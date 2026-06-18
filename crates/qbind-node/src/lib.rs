@@ -1334,6 +1334,26 @@ pub mod pqc_governance_durable_completion_external_publication_receipt;
 // MainNet governance, MainNet peer-driven apply, and validator-set rotation remain
 // refused/unsupported; rejected paths are non-mutating. Full C4 remains OPEN; C5 remains OPEN.
 pub mod pqc_governance_durable_completion_external_publication_acknowledgement;
+// Run 282 — source/test durable-completion external-publication-acknowledgement consumer /
+// external-publication-audit-finalization interface boundary. Sits one rung above the Run 280
+// external-publication-acknowledgement boundary: consumes only a Run 280
+// ExternalPublicationAcknowledgementRecorded outcome and projects a typed
+// external-publication-audit-finalization intent plus a modeled in-memory
+// DurableCompletionExternalPublicationAuditFinalizationLedger record. Only
+// ExternalPublicationAuditFinalizationRecorded authorizes modeled external-publication-audit-finalization
+// state. The fixture audit-finalization sink is DevNet/TestNet evidence-only and mutates only the
+// in-memory ledger; production / MainNet / external audit-finalization sinks remain reachable but
+// unavailable / fail-closed. Source/test only: no real settlement, settlement finality,
+// settlement receipt, settlement-receipt acknowledgement, settlement-finality projection,
+// settlement-outcome report backend, settlement-outcome publication, external publication,
+// external-publication confirmation, external-publication receipt, external-publication
+// acknowledgement, external-publication audit finalization, or audit-ledger acknowledgement backend.
+// It does NOT call Run 070, mutate
+// LivePqcTrustState, perform a real trust swap, evict sessions, write sequence files, write
+// authority markers, perform external publication, or touch RocksDB/file/schema/migration/storage-format.
+// MainNet governance, MainNet peer-driven apply, and validator-set rotation remain
+// refused/unsupported; rejected paths are non-mutating. Full C4 remains OPEN; C5 remains OPEN.
+pub mod pqc_governance_durable_completion_external_publication_audit_finalization;
 // Run 057 — trust-bundle activation epoch/height gating. Enforces
 // optional `activation_height` / `activation_epoch` fields on a
 // freshly validated trust bundle so a structurally valid, signed,
