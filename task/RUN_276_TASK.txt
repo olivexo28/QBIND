@@ -1,0 +1,471 @@
+Run 276 — Source/test durable-completion settlement-outcome publication consumer / external-publication-confirmation interface boundary
+
+You are continuing QBIND after Run 275.
+
+Current accepted state:
+
+Run 274 added the source/test durable-completion settlement-outcome report consumer / settlement-outcome publication interface boundary.
+
+Run 275 closed the release-binary evidence gap for Run 274. Run 275 proved on real `target/release/qbind-node` plus a release-built helper that the Run 274 production library symbols are present and exercised in release mode. The helper remains dead code from production runtime. The fixture settlement-outcome publication sink mutates only modeled in-memory `DurableCompletionSettlementOutcomePublicationLedger` state. Production/MainNet/external settlement-outcome publication sinks remain reachable but unavailable/fail-closed.
+
+Full C4 remains OPEN. C5 remains OPEN.
+
+Exact objective:
+
+Add the next source/test-only boundary above Run 274: a modeled durable-completion **settlement-outcome publication consumer / external-publication-confirmation interface boundary**.
+
+This boundary models the first downstream confirmation-intent step after a Run 274 `SettlementOutcomePublicationRecorded` outcome. It should convert a valid modeled settlement-outcome publication state into a typed external-publication-confirmation intent and modeled in-memory external-publication-confirmation record.
+
+This is a mockable, in-memory, source/test boundary only.
+
+Strict scope:
+
+* Source/test only.
+* No release-binary evidence in this run.
+* No production runtime enablement.
+* No real settlement backend.
+* No real settlement execution.
+* No real settlement finality.
+* No real settlement receipt.
+* No real settlement-receipt acknowledgement.
+* No real settlement-finality projection.
+* No real settlement-outcome report backend.
+* No real settlement-outcome publication.
+* No real settlement-outcome publication backend.
+* No real external publication.
+* No real external-publication confirmation.
+* No real external-publication-confirmation backend.
+* No real audit-ledger acknowledgement.
+* No real audit-ledger write.
+* No real production attestation/finalization/completion-report/durable-consume/persistent-replay backend.
+* No real governance execution engine.
+* No real production mutation engine.
+* No real on-chain governance proof verifier.
+* No KMS/HSM/RemoteSigner backend.
+* No RocksDB/file/schema/migration/storage-format change.
+* No wire/schema/marker/sequence/trust-bundle change.
+* No Run 070 call.
+* No `LivePqcTrustState` mutation.
+* No real trust swap.
+* No session eviction.
+* No sequence write.
+* No marker write.
+* No network I/O.
+* No MainNet governance.
+* No MainNet peer-driven apply.
+* No validator-set rotation.
+* No policy-change enablement.
+* Keep Full C4 OPEN.
+* Keep C5 OPEN.
+
+Required new source module:
+
+`crates/qbind-node/src/pqc_governance_durable_completion_external_publication_confirmation.rs`
+
+Register it in:
+
+`crates/qbind-node/src/lib.rs`
+
+Required new test file:
+
+`crates/qbind-node/tests/run_276_durable_completion_external_publication_confirmation_tests.rs`
+
+Required evidence doc:
+
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_276.md`
+
+Required narrow doc updates:
+
+* `docs/protocol/QBIND_GOVERNANCE_EXECUTION_RUNTIME_SURFACE_AUDIT.md`
+* `docs/protocol/QBIND_C4_C5_CLOSURE_CRITERIA.md`
+* `docs/ops/QBIND_PQC_TRUST_LIFECYCLE_RUNBOOK.md`
+* `docs/protocol/QBIND_PEER_DRIVEN_TRUST_BUNDLE_APPLY_SAFETY.md`
+* `docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md`
+* `docs/whitepaper/contradiction.md`
+
+Required ordering:
+
+Preserve the full prior modeled chain:
+
+1. Run 246 pipeline success before Run 248 sink intent.
+2. Run 248 `ConsumeReceiptRecorded` before Run 250 completion report.
+3. Run 250 `CompletionReportRecorded` before Run 252 finalization.
+4. Run 252 `DurableCompletionFinalized` before Run 254 attestation.
+5. Run 254 `DurableCompletionAttested` before Run 256 backend request.
+6. Run 256 `BackendSubmissionRecorded` before Run 258 audit/publication receipt.
+7. Run 258 `AuditReceiptRecorded` before Run 260 acknowledgement / confirmation.
+8. Run 260 `AcknowledgementRecorded` before Run 262 consumer request.
+9. Run 262 `AcknowledgementConsumed` before Run 264 settlement-projection request.
+10. Run 264 `SettlementProjectionRecorded` before Run 266 settlement-commitment request.
+11. Run 266 `SettlementCommitmentRecorded` before Run 268 settlement-finalization request.
+12. Run 268 `SettlementFinalizationRecorded` before Run 270 settlement-receipt acknowledgement request.
+13. Run 270 `SettlementReceiptAcknowledgementRecorded` before Run 272 settlement-outcome report request.
+14. Run 272 `SettlementOutcomeReportRecorded` before Run 274 settlement-outcome publication request.
+15. Run 274 `SettlementOutcomePublicationRecorded` before any Run 276 external-publication-confirmation request.
+16. Only Run 276 `ExternalPublicationConfirmationRecorded`, or an equivalently named success outcome, may authorize a new modeled external-publication-confirmation state.
+
+Suggested type names:
+
+* `DurableCompletionExternalPublicationConfirmationKind`
+* `DurableCompletionExternalPublicationConfirmationPolicy`
+* `DurableCompletionExternalPublicationConfirmationIdentity`
+* `DurableCompletionExternalPublicationConfirmationInput`
+* `DurableCompletionExternalPublicationConfirmationExpectations`
+* `DurableCompletionExternalPublicationConfirmationRequest`
+* `DurableCompletionExternalPublicationConfirmationResponse`
+* `DurableCompletionExternalPublicationConfirmationRecord`
+* `DurableCompletionExternalPublicationConfirmationDigest`
+* `DurableCompletionExternalPublicationConfirmationTranscriptDigest`
+* `DurableCompletionExternalPublicationConfirmationOutcome`
+
+Suggested sink trait:
+
+`GovernanceDurableCompletionExternalPublicationConfirmationSink`
+
+Suggested implementations:
+
+* `FixtureDurableCompletionExternalPublicationConfirmationSink`
+* `ProductionExternalPublicationConfirmationSink`
+* `MainNetExternalPublicationConfirmationSink`
+* `ExternalPublicationConfirmationSink`
+
+Implementation rules:
+
+* Fixture sink is DevNet/TestNet only.
+* Fixture sink mutates only an in-memory `DurableCompletionExternalPublicationConfirmationLedger`.
+* Production/MainNet/external confirmation sinks are reachable but unavailable/fail-closed.
+* No real external publication is performed.
+* No real external-publication confirmation is performed.
+* No network I/O is performed.
+* No files, RocksDB, markers, sequences, audit ledgers, settlement records, publication records, or production durable state are written.
+* No Run 070 call.
+* No `LivePqcTrustState` mutation.
+
+Required ledger:
+
+* `DurableCompletionExternalPublicationConfirmationLedger`
+* `DurableCompletionExternalPublicationConfirmationLedgerRecord`
+* `DurableCompletionExternalPublicationConfirmationLedgerSnapshot`
+* `DurableCompletionExternalPublicationConfirmationLedgerStatus`
+
+Ledger semantics:
+
+* One valid external-publication-confirmation record inserts exactly one in-memory record.
+* Duplicate identical external-publication-confirmation record is idempotent.
+* Same external-publication-confirmation record id with a different digest is equivocation and fails closed.
+* Rollback restores the in-memory snapshot.
+* Rollback failure never claims success.
+* Fixture ledger never writes files, RocksDB, markers, sequences, external publications, external-publication confirmations, audit-ledger entries, settlement records, settlement-finality records, settlement-receipt records, settlement-receipt acknowledgement records, settlement-finality projection records, settlement-outcome report records, settlement-outcome publication records, real confirmation records, or production durable state.
+
+Suggested outcome enum:
+
+Use exact names close to these:
+
+* `LegacyBypassNoExternalPublicationConfirmation`
+* `RejectedBeforeSettlementOutcomePublicationNoConfirmation`
+* `SettlementOutcomePublicationDidNotRecordNoConfirmation`
+* `ExternalPublicationConfirmationRecorded`
+* `ExternalPublicationConfirmationDuplicateIdempotent`
+* `ExternalPublicationConfirmationRejectedBeforeRecord`
+* `ExternalPublicationConfirmationRecordFailedNoConfirmation`
+* `ExternalPublicationConfirmationRolledBackNoConfirmation`
+* `ExternalPublicationConfirmationRollbackFailedFatalNoConfirmation`
+* `ExternalPublicationConfirmationAmbiguousFailClosedNoConfirmation`
+* `ProductionExternalPublicationConfirmationUnavailableNoConfirmation`
+* `MainNetExternalPublicationConfirmationUnavailableNoConfirmation`
+* `ExternalPublicationConfirmationUnavailableNoConfirmation`
+* `MainNetPeerDrivenApplyRefusedNoConfirmation`
+* `ValidatorSetRotationUnsupportedNoConfirmation`
+* `PolicyChangeUnsupportedNoConfirmation`
+
+Only `ExternalPublicationConfirmationRecorded` may authorize a new modeled external-publication-confirmation state.
+
+Required projection helpers:
+
+* `project_settlement_outcome_publication_outcome_to_external_publication_confirmation_request(...)`
+* `evaluate_durable_completion_external_publication_confirmation(...)`
+* `recover_durable_completion_external_publication_confirmation_window(...)`
+* `external_publication_confirmation_outcome_authorizes_record(...)`
+* `external_publication_confirmation_outcome_projects_to_recorded(...)`
+
+Projection semantics:
+
+* Only Run 274 `SettlementOutcomePublicationRecorded` creates an external-publication-confirmation request.
+* Run 274 duplicate-idempotent settlement-outcome publication outcome may only match an already-recorded external-publication-confirmation record and must not create a new one by itself.
+* Every other Run 274 outcome maps to no-confirmation fail-closed.
+* Run 272 `SettlementOutcomeReportRecorded` alone creates no external-publication-confirmation request.
+* Run 270 `SettlementReceiptAcknowledgementRecorded` alone creates no external-publication-confirmation request.
+* Run 268 `SettlementFinalizationRecorded` alone creates no external-publication-confirmation request.
+* Run 266 `SettlementCommitmentRecorded` alone creates no external-publication-confirmation request.
+* Run 264 `SettlementProjectionRecorded` alone creates no external-publication-confirmation request.
+* Run 262 `AcknowledgementConsumed` alone creates no external-publication-confirmation request.
+* Run 260 `AcknowledgementRecorded` alone creates no external-publication-confirmation request.
+* Run 258 `AuditReceiptRecorded` alone creates no external-publication-confirmation request.
+* Run 256 `BackendSubmissionRecorded` alone creates no external-publication-confirmation request.
+* All earlier stages alone create no external-publication-confirmation request.
+* Binding mismatch leaves invocation count zero.
+* Digest mismatch after invocation does not record.
+* Failure/rollback/ambiguous/unavailable paths fail closed.
+
+Required invariant helpers:
+
+Add grep-verifiable helpers with names close to:
+
+* `durable_completion_external_publication_confirmation_rejection_is_non_mutating`
+* `durable_completion_external_publication_confirmation_never_calls_run_070`
+* `durable_completion_external_publication_confirmation_never_mutates_live_pqc_trust_state`
+* `durable_completion_external_publication_confirmation_never_writes_sequence_or_marker`
+* `durable_completion_external_publication_confirmation_no_rocksdb_file_schema_migration_change`
+* `durable_completion_external_publication_confirmation_no_external_publication`
+* `durable_completion_external_publication_confirmation_no_real_external_publication_confirmation`
+* `durable_completion_external_publication_confirmation_no_real_audit_ledger`
+* `durable_completion_external_publication_confirmation_no_real_settlement`
+* `durable_completion_external_publication_confirmation_no_real_settlement_finality`
+* `durable_completion_external_publication_confirmation_no_real_settlement_receipt`
+* `durable_completion_external_publication_confirmation_no_real_settlement_receipt_acknowledgement`
+* `durable_completion_external_publication_confirmation_no_real_settlement_finality_projection`
+* `durable_completion_external_publication_confirmation_no_real_settlement_outcome_report_backend`
+* `durable_completion_external_publication_confirmation_no_real_settlement_outcome_publication`
+* `durable_completion_external_publication_confirmation_settlement_outcome_publication_required`
+* `durable_completion_external_publication_confirmation_record_required_before_confirmed`
+* `durable_completion_external_publication_confirmation_failed_record_never_records`
+* `durable_completion_external_publication_confirmation_rollback_never_records`
+* `durable_completion_external_publication_confirmation_ambiguous_window_fails_closed`
+* `durable_completion_external_publication_confirmation_mainnet_peer_driven_apply_refused_first`
+* `durable_completion_external_publication_confirmation_production_mainnet_unavailable`
+* `durable_completion_external_publication_confirmation_external_unavailable`
+* `durable_completion_external_publication_confirmation_validator_set_rotation_unsupported`
+* `durable_completion_external_publication_confirmation_policy_change_unsupported`
+* `durable_completion_external_publication_confirmation_local_operator_cannot_satisfy_mainnet_authority`
+* `durable_completion_external_publication_confirmation_peer_majority_cannot_satisfy_mainnet_authority`
+
+Required tests:
+
+Accepted / compatible:
+
+* Disabled external-publication-confirmation policy preserves legacy bypass and records nothing.
+* Disabled settlement-outcome publication / settlement-outcome report / settlement-receipt acknowledgement / settlement-finalization / settlement-commitment / settlement-projection / consumer / acknowledgement / receipt / backend / attestation / finalization / reporter / sink / pipeline policy never reaches external-publication confirmation.
+* DevNet fixture chain records exactly one modeled in-memory external-publication-confirmation record only after the full Run 246 → 248 → 250 → 252 → 254 → 256 → 258 → 260 → 262 → 264 → 266 → 268 → 270 → 272 → 274 → 276 chain.
+* TestNet fixture chain records exactly one modeled in-memory external-publication-confirmation record only after the same full chain.
+* Add-root / retire-root / revoke-root / emergency-revoke-root / noop modeled actions preserve ordering and confirm only after Run 274 `SettlementOutcomePublicationRecorded`.
+* Duplicate identical external-publication-confirmation record is idempotent.
+* Run 274 duplicate-idempotent settlement-outcome publication outcome may only match an already-recorded external-publication-confirmation record and never creates a new confirmation by itself.
+* Production external-publication-confirmation path is reachable but unavailable/fail-closed and records no state.
+* MainNet external-publication-confirmation path is reachable but unavailable/fail-closed and records no state.
+* External confirmation path is reachable but unavailable/fail-closed and performs no publication/network I/O.
+* MainNet peer-driven apply is refused before pipeline progression, sink invocation, reporter invocation, finalizer invocation, attestor invocation, backend invocation, receipt invocation, acknowledgement invocation, consumer invocation, settlement-projection invocation, settlement-commitment invocation, settlement-finalization invocation, settlement-receipt acknowledgement invocation, settlement-outcome report invocation, settlement-outcome publication invocation, and external-publication-confirmation invocation.
+* Validator-set rotation unsupported and records no state.
+* Policy-change unsupported and records no state.
+
+Rejected / fail-closed:
+
+* Every rejection before Run 276 produces no external-publication-confirmation request and no record.
+* Settlement-outcome publication did-not-record / rejected-before-record / record failure / rollback / rollback-failed / ambiguous window produces no external-publication-confirmation invocation and no record.
+* External-publication confirmation before Run 274 `SettlementOutcomePublicationRecorded` is rejected.
+* Same external-publication-confirmation record id with different digest fails closed as equivocation.
+* Wrong environment / chain / genesis / governance surface / mutation surface fails before sink invocation.
+* Wrong external-publication-confirmation identity / policy / kind / request / response / record digest fails closed.
+* Wrong settlement-outcome publication / settlement-outcome report / settlement-receipt acknowledgement / settlement-finalization / settlement-commitment / settlement-projection / consumer / acknowledgement / receipt / backend / attestation / finalization / completion-report / sink / pipeline digest fails closed.
+* Wrong proposal id / decision id / candidate digest / authority-domain sequence fails closed.
+* Malformed request / response fails closed.
+* Local operator key cannot satisfy MainNet authority.
+* Peer majority cannot satisfy MainNet authority.
+* Production/MainNet/external unavailable paths record no state and perform no publication.
+* Rejected paths produce no Run 070 call, no `LivePqcTrustState` mutation, no trust swap, no session eviction, no sequence write, no marker write, no RocksDB/file/schema/migration/storage-format change, no external publication, no real external-publication confirmation, no real audit-ledger write, no real settlement write, no real settlement-finality write, no real settlement-receipt write, no real settlement-receipt acknowledgement, no real settlement-finality projection, no real settlement-outcome report backend, and no real settlement-outcome publication.
+
+Recovery / crash-window:
+
+* before-pipeline through after-settlement-outcome-publication-success-before-confirmation-request windows fail closed unless explicit matching settlement-outcome publication success exists.
+* after-external-publication-confirmation-request-before-record fails closed.
+* after-external-publication-confirmation-record-before-success fails closed unless explicit matching external-publication-confirmation record exists.
+* after-external-publication-confirmation-success recovers as recorded.
+* ambiguous, record-failed, rollback-completed, rollback-failed, unknown, production/MainNet/external windows fail closed.
+* MainNet peer-driven apply refusal precedes recovery classification where applicable.
+
+Projection:
+
+* Only Run 274 `SettlementOutcomePublicationRecorded` creates an external-publication-confirmation request.
+* Run 272 `SettlementOutcomeReportRecorded` alone creates no external-publication-confirmation request.
+* Run 270 `SettlementReceiptAcknowledgementRecorded` alone creates no external-publication-confirmation request.
+* Run 268 `SettlementFinalizationRecorded` alone creates no external-publication-confirmation request.
+* Run 266 `SettlementCommitmentRecorded` alone creates no external-publication-confirmation request.
+* Run 264 `SettlementProjectionRecorded` alone creates no external-publication-confirmation request.
+* Run 262 `AcknowledgementConsumed` alone creates no external-publication-confirmation request.
+* Run 260 `AcknowledgementRecorded` alone creates no external-publication-confirmation request.
+* Run 258 `AuditReceiptRecorded` alone creates no external-publication-confirmation request.
+* Run 256 backend submission alone creates no external-publication-confirmation request.
+* All earlier stage successes alone create no external-publication-confirmation request.
+* Run 274 duplicate-idempotent settlement-outcome publication outcome creates no new external-publication-confirmation record unless a matching confirmation record already exists.
+* Only `ExternalPublicationConfirmationRecorded` authorizes modeled external-publication-confirmation state.
+* Every other outcome does not record.
+
+Stage-ordering:
+
+* MainNet peer-driven apply refusal happens before every later stage.
+* Evaluator/call-site authorization precedes durable replay.
+* Durable replay precedes mutation engine.
+* Mutation engine precedes modeled applier.
+* Modeled applier precedes sink intent.
+* Sink receipt precedes completion report.
+* Completion report precedes finalization.
+* Finalization precedes attestation.
+* Attestation precedes backend request.
+* Backend submission precedes audit receipt request.
+* Audit receipt precedes acknowledgement request.
+* Acknowledgement record precedes consumer request.
+* Consumer record precedes settlement-projection request.
+* Settlement-projection record precedes settlement-commitment request.
+* Settlement-commitment record precedes settlement-finalization request.
+* Settlement-finalization record precedes settlement-receipt acknowledgement request.
+* Settlement-receipt acknowledgement record precedes settlement-outcome report request.
+* Settlement-outcome report record precedes settlement-outcome publication request.
+* Settlement-outcome publication record precedes external-publication-confirmation request.
+* External-publication-confirmation record happens only after settlement-outcome publication success.
+* Rejection before external-publication-confirmation stage leaves external-publication-confirmation invocation count zero.
+* External-publication-confirmation record failure does not invalidate settlement-outcome publication state but does not authorize external-publication-confirmation state.
+* External-publication-confirmation rollback failure is fatal/fail-closed and does not authorize external-publication-confirmation state.
+
+Non-mutation:
+
+* no Run 070 call;
+* no `LivePqcTrustState` mutation;
+* no trust swap;
+* no session eviction;
+* no sequence write;
+* no marker write;
+* no RocksDB/file/schema/migration/storage-format write;
+* no wire/schema/marker/sequence/trust-bundle change;
+* no external network publication;
+* no real external-publication confirmation;
+* no real settlement;
+* no real settlement finality;
+* no real settlement receipt;
+* no real settlement-receipt acknowledgement;
+* no real settlement-finality projection;
+* no real settlement-outcome report backend;
+* no real settlement-outcome publication;
+* no real audit-ledger write;
+* fixture confirmation sink mutates only `DurableCompletionExternalPublicationConfirmationLedger`;
+* production/MainNet/external paths remain unavailable/fail-closed.
+
+Validation commands:
+
+Run at minimum:
+
+* `cargo build -p qbind-node --lib`
+* `cargo test -p qbind-node --test run_276_durable_completion_external_publication_confirmation_tests`
+* `cargo test -p qbind-node --test run_274_durable_completion_settlement_outcome_publication_tests`
+* `cargo test -p qbind-node --test run_272_durable_completion_settlement_outcome_report_tests`
+* `cargo test -p qbind-node --test run_270_durable_completion_settlement_receipt_acknowledgement_tests`
+* `cargo test -p qbind-node --test run_268_durable_completion_settlement_finalization_tests`
+* `cargo test -p qbind-node --test run_266_durable_completion_settlement_commitment_tests`
+* `cargo test -p qbind-node --test run_264_durable_completion_consumer_settlement_projection_tests`
+* `cargo test -p qbind-node --test run_262_durable_completion_acknowledgement_consumer_tests`
+* `cargo test -p qbind-node --test run_260_durable_completion_audit_receipt_acknowledgement_tests`
+* `cargo test -p qbind-node --test run_258_durable_completion_audit_publication_receipt_tests`
+* `cargo test -p qbind-node --test run_256_durable_completion_attestation_backend_tests`
+* `cargo test -p qbind-node --test run_254_modeled_durable_completion_attestation_projection_tests`
+* `cargo test -p qbind-node --test run_252_modeled_durable_completion_finalization_projection_tests`
+* `cargo test -p qbind-node --test run_250_modeled_durable_consume_completion_reporter_tests`
+* `cargo test -p qbind-node --test run_248_modeled_durable_consume_projection_sink_tests`
+* `cargo test -p qbind-node --test run_246_governance_modeled_end_to_end_pipeline_tests`
+* `cargo test -p qbind-node --test run_244_modeled_governance_trust_mutation_applier_tests`
+* `cargo test -p qbind-node --test run_242_governance_execution_mutation_engine_tests`
+* `cargo test -p qbind-node --test run_240_governance_evaluator_replay_durable_runtime_integration_tests`
+* `cargo test -p qbind-node --test run_238_governance_evaluator_replay_durable_backend_tests`
+* `cargo test -p qbind-node --test run_236_governance_evaluator_replay_consume_runtime_integration_tests`
+* `cargo test -p qbind-node --test run_234_governance_evaluator_replay_consume_boundary_tests`
+* `cargo test -p qbind-node --test run_232_governance_evaluator_replay_runtime_integration_tests`
+* `cargo test -p qbind-node --test run_230_governance_evaluator_replay_state_tests`
+* `cargo test -p qbind-node --test run_228_peer_evaluator_context_representation_tests`
+* `cargo test -p qbind-node --test run_226_governance_evaluator_runtime_callsite_wiring_tests`
+* `cargo test -p qbind-node --test run_224_governance_evaluator_runtime_integration_tests`
+* `cargo test -p qbind-node --lib pqc_authority`
+* `cargo test -p qbind-node --lib`
+
+Security scanning:
+
+* Run secret scanning and report result.
+* Run CodeQL if available and report honestly.
+* Because Run 276 changes source and tests, do not classify it as trivial unless the checker itself does so.
+* If Rust CodeQL analysis is skipped because the database is too large, times out, tooling is unavailable, or reports no analyzable changes, state that explicitly and do not claim CodeQL coverage.
+
+Documentation:
+
+Create:
+
+* `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_276.md`
+
+Update narrowly:
+
+* `docs/protocol/QBIND_GOVERNANCE_EXECUTION_RUNTIME_SURFACE_AUDIT.md`
+* `docs/protocol/QBIND_C4_C5_CLOSURE_CRITERIA.md`
+* `docs/ops/QBIND_PQC_TRUST_LIFECYCLE_RUNBOOK.md`
+* `docs/protocol/QBIND_PEER_DRIVEN_TRUST_BUNDLE_APPLY_SAFETY.md`
+* `docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md`
+* `docs/whitepaper/contradiction.md`
+
+Docs must state:
+
+* Run 276 is source/test only.
+* Run 276 adds a modeled durable-completion settlement-outcome publication consumer / external-publication-confirmation interface boundary.
+* The boundary consumes only Run 274 `SettlementOutcomePublicationRecorded`.
+* Run 274 `SettlementOutcomePublicationRecorded` is required before any external-publication-confirmation request can exist.
+* Only `ExternalPublicationConfirmationRecorded` authorizes modeled external-publication-confirmation state.
+* Fixture external-publication-confirmation sink is DevNet/TestNet evidence-only and in-memory only.
+* Production/MainNet/external external-publication-confirmation sinks remain reachable but unavailable/fail-closed.
+* No real settlement is implemented.
+* No real settlement finality is implemented.
+* No real settlement receipt is implemented.
+* No real settlement-receipt acknowledgement is implemented.
+* No real settlement-finality projection is implemented.
+* No real settlement-outcome report backend is implemented.
+* No real settlement-outcome publication is implemented.
+* No real external publication is implemented.
+* No real external-publication confirmation is implemented.
+* No real audit-ledger acknowledgement is implemented.
+* No real production backend is implemented.
+* No RocksDB/file/schema/migration/storage-format change is implemented.
+* No wire/schema/marker/sequence/trust-bundle change is implemented.
+* No MainNet governance is enabled.
+* No MainNet peer-driven apply is enabled.
+* No validator-set rotation is implemented.
+* No policy-change enablement is implemented.
+* No Run 070 call.
+* No `LivePqcTrustState` mutation.
+* Rejected external-publication-confirmation paths are non-mutating.
+* Full C4 remains OPEN.
+* C5 remains OPEN.
+
+Contradiction handling:
+
+* Crosscheck Run 276 against Runs 050–275.
+* If no contradiction is found, add a “Run 276 — no contradiction found” entry to `docs/whitepaper/contradiction.md`.
+* If contradiction is found, record it explicitly with exact file/function/doc reference and recommend the smallest safe fix.
+
+Expected verdict after completion:
+
+Source/test positive only if:
+
+* Run 276 tests pass.
+* Full regression corpus passes.
+* `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_276.md` exists.
+* Protocol/ops docs are updated.
+* `contradiction.md` has a Run 276 entry.
+* Secret scan result is reported.
+* CodeQL result or honest skip/timeout reason is reported.
+* C4/C5 remain OPEN.
+
+Suggested next step after successful Run 276:
+
+Run 277 — release-binary evidence for the Run 276 durable-completion settlement-outcome publication consumer / external-publication-confirmation interface boundary.
+
+Final response format:
+
+1. Exact verdict.
+2. Files changed.
+3. Tests run and results.
+4. Security invariants preserved.
+5. Honest limitations.
+6. C4/C5 status.
+7. Suggested Run 277 next step.
