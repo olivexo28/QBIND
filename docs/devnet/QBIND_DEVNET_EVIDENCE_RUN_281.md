@@ -84,7 +84,7 @@ The harness `bash scripts/devnet/run_281_durable_completion_external_publication
 
 ## Security scanning
 
-Secret scanning was run over the changed files (`docs/devnet/run_281_durable_completion_external_publication_acknowledgement_release_binary/summary.txt` and `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_281.md`) during the closure rerun and reported **no secrets**. CodeQL: this closure pass changes only generated evidence text and documentation (no production Rust source change), so the change set is non-code and trivial for code-analysis purposes; see the final task report for the honest CodeQL result. If Rust CodeQL analysis is skipped because the database is too large, times out, tooling is unavailable, no source changes are detected, or the checker classifies the change set as trivial, that is stated explicitly and no CodeQL coverage is overclaimed.
+Secret scanning was run over the changed files (`docs/devnet/run_281_durable_completion_external_publication_acknowledgement_release_binary/summary.txt` and `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_281.md`) during the closure rerun and reported **no secrets**. CodeQL: this closure pass changes only generated evidence text and Markdown documentation (no production Rust source change), so the CodeQL checker classified the change set as trivial and **skipped** analysis — no Rust CodeQL coverage is claimed for this closure pass. The underlying Run 280 production module and Run 281 helper/harness were re-run unchanged and were unaffected by this pass.
 
 ## Honest limitations
 
