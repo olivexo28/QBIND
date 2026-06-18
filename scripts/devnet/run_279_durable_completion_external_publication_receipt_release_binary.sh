@@ -63,7 +63,7 @@ log "cargo build --release -p qbind-node --example run_279_durable_completion_ex
   echo "qbind_node_sha256:  $(sha256_file "${NODE_BIN}")"
   echo "qbind_node_buildid: $(build_id "${NODE_BIN}")"
   echo "helper_277_path:    ${HELPER_279_BIN}"
-  echo "helper_277_sha256:  $(sha256_file "${HELPER_279_BIN}")"
+  echo "helper_279_sha256:  $(sha256_file "${HELPER_279_BIN}")"
   echo "helper_277_buildid: $(build_id "${HELPER_279_BIN}")"
 } >> "${PROVENANCE}"
 
@@ -194,7 +194,7 @@ fi
   echo "  rustc_version:      $(rustc --version 2>/dev/null || echo unknown)"
   echo "  cargo_version:      $(cargo --version 2>/dev/null || echo unknown)"
   echo "  qbind_node_sha256:  $(sha256_file "${NODE_BIN}")"
-  echo "  helper_277_sha256:  $(sha256_file "${HELPER_279_BIN}")"
+  echo "  helper_279_sha256:  $(sha256_file "${HELPER_279_BIN}")"
   echo
   echo "helper_summary: ${HELPER_279_OUT}/helper_summary.txt"
   sed 's/^/  /' "${HELPER_279_OUT}/helper_summary.txt"
