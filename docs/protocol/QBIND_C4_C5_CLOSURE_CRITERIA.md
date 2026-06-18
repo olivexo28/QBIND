@@ -1,6 +1,6 @@
 # QBIND C4 / C5 Closure Criteria
 
-**Status as of Run 280:** Full **C4 remains OPEN**. **C5 remains OPEN**.
+**Status as of Run 281:** Full **C4 remains OPEN**. **C5 remains OPEN**.
 This document is a formal closure checklist introduced by Run 200
 (docs/spec/crosscheck only). It defines C4 and C5, records their current
 status, provides a green/yellow/red matrix, enumerates the required
@@ -69,7 +69,7 @@ implemented. **Red** = not started / unavailable.
 | OnChainGovernance fixture verifier + production boundary (fail-closed) | 🟡 Yellow | Runs 178–187; real on-chain verifier unavailable |
 | Authority custody boundary + metadata + policy selector | 🟡 Yellow | Runs 188–193; real custody backend unavailable |
 | RemoteSigner boundary + payload + policy selector | 🟡 Yellow | Runs 194–199; real RemoteSigner backend unavailable |
-| Modeled durable-completion pipeline / settlement / external-publication boundary stack (typed interfaces, fixture sinks, selectors, fail-closed) | 🟡 Yellow | Runs 200–280 (incl. Run 280 external-publication-acknowledgement boundary atop the Run 278 external-publication-receipt boundary, release-binary-evidenced by Run 279); modeled in-memory boundaries / evidence only, no production backend |
+| Modeled durable-completion pipeline / settlement / external-publication boundary stack (typed interfaces, fixture sinks, selectors, fail-closed) | 🟡 Yellow | Runs 200–281 (incl. Run 280 external-publication-acknowledgement boundary atop the Run 278 external-publication-receipt boundary, release-binary-evidenced by Run 281); modeled in-memory boundaries / evidence only, no production backend |
 | Real production RemoteSigner backend | 🔴 Red | Not implemented |
 | Real KMS / HSM / cloud-KMS / PKCS#11 custody backend | 🔴 Red | Not implemented |
 | Real custody attestation verifier | 🔴 Red | Not implemented |

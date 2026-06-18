@@ -1,0 +1,80 @@
+114:pub type DurableCompletionExternalPublicationReceiptSurface =
+118:pub type DurableCompletionExternalPublicationReceiptEnvironment =
+123:pub type DurableCompletionExternalPublicationReceiptBinding =
+128:pub type DurableCompletionExternalPublicationReceiptReplayBinding = DurableReplayObservation;
+131:pub type DurableCompletionExternalPublicationReceiptPipelineBinding =
+135:pub type DurableCompletionExternalPublicationReceiptSinkBinding =
+139:pub type DurableCompletionExternalPublicationReceiptReporterBinding =
+143:pub type DurableCompletionExternalPublicationReceiptFinalizationBinding =
+147:pub type DurableCompletionExternalPublicationReceiptAttestationBinding =
+153:pub type DurableCompletionExternalPublicationReceiptBackendBinding =
+159:pub type DurableCompletionExternalPublicationReceiptReceiptBinding =
+165:pub type DurableCompletionExternalPublicationReceiptAcknowledgementBinding =
+171:pub type DurableCompletionExternalPublicationReceiptConsumerBinding =
+178:pub type DurableCompletionExternalPublicationReceiptExternalPublicationConfirmationBinding =
+187:pub enum DurableCompletionExternalPublicationReceiptKind {
+251:pub enum DurableCompletionExternalPublicationReceiptPolicy {
+299:pub struct DurableCompletionExternalPublicationReceiptIdentity {
+348:pub struct DurableCompletionExternalPublicationReceiptDigest(String);
+359:pub struct DurableCompletionExternalPublicationReceiptTranscriptDigest(String);
+414:pub fn external_publication_receipt_identity_digest(
+427:pub fn external_publication_receipt_request_digest(
+486:pub fn external_publication_receipt_response_digest(
+503:pub fn external_publication_receipt_record_digest(
+515:pub fn external_publication_receipt_transcript_digest(
+540:pub struct DurableCompletionExternalPublicationReceiptRequest {
+708:pub struct DurableCompletionExternalPublicationReceiptResponse {
+736:pub struct DurableCompletionExternalPublicationReceiptRecord {
+758:pub enum DurableCompletionExternalPublicationReceiptLedgerStatus {
+765:pub struct DurableCompletionExternalPublicationReceiptLedgerRecord {
+783:pub struct DurableCompletionExternalPublicationReceiptLedgerSnapshot {
+805:pub struct DurableCompletionExternalPublicationReceiptLedger {
+881:pub struct DurableCompletionExternalPublicationReceiptExpectations {
+1217:pub struct DurableCompletionExternalPublicationReceiptInput {
+1333:pub enum DurableCompletionExternalPublicationReceiptOutcome {
+1468:pub enum DurableCompletionExternalPublicationReceiptRequestIntent {
+1502:pub fn project_external_publication_confirmation_outcome_to_external_publication_receipt_request(
+1540:pub enum DurableCompletionExternalPublicationReceiptFault {
+1563:pub trait GovernanceDurableCompletionExternalPublicationReceiptSink {
+1616:pub struct FixtureDurableCompletionExternalPublicationReceiptSink {
+1761:pub struct ProductionExternalPublicationReceiptSink {
+1791:pub struct MainNetExternalPublicationReceiptSink {
+1822:pub struct ExternalExternalPublicationReceiptSink {
+1876:pub fn evaluate_durable_completion_external_publication_receipt<S>(
+1938:pub enum DurableCompletionExternalPublicationReceiptWindow {
+2027:pub fn recover_durable_completion_external_publication_receipt_window(
+2143:pub fn external_publication_receipt_outcome_authorizes_record(
+2152:pub fn external_publication_receipt_outcome_projects_to_recorded(
+2164:pub fn durable_completion_external_publication_receipt_rejection_is_non_mutating() -> bool {
+2169:pub fn durable_completion_external_publication_receipt_never_calls_run_070() -> bool {
+2174:pub fn durable_completion_external_publication_receipt_never_mutates_live_pqc_trust_state() -> bool {
+2179:pub fn durable_completion_external_publication_receipt_never_writes_sequence_or_marker() -> bool {
+2184:pub fn durable_completion_external_publication_receipt_no_rocksdb_file_schema_migration_change() -> bool {
+2189:pub fn durable_completion_external_publication_receipt_no_external_publication() -> bool {
+2194:pub fn durable_completion_external_publication_receipt_no_real_audit_ledger() -> bool {
+2199:pub fn durable_completion_external_publication_receipt_pipeline_success_required() -> bool {
+2204:pub fn durable_completion_external_publication_receipt_sink_receipt_required() -> bool {
+2209:pub fn durable_completion_external_publication_receipt_completion_report_required() -> bool {
+2214:pub fn durable_completion_external_publication_receipt_finalization_projection_required() -> bool {
+2219:pub fn durable_completion_external_publication_receipt_attestation_required() -> bool {
+2224:pub fn durable_completion_external_publication_receipt_backend_submission_required() -> bool {
+2229:pub fn durable_completion_external_publication_receipt_receipt_required() -> bool {
+2234:pub fn durable_completion_external_publication_receipt_consumer_required() -> bool {
+2241:pub fn durable_completion_external_publication_receipt_confirmation_required() -> bool {
+2247:pub fn durable_completion_external_publication_receipt_no_real_settlement() -> bool {
+2255:pub fn durable_completion_external_publication_receipt_no_real_settlement_finality() -> bool {
+2262:pub fn durable_completion_external_publication_receipt_no_real_settlement_receipt() -> bool {
+2271:pub fn durable_completion_external_publication_receipt_no_real_external_publication_confirmation() -> bool {
+2279:pub fn durable_completion_external_publication_receipt_no_real_settlement_finality_projection() -> bool {
+2287:pub fn durable_completion_external_publication_receipt_no_real_external_publication_receipt() -> bool {
+2292:pub fn durable_completion_external_publication_receipt_record_required_before_reported() -> bool {
+2297:pub fn durable_completion_external_publication_receipt_failed_record_never_records() -> bool {
+2302:pub fn durable_completion_external_publication_receipt_rollback_never_records() -> bool {
+2307:pub fn durable_completion_external_publication_receipt_ambiguous_window_fails_closed() -> bool {
+2312:pub fn durable_completion_external_publication_receipt_mainnet_peer_driven_apply_refused_first(
+2319:pub fn durable_completion_external_publication_receipt_production_mainnet_unavailable() -> bool {
+2324:pub fn durable_completion_external_publication_receipt_external_unavailable() -> bool {
+2329:pub fn durable_completion_external_publication_receipt_validator_set_rotation_unsupported() -> bool {
+2334:pub fn durable_completion_external_publication_receipt_policy_change_unsupported() -> bool {
+2339:pub fn durable_completion_external_publication_receipt_local_operator_cannot_satisfy_mainnet_authority(
+2345:pub fn durable_completion_external_publication_receipt_peer_majority_cannot_satisfy_mainnet_authority(

@@ -1,0 +1,80 @@
+114:pub type DurableCompletionExternalPublicationAcknowledgementSurface =
+118:pub type DurableCompletionExternalPublicationAcknowledgementEnvironment =
+123:pub type DurableCompletionExternalPublicationAcknowledgementBinding =
+128:pub type DurableCompletionExternalPublicationAcknowledgementReplayBinding = DurableReplayObservation;
+131:pub type DurableCompletionExternalPublicationAcknowledgementPipelineBinding =
+135:pub type DurableCompletionExternalPublicationAcknowledgementSinkBinding =
+139:pub type DurableCompletionExternalPublicationAcknowledgementReporterBinding =
+143:pub type DurableCompletionExternalPublicationAcknowledgementFinalizationBinding =
+147:pub type DurableCompletionExternalPublicationAcknowledgementAttestationBinding =
+153:pub type DurableCompletionExternalPublicationAcknowledgementBackendBinding =
+159:pub type DurableCompletionExternalPublicationAcknowledgementReceiptBinding =
+165:pub type DurableCompletionExternalPublicationAcknowledgementAcknowledgementBinding =
+171:pub type DurableCompletionExternalPublicationAcknowledgementConsumerBinding =
+178:pub type DurableCompletionExternalPublicationAcknowledgementExternalPublicationReceiptBinding =
+187:pub enum DurableCompletionExternalPublicationAcknowledgementKind {
+251:pub enum DurableCompletionExternalPublicationAcknowledgementPolicy {
+299:pub struct DurableCompletionExternalPublicationAcknowledgementIdentity {
+348:pub struct DurableCompletionExternalPublicationAcknowledgementDigest(String);
+359:pub struct DurableCompletionExternalPublicationAcknowledgementTranscriptDigest(String);
+414:pub fn external_publication_acknowledgement_identity_digest(
+427:pub fn external_publication_acknowledgement_request_digest(
+486:pub fn external_publication_acknowledgement_response_digest(
+503:pub fn external_publication_acknowledgement_record_digest(
+515:pub fn external_publication_acknowledgement_transcript_digest(
+540:pub struct DurableCompletionExternalPublicationAcknowledgementRequest {
+708:pub struct DurableCompletionExternalPublicationAcknowledgementResponse {
+736:pub struct DurableCompletionExternalPublicationAcknowledgementRecord {
+758:pub enum DurableCompletionExternalPublicationAcknowledgementLedgerStatus {
+765:pub struct DurableCompletionExternalPublicationAcknowledgementLedgerRecord {
+783:pub struct DurableCompletionExternalPublicationAcknowledgementLedgerSnapshot {
+805:pub struct DurableCompletionExternalPublicationAcknowledgementLedger {
+881:pub struct DurableCompletionExternalPublicationAcknowledgementExpectations {
+1217:pub struct DurableCompletionExternalPublicationAcknowledgementInput {
+1333:pub enum DurableCompletionExternalPublicationAcknowledgementOutcome {
+1468:pub enum DurableCompletionExternalPublicationAcknowledgementRequestIntent {
+1502:pub fn project_external_publication_receipt_outcome_to_external_publication_acknowledgement_request(
+1540:pub enum DurableCompletionExternalPublicationAcknowledgementFault {
+1563:pub trait GovernanceDurableCompletionExternalPublicationAcknowledgementSink {
+1616:pub struct FixtureDurableCompletionExternalPublicationAcknowledgementSink {
+1761:pub struct ProductionExternalPublicationAcknowledgementSink {
+1791:pub struct MainNetExternalPublicationAcknowledgementSink {
+1822:pub struct ExternalExternalPublicationAcknowledgementSink {
+1876:pub fn evaluate_durable_completion_external_publication_acknowledgement<S>(
+1938:pub enum DurableCompletionExternalPublicationAcknowledgementWindow {
+2027:pub fn recover_durable_completion_external_publication_acknowledgement_window(
+2143:pub fn external_publication_acknowledgement_outcome_authorizes_record(
+2152:pub fn external_publication_acknowledgement_outcome_projects_to_recorded(
+2164:pub fn durable_completion_external_publication_acknowledgement_rejection_is_non_mutating() -> bool {
+2169:pub fn durable_completion_external_publication_acknowledgement_never_calls_run_070() -> bool {
+2174:pub fn durable_completion_external_publication_acknowledgement_never_mutates_live_pqc_trust_state() -> bool {
+2179:pub fn durable_completion_external_publication_acknowledgement_never_writes_sequence_or_marker() -> bool {
+2184:pub fn durable_completion_external_publication_acknowledgement_no_rocksdb_file_schema_migration_change() -> bool {
+2189:pub fn durable_completion_external_publication_acknowledgement_no_external_publication() -> bool {
+2194:pub fn durable_completion_external_publication_acknowledgement_no_real_audit_ledger() -> bool {
+2199:pub fn durable_completion_external_publication_acknowledgement_pipeline_success_required() -> bool {
+2204:pub fn durable_completion_external_publication_acknowledgement_sink_receipt_required() -> bool {
+2209:pub fn durable_completion_external_publication_acknowledgement_completion_report_required() -> bool {
+2214:pub fn durable_completion_external_publication_acknowledgement_finalization_projection_required() -> bool {
+2219:pub fn durable_completion_external_publication_acknowledgement_attestation_required() -> bool {
+2224:pub fn durable_completion_external_publication_acknowledgement_backend_submission_required() -> bool {
+2229:pub fn durable_completion_external_publication_acknowledgement_receipt_required() -> bool {
+2234:pub fn durable_completion_external_publication_acknowledgement_consumer_required() -> bool {
+2241:pub fn durable_completion_external_publication_acknowledgement_confirmation_required() -> bool {
+2247:pub fn durable_completion_external_publication_acknowledgement_no_real_settlement() -> bool {
+2255:pub fn durable_completion_external_publication_acknowledgement_no_real_settlement_finality() -> bool {
+2262:pub fn durable_completion_external_publication_acknowledgement_no_real_settlement_receipt() -> bool {
+2271:pub fn durable_completion_external_publication_acknowledgement_no_real_external_publication_receipt() -> bool {
+2279:pub fn durable_completion_external_publication_acknowledgement_no_real_settlement_finality_projection() -> bool {
+2287:pub fn durable_completion_external_publication_acknowledgement_no_real_external_publication_acknowledgement() -> bool {
+2292:pub fn durable_completion_external_publication_acknowledgement_record_required_before_reported() -> bool {
+2297:pub fn durable_completion_external_publication_acknowledgement_failed_record_never_records() -> bool {
+2302:pub fn durable_completion_external_publication_acknowledgement_rollback_never_records() -> bool {
+2307:pub fn durable_completion_external_publication_acknowledgement_ambiguous_window_fails_closed() -> bool {
+2312:pub fn durable_completion_external_publication_acknowledgement_mainnet_peer_driven_apply_refused_first(
+2319:pub fn durable_completion_external_publication_acknowledgement_production_mainnet_unavailable() -> bool {
+2324:pub fn durable_completion_external_publication_acknowledgement_external_unavailable() -> bool {
+2329:pub fn durable_completion_external_publication_acknowledgement_validator_set_rotation_unsupported() -> bool {
+2334:pub fn durable_completion_external_publication_acknowledgement_policy_change_unsupported() -> bool {
+2339:pub fn durable_completion_external_publication_acknowledgement_local_operator_cannot_satisfy_mainnet_authority(
+2345:pub fn durable_completion_external_publication_acknowledgement_peer_majority_cannot_satisfy_mainnet_authority(

@@ -1,0 +1,2132 @@
+1,2c1,2
+< //! Run 277 — release-built helper for the Run 276 durable-completion
+< //! settlement-outcome publication consumer / external-publication-confirmation
+---
+> //! Run 279 — release-built helper for the Run 278 durable-completion
+> //! external-publication confirmation consumer / external-publication-receipt
+9,12c9,13
+< //! settlement-outcome report -> Run 274 settlement-outcome publication chain and
+< //! then evaluates the Run 276 external-publication confirmation. Projection is
+< //! intentionally from `input.settlement_outcome_publication_binding` through
+< //! `project_settlement_outcome_publication_outcome_to_external_publication_confirmation_request`.
+---
+> //! settlement-outcome report -> Run 274 settlement-outcome publication -> Run 276
+> //! external-publication confirmation chain and then evaluates the Run 278
+> //! external-publication receipt. Projection is intentionally from
+> //! `input.external_publication_confirmation_binding` through
+> //! `project_external_publication_confirmation_outcome_to_external_publication_receipt_request`.
+77,141d77
+< use qbind_node::pqc_governance_durable_completion_settlement_commitment::{
+<     settlement_commitment_identity_digest,
+<     evaluate_durable_completion_settlement_commitment,
+<     DurableCompletionSettlementCommitmentExpectations,
+<     DurableCompletionSettlementCommitmentIdentity,
+<     DurableCompletionSettlementCommitmentInput,
+<     DurableCompletionSettlementCommitmentKind,
+<     DurableCompletionSettlementCommitmentLedger,
+<     DurableCompletionSettlementCommitmentOutcome,
+<     DurableCompletionSettlementCommitmentPolicy,
+<     DurableCompletionSettlementCommitmentRequest,
+<     FixtureDurableCompletionSettlementCommitmentSink,
+< };
+< use qbind_node::pqc_governance_durable_completion_settlement_finalization::{
+<     settlement_finalization_identity_digest,
+<     evaluate_durable_completion_settlement_finalization,
+<     DurableCompletionSettlementFinalizationExpectations,
+<     DurableCompletionSettlementFinalizationIdentity,
+<     DurableCompletionSettlementFinalizationInput,
+<     DurableCompletionSettlementFinalizationKind,
+<     DurableCompletionSettlementFinalizationLedger,
+<     DurableCompletionSettlementFinalizationOutcome,
+<     DurableCompletionSettlementFinalizationPolicy,
+<     DurableCompletionSettlementFinalizationRequest,
+<     FixtureDurableCompletionSettlementFinalizationSink,
+< };
+< use qbind_node::pqc_governance_durable_completion_settlement_receipt_acknowledgement::{
+<     evaluate_durable_completion_settlement_receipt_acknowledgement,
+<     settlement_receipt_acknowledgement_identity_digest,
+<     DurableCompletionSettlementReceiptAcknowledgementExpectations,
+<     DurableCompletionSettlementReceiptAcknowledgementIdentity,
+<     DurableCompletionSettlementReceiptAcknowledgementInput,
+<     DurableCompletionSettlementReceiptAcknowledgementKind,
+<     DurableCompletionSettlementReceiptAcknowledgementLedger,
+<     DurableCompletionSettlementReceiptAcknowledgementOutcome,
+<     DurableCompletionSettlementReceiptAcknowledgementPolicy,
+<     DurableCompletionSettlementReceiptAcknowledgementRequest,
+<     FixtureDurableCompletionSettlementReceiptAcknowledgementSink,
+< };
+< use qbind_node::pqc_governance_durable_completion_settlement_outcome_report::{
+<     evaluate_durable_completion_settlement_outcome_report,
+<     settlement_outcome_report_identity_digest,
+<     DurableCompletionSettlementOutcomeReportExpectations,
+<     DurableCompletionSettlementOutcomeReportIdentity,
+<     DurableCompletionSettlementOutcomeReportInput,
+<     DurableCompletionSettlementOutcomeReportKind,
+<     DurableCompletionSettlementOutcomeReportLedger,
+<     DurableCompletionSettlementOutcomeReportOutcome,
+<     DurableCompletionSettlementOutcomeReportPolicy,
+<     DurableCompletionSettlementOutcomeReportRequest,
+<     FixtureDurableCompletionSettlementOutcomeReportSink,
+< };
+< use qbind_node::pqc_governance_durable_completion_settlement_outcome_publication::{
+<     evaluate_durable_completion_settlement_outcome_publication,
+<     settlement_outcome_publication_identity_digest,
+<     DurableCompletionSettlementOutcomePublicationExpectations,
+<     DurableCompletionSettlementOutcomePublicationIdentity,
+<     DurableCompletionSettlementOutcomePublicationInput,
+<     DurableCompletionSettlementOutcomePublicationKind,
+<     DurableCompletionSettlementOutcomePublicationLedger,
+<     DurableCompletionSettlementOutcomePublicationOutcome,
+<     DurableCompletionSettlementOutcomePublicationPolicy,
+<     DurableCompletionSettlementOutcomePublicationRequest,
+<     FixtureDurableCompletionSettlementOutcomePublicationSink,
+< };
+143d78
+<     external_publication_confirmation_identity_digest,
+170,171c105
+<     project_settlement_outcome_publication_outcome_to_external_publication_confirmation_request,
+<     recover_durable_completion_external_publication_confirmation_window,
+---
+>     external_publication_confirmation_identity_digest,
+173a108,109
+>     project_settlement_outcome_publication_outcome_to_external_publication_confirmation_request,
+>     recover_durable_completion_external_publication_confirmation_window,
+184c120,121
+<     DurableCompletionExternalPublicationConfirmationWindow, ExternalExternalPublicationConfirmationSink,
+---
+>     DurableCompletionExternalPublicationConfirmationWindow,
+>     ExternalExternalPublicationConfirmationSink,
+186,187c123,179
+<     GovernanceDurableCompletionExternalPublicationConfirmationSink, MainNetExternalPublicationConfirmationSink,
+<     ProductionExternalPublicationConfirmationSink,
+---
+>     GovernanceDurableCompletionExternalPublicationConfirmationSink,
+>     MainNetExternalPublicationConfirmationSink, ProductionExternalPublicationConfirmationSink,
+> };
+> use qbind_node::pqc_governance_durable_completion_settlement_commitment::{
+>     evaluate_durable_completion_settlement_commitment, settlement_commitment_identity_digest,
+>     DurableCompletionSettlementCommitmentExpectations,
+>     DurableCompletionSettlementCommitmentIdentity, DurableCompletionSettlementCommitmentInput,
+>     DurableCompletionSettlementCommitmentKind, DurableCompletionSettlementCommitmentLedger,
+>     DurableCompletionSettlementCommitmentOutcome, DurableCompletionSettlementCommitmentPolicy,
+>     DurableCompletionSettlementCommitmentRequest, FixtureDurableCompletionSettlementCommitmentSink,
+> };
+> use qbind_node::pqc_governance_durable_completion_settlement_finalization::{
+>     evaluate_durable_completion_settlement_finalization, settlement_finalization_identity_digest,
+>     DurableCompletionSettlementFinalizationExpectations,
+>     DurableCompletionSettlementFinalizationIdentity, DurableCompletionSettlementFinalizationInput,
+>     DurableCompletionSettlementFinalizationKind, DurableCompletionSettlementFinalizationLedger,
+>     DurableCompletionSettlementFinalizationOutcome, DurableCompletionSettlementFinalizationPolicy,
+>     DurableCompletionSettlementFinalizationRequest,
+>     FixtureDurableCompletionSettlementFinalizationSink,
+> };
+> use qbind_node::pqc_governance_durable_completion_settlement_outcome_publication::{
+>     evaluate_durable_completion_settlement_outcome_publication,
+>     settlement_outcome_publication_identity_digest,
+>     DurableCompletionSettlementOutcomePublicationExpectations,
+>     DurableCompletionSettlementOutcomePublicationIdentity,
+>     DurableCompletionSettlementOutcomePublicationInput,
+>     DurableCompletionSettlementOutcomePublicationKind,
+>     DurableCompletionSettlementOutcomePublicationLedger,
+>     DurableCompletionSettlementOutcomePublicationOutcome,
+>     DurableCompletionSettlementOutcomePublicationPolicy,
+>     DurableCompletionSettlementOutcomePublicationRequest,
+>     FixtureDurableCompletionSettlementOutcomePublicationSink,
+> };
+> use qbind_node::pqc_governance_durable_completion_settlement_outcome_report::{
+>     evaluate_durable_completion_settlement_outcome_report,
+>     settlement_outcome_report_identity_digest,
+>     DurableCompletionSettlementOutcomeReportExpectations,
+>     DurableCompletionSettlementOutcomeReportIdentity,
+>     DurableCompletionSettlementOutcomeReportInput, DurableCompletionSettlementOutcomeReportKind,
+>     DurableCompletionSettlementOutcomeReportLedger,
+>     DurableCompletionSettlementOutcomeReportOutcome,
+>     DurableCompletionSettlementOutcomeReportPolicy,
+>     DurableCompletionSettlementOutcomeReportRequest,
+>     FixtureDurableCompletionSettlementOutcomeReportSink,
+> };
+> use qbind_node::pqc_governance_durable_completion_settlement_receipt_acknowledgement::{
+>     evaluate_durable_completion_settlement_receipt_acknowledgement,
+>     settlement_receipt_acknowledgement_identity_digest,
+>     DurableCompletionSettlementReceiptAcknowledgementExpectations,
+>     DurableCompletionSettlementReceiptAcknowledgementIdentity,
+>     DurableCompletionSettlementReceiptAcknowledgementInput,
+>     DurableCompletionSettlementReceiptAcknowledgementKind,
+>     DurableCompletionSettlementReceiptAcknowledgementLedger,
+>     DurableCompletionSettlementReceiptAcknowledgementOutcome,
+>     DurableCompletionSettlementReceiptAcknowledgementPolicy,
+>     DurableCompletionSettlementReceiptAcknowledgementRequest,
+>     FixtureDurableCompletionSettlementReceiptAcknowledgementSink,
+203c195
+< // Run 277 — additional Run 276 production library symbols exercised by the
+---
+> // Run 279 — Run 276 external-publication confirmation stage symbols used by the
+208c200
+<     durable_completion_external_publication_confirmation_outcome_publication_required,
+---
+>     durable_completion_external_publication_confirmation_no_real_external_publication_confirmation,
+214c206
+<     durable_completion_external_publication_confirmation_no_real_external_publication_confirmation,
+---
+>     durable_completion_external_publication_confirmation_outcome_publication_required,
+230a223,295
+> use qbind_node::pqc_governance_durable_completion_external_publication_receipt::{
+>     durable_completion_external_publication_receipt_ambiguous_window_fails_closed,
+>     durable_completion_external_publication_receipt_attestation_required,
+>     durable_completion_external_publication_receipt_backend_submission_required,
+>     durable_completion_external_publication_receipt_completion_report_required,
+>     durable_completion_external_publication_receipt_external_unavailable,
+>     durable_completion_external_publication_receipt_failed_record_never_records,
+>     durable_completion_external_publication_receipt_finalization_projection_required,
+>     durable_completion_external_publication_receipt_local_operator_cannot_satisfy_mainnet_authority,
+>     durable_completion_external_publication_receipt_mainnet_peer_driven_apply_refused_first,
+>     durable_completion_external_publication_receipt_never_calls_run_070,
+>     durable_completion_external_publication_receipt_never_mutates_live_pqc_trust_state,
+>     durable_completion_external_publication_receipt_never_writes_sequence_or_marker,
+>     durable_completion_external_publication_receipt_no_external_publication,
+>     durable_completion_external_publication_receipt_no_real_audit_ledger,
+>     durable_completion_external_publication_receipt_no_rocksdb_file_schema_migration_change,
+>     durable_completion_external_publication_receipt_peer_majority_cannot_satisfy_mainnet_authority,
+>     durable_completion_external_publication_receipt_pipeline_success_required,
+>     durable_completion_external_publication_receipt_policy_change_unsupported,
+>     durable_completion_external_publication_receipt_production_mainnet_unavailable,
+>     durable_completion_external_publication_receipt_receipt_required,
+>     durable_completion_external_publication_receipt_record_required_before_reported,
+>     durable_completion_external_publication_receipt_rejection_is_non_mutating,
+>     durable_completion_external_publication_receipt_rollback_never_records,
+>     durable_completion_external_publication_receipt_sink_receipt_required,
+>     durable_completion_external_publication_receipt_validator_set_rotation_unsupported,
+>     evaluate_durable_completion_external_publication_receipt,
+>     external_publication_receipt_identity_digest,
+>     external_publication_receipt_outcome_authorizes_record,
+>     external_publication_receipt_outcome_projects_to_recorded,
+>     project_external_publication_confirmation_outcome_to_external_publication_receipt_request,
+>     recover_durable_completion_external_publication_receipt_window,
+>     DurableCompletionExternalPublicationReceiptExpectations,
+>     DurableCompletionExternalPublicationReceiptFault,
+>     DurableCompletionExternalPublicationReceiptIdentity,
+>     DurableCompletionExternalPublicationReceiptInput,
+>     DurableCompletionExternalPublicationReceiptKind,
+>     DurableCompletionExternalPublicationReceiptLedger,
+>     DurableCompletionExternalPublicationReceiptOutcome,
+>     DurableCompletionExternalPublicationReceiptPolicy,
+>     DurableCompletionExternalPublicationReceiptRequest,
+>     DurableCompletionExternalPublicationReceiptRequestIntent,
+>     DurableCompletionExternalPublicationReceiptWindow, ExternalExternalPublicationReceiptSink,
+>     FixtureDurableCompletionExternalPublicationReceiptSink,
+>     GovernanceDurableCompletionExternalPublicationReceiptSink,
+>     MainNetExternalPublicationReceiptSink, ProductionExternalPublicationReceiptSink,
+> };
+> // Run 279 — additional Run 278 production library symbols exercised by the
+> // release symbol reachability probe (imported here so the release helper source
+> // grep-proves it links the real Run 276 boundary symbols in release mode).
+> use qbind_node::pqc_governance_durable_completion_external_publication_receipt::{
+>     durable_completion_external_publication_receipt_confirmation_required,
+>     durable_completion_external_publication_receipt_consumer_required,
+>     durable_completion_external_publication_receipt_no_real_external_publication_confirmation,
+>     durable_completion_external_publication_receipt_no_real_external_publication_receipt,
+>     durable_completion_external_publication_receipt_no_real_settlement,
+>     durable_completion_external_publication_receipt_no_real_settlement_finality,
+>     durable_completion_external_publication_receipt_no_real_settlement_finality_projection,
+>     durable_completion_external_publication_receipt_no_real_settlement_receipt,
+>     external_publication_receipt_record_digest, external_publication_receipt_request_digest,
+>     external_publication_receipt_response_digest, external_publication_receipt_transcript_digest,
+>     DurableCompletionExternalPublicationReceiptBinding,
+>     DurableCompletionExternalPublicationReceiptDigest,
+>     DurableCompletionExternalPublicationReceiptEnvironment,
+>     DurableCompletionExternalPublicationReceiptLedgerRecord,
+>     DurableCompletionExternalPublicationReceiptLedgerSnapshot,
+>     DurableCompletionExternalPublicationReceiptLedgerStatus,
+>     DurableCompletionExternalPublicationReceiptRecord,
+>     DurableCompletionExternalPublicationReceiptResponse,
+>     DurableCompletionExternalPublicationReceiptSurface,
+>     DurableCompletionExternalPublicationReceiptTranscriptDigest,
+> };
+> 
+271,272c336
+< const OUTCOME_REPORT_RECORD_ID: &str =
+<     "durable-completion-settlement-outcome-report-0001";
+---
+> const OUTCOME_REPORT_RECORD_ID: &str = "durable-completion-settlement-outcome-report-0001";
+279,280c343,346
+< const CONFIRMATION_RECORD_ID: &str =
+<     "durable-completion-external-publication-confirmation-0001";
+---
+> const CONFIRMATION_RECORD_ID: &str = "durable-completion-external-publication-confirmation-0001";
+> const RECEIPT_ID: &str = "fixture-external-publication-receipt-0001";
+> const RECEIPT_DOMAIN_TAG: &str = "QBIND:run278:domain-separation:v1";
+> const RECEIPT_RECORD_ID: &str = "durable-completion-external-publication-receipt-0001";
+308a375
+>     external_publication_receipt_record_id: String,
+326,328c393
+<         outcome_report_record_id: format!(
+<             "durable-completion-settlement-outcome-report-{label}"
+<         ),
+---
+>         outcome_report_record_id: format!("durable-completion-settlement-outcome-report-{label}"),
+334a400,402
+>         external_publication_receipt_record_id: format!(
+>             "durable-completion-external-publication-receipt-{label}"
+>         ),
+353a422
+>         external_publication_receipt_record_id: RECEIPT_RECORD_ID.to_string(),
+1048d1116
+< 
+1191c1259,1260
+<         expected_projection_kind: DurableCompletionConsumerSettlementProjectionKind::FixtureInMemory,
+---
+>         expected_projection_kind:
+>             DurableCompletionConsumerSettlementProjectionKind::FixtureInMemory,
+1291,1292c1360
+<     let settlement_projection =
+<         attach_run264_settlement_projection(environment, action, false);
+---
+>     let settlement_projection = attach_run264_settlement_projection(environment, action, false);
+1410,1412c1478
+<         expected_settlement_projection_request_digest: settlement_projection
+<             .request_digest
+<             .clone(),
+---
+>         expected_settlement_projection_request_digest: settlement_projection.request_digest.clone(),
+1416,1418c1482
+<         expected_settlement_projection_record_digest: settlement_projection
+<             .record_digest
+<             .clone(),
+---
+>         expected_settlement_projection_record_digest: settlement_projection.record_digest.clone(),
+1427,1428c1491
+<         expected_commitment_policy:
+<             DurableCompletionSettlementCommitmentPolicy::FixtureAllowed,
+---
+>         expected_commitment_policy: DurableCompletionSettlementCommitmentPolicy::FixtureAllowed,
+1521,1522c1584
+<     let settlement_commitment =
+<         attach_run266_settlement_commitment(environment, action, false);
+---
+>     let settlement_commitment = attach_run266_settlement_commitment(environment, action, false);
+1640,1642c1702
+<         expected_settlement_commitment_request_digest: settlement_commitment
+<             .request_digest
+<             .clone(),
+---
+>         expected_settlement_commitment_request_digest: settlement_commitment.request_digest.clone(),
+1646,1648c1706
+<         expected_settlement_commitment_record_digest: settlement_commitment
+<             .record_digest
+<             .clone(),
+---
+>         expected_settlement_commitment_record_digest: settlement_commitment.record_digest.clone(),
+1657,1658c1715
+<         expected_finalization_policy:
+<             DurableCompletionSettlementFinalizationPolicy::FixtureAllowed,
+---
+>         expected_finalization_policy: DurableCompletionSettlementFinalizationPolicy::FixtureAllowed,
+1741c1798,1799
+< fn run270_receipt_acknowledgement_identity() -> DurableCompletionSettlementReceiptAcknowledgementIdentity {
+---
+> fn run270_receipt_acknowledgement_identity(
+> ) -> DurableCompletionSettlementReceiptAcknowledgementIdentity {
+1755,1756c1813
+<     let settlement_finalization =
+<         attach_run268_settlement_finalization(environment, action, false);
+---
+>     let settlement_finalization = attach_run268_settlement_finalization(environment, action, false);
+1824c1881,1883
+<         settlement_finalization_transcript_digest: settlement_finalization.transcript_digest.clone(),
+---
+>         settlement_finalization_transcript_digest: settlement_finalization
+>             .transcript_digest
+>             .clone(),
+1830c1889,1891
+<         expected_receipt_acknowledgement_record_id: action.receipt_acknowledgement_record_id.clone(),
+---
+>         expected_receipt_acknowledgement_record_id: action
+>             .receipt_acknowledgement_record_id
+>             .clone(),
+1871,1872c1932,1937
+<         expected_settlement_finalization_identity_digest: settlement_finalization.identity_digest.clone(),
+<         expected_settlement_finalization_request_digest: settlement_finalization.request_digest.clone(),
+---
+>         expected_settlement_finalization_identity_digest: settlement_finalization
+>             .identity_digest
+>             .clone(),
+>         expected_settlement_finalization_request_digest: settlement_finalization
+>             .request_digest
+>             .clone(),
+1876c1941,1943
+<         expected_settlement_finalization_record_digest: settlement_finalization.record_digest.clone(),
+---
+>         expected_settlement_finalization_record_digest: settlement_finalization
+>             .record_digest
+>             .clone(),
+1880c1947,1949
+<         expected_settlement_finalization_record_id: settlement_finalization.finalization_record_id.clone(),
+---
+>         expected_settlement_finalization_record_id: settlement_finalization
+>             .finalization_record_id
+>             .clone(),
+1882,1883c1951,1954
+<         expected_receipt_acknowledgement_kind: DurableCompletionSettlementReceiptAcknowledgementKind::FixtureInMemory,
+<         expected_receipt_acknowledgement_policy: DurableCompletionSettlementReceiptAcknowledgementPolicy::FixtureAllowed,
+---
+>         expected_receipt_acknowledgement_kind:
+>             DurableCompletionSettlementReceiptAcknowledgementKind::FixtureInMemory,
+>         expected_receipt_acknowledgement_policy:
+>             DurableCompletionSettlementReceiptAcknowledgementPolicy::FixtureAllowed,
+2048,2053c2119,2136
+<         settlement_receipt_acknowledgement_identity_digest: settlement_receipt_acknowledgement.identity_digest.clone(),
+<         settlement_receipt_acknowledgement_request_digest: settlement_receipt_acknowledgement.request_digest.clone(),
+<         settlement_receipt_acknowledgement_response_digest: settlement_receipt_acknowledgement.response_digest.clone(),
+<         settlement_receipt_acknowledgement_record_digest: settlement_receipt_acknowledgement.record_digest.clone(),
+<         settlement_receipt_acknowledgement_transcript_digest: settlement_receipt_acknowledgement.transcript_digest.clone(),
+<         settlement_receipt_acknowledgement_record_id: settlement_receipt_acknowledgement.receipt_acknowledgement_record_id.clone(),
+---
+>         settlement_receipt_acknowledgement_identity_digest: settlement_receipt_acknowledgement
+>             .identity_digest
+>             .clone(),
+>         settlement_receipt_acknowledgement_request_digest: settlement_receipt_acknowledgement
+>             .request_digest
+>             .clone(),
+>         settlement_receipt_acknowledgement_response_digest: settlement_receipt_acknowledgement
+>             .response_digest
+>             .clone(),
+>         settlement_receipt_acknowledgement_record_digest: settlement_receipt_acknowledgement
+>             .record_digest
+>             .clone(),
+>         settlement_receipt_acknowledgement_transcript_digest: settlement_receipt_acknowledgement
+>             .transcript_digest
+>             .clone(),
+>         settlement_receipt_acknowledgement_record_id: settlement_receipt_acknowledgement
+>             .receipt_acknowledgement_record_id
+>             .clone(),
+2099,2106c2182,2193
+<         expected_settlement_receipt_acknowledgement_identity_digest: settlement_receipt_acknowledgement.identity_digest.clone(),
+<         expected_settlement_receipt_acknowledgement_request_digest: settlement_receipt_acknowledgement.request_digest.clone(),
+<         expected_settlement_receipt_acknowledgement_response_digest: settlement_receipt_acknowledgement
+<             .response_digest
+<             .clone(),
+<         expected_settlement_receipt_acknowledgement_record_digest: settlement_receipt_acknowledgement.record_digest.clone(),
+<         expected_settlement_receipt_acknowledgement_transcript_digest: settlement_receipt_acknowledgement
+<             .transcript_digest
+---
+>         expected_settlement_receipt_acknowledgement_identity_digest:
+>             settlement_receipt_acknowledgement.identity_digest.clone(),
+>         expected_settlement_receipt_acknowledgement_request_digest:
+>             settlement_receipt_acknowledgement.request_digest.clone(),
+>         expected_settlement_receipt_acknowledgement_response_digest:
+>             settlement_receipt_acknowledgement.response_digest.clone(),
+>         expected_settlement_receipt_acknowledgement_record_digest:
+>             settlement_receipt_acknowledgement.record_digest.clone(),
+>         expected_settlement_receipt_acknowledgement_transcript_digest:
+>             settlement_receipt_acknowledgement.transcript_digest.clone(),
+>         expected_settlement_receipt_acknowledgement_record_id: settlement_receipt_acknowledgement
+>             .receipt_acknowledgement_record_id
+2108d2194
+<         expected_settlement_receipt_acknowledgement_record_id: settlement_receipt_acknowledgement.receipt_acknowledgement_record_id.clone(),
+2111c2197,2198
+<         expected_outcome_report_policy: DurableCompletionSettlementOutcomeReportPolicy::FixtureAllowed,
+---
+>         expected_outcome_report_policy:
+>             DurableCompletionSettlementOutcomeReportPolicy::FixtureAllowed,
+2276c2363,2365
+<         settlement_outcome_report_identity_digest: settlement_outcome_report.identity_digest.clone(),
+---
+>         settlement_outcome_report_identity_digest: settlement_outcome_report
+>             .identity_digest
+>             .clone(),
+2278c2367,2369
+<         settlement_outcome_report_response_digest: settlement_outcome_report.response_digest.clone(),
+---
+>         settlement_outcome_report_response_digest: settlement_outcome_report
+>             .response_digest
+>             .clone(),
+2280,2281c2371,2376
+<         settlement_outcome_report_transcript_digest: settlement_outcome_report.transcript_digest.clone(),
+<         settlement_outcome_report_record_id: settlement_outcome_report.outcome_report_record_id.clone(),
+---
+>         settlement_outcome_report_transcript_digest: settlement_outcome_report
+>             .transcript_digest
+>             .clone(),
+>         settlement_outcome_report_record_id: settlement_outcome_report
+>             .outcome_report_record_id
+>             .clone(),
+2327,2328c2422,2427
+<         expected_settlement_outcome_report_identity_digest: settlement_outcome_report.identity_digest.clone(),
+<         expected_settlement_outcome_report_request_digest: settlement_outcome_report.request_digest.clone(),
+---
+>         expected_settlement_outcome_report_identity_digest: settlement_outcome_report
+>             .identity_digest
+>             .clone(),
+>         expected_settlement_outcome_report_request_digest: settlement_outcome_report
+>             .request_digest
+>             .clone(),
+2332c2431,2433
+<         expected_settlement_outcome_report_record_digest: settlement_outcome_report.record_digest.clone(),
+---
+>         expected_settlement_outcome_report_record_digest: settlement_outcome_report
+>             .record_digest
+>             .clone(),
+2336c2437,2439
+<         expected_settlement_outcome_report_record_id: settlement_outcome_report.outcome_report_record_id.clone(),
+---
+>         expected_settlement_outcome_report_record_id: settlement_outcome_report
+>             .outcome_report_record_id
+>             .clone(),
+2338,2339c2441,2444
+<         expected_outcome_publication_kind: DurableCompletionSettlementOutcomePublicationKind::FixtureInMemory,
+<         expected_outcome_publication_policy: DurableCompletionSettlementOutcomePublicationPolicy::FixtureAllowed,
+---
+>         expected_outcome_publication_kind:
+>             DurableCompletionSettlementOutcomePublicationKind::FixtureInMemory,
+>         expected_outcome_publication_policy:
+>             DurableCompletionSettlementOutcomePublicationPolicy::FixtureAllowed,
+2406a2512
+> 
+2408c2514,2771
+< // Run 276 owned-context builder
+---
+> // Run 276 external-publication-confirmation attachment (new projection source)
+> // Builds a REAL Run 276 recorded confirmation from the Run 274 prior, so the
+> // Run 278 cur-layer projects from a genuine attached confirmation outcome.
+> // ===========================================================================
+> // ===========================================================================
+> // Run 276 external-publication-confirmation attachment (prior boundary)
+> // Builds a REAL Run 274 recorded outcome from the Run 272 prior. Uses the real
+> // Run 274 module field names so the Run 274 cur-layer can consume it.
+> // ===========================================================================
+> #[allow(dead_code)]
+> struct AttachedExternalPublicationConfirmation {
+>     outcome: DurableCompletionExternalPublicationConfirmationOutcome,
+>     confirmation_record_id: String,
+>     identity_digest: String,
+>     request_digest: String,
+>     response_digest: String,
+>     record_digest: String,
+>     transcript_digest: String,
+>     consumer: AttachedConsumer,
+>     settlement_outcome_publication: AttachedSettlementOutcomePublication,
+> }
+> 
+> fn run276_external_publication_confirmation_identity(
+> ) -> DurableCompletionExternalPublicationConfirmationIdentity {
+>     DurableCompletionExternalPublicationConfirmationIdentity {
+>         outcome_publication_id: CONFIRMATION_ID.to_string(),
+>         kind: DurableCompletionExternalPublicationConfirmationKind::FixtureInMemory,
+>         policy: DurableCompletionExternalPublicationConfirmationPolicy::FixtureAllowed,
+>         domain_separation_tag: CONFIRMATION_DOMAIN_TAG.to_string(),
+>     }
+> }
+> 
+> fn attach_run274_external_publication_confirmation(
+>     environment: TrustBundleEnvironment,
+>     action: &ActionLabel,
+>     external_publication_confirmation_duplicate: bool,
+> ) -> AttachedExternalPublicationConfirmation {
+>     let settlement_outcome_publication =
+>         attach_run274_settlement_outcome_publication(environment, action, false);
+>     let consumer = settlement_outcome_publication.consumer.clone();
+>     let ack = &consumer.ack;
+>     let outcome_publication_env = match environment {
+>         TrustBundleEnvironment::Devnet | TrustBundleEnvironment::Testnet => environment,
+>         TrustBundleEnvironment::Mainnet => TrustBundleEnvironment::Devnet,
+>     };
+>     let surface = GovernanceExecutionRuntimeSurface::ReloadApply;
+>     let env = ModeledGovernanceTrustMutationEnvironmentBinding {
+>         environment: outcome_publication_env,
+>         chain_id: CHAIN.to_string(),
+>         genesis_hash: GENESIS.to_string(),
+>     };
+>     let runtime = ModeledGovernanceTrustMutationRuntimeBinding {
+>         governance_surface: surface,
+>         mutation_surface: ModeledGovernanceTrustMutationSurface {
+>             validation_surface: surface,
+>             mutation_surface: surface,
+>         },
+>         authority_domain_sequence: SEQUENCE,
+>     };
+>     let id = run276_external_publication_confirmation_identity();
+>     let request = DurableCompletionExternalPublicationConfirmationRequest {
+>         confirmation_record_id: action.confirmation_record_id.clone(),
+>         environment: outcome_publication_env,
+>         chain_id: CHAIN.to_string(),
+>         genesis_hash: GENESIS.to_string(),
+>         governance_surface: surface,
+>         validation_surface: surface,
+>         mutation_surface: surface,
+>         proposal_id: action.proposal_id.clone(),
+>         decision_id: action.decision_id.clone(),
+>         candidate_digest: action.candidate_digest.clone(),
+>         authority_domain_sequence: SEQUENCE,
+>         pipeline_decision_digest: PIPELINE_DIGEST.to_string(),
+>         sink_decision_digest: SINK_DIGEST.to_string(),
+>         reporter_decision_digest: REPORTER_DIGEST.to_string(),
+>         finalization_decision_digest: FINALIZATION_DECISION_DIGEST.to_string(),
+>         attestation_digest: ATTESTATION_DIGEST.to_string(),
+>         attestation_id: ATTESTATION_ID.to_string(),
+>         backend_identity_digest: ack.receipt.backend.identity_digest.clone(),
+>         backend_request_digest: ack.receipt.backend.request_digest.clone(),
+>         backend_response_digest: ack.receipt.backend.response_digest.clone(),
+>         backend_receipt_digest: ack.receipt.backend.receipt_digest.clone(),
+>         backend_transcript_digest: ack.receipt.backend.transcript_digest.clone(),
+>         backend_record_id: ack.receipt.backend.backend_record_id.clone(),
+>         receipt_identity_digest: ack.receipt.identity_digest.clone(),
+>         receipt_request_digest: ack.receipt.request_digest.clone(),
+>         receipt_response_digest: ack.receipt.response_digest.clone(),
+>         receipt_record_digest: ack.receipt.record_digest.clone(),
+>         receipt_transcript_digest: ack.receipt.transcript_digest.clone(),
+>         receipt_record_id: ack.receipt.receipt_record_id.clone(),
+>         acknowledgement_identity_digest: ack.identity_digest.clone(),
+>         acknowledgement_request_digest: ack.request_digest.clone(),
+>         acknowledgement_response_digest: ack.response_digest.clone(),
+>         acknowledgement_record_digest: ack.record_digest.clone(),
+>         acknowledgement_transcript_digest: ack.transcript_digest.clone(),
+>         acknowledgement_record_id: ack.ack_record_id.clone(),
+>         consumer_identity_digest: consumer.identity_digest.clone(),
+>         consumer_request_digest: consumer.request_digest.clone(),
+>         consumer_response_digest: consumer.response_digest.clone(),
+>         consumer_record_digest: consumer.record_digest.clone(),
+>         consumer_transcript_digest: consumer.transcript_digest.clone(),
+>         consumer_record_id: consumer.consumer_record_id.clone(),
+>         settlement_outcome_publication_identity_digest: settlement_outcome_publication
+>             .identity_digest
+>             .clone(),
+>         settlement_outcome_publication_request_digest: settlement_outcome_publication
+>             .request_digest
+>             .clone(),
+>         settlement_outcome_publication_response_digest: settlement_outcome_publication
+>             .response_digest
+>             .clone(),
+>         settlement_outcome_publication_record_digest: settlement_outcome_publication
+>             .record_digest
+>             .clone(),
+>         settlement_outcome_publication_transcript_digest: settlement_outcome_publication
+>             .transcript_digest
+>             .clone(),
+>         settlement_outcome_publication_record_id: settlement_outcome_publication
+>             .outcome_publication_record_id
+>             .clone(),
+>         identity: id.clone(),
+>         domain_separation_tag: CONFIRMATION_DOMAIN_TAG.to_string(),
+>     };
+>     let expectations = DurableCompletionExternalPublicationConfirmationExpectations {
+>         expected_confirmation_record_id: action.confirmation_record_id.clone(),
+>         expected_environment: outcome_publication_env,
+>         expected_chain_id: CHAIN.to_string(),
+>         expected_genesis_hash: GENESIS.to_string(),
+>         expected_governance_surface: surface,
+>         expected_validation_surface: surface,
+>         expected_mutation_surface: surface,
+>         expected_proposal_id: action.proposal_id.clone(),
+>         expected_decision_id: action.decision_id.clone(),
+>         expected_candidate_digest: action.candidate_digest.clone(),
+>         expected_authority_domain_sequence: SEQUENCE,
+>         expected_pipeline_decision_digest: PIPELINE_DIGEST.to_string(),
+>         expected_sink_decision_digest: SINK_DIGEST.to_string(),
+>         expected_reporter_decision_digest: REPORTER_DIGEST.to_string(),
+>         expected_finalization_decision_digest: FINALIZATION_DECISION_DIGEST.to_string(),
+>         expected_attestation_digest: ATTESTATION_DIGEST.to_string(),
+>         expected_attestation_id: ATTESTATION_ID.to_string(),
+>         expected_backend_identity_digest: ack.receipt.backend.identity_digest.clone(),
+>         expected_backend_request_digest: ack.receipt.backend.request_digest.clone(),
+>         expected_backend_response_digest: ack.receipt.backend.response_digest.clone(),
+>         expected_backend_receipt_digest: ack.receipt.backend.receipt_digest.clone(),
+>         expected_backend_transcript_digest: ack.receipt.backend.transcript_digest.clone(),
+>         expected_backend_record_id: ack.receipt.backend.backend_record_id.clone(),
+>         expected_receipt_identity_digest: ack.receipt.identity_digest.clone(),
+>         expected_receipt_request_digest: ack.receipt.request_digest.clone(),
+>         expected_receipt_response_digest: ack.receipt.response_digest.clone(),
+>         expected_receipt_record_digest: ack.receipt.record_digest.clone(),
+>         expected_receipt_transcript_digest: ack.receipt.transcript_digest.clone(),
+>         expected_receipt_record_id: ack.receipt.receipt_record_id.clone(),
+>         expected_acknowledgement_identity_digest: ack.identity_digest.clone(),
+>         expected_acknowledgement_request_digest: ack.request_digest.clone(),
+>         expected_acknowledgement_response_digest: ack.response_digest.clone(),
+>         expected_acknowledgement_record_digest: ack.record_digest.clone(),
+>         expected_acknowledgement_transcript_digest: ack.transcript_digest.clone(),
+>         expected_acknowledgement_record_id: ack.ack_record_id.clone(),
+>         expected_consumer_identity_digest: consumer.identity_digest.clone(),
+>         expected_consumer_request_digest: consumer.request_digest.clone(),
+>         expected_consumer_response_digest: consumer.response_digest.clone(),
+>         expected_consumer_record_digest: consumer.record_digest.clone(),
+>         expected_consumer_transcript_digest: consumer.transcript_digest.clone(),
+>         expected_consumer_record_id: consumer.consumer_record_id.clone(),
+>         expected_settlement_outcome_publication_identity_digest: settlement_outcome_publication
+>             .identity_digest
+>             .clone(),
+>         expected_settlement_outcome_publication_request_digest: settlement_outcome_publication
+>             .request_digest
+>             .clone(),
+>         expected_settlement_outcome_publication_response_digest: settlement_outcome_publication
+>             .response_digest
+>             .clone(),
+>         expected_settlement_outcome_publication_record_digest: settlement_outcome_publication
+>             .record_digest
+>             .clone(),
+>         expected_settlement_outcome_publication_transcript_digest: settlement_outcome_publication
+>             .transcript_digest
+>             .clone(),
+>         expected_settlement_outcome_publication_record_id: settlement_outcome_publication
+>             .outcome_publication_record_id
+>             .clone(),
+>         expected_identity: id.clone(),
+>         expected_confirmation_kind:
+>             DurableCompletionExternalPublicationConfirmationKind::FixtureInMemory,
+>         expected_confirmation_policy:
+>             DurableCompletionExternalPublicationConfirmationPolicy::FixtureAllowed,
+>         expected_domain_separation_tag: CONFIRMATION_DOMAIN_TAG.to_string(),
+>     };
+>     let input = DurableCompletionExternalPublicationConfirmationInput {
+>         policy: DurableCompletionExternalPublicationConfirmationPolicy::FixtureAllowed,
+>         environment_binding: env,
+>         runtime_binding: runtime,
+>         replay_binding: DurableReplayObservation::MutationAuthorized,
+>         pipeline_binding:
+>             GovernanceModeledEndToEndPipelineOutcome::ModeledApplierAppliedAndDurableConsumeAuthorized,
+>         sink_binding: GovernanceModeledDurableConsumeSinkOutcome::ConsumeReceiptRecorded,
+>         reporter_binding:
+>             GovernanceModeledDurableConsumeCompletionReporterOutcome::CompletionReportRecorded,
+>         outcome_publication_binding:
+>             GovernanceModeledDurableCompletionFinalizationOutcome::DurableCompletionFinalized,
+>         attestation_binding:
+>             GovernanceModeledDurableCompletionAttestationOutcome::DurableCompletionAttested,
+>         backend_binding: ack.receipt.backend.outcome.clone(),
+>         receipt_binding: ack.receipt.outcome.clone(),
+>         acknowledgement_binding: ack.outcome.clone(),
+>         consumer_binding: consumer.outcome.clone(),
+>         settlement_outcome_publication_binding: settlement_outcome_publication.outcome.clone(),
+>         request,
+>     };
+>     let mut ledger = DurableCompletionExternalPublicationConfirmationLedger::new();
+>     let mut sink = FixtureDurableCompletionExternalPublicationConfirmationSink::new();
+>     let first = evaluate_durable_completion_external_publication_confirmation(
+>         &input,
+>         &expectations,
+>         &mut sink,
+>         &mut ledger,
+>     );
+>     assert_eq!(
+>         first,
+>         DurableCompletionExternalPublicationConfirmationOutcome::ExternalPublicationConfirmationRecorded
+>     );
+>     let outcome = if external_publication_confirmation_duplicate {
+>         let second = evaluate_durable_completion_external_publication_confirmation(
+>             &input,
+>             &expectations,
+>             &mut sink,
+>             &mut ledger,
+>         );
+>         assert_eq!(
+>             second,
+>             DurableCompletionExternalPublicationConfirmationOutcome::ExternalPublicationConfirmationDuplicateIdempotent
+>         );
+>         second
+>     } else {
+>         first
+>     };
+>     let record = ledger
+>         .find(&action.confirmation_record_id)
+>         .expect("recorded Run 276 external publication confirmation");
+>     AttachedExternalPublicationConfirmation {
+>         outcome,
+>         confirmation_record_id: action.confirmation_record_id.clone(),
+>         identity_digest: external_publication_confirmation_identity_digest(&id)
+>             .as_hex()
+>             .to_string(),
+>         request_digest: record.request_digest.as_hex().to_string(),
+>         response_digest: record.response_digest.as_hex().to_string(),
+>         record_digest: record.record_digest.as_hex().to_string(),
+>         transcript_digest: record.transcript_digest.as_hex().to_string(),
+>         consumer,
+>         settlement_outcome_publication,
+>     }
+> }
+> 
+> // ===========================================================================
+> // Run 278 owned-context builder
+2414,2415c2777,2778
+<     request: DurableCompletionExternalPublicationConfirmationRequest,
+<     expectations: DurableCompletionExternalPublicationConfirmationExpectations,
+---
+>     request: DurableCompletionExternalPublicationReceiptRequest,
+>     expectations: DurableCompletionExternalPublicationReceiptExpectations,
+2417c2780
+<     settlement_outcome_publication: AttachedSettlementOutcomePublication,
+---
+>     external_publication_confirmation: AttachedExternalPublicationConfirmation,
+2421,2425c2784,2788
+<     policy: DurableCompletionExternalPublicationConfirmationPolicy,
+<     kind: DurableCompletionExternalPublicationConfirmationKind,
+< ) -> DurableCompletionExternalPublicationConfirmationIdentity {
+<     DurableCompletionExternalPublicationConfirmationIdentity {
+<         outcome_publication_id: CONFIRMATION_ID.to_string(),
+---
+>     policy: DurableCompletionExternalPublicationReceiptPolicy,
+>     kind: DurableCompletionExternalPublicationReceiptKind,
+> ) -> DurableCompletionExternalPublicationReceiptIdentity {
+>     DurableCompletionExternalPublicationReceiptIdentity {
+>         confirmation_id: RECEIPT_ID.to_string(),
+2428c2791
+<         domain_separation_tag: CONFIRMATION_DOMAIN_TAG.to_string(),
+---
+>         domain_separation_tag: RECEIPT_DOMAIN_TAG.to_string(),
+2437,2438c2800,2801
+<     policy: DurableCompletionExternalPublicationConfirmationPolicy,
+<     kind: DurableCompletionExternalPublicationConfirmationKind,
+---
+>     policy: DurableCompletionExternalPublicationReceiptPolicy,
+>     kind: DurableCompletionExternalPublicationReceiptKind,
+2442,2444c2805,2807
+<     let settlement_outcome_publication =
+<         attach_run274_settlement_outcome_publication(environment, action, consumer_duplicate);
+<     let consumer = settlement_outcome_publication.consumer.clone();
+---
+>     let external_publication_confirmation =
+>         attach_run274_external_publication_confirmation(environment, action, consumer_duplicate);
+>     let consumer = external_publication_confirmation.consumer.clone();
+2460,2461c2823,2826
+<     let request = DurableCompletionExternalPublicationConfirmationRequest {
+<         confirmation_record_id: action.confirmation_record_id.clone(),
+---
+>     let request = DurableCompletionExternalPublicationReceiptRequest {
+>         external_publication_receipt_record_id: action
+>             .external_publication_receipt_record_id
+>             .clone(),
+2502,2507c2867,2884
+<         settlement_outcome_publication_identity_digest: settlement_outcome_publication.identity_digest.clone(),
+<         settlement_outcome_publication_request_digest: settlement_outcome_publication.request_digest.clone(),
+<         settlement_outcome_publication_response_digest: settlement_outcome_publication.response_digest.clone(),
+<         settlement_outcome_publication_record_digest: settlement_outcome_publication.record_digest.clone(),
+<         settlement_outcome_publication_transcript_digest: settlement_outcome_publication.transcript_digest.clone(),
+<         settlement_outcome_publication_record_id: settlement_outcome_publication.outcome_publication_record_id.clone(),
+---
+>         external_publication_confirmation_identity_digest: external_publication_confirmation
+>             .identity_digest
+>             .clone(),
+>         external_publication_confirmation_request_digest: external_publication_confirmation
+>             .request_digest
+>             .clone(),
+>         external_publication_confirmation_response_digest: external_publication_confirmation
+>             .response_digest
+>             .clone(),
+>         external_publication_confirmation_record_digest: external_publication_confirmation
+>             .record_digest
+>             .clone(),
+>         external_publication_confirmation_transcript_digest: external_publication_confirmation
+>             .transcript_digest
+>             .clone(),
+>         external_publication_confirmation_record_id: external_publication_confirmation
+>             .confirmation_record_id
+>             .clone(),
+2509c2886
+<         domain_separation_tag: CONFIRMATION_DOMAIN_TAG.to_string(),
+---
+>         domain_separation_tag: RECEIPT_DOMAIN_TAG.to_string(),
+2511,2512c2888,2891
+<     let expectations = DurableCompletionExternalPublicationConfirmationExpectations {
+<         expected_confirmation_record_id: action.confirmation_record_id.clone(),
+---
+>     let expectations = DurableCompletionExternalPublicationReceiptExpectations {
+>         expected_external_publication_receipt_record_id: action
+>             .external_publication_receipt_record_id
+>             .clone(),
+2553,2556c2932,2939
+<         expected_settlement_outcome_publication_identity_digest: settlement_outcome_publication.identity_digest.clone(),
+<         expected_settlement_outcome_publication_request_digest: settlement_outcome_publication.request_digest.clone(),
+<         expected_settlement_outcome_publication_response_digest: settlement_outcome_publication
+<             .response_digest
+---
+>         expected_external_publication_confirmation_identity_digest:
+>             external_publication_confirmation.identity_digest.clone(),
+>         expected_external_publication_confirmation_request_digest:
+>             external_publication_confirmation.request_digest.clone(),
+>         expected_external_publication_confirmation_response_digest:
+>             external_publication_confirmation.response_digest.clone(),
+>         expected_external_publication_confirmation_record_digest: external_publication_confirmation
+>             .record_digest
+2558,2560c2941,2944
+<         expected_settlement_outcome_publication_record_digest: settlement_outcome_publication.record_digest.clone(),
+<         expected_settlement_outcome_publication_transcript_digest: settlement_outcome_publication
+<             .transcript_digest
+---
+>         expected_external_publication_confirmation_transcript_digest:
+>             external_publication_confirmation.transcript_digest.clone(),
+>         expected_external_publication_confirmation_record_id: external_publication_confirmation
+>             .confirmation_record_id
+2562d2945
+<         expected_settlement_outcome_publication_record_id: settlement_outcome_publication.outcome_publication_record_id.clone(),
+2564,2566c2947,2949
+<         expected_confirmation_kind: kind,
+<         expected_confirmation_policy: policy,
+<         expected_domain_separation_tag: CONFIRMATION_DOMAIN_TAG.to_string(),
+---
+>         expected_external_publication_receipt_kind: kind,
+>         expected_external_publication_receipt_policy: policy,
+>         expected_domain_separation_tag: RECEIPT_DOMAIN_TAG.to_string(),
+2574c2957
+<         settlement_outcome_publication,
+---
+>         external_publication_confirmation,
+2582,2583c2965,2966
+<     policy: DurableCompletionExternalPublicationConfirmationPolicy,
+<     kind: DurableCompletionExternalPublicationConfirmationKind,
+---
+>     policy: DurableCompletionExternalPublicationReceiptPolicy,
+>     kind: DurableCompletionExternalPublicationReceiptKind,
+2592c2975
+<         policy: DurableCompletionExternalPublicationConfirmationPolicy,
+---
+>         policy: DurableCompletionExternalPublicationReceiptPolicy,
+2603,2605c2986,2988
+<         settlement_outcome_publication: DurableCompletionSettlementOutcomePublicationOutcome,
+<     ) -> DurableCompletionExternalPublicationConfirmationInput {
+<         DurableCompletionExternalPublicationConfirmationInput {
+---
+>         external_publication_confirmation: DurableCompletionExternalPublicationConfirmationOutcome,
+>     ) -> DurableCompletionExternalPublicationReceiptInput {
+>         DurableCompletionExternalPublicationReceiptInput {
+2613c2996
+<             outcome_publication_binding: confirmation,
+---
+>             confirmation_binding: confirmation,
+2619c3002
+<             settlement_outcome_publication_binding: settlement_outcome_publication,
+---
+>             external_publication_confirmation_binding: external_publication_confirmation,
+2627c3010
+<         policy: DurableCompletionExternalPublicationConfirmationPolicy,
+---
+>         policy: DurableCompletionExternalPublicationReceiptPolicy,
+2635c3018
+<     ) -> DurableCompletionExternalPublicationConfirmationInput {
+---
+>     ) -> DurableCompletionExternalPublicationReceiptInput {
+2648c3031
+<             self.settlement_outcome_publication.outcome.clone(),
+---
+>             self.external_publication_confirmation.outcome.clone(),
+2652c3035
+<     fn recorded(&self) -> DurableCompletionExternalPublicationConfirmationInput {
+---
+>     fn recorded(&self) -> DurableCompletionExternalPublicationReceiptInput {
+2665c3048
+<             self.settlement_outcome_publication.outcome.clone(),
+---
+>             self.external_publication_confirmation.outcome.clone(),
+2675,2676c3058,3059
+<         DurableCompletionExternalPublicationConfirmationPolicy::FixtureAllowed,
+<         DurableCompletionExternalPublicationConfirmationKind::FixtureInMemory,
+---
+>         DurableCompletionExternalPublicationReceiptPolicy::FixtureAllowed,
+>         DurableCompletionExternalPublicationReceiptKind::FixtureInMemory,
+2685,2686c3068,3069
+<         DurableCompletionExternalPublicationConfirmationPolicy::FixtureAllowed,
+<         DurableCompletionExternalPublicationConfirmationKind::FixtureInMemory,
+---
+>         DurableCompletionExternalPublicationReceiptPolicy::FixtureAllowed,
+>         DurableCompletionExternalPublicationReceiptKind::FixtureInMemory,
+2690,2691c3073,3074
+< fn fixture_sink() -> FixtureDurableCompletionExternalPublicationConfirmationSink {
+<     FixtureDurableCompletionExternalPublicationConfirmationSink::new()
+---
+> fn fixture_sink() -> FixtureDurableCompletionExternalPublicationReceiptSink {
+>     FixtureDurableCompletionExternalPublicationReceiptSink::new()
+2696c3079
+<         DurableCompletionExternalPublicationConfirmationPolicy::Disabled,
+---
+>         DurableCompletionExternalPublicationReceiptPolicy::Disabled,
+2705c3088
+<     let mut ledger = DurableCompletionExternalPublicationConfirmationLedger::new();
+---
+>     let mut ledger = DurableCompletionExternalPublicationReceiptLedger::new();
+2707c3090
+<     let outcome = evaluate_durable_completion_external_publication_confirmation(
+---
+>     let outcome = evaluate_durable_completion_external_publication_receipt(
+2715c3098
+<         DurableCompletionExternalPublicationConfirmationOutcome::LegacyBypassNoExternalPublicationConfirmation
+---
+>         DurableCompletionExternalPublicationReceiptOutcome::LegacyBypassNoExternalPublicationReceipt
+2725c3108
+<         DurableCompletionExternalPublicationConfirmationPolicy::FixtureAllowed,
+---
+>         DurableCompletionExternalPublicationReceiptPolicy::FixtureAllowed,
+2736c3119
+<         DurableCompletionSettlementOutcomePublicationOutcome::LegacyBypassNoSettlementOutcomePublication,
+---
+>         DurableCompletionExternalPublicationConfirmationOutcome::LegacyBypassNoExternalPublicationConfirmation,
+2738c3121
+<     let mut ledger = DurableCompletionExternalPublicationConfirmationLedger::new();
+---
+>     let mut ledger = DurableCompletionExternalPublicationReceiptLedger::new();
+2740c3123
+<     let outcome = evaluate_durable_completion_external_publication_confirmation(
+---
+>     let outcome = evaluate_durable_completion_external_publication_receipt(
+2748c3131
+<         DurableCompletionExternalPublicationConfirmationOutcome::LegacyBypassNoExternalPublicationConfirmation
+---
+>         DurableCompletionExternalPublicationReceiptOutcome::LegacyBypassNoExternalPublicationReceipt
+2762c3145
+<     let mut ledger = DurableCompletionExternalPublicationConfirmationLedger::new();
+---
+>     let mut ledger = DurableCompletionExternalPublicationReceiptLedger::new();
+2764c3147
+<     let outcome = evaluate_durable_completion_external_publication_confirmation(
+---
+>     let outcome = evaluate_durable_completion_external_publication_receipt(
+2772c3155
+<         DurableCompletionExternalPublicationConfirmationOutcome::ExternalPublicationConfirmationRecorded
+---
+>         DurableCompletionExternalPublicationReceiptOutcome::ExternalPublicationReceiptRecorded
+2774,2775c3157,3162
+<     assert!(external_publication_confirmation_outcome_authorizes_record(&outcome));
+<     assert!(external_publication_confirmation_outcome_projects_to_recorded(&outcome));
+---
+>     assert!(external_publication_receipt_outcome_authorizes_record(
+>         &outcome
+>     ));
+>     assert!(external_publication_receipt_outcome_projects_to_recorded(
+>         &outcome
+>     ));
+2778c3165
+<     assert!(ledger.contains(CONFIRMATION_RECORD_ID));
+---
+>     assert!(ledger.contains(RECEIPT_RECORD_ID));
+2780c3167
+<         external_publication_confirmation_identity_digest(&c.request.identity),
+---
+>         external_publication_receipt_identity_digest(&c.request.identity),
+2788c3175
+<     let mut ledger = DurableCompletionExternalPublicationConfirmationLedger::new();
+---
+>     let mut ledger = DurableCompletionExternalPublicationReceiptLedger::new();
+2790c3177
+<     let outcome = evaluate_durable_completion_external_publication_confirmation(
+---
+>     let outcome = evaluate_durable_completion_external_publication_receipt(
+2798c3185
+<         DurableCompletionExternalPublicationConfirmationOutcome::ExternalPublicationConfirmationRecorded
+---
+>         DurableCompletionExternalPublicationReceiptOutcome::ExternalPublicationReceiptRecorded
+2819,2820c3206,3207
+<             DurableCompletionExternalPublicationConfirmationPolicy::FixtureAllowed,
+<             DurableCompletionExternalPublicationConfirmationKind::FixtureInMemory,
+---
+>             DurableCompletionExternalPublicationReceiptPolicy::FixtureAllowed,
+>             DurableCompletionExternalPublicationReceiptKind::FixtureInMemory,
+2828c3215
+<         let mut ledger = DurableCompletionExternalPublicationConfirmationLedger::new();
+---
+>         let mut ledger = DurableCompletionExternalPublicationReceiptLedger::new();
+2830c3217
+<         let outcome = evaluate_durable_completion_external_publication_confirmation(
+---
+>         let outcome = evaluate_durable_completion_external_publication_receipt(
+2838c3225
+<             DurableCompletionExternalPublicationConfirmationOutcome::ExternalPublicationConfirmationRecorded,
+---
+>             DurableCompletionExternalPublicationReceiptOutcome::ExternalPublicationReceiptRecorded,
+2842c3229
+<         assert!(ledger.contains(&action.confirmation_record_id));
+---
+>         assert!(ledger.contains(&action.external_publication_receipt_record_id));
+2849c3236
+<     let mut ledger = DurableCompletionExternalPublicationConfirmationLedger::new();
+---
+>     let mut ledger = DurableCompletionExternalPublicationReceiptLedger::new();
+2851c3238
+<     let first = evaluate_durable_completion_external_publication_confirmation(
+---
+>     let first = evaluate_durable_completion_external_publication_receipt(
+2859c3246
+<         DurableCompletionExternalPublicationConfirmationOutcome::ExternalPublicationConfirmationRecorded
+---
+>         DurableCompletionExternalPublicationReceiptOutcome::ExternalPublicationReceiptRecorded
+2861c3248
+<     let second = evaluate_durable_completion_external_publication_confirmation(
+---
+>     let second = evaluate_durable_completion_external_publication_receipt(
+2869c3256
+<         DurableCompletionExternalPublicationConfirmationOutcome::ExternalPublicationConfirmationDuplicateIdempotent
+---
+>         DurableCompletionExternalPublicationReceiptOutcome::ExternalPublicationReceiptDuplicateIdempotent
+2871,2872c3258,3263
+<     assert!(!external_publication_confirmation_outcome_authorizes_record(&second));
+<     assert!(external_publication_confirmation_outcome_projects_to_recorded(&second));
+---
+>     assert!(!external_publication_receipt_outcome_authorizes_record(
+>         &second
+>     ));
+>     assert!(external_publication_receipt_outcome_projects_to_recorded(
+>         &second
+>     ));
+2877c3268
+<     // A real Run 274 SettlementOutcomePublicationDuplicateIdempotent outcome with
+---
+>     // A real Run 274 ExternalPublicationConfirmationDuplicateIdempotent outcome with
+2883,2884c3274,3275
+<         DurableCompletionExternalPublicationConfirmationPolicy::FixtureAllowed,
+<         DurableCompletionExternalPublicationConfirmationKind::FixtureInMemory,
+---
+>         DurableCompletionExternalPublicationReceiptPolicy::FixtureAllowed,
+>         DurableCompletionExternalPublicationReceiptKind::FixtureInMemory,
+2889,2890c3280,3281
+<         dup_ctx.settlement_outcome_publication.outcome,
+<         DurableCompletionSettlementOutcomePublicationOutcome::SettlementOutcomePublicationDuplicateIdempotent
+---
+>         dup_ctx.external_publication_confirmation.outcome,
+>         DurableCompletionExternalPublicationConfirmationOutcome::ExternalPublicationConfirmationDuplicateIdempotent
+2894c3285
+<     let mut ledger = DurableCompletionExternalPublicationConfirmationLedger::new();
+---
+>     let mut ledger = DurableCompletionExternalPublicationReceiptLedger::new();
+2896c3287
+<     let outcome = evaluate_durable_completion_external_publication_confirmation(
+---
+>     let outcome = evaluate_durable_completion_external_publication_receipt(
+2904c3295
+<         DurableCompletionExternalPublicationConfirmationOutcome::ExternalPublicationConfirmationRejectedBeforeRecord
+---
+>         DurableCompletionExternalPublicationReceiptOutcome::ExternalPublicationReceiptRejectedBeforeRecord
+2910c3301
+<     let recorded = evaluate_durable_completion_external_publication_confirmation(
+---
+>     let recorded = evaluate_durable_completion_external_publication_receipt(
+2918c3309
+<         DurableCompletionExternalPublicationConfirmationOutcome::ExternalPublicationConfirmationRecorded
+---
+>         DurableCompletionExternalPublicationReceiptOutcome::ExternalPublicationReceiptRecorded
+2920c3311
+<     let matched = evaluate_durable_completion_external_publication_confirmation(
+---
+>     let matched = evaluate_durable_completion_external_publication_receipt(
+2928c3319
+<         DurableCompletionExternalPublicationConfirmationOutcome::ExternalPublicationConfirmationDuplicateIdempotent
+---
+>         DurableCompletionExternalPublicationReceiptOutcome::ExternalPublicationReceiptDuplicateIdempotent
+2942,2943c3333,3334
+<         DurableCompletionExternalPublicationConfirmationPolicy::ProductionExternalPublicationConfirmationRequired,
+<         DurableCompletionExternalPublicationConfirmationKind::ProductionExternalPublicationConfirmationUnavailable,
+---
+>         DurableCompletionExternalPublicationReceiptPolicy::ProductionExternalPublicationReceiptRequired,
+>         DurableCompletionExternalPublicationReceiptKind::ProductionExternalPublicationReceiptUnavailable,
+2945,2947c3336,3338
+<     let mut ledger = DurableCompletionExternalPublicationConfirmationLedger::new();
+<     let mut sink = ProductionExternalPublicationConfirmationSink::default();
+<     let outcome = evaluate_durable_completion_external_publication_confirmation(
+---
+>     let mut ledger = DurableCompletionExternalPublicationReceiptLedger::new();
+>     let mut sink = ProductionExternalPublicationReceiptSink::default();
+>     let outcome = evaluate_durable_completion_external_publication_receipt(
+2955c3346
+<         DurableCompletionExternalPublicationConfirmationOutcome::ProductionExternalPublicationConfirmationUnavailableNoConfirmation
+---
+>         DurableCompletionExternalPublicationReceiptOutcome::ProductionExternalPublicationReceiptUnavailableNoReceipt
+2965,2966c3356,3357
+<         DurableCompletionExternalPublicationConfirmationPolicy::MainNetExternalPublicationConfirmationRequired,
+<         DurableCompletionExternalPublicationConfirmationKind::MainNetExternalPublicationConfirmationUnavailable,
+---
+>         DurableCompletionExternalPublicationReceiptPolicy::MainNetExternalPublicationReceiptRequired,
+>         DurableCompletionExternalPublicationReceiptKind::MainNetExternalPublicationReceiptUnavailable,
+2968,2970c3359,3361
+<     let mut ledger = DurableCompletionExternalPublicationConfirmationLedger::new();
+<     let mut sink = MainNetExternalPublicationConfirmationSink::default();
+<     let outcome = evaluate_durable_completion_external_publication_confirmation(
+---
+>     let mut ledger = DurableCompletionExternalPublicationReceiptLedger::new();
+>     let mut sink = MainNetExternalPublicationReceiptSink::default();
+>     let outcome = evaluate_durable_completion_external_publication_receipt(
+2978c3369
+<         DurableCompletionExternalPublicationConfirmationOutcome::MainNetExternalPublicationConfirmationUnavailableNoConfirmation
+---
+>         DurableCompletionExternalPublicationReceiptOutcome::MainNetExternalPublicationReceiptUnavailableNoReceipt
+2988,2989c3379,3380
+<         DurableCompletionExternalPublicationConfirmationPolicy::ExternalExternalPublicationConfirmationRequired,
+<         DurableCompletionExternalPublicationConfirmationKind::ExternalExternalPublicationConfirmationUnavailable,
+---
+>         DurableCompletionExternalPublicationReceiptPolicy::ExternalExternalPublicationReceiptRequired,
+>         DurableCompletionExternalPublicationReceiptKind::ExternalExternalPublicationReceiptUnavailable,
+2991,2993c3382,3384
+<     let mut ledger = DurableCompletionExternalPublicationConfirmationLedger::new();
+<     let mut sink = ExternalExternalPublicationConfirmationSink::default();
+<     let outcome = evaluate_durable_completion_external_publication_confirmation(
+---
+>     let mut ledger = DurableCompletionExternalPublicationReceiptLedger::new();
+>     let mut sink = ExternalExternalPublicationReceiptSink::default();
+>     let outcome = evaluate_durable_completion_external_publication_receipt(
+3001c3392
+<         DurableCompletionExternalPublicationConfirmationOutcome::ExternalExternalPublicationConfirmationUnavailableNoConfirmation
+---
+>         DurableCompletionExternalPublicationReceiptOutcome::ExternalExternalPublicationReceiptUnavailableNoReceipt
+3011,3012c3402,3403
+<         DurableCompletionExternalPublicationConfirmationPolicy::MainNetExternalPublicationConfirmationRequired,
+<         DurableCompletionExternalPublicationConfirmationKind::MainNetExternalPublicationConfirmationUnavailable,
+---
+>         DurableCompletionExternalPublicationReceiptPolicy::MainNetExternalPublicationReceiptRequired,
+>         DurableCompletionExternalPublicationReceiptKind::MainNetExternalPublicationReceiptUnavailable,
+3015c3406
+<         DurableCompletionExternalPublicationConfirmationPolicy::MainNetExternalPublicationConfirmationRequired,
+---
+>         DurableCompletionExternalPublicationReceiptPolicy::MainNetExternalPublicationReceiptRequired,
+3024,3026c3415,3417
+<     let mut ledger = DurableCompletionExternalPublicationConfirmationLedger::new();
+<     let mut sink = MainNetExternalPublicationConfirmationSink::default();
+<     let outcome = evaluate_durable_completion_external_publication_confirmation(
+---
+>     let mut ledger = DurableCompletionExternalPublicationReceiptLedger::new();
+>     let mut sink = MainNetExternalPublicationReceiptSink::default();
+>     let outcome = evaluate_durable_completion_external_publication_receipt(
+3034c3425
+<         DurableCompletionExternalPublicationConfirmationOutcome::MainNetPeerDrivenApplyRefusedNoConfirmation
+---
+>         DurableCompletionExternalPublicationReceiptOutcome::MainNetPeerDrivenApplyRefusedNoReceipt
+3044c3435
+<         DurableCompletionExternalPublicationConfirmationPolicy::FixtureAllowed,
+---
+>         DurableCompletionExternalPublicationReceiptPolicy::FixtureAllowed,
+3055c3446
+<         DurableCompletionSettlementOutcomePublicationOutcome::ValidatorSetRotationUnsupportedNoOutcomePublication,
+---
+>         DurableCompletionExternalPublicationConfirmationOutcome::ValidatorSetRotationUnsupportedNoConfirmation,
+3057c3448
+<     let mut ledger = DurableCompletionExternalPublicationConfirmationLedger::new();
+---
+>     let mut ledger = DurableCompletionExternalPublicationReceiptLedger::new();
+3059c3450
+<     let outcome = evaluate_durable_completion_external_publication_confirmation(
+---
+>     let outcome = evaluate_durable_completion_external_publication_receipt(
+3067c3458
+<         DurableCompletionExternalPublicationConfirmationOutcome::ValidatorSetRotationUnsupportedNoConfirmation
+---
+>         DurableCompletionExternalPublicationReceiptOutcome::ValidatorSetRotationUnsupportedNoReceipt
+3072c3463
+<         DurableCompletionExternalPublicationConfirmationPolicy::FixtureAllowed,
+---
+>         DurableCompletionExternalPublicationReceiptPolicy::FixtureAllowed,
+3083c3474
+<         DurableCompletionSettlementOutcomePublicationOutcome::PolicyChangeUnsupportedNoOutcomePublication,
+---
+>         DurableCompletionExternalPublicationConfirmationOutcome::PolicyChangeUnsupportedNoConfirmation,
+3085c3476
+<     let outcome = evaluate_durable_completion_external_publication_confirmation(
+---
+>     let outcome = evaluate_durable_completion_external_publication_receipt(
+3093c3484
+<         DurableCompletionExternalPublicationConfirmationOutcome::PolicyChangeUnsupportedNoConfirmation
+---
+>         DurableCompletionExternalPublicationReceiptOutcome::PolicyChangeUnsupportedNoReceipt
+3104,3105c3495,3496
+<     settlement_outcome_publication: DurableCompletionSettlementOutcomePublicationOutcome,
+<     expected: DurableCompletionExternalPublicationConfirmationOutcome,
+---
+>     external_publication_confirmation: DurableCompletionExternalPublicationConfirmationOutcome,
+>     expected: DurableCompletionExternalPublicationReceiptOutcome,
+3109c3500
+<         DurableCompletionExternalPublicationConfirmationPolicy::FixtureAllowed,
+---
+>         DurableCompletionExternalPublicationReceiptPolicy::FixtureAllowed,
+3120c3511
+<         settlement_outcome_publication,
+---
+>         external_publication_confirmation,
+3122c3513
+<     let mut ledger = DurableCompletionExternalPublicationConfirmationLedger::new();
+---
+>     let mut ledger = DurableCompletionExternalPublicationReceiptLedger::new();
+3124c3515
+<     let outcome = evaluate_durable_completion_external_publication_confirmation(
+---
+>     let outcome = evaluate_durable_completion_external_publication_receipt(
+3137,3138c3528,3529
+<     use DurableCompletionSettlementOutcomePublicationOutcome as Finalization;
+<     use DurableCompletionExternalPublicationConfirmationOutcome as Confirmation;
+---
+>     use DurableCompletionExternalPublicationConfirmationOutcome as Finalization;
+>     use DurableCompletionExternalPublicationReceiptOutcome as Confirmation;
+3140,3141c3531,3532
+<         Finalization::LegacyBypassNoSettlementOutcomePublication,
+<         Confirmation::LegacyBypassNoExternalPublicationConfirmation,
+---
+>         Finalization::LegacyBypassNoExternalPublicationConfirmation,
+>         Confirmation::LegacyBypassNoExternalPublicationReceipt,
+3144,3145c3535,3536
+<         Finalization::RejectedBeforeSettlementOutcomeReportNoOutcomePublication,
+<         Confirmation::RejectedBeforeSettlementOutcomePublicationNoConfirmation,
+---
+>         Finalization::RejectedBeforeSettlementOutcomePublicationNoConfirmation,
+>         Confirmation::RejectedBeforeExternalPublicationConfirmationNoReceipt,
+3148,3149c3539,3540
+<         Finalization::SettlementOutcomeReportDidNotRecordNoOutcomePublication,
+<         Confirmation::SettlementOutcomePublicationDidNotRecordNoConfirmation,
+---
+>         Finalization::SettlementOutcomePublicationDidNotRecordNoConfirmation,
+>         Confirmation::ExternalPublicationConfirmationDidNotRecordNoReceipt,
+3152,3153c3543,3544
+<         Finalization::SettlementOutcomePublicationRejectedBeforeRecord,
+<         Confirmation::SettlementOutcomePublicationDidNotRecordNoConfirmation,
+---
+>         Finalization::ExternalPublicationConfirmationRejectedBeforeRecord,
+>         Confirmation::ExternalPublicationConfirmationDidNotRecordNoReceipt,
+3156,3157c3547,3548
+<         Finalization::SettlementOutcomePublicationRecordFailedNoOutcomePublication,
+<         Confirmation::SettlementOutcomePublicationDidNotRecordNoConfirmation,
+---
+>         Finalization::ExternalPublicationConfirmationRecordFailedNoConfirmation,
+>         Confirmation::ExternalPublicationConfirmationDidNotRecordNoReceipt,
+3160,3161c3551,3552
+<         Finalization::SettlementOutcomePublicationRolledBackNoOutcomePublication,
+<         Confirmation::SettlementOutcomePublicationDidNotRecordNoConfirmation,
+---
+>         Finalization::ExternalPublicationConfirmationRolledBackNoConfirmation,
+>         Confirmation::ExternalPublicationConfirmationDidNotRecordNoReceipt,
+3164,3165c3555,3556
+<         Finalization::SettlementOutcomePublicationRollbackFailedFatalNoOutcomePublication,
+<         Confirmation::SettlementOutcomePublicationDidNotRecordNoConfirmation,
+---
+>         Finalization::ExternalPublicationConfirmationRollbackFailedFatalNoConfirmation,
+>         Confirmation::ExternalPublicationConfirmationDidNotRecordNoReceipt,
+3168,3169c3559,3560
+<         Finalization::SettlementOutcomePublicationAmbiguousFailClosedNoOutcomePublication,
+<         Confirmation::SettlementOutcomePublicationDidNotRecordNoConfirmation,
+---
+>         Finalization::ExternalPublicationConfirmationAmbiguousFailClosedNoConfirmation,
+>         Confirmation::ExternalPublicationConfirmationDidNotRecordNoReceipt,
+3172,3173c3563,3564
+<         Finalization::ProductionSettlementOutcomePublicationUnavailableNoOutcomePublication,
+<         Confirmation::SettlementOutcomePublicationDidNotRecordNoConfirmation,
+---
+>         Finalization::ProductionExternalPublicationConfirmationUnavailableNoConfirmation,
+>         Confirmation::ExternalPublicationConfirmationDidNotRecordNoReceipt,
+3176,3177c3567,3568
+<         Finalization::MainNetSettlementOutcomePublicationUnavailableNoOutcomePublication,
+<         Confirmation::SettlementOutcomePublicationDidNotRecordNoConfirmation,
+---
+>         Finalization::MainNetExternalPublicationConfirmationUnavailableNoConfirmation,
+>         Confirmation::ExternalPublicationConfirmationDidNotRecordNoReceipt,
+3180,3181c3571,3572
+<         Finalization::ExternalSettlementOutcomePublicationUnavailableNoOutcomePublication,
+<         Confirmation::SettlementOutcomePublicationDidNotRecordNoConfirmation,
+---
+>         Finalization::ExternalExternalPublicationConfirmationUnavailableNoConfirmation,
+>         Confirmation::ExternalPublicationConfirmationDidNotRecordNoReceipt,
+3184,3185c3575,3576
+<         Finalization::MainNetPeerDrivenApplyRefusedNoOutcomePublication,
+<         Confirmation::MainNetPeerDrivenApplyRefusedNoConfirmation,
+---
+>         Finalization::MainNetPeerDrivenApplyRefusedNoConfirmation,
+>         Confirmation::MainNetPeerDrivenApplyRefusedNoReceipt,
+3188,3189c3579,3580
+<         Finalization::ValidatorSetRotationUnsupportedNoOutcomePublication,
+<         Confirmation::ValidatorSetRotationUnsupportedNoConfirmation,
+---
+>         Finalization::ValidatorSetRotationUnsupportedNoConfirmation,
+>         Confirmation::ValidatorSetRotationUnsupportedNoReceipt,
+3192,3193c3583,3584
+<         Finalization::PolicyChangeUnsupportedNoOutcomePublication,
+<         Confirmation::PolicyChangeUnsupportedNoConfirmation,
+---
+>         Finalization::PolicyChangeUnsupportedNoConfirmation,
+>         Confirmation::PolicyChangeUnsupportedNoReceipt,
+3205c3596
+<     let mut ledger = DurableCompletionExternalPublicationConfirmationLedger::new();
+---
+>     let mut ledger = DurableCompletionExternalPublicationReceiptLedger::new();
+3207c3598
+<     let outcome = evaluate_durable_completion_external_publication_confirmation(
+---
+>     let outcome = evaluate_durable_completion_external_publication_receipt(
+3215c3606
+<         DurableCompletionExternalPublicationConfirmationOutcome::RejectedBeforeSettlementOutcomePublicationNoConfirmation
+---
+>         DurableCompletionExternalPublicationReceiptOutcome::RejectedBeforeExternalPublicationConfirmationNoReceipt
+3256c3647
+<     mut mutate: impl FnMut(&mut DurableCompletionExternalPublicationConfirmationRequest),
+---
+>     mut mutate: impl FnMut(&mut DurableCompletionExternalPublicationReceiptRequest),
+3261c3652
+<     let mut ledger = DurableCompletionExternalPublicationConfirmationLedger::new();
+---
+>     let mut ledger = DurableCompletionExternalPublicationReceiptLedger::new();
+3263c3654
+<     let outcome = evaluate_durable_completion_external_publication_confirmation(
+---
+>     let outcome = evaluate_durable_completion_external_publication_receipt(
+3271c3662
+<         DurableCompletionExternalPublicationConfirmationOutcome::ExternalPublicationConfirmationRejectedBeforeRecord
+---
+>         DurableCompletionExternalPublicationReceiptOutcome::ExternalPublicationReceiptRejectedBeforeRecord
+3278c3669
+< fn wrong_confirmation_record_id_rejected_before_record() {
+---
+> fn wrong_external_publication_receipt_record_id_rejected_before_record() {
+3280c3671
+<         r.confirmation_record_id = "other-outcome_publication".to_string();
+---
+>         r.external_publication_receipt_record_id = "other-outcome_publication".to_string();
+3382c3773
+<         r.identity.outcome_publication_id = "other-receipt-id".to_string();
+---
+>         r.identity.confirmation_id = "other-receipt-id".to_string();
+3425c3816
+<             DurableCompletionExternalPublicationConfirmationPolicy::ProductionExternalPublicationConfirmationRequired;
+---
+>             DurableCompletionExternalPublicationReceiptPolicy::ProductionExternalPublicationReceiptRequired;
+3432c3823
+<             DurableCompletionExternalPublicationConfirmationKind::ProductionExternalPublicationConfirmationUnavailable;
+---
+>             DurableCompletionExternalPublicationReceiptKind::ProductionExternalPublicationReceiptUnavailable;
+3450c3841
+<     let mut ledger = DurableCompletionExternalPublicationConfirmationLedger::new();
+---
+>     let mut ledger = DurableCompletionExternalPublicationReceiptLedger::new();
+3453c3844
+<     let first = evaluate_durable_completion_external_publication_confirmation(
+---
+>     let first = evaluate_durable_completion_external_publication_receipt(
+3461c3852
+<         DurableCompletionExternalPublicationConfirmationOutcome::ExternalPublicationConfirmationRecorded
+---
+>         DurableCompletionExternalPublicationReceiptOutcome::ExternalPublicationReceiptRecorded
+3470c3861
+<     let equivocation = evaluate_durable_completion_external_publication_confirmation(
+---
+>     let equivocation = evaluate_durable_completion_external_publication_receipt(
+3478c3869
+<         DurableCompletionExternalPublicationConfirmationOutcome::ExternalPublicationConfirmationRejectedBeforeRecord
+---
+>         DurableCompletionExternalPublicationReceiptOutcome::ExternalPublicationReceiptRejectedBeforeRecord
+3490,3491c3881,3882
+<         DurableCompletionExternalPublicationConfirmationPolicy::FixtureAllowed,
+<         DurableCompletionExternalPublicationConfirmationKind::FixtureInMemory,
+---
+>         DurableCompletionExternalPublicationReceiptPolicy::FixtureAllowed,
+>         DurableCompletionExternalPublicationReceiptKind::FixtureInMemory,
+3493c3884
+<     let mut ledger = DurableCompletionExternalPublicationConfirmationLedger::new();
+---
+>     let mut ledger = DurableCompletionExternalPublicationReceiptLedger::new();
+3495c3886
+<     let outcome = evaluate_durable_completion_external_publication_confirmation(
+---
+>     let outcome = evaluate_durable_completion_external_publication_receipt(
+3503c3894
+<         DurableCompletionExternalPublicationConfirmationOutcome::ExternalPublicationConfirmationRejectedBeforeRecord
+---
+>         DurableCompletionExternalPublicationReceiptOutcome::ExternalPublicationReceiptRejectedBeforeRecord
+3514,3515c3905,3906
+<     fault: DurableCompletionExternalPublicationConfirmationFault,
+<     expected: DurableCompletionExternalPublicationConfirmationOutcome,
+---
+>     fault: DurableCompletionExternalPublicationReceiptFault,
+>     expected: DurableCompletionExternalPublicationReceiptOutcome,
+3519,3521c3910,3912
+<     let mut ledger = DurableCompletionExternalPublicationConfirmationLedger::new();
+<     let mut sink = FixtureDurableCompletionExternalPublicationConfirmationSink::with_fault(fault);
+<     let outcome = evaluate_durable_completion_external_publication_confirmation(
+---
+>     let mut ledger = DurableCompletionExternalPublicationReceiptLedger::new();
+>     let mut sink = FixtureDurableCompletionExternalPublicationReceiptSink::with_fault(fault);
+>     let outcome = evaluate_durable_completion_external_publication_receipt(
+3535,3536c3926,3927
+<         DurableCompletionExternalPublicationConfirmationFault::RecordFailedNoOutcomePublication,
+<         DurableCompletionExternalPublicationConfirmationOutcome::ExternalPublicationConfirmationRecordFailedNoConfirmation,
+---
+>         DurableCompletionExternalPublicationReceiptFault::RecordFailedNoConfirmation,
+>         DurableCompletionExternalPublicationReceiptOutcome::ExternalPublicationReceiptRecordFailedNoReceipt,
+3542,3543c3933,3934
+<         DurableCompletionExternalPublicationConfirmationFault::RolledBackNoOutcomePublication,
+<         DurableCompletionExternalPublicationConfirmationOutcome::ExternalPublicationConfirmationRolledBackNoConfirmation,
+---
+>         DurableCompletionExternalPublicationReceiptFault::RolledBackNoConfirmation,
+>         DurableCompletionExternalPublicationReceiptOutcome::ExternalPublicationReceiptRolledBackNoReceipt,
+3549,3550c3940,3941
+<         DurableCompletionExternalPublicationConfirmationFault::RollbackFailedFatal,
+<         DurableCompletionExternalPublicationConfirmationOutcome::ExternalPublicationConfirmationRollbackFailedFatalNoConfirmation,
+---
+>         DurableCompletionExternalPublicationReceiptFault::RollbackFailedFatal,
+>         DurableCompletionExternalPublicationReceiptOutcome::ExternalPublicationReceiptRollbackFailedFatalNoReceipt,
+3556,3557c3947,3948
+<         DurableCompletionExternalPublicationConfirmationFault::AmbiguousAfterRecord,
+<         DurableCompletionExternalPublicationConfirmationOutcome::ExternalPublicationConfirmationAmbiguousFailClosedNoConfirmation,
+---
+>         DurableCompletionExternalPublicationReceiptFault::AmbiguousAfterRecord,
+>         DurableCompletionExternalPublicationReceiptOutcome::ExternalPublicationReceiptAmbiguousFailClosedNoReceipt,
+3565,3567c3956,3958
+< fn only_recorded_outcome_publication_outcome_creates_external_publication_confirmation_request_intent() {
+<     use DurableCompletionSettlementOutcomePublicationOutcome as Finalization;
+<     use DurableCompletionExternalPublicationConfirmationRequestIntent as Intent;
+---
+> fn only_recorded_outcome_publication_outcome_creates_external_publication_receipt_request_intent() {
+>     use DurableCompletionExternalPublicationConfirmationOutcome as Finalization;
+>     use DurableCompletionExternalPublicationReceiptRequestIntent as Intent;
+3569,3570c3960,3961
+<         project_settlement_outcome_publication_outcome_to_external_publication_confirmation_request(
+<             &Finalization::SettlementOutcomePublicationRecorded
+---
+>         project_external_publication_confirmation_outcome_to_external_publication_receipt_request(
+>             &Finalization::ExternalPublicationConfirmationRecorded
+3574,3577c3965,3970
+<     assert!(project_settlement_outcome_publication_outcome_to_external_publication_confirmation_request(
+<         &Finalization::SettlementOutcomePublicationRecorded
+<     )
+<     .creates_request());
+---
+>     assert!(
+>         project_external_publication_confirmation_outcome_to_external_publication_receipt_request(
+>             &Finalization::ExternalPublicationConfirmationRecorded
+>         )
+>         .creates_request()
+>     );
+3579,3580c3972,3973
+<         project_settlement_outcome_publication_outcome_to_external_publication_confirmation_request(
+<             &Finalization::SettlementOutcomePublicationDuplicateIdempotent
+---
+>         project_external_publication_confirmation_outcome_to_external_publication_receipt_request(
+>             &Finalization::ExternalPublicationConfirmationDuplicateIdempotent
+3584,3587c3977,3982
+<     assert!(!project_settlement_outcome_publication_outcome_to_external_publication_confirmation_request(
+<         &Finalization::LegacyBypassNoSettlementOutcomePublication
+<     )
+<     .creates_request());
+---
+>     assert!(
+>         !project_external_publication_confirmation_outcome_to_external_publication_receipt_request(
+>             &Finalization::LegacyBypassNoExternalPublicationConfirmation
+>         )
+>         .creates_request()
+>     );
+3590,3592c3985,3987
+< fn non_recording_outcome_publication_outcomes_create_no_external_publication_confirmation_request() {
+<     use DurableCompletionSettlementOutcomePublicationOutcome as Finalization;
+<     use DurableCompletionExternalPublicationConfirmationRequestIntent as Intent;
+---
+> fn non_recording_outcome_publication_outcomes_create_no_external_publication_receipt_request() {
+>     use DurableCompletionExternalPublicationConfirmationOutcome as Finalization;
+>     use DurableCompletionExternalPublicationReceiptRequestIntent as Intent;
+3594,3599c3989,3994
+<         Finalization::LegacyBypassNoSettlementOutcomePublication,
+<         Finalization::RejectedBeforeSettlementOutcomeReportNoOutcomePublication,
+<         Finalization::SettlementOutcomeReportDidNotRecordNoOutcomePublication,
+<         Finalization::SettlementOutcomePublicationRejectedBeforeRecord,
+<         Finalization::SettlementOutcomePublicationRecordFailedNoOutcomePublication,
+<         Finalization::ProductionSettlementOutcomePublicationUnavailableNoOutcomePublication,
+---
+>         Finalization::LegacyBypassNoExternalPublicationConfirmation,
+>         Finalization::RejectedBeforeSettlementOutcomePublicationNoConfirmation,
+>         Finalization::SettlementOutcomePublicationDidNotRecordNoConfirmation,
+>         Finalization::ExternalPublicationConfirmationRejectedBeforeRecord,
+>         Finalization::ExternalPublicationConfirmationRecordFailedNoConfirmation,
+>         Finalization::ProductionExternalPublicationConfirmationUnavailableNoConfirmation,
+3602,3603c3997,3998
+<             project_settlement_outcome_publication_outcome_to_external_publication_confirmation_request(&outcome_publication),
+<             Intent::NoOutcomePublication(_)
+---
+>             project_external_publication_confirmation_outcome_to_external_publication_receipt_request(&outcome_publication),
+>             Intent::NoConfirmation(_)
+3612c4007
+< fn recovered_ledger() -> DurableCompletionExternalPublicationConfirmationLedger {
+---
+> fn recovered_ledger() -> DurableCompletionExternalPublicationReceiptLedger {
+3614c4009
+<     let mut ledger = DurableCompletionExternalPublicationConfirmationLedger::new();
+---
+>     let mut ledger = DurableCompletionExternalPublicationReceiptLedger::new();
+3616c4011
+<     let _ = evaluate_durable_completion_external_publication_confirmation(
+---
+>     let _ = evaluate_durable_completion_external_publication_receipt(
+3626c4021
+<     window: DurableCompletionExternalPublicationConfirmationWindow,
+---
+>     window: DurableCompletionExternalPublicationReceiptWindow,
+3628c4023
+<     expected: DurableCompletionExternalPublicationConfirmationOutcome,
+---
+>     expected: DurableCompletionExternalPublicationReceiptOutcome,
+3634c4029
+<         ledger.find(CONFIRMATION_RECORD_ID)
+---
+>         ledger.find(RECEIPT_RECORD_ID)
+3638c4033
+<     let outcome = recover_durable_completion_external_publication_confirmation_window(
+---
+>     let outcome = recover_durable_completion_external_publication_receipt_window(
+3641c4036
+<         DurableCompletionExternalPublicationConfirmationKind::FixtureInMemory,
+---
+>         DurableCompletionExternalPublicationReceiptKind::FixtureInMemory,
+3648,3650c4043,4045
+< fn pre_settlement_outcome_publication_windows_fail_closed_no_commitment() {
+<     use DurableCompletionExternalPublicationConfirmationOutcome as Finalization;
+<     use DurableCompletionExternalPublicationConfirmationWindow as Window;
+---
+> fn pre_external_publication_confirmation_windows_fail_closed_no_commitment() {
+>     use DurableCompletionExternalPublicationReceiptOutcome as Finalization;
+>     use DurableCompletionExternalPublicationReceiptWindow as Window;
+3655,3659c4050,4054
+<         Window::AfterSinkReceiptRecordBeforeReportIntent,
+<         Window::AfterReportIntentBeforeReportRecord,
+<         Window::AfterReportRecordBeforeConfirmationIntent,
+<         Window::AfterConfirmationIntentBeforeConfirmationRecord,
+<         Window::AfterConfirmationRecordBeforeAttestationIntent,
+---
+>         Window::AfterSinkReceiptRecordBeforePublicationIntent,
+>         Window::AfterPublicationIntentBeforePublicationRecord,
+>         Window::AfterPublicationRecordBeforeReceiptIntent,
+>         Window::AfterReceiptIntentBeforeReceiptRecord,
+>         Window::AfterReceiptRecordBeforeAttestationIntent,
+3673,3676c4068,4071
+<         Window::AfterConsumerSuccessBeforeSettlementOutcomePublicationRequest,
+<         Window::AfterSettlementOutcomePublicationRequestBeforeSettlementOutcomePublicationRecord,
+<         Window::AfterSettlementOutcomePublicationRecordBeforeSettlementOutcomePublicationSuccess,
+<         Window::AfterSettlementOutcomePublicationSuccessBeforeExternalPublicationConfirmationRequest,
+---
+>         Window::AfterConsumerSuccessBeforeExternalPublicationConfirmationRequest,
+>         Window::AfterExternalPublicationConfirmationRequestBeforeExternalPublicationConfirmationRecord,
+>         Window::AfterExternalPublicationConfirmationRecordBeforeExternalPublicationConfirmationSuccess,
+>         Window::AfterExternalPublicationConfirmationSuccessBeforeExternalPublicationReceiptRequest,
+3681c4076
+<             Finalization::SettlementOutcomePublicationDidNotRecordNoConfirmation,
+---
+>             Finalization::ExternalPublicationConfirmationDidNotRecordNoReceipt,
+3686,3688c4081,4083
+< fn after_settlement_outcome_publication_request_before_record_rejects_before_record() {
+<     use DurableCompletionExternalPublicationConfirmationOutcome as Finalization;
+<     use DurableCompletionExternalPublicationConfirmationWindow as Window;
+---
+> fn after_external_publication_confirmation_request_before_record_rejects_before_record() {
+>     use DurableCompletionExternalPublicationReceiptOutcome as Finalization;
+>     use DurableCompletionExternalPublicationReceiptWindow as Window;
+3690c4085
+<         Window::AfterExternalPublicationConfirmationRequestBeforeExternalPublicationConfirmationRecord,
+---
+>         Window::AfterExternalPublicationReceiptRequestBeforeExternalPublicationReceiptRecord,
+3692c4087
+<         Finalization::ExternalPublicationConfirmationRejectedBeforeRecord,
+---
+>         Finalization::ExternalPublicationReceiptRejectedBeforeRecord,
+3696,3698c4091,4094
+< fn after_settlement_outcome_publication_record_before_success_requires_explicit_matching_record() {
+<     use DurableCompletionExternalPublicationConfirmationOutcome as Finalization;
+<     use DurableCompletionExternalPublicationConfirmationWindow as Window;
+---
+> fn after_external_publication_confirmation_record_before_success_requires_explicit_matching_record()
+> {
+>     use DurableCompletionExternalPublicationReceiptOutcome as Finalization;
+>     use DurableCompletionExternalPublicationReceiptWindow as Window;
+3700c4096
+<         Window::AfterExternalPublicationConfirmationRecordBeforeExternalPublicationConfirmationSuccess,
+---
+>         Window::AfterExternalPublicationReceiptRecordBeforeExternalPublicationReceiptSuccess,
+3702c4098
+<         Finalization::ExternalPublicationConfirmationRejectedBeforeRecord,
+---
+>         Finalization::ExternalPublicationReceiptRejectedBeforeRecord,
+3705c4101
+<         Window::AfterExternalPublicationConfirmationRecordBeforeExternalPublicationConfirmationSuccess,
+---
+>         Window::AfterExternalPublicationReceiptRecordBeforeExternalPublicationReceiptSuccess,
+3707c4103
+<         Finalization::ExternalPublicationConfirmationRecorded,
+---
+>         Finalization::ExternalPublicationReceiptRecorded,
+3711,3713c4107,4109
+< fn after_settlement_outcome_publication_success_recovers_as_recorded() {
+<     use DurableCompletionExternalPublicationConfirmationOutcome as Finalization;
+<     use DurableCompletionExternalPublicationConfirmationWindow as Window;
+---
+> fn after_external_publication_confirmation_success_recovers_as_recorded() {
+>     use DurableCompletionExternalPublicationReceiptOutcome as Finalization;
+>     use DurableCompletionExternalPublicationReceiptWindow as Window;
+3715c4111
+<         Window::AfterExternalPublicationConfirmationSuccess,
+---
+>         Window::AfterExternalPublicationReceiptSuccess,
+3717c4113
+<         Finalization::ExternalPublicationConfirmationRecorded,
+---
+>         Finalization::ExternalPublicationReceiptRecorded,
+3721c4117
+<         Window::AfterExternalPublicationConfirmationSuccess,
+---
+>         Window::AfterExternalPublicationReceiptSuccess,
+3723c4119
+<         Finalization::ExternalPublicationConfirmationRejectedBeforeRecord,
+---
+>         Finalization::ExternalPublicationReceiptRejectedBeforeRecord,
+3728,3729c4124,4125
+<     use DurableCompletionExternalPublicationConfirmationOutcome as Finalization;
+<     use DurableCompletionExternalPublicationConfirmationWindow as Window;
+---
+>     use DurableCompletionExternalPublicationReceiptOutcome as Finalization;
+>     use DurableCompletionExternalPublicationReceiptWindow as Window;
+3731c4127
+<         Window::AfterExternalPublicationConfirmationAmbiguous,
+---
+>         Window::AfterExternalPublicationReceiptAmbiguous,
+3733c4129
+<         Finalization::ExternalPublicationConfirmationAmbiguousFailClosedNoConfirmation,
+---
+>         Finalization::ExternalPublicationReceiptAmbiguousFailClosedNoReceipt,
+3738c4134
+<         Finalization::ExternalPublicationConfirmationAmbiguousFailClosedNoConfirmation,
+---
+>         Finalization::ExternalPublicationReceiptAmbiguousFailClosedNoReceipt,
+3741c4137
+<         Window::ExternalPublicationConfirmationRecordFailed,
+---
+>         Window::ExternalPublicationReceiptRecordFailed,
+3743c4139
+<         Finalization::ExternalPublicationConfirmationRecordFailedNoConfirmation,
+---
+>         Finalization::ExternalPublicationReceiptRecordFailedNoReceipt,
+3746c4142
+<         Window::ExternalPublicationConfirmationRollbackCompleted,
+---
+>         Window::ExternalPublicationReceiptRollbackCompleted,
+3748c4144
+<         Finalization::ExternalPublicationConfirmationRolledBackNoConfirmation,
+---
+>         Finalization::ExternalPublicationReceiptRolledBackNoReceipt,
+3751c4147
+<         Window::ExternalPublicationConfirmationRollbackFailed,
+---
+>         Window::ExternalPublicationReceiptRollbackFailed,
+3753c4149
+<         Finalization::ExternalPublicationConfirmationRollbackFailedFatalNoConfirmation,
+---
+>         Finalization::ExternalPublicationReceiptRollbackFailedFatalNoReceipt,
+3760c4156
+<     let outcome = recover_durable_completion_external_publication_confirmation_window(
+---
+>     let outcome = recover_durable_completion_external_publication_receipt_window(
+3762,3763c4158,4159
+<         DurableCompletionExternalPublicationConfirmationWindow::AfterExternalPublicationConfirmationSuccess,
+<         DurableCompletionExternalPublicationConfirmationKind::ProductionExternalPublicationConfirmationUnavailable,
+---
+>         DurableCompletionExternalPublicationReceiptWindow::AfterExternalPublicationReceiptSuccess,
+>         DurableCompletionExternalPublicationReceiptKind::ProductionExternalPublicationReceiptUnavailable,
+3769c4165
+<         DurableCompletionExternalPublicationConfirmationOutcome::ProductionExternalPublicationConfirmationUnavailableNoConfirmation
+---
+>         DurableCompletionExternalPublicationReceiptOutcome::ProductionExternalPublicationReceiptUnavailableNoReceipt
+3771c4167
+<     let outcome = recover_durable_completion_external_publication_confirmation_window(
+---
+>     let outcome = recover_durable_completion_external_publication_receipt_window(
+3773,3774c4169,4170
+<         DurableCompletionExternalPublicationConfirmationWindow::AfterExternalPublicationConfirmationSuccess,
+<         DurableCompletionExternalPublicationConfirmationKind::MainNetExternalPublicationConfirmationUnavailable,
+---
+>         DurableCompletionExternalPublicationReceiptWindow::AfterExternalPublicationReceiptSuccess,
+>         DurableCompletionExternalPublicationReceiptKind::MainNetExternalPublicationReceiptUnavailable,
+3780c4176
+<         DurableCompletionExternalPublicationConfirmationOutcome::MainNetExternalPublicationConfirmationUnavailableNoConfirmation
+---
+>         DurableCompletionExternalPublicationReceiptOutcome::MainNetExternalPublicationReceiptUnavailableNoReceipt
+3782c4178
+<     let outcome = recover_durable_completion_external_publication_confirmation_window(
+---
+>     let outcome = recover_durable_completion_external_publication_receipt_window(
+3784,3785c4180,4181
+<         DurableCompletionExternalPublicationConfirmationWindow::AfterExternalPublicationConfirmationSuccess,
+<         DurableCompletionExternalPublicationConfirmationKind::ExternalExternalPublicationConfirmationUnavailable,
+---
+>         DurableCompletionExternalPublicationReceiptWindow::AfterExternalPublicationReceiptSuccess,
+>         DurableCompletionExternalPublicationReceiptKind::ExternalExternalPublicationReceiptUnavailable,
+3791c4187
+<         DurableCompletionExternalPublicationConfirmationOutcome::ExternalExternalPublicationConfirmationUnavailableNoConfirmation
+---
+>         DurableCompletionExternalPublicationReceiptOutcome::ExternalExternalPublicationReceiptUnavailableNoReceipt
+3800,3801c4196,4197
+<         DurableCompletionExternalPublicationConfirmationPolicy::MainNetExternalPublicationConfirmationRequired,
+<         DurableCompletionExternalPublicationConfirmationKind::MainNetExternalPublicationConfirmationUnavailable,
+---
+>         DurableCompletionExternalPublicationReceiptPolicy::MainNetExternalPublicationReceiptRequired,
+>         DurableCompletionExternalPublicationReceiptKind::MainNetExternalPublicationReceiptUnavailable,
+3804c4200
+<         DurableCompletionExternalPublicationConfirmationPolicy::MainNetExternalPublicationConfirmationRequired,
+---
+>         DurableCompletionExternalPublicationReceiptPolicy::MainNetExternalPublicationReceiptRequired,
+3813c4209
+<     let outcome = recover_durable_completion_external_publication_confirmation_window(
+---
+>     let outcome = recover_durable_completion_external_publication_receipt_window(
+3815,3816c4211,4212
+<         DurableCompletionExternalPublicationConfirmationWindow::AfterExternalPublicationConfirmationSuccess,
+<         DurableCompletionExternalPublicationConfirmationKind::MainNetExternalPublicationConfirmationUnavailable,
+---
+>         DurableCompletionExternalPublicationReceiptWindow::AfterExternalPublicationReceiptSuccess,
+>         DurableCompletionExternalPublicationReceiptKind::MainNetExternalPublicationReceiptUnavailable,
+3822c4218
+<         DurableCompletionExternalPublicationConfirmationOutcome::MainNetPeerDrivenApplyRefusedNoConfirmation
+---
+>         DurableCompletionExternalPublicationReceiptOutcome::MainNetPeerDrivenApplyRefusedNoReceipt
+3832c4228
+<     let mut ledger = DurableCompletionExternalPublicationConfirmationLedger::new();
+---
+>     let mut ledger = DurableCompletionExternalPublicationReceiptLedger::new();
+3834c4230
+<     let _ = evaluate_durable_completion_external_publication_confirmation(
+---
+>     let _ = evaluate_durable_completion_external_publication_receipt(
+3851,3852c4247,4248
+<         DurableCompletionExternalPublicationConfirmationPolicy::FixtureAllowed,
+<         DurableCompletionExternalPublicationConfirmationKind::FixtureInMemory,
+---
+>         DurableCompletionExternalPublicationReceiptPolicy::FixtureAllowed,
+>         DurableCompletionExternalPublicationReceiptKind::FixtureInMemory,
+3856,3857c4252,4253
+<     let mut faulted = FixtureDurableCompletionExternalPublicationConfirmationSink::with_fault(
+<         DurableCompletionExternalPublicationConfirmationFault::RolledBackNoOutcomePublication,
+---
+>     let mut faulted = FixtureDurableCompletionExternalPublicationReceiptSink::with_fault(
+>         DurableCompletionExternalPublicationReceiptFault::RolledBackNoConfirmation,
+3859c4255
+<     let outcome = evaluate_durable_completion_external_publication_confirmation(
+---
+>     let outcome = evaluate_durable_completion_external_publication_receipt(
+3867c4263
+<         DurableCompletionExternalPublicationConfirmationOutcome::ExternalPublicationConfirmationRolledBackNoConfirmation
+---
+>         DurableCompletionExternalPublicationReceiptOutcome::ExternalPublicationReceiptRolledBackNoReceipt
+3870c4266
+<     assert!(!ledger.contains(&action.confirmation_record_id));
+---
+>     assert!(!ledger.contains(&action.external_publication_receipt_record_id));
+3878,3895c4274,4277
+<     assert!(durable_completion_external_publication_confirmation_rejection_is_non_mutating());
+<     assert!(durable_completion_external_publication_confirmation_never_calls_run_070());
+<     assert!(durable_completion_external_publication_confirmation_never_mutates_live_pqc_trust_state());
+<     assert!(durable_completion_external_publication_confirmation_never_writes_sequence_or_marker());
+<     assert!(durable_completion_external_publication_confirmation_no_rocksdb_file_schema_migration_change());
+<     assert!(durable_completion_external_publication_confirmation_no_external_publication());
+<     assert!(durable_completion_external_publication_confirmation_no_real_audit_ledger());
+<     assert!(durable_completion_external_publication_confirmation_pipeline_success_required());
+<     assert!(durable_completion_external_publication_confirmation_sink_receipt_required());
+<     assert!(durable_completion_external_publication_confirmation_completion_report_required());
+<     assert!(durable_completion_external_publication_confirmation_finalization_projection_required());
+<     assert!(durable_completion_external_publication_confirmation_attestation_required());
+<     assert!(durable_completion_external_publication_confirmation_backend_submission_required());
+<     assert!(durable_completion_external_publication_confirmation_receipt_required());
+<     assert!(durable_completion_external_publication_confirmation_record_required_before_reported());
+<     assert!(durable_completion_external_publication_confirmation_failed_record_never_records());
+<     assert!(durable_completion_external_publication_confirmation_rollback_never_records());
+<     assert!(durable_completion_external_publication_confirmation_ambiguous_window_fails_closed());
+---
+>     assert!(durable_completion_external_publication_receipt_rejection_is_non_mutating());
+>     assert!(durable_completion_external_publication_receipt_never_calls_run_070());
+>     assert!(durable_completion_external_publication_receipt_never_mutates_live_pqc_trust_state());
+>     assert!(durable_completion_external_publication_receipt_never_writes_sequence_or_marker());
+3897c4279,4295
+<         durable_completion_external_publication_confirmation_mainnet_peer_driven_apply_refused_first(
+---
+>         durable_completion_external_publication_receipt_no_rocksdb_file_schema_migration_change()
+>     );
+>     assert!(durable_completion_external_publication_receipt_no_external_publication());
+>     assert!(durable_completion_external_publication_receipt_no_real_audit_ledger());
+>     assert!(durable_completion_external_publication_receipt_pipeline_success_required());
+>     assert!(durable_completion_external_publication_receipt_sink_receipt_required());
+>     assert!(durable_completion_external_publication_receipt_completion_report_required());
+>     assert!(durable_completion_external_publication_receipt_finalization_projection_required());
+>     assert!(durable_completion_external_publication_receipt_attestation_required());
+>     assert!(durable_completion_external_publication_receipt_backend_submission_required());
+>     assert!(durable_completion_external_publication_receipt_receipt_required());
+>     assert!(durable_completion_external_publication_receipt_record_required_before_reported());
+>     assert!(durable_completion_external_publication_receipt_failed_record_never_records());
+>     assert!(durable_completion_external_publication_receipt_rollback_never_records());
+>     assert!(durable_completion_external_publication_receipt_ambiguous_window_fails_closed());
+>     assert!(
+>         durable_completion_external_publication_receipt_mainnet_peer_driven_apply_refused_first(
+3902c4300
+<         !durable_completion_external_publication_confirmation_mainnet_peer_driven_apply_refused_first(
+---
+>         !durable_completion_external_publication_receipt_mainnet_peer_driven_apply_refused_first(
+3906,3909c4304,4307
+<     assert!(durable_completion_external_publication_confirmation_production_mainnet_unavailable());
+<     assert!(durable_completion_external_publication_confirmation_external_unavailable());
+<     assert!(durable_completion_external_publication_confirmation_validator_set_rotation_unsupported());
+<     assert!(durable_completion_external_publication_confirmation_policy_change_unsupported());
+---
+>     assert!(durable_completion_external_publication_receipt_production_mainnet_unavailable());
+>     assert!(durable_completion_external_publication_receipt_external_unavailable());
+>     assert!(durable_completion_external_publication_receipt_validator_set_rotation_unsupported());
+>     assert!(durable_completion_external_publication_receipt_policy_change_unsupported());
+3911c4309
+<         durable_completion_external_publication_confirmation_local_operator_cannot_satisfy_mainnet_authority()
+---
+>         durable_completion_external_publication_receipt_local_operator_cannot_satisfy_mainnet_authority()
+3914c4312
+<         durable_completion_external_publication_confirmation_peer_majority_cannot_satisfy_mainnet_authority()
+---
+>         durable_completion_external_publication_receipt_peer_majority_cannot_satisfy_mainnet_authority()
+3919c4317
+<     let input: DurableCompletionExternalPublicationConfirmationInput = c.recorded();
+---
+>     let input: DurableCompletionExternalPublicationReceiptInput = c.recorded();
+3921,3923c4319,4322
+<     let intent = project_settlement_outcome_publication_outcome_to_external_publication_confirmation_request(
+<         &input.settlement_outcome_publication_binding,
+<     );
+---
+>     let intent =
+>         project_external_publication_confirmation_outcome_to_external_publication_receipt_request(
+>             &input.external_publication_confirmation_binding,
+>         );
+3927c4326
+<         DurableCompletionExternalPublicationConfirmationRequestIntent::CreateRequest
+---
+>         DurableCompletionExternalPublicationReceiptRequestIntent::CreateRequest
+3930,3932c4329,4331
+<     let mut ledger = DurableCompletionExternalPublicationConfirmationLedger::new();
+<     let mut sink = FixtureDurableCompletionExternalPublicationConfirmationSink::new();
+<     let outcome = evaluate_durable_completion_external_publication_confirmation(
+---
+>     let mut ledger = DurableCompletionExternalPublicationReceiptLedger::new();
+>     let mut sink = FixtureDurableCompletionExternalPublicationReceiptSink::new();
+>     let outcome = evaluate_durable_completion_external_publication_receipt(
+3940c4339
+<         DurableCompletionExternalPublicationConfirmationOutcome::ExternalPublicationConfirmationRecorded
+---
+>         DurableCompletionExternalPublicationReceiptOutcome::ExternalPublicationReceiptRecorded
+3942,3943c4341,4346
+<     assert!(external_publication_confirmation_outcome_authorizes_record(&outcome));
+<     assert!(external_publication_confirmation_outcome_projects_to_recorded(&outcome));
+---
+>     assert!(external_publication_receipt_outcome_authorizes_record(
+>         &outcome
+>     ));
+>     assert!(external_publication_receipt_outcome_projects_to_recorded(
+>         &outcome
+>     ));
+3947c4350
+<     assert_eq!(outcome.tag(), "external-publication-confirmation-recorded");
+---
+>     assert_eq!(outcome.tag(), "external-publication-receipt-recorded");
+3950c4353
+<         DurableCompletionExternalPublicationConfirmationKind::FixtureInMemory
+---
+>         DurableCompletionExternalPublicationReceiptKind::FixtureInMemory
+3954,3959c4357,4365
+<     let identity_digest: DurableCompletionExternalPublicationConfirmationDigest =
+<         external_publication_confirmation_identity_digest(&c.request.identity);
+<     let request_digest: DurableCompletionExternalPublicationConfirmationDigest =
+<         external_publication_confirmation_request_digest(&c.request);
+<     let response = DurableCompletionExternalPublicationConfirmationResponse {
+<         confirmation_record_id: c.request.confirmation_record_id.clone(),
+---
+>     let identity_digest: DurableCompletionExternalPublicationReceiptDigest =
+>         external_publication_receipt_identity_digest(&c.request.identity);
+>     let request_digest: DurableCompletionExternalPublicationReceiptDigest =
+>         external_publication_receipt_request_digest(&c.request);
+>     let response = DurableCompletionExternalPublicationReceiptResponse {
+>         external_publication_receipt_record_id: c
+>             .request
+>             .external_publication_receipt_record_id
+>             .clone(),
+3962c4368,4369
+<         confirmation_kind: DurableCompletionExternalPublicationConfirmationKind::FixtureInMemory,
+---
+>         external_publication_receipt_kind:
+>             DurableCompletionExternalPublicationReceiptKind::FixtureInMemory,
+3965,3971c4372,4382
+<     let response_digest: DurableCompletionExternalPublicationConfirmationDigest =
+<         external_publication_confirmation_response_digest(&response);
+<     let record: DurableCompletionExternalPublicationConfirmationRecord = c.request.to_record();
+<     let record_digest: DurableCompletionExternalPublicationConfirmationDigest =
+<         external_publication_confirmation_record_digest(&record);
+<     let transcript_digest: DurableCompletionExternalPublicationConfirmationTranscriptDigest =
+<         external_publication_confirmation_transcript_digest(&request_digest, &response_digest, &record_digest);
+---
+>     let response_digest: DurableCompletionExternalPublicationReceiptDigest =
+>         external_publication_receipt_response_digest(&response);
+>     let record: DurableCompletionExternalPublicationReceiptRecord = c.request.to_record();
+>     let record_digest: DurableCompletionExternalPublicationReceiptDigest =
+>         external_publication_receipt_record_digest(&record);
+>     let transcript_digest: DurableCompletionExternalPublicationReceiptTranscriptDigest =
+>         external_publication_receipt_transcript_digest(
+>             &request_digest,
+>             &response_digest,
+>             &record_digest,
+>         );
+3975,3977c4386,4388
+<     let ledger_record: &DurableCompletionExternalPublicationConfirmationLedgerRecord = ledger
+<         .find(CONFIRMATION_RECORD_ID)
+<         .expect("external-publication-confirmation ledger record");
+---
+>     let ledger_record: &DurableCompletionExternalPublicationReceiptLedgerRecord = ledger
+>         .find(RECEIPT_RECORD_ID)
+>         .expect("external-publication-receipt ledger record");
+3980c4391
+<         DurableCompletionExternalPublicationConfirmationLedgerStatus::Recorded
+---
+>         DurableCompletionExternalPublicationReceiptLedgerStatus::Recorded
+3982c4393
+<     let snapshot: DurableCompletionExternalPublicationConfirmationLedgerSnapshot = ledger.snapshot();
+---
+>     let snapshot: DurableCompletionExternalPublicationReceiptLedgerSnapshot = ledger.snapshot();
+3985,3986c4396,4397
+<     let _surface: DurableCompletionExternalPublicationConfirmationSurface = input.surface();
+<     let _environment: DurableCompletionExternalPublicationConfirmationEnvironment =
+---
+>     let _surface: DurableCompletionExternalPublicationReceiptSurface = input.surface();
+>     let _environment: DurableCompletionExternalPublicationReceiptEnvironment =
+3988c4399,4400
+<     let _binding: DurableCompletionExternalPublicationConfirmationBinding = input.runtime_binding.clone();
+---
+>     let _binding: DurableCompletionExternalPublicationReceiptBinding =
+>         input.runtime_binding.clone();
+3990,3991c4402,4403
+<     assert!(DurableCompletionExternalPublicationConfirmationPolicy::Disabled.is_disabled());
+<     assert!(DurableCompletionExternalPublicationConfirmationPolicy::FixtureAllowed.allows_fixture());
+---
+>     assert!(DurableCompletionExternalPublicationReceiptPolicy::Disabled.is_disabled());
+>     assert!(DurableCompletionExternalPublicationReceiptPolicy::FixtureAllowed.allows_fixture());
+3993,3994c4405,4406
+<         DurableCompletionExternalPublicationConfirmationPolicy::ProductionExternalPublicationConfirmationRequired.tag(),
+<         "production-external-publication-confirmation-required"
+---
+>         DurableCompletionExternalPublicationReceiptPolicy::ProductionExternalPublicationReceiptRequired.tag(),
+>         "production-external-publication-receipt-required"
+3996,3997c4408,4409
+<     assert!(DurableCompletionExternalPublicationConfirmationKind::FixtureInMemory.is_fixture());
+<     assert!(DurableCompletionExternalPublicationConfirmationKind::ProductionExternalPublicationConfirmationUnavailable.is_unavailable());
+---
+>     assert!(DurableCompletionExternalPublicationReceiptKind::FixtureInMemory.is_fixture());
+>     assert!(DurableCompletionExternalPublicationReceiptKind::ProductionExternalPublicationReceiptUnavailable.is_unavailable());
+3999c4411
+<         DurableCompletionExternalPublicationConfirmationKind::Disabled.tag(),
+---
+>         DurableCompletionExternalPublicationReceiptKind::Disabled.tag(),
+4003c4415
+<         DurableCompletionExternalPublicationConfirmationOutcome::LegacyBypassNoExternalPublicationConfirmation;
+---
+>         DurableCompletionExternalPublicationReceiptOutcome::LegacyBypassNoExternalPublicationReceipt;
+4007c4419
+<         DurableCompletionExternalPublicationConfirmationOutcome::MainNetPeerDrivenApplyRefusedNoConfirmation
+---
+>         DurableCompletionExternalPublicationReceiptOutcome::MainNetPeerDrivenApplyRefusedNoReceipt
+4012,4024c4424,4440
+<     assert!(durable_completion_external_publication_confirmation_consumer_required());
+<     assert!(durable_completion_external_publication_confirmation_outcome_publication_required());
+<     assert!(durable_completion_external_publication_confirmation_no_real_settlement());
+<     assert!(durable_completion_external_publication_confirmation_no_real_settlement_finality());
+<     assert!(durable_completion_external_publication_confirmation_no_real_settlement_receipt());
+<     assert!(durable_completion_external_publication_confirmation_no_real_settlement_finality_projection());
+<     assert!(durable_completion_external_publication_confirmation_no_real_settlement_outcome_publication());
+<     assert!(durable_completion_external_publication_confirmation_no_real_external_publication_confirmation());
+< 
+<     let mut prod = ProductionExternalPublicationConfirmationSink::default();
+<     let mut mainnet = MainNetExternalPublicationConfirmationSink::default();
+<     let mut external = ExternalExternalPublicationConfirmationSink::default();
+<     let mut prod_ledger = DurableCompletionExternalPublicationConfirmationLedger::new();
+---
+>     assert!(durable_completion_external_publication_receipt_consumer_required());
+>     assert!(durable_completion_external_publication_receipt_confirmation_required());
+>     assert!(durable_completion_external_publication_receipt_no_real_settlement());
+>     assert!(durable_completion_external_publication_receipt_no_real_settlement_finality());
+>     assert!(durable_completion_external_publication_receipt_no_real_settlement_receipt());
+>     assert!(
+>         durable_completion_external_publication_receipt_no_real_settlement_finality_projection()
+>     );
+>     assert!(
+>         durable_completion_external_publication_receipt_no_real_external_publication_confirmation()
+>     );
+>     assert!(durable_completion_external_publication_receipt_no_real_external_publication_receipt());
+> 
+>     let mut prod = ProductionExternalPublicationReceiptSink::default();
+>     let mut mainnet = MainNetExternalPublicationReceiptSink::default();
+>     let mut external = ExternalExternalPublicationReceiptSink::default();
+>     let mut prod_ledger = DurableCompletionExternalPublicationReceiptLedger::new();
+4026c4442
+<         prod.project_durable_completion_external_publication_confirmation(
+---
+>         prod.project_durable_completion_external_publication_receipt(
+4032c4448
+<         DurableCompletionExternalPublicationConfirmationOutcome::ProductionExternalPublicationConfirmationUnavailableNoConfirmation
+---
+>         DurableCompletionExternalPublicationReceiptOutcome::ProductionExternalPublicationReceiptUnavailableNoReceipt
+4035c4451
+<         mainnet.project_durable_completion_external_publication_confirmation(
+---
+>         mainnet.project_durable_completion_external_publication_receipt(
+4041c4457
+<         DurableCompletionExternalPublicationConfirmationOutcome::MainNetExternalPublicationConfirmationUnavailableNoConfirmation
+---
+>         DurableCompletionExternalPublicationReceiptOutcome::MainNetExternalPublicationReceiptUnavailableNoReceipt
+4044c4460
+<         external.project_durable_completion_external_publication_confirmation(
+---
+>         external.project_durable_completion_external_publication_receipt(
+4050c4466
+<         DurableCompletionExternalPublicationConfirmationOutcome::ExternalExternalPublicationConfirmationUnavailableNoConfirmation
+---
+>         DurableCompletionExternalPublicationReceiptOutcome::ExternalExternalPublicationReceiptUnavailableNoReceipt
+4063c4479
+<         PathBuf::from("docs/devnet/run_277_durable_completion_external_publication_confirmation_release_binary/helper_evidence/run_277")
+---
+>         PathBuf::from("docs/devnet/run_279_durable_completion_external_publication_receipt_release_binary/helper_evidence/run_279")
+4087c4503
+<         ("rejection_fail_closed", "wrong_confirmation_record_id_rejected_before_record", wrong_confirmation_record_id_rejected_before_record as fn()),
+---
+>         ("rejection_fail_closed", "wrong_external_publication_receipt_record_id_rejected_before_record", wrong_external_publication_receipt_record_id_rejected_before_record as fn()),
+4121c4537
+<         ("rejection_fail_closed", "non_recording_outcome_publication_outcomes_create_no_external_publication_confirmation_request", non_recording_outcome_publication_outcomes_create_no_external_publication_confirmation_request as fn()),
+---
+>         ("rejection_fail_closed", "non_recording_outcome_publication_outcomes_create_no_external_publication_receipt_request", non_recording_outcome_publication_outcomes_create_no_external_publication_receipt_request as fn()),
+4124,4127c4540,4543
+<         ("recovery_crash_window", "pre_settlement_outcome_publication_windows_fail_closed_no_commitment", pre_settlement_outcome_publication_windows_fail_closed_no_commitment as fn()),
+<         ("recovery_crash_window", "after_settlement_outcome_publication_request_before_record_rejects_before_record", after_settlement_outcome_publication_request_before_record_rejects_before_record as fn()),
+<         ("recovery_crash_window", "after_settlement_outcome_publication_record_before_success_requires_explicit_matching_record", after_settlement_outcome_publication_record_before_success_requires_explicit_matching_record as fn()),
+<         ("recovery_crash_window", "after_settlement_outcome_publication_success_recovers_as_recorded", after_settlement_outcome_publication_success_recovers_as_recorded as fn()),
+---
+>         ("recovery_crash_window", "pre_external_publication_confirmation_windows_fail_closed_no_commitment", pre_external_publication_confirmation_windows_fail_closed_no_commitment as fn()),
+>         ("recovery_crash_window", "after_external_publication_confirmation_request_before_record_rejects_before_record", after_external_publication_confirmation_request_before_record_rejects_before_record as fn()),
+>         ("recovery_crash_window", "after_external_publication_confirmation_record_before_success_requires_explicit_matching_record", after_external_publication_confirmation_record_before_success_requires_explicit_matching_record as fn()),
+>         ("recovery_crash_window", "after_external_publication_confirmation_success_recovers_as_recorded", after_external_publication_confirmation_success_recovers_as_recorded as fn()),
+4131,4132c4547,4548
+<         ("projection", "only_recorded_outcome_publication_outcome_creates_external_publication_confirmation_request_intent", only_recorded_outcome_publication_outcome_creates_external_publication_confirmation_request_intent as fn()),
+<         ("projection", "non_recording_outcome_publication_outcomes_create_no_external_publication_confirmation_request", non_recording_outcome_publication_outcomes_create_no_external_publication_confirmation_request as fn()),
+---
+>         ("projection", "only_recorded_outcome_publication_outcome_creates_external_publication_receipt_request_intent", only_recorded_outcome_publication_outcome_creates_external_publication_receipt_request_intent as fn()),
+>         ("projection", "non_recording_outcome_publication_outcomes_create_no_external_publication_receipt_request", non_recording_outcome_publication_outcomes_create_no_external_publication_receipt_request as fn()),
+4134,4136c4550,4552
+<         ("external_publication_confirmation_ledger", "duplicate_identical_receipt_is_idempotent", duplicate_identical_receipt_is_idempotent as fn()),
+<         ("external_publication_confirmation_ledger", "same_ack_record_id_different_digest_is_equivocation_no_second_receipt", same_ack_record_id_different_digest_is_equivocation_no_second_receipt as fn()),
+<         ("external_publication_confirmation_ledger", "rollback_restores_receipt_ledger_snapshot", rollback_restores_receipt_ledger_snapshot as fn()),
+---
+>         ("external_publication_receipt_ledger", "duplicate_identical_receipt_is_idempotent", duplicate_identical_receipt_is_idempotent as fn()),
+>         ("external_publication_receipt_ledger", "same_ack_record_id_different_digest_is_equivocation_no_second_receipt", same_ack_record_id_different_digest_is_equivocation_no_second_receipt as fn()),
+>         ("external_publication_receipt_ledger", "rollback_restores_receipt_ledger_snapshot", rollback_restores_receipt_ledger_snapshot as fn()),
+4140c4556
+<         ("non_mutation", "non_recording_outcome_publication_outcomes_create_no_external_publication_confirmation_request", non_recording_outcome_publication_outcomes_create_no_external_publication_confirmation_request as fn()),
+---
+>         ("non_mutation", "non_recording_outcome_publication_outcomes_create_no_external_publication_receipt_request", non_recording_outcome_publication_outcomes_create_no_external_publication_receipt_request as fn()),
+4155c4571,4575
+<         if *ok { entry.0 += 1; } else { entry.1 += 1; }
+---
+>         if *ok {
+>             entry.0 += 1;
+>         } else {
+>             entry.1 += 1;
+>         }
+4160,4163c4580,4586
+<     summary.push_str("Run 277 durable-completion external-publication-confirmation release helper\n");
+<     summary.push_str(&format!("verdict: {}\n", if total_fail == 0 { "PASS" } else { "FAIL" }));
+<     summary.push_str("projection_rule: input.settlement_outcome_publication_binding -> project_settlement_outcome_publication_outcome_to_external_publication_confirmation_request\n");
+<     summary.push_str("attached_chain: Run256 backend -> Run258 receipt -> Run260 acknowledgement -> Run262 consumer -> Run264 settlement projection -> Run266 settlement commitment -> Run268 settlement finalization -> Run270 settlement-receipt acknowledgement -> Run272 settlement-outcome report -> Run274 settlement-outcome publication -> Run276 external-publication confirmation\n");
+---
+>     summary.push_str("Run 279 durable-completion external-publication-receipt release helper\n");
+>     summary.push_str(&format!(
+>         "verdict: {}\n",
+>         if total_fail == 0 { "PASS" } else { "FAIL" }
+>     ));
+>     summary.push_str("projection_rule: input.external_publication_confirmation_binding -> project_external_publication_confirmation_outcome_to_external_publication_receipt_request\n");
+>     summary.push_str("attached_chain: Run256 backend -> Run258 receipt -> Run260 acknowledgement -> Run262 consumer -> Run264 settlement projection -> Run266 settlement commitment -> Run268 settlement finalization -> Run270 settlement-receipt acknowledgement -> Run272 settlement-outcome report -> Run274 settlement-outcome publication -> Run276 external-publication confirmation -> Run278 external-publication receipt\n");
+4171,4172c4594,4595
+<         outdir.join("fixtures/run_277_projection_rule.txt"),
+<         "input.settlement_outcome_publication_binding\nproject_settlement_outcome_publication_outcome_to_external_publication_confirmation_request\nSettlementOutcomePublicationRecorded -> CreateRequest\n",
+---
+>         outdir.join("fixtures/run_279_projection_rule.txt"),
+>         "input.external_publication_confirmation_binding\nproject_external_publication_confirmation_outcome_to_external_publication_receipt_request\nExternalPublicationConfirmationRecorded -> CreateRequest\n",
