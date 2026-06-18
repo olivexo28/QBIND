@@ -1,0 +1,57 @@
+Run 275 — release-binary governance durable-completion settlement-outcome-publication evidence
+git_commit: f0a843d61376d7c4a67a974c6faf2fb654f74919
+
+build:
+  rustc_version:      rustc 1.96.0 (ac68faa20 2026-05-25)
+  cargo_version:      cargo 1.96.0 (30a34c682 2026-05-25)
+  qbind_node_sha256:  c44f40726db025703cb41114be7c8192d485e12b88b0551260a780e6740d928f
+  helper_275_sha256:  f9a73ae52cee7c13c3ff71d4d29fe5b629831c8548c0338da6c13d8f2fda9387
+
+helper_summary: /home/runner/work/QBIND/QBIND/docs/devnet/run_275_durable_completion_settlement_outcome_publication_release_binary/helper_evidence/run_275/helper_summary.txt
+  Run 275 durable-completion settlement-outcome-publication release helper
+  verdict: PASS
+  projection_rule: input.settlement_outcome_report_binding -> project_settlement_outcome_report_outcome_to_outcome_publication_request
+  attached_chain: Run256 backend -> Run258 receipt -> Run260 acknowledgement -> Run262 consumer -> Run264 settlement projection -> Run266 settlement commitment -> Run268 settlement finalization -> Run270 settlement-receipt acknowledgement -> Run272 settlement-outcome report -> Run274 settlement-outcome publication
+  table accepted_compatible pass=13 fail=0
+  table non_mutation pass=5 fail=0
+  table projection pass=3 fail=0
+  table reachability pass=1 fail=0
+  table recovery_crash_window pass=9 fail=0
+  table rejection_fail_closed pass=41 fail=0
+  table settlement_outcome_publication_ledger pass=3 fail=0
+  table stage_ordering pass=5 fail=0
+  total_pass: 80
+  total_fail: 0
+
+release_binary_scenarios: S1_help=0 S2=1 S3=1 S4=1 S5=1 S6=1
+reachability: source/helper/module/entry/taxonomy/boundary/composition greps passed
+denylist: passed (81 patterns)
+tests:
+  test:run_274_durable_completion_settlement_outcome_publication_tests	rc=0
+  test:run_272_durable_completion_settlement_outcome_report_tests	rc=0
+  test:run_270_durable_completion_settlement_receipt_acknowledgement_tests	rc=0
+  test:run_268_durable_completion_settlement_finalization_tests	rc=0
+  test:run_266_durable_completion_settlement_commitment_tests	rc=0
+  test:run_264_durable_completion_consumer_settlement_projection_tests	rc=0
+  test:run_262_durable_completion_acknowledgement_consumer_tests	rc=0
+  test:run_260_durable_completion_audit_receipt_acknowledgement_tests	rc=0
+  test:run_258_durable_completion_audit_publication_receipt_tests	rc=0
+  test:run_256_durable_completion_attestation_backend_tests	rc=0
+  test:run_254_modeled_durable_completion_attestation_projection_tests	rc=0
+  test:run_252_modeled_durable_completion_finalization_projection_tests	rc=0
+  test:run_250_modeled_durable_consume_completion_reporter_tests	rc=0
+  test:run_248_modeled_durable_consume_projection_sink_tests	rc=0
+  test:run_246_governance_modeled_end_to_end_pipeline_tests	rc=0
+  test:run_244_modeled_governance_trust_mutation_applier_tests	rc=0
+  test:run_242_governance_execution_mutation_engine_tests	rc=0
+  test:run_240_governance_evaluator_replay_durable_runtime_integration_tests	rc=0
+  test:run_238_governance_evaluator_replay_durable_backend_tests	rc=0
+  test:run_236_governance_evaluator_replay_consume_runtime_integration_tests	rc=0
+  test:run_234_governance_evaluator_replay_consume_boundary_tests	rc=0
+  test:run_232_governance_evaluator_replay_runtime_integration_tests	rc=0
+  test:run_230_governance_evaluator_replay_state_tests	rc=0
+  test:run_228_peer_evaluator_context_representation_tests	rc=0
+  test:run_226_governance_evaluator_runtime_callsite_wiring_tests	rc=0
+  test:run_224_governance_evaluator_runtime_integration_tests	rc=0
+  lib:pqc_authority	rc=0
+  lib:lib_all	rc=0
