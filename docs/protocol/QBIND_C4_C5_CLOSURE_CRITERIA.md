@@ -1,6 +1,6 @@
 # QBIND C4 / C5 Closure Criteria
 
-**Status as of Run 277:** Full **C4 remains OPEN**. **C5 remains OPEN**.
+**Status as of Run 278:** Full **C4 remains OPEN**. **C5 remains OPEN**.
 This document is a formal closure checklist introduced by Run 200
 (docs/spec/crosscheck only). It defines C4 and C5, records their current
 status, provides a green/yellow/red matrix, enumerates the required
@@ -69,6 +69,7 @@ implemented. **Red** = not started / unavailable.
 | OnChainGovernance fixture verifier + production boundary (fail-closed) | 🟡 Yellow | Runs 178–187; real on-chain verifier unavailable |
 | Authority custody boundary + metadata + policy selector | 🟡 Yellow | Runs 188–193; real custody backend unavailable |
 | RemoteSigner boundary + payload + policy selector | 🟡 Yellow | Runs 194–199; real RemoteSigner backend unavailable |
+| Modeled durable-completion pipeline / settlement / external-publication boundary stack (typed interfaces, fixture sinks, selectors, fail-closed) | 🟡 Yellow | Runs 200–278 (incl. Run 278 external-publication-receipt boundary); modeled in-memory boundaries / evidence only, no production backend |
 | Real production RemoteSigner backend | 🔴 Red | Not implemented |
 | Real KMS / HSM / cloud-KMS / PKCS#11 custody backend | 🔴 Red | Not implemented |
 | Real custody attestation verifier | 🔴 Red | Not implemented |
@@ -78,6 +79,31 @@ implemented. **Red** = not started / unavailable.
 | MainNet authority rotation/revocation under production custody | 🔴 Red | Not proven |
 | Production signing audit trail / crypto-agility activation / incident response | 🔴 Red | Not production-real |
 | Full MainNet release-binary evidence under production custody | 🔴 Red | Not produced |
+
+### Matrix status clarification
+
+The C4/C5 matrix separates **boundary readiness** from **production readiness**.
+
+* **🟢 Green** — production-real behavior is implemented and release-binary
+  evidenced, or the item is fully closed for its stated scope.
+* **🟡 Yellow** — a typed boundary, policy selector, fixture path, fail-closed
+  behavior, and/or release-binary evidence exists, but the real production
+  backend or MainNet production evidence is not yet implemented.
+* **🔴 Red** — no accepted boundary exists for that layer, or the row
+  specifically refers to a real production backend / MainNet production
+  evidence that remains unavailable.
+
+Rows that refer to **interfaces, modeled boundaries, fixture sinks, selectors,
+or release-evidence helpers** may be Yellow when they are typed and evidenced.
+
+Rows that refer to **real production backends, real MainNet custody, real
+on-chain verifier integration, real validator-set rotation, or full MainNet
+evidence under production custody** remain Red until those production
+implementations are plugged in and release-binary evidenced.
+
+This taxonomy does not weaken closure criteria. Full C4 remains OPEN and C5
+remains OPEN until the production backend and MainNet evidence gates are
+satisfied.
 
 ## 4. Required closure evidence
 
