@@ -1200,6 +1200,7 @@ fn attach_run264_settlement_projection(
 /// `evaluate_durable_completion_settlement_commitment` round-trip on top
 /// of the real Run 262 consumer chain. The Run 268 settlement-finalization boundary
 /// projects this terminal outcome; it is never a faked, unattached commitment.
+#[allow(dead_code)]
 struct AttachedSettlementCommitment {
     outcome: DurableCompletionSettlementCommitmentOutcome,
     commitment_record_id: String,
@@ -1429,6 +1430,7 @@ fn attach_run266_settlement_commitment(
 }
 
 // ---- Run 268 settlement-finalization attachment (prior boundary) ----
+#[allow(dead_code)]
 struct AttachedSettlementFinalization {
     outcome: DurableCompletionSettlementFinalizationOutcome,
     finalization_record_id: String,
@@ -1662,6 +1664,7 @@ fn attach_run268_settlement_finalization(
 // Builds a REAL Run 270 recorded outcome from the Run 268 prior. Uses the real
 // Run 270 module field names so the Run 272 cur-layer can consume it.
 // ===========================================================================
+#[allow(dead_code)]
 struct AttachedSettlementReceiptAcknowledgement {
     outcome: DurableCompletionSettlementReceiptAcknowledgementOutcome,
     receipt_acknowledgement_record_id: String,
@@ -1889,6 +1892,7 @@ fn attach_run270_settlement_receipt_acknowledgement(
 // Builds a REAL Run 272 recorded outcome from the Run 270 prior. Uses the real
 // Run 272 module field names so the Run 274 cur-layer can consume it.
 // ===========================================================================
+#[allow(dead_code)]
 struct AttachedSettlementOutcomeReport {
     outcome: DurableCompletionSettlementOutcomeReportOutcome,
     outcome_report_record_id: String,
