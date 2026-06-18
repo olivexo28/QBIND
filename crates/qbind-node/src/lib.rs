@@ -1268,6 +1268,34 @@ pub mod pqc_governance_durable_completion_settlement_outcome_report;
 // refused/unsupported; rejected paths are non-mutating. Full C4 remains OPEN; C5 remains
 // OPEN.
 pub mod pqc_governance_durable_completion_settlement_outcome_publication;
+// Run 276 — modeled durable-completion settlement-outcome publication consumer /
+// external-publication-confirmation interface boundary. SOURCE/TEST-ONLY INTERFACE BOUNDARY.
+// Defines the first typed interface a future production external-publication-confirmation
+// subsystem would use to consume a Run 274 durable-completion settlement-outcome
+// publication record and prepare an external-publication-confirmation intent after the
+// Run 274 modeled settlement-outcome publication stage produced
+// SettlementOutcomePublicationRecorded. Interface boundary only: production /
+// MainNet / external external-publication-confirmation sinks are reachable but deliberately
+// unavailable / fail-closed, and the only positive external-publication-confirmation
+// implementation is a DevNet/TestNet fixture that records into an in-memory fixture
+// ledger for source/test evidence only. Only the Run 274
+// SettlementOutcomePublicationRecorded outcome creates an external-publication-confirmation
+// request; SettlementOutcomePublicationDuplicateIdempotent may only match an
+// already-recorded external-publication-confirmation record and never creates one. Every other
+// settlement-outcome publication outcome, every external-publication-confirmation record
+// failure / rollback / rollback-failed / ambiguous window, every production / MainNet /
+// external external-publication-confirmation unavailable path, and every unsupported action
+// fails closed with no external-publication confirmation. Source/test only: no real settlement,
+// no real settlement finality, no real settlement receipt, no real settlement-receipt
+// acknowledgement, no real settlement-finality projection, no real settlement-outcome
+// publication, no real external publication, no real external-publication confirmation, no
+// real audit-ledger acknowledgement, no real persistent backend. It does NOT call Run 070,
+// mutate LivePqcTrustState, perform a real trust swap, evict sessions, write sequence files,
+// write authority markers, perform external publication, or touch
+// RocksDB/file/schema/migration/storage-format. MainNet governance, MainNet peer-driven
+// apply, and validator-set rotation remain refused/unsupported; rejected paths are
+// non-mutating. Full C4 remains OPEN; C5 remains OPEN.
+pub mod pqc_governance_durable_completion_external_publication_confirmation;
 // Run 057 — trust-bundle activation epoch/height gating. Enforces
 // optional `activation_height` / `activation_epoch` fields on a
 // freshly validated trust bundle so a structurally valid, signed,
