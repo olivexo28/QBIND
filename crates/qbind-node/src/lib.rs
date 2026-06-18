@@ -1315,6 +1315,25 @@ pub mod pqc_governance_durable_completion_external_publication_confirmation;
 // governance, MainNet peer-driven apply, and validator-set rotation remain
 // refused/unsupported; rejected paths are non-mutating. Full C4 remains OPEN; C5 remains OPEN.
 pub mod pqc_governance_durable_completion_external_publication_receipt;
+// Run 280 — source/test durable-completion external-publication-receipt consumer /
+// external-publication-acknowledgement interface boundary. Sits one rung above the Run 278
+// external-publication-receipt boundary: consumes only a Run 278
+// ExternalPublicationReceiptRecorded outcome and projects a typed
+// external-publication-acknowledgement intent plus a modeled in-memory
+// DurableCompletionExternalPublicationAcknowledgementLedger record. Only
+// ExternalPublicationAcknowledgementRecorded authorizes modeled external-publication-acknowledgement
+// state. The fixture acknowledgement sink is DevNet/TestNet evidence-only and mutates only the
+// in-memory ledger; production / MainNet / external acknowledgement sinks remain reachable but
+// unavailable / fail-closed. Source/test only: no real settlement, settlement finality,
+// settlement receipt, settlement-receipt acknowledgement, settlement-finality projection,
+// settlement-outcome report backend, settlement-outcome publication, external publication,
+// external-publication confirmation, external-publication receipt, external-publication
+// acknowledgement, or audit-ledger acknowledgement backend. It does NOT call Run 070, mutate
+// LivePqcTrustState, perform a real trust swap, evict sessions, write sequence files, write
+// authority markers, perform external publication, or touch RocksDB/file/schema/migration/storage-format.
+// MainNet governance, MainNet peer-driven apply, and validator-set rotation remain
+// refused/unsupported; rejected paths are non-mutating. Full C4 remains OPEN; C5 remains OPEN.
+pub mod pqc_governance_durable_completion_external_publication_acknowledgement;
 // Run 057 — trust-bundle activation epoch/height gating. Enforces
 // optional `activation_height` / `activation_epoch` fields on a
 // freshly validated trust bundle so a structurally valid, signed,
