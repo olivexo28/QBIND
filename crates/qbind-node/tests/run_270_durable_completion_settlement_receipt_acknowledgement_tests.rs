@@ -1156,6 +1156,7 @@ fn attach_run264_settlement_projection(
 /// `evaluate_durable_completion_settlement_commitment` round-trip on top
 /// of the real Run 262 consumer chain. The Run 268 settlement-finalization boundary
 /// projects this terminal outcome; it is never a faked, unattached commitment.
+#[allow(dead_code)]
 struct AttachedSettlementCommitment {
     outcome: DurableCompletionSettlementCommitmentOutcome,
     commitment_record_id: String,
@@ -1385,6 +1386,7 @@ fn attach_run266_settlement_commitment(
 }
 
 // ---- Run 268 settlement-finalization attachment (prior boundary) ----
+#[allow(dead_code)]
 struct AttachedSettlementFinalization {
     outcome: DurableCompletionSettlementFinalizationOutcome,
     finalization_record_id: String,
