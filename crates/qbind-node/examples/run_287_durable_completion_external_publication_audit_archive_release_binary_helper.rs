@@ -14,7 +14,7 @@
 //! external-publication audit finalization, and then evaluates the Run 286
 //! external-publication-audit-completion boundary. Projection is intentionally
 //! from `input.external_publication_audit_completion_binding` through
-//! `project_external_publication_audit_finalization_outcome_to_external_publication_audit_archive_request`.
+//! `project_external_publication_audit_completion_outcome_to_external_publication_audit_archive_request`.
 //!
 //! The helper remains dead code from the production runtime: the production
 //! `qbind-node` binary never references it. The modeled external-publication
@@ -255,7 +255,7 @@ use qbind_node::pqc_governance_durable_completion_external_publication_audit_arc
     durable_completion_external_publication_audit_archive_no_real_settlement_finality,
     durable_completion_external_publication_audit_archive_no_real_settlement_receipt,
     durable_completion_external_publication_audit_archive_no_real_settlement_finality_projection,
-    durable_completion_external_publication_audit_archive_no_real_external_publication_audit_finalization,
+    durable_completion_external_publication_audit_archive_no_real_external_publication_audit_completion,
     durable_completion_external_publication_audit_archive_no_real_external_publication_audit_archive,
     DurableCompletionExternalPublicationAuditArchiveBinding,
     DurableCompletionExternalPublicationAuditArchiveDigest,
@@ -293,7 +293,7 @@ use qbind_node::pqc_governance_durable_completion_external_publication_audit_arc
     durable_completion_external_publication_audit_archive_sink_receipt_required,
     durable_completion_external_publication_audit_archive_validator_set_rotation_unsupported,
     evaluate_durable_completion_external_publication_audit_archive,
-    project_external_publication_audit_finalization_outcome_to_external_publication_audit_archive_request,
+    project_external_publication_audit_completion_outcome_to_external_publication_audit_archive_request,
     recover_durable_completion_external_publication_audit_archive_window,
     external_publication_audit_archive_outcome_authorizes_record,
     external_publication_audit_archive_outcome_projects_to_recorded,
@@ -314,7 +314,7 @@ use qbind_node::pqc_governance_durable_completion_external_publication_audit_arc
 };
 
 use qbind_node::pqc_governance_durable_completion_external_publication_audit_finalization::{
-    external_publication_audit_completion_identity_digest,
+    external_publication_audit_finalization_identity_digest,
     durable_completion_external_publication_audit_finalization_ambiguous_window_fails_closed,
     durable_completion_external_publication_audit_finalization_attestation_required,
     durable_completion_external_publication_audit_finalization_backend_submission_required,
@@ -453,6 +453,10 @@ const AUDIT_FINALIZATION_ID: &str = "fixture-external-publication-audit-completi
 const AUDIT_FINALIZATION_DOMAIN_TAG: &str = "QBIND:run284:domain-separation:v1";
 const AUDIT_FINALIZATION_RECORD_ID: &str =
     "durable-completion-external-publication-audit-completion-0001";
+const AUDIT_COMPLETION_ID: &str = "fixture-external-publication-audit-archive-0001";
+const AUDIT_COMPLETION_DOMAIN_TAG: &str = "QBIND:run286:domain-separation:v1";
+const AUDIT_COMPLETION_RECORD_ID: &str =
+    "durable-completion-external-publication-audit-archive-0001";
 
 /// The real Run 256 backend submission digests, captured from an *actual*
 /// `evaluate_durable_completion_attestation_backend` round-trip. The receipt is
@@ -483,6 +487,7 @@ struct ActionLabel {
     confirmation_record_id: String,
     external_publication_receipt_record_id: String,
     external_publication_acknowledgement_record_id: String,
+    external_publication_audit_finalization_record_id: String,
     external_publication_audit_completion_record_id: String,
     external_publication_audit_archive_record_id: String,
     proposal_id: String,
@@ -517,11 +522,14 @@ fn action_label(label: &str) -> ActionLabel {
         external_publication_acknowledgement_record_id: format!(
             "durable-completion-external-publication-acknowledgement-{label}"
         ),
-        external_publication_audit_completion_record_id: format!(
+        external_publication_audit_finalization_record_id: format!(
             "durable-completion-external-publication-audit-finalization-{label}"
         ),
-        external_publication_audit_archive_record_id: format!(
+        external_publication_audit_completion_record_id: format!(
             "durable-completion-external-publication-audit-completion-{label}"
+        ),
+        external_publication_audit_archive_record_id: format!(
+            "durable-completion-external-publication-audit-archive-{label}"
         ),
         proposal_id: format!("proposal-{label}"),
         decision_id: format!("decision-{label}"),
@@ -544,8 +552,9 @@ fn default_action() -> ActionLabel {
         confirmation_record_id: CONFIRMATION_RECORD_ID.to_string(),
         external_publication_receipt_record_id: RECEIPT_RECORD_ID.to_string(),
         external_publication_acknowledgement_record_id: EXT_PUB_ACK_RECORD_ID.to_string(),
-        external_publication_audit_completion_record_id: ACKNOWLEDGEMENT_RECORD_ID.to_string(),
-        external_publication_audit_archive_record_id: AUDIT_FINALIZATION_RECORD_ID.to_string(),
+        external_publication_audit_finalization_record_id: ACKNOWLEDGEMENT_RECORD_ID.to_string(),
+        external_publication_audit_completion_record_id: AUDIT_FINALIZATION_RECORD_ID.to_string(),
+        external_publication_audit_archive_record_id: AUDIT_COMPLETION_RECORD_ID.to_string(),
         proposal_id: PROPOSAL.to_string(),
         decision_id: DECISION.to_string(),
         candidate_digest: CAND_DIGEST.to_string(),
@@ -3342,7 +3351,7 @@ fn attach_run282_external_publication_audit_finalization(
     };
     let id = run282_confirmation_identity();
     let request = DurableCompletionExternalPublicationAuditFinalizationRequest {
-        external_publication_audit_completion_record_id: action.external_publication_audit_completion_record_id.clone(),
+        external_publication_audit_finalization_record_id: action.external_publication_audit_finalization_record_id.clone(),
         environment: confirmation_env,
         chain_id: CHAIN.to_string(),
         genesis_hash: GENESIS.to_string(),
@@ -3393,7 +3402,7 @@ fn attach_run282_external_publication_audit_finalization(
         domain_separation_tag: ACKNOWLEDGEMENT_DOMAIN_TAG.to_string(),
     };
     let expectations = DurableCompletionExternalPublicationAuditFinalizationExpectations {
-        expected_external_publication_audit_completion_record_id: action.external_publication_audit_completion_record_id.clone(),
+        expected_external_publication_audit_finalization_record_id: action.external_publication_audit_finalization_record_id.clone(),
         expected_environment: confirmation_env,
         expected_chain_id: CHAIN.to_string(),
         expected_genesis_hash: GENESIS.to_string(),
@@ -3503,7 +3512,7 @@ fn attach_run282_external_publication_audit_finalization(
     AttachedExternalPublicationAuditFinalization {
         outcome,
         external_publication_audit_completion_record_id: action.external_publication_audit_completion_record_id.clone(),
-        identity_digest: external_publication_audit_completion_identity_digest(&id)
+        identity_digest: external_publication_audit_finalization_identity_digest(&id)
             .as_hex()
             .to_string(),
         request_digest: record.request_digest.as_hex().to_string(),
@@ -4675,43 +4684,43 @@ fn receipt_ambiguous_window_fails_closed() {
 // ===========================================================================
 
 fn only_recorded_confirmation_outcome_creates_external_publication_audit_archive_request_intent() {
-    use DurableCompletionExternalPublicationAuditFinalizationOutcome as Finalization;
+    use DurableCompletionExternalPublicationAuditCompletionOutcome as Completion;
     use DurableCompletionExternalPublicationAuditArchiveRequestIntent as Intent;
     assert_eq!(
-        project_external_publication_audit_finalization_outcome_to_external_publication_audit_archive_request(
-            &Finalization::ExternalPublicationAuditFinalizationRecorded
+        project_external_publication_audit_completion_outcome_to_external_publication_audit_archive_request(
+            &Completion::ExternalPublicationAuditCompletionRecorded
         ),
         Intent::CreateRequest
     );
-    assert!(project_external_publication_audit_finalization_outcome_to_external_publication_audit_archive_request(
-        &Finalization::ExternalPublicationAuditFinalizationRecorded
+    assert!(project_external_publication_audit_completion_outcome_to_external_publication_audit_archive_request(
+        &Completion::ExternalPublicationAuditCompletionRecorded
     )
     .creates_request());
     assert_eq!(
-        project_external_publication_audit_finalization_outcome_to_external_publication_audit_archive_request(
-            &Finalization::ExternalPublicationAuditFinalizationDuplicateIdempotent
+        project_external_publication_audit_completion_outcome_to_external_publication_audit_archive_request(
+            &Completion::ExternalPublicationAuditCompletionDuplicateIdempotent
         ),
         Intent::IdempotentOnly
     );
-    assert!(!project_external_publication_audit_finalization_outcome_to_external_publication_audit_archive_request(
-        &Finalization::LegacyBypassNoExternalPublicationAuditFinalization
+    assert!(!project_external_publication_audit_completion_outcome_to_external_publication_audit_archive_request(
+        &Completion::LegacyBypassNoExternalPublicationAuditCompletion
     )
     .creates_request());
 }
 
 fn non_recording_confirmation_outcomes_create_no_external_publication_audit_archive_request() {
-    use DurableCompletionExternalPublicationAuditFinalizationOutcome as Finalization;
+    use DurableCompletionExternalPublicationAuditCompletionOutcome as Completion;
     use DurableCompletionExternalPublicationAuditArchiveRequestIntent as Intent;
-    for confirmation in [
-        Finalization::LegacyBypassNoExternalPublicationAuditFinalization,
-        Finalization::RejectedBeforeExternalPublicationAcknowledgementNoAuditFinalization,
-        Finalization::ExternalPublicationAcknowledgementDidNotRecordNoAuditFinalization,
-        Finalization::ExternalPublicationAuditFinalizationRejectedBeforeRecord,
-        Finalization::ExternalPublicationAuditFinalizationRecordFailedNoAuditFinalization,
-        Finalization::ProductionExternalPublicationAuditFinalizationUnavailableNoAuditFinalization,
+    for completion in [
+        Completion::LegacyBypassNoExternalPublicationAuditCompletion,
+        Completion::RejectedBeforeExternalPublicationAuditFinalizationNoAuditCompletion,
+        Completion::ExternalPublicationAuditFinalizationDidNotRecordNoAuditCompletion,
+        Completion::ExternalPublicationAuditCompletionRejectedBeforeRecord,
+        Completion::ExternalPublicationAuditCompletionRecordFailedNoAuditCompletion,
+        Completion::ProductionExternalPublicationAuditCompletionUnavailableNoAuditCompletion,
     ] {
         assert!(matches!(
-            project_external_publication_audit_finalization_outcome_to_external_publication_audit_archive_request(&confirmation),
+            project_external_publication_audit_completion_outcome_to_external_publication_audit_archive_request(&completion),
             Intent::NoReceipt(_)
         ));
     }
@@ -5031,7 +5040,7 @@ fn release_symbol_reachability_probe() {
     let input: DurableCompletionExternalPublicationAuditArchiveInput = c.recorded();
 
     let intent =
-        project_external_publication_audit_finalization_outcome_to_external_publication_audit_archive_request(
+        project_external_publication_audit_completion_outcome_to_external_publication_audit_archive_request(
             &input.external_publication_audit_completion_binding,
         );
     assert!(intent.creates_request());
@@ -5146,7 +5155,7 @@ fn release_symbol_reachability_probe() {
         durable_completion_external_publication_audit_archive_no_real_settlement_finality_projection()
     );
     assert!(
-        durable_completion_external_publication_audit_archive_no_real_external_publication_audit_finalization()
+        durable_completion_external_publication_audit_archive_no_real_external_publication_audit_completion()
     );
     assert!(durable_completion_external_publication_audit_archive_no_real_external_publication_audit_archive());
 
@@ -5301,7 +5310,7 @@ fn main() {
         "verdict: {}\n",
         if total_fail == 0 { "PASS" } else { "FAIL" }
     ));
-    summary.push_str("projection_rule: input.external_publication_audit_completion_binding -> project_external_publication_audit_finalization_outcome_to_external_publication_audit_archive_request\n");
+    summary.push_str("projection_rule: input.external_publication_audit_completion_binding -> project_external_publication_audit_completion_outcome_to_external_publication_audit_archive_request\n");
     summary.push_str("attached_chain: Run256 backend -> Run258 receipt -> Run260 acknowledgement -> Run262 consumer -> Run264 settlement projection -> Run266 settlement commitment -> Run268 settlement finalization -> Run270 settlement-receipt acknowledgement -> Run272 settlement-outcome report -> Run274 settlement-outcome publication -> Run276 external-publication confirmation -> Run278 external-publication receipt -> Run280 external-publication acknowledgement -> Run282 external-publication audit finalization -> Run284 external-publication audit completion\n");
     for (table, (pass, fail)) in &tables {
         summary.push_str(&format!("table {table} pass={pass} fail={fail}\n"));
@@ -5311,7 +5320,7 @@ fn main() {
     fs::write(outdir.join("helper_summary.txt"), &summary).expect("write helper summary");
     fs::write(
         outdir.join("fixtures/run_287_projection_rule.txt"),
-        "input.external_publication_audit_completion_binding\nproject_external_publication_audit_finalization_outcome_to_external_publication_audit_archive_request\nExternalPublicationAuditFinalizationRecorded -> CreateRequest\n",
+        "input.external_publication_audit_completion_binding\nproject_external_publication_audit_completion_outcome_to_external_publication_audit_archive_request\nExternalPublicationAuditFinalizationRecorded -> CreateRequest\n",
     ).expect("write projection fixture");
     print!("{summary}");
     if total_fail != 0 {
