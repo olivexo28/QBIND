@@ -1,20 +1,17 @@
-// Run 288 — durable-completion external-publication-audit-archive consumer /
-// external-publication-audit-seal boundary tests.
+// Run 286 — durable-completion external-publication-receipt consumer /
+// external-publication-audit-archive boundary tests.
 //
-// Source/test-only modeled boundary that sits one rung above the Run 286
-// external-publication-audit-archive boundary. The chain attaches the real Run 256
+// Source/test-only modeled boundary that sits one rung above the Run 278
+// external-publication-receipt boundary. The chain attaches the real Run 256
 // backend, Run 258 receipt, Run 260 acknowledgement, Run 262 consumer, Run 264
 // settlement projection, Run 266 settlement commitment, Run 268 settlement
 // finalization, Run 270 settlement-receipt acknowledgement, Run 272
 // settlement-outcome report, Run 274 settlement-outcome publication, Run 276
-// external-publication-confirmation, Run 278 external-publication-receipt, Run 280
-// external-publication-acknowledgement, Run 282 external-publication-audit-finalization,
-// Run 284 external-publication-audit-completion, and Run 286 external-publication-audit-archive
-// records, then evaluates the Run 288 external-publication-audit-seal
+// external-publication-confirmation, and Run 278 external-publication-receipt
+// records, then evaluates the Run 286 external-publication-audit-archive
 // boundary. Only a Run 286 ExternalPublicationAuditArchiveRecorded outcome
-// authorizes an external-publication-audit-seal request and only a Run 288
-// ExternalPublicationAuditSealRecorded outcome authorizes new state; every
-// ambiguous, missing, duplicate, or mismatched window fails closed.
+// authorizes new state; every ambiguous, missing, duplicate, or mismatched
+// window fails closed.
 
 use qbind_node::pqc_governance_durable_completion_acknowledgement_consumer::{
     consumer_identity_digest, evaluate_durable_completion_acknowledgement_consumer,
@@ -325,20 +322,6 @@ use qbind_node::pqc_governance_durable_completion_external_publication_audit_arc
     GovernanceDurableCompletionExternalPublicationAuditArchiveSink, MainNetExternalPublicationAuditArchiveSink,
     ProductionExternalPublicationAuditArchiveSink,
 };
-use qbind_node::pqc_governance_durable_completion_external_publication_audit_completion::{
-    external_publication_audit_completion_identity_digest,
-    evaluate_durable_completion_external_publication_audit_completion,
-    project_external_publication_audit_finalization_outcome_to_external_publication_audit_completion_request,
-    DurableCompletionExternalPublicationAuditCompletionExpectations,
-    DurableCompletionExternalPublicationAuditCompletionIdentity,
-    DurableCompletionExternalPublicationAuditCompletionInput,
-    DurableCompletionExternalPublicationAuditCompletionKind,
-    DurableCompletionExternalPublicationAuditCompletionLedger,
-    DurableCompletionExternalPublicationAuditCompletionOutcome,
-    DurableCompletionExternalPublicationAuditCompletionPolicy,
-    DurableCompletionExternalPublicationAuditCompletionRequest,
-    FixtureDurableCompletionExternalPublicationAuditCompletionSink,
-};
 use qbind_node::pqc_governance_durable_completion_external_publication_audit_finalization::{
     external_publication_audit_finalization_identity_digest,
     evaluate_durable_completion_external_publication_audit_finalization,
@@ -351,6 +334,19 @@ use qbind_node::pqc_governance_durable_completion_external_publication_audit_fin
     DurableCompletionExternalPublicationAuditFinalizationPolicy,
     DurableCompletionExternalPublicationAuditFinalizationRequest,
     FixtureDurableCompletionExternalPublicationAuditFinalizationSink,
+};
+use qbind_node::pqc_governance_durable_completion_external_publication_audit_completion::{
+    external_publication_audit_completion_identity_digest,
+    evaluate_durable_completion_external_publication_audit_completion,
+    DurableCompletionExternalPublicationAuditCompletionExpectations,
+    DurableCompletionExternalPublicationAuditCompletionIdentity,
+    DurableCompletionExternalPublicationAuditCompletionInput,
+    DurableCompletionExternalPublicationAuditCompletionKind,
+    DurableCompletionExternalPublicationAuditCompletionLedger,
+    DurableCompletionExternalPublicationAuditCompletionOutcome,
+    DurableCompletionExternalPublicationAuditCompletionPolicy,
+    DurableCompletionExternalPublicationAuditCompletionRequest,
+    FixtureDurableCompletionExternalPublicationAuditCompletionSink,
 };
 use qbind_node::pqc_governance_durable_completion_external_publication_acknowledgement::{
     external_publication_acknowledgement_identity_digest,
@@ -437,19 +433,22 @@ const EXT_PUB_ACK_ID: &str = "fixture-external-publication-acknowledgement-0001"
 const EXT_PUB_ACK_DOMAIN_TAG: &str = "QBIND:run280:domain-separation:v1";
 const EXT_PUB_ACK_RECORD_ID: &str =
     "durable-completion-external-publication-acknowledgement-0001";
-const ACKNOWLEDGEMENT_DOMAIN_TAG: &str = "QBIND:run282:domain-separation:v1";
+const ACKNOWLEDGEMENT_ID: &str = "fixture-external-publication-audit-archive-0001";
+const ACKNOWLEDGEMENT_DOMAIN_TAG: &str = "QBIND:run284:domain-separation:v1";
 const ACKNOWLEDGEMENT_RECORD_ID: &str =
-const AUDIT_FINALIZATION_DOMAIN_TAG: &str = "QBIND:run284:domain-separation:v1";
+    "durable-completion-external-publication-audit-archive-0001";
+const AUDIT_FINALIZATION_ID: &str = "fixture-external-publication-audit-seal-0001";
+const AUDIT_FINALIZATION_DOMAIN_TAG: &str = "QBIND:run286:domain-separation:v1";
 const AUDIT_FINALIZATION_RECORD_ID: &str =
-const EXT_PUB_AUDIT_FINALIZATION_ID: &str = "fixture-external-publication-audit-finalization-0001";
-const EXT_PUB_AUDIT_FINALIZATION_DOMAIN_TAG: &str = "QBIND:run282:domain-separation:v1";
-const EXT_PUB_AUDIT_FINALIZATION_RECORD_ID: &str =
-    "durable-completion-external-publication-audit-finalization-0001";
     "durable-completion-external-publication-audit-seal-0001";
 const EXT_PUB_AUDIT_FINALIZATION_ID: &str = "fixture-external-publication-audit-completion-0001";
 const EXT_PUB_AUDIT_FINALIZATION_DOMAIN_TAG: &str = "QBIND:run284:domain-separation:v1";
 const EXT_PUB_AUDIT_FINALIZATION_RECORD_ID: &str =
     "durable-completion-external-publication-audit-completion-0001";
+const EXT_PUB_AUDIT_FINALIZATION2_ID: &str = "fixture-external-publication-audit-finalization-0001";
+const EXT_PUB_AUDIT_FINALIZATION2_DOMAIN_TAG: &str = "QBIND:run282:domain-separation:v1";
+const EXT_PUB_AUDIT_FINALIZATION2_RECORD_ID: &str =
+    "durable-completion-external-publication-audit-finalization-0001";
 
 /// The real Run 256 backend submission digests, captured from an *actual*
 /// `evaluate_durable_completion_attestation_backend` round-trip. The receipt is
@@ -549,7 +548,7 @@ fn default_action() -> ActionLabel {
         confirmation_record_id: CONFIRMATION_RECORD_ID.to_string(),
         external_publication_receipt_record_id: RECEIPT_RECORD_ID.to_string(),
         external_publication_acknowledgement_record_id: EXT_PUB_ACK_RECORD_ID.to_string(),
-        external_publication_audit_finalization_record_id: EXT_PUB_AUDIT_FINALIZATION_RECORD_ID.to_string(),
+        external_publication_audit_finalization_record_id: EXT_PUB_AUDIT_FINALIZATION2_RECORD_ID.to_string(),
         external_publication_audit_completion_record_id: EXT_PUB_AUDIT_FINALIZATION_RECORD_ID.to_string(),
         external_publication_audit_archive_record_id: ACKNOWLEDGEMENT_RECORD_ID.to_string(),
         external_publication_audit_seal_record_id: AUDIT_FINALIZATION_RECORD_ID.to_string(),
@@ -3313,10 +3312,10 @@ struct AttachedExternalPublicationAuditFinalization {
 
 fn run282_confirmation_identity() -> DurableCompletionExternalPublicationAuditFinalizationIdentity {
     DurableCompletionExternalPublicationAuditFinalizationIdentity {
-        confirmation_id: EXT_PUB_AUDIT_FINALIZATION_ID.to_string(),
+        confirmation_id: EXT_PUB_AUDIT_FINALIZATION2_ID.to_string(),
         kind: DurableCompletionExternalPublicationAuditFinalizationKind::FixtureInMemory,
         policy: DurableCompletionExternalPublicationAuditFinalizationPolicy::FixtureAllowed,
-        domain_separation_tag: EXT_PUB_AUDIT_FINALIZATION_DOMAIN_TAG.to_string(),
+        domain_separation_tag: EXT_PUB_AUDIT_FINALIZATION2_DOMAIN_TAG.to_string(),
     }
 }
 
@@ -3397,7 +3396,7 @@ fn attach_run282_external_publication_audit_finalization(
         external_publication_acknowledgement_transcript_digest: external_publication_acknowledgement.transcript_digest.clone(),
         external_publication_acknowledgement_record_id: external_publication_acknowledgement.external_publication_acknowledgement_record_id.clone(),
         identity: id.clone(),
-        domain_separation_tag: EXT_PUB_AUDIT_FINALIZATION_DOMAIN_TAG.to_string(),
+        domain_separation_tag: EXT_PUB_AUDIT_FINALIZATION2_DOMAIN_TAG.to_string(),
     };
     let expectations = DurableCompletionExternalPublicationAuditFinalizationExpectations {
         expected_external_publication_audit_finalization_record_id: action.external_publication_audit_finalization_record_id.clone(),
@@ -3454,7 +3453,7 @@ fn attach_run282_external_publication_audit_finalization(
         expected_identity: id.clone(),
         expected_external_publication_audit_finalization_kind: DurableCompletionExternalPublicationAuditFinalizationKind::FixtureInMemory,
         expected_external_publication_audit_finalization_policy: DurableCompletionExternalPublicationAuditFinalizationPolicy::FixtureAllowed,
-        expected_domain_separation_tag: EXT_PUB_AUDIT_FINALIZATION_DOMAIN_TAG.to_string(),
+        expected_domain_separation_tag: EXT_PUB_AUDIT_FINALIZATION2_DOMAIN_TAG.to_string(),
     };
     let input = DurableCompletionExternalPublicationAuditFinalizationInput {
         policy: DurableCompletionExternalPublicationAuditFinalizationPolicy::FixtureAllowed,
@@ -4719,12 +4718,10 @@ fn non_recording_confirmation_outcomes_never_record_external_publication_audit_s
         Receipt::LegacyBypassNoExternalPublicationAuditSeal,
     );
     assert_non_recording_confirmation(
-        Finalization::RejectedBeforeExternalPublicationAuditFinalizationNoAuditCompletion,
         Finalization::RejectedBeforeExternalPublicationAuditCompletionNoAuditArchive,
         Receipt::RejectedBeforeExternalPublicationAuditArchiveNoAuditSeal,
     );
     assert_non_recording_confirmation(
-        Finalization::ExternalPublicationAuditFinalizationDidNotRecordNoAuditCompletion,
         Finalization::ExternalPublicationAuditCompletionDidNotRecordNoAuditArchive,
         Receipt::ExternalPublicationAuditArchiveDidNotRecordNoAuditSeal,
     );
@@ -5212,8 +5209,6 @@ fn non_recording_confirmation_outcomes_create_no_external_publication_audit_seal
     use DurableCompletionExternalPublicationAuditArchiveOutcome as Finalization;
     use DurableCompletionExternalPublicationAuditSealRequestIntent as Intent;
     for confirmation in [
-        Finalization::RejectedBeforeExternalPublicationAuditFinalizationNoAuditCompletion,
-        Finalization::ExternalPublicationAuditFinalizationDidNotRecordNoAuditCompletion,
         Finalization::LegacyBypassNoExternalPublicationAuditArchive,
         Finalization::RejectedBeforeExternalPublicationAuditCompletionNoAuditArchive,
         Finalization::ExternalPublicationAuditCompletionDidNotRecordNoAuditArchive,
