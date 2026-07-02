@@ -360,6 +360,19 @@ use qbind_node::pqc_governance_durable_completion_external_publication_audit_fin
     GovernanceDurableCompletionExternalPublicationAuditFinalizationSink, MainNetExternalPublicationAuditFinalizationSink,
     ProductionExternalPublicationAuditFinalizationSink,
 };
+use qbind_node::pqc_governance_durable_completion_external_publication_audit_completion::{
+    external_publication_audit_completion_identity_digest,
+    evaluate_durable_completion_external_publication_audit_completion,
+    DurableCompletionExternalPublicationAuditCompletionExpectations,
+    DurableCompletionExternalPublicationAuditCompletionIdentity,
+    DurableCompletionExternalPublicationAuditCompletionInput,
+    DurableCompletionExternalPublicationAuditCompletionKind,
+    DurableCompletionExternalPublicationAuditCompletionLedger,
+    DurableCompletionExternalPublicationAuditCompletionOutcome,
+    DurableCompletionExternalPublicationAuditCompletionPolicy,
+    DurableCompletionExternalPublicationAuditCompletionRequest,
+    FixtureDurableCompletionExternalPublicationAuditCompletionSink,
+};
 use qbind_node::pqc_governance_durable_completion_external_publication_acknowledgement::{
     external_publication_acknowledgement_identity_digest,
     evaluate_durable_completion_external_publication_acknowledgement,
@@ -3303,7 +3316,7 @@ fn attach_run280_external_publication_acknowledgement(
 #[allow(dead_code)]
 struct AttachedExternalPublicationAuditFinalization {
     outcome: DurableCompletionExternalPublicationAuditFinalizationOutcome,
-    external_publication_audit_completion_record_id: String,
+    external_publication_audit_finalization_record_id: String,
     identity_digest: String,
     request_digest: String,
     response_digest: String,
@@ -3507,11 +3520,11 @@ fn attach_run282_external_publication_audit_finalization(
         first
     };
     let record = ledger
-        .find(&action.external_publication_audit_completion_record_id)
+        .find(&action.external_publication_audit_finalization_record_id)
         .expect("recorded Run 282 settlement outcome publication");
     AttachedExternalPublicationAuditFinalization {
         outcome,
-        external_publication_audit_completion_record_id: action.external_publication_audit_completion_record_id.clone(),
+        external_publication_audit_finalization_record_id: action.external_publication_audit_finalization_record_id.clone(),
         identity_digest: external_publication_audit_finalization_identity_digest(&id)
             .as_hex()
             .to_string(),
@@ -3526,6 +3539,239 @@ fn attach_run282_external_publication_audit_finalization(
 
 
 // ===========================================================================
+// Run 284 external_publication_audit_completion attachment (prior boundary)
+// ===========================================================================
+
+/// The real Run 284 external-publication-audit-completion path, evaluated from
+/// the real Run 282 `ExternalPublicationAuditFinalizationRecorded` path. This is
+/// the carried attachment layer between the Run 282 audit-finalization boundary
+/// and the Run 286 audit-archive boundary. Only a recorded Run 284
+/// audit-completion outcome may create a Run 286 audit-archive request.
+struct AttachedExternalPublicationAuditCompletion {
+    outcome: DurableCompletionExternalPublicationAuditCompletionOutcome,
+    external_publication_audit_completion_record_id: String,
+    identity_digest: String,
+    request_digest: String,
+    response_digest: String,
+    record_digest: String,
+    transcript_digest: String,
+    consumer: AttachedConsumer,
+    external_publication_receipt: AttachedExternalPublicationReceipt,
+}
+
+fn run284_confirmation_identity() -> DurableCompletionExternalPublicationAuditCompletionIdentity {
+    DurableCompletionExternalPublicationAuditCompletionIdentity {
+        confirmation_id: AUDIT_FINALIZATION_ID.to_string(),
+        kind: DurableCompletionExternalPublicationAuditCompletionKind::FixtureInMemory,
+        policy: DurableCompletionExternalPublicationAuditCompletionPolicy::FixtureAllowed,
+        domain_separation_tag: AUDIT_FINALIZATION_DOMAIN_TAG.to_string(),
+    }
+}
+
+fn attach_run284_external_publication_audit_completion(
+    environment: TrustBundleEnvironment,
+    action: &ActionLabel,
+    confirmation_duplicate: bool,
+) -> AttachedExternalPublicationAuditCompletion {
+    let external_publication_audit_finalization =
+        attach_run282_external_publication_audit_finalization(environment, action, false);
+    let consumer = external_publication_audit_finalization.consumer.clone();
+    let ack = &consumer.ack;
+    let confirmation_env = match environment {
+        TrustBundleEnvironment::Devnet | TrustBundleEnvironment::Testnet => environment,
+        TrustBundleEnvironment::Mainnet => TrustBundleEnvironment::Devnet,
+    };
+    let surface = GovernanceExecutionRuntimeSurface::ReloadApply;
+    let env = ModeledGovernanceTrustMutationEnvironmentBinding {
+        environment: confirmation_env,
+        chain_id: CHAIN.to_string(),
+        genesis_hash: GENESIS.to_string(),
+    };
+    let runtime = ModeledGovernanceTrustMutationRuntimeBinding {
+        governance_surface: surface,
+        mutation_surface: ModeledGovernanceTrustMutationSurface {
+            validation_surface: surface,
+            mutation_surface: surface,
+        },
+        authority_domain_sequence: SEQUENCE,
+    };
+    let id = run284_confirmation_identity();
+    let request = DurableCompletionExternalPublicationAuditCompletionRequest {
+        external_publication_audit_completion_record_id: action.external_publication_audit_completion_record_id.clone(),
+        environment: confirmation_env,
+        chain_id: CHAIN.to_string(),
+        genesis_hash: GENESIS.to_string(),
+        governance_surface: surface,
+        validation_surface: surface,
+        mutation_surface: surface,
+        proposal_id: action.proposal_id.clone(),
+        decision_id: action.decision_id.clone(),
+        candidate_digest: action.candidate_digest.clone(),
+        authority_domain_sequence: SEQUENCE,
+        pipeline_decision_digest: PIPELINE_DIGEST.to_string(),
+        sink_decision_digest: SINK_DIGEST.to_string(),
+        reporter_decision_digest: REPORTER_DIGEST.to_string(),
+        finalization_decision_digest: FINALIZATION_DECISION_DIGEST.to_string(),
+        attestation_digest: ATTESTATION_DIGEST.to_string(),
+        attestation_id: ATTESTATION_ID.to_string(),
+        backend_identity_digest: ack.receipt.backend.identity_digest.clone(),
+        backend_request_digest: ack.receipt.backend.request_digest.clone(),
+        backend_response_digest: ack.receipt.backend.response_digest.clone(),
+        backend_receipt_digest: ack.receipt.backend.receipt_digest.clone(),
+        backend_transcript_digest: ack.receipt.backend.transcript_digest.clone(),
+        backend_record_id: ack.receipt.backend.backend_record_id.clone(),
+        receipt_identity_digest: ack.receipt.identity_digest.clone(),
+        receipt_request_digest: ack.receipt.request_digest.clone(),
+        receipt_response_digest: ack.receipt.response_digest.clone(),
+        receipt_record_digest: ack.receipt.record_digest.clone(),
+        receipt_transcript_digest: ack.receipt.transcript_digest.clone(),
+        receipt_record_id: ack.receipt.receipt_record_id.clone(),
+        acknowledgement_identity_digest: ack.identity_digest.clone(),
+        acknowledgement_request_digest: ack.request_digest.clone(),
+        acknowledgement_response_digest: ack.response_digest.clone(),
+        acknowledgement_record_digest: ack.record_digest.clone(),
+        acknowledgement_transcript_digest: ack.transcript_digest.clone(),
+        acknowledgement_record_id: ack.ack_record_id.clone(),
+        consumer_identity_digest: consumer.identity_digest.clone(),
+        consumer_request_digest: consumer.request_digest.clone(),
+        consumer_response_digest: consumer.response_digest.clone(),
+        consumer_record_digest: consumer.record_digest.clone(),
+        consumer_transcript_digest: consumer.transcript_digest.clone(),
+        consumer_record_id: consumer.consumer_record_id.clone(),
+        external_publication_audit_finalization_identity_digest: external_publication_audit_finalization.identity_digest.clone(),
+        external_publication_audit_finalization_request_digest: external_publication_audit_finalization.request_digest.clone(),
+        external_publication_audit_finalization_response_digest: external_publication_audit_finalization.response_digest.clone(),
+        external_publication_audit_finalization_record_digest: external_publication_audit_finalization.record_digest.clone(),
+        external_publication_audit_finalization_transcript_digest: external_publication_audit_finalization.transcript_digest.clone(),
+        external_publication_audit_finalization_record_id: external_publication_audit_finalization.external_publication_audit_finalization_record_id.clone(),
+        identity: id.clone(),
+        domain_separation_tag: AUDIT_FINALIZATION_DOMAIN_TAG.to_string(),
+    };
+    let expectations = DurableCompletionExternalPublicationAuditCompletionExpectations {
+        expected_external_publication_audit_completion_record_id: action.external_publication_audit_completion_record_id.clone(),
+        expected_environment: confirmation_env,
+        expected_chain_id: CHAIN.to_string(),
+        expected_genesis_hash: GENESIS.to_string(),
+        expected_governance_surface: surface,
+        expected_validation_surface: surface,
+        expected_mutation_surface: surface,
+        expected_proposal_id: action.proposal_id.clone(),
+        expected_decision_id: action.decision_id.clone(),
+        expected_candidate_digest: action.candidate_digest.clone(),
+        expected_authority_domain_sequence: SEQUENCE,
+        expected_pipeline_decision_digest: PIPELINE_DIGEST.to_string(),
+        expected_sink_decision_digest: SINK_DIGEST.to_string(),
+        expected_reporter_decision_digest: REPORTER_DIGEST.to_string(),
+        expected_finalization_decision_digest: FINALIZATION_DECISION_DIGEST.to_string(),
+        expected_attestation_digest: ATTESTATION_DIGEST.to_string(),
+        expected_attestation_id: ATTESTATION_ID.to_string(),
+        expected_backend_identity_digest: ack.receipt.backend.identity_digest.clone(),
+        expected_backend_request_digest: ack.receipt.backend.request_digest.clone(),
+        expected_backend_response_digest: ack.receipt.backend.response_digest.clone(),
+        expected_backend_receipt_digest: ack.receipt.backend.receipt_digest.clone(),
+        expected_backend_transcript_digest: ack.receipt.backend.transcript_digest.clone(),
+        expected_backend_record_id: ack.receipt.backend.backend_record_id.clone(),
+        expected_receipt_identity_digest: ack.receipt.identity_digest.clone(),
+        expected_receipt_request_digest: ack.receipt.request_digest.clone(),
+        expected_receipt_response_digest: ack.receipt.response_digest.clone(),
+        expected_receipt_record_digest: ack.receipt.record_digest.clone(),
+        expected_receipt_transcript_digest: ack.receipt.transcript_digest.clone(),
+        expected_receipt_record_id: ack.receipt.receipt_record_id.clone(),
+        expected_acknowledgement_identity_digest: ack.identity_digest.clone(),
+        expected_acknowledgement_request_digest: ack.request_digest.clone(),
+        expected_acknowledgement_response_digest: ack.response_digest.clone(),
+        expected_acknowledgement_record_digest: ack.record_digest.clone(),
+        expected_acknowledgement_transcript_digest: ack.transcript_digest.clone(),
+        expected_acknowledgement_record_id: ack.ack_record_id.clone(),
+        expected_consumer_identity_digest: consumer.identity_digest.clone(),
+        expected_consumer_request_digest: consumer.request_digest.clone(),
+        expected_consumer_response_digest: consumer.response_digest.clone(),
+        expected_consumer_record_digest: consumer.record_digest.clone(),
+        expected_consumer_transcript_digest: consumer.transcript_digest.clone(),
+        expected_consumer_record_id: consumer.consumer_record_id.clone(),
+        expected_external_publication_audit_finalization_identity_digest: external_publication_audit_finalization.identity_digest.clone(),
+        expected_external_publication_audit_finalization_request_digest: external_publication_audit_finalization.request_digest.clone(),
+        expected_external_publication_audit_finalization_response_digest: external_publication_audit_finalization
+            .response_digest
+            .clone(),
+        expected_external_publication_audit_finalization_record_digest: external_publication_audit_finalization.record_digest.clone(),
+        expected_external_publication_audit_finalization_transcript_digest: external_publication_audit_finalization
+            .transcript_digest
+            .clone(),
+        expected_external_publication_audit_finalization_record_id: external_publication_audit_finalization.external_publication_audit_finalization_record_id.clone(),
+        expected_identity: id.clone(),
+        expected_external_publication_audit_completion_kind: DurableCompletionExternalPublicationAuditCompletionKind::FixtureInMemory,
+        expected_external_publication_audit_completion_policy: DurableCompletionExternalPublicationAuditCompletionPolicy::FixtureAllowed,
+        expected_domain_separation_tag: AUDIT_FINALIZATION_DOMAIN_TAG.to_string(),
+    };
+    let input = DurableCompletionExternalPublicationAuditCompletionInput {
+        policy: DurableCompletionExternalPublicationAuditCompletionPolicy::FixtureAllowed,
+        environment_binding: env,
+        runtime_binding: runtime,
+        replay_binding: DurableReplayObservation::MutationAuthorized,
+        pipeline_binding:
+            GovernanceModeledEndToEndPipelineOutcome::ModeledApplierAppliedAndDurableConsumeAuthorized,
+        sink_binding: GovernanceModeledDurableConsumeSinkOutcome::ConsumeReceiptRecorded,
+        reporter_binding:
+            GovernanceModeledDurableConsumeCompletionReporterOutcome::CompletionReportRecorded,
+        confirmation_binding:
+            GovernanceModeledDurableCompletionFinalizationOutcome::DurableCompletionFinalized,
+        attestation_binding:
+            GovernanceModeledDurableCompletionAttestationOutcome::DurableCompletionAttested,
+        backend_binding: ack.receipt.backend.outcome.clone(),
+        receipt_binding: ack.receipt.outcome.clone(),
+        acknowledgement_binding: ack.outcome.clone(),
+        consumer_binding: consumer.outcome.clone(),
+        external_publication_audit_finalization_binding: external_publication_audit_finalization.outcome.clone(),
+        request,
+    };
+    let mut ledger = DurableCompletionExternalPublicationAuditCompletionLedger::new();
+    let mut sink = FixtureDurableCompletionExternalPublicationAuditCompletionSink::new();
+    let first = evaluate_durable_completion_external_publication_audit_completion(
+        &input,
+        &expectations,
+        &mut sink,
+        &mut ledger,
+    );
+    assert_eq!(
+        first,
+        DurableCompletionExternalPublicationAuditCompletionOutcome::ExternalPublicationAuditCompletionRecorded
+    );
+    let outcome = if confirmation_duplicate {
+        let second = evaluate_durable_completion_external_publication_audit_completion(
+            &input,
+            &expectations,
+            &mut sink,
+            &mut ledger,
+        );
+        assert_eq!(
+            second,
+            DurableCompletionExternalPublicationAuditCompletionOutcome::ExternalPublicationAuditCompletionDuplicateIdempotent
+        );
+        second
+    } else {
+        first
+    };
+    let record = ledger
+        .find(&action.external_publication_audit_completion_record_id)
+        .expect("recorded Run 284 external publication audit completion");
+    AttachedExternalPublicationAuditCompletion {
+        outcome,
+        external_publication_audit_completion_record_id: action.external_publication_audit_completion_record_id.clone(),
+        identity_digest: external_publication_audit_completion_identity_digest(&id)
+            .as_hex()
+            .to_string(),
+        request_digest: record.request_digest.as_hex().to_string(),
+        response_digest: record.response_digest.as_hex().to_string(),
+        record_digest: record.record_digest.as_hex().to_string(),
+        transcript_digest: record.transcript_digest.as_hex().to_string(),
+        consumer,
+        external_publication_receipt: external_publication_audit_finalization.external_publication_receipt,
+    }
+}
+
+
+// ===========================================================================
 // Run 286 owned-context builder
 // ===========================================================================
 
@@ -3535,7 +3781,7 @@ struct Ctx {
     request: DurableCompletionExternalPublicationAuditArchiveRequest,
     expectations: DurableCompletionExternalPublicationAuditArchiveExpectations,
     consumer: AttachedConsumer,
-    external_publication_audit_finalization: AttachedExternalPublicationAuditFinalization,
+    external_publication_audit_completion: AttachedExternalPublicationAuditCompletion,
 }
 
 fn ack_identity(
@@ -3543,10 +3789,10 @@ fn ack_identity(
     kind: DurableCompletionExternalPublicationAuditArchiveKind,
 ) -> DurableCompletionExternalPublicationAuditArchiveIdentity {
     DurableCompletionExternalPublicationAuditArchiveIdentity {
-        confirmation_id: AUDIT_FINALIZATION_ID.to_string(),
+        confirmation_id: AUDIT_COMPLETION_ID.to_string(),
         kind,
         policy,
-        domain_separation_tag: AUDIT_FINALIZATION_DOMAIN_TAG.to_string(),
+        domain_separation_tag: AUDIT_COMPLETION_DOMAIN_TAG.to_string(),
     }
 }
 
@@ -3560,9 +3806,9 @@ fn ctx_action(
     action: &ActionLabel,
     consumer_duplicate: bool,
 ) -> Ctx {
-    let external_publication_audit_finalization =
-        attach_run282_external_publication_audit_finalization(environment, action, consumer_duplicate);
-    let consumer = external_publication_audit_finalization.consumer.clone();
+    let external_publication_audit_completion =
+        attach_run284_external_publication_audit_completion(environment, action, consumer_duplicate);
+    let consumer = external_publication_audit_completion.consumer.clone();
     let ack = &consumer.ack;
     let env = ModeledGovernanceTrustMutationEnvironmentBinding {
         environment,
@@ -3620,14 +3866,14 @@ fn ctx_action(
         consumer_record_digest: consumer.record_digest.clone(),
         consumer_transcript_digest: consumer.transcript_digest.clone(),
         consumer_record_id: consumer.consumer_record_id.clone(),
-        external_publication_audit_completion_identity_digest: external_publication_audit_finalization.identity_digest.clone(),
-        external_publication_audit_completion_request_digest: external_publication_audit_finalization.request_digest.clone(),
-        external_publication_audit_completion_response_digest: external_publication_audit_finalization.response_digest.clone(),
-        external_publication_audit_completion_record_digest: external_publication_audit_finalization.record_digest.clone(),
-        external_publication_audit_completion_transcript_digest: external_publication_audit_finalization.transcript_digest.clone(),
-        external_publication_audit_completion_record_id: external_publication_audit_finalization.external_publication_audit_completion_record_id.clone(),
+        external_publication_audit_completion_identity_digest: external_publication_audit_completion.identity_digest.clone(),
+        external_publication_audit_completion_request_digest: external_publication_audit_completion.request_digest.clone(),
+        external_publication_audit_completion_response_digest: external_publication_audit_completion.response_digest.clone(),
+        external_publication_audit_completion_record_digest: external_publication_audit_completion.record_digest.clone(),
+        external_publication_audit_completion_transcript_digest: external_publication_audit_completion.transcript_digest.clone(),
+        external_publication_audit_completion_record_id: external_publication_audit_completion.external_publication_audit_completion_record_id.clone(),
         identity: id.clone(),
-        domain_separation_tag: AUDIT_FINALIZATION_DOMAIN_TAG.to_string(),
+        domain_separation_tag: AUDIT_COMPLETION_DOMAIN_TAG.to_string(),
     };
     let expectations = DurableCompletionExternalPublicationAuditArchiveExpectations {
         expected_external_publication_audit_archive_record_id: action.external_publication_audit_archive_record_id.clone(),
@@ -3671,20 +3917,20 @@ fn ctx_action(
         expected_consumer_record_digest: consumer.record_digest.clone(),
         expected_consumer_transcript_digest: consumer.transcript_digest.clone(),
         expected_consumer_record_id: consumer.consumer_record_id.clone(),
-        expected_external_publication_audit_completion_identity_digest: external_publication_audit_finalization.identity_digest.clone(),
-        expected_external_publication_audit_completion_request_digest: external_publication_audit_finalization.request_digest.clone(),
-        expected_external_publication_audit_completion_response_digest: external_publication_audit_finalization
+        expected_external_publication_audit_completion_identity_digest: external_publication_audit_completion.identity_digest.clone(),
+        expected_external_publication_audit_completion_request_digest: external_publication_audit_completion.request_digest.clone(),
+        expected_external_publication_audit_completion_response_digest: external_publication_audit_completion
             .response_digest
             .clone(),
-        expected_external_publication_audit_completion_record_digest: external_publication_audit_finalization.record_digest.clone(),
-        expected_external_publication_audit_completion_transcript_digest: external_publication_audit_finalization
+        expected_external_publication_audit_completion_record_digest: external_publication_audit_completion.record_digest.clone(),
+        expected_external_publication_audit_completion_transcript_digest: external_publication_audit_completion
             .transcript_digest
             .clone(),
-        expected_external_publication_audit_completion_record_id: external_publication_audit_finalization.external_publication_audit_completion_record_id.clone(),
+        expected_external_publication_audit_completion_record_id: external_publication_audit_completion.external_publication_audit_completion_record_id.clone(),
         expected_identity: id,
         expected_external_publication_audit_archive_kind: kind,
         expected_external_publication_audit_archive_policy: policy,
-        expected_domain_separation_tag: AUDIT_FINALIZATION_DOMAIN_TAG.to_string(),
+        expected_domain_separation_tag: AUDIT_COMPLETION_DOMAIN_TAG.to_string(),
     };
     Ctx {
         env,
@@ -3692,7 +3938,7 @@ fn ctx_action(
         request,
         expectations,
         consumer,
-        external_publication_audit_finalization,
+        external_publication_audit_completion,
     }
 }
 
@@ -3721,7 +3967,7 @@ impl Ctx {
         receipt: DurableCompletionAuditPublicationReceiptOutcome,
         acknowledgement: DurableCompletionAuditReceiptAcknowledgementOutcome,
         consumer: DurableCompletionAcknowledgementConsumerOutcome,
-        external_publication_audit_finalization: DurableCompletionExternalPublicationAuditFinalizationOutcome,
+        external_publication_audit_completion: DurableCompletionExternalPublicationAuditCompletionOutcome,
     ) -> DurableCompletionExternalPublicationAuditArchiveInput {
         DurableCompletionExternalPublicationAuditArchiveInput {
             policy,
@@ -3737,7 +3983,7 @@ impl Ctx {
             receipt_binding: receipt,
             acknowledgement_binding: acknowledgement,
             consumer_binding: consumer,
-            external_publication_audit_completion_binding: external_publication_audit_finalization,
+            external_publication_audit_completion_binding: external_publication_audit_completion,
             request: self.request.clone(),
         }
     }
@@ -3766,7 +4012,7 @@ impl Ctx {
             self.consumer.ack.receipt.outcome.clone(),
             self.consumer.ack.outcome.clone(),
             self.consumer.outcome.clone(),
-            self.external_publication_audit_finalization.outcome.clone(),
+            self.external_publication_audit_completion.outcome.clone(),
         )
     }
 
@@ -3783,7 +4029,7 @@ impl Ctx {
             self.consumer.ack.receipt.outcome.clone(),
             self.consumer.ack.outcome.clone(),
             self.consumer.outcome.clone(),
-            self.external_publication_audit_finalization.outcome.clone(),
+            self.external_publication_audit_completion.outcome.clone(),
         )
     }
 }
@@ -3854,7 +4100,7 @@ fn disabled_backend_policy_never_invokes_receipt_sink() {
         DurableCompletionAuditPublicationReceiptOutcome::LegacyBypassNoAuditReceipt,
         DurableCompletionAuditReceiptAcknowledgementOutcome::LegacyBypassNoAcknowledgement,
         DurableCompletionAcknowledgementConsumerOutcome::LegacyBypassNoConsumer,
-        DurableCompletionExternalPublicationAuditFinalizationOutcome::LegacyBypassNoExternalPublicationAuditFinalization,
+        DurableCompletionExternalPublicationAuditCompletionOutcome::LegacyBypassNoExternalPublicationAuditCompletion,
     );
     let mut ledger = DurableCompletionExternalPublicationAuditArchiveLedger::new();
     let mut sink = fixture_sink();
@@ -3896,7 +4142,7 @@ fn devnet_fixture_chain_records_exactly_one_receipt_only_after_backend_submissio
     assert!(external_publication_audit_archive_outcome_projects_to_recorded(&outcome));
     assert_eq!(sink.invocations(), 1);
     assert_eq!(ledger.len(), 1);
-    assert!(ledger.contains(AUDIT_FINALIZATION_RECORD_ID));
+    assert!(ledger.contains(AUDIT_COMPLETION_RECORD_ID));
     assert_eq!(
         external_publication_audit_archive_identity_digest(&c.request.identity),
         c.request.identity.digest()
@@ -3995,7 +4241,7 @@ fn duplicate_identical_receipt_is_idempotent() {
 }
 
 fn run268_duplicate_idempotent_confirmation_only_matches_existing_never_creates() {
-    // A real Run 282 ExternalPublicationAuditFinalizationDuplicateIdempotent outcome with
+    // A real Run 284 ExternalPublicationAuditCompletionDuplicateIdempotent outcome with
     // identical digests.
     let dup_ctx = ctx_action(
         TrustBundleEnvironment::Devnet,
@@ -4007,8 +4253,8 @@ fn run268_duplicate_idempotent_confirmation_only_matches_existing_never_creates(
         true,
     );
     assert_eq!(
-        dup_ctx.external_publication_audit_finalization.outcome,
-        DurableCompletionExternalPublicationAuditFinalizationOutcome::ExternalPublicationAuditFinalizationDuplicateIdempotent
+        dup_ctx.external_publication_audit_completion.outcome,
+        DurableCompletionExternalPublicationAuditCompletionOutcome::ExternalPublicationAuditCompletionDuplicateIdempotent
     );
 
     // With no prior receipt, a duplicate-idempotent backend cannot create one.
@@ -4173,7 +4419,7 @@ fn validator_set_rotation_and_policy_change_unsupported() {
         c.consumer.ack.receipt.outcome.clone(),
         c.consumer.ack.outcome.clone(),
         c.consumer.outcome.clone(),
-        DurableCompletionExternalPublicationAuditFinalizationOutcome::ValidatorSetRotationUnsupportedNoAuditFinalization,
+        DurableCompletionExternalPublicationAuditCompletionOutcome::ValidatorSetRotationUnsupportedNoAuditCompletion,
     );
     let mut ledger = DurableCompletionExternalPublicationAuditArchiveLedger::new();
     let mut sink = fixture_sink();
@@ -4201,7 +4447,7 @@ fn validator_set_rotation_and_policy_change_unsupported() {
         c.consumer.ack.receipt.outcome.clone(),
         c.consumer.ack.outcome.clone(),
         c.consumer.outcome.clone(),
-        DurableCompletionExternalPublicationAuditFinalizationOutcome::PolicyChangeUnsupportedNoAuditFinalization,
+        DurableCompletionExternalPublicationAuditCompletionOutcome::PolicyChangeUnsupportedNoAuditCompletion,
     );
     let outcome = evaluate_durable_completion_external_publication_audit_archive(
         &policy_change,
@@ -4222,7 +4468,7 @@ fn validator_set_rotation_and_policy_change_unsupported() {
 // ===========================================================================
 
 fn assert_non_recording_confirmation(
-    external_publication_audit_finalization: DurableCompletionExternalPublicationAuditFinalizationOutcome,
+    external_publication_audit_completion: DurableCompletionExternalPublicationAuditCompletionOutcome,
     expected: DurableCompletionExternalPublicationAuditArchiveOutcome,
 ) {
     let c = devnet_ctx();
@@ -4238,7 +4484,7 @@ fn assert_non_recording_confirmation(
         c.consumer.ack.receipt.outcome.clone(),
         c.consumer.ack.outcome.clone(),
         c.consumer.outcome.clone(),
-        external_publication_audit_finalization,
+        external_publication_audit_completion,
     );
     let mut ledger = DurableCompletionExternalPublicationAuditArchiveLedger::new();
     let mut sink = fixture_sink();
@@ -4255,62 +4501,62 @@ fn assert_non_recording_confirmation(
 }
 
 fn non_recording_confirmation_outcomes_never_record_external_publication_audit_archive() {
-    use DurableCompletionExternalPublicationAuditFinalizationOutcome as Finalization;
+    use DurableCompletionExternalPublicationAuditCompletionOutcome as Finalization;
     use DurableCompletionExternalPublicationAuditArchiveOutcome as Receipt;
     assert_non_recording_confirmation(
-        Finalization::LegacyBypassNoExternalPublicationAuditFinalization,
+        Finalization::LegacyBypassNoExternalPublicationAuditCompletion,
         Receipt::LegacyBypassNoExternalPublicationAuditArchive,
     );
     assert_non_recording_confirmation(
-        Finalization::RejectedBeforeExternalPublicationAcknowledgementNoAuditFinalization,
+        Finalization::RejectedBeforeExternalPublicationAuditFinalizationNoAuditCompletion,
         Receipt::RejectedBeforeExternalPublicationAuditCompletionNoAuditArchive,
     );
     assert_non_recording_confirmation(
-        Finalization::ExternalPublicationAcknowledgementDidNotRecordNoAuditFinalization,
+        Finalization::ExternalPublicationAuditFinalizationDidNotRecordNoAuditCompletion,
         Receipt::ExternalPublicationAuditCompletionDidNotRecordNoAuditArchive,
     );
     assert_non_recording_confirmation(
-        Finalization::ExternalPublicationAuditFinalizationRejectedBeforeRecord,
+        Finalization::ExternalPublicationAuditCompletionRejectedBeforeRecord,
         Receipt::ExternalPublicationAuditCompletionDidNotRecordNoAuditArchive,
     );
     assert_non_recording_confirmation(
-        Finalization::ExternalPublicationAuditFinalizationRecordFailedNoAuditFinalization,
+        Finalization::ExternalPublicationAuditCompletionRecordFailedNoAuditCompletion,
         Receipt::ExternalPublicationAuditCompletionDidNotRecordNoAuditArchive,
     );
     assert_non_recording_confirmation(
-        Finalization::ExternalPublicationAuditFinalizationRolledBackNoAuditFinalization,
+        Finalization::ExternalPublicationAuditCompletionRolledBackNoAuditCompletion,
         Receipt::ExternalPublicationAuditCompletionDidNotRecordNoAuditArchive,
     );
     assert_non_recording_confirmation(
-        Finalization::ExternalPublicationAuditFinalizationRollbackFailedFatalNoAuditFinalization,
+        Finalization::ExternalPublicationAuditCompletionRollbackFailedFatalNoAuditCompletion,
         Receipt::ExternalPublicationAuditCompletionDidNotRecordNoAuditArchive,
     );
     assert_non_recording_confirmation(
-        Finalization::ExternalPublicationAuditFinalizationAmbiguousFailClosedNoAuditFinalization,
+        Finalization::ExternalPublicationAuditCompletionAmbiguousFailClosedNoAuditCompletion,
         Receipt::ExternalPublicationAuditCompletionDidNotRecordNoAuditArchive,
     );
     assert_non_recording_confirmation(
-        Finalization::ProductionExternalPublicationAuditFinalizationUnavailableNoAuditFinalization,
+        Finalization::ProductionExternalPublicationAuditCompletionUnavailableNoAuditCompletion,
         Receipt::ExternalPublicationAuditCompletionDidNotRecordNoAuditArchive,
     );
     assert_non_recording_confirmation(
-        Finalization::MainNetExternalPublicationAuditFinalizationUnavailableNoAuditFinalization,
+        Finalization::MainNetExternalPublicationAuditCompletionUnavailableNoAuditCompletion,
         Receipt::ExternalPublicationAuditCompletionDidNotRecordNoAuditArchive,
     );
     assert_non_recording_confirmation(
-        Finalization::ExternalExternalPublicationAuditFinalizationUnavailableNoAuditFinalization,
+        Finalization::ExternalExternalPublicationAuditCompletionUnavailableNoAuditCompletion,
         Receipt::ExternalPublicationAuditCompletionDidNotRecordNoAuditArchive,
     );
     assert_non_recording_confirmation(
-        Finalization::MainNetPeerDrivenApplyRefusedNoAuditFinalization,
+        Finalization::MainNetPeerDrivenApplyRefusedNoAuditCompletion,
         Receipt::MainNetPeerDrivenApplyRefusedNoAuditArchive,
     );
     assert_non_recording_confirmation(
-        Finalization::ValidatorSetRotationUnsupportedNoAuditFinalization,
+        Finalization::ValidatorSetRotationUnsupportedNoAuditCompletion,
         Receipt::ValidatorSetRotationUnsupportedNoAuditArchive,
     );
     assert_non_recording_confirmation(
-        Finalization::PolicyChangeUnsupportedNoAuditFinalization,
+        Finalization::PolicyChangeUnsupportedNoAuditCompletion,
         Receipt::PolicyChangeUnsupportedNoAuditArchive,
     );
 }
@@ -4752,7 +4998,7 @@ fn assert_window(
     let input = c.recorded();
     let ledger = recovered_ledger();
     let record = if with_record {
-        ledger.find(AUDIT_FINALIZATION_RECORD_ID)
+        ledger.find(AUDIT_COMPLETION_RECORD_ID)
     } else {
         None
     };
@@ -5068,7 +5314,7 @@ fn release_symbol_reachability_probe() {
     assert!(!outcome.no_commitment());
     assert_eq!(
         outcome.tag(),
-        "external-publication-audit-completion-recorded"
+        "external-publication-audit-archive-recorded"
     );
     assert_eq!(
         sink.kind(),
@@ -5106,7 +5352,7 @@ fn release_symbol_reachability_probe() {
     assert!(!transcript_digest.as_hex().is_empty());
 
     let ledger_record: &DurableCompletionExternalPublicationAuditArchiveLedgerRecord = ledger
-        .find(AUDIT_FINALIZATION_RECORD_ID)
+        .find(AUDIT_COMPLETION_RECORD_ID)
         .expect("external-publication-audit-completion ledger record");
     assert_eq!(
         ledger_record.status,
@@ -5128,7 +5374,7 @@ fn release_symbol_reachability_probe() {
     );
     assert_eq!(
         DurableCompletionExternalPublicationAuditArchivePolicy::ProductionExternalPublicationAuditArchiveRequired.tag(),
-        "production-external-publication-audit-completion-required"
+        "production-external-publication-audit-archive-required"
     );
     assert!(DurableCompletionExternalPublicationAuditArchiveKind::FixtureInMemory.is_fixture());
     assert!(DurableCompletionExternalPublicationAuditArchiveKind::ProductionExternalPublicationAuditArchiveUnavailable.is_unavailable());
@@ -5320,7 +5566,7 @@ fn main() {
     fs::write(outdir.join("helper_summary.txt"), &summary).expect("write helper summary");
     fs::write(
         outdir.join("fixtures/run_287_projection_rule.txt"),
-        "input.external_publication_audit_completion_binding\nproject_external_publication_audit_completion_outcome_to_external_publication_audit_archive_request\nExternalPublicationAuditFinalizationRecorded -> CreateRequest\n",
+        "input.external_publication_audit_completion_binding\nproject_external_publication_audit_completion_outcome_to_external_publication_audit_archive_request\nExternalPublicationAuditCompletionRecorded -> CreateRequest\n",
     ).expect("write projection fixture");
     print!("{summary}");
     if total_fail != 0 {
