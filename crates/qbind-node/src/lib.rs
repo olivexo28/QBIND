@@ -509,6 +509,25 @@ pub mod pqc_production_remote_signer_backend;
 // KMS/HSM remain unavailable/fail-closed. Release-binary KMS/HSM
 // backend-boundary evidence is deferred to Run 204.
 pub mod pqc_authority_kms_hsm_backend;
+// Run 295 — source/test production KMS/HSM/cloud-KMS/PKCS#11 custody
+// backend client. Composes the Run 203 KMS/HSM boundary into a real
+// source/test custody backend: typed provider-kind / policy / request-kind
+// taxonomy, deterministic domain-separated request-id and custody
+// transcript digests, DevNet/TestNet-only fixture KMS/HSM providers, a
+// mockable provider transport, and production cloud-KMS / PKCS#11-HSM /
+// generic KMS/HSM provider paths that are reachable but fail closed
+// (unavailable/misconfigured) without real provider config / module /
+// session / key handle. The default policy is `Disabled` and fails closed
+// before any request/transport call; MainNet is refused absent production
+// authority criteria; there is no fixture/RemoteSigner/local-signing
+// fallback under a production policy. Non-mutating: no Run 070 call, no
+// LivePqcTrustState mutation, no trust swap, no session eviction, no
+// sequence/marker write, no durable replay overwrite, no settlement, no
+// external publication, no governance execution, no validator-set
+// rotation, no raw local production signing-key loading, no committed
+// secrets. This run is source/test only — release-binary evidence is
+// deferred to Run 296. Full C4 remains OPEN; C5 remains OPEN.
+pub mod pqc_production_kms_hsm_custody_backend;
 // Run 205 — source/test production custody attestation verifier skeleton.
 // Defines a typed `CustodyAttestationClass` (`Disabled`,
 // `FixtureAttestation`, `RemoteSignerAttestation`, `KmsAttestation`,
