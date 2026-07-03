@@ -1,0 +1,498 @@
+Run 291 — Production durable replay RocksDB backend source/test implementation
+
+You are continuing QBIND after Run 290.
+
+This run intentionally pivots from adding more modeled ladder layers to closing Red production-backend rows.
+
+Current accepted state:
+
+Run 289 was accepted as PASS / release-binary evidence positive for the Run 288 external-publication-audit-seal modeled boundary.
+
+Run 290 was accepted as PASS / source-test positive for the durable-completion external-publication-audit-seal consumer / external-publication-audit-anchor interface boundary.
+
+Run 290 is not release-binary evidenced. Release-binary evidence for Run 290 is intentionally deferred because the project is pivoting from modeled-layer expansion to Red-row production backend closure. This must be documented honestly and must not weaken the C4/C5 matrix. The modeled durable-completion / settlement / external-publication stack remains Yellow and is release-binary-evidenced only through Run 289.
+
+Full C4 remains OPEN. C5 remains OPEN.
+
+Strategic objective:
+
+Start Red-row closure by implementing the first real production durable replay RocksDB backend at source/test level.
+
+This run must move one production-backend row from “not implemented / unavailable” toward production-real implementation by replacing a purely in-memory/fixture durable replay boundary with a real RocksDB-backed durable replay backend, while keeping runtime enablement disabled/fail-closed until later release-binary evidence.
+
+This is source/test implementation only. Release-binary evidence is deferred to Run 292.
+
+Primary objective:
+
+Add a production-capable RocksDB durable replay backend for the governance durable replay layer.
+
+The backend must persist typed replay records durably, recover them across reopen, enforce domain binding, enforce idempotency/equivocation rules, reject corrupt or wrong-domain state fail-closed, and expose a mockable trait-compatible surface that can be driven by source tests without enabling any production runtime path by default.
+
+The backend must be real code, not another in-memory model.
+
+Required investigation before implementation:
+
+Inspect the existing durable replay modules and tests, especially the Run 238 / Run 240 surfaces, to identify the actual names and traits already used by the governance durable replay stack.
+
+At minimum inspect:
+
+* `crates/qbind-node/src/**` for existing durable replay backend/runtime integration modules.
+* `crates/qbind-node/tests/run_238_governance_evaluator_replay_durable_backend_tests.rs`
+* `crates/qbind-node/tests/run_240_governance_evaluator_replay_durable_runtime_integration_tests.rs`
+* any existing replay traits, replay record types, durable runtime integration types, replay digest helpers, and fixture/in-memory ledgers.
+* existing RocksDB production storage helpers, especially consensus storage lifecycle code, schema/version checks, lock handling, corruption fail-closed patterns, and temp-dir test conventions.
+* C4/C5 criteria and runtime audit docs, to preserve current taxonomy.
+
+If the actual existing module/type names differ from the suggested names below, use the real names and record the substitutions honestly in the evidence report.
+
+Required new source module:
+
+Prefer:
+
+`crates/qbind-node/src/pqc_governance_production_durable_replay_rocksdb.rs`
+
+If an existing durable replay module is the correct extension point, add the backend there only if that is cleaner and safer. Avoid broad refactors.
+
+Register the module in:
+
+`crates/qbind-node/src/lib.rs`
+
+Required new test file:
+
+`crates/qbind-node/tests/run_291_production_durable_replay_rocksdb_tests.rs`
+
+Required evidence doc:
+
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_291.md`
+
+Required narrow doc updates:
+
+* `docs/protocol/QBIND_C4_C5_CLOSURE_CRITERIA.md`
+* `docs/protocol/QBIND_GOVERNANCE_EXECUTION_RUNTIME_SURFACE_AUDIT.md`
+* `docs/ops/QBIND_PQC_TRUST_LIFECYCLE_RUNBOOK.md`
+* `docs/protocol/QBIND_PEER_DRIVEN_TRUST_BUNDLE_APPLY_SAFETY.md`
+* `docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md`
+* `docs/whitepaper/contradiction.md`
+
+Strict scope:
+
+Allowed:
+
+* Add a real RocksDB-backed durable replay backend.
+* Add a versioned backend schema / column-family layout if needed.
+* Add source/test-only temp-dir tests that open, write, close, reopen, and verify durable replay state.
+* Add explicit backend policy selectors/types if needed, defaulting to Disabled or Unavailable.
+* Add fail-closed production backend error taxonomy.
+* Add migration/version refusal logic for unsupported schemas.
+* Add corruption and wrong-domain fail-closed tests.
+* Add compatibility composition tests with the existing Run 238 / Run 240 durable replay surfaces.
+* Add docs explaining that this is production backend implementation at source/test level, not release-binary evidence and not runtime enablement.
+
+Not allowed:
+
+* Do not enable the RocksDB durable replay backend by default in the production binary.
+* Do not add public CLI flags unless absolutely necessary; prefer library/source-test policy selection only for this run.
+* Do not make MainNet use the backend by default.
+* Do not claim C4 closure.
+* Do not claim C5 closure.
+* Do not claim full production readiness.
+* Do not claim release-binary evidence.
+* Do not claim MainNet evidence.
+* Do not implement custody, RemoteSigner, KMS, HSM, cloud-KMS, PKCS#11, or custody attestation.
+* Do not implement real on-chain governance proof verification.
+* Do not implement governance execution engine behavior beyond the replay backend boundary.
+* Do not implement validator-set rotation.
+* Do not implement real settlement, settlement finality, settlement receipt, settlement-receipt acknowledgement, settlement-finality projection, settlement-outcome report backend, or settlement-outcome publication.
+* Do not implement real external publication, external-publication confirmation, receipt, acknowledgement, audit finalization, audit completion, audit archive, audit seal, or audit anchor.
+* Do not call Run 070.
+* Do not mutate `LivePqcTrustState`.
+* Do not swap trust state.
+* Do not evict sessions.
+* Do not write PQC trust-bundle sequence files.
+* Do not write authority markers.
+* Do not change trust-bundle wire format.
+* Do not change peer-candidate wire format.
+* Do not change consensus wire format.
+* Do not weaken any fail-closed behavior from Runs 050–290.
+* Do not reinterpret Yellow modeled stack rows as production-ready.
+* Do not turn any Red production row Green in docs unless both production implementation and release-binary evidence exist. Run 291 may move the relevant row toward Yellow or “implementation started/source-test positive,” but not Green.
+
+Backend design requirements:
+
+The RocksDB durable replay backend must provide:
+
+1. Domain binding
+
+Persisted replay data must be bound to:
+
+* environment;
+* chain_id;
+* genesis_hash or explicit optional genesis-domain binding if available;
+* backend schema version;
+* replay namespace / domain separator;
+* authority-domain sequence or replay epoch if already part of the existing replay model.
+
+Wrong environment, wrong chain, wrong genesis/domain, wrong namespace, or unsupported schema must fail closed.
+
+2. Versioned schema
+
+Define a stable schema version.
+
+On open:
+
+* supported schema opens successfully;
+* absent empty DB initializes exactly once;
+* unsupported future schema fails closed;
+* malformed schema marker fails closed;
+* missing required metadata in a non-empty DB fails closed;
+* partial initialization residue fails closed or is recovered only if recovery is explicitly safe and tested.
+
+3. Atomic record writes
+
+A replay record write must be all-or-nothing.
+
+If a record is acknowledged as written, it must survive reopen.
+
+If a simulated write failure occurs before commit, no partial record may be visible.
+
+If a simulated write failure occurs after an internal partial stage, recovery must fail closed or roll back deterministically.
+
+4. Idempotency and equivocation
+
+Duplicate identical replay record:
+
+* must be idempotent;
+* must not create a second logical record;
+* must return a typed idempotent outcome.
+
+Same replay record id with different digest:
+
+* must fail closed as equivocation;
+* must not overwrite the original record;
+* must preserve the original durable record across reopen.
+
+5. Replay ordering
+
+If the existing durable replay model has sequence/order/stage constraints, preserve them.
+
+Out-of-order records must fail closed unless the existing model explicitly permits them.
+
+A later stage must not appear durable unless all required prior durable records exist or are supplied by the existing replay model.
+
+6. Recovery / reopen semantics
+
+Tests must prove:
+
+* empty DB opens;
+* write then reopen returns the same record;
+* duplicate then reopen remains one record;
+* equivocation attempt then reopen preserves the original record;
+* wrong-domain reopen fails closed;
+* unsupported schema reopen fails closed;
+* corrupted metadata fails closed;
+* corrupted record payload/digest fails closed;
+* lock contention / second open fails closed if the existing RocksDB API surfaces lock errors;
+* read-only or unwritable directory fails closed where representable.
+
+7. No hidden fallback
+
+The backend must never silently fall back to in-memory replay if RocksDB open/write/read fails.
+
+There must be a typed unavailable/fail-closed outcome.
+
+No `.tmp` residue or partial-state cleanup should silently erase evidence unless explicitly designed and tested.
+
+8. Production default policy
+
+Default policy must remain Disabled or unavailable/fail-closed.
+
+Fixture/in-memory replay remains available only where already allowed.
+
+Production RocksDB backend is source/test selectable in this run but not default-enabled in the production binary.
+
+MainNet must not be enabled by this run.
+
+Suggested type names:
+
+Use actual existing names where available. Otherwise use names close to:
+
+* `ProductionDurableReplayRocksDbBackend`
+* `DurableReplayRocksDbConfig`
+* `DurableReplayRocksDbPolicy`
+* `DurableReplayRocksDbIdentity`
+* `DurableReplayRocksDbOpenOutcome`
+* `DurableReplayRocksDbWriteOutcome`
+* `DurableReplayRocksDbReadOutcome`
+* `DurableReplayRocksDbRecoveryOutcome`
+* `DurableReplayRocksDbError`
+* `DurableReplayRocksDbSchemaVersion`
+* `DurableReplayRocksDbRecord`
+* `DurableReplayRocksDbRecordId`
+* `DurableReplayRocksDbRecordDigest`
+* `DurableReplayRocksDbDomain`
+* `DurableReplayRocksDbSnapshot`
+
+Suggested trait:
+
+If an existing replay trait exists, implement that trait.
+
+Otherwise introduce a narrow trait such as:
+
+`GovernanceProductionDurableReplayBackend`
+
+with methods close to:
+
+* `open_or_initialize(...)`
+* `record_replay_event(...)`
+* `read_replay_record(...)`
+* `scan_replay_records(...)`
+* `recover_replay_window(...)`
+* `close_or_flush(...)` if needed.
+
+Do not create a broad storage abstraction if a narrow backend is sufficient.
+
+Required digest / canonical encoding rules:
+
+Use deterministic canonical bytes for record digests.
+
+Every digest must bind:
+
+* domain separator;
+* schema version;
+* environment;
+* chain_id;
+* genesis/domain if available;
+* record id;
+* stage/kind;
+* prior-stage digest if applicable;
+* payload digest;
+* replay sequence/order if applicable.
+
+Do not use debug formatting as canonical bytes.
+
+Do not use wall-clock time as a consensus/replay-authorizing value.
+
+Do not use random IDs unless the existing replay model already requires them; prefer deterministic record IDs from typed input.
+
+Required tests:
+
+Create a focused Run 291 source/test corpus. Target at least 40 tests, more if the existing replay model requires it.
+
+Minimum test groups:
+
+A. Open / schema tests
+
+* opens empty temp RocksDB and initializes metadata;
+* reopens initialized DB with same domain;
+* refuses wrong environment;
+* refuses wrong chain_id;
+* refuses wrong genesis/domain binding if available;
+* refuses unsupported future schema;
+* refuses malformed schema marker;
+* refuses missing metadata in non-empty DB;
+* refuses corrupted metadata;
+* refuses lock contention / second open if representable;
+* refuses unwritable path if representable.
+
+B. Write / read durability tests
+
+* writes one replay record and reads it back;
+* write survives close/reopen;
+* multiple records survive reopen in deterministic order;
+* read missing record returns typed not-found without mutation;
+* scan empty DB returns empty;
+* scan populated DB returns deterministic order;
+* flush/drop/reopen preserves committed data.
+
+C. Idempotency / equivocation tests
+
+* duplicate identical record is idempotent;
+* duplicate identical record after reopen is idempotent;
+* same id different digest fails closed;
+* same id different payload fails closed;
+* equivocation attempt does not overwrite original;
+* original survives reopen after equivocation attempt.
+
+D. Atomicity / recovery tests
+
+* simulated pre-write failure leaves no record;
+* simulated mid-write failure leaves no visible committed record or fails closed on recovery;
+* simulated post-write acknowledgement survives reopen;
+* corrupted record payload fails closed;
+* corrupted record digest fails closed;
+* truncated record fails closed;
+* partial batch residue fails closed or recovers only if explicitly designed.
+
+E. Composition with existing durable replay stack
+
+* existing fixture/in-memory durable replay tests still pass;
+* RocksDB backend accepts the same valid replay record shape as existing fixture backend;
+* existing Run 238 durable replay backend semantics are preserved;
+* existing Run 240 runtime integration semantics are preserved;
+* disabled policy preserves legacy/fixture behavior;
+* production RocksDB policy is source/test selectable only;
+* production binary default remains unaffected.
+
+F. Security invariants
+
+* rejected write does not call Run 070;
+* rejected write does not mutate `LivePqcTrustState`;
+* rejected write does not evict sessions;
+* rejected write does not write trust-bundle sequence;
+* rejected write does not write authority marker;
+* rejected write does not perform settlement;
+* rejected write does not perform external publication;
+* rejected write does not perform custody/RemoteSigner/KMS/HSM signing;
+* rejected write does not perform validator-set rotation;
+* MainNet remains refused or disabled unless explicitly allowed by existing policy;
+* local fixture material cannot satisfy MainNet production authority.
+
+G. C4/C5 taxonomy tests or grep checks
+
+Add source-test or doc grep checks where practical to prove:
+
+* Run 291 is source/test production durable replay RocksDB backend implementation;
+* Run 291 is not release-binary evidence;
+* modeled stack remains Yellow and release-evidenced only through Run 289;
+* real production backend rows remain Red unless implementation + release evidence exist;
+* Full C4 remains OPEN;
+* C5 remains OPEN.
+
+Required regression commands:
+
+Run at minimum:
+
+* `cargo build -p qbind-node --lib`
+* `cargo test -p qbind-node --test run_291_production_durable_replay_rocksdb_tests`
+* `cargo test -p qbind-node --test run_290_durable_completion_external_publication_audit_anchor_tests`
+* `cargo test -p qbind-node --test run_288_durable_completion_external_publication_audit_seal_tests`
+* `cargo test -p qbind-node --test run_286_durable_completion_external_publication_audit_archive_tests`
+* `cargo test -p qbind-node --test run_284_durable_completion_external_publication_audit_completion_tests`
+* `cargo test -p qbind-node --test run_282_durable_completion_external_publication_audit_finalization_tests`
+* `cargo test -p qbind-node --test run_280_durable_completion_external_publication_acknowledgement_tests`
+* `cargo test -p qbind-node --test run_278_durable_completion_external_publication_receipt_tests`
+* `cargo test -p qbind-node --test run_276_durable_completion_external_publication_confirmation_tests`
+* `cargo test -p qbind-node --test run_274_durable_completion_settlement_outcome_publication_tests`
+* `cargo test -p qbind-node --test run_272_durable_completion_settlement_outcome_report_tests`
+* `cargo test -p qbind-node --test run_270_durable_completion_settlement_receipt_acknowledgement_tests`
+* `cargo test -p qbind-node --test run_268_durable_completion_settlement_finalization_tests`
+* `cargo test -p qbind-node --test run_266_durable_completion_settlement_commitment_tests`
+* `cargo test -p qbind-node --test run_264_durable_completion_consumer_settlement_projection_tests`
+* `cargo test -p qbind-node --test run_262_durable_completion_acknowledgement_consumer_tests`
+* `cargo test -p qbind-node --test run_260_durable_completion_audit_receipt_acknowledgement_tests`
+* `cargo test -p qbind-node --test run_258_durable_completion_audit_publication_receipt_tests`
+* `cargo test -p qbind-node --test run_256_durable_completion_attestation_backend_tests`
+* `cargo test -p qbind-node --test run_254_modeled_durable_completion_attestation_projection_tests`
+* `cargo test -p qbind-node --test run_252_modeled_durable_completion_finalization_projection_tests`
+* `cargo test -p qbind-node --test run_250_modeled_durable_consume_completion_reporter_tests`
+* `cargo test -p qbind-node --test run_248_modeled_durable_consume_projection_sink_tests`
+* `cargo test -p qbind-node --test run_246_governance_modeled_end_to_end_pipeline_tests`
+* `cargo test -p qbind-node --test run_244_modeled_governance_trust_mutation_applier_tests`
+* `cargo test -p qbind-node --test run_242_governance_execution_mutation_engine_tests`
+* `cargo test -p qbind-node --test run_240_governance_evaluator_replay_durable_runtime_integration_tests`
+* `cargo test -p qbind-node --test run_238_governance_evaluator_replay_durable_backend_tests`
+* `cargo test -p qbind-node --test run_236_governance_evaluator_replay_consume_runtime_integration_tests`
+* `cargo test -p qbind-node --test run_234_governance_evaluator_replay_consume_boundary_tests`
+* `cargo test -p qbind-node --test run_232_governance_evaluator_replay_runtime_integration_tests`
+* `cargo test -p qbind-node --test run_230_governance_evaluator_replay_state_tests`
+* `cargo test -p qbind-node --test run_228_peer_evaluator_context_representation_tests`
+* `cargo test -p qbind-node --test run_226_governance_evaluator_runtime_callsite_wiring_tests`
+* `cargo test -p qbind-node --test run_224_governance_evaluator_runtime_integration_tests`
+* `cargo test -p qbind-node --lib pqc_authority`
+* `cargo test -p qbind-node --lib`
+
+If any older regression target has a known pre-existing failure, prove it existed before Run 291 changes and document it honestly. Do not hide regressions.
+
+Security scanning:
+
+* Run secret scanning and report result.
+* Run CodeQL if available and report honestly.
+* Because Run 291 adds a real RocksDB-backed backend, CodeQL or an honest skip/timeout reason is especially important.
+* If CodeQL skips because the database is too large, times out, tooling is unavailable, or reports no analyzable changes, say that exactly and do not claim CodeQL coverage.
+
+Documentation requirements:
+
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_291.md` must include:
+
+* exact verdict;
+* files changed;
+* backend design summary;
+* schema/domain binding summary;
+* durability/reopen evidence;
+* idempotency/equivocation evidence;
+* corruption/wrong-domain fail-closed evidence;
+* regression results;
+* secret scan result;
+* CodeQL result or honest limitation;
+* C4/C5 taxonomy status;
+* why Run 291 is not release-binary evidence;
+* why Run 291 does not close C4/C5;
+* suggested Run 292 release-binary evidence next step.
+
+C4/C5 closure criteria update:
+
+Update the matrix carefully.
+
+The modeled durable-completion / settlement / external-publication stack remains Yellow with release-binary evidence through Run 289 and source/test through Run 290.
+
+Add or update a row for production durable replay RocksDB backend:
+
+* after Run 291, it may be Yellow / source-test implementation landed, release-binary evidence pending;
+* it must not be Green until release-binary evidence proves the backend on real `target/release/qbind-node` and/or release-built helper, with restart/corruption/negative-invariant evidence.
+
+Do not mark C4 closed.
+
+Do not mark C5 closed.
+
+Contradiction handling:
+
+Update `docs/whitepaper/contradiction.md`.
+
+Add a “Run 291” entry.
+
+If no contradiction is found, state that Run 291 introduces a source/test production durable replay RocksDB backend while preserving C4/C5 OPEN status, default disabled/fail-closed runtime posture, and no MainNet enablement.
+
+If contradiction is found, record the exact contradiction with file/function/doc reference and recommend the smallest safe fix.
+
+Expected verdicts:
+
+Acceptable verdicts:
+
+* PASS / source-test production durable replay backend implementation, release-binary evidence deferred.
+* Partial-positive if the real RocksDB backend lands but some non-critical recovery/corruption scenario is deferred and documented.
+* Blocked only if existing durable replay abstractions cannot support RocksDB without a broader redesign. If blocked, document the exact blocker and smallest next run.
+
+Unacceptable verdicts:
+
+* Claiming C4 closure.
+* Claiming C5 closure.
+* Claiming release-binary evidence.
+* Enabling production runtime by default.
+* Silently falling back to in-memory backend on RocksDB failure.
+* Marking Red production rows Green without release evidence.
+* Skipping wrong-domain/corruption/idempotency/equivocation tests.
+* Hiding CodeQL failure/timeout/skip.
+* Hiding regression failures.
+* Broad redesign of unrelated governance, settlement, custody, consensus, trust-bundle, or wire surfaces.
+
+Suggested Run 292 next step after successful Run 291:
+
+Run 292 — release-binary evidence for the production durable replay RocksDB backend.
+
+Run 292 should build real `target/release/qbind-node` plus a release-built helper, exercise the RocksDB backend in release mode, prove write/reopen/replay/idempotency/equivocation/corruption/wrong-domain behavior, prove default production binary surfaces remain disabled/silent, and preserve Full C4 OPEN / C5 OPEN unless all required production gates are actually satisfied.
+
+Required final response format:
+
+1. Exact verdict.
+2. Files changed.
+3. Backend design summary.
+4. Schema/domain binding.
+5. Durability/reopen evidence.
+6. Idempotency/equivocation evidence.
+7. Corruption/wrong-domain fail-closed evidence.
+8. Tests run and results.
+9. C4/C5 matrix taxonomy status.
+10. Security invariants preserved.
+11. Honest limitations.
+12. C4/C5 status.
+13. Suggested Run 292 next step.
