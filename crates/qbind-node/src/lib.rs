@@ -868,6 +868,36 @@ pub mod pqc_governance_evaluator_replay_durable_runtime_integration;
 // refused; rejected paths are non-mutating and never invoke Run 070. Full C4
 // remains OPEN; C5 remains OPEN.
 pub mod pqc_governance_execution_mutation_engine;
+// Run 291 — source/test PRODUCTION durable replay RocksDB backend. Pivots from
+// modeled-layer expansion to Red production-backend closure by implementing the
+// first real production durable replay backend at source/test level. Unlike the
+// Run 238 FixtureDurableReplayBackend (in-process snapshot value-clone, no file
+// format), this module persists typed replay records to a REAL RocksDB database
+// on disk, recovers them across reopen, enforces domain binding (environment,
+// chain_id, genesis/domain, replay namespace, authority-domain sequence, schema
+// version), enforces idempotency (duplicate identical record is idempotent) and
+// equivocation (same id different digest fails closed, never overwrites), a
+// versioned schema (init-once empty DB / unsupported / malformed / missing /
+// corrupted metadata all fail closed), atomic WriteBatch record writes (survive
+// reopen or nothing), per-read digest verification (corrupt payload/digest/
+// truncated fails closed), Observed->Consumed stage ordering, and deterministic
+// recovery of partial-write residue. Defines DurableReplayRocksDbPolicy
+// (default Disabled), DurableReplayRocksDbIdentity/Config,
+// DurableReplayRocksDbRecord/Stage, DurableReplayEventInput,
+// DurableReplayRocksDb{Open,Write,Read,Recovery}Outcome, DurableReplayRocksDbError
+// taxonomy, the narrow mockable GovernanceProductionDurableReplayBackend trait,
+// the real ProductionDurableReplayRocksDbBackend, and an in-memory
+// MockDurableReplayBackend. Default policy is Disabled/fail-closed; MainNet is
+// refused at open; there is NO silent in-memory fallback on RocksDB failure. The
+// production binary is NOT wired to open this backend by default and no CLI flag
+// is added. Source/test only: performs no Run 070 call, no LivePqcTrustState
+// mutation, no trust swap, no session eviction, no sequence/marker write, no
+// settlement, no external publication, no custody/RemoteSigner/KMS/HSM signing,
+// and no validator-set rotation. Release-binary evidence for this backend is
+// deferred to Run 292; Run 291 does not claim C4/C5 closure, production
+// readiness, MainNet evidence, or release-binary evidence. Full C4 remains OPEN;
+// C5 remains OPEN.
+pub mod pqc_governance_production_durable_replay_rocksdb;
 // Run 244 — source/test governance modeled trust-state mutation applier
 // boundary. Adds the smallest in-memory model of what a future governance
 // mutation applier would do after every Run 242 mutation-engine gate has already
