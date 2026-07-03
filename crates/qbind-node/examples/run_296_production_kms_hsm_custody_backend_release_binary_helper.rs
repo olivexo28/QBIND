@@ -88,7 +88,6 @@ fn chain_for(env: TrustBundleEnvironment) -> &'static str {
         TrustBundleEnvironment::Devnet => "qbind-devnet",
         TrustBundleEnvironment::Testnet => "qbind-testnet",
         TrustBundleEnvironment::Mainnet => "qbind-mainnet",
-        _ => "qbind-other",
     }
 }
 
@@ -466,7 +465,7 @@ fn a16_run203_verifier_composition_is_exercised() {
     // Prove the Run 203 pure verifier composed by the Run 295 backend is
     // reachable/linked in release mode. `as usize` forces the symbol to be
     // materialized without needing to reconstruct its full argument surface.
-    let verifier_addr = verify_authority_custody_backend_response as usize;
+    let verifier_addr = verify_authority_custody_backend_response as *const () as usize;
     assert!(verifier_addr != 0);
     // And the accept path that internally dispatches to it authorizes.
     let env = TrustBundleEnvironment::Devnet;
@@ -1216,7 +1215,7 @@ fn f01_release_symbol_reachability_probe() {
     }
 
     // Run 203 pure verifier symbol is linked in release mode.
-    assert!(verify_authority_custody_backend_response as usize != 0);
+    assert!(verify_authority_custody_backend_response as *const () as usize != 0);
 
     // Invariant helpers.
     assert!(production_kms_hsm_custody_backend_default_is_disabled());

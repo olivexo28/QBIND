@@ -30,15 +30,15 @@ use qbind_node::pqc_production_remote_signer_backend::{
     ProductionRemoteSignerBackendConfig, ProductionRemoteSignerBackendPolicy,
     ProductionRemoteSignerError, ProductionRemoteSignerOutcome,
     ProductionRemoteSignerRecoveryOutcome, ProductionRemoteSignerRequestKind,
-    ProductionRemoteSignerRequestSpec, RemoteSignerBackendTransport, SubmittedRemoteSignerRequest,
+    ProductionRemoteSignerRequestSpec, SubmittedRemoteSignerRequest,
     PRODUCTION_REMOTE_SIGNER_BACKEND_PROTOCOL_VERSION, PRODUCTION_REMOTE_SIGNER_MAX_RESPONSE_BYTES,
 };
 use qbind_node::pqc_remote_authority_signer::{
     RemoteSignerIdentity, RemoteSignerMode, REMOTE_SIGNER_INVALID_SIGNATURE_SENTINEL,
 };
 use qbind_node::pqc_remote_signer_transport::{
-    FixtureLoopbackRemoteSignerTransport, RemoteSignerTransport, RemoteSignerTransportConfig,
-    RemoteSignerTransportResponseEnvelope, SimulatedTransportFault, TransportTimeoutRetryPolicy,
+    FixtureLoopbackRemoteSignerTransport, RemoteSignerTransportConfig,
+    RemoteSignerTransportResponseEnvelope, TransportTimeoutRetryPolicy,
 };
 use qbind_node::pqc_trust_bundle::TrustBundleEnvironment;
 
