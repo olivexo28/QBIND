@@ -443,6 +443,43 @@ pub mod pqc_remote_signer_policy_surface;
 // unavailable/fail-closed. Release-binary RemoteSigner transport-boundary
 // evidence is deferred to Run 202.
 pub mod pqc_remote_signer_transport;
+// Run 293 — source/test production RemoteSigner backend client. Adds the
+// first real backend that drives the Run 201 transport boundary: a typed
+// backend policy (`ProductionRemoteSignerBackendPolicy`, default
+// `Disabled`), backend config (`ProductionRemoteSignerBackendConfig`
+// wrapping the Run 201 transport config + backend protocol version), a
+// typed request spec (`ProductionRemoteSignerRequestSpec` with a
+// `ProductionRemoteSignerRequestKind`) from which it deterministically
+// derives the Run 194 inner request, the Run 201 request envelope, a
+// deterministic request id (`production_remote_signer_request_id`), and a
+// backend transcript digest
+// (`production_remote_signer_backend_transcript_digest`), a typed
+// transport error taxonomy (`ProductionRemoteSignerError` with retry
+// classification), a narrow mockable `RemoteSignerBackendTransport` trait
+// with a DevNet/TestNet source/test `LoopbackRemoteSignerService`
+// (wrapping the Run 201 fixture transport) and a programmable
+// `MockRemoteSignerBackendTransport`, the real client
+// `ProductionRemoteSignerBackend` implementing the
+// `GovernanceProductionRemoteSignerBackend` trait
+// (`build_request_envelope` / `submit_remote_signing_request` /
+// `verify_remote_signer_response` / `evaluate_remote_signer_backend` /
+// `recover_remote_signer_request_window`), and a precise typed
+// `ProductionRemoteSignerOutcome` taxonomy. Default policy is `Disabled`
+// (fail closed before any transport call, no request built); there is NO
+// silent fallback to fixture/loopback/local/in-memory signing; MainNet is
+// refused unless production authority criteria are satisfied (fixture
+// material never satisfies MainNet); validator-set rotation / policy
+// change / on-chain governance proof verification request kinds are
+// refused up front. Source/test only — no real networked transport, no
+// KMS/HSM/cloud-KMS/PKCS#11 provider, no CLI flag, no default runtime
+// wiring, no MainNet enablement, no custody-attestation verifier, no
+// on-chain proof verifier, no governance execution engine, no
+// validator-set rotation, no settlement, no external publication, no Run
+// 070 call, no LivePqcTrustState mutation, no trust swap, no session
+// eviction, no sequence/marker write, no raw local production signing-key
+// loading, no committed secrets. Release-binary evidence is deferred to
+// Run 294. Full C4 remains OPEN; C5 remains OPEN.
+pub mod pqc_production_remote_signer_backend;
 // Run 203 — source/test KMS/HSM backend abstraction boundary for
 // production authority custody. Defines provider-neutral typed
 // interfaces for a future KMS/HSM backend: a `BackendKind` (`Disabled`,
