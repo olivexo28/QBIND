@@ -1,0 +1,709 @@
+Run 295 — Source/test production KMS/HSM/cloud-KMS/PKCS#11 custody backend implementation
+
+You are continuing QBIND after Run 294.
+
+Current accepted state:
+
+Run 292 is accepted as PASS / release-binary evidence positive for the production durable replay RocksDB backend.
+
+Run 294 is accepted as PASS / release-binary evidence positive for the Run 293 production RemoteSigner backend.
+
+The C4/C5 matrix now has:
+
+* Production durable replay RocksDB backend — Green for narrow release-binary-evidenced backend behavior only.
+* Real production RemoteSigner backend — Green for narrow release-binary-evidenced backend behavior only.
+* Real KMS/HSM/cloud-KMS/PKCS#11 custody backend — Red.
+* Real custody attestation verifier — Red.
+* Real on-chain governance proof verifier — Red.
+* Governance execution engine — Red.
+* Validator-set rotation / authority-set synchronization — Red.
+* MainNet authority rotation/revocation under production custody — Red.
+* Production signing audit trail / crypto-agility activation / incident response — Red.
+* Full MainNet release-binary evidence under production custody — Red.
+
+Full C4 remains OPEN. C5 remains OPEN.
+
+Strategic objective:
+
+Continue Red-row closure by implementing the first source/test real production custody backend for KMS/HSM/cloud-KMS/PKCS#11 signing.
+
+This must be real backend implementation work, not another modeled-only interface layer.
+
+This run should move the “Real KMS / HSM / cloud-KMS / PKCS#11 custody backend” row from Red to Yellow / source-test implementation landed, release-binary evidence pending Run 296.
+
+Release-binary evidence is out of scope and deferred to Run 296.
+
+Primary objective:
+
+Implement a production-capable custody backend layer that can submit typed authority/governance signing requests to a production custody provider class, enforce deterministic request/response/transcript/domain binding, verify request/response correlation, reject unsupported or unavailable provider paths fail-closed, and remain mockable/source-testable without enabling any production runtime path by default.
+
+The backend must preserve the existing custody and authority boundaries from Runs 188–204 and compose with the accepted Run 293/294 RemoteSigner backend where relevant, but it must not rely on RemoteSigner as the only custody implementation.
+
+The backend must support at least the following provider classes as typed production choices:
+
+* disabled;
+* fixture/test-only KMS;
+* fixture/test-only HSM;
+* production cloud-KMS;
+* production PKCS#11 HSM;
+* generic production KMS;
+* generic production HSM.
+
+Where real provider credentials, hardware slots, cloud accounts, dynamic PKCS#11 libraries, or network endpoints are unavailable in CI/source tests, the production provider path must be reachable but fail-closed with typed unavailable / misconfigured / attestation-required outcomes. Do not silently accept fixture material as production.
+
+Required investigation before implementation:
+
+Inspect existing custody, KMS/HSM, RemoteSigner, authority, and governance modules before writing code.
+
+At minimum inspect:
+
+* `crates/qbind-node/src/pqc_authority_custody.rs`
+* `crates/qbind-node/src/pqc_authority_kms_hsm_backend.rs`
+* `crates/qbind-node/src/pqc_production_remote_signer_backend.rs`
+* `crates/qbind-node/src/pqc_remote_signer_transport.rs`
+* `crates/qbind-node/src/pqc_remote_authority_signer.rs`
+* tests and evidence for Runs 188–204
+* tests and evidence for Runs 293–294
+* `docs/protocol/QBIND_C4_C5_CLOSURE_CRITERIA.md`
+* `docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md`
+* `docs/ops/QBIND_PQC_TRUST_LIFECYCLE_RUNBOOK.md`
+* `docs/whitepaper/contradiction.md`
+
+Use the actual existing type/function/module names. If they differ from the suggested names below, use the real names and document substitutions honestly in the Run 295 evidence report.
+
+Required new source module:
+
+Prefer:
+
+`crates/qbind-node/src/pqc_production_kms_hsm_custody_backend.rs`
+
+If the existing Run 203 module is the correct extension point, extend it narrowly instead of creating a parallel duplicate. Avoid broad refactors.
+
+Register any new module in:
+
+`crates/qbind-node/src/lib.rs`
+
+Required new test file:
+
+`crates/qbind-node/tests/run_295_production_kms_hsm_custody_backend_tests.rs`
+
+Required evidence doc:
+
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_295.md`
+
+Required narrow docs updates:
+
+* `docs/protocol/QBIND_C4_C5_CLOSURE_CRITERIA.md`
+* `docs/protocol/QBIND_GOVERNANCE_EXECUTION_RUNTIME_SURFACE_AUDIT.md`
+* `docs/ops/QBIND_PQC_TRUST_LIFECYCLE_RUNBOOK.md`
+* `docs/protocol/QBIND_PEER_DRIVEN_TRUST_BUNDLE_APPLY_SAFETY.md`
+* `docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md`
+* `docs/whitepaper/contradiction.md`
+
+Strict scope:
+
+Allowed:
+
+* Add a production-capable custody backend implementation at source/test level.
+* Add typed backend config, identity, provider kind, key handle, request, response, transcript, error, and outcome types if not already present.
+* Reuse and extend existing Run 203 KMS/HSM backend abstractions where possible.
+* Compose with existing Run 188–193 custody metadata/policy selectors.
+* Compose with Run 293/294 RemoteSigner only as a separate custody option, not as a replacement for KMS/HSM custody.
+* Add mockable provider transport traits for cloud-KMS / PKCS#11 / generic KMS / generic HSM.
+* Add source/test fixture KMS/HSM providers that are explicitly non-production and refused for MainNet.
+* Add deterministic canonical request/response/transcript digests.
+* Add provider-domain binding and key-handle binding.
+* Add typed fail-closed outcomes for disabled, unavailable, misconfigured, wrong-domain, wrong-key, wrong-policy, malformed response, missing signature, missing attestation, unsupported provider, timeout, replay, and ambiguity.
+* Keep default policy Disabled.
+* Keep MainNet refused unless production authority criteria are satisfied.
+* Update docs/evidence narrowly.
+
+Not allowed:
+
+* Do not add release-binary evidence in Run 295.
+* Do not add a public CLI flag.
+* Do not enable KMS/HSM custody by default.
+* Do not wire the backend into production runtime by default.
+* Do not enable MainNet.
+* Do not claim production custody closure.
+* Do not claim C4 closure.
+* Do not claim C5 closure.
+* Do not claim MainNet readiness.
+* Do not load raw local production private keys.
+* Do not commit secrets, tokens, keys, cloud credentials, HSM PINs, PKCS#11 module paths from a real environment, or provider account identifiers.
+* Do not implement custody attestation verifier as a closure claim in this run; missing attestation must remain fail-closed or unavailable.
+* Do not implement real on-chain governance proof verification.
+* Do not implement a governance execution engine.
+* Do not implement validator-set rotation.
+* Do not implement settlement, settlement finality, settlement receipt, settlement-receipt acknowledgement, settlement-finality projection, settlement-outcome report backend, or settlement-outcome publication.
+* Do not implement external publication, external-publication confirmation, receipt, acknowledgement, audit finalization, audit completion, audit archive, audit seal, or audit anchor.
+* Do not call Run 070.
+* Do not mutate `LivePqcTrustState`.
+* Do not swap trust state.
+* Do not evict sessions.
+* Do not write PQC trust-bundle sequence files.
+* Do not write authority markers.
+* Do not change trust-bundle wire format.
+* Do not change peer-candidate wire format.
+* Do not change consensus wire format.
+* Do not weaken Run 292 durable replay RocksDB Green-for-scope status.
+* Do not weaken Run 294 RemoteSigner Green-for-scope status.
+* Do not turn the KMS/HSM row Green in Run 295. It may become Yellow/source-test implementation landed only; release-binary evidence is deferred to Run 296.
+
+Backend design requirements:
+
+1. Default Disabled / fail-closed
+
+The production custody backend policy must default to Disabled.
+
+Disabled policy must fail closed before any provider, transport, signing, or key-handle action.
+
+No default runtime path may open or call the backend.
+
+No fallback to fixture KMS, fixture HSM, RemoteSigner, local signing, dummy signing, or in-memory signing is allowed under production policy.
+
+2. Provider class separation
+
+Provider classes must be typed and explicit.
+
+At minimum model:
+
+* Disabled;
+* FixtureKms;
+* FixtureHsm;
+* ProductionCloudKms;
+* ProductionPkcs11Hsm;
+* ProductionGenericKms;
+* ProductionGenericHsm;
+* Unknown / unsupported.
+
+Fixture providers are allowed only for DevNet/TestNet source tests under explicit fixture policy.
+
+Fixture providers must be refused for MainNet.
+
+Production providers without configured provider identity/key handle/attestation must fail closed as unavailable or misconfigured, not silently fallback.
+
+3. Domain binding
+
+Every custody request and response must bind, where available:
+
+* environment;
+* chain_id;
+* genesis hash or authority-domain binding;
+* authority epoch or authority-domain sequence;
+* custody provider kind;
+* custody provider identity;
+* key handle / key fingerprint;
+* signer identity;
+* request kind;
+* authorized action;
+* candidate/proposal/request digest;
+* policy selector;
+* custody protocol version;
+* optional durable replay record digest;
+* optional RemoteSigner transcript digest if composed;
+* domain separation tag.
+
+Wrong environment, wrong chain, wrong genesis/domain, wrong authority sequence, wrong provider kind, wrong provider identity, wrong key handle, wrong signer identity, wrong authorized action, wrong candidate digest, wrong policy, wrong protocol version, or wrong transcript must fail closed.
+
+4. Canonical encoding
+
+Use deterministic canonical bytes for all request/response/transcript digests.
+
+Do not use Rust `Debug` formatting as canonical bytes.
+
+Do not use wall-clock time as an authorizing value.
+
+Do not use random request IDs unless they are explicitly non-authorizing and still bound into request/response correlation. Prefer deterministic request IDs in tests.
+
+5. Request/response correlation
+
+A custody response must only authorize the exact request it answers.
+
+Reject:
+
+* response for a different request id;
+* response for a different transcript digest;
+* response for a different candidate/proposal digest;
+* response for a different authorized action;
+* response for a different environment/chain/genesis;
+* response from a wrong provider identity;
+* response for a wrong key handle;
+* response under wrong custody class;
+* response signed/proved under an unexpected key;
+* response missing signature/proof material;
+* replayed response from a prior request.
+
+6. Provider availability / error taxonomy
+
+Surface typed fail-closed outcomes for:
+
+* backend disabled;
+* provider unavailable;
+* provider misconfigured;
+* provider endpoint unavailable;
+* provider timeout;
+* provider decode error;
+* provider response too large;
+* malformed response;
+* unsupported provider kind;
+* unsupported protocol version;
+* wrong-domain response;
+* wrong-key response;
+* wrong-policy response;
+* signing refused;
+* key unavailable;
+* attestation missing;
+* attestation unavailable;
+* attestation invalid / unverified;
+* provider replay / stale nonce;
+* ambiguous result;
+* MainNet refused;
+* MainNet production custody unavailable.
+
+7. MainNet policy
+
+MainNet must remain refused unless production authority criteria are satisfied.
+
+Fixture KMS/HSM material must not satisfy MainNet.
+
+RemoteSigner evidence alone must not satisfy MainNet KMS/HSM custody.
+
+Local operator material alone must not satisfy MainNet.
+
+Peer majority must not satisfy MainNet.
+
+The backend must not allow a custody provider response alone to bypass custody attestation, governance proof verification, validator-set rotation requirements, or MainNet readiness gates.
+
+8. No raw local production signing keys
+
+The backend must not introduce raw local production signing-key loading.
+
+Fixture keys may exist only in tests/examples and must be clearly non-production.
+
+No secrets or provider credentials may be committed.
+
+9. Composition with existing custody/governance surfaces
+
+Reuse existing Run 188–204 custody classes, KMS/HSM boundary types, and validators where possible.
+
+Do not duplicate existing KMS/HSM semantics if a narrow extension is sufficient.
+
+The backend must not bypass existing custody class, RemoteSigner policy, governance authority verifier, or MainNet peer-driven apply refusal.
+
+Suggested type names:
+
+Use actual existing names where available. Otherwise use names close to:
+
+* `ProductionKmsHsmCustodyBackend`
+* `ProductionKmsHsmCustodyBackendConfig`
+* `ProductionKmsHsmCustodyBackendPolicy`
+* `ProductionKmsHsmCustodyBackendIdentity`
+* `ProductionCustodyProviderKind`
+* `ProductionCustodyProviderIdentity`
+* `ProductionCustodyKeyHandle`
+* `ProductionCustodyRequest`
+* `ProductionCustodyResponse`
+* `ProductionCustodyTranscript`
+* `ProductionCustodyTranscriptDigest`
+* `ProductionCustodyRequestId`
+* `ProductionCustodyError`
+* `ProductionCustodyOutcome`
+* `ProductionCustodyProtocolVersion`
+* `KmsHsmCustodyProviderTransport`
+* `FixtureKmsCustodyProvider`
+* `FixtureHsmCustodyProvider`
+* `MockKmsHsmCustodyProviderTransport`
+* `ProductionCloudKmsProvider`
+* `ProductionPkcs11HsmProvider`
+* `ProductionGenericKmsProvider`
+* `ProductionGenericHsmProvider`
+
+Suggested trait:
+
+If an existing KMS/HSM custody backend trait exists, implement it.
+
+Otherwise introduce a narrow trait such as:
+
+`GovernanceProductionKmsHsmCustodyBackend`
+
+with methods close to:
+
+* `build_custody_request(...)`
+* `submit_custody_signing_request(...)`
+* `verify_custody_response(...)`
+* `evaluate_custody_backend(...)`
+* `recover_custody_request_window(...)` if replay/recovery is represented.
+
+Do not create a broad signing/custody framework if a narrow backend is sufficient.
+
+Required outcome taxonomy:
+
+Use actual existing outcomes where present. Otherwise include typed outcomes close to:
+
+* `DisabledNoRequest`
+* `RequestBuilt`
+* `FixtureKmsAccepted`
+* `FixtureHsmAccepted`
+* `ProductionCustodyAccepted`
+* `ProductionCustodyRejected`
+* `ProductionCustodyUnavailable`
+* `ProductionCustodyMisconfigured`
+* `ProductionCustodyTimeout`
+* `ProductionCustodyDecodeFailed`
+* `ProductionCustodyMalformedResponse`
+* `ProductionCustodyUnsupportedProtocol`
+* `ProductionCustodyUnsupportedProvider`
+* `ProductionCustodyDomainMismatch`
+* `ProductionCustodyTranscriptMismatch`
+* `ProductionCustodyRequestIdMismatch`
+* `ProductionCustodyWrongProvider`
+* `ProductionCustodyWrongKeyHandle`
+* `ProductionCustodyWrongSigner`
+* `ProductionCustodyWrongAction`
+* `ProductionCustodyWrongCandidateDigest`
+* `ProductionCustodyReplayRejected`
+* `ProductionCustodyAttestationMissing`
+* `ProductionCustodyAttestationUnavailable`
+* `ProductionCustodyAttestationInvalid`
+* `MainNetProductionCustodyUnavailable`
+* `MainNetRefused`
+* `FixtureMaterialRejectedForMainNet`
+* `RemoteSignerIsNotKmsHsmCustody`
+* `ValidatorSetRotationUnsupported`
+* `GovernanceVerifierUnavailable`
+* `PolicyChangeUnsupported`
+* `AmbiguousFailClosed`
+
+Only a typed accepted response under an allowed non-production fixture policy may authorize source/test evidence. Production provider acceptance may be modeled as accepted only if the implementation genuinely verifies all represented production response material; otherwise production providers must return unavailable/fail-closed until real provider verification exists.
+
+Required tests:
+
+Create a focused Run 295 source/test corpus. Target at least 60 tests.
+
+Minimum test groups:
+
+A. Accepted / compatible
+
+* Disabled default policy is explicit and inert.
+* DevNet fixture KMS accepts a valid request only under explicit fixture policy.
+* DevNet fixture HSM accepts a valid request only under explicit fixture policy.
+* TestNet fixture KMS/HSM accepts only under explicit allowed policy if existing policy permits.
+* Production provider request can be built without invoking a fixture fallback.
+* Production cloud-KMS provider path is reachable and fail-closed as unavailable/misconfigured when no real provider config exists.
+* Production PKCS#11 HSM provider path is reachable and fail-closed as unavailable/misconfigured when no real module/session/key handle exists.
+* Request id is deterministic.
+* Response digest is deterministic.
+* Transcript digest is deterministic.
+* Two identical requests produce identical request/transcript digests.
+* Valid fixture response authorizes exactly the matching request.
+* Existing Run 203 KMS/HSM boundary behavior remains compatible.
+* Existing Run 188–193 custody metadata/policy behavior remains compatible.
+* Run 293/294 RemoteSigner Green-for-scope behavior remains unchanged.
+
+B. Rejection / fail-closed
+
+* Disabled policy produces no request and no provider invocation.
+* MainNet identity refused.
+* Fixture KMS material refused for MainNet.
+* Fixture HSM material refused for MainNet.
+* RemoteSigner material cannot satisfy KMS/HSM custody row.
+* Local operator material alone refused for MainNet.
+* Peer majority refused for MainNet.
+* Wrong environment rejected.
+* Wrong chain rejected.
+* Wrong genesis/domain rejected.
+* Wrong authority sequence/epoch rejected.
+* Wrong provider kind rejected.
+* Wrong provider identity rejected.
+* Wrong key handle rejected.
+* Wrong signer identity rejected.
+* Wrong request id rejected.
+* Wrong transcript digest rejected.
+* Wrong candidate/proposal digest rejected.
+* Wrong authorized action rejected.
+* Wrong protocol version rejected.
+* Missing signature/proof rejected.
+* Missing attestation rejected where production policy requires attestation.
+* Attestation unavailable remains fail-closed.
+* Malformed response rejected.
+* Oversized response rejected if response sizing exists.
+* Response from prior request replay rejected.
+* Provider unavailable rejected.
+* Provider timeout rejected.
+* Provider decode error rejected.
+* Provider refused rejected.
+* Provider policy rejected rejected.
+* Unsupported provider rejected.
+* Ambiguous result rejected fail-closed.
+
+C. MainNet / authority policy
+
+* MainNet cannot be satisfied by fixture KMS.
+* MainNet cannot be satisfied by fixture HSM.
+* MainNet cannot be satisfied by RemoteSigner-only evidence.
+* MainNet cannot be satisfied by local operator material.
+* MainNet cannot be satisfied by peer majority.
+* MainNet cannot bypass missing custody attestation.
+* MainNet cannot bypass missing governance proof verifier.
+* MainNet cannot bypass validator-set rotation gate.
+* MainNet production custody unavailable path records no mutation.
+* MainNet peer-driven apply remains refused.
+
+D. Non-mutation
+
+Every rejected path proves:
+
+* no Run 070 call;
+* no `LivePqcTrustState` mutation;
+* no trust swap;
+* no session eviction;
+* no PQC trust-bundle sequence write;
+* no authority marker write;
+* no durable replay overwrite;
+* no settlement;
+* no external publication;
+* no governance execution;
+* no validator-set rotation;
+* no RemoteSigner fallback;
+* no KMS/HSM signing under wrong policy;
+* no raw local production signing key load;
+* no fallback to fixture/local signing under production policy.
+
+E. Replay / recovery / idempotency
+
+If request replay state is represented:
+
+* duplicate identical request is idempotent or safely rejected according to existing policy;
+* duplicate response for same request is idempotent only when byte-identical and policy permits;
+* same request id with different transcript fails closed;
+* same request id with different key handle fails closed;
+* same response id with different signature/proof fails closed;
+* recovery after request-built-before-response is fail-closed;
+* recovery after accepted-response-before-persisted-decision is fail-closed unless existing replay state proves exact acceptance;
+* ambiguous recovery window fails closed.
+
+If replay state is not yet represented, document it honestly and add tests proving no replay acceptance is claimed.
+
+F. C4/C5 taxonomy
+
+Tests or grep assertions must prove:
+
+* Run 295 is source/test production KMS/HSM/cloud-KMS/PKCS#11 custody backend implementation.
+* Run 295 is not release-binary evidence.
+* Production durable replay RocksDB backend remains Green-for-scope after Runs 291–292.
+* Real production RemoteSigner backend remains Green-for-scope after Runs 293–294.
+* Real KMS/HSM/cloud-KMS/PKCS#11 custody backend row becomes Yellow/source-test implementation landed, release-binary evidence pending Run 296.
+* Real custody attestation verifier remains Red unless separately implemented.
+* Real on-chain governance proof verifier remains Red.
+* Governance execution engine remains Red.
+* Validator-set rotation remains Red.
+* MainNet authority rotation/revocation under production custody remains Red.
+* Full MainNet release-binary evidence under production custody remains Red.
+* Full C4 remains OPEN.
+* C5 remains OPEN.
+
+Required regression commands:
+
+Run at minimum:
+
+* `cargo build -p qbind-node --lib`
+* `cargo test -p qbind-node --test run_295_production_kms_hsm_custody_backend_tests`
+* `cargo test -p qbind-node --test run_293_production_remote_signer_backend_tests`
+* `cargo test -p qbind-node --test run_291_production_durable_replay_rocksdb_tests`
+* `cargo test -p qbind-node --test run_290_durable_completion_external_publication_audit_anchor_tests`
+* `cargo test -p qbind-node --test run_288_durable_completion_external_publication_audit_seal_tests`
+* `cargo test -p qbind-node --test run_286_durable_completion_external_publication_audit_archive_tests`
+* `cargo test -p qbind-node --test run_284_durable_completion_external_publication_audit_completion_tests`
+* `cargo test -p qbind-node --test run_282_durable_completion_external_publication_audit_finalization_tests`
+* `cargo test -p qbind-node --test run_280_durable_completion_external_publication_acknowledgement_tests`
+* `cargo test -p qbind-node --test run_278_durable_completion_external_publication_receipt_tests`
+* `cargo test -p qbind-node --test run_276_durable_completion_external_publication_confirmation_tests`
+* `cargo test -p qbind-node --test run_274_durable_completion_settlement_outcome_publication_tests`
+* `cargo test -p qbind-node --test run_272_durable_completion_settlement_outcome_report_tests`
+* `cargo test -p qbind-node --test run_270_durable_completion_settlement_receipt_acknowledgement_tests`
+* `cargo test -p qbind-node --test run_268_durable_completion_settlement_finalization_tests`
+* `cargo test -p qbind-node --test run_266_durable_completion_settlement_commitment_tests`
+* `cargo test -p qbind-node --test run_264_durable_completion_consumer_settlement_projection_tests`
+* `cargo test -p qbind-node --test run_262_durable_completion_acknowledgement_consumer_tests`
+* `cargo test -p qbind-node --test run_260_durable_completion_audit_receipt_acknowledgement_tests`
+* `cargo test -p qbind-node --test run_258_durable_completion_audit_publication_receipt_tests`
+* `cargo test -p qbind-node --test run_256_durable_completion_attestation_backend_tests`
+* `cargo test -p qbind-node --test run_254_modeled_durable_completion_attestation_projection_tests`
+* `cargo test -p qbind-node --test run_252_modeled_durable_completion_finalization_projection_tests`
+* `cargo test -p qbind-node --test run_250_modeled_durable_consume_completion_reporter_tests`
+* `cargo test -p qbind-node --test run_248_modeled_durable_consume_projection_sink_tests`
+* `cargo test -p qbind-node --test run_246_governance_modeled_end_to_end_pipeline_tests`
+* `cargo test -p qbind-node --test run_244_modeled_governance_trust_mutation_applier_tests`
+* `cargo test -p qbind-node --test run_242_governance_execution_mutation_engine_tests`
+* `cargo test -p qbind-node --test run_240_governance_evaluator_replay_durable_runtime_integration_tests`
+* `cargo test -p qbind-node --test run_238_governance_evaluator_replay_durable_backend_tests`
+* `cargo test -p qbind-node --test run_236_governance_evaluator_replay_consume_runtime_integration_tests`
+* `cargo test -p qbind-node --test run_234_governance_evaluator_replay_consume_boundary_tests`
+* `cargo test -p qbind-node --test run_232_governance_evaluator_replay_runtime_integration_tests`
+* `cargo test -p qbind-node --test run_230_governance_evaluator_replay_state_tests`
+* `cargo test -p qbind-node --test run_228_peer_evaluator_context_representation_tests`
+* `cargo test -p qbind-node --test run_226_governance_evaluator_runtime_callsite_wiring_tests`
+* `cargo test -p qbind-node --test run_224_governance_evaluator_runtime_integration_tests`
+* `cargo test -p qbind-node --test run_204_kms_hsm_backend_release_binary_tests` or actual Run 204 test target if it exists
+* `cargo test -p qbind-node --test run_203_kms_hsm_backend_tests` or actual Run 203 test target if it exists
+* `cargo test -p qbind-node --test run_201_remote_signer_transport_boundary_tests`
+* `cargo test -p qbind-node --test run_194_remote_authority_signer_boundary_tests`
+* `cargo test -p qbind-node --lib pqc_authority`
+* `cargo test -p qbind-node --lib`
+
+If actual Run 203 / Run 204 / Run 194 / Run 201 test target names differ, use the real names and record substitutions in the evidence.
+
+Security scanning:
+
+* Run secret scanning over changed files.
+* Run CodeQL if available.
+* Because Run 295 adds real production custody backend code, CodeQL or an honest skip/timeout reason is required.
+* If CodeQL is skipped because the database is too large, times out, tooling is unavailable, or reports no analyzable changes, state that explicitly and do not claim CodeQL coverage.
+
+Documentation requirements:
+
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_295.md` must include:
+
+1. Exact verdict.
+2. Files changed.
+3. Backend design summary.
+4. Provider taxonomy and policy model.
+5. Request/response/transcript/domain binding.
+6. Accepted source/test evidence.
+7. Rejection/fail-closed evidence.
+8. MainNet refusal / authority policy evidence.
+9. Replay/recovery/idempotency evidence.
+10. Non-mutation evidence.
+11. Tests run and results.
+12. C4/C5 matrix taxonomy status.
+13. Security scan results.
+14. Honest limitations.
+15. C4/C5 status.
+16. Suggested Run 296 next step.
+
+Docs must state clearly:
+
+* Run 295 is source/test production KMS/HSM/cloud-KMS/PKCS#11 custody backend implementation.
+* Run 295 is not release-binary evidence.
+* Release-binary evidence is deferred to Run 296.
+* Run 295 does not add default production runtime wiring.
+* Run 295 does not add a public CLI flag.
+* Run 295 does not enable KMS/HSM custody by default.
+* Run 295 does not enable MainNet.
+* Run 295 does not implement custody attestation verifier closure.
+* Run 295 does not implement on-chain governance proof verification.
+* Run 295 does not implement a governance execution engine.
+* Run 295 does not implement validator-set rotation.
+* Run 295 does not implement settlement or external publication.
+* Run 295 does not call Run 070.
+* Run 295 does not mutate `LivePqcTrustState`.
+* Run 295 does not write trust-bundle sequence or authority marker files.
+* Run 295 does not weaken Run 292 durable replay RocksDB Green-for-scope status.
+* Run 295 does not weaken Run 294 RemoteSigner Green-for-scope status.
+* Full C4 remains OPEN.
+* C5 remains OPEN.
+
+C4/C5 matrix update:
+
+Update carefully.
+
+Expected after successful Run 295:
+
+* Production durable replay RocksDB backend remains Green for release-binary-evidenced backend behavior only.
+* Real production RemoteSigner backend remains Green for release-binary-evidenced backend behavior only.
+* Real KMS/HSM/cloud-KMS/PKCS#11 custody backend may move from Red to Yellow / source-test implementation landed, release-binary evidence pending Run 296.
+* Real custody attestation verifier remains Red unless separately implemented and evidenced.
+* Real on-chain governance proof verifier remains Red.
+* Governance execution engine remains Red.
+* Validator-set rotation / authority-set synchronization remains Red.
+* MainNet authority rotation/revocation under production custody remains Red.
+* Production signing audit trail / crypto-agility activation / incident response remains Red.
+* Full MainNet release-binary evidence under production custody remains Red.
+* Full C4 remains OPEN.
+* C5 remains OPEN.
+
+Do not mark KMS/HSM custody Green until Run 296 release-binary evidence exists.
+
+Do not mark custody attestation Green unless real attestation verification is separately implemented and evidenced.
+
+Do not mark C4 closed.
+
+Do not mark C5 closed.
+
+Contradiction handling:
+
+Update `docs/whitepaper/contradiction.md`.
+
+Add a “Run 295” entry.
+
+If no contradiction is found, state that Run 295 introduces a source/test production KMS/HSM/cloud-KMS/PKCS#11 custody backend implementation while preserving default Disabled/fail-closed runtime posture, no MainNet enablement, no custody-attestation closure, no on-chain-verifier/governance-engine/validator-set-rotation implementation, no Run 070 call, no `LivePqcTrustState` mutation, no trust-bundle sequence or authority-marker writes, and Full C4 OPEN / C5 OPEN.
+
+If contradiction is found, record the exact contradiction with file/function/doc reference and recommend the smallest safe fix.
+
+Expected verdicts:
+
+PASS / source-test production KMS/HSM/cloud-KMS/PKCS#11 custody backend implementation if:
+
+* a real production custody backend implementation lands at source/test level;
+* it composes with existing custody/KMS/HSM/authority surfaces;
+* default policy remains Disabled/fail-closed;
+* MainNet is refused unless production authority criteria are satisfied;
+* fixture material is rejected for MainNet;
+* provider request/response/transcript/domain binding tests pass;
+* unavailable/misconfigured/malformed/replay/wrong-domain/wrong-key tests pass;
+* non-mutation invariants pass;
+* regression corpus passes;
+* docs/evidence/contradiction are updated;
+* secret scan result is clean;
+* CodeQL result or honest skip/timeout reason is reported;
+* Full C4 remains OPEN;
+* C5 remains OPEN.
+
+Partial-positive if:
+
+* the backend implementation lands but one bounded non-critical provider/recovery scenario is deferred honestly;
+* no false closure claim is made.
+
+Blocked only if:
+
+* existing KMS/HSM/custody surfaces cannot support a real backend without broad redesign;
+* document the exact blocker and smallest safe next run.
+
+Unacceptable:
+
+* claiming release-binary evidence;
+* claiming C4 closure;
+* claiming C5 closure;
+* claiming MainNet readiness;
+* claiming default runtime enablement;
+* silently falling back to fixture/local/RemoteSigner signing under production custody policy;
+* using raw local production signing keys;
+* hiding CodeQL failure/timeout/skip;
+* hiding regression failures;
+* broad redesign of unrelated settlement, governance, consensus, trust-bundle, wire, RocksDB durable replay, RemoteSigner, or modeled pipeline surfaces.
+
+Suggested Run 296 next step after successful Run 295:
+
+Run 296 — release-binary evidence for the production KMS/HSM/cloud-KMS/PKCS#11 custody backend.
+
+Run 296 should build real `target/release/qbind-node` plus a release-built helper, exercise the Run 295 custody backend in release mode, prove provider request/response/transcript/domain binding, unavailable/misconfigured/malformed/replay/wrong-domain/wrong-key fail-closed behavior, prove default production binary surfaces remain Disabled/silent, prove MainNet remains refused absent production authority criteria and custody attestation, preserve Run 292/294 Green-for-scope rows, and preserve Full C4 OPEN / C5 OPEN unless every closure gate is actually satisfied.
+
+Required final response format:
+
+1. Exact verdict.
+2. Files changed.
+3. Backend design summary.
+4. Provider taxonomy and policy model.
+5. Request/response/transcript/domain binding.
+6. Accepted source/test evidence.
+7. Rejection/fail-closed evidence.
+8. MainNet refusal / authority policy evidence.
+9. Replay/recovery/idempotency evidence.
+10. Non-mutation evidence.
+11. Tests run and results.
+12. C4/C5 matrix taxonomy status.
+13. Security scan results.
+14. Honest limitations.
+15. C4/C5 status.
+16. Suggested Run 296 next step.
