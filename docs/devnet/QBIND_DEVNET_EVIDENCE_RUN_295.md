@@ -231,9 +231,8 @@ occurs on any path — the backend surfaces are pure evidence.
 * Secret scanning was run over the changed files; no secrets are present (the
   module uses only in-source deterministic fixture labels/digests, no keys or
   credentials).
-* CodeQL: see the final response. If CodeQL is unavailable, times out, or reports
-  the database is too large, that is stated explicitly and no CodeQL coverage is
-  claimed.
+* CodeQL: skipped because the CodeQL database was too large to build in the
+  session environment. No CodeQL coverage is claimed for Run 295.
 
 ## 14. Honest limitations
 

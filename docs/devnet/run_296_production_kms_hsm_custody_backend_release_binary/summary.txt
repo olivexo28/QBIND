@@ -1,0 +1,80 @@
+Run 296 — release-binary evidence for the Run 295 production KMS/HSM/cloud-KMS/PKCS#11 custody backend
+git_commit: 541a91b6e67b7d4daf05cb134570326feafb726f
+
+build:
+  rustc_version:      rustc 1.96.0 (ac68faa20 2026-05-25)
+  cargo_version:      cargo 1.96.0 (30a34c682 2026-05-25)
+  qbind_node_sha256:  f67b4f0b27b589d99805fa83d3da0a820036569717d179c9b68a0da77317303a
+  helper_296_sha256:  0b9077ee8390cb72450efe4b8e07b79ab33bb6941be1c340f990d494ef547347
+
+helper_summary: /home/runner/work/QBIND/QBIND/docs/devnet/run_296_production_kms_hsm_custody_backend_release_binary/helper_evidence/run_296/helper_summary.txt
+  Run 296 production KMS/HSM/cloud-KMS/PKCS#11 custody backend release helper
+  verdict: PASS
+  backend: crates/qbind-node/src/pqc_production_kms_hsm_custody_backend.rs (Run 295 ProductionKmsHsmCustodyBackend)
+  mode: real Run 295 backend over source/test fixture KMS/HSM providers, reachable-but-fail-closed production provider stubs, and mock transport; DevNet/TestNet fixture accept only; MainNet refused; default Disabled; production policy never accepts and never falls back to fixture/RemoteSigner/local signing; production cloud-KMS/PKCS#11/generic paths fail closed without real config; every failure is a typed outcome
+  table accepted_compatible pass=18 fail=0
+  table mainnet_authority_policy pass=9 fail=0
+  table non_mutation pass=5 fail=0
+  table reachability pass=1 fail=0
+  table rejection_fail_closed pass=36 fail=0
+  table replay_recovery_idempotency pass=7 fail=0
+  total_pass: 76
+  total_fail: 0
+
+deterministic_digests: stable across two independent helper invocations
+  request_id a6e0df48dc03592f1e9167fe88d8323e6550af302aead594605d82619733ecf6
+  request_envelope_digest bc17739a079123e50fb2bd809b15a72a1990ecde246584baa48f7ba097af586e
+  response_envelope_digest 1b7ef1afc0ceb7db87f56f83d41c2e0e4cdf91697c029d6ada22b1d3a3cd3ba0
+  response_transcript_digest a295324ced18b993fac58890a3984d4350aa02c127959047d81125b4d48b2230
+  backend_transcript_digest 260917db3816c06b7047d0a66174b4f9abc8cc61e573cbedf0c5ba0dd42767a6
+
+release_binary_scenarios: S1_help=0 S2=1 S3=1 S4=1 S5=1 S6=1
+reachability: source/helper/module/entry/taxonomy/boundary/composition greps passed
+c4c5_taxonomy: passed (18 phrases; RocksDB + RemoteSigner + KMS/HSM rows Green-for-scope only; Red rows unchanged; Full C4 OPEN; C5 OPEN)
+denylist: passed (32 patterns)
+tests:
+  test:run_295_production_kms_hsm_custody_backend_tests	rc=0
+  test:run_293_production_remote_signer_backend_tests	rc=0
+  test:run_291_production_durable_replay_rocksdb_tests	rc=0
+  test:run_290_durable_completion_external_publication_audit_anchor_tests	rc=0
+  test:run_288_durable_completion_external_publication_audit_seal_tests	rc=0
+  test:run_286_durable_completion_external_publication_audit_archive_tests	rc=0
+  test:run_284_durable_completion_external_publication_audit_completion_tests	rc=0
+  test:run_282_durable_completion_external_publication_audit_finalization_tests	rc=0
+  test:run_280_durable_completion_external_publication_acknowledgement_tests	rc=0
+  test:run_278_durable_completion_external_publication_receipt_tests	rc=0
+  test:run_276_durable_completion_external_publication_confirmation_tests	rc=0
+  test:run_274_durable_completion_settlement_outcome_publication_tests	rc=0
+  test:run_272_durable_completion_settlement_outcome_report_tests	rc=0
+  test:run_270_durable_completion_settlement_receipt_acknowledgement_tests	rc=0
+  test:run_268_durable_completion_settlement_finalization_tests	rc=0
+  test:run_266_durable_completion_settlement_commitment_tests	rc=0
+  test:run_264_durable_completion_consumer_settlement_projection_tests	rc=0
+  test:run_262_durable_completion_acknowledgement_consumer_tests	rc=0
+  test:run_260_durable_completion_audit_receipt_acknowledgement_tests	rc=0
+  test:run_258_durable_completion_audit_publication_receipt_tests	rc=0
+  test:run_256_durable_completion_attestation_backend_tests	rc=0
+  test:run_254_modeled_durable_completion_attestation_projection_tests	rc=0
+  test:run_252_modeled_durable_completion_finalization_projection_tests	rc=0
+  test:run_250_modeled_durable_consume_completion_reporter_tests	rc=0
+  test:run_248_modeled_durable_consume_projection_sink_tests	rc=0
+  test:run_246_governance_modeled_end_to_end_pipeline_tests	rc=0
+  test:run_244_modeled_governance_trust_mutation_applier_tests	rc=0
+  test:run_242_governance_execution_mutation_engine_tests	rc=0
+  test:run_240_governance_evaluator_replay_durable_runtime_integration_tests	rc=0
+  test:run_238_governance_evaluator_replay_durable_backend_tests	rc=0
+  test:run_236_governance_evaluator_replay_consume_runtime_integration_tests	rc=0
+  test:run_234_governance_evaluator_replay_consume_boundary_tests	rc=0
+  test:run_232_governance_evaluator_replay_runtime_integration_tests	rc=0
+  test:run_230_governance_evaluator_replay_state_tests	rc=0
+  test:run_228_peer_evaluator_context_representation_tests	rc=0
+  test:run_226_governance_evaluator_runtime_callsite_wiring_tests	rc=0
+  test:run_224_governance_evaluator_runtime_integration_tests	rc=0
+  test:run_203_kms_hsm_backend_boundary_tests	rc=0
+  test:run_201_remote_signer_transport_boundary_tests	rc=0
+  test:run_194_remote_authority_signer_boundary_tests	rc=0
+  test:run_188_authority_custody_boundary_tests	rc=0
+  lib:pqc_authority	rc=0
+  lib:lib_all	rc=0
+
+verdict: PASS (release-binary evidence only; Full C4 OPEN; C5 OPEN)
