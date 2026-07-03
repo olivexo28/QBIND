@@ -93,7 +93,7 @@ The harness ran the regression corpus `run_291` down through `run_224`, plus `--
 ## 13. Security scan results
 
 * **Secret scanning** — run over all changed files; **no secrets** found.
-* **CodeQL** — Run 292 is release-binary evidence for a real RocksDB backend and is not classified as trivial. The CodeQL checker result (pass / alerts / honest skip / timeout) is reported honestly; see the run's final response for the outcome. No production library surface was changed by this pass.
+* **CodeQL** — Run 292 is release-binary evidence for a real RocksDB backend and is not classified as trivial. The CodeQL checker was invoked (language: rust) but **did not complete**: the analysis was **skipped because the database size is too large**. No CodeQL coverage is claimed for this pass. No production library surface was changed by this pass (the change set is a release-mode example helper, a harness shell script, and Markdown/evidence documentation), and the underlying Run 291 production module is re-run unchanged.
 
 ## 14. Honest limitations
 

@@ -61,7 +61,7 @@ The harness `bash scripts/devnet/run_292_production_durable_replay_rocksdb_relea
 
 ## Security scanning
 
-Secret scanning was run over the changed files during the evidence pass and reported **no secrets**. CodeQL results are reported honestly in `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_292.md`. The underlying Run 291 production module is re-run unchanged and is unaffected by this pass.
+Secret scanning was run over the changed files during the evidence pass and reported **no secrets**. CodeQL was invoked (language: rust) but did **not** complete — the analysis was **skipped because the database size is too large**, so no CodeQL coverage is claimed. CodeQL results are reported honestly in `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_292.md`. The underlying Run 291 production module is re-run unchanged and is unaffected by this pass.
 
 ## Honest limitations
 
