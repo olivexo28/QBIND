@@ -1,6 +1,6 @@
 # QBIND C4 / C5 Closure Criteria
 
-**Status as of Run 291:** Full **C4 remains OPEN**. **C5 remains OPEN**.
+**Status as of Run 292:** Full **C4 remains OPEN**. **C5 remains OPEN**.
 This document is a formal closure checklist introduced by Run 200
 (docs/spec/crosscheck only). It defines C4 and C5, records their current
 status, provides a green/yellow/red matrix, enumerates the required
@@ -70,7 +70,7 @@ implemented. **Red** = not started / unavailable.
 | Authority custody boundary + metadata + policy selector | 🟡 Yellow | Runs 188–193; real custody backend unavailable |
 | RemoteSigner boundary + payload + policy selector | 🟡 Yellow | Runs 194–199; real RemoteSigner backend unavailable |
 | Modeled durable-completion pipeline / settlement / external-publication boundary stack (typed interfaces, fixture sinks, selectors, fail-closed) | 🟡 Yellow | Runs 200–290 (incl. Run 290 external-publication-audit-anchor boundary atop the Run 288 external-publication-audit-seal boundary atop the Run 286 external-publication-audit-archive boundary atop the Run 284 external-publication-audit-completion boundary atop the Run 282 external-publication-audit-finalization boundary atop the Run 280 external-publication-acknowledgement boundary, release-binary-evidenced through Run 289); modeled in-memory boundaries / evidence only, no production backend |
-| Production durable replay RocksDB backend (real on-disk RocksDB persistence, domain binding, versioned schema, atomic writes, idempotency/equivocation, corruption/wrong-domain fail-closed, no in-memory fallback, default-Disabled) | 🟡 Yellow | Run 291 source/test implementation landed (`crates/qbind-node/src/pqc_governance_production_durable_replay_rocksdb.rs`, `crates/qbind-node/tests/run_291_production_durable_replay_rocksdb_tests.rs`); release-binary evidence pending Run 292; not default-enabled in the production binary; MainNet refused; not Green until release-binary restart/corruption/negative-invariant evidence exists |
+| Production durable replay RocksDB backend (real on-disk RocksDB persistence, domain binding, versioned schema, atomic writes, idempotency/equivocation, corruption/wrong-domain fail-closed, no in-memory fallback, default-Disabled) | 🟢 Green (for scope) | Run 291 source/test implementation (`crates/qbind-node/src/pqc_governance_production_durable_replay_rocksdb.rs`, `crates/qbind-node/tests/run_291_production_durable_replay_rocksdb_tests.rs`) plus Run 292 release-binary evidence (`crates/qbind-node/examples/run_292_production_durable_replay_rocksdb_release_binary_helper.rs`, `scripts/devnet/run_292_production_durable_replay_rocksdb_release_binary.sh`, `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_292.md`). **Green for release-binary-evidenced RocksDB durable replay backend behavior only; not wired by default into production runtime; does not close C4/C5.** The Run 292 release helper exercises the real backend in release mode (write/reopen/replay/idempotency/equivocation/corruption/wrong-domain/no-fallback); default `DurableReplayRocksDbPolicy` is Disabled; the production binary is not wired to open the backend; no CLI flag added; MainNet refused at open |
 | Real production RemoteSigner backend | 🔴 Red | Not implemented |
 | Real KMS / HSM / cloud-KMS / PKCS#11 custody backend | 🔴 Red | Not implemented |
 | Real custody attestation verifier | 🔴 Red | Not implemented |

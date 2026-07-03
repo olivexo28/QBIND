@@ -1,0 +1,604 @@
+Run 293 — Source/test production RemoteSigner backend implementation
+
+You are continuing QBIND after Run 292.
+
+Current accepted state:
+
+Run 292 is accepted as PASS / release-binary evidence positive.
+
+Run 292 release-evidenced the Run 291 production durable replay RocksDB backend on real `target/release/qbind-node` plus a release-built helper. The RocksDB durable replay backend is now Green for narrow release-binary-evidenced backend behavior only: real on-disk RocksDB persistence, schema/domain binding, atomic writes, durability across reopen, deterministic digests, `Observed → Consumed` ordering, idempotency, equivocation refusal, corruption/wrong-domain/partial-residue fail-closed, no in-memory fallback, default Disabled, MainNet refused at open.
+
+Run 292 did not wire the backend into the default production runtime, did not add a public CLI flag, did not enable MainNet, did not implement custody / RemoteSigner / KMS / HSM, did not implement on-chain governance proof verification, did not implement a governance execution engine, did not implement validator-set rotation, did not implement settlement or external publication, did not call Run 070, did not mutate `LivePqcTrustState`, and did not write trust-bundle sequence or authority marker files.
+
+The C4/C5 matrix now marks only the production durable replay RocksDB backend row Green for narrow release-binary-evidenced scope. Real production RemoteSigner backend remains Red. Real KMS / HSM / cloud-KMS / PKCS#11 custody backend remains Red. Real custody attestation verifier remains Red. Real on-chain governance proof verifier remains Red. Governance execution engine remains Red. Validator-set rotation / authority-set synchronization remains Red. MainNet authority rotation/revocation under production custody remains Red. Full MainNet release-binary evidence under production custody remains Red.
+
+Full C4 remains OPEN. C5 remains OPEN.
+
+Strategic objective:
+
+Continue Red-row closure by implementing the first real production RemoteSigner backend at source/test level.
+
+This run must move the “Real production RemoteSigner backend” row from Red toward implementation by adding a real backend implementation behind the already-existing RemoteSigner boundary/payload/policy surfaces, while keeping default runtime behavior Disabled/fail-closed and deferring release-binary evidence to Run 294.
+
+This must be real backend implementation work, not another modeled interface layer.
+
+Primary objective:
+
+Implement a production-capable RemoteSigner backend client that can submit typed authority/governance signing requests to a remote signer service abstraction, validate typed responses, enforce transcript/domain binding, enforce request/response correlation, fail closed on every unavailable/malformed/mismatched/replayed response path, and remain mockable/source-testable without enabling any production runtime path by default.
+
+The backend may use a source/test loopback signer server or mock transport for tests, but the production backend surface itself must be real code: typed remote request/response protocol, deterministic canonical bytes, response verification, transport error handling, timeout handling, retry policy if any, and fail-closed behavior. Do not implement a fixture-only boundary and call it production.
+
+Release-binary evidence is out of scope and deferred to Run 294.
+
+Required investigation before implementation:
+
+Inspect the existing RemoteSigner-related modules and tests, especially Runs 194–202.
+
+At minimum inspect:
+
+* `crates/qbind-node/src/**` for RemoteSigner boundary, RemoteSigner payload, RemoteSigner policy selector, RemoteSigner transport, custody, authority lifecycle, and governance execution code.
+* tests for Runs 188–202, especially custody and RemoteSigner tests.
+* docs/devnet reports for Runs 194–202 if available.
+* `docs/protocol/QBIND_C4_C5_CLOSURE_CRITERIA.md`
+* `docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md`
+* `docs/ops/QBIND_PQC_TRUST_LIFECYCLE_RUNBOOK.md`
+* `docs/whitepaper/contradiction.md`
+
+Use the actual existing type/function/module names. If they differ from the suggested names below, use the real names and document substitutions honestly in the Run 293 evidence report.
+
+Required new source module:
+
+Prefer:
+
+`crates/qbind-node/src/pqc_production_remote_signer_backend.rs`
+
+If an existing RemoteSigner module is the correct extension point, extend it narrowly instead. Avoid broad refactors.
+
+Register the module in:
+
+`crates/qbind-node/src/lib.rs`
+
+Required new test file:
+
+`crates/qbind-node/tests/run_293_production_remote_signer_backend_tests.rs`
+
+Required evidence doc:
+
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_293.md`
+
+Required narrow docs updates:
+
+* `docs/protocol/QBIND_C4_C5_CLOSURE_CRITERIA.md`
+* `docs/protocol/QBIND_GOVERNANCE_EXECUTION_RUNTIME_SURFACE_AUDIT.md`
+* `docs/ops/QBIND_PQC_TRUST_LIFECYCLE_RUNBOOK.md`
+* `docs/protocol/QBIND_PEER_DRIVEN_TRUST_BUNDLE_APPLY_SAFETY.md`
+* `docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md`
+* `docs/whitepaper/contradiction.md`
+
+Strict scope:
+
+Allowed:
+
+* Add a production-capable RemoteSigner backend client implementation.
+* Add typed backend config, identity, endpoint, request, response, transcript, error, and outcome types if not already present.
+* Compose with the existing RemoteSigner boundary/payload/policy selector from Runs 194–199 and the transport boundary from Runs 201–202 where appropriate.
+* Add a source/test loopback signer service or mock transport to prove protocol behavior.
+* Add deterministic canonical request/response/transcript digests.
+* Add request/response correlation checks.
+* Add response signature/proof verification if the existing RemoteSigner response shape already contains signature/proof material.
+* Add fail-closed timeout/unavailable/malformed/replayed/wrong-domain/wrong-request/wrong-key/wrong-policy tests.
+* Keep policy default Disabled.
+* Keep MainNet refused unless production authority criteria are explicitly satisfied.
+* Update docs/evidence narrowly.
+
+Not allowed:
+
+* Do not add release-binary evidence in Run 293.
+* Do not add a public CLI flag.
+* Do not enable RemoteSigner by default.
+* Do not wire RemoteSigner into production runtime by default.
+* Do not enable MainNet.
+* Do not implement KMS/HSM/cloud-KMS/PKCS#11 provider integration in this run.
+* Do not claim production custody closure.
+* Do not claim C4 closure.
+* Do not claim C5 closure.
+* Do not claim MainNet readiness.
+* Do not claim full production readiness.
+* Do not implement real on-chain governance proof verification.
+* Do not implement governance execution engine behavior beyond RemoteSigner backend request/response handling.
+* Do not implement validator-set rotation.
+* Do not implement real settlement, settlement finality, settlement receipt, settlement-receipt acknowledgement, settlement-finality projection, settlement-outcome report backend, or settlement-outcome publication.
+* Do not implement real external publication, external-publication confirmation, receipt, acknowledgement, audit finalization, audit completion, audit archive, audit seal, or audit anchor.
+* Do not call Run 070.
+* Do not mutate `LivePqcTrustState`.
+* Do not swap trust state.
+* Do not evict sessions.
+* Do not write PQC trust-bundle sequence files.
+* Do not write authority markers.
+* Do not change trust-bundle wire format.
+* Do not change peer-candidate wire format.
+* Do not change consensus wire format.
+* Do not change the Run 291 RocksDB durable replay backend except for minimal composition tests if strictly necessary.
+* Do not weaken any fail-closed behavior from Runs 050–292.
+* Do not turn any Red production row Green in Run 293. Source/test implementation may move the RemoteSigner backend row to Yellow/source-test implementation landed, release-binary evidence pending Run 294.
+
+Backend design requirements:
+
+1. Default Disabled / fail-closed
+
+RemoteSigner backend policy must default to Disabled.
+
+Disabled policy must fail closed before any network/transport/signing attempt.
+
+No default runtime path may open or call the backend.
+
+No silent fallback to fixture, loopback, local signing, or in-memory signing is allowed.
+
+2. Domain binding
+
+Every RemoteSigner request and response must bind, where available:
+
+* environment;
+* chain_id;
+* genesis hash or authority-domain binding;
+* authority-domain sequence or authority epoch;
+* signer identity / signer key fingerprint;
+* request kind;
+* authorized action;
+* candidate digest or proposal digest;
+* replay/durable record digest if composed;
+* policy selector;
+* nonce/request id if used;
+* backend protocol version;
+* domain separation tag.
+
+Wrong environment, wrong chain, wrong genesis/domain, wrong authority sequence/epoch, wrong signer identity, wrong request id, wrong authorized action, wrong candidate digest, wrong payload digest, wrong policy, or wrong protocol version must fail closed.
+
+3. Canonical encoding
+
+Use deterministic canonical bytes for all transcript digests.
+
+Do not use Rust `Debug` formatting as canonical bytes.
+
+Do not use wall-clock time as an authorizing value.
+
+Do not use random request IDs unless they are explicitly non-authorizing and still bound into request/response correlation. Prefer deterministic request IDs derived from typed input for tests.
+
+4. Request/response correlation
+
+A RemoteSigner response must only authorize the exact request it answers.
+
+The backend must reject:
+
+* response for different request id;
+* response for different transcript digest;
+* response for different candidate digest;
+* response for different authorized action;
+* response for different chain/environment/genesis;
+* response from wrong signer identity;
+* replayed response from a prior request;
+* response signed/proved under an unexpected key;
+* response with missing or malformed proof/signature material.
+
+5. Transport / availability
+
+The production backend must surface typed fail-closed outcomes for:
+
+* endpoint unavailable;
+* connection refused;
+* timeout;
+* transport decode error;
+* response too large;
+* malformed response;
+* unsupported protocol version;
+* response-domain mismatch;
+* response-transcript mismatch;
+* signer unavailable;
+* signer refused;
+* signer policy rejected;
+* signer key unavailable;
+* signer attestation missing or unavailable if the existing surface models attestation.
+
+Use existing transport abstractions from Runs 201–202 if available. If a new narrow transport is necessary, keep it minimal and mockable.
+
+6. MainNet policy
+
+MainNet must remain refused unless production authority criteria are satisfied.
+
+Fixture/loopback/dev material must not satisfy MainNet.
+
+Local operator material alone must not satisfy MainNet.
+
+Peer majority must not satisfy MainNet.
+
+The backend must not allow a RemoteSigner response alone to bypass governance proof verification, custody attestation, validator-set rotation requirements, or MainNet readiness gates.
+
+7. No raw local production signing keys
+
+The production RemoteSigner backend must not introduce raw local production signing-key loading.
+
+Source/test loopback keys may exist only in tests/examples and must be clearly non-production.
+
+No secrets, private keys, tokens, credentials, or cloud provider material may be committed.
+
+8. Composition with existing authority/custody/governance surfaces
+
+The backend should compose narrowly with existing Runs 188–202 authority custody / RemoteSigner boundary types.
+
+Where existing validators already verify request/response/transcript material, reuse them rather than creating parallel semantics.
+
+The backend must not bypass existing custody class, RemoteSigner policy, governance authority verifier, or MainNet peer-driven apply refusal.
+
+Suggested type names:
+
+Use actual existing names where available. Otherwise use names close to:
+
+* `ProductionRemoteSignerBackend`
+* `ProductionRemoteSignerBackendConfig`
+* `ProductionRemoteSignerBackendPolicy`
+* `ProductionRemoteSignerBackendIdentity`
+* `ProductionRemoteSignerEndpoint`
+* `ProductionRemoteSignerRequest`
+* `ProductionRemoteSignerResponse`
+* `ProductionRemoteSignerTranscript`
+* `ProductionRemoteSignerTranscriptDigest`
+* `ProductionRemoteSignerRequestId`
+* `ProductionRemoteSignerError`
+* `ProductionRemoteSignerOutcome`
+* `ProductionRemoteSignerProtocolVersion`
+* `RemoteSignerBackendTransport`
+* `LoopbackRemoteSignerService`
+* `MockRemoteSignerBackendTransport`
+
+Suggested trait:
+
+If an existing RemoteSigner backend trait exists, implement it.
+
+Otherwise introduce a narrow trait such as:
+
+`GovernanceProductionRemoteSignerBackend`
+
+with methods close to:
+
+* `submit_remote_signing_request(...)`
+* `verify_remote_signer_response(...)`
+* `evaluate_remote_signer_backend(...)`
+* `recover_remote_signer_request_window(...)` if replay/recovery is part of the existing model.
+
+Do not create a broad signing/custody framework if a narrow backend is sufficient.
+
+Required outcome taxonomy:
+
+Use actual existing outcomes where present. Otherwise include typed outcomes close to:
+
+* `DisabledNoRequest`
+* `RequestBuilt`
+* `RemoteSignerAccepted`
+* `RemoteSignerRejected`
+* `RemoteSignerUnavailable`
+* `RemoteSignerTimeout`
+* `RemoteSignerTransportDecodeFailed`
+* `RemoteSignerMalformedResponse`
+* `RemoteSignerUnsupportedProtocol`
+* `RemoteSignerDomainMismatch`
+* `RemoteSignerTranscriptMismatch`
+* `RemoteSignerRequestIdMismatch`
+* `RemoteSignerWrongSigner`
+* `RemoteSignerWrongAction`
+* `RemoteSignerWrongCandidateDigest`
+* `RemoteSignerReplayRejected`
+* `RemoteSignerAttestationUnavailable`
+* `MainNetProductionAuthorityUnavailable`
+* `MainNetRefused`
+* `FixtureMaterialRejectedForMainNet`
+* `ValidatorSetRotationUnsupported`
+* `GovernanceVerifierUnavailable`
+* `PolicyChangeUnsupported`
+* `AmbiguousFailClosed`
+
+Only the typed accepted response may authorize the next modeled/production custody decision. Every other outcome must be non-mutating.
+
+Required tests:
+
+Create a focused Run 293 source/test corpus. Target at least 50 tests.
+
+Minimum test groups:
+
+A. Accepted / compatible
+
+* Disabled default policy is explicit and inert.
+* DevNet source/test loopback RemoteSigner accepts a valid request/response.
+* TestNet source/test loopback RemoteSigner accepts a valid request/response if policy explicitly allows it.
+* Request digest is deterministic.
+* Response digest is deterministic.
+* Transcript digest is deterministic.
+* Two identical requests produce identical request/transcript digests.
+* Valid response authorizes exactly the matching request.
+* Backend composes with existing Run 194–199 RemoteSigner request/response/policy types.
+* Backend composes with existing Run 201–202 transport boundary if available.
+* Backend composes with Run 291 durable replay record digest if the existing flow has a replay input; otherwise document why replay composition is not yet representable.
+* Existing fixture/in-memory RemoteSigner boundary behavior remains unchanged.
+
+B. Rejection / fail-closed
+
+* Disabled policy produces no request and no transport invocation.
+* MainNet identity refused.
+* Fixture loopback material refused for MainNet.
+* Wrong environment rejected.
+* Wrong chain rejected.
+* Wrong genesis/domain rejected.
+* Wrong authority sequence/epoch rejected.
+* Wrong signer identity rejected.
+* Wrong request id rejected.
+* Wrong transcript digest rejected.
+* Wrong candidate/proposal digest rejected.
+* Wrong authorized action rejected.
+* Wrong protocol version rejected.
+* Missing response proof/signature rejected.
+* Malformed response rejected.
+* Oversized response rejected if response sizing exists.
+* Response from prior request replay rejected.
+* Signer unavailable rejected.
+* Transport unavailable rejected.
+* Timeout rejected.
+* Decode error rejected.
+* Signer refused rejected.
+* Policy rejected rejected.
+* Ambiguous result rejected fail-closed.
+
+C. MainNet / authority policy
+
+* MainNet cannot be satisfied by local operator material alone.
+* MainNet cannot be satisfied by fixture loopback signer.
+* MainNet cannot be satisfied by peer majority.
+* MainNet cannot bypass missing custody attestation.
+* MainNet cannot bypass missing governance proof verifier.
+* MainNet cannot bypass validator-set rotation gate.
+* Production RemoteSigner unavailable path records no mutation.
+* MainNet peer-driven apply remains refused.
+
+D. Non-mutation
+
+Every rejected path proves:
+
+* no Run 070 call;
+* no `LivePqcTrustState` mutation;
+* no trust swap;
+* no session eviction;
+* no PQC trust-bundle sequence write;
+* no authority marker write;
+* no durable replay overwrite;
+* no settlement;
+* no external publication;
+* no governance execution;
+* no validator-set rotation;
+* no KMS/HSM/cloud-KMS/PKCS#11 signing;
+* no raw local production signing key load;
+* no fallback to fixture/loopback/local signing.
+
+E. Replay / recovery / idempotency
+
+If request replay state is represented:
+
+* duplicate identical request is idempotent or safely rejected according to existing policy;
+* duplicate response for same request is idempotent only when byte-identical and policy permits;
+* same request id with different transcript fails closed;
+* same response id with different signature/proof fails closed;
+* recovery after request-built-before-response is fail-closed;
+* recovery after accepted-response-before-persisted-decision is fail-closed unless existing replay state proves exact acceptance;
+* ambiguous recovery window fails closed.
+
+If replay state is not yet represented, document it honestly and add tests proving no replay acceptance is claimed.
+
+F. C4/C5 taxonomy
+
+Tests or grep assertions must prove:
+
+* Run 293 is source/test production RemoteSigner backend implementation.
+* Run 293 is not release-binary evidence.
+* Production durable replay RocksDB backend remains Green-for-scope after Runs 291–292.
+* Real production RemoteSigner backend row becomes Yellow/source-test implementation landed, release-binary evidence pending Run 294.
+* Real KMS/HSM/cloud-KMS/PKCS#11 custody backend remains Red.
+* Real custody attestation verifier remains Red unless already implemented elsewhere.
+* Real on-chain governance proof verifier remains Red.
+* Governance execution engine remains Red.
+* Validator-set rotation remains Red.
+* MainNet authority rotation/revocation under production custody remains Red.
+* Full MainNet release-binary evidence under production custody remains Red.
+* Full C4 remains OPEN.
+* C5 remains OPEN.
+
+Required regression commands:
+
+Run at minimum:
+
+* `cargo build -p qbind-node --lib`
+* `cargo test -p qbind-node --test run_293_production_remote_signer_backend_tests`
+* `cargo test -p qbind-node --test run_291_production_durable_replay_rocksdb_tests`
+* `cargo test -p qbind-node --test run_290_durable_completion_external_publication_audit_anchor_tests`
+* `cargo test -p qbind-node --test run_288_durable_completion_external_publication_audit_seal_tests`
+* `cargo test -p qbind-node --test run_286_durable_completion_external_publication_audit_archive_tests`
+* `cargo test -p qbind-node --test run_284_durable_completion_external_publication_audit_completion_tests`
+* `cargo test -p qbind-node --test run_282_durable_completion_external_publication_audit_finalization_tests`
+* `cargo test -p qbind-node --test run_280_durable_completion_external_publication_acknowledgement_tests`
+* `cargo test -p qbind-node --test run_278_durable_completion_external_publication_receipt_tests`
+* `cargo test -p qbind-node --test run_276_durable_completion_external_publication_confirmation_tests`
+* `cargo test -p qbind-node --test run_274_durable_completion_settlement_outcome_publication_tests`
+* `cargo test -p qbind-node --test run_272_durable_completion_settlement_outcome_report_tests`
+* `cargo test -p qbind-node --test run_270_durable_completion_settlement_receipt_acknowledgement_tests`
+* `cargo test -p qbind-node --test run_268_durable_completion_settlement_finalization_tests`
+* `cargo test -p qbind-node --test run_266_durable_completion_settlement_commitment_tests`
+* `cargo test -p qbind-node --test run_264_durable_completion_consumer_settlement_projection_tests`
+* `cargo test -p qbind-node --test run_262_durable_completion_acknowledgement_consumer_tests`
+* `cargo test -p qbind-node --test run_260_durable_completion_audit_receipt_acknowledgement_tests`
+* `cargo test -p qbind-node --test run_258_durable_completion_audit_publication_receipt_tests`
+* `cargo test -p qbind-node --test run_256_durable_completion_attestation_backend_tests`
+* `cargo test -p qbind-node --test run_254_modeled_durable_completion_attestation_projection_tests`
+* `cargo test -p qbind-node --test run_252_modeled_durable_completion_finalization_projection_tests`
+* `cargo test -p qbind-node --test run_250_modeled_durable_consume_completion_reporter_tests`
+* `cargo test -p qbind-node --test run_248_modeled_durable_consume_projection_sink_tests`
+* `cargo test -p qbind-node --test run_246_governance_modeled_end_to_end_pipeline_tests`
+* `cargo test -p qbind-node --test run_244_modeled_governance_trust_mutation_applier_tests`
+* `cargo test -p qbind-node --test run_242_governance_execution_mutation_engine_tests`
+* `cargo test -p qbind-node --test run_240_governance_evaluator_replay_durable_runtime_integration_tests`
+* `cargo test -p qbind-node --test run_238_governance_evaluator_replay_durable_backend_tests`
+* `cargo test -p qbind-node --test run_236_governance_evaluator_replay_consume_runtime_integration_tests`
+* `cargo test -p qbind-node --test run_234_governance_evaluator_replay_consume_boundary_tests`
+* `cargo test -p qbind-node --test run_232_governance_evaluator_replay_runtime_integration_tests`
+* `cargo test -p qbind-node --test run_230_governance_evaluator_replay_state_tests`
+* `cargo test -p qbind-node --test run_228_peer_evaluator_context_representation_tests`
+* `cargo test -p qbind-node --test run_226_governance_evaluator_runtime_callsite_wiring_tests`
+* `cargo test -p qbind-node --test run_224_governance_evaluator_runtime_integration_tests`
+* `cargo test -p qbind-node --lib pqc_authority`
+* `cargo test -p qbind-node --lib`
+
+Also run any existing RemoteSigner / custody / authority tests from Runs 188–202 if their names differ from the above list.
+
+Security scanning:
+
+* Run secret scanning over changed files.
+* Run CodeQL if available.
+* Because Run 293 adds a real production RemoteSigner backend, CodeQL or an honest skip/timeout reason is required.
+* If CodeQL is skipped because the database is too large, times out, tooling is unavailable, or reports no analyzable changes, state that explicitly and do not claim CodeQL coverage.
+
+Documentation requirements:
+
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_293.md` must include:
+
+1. Exact verdict.
+2. Files changed.
+3. Backend design summary.
+4. Request/response/transcript/domain binding.
+5. Accepted source/test evidence.
+6. Rejection/fail-closed evidence.
+7. MainNet refusal / authority policy evidence.
+8. Replay/recovery/idempotency evidence.
+9. Non-mutation evidence.
+10. Tests run and results.
+11. C4/C5 matrix taxonomy status.
+12. Security scan results.
+13. Honest limitations.
+14. C4/C5 status.
+15. Suggested Run 294 next step.
+
+Docs must state clearly:
+
+* Run 293 is source/test production RemoteSigner backend implementation.
+* Run 293 is not release-binary evidence.
+* Release-binary evidence is deferred to Run 294.
+* Run 293 does not add default production runtime wiring.
+* Run 293 does not add a public CLI flag.
+* Run 293 does not enable RemoteSigner by default.
+* Run 293 does not enable MainNet.
+* Run 293 does not implement KMS/HSM/cloud-KMS/PKCS#11 custody.
+* Run 293 does not implement custody attestation unless explicitly and actually implemented.
+* Run 293 does not implement on-chain governance proof verification.
+* Run 293 does not implement governance execution engine.
+* Run 293 does not implement validator-set rotation.
+* Run 293 does not implement settlement or external publication.
+* Run 293 does not call Run 070.
+* Run 293 does not mutate `LivePqcTrustState`.
+* Run 293 does not write trust-bundle sequence or authority marker files.
+* Run 293 does not weaken Run 292 durable replay RocksDB Green-for-scope status.
+* Full C4 remains OPEN.
+* C5 remains OPEN.
+
+C4/C5 matrix update:
+
+Update carefully.
+
+Expected after successful Run 293:
+
+* Production durable replay RocksDB backend remains Green for release-binary-evidenced backend behavior only.
+* Real production RemoteSigner backend may move from Red to Yellow / source-test implementation landed, release-binary evidence pending Run 294.
+* Real KMS/HSM/cloud-KMS/PKCS#11 custody backend remains Red.
+* Real custody attestation verifier remains Red unless separately implemented and evidenced.
+* Real on-chain governance proof verifier remains Red.
+* Governance execution engine remains Red.
+* Validator-set rotation / authority-set synchronization remains Red.
+* MainNet authority rotation/revocation under production custody remains Red.
+* Production signing audit trail / crypto-agility activation / incident response remains Red.
+* Full MainNet release-binary evidence under production custody remains Red.
+* Full C4 remains OPEN.
+* C5 remains OPEN.
+
+Do not mark RemoteSigner Green until Run 294 release-binary evidence exists.
+
+Do not mark C4 closed.
+
+Do not mark C5 closed.
+
+Contradiction handling:
+
+Update `docs/whitepaper/contradiction.md`.
+
+Add a “Run 293” entry.
+
+If no contradiction is found, state that Run 293 introduces a source/test production RemoteSigner backend implementation while preserving default Disabled/fail-closed runtime posture, no MainNet enablement, no KMS/HSM/custody-attestation/on-chain-verifier/governance-engine/validator-set-rotation implementation, no Run 070 call, no `LivePqcTrustState` mutation, and Full C4 OPEN / C5 OPEN.
+
+If contradiction is found, record the exact contradiction with file/function/doc reference and recommend the smallest safe fix.
+
+Expected verdicts:
+
+PASS / source-test production RemoteSigner backend implementation if:
+
+* a real production RemoteSigner backend implementation lands at source/test level;
+* it composes with existing RemoteSigner boundary/payload/policy surfaces;
+* default policy remains Disabled/fail-closed;
+* MainNet is refused unless production authority criteria are satisfied;
+* request/response/transcript/domain binding tests pass;
+* timeout/unavailable/malformed/replay/wrong-domain tests pass;
+* non-mutation invariants pass;
+* regression corpus passes;
+* docs/evidence/contradiction are updated;
+* secret scan result is clean;
+* CodeQL result or honest skip/timeout reason is reported;
+* Full C4 remains OPEN;
+* C5 remains OPEN.
+
+Partial-positive if:
+
+* the backend implementation lands but one bounded non-critical transport/recovery scenario is deferred honestly;
+* no false closure claim is made.
+
+Blocked only if:
+
+* the existing RemoteSigner boundary cannot support a real backend without broad redesign;
+* document the exact blocker and smallest safe next run.
+
+Unacceptable:
+
+* claiming release-binary evidence;
+* claiming C4 closure;
+* claiming C5 closure;
+* claiming MainNet readiness;
+* claiming default runtime enablement;
+* silently falling back to fixture/loopback/local signing;
+* using raw local production signing keys;
+* hiding CodeQL failure/timeout/skip;
+* hiding regression failures;
+* broad redesign of unrelated settlement, governance, consensus, trust-bundle, wire, RocksDB durable replay, or modeled pipeline surfaces.
+
+Suggested Run 294 next step after successful Run 293:
+
+Run 294 — release-binary evidence for the production RemoteSigner backend.
+
+Run 294 should build real `target/release/qbind-node` plus a release-built helper, exercise the Run 293 RemoteSigner backend in release mode, prove request/response/transcript/domain binding, timeout/unavailable/malformed/replay/wrong-domain fail-closed behavior, prove default production binary surfaces remain Disabled/silent, prove MainNet remains refused absent production authority criteria, and preserve Full C4 OPEN / C5 OPEN unless every closure gate is actually satisfied.
+
+Required final response format:
+
+1. Exact verdict.
+2. Files changed.
+3. Backend design summary.
+4. Request/response/transcript/domain binding.
+5. Accepted source/test evidence.
+6. Rejection/fail-closed evidence.
+7. MainNet refusal / authority policy evidence.
+8. Replay/recovery/idempotency evidence.
+9. Non-mutation evidence.
+10. Tests run and results.
+11. C4/C5 matrix taxonomy status.
+12. Security scan results.
+13. Honest limitations.
+14. C4/C5 status.
+15. Suggested Run 294 next step.
