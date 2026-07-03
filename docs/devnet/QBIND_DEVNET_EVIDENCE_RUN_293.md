@@ -189,9 +189,12 @@ authority-marker files.
 
 * Secret scan over changed files — **clean** (no secrets; the backend derives
   ids/transcripts by SHA3-256 over public spec fields and never embeds keys).
-* CodeQL — see the final task response for the exact CodeQL result or an honest
-  skip/timeout reason. Run 293 adds real backend code, so CodeQL (or an honest
-  skip reason) is reported; no CodeQL coverage is claimed if it did not run.
+* CodeQL — **attempted but did not complete**. CodeQL analysis over the Rust
+  database was invoked but timed out / was skipped because the database size is
+  too large, so it did **not** produce results. **No CodeQL coverage is
+  claimed** for Run 293. Run 293 adds real backend code that derives
+  ids/transcripts by SHA3-256 over public spec fields and never embeds keys;
+  the honest CodeQL limitation is recorded here directly rather than deferred.
 
 ## 13. Honest limitations
 
