@@ -1,0 +1,584 @@
+Run 290 — Source/test durable-completion external-publication-audit-seal consumer / external-publication-audit-anchor interface boundary
+
+You are continuing QBIND after Run 289.
+
+Current accepted state:
+
+Run 289 is accepted as PASS / release-binary evidence positive.
+
+Run 289 release-evidenced the Run 288 source/test durable-completion external-publication-audit-archive consumer / external-publication-audit-seal boundary on real `target/release/qbind-node` plus a release-built helper.
+
+Run 289 proved:
+
+* the Run 288 external-publication-audit-seal production library symbols are present and exercised in release mode;
+* the release helper remains dead code from production runtime;
+* the fixture external-publication-audit-seal sink mutates only modeled in-memory `DurableCompletionExternalPublicationAuditSealLedger`;
+* Production/MainNet/External external-publication-audit-seal sinks remain reachable but unavailable/fail-closed;
+* projection is driven exclusively from `input.external_publication_audit_archive_binding` through `project_external_publication_audit_archive_outcome_to_external_publication_audit_seal_request`;
+* Run 286 `ExternalPublicationAuditArchiveRecorded` is required before any Run 288 external-publication-audit-seal request can exist;
+* only `ExternalPublicationAuditSealRecorded` authorizes modeled external-publication-audit-seal state;
+* duplicate identical external-publication-audit-seal records are idempotent;
+* same external-publication-audit-seal record id with a different digest fails closed as equivocation;
+* helper corpus passed 80/80;
+* S1–S6 real-binary scenarios passed with expected return codes;
+* 113-pattern denylist passed;
+* source/helper reachability and C4/C5 taxonomy greps passed;
+* full regression corpus Run 288 → Run 224 passed;
+* `cargo test -p qbind-node --lib pqc_authority` passed;
+* `cargo test -p qbind-node --lib` passed;
+* secret scan reported clean;
+* CodeQL timed out / did not complete; no CodeQL coverage was claimed;
+* Full C4 remains OPEN;
+* C5 remains OPEN.
+
+Objective:
+
+Add the next source/test-only boundary above Run 288: a modeled durable-completion external-publication-audit-seal consumer / external-publication-audit-anchor interface boundary.
+
+This boundary models the first downstream audit-anchor step after a Run 288 `ExternalPublicationAuditSealRecorded` outcome. It converts a valid modeled external-publication-audit-seal state into a typed external-publication-audit-anchor intent and modeled in-memory external-publication-audit-anchor record.
+
+This is a mockable, in-memory, source/test boundary only.
+
+Strict scope:
+
+* Source/test only.
+* No release-binary evidence in this run.
+* No production runtime enablement.
+* No real external-publication audit anchor.
+* No real external-publication audit-anchor backend.
+* No real external-publication audit seal.
+* No real external-publication audit archive.
+* No real external-publication audit completion.
+* No real external-publication audit finalization.
+* No real external-publication acknowledgement.
+* No real external-publication receipt.
+* No real external-publication confirmation.
+* No real external publication.
+* No real settlement backend.
+* No real settlement execution.
+* No real settlement finality.
+* No real settlement receipt.
+* No real settlement-receipt acknowledgement.
+* No real settlement-finality projection.
+* No real settlement-outcome report backend.
+* No real settlement-outcome publication.
+* No real audit-ledger acknowledgement.
+* No real audit-ledger finalization.
+* No real audit-ledger write.
+* No real production attestation/finalization/completion-report/durable-consume/persistent-replay backend.
+* No real governance execution engine.
+* No real production mutation engine.
+* No real on-chain governance proof verifier.
+* No KMS/HSM/RemoteSigner backend.
+* No RocksDB/file/schema/migration/storage-format change.
+* No wire/schema/marker/sequence/trust-bundle change.
+* No Run 070 call.
+* No `LivePqcTrustState` mutation.
+* No real trust swap.
+* No session eviction.
+* No sequence write.
+* No marker write.
+* No network I/O.
+* No MainNet governance.
+* No MainNet peer-driven apply.
+* No validator-set rotation.
+* No policy-change enablement.
+* Keep Full C4 OPEN.
+* Keep C5 OPEN.
+
+Required new source module:
+
+`crates/qbind-node/src/pqc_governance_durable_completion_external_publication_audit_anchor.rs`
+
+Register it in:
+
+`crates/qbind-node/src/lib.rs`
+
+Required new test file:
+
+`crates/qbind-node/tests/run_290_durable_completion_external_publication_audit_anchor_tests.rs`
+
+Required evidence doc:
+
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_290.md`
+
+Required narrow doc updates:
+
+* `docs/protocol/QBIND_GOVERNANCE_EXECUTION_RUNTIME_SURFACE_AUDIT.md`
+* `docs/protocol/QBIND_C4_C5_CLOSURE_CRITERIA.md`
+* `docs/ops/QBIND_PQC_TRUST_LIFECYCLE_RUNBOOK.md`
+* `docs/protocol/QBIND_PEER_DRIVEN_TRUST_BUNDLE_APPLY_SAFETY.md`
+* `docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md`
+* `docs/whitepaper/contradiction.md`
+
+C4/C5 matrix requirements:
+
+* Preserve the matrix taxonomy clarification exactly in substance.
+* Do not weaken the distinction between boundary readiness and production readiness.
+* Update “Status as of Run 290” where appropriate.
+* Keep the modeled durable-completion / settlement / external-publication boundary stack Yellow only.
+* Mention Run 290 as a source/test modeled external-publication-audit-anchor boundary only.
+* Do not describe Run 290 as release-binary evidenced; that is for Run 291.
+* Keep real production RemoteSigner backend Red.
+* Keep real KMS / HSM / cloud-KMS / PKCS#11 custody backend Red.
+* Keep real custody attestation verifier Red.
+* Keep real on-chain governance proof verifier Red.
+* Keep governance execution engine Red.
+* Keep validator-set rotation / authority-set synchronization Red.
+* Keep full MainNet release-binary evidence under production custody Red.
+* Keep Full C4 OPEN.
+* Keep C5 OPEN.
+
+Required ordering:
+
+Preserve the full prior modeled chain:
+
+1. Run 246 pipeline success before Run 248 sink intent.
+2. Run 248 `ConsumeReceiptRecorded` before Run 250 completion report.
+3. Run 250 `CompletionReportRecorded` before Run 252 finalization.
+4. Run 252 `DurableCompletionFinalized` before Run 254 attestation.
+5. Run 254 `DurableCompletionAttested` before Run 256 backend request.
+6. Run 256 `BackendSubmissionRecorded` before Run 258 audit/publication receipt.
+7. Run 258 `AuditReceiptRecorded` before Run 260 acknowledgement / confirmation.
+8. Run 260 `AcknowledgementRecorded` before Run 262 acknowledgement-consumer request.
+9. Run 262 `AcknowledgementConsumed` before Run 264 settlement-projection request.
+10. Run 264 `SettlementProjectionRecorded` before Run 266 settlement-commitment request.
+11. Run 266 `SettlementCommitmentRecorded` before Run 268 settlement-finalization request.
+12. Run 268 `SettlementFinalizationRecorded` before Run 270 settlement-receipt acknowledgement request.
+13. Run 270 `SettlementReceiptAcknowledgementRecorded` before Run 272 settlement-outcome report request.
+14. Run 272 `SettlementOutcomeReportRecorded` before Run 274 settlement-outcome publication request.
+15. Run 274 `SettlementOutcomePublicationRecorded` before Run 276 external-publication-confirmation request.
+16. Run 276 `ExternalPublicationConfirmationRecorded` before Run 278 external-publication-receipt request.
+17. Run 278 `ExternalPublicationReceiptRecorded` before Run 280 external-publication-acknowledgement request.
+18. Run 280 `ExternalPublicationAcknowledgementRecorded` before Run 282 external-publication-audit-finalization request.
+19. Run 282 `ExternalPublicationAuditFinalizationRecorded` before Run 284 external-publication-audit-completion request.
+20. Run 284 `ExternalPublicationAuditCompletionRecorded` before Run 286 external-publication-audit-archive request.
+21. Run 286 `ExternalPublicationAuditArchiveRecorded` before Run 288 external-publication-audit-seal request.
+22. Run 288 `ExternalPublicationAuditSealRecorded` before any Run 290 external-publication-audit-anchor request.
+23. Only Run 290 `ExternalPublicationAuditAnchorRecorded`, or an equivalently named success outcome, may authorize a new modeled external-publication-audit-anchor state.
+
+Suggested type names:
+
+* `DurableCompletionExternalPublicationAuditAnchorKind`
+* `DurableCompletionExternalPublicationAuditAnchorPolicy`
+* `DurableCompletionExternalPublicationAuditAnchorIdentity`
+* `DurableCompletionExternalPublicationAuditAnchorInput`
+* `DurableCompletionExternalPublicationAuditAnchorExpectations`
+* `DurableCompletionExternalPublicationAuditAnchorRequest`
+* `DurableCompletionExternalPublicationAuditAnchorResponse`
+* `DurableCompletionExternalPublicationAuditAnchorRecord`
+* `DurableCompletionExternalPublicationAuditAnchorDigest`
+* `DurableCompletionExternalPublicationAuditAnchorTranscriptDigest`
+* `DurableCompletionExternalPublicationAuditAnchorOutcome`
+
+Suggested sink trait:
+
+`GovernanceDurableCompletionExternalPublicationAuditAnchorSink`
+
+Suggested implementations:
+
+* `FixtureDurableCompletionExternalPublicationAuditAnchorSink`
+* `ProductionExternalPublicationAuditAnchorSink`
+* `MainNetExternalPublicationAuditAnchorSink`
+* `ExternalExternalPublicationAuditAnchorSink`
+
+Implementation rules:
+
+* Fixture sink is DevNet/TestNet only.
+* Fixture sink mutates only an in-memory `DurableCompletionExternalPublicationAuditAnchorLedger`.
+* Production/MainNet/external audit-anchor sinks are reachable but unavailable/fail-closed.
+* No real audit anchor is performed.
+* No real audit seal is performed.
+* No real audit archive is performed.
+* No real audit-ledger write is performed.
+* No real external publication is performed.
+* No real external-publication confirmation, receipt, acknowledgement, audit finalization, audit completion, audit archive, audit seal, or audit anchor is performed.
+* No network I/O is performed.
+* No files, RocksDB, markers, sequences, audit ledgers, settlement records, settlement-finality records, settlement-receipt records, settlement-receipt acknowledgement records, settlement-finality projection records, settlement-outcome report records, settlement-outcome publication records, external-publication confirmation records, external-publication receipt records, external-publication acknowledgement records, external-publication audit-finalization records, external-publication audit-completion records, external-publication audit-archive records, external-publication audit-seal records, external-publication audit-anchor records, or production durable state are written.
+* No Run 070 call.
+* No `LivePqcTrustState` mutation.
+
+Required ledger:
+
+* `DurableCompletionExternalPublicationAuditAnchorLedger`
+* `DurableCompletionExternalPublicationAuditAnchorLedgerRecord`
+* `DurableCompletionExternalPublicationAuditAnchorLedgerSnapshot`
+* `DurableCompletionExternalPublicationAuditAnchorLedgerStatus`
+
+Ledger semantics:
+
+* One valid external-publication-audit-anchor record inserts exactly one in-memory record.
+* Duplicate identical external-publication-audit-anchor record is idempotent.
+* Same external-publication-audit-anchor record id with a different digest is equivocation and fails closed.
+* Rollback restores the in-memory snapshot.
+* Rollback failure never claims success.
+* Fixture ledger never writes files, RocksDB, markers, sequences, external publications, external-publication confirmations, external-publication receipts, external-publication acknowledgements, external-publication audit finalizations, external-publication audit completions, external-publication audit archives, external-publication audit seals, external-publication audit anchors, audit-ledger entries, settlement records, settlement-finality records, settlement-receipt records, settlement-receipt acknowledgement records, settlement-finality projection records, settlement-outcome report records, settlement-outcome publication records, real confirmation records, real receipt records, real acknowledgement records, real audit-finalization records, real audit-completion records, real audit-archive records, real audit-seal records, real audit-anchor records, or production durable state.
+
+Suggested outcome enum:
+
+Use exact names close to these:
+
+* `LegacyBypassNoExternalPublicationAuditAnchor`
+* `RejectedBeforeExternalPublicationAuditSealNoAuditAnchor`
+* `ExternalPublicationAuditSealDidNotRecordNoAuditAnchor`
+* `ExternalPublicationAuditAnchorRecorded`
+* `ExternalPublicationAuditAnchorDuplicateIdempotent`
+* `ExternalPublicationAuditAnchorRejectedBeforeRecord`
+* `ExternalPublicationAuditAnchorRecordFailedNoAuditAnchor`
+* `ExternalPublicationAuditAnchorRolledBackNoAuditAnchor`
+* `ExternalPublicationAuditAnchorRollbackFailedFatalNoAuditAnchor`
+* `ExternalPublicationAuditAnchorAmbiguousFailClosedNoAuditAnchor`
+* `ProductionExternalPublicationAuditAnchorUnavailableNoAuditAnchor`
+* `MainNetExternalPublicationAuditAnchorUnavailableNoAuditAnchor`
+* `ExternalPublicationAuditAnchorUnavailableNoAuditAnchor`
+* `MainNetPeerDrivenApplyRefusedNoAuditAnchor`
+* `ValidatorSetRotationUnsupportedNoAuditAnchor`
+* `PolicyChangeUnsupportedNoAuditAnchor`
+
+Only `ExternalPublicationAuditAnchorRecorded` may authorize a new modeled external-publication-audit-anchor state.
+
+Required projection helpers:
+
+* `project_external_publication_audit_seal_outcome_to_external_publication_audit_anchor_request(...)`
+* `evaluate_durable_completion_external_publication_audit_anchor(...)`
+* `recover_durable_completion_external_publication_audit_anchor_window(...)`
+* `external_publication_audit_anchor_outcome_authorizes_record(...)`
+* `external_publication_audit_anchor_outcome_projects_to_recorded(...)`
+
+Projection semantics:
+
+* Only Run 288 `ExternalPublicationAuditSealRecorded` creates an external-publication-audit-anchor request.
+* Run 288 duplicate-idempotent external-publication-audit-seal outcome may only match an already-recorded external-publication-audit-anchor record and must not create a new one by itself.
+* Every other Run 288 outcome maps to no-audit-anchor fail-closed.
+* Run 286 `ExternalPublicationAuditArchiveRecorded` alone creates no external-publication-audit-anchor request.
+* Run 284 `ExternalPublicationAuditCompletionRecorded` alone creates no external-publication-audit-anchor request.
+* Run 282 `ExternalPublicationAuditFinalizationRecorded` alone creates no external-publication-audit-anchor request.
+* Run 280 `ExternalPublicationAcknowledgementRecorded` alone creates no external-publication-audit-anchor request.
+* Run 278 `ExternalPublicationReceiptRecorded` alone creates no external-publication-audit-anchor request.
+* Run 276 `ExternalPublicationConfirmationRecorded` alone creates no external-publication-audit-anchor request.
+* Run 274 `SettlementOutcomePublicationRecorded` alone creates no external-publication-audit-anchor request.
+* Run 272 `SettlementOutcomeReportRecorded` alone creates no external-publication-audit-anchor request.
+* Run 270 `SettlementReceiptAcknowledgementRecorded` alone creates no external-publication-audit-anchor request.
+* Run 268 `SettlementFinalizationRecorded` alone creates no external-publication-audit-anchor request.
+* Run 266 `SettlementCommitmentRecorded` alone creates no external-publication-audit-anchor request.
+* Run 264 `SettlementProjectionRecorded` alone creates no external-publication-audit-anchor request.
+* Run 262 `AcknowledgementConsumed` alone creates no external-publication-audit-anchor request.
+* Run 260 `AcknowledgementRecorded` alone creates no external-publication-audit-anchor request.
+* Run 258 `AuditReceiptRecorded` alone creates no external-publication-audit-anchor request.
+* Run 256 `BackendSubmissionRecorded` alone creates no external-publication-audit-anchor request.
+* All earlier stages alone create no external-publication-audit-anchor request.
+* Binding mismatch leaves invocation count zero.
+* Digest mismatch after invocation does not record.
+* Failure/rollback/ambiguous/unavailable paths fail closed.
+
+Required invariant helpers:
+
+Add grep-verifiable helpers with names close to:
+
+* `durable_completion_external_publication_audit_anchor_rejection_is_non_mutating`
+* `durable_completion_external_publication_audit_anchor_never_calls_run_070`
+* `durable_completion_external_publication_audit_anchor_never_mutates_live_pqc_trust_state`
+* `durable_completion_external_publication_audit_anchor_never_writes_sequence_or_marker`
+* `durable_completion_external_publication_audit_anchor_no_rocksdb_file_schema_migration_change`
+* `durable_completion_external_publication_audit_anchor_no_external_publication`
+* `durable_completion_external_publication_audit_anchor_no_real_external_publication_confirmation`
+* `durable_completion_external_publication_audit_anchor_no_real_external_publication_receipt`
+* `durable_completion_external_publication_audit_anchor_no_real_external_publication_acknowledgement`
+* `durable_completion_external_publication_audit_anchor_no_real_external_publication_audit_finalization`
+* `durable_completion_external_publication_audit_anchor_no_real_external_publication_audit_completion`
+* `durable_completion_external_publication_audit_anchor_no_real_external_publication_audit_archive`
+* `durable_completion_external_publication_audit_anchor_no_real_external_publication_audit_seal`
+* `durable_completion_external_publication_audit_anchor_no_real_external_publication_audit_anchor`
+* `durable_completion_external_publication_audit_anchor_no_real_audit_ledger`
+* `durable_completion_external_publication_audit_anchor_no_real_settlement`
+* `durable_completion_external_publication_audit_anchor_no_real_settlement_finality`
+* `durable_completion_external_publication_audit_anchor_no_real_settlement_receipt`
+* `durable_completion_external_publication_audit_anchor_no_real_settlement_receipt_acknowledgement`
+* `durable_completion_external_publication_audit_anchor_no_real_settlement_finality_projection`
+* `durable_completion_external_publication_audit_anchor_no_real_settlement_outcome_report_backend`
+* `durable_completion_external_publication_audit_anchor_no_real_settlement_outcome_publication`
+* `durable_completion_external_publication_audit_anchor_external_publication_audit_seal_required`
+* `durable_completion_external_publication_audit_anchor_record_required_before_anchored`
+* `durable_completion_external_publication_audit_anchor_failed_record_never_records`
+* `durable_completion_external_publication_audit_anchor_rollback_never_records`
+* `durable_completion_external_publication_audit_anchor_ambiguous_window_fails_closed`
+* `durable_completion_external_publication_audit_anchor_mainnet_peer_driven_apply_refused_first`
+* `durable_completion_external_publication_audit_anchor_production_mainnet_unavailable`
+* `durable_completion_external_publication_audit_anchor_external_unavailable`
+* `durable_completion_external_publication_audit_anchor_validator_set_rotation_unsupported`
+* `durable_completion_external_publication_audit_anchor_policy_change_unsupported`
+* `durable_completion_external_publication_audit_anchor_local_operator_cannot_satisfy_mainnet_authority`
+* `durable_completion_external_publication_audit_anchor_peer_majority_cannot_satisfy_mainnet_authority`
+
+Required tests:
+
+Accepted / compatible:
+
+* Disabled external-publication-audit-anchor policy preserves legacy bypass and records nothing.
+* Disabled external-publication-audit-seal / audit-archive / audit-completion / audit-finalization / acknowledgement / receipt / confirmation / settlement-outcome publication / settlement-outcome report / settlement-receipt acknowledgement / settlement-finalization / settlement-commitment / settlement-projection / consumer / acknowledgement / receipt / backend / attestation / finalization / reporter / sink / pipeline policy never reaches audit anchor.
+* DevNet fixture chain records exactly one modeled in-memory external-publication-audit-anchor record only after the full Run 246 → 248 → 250 → 252 → 254 → 256 → 258 → 260 → 262 → 264 → 266 → 268 → 270 → 272 → 274 → 276 → 278 → 280 → 282 → 284 → 286 → 288 → 290 chain.
+* TestNet fixture chain records exactly one modeled in-memory external-publication-audit-anchor record only after the same full chain.
+* Add-root / retire-root / revoke-root / emergency-revoke-root / noop modeled actions preserve ordering and audit anchor only after Run 288 `ExternalPublicationAuditSealRecorded`.
+* Duplicate identical external-publication-audit-anchor record is idempotent.
+* Run 288 duplicate-idempotent external-publication-audit-seal outcome may only match an already-recorded external-publication-audit-anchor record and never creates a new audit anchor by itself.
+* Production external-publication-audit-anchor path is reachable but unavailable/fail-closed and records no state.
+* MainNet external-publication-audit-anchor path is reachable but unavailable/fail-closed and records no state.
+* External audit-anchor path is reachable but unavailable/fail-closed and performs no publication/network I/O.
+* MainNet peer-driven apply is refused before every modeled stage through external-publication-audit-anchor invocation.
+* Validator-set rotation unsupported and records no state.
+* Policy-change unsupported and records no state.
+
+Rejected / fail-closed:
+
+* Every rejection before Run 290 produces no external-publication-audit-anchor request and no record.
+* External-publication audit-seal did-not-record / rejected-before-record / record failure / rollback / rollback-failed / ambiguous window produces no external-publication-audit-anchor invocation and no record.
+* External-publication audit anchor before Run 288 `ExternalPublicationAuditSealRecorded` is rejected.
+* Same external-publication-audit-anchor record id with different digest fails closed as equivocation.
+* Wrong environment / chain / genesis / governance surface / mutation surface fails before sink invocation.
+* Wrong external-publication-audit-anchor identity / policy / kind / request / response / record digest fails closed.
+* Wrong external-publication-audit-seal / audit-archive / audit-completion / audit-finalization / acknowledgement / receipt / confirmation / settlement-outcome publication / settlement-outcome report / settlement-receipt acknowledgement / settlement-finalization / settlement-commitment / settlement-projection / consumer / acknowledgement / receipt / backend / attestation / finalization / completion-report / sink / pipeline digest fails closed.
+* Wrong proposal id / decision id / candidate digest / authority-domain sequence fails closed.
+* Malformed request / response fails closed.
+* Local operator key cannot satisfy MainNet authority.
+* Peer majority cannot satisfy MainNet authority.
+* Production/MainNet/external unavailable paths record no state and perform no publication.
+* Rejected paths produce no Run 070 call, no `LivePqcTrustState` mutation, no trust swap, no session eviction, no sequence write, no marker write, no RocksDB/file/schema/migration/storage-format change, no external publication, no real external-publication confirmation, no real external-publication receipt, no real external-publication acknowledgement, no real external-publication audit finalization, no real external-publication audit completion, no real external-publication audit archive, no real external-publication audit seal, no real external-publication audit anchor, no real audit-ledger write, no real settlement write, no real settlement-finality write, no real settlement-receipt write, no real settlement-receipt acknowledgement, no real settlement-finality projection, no real settlement-outcome report backend, and no real settlement-outcome publication.
+
+Recovery / crash-window:
+
+* before-pipeline through after-external-publication-audit-seal-success-before-audit-anchor-request windows fail closed unless explicit matching external-publication audit-seal success exists.
+* after-external-publication-audit-anchor-request-before-record fails closed.
+* after-external-publication-audit-anchor-record-before-success fails closed unless explicit matching external-publication-audit-anchor record exists.
+* after-external-publication-audit-anchor-success recovers as recorded.
+* ambiguous, record-failed, rollback-completed, rollback-failed, unknown, production/MainNet/external windows fail closed.
+* MainNet peer-driven apply refusal precedes recovery classification where applicable.
+
+Projection:
+
+* Only Run 288 `ExternalPublicationAuditSealRecorded` creates an external-publication-audit-anchor request.
+* Run 286 `ExternalPublicationAuditArchiveRecorded` alone creates no external-publication-audit-anchor request.
+* Run 284 `ExternalPublicationAuditCompletionRecorded` alone creates no external-publication-audit-anchor request.
+* Run 282 `ExternalPublicationAuditFinalizationRecorded` alone creates no external-publication-audit-anchor request.
+* Run 280 `ExternalPublicationAcknowledgementRecorded` alone creates no external-publication-audit-anchor request.
+* Run 278 `ExternalPublicationReceiptRecorded` alone creates no external-publication-audit-anchor request.
+* Run 276 `ExternalPublicationConfirmationRecorded` alone creates no external-publication-audit-anchor request.
+* Run 274 `SettlementOutcomePublicationRecorded` alone creates no external-publication-audit-anchor request.
+* Run 272 `SettlementOutcomeReportRecorded` alone creates no external-publication-audit-anchor request.
+* Run 270 `SettlementReceiptAcknowledgementRecorded` alone creates no external-publication-audit-anchor request.
+* Run 268 `SettlementFinalizationRecorded` alone creates no external-publication-audit-anchor request.
+* Run 266 `SettlementCommitmentRecorded` alone creates no external-publication-audit-anchor request.
+* Run 264 `SettlementProjectionRecorded` alone creates no external-publication-audit-anchor request.
+* Run 262 `AcknowledgementConsumed` alone creates no external-publication-audit-anchor request.
+* Run 260 `AcknowledgementRecorded` alone creates no external-publication-audit-anchor request.
+* Run 258 `AuditReceiptRecorded` alone creates no external-publication-audit-anchor request.
+* Run 256 backend submission alone creates no external-publication-audit-anchor request.
+* All earlier stage successes alone create no external-publication-audit-anchor request.
+* Run 288 duplicate-idempotent external-publication-audit-seal outcome creates no new external-publication-audit-anchor record unless a matching audit-anchor record already exists.
+* Only `ExternalPublicationAuditAnchorRecorded` authorizes modeled external-publication-audit-anchor state.
+* Every other outcome does not record.
+
+Stage-ordering:
+
+* MainNet peer-driven apply refusal happens before every later stage.
+* Evaluator/call-site authorization precedes durable replay.
+* Durable replay precedes mutation engine.
+* Mutation engine precedes modeled applier.
+* Modeled applier precedes sink intent.
+* Sink receipt precedes completion report.
+* Completion report precedes finalization.
+* Finalization precedes attestation.
+* Attestation precedes backend request.
+* Backend submission precedes audit receipt request.
+* Audit receipt precedes acknowledgement request.
+* Acknowledgement record precedes consumer request.
+* Consumer record precedes settlement-projection request.
+* Settlement-projection record precedes settlement-commitment request.
+* Settlement-commitment record precedes settlement-finalization request.
+* Settlement-finalization record precedes settlement-receipt acknowledgement request.
+* Settlement-receipt acknowledgement record precedes settlement-outcome report request.
+* Settlement-outcome report record precedes settlement-outcome publication request.
+* Settlement-outcome publication record precedes external-publication-confirmation request.
+* External-publication-confirmation record precedes external-publication-receipt request.
+* External-publication-receipt record precedes external-publication-acknowledgement request.
+* External-publication-acknowledgement record precedes external-publication-audit-finalization request.
+* External-publication-audit-finalization record precedes external-publication-audit-completion request.
+* External-publication-audit-completion record precedes external-publication-audit-archive request.
+* External-publication-audit-archive record precedes external-publication-audit-seal request.
+* External-publication-audit-seal record precedes external-publication-audit-anchor request.
+* External-publication-audit-anchor record happens only after external-publication-audit-seal success.
+* Rejection before external-publication-audit-anchor stage leaves external-publication-audit-anchor invocation count zero.
+* External-publication-audit-anchor record failure does not invalidate external-publication-audit-seal state but does not authorize external-publication-audit-anchor state.
+* External-publication-audit-anchor rollback failure is fatal/fail-closed and does not authorize external-publication-audit-anchor state.
+
+Non-mutation:
+
+* no Run 070 call;
+* no `LivePqcTrustState` mutation;
+* no trust swap;
+* no session eviction;
+* no sequence write;
+* no marker write;
+* no RocksDB/file/schema/migration/storage-format write;
+* no wire/schema/marker/sequence/trust-bundle change;
+* no external network publication;
+* no real external-publication confirmation;
+* no real external-publication receipt;
+* no real external-publication acknowledgement;
+* no real external-publication audit finalization;
+* no real external-publication audit completion;
+* no real external-publication audit archive;
+* no real external-publication audit seal;
+* no real external-publication audit anchor;
+* no real settlement;
+* no real settlement finality;
+* no real settlement receipt;
+* no real settlement-receipt acknowledgement;
+* no real settlement-finality projection;
+* no real settlement-outcome report backend;
+* no real settlement-outcome publication;
+* no real audit-ledger write;
+* fixture audit-anchor sink mutates only `DurableCompletionExternalPublicationAuditAnchorLedger`;
+* production/MainNet/external paths remain unavailable/fail-closed.
+
+Validation commands:
+
+Run at minimum:
+
+* `cargo build -p qbind-node --lib`
+* `cargo test -p qbind-node --test run_290_durable_completion_external_publication_audit_anchor_tests`
+* `cargo test -p qbind-node --test run_288_durable_completion_external_publication_audit_seal_tests`
+* `cargo test -p qbind-node --test run_286_durable_completion_external_publication_audit_archive_tests`
+* `cargo test -p qbind-node --test run_284_durable_completion_external_publication_audit_completion_tests`
+* `cargo test -p qbind-node --test run_282_durable_completion_external_publication_audit_finalization_tests`
+* `cargo test -p qbind-node --test run_280_durable_completion_external_publication_acknowledgement_tests`
+* `cargo test -p qbind-node --test run_278_durable_completion_external_publication_receipt_tests`
+* `cargo test -p qbind-node --test run_276_durable_completion_external_publication_confirmation_tests`
+* `cargo test -p qbind-node --test run_274_durable_completion_settlement_outcome_publication_tests`
+* `cargo test -p qbind-node --test run_272_durable_completion_settlement_outcome_report_tests`
+* `cargo test -p qbind-node --test run_270_durable_completion_settlement_receipt_acknowledgement_tests`
+* `cargo test -p qbind-node --test run_268_durable_completion_settlement_finalization_tests`
+* `cargo test -p qbind-node --test run_266_durable_completion_settlement_commitment_tests`
+* `cargo test -p qbind-node --test run_264_durable_completion_consumer_settlement_projection_tests`
+* `cargo test -p qbind-node --test run_262_durable_completion_acknowledgement_consumer_tests`
+* `cargo test -p qbind-node --test run_260_durable_completion_audit_receipt_acknowledgement_tests`
+* `cargo test -p qbind-node --test run_258_durable_completion_audit_publication_receipt_tests`
+* `cargo test -p qbind-node --test run_256_durable_completion_attestation_backend_tests`
+* `cargo test -p qbind-node --test run_254_modeled_durable_completion_attestation_projection_tests`
+* `cargo test -p qbind-node --test run_252_modeled_durable_completion_finalization_projection_tests`
+* `cargo test -p qbind-node --test run_250_modeled_durable_consume_completion_reporter_tests`
+* `cargo test -p qbind-node --test run_248_modeled_durable_consume_projection_sink_tests`
+* `cargo test -p qbind-node --test run_246_governance_modeled_end_to_end_pipeline_tests`
+* `cargo test -p qbind-node --test run_244_modeled_governance_trust_mutation_applier_tests`
+* `cargo test -p qbind-node --test run_242_governance_execution_mutation_engine_tests`
+* `cargo test -p qbind-node --test run_240_governance_evaluator_replay_durable_runtime_integration_tests`
+* `cargo test -p qbind-node --test run_238_governance_evaluator_replay_durable_backend_tests`
+* `cargo test -p qbind-node --test run_236_governance_evaluator_replay_consume_runtime_integration_tests`
+* `cargo test -p qbind-node --test run_234_governance_evaluator_replay_consume_boundary_tests`
+* `cargo test -p qbind-node --test run_232_governance_evaluator_replay_runtime_integration_tests`
+* `cargo test -p qbind-node --test run_230_governance_evaluator_replay_state_tests`
+* `cargo test -p qbind-node --test run_228_peer_evaluator_context_representation_tests`
+* `cargo test -p qbind-node --test run_226_governance_evaluator_runtime_callsite_wiring_tests`
+* `cargo test -p qbind-node --test run_224_governance_evaluator_runtime_integration_tests`
+* `cargo test -p qbind-node --lib pqc_authority`
+* `cargo test -p qbind-node --lib`
+
+Security scanning:
+
+* Run secret scanning and report result.
+* Run CodeQL if available and report honestly.
+* Because Run 290 changes source and tests, do not classify it as trivial unless the checker itself does so.
+* If Rust CodeQL analysis is skipped because the database is too large, times out, tooling is unavailable, no changes are detected, or reports no analyzable changes, state that explicitly and do not claim CodeQL coverage.
+
+Documentation:
+
+Create:
+
+* `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_290.md`
+
+Update narrowly:
+
+* `docs/protocol/QBIND_GOVERNANCE_EXECUTION_RUNTIME_SURFACE_AUDIT.md`
+* `docs/protocol/QBIND_C4_C5_CLOSURE_CRITERIA.md`
+* `docs/ops/QBIND_PQC_TRUST_LIFECYCLE_RUNBOOK.md`
+* `docs/protocol/QBIND_PEER_DRIVEN_TRUST_BUNDLE_APPLY_SAFETY.md`
+* `docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md`
+* `docs/whitepaper/contradiction.md`
+
+Docs must state:
+
+* Run 290 is source/test only.
+* Run 290 adds a modeled durable-completion external-publication-audit-seal consumer / external-publication-audit-anchor interface boundary.
+* The boundary consumes only Run 288 `ExternalPublicationAuditSealRecorded`.
+* Run 288 `ExternalPublicationAuditSealRecorded` is required before any external-publication-audit-anchor request can exist.
+* Only `ExternalPublicationAuditAnchorRecorded` authorizes modeled external-publication-audit-anchor state.
+* Fixture external-publication-audit-anchor sink is DevNet/TestNet evidence-only and in-memory only.
+* Production/MainNet/external external-publication-audit-anchor sinks remain reachable but unavailable/fail-closed.
+* The C4/C5 matrix taxonomy remains present and unweakened.
+* Yellow boundary rows do not equal production backend implementation.
+* Red production backend rows remain Red until production implementation and release-binary evidence exist.
+* No real settlement is implemented.
+* No real settlement finality is implemented.
+* No real settlement receipt is implemented.
+* No real settlement-receipt acknowledgement is implemented.
+* No real settlement-finality projection is implemented.
+* No real settlement-outcome report backend is implemented.
+* No real settlement-outcome publication is implemented.
+* No real external publication is implemented.
+* No real external-publication confirmation is implemented.
+* No real external-publication receipt is implemented.
+* No real external-publication acknowledgement is implemented.
+* No real external-publication audit finalization is implemented.
+* No real external-publication audit completion is implemented.
+* No real external-publication audit archive is implemented.
+* No real external-publication audit seal is implemented.
+* No real external-publication audit anchor is implemented.
+* No real audit-ledger acknowledgement is implemented.
+* No real audit-ledger finalization is implemented.
+* No real production backend is implemented.
+* No RocksDB/file/schema/migration/storage-format change is implemented.
+* No wire/schema/marker/sequence/trust-bundle change is implemented.
+* No MainNet governance is enabled.
+* No MainNet peer-driven apply is enabled.
+* No validator-set rotation is implemented.
+* No policy-change enablement is implemented.
+* No Run 070 call.
+* No `LivePqcTrustState` mutation.
+* Rejected external-publication-audit-anchor paths are non-mutating.
+* Full C4 remains OPEN.
+* C5 remains OPEN.
+
+Contradiction handling:
+
+* Crosscheck Run 290 against Runs 050–289.
+* If no contradiction is found, add a “Run 290 — no contradiction found” entry to `docs/whitepaper/contradiction.md`.
+* If contradiction is found, record it explicitly with exact file/function/doc reference and recommend the smallest safe fix.
+* Specifically verify that Run 290 does not reinterpret the C4/C5 matrix clarification as C4/C5 closure or production backend implementation.
+
+Expected verdict after completion:
+
+Source/test positive only if:
+
+* Run 290 tests pass.
+* Full regression corpus passes.
+* `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_290.md` exists.
+* Protocol/ops docs are updated.
+* C4/C5 matrix taxonomy remains present and unweakened.
+* `contradiction.md` has a Run 290 entry.
+* Secret scan result is reported.
+* CodeQL result or honest skip/timeout reason is reported.
+* C4/C5 remain OPEN.
+
+Suggested next step after successful Run 290:
+
+Run 291 — release-binary evidence for the Run 290 durable-completion external-publication-audit-seal consumer / external-publication-audit-anchor interface boundary.
+
+Final response format:
+
+1. Exact verdict.
+2. Files changed.
+3. Tests run and results.
+4. C4/C5 matrix taxonomy status.
+5. Security invariants preserved.
+6. Honest limitations.
+7. C4/C5 status.
+8. Suggested Run 291 next step.
