@@ -1,0 +1,721 @@
+Run 301 — Source/test real governance execution engine implementation
+
+You are continuing QBIND after Run 300.
+
+Current accepted state:
+
+Run 292 is accepted as PASS / release-binary evidence positive for the production durable replay RocksDB backend.
+
+Run 294 is accepted as PASS / release-binary evidence positive for the production RemoteSigner backend.
+
+Run 296 is accepted as PASS / release-binary evidence positive for the production KMS/HSM/cloud-KMS/PKCS#11 custody backend.
+
+Run 298 is accepted as PASS / release-binary evidence positive for the production custody attestation verifier.
+
+Run 300 is accepted as PASS / release-binary evidence positive for the Run 299 real on-chain governance proof verifier.
+
+Run 300 proves, on real `target/release/qbind-node` plus a release-built helper, that the Run 299 `ProductionOnChainGovernanceProofVerifier` symbols are present and exercised in release mode over a real SHA3-256 Merkle inclusion verifier, reachable-but-fail-closed unavailable inclusion-verifier stubs, and a programmable mock inclusion verifier. The trusted governance root/checkpoint is supplied explicitly out-of-band, the proof cannot self-authorize its root, default policy remains Disabled/fail-closed, no CLI flag was added, no default runtime wiring was added, MainNet remains refused, and Full C4 / C5 remain open.
+
+Current C4/C5 matrix:
+
+* Production durable replay RocksDB backend — Green for release-binary-evidenced backend behavior only.
+* Real production RemoteSigner backend — Green for release-binary-evidenced backend behavior only.
+* Real KMS/HSM/cloud-KMS/PKCS#11 custody backend — Green for release-binary-evidenced backend behavior only.
+* Real custody attestation verifier — Green for release-binary-evidenced custody-attestation verifier behavior only.
+* Real on-chain governance proof verifier — Green for release-binary-evidenced on-chain-governance-proof-verifier behavior only.
+* Governance execution engine — Red.
+* Validator-set rotation / authority-set synchronization — Red.
+* MainNet authority rotation/revocation under production custody — Red.
+* Production signing audit trail / crypto-agility activation / incident response — Red.
+* Full MainNet release-binary evidence under production custody — Red.
+
+Full C4 remains OPEN. C5 remains OPEN.
+
+Primary objective:
+
+Implement the first source/test real production governance execution engine.
+
+This engine must consume verified on-chain governance proof decisions and translate them into typed, deterministic, policy-gated authority lifecycle execution intents. It must compose with the accepted Run 299 / Run 300 on-chain governance proof verifier boundary, the Run 295 / Run 296 KMS/HSM custody backend boundary, the Run 297 / Run 298 custody attestation verifier boundary, and the existing governance execution evaluator/runtime surfaces from Runs 211–230 and modeled/durable surfaces from Runs 240–300.
+
+Run 301 is source/test only.
+
+Release-binary evidence is out of scope and deferred to Run 302.
+
+The expected matrix movement after a successful Run 301 is:
+
+* Governance execution engine: Red → Yellow / source-test implementation landed, release-binary evidence pending Run 302.
+
+Do not mark governance execution engine Green in Run 301.
+
+Do not mark validator-set rotation Green.
+
+Do not mark MainNet authority rotation/revocation Green.
+
+Do not claim C4 closure.
+
+Do not claim C5 closure.
+
+Strategic meaning:
+
+After Run 300, QBIND has Green-for-scope evidence for durable replay, RemoteSigner, KMS/HSM custody backend, custody attestation verification, and on-chain governance proof verification. The next blocker is the execution engine that takes a verified governance decision and produces an auditable, deterministic lifecycle execution intent. Run 301 must build that engine boundary honestly without crossing into live mutation, validator-set rotation, MainNet enablement, or release-binary claims.
+
+Required investigation before implementation:
+
+Inspect the existing governance execution and authority lifecycle surfaces before writing code. At minimum inspect:
+
+* `crates/qbind-node/src/pqc_governance_execution.rs`
+* `crates/qbind-node/src/pqc_governance_execution_evaluator.rs`
+* `crates/qbind-node/src/pqc_governance_execution_evaluator_runtime_integration.rs`
+* `crates/qbind-node/src/pqc_governance_execution_runtime_consumption.rs`
+* `crates/qbind-node/src/pqc_governance_evaluator_replay_state.rs`
+* `crates/qbind-node/src/pqc_governance_evaluator_replay_durable_backend.rs`
+* `crates/qbind-node/src/pqc_governance_evaluator_replay_durable_runtime_integration.rs`
+* `crates/qbind-node/src/pqc_governance_execution_mutation_engine.rs`
+* `crates/qbind-node/src/pqc_governance_modeled_end_to_end_pipeline.rs`
+* `crates/qbind-node/src/pqc_governance_production_durable_replay_rocksdb.rs`
+* `crates/qbind-node/src/pqc_production_remote_signer_backend.rs`
+* `crates/qbind-node/src/pqc_production_kms_hsm_custody_backend.rs`
+* `crates/qbind-node/src/pqc_production_custody_attestation_verifier.rs`
+* `crates/qbind-node/src/pqc_production_onchain_governance_proof_verifier.rs`
+* `crates/qbind-node/src/pqc_authority_custody.rs`
+* `crates/qbind-node/src/pqc_onchain_governance_proof.rs`
+* `crates/qbind-node/src/pqc_onchain_governance_verifier.rs`
+* `crates/qbind-node/tests/run_299_production_onchain_governance_proof_verifier_tests.rs`
+* `crates/qbind-node/tests/run_297_production_custody_attestation_verifier_tests.rs`
+* `crates/qbind-node/tests/run_295_production_kms_hsm_custody_backend_tests.rs`
+* `crates/qbind-node/tests/run_293_production_remote_signer_backend_tests.rs`
+* `crates/qbind-node/tests/run_291_production_durable_replay_rocksdb_tests.rs`
+* `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_300.md`
+* `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_299.md`
+* `docs/protocol/QBIND_C4_C5_CLOSURE_CRITERIA.md`
+* `docs/protocol/QBIND_GOVERNANCE_EXECUTION_RUNTIME_SURFACE_AUDIT.md`
+* `docs/ops/QBIND_PQC_TRUST_LIFECYCLE_RUNBOOK.md`
+* `docs/protocol/QBIND_PEER_DRIVEN_TRUST_BUNDLE_APPLY_SAFETY.md`
+* `docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md`
+* `docs/whitepaper/contradiction.md`
+
+Use actual existing type/function/module names. If names below differ from the codebase, use the real names and document substitutions in the Run 301 evidence report.
+
+Important preflight doc hygiene:
+
+Before or during Run 301 docs updates, refresh the high-level “Current status” prose in `docs/protocol/QBIND_C4_C5_CLOSURE_CRITERIA.md` so it does not still say real production custody backend / on-chain verifier remain unavailable after Runs 292/294/296/298/300 moved those rows Green-for-scope. The matrix itself should remain precise: those rows are Green only for narrow release-binary-evidenced scope and do not close C4/C5.
+
+Preferred implementation location:
+
+Add a new narrow module:
+
+`crates/qbind-node/src/pqc_production_governance_execution_engine.rs`
+
+Register it in:
+
+`crates/qbind-node/src/lib.rs`
+
+Required new test file:
+
+`crates/qbind-node/tests/run_301_production_governance_execution_engine_tests.rs`
+
+Required evidence doc:
+
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_301.md`
+
+Required narrow docs updates:
+
+* `docs/protocol/QBIND_C4_C5_CLOSURE_CRITERIA.md`
+* `docs/protocol/QBIND_GOVERNANCE_EXECUTION_RUNTIME_SURFACE_AUDIT.md`
+* `docs/ops/QBIND_PQC_TRUST_LIFECYCLE_RUNBOOK.md`
+* `docs/protocol/QBIND_PEER_DRIVEN_TRUST_BUNDLE_APPLY_SAFETY.md`
+* `docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md`
+* `docs/whitepaper/contradiction.md`
+
+Core design requirements:
+
+Implement a source/test production governance execution engine that:
+
+1. Defaults to Disabled / fail-closed.
+
+2. Accepts only explicitly verified governance-proof decisions.
+
+A valid engine accept path must require a Run 299 / Run 300-style accepted on-chain governance proof decision. It must not accept an unverified proof, fixture proof, local operator assertion, peer majority, custody-only evidence, RemoteSigner-only evidence, KMS/HSM-only evidence, or custody-attestation-only evidence.
+
+3. Produces a typed execution intent, not live mutation.
+
+Run 301 may produce a deterministic `GovernanceExecutionIntent`, `AuthorityLifecycleExecutionIntent`, `GovernanceExecutionPlan`, or equivalent. It must not directly apply the intent to live trust state.
+
+Allowed intent classes include source/test representations of:
+
+* authority lifecycle rotation intent;
+* authority lifecycle retirement intent;
+* authority lifecycle revocation intent;
+* emergency revocation intent;
+* bundle-signing-key authorization / retirement / revocation intent;
+* governance no-op / rejected decision;
+* future validator-set rotation request as a typed unsupported/fail-closed outcome only.
+
+Do not implement actual validator-set rotation.
+
+Do not write sequence files.
+
+Do not write authority markers.
+
+Do not call Run 070.
+
+4. Binds the full governance decision tuple.
+
+The engine must bind at least:
+
+* environment;
+* chain_id;
+* genesis hash;
+* authority root fingerprint and suite;
+* governance domain id;
+* governance epoch;
+* proposal id;
+* proposal digest;
+* proposal outcome;
+* lifecycle action;
+* candidate v2 digest;
+* authority-domain sequence;
+* decision id / replay nonce;
+* quorum / threshold;
+* trusted checkpoint / proof transcript digest from Run 299;
+* custody provider class / key handle / signer fingerprint where represented;
+* custody attestation transcript digest where represented;
+* durable replay record id / digest where represented;
+* execution policy id;
+* execution engine protocol version;
+* execution intent digest.
+
+Wrong value for any bound field must fail closed with a typed error.
+
+5. Uses canonical deterministic bytes.
+
+All execution-intent IDs, transcripts, request IDs, plan digests, and audit digests must use deterministic canonical bytes and domain-separated SHA3-256 or the existing project digest convention.
+
+Do not use Rust `Debug` formatting as canonical bytes.
+
+Do not use wall-clock time as an authorizing input.
+
+Freshness must be explicit: governance epoch, governance height, authority-domain sequence, decision id, replay nonce, or validity window.
+
+6. Enforces ordering.
+
+The engine should model the minimum safe ordering:
+
+selector/policy resolution →
+input well-formedness →
+verified on-chain governance proof decision check →
+replay/freshness check →
+custody backend evidence check where represented →
+custody attestation evidence check where represented →
+durable replay / idempotency check where represented →
+lifecycle action support check →
+execution intent construction →
+typed non-mutating outcome.
+
+Mutation must not occur in Run 301.
+
+Only a typed accepted outcome may authorize a future mutation run.
+
+7. Preserves MainNet refusal.
+
+MainNet must remain refused absent production authority criteria.
+
+For Run 301, no MainNet accept path is expected. A valid source/test DevNet/TestNet proof must not enable MainNet runtime behavior. A MainNet policy may be represented but should fail closed with a typed unavailable/refused outcome unless every production prerequisite is explicitly represented and proven. Since validator-set rotation and full MainNet evidence are still Red, do not produce MainNet-ready outcomes.
+
+8. Validator-set rotation remains unsupported.
+
+If a governance proof asks for validator-set rotation / authority-set synchronization, the engine must classify it as unsupported/fail-closed unless a narrow “prepared intent only” type is explicitly documented as non-mutating and not an implementation of rotation. The C4/C5 matrix must keep validator-set rotation Red.
+
+9. Governance execution engine does not equal runtime wiring.
+
+Run 301 must not wire the engine into default binary runtime call sites. It can compose with existing source/test runtime/evaluator surfaces, but no default runtime behavior should change. Release-binary evidence is deferred to Run 302.
+
+Suggested public types if no existing names fit:
+
+* `ProductionGovernanceExecutionEngine`
+* `ProductionGovernanceExecutionEngineConfig`
+* `ProductionGovernanceExecutionEnginePolicy`
+* `ProductionGovernanceExecutionEngineKind`
+* `ProductionGovernanceExecutionRequest`
+* `ProductionGovernanceExecutionInputs`
+* `ProductionGovernanceExecutionDecision`
+* `ProductionGovernanceExecutionIntent`
+* `ProductionGovernanceExecutionIntentKind`
+* `ProductionGovernanceExecutionTranscript`
+* `ProductionGovernanceExecutionOutcome`
+* `ProductionGovernanceExecutionError`
+* `ProductionGovernanceExecutionRecoveryOutcome`
+* `GovernanceExecutionProofBinding`
+* `GovernanceExecutionCustodyBinding`
+* `GovernanceExecutionAttestationBinding`
+* `GovernanceExecutionDurableReplayBinding`
+* `production_governance_execution_request_id`
+* `production_governance_execution_intent_digest`
+* `production_governance_execution_transcript_digest`
+* `evaluate_production_governance_execution`
+* `recover_production_governance_execution_window`
+
+Use existing project naming if suitable.
+
+Required policy taxonomy:
+
+At minimum represent:
+
+* `Disabled` default.
+* `AllowSourceTestVerifiedGovernanceExecution`.
+* `RequireProductionGovernanceExecution`.
+* `MainnetProductionGovernanceExecutionRequired`.
+
+Default must be Disabled.
+
+Production/MainNet policies must be reachable but fail closed unless every prerequisite is represented and proven. Since this is source/test and validator-set rotation/MainNet evidence remain Red, MainNet must not accept.
+
+Required outcome/error taxonomy:
+
+Use existing outcomes wherever possible. If new variants are needed, include close equivalents to:
+
+Accepted / prepared:
+
+* `AcceptedSourceTestGovernanceExecutionIntent`
+* `GovernanceExecutionIntentPrepared`
+* `AuthorityLifecycleIntentPrepared`
+* `EmergencyRevocationIntentPrepared`
+
+Disabled / unavailable:
+
+* `Disabled`
+* `ProductionGovernanceExecutionUnavailable`
+* `MainNetProductionGovernanceExecutionUnavailable`
+* `GovernanceExecutionEngineUnavailable`
+
+Proof / binding failures:
+
+* `VerifiedOnChainGovernanceProofRequired`
+* `UnverifiedGovernanceProofRejected`
+* `FixtureGovernanceProofRejectedAsProductionAuthority`
+* `LocalOperatorProofRejected`
+* `PeerMajorityProofRejected`
+* `CustodyOnlyProofRejected`
+* `RemoteSignerOnlyProofRejected`
+* `CustodyAttestationOnlyProofRejected`
+* `GovernanceProofTranscriptMismatch`
+* `WrongEnvironment`
+* `WrongChain`
+* `WrongGenesis`
+* `WrongAuthorityRoot`
+* `WrongGovernanceDomain`
+* `WrongGovernanceEpoch`
+* `WrongProposalId`
+* `WrongProposalDigest`
+* `WrongProposalOutcome`
+* `WrongLifecycleAction`
+* `WrongCandidateDigest`
+* `WrongAuthoritySequence`
+* `WrongDecisionId`
+* `WrongQuorum`
+* `WrongThreshold`
+
+Custody/attestation/durable replay failures:
+
+* `CustodyBackendEvidenceRequired`
+* `CustodyBackendMismatch`
+* `CustodyAttestationRequired`
+* `CustodyAttestationMismatch`
+* `DurableReplayEvidenceRequired`
+* `DurableReplayMismatch`
+* `DurableReplayUnavailable`
+
+Replay/freshness/action failures:
+
+* `DecisionReplayRejected`
+* `StaleGovernanceEpoch`
+* `StaleAuthoritySequence`
+* `ConflictingIntentForSameDecision`
+* `UnsupportedLifecycleAction`
+* `ValidatorSetRotationUnsupported`
+* `GovernanceExecutionAmbiguous`
+* `MainNetRefused`
+
+Non-mutation helpers:
+
+Every outcome should have helpers like `is_accept()`, `is_reject()`, `is_non_mutating()`, and `authorizes_future_mutation_only()` if useful. No Run 301 outcome should perform mutation.
+
+Required tests:
+
+Create a focused Run 301 source/test corpus. Target at least 90 tests.
+
+Minimum test groups:
+
+A. Accepted / compatible source-test evidence
+
+* Disabled default policy is explicit and inert.
+* Valid DevNet verified governance proof decision produces an execution intent under explicit source/test policy.
+* Valid TestNet verified governance proof decision produces an execution intent under explicit source/test policy.
+* Accepted intent binds environment.
+* Accepted intent binds chain_id.
+* Accepted intent binds genesis hash.
+* Accepted intent binds authority root fingerprint/suite.
+* Accepted intent binds governance domain.
+* Accepted intent binds governance epoch.
+* Accepted intent binds proposal id.
+* Accepted intent binds proposal digest.
+* Accepted intent binds proposal outcome.
+* Accepted intent binds lifecycle action.
+* Accepted intent binds candidate v2 digest.
+* Accepted intent binds authority-domain sequence.
+* Accepted intent binds decision id / replay nonce.
+* Accepted intent binds quorum / threshold.
+* Accepted intent binds Run 299 proof transcript digest.
+* Accepted intent binds trusted checkpoint digest where represented.
+* Accepted intent binds custody backend evidence where represented.
+* Accepted intent binds custody attestation evidence where represented.
+* Accepted intent binds durable replay evidence where represented.
+* Intent digest deterministic across identical inputs.
+* Request id deterministic across identical inputs.
+* Transcript digest deterministic across identical inputs.
+* Same verified decision produces identical intent digest.
+* Different lifecycle action changes intent digest.
+* Different candidate digest changes intent digest.
+* Emergency revocation intent is represented as source/test prepared intent only.
+* Rotate / retire / revoke lifecycle actions are represented as source/test prepared intents only.
+* Run 299 / Run 300 on-chain verifier accept output composes into the engine input.
+* Run 292/294/296/298/300 Green-for-scope rows remain compatible and not weakened.
+
+B. Rejection / fail-closed source-test evidence
+
+* Disabled rejects before proof evaluation / intent construction.
+* Missing governance proof decision rejected.
+* Unverified governance proof rejected.
+* Fixture governance proof rejected as production authority.
+* Local-operator assertion rejected.
+* Peer-majority assertion rejected.
+* Custody-only evidence rejected.
+* RemoteSigner-only evidence rejected.
+* Custody-attestation-only evidence rejected.
+* Wrong proof transcript rejected.
+* Wrong environment rejected.
+* Wrong chain rejected.
+* Wrong genesis rejected.
+* Wrong authority root rejected.
+* Wrong governance domain rejected.
+* Wrong governance epoch rejected.
+* Wrong proposal id rejected.
+* Wrong proposal digest rejected.
+* Wrong proposal outcome rejected.
+* Wrong lifecycle action rejected.
+* Wrong candidate digest rejected.
+* Wrong authority sequence rejected.
+* Wrong decision id rejected.
+* Wrong quorum rejected.
+* Wrong threshold rejected.
+* Missing custody evidence rejected when policy requires it.
+* Wrong custody backend provider/key/signer rejected when represented.
+* Missing custody attestation rejected when policy requires it.
+* Wrong custody attestation transcript rejected when represented.
+* Missing durable replay evidence rejected when policy requires it.
+* Wrong durable replay digest rejected when represented.
+* Replayed decision id rejected.
+* Stale governance epoch rejected.
+* Stale authority sequence rejected.
+* Conflicting intent for same decision rejected.
+* Unsupported lifecycle action rejected.
+* Validator-set rotation rejected / unsupported.
+* Governance execution engine unavailable path fails closed.
+* Production policy without production prerequisites fails closed.
+* Ambiguous input fails closed.
+
+C. MainNet / authority policy evidence
+
+* MainNet cannot be satisfied by fixture governance proof.
+* MainNet cannot be satisfied by local operator material.
+* MainNet cannot be satisfied by peer majority.
+* MainNet cannot be satisfied by RemoteSigner-only evidence.
+* MainNet cannot be satisfied by KMS/HSM custody alone.
+* MainNet cannot be satisfied by custody attestation alone.
+* MainNet cannot be satisfied by on-chain proof alone if governance execution production prerequisites are missing.
+* MainNet cannot bypass missing validator-set rotation.
+* MainNet production-required policy returns typed unavailable/refused outcome.
+* Valid DevNet/TestNet source-test proof does not enable MainNet runtime behavior.
+* MainNet peer-driven apply remains refused.
+* MainNet authority rotation/revocation remains not proven.
+
+D. Replay / recovery / idempotency evidence
+
+If recovery helpers are implemented:
+
+* no-prior execution window is clean no-op;
+* byte-identical verified decision / intent is idempotent;
+* same decision id with different proposal digest fails closed;
+* same decision id with different candidate digest fails closed;
+* same decision id with different lifecycle action fails closed;
+* same decision id with different proof transcript fails closed;
+* same decision id with different custody evidence fails closed where represented;
+* same decision id with different attestation evidence fails closed where represented;
+* stale governance epoch fails closed;
+* stale authority sequence fails closed;
+* ambiguous recovery window fails closed;
+* no durable mutation is claimed unless the Run 292 durable replay backend is explicitly used as a non-mutating source/test evidence dependency.
+
+E. Non-mutation evidence
+
+Every rejected path and every accepted source/test prepared intent must prove:
+
+* no Run 070 call;
+* no `LivePqcTrustState` mutation;
+* no trust swap;
+* no session eviction;
+* no PQC trust-bundle sequence write;
+* no authority marker write;
+* no durable replay overwrite;
+* no KMS/HSM signing call unless explicitly represented as evidence-only;
+* no RemoteSigner fallback;
+* no custody fallback;
+* no fixture fallback;
+* no local-operator fallback;
+* no peer-majority fallback;
+* no governance runtime default wiring;
+* no validator-set rotation;
+* no settlement;
+* no external publication;
+* no MainNet enablement.
+
+F. C4/C5 taxonomy evidence
+
+Tests or grep assertions must prove:
+
+* Run 301 is source/test real governance execution engine implementation.
+* Run 301 is not release-binary evidence.
+* Release-binary evidence is deferred to Run 302.
+* Run 292 durable replay RocksDB remains Green-for-scope only.
+* Run 294 RemoteSigner remains Green-for-scope only.
+* Run 296 KMS/HSM custody remains Green-for-scope only.
+* Run 298 custody attestation remains Green-for-scope only.
+* Run 300 on-chain governance proof verifier remains Green-for-scope only.
+* Governance execution engine moves Red → Yellow only if implementation lands and tests pass.
+* Validator-set rotation remains Red.
+* MainNet authority rotation/revocation under production custody remains Red.
+* Production signing audit trail / crypto-agility / incident response remains Red.
+* Full MainNet release-binary evidence remains Red.
+* Full C4 remains OPEN.
+* C5 remains OPEN.
+* C4/C5 current-status prose is refreshed to avoid stale “unavailable” wording for now-Green-for-scope rows while still making clear C4/C5 are not closed.
+
+Required regression commands:
+
+Run at minimum:
+
+* `cargo build -p qbind-node --lib`
+* `cargo test -p qbind-node --test run_301_production_governance_execution_engine_tests`
+* `cargo test -p qbind-node --test run_299_production_onchain_governance_proof_verifier_tests`
+* `cargo test -p qbind-node --test run_297_production_custody_attestation_verifier_tests`
+* `cargo test -p qbind-node --test run_295_production_kms_hsm_custody_backend_tests`
+* `cargo test -p qbind-node --test run_293_production_remote_signer_backend_tests`
+* `cargo test -p qbind-node --test run_291_production_durable_replay_rocksdb_tests`
+* `cargo test -p qbind-node --test run_186_onchain_governance_production_verifier_boundary_tests`
+* `cargo test -p qbind-node --test run_178_onchain_governance_proof_tests`
+* `cargo test -p qbind-node --test run_203_kms_hsm_backend_boundary_tests`
+* `cargo test -p qbind-node --test run_201_remote_signer_transport_boundary_tests`
+* `cargo test -p qbind-node --test run_194_remote_authority_signer_boundary_tests`
+* `cargo test -p qbind-node --test run_188_authority_custody_boundary_tests`
+* `cargo test -p qbind-node --test run_290_durable_completion_external_publication_audit_anchor_tests`
+* `cargo test -p qbind-node --test run_288_durable_completion_external_publication_audit_seal_tests`
+* `cargo test -p qbind-node --test run_286_durable_completion_external_publication_audit_archive_tests`
+* `cargo test -p qbind-node --test run_284_durable_completion_external_publication_audit_completion_tests`
+* `cargo test -p qbind-node --test run_282_durable_completion_external_publication_audit_finalization_tests`
+* `cargo test -p qbind-node --test run_280_durable_completion_external_publication_acknowledgement_tests`
+* `cargo test -p qbind-node --test run_278_durable_completion_external_publication_receipt_tests`
+* `cargo test -p qbind-node --test run_276_durable_completion_external_publication_confirmation_tests`
+* `cargo test -p qbind-node --test run_274_durable_completion_settlement_outcome_publication_tests`
+* `cargo test -p qbind-node --test run_272_durable_completion_settlement_outcome_report_tests`
+* `cargo test -p qbind-node --test run_270_durable_completion_settlement_receipt_acknowledgement_tests`
+* `cargo test -p qbind-node --test run_268_durable_completion_settlement_finalization_tests`
+* `cargo test -p qbind-node --test run_266_durable_completion_settlement_commitment_tests`
+* `cargo test -p qbind-node --test run_264_durable_completion_consumer_settlement_projection_tests`
+* `cargo test -p qbind-node --test run_262_durable_completion_acknowledgement_consumer_tests`
+* `cargo test -p qbind-node --test run_260_durable_completion_audit_receipt_acknowledgement_tests`
+* `cargo test -p qbind-node --test run_258_durable_completion_audit_publication_receipt_tests`
+* `cargo test -p qbind-node --test run_256_durable_completion_attestation_backend_tests`
+* `cargo test -p qbind-node --test run_254_modeled_durable_completion_attestation_projection_tests`
+* `cargo test -p qbind-node --test run_252_modeled_durable_completion_finalization_projection_tests`
+* `cargo test -p qbind-node --test run_250_modeled_durable_consume_completion_reporter_tests`
+* `cargo test -p qbind-node --test run_248_modeled_durable_consume_projection_sink_tests`
+* `cargo test -p qbind-node --test run_246_governance_modeled_end_to_end_pipeline_tests`
+* `cargo test -p qbind-node --test run_244_modeled_governance_trust_mutation_applier_tests`
+* `cargo test -p qbind-node --test run_242_governance_execution_mutation_engine_tests`
+* `cargo test -p qbind-node --test run_240_governance_evaluator_replay_durable_runtime_integration_tests`
+* `cargo test -p qbind-node --test run_238_governance_evaluator_replay_durable_backend_tests`
+* `cargo test -p qbind-node --test run_236_governance_evaluator_replay_consume_runtime_integration_tests`
+* `cargo test -p qbind-node --test run_234_governance_evaluator_replay_consume_boundary_tests`
+* `cargo test -p qbind-node --test run_232_governance_evaluator_replay_runtime_integration_tests`
+* `cargo test -p qbind-node --test run_230_governance_evaluator_replay_state_tests`
+* `cargo test -p qbind-node --test run_228_peer_evaluator_context_representation_tests`
+* `cargo test -p qbind-node --test run_226_governance_evaluator_runtime_callsite_wiring_tests`
+* `cargo test -p qbind-node --test run_224_governance_evaluator_runtime_integration_tests`
+* `cargo test -p qbind-node --lib pqc_authority`
+* `cargo test -p qbind-node --lib`
+
+If target names differ, use actual names and document substitutions in the evidence report.
+
+Known issue handling:
+
+If the unrelated pre-existing `m16_epoch_transition_hardening_tests.rs` compile failure still exists, report it honestly as pre-existing unless Run 301 touches it. Do not hide it. Do not include it in the required Run 301 corpus unless explicitly required.
+
+Security scanning:
+
+* Run secret scanning over all changed files.
+* Run CodeQL if available.
+* Because Run 301 adds real source/test governance execution engine logic, CodeQL or an honest skip/timeout reason is required.
+* If CodeQL is skipped, times out, reports database too large, tooling is unavailable, or otherwise does not complete, report that explicitly and do not claim CodeQL coverage.
+* The canonical evidence file must include the exact CodeQL result or exact honest limitation directly.
+
+Documentation requirements:
+
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_301.md` must include:
+
+1. Exact verdict.
+2. Files changed.
+3. Engine design summary.
+4. Governance execution policy / kind / intent taxonomy.
+5. Verified on-chain governance proof binding.
+6. Custody / attestation / durable replay composition.
+7. Accepted source/test evidence.
+8. Rejection / fail-closed evidence.
+9. MainNet refusal / authority policy evidence.
+10. Replay / recovery / idempotency evidence.
+11. Non-mutation evidence.
+12. Tests run and results.
+13. C4/C5 matrix taxonomy status.
+14. Security scan results.
+15. Honest limitations.
+16. C4/C5 status.
+17. Suggested Run 302 next step.
+
+Docs must state clearly:
+
+* Run 301 is source/test real governance execution engine implementation.
+* Run 301 is not release-binary evidence.
+* Release-binary evidence is deferred to Run 302.
+* Run 301 does not add default runtime wiring.
+* Run 301 does not add a public CLI flag.
+* Run 301 does not enable MainNet.
+* Run 301 does not implement validator-set rotation.
+* Run 301 does not implement settlement or external publication.
+* Run 301 does not call Run 070.
+* Run 301 does not mutate `LivePqcTrustState`.
+* Run 301 does not write trust-bundle sequence or authority marker files.
+* Run 301 does not accept fixture/local/peer-majority proof as production authority.
+* Run 301 does not weaken Run 292/294/296/298/300 Green-for-scope statuses.
+* Full C4 remains OPEN.
+* C5 remains OPEN.
+
+C4/C5 matrix update:
+
+Expected after successful Run 301:
+
+* Production durable replay RocksDB backend remains Green for release-binary-evidenced backend behavior only.
+* Real production RemoteSigner backend remains Green for release-binary-evidenced backend behavior only.
+* Real KMS/HSM/cloud-KMS/PKCS#11 custody backend remains Green for release-binary-evidenced backend behavior only.
+* Real custody attestation verifier remains Green for release-binary-evidenced custody-attestation verifier behavior only.
+* Real on-chain governance proof verifier remains Green for release-binary-evidenced on-chain-governance-proof-verifier behavior only.
+* Governance execution engine may move Red → Yellow / source-test implementation landed, release-binary evidence pending Run 302.
+* Validator-set rotation / authority-set synchronization remains Red.
+* MainNet authority rotation/revocation under production custody remains Red.
+* Production signing audit trail / crypto-agility activation / incident response remains Red.
+* Full MainNet release-binary evidence under production custody remains Red.
+* Full C4 remains OPEN.
+* C5 remains OPEN.
+
+Do not mark governance execution engine Green until Run 302 release-binary evidence exists.
+
+Do not mark validator-set rotation Green.
+
+Do not mark C4 closed.
+
+Do not mark C5 closed.
+
+Contradiction handling:
+
+Update `docs/whitepaper/contradiction.md`.
+
+Add a “Run 301” entry.
+
+If no contradiction is found, state that Run 301 introduces a source/test real governance execution engine while preserving default Disabled/fail-closed runtime posture, no CLI flag, no MainNet enablement, no validator-set-rotation implementation, no Run 070 call, no `LivePqcTrustState` mutation, no trust-bundle sequence or authority-marker writes, no fixture/local/peer-majority proof as production authority, no weakening of Run 292/294/296/298/300 Green-for-scope statuses, and Full C4 OPEN / C5 OPEN.
+
+If contradiction is found, record the exact contradiction with file/function/doc reference and recommend the smallest safe fix.
+
+Expected verdicts:
+
+PASS / source-test real governance execution engine implementation if:
+
+* real source/test production governance execution engine logic lands;
+* engine composes with the Run 299/300 on-chain governance proof verifier boundary;
+* engine composes with custody / attestation / durable replay evidence where represented;
+* default policy remains Disabled/fail-closed;
+* verified source/test DevNet/TestNet governance decisions produce only typed non-mutating execution intents;
+* fixture/local/peer-majority/custody-only/RemoteSigner-only inputs are rejected as production authority;
+* missing/malformed/unverified/replayed/wrong-domain/wrong-proof/wrong-custody/wrong-attestation/wrong-durable-replay inputs fail closed;
+* MainNet remains refused absent production authority criteria;
+* validator-set rotation remains unsupported / Red;
+* non-mutation invariants pass;
+* regression corpus passes;
+* docs/evidence/contradiction are updated;
+* secret scan is clean;
+* CodeQL result or honest skip/timeout is reported;
+* Full C4 remains OPEN;
+* C5 remains OPEN.
+
+Partial-positive if:
+
+* engine lands but one bounded production dependency, such as real validator-set rotation or production audit trail, is deferred honestly;
+* no false closure claim is made.
+
+Blocked only if:
+
+* existing governance execution surfaces cannot support a real engine without broad redesign;
+* document the exact blocker and smallest safe next run.
+
+Unacceptable:
+
+* claiming release-binary evidence;
+* claiming C4 closure;
+* claiming C5 closure;
+* claiming MainNet readiness;
+* accepting fixture proof as production authority;
+* accepting local operator proof as production authority;
+* accepting peer majority as production authority;
+* accepting on-chain proof alone as a live mutation command;
+* accepting custody-only / RemoteSigner-only / attestation-only evidence as governance execution authority;
+* implementing validator-set rotation while still claiming it is out of scope;
+* calling Run 070;
+* mutating `LivePqcTrustState`;
+* writing trust-bundle sequence files;
+* writing authority marker files;
+* hiding CodeQL failure/timeout/skip;
+* hiding regression failures;
+* broad redesign of unrelated settlement, external publication, consensus, trust-bundle, wire, RocksDB durable replay, RemoteSigner, KMS/HSM custody, custody attestation, on-chain proof verifier, or modeled pipeline surfaces.
+
+Suggested Run 302 next step after successful Run 301:
+
+Run 302 — release-binary evidence for the real governance execution engine.
+
+Run 302 should build real `target/release/qbind-node` plus a release-built helper, exercise the Run 301 engine in release mode, prove verified source/test DevNet/TestNet governance decisions produce only typed non-mutating execution intents, prove missing/malformed/unverified/replayed/wrong-domain/wrong-proof/wrong-custody/wrong-attestation/wrong-durable-replay fail-closed behavior, prove production binary surfaces remain Disabled/silent with no CLI flag, preserve Run 292/294/296/298/300 Green-for-scope rows, keep validator-set rotation Red, and preserve Full C4 OPEN / C5 OPEN.
+
+Required final response format:
+
+1. Exact verdict.
+2. Files changed.
+3. Engine design summary.
+4. Governance execution policy / kind / intent taxonomy.
+5. Verified on-chain governance proof binding.
+6. Custody / attestation / durable replay composition.
+7. Accepted source/test evidence.
+8. Rejection / fail-closed evidence.
+9. MainNet refusal / authority policy evidence.
+10. Replay / recovery / idempotency evidence.
+11. Non-mutation evidence.
+12. Tests run and results.
+13. C4/C5 matrix taxonomy status.
+14. Security scan results.
+15. Honest limitations.
+16. C4/C5 status.
+17. Suggested Run 302 next step.
