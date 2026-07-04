@@ -299,6 +299,27 @@ pub mod pqc_onchain_governance_payload_carrying;
 // verification, no KMS/HSM, no validator-set rotation. Release-
 // binary verifier-boundary evidence is deferred to Run 187.
 pub mod pqc_onchain_governance_verifier;
+// Run 299 — source/test REAL on-chain governance proof verifier. Layers
+// a real verification algorithm on top of the Run 178 typed proof format
+// and Run 186 verifier boundary: a deterministic domain-separated canonical
+// decision commitment, a real SHA3-256 Merkle inclusion proof verifier that
+// recomputes a governance root from an explicit leaf + authenticated sibling
+// path and checks it against an EXPLICIT trusted governance checkpoint/root
+// (the proof cannot self-authorize its root), full domain/chain/genesis/
+// authority-root/governance-domain/epoch/proposal/lifecycle/candidate/
+// authority-sequence/decision-id binding, explicit governance-height/epoch
+// freshness (never wall-clock), decision-id replay, and quorum/threshold.
+// Default policy `ProductionOnChainGovernanceVerifierPolicy::Disabled` fails
+// closed before any parsing/verification. Fixture proofs remain
+// DevNet/TestNet evidence-only and are rejected as production authority;
+// MainNet is refused even for otherwise valid synthetic proofs. Non-mutating:
+// no Run 070 apply, no `LivePqcTrustState` mutation, no trust swap, no session
+// eviction, no sequence/marker write, no durable replay overwrite, no
+// settlement, no external publication, no governance execution, no
+// validator-set rotation, no CLI flag, no default runtime wiring, no
+// committed secrets. Source/test only — release-binary evidence is deferred
+// to Run 300. Full C4 remains OPEN; C5 remains OPEN.
+pub mod pqc_production_onchain_governance_proof_verifier;
 // Run 188 — source/test-only KMS/HSM custody boundary for bundle-
 // signing authority and governance authority operations. Defines the
 // typed `AuthorityCustodyClass` (`FixtureLocalKey` / `LocalOperatorKey`
