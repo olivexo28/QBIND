@@ -100,7 +100,7 @@ The harness ran the required regression corpus: `run_299` (production on-chain g
 ## 15. Security scan results
 
 * **Secret scanning** — run over all changed files and evidence scripts; **no secrets** found. The verifier derives decision/proof/transcript digests by domain-separated hashing over public spec fields and never embeds keys.
-* **CodeQL** — _[to be finalized after the CodeQL pass; exact result or exact honest limitation is recorded here directly.]_
+* **CodeQL** — Run 300 is release-binary evidence for a real on-chain governance proof verifier and is not classified as trivial. The CodeQL checker was invoked (language: `rust`) but **did not complete**: the operation was **cancelled due to timeout** and returned no analysis and no alerts. **No CodeQL coverage is claimed** for this pass. No production library surface was changed by this pass (the change set is a release-mode example helper, a harness shell script, and Markdown/evidence documentation), and the underlying Run 299 production module is re-run unchanged. This exact honest CodeQL limitation is recorded here directly.
 
 ## 16. Honest limitations
 
