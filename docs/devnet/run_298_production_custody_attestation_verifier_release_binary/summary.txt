@@ -1,0 +1,39 @@
+Run 298 — release-binary evidence for the Run 297 production custody attestation verifier
+git_commit: 3eececfcbc5bcf699bded91d8ef1039f4b1f3569
+
+build:
+  rustc_version:      rustc 1.96.0 (ac68faa20 2026-05-25)
+  cargo_version:      cargo 1.96.0 (30a34c682 2026-05-25)
+  qbind_node_sha256:  e7b10b948f50721f3447e27623a8fe6127f271dbb1e075817ead18096628a067
+  helper_298_sha256:  42b3180bc7f03ff74b82b20068dfc9b8f87bc4b1f702e88e055efcf007383153
+
+helper_summary: /home/runner/work/QBIND/QBIND/docs/devnet/run_298_production_custody_attestation_verifier_release_binary/helper_evidence/run_298/helper_summary.txt
+  Run 298 production custody attestation verifier release helper
+  verdict: PASS
+  verifier: crates/qbind-node/src/pqc_production_custody_attestation_verifier.rs (Run 297 ProductionCustodyAttestationVerifier)
+  mode: real Run 297 verifier over source/test fixture KMS/HSM evidence verifiers, reachable-but-fail-closed production attestation verifier stubs, and a programmable mock evidence verifier; DevNet/TestNet fixture accept only; MainNet refused; default Disabled; production policy never verifies and never falls back to fixture/RemoteSigner/local material; production cloud-KMS/PKCS#11/generic attestation paths fail closed without real trust root / quote verifier / certificate chain / hardware proof; every failure is a typed non-mutating outcome
+  table accepted_compatible pass=20 fail=0
+  table mainnet_authority_policy pass=11 fail=0
+  table non_mutation pass=6 fail=0
+  table reachability_taxonomy pass=21 fail=0
+  table rejection_fail_closed pass=40 fail=0
+  table replay_recovery_idempotency pass=8 fail=0
+  total_pass: 106
+  total_fail: 0
+
+deterministic_digests: stable across two independent helper invocations
+  challenge_digest 441d8c979072a62e71dff04c14513c18d998035fba63296719779daaea3452cc
+  evidence_digest 1445e3a561df38a79d9e7538ebe71adf1162964cc922ead325882f5481a9b773
+  provider_identity_digest 9c9bb42460cb2255d387dbf211a610d1621d892d4227033edfca36e446c3ef39
+  trust_root_digest e9a0f12f8eaf16b40d000d27997d1fcff80ee60d567f49ca13a8d15441b95ea5
+  transcript_digest bea02cfda27732a08f17dd7b48156c9d0b121524078d2ac003b7ffd8c93f0d8a
+  decision_digest b221ec6515253d712059a7bb64c94e5f2117fde9a3177283d56f354e8fa4c508
+
+release_binary_scenarios: S1_help=0 S2=1 S3=1 S4=1 S5=1 S6=1
+reachability: source/helper/module/entry/taxonomy/boundary/composition greps passed
+c4c5_taxonomy: passed (19 phrases; RocksDB + RemoteSigner + KMS/HSM + custody-attestation rows Green-for-scope only; Red rows unchanged; Full C4 OPEN; C5 OPEN)
+denylist: passed (33 patterns)
+tests:
+  tests:skipped(RUN_298_SKIP_TESTS=1)
+
+verdict: PASS (release-binary evidence only; Full C4 OPEN; C5 OPEN)
