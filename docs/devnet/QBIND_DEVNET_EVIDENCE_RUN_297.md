@@ -214,10 +214,10 @@ run via explicit `--test` targets.
   credentials, HSM PINs, cloud account identifiers, real provider endpoints,
   real certificate chains, or real hardware quotes are present. All attestation
   material in tests is synthetic DevNet/TestNet fixture data.
-* CodeQL — see the finalized run result recorded with this change. Run 297 adds
-  real source code, so CodeQL (or an honest skip/timeout reason) is required;
-  the outcome is reported explicitly and no CodeQL coverage is claimed unless
-  the check completes.
+* CodeQL — **not completed. CodeQL analysis was skipped because the CodeQL
+  database size is too large.** No CodeQL coverage is claimed for the Run 297
+  changes. This is reported explicitly rather than hidden; the skip is a tooling
+  limitation, not a clean result.
 
 ## 14. Honest limitations
 
