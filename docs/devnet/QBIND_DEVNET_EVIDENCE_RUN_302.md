@@ -161,7 +161,12 @@ does not reinterpret this as C4/C5 closure.
   material is never accepted as production governance execution authority.
 * No new public CLI surface; default `Disabled`/fail-closed; MainNet refused.
 * Secret scanning over the changed files reported **no secrets**.
-* CodeQL: _[to be finalized — see below]_.
+* CodeQL: the CodeQL Rust analysis was **skipped** for this pass because the analysis database
+  size exceeded the analyzer limit (reported verbatim: _"Analysis was skipped because the database
+  size is too large."_). No alerts were produced. This is an honest tooling limitation, not a clean
+  pass; the Run 302 change adds only a release-mode evidence helper and a shell harness and makes no
+  change to the Run 301 engine or any production runtime code. Secret scanning over all changed files
+  reported no secrets.
 
 ## 17. Honest limitations
 
