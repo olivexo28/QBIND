@@ -528,6 +528,26 @@ pub mod pqc_authority_kms_hsm_backend;
 // secrets. This run is source/test only — release-binary evidence is
 // deferred to Run 296. Full C4 remains OPEN; C5 remains OPEN.
 pub mod pqc_production_kms_hsm_custody_backend;
+// Run 297 — source/test production custody attestation verifier. Layers a
+// typed provider-attestation verifier on top of the Run 295 KMS/HSM custody
+// backend: it validates typed attestation evidence and binds it to the
+// provider identity, key handle, custody class, signer identity, custody
+// request, custody response, backend transcript, authority domain, and
+// optional Run 291 durable replay record, failing closed when attestation is
+// missing/unavailable/malformed/stale/wrong-domain/wrong-provider/wrong-key/
+// ambiguous/unsupported. Default policy is `Disabled`/fail-closed. Fixture
+// attestation is accepted only for DevNet/TestNet under an explicit fixture
+// policy and refused for MainNet; the four production attestation classes
+// (cloud-KMS/PKCS#11-HSM/generic-KMS/generic-HSM) are reachable but fail
+// closed without real quote/certificate-chain/hardware verification material;
+// RemoteSigner attestation cannot satisfy the KMS/HSM custody row. The module
+// is non-mutating: no Run 070 apply, no `LivePqcTrustState` mutation, no trust
+// swap, no session eviction, no sequence/marker write, no durable replay
+// overwrite, no settlement, no external publication, no governance execution,
+// no validator-set rotation, no CLI flag, no default runtime wiring, no
+// committed secrets. Source/test only — release-binary evidence is deferred to
+// Run 298. Full C4 remains OPEN; C5 remains OPEN.
+pub mod pqc_production_custody_attestation_verifier;
 // Run 205 — source/test production custody attestation verifier skeleton.
 // Defines a typed `CustodyAttestationClass` (`Disabled`,
 // `FixtureAttestation`, `RemoteSignerAttestation`, `KmsAttestation`,
