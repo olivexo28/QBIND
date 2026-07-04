@@ -320,6 +320,22 @@ pub mod pqc_onchain_governance_verifier;
 // committed secrets. Source/test only — release-binary evidence is deferred
 // to Run 300. Full C4 remains OPEN; C5 remains OPEN.
 pub mod pqc_production_onchain_governance_proof_verifier;
+// Run 301 — source/test **real** production governance execution engine.
+// Consumes a verified Run 299 / Run 300 on-chain governance proof decision
+// and translates it into a typed, deterministic, policy-gated, NON-MUTATING
+// authority lifecycle execution intent. Composes with the Run 295/296
+// KMS/HSM custody backend, Run 297/298 custody attestation verifier, and
+// Run 291/292 durable replay backend evidence bindings. Default policy is
+// Disabled/fail-closed; only a verified DevNet/TestNet decision under the
+// explicit source/test policy produces a prepared intent. Fixture / local-
+// operator / peer-majority / custody-only / RemoteSigner-only / attestation-
+// only sources are rejected as production authority. MainNet is refused;
+// validator-set rotation is classified unsupported/fail-closed. No Run 070
+// call, no `LivePqcTrustState` mutation, no trust-bundle sequence or
+// authority-marker writes, no CLI flag, no default runtime wiring. Source/
+// test only — release-binary evidence is deferred to Run 302. Full C4
+// remains OPEN; C5 remains OPEN.
+pub mod pqc_production_governance_execution_engine;
 // Run 188 — source/test-only KMS/HSM custody boundary for bundle-
 // signing authority and governance authority operations. Defines the
 // typed `AuthorityCustodyClass` (`FixtureLocalKey` / `LocalOperatorKey`
