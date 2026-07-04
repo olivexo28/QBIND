@@ -46,8 +46,7 @@ use qbind_node::pqc_governance_production_durable_replay_rocksdb::{
     durable_replay_rocksdb_never_falls_back_to_in_memory, durable_replay_rocksdb_record_key,
     DurableReplayEventInput, DurableReplayRecordStage, DurableReplayRocksDbConfig,
     DurableReplayRocksDbError, DurableReplayRocksDbIdentity, DurableReplayRocksDbOpenOutcome,
-    DurableReplayRocksDbPolicy, DurableReplayRocksDbReadOutcome, DurableReplayRocksDbRecoveryOutcome,
-    DurableReplayRocksDbWriteOutcome, GovernanceProductionDurableReplayBackend,
+    DurableReplayRocksDbPolicy, DurableReplayRocksDbReadOutcome, DurableReplayRocksDbRecoveryOutcome, GovernanceProductionDurableReplayBackend,
     MockDurableReplayBackend, ProductionDurableReplayRocksDbBackend, KEY_DOMAIN, KEY_SCHEMA,
     DURABLE_REPLAY_ROCKSDB_SCHEMA_VERSION,
 };

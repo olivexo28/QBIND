@@ -16,7 +16,7 @@
 
 use qbind_node::pqc_authority_custody::AuthorityCustodyClass;
 use qbind_node::pqc_authority_kms_hsm_backend::{
-    BackendIdentity, BackendKind, BackendResponse, FixtureHsmBackend, FixtureKmsBackend,
+    BackendIdentity, BackendKind, FixtureHsmBackend, FixtureKmsBackend,
 };
 use qbind_node::pqc_authority_lifecycle::{
     AuthorityTrustDomain, LocalLifecycleAction, PQC_LIFECYCLE_SUITE_ML_DSA_44,
@@ -31,10 +31,10 @@ use qbind_node::pqc_production_kms_hsm_custody_backend::{
     production_kms_hsm_custody_backend_remote_signer_is_not_kms_hsm,
     production_kms_hsm_custody_request_id, production_kms_hsm_custody_transcript_digest,
     FixtureHsmCustodyProvider, FixtureKmsCustodyProvider,
-    GovernanceProductionKmsHsmCustodyBackend, KmsHsmCustodyProviderTransport,
+    GovernanceProductionKmsHsmCustodyBackend,
     MockKmsHsmCustodyTransport, ProductionCustodyError, ProductionCustodyOutcome,
     ProductionCustodyProviderKind, ProductionCustodyProviderStub, ProductionCustodyRecoveryOutcome,
-    ProductionCustodyRequestKind, ProductionCustodyRequestSpec, ProductionCustodyResponse,
+    ProductionCustodyRequestKind, ProductionCustodyRequestSpec,
     ProductionKmsHsmCustodyBackend, ProductionKmsHsmCustodyBackendConfig,
     ProductionKmsHsmCustodyBackendPolicy, SubmittedCustodyRequest,
     PRODUCTION_KMS_HSM_CUSTODY_BACKEND_PROTOCOL_VERSION, PRODUCTION_KMS_HSM_CUSTODY_MAX_RESPONSE_BYTES,
@@ -71,7 +71,6 @@ fn chain_for(env: TrustBundleEnvironment) -> &'static str {
         TrustBundleEnvironment::Devnet => "qbind-devnet",
         TrustBundleEnvironment::Testnet => "qbind-testnet",
         TrustBundleEnvironment::Mainnet => "qbind-mainnet",
-        _ => "qbind-other",
     }
 }
 
