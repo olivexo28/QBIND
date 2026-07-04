@@ -1,0 +1,38 @@
+Run 300 — release-binary evidence for the Run 299 production on-chain governance proof verifier
+git_commit: 8efc4da18200cf0f572035e619f8c94f1638bf5e
+
+build:
+  rustc_version:      rustc 1.96.0 (ac68faa20 2026-05-25)
+  cargo_version:      cargo 1.96.0 (30a34c682 2026-05-25)
+  qbind_node_sha256:  a46f82f71188479226f2cfcb1e2b23948dc0eefc63d8c83957b04db02abe9eee
+  helper_300_sha256:  415c1330a058582a747bc7eee901e52e690e745e400d2b04f72ad97d983c70be
+
+helper_summary: /home/runner/work/QBIND/QBIND/docs/devnet/run_300_production_onchain_governance_proof_verifier_release_binary/helper_evidence/run_300/helper_summary.txt
+  Run 300 production on-chain governance proof verifier release helper
+  verdict: PASS
+  verifier: crates/qbind-node/src/pqc_production_onchain_governance_proof_verifier.rs (Run 299 ProductionOnChainGovernanceProofVerifier)
+  mode: real Run 299 verifier over a real SHA3-256 Merkle inclusion verifier, reachable-but-fail-closed unavailable inclusion stubs, and a programmable mock inclusion verifier; DevNet/TestNet source-test accept only; MainNet refused; default Disabled; MainNet/production policy never verifies and never falls back to fixture / local-operator / peer-majority / custody-only / remote-signer material; trusted governance root/checkpoint supplied explicitly out-of-band; proof cannot self-authorize its root; production proof acceptance uses verified Merkle inclusion against an explicit trusted root; every failure is a typed non-mutating outcome
+  table accepted_compatible pass=14 fail=0
+  table mainnet_authority_policy pass=7 fail=0
+  table non_mutation pass=5 fail=0
+  table reachability_taxonomy pass=7 fail=0
+  table rejection_fail_closed pass=30 fail=0
+  table replay_recovery_idempotency pass=8 fail=0
+  total_pass: 71
+  total_fail: 0
+
+deterministic_digests: stable across two independent helper invocations
+  proof_digest 42856f64b78cd86505549c19cd42096ef15e341cf71035bcf10fe8390051bb42
+  decision_digest e1a5977cbfed3ff34758a40515272914c57fb0dc8355d04ad8b92fd2066f0472
+  checkpoint_digest b396a8229ab44a7762933ab804e5ae59ba26434aa066acb82da5f0dea81d9924
+  merkle_root 2ee697aeab7a84efc3bb76c288c448d615a52924ae8e68a2bdd43f68e0f1184c
+  transcript_digest 9ccf010f207ccde0a301234c460543fa2c7c7b103059a2a347d265218c3bc443
+
+release_binary_scenarios: S1_help=0 S2=1 S3=1 S4=1 S5=1 S6=1
+reachability: combined/source/helper/module/entry/taxonomy/boundary/composition greps passed
+c4c5_taxonomy: passed (20 phrases; RocksDB + RemoteSigner + KMS/HSM + custody-attestation + on-chain-governance-proof-verifier rows Green-for-scope only; Red rows unchanged; Full C4 OPEN; C5 OPEN)
+denylist: passed (33 patterns)
+tests:
+  tests:skipped(RUN_300_SKIP_TESTS=1)
+
+verdict: PASS (release-binary evidence only; Full C4 OPEN; C5 OPEN)
