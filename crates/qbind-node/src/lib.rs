@@ -336,6 +336,24 @@ pub mod pqc_production_onchain_governance_proof_verifier;
 // test only — release-binary evidence is deferred to Run 302. Full C4
 // remains OPEN; C5 remains OPEN.
 pub mod pqc_production_governance_execution_engine;
+// Run 303 — source/test-only validator-set rotation / authority-set
+// synchronization intent boundary. Consumes a verified Run 301/302
+// governance execution decision (`is_accept()` + prepared intent) and
+// translates it into a typed, deterministic, policy-gated, non-mutating
+// validator-set rotation / authority-set synchronization plan bound to the
+// full governance / validator-set-delta / custody / attestation / durable-
+// replay evidence tuple. Default policy is Disabled/fail-closed; only a
+// verified DevNet/TestNet governance execution intent under the explicit
+// source/test policy produces a prepared plan. On-chain-proof-alone /
+// fixture / local-operator / peer-majority / custody-only / RemoteSigner-
+// only / attestation-only sources are rejected as production authority.
+// MainNet is refused. The boundary never mutates a live validator set,
+// never transitions a consensus epoch, never calls Run 070, never mutates
+// `LivePqcTrustState`, adds no CLI flag and no default runtime wiring.
+// Source/test only — release-binary evidence is deferred to Run 304. The
+// validator-set rotation C4/C5 matrix row moves Red -> Yellow; Full C4
+// remains OPEN and C5 remains OPEN.
+pub mod pqc_production_validator_set_rotation_intent;
 // Run 188 — source/test-only KMS/HSM custody boundary for bundle-
 // signing authority and governance authority operations. Defines the
 // typed `AuthorityCustodyClass` (`FixtureLocalKey` / `LocalOperatorKey`
