@@ -1,0 +1,700 @@
+Run 299 — Source/test real on-chain governance proof verifier implementation
+
+You are continuing QBIND after Run 298.
+
+Current accepted state:
+
+Run 292 is accepted as PASS / release-binary evidence positive for the production durable replay RocksDB backend.
+
+Run 294 is accepted as PASS / release-binary evidence positive for the production RemoteSigner backend.
+
+Run 296 is accepted as PASS / release-binary evidence positive for the production KMS/HSM/cloud-KMS/PKCS#11 custody backend.
+
+Run 298 is accepted as PASS / release-binary evidence positive for the Run 297 production custody attestation verifier.
+
+Current C4/C5 matrix:
+
+* Production durable replay RocksDB backend — Green for release-binary-evidenced backend behavior only.
+* Real production RemoteSigner backend — Green for release-binary-evidenced backend behavior only.
+* Real KMS/HSM/cloud-KMS/PKCS#11 custody backend — Green for release-binary-evidenced KMS/HSM custody backend behavior only.
+* Real custody attestation verifier — Green for release-binary-evidenced custody-attestation verifier behavior only.
+* Real on-chain governance proof verifier — Red.
+* Governance execution engine — Red.
+* Validator-set rotation / authority-set synchronization — Red.
+* MainNet authority rotation/revocation under production custody — Red.
+* Production signing audit trail / crypto-agility activation / incident response — Red.
+* Full MainNet release-binary evidence under production custody — Red.
+
+Full C4 remains OPEN. C5 remains OPEN.
+
+Strategic objective:
+
+Begin the next Red-row closure campaign by implementing a source/test real on-chain governance proof verifier.
+
+The existing Run 178 / Run 186 / Run 187 OnChainGovernance work created a typed fixture proof format, fixture-only acceptance, and a production verifier boundary. The production verifier kinds currently remain unavailable / placeholder / fail-closed. Run 299 must implement the first real source/test production on-chain governance proof verifier logic, while preserving all existing fixture-only and MainNet refusal boundaries.
+
+Release-binary evidence is out of scope and deferred to Run 300.
+
+Primary objective:
+
+Implement a production-style on-chain governance proof verifier at source/test level that validates a deterministic, typed, canonical proof object against explicitly supplied governance verification inputs, such as a trusted governance checkpoint/root, decision commitment, receipt/event inclusion proof, proposal digest, lifecycle action, authority-domain sequence, and candidate v2 digest.
+
+This verifier must be real verifier logic, not a fixture mock and not a placeholder that always returns unavailable. It may use source/test synthetic proof fixtures and deterministic in-memory roots to exercise the verifier, but the verification algorithm itself must be real: canonical bytes, domain separation, digest binding, membership/inclusion verification, replay/freshness checks, threshold/quorum checks where represented, and fail-closed typed errors.
+
+Run 299 must move the “Real on-chain governance proof verifier” row from Red to Yellow / source-test implementation landed, release-binary evidence pending Run 300.
+
+Run 299 must not claim release-binary evidence, MainNet readiness, C4 closure, or C5 closure.
+
+Required investigation before implementation:
+
+Inspect the current governance proof, verifier, evaluator, authority, custody, and runtime surfaces before writing code.
+
+At minimum inspect:
+
+* `crates/qbind-node/src/pqc_onchain_governance_proof.rs`
+* `crates/qbind-node/src/pqc_onchain_governance_verifier.rs`
+* `crates/qbind-node/tests/run_178_onchain_governance_proof_tests.rs`
+* `crates/qbind-node/tests/run_186_onchain_governance_production_verifier_boundary_tests.rs`
+* Run 187 release helper / harness / evidence, if present
+* `crates/qbind-node/src/pqc_governance_execution_evaluator.rs`
+* `crates/qbind-node/src/pqc_governance_execution_evaluator_runtime_integration.rs`
+* `crates/qbind-node/src/pqc_governance_execution_runtime_consumption.rs`
+* `crates/qbind-node/src/pqc_governance_execution.rs`
+* `crates/qbind-node/src/pqc_authority_custody.rs`
+* `crates/qbind-node/src/pqc_production_kms_hsm_custody_backend.rs`
+* `crates/qbind-node/src/pqc_production_custody_attestation_verifier.rs`
+* `docs/protocol/QBIND_C4_C5_CLOSURE_CRITERIA.md`
+* `docs/protocol/QBIND_GOVERNANCE_EXECUTION_RUNTIME_SURFACE_AUDIT.md`
+* `docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md`
+* `docs/protocol/QBIND_PEER_DRIVEN_TRUST_BUNDLE_APPLY_SAFETY.md`
+* `docs/ops/QBIND_PQC_TRUST_LIFECYCLE_RUNBOOK.md`
+* `docs/whitepaper/contradiction.md`
+
+Use actual existing type/function/module names. If names below differ from the codebase, use the real names and document substitutions in the Run 299 evidence report.
+
+Preferred implementation location:
+
+Prefer extending the existing module:
+
+`crates/qbind-node/src/pqc_onchain_governance_verifier.rs`
+
+If the existing module is too crowded, add a narrow companion module such as:
+
+`crates/qbind-node/src/pqc_production_onchain_governance_proof_verifier.rs`
+
+If a new module is added, register it in:
+
+`crates/qbind-node/src/lib.rs`
+
+Required new test file:
+
+Prefer:
+
+`crates/qbind-node/tests/run_299_production_onchain_governance_proof_verifier_tests.rs`
+
+Required evidence doc:
+
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_299.md`
+
+Required narrow docs updates:
+
+* `docs/protocol/QBIND_C4_C5_CLOSURE_CRITERIA.md`
+* `docs/protocol/QBIND_GOVERNANCE_EXECUTION_RUNTIME_SURFACE_AUDIT.md`
+* `docs/ops/QBIND_PQC_TRUST_LIFECYCLE_RUNBOOK.md`
+* `docs/protocol/QBIND_PEER_DRIVEN_TRUST_BUNDLE_APPLY_SAFETY.md`
+* `docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md`
+* `docs/whitepaper/contradiction.md`
+
+Strict scope:
+
+Allowed:
+
+* Add source/test production on-chain governance proof verifier logic.
+* Add a production proof suite id / verifier kind / verifier policy if needed.
+* Add typed production proof structures if the existing `OnChainGovernanceProof` / `OnChainGovernanceProofWire` cannot represent production verification material safely.
+* Add canonical proof bytes and domain-separated digest helpers.
+* Add a real source/test inclusion proof verifier, such as a deterministic Merkle/commitment proof verifier, over explicitly supplied test roots/checkpoints.
+* Add typed trusted governance checkpoint / receipt root / event root / state root inputs if needed.
+* Add mockable verifier traits only if the current trait is not sufficient.
+* Add source/test fixtures that construct valid production-style proofs over synthetic roots.
+* Compose with the existing Run 178 typed proof format and Run 186 verifier boundary.
+* Preserve fixture proof behavior exactly: DevNet/TestNet evidence-only, never MainNet production authority.
+* Preserve production default Disabled/fail-closed behavior.
+* Preserve MainNet refusal absent production authority criteria.
+* Update docs/evidence narrowly.
+
+Not allowed:
+
+* Do not add release-binary evidence in Run 299.
+* Do not add a public CLI flag.
+* Do not wire the production on-chain verifier into default runtime behavior.
+* Do not enable MainNet.
+* Do not claim C4 closure.
+* Do not claim C5 closure.
+* Do not claim MainNet readiness.
+* Do not implement a governance execution engine.
+* Do not implement validator-set rotation.
+* Do not implement MainNet authority rotation/revocation.
+* Do not implement settlement or external publication.
+* Do not implement bridge/light-client networking, external RPC, external indexer calls, or live chain access unless already present and explicitly scoped.
+* Do not fetch proof material from the network.
+* Do not accept local operator claims as on-chain governance proof.
+* Do not accept peer majority as on-chain governance proof.
+* Do not accept fixture proof as production proof.
+* Do not accept a mock commitment as production proof.
+* Do not accept unverified proof bytes.
+* Do not turn a production placeholder into an accept path without real verification logic.
+* Do not write trust-bundle sequence files.
+* Do not write authority markers.
+* Do not call Run 070.
+* Do not mutate `LivePqcTrustState`.
+* Do not swap trust state.
+* Do not evict sessions.
+* Do not change trust-bundle wire format.
+* Do not change peer-candidate wire format.
+* Do not change consensus wire format.
+* Do not weaken Run 292 durable replay RocksDB Green-for-scope status.
+* Do not weaken Run 294 RemoteSigner Green-for-scope status.
+* Do not weaken Run 296 KMS/HSM custody Green-for-scope status.
+* Do not weaken Run 298 custody attestation Green-for-scope status.
+* Do not move governance engine / validator-set rotation / MainNet / production audit trail / full MainNet evidence rows out of Red.
+
+Verifier design requirements:
+
+1. Default Disabled / fail-closed
+
+The production on-chain governance proof verifier must default to Disabled or equivalent.
+
+Disabled must fail closed before any proof parsing, root verification, inclusion verification, or lifecycle authorization.
+
+2. Preserve existing fixture boundary
+
+Existing fixture OnChainGovernance behavior must remain DevNet/TestNet evidence-only.
+
+Fixture proof must be rejected for MainNet.
+
+Fixture proof must not satisfy production governance authority.
+
+Existing `AllowFixtureSourceTest` behavior must not become a production verifier selector.
+
+3. Production proof class
+
+Add or activate a production proof class only when verification is real.
+
+A production proof may be accepted at source/test level only if all represented proof material is verified against explicit trusted inputs.
+
+At minimum, the verifier should bind and check:
+
+* environment;
+* chain_id;
+* genesis hash;
+* authority root fingerprint and suite;
+* governance domain id;
+* governance epoch;
+* proposal id;
+* proposal digest;
+* proposal outcome;
+* lifecycle action;
+* active / new / revoked bundle-signing key fingerprints, where represented;
+* authority-domain sequence;
+* candidate v2 digest;
+* decision id / replay nonce;
+* freshness window or explicit governance height/epoch bounds;
+* quorum / threshold, if represented;
+* proof suite id;
+* trusted governance checkpoint/root;
+* receipt root / event root / state root, if represented;
+* event / decision inclusion proof path, if represented;
+* proof bytes digest;
+* domain separation tag.
+
+Wrong value for any bound field must fail closed with a typed error.
+
+4. Canonical bytes
+
+All production proof commitments must use deterministic canonical bytes.
+
+Do not use Rust `Debug` formatting as canonical proof bytes.
+
+Do not use wall-clock time as an authorizing input.
+
+Freshness must be explicit: governance height, governance epoch, authority-domain sequence, decision id, replay nonce, or typed validity window.
+
+5. Inclusion / commitment verification
+
+The verifier must perform real verification over the represented production proof structure.
+
+Acceptable source/test production verifier models include:
+
+* Merkle inclusion proof from decision/event commitment to a trusted governance root;
+* receipt/event root inclusion proof tied to a trusted governance checkpoint;
+* typed decision commitment verified against a trusted root with deterministic proof path;
+* threshold/quorum proof over deterministic signer set if the existing proof format represents that layer.
+
+Do not simply compare a fixture hash unless it is explicitly a real deterministic proof root and path verification algorithm.
+
+Do not silently accept proof bytes because they are non-empty.
+
+Do not classify an opaque blob as production verified.
+
+6. Trusted root / checkpoint handling
+
+Trusted governance root/checkpoint input must be explicit.
+
+Missing trusted root must fail closed.
+
+Wrong root must fail closed.
+
+Untrusted root supplied by the proof itself must not be accepted as authority.
+
+The proof cannot self-authorize its root.
+
+7. MainNet policy
+
+MainNet must remain refused unless production authority criteria are satisfied.
+
+For Run 299 source/test, MainNet should remain fail-closed even for otherwise valid synthetic production-style proofs unless there is an explicit test-only MainNet source/test policy that still documents no MainNet runtime enablement and no MainNet readiness.
+
+Fixture, local operator, RemoteSigner-only, KMS/HSM custody alone, custody attestation alone, and peer majority must not satisfy MainNet on-chain governance proof verification.
+
+A valid on-chain governance proof alone must not bypass missing governance execution engine, validator-set rotation, production custody ceremonies, or full MainNet evidence gates.
+
+8. Composition with existing verifier boundary
+
+The new implementation must compose with existing Run 178 / Run 186 surfaces rather than duplicating or bypassing them.
+
+If extending `OnChainGovernanceVerifierKind`, add a new kind such as:
+
+* `ProductionSourceTest`
+* `ProductionProofVerifier`
+* `ProductionMerkleVerifier`
+* `ProductionReceiptVerifier`
+
+Use real names that match the implementation.
+
+If adding new outcomes, preserve existing outcome names and add typed outcomes rather than weakening old ones.
+
+Suggested names if no existing names fit:
+
+* `ProductionOnChainGovernanceProofVerifier`
+* `ProductionOnChainGovernanceProofVerifierConfig`
+* `ProductionOnChainGovernanceVerifierPolicy`
+* `ProductionOnChainGovernanceProof`
+* `ProductionOnChainGovernanceProofSuite`
+* `ProductionOnChainGovernanceTrustedCheckpoint`
+* `ProductionOnChainGovernanceDecisionCommitment`
+* `ProductionOnChainGovernanceInclusionProof`
+* `ProductionOnChainGovernanceProofOutcome`
+* `ProductionOnChainGovernanceProofError`
+* `production_onchain_governance_proof_digest`
+* `production_onchain_governance_decision_digest`
+* `production_onchain_governance_transcript_digest`
+* `verify_production_onchain_governance_proof_real`
+* `dispatch_production_onchain_governance_proof`
+
+Required outcome/error taxonomy:
+
+Use existing outcomes wherever possible. If new typed outcomes are needed, include variants close to:
+
+* `Disabled`
+* `AcceptedProductionOnChainGovernanceProof`
+* `AcceptedFixtureOnChainGovernanceProof`
+* `FixtureProofRejectedAsMainNetProductionAuthority`
+* `FixtureProofRejectedAsProductionAuthority`
+* `ProductionVerifierUnavailable`
+* `ProductionTrustedRootMissing`
+* `ProductionTrustedRootMismatch`
+* `ProductionProofMalformed`
+* `ProductionProofUnsupportedSuite`
+* `ProductionProofInvalid`
+* `ProductionProofExpired`
+* `ProductionProofReplayRejected`
+* `ProductionProofWrongEnvironment`
+* `ProductionProofWrongChain`
+* `ProductionProofWrongGenesis`
+* `ProductionProofWrongAuthorityRoot`
+* `ProductionProofWrongGovernanceDomain`
+* `ProductionProofWrongGovernanceEpoch`
+* `ProductionProofWrongProposalId`
+* `ProductionProofWrongProposalDigest`
+* `ProductionProofWrongProposalOutcome`
+* `ProductionProofWrongLifecycleAction`
+* `ProductionProofWrongCandidateDigest`
+* `ProductionProofWrongAuthoritySequence`
+* `ProductionProofWrongDecisionId`
+* `ProductionProofQuorumNotMet`
+* `ProductionProofThresholdNotMet`
+* `ProductionProofInclusionFailed`
+* `ProductionProofRootMismatch`
+* `ProductionProofCheckpointMismatch`
+* `ProductionProofAmbiguous`
+* `LocalOperatorConfigOnlyRejected`
+* `PeerMajorityProofRejected`
+* `CustodyOnlyProofRejected`
+* `RemoteSignerOnlyProofRejected`
+* `MainNetProductionGovernanceProofUnavailable`
+* `MainNetRefused`
+* `GovernanceExecutionEngineUnavailable`
+* `ValidatorSetRotationUnsupported`
+* `AmbiguousFailClosed`
+
+Required tests:
+
+Create a focused Run 299 source/test corpus. Target at least 80 tests.
+
+Minimum test groups:
+
+A. Accepted / compatible
+
+* Disabled default policy is explicit and inert.
+* Existing fixture DevNet proof behavior remains compatible.
+* Existing fixture TestNet proof behavior remains compatible.
+* Fixture proof remains rejected for MainNet.
+* A production-style proof with a valid trusted checkpoint/root verifies under an explicit source/test production verifier policy.
+* Valid production proof binds environment.
+* Valid production proof binds chain_id.
+* Valid production proof binds genesis hash.
+* Valid production proof binds authority root.
+* Valid production proof binds governance domain id.
+* Valid production proof binds governance epoch.
+* Valid production proof binds proposal id and proposal digest.
+* Valid production proof binds proposal outcome.
+* Valid production proof binds lifecycle action.
+* Valid production proof binds candidate v2 digest.
+* Valid production proof binds authority-domain sequence.
+* Valid production proof binds decision id / replay nonce.
+* Valid production proof verifies inclusion / commitment path against the trusted root.
+* Valid production proof enforces quorum/threshold if represented.
+* Deterministic proof digest is stable across identical inputs.
+* Deterministic decision digest is stable across identical inputs.
+* Deterministic transcript digest is stable across identical inputs.
+* The Run 186 dispatcher reaches the new production verifier kind.
+* Existing Run 185 / Run 186 fixture routing remains compatible.
+* Run 292/294/296/298 Green-for-scope behavior remains unchanged.
+
+B. Rejection / fail-closed
+
+* Disabled policy rejects before parsing.
+* Missing proof rejected.
+* Empty proof bytes rejected.
+* Malformed proof rejected.
+* Unsupported schema version rejected.
+* Unsupported proof suite rejected.
+* Fixture proof under production policy rejected.
+* Production proof under fixture-only policy rejected.
+* Missing trusted root rejected.
+* Proof-supplied untrusted root rejected.
+* Wrong trusted root rejected.
+* Wrong environment rejected.
+* Wrong chain rejected.
+* Wrong genesis rejected.
+* Wrong authority root rejected.
+* Wrong governance domain rejected.
+* Wrong governance epoch rejected.
+* Wrong proposal id rejected.
+* Wrong proposal digest rejected.
+* Wrong proposal outcome rejected.
+* Wrong lifecycle action rejected.
+* Wrong candidate digest rejected.
+* Wrong authority sequence rejected.
+* Wrong decision id rejected.
+* Expired proof rejected.
+* Replayed decision id rejected.
+* Stale governance epoch rejected.
+* Quorum not met rejected.
+* Threshold not met rejected.
+* Invalid inclusion proof rejected.
+* Wrong Merkle path rejected.
+* Wrong receipt/event root rejected.
+* Wrong checkpoint rejected.
+* Ambiguous proof rejected.
+* Local operator config-only proof rejected.
+* Peer majority proof rejected.
+* Custody-only proof rejected.
+* RemoteSigner-only proof rejected.
+* Production verifier unavailable/misconfigured path remains fail-closed where applicable.
+* Existing malformed sibling payload short-circuits before verifier dispatch.
+* Existing Run 178 proof parser failures remain fail-closed.
+
+C. MainNet / authority policy
+
+* MainNet cannot be satisfied by fixture proof.
+* MainNet cannot be satisfied by local operator material.
+* MainNet cannot be satisfied by peer majority.
+* MainNet cannot be satisfied by RemoteSigner-only evidence.
+* MainNet cannot be satisfied by KMS/HSM custody alone.
+* MainNet cannot be satisfied by custody attestation alone.
+* MainNet cannot bypass missing production on-chain governance proof.
+* MainNet cannot bypass missing governance execution engine.
+* MainNet cannot bypass validator-set rotation gate.
+* MainNet peer-driven apply remains refused.
+* Valid source/test production-style proof does not enable MainNet runtime behavior.
+
+D. Non-mutation
+
+Every rejected path proves:
+
+* no Run 070 call;
+* no `LivePqcTrustState` mutation;
+* no trust swap;
+* no session eviction;
+* no PQC trust-bundle sequence write;
+* no authority marker write;
+* no durable replay overwrite;
+* no custody backend acceptance under wrong policy;
+* no fallback to fixture proof under production policy;
+* no fallback to local operator proof;
+* no fallback to peer majority;
+* no fallback to RemoteSigner or custody attestation;
+* no governance execution;
+* no validator-set rotation;
+* no settlement;
+* no external publication;
+* no MainNet enablement.
+
+E. Replay / recovery / idempotency
+
+If replay/recovery helpers exist or are added:
+
+* no-prior proof window is clean no-op;
+* byte-identical proof is idempotent or classified as identical according to policy;
+* same decision id with different proof transcript fails closed;
+* same decision id with different proposal digest fails closed;
+* same decision id with different candidate digest fails closed;
+* same decision id with different lifecycle action fails closed;
+* stale governance epoch fails closed;
+* ambiguous recovery window fails closed.
+
+If no durable replay state is added, document honestly that replay checks are pure source/test comparisons and no durable governance proof acceptance is claimed.
+
+F. C4/C5 taxonomy
+
+Tests or grep assertions must prove:
+
+* Run 299 is source/test real on-chain governance proof verifier implementation.
+* Run 299 is not release-binary evidence.
+* Run 292 durable replay RocksDB remains Green-for-scope.
+* Run 294 RemoteSigner remains Green-for-scope.
+* Run 296 KMS/HSM custody remains Green-for-scope.
+* Run 298 custody attestation remains Green-for-scope.
+* Real on-chain governance proof verifier moves Red → Yellow / source-test implementation landed, release-binary evidence pending Run 300.
+* Governance execution engine remains Red.
+* Validator-set rotation remains Red.
+* MainNet authority rotation/revocation under production custody remains Red.
+* Production signing audit trail / crypto-agility activation / incident response remains Red.
+* Full MainNet release-binary evidence under production custody remains Red.
+* Full C4 remains OPEN.
+* C5 remains OPEN.
+
+Required regression commands:
+
+Run at minimum:
+
+* `cargo build -p qbind-node --lib`
+* `cargo test -p qbind-node --test run_299_production_onchain_governance_proof_verifier_tests`
+* `cargo test -p qbind-node --test run_186_onchain_governance_production_verifier_boundary_tests`
+* `cargo test -p qbind-node --test run_178_onchain_governance_proof_tests`
+* `cargo test -p qbind-node --test run_297_production_custody_attestation_verifier_tests`
+* `cargo test -p qbind-node --test run_295_production_kms_hsm_custody_backend_tests`
+* `cargo test -p qbind-node --test run_293_production_remote_signer_backend_tests`
+* `cargo test -p qbind-node --test run_291_production_durable_replay_rocksdb_tests`
+* `cargo test -p qbind-node --test run_290_durable_completion_external_publication_audit_anchor_tests`
+* `cargo test -p qbind-node --test run_288_durable_completion_external_publication_audit_seal_tests`
+* `cargo test -p qbind-node --test run_286_durable_completion_external_publication_audit_archive_tests`
+* `cargo test -p qbind-node --test run_284_durable_completion_external_publication_audit_completion_tests`
+* `cargo test -p qbind-node --test run_282_durable_completion_external_publication_audit_finalization_tests`
+* `cargo test -p qbind-node --test run_280_durable_completion_external_publication_acknowledgement_tests`
+* `cargo test -p qbind-node --test run_278_durable_completion_external_publication_receipt_tests`
+* `cargo test -p qbind-node --test run_276_durable_completion_external_publication_confirmation_tests`
+* `cargo test -p qbind-node --test run_274_durable_completion_settlement_outcome_publication_tests`
+* `cargo test -p qbind-node --test run_272_durable_completion_settlement_outcome_report_tests`
+* `cargo test -p qbind-node --test run_270_durable_completion_settlement_receipt_acknowledgement_tests`
+* `cargo test -p qbind-node --test run_268_durable_completion_settlement_finalization_tests`
+* `cargo test -p qbind-node --test run_266_durable_completion_settlement_commitment_tests`
+* `cargo test -p qbind-node --test run_264_durable_completion_consumer_settlement_projection_tests`
+* `cargo test -p qbind-node --test run_262_durable_completion_acknowledgement_consumer_tests`
+* `cargo test -p qbind-node --test run_260_durable_completion_audit_receipt_acknowledgement_tests`
+* `cargo test -p qbind-node --test run_258_durable_completion_audit_publication_receipt_tests`
+* `cargo test -p qbind-node --test run_256_durable_completion_attestation_backend_tests`
+* `cargo test -p qbind-node --test run_254_modeled_durable_completion_attestation_projection_tests`
+* `cargo test -p qbind-node --test run_252_modeled_durable_completion_finalization_projection_tests`
+* `cargo test -p qbind-node --test run_250_modeled_durable_consume_completion_reporter_tests`
+* `cargo test -p qbind-node --test run_248_modeled_durable_consume_projection_sink_tests`
+* `cargo test -p qbind-node --test run_246_governance_modeled_end_to_end_pipeline_tests`
+* `cargo test -p qbind-node --test run_244_modeled_governance_trust_mutation_applier_tests`
+* `cargo test -p qbind-node --test run_242_governance_execution_mutation_engine_tests`
+* `cargo test -p qbind-node --test run_240_governance_evaluator_replay_durable_runtime_integration_tests`
+* `cargo test -p qbind-node --test run_238_governance_evaluator_replay_durable_backend_tests`
+* `cargo test -p qbind-node --test run_236_governance_evaluator_replay_consume_runtime_integration_tests`
+* `cargo test -p qbind-node --test run_234_governance_evaluator_replay_consume_boundary_tests`
+* `cargo test -p qbind-node --test run_232_governance_evaluator_replay_runtime_integration_tests`
+* `cargo test -p qbind-node --test run_230_governance_evaluator_replay_state_tests`
+* `cargo test -p qbind-node --test run_228_peer_evaluator_context_representation_tests`
+* `cargo test -p qbind-node --test run_226_governance_evaluator_runtime_callsite_wiring_tests`
+* `cargo test -p qbind-node --test run_224_governance_evaluator_runtime_integration_tests`
+* `cargo test -p qbind-node --test run_203_kms_hsm_backend_boundary_tests`
+* `cargo test -p qbind-node --test run_201_remote_signer_transport_boundary_tests`
+* `cargo test -p qbind-node --test run_194_remote_authority_signer_boundary_tests`
+* `cargo test -p qbind-node --test run_188_authority_custody_boundary_tests`
+* `cargo test -p qbind-node --lib pqc_authority`
+* `cargo test -p qbind-node --lib`
+
+If actual target names differ, use the real names and record substitutions in the evidence.
+
+Known issue handling:
+
+If the unrelated pre-existing `m16_epoch_transition_hardening_tests.rs` compile failure still exists, report it honestly as pre-existing unless Run 299 touches it. Do not hide it. Do not include it in the required Run 299 corpus unless explicitly required.
+
+Security scanning:
+
+* Run secret scanning over changed files.
+* Run CodeQL if available.
+* Because Run 299 adds real source/test production verifier logic, CodeQL or an honest skip/timeout reason is required.
+* If CodeQL is skipped, times out, reports database too large, tooling is unavailable, or otherwise does not complete, report that explicitly and do not claim CodeQL coverage.
+
+Documentation requirements:
+
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_299.md` must include:
+
+1. Exact verdict.
+2. Files changed.
+3. Verifier design summary.
+4. Production proof format / proof-suite / policy taxonomy.
+5. Trusted checkpoint / root / inclusion-proof binding.
+6. Accepted source/test evidence.
+7. Rejection / fail-closed evidence.
+8. MainNet refusal / authority policy evidence.
+9. Replay / recovery / idempotency evidence.
+10. Non-mutation evidence.
+11. Tests run and results.
+12. C4/C5 matrix taxonomy status.
+13. Security scan results.
+14. Honest limitations.
+15. C4/C5 status.
+16. Suggested Run 300 next step.
+
+Docs must state clearly:
+
+* Run 299 is source/test real on-chain governance proof verifier implementation.
+* Run 299 is not release-binary evidence.
+* Release-binary evidence is deferred to Run 300.
+* Run 299 does not add default production runtime wiring.
+* Run 299 does not add a public CLI flag.
+* Run 299 does not enable MainNet.
+* Run 299 does not implement governance execution engine.
+* Run 299 does not implement validator-set rotation.
+* Run 299 does not implement settlement or external publication.
+* Run 299 does not call Run 070.
+* Run 299 does not mutate `LivePqcTrustState`.
+* Run 299 does not write trust-bundle sequence or authority marker files.
+* Run 299 does not accept fixture proof as production proof.
+* Run 299 does not accept local-operator or peer-majority proof.
+* Run 299 preserves Run 292/294/296/298 Green-for-scope statuses.
+* Full C4 remains OPEN.
+* C5 remains OPEN.
+
+C4/C5 matrix update:
+
+Expected after successful Run 299:
+
+* Production durable replay RocksDB backend remains Green for release-binary-evidenced backend behavior only.
+* Real production RemoteSigner backend remains Green for release-binary-evidenced backend behavior only.
+* Real KMS/HSM/cloud-KMS/PKCS#11 custody backend remains Green for release-binary-evidenced backend behavior only.
+* Real custody attestation verifier remains Green for release-binary-evidenced custody-attestation verifier behavior only.
+* Real on-chain governance proof verifier may move Red → Yellow / source-test implementation landed, release-binary evidence pending Run 300.
+* Governance execution engine remains Red.
+* Validator-set rotation / authority-set synchronization remains Red.
+* MainNet authority rotation/revocation under production custody remains Red.
+* Production signing audit trail / crypto-agility activation / incident response remains Red.
+* Full MainNet release-binary evidence under production custody remains Red.
+* Full C4 remains OPEN.
+* C5 remains OPEN.
+
+Do not mark on-chain governance proof verifier Green until Run 300 release-binary evidence exists.
+
+Do not mark governance execution engine Green.
+
+Do not mark validator-set rotation Green.
+
+Do not mark C4 closed.
+
+Do not mark C5 closed.
+
+Contradiction handling:
+
+Update `docs/whitepaper/contradiction.md`.
+
+Add a “Run 299” entry.
+
+If no contradiction is found, state that Run 299 introduces a source/test real on-chain governance proof verifier while preserving default Disabled/fail-closed runtime posture, no CLI flag, no MainNet enablement, no governance-engine/validator-set-rotation implementation, no Run 070 call, no `LivePqcTrustState` mutation, no trust-bundle sequence or authority-marker writes, no fixture/local/peer-majority proof as production authority, no weakening of Run 292/294/296/298 Green-for-scope statuses, and Full C4 OPEN / C5 OPEN.
+
+If contradiction is found, record the exact contradiction with file/function/doc reference and recommend the smallest safe fix.
+
+Expected verdicts:
+
+PASS / source-test real on-chain governance proof verifier implementation if:
+
+* real source/test production proof verifier logic lands;
+* the verifier composes with existing Run 178 / Run 186 OnChainGovernance surfaces;
+* default policy remains Disabled/fail-closed;
+* fixture proof remains DevNet/TestNet evidence-only and rejected for MainNet;
+* production-style proofs are accepted only when the represented proof material verifies against explicit trusted roots/checkpoints;
+* missing/malformed/unsupported/replay/wrong-domain/wrong-root/wrong-proof/wrong-proposal/wrong-candidate tests pass;
+* MainNet remains refused absent production authority criteria;
+* non-mutation invariants pass;
+* regression corpus passes;
+* docs/evidence/contradiction are updated;
+* secret scan is clean;
+* CodeQL result or honest skip/timeout is reported;
+* Full C4 remains OPEN;
+* C5 remains OPEN.
+
+Partial-positive if:
+
+* the verifier lands but one bounded production proof class, such as a bridge/light-client integration, is deferred honestly;
+* no false closure claim is made.
+
+Blocked only if:
+
+* existing OnChainGovernance proof surfaces cannot support a real verifier without broad redesign;
+* document the exact blocker and smallest safe next run.
+
+Unacceptable:
+
+* claiming release-binary evidence;
+* claiming C4 closure;
+* claiming C5 closure;
+* claiming MainNet readiness;
+* accepting fixture proof as production proof;
+* accepting local operator proof as on-chain proof;
+* accepting peer majority as on-chain proof;
+* accepting opaque non-empty proof bytes as production verified;
+* using a mock commitment as production proof without real inclusion/root verification;
+* hiding CodeQL failure/timeout/skip;
+* hiding regression failures;
+* broad redesign of unrelated settlement, governance execution, consensus, trust-bundle, wire, RocksDB durable replay, RemoteSigner, KMS/HSM custody, custody attestation, or modeled pipeline surfaces.
+
+Suggested Run 300 next step after successful Run 299:
+
+Run 300 — release-binary evidence for the real on-chain governance proof verifier.
+
+Run 300 should build real `target/release/qbind-node` plus a release-built helper, exercise the Run 299 verifier in release mode, prove production-style proof acceptance only under explicit source/test production verifier policy with verified root/inclusion/proof material, prove fixture proof remains DevNet/TestNet evidence-only and rejected for MainNet, prove missing/malformed/replay/wrong-domain/wrong-root/wrong-proof/wrong-proposal/wrong-candidate fail-closed behavior, prove production binary surfaces remain Disabled/silent with no CLI flag, preserve Run 292/294/296/298 Green-for-scope rows, and preserve Full C4 OPEN / C5 OPEN.
+
+Required final response format:
+
+1. Exact verdict.
+2. Files changed.
+3. Verifier design summary.
+4. Production proof format / proof-suite / policy taxonomy.
+5. Trusted checkpoint / root / inclusion-proof binding.
+6. Accepted source/test evidence.
+7. Rejection / fail-closed evidence.
+8. MainNet refusal / authority policy evidence.
+9. Replay / recovery / idempotency evidence.
+10. Non-mutation evidence.
+11. Tests run and results.
+12. C4/C5 matrix taxonomy status.
+13. Security scan results.
+14. Honest limitations.
+15. C4/C5 status.
+16. Suggested Run 300 next step.
