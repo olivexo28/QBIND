@@ -1,0 +1,54 @@
+Run 304 — release-binary evidence for the Run 303 validator-set rotation / authority-set synchronization intent boundary
+git_commit: 0feb8bdde9a5af12d6a0e5fa7d40ac40e37dc7a7
+git_branch: copilot/run-304-update-documentation
+git_status: dirty
+
+build:
+  rustc_version:      rustc 1.96.0 (ac68faa20 2026-05-25)
+  cargo_version:      cargo 1.96.0 (30a34c682 2026-05-25)
+  host:               Linux runnervmmklqx 6.17.0-1018-azure #18~24.04.1-Ubuntu SMP Thu May 28 16:39:11 UTC 2026 x86_64 x86_64 x86_64 GNU/Linux
+  qbind_node_sha256:  543f3f89e951bb23e6ce827f13148149a5966967622363a5b117350eb278c713
+  helper_304_sha256:  21d4696d4d978e5ddd30c09620f00267667cb63fa4e61fed584d2a7f61458517
+
+helper_summary: /home/runner/work/QBIND/QBIND/docs/devnet/run_304_production_validator_set_rotation_intent_release_binary/helper_evidence/run_304/helper_summary.txt
+  Run 304 validator-set rotation / authority-set synchronization intent boundary release helper
+  verdict: PASS
+  boundary: crates/qbind-node/src/pqc_production_validator_set_rotation_intent.rs (Run 303 ProductionValidatorSetRotationBoundary)
+  mode: real Run 303 validator-set rotation / authority-set synchronization intent boundary over the real Run 301/302 verified governance execution accept decision; DevNet/TestNet source-test accept only; MainNet refused; default Disabled; MainNet/production policy never evaluates and never falls back to fixture / local-operator / peer-majority / on-chain-proof-alone / custody-only / remote-signer-only / custody-attestation-only material; consumes verified governance execution intents and produces typed non-mutating validator-set rotation plans; does not call Run 070; does not mutate LivePqcTrustState; does not mutate a live validator set or consensus state; does not call BasicHotStuffEngine::transition_to_epoch; does not write meta:current_epoch; does not inject a reconfig block; does not write trust-bundle sequence or authority marker files; every failure is a typed non-mutating outcome
+  table accepted_compatible pass=30 fail=0
+  table mainnet_authority_policy pass=12 fail=0
+  table non_mutation pass=8 fail=0
+  table reachability_taxonomy pass=11 fail=0
+  table rejection_fail_closed pass=58 fail=0
+  table replay_recovery_idempotency pass=13 fail=0
+  total_pass: 132
+  total_fail: 0
+
+deterministic_digests: stable across two independent helper invocations
+  plan_digest 24313f4d2a3723598152a2b96ac777d9fe9afe2d903a77445db202802cabdf83
+  request_id ec4f00b3815308ad15df13a00bcd8bad2301dfc301c117661dcbcf40f96057b2
+  transcript_digest 6bfb7b5650cec287f71c190d84337eb586340d235e0296486b0d92dad949fb7c
+  outcome_tag accepted-source-test-validator-set-rotation-plan
+
+release_binary_scenarios: S1_help=0 S2=1 S3=1 S4=1 S5_no_selector=2 S6_default_parse=1
+reachability: combined/source/helper/module/entry/taxonomy/boundary greps passed
+c4c5_taxonomy: passed (21 phrases; RocksDB + RemoteSigner + KMS/HSM + custody-attestation + on-chain-governance-proof-verifier + governance-execution-engine + validator-set-rotation-intent-boundary rows Green-for-scope only; Red rows unchanged; Full C4 OPEN; C5 OPEN)
+denylist: passed (37 patterns)
+tests:
+  test:run_303_production_validator_set_rotation_intent_tests	rc=0
+  test:run_301_production_governance_execution_engine_tests	rc=0
+  test:run_299_production_onchain_governance_proof_verifier_tests	rc=0
+  test:run_297_production_custody_attestation_verifier_tests	rc=0
+  test:run_295_production_kms_hsm_custody_backend_tests	rc=0
+  test:run_293_production_remote_signer_backend_tests	rc=0
+  test:run_291_production_durable_replay_rocksdb_tests	rc=0
+  test:run_186_onchain_governance_production_verifier_boundary_tests	rc=0
+  test:run_178_onchain_governance_proof_tests	rc=0
+  test:run_203_kms_hsm_backend_boundary_tests	rc=0
+  test:run_201_remote_signer_transport_boundary_tests	rc=0
+  test:run_194_remote_authority_signer_boundary_tests	rc=0
+  test:run_188_authority_custody_boundary_tests	rc=0
+  lib:pqc_authority	rc=0
+  lib:lib_all	rc=0
+
+verdict: PASS (release-binary evidence only; validator-set rotation Green-for-scope; MainNet authority rotation/revocation Red; Full C4 OPEN; C5 OPEN)
