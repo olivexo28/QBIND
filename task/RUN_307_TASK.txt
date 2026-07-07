@@ -1,0 +1,72 @@
+Run 307 — Source/test live validator-set / epoch-transition application authorization boundary
+
+Continue QBIND after accepted Run 306.
+
+Current state:
+Run 306 is accepted as PASS / release-binary evidence positive for the Run 305 validator-set rotation application / epoch-transition executor boundary. That row is Green-for-scope only. It does not apply a live validator-set change, does not transition epochs, does not enable MainNet, and does not close C4/C5.
+
+Primary objective:
+Implement the next narrow source/test boundary: a live validator-set / epoch-transition application authorization boundary that consumes a verified Run 305/306 application decision and produces a typed, deterministic, policy-gated live-application authorization intent for a future mutating executor.
+
+Strict scope:
+Source/test only. No release-binary evidence in Run 307; defer release-binary evidence to Run 308.
+
+Non-goals:
+Do not actually apply a validator-set change.
+Do not call BasicHotStuffEngine::transition_to_epoch.
+Do not write meta:current_epoch.
+Do not inject PAYLOAD_KIND_RECONFIG.
+Do not mutate consensus validator state, epoch counters, LivePqcTrustState, trust bundles, sequence files, authority markers, sessions, storage, settlement, or publication.
+Do not call Run 070.
+Do not add a public CLI flag.
+Do not add default runtime wiring.
+Do not enable MainNet.
+
+Required implementation:
+Add a narrow module, preferably:
+crates/qbind-node/src/pqc_production_live_validator_set_application_authorization.rs
+
+Add tests:
+crates/qbind-node/tests/run_307_production_live_validator_set_application_authorization_tests.rs
+
+The boundary must:
+1. Default Disabled / fail-closed.
+2. Accept only a verified Run 305/306 application decision with an application intent.
+3. Reject rotation plan alone, governance execution intent alone, governance proof alone, fixture/local/peer-majority/custody-only/RemoteSigner-only/attestation-only/arbitrary bytes.
+4. Bind environment, chain_id, genesis hash, authority root, governance domain/epoch, rotation decision id, application decision id, application intent digest, validator-set digests, delta digest, epoch-transition target, application nonce, quorum/threshold, custody/attestation/durable evidence where represented.
+5. Produce only a typed live-application authorization intent for a future mutating executor.
+6. Enforce replay/idempotency/equivocation/freshness fail-closed.
+7. Keep MainNet refused absent complete production authority criteria.
+
+Required tests:
+Target at least 100 tests covering accepted DevNet/TestNet source-test authorization, wrong-field failures, missing/unverified input failures, replay/equivocation, stale epoch/version, MainNet refusal, and full non-mutation invariants.
+
+Required docs:
+Add docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_307.md.
+Update C4/C5 closure criteria, contradiction.md, runtime audit, runbook, peer-driven safety, and trust-anchor authority model narrowly.
+
+Security:
+Run secret scan over changed files.
+Run CodeQL if available. If skipped/timed out/database too large, record the exact reason and do not claim CodeQL coverage.
+
+Expected matrix movement:
+Add or move the live validator-set / epoch-transition application authorization boundary row Red → Yellow only. Do not mark it Green until Run 308 release-binary evidence. Do not claim live rotation, epoch transition, MainNet readiness, C4 closure, or C5 closure.
+
+Final response format:
+1. Exact verdict.
+2. Files changed.
+3. Boundary design summary.
+4. Policy/kind/authorization taxonomy.
+5. Run 305/306 application-decision binding.
+6. Live-application authorization model.
+7. Accepted source/test evidence.
+8. Rejection/fail-closed evidence.
+9. MainNet refusal evidence.
+10. Replay/idempotency evidence.
+11. Non-mutation evidence.
+12. Tests run.
+13. Security scans.
+14. C4/C5 matrix status.
+15. Honest limitations.
+16. C4/C5 status.
+17. Suggested Run 308 next step.
