@@ -1,0 +1,56 @@
+Run 306 — release-binary evidence for the Run 305 validator-set rotation application / epoch-transition executor boundary
+git_commit: 4b5bcd30f49e479957a1873e371f312e69f60874
+git_branch: copilot/run-306-implement-new-feature
+git_status: dirty
+
+build:
+  rustc_version:      rustc 1.96.0 (ac68faa20 2026-05-25)
+  cargo_version:      cargo 1.96.0 (30a34c682 2026-05-25)
+  host:               Linux runnervmmklqx 6.17.0-1018-azure #18~24.04.1-Ubuntu SMP Thu May 28 16:39:11 UTC 2026 x86_64 x86_64 x86_64 GNU/Linux
+  qbind_node_sha256:  d5085033334cfdb0c815832989958b0fba92f0d2b87e738903b253cc7e02aa6e
+  helper_306_sha256:  a238c60ce96d8fc2d805bb73a6cbfd94dab6657d759da02c4bebe65c01b83083
+
+helper_summary: /tmp/run306_out/helper_evidence/run_306/helper_summary.txt
+  Run 306 validator-set rotation application / epoch-transition executor boundary release helper
+  verdict: PASS
+  boundary: crates/qbind-node/src/pqc_production_validator_set_rotation_application_executor.rs (Run 305 ProductionValidatorSetRotationApplicationExecutor)
+  mode: real Run 305 validator-set rotation application / epoch-transition executor boundary over the real Run 303/304 verified validator-set rotation plan accept decision (itself composing the Run 301/302 verified governance execution accept decision); DevNet/TestNet source-test accept only; MainNet refused; default Disabled; MainNet/production policy never evaluates and never falls back to fixture / local-operator / peer-majority / governance-proof-alone / governance-execution-intent-alone / custody-only / remote-signer-only / custody-attestation-only / arbitrary-bytes material; consumes verified validator-set rotation plans and produces typed non-mutating application decisions/intents; does not apply a live validator-set change; does not call Run 070; does not mutate LivePqcTrustState; does not mutate a live validator set, consensus state, or epoch counter; does not call BasicHotStuffEngine::transition_to_epoch; does not write meta:current_epoch; does not inject a reconfig block; does not write trust-bundle sequence or authority marker files; every failure is a typed non-mutating outcome
+  table accepted_compatible pass=30 fail=0
+  table mainnet_authority_policy pass=9 fail=0
+  table non_mutation pass=14 fail=0
+  table reachability_taxonomy pass=11 fail=0
+  table rejection_fail_closed pass=55 fail=0
+  table replay_recovery_idempotency pass=8 fail=0
+  total_pass: 127
+  total_fail: 0
+
+deterministic_digests: stable across two independent helper invocations
+  rotation_plan_digest 24313f4d2a3723598152a2b96ac777d9fe9afe2d903a77445db202802cabdf83
+  intent_digest 40480ca935ba2dc31a3b15b02ddb2435b336f500bd673d93e633ecd1ad8ec605
+  request_id ab48aca99ce759ae121a60cd721cc686f016ab251e3f58f0255f822e158c55d6
+  transcript_digest 6b0bd769b6155f83e3568732319d11bab0eb287222e4496c6a29e47ac7a20e8a
+  outcome_tag accepted-source-test-validator-set-rotation-application-decision
+
+release_binary_scenarios: S1_help=0 S2=1 S3=1 S4=1 S5_no_selector=2 S6_default_parse=1
+reachability: combined/source/helper/module/entry/taxonomy/boundary greps passed
+c4c5_taxonomy: passed (23 phrases; RocksDB + RemoteSigner + KMS/HSM + custody-attestation + on-chain-governance-proof-verifier + governance-execution-engine + validator-set-rotation-intent-boundary + validator-set-rotation-application-executor-boundary rows Green-for-scope only; Red rows unchanged; Full C4 OPEN; C5 OPEN)
+denylist: passed (43 patterns)
+tests:
+  test:run_305_production_validator_set_rotation_application_executor_tests	rc=0
+  test:run_303_production_validator_set_rotation_intent_tests	rc=0
+  test:run_301_production_governance_execution_engine_tests	rc=0
+  test:run_299_production_onchain_governance_proof_verifier_tests	rc=0
+  test:run_297_production_custody_attestation_verifier_tests	rc=0
+  test:run_295_production_kms_hsm_custody_backend_tests	rc=0
+  test:run_293_production_remote_signer_backend_tests	rc=0
+  test:run_291_production_durable_replay_rocksdb_tests	rc=0
+  test:run_186_onchain_governance_production_verifier_boundary_tests	rc=0
+  test:run_178_onchain_governance_proof_tests	rc=0
+  test:run_203_kms_hsm_backend_boundary_tests	rc=0
+  test:run_201_remote_signer_transport_boundary_tests	rc=0
+  test:run_194_remote_authority_signer_boundary_tests	rc=0
+  test:run_188_authority_custody_boundary_tests	rc=0
+  lib:pqc_authority	rc=0
+  lib:lib_all	rc=0
+
+verdict: PASS (release-binary evidence only; validator-set rotation application executor Green-for-scope; MainNet authority rotation/revocation Red; Full C4 OPEN; C5 OPEN)
