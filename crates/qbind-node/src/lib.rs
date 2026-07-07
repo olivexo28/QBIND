@@ -354,6 +354,29 @@ pub mod pqc_production_governance_execution_engine;
 // validator-set rotation C4/C5 matrix row moves Red -> Yellow; Full C4
 // remains OPEN and C5 remains OPEN.
 pub mod pqc_production_validator_set_rotation_intent;
+// Run 305 — source/test-only validator-set rotation application /
+// epoch-transition executor boundary. Consumes a verified Run 303/304
+// validator-set rotation decision (`is_accept()` + prepared plan) and
+// translates it into a typed, deterministic, policy-gated, non-mutating
+// validator-set rotation application decision / epoch-transition intent
+// bound to the full rotation-plan / governance / validator-set-delta /
+// custody / attestation / durable-replay evidence tuple and an explicit
+// epoch-transition target. Default policy is Disabled/fail-closed; only a
+// verified DevNet/TestNet rotation plan under the explicit source/test
+// policy produces a prepared application decision. Governance-proof-alone /
+// governance-execution-intent-alone / fixture / local-operator /
+// peer-majority / custody-only / RemoteSigner-only / custody-attestation-
+// only / arbitrary-validator-set-bytes sources are rejected as production
+// authority. MainNet is refused. The executor never applies a live
+// validator-set change, never transitions a consensus epoch, never calls
+// `BasicHotStuffEngine::transition_to_epoch`, never writes
+// `meta:current_epoch`, never injects a `PAYLOAD_KIND_RECONFIG` block,
+// never calls Run 070, never mutates `LivePqcTrustState`, adds no CLI flag
+// and no default runtime wiring. Source/test only — release-binary evidence
+// is deferred to Run 306. The validator-set rotation application /
+// epoch-transition executor C4/C5 matrix row moves Red -> Yellow; Full C4
+// remains OPEN and C5 remains OPEN.
+pub mod pqc_production_validator_set_rotation_application_executor;
 // Run 188 — source/test-only KMS/HSM custody boundary for bundle-
 // signing authority and governance authority operations. Defines the
 // typed `AuthorityCustodyClass` (`FixtureLocalKey` / `LocalOperatorKey`
