@@ -1,0 +1,51 @@
+Run 304 — Release-binary evidence for Run 303 validator-set rotation / authority-set synchronization intent boundary
+
+Continue QBIND after accepted Run 303.
+
+Objective:
+Produce release-binary evidence for the Run 303 source/test validator-set rotation / authority-set synchronization intent boundary.
+
+Scope:
+Build real target/release/qbind-node plus a release-built helper that links and exercises the Run 303 boundary symbols in release mode. Prove the boundary remains typed, deterministic, non-mutating, default-Disabled, MainNet-refused, and production-runtime silent.
+
+Required:
+1. Add a Run 304 release helper under crates/qbind-node/examples/.
+2. Add a Run 304 harness under scripts/devnet/.
+3. Add docs/devnet/run_304_* artifact directory with summary/log capture.
+4. Add docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_304.md.
+5. Update docs/protocol/QBIND_C4_C5_CLOSURE_CRITERIA.md.
+6. Update contradiction.md and any narrow runtime/runbook docs needed by house style.
+
+Evidence required:
+- Real target/release/qbind-node hash.
+- Release helper hash.
+- Helper corpus PASS counts.
+- Real-binary scenarios proving no public CLI flag, no enablement banner, and default production silence.
+- DevNet/TestNet accepted source-test plans are non-mutating.
+- Missing/unverified/on-chain-proof-alone/fixture/local/peer-majority/custody-only/RemoteSigner-only/attestation-only inputs fail closed.
+- Wrong governance binding, wrong validator-set digest, duplicate keys, ambiguous delta, non-monotonic epoch/version, replay, stale evidence, and MainNet attempts fail closed.
+- No Run 070 call, no LivePqcTrustState mutation, no trust swap, no session eviction, no sequence write, no authority marker write, no consensus validator-set mutation, no transition_to_epoch, no meta:current_epoch write, no reconfig block injection.
+
+Matrix rule:
+If Run 304 passes, validator-set rotation / authority-set synchronization may move Yellow → Green-for-scope only. It must not become MainNet-ready. MainNet authority rotation/revocation remains Red. Full C4 remains OPEN. C5 remains OPEN.
+
+Security:
+Run secret scan over changed files.
+Run CodeQL if available. If skipped, unavailable, timed out, or database too large, record the exact reason. Do not imply CodeQL clean coverage unless it actually completed.
+
+Final response:
+1. Exact verdict.
+2. Files changed.
+3. Release artifacts and hashes.
+4. Helper corpus results.
+5. Real-binary scenarios.
+6. Accepted release evidence.
+7. Rejection/fail-closed evidence.
+8. MainNet refusal evidence.
+9. Non-mutation evidence.
+10. Tests run.
+11. Security scans.
+12. C4/C5 matrix status.
+13. Honest limitations.
+14. C4/C5 status.
+15. Suggested Run 305 next step.
