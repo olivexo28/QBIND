@@ -401,6 +401,31 @@ pub mod pqc_production_validator_set_rotation_application_executor;
 // C4/C5 matrix row moves Red -> Yellow; Full C4 remains OPEN and C5 remains
 // OPEN.
 pub mod pqc_production_live_validator_set_application_authorization;
+// Run 309 — source/test-only staged live validator-set / epoch-transition
+// application executor boundary. Consumes a verified Run 307/308 live
+// validator-set application authorization decision (and its prepared
+// authorization intent) and translates it into a typed, deterministic,
+// policy-gated, non-mutating staged epoch-transition application record for a
+// future mutating epoch-transition executor, bound to the full authorization-
+// decision / application-decision / rotation / governance / validator-set /
+// custody / attestation / durable-replay evidence tuple, an explicit epoch-
+// transition target, and a staged-application nonce. Default policy is
+// Disabled/fail-closed; only a verified DevNet/TestNet live-application
+// authorization under the explicit source/test policy produces a prepared
+// staged application record. Application-decision-alone / rotation-plan-alone
+// / governance-proof-alone / governance-execution-intent-alone / fixture /
+// local-operator / peer-majority / custody-only / RemoteSigner-only /
+// custody-attestation-only / arbitrary-validator-set-bytes sources are
+// rejected as production authority. MainNet is refused. The executor never
+// applies a live validator-set change, never transitions a consensus epoch,
+// never calls `BasicHotStuffEngine::transition_to_epoch`, never writes
+// `meta:current_epoch`, never injects a `PAYLOAD_KIND_RECONFIG` block, never
+// calls Run 070, never mutates `LivePqcTrustState`, adds no CLI flag and no
+// default runtime wiring. Source/test only — release-binary evidence is
+// deferred to Run 310. The staged live validator-set epoch-transition
+// application C4/C5 matrix row moves Red -> Yellow; Full C4 remains OPEN and
+// C5 remains OPEN.
+pub mod pqc_production_staged_live_validator_set_epoch_transition_application_executor;
 // Run 188 — source/test-only KMS/HSM custody boundary for bundle-
 // signing authority and governance authority operations. Defines the
 // typed `AuthorityCustodyClass` (`FixtureLocalKey` / `LocalOperatorKey`
