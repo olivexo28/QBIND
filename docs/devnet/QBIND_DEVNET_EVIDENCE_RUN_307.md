@@ -199,6 +199,68 @@ does not weaken any prior Green-for-scope status.
 
 ---
 
+## 16a. Docs / security closure re-verification (Run 307 cleanup)
+
+This section records the documentation, secret-scanning, CodeQL, and test
+re-verification work actually completed during the Run 307 completion cleanup.
+No new source or test behavior was added in this cleanup; it only reconciles
+docs and re-runs the verification suite.
+
+### Documentation updates completed
+
+* `docs/protocol/QBIND_C4_C5_CLOSURE_CRITERIA.md` — status line moved from
+  Run 306 to Run 307; the new live validator-set application / epoch-transition
+  authorization matrix row is Yellow (source/test landed, release-binary
+  evidence pending Run 308); a Run 307 changelog entry was added.
+* `docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md` — narrow Run 307 entry
+  added.
+* `docs/protocol/QBIND_GOVERNANCE_EXECUTION_RUNTIME_SURFACE_AUDIT.md` — narrow
+  Run 307 entry added.
+* `docs/protocol/QBIND_PEER_DRIVEN_TRUST_BUNDLE_APPLY_SAFETY.md` — narrow Run 307
+  entry added.
+* `docs/ops/QBIND_PQC_TRUST_LIFECYCLE_RUNBOOK.md` — narrow Run 307 entry added.
+* `docs/whitepaper/contradiction.md` — narrow Run 307 "no contradiction" entry
+  added.
+* `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_307.md` — this reconciliation.
+
+The matrix row stays **Yellow only**: source/test implementation landed;
+release-binary evidence pending Run 308; no live validator-set mutation; no
+epoch transition; no MainNet readiness; Full C4 OPEN; C5 OPEN.
+
+### Secret scanning
+
+Secret scanning was run over the changed files
+(`docs/ops/QBIND_PQC_TRUST_LIFECYCLE_RUNBOOK.md`,
+`docs/protocol/QBIND_C4_C5_CLOSURE_CRITERIA.md`,
+`docs/protocol/QBIND_GOVERNANCE_EXECUTION_RUNTIME_SURFACE_AUDIT.md`,
+`docs/protocol/QBIND_PEER_DRIVEN_TRUST_BUNDLE_APPLY_SAFETY.md`,
+`docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md`,
+`docs/whitepaper/contradiction.md`, and this evidence file). Result:
+**No secrets detected in the scanned files. Safe to proceed.**
+
+### CodeQL
+
+CodeQL result is recorded in section 16b below.
+
+### Tests re-run (Run 307 cleanup)
+
+All commands were re-run on this branch and passed:
+
+* `cargo build -p qbind-node --lib` — **Finished** (dev profile, exit 0).
+* `cargo test -p qbind-node --test run_307_production_live_validator_set_application_authorization_tests` — **135 passed; 0 failed**.
+* `cargo test -p qbind-node --test run_305_production_validator_set_rotation_application_executor_tests` — **126 passed; 0 failed**.
+* `cargo test -p qbind-node --test run_303_production_validator_set_rotation_intent_tests` — **131 passed; 0 failed**.
+* `cargo test -p qbind-node --test run_301_production_governance_execution_engine_tests` — **117 passed; 0 failed**.
+* `cargo test -p qbind-node --lib` — **1377 passed; 0 failed**.
+
+---
+
+## 16b. CodeQL coverage
+
+_CodeQL result recorded below during the Run 307 cleanup._
+
+---
+
 ## 17. Suggested Run 308 next step
 
 Build a real `target/release/qbind-node` plus a release-built helper, exercise
