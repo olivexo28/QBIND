@@ -1,0 +1,57 @@
+Run 308 — release-binary evidence for the Run 307 live validator-set application / epoch-transition authorization boundary
+git_commit: 22b95fad554b11f3729900f93adc067c6db79272
+git_branch: copilot/run-308-update-user-roles
+git_status: dirty
+
+build:
+  rustc_version:      rustc 1.96.0 (ac68faa20 2026-05-25)
+  cargo_version:      cargo 1.96.0 (30a34c682 2026-05-25)
+  host:               Linux runnervmkkn4f 6.17.0-1018-azure #18~24.04.1-Ubuntu SMP Thu May 28 16:39:11 UTC 2026 x86_64 x86_64 x86_64 GNU/Linux
+  qbind_node_sha256:  7009fdf9c86b491b95b5bd073612e125a37469d514f8068dc777ec8a2743159b
+  helper_308_sha256:  8fb9275f14d5b2b5d2b8cdb388719cf276bcce292d6f09692c2ad1f2b553ffda
+
+helper_summary: /home/runner/work/QBIND/QBIND/docs/devnet/run_308_production_live_validator_set_application_authorization_release_binary/helper_evidence/run_308/helper_summary.txt
+  Run 308 live validator-set application / epoch-transition authorization boundary release helper
+  verdict: PASS
+  boundary: crates/qbind-node/src/pqc_production_live_validator_set_application_authorization.rs (Run 307 ProductionLiveValidatorSetApplicationAuthorizationExecutor)
+  mode: real Run 307 live validator-set application / epoch-transition authorization boundary over the real Run 305/306 verified validator-set rotation application accept decision (is_accept() with Some(application_intent); itself composing the Run 303/304 verified validator-set rotation plan accept decision and the Run 301/302 verified governance execution accept decision); DevNet/TestNet source-test accept only; MainNet refused; default Disabled; MainNet/production policy never evaluates and never falls back to fixture / local-operator / peer-majority / governance-proof-alone / governance-execution-intent-alone / rotation-plan-alone / custody-only / remote-signer-only / custody-attestation-only / arbitrary-bytes material; consumes verified validator-set rotation application decisions and produces typed non-mutating live-application authorization intents for a future mutating executor; does not apply a live validator-set change; does not call Run 070; does not mutate LivePqcTrustState; does not mutate a live validator set, consensus state, or epoch counter; does not call BasicHotStuffEngine::transition_to_epoch; does not write meta:current_epoch; does not inject a PAYLOAD_KIND_RECONFIG block; does not write trust-bundle sequence or authority marker files; every failure is a typed non-mutating outcome
+  table accepted_compatible pass=31 fail=0
+  table mainnet_authority_policy pass=9 fail=0
+  table non_mutation pass=15 fail=0
+  table reachability_taxonomy pass=11 fail=0
+  table rejection_fail_closed pass=62 fail=0
+  table replay_recovery_idempotency pass=8 fail=0
+  total_pass: 136
+  total_fail: 0
+
+deterministic_digests: stable across two independent helper invocations
+  application_intent_digest 40480ca935ba2dc31a3b15b02ddb2435b336f500bd673d93e633ecd1ad8ec605
+  intent_digest 2e68313bc36f5567fe4508ac7935c7ea093660a718c0f34fddcfd10a1b1f2cfb
+  request_id 1a00a280d513930cd1aa10c9e591b1633be02ec438b722029f635303e4f9cba3
+  transcript_digest 28929160717ed45eb881d3c02522b4b794fb0b46ac5e35a9d6c03a363b4fd777
+  outcome_tag accepted-source-test-live-validator-set-application-authorization
+
+release_binary_scenarios: S1_help=0 S2=1 S3=1 S4=1 S5_no_selector=2 S6_default_parse=1
+reachability: combined/source/helper/module/entry/taxonomy/boundary greps passed
+c4c5_taxonomy: passed (25 phrases; RocksDB + RemoteSigner + KMS/HSM + custody-attestation + on-chain-governance-proof-verifier + governance-execution-engine + validator-set-rotation-intent-boundary + validator-set-rotation-application-executor-boundary + live-validator-set-application-authorization-boundary rows Green-for-scope only; Red rows unchanged; Full C4 OPEN; C5 OPEN)
+denylist: passed (47 patterns)
+tests:
+  test:run_307_production_live_validator_set_application_authorization_tests	rc=0
+  test:run_305_production_validator_set_rotation_application_executor_tests	rc=0
+  test:run_303_production_validator_set_rotation_intent_tests	rc=0
+  test:run_301_production_governance_execution_engine_tests	rc=0
+  test:run_299_production_onchain_governance_proof_verifier_tests	rc=0
+  test:run_297_production_custody_attestation_verifier_tests	rc=0
+  test:run_295_production_kms_hsm_custody_backend_tests	rc=0
+  test:run_293_production_remote_signer_backend_tests	rc=0
+  test:run_291_production_durable_replay_rocksdb_tests	rc=0
+  test:run_186_onchain_governance_production_verifier_boundary_tests	rc=0
+  test:run_178_onchain_governance_proof_tests	rc=0
+  test:run_203_kms_hsm_backend_boundary_tests	rc=0
+  test:run_201_remote_signer_transport_boundary_tests	rc=0
+  test:run_194_remote_authority_signer_boundary_tests	rc=0
+  test:run_188_authority_custody_boundary_tests	rc=0
+  lib:pqc_authority	rc=0
+  lib:lib_all	rc=0
+
+verdict: PASS (release-binary evidence only; live validator-set application authorization Green-for-scope; MainNet authority rotation/revocation Red; Full C4 OPEN; C5 OPEN)
