@@ -240,7 +240,8 @@ Secret scanning was run over the changed files
 
 ### CodeQL
 
-CodeQL result is recorded in section 16b below.
+CodeQL result is recorded in section 16b below (skipped — docs-only change; no
+CodeQL coverage claimed).
 
 ### Tests re-run (Run 307 cleanup)
 
@@ -257,7 +258,14 @@ All commands were re-run on this branch and passed:
 
 ## 16b. CodeQL coverage
 
-_CodeQL result recorded below during the Run 307 cleanup._
+CodeQL was **skipped** for the Run 307 completion cleanup because all changes in
+this cleanup are documentation-only Markdown edits (Run 307 changelog / evidence
+entries and the C4/C5 status-line update); no source code, build configuration,
+or logic was modified. Exact result returned by the checker: *"Skipped: all
+changes are trivial."* **No CodeQL coverage is claimed for this change.** The
+underlying Run 307 source/test boundary
+(`crates/qbind-node/src/pqc_production_live_validator_set_application_authorization.rs`)
+was not modified in this cleanup.
 
 ---
 
