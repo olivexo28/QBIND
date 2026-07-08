@@ -1,0 +1,57 @@
+Run 307 completion cleanup — docs, evidence, and security provenance
+
+Continue the existing Run 307 branch. Do not begin Run 308.
+
+Objective:
+Complete the missing Run 307 evidence/docs/security closure for the already-implemented source/test live validator-set application / epoch-transition authorization boundary.
+
+Required fixes:
+
+1. Update `docs/protocol/QBIND_C4_C5_CLOSURE_CRITERIA.md` status line from Run 306 to Run 307.
+
+2. Keep the new live validator-set application / epoch-transition authorization row Yellow only:
+
+   * source/test implementation landed;
+   * release-binary evidence pending Run 308;
+   * no live validator-set mutation;
+   * no epoch transition;
+   * no MainNet readiness;
+   * Full C4 OPEN;
+   * C5 OPEN.
+
+3. Add or verify the Run 307 changelog entry in `QBIND_C4_C5_CLOSURE_CRITERIA.md`.
+
+4. Add narrow Run 307 entries to:
+
+   * `docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md`
+   * `docs/protocol/QBIND_GOVERNANCE_EXECUTION_RUNTIME_SURFACE_AUDIT.md`
+   * `docs/protocol/QBIND_PEER_DRIVEN_TRUST_BUNDLE_APPLY_SAFETY.md`
+   * `docs/ops/QBIND_PQC_TRUST_LIFECYCLE_RUNBOOK.md`
+   * `docs/whitepaper/contradiction.md`
+
+5. Reconcile `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_307.md` so it only claims docs/security work that is actually completed.
+
+6. Run secret scanning over changed files and record the exact result.
+
+7. Run CodeQL if available. If skipped, timed out, unavailable, or database too large, record the exact reason and state clearly that no CodeQL coverage is claimed.
+
+8. Re-run and record:
+
+   * `cargo build -p qbind-node --lib`
+   * `cargo test -p qbind-node --test run_307_production_live_validator_set_application_authorization_tests`
+   * `cargo test -p qbind-node --test run_305_production_validator_set_rotation_application_executor_tests`
+   * `cargo test -p qbind-node --test run_303_production_validator_set_rotation_intent_tests`
+   * `cargo test -p qbind-node --test run_301_production_governance_execution_engine_tests`
+   * `cargo test -p qbind-node --lib`
+
+Final response format:
+
+1. Exact verdict.
+2. Files changed.
+3. Documentation fixes completed.
+4. Security scan results.
+5. Tests run.
+6. C4/C5 matrix status.
+7. Honest limitations.
+8. C4/C5 status.
+9. Suggested Run 308 next step.
