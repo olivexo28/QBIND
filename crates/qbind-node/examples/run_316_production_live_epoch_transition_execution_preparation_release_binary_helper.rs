@@ -2467,6 +2467,47 @@ fn main() {
     )
     .expect("write deterministic-digest fixture");
 
+    // Recovery / idempotency fixture — forces release-symbol linkage of the
+    // Run 315 non-mutating recovery window over the typed
+    // `ProductionLiveEpochTransitionExecutionPreparationArtifact` and its
+    // `ProductionLiveEpochTransitionExecutionPreparationRecoveryOutcome`.
+    let recover_exec = ProductionLiveEpochTransitionExecutionPreparationExecutor::source_test();
+    let current_artifact: &ProductionLiveEpochTransitionExecutionPreparationArtifact = artifact;
+    let clean: ProductionLiveEpochTransitionExecutionPreparationRecoveryOutcome =
+        recover_exec.recover_live_epoch_transition_execution_preparation_window(
+            None,
+            current_artifact,
+        );
+    let idempotent: ProductionLiveEpochTransitionExecutionPreparationRecoveryOutcome =
+        recover_exec.recover_live_epoch_transition_execution_preparation_window(
+            Some(current_artifact),
+            current_artifact,
+        );
+    assert!(clean.is_clean(), "no-prior window must be clean");
+    assert!(clean.is_non_mutating() && idempotent.is_non_mutating());
+    assert!(
+        matches!(
+            idempotent,
+            ProductionLiveEpochTransitionExecutionPreparationRecoveryOutcome::IdempotentReplayObserved { .. }
+        ),
+        "byte-identical prior window must be idempotent replay"
+    );
+    let mut recovery_body = String::new();
+    recovery_body.push_str(&format!("no_prior_window_clean={}\n", clean.is_clean()));
+    recovery_body.push_str(&format!(
+        "idempotent_replay_observed={}\n",
+        matches!(
+            idempotent,
+            ProductionLiveEpochTransitionExecutionPreparationRecoveryOutcome::IdempotentReplayObserved { .. }
+        )
+    ));
+    recovery_body.push_str("recovery_is_non_mutating=true\n");
+    fs::write(
+        outdir.join("fixtures/run_316_recovery_window.txt"),
+        &recovery_body,
+    )
+    .expect("write recovery-window fixture");
+
     // Per-table tallies preserving first-seen order.
     let mut table_order: Vec<String> = Vec::new();
     let mut pass: BTreeMap<String, usize> = BTreeMap::new();
