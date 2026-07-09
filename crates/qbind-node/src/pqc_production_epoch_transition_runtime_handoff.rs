@@ -89,18 +89,19 @@ use crate::pqc_trust_bundle::TrustBundleEnvironment;
 /// protocol version this run accepts.
 pub const PRODUCTION_EPOCH_TRANSITION_RUNTIME_HANDOFF_PROTOCOL_VERSION: u16 = 1;
 
-/// Run 313 — live validator-set application authorization intent digest
-/// domain tag.
+/// Run 313 — runtime handoff content digest domain tag.
 pub const PRODUCTION_EPOCH_TRANSITION_RUNTIME_HANDOFF_INTENT_DOMAIN_TAG: &str =
     "QBIND:run313-epoch-transition-runtime-handoff-intent:v1";
 
-/// Run 313 — live validator-set application authorization request-id domain
-/// tag.
+/// Run 313 — runtime handoff id domain tag.
+pub const PRODUCTION_EPOCH_TRANSITION_RUNTIME_HANDOFF_ID_DOMAIN_TAG: &str =
+    "QBIND:run313-epoch-transition-runtime-handoff-id:v1";
+
+/// Run 313 — runtime handoff request-id domain tag.
 pub const PRODUCTION_EPOCH_TRANSITION_RUNTIME_HANDOFF_REQUEST_DOMAIN_TAG: &str =
     "QBIND:run313-epoch-transition-runtime-handoff-request:v1";
 
-/// Run 313 — live validator-set application authorization transcript digest
-/// domain tag.
+/// Run 313 — runtime handoff transcript digest domain tag.
 pub const PRODUCTION_EPOCH_TRANSITION_RUNTIME_HANDOFF_TRANSCRIPT_DOMAIN_TAG: &str =
     "QBIND:run313-epoch-transition-runtime-handoff-transcript:v1";
 
@@ -419,26 +420,32 @@ impl EpochTransitionRuntimeHandoffKind {
 /// with a precise fail-closed outcome.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EpochTransitionRuntimeHandoffAuthoritySource {
-    /// A verified Run 311/312 live validator-set application authorization
+    /// A verified Run 311/312 guarded epoch-transition mutation-execution
     /// decision. The **only** accepted authority source. The decision must
-    /// `is_accept()` and carry `Some(authorization_intent)`.
+    /// `is_accept()` and carry `Some(guarded_mutation_record)`.
     VerifiedGuardedMutationDecision {
         decision: ProductionGuardedEpochTransitionMutationDecision,
     },
-    /// No live-application authorization decision was supplied.
+    /// No guarded mutation-execution decision was supplied.
     MissingGuardedMutationDecision,
-    /// An unverified / non-accept live-application authorization decision.
+    /// An unverified / non-accept guarded mutation-execution decision.
     /// Rejected.
     UnverifiedGuardedMutationDecision {
         decision: ProductionGuardedEpochTransitionMutationDecision,
     },
-    /// An accepted authorization decision that carries no prepared
-    /// authorization intent. Rejected.
+    /// An accepted guarded mutation-execution decision that carries no prepared
+    /// guarded mutation record. Rejected.
     AcceptedGuardedMutationWithoutRecord {
         decision: ProductionGuardedEpochTransitionMutationDecision,
     },
+    /// A Run 309/310 staged-application decision presented directly, without a
+    /// Run 311/312 guarded mutation-execution decision. Rejected.
+    StagedApplicationDecisionWithoutGuardedMutation,
+    /// A Run 307/308 live-application authorization presented directly, without
+    /// a Run 311/312 guarded mutation-execution decision. Rejected.
+    LiveApplicationAuthorizationWithoutGuardedMutation,
     /// A Run 305/306 validator-set rotation *application decision* presented
-    /// directly, without a Run 311/312 live-application authorization.
+    /// directly, without a Run 311/312 guarded mutation-execution decision.
     /// Rejected.
     ApplicationDecisionWithoutGuardedMutation,
     /// A Run 303/304 validator-set rotation plan presented directly, without a
@@ -479,7 +486,7 @@ pub struct ProductionEpochTransitionRuntimeHandoffInputs {
     /// The authoritative trust domain.
     pub trust_domain: AuthorityTrustDomain,
     /// The opaque staged-application policy id bound into the staged record.
-    pub staged_application_policy_id: String,
+    pub handoff_policy_id: String,
     /// Expected Run 311/312 live-application authorization policy id (bound
     /// into the consumed authorization intent).
     pub expected_authorization_policy_id: String,
@@ -569,6 +576,30 @@ pub struct ProductionEpochTransitionRuntimeHandoffInputs {
     /// Expected Run 311/312 live-application nonce (re-exposed by the
     /// authorization intent).
     pub expected_live_application_nonce: u64,
+    /// Expected Run 311/312 guarded mutation-execution decision id (bound into
+    /// the consumed guarded mutation-execution decision).
+    pub expected_guarded_mutation_decision_id: String,
+    /// Expected Run 311/312 guarded mutation-execution request id.
+    pub expected_guarded_mutation_request_id: String,
+    /// Expected Run 311/312 guarded mutation-execution intent digest.
+    pub expected_guarded_mutation_intent_digest: String,
+    /// Expected Run 311/312 guarded mutation-execution transcript digest.
+    pub expected_guarded_mutation_transcript_digest: String,
+    /// Expected Run 311/312 guarded mutation nonce (re-exposed by the consumed
+    /// guarded mutation record).
+    pub expected_guarded_mutation_nonce: u64,
+    /// Expected current validator-set epoch a future live executor would
+    /// transition *from*. Must be `<=` the record's proposed validator-set
+    /// epoch (the proposed epoch may equal the current epoch on a no-op).
+    pub expected_current_validator_set_epoch: u64,
+    /// Expected current validator-set version a future live executor would
+    /// transition *from*. Must be `<=` the record's proposed validator-set
+    /// version.
+    pub expected_current_validator_set_version: u64,
+    /// Operator-declared required replay window a future live executor must
+    /// honour. Encoded into the handoff package preconditions; never a
+    /// wall-clock value and never a reject path in Run 313.
+    pub required_replay_window: u64,
     /// Minimum acceptable governance epoch (freshness; never wall-clock).
     pub min_governance_epoch: u64,
     /// Minimum acceptable validator-set epoch (freshness; never wall-clock).
@@ -597,7 +628,7 @@ impl ProductionEpochTransitionRuntimeHandoffInputs {
         !self.trust_domain.chain_id.is_empty()
             && !self.trust_domain.genesis_hash.is_empty()
             && !self.trust_domain.authority_root_fingerprint.is_empty()
-            && !self.staged_application_policy_id.is_empty()
+            && !self.handoff_policy_id.is_empty()
             && !self.expected_authorization_policy_id.is_empty()
             && !self.expected_application_policy_id.is_empty()
             && !self.expected_governance_domain_id.is_empty()
@@ -624,6 +655,10 @@ impl ProductionEpochTransitionRuntimeHandoffInputs {
             && !self.expected_staged_application_request_id.is_empty()
             && !self.expected_staged_application_intent_digest.is_empty()
             && !self.expected_staged_application_transcript_digest.is_empty()
+            && !self.expected_guarded_mutation_decision_id.is_empty()
+            && !self.expected_guarded_mutation_request_id.is_empty()
+            && !self.expected_guarded_mutation_intent_digest.is_empty()
+            && !self.expected_guarded_mutation_transcript_digest.is_empty()
             && (!self.require_custody_evidence || self.expected_custody.is_some())
             && (!self.require_attestation_evidence || self.expected_attestation.is_some())
             && (!self.require_durable_replay_evidence || self.expected_durable_replay.is_some())
@@ -634,18 +669,17 @@ impl ProductionEpochTransitionRuntimeHandoffInputs {
 // Request
 // ===========================================================================
 
-/// Run 313 — a staged live validator-set / epoch-transition application
-/// request: the authority source (a verified live-application authorization
-/// decision), the explicit epoch-transition target, a staged-application
-/// nonce, and any represented custody / attestation / durable-replay evidence
-/// bindings.
+/// Run 313 — a runtime handoff request: the authority source (a verified
+/// guarded epoch-transition mutation-execution decision), the explicit
+/// epoch-transition target, a runtime-handoff nonce, and any represented
+/// custody / attestation / durable-replay evidence bindings.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProductionEpochTransitionRuntimeHandoffRequest {
     pub authority_source: EpochTransitionRuntimeHandoffAuthoritySource,
     /// The epoch a future epoch-transition executor would transition to.
     pub proposed_epoch_transition_target: u64,
-    /// The staged-application nonce (idempotency / replay binding).
-    pub staged_application_nonce: u64,
+    /// The runtime-handoff nonce (idempotency / replay binding).
+    pub runtime_handoff_nonce: u64,
     pub custody_binding: Option<GovernanceExecutionCustodyBinding>,
     pub attestation_binding: Option<GovernanceExecutionAttestationBinding>,
     pub durable_replay_binding: Option<GovernanceExecutionDurableReplayBinding>,
@@ -653,17 +687,17 @@ pub struct ProductionEpochTransitionRuntimeHandoffRequest {
 
 impl ProductionEpochTransitionRuntimeHandoffRequest {
     /// Construct a request carrying only an authority source, epoch target,
-    /// and staged-application nonce (no represented custody / attestation /
+    /// and runtime-handoff nonce (no represented custody / attestation /
     /// durable-replay evidence).
     pub fn new(
         authority_source: EpochTransitionRuntimeHandoffAuthoritySource,
         proposed_epoch_transition_target: u64,
-        staged_application_nonce: u64,
+        runtime_handoff_nonce: u64,
     ) -> Self {
         Self {
             authority_source,
             proposed_epoch_transition_target,
-            staged_application_nonce,
+            runtime_handoff_nonce,
             custody_binding: None,
             attestation_binding: None,
             durable_replay_binding: None,
@@ -705,18 +739,22 @@ impl EpochTransitionRuntimeHandoffReplaySet
 }
 
 // ===========================================================================
-// Staged application record (boundary output)
+// Runtime handoff package (boundary output)
 // ===========================================================================
 
-/// Run 313 — a typed, deterministic, **non-mutating** staged live
-/// validator-set / epoch-transition application record. Only a typed accepted
-/// outcome carrying this record may authorize a *future* real mutation run
-/// (Run 314+); Run 313 never applies it.
+/// Run 313 — a typed, deterministic, **non-mutating** epoch-transition runtime
+/// handoff package. Only a typed accepted outcome carrying this package may
+/// authorize a *future* real live mutation run (Run 314+); Run 313 never
+/// applies it. The package re-exposes the full consumed guarded-mutation /
+/// staged-application / authorization / application / rotation / governance /
+/// validator-set evidence tuple **and** the exact future-executor
+/// preconditions, and carries deterministic `handoff_id`, `request_id`,
+/// `handoff_digest`, and `transcript_digest` identifiers.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProductionEpochTransitionRuntimeHandoffPackage {
     pub staged_kind: EpochTransitionRuntimeHandoffKind,
     pub protocol_version: u16,
-    pub staged_application_policy_id: String,
+    pub handoff_policy_id: String,
 
     // ---- Re-exposed Run 311/312 authorization intent tuple ------------
     pub authorization_policy_id: String,
@@ -778,20 +816,67 @@ pub struct ProductionEpochTransitionRuntimeHandoffPackage {
     // ---- Staged application binding (re-exposed consumed nonce) --------
     pub staged_application_nonce: u64,
 
-    // ---- Guarded mutation-execution binding ---------------------------
-    /// The newly proposed guarded mutation-execution nonce.
+    // ---- Bound Run 311/312 guarded mutation-execution authority tuple -
+    // (the consumed guarded mutation-execution decision transcript)
+    pub guarded_mutation_decision_id: String,
+    pub guarded_mutation_request_id: String,
+    pub guarded_mutation_intent_digest: String,
+    pub guarded_mutation_transcript_digest: String,
+
+    // ---- Guarded mutation-execution binding (re-exposed consumed nonce)
+    /// The consumed guarded mutation-execution nonce.
     pub guarded_mutation_nonce: u64,
+
+    // ---- Runtime handoff binding --------------------------------------
+    /// The newly proposed runtime-handoff nonce.
+    pub runtime_handoff_nonce: u64,
+
+    // ---- Exact future-executor preconditions --------------------------
+    /// Expected current validator-set digest a future live executor must
+    /// transition *from* (re-exposed record current-set digest).
+    pub precondition_current_validator_set_digest: String,
+    /// Expected current validator-set epoch a future live executor must
+    /// transition *from*.
+    pub precondition_current_validator_set_epoch: u64,
+    /// Expected current validator-set version a future live executor must
+    /// transition *from*.
+    pub precondition_current_validator_set_version: u64,
+    /// Proposed validator-set digest a future live executor must transition
+    /// *to* (re-exposed record proposed-set digest).
+    pub precondition_proposed_validator_set_digest: String,
+    /// Validator-set delta digest (re-exposed record delta digest).
+    pub precondition_delta_digest: String,
+    /// Target epoch a future live executor must transition to (re-exposed
+    /// record epoch-transition target).
+    pub precondition_target_epoch: u64,
+    /// Required governance epoch a future live executor must re-verify
+    /// (re-exposed record governance epoch).
+    pub precondition_required_governance_epoch: u64,
+    /// Required authority-domain sequence a future live executor must
+    /// re-verify (re-exposed record authority-domain sequence).
+    pub precondition_required_authority_sequence: u64,
+    /// Required replay window a future live executor must honour
+    /// (operator-declared).
+    pub precondition_required_replay_window: u64,
 
     // ---- Composed evidence (where represented) ------------------------
     pub custody_binding: Option<GovernanceExecutionCustodyBinding>,
     pub attestation_binding: Option<GovernanceExecutionAttestationBinding>,
     pub durable_replay_binding: Option<GovernanceExecutionDurableReplayBinding>,
+
+    // ---- Deterministic identifiers (excluded from `content_digest`) ---
+    pub handoff_id: String,
+    pub request_id: String,
+    pub handoff_digest: String,
+    pub transcript_digest: String,
 }
 
 impl ProductionEpochTransitionRuntimeHandoffPackage {
-    /// Deterministic, domain-separated SHA3-256 hex intent digest. `Debug`
+    /// Deterministic, domain-separated SHA3-256 hex content digest over every
+    /// field **except** the four identifier fields (`handoff_id`,
+    /// `request_id`, `handoff_digest`, `transcript_digest`). `Debug`
     /// formatting is never used as canonical bytes.
-    pub fn intent_digest(&self) -> String {
+    pub fn content_digest(&self) -> String {
         use sha3::{Digest, Sha3_256};
         let mut h = Sha3_256::new();
         h.update(
@@ -801,8 +886,8 @@ impl ProductionEpochTransitionRuntimeHandoffPackage {
         hash_field(&mut h, b"protocol_version", &self.protocol_version.to_le_bytes());
         hash_field(
             &mut h,
-            b"staged_application_policy_id",
-            self.staged_application_policy_id.as_bytes(),
+            b"handoff_policy_id",
+            self.handoff_policy_id.as_bytes(),
         );
         hash_field(&mut h, b"authorization_policy_id", self.authorization_policy_id.as_bytes());
         hash_field(&mut h, b"application_policy_id", self.application_policy_id.as_bytes());
@@ -913,8 +998,78 @@ impl ProductionEpochTransitionRuntimeHandoffPackage {
         );
         hash_field(
             &mut h,
+            b"guarded_mutation_decision_id",
+            self.guarded_mutation_decision_id.as_bytes(),
+        );
+        hash_field(
+            &mut h,
+            b"guarded_mutation_request_id",
+            self.guarded_mutation_request_id.as_bytes(),
+        );
+        hash_field(
+            &mut h,
+            b"guarded_mutation_intent_digest",
+            self.guarded_mutation_intent_digest.as_bytes(),
+        );
+        hash_field(
+            &mut h,
+            b"guarded_mutation_transcript_digest",
+            self.guarded_mutation_transcript_digest.as_bytes(),
+        );
+        hash_field(
+            &mut h,
             b"guarded_mutation_nonce",
             &self.guarded_mutation_nonce.to_le_bytes(),
+        );
+        hash_field(
+            &mut h,
+            b"runtime_handoff_nonce",
+            &self.runtime_handoff_nonce.to_le_bytes(),
+        );
+        hash_field(
+            &mut h,
+            b"precondition_current_validator_set_digest",
+            self.precondition_current_validator_set_digest.as_bytes(),
+        );
+        hash_field(
+            &mut h,
+            b"precondition_current_validator_set_epoch",
+            &self.precondition_current_validator_set_epoch.to_le_bytes(),
+        );
+        hash_field(
+            &mut h,
+            b"precondition_current_validator_set_version",
+            &self.precondition_current_validator_set_version.to_le_bytes(),
+        );
+        hash_field(
+            &mut h,
+            b"precondition_proposed_validator_set_digest",
+            self.precondition_proposed_validator_set_digest.as_bytes(),
+        );
+        hash_field(
+            &mut h,
+            b"precondition_delta_digest",
+            self.precondition_delta_digest.as_bytes(),
+        );
+        hash_field(
+            &mut h,
+            b"precondition_target_epoch",
+            &self.precondition_target_epoch.to_le_bytes(),
+        );
+        hash_field(
+            &mut h,
+            b"precondition_required_governance_epoch",
+            &self.precondition_required_governance_epoch.to_le_bytes(),
+        );
+        hash_field(
+            &mut h,
+            b"precondition_required_authority_sequence",
+            &self.precondition_required_authority_sequence.to_le_bytes(),
+        );
+        hash_field(
+            &mut h,
+            b"precondition_required_replay_window",
+            &self.precondition_required_replay_window.to_le_bytes(),
         );
         match &self.custody_binding {
             Some(c) => {
@@ -974,24 +1129,24 @@ fn durable_hash_into(d: &GovernanceExecutionDurableReplayBinding, h: &mut sha3::
     hash_field(h, b"durable_record_digest", d.durable_record_digest.as_bytes());
 }
 
-/// Run 313 — deterministic staged application record digest wrapper exposed
-/// as a named symbol.
-pub fn production_epoch_transition_runtime_handoff_intent_digest(
-    record: &ProductionEpochTransitionRuntimeHandoffPackage,
+/// Run 313 — deterministic runtime handoff package content digest wrapper
+/// exposed as a named symbol.
+pub fn production_epoch_transition_runtime_handoff_content_digest(
+    package: &ProductionEpochTransitionRuntimeHandoffPackage,
 ) -> String {
-    record.intent_digest()
+    package.content_digest()
 }
 
-/// Run 313 — deterministic, domain-separated staged application request id
-/// binding the protocol version, authorization intent digest, staged
-/// application policy id, epoch-transition target, and staged-application
-/// nonce. Deterministic across identical inputs; never wall-clock.
+/// Run 313 — deterministic, domain-separated runtime handoff request id
+/// binding the protocol version, guarded mutation intent digest, handoff
+/// policy id, epoch-transition target, and runtime-handoff nonce.
+/// Deterministic across identical inputs; never wall-clock.
 pub fn production_epoch_transition_runtime_handoff_request_id(
     protocol_version: u16,
-    authorization_intent_digest: &str,
-    staged_application_policy_id: &str,
+    guarded_mutation_intent_digest: &str,
+    handoff_policy_id: &str,
     epoch_transition_target: u64,
-    staged_application_nonce: u64,
+    runtime_handoff_nonce: u64,
 ) -> String {
     use sha3::{Digest, Sha3_256};
     let mut h = Sha3_256::new();
@@ -1001,13 +1156,13 @@ pub fn production_epoch_transition_runtime_handoff_request_id(
     hash_field(&mut h, b"protocol_version", &protocol_version.to_le_bytes());
     hash_field(
         &mut h,
-        b"authorization_intent_digest",
-        authorization_intent_digest.as_bytes(),
+        b"guarded_mutation_intent_digest",
+        guarded_mutation_intent_digest.as_bytes(),
     );
     hash_field(
         &mut h,
-        b"staged_application_policy_id",
-        staged_application_policy_id.as_bytes(),
+        b"handoff_policy_id",
+        handoff_policy_id.as_bytes(),
     );
     hash_field(
         &mut h,
@@ -1016,15 +1171,52 @@ pub fn production_epoch_transition_runtime_handoff_request_id(
     );
     hash_field(
         &mut h,
-        b"staged_application_nonce",
-        &staged_application_nonce.to_le_bytes(),
+        b"runtime_handoff_nonce",
+        &runtime_handoff_nonce.to_le_bytes(),
     );
     hex::encode(h.finalize())
 }
 
-/// Run 313 — deterministic, domain-separated staged application transcript
-/// digest binding the protocol version, request id, intent digest, and
-/// outcome tag.
+/// Run 313 — deterministic, domain-separated runtime handoff id binding the
+/// protocol version, guarded mutation intent digest, handoff policy id,
+/// epoch-transition target, and runtime-handoff nonce. Deterministic across
+/// identical inputs; never wall-clock. Distinct domain-separated from the
+/// request id.
+pub fn production_epoch_transition_runtime_handoff_id(
+    protocol_version: u16,
+    guarded_mutation_intent_digest: &str,
+    handoff_policy_id: &str,
+    epoch_transition_target: u64,
+    runtime_handoff_nonce: u64,
+) -> String {
+    use sha3::{Digest, Sha3_256};
+    let mut h = Sha3_256::new();
+    h.update(
+        PRODUCTION_EPOCH_TRANSITION_RUNTIME_HANDOFF_ID_DOMAIN_TAG.as_bytes(),
+    );
+    hash_field(&mut h, b"protocol_version", &protocol_version.to_le_bytes());
+    hash_field(
+        &mut h,
+        b"guarded_mutation_intent_digest",
+        guarded_mutation_intent_digest.as_bytes(),
+    );
+    hash_field(&mut h, b"handoff_policy_id", handoff_policy_id.as_bytes());
+    hash_field(
+        &mut h,
+        b"epoch_transition_target",
+        &epoch_transition_target.to_le_bytes(),
+    );
+    hash_field(
+        &mut h,
+        b"runtime_handoff_nonce",
+        &runtime_handoff_nonce.to_le_bytes(),
+    );
+    hex::encode(h.finalize())
+}
+
+/// Run 313 — deterministic, domain-separated runtime handoff transcript
+/// digest binding the protocol version, request id, handoff (content) digest,
+/// and outcome tag.
 pub fn production_epoch_transition_runtime_handoff_transcript_digest(
     protocol_version: u16,
     request_id: &str,
@@ -1068,19 +1260,21 @@ pub enum ProductionEpochTransitionRuntimeHandoffOutcome {
     MainNetProductionEpochTransitionRuntimeHandoffUnavailable,
 
     // ---- Accepted ------------------------------------------------------
-    /// A verified DevNet/TestNet live validator-set application authorization
-    /// decision produced a typed non-mutating staged application record under
+    /// A verified DevNet/TestNet guarded epoch-transition mutation-execution
+    /// decision produced a typed non-mutating runtime handoff package under
     /// the source/test policy. **Evidence only.**
     AcceptedSourceTestEpochTransitionRuntimeHandoff {
-        staged_kind: EpochTransitionRuntimeHandoffKind,
+        handoff_kind: EpochTransitionRuntimeHandoffKind,
         environment: TrustBundleEnvironment,
         epoch_transition_target: u64,
-        staged_application_nonce: u64,
+        runtime_handoff_nonce: u64,
     },
 
     // ---- Authorization-decision / authority failures ------------------
     VerifiedGuardedMutationDecisionRequired,
     UnverifiedGuardedMutationDecisionRejected,
+    StagedApplicationDecisionAloneRejected,
+    LiveApplicationAuthorizationAloneRejected,
     ApplicationDecisionAloneRejected,
     RotationPlanAloneRejected,
     GovernanceProofAloneRejected,
@@ -1092,6 +1286,14 @@ pub enum ProductionEpochTransitionRuntimeHandoffOutcome {
     RemoteSignerOnlyProofRejected,
     CustodyAttestationOnlyProofRejected,
     ArbitraryValidatorSetBytesRejected,
+
+    // ---- Guarded-mutation-decision binding failures -------------------
+    GuardedMutationDecisionIdMismatch,
+    GuardedMutationDecisionRequestIdMismatch,
+    GuardedMutationDecisionIntentDigestMismatch,
+    GuardedMutationDecisionTranscriptMismatch,
+    GuardedMutationDecisionIntegrityMismatch,
+    WrongGuardedMutationNonce,
 
     // ---- Authorization-decision binding failures ----------------------
     WrongAuthorizationPolicyId,
@@ -1143,6 +1345,8 @@ pub enum ProductionEpochTransitionRuntimeHandoffOutcome {
     WrongValidatorSetDeltaDigest,
     WrongValidatorSetEpoch,
     WrongValidatorSetVersion,
+    WrongCurrentValidatorSetEpoch,
+    WrongCurrentValidatorSetVersion,
     WrongProposedValidatorCount,
     WrongRotationNonce,
     UnsupportedStagedLiveApplication,
@@ -1214,10 +1418,16 @@ impl ProductionEpochTransitionRuntimeHandoffOutcome {
                 "accepted-source-test-epoch-transition-runtime-handoff"
             }
             Self::VerifiedGuardedMutationDecisionRequired => {
-                "verified-live-application-authorization-required"
+                "verified-guarded-mutation-decision-required"
             }
             Self::UnverifiedGuardedMutationDecisionRejected => {
-                "unverified-live-application-authorization-rejected"
+                "unverified-guarded-mutation-decision-rejected"
+            }
+            Self::StagedApplicationDecisionAloneRejected => {
+                "staged-application-decision-alone-rejected"
+            }
+            Self::LiveApplicationAuthorizationAloneRejected => {
+                "live-application-authorization-alone-rejected"
             }
             Self::ApplicationDecisionAloneRejected => "application-decision-alone-rejected",
             Self::RotationPlanAloneRejected => "rotation-plan-alone-rejected",
@@ -1226,7 +1436,7 @@ impl ProductionEpochTransitionRuntimeHandoffOutcome {
                 "governance-execution-intent-alone-rejected"
             }
             Self::FixtureStagedApplicationRejectedAsProductionAuthority => {
-                "fixture-live-application-authorization-rejected-as-production-authority"
+                "fixture-guarded-mutation-decision-rejected-as-production-authority"
             }
             Self::LocalOperatorProofRejected => "local-operator-proof-rejected",
             Self::PeerMajorityProofRejected => "peer-majority-proof-rejected",
@@ -1234,6 +1444,20 @@ impl ProductionEpochTransitionRuntimeHandoffOutcome {
             Self::RemoteSignerOnlyProofRejected => "remote-signer-only-proof-rejected",
             Self::CustodyAttestationOnlyProofRejected => "custody-attestation-only-proof-rejected",
             Self::ArbitraryValidatorSetBytesRejected => "arbitrary-validator-set-bytes-rejected",
+            Self::GuardedMutationDecisionIdMismatch => "guarded-mutation-decision-id-mismatch",
+            Self::GuardedMutationDecisionRequestIdMismatch => {
+                "guarded-mutation-decision-request-id-mismatch"
+            }
+            Self::GuardedMutationDecisionIntentDigestMismatch => {
+                "guarded-mutation-decision-intent-digest-mismatch"
+            }
+            Self::GuardedMutationDecisionTranscriptMismatch => {
+                "guarded-mutation-decision-transcript-mismatch"
+            }
+            Self::GuardedMutationDecisionIntegrityMismatch => {
+                "guarded-mutation-decision-integrity-mismatch"
+            }
+            Self::WrongGuardedMutationNonce => "wrong-guarded-mutation-nonce",
             Self::WrongAuthorizationPolicyId => "wrong-authorization-policy-id",
             Self::AuthorizationDecisionIdMismatch => "authorization-decision-id-mismatch",
             Self::AuthorizationDecisionRequestIdMismatch => {
@@ -1293,6 +1517,8 @@ impl ProductionEpochTransitionRuntimeHandoffOutcome {
             Self::WrongValidatorSetDeltaDigest => "wrong-validator-set-delta-digest",
             Self::WrongValidatorSetEpoch => "wrong-validator-set-epoch",
             Self::WrongValidatorSetVersion => "wrong-validator-set-version",
+            Self::WrongCurrentValidatorSetEpoch => "wrong-current-validator-set-epoch",
+            Self::WrongCurrentValidatorSetVersion => "wrong-current-validator-set-version",
             Self::WrongProposedValidatorCount => "wrong-proposed-validator-count",
             Self::WrongRotationNonce => "wrong-rotation-nonce",
             Self::UnsupportedStagedLiveApplication => {
@@ -1329,17 +1555,17 @@ impl ProductionEpochTransitionRuntimeHandoffOutcome {
 // ===========================================================================
 
 /// Run 313 — the typed decision produced by the executor boundary: the
-/// outcome, the bound staged application id, the deterministic request id,
-/// the optional prepared staged application record, its digest, and the
-/// verification transcript digest.
+/// outcome, the bound handoff id, the deterministic request id, the optional
+/// prepared runtime handoff package, its digest, and the verification
+/// transcript digest.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProductionEpochTransitionRuntimeHandoffDecision {
     pub outcome: ProductionEpochTransitionRuntimeHandoffOutcome,
-    pub staged_application_id: String,
+    pub handoff_id: String,
     pub request_id: String,
-    pub staged_application_record:
+    pub handoff_package:
         Option<ProductionEpochTransitionRuntimeHandoffPackage>,
-    pub intent_digest: String,
+    pub handoff_digest: String,
     pub transcript_digest: String,
 }
 
@@ -1349,10 +1575,10 @@ impl ProductionEpochTransitionRuntimeHandoffDecision {
     }
 
     /// Returns `true` iff the decision carries a prepared, non-mutating
-    /// staged application record (only on accept). The boundary never applies
+    /// runtime handoff package (only on accept). The boundary never applies
     /// it.
     pub fn authorizes_future_mutation_only(&self) -> bool {
-        self.outcome.authorizes_future_mutation_only() && self.staged_application_record.is_some()
+        self.outcome.authorizes_future_mutation_only() && self.handoff_package.is_some()
     }
 }
 
@@ -1453,6 +1679,12 @@ impl ProductionEpochTransitionRuntimeHandoffExecutor {
             S::ApplicationDecisionWithoutGuardedMutation => {
                 Err(O::ApplicationDecisionAloneRejected)
             }
+            S::StagedApplicationDecisionWithoutGuardedMutation => {
+                Err(O::StagedApplicationDecisionAloneRejected)
+            }
+            S::LiveApplicationAuthorizationWithoutGuardedMutation => {
+                Err(O::LiveApplicationAuthorizationAloneRejected)
+            }
             S::RotationPlanWithoutGuardedMutation => Err(O::RotationPlanAloneRejected),
             S::GovernanceExecutionIntentWithoutGuardedMutation => {
                 Err(O::GovernanceExecutionIntentAloneRejected)
@@ -1542,28 +1774,64 @@ impl ProductionEpochTransitionRuntimeHandoffExecutor {
         use ProductionEpochTransitionRuntimeHandoffOutcome as O;
         let td = &inputs.trust_domain;
 
-        // Consumed Run 311/312 staged-application decision transcript
+        // Consumed Run 311/312 guarded epoch-transition mutation-execution
+        // decision transcript binding.
+        if decision.staged_application_id != inputs.expected_guarded_mutation_decision_id {
+            return Some(O::GuardedMutationDecisionIdMismatch);
+        }
+        if decision.request_id != inputs.expected_guarded_mutation_request_id {
+            return Some(O::GuardedMutationDecisionRequestIdMismatch);
+        }
+        if decision.intent_digest != inputs.expected_guarded_mutation_intent_digest {
+            return Some(O::GuardedMutationDecisionIntentDigestMismatch);
+        }
+        if decision.transcript_digest != inputs.expected_guarded_mutation_transcript_digest {
+            return Some(O::GuardedMutationDecisionTranscriptMismatch);
+        }
+        // The prepared guarded-mutation record must reproduce the bound
+        // guarded-mutation decision intent digest.
+        if intent.intent_digest() != decision.intent_digest {
+            return Some(O::GuardedMutationDecisionIntegrityMismatch);
+        }
+        // The consumed guarded-mutation record's own guarded-mutation nonce
         // binding.
-        if decision.staged_application_id != inputs.expected_staged_application_decision_id {
+        if intent.guarded_mutation_nonce != inputs.expected_guarded_mutation_nonce {
+            return Some(O::WrongGuardedMutationNonce);
+        }
+
+        // Re-exposed Run 311/312 staged-application decision authority tuple
+        // binding (carried through the consumed guarded-mutation record).
+        if intent.staged_application_decision_id != inputs.expected_staged_application_decision_id {
             return Some(O::StagedApplicationDecisionIdMismatch);
         }
-        if decision.request_id != inputs.expected_staged_application_request_id {
+        if intent.staged_application_request_id != inputs.expected_staged_application_request_id {
             return Some(O::StagedApplicationDecisionRequestIdMismatch);
         }
-        if decision.intent_digest != inputs.expected_staged_application_intent_digest {
+        if intent.staged_application_intent_digest
+            != inputs.expected_staged_application_intent_digest
+        {
             return Some(O::StagedApplicationDecisionIntentDigestMismatch);
         }
-        if decision.transcript_digest != inputs.expected_staged_application_transcript_digest {
+        if intent.staged_application_transcript_digest
+            != inputs.expected_staged_application_transcript_digest
+        {
             return Some(O::StagedApplicationDecisionTranscriptMismatch);
         }
-        // The prepared staged record must reproduce the bound staged decision
-        // intent digest.
-        if intent.intent_digest() != decision.intent_digest {
-            return Some(O::StagedApplicationDecisionIntegrityMismatch);
-        }
-        // The consumed staged record's own staged-application nonce binding.
+        // The consumed record's re-exposed staged-application nonce binding.
         if intent.staged_application_nonce != inputs.expected_staged_application_nonce {
             return Some(O::WrongStagedApplicationNonce);
+        }
+
+        // Current validator-set epoch/version preflight preconditions: the
+        // operator-declared current epoch/version must not lead the bound
+        // (current) validator-set epoch/version carried by the record. This
+        // is a fail-closed preflight guard for the future live executor; the
+        // handoff itself never mutates the validator set.
+        if inputs.expected_current_validator_set_epoch > intent.validator_set_epoch {
+            return Some(O::WrongCurrentValidatorSetEpoch);
+        }
+        if inputs.expected_current_validator_set_version > intent.validator_set_version {
+            return Some(O::WrongCurrentValidatorSetVersion);
         }
 
         // Re-exposed Run 311/312 live-authorization decision authority tuple
@@ -1828,9 +2096,9 @@ impl ProductionEpochTransitionRuntimeHandoffExecutor {
         let staged_application_id = production_epoch_transition_runtime_handoff_request_id(
             self.config.protocol_version.0,
             &decision.intent_digest,
-            &inputs.staged_application_policy_id,
+            &inputs.handoff_policy_id,
             request.proposed_epoch_transition_target,
-            request.staged_application_nonce,
+            request.runtime_handoff_nonce,
         );
         if replay_set.contains(&staged_application_id) {
             return (O::StagedApplicationReplayRejected { staged_application_id }, None);
@@ -1880,11 +2148,11 @@ impl ProductionEpochTransitionRuntimeHandoffExecutor {
             return (O::UnsupportedStagedLiveApplication, None);
         }
 
-        // Step 9: construct the typed non-mutating staged application record.
-        let record = ProductionEpochTransitionRuntimeHandoffPackage {
+        // Step 9: construct the typed non-mutating runtime handoff package.
+        let mut record = ProductionEpochTransitionRuntimeHandoffPackage {
             staged_kind,
             protocol_version: self.config.protocol_version.0,
-            staged_application_policy_id: inputs.staged_application_policy_id.clone(),
+            handoff_policy_id: inputs.handoff_policy_id.clone(),
             authorization_policy_id: application_intent.authorization_policy_id.clone(),
             application_policy_id: application_intent.application_policy_id.clone(),
             environment: application_intent.environment,
@@ -1929,27 +2197,79 @@ impl ProductionEpochTransitionRuntimeHandoffExecutor {
             authorization_transcript_digest: application_intent
                 .authorization_transcript_digest
                 .clone(),
-            staged_application_decision_id: decision.staged_application_id.clone(),
-            staged_application_request_id: decision.request_id.clone(),
-            staged_application_intent_digest: decision.intent_digest.clone(),
-            staged_application_transcript_digest: decision.transcript_digest.clone(),
+            staged_application_decision_id: application_intent.staged_application_decision_id.clone(),
+            staged_application_request_id: application_intent.staged_application_request_id.clone(),
+            staged_application_intent_digest: application_intent
+                .staged_application_intent_digest
+                .clone(),
+            staged_application_transcript_digest: application_intent
+                .staged_application_transcript_digest
+                .clone(),
             staged_application_nonce: application_intent.staged_application_nonce,
-            guarded_mutation_nonce: request.staged_application_nonce,
+            // Consumed Run 311/312 guarded mutation-execution decision
+            // transcript (the authority source this run consumes).
+            guarded_mutation_decision_id: decision.staged_application_id.clone(),
+            guarded_mutation_request_id: decision.request_id.clone(),
+            guarded_mutation_intent_digest: decision.intent_digest.clone(),
+            guarded_mutation_transcript_digest: decision.transcript_digest.clone(),
+            // Re-exposed consumed guarded mutation-execution nonce.
+            guarded_mutation_nonce: application_intent.guarded_mutation_nonce,
+            // Newly proposed runtime-handoff nonce.
+            runtime_handoff_nonce: request.runtime_handoff_nonce,
+            // Exact future-executor preconditions.
+            precondition_current_validator_set_digest: application_intent.current_set_digest.clone(),
+            precondition_current_validator_set_epoch: application_intent.validator_set_epoch,
+            precondition_current_validator_set_version: application_intent.validator_set_version,
+            precondition_proposed_validator_set_digest: application_intent.proposed_set_digest.clone(),
+            precondition_delta_digest: application_intent.delta_digest.clone(),
+            precondition_target_epoch: application_intent.epoch_transition_target,
+            precondition_required_governance_epoch: application_intent.governance_epoch,
+            precondition_required_authority_sequence: application_intent.authority_domain_sequence,
+            precondition_required_replay_window: inputs.required_replay_window,
             custody_binding: request.custody_binding.clone(),
             attestation_binding: request.attestation_binding.clone(),
             durable_replay_binding: request.durable_replay_binding.clone(),
+            // Deterministic identifiers filled in below.
+            handoff_id: String::new(),
+            request_id: String::new(),
+            handoff_digest: String::new(),
+            transcript_digest: String::new(),
         };
 
-        // Step 10: typed accepted non-mutating outcome.
-        (
-            O::AcceptedSourceTestEpochTransitionRuntimeHandoff {
-                staged_kind,
-                environment: application_intent.environment,
-                epoch_transition_target: request.proposed_epoch_transition_target,
-                staged_application_nonce: request.staged_application_nonce,
-            },
-            Some(record),
-        )
+        // Step 10: typed accepted non-mutating outcome + deterministic
+        // identifiers bound into the package.
+        let outcome = O::AcceptedSourceTestEpochTransitionRuntimeHandoff {
+            handoff_kind: staged_kind,
+            environment: application_intent.environment,
+            epoch_transition_target: request.proposed_epoch_transition_target,
+            runtime_handoff_nonce: request.runtime_handoff_nonce,
+        };
+        let handoff_id = production_epoch_transition_runtime_handoff_id(
+            self.config.protocol_version.0,
+            &decision.intent_digest,
+            &inputs.handoff_policy_id,
+            request.proposed_epoch_transition_target,
+            request.runtime_handoff_nonce,
+        );
+        let request_id = production_epoch_transition_runtime_handoff_request_id(
+            self.config.protocol_version.0,
+            &decision.intent_digest,
+            &inputs.handoff_policy_id,
+            request.proposed_epoch_transition_target,
+            request.runtime_handoff_nonce,
+        );
+        record.handoff_digest = record.content_digest();
+        record.handoff_id = handoff_id;
+        record.request_id = request_id.clone();
+        record.transcript_digest =
+            production_epoch_transition_runtime_handoff_transcript_digest(
+                self.config.protocol_version.0,
+                &request_id,
+                &record.handoff_digest,
+                outcome.tag(),
+            );
+
+        (outcome, Some(record))
     }
 
     /// Run 313 — evaluate a staged live validator-set / epoch-transition
@@ -1966,9 +2286,23 @@ impl ProductionEpochTransitionRuntimeHandoffExecutor {
     ) -> ProductionEpochTransitionRuntimeHandoffDecision {
         let (outcome, record) = self.evaluate_core(request, inputs, replay_set);
 
-        // Authorization decision id + intent digest for the transcript
-        // (best-effort from the authority source).
-        let (staged_application_id, authorization_intent_digest) = match &request.authority_source {
+        // On accept the package carries the deterministic identifiers already;
+        // reuse them so the decision and package agree exactly.
+        if let Some(pkg) = &record {
+            return ProductionEpochTransitionRuntimeHandoffDecision {
+                outcome,
+                handoff_id: pkg.handoff_id.clone(),
+                request_id: pkg.request_id.clone(),
+                handoff_package: record.clone(),
+                handoff_digest: pkg.handoff_digest.clone(),
+                transcript_digest: pkg.transcript_digest.clone(),
+            };
+        }
+
+        // On reject, derive deterministic identifiers from the consumed
+        // guarded-mutation decision intent digest (best-effort from the
+        // authority source).
+        let guarded_mutation_intent_digest = match &request.authority_source {
             EpochTransitionRuntimeHandoffAuthoritySource::VerifiedGuardedMutationDecision {
                 decision,
             }
@@ -1977,32 +2311,39 @@ impl ProductionEpochTransitionRuntimeHandoffExecutor {
             }
             | EpochTransitionRuntimeHandoffAuthoritySource::AcceptedGuardedMutationWithoutRecord {
                 decision,
-            } => (decision.staged_application_id.clone(), decision.intent_digest.clone()),
-            _ => (String::new(), String::new()),
+            } => decision.intent_digest.clone(),
+            _ => String::new(),
         };
 
+        let handoff_id = production_epoch_transition_runtime_handoff_id(
+            self.config.protocol_version.0,
+            &guarded_mutation_intent_digest,
+            &inputs.handoff_policy_id,
+            request.proposed_epoch_transition_target,
+            request.runtime_handoff_nonce,
+        );
         let request_id = production_epoch_transition_runtime_handoff_request_id(
             self.config.protocol_version.0,
-            &authorization_intent_digest,
-            &inputs.staged_application_policy_id,
+            &guarded_mutation_intent_digest,
+            &inputs.handoff_policy_id,
             request.proposed_epoch_transition_target,
-            request.staged_application_nonce,
+            request.runtime_handoff_nonce,
         );
-        let intent_digest = record.as_ref().map(|i| i.intent_digest()).unwrap_or_default();
+        let handoff_digest = String::new();
         let transcript_digest =
             production_epoch_transition_runtime_handoff_transcript_digest(
                 self.config.protocol_version.0,
                 &request_id,
-                &intent_digest,
+                &handoff_digest,
                 outcome.tag(),
             );
 
         ProductionEpochTransitionRuntimeHandoffDecision {
             outcome,
-            staged_application_id,
+            handoff_id,
             request_id,
-            staged_application_record: record,
-            intent_digest,
+            handoff_package: None,
+            handoff_digest,
             transcript_digest,
         }
     }
