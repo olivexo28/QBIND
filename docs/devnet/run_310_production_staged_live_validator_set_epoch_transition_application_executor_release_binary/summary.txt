@@ -1,0 +1,59 @@
+Run 310 — release-binary evidence for the Run 309 staged live validator-set / epoch-transition application executor boundary
+git_commit: 1f8687c4ad2f45b9cb55732a7173145128252087
+git_branch: copilot/run-310-task
+git_status: dirty
+
+build:
+  rustc_version:      rustc 1.96.1 (31fca3adb 2026-06-26)
+  cargo_version:      cargo 1.96.1 (356927216 2026-06-26)
+  host:               Linux runnervm5mmn9 6.17.0-1018-azure #18~24.04.1-Ubuntu SMP Thu May 28 16:39:11 UTC 2026 x86_64 x86_64 x86_64 GNU/Linux
+  qbind_node_sha256:  e66123805dcd148f8dda16587bc0df33d8238eaebecd22edaa8373b08d63f4c5
+  helper_310_sha256:  0573595e6b3828c3cc2ab6332f4b61aa0b50fa42e883d0c0288ed2e04edd4410
+
+helper_summary: /home/runner/work/QBIND/QBIND/docs/devnet/run_310_production_staged_live_validator_set_epoch_transition_application_executor_release_binary/helper_evidence/run_310/helper_summary.txt
+  run_310_production_staged_live_validator_set_epoch_transition_application_executor_release_binary_helper
+  boundary=crates/qbind-node/src/pqc_production_staged_live_validator_set_epoch_transition_application_executor.rs :: ProductionStagedLiveValidatorSetEpochTransitionApplicationExecutor (Run 309 source/test boundary)
+  mode=release-binary example linked against release-built production library symbols; source/test executor constructor only; DevNet/TestNet accept identities only; no production/MainNet enablement; no live validator-set mutation; no epoch transition
+  table accepted_compatible pass=35 fail=0
+  table rejection_fail_closed pass=65 fail=0
+  table mainnet_authority_policy pass=7 fail=0
+  table replay_recovery_idempotency pass=6 fail=0
+  table non_mutation pass=3 fail=0
+  table reachability_taxonomy pass=5 fail=0
+  total_pass=121
+  total_fail=0
+  verdict=PASS
+
+deterministic_digests: stable across two independent helper invocations
+  authorization_intent_digest=2e68313bc36f5567fe4508ac7935c7ea093660a718c0f34fddcfd10a1b1f2cfb
+  staged_application_id=gov-decision-id-1
+  intent_digest=68ef9f43a89dd1c0973c39329f81bd60d3f3c845fa008946a71fcf9b7d0bff3d
+  request_id=1b03103b1ed3263b721d91cad25c345e359d42faf10542755f936a80dbc092e0
+  transcript_digest=63f2ec149ef767733b6761ce452f54deebfec742a1900d00c92871f96123e03c
+  outcome_tag=accepted-source-test-staged-live-validator-set-epoch-transition-application
+
+release_binary_scenarios: S1_help=0 S2=1 S3=1 S4=1 S5_no_selector=2 S6_default_parse=1
+reachability: combined/source/helper/module/entry/taxonomy/boundary greps passed
+c4c5_taxonomy: passed (27 phrases; RocksDB + RemoteSigner + KMS/HSM + custody-attestation + on-chain-governance-proof-verifier + governance-execution-engine + validator-set-rotation-intent-boundary + validator-set-rotation-application-executor-boundary + live-validator-set-application-authorization-boundary + staged-live-validator-set-epoch-transition-application-executor-boundary rows Green-for-scope only; Red rows unchanged; Full C4 OPEN; C5 OPEN)
+denylist: passed (52 patterns)
+tests:
+  test:run_309_production_staged_live_validator_set_epoch_transition_application_executor_tests	rc=0
+  test:run_307_production_live_validator_set_application_authorization_tests	rc=0
+  test:run_305_production_validator_set_rotation_application_executor_tests	rc=0
+  test:run_303_production_validator_set_rotation_intent_tests	rc=0
+  test:run_301_production_governance_execution_engine_tests	rc=0
+  test:run_299_production_onchain_governance_proof_verifier_tests	rc=0
+  test:run_297_production_custody_attestation_verifier_tests	rc=0
+  test:run_295_production_kms_hsm_custody_backend_tests	rc=0
+  test:run_293_production_remote_signer_backend_tests	rc=0
+  test:run_291_production_durable_replay_rocksdb_tests	rc=0
+  test:run_186_onchain_governance_production_verifier_boundary_tests	rc=0
+  test:run_178_onchain_governance_proof_tests	rc=0
+  test:run_203_kms_hsm_backend_boundary_tests	rc=0
+  test:run_201_remote_signer_transport_boundary_tests	rc=0
+  test:run_194_remote_authority_signer_boundary_tests	rc=0
+  test:run_188_authority_custody_boundary_tests	rc=0
+  lib:pqc_authority	rc=0
+  lib:lib_all	rc=0
+
+verdict: PASS (release-binary evidence only; staged live validator-set epoch-transition application executor Green-for-scope; MainNet authority rotation/revocation Red; Full C4 OPEN; C5 OPEN)
