@@ -213,11 +213,12 @@ first, then `run_313`, `run_311`, `run_309`, `run_307`, `run_305`, `run_303`, `r
 
 * Secret scanning over the changed files reported **no secrets**.
 * CodeQL: the `codeql_checker` tool was invoked over the Run 316 change set (new Rust example helper + new harness
-  shell script + documentation/evidence artifacts). Its result is recorded verbatim in the final task response. The Run
-  316 change set adds no new production runtime code path: the only new compiled code is the release-example helper
-  (which mirrors the already-reviewed Run 315 test corpus and performs no production mutation) and the bash harness
-  (which only builds, greps, and runs existing binaries/tests). No CodeQL result is claimed here beyond what the tool
-  actually reported.
+  shell script + documentation/evidence artifacts) but **did not complete — the operation was cancelled due to
+  timeout** and returned no results. **No CodeQL coverage is claimed for Run 316** and the timed-out run must not be
+  interpreted as a clean CodeQL result. The Run 316 change set adds no new production runtime code path: the only new
+  compiled code is the release-example helper (which mirrors the already-reviewed Run 315 test corpus and performs no
+  production mutation) and the bash harness (which only builds, greps, and runs existing binaries/tests). Secret
+  scanning over all changed files reported no secrets.
 
 ## 18. C4/C5 matrix taxonomy status
 
