@@ -452,6 +452,34 @@ pub mod pqc_production_staged_live_validator_set_epoch_transition_application_ex
 // to Run 312. The guarded epoch-transition mutation executor C4/C5 matrix row
 // moves Red -> Yellow; Full C4 remains OPEN and C5 remains OPEN.
 pub mod pqc_production_guarded_epoch_transition_mutation_executor;
+// Run 313 — source/test-only epoch-transition runtime handoff / live-mutation
+// preflight boundary. Consumes a verified Run 311/312 guarded epoch-transition
+// mutation-execution decision (and its prepared, non-mutating guarded mutation
+// record) and translates it into a typed, deterministic, policy-gated,
+// non-mutating runtime handoff package for a future live executor, bound to the
+// full guarded-mutation-decision / staged-application-decision /
+// authorization-decision / application-decision / rotation / governance /
+// validator-set / custody / attestation / durable-replay evidence tuple, an
+// explicit epoch-transition target, current/proposed validator-set
+// epoch/version preconditions, a required replay window, and a runtime-handoff
+// nonce. Default policy is Disabled/fail-closed; only a verified DevNet/TestNet
+// guarded-mutation decision under the explicit source/test policy produces a
+// runtime handoff package (and can apply it only to a caller-provided in-memory
+// EpochTransitionRuntimeHandoffFixtureState). Guarded-decision-without-record /
+// staged-application-decision-alone / live-application-authorization-alone /
+// application-decision-alone / rotation-plan-alone / governance-proof-alone /
+// governance-execution-intent-alone / fixture / local-operator / peer-majority /
+// custody-only / RemoteSigner-only / custody-attestation-only /
+// arbitrary-validator-set-bytes sources are rejected as production authority.
+// MainNet is refused. The boundary never applies a live validator-set change to
+// production state, never transitions a consensus epoch, never calls
+// `BasicHotStuffEngine::transition_to_epoch`, never writes `meta:current_epoch`,
+// never injects a `PAYLOAD_KIND_RECONFIG` block, never calls Run 070, never
+// mutates `LivePqcTrustState`, adds no CLI flag and no default runtime wiring.
+// Source/test only — release-binary evidence is deferred to Run 314. The
+// epoch-transition runtime handoff C4/C5 matrix row moves Red -> Yellow; Full C4
+// remains OPEN and C5 remains OPEN.
+pub mod pqc_production_epoch_transition_runtime_handoff;
 // Run 188 — source/test-only KMS/HSM custody boundary for bundle-
 // signing authority and governance authority operations. Defines the
 // typed `AuthorityCustodyClass` (`FixtureLocalKey` / `LocalOperatorKey`
