@@ -203,9 +203,12 @@ first, then `run_311`, `run_309`, `run_307`, `run_305`, `run_303`, `run_301`, `r
 
 * Secret scanning over the changed files reported **no secrets**.
 * CodeQL: the `codeql_checker` tool was invoked over the Run 314 change set (new Rust example helper + new harness
-  shell script + documentation/evidence artifacts). Any alerts it surfaced were investigated and addressed; the exact
-  status is recorded in the PR/session summary. No clean-CodeQL-coverage claim is made beyond what the tool actually
-  reported.
+  shell script + documentation/evidence artifacts) but **did not complete — the operation was cancelled due to
+  timeout** and returned no results. **No CodeQL coverage is claimed for Run 314** and the timed-out run must not be
+  interpreted as a clean CodeQL result. The Run 314 change set adds no new production runtime code path: the only new
+  compiled code is the release-example helper (which mirrors the already-reviewed Run 313 test corpus and performs no
+  production mutation) and the bash harness (which only builds, greps, and runs existing binaries/tests). Secret
+  scanning over all changed files reported no secrets.
 
 ## 18. C4/C5 matrix taxonomy status
 
