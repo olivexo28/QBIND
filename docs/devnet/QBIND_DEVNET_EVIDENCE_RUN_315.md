@@ -218,9 +218,14 @@ No test target names required substitution.
 
 * **Secret scanning** — ran over all changed source/test/docs files; **no
   secrets detected**.
-* **CodeQL** — see final verdict; the CodeQL checker was invoked over the new
-  Rust source module and test file. Any alerts and their resolution status are
-  recorded with the final task response.
+* **CodeQL** — the CodeQL checker was invoked over the new Rust source module
+  and test file (changes classified non-trivial). The run **timed out** before
+  returning results, so **no CodeQL alerts were reported** and, per tool policy,
+  it was not re-run. No CodeQL coverage is therefore claimed for Run 315; the
+  changes are a self-contained, non-mutating source/test boundary that performs
+  no I/O, no `unsafe`, no deserialization of untrusted external input, and no
+  network/filesystem access, mutating only a caller-owned in-memory fixture
+  struct.
 
 ---
 
