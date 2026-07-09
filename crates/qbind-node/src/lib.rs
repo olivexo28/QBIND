@@ -480,6 +480,17 @@ pub mod pqc_production_guarded_epoch_transition_mutation_executor;
 // epoch-transition runtime handoff C4/C5 matrix row moves Red -> Yellow; Full C4
 // remains OPEN and C5 remains OPEN.
 pub mod pqc_production_epoch_transition_runtime_handoff;
+// Run 315 — source/test live epoch-transition execution preparation boundary.
+// Consumes a verified Run 313/314 runtime handoff / live-mutation preflight
+// decision+package and produces a typed, deterministic, policy-gated,
+// non-mutating live-execution-preparation artifact for a future live
+// production mutation executor. Default Disabled/fail-closed; MainNet refused;
+// production/MainNet execution-preparation kinds reachable but fail closed as
+// unavailable. No default runtime wiring and no CLI flag. Source/test only:
+// release-binary evidence is deferred to Run 316. The live epoch-transition
+// execution preparation C4/C5 matrix row moves Red -> Yellow; Full C4 remains
+// OPEN and C5 remains OPEN.
+pub mod pqc_production_live_epoch_transition_execution_preparation;
 // Run 188 — source/test-only KMS/HSM custody boundary for bundle-
 // signing authority and governance authority operations. Defines the
 // typed `AuthorityCustodyClass` (`FixtureLocalKey` / `LocalOperatorKey`
