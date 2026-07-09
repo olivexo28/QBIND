@@ -1955,7 +1955,7 @@ impl ProductionGuardedEpochTransitionMutationExecutor {
     /// application request into a typed, deterministic, non-mutating decision.
     /// This never mutates any live validator set, consensus epoch, or trust
     /// state; on accept it produces only a prepared staged application record.
-    pub fn evaluate_staged_live_validator_set_epoch_transition_application<
+    pub fn evaluate_guarded_epoch_transition_mutation<
         R: GuardedEpochTransitionMutationReplaySet + ?Sized,
     >(
         &self,
@@ -2008,7 +2008,7 @@ impl ProductionGuardedEpochTransitionMutationExecutor {
 
     /// Run 311 — idempotency / recovery over a prepared-authorization window.
     /// Non-mutating; writes no durable state.
-    pub fn recover_staged_live_validator_set_epoch_transition_application_window(
+    pub fn recover_guarded_epoch_transition_mutation_window(
         &self,
         prior: Option<&ProductionGuardedEpochTransitionMutationRecord>,
         current: &ProductionGuardedEpochTransitionMutationRecord,
