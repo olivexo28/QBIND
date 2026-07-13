@@ -1,0 +1,67 @@
+Run 316 — release-binary evidence for the Run 315 live epoch-transition execution preparation boundary
+git_commit: 29f1e79001fa9a2161d11becbf648096eb55c323
+git_branch: copilot/run-316-task
+git_status: dirty
+
+build:
+  rustc_version:      rustc 1.96.1 (31fca3adb 2026-06-26)
+  cargo_version:      cargo 1.96.1 (356927216 2026-06-26)
+  host:               Linux runnervm5mmn9 6.17.0-1018-azure #18~24.04.1-Ubuntu SMP Thu May 28 16:39:11 UTC 2026 x86_64 x86_64 x86_64 GNU/Linux
+  qbind_node_sha256:  ad7e2d896ecc148f811ecc166480efde8d46394ab281477d53c9cd70bcbaf2d4
+  helper_316_sha256:  0e618a5ae998fc38d7fbd42547c24b0bf3d2404e1d0a4268be7d4f63a2845b3b
+
+helper_summary: /home/runner/work/QBIND/QBIND/docs/devnet/run_316_production_live_epoch_transition_execution_preparation_release_binary/helper_evidence/run_316/helper_summary.txt
+  run_316_production_live_epoch_transition_execution_preparation_release_binary_helper
+  boundary=crates/qbind-node/src/pqc_production_live_epoch_transition_execution_preparation.rs :: ProductionLiveEpochTransitionExecutionPreparationExecutor (Run 315 source/test boundary)
+  mode=release-binary example linked against release-built production library symbols; source/test executor constructor only; DevNet/TestNet accept identities only; no production/MainNet enablement; no live validator-set mutation; no epoch transition
+  table accepted_compatible pass=26 fail=0
+  table rejection_fail_closed pass=91 fail=0
+  table mainnet_authority_policy pass=5 fail=0
+  table replay_recovery_idempotency pass=6 fail=0
+  table fixture_state pass=2 fail=0
+  table non_mutation pass=3 fail=0
+  table reachability_taxonomy pass=6 fail=0
+  total_pass=139
+  total_fail=0
+  verdict=PASS
+
+deterministic_digests: stable across two independent helper invocations
+  runtime_handoff_intent_digest=85a6ffab67e671fe140fed0f9ff3ca51e1795ab3fd63cc5632bf14da7bb6ea0b
+  preparation_id=d031cf013eec578e161633daf428465281fee25b808c8894ddc404ccc08b2f07
+  named_preparation_id=d031cf013eec578e161633daf428465281fee25b808c8894ddc404ccc08b2f07
+  request_id=4d3a5ea9443ec90cdbb6c995f21638d97924a78e8cd92245ffb86051abcf423f
+  named_request_id=4d3a5ea9443ec90cdbb6c995f21638d97924a78e8cd92245ffb86051abcf423f
+  preparation_digest=ac3a8e16d67b9c5a144d58c0bc804ac5ad1f6fa8b8cefb8e355f6e3093fd6482
+  content_digest=ac3a8e16d67b9c5a144d58c0bc804ac5ad1f6fa8b8cefb8e355f6e3093fd6482
+  transcript_digest=a53f4a3ca8430bef50fc837a3db278b981ac73b7ec71bb0b74542c4470971d0d
+  named_transcript_digest=a53f4a3ca8430bef50fc837a3db278b981ac73b7ec71bb0b74542c4470971d0d
+  outcome_tag=accepted-source-test-live-epoch-transition-execution-preparation
+
+release_binary_scenarios: S1_help=0 S2=1 S3=1 S4=1 S5_no_selector=2 S6_default_parse=1
+reachability: combined/source/helper/module/entry/taxonomy/boundary greps passed
+c4c5_taxonomy: passed (33 phrases; RocksDB + RemoteSigner + KMS/HSM + custody-attestation + on-chain-governance-proof-verifier + governance-execution-engine + validator-set-rotation-intent-boundary + validator-set-rotation-application-executor-boundary + live-validator-set-application-authorization-boundary + staged-live-validator-set-epoch-transition-application-executor-boundary + guarded-epoch-transition-mutation-executor-boundary + epoch-transition-runtime-handoff-boundary + live-epoch-transition-execution-preparation-boundary rows Green-for-scope only; Red rows unchanged; Full C4 OPEN; C5 OPEN)
+denylist: passed (71 patterns)
+tests:
+  test:run_315_production_live_epoch_transition_execution_preparation_tests	rc=0
+  test:run_313_production_epoch_transition_runtime_handoff_tests	rc=0
+  test:run_311_production_guarded_epoch_transition_mutation_executor_tests	rc=0
+  test:run_309_production_staged_live_validator_set_epoch_transition_application_executor_tests	rc=0
+  test:run_307_production_live_validator_set_application_authorization_tests	rc=0
+  test:run_305_production_validator_set_rotation_application_executor_tests	rc=0
+  test:run_303_production_validator_set_rotation_intent_tests	rc=0
+  test:run_301_production_governance_execution_engine_tests	rc=0
+  test:run_299_production_onchain_governance_proof_verifier_tests	rc=0
+  test:run_297_production_custody_attestation_verifier_tests	rc=0
+  test:run_295_production_kms_hsm_custody_backend_tests	rc=0
+  test:run_293_production_remote_signer_backend_tests	rc=0
+  test:run_291_production_durable_replay_rocksdb_tests	rc=0
+  test:run_186_onchain_governance_production_verifier_boundary_tests	rc=0
+  test:run_178_onchain_governance_proof_tests	rc=0
+  test:run_203_kms_hsm_backend_boundary_tests	rc=0
+  test:run_201_remote_signer_transport_boundary_tests	rc=0
+  test:run_194_remote_authority_signer_boundary_tests	rc=0
+  test:run_188_authority_custody_boundary_tests	rc=0
+  lib:pqc_authority	rc=0
+  lib:lib_all	rc=0
+
+verdict: PASS (release-binary evidence only; live epoch-transition execution preparation Green-for-scope; MainNet authority rotation/revocation Red; Full C4 OPEN; C5 OPEN)
