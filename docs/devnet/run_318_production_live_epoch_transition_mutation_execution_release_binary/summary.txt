@@ -1,0 +1,118 @@
+Run 318 — release-binary evidence for the Run 317 live epoch-transition mutation execution boundary
+git_commit: 92e391503d10d89f480245a32fe1fae8ce1ef5d7
+git_branch: copilot/run-318-task
+git_status: dirty
+
+build:
+  rustc_version:      rustc 1.96.1 (31fca3adb 2026-06-26)
+  cargo_version:      cargo 1.96.1 (356927216 2026-06-26)
+  host:               Linux runnervm5mmn9 6.17.0-1018-azure #18~24.04.1-Ubuntu SMP Thu May 28 16:39:11 UTC 2026 x86_64 x86_64 x86_64 GNU/Linux
+  qbind_node_sha256:  180d234b4f42b12cdd0b1dcd514e9595c103d5ba4e3e860a0917c601d801f78e
+  helper_318_sha256:  e0d042f2d6c9e32c071f7ca421ddfb72d15815c8957577d077c0c86f1c5ce889
+
+helper_summary: /home/runner/work/QBIND/QBIND/docs/devnet/run_318_production_live_epoch_transition_mutation_execution_release_binary/helper_evidence/run_318/helper_summary.txt
+  run_318_production_live_epoch_transition_mutation_execution_release_binary_helper
+  boundary=crates/qbind-node/src/pqc_production_live_epoch_transition_mutation_execution.rs :: ProductionLiveEpochTransitionMutationExecutionExecutor (Run 317 source/test boundary)
+  mode=release-binary example linked against release-built production library symbols; source/test executor constructor only; DevNet/TestNet accept identities only; no production/MainNet enablement; no live validator-set mutation; no epoch transition
+  table accepted_compatible pass=28 fail=0
+  table rejection_fail_closed pass=97 fail=0
+  table mainnet_authority_policy pass=5 fail=0
+  table replay_recovery_idempotency pass=6 fail=0
+  table fixture_state pass=2 fail=0
+  table non_mutation pass=4 fail=0
+  table reachability_taxonomy pass=7 fail=0
+  total_pass=149
+  total_fail=0
+  verdict=PASS
+
+deterministic_digests: stable across two independent helper invocations
+  execution_preparation_intent_digest=ac3a8e16d67b9c5a144d58c0bc804ac5ad1f6fa8b8cefb8e355f6e3093fd6482
+  scenario=Add
+  execution_id=3b26aae8ba57310d82f9c62578e9d9e5e8d7854cf6014985c06a7a5784c66542
+  request_id=c0305c867c9cf359934cb615f8545b21e28edaa0dbecfe4ad6273e22bae8549b
+  execution_digest=bce6a2c3db88032236e829651790b4e0bdcd3dd512f3cb0a144e8ac4a1803add
+  content_digest=bce6a2c3db88032236e829651790b4e0bdcd3dd512f3cb0a144e8ac4a1803add
+  transcript_digest=2e935a50be34896e78aaacc8a01b0cf2d0600f0126d1cb3503c1bc85f1c2b3f4
+  scenario=Remove
+  execution_id=35fef8206fc921859f0aa05309d408af812da94b50f4f6b1cfa9475e8892713f
+  request_id=f3220d1e9ab2e70cf2dda9e73f261ad6cc6726c4c25a961e7bafdc85b65fb874
+  execution_digest=7259ad440830387f0502c8c422d2855ce438b72d6cc13f99d26117e92f30d3a8
+  content_digest=7259ad440830387f0502c8c422d2855ce438b72d6cc13f99d26117e92f30d3a8
+  transcript_digest=0dea340f6223a1dfa488f0e3d475fbb70dc541174f5277026cbb7b8470da5620
+  scenario=Update
+  execution_id=cbebf020d506316403f8aacb7881c4e3c8ef47dda9c0a7d065441ee9c95c58e3
+  request_id=7e61c7768f8b6111f593d60609fe166e3e197ee810595e5037bd3ec37b2539c8
+  execution_digest=feeb1dc413de10f2ada5f0fa5204235ba3ea1093226ef03d3b02a063fd4e3d2d
+  content_digest=feeb1dc413de10f2ada5f0fa5204235ba3ea1093226ef03d3b02a063fd4e3d2d
+  transcript_digest=e7c7d29269d2275a992dfee520a3309c8282f8fe8e3ecd329b63245fd6fbbc6a
+  scenario=NoOp
+  execution_id=5ace9b1cb7709a46da663fb9ea671a1693d1e99073c41efb0c53c297d2ec0cc0
+  request_id=7df92b4a64ee3c11a6c38c455acbc87a3f81331ea3e58b0a03b0486b2d607015
+  execution_digest=1a8bda7aa45a9c0ccb9a4096caaf52892c5a6f7d23614c29a0bd9eed7142948f
+  content_digest=1a8bda7aa45a9c0ccb9a4096caaf52892c5a6f7d23614c29a0bd9eed7142948f
+  transcript_digest=3cb251572c0b88c7bc1c783bc336a576c82d0d43fafaef669356d0de16b3df23
+  scenario=Identity
+  execution_id=edfb0e0ac91444e5e932949c64e92546333c5567a2c9443b6dfe8d8da6c96577
+  request_id=cd624f31f08ee65ad9782d9dc36fe43e664487e246099d4fa973bccff64098f8
+  execution_digest=e9e81a60ffb25e47b99c1c2ccf31513e81e2c051099a51fd39177db00550dd1f
+  content_digest=e9e81a60ffb25e47b99c1c2ccf31513e81e2c051099a51fd39177db00550dd1f
+  transcript_digest=285d358306b0329e284b8997ce07d87f51356b432c0ccf1c74b1d9e7b94c9b57
+  scenario=Retire
+  execution_id=8ee654e9d901e7ace891c8b1ff6a4de15a5d887d728003bb77022bf67fd7a840
+  request_id=ab2af0e86ba431533692ab206111b3a4ff2712c28a333c032b96652a9327fb58
+  execution_digest=95d3dc40996c51c4240bd6e502a3c06c221a6568ee9c233bf3d1dd4007a94228
+  content_digest=95d3dc40996c51c4240bd6e502a3c06c221a6568ee9c233bf3d1dd4007a94228
+  transcript_digest=21723b6ccb949806a5b25c558f18019e9c67aef30aba43571cc1f5a2e5260311
+  scenario=Emergency
+  execution_id=1760dd0b241a5b06e469f32e6682f0108e0b4edda6fd9f05bf817f2e49bdd1ce
+  request_id=37ff21167ab599a466b610d16ac8af032810edfd4e246e045c7010b44db72145
+  execution_digest=dc7c2b3f533e6e0f9ad8d00fe24aab28f876fbfbd9115e2d8b29482f400e42d6
+  content_digest=dc7c2b3f533e6e0f9ad8d00fe24aab28f876fbfbd9115e2d8b29482f400e42d6
+  transcript_digest=d931885208de501c8b3197b99aa1427a8d1abe46d8d9a21f17c29e887ee317fc
+  scenario=AuthSync
+  execution_id=12ce427731b0edae96a64833004d45dad847211c73e996343be7823c2d5dc28d
+  request_id=755620cf163e32c5843964f78489291eb07de0c8b0bc21ea3ea7442beb81123b
+  execution_digest=bb63fb7d606455624a11153c48b7152d62b6bf51ad0f0d389d2a864ee0e6ac1d
+  content_digest=bb63fb7d606455624a11153c48b7152d62b6bf51ad0f0d389d2a864ee0e6ac1d
+  transcript_digest=680cc5eed5408fbe4b649cb99a1f82fd97d08d82aa1adab45e91e05429ec9e7d
+  scenario=Bulk
+  execution_id=bc031a4c840443cc99331ecd9a48bad6ddd80905befcc3424cf0d96729813ea6
+  request_id=257fbab1d015e4304c5904d3608329f68b7e7e8a58fe89d25f820e9383982778
+  execution_digest=bd170e7f11ece5fa72e636b07e10f602d9cb103611720d0049e4dc02547de29f
+  content_digest=bd170e7f11ece5fa72e636b07e10f602d9cb103611720d0049e4dc02547de29f
+  transcript_digest=7833c53555442a6e2d1c3c0ab4e192b0bc18cd226f9df7f288f2790cf61f4034
+  named_execution_id=3b26aae8ba57310d82f9c62578e9d9e5e8d7854cf6014985c06a7a5784c66542
+  named_request_id=c0305c867c9cf359934cb615f8545b21e28edaa0dbecfe4ad6273e22bae8549b
+  named_content_digest=bce6a2c3db88032236e829651790b4e0bdcd3dd512f3cb0a144e8ac4a1803add
+  named_transcript_digest=2e935a50be34896e78aaacc8a01b0cf2d0600f0126d1cb3503c1bc85f1c2b3f4
+  outcome_tag=accepted-source-test-live-epoch-transition-mutation-execution
+
+release_binary_scenarios: S1_help=0 S2=1 S3=1 S4=1 S5_no_selector=2 S6_default_parse=1
+reachability: combined/source/helper/module/entry/taxonomy/boundary greps passed
+c4c5_taxonomy: passed (35 phrases; RocksDB + RemoteSigner + KMS/HSM + custody-attestation + on-chain-governance-proof-verifier + governance-execution-engine + validator-set-rotation-intent-boundary + validator-set-rotation-application-executor-boundary + live-validator-set-application-authorization-boundary + staged-live-validator-set-epoch-transition-application-executor-boundary + guarded-epoch-transition-mutation-executor-boundary + epoch-transition-runtime-handoff-boundary + live-epoch-transition-execution-preparation-boundary + live-epoch-transition-mutation-execution-boundary rows Green-for-scope only; Red rows unchanged; Full C4 OPEN; C5 OPEN)
+denylist: passed (78 patterns)
+tests:
+  test:run_317_production_live_epoch_transition_mutation_execution_tests	rc=0
+  test:run_315_production_live_epoch_transition_execution_preparation_tests	rc=0
+  test:run_313_production_epoch_transition_runtime_handoff_tests	rc=0
+  test:run_311_production_guarded_epoch_transition_mutation_executor_tests	rc=0
+  test:run_309_production_staged_live_validator_set_epoch_transition_application_executor_tests	rc=0
+  test:run_307_production_live_validator_set_application_authorization_tests	rc=0
+  test:run_305_production_validator_set_rotation_application_executor_tests	rc=0
+  test:run_303_production_validator_set_rotation_intent_tests	rc=0
+  test:run_301_production_governance_execution_engine_tests	rc=0
+  test:run_299_production_onchain_governance_proof_verifier_tests	rc=0
+  test:run_297_production_custody_attestation_verifier_tests	rc=0
+  test:run_295_production_kms_hsm_custody_backend_tests	rc=0
+  test:run_293_production_remote_signer_backend_tests	rc=0
+  test:run_291_production_durable_replay_rocksdb_tests	rc=0
+  test:run_186_onchain_governance_production_verifier_boundary_tests	rc=0
+  test:run_178_onchain_governance_proof_tests	rc=0
+  test:run_203_kms_hsm_backend_boundary_tests	rc=0
+  test:run_201_remote_signer_transport_boundary_tests	rc=0
+  test:run_194_remote_authority_signer_boundary_tests	rc=0
+  test:run_188_authority_custody_boundary_tests	rc=0
+  lib:pqc_authority	rc=0
+  lib:lib_all	rc=0
+
+verdict: PASS (release-binary evidence only; live epoch-transition mutation execution Green-for-scope; MainNet authority rotation/revocation Red; Full C4 OPEN; C5 OPEN)
