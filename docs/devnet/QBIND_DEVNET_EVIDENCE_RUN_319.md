@@ -244,11 +244,14 @@ No test target names required substitution.
 * **Secret scanning** — ran over all changed source/test/docs files; **no
   secrets detected**.
 * **CodeQL** — the CodeQL checker was invoked over the new Rust source module
-  and test file (changes classified non-trivial). CodeQL status is recorded
-  verbatim in the final task response. The changes are a self-contained,
-  non-mutating source/test boundary that performs no I/O, no `unsafe`, no
-  deserialization of untrusted external input, and no network/filesystem access,
-  mutating only a caller-owned in-memory fixture struct.
+  and test file (changes classified non-trivial). The analysis was **skipped by
+  the tool** because the CodeQL database size exceeded the checker's limit
+  (reported: "Analysis was skipped because the database size is too large"), so
+  **0 alerts were returned and no CodeQL coverage is claimed for Run 319**. The
+  changes are a self-contained, non-mutating source/test boundary that performs
+  no I/O, no `unsafe`, no deserialization of untrusted external input, and no
+  network/filesystem access, mutating only a caller-owned in-memory fixture
+  struct.
 
 ---
 
