@@ -241,17 +241,17 @@ RemoteSigner fallback, and no default runtime wiring.
 
 * `cargo build -p qbind-node --lib` — pass.
 * `cargo test -p qbind-node --test run_323_production_live_epoch_transition_commit_receipt_tests` — 175 passed.
-* `cargo test -p qbind-node --test run_321_production_live_epoch_transition_commit_execution_tests` — 149 passed.
+* `cargo test -p qbind-node --test run_321_production_live_epoch_transition_commit_execution_tests` — 167 passed.
 * `cargo test -p qbind-node --test run_319_production_live_epoch_transition_commit_authorization_tests` — 158 passed.
-* `cargo test -p qbind-node --test run_317_production_live_epoch_transition_mutation_execution_tests` — 167 passed.
-* `cargo test -p qbind-node --test run_315_production_live_epoch_transition_execution_preparation_tests` — 117 passed.
-* `cargo test -p qbind-node --test run_313_production_epoch_transition_runtime_handoff_tests` — 131 passed.
-* `cargo test -p qbind-node --test run_311_production_guarded_epoch_transition_mutation_executor_tests` — 126 passed.
-* `cargo test -p qbind-node --test run_309_production_staged_live_validator_set_epoch_transition_application_executor_tests` — 135 passed.
-* `cargo test -p qbind-node --test run_307_production_live_validator_set_application_authorization_tests` — 121 passed.
-* `cargo test -p qbind-node --test run_305_production_validator_set_rotation_application_executor_tests` — 124 passed.
-* `cargo test -p qbind-node --test run_303_production_validator_set_rotation_intent_tests` — 151 passed.
-* `cargo test -p qbind-node --test run_301_production_governance_execution_engine_tests` — 139 passed.
+* `cargo test -p qbind-node --test run_317_production_live_epoch_transition_mutation_execution_tests` — 149 passed.
+* `cargo test -p qbind-node --test run_315_production_live_epoch_transition_execution_preparation_tests` — 139 passed.
+* `cargo test -p qbind-node --test run_313_production_epoch_transition_runtime_handoff_tests` — 151 passed.
+* `cargo test -p qbind-node --test run_311_production_guarded_epoch_transition_mutation_executor_tests` — 124 passed.
+* `cargo test -p qbind-node --test run_309_production_staged_live_validator_set_epoch_transition_application_executor_tests` — 121 passed.
+* `cargo test -p qbind-node --test run_307_production_live_validator_set_application_authorization_tests` — 135 passed.
+* `cargo test -p qbind-node --test run_305_production_validator_set_rotation_application_executor_tests` — 126 passed.
+* `cargo test -p qbind-node --test run_303_production_validator_set_rotation_intent_tests` — 131 passed.
+* `cargo test -p qbind-node --test run_301_production_governance_execution_engine_tests` — 117 passed.
 * `cargo test -p qbind-node --lib` — 1377 passed.
 
 ---
@@ -261,13 +261,14 @@ RemoteSigner fallback, and no default runtime wiring.
 * **Secret scanning** was run over the changed files (module, tests, docs, and
   `lib.rs`); no secrets, credentials, tokens, or API keys were introduced. The
   module and tests use only synthetic fixture strings.
-* **CodeQL** — see the repository CodeQL run status recorded with this change.
-  If CodeQL was skipped, timed out, unavailable, classified trivial, or the
-  database was too large, that exact reason is recorded here and **no CodeQL
-  coverage is claimed** for Run 323. The Run 323 change is additive
-  source/test/docs only (a new pure-logic boundary module with no I/O, no
-  network, no `unsafe`, and no new dependencies), so its security surface is
-  limited to deterministic in-memory hashing and comparisons.
+* **CodeQL** — the CodeQL checker was invoked over the Run 323 change but
+  **did not complete** (it was cancelled due to a timeout on this large
+  workspace). Accordingly **no CodeQL coverage is claimed** for Run 323. The
+  Run 323 change is additive source/test/docs only (a new pure-logic boundary
+  module with no I/O, no network, no `unsafe`, and no new dependencies), so its
+  security surface is limited to deterministic in-memory hashing and
+  comparisons; a follow-up CodeQL run may be captured with the Run 324
+  release-binary evidence.
 
 ---
 
