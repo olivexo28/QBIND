@@ -1,0 +1,261 @@
+Run 322 — Release-binary evidence for Run 321 live epoch-transition commit execution / finalization boundary
+
+Continue QBIND after accepted Run 321.
+
+Current state:
+Run 321 is accepted as PASS / source-test positive and fully closed for Run 321 scope. It added the live epoch-transition commit execution / finalization boundary that consumes a verified Run 319/320 live epoch-transition commit-authorization accept decision and produces only a typed, deterministic, policy-gated, non-mutating commit-execution/finalization artifact.
+
+Run 321 is source/test only. It is not release-binary evidence. The live epoch-transition commit execution / finalization row is Yellow. Full C4 remains OPEN. C5 remains OPEN.
+
+Primary objective:
+Produce release-binary evidence for the Run 321 live epoch-transition commit execution / finalization boundary.
+
+Scope:
+Release-binary evidence only. Do not add a new source/test feature boundary. Do not wire this boundary into normal node operation. Do not enable MainNet. Do not perform a live production validator-set mutation, production epoch transition, production commit, or production finalization.
+
+Required implementation:
+
+1. Add a release helper under:
+
+`crates/qbind-node/examples/run_322_production_live_epoch_transition_commit_execution_release_binary_helper.rs`
+
+2. Add a release harness under:
+
+`scripts/devnet/run_322_production_live_epoch_transition_commit_execution_release_binary.sh`
+
+3. Add a tracked evidence archive:
+
+`docs/devnet/run_322_production_live_epoch_transition_commit_execution_release_binary/README.md`
+
+`docs/devnet/run_322_production_live_epoch_transition_commit_execution_release_binary/summary.txt`
+
+`docs/devnet/run_322_production_live_epoch_transition_commit_execution_release_binary/.gitignore`
+
+4. Add canonical evidence:
+
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_322.md`
+
+5. Update narrowly:
+
+`docs/protocol/QBIND_C4_C5_CLOSURE_CRITERIA.md`
+
+`docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md`
+
+`docs/protocol/QBIND_GOVERNANCE_EXECUTION_RUNTIME_SURFACE_AUDIT.md`
+
+`docs/protocol/QBIND_PEER_DRIVEN_TRUST_BUNDLE_APPLY_SAFETY.md`
+
+`docs/ops/QBIND_PQC_TRUST_LIFECYCLE_RUNBOOK.md`
+
+`docs/whitepaper/contradiction.md`
+
+Required C4/C5 doc hygiene:
+Refresh the C4/C5 “Current status” paragraph and the C4 table narrative so they explicitly say “as of Run 322” and include:
+
+* Run 303/304 validator-set rotation / authority-set synchronization intent boundary — Green-for-scope.
+* Run 305/306 validator-set rotation application / epoch-transition executor boundary — Green-for-scope.
+* Run 307/308 live validator-set application / epoch-transition authorization boundary — Green-for-scope.
+* Run 309/310 staged live validator-set / epoch-transition application executor boundary — Green-for-scope.
+* Run 311/312 guarded epoch-transition mutation executor boundary — Green-for-scope.
+* Run 313/314 epoch-transition runtime handoff / live-mutation preflight boundary — Green-for-scope.
+* Run 315/316 live epoch-transition execution preparation boundary — Green-for-scope.
+* Run 317/318 live epoch-transition mutation execution boundary — Green-for-scope.
+* Run 319/320 live epoch-transition commit authorization boundary — Green-for-scope.
+* Run 321 live epoch-transition commit execution / finalization boundary — Yellow before Run 322, and Green-for-scope only if Run 322 passes.
+* Full C4 OPEN and C5 OPEN.
+* No MainNet authority rotation/revocation.
+* No live production validator-set mutation, production epoch transition, production commit, or production finalization.
+
+Release evidence must prove:
+
+1. Real `target/release/qbind-node` built and SHA-256 captured.
+2. Release helper built and SHA-256 captured.
+3. Helper links and exercises the real Run 321 boundary symbols in release mode.
+4. Accepted DevNet/TestNet source-test path consumes a verified Run 319/320 live epoch-transition commit-authorization accept decision with `is_accept()` and `Some(commit_authorization_artifact)`.
+5. Accepted path emits only a typed non-mutating live epoch-transition commit-execution/finalization artifact.
+6. Any positive fixture-state application is explicitly caller-owned, in-memory, source/test-only, and not production runtime state.
+7. Deterministic `commit_execution_id`, `request_id`, `commit_execution_digest`, `content_digest`, and `transcript_digest` are stable across two independent helper invocations.
+8. Missing commit-authorization decision fails closed.
+9. Unverified commit-authorization decision fails closed.
+10. Accepted commit-authorization decision without artifact fails closed.
+11. Commit-authorization-decision-alone fails closed.
+12. Mutation-execution-decision-alone fails closed.
+13. Execution-preparation-decision-alone fails closed.
+14. Runtime-handoff-decision-alone fails closed.
+15. Guarded-mutation-decision-alone fails closed.
+16. Staged-application-decision-alone fails closed.
+17. Live-authorization-alone fails closed.
+18. Application-decision-alone fails closed.
+19. Rotation-plan-alone fails closed.
+20. Governance-execution-intent-alone fails closed.
+21. Governance-proof-alone fails closed.
+22. Fixture-only authority material fails closed.
+23. Local-operator assertion fails closed.
+24. Peer-majority assertion fails closed.
+25. Custody-only evidence fails closed.
+26. RemoteSigner-only evidence fails closed.
+27. Custody-attestation-only evidence fails closed.
+28. Arbitrary validator-set bytes fail closed.
+29. Wrong commit-authorization decision id fails closed.
+30. Wrong commit-authorization request id fails closed.
+31. Wrong commit-authorization artifact/content digest fails closed.
+32. Wrong commit-authorization transcript digest fails closed.
+33. Commit-authorization decision integrity mismatch fails closed.
+34. Wrong mutation-execution id/request/artifact/content/transcript digests fail closed.
+35. Wrong execution-preparation id/request/artifact/content/transcript digests fail closed.
+36. Wrong runtime handoff id/request/package/content/transcript digests fail closed.
+37. Wrong guarded mutation id/request/record/intent/transcript digests fail closed.
+38. Wrong staged application id/request/record/intent/transcript digests fail closed.
+39. Wrong live-authorization id/request/intent/transcript digests fail closed.
+40. Wrong application decision id/request/intent/transcript digests fail closed.
+41. Wrong environment / chain / genesis / authority root fails closed.
+42. Wrong governance domain / epoch / proposal / governance execution ids / governance execution digests fails closed.
+43. Wrong rotation ids / rotation digests / lifecycle action / rotation action fails closed.
+44. Wrong current/proposed/delta validator-set digests fail closed.
+45. Wrong current-validator-set epoch/version preconditions fail closed.
+46. Wrong resulting validator-set epoch/version postconditions fail closed.
+47. Wrong epoch-transition target fails closed.
+48. Wrong application nonce fails closed.
+49. Wrong live-application nonce fails closed.
+50. Wrong staged-application nonce fails closed.
+51. Wrong guarded-mutation nonce fails closed.
+52. Wrong runtime-handoff nonce fails closed.
+53. Wrong execution-preparation nonce fails closed.
+54. Wrong mutation-execution nonce fails closed.
+55. Wrong commit-authorization nonce fails closed.
+56. Wrong commit-execution nonce fails closed where represented.
+57. Custody / attestation / durable-replay binding mismatch fails closed where represented.
+58. Replay / idempotency / stale governance epoch / stale authority sequence / stale validator-set epoch / stale validator-set version all fail closed.
+59. MainNet remains refused.
+60. Production/MainNet policies remain reachable but fail closed as unavailable.
+61. Default policy remains Disabled and fails before artifact construction.
+
+Production binary scenarios must prove:
+
+1. `qbind-node --help` exposes no new public commit-execution or finalization CLI flag.
+2. DevNet default binary surface stays silent and disabled.
+3. TestNet default binary surface stays silent and disabled.
+4. MainNet default binary surface stays silent and disabled / refused as appropriate.
+5. An invented commit-execution/finalization flag is rejected by clap as an unexpected argument.
+6. Existing default genesis / environment surfaces fail closed exactly as before.
+
+Non-mutation proof:
+The release helper and harness must prove no live production mutation occurs:
+
+* no live production validator-set change;
+* no production consensus state mutation;
+* no production epoch-counter mutation;
+* no production commit;
+* no production finalization;
+* no `BasicHotStuffEngine::transition_to_epoch` call on production runtime state;
+* no `meta:current_epoch` write;
+* no `PAYLOAD_KIND_RECONFIG` injection;
+* no Run 070 call;
+* no `LivePqcTrustState` mutation;
+* no trust-bundle sequence write;
+* no authority-marker write;
+* no session eviction;
+* no settlement;
+* no publication;
+* no audit-finalization;
+* no external publication;
+* no MainNet enablement.
+
+The helper may exercise the caller-owned in-memory `LiveEpochTransitionCommitExecutionFixtureState` only as explicit source/test evidence. It must clearly distinguish this from production runtime state.
+
+Required tests/regressions:
+Run and record:
+
+* `cargo build -p qbind-node --release`
+* `cargo build -p qbind-node --example run_322_production_live_epoch_transition_commit_execution_release_binary_helper --release`
+* Run the Run 322 harness.
+* `cargo test -p qbind-node --test run_321_production_live_epoch_transition_commit_execution_tests`
+* `cargo test -p qbind-node --test run_319_production_live_epoch_transition_commit_authorization_tests`
+* `cargo test -p qbind-node --test run_317_production_live_epoch_transition_mutation_execution_tests`
+* `cargo test -p qbind-node --test run_315_production_live_epoch_transition_execution_preparation_tests`
+* `cargo test -p qbind-node --test run_313_production_epoch_transition_runtime_handoff_tests`
+* `cargo test -p qbind-node --test run_311_production_guarded_epoch_transition_mutation_executor_tests`
+* `cargo test -p qbind-node --test run_309_production_staged_live_validator_set_epoch_transition_application_executor_tests`
+* `cargo test -p qbind-node --test run_307_production_live_validator_set_application_authorization_tests`
+* `cargo test -p qbind-node --test run_305_production_validator_set_rotation_application_executor_tests`
+* `cargo test -p qbind-node --test run_303_production_validator_set_rotation_intent_tests`
+* `cargo test -p qbind-node --test run_301_production_governance_execution_engine_tests`
+* `cargo test -p qbind-node --test run_299_production_onchain_governance_proof_verifier_tests`
+* `cargo test -p qbind-node --test run_297_production_custody_attestation_verifier_tests`
+* `cargo test -p qbind-node --test run_295_production_kms_hsm_custody_backend_tests`
+* `cargo test -p qbind-node --test run_293_production_remote_signer_backend_tests`
+* `cargo test -p qbind-node --test run_291_production_durable_replay_rocksdb_tests`
+* `cargo test -p qbind-node --test run_186_onchain_governance_production_verifier_boundary_tests`
+* `cargo test -p qbind-node --test run_178_onchain_governance_proof_tests`
+* `cargo test -p qbind-node --test run_203_kms_hsm_backend_boundary_tests`
+* `cargo test -p qbind-node --test run_201_remote_signer_transport_boundary_tests`
+* `cargo test -p qbind-node --test run_194_remote_authority_signer_boundary_tests`
+* `cargo test -p qbind-node --test run_188_authority_custody_boundary_tests`
+* `cargo test -p qbind-node --lib pqc_authority`
+* `cargo test -p qbind-node --lib`
+
+If a test target name differs, use the real target name and record the substitution.
+
+Security:
+Run secret scanning over all changed files.
+Run CodeQL if available. If CodeQL is skipped, times out, is unavailable, classified trivial, or the database is too large, record the exact reason directly in `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_322.md` and explicitly state that no CodeQL coverage is claimed. Do not describe a skipped or timed-out CodeQL run as clean coverage.
+
+Provenance hygiene:
+If a `summary.txt` file is generated, generate it after the final commit or explicitly list any dirty/untracked files. Do not leave unexplained `git_status: dirty`.
+
+C4/C5 matrix:
+If Run 322 passes, move the live epoch-transition commit execution / finalization row Yellow → Green-for-scope only.
+
+Do not claim:
+
+* live production validator-set mutation;
+* production epoch transition;
+* production commit;
+* production finalization;
+* MainNet authority rotation/revocation;
+* default runtime wiring;
+* public CLI enablement;
+* C4 closure;
+* C5 closure.
+
+Expected verdict:
+PASS / release-binary evidence positive if the release helper and harness prove the Run 321 boundary in release mode, all fail-closed and non-mutation properties hold, production binary surfaces remain disabled/silent, docs are updated, security scans are recorded honestly, and Full C4 / C5 remain open.
+
+Partial-positive if release evidence mostly lands but one bounded evidence item is missing and documented honestly.
+
+Unacceptable:
+
+* marking the row Green without release evidence;
+* claiming MainNet readiness;
+* adding default runtime wiring;
+* adding a public CLI flag;
+* applying a live production validator-set change;
+* performing a production epoch transition;
+* committing or finalizing production runtime state;
+* calling `transition_to_epoch` on production runtime state;
+* writing `meta:current_epoch`;
+* injecting a reconfig block;
+* calling Run 070;
+* mutating `LivePqcTrustState`;
+* hiding failed/skipped CodeQL;
+* weakening prior Green-for-scope rows.
+
+Final response format:
+
+1. Exact verdict.
+2. Files changed.
+3. Release artifacts and hashes.
+4. Helper corpus results.
+5. Real-binary scenarios.
+6. Accepted release evidence.
+7. Rejection / fail-closed evidence.
+8. MainNet refusal / authority policy evidence.
+9. Replay / idempotency evidence.
+10. Fixture-state evidence.
+11. Non-mutation evidence.
+12. Tests run.
+13. Security scans.
+14. C4/C5 matrix status.
+15. Honest limitations.
+16. C4/C5 status.
+17. Suggested Run 323 next step.

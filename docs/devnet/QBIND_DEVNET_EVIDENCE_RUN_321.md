@@ -242,15 +242,22 @@ No test target names required substitution; all real target names matched the ta
 
 ## 14. Security scans
 
-* **Secret scanning** — ran over all changed source/test/docs files; **no
-  secrets detected**.
-* **CodeQL** — the CodeQL checker was invoked over the new Rust source module
-  and test file (changes classified non-trivial). The analysis was **skipped by
-  the tool** because the CodeQL database size exceeded the checker's limit
-  (reported: "Analysis was skipped because the database size is too large"), so
-  **0 alerts were returned and no CodeQL coverage is claimed for Run 321**. The
-  changes are a self-contained, non-mutating source/test boundary that performs
-  no I/O, no `unsafe`, no deserialization of untrusted external input, and no
+* **Secret scanning** — ran over all changed cleanup files
+  (`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_321.md`,
+  `docs/protocol/QBIND_C4_C5_CLOSURE_CRITERIA.md`,
+  `docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md`,
+  `docs/protocol/QBIND_GOVERNANCE_EXECUTION_RUNTIME_SURFACE_AUDIT.md`,
+  `docs/protocol/QBIND_PEER_DRIVEN_TRUST_BUNDLE_APPLY_SAFETY.md`,
+  `docs/ops/QBIND_PQC_TRUST_LIFECYCLE_RUNBOOK.md`,
+  `docs/whitepaper/contradiction.md`); **no secrets detected**.
+* **CodeQL** — the Run 321 source/test module and test file were landed in the
+  prior Run 321 source/test commits; this cleanup commit changes **documentation
+  only**. The CodeQL checker was invoked for this cleanup and returned exactly
+  **"Skipped: all changes are trivial"** (the cleanup changes are Markdown-only
+  and were declared trivial), so **no CodeQL analysis completed** in this run.
+  **No CodeQL coverage is claimed for Run 321** either way. The Run 321 source is
+  a self-contained, non-mutating source/test boundary that performs no I/O, no
+  `unsafe`, no deserialization of untrusted external input, and no
   network/filesystem access, mutating only a caller-owned in-memory fixture
   struct.
 
@@ -288,8 +295,8 @@ validator-set mutation, production epoch transition, or MainNet readiness.
 
 ## 18. Suggested Run 322 next step
 
-Capture **release-binary evidence** for the live epoch-transition commit
-authorization boundary (example helper + devnet harness script + curated
+Capture **release-binary evidence** for the Run 321 live epoch-transition commit
+execution / finalization boundary (example helper + devnet harness script + curated
 `docs/devnet/run_322_*/` evidence dir), moving this row **Yellow → Green** for
 scope, still without live production validator-set mutation, epoch transition,
-MainNet readiness, or C4/C5 closure.
+production commit, MainNet readiness, or C4/C5 closure.
