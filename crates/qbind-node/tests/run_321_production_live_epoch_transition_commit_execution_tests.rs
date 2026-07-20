@@ -1806,6 +1806,13 @@ fn x_inputs(
         expected_commit_authorization_intent_digest: dec.commit_authorization_digest.clone(),
         expected_commit_authorization_transcript_digest: dec.transcript_digest.clone(),
         expected_commit_authorization_nonce: pkg.commit_authorization_nonce,
+        expected_mutation_execution_decision_id: pkg.mutation_execution_decision_id.clone(),
+        expected_mutation_execution_request_id: pkg.mutation_execution_request_id.clone(),
+        expected_mutation_execution_intent_digest: pkg.mutation_execution_intent_digest.clone(),
+        expected_mutation_execution_transcript_digest: pkg
+            .mutation_execution_transcript_digest
+            .clone(),
+        expected_mutation_execution_nonce: pkg.mutation_execution_nonce,
         expected_execution_preparation_decision_id: pkg.execution_preparation_decision_id.clone(),
         expected_execution_preparation_request_id: pkg.execution_preparation_request_id.clone(),
         expected_execution_preparation_intent_digest: pkg.execution_preparation_intent_digest.clone(),
@@ -3155,6 +3162,102 @@ fn accept_content_digest_binds_runtime_handoff_tuple() {
 // (carried through the consumed Run 319/320 commit-authorization artifact) and
 // its alone-rejected authority variant.
 // ===========================================================================
+
+#[test]
+fn reject_mutation_execution_decision_id_mismatch() {
+    x_reject_inputs(
+        |i| i.expected_mutation_execution_decision_id = "wrong-mut-exec-id".to_string(),
+        XO::MutationExecutionDecisionIdMismatch,
+    );
+}
+
+#[test]
+fn reject_mutation_execution_request_id_mismatch() {
+    x_reject_inputs(
+        |i| i.expected_mutation_execution_request_id = "wrong-mut-exec-req".to_string(),
+        XO::MutationExecutionDecisionRequestIdMismatch,
+    );
+}
+
+#[test]
+fn reject_mutation_execution_intent_digest_mismatch() {
+    x_reject_inputs(
+        |i| i.expected_mutation_execution_intent_digest = "wrong-mut-exec-digest".to_string(),
+        XO::MutationExecutionDecisionIntentDigestMismatch,
+    );
+}
+
+#[test]
+fn reject_mutation_execution_transcript_mismatch() {
+    x_reject_inputs(
+        |i| {
+            i.expected_mutation_execution_transcript_digest =
+                "wrong-mut-exec-transcript".to_string()
+        },
+        XO::MutationExecutionDecisionTranscriptMismatch,
+    );
+}
+
+#[test]
+fn reject_wrong_mutation_execution_nonce() {
+    x_reject_inputs(
+        |i| i.expected_mutation_execution_nonce = MUT_NONCE + 100,
+        XO::WrongMutationExecutionNonce,
+    );
+}
+
+#[test]
+fn reject_mutation_execution_decision_alone() {
+    x_reject_source(
+        LiveEpochTransitionCommitExecutionAuthoritySource::MutationExecutionDecisionWithoutCommitAuthorization,
+        XO::MutationExecutionDecisionAloneRejected,
+    );
+}
+
+#[test]
+fn mutation_execution_alone_tag_is_stable() {
+    assert_eq!(
+        XO::MutationExecutionDecisionAloneRejected.tag(),
+        "mutation-execution-decision-alone-rejected"
+    );
+    assert_eq!(
+        XO::MutationExecutionDecisionIdMismatch.tag(),
+        "mutation-execution-decision-id-mismatch"
+    );
+    assert_eq!(
+        XO::WrongMutationExecutionNonce.tag(),
+        "wrong-mutation-execution-nonce"
+    );
+}
+
+#[test]
+fn accepted_artifact_re_exposes_mutation_execution_ancestor() {
+    let c = x_case(TrustBundleEnvironment::Devnet, Sc::Add);
+    let d = x_eval(&c);
+    assert!(d.is_accept());
+    let art = d.commit_execution_artifact.as_ref().unwrap();
+    // Grandparent Run 317/318 mutation-execution nonce re-exposed intact.
+    assert_eq!(art.mutation_execution_nonce, MUT_NONCE);
+    // Parent Run 319/320 commit-authorization nonce re-exposed intact.
+    assert_eq!(art.commit_authorization_nonce, CMT_NONCE);
+    // Self Run 321 commit-execution proposed nonce.
+    assert_eq!(art.commit_execution_nonce, CXE_NONCE);
+}
+
+#[test]
+fn mutation_execution_binding_rejects_are_non_mutating() {
+    for o in [
+        XO::MutationExecutionDecisionIdMismatch,
+        XO::MutationExecutionDecisionRequestIdMismatch,
+        XO::MutationExecutionDecisionIntentDigestMismatch,
+        XO::MutationExecutionDecisionTranscriptMismatch,
+        XO::WrongMutationExecutionNonce,
+        XO::MutationExecutionDecisionAloneRejected,
+    ] {
+        assert!(o.is_non_mutating());
+        assert!(!o.tag().is_empty());
+    }
+}
 
 #[test]
 fn reject_execution_preparation_decision_id_mismatch() {

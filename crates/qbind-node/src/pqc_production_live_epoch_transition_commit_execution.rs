@@ -437,6 +437,9 @@ pub enum LiveEpochTransitionCommitExecutionAuthoritySource {
     AcceptedCommitAuthorizationWithoutPackage {
         decision: ProductionLiveEpochTransitionCommitAuthorizationDecision,
     },
+    /// A Run 317/318 epoch-transition mutation-execution decision presented
+    /// directly, without a Run 319/320 commit-authorization decision. Rejected.
+    MutationExecutionDecisionWithoutCommitAuthorization,
     /// A Run 317/318 epoch-transition execution-preparation decision presented
     /// directly, without a Run 319/320 commit-authorization decision. Rejected.
     ExecutionPreparationDecisionWithoutCommitAuthorization,
@@ -612,6 +615,18 @@ pub struct ProductionLiveEpochTransitionCommitExecutionInputs {
     /// Expected Run 319/320 commit-authorization nonce (re-exposed by the
     /// consumed Run 319/320 commit-authorization artifact).
     pub expected_commit_authorization_nonce: u64,
+    /// Expected Run 317/318 mutation-execution decision id (re-exposed by
+    /// the consumed Run 319/320 commit-authorization artifact).
+    pub expected_mutation_execution_decision_id: String,
+    /// Expected Run 317/318 mutation-execution request id.
+    pub expected_mutation_execution_request_id: String,
+    /// Expected Run 317/318 mutation-execution intent/content digest.
+    pub expected_mutation_execution_intent_digest: String,
+    /// Expected Run 317/318 mutation-execution transcript digest.
+    pub expected_mutation_execution_transcript_digest: String,
+    /// Expected Run 317/318 mutation-execution nonce (re-exposed by the
+    /// consumed Run 319/320 commit-authorization artifact).
+    pub expected_mutation_execution_nonce: u64,
     /// Expected Run 317/318 execution-preparation decision id (re-exposed by
     /// the consumed Run 319/320 commit-authorization artifact).
     pub expected_execution_preparation_decision_id: String,
@@ -711,6 +726,10 @@ impl ProductionLiveEpochTransitionCommitExecutionInputs {
             && !self.expected_commit_authorization_request_id.is_empty()
             && !self.expected_commit_authorization_intent_digest.is_empty()
             && !self.expected_commit_authorization_transcript_digest.is_empty()
+            && !self.expected_mutation_execution_decision_id.is_empty()
+            && !self.expected_mutation_execution_request_id.is_empty()
+            && !self.expected_mutation_execution_intent_digest.is_empty()
+            && !self.expected_mutation_execution_transcript_digest.is_empty()
             && !self.expected_execution_preparation_decision_id.is_empty()
             && !self.expected_execution_preparation_request_id.is_empty()
             && !self.expected_execution_preparation_intent_digest.is_empty()
@@ -895,6 +914,15 @@ pub struct ProductionLiveEpochTransitionCommitExecutionArtifact {
     pub commit_authorization_transcript_digest: String,
     /// The re-exposed Run 319/320 commit-authorization nonce (consumed).
     pub commit_authorization_nonce: u64,
+
+    // ---- Bound Run 317/318 mutation-execution authority tuple -------
+    // (re-exposed by the consumed Run 319/320 commit-authorization artifact)
+    pub mutation_execution_decision_id: String,
+    pub mutation_execution_request_id: String,
+    pub mutation_execution_intent_digest: String,
+    pub mutation_execution_transcript_digest: String,
+    /// The re-exposed Run 317/318 mutation-execution nonce (consumed).
+    pub mutation_execution_nonce: u64,
 
     // ---- Bound Run 317/318 execution-preparation authority tuple -------
     // (re-exposed by the consumed Run 319/320 commit-authorization artifact)
@@ -1132,6 +1160,31 @@ impl ProductionLiveEpochTransitionCommitExecutionArtifact {
             &mut h,
             b"commit_authorization_nonce",
             &self.commit_authorization_nonce.to_le_bytes(),
+        );
+        hash_field(
+            &mut h,
+            b"mutation_execution_decision_id",
+            self.mutation_execution_decision_id.as_bytes(),
+        );
+        hash_field(
+            &mut h,
+            b"mutation_execution_request_id",
+            self.mutation_execution_request_id.as_bytes(),
+        );
+        hash_field(
+            &mut h,
+            b"mutation_execution_intent_digest",
+            self.mutation_execution_intent_digest.as_bytes(),
+        );
+        hash_field(
+            &mut h,
+            b"mutation_execution_transcript_digest",
+            self.mutation_execution_transcript_digest.as_bytes(),
+        );
+        hash_field(
+            &mut h,
+            b"mutation_execution_nonce",
+            &self.mutation_execution_nonce.to_le_bytes(),
         );
         hash_field(
             &mut h,
@@ -1466,6 +1519,14 @@ pub enum ProductionLiveEpochTransitionCommitExecutionOutcome {
     RuntimeHandoffDecisionTranscriptMismatch,
     WrongRuntimeHandoffNonce,
 
+    // ---- Mutation-execution-decision binding failures (re-exposed) -
+    MutationExecutionDecisionIdMismatch,
+    MutationExecutionDecisionRequestIdMismatch,
+    MutationExecutionDecisionIntentDigestMismatch,
+    MutationExecutionDecisionTranscriptMismatch,
+    WrongMutationExecutionNonce,
+    MutationExecutionDecisionAloneRejected,
+
     // ---- Execution-preparation-decision binding failures (re-exposed) -
     ExecutionPreparationDecisionIdMismatch,
     ExecutionPreparationDecisionRequestIdMismatch,
@@ -1661,6 +1722,22 @@ impl ProductionLiveEpochTransitionCommitExecutionOutcome {
                 "runtime-handoff-decision-transcript-mismatch"
             }
             Self::WrongRuntimeHandoffNonce => "wrong-runtime-handoff-nonce",
+            Self::MutationExecutionDecisionIdMismatch => {
+                "mutation-execution-decision-id-mismatch"
+            }
+            Self::MutationExecutionDecisionRequestIdMismatch => {
+                "mutation-execution-decision-request-id-mismatch"
+            }
+            Self::MutationExecutionDecisionIntentDigestMismatch => {
+                "mutation-execution-decision-intent-digest-mismatch"
+            }
+            Self::MutationExecutionDecisionTranscriptMismatch => {
+                "mutation-execution-decision-transcript-mismatch"
+            }
+            Self::WrongMutationExecutionNonce => "wrong-mutation-execution-nonce",
+            Self::MutationExecutionDecisionAloneRejected => {
+                "mutation-execution-decision-alone-rejected"
+            }
             Self::ExecutionPreparationDecisionIdMismatch => {
                 "execution-preparation-decision-id-mismatch"
             }
@@ -1906,6 +1983,9 @@ impl ProductionLiveEpochTransitionCommitExecutionExecutor {
             S::AcceptedCommitAuthorizationWithoutPackage { .. } => {
                 Err(O::VerifiedCommitAuthorizationDecisionRequired)
             }
+            S::MutationExecutionDecisionWithoutCommitAuthorization => {
+                Err(O::MutationExecutionDecisionAloneRejected)
+            }
             S::ExecutionPreparationDecisionWithoutCommitAuthorization => {
                 Err(O::ExecutionPreparationDecisionAloneRejected)
             }
@@ -2036,6 +2116,34 @@ impl ProductionLiveEpochTransitionCommitExecutionExecutor {
         // nonce binding.
         if intent.commit_authorization_nonce != inputs.expected_commit_authorization_nonce {
             return Some(O::WrongCommitAuthorizationNonce);
+        }
+
+        // Re-exposed Run 317/318 mutation-execution decision authority
+        // tuple binding (carried through the consumed Run 319/320
+        // commit-authorization artifact).
+        if intent.mutation_execution_decision_id
+            != inputs.expected_mutation_execution_decision_id
+        {
+            return Some(O::MutationExecutionDecisionIdMismatch);
+        }
+        if intent.mutation_execution_request_id
+            != inputs.expected_mutation_execution_request_id
+        {
+            return Some(O::MutationExecutionDecisionRequestIdMismatch);
+        }
+        if intent.mutation_execution_intent_digest
+            != inputs.expected_mutation_execution_intent_digest
+        {
+            return Some(O::MutationExecutionDecisionIntentDigestMismatch);
+        }
+        if intent.mutation_execution_transcript_digest
+            != inputs.expected_mutation_execution_transcript_digest
+        {
+            return Some(O::MutationExecutionDecisionTranscriptMismatch);
+        }
+        // The re-exposed mutation-execution nonce binding.
+        if intent.mutation_execution_nonce != inputs.expected_mutation_execution_nonce {
+            return Some(O::WrongMutationExecutionNonce);
         }
 
         // Re-exposed Run 317/318 execution-preparation decision authority
@@ -2535,6 +2643,22 @@ impl ProductionLiveEpochTransitionCommitExecutionExecutor {
             commit_authorization_transcript_digest: decision.transcript_digest.clone(),
             // Re-exposed consumed commit-authorization nonce.
             commit_authorization_nonce: application_intent.commit_authorization_nonce,
+            // Re-exposed Run 317/318 mutation-execution decision authority
+            // tuple (carried through the consumed commit-authorization artifact).
+            mutation_execution_decision_id: application_intent
+                .mutation_execution_decision_id
+                .clone(),
+            mutation_execution_request_id: application_intent
+                .mutation_execution_request_id
+                .clone(),
+            mutation_execution_intent_digest: application_intent
+                .mutation_execution_intent_digest
+                .clone(),
+            mutation_execution_transcript_digest: application_intent
+                .mutation_execution_transcript_digest
+                .clone(),
+            // Re-exposed consumed mutation-execution nonce.
+            mutation_execution_nonce: application_intent.mutation_execution_nonce,
             // Re-exposed Run 317/318 execution-preparation decision authority
             // tuple (carried through the consumed commit-authorization artifact).
             execution_preparation_decision_id: application_intent
