@@ -513,6 +513,17 @@ pub mod pqc_production_live_epoch_transition_mutation_execution;
 // transition commit authorization C4/C5 matrix row moves Red -> Yellow; Full C4
 // remains OPEN and C5 remains OPEN.
 pub mod pqc_production_live_epoch_transition_commit_authorization;
+// Run 321 — source/test live epoch-transition commit-execution / finalization
+// boundary. Consumes a verified Run 319/320 live epoch-transition
+// commit-authorization decision+artifact and produces a typed, deterministic,
+// policy-gated, non-mutating commit-execution/finalization artifact encoding the
+// exact future production commit preconditions and postconditions. Default
+// Disabled/fail-closed; MainNet refused; production/MainNet commit-execution/
+// finalization kinds reachable but fail closed as unavailable. No default
+// runtime wiring and no CLI flag. Source/test only: release-binary evidence is
+// deferred to Run 322. The live epoch-transition commit execution / finalization
+// C4/C5 matrix row moves Red -> Yellow; Full C4 remains OPEN and C5 remains OPEN.
+pub mod pqc_production_live_epoch_transition_commit_execution;
 // Run 188 — source/test-only KMS/HSM custody boundary for bundle-
 // signing authority and governance authority operations. Defines the
 // typed `AuthorityCustodyClass` (`FixtureLocalKey` / `LocalOperatorKey`
