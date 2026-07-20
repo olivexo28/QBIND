@@ -2046,6 +2046,15 @@ fn r_inputs(
         expected_commit_execution_intent_digest: dec.commit_execution_digest.clone(),
         expected_commit_execution_transcript_digest: dec.transcript_digest.clone(),
         expected_commit_execution_nonce: pkg.commit_execution_nonce,
+        expected_commit_authorization_decision_id: pkg.commit_authorization_decision_id.clone(),
+        expected_commit_authorization_request_id: pkg.commit_authorization_request_id.clone(),
+        expected_commit_authorization_intent_digest: pkg
+            .commit_authorization_intent_digest
+            .clone(),
+        expected_commit_authorization_transcript_digest: pkg
+            .commit_authorization_transcript_digest
+            .clone(),
+        expected_commit_authorization_nonce: pkg.commit_authorization_nonce,
         expected_mutation_execution_decision_id: pkg.mutation_execution_decision_id.clone(),
         expected_mutation_execution_request_id: pkg.mutation_execution_request_id.clone(),
         expected_mutation_execution_intent_digest: pkg.mutation_execution_intent_digest.clone(),
@@ -3452,6 +3461,85 @@ fn reject_mutation_execution_decision_alone() {
         LiveEpochTransitionCommitReceiptAuthoritySource::MutationExecutionDecisionWithoutCommitExecution,
         RO::MutationExecutionDecisionAloneRejected,
     );
+}
+
+#[test]
+fn reject_commit_authorization_decision_id_mismatch() {
+    r_reject_inputs(
+        |i| i.expected_commit_authorization_decision_id = "wrong-commit-auth-id".to_string(),
+        RO::CommitAuthorizationDecisionIdMismatch,
+    );
+}
+
+#[test]
+fn reject_commit_authorization_request_id_mismatch() {
+    r_reject_inputs(
+        |i| i.expected_commit_authorization_request_id = "wrong-commit-auth-req".to_string(),
+        RO::CommitAuthorizationDecisionRequestIdMismatch,
+    );
+}
+
+#[test]
+fn reject_commit_authorization_intent_digest_mismatch() {
+    r_reject_inputs(
+        |i| {
+            i.expected_commit_authorization_intent_digest =
+                "wrong-commit-auth-digest".to_string()
+        },
+        RO::CommitAuthorizationDecisionIntentDigestMismatch,
+    );
+}
+
+#[test]
+fn reject_commit_authorization_transcript_mismatch() {
+    r_reject_inputs(
+        |i| {
+            i.expected_commit_authorization_transcript_digest =
+                "wrong-commit-auth-transcript".to_string()
+        },
+        RO::CommitAuthorizationDecisionTranscriptMismatch,
+    );
+}
+
+#[test]
+fn reject_wrong_commit_authorization_nonce() {
+    r_reject_inputs(
+        |i| i.expected_commit_authorization_nonce = CMT_NONCE + 100,
+        RO::WrongCommitAuthorizationNonce,
+    );
+}
+
+#[test]
+fn reject_commit_authorization_decision_alone() {
+    r_reject_source(
+        LiveEpochTransitionCommitReceiptAuthoritySource::CommitAuthorizationDecisionWithoutCommitExecution,
+        RO::CommitAuthorizationDecisionAloneRejected,
+    );
+}
+
+#[test]
+fn commit_authorization_binding_rejects_are_non_mutating() {
+    for o in [
+        RO::CommitAuthorizationDecisionIdMismatch,
+        RO::CommitAuthorizationDecisionRequestIdMismatch,
+        RO::CommitAuthorizationDecisionIntentDigestMismatch,
+        RO::CommitAuthorizationDecisionTranscriptMismatch,
+        RO::WrongCommitAuthorizationNonce,
+        RO::CommitAuthorizationDecisionAloneRejected,
+    ] {
+        assert!(o.is_non_mutating());
+        assert!(!o.tag().is_empty());
+    }
+}
+
+#[test]
+fn accept_artifact_reexposes_commit_authorization_tuple() {
+    let c = r_case(TrustBundleEnvironment::Devnet, Sc::Add);
+    let d = r_eval(&c);
+    let art = d.commit_receipt_artifact.as_ref().unwrap();
+    assert_eq!(art.commit_authorization_nonce, CMT_NONCE);
+    assert!(!art.commit_authorization_decision_id.is_empty());
+    assert!(!art.commit_authorization_transcript_digest.is_empty());
 }
 
 #[test]
