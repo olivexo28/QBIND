@@ -1,0 +1,245 @@
+Run 323 — Source/test live epoch-transition commit receipt / post-commit audit-preparation boundary
+
+Continue QBIND after accepted Run 322.
+
+Current state:
+Run 322 is accepted as PASS / release-binary evidence positive for the Run 321 live epoch-transition commit execution / finalization boundary. That row is now Green-for-scope only.
+
+Run 322 did not apply a live production validator-set change, did not perform a production epoch transition, did not commit or finalize production runtime state, did not enable MainNet, did not add runtime wiring, did not add a public CLI flag, and did not close C4/C5.
+
+Primary objective:
+Implement the next narrow source/test boundary: a live epoch-transition commit receipt / post-commit audit-preparation boundary that consumes a verified Run 321/322 live epoch-transition commit-execution accept decision / artifact and produces a typed, deterministic, policy-gated, non-mutating post-commit receipt / audit-preparation artifact for a future production runtime commit/audit executor.
+
+Strict scope:
+Source/test only. No release-binary evidence in Run 323; defer release-binary evidence to Run 324.
+
+Important safety rule:
+Despite the name, Run 323 must not write a production commit receipt, audit ledger, durable replay record, settlement record, publication record, authority marker, trust-bundle sequence file, or runtime state. It may validate the full commit-execution artifact, bind all future post-commit receipt/audit preconditions, and produce a typed artifact describing the exact future post-commit receipt/audit step. It may mutate only an explicit caller-owned in-memory fixture state in tests.
+
+Production and MainNet post-commit receipt/audit implementations must be reachable but fail closed as unavailable.
+
+Non-goals:
+Do not wire this boundary into normal `qbind-node` runtime.
+Do not add a public CLI flag.
+Do not enable MainNet.
+Do not apply a live production validator-set change.
+Do not perform a production epoch transition.
+Do not commit production runtime state.
+Do not finalize production runtime state.
+Do not write a production post-commit receipt.
+Do not write an audit-finalization record.
+Do not write settlement or publication records.
+Do not call `BasicHotStuffEngine::transition_to_epoch` on production runtime state.
+Do not write `meta:current_epoch`.
+Do not inject `PAYLOAD_KIND_RECONFIG`.
+Do not mutate production consensus validator state.
+Do not mutate production epoch counters.
+Do not mutate `LivePqcTrustState`.
+Do not call Run 070.
+Do not write trust-bundle sequence files.
+Do not write authority-marker files.
+Do not evict sessions.
+Do not claim live validator-set rotation.
+Do not claim production epoch transition.
+Do not claim production commit/finalization.
+Do not claim MainNet readiness.
+Do not claim C4 closure or C5 closure.
+
+Required implementation:
+Add a narrow module, preferably:
+
+`crates/qbind-node/src/pqc_production_live_epoch_transition_commit_receipt.rs`
+
+Register it in:
+
+`crates/qbind-node/src/lib.rs`
+
+Add tests:
+
+`crates/qbind-node/tests/run_323_production_live_epoch_transition_commit_receipt_tests.rs`
+
+The boundary must:
+
+1. Default `Disabled` / fail-closed.
+2. Accept only a verified Run 321/322 live epoch-transition commit-execution decision carrying `Some(commit_execution_artifact)`.
+3. Reject commit-authorization decision alone, mutation-execution decision alone, execution-preparation decision alone, runtime-handoff decision alone, guarded-mutation decision alone, staged-application decision alone, live-application authorization alone, application decision alone, rotation plan alone, governance execution intent alone, governance proof alone, fixture-only authority, local-operator assertion, peer-majority assertion, custody-only evidence, RemoteSigner-only evidence, attestation-only evidence, arbitrary validator-set bytes, and accepted commit-execution decisions without an artifact.
+4. Bind environment, chain ID, genesis hash, authority root, governance domain/epoch/proposal, governance execution decision/request/intent/transcript digests, rotation decision/request/plan/transcript digests, application decision/request/intent/transcript digests, live authorization id/request/intent/transcript digests, staged application id/request/record/intent/transcript digests, guarded mutation id/request/record/intent/transcript digests, runtime handoff id/request/package/content/transcript digests, execution preparation id/request/artifact/content/transcript digests, mutation execution id/request/artifact/content/transcript digests, commit authorization id/request/artifact/content/transcript digests, commit execution id/request/artifact/content/transcript digests, current/proposed/delta validator-set digests, validator-set epoch/version, epoch-transition target, application nonce, live-application nonce, staged-application nonce, guarded-mutation nonce, runtime-handoff nonce, execution-preparation nonce, mutation-execution nonce, commit-authorization nonce, commit-execution nonce, quorum/threshold, custody/attestation/durable-replay bindings where represented.
+5. Produce a typed live epoch-transition commit receipt / post-commit audit-preparation artifact with deterministic `commit_receipt_id`, `request_id`, `commit_receipt_digest`, `content_digest`, and `transcript_digest`.
+6. Encode exact future production receipt/audit preconditions and postconditions:
+
+   * expected previous commit-execution artifact digest;
+   * expected production commit executor identity where represented;
+   * expected resulting validator-set digest;
+   * expected resulting validator-set epoch/version;
+   * expected target consensus epoch;
+   * expected durable replay domain;
+   * expected audit sink domain;
+   * required governance epoch;
+   * required authority sequence;
+   * required replay window;
+   * required no-conflicting-commit marker;
+   * required production runtime handle availability;
+   * required durable replay availability;
+   * required audit sink availability;
+   * optional future settlement/publication availability where represented, but do not write either.
+7. Enforce replay/idempotency/equivocation/freshness fail-closed.
+8. Keep MainNet refused absent complete production authority criteria.
+9. Keep production receipt/audit kind reachable but fail-closed as unavailable.
+10. Preserve all prior Green-for-scope rows without reinterpretation.
+
+Suggested taxonomy:
+
+* `ProductionLiveEpochTransitionCommitReceiptPolicy`
+
+  * `Disabled`
+  * `AllowSourceTestLiveEpochTransitionCommitReceipt`
+  * `RequireProductionLiveEpochTransitionCommitReceipt`
+  * `MainnetProductionLiveEpochTransitionCommitReceiptRequired`
+* `ProductionLiveEpochTransitionCommitReceiptKind`
+
+  * `Disabled`
+  * `SourceTestLiveEpochTransitionCommitReceipt`
+  * `ProductionLiveEpochTransitionCommitReceiptUnavailable`
+  * `MainNetLiveEpochTransitionCommitReceiptUnavailable`
+* `ProductionLiveEpochTransitionCommitReceiptRequest`
+* `ProductionLiveEpochTransitionCommitReceiptInputs`
+* `ProductionLiveEpochTransitionCommitReceiptDecision`
+* `ProductionLiveEpochTransitionCommitReceiptArtifact`
+* `ProductionLiveEpochTransitionCommitReceiptOutcome`
+* `ProductionLiveEpochTransitionCommitReceiptRecoveryOutcome`
+* `LiveEpochTransitionCommitReceiptReplaySet`
+* optional caller-owned `LiveEpochTransitionCommitReceiptFixtureState` for tests only.
+
+Required tests:
+Target at least 120 tests covering:
+
+* accepted DevNet/TestNet source-test commit-receipt / post-commit audit-preparation artifacts;
+* verified Run 321/322 commit-execution artifact binding;
+* deterministic digests under re-evaluation;
+* wrong environment / chain / genesis / authority root failures;
+* wrong governance domain / epoch / proposal / execution IDs / execution digests;
+* wrong rotation IDs / rotation digests;
+* wrong application IDs / application digests;
+* wrong live-authorization IDs / authorization digests;
+* wrong staged-application IDs / staged-record digests;
+* wrong guarded-mutation IDs / guarded-record digests;
+* wrong runtime-handoff IDs / handoff package digests;
+* wrong execution-preparation IDs / preparation artifact digests;
+* wrong mutation-execution IDs / mutation-execution artifact digests;
+* wrong commit-authorization IDs / commit-authorization artifact digests;
+* wrong commit-execution IDs / commit-execution artifact digests;
+* wrong current/proposed/delta validator-set digests;
+* wrong current-validator-set epoch/version preconditions;
+* wrong resulting validator-set epoch/version postconditions;
+* wrong epoch-transition target;
+* wrong application / live-application / staged-application / guarded-mutation / runtime-handoff / execution-preparation / mutation-execution / commit-authorization / commit-execution nonce;
+* missing/unverified commit-execution decision rejection;
+* accepted commit-execution decision without artifact rejection;
+* commit-authorization-decision-alone rejection;
+* mutation-execution-decision-alone rejection;
+* execution-preparation-decision-alone rejection;
+* runtime-handoff-decision-alone rejection;
+* guarded-mutation-decision-alone rejection;
+* staged-application-decision-alone rejection;
+* live-authorization-alone rejection;
+* application-decision-alone rejection;
+* rotation-plan-alone rejection;
+* governance-execution-intent-alone rejection;
+* governance-proof-alone rejection;
+* fixture/local-operator/peer-majority/custody-only/RemoteSigner-only/attestation-only/arbitrary-bytes rejection;
+* replay/idempotency/equivocation;
+* stale governance epoch / authority sequence / validator-set epoch / validator-set version;
+* MainNet refusal;
+* production-policy unavailable;
+* no runtime wiring / no CLI flag invariants;
+* non-mutation invariants;
+* C4/C5 taxonomy.
+
+Required docs:
+Add:
+
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_323.md`
+
+Update narrowly:
+
+* `docs/protocol/QBIND_C4_C5_CLOSURE_CRITERIA.md`
+* `docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md`
+* `docs/protocol/QBIND_GOVERNANCE_EXECUTION_RUNTIME_SURFACE_AUDIT.md`
+* `docs/protocol/QBIND_PEER_DRIVEN_TRUST_BUNDLE_APPLY_SAFETY.md`
+* `docs/ops/QBIND_PQC_TRUST_LIFECYCLE_RUNBOOK.md`
+* `docs/whitepaper/contradiction.md`
+
+C4/C5 matrix:
+Add or move the live epoch-transition commit receipt / post-commit audit-preparation boundary row Red → Yellow only if source/test evidence lands. Do not mark it Green until Run 324 release-binary evidence. Do not claim live production validator-set mutation, production epoch transition, production commit/finalization, production receipt write, production audit write, MainNet readiness, C4 closure, or C5 closure.
+
+Security:
+Run secret scanning over changed files.
+Run CodeQL if available. If skipped, timed out, unavailable, classified trivial, or database too large, record the exact reason directly in `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_323.md` and explicitly state that no CodeQL coverage is claimed.
+
+Required test commands:
+
+* `cargo build -p qbind-node --lib`
+* `cargo test -p qbind-node --test run_323_production_live_epoch_transition_commit_receipt_tests`
+* `cargo test -p qbind-node --test run_321_production_live_epoch_transition_commit_execution_tests`
+* `cargo test -p qbind-node --test run_319_production_live_epoch_transition_commit_authorization_tests`
+* `cargo test -p qbind-node --test run_317_production_live_epoch_transition_mutation_execution_tests`
+* `cargo test -p qbind-node --test run_315_production_live_epoch_transition_execution_preparation_tests`
+* `cargo test -p qbind-node --test run_313_production_epoch_transition_runtime_handoff_tests`
+* `cargo test -p qbind-node --test run_311_production_guarded_epoch_transition_mutation_executor_tests`
+* `cargo test -p qbind-node --test run_309_production_staged_live_validator_set_epoch_transition_application_executor_tests`
+* `cargo test -p qbind-node --test run_307_production_live_validator_set_application_authorization_tests`
+* `cargo test -p qbind-node --test run_305_production_validator_set_rotation_application_executor_tests`
+* `cargo test -p qbind-node --test run_303_production_validator_set_rotation_intent_tests`
+* `cargo test -p qbind-node --test run_301_production_governance_execution_engine_tests`
+* `cargo test -p qbind-node --lib`
+
+If any target name differs, use the real target name and document the substitution.
+
+Provenance hygiene:
+If a summary file is generated, generate it after the final commit or explicitly list any dirty/untracked files. Do not leave unexplained `git_status: dirty`.
+
+Expected verdict:
+PASS / source-test positive if the module, tests, docs, and security provenance land; the row moves Red → Yellow only; production/MainNet commit-receipt/audit-preparation paths fail closed; and Full C4 / C5 remain open.
+
+Partial-positive if the core module lands and compiles but tests/docs/security closure are incomplete.
+
+Unacceptable:
+
+* release-binary claim in Run 323;
+* marking the row Green;
+* adding default runtime wiring;
+* adding a public CLI flag;
+* enabling MainNet;
+* mutating live production consensus state;
+* applying a live production validator-set change;
+* performing a production epoch transition;
+* committing/finalizing production runtime state;
+* writing a production receipt or audit record;
+* calling `transition_to_epoch` on production runtime state;
+* writing `meta:current_epoch`;
+* injecting a reconfig block;
+* calling Run 070;
+* mutating `LivePqcTrustState`;
+* hiding failed/skipped CodeQL;
+* weakening prior Green-for-scope rows.
+
+Final response format:
+
+1. Exact verdict.
+2. Files changed.
+3. Boundary design summary.
+4. Policy/kind/commit-receipt taxonomy.
+5. Run 321/322 commit-execution artifact binding.
+6. Live commit-receipt / post-commit audit-preparation artifact model.
+7. Accepted source/test evidence.
+8. Rejection/fail-closed evidence.
+9. MainNet refusal evidence.
+10. Replay/idempotency evidence.
+11. Fixture-state evidence, if any.
+12. Non-mutation evidence.
+13. Tests run.
+14. Security scans.
+15. C4/C5 matrix status.
+16. Honest limitations.
+17. C4/C5 status.
+18. Suggested Run 324 next step.
