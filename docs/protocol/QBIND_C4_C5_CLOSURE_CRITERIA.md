@@ -51,7 +51,7 @@ production custody.
 | **C4** | ⚠️ **OPEN** | Authority-lifecycle typed boundaries, fixture/loopback evidence paths, custody/governance/RemoteSigner policy selectors, and DevNet/TestNet release-binary evidence landed (Runs 130–199). Real production durable-replay RocksDB backend (Runs 291/292), RemoteSigner backend (Runs 293/294), KMS/HSM custody backend (Runs 295/296), custody attestation verifier (Runs 297/298), on-chain governance proof verifier (Runs 299/300), governance execution engine (Runs 301/302), the validator-set rotation / authority-set synchronization intent boundary (Runs 303/304), the validator-set rotation application / epoch-transition executor boundary (Runs 305/306), the live validator-set application / epoch-transition authorization boundary (Runs 307/308), the staged live validator-set / epoch-transition application executor boundary (Runs 309/310), the guarded epoch-transition mutation executor boundary (Runs 311/312), and the epoch-transition runtime handoff / live-mutation preflight boundary (Runs 313/314), the live epoch-transition execution preparation boundary (Runs 315/316), the live epoch-transition mutation execution boundary (Runs 317/318), and the live epoch-transition commit authorization boundary (Runs 319/320) are now Green for their narrow release-binary-evidenced scope only. The live epoch-transition commit authorization boundary was Yellow after Run 319 (source/test only) and becomes Green-for-scope only because Run 320 landed its release-binary evidence. These do not close C4: they are not wired into default production runtime, involve no MainNet authority rotation/revocation, and apply no live validator-set mutation or epoch transition; full MainNet production-custody evidence and MainNet authority rotation/revocation remain unavailable. |
 | **C5** | ⚠️ **OPEN** | Production key custody, rotation/revocation ceremonies, hardware/remote signing attestation, operational audit trail, crypto-agility activation policy, and full MainNet release-binary evidence under production custody remain unavailable. |
 
-**Current status (as of Run 320).** The following non-mutating authority-lifecycle
+**Current status (as of Run 321).** The following non-mutating authority-lifecycle
 boundaries are now Green **for their narrow release-binary-evidenced scope only**:
 
 * Run 303/304 validator-set rotation / authority-set synchronization intent boundary — Green-for-scope.
@@ -63,6 +63,7 @@ boundaries are now Green **for their narrow release-binary-evidenced scope only*
 * Run 315/316 live epoch-transition execution preparation boundary — Green-for-scope.
 * Run 317/318 live epoch-transition mutation execution boundary — Green-for-scope.
 * Run 319 live epoch-transition commit authorization boundary — Yellow before Run 320, and Green-for-scope because Run 320 passed its release-binary evidence.
+* Run 321 live epoch-transition commit execution / finalization boundary — **Yellow only** (source/test); release-binary evidence deferred to Run 322, so it is **not** Green-for-scope.
 
 Full **C4 remains OPEN** and **C5 remains OPEN**. There is **no MainNet authority
 rotation/revocation** and **no live production validator-set mutation or production
