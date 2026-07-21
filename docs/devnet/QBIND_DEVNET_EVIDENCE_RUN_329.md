@@ -42,8 +42,8 @@ It calls neither Run 70 nor any runtime wiring. Production and MainNet
 audit-ledger-commitment / audit-ledger kinds are reachable but fail closed as
 unavailable. MainNet remains refused. Full C4 remains OPEN. C5 remains OPEN.
 
-The live epoch-transition durable-audit finalization / audit-ledger preparation
-boundary matrix row moves **Red → Yellow** (source/test implementation landed;
+The live epoch-transition audit-ledger commitment / durable-audit publication
+preparation boundary matrix row moves **Red → Yellow** (source/test implementation landed;
 release-binary evidence pending Run 330). It is **not** marked Green. No
 release-binary evidence, live production validator-set mutation, production epoch
 transition, production commit/finalization, production receipt/audit write,
@@ -151,7 +151,7 @@ before feeding it into the Run 329 executor.
 
 ---
 
-## 6. Live durable-audit finalization / audit-ledger-preparation artifact model
+## 6. Live audit-ledger-commitment / durable-audit publication-preparation artifact model
 
 The artifact carries deterministic `audit_ledger_commitment_id`,
 `audit_request_id`, `audit_ledger_commitment_digest`, `audit_content_digest`,
@@ -293,8 +293,8 @@ the full workspace.
 
 ## 15. C4/C5 matrix status
 
-The live epoch-transition durable-audit finalization / audit-ledger preparation
-row moves **Red → Yellow** (source/test only). It is **not** Green; Yellow →
+The live epoch-transition audit-ledger commitment / durable-audit publication
+preparation row moves **Red → Yellow** (source/test only). It is **not** Green; Yellow →
 Green-for-scope is deferred to Run 330 release-binary evidence. No live
 production validator-set mutation, production epoch transition, production
 commit/finalization, production receipt/audit write, production audit seal,
