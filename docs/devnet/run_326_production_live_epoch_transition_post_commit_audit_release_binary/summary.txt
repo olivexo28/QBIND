@@ -1,0 +1,122 @@
+Run 326 — release-binary evidence for the Run 325 live epoch-transition post-commit audit boundary
+git_commit: 17699e7aea6efe3773497a9dcff4f3b0c59a9097
+git_branch: copilot/run-326-update-user-roles
+git_status: dirty
+
+build:
+  rustc_version:      rustc 1.97.0 (2d8144b78 2026-07-07)
+  cargo_version:      cargo 1.97.0 (c980f4866 2026-06-30)
+  host:               Linux runnervm3jd5f 6.17.0-1020-azure #20~24.04.1-Ubuntu SMP Fri Jun 19 20:09:14 UTC 2026 x86_64 x86_64 x86_64 GNU/Linux
+  qbind_node_sha256:  9b3a2d698a7a4a72cc75fcbc432fcfcbde5d3950389e2c4cea57292632bb32e6
+  helper_320_sha256:  581e4b36ac46a758ce512e0aad30778b3c349e2d246b0e8698f3fc7840a4cfe2
+
+helper_summary: /home/runner/work/QBIND/QBIND/docs/devnet/run_326_production_live_epoch_transition_post_commit_audit_release_binary/helper_evidence/run_326/helper_summary.txt
+  run_326_production_live_epoch_transition_post_commit_audit_release_binary_helper
+  boundary=crates/qbind-node/src/pqc_production_live_epoch_transition_post_commit_audit.rs :: ProductionLiveEpochTransitionPostCommitAuditExecutor (Run 325 source/test boundary)
+  mode=release-binary example linked against release-built production library symbols; source/test executor constructor only; DevNet/TestNet accept identities only; no production/MainNet enablement; no live validator-set mutation; no epoch transition; no production commit; no production finalization
+  table accepted_compatible pass=32 fail=0
+  table rejection_fail_closed pass=115 fail=0
+  table mainnet_authority_policy pass=5 fail=0
+  table replay_recovery_idempotency pass=6 fail=0
+  table fixture_state pass=2 fail=0
+  table non_mutation pass=6 fail=0
+  table reachability_taxonomy pass=9 fail=0
+  total_pass=175
+  total_fail=0
+  verdict=PASS
+
+deterministic_digests: stable across two independent helper invocations
+  commit_receipt_intent_digest=0b8c57b2f45f6132f7870249e2987c8d04eb2beeac7634d8860613b3754bd8fe
+  scenario=Add
+  post_commit_audit_id=adbafbabf7031ca9c941a7281409c4c1e5158a557f0a6986a30e5fc480915905
+  request_id=64355fe3a00684a89de8184a889e10478fa82597bbd1afa8987b75b7dc48e065
+  post_commit_audit_digest=d537e044f29e7a67f4dd584a028e0448067de2ad9bca9c6ecdd79a965dc53ae2
+  content_digest=d537e044f29e7a67f4dd584a028e0448067de2ad9bca9c6ecdd79a965dc53ae2
+  transcript_digest=989b890d83e7294f4bf66cbbeb96d4c9394c3e4bbdcbf734fc0fa10e3ef92654
+  scenario=Remove
+  post_commit_audit_id=d1ed07d0415ef1314a531a5cab0f807457eee71e29ce1d4f123b1634bbd73054
+  request_id=8880e36307f5cf652927e3d50a98a8f4c75edeb77d9ab690cba09662553d8114
+  post_commit_audit_digest=1a25bba89fcca7456b733d9991a1dee144e6bc753f60d250e7254f4ca91c9caa
+  content_digest=1a25bba89fcca7456b733d9991a1dee144e6bc753f60d250e7254f4ca91c9caa
+  transcript_digest=a65d5a064fb90989e0f757e44f7a8ecfaf6e0d697c342e3d25a3d57bac547d70
+  scenario=Update
+  post_commit_audit_id=252b70d437fcb49ad7ed6dccbb5a36256cfe81dd3e87b37537aae37936de54d7
+  request_id=2d1913affa3407645a466504a14be3ce1e42a2adf2a9850e8517459d5ec4ad2e
+  post_commit_audit_digest=7494f31ad17544065320181dad5520397e7afd80123ac10b80018b69b335e629
+  content_digest=7494f31ad17544065320181dad5520397e7afd80123ac10b80018b69b335e629
+  transcript_digest=f83757656169f04069a4aba97ef698f95f926a85e9271bbef17f3b6b3659c22a
+  scenario=NoOp
+  post_commit_audit_id=97ce268c63a9e8dbda6a99718c0a71837dd91b75775d0a9187e3d6828df332ae
+  request_id=e1d7579dbde28065a1df43869789401c8fbf169998cf08d76ea5d12c3b5ed75e
+  post_commit_audit_digest=8ed8796b34f141355a13b9f3b3fb68b111f4de3b35c4a3ca370ae2554a9237fd
+  content_digest=8ed8796b34f141355a13b9f3b3fb68b111f4de3b35c4a3ca370ae2554a9237fd
+  transcript_digest=1d02bde1a44637be73b0f88fe9493814f49ef60321649f4bcc5e5efef2da4225
+  scenario=Identity
+  post_commit_audit_id=d128591b3309dfc348ba911166f7edb9cfb3539f936673e259b9ead77229004a
+  request_id=910dfe4c4b28114c88fd8da28a67a42cf5aa0493fffbebee836d005724a4fe83
+  post_commit_audit_digest=9047224c4d81fe5c4a7a7908570ebbfabb2a89599c56dca6af3b67114c3854da
+  content_digest=9047224c4d81fe5c4a7a7908570ebbfabb2a89599c56dca6af3b67114c3854da
+  transcript_digest=dfc1473febc1df8d8912fdfab26640edc6d375f0f8892659c41563a58aae22dd
+  scenario=Retire
+  post_commit_audit_id=360989d76f3d4a81e81d0ca3a20a2be80a2167a963a10494fce1a7dfda57236b
+  request_id=3f36063ea6cef605fc73cfefad1550575516850117d90636fa0bb381fc90823e
+  post_commit_audit_digest=1d26f7291490de70d9ea75f91141340857a17576e3be5c02cfe65ab328d53a94
+  content_digest=1d26f7291490de70d9ea75f91141340857a17576e3be5c02cfe65ab328d53a94
+  transcript_digest=0ab5cba52a9b3301a0746b93e63fda7dd096f30e465325c2f96b206f40a75761
+  scenario=Emergency
+  post_commit_audit_id=db730bc03e599718958e80d0cf070255784cafef08bd30006b7b2e777b6dc6ce
+  request_id=86ec6ac55b9ec43acb4c0a0eeb13c6b5248f7c03f03e185fa2a1c2dea71d4828
+  post_commit_audit_digest=5b71ecc8744506dbd0f2ff07ee0fb85c7d6d1892fd6b999c67249dceaaea6fc6
+  content_digest=5b71ecc8744506dbd0f2ff07ee0fb85c7d6d1892fd6b999c67249dceaaea6fc6
+  transcript_digest=54eeeea7eaae93ba56a1a9806de9bd8a0ca6153416b0298567ae13e475327aa4
+  scenario=AuthSync
+  post_commit_audit_id=48c08b60747c64f48ce97ce24630a6ef202d3b6b074ddee16a3068fe90ceacf5
+  request_id=a3ed401016ccbedb72d0271518b491ab4e3c1bb3ed4a64ff76610510f198631f
+  post_commit_audit_digest=d788433f8f2cd49be53be499cc73bc43403f5696d40c9b262d684576b9626c83
+  content_digest=d788433f8f2cd49be53be499cc73bc43403f5696d40c9b262d684576b9626c83
+  transcript_digest=aed4b6bdbcf2e598559335dddcb49a0864c3d5a82bc5bd6d13f446b16dfc8f96
+  scenario=Bulk
+  post_commit_audit_id=0c0ddce85be10894364901585c2a3a944d3db3ae2f67ea2502c27bbbecb13db6
+  request_id=55cfe77fecbbafbb8cf3f879cbb570f5a0324f1627ddbbecfb657715a7d6cecb
+  post_commit_audit_digest=3f123b3c554f7fce7ac99b5ebb8525aad953d51c4bc47e01a91afd6d2f40907f
+  content_digest=3f123b3c554f7fce7ac99b5ebb8525aad953d51c4bc47e01a91afd6d2f40907f
+  transcript_digest=cca67e3624839f886402882da80ff9f4f2261ec983b9f34f50b9c3c7b84429f1
+  named_post_commit_audit_id=adbafbabf7031ca9c941a7281409c4c1e5158a557f0a6986a30e5fc480915905
+  named_request_id=64355fe3a00684a89de8184a889e10478fa82597bbd1afa8987b75b7dc48e065
+  named_content_digest=d537e044f29e7a67f4dd584a028e0448067de2ad9bca9c6ecdd79a965dc53ae2
+  named_transcript_digest=989b890d83e7294f4bf66cbbeb96d4c9394c3e4bbdcbf734fc0fa10e3ef92654
+  outcome_tag=accepted-source-test-live-epoch-transition-post-commit-audit
+
+release_binary_scenarios: S1_help=0 S2=1 S3=1 S4=1 S5_no_selector=2 S6_default_parse=1
+reachability: combined/source/helper/module/entry/taxonomy/boundary greps passed
+c4c5_taxonomy: passed (39 phrases; RocksDB + RemoteSigner + KMS/HSM + custody-attestation + on-chain-governance-proof-verifier + governance-execution-engine + validator-set-rotation-intent-boundary + validator-set-rotation-application-executor-boundary + live-validator-set-application-authorization-boundary + staged-live-validator-set-epoch-transition-application-executor-boundary + guarded-epoch-transition-mutation-executor-boundary + epoch-transition-runtime-handoff-boundary + live-epoch-transition-commit-receipt-boundary + live-epoch-transition-post-commit-audit-boundary rows Green-for-scope only; Red rows unchanged; Full C4 OPEN; C5 OPEN)
+denylist: passed (78 patterns)
+tests:
+  test:run_325_production_live_epoch_transition_post_commit_audit_tests	rc=0
+  test:run_323_production_live_epoch_transition_commit_receipt_tests	rc=0
+  test:run_321_production_live_epoch_transition_commit_execution_tests	rc=0
+  test:run_319_production_live_epoch_transition_commit_authorization_tests	rc=0
+  test:run_317_production_live_epoch_transition_mutation_execution_tests	rc=0
+  test:run_315_production_live_epoch_transition_execution_preparation_tests	rc=0
+  test:run_313_production_epoch_transition_runtime_handoff_tests	rc=0
+  test:run_311_production_guarded_epoch_transition_mutation_executor_tests	rc=0
+  test:run_309_production_staged_live_validator_set_epoch_transition_application_executor_tests	rc=0
+  test:run_307_production_live_validator_set_application_authorization_tests	rc=0
+  test:run_305_production_validator_set_rotation_application_executor_tests	rc=0
+  test:run_303_production_validator_set_rotation_intent_tests	rc=0
+  test:run_301_production_governance_execution_engine_tests	rc=0
+  test:run_299_production_onchain_governance_proof_verifier_tests	rc=0
+  test:run_297_production_custody_attestation_verifier_tests	rc=0
+  test:run_295_production_kms_hsm_custody_backend_tests	rc=0
+  test:run_293_production_remote_signer_backend_tests	rc=0
+  test:run_291_production_durable_replay_rocksdb_tests	rc=0
+  test:run_186_onchain_governance_production_verifier_boundary_tests	rc=0
+  test:run_178_onchain_governance_proof_tests	rc=0
+  test:run_203_kms_hsm_backend_boundary_tests	rc=0
+  test:run_201_remote_signer_transport_boundary_tests	rc=0
+  test:run_194_remote_authority_signer_boundary_tests	rc=0
+  test:run_188_authority_custody_boundary_tests	rc=0
+  lib:pqc_authority	rc=0
+  lib:lib_all	rc=0
+
+verdict: PASS (release-binary evidence only; live epoch-transition post-commit audit Green-for-scope; MainNet authority rotation/revocation Red; Full C4 OPEN; C5 OPEN)
