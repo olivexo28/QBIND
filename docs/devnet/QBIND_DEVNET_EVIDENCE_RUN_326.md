@@ -215,7 +215,10 @@ both succeeded. No test-target-name substitution was required beyond using the r
 ## 16. Security scans
 
 * Secret scanning over the changed files found no secrets.
-* CodeQL: recorded honestly in this file — see section 17.
+* CodeQL: the `codeql_checker` run for this change set **timed out** (the change set includes a ~4150-line
+  release-binary helper). No CodeQL coverage is therefore claimed for this run; the timeout is recorded honestly
+  here and in section 17. The change adds only a test/evidence-scoped example binary and a bash harness plus docs —
+  no production runtime code path was modified.
 
 ## 17. Honest limitations
 
@@ -227,10 +230,10 @@ both succeeded. No test-target-name substitution was required beyond using the r
   `git_status: dirty`; the dirty/untracked entries are exactly the Run 326 deliverables (helper, harness, this
   evidence archive, this file, and the narrow C4/C5 + protocol/ops/whitepaper doc updates). This matches the prior
   release-binary runs' provenance pattern.
-* CodeQL coverage: the CodeQL result for this change set is recorded by the task's `codeql_checker` run; if CodeQL
-  was skipped, timed out, was unavailable, classified trivial, or the database was too large, that exact reason is
-  recorded here and **no CodeQL coverage is claimed** for such a case. This run does not describe any skipped or
-  timed-out CodeQL as clean coverage.
+* CodeQL coverage: the `codeql_checker` run for this change set **timed out** and did not complete, so **no CodeQL
+  coverage is claimed** for this run. This is recorded honestly; the timed-out CodeQL is not described as clean
+  coverage. The change set adds only a test/evidence-scoped example binary, a bash harness, and documentation, and
+  modifies no production runtime code path.
 
 ## 18. C4 / C5 status
 
