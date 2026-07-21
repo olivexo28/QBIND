@@ -1,3 +1,0 @@
-no_prior_window_clean=true
-idempotent_replay_observed=true
-recovery_is_non_mutating=true
