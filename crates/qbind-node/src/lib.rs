@@ -537,6 +537,19 @@ pub mod pqc_production_live_epoch_transition_commit_execution;
 // commit receipt / post-commit audit-preparation C4/C5 matrix row moves
 // Red -> Yellow; Full C4 remains OPEN and C5 remains OPEN.
 pub mod pqc_production_live_epoch_transition_commit_receipt;
+// Run 325 — source/test live epoch-transition post-commit audit seal /
+// durable-audit authorization boundary. Consumes a verified Run 323/324 live
+// epoch-transition commit-receipt accept decision carrying a prepared
+// commit-receipt artifact and produces a typed, deterministic, policy-gated,
+// non-mutating audit-seal / durable-audit authorization artifact encoding the
+// exact future production audit-seal / durable-audit preconditions and
+// postconditions. Default Disabled/fail-closed; MainNet refused;
+// production/MainNet audit-seal / durable-audit kinds reachable but fail closed
+// as unavailable. No default runtime wiring and no CLI flag. Source/test only:
+// release-binary evidence is deferred to Run 326. The live epoch-transition
+// post-commit audit seal / durable-audit authorization C4/C5 matrix row moves
+// Red -> Yellow; Full C4 remains OPEN and C5 remains OPEN.
+pub mod pqc_production_live_epoch_transition_post_commit_audit;
 // Run 188 — source/test-only KMS/HSM custody boundary for bundle-
 // signing authority and governance authority operations. Defines the
 // typed `AuthorityCustodyClass` (`FixtureLocalKey` / `LocalOperatorKey`

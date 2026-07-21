@@ -47,7 +47,7 @@ Captured in the tracked
 * `target/release/qbind-node` — SHA-256 `4d9af79ef9b003882d228097b103b297b5028eb3a438e1693ab1505ed345ee5c`
   (`qbind_node_sha256`).
 * `target/release/examples/run_324_production_live_epoch_transition_commit_receipt_release_binary_helper`
-  — SHA-256 `e9bffa405117b6b98a578a0310cc45d76d30ad93b760e94b015c0b67703df7cc` (`helper_320_sha256`).
+  — SHA-256 `e9bffa405117b6b98a578a0310cc45d76d30ad93b760e94b015c0b67703df7cc` (`helper_324_sha256`).
 * Toolchain: `rustc 1.97.0 (2d8144b78 2026-07-07)` / `cargo 1.97.0 (c980f4866 2026-06-30)` recorded in `summary.txt`.
 
 ## 4. Helper corpus results
