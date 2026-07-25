@@ -177,9 +177,12 @@ re-executed during cleanup; its exact committed `summary.txt` is treated as the 
   (`crates/qbind-node/examples/run_332_..._helper.rs`), the harness script
   (`scripts/devnet/run_332_..._release_binary.sh`), the archive tracked files (`README.md`, `summary.txt`, `.gitignore`),
   this canonical evidence doc, the C4/C5 criteria doc, and the five narrative docs. **No secrets were found.**
-* **CodeQL:** the `codeql_checker` tool was invoked for the Run 332 cleanup change set and returned exactly:
-  **"Skipped: all changes are trivial."** CodeQL therefore performed no analysis of this change set. **No CodeQL
-  coverage is claimed for Run 332.** The skip is not described as clean coverage. See section 14 for the full provenance.
+* **CodeQL:** the `codeql_checker` tool was invoked for the Run 332 change set (declared **non-trivial**, because the
+  change set adds a new compiled Rust example and a bash harness script). Each of three invocations returned the same
+  **infrastructure error** — `GitError: max_buffer git error: stdout maxBuffer length exceeded` — most likely because the
+  change set contains a very large (~4,600-line) generated helper plus large evidence documents. CodeQL therefore
+  performed **no** analysis of this change set. **No CodeQL coverage is claimed for Run 332;** this failed/errored result
+  is explicitly **not** described as clean coverage. See section 14 for the full provenance.
 
 ## 14. C4/C5 matrix status
 
@@ -188,11 +191,14 @@ preparation matrix row is **Green (for scope)** — for release-binary-evidenced
 live-epoch-transition-durable-audit-publication-boundary behavior only (source/test in Run 331; release-binary evidence
 positive in Run 332). MainNet authority rotation/revocation remains **Red**. No prior Green-for-scope row is weakened.
 
-**CodeQL provenance (recorded verbatim).** The `codeql_checker` tool was invoked for the Run 332 cleanup change set
-and returned exactly: **"Skipped: all changes are trivial."** The Run 332 cleanup change set adds only a canonical
-evidence document plus this security-provenance record and modifies no production runtime code path, so the tool
-classified the change as trivial and ran no analysis. Because CodeQL was **skipped**, **no CodeQL coverage is claimed for
-Run 332**; this skipped result is explicitly **not** described as clean coverage.
+**CodeQL provenance (recorded verbatim).** The `codeql_checker` tool was invoked three times for the Run 332 change
+set, declared **non-trivial** (the change set adds a new compiled Rust example and a bash harness script). Every
+invocation returned the identical infrastructure error, verbatim: **`Error in CodeQL Checker: 'GitError: max_buffer git
+error: stdout maxBuffer length exceeded'`**. This is a tool/infrastructure failure (most plausibly the ~4,600-line
+generated helper plus large evidence docs overflowing the git stdout buffer), **not** a reported code finding and **not**
+a clean result. Because CodeQL **errored and ran no analysis**, **no CodeQL coverage is claimed for Run 332**; this
+errored result is explicitly **not** described as clean coverage. Secret scanning (a separate tool) did run over all
+changed files and found no secrets.
 
 ## 15. Honest limitations
 
@@ -210,9 +216,10 @@ Run 332**; this skipped result is explicitly **not** described as clean coverage
   and the whitepaper contradiction log). Those files are committed as part of the same Run 332 change set that publishes
   this evidence doc; the `dirty` marker reflects only the in-progress harness snapshot and not any unexplained
   working-tree drift.
-* **CodeQL coverage:** the `codeql_checker` tool returned exactly **"Skipped: all changes are trivial."** (recorded
-  verbatim in section 14). Because CodeQL was **skipped**, **no CodeQL coverage is claimed for Run 332**; the skipped
-  result is **not** described as clean coverage.
+* **CodeQL coverage:** the `codeql_checker` tool was invoked three times and each returned the infrastructure error
+  `GitError: max_buffer git error: stdout maxBuffer length exceeded` (recorded verbatim in section 14). Because CodeQL
+  **errored and ran no analysis**, **no CodeQL coverage is claimed for Run 332**; the errored result is **not** described
+  as clean coverage.
 
 ## 16. C4/C5 status
 
