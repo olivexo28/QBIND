@@ -578,6 +578,21 @@ pub mod pqc_production_live_epoch_transition_durable_audit_finalization;
 // preparation C4/C5 matrix row moves Red -> Yellow; Full C4 remains OPEN and C5
 // remains OPEN.
 pub mod pqc_production_live_epoch_transition_audit_ledger_commitment;
+// Run 331 — source/test-only live epoch-transition durable-audit publication
+// authorization / external-publication-preparation boundary. Consumes a verified
+// Run 329/330 live epoch-transition audit-ledger-commitment accept decision
+// carrying a prepared audit-ledger-commitment artifact and produces a typed,
+// deterministic, policy-gated, non-mutating durable-audit-publication /
+// external-publication-preparation artifact encoding the exact future production
+// durable-audit publication / external-publication preconditions and
+// postconditions. Default Disabled/fail-closed; MainNet refused;
+// production/MainNet durable-audit-publication / external-publication-preparation
+// kinds reachable but fail closed as unavailable. No default runtime wiring and no
+// CLI flag. Source/test only: release-binary evidence is deferred to Run 332. The
+// live epoch-transition durable-audit publication authorization / external-
+// publication preparation C4/C5 matrix row moves Red -> Yellow; Full C4 remains
+// OPEN and C5 remains OPEN.
+pub mod pqc_production_live_epoch_transition_durable_audit_publication;
 // Run 188 — source/test-only KMS/HSM custody boundary for bundle-
 // signing authority and governance authority operations. Defines the
 // typed `AuthorityCustodyClass` (`FixtureLocalKey` / `LocalOperatorKey`
