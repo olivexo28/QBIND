@@ -282,15 +282,18 @@ trust-bundle-sequence / authority-marker / session state.
 
 **CodeQL result.** The `codeql_checker` tool was invoked for the Run 331 change
 (declared non-trivial: a new production-crate source module plus tests and a
-`lib.rs` registration). **Outcome: the invocation timed out** — the tool returned
-"Operation cancelled due to timeout" and instructed not to re-run it, matching the
-documented Run 329 precedent that codeql_checker result is recorded below for this large
-multi-crate workspace within the available time budget. **No CodeQL coverage is
-therefore claimed for Run 331.** The change remains additive, pure-logic,
-non-mutating source/test/docs with no I/O, no network, no `unsafe`, and no new
-dependencies; secret scanning (above) completed cleanly with no findings. A future
-run should re-attempt CodeQL in an environment with sufficient time/resources for
-the full workspace.
+`lib.rs` registration). **Outcome: the invocation failed to run.** Across three
+attempts the tool returned the infrastructure error
+`GitError: max_buffer git error: stdout maxBuffer length exceeded` — the checker's
+underlying git operation exceeded its output buffer on this large diff
+(≈7,500 added lines across the new source module and test file) and never produced
+a security result. This is a tool/environment limitation, not a completed scan with
+zero findings, so **no CodeQL coverage is claimed for Run 331.** The change remains
+additive, pure-logic, non-mutating source/test/docs with no I/O, no network, no
+`unsafe`, and no new dependencies; the Run 331 source is a mechanical token-rename
+of the already-reviewed Run 329 boundary module, and secret scanning (above)
+completed cleanly with no findings. A future run should re-attempt CodeQL in an
+environment where the checker can process the full workspace diff.
 
 ---
 
