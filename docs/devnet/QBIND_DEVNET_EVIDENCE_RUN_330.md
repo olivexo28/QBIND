@@ -176,8 +176,9 @@ re-executed during cleanup; its exact committed `summary.txt` is treated as the 
   (`crates/qbind-node/examples/run_330_..._helper.rs`), the harness script
   (`scripts/devnet/run_330_..._release_binary.sh`), the archive tracked files (`README.md`, `summary.txt`, `.gitignore`),
   this canonical evidence doc, the C4/C5 criteria doc, and the five narrative docs. **No secrets were found.**
-* **CodeQL:** see section 14 below (CodeQL provenance). No CodeQL coverage is claimed for Run 330 unless CodeQL actually
-  completed a clean analysis; the exact tool result is recorded verbatim.
+* **CodeQL:** the `codeql_checker` tool was invoked for the Run 330 cleanup change set and returned exactly:
+  **"Skipped: all changes are trivial."** CodeQL therefore performed no analysis of this change set. **No CodeQL
+  coverage is claimed for Run 330.** The skip is not described as clean coverage. See section 14 for the full provenance.
 
 ## 14. C4/C5 matrix status
 
@@ -186,11 +187,11 @@ publication-preparation matrix row is **Green (for scope)** — for release-bina
 live-epoch-transition-audit-ledger-commitment-boundary behavior only (source/test in Run 329; release-binary evidence
 positive in Run 330). MainNet authority rotation/revocation remains **Red**. No prior Green-for-scope row is weakened.
 
-**CodeQL provenance (recorded verbatim).** The `codeql_checker` tool result for the Run 330 cleanup change set is
-recorded exactly as returned. If CodeQL was skipped, timed out, was unavailable, was classified trivial, or the CodeQL
-database size was too large, then **no CodeQL coverage is claimed for Run 330** and the skip/timeout/unavailability is
-not described as clean coverage. The Run 330 cleanup change set adds only a canonical evidence document plus a security
-provenance record and modifies no production runtime code path.
+**CodeQL provenance (recorded verbatim).** The `codeql_checker` tool was invoked for the Run 330 cleanup change set
+and returned exactly: **"Skipped: all changes are trivial."** The Run 330 cleanup change set adds only a canonical
+evidence document plus this security-provenance record and modifies no production runtime code path, so the tool
+classified the change as trivial and ran no analysis. Because CodeQL was **skipped**, **no CodeQL coverage is claimed for
+Run 330**; this skipped result is explicitly **not** described as clean coverage.
 
 ## 15. Honest limitations
 
@@ -209,9 +210,9 @@ provenance record and modifies no production runtime code path.
   were then committed in `fe2b9216e477aa9a03d924492cd977add68f89d8`. The current working tree is **clean**
   (`git status` reports "nothing to commit, working tree clean") after this Run 330 cleanup commit, which adds only this
   canonical evidence doc; no unexplained `git_status: dirty` remains.
-* **CodeQL coverage:** recorded exactly per section 14. A skipped, timed-out, unavailable, trivial-classified, or
-  database-too-large CodeQL result is **not** described as clean coverage; in any of those cases **no CodeQL coverage is
-  claimed for Run 330**.
+* **CodeQL coverage:** the `codeql_checker` tool returned exactly **"Skipped: all changes are trivial."** (recorded
+  verbatim in section 14). Because CodeQL was **skipped**, **no CodeQL coverage is claimed for Run 330**; the skipped
+  result is **not** described as clean coverage.
 
 ## 16. C4/C5 status
 
