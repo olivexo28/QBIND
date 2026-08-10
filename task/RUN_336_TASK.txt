@@ -1,0 +1,354 @@
+Run 336 — Release-binary evidence for Run 335 live epoch-transition settlement / finalization-preparation boundary
+
+Continue QBIND after accepted Run 335.
+
+Current state:
+Run 335 is accepted as PASS / source-test positive. It added the live epoch-transition settlement / finalization-preparation boundary that consumes a verified Run 333/334 external-publication accept decision with `is_accept()` and `Some(external_publication_artifact)`, then produces only a typed, deterministic, policy-gated, non-mutating settlement / finalization-preparation artifact.
+
+Run 335 is source/test only. It is not release-binary evidence. The live epoch-transition settlement / finalization-preparation row is Yellow. Full C4 remains OPEN. C5 remains OPEN. MainNet authority rotation/revocation remains Red.
+
+Primary objective:
+Produce release-binary evidence for the Run 335 live epoch-transition settlement / finalization-preparation boundary.
+
+Scope:
+Release-binary evidence only. Do not add a new source/test feature boundary. Do not wire this boundary into normal node operation. Do not add a public CLI flag. Do not enable MainNet. Do not perform a live production validator-set mutation, production epoch transition, production commit/finalization, production receipt write, production audit write, production audit seal, production audit-finalization write, production audit-ledger write, production audit-ledger commitment write, durable-audit-publication write, durable replay write, settlement write, publication write, external-publication write, or settlement-finalization write.
+
+Required implementation:
+
+1. Add a release helper under:
+
+`crates/qbind-node/examples/run_336_production_live_epoch_transition_settlement_preparation_release_binary_helper.rs`
+
+2. Add a release harness under:
+
+`scripts/devnet/run_336_production_live_epoch_transition_settlement_preparation_release_binary.sh`
+
+3. Add a tracked evidence archive:
+
+`docs/devnet/run_336_production_live_epoch_transition_settlement_preparation_release_binary/README.md`
+
+`docs/devnet/run_336_production_live_epoch_transition_settlement_preparation_release_binary/summary.txt`
+
+`docs/devnet/run_336_production_live_epoch_transition_settlement_preparation_release_binary/.gitignore`
+
+Only `README.md`, `summary.txt`, and `.gitignore` should be tracked. Per-run logs, helper evidence, fixtures, exit codes, raw outputs, and generated artifacts should be gitignored.
+
+4. Add canonical evidence:
+
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_336.md`
+
+5. Update narrowly:
+
+`docs/protocol/QBIND_C4_C5_CLOSURE_CRITERIA.md`
+
+`docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md`
+
+`docs/protocol/QBIND_GOVERNANCE_EXECUTION_RUNTIME_SURFACE_AUDIT.md`
+
+`docs/protocol/QBIND_PEER_DRIVEN_TRUST_BUNDLE_APPLY_SAFETY.md`
+
+`docs/ops/QBIND_PQC_TRUST_LIFECYCLE_RUNBOOK.md`
+
+`docs/whitepaper/contradiction.md`
+
+Required C4/C5 doc hygiene:
+Refresh the C4/C5 criteria header, “Current status” heading, and nearby narrative so they explicitly say “as of Run 336.” The uploaded Run 335-era C4/C5 file still says “Status as of Run 334” and “Current status (as of Run 334)” while already containing the Run 335 Yellow row. Fix that in Run 336.
+
+The C4/C5 document must include:
+
+* Run 303/304 validator-set rotation / authority-set synchronization intent boundary — Green-for-scope.
+* Run 305/306 validator-set rotation application / epoch-transition executor boundary — Green-for-scope.
+* Run 307/308 live validator-set application / epoch-transition authorization boundary — Green-for-scope.
+* Run 309/310 staged live validator-set / epoch-transition application executor boundary — Green-for-scope.
+* Run 311/312 guarded epoch-transition mutation executor boundary — Green-for-scope.
+* Run 313/314 epoch-transition runtime handoff / live-mutation preflight boundary — Green-for-scope.
+* Run 315/316 live epoch-transition execution preparation boundary — Green-for-scope.
+* Run 317/318 live epoch-transition mutation execution boundary — Green-for-scope.
+* Run 319/320 live epoch-transition commit authorization boundary — Green-for-scope.
+* Run 321/322 live epoch-transition commit execution / finalization boundary — Green-for-scope.
+* Run 323/324 live epoch-transition commit receipt / post-commit audit-preparation boundary — Green-for-scope.
+* Run 325/326 live epoch-transition post-commit audit seal / durable-audit authorization boundary — Green-for-scope.
+* Run 327/328 live epoch-transition durable-audit finalization / audit-ledger preparation boundary — Green-for-scope.
+* Run 329/330 live epoch-transition audit-ledger commitment / durable-audit publication-preparation boundary — Green-for-scope.
+* Run 331/332 live epoch-transition durable-audit publication authorization / external-publication preparation boundary — Green-for-scope.
+* Run 333/334 live epoch-transition external-publication / settlement-preparation boundary — Green-for-scope.
+* Run 335 live epoch-transition settlement / finalization-preparation boundary — Yellow before Run 336, and Green-for-scope only if Run 336 passes.
+* Full C4 OPEN.
+* C5 OPEN.
+* MainNet authority rotation/revocation Red.
+* No live production validator-set mutation.
+* No production epoch transition.
+* No production commit/finalization.
+* No production receipt/audit/audit-seal/audit-finalization/audit-ledger/audit-ledger-commitment/durable-audit-publication/durable-replay/settlement/publication/external-publication/settlement-finalization write.
+* No default runtime wiring.
+* No public CLI enablement.
+* No C4/C5 closure claim.
+
+Release evidence must prove:
+
+1. Real `target/release/qbind-node` built and SHA-256 captured.
+2. Release helper built and SHA-256 captured.
+3. Helper links and exercises the real Run 335 boundary symbols in release mode.
+4. Accepted DevNet/TestNet source-test path consumes a verified Run 333/334 live epoch-transition external-publication accept decision with `is_accept()` and `Some(external_publication_artifact)`.
+5. Accepted path emits only a typed non-mutating live epoch-transition settlement / finalization-preparation artifact.
+6. Any positive fixture-state application is explicitly caller-owned, in-memory, source/test-only, and not production runtime, durable replay, receipt, audit, audit seal, audit-finalization, audit ledger, audit-ledger commitment, durable-audit-publication, settlement, publication, external-publication, or settlement-finalization state.
+7. Deterministic `settlement_preparation_id`, `request_id`, `settlement_preparation_digest`, `content_digest`, and `transcript_digest` are stable across two independent helper invocations.
+8. Missing external-publication decision fails closed.
+9. Unverified external-publication decision fails closed.
+10. Accepted external-publication decision without artifact fails closed.
+11. External-publication-decision-alone fails closed.
+12. Durable-audit-publication-decision-alone fails closed.
+13. Audit-ledger-commitment-decision-alone fails closed.
+14. Durable-audit-finalization-decision-alone fails closed.
+15. Post-commit-audit-decision-alone fails closed.
+16. Commit-receipt-decision-alone fails closed.
+17. Commit-execution-decision-alone fails closed.
+18. Commit-authorization-decision-alone fails closed.
+19. Mutation-execution-decision-alone fails closed.
+20. Execution-preparation-decision-alone fails closed.
+21. Runtime-handoff-decision-alone fails closed.
+22. Guarded-mutation-decision-alone fails closed.
+23. Staged-application-decision-alone fails closed.
+24. Live-authorization-alone fails closed.
+25. Application-decision-alone fails closed.
+26. Rotation-plan-alone fails closed.
+27. Governance-execution-intent-alone fails closed.
+28. Governance-proof-alone fails closed.
+29. Fixture-only authority material fails closed.
+30. Local-operator assertion fails closed.
+31. Peer-majority assertion fails closed.
+32. Custody-only evidence fails closed.
+33. RemoteSigner-only evidence fails closed.
+34. Custody-attestation-only evidence fails closed.
+35. Arbitrary validator-set bytes fail closed.
+36. Wrong external-publication decision id fails closed.
+37. Wrong external-publication request id fails closed.
+38. Wrong external-publication artifact/content digest fails closed.
+39. Wrong external-publication transcript digest fails closed.
+40. External-publication decision integrity mismatch fails closed.
+41. Wrong durable-audit-publication id/request/artifact/content/transcript digests fail closed.
+42. Wrong audit-ledger-commitment id/request/artifact/content/transcript digests fail closed.
+43. Wrong durable-audit-finalization id/request/artifact/content/transcript digests fail closed.
+44. Wrong post-commit-audit id/request/artifact/content/transcript digests fail closed.
+45. Wrong commit-receipt id/request/artifact/content/transcript digests fail closed.
+46. Wrong commit-execution id/request/artifact/content/transcript digests fail closed.
+47. Wrong commit-authorization id/request/artifact/content/transcript digests fail closed.
+48. Wrong mutation-execution id/request/artifact/content/transcript digests fail closed.
+49. Wrong execution-preparation id/request/artifact/content/transcript digests fail closed.
+50. Wrong runtime handoff id/request/package/content/transcript digests fail closed.
+51. Wrong guarded mutation id/request/record/intent/transcript digests fail closed.
+52. Wrong staged application id/request/record/intent/transcript digests fail closed.
+53. Wrong live-authorization id/request/intent/transcript digests fail closed.
+54. Wrong application decision id/request/intent/transcript digests fail closed.
+55. Wrong environment / chain / genesis / authority root fails closed.
+56. Wrong governance domain / epoch / proposal / governance execution ids / governance execution digests fails closed.
+57. Wrong rotation ids / rotation digests / lifecycle action / rotation action fails closed.
+58. Wrong current/proposed/delta validator-set digests fail closed.
+59. Wrong current-validator-set epoch/version preconditions fail closed.
+60. Wrong resulting validator-set epoch/version postconditions fail closed.
+61. Wrong epoch-transition target fails closed.
+62. Wrong durable replay domain fails closed.
+63. Wrong audit sink domain fails closed.
+64. Wrong audit ledger domain fails closed.
+65. Wrong audit-ledger commitment domain fails closed.
+66. Wrong durable-audit-publication domain fails closed.
+67. Wrong publication-preparation domain fails closed.
+68. Wrong external-publication domain fails closed.
+69. Wrong settlement-preparation domain fails closed.
+70. Wrong settlement-finalization domain fails closed.
+71. Wrong external anchor domain fails closed where represented.
+72. Wrong audit schema version fails closed.
+73. Wrong audit-seal domain separator fails closed.
+74. Wrong audit-finalization domain separator fails closed.
+75. Wrong publication-preparation domain separator fails closed.
+76. Wrong external-publication-preparation domain separator fails closed.
+77. Wrong settlement-preparation domain separator fails closed.
+78. Wrong settlement-finalization domain separator fails closed.
+79. Wrong no-conflicting-commit marker fails closed.
+80. Wrong no-prior-audit-seal marker fails closed.
+81. Wrong no-prior-audit-finalization marker fails closed.
+82. Wrong no-prior-audit-ledger-commitment marker fails closed.
+83. Wrong no-prior-durable-audit-publication marker fails closed.
+84. Wrong no-prior-external-publication marker fails closed.
+85. Wrong no-prior-settlement marker fails closed.
+86. Wrong no-prior-settlement-finalization marker fails closed.
+87. Wrong application nonce fails closed.
+88. Wrong live-application nonce fails closed.
+89. Wrong staged-application nonce fails closed.
+90. Wrong guarded-mutation nonce fails closed.
+91. Wrong runtime-handoff nonce fails closed.
+92. Wrong execution-preparation nonce fails closed.
+93. Wrong mutation-execution nonce fails closed.
+94. Wrong commit-authorization nonce fails closed.
+95. Wrong commit-execution nonce fails closed.
+96. Wrong commit-receipt nonce fails closed.
+97. Wrong post-commit-audit nonce fails closed.
+98. Wrong durable-audit-finalization nonce fails closed.
+99. Wrong audit-ledger-commitment nonce fails closed.
+100. Wrong durable-audit-publication nonce fails closed.
+101. Wrong external-publication nonce fails closed.
+102. Wrong settlement-preparation nonce fails closed where represented.
+103. Custody / attestation / durable-replay / audit-sink / audit-ledger / audit-ledger-commitment / durable-audit-publication / publication-sink / external-publication / settlement / settlement-finalization binding mismatch fails closed where represented.
+104. Replay / idempotency / stale governance epoch / stale authority sequence / stale validator-set epoch / stale validator-set version all fail closed.
+105. MainNet remains refused.
+106. Production/MainNet policies remain reachable but fail closed as unavailable.
+107. Default policy remains Disabled and fails before artifact construction.
+
+Production binary scenarios must prove:
+
+1. `qbind-node --help` exposes no new public settlement-preparation, settlement-finalization, settlement, publication, durable-audit-publication, external-publication, audit-ledger-commitment, audit-ledger, audit-finalization, post-commit-audit, audit-seal, durable-audit, audit-write, receipt-write, publication-write, settlement-write, or external-publication-write CLI flag.
+2. DevNet default binary surface stays silent and disabled.
+3. TestNet default binary surface stays silent and disabled.
+4. MainNet default binary surface stays silent and disabled / refused as appropriate.
+5. An invented settlement-preparation / settlement-finalization / settlement / publication flag is rejected by clap as an unexpected argument.
+6. Existing default genesis / environment surfaces fail closed exactly as before.
+
+Non-mutation proof:
+The release helper and harness must prove no live production mutation occurs:
+
+* no live production validator-set change;
+* no production consensus state mutation;
+* no production epoch-counter mutation;
+* no production commit;
+* no production finalization;
+* no production receipt write;
+* no production audit write;
+* no production audit seal;
+* no production audit-finalization write;
+* no production audit-ledger write;
+* no production audit-ledger commitment write;
+* no durable-audit-publication write;
+* no durable replay write;
+* no settlement write;
+* no settlement-finalization write;
+* no publication write;
+* no external-publication write;
+* no audit-finalization runtime write;
+* no `BasicHotStuffEngine::transition_to_epoch` call on production runtime state;
+* no `meta:current_epoch` write;
+* no `PAYLOAD_KIND_RECONFIG` injection;
+* no Run 070 call;
+* no `LivePqcTrustState` mutation;
+* no trust-bundle sequence write;
+* no authority-marker write;
+* no session eviction;
+* no MainNet enablement.
+
+The helper may exercise the caller-owned in-memory `LiveEpochTransitionSettlementPreparationFixtureState` only as explicit source/test evidence. It must clearly distinguish this from production runtime, durable replay, receipt, audit, audit seal, audit-finalization, audit ledger, audit-ledger commitment, durable-audit-publication, settlement, publication, external-publication, and settlement-finalization state.
+
+Required tests/regressions:
+Run and record:
+
+* `cargo build -p qbind-node --release`
+* `cargo build -p qbind-node --example run_336_production_live_epoch_transition_settlement_preparation_release_binary_helper --release`
+* Run the Run 336 harness.
+* `cargo test -p qbind-node --test run_335_production_live_epoch_transition_settlement_preparation_tests`
+* `cargo test -p qbind-node --test run_333_production_live_epoch_transition_external_publication_tests`
+* `cargo test -p qbind-node --test run_331_production_live_epoch_transition_durable_audit_publication_tests`
+* `cargo test -p qbind-node --test run_329_production_live_epoch_transition_audit_ledger_commitment_tests`
+* `cargo test -p qbind-node --test run_327_production_live_epoch_transition_durable_audit_finalization_tests`
+* `cargo test -p qbind-node --test run_325_production_live_epoch_transition_post_commit_audit_tests`
+* `cargo test -p qbind-node --test run_323_production_live_epoch_transition_commit_receipt_tests`
+* `cargo test -p qbind-node --test run_321_production_live_epoch_transition_commit_execution_tests`
+* `cargo test -p qbind-node --test run_319_production_live_epoch_transition_commit_authorization_tests`
+* `cargo test -p qbind-node --test run_317_production_live_epoch_transition_mutation_execution_tests`
+* `cargo test -p qbind-node --test run_315_production_live_epoch_transition_execution_preparation_tests`
+* `cargo test -p qbind-node --test run_313_production_epoch_transition_runtime_handoff_tests`
+* `cargo test -p qbind-node --test run_311_production_guarded_epoch_transition_mutation_executor_tests`
+* `cargo test -p qbind-node --test run_309_production_staged_live_validator_set_epoch_transition_application_executor_tests`
+* `cargo test -p qbind-node --test run_307_production_live_validator_set_application_authorization_tests`
+* `cargo test -p qbind-node --test run_305_production_validator_set_rotation_application_executor_tests`
+* `cargo test -p qbind-node --test run_303_production_validator_set_rotation_intent_tests`
+* `cargo test -p qbind-node --test run_301_production_governance_execution_engine_tests`
+* `cargo test -p qbind-node --test run_299_production_onchain_governance_proof_verifier_tests`
+* `cargo test -p qbind-node --test run_297_production_custody_attestation_verifier_tests`
+* `cargo test -p qbind-node --test run_295_production_kms_hsm_custody_backend_tests`
+* `cargo test -p qbind-node --test run_293_production_remote_signer_backend_tests`
+* `cargo test -p qbind-node --test run_291_production_durable_replay_rocksdb_tests`
+* `cargo test -p qbind-node --test run_186_onchain_governance_production_verifier_boundary_tests`
+* `cargo test -p qbind-node --test run_178_onchain_governance_proof_tests`
+* `cargo test -p qbind-node --test run_203_kms_hsm_backend_boundary_tests`
+* `cargo test -p qbind-node --test run_201_remote_signer_transport_boundary_tests`
+* `cargo test -p qbind-node --test run_194_remote_authority_signer_boundary_tests`
+* `cargo test -p qbind-node --test run_188_authority_custody_boundary_tests`
+* `cargo test -p qbind-node --lib pqc_authority`
+* `cargo test -p qbind-node --lib`
+
+If a test target name differs, use the real target name and record the substitution.
+
+Security:
+Run secret scanning over all changed files.
+Run CodeQL if available. If CodeQL is skipped, times out, unavailable, classified trivial, fails due infrastructure error, or database/diff is too large, record the exact reason directly in `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_336.md` and explicitly state that no CodeQL coverage is claimed. Do not describe a skipped, timed-out, failed, or database-too-large CodeQL result as clean coverage.
+
+Provenance hygiene:
+If a `summary.txt` file is generated, generate it after the final commit or explicitly list any dirty/untracked files. Do not leave unexplained `git_status: dirty`.
+
+C4/C5 matrix:
+If Run 336 passes, move the live epoch-transition settlement / finalization-preparation row Yellow → Green-for-scope only.
+
+Do not claim:
+
+* live production validator-set mutation;
+* production epoch transition;
+* production commit;
+* production finalization;
+* production receipt write;
+* production audit write;
+* production audit seal;
+* production audit-finalization write;
+* production audit-ledger write;
+* production audit-ledger commitment write;
+* durable-audit-publication write;
+* durable replay write;
+* settlement write;
+* settlement-finalization write;
+* publication write;
+* external-publication write;
+* MainNet authority rotation/revocation;
+* default runtime wiring;
+* public CLI enablement;
+* C4 closure;
+* C5 closure.
+
+Expected verdict:
+PASS / release-binary evidence positive if the release helper and harness prove the Run 335 boundary in release mode, all fail-closed and non-mutation properties hold, production binary surfaces remain disabled/silent, docs are updated, security scans are recorded honestly, and Full C4 / C5 remain open.
+
+Partial-positive if release evidence mostly lands but one bounded evidence item is missing and documented honestly.
+
+Unacceptable:
+
+* marking the row Green without release evidence;
+* claiming MainNet readiness;
+* adding default runtime wiring;
+* adding a public CLI flag;
+* applying a live production validator-set change;
+* performing a production epoch transition;
+* committing or finalizing production runtime state;
+* writing a production receipt, audit record, audit seal, audit-finalization record, audit-ledger record, audit-ledger commitment record, durable-audit-publication record, durable replay record, settlement record, settlement-finalization record, publication record, or external-publication record;
+* calling `transition_to_epoch` on production runtime state;
+* writing `meta:current_epoch`;
+* injecting a reconfig block;
+* calling Run 070;
+* mutating `LivePqcTrustState`;
+* hiding failed/skipped CodeQL;
+* weakening prior Green-for-scope rows.
+
+Final response format:
+
+1. Exact verdict.
+2. Files changed.
+3. Release artifacts and hashes.
+4. Helper corpus results.
+5. Real-binary scenarios.
+6. Accepted release evidence.
+7. Rejection / fail-closed evidence.
+8. MainNet refusal / authority policy evidence.
+9. Replay / idempotency evidence.
+10. Fixture-state evidence.
+11. Non-mutation evidence.
+12. Tests run.
+13. Security scans.
+14. C4/C5 matrix status.
+15. Honest limitations.
+16. C4/C5 status.
+17. Suggested Run 337 next step.
