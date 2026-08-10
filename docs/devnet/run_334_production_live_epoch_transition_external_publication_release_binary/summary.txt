@@ -1,0 +1,126 @@
+Run 334 — release-binary evidence for the Run 333 live epoch-transition external-publication boundary
+git_commit: 7b48a9f44b0c0a7f7fd14b9d32f01b0aaac9ceb2
+git_branch: copilot/run-334-task
+git_status: dirty
+
+build:
+  rustc_version:      rustc 1.97.1 (8bab26f4f 2026-07-14)
+  cargo_version:      cargo 1.97.1 (c980f4866 2026-06-30)
+  host:               Linux runnervmvrwv9 6.17.0-1020-azure #20~24.04.1-Ubuntu SMP Fri Jun 19 20:09:14 UTC 2026 x86_64 x86_64 x86_64 GNU/Linux
+  qbind_node_sha256:  267659c70892e54ba4af4a2146088058846f12d4e55afeee6a8f692109e715f6
+  helper_334_sha256:  cfbe382ba2868916c3d58c15048c68dfa4af4bb3b7a2ecc625d6628ae93574b7
+
+helper_summary: /home/runner/work/QBIND/QBIND/docs/devnet/run_334_production_live_epoch_transition_external_publication_release_binary/helper_evidence/run_334/helper_summary.txt
+  run_334_production_live_epoch_transition_external_publication_release_binary_helper
+  boundary=crates/qbind-node/src/pqc_production_live_epoch_transition_external_publication.rs :: ProductionLiveEpochTransitionExternalPublicationExecutor (Run 333 source/test boundary)
+  mode=release-binary example linked against release-built production library symbols; source/test executor constructor only; DevNet/TestNet accept identities only; no production/MainNet enablement; no live validator-set mutation; no epoch transition; no production commit; no production finalization
+  table accepted_compatible pass=32 fail=0
+  table rejection_fail_closed pass=115 fail=0
+  table mainnet_authority_policy pass=5 fail=0
+  table replay_recovery_idempotency pass=6 fail=0
+  table fixture_state pass=2 fail=0
+  table non_mutation pass=6 fail=0
+  table reachability_taxonomy pass=9 fail=0
+  total_pass=175
+  total_fail=0
+  verdict=PASS
+
+deterministic_digests: stable across two independent helper invocations
+  durable_audit_publication_intent_digest=ddf4c568a201932121d5d3794df35bc3ffc04b60beac1b1b003e06074b1f3d78
+  scenario=Add
+  external_publication_id=6ba6e327c1534dd8b51ac3138c4e0c3cbfcc00a3b4d67c80bf9823123228c8be
+  request_id=bc3b5ff9592f291049aa9e027c773a77de44579ec6af39328567632febad0509
+  external_publication_digest=38251edb59b4e99aa3abb06ec723a2f8f4b6a7aafef37da48331eadfc3e235eb
+  content_digest=38251edb59b4e99aa3abb06ec723a2f8f4b6a7aafef37da48331eadfc3e235eb
+  transcript_digest=bada82bc0dca1e91468467ee70e3fc93ab08ddbcdbfc740c14d414bf87801251
+  scenario=Remove
+  external_publication_id=4aa233d2e448d44295661349f271856775b00689b26871f9d725613477a9fbe2
+  request_id=cde0aeef22b00a2d815ea75d970edda1995ed037476f4be4d30cb9c0eb69e501
+  external_publication_digest=9098e41c2ba2175d80745da393ac731551cbc1d8240f9f519926d3ab1594e630
+  content_digest=9098e41c2ba2175d80745da393ac731551cbc1d8240f9f519926d3ab1594e630
+  transcript_digest=9b810ffb0ee237390d8a0549ca643d739dfa5b0219e5cbedfcbe3858edb8fc68
+  scenario=Update
+  external_publication_id=2ab9cd3ba700852d2ecfde7814642b92b90027ac1fa64dbc47ff2d3a08753e39
+  request_id=b394dc7a9cee0c86f3a42b28bbf354e1690a9114d9ef8d25b7c7b32fb793a462
+  external_publication_digest=8da74e189d089856cb0f0e1511f2042323695bf479dfed797bf99fcb4dceb108
+  content_digest=8da74e189d089856cb0f0e1511f2042323695bf479dfed797bf99fcb4dceb108
+  transcript_digest=0d7f8d4936d8c3771391f54e3e1be006a4755e30575ba96f6798e874a546287d
+  scenario=NoOp
+  external_publication_id=f34525c7e53df4f7c0270a8b2b3d5388174ed9546236bc3d9b3a8ac6c00f4c76
+  request_id=c5966fa5f49102573b9598fb50e655137b4e84b77985e2f56bea6fd86e0794dd
+  external_publication_digest=397d5249bc57e1d072edf297865b77fa1f7ee8216fa46003e5fbdf70c6e5e384
+  content_digest=397d5249bc57e1d072edf297865b77fa1f7ee8216fa46003e5fbdf70c6e5e384
+  transcript_digest=1f676324c0a3da38d5dd4e1bad29a97196b6fb154ed830aac073c95321e58a2e
+  scenario=Identity
+  external_publication_id=002ab88d0f273cb4460319566546e8879489d56f697e5dbbb07e7126b6177fc9
+  request_id=4ddf46801ed69ad1fff3bb2b0b404c4dbefef5b3d900957ae4085b9d23347f74
+  external_publication_digest=01688d67d0cb5fbd3a3801bd548bfcf4e0088643cdb13638bd0044dfe3b7a2b9
+  content_digest=01688d67d0cb5fbd3a3801bd548bfcf4e0088643cdb13638bd0044dfe3b7a2b9
+  transcript_digest=9337399e46d640c5da8e1b0fea1a3e3fa6dac5135c129263eb954b3aaedf1e00
+  scenario=Retire
+  external_publication_id=8b6f3e379fb64c7d0dc9cbca952b13e4d03e75bfe508b48bebb5e3ee084117f4
+  request_id=6693e64c65bcce8cea45d3e01f74f66cd3f922b935b0610d44832f291b71536d
+  external_publication_digest=fca2d6ffc64b7e3b2f4fb7d9bae243c5d6f4a3961a380e10b46255df88e25b12
+  content_digest=fca2d6ffc64b7e3b2f4fb7d9bae243c5d6f4a3961a380e10b46255df88e25b12
+  transcript_digest=8884e35eefee56db77a8d2ada41b328c2a861f8d4d145c75a5b466c43fad769a
+  scenario=Emergency
+  external_publication_id=da6d5d545641909ff416c28f4bc0634ace8d1695b494d18114bf549513c89979
+  request_id=019e0e60eabbb3985ebd16806da0b0b36b88d1648d67d6ed7759a369423e60d2
+  external_publication_digest=44c5bb4454c6f1d5a4ac61c2eb9c62cb90eee7dd4e3e8369d394685edaabf08a
+  content_digest=44c5bb4454c6f1d5a4ac61c2eb9c62cb90eee7dd4e3e8369d394685edaabf08a
+  transcript_digest=15a7cd4e41ebb5f232c3c2a2ddd76a698508f3ae7f5b49a41ff16706d29183ab
+  scenario=AuthSync
+  external_publication_id=aa784add77d911226e5e9002c3e000eac0219d052dfa0a3b216860148e45cd0b
+  request_id=6c8de0c0d19fdffd484b5c8b803157608f4809767c8593ac882190d01e04701a
+  external_publication_digest=397d7acaf6c9f1057e44051f4ed5a9355fc35f237e45cb575fd024fd1bd78fbe
+  content_digest=397d7acaf6c9f1057e44051f4ed5a9355fc35f237e45cb575fd024fd1bd78fbe
+  transcript_digest=70400aea77ae4deb8dc87c6f7abdfbe6337061c4b9832b64b6719b135fecf5d1
+  scenario=Bulk
+  external_publication_id=12498a8c8684e17a3dd133940cac5a5a90150c459cbcda43fcc1f59bc1c2d208
+  request_id=55801d68a3e1e4be36522caf77e3de9bd69ee990f3de79b9c64ffbf3b3d3f6e2
+  external_publication_digest=35741d432580fceb4fe7d865401c963e02d45395ce3196a86e455bde7ccef00c
+  content_digest=35741d432580fceb4fe7d865401c963e02d45395ce3196a86e455bde7ccef00c
+  transcript_digest=065f6e39fb3185af636f4de4f61b864fdbdaeeeebfed614ca34c2d8d34e2d145
+  named_external_publication_id=6ba6e327c1534dd8b51ac3138c4e0c3cbfcc00a3b4d67c80bf9823123228c8be
+  named_request_id=bc3b5ff9592f291049aa9e027c773a77de44579ec6af39328567632febad0509
+  named_content_digest=38251edb59b4e99aa3abb06ec723a2f8f4b6a7aafef37da48331eadfc3e235eb
+  named_transcript_digest=bada82bc0dca1e91468467ee70e3fc93ab08ddbcdbfc740c14d414bf87801251
+  outcome_tag=accepted-source-test-live-epoch-transition-external-publication
+
+release_binary_scenarios: S1_help=0 S2=1 S3=1 S4=1 S5_no_selector=2 S6_default_parse=1
+reachability: combined/source/helper/module/entry/taxonomy/boundary greps passed
+c4c5_taxonomy: passed (41 phrases; RocksDB + RemoteSigner + KMS/HSM + custody-attestation + on-chain-governance-proof-verifier + governance-execution-engine + validator-set-rotation-intent-boundary + validator-set-rotation-application-executor-boundary + live-validator-set-application-authorization-boundary + staged-live-validator-set-epoch-transition-application-executor-boundary + guarded-epoch-transition-mutation-executor-boundary + epoch-transition-runtime-handoff-boundary + live-epoch-transition-commit-receipt-boundary + live-epoch-transition-external-publication-boundary rows Green-for-scope only; Red rows unchanged; Full C4 OPEN; C5 OPEN)
+denylist: passed (83 patterns)
+tests:
+  test:run_333_production_live_epoch_transition_external_publication_tests	rc=0
+  test:run_331_production_live_epoch_transition_durable_audit_publication_tests	rc=0
+  test:run_329_production_live_epoch_transition_audit_ledger_commitment_tests	rc=0
+  test:run_327_production_live_epoch_transition_durable_audit_finalization_tests	rc=0
+  test:run_325_production_live_epoch_transition_post_commit_audit_tests	rc=0
+  test:run_323_production_live_epoch_transition_commit_receipt_tests	rc=0
+  test:run_321_production_live_epoch_transition_commit_execution_tests	rc=0
+  test:run_319_production_live_epoch_transition_commit_authorization_tests	rc=0
+  test:run_317_production_live_epoch_transition_mutation_execution_tests	rc=0
+  test:run_315_production_live_epoch_transition_execution_preparation_tests	rc=0
+  test:run_313_production_epoch_transition_runtime_handoff_tests	rc=0
+  test:run_311_production_guarded_epoch_transition_mutation_executor_tests	rc=0
+  test:run_309_production_staged_live_validator_set_epoch_transition_application_executor_tests	rc=0
+  test:run_307_production_live_validator_set_application_authorization_tests	rc=0
+  test:run_305_production_validator_set_rotation_application_executor_tests	rc=0
+  test:run_303_production_validator_set_rotation_intent_tests	rc=0
+  test:run_301_production_governance_execution_engine_tests	rc=0
+  test:run_299_production_onchain_governance_proof_verifier_tests	rc=0
+  test:run_297_production_custody_attestation_verifier_tests	rc=0
+  test:run_295_production_kms_hsm_custody_backend_tests	rc=0
+  test:run_293_production_remote_signer_backend_tests	rc=0
+  test:run_291_production_durable_replay_rocksdb_tests	rc=0
+  test:run_186_onchain_governance_production_verifier_boundary_tests	rc=0
+  test:run_178_onchain_governance_proof_tests	rc=0
+  test:run_203_kms_hsm_backend_boundary_tests	rc=0
+  test:run_201_remote_signer_transport_boundary_tests	rc=0
+  test:run_194_remote_authority_signer_boundary_tests	rc=0
+  test:run_188_authority_custody_boundary_tests	rc=0
+  lib:pqc_authority	rc=0
+  lib:lib_all	rc=0
+
+verdict: PASS (release-binary evidence only; live epoch-transition external-publication Green-for-scope; MainNet authority rotation/revocation Red; Full C4 OPEN; C5 OPEN)

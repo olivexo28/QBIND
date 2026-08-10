@@ -58,13 +58,13 @@ No change was made to the Run 333 boundary source or any other production runtim
 Captured in the tracked
 `docs/devnet/run_334_production_live_epoch_transition_external_publication_release_binary/summary.txt`:
 
-* `target/release/qbind-node` — SHA-256 `9234c14bc2fa4de58f97c9b85af32f5ef4c60a00512514c4b29defad8e883932`
+* `target/release/qbind-node` — SHA-256 `267659c70892e54ba4af4a2146088058846f12d4e55afeee6a8f692109e715f6`
   (`qbind_node_sha256`).
 * `target/release/examples/run_334_production_live_epoch_transition_external_publication_release_binary_helper`
-  — SHA-256 `24ee8ab51a38206ba602a7cd344891df737e02bbae1a8e8d75bfe40ffdddda4f` (`helper_332_sha256`).
-* Toolchain: `rustc 1.97.0 (2d8144b78 2026-07-07)` / `cargo 1.97.0 (c980f4866 2026-06-30)` recorded in `summary.txt`.
+  — SHA-256 `cfbe382ba2868916c3d58c15048c68dfa4af4bb3b7a2ecc625d6628ae93574b7` (`helper_334_sha256`).
+* Toolchain: `rustc 1.97.1 (8bab26f4f 2026-07-14)` / `cargo 1.97.1 (c980f4866 2026-06-30)` recorded in `summary.txt`.
 
-The real release binaries were rebuilt during this Run 334 cleanup (`cargo build -p qbind-node --release` and
+The real release binaries were built during this Run 334 run (`cargo build -p qbind-node --release` and
 `cargo build -p qbind-node --example run_334_..._helper --release` both succeeded). The hashes above are the exact
 values recorded by the committed harness `summary.txt`, which is treated as the final harness result for Run 334.
 
@@ -161,9 +161,10 @@ sequence write, authority-marker write, session eviction, or MainNet enablement.
 
 The Run 334 release harness
 (`scripts/devnet/run_334_production_live_epoch_transition_external_publication_release_binary.sh`) was executed
-end-to-end for this change set. It ran the full boundary regression corpus (the 28 test targets listed below, run
+end-to-end for this change set. It ran the full boundary regression corpus (28 test targets, run
 from the newest Run 333 boundary suite back through the ancestor chain, plus `--lib pqc_authority` and the full
-`--lib` suite), each passing. Representative results (final values recorded verbatim in the tracked `summary.txt`):
+`--lib` suite), each recording `rc=0` in the tracked `summary.txt`. Representative results (final values recorded
+verbatim in `summary.txt`):
 
 * `cargo test -p qbind-node --test run_333_production_live_epoch_transition_external_publication_tests` — **175 passed; 0 failed**.
 * `cargo test -p qbind-node --lib` — full library suite passed.
@@ -182,11 +183,11 @@ for Run 334.
   (`scripts/devnet/run_334_..._release_binary.sh`), the archive tracked files (`README.md`, `summary.txt`, `.gitignore`),
   this canonical evidence doc, the C4/C5 criteria doc, and the five narrative docs. **No secrets were found.**
 * **CodeQL:** the `codeql_checker` tool was invoked for the Run 334 change set (declared **non-trivial**, because the
-  change set adds a new compiled Rust example and a bash harness script). Each of three invocations returned the same
-  **infrastructure error** — `GitError: max_buffer git error: stdout maxBuffer length exceeded` — most likely because the
-  change set contains a very large (~4,600-line) generated helper plus large evidence documents. CodeQL therefore
-  performed **no** analysis of this change set. **No CodeQL coverage is claimed for Run 334;** this failed/errored result
-  is explicitly **not** described as clean coverage. See section 14 for the full provenance.
+  change set adds a new compiled Rust example and a bash harness script). It returned, verbatim: *"Analysis was skipped
+  because the database size is too large."* (0 alerts, but only because **no analysis ran**). CodeQL therefore performed
+  **no** analysis of this change set — most plausibly because the ~4,700-line generated release helper plus the large
+  evidence corpus pushed the CodeQL database over its size limit. **No CodeQL coverage is claimed for Run 334;** this
+  skipped result is explicitly **not** described as clean coverage. See section 14 for the full provenance.
 
 ## 14. C4/C5 matrix status
 
@@ -195,14 +196,14 @@ preparation matrix row is **Green (for scope)** — for release-binary-evidenced
 live-epoch-transition-external-publication-boundary behavior only (source/test in Run 333; release-binary evidence
 positive in Run 334). MainNet authority rotation/revocation remains **Red**. No prior Green-for-scope row is weakened.
 
-**CodeQL provenance (recorded verbatim).** The `codeql_checker` tool was invoked three times for the Run 334 change
-set, declared **non-trivial** (the change set adds a new compiled Rust example and a bash harness script). Every
-invocation returned the identical infrastructure error, verbatim: **`Error in CodeQL Checker: 'GitError: max_buffer git
-error: stdout maxBuffer length exceeded'`**. This is a tool/infrastructure failure (most plausibly the ~4,600-line
-generated helper plus large evidence docs overflowing the git stdout buffer), **not** a reported code finding and **not**
-a clean result. Because CodeQL **errored and ran no analysis**, **no CodeQL coverage is claimed for Run 334**; this
-errored result is explicitly **not** described as clean coverage. Secret scanning (a separate tool) did run over all
-changed files and found no secrets.
+**CodeQL provenance (recorded verbatim).** The `codeql_checker` tool was invoked for the Run 334 change set, declared
+**non-trivial** (the change set adds a new compiled Rust example and a bash harness script). It returned, verbatim:
+**`Analysis Result for 'rust'. Found 0 alerts: - rust: Analysis was skipped because the database size is too large.`**
+The reported "0 alerts" is a consequence of the analysis being **skipped**, **not** a clean scan. This is a
+tool/infrastructure limitation (most plausibly the ~4,700-line generated helper plus the large evidence docs pushing the
+CodeQL database over its size limit), **not** a reported code finding and **not** a clean result. Because CodeQL
+**ran no analysis**, **no CodeQL coverage is claimed for Run 334**; this skipped result is explicitly **not** described as
+clean coverage. Secret scanning (a separate tool) did run over all changed files and found no secrets.
 
 ## 15. Honest limitations
 
@@ -212,18 +213,17 @@ changed files and found no secrets.
   readiness.
 * The boundary is not wired into default production runtime and adds no public CLI flag.
 * **`git_status: dirty` explanation.** The committed harness `summary.txt` records `git_status: dirty` at
-  `git_commit` `5d49312973d5543f87a66073cdd7442b2a970ef2` (the Run 334 commit that had landed the release helper). The
+  `git_commit` `7b48a9f44b0c0a7f7fd14b9d32f01b0aaac9ceb2` (the Run 334 progress commit that had landed the release helper
+  and the first round of docs). The
   `summary.txt` is generated by the harness **while the run is in progress**, so at generation time the remaining Run 334
-  deliverables were still uncommitted/untracked: the harness script, the evidence archive (`README.md`, `summary.txt`,
-  `.gitignore`), this canonical evidence doc, the C4/C5 criteria doc, and the five narrative docs (trust-anchor authority
-  model, governance-execution runtime-surface audit, peer-driven trust-bundle apply safety, PQC trust-lifecycle runbook,
-  and the whitepaper contradiction log). Those files are committed as part of the same Run 334 change set that publishes
+  deliverables were still uncommitted/untracked: the evidence archive (`README.md`, `summary.txt`,
+  `.gitignore`), this canonical evidence doc, and the final in-place doc refinements. Those files are committed as part of
+  the same Run 334 change set that publishes
   this evidence doc; the `dirty` marker reflects only the in-progress harness snapshot and not any unexplained
   working-tree drift.
-* **CodeQL coverage:** the `codeql_checker` tool was invoked three times and each returned the infrastructure error
-  `GitError: max_buffer git error: stdout maxBuffer length exceeded` (recorded verbatim in section 14). Because CodeQL
-  **errored and ran no analysis**, **no CodeQL coverage is claimed for Run 334**; the errored result is **not** described
-  as clean coverage.
+* **CodeQL coverage:** the `codeql_checker` tool was invoked and returned *"Analysis was skipped because the database
+  size is too large."* (recorded verbatim in section 14). Because CodeQL **ran no analysis**, **no CodeQL coverage is
+  claimed for Run 334**; the skipped result is **not** described as clean coverage.
 
 ## 16. C4/C5 status
 
