@@ -8,18 +8,18 @@
 # Proves on real `target/release/qbind-node` plus a release-built helper that the
 # Run 335 production library symbols are present and exercised in release mode,
 # and that the real executor behaves correctly under release-built conditions
-# (DevNet/TestNet source-test accept over the real Run 335/324 verified
-# live epoch-transition commit receipt accept decision — is_accept() with
-# Some(preparation_artifact) — composing the real Run 311/312 guarded mutation
-# executor, Run 309/310 staged application executor, Run 307/308 authorization
-# executor, Run 305/306 application executor, and Run 303/304 validator-set
-# rotation intent boundary; full runtime-handoff / guarded-mutation /
+# (DevNet/TestNet source-test accept over the real Run 333/334 verified
+# live epoch-transition external-publication accept decision — is_accept() with
+# Some(external_publication_artifact) — composing the real Run 303/304 → Run 305/306
+# → Run 307/308 → Run 309/310 → Run 311/312 → Run 313/314 → Run 315/316 → Run 317/318
+# → Run 319/320 → Run 321/322 → Run 323/324 → Run 325/326 → Run 327/328 → Run 329/330
+# → Run 331/332 → Run 333/334 accept chain; full runtime-handoff / guarded-mutation /
 # staged-application / authorization / application / rotation / governance /
 # validator-set tuple + epoch-transition target + application / live-application
 # / staged-application / guarded-mutation / runtime-handoff / execution-
-# preparation nonce binding + commit-receipt-decision-integrity /
+# preparation nonce binding + external-publication-decision-integrity /
 # current-validator-set epoch-version preflight / disabled /
-# missing-commit-receipt-decision / unverified-commit-receipt-decision /
+# missing-external-publication-decision / unverified-external-publication-decision /
 # accepted-without-artifact / runtime-handoff-decision-alone / guarded-mutation-decision-alone /
 # staged-application-alone / live-authorization-alone / application-decision-alone / rotation-plan-alone /
 # governance-execution-intent-alone / governance-proof-alone / fixture-only /
@@ -28,9 +28,9 @@
 # settlement-preparation replay-recovery-idempotency / stale governance-epoch /
 # stale authority-sequence / stale validator-set epoch-version / production-
 # policy-unavailable / MainNet refused / non-mutating). The executor consumes a
-# verified live epoch-transition commit receipt accept decision and produces only a
+# verified live epoch-transition external-publication accept decision and produces only a
 # typed non-mutating live-settlement-preparation artifact for a future live
-# production mutation executor. The release helper remains dead code from the
+# production settlement or finalization executor. The release helper remains dead code from the
 # production runtime; the production binary is never wired to construct the
 # boundary and adds no CLI flag. No production runtime is enabled. MainNet
 # authority rotation/revocation remains Red. Full C4 remains OPEN. C5 remains
