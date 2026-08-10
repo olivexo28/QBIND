@@ -299,10 +299,16 @@ layer, e.g. Run 333 is `..._external_publication_tests`).
 
 **CodeQL result.** The `codeql_checker` tool was invoked for the Run 335 change,
 declared non-trivial (a new production-crate source module plus its test file and a
-`lib.rs` registration). The exact tool outcome is recorded here verbatim; if the
-scan is skipped, times out, is unavailable, is classified trivial, fails due to an
-infrastructure error, or the database/diff is too large, that exact reason is
-recorded and **no positive CodeQL coverage is claimed for Run 335.** The change
+`lib.rs` registration). The exact tool outcome recorded verbatim was:
+
+> Analysis Result for 'rust'. Found 0 alerts:
+> - **rust**: Analysis was skipped because the database size is too large.
+
+Because the CodeQL Rust analysis was **skipped (database size too large)**, the
+scan produced no findings but also provides **no positive CodeQL coverage for Run
+335** — no security assurance is claimed from CodeQL for this change. This matches
+the Run 333 predecessor, whose CodeQL run was likewise skipped for database size.
+The change
 nonetheless remains additive, pure-logic, non-mutating source/test/docs with no
 I/O, no network, no `unsafe`, and no new dependencies; the Run 335 source is a
 mechanical token-rename of the already-reviewed Run 333 boundary module, and secret
