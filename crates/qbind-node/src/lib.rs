@@ -653,6 +653,20 @@ pub mod pqc_production_live_epoch_transition_settlement_execution;
 // final settlement / authority-lifecycle completion C4/C5 matrix row moves
 // Red -> Yellow; Full C4 remains OPEN and C5 remains OPEN.
 pub mod pqc_production_live_epoch_transition_final_settlement_completion;
+// Run 343 — source/test-only live epoch-transition authority-lifecycle
+// activation-readiness / post-completion attestation boundary. Consumes a
+// verified Run 341/342 live epoch-transition final-settlement /
+// authority-lifecycle completion decision carrying a final-settlement-completion
+// artifact and produces a typed, deterministic, policy-gated, non-mutating
+// post-completion attestation artifact describing exactly what a future
+// production authority-lifecycle activation / completion-recognition /
+// final-execution sink would need to re-verify. It activates nothing, completes
+// nothing in production, writes nothing, and mutates no runtime state. Fails
+// closed by default with no default runtime wiring and no CLI flag. Source/test
+// only: release-binary evidence is deferred to Run 344. The live epoch-transition
+// authority-lifecycle activation-readiness / post-completion attestation C4/C5
+// matrix row moves Red -> Yellow; Full C4 remains OPEN and C5 remains OPEN.
+pub mod pqc_production_live_epoch_transition_authority_lifecycle_post_completion_attestation;
 // Run 188 — source/test-only KMS/HSM custody boundary for bundle-
 // signing authority and governance authority operations. Defines the
 // typed `AuthorityCustodyClass` (`FixtureLocalKey` / `LocalOperatorKey`
