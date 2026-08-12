@@ -321,11 +321,11 @@ to match the required test command exactly.
   file, `lib.rs`, and the modified docs). No secrets detected. No API keys,
   tokens, or credentials are present in any changed file.
 * **CodeQL:** run via the repository CodeQL checker over the Run 343 changes.
-  The result is recorded here. If CodeQL is skipped, times out, is unavailable,
-  classified trivial, fails due to an infrastructure error, or the database /
-  diff is too large, **no CodeQL coverage is claimed** for Run 343 and the exact
-  reason is recorded in this section. (See the final response for the concrete
-  run outcome for this session.)
+  **Result: analysis was skipped because the CodeQL database size is too large.**
+  Because CodeQL analysis did not complete, **no CodeQL coverage is claimed** for
+  Run 343. This is the exact recorded reason, per the Run 343 task requirement to
+  record skips/timeouts/too-large-database outcomes directly in this evidence
+  file. Secret scanning did complete and reported no secrets.
 
 ---
 
