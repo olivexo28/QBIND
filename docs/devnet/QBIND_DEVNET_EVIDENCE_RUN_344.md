@@ -207,9 +207,8 @@ positive in Run 344). MainNet authority rotation/revocation remains **Red**. No 
 
 **CodeQL provenance (recorded verbatim).** The `codeql_checker` tool was invoked for the Run 344 change set, declared
 **non-trivial** (the change set adds a new compiled Rust example and a bash harness script). The tool's verbatim result
-is recorded in the final change summary; where the reported "0 alerts" is a consequence of the analysis being **skipped**
-(a tool/infrastructure limitation, most plausibly the large generated helper plus the large evidence docs pushing the
-CodeQL database over its size limit), it is **not** a clean scan and **no CodeQL coverage is claimed for Run 344**. Secret
+is recorded verbatim as: `Analysis Result for 'rust'. Found 0 alerts: - rust: Analysis was skipped because the database size is too large.` Where the reported "0 alerts" is a consequence of the analysis being **skipped**
+(a tool/infrastructure limitation — the CodeQL database exceeded its size limit), it is **not** a clean scan and **no CodeQL coverage is claimed for Run 344**. Secret
 scanning (a separate tool) did run over all changed files and found no secrets.
 
 ## 15. Honest limitations
