@@ -9339,7 +9339,7 @@ mod run_343_post_completion_attestation {
 
     // ---- Run 343 (self) post-completion attestation layer ----
     // ---- Run 341 (self) final-settlement / authority-lifecycle completion layer ----
-    use qbind_node::pqc_production_live_epoch_transition_post_completion_attestation::*;
+    use qbind_node::pqc_production_live_epoch_transition_authority_lifecycle_post_completion_attestation::*;
 
     use ProductionLiveEpochTransitionPostCompletionAttestationOutcome as BO;
     use LiveEpochTransitionPostCompletionAttestationKind as BK;

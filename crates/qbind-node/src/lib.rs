@@ -666,7 +666,7 @@ pub mod pqc_production_live_epoch_transition_final_settlement_completion;
 // only: release-binary evidence is deferred to Run 344. The live epoch-transition
 // authority-lifecycle activation-readiness / post-completion attestation C4/C5
 // matrix row moves Red -> Yellow; Full C4 remains OPEN and C5 remains OPEN.
-pub mod pqc_production_live_epoch_transition_post_completion_attestation;
+pub mod pqc_production_live_epoch_transition_authority_lifecycle_post_completion_attestation;
 // Run 188 — source/test-only KMS/HSM custody boundary for bundle-
 // signing authority and governance authority operations. Defines the
 // typed `AuthorityCustodyClass` (`FixtureLocalKey` / `LocalOperatorKey`
