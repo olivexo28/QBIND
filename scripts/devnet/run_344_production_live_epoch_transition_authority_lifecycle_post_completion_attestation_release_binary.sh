@@ -52,7 +52,7 @@ set -euo pipefail
 
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-OUTDIR="${OUTDIR:-${REPO_ROOT}/docs/devnet/run_344_production_live_epoch_transition_post_completion_attestation_release_binary}"
+OUTDIR="${OUTDIR:-${REPO_ROOT}/docs/devnet/run_344_production_live_epoch_transition_authority_lifecycle_post_completion_attestation_release_binary}"
 NODE_BIN="${REPO_ROOT}/target/release/qbind-node"
 HELPER_BIN="${REPO_ROOT}/target/release/examples/run_344_production_live_epoch_transition_authority_lifecycle_post_completion_attestation_release_binary_helper"
 HELPER_OUT="${OUTDIR}/helper_evidence/run_344"
@@ -163,13 +163,13 @@ run_surface_scenario() {
   assert_surface_silent "${logf}"
 }
 
-log "S1 help hides Run 341 live epoch-transition post-completion-attestation surface (no new CLI flag)"
+log "S1 help hides Run 343 live epoch-transition post-completion-attestation surface (no new CLI flag)"
 set +e; "${NODE_BIN}" --help > "${LOGS_DIR}/qbind_node_help.log" 2>&1; HELP_RC=$?; set -e
 echo "${HELP_RC}" > "${EXIT_DIR}/S1_help.rc"; [[ "${HELP_RC}" -eq 0 ]] || fail "help failed"
 assert_surface_silent "${LOGS_DIR}/qbind_node_help.log"
 # No Run 344/341 live epoch-transition post-completion-attestation boundary flag / symbol / run marker is exposed.
 assert_not_grep "${LOGS_DIR}/qbind_node_help.log" 'live-epoch-transition-post-completion-attestation|ProductionLiveEpochTransitionPostCompletionAttestation|pqc_production_live_epoch_transition_authority_lifecycle_post_completion_attestation|post-completion-attestation|authority-lifecycle-completion|live-epoch-transition-settlement-execution|ProductionLiveEpochTransitionSettlementExecution|pqc_production_live_epoch_transition_settlement_execution|settlement-execution|live-settlement-execution|live-epoch-transition-external-publication|ProductionLiveEpochTransitionExternalPublication|pqc_production_live_epoch_transition_external_publication|external-publication|receipt-write|audit-write|live-epoch-transition-commit-receipt|ProductionLiveEpochTransitionCommitReceipt|pqc_production_live_epoch_transition_commit_receipt|commit-receipt|live-commit-receipt|run-344|run_344|run-341|run_341'
-log "S2..S4 default surfaces silent on live epoch-transition settlement-execution boundary claims"
+log "S2..S4 default surfaces silent on live epoch-transition post-completion-attestation boundary claims"
 run_surface_scenario S2_default_devnet devnet
 run_surface_scenario S3_default_testnet testnet
 run_surface_scenario S4_default_mainnet mainnet
@@ -421,7 +421,7 @@ else
 fi
 
 {
-  echo "Run 344 — release-binary evidence for the Run 341 live epoch-transition final-settlement / authority-lifecycle-completion boundary"
+  echo "Run 344 — release-binary evidence for the Run 343 live epoch-transition authority-lifecycle activation-readiness / post-completion-attestation boundary"
   echo "git_commit: $(git -C "${REPO_ROOT}" rev-parse HEAD 2>/dev/null || echo unknown)"
   echo "git_branch: $(git -C "${REPO_ROOT}" rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown)"
   echo "git_status: $(if [[ -n "$(git -C "${REPO_ROOT}" status --short 2>/dev/null)" ]]; then echo dirty; else echo clean; fi)"

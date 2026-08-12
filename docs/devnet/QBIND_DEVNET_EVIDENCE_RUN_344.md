@@ -36,14 +36,14 @@ and C5 remains OPEN.
 
 ## 2. Files changed
 
-* `crates/qbind-node/examples/run_344_production_live_epoch_transition_post_completion_attestation_release_binary_helper.rs`
+* `crates/qbind-node/examples/run_344_production_live_epoch_transition_authority_lifecycle_post_completion_attestation_release_binary_helper.rs`
   — release helper mirroring the Run 343 test corpus as release-linked free-function cases plus a
   `run_case`/`main` aggregator and a release-symbol reachability probe.
-* `scripts/devnet/run_344_production_live_epoch_transition_post_completion_attestation_release_binary.sh`
+* `scripts/devnet/run_344_production_live_epoch_transition_authority_lifecycle_post_completion_attestation_release_binary.sh`
   — executable end-to-end harness (release builds, helper twice + deterministic-digest diff, S1–S6
   real-binary scenarios, reachability greps, C4/C5 taxonomy greps, denylist, no-mutation proof, regression corpus,
   `summary.txt` emission).
-* `docs/devnet/run_344_production_live_epoch_transition_post_completion_attestation_release_binary/`
+* `docs/devnet/run_344_production_live_epoch_transition_authority_lifecycle_post_completion_attestation_release_binary/`
   — evidence archive (`README.md`, `summary.txt`, `.gitignore`; per-run artifacts git-ignored).
 * `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_342.md` — this canonical evidence file.
 * `docs/protocol/QBIND_C4_C5_CLOSURE_CRITERIA.md` — status line advanced to Run 344; live epoch-transition
@@ -60,12 +60,12 @@ No change was made to the Run 343 boundary source or any other production runtim
 ## 3. Release artifacts and hashes
 
 Captured in the tracked
-`docs/devnet/run_344_production_live_epoch_transition_post_completion_attestation_release_binary/summary.txt`:
+`docs/devnet/run_344_production_live_epoch_transition_authority_lifecycle_post_completion_attestation_release_binary/summary.txt`:
 
-* `target/release/qbind-node` — SHA-256 `70f77d651aeed22a25b31448ae368f80af9ee02bacd15571d424aa73b5c5be28`
+* `target/release/qbind-node` — SHA-256 `0b19e7cf96f07305008b9ca16229bcb63eba974a96bf8b592cc66e63c5aafe2e`
   (`qbind_node_sha256`).
-* `target/release/examples/run_344_production_live_epoch_transition_post_completion_attestation_release_binary_helper`
-  — SHA-256 `299a87926835623c2f2ec812ab30a43dde0013cfe1be15bdd2b420a9f7a40ea7` (`helper_344_sha256`).
+* `target/release/examples/run_344_production_live_epoch_transition_authority_lifecycle_post_completion_attestation_release_binary_helper`
+  — SHA-256 `7e338647cfb933876887267fc2be7d5de1ea07e53974f340b7e12e4ed9047b76` (`helper_344_sha256`).
 * Toolchain: `rustc 1.97.1 (8bab26f4f 2026-07-14)` / `cargo 1.97.1 (c980f4866 2026-06-30)` recorded in `summary.txt`.
 
 The real release binaries were built during this Run 344 run (`cargo build -p qbind-node --release` and
@@ -168,19 +168,20 @@ enablement. The denylist grep passed (91 patterns).
 ## 12. Tests run
 
 The Run 344 release harness
-(`scripts/devnet/run_344_production_live_epoch_transition_post_completion_attestation_release_binary.sh`) was executed
-end-to-end for this change set. It ran the full boundary regression corpus (32 test targets, run
+(`scripts/devnet/run_344_production_live_epoch_transition_authority_lifecycle_post_completion_attestation_release_binary.sh`) was executed
+end-to-end for this change set. It ran the full boundary regression corpus (34 test targets, run
 from the newest Run 343 boundary suite back through the ancestor chain, plus `--lib pqc_authority` and the full
 `--lib` suite), each recording `rc=0` in the tracked `summary.txt`. Representative results (final values recorded
 verbatim in `summary.txt`):
 
-* `cargo test -p qbind-node --test run_341_production_live_epoch_transition_post_completion_attestation_tests` — **passed; 0 failed**.
+* `cargo test -p qbind-node --test run_343_production_live_epoch_transition_authority_lifecycle_post_completion_attestation_tests` — **passed; 0 failed**.
+* `cargo test -p qbind-node --test run_341_production_live_epoch_transition_final_settlement_completion_tests` — **passed; 0 failed**.
 * `cargo test -p qbind-node --test run_339_production_live_epoch_transition_settlement_execution_tests` — **passed; 0 failed**.
 * `cargo test -p qbind-node --test run_337_production_live_epoch_transition_settlement_execution_preparation_tests` — **passed; 0 failed**.
 * `cargo test -p qbind-node --lib` — full library suite passed.
-* `bash -n scripts/devnet/run_344_production_live_epoch_transition_post_completion_attestation_release_binary.sh` — syntax OK.
+* `bash -n scripts/devnet/run_344_production_live_epoch_transition_authority_lifecycle_post_completion_attestation_release_binary.sh` — syntax OK.
 * `cargo build -p qbind-node --release` — succeeded.
-* `cargo build -p qbind-node --example run_344_production_live_epoch_transition_post_completion_attestation_release_binary_helper --release` — succeeded.
+* `cargo build -p qbind-node --example run_344_production_live_epoch_transition_authority_lifecycle_post_completion_attestation_release_binary_helper --release` — succeeded.
 
 The harness `summary.txt` records `verdict: PASS` for the full Run 343 → ancestor chain of boundary test suites plus
 `--lib pqc_authority` and the full `--lib` suite. The committed `summary.txt` is treated as the final harness result
