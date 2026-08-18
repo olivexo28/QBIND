@@ -1,0 +1,72 @@
+# QBIND DevNet evidence — Run 352
+
+**Title.** Release-binary evidence for the Run 351 live epoch-transition authority-activation post-final-execution confirmation / execution-sink-readiness boundary.
+
+**Status.** PASS (release-binary evidence). Run 352 is the release-binary evidence run for the Run 351 source/test **live epoch-transition authority-activation post-final-execution confirmation / execution-sink-readiness boundary** in `crates/qbind-node/src/pqc_production_live_epoch_transition_authority_activation_post_final_execution_confirmation.rs`.
+
+Run 352 proves on real `target/release/qbind-node` plus the release-built helper `crates/qbind-node/examples/run_352_production_live_epoch_transition_authority_activation_post_final_execution_confirmation_release_binary_helper.rs` that the Run 351 production library symbols are present and exercised in release mode. The helper drives the **real** Run 351 `ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationExecutor` over the **real** Run 349/350 verified live epoch-transition authority-activation final-execution accept decision (`is_accept()` with `Some(authority_activation_final_execution_artifact)`; itself composing the Run 347/348 authority-activation execution-preparation accept decision and the full prior Run 301–350 ancestor accept-decision chain), only for DevNet/TestNet source-test identities on the accept path, and produces typed non-mutating live authority-activation post-final-execution confirmation / execution-sink-readiness artifacts describing exactly what a future live production execution sink must re-verify before any real authority-activation / post-final-execution confirmation is allowed. The boundary remains dead code from the production runtime: the production binary never constructs the boundary, adds no CLI flag, and enables neither the boundary by default nor MainNet. Every failure surfaces as a typed non-mutating `ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationOutcome` variant; the boundary never writes a production post-final-execution-confirmation, final-execution, authority-activation, authority-activation-execution-preparation, authority-activation-authorization, final-settlement, authority-lifecycle-completion, settlement, settlement-finalization, settlement-execution, external publication, durable-audit publication, audit ledger, durable replay record, receipt/audit record, never applies a live production validator-set change, and never transitions a consensus epoch. Any positive fixture-state application is explicitly caller-owned, in-memory, source/test-only (`LiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationFixtureState`), and is not production runtime state.
+
+## What Run 352 states
+
+* Run 352 is release-binary evidence for the Run 351 real live epoch-transition authority-activation post-final-execution confirmation / execution-sink-readiness boundary.
+* Run 352 does not add new production runtime wiring.
+* Run 352 does not add a public CLI flag.
+* Run 352 does not enable the boundary by default.
+* Run 352 does not enable MainNet.
+* Run 352 does not apply a live production validator-set change.
+* Run 352 does not perform a production epoch transition.
+* Run 352 does not perform a production commit or finalization.
+* Run 352 does not write a production post-final-execution-confirmation, final-execution, authority-activation, authority-activation-execution-preparation, authority-activation-authorization, final-settlement, authority-lifecycle-completion, settlement, settlement-finalization, settlement-execution, external-publication, durable-audit publication, or audit record.
+* Run 352 does not mutate a live validator set, consensus state, or epoch counter.
+* Run 352 does not call `BasicHotStuffEngine::transition_to_epoch` on production runtime state.
+* Run 352 does not write `meta:current_epoch`.
+* Run 352 does not inject a `PAYLOAD_KIND_RECONFIG` block.
+* Run 352 does not implement post-final-execution confirmation, execution-sink write, authority activation, final execution, final settlement, authority-lifecycle completion, settlement, settlement-finalization, publication, external publication, audit-finalization, or durable-audit publication.
+* Run 352 does not call Run 070.
+* Run 352 does not mutate `LivePqcTrustState`.
+* Run 352 does not write trust-bundle sequence or authority marker files.
+* Run 352 exercises the caller-owned in-memory `LiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationFixtureState` only as explicit source/test evidence, clearly distinct from production runtime, durable replay, receipt, audit, settlement, publication, external-publication, final-execution, and execution-sink state.
+* Run 352 does not accept missing / unverified / accepted-without-artifact authority-activation-final-execution decisions, nor final-execution-decision-alone / execution-preparation-decision-alone / authorization-decision-alone / commit-authorization-decision-alone / mutation-execution-decision-alone / runtime-handoff-decision-alone / guarded-mutation-decision-alone / staged-application-alone / live-authorization-alone / application-decision-alone / rotation-plan-alone / governance-execution-intent-alone / governance-proof-alone / fixture / local-operator / peer-majority / custody-only / remote-signer-only / custody-attestation-only / arbitrary-validator-set-bytes material as production authority.
+* Run 352 does not weaken the Run 292 / 294 / 296 / 298 / 300 / 302 / 304 / 306 / 308 / 310 / 312 / 314 / 316 / 318 / 320 / 322 / 324 / 326 / 328 / 330 / 332 / 334 / 336 / 338 / 340 / 342 / 344 / 346 / 348 / 350 Green-for-scope statuses.
+* The default `ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationExecutorPolicy` is `Disabled` (fails closed with no artifact construction before any authority-activation-final-execution-decision / validator-set binding); `MainNet` is refused absent production authority criteria; DevNet/TestNet source-test authority-activation-post-final-execution-confirmation requests are accepted only under the explicit source-test policy when they bind a verified Run 349/350 live epoch-transition authority-activation final-execution accept decision that carries `Some(authority_activation_final_execution_artifact)`.
+* Under a production policy the boundary fails closed on missing / unverified / accepted-without-artifact / wrong-binding / authority-activation-final-execution-decision-integrity / mismatch / replay / stale inputs and never falls back to any lower-layer decision-alone / fixture / local-operator / peer-majority / custody-only / remote-signer-only / custody-attestation-only / arbitrary-bytes material.
+* The release helper exercises the Run 351 production library symbols in release mode and remains dead code from the production runtime.
+* The C4/C5 matrix taxonomy clarification remains present and separates boundary readiness from production readiness.
+* The prior Green-for-scope rows through Run 349/350 each remain Green **only** for their release-binary-evidenced scope; the live epoch-transition authority-activation final-execution row is now joined by the live epoch-transition authority-activation post-final-execution confirmation / execution-sink-readiness row, which is Green **only** for release-binary-evidenced live-epoch-transition-authority-activation-post-final-execution-confirmation-boundary behavior. None of these close C4/C5.
+* Red production rows (MainNet authority rotation/revocation under production custody, production signing audit trail / crypto-agility / incident response, full MainNet release-binary evidence under production custody) remain Red.
+* Full C4 remains **OPEN**. C5 remains **OPEN**.
+
+## Boundary symbols exercised
+
+* Policy: `ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationExecutorPolicy` (default `Disabled`, explicit source-test policy) and `ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationExecutorKind`.
+* Config: `ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationConfig`, `ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationProtocolVersion`.
+* Executor: `ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationExecutor` constructed over the real Run 349/350 verified live epoch-transition authority-activation final-execution accept decision and an in-memory replay set.
+* Authority source: `LiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationAuthoritySource`, exercised over the real Run 349/350 `ProductionLiveEpochTransitionAuthorityActivationFinalExecutionDecision`.
+* Inputs / request / decision / artifact: `ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationInputs`, `ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationRequest`, `ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationDecision`, `ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationArtifact`.
+* Entry points: `evaluate_live_epoch_transition_authority_activation_post_final_execution_confirmation`, `recover_live_epoch_transition_authority_activation_post_final_execution_confirmation_window`, `production_live_epoch_transition_authority_activation_post_final_execution_confirmation_content_digest`, `production_live_epoch_transition_authority_activation_post_final_execution_confirmation_request_id`, `production_live_epoch_transition_authority_activation_post_final_execution_confirmation_id`, `production_live_epoch_transition_authority_activation_post_final_execution_confirmation_transcript_digest`.
+* Replay set: trait `LiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationReplaySet` and `EmptyLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationReplaySet`.
+* Source/test fixture state: `LiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationFixtureState` (caller-owned, in-memory, source/test-only apply path; not production runtime state).
+* Taxonomy: `ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationOutcome`, `ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationRecoveryOutcome`, `LiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationKind`.
+
+## Substitution notes
+
+* The Run 351 executor surfaces every failure as a typed `ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationOutcome` fail-closed variant; there is no separate `ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationError` enum, so that symbol is intentionally not required by the reachability greps.
+* The Run 351 boundary produces a non-mutating `ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationArtifact` (rather than a settlement/receipt/audit "record"); the artifact captures the exact future-execution-sink preconditions/postconditions, and the `recover_live_epoch_transition_authority_activation_post_final_execution_confirmation_window` recovery path over the artifact is exercised directly by the helper as an explicit non-mutating recovery/idempotency fixture.
+* The helper corpus is 175 checks across accepted-compatible / rejection-fail-closed / MainNet-authority-policy / replay-recovery-idempotency / fixture-state / non-mutation / reachability-taxonomy tables.
+* The `supp_*` supplemental tests live in a private nested submodule that is not reachable from the helper entry point; the helper registers the core boundary cases that cover the required accepted-compatible / rejection-fail-closed / MainNet-refusal / replay-recovery / determinism / non-mutation properties.
+* Helper structure note: to reach the boundary dispatch from a release-example `fn main()`, the Run 351 boundary module (`run_351_authority_activation_post_final_execution_confirmation`, nested inside the Run 349 `run_349_authority_activation_final_execution` module in the source test) is re-exported as a `pub mod` in the helper example, and a `helper_main()` entry point is added inside it. This is the only structural deviation from a verbatim copy of the Run 351 test module; it changes no boundary logic, adds no `#[test]`, and does not alter the production library.
+* The harness `TEST_TARGETS` list begins with `run_351_..._authority_activation_post_final_execution_confirmation_tests` and `run_349_..._authority_activation_final_execution_tests` followed by the real Run-347 chain (`run_347_..._authority_activation_execution_preparation_tests`, `run_345_..._authority_activation_authorization_tests`, …) and the remaining ancestor / backend suites; all present targets are run and recorded.
+
+## How to reproduce
+
+```bash
+scripts/devnet/run_352_production_live_epoch_transition_authority_activation_post_final_execution_confirmation_release_binary.sh
+```
+
+The harness builds the real release `qbind-node` binary and the release helper, runs the helper corpus twice (checking deterministic-digest stability), captures real-binary CLI scenarios proving no public CLI flag / no enablement banner / default production silence, greps the Run 351 boundary symbols for reachability across the source module + the Run 349/350 live epoch-transition authority-activation final-execution module + the ancestor chain modules + the release helper, verifies the C4/C5 matrix taxonomy, proves the denylist empty, records a no-mutation proof, and runs the associated test targets. Generated artifacts (`logs/`, `exit_codes/`, `reachability/`, `test_results/`, `data/`, `helper_evidence/`, `provenance.txt`, `negative_invariants.txt`, `no_mutation_proof.txt`) contain absolute paths and are `.gitignore`d; only `README.md`, `summary.txt`, and `.gitignore` are tracked.
+
+## Tracked artifacts
+
+* `README.md` — this file.
+* `summary.txt` — top-level verdict, binary/helper hashes, helper corpus tables, deterministic digests, real-binary scenarios, reachability/taxonomy/denylist status, and test verdicts. It is generated by the harness during the run; if generated before the final commit it records `git_status: dirty`, and the dirty/untracked entries are exactly the Run 352 deliverables (the helper, the harness, this evidence archive, `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_352.md`, and the narrow C4/C5 + protocol/ops/whitepaper doc updates).
+* `.gitignore` — excludes the per-run generated artifacts.
