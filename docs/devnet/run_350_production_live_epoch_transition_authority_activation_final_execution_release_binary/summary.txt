@@ -1,0 +1,45 @@
+Run 350 — release-binary evidence for the Run 349 live epoch-transition authority-activation final-execution boundary
+git_commit: 7cf69a4224946dce31b420b8e2e7d1ea03d74915
+git_branch: copilot/run-350-task
+git_status: dirty
+
+build:
+  rustc_version:      rustc 1.97.1 (8bab26f4f 2026-07-14)
+  cargo_version:      cargo 1.97.1 (c980f4866 2026-06-30)
+  host:               Linux runnervmzvulz 6.17.0-1022-azure #22-Ubuntu SMP Mon Jul 27 17:24:03 UTC 2026 x86_64 x86_64 x86_64 GNU/Linux
+  qbind_node_sha256:  a36a6c331fa9796afa92f898f78789dcc52b1e8e36780c969f31e385b20fb451
+  helper_348_sha256:  dac0b000d47b1e9449fd202d6613a4a90ad8bcd7303938e3ffedca411d3f229b
+
+helper_summary: /home/runner/work/QBIND/QBIND/docs/devnet/run_350_production_live_epoch_transition_authority_activation_final_execution_release_binary/helper_evidence/run_350/helper_summary.txt
+  run=350
+  boundary=crates/qbind-node/src/pqc_production_live_epoch_transition_authority_activation_final_execution.rs::ProductionLiveEpochTransitionAuthorityActivationFinalExecutionExecutor
+  registered_cases=175
+  table accepted_compatible pass=31 fail=0
+  table determinism pass=1 fail=0
+  table mainnet_refusal pass=2 fail=0
+  table rejection_fail_closed pass=134 fail=0
+  table replay_recovery_idempotency pass=7 fail=0
+  total_pass=175
+  total_fail=0
+  verdict=PASS
+
+deterministic_digests: stable across two independent helper invocations
+  authority_activation_final_execution_id=928e0e773f388551014847304ae49401867193965c2f57025a58bf6bc0f71f5d
+  request_id=89d6f078937d7f4ba7a610e886af36cd1f99aeb5684532d5e2add1c58a2d591a
+  content_digest=85cbfd7451e16791129b8d3a07d4c249ff4e28046adbfb410c13460e455b70c7
+  authority_activation_final_execution_digest=85cbfd7451e16791129b8d3a07d4c249ff4e28046adbfb410c13460e455b70c7
+  transcript_digest=01ac4d00f6b0f0ce96ccf41ca56cf4b5aec1a565214fe0bdb28084e3bb9e46a3
+  second_authority_activation_final_execution_id=928e0e773f388551014847304ae49401867193965c2f57025a58bf6bc0f71f5d
+  second_request_id=89d6f078937d7f4ba7a610e886af36cd1f99aeb5684532d5e2add1c58a2d591a
+  second_content_digest=85cbfd7451e16791129b8d3a07d4c249ff4e28046adbfb410c13460e455b70c7
+  second_authority_activation_final_execution_digest=85cbfd7451e16791129b8d3a07d4c249ff4e28046adbfb410c13460e455b70c7
+  second_transcript_digest=01ac4d00f6b0f0ce96ccf41ca56cf4b5aec1a565214fe0bdb28084e3bb9e46a3
+
+release_binary_scenarios: S1_help=0 S2=1 S3=1 S4=1 S5_no_selector=2 S6_default_parse=1
+reachability: combined/source/helper/module/entry/taxonomy/boundary greps passed
+c4c5_taxonomy: passed (53 phrases; prior boundary rows Green-for-scope only; live-epoch-transition-authority-activation-final-execution row Green-for-scope; Red rows unchanged; Full C4 OPEN; C5 OPEN)
+denylist: passed (90 patterns)
+tests:
+  tests:skipped(RUN_350_SKIP_TESTS=1)
+
+verdict: PASS (release-binary evidence only; live epoch-transition authority-activation-final-execution Green-for-scope; MainNet authority rotation/revocation Red; Full C4 OPEN; C5 OPEN)
