@@ -354,7 +354,12 @@ predecessor chain builders plus the supplemental Run 349 boundary cases.
 * **Secret scanning:** run over the changed files (new source module, new test
   file, `lib.rs`, and the modified docs). No secrets detected. No API keys,
   tokens, or credentials are present in any changed file.
-* **CodeQL:** PENDING — recorded below after the run.
+* **CodeQL:** run via the repository CodeQL checker over the Run 349 changes.
+  The Run 349 changes add new Rust source and tests, so CodeQL was requested
+  (non-trivial). **Result: 0 alerts reported; the Rust analysis was skipped
+  because the CodeQL database size is too large.** Because CodeQL analysis did not
+  complete, **no CodeQL coverage is claimed** for Run 349. This is the exact
+  recorded reason. Secret scanning did complete and reported no secrets.
 
 ---
 
