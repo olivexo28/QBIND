@@ -1,0 +1,344 @@
+Run 351 — Source/test live epoch-transition authority-activation execution-sink readiness / post-final-execution confirmation boundary
+
+Continue QBIND after accepted Run 350.
+
+Current state:
+Run 350 is accepted as PASS / release-binary evidence positive for the Run 349 live epoch-transition authority-activation final-execution boundary.
+
+The Run 349/350 row is now Green-for-scope only. Full C4 remains OPEN. C5 remains OPEN. MainNet authority rotation/revocation remains Red.
+
+Run 350 did not add runtime wiring, did not add a public CLI flag, did not enable MainNet, did not activate authority, did not perform final execution, did not apply a live production validator-set change, did not perform a production epoch transition, did not commit or finalize production runtime state, and did not write any production final-execution, authority-activation, receipt, audit, durable replay, settlement, publication, or external-publication record.
+
+Primary objective:
+Implement the next narrow source/test boundary: a live epoch-transition authority-activation execution-sink readiness / post-final-execution confirmation boundary that consumes a verified Run 349/350 authority-activation final-execution accept decision with `is_accept()` and `Some(authority_activation_final_execution_artifact)`, then produces only a typed, deterministic, policy-gated, non-mutating post-final-execution confirmation / execution-sink-readiness artifact.
+
+Despite the name, Run 351 must not execute an authority activation, must not write to any execution sink, must not confirm production final execution, and must not mutate production state. It must produce only a typed artifact describing exactly what a future production execution sink would have to re-verify before any real authority-activation/post-final-execution confirmation is allowed.
+
+Strict scope:
+Source/test only. No release-binary evidence in Run 351; defer release-binary evidence to Run 352.
+
+Required doc-hygiene cleanup from Run 350:
+
+1. In `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_350.md`, fix the stale Section 17 heading from “Suggested Run 349 next step” to “Suggested Run 351 next step.”
+2. In the Run 350 C4/C5 wording, correct any phrase that describes the Run 349/350 Green row as “execution-preparation-boundary behavior” when the intended scope is “authority-activation final-execution boundary behavior.”
+3. Do not alter Run 350 hashes, helper counts, deterministic digests, S1–S6 results, test results, CodeQL provenance, or evidence meaning while doing this cleanup.
+
+Non-goals:
+Do not wire this boundary into normal `qbind-node` runtime.
+Do not add a public CLI flag.
+Do not enable MainNet.
+Do not activate authority.
+Do not perform final execution.
+Do not write to a final-execution sink.
+Do not write a post-final-execution confirmation record.
+Do not apply a live production validator-set change.
+Do not perform a production epoch transition.
+Do not commit production runtime state.
+Do not finalize production runtime state.
+Do not write a production receipt.
+Do not write a production audit record.
+Do not write a production audit seal.
+Do not write a production audit-finalization record.
+Do not write a production audit-ledger record.
+Do not write a production audit-ledger commitment.
+Do not write a durable-audit-publication record.
+Do not write a durable replay record.
+Do not write a settlement record.
+Do not write a settlement-finalization record.
+Do not write a settlement-execution record.
+Do not write a final-settlement record.
+Do not write an authority-lifecycle-completion record.
+Do not write an activation-readiness record.
+Do not write a post-completion-attestation record.
+Do not write an authority-activation-authorization record.
+Do not write an authority-activation execution-preparation record.
+Do not write a final-execution preflight record.
+Do not write a final-execution-readiness record.
+Do not write an authority-activation-final-execution record.
+Do not write an authority-activation record.
+Do not write a publication record.
+Do not write an external-publication record.
+Do not call `BasicHotStuffEngine::transition_to_epoch` on production runtime state.
+Do not write `meta:current_epoch`.
+Do not inject `PAYLOAD_KIND_RECONFIG`.
+Do not mutate production consensus validator state.
+Do not mutate production epoch counters.
+Do not mutate `LivePqcTrustState`.
+Do not call Run 070.
+Do not write trust-bundle sequence files.
+Do not write authority-marker files.
+Do not evict sessions.
+Do not claim live validator-set rotation.
+Do not claim production epoch transition.
+Do not claim production commit/finalization.
+Do not claim authority activation.
+Do not claim final execution.
+Do not claim post-final-execution confirmation.
+Do not claim MainNet readiness.
+Do not claim C4 closure or C5 closure.
+
+Required implementation:
+Add a narrow module, preferably:
+
+`crates/qbind-node/src/pqc_production_live_epoch_transition_authority_activation_post_final_execution_confirmation.rs`
+
+Register it in:
+
+`crates/qbind-node/src/lib.rs`
+
+Add tests:
+
+`crates/qbind-node/tests/run_351_production_live_epoch_transition_authority_activation_post_final_execution_confirmation_tests.rs`
+
+Add evidence:
+
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_351.md`
+
+The boundary must:
+
+1. Default `Disabled` / fail-closed.
+2. Accept only a verified Run 349/350 live epoch-transition authority-activation final-execution decision carrying `Some(authority_activation_final_execution_artifact)`.
+3. Reject authority-activation-final-execution decision alone, authority-activation-execution-preparation decision alone, authority-activation-authorization decision alone, post-completion-attestation decision alone, final-settlement-completion decision alone, settlement-execution decision alone, settlement-execution-preparation decision alone, settlement-preparation decision alone, external-publication decision alone, durable-audit-publication decision alone, audit-ledger-commitment decision alone, durable-audit-finalization decision alone, post-commit-audit decision alone, commit-receipt decision alone, commit-execution decision alone, commit-authorization decision alone, mutation-execution decision alone, execution-preparation decision alone, runtime-handoff decision alone, guarded-mutation decision alone, staged-application decision alone, live-authorization decision alone, application decision alone, rotation plan alone, governance execution intent alone, governance proof alone, fixture-only authority, local-operator assertion, peer-majority assertion, custody-only evidence, RemoteSigner-only evidence, attestation-only evidence, arbitrary validator-set bytes, and accepted authority-activation-final-execution decisions without an artifact.
+4. Bind environment, chain ID, genesis hash, authority root, governance domain/epoch/proposal, governance execution decision/request/intent/transcript digests, rotation decision/request/plan/transcript digests, application decision/request/intent/transcript digests, live authorization id/request/intent/transcript digests, staged application id/request/record/intent/transcript digests, guarded mutation id/request/record/intent/transcript digests, runtime handoff id/request/package/content/transcript digests, execution preparation id/request/artifact/content/transcript digests, mutation execution id/request/artifact/content/transcript digests, commit authorization id/request/artifact/content/transcript digests, commit execution id/request/artifact/content/transcript digests, commit receipt id/request/artifact/content/transcript digests, post-commit audit id/request/artifact/content/transcript digests, durable-audit-finalization id/request/artifact/content/transcript digests, audit-ledger-commitment id/request/artifact/content/transcript digests, durable-audit-publication id/request/artifact/content/transcript digests, external-publication id/request/artifact/content/transcript digests, settlement-preparation id/request/artifact/content/transcript digests, settlement-execution-preparation id/request/artifact/content/transcript digests, settlement-execution id/request/artifact/content/transcript digests, final-settlement-completion id/request/artifact/content/transcript digests, post-completion-attestation id/request/artifact/content/transcript digests, authority-activation-authorization id/request/artifact/content/transcript digests, authority-activation-execution-preparation id/request/artifact/content/transcript digests, authority-activation-final-execution id/request/artifact/content/transcript digests, current/proposed/delta validator-set digests, validator-set epoch/version, epoch-transition target, all nonces, quorum/threshold, and custody/attestation/durable-replay/audit-sink/audit-ledger/publication-sink/external-publication sink/settlement sink/settlement-finalization sink/final-settlement sink/authority-lifecycle-completion sink/activation-readiness sink/post-completion-attestation sink/authority-activation-authorization sink/authority-activation-execution-preparation sink/final-execution-preflight sink/final-execution-readiness sink/authority-activation-final-execution sink/final-execution sink/post-final-execution-confirmation sink bindings where represented.
+5. Produce a typed artifact with deterministic `authority_activation_post_final_execution_confirmation_id`, `request_id`, `authority_activation_post_final_execution_confirmation_digest`, `content_digest`, and `transcript_digest`.
+6. Encode exact future production post-final-execution confirmation / execution-sink-readiness preconditions and postconditions:
+
+   * expected previous authority-activation final-execution artifact digest;
+   * expected previous authority-activation execution-preparation artifact digest;
+   * expected previous authority-activation authorization artifact digest;
+   * expected previous post-completion-attestation artifact digest;
+   * expected previous final-settlement-completion artifact digest;
+   * expected previous settlement-execution artifact digest;
+   * expected previous settlement-execution-preparation artifact digest;
+   * expected previous settlement-preparation artifact digest;
+   * expected previous external-publication artifact digest;
+   * expected previous durable-audit-publication artifact digest;
+   * expected previous audit-ledger-commitment artifact digest;
+   * expected previous durable-audit-finalization artifact digest;
+   * expected previous post-commit-audit artifact digest;
+   * expected commit-receipt artifact digest;
+   * expected commit-execution artifact digest;
+   * expected resulting validator-set digest;
+   * expected resulting validator-set epoch/version;
+   * expected target consensus epoch;
+   * expected final-execution domain;
+   * expected authority-activation-final-execution domain;
+   * expected post-final-execution-confirmation domain;
+   * expected execution-sink-readiness domain;
+   * expected durable replay domain;
+   * expected audit sink domain;
+   * expected audit ledger domain;
+   * expected publication domain;
+   * expected external-publication domain;
+   * expected settlement domain;
+   * expected final-settlement domain;
+   * expected authority-lifecycle-completion domain;
+   * expected activation-readiness domain;
+   * expected post-completion-attestation domain;
+   * expected authority-activation-authorization domain;
+   * expected authority-activation-execution-preparation domain;
+   * expected final-execution-preflight domain;
+   * expected final-execution-readiness domain;
+   * required governance epoch;
+   * required authority sequence;
+   * required replay window;
+   * required no-conflicting-commit marker;
+   * required no-prior-authority-activation-final-execution marker;
+   * required no-prior-final-execution marker;
+   * required no-prior-post-final-execution-confirmation marker;
+   * required no-prior-execution-sink-write marker;
+   * required production runtime handle availability;
+   * required durable replay availability;
+   * required audit sink availability;
+   * required audit ledger availability;
+   * required publication sink availability, but do not write to it;
+   * required external-publication sink availability, but do not write to it;
+   * required settlement sink availability, but do not write to it;
+   * required final-settlement sink availability, but do not write to it;
+   * required authority-lifecycle-completion sink availability, but do not write to it;
+   * required authority-activation-final-execution sink availability, but do not write to it;
+   * required final-execution sink availability, but do not write to it;
+   * required post-final-execution-confirmation sink availability, but do not write to it.
+7. Enforce replay/idempotency/equivocation/freshness fail-closed.
+8. Keep MainNet refused absent complete production authority criteria.
+9. Keep production post-final-execution confirmation / execution-sink-readiness kind reachable but fail closed as unavailable.
+10. Preserve all prior Green-for-scope rows without reinterpretation.
+
+Suggested taxonomy:
+
+* `ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationExecutorPolicy`
+
+  * `Disabled`
+  * `AllowSourceTestLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmation`
+  * `RequireProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmation`
+  * `MainnetProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationRequired`
+* `ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationExecutorKind`
+
+  * `Disabled`
+  * `SourceTestLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmation`
+  * `ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationUnavailable`
+  * `MainNetLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationUnavailable`
+* `ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationRequest`
+* `ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationInputs`
+* `ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationDecision`
+* `ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationArtifact`
+* `ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationOutcome`
+* `ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationRecoveryOutcome`
+* `LiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationReplaySet`
+* optional caller-owned `LiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationFixtureState` for tests only.
+
+Required tests:
+Target at least 175 tests, covering:
+
+* accepted DevNet/TestNet source-test post-final-execution confirmation artifacts;
+* verified Run 349/350 authority-activation final-execution artifact binding;
+* deterministic digests under re-evaluation;
+* wrong environment / chain / genesis / authority root failures;
+* wrong governance domain / epoch / proposal / execution IDs / execution digests;
+* wrong rotation IDs / rotation digests;
+* wrong application IDs / application digests;
+* wrong live-authorization IDs / authorization digests;
+* wrong staged-application IDs / staged-record digests;
+* wrong guarded-mutation IDs / guarded-record digests;
+* wrong runtime-handoff IDs / handoff package digests;
+* wrong execution-preparation IDs / preparation artifact digests;
+* wrong mutation-execution IDs / mutation-execution artifact digests;
+* wrong commit-authorization IDs / commit-authorization artifact digests;
+* wrong commit-execution IDs / commit-execution artifact digests;
+* wrong commit-receipt IDs / commit-receipt artifact digests;
+* wrong post-commit-audit IDs / post-commit-audit artifact digests;
+* wrong durable-audit-finalization IDs / durable-audit-finalization artifact digests;
+* wrong audit-ledger-commitment IDs / audit-ledger-commitment artifact digests;
+* wrong durable-audit-publication IDs / durable-audit-publication artifact digests;
+* wrong external-publication IDs / external-publication artifact digests;
+* wrong settlement-preparation IDs / settlement-preparation artifact digests;
+* wrong settlement-execution-preparation IDs / settlement-execution-preparation artifact digests;
+* wrong settlement-execution IDs / settlement-execution artifact digests;
+* wrong final-settlement-completion IDs / final-settlement-completion artifact digests;
+* wrong post-completion-attestation IDs / post-completion-attestation artifact digests;
+* wrong authority-activation-authorization IDs / authority-activation-authorization artifact digests;
+* wrong authority-activation-execution-preparation IDs / authority-activation-execution-preparation artifact digests;
+* wrong authority-activation-final-execution IDs / authority-activation-final-execution artifact digests;
+* wrong current/proposed/delta validator-set digests;
+* wrong current-validator-set epoch/version preconditions;
+* wrong resulting validator-set epoch/version postconditions;
+* wrong epoch-transition target;
+* wrong final-execution / post-final-execution-confirmation / execution-sink-readiness domains;
+* wrong all relevant no-prior markers;
+* wrong all relevant nonces;
+* missing/unverified authority-activation-final-execution decision rejection;
+* accepted authority-activation-final-execution decision without artifact rejection;
+* every lower-layer decision-alone rejection;
+* fixture/local-operator/peer-majority/custody-only/RemoteSigner-only/attestation-only/arbitrary-bytes rejection;
+* replay/idempotency/equivocation;
+* stale governance epoch / authority sequence / validator-set epoch / validator-set version;
+* MainNet refusal;
+* production-policy unavailable;
+* no runtime wiring / no CLI flag invariants;
+* non-mutation invariants;
+* C4/C5 taxonomy;
+* Run 350 documentation-hygiene corrections.
+
+Required docs:
+Add:
+
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_351.md`
+
+Update narrowly:
+
+* `docs/protocol/QBIND_C4_C5_CLOSURE_CRITERIA.md`
+* `docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md`
+* `docs/protocol/QBIND_GOVERNANCE_EXECUTION_RUNTIME_SURFACE_AUDIT.md`
+* `docs/protocol/QBIND_PEER_DRIVEN_TRUST_BUNDLE_APPLY_SAFETY.md`
+* `docs/ops/QBIND_PQC_TRUST_LIFECYCLE_RUNBOOK.md`
+* `docs/whitepaper/contradiction.md`
+* `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_350.md` for the two narrow doc-hygiene corrections only.
+
+C4/C5 matrix:
+Add or move the live epoch-transition authority-activation post-final-execution confirmation / execution-sink-readiness row Red → Yellow only if source/test evidence lands. Do not mark it Green until Run 352 release-binary evidence. Do not reinterpret Run 349/350 Green-for-scope as production authority activation or production final execution.
+
+Security:
+Run secret scanning over changed files.
+Run CodeQL if available. If skipped, timed out, unavailable, classified trivial, fails due infrastructure error, or database/diff is too large, record the exact reason directly in `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_351.md` and explicitly state that no CodeQL coverage is claimed.
+
+Required test commands:
+
+* `cargo build -p qbind-node --lib`
+* `cargo test -p qbind-node --test run_351_production_live_epoch_transition_authority_activation_post_final_execution_confirmation_tests`
+* `cargo test -p qbind-node --test run_349_production_live_epoch_transition_authority_activation_final_execution_tests`
+* `cargo test -p qbind-node --test run_347_production_live_epoch_transition_authority_activation_execution_preparation_tests`
+* `cargo test -p qbind-node --test run_345_production_live_epoch_transition_authority_activation_authorization_tests`
+* `cargo test -p qbind-node --test run_343_production_live_epoch_transition_authority_lifecycle_post_completion_attestation_tests`
+* `cargo test -p qbind-node --test run_341_production_live_epoch_transition_final_settlement_completion_tests`
+* `cargo test -p qbind-node --test run_339_production_live_epoch_transition_settlement_execution_tests`
+* `cargo test -p qbind-node --test run_337_production_live_epoch_transition_settlement_execution_preparation_tests`
+* `cargo test -p qbind-node --test run_335_production_live_epoch_transition_settlement_preparation_tests`
+* `cargo test -p qbind-node --test run_333_production_live_epoch_transition_external_publication_tests`
+* `cargo test -p qbind-node --test run_331_production_live_epoch_transition_durable_audit_publication_tests`
+* `cargo test -p qbind-node --test run_329_production_live_epoch_transition_audit_ledger_commitment_tests`
+* `cargo test -p qbind-node --test run_327_production_live_epoch_transition_durable_audit_finalization_tests`
+* `cargo test -p qbind-node --test run_325_production_live_epoch_transition_post_commit_audit_tests`
+* `cargo test -p qbind-node --test run_323_production_live_epoch_transition_commit_receipt_tests`
+* `cargo test -p qbind-node --test run_321_production_live_epoch_transition_commit_execution_tests`
+* `cargo test -p qbind-node --test run_319_production_live_epoch_transition_commit_authorization_tests`
+* `cargo test -p qbind-node --test run_317_production_live_epoch_transition_mutation_execution_tests`
+* `cargo test -p qbind-node --test run_315_production_live_epoch_transition_execution_preparation_tests`
+* `cargo test -p qbind-node --test run_313_production_epoch_transition_runtime_handoff_tests`
+* `cargo test -p qbind-node --test run_311_production_guarded_epoch_transition_mutation_executor_tests`
+* `cargo test -p qbind-node --test run_309_production_staged_live_validator_set_epoch_transition_application_executor_tests`
+* `cargo test -p qbind-node --test run_307_production_live_validator_set_application_authorization_tests`
+* `cargo test -p qbind-node --test run_305_production_validator_set_rotation_application_executor_tests`
+* `cargo test -p qbind-node --test run_303_production_validator_set_rotation_intent_tests`
+* `cargo test -p qbind-node --test run_301_production_governance_execution_engine_tests`
+* `cargo test -p qbind-node --lib`
+
+If any target name differs, use the real target name and document the substitution.
+
+Provenance hygiene:
+If a summary file is generated, generate it after the final commit or explicitly list any dirty/untracked files. Do not leave unexplained `git_status: dirty`.
+
+Expected verdict:
+PASS / source-test positive if the module, tests, docs, and security provenance land; the row moves Red → Yellow only; production/MainNet post-final-execution confirmation paths fail closed; and Full C4 / C5 remain open.
+
+Partial-positive if the core module lands and compiles but tests/docs/security closure are incomplete.
+
+Unacceptable:
+
+* release-binary claim in Run 351;
+* marking the row Green;
+* adding default runtime wiring;
+* adding a public CLI flag;
+* enabling MainNet;
+* mutating live production consensus state;
+* applying a live production validator-set change;
+* performing a production epoch transition;
+* committing/finalizing production runtime state;
+* writing any production receipt, audit, durable replay, settlement, final-settlement, authority-lifecycle-completion, authority-activation, final-execution, post-final-execution-confirmation, publication, or external-publication record;
+* calling `transition_to_epoch` on production runtime state;
+* writing `meta:current_epoch`;
+* injecting a reconfig block;
+* calling Run 070;
+* mutating `LivePqcTrustState`;
+* hiding failed/skipped CodeQL;
+* weakening prior Green-for-scope rows.
+
+Final response format:
+
+1. Exact verdict.
+2. Files changed.
+3. Boundary design summary.
+4. Policy/kind/post-final-execution-confirmation taxonomy.
+5. Run 349/350 authority-activation-final-execution artifact binding.
+6. Post-final-execution confirmation / execution-sink-readiness artifact model.
+7. Accepted source/test evidence.
+8. Rejection/fail-closed evidence.
+9. MainNet refusal evidence.
+10. Replay/idempotency evidence.
+11. Fixture-state evidence, if any.
+12. Non-mutation evidence.
+13. Tests run.
+14. Security scans.
+15. C4/C5 matrix status.
+16. Honest limitations.
+17. C4/C5 status.
+18. Suggested Run 352 next step.
