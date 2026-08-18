@@ -424,7 +424,7 @@ else
 fi
 
 {
-  echo "Run 346 — release-binary evidence for the Run 343 live epoch-transition authority-lifecycle activation-readiness / authority-activation-authorization boundary"
+  echo "Run 346 — release-binary evidence for the Run 345 live epoch-transition authority-activation authorization / final-execution readiness boundary"
   echo "git_commit: $(git -C "${REPO_ROOT}" rev-parse HEAD 2>/dev/null || echo unknown)"
   echo "git_branch: $(git -C "${REPO_ROOT}" rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown)"
   echo "git_status: $(if [[ -n "$(git -C "${REPO_ROOT}" status --short 2>/dev/null)" ]]; then echo dirty; else echo clean; fi)"
@@ -444,7 +444,7 @@ fi
   echo
   echo "release_binary_scenarios: S1_help=${HELP_RC} S2=$(cat "${EXIT_DIR}/S2_default_devnet.rc") S3=$(cat "${EXIT_DIR}/S3_default_testnet.rc") S4=$(cat "${EXIT_DIR}/S4_default_mainnet.rc") S5_no_selector=${S5_RC} S6_default_parse=${S6_RC}"
   echo "reachability: combined/source/helper/module/entry/taxonomy/boundary greps passed"
-  echo "c4c5_taxonomy: passed (${#C4C5_PHRASES[@]} phrases; RocksDB + RemoteSigner + KMS/HSM + custody-attestation + on-chain-governance-proof-verifier + governance-execution-engine + validator-set-rotation-intent-boundary + validator-set-rotation-application-executor-boundary + live-validator-set-application-authorization-boundary + staged-live-validator-set-epoch-transition-application-executor-boundary + guarded-epoch-transition-mutation-executor-boundary + epoch-transition-runtime-handoff-boundary + live-epoch-transition-commit-receipt-boundary + live-epoch-transition-settlement-execution-boundary + live-epoch-transition-authority-activation-authorization-boundary rows Green-for-scope only; Red rows unchanged; Full C4 OPEN; C5 OPEN)"
+  echo "c4c5_taxonomy: passed (${#C4C5_PHRASES[@]} phrases; RocksDB + RemoteSigner + KMS/HSM + custody-attestation + on-chain-governance-proof-verifier + governance-execution-engine + validator-set-rotation-intent-boundary + validator-set-rotation-application-executor-boundary + live-validator-set-application-authorization-boundary + staged-live-validator-set-epoch-transition-application-executor-boundary + guarded-epoch-transition-mutation-executor-boundary + epoch-transition-runtime-handoff-boundary + live-epoch-transition-commit-receipt-boundary + live-epoch-transition-settlement-execution-boundary + live-epoch-transition-post-completion-attestation-boundary + live-epoch-transition-authority-activation-authorization-boundary rows Green-for-scope only; Red rows unchanged; Full C4 OPEN; C5 OPEN)"
   echo "denylist: passed (${#DENY_PATTERNS[@]} patterns)"
   echo "tests:"
   for verdict in "${TEST_VERDICTS[@]}"; do echo "  ${verdict}"; done

@@ -1,0 +1,82 @@
+Run 346 — release-binary evidence for the Run 345 live epoch-transition authority-activation authorization / final-execution readiness boundary
+git_commit: 9e05038d6c5127ffb8b9a657b37d11a0349ac5f2
+git_branch: copilot/run-346-implement-task
+git_status: dirty
+
+build:
+  rustc_version:      rustc 1.97.1 (8bab26f4f 2026-07-14)
+  cargo_version:      cargo 1.97.1 (c980f4866 2026-06-30)
+  host:               Linux runnervmzvulz 6.17.0-1022-azure #22-Ubuntu SMP Mon Jul 27 17:24:03 UTC 2026 x86_64 x86_64 x86_64 GNU/Linux
+  qbind_node_sha256:  21f53ef7ffe60304d029f5cafb15269b3aab95d92b82e139abee13a0f023825f
+  helper_346_sha256:  891c89a0c61ababb2aabb790be229dc079d68475cd654c05e6f05c90918739bc
+
+helper_summary: /home/runner/work/QBIND/QBIND/docs/devnet/run_346_production_live_epoch_transition_authority_activation_authorization_release_binary/helper_evidence/run_346/helper_summary.txt
+  run=346
+  boundary=crates/qbind-node/src/pqc_production_live_epoch_transition_authority_activation_authorization.rs::ProductionLiveEpochTransitionAuthorityActivationAuthorizationExecutor
+  registered_cases=175
+  table accepted_compatible pass=31 fail=0
+  table fixture_state pass=2 fail=0
+  table mainnet_policy pass=5 fail=0
+  table non_mutation pass=2 fail=0
+  table rejection_fail_closed pass=116 fail=0
+  table replay_idempotency_freshness pass=6 fail=0
+  table taxonomy_policy_kind pass=13 fail=0
+  total_pass=175
+  total_fail=0
+  verdict=PASS
+
+deterministic_digests: stable across two independent helper invocations
+  authority_activation_authorization_id=b0568638c35b3e1edee6e5387c937004fe8e102d36f34ae2fa989eae3bbc24fc
+  request_id=f253c9b03507104132b2378139f53a25cee6446d64c7f7a41b9c7d0f5a452870
+  content_digest=01c009c78f01936449a2262105f1ba0fe143435f3a0562c2dfe738bd86f5b79a
+  authority_activation_authorization_digest=01c009c78f01936449a2262105f1ba0fe143435f3a0562c2dfe738bd86f5b79a
+  transcript_digest=c9712ade7d8cd54ddc9b8d520216db2a7476fad566f2647d16eddcb6230e90a5
+  second_authority_activation_authorization_id=b0568638c35b3e1edee6e5387c937004fe8e102d36f34ae2fa989eae3bbc24fc
+  second_request_id=f253c9b03507104132b2378139f53a25cee6446d64c7f7a41b9c7d0f5a452870
+  second_content_digest=01c009c78f01936449a2262105f1ba0fe143435f3a0562c2dfe738bd86f5b79a
+  second_authority_activation_authorization_digest=01c009c78f01936449a2262105f1ba0fe143435f3a0562c2dfe738bd86f5b79a
+  second_transcript_digest=c9712ade7d8cd54ddc9b8d520216db2a7476fad566f2647d16eddcb6230e90a5
+
+release_binary_scenarios: S1_help=0 S2=1 S3=1 S4=1 S5_no_selector=2 S6_default_parse=1
+reachability: combined/source/helper/module/entry/taxonomy/boundary greps passed
+c4c5_taxonomy: passed (51 phrases; RocksDB + RemoteSigner + KMS/HSM + custody-attestation + on-chain-governance-proof-verifier + governance-execution-engine + validator-set-rotation-intent-boundary + validator-set-rotation-application-executor-boundary + live-validator-set-application-authorization-boundary + staged-live-validator-set-epoch-transition-application-executor-boundary + guarded-epoch-transition-mutation-executor-boundary + epoch-transition-runtime-handoff-boundary + live-epoch-transition-commit-receipt-boundary + live-epoch-transition-settlement-execution-boundary + live-epoch-transition-post-completion-attestation-boundary + live-epoch-transition-authority-activation-authorization-boundary rows Green-for-scope only; Red rows unchanged; Full C4 OPEN; C5 OPEN)
+denylist: passed (91 patterns)
+tests:
+  test:run_345_production_live_epoch_transition_authority_activation_authorization_tests	rc=0
+  test:run_343_production_live_epoch_transition_authority_lifecycle_post_completion_attestation_tests	rc=0
+  test:run_341_production_live_epoch_transition_final_settlement_completion_tests	rc=0
+  test:run_339_production_live_epoch_transition_settlement_execution_tests	rc=0
+  test:run_337_production_live_epoch_transition_settlement_execution_preparation_tests	rc=0
+  test:run_335_production_live_epoch_transition_settlement_preparation_tests	rc=0
+  test:run_333_production_live_epoch_transition_external_publication_tests	rc=0
+  test:run_331_production_live_epoch_transition_durable_audit_publication_tests	rc=0
+  test:run_329_production_live_epoch_transition_audit_ledger_commitment_tests	rc=0
+  test:run_327_production_live_epoch_transition_durable_audit_finalization_tests	rc=0
+  test:run_325_production_live_epoch_transition_post_commit_audit_tests	rc=0
+  test:run_323_production_live_epoch_transition_commit_receipt_tests	rc=0
+  test:run_321_production_live_epoch_transition_commit_execution_tests	rc=0
+  test:run_319_production_live_epoch_transition_commit_authorization_tests	rc=0
+  test:run_317_production_live_epoch_transition_mutation_execution_tests	rc=0
+  test:run_315_production_live_epoch_transition_execution_preparation_tests	rc=0
+  test:run_313_production_epoch_transition_runtime_handoff_tests	rc=0
+  test:run_311_production_guarded_epoch_transition_mutation_executor_tests	rc=0
+  test:run_309_production_staged_live_validator_set_epoch_transition_application_executor_tests	rc=0
+  test:run_307_production_live_validator_set_application_authorization_tests	rc=0
+  test:run_305_production_validator_set_rotation_application_executor_tests	rc=0
+  test:run_303_production_validator_set_rotation_intent_tests	rc=0
+  test:run_301_production_governance_execution_engine_tests	rc=0
+  test:run_299_production_onchain_governance_proof_verifier_tests	rc=0
+  test:run_297_production_custody_attestation_verifier_tests	rc=0
+  test:run_295_production_kms_hsm_custody_backend_tests	rc=0
+  test:run_293_production_remote_signer_backend_tests	rc=0
+  test:run_291_production_durable_replay_rocksdb_tests	rc=0
+  test:run_186_onchain_governance_production_verifier_boundary_tests	rc=0
+  test:run_178_onchain_governance_proof_tests	rc=0
+  test:run_203_kms_hsm_backend_boundary_tests	rc=0
+  test:run_201_remote_signer_transport_boundary_tests	rc=0
+  test:run_194_remote_authority_signer_boundary_tests	rc=0
+  test:run_188_authority_custody_boundary_tests	rc=0
+  lib:pqc_authority	rc=0
+  lib:lib_all	rc=0
+
+verdict: PASS (release-binary evidence only; live epoch-transition authority-activation-authorization Green-for-scope; MainNet authority rotation/revocation Red; Full C4 OPEN; C5 OPEN)
