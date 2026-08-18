@@ -1,5 +1,5 @@
 Run 350 — release-binary evidence for the Run 349 live epoch-transition authority-activation final-execution boundary
-git_commit: 7cf69a4224946dce31b420b8e2e7d1ea03d74915
+git_commit: 7377897500583b853fcf56bab412115267a75bef
 git_branch: copilot/run-350-task
 git_status: dirty
 
@@ -8,7 +8,7 @@ build:
   cargo_version:      cargo 1.97.1 (c980f4866 2026-06-30)
   host:               Linux runnervmzvulz 6.17.0-1022-azure #22-Ubuntu SMP Mon Jul 27 17:24:03 UTC 2026 x86_64 x86_64 x86_64 GNU/Linux
   qbind_node_sha256:  a36a6c331fa9796afa92f898f78789dcc52b1e8e36780c969f31e385b20fb451
-  helper_348_sha256:  dac0b000d47b1e9449fd202d6613a4a90ad8bcd7303938e3ffedca411d3f229b
+  helper_350_sha256:  dac0b000d47b1e9449fd202d6613a4a90ad8bcd7303938e3ffedca411d3f229b
 
 helper_summary: /home/runner/work/QBIND/QBIND/docs/devnet/run_350_production_live_epoch_transition_authority_activation_final_execution_release_binary/helper_evidence/run_350/helper_summary.txt
   run=350
@@ -40,6 +40,43 @@ reachability: combined/source/helper/module/entry/taxonomy/boundary greps passed
 c4c5_taxonomy: passed (53 phrases; prior boundary rows Green-for-scope only; live-epoch-transition-authority-activation-final-execution row Green-for-scope; Red rows unchanged; Full C4 OPEN; C5 OPEN)
 denylist: passed (90 patterns)
 tests:
-  tests:skipped(RUN_350_SKIP_TESTS=1)
+  test:run_349_production_live_epoch_transition_authority_activation_final_execution_tests	rc=0
+  test:run_347_production_live_epoch_transition_authority_activation_execution_preparation_tests	rc=0
+  test:run_345_production_live_epoch_transition_authority_activation_authorization_tests	rc=0
+  test:run_343_production_live_epoch_transition_authority_lifecycle_post_completion_attestation_tests	rc=0
+  test:run_341_production_live_epoch_transition_final_settlement_completion_tests	rc=0
+  test:run_339_production_live_epoch_transition_settlement_execution_tests	rc=0
+  test:run_337_production_live_epoch_transition_settlement_execution_preparation_tests	rc=0
+  test:run_335_production_live_epoch_transition_settlement_preparation_tests	rc=0
+  test:run_333_production_live_epoch_transition_external_publication_tests	rc=0
+  test:run_331_production_live_epoch_transition_durable_audit_publication_tests	rc=0
+  test:run_329_production_live_epoch_transition_audit_ledger_commitment_tests	rc=0
+  test:run_327_production_live_epoch_transition_durable_audit_finalization_tests	rc=0
+  test:run_325_production_live_epoch_transition_post_commit_audit_tests	rc=0
+  test:run_323_production_live_epoch_transition_commit_receipt_tests	rc=0
+  test:run_321_production_live_epoch_transition_commit_execution_tests	rc=0
+  test:run_319_production_live_epoch_transition_commit_authorization_tests	rc=0
+  test:run_317_production_live_epoch_transition_mutation_execution_tests	rc=0
+  test:run_315_production_live_epoch_transition_execution_preparation_tests	rc=0
+  test:run_313_production_epoch_transition_runtime_handoff_tests	rc=0
+  test:run_311_production_guarded_epoch_transition_mutation_executor_tests	rc=0
+  test:run_309_production_staged_live_validator_set_epoch_transition_application_executor_tests	rc=0
+  test:run_307_production_live_validator_set_application_authorization_tests	rc=0
+  test:run_305_production_validator_set_rotation_application_executor_tests	rc=0
+  test:run_303_production_validator_set_rotation_intent_tests	rc=0
+  test:run_301_production_governance_execution_engine_tests	rc=0
+  test:run_299_production_onchain_governance_proof_verifier_tests	rc=0
+  test:run_297_production_custody_attestation_verifier_tests	rc=0
+  test:run_295_production_kms_hsm_custody_backend_tests	rc=0
+  test:run_293_production_remote_signer_backend_tests	rc=0
+  test:run_291_production_durable_replay_rocksdb_tests	rc=0
+  test:run_186_onchain_governance_production_verifier_boundary_tests	rc=0
+  test:run_178_onchain_governance_proof_tests	rc=0
+  test:run_203_kms_hsm_backend_boundary_tests	rc=0
+  test:run_201_remote_signer_transport_boundary_tests	rc=0
+  test:run_194_remote_authority_signer_boundary_tests	rc=0
+  test:run_188_authority_custody_boundary_tests	rc=0
+  lib:pqc_authority	rc=0
+  lib:lib_all	rc=0
 
 verdict: PASS (release-binary evidence only; live epoch-transition authority-activation-final-execution Green-for-scope; MainNet authority rotation/revocation Red; Full C4 OPEN; C5 OPEN)
