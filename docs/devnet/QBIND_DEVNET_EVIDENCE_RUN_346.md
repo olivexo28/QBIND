@@ -230,18 +230,20 @@ scanning (a separate tool) did run over all changed files and found no secrets.
 
 ## 16. C4/C5 status
 
-Full **C4 remains OPEN**. **C5 remains OPEN**. The live epoch-transition authority-lifecycle activation-readiness / post-completion attestation row is
+Full **C4 remains OPEN**. **C5 remains OPEN**. The live epoch-transition authority-activation authorization / final-execution readiness row is
 **Green-for-scope only** (Run 345 source/test + Run 346 release-binary evidence). MainNet
 authority rotation/revocation remains **Red**. There is no live production validator-set mutation, no production epoch
 transition, no production commit/finalization, no production receipt/audit/audit-seal/audit-finalization/audit-ledger/
 external-publication/durable-replay/settlement/settlement-finalization/settlement-execution/final-settlement/publication write, no default runtime wiring, no
 public CLI enablement, and no C4/C5 closure claim.
 
-## 17. Suggested Run 345 next step
+## 17. Suggested Run 347 next step
 
-Run 345 (source/test, odd cadence): implement the next non-mutating boundary that consumes a verified Run 345/346 live
+Run 347 (source/test, odd cadence): implement the next non-mutating boundary that consumes a verified Run 345/346 live
 epoch-transition authority-activation authorization / final-execution readiness accept decision (`is_accept()` with
-`Some(authority_activation_authorization_artifact)`) — a live epoch-transition **authority-activation authorization /
-final-execution readiness** boundary — producing only a typed, deterministic, policy-gated, non-mutating artifact, moving a **new**
-matrix row Red → Yellow, with release-binary evidence deferred to Run 346. Full C4 / C5 remain OPEN. Do not begin
+`Some(authority_activation_authorization_artifact)`) — a live epoch-transition **authority-activation
+execution-preparation / final-execution preflight** boundary — producing only a typed, deterministic, policy-gated,
+non-mutating authority-activation execution-preparation / final-execution preflight artifact that describes exactly what a
+future production authority-activation / final-execution executor must re-verify, moving a **new**
+matrix row Red → Yellow, with release-binary evidence deferred to Run 348. Full C4 / C5 remain OPEN. Do not begin
 production runtime wiring, MainNet enablement, or any live mutation.
