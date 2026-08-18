@@ -687,6 +687,14 @@ pub mod pqc_production_live_epoch_transition_authority_activation_authorization;
 // produces a typed, non-mutating authority-activation execution-preparation /
 // final-execution preflight artifact. No runtime wiring; no CLI flag.
 pub mod pqc_production_live_epoch_transition_authority_activation_execution_preparation;
+// Run 349 — source/test-only live epoch-transition authority-activation
+// final-execution boundary. Consumes a verified Run 347/348
+// authority-activation execution-preparation / final-execution preflight
+// decision and produces a typed, non-mutating authority-activation
+// final-execution artifact. No runtime wiring; no CLI flag. Source/test only;
+// release-binary evidence deferred to Run 350. C4/C5 row moves Red -> Yellow;
+// Full C4 remains OPEN and C5 remains OPEN.
+pub mod pqc_production_live_epoch_transition_authority_activation_final_execution;
 // Run 188 — source/test-only KMS/HSM custody boundary for bundle-
 // signing authority and governance authority operations. Defines the
 // typed `AuthorityCustodyClass` (`FixtureLocalKey` / `LocalOperatorKey`
