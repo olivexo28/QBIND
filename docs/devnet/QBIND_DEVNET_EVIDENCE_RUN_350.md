@@ -244,11 +244,11 @@ public CLI enablement, and no C4/C5 closure claim.
 
 ## 17. Suggested Run 351 next step
 
-Run 349 (source/test, odd cadence): implement the next non-mutating boundary that consumes a verified Run 349/350 live
+Run 351 (source/test, odd cadence): implement the next non-mutating boundary that consumes a verified Run 349/350 live
 epoch-transition authority-activation final-execution accept decision (`is_accept()` with
 `Some(authority_activation_final_execution_artifact)`) — a live epoch-transition **authority-activation
-final-execution** boundary — producing only a typed, deterministic, policy-gated,
-non-mutating authority-activation final-execution preflight artifact that describes exactly what a
-future production authority-activation / final-execution executor must re-verify, moving a **new**
-matrix row Red → Yellow, with release-binary evidence deferred to Run 350. Full C4 / C5 remain OPEN. Do not begin
+post-final-execution confirmation / execution-sink-readiness** boundary — producing only a typed, deterministic, policy-gated,
+non-mutating authority-activation post-final-execution confirmation / execution-sink-readiness artifact that describes exactly what a
+future production execution sink must re-verify, moving a **new**
+matrix row Red → Yellow, with release-binary evidence deferred to Run 352. Full C4 / C5 remain OPEN. Do not begin
 production runtime wiring, CLI enablement, or MainNet activation.
