@@ -362,13 +362,14 @@ No target name required substitution.
   new test target, the new and modified docs, and `lib.rs`). No secrets were
   found; the change set introduces no credentials, keys, or tokens.
 * **CodeQL** — the `codeql_checker` tool was invoked for the Run 351 change set.
-  Its verbatim result is recorded in the PR/session log. Run 351 is a
+  Its verbatim result was: *"Analysis Result for 'rust'. Found 0 alerts: rust:
+  Analysis was skipped because the database size is too large."* Run 351 is a
   source/test-only, additive, deterministic-artifact change (a new fail-closed
-  module plus a shift-by-one test target and docs); where CodeQL performs no
-  analysis (for example a skipped result due to database/diff size, a timeout, a
-  trivial classification, or an infrastructure error), the exact reason is
-  recorded and **no CodeQL coverage is claimed for Run 351**. A skipped or
-  errored result is **not** described as clean coverage.
+  module plus a shift-by-one test target and docs); because CodeQL **skipped**
+  analysis (database size too large), the 0-alert result reflects **no analysis
+  performed**, not clean coverage. The exact reason is recorded here and
+  **no CodeQL coverage is claimed for Run 351**. This skipped result is **not**
+  described as clean coverage.
 
 ---
 
