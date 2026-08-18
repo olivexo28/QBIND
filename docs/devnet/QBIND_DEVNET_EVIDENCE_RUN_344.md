@@ -45,7 +45,7 @@ and C5 remains OPEN.
   `summary.txt` emission).
 * `docs/devnet/run_344_production_live_epoch_transition_authority_lifecycle_post_completion_attestation_release_binary/`
   — evidence archive (`README.md`, `summary.txt`, `.gitignore`; per-run artifacts git-ignored).
-* `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_342.md` — this canonical evidence file.
+* `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_344.md` — this canonical evidence file.
 * `docs/protocol/QBIND_C4_C5_CLOSURE_CRITERIA.md` — status line advanced to Run 344; live epoch-transition
   final settlement / authority-lifecycle completion row moved Yellow → Green-for-scope only;
   Current-status paragraph updated; Run 343/342 timeline entry advanced.
@@ -236,11 +236,11 @@ transition, no production commit/finalization, no production receipt/audit/audit
 external-publication/durable-replay/settlement/settlement-finalization/settlement-execution/final-settlement/publication write, no default runtime wiring, no
 public CLI enablement, and no C4/C5 closure claim.
 
-## 17. Suggested Run 343 next step
+## 17. Suggested Run 345 next step
 
-Run 343 (source/test, odd cadence): implement the next non-mutating boundary that consumes a verified Run 343/342 live
-epoch-transition final settlement / authority-lifecycle completion accept decision (`is_accept()` with
-`Some(post_completion_attestation_artifact)`) — e.g. a live epoch-transition **authority-lifecycle activation /
-post-completion attestation** boundary — producing only a typed, deterministic, policy-gated, non-mutating artifact, moving a **new**
-matrix row Red → Yellow, with release-binary evidence deferred to Run 344. Full C4 / C5 remain OPEN. Do not begin
+Run 345 (source/test, odd cadence): implement the next non-mutating boundary that consumes a verified Run 343/344 live
+epoch-transition authority-lifecycle activation-readiness / post-completion attestation accept decision (`is_accept()` with
+`Some(post_completion_attestation_artifact)`) — a live epoch-transition **authority-activation authorization /
+final-execution readiness** boundary — producing only a typed, deterministic, policy-gated, non-mutating artifact, moving a **new**
+matrix row Red → Yellow, with release-binary evidence deferred to Run 346. Full C4 / C5 remain OPEN. Do not begin
 production runtime wiring, MainNet enablement, or any live mutation.
