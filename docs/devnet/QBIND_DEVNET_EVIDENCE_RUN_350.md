@@ -205,7 +205,7 @@ for Run 350.
 
 Full **C4 remains OPEN**. **C5 remains OPEN**. The live epoch-transition authority-activation final-execution matrix
 row is **Green (for scope)** — for release-binary-evidenced
-live-epoch-transition-authority-activation-execution-preparation-boundary behavior only (source/test in Run 349; release-binary evidence
+live-epoch-transition-authority-activation-final-execution-boundary behavior only (source/test in Run 349; release-binary evidence
 positive in Run 350). MainNet authority rotation/revocation remains **Red**. No prior Green-for-scope row is weakened.
 
 **CodeQL provenance (recorded verbatim).** The `codeql_checker` tool was invoked for the Run 350 change set, declared
@@ -242,7 +242,7 @@ transition, no production commit/finalization, no production receipt/audit/audit
 external-publication/durable-replay/settlement/settlement-finalization/settlement-execution/final-settlement/publication write, no default runtime wiring, no
 public CLI enablement, and no C4/C5 closure claim.
 
-## 17. Suggested Run 349 next step
+## 17. Suggested Run 351 next step
 
 Run 349 (source/test, odd cadence): implement the next non-mutating boundary that consumes a verified Run 349/350 live
 epoch-transition authority-activation final-execution accept decision (`is_accept()` with
