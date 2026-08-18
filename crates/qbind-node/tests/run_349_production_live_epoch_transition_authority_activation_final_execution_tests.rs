@@ -9595,31 +9595,34 @@ mod run_349_authority_activation_final_execution {
 
     // ---- Run 347 (self) post-completion attestation layer ----
     // ---- Run 343 (self) final-settlement / authority-lifecycle completion layer ----
-    use qbind_node::pqc_production_live_epoch_transition_authority_activation_execution_preparation::*;
+    // ---- Run 345 (input) authority-activation-authorization producer layer ----
+    // Verbatim Run 345 producer (consumes the Run 343 post-completion-attestation
+    // decision) used to construct the immediate Run 347 predecessor input below.
+    use qbind_node::pqc_production_live_epoch_transition_authority_activation_authorization::*;
 
-    use ProductionLiveEpochTransitionAuthorityActivationExecutionPreparationOutcome as CO;
-    use LiveEpochTransitionAuthorityActivationExecutionPreparationKind as CK;
+    use ProductionLiveEpochTransitionAuthorityActivationAuthorizationOutcome as MO;
+    use LiveEpochTransitionAuthorityActivationAuthorizationKind as MK;
 
-    const CRC11_POLICY_ID: &str = "authority-activation-execution-preparation-policy-1";
-    const CRC11_NONCE: u64 = 49;
+    const MRC11_POLICY_ID: &str = "authority-activation-authorization-policy-1";
+    const MRC11_NONCE: u64 = 49;
 
-    fn expected_crc11_kind(sc: Sc) -> CK {
+    fn expected_mrc11_kind(sc: Sc) -> MK {
         match sc {
-            Sc::Add => CK::StageApplyValidatorAdd,
-            Sc::Remove => CK::StageApplyValidatorRemove,
-            Sc::Update => CK::StageApplyValidatorMetadataUpdate,
-            Sc::NoOp => CK::StageApplyNoOpAlreadySynchronized,
-            Sc::Identity => CK::StageApplyValidatorIdentityRotation,
-            Sc::Retire => CK::StageApplyValidatorRetirement,
-            Sc::Emergency => CK::StageApplyEmergencyValidatorRemoval,
-            Sc::AuthSync => CK::StageApplyAuthoritySetSynchronization,
-            Sc::Bulk => CK::StageApplyBulkValidatorSetRotation,
+            Sc::Add => MK::StageApplyValidatorAdd,
+            Sc::Remove => MK::StageApplyValidatorRemove,
+            Sc::Update => MK::StageApplyValidatorMetadataUpdate,
+            Sc::NoOp => MK::StageApplyNoOpAlreadySynchronized,
+            Sc::Identity => MK::StageApplyValidatorIdentityRotation,
+            Sc::Retire => MK::StageApplyValidatorRetirement,
+            Sc::Emergency => MK::StageApplyEmergencyValidatorRemoval,
+            Sc::AuthSync => MK::StageApplyAuthoritySetSynchronization,
+            Sc::Bulk => MK::StageApplyBulkValidatorSetRotation,
         }
     }
 
     /// Build an accepted Run 335/336 post-completion-attestation decision — the sole
-    /// accepted Run 337 authority-activation-execution-preparation authority source.
-    fn cc_decision(
+    /// accepted Run 337 authority-activation-authorization authority source.
+    fn mc_decision(
         env: TrustBundleEnvironment,
         sc: Sc,
     ) -> ProductionLiveEpochTransitionPostCompletionAttestationDecision {
@@ -9631,7 +9634,7 @@ mod run_349_authority_activation_final_execution {
         d
     }
 
-    fn cc_decision_rejected(
+    fn mc_decision_rejected(
         env: TrustBundleEnvironment,
         sc: Sc,
     ) -> ProductionLiveEpochTransitionPostCompletionAttestationDecision {
@@ -9642,29 +9645,29 @@ mod run_349_authority_activation_final_execution {
         d
     }
 
-    fn cc_decision_no_artifact(
+    fn mc_decision_no_artifact(
         env: TrustBundleEnvironment,
         sc: Sc,
     ) -> ProductionLiveEpochTransitionPostCompletionAttestationDecision {
-        let mut d = cc_decision(env, sc);
+        let mut d = mc_decision(env, sc);
         d.post_completion_attestation_artifact = None;
         d
     }
 
-    struct C347 {
-        executor: ProductionLiveEpochTransitionAuthorityActivationExecutionPreparationExecutor,
-        request: ProductionLiveEpochTransitionAuthorityActivationExecutionPreparationRequest,
-        inputs: ProductionLiveEpochTransitionAuthorityActivationExecutionPreparationInputs,
+    struct M345 {
+        executor: ProductionLiveEpochTransitionAuthorityActivationAuthorizationExecutor,
+        request: ProductionLiveEpochTransitionAuthorityActivationAuthorizationRequest,
+        inputs: ProductionLiveEpochTransitionAuthorityActivationAuthorizationInputs,
     }
 
-    fn c_inputs(
+    fn m_inputs(
         env: TrustBundleEnvironment,
         dec: &ProductionLiveEpochTransitionPostCompletionAttestationDecision,
-    ) -> ProductionLiveEpochTransitionAuthorityActivationExecutionPreparationInputs {
+    ) -> ProductionLiveEpochTransitionAuthorityActivationAuthorizationInputs {
         let pkg = dec.post_completion_attestation_artifact.as_ref().unwrap();
-        ProductionLiveEpochTransitionAuthorityActivationExecutionPreparationInputs {
+        ProductionLiveEpochTransitionAuthorityActivationAuthorizationInputs {
             trust_domain: trust_domain(env),
-            authority_activation_execution_preparation_policy_id: CRC11_POLICY_ID.to_string(),
+            authority_activation_authorization_policy_id: MRC11_POLICY_ID.to_string(),
             expected_authorization_policy_id: AUTH_POLICY_ID.to_string(),
             expected_application_policy_id: APP_POLICY_ID.to_string(),
             expected_governance_domain_id: GOV_DOMAIN.to_string(),
@@ -9765,12 +9768,257 @@ mod run_349_authority_activation_final_execution {
         }
     }
 
+    fn m_case(env: TrustBundleEnvironment, sc: Sc) -> M345 {
+        let dec = mc_decision(env, sc);
+        let target = dec.post_completion_attestation_artifact.as_ref().unwrap().epoch_transition_target;
+        let inputs = m_inputs(env, &dec);
+        let request = ProductionLiveEpochTransitionAuthorityActivationAuthorizationRequest::new(
+            LiveEpochTransitionAuthorityActivationAuthorizationAuthoritySource::VerifiedPostCompletionAttestationDecision {
+                decision: dec,
+            },
+            target,
+            MRC11_NONCE,
+        );
+        M345 {
+            executor: ProductionLiveEpochTransitionAuthorityActivationAuthorizationExecutor::source_test(),
+            request,
+            inputs,
+        }
+    }
+
+    fn empty_replay345() -> EmptyLiveEpochTransitionAuthorityActivationAuthorizationReplaySet {
+        EmptyLiveEpochTransitionAuthorityActivationAuthorizationReplaySet
+    }
+
+    fn m_eval(case: &M345) -> ProductionLiveEpochTransitionAuthorityActivationAuthorizationDecision {
+        case.executor.evaluate_live_epoch_transition_authority_activation_authorization(
+            &case.request,
+            &case.inputs,
+            &empty_replay345(),
+        )
+    }
+
+    fn m_eval_replay(
+        case: &M345,
+        replay: &[String],
+    ) -> ProductionLiveEpochTransitionAuthorityActivationAuthorizationDecision {
+        case.executor
+            .evaluate_live_epoch_transition_authority_activation_authorization(&case.request, &case.inputs, &replay)
+    }
+
+    fn m_exec_with_policy(
+        policy: ProductionLiveEpochTransitionAuthorityActivationAuthorizationExecutorPolicy,
+    ) -> ProductionLiveEpochTransitionAuthorityActivationAuthorizationExecutor {
+        ProductionLiveEpochTransitionAuthorityActivationAuthorizationExecutor::new(
+            ProductionLiveEpochTransitionAuthorityActivationAuthorizationConfig::source_test(),
+            policy,
+        )
+    }
+
+    /// Common helper: build a Devnet/Add case, apply a mutation to the inputs, and
+    /// assert the resulting outcome (fail-closed, no artifact).
+    fn m_reject_inputs(
+        mutate: impl FnOnce(&mut ProductionLiveEpochTransitionAuthorityActivationAuthorizationInputs),
+        expected: MO,
+    ) {
+        let mut c = m_case(TrustBundleEnvironment::Devnet, Sc::Add);
+        mutate(&mut c.inputs);
+        let d = m_eval(&c);
+        assert_eq!(d.outcome, expected, "outcome tag: {}", d.outcome.tag());
+        assert!(d.authority_activation_authorization_artifact.is_none());
+        assert!(!d.is_accept());
+        assert!(d.outcome.is_non_mutating());
+    }
+
+    /// Common helper: build a Devnet/Add case, replace its authority source, and
+    /// assert the resulting outcome.
+    fn m_reject_source(
+        source: LiveEpochTransitionAuthorityActivationAuthorizationAuthoritySource,
+        expected: MO,
+    ) {
+        let mut c = m_case(TrustBundleEnvironment::Devnet, Sc::Add);
+        c.request.authority_source = source;
+        let d = m_eval(&c);
+        assert_eq!(d.outcome, expected, "outcome tag: {}", d.outcome.tag());
+        assert!(d.authority_activation_authorization_artifact.is_none());
+    }
+
+    use qbind_node::pqc_production_live_epoch_transition_authority_activation_execution_preparation::*;
+
+    use ProductionLiveEpochTransitionAuthorityActivationExecutionPreparationOutcome as CO;
+    use LiveEpochTransitionAuthorityActivationExecutionPreparationKind as CK;
+
+    const CRC11_POLICY_ID: &str = "authority-activation-execution-preparation-policy-1";
+    const CRC11_NONCE: u64 = 49;
+
+    fn expected_crc11_kind(sc: Sc) -> CK {
+        match sc {
+            Sc::Add => CK::StageApplyValidatorAdd,
+            Sc::Remove => CK::StageApplyValidatorRemove,
+            Sc::Update => CK::StageApplyValidatorMetadataUpdate,
+            Sc::NoOp => CK::StageApplyNoOpAlreadySynchronized,
+            Sc::Identity => CK::StageApplyValidatorIdentityRotation,
+            Sc::Retire => CK::StageApplyValidatorRetirement,
+            Sc::Emergency => CK::StageApplyEmergencyValidatorRemoval,
+            Sc::AuthSync => CK::StageApplyAuthoritySetSynchronization,
+            Sc::Bulk => CK::StageApplyBulkValidatorSetRotation,
+        }
+    }
+
+    /// Build an accepted Run 335/336 post-completion-attestation decision — the sole
+    /// accepted Run 337 authority-activation-execution-preparation authority source.
+    fn cc_decision(
+        env: TrustBundleEnvironment,
+        sc: Sc,
+    ) -> ProductionLiveEpochTransitionAuthorityActivationAuthorizationDecision {
+        let d = m_eval(&m_case(env, sc));
+        assert!(
+            d.is_accept(),
+            "run 335 post-completion-attestation decision must accept for fixture"
+        );
+        d
+    }
+
+    fn cc_decision_rejected(
+        env: TrustBundleEnvironment,
+        sc: Sc,
+    ) -> ProductionLiveEpochTransitionAuthorityActivationAuthorizationDecision {
+        let mut c = m_case(env, sc);
+        c.inputs.expected_proposal_id = "tampered-proposal".to_string();
+        let d = m_eval(&c);
+        assert!(!d.is_accept(), "tampered run 335 decision must reject");
+        d
+    }
+
+    fn cc_decision_no_artifact(
+        env: TrustBundleEnvironment,
+        sc: Sc,
+    ) -> ProductionLiveEpochTransitionAuthorityActivationAuthorizationDecision {
+        let mut d = cc_decision(env, sc);
+        d.authority_activation_authorization_artifact = None;
+        d
+    }
+
+    struct C347 {
+        executor: ProductionLiveEpochTransitionAuthorityActivationExecutionPreparationExecutor,
+        request: ProductionLiveEpochTransitionAuthorityActivationExecutionPreparationRequest,
+        inputs: ProductionLiveEpochTransitionAuthorityActivationExecutionPreparationInputs,
+    }
+
+    fn c_inputs(
+        env: TrustBundleEnvironment,
+        dec: &ProductionLiveEpochTransitionAuthorityActivationAuthorizationDecision,
+    ) -> ProductionLiveEpochTransitionAuthorityActivationExecutionPreparationInputs {
+        let pkg = dec.authority_activation_authorization_artifact.as_ref().unwrap();
+        ProductionLiveEpochTransitionAuthorityActivationExecutionPreparationInputs {
+            trust_domain: trust_domain(env),
+            authority_activation_execution_preparation_policy_id: CRC11_POLICY_ID.to_string(),
+            expected_authorization_policy_id: AUTH_POLICY_ID.to_string(),
+            expected_application_policy_id: APP_POLICY_ID.to_string(),
+            expected_governance_domain_id: GOV_DOMAIN.to_string(),
+            expected_governance_epoch: GOV_EPOCH,
+            expected_proposal_id: PROPOSAL_ID.to_string(),
+            expected_lifecycle_action: pkg.lifecycle_action,
+            expected_rotation_action: pkg.rotation_action,
+            expected_authority_domain_sequence: SEQ,
+            expected_quorum: quorum(),
+            expected_threshold: threshold(),
+            expected_governance_decision_id: GOV_DECISION_ID.to_string(),
+            expected_governance_request_id: GOV_REQUEST_ID.to_string(),
+            expected_governance_intent_digest: pkg.governance_intent_digest.clone(),
+            expected_rotation_decision_id: pkg.rotation_decision_id.clone(),
+            expected_rotation_request_id: pkg.rotation_request_id.clone(),
+            expected_rotation_transcript_digest: pkg.rotation_transcript_digest.clone(),
+            expected_rotation_plan_digest: pkg.rotation_plan_digest.clone(),
+            expected_current_set_digest: pkg.current_set_digest.clone(),
+            expected_proposed_set_digest: pkg.proposed_set_digest.clone(),
+            expected_delta_digest: pkg.delta_digest.clone(),
+            expected_validator_set_epoch: pkg.validator_set_epoch,
+            expected_validator_set_version: pkg.validator_set_version,
+            expected_proposed_validator_count: pkg.proposed_validator_count,
+            expected_rotation_nonce: ROT_NONCE,
+            expected_application_decision_id: pkg.application_decision_id.clone(),
+            expected_application_request_id: pkg.application_request_id.clone(),
+            expected_application_intent_digest: pkg.application_intent_digest.clone(),
+            expected_application_transcript_digest: pkg.application_transcript_digest.clone(),
+            expected_authorization_decision_id: pkg.authorization_decision_id.clone(),
+            expected_authorization_request_id: pkg.authorization_request_id.clone(),
+            expected_authorization_intent_digest: pkg.authorization_intent_digest.clone(),
+            expected_authorization_transcript_digest: pkg.authorization_transcript_digest.clone(),
+            expected_staged_application_decision_id: pkg.staged_application_decision_id.clone(),
+            expected_staged_application_request_id: pkg.staged_application_request_id.clone(),
+            expected_staged_application_intent_digest: pkg.staged_application_intent_digest.clone(),
+            expected_staged_application_transcript_digest: pkg
+                .staged_application_transcript_digest
+                .clone(),
+            expected_staged_application_nonce: pkg.staged_application_nonce,
+            expected_epoch_transition_target: pkg.epoch_transition_target,
+            expected_application_nonce: pkg.application_nonce,
+            expected_live_application_nonce: pkg.live_application_nonce,
+            expected_guarded_mutation_decision_id: pkg.guarded_mutation_decision_id.clone(),
+            expected_guarded_mutation_request_id: pkg.guarded_mutation_request_id.clone(),
+            expected_guarded_mutation_intent_digest: pkg.guarded_mutation_intent_digest.clone(),
+            expected_guarded_mutation_transcript_digest: pkg
+                .guarded_mutation_transcript_digest
+                .clone(),
+            expected_guarded_mutation_nonce: pkg.guarded_mutation_nonce,
+            expected_authority_activation_authorization_decision_id: dec.authority_activation_authorization_id.clone(),
+            expected_authority_activation_authorization_request_id: dec.request_id.clone(),
+            expected_authority_activation_authorization_intent_digest: dec.authority_activation_authorization_digest.clone(),
+            expected_authority_activation_authorization_transcript_digest: dec.transcript_digest.clone(),
+            expected_authority_activation_authorization_nonce: pkg.authority_activation_authorization_nonce,
+            expected_commit_authorization_decision_id: pkg.commit_authorization_decision_id.clone(),
+            expected_commit_authorization_request_id: pkg.commit_authorization_request_id.clone(),
+            expected_commit_authorization_intent_digest: pkg
+                .commit_authorization_intent_digest
+                .clone(),
+            expected_commit_authorization_transcript_digest: pkg
+                .commit_authorization_transcript_digest
+                .clone(),
+            expected_commit_authorization_nonce: pkg.commit_authorization_nonce,
+            expected_mutation_execution_decision_id: pkg.mutation_execution_decision_id.clone(),
+            expected_mutation_execution_request_id: pkg.mutation_execution_request_id.clone(),
+            expected_mutation_execution_intent_digest: pkg.mutation_execution_intent_digest.clone(),
+            expected_mutation_execution_transcript_digest: pkg
+                .mutation_execution_transcript_digest
+                .clone(),
+            expected_mutation_execution_nonce: pkg.mutation_execution_nonce,
+            expected_execution_preparation_decision_id: pkg.execution_preparation_decision_id.clone(),
+            expected_execution_preparation_request_id: pkg.execution_preparation_request_id.clone(),
+            expected_execution_preparation_intent_digest: pkg.execution_preparation_intent_digest.clone(),
+            expected_execution_preparation_transcript_digest: pkg
+                .execution_preparation_transcript_digest
+                .clone(),
+            expected_execution_preparation_nonce: pkg.execution_preparation_nonce,
+            expected_runtime_handoff_decision_id: pkg.runtime_handoff_decision_id.clone(),
+            expected_runtime_handoff_request_id: pkg.runtime_handoff_request_id.clone(),
+            expected_runtime_handoff_intent_digest: pkg.runtime_handoff_intent_digest.clone(),
+            expected_runtime_handoff_transcript_digest: pkg
+                .runtime_handoff_transcript_digest
+                .clone(),
+            expected_runtime_handoff_nonce: pkg.runtime_handoff_nonce,
+            expected_current_validator_set_epoch: CUR_EPOCH,
+            expected_current_validator_set_version: CUR_VERSION,
+            required_replay_window: REPLAY_WINDOW,
+            min_governance_epoch: 0,
+            min_validator_set_epoch: 0,
+            min_validator_set_version: 0,
+            persisted_sequence: Some(SEQ - 1),
+            require_custody_evidence: false,
+            expected_custody: None,
+            require_attestation_evidence: false,
+            expected_attestation: None,
+            require_durable_replay_evidence: false,
+            expected_durable_replay: None,
+        }
+    }
+
     fn c_case(env: TrustBundleEnvironment, sc: Sc) -> C347 {
         let dec = cc_decision(env, sc);
-        let target = dec.post_completion_attestation_artifact.as_ref().unwrap().epoch_transition_target;
+        let target = dec.authority_activation_authorization_artifact.as_ref().unwrap().epoch_transition_target;
         let inputs = c_inputs(env, &dec);
         let request = ProductionLiveEpochTransitionAuthorityActivationExecutionPreparationRequest::new(
-            LiveEpochTransitionAuthorityActivationExecutionPreparationAuthoritySource::VerifiedPostCompletionAttestationDecision {
+            LiveEpochTransitionAuthorityActivationExecutionPreparationAuthoritySource::VerifiedAuthorityActivationAuthorizationDecision {
                 decision: dec,
             },
             target,
