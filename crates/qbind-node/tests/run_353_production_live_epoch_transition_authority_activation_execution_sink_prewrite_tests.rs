@@ -1,21 +1,21 @@
-//! Run 351 — source/test **live epoch-transition authority-activation
+//! Run 349 — source/test **live epoch-transition authority-activation
 //! execution-preparation / final-execution preflight** boundary integration
 //! tests.
 //!
-//! Source/test only. Run 351 does **not** capture release-binary evidence;
+//! Source/test only. Run 349 does **not** capture release-binary evidence;
 //! release-binary evidence for the live epoch-transition authority-activation
 //! execution-preparation / final-execution preflight boundary is deferred to
-//! **Run 352**.
+//! **Run 350**.
 //!
-//! Each accepted `run_351_authority_activation_post_final_execution_confirmation` case
+//! Each accepted `run_349_authority_activation_final_execution` case
 //! composes the real deep chain up through the Run 343/344
 //! post-completion-attestation and Run 347/348 authority-activation-execution-preparation
 //! layers to produce a verified, accepted Run 347/348 live epoch-transition
 //! authority-activation-execution-preparation decision, then feeds that decision into
-//! the Run 351 live epoch-transition authority-activation execution-preparation
+//! the Run 349 live epoch-transition authority-activation execution-preparation
 //! / final-execution preflight executor.
 //!
-//! Run 351 produces **only** a typed, non-mutating authority-activation
+//! Run 349 produces **only** a typed, non-mutating authority-activation
 //! execution-preparation / final-execution preflight artifact. It never
 //! activates authority state, never executes final settlement, never executes
 //! final-execution, never writes final-execution state, never applies a live
@@ -8842,7 +8842,7 @@ mod run_341_final_settlement_completion {
 // validator-set change, activates authority state, transitions an epoch, or
 // writes any production record.
 // ===========================================================================
-mod run_351_authority_activation_post_final_execution_confirmation {
+mod run_349_authority_activation_final_execution {
     #![allow(unused_imports)]
     #![allow(dead_code)]
     #![allow(unused_variables)]
@@ -10094,17 +10094,17 @@ mod run_351_authority_activation_post_final_execution_confirmation {
 
 
     // =======================================================================
-    // Run 351 layer (module under test): consumes the verified Run 347/348
+    // Run 349 layer (module under test): consumes the verified Run 347/348
     // authority-activation-execution-preparation decision and produces the typed,
     // non-mutating authority-activation execution-preparation / final-execution
     // preflight artifact.
     // =======================================================================
-    use qbind_node::pqc_production_live_epoch_transition_authority_activation_post_final_execution_confirmation::*;
+    use qbind_node::pqc_production_live_epoch_transition_authority_activation_final_execution::*;
 
-    use ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationOutcome as DO;
-    use LiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationKind as DK;
+    use ProductionLiveEpochTransitionAuthorityActivationFinalExecutionOutcome as DO;
+    use LiveEpochTransitionAuthorityActivationFinalExecutionKind as DK;
 
-    const CRC12_POLICY_ID: &str = "authority-activation-post-final-execution-confirmation-policy-1";
+    const CRC12_POLICY_ID: &str = "authority-activation-final-execution-policy-1";
     const CRC12_NONCE: u64 = 49;
 
     fn expected_crc12_kind(sc: Sc) -> DK {
@@ -10122,7 +10122,7 @@ mod run_351_authority_activation_post_final_execution_confirmation {
     }
 
     /// Build an accepted Run 335/336 authority-activation-execution-preparation decision — the sole
-    /// accepted Run 337 authority-activation-post-final-execution-confirmation authority source.
+    /// accepted Run 337 authority-activation-final-execution authority source.
     fn dc_decision(
         env: TrustBundleEnvironment,
         sc: Sc,
@@ -10155,20 +10155,20 @@ mod run_351_authority_activation_post_final_execution_confirmation {
         d
     }
 
-    struct D351 {
-        executor: ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationExecutor,
-        request: ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationRequest,
-        inputs: ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationInputs,
+    struct D349 {
+        executor: ProductionLiveEpochTransitionAuthorityActivationFinalExecutionExecutor,
+        request: ProductionLiveEpochTransitionAuthorityActivationFinalExecutionRequest,
+        inputs: ProductionLiveEpochTransitionAuthorityActivationFinalExecutionInputs,
     }
 
     fn d_inputs(
         env: TrustBundleEnvironment,
         dec: &ProductionLiveEpochTransitionAuthorityActivationExecutionPreparationDecision,
-    ) -> ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationInputs {
+    ) -> ProductionLiveEpochTransitionAuthorityActivationFinalExecutionInputs {
         let pkg = dec.authority_activation_execution_preparation_artifact.as_ref().unwrap();
-        ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationInputs {
+        ProductionLiveEpochTransitionAuthorityActivationFinalExecutionInputs {
             trust_domain: trust_domain(env),
-            authority_activation_post_final_execution_confirmation_policy_id: CRC12_POLICY_ID.to_string(),
+            authority_activation_final_execution_policy_id: CRC12_POLICY_ID.to_string(),
             expected_authorization_policy_id: AUTH_POLICY_ID.to_string(),
             expected_application_policy_id: APP_POLICY_ID.to_string(),
             expected_governance_domain_id: GOV_DOMAIN.to_string(),
@@ -10269,49 +10269,49 @@ mod run_351_authority_activation_post_final_execution_confirmation {
         }
     }
 
-    fn d_case(env: TrustBundleEnvironment, sc: Sc) -> D351 {
+    fn d_case(env: TrustBundleEnvironment, sc: Sc) -> D349 {
         let dec = dc_decision(env, sc);
         let target = dec.authority_activation_execution_preparation_artifact.as_ref().unwrap().epoch_transition_target;
         let inputs = d_inputs(env, &dec);
-        let request = ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationRequest::new(
-            LiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationAuthoritySource::VerifiedAuthorityActivationExecutionPreparationDecision {
+        let request = ProductionLiveEpochTransitionAuthorityActivationFinalExecutionRequest::new(
+            LiveEpochTransitionAuthorityActivationFinalExecutionAuthoritySource::VerifiedAuthorityActivationExecutionPreparationDecision {
                 decision: dec,
             },
             target,
             CRC12_NONCE,
         );
-        D351 {
-            executor: ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationExecutor::source_test(),
+        D349 {
+            executor: ProductionLiveEpochTransitionAuthorityActivationFinalExecutionExecutor::source_test(),
             request,
             inputs,
         }
     }
 
-    fn empty_replay351() -> EmptyLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationReplaySet {
-        EmptyLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationReplaySet
+    fn empty_replay349() -> EmptyLiveEpochTransitionAuthorityActivationFinalExecutionReplaySet {
+        EmptyLiveEpochTransitionAuthorityActivationFinalExecutionReplaySet
     }
 
-    fn d_eval(case: &D351) -> ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationDecision {
-        case.executor.evaluate_live_epoch_transition_authority_activation_post_final_execution_confirmation(
+    fn d_eval(case: &D349) -> ProductionLiveEpochTransitionAuthorityActivationFinalExecutionDecision {
+        case.executor.evaluate_live_epoch_transition_authority_activation_final_execution(
             &case.request,
             &case.inputs,
-            &empty_replay351(),
+            &empty_replay349(),
         )
     }
 
     fn d_eval_replay(
-        case: &D351,
+        case: &D349,
         replay: &[String],
-    ) -> ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationDecision {
+    ) -> ProductionLiveEpochTransitionAuthorityActivationFinalExecutionDecision {
         case.executor
-            .evaluate_live_epoch_transition_authority_activation_post_final_execution_confirmation(&case.request, &case.inputs, &replay)
+            .evaluate_live_epoch_transition_authority_activation_final_execution(&case.request, &case.inputs, &replay)
     }
 
     fn d_exec_with_policy(
-        policy: ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationExecutorPolicy,
-    ) -> ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationExecutor {
-        ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationExecutor::new(
-            ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationConfig::source_test(),
+        policy: ProductionLiveEpochTransitionAuthorityActivationFinalExecutionExecutorPolicy,
+    ) -> ProductionLiveEpochTransitionAuthorityActivationFinalExecutionExecutor {
+        ProductionLiveEpochTransitionAuthorityActivationFinalExecutionExecutor::new(
+            ProductionLiveEpochTransitionAuthorityActivationFinalExecutionConfig::source_test(),
             policy,
         )
     }
@@ -10319,14 +10319,14 @@ mod run_351_authority_activation_post_final_execution_confirmation {
     /// Common helper: build a Devnet/Add case, apply a mutation to the inputs, and
     /// assert the resulting outcome (fail-closed, no artifact).
     fn d_reject_inputs(
-        mutate: impl FnOnce(&mut ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationInputs),
+        mutate: impl FnOnce(&mut ProductionLiveEpochTransitionAuthorityActivationFinalExecutionInputs),
         expected: DO,
     ) {
         let mut c = d_case(TrustBundleEnvironment::Devnet, Sc::Add);
         mutate(&mut c.inputs);
         let d = d_eval(&c);
         assert_eq!(d.outcome, expected, "outcome tag: {}", d.outcome.tag());
-        assert!(d.authority_activation_post_final_execution_confirmation_artifact.is_none());
+        assert!(d.authority_activation_final_execution_artifact.is_none());
         assert!(!d.is_accept());
         assert!(d.outcome.is_non_mutating());
     }
@@ -10334,14 +10334,14 @@ mod run_351_authority_activation_post_final_execution_confirmation {
     /// Common helper: build a Devnet/Add case, replace its authority source, and
     /// assert the resulting outcome.
     fn d_reject_source(
-        source: LiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationAuthoritySource,
+        source: LiveEpochTransitionAuthorityActivationFinalExecutionAuthoritySource,
         expected: DO,
     ) {
         let mut c = d_case(TrustBundleEnvironment::Devnet, Sc::Add);
         c.request.authority_source = source;
         let d = d_eval(&c);
         assert_eq!(d.outcome, expected, "outcome tag: {}", d.outcome.tag());
-        assert!(d.authority_activation_post_final_execution_confirmation_artifact.is_none());
+        assert!(d.authority_activation_final_execution_artifact.is_none());
     }
 
     // ===========================================================================
@@ -10355,9 +10355,9 @@ mod run_351_authority_activation_post_final_execution_confirmation {
             let d = d_eval(&c);
             assert!(d.is_accept(), "scenario must accept");
             assert!(d.authorizes_future_mutation_only());
-            let art = d.authority_activation_post_final_execution_confirmation_artifact.as_ref().unwrap();
+            let art = d.authority_activation_final_execution_artifact.as_ref().unwrap();
             assert_eq!(art.staged_kind, expected_crc12_kind(sc));
-            assert_eq!(art.authority_activation_post_final_execution_confirmation_nonce, CRC12_NONCE);
+            assert_eq!(art.authority_activation_final_execution_nonce, CRC12_NONCE);
             assert_eq!(art.authority_activation_execution_preparation_nonce, CRC4_NONCE);
             assert_eq!(art.guarded_mutation_nonce, GUARDED_NONCE);
             assert_eq!(art.staged_application_nonce, STAGED_NONCE);
@@ -10370,7 +10370,7 @@ mod run_351_authority_activation_post_final_execution_confirmation {
             let c = d_case(TrustBundleEnvironment::Testnet, sc);
             let d = d_eval(&c);
             assert!(d.is_accept());
-            let art = d.authority_activation_post_final_execution_confirmation_artifact.as_ref().unwrap();
+            let art = d.authority_activation_final_execution_artifact.as_ref().unwrap();
             assert_eq!(art.environment, TrustBundleEnvironment::Testnet);
             assert_eq!(art.staged_kind, expected_crc12_kind(sc));
         }
@@ -10381,16 +10381,16 @@ mod run_351_authority_activation_post_final_execution_confirmation {
         let c = d_case(TrustBundleEnvironment::Devnet, Sc::Add);
         let d = d_eval(&c);
         match d.outcome {
-            DO::AcceptedSourceTestLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmation {
+            DO::AcceptedSourceTestLiveEpochTransitionAuthorityActivationFinalExecution {
                 execution_kind,
                 environment,
                 epoch_transition_target,
-                authority_activation_post_final_execution_confirmation_nonce,
+                authority_activation_final_execution_nonce,
             } => {
                 assert_eq!(execution_kind, DK::StageApplyValidatorAdd);
                 assert_eq!(environment, TrustBundleEnvironment::Devnet);
                 assert_eq!(epoch_transition_target, c.request.proposed_epoch_transition_target);
-                assert_eq!(authority_activation_post_final_execution_confirmation_nonce, CRC12_NONCE);
+                assert_eq!(authority_activation_final_execution_nonce, CRC12_NONCE);
             }
             other => panic!("unexpected outcome: {other:?}"),
         }
@@ -10405,20 +10405,20 @@ mod run_351_authority_activation_post_final_execution_confirmation {
         let handoff_req = dec.request_id.clone();
         let handoff_digest = dec.authority_activation_execution_preparation_digest.clone();
         let handoff_transcript = dec.transcript_digest.clone();
-        let request = ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationRequest::new(
-            LiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationAuthoritySource::VerifiedAuthorityActivationExecutionPreparationDecision {
+        let request = ProductionLiveEpochTransitionAuthorityActivationFinalExecutionRequest::new(
+            LiveEpochTransitionAuthorityActivationFinalExecutionAuthoritySource::VerifiedAuthorityActivationExecutionPreparationDecision {
                 decision: dec,
             },
             target,
             CRC12_NONCE,
         );
-        let exec = ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationExecutor::source_test();
-        let d = exec.evaluate_live_epoch_transition_authority_activation_post_final_execution_confirmation(
+        let exec = ProductionLiveEpochTransitionAuthorityActivationFinalExecutionExecutor::source_test();
+        let d = exec.evaluate_live_epoch_transition_authority_activation_final_execution(
             &request,
             &inputs,
-            &empty_replay351(),
+            &empty_replay349(),
         );
-        let art = d.authority_activation_post_final_execution_confirmation_artifact.as_ref().unwrap();
+        let art = d.authority_activation_final_execution_artifact.as_ref().unwrap();
         assert_eq!(art.authority_activation_execution_preparation_decision_id, handoff_id);
         assert_eq!(art.authority_activation_execution_preparation_request_id, handoff_req);
         assert_eq!(art.authority_activation_execution_preparation_intent_digest, handoff_digest);
@@ -10429,7 +10429,7 @@ mod run_351_authority_activation_post_final_execution_confirmation {
     fn accept_artifact_encodes_future_executor_preconditions() {
         let c = d_case(TrustBundleEnvironment::Devnet, Sc::Add);
         let d = d_eval(&c);
-        let art = d.authority_activation_post_final_execution_confirmation_artifact.as_ref().unwrap();
+        let art = d.authority_activation_final_execution_artifact.as_ref().unwrap();
         assert_eq!(art.precondition_current_validator_set_epoch, art.validator_set_epoch);
         assert_eq!(art.precondition_current_validator_set_version, art.validator_set_version);
         assert_eq!(art.precondition_target_epoch, art.epoch_transition_target);
@@ -10445,14 +10445,14 @@ mod run_351_authority_activation_post_final_execution_confirmation {
     fn accept_decision_ids_match_artifact_ids() {
         let c = d_case(TrustBundleEnvironment::Devnet, Sc::Add);
         let d = d_eval(&c);
-        let art = d.authority_activation_post_final_execution_confirmation_artifact.as_ref().unwrap();
-        assert_eq!(d.authority_activation_post_final_execution_confirmation_id, art.authority_activation_post_final_execution_confirmation_id);
+        let art = d.authority_activation_final_execution_artifact.as_ref().unwrap();
+        assert_eq!(d.authority_activation_final_execution_id, art.authority_activation_final_execution_id);
         assert_eq!(d.request_id, art.request_id);
-        assert_eq!(d.authority_activation_post_final_execution_confirmation_digest, art.authority_activation_post_final_execution_confirmation_digest);
+        assert_eq!(d.authority_activation_final_execution_digest, art.authority_activation_final_execution_digest);
         assert_eq!(d.transcript_digest, art.transcript_digest);
-        assert!(!d.authority_activation_post_final_execution_confirmation_id.is_empty());
+        assert!(!d.authority_activation_final_execution_id.is_empty());
         assert!(!d.request_id.is_empty());
-        assert!(!d.authority_activation_post_final_execution_confirmation_digest.is_empty());
+        assert!(!d.authority_activation_final_execution_digest.is_empty());
         assert!(!d.transcript_digest.is_empty());
     }
 
@@ -10466,9 +10466,9 @@ mod run_351_authority_activation_post_final_execution_confirmation {
             let c = d_case(TrustBundleEnvironment::Devnet, sc);
             let d1 = d_eval(&c);
             let d2 = d_eval(&c);
-            assert_eq!(d1.authority_activation_post_final_execution_confirmation_id, d2.authority_activation_post_final_execution_confirmation_id);
+            assert_eq!(d1.authority_activation_final_execution_id, d2.authority_activation_final_execution_id);
             assert_eq!(d1.request_id, d2.request_id);
-            assert_eq!(d1.authority_activation_post_final_execution_confirmation_digest, d2.authority_activation_post_final_execution_confirmation_digest);
+            assert_eq!(d1.authority_activation_final_execution_digest, d2.authority_activation_final_execution_digest);
             assert_eq!(d1.transcript_digest, d2.transcript_digest);
         }
     }
@@ -10477,8 +10477,8 @@ mod run_351_authority_activation_post_final_execution_confirmation {
     fn artifact_content_digest_is_stable() {
         let c = d_case(TrustBundleEnvironment::Devnet, Sc::Bulk);
         let d = d_eval(&c);
-        let art = d.authority_activation_post_final_execution_confirmation_artifact.as_ref().unwrap();
-        assert_eq!(art.content_digest(), art.authority_activation_post_final_execution_confirmation_digest);
+        let art = d.authority_activation_final_execution_artifact.as_ref().unwrap();
+        assert_eq!(art.content_digest(), art.authority_activation_final_execution_digest);
         assert_eq!(art.content_digest(), art.content_digest());
     }
 
@@ -10534,21 +10534,21 @@ mod run_351_authority_activation_post_final_execution_confirmation {
         let target = dec.authority_activation_execution_preparation_artifact.as_ref().unwrap().epoch_transition_target;
         let inputs = d_inputs(TrustBundleEnvironment::Devnet, &dec);
         dec.authority_activation_execution_preparation_artifact.as_mut().unwrap().proposal_digest = "tampered".to_string();
-        let request = ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationRequest::new(
-            LiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationAuthoritySource::VerifiedAuthorityActivationExecutionPreparationDecision {
+        let request = ProductionLiveEpochTransitionAuthorityActivationFinalExecutionRequest::new(
+            LiveEpochTransitionAuthorityActivationFinalExecutionAuthoritySource::VerifiedAuthorityActivationExecutionPreparationDecision {
                 decision: dec,
             },
             target,
             CRC12_NONCE,
         );
-        let exec = ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationExecutor::source_test();
-        let d = exec.evaluate_live_epoch_transition_authority_activation_post_final_execution_confirmation(
+        let exec = ProductionLiveEpochTransitionAuthorityActivationFinalExecutionExecutor::source_test();
+        let d = exec.evaluate_live_epoch_transition_authority_activation_final_execution(
             &request,
             &inputs,
-            &empty_replay351(),
+            &empty_replay349(),
         );
         assert_eq!(d.outcome, DO::AuthorityActivationExecutionPreparationDecisionIntegrityMismatch);
-        assert!(d.authority_activation_post_final_execution_confirmation_artifact.is_none());
+        assert!(d.authority_activation_final_execution_artifact.is_none());
     }
 
     // ===========================================================================
@@ -10917,7 +10917,7 @@ mod run_351_authority_activation_post_final_execution_confirmation {
         c.request.proposed_epoch_transition_target = 4242;
         let d = d_eval(&c);
         assert_eq!(d.outcome, DO::WrongEpochTransitionTarget);
-        assert!(d.authority_activation_post_final_execution_confirmation_artifact.is_none());
+        assert!(d.authority_activation_final_execution_artifact.is_none());
     }
 
     #[test]
@@ -10937,7 +10937,7 @@ mod run_351_authority_activation_post_final_execution_confirmation {
     #[test]
     fn reject_missing_authority_activation_execution_preparation_decision() {
         d_reject_source(
-            LiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationAuthoritySource::MissingAuthorityActivationExecutionPreparationDecision,
+            LiveEpochTransitionAuthorityActivationFinalExecutionAuthoritySource::MissingAuthorityActivationExecutionPreparationDecision,
             DO::VerifiedAuthorityActivationExecutionPreparationDecisionRequired,
         );
     }
@@ -10946,7 +10946,7 @@ mod run_351_authority_activation_post_final_execution_confirmation {
     fn reject_unverified_authority_activation_execution_preparation_decision() {
         let dec = dc_decision_rejected(TrustBundleEnvironment::Devnet, Sc::Add);
         d_reject_source(
-            LiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationAuthoritySource::UnverifiedAuthorityActivationExecutionPreparationDecision {
+            LiveEpochTransitionAuthorityActivationFinalExecutionAuthoritySource::UnverifiedAuthorityActivationExecutionPreparationDecision {
                 decision: dec,
             },
             DO::UnverifiedAuthorityActivationExecutionPreparationDecisionRejected,
@@ -10957,7 +10957,7 @@ mod run_351_authority_activation_post_final_execution_confirmation {
     fn reject_verified_source_with_non_accept_decision() {
         let dec = dc_decision_rejected(TrustBundleEnvironment::Devnet, Sc::Add);
         d_reject_source(
-            LiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationAuthoritySource::VerifiedAuthorityActivationExecutionPreparationDecision {
+            LiveEpochTransitionAuthorityActivationFinalExecutionAuthoritySource::VerifiedAuthorityActivationExecutionPreparationDecision {
                 decision: dec,
             },
             DO::UnverifiedAuthorityActivationExecutionPreparationDecisionRejected,
@@ -10968,7 +10968,7 @@ mod run_351_authority_activation_post_final_execution_confirmation {
     fn reject_accepted_authority_activation_execution_preparation_without_package_via_verified_source() {
         let dec = dc_decision_no_artifact(TrustBundleEnvironment::Devnet, Sc::Add);
         d_reject_source(
-            LiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationAuthoritySource::VerifiedAuthorityActivationExecutionPreparationDecision {
+            LiveEpochTransitionAuthorityActivationFinalExecutionAuthoritySource::VerifiedAuthorityActivationExecutionPreparationDecision {
                 decision: dec,
             },
             DO::VerifiedAuthorityActivationExecutionPreparationDecisionRequired,
@@ -10979,7 +10979,7 @@ mod run_351_authority_activation_post_final_execution_confirmation {
     fn reject_accepted_authority_activation_execution_preparation_without_package_variant() {
         let dec = dc_decision_no_artifact(TrustBundleEnvironment::Devnet, Sc::Add);
         d_reject_source(
-            LiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationAuthoritySource::AcceptedAuthorityActivationExecutionPreparationWithoutPackage {
+            LiveEpochTransitionAuthorityActivationFinalExecutionAuthoritySource::AcceptedAuthorityActivationExecutionPreparationWithoutPackage {
                 decision: dec,
             },
             DO::VerifiedAuthorityActivationExecutionPreparationDecisionRequired,
@@ -10989,7 +10989,7 @@ mod run_351_authority_activation_post_final_execution_confirmation {
     #[test]
     fn reject_guarded_mutation_decision_alone() {
         d_reject_source(
-            LiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationAuthoritySource::GuardedMutationDecisionWithoutAuthorityActivationExecutionPreparation,
+            LiveEpochTransitionAuthorityActivationFinalExecutionAuthoritySource::GuardedMutationDecisionWithoutAuthorityActivationExecutionPreparation,
             DO::GuardedMutationDecisionAloneRejected,
         );
     }
@@ -10997,7 +10997,7 @@ mod run_351_authority_activation_post_final_execution_confirmation {
     #[test]
     fn reject_staged_application_decision_alone() {
         d_reject_source(
-            LiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationAuthoritySource::StagedApplicationDecisionWithoutAuthorityActivationExecutionPreparation,
+            LiveEpochTransitionAuthorityActivationFinalExecutionAuthoritySource::StagedApplicationDecisionWithoutAuthorityActivationExecutionPreparation,
             DO::StagedApplicationDecisionAloneRejected,
         );
     }
@@ -11005,7 +11005,7 @@ mod run_351_authority_activation_post_final_execution_confirmation {
     #[test]
     fn reject_live_application_authorization_alone() {
         d_reject_source(
-            LiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationAuthoritySource::LiveApplicationAuthorizationWithoutAuthorityActivationExecutionPreparation,
+            LiveEpochTransitionAuthorityActivationFinalExecutionAuthoritySource::LiveApplicationAuthorizationWithoutAuthorityActivationExecutionPreparation,
             DO::LiveApplicationAuthorizationAloneRejected,
         );
     }
@@ -11013,7 +11013,7 @@ mod run_351_authority_activation_post_final_execution_confirmation {
     #[test]
     fn reject_application_decision_alone() {
         d_reject_source(
-            LiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationAuthoritySource::ApplicationDecisionWithoutAuthorityActivationExecutionPreparation,
+            LiveEpochTransitionAuthorityActivationFinalExecutionAuthoritySource::ApplicationDecisionWithoutAuthorityActivationExecutionPreparation,
             DO::ApplicationDecisionAloneRejected,
         );
     }
@@ -11021,7 +11021,7 @@ mod run_351_authority_activation_post_final_execution_confirmation {
     #[test]
     fn reject_rotation_plan_alone() {
         d_reject_source(
-            LiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationAuthoritySource::RotationPlanWithoutAuthorityActivationExecutionPreparation,
+            LiveEpochTransitionAuthorityActivationFinalExecutionAuthoritySource::RotationPlanWithoutAuthorityActivationExecutionPreparation,
             DO::RotationPlanAloneRejected,
         );
     }
@@ -11029,7 +11029,7 @@ mod run_351_authority_activation_post_final_execution_confirmation {
     #[test]
     fn reject_governance_execution_intent_alone() {
         d_reject_source(
-            LiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationAuthoritySource::GovernanceExecutionIntentWithoutAuthorityActivationExecutionPreparation,
+            LiveEpochTransitionAuthorityActivationFinalExecutionAuthoritySource::GovernanceExecutionIntentWithoutAuthorityActivationExecutionPreparation,
             DO::GovernanceExecutionIntentAloneRejected,
         );
     }
@@ -11037,7 +11037,7 @@ mod run_351_authority_activation_post_final_execution_confirmation {
     #[test]
     fn reject_governance_proof_alone() {
         d_reject_source(
-            LiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationAuthoritySource::GovernanceProofWithoutAuthorityActivationExecutionPreparation,
+            LiveEpochTransitionAuthorityActivationFinalExecutionAuthoritySource::GovernanceProofWithoutAuthorityActivationExecutionPreparation,
             DO::GovernanceProofAloneRejected,
         );
     }
@@ -11045,7 +11045,7 @@ mod run_351_authority_activation_post_final_execution_confirmation {
     #[test]
     fn reject_local_operator_assertion() {
         d_reject_source(
-            LiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationAuthoritySource::LocalOperatorAssertion,
+            LiveEpochTransitionAuthorityActivationFinalExecutionAuthoritySource::LocalOperatorAssertion,
             DO::LocalOperatorProofRejected,
         );
     }
@@ -11053,7 +11053,7 @@ mod run_351_authority_activation_post_final_execution_confirmation {
     #[test]
     fn reject_peer_majority_assertion() {
         d_reject_source(
-            LiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationAuthoritySource::PeerMajorityAssertion,
+            LiveEpochTransitionAuthorityActivationFinalExecutionAuthoritySource::PeerMajorityAssertion,
             DO::PeerMajorityProofRejected,
         );
     }
@@ -11061,7 +11061,7 @@ mod run_351_authority_activation_post_final_execution_confirmation {
     #[test]
     fn reject_custody_only_evidence() {
         d_reject_source(
-            LiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationAuthoritySource::CustodyOnlyEvidence,
+            LiveEpochTransitionAuthorityActivationFinalExecutionAuthoritySource::CustodyOnlyEvidence,
             DO::CustodyOnlyProofRejected,
         );
     }
@@ -11069,7 +11069,7 @@ mod run_351_authority_activation_post_final_execution_confirmation {
     #[test]
     fn reject_remote_signer_only_evidence() {
         d_reject_source(
-            LiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationAuthoritySource::RemoteSignerOnlyEvidence,
+            LiveEpochTransitionAuthorityActivationFinalExecutionAuthoritySource::RemoteSignerOnlyEvidence,
             DO::RemoteSignerOnlyProofRejected,
         );
     }
@@ -11077,7 +11077,7 @@ mod run_351_authority_activation_post_final_execution_confirmation {
     #[test]
     fn reject_custody_attestation_only_evidence() {
         d_reject_source(
-            LiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationAuthoritySource::CustodyAttestationOnlyEvidence,
+            LiveEpochTransitionAuthorityActivationFinalExecutionAuthoritySource::CustodyAttestationOnlyEvidence,
             DO::CustodyAttestationOnlyProofRejected,
         );
     }
@@ -11085,7 +11085,7 @@ mod run_351_authority_activation_post_final_execution_confirmation {
     #[test]
     fn reject_fixture_only_authority_activation_execution_preparation() {
         d_reject_source(
-            LiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationAuthoritySource::FixtureOnlyAuthorityActivationExecutionPreparation,
+            LiveEpochTransitionAuthorityActivationFinalExecutionAuthoritySource::FixtureOnlyAuthorityActivationExecutionPreparation,
             DO::FixtureStagedApplicationRejectedAsProductionAuthority,
         );
     }
@@ -11093,7 +11093,7 @@ mod run_351_authority_activation_post_final_execution_confirmation {
     #[test]
     fn reject_arbitrary_validator_set_bytes() {
         d_reject_source(
-            LiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationAuthoritySource::ArbitraryValidatorSetBytes,
+            LiveEpochTransitionAuthorityActivationFinalExecutionAuthoritySource::ArbitraryValidatorSetBytes,
             DO::ArbitraryValidatorSetBytesRejected,
         );
     }
@@ -11108,78 +11108,78 @@ mod run_351_authority_activation_post_final_execution_confirmation {
         c.inputs.trust_domain = trust_domain(TrustBundleEnvironment::Mainnet);
         let d = d_eval(&c);
         assert_eq!(d.outcome, DO::MainNetRefused);
-        assert!(d.authority_activation_post_final_execution_confirmation_artifact.is_none());
+        assert!(d.authority_activation_final_execution_artifact.is_none());
     }
 
     #[test]
     fn mainnet_policy_unavailable() {
         let c = d_case(TrustBundleEnvironment::Devnet, Sc::Add);
         let exec = d_exec_with_policy(
-            ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationExecutorPolicy::MainnetProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationRequired,
+            ProductionLiveEpochTransitionAuthorityActivationFinalExecutionExecutorPolicy::MainnetProductionLiveEpochTransitionAuthorityActivationFinalExecutionRequired,
         );
-        let d = exec.evaluate_live_epoch_transition_authority_activation_post_final_execution_confirmation(
+        let d = exec.evaluate_live_epoch_transition_authority_activation_final_execution(
             &c.request,
             &c.inputs,
-            &empty_replay351(),
+            &empty_replay349(),
         );
         assert_eq!(
             d.outcome,
-            DO::MainNetProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationUnavailable
+            DO::MainNetProductionLiveEpochTransitionAuthorityActivationFinalExecutionUnavailable
         );
-        assert!(d.authority_activation_post_final_execution_confirmation_artifact.is_none());
+        assert!(d.authority_activation_final_execution_artifact.is_none());
     }
 
     #[test]
     fn production_policy_unavailable() {
         let c = d_case(TrustBundleEnvironment::Devnet, Sc::Add);
         let exec = d_exec_with_policy(
-            ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationExecutorPolicy::RequireProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmation,
+            ProductionLiveEpochTransitionAuthorityActivationFinalExecutionExecutorPolicy::RequireProductionLiveEpochTransitionAuthorityActivationFinalExecution,
         );
-        let d = exec.evaluate_live_epoch_transition_authority_activation_post_final_execution_confirmation(
+        let d = exec.evaluate_live_epoch_transition_authority_activation_final_execution(
             &c.request,
             &c.inputs,
-            &empty_replay351(),
+            &empty_replay349(),
         );
         assert_eq!(
             d.outcome,
-            DO::ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationUnavailable
+            DO::ProductionLiveEpochTransitionAuthorityActivationFinalExecutionUnavailable
         );
-        assert!(d.authority_activation_post_final_execution_confirmation_artifact.is_none());
+        assert!(d.authority_activation_final_execution_artifact.is_none());
     }
 
     #[test]
     fn disabled_policy_fails_closed() {
         let c = d_case(TrustBundleEnvironment::Devnet, Sc::Add);
         let exec = d_exec_with_policy(
-            ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationExecutorPolicy::Disabled,
+            ProductionLiveEpochTransitionAuthorityActivationFinalExecutionExecutorPolicy::Disabled,
         );
-        let d = exec.evaluate_live_epoch_transition_authority_activation_post_final_execution_confirmation(
+        let d = exec.evaluate_live_epoch_transition_authority_activation_final_execution(
             &c.request,
             &c.inputs,
-            &empty_replay351(),
+            &empty_replay349(),
         );
         assert_eq!(d.outcome, DO::Disabled);
-        assert!(d.authority_activation_post_final_execution_confirmation_artifact.is_none());
+        assert!(d.authority_activation_final_execution_artifact.is_none());
         assert!(!d.is_accept());
     }
 
     #[test]
     fn reserved_production_kind_fails_closed() {
         let c = d_case(TrustBundleEnvironment::Devnet, Sc::Add);
-        let exec = ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationExecutor::new(
-            ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationConfig::new(
-                ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationExecutorKind::ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmation,
+        let exec = ProductionLiveEpochTransitionAuthorityActivationFinalExecutionExecutor::new(
+            ProductionLiveEpochTransitionAuthorityActivationFinalExecutionConfig::new(
+                ProductionLiveEpochTransitionAuthorityActivationFinalExecutionExecutorKind::ProductionLiveEpochTransitionAuthorityActivationFinalExecution,
             ),
-            ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationExecutorPolicy::AllowSourceTestLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmation,
+            ProductionLiveEpochTransitionAuthorityActivationFinalExecutionExecutorPolicy::AllowSourceTestLiveEpochTransitionAuthorityActivationFinalExecution,
         );
-        let d = exec.evaluate_live_epoch_transition_authority_activation_post_final_execution_confirmation(
+        let d = exec.evaluate_live_epoch_transition_authority_activation_final_execution(
             &c.request,
             &c.inputs,
-            &empty_replay351(),
+            &empty_replay349(),
         );
         assert_eq!(
             d.outcome,
-            DO::LiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationBoundaryUnavailable
+            DO::LiveEpochTransitionAuthorityActivationFinalExecutionBoundaryUnavailable
         );
     }
 
@@ -11191,14 +11191,14 @@ mod run_351_authority_activation_post_final_execution_confirmation {
     fn replay_rejected_when_id_present() {
         let c = d_case(TrustBundleEnvironment::Devnet, Sc::Add);
         let d = d_eval(&c);
-        let id = d.authority_activation_post_final_execution_confirmation_artifact.as_ref().unwrap().request_id.clone();
+        let id = d.authority_activation_final_execution_artifact.as_ref().unwrap().request_id.clone();
         let replay = vec![id];
         let d2 = d_eval_replay(&c, &replay);
         match d2.outcome {
             DO::StagedApplicationReplayRejected { .. } => {}
             other => panic!("expected replay rejection, got {other:?}"),
         }
-        assert!(d2.authority_activation_post_final_execution_confirmation_artifact.is_none());
+        assert!(d2.authority_activation_final_execution_artifact.is_none());
     }
 
     #[test]
@@ -11237,15 +11237,15 @@ mod run_351_authority_activation_post_final_execution_confirmation {
     fn fixture_state_apply_is_idempotent() {
         let c = d_case(TrustBundleEnvironment::Devnet, Sc::Add);
         let d = d_eval(&c);
-        let art = d.authority_activation_post_final_execution_confirmation_artifact.as_ref().unwrap();
-        let mut state = LiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationFixtureState::new(CUR_EPOCH, CUR_VERSION, "start");
-        assert!(state.apply_prepared_execution(art, &d.authority_activation_post_final_execution_confirmation_id));
+        let art = d.authority_activation_final_execution_artifact.as_ref().unwrap();
+        let mut state = LiveEpochTransitionAuthorityActivationFinalExecutionFixtureState::new(CUR_EPOCH, CUR_VERSION, "start");
+        assert!(state.apply_prepared_execution(art, &d.authority_activation_final_execution_id));
         assert_eq!(state.current_epoch, art.epoch_transition_target);
         assert_eq!(state.validator_set_version, art.validator_set_version);
         assert_eq!(state.current_set_digest, art.proposed_set_digest);
         // Re-applying the same id is a no-op.
-        assert!(!state.apply_prepared_execution(art, &d.authority_activation_post_final_execution_confirmation_id));
-        assert!(state.has_applied(&d.authority_activation_post_final_execution_confirmation_id));
+        assert!(!state.apply_prepared_execution(art, &d.authority_activation_final_execution_id));
+        assert!(state.has_applied(&d.authority_activation_final_execution_id));
     }
 
     #[test]
@@ -11253,9 +11253,9 @@ mod run_351_authority_activation_post_final_execution_confirmation {
         for sc in ALL_SC {
             let c = d_case(TrustBundleEnvironment::Devnet, sc);
             let d = d_eval(&c);
-            let art = d.authority_activation_post_final_execution_confirmation_artifact.as_ref().unwrap();
-            let mut state = LiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationFixtureState::new(CUR_EPOCH, CUR_VERSION, "start");
-            assert!(state.apply_prepared_execution(art, &d.authority_activation_post_final_execution_confirmation_id));
+            let art = d.authority_activation_final_execution_artifact.as_ref().unwrap();
+            let mut state = LiveEpochTransitionAuthorityActivationFinalExecutionFixtureState::new(CUR_EPOCH, CUR_VERSION, "start");
+            assert!(state.apply_prepared_execution(art, &d.authority_activation_final_execution_id));
             assert_eq!(state.current_epoch, art.epoch_transition_target);
         }
     }
@@ -11270,7 +11270,7 @@ mod run_351_authority_activation_post_final_execution_confirmation {
         let d = d_eval(&c);
         assert!(d.outcome.is_non_mutating());
         let bad = d_case(TrustBundleEnvironment::Devnet, Sc::Add);
-        let dbad = d_eval_replay(&bad, &[d_eval(&bad).authority_activation_post_final_execution_confirmation_id]);
+        let dbad = d_eval_replay(&bad, &[d_eval(&bad).authority_activation_final_execution_id]);
         assert!(dbad.outcome.is_non_mutating());
     }
 
@@ -11280,18 +11280,18 @@ mod run_351_authority_activation_post_final_execution_confirmation {
         let d = d_eval(&c);
         assert!(d.outcome.authorizes_future_mutation_only());
         assert!(d.authorizes_future_mutation_only());
-        assert!(d.authority_activation_post_final_execution_confirmation_artifact.as_ref().unwrap().staged_kind.is_non_mutating());
+        assert!(d.authority_activation_final_execution_artifact.as_ref().unwrap().staged_kind.is_non_mutating());
     }
 
     #[test]
     fn reject_never_authorizes_future_mutation() {
         d_reject_source(
-            LiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationAuthoritySource::MissingAuthorityActivationExecutionPreparationDecision,
+            LiveEpochTransitionAuthorityActivationFinalExecutionAuthoritySource::MissingAuthorityActivationExecutionPreparationDecision,
             DO::VerifiedAuthorityActivationExecutionPreparationDecisionRequired,
         );
         let mut c = d_case(TrustBundleEnvironment::Devnet, Sc::Add);
         c.request.authority_source =
-            LiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationAuthoritySource::MissingAuthorityActivationExecutionPreparationDecision;
+            LiveEpochTransitionAuthorityActivationFinalExecutionAuthoritySource::MissingAuthorityActivationExecutionPreparationDecision;
         let d = d_eval(&c);
         assert!(!d.authorizes_future_mutation_only());
         assert!(!d.outcome.authorizes_future_mutation_only());
@@ -11303,20 +11303,20 @@ mod run_351_authority_activation_post_final_execution_confirmation {
 
     #[test]
     fn policy_predicates() {
-        use ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationExecutorPolicy as Pol;
+        use ProductionLiveEpochTransitionAuthorityActivationFinalExecutionExecutorPolicy as Pol;
         assert!(Pol::Disabled.is_disabled());
-        assert!(Pol::AllowSourceTestLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmation.allows_source_test());
-        assert!(Pol::RequireProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmation.is_production());
-        assert!(Pol::MainnetProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationRequired.is_mainnet());
+        assert!(Pol::AllowSourceTestLiveEpochTransitionAuthorityActivationFinalExecution.allows_source_test());
+        assert!(Pol::RequireProductionLiveEpochTransitionAuthorityActivationFinalExecution.is_production());
+        assert!(Pol::MainnetProductionLiveEpochTransitionAuthorityActivationFinalExecutionRequired.is_mainnet());
         assert_eq!(Pol::default(), Pol::Disabled);
     }
 
     #[test]
     fn kind_predicates() {
-        use ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationExecutorKind as K;
-        assert!(K::SourceTestLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmation.is_source_test());
+        use ProductionLiveEpochTransitionAuthorityActivationFinalExecutionExecutorKind as K;
+        assert!(K::SourceTestLiveEpochTransitionAuthorityActivationFinalExecution.is_source_test());
         assert!(!K::Disabled.is_source_test());
-        assert!(!K::ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmation.is_source_test());
+        assert!(!K::ProductionLiveEpochTransitionAuthorityActivationFinalExecution.is_source_test());
         assert_eq!(K::default(), K::Disabled);
     }
 
@@ -11350,9 +11350,9 @@ mod run_351_authority_activation_post_final_execution_confirmation {
     fn config_and_inputs_well_formed() {
         let c = d_case(TrustBundleEnvironment::Devnet, Sc::Add);
         assert!(c.inputs.is_well_formed());
-        assert!(ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationConfig::source_test().is_well_formed());
+        assert!(ProductionLiveEpochTransitionAuthorityActivationFinalExecutionConfig::source_test().is_well_formed());
         // The default config still pins the supported protocol version.
-        assert!(ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationConfig::default().is_well_formed());
+        assert!(ProductionLiveEpochTransitionAuthorityActivationFinalExecutionConfig::default().is_well_formed());
     }
 
     // ===========================================================================
@@ -11366,18 +11366,18 @@ mod run_351_authority_activation_post_final_execution_confirmation {
                 let c = d_case(TrustBundleEnvironment::Devnet, $sc);
                 let d = d_eval(&c);
                 assert!(d.is_accept());
-                let art = d.authority_activation_post_final_execution_confirmation_artifact.as_ref().unwrap();
+                let art = d.authority_activation_final_execution_artifact.as_ref().unwrap();
                 assert_eq!(art.staged_kind, expected_crc12_kind($sc));
                 assert!(art.staged_kind.is_non_mutating());
                 let d2 = d_eval(&c);
-                assert_eq!(d.authority_activation_post_final_execution_confirmation_digest, d2.authority_activation_post_final_execution_confirmation_digest);
+                assert_eq!(d.authority_activation_final_execution_digest, d2.authority_activation_final_execution_digest);
                 assert_eq!(d.transcript_digest, d2.transcript_digest);
-                let mut state = LiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationFixtureState::new(
+                let mut state = LiveEpochTransitionAuthorityActivationFinalExecutionFixtureState::new(
                     CUR_EPOCH,
                     CUR_VERSION,
                     "start",
                 );
-                assert!(state.apply_prepared_execution(art, &d.authority_activation_post_final_execution_confirmation_id));
+                assert!(state.apply_prepared_execution(art, &d.authority_activation_final_execution_id));
                 assert_eq!(state.current_epoch, art.epoch_transition_target);
             }
         };
@@ -11401,7 +11401,7 @@ mod run_351_authority_activation_post_final_execution_confirmation {
                 let d = d_eval(&c);
                 assert!(d.is_accept());
                 assert_eq!(
-                    d.authority_activation_post_final_execution_confirmation_artifact.as_ref().unwrap().environment,
+                    d.authority_activation_final_execution_artifact.as_ref().unwrap().environment,
                     TrustBundleEnvironment::Testnet
                 );
             }
@@ -11426,7 +11426,7 @@ mod run_351_authority_activation_post_final_execution_confirmation {
                 c.inputs.expected_authority_activation_execution_preparation_decision_id = "bad".to_string();
                 let d = d_eval(&c);
                 assert_eq!(d.outcome, DO::AuthorityActivationExecutionPreparationDecisionIdMismatch);
-                assert!(d.authority_activation_post_final_execution_confirmation_artifact.is_none());
+                assert!(d.authority_activation_final_execution_artifact.is_none());
             }
         };
     }
@@ -11449,7 +11449,7 @@ mod run_351_authority_activation_post_final_execution_confirmation {
                 c.inputs.expected_guarded_mutation_decision_id = "bad".to_string();
                 let d = d_eval(&c);
                 assert_eq!(d.outcome, DO::GuardedMutationDecisionIdMismatch);
-                assert!(d.authority_activation_post_final_execution_confirmation_artifact.is_none());
+                assert!(d.authority_activation_final_execution_artifact.is_none());
             }
         };
     }
@@ -11476,7 +11476,7 @@ mod run_351_authority_activation_post_final_execution_confirmation {
         let c = d_case(TrustBundleEnvironment::Devnet, Sc::Add);
         let d = d_eval(&c);
         assert!(d.is_accept());
-        let art = d.authority_activation_post_final_execution_confirmation_artifact.as_ref().unwrap();
+        let art = d.authority_activation_final_execution_artifact.as_ref().unwrap();
         assert_eq!(art.runtime_handoff_decision_id, ppkg.runtime_handoff_decision_id);
         assert_eq!(art.runtime_handoff_request_id, ppkg.runtime_handoff_request_id);
         assert_eq!(art.runtime_handoff_intent_digest, ppkg.runtime_handoff_intent_digest);
@@ -11486,7 +11486,7 @@ mod run_351_authority_activation_post_final_execution_confirmation {
         );
         assert_eq!(art.runtime_handoff_nonce, HANDOFF_NONCE);
         assert_eq!(art.authority_activation_execution_preparation_nonce, CRC4_NONCE);
-        assert_eq!(art.authority_activation_post_final_execution_confirmation_nonce, CRC12_NONCE);
+        assert_eq!(art.authority_activation_final_execution_nonce, CRC12_NONCE);
     }
 
     #[test]
@@ -11535,7 +11535,7 @@ mod run_351_authority_activation_post_final_execution_confirmation {
     #[test]
     fn reject_runtime_handoff_decision_alone() {
         d_reject_source(
-            LiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationAuthoritySource::RuntimeHandoffDecisionWithoutAuthorityActivationExecutionPreparation,
+            LiveEpochTransitionAuthorityActivationFinalExecutionAuthoritySource::RuntimeHandoffDecisionWithoutAuthorityActivationExecutionPreparation,
             DO::RuntimeHandoffDecisionAloneRejected,
         );
     }
@@ -11578,8 +11578,8 @@ mod run_351_authority_activation_post_final_execution_confirmation {
         let c = d_case(TrustBundleEnvironment::Devnet, Sc::Add);
         let d1 = d_eval(&c);
         let d2 = d_eval(&c);
-        let a1 = d1.authority_activation_post_final_execution_confirmation_artifact.as_ref().unwrap();
-        let a2 = d2.authority_activation_post_final_execution_confirmation_artifact.as_ref().unwrap();
+        let a1 = d1.authority_activation_final_execution_artifact.as_ref().unwrap();
+        let a2 = d2.authority_activation_final_execution_artifact.as_ref().unwrap();
         assert_eq!(a1.content_digest(), a2.content_digest());
     }
 
@@ -11635,7 +11635,7 @@ mod run_351_authority_activation_post_final_execution_confirmation {
     #[test]
     fn reject_mutation_execution_decision_alone() {
         d_reject_source(
-            LiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationAuthoritySource::MutationExecutionDecisionWithoutAuthorityActivationExecutionPreparation,
+            LiveEpochTransitionAuthorityActivationFinalExecutionAuthoritySource::MutationExecutionDecisionWithoutAuthorityActivationExecutionPreparation,
             DO::MutationExecutionDecisionAloneRejected,
         );
     }
@@ -11689,7 +11689,7 @@ mod run_351_authority_activation_post_final_execution_confirmation {
     #[test]
     fn reject_commit_authorization_decision_alone() {
         d_reject_source(
-            LiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationAuthoritySource::CommitAuthorizationDecisionWithoutAuthorityActivationExecutionPreparation,
+            LiveEpochTransitionAuthorityActivationFinalExecutionAuthoritySource::CommitAuthorizationDecisionWithoutAuthorityActivationExecutionPreparation,
             DO::CommitAuthorizationDecisionAloneRejected,
         );
     }
@@ -11713,7 +11713,7 @@ mod run_351_authority_activation_post_final_execution_confirmation {
     fn accept_artifact_reexposes_commit_authorization_tuple() {
         let c = d_case(TrustBundleEnvironment::Devnet, Sc::Add);
         let d = d_eval(&c);
-        let art = d.authority_activation_post_final_execution_confirmation_artifact.as_ref().unwrap();
+        let art = d.authority_activation_final_execution_artifact.as_ref().unwrap();
         assert_eq!(art.commit_authorization_nonce, CMT_NONCE);
         assert!(!art.commit_authorization_decision_id.is_empty());
         assert!(!art.commit_authorization_transcript_digest.is_empty());
@@ -11740,13 +11740,13 @@ mod run_351_authority_activation_post_final_execution_confirmation {
         let c = d_case(TrustBundleEnvironment::Devnet, Sc::Add);
         let d = d_eval(&c);
         assert!(d.is_accept());
-        let art = d.authority_activation_post_final_execution_confirmation_artifact.as_ref().unwrap();
+        let art = d.authority_activation_final_execution_artifact.as_ref().unwrap();
         // Grandparent Run 329/330 mutation-execution nonce re-exposed intact.
         assert_eq!(art.mutation_execution_nonce, MUT_NONCE);
         // Parent Run 335/336 authority-activation-execution-preparation nonce re-exposed intact.
         assert_eq!(art.authority_activation_execution_preparation_nonce, CRC4_NONCE);
-        // Self Run 337 authority-activation-post-final-execution-confirmation proposed nonce.
-        assert_eq!(art.authority_activation_post_final_execution_confirmation_nonce, CRC12_NONCE);
+        // Self Run 337 authority-activation-final-execution proposed nonce.
+        assert_eq!(art.authority_activation_final_execution_nonce, CRC12_NONCE);
     }
 
     #[test]
@@ -11810,7 +11810,7 @@ mod run_351_authority_activation_post_final_execution_confirmation {
     #[test]
     fn reject_execution_preparation_decision_alone() {
         d_reject_source(
-            LiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationAuthoritySource::ExecutionPreparationDecisionWithoutAuthorityActivationExecutionPreparation,
+            LiveEpochTransitionAuthorityActivationFinalExecutionAuthoritySource::ExecutionPreparationDecisionWithoutAuthorityActivationExecutionPreparation,
             DO::ExecutionPreparationDecisionAloneRejected,
         );
     }
@@ -11836,13 +11836,13 @@ mod run_351_authority_activation_post_final_execution_confirmation {
         let c = d_case(TrustBundleEnvironment::Devnet, Sc::Add);
         let d = d_eval(&c);
         assert!(d.is_accept());
-        let art = d.authority_activation_post_final_execution_confirmation_artifact.as_ref().unwrap();
+        let art = d.authority_activation_final_execution_artifact.as_ref().unwrap();
         // Grandparent Run 329/330 execution-preparation nonce re-exposed intact.
         assert_eq!(art.execution_preparation_nonce, PREP_NONCE);
         // Parent Run 335/336 authority-activation-execution-preparation nonce re-exposed intact.
         assert_eq!(art.authority_activation_execution_preparation_nonce, CRC4_NONCE);
-        // Self Run 337 authority-activation-post-final-execution-confirmation proposed nonce.
-        assert_eq!(art.authority_activation_post_final_execution_confirmation_nonce, CRC12_NONCE);
+        // Self Run 337 authority-activation-final-execution proposed nonce.
+        assert_eq!(art.authority_activation_final_execution_nonce, CRC12_NONCE);
     }
 
     #[test]
@@ -11862,13 +11862,13 @@ mod run_351_authority_activation_post_final_execution_confirmation {
 
 
     // =======================================================================
-    // Run 351 supplemental coverage: additional deterministic / tag / invariant
+    // Run 349 supplemental coverage: additional deterministic / tag / invariant
     // assertions for the authority-activation execution-preparation /
     // final-execution preflight boundary (module under test).
     // =======================================================================
-    mod run_351_supplemental {
+    mod run_349_supplemental {
         use super::{d_case, d_eval, Sc};
-        use qbind_node::pqc_production_live_epoch_transition_authority_activation_post_final_execution_confirmation::*;
+        use qbind_node::pqc_production_live_epoch_transition_authority_activation_final_execution::*;
         use qbind_node::pqc_trust_bundle::TrustBundleEnvironment;
 
         #[test]
@@ -11879,8 +11879,8 @@ mod run_351_authority_activation_post_final_execution_confirmation {
             assert!(a.is_accept());
             assert_eq!(a, b);
             assert_eq!(
-                a.authority_activation_post_final_execution_confirmation_digest,
-                b.authority_activation_post_final_execution_confirmation_digest
+                a.authority_activation_final_execution_digest,
+                b.authority_activation_final_execution_digest
             );
             assert_eq!(a.transcript_digest, b.transcript_digest);
         }
@@ -11893,8 +11893,8 @@ mod run_351_authority_activation_post_final_execution_confirmation {
             assert!(a.is_accept());
             assert_eq!(a, b);
             assert_eq!(
-                a.authority_activation_post_final_execution_confirmation_digest,
-                b.authority_activation_post_final_execution_confirmation_digest
+                a.authority_activation_final_execution_digest,
+                b.authority_activation_final_execution_digest
             );
             assert_eq!(a.transcript_digest, b.transcript_digest);
         }
@@ -11907,8 +11907,8 @@ mod run_351_authority_activation_post_final_execution_confirmation {
             assert!(a.is_accept());
             assert_eq!(a, b);
             assert_eq!(
-                a.authority_activation_post_final_execution_confirmation_digest,
-                b.authority_activation_post_final_execution_confirmation_digest
+                a.authority_activation_final_execution_digest,
+                b.authority_activation_final_execution_digest
             );
             assert_eq!(a.transcript_digest, b.transcript_digest);
         }
@@ -11921,8 +11921,8 @@ mod run_351_authority_activation_post_final_execution_confirmation {
             assert!(a.is_accept());
             assert_eq!(a, b);
             assert_eq!(
-                a.authority_activation_post_final_execution_confirmation_digest,
-                b.authority_activation_post_final_execution_confirmation_digest
+                a.authority_activation_final_execution_digest,
+                b.authority_activation_final_execution_digest
             );
             assert_eq!(a.transcript_digest, b.transcript_digest);
         }
@@ -11935,8 +11935,8 @@ mod run_351_authority_activation_post_final_execution_confirmation {
             assert!(a.is_accept());
             assert_eq!(a, b);
             assert_eq!(
-                a.authority_activation_post_final_execution_confirmation_digest,
-                b.authority_activation_post_final_execution_confirmation_digest
+                a.authority_activation_final_execution_digest,
+                b.authority_activation_final_execution_digest
             );
             assert_eq!(a.transcript_digest, b.transcript_digest);
         }
@@ -11949,8 +11949,8 @@ mod run_351_authority_activation_post_final_execution_confirmation {
             assert!(a.is_accept());
             assert_eq!(a, b);
             assert_eq!(
-                a.authority_activation_post_final_execution_confirmation_digest,
-                b.authority_activation_post_final_execution_confirmation_digest
+                a.authority_activation_final_execution_digest,
+                b.authority_activation_final_execution_digest
             );
             assert_eq!(a.transcript_digest, b.transcript_digest);
         }
@@ -11963,8 +11963,8 @@ mod run_351_authority_activation_post_final_execution_confirmation {
             assert!(a.is_accept());
             assert_eq!(a, b);
             assert_eq!(
-                a.authority_activation_post_final_execution_confirmation_digest,
-                b.authority_activation_post_final_execution_confirmation_digest
+                a.authority_activation_final_execution_digest,
+                b.authority_activation_final_execution_digest
             );
             assert_eq!(a.transcript_digest, b.transcript_digest);
         }
@@ -11977,8 +11977,8 @@ mod run_351_authority_activation_post_final_execution_confirmation {
             assert!(a.is_accept());
             assert_eq!(a, b);
             assert_eq!(
-                a.authority_activation_post_final_execution_confirmation_digest,
-                b.authority_activation_post_final_execution_confirmation_digest
+                a.authority_activation_final_execution_digest,
+                b.authority_activation_final_execution_digest
             );
             assert_eq!(a.transcript_digest, b.transcript_digest);
         }
@@ -11991,8 +11991,8 @@ mod run_351_authority_activation_post_final_execution_confirmation {
             assert!(a.is_accept());
             assert_eq!(a, b);
             assert_eq!(
-                a.authority_activation_post_final_execution_confirmation_digest,
-                b.authority_activation_post_final_execution_confirmation_digest
+                a.authority_activation_final_execution_digest,
+                b.authority_activation_final_execution_digest
             );
             assert_eq!(a.transcript_digest, b.transcript_digest);
         }
@@ -12005,8 +12005,8 @@ mod run_351_authority_activation_post_final_execution_confirmation {
             assert!(a.is_accept());
             assert_eq!(a, b);
             assert_eq!(
-                a.authority_activation_post_final_execution_confirmation_digest,
-                b.authority_activation_post_final_execution_confirmation_digest
+                a.authority_activation_final_execution_digest,
+                b.authority_activation_final_execution_digest
             );
             assert_eq!(a.transcript_digest, b.transcript_digest);
         }
@@ -12019,8 +12019,8 @@ mod run_351_authority_activation_post_final_execution_confirmation {
             assert!(a.is_accept());
             assert_eq!(a, b);
             assert_eq!(
-                a.authority_activation_post_final_execution_confirmation_digest,
-                b.authority_activation_post_final_execution_confirmation_digest
+                a.authority_activation_final_execution_digest,
+                b.authority_activation_final_execution_digest
             );
             assert_eq!(a.transcript_digest, b.transcript_digest);
         }
@@ -12033,8 +12033,8 @@ mod run_351_authority_activation_post_final_execution_confirmation {
             assert!(a.is_accept());
             assert_eq!(a, b);
             assert_eq!(
-                a.authority_activation_post_final_execution_confirmation_digest,
-                b.authority_activation_post_final_execution_confirmation_digest
+                a.authority_activation_final_execution_digest,
+                b.authority_activation_final_execution_digest
             );
             assert_eq!(a.transcript_digest, b.transcript_digest);
         }
@@ -12047,8 +12047,8 @@ mod run_351_authority_activation_post_final_execution_confirmation {
             assert!(a.is_accept());
             assert_eq!(a, b);
             assert_eq!(
-                a.authority_activation_post_final_execution_confirmation_digest,
-                b.authority_activation_post_final_execution_confirmation_digest
+                a.authority_activation_final_execution_digest,
+                b.authority_activation_final_execution_digest
             );
             assert_eq!(a.transcript_digest, b.transcript_digest);
         }
@@ -12061,8 +12061,8 @@ mod run_351_authority_activation_post_final_execution_confirmation {
             assert!(a.is_accept());
             assert_eq!(a, b);
             assert_eq!(
-                a.authority_activation_post_final_execution_confirmation_digest,
-                b.authority_activation_post_final_execution_confirmation_digest
+                a.authority_activation_final_execution_digest,
+                b.authority_activation_final_execution_digest
             );
             assert_eq!(a.transcript_digest, b.transcript_digest);
         }
@@ -12075,8 +12075,8 @@ mod run_351_authority_activation_post_final_execution_confirmation {
             assert!(a.is_accept());
             assert_eq!(a, b);
             assert_eq!(
-                a.authority_activation_post_final_execution_confirmation_digest,
-                b.authority_activation_post_final_execution_confirmation_digest
+                a.authority_activation_final_execution_digest,
+                b.authority_activation_final_execution_digest
             );
             assert_eq!(a.transcript_digest, b.transcript_digest);
         }
@@ -12089,8 +12089,8 @@ mod run_351_authority_activation_post_final_execution_confirmation {
             assert!(a.is_accept());
             assert_eq!(a, b);
             assert_eq!(
-                a.authority_activation_post_final_execution_confirmation_digest,
-                b.authority_activation_post_final_execution_confirmation_digest
+                a.authority_activation_final_execution_digest,
+                b.authority_activation_final_execution_digest
             );
             assert_eq!(a.transcript_digest, b.transcript_digest);
         }
@@ -12103,8 +12103,8 @@ mod run_351_authority_activation_post_final_execution_confirmation {
             assert!(a.is_accept());
             assert_eq!(a, b);
             assert_eq!(
-                a.authority_activation_post_final_execution_confirmation_digest,
-                b.authority_activation_post_final_execution_confirmation_digest
+                a.authority_activation_final_execution_digest,
+                b.authority_activation_final_execution_digest
             );
             assert_eq!(a.transcript_digest, b.transcript_digest);
         }
@@ -12117,8 +12117,8 @@ mod run_351_authority_activation_post_final_execution_confirmation {
             assert!(a.is_accept());
             assert_eq!(a, b);
             assert_eq!(
-                a.authority_activation_post_final_execution_confirmation_digest,
-                b.authority_activation_post_final_execution_confirmation_digest
+                a.authority_activation_final_execution_digest,
+                b.authority_activation_final_execution_digest
             );
             assert_eq!(a.transcript_digest, b.transcript_digest);
         }
@@ -12129,10 +12129,10 @@ mod run_351_authority_activation_post_final_execution_confirmation {
             let d = d_eval(&c);
             assert!(d.is_accept());
             let art = d
-                .authority_activation_post_final_execution_confirmation_artifact
+                .authority_activation_final_execution_artifact
                 .as_ref()
                 .expect("accepted preflight must carry an artifact");
-            assert_eq!(art.content_digest(), d.authority_activation_post_final_execution_confirmation_digest);
+            assert_eq!(art.content_digest(), d.authority_activation_final_execution_digest);
             assert!(art.protocol_version >= 1);
             assert!(d.authorizes_future_mutation_only());
         }
@@ -12143,10 +12143,10 @@ mod run_351_authority_activation_post_final_execution_confirmation {
             let d = d_eval(&c);
             assert!(d.is_accept());
             let art = d
-                .authority_activation_post_final_execution_confirmation_artifact
+                .authority_activation_final_execution_artifact
                 .as_ref()
                 .expect("accepted preflight must carry an artifact");
-            assert_eq!(art.content_digest(), d.authority_activation_post_final_execution_confirmation_digest);
+            assert_eq!(art.content_digest(), d.authority_activation_final_execution_digest);
             assert!(art.protocol_version >= 1);
             assert!(d.authorizes_future_mutation_only());
         }
@@ -12157,10 +12157,10 @@ mod run_351_authority_activation_post_final_execution_confirmation {
             let d = d_eval(&c);
             assert!(d.is_accept());
             let art = d
-                .authority_activation_post_final_execution_confirmation_artifact
+                .authority_activation_final_execution_artifact
                 .as_ref()
                 .expect("accepted preflight must carry an artifact");
-            assert_eq!(art.content_digest(), d.authority_activation_post_final_execution_confirmation_digest);
+            assert_eq!(art.content_digest(), d.authority_activation_final_execution_digest);
             assert!(art.protocol_version >= 1);
             assert!(d.authorizes_future_mutation_only());
         }
@@ -12171,10 +12171,10 @@ mod run_351_authority_activation_post_final_execution_confirmation {
             let d = d_eval(&c);
             assert!(d.is_accept());
             let art = d
-                .authority_activation_post_final_execution_confirmation_artifact
+                .authority_activation_final_execution_artifact
                 .as_ref()
                 .expect("accepted preflight must carry an artifact");
-            assert_eq!(art.content_digest(), d.authority_activation_post_final_execution_confirmation_digest);
+            assert_eq!(art.content_digest(), d.authority_activation_final_execution_digest);
             assert!(art.protocol_version >= 1);
             assert!(d.authorizes_future_mutation_only());
         }
@@ -12185,10 +12185,10 @@ mod run_351_authority_activation_post_final_execution_confirmation {
             let d = d_eval(&c);
             assert!(d.is_accept());
             let art = d
-                .authority_activation_post_final_execution_confirmation_artifact
+                .authority_activation_final_execution_artifact
                 .as_ref()
                 .expect("accepted preflight must carry an artifact");
-            assert_eq!(art.content_digest(), d.authority_activation_post_final_execution_confirmation_digest);
+            assert_eq!(art.content_digest(), d.authority_activation_final_execution_digest);
             assert!(art.protocol_version >= 1);
             assert!(d.authorizes_future_mutation_only());
         }
@@ -12199,10 +12199,10 @@ mod run_351_authority_activation_post_final_execution_confirmation {
             let d = d_eval(&c);
             assert!(d.is_accept());
             let art = d
-                .authority_activation_post_final_execution_confirmation_artifact
+                .authority_activation_final_execution_artifact
                 .as_ref()
                 .expect("accepted preflight must carry an artifact");
-            assert_eq!(art.content_digest(), d.authority_activation_post_final_execution_confirmation_digest);
+            assert_eq!(art.content_digest(), d.authority_activation_final_execution_digest);
             assert!(art.protocol_version >= 1);
             assert!(d.authorizes_future_mutation_only());
         }
@@ -12213,10 +12213,10 @@ mod run_351_authority_activation_post_final_execution_confirmation {
             let d = d_eval(&c);
             assert!(d.is_accept());
             let art = d
-                .authority_activation_post_final_execution_confirmation_artifact
+                .authority_activation_final_execution_artifact
                 .as_ref()
                 .expect("accepted preflight must carry an artifact");
-            assert_eq!(art.content_digest(), d.authority_activation_post_final_execution_confirmation_digest);
+            assert_eq!(art.content_digest(), d.authority_activation_final_execution_digest);
             assert!(art.protocol_version >= 1);
             assert!(d.authorizes_future_mutation_only());
         }
@@ -12227,10 +12227,10 @@ mod run_351_authority_activation_post_final_execution_confirmation {
             let d = d_eval(&c);
             assert!(d.is_accept());
             let art = d
-                .authority_activation_post_final_execution_confirmation_artifact
+                .authority_activation_final_execution_artifact
                 .as_ref()
                 .expect("accepted preflight must carry an artifact");
-            assert_eq!(art.content_digest(), d.authority_activation_post_final_execution_confirmation_digest);
+            assert_eq!(art.content_digest(), d.authority_activation_final_execution_digest);
             assert!(art.protocol_version >= 1);
             assert!(d.authorizes_future_mutation_only());
         }
@@ -12241,29 +12241,29 @@ mod run_351_authority_activation_post_final_execution_confirmation {
             let d = d_eval(&c);
             assert!(d.is_accept());
             let art = d
-                .authority_activation_post_final_execution_confirmation_artifact
+                .authority_activation_final_execution_artifact
                 .as_ref()
                 .expect("accepted preflight must carry an artifact");
-            assert_eq!(art.content_digest(), d.authority_activation_post_final_execution_confirmation_digest);
+            assert_eq!(art.content_digest(), d.authority_activation_final_execution_digest);
             assert!(art.protocol_version >= 1);
             assert!(d.authorizes_future_mutation_only());
         }
 
         #[test]
         fn supp_policy_default_is_disabled() {
-            type P = ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationExecutorPolicy;
+            type P = ProductionLiveEpochTransitionAuthorityActivationFinalExecutionExecutorPolicy;
             assert_eq!(P::default(), P::Disabled);
             assert_eq!(P::Disabled.tag(), "disabled");
         }
 
         #[test]
         fn supp_policy_tags_nonempty() {
-            type P = ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationExecutorPolicy;
+            type P = ProductionLiveEpochTransitionAuthorityActivationFinalExecutionExecutorPolicy;
             for p in [
                 P::Disabled,
-                P::AllowSourceTestLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmation,
-                P::RequireProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmation,
-                P::MainnetProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationRequired,
+                P::AllowSourceTestLiveEpochTransitionAuthorityActivationFinalExecution,
+                P::RequireProductionLiveEpochTransitionAuthorityActivationFinalExecution,
+                P::MainnetProductionLiveEpochTransitionAuthorityActivationFinalExecutionRequired,
             ] {
                 assert!(!p.tag().is_empty());
             }
@@ -12283,7 +12283,7 @@ mod run_351_authority_activation_post_final_execution_confirmation {
                 PRODUCTION_LIVE_EPOCH_TRANSITION_AUTHORITY_ACTIVATION_EXECUTION_PREPARATION_TRANSCRIPT_DOMAIN_TAG,
             ];
             for t in tags {
-                assert!(t.contains("351"));
+                assert!(t.contains("349"));
                 assert!(!t.is_empty());
             }
             for i in 0..tags.len() {
@@ -12297,29 +12297,29 @@ mod run_351_authority_activation_post_final_execution_confirmation {
         fn supp_non_mutation_flag_is_true() {
             let c = d_case(TrustBundleEnvironment::Devnet, Sc::Add);
             let d = d_eval(&c);
-            let art = d.authority_activation_post_final_execution_confirmation_artifact.as_ref().unwrap();
+            let art = d.authority_activation_final_execution_artifact.as_ref().unwrap();
             assert!(art.staged_kind.is_non_mutating());
         }
     }
 
 
     // =======================================================================
-    // Run 353 under-test: live epoch-transition authority-activation
+    // Run 351 under-test: live epoch-transition authority-activation
     // post-final-execution confirmation / execution-sink-readiness boundary.
-    // Consumes the verified Run 351/352 authority-activation final-execution
+    // Consumes the verified Run 349/350 authority-activation final-execution
     // decision produced by the parent d-layer fixtures (d_case / d_eval).
     // =======================================================================
-    mod run_353_authority_activation_execution_sink_prewrite {
+    mod run_351_authority_activation_post_final_execution_confirmation {
         #![allow(unused_imports)]
         #![allow(dead_code)]
         #![allow(unused_variables)]
         use super::*;
-    use qbind_node::pqc_production_live_epoch_transition_authority_activation_execution_sink_prewrite::*;
+    use qbind_node::pqc_production_live_epoch_transition_authority_activation_post_final_execution_confirmation::*;
 
-    use ProductionLiveEpochTransitionAuthorityActivationExecutionSinkPrewriteOutcome as EO;
-    use LiveEpochTransitionAuthorityActivationExecutionSinkPrewriteKind as EK;
+    use ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationOutcome as EO;
+    use LiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationKind as EK;
 
-    const CRC13_POLICY_ID: &str = "authority-activation-execution-sink-prewrite-policy-1";
+    const CRC13_POLICY_ID: &str = "authority-activation-post-final-execution-confirmation-policy-1";
     const CRC13_NONCE: u64 = 49;
 
     fn expected_crc13_kind(sc: Sc) -> EK {
@@ -12336,16 +12336,16 @@ mod run_351_authority_activation_post_final_execution_confirmation {
         }
     }
 
-    /// Build an accepted Run 335/336 authority-activation-post-final-execution-confirmation decision — the sole
-    /// accepted Run 337 authority-activation-execution-sink-prewrite authority source.
+    /// Build an accepted Run 335/336 authority-activation-final-execution decision — the sole
+    /// accepted Run 337 authority-activation-post-final-execution-confirmation authority source.
     fn ed_decision(
         env: TrustBundleEnvironment,
         sc: Sc,
-    ) -> ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationDecision {
+    ) -> ProductionLiveEpochTransitionAuthorityActivationFinalExecutionDecision {
         let d = d_eval(&d_case(env, sc));
         assert!(
             d.is_accept(),
-            "run 335 authority-activation-post-final-execution-confirmation decision must accept for fixture"
+            "run 335 authority-activation-final-execution decision must accept for fixture"
         );
         d
     }
@@ -12353,7 +12353,7 @@ mod run_351_authority_activation_post_final_execution_confirmation {
     fn ed_decision_rejected(
         env: TrustBundleEnvironment,
         sc: Sc,
-    ) -> ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationDecision {
+    ) -> ProductionLiveEpochTransitionAuthorityActivationFinalExecutionDecision {
         let mut c = d_case(env, sc);
         c.inputs.expected_proposal_id = "tampered-proposal".to_string();
         let d = d_eval(&c);
@@ -12364,26 +12364,26 @@ mod run_351_authority_activation_post_final_execution_confirmation {
     fn ed_decision_no_artifact(
         env: TrustBundleEnvironment,
         sc: Sc,
-    ) -> ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationDecision {
+    ) -> ProductionLiveEpochTransitionAuthorityActivationFinalExecutionDecision {
         let mut d = ed_decision(env, sc);
-        d.authority_activation_post_final_execution_confirmation_artifact = None;
+        d.authority_activation_final_execution_artifact = None;
         d
     }
 
-    struct E353 {
-        executor: ProductionLiveEpochTransitionAuthorityActivationExecutionSinkPrewriteExecutor,
-        request: ProductionLiveEpochTransitionAuthorityActivationExecutionSinkPrewriteRequest,
-        inputs: ProductionLiveEpochTransitionAuthorityActivationExecutionSinkPrewriteInputs,
+    struct E351 {
+        executor: ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationExecutor,
+        request: ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationRequest,
+        inputs: ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationInputs,
     }
 
     fn e_inputs(
         env: TrustBundleEnvironment,
-        dec: &ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationDecision,
-    ) -> ProductionLiveEpochTransitionAuthorityActivationExecutionSinkPrewriteInputs {
-        let pkg = dec.authority_activation_post_final_execution_confirmation_artifact.as_ref().unwrap();
-        ProductionLiveEpochTransitionAuthorityActivationExecutionSinkPrewriteInputs {
+        dec: &ProductionLiveEpochTransitionAuthorityActivationFinalExecutionDecision,
+    ) -> ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationInputs {
+        let pkg = dec.authority_activation_final_execution_artifact.as_ref().unwrap();
+        ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationInputs {
             trust_domain: trust_domain(env),
-            authority_activation_execution_sink_prewrite_policy_id: CRC13_POLICY_ID.to_string(),
+            authority_activation_post_final_execution_confirmation_policy_id: CRC13_POLICY_ID.to_string(),
             expected_authorization_policy_id: AUTH_POLICY_ID.to_string(),
             expected_application_policy_id: APP_POLICY_ID.to_string(),
             expected_governance_domain_id: GOV_DOMAIN.to_string(),
@@ -12433,11 +12433,11 @@ mod run_351_authority_activation_post_final_execution_confirmation {
                 .guarded_mutation_transcript_digest
                 .clone(),
             expected_guarded_mutation_nonce: pkg.guarded_mutation_nonce,
-            expected_authority_activation_post_final_execution_confirmation_decision_id: dec.authority_activation_post_final_execution_confirmation_id.clone(),
-            expected_authority_activation_post_final_execution_confirmation_request_id: dec.request_id.clone(),
-            expected_authority_activation_post_final_execution_confirmation_intent_digest: dec.authority_activation_post_final_execution_confirmation_digest.clone(),
-            expected_authority_activation_post_final_execution_confirmation_transcript_digest: dec.transcript_digest.clone(),
-            expected_authority_activation_post_final_execution_confirmation_nonce: pkg.authority_activation_post_final_execution_confirmation_nonce,
+            expected_authority_activation_final_execution_decision_id: dec.authority_activation_final_execution_id.clone(),
+            expected_authority_activation_final_execution_request_id: dec.request_id.clone(),
+            expected_authority_activation_final_execution_intent_digest: dec.authority_activation_final_execution_digest.clone(),
+            expected_authority_activation_final_execution_transcript_digest: dec.transcript_digest.clone(),
+            expected_authority_activation_final_execution_nonce: pkg.authority_activation_final_execution_nonce,
             expected_commit_authorization_decision_id: pkg.commit_authorization_decision_id.clone(),
             expected_commit_authorization_request_id: pkg.commit_authorization_request_id.clone(),
             expected_commit_authorization_intent_digest: pkg
@@ -12484,49 +12484,49 @@ mod run_351_authority_activation_post_final_execution_confirmation {
         }
     }
 
-    fn e_case(env: TrustBundleEnvironment, sc: Sc) -> E353 {
+    fn e_case(env: TrustBundleEnvironment, sc: Sc) -> E351 {
         let dec = ed_decision(env, sc);
-        let target = dec.authority_activation_post_final_execution_confirmation_artifact.as_ref().unwrap().epoch_transition_target;
+        let target = dec.authority_activation_final_execution_artifact.as_ref().unwrap().epoch_transition_target;
         let inputs = e_inputs(env, &dec);
-        let request = ProductionLiveEpochTransitionAuthorityActivationExecutionSinkPrewriteRequest::new(
-            LiveEpochTransitionAuthorityActivationExecutionSinkPrewriteAuthoritySource::VerifiedAuthorityActivationPostFinalExecutionConfirmationDecision {
+        let request = ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationRequest::new(
+            LiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationAuthoritySource::VerifiedAuthorityActivationFinalExecutionDecision {
                 decision: dec,
             },
             target,
             CRC13_NONCE,
         );
-        E353 {
-            executor: ProductionLiveEpochTransitionAuthorityActivationExecutionSinkPrewriteExecutor::source_test(),
+        E351 {
+            executor: ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationExecutor::source_test(),
             request,
             inputs,
         }
     }
 
-    fn empty_replay353() -> EmptyLiveEpochTransitionAuthorityActivationExecutionSinkPrewriteReplaySet {
-        EmptyLiveEpochTransitionAuthorityActivationExecutionSinkPrewriteReplaySet
+    fn empty_replay351() -> EmptyLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationReplaySet {
+        EmptyLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationReplaySet
     }
 
-    fn e_eval(case: &E353) -> ProductionLiveEpochTransitionAuthorityActivationExecutionSinkPrewriteDecision {
-        case.executor.evaluate_live_epoch_transition_authority_activation_execution_sink_prewrite(
+    fn e_eval(case: &E351) -> ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationDecision {
+        case.executor.evaluate_live_epoch_transition_authority_activation_post_final_execution_confirmation(
             &case.request,
             &case.inputs,
-            &empty_replay353(),
+            &empty_replay351(),
         )
     }
 
     fn e_eval_replay(
-        case: &E353,
+        case: &E351,
         replay: &[String],
-    ) -> ProductionLiveEpochTransitionAuthorityActivationExecutionSinkPrewriteDecision {
+    ) -> ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationDecision {
         case.executor
-            .evaluate_live_epoch_transition_authority_activation_execution_sink_prewrite(&case.request, &case.inputs, &replay)
+            .evaluate_live_epoch_transition_authority_activation_post_final_execution_confirmation(&case.request, &case.inputs, &replay)
     }
 
     fn e_exec_with_policy(
-        policy: ProductionLiveEpochTransitionAuthorityActivationExecutionSinkPrewriteExecutorPolicy,
-    ) -> ProductionLiveEpochTransitionAuthorityActivationExecutionSinkPrewriteExecutor {
-        ProductionLiveEpochTransitionAuthorityActivationExecutionSinkPrewriteExecutor::new(
-            ProductionLiveEpochTransitionAuthorityActivationExecutionSinkPrewriteConfig::source_test(),
+        policy: ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationExecutorPolicy,
+    ) -> ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationExecutor {
+        ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationExecutor::new(
+            ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationConfig::source_test(),
             policy,
         )
     }
@@ -12534,14 +12534,14 @@ mod run_351_authority_activation_post_final_execution_confirmation {
     /// Common helper: build a Devnet/Add case, apply a mutation to the inputs, and
     /// assert the resulting outcome (fail-closed, no artifact).
     fn e_reject_inputs(
-        mutate: impl FnOnce(&mut ProductionLiveEpochTransitionAuthorityActivationExecutionSinkPrewriteInputs),
+        mutate: impl FnOnce(&mut ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationInputs),
         expected: EO,
     ) {
         let mut c = e_case(TrustBundleEnvironment::Devnet, Sc::Add);
         mutate(&mut c.inputs);
         let d = e_eval(&c);
         assert_eq!(d.outcome, expected, "outcome tag: {}", d.outcome.tag());
-        assert!(d.authority_activation_execution_sink_prewrite_artifact.is_none());
+        assert!(d.authority_activation_post_final_execution_confirmation_artifact.is_none());
         assert!(!d.is_accept());
         assert!(d.outcome.is_non_mutating());
     }
@@ -12549,18 +12549,18 @@ mod run_351_authority_activation_post_final_execution_confirmation {
     /// Common helper: build a Devnet/Add case, replace its authority source, and
     /// assert the resulting outcome.
     fn e_reject_source(
-        source: LiveEpochTransitionAuthorityActivationExecutionSinkPrewriteAuthoritySource,
+        source: LiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationAuthoritySource,
         expected: EO,
     ) {
         let mut c = e_case(TrustBundleEnvironment::Devnet, Sc::Add);
         c.request.authority_source = source;
         let d = e_eval(&c);
         assert_eq!(d.outcome, expected, "outcome tag: {}", d.outcome.tag());
-        assert!(d.authority_activation_execution_sink_prewrite_artifact.is_none());
+        assert!(d.authority_activation_post_final_execution_confirmation_artifact.is_none());
     }
 
     // ===========================================================================
-    // A. Accepted / compatible source-test authority-activation-post-final-execution-confirmation artifacts
+    // A. Accepted / compatible source-test authority-activation-final-execution artifacts
     // ===========================================================================
 
     #[test]
@@ -12570,10 +12570,10 @@ mod run_351_authority_activation_post_final_execution_confirmation {
             let d = e_eval(&c);
             assert!(d.is_accept(), "scenario must accept");
             assert!(d.authorizes_future_mutation_only());
-            let art = d.authority_activation_execution_sink_prewrite_artifact.as_ref().unwrap();
+            let art = d.authority_activation_post_final_execution_confirmation_artifact.as_ref().unwrap();
             assert_eq!(art.staged_kind, expected_crc13_kind(sc));
-            assert_eq!(art.authority_activation_execution_sink_prewrite_nonce, CRC13_NONCE);
-            assert_eq!(art.authority_activation_post_final_execution_confirmation_nonce, CRC4_NONCE);
+            assert_eq!(art.authority_activation_post_final_execution_confirmation_nonce, CRC13_NONCE);
+            assert_eq!(art.authority_activation_final_execution_nonce, CRC4_NONCE);
             assert_eq!(art.guarded_mutation_nonce, GUARDED_NONCE);
             assert_eq!(art.staged_application_nonce, STAGED_NONCE);
         }
@@ -12585,7 +12585,7 @@ mod run_351_authority_activation_post_final_execution_confirmation {
             let c = e_case(TrustBundleEnvironment::Testnet, sc);
             let d = e_eval(&c);
             assert!(d.is_accept());
-            let art = d.authority_activation_execution_sink_prewrite_artifact.as_ref().unwrap();
+            let art = d.authority_activation_post_final_execution_confirmation_artifact.as_ref().unwrap();
             assert_eq!(art.environment, TrustBundleEnvironment::Testnet);
             assert_eq!(art.staged_kind, expected_crc13_kind(sc));
         }
@@ -12596,55 +12596,55 @@ mod run_351_authority_activation_post_final_execution_confirmation {
         let c = e_case(TrustBundleEnvironment::Devnet, Sc::Add);
         let d = e_eval(&c);
         match d.outcome {
-            EO::AcceptedSourceTestLiveEpochTransitionAuthorityActivationExecutionSinkPrewrite {
+            EO::AcceptedSourceTestLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmation {
                 execution_kind,
                 environment,
                 epoch_transition_target,
-                authority_activation_execution_sink_prewrite_nonce,
+                authority_activation_post_final_execution_confirmation_nonce,
             } => {
                 assert_eq!(execution_kind, EK::StageApplyValidatorAdd);
                 assert_eq!(environment, TrustBundleEnvironment::Devnet);
                 assert_eq!(epoch_transition_target, c.request.proposed_epoch_transition_target);
-                assert_eq!(authority_activation_execution_sink_prewrite_nonce, CRC13_NONCE);
+                assert_eq!(authority_activation_post_final_execution_confirmation_nonce, CRC13_NONCE);
             }
             other => panic!("unexpected outcome: {other:?}"),
         }
     }
 
     #[test]
-    fn accept_artifact_reexposes_consumed_authority_activation_post_final_execution_confirmation_transcript() {
+    fn accept_artifact_reexposes_consumed_authority_activation_final_execution_transcript() {
         let dec = ed_decision(TrustBundleEnvironment::Devnet, Sc::Add);
-        let target = dec.authority_activation_post_final_execution_confirmation_artifact.as_ref().unwrap().epoch_transition_target;
+        let target = dec.authority_activation_final_execution_artifact.as_ref().unwrap().epoch_transition_target;
         let inputs = e_inputs(TrustBundleEnvironment::Devnet, &dec);
-        let handoff_id = dec.authority_activation_post_final_execution_confirmation_id.clone();
+        let handoff_id = dec.authority_activation_final_execution_id.clone();
         let handoff_req = dec.request_id.clone();
-        let handoff_digest = dec.authority_activation_post_final_execution_confirmation_digest.clone();
+        let handoff_digest = dec.authority_activation_final_execution_digest.clone();
         let handoff_transcript = dec.transcript_digest.clone();
-        let request = ProductionLiveEpochTransitionAuthorityActivationExecutionSinkPrewriteRequest::new(
-            LiveEpochTransitionAuthorityActivationExecutionSinkPrewriteAuthoritySource::VerifiedAuthorityActivationPostFinalExecutionConfirmationDecision {
+        let request = ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationRequest::new(
+            LiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationAuthoritySource::VerifiedAuthorityActivationFinalExecutionDecision {
                 decision: dec,
             },
             target,
             CRC13_NONCE,
         );
-        let exec = ProductionLiveEpochTransitionAuthorityActivationExecutionSinkPrewriteExecutor::source_test();
-        let d = exec.evaluate_live_epoch_transition_authority_activation_execution_sink_prewrite(
+        let exec = ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationExecutor::source_test();
+        let d = exec.evaluate_live_epoch_transition_authority_activation_post_final_execution_confirmation(
             &request,
             &inputs,
-            &empty_replay353(),
+            &empty_replay351(),
         );
-        let art = d.authority_activation_execution_sink_prewrite_artifact.as_ref().unwrap();
-        assert_eq!(art.authority_activation_post_final_execution_confirmation_decision_id, handoff_id);
-        assert_eq!(art.authority_activation_post_final_execution_confirmation_request_id, handoff_req);
-        assert_eq!(art.authority_activation_post_final_execution_confirmation_intent_digest, handoff_digest);
-        assert_eq!(art.authority_activation_post_final_execution_confirmation_transcript_digest, handoff_transcript);
+        let art = d.authority_activation_post_final_execution_confirmation_artifact.as_ref().unwrap();
+        assert_eq!(art.authority_activation_final_execution_decision_id, handoff_id);
+        assert_eq!(art.authority_activation_final_execution_request_id, handoff_req);
+        assert_eq!(art.authority_activation_final_execution_intent_digest, handoff_digest);
+        assert_eq!(art.authority_activation_final_execution_transcript_digest, handoff_transcript);
     }
 
     #[test]
     fn accept_artifact_encodes_future_executor_preconditions() {
         let c = e_case(TrustBundleEnvironment::Devnet, Sc::Add);
         let d = e_eval(&c);
-        let art = d.authority_activation_execution_sink_prewrite_artifact.as_ref().unwrap();
+        let art = d.authority_activation_post_final_execution_confirmation_artifact.as_ref().unwrap();
         assert_eq!(art.precondition_current_validator_set_epoch, art.validator_set_epoch);
         assert_eq!(art.precondition_current_validator_set_version, art.validator_set_version);
         assert_eq!(art.precondition_target_epoch, art.epoch_transition_target);
@@ -12660,14 +12660,14 @@ mod run_351_authority_activation_post_final_execution_confirmation {
     fn accept_decision_ids_match_artifact_ids() {
         let c = e_case(TrustBundleEnvironment::Devnet, Sc::Add);
         let d = e_eval(&c);
-        let art = d.authority_activation_execution_sink_prewrite_artifact.as_ref().unwrap();
-        assert_eq!(d.authority_activation_execution_sink_prewrite_id, art.authority_activation_execution_sink_prewrite_id);
+        let art = d.authority_activation_post_final_execution_confirmation_artifact.as_ref().unwrap();
+        assert_eq!(d.authority_activation_post_final_execution_confirmation_id, art.authority_activation_post_final_execution_confirmation_id);
         assert_eq!(d.request_id, art.request_id);
-        assert_eq!(d.authority_activation_execution_sink_prewrite_digest, art.authority_activation_execution_sink_prewrite_digest);
+        assert_eq!(d.authority_activation_post_final_execution_confirmation_digest, art.authority_activation_post_final_execution_confirmation_digest);
         assert_eq!(d.transcript_digest, art.transcript_digest);
-        assert!(!d.authority_activation_execution_sink_prewrite_id.is_empty());
+        assert!(!d.authority_activation_post_final_execution_confirmation_id.is_empty());
         assert!(!d.request_id.is_empty());
-        assert!(!d.authority_activation_execution_sink_prewrite_digest.is_empty());
+        assert!(!d.authority_activation_post_final_execution_confirmation_digest.is_empty());
         assert!(!d.transcript_digest.is_empty());
     }
 
@@ -12681,9 +12681,9 @@ mod run_351_authority_activation_post_final_execution_confirmation {
             let c = e_case(TrustBundleEnvironment::Devnet, sc);
             let d1 = e_eval(&c);
             let d2 = e_eval(&c);
-            assert_eq!(d1.authority_activation_execution_sink_prewrite_id, d2.authority_activation_execution_sink_prewrite_id);
+            assert_eq!(d1.authority_activation_post_final_execution_confirmation_id, d2.authority_activation_post_final_execution_confirmation_id);
             assert_eq!(d1.request_id, d2.request_id);
-            assert_eq!(d1.authority_activation_execution_sink_prewrite_digest, d2.authority_activation_execution_sink_prewrite_digest);
+            assert_eq!(d1.authority_activation_post_final_execution_confirmation_digest, d2.authority_activation_post_final_execution_confirmation_digest);
             assert_eq!(d1.transcript_digest, d2.transcript_digest);
         }
     }
@@ -12692,8 +12692,8 @@ mod run_351_authority_activation_post_final_execution_confirmation {
     fn artifact_content_digest_is_stable() {
         let c = e_case(TrustBundleEnvironment::Devnet, Sc::Bulk);
         let d = e_eval(&c);
-        let art = d.authority_activation_execution_sink_prewrite_artifact.as_ref().unwrap();
-        assert_eq!(art.content_digest(), art.authority_activation_execution_sink_prewrite_digest);
+        let art = d.authority_activation_post_final_execution_confirmation_artifact.as_ref().unwrap();
+        assert_eq!(art.content_digest(), art.authority_activation_post_final_execution_confirmation_digest);
         assert_eq!(art.content_digest(), art.content_digest());
     }
 
@@ -12702,68 +12702,68 @@ mod run_351_authority_activation_post_final_execution_confirmation {
     // ===========================================================================
 
     #[test]
-    fn wrong_authority_activation_post_final_execution_confirmation_decision_id() {
+    fn wrong_authority_activation_final_execution_decision_id() {
         e_reject_inputs(
-            |i| i.expected_authority_activation_post_final_execution_confirmation_decision_id = "bad".to_string(),
-            EO::AuthorityActivationPostFinalExecutionConfirmationDecisionIdMismatch,
+            |i| i.expected_authority_activation_final_execution_decision_id = "bad".to_string(),
+            EO::AuthorityActivationFinalExecutionDecisionIdMismatch,
         );
     }
 
     #[test]
-    fn wrong_authority_activation_post_final_execution_confirmation_request_id() {
+    fn wrong_authority_activation_final_execution_request_id() {
         e_reject_inputs(
-            |i| i.expected_authority_activation_post_final_execution_confirmation_request_id = "bad".to_string(),
-            EO::AuthorityActivationPostFinalExecutionConfirmationDecisionRequestIdMismatch,
+            |i| i.expected_authority_activation_final_execution_request_id = "bad".to_string(),
+            EO::AuthorityActivationFinalExecutionDecisionRequestIdMismatch,
         );
     }
 
     #[test]
-    fn wrong_authority_activation_post_final_execution_confirmation_intent_digest() {
+    fn wrong_authority_activation_final_execution_intent_digest() {
         e_reject_inputs(
-            |i| i.expected_authority_activation_post_final_execution_confirmation_intent_digest = "bad".to_string(),
-            EO::AuthorityActivationPostFinalExecutionConfirmationDecisionIntentDigestMismatch,
+            |i| i.expected_authority_activation_final_execution_intent_digest = "bad".to_string(),
+            EO::AuthorityActivationFinalExecutionDecisionIntentDigestMismatch,
         );
     }
 
     #[test]
-    fn wrong_authority_activation_post_final_execution_confirmation_transcript_digest() {
+    fn wrong_authority_activation_final_execution_transcript_digest() {
         e_reject_inputs(
-            |i| i.expected_authority_activation_post_final_execution_confirmation_transcript_digest = "bad".to_string(),
-            EO::AuthorityActivationPostFinalExecutionConfirmationDecisionTranscriptMismatch,
+            |i| i.expected_authority_activation_final_execution_transcript_digest = "bad".to_string(),
+            EO::AuthorityActivationFinalExecutionDecisionTranscriptMismatch,
         );
     }
 
     #[test]
-    fn wrong_authority_activation_post_final_execution_confirmation_nonce() {
+    fn wrong_authority_activation_final_execution_nonce() {
         e_reject_inputs(
-            |i| i.expected_authority_activation_post_final_execution_confirmation_nonce = 9999,
-            EO::WrongAuthorityActivationPostFinalExecutionConfirmationNonce,
+            |i| i.expected_authority_activation_final_execution_nonce = 9999,
+            EO::WrongAuthorityActivationFinalExecutionNonce,
         );
     }
 
     #[test]
-    fn tampered_authority_activation_post_final_execution_confirmation_package_integrity_mismatch() {
+    fn tampered_authority_activation_final_execution_package_integrity_mismatch() {
         // Mutate the consumed package so its content digest no longer matches the
         // bound handoff decision digest.
         let mut dec = ed_decision(TrustBundleEnvironment::Devnet, Sc::Add);
-        let target = dec.authority_activation_post_final_execution_confirmation_artifact.as_ref().unwrap().epoch_transition_target;
+        let target = dec.authority_activation_final_execution_artifact.as_ref().unwrap().epoch_transition_target;
         let inputs = e_inputs(TrustBundleEnvironment::Devnet, &dec);
-        dec.authority_activation_post_final_execution_confirmation_artifact.as_mut().unwrap().proposal_digest = "tampered".to_string();
-        let request = ProductionLiveEpochTransitionAuthorityActivationExecutionSinkPrewriteRequest::new(
-            LiveEpochTransitionAuthorityActivationExecutionSinkPrewriteAuthoritySource::VerifiedAuthorityActivationPostFinalExecutionConfirmationDecision {
+        dec.authority_activation_final_execution_artifact.as_mut().unwrap().proposal_digest = "tampered".to_string();
+        let request = ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationRequest::new(
+            LiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationAuthoritySource::VerifiedAuthorityActivationFinalExecutionDecision {
                 decision: dec,
             },
             target,
             CRC13_NONCE,
         );
-        let exec = ProductionLiveEpochTransitionAuthorityActivationExecutionSinkPrewriteExecutor::source_test();
-        let d = exec.evaluate_live_epoch_transition_authority_activation_execution_sink_prewrite(
+        let exec = ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationExecutor::source_test();
+        let d = exec.evaluate_live_epoch_transition_authority_activation_post_final_execution_confirmation(
             &request,
             &inputs,
-            &empty_replay353(),
+            &empty_replay351(),
         );
-        assert_eq!(d.outcome, EO::AuthorityActivationPostFinalExecutionConfirmationDecisionIntegrityMismatch);
-        assert!(d.authority_activation_execution_sink_prewrite_artifact.is_none());
+        assert_eq!(d.outcome, EO::AuthorityActivationFinalExecutionDecisionIntegrityMismatch);
+        assert!(d.authority_activation_post_final_execution_confirmation_artifact.is_none());
     }
 
     // ===========================================================================
@@ -13132,7 +13132,7 @@ mod run_351_authority_activation_post_final_execution_confirmation {
         c.request.proposed_epoch_transition_target = 4242;
         let d = e_eval(&c);
         assert_eq!(d.outcome, EO::WrongEpochTransitionTarget);
-        assert!(d.authority_activation_execution_sink_prewrite_artifact.is_none());
+        assert!(d.authority_activation_post_final_execution_confirmation_artifact.is_none());
     }
 
     #[test]
@@ -13150,21 +13150,21 @@ mod run_351_authority_activation_post_final_execution_confirmation {
     // ===========================================================================
 
     #[test]
-    fn reject_missing_authority_activation_post_final_execution_confirmation_decision() {
+    fn reject_missing_authority_activation_final_execution_decision() {
         e_reject_source(
-            LiveEpochTransitionAuthorityActivationExecutionSinkPrewriteAuthoritySource::MissingAuthorityActivationPostFinalExecutionConfirmationDecision,
-            EO::VerifiedAuthorityActivationPostFinalExecutionConfirmationDecisionRequired,
+            LiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationAuthoritySource::MissingAuthorityActivationFinalExecutionDecision,
+            EO::VerifiedAuthorityActivationFinalExecutionDecisionRequired,
         );
     }
 
     #[test]
-    fn reject_unverified_authority_activation_post_final_execution_confirmation_decision() {
+    fn reject_unverified_authority_activation_final_execution_decision() {
         let dec = ed_decision_rejected(TrustBundleEnvironment::Devnet, Sc::Add);
         e_reject_source(
-            LiveEpochTransitionAuthorityActivationExecutionSinkPrewriteAuthoritySource::UnverifiedAuthorityActivationPostFinalExecutionConfirmationDecision {
+            LiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationAuthoritySource::UnverifiedAuthorityActivationFinalExecutionDecision {
                 decision: dec,
             },
-            EO::UnverifiedAuthorityActivationPostFinalExecutionConfirmationDecisionRejected,
+            EO::UnverifiedAuthorityActivationFinalExecutionDecisionRejected,
         );
     }
 
@@ -13172,39 +13172,39 @@ mod run_351_authority_activation_post_final_execution_confirmation {
     fn reject_verified_source_with_non_accept_decision() {
         let dec = ed_decision_rejected(TrustBundleEnvironment::Devnet, Sc::Add);
         e_reject_source(
-            LiveEpochTransitionAuthorityActivationExecutionSinkPrewriteAuthoritySource::VerifiedAuthorityActivationPostFinalExecutionConfirmationDecision {
+            LiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationAuthoritySource::VerifiedAuthorityActivationFinalExecutionDecision {
                 decision: dec,
             },
-            EO::UnverifiedAuthorityActivationPostFinalExecutionConfirmationDecisionRejected,
+            EO::UnverifiedAuthorityActivationFinalExecutionDecisionRejected,
         );
     }
 
     #[test]
-    fn reject_accepted_authority_activation_post_final_execution_confirmation_without_package_via_verified_source() {
+    fn reject_accepted_authority_activation_final_execution_without_package_via_verified_source() {
         let dec = ed_decision_no_artifact(TrustBundleEnvironment::Devnet, Sc::Add);
         e_reject_source(
-            LiveEpochTransitionAuthorityActivationExecutionSinkPrewriteAuthoritySource::VerifiedAuthorityActivationPostFinalExecutionConfirmationDecision {
+            LiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationAuthoritySource::VerifiedAuthorityActivationFinalExecutionDecision {
                 decision: dec,
             },
-            EO::VerifiedAuthorityActivationPostFinalExecutionConfirmationDecisionRequired,
+            EO::VerifiedAuthorityActivationFinalExecutionDecisionRequired,
         );
     }
 
     #[test]
-    fn reject_accepted_authority_activation_post_final_execution_confirmation_without_package_variant() {
+    fn reject_accepted_authority_activation_final_execution_without_package_variant() {
         let dec = ed_decision_no_artifact(TrustBundleEnvironment::Devnet, Sc::Add);
         e_reject_source(
-            LiveEpochTransitionAuthorityActivationExecutionSinkPrewriteAuthoritySource::AcceptedAuthorityActivationPostFinalExecutionConfirmationWithoutPackage {
+            LiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationAuthoritySource::AcceptedAuthorityActivationFinalExecutionWithoutPackage {
                 decision: dec,
             },
-            EO::VerifiedAuthorityActivationPostFinalExecutionConfirmationDecisionRequired,
+            EO::VerifiedAuthorityActivationFinalExecutionDecisionRequired,
         );
     }
 
     #[test]
     fn reject_guarded_mutation_decision_alone() {
         e_reject_source(
-            LiveEpochTransitionAuthorityActivationExecutionSinkPrewriteAuthoritySource::GuardedMutationDecisionWithoutAuthorityActivationPostFinalExecutionConfirmation,
+            LiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationAuthoritySource::GuardedMutationDecisionWithoutAuthorityActivationFinalExecution,
             EO::GuardedMutationDecisionAloneRejected,
         );
     }
@@ -13212,7 +13212,7 @@ mod run_351_authority_activation_post_final_execution_confirmation {
     #[test]
     fn reject_staged_application_decision_alone() {
         e_reject_source(
-            LiveEpochTransitionAuthorityActivationExecutionSinkPrewriteAuthoritySource::StagedApplicationDecisionWithoutAuthorityActivationPostFinalExecutionConfirmation,
+            LiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationAuthoritySource::StagedApplicationDecisionWithoutAuthorityActivationFinalExecution,
             EO::StagedApplicationDecisionAloneRejected,
         );
     }
@@ -13220,7 +13220,7 @@ mod run_351_authority_activation_post_final_execution_confirmation {
     #[test]
     fn reject_live_application_authorization_alone() {
         e_reject_source(
-            LiveEpochTransitionAuthorityActivationExecutionSinkPrewriteAuthoritySource::LiveApplicationAuthorizationWithoutAuthorityActivationPostFinalExecutionConfirmation,
+            LiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationAuthoritySource::LiveApplicationAuthorizationWithoutAuthorityActivationFinalExecution,
             EO::LiveApplicationAuthorizationAloneRejected,
         );
     }
@@ -13228,7 +13228,7 @@ mod run_351_authority_activation_post_final_execution_confirmation {
     #[test]
     fn reject_application_decision_alone() {
         e_reject_source(
-            LiveEpochTransitionAuthorityActivationExecutionSinkPrewriteAuthoritySource::ApplicationDecisionWithoutAuthorityActivationPostFinalExecutionConfirmation,
+            LiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationAuthoritySource::ApplicationDecisionWithoutAuthorityActivationFinalExecution,
             EO::ApplicationDecisionAloneRejected,
         );
     }
@@ -13236,7 +13236,7 @@ mod run_351_authority_activation_post_final_execution_confirmation {
     #[test]
     fn reject_rotation_plan_alone() {
         e_reject_source(
-            LiveEpochTransitionAuthorityActivationExecutionSinkPrewriteAuthoritySource::RotationPlanWithoutAuthorityActivationPostFinalExecutionConfirmation,
+            LiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationAuthoritySource::RotationPlanWithoutAuthorityActivationFinalExecution,
             EO::RotationPlanAloneRejected,
         );
     }
@@ -13244,7 +13244,7 @@ mod run_351_authority_activation_post_final_execution_confirmation {
     #[test]
     fn reject_governance_execution_intent_alone() {
         e_reject_source(
-            LiveEpochTransitionAuthorityActivationExecutionSinkPrewriteAuthoritySource::GovernanceExecutionIntentWithoutAuthorityActivationPostFinalExecutionConfirmation,
+            LiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationAuthoritySource::GovernanceExecutionIntentWithoutAuthorityActivationFinalExecution,
             EO::GovernanceExecutionIntentAloneRejected,
         );
     }
@@ -13252,7 +13252,7 @@ mod run_351_authority_activation_post_final_execution_confirmation {
     #[test]
     fn reject_governance_proof_alone() {
         e_reject_source(
-            LiveEpochTransitionAuthorityActivationExecutionSinkPrewriteAuthoritySource::GovernanceProofWithoutAuthorityActivationPostFinalExecutionConfirmation,
+            LiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationAuthoritySource::GovernanceProofWithoutAuthorityActivationFinalExecution,
             EO::GovernanceProofAloneRejected,
         );
     }
@@ -13260,7 +13260,7 @@ mod run_351_authority_activation_post_final_execution_confirmation {
     #[test]
     fn reject_local_operator_assertion() {
         e_reject_source(
-            LiveEpochTransitionAuthorityActivationExecutionSinkPrewriteAuthoritySource::LocalOperatorAssertion,
+            LiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationAuthoritySource::LocalOperatorAssertion,
             EO::LocalOperatorProofRejected,
         );
     }
@@ -13268,7 +13268,7 @@ mod run_351_authority_activation_post_final_execution_confirmation {
     #[test]
     fn reject_peer_majority_assertion() {
         e_reject_source(
-            LiveEpochTransitionAuthorityActivationExecutionSinkPrewriteAuthoritySource::PeerMajorityAssertion,
+            LiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationAuthoritySource::PeerMajorityAssertion,
             EO::PeerMajorityProofRejected,
         );
     }
@@ -13276,7 +13276,7 @@ mod run_351_authority_activation_post_final_execution_confirmation {
     #[test]
     fn reject_custody_only_evidence() {
         e_reject_source(
-            LiveEpochTransitionAuthorityActivationExecutionSinkPrewriteAuthoritySource::CustodyOnlyEvidence,
+            LiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationAuthoritySource::CustodyOnlyEvidence,
             EO::CustodyOnlyProofRejected,
         );
     }
@@ -13284,7 +13284,7 @@ mod run_351_authority_activation_post_final_execution_confirmation {
     #[test]
     fn reject_remote_signer_only_evidence() {
         e_reject_source(
-            LiveEpochTransitionAuthorityActivationExecutionSinkPrewriteAuthoritySource::RemoteSignerOnlyEvidence,
+            LiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationAuthoritySource::RemoteSignerOnlyEvidence,
             EO::RemoteSignerOnlyProofRejected,
         );
     }
@@ -13292,15 +13292,15 @@ mod run_351_authority_activation_post_final_execution_confirmation {
     #[test]
     fn reject_custody_attestation_only_evidence() {
         e_reject_source(
-            LiveEpochTransitionAuthorityActivationExecutionSinkPrewriteAuthoritySource::CustodyAttestationOnlyEvidence,
+            LiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationAuthoritySource::CustodyAttestationOnlyEvidence,
             EO::CustodyAttestationOnlyProofRejected,
         );
     }
 
     #[test]
-    fn reject_fixture_only_authority_activation_post_final_execution_confirmation() {
+    fn reject_fixture_only_authority_activation_final_execution() {
         e_reject_source(
-            LiveEpochTransitionAuthorityActivationExecutionSinkPrewriteAuthoritySource::FixtureOnlyAuthorityActivationPostFinalExecutionConfirmation,
+            LiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationAuthoritySource::FixtureOnlyAuthorityActivationFinalExecution,
             EO::FixtureStagedApplicationRejectedAsProductionAuthority,
         );
     }
@@ -13308,7 +13308,7 @@ mod run_351_authority_activation_post_final_execution_confirmation {
     #[test]
     fn reject_arbitrary_validator_set_bytes() {
         e_reject_source(
-            LiveEpochTransitionAuthorityActivationExecutionSinkPrewriteAuthoritySource::ArbitraryValidatorSetBytes,
+            LiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationAuthoritySource::ArbitraryValidatorSetBytes,
             EO::ArbitraryValidatorSetBytesRejected,
         );
     }
@@ -13323,78 +13323,78 @@ mod run_351_authority_activation_post_final_execution_confirmation {
         c.inputs.trust_domain = trust_domain(TrustBundleEnvironment::Mainnet);
         let d = e_eval(&c);
         assert_eq!(d.outcome, EO::MainNetRefused);
-        assert!(d.authority_activation_execution_sink_prewrite_artifact.is_none());
+        assert!(d.authority_activation_post_final_execution_confirmation_artifact.is_none());
     }
 
     #[test]
     fn mainnet_policy_unavailable() {
         let c = e_case(TrustBundleEnvironment::Devnet, Sc::Add);
         let exec = e_exec_with_policy(
-            ProductionLiveEpochTransitionAuthorityActivationExecutionSinkPrewriteExecutorPolicy::MainnetProductionLiveEpochTransitionAuthorityActivationExecutionSinkPrewriteRequired,
+            ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationExecutorPolicy::MainnetProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationRequired,
         );
-        let d = exec.evaluate_live_epoch_transition_authority_activation_execution_sink_prewrite(
+        let d = exec.evaluate_live_epoch_transition_authority_activation_post_final_execution_confirmation(
             &c.request,
             &c.inputs,
-            &empty_replay353(),
+            &empty_replay351(),
         );
         assert_eq!(
             d.outcome,
-            EO::MainNetProductionLiveEpochTransitionAuthorityActivationExecutionSinkPrewriteUnavailable
+            EO::MainNetProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationUnavailable
         );
-        assert!(d.authority_activation_execution_sink_prewrite_artifact.is_none());
+        assert!(d.authority_activation_post_final_execution_confirmation_artifact.is_none());
     }
 
     #[test]
     fn production_policy_unavailable() {
         let c = e_case(TrustBundleEnvironment::Devnet, Sc::Add);
         let exec = e_exec_with_policy(
-            ProductionLiveEpochTransitionAuthorityActivationExecutionSinkPrewriteExecutorPolicy::RequireProductionLiveEpochTransitionAuthorityActivationExecutionSinkPrewrite,
+            ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationExecutorPolicy::RequireProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmation,
         );
-        let d = exec.evaluate_live_epoch_transition_authority_activation_execution_sink_prewrite(
+        let d = exec.evaluate_live_epoch_transition_authority_activation_post_final_execution_confirmation(
             &c.request,
             &c.inputs,
-            &empty_replay353(),
+            &empty_replay351(),
         );
         assert_eq!(
             d.outcome,
-            EO::ProductionLiveEpochTransitionAuthorityActivationExecutionSinkPrewriteUnavailable
+            EO::ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationUnavailable
         );
-        assert!(d.authority_activation_execution_sink_prewrite_artifact.is_none());
+        assert!(d.authority_activation_post_final_execution_confirmation_artifact.is_none());
     }
 
     #[test]
     fn disabled_policy_fails_closed() {
         let c = e_case(TrustBundleEnvironment::Devnet, Sc::Add);
         let exec = e_exec_with_policy(
-            ProductionLiveEpochTransitionAuthorityActivationExecutionSinkPrewriteExecutorPolicy::Disabled,
+            ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationExecutorPolicy::Disabled,
         );
-        let d = exec.evaluate_live_epoch_transition_authority_activation_execution_sink_prewrite(
+        let d = exec.evaluate_live_epoch_transition_authority_activation_post_final_execution_confirmation(
             &c.request,
             &c.inputs,
-            &empty_replay353(),
+            &empty_replay351(),
         );
         assert_eq!(d.outcome, EO::Disabled);
-        assert!(d.authority_activation_execution_sink_prewrite_artifact.is_none());
+        assert!(d.authority_activation_post_final_execution_confirmation_artifact.is_none());
         assert!(!d.is_accept());
     }
 
     #[test]
     fn reserved_production_kind_fails_closed() {
         let c = e_case(TrustBundleEnvironment::Devnet, Sc::Add);
-        let exec = ProductionLiveEpochTransitionAuthorityActivationExecutionSinkPrewriteExecutor::new(
-            ProductionLiveEpochTransitionAuthorityActivationExecutionSinkPrewriteConfig::new(
-                ProductionLiveEpochTransitionAuthorityActivationExecutionSinkPrewriteExecutorKind::ProductionLiveEpochTransitionAuthorityActivationExecutionSinkPrewrite,
+        let exec = ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationExecutor::new(
+            ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationConfig::new(
+                ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationExecutorKind::ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmation,
             ),
-            ProductionLiveEpochTransitionAuthorityActivationExecutionSinkPrewriteExecutorPolicy::AllowSourceTestLiveEpochTransitionAuthorityActivationExecutionSinkPrewrite,
+            ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationExecutorPolicy::AllowSourceTestLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmation,
         );
-        let d = exec.evaluate_live_epoch_transition_authority_activation_execution_sink_prewrite(
+        let d = exec.evaluate_live_epoch_transition_authority_activation_post_final_execution_confirmation(
             &c.request,
             &c.inputs,
-            &empty_replay353(),
+            &empty_replay351(),
         );
         assert_eq!(
             d.outcome,
-            EO::LiveEpochTransitionAuthorityActivationExecutionSinkPrewriteBoundaryUnavailable
+            EO::LiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationBoundaryUnavailable
         );
     }
 
@@ -13406,14 +13406,14 @@ mod run_351_authority_activation_post_final_execution_confirmation {
     fn replay_rejected_when_id_present() {
         let c = e_case(TrustBundleEnvironment::Devnet, Sc::Add);
         let d = e_eval(&c);
-        let id = d.authority_activation_execution_sink_prewrite_artifact.as_ref().unwrap().request_id.clone();
+        let id = d.authority_activation_post_final_execution_confirmation_artifact.as_ref().unwrap().request_id.clone();
         let replay = vec![id];
         let d2 = e_eval_replay(&c, &replay);
         match d2.outcome {
             EO::StagedApplicationReplayRejected { .. } => {}
             other => panic!("expected replay rejection, got {other:?}"),
         }
-        assert!(d2.authority_activation_execution_sink_prewrite_artifact.is_none());
+        assert!(d2.authority_activation_post_final_execution_confirmation_artifact.is_none());
     }
 
     #[test]
@@ -13452,15 +13452,15 @@ mod run_351_authority_activation_post_final_execution_confirmation {
     fn fixture_state_apply_is_idempotent() {
         let c = e_case(TrustBundleEnvironment::Devnet, Sc::Add);
         let d = e_eval(&c);
-        let art = d.authority_activation_execution_sink_prewrite_artifact.as_ref().unwrap();
-        let mut state = LiveEpochTransitionAuthorityActivationExecutionSinkPrewriteFixtureState::new(CUR_EPOCH, CUR_VERSION, "start");
-        assert!(state.apply_prepared_execution(art, &d.authority_activation_execution_sink_prewrite_id));
+        let art = d.authority_activation_post_final_execution_confirmation_artifact.as_ref().unwrap();
+        let mut state = LiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationFixtureState::new(CUR_EPOCH, CUR_VERSION, "start");
+        assert!(state.apply_prepared_execution(art, &d.authority_activation_post_final_execution_confirmation_id));
         assert_eq!(state.current_epoch, art.epoch_transition_target);
         assert_eq!(state.validator_set_version, art.validator_set_version);
         assert_eq!(state.current_set_digest, art.proposed_set_digest);
         // Re-applying the same id is a no-op.
-        assert!(!state.apply_prepared_execution(art, &d.authority_activation_execution_sink_prewrite_id));
-        assert!(state.has_applied(&d.authority_activation_execution_sink_prewrite_id));
+        assert!(!state.apply_prepared_execution(art, &d.authority_activation_post_final_execution_confirmation_id));
+        assert!(state.has_applied(&d.authority_activation_post_final_execution_confirmation_id));
     }
 
     #[test]
@@ -13468,9 +13468,9 @@ mod run_351_authority_activation_post_final_execution_confirmation {
         for sc in ALL_SC {
             let c = e_case(TrustBundleEnvironment::Devnet, sc);
             let d = e_eval(&c);
-            let art = d.authority_activation_execution_sink_prewrite_artifact.as_ref().unwrap();
-            let mut state = LiveEpochTransitionAuthorityActivationExecutionSinkPrewriteFixtureState::new(CUR_EPOCH, CUR_VERSION, "start");
-            assert!(state.apply_prepared_execution(art, &d.authority_activation_execution_sink_prewrite_id));
+            let art = d.authority_activation_post_final_execution_confirmation_artifact.as_ref().unwrap();
+            let mut state = LiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationFixtureState::new(CUR_EPOCH, CUR_VERSION, "start");
+            assert!(state.apply_prepared_execution(art, &d.authority_activation_post_final_execution_confirmation_id));
             assert_eq!(state.current_epoch, art.epoch_transition_target);
         }
     }
@@ -13485,7 +13485,7 @@ mod run_351_authority_activation_post_final_execution_confirmation {
         let d = e_eval(&c);
         assert!(d.outcome.is_non_mutating());
         let bad = e_case(TrustBundleEnvironment::Devnet, Sc::Add);
-        let dbad = e_eval_replay(&bad, &[e_eval(&bad).authority_activation_execution_sink_prewrite_id]);
+        let dbad = e_eval_replay(&bad, &[e_eval(&bad).authority_activation_post_final_execution_confirmation_id]);
         assert!(dbad.outcome.is_non_mutating());
     }
 
@@ -13495,18 +13495,18 @@ mod run_351_authority_activation_post_final_execution_confirmation {
         let d = e_eval(&c);
         assert!(d.outcome.authorizes_future_mutation_only());
         assert!(d.authorizes_future_mutation_only());
-        assert!(d.authority_activation_execution_sink_prewrite_artifact.as_ref().unwrap().staged_kind.is_non_mutating());
+        assert!(d.authority_activation_post_final_execution_confirmation_artifact.as_ref().unwrap().staged_kind.is_non_mutating());
     }
 
     #[test]
     fn reject_never_authorizes_future_mutation() {
         e_reject_source(
-            LiveEpochTransitionAuthorityActivationExecutionSinkPrewriteAuthoritySource::MissingAuthorityActivationPostFinalExecutionConfirmationDecision,
-            EO::VerifiedAuthorityActivationPostFinalExecutionConfirmationDecisionRequired,
+            LiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationAuthoritySource::MissingAuthorityActivationFinalExecutionDecision,
+            EO::VerifiedAuthorityActivationFinalExecutionDecisionRequired,
         );
         let mut c = e_case(TrustBundleEnvironment::Devnet, Sc::Add);
         c.request.authority_source =
-            LiveEpochTransitionAuthorityActivationExecutionSinkPrewriteAuthoritySource::MissingAuthorityActivationPostFinalExecutionConfirmationDecision;
+            LiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationAuthoritySource::MissingAuthorityActivationFinalExecutionDecision;
         let d = e_eval(&c);
         assert!(!d.authorizes_future_mutation_only());
         assert!(!d.outcome.authorizes_future_mutation_only());
@@ -13518,20 +13518,20 @@ mod run_351_authority_activation_post_final_execution_confirmation {
 
     #[test]
     fn policy_predicates() {
-        use ProductionLiveEpochTransitionAuthorityActivationExecutionSinkPrewriteExecutorPolicy as Pol;
+        use ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationExecutorPolicy as Pol;
         assert!(Pol::Disabled.is_disabled());
-        assert!(Pol::AllowSourceTestLiveEpochTransitionAuthorityActivationExecutionSinkPrewrite.allows_source_test());
-        assert!(Pol::RequireProductionLiveEpochTransitionAuthorityActivationExecutionSinkPrewrite.is_production());
-        assert!(Pol::MainnetProductionLiveEpochTransitionAuthorityActivationExecutionSinkPrewriteRequired.is_mainnet());
+        assert!(Pol::AllowSourceTestLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmation.allows_source_test());
+        assert!(Pol::RequireProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmation.is_production());
+        assert!(Pol::MainnetProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationRequired.is_mainnet());
         assert_eq!(Pol::default(), Pol::Disabled);
     }
 
     #[test]
     fn kind_predicates() {
-        use ProductionLiveEpochTransitionAuthorityActivationExecutionSinkPrewriteExecutorKind as K;
-        assert!(K::SourceTestLiveEpochTransitionAuthorityActivationExecutionSinkPrewrite.is_source_test());
+        use ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationExecutorKind as K;
+        assert!(K::SourceTestLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmation.is_source_test());
         assert!(!K::Disabled.is_source_test());
-        assert!(!K::ProductionLiveEpochTransitionAuthorityActivationExecutionSinkPrewrite.is_source_test());
+        assert!(!K::ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmation.is_source_test());
         assert_eq!(K::default(), K::Disabled);
     }
 
@@ -13548,16 +13548,16 @@ mod run_351_authority_activation_post_final_execution_confirmation {
 
     #[test]
     fn unsupported_staged_application_kind_is_unsupported() {
-        let pk = EK::from_staged_application_kind(LiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationKind::UnsupportedStagedApplication);
+        let pk = EK::from_staged_application_kind(LiveEpochTransitionAuthorityActivationFinalExecutionKind::UnsupportedStagedApplication);
         assert!(pk.is_unsupported());
     }
 
     #[test]
     fn outcome_tags_are_stable_and_distinct() {
-        let a = EO::AuthorityActivationPostFinalExecutionConfirmationDecisionIdMismatch;
+        let a = EO::AuthorityActivationFinalExecutionDecisionIdMismatch;
         let b = EO::GuardedMutationDecisionIdMismatch;
         assert_ne!(a.tag(), b.tag());
-        assert_eq!(a.tag(), EO::AuthorityActivationPostFinalExecutionConfirmationDecisionIdMismatch.tag());
+        assert_eq!(a.tag(), EO::AuthorityActivationFinalExecutionDecisionIdMismatch.tag());
         assert!(!EO::MainNetRefused.tag().is_empty());
     }
 
@@ -13565,9 +13565,9 @@ mod run_351_authority_activation_post_final_execution_confirmation {
     fn config_and_inputs_well_formed() {
         let c = e_case(TrustBundleEnvironment::Devnet, Sc::Add);
         assert!(c.inputs.is_well_formed());
-        assert!(ProductionLiveEpochTransitionAuthorityActivationExecutionSinkPrewriteConfig::source_test().is_well_formed());
+        assert!(ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationConfig::source_test().is_well_formed());
         // The default config still pins the supported protocol version.
-        assert!(ProductionLiveEpochTransitionAuthorityActivationExecutionSinkPrewriteConfig::default().is_well_formed());
+        assert!(ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationConfig::default().is_well_formed());
     }
 
     // ===========================================================================
@@ -13581,18 +13581,18 @@ mod run_351_authority_activation_post_final_execution_confirmation {
                 let c = e_case(TrustBundleEnvironment::Devnet, $sc);
                 let d = e_eval(&c);
                 assert!(d.is_accept());
-                let art = d.authority_activation_execution_sink_prewrite_artifact.as_ref().unwrap();
+                let art = d.authority_activation_post_final_execution_confirmation_artifact.as_ref().unwrap();
                 assert_eq!(art.staged_kind, expected_crc13_kind($sc));
                 assert!(art.staged_kind.is_non_mutating());
                 let d2 = e_eval(&c);
-                assert_eq!(d.authority_activation_execution_sink_prewrite_digest, d2.authority_activation_execution_sink_prewrite_digest);
+                assert_eq!(d.authority_activation_post_final_execution_confirmation_digest, d2.authority_activation_post_final_execution_confirmation_digest);
                 assert_eq!(d.transcript_digest, d2.transcript_digest);
-                let mut state = LiveEpochTransitionAuthorityActivationExecutionSinkPrewriteFixtureState::new(
+                let mut state = LiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationFixtureState::new(
                     CUR_EPOCH,
                     CUR_VERSION,
                     "start",
                 );
-                assert!(state.apply_prepared_execution(art, &d.authority_activation_execution_sink_prewrite_id));
+                assert!(state.apply_prepared_execution(art, &d.authority_activation_post_final_execution_confirmation_id));
                 assert_eq!(state.current_epoch, art.epoch_transition_target);
             }
         };
@@ -13616,7 +13616,7 @@ mod run_351_authority_activation_post_final_execution_confirmation {
                 let d = e_eval(&c);
                 assert!(d.is_accept());
                 assert_eq!(
-                    d.authority_activation_execution_sink_prewrite_artifact.as_ref().unwrap().environment,
+                    d.authority_activation_post_final_execution_confirmation_artifact.as_ref().unwrap().environment,
                     TrustBundleEnvironment::Testnet
                 );
             }
@@ -13633,28 +13633,28 @@ mod run_351_authority_activation_post_final_execution_confirmation {
     per_scenario_testnet_accept!(scenario_testnet_accept_authsync, Sc::AuthSync);
     per_scenario_testnet_accept!(scenario_testnet_accept_bulk, Sc::Bulk);
 
-    macro_rules! per_scenario_authority_activation_post_final_execution_confirmation_binding {
+    macro_rules! per_scenario_authority_activation_final_execution_binding {
         ($name:ident, $sc:expr) => {
             #[test]
             fn $name() {
                 let mut c = e_case(TrustBundleEnvironment::Devnet, $sc);
-                c.inputs.expected_authority_activation_post_final_execution_confirmation_decision_id = "bad".to_string();
+                c.inputs.expected_authority_activation_final_execution_decision_id = "bad".to_string();
                 let d = e_eval(&c);
-                assert_eq!(d.outcome, EO::AuthorityActivationPostFinalExecutionConfirmationDecisionIdMismatch);
-                assert!(d.authority_activation_execution_sink_prewrite_artifact.is_none());
+                assert_eq!(d.outcome, EO::AuthorityActivationFinalExecutionDecisionIdMismatch);
+                assert!(d.authority_activation_post_final_execution_confirmation_artifact.is_none());
             }
         };
     }
 
-    per_scenario_authority_activation_post_final_execution_confirmation_binding!(scenario_handoff_binding_add, Sc::Add);
-    per_scenario_authority_activation_post_final_execution_confirmation_binding!(scenario_handoff_binding_remove, Sc::Remove);
-    per_scenario_authority_activation_post_final_execution_confirmation_binding!(scenario_handoff_binding_update, Sc::Update);
-    per_scenario_authority_activation_post_final_execution_confirmation_binding!(scenario_handoff_binding_noop, Sc::NoOp);
-    per_scenario_authority_activation_post_final_execution_confirmation_binding!(scenario_handoff_binding_identity, Sc::Identity);
-    per_scenario_authority_activation_post_final_execution_confirmation_binding!(scenario_handoff_binding_retire, Sc::Retire);
-    per_scenario_authority_activation_post_final_execution_confirmation_binding!(scenario_handoff_binding_emergency, Sc::Emergency);
-    per_scenario_authority_activation_post_final_execution_confirmation_binding!(scenario_handoff_binding_authsync, Sc::AuthSync);
-    per_scenario_authority_activation_post_final_execution_confirmation_binding!(scenario_handoff_binding_bulk, Sc::Bulk);
+    per_scenario_authority_activation_final_execution_binding!(scenario_handoff_binding_add, Sc::Add);
+    per_scenario_authority_activation_final_execution_binding!(scenario_handoff_binding_remove, Sc::Remove);
+    per_scenario_authority_activation_final_execution_binding!(scenario_handoff_binding_update, Sc::Update);
+    per_scenario_authority_activation_final_execution_binding!(scenario_handoff_binding_noop, Sc::NoOp);
+    per_scenario_authority_activation_final_execution_binding!(scenario_handoff_binding_identity, Sc::Identity);
+    per_scenario_authority_activation_final_execution_binding!(scenario_handoff_binding_retire, Sc::Retire);
+    per_scenario_authority_activation_final_execution_binding!(scenario_handoff_binding_emergency, Sc::Emergency);
+    per_scenario_authority_activation_final_execution_binding!(scenario_handoff_binding_authsync, Sc::AuthSync);
+    per_scenario_authority_activation_final_execution_binding!(scenario_handoff_binding_bulk, Sc::Bulk);
 
     macro_rules! per_scenario_guarded_binding {
         ($name:ident, $sc:expr) => {
@@ -13664,7 +13664,7 @@ mod run_351_authority_activation_post_final_execution_confirmation {
                 c.inputs.expected_guarded_mutation_decision_id = "bad".to_string();
                 let d = e_eval(&c);
                 assert_eq!(d.outcome, EO::GuardedMutationDecisionIdMismatch);
-                assert!(d.authority_activation_execution_sink_prewrite_artifact.is_none());
+                assert!(d.authority_activation_post_final_execution_confirmation_artifact.is_none());
             }
         };
     }
@@ -13687,11 +13687,11 @@ mod run_351_authority_activation_post_final_execution_confirmation {
     #[test]
     fn accept_reexposes_runtime_handoff_tuple_from_parent() {
         let parent = ed_decision(TrustBundleEnvironment::Devnet, Sc::Add);
-        let ppkg = parent.authority_activation_post_final_execution_confirmation_artifact.as_ref().unwrap().clone();
+        let ppkg = parent.authority_activation_final_execution_artifact.as_ref().unwrap().clone();
         let c = e_case(TrustBundleEnvironment::Devnet, Sc::Add);
         let d = e_eval(&c);
         assert!(d.is_accept());
-        let art = d.authority_activation_execution_sink_prewrite_artifact.as_ref().unwrap();
+        let art = d.authority_activation_post_final_execution_confirmation_artifact.as_ref().unwrap();
         assert_eq!(art.runtime_handoff_decision_id, ppkg.runtime_handoff_decision_id);
         assert_eq!(art.runtime_handoff_request_id, ppkg.runtime_handoff_request_id);
         assert_eq!(art.runtime_handoff_intent_digest, ppkg.runtime_handoff_intent_digest);
@@ -13700,8 +13700,8 @@ mod run_351_authority_activation_post_final_execution_confirmation {
             ppkg.runtime_handoff_transcript_digest
         );
         assert_eq!(art.runtime_handoff_nonce, HANDOFF_NONCE);
-        assert_eq!(art.authority_activation_post_final_execution_confirmation_nonce, CRC4_NONCE);
-        assert_eq!(art.authority_activation_execution_sink_prewrite_nonce, CRC13_NONCE);
+        assert_eq!(art.authority_activation_final_execution_nonce, CRC4_NONCE);
+        assert_eq!(art.authority_activation_post_final_execution_confirmation_nonce, CRC13_NONCE);
     }
 
     #[test]
@@ -13750,7 +13750,7 @@ mod run_351_authority_activation_post_final_execution_confirmation {
     #[test]
     fn reject_runtime_handoff_decision_alone() {
         e_reject_source(
-            LiveEpochTransitionAuthorityActivationExecutionSinkPrewriteAuthoritySource::RuntimeHandoffDecisionWithoutAuthorityActivationPostFinalExecutionConfirmation,
+            LiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationAuthoritySource::RuntimeHandoffDecisionWithoutAuthorityActivationFinalExecution,
             EO::RuntimeHandoffDecisionAloneRejected,
         );
     }
@@ -13793,14 +13793,14 @@ mod run_351_authority_activation_post_final_execution_confirmation {
         let c = e_case(TrustBundleEnvironment::Devnet, Sc::Add);
         let d1 = e_eval(&c);
         let d2 = e_eval(&c);
-        let a1 = d1.authority_activation_execution_sink_prewrite_artifact.as_ref().unwrap();
-        let a2 = d2.authority_activation_execution_sink_prewrite_artifact.as_ref().unwrap();
+        let a1 = d1.authority_activation_post_final_execution_confirmation_artifact.as_ref().unwrap();
+        let a2 = d2.authority_activation_post_final_execution_confirmation_artifact.as_ref().unwrap();
         assert_eq!(a1.content_digest(), a2.content_digest());
     }
 
     // ===========================================================================
     // Run 337 — re-exposed Run 329/330 execution-preparation ancestor binding
-    // (carried through the consumed Run 335/336 authority-activation-post-final-execution-confirmation artifact) and
+    // (carried through the consumed Run 335/336 authority-activation-final-execution artifact) and
     // its alone-rejected authority variant.
     // ===========================================================================
 
@@ -13850,7 +13850,7 @@ mod run_351_authority_activation_post_final_execution_confirmation {
     #[test]
     fn reject_mutation_execution_decision_alone() {
         e_reject_source(
-            LiveEpochTransitionAuthorityActivationExecutionSinkPrewriteAuthoritySource::MutationExecutionDecisionWithoutAuthorityActivationPostFinalExecutionConfirmation,
+            LiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationAuthoritySource::MutationExecutionDecisionWithoutAuthorityActivationFinalExecution,
             EO::MutationExecutionDecisionAloneRejected,
         );
     }
@@ -13904,7 +13904,7 @@ mod run_351_authority_activation_post_final_execution_confirmation {
     #[test]
     fn reject_commit_authorization_decision_alone() {
         e_reject_source(
-            LiveEpochTransitionAuthorityActivationExecutionSinkPrewriteAuthoritySource::CommitAuthorizationDecisionWithoutAuthorityActivationPostFinalExecutionConfirmation,
+            LiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationAuthoritySource::CommitAuthorizationDecisionWithoutAuthorityActivationFinalExecution,
             EO::CommitAuthorizationDecisionAloneRejected,
         );
     }
@@ -13928,7 +13928,7 @@ mod run_351_authority_activation_post_final_execution_confirmation {
     fn accept_artifact_reexposes_commit_authorization_tuple() {
         let c = e_case(TrustBundleEnvironment::Devnet, Sc::Add);
         let d = e_eval(&c);
-        let art = d.authority_activation_execution_sink_prewrite_artifact.as_ref().unwrap();
+        let art = d.authority_activation_post_final_execution_confirmation_artifact.as_ref().unwrap();
         assert_eq!(art.commit_authorization_nonce, CMT_NONCE);
         assert!(!art.commit_authorization_decision_id.is_empty());
         assert!(!art.commit_authorization_transcript_digest.is_empty());
@@ -13955,13 +13955,13 @@ mod run_351_authority_activation_post_final_execution_confirmation {
         let c = e_case(TrustBundleEnvironment::Devnet, Sc::Add);
         let d = e_eval(&c);
         assert!(d.is_accept());
-        let art = d.authority_activation_execution_sink_prewrite_artifact.as_ref().unwrap();
+        let art = d.authority_activation_post_final_execution_confirmation_artifact.as_ref().unwrap();
         // Grandparent Run 329/330 mutation-execution nonce re-exposed intact.
         assert_eq!(art.mutation_execution_nonce, MUT_NONCE);
-        // Parent Run 335/336 authority-activation-post-final-execution-confirmation nonce re-exposed intact.
-        assert_eq!(art.authority_activation_post_final_execution_confirmation_nonce, CRC4_NONCE);
-        // Self Run 337 authority-activation-execution-sink-prewrite proposed nonce.
-        assert_eq!(art.authority_activation_execution_sink_prewrite_nonce, CRC13_NONCE);
+        // Parent Run 335/336 authority-activation-final-execution nonce re-exposed intact.
+        assert_eq!(art.authority_activation_final_execution_nonce, CRC4_NONCE);
+        // Self Run 337 authority-activation-post-final-execution-confirmation proposed nonce.
+        assert_eq!(art.authority_activation_post_final_execution_confirmation_nonce, CRC13_NONCE);
     }
 
     #[test]
@@ -14025,7 +14025,7 @@ mod run_351_authority_activation_post_final_execution_confirmation {
     #[test]
     fn reject_execution_preparation_decision_alone() {
         e_reject_source(
-            LiveEpochTransitionAuthorityActivationExecutionSinkPrewriteAuthoritySource::ExecutionPreparationDecisionWithoutAuthorityActivationPostFinalExecutionConfirmation,
+            LiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationAuthoritySource::ExecutionPreparationDecisionWithoutAuthorityActivationFinalExecution,
             EO::ExecutionPreparationDecisionAloneRejected,
         );
     }
@@ -14051,13 +14051,13 @@ mod run_351_authority_activation_post_final_execution_confirmation {
         let c = e_case(TrustBundleEnvironment::Devnet, Sc::Add);
         let d = e_eval(&c);
         assert!(d.is_accept());
-        let art = d.authority_activation_execution_sink_prewrite_artifact.as_ref().unwrap();
+        let art = d.authority_activation_post_final_execution_confirmation_artifact.as_ref().unwrap();
         // Grandparent Run 329/330 execution-preparation nonce re-exposed intact.
         assert_eq!(art.execution_preparation_nonce, PREP_NONCE);
-        // Parent Run 335/336 authority-activation-post-final-execution-confirmation nonce re-exposed intact.
-        assert_eq!(art.authority_activation_post_final_execution_confirmation_nonce, CRC4_NONCE);
-        // Self Run 337 authority-activation-execution-sink-prewrite proposed nonce.
-        assert_eq!(art.authority_activation_execution_sink_prewrite_nonce, CRC13_NONCE);
+        // Parent Run 335/336 authority-activation-final-execution nonce re-exposed intact.
+        assert_eq!(art.authority_activation_final_execution_nonce, CRC4_NONCE);
+        // Self Run 337 authority-activation-post-final-execution-confirmation proposed nonce.
+        assert_eq!(art.authority_activation_post_final_execution_confirmation_nonce, CRC13_NONCE);
     }
 
     #[test]
@@ -14077,13 +14077,13 @@ mod run_351_authority_activation_post_final_execution_confirmation {
 
 
     // =======================================================================
-    // Run 353 supplemental coverage: additional deterministic / tag / invariant
+    // Run 351 supplemental coverage: additional deterministic / tag / invariant
     // assertions for the authority-activation execution-preparation /
     // final-execution preflight boundary (module under test).
     // =======================================================================
-    mod run_351_supplemental {
+    mod run_349_supplemental {
         use super::{e_case, e_eval, Sc};
-        use qbind_node::pqc_production_live_epoch_transition_authority_activation_execution_sink_prewrite::*;
+        use qbind_node::pqc_production_live_epoch_transition_authority_activation_post_final_execution_confirmation::*;
         use qbind_node::pqc_trust_bundle::TrustBundleEnvironment;
 
         #[test]
@@ -14094,8 +14094,8 @@ mod run_351_authority_activation_post_final_execution_confirmation {
             assert!(a.is_accept());
             assert_eq!(a, b);
             assert_eq!(
-                a.authority_activation_execution_sink_prewrite_digest,
-                b.authority_activation_execution_sink_prewrite_digest
+                a.authority_activation_post_final_execution_confirmation_digest,
+                b.authority_activation_post_final_execution_confirmation_digest
             );
             assert_eq!(a.transcript_digest, b.transcript_digest);
         }
@@ -14108,8 +14108,8 @@ mod run_351_authority_activation_post_final_execution_confirmation {
             assert!(a.is_accept());
             assert_eq!(a, b);
             assert_eq!(
-                a.authority_activation_execution_sink_prewrite_digest,
-                b.authority_activation_execution_sink_prewrite_digest
+                a.authority_activation_post_final_execution_confirmation_digest,
+                b.authority_activation_post_final_execution_confirmation_digest
             );
             assert_eq!(a.transcript_digest, b.transcript_digest);
         }
@@ -14122,8 +14122,8 @@ mod run_351_authority_activation_post_final_execution_confirmation {
             assert!(a.is_accept());
             assert_eq!(a, b);
             assert_eq!(
-                a.authority_activation_execution_sink_prewrite_digest,
-                b.authority_activation_execution_sink_prewrite_digest
+                a.authority_activation_post_final_execution_confirmation_digest,
+                b.authority_activation_post_final_execution_confirmation_digest
             );
             assert_eq!(a.transcript_digest, b.transcript_digest);
         }
@@ -14136,8 +14136,8 @@ mod run_351_authority_activation_post_final_execution_confirmation {
             assert!(a.is_accept());
             assert_eq!(a, b);
             assert_eq!(
-                a.authority_activation_execution_sink_prewrite_digest,
-                b.authority_activation_execution_sink_prewrite_digest
+                a.authority_activation_post_final_execution_confirmation_digest,
+                b.authority_activation_post_final_execution_confirmation_digest
             );
             assert_eq!(a.transcript_digest, b.transcript_digest);
         }
@@ -14150,8 +14150,8 @@ mod run_351_authority_activation_post_final_execution_confirmation {
             assert!(a.is_accept());
             assert_eq!(a, b);
             assert_eq!(
-                a.authority_activation_execution_sink_prewrite_digest,
-                b.authority_activation_execution_sink_prewrite_digest
+                a.authority_activation_post_final_execution_confirmation_digest,
+                b.authority_activation_post_final_execution_confirmation_digest
             );
             assert_eq!(a.transcript_digest, b.transcript_digest);
         }
@@ -14164,8 +14164,8 @@ mod run_351_authority_activation_post_final_execution_confirmation {
             assert!(a.is_accept());
             assert_eq!(a, b);
             assert_eq!(
-                a.authority_activation_execution_sink_prewrite_digest,
-                b.authority_activation_execution_sink_prewrite_digest
+                a.authority_activation_post_final_execution_confirmation_digest,
+                b.authority_activation_post_final_execution_confirmation_digest
             );
             assert_eq!(a.transcript_digest, b.transcript_digest);
         }
@@ -14178,8 +14178,8 @@ mod run_351_authority_activation_post_final_execution_confirmation {
             assert!(a.is_accept());
             assert_eq!(a, b);
             assert_eq!(
-                a.authority_activation_execution_sink_prewrite_digest,
-                b.authority_activation_execution_sink_prewrite_digest
+                a.authority_activation_post_final_execution_confirmation_digest,
+                b.authority_activation_post_final_execution_confirmation_digest
             );
             assert_eq!(a.transcript_digest, b.transcript_digest);
         }
@@ -14192,8 +14192,8 @@ mod run_351_authority_activation_post_final_execution_confirmation {
             assert!(a.is_accept());
             assert_eq!(a, b);
             assert_eq!(
-                a.authority_activation_execution_sink_prewrite_digest,
-                b.authority_activation_execution_sink_prewrite_digest
+                a.authority_activation_post_final_execution_confirmation_digest,
+                b.authority_activation_post_final_execution_confirmation_digest
             );
             assert_eq!(a.transcript_digest, b.transcript_digest);
         }
@@ -14206,8 +14206,8 @@ mod run_351_authority_activation_post_final_execution_confirmation {
             assert!(a.is_accept());
             assert_eq!(a, b);
             assert_eq!(
-                a.authority_activation_execution_sink_prewrite_digest,
-                b.authority_activation_execution_sink_prewrite_digest
+                a.authority_activation_post_final_execution_confirmation_digest,
+                b.authority_activation_post_final_execution_confirmation_digest
             );
             assert_eq!(a.transcript_digest, b.transcript_digest);
         }
@@ -14220,8 +14220,8 @@ mod run_351_authority_activation_post_final_execution_confirmation {
             assert!(a.is_accept());
             assert_eq!(a, b);
             assert_eq!(
-                a.authority_activation_execution_sink_prewrite_digest,
-                b.authority_activation_execution_sink_prewrite_digest
+                a.authority_activation_post_final_execution_confirmation_digest,
+                b.authority_activation_post_final_execution_confirmation_digest
             );
             assert_eq!(a.transcript_digest, b.transcript_digest);
         }
@@ -14234,8 +14234,8 @@ mod run_351_authority_activation_post_final_execution_confirmation {
             assert!(a.is_accept());
             assert_eq!(a, b);
             assert_eq!(
-                a.authority_activation_execution_sink_prewrite_digest,
-                b.authority_activation_execution_sink_prewrite_digest
+                a.authority_activation_post_final_execution_confirmation_digest,
+                b.authority_activation_post_final_execution_confirmation_digest
             );
             assert_eq!(a.transcript_digest, b.transcript_digest);
         }
@@ -14248,8 +14248,8 @@ mod run_351_authority_activation_post_final_execution_confirmation {
             assert!(a.is_accept());
             assert_eq!(a, b);
             assert_eq!(
-                a.authority_activation_execution_sink_prewrite_digest,
-                b.authority_activation_execution_sink_prewrite_digest
+                a.authority_activation_post_final_execution_confirmation_digest,
+                b.authority_activation_post_final_execution_confirmation_digest
             );
             assert_eq!(a.transcript_digest, b.transcript_digest);
         }
@@ -14262,8 +14262,8 @@ mod run_351_authority_activation_post_final_execution_confirmation {
             assert!(a.is_accept());
             assert_eq!(a, b);
             assert_eq!(
-                a.authority_activation_execution_sink_prewrite_digest,
-                b.authority_activation_execution_sink_prewrite_digest
+                a.authority_activation_post_final_execution_confirmation_digest,
+                b.authority_activation_post_final_execution_confirmation_digest
             );
             assert_eq!(a.transcript_digest, b.transcript_digest);
         }
@@ -14276,8 +14276,8 @@ mod run_351_authority_activation_post_final_execution_confirmation {
             assert!(a.is_accept());
             assert_eq!(a, b);
             assert_eq!(
-                a.authority_activation_execution_sink_prewrite_digest,
-                b.authority_activation_execution_sink_prewrite_digest
+                a.authority_activation_post_final_execution_confirmation_digest,
+                b.authority_activation_post_final_execution_confirmation_digest
             );
             assert_eq!(a.transcript_digest, b.transcript_digest);
         }
@@ -14290,8 +14290,8 @@ mod run_351_authority_activation_post_final_execution_confirmation {
             assert!(a.is_accept());
             assert_eq!(a, b);
             assert_eq!(
-                a.authority_activation_execution_sink_prewrite_digest,
-                b.authority_activation_execution_sink_prewrite_digest
+                a.authority_activation_post_final_execution_confirmation_digest,
+                b.authority_activation_post_final_execution_confirmation_digest
             );
             assert_eq!(a.transcript_digest, b.transcript_digest);
         }
@@ -14304,8 +14304,8 @@ mod run_351_authority_activation_post_final_execution_confirmation {
             assert!(a.is_accept());
             assert_eq!(a, b);
             assert_eq!(
-                a.authority_activation_execution_sink_prewrite_digest,
-                b.authority_activation_execution_sink_prewrite_digest
+                a.authority_activation_post_final_execution_confirmation_digest,
+                b.authority_activation_post_final_execution_confirmation_digest
             );
             assert_eq!(a.transcript_digest, b.transcript_digest);
         }
@@ -14318,8 +14318,8 @@ mod run_351_authority_activation_post_final_execution_confirmation {
             assert!(a.is_accept());
             assert_eq!(a, b);
             assert_eq!(
-                a.authority_activation_execution_sink_prewrite_digest,
-                b.authority_activation_execution_sink_prewrite_digest
+                a.authority_activation_post_final_execution_confirmation_digest,
+                b.authority_activation_post_final_execution_confirmation_digest
             );
             assert_eq!(a.transcript_digest, b.transcript_digest);
         }
@@ -14332,8 +14332,8 @@ mod run_351_authority_activation_post_final_execution_confirmation {
             assert!(a.is_accept());
             assert_eq!(a, b);
             assert_eq!(
-                a.authority_activation_execution_sink_prewrite_digest,
-                b.authority_activation_execution_sink_prewrite_digest
+                a.authority_activation_post_final_execution_confirmation_digest,
+                b.authority_activation_post_final_execution_confirmation_digest
             );
             assert_eq!(a.transcript_digest, b.transcript_digest);
         }
@@ -14342,6 +14342,2220 @@ mod run_351_authority_activation_post_final_execution_confirmation {
         fn supp_artifact_present_devnet_add() {
             let c = e_case(TrustBundleEnvironment::Devnet, Sc::Add);
             let d = e_eval(&c);
+            assert!(d.is_accept());
+            let art = d
+                .authority_activation_post_final_execution_confirmation_artifact
+                .as_ref()
+                .expect("accepted preflight must carry an artifact");
+            assert_eq!(art.content_digest(), d.authority_activation_post_final_execution_confirmation_digest);
+            assert!(art.protocol_version >= 1);
+            assert!(d.authorizes_future_mutation_only());
+        }
+
+        #[test]
+        fn supp_artifact_present_devnet_remove() {
+            let c = e_case(TrustBundleEnvironment::Devnet, Sc::Remove);
+            let d = e_eval(&c);
+            assert!(d.is_accept());
+            let art = d
+                .authority_activation_post_final_execution_confirmation_artifact
+                .as_ref()
+                .expect("accepted preflight must carry an artifact");
+            assert_eq!(art.content_digest(), d.authority_activation_post_final_execution_confirmation_digest);
+            assert!(art.protocol_version >= 1);
+            assert!(d.authorizes_future_mutation_only());
+        }
+
+        #[test]
+        fn supp_artifact_present_devnet_update() {
+            let c = e_case(TrustBundleEnvironment::Devnet, Sc::Update);
+            let d = e_eval(&c);
+            assert!(d.is_accept());
+            let art = d
+                .authority_activation_post_final_execution_confirmation_artifact
+                .as_ref()
+                .expect("accepted preflight must carry an artifact");
+            assert_eq!(art.content_digest(), d.authority_activation_post_final_execution_confirmation_digest);
+            assert!(art.protocol_version >= 1);
+            assert!(d.authorizes_future_mutation_only());
+        }
+
+        #[test]
+        fn supp_artifact_present_devnet_noop() {
+            let c = e_case(TrustBundleEnvironment::Devnet, Sc::NoOp);
+            let d = e_eval(&c);
+            assert!(d.is_accept());
+            let art = d
+                .authority_activation_post_final_execution_confirmation_artifact
+                .as_ref()
+                .expect("accepted preflight must carry an artifact");
+            assert_eq!(art.content_digest(), d.authority_activation_post_final_execution_confirmation_digest);
+            assert!(art.protocol_version >= 1);
+            assert!(d.authorizes_future_mutation_only());
+        }
+
+        #[test]
+        fn supp_artifact_present_devnet_identity() {
+            let c = e_case(TrustBundleEnvironment::Devnet, Sc::Identity);
+            let d = e_eval(&c);
+            assert!(d.is_accept());
+            let art = d
+                .authority_activation_post_final_execution_confirmation_artifact
+                .as_ref()
+                .expect("accepted preflight must carry an artifact");
+            assert_eq!(art.content_digest(), d.authority_activation_post_final_execution_confirmation_digest);
+            assert!(art.protocol_version >= 1);
+            assert!(d.authorizes_future_mutation_only());
+        }
+
+        #[test]
+        fn supp_artifact_present_devnet_retire() {
+            let c = e_case(TrustBundleEnvironment::Devnet, Sc::Retire);
+            let d = e_eval(&c);
+            assert!(d.is_accept());
+            let art = d
+                .authority_activation_post_final_execution_confirmation_artifact
+                .as_ref()
+                .expect("accepted preflight must carry an artifact");
+            assert_eq!(art.content_digest(), d.authority_activation_post_final_execution_confirmation_digest);
+            assert!(art.protocol_version >= 1);
+            assert!(d.authorizes_future_mutation_only());
+        }
+
+        #[test]
+        fn supp_artifact_present_devnet_emergency() {
+            let c = e_case(TrustBundleEnvironment::Devnet, Sc::Emergency);
+            let d = e_eval(&c);
+            assert!(d.is_accept());
+            let art = d
+                .authority_activation_post_final_execution_confirmation_artifact
+                .as_ref()
+                .expect("accepted preflight must carry an artifact");
+            assert_eq!(art.content_digest(), d.authority_activation_post_final_execution_confirmation_digest);
+            assert!(art.protocol_version >= 1);
+            assert!(d.authorizes_future_mutation_only());
+        }
+
+        #[test]
+        fn supp_artifact_present_devnet_authsync() {
+            let c = e_case(TrustBundleEnvironment::Devnet, Sc::AuthSync);
+            let d = e_eval(&c);
+            assert!(d.is_accept());
+            let art = d
+                .authority_activation_post_final_execution_confirmation_artifact
+                .as_ref()
+                .expect("accepted preflight must carry an artifact");
+            assert_eq!(art.content_digest(), d.authority_activation_post_final_execution_confirmation_digest);
+            assert!(art.protocol_version >= 1);
+            assert!(d.authorizes_future_mutation_only());
+        }
+
+        #[test]
+        fn supp_artifact_present_devnet_bulk() {
+            let c = e_case(TrustBundleEnvironment::Devnet, Sc::Bulk);
+            let d = e_eval(&c);
+            assert!(d.is_accept());
+            let art = d
+                .authority_activation_post_final_execution_confirmation_artifact
+                .as_ref()
+                .expect("accepted preflight must carry an artifact");
+            assert_eq!(art.content_digest(), d.authority_activation_post_final_execution_confirmation_digest);
+            assert!(art.protocol_version >= 1);
+            assert!(d.authorizes_future_mutation_only());
+        }
+
+        #[test]
+        fn supp_policy_default_is_disabled() {
+            type P = ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationExecutorPolicy;
+            assert_eq!(P::default(), P::Disabled);
+            assert_eq!(P::Disabled.tag(), "disabled");
+        }
+
+        #[test]
+        fn supp_policy_tags_nonempty() {
+            type P = ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationExecutorPolicy;
+            for p in [
+                P::Disabled,
+                P::AllowSourceTestLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmation,
+                P::RequireProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmation,
+                P::MainnetProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationRequired,
+            ] {
+                assert!(!p.tag().is_empty());
+            }
+        }
+
+        #[test]
+        fn supp_protocol_version_supported() {
+            assert_eq!(PRODUCTION_LIVE_EPOCH_TRANSITION_AUTHORITY_ACTIVATION_FINAL_EXECUTION_PROTOCOL_VERSION, 1);
+        }
+
+        #[test]
+        fn supp_domain_tags_nonempty_and_distinct() {
+            let tags = [
+                PRODUCTION_LIVE_EPOCH_TRANSITION_AUTHORITY_ACTIVATION_FINAL_EXECUTION_INTENT_DOMAIN_TAG,
+                PRODUCTION_LIVE_EPOCH_TRANSITION_AUTHORITY_ACTIVATION_FINAL_EXECUTION_ID_DOMAIN_TAG,
+                PRODUCTION_LIVE_EPOCH_TRANSITION_AUTHORITY_ACTIVATION_FINAL_EXECUTION_REQUEST_DOMAIN_TAG,
+                PRODUCTION_LIVE_EPOCH_TRANSITION_AUTHORITY_ACTIVATION_FINAL_EXECUTION_TRANSCRIPT_DOMAIN_TAG,
+            ];
+            for t in tags {
+                assert!(t.contains("351"));
+                assert!(!t.is_empty());
+            }
+            for i in 0..tags.len() {
+                for j in (i + 1)..tags.len() {
+                    assert_ne!(tags[i], tags[j]);
+                }
+            }
+        }
+
+        #[test]
+        fn supp_non_mutation_flag_is_true() {
+            let c = e_case(TrustBundleEnvironment::Devnet, Sc::Add);
+            let d = e_eval(&c);
+            let art = d.authority_activation_post_final_execution_confirmation_artifact.as_ref().unwrap();
+            assert!(art.staged_kind.is_non_mutating());
+        }
+    }
+
+    // =======================================================================
+    // Run 353 under-test: live epoch-transition authority-activation
+    // post-final-execution confirmation / execution-sink-readiness boundary.
+    // Consumes the verified Run 351/352 authority-activation final-execution
+    // decision produced by the parent d-layer fixtures (e_case / e_eval).
+    // =======================================================================
+    mod run_353_authority_activation_execution_sink_prewrite {
+        #![allow(unused_imports)]
+        #![allow(dead_code)]
+        #![allow(unused_variables)]
+        use super::*;
+    use qbind_node::pqc_production_live_epoch_transition_authority_activation_execution_sink_prewrite::*;
+
+    use ProductionLiveEpochTransitionAuthorityActivationExecutionSinkPrewriteOutcome as FO;
+    use LiveEpochTransitionAuthorityActivationExecutionSinkPrewriteKind as FK;
+
+    const CRC14_POLICY_ID: &str = "authority-activation-execution-sink-prewrite-policy-1";
+    const CRC14_NONCE: u64 = 49;
+
+    fn expected_crc14_kind(sc: Sc) -> FK {
+        match sc {
+            Sc::Add => FK::StageApplyValidatorAdd,
+            Sc::Remove => FK::StageApplyValidatorRemove,
+            Sc::Update => FK::StageApplyValidatorMetadataUpdate,
+            Sc::NoOp => FK::StageApplyNoOpAlreadySynchronized,
+            Sc::Identity => FK::StageApplyValidatorIdentityRotation,
+            Sc::Retire => FK::StageApplyValidatorRetirement,
+            Sc::Emergency => FK::StageApplyEmergencyValidatorRemoval,
+            Sc::AuthSync => FK::StageApplyAuthoritySetSynchronization,
+            Sc::Bulk => FK::StageApplyBulkValidatorSetRotation,
+        }
+    }
+
+    /// Build an accepted Run 335/336 authority-activation-post-final-execution-confirmation decision — the sole
+    /// accepted Run 337 authority-activation-execution-sink-prewrite authority source.
+    fn fe_decision(
+        env: TrustBundleEnvironment,
+        sc: Sc,
+    ) -> ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationDecision {
+        let d = e_eval(&e_case(env, sc));
+        assert!(
+            d.is_accept(),
+            "run 335 authority-activation-post-final-execution-confirmation decision must accept for fixture"
+        );
+        d
+    }
+
+    fn fe_decision_rejected(
+        env: TrustBundleEnvironment,
+        sc: Sc,
+    ) -> ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationDecision {
+        let mut c = e_case(env, sc);
+        c.inputs.expected_proposal_id = "tampered-proposal".to_string();
+        let d = e_eval(&c);
+        assert!(!d.is_accept(), "tampered run 335 decision must reject");
+        d
+    }
+
+    fn fe_decision_no_artifact(
+        env: TrustBundleEnvironment,
+        sc: Sc,
+    ) -> ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationDecision {
+        let mut d = fe_decision(env, sc);
+        d.authority_activation_post_final_execution_confirmation_artifact = None;
+        d
+    }
+
+    struct F353 {
+        executor: ProductionLiveEpochTransitionAuthorityActivationExecutionSinkPrewriteExecutor,
+        request: ProductionLiveEpochTransitionAuthorityActivationExecutionSinkPrewriteRequest,
+        inputs: ProductionLiveEpochTransitionAuthorityActivationExecutionSinkPrewriteInputs,
+    }
+
+    fn f_inputs(
+        env: TrustBundleEnvironment,
+        dec: &ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationDecision,
+    ) -> ProductionLiveEpochTransitionAuthorityActivationExecutionSinkPrewriteInputs {
+        let pkg = dec.authority_activation_post_final_execution_confirmation_artifact.as_ref().unwrap();
+        ProductionLiveEpochTransitionAuthorityActivationExecutionSinkPrewriteInputs {
+            trust_domain: trust_domain(env),
+            authority_activation_execution_sink_prewrite_policy_id: CRC14_POLICY_ID.to_string(),
+            expected_authorization_policy_id: AUTH_POLICY_ID.to_string(),
+            expected_application_policy_id: APP_POLICY_ID.to_string(),
+            expected_governance_domain_id: GOV_DOMAIN.to_string(),
+            expected_governance_epoch: GOV_EPOCH,
+            expected_proposal_id: PROPOSAL_ID.to_string(),
+            expected_lifecycle_action: pkg.lifecycle_action,
+            expected_rotation_action: pkg.rotation_action,
+            expected_authority_domain_sequence: SEQ,
+            expected_quorum: quorum(),
+            expected_threshold: threshold(),
+            expected_governance_decision_id: GOV_DECISION_ID.to_string(),
+            expected_governance_request_id: GOV_REQUEST_ID.to_string(),
+            expected_governance_intent_digest: pkg.governance_intent_digest.clone(),
+            expected_rotation_decision_id: pkg.rotation_decision_id.clone(),
+            expected_rotation_request_id: pkg.rotation_request_id.clone(),
+            expected_rotation_transcript_digest: pkg.rotation_transcript_digest.clone(),
+            expected_rotation_plan_digest: pkg.rotation_plan_digest.clone(),
+            expected_current_set_digest: pkg.current_set_digest.clone(),
+            expected_proposed_set_digest: pkg.proposed_set_digest.clone(),
+            expected_delta_digest: pkg.delta_digest.clone(),
+            expected_validator_set_epoch: pkg.validator_set_epoch,
+            expected_validator_set_version: pkg.validator_set_version,
+            expected_proposed_validator_count: pkg.proposed_validator_count,
+            expected_rotation_nonce: ROT_NONCE,
+            expected_application_decision_id: pkg.application_decision_id.clone(),
+            expected_application_request_id: pkg.application_request_id.clone(),
+            expected_application_intent_digest: pkg.application_intent_digest.clone(),
+            expected_application_transcript_digest: pkg.application_transcript_digest.clone(),
+            expected_authorization_decision_id: pkg.authorization_decision_id.clone(),
+            expected_authorization_request_id: pkg.authorization_request_id.clone(),
+            expected_authorization_intent_digest: pkg.authorization_intent_digest.clone(),
+            expected_authorization_transcript_digest: pkg.authorization_transcript_digest.clone(),
+            expected_staged_application_decision_id: pkg.staged_application_decision_id.clone(),
+            expected_staged_application_request_id: pkg.staged_application_request_id.clone(),
+            expected_staged_application_intent_digest: pkg.staged_application_intent_digest.clone(),
+            expected_staged_application_transcript_digest: pkg
+                .staged_application_transcript_digest
+                .clone(),
+            expected_staged_application_nonce: pkg.staged_application_nonce,
+            expected_epoch_transition_target: pkg.epoch_transition_target,
+            expected_application_nonce: pkg.application_nonce,
+            expected_live_application_nonce: pkg.live_application_nonce,
+            expected_guarded_mutation_decision_id: pkg.guarded_mutation_decision_id.clone(),
+            expected_guarded_mutation_request_id: pkg.guarded_mutation_request_id.clone(),
+            expected_guarded_mutation_intent_digest: pkg.guarded_mutation_intent_digest.clone(),
+            expected_guarded_mutation_transcript_digest: pkg
+                .guarded_mutation_transcript_digest
+                .clone(),
+            expected_guarded_mutation_nonce: pkg.guarded_mutation_nonce,
+            expected_authority_activation_post_final_execution_confirmation_decision_id: dec.authority_activation_post_final_execution_confirmation_id.clone(),
+            expected_authority_activation_post_final_execution_confirmation_request_id: dec.request_id.clone(),
+            expected_authority_activation_post_final_execution_confirmation_intent_digest: dec.authority_activation_post_final_execution_confirmation_digest.clone(),
+            expected_authority_activation_post_final_execution_confirmation_transcript_digest: dec.transcript_digest.clone(),
+            expected_authority_activation_post_final_execution_confirmation_nonce: pkg.authority_activation_post_final_execution_confirmation_nonce,
+            expected_commit_authorization_decision_id: pkg.commit_authorization_decision_id.clone(),
+            expected_commit_authorization_request_id: pkg.commit_authorization_request_id.clone(),
+            expected_commit_authorization_intent_digest: pkg
+                .commit_authorization_intent_digest
+                .clone(),
+            expected_commit_authorization_transcript_digest: pkg
+                .commit_authorization_transcript_digest
+                .clone(),
+            expected_commit_authorization_nonce: pkg.commit_authorization_nonce,
+            expected_mutation_execution_decision_id: pkg.mutation_execution_decision_id.clone(),
+            expected_mutation_execution_request_id: pkg.mutation_execution_request_id.clone(),
+            expected_mutation_execution_intent_digest: pkg.mutation_execution_intent_digest.clone(),
+            expected_mutation_execution_transcript_digest: pkg
+                .mutation_execution_transcript_digest
+                .clone(),
+            expected_mutation_execution_nonce: pkg.mutation_execution_nonce,
+            expected_execution_preparation_decision_id: pkg.execution_preparation_decision_id.clone(),
+            expected_execution_preparation_request_id: pkg.execution_preparation_request_id.clone(),
+            expected_execution_preparation_intent_digest: pkg.execution_preparation_intent_digest.clone(),
+            expected_execution_preparation_transcript_digest: pkg
+                .execution_preparation_transcript_digest
+                .clone(),
+            expected_execution_preparation_nonce: pkg.execution_preparation_nonce,
+            expected_runtime_handoff_decision_id: pkg.runtime_handoff_decision_id.clone(),
+            expected_runtime_handoff_request_id: pkg.runtime_handoff_request_id.clone(),
+            expected_runtime_handoff_intent_digest: pkg.runtime_handoff_intent_digest.clone(),
+            expected_runtime_handoff_transcript_digest: pkg
+                .runtime_handoff_transcript_digest
+                .clone(),
+            expected_runtime_handoff_nonce: pkg.runtime_handoff_nonce,
+            expected_current_validator_set_epoch: CUR_EPOCH,
+            expected_current_validator_set_version: CUR_VERSION,
+            required_replay_window: REPLAY_WINDOW,
+            min_governance_epoch: 0,
+            min_validator_set_epoch: 0,
+            min_validator_set_version: 0,
+            persisted_sequence: Some(SEQ - 1),
+            require_custody_evidence: false,
+            expected_custody: None,
+            require_attestation_evidence: false,
+            expected_attestation: None,
+            require_durable_replay_evidence: false,
+            expected_durable_replay: None,
+        }
+    }
+
+    fn f_case(env: TrustBundleEnvironment, sc: Sc) -> F353 {
+        let dec = fe_decision(env, sc);
+        let target = dec.authority_activation_post_final_execution_confirmation_artifact.as_ref().unwrap().epoch_transition_target;
+        let inputs = f_inputs(env, &dec);
+        let request = ProductionLiveEpochTransitionAuthorityActivationExecutionSinkPrewriteRequest::new(
+            LiveEpochTransitionAuthorityActivationExecutionSinkPrewriteAuthoritySource::VerifiedAuthorityActivationPostFinalExecutionConfirmationDecision {
+                decision: dec,
+            },
+            target,
+            CRC14_NONCE,
+        );
+        F353 {
+            executor: ProductionLiveEpochTransitionAuthorityActivationExecutionSinkPrewriteExecutor::source_test(),
+            request,
+            inputs,
+        }
+    }
+
+    fn empty_replay353() -> EmptyLiveEpochTransitionAuthorityActivationExecutionSinkPrewriteReplaySet {
+        EmptyLiveEpochTransitionAuthorityActivationExecutionSinkPrewriteReplaySet
+    }
+
+    fn f_eval(case: &F353) -> ProductionLiveEpochTransitionAuthorityActivationExecutionSinkPrewriteDecision {
+        case.executor.evaluate_live_epoch_transition_authority_activation_execution_sink_prewrite(
+            &case.request,
+            &case.inputs,
+            &empty_replay353(),
+        )
+    }
+
+    fn e_eval_replay(
+        case: &F353,
+        replay: &[String],
+    ) -> ProductionLiveEpochTransitionAuthorityActivationExecutionSinkPrewriteDecision {
+        case.executor
+            .evaluate_live_epoch_transition_authority_activation_execution_sink_prewrite(&case.request, &case.inputs, &replay)
+    }
+
+    fn e_exec_with_policy(
+        policy: ProductionLiveEpochTransitionAuthorityActivationExecutionSinkPrewriteExecutorPolicy,
+    ) -> ProductionLiveEpochTransitionAuthorityActivationExecutionSinkPrewriteExecutor {
+        ProductionLiveEpochTransitionAuthorityActivationExecutionSinkPrewriteExecutor::new(
+            ProductionLiveEpochTransitionAuthorityActivationExecutionSinkPrewriteConfig::source_test(),
+            policy,
+        )
+    }
+
+    /// Common helper: build a Devnet/Add case, apply a mutation to the inputs, and
+    /// assert the resulting outcome (fail-closed, no artifact).
+    fn e_reject_inputs(
+        mutate: impl FnOnce(&mut ProductionLiveEpochTransitionAuthorityActivationExecutionSinkPrewriteInputs),
+        expected: FO,
+    ) {
+        let mut c = f_case(TrustBundleEnvironment::Devnet, Sc::Add);
+        mutate(&mut c.inputs);
+        let d = f_eval(&c);
+        assert_eq!(d.outcome, expected, "outcome tag: {}", d.outcome.tag());
+        assert!(d.authority_activation_execution_sink_prewrite_artifact.is_none());
+        assert!(!d.is_accept());
+        assert!(d.outcome.is_non_mutating());
+    }
+
+    /// Common helper: build a Devnet/Add case, replace its authority source, and
+    /// assert the resulting outcome.
+    fn e_reject_source(
+        source: LiveEpochTransitionAuthorityActivationExecutionSinkPrewriteAuthoritySource,
+        expected: FO,
+    ) {
+        let mut c = f_case(TrustBundleEnvironment::Devnet, Sc::Add);
+        c.request.authority_source = source;
+        let d = f_eval(&c);
+        assert_eq!(d.outcome, expected, "outcome tag: {}", d.outcome.tag());
+        assert!(d.authority_activation_execution_sink_prewrite_artifact.is_none());
+    }
+
+    // ===========================================================================
+    // A. Accepted / compatible source-test authority-activation-post-final-execution-confirmation artifacts
+    // ===========================================================================
+
+    #[test]
+    fn accept_all_scenarios_devnet() {
+        for sc in ALL_SC {
+            let c = f_case(TrustBundleEnvironment::Devnet, sc);
+            let d = f_eval(&c);
+            assert!(d.is_accept(), "scenario must accept");
+            assert!(d.authorizes_future_mutation_only());
+            let art = d.authority_activation_execution_sink_prewrite_artifact.as_ref().unwrap();
+            assert_eq!(art.staged_kind, expected_crc14_kind(sc));
+            assert_eq!(art.authority_activation_execution_sink_prewrite_nonce, CRC14_NONCE);
+            assert_eq!(art.authority_activation_post_final_execution_confirmation_nonce, CRC4_NONCE);
+            assert_eq!(art.guarded_mutation_nonce, GUARDED_NONCE);
+            assert_eq!(art.staged_application_nonce, STAGED_NONCE);
+        }
+    }
+
+    #[test]
+    fn accept_all_scenarios_testnet() {
+        for sc in ALL_SC {
+            let c = f_case(TrustBundleEnvironment::Testnet, sc);
+            let d = f_eval(&c);
+            assert!(d.is_accept());
+            let art = d.authority_activation_execution_sink_prewrite_artifact.as_ref().unwrap();
+            assert_eq!(art.environment, TrustBundleEnvironment::Testnet);
+            assert_eq!(art.staged_kind, expected_crc14_kind(sc));
+        }
+    }
+
+    #[test]
+    fn accept_outcome_carries_kind_env_target_nonce() {
+        let c = f_case(TrustBundleEnvironment::Devnet, Sc::Add);
+        let d = f_eval(&c);
+        match d.outcome {
+            FO::AcceptedSourceTestLiveEpochTransitionAuthorityActivationExecutionSinkPrewrite {
+                execution_kind,
+                environment,
+                epoch_transition_target,
+                authority_activation_execution_sink_prewrite_nonce,
+            } => {
+                assert_eq!(execution_kind, FK::StageApplyValidatorAdd);
+                assert_eq!(environment, TrustBundleEnvironment::Devnet);
+                assert_eq!(epoch_transition_target, c.request.proposed_epoch_transition_target);
+                assert_eq!(authority_activation_execution_sink_prewrite_nonce, CRC14_NONCE);
+            }
+            other => panic!("unexpected outcome: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn accept_artifact_reexposes_consumed_authority_activation_post_final_execution_confirmation_transcript() {
+        let dec = fe_decision(TrustBundleEnvironment::Devnet, Sc::Add);
+        let target = dec.authority_activation_post_final_execution_confirmation_artifact.as_ref().unwrap().epoch_transition_target;
+        let inputs = f_inputs(TrustBundleEnvironment::Devnet, &dec);
+        let handoff_id = dec.authority_activation_post_final_execution_confirmation_id.clone();
+        let handoff_req = dec.request_id.clone();
+        let handoff_digest = dec.authority_activation_post_final_execution_confirmation_digest.clone();
+        let handoff_transcript = dec.transcript_digest.clone();
+        let request = ProductionLiveEpochTransitionAuthorityActivationExecutionSinkPrewriteRequest::new(
+            LiveEpochTransitionAuthorityActivationExecutionSinkPrewriteAuthoritySource::VerifiedAuthorityActivationPostFinalExecutionConfirmationDecision {
+                decision: dec,
+            },
+            target,
+            CRC14_NONCE,
+        );
+        let exec = ProductionLiveEpochTransitionAuthorityActivationExecutionSinkPrewriteExecutor::source_test();
+        let d = exec.evaluate_live_epoch_transition_authority_activation_execution_sink_prewrite(
+            &request,
+            &inputs,
+            &empty_replay353(),
+        );
+        let art = d.authority_activation_execution_sink_prewrite_artifact.as_ref().unwrap();
+        assert_eq!(art.authority_activation_post_final_execution_confirmation_decision_id, handoff_id);
+        assert_eq!(art.authority_activation_post_final_execution_confirmation_request_id, handoff_req);
+        assert_eq!(art.authority_activation_post_final_execution_confirmation_intent_digest, handoff_digest);
+        assert_eq!(art.authority_activation_post_final_execution_confirmation_transcript_digest, handoff_transcript);
+    }
+
+    #[test]
+    fn accept_artifact_encodes_future_executor_preconditions() {
+        let c = f_case(TrustBundleEnvironment::Devnet, Sc::Add);
+        let d = f_eval(&c);
+        let art = d.authority_activation_execution_sink_prewrite_artifact.as_ref().unwrap();
+        assert_eq!(art.precondition_current_validator_set_epoch, art.validator_set_epoch);
+        assert_eq!(art.precondition_current_validator_set_version, art.validator_set_version);
+        assert_eq!(art.precondition_target_epoch, art.epoch_transition_target);
+        assert_eq!(art.precondition_required_governance_epoch, art.governance_epoch);
+        assert_eq!(art.precondition_required_authority_sequence, art.authority_domain_sequence);
+        assert_eq!(art.precondition_required_replay_window, REPLAY_WINDOW);
+        assert_eq!(art.precondition_proposed_validator_set_digest, art.proposed_set_digest);
+        assert_eq!(art.precondition_delta_digest, art.delta_digest);
+        assert_eq!(art.precondition_current_validator_set_digest, art.current_set_digest);
+    }
+
+    #[test]
+    fn accept_decision_ids_match_artifact_ids() {
+        let c = f_case(TrustBundleEnvironment::Devnet, Sc::Add);
+        let d = f_eval(&c);
+        let art = d.authority_activation_execution_sink_prewrite_artifact.as_ref().unwrap();
+        assert_eq!(d.authority_activation_execution_sink_prewrite_id, art.authority_activation_execution_sink_prewrite_id);
+        assert_eq!(d.request_id, art.request_id);
+        assert_eq!(d.authority_activation_execution_sink_prewrite_digest, art.authority_activation_execution_sink_prewrite_digest);
+        assert_eq!(d.transcript_digest, art.transcript_digest);
+        assert!(!d.authority_activation_execution_sink_prewrite_id.is_empty());
+        assert!(!d.request_id.is_empty());
+        assert!(!d.authority_activation_execution_sink_prewrite_digest.is_empty());
+        assert!(!d.transcript_digest.is_empty());
+    }
+
+    // ===========================================================================
+    // B. Determinism under re-evaluation
+    // ===========================================================================
+
+    #[test]
+    fn deterministic_digests_under_reevaluation() {
+        for sc in ALL_SC {
+            let c = f_case(TrustBundleEnvironment::Devnet, sc);
+            let d1 = f_eval(&c);
+            let d2 = f_eval(&c);
+            assert_eq!(d1.authority_activation_execution_sink_prewrite_id, d2.authority_activation_execution_sink_prewrite_id);
+            assert_eq!(d1.request_id, d2.request_id);
+            assert_eq!(d1.authority_activation_execution_sink_prewrite_digest, d2.authority_activation_execution_sink_prewrite_digest);
+            assert_eq!(d1.transcript_digest, d2.transcript_digest);
+        }
+    }
+
+    #[test]
+    fn artifact_content_digest_is_stable() {
+        let c = f_case(TrustBundleEnvironment::Devnet, Sc::Bulk);
+        let d = f_eval(&c);
+        let art = d.authority_activation_execution_sink_prewrite_artifact.as_ref().unwrap();
+        assert_eq!(art.content_digest(), art.authority_activation_execution_sink_prewrite_digest);
+        assert_eq!(art.content_digest(), art.content_digest());
+    }
+
+    // ===========================================================================
+    // C. Consumed execution-preparation decision transcript binding failures
+    // ===========================================================================
+
+    #[test]
+    fn wrong_authority_activation_post_final_execution_confirmation_decision_id() {
+        e_reject_inputs(
+            |i| i.expected_authority_activation_post_final_execution_confirmation_decision_id = "bad".to_string(),
+            FO::AuthorityActivationPostFinalExecutionConfirmationDecisionIdMismatch,
+        );
+    }
+
+    #[test]
+    fn wrong_authority_activation_post_final_execution_confirmation_request_id() {
+        e_reject_inputs(
+            |i| i.expected_authority_activation_post_final_execution_confirmation_request_id = "bad".to_string(),
+            FO::AuthorityActivationPostFinalExecutionConfirmationDecisionRequestIdMismatch,
+        );
+    }
+
+    #[test]
+    fn wrong_authority_activation_post_final_execution_confirmation_intent_digest() {
+        e_reject_inputs(
+            |i| i.expected_authority_activation_post_final_execution_confirmation_intent_digest = "bad".to_string(),
+            FO::AuthorityActivationPostFinalExecutionConfirmationDecisionIntentDigestMismatch,
+        );
+    }
+
+    #[test]
+    fn wrong_authority_activation_post_final_execution_confirmation_transcript_digest() {
+        e_reject_inputs(
+            |i| i.expected_authority_activation_post_final_execution_confirmation_transcript_digest = "bad".to_string(),
+            FO::AuthorityActivationPostFinalExecutionConfirmationDecisionTranscriptMismatch,
+        );
+    }
+
+    #[test]
+    fn wrong_authority_activation_post_final_execution_confirmation_nonce() {
+        e_reject_inputs(
+            |i| i.expected_authority_activation_post_final_execution_confirmation_nonce = 9999,
+            FO::WrongAuthorityActivationPostFinalExecutionConfirmationNonce,
+        );
+    }
+
+    #[test]
+    fn tampered_authority_activation_post_final_execution_confirmation_package_integrity_mismatch() {
+        // Mutate the consumed package so its content digest no longer matches the
+        // bound handoff decision digest.
+        let mut dec = fe_decision(TrustBundleEnvironment::Devnet, Sc::Add);
+        let target = dec.authority_activation_post_final_execution_confirmation_artifact.as_ref().unwrap().epoch_transition_target;
+        let inputs = f_inputs(TrustBundleEnvironment::Devnet, &dec);
+        dec.authority_activation_post_final_execution_confirmation_artifact.as_mut().unwrap().proposal_digest = "tampered".to_string();
+        let request = ProductionLiveEpochTransitionAuthorityActivationExecutionSinkPrewriteRequest::new(
+            LiveEpochTransitionAuthorityActivationExecutionSinkPrewriteAuthoritySource::VerifiedAuthorityActivationPostFinalExecutionConfirmationDecision {
+                decision: dec,
+            },
+            target,
+            CRC14_NONCE,
+        );
+        let exec = ProductionLiveEpochTransitionAuthorityActivationExecutionSinkPrewriteExecutor::source_test();
+        let d = exec.evaluate_live_epoch_transition_authority_activation_execution_sink_prewrite(
+            &request,
+            &inputs,
+            &empty_replay353(),
+        );
+        assert_eq!(d.outcome, FO::AuthorityActivationPostFinalExecutionConfirmationDecisionIntegrityMismatch);
+        assert!(d.authority_activation_execution_sink_prewrite_artifact.is_none());
+    }
+
+    // ===========================================================================
+    // D. Re-exposed guarded-mutation decision transcript binding failures
+    // ===========================================================================
+
+    #[test]
+    fn wrong_guarded_mutation_decision_id() {
+        e_reject_inputs(
+            |i| i.expected_guarded_mutation_decision_id = "bad".to_string(),
+            FO::GuardedMutationDecisionIdMismatch,
+        );
+    }
+
+    #[test]
+    fn wrong_guarded_mutation_request_id() {
+        e_reject_inputs(
+            |i| i.expected_guarded_mutation_request_id = "bad".to_string(),
+            FO::GuardedMutationDecisionRequestIdMismatch,
+        );
+    }
+
+    #[test]
+    fn wrong_guarded_mutation_intent_digest() {
+        e_reject_inputs(
+            |i| i.expected_guarded_mutation_intent_digest = "bad".to_string(),
+            FO::GuardedMutationDecisionIntentDigestMismatch,
+        );
+    }
+
+    #[test]
+    fn wrong_guarded_mutation_transcript_digest() {
+        e_reject_inputs(
+            |i| i.expected_guarded_mutation_transcript_digest = "bad".to_string(),
+            FO::GuardedMutationDecisionTranscriptMismatch,
+        );
+    }
+
+    #[test]
+    fn wrong_guarded_mutation_nonce() {
+        e_reject_inputs(
+            |i| i.expected_guarded_mutation_nonce = 9999,
+            FO::WrongGuardedMutationNonce,
+        );
+    }
+
+    // ===========================================================================
+    // E. Re-exposed staged-application decision transcript binding failures
+    // ===========================================================================
+
+    #[test]
+    fn wrong_staged_application_decision_id() {
+        e_reject_inputs(
+            |i| i.expected_staged_application_decision_id = "bad".to_string(),
+            FO::StagedApplicationDecisionIdMismatch,
+        );
+    }
+
+    #[test]
+    fn wrong_staged_application_request_id() {
+        e_reject_inputs(
+            |i| i.expected_staged_application_request_id = "bad".to_string(),
+            FO::StagedApplicationDecisionRequestIdMismatch,
+        );
+    }
+
+    #[test]
+    fn wrong_staged_application_intent_digest() {
+        e_reject_inputs(
+            |i| i.expected_staged_application_intent_digest = "bad".to_string(),
+            FO::StagedApplicationDecisionIntentDigestMismatch,
+        );
+    }
+
+    #[test]
+    fn wrong_staged_application_transcript_digest() {
+        e_reject_inputs(
+            |i| i.expected_staged_application_transcript_digest = "bad".to_string(),
+            FO::StagedApplicationDecisionTranscriptMismatch,
+        );
+    }
+
+    #[test]
+    fn wrong_staged_application_nonce() {
+        e_reject_inputs(
+            |i| i.expected_staged_application_nonce = 9999,
+            FO::WrongStagedApplicationNonce,
+        );
+    }
+
+    // ===========================================================================
+    // F. Re-exposed authorization / application binding failures
+    // ===========================================================================
+
+    #[test]
+    fn wrong_authorization_decision_id() {
+        e_reject_inputs(
+            |i| i.expected_authorization_decision_id = "bad".to_string(),
+            FO::AuthorizationDecisionIdMismatch,
+        );
+    }
+
+    #[test]
+    fn wrong_authorization_request_id() {
+        e_reject_inputs(
+            |i| i.expected_authorization_request_id = "bad".to_string(),
+            FO::AuthorizationDecisionRequestIdMismatch,
+        );
+    }
+
+    #[test]
+    fn wrong_authorization_intent_digest() {
+        e_reject_inputs(
+            |i| i.expected_authorization_intent_digest = "bad".to_string(),
+            FO::AuthorizationDecisionIntentDigestMismatch,
+        );
+    }
+
+    #[test]
+    fn wrong_authorization_transcript_digest() {
+        e_reject_inputs(
+            |i| i.expected_authorization_transcript_digest = "bad".to_string(),
+            FO::AuthorizationDecisionTranscriptMismatch,
+        );
+    }
+
+    #[test]
+    fn wrong_application_decision_id() {
+        e_reject_inputs(
+            |i| i.expected_application_decision_id = "bad".to_string(),
+            FO::WrongApplicationDecisionId,
+        );
+    }
+
+    #[test]
+    fn wrong_application_request_id() {
+        e_reject_inputs(
+            |i| i.expected_application_request_id = "bad".to_string(),
+            FO::WrongApplicationRequestId,
+        );
+    }
+
+    #[test]
+    fn wrong_application_intent_digest() {
+        e_reject_inputs(
+            |i| i.expected_application_intent_digest = "bad".to_string(),
+            FO::WrongApplicationIntentDigest,
+        );
+    }
+
+    #[test]
+    fn wrong_application_transcript_digest() {
+        e_reject_inputs(
+            |i| i.expected_application_transcript_digest = "bad".to_string(),
+            FO::WrongApplicationTranscriptDigest,
+        );
+    }
+
+    #[test]
+    fn wrong_application_policy_id() {
+        e_reject_inputs(
+            |i| i.expected_application_policy_id = "bad".to_string(),
+            FO::WrongApplicationPolicyId,
+        );
+    }
+
+    #[test]
+    fn wrong_authorization_policy_id() {
+        e_reject_inputs(
+            |i| i.expected_authorization_policy_id = "bad".to_string(),
+            FO::WrongAuthorizationPolicyId,
+        );
+    }
+
+    // ===========================================================================
+    // G. Governance / rotation tuple binding failures
+    // ===========================================================================
+
+    #[test]
+    fn wrong_environment() {
+        e_reject_inputs(
+            |i| i.trust_domain = custom_domain(TrustBundleEnvironment::Testnet, "qbind-devnet", GENESIS_HASH, ROOT_FP),
+            FO::WrongEnvironment,
+        );
+    }
+
+    #[test]
+    fn wrong_chain() {
+        e_reject_inputs(
+            |i| i.trust_domain = custom_domain(TrustBundleEnvironment::Devnet, "wrong-chain", GENESIS_HASH, ROOT_FP),
+            FO::WrongChain,
+        );
+    }
+
+    #[test]
+    fn wrong_genesis() {
+        e_reject_inputs(
+            |i| i.trust_domain = custom_domain(TrustBundleEnvironment::Devnet, "qbind-devnet", "wrong-genesis", ROOT_FP),
+            FO::WrongGenesis,
+        );
+    }
+
+    #[test]
+    fn wrong_authority_root() {
+        e_reject_inputs(
+            |i| i.trust_domain = custom_domain(TrustBundleEnvironment::Devnet, "qbind-devnet", GENESIS_HASH, "wrong-root"),
+            FO::WrongAuthorityRoot,
+        );
+    }
+
+    #[test]
+    fn wrong_governance_domain() {
+        e_reject_inputs(
+            |i| i.expected_governance_domain_id = "bad".to_string(),
+            FO::WrongGovernanceDomain,
+        );
+    }
+
+    #[test]
+    fn wrong_governance_epoch() {
+        e_reject_inputs(|i| i.expected_governance_epoch = 999, FO::WrongGovernanceEpoch);
+    }
+
+    #[test]
+    fn wrong_proposal_id() {
+        e_reject_inputs(|i| i.expected_proposal_id = "bad".to_string(), FO::WrongProposalId);
+    }
+
+    #[test]
+    fn wrong_governance_execution_intent_digest() {
+        e_reject_inputs(
+            |i| i.expected_governance_intent_digest = "bad".to_string(),
+            FO::WrongGovernanceExecutionIntentDigest,
+        );
+    }
+
+    #[test]
+    fn wrong_rotation_decision_id() {
+        e_reject_inputs(
+            |i| i.expected_rotation_decision_id = "bad".to_string(),
+            FO::WrongRotationDecisionId,
+        );
+    }
+
+    #[test]
+    fn wrong_rotation_request_id() {
+        e_reject_inputs(
+            |i| i.expected_rotation_request_id = "bad".to_string(),
+            FO::WrongRotationRequestId,
+        );
+    }
+
+    #[test]
+    fn wrong_rotation_transcript_digest() {
+        e_reject_inputs(
+            |i| i.expected_rotation_transcript_digest = "bad".to_string(),
+            FO::WrongRotationTranscriptDigest,
+        );
+    }
+
+    #[test]
+    fn wrong_rotation_plan_digest() {
+        e_reject_inputs(
+            |i| i.expected_rotation_plan_digest = "bad".to_string(),
+            FO::WrongRotationPlanDigest,
+        );
+    }
+
+    #[test]
+    fn wrong_lifecycle_action() {
+        e_reject_inputs(
+            |i| i.expected_lifecycle_action = LocalLifecycleAction::EmergencyRevoke,
+            FO::WrongLifecycleAction,
+        );
+    }
+
+    #[test]
+    fn wrong_rotation_action() {
+        e_reject_inputs(
+            |i| i.expected_rotation_action = ValidatorSetRotationAction::EmergencyValidatorRemoval,
+            FO::WrongRotationAction,
+        );
+    }
+
+    #[test]
+    fn wrong_authority_sequence() {
+        e_reject_inputs(|i| i.expected_authority_domain_sequence = 999, FO::WrongAuthoritySequence);
+    }
+
+    // ===========================================================================
+    // H. Validator-set binding failures
+    // ===========================================================================
+
+    #[test]
+    fn wrong_current_validator_set_digest() {
+        e_reject_inputs(
+            |i| i.expected_current_set_digest = "bad".to_string(),
+            FO::WrongCurrentValidatorSetDigest,
+        );
+    }
+
+    #[test]
+    fn wrong_proposed_validator_set_digest() {
+        e_reject_inputs(
+            |i| i.expected_proposed_set_digest = "bad".to_string(),
+            FO::WrongProposedValidatorSetDigest,
+        );
+    }
+
+    #[test]
+    fn wrong_validator_set_delta_digest() {
+        e_reject_inputs(
+            |i| i.expected_delta_digest = "bad".to_string(),
+            FO::WrongValidatorSetDeltaDigest,
+        );
+    }
+
+    #[test]
+    fn wrong_validator_set_epoch() {
+        e_reject_inputs(|i| i.expected_validator_set_epoch = 999, FO::WrongValidatorSetEpoch);
+    }
+
+    #[test]
+    fn wrong_validator_set_version() {
+        e_reject_inputs(|i| i.expected_validator_set_version = 999, FO::WrongValidatorSetVersion);
+    }
+
+    #[test]
+    fn wrong_current_validator_set_epoch() {
+        e_reject_inputs(
+            |i| i.expected_current_validator_set_epoch = 999,
+            FO::WrongCurrentValidatorSetEpoch,
+        );
+    }
+
+    #[test]
+    fn wrong_current_validator_set_version() {
+        e_reject_inputs(
+            |i| i.expected_current_validator_set_version = 999,
+            FO::WrongCurrentValidatorSetVersion,
+        );
+    }
+
+    #[test]
+    fn wrong_proposed_validator_count() {
+        e_reject_inputs(|i| i.expected_proposed_validator_count = 999, FO::WrongProposedValidatorCount);
+    }
+
+    #[test]
+    fn wrong_rotation_nonce() {
+        e_reject_inputs(|i| i.expected_rotation_nonce = 999, FO::WrongRotationNonce);
+    }
+
+    // ===========================================================================
+    // I. Epoch-transition target / nonce binding failures
+    // ===========================================================================
+
+    #[test]
+    fn wrong_epoch_transition_target_inputs() {
+        e_reject_inputs(|i| i.expected_epoch_transition_target = 999, FO::WrongEpochTransitionTarget);
+    }
+
+    #[test]
+    fn wrong_epoch_transition_target_request() {
+        let mut c = f_case(TrustBundleEnvironment::Devnet, Sc::Add);
+        c.request.proposed_epoch_transition_target = 4242;
+        let d = f_eval(&c);
+        assert_eq!(d.outcome, FO::WrongEpochTransitionTarget);
+        assert!(d.authority_activation_execution_sink_prewrite_artifact.is_none());
+    }
+
+    #[test]
+    fn wrong_application_nonce() {
+        e_reject_inputs(|i| i.expected_application_nonce = 999, FO::WrongApplicationNonce);
+    }
+
+    #[test]
+    fn wrong_live_application_nonce() {
+        e_reject_inputs(|i| i.expected_live_application_nonce = 999, FO::WrongLiveApplicationNonce);
+    }
+
+    // ===========================================================================
+    // J. Authority-source rejection / fail-closed paths
+    // ===========================================================================
+
+    #[test]
+    fn reject_missing_authority_activation_post_final_execution_confirmation_decision() {
+        e_reject_source(
+            LiveEpochTransitionAuthorityActivationExecutionSinkPrewriteAuthoritySource::MissingAuthorityActivationPostFinalExecutionConfirmationDecision,
+            FO::VerifiedAuthorityActivationPostFinalExecutionConfirmationDecisionRequired,
+        );
+    }
+
+    #[test]
+    fn reject_unverified_authority_activation_post_final_execution_confirmation_decision() {
+        let dec = fe_decision_rejected(TrustBundleEnvironment::Devnet, Sc::Add);
+        e_reject_source(
+            LiveEpochTransitionAuthorityActivationExecutionSinkPrewriteAuthoritySource::UnverifiedAuthorityActivationPostFinalExecutionConfirmationDecision {
+                decision: dec,
+            },
+            FO::UnverifiedAuthorityActivationPostFinalExecutionConfirmationDecisionRejected,
+        );
+    }
+
+    #[test]
+    fn reject_verified_source_with_non_accept_decision() {
+        let dec = fe_decision_rejected(TrustBundleEnvironment::Devnet, Sc::Add);
+        e_reject_source(
+            LiveEpochTransitionAuthorityActivationExecutionSinkPrewriteAuthoritySource::VerifiedAuthorityActivationPostFinalExecutionConfirmationDecision {
+                decision: dec,
+            },
+            FO::UnverifiedAuthorityActivationPostFinalExecutionConfirmationDecisionRejected,
+        );
+    }
+
+    #[test]
+    fn reject_accepted_authority_activation_post_final_execution_confirmation_without_package_via_verified_source() {
+        let dec = fe_decision_no_artifact(TrustBundleEnvironment::Devnet, Sc::Add);
+        e_reject_source(
+            LiveEpochTransitionAuthorityActivationExecutionSinkPrewriteAuthoritySource::VerifiedAuthorityActivationPostFinalExecutionConfirmationDecision {
+                decision: dec,
+            },
+            FO::VerifiedAuthorityActivationPostFinalExecutionConfirmationDecisionRequired,
+        );
+    }
+
+    #[test]
+    fn reject_accepted_authority_activation_post_final_execution_confirmation_without_package_variant() {
+        let dec = fe_decision_no_artifact(TrustBundleEnvironment::Devnet, Sc::Add);
+        e_reject_source(
+            LiveEpochTransitionAuthorityActivationExecutionSinkPrewriteAuthoritySource::AcceptedAuthorityActivationPostFinalExecutionConfirmationWithoutPackage {
+                decision: dec,
+            },
+            FO::VerifiedAuthorityActivationPostFinalExecutionConfirmationDecisionRequired,
+        );
+    }
+
+    #[test]
+    fn reject_guarded_mutation_decision_alone() {
+        e_reject_source(
+            LiveEpochTransitionAuthorityActivationExecutionSinkPrewriteAuthoritySource::GuardedMutationDecisionWithoutAuthorityActivationPostFinalExecutionConfirmation,
+            FO::GuardedMutationDecisionAloneRejected,
+        );
+    }
+
+    #[test]
+    fn reject_staged_application_decision_alone() {
+        e_reject_source(
+            LiveEpochTransitionAuthorityActivationExecutionSinkPrewriteAuthoritySource::StagedApplicationDecisionWithoutAuthorityActivationPostFinalExecutionConfirmation,
+            FO::StagedApplicationDecisionAloneRejected,
+        );
+    }
+
+    #[test]
+    fn reject_live_application_authorization_alone() {
+        e_reject_source(
+            LiveEpochTransitionAuthorityActivationExecutionSinkPrewriteAuthoritySource::LiveApplicationAuthorizationWithoutAuthorityActivationPostFinalExecutionConfirmation,
+            FO::LiveApplicationAuthorizationAloneRejected,
+        );
+    }
+
+    #[test]
+    fn reject_application_decision_alone() {
+        e_reject_source(
+            LiveEpochTransitionAuthorityActivationExecutionSinkPrewriteAuthoritySource::ApplicationDecisionWithoutAuthorityActivationPostFinalExecutionConfirmation,
+            FO::ApplicationDecisionAloneRejected,
+        );
+    }
+
+    #[test]
+    fn reject_rotation_plan_alone() {
+        e_reject_source(
+            LiveEpochTransitionAuthorityActivationExecutionSinkPrewriteAuthoritySource::RotationPlanWithoutAuthorityActivationPostFinalExecutionConfirmation,
+            FO::RotationPlanAloneRejected,
+        );
+    }
+
+    #[test]
+    fn reject_governance_execution_intent_alone() {
+        e_reject_source(
+            LiveEpochTransitionAuthorityActivationExecutionSinkPrewriteAuthoritySource::GovernanceExecutionIntentWithoutAuthorityActivationPostFinalExecutionConfirmation,
+            FO::GovernanceExecutionIntentAloneRejected,
+        );
+    }
+
+    #[test]
+    fn reject_governance_proof_alone() {
+        e_reject_source(
+            LiveEpochTransitionAuthorityActivationExecutionSinkPrewriteAuthoritySource::GovernanceProofWithoutAuthorityActivationPostFinalExecutionConfirmation,
+            FO::GovernanceProofAloneRejected,
+        );
+    }
+
+    #[test]
+    fn reject_local_operator_assertion() {
+        e_reject_source(
+            LiveEpochTransitionAuthorityActivationExecutionSinkPrewriteAuthoritySource::LocalOperatorAssertion,
+            FO::LocalOperatorProofRejected,
+        );
+    }
+
+    #[test]
+    fn reject_peer_majority_assertion() {
+        e_reject_source(
+            LiveEpochTransitionAuthorityActivationExecutionSinkPrewriteAuthoritySource::PeerMajorityAssertion,
+            FO::PeerMajorityProofRejected,
+        );
+    }
+
+    #[test]
+    fn reject_custody_only_evidence() {
+        e_reject_source(
+            LiveEpochTransitionAuthorityActivationExecutionSinkPrewriteAuthoritySource::CustodyOnlyEvidence,
+            FO::CustodyOnlyProofRejected,
+        );
+    }
+
+    #[test]
+    fn reject_remote_signer_only_evidence() {
+        e_reject_source(
+            LiveEpochTransitionAuthorityActivationExecutionSinkPrewriteAuthoritySource::RemoteSignerOnlyEvidence,
+            FO::RemoteSignerOnlyProofRejected,
+        );
+    }
+
+    #[test]
+    fn reject_custody_attestation_only_evidence() {
+        e_reject_source(
+            LiveEpochTransitionAuthorityActivationExecutionSinkPrewriteAuthoritySource::CustodyAttestationOnlyEvidence,
+            FO::CustodyAttestationOnlyProofRejected,
+        );
+    }
+
+    #[test]
+    fn reject_fixture_only_authority_activation_post_final_execution_confirmation() {
+        e_reject_source(
+            LiveEpochTransitionAuthorityActivationExecutionSinkPrewriteAuthoritySource::FixtureOnlyAuthorityActivationPostFinalExecutionConfirmation,
+            FO::FixtureStagedApplicationRejectedAsProductionAuthority,
+        );
+    }
+
+    #[test]
+    fn reject_arbitrary_validator_set_bytes() {
+        e_reject_source(
+            LiveEpochTransitionAuthorityActivationExecutionSinkPrewriteAuthoritySource::ArbitraryValidatorSetBytes,
+            FO::ArbitraryValidatorSetBytesRejected,
+        );
+    }
+
+    // ===========================================================================
+    // K. MainNet / policy refusal
+    // ===========================================================================
+
+    #[test]
+    fn mainnet_domain_refused_under_source_test_policy() {
+        let mut c = f_case(TrustBundleEnvironment::Devnet, Sc::Add);
+        c.inputs.trust_domain = trust_domain(TrustBundleEnvironment::Mainnet);
+        let d = f_eval(&c);
+        assert_eq!(d.outcome, FO::MainNetRefused);
+        assert!(d.authority_activation_execution_sink_prewrite_artifact.is_none());
+    }
+
+    #[test]
+    fn mainnet_policy_unavailable() {
+        let c = f_case(TrustBundleEnvironment::Devnet, Sc::Add);
+        let exec = e_exec_with_policy(
+            ProductionLiveEpochTransitionAuthorityActivationExecutionSinkPrewriteExecutorPolicy::MainnetProductionLiveEpochTransitionAuthorityActivationExecutionSinkPrewriteRequired,
+        );
+        let d = exec.evaluate_live_epoch_transition_authority_activation_execution_sink_prewrite(
+            &c.request,
+            &c.inputs,
+            &empty_replay353(),
+        );
+        assert_eq!(
+            d.outcome,
+            FO::MainNetProductionLiveEpochTransitionAuthorityActivationExecutionSinkPrewriteUnavailable
+        );
+        assert!(d.authority_activation_execution_sink_prewrite_artifact.is_none());
+    }
+
+    #[test]
+    fn production_policy_unavailable() {
+        let c = f_case(TrustBundleEnvironment::Devnet, Sc::Add);
+        let exec = e_exec_with_policy(
+            ProductionLiveEpochTransitionAuthorityActivationExecutionSinkPrewriteExecutorPolicy::RequireProductionLiveEpochTransitionAuthorityActivationExecutionSinkPrewrite,
+        );
+        let d = exec.evaluate_live_epoch_transition_authority_activation_execution_sink_prewrite(
+            &c.request,
+            &c.inputs,
+            &empty_replay353(),
+        );
+        assert_eq!(
+            d.outcome,
+            FO::ProductionLiveEpochTransitionAuthorityActivationExecutionSinkPrewriteUnavailable
+        );
+        assert!(d.authority_activation_execution_sink_prewrite_artifact.is_none());
+    }
+
+    #[test]
+    fn disabled_policy_fails_closed() {
+        let c = f_case(TrustBundleEnvironment::Devnet, Sc::Add);
+        let exec = e_exec_with_policy(
+            ProductionLiveEpochTransitionAuthorityActivationExecutionSinkPrewriteExecutorPolicy::Disabled,
+        );
+        let d = exec.evaluate_live_epoch_transition_authority_activation_execution_sink_prewrite(
+            &c.request,
+            &c.inputs,
+            &empty_replay353(),
+        );
+        assert_eq!(d.outcome, FO::Disabled);
+        assert!(d.authority_activation_execution_sink_prewrite_artifact.is_none());
+        assert!(!d.is_accept());
+    }
+
+    #[test]
+    fn reserved_production_kind_fails_closed() {
+        let c = f_case(TrustBundleEnvironment::Devnet, Sc::Add);
+        let exec = ProductionLiveEpochTransitionAuthorityActivationExecutionSinkPrewriteExecutor::new(
+            ProductionLiveEpochTransitionAuthorityActivationExecutionSinkPrewriteConfig::new(
+                ProductionLiveEpochTransitionAuthorityActivationExecutionSinkPrewriteExecutorKind::ProductionLiveEpochTransitionAuthorityActivationExecutionSinkPrewrite,
+            ),
+            ProductionLiveEpochTransitionAuthorityActivationExecutionSinkPrewriteExecutorPolicy::AllowSourceTestLiveEpochTransitionAuthorityActivationExecutionSinkPrewrite,
+        );
+        let d = exec.evaluate_live_epoch_transition_authority_activation_execution_sink_prewrite(
+            &c.request,
+            &c.inputs,
+            &empty_replay353(),
+        );
+        assert_eq!(
+            d.outcome,
+            FO::LiveEpochTransitionAuthorityActivationExecutionSinkPrewriteBoundaryUnavailable
+        );
+    }
+
+    // ===========================================================================
+    // L. Replay / idempotency / freshness
+    // ===========================================================================
+
+    #[test]
+    fn replay_rejected_when_id_present() {
+        let c = f_case(TrustBundleEnvironment::Devnet, Sc::Add);
+        let d = f_eval(&c);
+        let id = d.authority_activation_execution_sink_prewrite_artifact.as_ref().unwrap().request_id.clone();
+        let replay = vec![id];
+        let d2 = e_eval_replay(&c, &replay);
+        match d2.outcome {
+            FO::StagedApplicationReplayRejected { .. } => {}
+            other => panic!("expected replay rejection, got {other:?}"),
+        }
+        assert!(d2.authority_activation_execution_sink_prewrite_artifact.is_none());
+    }
+
+    #[test]
+    fn no_replay_when_id_absent() {
+        let c = f_case(TrustBundleEnvironment::Devnet, Sc::Add);
+        let replay: Vec<String> = vec!["some-other-id".to_string()];
+        let d = e_eval_replay(&c, &replay);
+        assert!(d.is_accept());
+    }
+
+    #[test]
+    fn stale_governance_epoch() {
+        e_reject_inputs(|i| i.min_governance_epoch = u64::MAX, FO::StaleGovernanceEpoch);
+    }
+
+    #[test]
+    fn stale_authority_sequence() {
+        e_reject_inputs(|i| i.persisted_sequence = Some(u64::MAX), FO::StaleAuthoritySequence);
+    }
+
+    #[test]
+    fn stale_validator_set_epoch() {
+        e_reject_inputs(|i| i.min_validator_set_epoch = u64::MAX, FO::StaleValidatorSetEpoch);
+    }
+
+    #[test]
+    fn stale_validator_set_version() {
+        e_reject_inputs(|i| i.min_validator_set_version = u64::MAX, FO::StaleValidatorSetVersion);
+    }
+
+    // ===========================================================================
+    // M. Fixture-state (source/test bounded) application
+    // ===========================================================================
+
+    #[test]
+    fn fixture_state_apply_is_idempotent() {
+        let c = f_case(TrustBundleEnvironment::Devnet, Sc::Add);
+        let d = f_eval(&c);
+        let art = d.authority_activation_execution_sink_prewrite_artifact.as_ref().unwrap();
+        let mut state = LiveEpochTransitionAuthorityActivationExecutionSinkPrewriteFixtureState::new(CUR_EPOCH, CUR_VERSION, "start");
+        assert!(state.apply_prepared_execution(art, &d.authority_activation_execution_sink_prewrite_id));
+        assert_eq!(state.current_epoch, art.epoch_transition_target);
+        assert_eq!(state.validator_set_version, art.validator_set_version);
+        assert_eq!(state.current_set_digest, art.proposed_set_digest);
+        // Re-applying the same id is a no-op.
+        assert!(!state.apply_prepared_execution(art, &d.authority_activation_execution_sink_prewrite_id));
+        assert!(state.has_applied(&d.authority_activation_execution_sink_prewrite_id));
+    }
+
+    #[test]
+    fn fixture_state_apply_all_scenarios() {
+        for sc in ALL_SC {
+            let c = f_case(TrustBundleEnvironment::Devnet, sc);
+            let d = f_eval(&c);
+            let art = d.authority_activation_execution_sink_prewrite_artifact.as_ref().unwrap();
+            let mut state = LiveEpochTransitionAuthorityActivationExecutionSinkPrewriteFixtureState::new(CUR_EPOCH, CUR_VERSION, "start");
+            assert!(state.apply_prepared_execution(art, &d.authority_activation_execution_sink_prewrite_id));
+            assert_eq!(state.current_epoch, art.epoch_transition_target);
+        }
+    }
+
+    // ===========================================================================
+    // N. Non-mutation invariants
+    // ===========================================================================
+
+    #[test]
+    fn every_outcome_is_non_mutating() {
+        let c = f_case(TrustBundleEnvironment::Devnet, Sc::Add);
+        let d = f_eval(&c);
+        assert!(d.outcome.is_non_mutating());
+        let bad = f_case(TrustBundleEnvironment::Devnet, Sc::Add);
+        let dbad = e_eval_replay(&bad, &[f_eval(&bad).authority_activation_execution_sink_prewrite_id]);
+        assert!(dbad.outcome.is_non_mutating());
+    }
+
+    #[test]
+    fn accept_authorizes_future_mutation_only() {
+        let c = f_case(TrustBundleEnvironment::Devnet, Sc::Add);
+        let d = f_eval(&c);
+        assert!(d.outcome.authorizes_future_mutation_only());
+        assert!(d.authorizes_future_mutation_only());
+        assert!(d.authority_activation_execution_sink_prewrite_artifact.as_ref().unwrap().staged_kind.is_non_mutating());
+    }
+
+    #[test]
+    fn reject_never_authorizes_future_mutation() {
+        e_reject_source(
+            LiveEpochTransitionAuthorityActivationExecutionSinkPrewriteAuthoritySource::MissingAuthorityActivationPostFinalExecutionConfirmationDecision,
+            FO::VerifiedAuthorityActivationPostFinalExecutionConfirmationDecisionRequired,
+        );
+        let mut c = f_case(TrustBundleEnvironment::Devnet, Sc::Add);
+        c.request.authority_source =
+            LiveEpochTransitionAuthorityActivationExecutionSinkPrewriteAuthoritySource::MissingAuthorityActivationPostFinalExecutionConfirmationDecision;
+        let d = f_eval(&c);
+        assert!(!d.authorizes_future_mutation_only());
+        assert!(!d.outcome.authorizes_future_mutation_only());
+    }
+
+    // ===========================================================================
+    // O. Taxonomy / policy / kind
+    // ===========================================================================
+
+    #[test]
+    fn policy_predicates() {
+        use ProductionLiveEpochTransitionAuthorityActivationExecutionSinkPrewriteExecutorPolicy as Pol;
+        assert!(Pol::Disabled.is_disabled());
+        assert!(Pol::AllowSourceTestLiveEpochTransitionAuthorityActivationExecutionSinkPrewrite.allows_source_test());
+        assert!(Pol::RequireProductionLiveEpochTransitionAuthorityActivationExecutionSinkPrewrite.is_production());
+        assert!(Pol::MainnetProductionLiveEpochTransitionAuthorityActivationExecutionSinkPrewriteRequired.is_mainnet());
+        assert_eq!(Pol::default(), Pol::Disabled);
+    }
+
+    #[test]
+    fn kind_predicates() {
+        use ProductionLiveEpochTransitionAuthorityActivationExecutionSinkPrewriteExecutorKind as K;
+        assert!(K::SourceTestLiveEpochTransitionAuthorityActivationExecutionSinkPrewrite.is_source_test());
+        assert!(!K::Disabled.is_source_test());
+        assert!(!K::ProductionLiveEpochTransitionAuthorityActivationExecutionSinkPrewrite.is_source_test());
+        assert_eq!(K::default(), K::Disabled);
+    }
+
+    #[test]
+    fn execution_kind_mapping_matches_handoff_kind() {
+        for sc in ALL_SC {
+            let hk = expected_crc13_kind(sc);
+            let pk = FK::from_staged_application_kind(hk);
+            assert_eq!(pk, expected_crc14_kind(sc));
+            assert!(pk.is_non_mutating());
+            assert!(!pk.is_unsupported());
+        }
+    }
+
+    #[test]
+    fn unsupported_staged_application_kind_is_unsupported() {
+        let pk = FK::from_staged_application_kind(LiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationKind::UnsupportedStagedApplication);
+        assert!(pk.is_unsupported());
+    }
+
+    #[test]
+    fn outcome_tags_are_stable_and_distinct() {
+        let a = FO::AuthorityActivationPostFinalExecutionConfirmationDecisionIdMismatch;
+        let b = FO::GuardedMutationDecisionIdMismatch;
+        assert_ne!(a.tag(), b.tag());
+        assert_eq!(a.tag(), FO::AuthorityActivationPostFinalExecutionConfirmationDecisionIdMismatch.tag());
+        assert!(!FO::MainNetRefused.tag().is_empty());
+    }
+
+    #[test]
+    fn config_and_inputs_well_formed() {
+        let c = f_case(TrustBundleEnvironment::Devnet, Sc::Add);
+        assert!(c.inputs.is_well_formed());
+        assert!(ProductionLiveEpochTransitionAuthorityActivationExecutionSinkPrewriteConfig::source_test().is_well_formed());
+        // The default config still pins the supported protocol version.
+        assert!(ProductionLiveEpochTransitionAuthorityActivationExecutionSinkPrewriteConfig::default().is_well_formed());
+    }
+
+    // ===========================================================================
+    // P. Per-scenario expansion (accept + determinism + non-mutation + bindings)
+    // ===========================================================================
+
+    macro_rules! per_scenario_accept {
+        ($name:ident, $sc:expr) => {
+            #[test]
+            fn $name() {
+                let c = f_case(TrustBundleEnvironment::Devnet, $sc);
+                let d = f_eval(&c);
+                assert!(d.is_accept());
+                let art = d.authority_activation_execution_sink_prewrite_artifact.as_ref().unwrap();
+                assert_eq!(art.staged_kind, expected_crc14_kind($sc));
+                assert!(art.staged_kind.is_non_mutating());
+                let d2 = f_eval(&c);
+                assert_eq!(d.authority_activation_execution_sink_prewrite_digest, d2.authority_activation_execution_sink_prewrite_digest);
+                assert_eq!(d.transcript_digest, d2.transcript_digest);
+                let mut state = LiveEpochTransitionAuthorityActivationExecutionSinkPrewriteFixtureState::new(
+                    CUR_EPOCH,
+                    CUR_VERSION,
+                    "start",
+                );
+                assert!(state.apply_prepared_execution(art, &d.authority_activation_execution_sink_prewrite_id));
+                assert_eq!(state.current_epoch, art.epoch_transition_target);
+            }
+        };
+    }
+
+    per_scenario_accept!(scenario_accept_add, Sc::Add);
+    per_scenario_accept!(scenario_accept_remove, Sc::Remove);
+    per_scenario_accept!(scenario_accept_update, Sc::Update);
+    per_scenario_accept!(scenario_accept_noop, Sc::NoOp);
+    per_scenario_accept!(scenario_accept_identity, Sc::Identity);
+    per_scenario_accept!(scenario_accept_retire, Sc::Retire);
+    per_scenario_accept!(scenario_accept_emergency, Sc::Emergency);
+    per_scenario_accept!(scenario_accept_authsync, Sc::AuthSync);
+    per_scenario_accept!(scenario_accept_bulk, Sc::Bulk);
+
+    macro_rules! per_scenario_testnet_accept {
+        ($name:ident, $sc:expr) => {
+            #[test]
+            fn $name() {
+                let c = f_case(TrustBundleEnvironment::Testnet, $sc);
+                let d = f_eval(&c);
+                assert!(d.is_accept());
+                assert_eq!(
+                    d.authority_activation_execution_sink_prewrite_artifact.as_ref().unwrap().environment,
+                    TrustBundleEnvironment::Testnet
+                );
+            }
+        };
+    }
+
+    per_scenario_testnet_accept!(scenario_testnet_accept_add, Sc::Add);
+    per_scenario_testnet_accept!(scenario_testnet_accept_remove, Sc::Remove);
+    per_scenario_testnet_accept!(scenario_testnet_accept_update, Sc::Update);
+    per_scenario_testnet_accept!(scenario_testnet_accept_noop, Sc::NoOp);
+    per_scenario_testnet_accept!(scenario_testnet_accept_identity, Sc::Identity);
+    per_scenario_testnet_accept!(scenario_testnet_accept_retire, Sc::Retire);
+    per_scenario_testnet_accept!(scenario_testnet_accept_emergency, Sc::Emergency);
+    per_scenario_testnet_accept!(scenario_testnet_accept_authsync, Sc::AuthSync);
+    per_scenario_testnet_accept!(scenario_testnet_accept_bulk, Sc::Bulk);
+
+    macro_rules! per_scenario_authority_activation_post_final_execution_confirmation_binding {
+        ($name:ident, $sc:expr) => {
+            #[test]
+            fn $name() {
+                let mut c = f_case(TrustBundleEnvironment::Devnet, $sc);
+                c.inputs.expected_authority_activation_post_final_execution_confirmation_decision_id = "bad".to_string();
+                let d = f_eval(&c);
+                assert_eq!(d.outcome, FO::AuthorityActivationPostFinalExecutionConfirmationDecisionIdMismatch);
+                assert!(d.authority_activation_execution_sink_prewrite_artifact.is_none());
+            }
+        };
+    }
+
+    per_scenario_authority_activation_post_final_execution_confirmation_binding!(scenario_handoff_binding_add, Sc::Add);
+    per_scenario_authority_activation_post_final_execution_confirmation_binding!(scenario_handoff_binding_remove, Sc::Remove);
+    per_scenario_authority_activation_post_final_execution_confirmation_binding!(scenario_handoff_binding_update, Sc::Update);
+    per_scenario_authority_activation_post_final_execution_confirmation_binding!(scenario_handoff_binding_noop, Sc::NoOp);
+    per_scenario_authority_activation_post_final_execution_confirmation_binding!(scenario_handoff_binding_identity, Sc::Identity);
+    per_scenario_authority_activation_post_final_execution_confirmation_binding!(scenario_handoff_binding_retire, Sc::Retire);
+    per_scenario_authority_activation_post_final_execution_confirmation_binding!(scenario_handoff_binding_emergency, Sc::Emergency);
+    per_scenario_authority_activation_post_final_execution_confirmation_binding!(scenario_handoff_binding_authsync, Sc::AuthSync);
+    per_scenario_authority_activation_post_final_execution_confirmation_binding!(scenario_handoff_binding_bulk, Sc::Bulk);
+
+    macro_rules! per_scenario_guarded_binding {
+        ($name:ident, $sc:expr) => {
+            #[test]
+            fn $name() {
+                let mut c = f_case(TrustBundleEnvironment::Devnet, $sc);
+                c.inputs.expected_guarded_mutation_decision_id = "bad".to_string();
+                let d = f_eval(&c);
+                assert_eq!(d.outcome, FO::GuardedMutationDecisionIdMismatch);
+                assert!(d.authority_activation_execution_sink_prewrite_artifact.is_none());
+            }
+        };
+    }
+
+    per_scenario_guarded_binding!(scenario_guarded_binding_add, Sc::Add);
+    per_scenario_guarded_binding!(scenario_guarded_binding_remove, Sc::Remove);
+    per_scenario_guarded_binding!(scenario_guarded_binding_update, Sc::Update);
+    per_scenario_guarded_binding!(scenario_guarded_binding_noop, Sc::NoOp);
+    per_scenario_guarded_binding!(scenario_guarded_binding_identity, Sc::Identity);
+    per_scenario_guarded_binding!(scenario_guarded_binding_retire, Sc::Retire);
+    per_scenario_guarded_binding!(scenario_guarded_binding_emergency, Sc::Emergency);
+    per_scenario_guarded_binding!(scenario_guarded_binding_authsync, Sc::AuthSync);
+    per_scenario_guarded_binding!(scenario_guarded_binding_bulk, Sc::Bulk);
+    // ===========================================================================
+    // Q. Deeper re-exposed Run 327/328 runtime-handoff authority-tuple binding
+    //    (additive layer introduced by Run 335 on top of the rotated Run 329
+    //    coverage above). All non-mutating, fail-closed.
+    // ===========================================================================
+
+    #[test]
+    fn accept_reexposes_runtime_handoff_tuple_from_parent() {
+        let parent = fe_decision(TrustBundleEnvironment::Devnet, Sc::Add);
+        let ppkg = parent.authority_activation_post_final_execution_confirmation_artifact.as_ref().unwrap().clone();
+        let c = f_case(TrustBundleEnvironment::Devnet, Sc::Add);
+        let d = f_eval(&c);
+        assert!(d.is_accept());
+        let art = d.authority_activation_execution_sink_prewrite_artifact.as_ref().unwrap();
+        assert_eq!(art.runtime_handoff_decision_id, ppkg.runtime_handoff_decision_id);
+        assert_eq!(art.runtime_handoff_request_id, ppkg.runtime_handoff_request_id);
+        assert_eq!(art.runtime_handoff_intent_digest, ppkg.runtime_handoff_intent_digest);
+        assert_eq!(
+            art.runtime_handoff_transcript_digest,
+            ppkg.runtime_handoff_transcript_digest
+        );
+        assert_eq!(art.runtime_handoff_nonce, HANDOFF_NONCE);
+        assert_eq!(art.authority_activation_post_final_execution_confirmation_nonce, CRC4_NONCE);
+        assert_eq!(art.authority_activation_execution_sink_prewrite_nonce, CRC14_NONCE);
+    }
+
+    #[test]
+    fn reject_runtime_handoff_decision_id_mismatch() {
+        e_reject_inputs(
+            |i| i.expected_runtime_handoff_decision_id = "wrong-runtime-handoff-id".to_string(),
+            FO::RuntimeHandoffDecisionIdMismatch,
+        );
+    }
+
+    #[test]
+    fn reject_runtime_handoff_request_id_mismatch() {
+        e_reject_inputs(
+            |i| i.expected_runtime_handoff_request_id = "wrong-runtime-handoff-req".to_string(),
+            FO::RuntimeHandoffDecisionRequestIdMismatch,
+        );
+    }
+
+    #[test]
+    fn reject_runtime_handoff_intent_digest_mismatch() {
+        e_reject_inputs(
+            |i| i.expected_runtime_handoff_intent_digest = "wrong-runtime-handoff-digest".to_string(),
+            FO::RuntimeHandoffDecisionIntentDigestMismatch,
+        );
+    }
+
+    #[test]
+    fn reject_runtime_handoff_transcript_mismatch() {
+        e_reject_inputs(
+            |i| {
+                i.expected_runtime_handoff_transcript_digest =
+                    "wrong-runtime-handoff-transcript".to_string()
+            },
+            FO::RuntimeHandoffDecisionTranscriptMismatch,
+        );
+    }
+
+    #[test]
+    fn reject_wrong_runtime_handoff_nonce() {
+        e_reject_inputs(
+            |i| i.expected_runtime_handoff_nonce = HANDOFF_NONCE + 100,
+            FO::WrongRuntimeHandoffNonce,
+        );
+    }
+
+    #[test]
+    fn reject_runtime_handoff_decision_alone() {
+        e_reject_source(
+            LiveEpochTransitionAuthorityActivationExecutionSinkPrewriteAuthoritySource::RuntimeHandoffDecisionWithoutAuthorityActivationPostFinalExecutionConfirmation,
+            FO::RuntimeHandoffDecisionAloneRejected,
+        );
+    }
+
+    #[test]
+    fn runtime_handoff_alone_tag_is_stable() {
+        assert_eq!(
+            FO::RuntimeHandoffDecisionAloneRejected.tag(),
+            "runtime-handoff-decision-alone-rejected"
+        );
+        assert_eq!(
+            FO::RuntimeHandoffDecisionIdMismatch.tag(),
+            "runtime-handoff-decision-id-mismatch"
+        );
+        assert_eq!(
+            FO::WrongRuntimeHandoffNonce.tag(),
+            "wrong-runtime-handoff-nonce"
+        );
+    }
+
+    #[test]
+    fn runtime_handoff_binding_rejects_are_non_mutating() {
+        for o in [
+            FO::RuntimeHandoffDecisionIdMismatch,
+            FO::RuntimeHandoffDecisionRequestIdMismatch,
+            FO::RuntimeHandoffDecisionIntentDigestMismatch,
+            FO::RuntimeHandoffDecisionTranscriptMismatch,
+            FO::WrongRuntimeHandoffNonce,
+            FO::RuntimeHandoffDecisionAloneRejected,
+        ] {
+            assert!(o.is_non_mutating());
+        }
+    }
+
+    #[test]
+    fn accept_content_digest_binds_runtime_handoff_tuple() {
+        // Two accepted evaluations over identical fixtures reproduce an identical
+        // content digest (determinism), and the digest incorporates the
+        // re-exposed runtime-handoff tuple.
+        let c = f_case(TrustBundleEnvironment::Devnet, Sc::Add);
+        let d1 = f_eval(&c);
+        let d2 = f_eval(&c);
+        let a1 = d1.authority_activation_execution_sink_prewrite_artifact.as_ref().unwrap();
+        let a2 = d2.authority_activation_execution_sink_prewrite_artifact.as_ref().unwrap();
+        assert_eq!(a1.content_digest(), a2.content_digest());
+    }
+
+    // ===========================================================================
+    // Run 337 — re-exposed Run 329/330 execution-preparation ancestor binding
+    // (carried through the consumed Run 335/336 authority-activation-post-final-execution-confirmation artifact) and
+    // its alone-rejected authority variant.
+    // ===========================================================================
+
+    #[test]
+    fn reject_mutation_execution_decision_id_mismatch() {
+        e_reject_inputs(
+            |i| i.expected_mutation_execution_decision_id = "wrong-mut-exec-id".to_string(),
+            FO::MutationExecutionDecisionIdMismatch,
+        );
+    }
+
+    #[test]
+    fn reject_mutation_execution_request_id_mismatch() {
+        e_reject_inputs(
+            |i| i.expected_mutation_execution_request_id = "wrong-mut-exec-req".to_string(),
+            FO::MutationExecutionDecisionRequestIdMismatch,
+        );
+    }
+
+    #[test]
+    fn reject_mutation_execution_intent_digest_mismatch() {
+        e_reject_inputs(
+            |i| i.expected_mutation_execution_intent_digest = "wrong-mut-exec-digest".to_string(),
+            FO::MutationExecutionDecisionIntentDigestMismatch,
+        );
+    }
+
+    #[test]
+    fn reject_mutation_execution_transcript_mismatch() {
+        e_reject_inputs(
+            |i| {
+                i.expected_mutation_execution_transcript_digest =
+                    "wrong-mut-exec-transcript".to_string()
+            },
+            FO::MutationExecutionDecisionTranscriptMismatch,
+        );
+    }
+
+    #[test]
+    fn reject_wrong_mutation_execution_nonce() {
+        e_reject_inputs(
+            |i| i.expected_mutation_execution_nonce = MUT_NONCE + 100,
+            FO::WrongMutationExecutionNonce,
+        );
+    }
+
+    #[test]
+    fn reject_mutation_execution_decision_alone() {
+        e_reject_source(
+            LiveEpochTransitionAuthorityActivationExecutionSinkPrewriteAuthoritySource::MutationExecutionDecisionWithoutAuthorityActivationPostFinalExecutionConfirmation,
+            FO::MutationExecutionDecisionAloneRejected,
+        );
+    }
+
+    #[test]
+    fn reject_commit_authorization_decision_id_mismatch() {
+        e_reject_inputs(
+            |i| i.expected_commit_authorization_decision_id = "wrong-commit-auth-id".to_string(),
+            FO::CommitAuthorizationDecisionIdMismatch,
+        );
+    }
+
+    #[test]
+    fn reject_commit_authorization_request_id_mismatch() {
+        e_reject_inputs(
+            |i| i.expected_commit_authorization_request_id = "wrong-commit-auth-req".to_string(),
+            FO::CommitAuthorizationDecisionRequestIdMismatch,
+        );
+    }
+
+    #[test]
+    fn reject_commit_authorization_intent_digest_mismatch() {
+        e_reject_inputs(
+            |i| {
+                i.expected_commit_authorization_intent_digest =
+                    "wrong-commit-auth-digest".to_string()
+            },
+            FO::CommitAuthorizationDecisionIntentDigestMismatch,
+        );
+    }
+
+    #[test]
+    fn reject_commit_authorization_transcript_mismatch() {
+        e_reject_inputs(
+            |i| {
+                i.expected_commit_authorization_transcript_digest =
+                    "wrong-commit-auth-transcript".to_string()
+            },
+            FO::CommitAuthorizationDecisionTranscriptMismatch,
+        );
+    }
+
+    #[test]
+    fn reject_wrong_commit_authorization_nonce() {
+        e_reject_inputs(
+            |i| i.expected_commit_authorization_nonce = CMT_NONCE + 100,
+            FO::WrongCommitAuthorizationNonce,
+        );
+    }
+
+    #[test]
+    fn reject_commit_authorization_decision_alone() {
+        e_reject_source(
+            LiveEpochTransitionAuthorityActivationExecutionSinkPrewriteAuthoritySource::CommitAuthorizationDecisionWithoutAuthorityActivationPostFinalExecutionConfirmation,
+            FO::CommitAuthorizationDecisionAloneRejected,
+        );
+    }
+
+    #[test]
+    fn commit_authorization_binding_rejects_are_non_mutating() {
+        for o in [
+            FO::CommitAuthorizationDecisionIdMismatch,
+            FO::CommitAuthorizationDecisionRequestIdMismatch,
+            FO::CommitAuthorizationDecisionIntentDigestMismatch,
+            FO::CommitAuthorizationDecisionTranscriptMismatch,
+            FO::WrongCommitAuthorizationNonce,
+            FO::CommitAuthorizationDecisionAloneRejected,
+        ] {
+            assert!(o.is_non_mutating());
+            assert!(!o.tag().is_empty());
+        }
+    }
+
+    #[test]
+    fn accept_artifact_reexposes_commit_authorization_tuple() {
+        let c = f_case(TrustBundleEnvironment::Devnet, Sc::Add);
+        let d = f_eval(&c);
+        let art = d.authority_activation_execution_sink_prewrite_artifact.as_ref().unwrap();
+        assert_eq!(art.commit_authorization_nonce, CMT_NONCE);
+        assert!(!art.commit_authorization_decision_id.is_empty());
+        assert!(!art.commit_authorization_transcript_digest.is_empty());
+    }
+
+    #[test]
+    fn mutation_execution_alone_tag_is_stable() {
+        assert_eq!(
+            FO::MutationExecutionDecisionAloneRejected.tag(),
+            "mutation-execution-decision-alone-rejected"
+        );
+        assert_eq!(
+            FO::MutationExecutionDecisionIdMismatch.tag(),
+            "mutation-execution-decision-id-mismatch"
+        );
+        assert_eq!(
+            FO::WrongMutationExecutionNonce.tag(),
+            "wrong-mutation-execution-nonce"
+        );
+    }
+
+    #[test]
+    fn accepted_artifact_re_exposes_mutation_execution_ancestor() {
+        let c = f_case(TrustBundleEnvironment::Devnet, Sc::Add);
+        let d = f_eval(&c);
+        assert!(d.is_accept());
+        let art = d.authority_activation_execution_sink_prewrite_artifact.as_ref().unwrap();
+        // Grandparent Run 329/330 mutation-execution nonce re-exposed intact.
+        assert_eq!(art.mutation_execution_nonce, MUT_NONCE);
+        // Parent Run 335/336 authority-activation-post-final-execution-confirmation nonce re-exposed intact.
+        assert_eq!(art.authority_activation_post_final_execution_confirmation_nonce, CRC4_NONCE);
+        // Self Run 337 authority-activation-execution-sink-prewrite proposed nonce.
+        assert_eq!(art.authority_activation_execution_sink_prewrite_nonce, CRC14_NONCE);
+    }
+
+    #[test]
+    fn mutation_execution_binding_rejects_are_non_mutating() {
+        for o in [
+            FO::MutationExecutionDecisionIdMismatch,
+            FO::MutationExecutionDecisionRequestIdMismatch,
+            FO::MutationExecutionDecisionIntentDigestMismatch,
+            FO::MutationExecutionDecisionTranscriptMismatch,
+            FO::WrongMutationExecutionNonce,
+            FO::MutationExecutionDecisionAloneRejected,
+        ] {
+            assert!(o.is_non_mutating());
+            assert!(!o.tag().is_empty());
+        }
+    }
+
+    #[test]
+    fn reject_execution_preparation_decision_id_mismatch() {
+        e_reject_inputs(
+            |i| i.expected_execution_preparation_decision_id = "wrong-exec-prep-id".to_string(),
+            FO::ExecutionPreparationDecisionIdMismatch,
+        );
+    }
+
+    #[test]
+    fn reject_execution_preparation_request_id_mismatch() {
+        e_reject_inputs(
+            |i| i.expected_execution_preparation_request_id = "wrong-exec-prep-req".to_string(),
+            FO::ExecutionPreparationDecisionRequestIdMismatch,
+        );
+    }
+
+    #[test]
+    fn reject_execution_preparation_intent_digest_mismatch() {
+        e_reject_inputs(
+            |i| i.expected_execution_preparation_intent_digest = "wrong-exec-prep-digest".to_string(),
+            FO::ExecutionPreparationDecisionIntentDigestMismatch,
+        );
+    }
+
+    #[test]
+    fn reject_execution_preparation_transcript_mismatch() {
+        e_reject_inputs(
+            |i| {
+                i.expected_execution_preparation_transcript_digest =
+                    "wrong-exec-prep-transcript".to_string()
+            },
+            FO::ExecutionPreparationDecisionTranscriptMismatch,
+        );
+    }
+
+    #[test]
+    fn reject_wrong_execution_preparation_nonce() {
+        e_reject_inputs(
+            |i| i.expected_execution_preparation_nonce = PREP_NONCE + 100,
+            FO::WrongExecutionPreparationNonce,
+        );
+    }
+
+    #[test]
+    fn reject_execution_preparation_decision_alone() {
+        e_reject_source(
+            LiveEpochTransitionAuthorityActivationExecutionSinkPrewriteAuthoritySource::ExecutionPreparationDecisionWithoutAuthorityActivationPostFinalExecutionConfirmation,
+            FO::ExecutionPreparationDecisionAloneRejected,
+        );
+    }
+
+    #[test]
+    fn execution_preparation_alone_tag_is_stable() {
+        assert_eq!(
+            FO::ExecutionPreparationDecisionAloneRejected.tag(),
+            "execution-preparation-decision-alone-rejected"
+        );
+        assert_eq!(
+            FO::ExecutionPreparationDecisionIdMismatch.tag(),
+            "execution-preparation-decision-id-mismatch"
+        );
+        assert_eq!(
+            FO::WrongExecutionPreparationNonce.tag(),
+            "wrong-execution-preparation-nonce"
+        );
+    }
+
+    #[test]
+    fn accepted_artifact_re_exposes_execution_preparation_ancestor() {
+        let c = f_case(TrustBundleEnvironment::Devnet, Sc::Add);
+        let d = f_eval(&c);
+        assert!(d.is_accept());
+        let art = d.authority_activation_execution_sink_prewrite_artifact.as_ref().unwrap();
+        // Grandparent Run 329/330 execution-preparation nonce re-exposed intact.
+        assert_eq!(art.execution_preparation_nonce, PREP_NONCE);
+        // Parent Run 335/336 authority-activation-post-final-execution-confirmation nonce re-exposed intact.
+        assert_eq!(art.authority_activation_post_final_execution_confirmation_nonce, CRC4_NONCE);
+        // Self Run 337 authority-activation-execution-sink-prewrite proposed nonce.
+        assert_eq!(art.authority_activation_execution_sink_prewrite_nonce, CRC14_NONCE);
+    }
+
+    #[test]
+    fn execution_preparation_binding_rejects_are_non_mutating() {
+        for o in [
+            FO::ExecutionPreparationDecisionIdMismatch,
+            FO::ExecutionPreparationDecisionRequestIdMismatch,
+            FO::ExecutionPreparationDecisionIntentDigestMismatch,
+            FO::ExecutionPreparationDecisionTranscriptMismatch,
+            FO::WrongExecutionPreparationNonce,
+            FO::ExecutionPreparationDecisionAloneRejected,
+        ] {
+            assert!(o.is_non_mutating());
+            assert!(!o.tag().is_empty());
+        }
+    }
+
+
+    // =======================================================================
+    // Run 353 supplemental coverage: additional deterministic / tag / invariant
+    // assertions for the authority-activation execution-preparation /
+    // final-execution preflight boundary (module under test).
+    // =======================================================================
+    mod run_351_supplemental {
+        use super::{f_case, f_eval, Sc};
+        use qbind_node::pqc_production_live_epoch_transition_authority_activation_execution_sink_prewrite::*;
+        use qbind_node::pqc_trust_bundle::TrustBundleEnvironment;
+
+        #[test]
+        fn supp_determinism_devnet_add() {
+            let c = f_case(TrustBundleEnvironment::Devnet, Sc::Add);
+            let a = f_eval(&c);
+            let b = f_eval(&c);
+            assert!(a.is_accept());
+            assert_eq!(a, b);
+            assert_eq!(
+                a.authority_activation_execution_sink_prewrite_digest,
+                b.authority_activation_execution_sink_prewrite_digest
+            );
+            assert_eq!(a.transcript_digest, b.transcript_digest);
+        }
+
+        #[test]
+        fn supp_determinism_devnet_remove() {
+            let c = f_case(TrustBundleEnvironment::Devnet, Sc::Remove);
+            let a = f_eval(&c);
+            let b = f_eval(&c);
+            assert!(a.is_accept());
+            assert_eq!(a, b);
+            assert_eq!(
+                a.authority_activation_execution_sink_prewrite_digest,
+                b.authority_activation_execution_sink_prewrite_digest
+            );
+            assert_eq!(a.transcript_digest, b.transcript_digest);
+        }
+
+        #[test]
+        fn supp_determinism_devnet_update() {
+            let c = f_case(TrustBundleEnvironment::Devnet, Sc::Update);
+            let a = f_eval(&c);
+            let b = f_eval(&c);
+            assert!(a.is_accept());
+            assert_eq!(a, b);
+            assert_eq!(
+                a.authority_activation_execution_sink_prewrite_digest,
+                b.authority_activation_execution_sink_prewrite_digest
+            );
+            assert_eq!(a.transcript_digest, b.transcript_digest);
+        }
+
+        #[test]
+        fn supp_determinism_devnet_noop() {
+            let c = f_case(TrustBundleEnvironment::Devnet, Sc::NoOp);
+            let a = f_eval(&c);
+            let b = f_eval(&c);
+            assert!(a.is_accept());
+            assert_eq!(a, b);
+            assert_eq!(
+                a.authority_activation_execution_sink_prewrite_digest,
+                b.authority_activation_execution_sink_prewrite_digest
+            );
+            assert_eq!(a.transcript_digest, b.transcript_digest);
+        }
+
+        #[test]
+        fn supp_determinism_devnet_identity() {
+            let c = f_case(TrustBundleEnvironment::Devnet, Sc::Identity);
+            let a = f_eval(&c);
+            let b = f_eval(&c);
+            assert!(a.is_accept());
+            assert_eq!(a, b);
+            assert_eq!(
+                a.authority_activation_execution_sink_prewrite_digest,
+                b.authority_activation_execution_sink_prewrite_digest
+            );
+            assert_eq!(a.transcript_digest, b.transcript_digest);
+        }
+
+        #[test]
+        fn supp_determinism_devnet_retire() {
+            let c = f_case(TrustBundleEnvironment::Devnet, Sc::Retire);
+            let a = f_eval(&c);
+            let b = f_eval(&c);
+            assert!(a.is_accept());
+            assert_eq!(a, b);
+            assert_eq!(
+                a.authority_activation_execution_sink_prewrite_digest,
+                b.authority_activation_execution_sink_prewrite_digest
+            );
+            assert_eq!(a.transcript_digest, b.transcript_digest);
+        }
+
+        #[test]
+        fn supp_determinism_devnet_emergency() {
+            let c = f_case(TrustBundleEnvironment::Devnet, Sc::Emergency);
+            let a = f_eval(&c);
+            let b = f_eval(&c);
+            assert!(a.is_accept());
+            assert_eq!(a, b);
+            assert_eq!(
+                a.authority_activation_execution_sink_prewrite_digest,
+                b.authority_activation_execution_sink_prewrite_digest
+            );
+            assert_eq!(a.transcript_digest, b.transcript_digest);
+        }
+
+        #[test]
+        fn supp_determinism_devnet_authsync() {
+            let c = f_case(TrustBundleEnvironment::Devnet, Sc::AuthSync);
+            let a = f_eval(&c);
+            let b = f_eval(&c);
+            assert!(a.is_accept());
+            assert_eq!(a, b);
+            assert_eq!(
+                a.authority_activation_execution_sink_prewrite_digest,
+                b.authority_activation_execution_sink_prewrite_digest
+            );
+            assert_eq!(a.transcript_digest, b.transcript_digest);
+        }
+
+        #[test]
+        fn supp_determinism_devnet_bulk() {
+            let c = f_case(TrustBundleEnvironment::Devnet, Sc::Bulk);
+            let a = f_eval(&c);
+            let b = f_eval(&c);
+            assert!(a.is_accept());
+            assert_eq!(a, b);
+            assert_eq!(
+                a.authority_activation_execution_sink_prewrite_digest,
+                b.authority_activation_execution_sink_prewrite_digest
+            );
+            assert_eq!(a.transcript_digest, b.transcript_digest);
+        }
+
+        #[test]
+        fn supp_determinism_testnet_add() {
+            let c = f_case(TrustBundleEnvironment::Testnet, Sc::Add);
+            let a = f_eval(&c);
+            let b = f_eval(&c);
+            assert!(a.is_accept());
+            assert_eq!(a, b);
+            assert_eq!(
+                a.authority_activation_execution_sink_prewrite_digest,
+                b.authority_activation_execution_sink_prewrite_digest
+            );
+            assert_eq!(a.transcript_digest, b.transcript_digest);
+        }
+
+        #[test]
+        fn supp_determinism_testnet_remove() {
+            let c = f_case(TrustBundleEnvironment::Testnet, Sc::Remove);
+            let a = f_eval(&c);
+            let b = f_eval(&c);
+            assert!(a.is_accept());
+            assert_eq!(a, b);
+            assert_eq!(
+                a.authority_activation_execution_sink_prewrite_digest,
+                b.authority_activation_execution_sink_prewrite_digest
+            );
+            assert_eq!(a.transcript_digest, b.transcript_digest);
+        }
+
+        #[test]
+        fn supp_determinism_testnet_update() {
+            let c = f_case(TrustBundleEnvironment::Testnet, Sc::Update);
+            let a = f_eval(&c);
+            let b = f_eval(&c);
+            assert!(a.is_accept());
+            assert_eq!(a, b);
+            assert_eq!(
+                a.authority_activation_execution_sink_prewrite_digest,
+                b.authority_activation_execution_sink_prewrite_digest
+            );
+            assert_eq!(a.transcript_digest, b.transcript_digest);
+        }
+
+        #[test]
+        fn supp_determinism_testnet_noop() {
+            let c = f_case(TrustBundleEnvironment::Testnet, Sc::NoOp);
+            let a = f_eval(&c);
+            let b = f_eval(&c);
+            assert!(a.is_accept());
+            assert_eq!(a, b);
+            assert_eq!(
+                a.authority_activation_execution_sink_prewrite_digest,
+                b.authority_activation_execution_sink_prewrite_digest
+            );
+            assert_eq!(a.transcript_digest, b.transcript_digest);
+        }
+
+        #[test]
+        fn supp_determinism_testnet_identity() {
+            let c = f_case(TrustBundleEnvironment::Testnet, Sc::Identity);
+            let a = f_eval(&c);
+            let b = f_eval(&c);
+            assert!(a.is_accept());
+            assert_eq!(a, b);
+            assert_eq!(
+                a.authority_activation_execution_sink_prewrite_digest,
+                b.authority_activation_execution_sink_prewrite_digest
+            );
+            assert_eq!(a.transcript_digest, b.transcript_digest);
+        }
+
+        #[test]
+        fn supp_determinism_testnet_retire() {
+            let c = f_case(TrustBundleEnvironment::Testnet, Sc::Retire);
+            let a = f_eval(&c);
+            let b = f_eval(&c);
+            assert!(a.is_accept());
+            assert_eq!(a, b);
+            assert_eq!(
+                a.authority_activation_execution_sink_prewrite_digest,
+                b.authority_activation_execution_sink_prewrite_digest
+            );
+            assert_eq!(a.transcript_digest, b.transcript_digest);
+        }
+
+        #[test]
+        fn supp_determinism_testnet_emergency() {
+            let c = f_case(TrustBundleEnvironment::Testnet, Sc::Emergency);
+            let a = f_eval(&c);
+            let b = f_eval(&c);
+            assert!(a.is_accept());
+            assert_eq!(a, b);
+            assert_eq!(
+                a.authority_activation_execution_sink_prewrite_digest,
+                b.authority_activation_execution_sink_prewrite_digest
+            );
+            assert_eq!(a.transcript_digest, b.transcript_digest);
+        }
+
+        #[test]
+        fn supp_determinism_testnet_authsync() {
+            let c = f_case(TrustBundleEnvironment::Testnet, Sc::AuthSync);
+            let a = f_eval(&c);
+            let b = f_eval(&c);
+            assert!(a.is_accept());
+            assert_eq!(a, b);
+            assert_eq!(
+                a.authority_activation_execution_sink_prewrite_digest,
+                b.authority_activation_execution_sink_prewrite_digest
+            );
+            assert_eq!(a.transcript_digest, b.transcript_digest);
+        }
+
+        #[test]
+        fn supp_determinism_testnet_bulk() {
+            let c = f_case(TrustBundleEnvironment::Testnet, Sc::Bulk);
+            let a = f_eval(&c);
+            let b = f_eval(&c);
+            assert!(a.is_accept());
+            assert_eq!(a, b);
+            assert_eq!(
+                a.authority_activation_execution_sink_prewrite_digest,
+                b.authority_activation_execution_sink_prewrite_digest
+            );
+            assert_eq!(a.transcript_digest, b.transcript_digest);
+        }
+
+        #[test]
+        fn supp_artifact_present_devnet_add() {
+            let c = f_case(TrustBundleEnvironment::Devnet, Sc::Add);
+            let d = f_eval(&c);
             assert!(d.is_accept());
             let art = d
                 .authority_activation_execution_sink_prewrite_artifact
@@ -14354,8 +16568,8 @@ mod run_351_authority_activation_post_final_execution_confirmation {
 
         #[test]
         fn supp_artifact_present_devnet_remove() {
-            let c = e_case(TrustBundleEnvironment::Devnet, Sc::Remove);
-            let d = e_eval(&c);
+            let c = f_case(TrustBundleEnvironment::Devnet, Sc::Remove);
+            let d = f_eval(&c);
             assert!(d.is_accept());
             let art = d
                 .authority_activation_execution_sink_prewrite_artifact
@@ -14368,8 +16582,8 @@ mod run_351_authority_activation_post_final_execution_confirmation {
 
         #[test]
         fn supp_artifact_present_devnet_update() {
-            let c = e_case(TrustBundleEnvironment::Devnet, Sc::Update);
-            let d = e_eval(&c);
+            let c = f_case(TrustBundleEnvironment::Devnet, Sc::Update);
+            let d = f_eval(&c);
             assert!(d.is_accept());
             let art = d
                 .authority_activation_execution_sink_prewrite_artifact
@@ -14382,8 +16596,8 @@ mod run_351_authority_activation_post_final_execution_confirmation {
 
         #[test]
         fn supp_artifact_present_devnet_noop() {
-            let c = e_case(TrustBundleEnvironment::Devnet, Sc::NoOp);
-            let d = e_eval(&c);
+            let c = f_case(TrustBundleEnvironment::Devnet, Sc::NoOp);
+            let d = f_eval(&c);
             assert!(d.is_accept());
             let art = d
                 .authority_activation_execution_sink_prewrite_artifact
@@ -14396,8 +16610,8 @@ mod run_351_authority_activation_post_final_execution_confirmation {
 
         #[test]
         fn supp_artifact_present_devnet_identity() {
-            let c = e_case(TrustBundleEnvironment::Devnet, Sc::Identity);
-            let d = e_eval(&c);
+            let c = f_case(TrustBundleEnvironment::Devnet, Sc::Identity);
+            let d = f_eval(&c);
             assert!(d.is_accept());
             let art = d
                 .authority_activation_execution_sink_prewrite_artifact
@@ -14410,8 +16624,8 @@ mod run_351_authority_activation_post_final_execution_confirmation {
 
         #[test]
         fn supp_artifact_present_devnet_retire() {
-            let c = e_case(TrustBundleEnvironment::Devnet, Sc::Retire);
-            let d = e_eval(&c);
+            let c = f_case(TrustBundleEnvironment::Devnet, Sc::Retire);
+            let d = f_eval(&c);
             assert!(d.is_accept());
             let art = d
                 .authority_activation_execution_sink_prewrite_artifact
@@ -14424,8 +16638,8 @@ mod run_351_authority_activation_post_final_execution_confirmation {
 
         #[test]
         fn supp_artifact_present_devnet_emergency() {
-            let c = e_case(TrustBundleEnvironment::Devnet, Sc::Emergency);
-            let d = e_eval(&c);
+            let c = f_case(TrustBundleEnvironment::Devnet, Sc::Emergency);
+            let d = f_eval(&c);
             assert!(d.is_accept());
             let art = d
                 .authority_activation_execution_sink_prewrite_artifact
@@ -14438,8 +16652,8 @@ mod run_351_authority_activation_post_final_execution_confirmation {
 
         #[test]
         fn supp_artifact_present_devnet_authsync() {
-            let c = e_case(TrustBundleEnvironment::Devnet, Sc::AuthSync);
-            let d = e_eval(&c);
+            let c = f_case(TrustBundleEnvironment::Devnet, Sc::AuthSync);
+            let d = f_eval(&c);
             assert!(d.is_accept());
             let art = d
                 .authority_activation_execution_sink_prewrite_artifact
@@ -14452,8 +16666,8 @@ mod run_351_authority_activation_post_final_execution_confirmation {
 
         #[test]
         fn supp_artifact_present_devnet_bulk() {
-            let c = e_case(TrustBundleEnvironment::Devnet, Sc::Bulk);
-            let d = e_eval(&c);
+            let c = f_case(TrustBundleEnvironment::Devnet, Sc::Bulk);
+            let d = f_eval(&c);
             assert!(d.is_accept());
             let art = d
                 .authority_activation_execution_sink_prewrite_artifact
@@ -14510,13 +16724,14 @@ mod run_351_authority_activation_post_final_execution_confirmation {
 
         #[test]
         fn supp_non_mutation_flag_is_true() {
-            let c = e_case(TrustBundleEnvironment::Devnet, Sc::Add);
-            let d = e_eval(&c);
+            let c = f_case(TrustBundleEnvironment::Devnet, Sc::Add);
+            let d = f_eval(&c);
             let art = d.authority_activation_execution_sink_prewrite_artifact.as_ref().unwrap();
             assert!(art.staged_kind.is_non_mutating());
         }
     }
 
+    }
     }
 
 }
