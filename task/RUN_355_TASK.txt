@@ -1,0 +1,252 @@
+Run 355 — Public DevNet release-readiness audit / gap matrix
+
+Continue QBIND after accepted Run 354.
+
+Current state:
+Run 354 is accepted as PASS / release-binary evidence positive for the Run 353 live epoch-transition authority-activation execution-sink prewrite / sink-commit-readiness boundary.
+
+The Run 353/354 row is Green-for-scope only. Full C4 remains OPEN. C5 remains OPEN. MainNet authority rotation/revocation remains Red.
+
+Run 354 did not add runtime wiring, did not add a public CLI flag, did not enable MainNet, did not write to an execution sink, did not perform authority activation, did not perform final execution, did not apply a live production validator-set change, did not perform a production epoch transition, did not commit/finalize production runtime state, and did not close C4 or C5.
+
+Primary objective:
+Start the QBIND public network release-readiness track with a source/docs/test-only public DevNet readiness audit and gap matrix.
+
+This run must determine, from the actual repository state and existing evidence, what remains before QBIND can safely open a public experimental DevNet.
+
+The result must be a concrete, evidence-grounded launch-readiness matrix divided into:
+
+1. Must-have before public DevNet.
+2. Should-have before public DevNet.
+3. Can wait until public TestNet.
+4. MainNet-only / not required for public DevNet.
+
+Strict scope:
+Audit / docs / test-only.
+
+No public DevNet launch claim.
+No public TestNet readiness claim.
+No MainNet readiness claim.
+No release-binary public network claim.
+No runtime behavior change unless it is purely compile/test scaffolding for readiness classification.
+No public CLI flag.
+No MainNet enablement.
+No C4 closure.
+No C5 closure.
+
+Important decision:
+Do not continue the next internal authority-activation execution-sink boundary in Run 355. Park that as future work. Run 355 begins the public DevNet readiness track.
+
+Non-goals:
+Do not open a public DevNet.
+Do not deploy seed nodes.
+Do not deploy a faucet.
+Do not deploy an explorer.
+Do not expose a public RPC gateway.
+Do not publish a public genesis package as ready.
+Do not claim public TestNet readiness.
+Do not claim MainNet readiness.
+Do not close C4.
+Do not close C5.
+Do not reinterpret any Green-for-scope authority-lifecycle boundary as production readiness.
+Do not wire the Run 353/354 boundary into runtime.
+Do not add authority activation.
+Do not add final execution.
+Do not add execution-sink writes.
+Do not perform validator-set mutation.
+Do not perform epoch transition.
+Do not add public CLI enablement.
+Do not create marketing language.
+
+Required investigation:
+Inspect the repository and existing evidence docs for the current state of:
+
+1. Public DevNet genesis packaging.
+2. DevNet bootnode / seed-node configuration.
+3. DevNet validator onboarding instructions.
+4. DevNet faucet availability or absence.
+5. DevNet RPC exposure and rate-limit posture.
+6. DevNet explorer / status-page availability or absence.
+7. DevNet reset policy.
+8. DevNet incident-response process.
+9. DevNet monitoring / alerting / metrics readiness.
+10. DevNet release-binary provenance requirements.
+11. DevNet public-network abuse / DoS protections.
+12. DevNet validator identity / key-management guidance.
+13. DevNet PQC trust-bundle bootstrap process.
+14. DevNet governance / authority-lifecycle status.
+15. DevNet data-retention / snapshot / backup posture.
+16. DevNet upgrade / rollback procedure.
+17. DevNet user-facing documentation gaps.
+18. TestNet blockers distinct from DevNet blockers.
+19. MainNet blockers distinct from TestNet blockers.
+20. C4/C5 blockers that must remain explicitly open.
+
+Required implementation:
+Add a new readiness document:
+
+`docs/release/QBIND_PUBLIC_DEVNET_READINESS_CRITERIA.md`
+
+Add canonical evidence:
+
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_355.md`
+
+Update narrowly:
+
+`docs/protocol/QBIND_C4_C5_CLOSURE_CRITERIA.md`
+`docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md`
+`docs/protocol/QBIND_GOVERNANCE_EXECUTION_RUNTIME_SURFACE_AUDIT.md`
+`docs/ops/QBIND_PQC_TRUST_LIFECYCLE_RUNBOOK.md`
+`docs/whitepaper/contradiction.md`
+
+If an exact public DevNet readiness checklist already exists, update it instead of duplicating it. If only generic release or MainNet checklists exist, keep the new public DevNet readiness criteria document separate and cross-reference them.
+
+Required readiness document content:
+`QBIND_PUBLIC_DEVNET_READINESS_CRITERIA.md` must contain:
+
+1. Public DevNet launch definition.
+2. Explicit public DevNet non-goals.
+3. Public DevNet safety label:
+   - experimental;
+   - resettable;
+   - no value;
+   - no MainNet readiness claim;
+   - no C4/C5 closure claim.
+4. Must-have checklist.
+5. Should-have checklist.
+6. TestNet-deferred checklist.
+7. MainNet-deferred checklist.
+8. Evidence required for each must-have item.
+9. Owner / source file / evidence location for each item.
+10. Current status per item:
+    - Green: already evidenced enough for public DevNet;
+    - Yellow: partial / needs one or more runs;
+    - Red: missing;
+    - N/A for DevNet.
+11. Exact next run recommendation for each Red/Yellow must-have item.
+12. Public DevNet launch blocker summary.
+13. Public TestNet blocker summary.
+14. MainNet blocker summary.
+15. C4/C5 non-closure statement.
+
+Required classification:
+Classify these at minimum:
+
+- genesis package;
+- release binary provenance;
+- release binary reproducibility / SHA / BuildID;
+- seed nodes / bootnodes;
+- validator onboarding;
+- validator identity;
+- validator key-management guidance;
+- trust-bundle bootstrap;
+- PQC root / signing-key guidance;
+- faucet;
+- RPC gateway;
+- RPC rate limiting;
+- public P2P port posture;
+- peer admission policy;
+- telemetry / metrics;
+- monitoring / alerting;
+- status page;
+- explorer;
+- reset policy;
+- incident response;
+- abuse handling;
+- snapshot / backup / restore;
+- data retention;
+- upgrade procedure;
+- rollback procedure;
+- public documentation;
+- user-facing disclaimers;
+- network parameter publication;
+- genesis hash publication;
+- seed-node list publication;
+- DevNet authority lifecycle;
+- governance proof status;
+- validator-set rotation status;
+- runtime wiring for authority lifecycle;
+- MainNet custody;
+- MainNet authority rotation/revocation;
+- C4;
+- C5.
+
+Required matrix shape:
+For each item include:
+
+- item name;
+- release stage: DevNet / TestNet / MainNet;
+- category: network / binary / ops / docs / security / governance / custody / observability;
+- current status: Green / Yellow / Red / N/A;
+- evidence source;
+- blocker description;
+- risk if launched without it;
+- next run recommendation.
+
+Expected likely outcome:
+Run 355 should almost certainly be PASS / public-DevNet-readiness-audit positive if the readiness document, matrix, docs, evidence, and provenance land.
+
+Do not mark public DevNet ready unless every must-have item is genuinely Green and evidenced. If any must-have is Yellow or Red, state that public DevNet is not yet launch-ready and list the blockers.
+
+Expected C4/C5 matrix result:
+Full C4 remains OPEN.
+C5 remains OPEN.
+MainNet authority rotation/revocation remains Red.
+Run 353/354 remains Green-for-scope only.
+Public DevNet readiness is introduced as a separate release-readiness track, not as C4/C5 closure.
+
+Security:
+Run secret scanning over changed files.
+
+Run CodeQL only if source code changes. If this is docs/audit-only, record that CodeQL is not meaningful for the Run 355 diff and that no CodeQL coverage is claimed. If CodeQL is invoked and skipped, timed out, unavailable, or database-too-large, record the exact result and do not call it clean.
+
+Required tests:
+At minimum:
+
+`cargo test -p qbind-node --lib`
+
+If only docs changed and repo policy allows a lighter command, record the exact command substitution and reason. Prefer still running full `--lib` unless it is prohibitively expensive.
+
+Provenance hygiene:
+Record git commit, branch, and clean/dirty state in:
+
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_355.md`
+
+Do not leave unexplained `git_status: dirty`.
+
+Expected verdict:
+PASS / public-DevNet-readiness-audit positive if the readiness criteria, gap matrix, docs, evidence, security provenance, and test/provenance records land.
+
+Partial-positive if the audit lands but one required classification area remains unresolved and is documented honestly.
+
+Unacceptable:
+- claiming public DevNet launch without evidence;
+- claiming public TestNet readiness;
+- claiming MainNet readiness;
+- closing C4 or C5;
+- marking MainNet authority rotation/revocation Green;
+- wiring runtime authority activation;
+- adding public CLI enablement;
+- adding faucet / RPC / seed-node deployment without separate evidence;
+- weakening prior Green-for-scope boundaries;
+- hiding skipped CodeQL;
+- using marketing language instead of evidence language.
+
+Final response format:
+1. Exact verdict.
+2. Files changed.
+3. Public DevNet readiness definition.
+4. Must-have matrix summary.
+5. Should-have matrix summary.
+6. TestNet-deferred items.
+7. MainNet-deferred items.
+8. Current public DevNet readiness status.
+9. Public DevNet blockers.
+10. Public TestNet blockers.
+11. MainNet blockers.
+12. C4/C5 status.
+13. Tests run.
+14. Security scans.
+15. Provenance.
+16. Honest limitations.
+17. Suggested Run 356 next step.

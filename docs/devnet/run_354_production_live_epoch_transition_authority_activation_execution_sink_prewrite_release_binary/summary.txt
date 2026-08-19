@@ -1,6 +1,6 @@
 Run 354 — release-binary evidence for the Run 353 live epoch-transition authority-activation execution-sink prewrite / sink-commit-readiness boundary
-git_commit: a7469d3d03be35e23d57774ebe48df4787fdee16
-git_branch: copilot/run-354-task
+git_commit: 746bcdc98853a21dc72f3ad508b64ae16b9ed96d
+git_branch: copilot/run-354-implement-user-authentication
 git_status: dirty
 
 build:
@@ -40,6 +40,45 @@ reachability: combined/source/helper/module/entry/taxonomy/boundary greps passed
 c4c5_taxonomy: passed (57 phrases; prior boundary rows Green-for-scope only; live-epoch-transition-authority-activation-execution-sink-prewrite row Green-for-scope; Red rows unchanged; Full C4 OPEN; C5 OPEN)
 denylist: passed (90 patterns)
 tests:
-  tests:skipped(RUN_354_SKIP_TESTS=1)
+  test:run_353_production_live_epoch_transition_authority_activation_execution_sink_prewrite_tests	rc=0
+  test:run_351_production_live_epoch_transition_authority_activation_post_final_execution_confirmation_tests	rc=0
+  test:run_349_production_live_epoch_transition_authority_activation_final_execution_tests	rc=0
+  test:run_347_production_live_epoch_transition_authority_activation_execution_preparation_tests	rc=0
+  test:run_345_production_live_epoch_transition_authority_activation_authorization_tests	rc=0
+  test:run_343_production_live_epoch_transition_authority_lifecycle_post_completion_attestation_tests	rc=0
+  test:run_341_production_live_epoch_transition_final_settlement_completion_tests	rc=0
+  test:run_339_production_live_epoch_transition_settlement_execution_tests	rc=0
+  test:run_337_production_live_epoch_transition_settlement_execution_preparation_tests	rc=0
+  test:run_335_production_live_epoch_transition_settlement_preparation_tests	rc=0
+  test:run_333_production_live_epoch_transition_external_publication_tests	rc=0
+  test:run_331_production_live_epoch_transition_durable_audit_publication_tests	rc=0
+  test:run_329_production_live_epoch_transition_audit_ledger_commitment_tests	rc=0
+  test:run_327_production_live_epoch_transition_durable_audit_finalization_tests	rc=0
+  test:run_325_production_live_epoch_transition_post_commit_audit_tests	rc=0
+  test:run_323_production_live_epoch_transition_commit_receipt_tests	rc=0
+  test:run_321_production_live_epoch_transition_commit_execution_tests	rc=0
+  test:run_319_production_live_epoch_transition_commit_authorization_tests	rc=0
+  test:run_317_production_live_epoch_transition_mutation_execution_tests	rc=0
+  test:run_315_production_live_epoch_transition_execution_preparation_tests	rc=0
+  test:run_313_production_epoch_transition_runtime_handoff_tests	rc=0
+  test:run_311_production_guarded_epoch_transition_mutation_executor_tests	rc=0
+  test:run_309_production_staged_live_validator_set_epoch_transition_application_executor_tests	rc=0
+  test:run_307_production_live_validator_set_application_authorization_tests	rc=0
+  test:run_305_production_validator_set_rotation_application_executor_tests	rc=0
+  test:run_303_production_validator_set_rotation_intent_tests	rc=0
+  test:run_301_production_governance_execution_engine_tests	rc=0
+  test:run_299_production_onchain_governance_proof_verifier_tests	rc=0
+  test:run_297_production_custody_attestation_verifier_tests	rc=0
+  test:run_295_production_kms_hsm_custody_backend_tests	rc=0
+  test:run_293_production_remote_signer_backend_tests	rc=0
+  test:run_291_production_durable_replay_rocksdb_tests	rc=0
+  test:run_186_onchain_governance_production_verifier_boundary_tests	rc=0
+  test:run_178_onchain_governance_proof_tests	rc=0
+  test:run_203_kms_hsm_backend_boundary_tests	rc=0
+  test:run_201_remote_signer_transport_boundary_tests	rc=0
+  test:run_194_remote_authority_signer_boundary_tests	rc=0
+  test:run_188_authority_custody_boundary_tests	rc=0
+  lib:pqc_authority	rc=0
+  lib:lib_all	rc=0
 
 verdict: PASS (release-binary evidence only; live epoch-transition authority-activation-execution-sink-prewrite Green-for-scope; MainNet authority rotation/revocation Red; Full C4 OPEN; C5 OPEN)

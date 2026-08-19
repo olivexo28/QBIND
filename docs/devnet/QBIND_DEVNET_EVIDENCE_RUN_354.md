@@ -169,26 +169,29 @@ enablement. The denylist grep passed (90 patterns).
 ## 12. Tests run
 
 The Run 354 release harness
-(`scripts/devnet/run_354_production_live_epoch_transition_authority_activation_execution_sink_prewrite_release_binary.sh`) was executed
-end-to-end for this change set. It ran the full boundary regression corpus (38 test targets, run
-from the newest Run 353 boundary suite back through the ancestor chain, plus `--lib pqc_authority` and the full
-`--lib` suite), each recording `rc=0` in the tracked `summary.txt`. Representative results (final values recorded
-verbatim in `summary.txt`):
+(`scripts/devnet/run_354_production_live_epoch_transition_authority_activation_execution_sink_prewrite_release_binary.sh`) was
+**re-executed end-to-end WITHOUT `RUN_354_SKIP_TESTS=1`** for this change set, so real per-target test results were
+captured. It ran the full boundary regression corpus (38 test targets, run from the newest Run 353 boundary suite back
+through the ancestor chain, plus `--lib pqc_authority` and the full `--lib` suite), each recording a real `rc=0` in the
+tracked `summary.txt`. Across all targets **10,992 test cases passed and 0 failed**. The previous
+`tests:skipped(RUN_354_SKIP_TESTS=1)` marker has been removed from the regenerated `summary.txt`, which now lists a real
+`test:<target> rc=0` line for every target plus `lib:pqc_authority rc=0` and `lib:lib_all rc=0`. Representative results
+(final values recorded verbatim in `summary.txt`):
 
-* `cargo test -p qbind-node --test run_353_production_live_epoch_transition_authority_activation_execution_sink_prewrite_tests` — **passed; 0 failed**.
-* `cargo test -p qbind-node --test run_351_production_live_epoch_transition_authority_activation_post_final_execution_confirmation_tests` — **passed; 0 failed**.
-* `cargo test -p qbind-node --test run_349_production_live_epoch_transition_authority_activation_final_execution_tests` — **passed; 0 failed**.
-* `cargo test -p qbind-node --test run_347_production_live_epoch_transition_authority_activation_execution_preparation_tests` — **passed; 0 failed**.
-* `cargo test -p qbind-node --test run_345_production_live_epoch_transition_authority_activation_authorization_tests` — **passed; 0 failed**.
-* `cargo test -p qbind-node --test run_343_production_live_epoch_transition_authority_lifecycle_post_completion_attestation_tests` — **passed; 0 failed**.
-* `cargo test -p qbind-node --lib` — full library suite passed.
-* `bash -n scripts/devnet/run_354_production_live_epoch_transition_authority_activation_execution_sink_prewrite_release_binary.sh` — syntax OK.
+* `cargo test -p qbind-node --test run_353_production_live_epoch_transition_authority_activation_execution_sink_prewrite_tests` — **1146 passed; 0 failed** (rc=0).
+* `cargo test -p qbind-node --test run_351_production_live_epoch_transition_authority_activation_post_final_execution_confirmation_tests` — **939 passed; 0 failed** (rc=0).
+* `cargo test -p qbind-node --test run_349_production_live_epoch_transition_authority_activation_final_execution_tests` — **732 passed; 0 failed** (rc=0).
+* `cargo test -p qbind-node --test run_347_production_live_epoch_transition_authority_activation_execution_preparation_tests` — **732 passed; 0 failed** (rc=0).
+* `cargo test -p qbind-node --test run_345_production_live_epoch_transition_authority_activation_authorization_tests` — **700 passed; 0 failed** (rc=0).
+* `cargo test -p qbind-node --test run_343_production_live_epoch_transition_authority_lifecycle_post_completion_attestation_tests` — **700 passed; 0 failed** (rc=0).
+* `cargo test -p qbind-node --lib pqc_authority` — **164 passed; 0 failed** (rc=0).
+* `cargo test -p qbind-node --lib` — full library suite **1377 passed; 0 failed** (rc=0).
 * `cargo build -p qbind-node --release` — succeeded.
 * `cargo build -p qbind-node --example run_354_production_live_epoch_transition_authority_activation_execution_sink_prewrite_release_binary_helper --release` — succeeded.
 
 The harness `summary.txt` records `verdict: PASS` for the full Run 353 → ancestor chain of boundary test suites plus
-`--lib pqc_authority` and the full `--lib` suite. The committed `summary.txt` is treated as the final harness result
-for Run 354.
+`--lib pqc_authority` and the full `--lib` suite, with real per-target `rc=0` results and no skip marker. The committed
+`summary.txt` is treated as the final harness result for Run 354.
 
 ## 13. Security scans
 
@@ -196,10 +199,11 @@ for Run 354.
   (`crates/qbind-node/examples/run_354_..._helper.rs`), the harness script
   (`scripts/devnet/run_354_..._release_binary.sh`), the archive tracked files (`README.md`, `summary.txt`, `.gitignore`),
   this canonical evidence doc, the C4/C5 criteria doc, and the five narrative docs. **No secrets were found.**
-* **CodeQL:** the `codeql_checker` tool was invoked for the Run 354 change set (declared **non-trivial**, because the
-  change set adds a new compiled Rust example and a bash harness script). Its result is recorded verbatim in section 14;
-  where CodeQL performs no analysis (e.g. a skipped result due to database size), **no CodeQL coverage is claimed for
-  Run 354** and the skipped result is explicitly **not** described as clean coverage.
+* **CodeQL:** the `codeql_checker` tool was invoked for the Run 354 evidence-reconciliation change set. Its result is
+  recorded verbatim in section 14 (`Skipped: all changes are trivial.` for this doc-only reconciliation diff; a prior
+  invocation over the original example+harness change set was skipped for database size). In every case CodeQL performed
+  no static analysis of Run 354 code, so **no CodeQL coverage is claimed for Run 354** and no skipped result is described
+  as clean coverage.
 
 ## 14. C4/C5 matrix status
 
@@ -208,11 +212,15 @@ row is **Green (for scope)** — for release-binary-evidenced
 live-epoch-transition-authority-activation-execution-sink-prewrite-boundary behavior only (source/test in Run 353; release-binary evidence
 positive in Run 354). MainNet authority rotation/revocation remains **Red**. No prior Green-for-scope row is weakened.
 
-**CodeQL provenance (recorded verbatim).** The `codeql_checker` tool was invoked for the Run 354 change set, declared
-**non-trivial** (the change set adds a new compiled Rust example and a bash harness script). The tool's verbatim result
-is recorded verbatim as: `Analysis Result for 'rust'. Found 0 alerts: - rust: Analysis was skipped because the database size is too large.`. Where a reported "0 alerts" is a consequence of the analysis being **skipped**
-(a tool/infrastructure limitation — the CodeQL database exceeded its size limit), it is **not** a clean scan and **no CodeQL coverage is claimed for Run 354**. Secret
-scanning (a separate tool) did run over all changed files and found no secrets.
+**CodeQL provenance (recorded verbatim).** The `codeql_checker` tool was invoked for the Run 354 evidence-reconciliation
+change set. Because this reconciliation change set is **documentation/evidence-only** (the harness-regenerated
+`summary.txt` with real per-target `rc=0` results and this evidence doc's updated test-results section — no production
+source, test, or build code was modified), the tool's verbatim result is: `Skipped: all changes are trivial.` A prior
+invocation over the original Run 354 change set (which added the compiled Rust example and the bash harness) returned,
+verbatim: `Analysis Result for 'rust'. Found 0 alerts: - rust: Analysis was skipped because the database size is too
+large.` In both cases CodeQL performed **no** static analysis of Run 354 code — one skipped as trivial (doc-only diff),
+the other skipped due to database size — so **no CodeQL coverage is claimed for Run 354** and neither skipped result is
+described as a clean scan. Secret scanning (a separate tool) did run over all changed files and found no secrets.
 
 ## 15. Honest limitations
 
