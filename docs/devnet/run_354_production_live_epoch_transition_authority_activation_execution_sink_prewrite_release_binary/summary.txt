@@ -1,0 +1,45 @@
+Run 354 — release-binary evidence for the Run 353 live epoch-transition authority-activation execution-sink prewrite / sink-commit-readiness boundary
+git_commit: a7469d3d03be35e23d57774ebe48df4787fdee16
+git_branch: copilot/run-354-task
+git_status: dirty
+
+build:
+  rustc_version:      rustc 1.97.1 (8bab26f4f 2026-07-14)
+  cargo_version:      cargo 1.97.1 (c980f4866 2026-06-30)
+  host:               Linux runnervmzvulz 6.17.0-1022-azure #22-Ubuntu SMP Mon Jul 27 17:24:03 UTC 2026 x86_64 x86_64 x86_64 GNU/Linux
+  qbind_node_sha256:  f916af6db4cd1d8575b02f750ad4759c3470c2a2027d532cde50ca06e5b22990
+  helper_354_sha256:  51b7a7a4539341663eb78add60721773113e12bd5d11aed2d5899bbde2e2e789
+
+helper_summary: /home/runner/work/QBIND/QBIND/docs/devnet/run_354_production_live_epoch_transition_authority_activation_execution_sink_prewrite_release_binary/helper_evidence/run_354/helper_summary.txt
+  run=354
+  boundary=crates/qbind-node/src/pqc_production_live_epoch_transition_authority_activation_execution_sink_prewrite.rs::ProductionLiveEpochTransitionAuthorityActivationExecutionSinkPrewriteExecutor
+  registered_cases=175
+  table accepted_compatible pass=29 fail=0
+  table determinism pass=1 fail=0
+  table mainnet_refusal pass=2 fail=0
+  table rejection_fail_closed pass=136 fail=0
+  table replay_recovery_idempotency pass=7 fail=0
+  total_pass=175
+  total_fail=0
+  verdict=PASS
+
+deterministic_digests: stable across two independent helper invocations
+  authority_activation_execution_sink_prewrite_id=9867fd1e4b3123665624b84acfad8fd17e174e8c5bf6b2a79795fb7bbd4855c6
+  request_id=7b6ae7e62ac7f3697434223d7e42934b658d1a9c537651ad7867474cfe36984a
+  content_digest=d4e1913e052e5772b6d5c1c7fc2e408ff609fb514e35e8f28103af9e61b95043
+  authority_activation_execution_sink_prewrite_digest=d4e1913e052e5772b6d5c1c7fc2e408ff609fb514e35e8f28103af9e61b95043
+  transcript_digest=2ef0ac0d86b387cd31d409eeccd617e86a3da88d67083e1cefa865ee20352663
+  second_authority_activation_execution_sink_prewrite_id=9867fd1e4b3123665624b84acfad8fd17e174e8c5bf6b2a79795fb7bbd4855c6
+  second_request_id=7b6ae7e62ac7f3697434223d7e42934b658d1a9c537651ad7867474cfe36984a
+  second_content_digest=d4e1913e052e5772b6d5c1c7fc2e408ff609fb514e35e8f28103af9e61b95043
+  second_authority_activation_execution_sink_prewrite_digest=d4e1913e052e5772b6d5c1c7fc2e408ff609fb514e35e8f28103af9e61b95043
+  second_transcript_digest=2ef0ac0d86b387cd31d409eeccd617e86a3da88d67083e1cefa865ee20352663
+
+release_binary_scenarios: S1_help=0 S2=1 S3=1 S4=1 S5_no_selector=2 S6_default_parse=1
+reachability: combined/source/helper/module/entry/taxonomy/boundary greps passed
+c4c5_taxonomy: passed (57 phrases; prior boundary rows Green-for-scope only; live-epoch-transition-authority-activation-execution-sink-prewrite row Green-for-scope; Red rows unchanged; Full C4 OPEN; C5 OPEN)
+denylist: passed (90 patterns)
+tests:
+  tests:skipped(RUN_354_SKIP_TESTS=1)
+
+verdict: PASS (release-binary evidence only; live epoch-transition authority-activation-execution-sink-prewrite Green-for-scope; MainNet authority rotation/revocation Red; Full C4 OPEN; C5 OPEN)
