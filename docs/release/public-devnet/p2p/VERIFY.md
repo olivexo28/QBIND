@@ -53,16 +53,18 @@ claim C4/C5 closure, and must not mark M4 Green. These greps should return **no*
 
 ```bash
 P2PDOCS="docs/release/public-devnet/p2p"
-# 3. launch-ready — must only appear as "NOT launch-ready"
-grep -rniE 'launch[- ]ready' "$P2PDOCS" | grep -viE 'not[- ]*launch[- ]?ready' || echo "OK: no positive launch-ready claim"
-# 4. TestNet readiness — must not be claimed
-grep -rniE 'testnet[- ]?(ready|readiness)' "$P2PDOCS" | grep -viE 'no |not |before |remains' || echo "OK: no TestNet readiness claim"
-# 5. MainNet readiness — must not be claimed
-grep -rniE 'mainnet[- ]?(ready|readiness)' "$P2PDOCS" | grep -viE 'no |not |remains|red' || echo "OK: no MainNet readiness claim"
-# 6. C4/C5 closure — must not be claimed
-grep -rniE 'C4|C5' "$P2PDOCS" | grep -iE 'clos' | grep -viE 'no |not |open|remains' || echo "OK: no C4/C5 closure claim"
-# 7. M4 Green — must not be marked
-grep -rniE 'M4' "$P2PDOCS" | grep -iE 'green' | grep -viE 'not|before|remains|yellow' || echo "OK: M4 not marked Green"
+# Strip markdown emphasis so negations like "**not**" are matched by word filters.
+strip() { grep -rni "$@" "$P2PDOCS" | grep -v 'VERIFY.md' | sed -E 's/[*_>`]/ /g'; }
+# 3. launch-ready — must only appear as a negation ("NOT launch-ready" / "launch-blocking")
+strip -E 'launch[- ]ready' | grep -viE 'not +launch[- ]?ready|launch-blocking' || echo "OK: no positive launch-ready claim"
+# 4. TestNet readiness — must only appear as a negation/disclaimer
+strip -E 'testnet[- ]?(ready|readiness)' | grep -viE '\b(no|not|nothing|neither|nor|implies|before|remains)\b|readiness claim' || echo "OK: no TestNet readiness claim"
+# 5. MainNet readiness — must only appear as a negation/disclaimer
+strip -E 'mainnet[- ]?(ready|readiness)' | grep -viE '\b(no|not|nothing|neither|nor|implies|remains|red)\b|readiness claim' || echo "OK: no MainNet readiness claim"
+# 6. C4/C5 closure — must only appear as "OPEN"/negation
+strip -E 'C4|C5' | grep -iE 'clos' | grep -viE '\b(no|not|nothing|open|remains)\b' || echo "OK: no C4/C5 closure claim"
+# 7. M4 Green — must not be marked (allow future-conditional "moves Green only when …")
+strip -E 'M4' | grep -iE 'green' | grep -viE 'not|before|remains|yellow|only when|moves green only|can move' || echo "OK: M4 not marked Green"
 ```
 
 Expected: an `OK: …` line for each check (no offending lines printed).
