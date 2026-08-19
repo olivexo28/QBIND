@@ -1,0 +1,222 @@
+Run 356 — Canonical public DevNet genesis package + network parameters + genesis hash publication
+
+Continue QBIND after accepted Run 355.
+
+Current state:
+Run 355 is accepted as PASS / public-DevNet-readiness-audit positive.
+
+Run 355 introduced the public DevNet release-readiness track as a separate track from C4/C5 closure and from the internal authority-lifecycle boundary chain. Public DevNet is NOT launch-ready. Among 20 public DevNet must-haves, only M16 incident response is Green. M3 reproducibility/BuildID and M4 seed/bootnodes are Red. M1 genesis package, M19 network parameter publication, and M20 genesis hash publication are Yellow.
+
+Full C4 remains OPEN. C5 remains OPEN. MainNet authority rotation/revocation remains Red. Run 353/354 remains Green-for-scope only and is not wired into runtime.
+
+Primary objective:
+Close or narrow the highest-leverage Yellow public DevNet must-haves:
+
+- M1 canonical DevNet genesis package;
+- M19 canonical network parameter publication;
+- M20 canonical genesis hash publication.
+
+Run 356 must publish a canonical public DevNet genesis package and the associated network-parameter and genesis-hash artifacts in the repository, with verification evidence.
+
+Strict scope:
+Docs / artifact / verification only.
+
+No public DevNet launch claim.
+No seed-node deployment.
+No bootnode deployment.
+No faucet.
+No RPC gateway.
+No explorer.
+No status page.
+No MainNet enablement.
+No public TestNet readiness claim.
+No C4 closure.
+No C5 closure.
+No runtime authority-lifecycle wiring.
+No validator-set mutation.
+No production epoch transition.
+No production execution-sink write.
+No new public CLI flag unless an already-existing CLI verifier is being documented; do not add one in this run.
+
+Important:
+Run 356 may add static DevNet genesis artifacts under docs/release or docs/devnet if those artifacts are generated from existing code or existing fixtures. It must not silently invent production authority material. Any key, root, validator, or signer material included in the DevNet package must be clearly labeled DevNet-only / no value / resettable / not MainNet.
+
+Required investigation:
+Inspect the repository for existing DevNet genesis generation and verification surfaces, including at minimum:
+
+- `crates/qbind-genesis/`
+- `crates/qbind-ledger/src/genesis.rs`
+- `crates/qbind-node/src/pqc_boot_genesis.rs`
+- `crates/qbind-node/src/cli.rs`
+- existing `--genesis-path`
+- existing `--print-genesis-hash`
+- existing `--expect-genesis-hash` or equivalent expected-hash validation surface
+- existing DevNet fixtures and helper-generated genesis material
+- existing chain/environment constants
+- existing DevNet operational guide
+- Run 355 readiness criteria
+
+Required implementation:
+Add a canonical public DevNet genesis package directory, preferably:
+
+`docs/release/public-devnet/genesis/`
+
+Minimum tracked files:
+
+1. `docs/release/public-devnet/genesis/README.md`
+2. `docs/release/public-devnet/genesis/devnet-genesis.json`
+3. `docs/release/public-devnet/genesis/devnet-genesis.sha256`
+4. `docs/release/public-devnet/genesis/devnet-network-parameters.md`
+5. `docs/release/public-devnet/genesis/VERIFY.md`
+
+If the repository already has a better canonical artifact location, use it and document why.
+
+Add canonical evidence:
+
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_356.md`
+
+Update narrowly:
+
+- `docs/release/QBIND_PUBLIC_DEVNET_READINESS_CRITERIA.md`
+- `docs/protocol/QBIND_C4_C5_CLOSURE_CRITERIA.md`
+- `docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md`
+- `docs/protocol/QBIND_GOVERNANCE_EXECUTION_RUNTIME_SURFACE_AUDIT.md`
+- `docs/ops/QBIND_PQC_TRUST_LIFECYCLE_RUNBOOK.md`
+- `docs/whitepaper/contradiction.md`
+
+Required genesis package content:
+The package must document:
+
+1. Environment: DevNet only.
+2. Chain ID.
+3. Genesis hash.
+4. Genesis file SHA-256.
+5. Network name.
+6. Consensus/network parameters that are safe to publish.
+7. Validator set included in the genesis package, if any.
+8. Council / allocation / monetary parameters, if any.
+9. PQC trust-root / signing-key status.
+10. Whether any authority/root/signing material is fixture/dev-only.
+11. Resettable/no-value safety label.
+12. Operator verification steps.
+13. Exact command to print or verify the genesis hash.
+14. Exact command to boot with the genesis file, if already supported.
+15. What is still missing before public DevNet launch.
+
+Required verification evidence:
+Run and record the exact commands used to verify:
+
+1. The genesis file is valid JSON.
+2. The genesis file is parseable by existing QBIND code or existing CLI where supported.
+3. The genesis hash printed by QBIND tooling matches the published hash.
+4. The SHA-256 in `devnet-genesis.sha256` matches the committed `devnet-genesis.json`.
+5. The network parameters document matches the values in the genesis file and/or source constants.
+6. MainNet is not affected.
+7. TestNet is not affected.
+8. No public DevNet launch claim is made.
+
+If an existing CLI cannot verify one of these yet, record the gap honestly and keep the corresponding readiness item Yellow rather than Green.
+
+Readiness matrix update rules:
+In `QBIND_PUBLIC_DEVNET_READINESS_CRITERIA.md`:
+
+- Move M1 to Green only if the committed genesis artifact is canonical, verified, and operator-facing.
+- Move M19 to Green only if network parameters are published as a canonical operator artifact and checked against source/genesis.
+- Move M20 to Green only if the canonical genesis hash is published and verifiable by an operator command.
+- If any of the above are partial, keep the item Yellow and state the exact missing evidence.
+- Do not alter M3 or M4 unless this run genuinely closes them. M3 reproducibility/BuildID and M4 seed/bootnodes likely remain Red.
+- Public DevNet should remain NOT launch-ready unless every must-have is Green. It should almost certainly remain not launch-ready after Run 356.
+
+Required safety label:
+Every public-facing artifact in the package must include:
+
+- experimental;
+- resettable;
+- no value;
+- no MainNet readiness claim;
+- no C4/C5 closure claim.
+
+Required tests:
+At minimum:
+
+- `cargo test -p qbind-node --lib`
+
+Also run any existing genesis-specific tests or CLI checks discovered during investigation. Examples may include, if valid in the repo:
+
+- `cargo test -p qbind-ledger genesis`
+- `cargo test -p qbind-genesis`
+- `cargo run -p qbind-node --release -- --genesis-path <path> --print-genesis-hash`
+
+Use the actual repository-supported commands. If a suggested command is invalid, do not force it; record the real substitute and reason.
+
+Security:
+Run secret scanning over all changed files, especially `devnet-genesis.json`.
+
+If genesis artifacts include private keys, private signing material, mnemonics, seed phrases, tokens, credentials, API keys, or production-like secrets, the run must fail or mark Partial-positive and remove them.
+
+Public DevNet fixtures may include public keys, validator IDs, public addresses, and non-secret parameters only. Any fixture/dev-only public material must be clearly labeled.
+
+CodeQL:
+Run CodeQL only if source code changes. If this is docs/artifact-only, record that CodeQL is not meaningful for the Run 356 diff and that no CodeQL coverage is claimed. If CodeQL is invoked and skipped/timed out/unavailable/database-too-large, record the exact result and do not call it clean.
+
+Provenance:
+Record in `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_356.md`:
+
+- git commit;
+- branch;
+- clean/dirty state;
+- artifact paths;
+- artifact SHA-256;
+- genesis hash;
+- commands run;
+- test results;
+- security scan result;
+- readiness matrix deltas.
+
+Do not leave unexplained `git_status: dirty`.
+
+C4/C5:
+Full C4 remains OPEN.
+C5 remains OPEN.
+MainNet authority rotation/revocation remains Red.
+Run 353/354 remains Green-for-scope only.
+Public DevNet readiness remains a separate release-readiness track.
+
+Expected verdict:
+PASS / public-DevNet-genesis-publication positive if the canonical genesis artifact, genesis hash, network parameters, verification docs, evidence, readiness-matrix updates, tests, secret scan, and provenance all land.
+
+Partial-positive if the artifacts land but one or more of M1/M19/M20 cannot honestly move Green due to missing verifier support or incomplete operator-facing evidence.
+
+Unacceptable:
+- claiming public DevNet launch-ready unless all must-haves are Green;
+- publishing private keys or secrets;
+- inventing production authority material;
+- claiming TestNet readiness;
+- claiming MainNet readiness;
+- closing C4 or C5;
+- marking MainNet authority rotation/revocation Green;
+- adding runtime authority-lifecycle wiring;
+- adding a public CLI flag;
+- deploying seed nodes, faucet, RPC, explorer, or status page in this run;
+- weakening prior Green-for-scope boundaries;
+- hiding skipped CodeQL;
+- using marketing language.
+
+Final response format:
+1. Exact verdict.
+2. Files changed.
+3. Genesis package contents.
+4. Published network parameters.
+5. Published genesis hash and SHA-256.
+6. Verification commands and results.
+7. Readiness matrix deltas for M1/M19/M20.
+8. Current public DevNet readiness status.
+9. Remaining public DevNet blockers.
+10. Public TestNet blockers.
+11. MainNet blockers.
+12. C4/C5 status.
+13. Tests run.
+14. Security scans.
+15. Provenance.
+16. Honest limitations.
+17. Suggested Run 357 next step.
