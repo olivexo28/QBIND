@@ -1,6 +1,7 @@
 # QBIND Public DevNet Readiness Criteria and Gap Matrix
 
-**Status:** Canonical (Run 355 deliverable — public network release-readiness track, kickoff).
+**Status:** Canonical (Run 355 deliverable — public network release-readiness track, kickoff; updated Run 356 —
+M1/M19/M20 moved to Green with the published DevNet genesis package).
 **Track:** Public network release-readiness. This is a **separate track** from the internal
 authority-lifecycle boundary track (Run 130–354) and from C4/C5 closure.
 **Scope of this document:** source/docs/test-only audit and gap matrix. It introduces public DevNet
@@ -81,7 +82,7 @@ This label is a **must-have** and is a launch precondition, not a post-launch ad
 
 Each item must be genuinely **Green** and evidenced before public DevNet launch. See §10/§16 matrix for status.
 
-- [ ] M1. Canonical DevNet genesis package published (file + hash + parameters).
+- [x] M1. Canonical DevNet genesis package published (file + hash + parameters). — **Green (Run 356)**; see `docs/release/public-devnet/genesis/`.
 - [ ] M2. Release binary provenance published (source commit, build inputs, SHA-256).
 - [ ] M3. Release binary reproducibility / BuildID documented (deterministic or documented non-determinism).
 - [ ] M4. Seed/bootnode list published for public join.
@@ -99,8 +100,8 @@ Each item must be genuinely **Green** and evidenced before public DevNet launch.
 - [ ] M16. Incident-response process published.
 - [ ] M17. Public documentation (how to run a node) sufficient for unassisted external bring-up.
 - [ ] M18. User-facing disclaimers published (the §3 safety label).
-- [ ] M19. Network parameter publication (chain id, env scope, consensus/timing params).
-- [ ] M20. Genesis hash publication (canonical hash operators verify with `--expect-genesis-hash`).
+- [x] M19. Network parameter publication (chain id, env scope, consensus/timing params). — **Green (Run 356)**; see `docs/release/public-devnet/genesis/devnet-network-parameters.md`.
+- [x] M20. Genesis hash publication (canonical hash operators verify with `--expect-genesis-hash`). — **Green (Run 356)**; hash `0x48b3a862befe50e31bad5e1e11ba1ad282dc65723b1989e9ce2091b4af18145f`, see `docs/release/public-devnet/genesis/VERIFY.md`.
 
 ---
 
@@ -196,7 +197,7 @@ Legend: 🟢 Green (evidenced enough for public DevNet) · 🟡 Yellow (partial 
 
 | Item | Status | Basis |
 |------|--------|-------|
-| M1 genesis package | 🟡 | Embedded/builder + test fixtures exist; no canonical public genesis published. |
+| M1 genesis package | 🟢 | **Run 356:** canonical `docs/release/public-devnet/genesis/devnet-genesis.json` committed, hash + SHA-256 published + operator-verifiable. |
 | M2 release provenance | 🟡 | Per-run SHA-256 exists; no published release-provenance record. |
 | M3 reproducibility / BuildID | 🔴 | No reproducible-build result or BuildID documented. |
 | M4 seed/bootnodes | 🔴 | Static `--p2p-peer` only; no published seed list; no discovery. |
@@ -214,8 +215,8 @@ Legend: 🟢 Green (evidenced enough for public DevNet) · 🟡 Yellow (partial 
 | M16 incident response | 🟢 | `QBIND_INCIDENT_RESPONSE.md` comprehensive; DevNet scoping is a small doc note. |
 | M17 public documentation | 🟡 | Operational guide exists; README minimal; no external quickstart. |
 | M18 user-facing disclaimers | 🟡 | §3 label defined here; not yet in operator-facing release material. |
-| M19 network parameter publication | 🟡 | Params exist in code; not published as a canonical operator artifact. |
-| M20 genesis hash publication | 🟡 | Hash computable via CLI; no canonical published hash. |
+| M19 network parameter publication | 🟢 | **Run 356:** `devnet-network-parameters.md` published as canonical operator artifact, checked against genesis + `QBIND_DEVNET_CHAIN_ID`. |
+| M20 genesis hash publication | 🟢 | **Run 356:** canonical hash `0x48b3a862…af18145f` published + verifiable via `--print-genesis-hash` / `--expect-genesis-hash`. |
 | S1 snapshot / backup / restore | 🟡 | Creation supported; restore path partial. |
 | S2 data retention | 🟡 | Baseline exists; DevNet retention not formalized. |
 | S3 upgrade procedure | 🟡 | Release track spec exists; no staged upgrade runbook. |
@@ -245,7 +246,7 @@ Legend: 🟢 Green (evidenced enough for public DevNet) · 🟡 Yellow (partial 
 
 | Item | Status | Next-run recommendation |
 |------|--------|--------------------------|
-| M1 | 🟡 | Run: publish canonical DevNet genesis artifact + record hash (docs/genesis-publication run). |
+| M1 | 🟢 | **Done (Run 356):** canonical DevNet genesis artifact published + hash recorded (`docs/release/public-devnet/genesis/`). |
 | M2 | 🟡 | Run: emit a published release-provenance record (commit + toolchain + build cmd + SHA-256). |
 | M3 | 🔴 | Run: attempt reproducible build; document result or bounded non-determinism + BuildID. |
 | M4 | 🔴 | Run: define + publish a seed/bootnode list format and a placeholder DevNet seed list (docs-only). |
@@ -262,22 +263,22 @@ Legend: 🟢 Green (evidenced enough for public DevNet) · 🟡 Yellow (partial 
 | M15 | 🟡 | Run: publish DevNet reset policy (trigger conditions, notice, audit trail). |
 | M17 | 🟡 | Run: publish external how-to-run-a-node (fold with M5). |
 | M18 | 🟡 | Run: fold §3 safety label into operator-facing release material. |
-| M19 | 🟡 | Run: publish canonical network-parameter artifact (fold with M1). |
-| M20 | 🟡 | Run: publish canonical genesis hash (fold with M1). |
+| M19 | 🟢 | **Done (Run 356):** canonical network-parameter artifact published (`devnet-network-parameters.md`). |
+| M20 | 🟢 | **Done (Run 356):** canonical genesis hash published + operator-verifiable (`VERIFY.md`). |
 
 Note: several Yellow items can be closed by a small number of consolidated documentation/publication runs
-(genesis+params+hash together; onboarding+identity+key-management+quickstart together;
+(genesis+params+hash landed in Run 356; remaining: onboarding+identity+key-management+quickstart together;
 trust-root bootstrap+PQC guidance together; monitoring+alerting together; port posture+admission+abuse together).
 
 ---
 
 ## 12. Public DevNet launch blocker summary
 
-Public DevNet is **NOT yet launch-ready**. Every must-have except **M16 (incident response)** is currently
-**Yellow or Red**. The launch blockers are, at minimum:
+Public DevNet is **NOT yet launch-ready**. As of **Run 356**, the Green must-haves are **M1, M16, M19, M20**;
+every other must-have remains **Yellow or Red**. The launch blockers are, at minimum:
 
 - **Red:** M3 (reproducibility/BuildID), M4 (seed/bootnodes).
-- **Yellow (must reach Green):** M1, M2, M5, M6, M7, M8, M9, M10, M11, M12, M13, M14, M15, M17, M18, M19, M20.
+- **Yellow (must reach Green):** M2, M5, M6, M7, M8, M9, M10, M11, M12, M13, M14, M15, M17, M18.
 
 Because at least one must-have is not Green, this document does **not** mark public DevNet ready.
 
@@ -318,7 +319,7 @@ Columns: item · release stage · category · status · evidence source · block
 
 | Item | Stage | Category | Status | Evidence source | Blocker | Risk if launched without | Next run |
 |------|-------|----------|--------|-----------------|---------|--------------------------|----------|
-| genesis package | DevNet | network | 🟡 | `qbind-genesis`, `pqc_boot_genesis.rs`, run fixtures | No canonical published genesis | Operators join divergent chains | Publish genesis+params+hash |
+| genesis package | DevNet | network | 🟢 | `docs/release/public-devnet/genesis/` (Run 356) | Published + verified | Operators join divergent chains | Done (Run 356) |
 | release binary provenance | DevNet | binary | 🟡 | `build.sh`, per-run `artifact_sha256.txt` | No published provenance record | Unverifiable binaries | Emit provenance record |
 | release reproducibility / SHA / BuildID | DevNet | binary | 🔴 | none | No reproducible/BuildID result | Cannot attest what operators run | Reproducible-build run |
 | seed nodes / bootnodes | DevNet | network | 🔴 | CLI `--p2p-peer` | No published seeds/discovery | Outsiders cannot join | Publish seed-list format + list |
@@ -345,8 +346,8 @@ Columns: item · release stage · category · status · evidence source · block
 | rollback procedure | DevNet | ops | 🟡 | authority reset only | No staged rollback runbook | Unrecoverable bad upgrade | Should-have run |
 | public documentation | DevNet | docs | 🟡 | `README.md`, operational guide | No external how-to-run | Operators cannot self-serve | Public docs run |
 | user-facing disclaimers | DevNet | docs | 🟡 | this doc §3 | Not in release material | Misperceived value/stability | Publish label |
-| network parameter publication | DevNet | network | 🟡 | `primitives.rs`, `node_config.rs` | Not published as artifact | Config divergence | Publish params |
-| genesis hash publication | DevNet | network | 🟡 | `--print-genesis-hash` | No canonical hash published | Chain divergence | Publish hash |
+| network parameter publication | DevNet | network | 🟢 | `devnet-network-parameters.md` (Run 356) | Published + checked vs source | Config divergence | Done (Run 356) |
+| genesis hash publication | DevNet | network | 🟢 | `--print-genesis-hash` + `VERIFY.md` (Run 356) | Canonical hash published | Chain divergence | Done (Run 356) |
 | DevNet authority lifecycle | DevNet | governance | 🟡 | authority-lifecycle evidence runs | Green-for-scope only | Overclaiming readiness | Keep scoped |
 | governance proof status | TestNet | governance | 🟡 | governance evidence runs, surface audit | Scale hardening deferred | Overclaiming readiness | TestNet |
 | validator-set rotation status | TestNet | governance | 🟡 | Run 303–310 boundaries | Green-for-scope only; not live | Overclaiming readiness | TestNet |
@@ -360,10 +361,12 @@ Columns: item · release stage · category · status · evidence source · block
 
 ## 17. Summary
 
-Public DevNet readiness is now a **tracked, evidence-grounded classification**. The audit lands cleanly, but
-public DevNet is **not launch-ready**: only **incident response (M16)** is Green among the must-haves; all other
-must-haves are Yellow or Red (notably **Red** for reproducibility/BuildID and seed/bootnodes). C4 and C5 remain
-**OPEN**, MainNet authority rotation/revocation remains **Red**, and the Run 353/354 boundary remains
-Green-for-scope only. The most efficient path forward is a small series of consolidated documentation/publication
-runs (genesis+params+hash; onboarding+identity+key-management+quickstart+disclaimers; trust-root bootstrap+PQC
-guidance; monitoring+alerting; port-posture+admission+abuse; reset policy; release provenance/reproducibility).
+Public DevNet readiness is a **tracked, evidence-grounded classification**. As of **Run 356**, the canonical
+DevNet genesis package, network parameters, and genesis hash are published and operator-verifiable, moving
+**M1, M19, M20** to Green (joining **M16 incident response**). Public DevNet is still **not launch-ready**: all
+other must-haves remain Yellow or Red (notably **Red** for reproducibility/BuildID (M3) and seed/bootnodes (M4)).
+C4 and C5 remain **OPEN**, MainNet authority rotation/revocation remains **Red**, and the Run 353/354 boundary
+remains Green-for-scope only. The most efficient path forward is a small series of consolidated
+documentation/publication runs (onboarding+identity+key-management+quickstart+disclaimers; trust-root bootstrap+PQC
+guidance; monitoring+alerting; port-posture+admission+abuse; reset policy; release provenance/reproducibility;
+seed/bootnode list).
