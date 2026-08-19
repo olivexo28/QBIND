@@ -11,8 +11,9 @@ run from the repository root.
 ## 0. Public DevNet is NOT launch-ready yet
 
 **Public DevNet is NOT launch-ready.** There are **no** externally reachable seeds
-(must-have **M4** is Yellow and launch-blocking) and **no** documented release-binary
-reproducibility / BuildID (must-have **M3** is Red). This quickstart lets you build and run a node
+(must-have **M4** is Yellow and launch-blocking) and other must-haves (M6–M15) remain unresolved.
+Release-binary reproducibility / BuildID (must-have **M3**) is **Green for same-host scope** after
+Run 359 (see §3). This quickstart lets you build and run a node
 **locally / in dry-run**; it does **not** let you join a live public network, because no live public
 network exists yet. See `docs/release/QBIND_PUBLIC_DEVNET_READINESS_CRITERIA.md` and §11 below.
 
@@ -215,9 +216,12 @@ Run 358 changes **no** P2P wire format, peer-admission logic, or default network
 Public DevNet remains **NOT launch-ready**. Outstanding (non-exhaustive; see
 `docs/release/QBIND_PUBLIC_DEVNET_READINESS_CRITERIA.md`):
 
-- **M3 — release-binary reproducibility / BuildID:** **Red**.
+- **M3 — release-binary reproducibility / BuildID:** **Green (same-host scope, Run 359)**; see
+  `docs/release/public-devnet/binary/` (`RELEASE_PROVENANCE.md`, `REPRODUCIBILITY.md`, `BUILDINFO.md`,
+  `qbind-node.sha256`, `VERIFY.md`). Cross-host / SLSA / signed-release scope is **not** claimed.
 - **M4 — live seed/bootnode list + external reachability evidence:** **Yellow / launch-blocking**
   (format + placeholder only).
 - External reachability, status page, alerting, and a seed-node runbook: still outstanding.
+- Other must-haves (M6–M15) remain unresolved (Yellow/Red).
 
 Because at least one must-have is not Green, public DevNet is **not** launch-ready.

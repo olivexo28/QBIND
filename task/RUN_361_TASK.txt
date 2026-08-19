@@ -1,0 +1,333 @@
+Run 361 — Public DevNet abuse/DoS hardening: operator-configurable peer rate limits + connection-rate limiter boundary
+
+Continue QBIND after accepted Run 360.
+
+Current state:
+Run 360 is accepted as PASS / public-DevNet-P2P-posture positive.
+
+Run 356 published the canonical public DevNet genesis package.
+Run 357 published the canonical seed-list schema and placeholder seed-list.
+Run 358 published the external operator onboarding package.
+Run 359 published the release-binary provenance + reproducibility / BuildID package.
+Run 360 published the P2P exposure / peer-admission / abuse-DoS posture package.
+
+Current public DevNet readiness state:
+- M1 canonical DevNet genesis package: Green.
+- M2 release binary provenance: Green.
+- M3 release binary reproducibility / BuildID: Green for same-host scope.
+- M5 validator/full-node onboarding quickstart: Green.
+- M10 public P2P port posture: Green.
+- M11 peer admission policy: Green.
+- M16 incident response: Green.
+- M17 public how-to-run-a-node documentation: Green.
+- M18 user-facing disclaimers: Green.
+- M19 network parameter publication: Green.
+- M20 genesis hash publication: Green.
+- M4 seed/bootnodes: Yellow and launch-blocking; no live seeds or reachability evidence.
+- M6 validator identity guidance: Yellow/Partial; no stable operator-facing identity-generation command.
+- M7–M9 remain Yellow.
+- M12 abuse / DoS protections: Yellow/Partial.
+- M13–M15 remain Yellow.
+
+Run 360 recorded the exact M12 gap:
+- existing per-peer inbound-message token-bucket rate limiter is enabled by default;
+- current defaults are hardcoded at 1000 messages/sec + 100 burst with 16 shards;
+- thresholds are not operator-configurable through CLI/config;
+- limiter fails open on lock poisoning;
+- no per-connection / global inbound-connection-rate limiter is exposed in `qbind-node`.
+
+Full C4 remains OPEN.
+C5 remains OPEN.
+MainNet authority rotation/revocation remains Red.
+Run 353/354 remains Green-for-scope only and is not wired into runtime.
+Public DevNet readiness remains a separate release-readiness track.
+
+Primary objective:
+Land a source/test-only abuse/DoS hardening boundary that makes public DevNet rate-limit posture operator-configurable and introduces a bounded inbound connection-rate limiter boundary, without changing default behavior unless explicitly configured.
+
+This run should move M12 toward Green at the source/test level only:
+- source/test boundary lands in Run 361;
+- release-binary evidence is deferred to Run 362;
+- M12 should move Yellow → Yellow/stronger or Red → Yellow? Do not mark Green until release-binary evidence exists unless the readiness criteria explicitly allow source/test Green. Prefer Red/Yellow → Yellow with Green deferred to Run 362.
+
+Strict scope:
+Source/test boundary only.
+
+No public DevNet launch.
+No live seed-node deployment.
+No bootnode deployment.
+No faucet.
+No RPC gateway.
+No explorer.
+No status page.
+No MainNet enablement.
+No public TestNet readiness claim.
+No C4 closure.
+No C5 closure.
+No runtime authority-lifecycle wiring.
+No validator-set mutation.
+No production epoch transition.
+No production execution-sink write.
+No P2P wire-format change.
+No peer-admission weakening.
+No trust-bundle behavior weakening.
+No default-open public port.
+No fake live infrastructure.
+No M4 Green.
+No M6 Green.
+No public DevNet launch-ready claim.
+
+Required investigation:
+Inspect the current abuse/DoS and P2P surfaces, including at minimum:
+
+- `crates/qbind-node/src/peer_rate_limiter.rs`
+- `crates/qbind-node/src/p2p_tcp.rs`
+- `crates/qbind-node/src/p2p_inbound.rs`
+- `crates/qbind-node/src/cli.rs`
+- `crates/qbind-node/src/node_config.rs`
+- `crates/qbind-node/src/metrics.rs`
+- `crates/qbind-node/src/metrics_http.rs`
+- any existing connection tracking / peer registry / dial retry code
+- Run 360 docs:
+  - `docs/release/public-devnet/p2p/ABUSE_DOS_POSTURE.md`
+  - `docs/release/public-devnet/p2p/P2P_PORT_POSTURE.md`
+  - `docs/release/public-devnet/p2p/PEER_ADMISSION_POLICY.md`
+  - `docs/release/public-devnet/p2p/VERIFY.md`
+- `docs/release/QBIND_PUBLIC_DEVNET_READINESS_CRITERIA.md`
+- `docs/ops/QBIND_MONITORING_AND_ALERTING_BASELINE.md`, if present
+- `docs/ops/QBIND_PQC_TRUST_LIFECYCLE_RUNBOOK.md`
+
+Required implementation:
+Add a source/test-only boundary for operator-configurable abuse/DoS posture.
+
+Prefer a small focused module, for example:
+
+`crates/qbind-node/src/public_devnet_abuse_dos_config.rs`
+
+or a more repo-consistent name if existing naming conventions suggest one.
+
+The boundary must include:
+
+1. Typed config model for public DevNet abuse/DoS posture:
+   - per-peer max messages per second;
+   - per-peer burst allowance;
+   - global inbound connection rate window;
+   - global inbound connection burst allowance;
+   - optional per-IP or per-remote-address connection rate window if source support exists;
+   - fail-open vs fail-closed behavior marker, if applicable;
+   - environment binding;
+   - genesis hash binding, where appropriate;
+   - explicit default profile.
+
+2. Safe default profile:
+   - must preserve current behavior by default unless explicitly enabled/configured;
+   - default per-peer values should match the current hardcoded behavior: 1000 msg/s + 100 burst;
+   - default public DevNet profile may recommend stricter values, but must not silently alter runtime defaults unless this run explicitly wires and tests that behavior.
+
+3. Config validation:
+   - reject zero or nonsensical values;
+   - reject unbounded values where they would disable protections accidentally;
+   - reject values above a documented maximum unless explicitly allowed;
+   - reject MainNet use unless a production policy exists;
+   - reject TestNet/MainNet readiness claims.
+
+4. Connection-rate limiter boundary:
+   - pure/source-test model is acceptable for Run 361;
+   - records per remote peer or address;
+   - supports bounded window refill / token bucket / leaky bucket semantics;
+   - exposes deterministic outcomes:
+     - `ConnectionAllowed`
+     - `ConnectionRateLimited`
+     - `ConnectionLimiterDisabled`
+     - `InvalidConfig`
+     - `MainNetRefused`
+     - `StateUnavailable`
+   - must be non-mutating outside caller-owned fixture state.
+
+5. Integration adapter boundary:
+   - if safe and narrow, provide an adapter shape showing how `p2p_tcp` would consult the config/limiter before accepting inbound connections;
+   - do not change live runtime behavior unless the integration is explicitly implemented and tested without weakening defaults;
+   - if not wiring live behavior in Run 361, document that this is a source/test boundary and Run 362 or a later run must produce release-binary/runtime evidence.
+
+6. Metrics surface plan:
+   - do not add metrics unless implemented and tested;
+   - if adding source metrics helpers, define exact names and test that no duplicates or misleading counters are introduced;
+   - at minimum document which existing metrics remain authoritative and what future metric is required for connection-rate drops.
+
+7. CLI/config posture:
+   - If adding new public CLI flags, keep them narrow and documented. However, prefer not adding public flags in Run 361 unless unavoidable.
+   - A safer source/test run may define `NodeConfig`/internal config plumbing first and defer public CLI exposure to release-evidence or a separate public-surface run.
+   - If CLI flags are added, they must be validated in tests, hidden or public status must be explicit, and docs must be updated. Do not add flags silently.
+
+Required tests:
+Add a dedicated test target, for example:
+
+`crates/qbind-node/tests/run_361_public_devnet_abuse_dos_hardening_tests.rs`
+
+Tests must cover at minimum:
+
+Accepted / construction:
+1. default profile preserves current 1000 msg/s + 100 burst values;
+2. valid custom per-peer thresholds accepted;
+3. valid connection-rate thresholds accepted;
+4. DevNet source/test profile accepted;
+5. TestNet/MainNet production profiles not accidentally accepted as DevNet.
+
+Validation failures:
+6. zero max messages/sec rejected;
+7. zero or invalid burst rejected where unsafe;
+8. impossible connection window rejected;
+9. unbounded/too-large values rejected or explicitly marked unsafe;
+10. malformed config rejected;
+11. wrong environment rejected;
+12. wrong genesis binding rejected if genesis binding is part of config;
+13. MainNet refused absent production policy.
+
+Rate limiter behavior:
+14. per-peer token bucket allows under-budget traffic;
+15. per-peer token bucket drops over-budget traffic;
+16. refill behavior deterministic;
+17. burst behavior deterministic;
+18. lock-poison/failure behavior is explicitly documented and tested if modelled;
+19. connection limiter allows under-budget connections;
+20. connection limiter limits over-budget connections;
+21. connection limiter refill/window behavior deterministic;
+22. per-peer and connection limiter state are independent;
+23. disabled limiter is explicit and observable.
+
+Non-mutation:
+24. rejected config produces no runtime mutation;
+25. limiter writes only caller-owned test/fixture state;
+26. no trust-bundle mutation;
+27. no LivePqcTrustState mutation;
+28. no sequence file write;
+29. no validator-set mutation;
+30. no epoch transition;
+31. no Run 070 apply path;
+32. no public DevNet launch claim.
+
+Compatibility:
+33. existing `PeerRateLimiter::with_defaults()` behavior remains compatible;
+34. existing lib tests pass;
+35. no existing P2P admission policy is weakened;
+36. no MainNet authority rotation/revocation path changes.
+
+Required docs:
+Add canonical evidence:
+
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_361.md`
+
+Update narrowly:
+
+- `docs/release/QBIND_PUBLIC_DEVNET_READINESS_CRITERIA.md`
+- `docs/release/public-devnet/p2p/ABUSE_DOS_POSTURE.md`
+- `docs/release/public-devnet/p2p/VERIFY.md`
+- `docs/protocol/QBIND_C4_C5_CLOSURE_CRITERIA.md`
+- `docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md`
+- `docs/protocol/QBIND_GOVERNANCE_EXECUTION_RUNTIME_SURFACE_AUDIT.md`
+- `docs/ops/QBIND_PQC_TRUST_LIFECYCLE_RUNBOOK.md`
+- `docs/whitepaper/contradiction.md`
+
+Docs must state clearly:
+- Run 361 is source/test only unless runtime wiring truly lands;
+- release-binary evidence is deferred to Run 362;
+- M12 is not Green until release-binary/runtime evidence exists;
+- M4 remains Yellow/launch-blocking;
+- public DevNet remains NOT launch-ready;
+- C4/C5 remain OPEN.
+
+Required commands:
+Run and record:
+
+- `cargo build -p qbind-node --lib`
+- `cargo test -p qbind-node --test run_361_public_devnet_abuse_dos_hardening_tests`
+- `cargo test -p qbind-node --lib`
+
+If test target name differs, record the exact substitution and why.
+
+Security:
+Run secret scanning over all changed files.
+
+No private keys, mnemonics, seed phrases, credentials, API keys, tokens, private infrastructure, real production hostnames, or unapproved live endpoints may be introduced.
+
+CodeQL:
+Because this run changes Rust source, run CodeQL if available.
+
+If CodeQL is skipped, times out, is unavailable, or reports database-too-large / trivial-change / infrastructure failure, record the exact result and do not call it clean.
+
+Provenance:
+Record in `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_361.md`:
+
+- git commit;
+- branch;
+- clean/dirty state;
+- files changed;
+- source module path;
+- test target path;
+- commands run;
+- test results;
+- secret scan result;
+- CodeQL result;
+- readiness matrix delta;
+- exact reason M12 is or is not Green.
+
+Do not leave unexplained `git_status: dirty`.
+
+Readiness matrix update rules:
+In `QBIND_PUBLIC_DEVNET_READINESS_CRITERIA.md`:
+
+- M12 may move Yellow/Partial → Yellow/stronger only if source/test hardening lands but no release-binary/runtime evidence exists.
+- M12 may move Yellow/Partial → Green only if actual runtime/operator-configurable protection is implemented, validated, documented, and release-binary evidenced. Prefer deferring Green to Run 362.
+- Do not alter M4 unless live seed/bootnode reachability evidence actually lands.
+- Do not alter M6 unless stable identity-generation support lands.
+- Do not alter M7/M8/M9/M13/M14/M15 unless genuinely closed.
+- Public DevNet remains NOT launch-ready unless all must-haves are Green.
+
+Expected verdict:
+PASS / public-DevNet-abuse-DoS-hardening source-test positive if the source/test boundary, tests, docs, evidence, secret scan, and CodeQL provenance land.
+
+Partial-positive if config docs land but the source/test boundary cannot honestly model connection limiting or operator-configurable thresholds.
+
+Unacceptable:
+- claiming public DevNet launch-ready;
+- marking M4 Green without live seed/bootnode reachability evidence;
+- marking M6 Green without identity-generation support;
+- marking M12 Green without real runtime/operator-configurable and release-binary evidence;
+- weakening P2P admission;
+- changing P2P wire format;
+- silently changing runtime defaults;
+- adding public CLI flags without tests/docs;
+- publishing fake live seed addresses;
+- publishing secrets or private infrastructure;
+- claiming TestNet readiness;
+- claiming MainNet readiness;
+- closing C4 or C5;
+- marking MainNet authority rotation/revocation Green;
+- adding runtime authority-lifecycle wiring;
+- deploying seed nodes, faucet, RPC, explorer, or status page in this run;
+- hiding skipped CodeQL;
+- using marketing language.
+
+Final response format:
+1. Exact verdict.
+2. Files changed.
+3. Source boundary summary.
+4. Abuse/DoS config model.
+5. Connection-rate limiter boundary.
+6. Default compatibility.
+7. Runtime/CLI wiring status.
+8. Accepted tests.
+9. Rejection/fail-closed tests.
+10. Non-mutation evidence.
+11. Readiness matrix delta for M12.
+12. Current public DevNet readiness status.
+13. Remaining public DevNet blockers.
+14. Public TestNet blockers.
+15. MainNet blockers.
+16. C4/C5 status.
+17. Tests run.
+18. Security scans.
+19. CodeQL.
+20. Provenance.
+21. Honest limitations.
+22. Suggested Run 362 next step.
