@@ -1,0 +1,362 @@
+Run 359 — Public DevNet release-binary provenance + reproducibility / BuildID record
+
+Continue QBIND after accepted Run 358.
+
+Current state:
+Run 358 is accepted as PASS / public-DevNet-operator-onboarding positive.
+
+Public DevNet remains NOT launch-ready.
+
+Current public DevNet readiness state:
+- M1 canonical DevNet genesis package: Green.
+- M5 validator/full-node onboarding quickstart: Green.
+- M16 incident response: Green.
+- M17 public how-to-run-a-node documentation: Green.
+- M18 user-facing disclaimers: Green.
+- M19 network parameter publication: Green.
+- M20 genesis hash publication: Green.
+- M2 release binary provenance: Yellow.
+- M3 release binary reproducibility / BuildID: Red.
+- M4 seed/bootnodes: Yellow and still launch-blocking; no live seeds or reachability evidence.
+- M6 validator identity guidance: Yellow/Partial; no stable operator-facing identity-generation command.
+- M7–M15 remain Yellow.
+
+Full C4 remains OPEN. C5 remains OPEN. MainNet authority rotation/revocation remains Red. Run 353/354 remains Green-for-scope only and is not wired into runtime.
+
+Primary objective:
+Publish a canonical public DevNet release-binary provenance and reproducibility / BuildID record for `qbind-node`.
+
+This run should close or materially narrow:
+
+- M2 release binary provenance;
+- M3 release binary reproducibility / BuildID.
+
+Strict scope:
+Docs / artifact / verification only, using existing build surfaces.
+
+No public DevNet launch.
+No live seed-node deployment.
+No bootnode deployment.
+No faucet.
+No RPC gateway.
+No explorer.
+No status page.
+No MainNet enablement.
+No public TestNet readiness claim.
+No C4 closure.
+No C5 closure.
+No runtime authority-lifecycle wiring.
+No validator-set mutation.
+No production epoch transition.
+No production execution-sink write.
+No new public CLI flag.
+No change to P2P wire format.
+No change to peer admission logic.
+No default network behavior change.
+No fake live infrastructure.
+No release-signing claim unless actual signing material and verification evidence exist.
+No SLSA-grade claim unless actually evidenced.
+
+Required investigation:
+Inspect the repository for existing release / build / provenance surfaces, including at minimum:
+
+- `Cargo.toml`
+- `Cargo.lock`
+- workspace package metadata
+- `.cargo/config*`, if present
+- `.github/workflows/`, if present
+- `docs/whitepaper/build.sh`
+- existing per-run release-binary evidence helpers and harnesses
+- existing `artifact_sha256.txt` or release SHA records
+- any existing BuildID, build metadata, `--version`, or `--help` output surfaces
+- any existing reproducible-build documentation
+- any existing `rust-toolchain` or pinned toolchain file
+- Run 355 public DevNet readiness criteria
+- Run 356 genesis package
+- Run 357 seed-list package
+- Run 358 operator package
+
+Required implementation:
+Add a canonical public DevNet binary provenance directory if it does not already exist:
+
+`docs/release/public-devnet/binary/`
+
+Add these minimum tracked files:
+
+1. `docs/release/public-devnet/binary/README.md`
+2. `docs/release/public-devnet/binary/RELEASE_PROVENANCE.md`
+3. `docs/release/public-devnet/binary/REPRODUCIBILITY.md`
+4. `docs/release/public-devnet/binary/qbind-node.sha256`
+5. `docs/release/public-devnet/binary/BUILDINFO.md`
+6. `docs/release/public-devnet/binary/VERIFY.md`
+
+If a better canonical location already exists, use it and document why.
+
+Add canonical evidence:
+
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_359.md`
+
+Update narrowly:
+
+- `docs/release/QBIND_PUBLIC_DEVNET_READINESS_CRITERIA.md`
+- `docs/protocol/QBIND_C4_C5_CLOSURE_CRITERIA.md`
+- `docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md`
+- `docs/protocol/QBIND_GOVERNANCE_EXECUTION_RUNTIME_SURFACE_AUDIT.md`
+- `docs/ops/QBIND_PQC_TRUST_LIFECYCLE_RUNBOOK.md`
+- `docs/whitepaper/contradiction.md`
+- optionally `docs/release/public-devnet/operator/QUICKSTART.md` and `docs/release/public-devnet/operator/README.md` only to cross-link the new binary provenance package.
+
+Do not modify the Run 356 genesis artifact unless the run explicitly owns a separate artifact-reconciliation patch. The Run 358 CRLF/LF genesis SHA observation may be referenced as a known limitation, but Run 359 should not silently rewrite genesis.
+
+Required README content:
+`binary/README.md` must explain:
+
+1. What the binary provenance package is.
+2. What it is not.
+3. Public DevNet is NOT launch-ready.
+4. The package is DevNet-only / experimental / resettable / no value.
+5. No MainNet readiness claim.
+6. No C4/C5 closure claim.
+7. Which binary is covered: `target/release/qbind-node`.
+8. How to verify the binary SHA-256.
+9. How to inspect the build inputs.
+10. How to read the reproducibility result.
+11. What remains before public DevNet launch.
+
+Required RELEASE_PROVENANCE content:
+`RELEASE_PROVENANCE.md` must record:
+
+1. Repository URL / owner as known from the checkout.
+2. Git commit.
+3. Git branch.
+4. Clean/dirty state.
+5. Build host OS / architecture, if available.
+6. `rustc --version --verbose`.
+7. `cargo --version --verbose`.
+8. Cargo profile used.
+9. Exact build command.
+10. Whether `Cargo.lock` was present and used.
+11. Whether dependency resolution was frozen/locked/offline.
+12. SHA-256 of `target/release/qbind-node`.
+13. Binary size.
+14. Build timestamp or explicit statement if timestamp is intentionally excluded.
+15. Whether any BuildID/debug-id/version metadata is present.
+16. Exact command used to extract BuildID/debug-id/version metadata.
+17. Safety label and non-launch statement.
+
+Required qbind-node.sha256 content:
+`qbind-node.sha256` must contain the SHA-256 of the release-built `target/release/qbind-node` in standard checksum format:
+
+`<sha256>  qbind-node`
+
+If the package does not copy the binary into docs, make clear that the checksum applies to the locally built release artifact, not a committed binary blob. Do not commit large binaries unless repo policy already allows it.
+
+Required BUILDINFO content:
+`BUILDINFO.md` must record all build inputs needed for an operator to reproduce or audit the build, including:
+
+- git commit;
+- git branch;
+- clean/dirty state;
+- build command;
+- target triple;
+- rustc verbose version;
+- cargo verbose version;
+- active cargo config relevant to builds, if any;
+- profile;
+- environment variables intentionally set for reproducibility, if any;
+- whether debug symbols / stripping / LTO / codegen-units / panic strategy are default or configured;
+- binary size;
+- binary SHA-256;
+- BuildID/debug-id/version metadata, if available;
+- limitations.
+
+Required REPRODUCIBILITY content:
+`REPRODUCIBILITY.md` must include:
+
+1. Exact reproducibility experiment description.
+2. At least two clean release builds in separate target directories or after cleaning, using the same commit and build command.
+3. SHA-256 of each produced `qbind-node`.
+4. Whether the two hashes match.
+5. If they match:
+   - mark the local same-host reproducibility experiment Green for scope;
+   - do not claim cross-host reproducibility unless tested.
+6. If they do not match:
+   - compare available metadata;
+   - record bounded non-determinism honestly;
+   - keep M3 Yellow or Partial unless the non-determinism is fully understood and bounded enough for the readiness criteria.
+7. BuildID/debug-id result:
+   - present / absent / unavailable;
+   - exact command used;
+   - exact output.
+8. Explicit distinction between:
+   - same-host reproducibility;
+   - clean-tree reproducibility;
+   - cross-host reproducibility;
+   - SLSA-grade provenance.
+9. Statement that no SLSA-grade or signed-release claim is made unless actually evidenced.
+
+Recommended reproducibility approach:
+Use two separate target directories to avoid incremental artifacts:
+
+- `CARGO_TARGET_DIR=/tmp/qbind-run359-a cargo build -p qbind-node --release --locked`
+- `CARGO_TARGET_DIR=/tmp/qbind-run359-b cargo build -p qbind-node --release --locked`
+
+Then compare:
+
+- `sha256sum /tmp/qbind-run359-a/release/qbind-node`
+- `sha256sum /tmp/qbind-run359-b/release/qbind-node`
+- `cmp -s /tmp/qbind-run359-a/release/qbind-node /tmp/qbind-run359-b/release/qbind-node`
+
+If `--locked` is unsupported or fails due to repository state, record the exact failure and substitute the real command used. Do not hide the substitution.
+
+BuildID / metadata commands:
+Use repository/platform-supported commands only. Try, where available:
+
+- `file target/release/qbind-node`
+- `readelf -n target/release/qbind-node`
+- `objdump -f target/release/qbind-node`
+- `./target/release/qbind-node --help`
+- any existing `--version` if present
+
+If a command is unavailable on the platform, record that it is unavailable. Do not invent BuildID output.
+
+Required VERIFY content:
+`VERIFY.md` must include exact verification commands for an operator to reproduce the package checks:
+
+1. Build `qbind-node` release with the documented command.
+2. Verify `qbind-node.sha256`.
+3. Print `rustc --version --verbose`.
+4. Print `cargo --version --verbose`.
+5. Extract or attempt BuildID/debug-id metadata.
+6. Re-run the two-build reproducibility experiment.
+7. Confirm public DevNet is not claimed launch-ready.
+8. Confirm C4/C5 are not claimed closed.
+9. Confirm MainNet/TestNet readiness is not claimed.
+10. Confirm no binary blob is committed unless intentionally allowed.
+
+Required validation:
+Run and record exact commands proving:
+
+1. `cargo build -p qbind-node --release --locked` succeeds, or record exact substitute.
+2. `target/release/qbind-node` exists.
+3. `sha256sum target/release/qbind-node` matches `qbind-node.sha256`.
+4. Two clean/rebased target-dir builds produce matching or non-matching hashes, with exact evidence.
+5. BuildID/debug-id extraction was attempted and result recorded.
+6. `cargo test -p qbind-node --lib` passes.
+7. All new binary provenance docs contain the safety label.
+8. No binary provenance doc claims public DevNet launch-ready.
+9. No doc claims TestNet readiness.
+10. No doc claims MainNet readiness.
+11. No doc claims C4/C5 closure.
+12. No private key / mnemonic / token / credential is introduced.
+13. Run 356/357/358 artifacts are referenced but not silently modified.
+
+Readiness matrix update rules:
+In `QBIND_PUBLIC_DEVNET_READINESS_CRITERIA.md`:
+
+- M2 may move Yellow → Green only if a canonical release provenance record is committed and operator-verifiable.
+- M3 may move Red → Green only if reproducibility and/or BuildID documentation satisfies the criteria:
+  - same-host two-build reproducibility demonstrated and recorded; or
+  - documented, bounded non-determinism plus BuildID/debug-id record sufficient for public DevNet; or
+  - an explicit documented reason why BuildID is absent but reproducibility is otherwise demonstrated.
+- If only provenance lands but reproducibility remains unresolved, move M2 Green and M3 Red → Yellow/Partial, not Green.
+- Do not alter M4 unless live seed/bootnode reachability evidence actually lands.
+- Do not alter M6 unless a stable identity-generation command/procedure actually lands.
+- Public DevNet remains NOT launch-ready unless all must-haves are Green.
+
+Required tests:
+At minimum:
+
+`cargo test -p qbind-node --lib`
+
+Also run the build/provenance/reproducibility verification commands above.
+
+Security:
+Run secret scanning over all changed files.
+
+The provenance docs must not include private keys, mnemonics, seed phrases, credentials, API keys, tokens, private infrastructure, real production hostnames, or unapproved live endpoints.
+
+If environment dumps are included, redact or avoid secret-bearing variables. Prefer explicit selected variables over full `env`.
+
+CodeQL:
+Run CodeQL only if source code changes. If this is docs/artifact-only, record that CodeQL is not meaningful for the Run 359 diff and that no CodeQL coverage is claimed. If CodeQL is invoked and skipped/timed out/unavailable/database-too-large, record the exact result and do not call it clean.
+
+Provenance:
+Record in `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_359.md`:
+
+- git commit;
+- branch;
+- clean/dirty state;
+- artifact paths;
+- qbind-node SHA-256;
+- binary size;
+- rustc/cargo versions;
+- target triple;
+- BuildID/debug-id result;
+- reproducibility result;
+- commands run;
+- test results;
+- security scan result;
+- readiness matrix deltas.
+
+Do not leave unexplained `git_status: dirty`.
+
+C4/C5:
+Full C4 remains OPEN.
+C5 remains OPEN.
+MainNet authority rotation/revocation remains Red.
+Run 353/354 remains Green-for-scope only.
+Public DevNet readiness remains a separate release-readiness track.
+
+Expected verdict:
+PASS / public-DevNet-release-binary-provenance positive if the provenance package, reproducibility/BuildID record, verification docs, evidence, readiness-matrix updates, tests, secret scan, and provenance all land.
+
+Expected readiness result:
+M2 should move Yellow → Green if the release provenance record is complete and operator-verifiable.
+M3 should move Red → Green only if reproducibility/BuildID criteria are genuinely satisfied.
+M3 should move Red → Yellow/Partial if provenance lands but reproducibility remains unresolved or only partially bounded.
+Public DevNet should probably remain NOT launch-ready because M4, M6, M7–M15 remain unresolved.
+
+Partial-positive if the provenance package lands but reproducibility or BuildID evidence is incomplete and documented honestly.
+
+Unacceptable:
+- claiming public DevNet launch-ready;
+- marking M3 Green without real reproducibility or bounded BuildID evidence;
+- marking M4 Green without live seed/bootnode reachability evidence;
+- marking M6 Green without identity-generation support;
+- committing large release binaries without repo policy;
+- claiming SLSA-grade provenance without evidence;
+- claiming signed release without actual signing evidence;
+- publishing secrets or private infrastructure;
+- claiming TestNet readiness;
+- claiming MainNet readiness;
+- closing C4 or C5;
+- marking MainNet authority rotation/revocation Green;
+- adding runtime authority-lifecycle wiring;
+- adding public CLI flags;
+- deploying seed nodes, faucet, RPC, explorer, or status page in this run;
+- changing P2P wire/peer-admission behavior;
+- weakening prior Green-for-scope boundaries;
+- hiding skipped CodeQL;
+- using marketing language.
+
+Final response format:
+1. Exact verdict.
+2. Files changed.
+3. Binary provenance package contents.
+4. Release provenance summary.
+5. Build inputs / BUILDINFO summary.
+6. qbind-node SHA-256 and binary metadata.
+7. Reproducibility / BuildID result.
+8. Verification commands and results.
+9. Readiness matrix deltas for M2/M3.
+10. Current public DevNet readiness status.
+11. Remaining public DevNet blockers.
+12. Public TestNet blockers.
+13. MainNet blockers.
+14. C4/C5 status.
+15. Tests run.
+16. Security scans.
+17. Provenance.
+18. Honest limitations.
+19. Suggested Run 360 next step.
