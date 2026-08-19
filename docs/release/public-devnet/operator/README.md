@@ -45,6 +45,10 @@ internal `docs/devnet/QBIND_DEVNET_OPERATIONAL_GUIDE.md`.
   `0x48b3a862befe50e31bad5e1e11ba1ad282dc65723b1989e9ce2091b4af18145f`).
 - **Run 357 seed-list format + placeholder** — `docs/release/public-devnet/network/`
   (`devnet-seed-list.schema.json`, `devnet-seeds.placeholder.json`).
+- **Run 359 release-binary provenance package** — `docs/release/public-devnet/binary/`
+  (`RELEASE_PROVENANCE.md`, `REPRODUCIBILITY.md`, `BUILDINFO.md`, `qbind-node.sha256`, `VERIFY.md`):
+  how to verify the `qbind-node` release-binary SHA-256, inspect the build inputs, and read the
+  same-host reproducibility / BuildID result.
 - **Pre-existing `qbind-node` CLI surface** — `crates/qbind-node/src/cli.rs`. Run 358 adds **no**
   CLI flag and changes **no** default behaviour.
 

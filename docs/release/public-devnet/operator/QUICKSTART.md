@@ -53,6 +53,10 @@ Confirm the binary runs and exposes its help (used by the checks in `VERIFY.md`)
 ./target/release/qbind-node --help
 ```
 
+> To verify the release-binary SHA-256, inspect build inputs, or reproduce the build, see the Run 359
+> release-binary provenance package: `docs/release/public-devnet/binary/` (`RELEASE_PROVENANCE.md`,
+> `BUILDINFO.md`, `REPRODUCIBILITY.md`, `qbind-node.sha256`, `VERIFY.md`).
+
 ## 4. Verify the Run 356 genesis package
 
 The canonical genesis package lives at `docs/release/public-devnet/genesis/`. Verify it before
