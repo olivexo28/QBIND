@@ -1,0 +1,268 @@
+Run 357 — Public DevNet seed/bootnode list format + placeholder seed-list publication
+
+Continue QBIND after accepted Run 356.
+
+Current state:
+Run 356 is accepted as PASS / public-DevNet-genesis-publication positive.
+
+Run 356 published the canonical public DevNet genesis package, network parameters, genesis hash, and verification docs under:
+
+`docs/release/public-devnet/genesis/`
+
+Run 356 moved public DevNet readiness items:
+
+- M1 canonical DevNet genesis package: Yellow → Green.
+- M19 network parameter publication: Yellow → Green.
+- M20 genesis hash publication: Yellow → Green.
+
+Public DevNet remains NOT launch-ready. Green must-haves are now M1, M16, M19, and M20. M3 release-binary reproducibility / BuildID remains Red. M4 seed/bootnodes remains Red. Other must-haves remain Yellow.
+
+Full C4 remains OPEN. C5 remains OPEN. MainNet authority rotation/revocation remains Red. Run 353/354 remains Green-for-scope only and is not wired into runtime.
+
+Primary objective:
+Begin narrowing M4 by publishing a canonical public DevNet seed/bootnode list format and a placeholder DevNet seed-list artifact.
+
+This run should produce the operator-facing structure required for future seed publication, but it must not claim M4 Green unless real seed nodes are deployed and reachability is evidenced.
+
+Expected likely outcome:
+PASS / public-DevNet-seed-list-format positive.
+
+M4 should likely move Red → Yellow, not Green, unless the run also includes real seed/bootnode reachability evidence from externally reachable nodes. If no real seed nodes are deployed, the result must say M4 remains launch-blocking.
+
+Strict scope:
+Docs / artifact / verification only.
+
+No public DevNet launch.
+No real seed-node deployment.
+No bootnode deployment.
+No faucet.
+No RPC gateway.
+No explorer.
+No status page.
+No MainNet enablement.
+No public TestNet readiness claim.
+No C4 closure.
+No C5 closure.
+No runtime authority-lifecycle wiring.
+No validator-set mutation.
+No production epoch transition.
+No production execution-sink write.
+No new public CLI flag.
+No change to P2P wire format.
+No change to peer admission logic.
+No default network behavior change.
+
+Important:
+A placeholder seed list is allowed only if it is clearly marked as placeholder / not live / not launch-ready.
+
+Do not publish fake externally reachable IPs, DNS names, peer IDs, or keys as if they are live.
+
+Required investigation:
+Inspect the repository for existing P2P join and seed/peer configuration surfaces, including at minimum:
+
+- `crates/qbind-node/src/cli.rs`
+- `--p2p-peer`
+- `--p2p-listen-addr`
+- `--enable-p2p`
+- any advertise-address or external-address configuration
+- peer identity / node identity / validator identity surfaces
+- P2P mutual-auth / trust-bundle requirements
+- existing DevNet operational guide
+- existing public DevNet readiness criteria
+- Run 356 genesis package and network parameters
+- any existing seed/bootnode references or network config fixtures
+
+Required implementation:
+Add a canonical public DevNet network directory if it does not already exist:
+
+`docs/release/public-devnet/network/`
+
+Add these minimum tracked files:
+
+1. `docs/release/public-devnet/network/README.md`
+2. `docs/release/public-devnet/network/devnet-seed-list.schema.json`
+3. `docs/release/public-devnet/network/devnet-seeds.placeholder.json`
+4. `docs/release/public-devnet/network/VERIFY.md`
+
+If the repository already has a better canonical location, use it and document why.
+
+Add canonical evidence:
+
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_357.md`
+
+Update narrowly:
+
+- `docs/release/QBIND_PUBLIC_DEVNET_READINESS_CRITERIA.md`
+- `docs/protocol/QBIND_C4_C5_CLOSURE_CRITERIA.md`
+- `docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md`
+- `docs/protocol/QBIND_GOVERNANCE_EXECUTION_RUNTIME_SURFACE_AUDIT.md`
+- `docs/ops/QBIND_PQC_TRUST_LIFECYCLE_RUNBOOK.md`
+- `docs/whitepaper/contradiction.md`
+
+Required seed-list format:
+The seed-list schema and placeholder list must define, at minimum:
+
+1. `schema_version`
+2. `network_name`
+3. `environment`
+4. `runtime_chain_id`
+5. `genesis_hash`
+6. `genesis_file_sha256`
+7. `seed_nodes`
+8. For each seed node:
+   - `node_id` or documented absence;
+   - `peer_id` or documented absence;
+   - `validator_address` if applicable;
+   - `p2p_host`;
+   - `p2p_port`;
+   - `p2p_multiaddr` or equivalent connection string if QBIND uses one;
+   - `transport_security_mode`;
+   - `pqc_suite`;
+   - `trust_bundle_required`;
+   - `expected_genesis_hash`;
+   - `operator`;
+   - `status`: one of `placeholder`, `planned`, `live`, `retired`;
+   - `last_reachability_evidence`;
+   - `notes`.
+9. Safety label:
+   - experimental;
+   - resettable;
+   - no value;
+   - no MainNet readiness claim;
+   - no C4/C5 closure claim.
+10. Explicit statement that placeholder entries are not live seeds.
+
+Required placeholder artifact:
+`devnet-seeds.placeholder.json` must be valid JSON and must not contain fake live infrastructure.
+
+It may contain either:
+
+- an empty `seed_nodes: []` list with documented required shape; or
+- placeholder entries with `status: "placeholder"` and non-routable / example values only.
+
+If placeholder entries are used, use documentation/example-safe values only and state that they are not externally reachable.
+
+Required README content:
+The network README must explain:
+
+1. What the seed list is.
+2. What it is not.
+3. How it relates to Run 356 genesis package.
+4. How an operator will use a future live seed list.
+5. Which existing CLI flags are expected to be used, such as `--p2p-peer`, if supported.
+6. Why public DevNet is still not launch-ready.
+7. What evidence is required to move M4 to Green.
+8. What future run must provide real reachability evidence.
+
+Required verification:
+Run and record exact commands proving:
+
+1. Seed-list schema is valid JSON.
+2. Placeholder seed-list is valid JSON.
+3. Placeholder seed-list validates against the schema, if a schema validator is available.
+4. Placeholder seed-list references the Run 356 genesis hash correctly.
+5. Placeholder seed-list references the Run 356 genesis file SHA-256 correctly.
+6. No placeholder entry is falsely marked live.
+7. No public DevNet launch claim is present.
+8. MainNet/TestNet are unaffected.
+
+If no JSON Schema validator is available in the repo, use a small deterministic Python validation script in the evidence process and record the exact command. Do not add a new dependency unless already acceptable in the repo.
+
+Readiness matrix update rules:
+In `QBIND_PUBLIC_DEVNET_READINESS_CRITERIA.md`:
+
+- M4 may move Red → Yellow if the seed-list format and placeholder artifact are canonical and verified.
+- M4 may move to Green only if there is committed live seed/bootnode list plus reachability evidence from real externally reachable seed nodes.
+- If this run publishes only the format and placeholder list, M4 remains a public DevNet launch blocker.
+- Do not alter M3 unless reproducibility/BuildID evidence actually lands.
+- Do not alter M2/M5–M18 unless this run genuinely closes those items.
+- Public DevNet remains NOT launch-ready.
+
+Required tests:
+At minimum:
+
+`cargo test -p qbind-node --lib`
+
+Also run lightweight validation commands for JSON/schema artifacts.
+
+If the diff is docs/artifact-only, no broader source regression suite is required unless repository policy says otherwise. Record the exact commands and results.
+
+Security:
+Run secret scanning over all changed files.
+
+The seed-list files must not include private keys, private IPs intended to remain private, credentials, tokens, API keys, mnemonics, seed phrases, production hostnames, or real operator secrets.
+
+If any real live seed information is included, it must be intentionally public and documented as such.
+
+CodeQL:
+Run CodeQL only if source code changes. If this is docs/artifact-only, record that CodeQL is not meaningful for the Run 357 diff and that no CodeQL coverage is claimed. If CodeQL is invoked and skipped/timed out/unavailable/database-too-large, record the exact result and do not call it clean.
+
+Provenance:
+Record in `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_357.md`:
+
+- git commit;
+- branch;
+- clean/dirty state;
+- artifact paths;
+- schema hash;
+- placeholder seed-list hash;
+- Run 356 genesis hash;
+- Run 356 genesis file SHA-256;
+- commands run;
+- test results;
+- security scan result;
+- readiness matrix deltas.
+
+Do not leave unexplained `git_status: dirty`.
+
+C4/C5:
+Full C4 remains OPEN.
+C5 remains OPEN.
+MainNet authority rotation/revocation remains Red.
+Run 353/354 remains Green-for-scope only.
+Public DevNet readiness remains a separate release-readiness track.
+
+Expected verdict:
+PASS / public-DevNet-seed-list-format positive if the canonical seed-list schema, placeholder seed-list, verification docs, evidence, readiness-matrix updates, tests, secret scan, and provenance all land.
+
+Expected readiness result:
+M4 should move Red → Yellow if only format + placeholder list land.
+M4 should move Green only with real live seed/bootnode reachability evidence.
+
+Partial-positive if the seed-list format lands but validation or readiness classification is incomplete and documented honestly.
+
+Unacceptable:
+- claiming public DevNet launch-ready;
+- marking M4 Green without live seed/bootnode reachability evidence;
+- publishing fake live seed addresses;
+- publishing secrets or private infrastructure accidentally;
+- claiming TestNet readiness;
+- claiming MainNet readiness;
+- closing C4 or C5;
+- marking MainNet authority rotation/revocation Green;
+- adding runtime authority-lifecycle wiring;
+- adding a public CLI flag;
+- deploying seed nodes, faucet, RPC, explorer, or status page in this run;
+- changing P2P wire/peer-admission behavior;
+- weakening prior Green-for-scope boundaries;
+- hiding skipped CodeQL;
+- using marketing language.
+
+Final response format:
+1. Exact verdict.
+2. Files changed.
+3. Seed-list package contents.
+4. Seed-list schema summary.
+5. Placeholder seed-list contents.
+6. Verification commands and results.
+7. Readiness matrix delta for M4.
+8. Current public DevNet readiness status.
+9. Remaining public DevNet blockers.
+10. Public TestNet blockers.
+11. MainNet blockers.
+12. C4/C5 status.
+13. Tests run.
+14. Security scans.
+15. Provenance.
+16. Honest limitations.
+17. Suggested Run 358 next step.
