@@ -93,9 +93,16 @@ release-readiness track**, not C4/C5 closure; C4/C5 closure is not a public DevN
 ## 10. Tests run
 
 Run 355 is docs/audit-only and changes **no** source code (`crates/**` untouched). No code path changed, so the
-node library behavior is unchanged from accepted Run 354. The repository-standard boundary test command
-(`cargo test -p qbind-node --lib`) exercises the node library and is unaffected by this run's diff, which touches
-only Markdown under `docs/`. See §12 for the exact commands actually executed for verification and their results.
+node library behavior is unchanged from accepted Run 354. The repository-standard boundary test command was still
+run in full to confirm the unchanged library builds and passes:
+
+```
+cargo test -p qbind-node --lib
+```
+
+Result: **`test result: ok. 1377 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out`** (finished in ~56s).
+The run is unaffected by this run's diff, which touches only Markdown under `docs/`; the pass simply confirms no
+regression was introduced.
 
 ## 11. Security scans
 
