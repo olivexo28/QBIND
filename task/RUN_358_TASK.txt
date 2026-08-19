@@ -1,0 +1,332 @@
+Run 358 — Public DevNet external operator onboarding quickstart + identity guide + safety label publication
+
+Continue QBIND after accepted Run 357.
+
+Current state:
+Run 357 is accepted as PASS / public-DevNet-seed-list-format positive.
+
+Run 356 published the canonical public DevNet genesis package, network parameters, genesis hash, and verification docs under:
+
+`docs/release/public-devnet/genesis/`
+
+Run 357 published the canonical public DevNet seed/bootnode list format and placeholder seed-list artifact under:
+
+`docs/release/public-devnet/network/`
+
+Public DevNet remains NOT launch-ready.
+
+Current public DevNet readiness state:
+- M1 canonical DevNet genesis package: Green.
+- M16 incident response: Green.
+- M19 network parameter publication: Green.
+- M20 genesis hash publication: Green.
+- M3 release-binary reproducibility / BuildID: Red.
+- M4 seed/bootnodes: Yellow, still launch-blocking; format + placeholder exist, but no live seeds or reachability evidence.
+- M5 validator/full-node onboarding quickstart: Yellow.
+- M6 validator identity guidance: Yellow.
+- M17 public how-to-run-a-node documentation: Yellow.
+- M18 user-facing disclaimers: Yellow.
+- Other public DevNet must-haves remain Yellow unless explicitly evidenced.
+
+Full C4 remains OPEN. C5 remains OPEN. MainNet authority rotation/revocation remains Red. Run 353/354 remains Green-for-scope only and is not wired into runtime.
+
+Primary objective:
+Publish and validate an external public DevNet operator onboarding quickstart that lets a third-party operator understand how to run a QBIND DevNet full node / validator node using the existing repo surfaces, the Run 356 genesis package, and the Run 357 seed-list format.
+
+This run should close or materially narrow:
+
+- M5 validator/full-node onboarding quickstart;
+- M6 validator identity guidance;
+- M17 public how-to-run-a-node documentation;
+- M18 user-facing safety disclaimers.
+
+Strict scope:
+Docs / artifact / verification only, with command validation against existing CLI surfaces.
+
+No public DevNet launch.
+No live seed-node deployment.
+No real bootnode deployment.
+No faucet.
+No RPC gateway.
+No explorer.
+No status page.
+No MainNet enablement.
+No public TestNet readiness claim.
+No C4 closure.
+No C5 closure.
+No runtime authority-lifecycle wiring.
+No validator-set mutation.
+No production epoch transition.
+No production execution-sink write.
+No new public CLI flag.
+No change to P2P wire format.
+No change to peer admission logic.
+No default network behavior change.
+No fake live infrastructure.
+
+Required investigation:
+Inspect the repository for existing external-operator bring-up and identity surfaces, including at minimum:
+
+- `README.md`
+- `docs/devnet/QBIND_DEVNET_OPERATIONAL_GUIDE.md`
+- `docs/release/QBIND_PUBLIC_DEVNET_READINESS_CRITERIA.md`
+- `docs/release/public-devnet/genesis/README.md`
+- `docs/release/public-devnet/genesis/VERIFY.md`
+- `docs/release/public-devnet/network/README.md`
+- `docs/release/public-devnet/network/VERIFY.md`
+- `crates/qbind-node/src/cli.rs`
+- `--env devnet`
+- `--genesis-path`
+- `--expect-genesis-hash`
+- `--print-genesis-hash`
+- `--data-dir`
+- `--enable-p2p`
+- `--p2p-listen-addr`
+- `--p2p-advertised-addr`
+- `--p2p-peer`
+- `--p2p-mutual-auth`
+- `--p2p-trust-bundle`
+- `--p2p-trust-bundle-signing-key`
+- node identity / peer identity / validator identity generation or loading surfaces;
+- signer mode / local signer / remote signer / keystore surfaces, if already present;
+- metrics surfaces, if referenced by the quickstart;
+- reset / cleanup surfaces that are safe to publish.
+
+Required implementation:
+Add a public DevNet operator docs directory if it does not already exist:
+
+`docs/release/public-devnet/operator/`
+
+Add these minimum tracked files:
+
+1. `docs/release/public-devnet/operator/README.md`
+2. `docs/release/public-devnet/operator/QUICKSTART.md`
+3. `docs/release/public-devnet/operator/IDENTITY.md`
+4. `docs/release/public-devnet/operator/SAFETY.md`
+5. `docs/release/public-devnet/operator/VERIFY.md`
+
+If a better canonical location already exists, use it and document why.
+
+Add canonical evidence:
+
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_358.md`
+
+Update narrowly:
+
+- `docs/release/QBIND_PUBLIC_DEVNET_READINESS_CRITERIA.md`
+- `docs/protocol/QBIND_C4_C5_CLOSURE_CRITERIA.md`
+- `docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md`
+- `docs/protocol/QBIND_GOVERNANCE_EXECUTION_RUNTIME_SURFACE_AUDIT.md`
+- `docs/ops/QBIND_PQC_TRUST_LIFECYCLE_RUNBOOK.md`
+- `docs/whitepaper/contradiction.md`
+
+Optional, only if appropriate and narrowly scoped:
+- update the repository top-level `README.md` with a short pointer to the public DevNet operator docs, but do not claim public DevNet is launch-ready.
+
+Required QUICKSTART content:
+`QUICKSTART.md` must include:
+
+1. Safety label:
+   - experimental;
+   - resettable;
+   - no value;
+   - no MainNet readiness claim;
+   - no C4/C5 closure claim.
+2. Explicit statement that public DevNet is NOT launch-ready yet.
+3. Prerequisites:
+   - Rust/toolchain expectations if already documented;
+   - source checkout;
+   - release build command;
+   - no live seed expectation yet.
+4. Verify the Run 356 genesis package:
+   - file path;
+   - SHA-256 verification;
+   - `--print-genesis-hash`;
+   - `--expect-genesis-hash`.
+5. Explain the Run 357 seed-list placeholder:
+   - where it lives;
+   - why it must not be dialed;
+   - how a future live seed list will be used.
+6. Full-node local dry-run / local boot command using existing flags only, if supported.
+7. Validator-node guidance:
+   - what is currently possible;
+   - what remains fixture/internal;
+   - what not to claim.
+8. P2P joining guidance:
+   - use future `status: "live"` seed entries only;
+   - map seed-list fields to existing CLI flags such as `--p2p-peer`;
+   - do not dial placeholder entries.
+9. Data directory guidance:
+   - recommended devnet data-dir;
+   - resettable/no-value warning;
+   - cleanup/reset notes if safe.
+10. Troubleshooting:
+   - genesis hash mismatch;
+   - invalid seed list;
+   - P2P disabled by default;
+   - no live seeds yet;
+   - MainNet/TestNet not affected.
+11. What remains before public DevNet launch.
+
+Required IDENTITY content:
+`IDENTITY.md` must include:
+
+1. Difference between:
+   - node identity;
+   - peer identity;
+   - validator address;
+   - validator signing identity;
+   - PQC transport / trust-bundle material.
+2. Existing CLI/config surfaces for identity generation or loading.
+3. Which identity material is safe to publish.
+4. Which material must never be published.
+5. Guidance for placeholder / planned / live seed entries.
+6. Guidance for validators vs full nodes.
+7. Clear statement that no production/MainNet identity or custody material is introduced by this run.
+8. Any repository-supported commands to generate or inspect identity material, if available.
+9. If identity generation is not yet externally documented or not supported by a stable command, state the gap honestly and keep M6 Yellow or Partial.
+
+Required SAFETY content:
+`SAFETY.md` must publish the user-facing safety label in operator-facing material:
+
+- experimental;
+- resettable;
+- no value;
+- no MainNet readiness claim;
+- no C4/C5 closure claim;
+- no guarantees of availability, state durability, or continuity;
+- no expectation that DevNet balances or state survive resets;
+- TestNet and MainNet are separate future stages.
+
+Required VERIFY content:
+`VERIFY.md` must include exact verification commands for the operator docs, including:
+
+1. The genesis verification commands from Run 356, or links to them with a cross-check command.
+2. The seed-list validation commands from Run 357, or links to them with a cross-check command.
+3. A command proving `qbind-node --help` contains every existing flag referenced by the quickstart.
+4. A command proving the placeholder seed list is not marked live.
+5. A command proving every placeholder `p2p_host` is documentation-safe or non-live.
+6. A command proving no operator doc claims public DevNet is launch-ready.
+7. A command proving the safety label appears in all operator-facing docs.
+8. A command proving MainNet/TestNet are not modified by this run.
+
+Required validation:
+Run and record exact commands proving:
+
+1. All new operator docs exist.
+2. All new operator docs contain the safety label.
+3. QUICKSTART references the Run 356 genesis hash:
+   `0x48b3a862befe50e31bad5e1e11ba1ad282dc65723b1989e9ce2091b4af18145f`
+4. QUICKSTART references the Run 356 genesis SHA-256:
+   `d1db07febcf76267f9d3e277a0ff99d06bbe5dffd59d0607799521562ec5c86c`
+5. QUICKSTART references the Run 357 seed-list placeholder and warns not to dial it.
+6. Every CLI flag referenced by QUICKSTART exists in `qbind-node --help`, or the doc marks it as future/unsupported.
+7. No doc claims public DevNet is launch-ready.
+8. No doc claims TestNet readiness.
+9. No doc claims MainNet readiness.
+10. No doc claims C4/C5 closure.
+11. No private key / mnemonic / token / credential is introduced.
+
+Readiness matrix update rules:
+In `QBIND_PUBLIC_DEVNET_READINESS_CRITERIA.md`:
+
+- M5 may move Yellow → Green only if the quickstart is operator-facing, complete enough for unassisted bring-up, and validated against existing CLI surfaces.
+- M6 may move Yellow → Green only if identity guidance is operator-facing and validated against existing CLI/config surfaces. If identity generation/loading is still unclear or unsupported, keep M6 Yellow and state the exact gap.
+- M17 may move Yellow → Green only if the public how-to-run-a-node material is complete, operator-facing, and cross-linked from the readiness track.
+- M18 may move Yellow → Green only if the safety label is published in operator-facing material, not only in the internal readiness matrix.
+- Do not alter M3 or M4 unless this run genuinely adds reproducibility/BuildID evidence or real live seed reachability evidence.
+- Public DevNet remains NOT launch-ready unless all must-haves are Green.
+
+Required tests:
+At minimum:
+
+`cargo test -p qbind-node --lib`
+
+Also run the documentation validation commands described above.
+
+If the diff is docs/artifact-only, no broader source regression suite is required unless repository policy says otherwise. Record the exact commands and results.
+
+Security:
+Run secret scanning over all changed files.
+
+The operator docs must not include private keys, mnemonics, seed phrases, credentials, API keys, tokens, private infrastructure, real production hostnames, or unapproved live endpoints.
+
+If any sample secret-like value is included, it must be documentation-safe and explicitly non-secret.
+
+CodeQL:
+Run CodeQL only if source code changes. If this is docs/artifact-only, record that CodeQL is not meaningful for the Run 358 diff and that no CodeQL coverage is claimed. If CodeQL is invoked and skipped/timed out/unavailable/database-too-large, record the exact result and do not call it clean.
+
+Provenance:
+Record in `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_358.md`:
+
+- git commit;
+- branch;
+- clean/dirty state;
+- artifact paths;
+- operator-doc file hashes;
+- Run 356 genesis hash;
+- Run 356 genesis file SHA-256;
+- Run 357 schema hash;
+- Run 357 placeholder seed-list hash;
+- commands run;
+- test results;
+- security scan result;
+- readiness matrix deltas.
+
+Do not leave unexplained `git_status: dirty`.
+
+C4/C5:
+Full C4 remains OPEN.
+C5 remains OPEN.
+MainNet authority rotation/revocation remains Red.
+Run 353/354 remains Green-for-scope only.
+Public DevNet readiness remains a separate release-readiness track.
+
+Expected verdict:
+PASS / public-DevNet-operator-onboarding positive if the operator docs, quickstart, identity guide, safety publication, verification docs, evidence, readiness-matrix updates, tests, secret scan, and provenance all land.
+
+Expected readiness result:
+M5 should move Yellow → Green if the quickstart is validated against real existing CLI surfaces.
+M17 should move Yellow → Green if the how-to-run-a-node guide is complete and operator-facing.
+M18 should move Yellow → Green if the safety label is published in the operator-facing docs.
+M6 should move Yellow → Green only if identity guidance is validated against existing CLI/config surfaces; otherwise keep M6 Yellow and document the exact missing support.
+
+Partial-positive if the docs land but one or more of M5/M6/M17/M18 cannot honestly move Green.
+
+Unacceptable:
+- claiming public DevNet launch-ready;
+- marking M4 Green without live seed/bootnode reachability evidence;
+- marking M3 Green without reproducibility/BuildID evidence;
+- documenting nonexistent CLI flags as real;
+- adding new public CLI flags;
+- publishing secrets or private infrastructure;
+- claiming TestNet readiness;
+- claiming MainNet readiness;
+- closing C4 or C5;
+- marking MainNet authority rotation/revocation Green;
+- adding runtime authority-lifecycle wiring;
+- deploying seed nodes, faucet, RPC, explorer, or status page in this run;
+- changing P2P wire/peer-admission behavior;
+- weakening prior Green-for-scope boundaries;
+- hiding skipped CodeQL;
+- using marketing language.
+
+Final response format:
+1. Exact verdict.
+2. Files changed.
+3. Operator documentation package contents.
+4. Quickstart summary.
+5. Identity guidance summary.
+6. Safety/disclaimer publication.
+7. Verification commands and results.
+8. Readiness matrix deltas for M5/M6/M17/M18.
+9. Current public DevNet readiness status.
+10. Remaining public DevNet blockers.
+11. Public TestNet blockers.
+12. MainNet blockers.
+13. C4/C5 status.
+14. Tests run.
+15. Security scans.
+16. Provenance.
+17. Honest limitations.
+18. Suggested Run 359 next step.
