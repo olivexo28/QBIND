@@ -1,7 +1,8 @@
 # QBIND Public DevNet Readiness Criteria and Gap Matrix
 
 **Status:** Canonical (Run 355 deliverable — public network release-readiness track, kickoff; updated Run 356 —
-M1/M19/M20 moved to Green with the published DevNet genesis package).
+M1/M19/M20 moved to Green with the published DevNet genesis package; updated Run 357 — M4 moved Red → Yellow with
+the published seed-list format + placeholder artifact, M4 remains a launch blocker).
 **Track:** Public network release-readiness. This is a **separate track** from the internal
 authority-lifecycle boundary track (Run 130–354) and from C4/C5 closure.
 **Scope of this document:** source/docs/test-only audit and gap matrix. It introduces public DevNet
@@ -85,7 +86,7 @@ Each item must be genuinely **Green** and evidenced before public DevNet launch.
 - [x] M1. Canonical DevNet genesis package published (file + hash + parameters). — **Green (Run 356)**; see `docs/release/public-devnet/genesis/`.
 - [ ] M2. Release binary provenance published (source commit, build inputs, SHA-256).
 - [ ] M3. Release binary reproducibility / BuildID documented (deterministic or documented non-determinism).
-- [ ] M4. Seed/bootnode list published for public join.
+- [ ] M4. Seed/bootnode list published for public join. — **Yellow (Run 357)**: canonical seed-list format + placeholder artifact published (`docs/release/public-devnet/network/`); **still a launch blocker** — no live seeds / reachability evidence yet.
 - [ ] M5. Validator/full-node onboarding quickstart for external operators.
 - [ ] M6. Validator identity guidance (node identity/key generation) published.
 - [ ] M7. Validator key-management guidance (local keystore / remote signer / HSM options) published.
@@ -200,7 +201,7 @@ Legend: 🟢 Green (evidenced enough for public DevNet) · 🟡 Yellow (partial 
 | M1 genesis package | 🟢 | **Run 356:** canonical `docs/release/public-devnet/genesis/devnet-genesis.json` committed, hash + SHA-256 published + operator-verifiable. |
 | M2 release provenance | 🟡 | Per-run SHA-256 exists; no published release-provenance record. |
 | M3 reproducibility / BuildID | 🔴 | No reproducible-build result or BuildID documented. |
-| M4 seed/bootnodes | 🔴 | Static `--p2p-peer` only; no published seed list; no discovery. |
+| M4 seed/bootnodes | 🟡 | **Run 357:** canonical seed-list format (`devnet-seed-list.schema.json`) + placeholder artifact (`devnet-seeds.placeholder.json`) published under `docs/release/public-devnet/network/`, verified + genesis-pinned. Still **Red-equivalent for launch**: no live seeds, no reachability evidence, static `--p2p-peer` only, no discovery. **Launch blocker.** |
 | M5 validator onboarding | 🟡 | Operational guide exists; no external quickstart. |
 | M6 validator identity | 🟡 | Identity/key CLI exists; no standalone identity guide. |
 | M7 key-management | 🟡 | Local keystore / remote signer / HSM surfaces exist; no consolidated guide. |
@@ -249,7 +250,7 @@ Legend: 🟢 Green (evidenced enough for public DevNet) · 🟡 Yellow (partial 
 | M1 | 🟢 | **Done (Run 356):** canonical DevNet genesis artifact published + hash recorded (`docs/release/public-devnet/genesis/`). |
 | M2 | 🟡 | Run: emit a published release-provenance record (commit + toolchain + build cmd + SHA-256). |
 | M3 | 🔴 | Run: attempt reproducible build; document result or bounded non-determinism + BuildID. |
-| M4 | 🔴 | Run: define + publish a seed/bootnode list format and a placeholder DevNet seed list (docs-only). |
+| M4 | 🟡 | **Format landed (Run 357):** seed-list schema + placeholder published (`docs/release/public-devnet/network/`). **Next:** deploy real seed/bootnode nodes and capture external reachability evidence, then replace placeholder with live entries to move Green. |
 | M5 | 🟡 | Run: author external validator/full-node quickstart validated against real startup. |
 | M6 | 🟡 | Run: author node-identity/key-generation guide (docs, CLI-validated). |
 | M7 | 🟡 | Run: consolidate key-management guide (`--signer-mode`, keystore, remote signer, HSM). |
@@ -274,11 +275,12 @@ trust-root bootstrap+PQC guidance together; monitoring+alerting together; port p
 
 ## 12. Public DevNet launch blocker summary
 
-Public DevNet is **NOT yet launch-ready**. As of **Run 356**, the Green must-haves are **M1, M16, M19, M20**;
+Public DevNet is **NOT yet launch-ready**. As of **Run 357**, the Green must-haves are **M1, M16, M19, M20**;
 every other must-have remains **Yellow or Red**. The launch blockers are, at minimum:
 
-- **Red:** M3 (reproducibility/BuildID), M4 (seed/bootnodes).
-- **Yellow (must reach Green):** M2, M5, M6, M7, M8, M9, M10, M11, M12, M13, M14, M15, M17, M18.
+- **Red:** M3 (reproducibility/BuildID).
+- **Yellow (must reach Green):** M2, M4 (seed/bootnodes — format+placeholder landed Run 357, still a launch blocker
+  until live seeds + reachability evidence land), M5, M6, M7, M8, M9, M10, M11, M12, M13, M14, M15, M17, M18.
 
 Because at least one must-have is not Green, this document does **not** mark public DevNet ready.
 
@@ -361,10 +363,12 @@ Columns: item · release stage · category · status · evidence source · block
 
 ## 17. Summary
 
-Public DevNet readiness is a **tracked, evidence-grounded classification**. As of **Run 356**, the canonical
-DevNet genesis package, network parameters, and genesis hash are published and operator-verifiable, moving
-**M1, M19, M20** to Green (joining **M16 incident response**). Public DevNet is still **not launch-ready**: all
-other must-haves remain Yellow or Red (notably **Red** for reproducibility/BuildID (M3) and seed/bootnodes (M4)).
+Public DevNet readiness is a **tracked, evidence-grounded classification**. As of **Run 357**, the canonical
+DevNet genesis package, network parameters, and genesis hash (Run 356) are published and operator-verifiable,
+keeping **M1, M19, M20** Green (joining **M16 incident response**); Run 357 adds the canonical seed-list format +
+placeholder artifact, moving **M4 Red → Yellow** while keeping it a launch blocker. Public DevNet is still **not
+launch-ready**: all other must-haves remain Yellow or Red (notably **Red** for reproducibility/BuildID (M3), and
+**Yellow-but-blocking** for seed/bootnodes (M4) until real live seeds + reachability evidence land).
 C4 and C5 remain **OPEN**, MainNet authority rotation/revocation remains **Red**, and the Run 353/354 boundary
 remains Green-for-scope only. The most efficient path forward is a small series of consolidated
 documentation/publication runs (onboarding+identity+key-management+quickstart+disclaimers; trust-root bootstrap+PQC

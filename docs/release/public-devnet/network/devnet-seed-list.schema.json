@@ -1,0 +1,190 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://qbind.dev/schemas/public-devnet/devnet-seed-list.schema.json",
+  "title": "QBIND Public DevNet Seed / Bootnode List",
+  "description": "Canonical operator-facing schema for the QBIND public DevNet seed/bootnode list (Run 357). DevNet only: experimental, resettable, no value, no MainNet readiness claim, no C4/C5 closure claim. A seed list document that validates against this schema is NOT a public DevNet launch claim. Entries with status 'placeholder' or 'planned' are NOT live seeds and are NOT externally reachable.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "network_name",
+    "environment",
+    "runtime_chain_id",
+    "genesis_hash",
+    "genesis_file_sha256",
+    "safety_label",
+    "placeholder_statement",
+    "seed_nodes"
+  ],
+  "properties": {
+    "schema_version": {
+      "description": "Version of this seed-list schema/document format.",
+      "type": "string",
+      "minLength": 1
+    },
+    "network_name": {
+      "description": "Human-readable network name, e.g. 'QBIND Public DevNet (experimental)'.",
+      "type": "string",
+      "minLength": 1
+    },
+    "environment": {
+      "description": "Deployment environment. DevNet only for this document.",
+      "type": "string",
+      "enum": ["devnet"]
+    },
+    "runtime_chain_id": {
+      "description": "Runtime environment ChainId. DevNet: 0x51424E4444455600 = 5855328520645203456.",
+      "type": "string",
+      "minLength": 1
+    },
+    "genesis_hash": {
+      "description": "Canonical Run 101 genesis hash of the Run 356 genesis package (0x-prefixed hex).",
+      "type": "string",
+      "pattern": "^0x[0-9a-f]{64}$"
+    },
+    "genesis_file_sha256": {
+      "description": "File-byte SHA-256 of the Run 356 devnet-genesis.json (lowercase hex, no 0x).",
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "safety_label": {
+      "description": "Mandatory safety label. All flags must be present and set as shown for a DevNet seed list.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "experimental",
+        "resettable",
+        "no_value",
+        "no_mainnet_readiness_claim",
+        "no_c4_c5_closure_claim"
+      ],
+      "properties": {
+        "experimental": { "type": "boolean", "enum": [true] },
+        "resettable": { "type": "boolean", "enum": [true] },
+        "no_value": { "type": "boolean", "enum": [true] },
+        "no_mainnet_readiness_claim": { "type": "boolean", "enum": [true] },
+        "no_c4_c5_closure_claim": { "type": "boolean", "enum": [true] }
+      }
+    },
+    "placeholder_statement": {
+      "description": "Explicit statement that placeholder/planned entries are not live seeds and are not externally reachable.",
+      "type": "string",
+      "minLength": 1
+    },
+    "seed_nodes": {
+      "description": "List of seed/bootnode entries. May be empty. Placeholder entries must use status 'placeholder' and non-routable / documentation-example values only.",
+      "type": "array",
+      "items": { "$ref": "#/definitions/seed_node" }
+    }
+  },
+  "definitions": {
+    "seed_node": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "node_id",
+        "peer_id",
+        "validator_address",
+        "p2p_host",
+        "p2p_port",
+        "p2p_multiaddr",
+        "transport_security_mode",
+        "pqc_suite",
+        "trust_bundle_required",
+        "expected_genesis_hash",
+        "operator",
+        "status",
+        "last_reachability_evidence",
+        "notes"
+      ],
+      "properties": {
+        "node_id": {
+          "description": "Node identity. Use null to document a deliberate absence.",
+          "type": ["string", "null"]
+        },
+        "peer_id": {
+          "description": "P2P peer identity. Use null to document a deliberate absence.",
+          "type": ["string", "null"]
+        },
+        "validator_address": {
+          "description": "Validator address if this seed is also a validator; null if not applicable.",
+          "type": ["string", "null"]
+        },
+        "p2p_host": {
+          "description": "P2P host. For placeholder/planned entries this MUST be a non-routable / documentation-example value (e.g. an RFC 5737 TEST-NET address or example.invalid).",
+          "type": "string",
+          "minLength": 1
+        },
+        "p2p_port": {
+          "description": "P2P port.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535
+        },
+        "p2p_multiaddr": {
+          "description": "Connection string usable with the pre-existing --p2p-peer flag (host:port, or vid@host:port). Use null if not applicable.",
+          "type": ["string", "null"]
+        },
+        "transport_security_mode": {
+          "description": "Transport security posture, e.g. 'kemtls-mutual-auth-required', 'kemtls-optional', or 'disabled'.",
+          "type": "string",
+          "minLength": 1
+        },
+        "pqc_suite": {
+          "description": "PQC suite identifier, e.g. 'ml-dsa-44' (suite_id 100).",
+          "type": "string",
+          "minLength": 1
+        },
+        "trust_bundle_required": {
+          "description": "Whether a signed PQC trust bundle is required to join this seed (see --p2p-trust-bundle).",
+          "type": "boolean"
+        },
+        "expected_genesis_hash": {
+          "description": "Genesis hash the seed expects peers to pin; must match the top-level genesis_hash for a consistent DevNet.",
+          "type": "string",
+          "pattern": "^0x[0-9a-f]{64}$"
+        },
+        "operator": {
+          "description": "Operator label. For placeholder entries use a non-identifying example value.",
+          "type": "string",
+          "minLength": 1
+        },
+        "status": {
+          "description": "Lifecycle status of the seed entry.",
+          "type": "string",
+          "enum": ["placeholder", "planned", "live", "retired"]
+        },
+        "last_reachability_evidence": {
+          "description": "Reference to reachability evidence (e.g. path to an evidence doc or a timestamped probe result). MUST be null for non-live entries; MUST be non-null for status 'live'.",
+          "type": ["string", "null"]
+        },
+        "notes": {
+          "description": "Free-form notes.",
+          "type": "string"
+        }
+      },
+      "allOf": [
+        {
+          "description": "A 'live' seed must carry reachability evidence.",
+          "if": { "properties": { "status": { "const": "live" } } },
+          "then": {
+            "properties": {
+              "last_reachability_evidence": { "type": "string", "minLength": 1 }
+            }
+          }
+        },
+        {
+          "description": "A non-live seed (placeholder/planned/retired) must NOT falsely carry reachability evidence.",
+          "if": {
+            "properties": { "status": { "enum": ["placeholder", "planned", "retired"] } }
+          },
+          "then": {
+            "properties": {
+              "last_reachability_evidence": { "type": "null" }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

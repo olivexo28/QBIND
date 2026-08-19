@@ -1,0 +1,34 @@
+{
+  "schema_version": "1.0.0",
+  "network_name": "QBIND Public DevNet (experimental)",
+  "environment": "devnet",
+  "runtime_chain_id": "0x51424E4444455600",
+  "genesis_hash": "0x48b3a862befe50e31bad5e1e11ba1ad282dc65723b1989e9ce2091b4af18145f",
+  "genesis_file_sha256": "d1db07febcf76267f9d3e277a0ff99d06bbe5dffd59d0607799521562ec5c86c",
+  "safety_label": {
+    "experimental": true,
+    "resettable": true,
+    "no_value": true,
+    "no_mainnet_readiness_claim": true,
+    "no_c4_c5_closure_claim": true
+  },
+  "placeholder_statement": "This is a PLACEHOLDER DevNet seed list. It contains NO live seeds and NO externally reachable infrastructure. Every entry uses status 'placeholder' with non-routable RFC 5737 / RFC 6761 documentation-example values only. Public DevNet is NOT launch-ready. M4 (seed/bootnodes) remains a public DevNet launch blocker until a committed live seed list plus reachability evidence from real externally reachable seed nodes lands in a future run.",
+  "seed_nodes": [
+    {
+      "node_id": null,
+      "peer_id": null,
+      "validator_address": null,
+      "p2p_host": "192.0.2.1",
+      "p2p_port": 19000,
+      "p2p_multiaddr": "192.0.2.1:19000",
+      "transport_security_mode": "kemtls-mutual-auth-required",
+      "pqc_suite": "ml-dsa-44",
+      "trust_bundle_required": true,
+      "expected_genesis_hash": "0x48b3a862befe50e31bad5e1e11ba1ad282dc65723b1989e9ce2091b4af18145f",
+      "operator": "example-operator-placeholder",
+      "status": "placeholder",
+      "last_reachability_evidence": null,
+      "notes": "PLACEHOLDER ONLY - NOT A LIVE SEED. 192.0.2.1 is an RFC 5737 TEST-NET-1 documentation address and is not externally reachable. node_id/peer_id/validator_address are intentionally absent (null) because no real node identity has been generated for a public seed. This entry documents the required shape of a future live seed entry; it must be replaced with a real, evidenced seed node before M4 can move to Green."
+    }
+  ]
+}
