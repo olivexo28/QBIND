@@ -188,9 +188,12 @@ The test target name matches the task-suggested name exactly; no substitution wa
 
 ## 19. CodeQL
 
-- CodeQL (Rust) was run over the source changes. Result recorded in the run summary; it is **not**
-  claimed clean if it was skipped, timed out, reported database-too-large, or reported an
-  infrastructure failure — see the final task summary for the exact reported result.
+- CodeQL (Rust) was invoked over the source changes and **did not run to completion**: the analysis was
+  **skipped because the CodeQL database size is too large** ("Analysis was skipped because the database
+  size is too large"; 0 alerts reported). Per the run rules this is **not** claimed clean — the result
+  is an infrastructure/database-size skip, not a clean pass. No CodeQL coverage is asserted for this
+  diff; a future run on a smaller database scope (or the Run 362 runtime-wiring change) should re-attempt
+  CodeQL coverage.
 
 ## 20. Provenance
 
