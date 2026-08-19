@@ -10,7 +10,12 @@ and M3 moved Red → Green with the published release-binary provenance + reprod
 (`docs/release/public-devnet/binary/`): a canonical operator-verifiable provenance record plus a same-host,
 clean-tree two-build reproducibility result (byte-identical `qbind-node`, SHA-256 `f916af6d…b22990`, stable ELF
 BuildID `274fdaf3…5208b`); M4 remains Yellow/launch-blocking and M6–M15 remain Yellow/Red, so public DevNet remains
-NOT launch-ready).
+NOT launch-ready; updated Run 360 — M10 (public P2P port posture) and M11 (peer admission policy) moved Yellow → Green
+with the published P2P posture package (`docs/release/public-devnet/p2p/`), validated against the existing `qbind-node`
+CLI/transport/trust-bundle surfaces; M12 (abuse/DoS protections) stays Yellow/Partial — the per-peer rate limiter and
+metrics are documented against source, but its thresholds are hardcoded (not operator-configurable) and no
+per-connection-rate limiter is exposed; M4 remains Yellow/launch-blocking and M6–M9/M13–M15 unchanged, so public DevNet
+remains NOT launch-ready).
 **Track:** Public network release-readiness. This is a **separate track** from the internal
 authority-lifecycle boundary track (Run 130–354) and from C4/C5 closure.
 **Scope of this document:** source/docs/test-only audit and gap matrix. It introduces public DevNet
@@ -100,9 +105,9 @@ Each item must be genuinely **Green** and evidenced before public DevNet launch.
 - [ ] M7. Validator key-management guidance (local keystore / remote signer / HSM options) published.
 - [ ] M8. PQC trust-bundle bootstrap process for DevNet trust roots published.
 - [ ] M9. PQC root / signing-key guidance for DevNet published.
-- [ ] M10. Public P2P port posture defined (listen/advertise, `--enable-p2p` default, NAT guidance).
-- [ ] M11. Peer admission policy defined for an open network.
-- [ ] M12. Abuse / DoS protections documented and enabled (per-peer rate limiting posture).
+- [x] M10. Public P2P port posture defined (listen/advertise, `--enable-p2p` default, NAT guidance). — **Green (Run 360)**: public P2P port posture published (`docs/release/public-devnet/p2p/P2P_PORT_POSTURE.md`), validated against the existing `qbind-node` CLI surface (`--enable-p2p` default `false`, `--p2p-listen-addr` default `127.0.0.1:0`, `--p2p-advertised-addr`, `--p2p-peer`, `--expect-genesis-hash`, all present in `--help`); no new flag, no default behaviour change, no discovery claim.
+- [x] M11. Peer admission policy defined for an open network. — **Green (Run 360)**: peer-admission policy published (`docs/release/public-devnet/p2p/PEER_ADMISSION_POLICY.md`), validated against the existing KEMTLS mutual-auth (`--p2p-mutual-auth`), PQC root (`--p2p-pqc-root-mode`, `--p2p-trusted-root`, `--p2p-leaf-cert`/`-key`, `--p2p-peer-leaf-cert`) and trust-bundle (`--p2p-trust-bundle`, `--p2p-trust-bundle-signing-key`) surfaces; fail-closed failure matrix documented; peer claims advisory-only, peer-driven apply out of scope; no admission-logic change.
+- [ ] M12. Abuse / DoS protections documented and enabled (per-peer rate limiting posture). — **Yellow / Partial (Run 360)**: abuse/DoS posture published (`docs/release/public-devnet/p2p/ABUSE_DOS_POSTURE.md`) against the real per-peer rate limiter (`peer_rate_limiter.rs`: default `1000` msg/s + `100` burst, enabled by default) and P2P/trust-bundle metrics; **gap:** thresholds are **hardcoded** with no operator-facing CLI/config surface, and no per-connection / global inbound-connection-rate limiter is exposed in `qbind-node`, so M12 stays Yellow/Partial until tunable thresholds + connection-rate limiting land.
 - [ ] M13. Telemetry / metrics baseline available to operators.
 - [ ] M14. Monitoring / alerting baseline available to operators.
 - [ ] M15. Reset policy published (when/how DevNet state is wiped).
@@ -187,7 +192,7 @@ Each item must be genuinely **Green** and evidenced before public DevNet launch.
 | M4, M7 | Ops | CLI `--p2p-peer`; no published seed list; `crates/qbind-remote-signer/` |
 | M5, M6, M17 | Docs | `docs/release/public-devnet/operator/` external onboarding package (Run 358: `README.md`, `QUICKSTART.md`, `IDENTITY.md`, `SAFETY.md`, `VERIFY.md`); `docs/devnet/QBIND_DEVNET_OPERATIONAL_GUIDE.md`; M5/M17 Green, M6 Yellow (no identity-generation command yet) |
 | M8, M9 | Ops / security | `docs/ops/QBIND_PQC_TRUST_LIFECYCLE_RUNBOOK.md`, `crates/qbind-node/src/pqc_trust_bundle.rs` |
-| M10, M11, M12 | Security / net | `crates/qbind-node/src/cli.rs`, `peer_rate_limiter.rs`, `QBIND_PEER_TRUST_BUNDLE_PROPAGATION_SAFETY.md` |
+| M10, M11, M12 | Security / net | `docs/release/public-devnet/p2p/` (Run 360: `README.md`, `P2P_PORT_POSTURE.md`, `PEER_ADMISSION_POLICY.md`, `ABUSE_DOS_POSTURE.md`, `VERIFY.md`); `crates/qbind-node/src/cli.rs`, `peer_rate_limiter.rs`, `QBIND_PEER_TRUST_BUNDLE_PROPAGATION_SAFETY.md`; M10/M11 Green, M12 Yellow/Partial |
 | M13, M14 | Observability | `crates/qbind-node/src/metrics_http.rs`, `docs/ops/QBIND_MONITORING_AND_ALERTING_BASELINE.md` |
 | M15 | Ops | CLI `--authority-state-reset`, `crates/qbind-ledger/src/authority_state_reset.rs` |
 | M16 | Ops | `docs/ops/QBIND_INCIDENT_RESPONSE.md`, `docs/ops/QBIND_OPERATOR_DRILL_CATALOG.md` |
@@ -215,9 +220,9 @@ Legend: 🟢 Green (evidenced enough for public DevNet) · 🟡 Yellow (partial 
 | M7 key-management | 🟡 | Local keystore / remote signer / HSM surfaces exist; no consolidated guide. |
 | M8 trust-bundle bootstrap | 🟡 | Runbook + `pqc_trust_bundle` exist; DevNet root bootstrap not published. |
 | M9 PQC root / signing-key guidance | 🟡 | CLI + runbook exist; DevNet-specific guidance not consolidated. |
-| M10 public P2P port posture | 🟡 | Configurable; `--enable-p2p` defaults false; public exposure posture not published. |
-| M11 peer admission policy | 🟡 | Mutual-auth + trust-bundle gating exist; open-network policy not published. |
-| M12 abuse / DoS protections | 🟡 | `peer_rate_limiter` exists; public-network thresholds not published. |
+| M10 public P2P port posture | 🟢 | **Run 360:** public P2P port/listen/advertise/NAT/`--enable-p2p` posture published (`docs/release/public-devnet/p2p/P2P_PORT_POSTURE.md`), CLI-validated. No new flag; no discovery claim. |
+| M11 peer admission policy | 🟢 | **Run 360:** open-network peer-admission policy published (`docs/release/public-devnet/p2p/PEER_ADMISSION_POLICY.md`) against existing KEMTLS mutual-auth + PQC trust-root/trust-bundle surfaces; fail-closed matrix; peer claims advisory-only. |
+| M12 abuse / DoS protections | 🟡 | **Run 360:** abuse/DoS posture published (`docs/release/public-devnet/p2p/ABUSE_DOS_POSTURE.md`) against `peer_rate_limiter` (default `1000` msg/s + `100` burst, on by default) + metrics. **Partial:** thresholds hardcoded (no CLI/config surface); no per-connection-rate limiter exposed. |
 | M13 telemetry / metrics | 🟡 | `/metrics` endpoint + baseline exist; operator-facing exposure doc partial. |
 | M14 monitoring / alerting | 🟡 | Baseline doc exists; alert rules / scrape config absent. |
 | M15 reset policy | 🟡 | `--authority-state-reset` exists; network-wide reset policy not published. |
@@ -264,9 +269,9 @@ Legend: 🟢 Green (evidenced enough for public DevNet) · 🟡 Yellow (partial 
 | M7 | 🟡 | Run: consolidate key-management guide (`--signer-mode`, keystore, remote signer, HSM). |
 | M8 | 🟡 | Run: publish DevNet trust-root bootstrap procedure. |
 | M9 | 🟡 | Run: publish DevNet PQC root/signing-key guidance (fold into M8 run if convenient). |
-| M10 | 🟡 | Run: publish public P2P port/NAT/`--enable-p2p` posture doc. |
-| M11 | 🟡 | Run: publish open-network peer-admission policy (mutual-auth + trust-bundle gating). |
-| M12 | 🟡 | Run: publish rate-limiter thresholds + enablement posture for public exposure. |
+| M10 | 🟢 | **Done (Run 360):** public P2P port/NAT/`--enable-p2p` posture published (`docs/release/public-devnet/p2p/P2P_PORT_POSTURE.md`). |
+| M11 | 🟢 | **Done (Run 360):** open-network peer-admission policy published (`docs/release/public-devnet/p2p/PEER_ADMISSION_POLICY.md`). |
+| M12 | 🟡 | **Partial (Run 360):** abuse/DoS posture published (`docs/release/public-devnet/p2p/ABUSE_DOS_POSTURE.md`). **Next:** expose operator-tunable rate-limiter thresholds + per-connection-rate limiting, then validate under load to move Green. |
 | M13 | 🟡 | Run: publish operator metrics exposure guide (fold with M14). |
 | M14 | 🟡 | Run: ship alert-rule definitions / scrape config alongside the baseline. |
 | M15 | 🟡 | Run: publish DevNet reset policy (trigger conditions, notice, audit trail). |
@@ -283,13 +288,13 @@ trust-root bootstrap+PQC guidance together; monitoring+alerting together; port p
 
 ## 12. Public DevNet launch blocker summary
 
-Public DevNet is **NOT yet launch-ready**. As of **Run 359**, the Green must-haves are **M1, M2, M3, M5, M16, M17,
-M18, M19, M20**; every other must-have remains **Yellow or Red**. The launch blockers are, at minimum:
+Public DevNet is **NOT yet launch-ready**. As of **Run 360**, the Green must-haves are **M1, M2, M3, M5, M10, M11,
+M16, M17, M18, M19, M20**; every other must-have remains **Yellow or Red**. The launch blockers are, at minimum:
 
 - **Red:** *(none among the tracked must-haves — M3 moved to Green in Run 359).*
 - **Yellow (must reach Green):** M4 (seed/bootnodes — format+placeholder landed Run 357, still a launch blocker
   until live seeds + reachability evidence land), M6 (identity — guidance landed Run 358, generation command still
-  missing), M7, M8, M9, M10, M11, M12, M13, M14, M15.
+  missing), M7, M8, M9, M12 (abuse/DoS — posture landed Run 360, thresholds not operator-configurable), M13, M14, M15.
 
 Because at least one must-have is not Green, this document does **not** mark public DevNet ready.
 
@@ -382,8 +387,12 @@ Run 359 publishes the release-binary provenance + reproducibility/BuildID packag
 (`docs/release/public-devnet/binary/`), moving **M2 Yellow → Green** and **M3 Red → Green** on the basis of a
 canonical operator-verifiable provenance record plus a same-host, clean-tree two-build reproducibility result
 (byte-identical `qbind-node`, SHA-256 `f916af6d…b22990`, stable ELF BuildID `274fdaf3…5208b`; cross-host/SLSA/signed
-not claimed).
-Public DevNet is still **not launch-ready**: M4 and the remaining must-haves (M6–M15) are unchanged and remain
+not claimed); Run 360 publishes the P2P exposure / peer-admission / abuse-DoS posture package
+(`docs/release/public-devnet/p2p/`), moving **M10, M11 Yellow → Green** (public P2P port posture and open-network
+peer-admission policy, validated against the existing CLI/transport/trust-bundle surfaces) and keeping **M12
+Yellow/Partial** (abuse/DoS posture published against the real per-peer rate limiter + metrics, but its thresholds are
+hardcoded with no operator-facing config surface and no per-connection-rate limiter is exposed).
+Public DevNet is still **not launch-ready**: M4 and the remaining must-haves (M6–M9, M12–M15) remain
 Yellow or Red — notably **Yellow-but-blocking** for seed/bootnodes (M4) until real live seeds + reachability evidence
 land.
 C4 and C5 remain **OPEN**, MainNet authority rotation/revocation remains **Red**, and the Run 353/354 boundary

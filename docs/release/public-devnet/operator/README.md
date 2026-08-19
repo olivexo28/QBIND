@@ -73,16 +73,18 @@ internal `docs/devnet/QBIND_DEVNET_OPERATIONAL_GUIDE.md`.
 
 This package targets the public DevNet readiness must-haves **M5** (onboarding quickstart),
 **M6** (validator identity guidance), **M17** (public how-to-run-a-node), and **M18** (user-facing
-disclaimers), tracked in `docs/release/QBIND_PUBLIC_DEVNET_READINESS_CRITERIA.md`. Run 358 does
-**not** alter **M3** (reproducibility / BuildID — remains Red) or **M4** (seed/bootnodes — remains
-Yellow and launch-blocking), because it adds no reproducibility/BuildID evidence and no live-seed
-reachability evidence.
+disclaimers), tracked in `docs/release/QBIND_PUBLIC_DEVNET_READINESS_CRITERIA.md`. Run 358 itself
+adds no reproducibility/BuildID evidence and no live-seed reachability evidence. **M3**
+(reproducibility / BuildID) was subsequently moved to **Green (same-host scope)** by Run 359
+(`docs/release/public-devnet/binary/`); **M4** (seed/bootnodes) remains **Yellow and
+launch-blocking**.
 
 ## 6. Why public DevNet is still NOT launch-ready
 
 Publishing operator onboarding documentation does not make the network joinable. There are still
-**no** externally reachable seeds (M4 remains Yellow / launch-blocking) and **no** documented
-release-binary reproducibility / BuildID (M3 remains Red). Because at least one must-have is not
+**no** externally reachable seeds (M4 remains Yellow / launch-blocking) and other must-haves
+(M6–M15) remain unresolved; M3 is Green for same-host scope after Run 359 but does not by itself make
+the network joinable. Because at least one must-have is not
 Green, public DevNet is **not** launch-ready. See
 `docs/release/QBIND_PUBLIC_DEVNET_READINESS_CRITERIA.md`.
 
