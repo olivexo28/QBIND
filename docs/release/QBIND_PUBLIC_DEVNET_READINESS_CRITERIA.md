@@ -5,7 +5,12 @@ M1/M19/M20 moved to Green with the published DevNet genesis package; updated Run
 the published seed-list format + placeholder artifact, M4 remains a launch blocker; updated Run 358 —
 M5/M17/M18 moved Yellow → Green with the published external operator onboarding package
 (`docs/release/public-devnet/operator/`), M6 stays Yellow/Partial pending an operator-facing identity-generation
-command, and M3/M4 are unchanged so public DevNet remains NOT launch-ready).
+command, and M3/M4 are unchanged so public DevNet remains NOT launch-ready; updated Run 359 — M2 moved Yellow → Green
+and M3 moved Red → Green with the published release-binary provenance + reproducibility/BuildID package
+(`docs/release/public-devnet/binary/`): a canonical operator-verifiable provenance record plus a same-host,
+clean-tree two-build reproducibility result (byte-identical `qbind-node`, SHA-256 `f916af6d…b22990`, stable ELF
+BuildID `274fdaf3…5208b`); M4 remains Yellow/launch-blocking and M6–M15 remain Yellow/Red, so public DevNet remains
+NOT launch-ready).
 **Track:** Public network release-readiness. This is a **separate track** from the internal
 authority-lifecycle boundary track (Run 130–354) and from C4/C5 closure.
 **Scope of this document:** source/docs/test-only audit and gap matrix. It introduces public DevNet
@@ -87,8 +92,8 @@ This label is a **must-have** and is a launch precondition, not a post-launch ad
 Each item must be genuinely **Green** and evidenced before public DevNet launch. See §10/§16 matrix for status.
 
 - [x] M1. Canonical DevNet genesis package published (file + hash + parameters). — **Green (Run 356)**; see `docs/release/public-devnet/genesis/`.
-- [ ] M2. Release binary provenance published (source commit, build inputs, SHA-256).
-- [ ] M3. Release binary reproducibility / BuildID documented (deterministic or documented non-determinism).
+- [x] M2. Release binary provenance published (source commit, build inputs, SHA-256). — **Green (Run 359)**; see `docs/release/public-devnet/binary/RELEASE_PROVENANCE.md` (commit `420bb571…`, toolchain 1.97.1, `cargo build -p qbind-node --release --locked`, SHA-256 `f916af6d…b22990`).
+- [x] M3. Release binary reproducibility / BuildID documented (deterministic or documented non-determinism). — **Green (Run 359)**; see `docs/release/public-devnet/binary/REPRODUCIBILITY.md` — same-host, clean-tree two-build reproducibility (byte-identical `qbind-node`) + ELF BuildID `274fdaf3…5208b`. Cross-host/SLSA/signed-release **not** claimed.
 - [ ] M4. Seed/bootnode list published for public join. — **Yellow (Run 357)**: canonical seed-list format + placeholder artifact published (`docs/release/public-devnet/network/`); **still a launch blocker** — no live seeds / reachability evidence yet.
 - [x] M5. Validator/full-node onboarding quickstart for external operators. — **Green (Run 358)**: external operator quickstart published (`docs/release/public-devnet/operator/QUICKSTART.md`), validated against the real `qbind-node` CLI surface (`--help`), the Run 356 genesis package, and the Run 357 seed-list format.
 - [ ] M6. Validator identity guidance (node identity/key generation) published. — **Yellow / Partial (Run 358)**: identity guidance published (`docs/release/public-devnet/operator/IDENTITY.md`) and validated against pre-existing identity/signer **loading/selection** flags; **gap:** no externally documented, stable `qbind-node` command **generates** a publishable node/peer/validator identity for an external operator, and no live public DevNet exists to register one — M6 stays Yellow until such a command/procedure lands.
@@ -178,7 +183,7 @@ Each item must be genuinely **Green** and evidenced before public DevNet launch.
 | Item | Owner | Primary source / evidence location |
 |------|-------|-------------------------------------|
 | M1, M19, M20 | Protocol eng | `crates/qbind-genesis/src/lib.rs`, `crates/qbind-node/src/pqc_boot_genesis.rs`, CLI `--print-genesis-hash`/`--expect-genesis-hash` |
-| M2, M3 | Release mgmt | `docs/whitepaper/build.sh`, per-run `artifact_sha256.txt`; no published release-provenance record yet |
+| M2, M3 | Release mgmt | `docs/release/public-devnet/binary/` (Run 359: `README.md`, `RELEASE_PROVENANCE.md`, `REPRODUCIBILITY.md`, `BUILDINFO.md`, `qbind-node.sha256`, `VERIFY.md`); `docs/whitepaper/build.sh`; per-run `artifact_sha256.txt`; M2/M3 Green |
 | M4, M7 | Ops | CLI `--p2p-peer`; no published seed list; `crates/qbind-remote-signer/` |
 | M5, M6, M17 | Docs | `docs/release/public-devnet/operator/` external onboarding package (Run 358: `README.md`, `QUICKSTART.md`, `IDENTITY.md`, `SAFETY.md`, `VERIFY.md`); `docs/devnet/QBIND_DEVNET_OPERATIONAL_GUIDE.md`; M5/M17 Green, M6 Yellow (no identity-generation command yet) |
 | M8, M9 | Ops / security | `docs/ops/QBIND_PQC_TRUST_LIFECYCLE_RUNBOOK.md`, `crates/qbind-node/src/pqc_trust_bundle.rs` |
@@ -202,8 +207,8 @@ Legend: 🟢 Green (evidenced enough for public DevNet) · 🟡 Yellow (partial 
 | Item | Status | Basis |
 |------|--------|-------|
 | M1 genesis package | 🟢 | **Run 356:** canonical `docs/release/public-devnet/genesis/devnet-genesis.json` committed, hash + SHA-256 published + operator-verifiable. |
-| M2 release provenance | 🟡 | Per-run SHA-256 exists; no published release-provenance record. |
-| M3 reproducibility / BuildID | 🔴 | No reproducible-build result or BuildID documented. |
+| M2 release provenance | 🟢 | **Run 359:** canonical operator-verifiable provenance record published (`docs/release/public-devnet/binary/RELEASE_PROVENANCE.md`): commit `420bb571…`, toolchain 1.97.1, `cargo build -p qbind-node --release --locked`, SHA-256 `f916af6d…b22990`, BuildID `274fdaf3…5208b`. |
+| M3 reproducibility / BuildID | 🟢 | **Run 359:** same-host, clean-tree two-build reproducibility (byte-identical `qbind-node`) + ELF BuildID recorded (`docs/release/public-devnet/binary/REPRODUCIBILITY.md`). Cross-host/SLSA/signed-release **not** claimed. |
 | M4 seed/bootnodes | 🟡 | **Run 357:** canonical seed-list format (`devnet-seed-list.schema.json`) + placeholder artifact (`devnet-seeds.placeholder.json`) published under `docs/release/public-devnet/network/`, verified + genesis-pinned. Still **Red-equivalent for launch**: no live seeds, no reachability evidence, static `--p2p-peer` only, no discovery. **Launch blocker.** |
 | M5 validator onboarding | 🟢 | **Run 358:** external operator quickstart published (`docs/release/public-devnet/operator/QUICKSTART.md`), validated against the real `qbind-node --help` CLI surface, the Run 356 genesis package, and the Run 357 seed-list format. |
 | M6 validator identity | 🟡 | **Run 358:** identity guidance published (`docs/release/public-devnet/operator/IDENTITY.md`), validated against pre-existing identity/signer **loading/selection** flags. **Gap:** no stable operator-facing command **generates** a publishable node/peer/validator identity, and no live public DevNet to register into — stays Yellow/Partial. |
@@ -251,8 +256,8 @@ Legend: 🟢 Green (evidenced enough for public DevNet) · 🟡 Yellow (partial 
 | Item | Status | Next-run recommendation |
 |------|--------|--------------------------|
 | M1 | 🟢 | **Done (Run 356):** canonical DevNet genesis artifact published + hash recorded (`docs/release/public-devnet/genesis/`). |
-| M2 | 🟡 | Run: emit a published release-provenance record (commit + toolchain + build cmd + SHA-256). |
-| M3 | 🔴 | Run: attempt reproducible build; document result or bounded non-determinism + BuildID. |
+| M2 | 🟢 | **Done (Run 359):** published release-provenance record (commit + toolchain + build cmd + SHA-256 + BuildID) at `docs/release/public-devnet/binary/RELEASE_PROVENANCE.md`. |
+| M3 | 🟢 | **Done (Run 359):** same-host, clean-tree two-build reproducibility (byte-identical `qbind-node`) + ELF BuildID documented (`docs/release/public-devnet/binary/REPRODUCIBILITY.md`). Cross-host/SLSA/signed-release **not** claimed. |
 | M4 | 🟡 | **Format landed (Run 357):** seed-list schema + placeholder published (`docs/release/public-devnet/network/`). **Next:** deploy real seed/bootnode nodes and capture external reachability evidence, then replace placeholder with live entries to move Green. |
 | M5 | 🟢 | **Done (Run 358):** external validator/full-node quickstart published + CLI-validated (`docs/release/public-devnet/operator/QUICKSTART.md`). |
 | M6 | 🟡 | **Partial (Run 358):** identity guidance published + CLI-validated for loading/selection. **Next:** expose a stable operator-facing node/peer/validator identity-generation command (+ live registration path) to move Green. |
@@ -278,11 +283,11 @@ trust-root bootstrap+PQC guidance together; monitoring+alerting together; port p
 
 ## 12. Public DevNet launch blocker summary
 
-Public DevNet is **NOT yet launch-ready**. As of **Run 358**, the Green must-haves are **M1, M5, M16, M17, M18,
-M19, M20**; every other must-have remains **Yellow or Red**. The launch blockers are, at minimum:
+Public DevNet is **NOT yet launch-ready**. As of **Run 359**, the Green must-haves are **M1, M2, M3, M5, M16, M17,
+M18, M19, M20**; every other must-have remains **Yellow or Red**. The launch blockers are, at minimum:
 
-- **Red:** M3 (reproducibility/BuildID).
-- **Yellow (must reach Green):** M2, M4 (seed/bootnodes — format+placeholder landed Run 357, still a launch blocker
+- **Red:** *(none among the tracked must-haves — M3 moved to Green in Run 359).*
+- **Yellow (must reach Green):** M4 (seed/bootnodes — format+placeholder landed Run 357, still a launch blocker
   until live seeds + reachability evidence land), M6 (identity — guidance landed Run 358, generation command still
   missing), M7, M8, M9, M10, M11, M12, M13, M14, M15.
 
@@ -326,8 +331,8 @@ Columns: item · release stage · category · status · evidence source · block
 | Item | Stage | Category | Status | Evidence source | Blocker | Risk if launched without | Next run |
 |------|-------|----------|--------|-----------------|---------|--------------------------|----------|
 | genesis package | DevNet | network | 🟢 | `docs/release/public-devnet/genesis/` (Run 356) | Published + verified | Operators join divergent chains | Done (Run 356) |
-| release binary provenance | DevNet | binary | 🟡 | `build.sh`, per-run `artifact_sha256.txt` | No published provenance record | Unverifiable binaries | Emit provenance record |
-| release reproducibility / SHA / BuildID | DevNet | binary | 🔴 | none | No reproducible/BuildID result | Cannot attest what operators run | Reproducible-build run |
+| release binary provenance | DevNet | binary | 🟢 | `docs/release/public-devnet/binary/RELEASE_PROVENANCE.md` (Run 359) | Published + operator-verifiable | Unverifiable binaries | Done (Run 359) |
+| release reproducibility / SHA / BuildID | DevNet | binary | 🟢 | `docs/release/public-devnet/binary/REPRODUCIBILITY.md` (Run 359) | Same-host two-build reproducibility + BuildID recorded | Cannot attest what operators run | Done (Run 359); cross-host/SLSA not claimed |
 | seed nodes / bootnodes | DevNet | network | 🔴 | CLI `--p2p-peer` | No published seeds/discovery | Outsiders cannot join | Publish seed-list format + list |
 | validator onboarding | DevNet | docs | 🟡 | `QBIND_DEVNET_OPERATIONAL_GUIDE.md` | No external quickstart | Onboarding failures/misconfig | Author external quickstart |
 | validator identity | DevNet | security | 🟡 | `cli.rs`, `peer_key_provider.rs` | No identity guide | Identity collisions/misconfig | Identity guide run |
@@ -367,17 +372,22 @@ Columns: item · release stage · category · status · evidence source · block
 
 ## 17. Summary
 
-Public DevNet readiness is a **tracked, evidence-grounded classification**. As of **Run 358**, the canonical
+Public DevNet readiness is a **tracked, evidence-grounded classification**. As of **Run 359**, the canonical
 DevNet genesis package, network parameters, and genesis hash (Run 356) are published and operator-verifiable,
 keeping **M1, M19, M20** Green (joining **M16 incident response**); Run 357 added the canonical seed-list format +
 placeholder artifact, moving **M4 Red → Yellow** while keeping it a launch blocker; Run 358 publishes the external
 operator onboarding package (`docs/release/public-devnet/operator/`), moving **M5, M17, M18 Yellow → Green** and
-keeping **M6 Yellow/Partial** (identity guidance published, but no operator-facing identity-generation command yet).
-Public DevNet is still **not launch-ready**: M3/M4 are unchanged and other must-haves remain Yellow or Red (notably
-**Red** for reproducibility/BuildID (M3), and **Yellow-but-blocking** for seed/bootnodes (M4) until real live seeds
-+ reachability evidence land).
+keeping **M6 Yellow/Partial** (identity guidance published, but no operator-facing identity-generation command yet);
+Run 359 publishes the release-binary provenance + reproducibility/BuildID package
+(`docs/release/public-devnet/binary/`), moving **M2 Yellow → Green** and **M3 Red → Green** on the basis of a
+canonical operator-verifiable provenance record plus a same-host, clean-tree two-build reproducibility result
+(byte-identical `qbind-node`, SHA-256 `f916af6d…b22990`, stable ELF BuildID `274fdaf3…5208b`; cross-host/SLSA/signed
+not claimed).
+Public DevNet is still **not launch-ready**: M4 and the remaining must-haves (M6–M15) are unchanged and remain
+Yellow or Red — notably **Yellow-but-blocking** for seed/bootnodes (M4) until real live seeds + reachability evidence
+land.
 C4 and C5 remain **OPEN**, MainNet authority rotation/revocation remains **Red**, and the Run 353/354 boundary
 remains Green-for-scope only. The most efficient path forward is a small series of consolidated
 documentation/publication runs (onboarding+identity+key-management+quickstart+disclaimers; trust-root bootstrap+PQC
-guidance; monitoring+alerting; port-posture+admission+abuse; reset policy; release provenance/reproducibility;
+guidance; monitoring+alerting; port-posture+admission+abuse; reset policy;
 seed/bootnode list).
