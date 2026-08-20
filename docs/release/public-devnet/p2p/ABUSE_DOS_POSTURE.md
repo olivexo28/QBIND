@@ -147,16 +147,54 @@ Therefore **M12 stays Yellow (strengthened)** and **M12 Green is deferred to Run
 the limiter into runtime, validate under load, and produce release-binary evidence. See
 `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_361.md`.
 
+## 7b. Run 362 runtime wiring (connection-rate limiter live; default-off)
+
+Run 362 wires the Run 361 connection-rate limiter into the **live** `p2p_tcp` accept path behind
+runtime-owned, default-off state, adds a metric, and exposes hidden/devnet-only operator CLI flags:
+
+- Runtime module: `crates/qbind-node/src/public_devnet_abuse_dos_runtime.rs`
+  (`PublicDevnetAbuseDosRuntimeConfig`, `PublicDevnetAbuseDosRuntimeState`, runtime-owned
+  `ConnectionRateLimiterState`).
+- Tests: `crates/qbind-node/tests/run_362_public_devnet_abuse_dos_runtime_tests.rs` (38 tests).
+- Accept-loop integration: `TcpKemTlsP2pService` consults the connection-rate limiter at the top of the
+  accepted-socket arm, **before** any KEMTLS handshake / trust-bundle / genesis work. An over-budget
+  inbound connection is dropped deterministically (socket closed, no peer admitted). With no runtime
+  state installed (the default), the accept loop is byte-for-byte the pre-Run-362 path.
+- **Metric:** `qbind_p2p_connection_rate_drop_total` — an unlabeled counter on `P2pMetrics` that
+  increments **only** when the connection-rate limiter refuses an inbound connection. It carries no
+  endpoint labels or secrets and is registered exactly once.
+- **Operator CLI (hidden / devnet-only, absent from `--help`):**
+  `--p2p-connection-rate-limit-enabled`, `--p2p-connection-rate-window-ms`,
+  `--p2p-connection-rate-max`, `--p2p-connection-burst`, `--p2p-max-messages-per-second`,
+  `--p2p-burst-allowance`, `--p2p-per-address-connection-rate-window-ms`,
+  `--p2p-per-address-connection-max`. Defaults (no flags) preserve behavior exactly; enabling requires a
+  positive window + max; invalid/zero/unbounded/inconsistent values fail closed at CLI validation;
+  MainNet is refused (`MainNetRefused`).
+- **Default preserved:** with no flags, the limiter is disabled, per-peer defaults stay `1000` msg/s +
+  `100` burst, and the accept loop is unchanged.
+
+**M12 stays Yellow/Partial (strengthened).** The connection-rate limiter is now runtime-wired and
+operator-configurable, but the live per-peer **message-rate** limiter (`PeerRateLimiter` in
+`async_peer_manager`) is still not operator-configurable at runtime — the message-rate flags are
+validated into the runtime config but inert against it. M12 Green remains deferred pending per-peer
+message-rate runtime override + load evidence. See `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_362.md` and
+the release-binary evidence archive
+`docs/devnet/run_362_public_devnet_abuse_dos_runtime_release_binary/`.
+
 ## 8. Future work required before TestNet
 
 Before a public TestNet, at minimum:
 
 - Wire the Run 361 `AbuseDosConfig` / `ConnectionRateLimiter` boundary into the node runtime (accept
   loop) and expose operator-configurable rate-limiter thresholds (or document a supported config
-  surface).
+  surface). **(Connection-rate limiter done in Run 362; per-peer message-rate runtime override still
+  outstanding.)**
 - Register and test the planned `qbind_p2p_connection_rate_drop_total` metric at the runtime call site.
+  **(Done in Run 362.)**
 - Publish tuned thresholds validated under real inbound load, with alerting wired to the metrics in
-  §5.
+  §5. **(Load validation still outstanding.)**
 
-None of this is claimed complete by Run 360/361; Run 360 publishes posture, Run 361 adds a source/test
-boundary, and both record the remaining gap.
+None of this is claimed complete by Run 360/361/362; Run 360 publishes posture, Run 361 adds a
+source/test boundary, Run 362 wires the connection-rate limiter into runtime with release-binary
+evidence, and all three record the remaining gap (per-peer message-rate runtime override + load
+validation).
