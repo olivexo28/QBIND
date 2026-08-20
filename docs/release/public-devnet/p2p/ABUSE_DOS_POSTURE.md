@@ -120,13 +120,43 @@ For a future public DevNet seed exposure, the minimum recommended posture is:
   must be enforced externally, **M12 remains Yellow/Partial** — see
   `docs/release/QBIND_PUBLIC_DEVNET_READINESS_CRITERIA.md`.
 
+## 7a. Run 361 source/test hardening boundary (no runtime change)
+
+Run 361 landed a **source/test-only** boundary that makes the abuse/DoS posture operator-configurable
+at the type level and introduces a pure, deterministic inbound connection-rate limiter model:
+
+- Module: `crates/qbind-node/src/public_devnet_abuse_dos_config.rs`.
+- Tests: `crates/qbind-node/tests/run_361_public_devnet_abuse_dos_hardening_tests.rs` (30 tests).
+- `AbuseDosConfig` — typed model for per-peer max messages/sec + burst, global inbound
+  connection-rate window + burst, optional per-remote-address window, a fail-open/fail-closed marker,
+  environment binding, optional genesis-hash binding, and an explicit profile marker; validated to
+  reject zero / nonsensical / unbounded / wrong-environment / genesis-mismatch / MainNet values.
+- `ConnectionRateLimiter` + `ConnectionRateLimiterState` — a bounded token-bucket connection-rate
+  limiter with deterministic outcomes (`ConnectionAllowed`, `ConnectionRateLimited`,
+  `ConnectionLimiterDisabled`, `InvalidConfig`, `MainNetRefused`, `StateUnavailable`) that writes
+  **only** into caller-owned fixture state.
+- **Safe default:** `AbuseDosConfig::default()` preserves the current `1000` msg/s + `100` burst
+  per-peer behavior and leaves the connection limiter **disabled** — importing the module changes
+  nothing at runtime.
+
+This is **source/test only**: there is **no** runtime wiring into the `p2p_tcp` accept loop, **no**
+public CLI flag, and **no** default behavior change. The intended integration call site is captured as
+a documentation adapter shape (`inbound_connection_adapter_shape`). No metric is registered; the future
+connection-rate-drop metric name (`qbind_p2p_connection_rate_drop_total`) is reserved but not added.
+Therefore **M12 stays Yellow (strengthened)** and **M12 Green is deferred to Run 362**, which must wire
+the limiter into runtime, validate under load, and produce release-binary evidence. See
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_361.md`.
+
 ## 8. Future work required before TestNet
 
 Before a public TestNet, at minimum:
 
-- Expose operator-configurable rate-limiter thresholds (or document a supported config surface).
-- Add per-connection and global inbound-connection-rate limiting at the node layer.
+- Wire the Run 361 `AbuseDosConfig` / `ConnectionRateLimiter` boundary into the node runtime (accept
+  loop) and expose operator-configurable rate-limiter thresholds (or document a supported config
+  surface).
+- Register and test the planned `qbind_p2p_connection_rate_drop_total` metric at the runtime call site.
 - Publish tuned thresholds validated under real inbound load, with alerting wired to the metrics in
   §5.
 
-None of this is claimed complete by Run 360; this document publishes posture and records the gap.
+None of this is claimed complete by Run 360/361; Run 360 publishes posture, Run 361 adds a source/test
+boundary, and both record the remaining gap.
