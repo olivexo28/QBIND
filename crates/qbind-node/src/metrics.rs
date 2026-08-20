@@ -6017,6 +6017,31 @@ pub struct P2pMetrics {
     peer_candidate_propagation_suppressed_duplicate_total: AtomicU64,
     peer_candidate_propagation_suppressed_invalid_total: AtomicU64,
     peer_candidate_propagation_rate_limited_total: AtomicU64,
+
+    // ------------------------------------------------------------------
+    // Run 362 — public DevNet abuse/DoS runtime wiring.
+    //
+    //   qbind_p2p_connection_rate_drop_total
+    //       (counter; +1 each time the runtime-owned inbound
+    //       connection-rate limiter
+    //       (`public_devnet_abuse_dos_runtime::PublicDevnetAbuseDosRuntimeState`)
+    //       refuses/drops an inbound connection in the `p2p_tcp`
+    //       accept loop. Zero unless an operator explicitly enables
+    //       and configures the connection-rate limiter — the default
+    //       disabled profile never touches this counter.)
+    //
+    // Discipline:
+    // - No label cardinality; no per-remote-address label (raw remote
+    //   endpoints are never leaked into the metric).
+    // - Bumped ONLY by
+    //   `PublicDevnetAbuseDosRuntimeState::check_inbound` on the
+    //   `ConnectionRateLimited` decision. An allowed / disabled /
+    //   defensive-non-decision outcome never bumps it.
+    // - Distinct from the per-peer message-rate `rate_limit_drop`
+    //   family: that limits inbound MESSAGES per admitted peer; this
+    //   limits inbound CONNECTIONS before admission.
+    // ------------------------------------------------------------------
+    connection_rate_drop_total: AtomicU64,
 }
 
 impl P2pMetrics {
@@ -6992,6 +7017,13 @@ impl P2pMetrics {
             self.peer_candidate_propagation_rate_limited_total()
         ));
 
+        // Run 362 — runtime-owned inbound connection-rate drop counter. Zero
+        // unless an operator explicitly enables the connection-rate limiter.
+        output.push_str(&format!(
+            "qbind_p2p_connection_rate_drop_total {}\n",
+            self.connection_rate_drop_total()
+        ));
+
         output
     }
 
@@ -7687,8 +7719,20 @@ impl P2pMetrics {
         self.peer_candidate_propagation_rate_limited_total
             .fetch_add(1, Ordering::Relaxed);
     }
-}
 
+    /// Total inbound connections refused by the runtime-owned connection-rate
+    /// limiter (`qbind_p2p_connection_rate_drop_total`).
+    pub fn connection_rate_drop_total(&self) -> u64 {
+        self.connection_rate_drop_total.load(Ordering::Relaxed)
+    }
+
+    /// Record one inbound connection-rate refusal. Bumped only by the
+    /// runtime-owned limiter on a `ConnectionRateLimited` decision.
+    pub fn record_connection_rate_drop(&self) {
+        self.connection_rate_drop_total
+            .fetch_add(1, Ordering::Relaxed);
+    }
+}
 // ============================================================================
 // Run 044 — CertVerifyMetricsSink adapter
 // ============================================================================

@@ -686,6 +686,72 @@ pub struct CliArgs {
     )]
     pub p2p_trust_bundle_peer_candidate_propagation_enabled: bool,
 
+    // ------------------------------------------------------------------
+    // Run 362 — hidden, disabled-by-default public-DevNet abuse/DoS
+    // connection-rate limiter flags. These wire the Run 361
+    // `AbuseDosConfig` / `ConnectionRateLimiter` model into the live
+    // `p2p_tcp` accept path via `p2p_node_builder`.
+    //
+    // DevNet/public-DevNet abuse/DoS posture ONLY — NOT MainNet
+    // readiness. Defaults preserve current behaviour exactly (per-peer
+    // 1000 msg/s + 100 burst, connection limiter disabled). Enabling the
+    // limiter requires `--p2p-connection-rate-limit-enabled` together
+    // with a positive window + max; invalid/zero/unbounded values fail
+    // closed at config validation. MainNet use is refused. See
+    // `docs/release/public-devnet/p2p/ABUSE_DOS_POSTURE.md`.
+    // ------------------------------------------------------------------
+
+    /// Run 362 (DevNet/public-DevNet abuse/DoS posture; NOT MainNet
+    /// readiness): enable the runtime-owned inbound connection-rate
+    /// limiter. Disabled by default; when unset the accept loop is
+    /// bit-for-bit unchanged. When set, `--p2p-connection-rate-window-ms`
+    /// and `--p2p-connection-rate-max` must be positive or startup fails
+    /// closed.
+    #[arg(long = "p2p-connection-rate-limit-enabled", hide = true)]
+    pub p2p_connection_rate_limit_enabled: bool,
+
+    /// Run 362 (DevNet abuse/DoS posture): override the per-peer sustained
+    /// inbound message rate (messages/second). Default (unset) preserves
+    /// the current hardcoded `1000` msg/s. Zero is rejected.
+    #[arg(long = "p2p-max-messages-per-second", hide = true)]
+    pub p2p_max_messages_per_second: Option<u64>,
+
+    /// Run 362 (DevNet abuse/DoS posture): override the per-peer burst
+    /// allowance. Default (unset) preserves the current hardcoded `100`.
+    #[arg(long = "p2p-burst-allowance", hide = true)]
+    pub p2p_burst_allowance: Option<u64>,
+
+    /// Run 362 (DevNet abuse/DoS posture): global inbound connection-rate
+    /// window in milliseconds. Required (positive) when
+    /// `--p2p-connection-rate-limit-enabled` is set. Zero is rejected.
+    #[arg(long = "p2p-connection-rate-window-ms", hide = true)]
+    pub p2p_connection_rate_window_ms: Option<u64>,
+
+    /// Run 362 (DevNet abuse/DoS posture): maximum inbound connections
+    /// admitted per global connection-rate window. Required (positive)
+    /// when `--p2p-connection-rate-limit-enabled` is set. Zero is rejected.
+    #[arg(long = "p2p-connection-rate-max", hide = true)]
+    pub p2p_connection_rate_max: Option<u64>,
+
+    /// Run 362 (DevNet abuse/DoS posture): additional global inbound
+    /// connection burst allowance above the window rate. Default `0`.
+    #[arg(long = "p2p-connection-burst", hide = true)]
+    pub p2p_connection_burst: Option<u64>,
+
+    /// Run 362 (DevNet abuse/DoS posture): optional per-remote-address
+    /// connection-rate window in milliseconds. When set together with
+    /// `--p2p-per-address-connection-max`, an abusive single address is
+    /// bounded independently of the global budget. Zero is rejected.
+    #[arg(long = "p2p-per-address-connection-rate-window-ms", hide = true)]
+    pub p2p_per_address_connection_rate_window_ms: Option<u64>,
+
+    /// Run 362 (DevNet abuse/DoS posture): maximum inbound connections per
+    /// per-address window. Required (positive) when
+    /// `--p2p-per-address-connection-rate-window-ms` is set. Zero is
+    /// rejected.
+    #[arg(long = "p2p-per-address-connection-max", hide = true)]
+    pub p2p_per_address_connection_max: Option<u64>,
+
     /// Run 147 — hidden, **disabled-by-default** operator opt-in flag
     /// that arms the Run 146 [`LivePeerCandidateWireDispatcher`]
     /// non-applying [`PeerCandidateStagingQueue`] hook on the live
@@ -1789,6 +1855,105 @@ impl CliArgs {
             value: s.to_string(),
             reason: format!("{}", e),
         })
+    }
+
+    /// Run 362: build the optional operator-supplied public-DevNet abuse/DoS
+    /// runtime config from the hidden `--p2p-connection-rate-limit-*` /
+    /// `--p2p-max-messages-per-second` / `--p2p-burst-allowance` flag family.
+    ///
+    /// Returns:
+    /// - `Ok(None)` when no abuse/DoS flag is supplied — the accept loop stays
+    ///   bit-for-bit unchanged (default behavior preserved);
+    /// - `Ok(Some(cfg))` when a validated config is supplied. The connection
+    ///   limiter is installed by `p2p_node_builder` only when it is enabled;
+    /// - `Err(..)` (fail-closed) for zero/nonsensical/unbounded/inconsistent
+    ///   values, or MainNet (no production abuse/DoS policy exists).
+    ///
+    /// This is DevNet/public-DevNet abuse/DoS posture only, not MainNet
+    /// readiness.
+    pub fn abuse_dos_runtime_config(
+        &self,
+    ) -> Result<
+        Option<crate::public_devnet_abuse_dos_runtime::PublicDevnetAbuseDosRuntimeConfig>,
+        CliError,
+    > {
+        use crate::public_devnet_abuse_dos_config::{AbuseDosConfig, AbuseDosProfile};
+        use crate::public_devnet_abuse_dos_runtime::PublicDevnetAbuseDosRuntimeConfig;
+
+        let any = self.p2p_connection_rate_limit_enabled
+            || self.p2p_max_messages_per_second.is_some()
+            || self.p2p_burst_allowance.is_some()
+            || self.p2p_connection_rate_window_ms.is_some()
+            || self.p2p_connection_rate_max.is_some()
+            || self.p2p_connection_burst.is_some()
+            || self.p2p_per_address_connection_rate_window_ms.is_some()
+            || self.p2p_per_address_connection_max.is_some();
+        if !any {
+            return Ok(None);
+        }
+
+        let environment = parse_environment(&self.environment)?;
+
+        let mut cfg = AbuseDosConfig::compatibility_default().with_environment(environment);
+        cfg.profile = AbuseDosProfile::Custom;
+
+        if let Some(v) = self.p2p_max_messages_per_second {
+            cfg.per_peer_max_messages_per_second = v;
+        }
+        if let Some(v) = self.p2p_burst_allowance {
+            cfg.per_peer_burst_allowance = v;
+        }
+
+        if self.p2p_connection_rate_limit_enabled {
+            cfg.connection_limiter_enabled = true;
+            let window_ms = self.p2p_connection_rate_window_ms.ok_or_else(|| {
+                CliError::ConfigValidation(
+                    "--p2p-connection-rate-limit-enabled requires \
+                     --p2p-connection-rate-window-ms"
+                        .to_string(),
+                )
+            })?;
+            let max = self.p2p_connection_rate_max.ok_or_else(|| {
+                CliError::ConfigValidation(
+                    "--p2p-connection-rate-limit-enabled requires --p2p-connection-rate-max"
+                        .to_string(),
+                )
+            })?;
+            cfg.connection_rate_window = std::time::Duration::from_millis(window_ms);
+            cfg.max_connections_per_window = max;
+            cfg.connection_burst_allowance = self.p2p_connection_burst.unwrap_or(0);
+
+            match (
+                self.p2p_per_address_connection_rate_window_ms,
+                self.p2p_per_address_connection_max,
+            ) {
+                (Some(w), Some(m)) => {
+                    cfg.per_address_rate_window = Some(std::time::Duration::from_millis(w));
+                    cfg.max_connections_per_address_window = m;
+                }
+                (None, None) => {}
+                _ => {
+                    return Err(CliError::ConfigValidation(
+                        "--p2p-per-address-connection-rate-window-ms and \
+                         --p2p-per-address-connection-max must be supplied together"
+                            .to_string(),
+                    ));
+                }
+            }
+        } else if self.p2p_connection_rate_window_ms.is_some()
+            || self.p2p_connection_rate_max.is_some()
+            || self.p2p_connection_burst.is_some()
+            || self.p2p_per_address_connection_rate_window_ms.is_some()
+            || self.p2p_per_address_connection_max.is_some()
+        {
+            return Err(CliError::ConfigValidation(
+                "connection-rate flags require --p2p-connection-rate-limit-enabled".to_string(),
+            ));
+        }
+
+        PublicDevnetAbuseDosRuntimeConfig::from_config(cfg)
+            .map(Some)
+            .map_err(|e| CliError::ConfigValidation(format!("abuse/DoS config: {e}")))
     }
 
     /// Build a NodeConfig from CLI arguments.

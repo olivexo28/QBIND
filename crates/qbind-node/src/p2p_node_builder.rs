@@ -703,6 +703,17 @@ pub struct P2pNodeBuilder {
     /// behaviour bit-for-bit.
     peer_candidate_wire_sink:
         Option<Arc<dyn crate::pqc_peer_candidate_wire::PeerCandidateWireFrameSink>>,
+    /// Run 362: optional operator-supplied abuse/DoS runtime config. When set
+    /// (and its connection-rate limiter is enabled), `build()` constructs a
+    /// runtime-owned
+    /// [`crate::public_devnet_abuse_dos_runtime::PublicDevnetAbuseDosRuntimeState`]
+    /// (wiring the shared `Arc<P2pMetrics>` so
+    /// `qbind_p2p_connection_rate_drop_total` reflects real refusals) and
+    /// installs it on the constructed `TcpKemTlsP2pService` via
+    /// `set_abuse_dos_runtime_state`. Default `None` preserves prior
+    /// behaviour bit-for-bit.
+    abuse_dos_runtime_config:
+        Option<crate::public_devnet_abuse_dos_runtime::PublicDevnetAbuseDosRuntimeConfig>,
 }
 
 impl Default for P2pNodeBuilder {
@@ -748,7 +759,11 @@ impl P2pNodeBuilder {
             // None — preserves pre-Run-079 builder/test behaviour
             // bit-for-bit (frames with discriminator 0x05 are
             // dropped cheaply by the read loop).
+            // Run 362: abuse/DoS runtime config defaults to None —
+            // preserves prior builder/test behaviour bit-for-bit (no
+            // runtime-owned connection-rate limiter installed).
             peer_candidate_wire_sink: None,
+            abuse_dos_runtime_config: None,
         }
     }
 
@@ -914,6 +929,24 @@ impl P2pNodeBuilder {
         sink: Arc<dyn crate::pqc_peer_candidate_wire::PeerCandidateWireFrameSink>,
     ) -> Self {
         self.peer_candidate_wire_sink = Some(sink);
+        self
+    }
+
+    /// Run 362: install an operator-supplied abuse/DoS runtime config. When the
+    /// config's connection-rate limiter is enabled, `build()` constructs a
+    /// runtime-owned connection-rate limiter state and installs it on the
+    /// constructed `TcpKemTlsP2pService` so inbound connections are
+    /// rate-limited before admission.
+    ///
+    /// Default `None` (and any config whose limiter is disabled) preserves
+    /// prior behaviour bit-for-bit. The production binary wires this from
+    /// `main.rs` when the hidden `--p2p-connection-rate-limit-enabled` flag
+    /// family is supplied.
+    pub fn with_abuse_dos_runtime_config(
+        mut self,
+        config: crate::public_devnet_abuse_dos_runtime::PublicDevnetAbuseDosRuntimeConfig,
+    ) -> Self {
+        self.abuse_dos_runtime_config = Some(config);
         self
     }
 
@@ -1254,6 +1287,37 @@ impl P2pNodeBuilder {
             },
         ));
 
+        // Run 362: compute the shared `Arc<P2pMetrics>` up front (moved above
+        // `start()`) so the runtime-owned abuse/DoS connection-rate limiter can
+        // be installed BEFORE the accept loop begins and can bump
+        // `qbind_p2p_connection_rate_drop_total` on real refusals. Prefer a
+        // caller-supplied `Arc<P2pMetrics>` so the live binary shares exactly
+        // one instance between the transport and the `/metrics` scrape; fall
+        // back to a fresh local instance for builder-only tests. This is an
+        // `Arc` clone / allocation only — no behaviour change.
+        let metrics = self
+            .p2p_metrics
+            .clone()
+            .unwrap_or_else(|| Arc::new(P2pMetrics::new()));
+
+        // Run 362: install the runtime-owned abuse/DoS connection-rate limiter
+        // (if the operator enabled it) BEFORE `start()` so the very first
+        // accepted connection is already subject to it. A disabled limiter
+        // (default) is not installed, preserving prior behaviour bit-for-bit.
+        if let Some(abuse_cfg) = self.abuse_dos_runtime_config.as_ref() {
+            if abuse_cfg.connection_limiter_enabled() {
+                let runtime_state = abuse_cfg
+                    .clone()
+                    .into_runtime_state(Some(Arc::clone(&metrics)))
+                    .map_err(|e| {
+                        P2pTransportError::Config(format!(
+                            "invalid abuse/DoS connection-rate limiter config: {e}"
+                        ))
+                    })?;
+                p2p_service.set_abuse_dos_runtime_state(Arc::new(runtime_state));
+            }
+        }
+
         // Start the service
         p2p_service.start().await?;
 
@@ -1266,10 +1330,8 @@ impl P2pNodeBuilder {
         // `NodeMetrics::format_metrics`). Falls back to a fresh local
         // instance for builder-only tests, preserving pre-Run-043
         // behaviour bit-for-bit when `with_p2p_metrics` is not called.
-        let metrics = self
-            .p2p_metrics
-            .clone()
-            .unwrap_or_else(|| Arc::new(P2pMetrics::new()));
+        // Run 362: `metrics` is now computed above `start()`; this binding is
+        // retained as-is for the downstream code below.
 
         // Run 037: surface PQC root distribution mode in metrics so
         // operators / scrapers can confirm at a glance whether the

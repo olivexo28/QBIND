@@ -496,6 +496,22 @@ pub struct TcpKemTlsP2pService {
     /// `--p2p-trust-bundle-peer-candidate-wire-validation-enabled`
     /// flag is set.
     peer_candidate_wire_sink: Arc<RwLock<Option<Arc<dyn crate::pqc_peer_candidate_wire::PeerCandidateWireFrameSink>>>>,
+    /// Run 362: optional runtime-owned abuse/DoS connection-rate limiter
+    /// state consulted at the top of the accept loop, before any expensive
+    /// per-connection admission work (KEMTLS handshake, trust-bundle /
+    /// genesis checks).
+    ///
+    /// `None` by default (and whenever the operator has not enabled the
+    /// connection-rate limiter), in which case the accept loop is bit-for-bit
+    /// unchanged. When `Some`, an over-budget inbound connection is refused
+    /// and closed early and the `qbind_p2p_connection_rate_drop_total` metric
+    /// is incremented; an under-budget (or disabled-limiter) connection
+    /// proceeds to the unchanged admission path. A refusal never admits a
+    /// peer, never mutates trust state, and never writes any sequence/marker
+    /// file. Installed via
+    /// [`TcpKemTlsP2pService::set_abuse_dos_runtime_state`].
+    abuse_dos_runtime:
+        Arc<RwLock<Option<Arc<crate::public_devnet_abuse_dos_runtime::PublicDevnetAbuseDosRuntimeState>>>>,
 }
 
 impl std::fmt::Debug for TcpKemTlsP2pService {
@@ -543,6 +559,7 @@ impl TcpKemTlsP2pService {
             dial_retry_policy: Arc::new(RwLock::new(DialRetryPolicy::default())),
             dial_handles: Arc::new(RwLock::new(Vec::new())),
             peer_candidate_wire_sink: Arc::new(RwLock::new(None)),
+            abuse_dos_runtime: Arc::new(RwLock::new(None)),
         })
     }
 
@@ -640,6 +657,29 @@ impl TcpKemTlsP2pService {
     /// just a boolean to avoid leaking the trait object.
     pub fn has_peer_candidate_wire_frame_sink(&self) -> bool {
         self.peer_candidate_wire_sink.read().is_some()
+    }
+
+    /// Run 362: install the runtime-owned abuse/DoS connection-rate limiter
+    /// state consulted by the accept loop.
+    ///
+    /// Must be called before `start()` so the very first accepted connection
+    /// is already subject to the limiter. Default (never called, or the
+    /// operator did not enable the limiter) leaves the accept loop bit-for-bit
+    /// unchanged. This is the production-binary entry point used by
+    /// `p2p_node_builder` when the operator opts in via the hidden
+    /// `--p2p-connection-rate-limit-enabled` flag family.
+    pub fn set_abuse_dos_runtime_state(
+        &self,
+        state: Arc<crate::public_devnet_abuse_dos_runtime::PublicDevnetAbuseDosRuntimeState>,
+    ) {
+        *self.abuse_dos_runtime.write() = Some(state);
+    }
+
+    /// Run 362: whether a runtime-owned abuse/DoS connection-rate limiter has
+    /// been installed (tests / observability). Returns `false` in the default
+    /// configuration.
+    pub fn has_abuse_dos_runtime_state(&self) -> bool {
+        self.abuse_dos_runtime.read().is_some()
     }
 
     // ------------------------------------------------------------------
@@ -826,6 +866,7 @@ impl TcpKemTlsP2pService {
         let inbound_session_counter = Arc::clone(&self.inbound_session_counter);
         let inbound_identity_resolver = Arc::clone(&self.inbound_identity_resolver);
         let peer_candidate_wire_sink = Arc::clone(&self.peer_candidate_wire_sink);
+        let abuse_dos_runtime = Arc::clone(&self.abuse_dos_runtime);
 
         tokio::spawn(async move {
             let mut shutdown_rx = shutdown_rx;
@@ -838,6 +879,34 @@ impl TcpKemTlsP2pService {
                     result = listener.accept() => {
                         match result {
                             Ok((stream, peer_addr)) => {
+                                // Run 362: consult the runtime-owned inbound
+                                // connection-rate limiter (if installed and
+                                // enabled) BEFORE any expensive per-connection
+                                // admission work. Over-budget connections are
+                                // refused deterministically and the socket is
+                                // dropped early; the KEMTLS handshake,
+                                // trust-bundle and genesis checks never run for
+                                // a refused connection, and no peer is admitted.
+                                // Default (no limiter installed) skips this
+                                // block entirely and preserves prior behavior.
+                                let admit = {
+                                    let guard = abuse_dos_runtime.read();
+                                    match guard.as_ref() {
+                                        Some(state) => {
+                                            state.should_admit(peer_addr, std::time::Instant::now())
+                                        }
+                                        None => true,
+                                    }
+                                };
+                                if !admit {
+                                    println!(
+                                        "[P2P] Connection-rate limited inbound from {}",
+                                        peer_addr
+                                    );
+                                    drop(stream);
+                                    continue;
+                                }
+
                                 println!("[P2P] Accepted connection from {}", peer_addr);
 
                                 let peers_clone = Arc::clone(&peers);
