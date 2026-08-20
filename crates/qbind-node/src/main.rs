@@ -6814,6 +6814,36 @@ async fn run_p2p_node(
         builder
     };
 
+    // Run 362: parse + validate the optional operator-supplied public-DevNet
+    // abuse/DoS connection-rate limiter config from the hidden
+    // `--p2p-connection-rate-limit-*` flag family. Fail closed on any
+    // invalid / inconsistent / MainNet config; when absent the accept loop is
+    // bit-for-bit unchanged. The builder installs the runtime-owned limiter
+    // only when the connection limiter is enabled.
+    let builder = match args.abuse_dos_runtime_config() {
+        Ok(Some(abuse_cfg)) => {
+            if abuse_cfg.connection_limiter_enabled() {
+                eprintln!(
+                    "[binary] Run 362: public-DevNet abuse/DoS inbound connection-rate \
+                     limiter ENABLED (DevNet posture; not MainNet readiness). \
+                     qbind_p2p_connection_rate_drop_total will increment on refusals."
+                );
+            } else {
+                eprintln!(
+                    "[binary] Run 362: abuse/DoS per-peer overrides supplied but the \
+                     inbound connection-rate limiter is disabled; accept-loop connection \
+                     admission is unchanged."
+                );
+            }
+            builder.with_abuse_dos_runtime_config(abuse_cfg)
+        }
+        Ok(None) => builder,
+        Err(e) => {
+            eprintln!("[binary] FATAL: invalid abuse/DoS configuration: {}", e);
+            std::process::exit(1);
+        }
+    };
+
     let node_context = match builder.build(config, validator_id).await {
         Ok(ctx) => ctx,
         Err(e) => {

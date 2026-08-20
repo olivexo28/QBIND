@@ -13,6 +13,10 @@ commands; none deploy infrastructure, none open a public port, and none claim la
 - Run 360 published the P2P port / peer-admission / abuse-DoS posture (docs-only, CLI-validated).
 - Run 361 added a **source/test-only** operator-configurable abuse/DoS config model + a bounded inbound
   connection-rate limiter boundary. **No runtime wiring, no CLI flag, no default change.**
+- Run 362 **wires the connection-rate limiter into the live `p2p_tcp` accept loop** behind
+  runtime-owned, default-off state, adds the `qbind_p2p_connection_rate_drop_total` metric, and exposes
+  hidden/devnet-only operator CLI flags. Defaults are preserved bit-for-bit. §4 below describes the
+  Run 361 boundary state; §7 describes the Run 362 runtime wiring.
 
 ## 2. Verify the abuse/DoS posture doc matches source
 
@@ -41,16 +45,14 @@ cargo test -p qbind-node --test run_361_public_devnet_abuse_dos_hardening_tests
 cargo test -p qbind-node --lib
 ```
 
-## 4. Verify no runtime wiring / CLI flag was added
+## 4. Verify the Run 361 boundary state (source/test only)
+
+The following describes the **Run 361** boundary as it stood before Run 362 runtime wiring; §7
+documents the Run 362 changes.
 
 ```
-# The connection-rate limiter is NOT referenced by the live accept loop:
-grep -n "ConnectionRateLimiter\|public_devnet_abuse_dos_config" crates/qbind-node/src/p2p_tcp.rs || \
-  echo "OK: no runtime wiring in p2p_tcp.rs"
-
-# No new public CLI flag was added for the abuse/DoS config:
-grep -n "abuse.dos\|connection-rate\|connection_rate" crates/qbind-node/src/cli.rs || \
-  echo "OK: no new abuse/DoS CLI flag"
+# As of Run 361, the connection-rate limiter was NOT referenced by the live accept loop.
+# As of Run 362 it IS (behind runtime-owned, default-off state) — see §7.
 ```
 
 ## 5. Verify the safe default preserves current behavior
@@ -61,7 +63,41 @@ leaves the connection limiter **disabled** (test `t01_default_profile_preserves_
 
 ## 6. Verify no forbidden claim
 
-Run 361 does not claim public DevNet launch-readiness, TestNet readiness, MainNet readiness, C4/C5
-closure, or M4/M6/M12 Green. M12 stays **Yellow (strengthened)**; Green is deferred to Run 362 pending
-runtime wiring + release-binary evidence. See `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_361.md` and
+Run 361/362 do not claim public DevNet launch-readiness, TestNet readiness, MainNet readiness, C4/C5
+closure, or M4/M6 Green. **M12 stays Yellow/Partial (strengthened)**: Run 362 wires the connection-rate
+limiter into runtime with release-binary evidence, but M12 Green remains deferred because the live
+per-peer message-rate limiter is still not operator-configurable at runtime. See
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_362.md` and
 `docs/release/QBIND_PUBLIC_DEVNET_READINESS_CRITERIA.md`.
+
+## 7. Verify the Run 362 runtime wiring
+
+```
+# Runtime module and Run 362 test target exist:
+ls crates/qbind-node/src/public_devnet_abuse_dos_runtime.rs
+ls crates/qbind-node/tests/run_362_public_devnet_abuse_dos_runtime_tests.rs
+
+# The connection-rate limiter IS now consulted by the live accept loop (behind runtime-owned state):
+grep -n "abuse_dos_runtime\|should_admit" crates/qbind-node/src/p2p_tcp.rs
+
+# The connection-rate-drop metric is registered on P2pMetrics:
+grep -n "connection_rate_drop_total\|qbind_p2p_connection_rate_drop_total" \
+  crates/qbind-node/src/metrics.rs
+
+# The hidden/devnet-only abuse/DoS CLI flags exist (and are absent from --help):
+grep -n "p2p-connection-rate-limit-enabled\|abuse_dos_runtime_config" crates/qbind-node/src/cli.rs
+
+# Build the release binary + helper, then run the Run 362 harness (captures SHA-256s + verdict):
+cargo build -p qbind-node --release
+cargo build -p qbind-node --release \
+  --example run_362_public_devnet_abuse_dos_runtime_release_binary_helper
+scripts/devnet/run_362_public_devnet_abuse_dos_runtime_release_binary.sh /tmp/run362_out
+
+# Run the Run 362 tests + Run 361 regression + library tests:
+cargo test -p qbind-node --test run_362_public_devnet_abuse_dos_runtime_tests
+cargo test -p qbind-node --test run_361_public_devnet_abuse_dos_hardening_tests
+cargo test -p qbind-node --lib
+
+# The abuse/DoS flags are hidden (devnet-only) and MUST NOT appear in --help:
+target/release/qbind-node --help | grep -c "p2p-connection-rate" || echo "OK: hidden from --help"
+```

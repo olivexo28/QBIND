@@ -2124,6 +2124,9 @@ pub mod peer_rate_limiter;
 // Run 361 — Public DevNet abuse/DoS hardening: operator-configurable rate-limit
 // posture + bounded inbound connection-rate limiter boundary (source/test only).
 pub mod public_devnet_abuse_dos_config;
+// Run 362 — runtime wiring for the Run 361 abuse/DoS model: runtime-owned
+// connection-rate limiter state installed into the P2P accept path.
+pub mod public_devnet_abuse_dos_runtime;
 pub mod remote_signer;
 pub mod secure_channel;
 pub mod signer_loader;

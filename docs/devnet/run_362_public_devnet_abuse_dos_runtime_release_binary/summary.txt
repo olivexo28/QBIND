@@ -1,0 +1,62 @@
+=== Run 362 release-binary evidence (tracked summary) ===
+
+Verdict: PASS (release-binary evidence for the public DevNet abuse/DoS runtime
+wiring; NOT a public DevNet launch and NOT a Green M12 / TestNet / MainNet
+readiness claim).
+
+Provenance
+----------
+branch:          copilot/run-362-task
+git_commit:      a7d7c4bb48f256c7e8e18473b41e8484dfcc39f1 (core wiring; evidence
+                 + docs land in a follow-up commit on the same branch)
+toolchain:       rustc 1.97.1 (8bab26f4f 2026-07-14)
+cargo:           cargo 1.97.1 (c980f4866 2026-06-30)
+node_bin:        target/release/qbind-node
+node_bin_sha256: c1171fd1bc3f111ec2defe7d28d2e7dde9a985903e633caca4125a9b502b1733
+node_build_id:   323a116f912f7d458e12d06bf0c9a809c39bf5c0
+helper_bin:      target/release/examples/run_362_public_devnet_abuse_dos_runtime_release_binary_helper
+helper_sha256:   29b1ae238c3e8e52601cf70d4e98b64bc4bac7d245efa5774d4d2451bbf29a4c
+helper_build_id: 67569c6b0a3f460d31da66aa2528aca3926e9fda
+
+NOTE: SHA-256 / Build ID values are environment-specific (they depend on the
+exact toolchain, absolute build path, and dependency versions) and are recorded
+here only as reproducibility anchors for this build. Re-running the harness in a
+different environment will legitimately produce different hashes.
+
+Release-built helper (real Run 361/362 runtime symbols)
+-------------------------------------------------------
+scenarios_total:  5
+scenarios_passed: 5
+verdict:          PASS
+
+  01_default_preserves_behavior   disabled limiter never refuses; drop_count=0
+  02_enabled_allows_then_refuses  30 admitted; 31st ConnectionRateLimited; metric=1
+  03_invalid_config_fails_closed  zero-window enabled config rejected
+  04_mainnet_refused              MainNet abuse/DoS config refused
+  05_metric_not_increment_on_allow allowed connection leaves metric at 0
+
+metric_name:      qbind_p2p_connection_rate_drop_total
+registered_once:  true
+endpoint_label_leak: false
+rendered_line:    qbind_p2p_connection_rate_drop_total 1
+
+Production binary CLI surface
+-----------------------------
+help_hidden_flags_absent: true   (all Run 362 abuse/DoS flags are hidden/devnet-only)
+invented_flag_rejected:   true   (rc=2; clap rejects --p2p-connection-rate-bogus)
+real_hidden_flags_parse:  true   (rc=0; the real hidden flags parse)
+
+Scope / non-claims
+------------------
+Run 362 does NOT launch a public DevNet, deploy a seed / bootnode / faucet /
+RPC / explorer / status page, open a default-open public port, change any P2P
+wire format, weaken peer admission or trust-bundle behavior, wire authority
+lifecycle, or mutate validator set / epoch state. Default behavior is preserved
+bit-for-bit (limiter disabled by default). M4 remains Yellow/launch-blocking;
+M6 remains Yellow; C4 and C5 remain OPEN; M12 stays Yellow/Partial (strengthened)
+because per-peer message-rate runtime override is not delivered — see
+docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_362.md.
+
+Reproduce
+---------
+scripts/devnet/run_362_public_devnet_abuse_dos_runtime_release_binary.sh <OUT_DIR>
