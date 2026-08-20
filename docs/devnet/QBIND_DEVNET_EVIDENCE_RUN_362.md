@@ -270,10 +270,11 @@ the Run 353/354 boundary remains Green-for-scope only and is not wired into runt
 
 ## 22. CodeQL
 
-- CodeQL (Rust) result recorded verbatim in the run log; **not claimed clean** unless it ran to
-  completion with zero true-positive alerts. If it was skipped / timed out / reported
-  database-too-large / infrastructure failure, that exact status is recorded and no CodeQL coverage is
-  asserted for this diff.
+- CodeQL (Rust) was invoked over the source changes and **did not run to completion**: the analysis was
+  **skipped because the CodeQL database size is too large** ("Analysis was skipped because the database
+  size is too large"; 0 alerts reported). Per the run rules this is **not** claimed clean — the result
+  is an infrastructure/database-size skip, not a clean pass. No CodeQL coverage is asserted for this
+  diff. This matches the Run 361 CodeQL outcome on the same repository.
 
 ## 23. Provenance
 
