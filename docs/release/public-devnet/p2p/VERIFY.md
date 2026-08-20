@@ -101,3 +101,36 @@ cargo test -p qbind-node --lib
 # The abuse/DoS flags are hidden (devnet-only) and MUST NOT appear in --help:
 target/release/qbind-node --help | grep -c "p2p-connection-rate" || echo "OK: hidden from --help"
 ```
+
+## 7a. Verify the Run 363 per-peer message-rate runtime override (source/test)
+
+Run 363 makes the hidden `--p2p-max-messages-per-second` / `--p2p-burst-allowance` flags actually
+affect the live per-peer `PeerRateLimiter` used by `AsyncPeerManager` (default preserved: `1000` msg/s
++ `100` burst). Source/test only; release-binary evidence is deferred to Run 364.
+
+```
+# Run 363 test target exists:
+ls crates/qbind-node/tests/run_363_public_devnet_per_peer_message_rate_runtime_tests.rs
+
+# The runtime config derives a validated per-peer PeerRateLimiterConfig:
+grep -n "peer_rate_limiter_config\|build_peer_rate_limiter" \
+  crates/qbind-node/src/public_devnet_abuse_dos_runtime.rs
+
+# The peer-manager builds its live per-peer limiter from the operator-configured thresholds:
+grep -n "peer_rate_limiter_config\|with_peer_rate_limiter_config\|build_peer_rate_limiter" \
+  crates/qbind-node/src/async_peer_manager.rs
+
+# Run the Run 363 tests + Run 362/361 regressions + library tests:
+cargo build -p qbind-node --lib
+cargo test -p qbind-node --test run_363_public_devnet_per_peer_message_rate_runtime_tests
+cargo test -p qbind-node --test run_362_public_devnet_abuse_dos_runtime_tests
+cargo test -p qbind-node --test run_361_public_devnet_abuse_dos_hardening_tests
+cargo test -p qbind-node --lib
+
+# The per-peer message-rate flags remain hidden (devnet-only) and MUST NOT appear in --help:
+target/release/qbind-node --help | grep -c "p2p-max-messages-per-second" || echo "OK: hidden from --help"
+```
+
+See `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_363.md`. **M12 stays Yellow/Partial (stronger); Green is
+deferred to Run 364** pending release-binary evidence for both connection-rate and per-peer
+message-rate runtime configurability.

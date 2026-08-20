@@ -47,6 +47,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use crate::metrics::P2pMetrics;
+use crate::peer_rate_limiter::{PeerRateLimiter, PeerRateLimiterConfig};
 use crate::public_devnet_abuse_dos_config::{
     AbuseDosConfig, AbuseDosConfigError, ConnectionDecision, ConnectionRateLimiter,
     ConnectionRateLimiterState, RemoteAddr,
@@ -97,6 +98,30 @@ impl PublicDevnetAbuseDosRuntimeConfig {
     /// defaults and leaves the connection limiter disabled.
     pub fn preserves_runtime_defaults(&self) -> bool {
         self.config.preserves_runtime_defaults()
+    }
+
+    /// Run 363: derive the validated per-peer [`PeerRateLimiterConfig`] this
+    /// posture applies to the live per-peer inbound message-rate limiter used by
+    /// the peer-manager path.
+    ///
+    /// The backing [`AbuseDosConfig`] was validated at construction
+    /// ([`from_config`](Self::from_config) / [`disabled_default`](Self::disabled_default)),
+    /// so the returned config carries only accepted per-peer thresholds
+    /// (non-zero, bounded max messages/sec and bounded burst). The safe default
+    /// yields exactly `1000` msg/s + `100` burst, matching
+    /// [`crate::peer_rate_limiter::PeerRateLimiter::with_defaults`].
+    pub fn peer_rate_limiter_config(&self) -> PeerRateLimiterConfig {
+        self.config.peer_rate_limiter_config()
+    }
+
+    /// Run 363: build a live per-peer [`PeerRateLimiter`] from the validated
+    /// per-peer thresholds carried by this runtime config.
+    ///
+    /// This is the single source/test seam through which the hidden
+    /// `--p2p-max-messages-per-second` / `--p2p-burst-allowance` overrides reach
+    /// the live per-peer message-rate limiter construction path.
+    pub fn build_peer_rate_limiter(&self) -> PeerRateLimiter {
+        PeerRateLimiter::new(self.peer_rate_limiter_config())
     }
 
     /// Build the runtime-owned state from this config, optionally wiring the
