@@ -1,0 +1,100 @@
+=== Run 366 release-binary end-to-end evidence (tracked summary) ===
+
+Verdict: Partial-positive (release-binary END-TO-END evidence for BOTH public
+DevNet abuse/DoS M12 controls — connection-rate limiter + per-peer message-rate
+override threaded through the DEPLOYED P2pNodeBuilder path from Run 365). NOT a
+public DevNet launch and NOT a Green M12 / TestNet / MainNet readiness claim.
+M12 stays Yellow/Partial (strengthened) — see the M12 disposition below and
+docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_366.md.
+
+Provenance
+----------
+branch:          copilot/run-366-update-application-logs
+base_git_commit: 12714a8a2c35ecf46fdcf95dc35714bc92336369 (helper + harness + docs
+                 land on this branch)
+toolchain:       rustc 1.97.1 (8bab26f4f 2026-07-14)
+cargo:           cargo 1.97.1 (c980f4866 2026-06-30)
+node_bin:        target/release/qbind-node
+node_bin_sha256: 1c4e546f3a766c006d2bd9601a3a404e9983c0e32d52fd8691b367ded667e381
+node_build_id:   147246663749c27398299ae69a57140bf7d2b2f1
+helper_bin:      target/release/examples/run_366_public_devnet_abuse_dos_m12_end_to_end_release_helper
+helper_sha256:   9cd59f7caa48705922d8fb7a77881d6175f80cf2e54e099290c336ff9dad9d47
+helper_build_id: 511214803e24c9fc585ac6d78af9f443a5c5b8a6
+
+NOTE: SHA-256 / Build ID values are environment-specific (they depend on the
+exact toolchain, absolute build path, and dependency versions) and are recorded
+here only as reproducibility anchors for this build. Re-running the harness in a
+different environment will legitimately produce different hashes.
+
+Release-built helper (real Run 361/362/363/365 runtime symbols; per-peer
+scenarios drive the DEPLOYED P2pNodeBuilder path)
+-----------------------------------------------------------------------------
+scenarios_total:  8
+scenarios_passed: 8
+verdict:          PASS
+
+  01_default_preserves_behavior                deployed builder derives None; conn limiter disabled; per-peer 1000/100; drop metric 0
+  02_connection_rate_end_to_end                4 admitted; over-budget ConnectionRateLimited; no admit on refusal; metric increments per refusal
+  03_per_peer_message_rate_end_to_end          deployed builder installs 5/0; deployed pm honors it; 5 allowed; 6th dropped; conn metric 0
+  04_combined_independence                     conn refusal doesn't admit; msg drop on admitted deployed path; counters distinct
+  05_invalid_configs_fail_closed               zero-window/zero-msg/zero-conn/unbounded/inconsistent all rejected
+  06_mainnet_refused                           MainNet abuse/DoS config refused (direct + CLI)
+  07_cli_surface_hidden_and_parse_checked      hidden flags absent from --help; real parse; invented rejected
+  08_deployed_builder_matches_direct_default   deployed default == direct default (no drift)
+
+metric_name:      qbind_p2p_connection_rate_drop_total
+registered_once:  true
+endpoint_label_leak: false
+rendered_line:    qbind_p2p_connection_rate_drop_total 1
+
+Production binary CLI surface
+-----------------------------
+help_hidden_flags_absent:  true   (all Run 362/363 abuse/DoS flags are hidden/devnet-only)
+invented_flag_rejected:    true   (rc=2; clap rejects --p2p-connection-rate-bogus)
+real_hidden_flags_parse:   true   (rc=0; the real hidden flags parse, incl. per-peer + connection-rate)
+invalid_config_fail_closed: proven via release helper scenario 05 (production fn CliArgs::abuse_dos_runtime_config)
+mainnet_abuse_dos_refused:  proven via release helper scenario 06 (production fn CliArgs::abuse_dos_runtime_config)
+
+Bounded real-node launch (deployed-path liveness probe)
+-------------------------------------------------------
+node_launch:            started + reaped by timeout (rc=124); real binary accepted hidden abuse/DoS flags
+node_launch_p2p_path:   NOT driven — DevNet LocalMesh ignores --enable-p2p ("enable_p2p=true ignored
+                        because network_mode=local-mesh"); node blocks in the consensus loop.
+                        This is the documented blocker that keeps M12 Yellow/Partial.
+
+Required tests (exact counts)
+-----------------------------
+cargo build -p qbind-node --release                                             OK
+cargo build -p qbind-node --release --example run_366_...helper                 OK
+run_366 harness                                                                 PARTIAL-POSITIVE
+cargo test -p qbind-node --test run_365_...threading_tests   20 passed; 0 failed
+cargo test -p qbind-node --test run_363_...runtime_tests     21 passed; 0 failed
+cargo test -p qbind-node --test run_362_...runtime_tests     38 passed; 0 failed
+cargo test -p qbind-node --test run_361_...hardening_tests   30 passed; 0 failed
+cargo test -p qbind-node --lib                             1385 passed; 0 failed
+
+M12 disposition
+---------------
+M12 stays Yellow/Partial (strengthened). The connection-rate limiter is wired
+end-to-end into the production accept path and is release-binary proven. The
+per-peer message-rate override now reaches the DEPLOYED P2pNodeBuilder live
+AsyncPeerManagerImpl construction path (Run 365 threading), release-binary
+proven here via the helper's deployed-builder scenarios. HOWEVER, a running
+qbind-node cannot be driven over its live P2P inbound/message socket path in
+this environment because DevNet runs in LocalMesh mode (--enable-p2p ignored),
+so end-to-end operator effect on a live socket is not demonstrated. Per the
+readiness rules (evidence is deployed-builder-path release-binary, not
+live-socket), M12 does not move Green.
+
+Scope / non-claims
+------------------
+Run 366 does NOT launch a public DevNet, deploy a seed / bootnode / faucet /
+RPC / explorer / status page, open a default-open public port, change any P2P
+wire format, weaken peer admission or trust-bundle behavior, wire authority
+lifecycle, or mutate validator set / epoch state. Default behavior is preserved
+bit-for-bit (connection limiter disabled by default; per-peer 1000/100). M4
+remains Yellow/launch-blocking; M6 remains Yellow; C4 and C5 remain OPEN.
+
+Reproduce
+---------
+scripts/devnet/run_366_public_devnet_abuse_dos_m12_end_to_end_release_binary.sh <OUT_DIR>
