@@ -190,9 +190,12 @@ documentation ranges or localhost.
 ## 19. CodeQL
 
 This run changes Rust production source (`p2p_node_builder.rs`) plus a new test file, so
-`codeql_checker` was invoked (declared non-trivial). Its exact result is recorded in §20/final
-response; if the analysis is skipped, unavailable, times out, or the database is too large, that exact
-outcome is recorded verbatim and is **not** asserted as a clean scan.
+`codeql_checker` was invoked (declared non-trivial). **Exact result: CodeQL analysis for `rust` was
+SKIPPED — the database size is too large (0 alerts returned because the analysis did not run).** This
+is recorded verbatim and is **not** asserted as a clean scan. The production change is additive and
+default-preserving (a new context field plus three builder methods that thread an already-validated
+`PeerRateLimiterConfig` into `AsyncPeerManagerImpl::new`), introducing no new unsafe code, no I/O, no
+untrusted-input parsing, and no new external surface.
 
 ## 20. Provenance
 
