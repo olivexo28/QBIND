@@ -1,0 +1,88 @@
+=== Run 364 release-binary evidence (tracked summary) ===
+
+Verdict: Partial-positive (release-binary evidence for BOTH public DevNet
+abuse/DoS M12 controls — connection-rate limiter + per-peer message-rate
+override). NOT a public DevNet launch and NOT a Green M12 / TestNet / MainNet
+readiness claim. M12 stays Yellow/Partial (strengthened) — see the M12
+disposition below and docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_364.md.
+
+Provenance
+----------
+branch:          copilot/run-364-update-documentation
+git_commit:      02663e8f69b66f14e4795a255347f6a1caed0d7e (helper + harness land in
+                 an earlier commit on the same branch; evidence + docs follow)
+toolchain:       rustc 1.97.1 (8bab26f4f 2026-07-14)
+cargo:           cargo 1.97.1 (c980f4866 2026-06-30)
+node_bin:        target/release/qbind-node
+node_bin_sha256: 5912445d58fad6991f478c1f2316d081c18b2d8d018f89f5ee5a9be44c4bb2fb
+node_build_id:   72a7c9e358aa0cda432f89b0a4a7b3bce4fca6ad
+helper_bin:      target/release/examples/run_364_public_devnet_abuse_dos_m12_release_binary_helper
+helper_sha256:   ed3cc61f77b9f2cb1b537dcce218d47c7090ac86cb347f71072930a4f2048d4d
+helper_build_id: dfcacc08b51428cbcacba85d9ba91f99ddc3ab56
+
+NOTE: SHA-256 / Build ID values are environment-specific (they depend on the
+exact toolchain, absolute build path, and dependency versions) and are recorded
+here only as reproducibility anchors for this build. Re-running the harness in a
+different environment will legitimately produce different hashes.
+
+Release-built helper (real Run 361/362/363 runtime symbols)
+-----------------------------------------------------------
+scenarios_total:  7
+scenarios_passed: 7
+verdict:          PASS
+
+  01_default_preserves_behavior                       conn limiter disabled; per-peer 1000/100; drop metric 0
+  02_connection_rate_enabled_allows_then_refuses      4 admitted; 5th ConnectionRateLimited; metric increments once
+  03_per_peer_message_rate_enabled_allows_then_drops  custom 5/0 reaches limiter; 5 allowed; 6th dropped; conn metric 0
+  04_combined_connection_and_message_rate_independent conn refusal doesn't admit; msg drop on admitted path; counters distinct
+  05_invalid_config_fails_closed                      zero-window/zero-msg/zero-conn/unbounded/inconsistent all rejected
+  06_mainnet_refused                                  MainNet abuse/DoS config refused (direct + CLI)
+  07_cli_surface_hidden_and_parse_checked             hidden flags absent from --help; real parse; invented rejected
+
+metric_name:      qbind_p2p_connection_rate_drop_total
+registered_once:  true
+endpoint_label_leak: false
+rendered_line:    qbind_p2p_connection_rate_drop_total 1
+
+Production binary CLI surface
+-----------------------------
+help_hidden_flags_absent:  true   (all Run 362/363 abuse/DoS flags are hidden/devnet-only)
+invented_flag_rejected:    true   (rc=2; clap rejects --p2p-connection-rate-bogus)
+real_hidden_flags_parse:   true   (rc=0; the real hidden flags parse, incl. per-peer + connection-rate)
+invalid_config_fail_closed: proven via release helper scenario 05 (production fn CliArgs::abuse_dos_runtime_config)
+mainnet_abuse_dos_refused:  proven via release helper scenario 06 (production fn CliArgs::abuse_dos_runtime_config)
+
+Required tests (exact counts)
+-----------------------------
+cargo build -p qbind-node --release                                             OK
+cargo build -p qbind-node --release --example run_364_...helper                 OK
+run_364 harness                                                                 PASS
+cargo test -p qbind-node --test run_363_...runtime_tests    21 passed; 0 failed
+cargo test -p qbind-node --test run_362_...runtime_tests    38 passed; 0 failed
+cargo test -p qbind-node --test run_361_...hardening_tests  30 passed; 0 failed
+cargo test -p qbind-node --lib                            1385 passed; 0 failed
+
+M12 disposition
+---------------
+M12 stays Yellow/Partial (strengthened). The connection-rate limiter is wired
+end-to-end into the production accept path and is release-binary proven. The
+per-peer message-rate override reaches the live AsyncPeerManagerImpl limiter
+construction path (release-binary proven), but production main.rs /
+p2p_node_builder do NOT yet thread the CLI-derived peer_rate_limiter_config into
+the deployed node's live peer manager, so end-to-end operator effect on a
+running node is not yet delivered. Per the readiness rules, because the per-peer
+message-rate evidence is incomplete for the deployed binary, M12 does not move
+Green.
+
+Scope / non-claims
+------------------
+Run 364 does NOT launch a public DevNet, deploy a seed / bootnode / faucet /
+RPC / explorer / status page, open a default-open public port, change any P2P
+wire format, weaken peer admission or trust-bundle behavior, wire authority
+lifecycle, or mutate validator set / epoch state. Default behavior is preserved
+bit-for-bit (connection limiter disabled by default; per-peer 1000/100). M4
+remains Yellow/launch-blocking; M6 remains Yellow; C4 and C5 remain OPEN.
+
+Reproduce
+---------
+scripts/devnet/run_364_public_devnet_abuse_dos_m12_release_binary.sh <OUT_DIR>
