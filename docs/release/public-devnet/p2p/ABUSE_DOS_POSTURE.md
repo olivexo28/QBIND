@@ -227,6 +227,26 @@ yet thread the CLI-derived `peer_rate_limiter_config` into its live `AsyncPeerMa
 operator effect on a running node is not yet delivered. M4 remains Yellow/launch-blocking; public
 DevNet remains **NOT launch-ready**; Full **C4 / C5 remain OPEN**.
 
+## 7e. Run 365 deployed-node per-peer threading (source/test only)
+
+Run 365 closes the deployed-node source/test gap Run 364 flagged: the deployed `P2pNodeBuilder` now
+threads the CLI-derived `peer_rate_limiter_config` into the live `AsyncPeerManagerImpl` construction
+path.
+
+- `crates/qbind-node/src/p2p_node_builder.rs` — `P2pNodeBuilder::deployed_peer_rate_limiter_config`
+  derives the validated `Option<PeerRateLimiterConfig>`; `deployed_async_peer_manager_config` and
+  `build_deployed_peer_manager` construct the live `AsyncPeerManagerImpl` from it;
+  `P2pNodeContext.peer_rate_limiter_config` records the derived config on the built context.
+- Tests: `crates/qbind-node/tests/run_365_public_devnet_deployed_peer_rate_threading_tests.rs` (20).
+- Evidence: `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_365.md`.
+
+Defaults are preserved bit-for-bit (`None` → `PeerRateLimiter::with_defaults()`, `1000` msg/s + `100`
+burst; connection limiter disabled unless explicitly enabled); the Run 362 connection-rate limiter is
+unchanged; no new public CLI flags. **Run 365 is source/test only.** Release-binary end-to-end evidence
+is deferred to **Run 366**. **M12 does not go Green until Run 366** proves both controls end-to-end on
+the deployed binary. M4 remains Yellow/launch-blocking; public DevNet remains **NOT launch-ready**;
+Full **C4 / C5 remain OPEN**.
+
 ## 8. Future work required before TestNet
 
 Before a public TestNet, at minimum:
@@ -234,16 +254,17 @@ Before a public TestNet, at minimum:
 - Wire the Run 361 `AbuseDosConfig` / `ConnectionRateLimiter` boundary into the node runtime (accept
   loop) and expose operator-configurable rate-limiter thresholds (or document a supported config
   surface). **(Connection-rate limiter done in Run 362; per-peer message-rate runtime override wired at
-  source/test level in Run 363; release-binary evidence for both landed in Run 364 — but the deployed
-  node does not yet thread the per-peer override into its live `AsyncPeerManagerImpl`, so end-to-end
-  per-peer threading remains outstanding.)**
+  source/test level in Run 363; release-binary evidence for both landed in Run 364; the deployed
+  builder threads the per-peer override into its live `AsyncPeerManagerImpl` at source/test level in
+  Run 365 — release-binary end-to-end evidence remains outstanding, deferred to Run 366.)**
 - Register and test the planned `qbind_p2p_connection_rate_drop_total` metric at the runtime call site.
   **(Done in Run 362; release-binary verified in Run 364.)**
 - Publish tuned thresholds validated under real inbound load, with alerting wired to the metrics in
   §5. **(Load validation still outstanding.)**
 
-None of this is claimed complete by Run 360/361/362/363/364; Run 360 publishes posture, Run 361 adds a
+None of this is claimed complete by Run 360/361/362/363/364/365; Run 360 publishes posture, Run 361 adds a
 source/test boundary, Run 362 wires the connection-rate limiter into runtime with release-binary
 evidence, Run 363 wires the per-peer message-rate runtime override at source/test level, Run 364 lands
-release-binary evidence for both controls, and all record the remaining gap (per-peer message-rate
-end-to-end production threading + load validation).
+release-binary evidence for both controls, Run 365 threads the per-peer override through the deployed
+builder at source/test level, and all record the remaining gap (per-peer message-rate end-to-end
+release-binary evidence, deferred to Run 366, + load validation).

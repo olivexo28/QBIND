@@ -63,13 +63,38 @@ leaves the connection limiter **disabled** (test `t01_default_profile_preserves_
 
 ## 6. Verify no forbidden claim
 
-Run 361/362/363/364 do not claim public DevNet launch-readiness, TestNet readiness, MainNet readiness,
+Run 361/362/363/364/365 do not claim public DevNet launch-readiness, TestNet readiness, MainNet readiness,
 C4/C5 closure, or M4/M6 Green. **M12 stays Yellow/Partial (strengthened)**: Run 362 wires the
 connection-rate limiter into runtime, Run 363 wires the per-peer message-rate override at source/test
-level, and Run 364 lands release-binary evidence for both — but M12 Green remains deferred because the
-deployed node does not yet thread the CLI-derived per-peer override into its live `AsyncPeerManagerImpl`
-(construction-path-only, not end-to-end). See `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_364.md` and
+level, Run 364 lands release-binary evidence for both, and Run 365 threads the CLI-derived per-peer
+override through the deployed `P2pNodeBuilder` into the live `AsyncPeerManagerImpl` construction path at
+source/test level — but M12 Green remains **deferred to Run 366** pending release-binary end-to-end
+evidence. See `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_365.md`,
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_364.md`, and
 `docs/release/QBIND_PUBLIC_DEVNET_READINESS_CRITERIA.md`.
+
+## 7z. Verify the Run 365 deployed-node per-peer threading (source/test)
+
+Run 365 threads the CLI-derived `peer_rate_limiter_config` through the deployed `P2pNodeBuilder` into
+the live `AsyncPeerManagerImpl` construction path. Source/test only; release-binary evidence deferred
+to Run 366.
+
+```bash
+# Run 365 test target exists:
+test -f crates/qbind-node/tests/run_365_public_devnet_deployed_peer_rate_threading_tests.rs
+
+# Build the library and run the Run 365 tests + prior-run regressions + library tests:
+cargo build -p qbind-node --lib
+cargo test -p qbind-node --test run_365_public_devnet_deployed_peer_rate_threading_tests
+cargo test -p qbind-node --test run_363_public_devnet_per_peer_message_rate_runtime_tests
+cargo test -p qbind-node --test run_362_public_devnet_abuse_dos_runtime_tests
+cargo test -p qbind-node --test run_361_public_devnet_abuse_dos_hardening_tests
+cargo test -p qbind-node --lib
+```
+
+Expected: Run 365 **20 passed**, Run 363 **21 passed**, Run 362 **38 passed**, Run 361 **30 passed**,
+library **1385 passed**. Defaults preserved (`1000` msg/s + `100` burst; connection limiter disabled),
+no new public CLI flags. **M12 stays Yellow/Partial (strengthened); Green deferred to Run 366.**
 
 ## 7. Verify the Run 362 runtime wiring
 
