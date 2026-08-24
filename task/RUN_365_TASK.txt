@@ -1,0 +1,231 @@
+Run 365 — Public DevNet abuse/DoS per-peer message-rate deployed-node threading
+
+Continue QBIND after accepted Run 364.
+
+Current state:
+Run 364 is accepted as PARTIAL-POSITIVE / public-DevNet-abuse-DoS-M12 release-binary positive.
+
+Run 364 proved in release mode that:
+- the connection-rate limiter is production-wired into the live `p2p_tcp` accept path;
+- `qbind_p2p_connection_rate_drop_total` increments on connection-rate refusal;
+- the per-peer message-rate override reaches the live `AsyncPeerManagerImpl` limiter construction path;
+- default behavior remains unchanged;
+- hidden/devnet-only abuse/DoS flags remain hidden from `--help`;
+- invalid config and MainNet are refused;
+- no public DevNet launch, no TestNet/MainNet readiness, and no C4/C5 closure is claimed.
+
+Run 364 did NOT move M12 Green. M12 remains Yellow/Partial because the deployed `qbind-node` path does not yet thread the CLI-derived `peer_rate_limiter_config` from `main.rs` / `p2p_node_builder` into the live `AsyncPeerManagerImpl`.
+
+Primary objective:
+Land the bounded source/test runtime threading that passes the CLI-derived per-peer message-rate config into the deployed node’s live `AsyncPeerManagerImpl`.
+
+This run must close the source/test gap identified by Run 364:
+`CliArgs::abuse_dos_runtime_config()` → `peer_rate_limiter_config` → deployed `p2p_node_builder` / live peer-manager construction.
+
+Run 365 is source/test only. Release-binary evidence is deferred to Run 366. M12 must not move Green in Run 365.
+
+Strict scope:
+Source/test deployed-node threading only.
+
+No public DevNet launch.
+No live seed-node deployment.
+No bootnode deployment.
+No faucet.
+No RPC gateway.
+No explorer.
+No status page.
+No MainNet enablement.
+No TestNet readiness claim.
+No C4 closure.
+No C5 closure.
+No authority-lifecycle runtime wiring.
+No validator-set mutation.
+No production epoch transition.
+No execution-sink write.
+No P2P wire-format change.
+No peer-admission weakening.
+No trust-bundle behavior weakening.
+No default-open public port.
+No M4 Green.
+No M6 Green.
+No M12 Green in Run 365.
+No new public CLI flags.
+
+Required investigation:
+Inspect at minimum:
+
+- `crates/qbind-node/src/main.rs`
+- `crates/qbind-node/src/p2p_node_builder.rs`
+- `crates/qbind-node/src/async_peer_manager.rs`
+- `crates/qbind-node/src/public_devnet_abuse_dos_runtime.rs`
+- `crates/qbind-node/src/public_devnet_abuse_dos_config.rs`
+- `crates/qbind-node/src/peer_rate_limiter.rs`
+- `crates/qbind-node/src/cli.rs`
+- `crates/qbind-node/src/p2p_tcp.rs`
+- Run 362, Run 363, and Run 364 evidence/docs/tests
+- `docs/release/QBIND_PUBLIC_DEVNET_READINESS_CRITERIA.md`
+- `docs/release/public-devnet/p2p/ABUSE_DOS_POSTURE.md`
+- `docs/release/public-devnet/p2p/VERIFY.md`
+
+Required implementation:
+1. Thread the validated `peer_rate_limiter_config` from the existing abuse/DoS runtime config into the deployed P2P node construction path.
+
+2. Ensure the live `AsyncPeerManagerImpl` used by the deployed node is constructed with:
+   - `PeerRateLimiter::with_defaults()` when no per-peer override is configured;
+   - `PeerRateLimiter::new(custom_cfg)` when valid hidden/devnet-only per-peer override flags are configured.
+
+3. Preserve defaults exactly:
+   - no flags → max `1000` msg/s;
+   - no flags → burst `100`;
+   - no flags → connection limiter disabled unless explicitly enabled;
+   - no flags → deployed node behavior unchanged.
+
+4. Keep the Run 362 connection-rate limiter behavior unchanged.
+
+5. Reject invalid values before runtime:
+   - zero message-rate max;
+   - unsafe/unbounded message-rate values;
+   - invalid burst values;
+   - wrong environment where represented;
+   - MainNet refused absent production policy.
+
+6. Do not expose the hidden/devnet-only flags in `--help`.
+
+7. Do not add new public CLI flags.
+
+Required tests:
+Add or extend a dedicated source/test target:
+
+`crates/qbind-node/tests/run_365_public_devnet_deployed_peer_rate_threading_tests.rs`
+
+Cover at minimum:
+
+1. deployed-node builder default constructs peer manager with default per-peer limiter;
+2. no flags preserve `1000` msg/s + `100` burst;
+3. valid custom `--p2p-max-messages-per-second` reaches deployed peer-manager config;
+4. valid custom `--p2p-burst-allowance` reaches deployed peer-manager config;
+5. custom per-peer limiter allows under-budget messages;
+6. custom per-peer limiter drops over-budget messages;
+7. default limiter behavior remains unchanged;
+8. connection-rate limiter config still reaches accept-loop path;
+9. connection-rate limiter and per-peer limiter remain independent;
+10. connection-rate metric does not increment on per-peer message drop;
+11. invalid zero message-rate max rejected;
+12. unsafe/unbounded message-rate rejected;
+13. MainNet refused;
+14. hidden flags absent from `--help`;
+15. real hidden flags parse;
+16. invented flags rejected;
+17. no P2P wire-format change;
+18. no peer-admission weakening;
+19. no trust-bundle behavior weakening;
+20. no `LivePqcTrustState` mutation;
+21. no sequence/marker write;
+22. no validator-set mutation;
+23. no epoch transition;
+24. no Run 070 path;
+25. public DevNet not launch-ready;
+26. M4 remains Yellow;
+27. M6 remains Yellow;
+28. M12 remains Yellow/Partial pending Run 366 release-binary evidence;
+29. Run 361 tests remain green;
+30. Run 362 tests remain green;
+31. Run 363 tests remain green.
+
+Required docs:
+Add:
+
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_365.md`
+
+Update narrowly:
+
+- `docs/release/QBIND_PUBLIC_DEVNET_READINESS_CRITERIA.md`
+- `docs/release/public-devnet/p2p/ABUSE_DOS_POSTURE.md`
+- `docs/release/public-devnet/p2p/VERIFY.md`
+- `docs/protocol/QBIND_C4_C5_CLOSURE_CRITERIA.md`
+- `docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md`
+- `docs/protocol/QBIND_GOVERNANCE_EXECUTION_RUNTIME_SURFACE_AUDIT.md`
+- `docs/ops/QBIND_PQC_TRUST_LIFECYCLE_RUNBOOK.md`
+- `docs/whitepaper/contradiction.md`
+
+Docs must state:
+- Run 365 threads the per-peer override into the deployed node path at source/test level;
+- release-binary evidence is deferred to Run 366;
+- M12 remains Yellow/Partial until Run 366;
+- M4 remains Yellow/launch-blocking;
+- public DevNet remains NOT launch-ready;
+- Full C4 remains OPEN;
+- C5 remains OPEN.
+
+Required commands:
+Run and record:
+
+- `cargo build -p qbind-node --lib`
+- `cargo test -p qbind-node --test run_365_public_devnet_deployed_peer_rate_threading_tests`
+- `cargo test -p qbind-node --test run_363_public_devnet_per_peer_message_rate_runtime_tests`
+- `cargo test -p qbind-node --test run_362_public_devnet_abuse_dos_runtime_tests`
+- `cargo test -p qbind-node --test run_361_public_devnet_abuse_dos_hardening_tests`
+- `cargo test -p qbind-node --lib`
+
+Record exact pass/fail counts. Preserve the reconciled Run 361 count as 30 unless the actual target output changes.
+
+Security:
+Run secret scanning over all changed files.
+
+CodeQL:
+Because this run changes Rust source, invoke CodeQL if available. If skipped, unavailable, timed out, or database-too-large, record the exact result and do not call it clean.
+
+Readiness matrix rules:
+- M12 may move Yellow/Partial → Yellow/stronger if the deployed-node threading lands at source/test level.
+- M12 must not move Green until Run 366 release-binary evidence proves the deployed node honors both connection-rate and per-peer message-rate runtime config end-to-end.
+- Do not alter M4 unless live seed/bootnode reachability evidence lands.
+- Do not alter M6 unless stable identity-generation support lands.
+- Do not alter M7–M9/M13–M15 unless genuinely closed.
+
+Expected verdict:
+PASS / public-DevNet-per-peer deployed-node threading source-test positive if the deployed-node threading, tests, docs, security scan, CodeQL provenance, and matrix updates land.
+
+Partial-positive if the builder/API wiring lands but the deployed node path still cannot consume the configured per-peer limiter.
+
+Unacceptable:
+- claiming public DevNet launch-ready;
+- marking M12 Green in Run 365;
+- marking M4 Green without live seed/bootnode reachability evidence;
+- marking M6 Green without identity-generation support;
+- exposing hidden/devnet-only abuse/DoS flags in public help accidentally;
+- silently changing defaults;
+- weakening peer admission;
+- changing P2P wire format;
+- publishing fake live seed addresses;
+- publishing secrets or private infrastructure;
+- claiming TestNet readiness;
+- claiming MainNet readiness;
+- closing C4 or C5;
+- adding authority-lifecycle runtime wiring;
+- deploying seed nodes, faucet, RPC, explorer, or status page in this run;
+- hiding skipped CodeQL;
+- using marketing language.
+
+Final response format:
+1. Exact verdict.
+2. Files changed.
+3. Deployed-node threading summary.
+4. Per-peer message-rate config path.
+5. Peer manager construction behavior.
+6. Default compatibility.
+7. CLI/config surface.
+8. Accepted tests.
+9. Rejection/fail-closed tests.
+10. Runtime/non-mutation evidence.
+11. Readiness matrix delta for M12.
+12. Current public DevNet readiness status.
+13. Remaining public DevNet blockers.
+14. Public TestNet blockers.
+15. MainNet blockers.
+16. C4/C5 status.
+17. Tests run.
+18. Security scans.
+19. CodeQL.
+20. Provenance.
+21. Honest limitations.
+22. Suggested Run 366 next step.

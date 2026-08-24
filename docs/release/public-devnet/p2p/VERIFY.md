@@ -63,11 +63,12 @@ leaves the connection limiter **disabled** (test `t01_default_profile_preserves_
 
 ## 6. Verify no forbidden claim
 
-Run 361/362 do not claim public DevNet launch-readiness, TestNet readiness, MainNet readiness, C4/C5
-closure, or M4/M6 Green. **M12 stays Yellow/Partial (strengthened)**: Run 362 wires the connection-rate
-limiter into runtime with release-binary evidence, but M12 Green remains deferred because the live
-per-peer message-rate limiter is still not operator-configurable at runtime. See
-`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_362.md` and
+Run 361/362/363/364 do not claim public DevNet launch-readiness, TestNet readiness, MainNet readiness,
+C4/C5 closure, or M4/M6 Green. **M12 stays Yellow/Partial (strengthened)**: Run 362 wires the
+connection-rate limiter into runtime, Run 363 wires the per-peer message-rate override at source/test
+level, and Run 364 lands release-binary evidence for both — but M12 Green remains deferred because the
+deployed node does not yet thread the CLI-derived per-peer override into its live `AsyncPeerManagerImpl`
+(construction-path-only, not end-to-end). See `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_364.md` and
 `docs/release/QBIND_PUBLIC_DEVNET_READINESS_CRITERIA.md`.
 
 ## 7. Verify the Run 362 runtime wiring
@@ -134,3 +135,38 @@ target/release/qbind-node --help | grep -c "p2p-max-messages-per-second" || echo
 See `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_363.md`. **M12 stays Yellow/Partial (stronger); Green is
 deferred to Run 364** pending release-binary evidence for both connection-rate and per-peer
 message-rate runtime configurability.
+
+## 7b. Verify the Run 364 release-binary evidence for both controls
+
+Run 364 produces release-binary evidence for **both** abuse/DoS controls on the real
+`target/release/qbind-node` binary plus a release-built helper. It adds no source behavior and no new
+CLI flag.
+
+```
+# Run 364 helper + harness exist:
+ls crates/qbind-node/examples/run_364_public_devnet_abuse_dos_m12_release_binary_helper.rs
+ls scripts/devnet/run_364_public_devnet_abuse_dos_m12_release_binary.sh
+
+# Build the release binary + helper, then run the Run 364 harness (captures SHA-256s + verdict):
+cargo build -p qbind-node --release
+cargo build -p qbind-node --release \
+  --example run_364_public_devnet_abuse_dos_m12_release_binary_helper
+scripts/devnet/run_364_public_devnet_abuse_dos_m12_release_binary.sh /tmp/run364out
+grep -E '^(verdict|helper_verdict):' /tmp/run364out/summary.txt
+
+# Re-run the Run 363/362/361 regressions + library tests:
+cargo test -p qbind-node --test run_363_public_devnet_per_peer_message_rate_runtime_tests
+cargo test -p qbind-node --test run_362_public_devnet_abuse_dos_runtime_tests
+cargo test -p qbind-node --test run_361_public_devnet_abuse_dos_hardening_tests
+cargo test -p qbind-node --lib
+
+# All Run 362/363 abuse/DoS flags remain hidden (devnet-only) and MUST NOT appear in --help:
+target/release/qbind-node --help | grep -c -- "--p2p-connection-rate\|--p2p-max-messages-per-second\|--p2p-burst-allowance" \
+  || echo "OK: hidden from --help"
+```
+
+See `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_364.md` and
+`docs/devnet/run_364_public_devnet_abuse_dos_m12_release_binary/`. **M12 stays Yellow/Partial
+(strengthened) — NOT Green**: the connection-rate limiter is production-wired and release-proven, but
+the deployed node does not yet thread the CLI-derived per-peer `peer_rate_limiter_config` into its live
+`AsyncPeerManagerImpl`, so per-peer operator effect on a running node is not yet delivered.
