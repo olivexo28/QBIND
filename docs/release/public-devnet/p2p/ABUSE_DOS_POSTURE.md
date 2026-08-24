@@ -247,6 +247,26 @@ is deferred to **Run 366**. **M12 does not go Green until Run 366** proves both 
 the deployed binary. M4 remains Yellow/launch-blocking; public DevNet remains **NOT launch-ready**;
 Full **C4 / C5 remain OPEN**.
 
+## 7f. Run 366 deployed-builder-path release-binary end-to-end evidence
+
+Run 366 produces the release-binary end-to-end evidence deferred by Run 365. A release-built helper
+(`crates/qbind-node/examples/run_366_public_devnet_abuse_dos_m12_end_to_end_release_helper.rs`) links the
+real Run 361/362/363/365 symbols and drives the per-peer scenarios through the **deployed**
+`P2pNodeBuilder` path (`with_abuse_dos_runtime_config` → `deployed_peer_rate_limiter_config` →
+`deployed_async_peer_manager_config` → `build_deployed_peer_manager`), proving both the connection-rate
+limiter and the per-peer message-rate override on real `target/release/qbind-node` (8/8 scenarios).
+
+- Harness: `scripts/devnet/run_366_public_devnet_abuse_dos_m12_end_to_end_release_binary.sh`.
+- Evidence: `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_366.md`,
+  `docs/devnet/run_366_public_devnet_abuse_dos_m12_end_to_end_release_binary/`.
+- No production source change; defaults preserved bit-for-bit; no new public CLI flags.
+
+**M12 stays Yellow/Partial (strengthened) — it does NOT move Green.** A running `qbind-node` cannot be
+driven over its live P2P inbound/message socket path in this environment because DevNet runs in LocalMesh
+mode (`--enable-p2p` is ignored) and blocks in the consensus loop; the evidence is deployed-builder-path
+release-binary, not live-socket. M4 remains Yellow/launch-blocking; public DevNet remains **NOT
+launch-ready**; Full **C4 / C5 remain OPEN**.
+
 ## 8. Future work required before TestNet
 
 Before a public TestNet, at minimum:
@@ -256,7 +276,8 @@ Before a public TestNet, at minimum:
   surface). **(Connection-rate limiter done in Run 362; per-peer message-rate runtime override wired at
   source/test level in Run 363; release-binary evidence for both landed in Run 364; the deployed
   builder threads the per-peer override into its live `AsyncPeerManagerImpl` at source/test level in
-  Run 365 — release-binary end-to-end evidence remains outstanding, deferred to Run 366.)**
+  Run 365; Run 366 lands deployed-builder-path release-binary end-to-end evidence — live-socket
+  end-to-end evidence over a running node remains outstanding.)**
 - Register and test the planned `qbind_p2p_connection_rate_drop_total` metric at the runtime call site.
   **(Done in Run 362; release-binary verified in Run 364.)**
 - Publish tuned thresholds validated under real inbound load, with alerting wired to the metrics in
@@ -266,5 +287,6 @@ None of this is claimed complete by Run 360/361/362/363/364/365; Run 360 publish
 source/test boundary, Run 362 wires the connection-rate limiter into runtime with release-binary
 evidence, Run 363 wires the per-peer message-rate runtime override at source/test level, Run 364 lands
 release-binary evidence for both controls, Run 365 threads the per-peer override through the deployed
-builder at source/test level, and all record the remaining gap (per-peer message-rate end-to-end
-release-binary evidence, deferred to Run 366, + load validation).
+builder at source/test level, Run 366 lands deployed-builder-path release-binary end-to-end evidence,
+and all record the remaining gap (per-peer message-rate **live-socket** end-to-end evidence over a
+running node + load validation).

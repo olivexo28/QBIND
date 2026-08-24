@@ -63,15 +63,39 @@ leaves the connection limiter **disabled** (test `t01_default_profile_preserves_
 
 ## 6. Verify no forbidden claim
 
-Run 361/362/363/364/365 do not claim public DevNet launch-readiness, TestNet readiness, MainNet readiness,
+Run 361/362/363/364/365/366 do not claim public DevNet launch-readiness, TestNet readiness, MainNet readiness,
 C4/C5 closure, or M4/M6 Green. **M12 stays Yellow/Partial (strengthened)**: Run 362 wires the
 connection-rate limiter into runtime, Run 363 wires the per-peer message-rate override at source/test
-level, Run 364 lands release-binary evidence for both, and Run 365 threads the CLI-derived per-peer
+level, Run 364 lands release-binary evidence for both, Run 365 threads the CLI-derived per-peer
 override through the deployed `P2pNodeBuilder` into the live `AsyncPeerManagerImpl` construction path at
-source/test level — but M12 Green remains **deferred to Run 366** pending release-binary end-to-end
-evidence. See `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_365.md`,
+source/test level, and Run 366 lands deployed-builder-path release-binary end-to-end evidence — but M12
+Green remains **deferred** pending **live-socket** end-to-end evidence over a running node (DevNet
+LocalMesh ignores `--enable-p2p`, so the live socket path is not driven). See
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_366.md`, `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_365.md`,
 `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_364.md`, and
 `docs/release/QBIND_PUBLIC_DEVNET_READINESS_CRITERIA.md`.
+
+## 7y. Verify the Run 366 deployed-builder-path release-binary evidence
+
+Run 366 proves on real release artifacts that the deployed `P2pNodeBuilder` path honors both abuse/DoS
+controls. Release-binary evidence; no production source change; deployed-builder-path, not live-socket.
+
+```bash
+# Run 366 helper + harness exist:
+test -f crates/qbind-node/examples/run_366_public_devnet_abuse_dos_m12_end_to_end_release_helper.rs
+test -f scripts/devnet/run_366_public_devnet_abuse_dos_m12_end_to_end_release_binary.sh
+
+# Build the release binary + helper and run the harness:
+cargo build -p qbind-node --release
+cargo build -p qbind-node --release --example run_366_public_devnet_abuse_dos_m12_end_to_end_release_helper
+scripts/devnet/run_366_public_devnet_abuse_dos_m12_end_to_end_release_binary.sh /tmp/run366_out
+```
+
+Expected: helper **8/8 scenarios PASS**; `--help` hides all 8 hidden abuse/DoS flags; real hidden flags
+parse; invented flag rejected (rc=2); the bounded node launch is reaped by timeout under LocalMesh
+(`enable_p2p=true ignored because network_mode=local-mesh`). Defaults preserved (`1000` msg/s + `100`
+burst; connection limiter disabled), no new public CLI flags. **M12 stays Yellow/Partial (strengthened);
+Green deferred pending live-socket end-to-end evidence.**
 
 ## 7z. Verify the Run 365 deployed-node per-peer threading (source/test)
 
