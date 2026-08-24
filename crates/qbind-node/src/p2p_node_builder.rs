@@ -58,8 +58,10 @@ use std::sync::Arc;
 use parking_lot::RwLock;
 use tokio::task::JoinHandle;
 
+use crate::async_peer_manager::{AsyncPeerManagerConfig, AsyncPeerManagerImpl};
 use crate::consensus_net_p2p::{P2pConsensusNetwork, SimpleValidatorNodeMapping};
 use crate::identity_map::PeerValidatorMap;
+use crate::peer_rate_limiter::PeerRateLimiterConfig;
 use crate::metrics::P2pMetrics;
 use crate::node_config::NodeConfig;
 use crate::p2p::{NodeId, P2pService};
@@ -162,6 +164,23 @@ pub struct P2pNodeContext {
     /// `p2p_tcp::handle_inbound_connection` and tracked under C4 in
     /// `docs/whitepaper/contradiction.md`.
     pub peer_validator_map: Arc<RwLock<PeerValidatorMap>>,
+    /// Run 365: the validated per-peer [`PeerRateLimiterConfig`] threaded from
+    /// the installed abuse/DoS runtime config into the deployed node's
+    /// peer-manager construction path.
+    ///
+    /// - `None` → no hidden/devnet-only per-peer override was supplied, so the
+    ///   deployed peer-manager builds `PeerRateLimiter::with_defaults()`
+    ///   (`1000` msg/s + `100` burst), preserving prior behaviour bit-for-bit;
+    /// - `Some(cfg)` → valid hidden `--p2p-max-messages-per-second` /
+    ///   `--p2p-burst-allowance` overrides were supplied and validated, so the
+    ///   deployed peer-manager builds `PeerRateLimiter::new(cfg)`.
+    ///
+    /// This mirrors exactly what
+    /// [`P2pNodeBuilder::deployed_peer_rate_limiter_config`] returns and is the
+    /// config
+    /// [`P2pNodeBuilder::build_deployed_peer_manager`] installs on the live
+    /// [`AsyncPeerManagerImpl`].
+    pub peer_rate_limiter_config: Option<PeerRateLimiterConfig>,
 }
 
 impl std::fmt::Debug for P2pNodeContext {
@@ -950,6 +969,52 @@ impl P2pNodeBuilder {
         self
     }
 
+    /// Run 365: derive the validated per-peer [`PeerRateLimiterConfig`] this
+    /// deployed builder threads into the live peer-manager construction path.
+    ///
+    /// - `None` (no abuse/DoS runtime config installed, i.e. no hidden
+    ///   `--p2p-max-messages-per-second` / `--p2p-burst-allowance` overrides)
+    ///   → the deployed peer-manager builds `PeerRateLimiter::with_defaults()`
+    ///   (`1000` msg/s + `100` burst), preserving prior behaviour bit-for-bit;
+    /// - `Some(cfg)` → the installed runtime config was validated at
+    ///   construction (Run 362/363), so this returns only accepted (non-zero,
+    ///   bounded) per-peer thresholds via
+    ///   [`crate::public_devnet_abuse_dos_runtime::PublicDevnetAbuseDosRuntimeConfig::peer_rate_limiter_config`].
+    ///
+    /// This is intentionally independent of the connection-rate limiter: the
+    /// per-peer override applies whether or not the operator also enabled the
+    /// Run 362 inbound connection-rate limiter.
+    pub fn deployed_peer_rate_limiter_config(&self) -> Option<PeerRateLimiterConfig> {
+        self.abuse_dos_runtime_config
+            .as_ref()
+            .map(|cfg| cfg.peer_rate_limiter_config())
+    }
+
+    /// Run 365: the [`AsyncPeerManagerConfig`] the deployed node uses, with the
+    /// CLI-derived per-peer message-rate limiter threaded in.
+    ///
+    /// Equivalent to the default config plus
+    /// [`AsyncPeerManagerConfig::with_peer_rate_limiter_config`] set to
+    /// [`Self::deployed_peer_rate_limiter_config`]. When no override is
+    /// installed this is bit-for-bit the default config, so the deployed
+    /// peer-manager behaviour is unchanged.
+    pub fn deployed_async_peer_manager_config(&self) -> AsyncPeerManagerConfig {
+        AsyncPeerManagerConfig::default()
+            .with_peer_rate_limiter_config(self.deployed_peer_rate_limiter_config())
+    }
+
+    /// Run 365: construct the live [`AsyncPeerManagerImpl`] the deployed node
+    /// uses, with the CLI-derived per-peer message-rate limiter threaded in.
+    ///
+    /// This closes the source/test gap identified by Run 364: the validated
+    /// per-peer `peer_rate_limiter_config` reaches the deployed node's live
+    /// peer-manager construction path. With no override installed the
+    /// peer-manager is built with `PeerRateLimiter::with_defaults()`; with a
+    /// valid override it is built with `PeerRateLimiter::new(cfg)`.
+    pub fn build_deployed_peer_manager(&self) -> AsyncPeerManagerImpl {
+        AsyncPeerManagerImpl::new(self.deployed_async_peer_manager_config())
+    }
+
     /// Build the P2P node context.
     ///
     /// This method:
@@ -1287,6 +1352,12 @@ impl P2pNodeBuilder {
             },
         ));
 
+        // Run 365: derive the validated per-peer PeerRateLimiterConfig threaded
+        // from the installed abuse/DoS runtime config BEFORE any field of
+        // `self` is moved below, so the built context can expose exactly what
+        // the deployed peer-manager construction path consumes.
+        let deployed_peer_rate_limiter_config = self.deployed_peer_rate_limiter_config();
+
         // Run 362: compute the shared `Arc<P2pMetrics>` up front (moved above
         // `start()`) so the runtime-owned abuse/DoS connection-rate limiter can
         // be installed BEFORE the accept loop begins and can bump
@@ -1411,6 +1482,7 @@ impl P2pNodeBuilder {
             metrics,
             validator_id,
             peer_validator_map: Arc::new(RwLock::new(peer_validator_map)),
+            peer_rate_limiter_config: deployed_peer_rate_limiter_config,
         })
     }
 
