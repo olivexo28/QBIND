@@ -181,20 +181,45 @@ message-rate runtime override + load evidence. See `docs/devnet/QBIND_DEVNET_EVI
 the release-binary evidence archive
 `docs/devnet/run_362_public_devnet_abuse_dos_runtime_release_binary/`.
 
+## 7c. Run 363 per-peer message-rate runtime override (source/test only)
+
+Run 363 wires the per-peer message-rate runtime override at **source/test level**, closing the Run 362
+gap where the `--p2p-max-messages-per-second` / `--p2p-burst-allowance` flags were validated but inert
+against the live per-peer limiter:
+
+- `PublicDevnetAbuseDosRuntimeConfig::peer_rate_limiter_config()` derives the validated
+  `PeerRateLimiterConfig` from the backing `AbuseDosConfig` (non-zero, bounded max messages/sec +
+  burst; MainNet refused).
+- `AsyncPeerManagerConfig` gains an optional `peer_rate_limiter_config` (default `None`) and a
+  `with_peer_rate_limiter_config()` builder; `AsyncPeerManagerImpl` builds the live per-peer
+  `PeerRateLimiter` from it (`None` → `PeerRateLimiter::with_defaults()`).
+- Tests: `crates/qbind-node/tests/run_363_public_devnet_per_peer_message_rate_runtime_tests.rs`
+  (21 tests) prove the previously inert flags now reach the live limiter construction path while
+  preserving defaults (`1000` msg/s + `100` burst).
+- **Default preserved:** with no flags, the peer-manager limiter is bit-for-bit
+  `PeerRateLimiter::with_defaults()`.
+
+**Run 363 is source/test only.** Release-binary evidence is deferred to **Run 364**. **M12 does not go
+Green until Run 364 release-binary evidence proves both connection-rate and per-peer message-rate
+runtime configurability.** M12 moves `Yellow/Partial → Yellow/stronger`. M4 remains
+Yellow/launch-blocking, public DevNet remains **NOT launch-ready**, and Full **C4 / C5 remain OPEN**.
+See `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_363.md`.
+
 ## 8. Future work required before TestNet
 
 Before a public TestNet, at minimum:
 
 - Wire the Run 361 `AbuseDosConfig` / `ConnectionRateLimiter` boundary into the node runtime (accept
   loop) and expose operator-configurable rate-limiter thresholds (or document a supported config
-  surface). **(Connection-rate limiter done in Run 362; per-peer message-rate runtime override still
-  outstanding.)**
+  surface). **(Connection-rate limiter done in Run 362; per-peer message-rate runtime override wired at
+  source/test level in Run 363; release-binary evidence deferred to Run 364.)**
 - Register and test the planned `qbind_p2p_connection_rate_drop_total` metric at the runtime call site.
   **(Done in Run 362.)**
 - Publish tuned thresholds validated under real inbound load, with alerting wired to the metrics in
   §5. **(Load validation still outstanding.)**
 
-None of this is claimed complete by Run 360/361/362; Run 360 publishes posture, Run 361 adds a
+None of this is claimed complete by Run 360/361/362/363; Run 360 publishes posture, Run 361 adds a
 source/test boundary, Run 362 wires the connection-rate limiter into runtime with release-binary
-evidence, and all three record the remaining gap (per-peer message-rate runtime override + load
-validation).
+evidence, Run 363 wires the per-peer message-rate runtime override at source/test level, and all record
+the remaining gap (per-peer message-rate release-binary evidence + load validation, deferred to Run
+364).

@@ -284,7 +284,7 @@ Legend: 🟢 Green (evidenced enough for public DevNet) · 🟡 Yellow (partial 
 | M9 | 🟡 | Run: publish DevNet PQC root/signing-key guidance (fold into M8 run if convenient). |
 | M10 | 🟢 | **Done (Run 360):** public P2P port/NAT/`--enable-p2p` posture published (`docs/release/public-devnet/p2p/P2P_PORT_POSTURE.md`). |
 | M11 | 🟢 | **Done (Run 360):** open-network peer-admission policy published (`docs/release/public-devnet/p2p/PEER_ADMISSION_POLICY.md`). |
-| M12 | 🟡 | **Partial, strengthened (Run 362):** the Run 361 config model + bounded inbound connection-rate limiter are now wired into the live `p2p_tcp` accept loop behind runtime-owned, default-off state (`public_devnet_abuse_dos_runtime.rs`), with the `qbind_p2p_connection_rate_drop_total` metric, hidden/devnet-only operator CLI flags, and release-binary evidence. **Next:** wire per-peer message-rate runtime override into the live per-peer limiter + capture load evidence to move Green. |
+| M12 | 🟡 | **Partial, stronger (Run 363):** Run 362 wired the bounded inbound connection-rate limiter into the live `p2p_tcp` accept loop (default-off, `qbind_p2p_connection_rate_drop_total` metric, hidden/devnet-only CLI flags, release-binary evidence). Run 363 wires the **per-peer message-rate runtime override** into the live per-peer `PeerRateLimiter` construction path used by `AsyncPeerManager` at **source/test level** — the Run 362 hidden `--p2p-max-messages-per-second` / `--p2p-burst-allowance` flags now affect the live limiter (default preserved: `1000` msg/s + `100` burst). **Not Green:** release-binary evidence proving both connection-rate and per-peer message-rate runtime configurability is deferred to **Run 364**. |
 | M13 | 🟡 | Run: publish operator metrics exposure guide (fold with M14). |
 | M14 | 🟡 | Run: ship alert-rule definitions / scrape config alongside the baseline. |
 | M15 | 🟡 | Run: publish DevNet reset policy (trigger conditions, notice, audit trail). |
@@ -307,9 +307,10 @@ M16, M17, M18, M19, M20**; every other must-have remains **Yellow or Red**. The 
 - **Red:** *(none among the tracked must-haves — M3 moved to Green in Run 359).*
 - **Yellow (must reach Green):** M4 (seed/bootnodes — format+placeholder landed Run 357, still a launch blocker
   until live seeds + reachability evidence land), M6 (identity — guidance landed Run 358, generation command still
-  missing), M7, M8, M9, M12 (abuse/DoS — posture landed Run 360; Run 361 added a source/test-only operator-configurable
-  config model + bounded connection-rate limiter boundary, but no runtime wiring / release-binary evidence yet — Green
-  deferred to Run 362), M13, M14, M15.
+  missing), M7, M8, M9, M12 (abuse/DoS — posture landed Run 360; Run 361 added a source/test-only config model +
+  connection-rate limiter boundary; Run 362 wired the connection-rate limiter into runtime with release-binary
+  evidence; Run 363 wired the per-peer message-rate runtime override at source/test level — Green deferred to Run 364
+  pending release-binary evidence for both), M13, M14, M15.
 
 Because at least one must-have is not Green, this document does **not** mark public DevNet ready.
 
@@ -413,8 +414,11 @@ preserves the current `1000` msg/s + `100` burst behavior and leaves the connect
 **strengthens M12** by wiring that connection-rate limiter into the live `p2p_tcp` accept loop behind runtime-owned,
 default-off state (`crates/qbind-node/src/public_devnet_abuse_dos_runtime.rs`), adding the
 `qbind_p2p_connection_rate_drop_total` metric, and exposing hidden/devnet-only operator CLI flags with release-binary
-evidence — but **M12 stays Yellow/Partial** because the live per-peer message-rate limiter is still not
-operator-configurable at runtime, so **Green remains deferred** (per-peer message-rate runtime override + load evidence).
+evidence; Run 363 further **strengthens M12** by wiring the **per-peer message-rate runtime override** into the live
+per-peer `PeerRateLimiter` construction path used by `AsyncPeerManager` at source/test level (the Run 362 hidden
+`--p2p-max-messages-per-second` / `--p2p-burst-allowance` flags now affect the live limiter; default preserved) — but
+**M12 stays Yellow/Partial (stronger)** because release-binary evidence proving both connection-rate and per-peer
+message-rate runtime configurability is **deferred to Run 364**, so **Green remains deferred**.
 Public DevNet is still **not launch-ready**: M4 and the remaining must-haves (M6–M9, M12–M15) remain
 Yellow or Red — notably **Yellow-but-blocking** for seed/bootnodes (M4) until real live seeds + reachability evidence
 land.

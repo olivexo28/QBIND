@@ -120,7 +120,7 @@ use tokio::task::JoinHandle;
 use crate::channel_config::ChannelCapacityConfig;
 use crate::metrics::{DisconnectReason, InboundMsgKind, NodeMetrics};
 use crate::peer::PeerId;
-use crate::peer_rate_limiter::PeerRateLimiter;
+use crate::peer_rate_limiter::{PeerRateLimiter, PeerRateLimiterConfig};
 use crate::secure_channel::{SecureChannel, SecureChannelAsync};
 use qbind_consensus::network::{ConsensusNetworkEvent, NetworkError};
 use qbind_net::{ClientConnectionConfig, ServerConnectionConfig};
@@ -977,6 +977,16 @@ pub struct AsyncPeerManagerConfig {
     ///
     /// Only applies when `transport_security_mode` is `Kemtls`.
     pub max_concurrent_kemtls_handshakes: Option<usize>,
+    /// Run 363: optional operator-configured per-peer inbound message-rate
+    /// limiter configuration.
+    ///
+    /// - `None` → the peer-manager builds `PeerRateLimiter::with_defaults()`
+    ///   (`1000` msg/s + `100` burst), preserving current behavior exactly.
+    /// - `Some(cfg)` → the peer-manager builds `PeerRateLimiter::new(cfg)` from
+    ///   the validated per-peer thresholds derived from the Run 362 abuse/DoS
+    ///   runtime config (hidden `--p2p-max-messages-per-second` /
+    ///   `--p2p-burst-allowance`).
+    pub peer_rate_limiter_config: Option<PeerRateLimiterConfig>,
 }
 
 impl Default for AsyncPeerManagerConfig {
@@ -998,6 +1008,7 @@ impl Default for AsyncPeerManagerConfig {
             server_config: None,
             max_peers: None,                        // No limit by default (T105)
             max_concurrent_kemtls_handshakes: None, // No limit by default (T113)
+            peer_rate_limiter_config: None,         // Default per-peer limiter (Run 363)
         }
     }
 }
@@ -1030,6 +1041,7 @@ impl AsyncPeerManagerConfig {
             server_config: None,
             max_peers: None,                        // No limit by default (T105)
             max_concurrent_kemtls_handshakes: None, // No limit by default (T113)
+            peer_rate_limiter_config: None,         // Default per-peer limiter (Run 363)
         }
     }
 
@@ -1103,6 +1115,26 @@ impl AsyncPeerManagerConfig {
     /// - For backward compatibility: `None` (default)
     pub fn with_max_concurrent_kemtls_handshakes(mut self, limit: Option<usize>) -> Self {
         self.max_concurrent_kemtls_handshakes = limit;
+        self
+    }
+
+    /// Run 363: set the operator-configured per-peer inbound message-rate
+    /// limiter configuration.
+    ///
+    /// - `None` (default) → the peer-manager builds
+    ///   `PeerRateLimiter::with_defaults()` (`1000` msg/s + `100` burst),
+    ///   preserving current behavior exactly.
+    /// - `Some(cfg)` → the peer-manager builds `PeerRateLimiter::new(cfg)` from
+    ///   the validated per-peer thresholds. Callers should derive `cfg` from a
+    ///   validated
+    ///   [`crate::public_devnet_abuse_dos_runtime::PublicDevnetAbuseDosRuntimeConfig`]
+    ///   via its `peer_rate_limiter_config()` so only accepted (non-zero,
+    ///   bounded) thresholds ever reach the live limiter.
+    pub fn with_peer_rate_limiter_config(
+        mut self,
+        config: Option<PeerRateLimiterConfig>,
+    ) -> Self {
+        self.peer_rate_limiter_config = config;
         self
     }
 }
@@ -1240,9 +1272,21 @@ impl std::fmt::Debug for AsyncPeerManagerImpl {
     }
 }
 
+/// Run 363: build the per-peer inbound message-rate limiter for a peer-manager.
+///
+/// - `None` → `PeerRateLimiter::with_defaults()` (`1000` msg/s + `100` burst),
+///   preserving current behavior exactly when no operator override is present.
+/// - `Some(cfg)` → `PeerRateLimiter::new(cfg)` from validated per-peer
+///   thresholds derived from the Run 362 abuse/DoS runtime config.
+fn build_peer_rate_limiter(config: Option<PeerRateLimiterConfig>) -> PeerRateLimiter {
+    match config {
+        Some(cfg) => PeerRateLimiter::new(cfg),
+        None => PeerRateLimiter::with_defaults(),
+    }
+}
+
 impl AsyncPeerManagerImpl {
     /// Create a new `AsyncPeerManagerImpl` with the given configuration.
-    ///
     /// This does NOT start the listener. Call `start_listener()` to begin
     /// accepting connections.
     pub fn new(config: AsyncPeerManagerConfig) -> Self {
@@ -1255,6 +1299,10 @@ impl AsyncPeerManagerImpl {
         let kemtls_handshake_semaphore = config
             .max_concurrent_kemtls_handshakes
             .map(|limit| Arc::new(Semaphore::new(limit)));
+
+        // Run 363: build the per-peer inbound message-rate limiter from the
+        // operator-configured thresholds when present, else defaults.
+        let rate_limiter = Arc::new(build_peer_rate_limiter(config.peer_rate_limiter_config));
 
         AsyncPeerManagerImpl {
             config,
@@ -1271,13 +1319,22 @@ impl AsyncPeerManagerImpl {
             metrics: None,
             kemtls_metrics: Arc::new(KemtlsMetrics::new()),
             kemtls_handshake_semaphore,
-            rate_limiter: Arc::new(PeerRateLimiter::with_defaults()),
+            rate_limiter,
         }
     }
 
     /// Create a new `AsyncPeerManagerImpl` with default configuration.
     pub fn new_default() -> Self {
         Self::new(AsyncPeerManagerConfig::default())
+    }
+
+    /// Run 363: borrow the live per-peer inbound message-rate limiter.
+    ///
+    /// Exposes the limiter actually installed on the peer-manager so callers /
+    /// tests can confirm the operator-configured per-peer thresholds reached the
+    /// live construction path (default: `1000` msg/s + `100` burst).
+    pub fn peer_rate_limiter(&self) -> &PeerRateLimiter {
+        &self.rate_limiter
     }
 
     /// Create a new `AsyncPeerManagerImpl` with metrics enabled (T90.4).
@@ -1292,6 +1349,10 @@ impl AsyncPeerManagerImpl {
         let kemtls_handshake_semaphore = config
             .max_concurrent_kemtls_handshakes
             .map(|limit| Arc::new(Semaphore::new(limit)));
+
+        // Run 363: build the per-peer inbound message-rate limiter from the
+        // operator-configured thresholds when present, else defaults.
+        let rate_limiter = Arc::new(build_peer_rate_limiter(config.peer_rate_limiter_config));
 
         AsyncPeerManagerImpl {
             config,
@@ -1308,7 +1369,7 @@ impl AsyncPeerManagerImpl {
             metrics: Some(metrics),
             kemtls_metrics: Arc::new(KemtlsMetrics::new()),
             kemtls_handshake_semaphore,
-            rate_limiter: Arc::new(PeerRateLimiter::with_defaults()),
+            rate_limiter,
         }
     }
 
