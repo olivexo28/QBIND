@@ -1,0 +1,87 @@
+=== Run 372 release-binary M12 strict-auth multi-peer hardening evidence (canonical summary) ===
+
+VERDICT: PASS — public-DevNet abuse/DoS M12 strict-auth multi-peer hardening POSITIVE.
+  Two peers completed MutualAuthMode::Required KEMTLS handshakes against
+  target/release/qbind-node; an abusive over-budget flood was isolated to its own per-peer
+  bucket on live /metrics while the honest peer kept a full budget; the connection-rate
+  control stayed independent; and all Run 371 guarantees were preserved. M12 remains Green
+  for scope (no broadening to public DevNet launch readiness).
+
+DECISION GATE: Route A (no production source change; production public APIs only).
+
+TOOLCHAIN (from a representative run; hashes are host/build-specific and will differ per rebuild):
+  rustc 1.97.1 (8bab26f4f 2026-07-14)
+  cargo 1.97.1 (c980f4866 2026-06-30)
+
+RELEASE ARTIFACTS (representative run; sha256 changes per rebuild):
+  target/release/qbind-node
+    sha256:   e28775a2c44d02466b3c86dfff5e5641d93d983bde89e6d0f4701cc257131669
+    build_id: 05e9e0b9b78599fe1c4d5f6bd1fd8786f3a4b9ec
+  target/release/examples/run_372_public_devnet_m12_strict_auth_multi_peer_flood_helper
+    sha256:   f45dd1c2024760d10c157441d296029c33b37b5b963c861cce8599d37b692b8d
+    build_id: e9c140626c94c386c7e5a8ebc323e59e3319a806
+
+IN-PROCESS HELPER (release-built, strict-auth multi-peer flood over real loopback sockets): PASS 13/13
+  01_default_preserves_behavior                        per-peer 1000/100; adapter metrics None; conn disabled
+  02_strict_mutual_auth_admission                      honest peer completes Required mutual-auth; node A binds cert-derived NodeId
+  03_pqc_static_root_or_production_grade_material_path  two-node PqcStaticRoot Required handshake with real ML-DSA-44/ML-KEM-768 material
+  04_single_peer_under_budget                          under-budget flood -> 0 per-peer drops; metric absent
+  05_single_peer_over_budget                           over-budget flood -> deployed limiter drops; exported counter increments (~47/60)
+  06_multi_peer_bucket_isolation                       abusive bucket drops>0; honest bucket 0; distinct labels
+  07_abusive_peer_does_not_consume_honest_peer_budget  honest peer still under budget after the abusive flood (bucket drops stay 0)
+  08_connection_rate_regression                        connection-rate config validates + installs; per-peer defaults untouched
+  09_combined_limiter_independence                     per-peer flood leaves qbind_p2p_connection_rate_drop_total at 0
+  10_invalid_configs_fail_closed                       zero-window/zero-msg/zero-conn/unbounded all rejected
+  11_mainnet_refused                                   MainNet abuse/DoS config refused (direct + CLI)
+  12_hidden_cli_surface_checked                        hidden flags absent from --help; --p2p-mutual-auth stays public; invented rejected
+  13_non_mutation_guards                               abuse/DoS config is observability-only; no trust/validator/epoch surface
+
+PRODUCTION CLI SURFACE (real binary):
+  help_hidden_flags_absent: true (all Run 362/363 abuse/DoS flags hidden)
+  strict_auth_flag_public:  true (--p2p-mutual-auth is a pre-existing PUBLIC flag; not new)
+  invented_flag_rejected:   true (rc=2)
+  real_hidden_flags_parse:  true (rc=0)
+
+FAIL-CLOSED AT STARTUP (real binary exits non-zero):
+  invalid_zero_per_peer_max_fails_closed:     true
+  unbounded_per_peer_max_fails_closed:        true
+  invalid_zero_connection_rate_fails_closed:  true
+  mainnet_abuse_dos_refused:                  true
+
+LIVE SOCKET — default_preserves_behavior:
+  connection limiter DISABLED; qbind_p2p_connection_rate_drop_total=0; per-peer defaults 1000/100.
+
+LIVE SOCKET — connection_rate_regression (Run 367/370 preserved):
+  under-budget: 3 inbound TCP connections admitted; drop metric still 0.
+  over-budget:  10 inbound TCP connections -> 3 accepted / 7 refused; qbind_p2p_connection_rate_drop_total=7.
+  independence: connection-rate flood left qbind_net_per_peer_drops_total ABSENT.
+
+LIVE SOCKET — STRICT-AUTH MULTI-PEER per-peer message-rate flood (deployed read loop; budget 5 msg/s + 5 burst):
+  strict_mutual_auth_admission_live:  deployed node running under MutualAuthMode::Required (logged mutual_auth=Required).
+  multi_peer_kemtls_admitted:         TWO peers completed Required KEMTLS handshakes against target/release/qbind-node.
+  per_peer_bucket_labels:             honest_vid=1 label=10525299210378515360; abusive_vid=2 label=16923200116091377281.
+  single_peer_over_budget_live:       abusive over-budget flood -> qbind_net_per_peer_drops_total{peer="16923200116091377281",reason="rate_limit"}=47 on LIVE /metrics.
+  single_peer_under_budget_live:      honest under-budget flood -> no drops in its bucket (label 10525299210378515360 ABSENT).
+  multi_peer_bucket_isolation_live:   abusive drops attributed ONLY to abusive bucket; honest bucket clean.
+  abusive_peer_does_not_consume_honest_peer_budget_live: honest peer stayed fully under budget while the abusive bucket absorbed all drops.
+  combined_limiter_independence:      strict-auth multi-peer flood left qbind_p2p_connection_rate_drop_total=0.
+  per_peer_drop_does_not_tear_down:   deployed node still serving /metrics after the flood.
+
+PQC/STATIC-ROOT MATERIAL:
+  Runtime-generated ML-DSA-44 root + ML-KEM-768 leaf material drives a two-node
+  PqcRootMode::PqcStaticRoot Required mutual-auth handshake in the release helper.
+  Material is ephemeral, in-memory, never written to disk, and never committed.
+
+READINESS DELTA:
+  M12 remains Green (strict-auth + multi-peer hardening evidence PASSES; scope unchanged).
+  M4 (Yellow/launch-blocking), M6 (Yellow/Partial), M7-M9, M13-M15 UNCHANGED.
+  Public DevNet remains NOT launch-ready. No TestNet/MainNet readiness claim. C4/C5 remain OPEN.
+  MainNet authority rotation/revocation remains Red.
+
+SECURITY:
+  Loopback / temp dirs only. No committed secrets or live endpoints.
+  Generated PQC/KEMTLS material is temporary, dev-only, in-memory, and gitignored.
+
+NOTE: exact per-peer drop counts (e.g. 47 of 60) vary slightly with scheduling; the invariant is
+  under-budget => 0 drops (metric absent) and over-budget => drops > 0 attributed to the abusive
+  bucket only, with the honest bucket clean, on live /metrics.

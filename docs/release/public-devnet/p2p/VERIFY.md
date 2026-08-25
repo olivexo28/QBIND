@@ -161,6 +161,33 @@ kept up; the connection-rate live-socket proof preserved (metric = 7) and indepe
 MainNet fail the binary closed; `--help` still hides the abuse/DoS flags. **M12 moves Green for the two
 abuse/DoS deployed live-socket controls; defaults preserved; does not move M4/M6 or close C4/C5.**
 
+## 7vc. Verify the Run 372 strict-mutual-auth + multi-peer concurrent flood hardening (Route A) — M12 Green
+
+Run 372 re-proves the Run 371 result under **strict admission** (`--p2p-mutual-auth required`) and
+**multi-peer concurrent flood** conditions, still using production public APIs (no source change). Two peers
+(honest under-budget + abusive over-budget) each complete a `MutualAuthMode::Required` KEMTLS handshake
+against a running `target/release/qbind-node`; live `/metrics` isolates the abusive peer's drops to its own
+per-peer bucket while the honest peer's bucket stays clean.
+
+```bash
+# Run 372 helper + harness exist (no source test file — Route A / no source change):
+test -f crates/qbind-node/examples/run_372_public_devnet_m12_strict_auth_multi_peer_flood_helper.rs
+test -f scripts/devnet/run_372_public_devnet_m12_strict_auth_multi_peer_flood_release_binary.sh
+
+# Run the release-binary live-socket harness (builds release + helper, drives real strict-auth sockets):
+bash scripts/devnet/run_372_public_devnet_m12_strict_auth_multi_peer_flood_release_binary.sh /tmp/qbind-run372
+cat /tmp/qbind-run372/summary.txt
+```
+
+Expected: the helper scenario suite **PASS (13/13)**; the deployed node logs `mutual_auth=Required`; both
+peers complete the Required KEMTLS handshake; the abusive peer's over-budget flood surfaces
+`qbind_net_per_peer_drops_total{peer="<abusive key>",reason="rate_limit"}` > 0 while the honest peer's bucket
+label is ABSENT; the connection-rate live-socket proof preserved (metric = 7) and independent; the release
+helper proves a production-grade `PqcRootMode::PqcStaticRoot` (ML-DSA-44 + ML-KEM-768) Required handshake;
+invalid/unbounded/MainNet fail the binary closed; `--help` still hides the abuse/DoS flags and keeps
+`--p2p-mutual-auth` public. **M12 remains Green (hardening); no new public CLI flags; strict mutual-auth only
+tightens admission; does not move M4/M6 or close C4/C5.**
+
 ## 7w. Verify the Run 368 admitted-peer per-peer message-rate live-socket evidence
 
 Run 368 drives a real admitted peer on a live `AsyncPeerManagerImpl` over a loopback socket and proves

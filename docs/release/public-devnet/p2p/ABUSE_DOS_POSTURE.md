@@ -409,6 +409,34 @@ default (Disabled) mutual-auth admission. No production source change; no wire-f
 trust-bundle / KEMTLS weakening; defaults preserved; M4 remains Yellow/launch-blocking; public DevNet
 remains **NOT launch-ready**; Full **C4 / C5 remain OPEN**.
 
+## 7l. Run 372 strict-mutual-auth + multi-peer concurrent flood — M12 Green (hardening, Route A)
+
+Run 372 re-proves the Run 371 M12 Green result under **stricter admission** and **multi-peer concurrent
+flood** conditions, still using **only production public APIs (no source change)**.
+
+- **Strict admission:** the deployed `target/release/qbind-node` runs with the pre-existing **public** flag
+  `--p2p-mutual-auth required`, and each flooding peer completes the full `MutualAuthMode::Required` KEMTLS
+  handshake before flooding; the listener registers each peer under its **verified cert-derived NodeId**.
+- **Multi-peer bucket isolation (live socket):** two peers run concurrently — an honest peer (under budget)
+  and an abusive peer (over budget). On live `/metrics` the abusive peer's drops appear **only** under the
+  abusive peer's deterministic `qbind_net_per_peer_drops_total{peer="<key>",reason="rate_limit"}` bucket
+  (> 0), while the honest peer's bucket label is **ABSENT** — the abusive flood does **not** consume the
+  honest peer's budget.
+- **Production-grade material:** the release helper additionally drives a two-node
+  `PqcRootMode::PqcStaticRoot` Required mutual-auth handshake with runtime-generated ML-DSA-44 root +
+  ML-KEM-768 leaf material (ephemeral, in-memory, never written to disk).
+- **Preserved:** the connection-rate live-socket regression (10 conns, max 3 → 3 accepted / 7 refused,
+  `qbind_p2p_connection_rate_drop_total = 7`) and control-independence; invalid/unbounded/MainNet configs
+  fail closed; hidden CLI surface preserved; helper scenario suite 13/13.
+- Artifacts: `crates/qbind-node/examples/run_372_public_devnet_m12_strict_auth_multi_peer_flood_helper.rs`,
+  `scripts/devnet/run_372_public_devnet_m12_strict_auth_multi_peer_flood_release_binary.sh`,
+  `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_372.md`.
+
+**M12 remains Green** (hardening evidence; scope unchanged). No new public CLI flags; strict mutual-auth
+only **tightens** admission; no wire-format / trust-bundle weakening; M4/M6 unchanged; public DevNet remains
+**NOT launch-ready**; Full **C4 / C5 remain OPEN**. Sustained high-throughput multi-peer load validation and
+cross-process production-grade PQC-static-root live-socket flood remain outstanding.
+
 
 Before a public TestNet, at minimum:
 
@@ -446,4 +474,9 @@ connection-rate evidence,
 and all record the remaining gap (per-peer message-rate **live-socket** evidence via a KEMTLS-admitted
 deployed socket flood + load validation). **Run 371 closes the KEMTLS-admitted deployed per-peer
 live-socket flood gap (Route A, M12 Green for both abuse/DoS deployed live-socket controls); sustained
-multi-peer load validation under production-grade keys/strict admission remains outstanding.**
+multi-peer load validation under production-grade keys/strict admission remains outstanding.** **Run 372
+adds strict-mutual-auth (`--p2p-mutual-auth required`) admission and multi-peer bucket-isolation live-socket
+hardening evidence (honest under-budget peer's bucket stays clean while the abusive peer's bucket absorbs
+all drops), plus in-process production-grade `PqcRootMode::PqcStaticRoot` (ML-DSA-44 + ML-KEM-768) proof;
+sustained high-throughput load validation and cross-process PQC-static-root live-socket flood remain
+outstanding.**
