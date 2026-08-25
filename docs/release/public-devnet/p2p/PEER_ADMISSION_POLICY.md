@@ -9,6 +9,12 @@ the **pre-existing** KEMTLS mutual-auth, PQC trust-root, and trust-bundle surfac
 changes **no** peer-admission logic and adds **no** CLI flag. All flags below are pre-existing and
 validated to appear in `qbind-node --help` (see `VERIFY.md`).
 
+> **Run 375 note.** The first-class `qbind-node identity` command (Run 375) is a local key/cert
+> generation + verification utility only. It **does not change peer-admission logic**: it opens no
+> socket, registers no peer, and mutates no trust/validator state. The material it generates is
+> admitted by exactly the same pre-existing strict mutual-auth path described here (which only
+> **tightens** admission). No peer-admission weakening.
+
 ## 1. How a peer is admitted on public DevNet
 
 Admission uses the **existing** KEMTLS handshake path. On an open public DevNet port, the intended

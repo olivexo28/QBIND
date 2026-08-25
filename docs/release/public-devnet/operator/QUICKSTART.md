@@ -221,11 +221,20 @@ Public DevNet remains **NOT launch-ready**. Outstanding (non-exhaustive; see
   `qbind-node.sha256`, `VERIFY.md`). Cross-host / SLSA / signed-release scope is **not** claimed.
 - **M4 — live seed/bootnode list + external reachability evidence:** **Yellow / launch-blocking**
   (format + placeholder only).
-- **M6 — operator identity generation:** **Yellow / Partial (materially narrowed, Run 374)**. To
-  generate the peer identity material used by the strict-auth flags above, see the identity package
-  `docs/release/public-devnet/identity/` (`IDENTITY_GENERATION.md` / `IDENTITY_VERIFY.md`). Generation
-  is a release-built example helper, not yet a first-class CLI subcommand, and there is no live
-  registration path — so M6 stays Yellow.
+- **M6 — operator identity generation:** **Yellow / Partial (first-class generation half Green-for-scope, Run 375)**. To
+  generate the peer identity material used by the strict-auth flags above, use the first-class
+  `qbind-node identity` command (Run 375):
+
+  ```bash
+  qbind-node identity generate devnet full-node "$OUT/node"
+  qbind-node identity verify "$OUT/node/leaf.cert.bin"
+  ```
+
+  See the identity package `docs/release/public-devnet/identity/`
+  (`IDENTITY_GENERATION.md` / `IDENTITY_VERIFY.md`). The stable, documented,
+  release-binary-evidenced generation + verification command now exists, but
+  there is still **no live registration path** into a running public DevNet
+  (M4-gated) — so M6 as a whole stays Yellow / Partial.
 - External reachability, status page, alerting, and a seed-node runbook: still outstanding.
 - Other must-haves (M6–M15) remain unresolved (Yellow/Red).
 

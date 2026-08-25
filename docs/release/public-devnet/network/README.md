@@ -132,15 +132,24 @@ A future run must **deploy real seed/bootnode nodes** and **capture external rea
 then replace the placeholder entry with live entries and update the readiness matrix. That deployment
 work is explicitly **out of scope** for Run 357 (docs / artifact / verification only).
 
-## 8a. Populating seed identity fields (Run 374)
+## 8a. Populating seed identity fields (Run 374, first-class command Run 375)
 
 The per-seed `node_id` / `peer_id` / `validator_address` / `pqc_suite` /
 `transport_security_mode` fields are produced by the Run 374 operator identity package
 (`docs/release/public-devnet/identity/`). An operator generates candidate identity material with
-`run_374_public_devnet_identity_generation_helper`, then maps the resulting `public-identity.json` into
-a `seed_node` object (see `IDENTITY_VERIFY.md` §4). Candidate entries stay `status: "planned"` /
-`"placeholder"` with `last_reachability_evidence: null` — publishing a `node_id` here is **not** a live
-or reachability claim, and does **not** move M4.
+the first-class `qbind-node identity generate` command (Run 375; the Run 374
+`run_374_public_devnet_identity_generation_helper` example remains a thin wrapper), then maps the
+resulting `public-identity.json` into a `seed_node` object. The command can emit the mapped object
+directly:
+
+```bash
+qbind-node identity generate devnet seed "$OUT/seed"
+qbind-node identity seed-candidate "$OUT/seed"   # prints a planned seed_node object
+```
+
+Candidate entries stay `status: "planned"` / `"placeholder"` with `last_reachability_evidence: null`
+and require the operator to fill `p2p_host` / `p2p_multiaddr` / `operator` / `expected_genesis_hash`
+— publishing a `node_id` here is **not** a live or reachability claim, and does **not** move M4.
 
 ## Provenance
 

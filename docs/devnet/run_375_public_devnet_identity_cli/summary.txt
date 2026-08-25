@@ -1,0 +1,16 @@
+release_binary=OK sha256=970bce217670c83120ffb37cbe0c70fa984d862646a60c3abeb3e07935ef31db
+build_id=94f9faab4f748916e2d5f85d3c7eb6deb4eac63c
+toolchain=rustc 1.97.1 (8bab26f4f 2026-07-14) / cargo 1.97.1 (c980f4866 2026-06-30)
+generate_full-node=OK kem_sk_perms=600 node_id=2f298a8b5c4f90fe
+generate_seed=OK kem_sk_perms=600 node_id=f10d9a9070952099
+generate_validator-candidate=OK kem_sk_perms=600 node_id=55196737691adaf1
+root_signing_key_on_disk=NONE (held in memory only)
+identity_schema_validation=OK (full-node, seed, validator-candidate)
+deterministic_node_id_verify=OK (generate == verify for all roles)
+seed_list_candidate_insertion=OK (status=planned, no reachability claim)
+loopback_strict_auth_boot=OK qbind_p2p_pqc_root_mode 1 qbind_p2p_pqc_roots_configured 1 
+mismatched_material_fail_closed=OK (node exited: local leaf cert validator_id does not match --validator-id)
+mainnet_testnet_generation=REFUSED (fail closed, non-zero exit, no material written)
+unknown_role_generation=REFUSED (fail closed)
+
+RESULT=PASS (first-class qbind-node identity command proven; DevNet-only; no live deployment)

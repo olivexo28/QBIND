@@ -1,7 +1,28 @@
-# QBIND Public DevNet — Operator Identity Package (Run 374)
+# QBIND Public DevNet — Operator Identity Package (Run 374, first-class command Run 375)
 
 > **Safety label (applies to every file in this directory):**
 > **experimental · resettable · no value · no MainNet readiness claim · no C4/C5 closure claim · NOT public-DevNet launch-ready.**
+
+> **Run 375 — first-class command.** The identity-generation and verification
+> workflow described in this package is now available as a stable, first-class
+> `qbind-node identity` subcommand (no example build required):
+>
+> ```bash
+> qbind-node identity generate devnet full-node <outdir>
+> qbind-node identity generate devnet seed <outdir>
+> qbind-node identity generate devnet validator-candidate <outdir> [validator_index]
+> qbind-node identity verify <outdir>/leaf.cert.bin
+> qbind-node identity print-public <outdir>
+> qbind-node identity seed-candidate <outdir>
+> ```
+>
+> The command emits the **same** files, the **same** schema-compatible
+> `public-identity.json`, the **same** `0600` KEM secret key, the same
+> in-memory-only root signing key, and the same MainNet/TestNet refusals as the
+> Run 374 helper (which is now a thin wrapper over the shared implementation).
+> It changes **no** default node behavior: it is only reached when `identity` is
+> the first CLI token. See `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_375.md`.
+
 
 This directory is the canonical, operator-facing **identity-generation and
 verification** package for the QBIND public DevNet. It lets an external DevNet
@@ -29,7 +50,13 @@ missing). See "Readiness status" below for the exact matrix delta.
 
 ## Tooling
 
-- **Generator / verifier (release-built example, not a production runtime path):**
+- **First-class command (Run 375, preferred):** `qbind-node identity`
+  (`generate` / `verify` / `print-public` / `seed-candidate`), implemented in
+  `crates/qbind-node/src/identity_cli.rs`. Evidence:
+  `scripts/devnet/run_375_public_devnet_identity_cli.sh` /
+  `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_375.md`.
+- **Generator / verifier (release-built example, now a thin wrapper over the
+  first-class command):**
   `crates/qbind-node/examples/run_374_public_devnet_identity_generation_helper.rs`
 - **Evidence harness:**
   `scripts/devnet/run_374_public_devnet_identity_generation.sh`

@@ -8,6 +8,11 @@ DevNet P2P posture package (`P2P_PORT_POSTURE.md`, `PEER_ADMISSION_POLICY.md`, `
 and the Run 361 source/test abuse/DoS hardening boundary. All commands are read-only or build/test
 commands; none deploy infrastructure, none open a public port, and none claim launch readiness.
 
+> **Run 375 note.** The first-class `qbind-node identity` command (Run 375) adds no P2P wire-format
+> change and no peer-admission change. To confirm the P2P posture is unchanged, verify the
+> pre-existing strict mutual-auth flags still appear in `qbind-node --help` and that the `identity`
+> subcommand is a local generation/verification utility only (`qbind-node identity --help`).
+
 ## 1. Scope
 
 - Run 360 published the P2P port / peer-admission / abuse-DoS posture (docs-only, CLI-validated).

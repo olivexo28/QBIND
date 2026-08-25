@@ -92,6 +92,7 @@ pub mod evm_state_store;
 pub mod execution_adapter;
 pub mod forged_injection;
 pub mod hotstuff_node_sim;
+pub mod identity_cli;
 pub mod identity_map;
 pub mod keystore;
 pub mod ledger_bridge;

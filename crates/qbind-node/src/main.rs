@@ -2005,6 +2005,24 @@ fn invoke_run_182_local_peer_candidate_check_callsite_onchain_governance_marker_
 /// Main entry point for qbind-node binary.
 #[tokio::main]
 async fn main() {
+    // Run 375 — first-class `qbind-node identity` command surface. Intercept the
+    // `identity` subcommand BEFORE any flag parsing or config construction, so it
+    // is a pure local key/cert generation + verification utility that never
+    // touches node startup, networking, or any runtime state. A normal
+    // `qbind-node …` invocation (no `identity` token) is completely unaffected —
+    // this preserves all default behavior. DevNet-only; MainNet/TestNet
+    // generation is refused inside the dispatcher.
+    {
+        let mut raw = std::env::args();
+        let _bin = raw.next();
+        if let Some(first) = raw.next() {
+            if first == "identity" {
+                let code = qbind_node::identity_cli::dispatch(raw);
+                std::process::exit(code);
+            }
+        }
+    }
+
     let args = CliArgs::parse_args();
 
     // Build NodeConfig from CLI args
