@@ -1,0 +1,96 @@
+=== Run 373 release-binary M12 cross-process PqcStaticRoot strict-auth hardening evidence (canonical summary) ===
+
+VERDICT: PASS — public-DevNet abuse/DoS M12 cross-process PqcStaticRoot strict-auth hardening POSITIVE.
+  Two peers completed MutualAuthMode::Required + PqcStaticRoot KEMTLS handshakes against
+  target/release/qbind-node using operator-configured static-root material (--p2p-trusted-root /
+  --p2p-leaf-cert / --p2p-leaf-cert-key); an abusive over-budget flood was isolated to its own
+  cert-derived per-peer bucket on live /metrics while the honest peer kept a full budget; the
+  connection-rate control stayed independent; and all Run 371/372 guarantees were preserved.
+  M12 remains Green for scope (no broadening to public DevNet launch readiness).
+
+DECISION GATE: Route A (no production source change; production public APIs + pre-existing public CLI only).
+
+TOOLCHAIN (from a representative run; hashes are host/build-specific and will differ per rebuild):
+  rustc 1.97.1 (8bab26f4f 2026-07-14)
+  cargo 1.97.1 (c980f4866 2026-06-30)
+
+RELEASE ARTIFACTS (representative run; sha256 changes per rebuild):
+  target/release/qbind-node
+    sha256:   e28775a2c44d02466b3c86dfff5e5641d93d983bde89e6d0f4701cc257131669
+    build_id: 05e9e0b9b78599fe1c4d5f6bd1fd8786f3a4b9ec
+  target/release/examples/run_373_public_devnet_m12_pqc_static_root_cross_process_helper
+    sha256:   dca1fbdfaab57d4c67a806e14145851a5845fcba7edc69ba62beccaadd653488
+    build_id: b99ac10f4a26d54f02e30d1bfff2e31cb1fb94c4
+  target/release/examples/devnet_pqc_root_helper
+    sha256:   0351fb6dd73668c0d1ee3dc03c22b89bebd0bb8ad07353eaf4f5a1ddae6a0461
+
+IN-PROCESS HELPER (release-built, cross-process-shaped static-root strict-auth scenarios over real loopback sockets): PASS 13/13
+  01_default_preserves_behavior                        per-peer 1000/100; adapter metrics None; conn disabled
+  02_strict_mutual_auth_admission                      honest peer completes Required mutual-auth; node A binds cert-derived NodeId
+  03_pqc_static_root_file_loaded_material_path         file-loaded PqcStaticRoot Required handshake with real ML-DSA-44/ML-KEM-768 material
+  04_cert_derived_node_id                              deployed node registers each peer under its verified cert-derived NodeId (leaf ML-KEM pk)
+  05_single_peer_under_budget                          under-budget flood -> 0 per-peer drops; metric absent
+  06_single_peer_over_budget                           over-budget flood -> deployed limiter drops; exported counter increments
+  07_multi_peer_bucket_isolation                       abusive bucket drops>0; honest bucket 0; distinct cert-derived labels
+  08_abusive_peer_does_not_consume_honest_peer_budget  honest peer still under budget after the abusive flood (bucket drops stay 0)
+  09_connection_rate_regression                        connection-rate config validates + installs; per-peer defaults untouched
+  10_combined_limiter_independence                     per-peer flood leaves qbind_p2p_connection_rate_drop_total at 0
+  11_invalid_configs_fail_closed                       zero-window/zero-msg/zero-conn/unbounded/malformed-root all rejected
+  12_mainnet_refused                                   MainNet abuse/DoS config refused (direct + CLI)
+  13_hidden_cli_surface_and_non_mutation_guards        hidden flags absent; static-root/strict-auth flags public; observability-only config
+
+PRODUCTION CLI SURFACE (real binary):
+  help_hidden_flags_absent:               true (all Run 362/363 abuse/DoS flags hidden)
+  strict_auth_and_static_root_flags_public: true (--p2p-mutual-auth / --p2p-pqc-root-mode / --p2p-trusted-root / --p2p-leaf-cert are pre-existing PUBLIC flags; not new)
+  invented_flag_rejected:                 true (rc=2)
+  real_hidden_flags_parse:                true (rc=0)
+
+FAIL-CLOSED AT STARTUP (real binary exits non-zero):
+  invalid_zero_per_peer_max_fails_closed:     true
+  unbounded_per_peer_max_fails_closed:        true
+  invalid_zero_connection_rate_fails_closed:  true
+  malformed_trusted_root_fails_closed:        true
+  mainnet_abuse_dos_refused:                  true
+
+LIVE SOCKET — default_preserves_behavior:
+  connection limiter DISABLED; qbind_p2p_connection_rate_drop_total=0; per-peer defaults 1000/100.
+
+LIVE SOCKET — connection_rate_regression (Run 367/370 preserved):
+  under-budget: 3 inbound TCP connections admitted; drop metric still 0.
+  over-budget:  10 inbound TCP connections -> 3 accepted / 7 refused; qbind_p2p_connection_rate_drop_total=7.
+  independence: connection-rate flood left qbind_net_per_peer_drops_total ABSENT.
+
+PQC/STATIC-ROOT MATERIAL (operator-configured, file-loaded, temporary):
+  temporary_pqc_static_root_material_generated: true
+    root_id=704db1a00e6d894b983c6b94d58b39ded9e36bd0a8ee2198b3bacd643d4a3cc4 suite=100 kem=ml-kem-768 validators=3
+    (temp dir; per-vid leaf cert + KEM secret key on disk in temp dir only; root signing key in-memory only, never on disk; removed on exit).
+  trusted-root.spec loaded via --p2p-trusted-root; leaf cert/key loaded via --p2p-leaf-cert / --p2p-leaf-cert-key.
+
+LIVE SOCKET — CROSS-PROCESS STATIC-ROOT STRICT-AUTH multi-peer per-peer message-rate flood (deployed read loop; budget 5 msg/s + 5 burst):
+  cross_process_static_root_admission_live: deployed node running under MutualAuthMode::Required + PqcStaticRoot
+                                            (qbind_p2p_pqc_root_mode=1, qbind_p2p_pqc_roots_configured=1 on live /metrics).
+  per_peer_bucket_labels:                   honest_vid=1 label=1683391479773513313; abusive_vid=2 label=7076916635622004226 (cert-derived).
+  multi_peer_static_root_kemtls_admitted:   TWO peers completed Required + PqcStaticRoot KEMTLS handshakes against target/release/qbind-node.
+  cert_derived_node_id_observed_live:       both peers observed the deployed node's cert-derived NodeId; the deployed node registered
+                                            each peer under its verified cert-derived NodeId (from the certified leaf ML-KEM-768 pk).
+  over_budget_static_root_peer_live:        abusive over-budget flood -> qbind_net_per_peer_drops_total{peer="7076916635622004226",reason="rate_limit"}=47 on LIVE /metrics.
+  under_budget_static_root_peer_live:       honest under-budget flood -> no drops in its bucket (label 1683391479773513313 ABSENT).
+  multi_peer_bucket_isolation_live:         abusive drops attributed ONLY to abusive bucket; honest bucket clean.
+  abusive_peer_does_not_consume_honest_peer_budget_live: honest peer stayed fully under budget while the abusive bucket absorbed all drops.
+  combined_limiter_independence_per_peer_side: static-root multi-peer flood left qbind_p2p_connection_rate_drop_total=0.
+  per_peer_drop_does_not_tear_down:         deployed node still serving /metrics after the flood.
+
+READINESS DELTA:
+  M12 remains Green (cross-process PqcStaticRoot strict-auth hardening evidence PASSES; scope unchanged).
+  M4 (Yellow/launch-blocking), M6 (Yellow/Partial), M7-M9, M13-M15 UNCHANGED.
+  Public DevNet remains NOT launch-ready. No TestNet/MainNet readiness claim. C4/C5 remain OPEN.
+  MainNet authority rotation/revocation remains Red.
+
+SECURITY:
+  Loopback / temp dirs only. No committed secrets or live endpoints.
+  Generated PQC/KEMTLS material (including private KEM secret keys) is temporary, dev-only, written only to temp dirs,
+  removed on exit, and gitignored. The root signing key is held in memory only and never written to disk.
+
+NOTE: exact per-peer drop counts (e.g. 47 of 60) and cert-derived bucket labels vary per run (random ML-KEM keypairs +
+  scheduling); the invariant is under-budget => 0 drops (metric absent) and over-budget => drops > 0 attributed to the
+  abusive cert-derived bucket only, with the honest bucket clean, on live /metrics.

@@ -1,0 +1,33 @@
+# Run 373 evidence archive — only README.md, summary.txt, and .gitignore are tracked.
+# All per-run artifacts contain absolute paths and ephemeral data and MUST NOT be committed.
+# Generated PQC/KEMTLS material (roots, certs, KEM secret keys, trust bundles), node data
+# dirs, logs, and metrics dumps are temporary and dev-only; only published-safe
+# hashes/fingerprints appear in the tracked summary/README.
+material/
+helper/
+helper_stdout.txt
+scenarios/
+nodes/
+failclosed/
+logs/
+data/
+node_data/
+help.txt
+version.txt
+invented_flag.txt
+real_flags_parse.txt
+metric_evidence.txt
+manifest.txt
+provenance.txt
+material_stdout.txt
+material_stderr.txt
+static_honest.txt
+static_abusive.txt
+static_honest_stdout.txt
+static_abusive_stdout.txt
+*.log
+*.rc
+*.cert.bin
+*.kem.sk.bin
+*.spec
+*.hex
