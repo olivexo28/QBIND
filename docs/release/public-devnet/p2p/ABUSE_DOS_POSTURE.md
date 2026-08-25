@@ -437,6 +437,37 @@ only **tightens** admission; no wire-format / trust-bundle weakening; M4/M6 unch
 **NOT launch-ready**; Full **C4 / C5 remain OPEN**. Sustained high-throughput multi-peer load validation and
 cross-process production-grade PQC-static-root live-socket flood remain outstanding.
 
+## 7m. Run 373 cross-process PqcStaticRoot strict-auth flood — M12 Green (hardening, Route A)
+
+Run 373 extends Run 372's **in-process** `PqcRootMode::PqcStaticRoot` proof to a **cross-process**
+standalone-binary proof, still using **only production public APIs + the pre-existing public CLI (no source
+change)**.
+
+- **Operator-configured static-root material:** the pre-existing `devnet_pqc_root_helper` mints **temporary**
+  ML-DSA-44 root + ML-KEM-768 leaf material into a temp dir (root signing key in memory only, never on disk;
+  removed on exit; gitignored).
+- **Cross-process strict-auth admission (live socket):** the deployed `target/release/qbind-node` runs with
+  the pre-existing **public** flags `--p2p-mutual-auth required --p2p-pqc-root-mode pqc-static-root
+  --p2p-trusted-root … --p2p-leaf-cert … --p2p-leaf-cert-key …`; live `/metrics` exports
+  `qbind_p2p_pqc_root_mode 1` and `qbind_p2p_pqc_roots_configured 1`. Both flooding peers, built from the same
+  operator material, complete the full `MutualAuthMode::Required` + PqcStaticRoot KEMTLS handshake; the
+  listener registers each under its **verified cert-derived NodeId** (from the certified leaf ML-KEM-768 pk).
+- **Multi-peer bucket isolation (live socket):** an abusive over-budget flood surfaces
+  `qbind_net_per_peer_drops_total{peer="<cert-derived key>",reason="rate_limit"}` (> 0) while the honest
+  peer's cert-derived bucket label is **ABSENT** — the abusive flood does **not** consume the honest peer's
+  budget.
+- **Preserved:** the connection-rate live-socket regression (10 conns, max 3 → 3 accepted / 7 refused,
+  `qbind_p2p_connection_rate_drop_total = 7`) and control-independence; invalid/unbounded/malformed-root/
+  MainNet configs fail closed; hidden CLI surface preserved; helper scenario suite 13/13.
+- Artifacts: `crates/qbind-node/examples/run_373_public_devnet_m12_pqc_static_root_cross_process_helper.rs`,
+  `scripts/devnet/run_373_public_devnet_m12_pqc_static_root_cross_process_release_binary.sh`,
+  `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_373.md`.
+
+**M12 remains Green** (hardening evidence; scope unchanged). No new public CLI flags; strict mutual-auth +
+static-root only **tighten** admission; no wire-format / trust-bundle weakening; M4/M6 unchanged; public
+DevNet remains **NOT launch-ready**; Full **C4 / C5 remain OPEN**. Sustained high-throughput multi-peer load
+validation and trust-bundle-signed (rotation-staging) cross-process live-socket flood remain outstanding.
+
 
 Before a public TestNet, at minimum:
 
@@ -479,4 +510,9 @@ adds strict-mutual-auth (`--p2p-mutual-auth required`) admission and multi-peer 
 hardening evidence (honest under-budget peer's bucket stays clean while the abusive peer's bucket absorbs
 all drops), plus in-process production-grade `PqcRootMode::PqcStaticRoot` (ML-DSA-44 + ML-KEM-768) proof;
 sustained high-throughput load validation and cross-process PQC-static-root live-socket flood remain
+outstanding.** **Run 373 closes the cross-process PQC-static-root gap: the standalone
+`target/release/qbind-node` runs under `--p2p-mutual-auth required --p2p-pqc-root-mode pqc-static-root` with
+operator-configured `--p2p-trusted-root`/`--p2p-leaf-cert`/`--p2p-leaf-cert-key` material and two
+KEMTLS-admitted peers flood cross-process with abusive-bucket isolation on live `/metrics`; sustained
+high-throughput load validation and trust-bundle-signed rotation-staging cross-process flood remain
 outstanding.**
