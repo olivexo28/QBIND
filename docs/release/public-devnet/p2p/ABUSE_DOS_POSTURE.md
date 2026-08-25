@@ -293,6 +293,39 @@ peer socket (it enforces on the `AsyncPeerManagerImpl` receive path and needs a 
 harness — see Run 368 next-step). M12 Green requires both controls over a live socket. M4 remains
 Yellow/launch-blocking; public DevNet remains **NOT launch-ready**; Full **C4 / C5 remain OPEN**.
 
+## 7h. Run 368 admitted-peer per-peer message-rate live-socket evidence
+
+Run 368 strengthens the per-peer **message-rate** evidence from Run 367's synchronous construction-path
+`PeerRateLimiter::allow()` proof to a **real admitted-peer socket** proof. The Run 368 helper stands up a
+loopback TCP socket pair, registers one side as an admitted peer on a live `AsyncPeerManagerImpl` (the
+component that owns the per-peer `PeerRateLimiter`) via `add_peer_with_stream`, and floods
+length-prefixed `NetMessage` frames from the other side through the actual async
+`AsyncPeerManagerImpl::peer_reader_task` receive loop.
+
+- Under budget (bucket 5/0, 5 frames): all accepted; 0 per-peer drops.
+- Over budget (bucket 5/0, 80 frames): dropped by the live `PeerRateLimiter` (≈75 drops observed);
+  `NodeMetrics::peer_network().total_rate_limit_drops()` / `peer_rate_limit_drop_count(peer)` increment
+  and `qbind_net_per_peer_drops_total{peer="…",reason="rate_limit"}` renders.
+- Independence: a connection-rate refusal increments only `qbind_p2p_connection_rate_drop_total`
+  (`P2pMetrics`), a per-peer flood increments only the per-peer counter (`NodeMetrics::peer_network`).
+- Connection-rate regression: the Run 367 live-socket connection-rate proof is re-run on the release
+  binary (10 connections, max 3 → 3 accepted / 7 refused; metric = 7).
+- Helper: `crates/qbind-node/examples/run_368_public_devnet_abuse_dos_per_peer_live_socket_helper.rs`
+  (9/9). Harness:
+  `scripts/devnet/run_368_public_devnet_abuse_dos_per_peer_live_socket_release_binary.sh`. Evidence:
+  `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_368.md`,
+  `docs/devnet/run_368_public_devnet_abuse_dos_per_peer_live_socket_release_binary/`.
+- No production source change; defaults preserved; no new public CLI flags.
+
+**M12 stays Yellow/Partial (strengthened) — it does NOT move Green.** Decision gate = **Route C**: the
+**deployed** `qbind-node` inbound path (`TcpKemTlsP2pService::subscribe` → `P2pInboundDemuxer` →
+handlers) does NOT consult the `PeerRateLimiter`, and `AsyncPeerManagerImpl` is never spawned by
+`main.rs`, so Run 368's per-peer proof is at the `AsyncPeerManagerImpl` layer with a plain-TCP admitted
+peer, not the deployed TcpKemTls receive path and not KEMTLS mutual-auth. M12 Green requires both
+controls over the deployed live socket; the remaining blocker is wiring the `PeerRateLimiter` onto the
+deployed TcpKemTls receive path (recommended Run 369). M4 remains Yellow/launch-blocking; public DevNet
+remains **NOT launch-ready**; Full **C4 / C5 remain OPEN**.
+
 ## 8. Future work required before TestNet
 
 Before a public TestNet, at minimum:

@@ -63,18 +63,45 @@ leaves the connection limiter **disabled** (test `t01_default_profile_preserves_
 
 ## 6. Verify no forbidden claim
 
-Run 361/362/363/364/365/366/367 do not claim public DevNet launch-readiness, TestNet readiness, MainNet readiness,
+Run 361/362/363/364/365/366/367/368 do not claim public DevNet launch-readiness, TestNet readiness, MainNet readiness,
 C4/C5 closure, or M4/M6 Green. **M12 stays Yellow/Partial (strengthened)**: Run 362 wires the
 connection-rate limiter into runtime, Run 363 wires the per-peer message-rate override at source/test
 level, Run 364 lands release-binary evidence for both, Run 365 threads the CLI-derived per-peer
 override through the deployed `P2pNodeBuilder` into the live `AsyncPeerManagerImpl` construction path at
-source/test level, Run 366 lands deployed-builder-path release-binary end-to-end evidence, and Run 367
-proves the **connection-rate** control **live-socket** on a running P2P-capable node — but M12
-Green remains **deferred** pending **live-socket** evidence for the per-peer **message-rate** control
-over an admitted running peer. See
-`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_367.md`, `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_366.md`,
+source/test level, Run 366 lands deployed-builder-path release-binary end-to-end evidence, Run 367
+proves the **connection-rate** control **live-socket** on a running P2P-capable node, and Run 368
+proves the per-peer **message-rate** control over a **real admitted-peer socket at the
+`AsyncPeerManagerImpl` layer** — but M12 Green remains **deferred** because the **deployed** inbound path
+(TcpKemTls→demuxer) does not yet consult the `PeerRateLimiter` (Route C), so per-peer enforcement is not
+proven on the deployed live socket. See
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_368.md`, `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_367.md`, `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_366.md`,
 `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_365.md`, and
 `docs/release/QBIND_PUBLIC_DEVNET_READINESS_CRITERIA.md`.
+
+## 7w. Verify the Run 368 admitted-peer per-peer message-rate live-socket evidence
+
+Run 368 drives a real admitted peer on a live `AsyncPeerManagerImpl` over a loopback socket and proves
+per-peer message-rate drops, and re-runs the Run 367 connection-rate live-socket proof. No production
+source change.
+
+```bash
+# Run 368 helper + harness exist:
+test -f crates/qbind-node/examples/run_368_public_devnet_abuse_dos_per_peer_live_socket_helper.rs
+test -f scripts/devnet/run_368_public_devnet_abuse_dos_per_peer_live_socket_release_binary.sh
+
+# Build the release binary + helper and run the harness:
+cargo build -p qbind-node --release
+cargo build -p qbind-node --release --example run_368_public_devnet_abuse_dos_per_peer_live_socket_helper
+scripts/devnet/run_368_public_devnet_abuse_dos_per_peer_live_socket_release_binary.sh /tmp/run368_out
+```
+
+Expected: helper **9/9 scenarios PASS**; a `5/0` bucket accepts 5 framed messages over a real socket
+(0 drops) and drops an 80-frame flood (≈75 per-peer drops) with
+`qbind_net_per_peer_drops_total{...,reason="rate_limit"}` rendering; the connection-rate regression
+passes (10 connections, max 3 → 3 accepted / 7 refused, metric = 7); `--help` hides all 8 hidden
+abuse/DoS flags; real hidden flags parse; invented flag rejected (rc=2). Defaults preserved; no new
+public CLI flags. **M12 stays Yellow/Partial (strengthened); Green deferred (Route C) pending
+per-peer message-rate enforcement on the deployed TcpKemTls receive path.**
 
 ## 7x. Verify the Run 367 live-socket connection-rate evidence
 
