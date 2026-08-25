@@ -137,6 +137,30 @@ proven live-socket (10 inbound TCP connections, max 3 → 3 accepted / 7 refused
 the binary closed; `--help` still hides the abuse/DoS flags. **M12 stays Yellow/Partial (strengthened) — the
 fully-live KEMTLS-admitted deployed per-peer socket flood remains the residual blocker; Green deferred.**
 
+## 7vb. Verify the Run 371 KEMTLS-admitted deployed per-peer live-socket flood (Route A) — M12 Green
+
+Run 371 uses production public APIs (no source change) to stand up a **second KEMTLS-admitted peer** that
+completes a real KEMTLS mutual-auth handshake over a real loopback socket against a running
+`target/release/qbind-node`, floods over-budget `P2pMessage::Consensus` frames through the deployed
+`TcpKemTlsP2pService::read_loop`, and observes live `/metrics`.
+
+```bash
+# Run 371 helper + harness exist (no source test file — Route A / no source change):
+test -f crates/qbind-node/examples/run_371_public_devnet_m12_kemtls_per_peer_live_socket_flood_helper.rs
+test -f scripts/devnet/run_371_public_devnet_m12_kemtls_per_peer_live_socket_flood_release_binary.sh
+
+# Run the release-binary live-socket harness (builds release + helper, drives real KEMTLS sockets):
+bash scripts/devnet/run_371_public_devnet_m12_kemtls_per_peer_live_socket_flood_release_binary.sh /tmp/qbind-run371
+cat /tmp/qbind-run371/summary.txt
+```
+
+Expected: the helper scenario suite **PASS (10/10)**; the KEMTLS handshake completes against
+`target/release/qbind-node`; under-budget frames → `qbind_net_per_peer_drops_total{reason="rate_limit"}`
+ABSENT; over-budget frames → that counter increments (~47 of 60) on live `/metrics` with the connection
+kept up; the connection-rate live-socket proof preserved (metric = 7) and independent; invalid/unbounded/
+MainNet fail the binary closed; `--help` still hides the abuse/DoS flags. **M12 moves Green for the two
+abuse/DoS deployed live-socket controls; defaults preserved; does not move M4/M6 or close C4/C5.**
+
 ## 7w. Verify the Run 368 admitted-peer per-peer message-rate live-socket evidence
 
 Run 368 drives a real admitted peer on a live `AsyncPeerManagerImpl` over a loopback socket and proves

@@ -1,0 +1,74 @@
+=== Run 371 release-binary M12 KEMTLS per-peer live-socket evidence (canonical summary) ===
+
+VERDICT: PASS — public-DevNet abuse/DoS M12 KEMTLS live-socket release-binary POSITIVE.
+  A second KEMTLS-admitted peer completed mutual auth against target/release/qbind-node,
+  flooded over-budget frames through the deployed TcpKemTlsP2pService::read_loop, and live
+  /metrics exposed qbind_net_per_peer_drops_total{reason="rate_limit"} increments. The
+  Run 367/370 connection-rate live-socket proof is preserved. Both deployed live-socket
+  controls are proven.
+
+DECISION GATE: Route A (no production source change; production public APIs only).
+
+TOOLCHAIN (from a representative run; hashes are host/build-specific and will differ per rebuild):
+  rustc 1.97.1 (8bab26f4f 2026-07-14)
+  cargo 1.97.1 (c980f4866 2026-06-30)
+
+RELEASE ARTIFACTS (representative run; sha256 changes per rebuild):
+  target/release/qbind-node
+    sha256:   e28775a2c44d02466b3c86dfff5e5641d93d983bde89e6d0f4701cc257131669
+    build_id: 05e9e0b9b78599fe1c4d5f6bd1fd8786f3a4b9ec
+  target/release/examples/run_371_public_devnet_m12_kemtls_per_peer_live_socket_flood_helper
+    sha256:   a45d477188def91a7357a62b1735ca4ac093a35ea36a744b476f1380a20c7efe
+    build_id: cade551f3f6a7aef9e66a9f19636dbaffa29f1f3
+
+IN-PROCESS HELPER (release-built, two-node KEMTLS flood over a real loopback socket): PASS 10/10
+  01_default_preserves_behavior      per-peer 1000/100; adapter metrics None; conn disabled
+  02_hidden_cli_surface_checked      hidden flags absent from --help; real parse; invented rejected
+  03_invalid_configs_fail_closed     zero-window/zero-msg/zero-conn/unbounded all rejected
+  04_mainnet_refused                 MainNet abuse/DoS config refused (direct + CLI)
+  06_kemtls_second_peer_admitted     node B KEMTLS handshake completed; deployed per-peer limiter installed
+  07_per_peer_kemtls_under_budget    under-budget flood -> 0 per-peer drops; metric absent
+  08_per_peer_kemtls_over_budget     over-budget flood -> deployed limiter drops; exported counter increments (~47/60)
+  09_metrics_export_live             qbind_net_per_peer_drops_total rendered by NodeMetrics::format_metrics
+  10_combined_limiter_independence   per-peer flood leaves qbind_p2p_connection_rate_drop_total at 0
+  11_non_mutation_guards             abuse/DoS config is observability-only; no trust/validator/epoch surface
+
+PRODUCTION CLI SURFACE (real binary):
+  help_hidden_flags_absent: true (all Run 362/363 abuse/DoS flags hidden)
+  invented_flag_rejected:   true (rc=2)
+  real_hidden_flags_parse:  true (rc=0)
+
+FAIL-CLOSED AT STARTUP (real binary exits non-zero):
+  invalid_zero_per_peer_max_fails_closed:     true
+  unbounded_per_peer_max_fails_closed:        true
+  invalid_zero_connection_rate_fails_closed:  true
+  mainnet_abuse_dos_refused:                  true
+
+LIVE SOCKET — default_preserves_behavior:
+  connection limiter DISABLED; qbind_p2p_connection_rate_drop_total=0; per-peer defaults 1000/100.
+
+LIVE SOCKET — connection_rate_live_socket_regression (Run 367/370 preserved):
+  under-budget: 3 inbound TCP connections admitted; drop metric still 0.
+  over-budget:  10 inbound TCP connections -> 3 accepted / 7 refused; qbind_p2p_connection_rate_drop_total=7.
+  independence: connection-rate flood left qbind_net_per_peer_drops_total ABSENT.
+
+LIVE SOCKET — KEMTLS per-peer message-rate flood (deployed read loop; budget 5 msg/s + 5 burst):
+  kemtls_second_peer_admitted:       KEMTLS mutual-auth handshake completed against target/release/qbind-node
+                                     (deterministic peer NodeId observed by the dialer).
+  per_peer_kemtls_under_budget:      4 under-budget frames -> 0 per-peer drops (metric ABSENT).
+  per_peer_kemtls_over_budget:       60 over-budget frames -> qbind_net_per_peer_drops_total{reason="rate_limit"}=47
+                                     on the LIVE /metrics of target/release/qbind-node.
+  combined_limiter_independence:     per-peer flood left qbind_p2p_connection_rate_drop_total=0.
+  per_peer_drop_does_not_tear_down:  deployed node still serving /metrics after the flood.
+
+READINESS DELTA:
+  M12 Yellow/Partial -> Green (both deployed live-socket controls proven on the real release binary).
+  M4, M6, M7-M9, M13-M15 unchanged. Public DevNet remains NOT launch-ready (other must-haves outstanding).
+  No TestNet/MainNet readiness claim. C4/C5 remain OPEN.
+
+SECURITY:
+  Loopback / RFC 5737 / temp dirs only. No committed secrets or live endpoints.
+  Generated KEMTLS material is temporary, dev-only, and gitignored.
+
+NOTE: exact per-peer drop counts (e.g. 47/48 of 60) vary slightly with scheduling; the invariant is
+  under-budget => 0 drops (metric absent) and over-budget => drops > 0 on live /metrics.
