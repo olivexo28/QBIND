@@ -254,8 +254,11 @@ DevNet launch-ready; other must-haves remain outstanding.
 ## 23. CodeQL
 
 - CodeQL invoked over the Rust example changes (the only code change; docs and
-  scripts are non-Rust). Result recorded honestly in the PR/run log — not
-  asserted clean unless the run reports clean.
+  scripts are non-Rust). Result: **0 alerts.** The Rust analysis itself was
+  **skipped by the runner because the CodeQL database size exceeded the
+  environment limit** — this is an environment/tooling limitation, not a clean
+  bill of health asserted from a completed scan. No alerts were reported; the
+  required cargo test suite (§21) passed.
 
 ## 24. Provenance
 
