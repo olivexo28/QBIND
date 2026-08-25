@@ -1,0 +1,26 @@
+=== Run 368 release-binary admitted-peer per-peer message-rate live-socket evidence ===
+repo_root: /home/runner/work/QBIND/QBIND
+toolchain: rustc 1.97.1 (8bab26f4f 2026-07-14)
+cargo:     cargo 1.97.1 (c980f4866 2026-06-30)
+node_bin:            /home/runner/work/QBIND/QBIND/target/release/qbind-node
+node_bin_sha256:     1c4e546f3a766c006d2bd9601a3a404e9983c0e32d52fd8691b367ded667e381
+node_bin_build_id:   147246663749c27398299ae69a57140bf7d2b2f1
+helper_bin:          /home/runner/work/QBIND/QBIND/target/release/examples/run_368_public_devnet_abuse_dos_per_peer_live_socket_helper
+helper_bin_sha256:   b83c7882e67abe4b1730512fdfc9184a0288d9d62d6067ca23d6494ede4ec876
+helper_bin_build_id: 42dc0e8ada56f8af7f61c106ee3bc4721c0a1745
+helper_verdict: PASS
+helper_scenarios: 9 scenarios recorded
+helper_per_peer_live_socket_drops: 75 (AsyncPeerManagerImpl layer, real loopback socket)
+help_hidden_flags_absent: true (all Run 362/363 abuse/DoS flags are hidden)
+invented_flag_rejected: true (rc=2)
+real_hidden_flags_parse: true (rc=0)
+p2p_mode_discovery: P2P-capable loopback mode CONFIRMED (real socket bound; 'P2P transport up')
+default_preserves_behavior: connection limiter DISABLED; qbind_p2p_connection_rate_drop_total=0 (live socket)
+connection_rate_under_budget: 3 inbound TCP connections admitted; drop metric still 0 (live socket)
+connection_rate_over_budget: 10 inbound TCP connections → 3 accepted / 7 refused; qbind_p2p_connection_rate_drop_total=7 (live socket)
+connection_rate_regression: PASS (Run 367 connection-rate proof re-run on the release binary)
+per_peer_message_rate_deployed_live_socket: NOT driven — deployed inbound path (TcpKemTls->demuxer) does not consult PeerRateLimiter; proven at AsyncPeerManagerImpl layer via Run 368 helper (real socket, 75 drops). Remaining M12 blocker: wire PeerRateLimiter onto the deployed TcpKemTls receive path.
+invalid_config_fail_closed: proven via release helper (scenario 07; production validation fn CliArgs::abuse_dos_runtime_config)
+mainnet_abuse_dos_refused: proven via release helper (scenario 08; production validation fn CliArgs::abuse_dos_runtime_config)
+combined_limiter_independence: proven via release helper (scenario 06; conn metric vs per-peer counter distinct)
+verdict: PARTIAL-POSITIVE (per-peer MESSAGE-rate proven over a real admitted-peer socket at the AsyncPeerManagerImpl layer; CONNECTION-rate re-proven live-socket on the release binary; deployed TcpKemTls receive path does NOT yet enforce the per-peer limiter, so M12 stays Yellow/Partial, strengthened)
