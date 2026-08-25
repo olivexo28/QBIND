@@ -1,0 +1,347 @@
+Run 368 — Public DevNet abuse/DoS M12 admitted-peer message-rate live-socket evidence
+
+Continue QBIND after accepted Run 367.
+
+Current state:
+Run 367 is accepted as PARTIAL-POSITIVE / public-DevNet-abuse-DoS-M12 live-socket release-binary positive for the connection-rate control.
+
+Run 367 proved:
+- the existing release binary supports a bounded P2P-capable loopback mode with:
+  `--network-mode p2p --enable-p2p --p2p-listen-addr 127.0.0.1:<port>`;
+- the Run 366 LocalMesh blocker was caused by omitting `--network-mode p2p`;
+- the connection-rate limiter is proven live-socket on real `target/release/qbind-node`;
+- under-budget inbound TCP connections are admitted;
+- over-budget inbound TCP connections are refused;
+- `qbind_p2p_connection_rate_drop_total` increments on live socket refusal;
+- helper 8/8 scenarios passed;
+- no production/library source changed;
+- no new CLI flag;
+- no P2P wire-format change;
+- no peer-admission/trust-bundle weakening;
+- no validator-set / epoch / sequence / `LivePqcTrustState` mutation;
+- no TestNet/MainNet readiness;
+- no C4/C5 closure.
+
+Run 367 did NOT move M12 Green because the per-peer message-rate limiter was not driven over an admitted live peer socket. The remaining M12 blocker is a live admitted peer that completes KEMTLS and floods messages over the configured per-peer bucket.
+
+Current public DevNet readiness:
+- Green: M1, M2, M3 same-host scope, M5, M10, M11, M16, M17, M18, M19, M20.
+- Yellow/Partial: M4, M6, M7, M8, M9, M12, M13, M14, M15.
+- M4 remains launch-blocking.
+- Public DevNet remains NOT launch-ready.
+- Full C4 OPEN.
+- C5 OPEN.
+- MainNet authority rotation/revocation Red.
+
+Primary objective:
+Produce release-binary live-socket evidence that the per-peer message-rate limiter is honored over an admitted live KEMTLS peer/message path.
+
+If Run 368 proves:
+1. a second peer completes the required P2P/KEMTLS admission path;
+2. custom `--p2p-max-messages-per-second` and `--p2p-burst-allowance` reach the running node’s live `AsyncPeerManagerImpl`;
+3. under-budget peer messages are accepted;
+4. over-budget peer messages are dropped by the live per-peer `PeerRateLimiter`;
+5. per-peer drop metrics/counters reflect the drop;
+6. connection-rate evidence from Run 367 remains valid and default behavior remains preserved;
+
+then M12 may move Yellow/Partial → Green for the public DevNet readiness track.
+
+Strict scope:
+Release-binary live-socket admitted-peer evidence for M12 only.
+
+No public DevNet launch.
+No live external seed-node deployment.
+No public bootnode deployment.
+No faucet.
+No RPC gateway.
+No explorer.
+No status page.
+No MainNet enablement.
+No TestNet readiness claim.
+No C4 closure.
+No C5 closure.
+No authority-lifecycle runtime wiring.
+No validator-set mutation.
+No production epoch transition.
+No execution-sink write.
+No P2P wire-format change.
+No peer-admission weakening.
+No trust-bundle behavior weakening.
+No default-open public port.
+No M4 Green.
+No M6 Green.
+No public DevNet launch-ready claim.
+No fake live infrastructure.
+
+Required investigation:
+Inspect existing P2P/KEMTLS and peer-message evidence machinery before writing new code:
+
+- `crates/qbind-node/src/main.rs`
+- `crates/qbind-node/src/p2p_node_builder.rs`
+- `crates/qbind-node/src/p2p_tcp.rs`
+- `crates/qbind-node/src/p2p_inbound.rs`
+- `crates/qbind-node/src/async_peer_manager.rs`
+- `crates/qbind-node/src/peer_rate_limiter.rs`
+- `crates/qbind-node/src/public_devnet_abuse_dos_runtime.rs`
+- `crates/qbind-node/src/public_devnet_abuse_dos_config.rs`
+- `crates/qbind-node/src/metrics.rs`
+- `crates/qbind-node/src/metrics_http.rs`
+- `crates/qbind-node/src/cli.rs`
+- existing N=2/N=3/N=4 P2P/KEMTLS release harnesses, especially Run 081, Run 084, Run 085, Run 089;
+- existing peer-candidate `0x05` exchange helpers;
+- existing trust-bundle helper examples;
+- Run 367 helper/harness/evidence;
+- `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_367.md`;
+- `docs/release/QBIND_PUBLIC_DEVNET_READINESS_CRITERIA.md`;
+- `docs/release/public-devnet/p2p/ABUSE_DOS_POSTURE.md`;
+- `docs/release/public-devnet/p2p/VERIFY.md`.
+
+Required decision gate:
+Before implementing, decide which evidence route is possible:
+
+A. Existing release-binary P2P/KEMTLS harnesses can be adapted to create two admitted peers and flood messages over the live peer path.
+   - Proceed with evidence/helper/harness only if possible.
+
+B. A tiny hidden/devnet-only evidence seam is needed to emit controlled peer messages after admission.
+   - Implement only if narrow, hidden, tested, and not a public CLI surface.
+   - Do not change wire format or peer-admission policy.
+   - M12 Green requires release-binary live-socket proof after the seam lands.
+
+C. Current code cannot drive admitted-peer message traffic without broader P2P test-harness or runtime work.
+   - Do not mark M12 Green.
+   - Record the exact blocker and recommend the next source/test run.
+
+Preferred implementation:
+Add release-binary helper:
+
+`crates/qbind-node/examples/run_368_public_devnet_abuse_dos_per_peer_live_socket_helper.rs`
+
+Add release harness:
+
+`scripts/devnet/run_368_public_devnet_abuse_dos_per_peer_live_socket_release_binary.sh`
+
+Add evidence archive:
+
+`docs/devnet/run_368_public_devnet_abuse_dos_per_peer_live_socket_release_binary/README.md`
+`docs/devnet/run_368_public_devnet_abuse_dos_per_peer_live_socket_release_binary/summary.txt`
+`docs/devnet/run_368_public_devnet_abuse_dos_per_peer_live_socket_release_binary/.gitignore`
+
+Only those three archive files should be tracked. Raw logs, process logs, temp data dirs, helper JSON, generated certs, generated trust bundles, and generated private material must be gitignored unless explicitly committed as public non-secret fixtures.
+
+Add canonical evidence:
+
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_368.md`
+
+Update narrowly:
+
+- `docs/release/QBIND_PUBLIC_DEVNET_READINESS_CRITERIA.md`
+- `docs/release/public-devnet/p2p/ABUSE_DOS_POSTURE.md`
+- `docs/release/public-devnet/p2p/VERIFY.md`
+- `docs/protocol/QBIND_C4_C5_CLOSURE_CRITERIA.md`
+- `docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md`
+- `docs/protocol/QBIND_GOVERNANCE_EXECUTION_RUNTIME_SURFACE_AUDIT.md`
+- `docs/ops/QBIND_PQC_TRUST_LIFECYCLE_RUNBOOK.md`
+- `docs/whitepaper/contradiction.md`
+
+Runtime evidence requirements:
+The Run 368 harness must prove, on real release artifacts:
+
+1. `target/release/qbind-node` builds successfully.
+2. helper builds successfully.
+3. qbind-node SHA-256 captured.
+4. helper SHA-256 captured.
+5. BuildIDs captured where available.
+6. toolchain versions captured.
+7. at least two P2P-capable loopback participants are started or otherwise an admitted live KEMTLS peer is created.
+8. the receiver has custom per-peer message-rate config installed.
+9. KEMTLS / mutual-auth admission succeeds for the sending peer.
+10. under-budget messages are accepted over the admitted peer path.
+11. over-budget messages are dropped over the admitted peer path.
+12. per-peer `rate_limit_drop` / `total_rate_limit_drops()` or an equivalent live metric/counter reflects the drop.
+13. the connection-rate metric does not increment for per-peer message drops.
+14. connection-rate limiter evidence from Run 367 remains valid or is re-run as a regression.
+15. both controls remain independent.
+16. default no-flag behavior preserves `1000` msg/s + `100` burst and connection limiter disabled.
+17. hidden/devnet-only flags remain absent from `--help`.
+18. real hidden flags parse.
+19. invented flags are rejected by clap.
+20. invalid zero connection-rate config fails closed.
+21. invalid zero per-peer message-rate config fails closed.
+22. unsafe/unbounded values fail closed.
+23. MainNet abuse/DoS enablement refused.
+24. no public DevNet launch claim.
+25. no M4 Green claim.
+26. no M6 Green claim.
+27. no TestNet readiness claim.
+28. no MainNet readiness claim.
+29. no C4/C5 closure claim.
+30. no P2P wire-format change.
+31. no peer-admission weakening.
+32. no trust-bundle behavior weakening.
+33. no `LivePqcTrustState` mutation.
+34. no sequence/marker write.
+35. no validator-set mutation.
+36. no epoch transition.
+37. no Run 070 path.
+
+Required helper/harness scenarios:
+At minimum:
+
+1. `default_preserves_behavior`
+   - no abuse/DoS flags/config;
+   - connection limiter disabled;
+   - per-peer defaults 1000 / 100;
+   - no per-peer drops under ordinary small message count.
+
+2. `two_node_kemtls_admission`
+   - receiver and sender run on loopback;
+   - KEMTLS/mutual-auth admission succeeds;
+   - no fallback roots;
+   - no placeholder seed dial.
+
+3. `per_peer_message_rate_live_socket_under_budget`
+   - configure small per-peer bucket;
+   - send N messages within budget;
+   - prove accepted/no drop.
+
+4. `per_peer_message_rate_live_socket_over_budget`
+   - send N+1 or flood above bucket;
+   - prove over-budget messages are dropped by the live `PeerRateLimiter`;
+   - prove per-peer drop counter/metric increments.
+
+5. `connection_rate_regression`
+   - either re-run the Run 367 live-socket connection-rate proof or cite/run a compact regression proving connection-rate still admits/refuses and metric increments.
+
+6. `combined_limiter_independence`
+   - configure both controls;
+   - prove connection-rate refusal and per-peer message-rate drop are independent;
+   - prove counters remain distinct.
+
+7. `invalid_configs_fail_closed`
+   - zero connection-rate window;
+   - zero connection-rate max;
+   - zero per-peer message max;
+   - unsafe/unbounded values;
+   - inconsistent per-address config.
+
+8. `mainnet_refused`
+   - enabled abuse/DoS config under MainNet refused.
+
+9. `cli_surface_hidden_and_parse_checked`
+   - hidden flags absent from `--help`;
+   - real hidden flags parse;
+   - invented flag rejected.
+
+Required tests:
+Run and record exact counts:
+
+- `cargo build -p qbind-node --release`
+- `cargo build -p qbind-node --release --example run_368_public_devnet_abuse_dos_per_peer_live_socket_helper`
+- Run the Run 368 harness.
+- `cargo test -p qbind-node --test run_365_public_devnet_deployed_peer_rate_threading_tests`
+- `cargo test -p qbind-node --test run_363_public_devnet_per_peer_message_rate_runtime_tests`
+- `cargo test -p qbind-node --test run_362_public_devnet_abuse_dos_runtime_tests`
+- `cargo test -p qbind-node --test run_361_public_devnet_abuse_dos_hardening_tests`
+- `cargo test -p qbind-node --lib`
+
+Preserve the reconciled Run 361 count as 30 unless actual target output changes.
+
+Security:
+Run secret scanning over all changed files.
+
+No private keys, mnemonics, seed phrases, credentials, API keys, tokens, private infrastructure, real production hostnames, or unapproved live endpoints may be introduced.
+
+Use localhost, RFC 5737, RFC 3849, temporary data dirs, and temporary generated non-secret test material only. If generated private keys/certs/trust bundles are needed for KEMTLS, keep them in ignored temporary directories and record only fingerprints/hashes safe to publish.
+
+CodeQL:
+If any Rust source/example is added or changed, invoke CodeQL if available.
+
+If CodeQL is skipped, unavailable, timed out, database-too-large, or not meaningful, record the exact result and do not call it clean.
+
+Provenance:
+Record in `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_368.md`:
+
+- git commit;
+- branch;
+- clean/dirty state;
+- files changed;
+- helper path;
+- harness path;
+- archive path;
+- release binary SHA-256;
+- helper SHA-256;
+- BuildIDs where available;
+- toolchain versions;
+- exact runtime evidence shape;
+- whether an admitted live KEMTLS peer/message path was driven;
+- exact helper scenarios;
+- exact production-binary scenarios;
+- exact test counts;
+- secret scan result;
+- CodeQL result;
+- readiness matrix delta for M12;
+- exact reason M12 is or is not Green.
+
+Readiness matrix rules:
+- M12 may move Yellow/Partial → Green only if release-binary live-socket evidence proves BOTH:
+  1. connection-rate limiting over live sockets;
+  2. per-peer message-rate limiting over an admitted live peer/message path.
+- If per-peer evidence is still helper-only, builder-only, construction-path-only, or blocked by missing KEMTLS peer flood support, keep M12 Yellow/Partial.
+- If KEMTLS admission succeeds but message flood/drop metric is not proven, keep M12 Yellow/Partial.
+- Do not alter M4 unless live seed/bootnode reachability evidence lands.
+- Do not alter M6 unless stable identity-generation support lands.
+- Do not alter M7–M9/M13–M15 unless genuinely closed.
+- Public DevNet remains NOT launch-ready unless all must-haves are Green.
+
+Expected verdict:
+PASS / public-DevNet-abuse-DoS-M12 per-peer live-socket release-binary positive if the harness drives an admitted live KEMTLS peer/message path and proves per-peer message-rate drops, while preserving the Run 367 connection-rate evidence and all defaults.
+
+Partial-positive if evidence improves but remains helper-only, builder-only, construction-path-only, or cannot complete admitted-peer flood.
+
+Unacceptable:
+- claiming public DevNet launch-ready;
+- marking M12 Green without live-socket evidence for both controls;
+- marking M4 Green without live seed/bootnode reachability evidence;
+- marking M6 Green without identity-generation support;
+- exposing hidden/devnet-only abuse/DoS flags in public help accidentally;
+- silently changing defaults;
+- weakening peer admission;
+- changing P2P wire format;
+- publishing fake live seed addresses;
+- publishing secrets or private infrastructure;
+- claiming TestNet readiness;
+- claiming MainNet readiness;
+- closing C4 or C5;
+- adding authority-lifecycle runtime wiring;
+- deploying seed nodes, faucet, RPC, explorer, or status page in this run;
+- hiding skipped CodeQL;
+- using marketing language.
+
+Final response format:
+1. Exact verdict.
+2. Files changed.
+3. Release artifacts and hashes.
+4. Runtime evidence shape.
+5. Two-node KEMTLS admission evidence.
+6. Helper/harness corpus.
+7. Production-binary scenarios.
+8. Per-peer message-rate live-socket evidence.
+9. Connection-rate regression evidence.
+10. Combined limiter independence evidence.
+11. Rejection/fail-closed evidence.
+12. Default compatibility.
+13. CLI/config surface.
+14. Metric/counter evidence.
+15. Non-mutation evidence.
+16. Readiness matrix delta for M12.
+17. Current public DevNet readiness status.
+18. Remaining public DevNet blockers.
+19. Public TestNet blockers.
+20. MainNet blockers.
+21. C4/C5 status.
+22. Tests run.
+23. Security scans.
+24. CodeQL.
+25. Provenance.
+26. Honest limitations.
+27. Suggested Run 369 next step.

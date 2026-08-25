@@ -63,17 +63,42 @@ leaves the connection limiter **disabled** (test `t01_default_profile_preserves_
 
 ## 6. Verify no forbidden claim
 
-Run 361/362/363/364/365/366 do not claim public DevNet launch-readiness, TestNet readiness, MainNet readiness,
+Run 361/362/363/364/365/366/367 do not claim public DevNet launch-readiness, TestNet readiness, MainNet readiness,
 C4/C5 closure, or M4/M6 Green. **M12 stays Yellow/Partial (strengthened)**: Run 362 wires the
 connection-rate limiter into runtime, Run 363 wires the per-peer message-rate override at source/test
 level, Run 364 lands release-binary evidence for both, Run 365 threads the CLI-derived per-peer
 override through the deployed `P2pNodeBuilder` into the live `AsyncPeerManagerImpl` construction path at
-source/test level, and Run 366 lands deployed-builder-path release-binary end-to-end evidence — but M12
-Green remains **deferred** pending **live-socket** end-to-end evidence over a running node (DevNet
-LocalMesh ignores `--enable-p2p`, so the live socket path is not driven). See
-`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_366.md`, `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_365.md`,
-`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_364.md`, and
+source/test level, Run 366 lands deployed-builder-path release-binary end-to-end evidence, and Run 367
+proves the **connection-rate** control **live-socket** on a running P2P-capable node — but M12
+Green remains **deferred** pending **live-socket** evidence for the per-peer **message-rate** control
+over an admitted running peer. See
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_367.md`, `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_366.md`,
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_365.md`, and
 `docs/release/QBIND_PUBLIC_DEVNET_READINESS_CRITERIA.md`.
+
+## 7x. Verify the Run 367 live-socket connection-rate evidence
+
+Run 367 launches the real release binary in a P2P-capable loopback mode and proves the accept-loop
+connection-rate control over a real inbound socket. No production source change.
+
+```bash
+# Run 367 helper + harness exist:
+test -f crates/qbind-node/examples/run_367_public_devnet_abuse_dos_live_socket_helper.rs
+test -f scripts/devnet/run_367_public_devnet_abuse_dos_live_socket_release_binary.sh
+
+# Build the release binary + helper and run the live-socket harness:
+cargo build -p qbind-node --release
+cargo build -p qbind-node --release --example run_367_public_devnet_abuse_dos_live_socket_helper
+scripts/devnet/run_367_public_devnet_abuse_dos_live_socket_release_binary.sh /tmp/run367_out
+```
+
+Expected: helper **8/8 scenarios PASS**; `p2p_mode_discovery` confirms `P2P transport up` (real socket
+bound via `--network-mode p2p --enable-p2p --p2p-listen-addr 127.0.0.1:<port>`); default (no-flag) node
+keeps `qbind_p2p_connection_rate_drop_total = 0`; a configured limiter (window 60000 ms, max 3) admits 3
+under-budget inbound TCP connections (metric 0) and refuses over-budget (10 total → 3 accepted / 7
+refused, live metric = 7). `--help` hides all 8 hidden abuse/DoS flags; real hidden flags parse; invented
+flag rejected (rc=2). Defaults preserved; no new public CLI flags. **M12 stays Yellow/Partial
+(strengthened); Green deferred pending per-peer message-rate live-socket evidence over an admitted peer.**
 
 ## 7y. Verify the Run 366 deployed-builder-path release-binary evidence
 

@@ -1,0 +1,18 @@
+# Run 367 evidence archive — only README.md, summary.txt, and .gitignore are tracked.
+# All per-run artifacts contain absolute paths and ephemeral data and MUST NOT be committed.
+helper/
+helper_stdout.txt
+scenarios/
+nodes/
+logs/
+data/
+node_data/
+help.txt
+version.txt
+invented_flag.txt
+real_flags_parse.txt
+metric_evidence.txt
+manifest.txt
+provenance.txt
+*.log
+*.rc
