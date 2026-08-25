@@ -512,6 +512,23 @@ pub struct TcpKemTlsP2pService {
     /// [`TcpKemTlsP2pService::set_abuse_dos_runtime_state`].
     abuse_dos_runtime:
         Arc<RwLock<Option<Arc<crate::public_devnet_abuse_dos_runtime::PublicDevnetAbuseDosRuntimeState>>>>,
+    /// Run 369: optional deployed inbound per-peer message-rate limiter
+    /// consulted by every per-peer `read_loop` AFTER a frame decodes to a
+    /// structured `P2pMessage` and BEFORE it is forwarded to the inbound
+    /// demuxer / handlers.
+    ///
+    /// `None` by default (bit-for-bit pre-Run-369 behaviour). When installed
+    /// (via [`TcpKemTlsP2pService::set_inbound_per_peer_limiter`]), an
+    /// over-budget frame is dropped, the adapter's bounded per-peer drop
+    /// counter is incremented, and the existing per-peer
+    /// `qbind_net_per_peer_drops_total{reason="rate_limit"}` counter is bumped
+    /// if a metrics handle was installed. Dropping a frame never tears down the
+    /// connection, never touches the connection-rate limiter, and never mutates
+    /// admission / trust / sequence / validator / epoch state. The default
+    /// posture is `1000` msg/s + `100` burst so normal traffic is unaffected.
+    inbound_per_peer_limiter: Arc<
+        RwLock<Option<Arc<crate::deployed_inbound_per_peer_limiter::DeployedInboundPerPeerLimiter>>>,
+    >,
 }
 
 impl std::fmt::Debug for TcpKemTlsP2pService {
@@ -560,6 +577,7 @@ impl TcpKemTlsP2pService {
             dial_handles: Arc::new(RwLock::new(Vec::new())),
             peer_candidate_wire_sink: Arc::new(RwLock::new(None)),
             abuse_dos_runtime: Arc::new(RwLock::new(None)),
+            inbound_per_peer_limiter: Arc::new(RwLock::new(None)),
         })
     }
 
@@ -680,6 +698,29 @@ impl TcpKemTlsP2pService {
     /// configuration.
     pub fn has_abuse_dos_runtime_state(&self) -> bool {
         self.abuse_dos_runtime.read().is_some()
+    }
+
+    /// Run 369: install (or replace) the deployed inbound per-peer
+    /// message-rate limiter consulted by every per-peer `read_loop`.
+    ///
+    /// Must be called before `start()` so the very first inbound frame from
+    /// the very first accepted connection is already subject to the limiter.
+    /// Default (never called) leaves the read loop bit-for-bit unchanged. This
+    /// is the production-binary entry point used by `p2p_node_builder`, which
+    /// installs an adapter carrying the CLI-derived per-peer thresholds (or the
+    /// documented `1000` msg/s + `100` burst default).
+    pub fn set_inbound_per_peer_limiter(
+        &self,
+        limiter: Arc<crate::deployed_inbound_per_peer_limiter::DeployedInboundPerPeerLimiter>,
+    ) {
+        *self.inbound_per_peer_limiter.write() = Some(limiter);
+    }
+
+    /// Run 369: whether a deployed inbound per-peer message-rate limiter has
+    /// been installed (tests / observability). Returns `false` in the default
+    /// configuration.
+    pub fn has_inbound_per_peer_limiter(&self) -> bool {
+        self.inbound_per_peer_limiter.read().is_some()
     }
 
     // ------------------------------------------------------------------
@@ -867,6 +908,7 @@ impl TcpKemTlsP2pService {
         let inbound_identity_resolver = Arc::clone(&self.inbound_identity_resolver);
         let peer_candidate_wire_sink = Arc::clone(&self.peer_candidate_wire_sink);
         let abuse_dos_runtime = Arc::clone(&self.abuse_dos_runtime);
+        let inbound_per_peer_limiter = Arc::clone(&self.inbound_per_peer_limiter);
 
         tokio::spawn(async move {
             let mut shutdown_rx = shutdown_rx;
@@ -917,6 +959,8 @@ impl TcpKemTlsP2pService {
                                 let inbound_session_counter_clone = Arc::clone(&inbound_session_counter);
                                 let resolver_clone = Arc::clone(&inbound_identity_resolver);
                                 let wire_sink_clone = Arc::clone(&peer_candidate_wire_sink);
+                                let inbound_per_peer_limiter_clone =
+                                    Arc::clone(&inbound_per_peer_limiter);
 
                                 tokio::spawn(async move {
                                     if let Err(e) = Self::handle_inbound_connection(
@@ -930,6 +974,7 @@ impl TcpKemTlsP2pService {
                                         inbound_session_counter_clone,
                                         resolver_clone,
                                         wire_sink_clone,
+                                        inbound_per_peer_limiter_clone,
                                     )
                                     .await
                                     {
@@ -989,6 +1034,15 @@ impl TcpKemTlsP2pService {
         inbound_identity_resolver: Arc<RwLock<Option<InboundIdentityResolver>>>,
         peer_candidate_wire_sink: Arc<
             RwLock<Option<Arc<dyn crate::pqc_peer_candidate_wire::PeerCandidateWireFrameSink>>>,
+        >,
+        inbound_per_peer_limiter: Arc<
+            RwLock<
+                Option<
+                    Arc<
+                        crate::deployed_inbound_per_peer_limiter::DeployedInboundPerPeerLimiter,
+                    >,
+                >,
+            >,
         >,
     ) -> Result<(), P2pTransportError> {
         // Convert Tokio stream to std::net::TcpStream for KEMTLS handshake.
@@ -1071,6 +1125,7 @@ impl TcpKemTlsP2pService {
             connections_current,
             bytes_received,
             peer_candidate_wire_sink,
+            inbound_per_peer_limiter,
         )
         .await;
 
@@ -1164,6 +1219,7 @@ impl TcpKemTlsP2pService {
             Arc::clone(&self.connections_current),
             Arc::clone(&self.bytes_received),
             Arc::clone(&self.peer_candidate_wire_sink),
+            Arc::clone(&self.inbound_per_peer_limiter),
         )
         .await;
 
@@ -1179,6 +1235,15 @@ impl TcpKemTlsP2pService {
         _connections_current: Arc<AtomicU64>,
         bytes_received: Arc<AtomicU64>,
         peer_candidate_wire_sink: Arc<RwLock<Option<Arc<dyn crate::pqc_peer_candidate_wire::PeerCandidateWireFrameSink>>>>,
+        inbound_per_peer_limiter: Arc<
+            RwLock<
+                Option<
+                    Arc<
+                        crate::deployed_inbound_per_peer_limiter::DeployedInboundPerPeerLimiter,
+                    >,
+                >,
+            >,
+        >,
     ) {
         // Create outbound channel for this peer
         let (peer_tx, peer_rx) = mpsc::channel::<P2pMessage>(64);
@@ -1202,6 +1267,7 @@ impl TcpKemTlsP2pService {
         let inbound_tx_clone = inbound_tx.clone();
         let bytes_received_clone = Arc::clone(&bytes_received);
         let wire_sink_clone = Arc::clone(&peer_candidate_wire_sink);
+        let inbound_per_peer_limiter_clone = Arc::clone(&inbound_per_peer_limiter);
         let read_handle = tokio::spawn(async move {
             Self::read_loop(
                 node_id,
@@ -1209,6 +1275,7 @@ impl TcpKemTlsP2pService {
                 inbound_tx_clone,
                 bytes_received_clone,
                 wire_sink_clone,
+                inbound_per_peer_limiter_clone,
             )
             .await;
         });
@@ -1252,6 +1319,15 @@ impl TcpKemTlsP2pService {
         peer_candidate_wire_sink: Arc<
             RwLock<Option<Arc<dyn crate::pqc_peer_candidate_wire::PeerCandidateWireFrameSink>>>,
         >,
+        inbound_per_peer_limiter: Arc<
+            RwLock<
+                Option<
+                    Arc<
+                        crate::deployed_inbound_per_peer_limiter::DeployedInboundPerPeerLimiter,
+                    >,
+                >,
+            >,
+        >,
     ) {
         loop {
             match channel.recv().await {
@@ -1277,6 +1353,26 @@ impl TcpKemTlsP2pService {
 
                     match decode_frame(&frame_bytes) {
                         Ok(msg) => {
+                            // Run 369: consult the deployed inbound per-peer
+                            // message-rate limiter (if installed) AFTER the
+                            // frame decodes to a structured `P2pMessage` and
+                            // BEFORE it is forwarded to the demuxer/handlers.
+                            // An over-budget frame is dropped (the read loop
+                            // CONTINUES — a per-peer message-rate drop never
+                            // tears down the connection) and the adapter bumps
+                            // its own per-peer drop counter (and the existing
+                            // `qbind_net_per_peer_drops_total{reason="rate_limit"}`
+                            // metric if a handle is installed). The
+                            // connection-rate limiter and its metric are never
+                            // touched here. Default (no limiter installed)
+                            // skips this block and preserves prior behavior.
+                            let limiter_snapshot = inbound_per_peer_limiter.read().clone();
+                            if let Some(limiter) = limiter_snapshot {
+                                if !limiter.allow_node(&source_peer, std::time::Instant::now()) {
+                                    continue;
+                                }
+                            }
+
                             if inbound_tx.send(msg).await.is_err() {
                                 break; // Receiver dropped
                             }
@@ -1480,6 +1576,7 @@ impl TcpKemTlsP2pService {
             connections_current: Arc::clone(&self.connections_current),
             bytes_received: Arc::clone(&self.bytes_received),
             peer_candidate_wire_sink: Arc::clone(&self.peer_candidate_wire_sink),
+            inbound_per_peer_limiter: Arc::clone(&self.inbound_per_peer_limiter),
         }
     }
 
@@ -1666,6 +1763,18 @@ struct DialerHandle {
     peer_candidate_wire_sink: Arc<
         RwLock<Option<Arc<dyn crate::pqc_peer_candidate_wire::PeerCandidateWireFrameSink>>>,
     >,
+    /// Run 369: shared optional deployed inbound per-peer message-rate
+    /// limiter (cloned from `TcpKemTlsP2pService::inbound_per_peer_limiter`).
+    /// Threaded into `spawn_peer_handlers` so retry-dialed peers' read loops
+    /// are subject to the same limiter the accept-loop peers are. Default
+    /// `None` → prior behaviour preserved bit-for-bit.
+    inbound_per_peer_limiter: Arc<
+        RwLock<
+            Option<
+                Arc<crate::deployed_inbound_per_peer_limiter::DeployedInboundPerPeerLimiter>,
+            >,
+        >,
+    >,
 }
 
 impl DialerHandle {
@@ -1741,6 +1850,7 @@ impl DialerHandle {
             Arc::clone(&self.connections_current),
             Arc::clone(&self.bytes_received),
             Arc::clone(&self.peer_candidate_wire_sink),
+            Arc::clone(&self.inbound_per_peer_limiter),
         )
         .await;
 

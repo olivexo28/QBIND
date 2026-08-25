@@ -63,20 +63,48 @@ leaves the connection limiter **disabled** (test `t01_default_profile_preserves_
 
 ## 6. Verify no forbidden claim
 
-Run 361/362/363/364/365/366/367/368 do not claim public DevNet launch-readiness, TestNet readiness, MainNet readiness,
+Run 361/362/363/364/365/366/367/368/369 do not claim public DevNet launch-readiness, TestNet readiness, MainNet readiness,
 C4/C5 closure, or M4/M6 Green. **M12 stays Yellow/Partial (strengthened)**: Run 362 wires the
 connection-rate limiter into runtime, Run 363 wires the per-peer message-rate override at source/test
 level, Run 364 lands release-binary evidence for both, Run 365 threads the CLI-derived per-peer
 override through the deployed `P2pNodeBuilder` into the live `AsyncPeerManagerImpl` construction path at
 source/test level, Run 366 lands deployed-builder-path release-binary end-to-end evidence, Run 367
-proves the **connection-rate** control **live-socket** on a running P2P-capable node, and Run 368
+proves the **connection-rate** control **live-socket** on a running P2P-capable node, Run 368
 proves the per-peer **message-rate** control over a **real admitted-peer socket at the
-`AsyncPeerManagerImpl` layer** — but M12 Green remains **deferred** because the **deployed** inbound path
-(TcpKemTls→demuxer) does not yet consult the `PeerRateLimiter` (Route C), so per-peer enforcement is not
-proven on the deployed live socket. See
+`AsyncPeerManagerImpl` layer**, and Run 369 **wires the per-peer `PeerRateLimiter` onto the deployed
+TcpKemTls receive path** (`read_loop` → `inbound_tx` → `subscribe()` → `P2pInboundDemuxer` → handlers)
+at source/test level — but M12 Green remains **deferred** because release-binary **live-socket** evidence
+over that deployed receive path is not yet landed (Run 370). See
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_369.md`,
 `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_368.md`, `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_367.md`, `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_366.md`,
 `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_365.md`, and
 `docs/release/QBIND_PUBLIC_DEVNET_READINESS_CRITERIA.md`.
+
+## 7v. Verify the Run 369 deployed TcpKemTls receive-path per-peer wiring (source/test)
+
+Run 369 wires the per-peer `PeerRateLimiter` onto the deployed inbound receive path via the
+`DeployedInboundPerPeerLimiter` adapter, installed by `P2pNodeBuilder::start()` and consulted by the
+`TcpKemTlsP2pService` per-peer `read_loop` before demuxer dispatch. Source/test only; no wire-format,
+admission, or connection-rate change.
+
+```bash
+# Run 369 adapter + test target exist:
+test -f crates/qbind-node/src/deployed_inbound_per_peer_limiter.rs
+test -f crates/qbind-node/tests/run_369_public_devnet_deployed_per_peer_limiter_wiring_tests.rs
+
+# Build the lib and run the Run 369 tests + regression targets:
+cargo build -p qbind-node --lib
+cargo test -p qbind-node --test run_369_public_devnet_deployed_per_peer_limiter_wiring_tests
+cargo test -p qbind-node --test run_365_public_devnet_deployed_peer_rate_threading_tests
+```
+
+Expected: Run 369 tests **24/24 PASS**; the deployed inbound limiter derives `1000` msg/s + `100` burst
+by default; the hidden `--p2p-max-messages-per-second` / `--p2p-burst-allowance` overrides reach it;
+over-budget inbound frames drop with the adapter's per-peer counter (and
+`qbind_net_per_peer_drops_total{reason="rate_limit"}`) incrementing while `qbind_p2p_connection_rate_drop_total`
+stays 0; `--help` still hides the abuse/DoS flags and no Run 369 flag exists. Defaults preserved; no new
+public CLI flags. **M12 stays Yellow/Partial — deployed TcpKemTls receive-path source/test wiring landed;
+Green deferred to Run 370 pending release-binary live-socket deployed-path evidence.**
 
 ## 7w. Verify the Run 368 admitted-peer per-peer message-rate live-socket evidence
 

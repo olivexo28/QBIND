@@ -2127,6 +2127,10 @@ pub mod public_devnet_abuse_dos_config;
 // Run 362 — runtime wiring for the Run 361 abuse/DoS model: runtime-owned
 // connection-rate limiter state installed into the P2P accept path.
 pub mod public_devnet_abuse_dos_runtime;
+// Run 369 — deployed inbound per-peer message-rate limiter adapter that wires
+// the validated per-peer PeerRateLimiter onto the TcpKemTls inbound receive
+// path (consulted before demuxer/handler dispatch).
+pub mod deployed_inbound_per_peer_limiter;
 pub mod remote_signer;
 pub mod secure_channel;
 pub mod signer_loader;

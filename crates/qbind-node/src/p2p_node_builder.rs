@@ -1389,6 +1389,34 @@ impl P2pNodeBuilder {
             }
         }
 
+        // Run 369: install the deployed inbound per-peer message-rate limiter
+        // BEFORE `start()` so the very first inbound frame from the very first
+        // accepted (or dialed) peer is already rate-limited before it reaches
+        // the demuxer/handlers. The adapter carries the same validated per-peer
+        // thresholds this builder already threads into the deployed peer
+        // manager (Run 365): `deployed_peer_rate_limiter_config()` returns
+        // `None` → the documented `1000` msg/s + `100` burst default, or
+        // `Some(cfg)` → the validated hidden `--p2p-max-messages-per-second` /
+        // `--p2p-burst-allowance` override. The default posture leaves normal
+        // traffic unaffected. This wiring is independent of the Run 362
+        // connection-rate limiter and never touches its metric.
+        //
+        // The builder only carries a `P2pMetrics` handle here (not a
+        // `NodeMetrics`), so the adapter's shared per-peer metric handle is
+        // `None`; the adapter's own bounded per-peer drop counter still
+        // records drops. Threading `NodeMetrics` into the transport for the
+        // `qbind_net_per_peer_drops_total` scrape is deferred (see Run 369
+        // evidence "honest limitations").
+        {
+            let inbound_limiter = Arc::new(
+                crate::deployed_inbound_per_peer_limiter::DeployedInboundPerPeerLimiter::from_optional_config(
+                    deployed_peer_rate_limiter_config,
+                    None,
+                ),
+            );
+            p2p_service.set_inbound_per_peer_limiter(inbound_limiter);
+        }
+
         // Start the service
         p2p_service.start().await?;
 
