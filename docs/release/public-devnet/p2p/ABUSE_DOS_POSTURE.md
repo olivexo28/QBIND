@@ -326,6 +326,38 @@ controls over the deployed live socket; the remaining blocker is wiring the `Pee
 deployed TcpKemTls receive path (recommended Run 369). M4 remains Yellow/launch-blocking; public DevNet
 remains **NOT launch-ready**; Full **C4 / C5 remain OPEN**.
 
+## 7i. Run 369 deployed TcpKemTls receive-path per-peer wiring (source/test only)
+
+Run 369 closes the Run 368 Route-C blocker at the source/test level: the **deployed** inbound receive
+path now consults a per-peer `PeerRateLimiter` **before** demuxer/handler dispatch.
+
+- New adapter `crates/qbind-node/src/deployed_inbound_per_peer_limiter.rs` —
+  `DeployedInboundPerPeerLimiter` wraps a `PeerRateLimiter` built from the same validated
+  `PeerRateLimiterConfig` the deployed builder already derives (`deployed_peer_rate_limiter_config()`),
+  defaulting to the documented `1000` msg/s + `100` burst posture. It owns a self-contained bounded
+  per-peer drop counter and an optional `NodeMetrics` handle used to bump the existing
+  `qbind_net_per_peer_drops_total{reason="rate_limit"}` counter.
+- `crates/qbind-node/src/p2p_tcp.rs` — `TcpKemTlsP2pService` gains an optional
+  `inbound_per_peer_limiter` (installed via `set_inbound_per_peer_limiter`, `has_inbound_per_peer_limiter`
+  accessor). The per-peer `read_loop` consults it AFTER a frame decodes to a structured `P2pMessage` and
+  BEFORE `inbound_tx.send(..)` — the exact deployed path
+  `read_loop` → `inbound_tx` → `subscribe()` → `P2pInboundDemuxer` → handlers. An over-budget frame is
+  dropped and the read loop CONTINUES (a per-peer message-rate drop never tears down the connection).
+- `crates/qbind-node/src/p2p_node_builder.rs` — `P2pNodeBuilder::start()` installs the adapter (from
+  `deployed_peer_rate_limiter_config()`, default posture when no override) before `p2p_service.start()`.
+- **Peer keying (honest):** the rate-limit bucket key is a `PeerId` derived from the first 8 bytes of the
+  connection `NodeId` (big-endian). This is a coarse rate-limiting bucket selector only — **not** an
+  identity/authentication claim; it never feeds admission, trust-bundle validation, or any consensus /
+  authority decision.
+- Tests: `crates/qbind-node/tests/run_369_public_devnet_deployed_per_peer_limiter_wiring_tests.rs` (24).
+
+**M12 stays Yellow/Partial — deployed TcpKemTls receive-path source/test wiring landed — and does NOT
+move Green.** This is a source/test run; release-binary live-socket evidence over the deployed receive
+path is deferred to Run 370. Defaults preserved; no new public CLI flags; no P2P wire-format change; no
+admission / trust-bundle / KEMTLS weakening; the connection-rate limiter and
+`qbind_p2p_connection_rate_drop_total` metric are untouched. M4 remains Yellow/launch-blocking; public
+DevNet remains **NOT launch-ready**; Full **C4 / C5 remain OPEN**.
+
 ## 8. Future work required before TestNet
 
 Before a public TestNet, at minimum:
@@ -336,19 +368,24 @@ Before a public TestNet, at minimum:
   source/test level in Run 363; release-binary evidence for both landed in Run 364; the deployed
   builder threads the per-peer override into its live `AsyncPeerManagerImpl` at source/test level in
   Run 365; Run 366 lands deployed-builder-path release-binary end-to-end evidence; Run 367 proves the
-  connection-rate control live-socket on a running P2P-capable node — per-peer message-rate live-socket
-  evidence over an admitted peer remains outstanding.)**
+  connection-rate control live-socket on a running P2P-capable node; Run 368 proves the per-peer
+  message-rate control over a real admitted-peer socket at the `AsyncPeerManagerImpl` layer; Run 369
+  wires the per-peer `PeerRateLimiter` onto the **deployed** TcpKemTls receive path at source/test level
+  — release-binary live-socket evidence over that deployed path remains outstanding.)**
 - Register and test the planned `qbind_p2p_connection_rate_drop_total` metric at the runtime call site.
   **(Done in Run 362; release-binary verified in Run 364; live-socket increment on a running node verified
   in Run 367.)**
 - Publish tuned thresholds validated under real inbound load, with alerting wired to the metrics in
   §5. **(Load validation still outstanding.)**
 
-None of this is claimed complete by Run 360/361/362/363/364/365/366/367; Run 360 publishes posture, Run 361 adds a
+None of this is claimed complete by Run 360/361/362/363/364/365/366/367/368/369; Run 360 publishes posture, Run 361 adds a
 source/test boundary, Run 362 wires the connection-rate limiter into runtime with release-binary
 evidence, Run 363 wires the per-peer message-rate runtime override at source/test level, Run 364 lands
 release-binary evidence for both controls, Run 365 threads the per-peer override through the deployed
 builder at source/test level, Run 366 lands deployed-builder-path release-binary end-to-end evidence,
 Run 367 proves the connection-rate control live-socket on a running P2P-capable node,
-and all record the remaining gap (per-peer message-rate **live-socket** evidence over an admitted
-running peer + load validation).
+Run 368 proves the per-peer message-rate control over a real admitted-peer socket at the
+`AsyncPeerManagerImpl` layer, Run 369 wires the per-peer `PeerRateLimiter` onto the deployed TcpKemTls
+receive path at source/test level,
+and all record the remaining gap (per-peer message-rate **live-socket** evidence over the deployed
+receive path + load validation).
