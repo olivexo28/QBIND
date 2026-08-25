@@ -197,6 +197,21 @@ connection-rate live-socket regression and control-independence are preserved; h
 `docs/devnet/run_373_public_devnet_m12_pqc_static_root_cross_process_release_binary/`). **No new public CLI
 flags** (the static-root/strict-auth flags are pre-existing and public; abuse/DoS flags stay hidden); no
 trust-bundle/wire-format change; M4/M6 unchanged; public DevNet remains NOT launch-ready; C4/C5 remain OPEN.
+Updated Run 374 — **M6 materially narrowed but remains Yellow/Partial**: a stable, release-built operator-facing
+identity **generation + verification** package is published under
+`docs/release/public-devnet/identity/` (`README.md`, `IDENTITY_GENERATION.md`, `IDENTITY_VERIFY.md`,
+`OPERATOR_IDENTITY_SCHEMA.json`, `EXAMPLE_PUBLIC_IDENTITY.json`, `SAFETY.md`, `VERIFY.md`) backed by the
+release-built example `run_374_public_devnet_identity_generation_helper` (Route B — no production source change,
+no new `qbind-node` CLI flag), the harness `scripts/devnet/run_374_public_devnet_identity_generation.sh`, and
+evidence `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_374.md`. The helper generates node / seed / validator-candidate
+identity material (root ML-DSA-44 signing key in memory only; ML-KEM-768 leaf secret written `0600` to an
+operator-selected temp path), emits a schema-validated public identity JSON, deterministically re-derives the
+NodeId from the public cert, inserts into the Run 357 seed-list without schema violation, and is accepted by a
+real loopback `target/release/qbind-node` boot under `--p2p-mutual-auth required --p2p-pqc-root-mode
+pqc-static-root` (`qbind_p2p_pqc_root_mode 1`); MainNet/TestNet generation and mismatched material fail closed.
+M6 stays Yellow/Partial because generation is a release-built example (not a first-class CLI subcommand) and no
+live registration path exists (M4-gated). M4 remains Yellow/launch-blocking; M12 remains Green; public DevNet
+remains NOT launch-ready; C4/C5 remain OPEN.
 **Track:** Public network release-readiness. This is a **separate track** from the internal
 authority-lifecycle boundary track (Run 130–354) and from C4/C5 closure.
 **Scope of this document:** source/docs/test-only audit and gap matrix. It introduces public DevNet
@@ -282,7 +297,7 @@ Each item must be genuinely **Green** and evidenced before public DevNet launch.
 - [x] M3. Release binary reproducibility / BuildID documented (deterministic or documented non-determinism). — **Green (Run 359)**; see `docs/release/public-devnet/binary/REPRODUCIBILITY.md` — same-host, clean-tree two-build reproducibility (byte-identical `qbind-node`) + ELF BuildID `274fdaf3…5208b`. Cross-host/SLSA/signed-release **not** claimed.
 - [ ] M4. Seed/bootnode list published for public join. — **Yellow (Run 357)**: canonical seed-list format + placeholder artifact published (`docs/release/public-devnet/network/`); **still a launch blocker** — no live seeds / reachability evidence yet.
 - [x] M5. Validator/full-node onboarding quickstart for external operators. — **Green (Run 358)**: external operator quickstart published (`docs/release/public-devnet/operator/QUICKSTART.md`), validated against the real `qbind-node` CLI surface (`--help`), the Run 356 genesis package, and the Run 357 seed-list format.
-- [ ] M6. Validator identity guidance (node identity/key generation) published. — **Yellow / Partial (Run 358)**: identity guidance published (`docs/release/public-devnet/operator/IDENTITY.md`) and validated against pre-existing identity/signer **loading/selection** flags; **gap:** no externally documented, stable `qbind-node` command **generates** a publishable node/peer/validator identity for an external operator, and no live public DevNet exists to register one — M6 stays Yellow until such a command/procedure lands.
+- [ ] M6. Validator identity guidance (node identity/key generation) published. — **Yellow / Partial (Run 358; materially narrowed Run 374)**: identity guidance published (`docs/release/public-devnet/operator/IDENTITY.md`) and validated against pre-existing identity/signer **loading/selection** flags; **Run 374** adds a stable, release-built operator-facing identity **generation + verification** package (`docs/release/public-devnet/identity/` + `run_374_public_devnet_identity_generation_helper` + harness + `OPERATOR_IDENTITY_SCHEMA.json`) that generates node/seed/validator-candidate material, emits a schema-validated public identity, deterministically re-derives the NodeId, inserts into the seed-list, and is accepted by a real loopback strict-auth `qbind-node` boot (MainNet/TestNet + mismatch fail closed). **Remaining gap:** generation is a release-built example (not a first-class `qbind-node` subcommand) and no live public DevNet exists to register one — M6 stays Yellow until a stable CLI subcommand + live registration path land.
 - [ ] M7. Validator key-management guidance (local keystore / remote signer / HSM options) published.
 - [ ] M8. PQC trust-bundle bootstrap process for DevNet trust roots published.
 - [ ] M9. PQC root / signing-key guidance for DevNet published.
@@ -397,7 +412,7 @@ Legend: 🟢 Green (evidenced enough for public DevNet) · 🟡 Yellow (partial 
 | M3 reproducibility / BuildID | 🟢 | **Run 359:** same-host, clean-tree two-build reproducibility (byte-identical `qbind-node`) + ELF BuildID recorded (`docs/release/public-devnet/binary/REPRODUCIBILITY.md`). Cross-host/SLSA/signed-release **not** claimed. |
 | M4 seed/bootnodes | 🟡 | **Run 357:** canonical seed-list format (`devnet-seed-list.schema.json`) + placeholder artifact (`devnet-seeds.placeholder.json`) published under `docs/release/public-devnet/network/`, verified + genesis-pinned. Still **Red-equivalent for launch**: no live seeds, no reachability evidence, static `--p2p-peer` only, no discovery. **Launch blocker.** |
 | M5 validator onboarding | 🟢 | **Run 358:** external operator quickstart published (`docs/release/public-devnet/operator/QUICKSTART.md`), validated against the real `qbind-node --help` CLI surface, the Run 356 genesis package, and the Run 357 seed-list format. |
-| M6 validator identity | 🟡 | **Run 358:** identity guidance published (`docs/release/public-devnet/operator/IDENTITY.md`), validated against pre-existing identity/signer **loading/selection** flags. **Gap:** no stable operator-facing command **generates** a publishable node/peer/validator identity, and no live public DevNet to register into — stays Yellow/Partial. |
+| M6 validator identity | 🟡 | **Run 358:** identity guidance published (`docs/release/public-devnet/operator/IDENTITY.md`), validated against pre-existing identity/signer **loading/selection** flags. **Run 374 (materially narrowed):** stable, release-built operator-facing identity **generation + verification** package published (`docs/release/public-devnet/identity/` + `run_374_public_devnet_identity_generation_helper` + `scripts/devnet/run_374_public_devnet_identity_generation.sh` + `OPERATOR_IDENTITY_SCHEMA.json`, Route B / no production source change); generates node/seed/validator-candidate material (root signing key in-memory only, ML-KEM-768 leaf secret `0600`), emits schema-validated public identity, deterministically re-derives NodeId, inserts into the seed-list, accepted by a real loopback `qbind-node` strict-auth + static-root boot (`qbind_p2p_pqc_root_mode 1`); MainNet/TestNet + mismatched material fail closed (`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_374.md`). **Gap:** generation is a release-built example (not a first-class CLI subcommand) and no live public DevNet to register into — stays Yellow/Partial. |
 | M7 key-management | 🟡 | Local keystore / remote signer / HSM surfaces exist; no consolidated guide. |
 | M8 trust-bundle bootstrap | 🟡 | Runbook + `pqc_trust_bundle` exist; DevNet root bootstrap not published. |
 | M9 PQC root / signing-key guidance | 🟡 | CLI + runbook exist; DevNet-specific guidance not consolidated. |
@@ -446,7 +461,7 @@ Legend: 🟢 Green (evidenced enough for public DevNet) · 🟡 Yellow (partial 
 | M3 | 🟢 | **Done (Run 359):** same-host, clean-tree two-build reproducibility (byte-identical `qbind-node`) + ELF BuildID documented (`docs/release/public-devnet/binary/REPRODUCIBILITY.md`). Cross-host/SLSA/signed-release **not** claimed. |
 | M4 | 🟡 | **Format landed (Run 357):** seed-list schema + placeholder published (`docs/release/public-devnet/network/`). **Next:** deploy real seed/bootnode nodes and capture external reachability evidence, then replace placeholder with live entries to move Green. |
 | M5 | 🟢 | **Done (Run 358):** external validator/full-node quickstart published + CLI-validated (`docs/release/public-devnet/operator/QUICKSTART.md`). |
-| M6 | 🟡 | **Partial (Run 358):** identity guidance published + CLI-validated for loading/selection. **Next:** expose a stable operator-facing node/peer/validator identity-generation command (+ live registration path) to move Green. |
+| M6 | 🟡 | **Partial (Run 358; materially narrowed Run 374):** identity guidance + CLI-validated loading/selection, plus a stable release-built operator-facing identity **generation + verification** package (`docs/release/public-devnet/identity/`, helper + harness + schema, Route B). **Next:** promote the helper to a first-class `qbind-node identity generate/verify` subcommand with operator-supplied-root support, and add a live registration path (M4-gated) to move Green. |
 | M7 | 🟡 | Run: consolidate key-management guide (`--signer-mode`, keystore, remote signer, HSM). |
 | M8 | 🟡 | Run: publish DevNet trust-root bootstrap procedure. |
 | M9 | 🟡 | Run: publish DevNet PQC root/signing-key guidance (fold into M8 run if convenient). |

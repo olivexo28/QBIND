@@ -412,3 +412,11 @@ See `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_364.md` and
 (strengthened) — NOT Green**: the connection-rate limiter is production-wired and release-proven, but
 the deployed node does not yet thread the CLI-derived per-peer `peer_rate_limiter_config` into its live
 `AsyncPeerManagerImpl`, so per-peer operator effect on a running node is not yet delivered.
+## Run 374 — operator identity material (cross-reference)
+
+The peer identity material verified through these admission paths can be generated and independently
+verified with the Run 374 operator identity package (`docs/release/public-devnet/identity/`,
+`VERIFY.md` / `IDENTITY_VERIFY.md`). Run 374 is **generation/verification only** (Route B, no production
+source change, no new CLI flag): it does not change admission, the P2P wire format, or trust-bundle
+handling, and it does not move M12. A real loopback `qbind-node` boot on generated material reports
+`qbind_p2p_pqc_root_mode 1` / `qbind_p2p_pqc_roots_configured 1`; mismatched material fails closed.

@@ -1,0 +1,157 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://qbind.dev/schemas/public-devnet/operator-identity.schema.json",
+  "title": "QBIND Public DevNet Operator Public Identity",
+  "description": "Canonical operator-facing schema for the PUBLIC identity document emitted by the Run 374 identity-generation helper (`run_374_public_devnet_identity_generation_helper generate`). DevNet only: experimental, resettable, no value, no MainNet readiness claim, no C4/C5 closure claim. This document carries only PUBLIC material (NodeId, fingerprints, root id/public key, suite ids, and the ready-to-copy --p2p-trusted-root spec). It MUST NOT contain any secret key, KEM secret, signing secret, mnemonic, or credential. A document that validates against this schema is NOT a public DevNet launch claim.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "environment",
+    "role",
+    "suite",
+    "node_id",
+    "node_id_short",
+    "peer_id",
+    "leaf_cert_fingerprint",
+    "leaf_cert_fingerprint_short",
+    "root_key_id",
+    "root_pk_fingerprint",
+    "trusted_root_spec",
+    "validator_address",
+    "transport_security_mode",
+    "pqc_suite",
+    "private_material",
+    "safety_label",
+    "devnet_only"
+  ],
+  "properties": {
+    "schema_version": {
+      "description": "Version of this operator-identity schema/document format.",
+      "type": "string",
+      "minLength": 1
+    },
+    "environment": {
+      "description": "Deployment environment. DevNet only for this document.",
+      "type": "string",
+      "enum": ["devnet"]
+    },
+    "role": {
+      "description": "Identity role this material was generated for.",
+      "type": "string",
+      "enum": ["full-node", "seed", "validator-candidate"]
+    },
+    "suite": {
+      "description": "PQC suite identifiers for the signature (root -> leaf delegation) and the leaf KEM.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sig_suite_id", "sig_suite", "kem_suite_id", "kem_suite"],
+      "properties": {
+        "sig_suite_id": { "type": "integer", "enum": [100] },
+        "sig_suite": { "type": "string", "enum": ["ml-dsa-44"] },
+        "kem_suite_id": { "type": "integer" },
+        "kem_suite": { "type": "string", "enum": ["ml-kem-768"] }
+      }
+    },
+    "node_id": {
+      "description": "Full NodeId as 64 lowercase hex chars. Derived deterministically as sha3_256('QBIND:nodeid:v1' || leaf_kem_pk). Safe to publish.",
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "node_id_short": {
+      "description": "First 8 bytes of the NodeId as 16 lowercase hex chars (log/display form). Safe to publish.",
+      "type": "string",
+      "pattern": "^[0-9a-f]{16}$"
+    },
+    "peer_id": {
+      "description": "P2P peer identity. For the KEMTLS transport identity this equals node_id. Safe to publish.",
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "leaf_cert_fingerprint": {
+      "description": "SHA3-256 fingerprint of the canonical leaf NetworkDelegationCert bytes, 64 lowercase hex chars. Safe to publish.",
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "leaf_cert_fingerprint_short": {
+      "description": "First 4 bytes of the leaf cert fingerprint as 8 lowercase hex chars (log/display form). Safe to publish.",
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}$"
+    },
+    "root_key_id": {
+      "description": "Trust-root key id (32 bytes) as 64 lowercase hex chars, embedded in every leaf cert issued by this root. Safe to publish.",
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "root_pk_fingerprint": {
+      "description": "First 4 bytes of SHA3-256(root_pk) as 8 lowercase hex chars (log-safe fingerprint of the root public key). Safe to publish.",
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}$"
+    },
+    "trusted_root_spec": {
+      "description": "Ready-to-copy value for the pre-existing --p2p-trusted-root flag: '<root_key_id_hex>:<suite_id>:<root_pk_hex>'. Contains only PUBLIC root material. Safe to publish.",
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}:[0-9]+:[0-9a-f]+$"
+    },
+    "validator_address": {
+      "description": "Public validator address for a validator-candidate identity, or null for full-node/seed roles.",
+      "type": ["string", "null"]
+    },
+    "transport_security_mode": {
+      "description": "Transport security posture the material is intended for, e.g. 'kemtls-mutual-auth-required'.",
+      "type": "string",
+      "minLength": 1
+    },
+    "pqc_suite": {
+      "description": "PQC suite identifier for seed-list interop, e.g. 'ml-dsa-44'.",
+      "type": "string",
+      "minLength": 1
+    },
+    "private_material": {
+      "description": "Paths (NOT contents) of the private material generated alongside this public identity. The referenced files MUST NEVER be published or committed.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["leaf_cert_path", "leaf_kem_sk_path", "note"],
+      "properties": {
+        "leaf_cert_path": { "type": "string", "minLength": 1 },
+        "leaf_kem_sk_path": { "type": "string", "minLength": 1 },
+        "note": { "type": "string", "minLength": 1 }
+      }
+    },
+    "safety_label": {
+      "description": "Mandatory DevNet safety label. All flags must be present and set as shown.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "experimental",
+        "resettable",
+        "no_value",
+        "no_mainnet_readiness_claim",
+        "no_c4_c5_closure_claim"
+      ],
+      "properties": {
+        "experimental": { "type": "boolean", "enum": [true] },
+        "resettable": { "type": "boolean", "enum": [true] },
+        "no_value": { "type": "boolean", "enum": [true] },
+        "no_mainnet_readiness_claim": { "type": "boolean", "enum": [true] },
+        "no_c4_c5_closure_claim": { "type": "boolean", "enum": [true] }
+      }
+    },
+    "devnet_only": {
+      "description": "Must be true. Marks the identity as DevNet-only, no-value, resettable material.",
+      "type": "boolean",
+      "enum": [true]
+    }
+  },
+  "allOf": [
+    {
+      "description": "Only a validator-candidate may carry a non-null validator_address.",
+      "if": {
+        "properties": { "role": { "enum": ["full-node", "seed"] } }
+      },
+      "then": {
+        "properties": { "validator_address": { "type": "null" } }
+      }
+    }
+  ]
+}
