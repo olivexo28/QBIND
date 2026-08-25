@@ -63,7 +63,7 @@ leaves the connection limiter **disabled** (test `t01_default_profile_preserves_
 
 ## 6. Verify no forbidden claim
 
-Run 361/362/363/364/365/366/367/368/369 do not claim public DevNet launch-readiness, TestNet readiness, MainNet readiness,
+Run 361/362/363/364/365/366/367/368/369/370 do not claim public DevNet launch-readiness, TestNet readiness, MainNet readiness,
 C4/C5 closure, or M4/M6 Green. **M12 stays Yellow/Partial (strengthened)**: Run 362 wires the
 connection-rate limiter into runtime, Run 363 wires the per-peer message-rate override at source/test
 level, Run 364 lands release-binary evidence for both, Run 365 threads the CLI-derived per-peer
@@ -71,10 +71,13 @@ override through the deployed `P2pNodeBuilder` into the live `AsyncPeerManagerIm
 source/test level, Run 366 lands deployed-builder-path release-binary end-to-end evidence, Run 367
 proves the **connection-rate** control **live-socket** on a running P2P-capable node, Run 368
 proves the per-peer **message-rate** control over a **real admitted-peer socket at the
-`AsyncPeerManagerImpl` layer**, and Run 369 **wires the per-peer `PeerRateLimiter` onto the deployed
+`AsyncPeerManagerImpl` layer**, Run 369 **wires the per-peer `PeerRateLimiter` onto the deployed
 TcpKemTls receive path** (`read_loop` → `inbound_tx` → `subscribe()` → `P2pInboundDemuxer` → handlers)
-at source/test level — but M12 Green remains **deferred** because release-binary **live-socket** evidence
-over that deployed receive path is not yet landed (Run 370). See
+at source/test level, and Run 370 **threads a live `NodeMetrics` handle into the deployed adapter (Route
+B)** so the deployed per-peer drop exports `qbind_net_per_peer_drops_total{reason="rate_limit"}` and adds
+release-binary **live-socket** connection-rate evidence — but M12 Green remains **deferred** because the
+fully-live KEMTLS-admitted deployed per-peer socket flood is not yet driven. See
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_370.md`,
 `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_369.md`,
 `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_368.md`, `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_367.md`, `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_366.md`,
 `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_365.md`, and
@@ -105,6 +108,34 @@ over-budget inbound frames drop with the adapter's per-peer counter (and
 stays 0; `--help` still hides the abuse/DoS flags and no Run 369 flag exists. Defaults preserved; no new
 public CLI flags. **M12 stays Yellow/Partial — deployed TcpKemTls receive-path source/test wiring landed;
 Green deferred to Run 370 pending release-binary live-socket deployed-path evidence.**
+
+## 7va. Verify the Run 370 deployed per-peer exported-metric threading + release-binary evidence (Route B)
+
+Run 370 threads a live `NodeMetrics` handle into the deployed `DeployedInboundPerPeerLimiter` (via
+`P2pNodeBuilder::with_node_metrics` + the shared `build_deployed_inbound_per_peer_limiter()` seam, wired in
+`main.rs`) so a per-peer drop on the deployed `read_loop` exports
+`qbind_net_per_peer_drops_total{reason="rate_limit"}`. Default-preserving; no new public CLI flags.
+
+```bash
+# Run 370 helper + harness + test target exist:
+test -f crates/qbind-node/examples/run_370_public_devnet_abuse_dos_m12_deployed_live_socket_helper.rs
+test -f scripts/devnet/run_370_public_devnet_abuse_dos_m12_deployed_live_socket_release_binary.sh
+test -f crates/qbind-node/tests/run_370_public_devnet_deployed_live_socket_m12_tests.rs
+
+# Build the lib and run the Run 370 source tests:
+cargo build -p qbind-node --lib
+cargo test -p qbind-node --test run_370_public_devnet_deployed_live_socket_m12_tests
+
+# Run the release-binary live-socket harness (builds release + helper, drives real sockets):
+bash scripts/devnet/run_370_public_devnet_abuse_dos_m12_deployed_live_socket_release_binary.sh
+```
+
+Expected: Run 370 tests **20/20 PASS**; the release helper **PASS (10/10)**; the connection-rate control
+proven live-socket (10 inbound TCP connections, max 3 → 3 accepted / 7 refused, live
+`qbind_p2p_connection_rate_drop_total = 7`); the deployed adapter exports
+`qbind_net_per_peer_drops_total{reason="rate_limit"}` on over-budget drops; invalid/unbounded/MainNet fail
+the binary closed; `--help` still hides the abuse/DoS flags. **M12 stays Yellow/Partial (strengthened) — the
+fully-live KEMTLS-admitted deployed per-peer socket flood remains the residual blocker; Green deferred.**
 
 ## 7w. Verify the Run 368 admitted-peer per-peer message-rate live-socket evidence
 
