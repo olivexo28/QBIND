@@ -188,6 +188,37 @@ invalid/unbounded/MainNet fail the binary closed; `--help` still hides the abuse
 `--p2p-mutual-auth` public. **M12 remains Green (hardening); no new public CLI flags; strict mutual-auth only
 tightens admission; does not move M4/M6 or close C4/C5.**
 
+## 7vd. Verify the Run 373 cross-process PqcStaticRoot strict-auth flood hardening (Route A) — M12 Green
+
+Run 373 extends Run 372's in-process static-root proof to a **cross-process** standalone-binary proof: the
+deployed `target/release/qbind-node` runs under `--p2p-mutual-auth required --p2p-pqc-root-mode
+pqc-static-root` with operator-configured `--p2p-trusted-root`/`--p2p-leaf-cert`/`--p2p-leaf-cert-key`
+material, and two KEMTLS-admitted peers built from the same material flood cross-process with abusive-bucket
+isolation on live `/metrics`. Production public APIs + pre-existing public CLI only (no source change).
+
+```bash
+# Run 373 helper + harness exist (no source test file — Route A / no source change):
+test -f crates/qbind-node/examples/run_373_public_devnet_m12_pqc_static_root_cross_process_helper.rs
+test -f scripts/devnet/run_373_public_devnet_m12_pqc_static_root_cross_process_release_binary.sh
+
+# Run the release-binary live-socket harness (builds release + helpers, mints temporary static-root
+# material, drives real cross-process strict-auth static-root sockets):
+bash scripts/devnet/run_373_public_devnet_m12_pqc_static_root_cross_process_release_binary.sh /tmp/qbind-run373
+cat /tmp/qbind-run373/summary.txt
+```
+
+Expected: the helper scenario suite **PASS (13/13)**; temporary ML-DSA-44 root + ML-KEM-768 leaf material is
+generated in a temp dir (root signing key in memory only); the deployed node logs
+`pqc_root_mode=pqc-static-root` and `mutual_auth=Required` and exports `qbind_p2p_pqc_root_mode 1` /
+`qbind_p2p_pqc_roots_configured 1`; both peers complete the Required + PqcStaticRoot KEMTLS handshake and are
+registered under their verified cert-derived NodeIds; the abusive peer's over-budget flood surfaces
+`qbind_net_per_peer_drops_total{peer="<cert-derived key>",reason="rate_limit"}` > 0 while the honest peer's
+cert-derived bucket label is ABSENT; the connection-rate live-socket proof preserved (metric = 7) and
+independent; invalid/unbounded/malformed-root/MainNet fail the binary closed; `--help` still hides the
+abuse/DoS flags and keeps the static-root/strict-auth flags public. **M12 remains Green (hardening); no new
+public CLI flags; static-root + strict mutual-auth only tighten admission; does not move M4/M6 or close
+C4/C5.**
+
 ## 7w. Verify the Run 368 admitted-peer per-peer message-rate live-socket evidence
 
 Run 368 drives a real admitted peer on a live `AsyncPeerManagerImpl` over a loopback socket and proves
