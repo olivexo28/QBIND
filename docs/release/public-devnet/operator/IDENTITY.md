@@ -90,17 +90,30 @@ MainNet or TestNet identity artifact. MainNet custody and MainNet authority rota
   genesis hash; its provenance line reports the environment and authority context bound into the
   genesis (the genesis `authority` block is the published public authority material).
 
-## 9. Honest gap — identity generation for external operators (M6)
+## 9. Identity generation for external operators (M6) — Run 374 package
 
-There is currently **no** externally documented, stable `qbind-node` command that **generates** a
-fresh public validator / node / peer identity for an external operator to register on a live public
-DevNet. Key generation exists internally (e.g. within test/fixture helpers and the signer subsystem),
-but it is **not** exposed as a stable, operator-facing "generate my identity" CLI command, and no live
-public DevNet exists to register such an identity into.
+**Run 374** publishes a stable, release-built operator-facing identity
+**generation and verification** package under
+`docs/release/public-devnet/identity/` (see its `README.md`,
+`IDENTITY_GENERATION.md`, `IDENTITY_VERIFY.md`, `OPERATOR_IDENTITY_SCHEMA.json`,
+`EXAMPLE_PUBLIC_IDENTITY.json`, `SAFETY.md`, `VERIFY.md`). It is backed by the
+release-built example `run_374_public_devnet_identity_generation_helper` (Route B
+— **no** production source change, **no** new `qbind-node` CLI flag) and the
+harness `scripts/devnet/run_374_public_devnet_identity_generation.sh`. The helper
+**generates** node / seed / validator-candidate identity material (root ML-DSA-44
+signing key held in memory only; ML-KEM-768 leaf secret written `0600` to an
+operator-selected temp path), emits a schema-validated public identity JSON,
+deterministically re-derives the NodeId from the public cert, maps into the Run
+357 seed-list, and is accepted by a real loopback `qbind-node` boot under
+`--p2p-mutual-auth required --p2p-pqc-root-mode pqc-static-root`. MainNet/TestNet
+generation and mismatched material fail closed.
 
-Because identity **loading / selection / signer configuration** is validated against real
-pre-existing CLI surfaces, but identity **generation** for external operators is **not** yet exposed
-as a stable operator-facing command, must-have **M6** remains **Yellow (Partial)**. The exact missing
-support is: a stable, documented CLI command (or documented procedure over a stable command) for an
-external operator to generate a publishable node/peer/validator identity, plus a live registration
-path. See `docs/release/QBIND_PUBLIC_DEVNET_READINESS_CRITERIA.md`.
+Because generation is delivered as a **release-built example helper** (the repo's
+established operator-tooling pattern) rather than a first-class `qbind-node`
+subcommand, and because **no live public DevNet exists to register an identity
+into** (M4-gated), must-have **M6** is **materially narrowed but remains Yellow
+(Partial)**. The remaining support needed to move M6 Green is: promoting the
+helper to a stable first-class `qbind-node` subcommand (with operator-supplied
+root reuse/rotation) plus a live registration path. See
+`docs/release/QBIND_PUBLIC_DEVNET_READINESS_CRITERIA.md` and
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_374.md`.

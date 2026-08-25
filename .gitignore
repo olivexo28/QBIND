@@ -19,3 +19,12 @@ target/
 # Generated whitepaper PDF (T240)
 # Build from source with: docs/whitepaper/build_whitepaper.sh
 docs/whitepaper/QBIND_WHITEPAPER.pdf
+
+# Run 374: operator identity-generation output (DevNet-only, never commit secret
+# or generated identity material). These are safety-net patterns; operators
+# should generate into a temp dir OUTSIDE the repo tree (see
+# docs/release/public-devnet/identity/SAFETY.md).
+qbind-identity-out/
+*.kem.sk.bin
+*.kem.pk.bin
+*.cert.bin

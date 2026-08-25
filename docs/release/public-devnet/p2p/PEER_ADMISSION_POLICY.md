@@ -119,3 +119,12 @@ no such behaviour.
 Nothing in this admission policy implies MainNet readiness. MainNet authority rotation/revocation
 remains **Red**, Full **C4 remains OPEN**, and **C5 remains OPEN**. This policy governs public DevNet
 peer admission only and makes no MainNet claim.
+
+## 11. Operator identity material for admission (Run 374)
+
+The KEMTLS leaf cert + trusted-root material a peer presents for admission under
+`--p2p-mutual-auth required` / `--p2p-pqc-root-mode pqc-static-root` can be generated with the Run 374
+operator identity package (`docs/release/public-devnet/identity/`). That package is
+**generation/verification only**: it does **not** weaken admission (strict mutual-auth only tightens
+it), change the peer-admission policy, alter the P2P wire format, or apply any trust bundle. A generated
+identity that presents mismatched material fails admission closed exactly as before.

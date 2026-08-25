@@ -132,6 +132,16 @@ A future run must **deploy real seed/bootnode nodes** and **capture external rea
 then replace the placeholder entry with live entries and update the readiness matrix. That deployment
 work is explicitly **out of scope** for Run 357 (docs / artifact / verification only).
 
+## 8a. Populating seed identity fields (Run 374)
+
+The per-seed `node_id` / `peer_id` / `validator_address` / `pqc_suite` /
+`transport_security_mode` fields are produced by the Run 374 operator identity package
+(`docs/release/public-devnet/identity/`). An operator generates candidate identity material with
+`run_374_public_devnet_identity_generation_helper`, then maps the resulting `public-identity.json` into
+a `seed_node` object (see `IDENTITY_VERIFY.md` §4). Candidate entries stay `status: "planned"` /
+`"placeholder"` with `last_reachability_evidence: null` — publishing a `node_id` here is **not** a live
+or reachability claim, and does **not** move M4.
+
 ## Provenance
 
 Full provenance (git commit, branch, clean/dirty state, artifact paths + hashes, Run 356 genesis

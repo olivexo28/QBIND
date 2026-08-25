@@ -221,6 +221,11 @@ Public DevNet remains **NOT launch-ready**. Outstanding (non-exhaustive; see
   `qbind-node.sha256`, `VERIFY.md`). Cross-host / SLSA / signed-release scope is **not** claimed.
 - **M4 — live seed/bootnode list + external reachability evidence:** **Yellow / launch-blocking**
   (format + placeholder only).
+- **M6 — operator identity generation:** **Yellow / Partial (materially narrowed, Run 374)**. To
+  generate the peer identity material used by the strict-auth flags above, see the identity package
+  `docs/release/public-devnet/identity/` (`IDENTITY_GENERATION.md` / `IDENTITY_VERIFY.md`). Generation
+  is a release-built example helper, not yet a first-class CLI subcommand, and there is no live
+  registration path — so M6 stays Yellow.
 - External reachability, status page, alerting, and a seed-node runbook: still outstanding.
 - Other must-haves (M6–M15) remain unresolved (Yellow/Red).
 
