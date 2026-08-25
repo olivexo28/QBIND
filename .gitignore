@@ -23,8 +23,13 @@ docs/whitepaper/QBIND_WHITEPAPER.pdf
 # Run 374: operator identity-generation output (DevNet-only, never commit secret
 # or generated identity material). These are safety-net patterns; operators
 # should generate into a temp dir OUTSIDE the repo tree (see
-# docs/release/public-devnet/identity/SAFETY.md).
+# docs/release/public-devnet/identity/SAFETY.md). Run 375 adds the first-class
+# `qbind-node identity` command, which writes the same material.
 qbind-identity-out/
 *.kem.sk.bin
 *.kem.pk.bin
 *.cert.bin
+root.pk.hex
+root.id.hex
+trusted-root.spec
+public-identity.json

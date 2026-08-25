@@ -1,7 +1,12 @@
-# QBIND Public DevNet — Identity Verification (Run 374)
+# QBIND Public DevNet — Identity Verification (Run 374, first-class command Run 375)
 
 > **Safety label:** experimental · resettable · no value · no MainNet readiness
 > claim · no C4/C5 closure claim · NOT public-DevNet launch-ready.
+
+> **Run 375 — first-class command (preferred).** Verification is now a stable
+> `qbind-node identity verify` / `qbind-node identity print-public` subcommand.
+> Wherever this document shows `"$BIN" verify …`, you may equivalently run
+> `qbind-node identity verify …` — identical, public-only output.
 
 This document gives the **exact** commands to print, verify, and cross-check
 public identity material. Every step here operates on **public** material only
@@ -11,7 +16,10 @@ published `public-identity.json` + `leaf.cert.bin`.
 Set up:
 
 ```bash
-BIN=./target/release/examples/run_374_public_devnet_identity_generation_helper
+# First-class command (Run 375):
+BIN="./target/release/qbind-node identity"
+# or the Run 374 example wrapper:
+#   BIN=./target/release/examples/run_374_public_devnet_identity_generation_helper
 DIR="$OUT/node"     # a directory produced by IDENTITY_GENERATION.md
 ```
 

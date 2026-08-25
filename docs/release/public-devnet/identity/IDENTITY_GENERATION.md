@@ -1,22 +1,34 @@
-# QBIND Public DevNet — Identity Generation (Run 374)
+# QBIND Public DevNet — Identity Generation (Run 374, first-class command Run 375)
 
 > **Safety label:** experimental · resettable · no value · no MainNet readiness
 > claim · no C4/C5 closure claim · NOT public-DevNet launch-ready.
 
+> **Run 375 — first-class command (preferred).** Generation is now a stable
+> `qbind-node identity generate` subcommand. Wherever this document shows
+> `"$BIN" generate …`, you may equivalently run `qbind-node identity generate …`
+> against the release node binary — identical output, files, perms, and
+> refusals. Example:
+>
+> ```bash
+> qbind-node identity generate devnet full-node "$OUT/node"
+> qbind-node identity generate devnet validator-candidate "$OUT/val" 0
+> ```
+
 This document gives the **exact** operator commands to generate DevNet identity
-material with the Run 374 helper, and describes every file it writes. The helper
-is a **release-built example** (no production runtime change, no new
-`qbind-node` CLI flag). All private material is written **only** to the
-operator-selected output directory; nothing is committed.
+material, and describes every file written. The first-class `qbind-node
+identity` command (Run 375) is DevNet-gated and changes no default node
+behavior; the Run 374 `run_374_public_devnet_identity_generation_helper` example
+remains available as a thin wrapper over the same implementation.
 
 ## 0. Prerequisites
 
-Build the helper (and, for the optional loopback check, the node binary):
+Build the node binary (which carries the first-class `identity` command); the
+Run 374 example is optional:
 
 ```bash
-cargo build -p qbind-node --release --example run_374_public_devnet_identity_generation_helper
-# optional (for §6 loopback strict-auth boot):
 cargo build -p qbind-node --release --bin qbind-node
+# optional (Run 374 example, thin wrapper over the same code):
+cargo build -p qbind-node --release --example run_374_public_devnet_identity_generation_helper
 ```
 
 Choose an output directory that is **outside any git tree** — e.g. a `mktemp -d`
@@ -25,7 +37,10 @@ conventional `qbind-identity-out/` directory as a backstop (see `SAFETY.md`).
 
 ```bash
 OUT="$(mktemp -d)"        # operator-selected temp dir; never commit its contents
-BIN=./target/release/examples/run_374_public_devnet_identity_generation_helper
+# First-class command (Run 375):
+BIN="./target/release/qbind-node identity"
+# or the Run 374 example wrapper:
+#   BIN=./target/release/examples/run_374_public_devnet_identity_generation_helper
 ```
 
 ## 1. Generate a full-node identity

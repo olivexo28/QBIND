@@ -7,6 +7,13 @@ Copy-paste steps a reviewer runs to confirm the Run 374 identity package. Steps
 1–7 need only Rust + Python 3 (`jsonschema`); step 6 additionally builds the node
 binary.
 
+> **Run 375 — first-class command.** To verify against the first-class command
+> instead of the Run 374 example, build the node binary
+> (`cargo build -p qbind-node --release --bin qbind-node`) and replace
+> `"$BIN" generate …` / `"$BIN" verify …` with `qbind-node identity generate …`
+> / `qbind-node identity verify …`. The full first-class evidence harness is
+> `scripts/devnet/run_375_public_devnet_identity_cli.sh`.
+
 ## 1. Helper builds
 
 ```bash

@@ -1,0 +1,20 @@
+# Run 375 evidence archive — only README.md, summary.txt, and .gitignore are tracked.
+# All per-run artifacts contain absolute paths and ephemeral data and MUST NOT be committed.
+# Generated identity material (roots, certs, KEM secret keys), node data dirs, logs, and
+# metrics dumps are temporary and dev-only; only published-safe hashes/short ids appear in
+# the tracked summary/README.
+material/
+node-data/
+node-data-neg/
+nodes/
+logs/
+data/
+*.public.json
+*.candidate.json
+*.err
+*.log
+*.cert.bin
+*.kem.sk.bin
+*.spec
+*.hex
+public-identity.json

@@ -7,6 +7,12 @@ This document states what identity material is safe to publish, what must
 **never** be published, and the DevNet-only handling rules for the Run 374
 identity package.
 
+> **Run 375 note.** The same safety rules apply verbatim to the first-class
+> `qbind-node identity` command (Run 375): the ML-KEM-768 secret key is written
+> `0600` to the operator-selected output directory only, the root ML-DSA-44
+> signing key is held in memory and never written to disk, and
+> `public-identity.json` records private-file **paths only**, never contents.
+
 ## 1. Safe to publish (public material)
 
 - `node_id` / `node_id_short` and `peer_id` (derived from the certified leaf

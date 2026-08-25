@@ -117,3 +117,36 @@ helper to a stable first-class `qbind-node` subcommand (with operator-supplied
 root reuse/rotation) plus a live registration path. See
 `docs/release/QBIND_PUBLIC_DEVNET_READINESS_CRITERIA.md` and
 `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_374.md`.
+
+### 9.1 Run 375 — first-class `qbind-node identity` command
+
+**Run 375** promotes the Run 374 workflow into a stable, first-class
+`qbind-node identity` subcommand (Route B — DevNet-gated, default-safe, no
+runtime behavior change; it is only reached when `identity` is the first CLI
+token):
+
+```bash
+qbind-node identity generate devnet full-node <outdir>
+qbind-node identity generate devnet seed <outdir>
+qbind-node identity generate devnet validator-candidate <outdir> [validator_index]
+qbind-node identity verify <outdir>/leaf.cert.bin
+qbind-node identity print-public <outdir>
+qbind-node identity seed-candidate <outdir>
+```
+
+The command reuses the exact Run 374 primitives (the Run 374 example is now a
+thin wrapper over the shared `crate::identity_cli` implementation), so all Run
+374 evidence — file set, schema-compatible `public-identity.json`, `0600` KEM
+secret key, in-memory-only root signing key, deterministic NodeId, seed-list
+mapping, loopback strict-auth boot, mismatch fail-closed, MainNet/TestNet
+refusal — is preserved and reproducible. Evidence:
+`scripts/devnet/run_375_public_devnet_identity_cli.sh`,
+`crates/qbind-node/tests/run_375_public_devnet_identity_cli_tests.rs`, and
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_375.md`.
+
+**M6 delta (Run 375):** the first-class **generation + verification** half of M6
+is now **Green-for-scope** (stable command, documented, release-binary-evidenced,
+schema-compatible, safe for external DevNet operators). M6 as a whole **remains
+Yellow (Partial)** because a **live registration path** into a running public
+DevNet does not exist (M4-gated) and operator-supplied root reuse/rotation/
+revocation is still C4/C5-OPEN. No M4 Green, no C4/C5 closure is claimed.
