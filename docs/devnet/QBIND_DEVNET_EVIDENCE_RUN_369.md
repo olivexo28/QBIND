@@ -244,9 +244,10 @@ production hostnames, or unapproved live endpoints were introduced. Only localho
 ## 20. CodeQL result
 
 CodeQL (`codeql_checker`) was invoked because production Rust source changed
-(`isTrivial = false`). Result recorded in §CodeQL (captured) below — see the final response for the
-exact status and any alert triage. CodeQL was not skipped and is not claimed clean without a recorded
-result.
+(`isTrivial = false`). Exact result: **analysis was skipped because the CodeQL database size is too
+large** (0 alerts returned, but the analysis did not run to completion). This is **not** a clean result
+and is not claimed as such — it is recorded honestly as a skip. No alert triage is possible from a
+skipped analysis; the source/test changes are covered instead by the unit/integration suites in §18.
 
 ## 21. Provenance
 
@@ -299,5 +300,6 @@ runtime-tools-secret_scanning over changed files → no secrets found
 ## CodeQL (captured)
 
 ```
-codeql_checker invoked (isTrivial=false, production Rust source changed) → result recorded in final response
+codeql_checker invoked (isTrivial=false, production Rust source changed)
+  → rust: analysis SKIPPED — database size too large (0 alerts; NOT a clean result, recorded as skip)
 ```
