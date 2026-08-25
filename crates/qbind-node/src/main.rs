@@ -5075,7 +5075,15 @@ async fn run_p2p_node(
         .with_num_validators(num_validators as usize)
         .with_consensus_handler(Arc::new(consensus_handler))
         .with_mutual_auth_mode(mutual_auth_mode)
-        .with_p2p_metrics(node_metrics.p2p_arc());
+        .with_p2p_metrics(node_metrics.p2p_arc())
+        // Run 370: share the same `Arc<NodeMetrics>` the live `/metrics` HTTP
+        // endpoint scrapes with the deployed inbound per-peer message-rate
+        // limiter, so a per-peer message-rate drop on the deployed `TcpKemTls`
+        // receive path (Run 369 wiring) bumps the exported
+        // `qbind_net_per_peer_drops_total{reason="rate_limit"}` counter. This is
+        // a shared `Arc` clone only; it never touches the connection-rate
+        // limiter or changes defaults.
+        .with_node_metrics(Arc::clone(&node_metrics));
 
     // Run 037 (C4 piece (c)): production-honest PQC KEMTLS root-key
     // distribution. Default mode is `test-grade-dummy-sig` (preserves

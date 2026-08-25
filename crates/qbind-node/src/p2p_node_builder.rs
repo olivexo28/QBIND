@@ -62,7 +62,7 @@ use crate::async_peer_manager::{AsyncPeerManagerConfig, AsyncPeerManagerImpl};
 use crate::consensus_net_p2p::{P2pConsensusNetwork, SimpleValidatorNodeMapping};
 use crate::identity_map::PeerValidatorMap;
 use crate::peer_rate_limiter::PeerRateLimiterConfig;
-use crate::metrics::P2pMetrics;
+use crate::metrics::{NodeMetrics, P2pMetrics};
 use crate::node_config::NodeConfig;
 use crate::p2p::{NodeId, P2pService};
 use crate::p2p_inbound::{
@@ -687,6 +687,24 @@ pub struct P2pNodeBuilder {
     /// `None`, `build()` falls back to creating a fresh local instance
     /// (preserving pre-Run-043 behaviour for builder-only tests).
     p2p_metrics: Option<Arc<P2pMetrics>>,
+    /// Run 370: optional caller-supplied `NodeMetrics` Arc.
+    ///
+    /// When set, `start()` installs this handle into the deployed inbound
+    /// per-peer message-rate limiter ([`DeployedInboundPerPeerLimiter`]) so a
+    /// per-peer message-rate drop on the deployed `TcpKemTls` receive path bumps
+    /// the existing `qbind_net_per_peer_drops_total{reason="rate_limit"}`
+    /// counter served from `NodeMetrics::format_metrics`. Run 369 could only
+    /// install the adapter with `metrics = None` (the builder held a
+    /// `P2pMetrics`, not the `NodeMetrics` that owns the per-peer counter), so
+    /// live `/metrics` could not export per-peer drops even though the adapter's
+    /// own bounded counter recorded them. `qbind-node`'s `main.rs` now wires
+    /// this via `with_node_metrics(node_metrics.clone())`, sharing exactly the
+    /// same `NodeMetrics` instance the live `/metrics` HTTP endpoint scrapes.
+    ///
+    /// When `None` (all builder-only tests and any caller that does not opt in),
+    /// the adapter is installed with `metrics = None` exactly as in Run 369,
+    /// preserving prior behaviour bit-for-bit.
+    node_metrics: Option<Arc<NodeMetrics>>,
     /// Run 052: optional revoked leaf-cert fingerprint set, derived
     /// from the loaded trust bundle's currently-active
     /// `revocations[i].leaf_cert_fingerprint` entries. Default is
@@ -765,6 +783,13 @@ impl P2pNodeBuilder {
             // `qbind_p2p_pqc_*` counters surfaced on the live
             // `/metrics` endpoint reflect real cert-verify activity.
             p2p_metrics: None,
+            // Run 370: node metrics handle defaults to None — the deployed
+            // inbound per-peer limiter is installed with `metrics = None`
+            // exactly as in Run 369, preserving prior behaviour bit-for-bit for
+            // all builder-only tests. The live binary wires this via
+            // `with_node_metrics(node_metrics.clone())` so live `/metrics` can
+            // export `qbind_net_per_peer_drops_total{reason="rate_limit"}`.
+            node_metrics: None,
             // Run 052: leaf-cert revocations default to none so that
             // pre-Run-052 builders behave bit-for-bit identically.
             // The live binary wires this from the loaded trust bundle.
@@ -872,6 +897,27 @@ impl P2pNodeBuilder {
     /// this via `with_p2p_metrics(node_metrics.p2p_arc())`.
     pub fn with_p2p_metrics(mut self, metrics: Arc<P2pMetrics>) -> Self {
         self.p2p_metrics = Some(metrics);
+        self
+    }
+
+    /// Run 370: install a caller-supplied `Arc<NodeMetrics>` so the deployed
+    /// inbound per-peer message-rate limiter
+    /// ([`DeployedInboundPerPeerLimiter`]) can bump the existing
+    /// `qbind_net_per_peer_drops_total{reason="rate_limit"}` counter served from
+    /// `NodeMetrics::format_metrics`.
+    ///
+    /// Without this, `start()` installs the adapter with `metrics = None`
+    /// exactly as in Run 369 (the adapter's own bounded per-peer drop counter
+    /// still records drops, but the exported `/metrics` counter never moves),
+    /// preserving pre-Run-370 behaviour for builder-only tests. `qbind-node`'s
+    /// `main.rs` wires this via `with_node_metrics(node_metrics.clone())`,
+    /// sharing exactly the same `NodeMetrics` instance the live `/metrics`
+    /// endpoint scrapes so a per-peer message-rate drop on the deployed
+    /// `TcpKemTls` receive path is observable over live `/metrics`. This never
+    /// touches the connection-rate limiter or its
+    /// `qbind_p2p_connection_rate_drop_total` metric.
+    pub fn with_node_metrics(mut self, metrics: Arc<NodeMetrics>) -> Self {
+        self.node_metrics = Some(metrics);
         self
     }
 
@@ -1013,6 +1059,30 @@ impl P2pNodeBuilder {
     /// valid override it is built with `PeerRateLimiter::new(cfg)`.
     pub fn build_deployed_peer_manager(&self) -> AsyncPeerManagerImpl {
         AsyncPeerManagerImpl::new(self.deployed_async_peer_manager_config())
+    }
+
+    /// Run 370: construct the deployed inbound per-peer message-rate limiter
+    /// adapter exactly the way [`Self::start`] installs it on the live
+    /// `TcpKemTls` transport.
+    ///
+    /// The adapter carries the CLI-derived per-peer thresholds
+    /// ([`Self::deployed_peer_rate_limiter_config`]) — `None` → the documented
+    /// `1000` msg/s + `100` burst default, `Some(cfg)` → the validated hidden
+    /// override — and the optional live `NodeMetrics` handle installed via
+    /// [`Self::with_node_metrics`]. When no handle is installed the adapter's
+    /// shared per-peer metric handle is `None` (Run 369 posture, preserved
+    /// bit-for-bit); when installed, a per-peer message-rate drop bumps the
+    /// exported `qbind_net_per_peer_drops_total{reason="rate_limit"}` counter.
+    ///
+    /// This is the single source-of-truth seam consumed by both `start()` and
+    /// the Run 370 source tests, so the tested construction matches deployment.
+    pub fn build_deployed_inbound_per_peer_limiter(
+        &self,
+    ) -> crate::deployed_inbound_per_peer_limiter::DeployedInboundPerPeerLimiter {
+        crate::deployed_inbound_per_peer_limiter::DeployedInboundPerPeerLimiter::from_optional_config(
+            self.deployed_peer_rate_limiter_config(),
+            self.node_metrics.clone(),
+        )
     }
 
     /// Build the P2P node context.
@@ -1358,6 +1428,7 @@ impl P2pNodeBuilder {
         // the deployed peer-manager construction path consumes.
         let deployed_peer_rate_limiter_config = self.deployed_peer_rate_limiter_config();
 
+
         // Run 362: compute the shared `Arc<P2pMetrics>` up front (moved above
         // `start()`) so the runtime-owned abuse/DoS connection-rate limiter can
         // be installed BEFORE the accept loop begins and can bump
@@ -1401,19 +1472,19 @@ impl P2pNodeBuilder {
         // traffic unaffected. This wiring is independent of the Run 362
         // connection-rate limiter and never touches its metric.
         //
-        // The builder only carries a `P2pMetrics` handle here (not a
-        // `NodeMetrics`), so the adapter's shared per-peer metric handle is
-        // `None`; the adapter's own bounded per-peer drop counter still
-        // records drops. Threading `NodeMetrics` into the transport for the
-        // `qbind_net_per_peer_drops_total` scrape is deferred (see Run 369
-        // evidence "honest limitations").
+        // The builder carries a `P2pMetrics` handle here (not a `NodeMetrics`),
+        // so Run 369 could only install the adapter with `metrics = None`; the
+        // adapter's own bounded per-peer drop counter still records drops, but
+        // the exported `qbind_net_per_peer_drops_total{reason="rate_limit"}`
+        // counter never moved. Run 370 threads the optional live `NodeMetrics`
+        // handle (installed by `main.rs` via `with_node_metrics`) into the
+        // adapter so a per-peer message-rate drop on the deployed receive path
+        // is observable over live `/metrics`. When no handle is installed
+        // (`None`, all builder-only tests) the Run 369 posture is preserved
+        // bit-for-bit. This wiring is independent of the Run 362 connection-rate
+        // limiter and never touches its metric.
         {
-            let inbound_limiter = Arc::new(
-                crate::deployed_inbound_per_peer_limiter::DeployedInboundPerPeerLimiter::from_optional_config(
-                    deployed_peer_rate_limiter_config,
-                    None,
-                ),
-            );
+            let inbound_limiter = Arc::new(self.build_deployed_inbound_per_peer_limiter());
             p2p_service.set_inbound_per_peer_limiter(inbound_limiter);
         }
 
