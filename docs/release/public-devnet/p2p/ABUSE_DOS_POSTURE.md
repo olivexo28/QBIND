@@ -358,7 +358,32 @@ admission / trust-bundle / KEMTLS weakening; the connection-rate limiter and
 `qbind_p2p_connection_rate_drop_total` metric are untouched. M4 remains Yellow/launch-blocking; public
 DevNet remains **NOT launch-ready**; Full **C4 / C5 remain OPEN**.
 
-## 8. Future work required before TestNet
+## 7j. Run 370 deployed per-peer exported-metric threading + release-binary live-socket evidence (Route B)
+
+Run 370 closes the Run 369 "honest limitation" that the deployed adapter was installed with
+`metrics = None`, and adds release-binary live-socket evidence.
+
+- **Source (narrow, default-preserving):** `crates/qbind-node/src/p2p_node_builder.rs` gains an optional
+  `node_metrics: Option<Arc<NodeMetrics>>` field, a `with_node_metrics(..)` method, and a shared
+  `build_deployed_inbound_per_peer_limiter()` seam used by both `start()` and the source tests.
+  `crates/qbind-node/src/main.rs` wires `.with_node_metrics(Arc::clone(&node_metrics))` — the SAME
+  `NodeMetrics` the live `/metrics` endpoint scrapes — so a per-peer drop on the deployed `read_loop`
+  bumps the exported `qbind_net_per_peer_drops_total{reason="rate_limit"}` counter. With no handle the
+  adapter keeps `metrics = None` (Run 369 posture, bit-for-bit).
+- **Release evidence:** `scripts/devnet/run_370_public_devnet_abuse_dos_m12_deployed_live_socket_release_binary.sh`
+  proves on real `target/release/qbind-node`: connection-rate control live-socket (10 inbound TCP
+  connections, max 3 → 3 accepted / 7 refused, live `qbind_p2p_connection_rate_drop_total = 7`), default
+  no-flag posture, invalid/unbounded/MainNet fail-closed, hidden CLI surface preserved; the Run 370 helper
+  (10/10) drives the exact deployed adapter object and shows the exported per-peer counter incrementing on
+  over-budget drops, independent of the connection-rate metric.
+- Tests: `crates/qbind-node/tests/run_370_public_devnet_deployed_live_socket_m12_tests.rs` (20).
+
+**M12 stays Yellow/Partial (strengthened) and does NOT move Green.** The residual blocker is a
+KEMTLS-admitted deployed per-peer socket flood observed on live `/metrics`; the deployed per-peer evidence
+here is the deployed adapter object exercised in the release helper, not a fully live KEMTLS socket flood.
+Defaults preserved; no new public CLI flags; no wire-format / admission / trust-bundle / KEMTLS weakening;
+M4 remains Yellow/launch-blocking; public DevNet remains **NOT launch-ready**; Full **C4 / C5 remain OPEN**.
+
 
 Before a public TestNet, at minimum:
 
@@ -371,14 +396,17 @@ Before a public TestNet, at minimum:
   connection-rate control live-socket on a running P2P-capable node; Run 368 proves the per-peer
   message-rate control over a real admitted-peer socket at the `AsyncPeerManagerImpl` layer; Run 369
   wires the per-peer `PeerRateLimiter` onto the **deployed** TcpKemTls receive path at source/test level
-  — release-binary live-socket evidence over that deployed path remains outstanding.)**
+  — release-binary live-socket evidence over that deployed path remains outstanding.)** **(Run 370 threads
+  a live `NodeMetrics` handle into the deployed adapter (Route B) so the deployed per-peer drop exports
+  `qbind_net_per_peer_drops_total{reason="rate_limit"}`, and adds release-binary live-socket connection-rate
+  evidence; the fully-live KEMTLS-admitted deployed per-peer socket flood remains outstanding.)**
 - Register and test the planned `qbind_p2p_connection_rate_drop_total` metric at the runtime call site.
   **(Done in Run 362; release-binary verified in Run 364; live-socket increment on a running node verified
   in Run 367.)**
 - Publish tuned thresholds validated under real inbound load, with alerting wired to the metrics in
   §5. **(Load validation still outstanding.)**
 
-None of this is claimed complete by Run 360/361/362/363/364/365/366/367/368/369; Run 360 publishes posture, Run 361 adds a
+None of this is claimed complete by Run 360/361/362/363/364/365/366/367/368/369/370; Run 360 publishes posture, Run 361 adds a
 source/test boundary, Run 362 wires the connection-rate limiter into runtime with release-binary
 evidence, Run 363 wires the per-peer message-rate runtime override at source/test level, Run 364 lands
 release-binary evidence for both controls, Run 365 threads the per-peer override through the deployed
@@ -387,5 +415,8 @@ Run 367 proves the connection-rate control live-socket on a running P2P-capable 
 Run 368 proves the per-peer message-rate control over a real admitted-peer socket at the
 `AsyncPeerManagerImpl` layer, Run 369 wires the per-peer `PeerRateLimiter` onto the deployed TcpKemTls
 receive path at source/test level,
-and all record the remaining gap (per-peer message-rate **live-socket** evidence over the deployed
-receive path + load validation).
+Run 370 threads a live `NodeMetrics` handle into the deployed adapter (Route B) so the deployed per-peer
+drop exports `qbind_net_per_peer_drops_total{reason="rate_limit"}` and adds release-binary live-socket
+connection-rate evidence,
+and all record the remaining gap (per-peer message-rate **live-socket** evidence via a KEMTLS-admitted
+deployed socket flood + load validation).

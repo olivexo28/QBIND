@@ -1,0 +1,79 @@
+Run 370 — public DevNet abuse/DoS M12 deployed live-socket release-binary evidence
+==================================================================================
+
+Decision gate: Route B (narrow, default-preserving source change to thread a live
+NodeMetrics handle into the deployed DeployedInboundPerPeerLimiter so live /metrics
+can export qbind_net_per_peer_drops_total).
+
+Verdict: PARTIAL-POSITIVE — M12 stays Yellow/Partial (strengthened); does NOT move Green.
+
+Toolchain (as-run):
+  rustc 1.97.1 (8bab26f4f 2026-07-14)
+  cargo 1.97.1 (c980f4866 2026-06-30)
+
+Release artifacts (hashes reproducible per build environment; recorded from one
+representative run — the harness re-captures live values each run):
+  target/release/qbind-node
+    sha256:   e28775a2c44d02466b3c86dfff5e5641d93d983bde89e6d0f4701cc257131669
+    build_id: 05e9e0b9b78599fe1c4d5f6bd1fd8786f3a4b9ec
+  target/release/examples/run_370_public_devnet_abuse_dos_m12_deployed_live_socket_helper
+    sha256:   5325781bbeca8b995a0f1183ab8b329b0e204147487f052746f476d65569ad8a
+    build_id: 3e68662c0743f653d89a764e9a0e418c8b4cebb3
+
+Release helper: PASS (10/10 scenarios)
+  01_default_preserves_behavior
+  02_hidden_cli_surface_checked
+  03_invalid_configs_fail_closed
+  04_mainnet_refused
+  05_connection_rate_live_socket_under_budget
+  06_connection_rate_live_socket_over_budget
+  07_per_peer_deployed_live_socket_under_budget
+  08_per_peer_deployed_live_socket_over_budget
+  09_combined_limiter_independence
+  10_metrics_export_live
+
+CLI surface (release binary):
+  help_hidden_flags_absent: true (all Run 362/363 abuse/DoS flags hidden from --help)
+  invented_flag_rejected: true (rc=2)
+  real_hidden_flags_parse: true (rc=0)
+
+Fail-closed at startup (release binary exits non-zero):
+  invalid_zero_per_peer_max_fails_closed: true (rc=1)
+  unbounded_per_peer_max_fails_closed: true (rc=1)
+  invalid_zero_connection_rate_fails_closed: true (rc=1)
+  mainnet_abuse_dos_refused: true (rc=1)
+
+LIVE SOCKET — connection-rate control (real target/release/qbind-node,
+--network-mode p2p --enable-p2p --p2p-listen-addr 127.0.0.1:<port>):
+  p2p_mode_discovery: 'P2P transport up' CONFIRMED (real socket bound)
+  default_preserves_behavior: connection limiter DISABLED; qbind_p2p_connection_rate_drop_total=0; per-peer defaults 1000/100
+  connection_rate_live_socket_under_budget: 3 inbound TCP connections admitted; drop metric 0
+  connection_rate_live_socket_over_budget: 10 inbound TCP connections -> 3 accepted / 7 refused; qbind_p2p_connection_rate_drop_total=7
+  combined_limiter_independence_live: connection-rate flood left qbind_net_per_peer_drops_total ABSENT (controls independent)
+
+DEPLOYED per-peer message-rate exported metric (Route B, via release helper —
+the exact DeployedInboundPerPeerLimiter object start() installs on
+TcpKemTlsP2pService::read_loop, now carrying the live NodeMetrics handle):
+  conn_metric_registered_once: true; conn_endpoint_label_leak: false
+  per_peer_family_present: true
+  per_peer_rendered_line: qbind_net_per_peer_drops_total{peer="21",reason="rate_limit"} 5
+  scenario 08 over-budget: adapter counter == exported qbind_net_per_peer_drops_total == 20
+
+Honest limitation / residual blocker:
+  The KEMTLS-admitted deployed per-peer socket flood (a second peer completing the
+  mutual-auth handshake and flooding over-budget frames over the deployed read loop,
+  observed on live /metrics) is NOT driven in this run. Deployed per-peer evidence is
+  the deployed adapter object exercised synchronously in the release helper (with the
+  Run 370 NodeMetrics threading proving the exported counter path), not a fully live
+  KEMTLS socket flood. Therefore M12 stays Yellow/Partial (strengthened) and does NOT
+  move Green.
+
+Non-mutation / scope:
+  No public DevNet launch; no seed/bootnode/faucet/RPC/explorer/status page; no P2P
+  wire-format change; no peer-admission/KEMTLS/trust-bundle weakening; no
+  LivePqcTrustState/validator-set/epoch/sequence/marker mutation; no new public CLI
+  flags; hidden abuse/DoS flags remain hidden. All addresses loopback (127.0.0.1) /
+  RFC 5737; temporary data dirs; no secrets committed.
+
+Reproduce:
+  bash scripts/devnet/run_370_public_devnet_abuse_dos_m12_deployed_live_socket_release_binary.sh

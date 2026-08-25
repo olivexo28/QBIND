@@ -111,6 +111,31 @@ does NOT move Green:** this is a source/test run; release-binary live-socket dep
 (both connection-rate and per-peer message-rate over the deployed TcpKemTls receive path) is deferred to
 Run 370. Defaults preserved; no new public CLI flags; M4 remains Yellow/launch-blocking; public DevNet
 remains NOT launch-ready.
+updated Run 370 — M12 stays **Yellow/Partial** but is further **strengthened — deployed per-peer drop
+metric wired end-to-end (Route B) + release-binary live-socket evidence**, and **does NOT move Green**.
+Run 370 closes the Run 369 "honest limitation" that the deployed `DeployedInboundPerPeerLimiter` was
+installed with `metrics = None` (the builder held a `P2pMetrics`, not the `NodeMetrics` that owns the
+per-peer counter): a narrow, default-preserving source change threads an optional live `NodeMetrics`
+handle through `P2pNodeBuilder::with_node_metrics` and the shared
+`build_deployed_inbound_per_peer_limiter()` seam that `start()` uses, wired in `main.rs` with the SAME
+`Arc<NodeMetrics>` the live `/metrics` endpoint scrapes, so a per-peer message-rate drop on the deployed
+`TcpKemTls` read loop now bumps the exported `qbind_net_per_peer_drops_total{reason="rate_limit"}` counter
+(`crates/qbind-node/tests/run_370_public_devnet_deployed_live_socket_m12_tests.rs`, 20/20). The Run 370
+release harness proves on real `target/release/qbind-node`: the **connection-rate** control live-socket
+(10 inbound TCP connections, max 3 → 3 accepted / 7 refused, live `qbind_p2p_connection_rate_drop_total = 7`),
+default no-flag posture (connection limiter disabled, per-peer `1000/100`), invalid/unbounded/MainNet
+configs fail the binary closed, hidden CLI surface preserved; and the Run 370 release helper (10/10) drives
+the exact deployed adapter object `start()` installs on the read loop and shows the exported per-peer
+counter incrementing on over-budget drops with the two controls independent
+(`crates/qbind-node/examples/run_370_public_devnet_abuse_dos_m12_deployed_live_socket_helper.rs`,
+`scripts/devnet/run_370_public_devnet_abuse_dos_m12_deployed_live_socket_release_binary.sh`,
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_370.md`). **Decision gate = Route B.** **M12 does NOT move Green:**
+the residual blocker is a **KEMTLS-admitted deployed per-peer socket flood** — driving over-budget frames
+over a real second-peer KEMTLS handshake through the deployed read loop and observing the exported metric
+on live `/metrics` — which this run does not stand up; the deployed per-peer evidence is the deployed
+adapter object exercised in the release helper, not a fully live KEMTLS socket flood. Defaults preserved;
+no new public CLI flags; no admission/trust/wire-format change; M4 remains Yellow/launch-blocking; public
+DevNet remains NOT launch-ready.
 **Track:** Public network release-readiness. This is a **separate track** from the internal
 authority-lifecycle boundary track (Run 130–354) and from C4/C5 closure.
 **Scope of this document:** source/docs/test-only audit and gap matrix. It introduces public DevNet
