@@ -384,6 +384,31 @@ here is the deployed adapter object exercised in the release helper, not a fully
 Defaults preserved; no new public CLI flags; no wire-format / admission / trust-bundle / KEMTLS weakening;
 M4 remains Yellow/launch-blocking; public DevNet remains **NOT launch-ready**; Full **C4 / C5 remain OPEN**.
 
+## 7k. Run 371 KEMTLS-admitted deployed per-peer live-socket flood — M12 Green (Route A)
+
+Run 371 closes the Run 370 residual blocker using **only production public APIs (no source change)**.
+
+- **Driver:** the Run 371 helper in `dial-flood` mode (built from `P2pNodeBuilder`) acts as a **second
+  KEMTLS-admitted peer**, completes a **real KEMTLS mutual-auth handshake over a real loopback socket**
+  against a separate running `target/release/qbind-node`, then floods structured `P2pMessage::Consensus`
+  frames (discriminator `0`, so they reach the deployed per-peer limiter after `decode_frame`).
+- **Live-socket evidence on real `target/release/qbind-node`:** under-budget frames → **0 per-peer drops**
+  (`qbind_net_per_peer_drops_total{reason="rate_limit"}` ABSENT); over-budget frames → live `/metrics`
+  exposes that counter incrementing (~47 of 60 in a representative run) with the connection kept up (no
+  teardown). The Run 367/370 connection-rate live-socket proof is preserved and independent
+  (`qbind_p2p_connection_rate_drop_total = 7`; the per-peer flood leaves it at 0). Invalid/unbounded/MainNet
+  configs still fail the binary closed; hidden CLI surface preserved; helper scenario suite 10/10.
+- Artifacts: `crates/qbind-node/examples/run_371_public_devnet_m12_kemtls_per_peer_live_socket_flood_helper.rs`,
+  `scripts/devnet/run_371_public_devnet_m12_kemtls_per_peer_live_socket_flood_release_binary.sh`,
+  `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_371.md`.
+
+**M12 moves Green for the abuse/DoS deployed live-socket controls** (connection-rate + KEMTLS-admitted
+deployed per-peer message-rate, both proven over real sockets on the release binary). Green is scoped to
+these two controls; the flood runs over loopback with default deterministic test-grade KEM keypairs and
+default (Disabled) mutual-auth admission. No production source change; no wire-format / admission /
+trust-bundle / KEMTLS weakening; defaults preserved; M4 remains Yellow/launch-blocking; public DevNet
+remains **NOT launch-ready**; Full **C4 / C5 remain OPEN**.
+
 
 Before a public TestNet, at minimum:
 
@@ -419,4 +444,6 @@ Run 370 threads a live `NodeMetrics` handle into the deployed adapter (Route B) 
 drop exports `qbind_net_per_peer_drops_total{reason="rate_limit"}` and adds release-binary live-socket
 connection-rate evidence,
 and all record the remaining gap (per-peer message-rate **live-socket** evidence via a KEMTLS-admitted
-deployed socket flood + load validation).
+deployed socket flood + load validation). **Run 371 closes the KEMTLS-admitted deployed per-peer
+live-socket flood gap (Route A, M12 Green for both abuse/DoS deployed live-socket controls); sustained
+multi-peer load validation under production-grade keys/strict admission remains outstanding.**
