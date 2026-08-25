@@ -1,0 +1,109 @@
+=== Run 367 release-binary live-socket evidence (tracked summary) ===
+
+Verdict: Partial-positive (strengthened). Release-binary LIVE-SOCKET evidence
+that the accept-loop CONNECTION-RATE control (Run 362) is honored end-to-end by
+a running P2P-capable target/release/qbind-node over real inbound loopback TCP
+sockets. NOT a public DevNet launch and NOT a Green M12 / TestNet / MainNet
+readiness claim. M12 stays Yellow/Partial (strengthened) because the per-peer
+MESSAGE-rate live-admitted-peer path is not driven — see the M12 disposition
+below and docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_367.md.
+
+Decision gate: Conclusion A — the existing release binary supports a bounded
+P2P-capable loopback mode (--network-mode p2p --enable-p2p --p2p-listen-addr
+127.0.0.1:<port>). No production/library source change; no new CLI flag.
+
+Provenance
+----------
+branch:          copilot/run-367-task
+base_git_commit: 901bc843910e1f33821af3f4b2e0e3e1fd13a637 (helper + harness + docs
+                 land on this branch)
+toolchain:       rustc 1.97.1 (8bab26f4f 2026-07-14)
+cargo:           cargo 1.97.1 (c980f4866 2026-06-30)
+node_bin:        target/release/qbind-node
+node_bin_sha256: 1c4e546f3a766c006d2bd9601a3a404e9983c0e32d52fd8691b367ded667e381
+node_build_id:   147246663749c27398299ae69a57140bf7d2b2f1
+helper_bin:      target/release/examples/run_367_public_devnet_abuse_dos_live_socket_helper
+helper_sha256:   1063424eaa146354fa010b42c922e4c0761e4b7d0e8b621a1b8ab0c5eda814f3
+helper_build_id: e367620b31701570b938d7a053314f3e1ad3fadf
+
+NOTE: SHA-256 / Build ID values are environment-specific (they depend on the
+exact toolchain, absolute build path, and dependency versions) and are recorded
+here only as reproducibility anchors for this build. Re-running the harness in a
+different environment (or after any rebuild) will legitimately produce different
+hashes; the harness re-captures them each run.
+
+Release-built helper (real Run 361/362/363/365 runtime symbols; in-process proof
+that backs the live-socket scenarios)
+--------------------------------------------------------------------------------
+scenarios_total:  8
+scenarios_passed: 8
+verdict:          PASS
+
+  01_default_preserves_behavior                deployed builder derives None; conn limiter disabled; per-peer 1000/100; drop metric 0
+  02_connection_rate_admit_refuse              4 admitted; over-budget ConnectionRateLimited; no admit on refusal; metric increments per refusal
+  03_per_peer_message_rate_deployed            deployed builder installs 5/0; deployed pm honors it; 5 allowed; 6th dropped; conn metric 0
+  04_combined_independence                     conn refusal doesn't admit; msg drop on admitted deployed path; counters distinct
+  05_invalid_configs_fail_closed               zero-window/zero-msg/zero-conn/unbounded/inconsistent all rejected
+  06_mainnet_refused                           MainNet abuse/DoS config refused (direct + CLI)
+  07_cli_surface_hidden_and_parse_checked      hidden flags absent from --help; real parse; invented rejected
+  08_deployed_builder_matches_direct_default   deployed default == direct default (no drift)
+
+metric_name:      qbind_p2p_connection_rate_drop_total
+registered_once:  true
+endpoint_label_leak: false
+rendered_line:    qbind_p2p_connection_rate_drop_total 1
+
+Production binary CLI surface
+-----------------------------
+help_hidden_flags_absent:  true   (all Run 362/363 abuse/DoS flags are hidden/devnet-only)
+invented_flag_rejected:    true   (rc=2; clap rejects --p2p-connection-rate-bogus)
+real_hidden_flags_parse:   true   (rc=0; the real hidden flags parse, incl. per-peer + connection-rate)
+invalid_config_fail_closed: proven via release helper scenario 05 (production fn CliArgs::abuse_dos_runtime_config)
+mainnet_abuse_dos_refused:  proven via release helper scenario 06 (production fn CliArgs::abuse_dos_runtime_config)
+
+LIVE-SOCKET evidence (running P2P-capable target/release/qbind-node)
+--------------------------------------------------------------------
+p2p_mode_discovery:            P2P-capable loopback mode CONFIRMED — real socket bound; "P2P transport up"
+default_preserves_behavior:    no-flag P2P node → connection limiter DISABLED; qbind_p2p_connection_rate_drop_total=0
+connection_rate_under_budget:  3 inbound TCP connections admitted; drop metric still 0
+connection_rate_over_budget:   10 inbound TCP connections → 3 accepted / 7 refused; qbind_p2p_connection_rate_drop_total=7
+connection_rate_metric_on_allowed: metric stayed 0 across the first 3 allowed connections
+per_peer_message_rate_live_socket: NOT driven — requires a second admitted KEMTLS peer flood harness
+                               (proven via DEPLOYED builder path in Run 367 helper scenarios 03/04; recorded blocker)
+
+Required tests (exact counts)
+-----------------------------
+cargo build -p qbind-node --release                                             OK
+cargo build -p qbind-node --release --example run_367_...live_socket_helper     OK
+run_367 harness                                                                 PARTIAL-POSITIVE (live connection-rate socket proven)
+cargo test -p qbind-node --test run_365_...threading_tests   20 passed; 0 failed
+cargo test -p qbind-node --test run_363_...runtime_tests     21 passed; 0 failed
+cargo test -p qbind-node --test run_362_...runtime_tests     38 passed; 0 failed
+cargo test -p qbind-node --test run_361_...hardening_tests   30 passed; 0 failed
+cargo test -p qbind-node --lib                             1385 passed; 0 failed
+
+M12 disposition
+---------------
+M12 stays Yellow/Partial (strengthened). The connection-rate limiter is now
+proven LIVE-SOCKET on the real release binary: a running P2P-capable qbind-node
+admits under-budget inbound TCP connections and refuses over-budget ones,
+incrementing qbind_p2p_connection_rate_drop_total on the live /metrics endpoint.
+The per-peer message-rate override reaches the DEPLOYED P2pNodeBuilder live
+AsyncPeerManagerImpl construction path (Run 365 threading), release-binary
+proven via the helper's deployed-builder scenarios — but it is NOT driven over
+an admitted live peer socket (that needs a second KEMTLS peer flood harness).
+Per the readiness rules (BOTH controls must be proven over a live socket), M12
+does not move Green.
+
+Scope / non-claims
+------------------
+Run 367 does NOT launch a public DevNet, deploy a seed / bootnode / faucet /
+RPC / explorer / status page, open a default-open public port, change any P2P
+wire format, weaken peer admission or trust-bundle behavior, wire authority
+lifecycle, or mutate validator set / epoch state. Default behavior is preserved
+bit-for-bit (connection limiter disabled by default; per-peer 1000/100). M4
+remains Yellow/launch-blocking; M6 remains Yellow; C4 and C5 remain OPEN.
+
+Reproduce
+---------
+scripts/devnet/run_367_public_devnet_abuse_dos_live_socket_release_binary.sh <OUT_DIR>
