@@ -228,13 +228,17 @@ Public DevNet remains **NOT launch-ready**. Outstanding (non-exhaustive; see
   ```bash
   qbind-node identity generate devnet full-node "$OUT/node"
   qbind-node identity verify "$OUT/node/leaf.cert.bin"
+  qbind-node identity register-check "$OUT/node/public-identity.json" \
+      --seed-list docs/release/public-devnet/network/devnet-seeds.placeholder.json \
+      --role full-node --cert "$OUT/node/leaf.cert.bin"
   ```
 
   See the identity package `docs/release/public-devnet/identity/`
   (`IDENTITY_GENERATION.md` / `IDENTITY_VERIFY.md`). The stable, documented,
-  release-binary-evidenced generation + verification command now exists, but
-  there is still **no live registration path** into a running public DevNet
-  (M4-gated) — so M6 as a whole stays Yellow / Partial.
+  release-binary-evidenced generation + verification + **registration /
+  admission-check** (Run 376, non-mutating) workflow now exists, but there is
+  still **no live registration path** into a running public DevNet (M4-gated) —
+  so M6 as a whole stays Yellow / Partial.
 - External reachability, status page, alerting, and a seed-node runbook: still outstanding.
 - Other must-haves (M6–M15) remain unresolved (Yellow/Red).
 

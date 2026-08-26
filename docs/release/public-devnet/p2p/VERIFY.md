@@ -13,6 +13,12 @@ commands; none deploy infrastructure, none open a public port, and none claim la
 > pre-existing strict mutual-auth flags still appear in `qbind-node --help` and that the `identity`
 > subcommand is a local generation/verification utility only (`qbind-node identity --help`).
 
+> **Run 376 note.** The `qbind-node identity register-check` admission verifier (Run 376) likewise
+> adds no P2P wire-format change and no peer-admission change. It is an **offline** schema +
+> deterministic-NodeId check that opens no socket and mutates no state; confirm via
+> `qbind-node identity register-check --help` and by re-running
+> `scripts/devnet/run_376_public_devnet_identity_registration.sh` (which never binds a port).
+
 ## 1. Scope
 
 - Run 360 published the P2P port / peer-admission / abuse-DoS posture (docs-only, CLI-validated).

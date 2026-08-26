@@ -15,6 +15,14 @@ validated to appear in `qbind-node --help` (see `VERIFY.md`).
 > admitted by exactly the same pre-existing strict mutual-auth path described here (which only
 > **tightens** admission). No peer-admission weakening.
 
+> **Run 376 note.** The non-mutating `qbind-node identity register-check` admission verifier (Run 376)
+> validates whether a public identity would be an admissible *seed-list* entry — an **offline**,
+> schema + deterministic-NodeId check. It **does not** change or bypass the runtime peer-admission
+> path: it opens no socket, admits no peer, and mutates no trust/validator/epoch/sequence/marker
+> state. A `register-check` "admissible" verdict is a documentation/registration convenience only;
+> live admission is still performed exclusively by the strict KEMTLS handshake path below. No
+> peer-admission weakening. See `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_376.md`.
+
 ## 1. How a peer is admitted on public DevNet
 
 Admission uses the **existing** KEMTLS handshake path. On an open public DevNet port, the intended

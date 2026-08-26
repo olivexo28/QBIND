@@ -1,0 +1,15 @@
+release_binary=OK sha256=ae1e699b0d6f1cbafb2913719e111877c8b90a67c0bbfac09fb23afe8acbfa96
+build_id=8d34c1b1c5c5f8209060a2a63a939d45c7f9667e
+toolchain=rustc 1.97.1 (8bab26f4f 2026-07-14) / cargo 1.97.1 (c980f4866 2026-06-30)
+generate_all_roles=OK (kem_sk 0600; no root signing key on disk)
+seed_candidate=OK (status=planned; no reachability claim)
+register_check_accept=OK (full-node, seed, validator-candidate; cert-verified; planned; no live/M4/C4/C5 claim)
+seed_list_schema_validation=OK (candidate inserted; status=planned, no reachability)
+live_without_reachability=REFUSED (fail closed; no live/M4 claim)
+planned_with_reachability=REFUSED (fail closed; schema forbids reachability on non-live)
+embedded_private_material=REFUSED (fail closed)
+mismatched_cert=REFUSED (fail closed; deterministic NodeId re-derivation)
+mainnet_testnet_material=REFUSED (fail closed; DevNet-only)
+committed_private_material=NONE (material dir is temporary; removed on exit)
+
+RESULT=PASS (non-mutating identity register-check admission verifier proven; DevNet-only; no live deployment; no M4 Green; C4/C5 OPEN)
