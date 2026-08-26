@@ -1,0 +1,34 @@
+{
+  "schema_version": "1.0.0",
+  "network_name": "QBIND Public DevNet (experimental)",
+  "environment": "devnet",
+  "runtime_chain_id": "0x51424E4444455600",
+  "genesis_hash": "0x48b3a862befe50e31bad5e1e11ba1ad282dc65723b1989e9ce2091b4af18145f",
+  "genesis_file_sha256": "d1db07febcf76267f9d3e277a0ff99d06bbe5dffd59d0607799521562ec5c86c",
+  "safety_label": {
+    "experimental": true,
+    "resettable": true,
+    "no_value": true,
+    "no_mainnet_readiness_claim": true,
+    "no_c4_c5_closure_claim": true
+  },
+  "placeholder_statement": "This is a Run 377 PREFLIGHT live-seed CANDIDATE document (Route B / Partial-positive). It contains NO live seeds and NO externally reachable infrastructure. Its single entry uses status 'planned' with a non-routable RFC 5737 (TEST-NET-3) documentation host, because external reachability from OUTSIDE the seed operator's own host/NAT was NOT proven in Run 377 (only loopback / same-host reachability was demonstrated). Public DevNet is NOT launch-ready. M4 (seed/bootnodes) remains a public DevNet launch blocker until external reachability evidence for a real, externally reachable seed node lands and this entry is promoted to status 'live' with a non-null last_reachability_evidence reference. See docs/release/public-devnet/network/reachability/RUN_377_qbind-devnet-seed-1.md and docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_377.md.",
+  "seed_nodes": [
+    {
+      "node_id": "4111c4be4715f26d8cf6f9d3764f2ff7779bd431036ece77d28f47567945f688",
+      "peer_id": "4111c4be4715f26d8cf6f9d3764f2ff7779bd431036ece77d28f47567945f688",
+      "validator_address": null,
+      "p2p_host": "203.0.113.10",
+      "p2p_port": 30333,
+      "p2p_multiaddr": "203.0.113.10:30333",
+      "transport_security_mode": "kemtls-mutual-auth-required",
+      "pqc_suite": "ml-dsa-44",
+      "trust_bundle_required": true,
+      "expected_genesis_hash": "0x48b3a862befe50e31bad5e1e11ba1ad282dc65723b1989e9ce2091b4af18145f",
+      "operator": "qbind-devnet-seed-1-preflight",
+      "status": "planned",
+      "last_reachability_evidence": null,
+      "notes": "RUN 377 PREFLIGHT CANDIDATE - NOT A LIVE SEED. node_id/peer_id are REAL public identifiers produced by the Run 375 `qbind-node identity generate devnet seed` path; the corresponding ML-KEM-768 leaf secret and in-memory ML-DSA-44 root signing key were generated in an ephemeral temp directory and DISCARDED, so this identity is illustrative only and MUST be replaced by the operator's durable seed identity before any live publication. p2p_host 203.0.113.10 is an RFC 5737 TEST-NET-3 documentation address and is NOT externally reachable. status is 'planned' (NOT 'live') and last_reachability_evidence is null because Run 377 proved only loopback/same-host reachability; external reachability from outside the operator host/NAT was NOT proven. To promote to status 'live': stand up a real externally reachable KEMTLS static-root seed, capture external reachability evidence, set p2p_host/p2p_multiaddr/operator to the real public values, set status 'live', and set last_reachability_evidence to the evidence reference. `qbind-node identity register-check --status live --reachability-evidence <ref>` was demonstrated in Run 377 to accept exactly that shape and to fail closed without the evidence reference."
+    }
+  ]
+}

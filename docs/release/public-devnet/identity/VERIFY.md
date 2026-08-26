@@ -22,6 +22,14 @@ binary.
 > on `status=live` without reachability, embedded private material, mismatched
 > cert, and MainNet/TestNet material. Canonical record:
 > `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_376.md`.
+>
+> **Run 377 — live-admission gate + reachability preflight (Route B / Partial-positive).** Run
+> `scripts/devnet/run_377_public_devnet_live_seed_reachability.sh`. It proves `register-check --status
+> live --reachability-evidence <ref>` **accepts** a cert-verified live candidate only WITH an evidence
+> reference (and fails closed WITHOUT it, and on `planned`+reachability), and boots a real loopback
+> `qbind-node` P2P listener that it dials same-host. **External reachability was NOT proven** (only
+> loopback/same-host), so **M4 stays Yellow** and no committed entry is marked live. Canonical record:
+> `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_377.md`.
 
 ## 1. Helper builds
 

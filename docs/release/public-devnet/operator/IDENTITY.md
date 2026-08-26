@@ -181,3 +181,20 @@ and `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_376.md`.
 for external operators). M6 as a whole **remains Yellow (Partial)** because the
 *live* registration half is inseparable from M4 live seed reachability, which has
 not landed. No M4 Green, no C4/C5 closure is claimed.
+
+### 9.3 Run 377 — live-admission gate + reachability preflight (Route B / Partial-positive)
+
+**Run 377** exercises the *live* branch of `register-check`:
+`register-check … --status live --reachability-evidence <ref>` **accepts** a
+cert-verified live candidate only when a reachability-evidence reference is
+supplied, and **fails closed** without it (and for `planned`+reachability). Run
+377 also boots a real loopback `qbind-node` P2P listener and dials it same-host,
+proving the deployed listener path is reachable over loopback. **External
+reachability from outside the seed operator's own host/NAT was NOT proven**, so
+the committed candidate
+(`docs/release/public-devnet/network/devnet-seeds.live-candidate.json`) stays
+`status: planned` with null reachability and **M4 stays Yellow**. The admission
+gate is a structural decision, not a reachability proof
+(`m4_green_claim=false`, `live_reachability_claim=false`). Canonical record:
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_377.md`;
+`docs/release/public-devnet/network/reachability/RUN_377_qbind-devnet-seed-1.md`.

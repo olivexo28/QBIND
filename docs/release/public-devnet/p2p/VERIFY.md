@@ -18,6 +18,13 @@ commands; none deploy infrastructure, none open a public port, and none claim la
 > deterministic-NodeId check that opens no socket and mutates no state; confirm via
 > `qbind-node identity register-check --help` and by re-running
 > `scripts/devnet/run_376_public_devnet_identity_registration.sh` (which never binds a port).
+>
+> **Run 377 note.** The Run 377 M4 reachability preflight adds no P2P wire-format change and no
+> peer-admission change. Its harness (`scripts/devnet/run_377_public_devnet_live_seed_reachability.sh`)
+> boots a loopback-only `qbind-node` P2P listener (`127.0.0.1:<port>`, default posture) and dials it
+> same-host to demonstrate reachability of the deployed listener path; it opens **no** externally
+> reachable port. **External reachability was NOT proven**, so **M4 stays Yellow**. See
+> `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_377.md`.
 
 ## 1. Scope
 
