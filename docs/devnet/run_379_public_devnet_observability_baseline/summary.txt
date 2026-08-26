@@ -1,0 +1,15 @@
+release_binary=OK sha256=ae1e699b0d6f1cbafb2913719e111877c8b90a67c0bbfac09fb23afe8acbfa96
+build_id=8d34c1b1c5c5f8209060a2a63a939d45c7f9667e
+toolchain=rustc 1.97.1 (8bab26f4f 2026-07-14) / cargo 1.97.1 (c980f4866 2026-06-30)
+no_new_observability_cli_flag=OK (exposure remains QBIND_METRICS_HTTP_ADDR env only)
+metrics_endpoint_scrape=OK http=200 bind=127.0.0.1:39761 lines=505
+public_exposure=NONE (endpoint bound to 127.0.0.1; no auth/TLS; must stay loopback)
+required_families_present=OK (10 enabled-alert metrics verified in fresh scrape)
+absent_metrics_stay_future=OK (qbind_net_per_peer_drops_total, qbind_state_size_bytes absent; alerts kept in future/not-enabled group)
+scrape_config_yaml=OK (prometheus-scrape.example.yml)
+alert_rules_yaml=OK (prometheus-alerts.example.yml)
+alert_rules_future_group=OK (absent-metric alerts present only in future/not-enabled group)
+non_claim_check=OK (no launch-ready / M4-Green / TestNet/MainNet / C4/C5-closure claim in observability docs)
+committed_private_material=NONE (node-data dir + scrape dump removed on exit)
+
+RESULT=POSITIVE (Route B: operator observability baseline; release-binary scrape evidence + parsed scrape/alert configs; M13 and M14 -> Green; M4 stays Yellow; C4/C5 OPEN; no launch/TestNet/MainNet claim)

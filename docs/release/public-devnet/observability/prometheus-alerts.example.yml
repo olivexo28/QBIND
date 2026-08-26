@@ -1,0 +1,158 @@
+# QBIND public DevNet — example Prometheus alert rules (Run 379, M14).
+#
+# Two groups:
+#   * qbind-devnet-observability                     — ENABLED. Every expr uses a
+#     metric verified present in the release-binary baseline scrape (see
+#     ../observability/METRICS.md and docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_379.md),
+#     or the Prometheus-synthesized `up` series.
+#   * qbind-devnet-observability-future-not-enabled  — FUTURE / NOT ENABLED. Each
+#     rule references a metric that was ABSENT from the baseline scrape. They are
+#     shipped disabled-by-intent (severity=observe, status=future) so operators can
+#     enable them once the underlying series exists. They will simply never fire
+#     until then; they are documented as future, not active guarantees.
+#
+# Severity vocabulary (see ../observability/RUNBOOK.md):
+#   page    — wake a human now (safety/liveness impacting).
+#   ticket  — actionable but not an immediate page.
+#   observe — informational; correlate, do not page.
+#
+# DevNet has NO value and is resettable. These rules imply no launch / TestNet /
+# MainNet / C4 / C5 readiness.
+groups:
+  - name: qbind-devnet-observability
+    rules:
+      - alert: QbindNodeDown
+        expr: up{job="qbind-node"} == 0
+        for: 2m
+        labels:
+          severity: page
+          network: qbind-public-devnet
+        annotations:
+          summary: "qbind-node /metrics endpoint unreachable"
+          description: "Prometheus target {{ $labels.instance }} has been down for 2m (metrics endpoint / process down)."
+          runbook: "observability/RUNBOOK.md#qbindnodedown"
+
+      - alert: QbindConsensusNoProgress
+        expr: up{job="qbind-node"} == 1 and changes(qbind_consensus_committed_height[10m]) == 0
+        for: 10m
+        labels:
+          severity: page
+          network: qbind-public-devnet
+        annotations:
+          summary: "qbind-node committed height not advancing"
+          description: "qbind_consensus_committed_height has not changed for 10m while the node is up on {{ $labels.instance }}."
+          runbook: "observability/RUNBOOK.md#qbindconsensusnoprogress"
+
+      - alert: QbindNodeNoP2PConnections
+        expr: up{job="qbind-node"} == 1 and qbind_p2p_connections_current == 0
+        for: 15m
+        labels:
+          severity: ticket
+          network: qbind-public-devnet
+        annotations:
+          summary: "qbind-node has zero live P2P connections"
+          description: "qbind_p2p_connections_current == 0 for 15m on {{ $labels.instance }} (possible isolation / listener unreachable)."
+          runbook: "observability/RUNBOOK.md#qbindnodenop2pconnections"
+
+      - alert: QbindConnectionRateDropsSustained
+        expr: increase(qbind_p2p_connection_rate_drop_total[15m]) > 0
+        for: 15m
+        labels:
+          severity: ticket
+          network: qbind-public-devnet
+        annotations:
+          summary: "Sustained M12 connection-rate limiter drops"
+          description: "qbind_p2p_connection_rate_drop_total increased over 15m on {{ $labels.instance }} (possible connection flood / abuse)."
+          runbook: "observability/RUNBOOK.md#qbindconnectionratedropssustained"
+
+      - alert: QbindTrustBundleSignatureRejections
+        expr: increase(qbind_p2p_pqc_trust_bundle_signature_rejected_total[10m]) > 0
+        for: 0m
+        labels:
+          severity: ticket
+          network: qbind-public-devnet
+        annotations:
+          summary: "PQC trust-bundle signature rejections observed"
+          description: "qbind_p2p_pqc_trust_bundle_signature_rejected_total increased over 10m on {{ $labels.instance }}."
+          runbook: "observability/RUNBOOK.md#qbindtrustbundlesignaturerejections"
+
+      - alert: QbindTrustBundleSequencePersistFailure
+        expr: increase(qbind_p2p_pqc_trust_bundle_sequence_persist_failures_total[10m]) > 0
+        for: 0m
+        labels:
+          severity: page
+          network: qbind-public-devnet
+        annotations:
+          summary: "PQC trust-bundle sequence persistence failing"
+          description: "qbind_p2p_pqc_trust_bundle_sequence_persist_failures_total increased on {{ $labels.instance }} (durable trust state may be unwritable)."
+          runbook: "observability/RUNBOOK.md#qbindtrustbundlesequencepersistfailure"
+
+      - alert: QbindSnapshotFailures
+        expr: increase(qbind_snapshot_failure_total[1h]) > 0
+        for: 0m
+        labels:
+          severity: ticket
+          network: qbind-public-devnet
+        annotations:
+          summary: "qbind-node snapshot failures"
+          description: "qbind_snapshot_failure_total increased over 1h on {{ $labels.instance }} (storage/snapshot subsystem degraded)."
+          runbook: "observability/RUNBOOK.md#qbindsnapshotfailures"
+
+      - alert: QbindRestoreCatchupStuck
+        expr: qbind_restore_catchup_mode_active == 1
+        for: 30m
+        labels:
+          severity: ticket
+          network: qbind-public-devnet
+        annotations:
+          summary: "qbind-node stuck in restore/catch-up"
+          description: "qbind_restore_catchup_mode_active == 1 for 30m on {{ $labels.instance }} (node not catching up to head)."
+          runbook: "observability/RUNBOOK.md#qbindrestorecatchupstuck"
+
+      - alert: QbindPeerCandidateRejectionsHigh
+        expr: increase(qbind_p2p_pqc_trust_bundle_peer_candidate_rejected_total[15m]) > 0
+        for: 15m
+        labels:
+          severity: observe
+          network: qbind-public-devnet
+        annotations:
+          summary: "Peer-candidate trust-bundle rejections observed"
+          description: "qbind_p2p_pqc_trust_bundle_peer_candidate_rejected_total increased over 15m on {{ $labels.instance }} (correlate with propagation counters)."
+          runbook: "observability/RUNBOOK.md#qbindpeercandidaterejectionshigh"
+
+  # -------------------------------------------------------------------------
+  # FUTURE / NOT ENABLED. Every rule below references a metric that was ABSENT
+  # from the Run 379 baseline scrape. They parse as YAML and will not fire until
+  # the underlying series exists. Do not treat them as active coverage.
+  # -------------------------------------------------------------------------
+  - name: qbind-devnet-observability-future-not-enabled
+    rules:
+      - alert: QbindPerPeerRateLimitDropsSustained
+        # FUTURE: qbind_net_per_peer_drops_total is emitted per-peer only AFTER a
+        # per-peer rate-limit drop; it was absent from the baseline scrape and the
+        # deployed per-peer message-rate override is construction-path-only.
+        expr: increase(qbind_net_per_peer_drops_total[5m]) > 0
+        for: 10m
+        labels:
+          severity: observe
+          status: future
+          network: qbind-public-devnet
+        annotations:
+          summary: "[FUTURE/NOT ENABLED] Sustained per-peer rate-limit drops"
+          description: "Enable once qbind_net_per_peer_drops_total is emitted by the deployed node (see METRICS.md §2 and ABUSE_DOS_POSTURE.md)."
+          runbook: "observability/RUNBOOK.md#qbindperpeerratelimitdropssustained-future"
+
+      - alert: QbindNodeDiskSpaceLow
+        # FUTURE: qbind-node emits no free-disk gauge in the default scrape. Use
+        # host/node-exporter metrics (node_filesystem_avail_bytes) instead. This
+        # placeholder documents the intent and stays disabled here.
+        expr: qbind_state_size_bytes > 0 and qbind_state_size_bytes > 1e18
+        for: 15m
+        labels:
+          severity: observe
+          status: future
+          network: qbind-public-devnet
+        annotations:
+          summary: "[FUTURE/NOT ENABLED] Storage/disk pressure"
+          description: "qbind_state_size_bytes was absent from the baseline scrape; do disk alerting via node-exporter. See METRICS.md §5."
+          runbook: "observability/RUNBOOK.md#qbindnodediskspacelow-future"

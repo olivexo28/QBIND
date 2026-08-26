@@ -1,0 +1,37 @@
+# QBIND public DevNet — example Prometheus scrape config (Run 379, M13/M14).
+#
+# SAFETY: metrics are exposed by the release qbind-node binary ONLY when
+# QBIND_METRICS_HTTP_ADDR is set, and MUST be bound to loopback (127.0.0.1).
+# The /metrics endpoint has NO authentication and NO TLS. Do NOT bind it to a
+# public interface. If a central Prometheus must scrape a node, place a
+# firewalled, authenticating reverse proxy in front of it — never expose the raw
+# endpoint on the public internet.
+#
+# Addresses below are loopback / RFC 5737 (TEST-NET) documentation examples only.
+# Replace with your fenced internal targets. This file is a documentation example,
+# not a deployed configuration, and implies no launch / TestNet / MainNet / C4 / C5
+# readiness.
+global:
+  scrape_interval: 15s
+  scrape_timeout: 10s
+  external_labels:
+    network: qbind-public-devnet
+    env: devnet
+
+rule_files:
+  - prometheus-alerts.example.yml
+
+scrape_configs:
+  - job_name: qbind-node
+    metrics_path: /metrics
+    scheme: http
+    static_configs:
+      # Same-host Prometheus scraping a loopback-bound qbind-node metrics endpoint.
+      - targets:
+          - 127.0.0.1:9100
+        labels:
+          role: devnet-node
+      # Additional nodes are reached ONLY through a fenced internal address space
+      # (documentation-only RFC 5737 examples shown here), never the public net.
+      # - targets: ["192.0.2.10:9100"]
+      #   labels: { role: devnet-node }

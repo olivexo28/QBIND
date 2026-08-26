@@ -1,0 +1,223 @@
+Run 380 — Observability hardening: per-peer drop scrape evidence + node/build/disk gauges
+
+Continue QBIND after accepted Run 379.
+
+Current state:
+Run 379 is accepted as POSITIVE / public-DevNet observability baseline.
+
+Run 379 moved:
+- M13 telemetry / metrics baseline: Yellow → Green.
+- M14 monitoring / alerting baseline: Yellow → Green.
+
+Run 379 proved:
+- release `qbind-node` builds;
+- `QBIND_METRICS_HTTP_ADDR=127.0.0.1:<port>` starts the existing `/metrics` endpoint;
+- `/metrics` scrapes over loopback with HTTP 200;
+- required baseline metric families are present;
+- Prometheus scrape config parses;
+- Prometheus alert rules parse;
+- alert rules for absent metrics are kept future / not enabled;
+- no new CLI flag;
+- no production Rust source change;
+- no public exposure;
+- no launch / M4 Green / TestNet / MainNet / C4/C5 claim.
+
+Important correction to carry into Run 380:
+Run 379 correctly marked `qbind_net_per_peer_drops_total` as absent from a clean scrape until the first per-peer drop, but some observability docs describe the deployed per-peer override as “construction-path-only.” That is stale after Runs 371–373. Runs 371–373 proved deployed KEMTLS live-socket per-peer M12 enforcement. Run 380 must correct the wording without downgrading M12.
+
+Current readiness:
+- M12 Green.
+- M13 Green.
+- M14 Green.
+- M4 Yellow / launch-blocking.
+- M6 Yellow/Partial, M4-gated.
+- Public DevNet NOT launch-ready.
+- C4 OPEN.
+- C5 OPEN.
+- MainNet authority rotation/revocation Red.
+
+Primary objective:
+Deepen the Run 379 observability baseline by:
+1. correcting stale M12/per-peer observability wording;
+2. producing release-binary scrape evidence where `qbind_net_per_peer_drops_total{reason="rate_limit"}` is present after an induced per-peer drop, if feasible using existing Run 371–373 helper paths;
+3. adding minimal node/build/chain info and disk/storage-capacity metrics if they can be implemented safely and default-read-only;
+4. promoting alert rules from FUTURE to ENABLED only when their backing metrics are present in the release scrape.
+
+Strict scope:
+Observability hardening only.
+
+No public DevNet launch.
+No live seed/bootnode deployment.
+No M4 Green.
+No M6 Green.
+No faucet.
+No RPC gateway.
+No explorer.
+No status page.
+No TestNet readiness claim.
+No MainNet readiness claim.
+No C4 closure.
+No C5 closure.
+No authority-lifecycle runtime wiring.
+No validator-set mutation.
+No epoch transition.
+No sequence/marker write.
+No LivePqcTrustState mutation.
+No trust-bundle live apply.
+No peer-driven apply.
+No P2P wire-format change.
+No peer-admission weakening.
+No public metrics exposure by default.
+No committed secrets, keys, data dirs, logs, metrics dumps with sensitive labels, private hostnames, or private endpoints.
+
+Required investigation:
+Inspect:
+- Run 379 evidence, harness, observability docs, scrape config, alert rules, and runbook.
+- `docs/release/public-devnet/observability/METRICS.md`
+- `docs/release/public-devnet/observability/ALERT_RULES.md`
+- `docs/release/public-devnet/observability/RUNBOOK.md`
+- `docs/release/public-devnet/observability/VERIFY.md`
+- `crates/qbind-node/src/metrics.rs`
+- `crates/qbind-node/src/metrics_http.rs`
+- `crates/qbind-node/src/main.rs`
+- Run 371–373 helpers/harnesses for KEMTLS per-peer live-socket flood evidence.
+- Run 369/370 deployed per-peer limiter wiring.
+- `docs/release/QBIND_PUBLIC_DEVNET_READINESS_CRITERIA.md`
+
+Decision gate:
+Record one route:
+
+Route A — existing source can already produce a release scrape containing `qbind_net_per_peer_drops_total` by inducing a per-peer drop with the Run 371–373 helper path.
+No production source change for the per-peer metric; update docs and enable the alert only if scrape evidence lands.
+
+Route B — small production metrics additions are needed for node/build/chain info and disk/storage gauge.
+Add minimal read-only metrics only. Preserve default disabled metrics endpoint. Add tests and release scrape evidence.
+
+Route C — some metrics remain unavailable or too invasive.
+Keep corresponding alerts future / not enabled and document exact blockers.
+
+Implementation requirements:
+Prefer a small, clean split:
+1. Docs correction:
+   - Remove “construction-path-only” wording from observability docs.
+   - Replace with: “series is absent in a clean scrape until a per-peer rate-limit drop occurs; Runs 371–373 prove deployed KEMTLS live-socket enforcement.”
+2. Per-peer drop scrape:
+   - Reuse or adapt existing release helpers to induce a real per-peer rate-limit drop.
+   - Scrape `/metrics` after the drop.
+   - Prove `qbind_net_per_peer_drops_total{reason="rate_limit"}` is present.
+   - Prove connection-rate metric remains independent.
+3. Optional production metric additions:
+   - `qbind_node_build_info{version,git_commit_or_unknown,build_id_or_unknown,chain_id_or_unknown,env}` value 1, or an equivalent low-cardinality info metric.
+   - `qbind_node_data_dir_free_bytes` or equivalent, if safe and portable.
+   - Avoid secrets, paths, private hostnames, or high-cardinality labels.
+4. Alert promotion:
+   - Promote `QbindPerPeerRateLimitDropsSustained` to enabled only if the release scrape can make the metric present and the expression parses.
+   - Promote disk alert only if a qbind-owned disk/free-space metric exists; otherwise keep disk alert future and recommend node-exporter.
+
+Expected artifacts:
+Update:
+- `docs/release/public-devnet/observability/METRICS.md`
+- `docs/release/public-devnet/observability/ALERT_RULES.md`
+- `docs/release/public-devnet/observability/RUNBOOK.md`
+- `docs/release/public-devnet/observability/VERIFY.md`
+- `docs/release/public-devnet/observability/prometheus-alerts.example.yml`
+- `docs/release/public-devnet/observability/prometheus-scrape.example.yml` only if needed
+- `docs/release/QBIND_PUBLIC_DEVNET_READINESS_CRITERIA.md`
+- `docs/release/public-devnet/p2p/ABUSE_DOS_POSTURE.md`
+- `docs/release/public-devnet/p2p/VERIFY.md`
+- `docs/protocol/QBIND_C4_C5_CLOSURE_CRITERIA.md`
+- `docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md`
+- `docs/protocol/QBIND_GOVERNANCE_EXECUTION_RUNTIME_SURFACE_AUDIT.md`
+- `docs/ops/QBIND_PQC_TRUST_LIFECYCLE_RUNBOOK.md`
+- `docs/whitepaper/contradiction.md`
+
+Add harness:
+`scripts/devnet/run_380_public_devnet_observability_hardening.sh`
+
+Add archive:
+`docs/devnet/run_380_public_devnet_observability_hardening/{README.md,summary.txt,.gitignore}`
+
+Add canonical evidence:
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_380.md`
+
+If production Rust metrics source changes, add tests:
+`crates/qbind-node/tests/run_380_public_devnet_observability_metrics_tests.rs`
+
+Required evidence:
+The run must prove:
+1. release `qbind-node` builds;
+2. `/metrics` still disabled by default unless `QBIND_METRICS_HTTP_ADDR` is set;
+3. `/metrics` still binds to loopback in the harness;
+4. clean scrape still works;
+5. per-peer-drop scrape works if Route A succeeds;
+6. `qbind_net_per_peer_drops_total` appears only after induced drop;
+7. per-peer drop does not increment `qbind_p2p_connection_rate_drop_total`;
+8. connection-rate drop does not increment per-peer metric;
+9. any new info/disk metrics are low-cardinality and secret-free;
+10. scrape YAML parses;
+11. alert YAML parses;
+12. enabled alert metrics are all present in the verified scrape;
+13. future/not-enabled alerts are only for absent metrics;
+14. no launch-ready / M4 Green / M6 Green / TestNet / MainNet / C4/C5 closure claim;
+15. no public metrics exposure by default.
+
+Required tests:
+Run and record exact counts:
+- `cargo build -p qbind-node --release --bin qbind-node`
+- Run the Run 380 harness
+- YAML parse check for scrape config
+- YAML parse check for alert rules
+- non-claim grep over observability package
+- `cargo test -p qbind-node --lib`
+
+If Rust source changes:
+- `cargo test -p qbind-node --test run_380_public_devnet_observability_metrics_tests`
+- relevant metrics/unit tests
+- invoke CodeQL if available
+
+Security:
+Run secret scanning over all changed files.
+No secrets, private keys, credentials, private infrastructure, raw logs, data dirs, or sensitive metrics dumps may be committed.
+Use only loopback, RFC 5737, and redacted examples.
+
+Readiness rules:
+- M13 and M14 remain Green if the hardening preserves Run 379 guarantees.
+- Do not alter M4 unless real external seed reachability lands.
+- Do not alter M6 unless M4-backed live registration lands.
+- M12 remains Green unless contradicted.
+- Public DevNet remains NOT launch-ready unless all must-haves are Green.
+- C4/C5 remain OPEN.
+- TestNet/MainNet remain untouched.
+
+Expected verdict:
+PASS / public-DevNet observability hardening positive if stale docs are corrected, per-peer-drop scrape evidence lands or is honestly bounded, configs parse, alerts are correctly enabled/future, and tests/scans/provenance pass.
+
+Partial-positive if only the docs correction lands or if per-peer/drop/info/disk metrics cannot be evidenced without broader changes.
+
+Final response format:
+1. Exact verdict.
+2. Files changed.
+3. Decision gate route.
+4. Documentation correction.
+5. Metrics endpoint surface.
+6. Per-peer drop scrape evidence.
+7. Node/build/chain info metric evidence.
+8. Disk/storage metric evidence.
+9. Alert rule changes.
+10. Scrape config evidence.
+11. Runbook evidence.
+12. Rejection / non-claim checks.
+13. Default compatibility / no runtime behavior change.
+14. Readiness matrix delta for M13.
+15. Readiness matrix delta for M14.
+16. Current public DevNet readiness status.
+17. Remaining public DevNet blockers.
+18. Public TestNet blockers.
+19. MainNet blockers.
+20. C4/C5 status.
+21. Tests run.
+22. Security scans.
+23. CodeQL.
+24. Provenance.
+25. Honest limitations.
+26. Suggested Run 381 next step.

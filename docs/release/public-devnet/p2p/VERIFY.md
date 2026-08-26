@@ -438,3 +438,25 @@ verified with the Run 374 operator identity package (`docs/release/public-devnet
 source change, no new CLI flag): it does not change admission, the P2P wire format, or trust-bundle
 handling, and it does not move M12. A real loopback `qbind-node` boot on generated material reports
 `qbind_p2p_pqc_root_mode 1` / `qbind_p2p_pqc_roots_configured 1`; mismatched material fails closed.
+
+## Run 379 — observability of the abuse/DoS counters (cross-reference)
+
+The abuse/DoS counters exercised above (`qbind_p2p_connection_rate_drop_total`,
+`qbind_net_per_peer_drops_total`, `qbind_p2p_pqc_trust_bundle_*`) are surfaced to
+operators by the Run 379 observability package
+(`docs/release/public-devnet/observability/`). Verify safe exposure and family
+presence with:
+
+```bash
+bash scripts/devnet/run_379_public_devnet_observability_baseline.sh
+```
+
+Run 379 is **docs + harness only** (Route B, no production source change, no new
+CLI flag): it boots the release binary with `QBIND_METRICS_HTTP_ADDR=127.0.0.1:<port>`,
+scrapes `/metrics` over loopback (HTTP 200), confirms the required families are
+present, and YAML-parses the example scrape config + alert rules. It does **not**
+change admission, the P2P wire format, or trust-bundle handling, and it does not
+move M4/M12. The per-peer drop series `qbind_net_per_peer_drops_total` is absent
+in a clean scrape (emitted only after a per-peer drop), so its example alert is
+shipped **future / not-enabled**; the connection-rate alert is enabled. Run 379
+moves **M13 and M14** Yellow → Green.

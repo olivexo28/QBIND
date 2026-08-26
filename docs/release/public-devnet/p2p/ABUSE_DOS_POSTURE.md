@@ -81,6 +81,16 @@ Exact metric/counter surfaces (`crates/qbind-node/src/metrics.rs`):
 See the monitoring baseline (`docs/ops/QBIND_MONITORING_AND_ALERTING_BASELINE.md`) and the PQC trust
 lifecycle runbook (`docs/ops/QBIND_PQC_TRUST_LIFECYCLE_RUNBOOK.md`) for alerting guidance.
 
+> **Run 379 (M13/M14):** the public DevNet observability package
+> (`docs/release/public-devnet/observability/`) now documents how to expose these
+> abuse/DoS counters over `/metrics` (loopback via `QBIND_METRICS_HTTP_ADDR`) and
+> ships an example alert on **sustained connection-rate drops**
+> (`qbind_p2p_connection_rate_drop_total`, verified present in a release-binary
+> scrape). The **per-peer** drop series `qbind_net_per_peer_drops_total` is emitted
+> only after a per-peer rate-limit drop occurs and was absent from a clean scrape,
+> so its alert is shipped **future / not-enabled** — consistent with the
+> construction-path-only per-peer message-rate override noted in §7c–§7f.
+
 ## 6. Minimum public DevNet recommended posture
 
 For a future public DevNet seed exposure, the minimum recommended posture is:

@@ -198,6 +198,26 @@ Run 358 changes **no** P2P wire format, peer-admission logic, or default network
 
   This deletes only your **local** DevNet data directory; it affects no other network.
 
+### 9.1 Optional metrics / observability (M13/M14)
+
+Metrics are **off by default**. To expose a Prometheus `/metrics` endpoint for a
+local DevNet node, set `QBIND_METRICS_HTTP_ADDR` to a **loopback** address:
+
+```bash
+QBIND_METRICS_HTTP_ADDR=127.0.0.1:9100 \
+  qbind-node --network-mode p2p --enable-p2p \
+             --p2p-listen-addr 127.0.0.1:0 --validator-id 0 --data-dir ./devnet-data
+curl -s http://127.0.0.1:9100/metrics | head
+```
+
+- The endpoint has **no authentication and no TLS** — bind it to `127.0.0.1`
+  only, never to a public interface, and never publish it on a status page.
+- If a central Prometheus must scrape it, front it with a firewalled,
+  authenticating reverse proxy.
+- Full operator guidance — verified metric families, an example scrape config,
+  alert rules with `page`/`ticket`/`observe` severities, and a response runbook —
+  is in `docs/release/public-devnet/observability/` (M13/M14, Run 379).
+
 ## 10. Troubleshooting
 
 - **Genesis hash mismatch:** `--expect-genesis-hash` failed. Re-verify §4.1/§4.2; ensure you passed
@@ -245,7 +265,12 @@ Public DevNet remains **NOT launch-ready**. Outstanding (non-exhaustive; see
   --status live --reachability-evidence` gate and a loopback listener dial — but
   **external reachability (from outside the operator host/NAT) is NOT proven**,
   so the candidate stays `status: planned` and **M4 stays Yellow**.
-- External reachability, status page, alerting, and a seed-node runbook: still outstanding.
-- Other must-haves (M6–M15) remain unresolved (Yellow/Red).
+- External reachability, status page, and a seed-node runbook: still outstanding.
+- **M13/M14 — telemetry + monitoring/alerting baseline: Green (Run 379)**: the
+  operator observability package (`docs/release/public-devnet/observability/`)
+  documents safe `/metrics` exposure, verified metric families, an example scrape
+  config, alert rules, and a runbook. This does **not** make the DevNet
+  launch-ready — M4 (external reachability) is still the blocker.
+- Other must-haves (notably M4/M6, M15) remain unresolved (Yellow/Red).
 
 Because at least one must-have is not Green, public DevNet is **not** launch-ready.
