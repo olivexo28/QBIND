@@ -21,6 +21,8 @@ list for public join) is Green.
 | `devnet-seed-list.schema.json` | Canonical JSON Schema (draft-07) for a DevNet seed/bootnode list. |
 | `devnet-seeds.placeholder.json` | Placeholder DevNet seed list (non-live, documentation-example values only). |
 | `VERIFY.md` | Exact operator verification commands and expected outputs. |
+| `devnet-seeds.live-candidate.json` | **Run 377** preflight live-seed **candidate** (Route B / Partial-positive): schema-valid, single entry `status: planned` with a real Run-375-path public `node_id`/`peer_id` and a non-routable RFC 5737 host. **NOT a live seed** — external reachability was not proven. |
+| `reachability/RUN_377_qbind-devnet-seed-1.md` | **Run 377** reachability evidence record (loopback/same-host only; external reachability NOT proven; M4 stays Yellow). |
 
 This is the canonical location for the public DevNet seed/bootnode list. It sits alongside the
 Run 356 genesis package (`docs/release/public-devnet/genesis/`) under the shared
@@ -166,6 +168,25 @@ qbind-node identity register-check "$OUT/seed/public-identity.json" \
 
 It opens **no** socket, mutates **no** state, and makes **no** live/reachability/M4 claim. See
 `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_376.md`.
+
+**Run 377 — live-admission gate + reachability preflight (Route B / Partial-positive).** To admit a
+*live* candidate, `register-check` requires a reachability-evidence reference:
+
+```bash
+qbind-node identity register-check "$OUT/seed/public-identity.json" \
+    --seed-list docs/release/public-devnet/network/devnet-seeds.live-candidate.json \
+    --role seed --cert "$OUT/seed/leaf.cert.bin" \
+    --status live --reachability-evidence \
+    docs/release/public-devnet/network/reachability/RUN_377_qbind-devnet-seed-1.md
+```
+
+This **accepts** only with the evidence reference and **fails closed** without it (and for
+`planned`+reachability). Run 377 also boots a real loopback `qbind-node` P2P listener and dials it
+same-host, but **external reachability from outside the operator host/NAT was NOT proven**, so the
+committed candidate stays `status: planned` and **M4 stays Yellow**. The gate is a structural admission
+decision, **not** a reachability proof (`m4_green_claim=false`). See
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_377.md` and
+`docs/release/public-devnet/network/reachability/RUN_377_qbind-devnet-seed-1.md`.
 
 ## Provenance
 

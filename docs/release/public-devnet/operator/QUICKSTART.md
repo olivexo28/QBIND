@@ -239,6 +239,12 @@ Public DevNet remains **NOT launch-ready**. Outstanding (non-exhaustive; see
   admission-check** (Run 376, non-mutating) workflow now exists, but there is
   still **no live registration path** into a running public DevNet (M4-gated) —
   so M6 as a whole stays Yellow / Partial.
+- Seed/bootnode reachability: **Run 377** adds a preflight live-seed candidate
+  (`docs/release/public-devnet/network/devnet-seeds.live-candidate.json`),
+  a reachability record, and a harness that release-proves the `register-check
+  --status live --reachability-evidence` gate and a loopback listener dial — but
+  **external reachability (from outside the operator host/NAT) is NOT proven**,
+  so the candidate stays `status: planned` and **M4 stays Yellow**.
 - External reachability, status page, alerting, and a seed-node runbook: still outstanding.
 - Other must-haves (M6–M15) remain unresolved (Yellow/Red).
 

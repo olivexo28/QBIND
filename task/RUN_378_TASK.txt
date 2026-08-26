@@ -1,0 +1,184 @@
+Run 378 — Public DevNet M4 external seed reachability Route A evidence
+
+Continue QBIND after accepted Run 377.
+
+Current state:
+Run 377 is accepted as PARTIAL-POSITIVE / public-DevNet M4 live seed reachability preflight.
+
+Run 377 delivered:
+- schema-valid `devnet-seeds.live-candidate.json`;
+- reachability record `RUN_377_qbind-devnet-seed-1.md`;
+- release harness;
+- 4 Run 377 tests;
+- live `register-check --status live --reachability-evidence <ref>` admission gate evidence;
+- same-host loopback TCP listener preflight;
+- no external reachability proof;
+- no M4 Green;
+- no public DevNet launch;
+- C4/C5 still OPEN.
+
+Current readiness:
+- M12 Green.
+- M6 generation / verification / admission-check halves Green-for-scope.
+- M6 overall Yellow/Partial because live registration is M4-gated.
+- M4 Yellow / launch-blocking.
+- Public DevNet NOT launch-ready.
+- C4 OPEN.
+- C5 OPEN.
+- MainNet authority rotation/revocation Red.
+
+Primary objective:
+Execute Route A for M4: deploy or use a real externally reachable DevNet seed/bootnode endpoint, prove reachability from outside the seed operator host/NAT, publish a live seed-list entry backed by evidence, and verify it through `qbind-node identity register-check --status live --reachability-evidence <ref>`.
+
+M4 may move Yellow → Green only if the external reachability proof is real and reproducible. If the run still only proves loopback, same-host, private-network, or same-cloud/internal reachability, M4 must stay Yellow.
+
+Strict scope:
+M4 live seed/bootnode reachability only.
+
+No faucet.
+No RPC gateway.
+No explorer.
+No status page.
+No public DevNet launch unless every public DevNet must-have is Green, which is not expected.
+No TestNet readiness claim.
+No MainNet readiness claim.
+No C4 closure.
+No C5 closure.
+No authority-lifecycle runtime wiring.
+No validator-set mutation.
+No epoch transition.
+No sequence/marker write.
+No LivePqcTrustState mutation.
+No trust-bundle live apply.
+No peer-driven apply.
+No P2P wire-format change.
+No peer-admission weakening.
+No hidden fallback roots.
+No committed private keys, generated roots, generated leaf keys, data dirs, logs with secrets, metrics dumps with private endpoints, credentials, tokens, or private infrastructure secrets.
+
+Required investigation:
+Inspect:
+- `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_377.md`;
+- `docs/release/public-devnet/network/devnet-seeds.live-candidate.json`;
+- `docs/release/public-devnet/network/reachability/RUN_377_qbind-devnet-seed-1.md`;
+- `scripts/devnet/run_377_public_devnet_live_seed_reachability.sh`;
+- `crates/qbind-node/tests/run_377_public_devnet_live_seed_reachability_tests.rs`;
+- `crates/qbind-node/src/identity_cli.rs`;
+- Run 375 and Run 376 identity command and register-check evidence;
+- Run 371–373 KEMTLS strict-auth / PqcStaticRoot harnesses;
+- `docs/release/public-devnet/network/devnet-seed-list.schema.json`;
+- `docs/release/public-devnet/network/README.md`;
+- `docs/release/public-devnet/network/VERIFY.md`;
+- `docs/release/public-devnet/operator/QUICKSTART.md`;
+- `docs/release/public-devnet/operator/IDENTITY.md`;
+- `docs/release/public-devnet/p2p/PEER_ADMISSION_POLICY.md`;
+- `docs/release/public-devnet/p2p/VERIFY.md`;
+- `docs/release/QBIND_PUBLIC_DEVNET_READINESS_CRITERIA.md`.
+
+Decision gate:
+Record one route:
+
+Route A — real external seed reachability proven.
+A public seed endpoint is intentionally exposed, reached from an independent external vantage point, and the evidence satisfies M4 Green rules.
+
+Route B — only partial external preflight proven.
+Examples: same-cloud-only, VPN/internal-only, TCP-only without KEMTLS when KEMTLS was required, unstable reachability, no independent vantage point, or candidate identity not actually used by the listener. Keep M4 Yellow.
+
+Route C — no safe external seed infrastructure available.
+Do not expose a real endpoint. Keep M4 Yellow and document infrastructure prerequisites.
+
+M4 Green requirements:
+M4 may move Green only if all are true:
+
+1. At least one seed/bootnode entry is intentionally published as `status: live`.
+2. The seed entry uses real public `node_id` / `peer_id` values from the Run 375 identity path.
+3. The seed runs under the same durable identity material represented by the live seed entry.
+4. No private material is committed.
+5. `last_reachability_evidence` is present and points to the Run 378 evidence record.
+6. Reachability is proven from outside the seed operator’s own host/NAT.
+7. Evidence includes at minimum TCP dial success from the external vantage.
+8. Preferably, and if technically feasible, evidence includes KEMTLS strict-auth + `PqcStaticRoot` handshake from the external vantage.
+9. The observed remote NodeId / cert-derived identity matches the published seed entry.
+10. The seed entry pins the Run 356 genesis hash and genesis file SHA correctly.
+11. `qbind-node identity register-check --status live --reachability-evidence <ref>` accepts the live entry.
+12. The full seed-list document validates against `devnet-seed-list.schema.json`.
+13. Safety labels remain experimental / resettable / no value / no MainNet readiness / no C4/C5 closure.
+14. No other readiness item is silently marked Green.
+
+Implementation requirements:
+Prefer evidence, harness, docs, and JSON artifact changes only.
+
+Add or update:
+
+1. Live seed-list artifact:
+   `docs/release/public-devnet/network/devnet-seeds.live.json`
+   or, if not ready to replace the candidate, update:
+   `docs/release/public-devnet/network/devnet-seeds.live-candidate.json`
+
+2. Reachability evidence:
+   `docs/release/public-devnet/network/reachability/RUN_378_<seed-id>.md`
+
+3. Harness:
+   `scripts/devnet/run_378_public_devnet_external_seed_reachability.sh`
+
+4. Canonical evidence:
+   `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_378.md`
+
+5. Archive:
+   `docs/devnet/run_378_public_devnet_external_seed_reachability/{README.md,summary.txt,.gitignore}`
+
+If Rust source changes are required, they must be minimal, default-safe, and justified. Prefer no production source change.
+
+Live seed-list fields:
+The live entry must include:
+- `node_id`;
+- `peer_id`;
+- `validator_address` if applicable, otherwise null;
+- `p2p_host`;
+- `p2p_port`;
+- `p2p_multiaddr`;
+- `transport_security_mode`;
+- `pqc_suite`;
+- `trust_bundle_required`;
+- `expected_genesis_hash`;
+- `operator`;
+- `status: live`;
+- `last_reachability_evidence`;
+- notes with safety label and evidence reference.
+
+Reachability evidence requirements:
+Record:
+
+1. UTC timestamp.
+2. Seed identifier.
+3. Published node_id / peer_id.
+4. Public host and port.
+5. External vantage point identity:
+   - cloud/region or network class is enough;
+   - do not publish private credentials.
+6. Route type:
+   - external;
+   - same-cloud-external;
+   - same-host;
+   - loopback;
+   - private/internal;
+   - unknown.
+7. TCP dial command and result.
+8. KEMTLS strict-auth command and result, if feasible.
+9. Observed remote NodeId / cert-derived identity.
+10. Genesis hash pinned by the joining client.
+11. Relevant `qbind-node` startup flags, with secrets redacted.
+12. Logs with private material redacted.
+13. Any firewall/NAT/LB details needed to reproduce reachability, without exposing secrets.
+14. Conclusion: M4 Green evidence satisfied or not satisfied.
+
+Required live registration evidence:
+Run and record:
+
+```bash
+qbind-node identity register-check <seed-identity>/public-identity.json \
+  --seed-list docs/release/public-devnet/network/devnet-seeds.live.json \
+  --role seed \
+  --cert <seed-identity>/leaf.cert.bin \
+  --status live \
+  --reachability-evidence docs/release/public-devnet/network/reachability/RUN_378_<seed-id>.md

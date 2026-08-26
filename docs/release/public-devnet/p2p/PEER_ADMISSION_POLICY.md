@@ -22,6 +22,15 @@ validated to appear in `qbind-node --help` (see `VERIFY.md`).
 > state. A `register-check` "admissible" verdict is a documentation/registration convenience only;
 > live admission is still performed exclusively by the strict KEMTLS handshake path below. No
 > peer-admission weakening. See `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_376.md`.
+>
+> **Run 377 note.** The Run 377 M4 reachability preflight likewise does **not** touch peer admission.
+> Its loopback listener runs under the pre-existing default posture (`--network-mode p2p --enable-p2p
+> --p2p-listen-addr 127.0.0.1:<port>`, mutual-auth `Disabled`) purely to demonstrate same-host TCP
+> reachability of the deployed listener; it opens no externally reachable port and admits no real peer.
+> The `register-check --status live --reachability-evidence` gate it exercises is the same offline
+> admission verifier — it makes no live/M4 claim and does not alter the strict KEMTLS handshake path
+> below. External reachability was **NOT proven**; **M4 stays Yellow**. See
+> `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_377.md`.
 
 ## 1. How a peer is admitted on public DevNet
 
