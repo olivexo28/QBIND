@@ -245,9 +245,15 @@ verdict explicitly sets `c4_c5_closure_claim=false`.
 
 ## 22. CodeQL
 
-CodeQL invoked over the Rust source change to `identity_cli.rs`; result recorded
-in the PR/session (see finalization notes). Not declared clean unless the tool
-reports so.
+CodeQL was invoked over the Rust source change to `identity_cli.rs`. Exact
+result: **analysis skipped — "Analysis was skipped because the database size is
+too large" (0 alerts returned).** This is **not** a clean bill of health; the
+tool did not analyze the change. Mitigating factors for this specific change:
+`register-check` is read-only, opens no socket, spawns no process, and performs
+only local file reads + JSON parsing (`serde_json`) + wire-cert decoding through
+the same pre-existing `NetworkDelegationCert::decode` path used elsewhere; all
+operator-controlled input is validated and fails closed without `unsafe`, shell
+execution, or dynamic path traversal beyond the operator-supplied file arguments.
 
 ## 23. Provenance
 
