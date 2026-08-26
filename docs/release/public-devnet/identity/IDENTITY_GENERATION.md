@@ -14,6 +14,13 @@
 > qbind-node identity generate devnet validator-candidate "$OUT/val" 0
 > ```
 
+> **Run 376 — registration / admission-check.** After generating, run
+> `qbind-node identity register-check "$OUT/node/public-identity.json"
+> --seed-list <seed-list.json> [--role <role>] [--cert "$OUT/node/leaf.cert.bin"]`
+> to confirm the material is admissible as a future (planned) seed-list entry
+> before publishing. It is non-mutating, opens no socket, and makes no
+> live/reachability claim. See `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_376.md`.
+
 This document gives the **exact** operator commands to generate DevNet identity
 material, and describes every file written. The first-class `qbind-node
 identity` command (Run 375) is DevNet-gated and changes no default node

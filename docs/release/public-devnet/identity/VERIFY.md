@@ -14,6 +14,15 @@ binary.
 > / `qbind-node identity verify …`. The full first-class evidence harness is
 > `scripts/devnet/run_375_public_devnet_identity_cli.sh`.
 
+> **Run 376 — registration / admission-check verification.** To verify the
+> non-mutating admission boundary, run
+> `scripts/devnet/run_376_public_devnet_identity_registration.sh`. It builds the
+> release node, generates all three roles, and proves `register-check` accepts a
+> planned candidate (cert-verified, seed-list-schema-valid) while failing closed
+> on `status=live` without reachability, embedded private material, mismatched
+> cert, and MainNet/TestNet material. Canonical record:
+> `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_376.md`.
+
 ## 1. Helper builds
 
 ```bash

@@ -151,6 +151,22 @@ Candidate entries stay `status: "planned"` / `"placeholder"` with `last_reachabi
 and require the operator to fill `p2p_host` / `p2p_multiaddr` / `operator` / `expected_genesis_hash`
 — publishing a `node_id` here is **not** a live or reachability claim, and does **not** move M4.
 
+**Run 376 — admission-check before publishing.** Before adding a candidate to a seed list, run the
+non-mutating `qbind-node identity register-check` verifier. It validates the `public-identity.json`
+against the operator-identity schema rules, maps it into a `devnet-seed-list.schema.json` `seed_node`
+candidate against a target seed list, verifies the NodeId deterministically from the leaf cert, and
+**fails closed** on private-material embedding, malformed fields, wrong environment, MainNet/TestNet
+material, mismatched cert, `status=live` without reachability evidence, and `planned`+reachability:
+
+```bash
+qbind-node identity register-check "$OUT/seed/public-identity.json" \
+    --seed-list docs/release/public-devnet/network/devnet-seeds.placeholder.json \
+    --role seed --cert "$OUT/seed/leaf.cert.bin"
+```
+
+It opens **no** socket, mutates **no** state, and makes **no** live/reachability/M4 claim. See
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_376.md`.
+
 ## Provenance
 
 Full provenance (git commit, branch, clean/dirty state, artifact paths + hashes, Run 356 genesis

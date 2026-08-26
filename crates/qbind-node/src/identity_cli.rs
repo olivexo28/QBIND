@@ -33,7 +33,23 @@
 //!   qbind-node identity verify <leaf_cert_path>
 //!   qbind-node identity print-public <identity_dir>
 //!   qbind-node identity seed-candidate <identity_dir>
+//!   qbind-node identity register-check <public-identity.json> --seed-list <path> \
+//!       [--role <role>] [--cert <leaf.cert.bin>] \
+//!       [--status planned|live] [--reachability-evidence <ref>]
 //! ```
+//!
+//! ## Run 376 — registration / admission-check boundary
+//!
+//! `register-check` is a **non-mutating** validation boundary (Route B) that
+//! answers a single question: *is this public identity admissible as a future
+//! DevNet seed-list entry?* It reads **public material only**, validates the
+//! `public-identity.json` against the operator-identity schema rules, maps it
+//! into a `devnet-seed-list.schema.json` `seed_node` candidate, and enforces the
+//! seed-list status / reachability rules. It **never** opens a socket, never
+//! registers a peer, never mutates trust / validator / epoch / sequence / marker
+//! state, never changes the P2P wire format, and never weakens peer admission.
+//! It is a pure local read-only admission verifier and makes **no** live /
+//! reachability / M4 claim.
 //!
 //! `dispatch` returns a process exit code (`0` success, `2` usage, `3` refused /
 //! bad input, `1` I/O failure) and never panics on operator-controlled input, so
@@ -46,6 +62,7 @@ use std::path::Path;
 use std::os::unix::fs::PermissionsExt;
 
 use qbind_crypto::{MlKem768Backend, KEM_SUITE_ML_KEM_768};
+use serde_json::Value;
 use qbind_net::handshake::leaf_cert_fingerprint;
 use qbind_wire::io::WireDecode;
 use qbind_wire::net::NetworkDelegationCert;
@@ -115,11 +132,16 @@ fn usage() -> i32 {
          qbind-node identity generate <env> <role> <outdir> [validator_index]\n  \
          qbind-node identity verify <leaf_cert_path>\n  \
          qbind-node identity print-public <identity_dir>\n  \
-         qbind-node identity seed-candidate <identity_dir>\n\n\
+         qbind-node identity seed-candidate <identity_dir>\n  \
+         qbind-node identity register-check <public-identity.json> --seed-list <path> \
+         [--role <role>] [--cert <leaf.cert.bin>] [--status planned|live] \
+         [--reachability-evidence <ref>]\n\n\
          env             : must be `devnet` (MainNet/TestNet are refused; DevNet-only tooling)\n\
          role            : full-node | seed | validator-candidate\n\
          validator_index : optional u64 (default 0); binds the leaf cert validator_id to\n\
-         \x20                 `qbind-val-<index>` so the material loads under `--validator-id <index>`"
+         \x20                 `qbind-val-<index>` so the material loads under `--validator-id <index>`\n\
+         register-check  : NON-MUTATING admission verifier — reads public material only, opens no\n\
+         \x20                 socket, mutates no state, makes no live/reachability/M4 claim"
     );
     EXIT_USAGE
 }
@@ -589,6 +611,597 @@ fn json_value_field(json: &str, key: &str) -> Option<String> {
     None
 }
 
+/// Read a public-identity JSON `Value` and enforce the operator-identity schema
+/// admission rules (structural subset of `OPERATOR_IDENTITY_SCHEMA.json`). Fails
+/// closed on any missing / malformed / non-DevNet / private-material field.
+/// Returns the validated role on success. `raw` is the original file text, used
+/// to catch embedded secret material that a structural walk might miss.
+fn validate_public_identity(v: &Value, raw: &str) -> Result<String, String> {
+    let obj = v.as_object().ok_or("public-identity.json is not a JSON object")?;
+
+    // additionalProperties: false — reject any unknown top-level field (this also
+    // fail-closes on an injected secret-key field smuggled into the public doc).
+    const ALLOWED_TOP: &[&str] = &[
+        "schema_version",
+        "environment",
+        "role",
+        "suite",
+        "node_id",
+        "node_id_short",
+        "peer_id",
+        "leaf_cert_fingerprint",
+        "leaf_cert_fingerprint_short",
+        "root_key_id",
+        "root_pk_fingerprint",
+        "trusted_root_spec",
+        "validator_address",
+        "transport_security_mode",
+        "pqc_suite",
+        "private_material",
+        "safety_label",
+        "devnet_only",
+    ];
+    for k in obj.keys() {
+        if !ALLOWED_TOP.contains(&k.as_str()) {
+            return Err(format!("unexpected/forbidden field in public identity: `{}`", k));
+        }
+    }
+
+    let s = |key: &str| -> Result<String, String> {
+        obj.get(key)
+            .and_then(|x| x.as_str())
+            .map(|x| x.to_string())
+            .ok_or_else(|| format!("missing/non-string field `{}`", key))
+    };
+
+    // environment MUST be devnet — refuses MainNet/TestNet identity material.
+    let env = s("environment")?;
+    if env != "devnet" {
+        return Err(format!(
+            "environment `{}` refused — register-check is DevNet-only (MainNet/TestNet material is not admissible)",
+            env
+        ));
+    }
+
+    // role enum.
+    let role = s("role")?;
+    if !matches!(role.as_str(), "full-node" | "seed" | "validator-candidate") {
+        return Err(format!("unknown role `{}`", role));
+    }
+
+    // NodeId / peer_id / fingerprint / root pattern checks (malformed → reject).
+    let node_id = s("node_id")?;
+    if !is_hex_exact(&node_id, 64) {
+        return Err("malformed node_id (want 64 lowercase hex)".into());
+    }
+    let node_id_short = s("node_id_short")?;
+    if !is_hex_exact(&node_id_short, 16) {
+        return Err("malformed node_id_short (want 16 lowercase hex)".into());
+    }
+    let peer_id = s("peer_id")?;
+    if !is_hex_exact(&peer_id, 64) {
+        return Err("malformed peer_id (want 64 lowercase hex)".into());
+    }
+    let leaf_fp = s("leaf_cert_fingerprint")?;
+    if !is_hex_exact(&leaf_fp, 64) {
+        return Err("malformed leaf_cert_fingerprint (want 64 lowercase hex)".into());
+    }
+    let leaf_fp_short = s("leaf_cert_fingerprint_short")?;
+    if !is_hex_exact(&leaf_fp_short, 8) {
+        return Err("malformed leaf_cert_fingerprint_short (want 8 lowercase hex)".into());
+    }
+    let root_id = s("root_key_id")?;
+    if !is_hex_exact(&root_id, 64) {
+        return Err("malformed root_key_id (want 64 lowercase hex)".into());
+    }
+    let root_pk_fp = s("root_pk_fingerprint")?;
+    if !is_hex_exact(&root_pk_fp, 8) {
+        return Err("malformed root_pk_fingerprint (want 8 lowercase hex)".into());
+    }
+
+    // trusted_root_spec: "<64hex>:<int>:<hex>".
+    let spec = s("trusted_root_spec")?;
+    if !is_valid_trusted_root_spec(&spec) {
+        return Err("malformed trusted_root_spec (want <64hex>:<int>:<hex>)".into());
+    }
+
+    // devnet_only == true.
+    if obj.get("devnet_only").and_then(|x| x.as_bool()) != Some(true) {
+        return Err("devnet_only must be true".into());
+    }
+
+    // safety_label flags all true.
+    let sl = obj
+        .get("safety_label")
+        .and_then(|x| x.as_object())
+        .ok_or("missing safety_label object")?;
+    for flag in [
+        "experimental",
+        "resettable",
+        "no_value",
+        "no_mainnet_readiness_claim",
+        "no_c4_c5_closure_claim",
+    ] {
+        if sl.get(flag).and_then(|x| x.as_bool()) != Some(true) {
+            return Err(format!("safety_label.{} must be true", flag));
+        }
+    }
+
+    // validator_address: null unless role == validator-candidate.
+    let va = obj.get("validator_address").ok_or("missing validator_address")?;
+    match role.as_str() {
+        "validator-candidate" => {
+            if !va.is_string() {
+                return Err("validator-candidate requires a string validator_address".into());
+            }
+        }
+        _ => {
+            if !va.is_null() {
+                return Err("validator_address must be null for full-node/seed roles".into());
+            }
+        }
+    }
+
+    // private_material must record PATHS only.
+    let pm = obj
+        .get("private_material")
+        .and_then(|x| x.as_object())
+        .ok_or("missing private_material object")?;
+    const ALLOWED_PM: &[&str] = &["leaf_cert_path", "leaf_kem_sk_path", "note"];
+    for k in pm.keys() {
+        if !ALLOWED_PM.contains(&k.as_str()) {
+            return Err(format!("forbidden private_material field `{}`", k));
+        }
+    }
+
+    // Reject any embedded secret material (belt-and-braces over the raw text).
+    // The generated public doc legitimately references the secret-key *path*
+    // (`leaf_kem_sk_path`) and mentions in its note that the leaf KEM secret and
+    // root signing key are SECRET; those references are not a leak. We therefore
+    // match only unambiguous embedded-secret indicators.
+    let lower = raw.to_lowercase();
+    for needle in [
+        "secret_key",
+        "private_key",
+        "secretkey",
+        "privatekey",
+        "mnemonic",
+        "seed_phrase",
+        "-----begin",
+    ] {
+        if lower.contains(needle) {
+            return Err(format!(
+                "public identity appears to embed private material (`{}`) — refused",
+                needle
+            ));
+        }
+    }
+
+    Ok(role)
+}
+
+fn is_hex_exact(s: &str, len: usize) -> bool {
+    s.len() == len && s.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
+}
+
+fn is_valid_trusted_root_spec(spec: &str) -> bool {
+    let parts: Vec<&str> = spec.split(':').collect();
+    if parts.len() != 3 {
+        return false;
+    }
+    is_hex_exact(parts[0], 64)
+        && !parts[1].is_empty()
+        && parts[1].bytes().all(|b| b.is_ascii_digit())
+        && !parts[2].is_empty()
+        && parts[2].bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
+}
+
+/// `register-check <public-identity.json> --seed-list <path> [--role <role>]
+/// [--cert <leaf.cert.bin>] [--status planned|live] [--reachability-evidence <ref>]`
+///
+/// Non-mutating admission verifier. Reads public material only, opens no socket,
+/// mutates no runtime state, makes no live/reachability/M4 claim. Prints a
+/// machine-readable JSON verdict on stdout; exit `0` = admissible, `3` = refused
+/// (fail-closed), `2` = usage, `1` = I/O.
+fn cmd_register_check(mut args: impl Iterator<Item = String>) -> i32 {
+    let identity_path = match args.next() {
+        Some(v) if !v.starts_with("--") => v,
+        _ => return usage(),
+    };
+
+    let mut seed_list: Option<String> = None;
+    let mut role_flag: Option<String> = None;
+    let mut cert_flag: Option<String> = None;
+    let mut status = "planned".to_string();
+    let mut reachability: Option<String> = None;
+
+    while let Some(flag) = args.next() {
+        match flag.as_str() {
+            "--seed-list" => match args.next() {
+                Some(v) => seed_list = Some(v),
+                None => return usage(),
+            },
+            "--role" => match args.next() {
+                Some(v) => role_flag = Some(v),
+                None => return usage(),
+            },
+            "--cert" => match args.next() {
+                Some(v) => cert_flag = Some(v),
+                None => return usage(),
+            },
+            "--status" => match args.next() {
+                Some(v) => status = v,
+                None => return usage(),
+            },
+            "--reachability-evidence" => match args.next() {
+                Some(v) => reachability = Some(v),
+                None => return usage(),
+            },
+            other => {
+                eprintln!("[qbind-node identity register-check] unknown flag `{}`", other);
+                return usage();
+            }
+        }
+    }
+
+    let seed_list = match seed_list {
+        Some(v) => v,
+        None => {
+            eprintln!("[qbind-node identity register-check] REFUSED: --seed-list <path> is required");
+            return usage();
+        }
+    };
+
+    // 1. Read the public identity (public material only).
+    let raw = match fs::read_to_string(Path::new(&identity_path)) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!(
+                "[qbind-node identity register-check] ERROR: could not read `{}`: {}",
+                identity_path, e
+            );
+            return EXIT_IO;
+        }
+    };
+    let identity: Value = match serde_json::from_str(&raw) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!(
+                "[qbind-node identity register-check] REFUSED: `{}` is not valid JSON: {}",
+                identity_path, e
+            );
+            return EXIT_REFUSED;
+        }
+    };
+
+    // 2. Validate the public identity against the operator-identity schema rules.
+    let role = match validate_public_identity(&identity, &raw) {
+        Ok(r) => r,
+        Err(reason) => return reject(&reason),
+    };
+
+    // Optional --role must match the identity's declared role.
+    if let Some(want) = &role_flag {
+        if !matches!(want.as_str(), "full-node" | "seed" | "validator-candidate") {
+            return reject(&format!("unknown --role `{}`", want));
+        }
+        if want != &role {
+            return reject(&format!(
+                "--role `{}` does not match identity role `{}`",
+                want, role
+            ));
+        }
+    }
+
+    // 3. Load the seed-list document (for genesis context + schema target).
+    let seed_raw = match fs::read_to_string(Path::new(&seed_list)) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!(
+                "[qbind-node identity register-check] ERROR: could not read seed-list `{}`: {}",
+                seed_list, e
+            );
+            return EXIT_IO;
+        }
+    };
+    let seed_doc: Value = match serde_json::from_str(&seed_raw) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!(
+                "[qbind-node identity register-check] REFUSED: seed-list `{}` is not valid JSON: {}",
+                seed_list, e
+            );
+            return EXIT_REFUSED;
+        }
+    };
+    let genesis_hash = match validate_seed_list_doc(&seed_doc) {
+        Ok(g) => g,
+        Err(reason) => return reject(&format!("seed-list: {}", reason)),
+    };
+
+    // 4/5. Enforce seed-list status / reachability admission rule.
+    match status.as_str() {
+        "planned" => {
+            if reachability.is_some() {
+                return reject(
+                    "a `planned` candidate must NOT carry reachability evidence (schema forbids \
+                     last_reachability_evidence on non-live entries)",
+                );
+            }
+        }
+        "live" => {
+            if reachability.is_none() {
+                return reject(
+                    "status=live requires --reachability-evidence (a live seed must carry \
+                     last_reachability_evidence); no live/M4 claim is made without it",
+                );
+            }
+        }
+        other => {
+            return reject(&format!(
+                "unsupported --status `{}` (register-check accepts only `planned` or `live`)",
+                other
+            ));
+        }
+    }
+
+    // 10. If a leaf cert is supplied, verify NodeId deterministically and check
+    //     the cert binds to the same identity (fail closed on any mismatch).
+    if let Some(cert_path) = &cert_flag {
+        if let Err(reason) = verify_cert_against_identity(cert_path, &identity, &role) {
+            return reject(&reason);
+        }
+    }
+
+    // 3. (cont.) Map the identity into a seed_node candidate and validate it.
+    let node_id = identity.get("node_id").and_then(|x| x.as_str()).unwrap_or_default();
+    let peer_id = identity.get("peer_id").and_then(|x| x.as_str()).unwrap_or_default();
+    let transport = identity
+        .get("transport_security_mode")
+        .and_then(|x| x.as_str())
+        .unwrap_or_default();
+    let pqc_suite = identity.get("pqc_suite").and_then(|x| x.as_str()).unwrap_or_default();
+    let validator_address = identity.get("validator_address").cloned().unwrap_or(Value::Null);
+    let reach_val = match &reachability {
+        Some(r) => Value::String(r.clone()),
+        None => Value::Null,
+    };
+
+    let candidate = serde_json::json!({
+        "node_id": node_id,
+        "peer_id": peer_id,
+        "validator_address": validator_address,
+        "p2p_host": "203.0.113.10",
+        "p2p_port": 30333,
+        "p2p_multiaddr": "203.0.113.10:30333",
+        "transport_security_mode": transport,
+        "pqc_suite": pqc_suite,
+        "trust_bundle_required": false,
+        "expected_genesis_hash": genesis_hash,
+        "operator": "register-check-candidate",
+        "status": status,
+        "last_reachability_evidence": reach_val,
+        "notes": "register-check derived candidate (admission verification only; not live)"
+    });
+    if let Err(reason) = validate_seed_node(&candidate) {
+        return reject(&format!("candidate: {}", reason));
+    }
+
+    // Admissible. Emit a machine-readable verdict (public material only).
+    let verdict = serde_json::json!({
+        "admissible": true,
+        "role": role,
+        "node_id": node_id,
+        "peer_id": peer_id,
+        "environment": "devnet",
+        "seed_list": seed_list,
+        "expected_genesis_hash": genesis_hash,
+        "candidate_status": status,
+        "cert_verified": cert_flag.is_some(),
+        "socket_opened": false,
+        "runtime_state_mutated": false,
+        "live_reachability_claim": false,
+        "m4_green_claim": false,
+        "c4_c5_closure_claim": false,
+        "candidate": candidate,
+    });
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&verdict).unwrap_or_else(|_| "{}".to_string())
+    );
+    0
+}
+
+/// Emit a fail-closed refusal verdict on stdout and return `EXIT_REFUSED`.
+fn reject(reason: &str) -> i32 {
+    let verdict = serde_json::json!({
+        "admissible": false,
+        "reason": reason,
+        "socket_opened": false,
+        "runtime_state_mutated": false,
+        "live_reachability_claim": false,
+        "m4_green_claim": false,
+        "c4_c5_closure_claim": false,
+    });
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&verdict).unwrap_or_else(|_| "{}".to_string())
+    );
+    eprintln!("[qbind-node identity register-check] REFUSED: {}", reason);
+    EXIT_REFUSED
+}
+
+/// Validate the top-level seed-list document (structural subset of
+/// `devnet-seed-list.schema.json`) and return its `genesis_hash`. Also enforces
+/// the per-entry status/reachability rule on any existing entries.
+fn validate_seed_list_doc(v: &Value) -> Result<String, String> {
+    let obj = v.as_object().ok_or("not a JSON object")?;
+    for req in [
+        "schema_version",
+        "network_name",
+        "environment",
+        "runtime_chain_id",
+        "genesis_hash",
+        "genesis_file_sha256",
+        "safety_label",
+        "placeholder_statement",
+        "seed_nodes",
+    ] {
+        if !obj.contains_key(req) {
+            return Err(format!("missing required field `{}`", req));
+        }
+    }
+    if obj.get("environment").and_then(|x| x.as_str()) != Some("devnet") {
+        return Err("environment must be `devnet`".into());
+    }
+    let genesis = obj
+        .get("genesis_hash")
+        .and_then(|x| x.as_str())
+        .ok_or("genesis_hash must be a string")?;
+    if !is_genesis_hash(genesis) {
+        return Err("genesis_hash must match 0x<64hex>".into());
+    }
+    let nodes = obj
+        .get("seed_nodes")
+        .and_then(|x| x.as_array())
+        .ok_or("seed_nodes must be an array")?;
+    for (i, n) in nodes.iter().enumerate() {
+        validate_seed_node(n).map_err(|e| format!("seed_nodes[{}]: {}", i, e))?;
+    }
+    Ok(genesis.to_string())
+}
+
+fn is_genesis_hash(s: &str) -> bool {
+    s.len() == 66
+        && s.starts_with("0x")
+        && s[2..].bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
+}
+
+/// Validate a single `seed_node` object (structural subset of the seed-list
+/// schema, including the status ⇔ reachability allOf rules).
+fn validate_seed_node(v: &Value) -> Result<(), String> {
+    let obj = v.as_object().ok_or("not a JSON object")?;
+    const REQUIRED: &[&str] = &[
+        "node_id",
+        "peer_id",
+        "validator_address",
+        "p2p_host",
+        "p2p_port",
+        "p2p_multiaddr",
+        "transport_security_mode",
+        "pqc_suite",
+        "trust_bundle_required",
+        "expected_genesis_hash",
+        "operator",
+        "status",
+        "last_reachability_evidence",
+        "notes",
+    ];
+    for req in REQUIRED {
+        if !obj.contains_key(*req) {
+            return Err(format!("missing required field `{}`", req));
+        }
+    }
+    for k in obj.keys() {
+        if !REQUIRED.contains(&k.as_str()) {
+            return Err(format!("unexpected field `{}`", k));
+        }
+    }
+    let status = obj
+        .get("status")
+        .and_then(|x| x.as_str())
+        .ok_or("status must be a string")?;
+    if !matches!(status, "placeholder" | "planned" | "live" | "retired") {
+        return Err(format!("invalid status `{}`", status));
+    }
+    let expected_genesis = obj
+        .get("expected_genesis_hash")
+        .and_then(|x| x.as_str())
+        .ok_or("expected_genesis_hash must be a string")?;
+    if !is_genesis_hash(expected_genesis) {
+        return Err("expected_genesis_hash must match 0x<64hex>".into());
+    }
+    let reach = obj
+        .get("last_reachability_evidence")
+        .ok_or("missing last_reachability_evidence")?;
+    match status {
+        "live" => {
+            let ok = reach.as_str().map(|s| !s.is_empty()).unwrap_or(false);
+            if !ok {
+                return Err("status=live requires a non-empty last_reachability_evidence".into());
+            }
+        }
+        _ => {
+            if !reach.is_null() {
+                return Err(format!(
+                    "status={} must have null last_reachability_evidence",
+                    status
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Decode the leaf cert at `cert_path`, re-derive the NodeId / fingerprint /
+/// root id, and confirm the cert binds to the same identity. For a
+/// validator-candidate, also confirm the cert's validator_id matches the
+/// identity's `validator_address` index. Fails closed on any mismatch.
+fn verify_cert_against_identity(cert_path: &str, identity: &Value, role: &str) -> Result<(), String> {
+    let bytes = fs::read(Path::new(cert_path))
+        .map_err(|e| format!("could not read leaf cert `{}`: {}", cert_path, e))?;
+    let mut slice: &[u8] = &bytes;
+    let cert = NetworkDelegationCert::decode(&mut slice)
+        .map_err(|e| format!("could not decode leaf cert `{}`: {:?}", cert_path, e))?;
+
+    let node_id = hex_lower(&qbind_hash::derive_node_id_from_pubkey(&cert.leaf_kem_pk));
+    let want_node_id = identity.get("node_id").and_then(|x| x.as_str()).unwrap_or_default();
+    if node_id != want_node_id {
+        return Err(format!(
+            "leaf cert NodeId `{}` does not match public identity node_id `{}`",
+            node_id, want_node_id
+        ));
+    }
+    let fp = hex_lower(&leaf_cert_fingerprint(&cert));
+    let want_fp = identity
+        .get("leaf_cert_fingerprint")
+        .and_then(|x| x.as_str())
+        .unwrap_or_default();
+    if fp != want_fp {
+        return Err(format!(
+            "leaf cert fingerprint `{}` does not match public identity leaf_cert_fingerprint `{}`",
+            fp, want_fp
+        ));
+    }
+    let root_id = hex_lower(&cert.root_key_id);
+    let want_root = identity.get("root_key_id").and_then(|x| x.as_str()).unwrap_or_default();
+    if root_id != want_root {
+        return Err(format!(
+            "leaf cert root_key_id `{}` does not match public identity root_key_id `{}`",
+            root_id, want_root
+        ));
+    }
+
+    if role == "validator-candidate" {
+        let va = identity
+            .get("validator_address")
+            .and_then(|x| x.as_str())
+            .ok_or("validator-candidate identity missing validator_address")?;
+        let index = va
+            .strip_prefix("qbind-val-")
+            .and_then(|s| s.parse::<u64>().ok())
+            .ok_or_else(|| format!("validator_address `{}` is not `qbind-val-<index>`", va))?;
+        let expected = validator_id_bytes_for_index(index);
+        if cert.validator_id != expected {
+            return Err(format!(
+                "leaf cert validator_id does not match identity validator index {} ({})",
+                index, va
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// Dispatch the `identity` subcommand. `args` MUST be the tokens **after** the
 /// `identity` keyword (i.e. the subcommand and its arguments). Returns a process
 /// exit code; never panics on operator-controlled input.
@@ -602,6 +1215,7 @@ pub fn dispatch(mut args: impl Iterator<Item = String>) -> i32 {
         "verify" => cmd_verify(args),
         "print-public" => cmd_print_public(args),
         "seed-candidate" => cmd_seed_candidate(args),
+        "register-check" => cmd_register_check(args),
         "-h" | "--help" | "help" => {
             usage();
             0

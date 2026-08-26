@@ -8,6 +8,14 @@
 > Wherever this document shows `"$BIN" verify …`, you may equivalently run
 > `qbind-node identity verify …` — identical, public-only output.
 
+> **Run 376 — registration / admission-check.** Beyond re-deriving public
+> identity, `qbind-node identity register-check <public-identity.json>
+> --seed-list <path> [--role <role>] [--cert <leaf.cert.bin>]` decides whether the
+> identity is admissible as a future seed-list entry (schema-valid, cert-consistent,
+> `status=planned`, no reachability). It reads public material only, opens no
+> socket, mutates no state, and makes no live/reachability/M4 claim. See
+> `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_376.md`.
+
 This document gives the **exact** commands to print, verify, and cross-check
 public identity material. Every step here operates on **public** material only
 (no secret key is read), so it is safe for an external reviewer to run on a

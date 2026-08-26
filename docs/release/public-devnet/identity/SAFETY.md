@@ -13,6 +13,13 @@ identity package.
 > signing key is held in memory and never written to disk, and
 > `public-identity.json` records private-file **paths only**, never contents.
 
+> **Run 376 note.** The `qbind-node identity register-check` admission verifier
+> reads **public material only** and **fails closed** if a `public-identity.json`
+> embeds any secret indicator (`secret_key`, `private_key`, `mnemonic`,
+> `seed_phrase`, PEM `-----begin`) or any unknown/forbidden field — an extra guard
+> against accidentally publishing private material. It never reads the KEM secret
+> key, opens no socket, and mutates no state.
+
 ## 1. Safe to publish (public material)
 
 - `node_id` / `node_id_short` and `peer_id` (derived from the certified leaf

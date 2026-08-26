@@ -150,3 +150,34 @@ schema-compatible, safe for external DevNet operators). M6 as a whole **remains
 Yellow (Partial)** because a **live registration path** into a running public
 DevNet does not exist (M4-gated) and operator-supplied root reuse/rotation/
 revocation is still C4/C5-OPEN. No M4 Green, no C4/C5 closure is claimed.
+
+### 9.2 Run 376 — non-mutating `identity register-check` admission boundary
+
+**Run 376** adds a **non-mutating** admission verifier that decides whether a
+generated public identity is admissible as a future seed-list entry:
+
+```bash
+qbind-node identity register-check <outdir>/public-identity.json \
+    --seed-list docs/release/public-devnet/network/devnet-seeds.placeholder.json \
+    [--role full-node|seed|validator-candidate] [--cert <outdir>/leaf.cert.bin] \
+    [--status planned|live] [--reachability-evidence <ref>]
+```
+
+It reads **public material only**, validates `public-identity.json` against the
+operator-identity schema rules, maps it into a `devnet-seed-list.schema.json`
+`seed_node` candidate (`status=planned`, `expected_genesis_hash` from the target
+seed list, `last_reachability_evidence=null`), verifies the NodeId
+deterministically from the leaf cert when supplied, and **fails closed** on
+private-material embedding, malformed fields, wrong environment, MainNet/TestNet
+material, mismatched cert, `status=live` without reachability evidence, and
+`planned`+reachability. It opens **no** socket, mutates **no** runtime state, and
+makes **no** live / reachability / M4 / C4 / C5 claim. Evidence:
+`scripts/devnet/run_376_public_devnet_identity_registration.sh`,
+`crates/qbind-node/tests/run_376_public_devnet_identity_registration_tests.rs`,
+and `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_376.md`.
+
+**M6 delta (Run 376):** the **registration / admission-check** half of M6 is now
+**Green-for-scope** (a stable generate → verify → register-check workflow exists
+for external operators). M6 as a whole **remains Yellow (Partial)** because the
+*live* registration half is inseparable from M4 live seed reachability, which has
+not landed. No M4 Green, no C4/C5 closure is claimed.

@@ -23,6 +23,26 @@
 > It changes **no** default node behavior: it is only reached when `identity` is
 > the first CLI token. See `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_375.md`.
 
+> **Run 376 — registration / admission-check.** A **non-mutating**
+> `qbind-node identity register-check` subcommand now decides whether a
+> generated public identity is admissible as a future DevNet seed-list entry:
+>
+> ```bash
+> qbind-node identity register-check <outdir>/public-identity.json \
+>     --seed-list docs/release/public-devnet/network/devnet-seeds.placeholder.json \
+>     [--role full-node|seed|validator-candidate] [--cert <outdir>/leaf.cert.bin] \
+>     [--status planned|live] [--reachability-evidence <ref>]
+> ```
+>
+> It reads **public material only**, validates `public-identity.json` against the
+> operator-identity schema rules, maps it into a `devnet-seed-list.schema.json`
+> `seed_node` candidate, verifies the NodeId deterministically from the leaf cert,
+> and **fails closed** on private-material embedding, malformed fields, wrong
+> environment, MainNet/TestNet material, mismatched cert, `status=live` without
+> reachability evidence, and `planned`+reachability. It opens **no** socket,
+> mutates **no** runtime state, and makes **no** live / reachability / M4 / C4 / C5
+> claim. See `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_376.md`.
+
 
 This directory is the canonical, operator-facing **identity-generation and
 verification** package for the QBIND public DevNet. It lets an external DevNet
@@ -51,10 +71,12 @@ missing). See "Readiness status" below for the exact matrix delta.
 ## Tooling
 
 - **First-class command (Run 375, preferred):** `qbind-node identity`
-  (`generate` / `verify` / `print-public` / `seed-candidate`), implemented in
-  `crates/qbind-node/src/identity_cli.rs`. Evidence:
+  (`generate` / `verify` / `print-public` / `seed-candidate` / `register-check`),
+  implemented in `crates/qbind-node/src/identity_cli.rs`. Evidence:
   `scripts/devnet/run_375_public_devnet_identity_cli.sh` /
-  `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_375.md`.
+  `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_375.md`; registration/admission-check
+  (Run 376): `scripts/devnet/run_376_public_devnet_identity_registration.sh` /
+  `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_376.md`.
 - **Generator / verifier (release-built example, now a thin wrapper over the
   first-class command):**
   `crates/qbind-node/examples/run_374_public_devnet_identity_generation_helper.rs`
