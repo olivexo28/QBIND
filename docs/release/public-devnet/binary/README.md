@@ -23,6 +23,8 @@ are running the artifact this repository describes.
 | `REPRODUCIBILITY.md` | Same-host two-build reproducibility experiment + BuildID result. Includes the Run 383 same-input reproducibility result for the canonical injected-provenance release build. |
 | `BUILDINFO.md` | Full build-input record for audit/reproduction. Includes the Run 382 ELF-BuildID-vs-metric-`build_id`-label distinction and the Run 383 canonical injected release-provenance build command. |
 | `qbind-node.sha256` | SHA-256 of the locally built `target/release/qbind-node`, standard checksum format. |
+| `RELEASE_ARTIFACT_MANIFEST.schema.json` | JSON Schema (draft-07) contract for the canonical CI/release-artifact manifest (Run 384). |
+| `RELEASE_ARTIFACT_MANIFEST.example.json` | Publish-safe example manifest generated from the real canonical injected build (Run 384); validates against the schema. |
 | `VERIFY.md` | Exact operator verification commands and expected outputs. |
 
 ## 2. What this package is NOT
@@ -104,6 +106,23 @@ across two clean builds), and changing the injected `build_id` changes the hash 
 **per-input**, same-host result only (see `REPRODUCIBILITY.md` §10 and
 `../../../devnet/QBIND_DEVNET_EVIDENCE_RUN_383.md`).
 
+## 10a. Canonical release-artifact manifest (Run 384)
+
+Run 384 adds a canonical, publish-safe **release-artifact manifest** for the Run 383
+canonical injected build. `RELEASE_ARTIFACT_MANIFEST.schema.json` is the JSON-Schema
+(draft-07) contract and `RELEASE_ARTIFACT_MANIFEST.example.json` is an example
+generated from the **real** artifact and a **live loopback** `qbind_node_build_info`
+scrape. The manifest records the injected build inputs, the release-binary SHA-256,
+the ELF BuildID, the metric `build_id` / `git_commit` (kept a **separate field** from
+and distinct from the ELF BuildID), the toolchain, the target triple, the
+`Cargo.lock` hash, the exact build command, the **same-host / per-input**
+reproducibility scope (referencing Run 383, **not** overclaimed as cross-host or
+SLSA), the source-tree state, explicit non-claim fields, verification commands, and
+the artifact safety label. It embeds **no** binary blob, absolute path, private
+hostname, external endpoint, secret, or raw `/metrics` dump. Regenerate + validate
+with `scripts/devnet/run_384_public_devnet_release_artifact_manifest.sh` (see
+`VERIFY.md` §6b and `../../../devnet/QBIND_DEVNET_EVIDENCE_RUN_384.md`).
+
 ## 11. What remains before public DevNet launch
 
 Publishing this provenance record does **not** make the network joinable. Remaining public DevNet
@@ -125,3 +144,6 @@ Public DevNet stays **NOT launch-ready** until all must-haves are Green. See
 - Run 382 build-info provenance evidence: `../../../devnet/QBIND_DEVNET_EVIDENCE_RUN_382.md`.
 - Run 383 canonical injected release-provenance + reproducibility evidence:
   `../../../devnet/QBIND_DEVNET_EVIDENCE_RUN_383.md`.
+- Run 384 CI/release-artifact manifest package (`RELEASE_ARTIFACT_MANIFEST.schema.json` +
+  `RELEASE_ARTIFACT_MANIFEST.example.json`), evidence:
+  `../../../devnet/QBIND_DEVNET_EVIDENCE_RUN_384.md`.

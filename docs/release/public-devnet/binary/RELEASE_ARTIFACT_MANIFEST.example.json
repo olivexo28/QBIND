@@ -1,0 +1,52 @@
+{
+  "schema_version": "1.0.0",
+  "package_name": "qbind-public-devnet-release-artifact-manifest",
+  "package_version": "1.0.0",
+  "environment": "devnet",
+  "git_commit_full": "262e2df5c33320dc934c14792ecc6d8e5ea24c4c",
+  "git_commit_short": "262e2df5c333",
+  "injected_QBIND_GIT_COMMIT": "262e2df5c333",
+  "injected_QBIND_BUILD_ID": "qbind-devnet-0.1.0-262e2df5c333",
+  "binary_path": "target/release/qbind-node",
+  "binary_sha256": "bf0fadd4dff37aa426e5dfc87fda04123395eff04675f43c65ba1c3cf6d0e673",
+  "elf_build_id": "4bb114ba7cf7fd89795da80c2ad7c2bdee9e45b2",
+  "metric_build_id": "qbind-devnet-0.1.0-262e2df5c333",
+  "metric_git_commit": "262e2df5c333",
+  "toolchain": {
+    "rustc_version": "rustc 1.98.0 (88d9e12ae 2026-08-18)",
+    "cargo_version": "cargo 1.98.0 (797e8a9bc 2026-08-05)"
+  },
+  "target_triple": "x86_64-unknown-linux-gnu",
+  "cargo_lock_sha256": "70aec07f6e1eb8ea3e98634acefdd92bf9f9ea03929d2821e3cc04c75bb1baaf",
+  "build_command": "QBIND_GIT_COMMIT=262e2df5c333 QBIND_BUILD_ID=qbind-devnet-0.1.0-262e2df5c333 cargo build -p qbind-node --release --locked --bin qbind-node",
+  "reproducibility_scope": {
+    "same_host": true,
+    "per_input": true,
+    "cross_host": false,
+    "slsa_grade": false,
+    "signed_release": false,
+    "reference": "docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_383.md (same-input, same-host reproducibility; not cross-host, not SLSA)"
+  },
+  "generated_at_utc": "2026-08-31T12:14:27Z",
+  "source_tree_state": "clean",
+  "non_claims": {
+    "no_public_devnet_launch": true,
+    "no_M4_green": true,
+    "no_M6_green": true,
+    "no_testnet_ready": true,
+    "no_mainnet_ready": true,
+    "no_C4_closure": true,
+    "no_C5_closure": true,
+    "no_signed_release": true,
+    "no_slsa_provenance": true
+  },
+  "verification_commands": [
+    "GC=$(git rev-parse --short=12 HEAD)",
+    "QBIND_GIT_COMMIT=\"$GC\" QBIND_BUILD_ID=\"qbind-devnet-0.1.0-$GC\" cargo build -p qbind-node --release --locked --bin qbind-node",
+    "sha256sum target/release/qbind-node   # expect binary_sha256",
+    "readelf -n target/release/qbind-node | grep -i 'build id'   # expect elf_build_id",
+    "QBIND_METRICS_HTTP_ADDR=127.0.0.1:19090 target/release/qbind-node --env devnet --network-mode p2p --enable-p2p --p2p-listen-addr 127.0.0.1:19091 --validator-id 0 --data-dir ./qbind-verify-data &",
+    "curl -fsS http://127.0.0.1:19090/metrics | grep -E '^qbind_node_build_info' # expect metric_build_id + metric_git_commit"
+  ],
+  "artifact_safety_label": "experimental · resettable · no value · no MainNet readiness claim · no C4/C5 closure claim"
+}

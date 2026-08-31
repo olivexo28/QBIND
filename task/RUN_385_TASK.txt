@@ -1,0 +1,190 @@
+Run 385 — CI artifact generation for public DevNet release manifest
+
+Current state:
+Run 384 is accepted PASS. The public DevNet release-artifact manifest package now exists:
+- RELEASE_ARTIFACT_MANIFEST.schema.json
+- RELEASE_ARTIFACT_MANIFEST.example.json
+- run_384_public_devnet_release_artifact_manifest.sh
+- canonical injected provenance:
+  QBIND_GIT_COMMIT=<short commit>
+  QBIND_BUILD_ID=qbind-devnet-0.1.0-<short commit>
+- manifest generated from the real release binary + live loopback qbind_node_build_info scrape
+- schema-valid
+- SHA / ELF BuildID / metric labels / Cargo.lock / toolchain cross-checked
+- same-host/per-input reproducibility scope only
+- M12/M13/M14 Green
+- M4 Yellow / launch-blocking
+- M6 Yellow/Partial
+- public DevNet NOT launch-ready
+- C4/C5 OPEN
+
+Objective:
+Wire the Run 384 manifest generation into CI so every published DevNet release build can produce a schema-validated RELEASE_ARTIFACT_MANIFEST.json as a CI artifact, without committing generated CI output and without changing production Rust code.
+
+Decision gate:
+Prefer Route A:
+- CI workflow/config + harness/docs only.
+- No production Rust source change.
+- No build.rs change.
+- No runtime behavior change.
+- No new qbind-node CLI flag.
+
+Strict scope:
+- Add or update CI workflow only for release-manifest artifact generation.
+- Keep workflow manual or release-track scoped unless the repository already has an established safe release trigger.
+- Archive generated manifest as CI artifact, not as a committed changing file.
+- Reuse the existing Run 384 harness or a small wrapper around it.
+- Preserve all Run 384 schema and publish-safety checks.
+
+Non-goals:
+- No public DevNet launch.
+- No M4 Green.
+- No M6 Green.
+- No external seed/bootnode.
+- No faucet, RPC, explorer, status page.
+- No TestNet/MainNet readiness.
+- No C4/C5 closure.
+- No authority lifecycle wiring.
+- No validator-set mutation.
+- No epoch transition.
+- No trust-bundle apply.
+- No P2P wire/admission/trust change.
+- No new public CLI flag.
+- No committed generated manifest from CI.
+- No secrets, signing keys, CI tokens, private endpoints, raw logs, raw metrics dumps, data dirs, hostnames, branch dirty-state, or absolute build paths.
+
+Required investigation:
+Inspect:
+- scripts/devnet/run_384_public_devnet_release_artifact_manifest.sh
+- RELEASE_ARTIFACT_MANIFEST.schema.json
+- RELEASE_ARTIFACT_MANIFEST.example.json
+- docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_384.md
+- docs/release/public-devnet/binary/{README.md,BUILDINFO.md,REPRODUCIBILITY.md,VERIFY.md}
+- any existing .github/workflows or CI configuration
+- Cargo.lock and release build assumptions
+- observability VERIFY docs for the metrics scrape requirement
+
+Implementation:
+Add, if GitHub Actions is used:
+- .github/workflows/public-devnet-release-artifact-manifest.yml
+
+Add:
+- scripts/devnet/run_385_public_devnet_ci_release_artifact_manifest.sh
+- docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_385.md
+- docs/devnet/run_385_public_devnet_ci_release_artifact_manifest/{README.md,summary.txt,.gitignore}
+
+Update narrowly:
+- docs/release/public-devnet/binary/README.md
+- docs/release/public-devnet/binary/BUILDINFO.md
+- docs/release/public-devnet/binary/REPRODUCIBILITY.md
+- docs/release/public-devnet/binary/VERIFY.md
+- docs/release/public-devnet/observability/VERIFY.md
+- docs/release/QBIND_PUBLIC_DEVNET_READINESS_CRITERIA.md
+- docs/protocol/QBIND_C4_C5_CLOSURE_CRITERIA.md
+- docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md
+- docs/protocol/QBIND_GOVERNANCE_EXECUTION_RUNTIME_SURFACE_AUDIT.md
+- docs/ops/QBIND_PQC_TRUST_LIFECYCLE_RUNBOOK.md
+- docs/whitepaper/contradiction.md
+
+CI workflow requirements:
+- Build with:
+  QBIND_GIT_COMMIT="${short_commit}"
+  QBIND_BUILD_ID="qbind-devnet-0.1.0-${short_commit}"
+  cargo build -p qbind-node --release --locked --bin qbind-node
+- Generate RELEASE_ARTIFACT_MANIFEST.json from the actual CI-built binary.
+- Validate against RELEASE_ARTIFACT_MANIFEST.schema.json.
+- Scrape live loopback /metrics and confirm qbind_node_build_info matches manifest.
+- Upload artifacts:
+  - qbind-node.sha256 or checksum text
+  - RELEASE_ARTIFACT_MANIFEST.json
+  - manifest validation summary
+  - optional readelf BuildID summary
+- Do not upload raw logs, raw metrics dumps, temp data dirs, private material, or secrets.
+- Ensure generated artifact is not committed by the workflow.
+- Use least privilege workflow permissions.
+- Avoid secrets entirely unless the repository already requires them; no signing in this run.
+- Record signed_release=false and slsa_grade=false.
+
+Harness evidence:
+1. CI workflow syntax/lint check if available.
+2. Local dry-run wrapper proves the same commands the CI workflow will run.
+3. Canonical injected build succeeds.
+4. Manifest generated from actual binary.
+5. Manifest schema-valid.
+6. Live qbind_node_build_info cross-check passes.
+7. SHA-256 and ELF BuildID cross-check pass.
+8. Cargo.lock hash recorded.
+9. Toolchain and target recorded.
+10. Generated manifest publish-safe.
+11. Artifact upload paths exclude raw logs/metrics/data dirs.
+12. No new qbind-node CLI flag.
+13. Metrics disabled by default.
+14. Non-claim grep passes.
+15. CI permissions are minimal.
+16. Workflow does not create a release, tag, deployment, seed, endpoint, or public network claim.
+
+Required tests:
+- cargo build -p qbind-node --release --locked --bin qbind-node with canonical injected provenance
+- Run 385 harness
+- Manifest schema validation
+- Workflow YAML parse/lint if available
+- Observability scrape + alert YAML parse
+- cargo test -p qbind-node --test run_382_public_devnet_build_info_provenance_tests
+- cargo test -p qbind-node --lib only if Rust code changed; otherwise record baseline/no Rust delta honestly
+- non-claim grep
+
+Security:
+- Run secret scanning over all changed files.
+- Confirm no CI secrets referenced.
+- Confirm no private endpoint/hostname/token/path/raw metrics/raw logs/data dir is committed.
+- Confirm generated artifacts remain under ignored/temp or CI-artifact-only paths.
+
+CodeQL:
+- If workflow/docs/shell/schema only, record CodeQL as trivial/not meaningful for compiled code.
+- If any Rust source changes, invoke CodeQL if available and record exact result. Do not call skipped analysis clean.
+
+Readiness:
+- M13 remains Green.
+- M14 remains Green.
+- M12 remains Green.
+- M4 remains Yellow / launch-blocking.
+- M6 remains Yellow/Partial.
+- Public DevNet remains NOT launch-ready.
+- C4/C5 remain OPEN.
+
+Expected verdict:
+PASS / public-DevNet CI release-manifest artifact generation POSITIVE if CI/workflow + local harness generate and validate a publish-safe manifest from a real canonical injected build, without committing generated CI artifacts or changing production runtime.
+
+Partial-positive if only docs land, workflow is not executable, or manifest generation is not tied to the actual built artifact.
+
+Final response format:
+1. Exact verdict
+2. Files changed
+3. Decision gate route
+4. CI workflow/package contents
+5. Canonical injected build inputs
+6. CI artifact outputs
+7. Manifest generation evidence
+8. Manifest schema evidence
+9. Live metric cross-check
+10. SHA / ELF BuildID cross-check
+11. Cargo.lock/toolchain evidence
+12. Artifact upload safety
+13. Workflow permissions/secrets posture
+14. Default compatibility
+15. CLI surface
+16. Reproducibility scope
+17. Non-claim checks
+18. Readiness M13
+19. Readiness M14
+20. Public DevNet status
+21. Remaining DevNet blockers
+22. TestNet blockers
+23. MainNet blockers
+24. C4/C5
+25. Tests run
+26. Security scans
+27. CodeQL
+28. Provenance
+29. Honest limitations
+30. Suggested Run 386

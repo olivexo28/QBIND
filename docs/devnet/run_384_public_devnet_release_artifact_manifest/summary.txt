@@ -1,0 +1,31 @@
+=== Run 384 canonical injected release-artifact manifest ===
+decision_gate=Route A (docs/harness/schema only: record a canonical, publish-safe release-artifact manifest for the Run 383 canonical injected build; no production source change, no build.rs change, no runtime change, no CLI flag)
+canonical_git_commit=262e2df5c333 (expected short commit; equals git rev-parse --short=12 HEAD)
+canonical_build_id=qbind-devnet-0.1.0-262e2df5c333 (canonical release id; injected, NOT the ELF BuildID)
+toolchain=rustc 1.98.0 (88d9e12ae 2026-08-18) / cargo 1.98.0 (797e8a9bc 2026-08-05)
+target_triple=x86_64-unknown-linux-gnu
+build_command=QBIND_GIT_COMMIT=262e2df5c333 QBIND_BUILD_ID=qbind-devnet-0.1.0-262e2df5c333 cargo build -p qbind-node --release --locked --bin qbind-node
+release_build_canonical=OK sha256=bf0fadd4dff37aa426e5dfc87fda04123395eff04675f43c65ba1c3cf6d0e673 elf_build_id=4bb114ba7cf7fd89795da80c2ad7c2bdee9e45b2
+no_new_cli_flag=OK (no provenance/manifest CLI flag; exposure remains QBIND_METRICS_HTTP_ADDR env only)
+metrics_scrape=OK http=200 bind=127.0.0.1:45585 lines=515
+public_exposure=NONE (endpoint bound to 127.0.0.1; no auth/TLS; must stay loopback)
+build_info_line=qbind_node_build_info{version="0.1.0",build_id="qbind-devnet-0.1.0-262e2df5c333",git_commit="262e2df5c333",env="devnet",chain_id="51424e4444455600"} 1
+cargo_lock_sha256=70aec07f6e1eb8ea3e98634acefdd92bf9f9ea03929d2821e3cc04c75bb1baaf
+metrics_disabled_by_default=OK (no QBIND_METRICS_HTTP_ADDR => no /metrics bind logged)
+manifest_generated=OK (manifest.json written under the run output dir)
+manifest_schema_valid=OK (validated against RELEASE_ARTIFACT_MANIFEST.schema.json)
+example_schema_valid=OK (committed RELEASE_ARTIFACT_MANIFEST.example.json validates)
+live_metric_crosscheck=OK metric_build_id=qbind-devnet-0.1.0-262e2df5c333 metric_git_commit=262e2df5c333 (equal to live scrape + canonical injected)
+binary_sha256_crosscheck=OK bf0fadd4dff37aa426e5dfc87fda04123395eff04675f43c65ba1c3cf6d0e673
+elf_build_id_crosscheck=OK 4bb114ba7cf7fd89795da80c2ad7c2bdee9e45b2
+elf_vs_metric_separate=OK (metric_build_id != elf_build_id; distinct manifest fields)
+cargo_lock_recorded=OK cargo_lock_sha256=70aec07f6e1eb8ea3e98634acefdd92bf9f9ea03929d2821e3cc04c75bb1baaf
+toolchain_recorded=OK rustc=rustc 1.98.0 (88d9e12ae 2026-08-18) cargo=cargo 1.98.0 (797e8a9bc 2026-08-05)
+no_private_material=OK (no absolute path, host, endpoint, secret, or raw metrics dump in manifest)
+non_claims_true=OK (no launch / M4 / M6 / TestNet / MainNet / C4 / C5 / signed / SLSA claim)
+reproducibility_scope=OK same-host/per-input only; references Run 383; not cross-host, not SLSA
+schema_example_publish_safe=OK (no absolute home path / secret in schema or example)
+non_claim_check=OK (no launch-ready / M4-Green / TestNet/MainNet / C4/C5-closure claim in release+observability docs)
+committed_private_material=NONE (node-data dirs and raw scrape dumps removed on exit; only publish-safe hashes and status lines committed)
+
+RESULT=POSITIVE (Route A: canonical injected release-artifact manifest generated from the REAL canonical injected build (git_commit=262e2df5c333, build_id=qbind-devnet-0.1.0-262e2df5c333); schema-valid; live loopback qbind_node_build_info metric build_id/git_commit match the manifest; binary SHA-256=bf0fadd4dff37aa426e5dfc87fda04123395eff04675f43c65ba1c3cf6d0e673 and ELF BuildID=4bb114ba7cf7fd89795da80c2ad7c2bdee9e45b2 match; metric build_id kept a separate field from the ELF BuildID; Cargo.lock hash + toolchain recorded; no private path/host/endpoint/secret/raw-metrics-dump; non-claim fields true; reproducibility scope same-host/per-input references Run 383 without overclaim; metrics disabled-by-default and loopback-only; no new CLI flag; M12/M13/M14 remain Green; M4 stays Yellow; M6 Yellow/Partial; public DevNet NOT launch-ready; C4/C5 OPEN)

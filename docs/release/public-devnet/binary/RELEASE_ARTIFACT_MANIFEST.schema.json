@@ -1,0 +1,206 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://qbind.dev/schemas/public-devnet/RELEASE_ARTIFACT_MANIFEST.schema.json",
+  "title": "QBIND Public DevNet Release-Artifact Manifest",
+  "description": "Canonical, publish-safe manifest describing a single qbind-node public DevNet release artifact built with canonical injected provenance (Run 383/384). Records the exact injected build inputs, the release-binary SHA-256, the ELF BuildID, the qbind_node_build_info metric build_id/git_commit, toolchain, target, lockfile state, and verification commands. Docs/artifact only: it embeds no binary blob, no secret, no private path/hostname/endpoint, no raw log, and no raw /metrics dump.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "package_name",
+    "package_version",
+    "environment",
+    "git_commit_short",
+    "injected_QBIND_GIT_COMMIT",
+    "injected_QBIND_BUILD_ID",
+    "binary_path",
+    "binary_sha256",
+    "elf_build_id",
+    "metric_build_id",
+    "metric_git_commit",
+    "toolchain",
+    "target_triple",
+    "cargo_lock_sha256",
+    "build_command",
+    "reproducibility_scope",
+    "generated_at_utc",
+    "source_tree_state",
+    "non_claims",
+    "verification_commands",
+    "artifact_safety_label"
+  ],
+  "properties": {
+    "schema_version": {
+      "description": "Manifest schema version (semver of this schema contract).",
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+    },
+    "package_name": {
+      "description": "Stable name of this manifest package.",
+      "type": "string",
+      "const": "qbind-public-devnet-release-artifact-manifest"
+    },
+    "package_version": {
+      "description": "Version of the manifest package contents.",
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+    },
+    "environment": {
+      "description": "Deployment environment the artifact targets. DevNet only.",
+      "type": "string",
+      "const": "devnet"
+    },
+    "git_commit_full": {
+      "description": "Full 40-hex git commit of the source tree, if it can be captured safely. Optional; omit or set null when a git-less / source-tarball build cannot determine it.",
+      "type": ["string", "null"],
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "git_commit_short": {
+      "description": "Short git commit of the source tree (git rev-parse --short=12 HEAD), or 'unknown' when unavailable.",
+      "type": "string",
+      "pattern": "^([0-9a-f]{7,40}|unknown)$"
+    },
+    "injected_QBIND_GIT_COMMIT": {
+      "description": "The canonical QBIND_GIT_COMMIT value injected at build time (bridged into qbind_node_build_info git_commit by crates/qbind-node/build.rs).",
+      "type": "string",
+      "pattern": "^[A-Za-z0-9._-]+$"
+    },
+    "injected_QBIND_BUILD_ID": {
+      "description": "The canonical, low-cardinality, non-secret QBIND_BUILD_ID release id injected at build time. Never derived from git or the ELF; intentionally NOT the ELF BuildID.",
+      "type": "string",
+      "pattern": "^[A-Za-z0-9._-]+$"
+    },
+    "binary_path": {
+      "description": "Repository-relative path of the covered release binary. Must not be an absolute path.",
+      "type": "string",
+      "const": "target/release/qbind-node"
+    },
+    "binary_sha256": {
+      "description": "SHA-256 of the built release binary.",
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "elf_build_id": {
+      "description": "ELF .note.gnu.build-id of the release binary (readelf -n). A linker-computed binary identity; a SEPARATE plane from metric_build_id. Empty string only if readelf is unavailable.",
+      "type": "string",
+      "pattern": "^([0-9a-f]{8,64}|)$"
+    },
+    "metric_build_id": {
+      "description": "The build_id label rendered by the live qbind_node_build_info /metrics scrape. Equals injected_QBIND_BUILD_ID for a canonical injected build. Must differ from elf_build_id.",
+      "type": "string",
+      "pattern": "^[A-Za-z0-9._-]+$"
+    },
+    "metric_git_commit": {
+      "description": "The git_commit label rendered by the live qbind_node_build_info /metrics scrape. Equals injected_QBIND_GIT_COMMIT for a canonical injected build.",
+      "type": "string",
+      "pattern": "^[A-Za-z0-9._-]+$"
+    },
+    "toolchain": {
+      "description": "Recorded rustc / cargo versions used for the reference build.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["rustc_version", "cargo_version"],
+      "properties": {
+        "rustc_version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "cargo_version": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "target_triple": {
+      "description": "Target triple of the reference build (default host target; no --target override).",
+      "type": "string",
+      "pattern": "^[A-Za-z0-9._-]+$"
+    },
+    "cargo_lock_sha256": {
+      "description": "SHA-256 of the committed root Cargo.lock consumed with --locked (proves the pinned dependency graph).",
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "build_command": {
+      "description": "Exact release build command line with injected provenance env prefix.",
+      "type": "string",
+      "minLength": 1
+    },
+    "reproducibility_scope": {
+      "description": "Honest, bounded reproducibility scope. same-host / per-input only; explicitly NOT cross-host and NOT SLSA-grade.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "same_host",
+        "per_input",
+        "cross_host",
+        "slsa_grade",
+        "signed_release",
+        "reference"
+      ],
+      "properties": {
+        "same_host": { "type": "boolean", "const": true },
+        "per_input": { "type": "boolean", "const": true },
+        "cross_host": { "type": "boolean", "const": false },
+        "slsa_grade": { "type": "boolean", "const": false },
+        "signed_release": { "type": "boolean", "const": false },
+        "reference": {
+          "description": "Pointer to the Run 383 same-input reproducibility evidence this scope references (not overclaimed as cross-host/SLSA).",
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "generated_at_utc": {
+      "description": "UTC timestamp when this manifest was generated (ISO-8601, Zulu).",
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
+    },
+    "source_tree_state": {
+      "description": "Source tree cleanliness at build time.",
+      "type": "string",
+      "enum": ["clean", "dirty", "unknown"]
+    },
+    "non_claims": {
+      "description": "Explicit negative readiness claims. Every field must be true (the artifact makes none of these claims).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "no_public_devnet_launch",
+        "no_M4_green",
+        "no_M6_green",
+        "no_testnet_ready",
+        "no_mainnet_ready",
+        "no_C4_closure",
+        "no_C5_closure",
+        "no_signed_release",
+        "no_slsa_provenance"
+      ],
+      "properties": {
+        "no_public_devnet_launch": { "type": "boolean", "const": true },
+        "no_M4_green": { "type": "boolean", "const": true },
+        "no_M6_green": { "type": "boolean", "const": true },
+        "no_testnet_ready": { "type": "boolean", "const": true },
+        "no_mainnet_ready": { "type": "boolean", "const": true },
+        "no_C4_closure": { "type": "boolean", "const": true },
+        "no_C5_closure": { "type": "boolean", "const": true },
+        "no_signed_release": { "type": "boolean", "const": true },
+        "no_slsa_provenance": { "type": "boolean", "const": true }
+      }
+    },
+    "verification_commands": {
+      "description": "Operator-runnable verification commands (repository-relative; no absolute path, hostname, or secret). Reproduce the manifest's binary SHA-256, ELF BuildID, and live metric labels.",
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "artifact_safety_label": {
+      "description": "Standing safety label for every artifact this manifest describes.",
+      "type": "string",
+      "const": "experimental · resettable · no value · no MainNet readiness claim · no C4/C5 closure claim"
+    }
+  }
+}

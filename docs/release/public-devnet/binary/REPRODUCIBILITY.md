@@ -131,3 +131,10 @@ the injected `git_commit` / `build_id` are compiled in, reproducibility is **per
 source + lockfile + toolchain + injected provenance ⇒ the same binary; a different injected value ⇒ a
 different binary. Cross-host reproducibility, SLSA-grade provenance, and signed-release attestation
 are still **not** claimed.
+
+**Run 384 manifest.** Run 384 records this canonical injected build (its SHA-256, ELF BuildID, live
+metric `build_id` / `git_commit`, toolchain, target, and `Cargo.lock` hash) in a schema-validated
+release-artifact manifest (`RELEASE_ARTIFACT_MANIFEST.schema.json` /
+`RELEASE_ARTIFACT_MANIFEST.example.json`). The manifest's `reproducibility_scope` is **same-host /
+per-input** only and **references** this Run 383 result without overclaiming cross-host or SLSA-grade
+provenance. See `BUILDINFO.md` and `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_384.md`.

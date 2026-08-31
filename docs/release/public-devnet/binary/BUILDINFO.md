@@ -142,6 +142,35 @@ binary on the reference host; changing the injected `build_id` changes the hash 
 expected). Regenerate the full evidence with
 `scripts/devnet/run_383_public_devnet_release_provenance_injected_repro.sh`.
 
+## Canonical release-artifact manifest (Run 384)
+
+Run 384 records the canonical injected build above as a machine-readable,
+publish-safe **release-artifact manifest**. The contract is
+`RELEASE_ARTIFACT_MANIFEST.schema.json`; a real generated example is
+`RELEASE_ARTIFACT_MANIFEST.example.json`. The manifest binds together, for one
+published artifact, the fields recorded in this document plus the live metric
+labels:
+
+- `injected_QBIND_GIT_COMMIT` / `injected_QBIND_BUILD_ID` — the canonical injected
+  provenance.
+- `binary_sha256` / `elf_build_id` — the release binary's SHA-256 and ELF
+  `.note.gnu.build-id`.
+- `metric_build_id` / `metric_git_commit` — the labels from a live loopback
+  `qbind_node_build_info` scrape. `metric_build_id` is a **separate field** from and
+  is asserted **distinct** from `elf_build_id` (operator-facing release id vs
+  linker-computed binary identity).
+- `toolchain` / `target_triple` / `cargo_lock_sha256` — the recorded `rustc`/`cargo`
+  versions, the host target triple, and the SHA-256 of the committed root
+  `Cargo.lock` consumed with `--locked`.
+- `reproducibility_scope` — **same-host / per-input** only, referencing the Run 383
+  same-input reproducibility evidence and explicitly **not** claiming cross-host or
+  SLSA-grade provenance.
+
+The manifest embeds no absolute path, private hostname, external endpoint, secret,
+or raw `/metrics` dump. Generate + schema-validate it against the actual build with
+`scripts/devnet/run_384_public_devnet_release_artifact_manifest.sh` (evidence
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_384.md`).
+
 ## Limitations
 
 - **Toolchain-sensitive.** The SHA-256 and BuildID above are specific to the recorded
