@@ -177,3 +177,32 @@ evidence record) and the loopback preflight are exercised by
 entry is marked live. The Route A infrastructure prerequisites are documented in
 `docs/release/public-devnet/network/reachability/RUN_378_qbind-devnet-seed-1.md` §14. See
 `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_378.md`.
+
+## 11. Run 388 — external-reachability execution (Route C)
+
+Run 388 executed the same Route A objective and reached the **same Route C finding** as Run 378 (no
+external ingress / no independent off-host vantage point), so **M4 stays Yellow**. The same schema-honesty
+check still holds against the (text-refreshed) candidate:
+
+```bash
+python3 -c "
+import json, jsonschema
+schema=json.load(open('docs/release/public-devnet/network/devnet-seed-list.schema.json'))
+d=json.load(open('docs/release/public-devnet/network/devnet-seeds.live-candidate.json'))
+jsonschema.validate(instance=d, schema=schema)
+for n in d['seed_nodes']:
+    assert n['status'] != 'live', 'external reachability unproven — must not be live'
+    assert n['last_reachability_evidence'] is None
+print('live-candidate validates; not falsely live (M4 stays Yellow)')
+"
+```
+
+Expected: `live-candidate validates; not falsely live (M4 stays Yellow)`.
+
+The `register-check --status live --reachability-evidence <ref>` admission gate (against the Run 388
+evidence record) and the loopback preflight are exercised by
+`scripts/devnet/run_388_public_devnet_m4_external_seed_reachability.sh`
+(`RESULT=NEGATIVE-FOR-EXTERNAL (Route C)`); external reachability was **NOT** proven, so no committed
+entry is marked live. The Route A infrastructure prerequisites are documented in
+`docs/release/public-devnet/network/reachability/RUN_388_qbind-devnet-seed-1.md` §15. See
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_388.md`.
