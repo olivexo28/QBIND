@@ -198,3 +198,23 @@ signature/attestation/private-key artifact is committed). The optional signing w
 `confirm` defaults to `no`, protected `release-signing` environment) and mints a keyless GitHub
 attestation only when explicitly enabled; verify it then with
 `gh attestation verify target/release/qbind-node --repo <owner>/<repo>`.
+
+## 12. Verify a real hosted-CI attestation against the binary SHA-256 (Run 387)
+
+Inside GitHub-hosted CI, after the Run 386 workflow mints a real keyless build-provenance
+attestation, run the Run 387 verify harness to bind the attestation to the built binary's
+SHA-256 and emit a publish-safe attestation identity:
+
+```
+bash scripts/devnet/run_387_public_devnet_hosted_ci_attestation_verify.sh
+```
+
+Expected in hosted CI (Route A): the harness runs
+`gh attestation verify target/release/qbind-node --repo <owner>/<repo> --predicate-type
+https://slsa.dev/provenance/v1`, records `RESULT=POSITIVE` **only** on a genuine PASS, and
+writes a publish-safe `ATTESTATION_IDENTITY.txt` (workflow, repo, predicate type, binary
+SHA-256, verifier command, verification result, issuer/OIDC identity, and the unchanged
+`signed_release=false` / `slsa_grade=false`). Offline (Route C) it honestly records the
+missing prerequisite and never fakes a PASS; `signed_release`/`slsa_grade` stay **false**
+and the schema still pins both `const:false`. See
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_387.md`.

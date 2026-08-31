@@ -185,6 +185,13 @@ job-scoped `id-token`+`attestations` writes; protected `release-signing` environ
 `confirm`-gated). No attestation is produced in that preflight, so `signed_release` and
 `slsa_grade` stay `false` (evidence `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_386.md`).
 
+Run 387 attempts to execute that protected path for real (dispatch with `confirm=yes`,
+mint + verify a keyless attestation). From the offline sandbox it is **Route C** (hosted
+CI not reachable), so it is Negative-for-attestation and adds only a publish-safe verify
+harness `scripts/devnet/run_387_public_devnet_hosted_ci_attestation_verify.sh` that runs
+the real `gh attestation verify` binding when executed inside hosted CI. `signed_release`
+and `slsa_grade` stay `false` (evidence `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_387.md`).
+
 ## Limitations
 
 - **Toolchain-sensitive.** The SHA-256 and BuildID above are specific to the recorded
