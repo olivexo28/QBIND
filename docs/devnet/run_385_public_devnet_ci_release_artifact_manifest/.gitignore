@@ -1,0 +1,26 @@
+# Run 385 evidence archive — only README.md, summary.txt, and .gitignore are tracked.
+# Everything else here is CI-artifact-only or per-run temporary output and MUST NOT be committed.
+# In particular the generated RELEASE_ARTIFACT_MANIFEST.json is a CI *artifact* (uploaded by
+# .github/workflows/public-devnet-release-artifact-manifest.yml), never a committed changing file.
+# Node data dirs, node logs, raw /metrics scrape dumps, the staged ci-artifacts/ bundle, and the
+# generated manifest are temporary and dev/CI-only; only publish-safe hashes and status lines appear in
+# the tracked summary/README. The committed, publish-safe example manifest lives at
+# docs/release/public-devnet/binary/RELEASE_ARTIFACT_MANIFEST.example.json.
+ci-artifacts/
+run384/
+node-data/
+nodes/
+logs/
+data/
+RELEASE_ARTIFACT_MANIFEST.json
+manifest.json
+qbind-node.sha256
+BUILDID.txt
+MANIFEST_VALIDATION_SUMMARY.txt
+clean_metrics.txt
+metrics.txt
+*.metrics
+*.err
+*.log
+*.metrics.txt
+manifest.metrics.txt

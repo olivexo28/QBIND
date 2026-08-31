@@ -171,6 +171,12 @@ or raw `/metrics` dump. Generate + schema-validate it against the actual build w
 `scripts/devnet/run_384_public_devnet_release_artifact_manifest.sh` (evidence
 `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_384.md`).
 
+Run 385 additionally generates this manifest in **CI** as a publish-safe **CI
+artifact** (never committed) via
+`.github/workflows/public-devnet-release-artifact-manifest.yml` and the local dry-run
+wrapper `scripts/devnet/run_385_public_devnet_ci_release_artifact_manifest.sh`
+(evidence `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_385.md`).
+
 ## Limitations
 
 - **Toolchain-sensitive.** The SHA-256 and BuildID above are specific to the recorded

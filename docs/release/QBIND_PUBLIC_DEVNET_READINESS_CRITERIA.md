@@ -400,6 +400,28 @@ wire-format / peer-admission / trust / validator / epoch / sequence / marker cha
 `docs/devnet/run_384_public_devnet_release_artifact_manifest/`. **M12, M13, and M14 remain Green**; M4
 stays Yellow/launch-blocking; M6 remains Yellow/Partial; public DevNet remains NOT launch-ready; C4/C5
 remain OPEN; MainNet/TestNet untouched.
+
+Updated Run 385 — **CI generation of the release-artifact manifest (M13/M14 remain Green)**: Run 385 is
+a **CI/workflow + harness/docs-only** run (decision gate **Route A**, no production source change, no
+`build.rs` change, no runtime change, no CLI flag) that wires the Run 384 manifest generation into CI so
+every published DevNet release build can emit a schema-validated `RELEASE_ARTIFACT_MANIFEST.json` as a
+**CI artifact** — never a committed, changing file. It adds
+`.github/workflows/public-devnet-release-artifact-manifest.yml` (manual / release-track scoped;
+least-privilege `permissions: contents: read`; no secrets; no release/tag/deployment; no commit/push),
+the local dry-run wrapper `scripts/devnet/run_385_public_devnet_ci_release_artifact_manifest.sh` (reuses
+the Run 384 harness), the archive `docs/devnet/run_385_public_devnet_ci_release_artifact_manifest/`, and
+evidence `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_385.md`. The wrapper lints the workflow YAML, builds the
+canonical injected artifact, generates the manifest from the actual binary (SHA-256, ELF BuildID) plus a
+live loopback `qbind_node_build_info` scrape, validates it against the committed schema
+(`RESULT=POSITIVE`), and stages only publish-safe CI artifacts (`RELEASE_ARTIFACT_MANIFEST.json`,
+`qbind-node.sha256`, `MANIFEST_VALIDATION_SUMMARY.txt`, `BUILDID.txt`) excluding raw logs/metrics/data
+dirs, with `signed_release=false` / `slsa_grade=false` recorded and the generated manifest **not**
+committed. The only non-doc change to an existing file is a content-preserving CRLF→LF normalization of
+the Run 384 harness so CI can execute it. No metric/alert/scrape change; no new CLI flag (exposure stays
+`QBIND_METRICS_HTTP_ADDR` loopback-only, disabled by default); no P2P wire-format / peer-admission /
+trust / validator / epoch / sequence / marker change. **M12, M13, and M14 remain Green**; M4 stays
+Yellow/launch-blocking; M6 remains Yellow/Partial; public DevNet remains NOT launch-ready; C4/C5 remain
+OPEN; MainNet/TestNet untouched.
 **Track:** Public network release-readiness. This is a **separate track** from the internal
 authority-lifecycle boundary track (Run 130–354) and from C4/C5 closure.
 **Scope of this document:** source/docs/test-only audit and gap matrix. It introduces public DevNet

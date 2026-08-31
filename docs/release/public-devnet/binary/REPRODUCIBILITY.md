@@ -138,3 +138,9 @@ release-artifact manifest (`RELEASE_ARTIFACT_MANIFEST.schema.json` /
 `RELEASE_ARTIFACT_MANIFEST.example.json`). The manifest's `reproducibility_scope` is **same-host /
 per-input** only and **references** this Run 383 result without overclaiming cross-host or SLSA-grade
 provenance. See `BUILDINFO.md` and `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_384.md`.
+
+**Run 385 CI generation.** Run 385 generates this same manifest in CI as a publish-safe **CI artifact**
+(never committed) via `.github/workflows/public-devnet-release-artifact-manifest.yml` and the local
+dry-run wrapper `scripts/devnet/run_385_public_devnet_ci_release_artifact_manifest.sh`. The
+reproducibility scope is unchanged (**same-host / per-input** only; cross-host and SLSA-grade are not
+claimed). See `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_385.md`.

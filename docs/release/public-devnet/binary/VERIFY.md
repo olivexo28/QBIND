@@ -126,6 +126,25 @@ python3 -c "import json,jsonschema,sys; \
 
 Expected: `manifest OK`.
 
+## 6c. Generate the manifest as a CI artifact (Run 385)
+
+Run 385 wires the Run 384 manifest generation into CI as a **CI artifact** (never a
+committed file). Run the same commands the workflow runs — this is the local dry-run:
+
+```
+bash scripts/devnet/run_385_public_devnet_ci_release_artifact_manifest.sh
+```
+
+Expected: `RESULT=POSITIVE`. The wrapper lints
+`.github/workflows/public-devnet-release-artifact-manifest.yml` (valid YAML,
+manual/release-track trigger, least-privilege `permissions: contents: read`, no
+secrets, no release/commit/push), reuses the Run 384 harness to build + generate +
+schema-validate + live-cross-check, and stages only publish-safe CI artifacts
+(`RELEASE_ARTIFACT_MANIFEST.json`, `qbind-node.sha256`,
+`MANIFEST_VALIDATION_SUMMARY.txt`, `BUILDID.txt`) with raw logs / metrics / data dirs
+excluded. The generated `RELEASE_ARTIFACT_MANIFEST.json` is uploaded as a CI artifact
+and is **not** committed. Evidence: `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_385.md`.
+
 ## 7. Confirm public DevNet is not claimed launch-ready
 
 ```

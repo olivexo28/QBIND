@@ -1,0 +1,26 @@
+=== Run 385 CI release-artifact manifest wrapper ===
+decision_gate=Route A (CI/workflow + harness/docs only: wire Run 384 manifest generation into CI as a CI artifact; no production source change, no build.rs change, no runtime change, no CLI flag; generated manifest NEVER committed)
+workflow=.github/workflows/public-devnet-release-artifact-manifest.yml
+reused_harness=scripts/devnet/run_384_public_devnet_release_artifact_manifest.sh
+workflow_yaml_parse=OK (valid YAML; manual/release-track trigger; permissions == {contents: read})
+workflow_least_privilege=OK (permissions: contents: read only; no write scope)
+workflow_no_secrets=OK (no secrets.* reference; no signing this run)
+workflow_no_release=OK (no release/tag/deployment/seed/endpoint creation; no commit/push of artifacts)
+actionlint=SKIP (actionlint not installed; PyYAML parse + static checks used instead)
+run384_reuse=OK (RESULT=POSITIVE; canonical injected build + schema-valid manifest + live metric cross-check)
+canonical_git_commit=3113c2116154
+canonical_build_id=qbind-devnet-0.1.0-3113c2116154
+build_command=QBIND_GIT_COMMIT=3113c2116154 QBIND_BUILD_ID=qbind-devnet-0.1.0-3113c2116154 cargo build -p qbind-node --release --locked --bin qbind-node
+target_triple=x86_64-unknown-linux-gnu
+cargo_lock_sha256=70aec07f6e1eb8ea3e98634acefdd92bf9f9ea03929d2821e3cc04c75bb1baaf
+signed_release=false slsa_grade=false (recorded in manifest; no signing/SLSA in this run)
+ci_artifacts_staged=OK (BUILDID.txt MANIFEST_VALIDATION_SUMMARY.txt RELEASE_ARTIFACT_MANIFEST.json qbind-node.sha256 )
+staged_manifest_schema_valid=OK (staged RELEASE_ARTIFACT_MANIFEST.json validates against committed schema)
+artifact_upload_safety=OK (staged dir excludes raw logs/metrics/data dirs; no absolute path/host/endpoint/secret/raw-metrics-dump)
+no_new_cli_flag=OK (no provenance/manifest/CI CLI flag; exposure remains QBIND_METRICS_HTTP_ADDR env only)
+generated_manifest_not_committed=OK (RELEASE_ARTIFACT_MANIFEST.json is a CI artifact only; not tracked in git)
+non_claim_check=OK (no launch-ready / M4-Green / TestNet/MainNet / C4/C5-closure claim in release+observability docs)
+observability_yaml_parse=OK (prometheus example YAML unchanged and still parses)
+committed_private_material=NONE (Run 384 removed node-data dirs and raw scrape dumps on exit; only publish-safe hashes/status lines land in tracked summary; generated manifest stays a CI artifact)
+
+RESULT=POSITIVE (Route A: Run 384 manifest generation wired into CI via .github/workflows/public-devnet-release-artifact-manifest.yml and this wrapper; canonical injected build git_commit=3113c2116154 build_id=qbind-devnet-0.1.0-3113c2116154; schema-valid manifest generated from the REAL built binary + live loopback qbind_node_build_info scrape; publish-safe CI artifacts staged (RELEASE_ARTIFACT_MANIFEST.json, qbind-node.sha256, MANIFEST_VALIDATION_SUMMARY.txt, BUILDID.txt) excluding raw logs/metrics/data dirs; least-privilege permissions contents:read; no secrets; no release/tag/deployment; generated manifest NOT committed; signed_release=false slsa_grade=false; no new CLI flag; metrics disabled-by-default and loopback-only; M12/M13/M14 remain Green; M4 stays Yellow; M6 Yellow/Partial; public DevNet NOT launch-ready; C4/C5 OPEN)

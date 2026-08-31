@@ -123,6 +123,20 @@ hostname, external endpoint, secret, or raw `/metrics` dump. Regenerate + valida
 with `scripts/devnet/run_384_public_devnet_release_artifact_manifest.sh` (see
 `VERIFY.md` §6b and `../../../devnet/QBIND_DEVNET_EVIDENCE_RUN_384.md`).
 
+## 10b. CI generation of the release-artifact manifest (Run 385)
+
+Run 385 wires the Run 384 manifest generation into CI. The workflow
+`.github/workflows/public-devnet-release-artifact-manifest.yml` (manual /
+release-track scoped, least-privilege `permissions: contents: read`, no secrets)
+builds the canonical injected artifact, generates the manifest from the actual binary
++ a live loopback `qbind_node_build_info` scrape, validates it against the committed
+schema, and uploads a publish-safe bundle (`RELEASE_ARTIFACT_MANIFEST.json`,
+`qbind-node.sha256`, `MANIFEST_VALIDATION_SUMMARY.txt`, `BUILDID.txt`) as a **CI
+artifact** — the generated manifest is **never** committed. The local dry-run wrapper
+`scripts/devnet/run_385_public_devnet_ci_release_artifact_manifest.sh` runs the same
+commands (see `VERIFY.md` §6c and
+`../../../devnet/QBIND_DEVNET_EVIDENCE_RUN_385.md`).
+
 ## 11. What remains before public DevNet launch
 
 Publishing this provenance record does **not** make the network joinable. Remaining public DevNet
@@ -147,3 +161,7 @@ Public DevNet stays **NOT launch-ready** until all must-haves are Green. See
 - Run 384 CI/release-artifact manifest package (`RELEASE_ARTIFACT_MANIFEST.schema.json` +
   `RELEASE_ARTIFACT_MANIFEST.example.json`), evidence:
   `../../../devnet/QBIND_DEVNET_EVIDENCE_RUN_384.md`.
+- Run 385 CI wiring of the release-artifact manifest
+  (`.github/workflows/public-devnet-release-artifact-manifest.yml` +
+  `scripts/devnet/run_385_public_devnet_ci_release_artifact_manifest.sh`), evidence:
+  `../../../devnet/QBIND_DEVNET_EVIDENCE_RUN_385.md`.
