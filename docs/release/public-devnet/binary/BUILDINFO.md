@@ -177,6 +177,14 @@ artifact** (never committed) via
 wrapper `scripts/devnet/run_385_public_devnet_ci_release_artifact_manifest.sh`
 (evidence `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_385.md`).
 
+Run 386 adds an optional, **disabled-by-default** protected CI **signing /
+attestation** preflight (`.github/workflows/public-devnet-release-signing-attestation.yml`
++ `scripts/devnet/run_386_public_devnet_release_signing_attestation_preflight.sh`):
+keyless GitHub artifact attestation over GitHub OIDC (no repository secrets;
+job-scoped `id-token`+`attestations` writes; protected `release-signing` environment;
+`confirm`-gated). No attestation is produced in that preflight, so `signed_release` and
+`slsa_grade` stay `false` (evidence `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_386.md`).
+
 ## Limitations
 
 - **Toolchain-sensitive.** The SHA-256 and BuildID above are specific to the recorded
@@ -187,4 +195,7 @@ wrapper `scripts/devnet/run_385_public_devnet_ci_release_artifact_manifest.sh`
   required for the same-host result.
 - **Same-host scope only.** These inputs support the same-host, clean-tree reproducibility result in
   `REPRODUCIBILITY.md`. Cross-host reproducibility and SLSA-grade provenance are **not** claimed.
-- **No signing.** No signing material exists; no signed-release claim is made.
+- **No signing.** No signing material is committed and no signed-release claim is made.
+  Run 386 adds an optional, disabled-by-default keyless GitHub attestation CI preflight;
+  until it is explicitly enabled and a real attestation is verified against the binary
+  SHA-256, `signed_release`/`slsa_grade` stay `false`.

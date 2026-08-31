@@ -401,6 +401,30 @@ wire-format / peer-admission / trust / validator / epoch / sequence / marker cha
 stays Yellow/launch-blocking; M6 remains Yellow/Partial; public DevNet remains NOT launch-ready; C4/C5
 remain OPEN; MainNet/TestNet untouched.
 
+Updated Run 386 — **optional, disabled-by-default signing/attestation CI preflight (M13/M14 remain
+Green)**: Run 386 is a **CI/workflow + harness/docs-only** run (decision gate **Route B**, no production
+source change, no `build.rs` change, no runtime change, no CLI flag) that adds an optional, protected
+release **signing/attestation** preflight while keeping `signed_release=false` and `slsa_grade=false`
+honest. A real, **secret-free** attestation path exists (GitHub artifact attestation via
+`actions/attest-build-provenance`, keyless Sigstore over GitHub OIDC) but needs elevated
+`id-token`+`attestations` writes and a protected CI environment and cannot be minted/verified offline, so
+the workflow ships disabled by default. It adds
+`.github/workflows/public-devnet-release-signing-attestation.yml` (manual-only; `confirm` input defaults
+to `no`; single job gated on `confirm == 'yes'`; protected `release-signing` environment; top-level
+`permissions: contents: read`; job elevates only `id-token: write` + `attestations: write`; no secrets;
+no release/tag/deployment; no commit/push), the preflight harness
+`scripts/devnet/run_386_public_devnet_release_signing_attestation_preflight.sh` (reuses the Run 385
+wrapper; `RESULT=POSITIVE`), the archive
+`docs/devnet/run_386_public_devnet_release_signing_attestation_preflight/`, and evidence
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_386.md`. No signature/attestation/private key is produced or
+committed; the committed manifest schema still pins `signed_release`/`slsa_grade` to `const:false`. The
+only non-doc changes to existing files are content-preserving CRLF→LF normalizations of the Run 384/385
+harnesses so CI can execute them. No metric/alert/scrape change; no new CLI flag (exposure stays
+`QBIND_METRICS_HTTP_ADDR` loopback-only, disabled by default); no P2P wire-format / peer-admission /
+trust / validator / epoch / sequence / marker change. **M12, M13, and M14 remain Green**; M4 stays
+Yellow/launch-blocking; M6 remains Yellow/Partial; public DevNet remains NOT launch-ready; C4/C5 remain
+OPEN; MainNet/TestNet untouched.
+
 Updated Run 385 — **CI generation of the release-artifact manifest (M13/M14 remain Green)**: Run 385 is
 a **CI/workflow + harness/docs-only** run (decision gate **Route A**, no production source change, no
 `build.rs` change, no runtime change, no CLI flag) that wires the Run 384 manifest generation into CI so

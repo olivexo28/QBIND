@@ -1,0 +1,132 @@
+# Run 386 — public DevNet release SIGNING / ATTESTATION preflight (disabled by default).
+#
+# Decision gate: Route B. A real, secret-free signing/attestation path exists
+# (GitHub artifact attestation via actions/attest-build-provenance, keyless Sigstore
+# over GitHub OIDC — NO repository secrets), BUT it requires the elevated
+# `id-token: write` + `attestations: write` permissions and can only mint / verify a
+# genuine attestation inside GitHub-hosted CI. It CANNOT run in the offline sandbox,
+# so this workflow ships DISABLED BY DEFAULT and no attestation is committed. Until a
+# real attestation is minted by this protected path AND verified against the built
+# binary's SHA-256, the release-artifact manifest keeps signed_release=false and
+# slsa_grade=false (see docs/release/public-devnet/binary/RELEASE_ARTIFACT_MANIFEST.schema.json,
+# which pins both to const:false; a real attestation is recorded in a SEPARATE
+# publish-safe artifact file, never by flipping those fields or committing the blob).
+#
+# Disabled-by-default posture:
+#   * Manual-only (workflow_dispatch). No push/tag/schedule trigger, so it never runs
+#     on a merge, tag, or timer.
+#   * A required `confirm` input defaults to `no`; the single job is guarded by
+#     `if: inputs.confirm == 'yes'`, so an accidental dispatch is a no-op.
+#   * Targets a protected GitHub Environment (`release-signing`) an operator must
+#     create with required reviewers before the job can run. The environment NAME is
+#     not a secret and no `secrets.*` value is referenced anywhere in this workflow.
+#
+# Least privilege:
+#   * Top-level permissions are `contents: read` only.
+#   * The elevated `id-token: write` (OIDC for keyless signing) and
+#     `attestations: write` (write the provenance attestation) scopes are granted
+#     ONLY on the gated `attest` job, and ONLY those two writes — no
+#     contents/packages/deployments/pull-requests write. No repository secret is used.
+#
+# Safety: creates NO release, tag, or deployment; commits / pushes NOTHING; uploads
+# only publish-safe CI artifacts (checksum text + an attestation IDENTITY summary),
+# never a private key, OIDC token, raw attestation bundle secret, raw log, raw
+# /metrics dump, data dir, or the ELF blob.
+
+name: public-devnet-release-signing-attestation
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: >-
+          Type "yes" to explicitly opt in to minting a build-provenance attestation
+          in the protected release-signing environment. Any other value is a no-op.
+        type: choice
+        default: "no"
+        options:
+          - "no"
+          - "yes"
+
+# Least privilege by default. The attestation job below narrowly elevates only the
+# two writes required for keyless GitHub artifact attestation (no repository secret).
+permissions:
+  contents: read
+
+concurrency:
+  group: public-devnet-release-signing-attestation-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  attest:
+    # Disabled by default: only runs when an operator explicitly confirms.
+    if: ${{ github.event.inputs.confirm == 'yes' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    # Protected environment an operator must configure (required reviewers) before
+    # this job can execute. The name is not a secret; no secrets.* is referenced.
+    environment: release-signing
+    permissions:
+      contents: read
+      # Keyless Sigstore signing identity over GitHub OIDC (no repository secret).
+      id-token: write
+      # Write the build-provenance attestation for the built artifact.
+      attestations: write
+    env:
+      CI_STAGE_DIR: ${{ runner.temp }}/qbind-run386-ci-release-signing-attestation
+    steps:
+      - name: Checkout (full history for short commit)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install Rust toolchain (pinned, stable)
+        run: |
+          rustup show active-toolchain || rustup toolchain install stable --profile minimal
+          rustup component add --toolchain stable rust-std >/dev/null 2>&1 || true
+          rustc --version
+          cargo --version
+
+      - name: Install manifest validation dependency
+        run: python3 -m pip install --user jsonschema >/dev/null 2>&1 || true
+
+      - name: Build canonical injected artifact + manifest (reuse Run 385 wrapper)
+        run: |
+          bash scripts/devnet/run_385_public_devnet_ci_release_artifact_manifest.sh "${CI_STAGE_DIR}"
+
+      - name: Attest build provenance for the release binary (keyless, no secrets)
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: target/release/qbind-node
+
+      - name: Verify the attestation against the built binary
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # Record the publish-safe attestation IDENTITY (digest + verifier command +
+          # issuer/repo), NEVER the private material. This proves the attestation
+          # covers THIS binary's SHA-256 before anything is treated as "signed".
+          SHA="$(sha256sum target/release/qbind-node | awk '{print $1}')"
+          mkdir -p "${CI_STAGE_DIR}/ci-artifacts"
+          gh attestation verify target/release/qbind-node \
+            --repo "${GITHUB_REPOSITORY}" \
+            --predicate-type https://slsa.dev/provenance/v1
+          {
+            printf 'binary_sha256=%s  qbind-node\n' "${SHA}"
+            printf 'attestation_repo=%s\n' "${GITHUB_REPOSITORY}"
+            printf 'verifier_command=gh attestation verify target/release/qbind-node --repo %s\n' "${GITHUB_REPOSITORY}"
+            printf 'verification=PASS\n'
+          } > "${CI_STAGE_DIR}/ci-artifacts/ATTESTATION_IDENTITY.txt"
+
+      - name: Upload publish-safe attestation-identity bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: qbind-public-devnet-release-signing-attestation
+          # Only the publish-safe checksum + attestation-identity summary. No OIDC
+          # token, no private key, no raw attestation secret, no raw logs/metrics,
+          # no data dir, and no ELF blob are uploaded.
+          path: ${{ env.CI_STAGE_DIR }}/ci-artifacts
+          if-no-files-found: error
+          retention-days: 14
