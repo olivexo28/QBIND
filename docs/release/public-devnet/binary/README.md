@@ -20,8 +20,8 @@ are running the artifact this repository describes.
 |------|---------|
 | `README.md` | This document (scope, safety labels, verification pointers). |
 | `RELEASE_PROVENANCE.md` | Canonical provenance record (commit, toolchain, build command, SHA-256, BuildID). |
-| `REPRODUCIBILITY.md` | Same-host two-build reproducibility experiment + BuildID result. |
-| `BUILDINFO.md` | Full build-input record for audit/reproduction. Includes the Run 382 ELF-BuildID-vs-metric-`build_id`-label distinction. |
+| `REPRODUCIBILITY.md` | Same-host two-build reproducibility experiment + BuildID result. Includes the Run 383 same-input reproducibility result for the canonical injected-provenance release build. |
+| `BUILDINFO.md` | Full build-input record for audit/reproduction. Includes the Run 382 ELF-BuildID-vs-metric-`build_id`-label distinction and the Run 383 canonical injected release-provenance build command. |
 | `qbind-node.sha256` | SHA-256 of the locally built `target/release/qbind-node`, standard checksum format. |
 | `VERIFY.md` | Exact operator verification commands and expected outputs. |
 
@@ -97,7 +97,12 @@ target/release/qbind-node --version
 See `REPRODUCIBILITY.md`. On the reference host, two clean `--locked` release builds in separate
 target directories produced a **byte-identical** `qbind-node` (same SHA-256, same ELF BuildID). This
 is a **same-host, clean-tree** reproducibility result for scope only. Cross-host reproducibility and
-SLSA-grade provenance are **not** claimed.
+SLSA-grade provenance are **not** claimed. Run 383 extends this to the **canonical injected-provenance**
+release build: injecting the canonical `QBIND_GIT_COMMIT` / `QBIND_BUILD_ID` (so the published artifact
+ships populated `qbind_node_build_info` provenance) is **same-input reproducible** (byte-identical
+across two clean builds), and changing the injected `build_id` changes the hash as expected — a
+**per-input**, same-host result only (see `REPRODUCIBILITY.md` §10 and
+`../../../devnet/QBIND_DEVNET_EVIDENCE_RUN_383.md`).
 
 ## 11. What remains before public DevNet launch
 
@@ -117,3 +122,6 @@ Public DevNet stays **NOT launch-ready** until all must-haves are Green. See
 - Seed-list format package: `../network/` (Run 357).
 - Operator onboarding package: `../operator/` (Run 358).
 - Run 359 evidence: `../../../devnet/QBIND_DEVNET_EVIDENCE_RUN_359.md`.
+- Run 382 build-info provenance evidence: `../../../devnet/QBIND_DEVNET_EVIDENCE_RUN_382.md`.
+- Run 383 canonical injected release-provenance + reproducibility evidence:
+  `../../../devnet/QBIND_DEVNET_EVIDENCE_RUN_383.md`.

@@ -93,13 +93,17 @@ grep -E '^qbind_consensus_committed_height|^qbind_p2p_connections_current|^qbind
 grep -E '^qbind_node_build_info\{' /tmp/metrics.txt
 grep -E '^qbind_node_data_dir_free_bytes ' /tmp/metrics.txt   # value only, no label
 
-# 11a. Run 382: build-time provenance. A default (git work-tree) build auto-fills
-# git_commit with a short commit hash; build_id stays "unknown" until injected:
+# 11a. Run 382/383: build-time provenance. A default (git work-tree) build auto-fills
+# git_commit with a short commit hash; build_id stays "unknown" until injected. For a
+# published release artifact, Run 383 injects CANONICAL provenance so both labels are
+# populated by default (metric build_id is the harness/CI release id, NOT the ELF
+# .note.gnu.build-id):
 grep -Eo 'git_commit="[^"]*"' /tmp/metrics.txt                # -> a short hash (or "unknown")
-# Inject provenance at build time to populate both labels (metric build_id is the
-# harness/CI release id, NOT the ELF .note.gnu.build-id):
-#   QBIND_GIT_COMMIT="$(git rev-parse --short=12 HEAD)" QBIND_BUILD_ID="<release-id>" \
-#     cargo build -p qbind-node --release --bin qbind-node
+grep -Eo 'build_id="[^"]*"' /tmp/metrics.txt                  # -> canonical release id when injected (else "unknown")
+# Canonical injected release build (Run 383):
+#   QBIND_GIT_COMMIT="$(git rev-parse --short=12 HEAD)" \
+#   QBIND_BUILD_ID="qbind-devnet-0.1.0-$(git rev-parse --short=12 HEAD)" \
+#     cargo build -p qbind-node --release --locked --bin qbind-node
 readelf -n ./target/release/qbind-node | grep -i 'build id'   # ELF BuildID (separate plane)
 
 # 13. Legacy state-size gauge stays absent (future group only)

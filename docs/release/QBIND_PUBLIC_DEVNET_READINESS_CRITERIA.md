@@ -352,6 +352,30 @@ HTTP 200; scrape + alert YAML parse; non-claim check OK. Evidence
 `docs/devnet/run_382_public_devnet_build_info_provenance/`. **M12, M13, and M14 remain Green**; M4 stays
 Yellow/launch-blocking; M6 remains Yellow/Partial; public DevNet remains NOT launch-ready; C4/C5 remain
 OPEN; MainNet/TestNet untouched.
+
+Updated Run 383 — **canonical injected release provenance + same-input reproducibility (M13/M14 remain
+Green)**: Run 383 is a **docs/harness-only** run (decision gate **Route A**, no production source
+change, no CLI flag) that wires the Run 382 `build.rs` provenance bridge to **canonical injected**
+values for a published release artifact and proves the injected build is same-input reproducible. The
+release harness injects `QBIND_GIT_COMMIT="$(git rev-parse --short=12 HEAD)"` and a canonical
+low-cardinality non-secret `QBIND_BUILD_ID="qbind-devnet-<version>-<short-commit>"`, so a live loopback
+`qbind_node_build_info` scrape shows both labels populated (injected `git_commit` equals the expected
+short commit; injected `build_id` equals the canonical release id). Two clean `--locked` builds with the
+same source, lockfile, toolchain, and injected provenance produce a **byte-identical** binary on the
+reference host; changing the injected `build_id` changes the hash (recorded as expected); the
+missing-injection fallback (`build_id="unknown"`) is preserved; the ELF `.note.gnu.build-id` is captured
+separately and stays distinct from the metric `build_id`. No metric/alert/scrape change; the
+`qbind_node_data_dir_free_bytes` gauge is intact; no new CLI flag (exposure stays
+`QBIND_METRICS_HTTP_ADDR` loopback-only, disabled by default); no P2P wire-format change; no
+peer-admission weakening; no trust/validator/epoch/sequence/marker mutation. Release evidence via
+`scripts/devnet/run_383_public_devnet_release_provenance_injected_repro.sh` (`RESULT=POSITIVE`):
+canonical injected build; both labels in a live scrape; same-input reproducibility byte-identical;
+changed-input hash difference; ELF BuildID separate; metrics disabled without env; loopback `/metrics`
+HTTP 200; scrape + alert YAML parse; non-claim check OK. Evidence
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_383.md`, archive
+`docs/devnet/run_383_public_devnet_release_provenance_injected_repro/`. **M12, M13, and M14 remain
+Green**; M4 stays Yellow/launch-blocking; M6 remains Yellow/Partial; public DevNet remains NOT
+launch-ready; C4/C5 remain OPEN; MainNet/TestNet untouched.
 **Track:** Public network release-readiness. This is a **separate track** from the internal
 authority-lifecycle boundary track (Run 130–354) and from C4/C5 closure.
 **Scope of this document:** source/docs/test-only audit and gap matrix. It introduces public DevNet

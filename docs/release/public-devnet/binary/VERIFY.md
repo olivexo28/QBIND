@@ -75,6 +75,29 @@ Expected (reference host): both SHA-256 equal `f916af6d…b22990`; `cmp` prints 
 differ on your host, that is bounded cross-host/toolchain non-determinism — record it; the published
 result is a **same-host** claim only.
 
+## 6a. Re-run the Run 383 canonical injected-provenance reproducibility experiment
+
+Prove the **injected** release build (canonical `QBIND_GIT_COMMIT` / `QBIND_BUILD_ID`) is same-input
+reproducible and that a changed injected `build_id` changes the hash:
+
+```
+GC="$(git rev-parse --short=12 HEAD)"; BID="qbind-devnet-0.1.0-${GC}"
+CARGO_TARGET_DIR=/tmp/qbind-run383-a QBIND_GIT_COMMIT="$GC" QBIND_BUILD_ID="$BID" \
+  cargo build -p qbind-node --release --locked --bin qbind-node
+CARGO_TARGET_DIR=/tmp/qbind-run383-b QBIND_GIT_COMMIT="$GC" QBIND_BUILD_ID="$BID" \
+  cargo build -p qbind-node --release --locked --bin qbind-node
+cmp -s /tmp/qbind-run383-a/release/qbind-node /tmp/qbind-run383-b/release/qbind-node && echo IDENTICAL || echo DIFFER
+CARGO_TARGET_DIR=/tmp/qbind-run383-a QBIND_GIT_COMMIT="$GC" QBIND_BUILD_ID="${BID}-alt" \
+  cargo build -p qbind-node --release --locked --bin qbind-node
+sha256sum /tmp/qbind-run383-a/release/qbind-node   # expect a DIFFERENT hash than the identical pair
+```
+
+Expected (reference host): the two same-input builds print `IDENTICAL`; the changed `build_id` build
+hashes differently. The full harness
+(`scripts/devnet/run_383_public_devnet_release_provenance_injected_repro.sh`) automates this and also
+scrapes `qbind_node_build_info` to confirm the injected `git_commit` / `build_id` labels. This is a
+**same-host, per-input** result only — see `REPRODUCIBILITY.md` §10.
+
 ## 7. Confirm public DevNet is not claimed launch-ready
 
 ```
