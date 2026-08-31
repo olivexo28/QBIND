@@ -483,3 +483,23 @@ example alert `QbindPerPeerRateLimitDropsSustained` is promoted **future →
 enabled**. Run 380 changes **no** admission, wire format, or trust-bundle handling,
 opens **no** external port, and makes **no** launch/M4/TestNet/MainNet/C4/C5 claim;
 **M12/M13/M14 remain Green**. See `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_380.md`.
+
+## Run 381 — node/build/chain info + qbind-owned disk gauge (cross-reference)
+
+Run 381 adds two node-local, read-only observability series (Route B, a minimal
+metrics source change) and **changes no P2P admission, wire format, or
+trust-bundle handling**:
+
+```bash
+bash scripts/devnet/run_381_public_devnet_observability_gauges.sh
+```
+
+The harness boots the release binary with `--data-dir` and
+`QBIND_METRICS_HTTP_ADDR` on loopback, and proves `qbind_node_build_info` (static
+info gauge, value 1, low-cardinality secret-free labels) and the qbind-owned
+`qbind_node_data_dir_free_bytes` gauge (value only, no path/mount/hostname label)
+are **present**, while the per-peer drop control and its alert remain unchanged
+(still enabled per Run 380). The disk alert `QbindNodeDiskSpaceLow` is promoted
+**future → enabled** against the disk gauge. Run 381 opens **no** external port,
+adds **no** CLI flag, and makes **no** launch/M4/TestNet/MainNet/C4/C5 claim;
+**M12/M13/M14 remain Green**. See `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_381.md`.

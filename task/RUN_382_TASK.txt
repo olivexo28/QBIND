@@ -1,0 +1,169 @@
+Run 382 — Release provenance injection for qbind_node_build_info
+
+Current state:
+Run 381 is accepted as PASS / public-DevNet observability gauge hardening POSITIVE.
+Run 381 added:
+- qbind_node_build_info{version,build_id,git_commit,env,chain_id} 1
+- qbind_node_data_dir_free_bytes
+- QbindNodeDiskSpaceLow enabled
+- QbindStateSizeHigh future
+- M12/M13/M14 Green preserved
+- M4 Yellow / launch-blocking
+- M6 Yellow/Partial
+- public DevNet NOT launch-ready
+- C4/C5 OPEN
+
+Known limitation:
+qbind_node_build_info currently emits build_id="unknown" and git_commit="unknown" unless QBIND_BUILD_ID / QBIND_GIT_COMMIT are injected.
+
+Objective:
+Make release-binary provenance visible through qbind_node_build_info by adding a safe build-time or CI-injected provenance path for git commit and BuildID-compatible build identity, while preserving all Run 381 metric safety constraints.
+
+Strict scope:
+Observability/provenance only.
+
+No public DevNet launch.
+No M4 Green.
+No M6 Green.
+No seed/bootnode exposure.
+No faucet, RPC gateway, explorer, or status page.
+No TestNet/MainNet readiness.
+No C4/C5 closure.
+No authority-lifecycle wiring.
+No validator-set mutation.
+No epoch transition.
+No trust-bundle apply.
+No P2P wire/admission/trust changes.
+No private paths, hostnames, endpoints, secrets, keys, data dirs, raw logs, or raw metrics dumps in committed artifacts.
+
+Required investigation:
+Inspect:
+- Run 359 binary provenance package
+- Run 381 metrics implementation
+- metrics.rs / metrics_http.rs / main.rs
+- Cargo build configuration
+- CI/build environment availability
+- existing use of env! / option_env! / build.rs
+- docs/release/public-devnet/observability/METRICS.md
+- docs/release/public-devnet/observability/VERIFY.md
+- docs/release/public-devnet/binary/BUILDINFO or equivalent provenance docs
+
+Decision gate:
+Route A:
+Existing env injection is enough. Update harness/docs to build with QBIND_BUILD_ID and QBIND_GIT_COMMIT and prove metric values populate.
+
+Route B:
+Add minimal build.rs or compile-time env bridge to expose git commit/build metadata safely.
+
+Route C:
+Provenance injection cannot be made reproducible/safe in this environment. Keep unknown labels and document exact blocker.
+
+Implementation requirements:
+1. Preserve qbind_node_build_info label set exactly unless a strong reason exists.
+2. Values must be sanitized to [A-Za-z0-9._-].
+3. Missing provenance must render unknown, never panic.
+4. No path, hostname, username, private endpoint, branch name, dirty status string, or absolute build path in metrics.
+5. Reproducibility docs must distinguish:
+   - binary ELF BuildID from
+   - qbind_node_build_info build_id label.
+6. If using git commit, prefer full or short commit hash only.
+7. If using BuildID, use a stable injected value from the harness, not runtime shelling out from the node.
+8. No new CLI flag.
+9. Metrics remain disabled unless QBIND_METRICS_HTTP_ADDR is set.
+
+Expected files:
+If source changes:
+- likely build.rs or minimal source/env handling update
+- tests: crates/qbind-node/tests/run_382_public_devnet_build_info_provenance_tests.rs
+
+Always add:
+- scripts/devnet/run_382_public_devnet_build_info_provenance.sh
+- docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_382.md
+- docs/devnet/run_382_public_devnet_build_info_provenance/{README.md,summary.txt,.gitignore}
+
+Update:
+- docs/release/public-devnet/observability/METRICS.md
+- docs/release/public-devnet/observability/VERIFY.md
+- docs/release/public-devnet/observability/README.md
+- docs/release/public-devnet/binary/README.md or provenance docs if present
+- docs/release/QBIND_PUBLIC_DEVNET_READINESS_CRITERIA.md
+- docs/protocol/QBIND_C4_C5_CLOSURE_CRITERIA.md
+- docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md
+- docs/protocol/QBIND_GOVERNANCE_EXECUTION_RUNTIME_SURFACE_AUDIT.md
+- docs/ops/QBIND_PQC_TRUST_LIFECYCLE_RUNBOOK.md
+- docs/whitepaper/contradiction.md
+
+Required release evidence:
+Harness must prove:
+1. release build succeeds;
+2. qbind_node_build_info appears in live scrape;
+3. version label is present;
+4. git_commit is populated when injected;
+5. build_id is populated when injected;
+6. missing injection still renders unknown;
+7. labels are sanitized;
+8. no path/host/endpoint/secret labels;
+9. qbind_node_data_dir_free_bytes still appears when --data-dir is set;
+10. metrics disabled by default;
+11. scrape YAML parses;
+12. alert YAML parses;
+13. enabled alert expressions remain backed by present metrics / up / Run-380 per-peer series;
+14. non-claim grep passes;
+15. release SHA and ELF BuildID captured separately from metric labels.
+
+Required tests:
+- cargo build -p qbind-node --release --bin qbind-node
+- Run 382 harness
+- cargo test -p qbind-node --test run_382_public_devnet_build_info_provenance_tests, if source changes
+- cargo test -p qbind-node --lib
+- YAML parse checks
+- non-claim grep
+
+Security:
+Run secret scanning over all changed files.
+No raw logs, data dirs, keys, credentials, private hostnames, endpoint labels, or absolute paths committed.
+
+CodeQL:
+If Rust source/build.rs changes, invoke CodeQL if available.
+If skipped/timeout/DB-too-large, record exact result and do not call it clean.
+
+Readiness:
+M13 remains Green.
+M14 remains Green.
+M12 remains Green.
+M4 remains Yellow.
+M6 remains Yellow/Partial.
+Public DevNet remains NOT launch-ready.
+C4/C5 remain OPEN.
+
+Expected verdict:
+PASS / public-DevNet build-info provenance hardening positive if injected provenance lands safely and release scrape proves it.
+
+Partial-positive if provenance remains unknown but docs/harness clarify the blocker.
+
+Final response format:
+1. Exact verdict
+2. Files changed
+3. Decision gate route
+4. Provenance injection design
+5. qbind_node_build_info evidence
+6. Missing-provenance fallback
+7. Label safety
+8. ELF BuildID vs metric build_id distinction
+9. Disk metric regression
+10. Metrics endpoint/default compatibility
+11. Alert/scrape config evidence
+12. Non-claim checks
+13. Readiness M13
+14. Readiness M14
+15. Public DevNet status
+16. Remaining DevNet blockers
+17. TestNet blockers
+18. MainNet blockers
+19. C4/C5
+20. Tests run
+21. Security scans
+22. CodeQL
+23. Provenance
+24. Honest limitations
+25. Suggested Run 383

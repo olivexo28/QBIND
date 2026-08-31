@@ -1,0 +1,25 @@
+=== Run 381 release-binary observability gauge evidence ===
+decision_gate=Route B (minimal read-only metrics source change: qbind_node_build_info + qbind_node_data_dir_free_bytes)
+release_binary=OK sha256=26b4f091914436d1952d6e2bce8523f7cb302586b1aaf2ef3908fb666a9e50fc
+release_binary_build_id=3a96efbeadfd6e7ea282449247268e74a8c25507
+toolchain=rustc 1.98.0 (88d9e12ae 2026-08-18) / cargo 1.98.0 (797e8a9bc 2026-08-05)
+no_new_observability_cli_flag=OK (exposure remains QBIND_METRICS_HTTP_ADDR env only)
+metrics_endpoint_scrape=OK http=200 bind=127.0.0.1:33923 lines=515
+public_exposure=NONE (endpoint bound to 127.0.0.1; no auth/TLS; must stay loopback)
+baseline_families_present=OK (committed_height, p2p_connections_current, connection_rate_drop_total, trust-bundle)
+per_peer_drop_state=OK (qbind_net_per_peer_drops_total absent-until-drop; alert stays ENABLED per Run 380)
+build_info_present=OK qbind_node_build_info{version="0.1.0",build_id="unknown",git_commit="unknown",env="devnet",chain_id="51424e4444455600"} 1
+build_info_labels_safe=OK (low-cardinality, no path/host/endpoint/secret; unknowns render as unknown)
+disk_free_bytes_present=OK qbind_node_data_dir_free_bytes=84525117440 (value only, no path/mount/host label)
+legacy_state_size_absent=OK (qbind_state_size_bytes still absent → QbindStateSizeHigh stays future)
+metrics_disabled_by_default=OK (no QBIND_METRICS_HTTP_ADDR ⇒ no /metrics bind logged)
+scrape_config_yaml=OK (prometheus-scrape.example.yml)
+alert_rules_yaml=OK (prometheus-alerts.example.yml)
+disk_alert_enabled=OK (QbindNodeDiskSpaceLow promoted future → enabled; references qbind_node_data_dir_free_bytes)
+per_peer_alert_enabled=OK (QbindPerPeerRateLimitDropsSustained remains enabled)
+enabled_exprs_present=OK (every enabled alert expr references a scrape-present metric, up, or the Run-380-proven per-peer series)
+future_group_absent_only=OK (future group carries only the still-absent qbind_state_size_bytes)
+non_claim_check=OK (no launch-ready / M4-Green / TestNet/MainNet / C4/C5-closure claim in observability docs)
+committed_private_material=NONE (node-data dirs + scrape dumps removed on exit)
+
+RESULT=POSITIVE (Route B: qbind_node_build_info + qbind_node_data_dir_free_bytes land safely on the release binary; disk alert promoted future → enabled; per-peer alert stays enabled; future group carries only the still-absent qbind_state_size_bytes; metrics stay disabled-by-default and loopback-only; M12/M13/M14 remain Green; M4 stays Yellow; C4/C5 OPEN; no launch/TestNet/MainNet claim)

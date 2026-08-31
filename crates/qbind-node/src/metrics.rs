@@ -5415,6 +5415,81 @@ impl EnvironmentMetrics {
 
 use crate::channel_config::ChannelCapacityConfig;
 
+/// Run 381: runtime build/chain context for the `qbind_node_build_info`
+/// low-cardinality info metric.
+///
+/// Only carries a fixed-vocabulary environment string (`devnet` / `testnet` /
+/// `mainnet`) and a canonical chain-id hex string. It NEVER carries paths,
+/// hostnames, private endpoints, or high-cardinality values.
+#[derive(Debug, Clone)]
+pub struct BuildInfoContext {
+    /// Network environment name (fixed vocabulary, low cardinality).
+    pub env: String,
+    /// Canonical chain-id hex (e.g. `0x0000000000000000`).
+    pub chain_id: String,
+}
+
+/// Sanitize a Prometheus label value to keep it low-cardinality and secret-free.
+///
+/// Restricts to `[A-Za-z0-9._-]`, replacing any other byte with `_`, and caps
+/// the length. Empty or all-invalid input renders as `unknown`. This guarantees
+/// no quotes/newlines/backslashes can break the exposition format and that no
+/// stray path/hostname characters leak through a build label.
+fn sanitize_info_label(raw: &str) -> String {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return "unknown".to_string();
+    }
+    let mut out = String::with_capacity(trimmed.len().min(64));
+    for ch in trimmed.chars().take(64) {
+        if ch.is_ascii_alphanumeric() || ch == '.' || ch == '_' || ch == '-' {
+            out.push(ch);
+        } else {
+            out.push('_');
+        }
+    }
+    if out.is_empty() {
+        "unknown".to_string()
+    } else {
+        out
+    }
+}
+
+/// Run 381: best-effort free bytes available on the filesystem backing `path`.
+///
+/// Uses `statvfs(3)` on unix; returns `None` on any error or on non-unix
+/// targets so the caller can honestly omit the gauge rather than panic or fake
+/// a value. Only the numeric result is ever exported — never the path.
+#[cfg(unix)]
+fn data_dir_free_bytes(path: &std::path::Path) -> Option<u64> {
+    use std::os::unix::ffi::OsStrExt;
+    let c_path = std::ffi::CString::new(path.as_os_str().as_bytes()).ok()?;
+    // SAFETY: `statvfs` fills a caller-provided struct; `c_path` is a valid
+    // NUL-terminated C string that outlives the call. We check the return code
+    // before reading any field.
+    let mut stat: libc::statvfs = unsafe { std::mem::zeroed() };
+    let rc = unsafe { libc::statvfs(c_path.as_ptr(), &mut stat) };
+    if rc != 0 {
+        return None;
+    }
+    // Prefer the fundamental block size (`f_frsize`); fall back to `f_bsize`.
+    let block = if stat.f_frsize != 0 {
+        stat.f_frsize as u64
+    } else {
+        stat.f_bsize as u64
+    };
+    let avail = stat.f_bavail as u64;
+    Some(avail.saturating_mul(block))
+}
+
+/// Non-unix fallback: no portable free-space syscall, so the gauge is omitted.
+#[cfg(not(unix))]
+fn data_dir_free_bytes(_path: &std::path::Path) -> Option<u64> {
+    None
+}
+
+
+
 /// Combined metrics for the async consensus node.
 ///
 /// This struct aggregates all metrics categories and provides a single
@@ -9211,6 +9286,14 @@ pub struct NodeMetrics {
     /// disabled). Surfaces honest scope of the configured validator
     /// set without exposing key material.
     timeout_verification_validator_count: std::sync::atomic::AtomicU64,
+    /// Run 381: optional runtime build/chain context for the low-cardinality
+    /// `qbind_node_build_info` info metric. `(env, chain_id)`; both render as
+    /// `unknown` when unset. Never carries paths, hostnames, or endpoints.
+    build_context: std::sync::RwLock<Option<BuildInfoContext>>,
+    /// Run 381: optional qbind-owned data directory used only to compute the
+    /// `qbind_node_data_dir_free_bytes` gauge. The path itself is NEVER
+    /// emitted as a label — only the free-bytes value is exported.
+    data_dir: std::sync::RwLock<Option<std::path::PathBuf>>,
 }
 
 impl Default for NodeMetrics {
@@ -9258,12 +9341,36 @@ impl NodeMetrics {
             timeout_verification_signer_loaded: std::sync::atomic::AtomicU8::new(0),
             timeout_verification_key_provider_loaded: std::sync::atomic::AtomicU8::new(0),
             timeout_verification_validator_count: std::sync::atomic::AtomicU64::new(0),
+            build_context: std::sync::RwLock::new(None),
+            data_dir: std::sync::RwLock::new(None),
         }
     }
 
     /// Get network metrics.
     pub fn network(&self) -> &NetworkMetrics {
         &self.network
+    }
+
+    /// Run 381: set the runtime build/chain context for `qbind_node_build_info`.
+    ///
+    /// `env` and `chain_id` are sanitized to a low-cardinality label vocabulary
+    /// on emission. No path, hostname, or endpoint is ever accepted here.
+    pub fn set_build_context(&self, env: &str, chain_id: &str) {
+        if let Ok(mut guard) = self.build_context.write() {
+            *guard = Some(BuildInfoContext {
+                env: env.to_string(),
+                chain_id: chain_id.to_string(),
+            });
+        }
+    }
+
+    /// Run 381: set the qbind-owned data directory used to compute
+    /// `qbind_node_data_dir_free_bytes`. Only the free-bytes value derived from
+    /// this path is ever exported; the path itself is never emitted.
+    pub fn set_data_dir(&self, path: std::path::PathBuf) {
+        if let Ok(mut guard) = self.data_dir.write() {
+            *guard = Some(path);
+        }
     }
 
     /// Get runtime metrics.
@@ -10069,6 +10176,50 @@ impl NodeMetrics {
 
         // Monetary engine telemetry metrics (T196)
         output.push_str(&self.monetary.format_metrics());
+
+        // ------------------------------------------------------------------
+        // Run 381: node/build/chain info + qbind-owned data-dir free space.
+        //
+        // Both are read-only, low-cardinality, and secret-free. Unknown values
+        // render as `unknown` (build info) or the gauge is omitted (free bytes)
+        // rather than panicking or fabricating data. No path/hostname/endpoint
+        // label is ever emitted.
+        // ------------------------------------------------------------------
+        let version = sanitize_info_label(env!("CARGO_PKG_VERSION"));
+        let build_id = sanitize_info_label(option_env!("QBIND_BUILD_ID").unwrap_or("unknown"));
+        let git_commit =
+            sanitize_info_label(option_env!("QBIND_GIT_COMMIT").unwrap_or("unknown"));
+        let (env_label, chain_label) = match self.build_context.read() {
+            Ok(guard) => match guard.as_ref() {
+                Some(ctx) => (
+                    sanitize_info_label(&ctx.env),
+                    sanitize_info_label(&ctx.chain_id),
+                ),
+                None => ("unknown".to_string(), "unknown".to_string()),
+            },
+            Err(_) => ("unknown".to_string(), "unknown".to_string()),
+        };
+        output.push_str("\n# Node/build/chain info (Run 381)\n");
+        output.push_str("# HELP qbind_node_build_info Static node build/chain info (labels only; value always 1).\n");
+        output.push_str("# TYPE qbind_node_build_info gauge\n");
+        output.push_str(&format!(
+            "qbind_node_build_info{{version=\"{}\",build_id=\"{}\",git_commit=\"{}\",env=\"{}\",chain_id=\"{}\"}} 1\n",
+            version, build_id, git_commit, env_label, chain_label
+        ));
+
+        // qbind-owned data-dir free-space gauge (value only; no path label).
+        let free_bytes = match self.data_dir.read() {
+            Ok(guard) => guard
+                .as_ref()
+                .and_then(|p| data_dir_free_bytes(p.as_path())),
+            Err(_) => None,
+        };
+        if let Some(bytes) = free_bytes {
+            output.push_str("\n# Data-dir free space (Run 381)\n");
+            output.push_str("# HELP qbind_node_data_dir_free_bytes Free bytes on the filesystem backing the qbind data directory.\n");
+            output.push_str("# TYPE qbind_node_data_dir_free_bytes gauge\n");
+            output.push_str(&format!("qbind_node_data_dir_free_bytes {}\n", bytes));
+        }
 
         output
     }
