@@ -110,6 +110,38 @@ QBIND_BUILD_ID="<release-id>" \
 
 See `../observability/METRICS.md` and `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_382.md`.
 
+## Canonical injected release provenance (Run 383)
+
+Run 383 wires the Run 382 bridge to **canonical injected provenance** so a published
+release artifact ships populated `qbind_node_build_info` provenance by default, and
+proves the injected build is **same-input reproducible**. The canonical values the
+release harness injects are:
+
+- `QBIND_GIT_COMMIT` = the expected short commit, `git rev-parse --short=12 HEAD`.
+- `QBIND_BUILD_ID` = a canonical, low-cardinality, non-secret release id derived
+  deterministically from the package version + short commit,
+  `qbind-devnet-<pkg-version>-<short-commit>`. It is **injected** (never derived
+  inside `build.rs` from git or the ELF) and is intentionally **not** the ELF
+  BuildID.
+
+Canonical release build command:
+
+```
+QBIND_GIT_COMMIT="$(git rev-parse --short=12 HEAD)" \
+QBIND_BUILD_ID="qbind-devnet-0.1.0-$(git rev-parse --short=12 HEAD)" \
+  cargo build -p qbind-node --release --locked --bin qbind-node
+```
+
+Injecting `QBIND_GIT_COMMIT` / `QBIND_BUILD_ID` changes the compiled label strings
+and therefore the SHA-256 / ELF BuildID relative to a no-injection build, so the
+injected artifact's binary hash, ELF BuildID, and the canonical injected values are
+recorded together (see `REPRODUCIBILITY.md` §Run 383 and
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_383.md`). Two clean builds with the same
+source, lockfile, toolchain, and injected provenance produce a **byte-identical**
+binary on the reference host; changing the injected `build_id` changes the hash (as
+expected). Regenerate the full evidence with
+`scripts/devnet/run_383_public_devnet_release_provenance_injected_repro.sh`.
+
 ## Limitations
 
 - **Toolchain-sensitive.** The SHA-256 and BuildID above are specific to the recorded

@@ -96,3 +96,38 @@ Green.)
 No **SLSA-grade** provenance and no **signed-release** claim is made. No signing material or
 signature-verification evidence exists for this run. This record is a same-host, clean-tree
 reproducibility + BuildID observation only.
+
+## 10. Run 383 — same-input reproducibility of the injected-provenance build
+
+Run 359 (above) proved same-host reproducibility of the **default** (no-injection) build. Run 383
+extends that to the **canonical injected-provenance** release build wired in Run 382/383, so the
+published artifact ships populated `qbind_node_build_info` provenance **and** is reproducible.
+
+- **Canonical injected provenance:** `QBIND_GIT_COMMIT="$(git rev-parse --short=12 HEAD)"` and
+  `QBIND_BUILD_ID="qbind-devnet-<pkg-version>-<short-commit>"` (see `BUILDINFO.md`).
+- **Build command (each build):**
+  `QBIND_GIT_COMMIT=<commit> QBIND_BUILD_ID=<canonical-id> cargo build -p qbind-node --release --locked --bin qbind-node`.
+- **Experiment:** two clean builds in separate `CARGO_TARGET_DIR`s with the **same** source,
+  lockfile, toolchain, and injected provenance, plus a third build in the default `target/`.
+
+Result on the reference host:
+
+- **Same-input reproducible = YES (Green for scope).** Both isolated builds and the default-target
+  build produced a **byte-identical** `qbind-node` (`cmp -s` exit 0; identical SHA-256 and identical
+  ELF BuildID across all three).
+- **Changed-input sensitivity = YES.** Rebuilding with a **different** injected `build_id`
+  (`…-alt`) changed the binary SHA-256, as expected — the injected provenance is compiled into the
+  binary.
+- **Missing-injection fallback intact.** A build with no `QBIND_BUILD_ID` does not embed the
+  canonical id; the metric renders `build_id="unknown"` (Run 382 regression preserved).
+
+The exact captured SHA-256, ELF BuildID, toolchain, git commit, canonical injected `build_id`, and
+build command line for the reference run are recorded in
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_383.md` and the archived
+`docs/devnet/run_383_public_devnet_release_provenance_injected_repro/summary.txt`.
+
+**Scope unchanged.** This is a **same-host, clean-tree, per-input** reproducibility result. Because
+the injected `git_commit` / `build_id` are compiled in, reproducibility is **per input**: the same
+source + lockfile + toolchain + injected provenance ⇒ the same binary; a different injected value ⇒ a
+different binary. Cross-host reproducibility, SLSA-grade provenance, and signed-release attestation
+are still **not** claimed.

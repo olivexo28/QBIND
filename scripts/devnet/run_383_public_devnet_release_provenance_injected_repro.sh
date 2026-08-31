@@ -373,8 +373,12 @@ emit "alert_rules_yaml=OK ($(basename "${ALERTS_YML}"))"
 # ---------------------------------------------------------------------------
 # 17. Non-claim grep over the release-binary + observability packages.
 # ---------------------------------------------------------------------------
+# Exclude negated / instructional lines (verification greps, "negates any ...
+# mention", "no doc claims C4 or C5 closed", "remains OPEN/Yellow/Red", etc.). A
+# forbidden hit is only a POSITIVE readiness assertion, never a negation or a
+# verification command that quotes the phrase.
 CLAIM_HITS="$(grep -rEi 'launch-ready|M4 Green|C4 closed|C5 closed|TestNet ready|MainNet ready' \
-  "${OBS_DIR}" "${BIN_DIR}" 2>/dev/null | grep -viE 'NOT |not launch-ready|no M4|neither|not a claim|does not|remains? (open|yellow)' || true)"
+  "${OBS_DIR}" "${BIN_DIR}" 2>/dev/null | grep -viE 'NOT |not launch-ready|no M4|neither|not a claim|does not|remains? (open|yellow|red)|grep |negat|no doc claims|matches present|Expected:|no C4/C5 closure|C[45] remains OPEN|no .*closure claim' || true)"
 [ -z "${CLAIM_HITS}" ] || { printf '%s\n' "${CLAIM_HITS}" >&2; fail "release/observability docs contain a forbidden readiness claim"; }
 emit "non_claim_check=OK (no launch-ready / M4-Green / TestNet/MainNet / C4/C5-closure claim in release+observability docs)"
 
