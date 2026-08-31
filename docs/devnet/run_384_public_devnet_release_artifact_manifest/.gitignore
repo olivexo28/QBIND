@@ -1,0 +1,18 @@
+# Run 384 evidence archive — only README.md, summary.txt, and .gitignore are tracked.
+# All per-run artifacts contain absolute paths and ephemeral data and MUST NOT be committed.
+# Node data dirs, node logs, raw /metrics scrape dumps, and the generated manifest.json are
+# temporary and dev-only; only publish-safe hashes and status lines appear in the tracked
+# summary/README. The committed, publish-safe example manifest lives at
+# docs/release/public-devnet/binary/RELEASE_ARTIFACT_MANIFEST.example.json.
+node-data/
+nodes/
+logs/
+data/
+manifest.json
+clean_metrics.txt
+metrics.txt
+*.metrics
+*.err
+*.log
+*.metrics.txt
+manifest.metrics.txt

@@ -98,6 +98,34 @@ hashes differently. The full harness
 scrapes `qbind_node_build_info` to confirm the injected `git_commit` / `build_id` labels. This is a
 **same-host, per-input** result only — see `REPRODUCIBILITY.md` §10.
 
+## 6b. Generate and validate the Run 384 release-artifact manifest
+
+Produce a canonical, publish-safe manifest from the **actual** canonical injected build and a live
+loopback `qbind_node_build_info` scrape, and validate it against the committed schema:
+
+```
+bash scripts/devnet/run_384_public_devnet_release_artifact_manifest.sh
+```
+
+Expected: `RESULT=POSITIVE`. The harness builds the canonical injected artifact, generates the
+manifest, validates the generated manifest **and** the committed
+`RELEASE_ARTIFACT_MANIFEST.example.json` against `RELEASE_ARTIFACT_MANIFEST.schema.json`, and asserts
+the manifest's `binary_sha256`, `elf_build_id`, `metric_build_id`, and `metric_git_commit` match the
+real build / live scrape (metric `build_id` kept a **separate field** from and distinct from the ELF
+BuildID), that the `Cargo.lock` hash and toolchain are recorded, that no absolute path / hostname /
+endpoint / secret / raw `/metrics` dump is embedded, that the non-claim fields are all true, and that
+the reproducibility scope is same-host / per-input only (referencing Run 383, not cross-host / SLSA).
+To validate an existing manifest standalone:
+
+```
+python3 -c "import json,jsonschema,sys; \
+ s=json.load(open('docs/release/public-devnet/binary/RELEASE_ARTIFACT_MANIFEST.schema.json')); \
+ i=json.load(open('docs/release/public-devnet/binary/RELEASE_ARTIFACT_MANIFEST.example.json')); \
+ jsonschema.validate(i,s); print('manifest OK')"
+```
+
+Expected: `manifest OK`.
+
 ## 7. Confirm public DevNet is not claimed launch-ready
 
 ```
@@ -133,5 +161,6 @@ file docs/release/public-devnet/binary/qbind-node.sha256
 ```
 
 Expected: only text files are tracked (`README.md`, `RELEASE_PROVENANCE.md`, `REPRODUCIBILITY.md`,
-`BUILDINFO.md`, `qbind-node.sha256`, `VERIFY.md`); no `qbind-node` ELF blob is tracked. The
+`BUILDINFO.md`, `qbind-node.sha256`, `VERIFY.md`, `RELEASE_ARTIFACT_MANIFEST.schema.json`,
+`RELEASE_ARTIFACT_MANIFEST.example.json`); no `qbind-node` ELF blob is tracked. The
 `.sha256` file is an ASCII checksum, not a binary.

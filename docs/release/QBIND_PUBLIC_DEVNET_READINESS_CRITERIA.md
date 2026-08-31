@@ -376,6 +376,30 @@ HTTP 200; scrape + alert YAML parse; non-claim check OK. Evidence
 `docs/devnet/run_383_public_devnet_release_provenance_injected_repro/`. **M12, M13, and M14 remain
 Green**; M4 stays Yellow/launch-blocking; M6 remains Yellow/Partial; public DevNet remains NOT
 launch-ready; C4/C5 remain OPEN; MainNet/TestNet untouched.
+
+Updated Run 384 — **canonical CI/release-artifact manifest (M13/M14 remain Green)**: Run 384 is a
+**docs/harness/schema-only** run (decision gate **Route A**, no production source change, no `build.rs`
+change, no runtime change, no CLI flag) that records the Run 383 canonical injected build as a
+machine-readable, publish-safe **release-artifact manifest**. It adds
+`docs/release/public-devnet/binary/RELEASE_ARTIFACT_MANIFEST.schema.json` (JSON-Schema draft-07
+contract) and `RELEASE_ARTIFACT_MANIFEST.example.json` (generated from the real build), the harness
+`scripts/devnet/run_384_public_devnet_release_artifact_manifest.sh`, the archive
+`docs/devnet/run_384_public_devnet_release_artifact_manifest/`, and evidence
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_384.md`. The harness builds the canonical injected artifact
+(`QBIND_GIT_COMMIT="$(git rev-parse --short=12 HEAD)"`,
+`QBIND_BUILD_ID="qbind-devnet-<version>-<short-commit>"`), generates the manifest from the actual
+binary (SHA-256, ELF BuildID) plus a live loopback `qbind_node_build_info` scrape (metric `build_id` /
+`git_commit`), records the `Cargo.lock` hash, toolchain, and target triple, and validates the manifest
+**and** the committed example against the schema (`RESULT=POSITIVE`). The manifest keeps `metric_build_id`
+a **separate field** from and distinct from `elf_build_id`, carries same-host/per-input
+`reproducibility_scope` referencing Run 383 (not cross-host / SLSA), all non-claim fields true, and no
+absolute path / hostname / endpoint / secret / raw `/metrics` dump. No metric/alert/scrape change; no new
+CLI flag (exposure stays `QBIND_METRICS_HTTP_ADDR` loopback-only, disabled by default); no P2P
+wire-format / peer-admission / trust / validator / epoch / sequence / marker change. Evidence
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_384.md`, archive
+`docs/devnet/run_384_public_devnet_release_artifact_manifest/`. **M12, M13, and M14 remain Green**; M4
+stays Yellow/launch-blocking; M6 remains Yellow/Partial; public DevNet remains NOT launch-ready; C4/C5
+remain OPEN; MainNet/TestNet untouched.
 **Track:** Public network release-readiness. This is a **separate track** from the internal
 authority-lifecycle boundary track (Run 130–354) and from C4/C5 closure.
 **Scope of this document:** source/docs/test-only audit and gap matrix. It introduces public DevNet

@@ -105,6 +105,12 @@ grep -Eo 'build_id="[^"]*"' /tmp/metrics.txt                  # -> canonical rel
 #   QBIND_BUILD_ID="qbind-devnet-0.1.0-$(git rev-parse --short=12 HEAD)" \
 #     cargo build -p qbind-node --release --locked --bin qbind-node
 readelf -n ./target/release/qbind-node | grep -i 'build id'   # ELF BuildID (separate plane)
+# Run 384: bind the canonical injected build's SHA-256 / ELF BuildID / metric build_id /
+# git_commit / toolchain / target / Cargo.lock hash into a schema-validated, publish-safe
+# release-artifact manifest (metric build_id kept a SEPARATE field from the ELF BuildID):
+#   bash scripts/devnet/run_384_public_devnet_release_artifact_manifest.sh
+# Contract: docs/release/public-devnet/binary/RELEASE_ARTIFACT_MANIFEST.schema.json;
+# example:  docs/release/public-devnet/binary/RELEASE_ARTIFACT_MANIFEST.example.json.
 
 # 13. Legacy state-size gauge stays absent (future group only)
 grep -c '^qbind_state_size_bytes' /tmp/metrics.txt            # -> 0
