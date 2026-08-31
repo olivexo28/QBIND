@@ -24,6 +24,12 @@ infrastructure, or claiming the network is joinable yet.
 | `SAFETY.md` | User-facing safety label / disclaimer publication. |
 | `VERIFY.md` | Exact operator verification commands and expected outputs for this package. |
 
+> **Run 389 — security package.** Consolidated key-management and PQC trust-bootstrap guidance for
+> DevNet operators is published separately under `docs/release/public-devnet/security/`
+> (`KEY_MANAGEMENT.md` = M7, `PQC_TRUST_BOOTSTRAP.md` = M8, `PQC_ROOT_AND_SIGNING_KEYS.md` = M9, plus
+> `README.md` / `SAFETY.md` / `VERIFY.md`). See it after `IDENTITY.md` for signer modes, private-key
+> permissions, trust-bundle bootstrap, and root/signing-key handling.
+
 ## Canonical location
 
 This is the canonical location for external public DevNet operator onboarding material. It sits

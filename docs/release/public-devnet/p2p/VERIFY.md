@@ -18,6 +18,13 @@ commands; none deploy infrastructure, none open a public port, and none claim la
 > deterministic-NodeId check that opens no socket and mutates no state; confirm via
 > `qbind-node identity register-check --help` and by re-running
 > `scripts/devnet/run_376_public_devnet_identity_registration.sh` (which never binds a port).
+
+> **Run 389 note.** The Run 389 security package (`docs/release/public-devnet/security/`) verifies the
+> key/trust guidance against the same pre-existing surfaces without any wire-format or admission
+> change. Its trust-bundle check uses the **validation-only** `--p2p-trust-bundle-reload-check` path
+> (`signature_verified=true` / `VERDICT=valid`; tampered fails closed) and opens no port; reproduce it
+> with `bash scripts/devnet/run_389_public_devnet_security_key_trust_bootstrap.sh` and
+> `docs/release/public-devnet/security/VERIFY.md`.
 >
 > **Run 377 note.** The Run 377 M4 reachability preflight adds no P2P wire-format change and no
 > peer-admission change. Its harness (`scripts/devnet/run_377_public_devnet_live_seed_reachability.sh`)

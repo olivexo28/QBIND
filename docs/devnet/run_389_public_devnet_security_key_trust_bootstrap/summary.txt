@@ -1,0 +1,22 @@
+[run389] building qbind-node (release, locked)…
+[run389] building devnet_pqc_trust_bundle_helper example…
+release_binary=OK sha256=6c43154415b630645217bbdb618f80dfb719b24d58799c3dcfd3df505b0a6ccd
+build_id=c61071905d4f3497b5ee845a12ecd434bac642f5
+toolchain=rustc 1.98.0 (88d9e12ae 2026-08-18) / cargo 1.98.0 (797e8a9bc 2026-08-05)
+help_documented_flags=OK (13 flags present; no invented flag)
+identity_help=OK (generate/verify/print-public/seed-candidate/register-check surfaced)
+[run389] identity generate devnet full-node…
+identity_generate=OK node_id=c79005a05e53420a19cdd78c84e590ee62aa65260097e1b144a3ea4f6181708d (kem_sk 0600; no root signing key on disk)
+identity_verify=OK (NodeId deterministically re-derived from public cert)
+public_identity_no_private_material_ok
+public_identity_no_private=OK (private_material records paths only; no secret key bytes)
+[run389] minting signed DevNet trust bundle…
+trust_bundle_mint=OK (signed DevNet bundle; signing SECRET key NOT on disk; leaf kem_sk 0600)
+trust_bundle_reload_check_valid=OK (signature_verified=true; VERDICT=valid; validation-only, no live apply)
+trust_bundle_reload_check_tampered=REFUSED (fail closed; VERDICT=invalid; signature verification failed)
+mainnet_testnet_generation=REFUSED (fail closed; DevNet-only tooling)
+non_claim_grep=OK (no launch-ready / M4-Green / C4-C5-closure / TestNet-MainNet-ready claim)
+cross_links=OK (operator, identity, p2p, PQC lifecycle runbook referenced)
+committed_private_material=NONE (material dir is temporary; removed on exit)
+
+RESULT=POSITIVE (M7/M8/M9 security key-management + PQC trust-bundle bootstrap guidance published and verified against real CLI/helper surfaces; no production source change; M4/M6 stay Yellow; C4/C5 OPEN; public DevNet NOT launch-ready)
