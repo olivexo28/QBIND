@@ -51,7 +51,13 @@ canonical records are `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_381.md`,
 11. **Node/build/chain info present (Run 381):** the scrape contains
     `qbind_node_build_info{version,build_id,git_commit,env,chain_id} 1` with
     low-cardinality, secret-free labels (no path/hostname/endpoint; unknown values
-    render as `unknown`).
+    render as `unknown`). **Run 382** adds a build-time provenance bridge
+    (`crates/qbind-node/build.rs`): `git_commit` is auto-derived to a **short git
+    commit hash** (or an explicit `QBIND_GIT_COMMIT` override), and `build_id` is a
+    **harness/CI-injected** `QBIND_BUILD_ID` (never derived from git or the ELF).
+    Missing provenance still renders `unknown`. This metric `build_id` label is
+    distinct from the binary's ELF `.note.gnu.build-id` recorded in
+    `../binary/BUILDINFO.md`.
 12. **qbind-owned free-space gauge present (Run 381):** with `--data-dir` set the
     scrape contains a value-only `qbind_node_data_dir_free_bytes` (no path/mount/
     hostname label). Its alert `QbindNodeDiskSpaceLow` is **enabled** because the
@@ -86,6 +92,15 @@ grep -E '^qbind_consensus_committed_height|^qbind_p2p_connections_current|^qbind
 # 11-12. Run 381 gauges present (build info + qbind-owned data-dir free space)
 grep -E '^qbind_node_build_info\{' /tmp/metrics.txt
 grep -E '^qbind_node_data_dir_free_bytes ' /tmp/metrics.txt   # value only, no label
+
+# 11a. Run 382: build-time provenance. A default (git work-tree) build auto-fills
+# git_commit with a short commit hash; build_id stays "unknown" until injected:
+grep -Eo 'git_commit="[^"]*"' /tmp/metrics.txt                # -> a short hash (or "unknown")
+# Inject provenance at build time to populate both labels (metric build_id is the
+# harness/CI release id, NOT the ELF .note.gnu.build-id):
+#   QBIND_GIT_COMMIT="$(git rev-parse --short=12 HEAD)" QBIND_BUILD_ID="<release-id>" \
+#     cargo build -p qbind-node --release --bin qbind-node
+readelf -n ./target/release/qbind-node | grep -i 'build id'   # ELF BuildID (separate plane)
 
 # 13. Legacy state-size gauge stays absent (future group only)
 grep -c '^qbind_state_size_bytes' /tmp/metrics.txt            # -> 0

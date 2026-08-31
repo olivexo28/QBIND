@@ -1,0 +1,146 @@
+Run 383 — Canonical release-build provenance injection and reproducibility evidence
+
+Current state:
+Run 382 is accepted PASS. `qbind_node_build_info` now supports safe build-time provenance:
+- git_commit auto-derived or injected by QBIND_GIT_COMMIT
+- build_id injected only by QBIND_BUILD_ID
+- missing values render unknown
+- labels sanitized and secret-free
+- ELF BuildID and metric build_id are distinct
+- M12/M13/M14 remain Green
+- M4 remains Yellow / launch-blocking
+- M6 remains Yellow/Partial
+- public DevNet remains NOT launch-ready
+- C4/C5 remain OPEN
+
+Objective:
+Wire the public DevNet release-build/provenance harness so published release artifacts are built with canonical injected QBIND_GIT_COMMIT and QBIND_BUILD_ID values by default, and prove same-input reproducibility for the injected-provenance build.
+
+Strict scope:
+Release provenance and reproducibility evidence only.
+
+Non-goals:
+No public DevNet launch.
+No M4 Green.
+No M6 Green.
+No external seed/bootnode.
+No faucet, RPC gateway, explorer, or status page.
+No TestNet/MainNet readiness.
+No C4/C5 closure.
+No authority-lifecycle wiring.
+No validator-set mutation.
+No epoch transition.
+No trust-bundle apply.
+No P2P wire/admission/trust change.
+No new public CLI flag.
+No committed secrets, keys, raw logs, data dirs, private endpoints, hostnames, branch names, dirty-state strings, or raw metrics dumps.
+
+Required investigation:
+Inspect:
+- docs/release/public-devnet/binary/{README.md,BUILDINFO.md,REPRODUCIBILITY.md,VERIFY.md}
+- docs/release/public-devnet/observability/{METRICS.md,VERIFY.md}
+- scripts/devnet/run_382_public_devnet_build_info_provenance.sh
+- Run 359 provenance/reproducibility package
+- Run 381/382 metrics implementation
+- crates/qbind-node/build.rs
+- Cargo build inputs and lockfile state
+
+Implementation:
+Prefer docs/harness only.
+
+Add or update:
+- scripts/devnet/run_383_public_devnet_release_provenance_injected_repro.sh
+- docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_383.md
+- docs/devnet/run_383_public_devnet_release_provenance_injected_repro/{README.md,summary.txt,.gitignore}
+
+Update:
+- docs/release/public-devnet/binary/README.md
+- docs/release/public-devnet/binary/BUILDINFO.md
+- docs/release/public-devnet/binary/REPRODUCIBILITY.md
+- docs/release/public-devnet/binary/VERIFY.md
+- docs/release/public-devnet/observability/METRICS.md
+- docs/release/public-devnet/observability/VERIFY.md
+- docs/release/QBIND_PUBLIC_DEVNET_READINESS_CRITERIA.md
+- docs/protocol/QBIND_C4_C5_CLOSURE_CRITERIA.md
+- docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md
+- docs/protocol/QBIND_GOVERNANCE_EXECUTION_RUNTIME_SURFACE_AUDIT.md
+- docs/ops/QBIND_PQC_TRUST_LIFECYCLE_RUNBOOK.md
+- docs/whitepaper/contradiction.md
+
+Required harness evidence:
+1. clean release build with canonical injected `QBIND_GIT_COMMIT`
+2. clean release build with canonical injected `QBIND_BUILD_ID`
+3. `qbind_node_build_info` live scrape shows both injected labels
+4. injected git commit equals expected short commit
+5. injected build_id equals the canonical release id chosen by the harness
+6. ELF BuildID captured separately
+7. metric build_id differs from ELF BuildID unless deliberately set equal and documented; prefer distinct
+8. two clean builds with the same source, lockfile, toolchain, and injected provenance produce byte-identical binaries on the same host
+9. changing injected build_id changes binary hash, recorded as expected
+10. missing-injection fallback from Run 382 still works or is covered by Run 382 regression
+11. metrics disabled by default
+12. `/metrics` loopback scrape works when env-gated
+13. no new CLI flag
+14. no path/host/endpoint/secret/branch/dirty label leakage
+15. binary SHA, ELF BuildID, toolchain, git commit, injected build_id, and command line are captured
+16. YAML parse checks still pass
+17. non-claim grep passes
+
+Required tests:
+- cargo build -p qbind-node --release --locked --bin qbind-node with injected provenance
+- same-input reproducibility build 1 and build 2
+- Run 383 harness
+- cargo test -p qbind-node --test run_382_public_devnet_build_info_provenance_tests
+- cargo test -p qbind-node --lib
+- YAML parse checks
+- non-claim grep
+
+Security:
+Run secret scanning over all changed files.
+Do not commit raw metrics dumps, node logs, temp data dirs, private keys, private hostnames, external endpoints, or credentials.
+
+CodeQL:
+If no production Rust changes, record CodeQL as trivial / not meaningful.
+If Rust source/build.rs changes, invoke CodeQL if available. If skipped because DB is too large, record that exactly and do not call it clean.
+
+Readiness:
+M13 remains Green.
+M14 remains Green.
+M12 remains Green.
+M4 remains Yellow / launch-blocking.
+M6 remains Yellow/Partial.
+Public DevNet remains NOT launch-ready.
+C4/C5 remain OPEN.
+
+Expected verdict:
+PASS / public-DevNet injected release provenance reproducibility POSITIVE if same-input injected build reproducibility and live metric provenance both land.
+
+Partial-positive if injection works but same-input reproducibility is not proven.
+
+Final response format:
+1. Exact verdict
+2. Files changed
+3. Decision gate route
+4. Canonical injected provenance values
+5. Build command
+6. qbind_node_build_info evidence
+7. Same-input reproducibility evidence
+8. Changed-input hash-difference evidence
+9. ELF BuildID vs metric build_id
+10. Metrics endpoint/default compatibility
+11. Label safety
+12. Alert/scrape config evidence
+13. Non-claim checks
+14. Readiness M13
+15. Readiness M14
+16. Public DevNet status
+17. Remaining DevNet blockers
+18. TestNet blockers
+19. MainNet blockers
+20. C4/C5
+21. Tests run
+22. Security scans
+23. CodeQL
+24. Provenance
+25. Honest limitations
+26. Suggested Run 384

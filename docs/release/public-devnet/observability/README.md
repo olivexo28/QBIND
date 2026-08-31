@@ -16,15 +16,21 @@ exposes, verifies, scrapes, and alerts on the metrics that the **release**
   hardening, decision gate **Route A** for the per-peer drop metric + **Route C**
   for node/build-info and disk gauges; Run 381 hardening, decision gate **Route B**
   — a minimal read-only source change adds `qbind_node_build_info` and the
-  qbind-owned `qbind_node_data_dir_free_bytes` gauge). It adds **no** new CLI flag;
+  qbind-owned `qbind_node_data_dir_free_bytes` gauge; Run 382 provenance, decision
+  gate **Route B** — a minimal build-time provenance bridge
+  (`crates/qbind-node/build.rs`) that auto-fills the `qbind_node_build_info`
+  `git_commit` label with a short git commit hash and passes through a
+  harness/CI-injected `QBIND_BUILD_ID`, so release provenance is visible without a
+  runtime change). It adds **no** new CLI flag;
   the metrics endpoint is the pre-existing `metrics_http` server gated by the
   `QBIND_METRICS_HTTP_ADDR` environment variable
   (`crates/qbind-node/src/metrics_http.rs`, `crates/qbind-node/src/main.rs`).
 - Every metric name listed here was **verified against the release binary** by
   scraping `/metrics` over loopback — see [`VERIFY.md`](./VERIFY.md), the Run 379
   evidence record `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_379.md`, the Run 380
-  hardening record `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_380.md`, and the Run 381
-  hardening record `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_381.md`.
+  hardening record `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_380.md`, the Run 381
+  hardening record `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_381.md`, and the Run 382
+  provenance record `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_382.md`.
 - Alert rules that reference a metric **not present in any verified scrape** are
   clearly marked **FUTURE / not enabled** rather than shipped as active. The
   per-peer drop alert `QbindPerPeerRateLimitDropsSustained` was promoted to
