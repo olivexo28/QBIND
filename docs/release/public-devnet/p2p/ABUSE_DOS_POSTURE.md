@@ -86,10 +86,12 @@ lifecycle runbook (`docs/ops/QBIND_PQC_TRUST_LIFECYCLE_RUNBOOK.md`) for alerting
 > abuse/DoS counters over `/metrics` (loopback via `QBIND_METRICS_HTTP_ADDR`) and
 > ships an example alert on **sustained connection-rate drops**
 > (`qbind_p2p_connection_rate_drop_total`, verified present in a release-binary
-> scrape). The **per-peer** drop series `qbind_net_per_peer_drops_total` is emitted
-> only after a per-peer rate-limit drop occurs and was absent from a clean scrape,
-> so its alert is shipped **future / not-enabled** — consistent with the
-> construction-path-only per-peer message-rate override noted in §7c–§7f.
+> scrape). The **per-peer** drop series `qbind_net_per_peer_drops_total` is
+> **absent in a clean scrape until a per-peer rate-limit drop occurs**; Runs
+> 371–373 prove deployed KEMTLS live-socket enforcement (§7k–§7m) and its example
+> alert `QbindPerPeerRateLimitDropsSustained` is **enabled** in Run 380 with
+> release-binary scrape evidence that the series becomes present after an induced
+> per-peer drop.
 
 ## 6. Minimum public DevNet recommended posture
 
@@ -477,6 +479,36 @@ change)**.
 static-root only **tighten** admission; no wire-format / trust-bundle weakening; M4/M6 unchanged; public
 DevNet remains **NOT launch-ready**; Full **C4 / C5 remain OPEN**. Sustained high-throughput multi-peer load
 validation and trust-bundle-signed (rotation-staging) cross-process live-socket flood remain outstanding.
+
+## 7n. Run 380 observability hardening — per-peer drop scrape + alert promotion (Route A)
+
+Run 380 turns the deployed per-peer drop counter proven in Runs 371–373 into
+first-class, alertable observability, reusing the Run 371 KEMTLS live-socket helper
+path with **no production source change**.
+
+- **Clean-then-induced scrape (live socket):** the deployed `target/release/qbind-node`
+  boots with the pre-existing per-peer flags `--p2p-max-messages-per-second` /
+  `--p2p-burst-allowance` and `QBIND_METRICS_HTTP_ADDR=127.0.0.1:<port>`; a clean
+  `/metrics` scrape shows `qbind_net_per_peer_drops_total` **absent**, then a
+  KEMTLS-admitted over-budget flood (Run 371 helper in `dial-flood` mode) trips the
+  deployed `TcpKemTlsP2pService::read_loop` per-peer limiter and a re-scrape exposes
+  `qbind_net_per_peer_drops_total{reason="rate_limit"}` > 0.
+- **Control independence (live socket):** the per-peer flood leaves
+  `qbind_p2p_connection_rate_drop_total = 0`, and a connection-rate flood leaves the
+  per-peer family absent — the two M12 controls remain independent.
+- **Docs correction:** the earlier "construction-path-only" per-peer wording in the
+  observability package is corrected to "absent in a clean scrape until a per-peer
+  rate-limit drop occurs; Runs 371–373 prove deployed KEMTLS live-socket
+  enforcement." The example alert `QbindPerPeerRateLimitDropsSustained` is promoted
+  **future → enabled**; the disk alert stays future (no qbind-owned free-disk gauge;
+  use node-exporter).
+- Artifacts: `scripts/devnet/run_380_public_devnet_observability_hardening.sh`,
+  `docs/devnet/run_380_public_devnet_observability_hardening/`,
+  `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_380.md`.
+
+**M12/M13/M14 remain Green** (hardening evidence; scope unchanged). No new public CLI
+flags; no wire-format / trust-bundle / admission change; M4/M6 unchanged; public
+DevNet remains **NOT launch-ready**; Full **C4 / C5 remain OPEN**.
 
 
 Before a public TestNet, at minimum:

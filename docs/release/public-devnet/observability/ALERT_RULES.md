@@ -27,6 +27,7 @@ stays a single source of *what fires and how loud*.
 | `QbindSnapshotFailures` | ticket | `increase(qbind_snapshot_failure_total[1h]) > 0` | Snapshot/storage subsystem degraded. |
 | `QbindRestoreCatchupStuck` | ticket | `qbind_restore_catchup_mode_active == 1` for 30m | Node stuck in catch-up. |
 | `QbindPeerCandidateRejectionsHigh` | observe | `increase(qbind_p2p_pqc_trust_bundle_peer_candidate_rejected_total[15m]) > 0` for 15m | Peer-candidate rejections; correlate. |
+| `QbindPerPeerRateLimitDropsSustained` | observe | `increase(qbind_net_per_peer_drops_total[5m]) > 0` for 10m | Sustained M12 per-peer message-rate drops (per-`peer` abuse). |
 
 **Coverage notes (honest):**
 
@@ -36,6 +37,10 @@ stays a single source of *what fires and how loud*.
   listener-up signal is a future improvement.
 - *Connection-rate drops sustained* → `QbindConnectionRateDropsSustained`
   (M12 connection-rate limiter, production-wired, Run 371 Green).
+- *Per-peer message-rate drops sustained* → `QbindPerPeerRateLimitDropsSustained`
+  (M12 per-peer limiter enforced over the deployed KEMTLS live socket, Runs
+  371–373 Green; the series `qbind_net_per_peer_drops_total` is absent until the
+  first per-peer drop and is proven present after an induced drop by Run 380).
 - *Trust-bundle load/apply failures* → `QbindTrustBundleSignatureRejections` +
   `QbindTrustBundleSequencePersistFailure` (live-reload apply-failure counters
   also exist for future use).
@@ -53,13 +58,21 @@ active coverage:
 
 | Alert | Absent metric | Why future |
 |---|---|---|
-| `QbindPerPeerRateLimitDropsSustained` | `qbind_net_per_peer_drops_total` | Emitted per-peer only after a per-peer rate-limit drop; absent in the clean scrape; deployed per-peer message-rate override is construction-path-only (see `ABUSE_DOS_POSTURE.md`). |
-| `QbindNodeDiskSpaceLow` | `qbind_state_size_bytes` (and no free-disk gauge) | Not present in the default scrape; do disk alerting via node-exporter (`node_filesystem_avail_bytes`). |
+| `QbindNodeDiskSpaceLow` | `qbind_state_size_bytes` (and no free-disk gauge) | qbind-node emits **no** owned free-disk/storage-capacity gauge (Run 380 Route C); do disk alerting via node-exporter (`node_filesystem_avail_bytes`). |
+
+> **Run 380 note:** `QbindPerPeerRateLimitDropsSustained` was promoted from this
+> future group to the **enabled** rules above. Its metric
+> `qbind_net_per_peer_drops_total` is absent in a clean scrape until a per-peer
+> rate-limit drop occurs, but Runs 371–373 prove deployed KEMTLS live-socket
+> enforcement and Run 380 provides release-binary scrape evidence that the series
+> becomes present after an induced per-peer drop. The disk alert stays future
+> because no qbind-owned disk/free-space metric exists.
 
 ## Validation
 
-Both YAML files parse cleanly and are checked by the Run 379 harness
-(`scripts/devnet/run_379_public_devnet_observability_baseline.sh`) and
-[`VERIFY.md`](./VERIFY.md). If `promtool` is available, `promtool check rules`
+Both YAML files parse cleanly and are checked by the Run 380 harness
+(`scripts/devnet/run_380_public_devnet_observability_hardening.sh`), the earlier
+Run 379 harness (`scripts/devnet/run_379_public_devnet_observability_baseline.sh`),
+and [`VERIFY.md`](./VERIFY.md). If `promtool` is available, `promtool check rules`
 and `promtool check config` may be run as an optional stronger check; the harness
 uses a dependency-free Python YAML parse so it works without Prometheus installed.
