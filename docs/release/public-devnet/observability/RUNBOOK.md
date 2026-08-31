@@ -76,17 +76,22 @@ General first steps for any alert:
 rejected. Correlate with `..._peer_candidate_received_total` /
 `..._validated_total`. Informational unless paired with a page-level alert.
 
+## QbindPerPeerRateLimitDropsSustained
+**Severity: observe.** The deployed M12 per-peer message-rate limiter is dropping
+frames from one or more peers. `qbind_net_per_peer_drops_total{reason="rate_limit"}`
+is absent until the first per-peer drop, then increments per offending `peer`
+label; Runs 371–373 prove this enforcement over the deployed KEMTLS live socket and
+Run 380 provides release-binary scrape evidence. Respond as for
+`QbindConnectionRateDropsSustained`, but scope to the offending `peer` label:
+confirm locally, classify local vs network-wide, preserve evidence, and correlate
+with `qbind_p2p_connection_rate_drop_total` (the two controls are independent — a
+per-peer drop does not increment the connection-rate counter and vice versa).
+
 ---
 
 ## FUTURE / NOT ENABLED
 
-### QbindPerPeerRateLimitDropsSustained (future)
-`qbind_net_per_peer_drops_total` is absent until a per-peer rate-limit drop
-occurs, and the deployed per-peer message-rate override is construction-path-only.
-When a future run wires the deployed per-peer limiter to emit this series, enable
-this rule and respond as for `QbindConnectionRateDropsSustained` but scoped to the
-offending `peer` label.
-
 ### QbindNodeDiskSpaceLow (future)
-qbind-node emits no free-disk gauge. Do disk alerting with host/node-exporter
-metrics (`node_filesystem_avail_bytes`). Until then this rule stays disabled.
+qbind-node emits no free-disk / storage-capacity gauge (Run 380 Route C). Do disk
+alerting with host/node-exporter metrics (`node_filesystem_avail_bytes`). Until a
+qbind-owned free-disk metric exists this rule stays disabled.

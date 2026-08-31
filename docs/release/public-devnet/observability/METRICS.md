@@ -55,14 +55,21 @@ is making consensus progress:
 | `qbind_p2p_session_eviction_*_total` | counter | Session eviction outcomes. |
 
 **Per-peer rate-limit drops — `qbind_net_per_peer_drops_total{peer,reason="rate_limit"}`
-(CONDITIONAL / effectively FUTURE for alerting).** This series is emitted by the
-release binary **only after a per-peer rate-limit drop has occurred**
-(`metrics.rs` renders it per-peer guarded by `rate_limit_drop > 0`) and it was
-**absent from the clean baseline scrape**. It is also consistent with the M12
-posture that the per-peer *message-rate* override is construction-path-only on the
-deployed node (see `ABUSE_DOS_POSTURE.md`). Alert rules on this series are marked
-**FUTURE / not enabled** in [`ALERT_RULES.md`](./ALERT_RULES.md) because the series
-is absent until the first drop.
+(CONDITIONAL: absent until the first per-peer drop; ENABLED for alerting).** This
+series is emitted by the release binary **only after a per-peer rate-limit drop
+has occurred** (`metrics.rs` renders it per-peer guarded by `rate_limit_drop > 0`),
+so it is **absent in a clean scrape until a per-peer rate-limit drop occurs**. It
+is **not** an unwired series: **Runs 371–373 prove deployed KEMTLS live-socket
+enforcement** — a KEMTLS-admitted peer that floods over-budget frames through the
+deployed `TcpKemTlsP2pService::read_loop` trips the deployed per-peer limiter and
+makes `qbind_net_per_peer_drops_total{reason="rate_limit"}` appear on the live
+`/metrics` endpoint (M12 Green). **Run 380** reproduces this against the release
+binary: a clean scrape shows the series absent, then an induced per-peer drop makes
+it present, while `qbind_p2p_connection_rate_drop_total` stays independent. Its
+alert `QbindPerPeerRateLimitDropsSustained` is therefore **ENABLED** in
+[`ALERT_RULES.md`](./ALERT_RULES.md); `increase(...)` over an absent-until-first-drop
+series simply does not fire until the first real drop, which is the correct
+behaviour (see `ABUSE_DOS_POSTURE.md` §7k–§7m for the deployed live-socket proof).
 
 ## 3. PQC trust-bundle & peer-candidate propagation (REQUIRED)
 

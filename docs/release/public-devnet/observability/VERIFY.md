@@ -1,15 +1,20 @@
 # QBIND Public DevNet — Observability Verification (M13/M14)
 
-Reproducible, release-binary-backed verification for the observability baseline.
-The one-command path is the Run 379 harness:
+Reproducible, release-binary-backed verification for the observability baseline
+and the Run 380 hardening (per-peer drop scrape + alert promotion). The
+one-command paths are the Run 380 hardening harness and the Run 379 baseline
+harness:
 
 ```bash
+bash scripts/devnet/run_380_public_devnet_observability_hardening.sh
 bash scripts/devnet/run_379_public_devnet_observability_baseline.sh
 ```
 
-It writes publish-safe results to
-`docs/devnet/run_379_public_devnet_observability_baseline/summary.txt` and the
-canonical record is `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_379.md`.
+They write publish-safe results to
+`docs/devnet/run_380_public_devnet_observability_hardening/summary.txt` and
+`docs/devnet/run_379_public_devnet_observability_baseline/summary.txt`; the
+canonical records are `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_380.md` and
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_379.md`.
 
 ## What the harness proves
 
@@ -33,12 +38,18 @@ canonical record is `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_379.md`.
    `*-future-not-enabled` group.
 9. **Docs list only real metrics:** every enabled alert expression's metric is
    grep-confirmed present in the fresh scrape.
-10. **Absent-metric alerts are future:** `qbind_net_per_peer_drops_total` and
-    `qbind_state_size_bytes` are confirmed **absent** from the scrape, and their
-    alerts live only in the future/not-enabled group.
-11. **No live seed / M4 claim:** the harness asserts the summary makes no
+10. **Per-peer drop appears only after an induced drop:**
+    `qbind_net_per_peer_drops_total` is confirmed **absent** in a clean scrape,
+    then made **present** by inducing a per-peer rate-limit drop over the deployed
+    KEMTLS live socket (Run 371–373 helper path), while
+    `qbind_p2p_connection_rate_drop_total` stays independent (Run 380). Its alert
+    `QbindPerPeerRateLimitDropsSustained` is **enabled**.
+11. **Disk alert stays future:** no qbind-owned free-disk/storage-capacity gauge
+    exists, so `QbindNodeDiskSpaceLow` remains in the future/not-enabled group
+    (use node-exporter `node_filesystem_avail_bytes`).
+12. **No live seed / M4 claim:** the harness asserts the summary makes no
     launch/live-seed/M4-Green claim.
-12. **No TestNet/MainNet/C4/C5 claim:** the harness asserts no such claim.
+13. **No TestNet/MainNet/C4/C5 claim:** the harness asserts no such claim.
 
 ## Manual verification (optional)
 
@@ -60,8 +71,11 @@ curl -s -o /tmp/metrics.txt -w 'http=%{http_code}\n' http://127.0.0.1:$PORT/metr
 # 5. Required families present
 grep -E '^qbind_consensus_committed_height|^qbind_p2p_connections_current|^qbind_p2p_connection_rate_drop_total' /tmp/metrics.txt
 
-# 10. Absent metrics stay future
+# 10. Per-peer drop series is absent in a clean scrape (present only after a drop)
 grep -c '^qbind_net_per_peer_drops_total' /tmp/metrics.txt   # -> 0 in a clean scrape
+# Induce a per-peer drop with the Run 371-373 KEMTLS live-socket helper path, then
+# re-scrape: qbind_net_per_peer_drops_total{reason="rate_limit"} becomes present
+# while qbind_p2p_connection_rate_drop_total stays 0 (see the Run 380 harness).
 
 # 7-8. Config YAML parses (dependency-free)
 python3 -c "import sys;              \

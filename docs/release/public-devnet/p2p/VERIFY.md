@@ -460,3 +460,26 @@ move M4/M12. The per-peer drop series `qbind_net_per_peer_drops_total` is absent
 in a clean scrape (emitted only after a per-peer drop), so its example alert is
 shipped **future / not-enabled**; the connection-rate alert is enabled. Run 379
 moves **M13 and M14** Yellow → Green.
+
+## Run 380 — per-peer drop scrape + alert promotion (cross-reference)
+
+Run 380 deepens the Run 379 observability baseline by turning the per-peer drop
+counter into first-class, alertable evidence — reusing the Run 371–373 KEMTLS
+live-socket helper path, with **no production source change** (Route A for the
+per-peer metric; Route C for node/build-info and disk gauges, which stay future):
+
+```bash
+bash scripts/devnet/run_380_public_devnet_observability_hardening.sh
+```
+
+The harness boots the release binary with the deployed per-peer limiter
+(`--p2p-max-messages-per-second` / `--p2p-burst-allowance`), confirms
+`qbind_net_per_peer_drops_total` is **absent** in a clean scrape, drives an
+over-budget KEMTLS-admitted flood so the deployed `TcpKemTlsP2pService::read_loop`
+per-peer limiter trips, re-scrapes `/metrics` and proves
+`qbind_net_per_peer_drops_total{reason="rate_limit"}` is **present** while
+`qbind_p2p_connection_rate_drop_total` stays `0` (controls independent). The
+example alert `QbindPerPeerRateLimitDropsSustained` is promoted **future →
+enabled**. Run 380 changes **no** admission, wire format, or trust-bundle handling,
+opens **no** external port, and makes **no** launch/M4/TestNet/MainNet/C4/C5 claim;
+**M12/M13/M14 remain Green**. See `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_380.md`.

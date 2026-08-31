@@ -1,15 +1,20 @@
-# QBIND public DevNet — example Prometheus alert rules (Run 379, M14).
+# QBIND public DevNet — example Prometheus alert rules (Run 379 baseline; Run 380
+# hardening: per-peer drop alert promoted FUTURE -> ENABLED).
 #
 # Two groups:
 #   * qbind-devnet-observability                     — ENABLED. Every expr uses a
-#     metric verified present in the release-binary baseline scrape (see
-#     ../observability/METRICS.md and docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_379.md),
-#     or the Prometheus-synthesized `up` series.
+#     metric verified present in a release-binary scrape (see
+#     ../observability/METRICS.md, docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_379.md and
+#     docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_380.md), or the Prometheus-synthesized
+#     `up` series. QbindPerPeerRateLimitDropsSustained references
+#     qbind_net_per_peer_drops_total, which is absent in a clean scrape until the
+#     first per-peer drop and is proven present after an induced drop by Run 380.
 #   * qbind-devnet-observability-future-not-enabled  — FUTURE / NOT ENABLED. Each
-#     rule references a metric that was ABSENT from the baseline scrape. They are
-#     shipped disabled-by-intent (severity=observe, status=future) so operators can
-#     enable them once the underlying series exists. They will simply never fire
-#     until then; they are documented as future, not active guarantees.
+#     rule references a metric that is ABSENT from the release scrape (no
+#     qbind-owned free-disk/storage-capacity gauge exists). They are shipped
+#     disabled-by-intent (severity=observe, status=future) so operators can enable
+#     them once the underlying series exists. They will simply never fire until
+#     then; they are documented as future, not active guarantees.
 #
 # Severity vocabulary (see ../observability/RUNBOOK.md):
 #   page    — wake a human now (safety/liveness impacting).
@@ -120,32 +125,35 @@ groups:
           description: "qbind_p2p_pqc_trust_bundle_peer_candidate_rejected_total increased over 15m on {{ $labels.instance }} (correlate with propagation counters)."
           runbook: "observability/RUNBOOK.md#qbindpeercandidaterejectionshigh"
 
-  # -------------------------------------------------------------------------
-  # FUTURE / NOT ENABLED. Every rule below references a metric that was ABSENT
-  # from the Run 379 baseline scrape. They parse as YAML and will not fire until
-  # the underlying series exists. Do not treat them as active coverage.
-  # -------------------------------------------------------------------------
-  - name: qbind-devnet-observability-future-not-enabled
-    rules:
       - alert: QbindPerPeerRateLimitDropsSustained
-        # FUTURE: qbind_net_per_peer_drops_total is emitted per-peer only AFTER a
-        # per-peer rate-limit drop; it was absent from the baseline scrape and the
-        # deployed per-peer message-rate override is construction-path-only.
+        # ENABLED (Run 380). qbind_net_per_peer_drops_total is emitted per-peer
+        # only AFTER a per-peer rate-limit drop, so it is absent in a clean scrape
+        # until the first drop; Runs 371-373 prove deployed KEMTLS live-socket
+        # enforcement and Run 380 provides release-binary scrape evidence that the
+        # series becomes present after an induced per-peer drop. increase() over an
+        # absent-until-first-drop series simply does not fire until the first drop.
         expr: increase(qbind_net_per_peer_drops_total[5m]) > 0
         for: 10m
         labels:
           severity: observe
-          status: future
           network: qbind-public-devnet
         annotations:
-          summary: "[FUTURE/NOT ENABLED] Sustained per-peer rate-limit drops"
-          description: "Enable once qbind_net_per_peer_drops_total is emitted by the deployed node (see METRICS.md §2 and ABUSE_DOS_POSTURE.md)."
-          runbook: "observability/RUNBOOK.md#qbindperpeerratelimitdropssustained-future"
+          summary: "Sustained per-peer rate-limit drops"
+          description: "qbind_net_per_peer_drops_total{reason=\"rate_limit\"} increased over 5m for peer {{ $labels.peer }} on {{ $labels.instance }} (deployed M12 per-peer limiter; independent of the connection-rate counter). See METRICS.md §2 and ABUSE_DOS_POSTURE.md §7k-§7m."
+          runbook: "observability/RUNBOOK.md#qbindperpeerratelimitdropssustained"
 
+  # -------------------------------------------------------------------------
+  # FUTURE / NOT ENABLED. Every rule below references a metric that was ABSENT
+  # from the release scrape. They parse as YAML and will not fire until the
+  # underlying series exists. Do not treat them as active coverage.
+  # -------------------------------------------------------------------------
+  - name: qbind-devnet-observability-future-not-enabled
+    rules:
       - alert: QbindNodeDiskSpaceLow
-        # FUTURE: qbind-node emits no free-disk gauge in the default scrape. Use
-        # host/node-exporter metrics (node_filesystem_avail_bytes) instead. This
-        # placeholder documents the intent and stays disabled here.
+        # FUTURE: qbind-node emits no free-disk / storage-capacity gauge in the
+        # default scrape (Run 380 Route C). Use host/node-exporter metrics
+        # (node_filesystem_avail_bytes) instead. This placeholder documents the
+        # intent and stays disabled here.
         expr: qbind_state_size_bytes > 0 and qbind_state_size_bytes > 1e18
         for: 15m
         labels:
@@ -154,5 +162,5 @@ groups:
           network: qbind-public-devnet
         annotations:
           summary: "[FUTURE/NOT ENABLED] Storage/disk pressure"
-          description: "qbind_state_size_bytes was absent from the baseline scrape; do disk alerting via node-exporter. See METRICS.md §5."
+          description: "qbind_state_size_bytes was absent from the release scrape; do disk alerting via node-exporter. See METRICS.md §5."
           runbook: "observability/RUNBOOK.md#qbindnodediskspacelow-future"

@@ -12,16 +12,21 @@ exposes, verifies, scrapes, and alerts on the metrics that the **release**
 
 ## What this package is
 
-- A **docs + verification** package (Run 379, decision gate **Route B**). It adds
-  no production Rust source change and no new CLI flag. The metrics endpoint is
-  the pre-existing `metrics_http` server gated by the `QBIND_METRICS_HTTP_ADDR`
-  environment variable (`crates/qbind-node/src/metrics_http.rs`,
-  `crates/qbind-node/src/main.rs`).
+- A **docs + verification** package (Run 379, decision gate **Route B**; Run 380
+  hardening, decision gate **Route A** for the per-peer drop metric + **Route C**
+  for node/build-info and disk gauges). It adds no production Rust source change
+  and no new CLI flag. The metrics endpoint is the pre-existing `metrics_http`
+  server gated by the `QBIND_METRICS_HTTP_ADDR` environment variable
+  (`crates/qbind-node/src/metrics_http.rs`, `crates/qbind-node/src/main.rs`).
 - Every metric name listed here was **verified against the release binary** by
-  scraping `/metrics` over loopback — see [`VERIFY.md`](./VERIFY.md) and the
-  Run 379 evidence record `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_379.md`.
-- Alert rules that reference a metric **not present in the baseline scrape** are
-  clearly marked **FUTURE / not enabled** rather than shipped as active.
+  scraping `/metrics` over loopback — see [`VERIFY.md`](./VERIFY.md), the Run 379
+  evidence record `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_379.md`, and the Run 380
+  hardening record `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_380.md`.
+- Alert rules that reference a metric **not present in any verified scrape** are
+  clearly marked **FUTURE / not enabled** rather than shipped as active. The
+  per-peer drop alert `QbindPerPeerRateLimitDropsSustained` was promoted to
+  **enabled** in Run 380 (its series is absent in a clean scrape until the first
+  per-peer drop and is proven present after an induced drop).
 
 ## What this package is NOT
 
