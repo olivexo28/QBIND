@@ -1,0 +1,215 @@
+Run 381 — Observability gauge hardening: node/build/chain info + qbind-owned disk metric
+
+Continue QBIND after accepted Run 380.
+
+Current state:
+Run 380 is accepted as PASS / public-DevNet observability hardening POSITIVE.
+
+Run 380 proved:
+- M12 remains Green.
+- M13 remains Green.
+- M14 remains Green.
+- `qbind_net_per_peer_drops_total{reason="rate_limit"}` is absent in a clean scrape and present after an induced deployed KEMTLS live-socket per-peer drop.
+- `QbindPerPeerRateLimitDropsSustained` moved future → enabled.
+- Build-info and disk/free-space gauges remain absent by Route C.
+- M4 remains Yellow / launch-blocking.
+- M6 remains Yellow/Partial, M4-gated.
+- Public DevNet remains NOT launch-ready.
+- C4 OPEN.
+- C5 OPEN.
+
+Important cleanup from Run 380:
+`docs/release/public-devnet/observability/METRICS.md` has a stale summary-row phrase:
+`qbind_net_per_peer_drops_total ... Watch; alert FUTURE`.
+That must be corrected to match Run 380:
+`Conditional; alert ENABLED after Run 380 induced-drop evidence`.
+Do not downgrade M12/M13/M14.
+
+Objective:
+Add a minimal, read-only, low-cardinality observability gauge layer for:
+1. node/build/chain info;
+2. qbind-owned data-dir free-space / storage-capacity visibility;
+3. alert-rule promotion for disk only if the backing qbind-owned metric is release-scrape proven.
+
+Strict scope:
+Observability metrics only.
+
+No public DevNet launch.
+No M4 Green.
+No M6 Green.
+No live seed/bootnode.
+No faucet.
+No RPC gateway.
+No explorer.
+No status page.
+No TestNet readiness.
+No MainNet readiness.
+No C4 closure.
+No C5 closure.
+No authority-lifecycle runtime wiring.
+No validator-set mutation.
+No epoch transition.
+No trust-bundle apply.
+No peer-driven apply.
+No P2P wire-format change.
+No peer-admission weakening.
+No new public P2P port exposure.
+No committed secrets, keys, private endpoints, raw logs, data dirs, or raw metrics dumps.
+
+Required investigation:
+Inspect:
+- `crates/qbind-node/src/metrics.rs`
+- `crates/qbind-node/src/metrics_http.rs`
+- `crates/qbind-node/src/main.rs`
+- node config / data-dir helpers
+- release binary provenance/build-id handling from Runs 359 and 376–380
+- Run 379 and Run 380 harnesses
+- `docs/release/public-devnet/observability/METRICS.md`
+- `docs/release/public-devnet/observability/ALERT_RULES.md`
+- `docs/release/public-devnet/observability/RUNBOOK.md`
+- `docs/release/public-devnet/observability/VERIFY.md`
+- `docs/release/public-devnet/observability/prometheus-alerts.example.yml`
+- `docs/release/QBIND_PUBLIC_DEVNET_READINESS_CRITERIA.md`
+
+Decision gate:
+Record one route:
+
+Route A:
+Existing source already exposes equivalent node/build/chain and disk metrics. No production source change. Update docs/harness only.
+
+Route B:
+Small production metrics source change is needed. Add minimal read-only metrics and release-binary scrape evidence.
+
+Route C:
+One or both gauges are too invasive or unsafe. Keep the relevant alert future and document exact blocker.
+
+Implementation requirements:
+1. Fix the stale Run 380 METRICS summary row.
+2. Add a low-cardinality info metric, preferably:
+   `qbind_node_build_info{version,build_id_or_unknown,git_commit_or_unknown,env,chain_id_or_unknown} 1`
+   Requirements:
+   - no paths;
+   - no hostnames;
+   - no private endpoint labels;
+   - no high-cardinality values;
+   - unknown values must render as `unknown`, not fail.
+3. Add a qbind-owned disk/free-space metric if safe and portable, preferably:
+   `qbind_node_data_dir_free_bytes`
+   or a similarly named gauge.
+   Requirements:
+   - value only;
+   - no path label;
+   - no mount label;
+   - no hostname label;
+   - if unavailable, render nothing or a clearly documented unavailable posture without panics.
+4. Update alert rules:
+   - Keep `QbindPerPeerRateLimitDropsSustained` enabled.
+   - Promote `QbindNodeDiskSpaceLow` from future → enabled only if the qbind-owned disk metric is present in release scrape.
+   - If no safe disk metric lands, keep disk future and do not fake coverage.
+5. Update runbook for any enabled disk alert.
+6. Preserve metrics disabled-by-default behavior via `QBIND_METRICS_HTTP_ADDR`.
+
+Expected files:
+If Route B:
+- source changes in the minimum required metrics/main/config files only;
+- tests: `crates/qbind-node/tests/run_381_public_devnet_observability_gauges_tests.rs`.
+
+Always add:
+- `scripts/devnet/run_381_public_devnet_observability_gauges.sh`
+- `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_381.md`
+- `docs/devnet/run_381_public_devnet_observability_gauges/{README.md,summary.txt,.gitignore}`
+
+Update:
+- `docs/release/public-devnet/observability/METRICS.md`
+- `docs/release/public-devnet/observability/ALERT_RULES.md`
+- `docs/release/public-devnet/observability/RUNBOOK.md`
+- `docs/release/public-devnet/observability/VERIFY.md`
+- `docs/release/public-devnet/observability/prometheus-alerts.example.yml`
+- `docs/release/QBIND_PUBLIC_DEVNET_READINESS_CRITERIA.md`
+- `docs/release/public-devnet/p2p/ABUSE_DOS_POSTURE.md` only if needed
+- `docs/release/public-devnet/p2p/VERIFY.md` only if needed
+- `docs/protocol/QBIND_C4_C5_CLOSURE_CRITERIA.md`
+- `docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md`
+- `docs/protocol/QBIND_GOVERNANCE_EXECUTION_RUNTIME_SURFACE_AUDIT.md`
+- `docs/ops/QBIND_PQC_TRUST_LIFECYCLE_RUNBOOK.md`
+- `docs/whitepaper/contradiction.md`
+
+Required release evidence:
+The harness must prove:
+1. release `qbind-node` builds;
+2. `/metrics` is disabled by default when `QBIND_METRICS_HTTP_ADDR` is unset;
+3. `/metrics` binds to loopback only in the harness;
+4. clean scrape HTTP 200;
+5. existing Run 379/380 required families still present;
+6. `qbind_net_per_peer_drops_total` documentation/alert state remains correct;
+7. new node/build/chain info metric appears if implemented;
+8. new metric labels are low-cardinality and secret-free;
+9. new disk/free-space metric appears if implemented;
+10. disk alert is enabled only if metric appears;
+11. scrape YAML parses;
+12. alert YAML parses;
+13. enabled alert expressions reference present metrics;
+14. future/not-enabled group contains only metrics still absent;
+15. non-claim grep passes;
+16. no default public metrics exposure.
+
+Required tests:
+Run and record exact counts:
+- `cargo build -p qbind-node --release --bin qbind-node`
+- Run the Run 381 harness
+- YAML parse check for scrape config
+- YAML parse check for alert rules
+- non-claim grep over observability package
+- `cargo test -p qbind-node --lib`
+
+If Rust source changes:
+- `cargo test -p qbind-node --test run_381_public_devnet_observability_gauges_tests`
+- invoke CodeQL if available and record exact result.
+- Do not call skipped/timed-out/DB-too-large CodeQL “clean.”
+
+Security:
+Run secret scanning over all changed files.
+No private keys, credentials, private hostnames, raw logs, data dirs, raw metrics dumps, or private endpoint labels may be committed.
+Use only loopback and RFC 5737 examples.
+
+Readiness rules:
+- M13 remains Green if release scrape still proves operator telemetry.
+- M14 remains Green if alert YAML/runbook remain valid and alerts match real metrics.
+- M12 remains Green unless contradicted.
+- M4 remains Yellow unless real external seed reachability lands, which is out of scope.
+- M6 remains Yellow/Partial unless M4-backed live registration lands, which is out of scope.
+- Public DevNet remains NOT launch-ready.
+- C4/C5 remain OPEN.
+- TestNet/MainNet untouched.
+
+Expected verdict:
+PASS / public-DevNet observability gauge hardening positive if metrics land safely, scrape evidence proves them, alert states are correct, tests/scans pass, and no readiness overclaim occurs.
+
+Partial-positive if only the stale doc cleanup lands or if one gauge remains unavailable and is honestly kept future.
+
+Final response format:
+1. Exact verdict.
+2. Files changed.
+3. Decision gate route.
+4. Run 380 cleanup.
+5. Metrics endpoint surface.
+6. Node/build/chain info metric evidence.
+7. Disk/free-space metric evidence.
+8. Alert rule changes.
+9. Scrape config evidence.
+10. Runbook evidence.
+11. Rejection / non-claim checks.
+12. Default compatibility / no runtime behavior change.
+13. Readiness matrix delta for M13.
+14. Readiness matrix delta for M14.
+15. Current public DevNet readiness status.
+16. Remaining public DevNet blockers.
+17. Public TestNet blockers.
+18. MainNet blockers.
+19. C4/C5 status.
+20. Tests run.
+21. Security scans.
+22. CodeQL.
+23. Provenance.
+24. Honest limitations.
+25. Suggested Run 382 next step.
