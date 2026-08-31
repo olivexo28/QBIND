@@ -2,6 +2,9 @@
 name = "qbind-node"
 version = "0.1.0"
 edition = "2021"
+# Run 382: bridge build-time provenance (git commit / harness build id) into the
+# `qbind_node_build_info` metric labels. See build.rs for the safety constraints.
+build = "build.rs"
 
 [features]
 default = []
