@@ -21,9 +21,10 @@ list for public join) is Green.
 | `devnet-seed-list.schema.json` | Canonical JSON Schema (draft-07) for a DevNet seed/bootnode list. |
 | `devnet-seeds.placeholder.json` | Placeholder DevNet seed list (non-live, documentation-example values only). |
 | `VERIFY.md` | Exact operator verification commands and expected outputs. |
-| `devnet-seeds.live-candidate.json` | Preflight live-seed **candidate** (schema-valid, single entry `status: planned` with a real Run-375-path public `node_id`/`peer_id` and a non-routable RFC 5737 host). **NOT a live seed** — external reachability was not proven (Run 377 loopback-only / Route B; Run 378 Route C). |
+| `devnet-seeds.live-candidate.json` | Preflight live-seed **candidate** (schema-valid, single entry `status: planned` with a real Run-375-path public `node_id`/`peer_id` and a non-routable RFC 5737 host). **NOT a live seed** — external reachability was not proven (Run 377 loopback-only / Route B; Run 378 Route C; Run 388 Route C). |
 | `reachability/RUN_377_qbind-devnet-seed-1.md` | **Run 377** reachability evidence record (loopback/same-host only; external reachability NOT proven; M4 stays Yellow). |
 | `reachability/RUN_378_qbind-devnet-seed-1.md` | **Run 378** external-reachability attempt record (Route C — no external ingress / no independent external vantage point available; external reachability NOT proven; M4 stays Yellow; Route A infrastructure prerequisites documented). |
+| `reachability/RUN_388_qbind-devnet-seed-1.md` | **Run 388** external-reachability execution record (Route C — same finding as Run 378; no external ingress / no independent off-host vantage point; external reachability NOT proven; M4 stays Yellow; Route A infrastructure prerequisites documented). |
 
 This is the canonical location for the public DevNet seed/bootnode list. It sits alongside the
 Run 356 genesis package (`docs/release/public-devnet/genesis/`) under the shared
@@ -197,6 +198,15 @@ and external reachability could not be proven. Run 378 re-proves the same live-a
 at `status: planned`, and keeps **M4 Yellow**. The Route A infrastructure prerequisites are documented in
 `docs/release/public-devnet/network/reachability/RUN_378_qbind-devnet-seed-1.md` §14. See
 `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_378.md`.
+
+**Run 388 — external-reachability execution (Route C).** Run 388 executed the same Route A objective and
+reached the **same Route C finding** as Run 378: the sandboxed environment has **no external ingress and no
+independent off-host vantage point**, so no real endpoint could be exposed and external reachability could
+not be proven. Run 388 re-proves the live-admission gate (against
+`reachability/RUN_388_qbind-devnet-seed-1.md`) and the loopback preflight, keeps the committed candidate at
+`status: planned`, and keeps **M4 Yellow**. The Route A infrastructure prerequisites are documented in
+`docs/release/public-devnet/network/reachability/RUN_388_qbind-devnet-seed-1.md` §15. See
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_388.md`.
 
 ## Provenance
 

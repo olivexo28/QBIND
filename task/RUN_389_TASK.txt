@@ -1,0 +1,256 @@
+Run 389 — Public DevNet M7/M8/M9 key-management and PQC trust-root bootstrap guidance
+
+Current state:
+Run 388 is accepted NEGATIVE-FOR-EXTERNAL / Route C.
+M4 remains Yellow / launch-blocking because no real externally reachable seed endpoint or independent off-host vantage point exists in the sandbox.
+M6 remains Yellow/Partial and M4-gated.
+M12, M13, M14 remain Green.
+Public DevNet remains NOT launch-ready.
+C4 remains OPEN.
+C5 remains OPEN.
+TestNet/MainNet untouched.
+
+Objective:
+Close or materially narrow the remaining public DevNet security-operator documentation blockers:
+- M7: validator key-management guidance.
+- M8: DevNet PQC trust-bundle bootstrap process.
+- M9: DevNet PQC root / bundle-signing-key guidance.
+
+This should be an operator-facing docs + verification run, preferably with no production Rust source change.
+
+Strict scope:
+M7/M8/M9 only.
+
+No public DevNet launch.
+No M4 Green.
+No M6 Green.
+No live seed/bootnode deployment.
+No faucet.
+No RPC gateway.
+No explorer.
+No status page.
+No TestNet readiness claim.
+No MainNet readiness claim.
+No C4 closure.
+No C5 closure.
+No authority-lifecycle runtime wiring.
+No validator-set mutation.
+No epoch transition.
+No trust-bundle live apply.
+No peer-driven apply.
+No P2P wire-format change.
+No peer-admission weakening.
+No new public CLI flag unless an existing documented flag is missing from `--help` and the task explicitly justifies it.
+No committed private keys, KEM secrets, ML-DSA root signing secrets, mnemonic, seed phrase, credentials, tokens, raw logs, raw metrics dumps, data dirs, private endpoints, private hostnames, absolute build paths, or branch dirty-state strings.
+
+Required investigation:
+Inspect:
+- docs/release/public-devnet/operator/README.md
+- docs/release/public-devnet/operator/QUICKSTART.md
+- docs/release/public-devnet/operator/IDENTITY.md
+- docs/release/public-devnet/operator/SAFETY.md
+- docs/release/public-devnet/operator/VERIFY.md
+- docs/release/public-devnet/identity/README.md
+- docs/release/public-devnet/identity/IDENTITY_GENERATION.md
+- docs/release/public-devnet/identity/IDENTITY_VERIFY.md
+- docs/release/public-devnet/identity/SAFETY.md
+- docs/release/public-devnet/p2p/PEER_ADMISSION_POLICY.md
+- docs/release/public-devnet/p2p/VERIFY.md
+- docs/ops/QBIND_PQC_TRUST_LIFECYCLE_RUNBOOK.md
+- docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md
+- docs/protocol/QBIND_C4_C5_CLOSURE_CRITERIA.md
+- docs/release/QBIND_PUBLIC_DEVNET_READINESS_CRITERIA.md
+- qbind-node `--help`
+- identity command `--help` / subcommand help if available
+- existing trust-bundle helper examples and CLI surfaces:
+  --p2p-trust-bundle
+  --p2p-trust-bundle-signing-key
+  --p2p-trusted-root
+  --p2p-pqc-root-mode
+  --p2p-leaf-cert
+  --p2p-leaf-cert-key
+  --p2p-peer-leaf-cert
+  --p2p-mutual-auth
+  --signer-mode
+  --signer-keystore-path or current signer-related flags
+
+Decision gate:
+Route A:
+Existing CLI/helper surfaces are sufficient. Publish docs/harness/verification only.
+
+Route B:
+Small helper or docs-only verification script is needed to validate commands and generated example shapes. Add it without production source change.
+
+Route C:
+One or more of M7/M8/M9 cannot move Green because the required operator-facing surface is missing. Keep the affected item Yellow and document exact blockers.
+
+Expected artifacts:
+Add:
+- docs/release/public-devnet/security/README.md
+- docs/release/public-devnet/security/KEY_MANAGEMENT.md
+- docs/release/public-devnet/security/PQC_TRUST_BOOTSTRAP.md
+- docs/release/public-devnet/security/PQC_ROOT_AND_SIGNING_KEYS.md
+- docs/release/public-devnet/security/SAFETY.md
+- docs/release/public-devnet/security/VERIFY.md
+
+Add harness:
+- scripts/devnet/run_389_public_devnet_security_key_trust_bootstrap.sh
+
+Add archive:
+- docs/devnet/run_389_public_devnet_security_key_trust_bootstrap/{README.md,summary.txt,.gitignore}
+
+Add canonical evidence:
+- docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_389.md
+
+Update narrowly:
+- docs/release/public-devnet/operator/README.md
+- docs/release/public-devnet/operator/QUICKSTART.md
+- docs/release/public-devnet/operator/IDENTITY.md
+- docs/release/public-devnet/p2p/PEER_ADMISSION_POLICY.md
+- docs/release/public-devnet/p2p/VERIFY.md
+- docs/release/QBIND_PUBLIC_DEVNET_READINESS_CRITERIA.md
+- docs/protocol/QBIND_C4_C5_CLOSURE_CRITERIA.md
+- docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md
+- docs/protocol/QBIND_GOVERNANCE_EXECUTION_RUNTIME_SURFACE_AUDIT.md
+- docs/ops/QBIND_PQC_TRUST_LIFECYCLE_RUNBOOK.md
+- docs/whitepaper/contradiction.md
+
+Required documentation content:
+KEY_MANAGEMENT.md must cover:
+1. DevNet-only safety label.
+2. What keys exist:
+   - node / KEMTLS leaf key;
+   - transport trust root;
+   - consensus/block signer key;
+   - trust-bundle signing key;
+   - operator identity JSON;
+   - what is public vs private.
+3. Local signer mode guidance using existing CLI only.
+4. Remote signer / HSM/KMS posture if surfaces exist, with honest “future/unavailable” notes if not launch-ready.
+5. File permission requirements, especially private key `0600`.
+6. Rotation/revocation status:
+   - DevNet operational guidance only;
+   - no MainNet custody;
+   - C4/C5 remain OPEN.
+7. Backup guidance:
+   - what to back up;
+   - what never to commit;
+   - how to recover from lost DevNet keys.
+8. Explicit refusal of value-bearing/MainNet custody claims.
+
+PQC_TRUST_BOOTSTRAP.md must cover:
+1. DevNet trust-bundle bootstrap flow.
+2. Genesis hash pinning.
+3. Transport roots vs bundle-signing keys separation.
+4. `--p2p-trust-bundle` loading.
+5. `--p2p-trust-bundle-signing-key` candidate-signing-key usage.
+6. `--p2p-trusted-root` / static-root posture and DevNet limitations.
+7. Reload-check / reload-apply / SIGHUP surfaces if applicable.
+8. Peer-candidate validation/propagation remains advisory/non-mutating unless explicitly enabled by prior safe flags.
+9. No peer-driven live apply.
+10. No fallback roots or hidden default trust anchors.
+11. MainNet/TestNet stricter policy and no DevNet shortcut leakage.
+
+PQC_ROOT_AND_SIGNING_KEYS.md must cover:
+1. How to generate DevNet root/leaf material using existing helpers or identity command.
+2. Which generated files are public.
+3. Which generated files are private and must never be committed.
+4. How root fingerprints / node IDs are derived or verified.
+5. How to pin a trusted root for strict KEMTLS.
+6. How to verify a trust-bundle signature.
+7. How to identify wrong-chain / wrong-env / wrong-genesis material.
+8. What is not production custody.
+9. What remains C4/C5-open.
+
+VERIFY.md must give copy-paste operator checks:
+- `qbind-node --help` surface grep checks.
+- `qbind-node identity --help` or subcommand help checks, if supported.
+- Generate a temporary DevNet identity.
+- Verify public identity.
+- Confirm private files are `0600`.
+- Confirm no private key appears in public JSON.
+- Validate example docs for no forbidden claims.
+- Optional trust-bundle helper smoke if existing helper supports it.
+- Confirm MainNet/TestNet refusal for DevNet-only generation/bootstrap paths where applicable.
+
+Required harness evidence:
+1. Release `qbind-node` builds.
+2. `qbind-node --help` contains all documented existing flags and no invented flags.
+3. Identity command help or usage is captured if available.
+4. Temporary DevNet identity generation succeeds.
+5. Verification succeeds.
+6. Private KEM key permission is `0600`.
+7. Root signing secret is not written to disk for identity path, if using Run 375 path.
+8. Public identity JSON contains no private material.
+9. Any trust-bundle helper smoke uses temp files only and records no private material.
+10. MainNet/TestNet DevNet-only paths fail closed where applicable.
+11. Docs contain no launch-ready / M4 Green / M6 fully Green / TestNet / MainNet / C4/C5 closure claim.
+12. Security docs cross-link operator, identity, p2p, and PQC lifecycle docs.
+13. M7/M8/M9 readiness changes are supported by the verification evidence.
+
+Required tests:
+- Run 389 harness.
+- cargo build -p qbind-node --release --locked --bin qbind-node.
+- Relevant existing identity tests:
+  cargo test -p qbind-node --test run_375_public_devnet_identity_cli_tests
+  cargo test -p qbind-node --test run_376_public_devnet_identity_registration_tests
+- Any trust-bundle tests/helpers relevant to the documented bootstrap path.
+- cargo test -p qbind-node --lib only if Rust source changed; otherwise record baseline/no Rust delta honestly.
+- non-claim grep.
+
+Security:
+Run secret scanning over all changed files.
+Confirm no private key, root signing secret, KEM secret, mnemonic, seed phrase, credential, token, raw log, raw metrics dump, data dir, private endpoint, private hostname, absolute build path, or branch dirty-state string is committed.
+Use temp dirs and archive `.gitignore` backstops.
+
+CodeQL:
+If docs/harness only, record CodeQL as trivial/not meaningful.
+If Rust source/build.rs changes, invoke CodeQL if available and record exact result.
+Do not call skipped, unavailable, DB-too-large, timed-out, or trivial analysis clean.
+
+Readiness rules:
+- M7 may move Yellow → Green only if operator-facing key-management guidance is published and verified against real CLI surfaces.
+- M8 may move Yellow → Green only if DevNet trust-bundle bootstrap procedure is published and verified against real trust-bundle/helper surfaces.
+- M9 may move Yellow → Green only if PQC root/signing-key guidance is published and verified against real root/signing-key surfaces.
+- M4 remains Yellow unless real external seed reachability lands.
+- M6 remains Yellow/Partial unless M4-backed live registration lands.
+- M12/M13/M14 remain Green unless contradicted.
+- Public DevNet remains NOT launch-ready unless every must-have blocker is Green.
+- C4/C5 remain OPEN.
+- TestNet/MainNet untouched.
+
+Expected verdict:
+PASS / public-DevNet security key/trust bootstrap guidance POSITIVE if M7/M8/M9 docs, verification, tests, security scan, and provenance land with no overclaim.
+
+Partial-positive if only one or two of M7/M8/M9 can move Green.
+
+Final response format:
+1. Exact verdict
+2. Files changed
+3. Decision gate route
+4. Security package contents
+5. Key-management guidance
+6. Trust-bundle bootstrap guidance
+7. PQC root/signing-key guidance
+8. Public/private material rules
+9. CLI/help verification
+10. Identity generation/verification evidence
+11. Trust-bundle helper/bootstrap evidence
+12. Rejection/fail-closed evidence
+13. Default compatibility
+14. CLI surface
+15. Runtime mutation check
+16. Readiness delta M7
+17. Readiness delta M8
+18. Readiness delta M9
+19. Public DevNet status
+20. Remaining DevNet blockers
+21. TestNet blockers
+22. MainNet blockers
+23. C4/C5
+24. Tests run
+25. Security scans
+26. CodeQL
+27. Provenance
+28. Honest limitations
+29. Suggested Run 390
