@@ -123,10 +123,19 @@ diagnostics.
 | `qbind_restore_catchup_blocks_applied_total` | counter | Blocks applied during catch-up. |
 | `qbind_restore_catchup_responses_rejected_total` | counter | Rejected catch-up responses. |
 
-> There is **no** dedicated free-disk-bytes / storage-size gauge in the default
-> scrape (`qbind_state_size_bytes` exists in source but was **not** observed in the
-> baseline scrape). Disk-space alerting must use node-exporter / host metrics, not
-> the qbind endpoint — documented as **absent**, alert marked FUTURE.
+### 5a. qbind-owned data-dir free space (Run 381) — ENABLED
+
+| Metric | Type | Meaning |
+|---|---|---|
+| `qbind_node_data_dir_free_bytes` | gauge | Free bytes on the filesystem backing the qbind data directory (from `--data-dir`). Value only — **no** path/mount/hostname label. |
+
+> Run 381 adds a **qbind-owned** free-space gauge derived from `statvfs(3)` on the
+> `--data-dir` filesystem. It is emitted **only** when `--data-dir` is set and the
+> syscall succeeds (unix); otherwise the gauge is simply omitted (no panic, no
+> fabricated value). Because it is proven present in the Run 381 release scrape,
+> `QbindNodeDiskSpaceLow` is promoted **FUTURE → ENABLED** against this metric.
+> The legacy `qbind_state_size_bytes` remains **absent** from the default scrape;
+> operators may still complement with node-exporter host metrics.
 
 ## 6. Other observed families (BEST-EFFORT)
 
@@ -137,11 +146,18 @@ keystore (`qbind_keystore_load_failure_total`), KEM
 (`qbind_net_kem_encaps_total`, `qbind_net_kem_decaps_total`), and DAG coupling
 (`qbind_dag_coupling_rejected_total`).
 
+### 6a. Node/build/chain info (Run 381) — ENABLED
+
+| Metric | Type | Meaning |
+|---|---|---|
+| `qbind_node_build_info{version,build_id,git_commit,env,chain_id}` | gauge | Static info metric; value always `1`. Labels are low-cardinality and secret-free. `build_id`/`git_commit` render `unknown` unless injected at build time via `QBIND_BUILD_ID` / `QBIND_GIT_COMMIT`. `env` is the fixed vocabulary `devnet`/`testnet`/`mainnet`; `chain_id` is canonical hex. **No** path, hostname, or private-endpoint label is ever emitted. |
+
 ## 7. Required vs best-effort vs absent — summary
 
 | Class | Metrics | For launch ops? |
 |---|---|---|
 | **Required** | Prometheus `up`; `qbind_consensus_committed_height`; `qbind_p2p_connections_current`; `qbind_p2p_connection_rate_drop_total`; trust-bundle load/verify/reject | **Yes** |
 | **Best-effort** | detailed consensus rejection counters; snapshot/restore; mempool/execution; monetary; KEM | Recommended |
-| **Conditional** | `qbind_net_per_peer_drops_total` (only after first per-peer drop) | Watch; alert FUTURE |
-| **Absent (default scrape)** | node/build/chain info gauge; free-disk gauge; PQC-suite / KEMTLS-handshake crypto sub-metrics; `qbind_state_size_bytes` | Use host metrics / future run |
+| **Conditional** | `qbind_net_per_peer_drops_total` (only after first per-peer drop) | Conditional; alert ENABLED after Run 380 induced-drop evidence |
+| **Info / gauge (Run 381)** | `qbind_node_build_info`; `qbind_node_data_dir_free_bytes` | Node/build/chain identity + qbind-owned disk visibility; disk alert ENABLED |
+| **Absent (default scrape)** | PQC-suite / KEMTLS-handshake crypto sub-metrics; `qbind_state_size_bytes` | Use host metrics / future run |

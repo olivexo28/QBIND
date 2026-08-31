@@ -1,20 +1,25 @@
 # QBIND public DevNet — example Prometheus alert rules (Run 379 baseline; Run 380
-# hardening: per-peer drop alert promoted FUTURE -> ENABLED).
+# hardening: per-peer drop alert promoted FUTURE -> ENABLED; Run 381 hardening:
+# node/build/chain info + qbind-owned data-dir free-space gauge added, disk alert
+# promoted FUTURE -> ENABLED against the qbind-owned metric).
 #
 # Two groups:
 #   * qbind-devnet-observability                     — ENABLED. Every expr uses a
 #     metric verified present in a release-binary scrape (see
-#     ../observability/METRICS.md, docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_379.md and
-#     docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_380.md), or the Prometheus-synthesized
+#     ../observability/METRICS.md, docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_379.md,
+#     docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_380.md and
+#     docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_381.md), or the Prometheus-synthesized
 #     `up` series. QbindPerPeerRateLimitDropsSustained references
 #     qbind_net_per_peer_drops_total, which is absent in a clean scrape until the
 #     first per-peer drop and is proven present after an induced drop by Run 380.
+#     QbindNodeDiskSpaceLow references qbind_node_data_dir_free_bytes, proven
+#     present in the Run 381 release scrape when --data-dir is set.
 #   * qbind-devnet-observability-future-not-enabled  — FUTURE / NOT ENABLED. Each
-#     rule references a metric that is ABSENT from the release scrape (no
-#     qbind-owned free-disk/storage-capacity gauge exists). They are shipped
-#     disabled-by-intent (severity=observe, status=future) so operators can enable
-#     them once the underlying series exists. They will simply never fire until
-#     then; they are documented as future, not active guarantees.
+#     rule references a metric that is ABSENT from the release scrape (the legacy
+#     qbind_state_size_bytes storage-size gauge is still not exported). They are
+#     shipped disabled-by-intent (severity=observe, status=future) so operators
+#     can enable them once the underlying series exists. They will simply never
+#     fire until then; they are documented as future, not active guarantees.
 #
 # Severity vocabulary (see ../observability/RUNBOOK.md):
 #   page    — wake a human now (safety/liveness impacting).
@@ -142,25 +147,42 @@ groups:
           description: "qbind_net_per_peer_drops_total{reason=\"rate_limit\"} increased over 5m for peer {{ $labels.peer }} on {{ $labels.instance }} (deployed M12 per-peer limiter; independent of the connection-rate counter). See METRICS.md §2 and ABUSE_DOS_POSTURE.md §7k-§7m."
           runbook: "observability/RUNBOOK.md#qbindperpeerratelimitdropssustained"
 
+      - alert: QbindNodeDiskSpaceLow
+        # ENABLED (Run 381). qbind_node_data_dir_free_bytes is a qbind-owned gauge
+        # derived from statvfs(3) on the --data-dir filesystem. It is proven
+        # present in the Run 381 release-binary scrape (see
+        # docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_381.md). The 5 GiB threshold is an
+        # example DevNet floor; operators should tune it to their volume size.
+        expr: qbind_node_data_dir_free_bytes < 5368709120
+        for: 15m
+        labels:
+          severity: ticket
+          network: qbind-public-devnet
+        annotations:
+          summary: "qbind-node data-dir free space low"
+          description: "qbind_node_data_dir_free_bytes < 5GiB for 15m on {{ $labels.instance }} (data volume filling; risk to snapshots/state persistence). See METRICS.md §5a."
+          runbook: "observability/RUNBOOK.md#qbindnodediskspacelow"
+
   # -------------------------------------------------------------------------
-  # FUTURE / NOT ENABLED. Every rule below references a metric that was ABSENT
+  # FUTURE / NOT ENABLED. Every rule below references a metric that is ABSENT
   # from the release scrape. They parse as YAML and will not fire until the
   # underlying series exists. Do not treat them as active coverage.
   # -------------------------------------------------------------------------
   - name: qbind-devnet-observability-future-not-enabled
     rules:
-      - alert: QbindNodeDiskSpaceLow
-        # FUTURE: qbind-node emits no free-disk / storage-capacity gauge in the
-        # default scrape (Run 380 Route C). Use host/node-exporter metrics
-        # (node_filesystem_avail_bytes) instead. This placeholder documents the
-        # intent and stays disabled here.
-        expr: qbind_state_size_bytes > 0 and qbind_state_size_bytes > 1e18
+      - alert: QbindStateSizeHigh
+        # FUTURE: the legacy qbind_state_size_bytes storage-size gauge exists in
+        # source but is NOT exported in the default release scrape (Run 379/380/381
+        # confirm it absent). Kept disabled-by-intent until the series is exported.
+        # For qbind-owned free-space alerting, use the ENABLED QbindNodeDiskSpaceLow
+        # rule in the enabled group above.
+        expr: qbind_state_size_bytes > 1e18
         for: 15m
         labels:
           severity: observe
           status: future
           network: qbind-public-devnet
         annotations:
-          summary: "[FUTURE/NOT ENABLED] Storage/disk pressure"
-          description: "qbind_state_size_bytes was absent from the release scrape; do disk alerting via node-exporter. See METRICS.md §5."
-          runbook: "observability/RUNBOOK.md#qbindnodediskspacelow-future"
+          summary: "[FUTURE/NOT ENABLED] Estimated state size very large"
+          description: "qbind_state_size_bytes is absent from the release scrape; this rule cannot fire until the gauge is exported. See METRICS.md §5/§7."
+          runbook: "observability/RUNBOOK.md#qbindstatesizehigh-future"

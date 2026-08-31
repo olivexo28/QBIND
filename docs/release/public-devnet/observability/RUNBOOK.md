@@ -89,9 +89,33 @@ per-peer drop does not increment the connection-rate counter and vice versa).
 
 ---
 
+## QbindNodeDiskSpaceLow
+**Severity: ticket.** *(ENABLED, Run 381.)* The qbind-owned gauge
+`qbind_node_data_dir_free_bytes` — free bytes on the filesystem backing
+`--data-dir`, derived from `statvfs(3)` — has fallen below the configured floor
+(example: 5 GiB) for 15m. Low free space risks failed snapshots and unwritable
+durable state (correlate with `QbindSnapshotFailures` /
+`QbindTrustBundleSequencePersistFailure`). Respond:
+1. Confirm on the affected instance which volume backs `--data-dir` and its true
+   free space (`df -h <data-dir>`). The gauge is value-only; it carries **no**
+   path/mount/hostname label, so map the instance → volume from your inventory.
+2. Reclaim space: prune old snapshots/logs off the data volume, or grow the
+   volume. Do not delete live consensus/state files.
+3. If free space cannot be restored promptly, plan a controlled restart onto a
+   larger volume using the standard restore/catch-up path.
+4. Tune the alert threshold to the real volume size; the shipped 5 GiB floor is a
+   conservative DevNet example, not a guarantee.
+
+The gauge is emitted only when `--data-dir` is set and the syscall succeeds; if
+it is absent, this rule cannot fire (verify `--data-dir` and platform support).
+
+---
+
 ## FUTURE / NOT ENABLED
 
-### QbindNodeDiskSpaceLow (future)
-qbind-node emits no free-disk / storage-capacity gauge (Run 380 Route C). Do disk
-alerting with host/node-exporter metrics (`node_filesystem_avail_bytes`). Until a
-qbind-owned free-disk metric exists this rule stays disabled.
+### QbindStateSizeHigh (future)
+The legacy `qbind_state_size_bytes` estimated-state-size gauge exists in source
+but is **not** exported in the default release scrape (Run 379/380/381 confirm it
+absent), so this rule cannot fire. For qbind-owned free-space alerting use the
+ENABLED `QbindNodeDiskSpaceLow` rule (`qbind_node_data_dir_free_bytes`). Operators
+may additionally use host/node-exporter metrics (`node_filesystem_avail_bytes`).

@@ -4604,6 +4604,24 @@ async fn main() {
     // See `binary_consensus_loop::run_binary_consensus_loop`.
     // ------------------------------------------------------------------
     let node_metrics = Arc::new(NodeMetrics::new());
+    // Run 381: populate the low-cardinality build/chain context and the
+    // qbind-owned data-dir path so `/metrics` can expose `qbind_node_build_info`
+    // and `qbind_node_data_dir_free_bytes`. Both are read-only and secret-free;
+    // the data-dir path is used only to compute free bytes and is never emitted
+    // as a label.
+    {
+        let env_label = match config.environment {
+            qbind_types::NetworkEnvironment::Devnet => "devnet",
+            qbind_types::NetworkEnvironment::Testnet => "testnet",
+            qbind_types::NetworkEnvironment::Mainnet => "mainnet",
+        };
+        let chain_id_label =
+            qbind_node::pqc_trust_sequence::chain_id_hex(config.chain_id());
+        node_metrics.set_build_context(env_label, &chain_id_label);
+        if let Some(ref dir) = config.data_dir {
+            node_metrics.set_data_dir(dir.clone());
+        }
+    }
     let metrics_cfg = MetricsHttpConfig::from_env();
     if metrics_cfg.is_enabled() {
         eprintln!(

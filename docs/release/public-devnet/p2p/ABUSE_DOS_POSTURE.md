@@ -510,6 +510,22 @@ path with **no production source change**.
 flags; no wire-format / trust-bundle / admission change; M4/M6 unchanged; public
 DevNet remains **NOT launch-ready**; Full **C4 / C5 remain OPEN**.
 
+### 7o. Run 381 observability gauge hardening — node/build/chain info + disk metric (Route B)
+
+Run 381 is a node-local observability addition and **changes no P2P abuse/DoS
+posture**. It adds two read-only, low-cardinality, secret-free series to the
+release `/metrics` scrape — `qbind_node_build_info{version,build_id,git_commit,env,
+chain_id}` (static info gauge) and the qbind-owned `qbind_node_data_dir_free_bytes`
+free-space gauge (value only, no path/mount/hostname label) — and promotes the
+`QbindNodeDiskSpaceLow` alert future → enabled against the disk gauge. The per-peer
+drop control and its alert `QbindPerPeerRateLimitDropsSustained` are unchanged
+(still enabled per Run 380). No new public CLI flag, no wire-format / trust-bundle /
+admission change, no new externally reachable port. Artifacts:
+`scripts/devnet/run_381_public_devnet_observability_gauges.sh`,
+`docs/devnet/run_381_public_devnet_observability_gauges/`,
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_381.md`. **M12/M13/M14 remain Green**;
+M4/M6 unchanged; public DevNet remains **NOT launch-ready**; **C4/C5 remain OPEN**.
+
 
 Before a public TestNet, at minimum:
 

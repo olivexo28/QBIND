@@ -28,6 +28,7 @@ stays a single source of *what fires and how loud*.
 | `QbindRestoreCatchupStuck` | ticket | `qbind_restore_catchup_mode_active == 1` for 30m | Node stuck in catch-up. |
 | `QbindPeerCandidateRejectionsHigh` | observe | `increase(qbind_p2p_pqc_trust_bundle_peer_candidate_rejected_total[15m]) > 0` for 15m | Peer-candidate rejections; correlate. |
 | `QbindPerPeerRateLimitDropsSustained` | observe | `increase(qbind_net_per_peer_drops_total[5m]) > 0` for 10m | Sustained M12 per-peer message-rate drops (per-`peer` abuse). |
+| `QbindNodeDiskSpaceLow` | ticket | `qbind_node_data_dir_free_bytes < 5368709120` for 15m | Data-dir free space below ~5 GiB (qbind-owned gauge, Run 381). |
 
 **Coverage notes (honest):**
 
@@ -45,8 +46,13 @@ stays a single source of *what fires and how loud*.
   `QbindTrustBundleSequencePersistFailure` (live-reload apply-failure counters
   also exist for future use).
 - *Consensus no-progress* → `QbindConsensusNoProgress`.
-- *Disk/storage issue* → `QbindSnapshotFailures` proxies storage health; a true
-  free-disk alert is **FUTURE** (see below).
+- *Disk/storage issue* → `QbindNodeDiskSpaceLow` (**ENABLED**, Run 381) alerts on
+  the qbind-owned `qbind_node_data_dir_free_bytes` gauge; `QbindSnapshotFailures`
+  additionally proxies storage-subsystem health. Operators may still complement
+  with node-exporter host metrics.
+- *Node/build/chain identity* → `qbind_node_build_info` (Run 381) is a static
+  low-cardinality info gauge (value `1`) for build/version/chain correlation; it
+  is informational and has no alert.
 - *High error/rejection counters* → trust-bundle + peer-candidate rejection rules.
 
 ## FUTURE / NOT ENABLED rules (metric absent from the baseline scrape)
@@ -58,15 +64,20 @@ active coverage:
 
 | Alert | Absent metric | Why future |
 |---|---|---|
-| `QbindNodeDiskSpaceLow` | `qbind_state_size_bytes` (and no free-disk gauge) | qbind-node emits **no** owned free-disk/storage-capacity gauge (Run 380 Route C); do disk alerting via node-exporter (`node_filesystem_avail_bytes`). |
+| `QbindStateSizeHigh` | `qbind_state_size_bytes` | The legacy estimated-state-size gauge exists in source but is **not** exported in the default release scrape (Run 379/380/381 confirm it absent). For qbind-owned free-space alerting use the ENABLED `QbindNodeDiskSpaceLow` rule (`qbind_node_data_dir_free_bytes`). |
+
+> **Run 381 note:** `QbindNodeDiskSpaceLow` was promoted from the future group to
+> the **enabled** rules above. It now references the qbind-owned
+> `qbind_node_data_dir_free_bytes` gauge, which Run 381 proves present in a
+> release-binary scrape when `--data-dir` is set. The future group now carries only
+> the still-absent `qbind_state_size_bytes` legacy gauge (`QbindStateSizeHigh`).
 
 > **Run 380 note:** `QbindPerPeerRateLimitDropsSustained` was promoted from this
 > future group to the **enabled** rules above. Its metric
 > `qbind_net_per_peer_drops_total` is absent in a clean scrape until a per-peer
 > rate-limit drop occurs, but Runs 371–373 prove deployed KEMTLS live-socket
 > enforcement and Run 380 provides release-binary scrape evidence that the series
-> becomes present after an induced per-peer drop. The disk alert stays future
-> because no qbind-owned disk/free-space metric exists.
+> becomes present after an induced per-peer drop.
 
 ## Validation
 

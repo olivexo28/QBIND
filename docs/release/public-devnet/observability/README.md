@@ -14,19 +14,24 @@ exposes, verifies, scrapes, and alerts on the metrics that the **release**
 
 - A **docs + verification** package (Run 379, decision gate **Route B**; Run 380
   hardening, decision gate **Route A** for the per-peer drop metric + **Route C**
-  for node/build-info and disk gauges). It adds no production Rust source change
-  and no new CLI flag. The metrics endpoint is the pre-existing `metrics_http`
-  server gated by the `QBIND_METRICS_HTTP_ADDR` environment variable
+  for node/build-info and disk gauges; Run 381 hardening, decision gate **Route B**
+  — a minimal read-only source change adds `qbind_node_build_info` and the
+  qbind-owned `qbind_node_data_dir_free_bytes` gauge). It adds **no** new CLI flag;
+  the metrics endpoint is the pre-existing `metrics_http` server gated by the
+  `QBIND_METRICS_HTTP_ADDR` environment variable
   (`crates/qbind-node/src/metrics_http.rs`, `crates/qbind-node/src/main.rs`).
 - Every metric name listed here was **verified against the release binary** by
   scraping `/metrics` over loopback — see [`VERIFY.md`](./VERIFY.md), the Run 379
-  evidence record `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_379.md`, and the Run 380
-  hardening record `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_380.md`.
+  evidence record `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_379.md`, the Run 380
+  hardening record `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_380.md`, and the Run 381
+  hardening record `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_381.md`.
 - Alert rules that reference a metric **not present in any verified scrape** are
   clearly marked **FUTURE / not enabled** rather than shipped as active. The
   per-peer drop alert `QbindPerPeerRateLimitDropsSustained` was promoted to
-  **enabled** in Run 380 (its series is absent in a clean scrape until the first
-  per-peer drop and is proven present after an induced drop).
+  **enabled** in Run 380; the disk alert `QbindNodeDiskSpaceLow` was promoted to
+  **enabled** in Run 381 against the qbind-owned `qbind_node_data_dir_free_bytes`
+  gauge. The future group now carries only the still-absent legacy
+  `qbind_state_size_bytes` gauge (`QbindStateSizeHigh`).
 
 ## What this package is NOT
 

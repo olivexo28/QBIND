@@ -44,6 +44,12 @@ clap           = { version = "4.5", features = ["derive"] }
 hex            = "0.4"
 sha3           = "0.10"
 
+# Run 381: unix `statvfs(3)` for the qbind-owned data-dir free-space gauge
+# (`qbind_node_data_dir_free_bytes`). Already present in the workspace lockfile;
+# used only under `cfg(unix)`, non-unix targets omit the gauge.
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
 [dev-dependencies]
 qbind-serde  = { path = "../qbind-serde" }
 qbind-system = { path = "../qbind-system" }

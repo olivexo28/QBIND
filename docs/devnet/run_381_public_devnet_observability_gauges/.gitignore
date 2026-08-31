@@ -1,0 +1,17 @@
+# Run 381 evidence archive — only README.md, summary.txt, and .gitignore are tracked.
+# All per-run artifacts contain absolute paths and ephemeral data and MUST NOT be committed.
+# Node data dirs, node logs, raw /metrics scrape dumps, and helper flood outputs are
+# temporary and dev-only; only publish-safe hashes and status lines appear in the
+# tracked summary/README.
+node-data/
+nodes/
+logs/
+data/
+clean_metrics.txt
+metrics.txt
+*.metrics
+kemtls_*.txt
+*.err
+*.log
+*.public.json
+public-identity.json

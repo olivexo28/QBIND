@@ -1,19 +1,23 @@
 # QBIND Public DevNet — Observability Verification (M13/M14)
 
-Reproducible, release-binary-backed verification for the observability baseline
-and the Run 380 hardening (per-peer drop scrape + alert promotion). The
-one-command paths are the Run 380 hardening harness and the Run 379 baseline
-harness:
+Reproducible, release-binary-backed verification for the observability baseline,
+the Run 380 hardening (per-peer drop scrape + alert promotion) and the Run 381
+hardening (node/build/chain info + qbind-owned data-dir free-space gauge + disk
+alert promotion). The one-command paths are the Run 381, Run 380 and Run 379
+harnesses:
 
 ```bash
+bash scripts/devnet/run_381_public_devnet_observability_gauges.sh
 bash scripts/devnet/run_380_public_devnet_observability_hardening.sh
 bash scripts/devnet/run_379_public_devnet_observability_baseline.sh
 ```
 
 They write publish-safe results to
+`docs/devnet/run_381_public_devnet_observability_gauges/summary.txt`,
 `docs/devnet/run_380_public_devnet_observability_hardening/summary.txt` and
 `docs/devnet/run_379_public_devnet_observability_baseline/summary.txt`; the
-canonical records are `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_380.md` and
+canonical records are `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_381.md`,
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_380.md` and
 `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_379.md`.
 
 ## What the harness proves
@@ -44,12 +48,20 @@ canonical records are `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_380.md` and
     KEMTLS live socket (Run 371–373 helper path), while
     `qbind_p2p_connection_rate_drop_total` stays independent (Run 380). Its alert
     `QbindPerPeerRateLimitDropsSustained` is **enabled**.
-11. **Disk alert stays future:** no qbind-owned free-disk/storage-capacity gauge
-    exists, so `QbindNodeDiskSpaceLow` remains in the future/not-enabled group
-    (use node-exporter `node_filesystem_avail_bytes`).
-12. **No live seed / M4 claim:** the harness asserts the summary makes no
+11. **Node/build/chain info present (Run 381):** the scrape contains
+    `qbind_node_build_info{version,build_id,git_commit,env,chain_id} 1` with
+    low-cardinality, secret-free labels (no path/hostname/endpoint; unknown values
+    render as `unknown`).
+12. **qbind-owned free-space gauge present (Run 381):** with `--data-dir` set the
+    scrape contains a value-only `qbind_node_data_dir_free_bytes` (no path/mount/
+    hostname label). Its alert `QbindNodeDiskSpaceLow` is **enabled** because the
+    metric is proven present.
+13. **Future group carries only still-absent metrics:** `QbindStateSizeHigh`
+    (legacy `qbind_state_size_bytes`) remains in the future/not-enabled group and
+    is grep-confirmed absent from the scrape.
+14. **No live seed / M4 claim:** the harness asserts the summary makes no
     launch/live-seed/M4-Green claim.
-13. **No TestNet/MainNet/C4/C5 claim:** the harness asserts no such claim.
+15. **No TestNet/MainNet/C4/C5 claim:** the harness asserts no such claim.
 
 ## Manual verification (optional)
 
@@ -70,6 +82,13 @@ curl -s -o /tmp/metrics.txt -w 'http=%{http_code}\n' http://127.0.0.1:$PORT/metr
 
 # 5. Required families present
 grep -E '^qbind_consensus_committed_height|^qbind_p2p_connections_current|^qbind_p2p_connection_rate_drop_total' /tmp/metrics.txt
+
+# 11-12. Run 381 gauges present (build info + qbind-owned data-dir free space)
+grep -E '^qbind_node_build_info\{' /tmp/metrics.txt
+grep -E '^qbind_node_data_dir_free_bytes ' /tmp/metrics.txt   # value only, no label
+
+# 13. Legacy state-size gauge stays absent (future group only)
+grep -c '^qbind_state_size_bytes' /tmp/metrics.txt            # -> 0
 
 # 10. Per-peer drop series is absent in a clean scrape (present only after a drop)
 grep -c '^qbind_net_per_peer_drops_total' /tmp/metrics.txt   # -> 0 in a clean scrape
