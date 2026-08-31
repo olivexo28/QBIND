@@ -165,3 +165,9 @@ Public DevNet stays **NOT launch-ready** until all must-haves are Green. See
   (`.github/workflows/public-devnet-release-artifact-manifest.yml` +
   `scripts/devnet/run_385_public_devnet_ci_release_artifact_manifest.sh`), evidence:
   `../../../devnet/QBIND_DEVNET_EVIDENCE_RUN_385.md`.
+- Run 386 optional, disabled-by-default **signing / attestation** CI preflight
+  (`.github/workflows/public-devnet-release-signing-attestation.yml` +
+  `scripts/devnet/run_386_public_devnet_release_signing_attestation_preflight.sh`);
+  keyless GitHub artifact attestation over OIDC (no secrets), `signed_release=false` /
+  `slsa_grade=false` kept honest, evidence:
+  `../../../devnet/QBIND_DEVNET_EVIDENCE_RUN_386.md`.

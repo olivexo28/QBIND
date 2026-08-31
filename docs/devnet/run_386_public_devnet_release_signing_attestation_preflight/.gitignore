@@ -1,0 +1,41 @@
+# Run 386 evidence archive — only README.md, summary.txt, and .gitignore are tracked.
+# Everything else here is preflight/CI-artifact-only or per-run temporary output and MUST NOT be committed.
+# In particular NO signature, attestation, or signing-key material is ever committed: the real
+# build-provenance attestation is minted only by the disabled-by-default protected workflow
+# .github/workflows/public-devnet-release-signing-attestation.yml as a CI artifact, and the generated
+# RELEASE_ARTIFACT_MANIFEST.json remains a CI *artifact* (uploaded by
+# .github/workflows/public-devnet-release-artifact-manifest.yml), never a committed changing file.
+# Node data dirs, node logs, raw /metrics scrape dumps, the staged ci-artifacts/ bundle, the reused
+# Run 385 output under run385/, and the generated manifest are temporary and dev/CI-only; only
+# publish-safe hashes and status lines appear in the tracked summary/README. The committed, publish-safe
+# example manifest lives at docs/release/public-devnet/binary/RELEASE_ARTIFACT_MANIFEST.example.json.
+ci-artifacts/
+run385/
+run384/
+node-data/
+nodes/
+logs/
+data/
+RELEASE_ARTIFACT_MANIFEST.json
+manifest.json
+qbind-node.sha256
+BUILDID.txt
+SIGNING_PREFLIGHT.txt
+MANIFEST_VALIDATION_SUMMARY.txt
+ATTESTATION_IDENTITY.txt
+*.sig
+*.sigstore
+*.sigstore.json
+*.intoto.jsonl
+*.dsse
+*.attestation
+*.pem
+*.key
+*.p12
+clean_metrics.txt
+metrics.txt
+*.metrics
+*.err
+*.log
+*.metrics.txt
+manifest.metrics.txt

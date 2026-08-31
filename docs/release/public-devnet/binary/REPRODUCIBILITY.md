@@ -144,3 +144,11 @@ provenance. See `BUILDINFO.md` and `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_384.md
 dry-run wrapper `scripts/devnet/run_385_public_devnet_ci_release_artifact_manifest.sh`. The
 reproducibility scope is unchanged (**same-host / per-input** only; cross-host and SLSA-grade are not
 claimed). See `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_385.md`.
+
+**Run 386 signing/attestation preflight.** Run 386 adds an optional, **disabled-by-default** protected CI
+signing/attestation preflight (`.github/workflows/public-devnet-release-signing-attestation.yml` +
+`scripts/devnet/run_386_public_devnet_release_signing_attestation_preflight.sh`) using keyless GitHub
+artifact attestation over GitHub OIDC (no repository secrets). It produces no attestation in the
+preflight, so `signed_release`/`slsa_grade` remain **false** and the reproducibility scope is unchanged
+(**same-host / per-input** only; cross-host and SLSA-grade are still not claimed). See
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_386.md`.

@@ -1,0 +1,29 @@
+=== Run 386 release signing/attestation preflight ===
+decision_gate=Route B (secret-free GitHub artifact attestation path exists but requires elevated id-token:write + attestations:write in a protected CI environment and cannot be minted/verified in this offline sandbox; ship a disabled-by-default protected workflow + exact prerequisites; keep signed_release=false slsa_grade=false honest; no signature/attestation produced or committed)
+signing_workflow=.github/workflows/public-devnet-release-signing-attestation.yml (disabled by default)
+reused_manifest_workflow=.github/workflows/public-devnet-release-artifact-manifest.yml (unchanged)
+reused_wrapper=scripts/devnet/run_385_public_devnet_ci_release_artifact_manifest.sh
+crlf_guard=OK (reused shell harnesses run_384/run_385 + this preflight are LF; executable on Linux/CI)
+signing_workflow_yaml=OK (manual-only; confirm defaults 'no'; job gated on confirm=='yes'; protected environment 'release-signing'; top-level permissions contents:read; job writes limited to id-token+attestations; attest-build-provenance + gh attestation verify present)
+signing_workflow_no_secrets=OK (no secrets.* reference; keyless Sigstore over GitHub OIDC)
+signing_workflow_least_privilege=OK (only id-token:write + attestations:write elevated; contents stays read; no packages/deployments/contents write)
+signing_workflow_no_release=OK (no release/tag/deployment; no commit/push of signatures/attestations)
+manifest_workflow_unchanged=OK (permissions: contents: read; no secrets; Run 385 posture preserved)
+actionlint=SKIP (actionlint not installed; PyYAML parse + static checks used instead)
+run385_regression=OK (RESULT=POSITIVE; canonical injected build + schema-valid manifest + live metric cross-check preserved)
+canonical_git_commit=cc0ca25e3c04
+canonical_build_id=qbind-devnet-0.1.0-cc0ca25e3c04
+binary_sha256=3932279e6f1eea3799562a69d959b1b6286a06a012aca5f96360f4b9948324cd
+elf_build_id=636475b1fc3f038a992f6a16947c3f9a722e7da4
+signed_release=false slsa_grade=false (present and true; no real attestation produced/verified in this offline preflight)
+schema_pins_false=OK (RELEASE_ARTIFACT_MANIFEST.schema.json keeps signed_release/slsa_grade const:false; real attestation identity goes in a separate artifact file)
+no_signature_committed=OK (no *.sig/*.sigstore/*.intoto.jsonl/*.dsse/ATTESTATION_IDENTITY/private-key artifact tracked in git)
+staged_manifest_schema_valid=OK (staged RELEASE_ARTIFACT_MANIFEST.json validates against committed schema)
+ci_artifacts_staged=OK (BUILDID.txt RELEASE_ARTIFACT_MANIFEST.json SIGNING_PREFLIGHT.txt qbind-node.sha256 )
+artifact_upload_safety=OK (staged dir excludes raw logs/metrics/data dirs; no absolute path/host/endpoint/secret/raw-metrics-dump/signing-key)
+no_new_cli_flag=OK (no provenance/release-signing/attestation/manifest CLI flag; pre-existing consensus --signer-* flags unchanged; exposure remains QBIND_METRICS_HTTP_ADDR env only)
+non_claim_check=OK (no launch-ready / M4-Green / TestNet/MainNet / C4/C5-closure claim in release+observability docs)
+observability_yaml_parse=OK (prometheus example YAML unchanged and still parses)
+committed_private_material=NONE (no signature/attestation/private key committed; generated manifest stays a CI artifact; only publish-safe hashes/status lines land in the tracked summary)
+
+RESULT=POSITIVE (Route B: disabled-by-default protected signing/attestation workflow .github/workflows/public-devnet-release-signing-attestation.yml added with the exact operator/CI prerequisites — keyless GitHub artifact attestation over OIDC, no secrets, job-scoped id-token+attestations writes, protected release-signing environment, confirm-gated; Run 385 regression RESULT=POSITIVE with canonical injected build git_commit=cc0ca25e3c04 build_id=qbind-devnet-0.1.0-cc0ca25e3c04, binary_sha256=3932279e6f1eea3799562a69d959b1b6286a06a012aca5f96360f4b9948324cd, elf_build_id=636475b1fc3f038a992f6a16947c3f9a722e7da4; schema-valid manifest from the REAL binary + live loopback scrape; signed_release=false slsa_grade=false present and true; schema still pins both false; no signature/attestation/private key produced or committed; publish-safe artifacts staged excluding raw logs/metrics/data dirs; no new CLI flag; metrics disabled-by-default and loopback-only; M12/M13/M14 remain Green; M4 stays Yellow; M6 Yellow/Partial; public DevNet NOT launch-ready; C4/C5 OPEN)

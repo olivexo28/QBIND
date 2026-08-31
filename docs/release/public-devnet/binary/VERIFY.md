@@ -183,3 +183,18 @@ Expected: only text files are tracked (`README.md`, `RELEASE_PROVENANCE.md`, `RE
 `BUILDINFO.md`, `qbind-node.sha256`, `VERIFY.md`, `RELEASE_ARTIFACT_MANIFEST.schema.json`,
 `RELEASE_ARTIFACT_MANIFEST.example.json`); no `qbind-node` ELF blob is tracked. The
 `.sha256` file is an ASCII checksum, not a binary.
+## 11. Confirm the signing/attestation preflight keeps signed_release/slsa_grade false (Run 386)
+
+```
+grep -n '"signed_release"\|"slsa_grade"' RELEASE_ARTIFACT_MANIFEST.example.json
+grep -Rin "signed_release=false\|slsa_grade=false" docs/devnet/run_386_public_devnet_release_signing_attestation_preflight/summary.txt
+git ls-files ':(glob)**/*.sig' ':(glob)**/*.sigstore*' ':(glob)**/*.intoto.jsonl' ':(glob)**/ATTESTATION_IDENTITY.txt'
+```
+
+Expected: the manifest example keeps `signed_release`/`slsa_grade` **false**; the Run 386 summary
+records `signed_release=false` / `slsa_grade=false`; and the last command prints nothing (no
+signature/attestation/private-key artifact is committed). The optional signing workflow
+`.github/workflows/public-devnet-release-signing-attestation.yml` is disabled by default (manual-only,
+`confirm` defaults to `no`, protected `release-signing` environment) and mints a keyless GitHub
+attestation only when explicitly enabled; verify it then with
+`gh attestation verify target/release/qbind-node --repo <owner>/<repo>`.
