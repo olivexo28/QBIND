@@ -1,4 +1,4 @@
-# QBIND DevNet Evidence — Run 380
+# QBIND DevNet Evidence -- Run 380
 
 Public DevNet **observability hardening** on top of the accepted Run 379 baseline.
 Run 380 deepens the **M13 telemetry / metrics** and **M14 monitoring / alerting**
@@ -6,12 +6,12 @@ baselines by (1) correcting stale per-peer / M12 observability wording, (2)
 producing **release-binary scrape evidence** that
 `qbind_net_per_peer_drops_total{reason="rate_limit"}` becomes **present after an
 induced per-peer rate-limit drop** over the deployed KEMTLS live socket, and (3)
-**promoting** that alert from FUTURE to ENABLED — all with **no production Rust
+**promoting** that alert from FUTURE to ENABLED -- all with **no production Rust
 source change**.
 
-> **Safety label:** DevNet · experimental · **no value** · resettable · metrics
-> loopback-only by default · **NOT public-DevNet launch-ready** · no M4 Green · no
-> M6 Green · no TestNet readiness · no MainNet readiness · **C4/C5 OPEN**. This
+> **Safety label:** DevNet | experimental | **no value** | resettable | metrics
+> loopback-only by default | **NOT public-DevNet launch-ready** | no M4 Green | no
+> M6 Green | no TestNet readiness | no MainNet readiness | **C4/C5 OPEN**. This
 > hardening does **not** imply launch, TestNet, MainNet, C4, or C5 readiness. No
 > production source change; no new public endpoint; no P2P wire-format change; no
 > peer-admission weakening; no trust/validator/epoch/sequence/marker/
@@ -23,7 +23,7 @@ source change**.
 "construction-path-only" per-peer wording is corrected; release-binary scrape
 evidence lands (`qbind_net_per_peer_drops_total{reason="rate_limit"}=47` present
 only after an induced per-peer drop, absent in a clean scrape); the per-peer alert
-is promoted **future → enabled**; scrape + alert configs parse; the only remaining
+is promoted **future -> enabled**; scrape + alert configs parse; the only remaining
 future alert backs a genuinely absent (disk) metric; and tests/scans/provenance
 pass. **M12, M13, M14 remain Green**; **M4 remains Yellow**; **M6 remains
 Yellow/Partial**; the public DevNet remains **NOT launch-ready**; **C4/C5 remain
@@ -40,13 +40,13 @@ Observability package (docs correction + alert promotion):
 - `docs/release/public-devnet/observability/prometheus-alerts.example.yml`
 
 P2P posture / verification:
-- `docs/release/public-devnet/p2p/ABUSE_DOS_POSTURE.md` (§7n added; §5 note corrected)
+- `docs/release/public-devnet/p2p/ABUSE_DOS_POSTURE.md` (section 7n added; section 5 note corrected)
 - `docs/release/public-devnet/p2p/VERIFY.md` (Run 380 cross-reference)
 
 Harness + archive + evidence:
-- `scripts/devnet/run_380_public_devnet_observability_hardening.sh` — **new** harness.
-- `docs/devnet/run_380_public_devnet_observability_hardening/{README.md,summary.txt,.gitignore}` — **new** archive.
-- `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_380.md` — this evidence record.
+- `scripts/devnet/run_380_public_devnet_observability_hardening.sh` -- **new** harness.
+- `docs/devnet/run_380_public_devnet_observability_hardening/{README.md,summary.txt,.gitignore}` -- **new** archive.
+- `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_380.md` -- this evidence record.
 
 Narrow run-log updates:
 - `docs/release/QBIND_PUBLIC_DEVNET_READINESS_CRITERIA.md`
@@ -64,12 +64,12 @@ no production source changed.
 
 ## 3. Decision gate route
 
-**Route A for the per-peer drop metric** — existing source already produces the
+**Route A for the per-peer drop metric** -- existing source already produces the
 series after a real per-peer drop over the deployed KEMTLS live socket (Runs
-371–373). Run 380 reuses the Run 371 helper (`dial-flood` mode) to induce a drop
+371-373). Run 380 reuses the Run 371 helper (`dial-flood` mode) to induce a drop
 against the release binary and scrapes it present; **no production source change**.
 
-**Route C for node/build-info and disk/storage gauges** — qbind-node emits no
+**Route C for node/build-info and disk/storage gauges** -- qbind-node emits no
 owned `qbind_node_build_info` and no free-disk / storage-capacity gauge, and
 adding them was judged out of appetite for a no-source-change hardening run. The
 disk alert stays **future / not-enabled**; disk alerting is delegated to
@@ -83,12 +83,12 @@ Route B (small production metrics additions) was **not** taken.
 
 The stale "construction-path-only" per-peer wording is removed from the
 observability package and the P2P posture note and replaced with: *"series is
-absent in a clean scrape until a per-peer rate-limit drop occurs; Runs 371–373
-prove deployed KEMTLS live-socket enforcement."* Corrected in `METRICS.md §2`,
+absent in a clean scrape until a per-peer rate-limit drop occurs; Runs 371-373
+prove deployed KEMTLS live-socket enforcement."* Corrected in `METRICS.md section 2`,
 `ALERT_RULES.md`, `RUNBOOK.md`, `prometheus-alerts.example.yml`, and
-`p2p/ABUSE_DOS_POSTURE.md §5`. This does **not** downgrade M12: it aligns the docs
-with the deployed live-socket enforcement proven in Runs 371–373 (see
-`ABUSE_DOS_POSTURE.md §7k–§7m`). The historical Run 364 log entries (which describe
+`p2p/ABUSE_DOS_POSTURE.md section 5`. This does **not** downgrade M12: it aligns the docs
+with the deployed live-socket enforcement proven in Runs 371-373 (see
+`ABUSE_DOS_POSTURE.md section 7k-section 7m`). The historical Run 364 log entries (which describe
 a separate `AsyncPeerManagerImpl` CLI-threading gap) are left unchanged as history.
 
 ## 5. Metrics endpoint surface
@@ -105,16 +105,16 @@ loopback. No new CLI flag exists (`--help` asserted clean).
 From `scripts/devnet/run_380_public_devnet_observability_hardening.sh` against the
 release binary + the Run 371 helper:
 
-- **Clean scrape:** `per_peer_clean_scrape=ABSENT` —
+- **Clean scrape:** `per_peer_clean_scrape=ABSENT` --
   `qbind_net_per_peer_drops_total` is absent before any flood.
 - **Induced drop:** a KEMTLS-admitted peer completes mutual auth against the
   running `target/release/qbind-node` and floods 60 over-budget frames through the
-  deployed read loop → `per_peer_induced_scrape=PRESENT
+  deployed read loop -> `per_peer_induced_scrape=PRESENT
   qbind_net_per_peer_drops_total{reason="rate_limit"}=47`.
 - **Independence (per-peer side):** the flood left
   `qbind_p2p_connection_rate_drop_total=0`.
 - **Independence (connection side):** a separate connection-rate flood (10 conns,
-  max 3 → 7 refused) incremented `qbind_p2p_connection_rate_drop_total=7` while the
+  max 3 -> 7 refused) incremented `qbind_p2p_connection_rate_drop_total=7` while the
   per-peer metric stayed **absent**.
 
 ## 7. Node / build / chain info metric evidence
@@ -136,7 +136,7 @@ recommended via host/node-exporter (`node_filesystem_avail_bytes`).
 
 ## 9. Alert rule changes
 
-- `QbindPerPeerRateLimitDropsSustained` **promoted FUTURE → ENABLED** in the
+- `QbindPerPeerRateLimitDropsSustained` **promoted FUTURE -> ENABLED** in the
   `qbind-devnet-observability` group. Its metric is absent in a clean scrape until
   the first per-peer drop; `increase(...)` over an absent-until-first-drop series
   simply does not fire until a real drop, and Run 380 proves the series becomes
@@ -148,7 +148,7 @@ recommended via host/node-exporter (`node_filesystem_avail_bytes`).
 ## 10. Scrape config evidence
 
 `prometheus-scrape.example.yml` is unchanged (loopback / RFC 5737 targets,
-`metrics_path: /metrics`, `scrape_interval: 15s`) and **parses as YAML** —
+`metrics_path: /metrics`, `scrape_interval: 15s`) and **parses as YAML** --
 `scrape_config_yaml=OK`.
 
 ## 11. Runbook evidence
@@ -170,10 +170,10 @@ wire-format change is made.
 
 No production source change. With `QBIND_METRICS_HTTP_ADDR` unset the metrics
 server stays disabled; the harness confirms this. Enabling it changes no consensus,
-P2P, trust, or admission behavior — it only serves read-only counters over a
+P2P, trust, or admission behavior -- it only serves read-only counters over a
 loopback socket. The per-peer flags (`--p2p-max-messages-per-second` /
 `--p2p-burst-allowance`) are the pre-existing hidden DevNet flags used by Runs
-371–373; their default (1000 msg/s + 100 burst) is preserved.
+371-373; their default (1000 msg/s + 100 burst) is preserved.
 
 ## 14. Readiness matrix delta for M13
 
@@ -197,7 +197,7 @@ cannot launch.
 ## 17. Remaining public DevNet blockers
 
 - **M4:** a real, externally reachable seed/bootnode with external reachability
-  evidence (Run 378 Route C prerequisites) — primary blocker.
+  evidence (Run 378 Route C prerequisites) -- primary blocker.
 - **M6** live-registration half (M4-gated).
 - All other Yellow/Red must-haves per the readiness matrix.
 
@@ -219,24 +219,24 @@ hardening is read-only telemetry/monitoring and closes neither.
 
 ## 21. Tests run
 
-- `cargo build -p qbind-node --release --bin qbind-node` — **OK**.
-- `cargo build -p qbind-node --release --example run_371_public_devnet_m12_kemtls_per_peer_live_socket_flood_helper` — **OK**.
-- `scripts/devnet/run_380_public_devnet_observability_hardening.sh` —
+- `cargo build -p qbind-node --release --bin qbind-node` -- **OK**.
+- `cargo build -p qbind-node --release --example run_371_public_devnet_m12_kemtls_per_peer_live_socket_flood_helper` -- **OK**.
+- `scripts/devnet/run_380_public_devnet_observability_hardening.sh` --
   **RESULT=POSITIVE** (build OK; no new CLI flag; metrics disabled by default;
   loopback `/metrics` HTTP 200; per-peer metric ABSENT clean then PRESENT=47 after
   induced drop; both independence checks OK; Route C gauges absent; scrape + alert
   YAML parse OK; per-peer alert enabled; future group carries only disk; non-claim
   OK).
-- YAML parse check for `prometheus-scrape.example.yml` — **OK**.
-- YAML parse check for `prometheus-alerts.example.yml` — **OK**.
-- Non-claim grep over the observability package — **OK**.
-- `cargo test -p qbind-node --lib` — **PASS** (`test result: ok. 1394 passed;
+- YAML parse check for `prometheus-scrape.example.yml` -- **OK**.
+- YAML parse check for `prometheus-alerts.example.yml` -- **OK**.
+- Non-claim grep over the observability package -- **OK**.
+- `cargo test -p qbind-node --lib` -- **PASS** (`test result: ok. 1394 passed;
   0 failed; 0 ignored`; no production source changed, so results match the Run 379
   baseline).
 
 ## 22. Security scans
 
-- `runtime-tools-secret_scanning` over all changed files — no secrets.
+- `runtime-tools-secret_scanning` over all changed files -- no secrets.
 - No credential, bearer token, webhook URL, private hostname, private IP, key, data
   dir, raw log, or metrics dump is committed. All addresses are loopback
   (`127.0.0.1`) or RFC 5737 (`192.0.2.0/24`) documentation examples. The harness
@@ -255,7 +255,7 @@ it reflects the absence of an analyzable production change.
 ## 24. Provenance
 
 From `scripts/devnet/run_380_public_devnet_observability_hardening.sh` (host-local;
-reproduced by re-running the harness — SHA-256 / BuildID are host-specific):
+reproduced by re-running the harness -- SHA-256 / BuildID are host-specific):
 
 ```
 release_binary sha256 = e6f264f05d5e6d310abd0ffe4c3dee9cef90ee377d60964b599c4a8b29c552dd
@@ -286,10 +286,10 @@ induced per-peer drops = qbind_net_per_peer_drops_total{reason="rate_limit"}=47
 ## 26. Suggested Run 381 next step
 
 Either (a) return to **M4**: execute Route A on real infrastructure per
-`network/reachability/RUN_378_qbind-devnet-seed-1.md` §14 (durable operator seed
+`network/reachability/RUN_378_qbind-devnet-seed-1.md` section 14 (durable operator seed
 identity, externally reachable KEMTLS static-root listener, external-vantage TCP +
-handshake evidence) to attempt M4 Yellow → Green and unblock M6's live half; or
-(b) take **Route B** for the remaining observability gaps — add a low-cardinality
+handshake evidence) to attempt M4 Yellow -> Green and unblock M6's live half; or
+(b) take **Route B** for the remaining observability gaps -- add a low-cardinality
 `qbind_node_build_info` gauge and a portable `qbind_node_data_dir_free_bytes`
 gauge to the default `/metrics`, wire them read-only, add
 `crates/qbind-node/tests/run_381_public_devnet_observability_metrics_tests.rs`,
