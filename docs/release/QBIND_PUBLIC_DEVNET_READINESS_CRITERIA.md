@@ -333,6 +333,25 @@ metrics; non-claim check OK. Evidence `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_381
 `docs/devnet/run_381_public_devnet_observability_gauges/`. **M12, M13, and M14 remain Green**; M4 stays
 Yellow/launch-blocking; M6 remains Yellow/Partial; public DevNet remains NOT launch-ready; C4/C5 remain
 OPEN; MainNet/TestNet untouched.
+
+Updated Run 382 — **build-info provenance hardening (M13/M14 remain Green)**: Run 382 adds a minimal
+build-time provenance bridge (decision gate **Route B**), `crates/qbind-node/build.rs`, that populates the
+Run 381 `qbind_node_build_info` labels without any runtime change: `git_commit` is auto-derived to a short
+git commit hash (or an explicit `QBIND_GIT_COMMIT` override) and `build_id` is a harness/CI-injected
+`QBIND_BUILD_ID` (never derived from git or the ELF). Missing provenance still renders `unknown`; all label
+values are sanitized to `[A-Za-z0-9._-]` (no path/host/branch/dirty/endpoint/secret leak). The metric
+`build_id` label is documented as distinct from the binary ELF `.note.gnu.build-id`. No metric/alert/scrape
+change; the Run 381 `qbind_node_data_dir_free_bytes` gauge is intact; no new CLI flag (exposure stays
+`QBIND_METRICS_HTTP_ADDR` loopback-only, disabled by default); no P2P wire-format change; no
+peer-admission weakening; no trust/validator/epoch/sequence/marker mutation. Release evidence via
+`scripts/devnet/run_382_public_devnet_build_info_provenance.sh` (`RESULT=POSITIVE`): default build
+auto-fills `git_commit` while `build_id` stays `unknown`; an injected build honours both; ELF BuildID kept
+separate from the metric `build_id`; disk gauge intact; metrics disabled without env; loopback `/metrics`
+HTTP 200; scrape + alert YAML parse; non-claim check OK. Evidence
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_382.md`, archive
+`docs/devnet/run_382_public_devnet_build_info_provenance/`. **M12, M13, and M14 remain Green**; M4 stays
+Yellow/launch-blocking; M6 remains Yellow/Partial; public DevNet remains NOT launch-ready; C4/C5 remain
+OPEN; MainNet/TestNet untouched.
 **Track:** Public network release-readiness. This is a **separate track** from the internal
 authority-lifecycle boundary track (Run 130–354) and from C4/C5 closure.
 **Scope of this document:** source/docs/test-only audit and gap matrix. It introduces public DevNet

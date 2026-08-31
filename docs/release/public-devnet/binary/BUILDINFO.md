@@ -84,6 +84,32 @@ HAS_SYMS, DYNAMIC, D_PAGED
 start address 0x0000000000291340
 ```
 
+## ELF BuildID vs the `qbind_node_build_info` metric `build_id` label (Run 382)
+
+Two different "build id" values exist and must **not** be conflated:
+
+- **ELF BuildID** — the `.note.gnu.build-id` recorded above (`readelf -n`). It is a
+  linker-computed identity of the compiled binary and is captured in this
+  provenance record.
+- **`qbind_node_build_info` `build_id` label** — an operator-facing release
+  identity exposed on the `/metrics` scrape. Run 382 populates it **only** from a
+  build-time-injected `QBIND_BUILD_ID` env var (harness / CI); it is never derived
+  from git or from the ELF BuildID, and renders `unknown` when not injected. The
+  companion `git_commit` label is auto-derived to a short git commit hash (or an
+  explicit `QBIND_GIT_COMMIT`).
+
+To ship populated metric provenance, inject both at build time (this changes the
+compiled label strings and therefore the SHA-256 / ELF BuildID, so record the
+injected values alongside the binary hash):
+
+```
+QBIND_GIT_COMMIT="$(git rev-parse --short=12 HEAD)" \
+QBIND_BUILD_ID="<release-id>" \
+  cargo build -p qbind-node --release --locked --bin qbind-node
+```
+
+See `../observability/METRICS.md` and `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_382.md`.
+
 ## Limitations
 
 - **Toolchain-sensitive.** The SHA-256 and BuildID above are specific to the recorded

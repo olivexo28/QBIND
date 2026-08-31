@@ -150,7 +150,7 @@ keystore (`qbind_keystore_load_failure_total`), KEM
 
 | Metric | Type | Meaning |
 |---|---|---|
-| `qbind_node_build_info{version,build_id,git_commit,env,chain_id}` | gauge | Static info metric; value always `1`. Labels are low-cardinality and secret-free. `build_id`/`git_commit` render `unknown` unless injected at build time via `QBIND_BUILD_ID` / `QBIND_GIT_COMMIT`. `env` is the fixed vocabulary `devnet`/`testnet`/`mainnet`; `chain_id` is canonical hex. **No** path, hostname, or private-endpoint label is ever emitted. |
+| `qbind_node_build_info{version,build_id,git_commit,env,chain_id}` | gauge | Static info metric; value always `1`. Labels are low-cardinality and secret-free. `git_commit` is auto-derived to a short git commit hash at build time (Run 382 `build.rs`) or set via `QBIND_GIT_COMMIT`; `build_id` is a harness/CI-injected `QBIND_BUILD_ID` (never derived from git or the ELF). Both render `unknown` when not injected/derivable. The metric `build_id` label is **distinct** from the binary ELF `.note.gnu.build-id` (see `../binary/BUILDINFO.md`). `env` is the fixed vocabulary `devnet`/`testnet`/`mainnet`; `chain_id` is canonical hex. **No** path, hostname, branch, dirty-status, or private-endpoint label is ever emitted. |
 
 ## 7. Required vs best-effort vs absent — summary
 

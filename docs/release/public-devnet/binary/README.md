@@ -21,7 +21,7 @@ are running the artifact this repository describes.
 | `README.md` | This document (scope, safety labels, verification pointers). |
 | `RELEASE_PROVENANCE.md` | Canonical provenance record (commit, toolchain, build command, SHA-256, BuildID). |
 | `REPRODUCIBILITY.md` | Same-host two-build reproducibility experiment + BuildID result. |
-| `BUILDINFO.md` | Full build-input record for audit/reproduction. |
+| `BUILDINFO.md` | Full build-input record for audit/reproduction. Includes the Run 382 ELF-BuildID-vs-metric-`build_id`-label distinction. |
 | `qbind-node.sha256` | SHA-256 of the locally built `target/release/qbind-node`, standard checksum format. |
 | `VERIFY.md` | Exact operator verification commands and expected outputs. |
 
