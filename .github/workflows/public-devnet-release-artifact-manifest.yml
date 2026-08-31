@@ -1,0 +1,83 @@
+# Run 385 — public DevNet CI release-artifact MANIFEST generation.
+#
+# Wires the Run 384 canonical injected release-artifact manifest generation into
+# CI so every published DevNet release build can produce a schema-validated
+# RELEASE_ARTIFACT_MANIFEST.json as a *CI artifact* (never a committed file).
+#
+# Decision gate: Route A (CI/workflow + harness/docs only). This workflow makes NO
+# production Rust source change, NO build.rs change, NO runtime behaviour change,
+# and adds NO new qbind-node CLI flag. It runs the SAME commands as the local
+# dry-run wrapper `scripts/devnet/run_385_public_devnet_ci_release_artifact_manifest.sh`,
+# which reuses the Run 384 harness to build the canonical injected artifact,
+# generate the manifest from the ACTUAL built binary + a LIVE loopback
+# qbind_node_build_info scrape, and validate it against the committed schema.
+#
+# Safety posture:
+#   * Least-privilege permissions (contents: read only).
+#   * No secrets referenced; no signing in this run (signed_release=false,
+#     slsa_grade=false are recorded in the manifest).
+#   * Manual (workflow_dispatch) or release-track (version tag) scoped only.
+#   * Does NOT create a release, tag, deployment, seed, endpoint, or public
+#     network claim, and does NOT commit or push the generated manifest.
+#   * Uploads only publish-safe artifacts (checksum text, manifest JSON,
+#     validation summary, optional ELF BuildID summary) — never raw logs, raw
+#     metrics dumps, temp data dirs, secrets, or private material.
+
+name: public-devnet-release-artifact-manifest
+
+on:
+  workflow_dispatch: {}
+  # Release-track scope only: version tags. No push-to-branch trigger, so a normal
+  # merge never runs this and it can only be invoked deliberately.
+  push:
+    tags:
+      - "v*"
+
+# Least privilege: the job only reads the checked-out source and uploads a CI
+# artifact. It never writes to the repository, so no write scope is granted.
+permissions:
+  contents: read
+
+concurrency:
+  group: public-devnet-release-artifact-manifest-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release-artifact-manifest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      # CI staging directory for publish-safe artifacts only (never committed).
+      CI_STAGE_DIR: ${{ runner.temp }}/qbind-run385-ci-release-artifact-manifest
+    steps:
+      - name: Checkout (full history for short commit)
+        uses: actions/checkout@v4
+        with:
+          # The canonical QBIND_GIT_COMMIT is `git rev-parse --short=12 HEAD`;
+          # a full history keeps that stable and unambiguous.
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install Rust toolchain (pinned, stable)
+        run: |
+          rustup show active-toolchain || rustup toolchain install stable --profile minimal
+          rustup component add --toolchain stable rust-std >/dev/null 2>&1 || true
+          rustc --version
+          cargo --version
+
+      - name: Install manifest validation dependency
+        run: python3 -m pip install --user jsonschema >/dev/null 2>&1 || true
+
+      - name: Generate and validate the release-artifact manifest
+        run: |
+          bash scripts/devnet/run_385_public_devnet_ci_release_artifact_manifest.sh "${CI_STAGE_DIR}"
+
+      - name: Upload publish-safe release-artifact manifest bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: qbind-public-devnet-release-artifact-manifest
+          # Only the staged, publish-safe CI artifacts are uploaded. Raw logs, raw
+          # metrics dumps, node data dirs, and the working tree are NOT included.
+          path: ${{ env.CI_STAGE_DIR }}/ci-artifacts
+          if-no-files-found: error
+          retention-days: 14

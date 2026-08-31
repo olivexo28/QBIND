@@ -111,6 +111,10 @@ readelf -n ./target/release/qbind-node | grep -i 'build id'   # ELF BuildID (sep
 #   bash scripts/devnet/run_384_public_devnet_release_artifact_manifest.sh
 # Contract: docs/release/public-devnet/binary/RELEASE_ARTIFACT_MANIFEST.schema.json;
 # example:  docs/release/public-devnet/binary/RELEASE_ARTIFACT_MANIFEST.example.json.
+# Run 385: generate that manifest in CI as a publish-safe CI artifact (never committed) via
+# .github/workflows/public-devnet-release-artifact-manifest.yml; local dry-run wrapper runs the
+# same commands (workflow uses least-privilege permissions: contents: read, no secrets):
+#   bash scripts/devnet/run_385_public_devnet_ci_release_artifact_manifest.sh
 
 # 13. Legacy state-size gauge stays absent (future group only)
 grep -c '^qbind_state_size_bytes' /tmp/metrics.txt            # -> 0
