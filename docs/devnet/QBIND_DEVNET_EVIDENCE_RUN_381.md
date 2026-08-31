@@ -240,9 +240,14 @@ publish-safe hashes and status lines appear in the tracked summary. Only loopbac
 
 ## 22. CodeQL
 
-Recorded in the PR run log. The only production source change is read-only metrics
-emission plus a guarded cfg(unix) statvfs(3) call (return-code checked before any
-field read; path passed as a validated CString).
+CodeQL (rust) was invoked on the change set and returned: analysis SKIPPED
+because the database size is too large (0 alerts, but the analysis did not run to
+completion). Per policy this is NOT recorded as "clean". Manual review of the only
+production source change (read-only metrics emission plus a guarded cfg(unix)
+statvfs(3) call): the syscall return code is checked before any struct field is
+read, the path is passed as a validated NUL-terminated CString, and the struct is
+zero-initialized; label values are sanitized to [A-Za-z0-9._-] with a length cap,
+so no exposition-format injection is possible.
 
 ## 23. Provenance
 
