@@ -152,3 +152,12 @@ artifact attestation over GitHub OIDC (no repository secrets). It produces no at
 preflight, so `signed_release`/`slsa_grade` remain **false** and the reproducibility scope is unchanged
 (**same-host / per-input** only; cross-host and SLSA-grade are still not claimed). See
 `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_386.md`.
+
+**Run 387 hosted-CI attestation execution attempt.** Run 387 attempts to run that protected path for
+real; from the offline sandbox it is **Route C** (hosted CI not reachable — `gh` unauthenticated,
+`api.github.com` DNS-blocked, no protected-env dispatch), i.e. Negative-for-attestation. It adds a
+publish-safe verify harness `scripts/devnet/run_387_public_devnet_hosted_ci_attestation_verify.sh`
+that runs the real `gh attestation verify` binding against the built binary's SHA-256 only inside
+hosted CI. `signed_release`/`slsa_grade` remain **false** and the reproducibility scope is unchanged
+(**same-host / per-input** only; cross-host and SLSA-grade still not claimed). See
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_387.md`.

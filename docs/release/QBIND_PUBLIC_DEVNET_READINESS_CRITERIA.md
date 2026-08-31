@@ -401,6 +401,24 @@ wire-format / peer-admission / trust / validator / epoch / sequence / marker cha
 stays Yellow/launch-blocking; M6 remains Yellow/Partial; public DevNet remains NOT launch-ready; C4/C5
 remain OPEN; MainNet/TestNet untouched.
 
+Updated Run 387 — **hosted-CI keyless attestation execution attempt (M13/M14 remain Green)**: Run 387
+is a **harness/docs-only** run (decision gate **Route C**, no production source change, no `build.rs`
+change, no runtime change, no CLI flag) that attempts to execute the Run 386 protected signing path for
+real — dispatch with `confirm=yes`, mint + verify a keyless build-provenance attestation for
+`target/release/qbind-node`. From the offline sandbox that path is not reachable (`gh` unauthenticated,
+`api.github.com` DNS-blocked, no OIDC issuer, no ability to create the protected `release-signing`
+environment or dispatch), so it is **Negative-for-attestation** and preserves the Run 386 preflight
+posture. It adds the publish-safe verify harness
+`scripts/devnet/run_387_public_devnet_hosted_ci_attestation_verify.sh` (run-time Route A/Route C gating;
+runs the real `gh attestation verify` binding only inside hosted CI; never fakes a PASS), the archive
+`docs/devnet/run_387_public_devnet_hosted_ci_attestation/`, and evidence
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_387.md`. No signature/attestation/private key is produced or
+committed; `signed_release`/`slsa_grade` stay `false` and the committed manifest schema still pins both
+to `const:false`. No metric/alert/scrape change; no new CLI flag (exposure stays `QBIND_METRICS_HTTP_ADDR`
+loopback-only, disabled by default); no P2P wire-format / peer-admission / trust / validator / epoch /
+sequence / marker change. **M12, M13, and M14 remain Green**; M4 stays Yellow/launch-blocking; M6 remains
+Yellow/Partial; public DevNet remains NOT launch-ready; C4/C5 remain OPEN; MainNet/TestNet untouched.
+
 Updated Run 386 — **optional, disabled-by-default signing/attestation CI preflight (M13/M14 remain
 Green)**: Run 386 is a **CI/workflow + harness/docs-only** run (decision gate **Route B**, no production
 source change, no `build.rs` change, no runtime change, no CLI flag) that adds an optional, protected

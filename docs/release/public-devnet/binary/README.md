@@ -171,3 +171,8 @@ Public DevNet stays **NOT launch-ready** until all must-haves are Green. See
   keyless GitHub artifact attestation over OIDC (no secrets), `signed_release=false` /
   `slsa_grade=false` kept honest, evidence:
   `../../../devnet/QBIND_DEVNET_EVIDENCE_RUN_386.md`.
+- Run 387 hosted-CI **attestation execution** attempt + publish-safe verify harness
+  (`scripts/devnet/run_387_public_devnet_hosted_ci_attestation_verify.sh`); decision gate
+  **Route C** (hosted CI not drivable from the offline sandbox), Negative-for-attestation,
+  `signed_release=false` / `slsa_grade=false` unchanged, evidence:
+  `../../../devnet/QBIND_DEVNET_EVIDENCE_RUN_387.md`.

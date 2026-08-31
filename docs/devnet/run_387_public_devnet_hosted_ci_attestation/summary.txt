@@ -1,0 +1,16 @@
+=== Run 387 hosted-CI keyless attestation verify ===
+objective=verify a REAL keyless build-provenance attestation against the built release binary SHA-256 and record publish-safe attestation identity only
+decision_gate=Route C
+attestation_repo=olivexo28/QBIND
+binary_name=qbind-node
+binary_sha256=UNAVAILABLE (binary not built in this environment)
+gh_present=yes gh_authenticated=no
+verifier_command=gh attestation verify qbind-node --repo olivexo28/QBIND --predicate-type https://slsa.dev/provenance/v1
+verification=NOT-RUN
+signed_release=false slsa_grade=false (unchanged; not flipped by this harness)
+schema_pins_false=EXPECTED (RELEASE_ARTIFACT_MANIFEST.schema.json keeps signed_release/slsa_grade const:false; real attestation identity goes in a separate artifact)
+no_secret_emitted=OK (only owner/repo, binary basename, SHA-256, status lines; no token/key/raw-attestation/log/metrics/data-dir/host/abs-path)
+no_release_or_endpoint=OK (creates no release/tag/deployment/seed/endpoint; adds no CLI flag; builds nothing)
+blocker=release binary 'qbind-node' not built (the Run 385 wrapper builds it inside the Run 386 workflow).
+
+RESULT=NEGATIVE-FOR-ATTESTATION (Route C: hosted-CI attestation could not be minted/verified from this environment — release binary 'qbind-node' not built (the Run 385 wrapper builds it inside the Run 386 workflow).; Run 386 preflight posture preserved; signed_release=false slsa_grade=false)
