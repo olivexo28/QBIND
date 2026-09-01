@@ -1,0 +1,13 @@
+release_binary=OK sha256=8113cb759123ad5c641ab636b0d8d19967940992fa6e670a2b39e66d69667c1b
+build_id=165bf83dc66583d05adddabdae382a04c9182597
+toolchain=rustc 1.98.0 (88d9e12ae 2026-08-18) / cargo 1.98.0 (797e8a9bc 2026-08-05)
+identity_generate_seed=OK node_id=42a13ddee8f976f38e1e9ce02602e0353969d0b9bdf6d7b0f3fecb65b746f289 (kem_sk 0600; no root signing key on disk)
+register_check_live_accept=OK (cert-verified; status=live admitted WITH reachability ref; command makes no live/M4/C4/C5 claim)
+live_without_reachability=REFUSED (fail closed; no live/M4 claim)
+planned_with_reachability=REFUSED (fail closed; schema forbids reachability on non-live)
+loopback_preflight=OK ts=2026-09-01T06:53:14Z target=127.0.0.1:51231 route=loopback/same-host tcp_dial=accepted
+external_reachability=NOT_PROVEN (Route C: no external ingress / no independent off-host vantage point in this environment; M4 stays Yellow)
+live_candidate_schema_validation=OK (validates; single entry status=planned, no false live claim)
+committed_private_material=NONE (material/node-data dirs are temporary; removed on exit)
+
+RESULT=NEGATIVE-FOR-EXTERNAL (Route C: no safe external seed infrastructure available; live admission gate proven + loopback preflight only; external reachability NOT proven; M4 stays Yellow; C4/C5 OPEN)
