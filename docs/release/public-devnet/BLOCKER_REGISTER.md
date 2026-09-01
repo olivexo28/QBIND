@@ -46,6 +46,8 @@ MainNet readiness is claimed.**
 
 ## Cross-references
 
+- `docs/release/public-devnet/ARTIFACT_INDEX.md` — release-package navigation index.
+- `docs/release/public-devnet/OPERATOR_VERIFICATION_MAP.md` — read orders + verification map + stop rule.
 - `docs/release/public-devnet/LAUNCH_GO_NO_GO.md` — launch decision gate.
 - `docs/release/QBIND_PUBLIC_DEVNET_READINESS_CRITERIA.md` — canonical readiness matrix.
 - `docs/release/public-devnet/network/M4_ROUTE_A_DEPLOYMENT_CHECKLIST.md` — M4 Green checklist.
