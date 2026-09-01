@@ -158,7 +158,11 @@ DevNet v0 freeze; this is a **local** boot, not a public join. Stop the node wit
 - **What is currently possible:** building the binary, verifying the genesis package, and running a
   node **locally** against the DevNet genesis with a local data directory (§6). Signer configuration
   surfaces exist as pre-existing flags — `--signer-mode`, `--signer-keystore-path`,
-  `--remote-signer-url`, `--hsm-config-path` — and a `--validator-id` index selector.
+  `--remote-signer-url`, `--hsm-config-path` — and a `--validator-id` index selector. For consolidated
+  key-management (signer modes, private-key `0600` permissions, backup/rotation posture) and PQC
+  trust-bundle bootstrap / root/signing-key handling, see the Run 389 security package
+  `docs/release/public-devnet/security/` (`KEY_MANAGEMENT.md`, `PQC_TRUST_BOOTSTRAP.md`,
+  `PQC_ROOT_AND_SIGNING_KEYS.md`).
 - **What remains fixture/internal:** the DevNet genesis validator set is a **fixture** (see the
   Run 356 genesis `README.md` §7). There is **no** externally documented, stable command that
   generates a fresh public validator identity for an external operator to register on a live public

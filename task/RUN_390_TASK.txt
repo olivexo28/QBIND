@@ -1,0 +1,252 @@
+Run 390 — Public DevNet M15 reset policy + M16 incident-response publication/reconciliation
+
+Current state:
+Run 389 is accepted PASS / public-DevNet security key/trust bootstrap guidance POSITIVE.
+M7/M8/M9 moved Yellow → Green-for-scope.
+M12/M13/M14 remain Green.
+M4 remains Yellow / launch-blocking.
+M6 remains Yellow/Partial and M4-gated.
+Public DevNet remains NOT launch-ready.
+C4 remains OPEN.
+C5 remains OPEN.
+TestNet/MainNet untouched.
+
+Known cleanup:
+The readiness criteria appear to contain inconsistent M16 status language:
+- Some places treat M16 incident response as Green because `docs/ops/QBIND_INCIDENT_RESPONSE.md` exists.
+- Other Run 389 wording suggests M16 is not yet Green.
+Run 390 must reconcile this by source inspection and update the matrix consistently.
+
+Objective:
+Publish and verify the remaining public DevNet operator-readiness material for:
+- M15: DevNet reset policy.
+- M16: incident-response process, either moving it Green if public-DevNet scoped evidence is sufficient, or preserving/clarifying its current Green status if already supported.
+
+Strict scope:
+Docs + verification harness only unless source inspection proves an existing CLI/documented surface is missing.
+
+No public DevNet launch.
+No M4 Green.
+No M6 Green.
+No live seed/bootnode deployment.
+No faucet.
+No RPC gateway.
+No explorer.
+No status page.
+No TestNet readiness.
+No MainNet readiness.
+No C4 closure.
+No C5 closure.
+No authority-lifecycle runtime wiring.
+No validator-set mutation.
+No epoch transition.
+No trust-bundle live apply.
+No peer-driven apply.
+No P2P wire-format change.
+No peer-admission change.
+No new public CLI flag unless absolutely required and justified.
+No committed private keys, credentials, tokens, raw logs, raw metrics dumps, data dirs, private endpoints, private hostnames, absolute build paths, or branch dirty-state strings.
+
+Required investigation:
+Inspect:
+- docs/release/QBIND_PUBLIC_DEVNET_READINESS_CRITERIA.md
+- docs/ops/QBIND_INCIDENT_RESPONSE.md
+- docs/ops/QBIND_OPERATOR_DRILL_CATALOG.md
+- docs/release/public-devnet/operator/README.md
+- docs/release/public-devnet/operator/QUICKSTART.md
+- docs/release/public-devnet/operator/SAFETY.md
+- docs/release/public-devnet/operator/VERIFY.md
+- docs/release/public-devnet/observability/RUNBOOK.md
+- docs/release/public-devnet/observability/ALERT_RULES.md
+- docs/release/public-devnet/network/README.md
+- docs/release/public-devnet/security/README.md
+- docs/release/public-devnet/security/SAFETY.md
+- docs/ops/QBIND_PQC_TRUST_LIFECYCLE_RUNBOOK.md
+- qbind-node --help for reset-related flags, especially `--authority-state-reset`
+- authority reset source/docs if present, especially `crates/qbind-ledger/src/authority_state_reset.rs`
+
+Decision gate:
+Route A:
+Existing docs and CLI surfaces are sufficient. Publish public-DevNet reset policy + incident-response scoping docs and verification harness.
+
+Route B:
+A small docs/verification helper is needed to validate existing reset/incident-response commands and cross-links. Add no production source.
+
+Route C:
+M15 or M16 cannot move Green because the required operator-facing surface is missing. Keep the affected item Yellow and document the exact blocker.
+
+Expected new docs:
+- docs/release/public-devnet/ops/README.md
+- docs/release/public-devnet/ops/RESET_POLICY.md
+- docs/release/public-devnet/ops/INCIDENT_RESPONSE.md
+- docs/release/public-devnet/ops/SAFETY.md
+- docs/release/public-devnet/ops/VERIFY.md
+
+Expected harness/archive/evidence:
+- scripts/devnet/run_390_public_devnet_ops_reset_incident_response.sh
+- docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_390.md
+- docs/devnet/run_390_public_devnet_ops_reset_incident_response/{README.md,summary.txt,.gitignore}
+
+Update narrowly:
+- docs/release/QBIND_PUBLIC_DEVNET_READINESS_CRITERIA.md
+- docs/release/public-devnet/operator/README.md
+- docs/release/public-devnet/operator/QUICKSTART.md
+- docs/release/public-devnet/operator/SAFETY.md
+- docs/release/public-devnet/observability/RUNBOOK.md if cross-link needed
+- docs/release/public-devnet/security/README.md if cross-link needed
+- docs/protocol/QBIND_C4_C5_CLOSURE_CRITERIA.md
+- docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md
+- docs/protocol/QBIND_GOVERNANCE_EXECUTION_RUNTIME_SURFACE_AUDIT.md
+- docs/ops/QBIND_PQC_TRUST_LIFECYCLE_RUNBOOK.md
+- docs/whitepaper/contradiction.md
+
+RESET_POLICY.md must cover:
+1. DevNet-only safety label: experimental, resettable, no value, no MainNet readiness, no C4/C5 closure.
+2. What a DevNet reset means:
+   - state may be wiped;
+   - genesis may remain pinned or a successor genesis may be published;
+   - prior balances/state have no value and no persistence guarantee.
+3. Reset triggers:
+   - safety incident;
+   - data corruption;
+   - trust-root/key compromise;
+   - protocol-breaking upgrade;
+   - unrecoverable fork;
+   - planned maintenance.
+4. Notice policy:
+   - pre-announcement when possible;
+   - emergency reset without notice allowed for safety;
+   - UTC timestamped reset record required after the fact.
+5. Operator action:
+   - stop node;
+   - back up private keys only if still trusted;
+   - delete/reset data dir;
+   - verify genesis hash;
+   - restart using published package.
+6. What never changes silently:
+   - no hidden genesis;
+   - no silent seed promotion;
+   - no implicit trust-root replacement;
+   - no MainNet/TestNet reuse.
+7. Reset evidence record shape:
+   - reset id;
+   - reason;
+   - UTC timestamp;
+   - old/new genesis hash if applicable;
+   - operator action;
+   - safety statement;
+   - no-value reminder.
+8. `--authority-state-reset` posture if relevant:
+   - document exactly what it does and does not reset;
+   - do not imply live governance/authority C4/C5 closure.
+9. No legal/financial/value guarantees.
+
+INCIDENT_RESPONSE.md must cover:
+1. DevNet incident severity levels.
+2. Incident classes:
+   - seed unreachable;
+   - trust-bundle/root/signing-key mismatch;
+   - suspected key compromise;
+   - peer flood/DoS;
+   - chain halt/no progress;
+   - bad release artifact/provenance issue;
+   - reset event.
+3. First-response steps per class.
+4. Evidence to capture:
+   - timestamps;
+   - binary SHA/BuildID/manifest;
+   - metrics screenshots or summaries only, not raw dumps;
+   - relevant node IDs;
+   - redacted config.
+5. Escalation and rollback/reset decision points.
+6. Cross-links to observability alerts/runbook, security package, P2P posture, reset policy, and existing ops incident-response document.
+7. Publication policy:
+   - publish minimal incident summary for public DevNet;
+   - avoid secrets/private endpoints/raw logs.
+8. Explicit non-claims:
+   - no uptime SLA;
+   - no value protection;
+   - no MainNet readiness;
+   - no C4/C5 closure.
+
+VERIFY.md must give copy-paste checks:
+- qbind-node --help contains documented reset-related flag(s), if any.
+- ops docs contain safety label.
+- reset policy contains trigger/notice/evidence/operator-action sections.
+- incident response contains severity/classes/evidence/redaction/cross-link sections.
+- docs cross-link operator, observability, security, network, and ops runbooks.
+- non-claim grep passes.
+- no private/raw artifacts are committed.
+
+Required harness evidence:
+1. Release `qbind-node` builds.
+2. `qbind-node --help` checked for documented existing reset-related flags.
+3. No invented reset/incident CLI flags.
+4. Ops package files exist.
+5. Safety labels present.
+6. Reset policy required sections present.
+7. Incident response required sections present.
+8. Cross-links present to operator/security/observability/network/ops runbooks.
+9. Non-claim grep passes.
+10. No launch-ready / M4 Green / M6 fully Green / TestNet / MainNet / C4/C5 closure claim.
+11. No private material/raw logs/raw metrics/data dirs committed.
+12. M15/M16 readiness status reconciled in the matrix.
+
+Required tests:
+- scripts/devnet/run_390_public_devnet_ops_reset_incident_response.sh
+- cargo build -p qbind-node --release --locked --bin qbind-node
+- cargo test -p qbind-node --lib only if Rust source changed; otherwise record baseline/no Rust delta honestly
+- non-claim grep
+
+Security:
+Run secret scanning over all changed files.
+Do not commit raw logs, raw metrics dumps, data dirs, private keys, credentials, tokens, private endpoints, private hostnames, absolute build paths, or branch dirty-state strings.
+
+CodeQL:
+If docs/harness only, record CodeQL as trivial/not meaningful.
+If any Rust/build.rs changes, invoke CodeQL if available and record exact result.
+Do not call skipped, unavailable, DB-too-large, timed-out, or trivial analysis clean.
+
+Readiness rules:
+- M15 may move Yellow → Green only if a public DevNet reset policy is published and verified.
+- M16 may move Yellow → Green only if public DevNet incident-response process is published/scoped and verified; if it was already Green, preserve Green and record reconciliation instead of pretending a new Green move.
+- M4 remains Yellow unless real external seed reachability lands.
+- M6 remains Yellow/Partial unless M4-backed live registration lands.
+- M12/M13/M14 remain Green unless contradicted.
+- Public DevNet remains NOT launch-ready unless every must-have is Green.
+- C4/C5 remain OPEN.
+- TestNet/MainNet untouched.
+
+Expected verdict:
+PASS / public-DevNet ops reset + incident-response guidance POSITIVE if M15 lands Green and M16 is either moved Green or reconciled as already Green with public-DevNet scoped evidence.
+
+Partial-positive if only M15 or only M16 is complete.
+
+Final response format:
+1. Exact verdict
+2. Files changed
+3. Decision gate route
+4. Ops package contents
+5. Reset policy guidance
+6. Incident-response guidance
+7. Reset evidence record shape
+8. Incident evidence/redaction rules
+9. CLI/help verification
+10. Cross-link verification
+11. Non-claim checks
+12. Default compatibility
+13. CLI surface
+14. Runtime mutation check
+15. Readiness delta M15
+16. Readiness delta/reconciliation M16
+17. Public DevNet status
+18. Remaining DevNet blockers
+19. TestNet blockers
+20. MainNet blockers
+21. C4/C5
+22. Tests run
+23. Security scans
+24. CodeQL
+25. Provenance
+26. Honest limitations
+27. Suggested Run 391

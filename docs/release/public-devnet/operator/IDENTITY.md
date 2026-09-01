@@ -198,3 +198,25 @@ gate is a structural decision, not a reachability proof
 (`m4_green_claim=false`, `live_reachability_claim=false`). Canonical record:
 `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_377.md`;
 `docs/release/public-devnet/network/reachability/RUN_377_qbind-devnet-seed-1.md`.
+## 10. Security: key-management + PQC trust bootstrap (Run 389)
+
+**Run 389** publishes the consolidated public DevNet **security** package under
+`docs/release/public-devnet/security/`, which extends this identity guidance with:
+
+- `KEY_MANAGEMENT.md` (**M7**) — the full key inventory (node/KEMTLS leaf key,
+  transport trust root, consensus/block signer key, trust-bundle signing key,
+  operator identity JSON) with public-vs-private marking, local signer-mode
+  guidance (`--signer-mode` loopback-testing / encrypted-fs / remote-signer /
+  hsm-pkcs11), remote-signer/HSM posture, private-key `0600` permissions,
+  rotation/revocation status, backup guidance, and an explicit refusal of
+  MainNet custody claims.
+- `PQC_TRUST_BOOTSTRAP.md` (**M8**) — the DevNet PQC trust-bundle bootstrap flow
+  (`--p2p-trust-bundle` / `--p2p-trust-bundle-signing-key`, genesis pinning,
+  validation-only reload-check, no peer-driven live apply).
+- `PQC_ROOT_AND_SIGNING_KEYS.md` (**M9**) — generating and verifying DevNet
+  root/leaf/signing-key material and which files are public vs private.
+
+The package is verified against the real CLI/helper surfaces (see
+`docs/release/public-devnet/security/VERIFY.md` and
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_389.md`). It adds **no** CLI flag, applies
+**no** live trust, and makes **no** M4/M6-Green or C4/C5-closure claim.

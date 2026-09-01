@@ -31,6 +31,14 @@ validated to appear in `qbind-node --help` (see `VERIFY.md`).
 > admission verifier — it makes no live/M4 claim and does not alter the strict KEMTLS handshake path
 > below. External reachability was **NOT proven**; **M4 stays Yellow**. See
 > `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_377.md`.
+>
+> **Run 389 note.** The Run 389 security package (`docs/release/public-devnet/security/`) documents the
+> key-management (M7), PQC trust-bundle bootstrap (M8), and PQC root/signing-key (M9) guidance against
+> exactly the pre-existing admission surfaces described here. Its trust-bundle verification uses the
+> **validation-only** `--p2p-trust-bundle-reload-check` path (no live apply) and its identity flow is
+> read-only; it **does not** change or bypass this peer-admission policy, enable peer-driven apply, or
+> weaken admission (strict mutual-auth only tightens it). See
+> `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_389.md`.
 
 ## 1. How a peer is admitted on public DevNet
 
