@@ -13,7 +13,12 @@ General first steps for any alert:
 2. Note whether the condition is **local** (one node) or **network-wide** (many
    nodes) — see `docs/ops/QBIND_MONITORING_AND_ALERTING_BASELINE.md` principle 4.
 3. Preserve evidence (logs, scrape snapshots) before restart; see
-   `docs/ops/QBIND_INCIDENT_RESPONSE.md`.
+   `docs/ops/QBIND_INCIDENT_RESPONSE.md` (internal) and, for the public-DevNet
+   operator incident-response process (severity levels, incident classes,
+   evidence + redaction, escalation, publication),
+   `docs/release/public-devnet/ops/INCIDENT_RESPONSE.md`. For when/how DevNet
+   state is wiped and the operator actions around a reset, see
+   `docs/release/public-devnet/ops/RESET_POLICY.md`.
 
 ---
 

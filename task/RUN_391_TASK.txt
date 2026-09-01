@@ -1,0 +1,192 @@
+Run 391 — Public DevNet M4 real external seed reachability execution
+
+Current state:
+Run 390 is accepted PASS.
+M15 moved Yellow → Green.
+M16 is reconciled Green with public-DevNet scoped incident-response evidence.
+M7/M8/M9/M12/M13/M14 are Green-for-scope / Green as previously recorded.
+M4 remains Yellow / launch-blocking.
+M6 remains Yellow/Partial because the live registration half is M4-gated.
+Public DevNet remains NOT launch-ready.
+C4 remains OPEN.
+C5 remains OPEN.
+TestNet/MainNet are untouched.
+
+Objective:
+Execute the real M4 Route A path: deploy or verify one externally reachable public DevNet seed/bootnode endpoint under strict KEMTLS static-root posture, prove reachability from an independent off-host vantage point, and promote the seed-list entry to status=live only if all M4 Green requirements are met.
+
+Hard decision gate:
+Before changing docs or artifacts, verify that all Route A prerequisites exist:
+1. durable DevNet seed identity material available to the operator;
+2. real public endpoint with inbound P2P port opened;
+3. qbind-node release binary can run at that endpoint;
+4. strict KEMTLS static-root material available;
+5. independent external vantage point available outside the seed host/NAT;
+6. ability to capture publish-safe TCP + KEMTLS evidence;
+7. canonical DevNet genesis hash pinned;
+8. no private endpoint/hostname/secret will be committed.
+
+If any prerequisite is missing:
+- do not fabricate reachability;
+- do not re-run loopback as a substitute;
+- produce a minimal NEGATIVE-FOR-EXTERNAL / Route C evidence note listing the missing prerequisite;
+- keep M4 Yellow and M6 Yellow/Partial.
+
+Strict scope:
+M4 external seed/bootnode reachability only.
+
+No faucet.
+No RPC gateway.
+No explorer.
+No status page.
+No TestNet readiness.
+No MainNet readiness.
+No C4 closure.
+No C5 closure.
+No authority-lifecycle runtime wiring.
+No validator-set mutation.
+No epoch transition.
+No trust-bundle live apply.
+No peer-driven apply.
+No P2P wire-format change.
+No peer-admission weakening.
+No new public CLI flag.
+No hidden fallback root.
+No default-open networking change.
+No committed private key, KEM secret, signing secret, token, raw log, raw metrics dump, data dir, private endpoint, private hostname, absolute build path, or dirty-state string.
+
+Required investigation:
+Inspect:
+- docs/release/public-devnet/network/devnet-seeds.live-candidate.json
+- docs/release/public-devnet/network/devnet-seed-list.schema.json
+- docs/release/public-devnet/network/README.md
+- docs/release/public-devnet/network/VERIFY.md
+- docs/release/public-devnet/identity/IDENTITY_GENERATION.md
+- docs/release/public-devnet/identity/IDENTITY_VERIFY.md
+- docs/release/public-devnet/security/PQC_ROOT_AND_SIGNING_KEYS.md
+- docs/release/public-devnet/security/PQC_TRUST_BOOTSTRAP.md
+- docs/release/public-devnet/p2p/PEER_ADMISSION_POLICY.md
+- docs/release/public-devnet/p2p/VERIFY.md
+- docs/release/public-devnet/ops/INCIDENT_RESPONSE.md
+- docs/release/public-devnet/ops/RESET_POLICY.md
+- docs/release/QBIND_PUBLIC_DEVNET_READINESS_CRITERIA.md
+- docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_377.md
+- docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_378.md
+- docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_388.md
+- docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_390.md
+
+Route A implementation:
+1. Build the release binary with locked dependencies.
+2. Generate or load durable DevNet seed identity material using the Run 375 first-class identity path.
+3. Start the seed node on a real public endpoint:
+   - --env devnet
+   - --network-mode p2p
+   - --enable-p2p
+   - --p2p-listen-addr 0.0.0.0:<public_p2p_port> or equivalent host-specific public bind
+   - --p2p-mutual-auth required
+   - --p2p-pqc-root-mode pqc-static-root
+   - --p2p-trusted-root <trusted-root.spec>
+   - --p2p-leaf-cert <leaf.cert.bin>
+   - --p2p-leaf-cert-key <leaf.kem.sk.bin>
+   - --genesis-path docs/release/public-devnet/genesis/devnet-genesis.json
+   - --expect-genesis-hash 0x48b3a862befe50e31bad5e1e11ba1ad282dc65723b1989e9ce2091b4af18145f
+4. From an independent external vantage point, prove:
+   - TCP dial succeeds to the public P2P endpoint;
+   - strict KEMTLS handshake completes;
+   - the peer identity / NodeId matches the published public identity;
+   - the endpoint is not loopback, RFC 1918, RFC 5737, link-local, or same-host-only.
+5. Capture publish-safe evidence:
+   - UTC timestamp;
+   - external vantage description;
+   - target public host/port, redacted if necessary but not private;
+   - node_id / peer_id;
+   - binary SHA-256 / BuildID / toolchain;
+   - genesis hash;
+   - KEMTLS/static-root success;
+   - no raw logs or secret material.
+6. Create:
+   - docs/release/public-devnet/network/reachability/RUN_391_qbind-devnet-seed-1.md
+   - docs/release/public-devnet/network/devnet-seeds.live.json only if all M4 Green requirements pass
+   - or update devnet-seeds.live-candidate.json only if evidence remains candidate/preflight.
+7. Run `qbind-node identity register-check ... --status live --reachability-evidence <RUN_391_ref>` and require exit 0 only when real external evidence exists.
+
+M4 Green requirements:
+M4 may move Yellow → Green only if:
+- at least one seed/bootnode is externally reachable from an independent vantage point;
+- evidence includes successful TCP + strict KEMTLS static-root handshake;
+- seed identity maps to the published public identity;
+- seed-list JSON is schema-valid;
+- status is `live`;
+- `last_reachability_evidence` points to the Run 391 evidence record;
+- no private material is committed;
+- non-claim grep passes;
+- release-binary provenance is recorded.
+
+M6 rule:
+M6 remains Yellow/Partial unless the live registration path is backed by the new M4 live seed evidence and the readiness criteria explicitly permit closing the live half. Do not mark M6 fully Green unless the matrix requirements say all M6 subconditions are satisfied.
+
+Required tests/evidence:
+- cargo build -p qbind-node --release --locked --bin qbind-node
+- schema validation for any seed-list JSON
+- register-check live admission with evidence
+- register-check live without evidence refused
+- register-check planned + evidence refused
+- external TCP check from independent vantage
+- external strict KEMTLS handshake check from independent vantage
+- non-claim grep
+- secret scan over all changed files
+- CodeQL: trivial/not meaningful if docs/harness only; invoke and record exact result if Rust changes
+
+Docs to update narrowly:
+- docs/release/public-devnet/network/README.md
+- docs/release/public-devnet/network/VERIFY.md
+- docs/release/public-devnet/operator/QUICKSTART.md if operator command changes are needed
+- docs/release/public-devnet/p2p/VERIFY.md if verification commands are added
+- docs/release/QBIND_PUBLIC_DEVNET_READINESS_CRITERIA.md
+- docs/protocol/QBIND_C4_C5_CLOSURE_CRITERIA.md
+- docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md
+- docs/protocol/QBIND_GOVERNANCE_EXECUTION_RUNTIME_SURFACE_AUDIT.md
+- docs/ops/QBIND_PQC_TRUST_LIFECYCLE_RUNBOOK.md
+- docs/whitepaper/contradiction.md
+
+Evidence/archive:
+- scripts/devnet/run_391_public_devnet_m4_external_seed_reachability.sh
+- docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_391.md
+- docs/devnet/run_391_public_devnet_m4_external_seed_reachability/{README.md,summary.txt,.gitignore}
+
+Expected verdicts:
+PASS / public-DevNet M4 external seed reachability POSITIVE only if real independent external TCP + strict KEMTLS evidence exists and seed-list status becomes live.
+
+NEGATIVE-FOR-EXTERNAL / Route C if infrastructure or independent vantage is unavailable. In that case M4 remains Yellow, M6 remains Yellow/Partial, public DevNet remains NOT launch-ready.
+
+Final response format:
+1. Exact verdict
+2. Files changed
+3. Decision gate route
+4. External infrastructure prerequisite result
+5. Seed/bootnode endpoint
+6. Identity material
+7. Public/private separation
+8. Independent vantage evidence
+9. TCP reachability evidence
+10. KEMTLS/static-root evidence
+11. Reachability record
+12. Seed-list status
+13. Register-check live admission
+14. Rejection/fail-closed evidence
+15. Default compatibility
+16. CLI surface
+17. Runtime mutation check
+18. Readiness delta M4
+19. Readiness delta M6
+20. Public DevNet status
+21. Remaining DevNet blockers
+22. TestNet blockers
+23. MainNet blockers
+24. C4/C5
+25. Tests run
+26. Security scans
+27. CodeQL
+28. Provenance
+29. Honest limitations
+30. Suggested Run 392

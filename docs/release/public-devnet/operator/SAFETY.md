@@ -24,7 +24,9 @@ QBIND Public DevNet is:
 - **No guarantees of availability, state durability, or continuity.** There is no uptime guarantee,
   no durability guarantee, and no continuity guarantee for DevNet.
 - **No expectation that DevNet balances or state survive resets.** Any DevNet balance or state may be
-  destroyed by a reset; do not rely on persistence.
+  destroyed by a reset; do not rely on persistence. The full DevNet reset policy (triggers, notice,
+  operator actions, evidence-record shape) and incident-response process are published in
+  `docs/release/public-devnet/ops/` (`RESET_POLICY.md`, `INCIDENT_RESPONSE.md`; M15/M16, Run 390).
 - **Public DevNet is NOT launch-ready.** There are no externally reachable seeds (M4 is Yellow /
   launch-blocking) and no documented release-binary reproducibility / BuildID (M3 is Red). This
   package does **not** launch a public DevNet and deploys no seed node, bootnode, faucet, RPC
