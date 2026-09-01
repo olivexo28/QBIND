@@ -251,6 +251,21 @@ state. **M6 does NOT move Green** — no live public DevNet to register a contin
 (M4-gated) and operator-supplied root reuse/rotation/revocation is C4/C5-OPEN. **M4 stays
 Yellow/launch-blocking; S5/S7 stay Yellow; M12–M16 remain Green; public DevNet stays NOT launch-ready;
 C4/C5 remain OPEN; MainNet/TestNet untouched.**
+Updated Run 402 — **launch go/no-go gate + blocker register published; no readiness item moves (Route B —
+docs + verification harness only, no production source change, no `build.rs` change, no new CLI flag)**:
+publishes the operator-facing public DevNet **launch decision gate** — `docs/release/public-devnet/LAUNCH_GO_NO_GO.md`
+(DevNet-only / experimental / resettable / no-value label; current decision **NO-GO / NOT launch-ready**;
+Green-items summary; blocking-items summary; exact M4 Green prerequisites; exact M6 Green prerequisites;
+S5/S7 M4-gated explanation; C4/C5 OPEN statement; TestNet/MainNet non-claim; final go/no-go rule) and
+`docs/release/public-devnet/BLOCKER_REGISTER.md` (the M4/M6/S5/S7 blockers with owner/action/evidence-needed/status
+columns; "no launch until every must-have is Green and launch is explicitly in scope"). Verified against this
+canonical readiness matrix by `scripts/devnet/run_402_public_devnet_launch_go_no_go_gate.sh` (`RESULT=POSITIVE`),
+with `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_402.md` and archive
+`docs/devnet/run_402_public_devnet_launch_go_no_go_gate/`. It adds **no** CLI flag, opens **no** port, deploys
+**no** seed/bootnode/faucet/RPC/explorer/status service, applies **no** trust bundle, and mutates **no**
+validator/epoch/sequence/marker/`LivePqcTrustState` state. **No readiness item moves Green** — this run adds
+clarity only. **M4 stays Yellow/launch-blocking; M6 stays Yellow/Partial; S5/S7 stay Yellow; M1–M3/M5/M7–M20
+remain Green; public DevNet stays NOT launch-ready; C4/C5 remain OPEN; MainNet/TestNet untouched.**
 Updated Run 374 — **M6 materially narrowed but remains Yellow/Partial**: a stable, release-built operator-facing
 identity **generation + verification** package is published under
 `docs/release/public-devnet/identity/` (`README.md`, `IDENTITY_GENERATION.md`, `IDENTITY_VERIFY.md`,
