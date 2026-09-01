@@ -1,0 +1,16 @@
+release_binary=OK sha256=80d83b0472b7382ec4ccf2ea6d627bfbf9b9375ab22d6d598d129eb88f4357be
+build_id=430c1348ea20cd8f88d84bbfd2a4ab7bd94e4733
+toolchain=rustc 1.98.0 (88d9e12ae 2026-08-18) / cargo 1.98.0 (797e8a9bc 2026-08-05)
+cli_flags=OK (all documented P2P/genesis flags pre-existing in cli.rs + --help; no new flag)
+identity_subcommands=OK (generate + register-check present; non-mutating)
+live_candidate_schema_validation=OK (validates; single entry status=planned, non-live)
+network_docs_present=OK (SEED_NODE_OPERATIONS + M4_ROUTE_A_DEPLOYMENT_CHECKLIST + SEED_REACHABILITY_EVIDENCE_TEMPLATE; safety labels present)
+seed_node_operations_sections=OK (safety/role/identity-custody/startup/firewall/metrics/checks/failure/retirement)
+route_a_checklist_sections=OK (preflight/identity/endpoint/kemtls/vantage/tcp/kemtls-evidence/promotion/register-check/m4-rules)
+evidence_template_fields=OK (all required evidence + conclusion fields present)
+cross_links=OK (identity, security root/bootstrap, observability, ops incident/reset, readiness, genesis, PQC lifecycle referenced)
+non_claim_grep=OK (no launch-ready / M4-Green / C4-C5-closure / TestNet-MainNet-ready / uptime-SLA claim)
+committed_private_material=NONE (network docs only; no keys/logs/metrics/data dirs)
+readiness=OK (S7 off 🔴; M4 🟡; M6 🟡; public DevNet NOT launch-ready)
+
+RESULT=POSITIVE (S7 seed-node operations runbook + M4 Route-A deployment checklist + reachability evidence template published and verified against real CLI/schema surfaces; no production source change; M4 stays Yellow; M6 stays Yellow/Partial; C4/C5 OPEN; public DevNet NOT launch-ready)

@@ -235,3 +235,22 @@ evidence record) and the loopback preflight are exercised by
 entry is marked live. The Route A infrastructure prerequisites are documented in
 `docs/release/public-devnet/network/reachability/RUN_391_qbind-devnet-seed-1.md` §15. See
 `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_391.md`.
+## 13. Run 392 — seed-node operations runbook + M4 Route-A checklist (Route B / docs-only)
+
+Run 392 publishes the seed-node operations package (`SEED_NODE_OPERATIONS.md`,
+`M4_ROUTE_A_DEPLOYMENT_CHECKLIST.md`, `SEED_REACHABILITY_EVIDENCE_TEMPLATE.md`) and verifies it against
+the real `qbind-node` CLI/help + seed-list schema surfaces. Reproduce with:
+
+```bash
+bash scripts/devnet/run_392_public_devnet_seed_ops_route_a_checklist.sh
+```
+
+Expected: `RESULT=POSITIVE`. The harness confirms (1) the release build; (2) every documented seed
+P2P/genesis flag is pre-existing in `crates/qbind-node/src/cli.rs` and advertised in `--help` (no new
+flag); (3) the `identity generate` / `identity register-check` subcommands exist; (4)
+`devnet-seeds.live-candidate.json` still validates against `devnet-seed-list.schema.json` and stays
+non-live; (5) the three new docs carry every required section; (6) cross-links to identity, security,
+observability, ops, genesis, and readiness docs are present; (7) the non-claim grep passes; and (8) no
+private/raw artifact is committed. This run is **docs + verification harness only**: it deploys no
+seed, exposes no external endpoint, and **does not move M4 Green or M6 Green**. See
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_392.md`.

@@ -67,6 +67,11 @@ against the real CLI/helper surfaces (see `VERIFY.md` and
 or **M6** (Yellow / Partial), and it does **not** close **C4** or **C5** — both remain **OPEN**.
 Because at least one must-have (M4) is not Green, public DevNet is **not** launch-ready.
 
+The Run 392 seed-node operations runbook
+(`docs/release/public-devnet/network/SEED_NODE_OPERATIONS.md`) cross-links this package for a real
+seed's strict KEMTLS static-root startup posture (`PQC_ROOT_AND_SIGNING_KEYS.md`,
+`PQC_TRUST_BOOTSTRAP.md`).
+
 ## Provenance
 
 Full provenance (git commit, artifact paths + hashes, release-binary SHA-256 / BuildID / toolchain,
