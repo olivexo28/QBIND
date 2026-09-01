@@ -1,0 +1,211 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://qbind.dev/schema/public-devnet/status-health-view.schema.json",
+  "title": "QBIND Public DevNet — Aggregate Status / Health View",
+  "description": "Publish-safe schema for a future QBIND public DevNet aggregate health view (Run 395, S5, Route B). This is a DECISION + SCHEMA artifact only; it does NOT describe a deployed status service and MUST NOT be read as one. Any instance is illustrative example data unless it is generated from a real live network, which does not exist while M4 is Yellow. The schema deliberately forbids uptime/SLA fields, private endpoints, raw logs, raw metrics dumps, secrets, data-dir paths, and absolute paths.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "network",
+    "safety",
+    "generated_at",
+    "data_source",
+    "genesis",
+    "build",
+    "seed_list",
+    "readiness",
+    "metrics_endpoint",
+    "alerts",
+    "notices"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "description": "Schema version this instance conforms to.",
+      "const": "1.0.0"
+    },
+    "network": {
+      "type": "string",
+      "description": "Must be the public DevNet label. No TestNet/MainNet value is permitted by this schema.",
+      "const": "qbind-public-devnet"
+    },
+    "safety": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Mandatory safety envelope. Every flag is fixed so an instance cannot silently drop a disclaimer.",
+      "required": [
+        "environment",
+        "experimental",
+        "resettable",
+        "has_value",
+        "uptime_sla",
+        "launch_ready",
+        "testnet_ready",
+        "mainnet_ready",
+        "c4_closed",
+        "c5_closed",
+        "example_data_only"
+      ],
+      "properties": {
+        "environment": { "type": "string", "const": "devnet" },
+        "experimental": { "type": "boolean", "const": true },
+        "resettable": { "type": "boolean", "const": true },
+        "has_value": { "type": "boolean", "const": false },
+        "uptime_sla": { "type": "boolean", "const": false },
+        "launch_ready": { "type": "boolean", "const": false },
+        "testnet_ready": { "type": "boolean", "const": false },
+        "mainnet_ready": { "type": "boolean", "const": false },
+        "c4_closed": { "type": "boolean", "const": false },
+        "c5_closed": { "type": "boolean", "const": false },
+        "example_data_only": {
+          "type": "boolean",
+          "description": "True for any instance not generated from a real live network. Static examples MUST set this true."
+        }
+      }
+    },
+    "generated_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "UTC timestamp the view was generated. No uptime/duration is derived from this."
+    },
+    "data_source": {
+      "type": "string",
+      "description": "Provenance of the values. 'static-example' means illustrative placeholder data. A live value requires a real, externally reachable network (M4 Green), which does not exist yet.",
+      "enum": ["static-example", "operator-self-report", "live-scrape"]
+    },
+    "genesis": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Canonical genesis identity operators verify with --expect-genesis-hash.",
+      "required": ["chain_id", "genesis_hash"],
+      "properties": {
+        "chain_id": { "type": "string", "description": "QBIND_DEVNET_CHAIN_ID value." },
+        "genesis_hash": {
+          "type": "string",
+          "description": "Canonical 0x-prefixed genesis hash (public artifact).",
+          "pattern": "^0x[0-9a-f]{64}$"
+        }
+      }
+    },
+    "build": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Public, non-sensitive release build info (mirrors qbind_node_build_info labels).",
+      "required": ["version", "git_commit"],
+      "properties": {
+        "version": { "type": "string" },
+        "build_id": { "type": "string" },
+        "git_commit": { "type": "string", "description": "Short git commit hash (public)." },
+        "env": { "type": "string", "enum": ["devnet"] }
+      }
+    },
+    "seed_list": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Published seed-list status. Endpoints are only included when intentionally public; otherwise counts only.",
+      "required": ["status", "published_count", "live_count"],
+      "properties": {
+        "status": {
+          "type": "string",
+          "description": "'planned' until a real externally reachable seed exists (M4). 'live' requires M4 Green.",
+          "enum": ["planned", "candidate", "live"]
+        },
+        "published_count": { "type": "integer", "minimum": 0 },
+        "live_count": { "type": "integer", "minimum": 0 },
+        "public_endpoints": {
+          "type": "array",
+          "description": "OPTIONAL. Only intentionally-public seed endpoints (host:port). Omit entirely unless the endpoint is meant to be public. Never include private/internal addresses.",
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9.-]+:[0-9]{1,5}$"
+          }
+        }
+      }
+    },
+    "readiness": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Aggregate readiness rollup mirroring the readiness matrix. Colors are the only permitted values.",
+      "required": ["public_devnet_launch_ready", "m4", "m6"],
+      "properties": {
+        "public_devnet_launch_ready": { "type": "boolean", "const": false },
+        "m4": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["label", "status"],
+          "properties": {
+            "label": { "type": "string", "const": "seed / bootnode reachability" },
+            "status": { "type": "string", "enum": ["red", "yellow", "green"] }
+          }
+        },
+        "m6": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["label", "status"],
+          "properties": {
+            "label": { "type": "string", "const": "validator identity" },
+            "status": { "type": "string", "enum": ["red", "yellow", "green"] }
+          }
+        }
+      }
+    },
+    "metrics_endpoint": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Status of the observability metrics endpoint posture. No address is published (loopback-only by design).",
+      "required": ["exposure", "status"],
+      "properties": {
+        "exposure": {
+          "type": "string",
+          "description": "Metrics are loopback-only by default (QBIND_METRICS_HTTP_ADDR). No public address is ever published here.",
+          "const": "loopback-only"
+        },
+        "status": { "type": "string", "enum": ["unknown", "disabled", "up", "down"] }
+      }
+    },
+    "alerts": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Summary of the shipped alert package (counts only; no raw alert payloads).",
+      "required": ["package", "enabled_rules", "future_rules", "firing"],
+      "properties": {
+        "package": {
+          "type": "string",
+          "description": "Reference to the shipped observability alert/scrape package (Run 379–381).",
+          "const": "docs/release/public-devnet/observability/prometheus-alerts.example.yml"
+        },
+        "enabled_rules": { "type": "integer", "minimum": 0 },
+        "future_rules": { "type": "integer", "minimum": 0 },
+        "firing": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Count of currently firing alerts. Static examples use 0. Never embed raw alert bodies or metric dumps."
+        }
+      }
+    },
+    "notices": {
+      "type": "array",
+      "description": "Incident / reset notices (publish-safe summaries only; no raw logs, no secrets, no private endpoints).",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "at", "summary"],
+        "properties": {
+          "kind": { "type": "string", "enum": ["incident", "reset", "maintenance", "none"] },
+          "at": { "type": "string", "format": "date-time" },
+          "summary": {
+            "type": "string",
+            "maxLength": 280,
+            "description": "Short redacted summary. No absolute paths, no data dirs, no raw logs, no secrets."
+          },
+          "reference": {
+            "type": "string",
+            "description": "OPTIONAL repository-relative reference to a published incident/reset record.",
+            "pattern": "^docs/.+"
+          }
+        }
+      }
+    }
+  }
+}

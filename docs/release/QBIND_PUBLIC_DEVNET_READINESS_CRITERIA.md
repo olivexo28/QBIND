@@ -197,6 +197,30 @@ connection-rate live-socket regression and control-independence are preserved; h
 `docs/devnet/run_373_public_devnet_m12_pqc_static_root_cross_process_release_binary/`). **No new public CLI
 flags** (the static-root/strict-auth flags are pre-existing and public; abuse/DoS flags stay hidden); no
 trust-bundle/wire-format change; M4/M6 unchanged; public DevNet remains NOT launch-ready; C4/C5 remain OPEN.
+Updated Run 395 — **S6 alert-rule/scrape-config moves Red → Green (reconciled; Route A) and S5
+status page moves Red → Yellow (should-have; Route B — docs + schema + verification harness only, no
+production source change)**: Run 395 resolves the two remaining observability-adjacent should-haves.
+For **S6**, the readiness matrix previously kept "alert-rule definitions / scrape config shipped
+alongside the metrics baseline" as Red / "None shipped" even though **M14** already recorded the
+alert rules, scrape config, runbook, and machine-readable Prometheus examples as shipped and
+YAML-verified in Runs 379–381 (`docs/release/public-devnet/observability/ALERT_RULES.md`,
+`SCRAPE_CONFIG.md`, `RUNBOOK.md`, `prometheus-scrape.example.yml`, `prometheus-alerts.example.yml`).
+Run 395 reconciles this inconsistency honestly by moving **S6 Red → Green** citing those already
+shipped files (both YAML re-parsed by the Run 395 harness) — **no** alert/scrape content is
+duplicated. For **S5**, no live status service is deployed (a live aggregate health view depends on
+M4, which is Yellow); instead a **publish-safe static** status-page decision + future health-view
+schema/example package is published under `docs/release/public-devnet/status/` (`README.md`,
+`STATUS_PAGE_DECISION.md`, `STATUS_HEALTH_VIEW_SCHEMA.json`, `EXAMPLE_STATUS_HEALTH_VIEW.json`,
+`SAFETY.md`, `VERIFY.md`) with a fixed safety envelope (`launch_ready:false`, `uptime_sla:false`,
+`example_data_only`, no TestNet/MainNet readiness, C4/C5 not closed) and redaction rules; the example
+validates against the schema and is marked `data_source: static-example`. **S5 stays Yellow, not
+Green** — no externally usable status page is deployed or maintained; live status is deferred to M4.
+Harness `scripts/devnet/run_395_public_devnet_status_s6_reconciliation.sh` (`RESULT=POSITIVE`),
+evidence `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_395.md` and archive
+`docs/devnet/run_395_public_devnet_status_s6_reconciliation/`. **No production Rust source change; no
+`build.rs` change; no new public CLI flag.** M4 stays Yellow/launch-blocking, M6 stays Yellow/Partial,
+S7 stays Yellow, M12/M13/M14/M15/M16 remain Green; public DevNet remains NOT launch-ready; C4/C5
+remain OPEN; MainNet/TestNet untouched.
 Updated Run 374 — **M6 materially narrowed but remains Yellow/Partial**: a stable, release-built operator-facing
 identity **generation + verification** package is published under
 `docs/release/public-devnet/identity/` (`README.md`, `IDENTITY_GENERATION.md`, `IDENTITY_VERIFY.md`,
@@ -695,8 +719,8 @@ Each item must be genuinely **Green** and evidenced before public DevNet launch.
 - [x] S2. Data-retention posture documented for DevNet. — **Green (Run 394)**: `docs/release/public-devnet/recovery/DATA_RETENTION.md` is explicit about reset / no-SLA / no-value, suggested best-effort local windows, redaction rules, and reset-policy cross-link.
 - [x] S3. Upgrade procedure documented (binary upgrade / rolling restart). — **Green (Run 394)**: `docs/release/public-devnet/recovery/UPGRADE_PROCEDURE.md` ties the upgrade to release-artifact/manifest/provenance verification, stop → back-up → replace → restart-with-same-genesis-pin → verify build-info, with rollback criteria.
 - [x] S4. Rollback procedure documented. — **Green (Run 394)**: `docs/release/public-devnet/recovery/ROLLBACK_PROCEDURE.md` is fail-closed on unsafe state edits (no hand-edit of trust/authority/sequence/marker state), rolls back only under matching genesis/data assumptions, and prefers wipe-and-rejoin when compatibility is uncertain.
-- [ ] S5. Status page or aggregate health view.
-- [ ] S6. Alert-rule definitions / scrape config shipped alongside the metrics baseline.
+- [~] S5. Status page or aggregate health view. — **Yellow (Run 395, Route B)**: no live status service is deployed (a live health view would depend on M4, which is Yellow), so instead a **publish-safe static** status-page decision + future aggregate-health-view schema/example package is published (`docs/release/public-devnet/status/README.md`, `STATUS_PAGE_DECISION.md`, `STATUS_HEALTH_VIEW_SCHEMA.json`, `EXAMPLE_STATUS_HEALTH_VIEW.json`, `SAFETY.md`, `VERIFY.md`). The schema fixes the required fields (genesis hash, build info, seed-list status, M4/M6 status, metrics-endpoint status, alerts summary, incidents/reset notices), a fixed safety envelope (`launch_ready:false`, `uptime_sla:false`, `example_data_only`, no TestNet/MainNet readiness, C4/C5 not closed), and redaction rules (no private endpoints, raw logs, raw metrics dumps, secrets, data dirs, or absolute paths); the example validates against the schema and is marked `data_source: static-example`. S5 stays **Yellow, not Green** — no externally usable status page is deployed or maintained; live status is explicitly deferred until M4. Evidence `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_395.md`; no production source change.
+- [x] S6. Alert-rule definitions / scrape config shipped alongside the metrics baseline. — **Green (Run 395, reconciled; Route A)**: this row previously read Red / "None shipped" while **M14** already recorded the alert-rule definitions, scrape config, runbook, and machine-readable Prometheus examples as shipped and YAML-verified in Runs 379–381 — a genuine internal inconsistency. Run 395 reconciles it honestly against the already-shipped observability package: `docs/release/public-devnet/observability/ALERT_RULES.md`, `docs/release/public-devnet/observability/SCRAPE_CONFIG.md`, `docs/release/public-devnet/observability/RUNBOOK.md`, `docs/release/public-devnet/observability/prometheus-scrape.example.yml`, and `docs/release/public-devnet/observability/prometheus-alerts.example.yml` (both YAML files re-parsed by the Run 395 harness), with per-alert severities (`page`/`ticket`/`observe`), enabled rules referencing only metrics verified present in the release-binary scrape, and absent-metric alerts kept in a clearly-marked future/not-enabled group. No alert/scrape content is duplicated. Evidence `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_395.md` (and the underlying `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_379.md`/`_380.md`/`_381.md`); no production source change.
 - [~] S7. Seed-node operational runbook (operating the published seeds). — **Yellow (Run 392)**: a seed-node operations runbook, an M4 Route-A deployment checklist, and a reachability evidence template are published (`docs/release/public-devnet/network/SEED_NODE_OPERATIONS.md`, `M4_ROUTE_A_DEPLOYMENT_CHECKLIST.md`, `SEED_REACHABILITY_EVIDENCE_TEMPLATE.md`) and verified against the real `qbind-node` CLI/help + seed-list schema surfaces. Operating a **live** seed still depends on M4 (no externally reachable seed exists), so S7 stays Yellow, not Green.
 
 ---
@@ -805,8 +829,8 @@ Legend: 🟢 Green (evidenced enough for public DevNet) · 🟡 Yellow (partial 
 | S2 data retention | 🟢 | **Run 394:** DevNet data-retention posture published (`docs/release/public-devnet/recovery/DATA_RETENTION.md`) — explicit reset / no-SLA / no-value, best-effort windows, redaction rules, reset-policy cross-link. |
 | S3 upgrade procedure | 🟢 | **Run 394:** binary upgrade / rolling-restart procedure published (`docs/release/public-devnet/recovery/UPGRADE_PROCEDURE.md`), tied to release provenance verification + genesis pinning. |
 | S4 rollback procedure | 🟢 | **Run 394:** rollback procedure published (`docs/release/public-devnet/recovery/ROLLBACK_PROCEDURE.md`), fail-closed on unsafe state edits; wipe-and-rejoin when compatibility uncertain. |
-| S5 status page | 🔴 | None. |
-| S6 alert rules / scrape config | 🔴 | None shipped. |
+| S5 status page | 🟡 | **Run 395 (Route B):** no live status service (health view is M4-gated); publish-safe static status-page decision + future health-view schema/example published (`docs/release/public-devnet/status/` — `README.md`, `STATUS_PAGE_DECISION.md`, `STATUS_HEALTH_VIEW_SCHEMA.json`, `EXAMPLE_STATUS_HEALTH_VIEW.json`, `SAFETY.md`, `VERIFY.md`); example validates against schema and is marked `static-example`. Yellow, not Green — no deployed/maintained page; live status deferred to M4. |
+| S6 alert rules / scrape config | 🟢 | **Run 395 (reconciled, Route A):** previously Red/"None shipped" — an inconsistency with M14, which already shipped these in Runs 379–381. Reconciled against the shipped observability package (`docs/release/public-devnet/observability/ALERT_RULES.md`, `SCRAPE_CONFIG.md`, `RUNBOOK.md`, `prometheus-scrape.example.yml`, `prometheus-alerts.example.yml`; both YAML re-parsed by the Run 395 harness). No content duplicated. |
 | S7 seed-node runbook | 🟡 | **Run 392:** seed-node operations runbook + M4 Route-A deployment checklist + reachability evidence template published (`docs/release/public-devnet/network/SEED_NODE_OPERATIONS.md`, `M4_ROUTE_A_DEPLOYMENT_CHECKLIST.md`, `SEED_REACHABILITY_EVIDENCE_TEMPLATE.md`), verified against real CLI/help + seed-list schema. Operating a live seed remains M4-gated. |
 | T1 faucet | ⚪ | Explicit DevNet non-goal; TestNet-deferred. |
 | T2 RPC gateway | ⚪ | Explicit DevNet non-goal; TestNet-deferred. |
@@ -925,7 +949,7 @@ Columns: item · release stage · category · status · evidence source · block
 | peer admission policy | DevNet | security | 🟡 | mutual-auth, trust-bundle gating | Open-network policy unpublished | Eclipse/spam admission | Admission-policy doc run |
 | telemetry / metrics | DevNet | observability | 🟡 | `metrics_http.rs` | Operator exposure doc partial | Blind operations | Metrics exposure guide |
 | monitoring / alerting | DevNet | observability | 🟡 | `QBIND_MONITORING_AND_ALERTING_BASELINE.md` | Alert rules absent | Missed incidents | Ship alert rules |
-| status page | DevNet | observability | 🔴 | none | Missing | No shared health view | Should-have run |
+| status page | DevNet | observability | 🟡 | `docs/release/public-devnet/status/` (Run 395) | Static decision + health-view schema published; live status M4-gated | No shared health view yet | Deploy live view once M4 Green |
 | explorer | TestNet | observability | ⚪ | n/a | Deferred | n/a for DevNet | TestNet |
 | reset policy | DevNet | ops | 🟢 | `docs/release/public-devnet/ops/RESET_POLICY.md` (Run 390); CLI `--authority-state-reset` | Published + verified | — | Done (Run 390) |
 | incident response | DevNet | ops | 🟢 | `docs/release/public-devnet/ops/INCIDENT_RESPONSE.md` (Run 390) + internal `QBIND_INCIDENT_RESPONSE.md` | Public-DevNet-scoped process published (reconciled) | — | Done (Run 390) |

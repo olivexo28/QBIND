@@ -1,0 +1,183 @@
+Run 396 — Public DevNet readiness matrix canonicalization / stale-row cleanup
+
+Current state:
+Run 395 is accepted PASS.
+S5 moved Red → Yellow.
+S6 moved Red → Green.
+S1/S2/S3/S4 are Green.
+S7 remains Yellow.
+M4 remains Yellow / launch-blocking.
+M6 remains Yellow/Partial.
+M7/M8/M9/M12/M13/M14/M15/M16 are Green or Green-for-scope as recorded.
+Public DevNet remains NOT launch-ready.
+C4 remains OPEN.
+C5 remains OPEN.
+TestNet/MainNet remain untouched.
+
+Known cleanup:
+`docs/release/QBIND_PUBLIC_DEVNET_READINESS_CRITERIA.md` now has correct current-status rows for recent runs, but the older consolidated gap matrix / summary sections still contain stale legacy statuses for items already updated by Runs 356–395. Run 396 must reconcile the document so every checklist, status table, gap matrix, blocker summary, and next-run recommendation agrees.
+
+Objective:
+Make `QBIND_PUBLIC_DEVNET_READINESS_CRITERIA.md` internally consistent after Runs 356–395, without changing readiness semantics or adding new functionality.
+
+Strict scope:
+Docs + verification harness only.
+
+No public DevNet launch.
+No M4 Green.
+No M6 Green.
+No S5 Green.
+No S7 Green.
+No new public CLI flag.
+No Rust source change.
+No build.rs change.
+No runtime behavior change.
+No seed/bootnode/faucet/RPC/explorer/status service deployment.
+No TestNet readiness.
+No MainNet readiness.
+No C4 closure.
+No C5 closure.
+No authority-lifecycle runtime wiring.
+No validator-set mutation.
+No epoch transition.
+No trust-bundle live apply.
+No peer-driven apply.
+No P2P wire-format or peer-admission change.
+
+Required investigation:
+Inspect:
+- docs/release/QBIND_PUBLIC_DEVNET_READINESS_CRITERIA.md
+- docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_356.md through docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_395.md where present
+- docs/release/public-devnet/genesis/
+- docs/release/public-devnet/binary/
+- docs/release/public-devnet/operator/
+- docs/release/public-devnet/identity/
+- docs/release/public-devnet/p2p/
+- docs/release/public-devnet/observability/
+- docs/release/public-devnet/security/
+- docs/release/public-devnet/ops/
+- docs/release/public-devnet/recovery/
+- docs/release/public-devnet/status/
+- docs/release/public-devnet/network/
+- docs/protocol/QBIND_C4_C5_CLOSURE_CRITERIA.md
+- docs/whitepaper/contradiction.md
+
+Decision gate:
+Route A:
+If the current source of truth is clear, update only the stale readiness matrix rows / summaries / next-run recommendations and add a verification harness.
+
+Route B:
+If multiple sections disagree and need a small generated consistency summary, add a docs-only helper/harness to parse the matrix and assert expected statuses.
+
+Route C:
+If a status cannot be reconciled from committed evidence, preserve the more conservative status and document the ambiguity.
+
+Canonical expected statuses after Run 395:
+Must-haves:
+- M1 Green
+- M2 Green
+- M3 Green
+- M4 Yellow / launch-blocking
+- M5 Green
+- M6 Yellow / Partial
+- M7 Green-for-scope / Green
+- M8 Green-for-scope / Green
+- M9 Green-for-scope / Green
+- M10 Green
+- M11 Green
+- M12 Green
+- M13 Green
+- M14 Green
+- M15 Green
+- M16 Green
+- M17 Green
+- M18 Green
+- M19 Green
+- M20 Green
+
+Should-haves:
+- S1 Green
+- S2 Green
+- S3 Green
+- S4 Green
+- S5 Yellow
+- S6 Green
+- S7 Yellow
+
+TestNet-deferred:
+- T1/T2/T3/T4/T7/T8 N/A or deferred for DevNet
+- T5/T6 Yellow / TestNet-deferred boundary-only, if already stated that way
+
+MainNet-deferred:
+- N1 Red
+- N2 Red
+- N3 Red
+- N4 Red
+- N5 C4 OPEN / Red
+- N6 C5 OPEN / Red
+- N7 Red
+
+Required updates:
+- Reconcile §4 must-have checklist.
+- Reconcile §5 should-have checklist.
+- Reconcile §10 current status table.
+- Reconcile §11 exact next-run recommendations.
+- Reconcile §12 launch blocker summary.
+- Reconcile §16 consolidated gap matrix.
+- Reconcile §17 summary.
+- Preserve historical run notes, but make the current status unambiguous.
+- Add a Run 396 update note at the top.
+
+Required harness:
+Create:
+- scripts/devnet/run_396_public_devnet_readiness_matrix_canonicalization.sh
+- docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_396.md
+- docs/devnet/run_396_public_devnet_readiness_matrix_canonicalization/{README.md,summary.txt,.gitignore}
+
+Harness must verify:
+1. No stale `None shipped` row remains for S6.
+2. No stale Red row remains for S1/S2/S3/S4/S6.
+3. No stale Yellow row remains for M5/M7/M8/M9/M10/M11/M12/M13/M14/M15/M16/M17/M18/M19/M20.
+4. M4 remains Yellow / launch-blocking everywhere.
+5. M6 remains Yellow / Partial everywhere.
+6. S5 remains Yellow everywhere.
+7. S7 remains Yellow everywhere.
+8. Public DevNet remains NOT launch-ready everywhere.
+9. C4/C5 remain OPEN everywhere.
+10. No TestNet/MainNet readiness claim appears.
+11. No new launch/faucet/RPC/explorer/status-service claim appears.
+12. Changed files contain no secrets/private material/raw logs/raw metrics/data dirs/absolute paths.
+
+Required tests/checks:
+- bash scripts/devnet/run_396_public_devnet_readiness_matrix_canonicalization.sh
+- markdown grep consistency checks
+- non-claim grep
+- secret scan over changed files
+- cargo test --lib only if Rust source changed; otherwise record no-Rust-delta honestly
+
+CodeQL:
+If docs/shell only, record trivial/not meaningful.
+If Rust or build.rs changes, invoke CodeQL if available and record the exact result.
+Never call skipped/trivial/timed-out/DB-too-large analysis clean.
+
+Expected verdict:
+PASS / public-DevNet readiness matrix canonicalization POSITIVE if the matrix and summaries are internally consistent and no readiness overclaim is introduced.
+
+Final response format:
+1. Exact verdict
+2. Files changed
+3. Decision gate route
+4. Matrix inconsistency investigation
+5. Canonical status table
+6. Must-have reconciliation
+7. Should-have reconciliation
+8. Gap-matrix reconciliation
+9. Launch-blocker summary
+10. C4/C5 non-closure
+11. TestNet/MainNet non-claims
+12. Harness checks
+13. Non-claim checks
+14. Security scans
+15. CodeQL
+16. Honest limitations
+17. Suggested Run 397
