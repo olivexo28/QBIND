@@ -43,6 +43,18 @@
 > mutates **no** runtime state, and makes **no** live / reachability / M4 / C4 / C5
 > claim. See `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_376.md`.
 
+> **Run 401 — operator identity continuity / rotation-revocation deferral.**
+> `IDENTITY_CONTINUITY.md` documents how an operator keeps a **durable operator
+> identity** across public DevNet restarts (reuse the same `leaf.kem.sk.bin` +
+> `leaf.cert.bin` to preserve `node_id`/`peer_id`), what public/private material
+> is involved, exactly what **may be reused** between restarts, and what **must
+> not be rotated by hand**. `ROTATION_REVOCATION_DEFERRAL.md` states that
+> production rotation/revocation is **NOT implemented** and is **explicitly
+> deferred** to C4/C5/MainNet work. Both are **docs only** (no CLI flag, no source
+> change, no live apply) and verified against the existing `qbind-node identity`
+> surfaces by `scripts/devnet/run_401_public_devnet_m6_identity_continuity.sh`.
+> **M6 stays Yellow / Partial** (better documented); **M4** stays Yellow; **C4/C5**
+> remain **OPEN**. See `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_401.md`.
 
 This directory is the canonical, operator-facing **identity-generation and
 verification** package for the QBIND public DevNet. It lets an external DevNet
@@ -66,6 +78,8 @@ missing). See "Readiness status" below for the exact matrix delta.
 | `OPERATOR_IDENTITY_SCHEMA.json` | JSON Schema (draft-07) for the public identity document emitted by the helper. |
 | `EXAMPLE_PUBLIC_IDENTITY.json` | A public-only example identity document (placeholder values) that validates against the schema. |
 | `SAFETY.md` | What is safe to publish, what must never be published, rotation/revocation limits, DevNet-only labelling. |
+| `IDENTITY_CONTINUITY.md` | How to keep a durable operator identity across DevNet restarts: public/private material, what may be reused, what must not be rotated by hand (Run 401). |
+| `ROTATION_REVOCATION_DEFERRAL.md` | Statement that production rotation/revocation is NOT implemented and is explicitly deferred to C4/C5/MainNet (Run 401). |
 | `VERIFY.md` | Copy-paste verification steps a reviewer runs to confirm the package. |
 
 ## Tooling

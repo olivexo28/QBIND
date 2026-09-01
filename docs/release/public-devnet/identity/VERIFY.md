@@ -31,6 +31,15 @@ binary.
 > loopback/same-host), so **M4 stays Yellow** and no committed entry is marked live. Canonical record:
 > `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_377.md`.
 
+> **Run 401 — identity continuity + rotation/revocation deferral verification.** Run
+> `scripts/devnet/run_401_public_devnet_m6_identity_continuity.sh`. It builds the release node,
+> confirms `IDENTITY_CONTINUITY.md` and `ROTATION_REVOCATION_DEFERRAL.md` exist and carry the safety
+> label, confirms the documented `identity generate/verify/print-public/seed-candidate/register-check`
+> commands are present in the `qbind-node identity` help/usage surface, re-derives a `node_id`
+> deterministically with `identity verify` to demonstrate durable reuse, asserts C4/C5 stay OPEN and no
+> M4/M6-Green claim is made, runs the non-claim grep, and scans for committed private material. Canonical
+> record: `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_401.md`.
+
 ## 1. Helper builds
 
 ```bash
