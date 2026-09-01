@@ -29,6 +29,7 @@ list for public join) is Green.
 | `reachability/RUN_378_qbind-devnet-seed-1.md` | **Run 378** external-reachability attempt record (Route C — no external ingress / no independent external vantage point available; external reachability NOT proven; M4 stays Yellow; Route A infrastructure prerequisites documented). |
 | `reachability/RUN_388_qbind-devnet-seed-1.md` | **Run 388** external-reachability execution record (Route C — same finding as Run 378; no external ingress / no independent off-host vantage point; external reachability NOT proven; M4 stays Yellow; Route A infrastructure prerequisites documented). |
 | `reachability/RUN_391_qbind-devnet-seed-1.md` | **Run 391** external-reachability execution record (Route C — same finding as Run 378/388; no external ingress / no independent off-host vantage point; external reachability NOT proven; M4 stays Yellow; Route A infrastructure prerequisites documented). |
+| `reachability/RUN_393_qbind-devnet-seed-1.md` | **Run 393** real-external-reachability execution record (Route C — same finding as Run 378/388/391; no external ingress / no independent off-host vantage point; external TCP + KEMTLS reachability NOT proven; no `devnet-seeds.live.json`; M4 stays Yellow; Route A infrastructure prerequisites documented). |
 
 This is the canonical location for the public DevNet seed/bootnode list. It sits alongside the
 Run 356 genesis package (`docs/release/public-devnet/genesis/`) under the shared
@@ -230,6 +231,16 @@ independent off-host external TCP + KEMTLS verification, seed-list promotion to 
 (`scripts/devnet/run_392_public_devnet_seed_ops_route_a_checklist.sh`, `RESULT=POSITIVE`): it deploys no
 seed, exposes no external endpoint, and **does not move M4 Green or M6 Green**. See
 `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_392.md`.
+
+**Run 393 — real-external-reachability execution (Route C).** Run 393 executed the same Route A objective
+following the Run 392 runbook / M4 Route-A checklist and reached the **same Route C finding** as
+Run 378/388/391: the sandboxed environment has **no external ingress and no independent off-host vantage
+point**, so no real endpoint could be exposed and external TCP + KEMTLS/static-root reachability could not
+be proven. Run 393 re-proves the live-admission gate (against `reachability/RUN_393_qbind-devnet-seed-1.md`)
+and the loopback preflight, keeps the committed candidate at `status: planned`, publishes **no**
+`devnet-seeds.live.json`, and keeps **M4 Yellow**. The Route A infrastructure prerequisites are documented
+in `docs/release/public-devnet/network/reachability/RUN_393_qbind-devnet-seed-1.md` §15. See
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_393.md`.
 
 ## Provenance
 
