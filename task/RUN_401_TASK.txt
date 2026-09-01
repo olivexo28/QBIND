@@ -1,0 +1,145 @@
+Run 401 — Public DevNet M6 operator-root reuse / rotation deferral package
+
+Current state:
+M4 remains Yellow / launch-blocking.
+M6 remains Yellow / Partial.
+The M6 generation + verification half is Green-for-scope.
+The M6 register-check half is Green-for-scope.
+Remaining M6 gaps:
+- no live public DevNet to register into, because M4 is not Green;
+- operator-root reuse / rotation / revocation remains C4/C5-open.
+
+Objective:
+Publish and verify a public DevNet M6 operator identity continuity package:
+- explain durable operator identity reuse;
+- document safe public/private material handling;
+- document what operators may reuse between DevNet restarts;
+- document what must not be rotated manually;
+- document rotation/revocation as explicitly deferred to C4/C5/MainNet work;
+- verify all claims against existing identity CLI surfaces only.
+
+Strict scope:
+Docs + verification harness only unless existing tests need narrow extension.
+No M4 Green.
+No M6 Green unless every remaining criterion is genuinely satisfied.
+No live seed.
+No devnet-seeds.live.json.
+No public DevNet launch.
+No new public CLI flag.
+No C4 closure.
+No C5 closure.
+No authority rotation implementation.
+No revocation implementation.
+No trust-bundle live apply.
+No validator-set mutation.
+No epoch transition.
+No peer-driven apply.
+No private material committed.
+
+Required investigation:
+Read:
+- docs/release/QBIND_PUBLIC_DEVNET_READINESS_CRITERIA.md
+- docs/release/public-devnet/identity/
+- docs/release/public-devnet/operator/IDENTITY.md
+- docs/release/public-devnet/security/KEY_MANAGEMENT.md
+- docs/release/public-devnet/security/PQC_ROOT_AND_SIGNING_KEYS.md
+- docs/release/public-devnet/security/PQC_TRUST_BOOTSTRAP.md
+- docs/release/public-devnet/network/SEED_NODE_OPERATIONS.md
+- docs/release/public-devnet/network/M4_ROUTE_A_DEPLOYMENT_CHECKLIST.md
+- crates/qbind-node/src/identity_cli.rs
+- crates/qbind-node/tests/run_375_public_devnet_identity_cli_tests.rs
+- crates/qbind-node/tests/run_376_public_devnet_identity_registration_tests.rs
+- docs/protocol/QBIND_C4_C5_CLOSURE_CRITERIA.md
+- docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md
+- docs/ops/QBIND_PQC_TRUST_LIFECYCLE_RUNBOOK.md
+- docs/whitepaper/contradiction.md
+
+Decision gate:
+Route A:
+If existing identity CLI already supports safe durable identity reuse verification, document and verify it.
+
+Route B:
+If reuse is mostly operational guidance, publish docs + harness only. Expected route.
+
+Route C:
+If reuse/rotation/revocation cannot be safely documented without overclaiming C4/C5, keep M6 unchanged and record the exact blocker.
+
+Required docs:
+Create:
+- docs/release/public-devnet/identity/IDENTITY_CONTINUITY.md
+- docs/release/public-devnet/identity/ROTATION_REVOCATION_DEFERRAL.md
+
+Update narrowly:
+- docs/release/public-devnet/identity/README.md
+- docs/release/public-devnet/identity/VERIFY.md
+- docs/release/QBIND_PUBLIC_DEVNET_READINESS_CRITERIA.md
+- docs/protocol/QBIND_C4_C5_CLOSURE_CRITERIA.md
+- docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md
+- docs/ops/QBIND_PQC_TRUST_LIFECYCLE_RUNBOOK.md
+- docs/whitepaper/contradiction.md
+
+Harness:
+Create:
+- scripts/devnet/run_401_public_devnet_m6_identity_continuity.sh
+- docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_401.md
+- docs/devnet/run_401_public_devnet_m6_identity_continuity/{README.md,summary.txt,.gitignore}
+
+Harness must verify:
+- identity continuity docs exist;
+- rotation/revocation deferral doc exists;
+- documented identity commands are present in qbind-node --help;
+- identity generate / verify / print-public / seed-candidate / register-check surfaces remain present;
+- MainNet/TestNet identity generation remains refused if covered by existing tests;
+- no M4/M6 Green claim unless criteria are truly satisfied;
+- C4/C5 remain OPEN;
+- no private key/KEM/root/signing material committed;
+- non-claim grep passes.
+
+Readiness rules:
+M6 may remain Yellow/Partial but become better documented.
+Do not move M6 Green unless live registration and all remaining M6 criteria are genuinely satisfied.
+M4 remains Yellow.
+S5/S7 remain Yellow.
+Public DevNet remains NOT launch-ready.
+C4/C5 remain OPEN.
+
+Tests:
+- bash scripts/devnet/run_401_public_devnet_m6_identity_continuity.sh
+- cargo test -p qbind-node run_375_public_devnet_identity_cli
+- cargo test -p qbind-node run_376_public_devnet_identity_registration
+- cargo build -p qbind-node --release --locked --bin qbind-node if help verification is used
+- non-claim grep
+- secret scan
+
+CodeQL:
+Docs/shell only → trivial/not meaningful.
+Rust change → run or record exact CodeQL result honestly.
+Never call skipped CodeQL clean.
+
+Expected verdict:
+PASS / public-DevNet M6 identity continuity package POSITIVE if docs + harness land cleanly.
+PARTIAL-POSITIVE if M6 remains materially blocked but the exact blocker is clearer.
+NEGATIVE if the package would overclaim rotation/revocation or C4/C5 closure.
+
+Final response format:
+1. Exact verdict
+2. Files changed
+3. Decision gate route
+4. M6 investigation result
+5. Identity continuity guidance
+6. Rotation/revocation deferral
+7. CLI/help verification
+8. Existing identity test evidence
+9. Non-claim checks
+10. Security scans
+11. Runtime mutation check
+12. Readiness delta M6
+13. M4 status
+14. S5/S7 status
+15. Public DevNet status
+16. C4/C5
+17. TestNet/MainNet blockers
+18. Tests run
+19. CodeQL
+20. Honest limitations
+21. Suggested Run 402
