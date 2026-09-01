@@ -110,6 +110,8 @@ paths, or branch dirty-state strings.
 - P2P posture / abuse-DoS — `docs/release/public-devnet/p2p/` (rate-limiter posture, admission).
 - Reset policy — `RESET_POLICY.md` (this package).
 - Network / seed-list posture — `docs/release/public-devnet/network/`.
+- Seed-node operations + retirement — `docs/release/public-devnet/network/SEED_NODE_OPERATIONS.md`
+  (durable identity custody, strict KEMTLS static-root startup, seed retirement on incident).
 - Internal incident-response procedure — `docs/ops/QBIND_INCIDENT_RESPONSE.md` (authoritative for
   internal roles / escalation / evidence packet).
 - Operator drill catalog — `docs/ops/QBIND_OPERATOR_DRILL_CATALOG.md`.

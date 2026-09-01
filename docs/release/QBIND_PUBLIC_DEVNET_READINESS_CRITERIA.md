@@ -292,6 +292,24 @@ Route A infrastructure prerequisites),
 `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_388.md`. The committed live-seed candidate stays `status: planned`
 with null reachability (text refreshed to reference Run 388). M6 remains Yellow/Partial; M12/M13/M14 remain
 Green; public DevNet remains NOT launch-ready; C4/C5 remain OPEN; MainNet/TestNet untouched.
+Updated Run 392 — **S7 seed-node operational runbook moves Red → Yellow (should-have; Route B — docs +
+verification harness only, no production source change); M4 stays Yellow, M6 stays Yellow/Partial**:
+Run 392 publishes the operator-facing public DevNet seed-node operations package
+(`docs/release/public-devnet/network/SEED_NODE_OPERATIONS.md`,
+`M4_ROUTE_A_DEPLOYMENT_CHECKLIST.md`, `SEED_REACHABILITY_EVIDENCE_TEMPLATE.md`) and verifies it against
+the real `qbind-node` CLI/help + seed-list schema surfaces via
+`scripts/devnet/run_392_public_devnet_seed_ops_route_a_checklist.sh` (`RESULT=POSITIVE`): all documented
+seed P2P/genesis flags pre-existing in `cli.rs` + `--help` with no invented flag; `identity generate` /
+`register-check` subcommands present; `devnet-seeds.live-candidate.json` still schema-valid and non-live;
+required doc sections + cross-links present; non-claim grep passes; no private/raw artifact committed.
+The runbook makes it unambiguous what a real seed operator must do before M4 can move Green (durable
+identity custody, strict KEMTLS static-root startup, genesis pinning, independent off-host external
+TCP + KEMTLS verification, seed-list promotion, register-check live admission, retirement) **without
+faking any external endpoint or reachability**. It adds `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_392.md`
+and the archive `docs/devnet/run_392_public_devnet_seed_ops_route_a_checklist/`. **M4 does NOT move
+Green** (no externally reachable seed / no independent off-host vantage); **M6 stays Yellow/Partial**
+(live registration is M4-gated); M12/M13/M14/M15/M16 remain Green; public DevNet remains NOT
+launch-ready; C4/C5 remain OPEN; MainNet/TestNet untouched.
 Updated Run 391 — **M4 remains Yellow/launch-blocking (Route C — no safe external seed infrastructure);
 no Green move**: Run 391 re-executes the same **Route A** objective as Run 378/388 (deploy/use a real
 externally reachable seed and prove reachability from an **independent off-host vantage point**) with **no
@@ -643,7 +661,7 @@ Each item must be genuinely **Green** and evidenced before public DevNet launch.
 - [ ] S4. Rollback procedure documented.
 - [ ] S5. Status page or aggregate health view.
 - [ ] S6. Alert-rule definitions / scrape config shipped alongside the metrics baseline.
-- [ ] S7. Seed-node operational runbook (operating the published seeds).
+- [~] S7. Seed-node operational runbook (operating the published seeds). — **Yellow (Run 392)**: a seed-node operations runbook, an M4 Route-A deployment checklist, and a reachability evidence template are published (`docs/release/public-devnet/network/SEED_NODE_OPERATIONS.md`, `M4_ROUTE_A_DEPLOYMENT_CHECKLIST.md`, `SEED_REACHABILITY_EVIDENCE_TEMPLATE.md`) and verified against the real `qbind-node` CLI/help + seed-list schema surfaces. Operating a **live** seed still depends on M4 (no externally reachable seed exists), so S7 stays Yellow, not Green.
 
 ---
 
@@ -753,7 +771,7 @@ Legend: 🟢 Green (evidenced enough for public DevNet) · 🟡 Yellow (partial 
 | S4 rollback procedure | 🟡 | Authority reset only; no staged rollback runbook. |
 | S5 status page | 🔴 | None. |
 | S6 alert rules / scrape config | 🔴 | None shipped. |
-| S7 seed-node runbook | 🔴 | None (depends on M4). |
+| S7 seed-node runbook | 🟡 | **Run 392:** seed-node operations runbook + M4 Route-A deployment checklist + reachability evidence template published (`docs/release/public-devnet/network/SEED_NODE_OPERATIONS.md`, `M4_ROUTE_A_DEPLOYMENT_CHECKLIST.md`, `SEED_REACHABILITY_EVIDENCE_TEMPLATE.md`), verified against real CLI/help + seed-list schema. Operating a live seed remains M4-gated. |
 | T1 faucet | ⚪ | Explicit DevNet non-goal; TestNet-deferred. |
 | T2 RPC gateway | ⚪ | Explicit DevNet non-goal; TestNet-deferred. |
 | T3 RPC rate limiting | ⚪ | Depends on T2; TestNet-deferred. |

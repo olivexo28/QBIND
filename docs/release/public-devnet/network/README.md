@@ -21,6 +21,9 @@ list for public join) is Green.
 | `devnet-seed-list.schema.json` | Canonical JSON Schema (draft-07) for a DevNet seed/bootnode list. |
 | `devnet-seeds.placeholder.json` | Placeholder DevNet seed list (non-live, documentation-example values only). |
 | `VERIFY.md` | Exact operator verification commands and expected outputs. |
+| `SEED_NODE_OPERATIONS.md` | **Run 392** seed-node operations runbook (DevNet-only): operator role, durable identity custody, strict KEMTLS static-root startup, firewall/NAT, loopback-only metrics, operational checks, failure handling, and seed retirement. Docs-only — no live seed. |
+| `M4_ROUTE_A_DEPLOYMENT_CHECKLIST.md` | **Run 392** exact Route-A deployment checklist that a real operator must complete (real public endpoint + independent off-host external TCP/KEMTLS evidence + `devnet-seeds.live.json` promotion + `register-check --status live`) before **M4** can move Green. Publishing it does **not** move M4 Green. |
+| `SEED_REACHABILITY_EVIDENCE_TEMPLATE.md` | **Run 392** canonical reachability evidence record format (run id, UTC, seed/node/peer id, genesis, binary SHA/BuildID/toolchain, public host/port, vantage independence, TCP/KEMTLS results, observed identity, redaction, and `external_tcp_reachability`/`external_kemtls_reachability`/`live_reachability_claim`/`m4_green_claim`/`c4_c5_closure_claim` conclusions). |
 | `devnet-seeds.live-candidate.json` | Preflight live-seed **candidate** (schema-valid, single entry `status: planned` with a real Run-375-path public `node_id`/`peer_id` and a non-routable RFC 5737 host). **NOT a live seed** — external reachability was not proven (Run 377 loopback-only / Route B; Run 378 Route C; Run 388 Route C; Run 391 Route C). |
 | `reachability/RUN_377_qbind-devnet-seed-1.md` | **Run 377** reachability evidence record (loopback/same-host only; external reachability NOT proven; M4 stays Yellow). |
 | `reachability/RUN_378_qbind-devnet-seed-1.md` | **Run 378** external-reachability attempt record (Route C — no external ingress / no independent external vantage point available; external reachability NOT proven; M4 stays Yellow; Route A infrastructure prerequisites documented). |
@@ -217,6 +220,16 @@ not be proven. Run 391 re-proves the live-admission gate (against
 `status: planned`, and keeps **M4 Yellow**. The Route A infrastructure prerequisites are documented in
 `docs/release/public-devnet/network/reachability/RUN_391_qbind-devnet-seed-1.md` §15. See
 `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_391.md`.
+
+**Run 392 — seed-node operations runbook + M4 Route-A deployment checklist (Route B / docs-only).** Run
+392 publishes the operator-facing `SEED_NODE_OPERATIONS.md`, `M4_ROUTE_A_DEPLOYMENT_CHECKLIST.md`, and
+`SEED_REACHABILITY_EVIDENCE_TEMPLATE.md` so it is unambiguous what a real seed operator must do before
+M4 can move Green (durable identity custody, strict KEMTLS static-root startup, genesis pinning,
+independent off-host external TCP + KEMTLS verification, seed-list promotion to `status: live`,
+`register-check --status live` admission, and retirement). This is **docs + verification harness only**
+(`scripts/devnet/run_392_public_devnet_seed_ops_route_a_checklist.sh`, `RESULT=POSITIVE`): it deploys no
+seed, exposes no external endpoint, and **does not move M4 Green or M6 Green**. See
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_392.md`.
 
 ## Provenance
 

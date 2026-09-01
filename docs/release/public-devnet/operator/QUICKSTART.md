@@ -123,6 +123,10 @@ The seed-list format and a **placeholder** artifact live at `docs/release/public
 
 - Format (JSON Schema draft-07): `devnet-seed-list.schema.json`
 - Placeholder artifact: `devnet-seeds.placeholder.json`
+- Seed-node operations runbook + M4 Route-A deployment checklist + reachability evidence template
+  (Run 392): `SEED_NODE_OPERATIONS.md`, `M4_ROUTE_A_DEPLOYMENT_CHECKLIST.md`,
+  `SEED_REACHABILITY_EVIDENCE_TEMPLATE.md` — what a real seed operator must do (docs-only; no live
+  seed; does not move M4/M6 Green).
 
 The placeholder contains **no live seeds**. Its single entry uses `status: "placeholder"` with a
 non-routable **RFC 5737 TEST-NET-1** host (`192.0.2.1`) and `null` `node_id` / `peer_id` /

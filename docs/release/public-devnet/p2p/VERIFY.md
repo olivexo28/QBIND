@@ -510,3 +510,14 @@ are **present**, while the per-peer drop control and its alert remain unchanged
 **future → enabled** against the disk gauge. Run 381 opens **no** external port,
 adds **no** CLI flag, and makes **no** launch/M4/TestNet/MainNet/C4/C5 claim;
 **M12/M13/M14 remain Green**. See `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_381.md`.
+## Run 392 — seed-node strict KEMTLS static-root startup posture (cross-reference)
+
+The Run 392 seed-node operations runbook
+(`docs/release/public-devnet/network/SEED_NODE_OPERATIONS.md`) and M4 Route-A deployment checklist
+(`docs/release/public-devnet/network/M4_ROUTE_A_DEPLOYMENT_CHECKLIST.md`) reuse the pre-existing strict
+KEMTLS mutual-auth + PQC static-root P2P surfaces verified in this document
+(`--p2p-mutual-auth required`, `--p2p-pqc-root-mode pqc-static-root`, `--p2p-trusted-root`,
+`--p2p-leaf-cert` / `--p2p-leaf-cert-key`). Run 392 is **docs + verification harness only**: it adds
+**no** CLI flag, changes **no** wire format, weakens **no** peer admission, exposes **no** external
+endpoint, and makes **no** launch/M4/M6/TestNet/MainNet/C4/C5 Green/closure claim. See
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_392.md`.
