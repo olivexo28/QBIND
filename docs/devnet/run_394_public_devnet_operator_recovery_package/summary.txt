@@ -1,0 +1,16 @@
+release_binary=OK sha256=465071abd1a4d4f02a8019b4de28d6649108cfd69323287200acc9f48d2c2861
+build_id=33ba19951369a13b88fcc580049a8ecead960c09
+toolchain=rustc 1.98.0 (88d9e12ae 2026-08-18) / cargo 1.98.0 (797e8a9bc 2026-08-05)
+cli_help_flags=OK (11 recovery flags present in --help; no invented flag)
+recovery_package_files=OK (README/BACKUP_RESTORE/DATA_RETENTION/UPGRADE_PROCEDURE/ROLLBACK_PROCEDURE/SAFETY/VERIFY present)
+safety_labels=OK (experimental/no-value/no-data-permanence label in all 7 recovery docs)
+backup_restore_sections=OK (backup-targets/stop-before-copy/must-not-commit/restore/genesis-pin/provenance/wipe-rejoin)
+data_retention_sections=OK (resettable/best-effort/no-SLA/retention-window/redaction/reset-policy-link)
+upgrade_sections=OK (verify-provenance/stop/backup-metadata/replace/genesis-pin/build-info/rollback-criteria)
+rollback_sections=OK (previous-binary/matching-assumptions/no-hand-edit-trust/no-sequence-marker-edit/wipe-rejoin/incident-escalation)
+cross_links=OK (operator, ops reset/incident, observability, network, genesis, internal backup baseline, PQC lifecycle referenced)
+non_claim_grep=OK (no launch-ready / M4-M6-Green / C4-C5-closure / TestNet-MainNet-ready / uptime-SLA / data-permanence claim)
+committed_private_material=NONE (recovery package is docs only; no keys/logs/metrics/data dirs)
+readiness_reconciled=OK (S1..S4 🟢; M4 🟡; M6 🟡; S7 🟡; public DevNet NOT launch-ready)
+
+RESULT=POSITIVE (public-DevNet operator recovery package published and verified against real CLI/help surfaces; no production source change; S1..S4 documented + verified; M4/M6/S7 stay Yellow; C4/C5 OPEN; public DevNet NOT launch-ready)

@@ -309,6 +309,25 @@ and `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_393.md`. The committed live-seed cand
 planned` with null reachability. M6 remains Yellow/Partial; S7 remains Yellow; M12/M13/M14/M15/M16 remain
 Green; public DevNet remains NOT launch-ready; C4/C5 remain OPEN; MainNet/TestNet untouched. No production
 Rust source change; no new public CLI flag.
+Updated Run 394 — **S1 backup/restore, S2 data retention, S3 upgrade, S4 rollback move Yellow → Green
+(should-have; Route B — docs + verification harness only, no production source change); M4 stays
+Yellow, M6 stays Yellow/Partial, S7 stays Yellow**: Run 394 publishes the operator-facing public
+DevNet recovery package (`docs/release/public-devnet/recovery/` — `README.md`, `BACKUP_RESTORE.md`,
+`DATA_RETENTION.md`, `UPGRADE_PROCEDURE.md`, `ROLLBACK_PROCEDURE.md`, `SAFETY.md`, `VERIFY.md`) and
+verifies it against the real `qbind-node` CLI/help surfaces via
+`scripts/devnet/run_394_public_devnet_operator_recovery_package.sh` (`RESULT=POSITIVE`): every
+documented recovery flag (`--data-dir`, `--snapshot-dir`, `--snapshot-interval-blocks`,
+`--snapshot-max-snapshots`, `--restore-from-snapshot`, `--state-retention-mode`,
+`--state-retain-height`, `--state-prune-interval`, `--genesis-path`, `--print-genesis-hash`,
+`--expect-genesis-hash`) is pre-existing in `--help` with no invented flag; safety labels, required
+sections, and cross-links present; non-claim grep passes; no private/raw artifact committed. Backup /
+restore is scoped as best-effort DevNet convenience (fail-closed `--restore-from-snapshot`, genesis
+pinning, wipe-and-rejoin default) with **no guarantee of data permanence and no uptime SLA**. It adds
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_394.md` and the archive
+`docs/devnet/run_394_public_devnet_operator_recovery_package/`. **No production Rust source change; no
+new public CLI flag.** M4 stays Yellow/launch-blocking, M6 stays Yellow/Partial, S7 stays Yellow,
+M12/M13/M14/M15/M16 remain Green; public DevNet remains NOT launch-ready; C4/C5 remain OPEN;
+MainNet/TestNet untouched.
 Updated Run 392 — **S7 seed-node operational runbook moves Red → Yellow (should-have; Route B — docs +
 verification harness only, no production source change); M4 stays Yellow, M6 stays Yellow/Partial**:
 Run 392 publishes the operator-facing public DevNet seed-node operations package
@@ -672,10 +691,10 @@ Each item must be genuinely **Green** and evidenced before public DevNet launch.
 
 ## 5. Should-have checklist (strongly recommended, not launch-blocking)
 
-- [ ] S1. Snapshot / backup / restore baseline usable by operators (creation + restore path).
-- [ ] S2. Data-retention posture documented for DevNet.
-- [ ] S3. Upgrade procedure documented (binary upgrade / rolling restart).
-- [ ] S4. Rollback procedure documented.
+- [x] S1. Snapshot / backup / restore baseline usable by operators (creation + restore path). — **Green (Run 394)**: public-DevNet backup/restore baseline published (`docs/release/public-devnet/recovery/BACKUP_RESTORE.md`) and verified against the real pre-existing snapshot/restore CLI surfaces (`--snapshot-dir`, `--snapshot-interval-blocks`, `--snapshot-max-snapshots`, `--restore-from-snapshot`, `--expect-genesis-hash`). Best-effort DevNet convenience only — no guarantee of data permanence; wipe-and-rejoin is the DevNet-safe default.
+- [x] S2. Data-retention posture documented for DevNet. — **Green (Run 394)**: `docs/release/public-devnet/recovery/DATA_RETENTION.md` is explicit about reset / no-SLA / no-value, suggested best-effort local windows, redaction rules, and reset-policy cross-link.
+- [x] S3. Upgrade procedure documented (binary upgrade / rolling restart). — **Green (Run 394)**: `docs/release/public-devnet/recovery/UPGRADE_PROCEDURE.md` ties the upgrade to release-artifact/manifest/provenance verification, stop → back-up → replace → restart-with-same-genesis-pin → verify build-info, with rollback criteria.
+- [x] S4. Rollback procedure documented. — **Green (Run 394)**: `docs/release/public-devnet/recovery/ROLLBACK_PROCEDURE.md` is fail-closed on unsafe state edits (no hand-edit of trust/authority/sequence/marker state), rolls back only under matching genesis/data assumptions, and prefers wipe-and-rejoin when compatibility is uncertain.
 - [ ] S5. Status page or aggregate health view.
 - [ ] S6. Alert-rule definitions / scrape config shipped alongside the metrics baseline.
 - [~] S7. Seed-node operational runbook (operating the published seeds). — **Yellow (Run 392)**: a seed-node operations runbook, an M4 Route-A deployment checklist, and a reachability evidence template are published (`docs/release/public-devnet/network/SEED_NODE_OPERATIONS.md`, `M4_ROUTE_A_DEPLOYMENT_CHECKLIST.md`, `SEED_REACHABILITY_EVIDENCE_TEMPLATE.md`) and verified against the real `qbind-node` CLI/help + seed-list schema surfaces. Operating a **live** seed still depends on M4 (no externally reachable seed exists), so S7 stays Yellow, not Green.
@@ -748,8 +767,8 @@ Each item must be genuinely **Green** and evidenced before public DevNet launch.
 | M15 | Ops | `docs/release/public-devnet/ops/RESET_POLICY.md` (Run 390); CLI `--authority-state-reset`, `crates/qbind-node/src/pqc_authority_state_reset.rs` |
 | M16 | Ops | `docs/release/public-devnet/ops/INCIDENT_RESPONSE.md` (Run 390), `docs/ops/QBIND_INCIDENT_RESPONSE.md`, `docs/ops/QBIND_OPERATOR_DRILL_CATALOG.md` |
 | M18 | Docs | This document §3 |
-| S1, S2 | Ops | `docs/ops/QBIND_BACKUP_AND_RECOVERY_BASELINE.md`, `crates/qbind-ledger/src/state_snapshot.rs` |
-| S3, S4 | Release mgmt | `docs/release/QBIND_RELEASE_TRACK_SPEC.md`; no staged upgrade/rollback runbook yet |
+| S1, S2 | Ops | `docs/release/public-devnet/recovery/BACKUP_RESTORE.md`, `DATA_RETENTION.md` (Run 394); `docs/ops/QBIND_BACKUP_AND_RECOVERY_BASELINE.md`, `crates/qbind-ledger/src/state_snapshot.rs` |
+| S3, S4 | Release mgmt | `docs/release/public-devnet/recovery/UPGRADE_PROCEDURE.md`, `ROLLBACK_PROCEDURE.md` (Run 394); `docs/release/QBIND_RELEASE_TRACK_SPEC.md` |
 | N1, N2, N3 | Governance / custody | `docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md`, `docs/protocol/QBIND_GOVERNANCE_EXECUTION_RUNTIME_SURFACE_AUDIT.md` |
 | N5, N6 | Protocol eng | `docs/protocol/QBIND_C4_C5_CLOSURE_CRITERIA.md` |
 
@@ -782,10 +801,10 @@ Legend: 🟢 Green (evidenced enough for public DevNet) · 🟡 Yellow (partial 
 | M18 user-facing disclaimers | 🟢 | **Run 358:** §3 safety label published in operator-facing material (`docs/release/public-devnet/operator/SAFETY.md` + every operator-doc header), not only in this internal matrix. |
 | M19 network parameter publication | 🟢 | **Run 356:** `devnet-network-parameters.md` published as canonical operator artifact, checked against genesis + `QBIND_DEVNET_CHAIN_ID`. |
 | M20 genesis hash publication | 🟢 | **Run 356:** canonical hash `0x48b3a862…af18145f` published + verifiable via `--print-genesis-hash` / `--expect-genesis-hash`. |
-| S1 snapshot / backup / restore | 🟡 | Creation supported; restore path partial. |
-| S2 data retention | 🟡 | Baseline exists; DevNet retention not formalized. |
-| S3 upgrade procedure | 🟡 | Release track spec exists; no staged upgrade runbook. |
-| S4 rollback procedure | 🟡 | Authority reset only; no staged rollback runbook. |
+| S1 snapshot / backup / restore | 🟢 | **Run 394:** public-DevNet backup/restore baseline published (`docs/release/public-devnet/recovery/BACKUP_RESTORE.md`), verified against real pre-existing snapshot/restore CLI surfaces. Best-effort DevNet convenience; no data-permanence guarantee; wipe-and-rejoin default. |
+| S2 data retention | 🟢 | **Run 394:** DevNet data-retention posture published (`docs/release/public-devnet/recovery/DATA_RETENTION.md`) — explicit reset / no-SLA / no-value, best-effort windows, redaction rules, reset-policy cross-link. |
+| S3 upgrade procedure | 🟢 | **Run 394:** binary upgrade / rolling-restart procedure published (`docs/release/public-devnet/recovery/UPGRADE_PROCEDURE.md`), tied to release provenance verification + genesis pinning. |
+| S4 rollback procedure | 🟢 | **Run 394:** rollback procedure published (`docs/release/public-devnet/recovery/ROLLBACK_PROCEDURE.md`), fail-closed on unsafe state edits; wipe-and-rejoin when compatibility uncertain. |
 | S5 status page | 🔴 | None. |
 | S6 alert rules / scrape config | 🔴 | None shipped. |
 | S7 seed-node runbook | 🟡 | **Run 392:** seed-node operations runbook + M4 Route-A deployment checklist + reachability evidence template published (`docs/release/public-devnet/network/SEED_NODE_OPERATIONS.md`, `M4_ROUTE_A_DEPLOYMENT_CHECKLIST.md`, `SEED_REACHABILITY_EVIDENCE_TEMPLATE.md`), verified against real CLI/help + seed-list schema. Operating a live seed remains M4-gated. |
@@ -911,10 +930,10 @@ Columns: item · release stage · category · status · evidence source · block
 | reset policy | DevNet | ops | 🟢 | `docs/release/public-devnet/ops/RESET_POLICY.md` (Run 390); CLI `--authority-state-reset` | Published + verified | — | Done (Run 390) |
 | incident response | DevNet | ops | 🟢 | `docs/release/public-devnet/ops/INCIDENT_RESPONSE.md` (Run 390) + internal `QBIND_INCIDENT_RESPONSE.md` | Public-DevNet-scoped process published (reconciled) | — | Done (Run 390) |
 | abuse handling | DevNet | security | 🟡 | `peer_rate_limiter.rs` | Public thresholds unpublished | DoS/flooding | Abuse-posture doc run |
-| snapshot / backup / restore | DevNet | ops | 🟡 | `state_snapshot.rs`, backup baseline | Restore path partial | Data loss on reset | Should-have run |
-| data retention | DevNet | ops | 🟡 | backup baseline | DevNet retention not formalized | Unclear retention | Should-have run |
-| upgrade procedure | DevNet | ops | 🟡 | `QBIND_RELEASE_TRACK_SPEC.md` | No staged upgrade runbook | Botched upgrades | Should-have run |
-| rollback procedure | DevNet | ops | 🟡 | authority reset only | No staged rollback runbook | Unrecoverable bad upgrade | Should-have run |
+| snapshot / backup / restore | DevNet | ops | 🟢 | `docs/release/public-devnet/recovery/BACKUP_RESTORE.md` (Run 394); `--restore-from-snapshot`, `state_snapshot.rs` | Published + verified (best-effort DevNet convenience) | Data loss on reset (accepted; wipe-and-rejoin default) | Done (Run 394) |
+| data retention | DevNet | ops | 🟢 | `docs/release/public-devnet/recovery/DATA_RETENTION.md` (Run 394) | Published (reset / no-SLA / no-value explicit) | — | Done (Run 394) |
+| upgrade procedure | DevNet | ops | 🟢 | `docs/release/public-devnet/recovery/UPGRADE_PROCEDURE.md` (Run 394) | Published + tied to release provenance | — | Done (Run 394) |
+| rollback procedure | DevNet | ops | 🟢 | `docs/release/public-devnet/recovery/ROLLBACK_PROCEDURE.md` (Run 394) | Published + fail-closed on unsafe state edits | — | Done (Run 394) |
 | public documentation | DevNet | docs | 🟡 | `README.md`, operational guide | No external how-to-run | Operators cannot self-serve | Public docs run |
 | user-facing disclaimers | DevNet | docs | 🟡 | this doc §3 | Not in release material | Misperceived value/stability | Publish label |
 | network parameter publication | DevNet | network | 🟢 | `devnet-network-parameters.md` (Run 356) | Published + checked vs source | Config divergence | Done (Run 356) |
