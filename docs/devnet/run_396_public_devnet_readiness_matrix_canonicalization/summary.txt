@@ -1,0 +1,96 @@
+== Run 396 readiness matrix canonicalization verifier ==
+Document under test: docs/release/QBIND_PUBLIC_DEVNET_READINESS_CRITERIA.md
+
+-- 1. No stale 'None shipped' row remains for S6 --
+  [PASS] S6/alert-rules table row is not Red+None-shipped
+  [PASS] S6 status row is Green in the current-status table
+
+-- 2. No stale Red row remains for S1/S2/S3/S4/S6 --
+  [PASS] S1 snapshot/backup/restore is Green
+  [PASS] S2 data retention is Green
+  [PASS] S3 upgrade procedure is Green
+  [PASS] S4 rollback procedure is Green
+  [PASS] no S1..S4/S6 status row is Red
+
+-- 3. No stale Yellow row remains for M5/M7..M20 (in §10 status table and §16 gap matrix) --
+  [PASS] §10 row Green: M5 validator onboarding
+  [PASS] §10 row Green: M7 key-management
+  [PASS] §10 row Green: M8 trust-bundle bootstrap
+  [PASS] §10 row Green: M9 PQC root / signing-key guidance
+  [PASS] §10 row Green: M10 public P2P port posture
+  [PASS] §10 row Green: M11 peer admission policy
+  [PASS] §10 row Green: M12 abuse / DoS protections
+  [PASS] §10 row Green: M13 telemetry / metrics
+  [PASS] §10 row Green: M14 monitoring / alerting
+  [PASS] §10 row Green: M15 reset policy
+  [PASS] §10 row Green: M16 incident response
+  [PASS] §10 row Green: M17 public documentation
+  [PASS] §10 row Green: M18 user-facing disclaimers
+  [PASS] §10 row Green: M19 network parameter publication
+  [PASS] §10 row Green: M20 genesis hash publication
+  [PASS] §16 validator onboarding not Yellow/Red
+  [PASS] §16 key-management not Yellow/Red
+  [PASS] §16 trust-bundle bootstrap not Yellow/Red
+  [PASS] §16 PQC root/signing-key not Yellow/Red
+  [PASS] §16 public P2P port posture not Yellow/Red
+  [PASS] §16 peer admission policy not Yellow/Red
+  [PASS] §16 telemetry / metrics not Yellow/Red
+  [PASS] §16 monitoring / alerting not Yellow/Red
+  [PASS] §16 abuse handling not Yellow/Red
+  [PASS] §16 public documentation not Yellow/Red
+  [PASS] §16 user-facing disclaimers not Yellow/Red
+
+-- 4. M4 remains Yellow / launch-blocking everywhere --
+  [PASS] §10 M4 status row is Yellow
+  [PASS] §16 seed-nodes row is Yellow
+  [PASS] §16 seed-nodes row is not Red
+  [PASS] M4 described as launch blocker
+
+-- 5. M6 remains Yellow / Partial everywhere --
+  [PASS] §10 M6 status row is Yellow
+  [PASS] §16 validator identity row is Yellow
+  [PASS] M6 described as Yellow / Partial
+
+-- 6. S5 remains Yellow everywhere --
+  [PASS] §10 S5 status row is Yellow
+  [PASS] §16 status page row is Yellow
+  [PASS] S5 not marked Green in checklist
+
+-- 7. S7 remains Yellow everywhere --
+  [PASS] §10 S7 status row is Yellow
+  [PASS] S7 checklist item is Yellow (unchecked)
+
+-- 8. Public DevNet remains NOT launch-ready everywhere --
+  [PASS] explicit NOT launch-ready statement
+  [PASS] no positive launch-ready claim
+
+-- 9. C4/C5 remain OPEN everywhere --
+  [PASS] C4 remains OPEN
+  [PASS] C5 remains OPEN
+  [PASS] no C4 closure claim
+  [PASS] no C5 closure claim
+
+-- 10. No TestNet/MainNet readiness claim appears --
+  [PASS] no TestNet readiness claim
+  [PASS] no MainNet readiness claim
+
+-- 11. No new launch/faucet/RPC/explorer/status-service DEPLOYMENT claim appears --
+  [PASS] no faucet deployment claim
+  [PASS] no RPC gateway deployment claim
+  [PASS] no explorer deployment claim
+  [PASS] no live status-service deploy claim
+
+-- 12. Changed files contain no secrets / raw material / absolute paths --
+  [PASS] no secrets in docs/release/QBIND_PUBLIC_DEVNET_READINESS_CRITERIA.md
+  [PASS] no host absolute paths in docs/release/QBIND_PUBLIC_DEVNET_READINESS_CRITERIA.md
+  [PASS] secret/abs-path self-scan skipped for the verifier script itself (scripts/devnet/run_396_public_devnet_readiness_matrix_canonicalization.sh)
+  [PASS] no secrets in docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_396.md
+  [PASS] no host absolute paths in docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_396.md
+  [PASS] no secrets in docs/devnet/run_396_public_devnet_readiness_matrix_canonicalization/README.md
+  [PASS] no host absolute paths in docs/devnet/run_396_public_devnet_readiness_matrix_canonicalization/README.md
+  [PASS] no secrets in docs/devnet/run_396_public_devnet_readiness_matrix_canonicalization/summary.txt
+  [PASS] no host absolute paths in docs/devnet/run_396_public_devnet_readiness_matrix_canonicalization/summary.txt
+
+== Summary: 66 checks, 0 failure(s) ==
+RESULT=POSITIVE
+VERDICT=PASS — public-DevNet readiness matrix canonicalization POSITIVE

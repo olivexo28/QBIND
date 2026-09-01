@@ -1,5 +1,18 @@
 # QBIND Public DevNet Readiness Criteria and Gap Matrix
 
+> **Run 396 — readiness-matrix canonicalization / stale-row cleanup (docs + verification harness only; Route A).**
+> This run does **not** change any readiness semantics or add functionality. It reconciles the document so every
+> checklist, status table, gap matrix, blocker summary, and next-run recommendation agrees with the canonical
+> per-item status established by Runs 356–395. The §10 current-status table (and §4/§5 checklists) are the source
+> of truth; the older §16 consolidated gap matrix and §17 summary carried legacy statuses for items already
+> updated by later runs and are reconciled here. **Canonical status after Run 395:** must-haves **M1–M3, M5,
+> M7–M20 Green**, **M4 Yellow / launch-blocking**, **M6 Yellow / Partial**; should-haves **S1–S4, S6 Green**,
+> **S5 Yellow**, **S7 Yellow**; **public DevNet remains NOT launch-ready**; **C4 and C5 remain OPEN**;
+> TestNet/MainNet untouched (N1–N7 Red). No public CLI flag, no Rust/`build.rs`/runtime change; no
+> seed/bootnode/faucet/RPC/explorer/status-service deployment. Verified by
+> `scripts/devnet/run_396_public_devnet_readiness_matrix_canonicalization.sh`; evidence
+> `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_396.md`.
+
 **Status:** Canonical (Run 355 deliverable — public network release-readiness track, kickoff; updated Run 356 —
 M1/M19/M20 moved to Green with the published DevNet genesis package; updated Run 357 — M4 moved Red → Yellow with
 the published seed-list format + placeholder artifact, M4 remains a launch blocker; updated Run 358 —
@@ -883,10 +896,12 @@ trust-root bootstrap+PQC guidance together; monitoring+alerting together; port p
 
 ## 12. Public DevNet launch blocker summary
 
-Public DevNet is **NOT yet launch-ready**. As of **Run 390**, the remaining launch blocker among the tracked
-must-haves is **M4** (Yellow, seed/bootnodes) with **M6** Yellow/Partial (identity); **M7, M8, M9** are Green
-(Run 389), **M12** is Green (Run 371), **M13/M14** are Green (Run 379+), and **M15/M16** are Green (Run 390 —
-reset policy published; incident-response reconciled). The launch blockers are, at minimum:
+Public DevNet is **NOT yet launch-ready**. As of **Run 395 (reconciled Run 396)**, the remaining launch blocker
+among the tracked must-haves is **M4** (Yellow, seed/bootnodes) with **M6** Yellow/Partial (identity); **M7, M8,
+M9** are Green (Run 389), **M12** is Green (Run 371), **M13/M14** are Green (Run 379+), and **M15/M16** are Green
+(Run 390 — reset policy published; incident-response reconciled). Among the non-blocking should-haves, **S1–S4**
+are Green (Run 394) and **S6** is Green (Run 395, reconciled), while **S5** (status page) and **S7** (seed-node
+runbook) remain Yellow (both live-status/live-seed paths are M4-gated). The launch blockers are, at minimum:
 
 - **Red:** *(none among the tracked must-haves — M3 moved to Green in Run 359).*
 - **Yellow (must reach Green):** M4 (seed/bootnodes — format+placeholder landed Run 357, external reachability
@@ -936,30 +951,30 @@ Columns: item · release stage · category · status · evidence source · block
 | genesis package | DevNet | network | 🟢 | `docs/release/public-devnet/genesis/` (Run 356) | Published + verified | Operators join divergent chains | Done (Run 356) |
 | release binary provenance | DevNet | binary | 🟢 | `docs/release/public-devnet/binary/RELEASE_PROVENANCE.md` (Run 359) | Published + operator-verifiable | Unverifiable binaries | Done (Run 359) |
 | release reproducibility / SHA / BuildID | DevNet | binary | 🟢 | `docs/release/public-devnet/binary/REPRODUCIBILITY.md` (Run 359) | Same-host two-build reproducibility + BuildID recorded | Cannot attest what operators run | Done (Run 359); cross-host/SLSA not claimed |
-| seed nodes / bootnodes | DevNet | network | 🔴 | CLI `--p2p-peer` | No published seeds/discovery | Outsiders cannot join | Publish seed-list format + list |
-| validator onboarding | DevNet | docs | 🟡 | `QBIND_DEVNET_OPERATIONAL_GUIDE.md` | No external quickstart | Onboarding failures/misconfig | Author external quickstart |
-| validator identity | DevNet | security | 🟡 | `cli.rs`, `peer_key_provider.rs` | No identity guide | Identity collisions/misconfig | Identity guide run |
-| validator key-management guidance | DevNet | security | 🟡 | `--signer-mode`, `qbind-remote-signer` | No consolidated guide | Key mishandling | Key-management guide run |
-| trust-bundle bootstrap | DevNet | security | 🟡 | `pqc_trust_bundle.rs`, PQC runbook | DevNet root bootstrap unpublished | Trust misconfiguration | Trust-root bootstrap run |
-| PQC root / signing-key guidance | DevNet | security | 🟡 | CLI trust-root flags, PQC runbook | DevNet guidance not consolidated | Weak/incorrect roots | Fold into bootstrap run |
+| seed nodes / bootnodes | DevNet | network | 🟡 | `docs/release/public-devnet/network/` (Run 357; preflight Run 377; Route-C external Runs 378/388/391/393) | Format + placeholder + preflight candidate published; external reachability NOT proven | Outsiders cannot join a live seed | **Launch blocker** — deploy a live externally reachable seed + capture off-host reachability evidence (M4) |
+| validator onboarding | DevNet | docs | 🟢 | `docs/release/public-devnet/operator/QUICKSTART.md` (Run 358) | External quickstart published + CLI-validated | Onboarding failures/misconfig | Done (Run 358) |
+| validator identity | DevNet | security | 🟡 | `docs/release/public-devnet/operator/IDENTITY.md`, `docs/release/public-devnet/identity/`, `identity_cli.rs` (Run 358/374/375/376) | Guidance + first-class `identity` generate/verify/register-check Green-for-scope; live registration M4-gated, root reuse/rotation C4/C5-OPEN | Identity collisions/misconfig | Live registration path (M4-gated) + operator-root reuse/rotation |
+| validator key-management guidance | DevNet | security | 🟢 | `docs/release/public-devnet/security/KEY_MANAGEMENT.md` (Run 389) | Consolidated guide published + verified (Green-for-scope; no MainNet custody) | Key mishandling | Done (Run 389) |
+| trust-bundle bootstrap | DevNet | security | 🟢 | `docs/release/public-devnet/security/PQC_TRUST_BOOTSTRAP.md` (Run 389) | DevNet root bootstrap published + reload-check verified (no live apply) | Trust misconfiguration | Done (Run 389) |
+| PQC root / signing-key guidance | DevNet | security | 🟢 | `docs/release/public-devnet/security/PQC_ROOT_AND_SIGNING_KEYS.md` (Run 389) | DevNet root/signing-key guidance published + verified (C4/C5 OPEN) | Weak/incorrect roots | Done (Run 389) |
 | faucet | TestNet | ops | ⚪ | n/a (DevNet non-goal) | Deferred | n/a for DevNet | TestNet |
 | RPC gateway | TestNet | network | ⚪ | n/a (DevNet non-goal) | Deferred | n/a for DevNet | TestNet |
 | RPC rate limiting | TestNet | security | ⚪ | n/a | Deferred | n/a for DevNet | TestNet |
-| public P2P port posture | DevNet | network | 🟡 | `cli.rs` (`--p2p-listen-addr`, `--enable-p2p`) | Public exposure posture unpublished | Unintended exposure/NAT issues | Port-posture doc run |
-| peer admission policy | DevNet | security | 🟡 | mutual-auth, trust-bundle gating | Open-network policy unpublished | Eclipse/spam admission | Admission-policy doc run |
-| telemetry / metrics | DevNet | observability | 🟡 | `metrics_http.rs` | Operator exposure doc partial | Blind operations | Metrics exposure guide |
-| monitoring / alerting | DevNet | observability | 🟡 | `QBIND_MONITORING_AND_ALERTING_BASELINE.md` | Alert rules absent | Missed incidents | Ship alert rules |
+| public P2P port posture | DevNet | network | 🟢 | `docs/release/public-devnet/p2p/P2P_PORT_POSTURE.md` (Run 360) | Public exposure/NAT posture published + CLI-validated | Unintended exposure/NAT issues | Done (Run 360) |
+| peer admission policy | DevNet | security | 🟢 | `docs/release/public-devnet/p2p/PEER_ADMISSION_POLICY.md` (Run 360) | Open-network admission policy published + fail-closed matrix | Eclipse/spam admission | Done (Run 360) |
+| telemetry / metrics | DevNet | observability | 🟢 | `docs/release/public-devnet/observability/` (Run 379–381) | Operator exposure guide published + release-binary scrape-verified | Blind operations | Done (Run 379) |
+| monitoring / alerting | DevNet | observability | 🟢 | `docs/release/public-devnet/observability/ALERT_RULES.md`, `prometheus-*.example.yml` (Run 379–381) | Alert rules + scrape config shipped + YAML-verified | Missed incidents | Done (Run 379) |
 | status page | DevNet | observability | 🟡 | `docs/release/public-devnet/status/` (Run 395) | Static decision + health-view schema published; live status M4-gated | No shared health view yet | Deploy live view once M4 Green |
 | explorer | TestNet | observability | ⚪ | n/a | Deferred | n/a for DevNet | TestNet |
 | reset policy | DevNet | ops | 🟢 | `docs/release/public-devnet/ops/RESET_POLICY.md` (Run 390); CLI `--authority-state-reset` | Published + verified | — | Done (Run 390) |
 | incident response | DevNet | ops | 🟢 | `docs/release/public-devnet/ops/INCIDENT_RESPONSE.md` (Run 390) + internal `QBIND_INCIDENT_RESPONSE.md` | Public-DevNet-scoped process published (reconciled) | — | Done (Run 390) |
-| abuse handling | DevNet | security | 🟡 | `peer_rate_limiter.rs` | Public thresholds unpublished | DoS/flooding | Abuse-posture doc run |
+| abuse handling | DevNet | security | 🟢 | `docs/release/public-devnet/p2p/ABUSE_DOS_POSTURE.md`, `peer_rate_limiter.rs` (Run 360–373) | Posture published; both deployed live-socket controls proven (Run 371) | DoS/flooding | Done (Run 371); scoped to abuse/DoS controls only |
 | snapshot / backup / restore | DevNet | ops | 🟢 | `docs/release/public-devnet/recovery/BACKUP_RESTORE.md` (Run 394); `--restore-from-snapshot`, `state_snapshot.rs` | Published + verified (best-effort DevNet convenience) | Data loss on reset (accepted; wipe-and-rejoin default) | Done (Run 394) |
 | data retention | DevNet | ops | 🟢 | `docs/release/public-devnet/recovery/DATA_RETENTION.md` (Run 394) | Published (reset / no-SLA / no-value explicit) | — | Done (Run 394) |
 | upgrade procedure | DevNet | ops | 🟢 | `docs/release/public-devnet/recovery/UPGRADE_PROCEDURE.md` (Run 394) | Published + tied to release provenance | — | Done (Run 394) |
 | rollback procedure | DevNet | ops | 🟢 | `docs/release/public-devnet/recovery/ROLLBACK_PROCEDURE.md` (Run 394) | Published + fail-closed on unsafe state edits | — | Done (Run 394) |
-| public documentation | DevNet | docs | 🟡 | `README.md`, operational guide | No external how-to-run | Operators cannot self-serve | Public docs run |
-| user-facing disclaimers | DevNet | docs | 🟡 | this doc §3 | Not in release material | Misperceived value/stability | Publish label |
+| public documentation | DevNet | docs | 🟢 | `docs/release/public-devnet/operator/` (Run 358) | External how-to-run package published + validated | Operators cannot self-serve | Done (Run 358) |
+| user-facing disclaimers | DevNet | docs | 🟢 | `docs/release/public-devnet/operator/SAFETY.md` + operator-doc headers (Run 358) | §3 safety label published in release material | Misperceived value/stability | Done (Run 358) |
 | network parameter publication | DevNet | network | 🟢 | `devnet-network-parameters.md` (Run 356) | Published + checked vs source | Config divergence | Done (Run 356) |
 | genesis hash publication | DevNet | network | 🟢 | `--print-genesis-hash` + `VERIFY.md` (Run 356) | Canonical hash published | Chain divergence | Done (Run 356) |
 | DevNet authority lifecycle | DevNet | governance | 🟡 | authority-lifecycle evidence runs | Green-for-scope only | Overclaiming readiness | Keep scoped |
@@ -1018,3 +1033,13 @@ defers to the internal `docs/ops/QBIND_INCIDENT_RESPONSE.md`.
 C4 and C5 remain **OPEN**, MainNet authority rotation/revocation remains **Red**, and the Run 353/354 boundary
 remains Green-for-scope only. The most efficient remaining path forward is real external seed reachability
 (M4) plus the M4-gated live identity registration path (M6).
+
+**Canonical current status (as of Run 395, reconciled Run 396).** Must-haves: **M1, M2, M3 Green**; **M4 Yellow /
+launch-blocking**; **M5 Green**; **M6 Yellow / Partial**; **M7, M8, M9 Green (Green-for-scope)**; **M10, M11, M12,
+M13, M14, M15, M16, M17, M18, M19, M20 Green**. Should-haves: **S1, S2, S3, S4 Green**; **S5 Yellow**; **S6 Green**;
+**S7 Yellow**. TestNet-deferred: **T1–T4, T7, T8 N/A / deferred for DevNet**; **T5, T6 Yellow (TestNet-deferred
+boundary-only)**. MainNet-deferred: **N1, N2, N3, N4, N7 Red**; **N5 (C4) OPEN / Red**; **N6 (C5) OPEN / Red**.
+Because at least one must-have (M4) is not Green, **public DevNet remains NOT launch-ready**; C4 and C5 remain
+**OPEN**; no TestNet or MainNet readiness is claimed. Run 396 is a documentation-consistency reconciliation only
+(the §10 status table and §4/§5 checklists are the source of truth); it changes no readiness semantics and adds no
+functionality.
