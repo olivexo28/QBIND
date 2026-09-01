@@ -202,6 +202,11 @@ Run 358 changes **no** P2P wire format, peer-admission logic, or default network
 
   This deletes only your **local** DevNet data directory; it affects no other network.
 
+- **Reset policy + incident response:** the full DevNet **reset policy** (what a network reset means,
+  triggers, notice policy, operator actions, and the reset evidence-record shape) and the
+  public-DevNet **incident-response** process are published in `docs/release/public-devnet/ops/`
+  (`RESET_POLICY.md`, `INCIDENT_RESPONSE.md`; M15/M16, Run 390).
+
 ### 9.1 Optional metrics / observability (M13/M14)
 
 Metrics are **off by default**. To expose a Prometheus `/metrics` endpoint for a

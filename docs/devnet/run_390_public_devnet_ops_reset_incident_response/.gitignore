@@ -1,0 +1,17 @@
+# Run 390 evidence archive — only README.md, summary.txt, and .gitignore are tracked.
+# All per-run artifacts contain absolute paths and ephemeral data and MUST NOT be committed.
+# Captured --help text, logs, metrics dumps, node data dirs, and any generated material are
+# temporary and dev-only; only published-safe hashes and status lines appear in the tracked summary.
+material/
+node-data/
+nodes/
+logs/
+data/
+*.err
+*.log
+*.out
+*.help.txt
+*.kem.sk.bin
+*.key
+*.pem
+metrics*.txt

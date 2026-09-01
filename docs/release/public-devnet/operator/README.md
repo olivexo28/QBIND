@@ -30,6 +30,12 @@ infrastructure, or claiming the network is joinable yet.
 > `README.md` / `SAFETY.md` / `VERIFY.md`). See it after `IDENTITY.md` for signer modes, private-key
 > permissions, trust-bundle bootstrap, and root/signing-key handling.
 
+> **Run 390 — ops package.** DevNet **reset policy** (M15) and **public-DevNet-scoped
+> incident-response** process (M16) for operators are published separately under
+> `docs/release/public-devnet/ops/` (`RESET_POLICY.md`, `INCIDENT_RESPONSE.md`, plus `README.md` /
+> `SAFETY.md` / `VERIFY.md`). See it for when/how DevNet state is wiped, operator actions around a
+> reset, and how DevNet incidents are classified, evidenced (with redaction), and published.
+
 ## Canonical location
 
 This is the canonical location for external public DevNet operator onboarding material. It sits

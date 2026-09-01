@@ -51,6 +51,9 @@ generation/verification package (`docs/release/public-devnet/identity/`), and th
 - P2P posture / admission — `docs/release/public-devnet/p2p/` (`PEER_ADMISSION_POLICY.md`,
   `P2P_PORT_POSTURE.md`, `VERIFY.md`).
 - PQC trust lifecycle runbook — `docs/ops/QBIND_PQC_TRUST_LIFECYCLE_RUNBOOK.md`.
+- Ops (reset policy + incident response) — `docs/release/public-devnet/ops/` (`RESET_POLICY.md`,
+  `INCIDENT_RESPONSE.md`; a suspected key/trust-root compromise is an incident class and a reset
+  trigger).
 - Trust-anchor authority model — `docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md`.
 - C4/C5 closure criteria — `docs/protocol/QBIND_C4_C5_CLOSURE_CRITERIA.md`.
 

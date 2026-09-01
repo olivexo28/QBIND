@@ -1,0 +1,14 @@
+release_binary=OK sha256=5d6ae6210c06acc086b7eedf4b234e57e1525103e2fa69b1633e9418c8c2179f
+build_id=ca7da940e6c1453340d8ee85eb637f908501d90d
+toolchain=rustc 1.98.0 (88d9e12ae 2026-08-18) / cargo 1.98.0 (797e8a9bc 2026-08-05)
+reset_flag=OK (--authority-state-reset defined+offline-dispatched; hidden from --help; no invented flag)
+ops_package_files=OK (README/RESET_POLICY/INCIDENT_RESPONSE/SAFETY/VERIFY present)
+safety_labels=OK (experimental/resettable/no-value label in all 5 ops docs)
+reset_policy_sections=OK (triggers/notice/operator-action/evidence-record/never-silent/authority-state-reset/no-guarantees)
+incident_response_sections=OK (severity/classes/first-response/evidence/redaction/escalation/publication/non-claims)
+cross_links=OK (operator, observability, security, network, internal-incident-response, PQC lifecycle referenced)
+non_claim_grep=OK (no launch-ready / M4-Green / C4-C5-closure / TestNet-MainNet-ready / uptime-SLA claim)
+committed_private_material=NONE (ops package is docs only; no keys/logs/metrics/data dirs)
+readiness_reconciled=OK (M15 🟢; M16 🟢 reconciled; M4 🟡; M6 🟡; public DevNet NOT launch-ready)
+
+RESULT=POSITIVE (M15 DevNet reset policy + M16 public-DevNet incident-response guidance published and verified against real CLI/source surfaces; no production source change; M4/M6 stay Yellow; C4/C5 OPEN; public DevNet NOT launch-ready)
