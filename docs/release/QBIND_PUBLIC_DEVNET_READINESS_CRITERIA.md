@@ -266,6 +266,27 @@ with `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_402.md` and archive
 validator/epoch/sequence/marker/`LivePqcTrustState` state. **No readiness item moves Green** — this run adds
 clarity only. **M4 stays Yellow/launch-blocking; M6 stays Yellow/Partial; S5/S7 stay Yellow; M1–M3/M5/M7–M20
 remain Green; public DevNet stays NOT launch-ready; C4/C5 remain OPEN; MainNet/TestNet untouched.**
+Updated Run 403 — **release package index + operator verification map published; no readiness item moves
+(Route B — docs + verification harness only, no production source change, no `build.rs` change, no new CLI
+flag)**: publishes the operator/reviewer public DevNet **navigation index** — `docs/release/public-devnet/ARTIFACT_INDEX.md`
+(DevNet-only / experimental / resettable / no-value label; thirteen artifact groups — genesis; binary
+provenance/reproducibility/manifest; operator quickstart; identity; P2P/peer admission;
+network/seed-list/M4 checklist; security/PQC trust bootstrap; observability/alerting; ops/reset/incident
+response; recovery/backup/upgrade/rollback; status decision; launch go/no-go; blocker register — each with
+path / purpose / readiness item / verification command or document / current status / non-claims) and
+`docs/release/public-devnet/OPERATOR_VERIFICATION_MAP.md` (recommended read orders for an external operator,
+a security reviewer, and a release manager; an exact verification map for genesis / binary provenance /
+identity / P2P posture / observability / recovery / go-no-go verification; and a four-part launch stop rule:
+no launch while M4/M6 Yellow, no `devnet-seeds.live.json` without real M4 evidence, no TestNet/MainNet
+readiness claim, no C4/C5 closure claim). Verified against the on-disk package tree and this canonical
+readiness matrix by `scripts/devnet/run_403_public_devnet_artifact_index_verification_map.sh`
+(`RESULT=POSITIVE`), with `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_403.md` and archive
+`docs/devnet/run_403_public_devnet_artifact_index_verification_map/`. It adds **no** CLI flag, opens **no**
+port, deploys **no** seed/bootnode/faucet/RPC/explorer/status service, applies **no** trust bundle, and
+mutates **no** validator/epoch/sequence/marker/`LivePqcTrustState` state. **No readiness item moves Green** —
+this run adds navigation + clarity only. **M4 stays Yellow/launch-blocking; M6 stays Yellow/Partial; S5/S7
+stay Yellow; M1–M3/M5/M7–M20 remain Green; public DevNet stays NOT launch-ready; C4/C5 remain OPEN;
+MainNet/TestNet untouched.**
 Updated Run 374 — **M6 materially narrowed but remains Yellow/Partial**: a stable, release-built operator-facing
 identity **generation + verification** package is published under
 `docs/release/public-devnet/identity/` (`README.md`, `IDENTITY_GENERATION.md`, `IDENTITY_VERIFY.md`,

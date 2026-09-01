@@ -1,0 +1,120 @@
+# QBIND Public DevNet — Operator Verification Map (Run 403)
+
+> **Safety label:** DevNet · experimental · resettable · no value · no uptime SLA ·
+> NOT public-DevNet launch-ready · no M4 Green · no M6 fully-Green · no S5 Green ·
+> no S7 Green · no TestNet readiness · no MainNet readiness · **C4/C5 OPEN** ·
+> no C4/C5 closure claim.
+
+This is the operator/reviewer **verification map** for the QBIND public DevNet
+release package. It gives a recommended **read order** for three audiences, an
+**exact verification map** (what to run / read to verify each artifact), and a
+clear **launch stop rule**. It is the companion to
+`docs/release/public-devnet/ARTIFACT_INDEX.md` (the navigation index). It is
+**docs-only**: it deploys nothing, starts no node, opens no port, adds no CLI
+flag, changes no runtime behavior, and moves **no** readiness item Green.
+
+Source of truth for item status is the canonical readiness matrix
+`docs/release/QBIND_PUBLIC_DEVNET_READINESS_CRITERIA.md`. The current launch
+decision is **NO-GO / NOT launch-ready** (`LAUNCH_GO_NO_GO.md`).
+
+## 1. Recommended read order — external operator
+
+1. `docs/release/public-devnet/ARTIFACT_INDEX.md` — find every artifact.
+2. `docs/release/public-devnet/operator/SAFETY.md` — understand the DevNet safety
+   envelope (experimental, resettable, no value, no SLA).
+3. `docs/release/public-devnet/operator/QUICKSTART.md` — bring up a local node.
+4. `docs/release/public-devnet/genesis/VERIFY.md` — verify + pin genesis.
+5. `docs/release/public-devnet/binary/VERIFY.md` — verify the release binary.
+6. `docs/release/public-devnet/identity/IDENTITY_GENERATION.md` +
+   `identity/IDENTITY_CONTINUITY.md` — generate a durable identity.
+7. `docs/release/public-devnet/security/KEY_MANAGEMENT.md` +
+   `security/PQC_TRUST_BOOTSTRAP.md` — key handling + trust bootstrap.
+8. `docs/release/public-devnet/observability/RUNBOOK.md` — metrics + alerts.
+9. `docs/release/public-devnet/ops/RESET_POLICY.md` +
+   `recovery/BACKUP_RESTORE.md` — reset / backup / recovery.
+10. `docs/release/public-devnet/LAUNCH_GO_NO_GO.md` — confirm the **NO-GO** posture
+    before attempting anything network-facing.
+
+## 2. Recommended read order — security reviewer
+
+1. `docs/release/public-devnet/ARTIFACT_INDEX.md` — scope of artifacts.
+2. `docs/release/public-devnet/security/PQC_ROOT_AND_SIGNING_KEYS.md` +
+   `security/KEY_MANAGEMENT.md` — root/signing-key + key-management posture.
+3. `docs/release/public-devnet/security/PQC_TRUST_BOOTSTRAP.md` — PQC trust
+   bootstrap.
+4. `docs/release/public-devnet/p2p/PEER_ADMISSION_POLICY.md` +
+   `p2p/P2P_PORT_POSTURE.md` + `p2p/ABUSE_DOS_POSTURE.md` — admission + DoS posture.
+5. `docs/release/public-devnet/identity/ROTATION_REVOCATION_DEFERRAL.md` — why
+   production rotation/revocation is deferred (C4/C5).
+6. `docs/release/public-devnet/binary/RELEASE_PROVENANCE.md` +
+   `binary/REPRODUCIBILITY.md` — provenance + reproducibility.
+7. `docs/protocol/QBIND_C4_C5_CLOSURE_CRITERIA.md` — C4/C5 closure criteria (**OPEN**).
+8. `docs/whitepaper/contradiction.md` — contradiction ledger.
+9. `docs/release/public-devnet/BLOCKER_REGISTER.md` — open blockers.
+
+## 3. Recommended read order — release manager
+
+1. `docs/release/QBIND_PUBLIC_DEVNET_READINESS_CRITERIA.md` — the canonical matrix.
+2. `docs/release/public-devnet/ARTIFACT_INDEX.md` — package coverage.
+3. `docs/release/public-devnet/LAUNCH_GO_NO_GO.md` — the decision gate.
+4. `docs/release/public-devnet/BLOCKER_REGISTER.md` — M4 / M6 / S5 / S7 blockers.
+5. `docs/release/public-devnet/network/M4_ROUTE_A_DEPLOYMENT_CHECKLIST.md` — the
+   exact M4 Green prerequisites.
+6. `docs/release/public-devnet/network/SEED_REACHABILITY_EVIDENCE_TEMPLATE.md` — the
+   reachability evidence format M4 requires.
+7. `docs/release/public-devnet/status/STATUS_PAGE_DECISION.md` — S5 deferral.
+8. `docs/protocol/QBIND_C4_C5_CLOSURE_CRITERIA.md` +
+   `docs/whitepaper/contradiction.md` — C4/C5 + contradiction ledger.
+
+## 4. Exact verification map
+
+| Verify | How | Reference | Item / status |
+| ------ | --- | --------- | ------------- |
+| **Genesis verification** | `sha256sum devnet-genesis.json` matches `devnet-genesis.sha256`; pin node with `--expect-genesis-hash`. | `genesis/VERIFY.md` | M1/M19/M20 — Green |
+| **Binary provenance verification** | Verify `qbind-node.sha256`; follow provenance + reproducibility; validate the release artifact manifest against its schema. | `binary/VERIFY.md`, `run_383…`, `run_384…`, `run_385…` | M2/M3 — Green |
+| **Identity verification** | `qbind-node identity verify` / `print-public` / non-mutating `register-check`; check continuity guidance. | `identity/IDENTITY_VERIFY.md`, `run_375…`, `run_376…`, `run_401…` | M6 — **Yellow / Partial** |
+| **P2P posture verification** | Review port posture + admission policy + abuse/DoS posture; exercise the release-binary abuse/DoS harnesses. | `p2p/VERIFY.md`, `run_367…`, `run_368…` | M10/M11/M12 — Green-for-scope |
+| **Observability verification** | Scrape loopback `/metrics`; validate scrape + alert examples; follow the runbook. | `observability/VERIFY.md`, `run_379…`, `run_381…` | M13/M14 — Green |
+| **Recovery verification** | Follow backup/restore, upgrade, rollback, data-retention procedures on a local DevNet. | `recovery/VERIFY.md`, `run_394…` | recovery pkg — Green-for-scope |
+| **Go/no-go verification** | Run the go/no-go gate harness; confirm decision is **NO-GO** and blockers are M4/M6/S5/S7. | `run_402_public_devnet_launch_go_no_go_gate.sh` | launch gate — **NO-GO** |
+
+(Harness scripts live under `scripts/devnet/`; the `run_NNN…` shorthand above
+refers to `scripts/devnet/run_NNN_*.sh`.)
+
+## 5. Launch stop rule
+
+Read and obey these stops before doing anything network-facing:
+
+1. **Do not attempt launch while M4 / M6 are Yellow.** The launch decision is
+   **NO-GO** (`LAUNCH_GO_NO_GO.md`). GO requires **every** must-have (M1–M20) Green
+   **and** launch explicitly in scope. Neither holds today.
+2. **Do not create `devnet-seeds.live.json` without real M4 evidence.** Only a
+   `devnet-seeds.placeholder.json` and a `devnet-seeds.live-candidate.json` exist.
+   A live seed-list requires a timestamped external TCP dial **and** external
+   KEMTLS mutual-auth + PQC static-root handshake from a **genuinely independent
+   off-host vantage** (not same-host / same-NAT / same-VPC / RFC 5737), matching
+   the published `node_id`, per
+   `network/SEED_REACHABILITY_EVIDENCE_TEMPLATE.md` and
+   `network/M4_ROUTE_A_DEPLOYMENT_CHECKLIST.md`.
+3. **Do not claim TestNet / MainNet readiness.** N1–N7 remain **Red**; `identity
+   generate` refuses `mainnet` / `testnet`. No TestNet/MainNet artifact is created
+   or implied.
+4. **Do not claim C4 / C5 closure.** **C4 remains OPEN. C5 remains OPEN.** Production
+   key rotation/revocation is **deferred**, not delivered
+   (`identity/ROTATION_REVOCATION_DEFERRAL.md`,
+   `docs/protocol/QBIND_C4_C5_CLOSURE_CRITERIA.md`). See also
+   `docs/whitepaper/contradiction.md`.
+
+## 6. Cross-references
+
+- `docs/release/public-devnet/ARTIFACT_INDEX.md` — artifact navigation index.
+- `docs/release/public-devnet/LAUNCH_GO_NO_GO.md` — launch decision gate.
+- `docs/release/public-devnet/BLOCKER_REGISTER.md` — blocker register.
+- `docs/release/QBIND_PUBLIC_DEVNET_READINESS_CRITERIA.md` — canonical readiness matrix.
+- `docs/release/public-devnet/network/M4_ROUTE_A_DEPLOYMENT_CHECKLIST.md` — M4 Green checklist.
+- `docs/release/public-devnet/network/SEED_REACHABILITY_EVIDENCE_TEMPLATE.md` — reachability evidence format.
+- `docs/release/public-devnet/identity/IDENTITY_CONTINUITY.md` — operator identity continuity (M6).
+- `docs/release/public-devnet/identity/ROTATION_REVOCATION_DEFERRAL.md` — rotation/revocation deferral (M6).
+- `docs/release/public-devnet/status/STATUS_PAGE_DECISION.md` — status-page decision (S5).
+- `docs/protocol/QBIND_C4_C5_CLOSURE_CRITERIA.md` — C4/C5 closure criteria.
+- `docs/whitepaper/contradiction.md` — contradiction ledger.

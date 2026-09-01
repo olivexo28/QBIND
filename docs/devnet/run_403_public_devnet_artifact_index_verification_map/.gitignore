@@ -1,0 +1,20 @@
+# Run 403 evidence archive — only README.md, summary.txt, and .gitignore are tracked.
+# All per-run artifacts contain absolute paths and ephemeral data and MUST NOT be committed.
+# Only publish-safe document hashes and OK/POSITIVE status lines appear in the tracked summary.
+material/
+node/
+nodes/
+logs/
+data/
+*.err
+*.log
+*.out
+*.help.txt
+*.usage.txt
+*.kem.sk.bin
+*.cert.bin
+*.key
+*.pem
+*.public.json
+*.candidate.json
+metrics*.txt

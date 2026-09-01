@@ -15,6 +15,10 @@ no node, opens no port, adds no CLI flag, changes no runtime behavior, and moves
 
 Companion documents:
 
+- `docs/release/public-devnet/ARTIFACT_INDEX.md` — the release-package navigation
+  index (every artifact: path / purpose / readiness item / verify / status).
+- `docs/release/public-devnet/OPERATOR_VERIFICATION_MAP.md` — recommended read
+  orders + the exact verification map + the launch stop rule.
 - `docs/release/public-devnet/BLOCKER_REGISTER.md` — the itemized blocker register
   (owner / action / evidence-needed / status).
 - `docs/release/QBIND_PUBLIC_DEVNET_READINESS_CRITERIA.md` — the canonical
