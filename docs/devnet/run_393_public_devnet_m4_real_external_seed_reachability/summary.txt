@@ -1,0 +1,17 @@
+release_binary=OK sha256=9062d5b5f03bcc4d6b2ee021e76568d7783f7f4e2e18baa2f0da9b627b62fec0
+build_id=bd22f0766824977d8becc09af39416cdacd84a0e
+toolchain=rustc 1.98.0 (88d9e12ae 2026-08-18) / cargo 1.98.0 (797e8a9bc 2026-08-05)
+identity_generate_seed=OK node_id=051b0f0164d75203ece293c45925670d14ac7cf60b25be6237ffcb14f1adac7a (kem_sk 0600; no root signing key on disk)
+register_check_live_accept=OK (cert-verified; status=live admitted WITH reachability ref; command makes no live/M4/C4/C5 claim)
+live_without_reachability=REFUSED (fail closed; no live/M4 claim)
+planned_with_reachability=REFUSED (fail closed; schema forbids reachability on non-live)
+loopback_preflight=OK ts=2026-09-01T08:43:01Z target=127.0.0.1:36643 route=loopback/same-host tcp_dial=accepted
+external_tcp_reachability=NOT_PROVEN (Route C: no external ingress / no independent off-host vantage point in this environment)
+external_kemtls_reachability=NOT_PROVEN (Route C: no external endpoint / no independent off-host vantage point; not fabricated)
+observed_remote_nodeid_match=NOT_CAPTURED (no external observer exists; not fabricated)
+live_candidate_schema_validation=OK (validates; single entry status=planned, no false live claim)
+devnet_seeds_live_json=ABSENT (Route C: not published; no live seed to promote)
+nonclaim_grep=OK (reachability conclusions all false; no positive M4-Green/live/PASS token in tracked Run 393 artifacts)
+committed_private_material=NONE (material/node-data dirs are temporary; removed on exit)
+
+RESULT=NEGATIVE-FOR-EXTERNAL (Route C: no safe external seed infrastructure available; live admission gate proven + loopback preflight only; external TCP + KEMTLS reachability NOT proven; no devnet-seeds.live.json; M4 stays Yellow; C4/C5 OPEN)

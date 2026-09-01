@@ -254,3 +254,26 @@ observability, ops, genesis, and readiness docs are present; (7) the non-claim g
 private/raw artifact is committed. This run is **docs + verification harness only**: it deploys no
 seed, exposes no external endpoint, and **does not move M4 Green or M6 Green**. See
 `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_392.md`.
+
+## 14. Run 393 — real-external-reachability execution (Route C)
+
+Run 393 executed the Route A objective (real external TCP + KEMTLS/static-root reachability from an
+independent off-host vantage point) following the Run 392 runbook / M4 Route-A checklist and reached the
+**same Route C finding** as Run 378/388/391 (no external ingress / no independent off-host vantage point).
+Reproduce with:
+
+```bash
+bash scripts/devnet/run_393_public_devnet_m4_real_external_seed_reachability.sh
+```
+
+Expected: `RESULT=NEGATIVE-FOR-EXTERNAL (Route C)`. The harness confirms (1) the release build
+(`--locked`) with SHA-256 / ELF BuildID / toolchain; (2) `identity generate devnet seed` produces real
+public `node_id`/`peer_id` (KEM secret `0600`; no root signing key on disk); (3) `register-check --status
+live --reachability-evidence <ref>` accepts a cert-verified live candidate while asserting no
+live/M4/C4/C5 claim; (4) `--status live` without evidence and `--status planned` with evidence both fail
+closed; (5) a real loopback `qbind-node` P2P listener accepts a same-host TCP dial (external reachability
+`NOT_PROVEN`); (6) `devnet-seeds.live-candidate.json` still validates and stays non-live, and no
+`devnet-seeds.live.json` is published; (7) the non-claim grep passes; and (8) no private/raw artifact is
+committed. External reachability is **not proven**, so **M4 stays Yellow**. Route A prerequisites are in
+`docs/release/public-devnet/network/reachability/RUN_393_qbind-devnet-seed-1.md` §15. See
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_393.md`.
