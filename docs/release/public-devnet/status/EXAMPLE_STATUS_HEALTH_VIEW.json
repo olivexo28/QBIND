@@ -1,0 +1,63 @@
+{
+  "schema_version": "1.0.0",
+  "network": "qbind-public-devnet",
+  "safety": {
+    "environment": "devnet",
+    "experimental": true,
+    "resettable": true,
+    "has_value": false,
+    "uptime_sla": false,
+    "launch_ready": false,
+    "testnet_ready": false,
+    "mainnet_ready": false,
+    "c4_closed": false,
+    "c5_closed": false,
+    "example_data_only": true
+  },
+  "generated_at": "2026-09-01T00:00:00Z",
+  "data_source": "static-example",
+  "genesis": {
+    "chain_id": "qbind-devnet",
+    "genesis_hash": "0x48b3a862befe50e31bad5e1e11ba1ad282dc65723b1989e9ce2091b4af18145f"
+  },
+  "build": {
+    "version": "0.0.0-devnet-example",
+    "build_id": "example-build-id",
+    "git_commit": "0000000",
+    "env": "devnet"
+  },
+  "seed_list": {
+    "status": "planned",
+    "published_count": 1,
+    "live_count": 0
+  },
+  "readiness": {
+    "public_devnet_launch_ready": false,
+    "m4": {
+      "label": "seed / bootnode reachability",
+      "status": "yellow"
+    },
+    "m6": {
+      "label": "validator identity",
+      "status": "yellow"
+    }
+  },
+  "metrics_endpoint": {
+    "exposure": "loopback-only",
+    "status": "unknown"
+  },
+  "alerts": {
+    "package": "docs/release/public-devnet/observability/prometheus-alerts.example.yml",
+    "enabled_rules": 11,
+    "future_rules": 1,
+    "firing": 0
+  },
+  "notices": [
+    {
+      "kind": "none",
+      "at": "2026-09-01T00:00:00Z",
+      "summary": "Illustrative example only. No live public DevNet network exists while M4 is Yellow.",
+      "reference": "docs/release/public-devnet/status/STATUS_PAGE_DECISION.md"
+    }
+  ]
+}
