@@ -1,0 +1,188 @@
+Run 395 — Public DevNet status-page decision (S5) + S6 alert/scrape reconciliation
+
+Current state:
+Run 394 is accepted as PASS.
+S1/S2/S3/S4 are Green.
+M4 remains Yellow / launch-blocking.
+M6 remains Yellow/Partial.
+S7 remains Yellow.
+M12/M13/M14/M15/M16 remain Green.
+M7/M8/M9 remain Green-for-scope.
+Public DevNet remains NOT launch-ready.
+C4 remains OPEN.
+C5 remains OPEN.
+TestNet/MainNet remain untouched.
+
+Important known inconsistency:
+The readiness matrix currently keeps S6 “alert-rule definitions / scrape config shipped alongside the metrics baseline” as Red / none shipped, while M14 already records the observability alert rules, scrape config, runbook, and machine-readable prometheus examples as shipped and YAML-verified in Runs 379–381.
+Run 395 must investigate and reconcile this honestly before changing S6.
+
+Objective:
+Resolve the remaining public DevNet should-have status around:
+- S5: status page or aggregate health view.
+- S6: alert-rule definitions / scrape config shipped alongside the metrics baseline.
+
+Do this without touching M4/M6/C4/C5 and without claiming public DevNet launch readiness.
+
+Strict scope:
+Docs + verification harness only unless a tiny static artifact is required.
+No Rust source change unless absolutely necessary.
+No build.rs change.
+No production runtime change.
+No new public CLI flag.
+No external seed deployment.
+No public DevNet launch.
+No M4 Green.
+No M6 Green.
+No live seed operation.
+No faucet/RPC/explorer/status service deployment unless explicitly proven and safe.
+No TestNet/MainNet readiness.
+No C4/C5 closure.
+No trust/validator/epoch/sequence/marker/LivePqcTrustState mutation.
+No peer-driven apply.
+No private material committed.
+
+Required investigation:
+Read:
+- docs/release/QBIND_PUBLIC_DEVNET_READINESS_CRITERIA.md
+- docs/release/public-devnet/observability/README.md
+- docs/release/public-devnet/observability/METRICS.md
+- docs/release/public-devnet/observability/SCRAPE_CONFIG.md
+- docs/release/public-devnet/observability/ALERT_RULES.md
+- docs/release/public-devnet/observability/RUNBOOK.md
+- docs/release/public-devnet/observability/VERIFY.md
+- docs/release/public-devnet/observability/prometheus-scrape.example.yml
+- docs/release/public-devnet/observability/prometheus-alerts.example.yml
+- docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_379.md
+- docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_380.md
+- docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_381.md
+- docs/release/public-devnet/operator/README.md
+- docs/release/public-devnet/ops/INCIDENT_RESPONSE.md
+- docs/release/public-devnet/ops/RESET_POLICY.md
+- docs/release/public-devnet/recovery/README.md
+- docs/protocol/QBIND_C4_C5_CLOSURE_CRITERIA.md
+- docs/whitepaper/contradiction.md
+
+Decision gate:
+Route A:
+If S6 is already fully satisfied by the Run 379–381 observability package, reconcile the readiness matrix by moving S6 Red → Green with citations to the existing shipped files and harness evidence. Do not create duplicate docs.
+
+Route B:
+If S6 needs a clearer public-DevNet “shipped package” wrapper around the existing observability files, add a narrow verification/index document under observability and update the matrix. Do not duplicate the actual alert/scrape content.
+
+Route C:
+If S6’s intended meaning is materially different from M14 and cannot be satisfied by the existing examples, keep S6 Yellow/Red and document the exact missing artifact.
+
+For S5:
+Route A:
+If a static, publish-safe aggregate health view can be provided without live infra, publish a status-page template or static health-view specification and mark S5 Yellow, not Green, unless it is actually wired to live data.
+
+Route B:
+If no live status service exists, publish a “status page decision” document that clearly defers live status page deployment until M4/live network exists, while providing the future status-page schema, fields, redaction rules, and non-claims. This is the expected safe route.
+
+Route C:
+If even a template would create misleading launch/status claims, record S5 as intentionally deferred and keep Red.
+
+Required docs/artifacts:
+Create if justified:
+- docs/release/public-devnet/status/README.md
+- docs/release/public-devnet/status/STATUS_PAGE_DECISION.md
+- docs/release/public-devnet/status/STATUS_HEALTH_VIEW_SCHEMA.json
+- docs/release/public-devnet/status/EXAMPLE_STATUS_HEALTH_VIEW.json
+- docs/release/public-devnet/status/SAFETY.md
+- docs/release/public-devnet/status/VERIFY.md
+
+For S6 reconciliation, either update existing observability docs or create only a narrow:
+- docs/release/public-devnet/observability/SHIPPED_ALERT_SCRAPE_PACKAGE.md
+
+Do not duplicate prometheus YAML unless needed. Prefer referencing the already shipped files.
+
+Status-page / health-view content must include:
+- DevNet-only label;
+- experimental / resettable / no value;
+- no uptime SLA;
+- public DevNet NOT launch-ready;
+- no live seed claim unless M4 is Green;
+- no TestNet/MainNet readiness;
+- no C4/C5 closure;
+- fields for genesis hash, binary build info, seed-list status, M4/M6 status, metrics endpoint status, alerts summary, incidents/reset notices;
+- redaction rules: no private endpoints unless intentionally public, no raw logs, no raw metrics dumps, no secrets, no data dirs, no absolute paths;
+- clear statement that static example data is illustrative only.
+
+Required harness:
+Create:
+- scripts/devnet/run_395_public_devnet_status_s6_reconciliation.sh
+- docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_395.md
+- docs/devnet/run_395_public_devnet_status_s6_reconciliation/{README.md,summary.txt,.gitignore}
+
+Harness must verify:
+- release build only if CLI/help or metric checks are used;
+- status docs/artifacts exist if created;
+- status schema/example JSON validate if created;
+- observability scrape config YAML parses;
+- observability alert rules YAML parses;
+- S6 reconciliation references existing Run 379–381 shipped artifacts correctly;
+- no duplicate or contradictory S6 status remains;
+- no forbidden launch/M4-Green/M6-Green/TestNet/MainNet/C4-C5 claim;
+- no raw logs/metrics/data dirs/private endpoints/absolute paths/secrets committed;
+- readiness matrix changes only S5/S6 as justified.
+
+Readiness rules:
+- S6 may move Red → Green if the already shipped observability alert/scrape package is verified and the duplicate status is reconciled.
+- S6 may move Red → Yellow if only partial packaging/decision evidence exists.
+- S5 should not move Green unless a real, externally usable status page or aggregate health view is deployed or fully publishable and maintained.
+- S5 may move Red → Yellow if a publish-safe static decision/template/schema lands and live status service is explicitly deferred.
+- M4 remains Yellow.
+- M6 remains Yellow/Partial.
+- S7 remains Yellow.
+- Public DevNet remains NOT launch-ready.
+- C4/C5 remain OPEN.
+
+Required tests/checks:
+- bash scripts/devnet/run_395_public_devnet_status_s6_reconciliation.sh
+- YAML parse for prometheus examples
+- JSON Schema validation for status schema/example if created
+- non-claim grep
+- secret scan over changed files
+- cargo test --lib only if Rust source changed; otherwise record no-Rust-delta honestly
+
+CodeQL:
+If docs/YAML/JSON/shell only, record trivial/not meaningful.
+If Rust or build.rs changes, invoke CodeQL if available and record exact result.
+Never call skipped/trivial/timed-out/DB-too-large analysis clean.
+
+Expected verdict:
+PASS / public-DevNet S5/S6 readiness reconciliation POSITIVE if the status decision package and S6 reconciliation land cleanly.
+PARTIAL-POSITIVE if S5 remains Red but S6 is reconciled, or S6 remains Yellow due a real missing artifact.
+NEGATIVE if the run cannot reconcile the matrix without overclaiming.
+
+Final response format:
+1. Exact verdict
+2. Files changed
+3. Decision gate route
+4. S6 investigation result
+5. S6 package/reconciliation
+6. S5 status-page decision
+7. Status/health-view package contents
+8. Schema/example validation
+9. Alert/scrape YAML verification
+10. Cross-link verification
+11. Non-claim checks
+12. Default compatibility
+13. Runtime mutation check
+14. Readiness delta S5
+15. Readiness delta S6
+16. M4 status
+17. M6 status
+18. S7 status
+19. Public DevNet status
+20. Remaining DevNet blockers
+21. TestNet blockers
+22. MainNet blockers
+23. C4/C5
+24. Tests run
+25. Security scans
+26. CodeQL
+27. Provenance
+28. Honest limitations
+29. Suggested Run 396
