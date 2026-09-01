@@ -1,0 +1,15 @@
+release_binary=OK sha256=3d47ccfa50aa4275ee782fe19efcadcdc20dd8adc755187e414ecdcebc4a80ab
+build_id=ee74f1c98d44fefd33dbfe0ee00385c4dcfa2c52
+toolchain=rustc 1.98.0 (88d9e12ae 2026-08-18) / cargo 1.98.0 (797e8a9bc 2026-08-05)
+continuity_docs=OK (IDENTITY_CONTINUITY.md + ROTATION_REVOCATION_DEFERRAL.md present, safety-labelled)
+identity_help_commands=OK (generate/verify/print-public/seed-candidate/register-check present in identity usage)
+identity_surfaces=OK (generate/verify/print-public/seed-candidate/register-check functional; node_id reuse deterministic; leaf secret 0600)
+mainnet_testnet_generation=REFUSED (no material written)
+continuity_sections=OK (durable-identity/may-reuse/no-hand-rotate/material-handling/leaf-secret/node_id/in-memory-root)
+deferral_sections=OK (not-implemented/explicitly-deferred/no-online-revocation/no-CA-lifecycle/C4/C5/MainNet)
+cross_links=OK (C4/C5, trust-anchor, PQC-lifecycle, security/KEY_MANAGEMENT, contradiction referenced)
+non_claim_grep=OK (no launch-ready / M4-M6-Green / C4-C5-closure / TestNet-MainNet-ready / rotation-delivered claim)
+committed_private_material=NONE (identity package is docs/schema only; no keys/logs/metrics/data dirs)
+readiness_reconciled=OK (M4 🟡; M6 🟡; S5 🟡; S7 🟡; C4/C5 OPEN; public DevNet NOT launch-ready)
+
+RESULT=POSITIVE (public-DevNet M6 operator identity continuity + rotation/revocation deferral package published and verified against the real qbind-node identity CLI surfaces; no production source change; M6 stays Yellow/Partial; M4/S5/S7 stay Yellow; C4/C5 OPEN; public DevNet NOT launch-ready)

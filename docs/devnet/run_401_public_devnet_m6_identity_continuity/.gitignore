@@ -1,0 +1,22 @@
+# Run 401 evidence archive — only README.md, summary.txt, and .gitignore are tracked.
+# All per-run artifacts contain absolute paths and ephemeral data and MUST NOT be committed.
+# Captured identity usage text, generated identity material, KEM secret keys, leaf certs, logs,
+# and any node data dirs are temporary and dev-only; only publish-safe hashes and status lines
+# appear in the tracked summary.
+material/
+node/
+nodes/
+logs/
+data/
+*.err
+*.log
+*.out
+*.help.txt
+*.usage.txt
+*.kem.sk.bin
+*.cert.bin
+*.key
+*.pem
+*.public.json
+*.candidate.json
+metrics*.txt
