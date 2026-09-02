@@ -116,8 +116,8 @@
     },
     {
       "relative_path": "ARTIFACT_INDEX.md",
-      "sha256": "f53b253d75d335534f8eaa344dfd603f83db2aed9568167c6c484e9094c7208a",
-      "byte_size": 17067,
+      "sha256": "3cd0a4977ee44da548f80716b88cbd442360123c5ce860fe443ae72f01dc63a7",
+      "byte_size": 18024,
       "artifact_group": "top-level",
       "readiness_item": "package-index",
       "status": "no-go",
@@ -125,8 +125,8 @@
     },
     {
       "relative_path": "OPERATOR_VERIFICATION_MAP.md",
-      "sha256": "3a094401492ca8f5be725a180539d0bbd64149d0f7e95a2ed5e4a73a14ee8f03",
-      "byte_size": 11145,
+      "sha256": "563362dc1e06760b82b0d79aa41501761c1db1cfd34a1f643b83b7887178b611",
+      "byte_size": 12125,
       "artifact_group": "top-level",
       "readiness_item": "verification-map",
       "status": "no-go",
@@ -173,5 +173,5 @@
     "deploys_seed_or_service": false,
     "mutates_runtime_state": false
   },
-  "artifact_safety_label": "experimental \u00b7 resettable \u00b7 no value \u00b7 no uptime SLA \u00b7 NOT public-DevNet launch-ready \u00b7 no MainNet readiness claim \u00b7 no C4/C5 closure claim"
+  "artifact_safety_label": "experimental · resettable · no value · no uptime SLA · NOT public-DevNet launch-ready · no MainNet readiness claim · no C4/C5 closure claim"
 }

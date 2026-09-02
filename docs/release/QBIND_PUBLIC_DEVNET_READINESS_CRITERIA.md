@@ -387,6 +387,37 @@ against the on-disk package tree and this canonical readiness matrix by that har
 validator/epoch/sequence/marker/`LivePqcTrustState` state. **No readiness item moves Green** — this run adds
 audit/reviewer usability only. **M4 stays Yellow/launch-blocking; M6 stays Yellow/Partial; S5/S7 stay Yellow;
 M1–M3/M5/M7–M20 remain Green; public DevNet stays NOT launch-ready; C4/C5 remain OPEN; MainNet/TestNet untouched.**
+Updated Run 408 — **retained anchor-drift history comparator published; no readiness item moves (Route B — docs +
+schema + shell only, no production source change, no `build.rs` change, no `Cargo.toml` change, no new CLI flag)**:
+publishes a **local, non-mutating** comparator for two retained Run 407-style `ANCHOR_DRIFT_REPORT.json` artifacts —
+`docs/release/public-devnet/PACKAGE_INTEGRITY_DRIFT_HISTORY.md` (guide: how to download two retained reports manually,
+how to run the comparator, how to interpret added/removed full-tree-only paths, why full-tree-only drift can be
+expected, why missing anchors/undocumented mismatches remain failures, why it is not binary provenance or launch
+evidence, why M4/M6/S5/S7 and C4/C5 are unchanged, and that retained artifacts are provider-dependent and may expire)
+and `docs/release/public-devnet/PACKAGE_INTEGRITY_DRIFT_HISTORY_DIFF.schema.json` (draft-07 diff schema fixing
+`diff_version`, `generated_for_run: 408`, `scope: public-devnet-docs-anchor-drift-history-diff`,
+`package_root: docs/release/public-devnet`, `base_report`/`candidate_report`, a `count_delta` object, `path_delta`
+arrays of safe relative paths only, the four `verdict` enum values, the eight safety labels, and the eleven
+`non_claims` booleans all `false`; `additionalProperties: false` throughout). It adds the harness
+`scripts/devnet/run_408_public_devnet_retained_drift_history_comparator.sh` (`RESULT=POSITIVE`; 25 checks),
+`docs/devnet/run_408_public_devnet_retained_drift_history_comparator/`, and
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_408.md`, and narrowly updates
+`PACKAGE_INTEGRITY_CI_RETENTION.md`/`PACKAGE_INTEGRITY_CI_ARTIFACTS.md`/`ARTIFACT_INDEX.md`/`OPERATOR_VERIFICATION_MAP.md`
+to reference the comparator. The comparator validates two Run 407-style inputs against the Run 407 schema, emits a
+transient `PACKAGE_INTEGRITY_DRIFT_HISTORY_DIFF.json` **outside** the package tree that validates against the Run 408
+schema, reports added/removed full-tree-only paths as expected curated-anchor drift, and **fails closed** (verdict
+`negative-new-missing-anchor` / `negative-new-undocumented-mismatch`, exit 3) when a candidate introduces a new missing
+anchor or a new undocumented mismatch; an invalid input yields `negative-invalid-input`. It **never** fetches CI
+artifacts automatically and needs **no** token/secret; nothing generated is committed. The Run 407 wrapper still passes;
+the Run 404 anchor manifest had its SHA-256/byte size refreshed for exactly the two narrowly-edited anchor docs
+(`ARTIFACT_INDEX.md`, `OPERATOR_VERIFICATION_MAP.md`) as a documented deliberate refresh (no entry added/removed, no
+`status` changed). Verified against the on-disk package tree and this canonical readiness matrix by that harness, with
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_408.md` and archive
+`docs/devnet/run_408_public_devnet_retained_drift_history_comparator/`. It adds **no** CLI flag, opens **no** port,
+deploys **no** seed/bootnode/faucet/RPC/explorer/status service, applies **no** trust bundle, and mutates **no**
+validator/epoch/sequence/marker/`LivePqcTrustState` state. **No readiness item moves Green** — this run adds
+audit/reviewer usability only. **M4 stays Yellow/launch-blocking; M6 stays Yellow/Partial; S5/S7 stay Yellow;
+M1–M3/M5/M7–M20 remain Green; public DevNet stays NOT launch-ready; C4/C5 remain OPEN; MainNet/TestNet untouched.**
 Updated Run 374 — **M6 materially narrowed but remains Yellow/Partial**: a stable, release-built operator-facing
 identity **generation + verification** package is published under
 `docs/release/public-devnet/identity/` (`README.md`, `IDENTITY_GENERATION.md`, `IDENTITY_VERIFY.md`,

@@ -1,0 +1,212 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://qbind.dev/schemas/public-devnet/PACKAGE_INTEGRITY_DRIFT_HISTORY_DIFF.schema.json",
+  "title": "QBIND Public DevNet Retained Anchor-Drift History Diff",
+  "description": "Canonical, publish-safe schema for the LOCAL historical comparison of two retained Run 407-style ANCHOR_DRIFT_REPORT.json artifacts (each valid under PACKAGE_INTEGRITY_ANCHOR_DRIFT_REPORT.schema.json). The diff is GENERATED TRANSIENTLY at comparison time into a directory OUTSIDE the package tree and is NOT committed. It records the per-count delta and per-array path delta (added/removed full-tree-only paths, new/cleared missing anchors, new/cleared undocumented mismatches, and changed documented refreshes) between a base report and a candidate report, plus an overall verdict. It is docs/artifact only: it embeds NO binary blob, NO secret, NO private path/hostname/endpoint, NO raw log, NO raw /metrics dump, and NO generated private identity. The comparator NEVER fetches CI artifacts automatically and NEVER requires a token or secret; the operator downloads the two reports manually. This diff is NOT a signed attestation, NOT binary provenance, and NOT launch evidence. It moves NO readiness item: M4 stays Yellow, M6 stays Yellow/Partial, S5/S7 stay Yellow, public DevNet stays NOT launch-ready, and C4/C5 stay OPEN.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "diff_version",
+    "generated_for_run",
+    "scope",
+    "package_root",
+    "base_report",
+    "candidate_report",
+    "safety_labels",
+    "count_delta",
+    "path_delta",
+    "verdict",
+    "non_claims",
+    "artifact_safety_label"
+  ],
+  "definitions": {
+    "relativePath": {
+      "type": "string",
+      "pattern": "^(?!/)(?!.*\\.\\.)(?![A-Za-z]:)[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*$"
+    },
+    "relativePathArray": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "$ref": "#/definitions/relativePath" }
+    },
+    "counts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "anchor_total",
+        "anchors_present_matching",
+        "anchors_missing",
+        "undocumented_mismatches",
+        "documented_refreshes",
+        "full_tree_only"
+      ],
+      "properties": {
+        "anchor_total": { "type": "integer", "minimum": 0 },
+        "anchors_present_matching": { "type": "integer", "minimum": 0 },
+        "anchors_missing": { "type": "integer", "minimum": 0 },
+        "undocumented_mismatches": { "type": "integer", "minimum": 0 },
+        "documented_refreshes": { "type": "integer", "minimum": 0 },
+        "full_tree_only": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "reportRef": {
+      "description": "Identity + counts of one retained Run 407-style ANCHOR_DRIFT_REPORT.json input. No filesystem path, no timestamp source of truth, and no free-form label are embedded.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["scope", "generated_for_run", "counts"],
+      "properties": {
+        "scope": { "type": "string", "const": "public-devnet-docs-anchor-drift" },
+        "generated_for_run": { "type": "integer", "const": 407 },
+        "counts": { "$ref": "#/definitions/counts" }
+      }
+    }
+  },
+  "properties": {
+    "diff_version": {
+      "description": "Diff schema version (semver of this schema contract).",
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+    },
+    "generated_for_run": {
+      "description": "The QBIND run number this diff schema was introduced for. Fixed to 408.",
+      "type": "integer",
+      "const": 408
+    },
+    "scope": {
+      "description": "Stable scope tag for this diff. Historical comparison of two anchor-drift reports only.",
+      "type": "string",
+      "const": "public-devnet-docs-anchor-drift-history-diff"
+    },
+    "package_root": {
+      "description": "Repository-relative root of the documented public DevNet package. All relative_path values are resolved against this root. Never an absolute path.",
+      "type": "string",
+      "const": "docs/release/public-devnet"
+    },
+    "generated_at_utc": {
+      "description": "OPTIONAL UTC timestamp (ISO-8601, Zulu) when this diff was generated. Informational only.",
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
+    },
+    "base_report": { "$ref": "#/definitions/reportRef" },
+    "candidate_report": { "$ref": "#/definitions/reportRef" },
+    "safety_labels": {
+      "description": "Standing safety labels this diff carries. All required labels must be present.",
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "enum": [
+          "devnet",
+          "experimental",
+          "resettable",
+          "no_value",
+          "no_uptime_sla",
+          "not_launch_ready",
+          "c4_open",
+          "c5_open"
+        ]
+      },
+      "minItems": 8,
+      "allOf": [
+        { "contains": { "const": "devnet" } },
+        { "contains": { "const": "experimental" } },
+        { "contains": { "const": "resettable" } },
+        { "contains": { "const": "no_value" } },
+        { "contains": { "const": "no_uptime_sla" } },
+        { "contains": { "const": "not_launch_ready" } },
+        { "contains": { "const": "c4_open" } },
+        { "contains": { "const": "c5_open" } }
+      ]
+    },
+    "count_delta": {
+      "description": "Per-count integer delta (candidate minus base). A value of 0 means the count is unchanged. Values may be negative (candidate lower than base).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "anchor_total",
+        "anchors_present_matching",
+        "anchors_missing",
+        "undocumented_mismatches",
+        "documented_refreshes",
+        "full_tree_only"
+      ],
+      "properties": {
+        "anchor_total": { "type": "integer" },
+        "anchors_present_matching": { "type": "integer" },
+        "anchors_missing": { "type": "integer" },
+        "undocumented_mismatches": { "type": "integer" },
+        "documented_refreshes": { "type": "integer" },
+        "full_tree_only": { "type": "integer" }
+      }
+    },
+    "path_delta": {
+      "description": "Per-array path delta between base and candidate, using safe relative paths only. Added/removed full-tree-only paths are expected curated-anchor drift; new missing anchors and new undocumented mismatches are failures; cleared arrays record failures that went away; changed documented refreshes record deliberate-refresh set changes.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "added_full_tree_only",
+        "removed_full_tree_only",
+        "new_missing_anchors",
+        "cleared_missing_anchors",
+        "new_undocumented_mismatches",
+        "cleared_undocumented_mismatches",
+        "changed_documented_refreshes"
+      ],
+      "properties": {
+        "added_full_tree_only": { "$ref": "#/definitions/relativePathArray" },
+        "removed_full_tree_only": { "$ref": "#/definitions/relativePathArray" },
+        "new_missing_anchors": { "$ref": "#/definitions/relativePathArray" },
+        "cleared_missing_anchors": { "$ref": "#/definitions/relativePathArray" },
+        "new_undocumented_mismatches": { "$ref": "#/definitions/relativePathArray" },
+        "cleared_undocumented_mismatches": { "$ref": "#/definitions/relativePathArray" },
+        "changed_documented_refreshes": { "$ref": "#/definitions/relativePathArray" }
+      }
+    },
+    "verdict": {
+      "description": "Overall comparison verdict. Only positive-no-new-failures is a PASS; the three negative verdicts fail closed.",
+      "type": "string",
+      "enum": [
+        "positive-no-new-failures",
+        "negative-new-missing-anchor",
+        "negative-new-undocumented-mismatch",
+        "negative-invalid-input"
+      ]
+    },
+    "non_claims": {
+      "description": "Explicit non-claim booleans. Every field must be exactly false (this diff makes none of these claims).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "launches_public_devnet",
+        "moves_m4_green",
+        "moves_m6_green",
+        "moves_s5_green",
+        "moves_s7_green",
+        "closes_c4",
+        "closes_c5",
+        "claims_testnet_ready",
+        "claims_mainnet_ready",
+        "deploys_seed_or_service",
+        "mutates_runtime_state"
+      ],
+      "properties": {
+        "launches_public_devnet": { "type": "boolean", "const": false },
+        "moves_m4_green": { "type": "boolean", "const": false },
+        "moves_m6_green": { "type": "boolean", "const": false },
+        "moves_s5_green": { "type": "boolean", "const": false },
+        "moves_s7_green": { "type": "boolean", "const": false },
+        "closes_c4": { "type": "boolean", "const": false },
+        "closes_c5": { "type": "boolean", "const": false },
+        "claims_testnet_ready": { "type": "boolean", "const": false },
+        "claims_mainnet_ready": { "type": "boolean", "const": false },
+        "deploys_seed_or_service": { "type": "boolean", "const": false },
+        "mutates_runtime_state": { "type": "boolean", "const": false }
+      }
+    },
+    "artifact_safety_label": {
+      "description": "Standing human-readable safety label this diff carries.",
+      "type": "string",
+      "const": "experimental · resettable · no value · no uptime SLA · NOT public-DevNet launch-ready · no MainNet readiness claim · no C4/C5 closure claim"
+    }
+  }
+}
