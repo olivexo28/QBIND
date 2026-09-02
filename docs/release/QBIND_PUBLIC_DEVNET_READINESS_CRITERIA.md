@@ -418,6 +418,26 @@ deploys **no** seed/bootnode/faucet/RPC/explorer/status service, applies **no** 
 validator/epoch/sequence/marker/`LivePqcTrustState` state. **No readiness item moves Green** — this run adds
 audit/reviewer usability only. **M4 stays Yellow/launch-blocking; M6 stays Yellow/Partial; S5/S7 stay Yellow;
 M1–M3/M5/M7–M20 remain Green; public DevNet stays NOT launch-ready; C4/C5 remain OPEN; MainNet/TestNet untouched.**
+Updated Run 409 — **integrity-doc consistency reconciliation; no readiness item moves (Route B — docs + shell only, no
+production source change, no `build.rs` change, no `Cargo.toml` change, no new CLI flag)**: reconciles narrow
+documentation inconsistencies surfaced across Runs 406–408. Determined from the on-disk package tree that Run 408
+narrowly edited two curated anchor docs (`ARTIFACT_INDEX.md`, `OPERATOR_VERIFICATION_MAP.md`), so the Run 404 anchor
+manifest **was** refreshed for exactly those two docs (no entry added/removed, no `status` changed) — this matrix and
+the Run 408 contradiction entry already stated this, and Run 409 corrects the stale
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_408.md` statement that the manifest was "not edited this run" to match. Also
+reconciles the current CI artifact count to **four** download-only artifacts
+(`PACKAGE_INTEGRITY_FULL_TREE_MANIFEST.generated.json`, `ANCHOR_DRIFT_REPORT.md`, `ANCHOR_DRIFT_REPORT.json`,
+`PACKAGE_INTEGRITY_CI_SUMMARY.txt`) in `PACKAGE_INTEGRITY_CI_ARTIFACTS.md`, removing stale "exactly three"
+current-artifact wording that predated the Run 407 JSON report; generated artifacts stay outside the package tree and
+are never committed, and retention remains convenience/audit usability only (not binary provenance, not launch
+evidence). It adds `scripts/devnet/run_409_public_devnet_integrity_doc_consistency.sh` (`RESULT=POSITIVE`),
+`docs/devnet/run_409_public_devnet_integrity_doc_consistency/`, and `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_409.md`, and
+narrowly updates `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_408.md`,
+`docs/release/public-devnet/PACKAGE_INTEGRITY_CI_ARTIFACTS.md`, and `docs/whitepaper/contradiction.md`. It adds **no**
+CLI flag, opens **no** port, deploys **no** seed/bootnode/faucet/RPC/explorer/status service, applies **no** trust
+bundle, and mutates **no** validator/epoch/sequence/marker/`LivePqcTrustState` state. **No readiness item moves Green** —
+this run reconciles documentation only. **M4 stays Yellow/launch-blocking; M6 stays Yellow/Partial; S5/S7 stay Yellow;
+M1–M3/M5/M7–M20 remain Green; public DevNet stays NOT launch-ready; C4/C5 remain OPEN; MainNet/TestNet untouched.**
 Updated Run 374 — **M6 materially narrowed but remains Yellow/Partial**: a stable, release-built operator-facing
 identity **generation + verification** package is published under
 `docs/release/public-devnet/identity/` (`README.md`, `IDENTITY_GENERATION.md`, `IDENTITY_VERIFY.md`,

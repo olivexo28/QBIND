@@ -44,8 +44,12 @@ Narrowly updated (docs only):
 - `docs/release/QBIND_PUBLIC_DEVNET_READINESS_CRITERIA.md` (Run 408 narrative; statuses unchanged)
 - `docs/whitepaper/contradiction.md` (Run 408 — No contradiction found)
 
-No production source, `build.rs`, `Cargo.toml`, or CLI file is changed. The Run 404 anchor
-manifest was **not** edited this run.
+No production source, `build.rs`, `Cargo.toml`, or CLI file is changed. Because this run
+narrowly edits two curated anchor docs (`ARTIFACT_INDEX.md`, `OPERATOR_VERIFICATION_MAP.md`)
+to reference the comparator, the Run 404 anchor manifest
+(`PACKAGE_INTEGRITY_MANIFEST.example.json`) had its SHA-256/byte size
+**refreshed for exactly those two anchor docs** as a documented deliberate refresh — no
+manifest entry was added or removed, and no `status` changed.
 
 ## 3. Decision gate route
 
