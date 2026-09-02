@@ -1,0 +1,26 @@
+# Run 410 evidence archive — only README.md, summary.txt, and .gitignore are tracked.
+# The harness is a read-only documentation-consistency verifier; it generates nothing
+# under the repository tree. Any transient run output (summaries, logs) is written to a
+# staging directory OUTSIDE the package tree (runner temp) and MUST NOT be committed.
+# Only publish-safe OK/POSITIVE status lines appear in the tracked summary.
+material/
+node/
+nodes/
+logs/
+data/
+artifact-staging/
+*.err
+*.log
+*.out
+*.help.txt
+*.usage.txt
+*.kem.sk.bin
+*.cert.bin
+*.key
+*.pem
+metrics*.txt
+*.generated.json
+ANCHOR_DRIFT_REPORT.md
+ANCHOR_DRIFT_REPORT.json
+PACKAGE_INTEGRITY_CI_SUMMARY.txt
+PACKAGE_INTEGRITY_DRIFT_HISTORY_DIFF.json

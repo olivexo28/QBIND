@@ -33,6 +33,10 @@ Companion files:
   `PACKAGE_INTEGRITY_CI_RETENTION.md` add a **machine-readable** JSON anchor-drift
   report and document CI artifact retention (download-only; convenience/audit only).
 - `docs/release/public-devnet/ARTIFACT_INDEX.md` — the navigation index.
+- `docs/release/public-devnet/PACKAGE_INTEGRITY_STALE_PROSE_LINT.md` — the Run 410
+  **stale-prose lint** that fails closed if these package-integrity guides or the CI
+  workflow drift on the current four download-only artifacts, the canonical Run 408
+  anchor-refresh statement, or any readiness/closure/launch/provenance/runtime overclaim.
 - `docs/release/public-devnet/OPERATOR_VERIFICATION_MAP.md` — the verification map
   (run the integrity check **first**, then follow this map).
 

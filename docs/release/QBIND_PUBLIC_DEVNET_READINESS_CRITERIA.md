@@ -438,6 +438,30 @@ CLI flag, opens **no** port, deploys **no** seed/bootnode/faucet/RPC/explorer/st
 bundle, and mutates **no** validator/epoch/sequence/marker/`LivePqcTrustState` state. **No readiness item moves Green** —
 this run reconciles documentation only. **M4 stays Yellow/launch-blocking; M6 stays Yellow/Partial; S5/S7 stay Yellow;
 M1–M3/M5/M7–M20 remain Green; public DevNet stays NOT launch-ready; C4/C5 remain OPEN; MainNet/TestNet untouched.**
+Updated Run 410 — **package-integrity stale-prose lint published; no readiness item moves (Route B — docs + shell +
+YAML only, no production source change, no `build.rs` change, no `Cargo.toml` change, no new CLI flag)**: adds a
+lightweight cross-document lint into the package-integrity verification path so future docs runs **fail closed** if CI
+artifact counts, artifact names, anchor-refresh wording, or generated-output claims drift again — preventing recurrence
+of the Run 406→409 documentation drift. Publishes
+`docs/release/public-devnet/PACKAGE_INTEGRITY_STALE_PROSE_LINT.md` and
+`scripts/devnet/run_410_public_devnet_package_integrity_stale_prose_lint.sh` (`RESULT=POSITIVE`), which rejects stale
+"exactly three" artifact wording, inconsistent artifact names across the CI artifacts guide, retention guide, operator
+verification map, artifact index, and workflow, a missing `ANCHOR_DRIFT_REPORT.json`, a denied/conflicting Run 408
+anchor-refresh statement, a non-existent or mismatched manifest anchor, and any readiness/closure/launch/provenance/
+runtime overclaim. The current CI artifact set stays **four** download-only artifacts
+(`PACKAGE_INTEGRITY_FULL_TREE_MANIFEST.generated.json`, `ANCHOR_DRIFT_REPORT.md`, `ANCHOR_DRIFT_REPORT.json`,
+`PACKAGE_INTEGRITY_CI_SUMMARY.txt`), staged outside the package tree and never committed. The lint runs **after** the
+Run 407 verifier/wrapper in the existing least-privilege workflow (`contents: read`, no secrets, no
+deploy/release/tag/push/commit, fails on a dirty tree). It adds `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_410.md` and
+`docs/devnet/run_410_public_devnet_package_integrity_stale_prose_lint/`, refreshes the Run 404 anchor manifest
+(`PACKAGE_INTEGRITY_MANIFEST.example.json`) SHA-256/byte size for exactly the three narrowly-edited anchor docs
+(`ARTIFACT_INDEX.md`, `OPERATOR_VERIFICATION_MAP.md`, `PACKAGE_INTEGRITY.md`; no entry added/removed, no `status`
+changed), and narrowly updates the package-integrity guides, this matrix, and `docs/whitepaper/contradiction.md`. It
+adds **no** CLI flag, opens **no** port, deploys **no** seed/bootnode/faucet/RPC/explorer/status service, applies **no**
+trust bundle, and mutates **no** validator/epoch/sequence/marker/`LivePqcTrustState` state. **No readiness item moves
+Green** — this run lints documentation only. **M4 stays Yellow/launch-blocking; M6 stays Yellow/Partial; S5/S7 stay
+Yellow; M1–M3/M5/M7–M20 remain Green; public DevNet stays NOT launch-ready; C4/C5 remain OPEN; MainNet/TestNet
+untouched.**
 Updated Run 374 — **M6 materially narrowed but remains Yellow/Partial**: a stable, release-built operator-facing
 identity **generation + verification** package is published under
 `docs/release/public-devnet/identity/` (`README.md`, `IDENTITY_GENERATION.md`, `IDENTITY_VERIFY.md`,
