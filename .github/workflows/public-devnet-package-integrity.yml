@@ -44,6 +44,7 @@ on:
       - "scripts/devnet/run_406_public_devnet_full_tree_ci_artifact_anchor_drift.sh"
       - "scripts/devnet/run_405_public_devnet_full_tree_package_integrity.sh"
       - "scripts/devnet/run_404_public_devnet_package_integrity_manifest.sh"
+      - "scripts/devnet/run_410_public_devnet_package_integrity_stale_prose_lint.sh"
       - ".github/workflows/public-devnet-package-integrity.yml"
 
 # Least privilege: the job only reads the checked-out source. It never writes to the
@@ -74,6 +75,10 @@ jobs:
       - name: Run the full-tree integrity verifier + anchor-drift JSON/retention wrapper
         run: |
           bash scripts/devnet/run_407_public_devnet_anchor_drift_json_retention.sh "${RUN407_OUTDIR}"
+
+      - name: Run the package-integrity stale-prose lint (Run 410)
+        run: |
+          bash scripts/devnet/run_410_public_devnet_package_integrity_stale_prose_lint.sh "${{ runner.temp }}/qbind-run410-stale-prose-lint"
 
       - name: Upload download-only integrity CI artifacts
         uses: actions/upload-artifact@v4

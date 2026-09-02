@@ -27,6 +27,11 @@ Companion files:
   Run 408 **diff** schema (draft-07); the comparator output validates against it.
 - `scripts/devnet/run_408_public_devnet_retained_drift_history_comparator.sh` — the Run 408
   harness / local comparator.
+- `docs/release/public-devnet/PACKAGE_INTEGRITY_STALE_PROSE_LINT.md` +
+  `scripts/devnet/run_410_public_devnet_package_integrity_stale_prose_lint.sh` — the Run 410
+  **stale-prose lint** that fails closed if the package-integrity guides or the workflow drift
+  on the current four download-only artifact names, the "exactly four" count, the canonical
+  Run 408 anchor-refresh statement, or any readiness/closure/launch/provenance/runtime overclaim.
 
 ## 1. How to download two retained `ANCHOR_DRIFT_REPORT.json` artifacts manually
 

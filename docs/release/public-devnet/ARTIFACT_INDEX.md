@@ -246,7 +246,8 @@ Each artifact group lists:
   `PACKAGE_INTEGRITY_ANCHOR_DRIFT_REPORT.schema.json`,
   `PACKAGE_INTEGRITY_CI_RETENTION.md`,
   `PACKAGE_INTEGRITY_DRIFT_HISTORY.md`,
-  `PACKAGE_INTEGRITY_DRIFT_HISTORY_DIFF.schema.json`.
+  `PACKAGE_INTEGRITY_DRIFT_HISTORY_DIFF.schema.json`,
+  `PACKAGE_INTEGRITY_STALE_PROSE_LINT.md`.
 - **Purpose:** a machine-readable manifest (SHA-256 + byte size) so operators can
   confirm the documented public DevNet package files are present and unchanged
   **before** following `OPERATOR_VERIFICATION_MAP.md`. Two coverage levels: the
@@ -263,6 +264,12 @@ Each artifact group lists:
   (`PACKAGE_INTEGRITY_DRIFT_HISTORY.md` + `PACKAGE_INTEGRITY_DRIFT_HISTORY_DIFF.schema.json`)
   for two retained `ANCHOR_DRIFT_REPORT.json` reports (manual download; no auto-fetch; no
   token/secret; transient diff never committed).
+  Run 410 additionally adds a **stale-prose lint** (`PACKAGE_INTEGRITY_STALE_PROSE_LINT.md`)
+  that fails closed if the package-integrity docs/workflow drift on the current **four**
+  download-only artifacts (`PACKAGE_INTEGRITY_FULL_TREE_MANIFEST.generated.json`,
+  `ANCHOR_DRIFT_REPORT.md`, `ANCHOR_DRIFT_REPORT.json`, `PACKAGE_INTEGRITY_CI_SUMMARY.txt`),
+  the canonical Run 408 anchor-refresh statement, or any readiness/closure/launch/provenance/
+  runtime overclaim.
   This is documentation-tree integrity, **not** binary provenance
   (see group 2 for the release-binary manifest).
 - **Readiness item:** package integrity (docs-only; moves nothing).
@@ -282,7 +289,10 @@ Each artifact group lists:
   non-mutating historical comparator over two retained JSON drift reports,
   `docs/release/public-devnet/PACKAGE_INTEGRITY_DRIFT_HISTORY.md` +
   `docs/release/public-devnet/PACKAGE_INTEGRITY_DRIFT_HISTORY_DIFF.schema.json` +
-  `scripts/devnet/run_408_public_devnet_retained_drift_history_comparator.sh`.
+  `scripts/devnet/run_408_public_devnet_retained_drift_history_comparator.sh`. For the
+  cross-document stale-prose lint that keeps these guides and the CI workflow honest,
+  `docs/release/public-devnet/PACKAGE_INTEGRITY_STALE_PROSE_LINT.md` +
+  `scripts/devnet/run_410_public_devnet_package_integrity_stale_prose_lint.sh`.
 - **Status:** docs-only; **moves no readiness item** (M4/M6/S5/S7 stay Yellow;
   C4/C5 OPEN; public DevNet NOT launch-ready).
 - **Non-claims:** not binary provenance; no signed release / SLSA claim; deploys

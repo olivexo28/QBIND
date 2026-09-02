@@ -116,8 +116,8 @@
     },
     {
       "relative_path": "ARTIFACT_INDEX.md",
-      "sha256": "3cd0a4977ee44da548f80716b88cbd442360123c5ce860fe443ae72f01dc63a7",
-      "byte_size": 18024,
+      "sha256": "abffb3a4d90e42a1b62696b305218077f2aa2dc22c1e8eea81547b311a0c0f18",
+      "byte_size": 18794,
       "artifact_group": "top-level",
       "readiness_item": "package-index",
       "status": "no-go",
@@ -125,8 +125,8 @@
     },
     {
       "relative_path": "OPERATOR_VERIFICATION_MAP.md",
-      "sha256": "563362dc1e06760b82b0d79aa41501761c1db1cfd34a1f643b83b7887178b611",
-      "byte_size": 12125,
+      "sha256": "c4729efc629e9f9dcdb8bb136e45924abbb43ece1e9b2faff8462d83adf2e476",
+      "byte_size": 13309,
       "artifact_group": "top-level",
       "readiness_item": "verification-map",
       "status": "no-go",
@@ -152,8 +152,8 @@
     },
     {
       "relative_path": "PACKAGE_INTEGRITY.md",
-      "sha256": "97e11ce777ff4a08dafe99db5deacf508d7e577a8c70ed065e811172dd7158ba",
-      "byte_size": 9212,
+      "sha256": "6c9fe888a95a70de497b5b0bff6dadd097fdc7db685847a2e0b0ae323c5a37fa",
+      "byte_size": 9560,
       "artifact_group": "top-level",
       "readiness_item": "package-integrity",
       "status": "no-go",

@@ -30,6 +30,11 @@ Companion files:
   artifacts (manual download; no auto-fetch; no token/secret; nothing committed).
 - `.github/workflows/public-devnet-package-integrity.yml` — the least-privilege CI
   workflow that runs the verifier and uploads the artifacts.
+- `docs/release/public-devnet/PACKAGE_INTEGRITY_STALE_PROSE_LINT.md` +
+  `scripts/devnet/run_410_public_devnet_package_integrity_stale_prose_lint.sh` — the Run 410
+  **stale-prose lint** that fails closed if this guide or the workflow drifts on the current
+  four download-only artifact names, the "exactly four" count, the canonical Run 408
+  anchor-refresh statement, or any readiness/closure/launch/provenance/runtime overclaim.
 
 ## 1. Which CI artifacts are retained
 
