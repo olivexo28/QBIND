@@ -21,6 +21,11 @@ Companion files:
   JSON Schema (draft-07).
 - `docs/release/public-devnet/PACKAGE_INTEGRITY_MANIFEST.example.json` — a
   schema-valid example manifest whose hashes match the current on-disk tree.
+- `docs/release/public-devnet/PACKAGE_INTEGRITY_FULL_TREE.md` — the **full-tree**
+  integrity verifier (Run 405): for exhaustive coverage it hashes **every**
+  publish-safe file in the package tree via a transiently-generated manifest (never
+  committed), addressing this anchor manifest's honest limitation that it lists only
+  one anchor per group plus the top-level docs.
 - `docs/release/public-devnet/ARTIFACT_INDEX.md` — the navigation index.
 - `docs/release/public-devnet/OPERATOR_VERIFICATION_MAP.md` — the verification map
   (run the integrity check **first**, then follow this map).

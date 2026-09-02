@@ -18,6 +18,9 @@ Companion documents:
 - `docs/release/public-devnet/PACKAGE_INTEGRITY.md` — the package integrity
   manifest guide: verify the documented package files are present + unchanged
   (SHA-256 + byte size) **before** following the verification map.
+- `docs/release/public-devnet/PACKAGE_INTEGRITY_FULL_TREE.md` — the full-tree
+  integrity verifier guide: exhaustive, transiently-generated hashing of **every**
+  publish-safe file in the package tree.
 - `docs/release/public-devnet/OPERATOR_VERIFICATION_MAP.md` — recommended read
   orders + the exact verification map + the launch stop rule.
 - `docs/release/public-devnet/LAUNCH_GO_NO_GO.md` — the current launch decision
@@ -228,20 +231,29 @@ Each artifact group lists:
 
 - **Path:** `docs/release/public-devnet/PACKAGE_INTEGRITY.md`,
   `PACKAGE_INTEGRITY_MANIFEST.schema.json`,
-  `PACKAGE_INTEGRITY_MANIFEST.example.json`.
+  `PACKAGE_INTEGRITY_MANIFEST.example.json`,
+  `PACKAGE_INTEGRITY_FULL_TREE.md`,
+  `PACKAGE_INTEGRITY_FULL_TREE_MANIFEST.schema.json`.
 - **Purpose:** a machine-readable manifest (SHA-256 + byte size) so operators can
   confirm the documented public DevNet package files are present and unchanged
-  **before** following `OPERATOR_VERIFICATION_MAP.md`. This is documentation-tree
-  integrity, **not** binary provenance (see group 2 for the release-binary manifest).
+  **before** following `OPERATOR_VERIFICATION_MAP.md`. Two coverage levels: the
+  Run 404 **anchor** manifest (one `VERIFY.md` per group + the top-level docs) and
+  the Run 405 **full-tree** integrity verification, which hashes **every**
+  publish-safe file under the package tree via a transiently-generated manifest
+  (never committed). This is documentation-tree integrity, **not** binary provenance
+  (see group 2 for the release-binary manifest).
 - **Readiness item:** package integrity (docs-only; moves nothing).
 - **Verify:** `docs/release/public-devnet/PACKAGE_INTEGRITY.md`;
   `scripts/devnet/run_404_public_devnet_package_integrity_manifest.sh`; validate
   `PACKAGE_INTEGRITY_MANIFEST.example.json` against its schema and re-hash each
-  listed file.
+  listed file. For exhaustive coverage,
+  `docs/release/public-devnet/PACKAGE_INTEGRITY_FULL_TREE.md` +
+  `scripts/devnet/run_405_public_devnet_full_tree_package_integrity.sh`.
 - **Status:** docs-only; **moves no readiness item** (M4/M6/S5/S7 stay Yellow;
   C4/C5 OPEN; public DevNet NOT launch-ready).
 - **Non-claims:** not binary provenance; no signed release / SLSA claim; deploys
-  nothing; mutates no runtime state.
+  nothing; mutates no runtime state; the full-tree manifest is generated
+  transiently and never committed.
 
 ---
 

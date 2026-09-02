@@ -1,0 +1,18 @@
+full_tree_guide_present=OK (PACKAGE_INTEGRITY_FULL_TREE.md present, safety-labelled) sha256=0dd9eead4be56177bd8ccd6049471d75156548664e2c3a7b965dfd7ee3c8c724
+full_tree_schema_present=OK (PACKAGE_INTEGRITY_FULL_TREE_MANIFEST.schema.json) sha256=db678f313fa1e78ec50f11cf976133b9abc9dc90e4583faddb68270512018605
+full_tree_manifest_generated=OK (generated transiently outside the tree; not committed)
+full_tree_schema_validation=OK (generated manifest validates; generated_for_run=405; scope=full-tree; safety labels + non_claims fixed)
+full_tree_coverage=OK (manifest file set == on-disk publish-safe file set under docs/release/public-devnet; 86 files)
+full_tree_hash_verification=OK (every listed file exists; sha256 + byte_size match on-disk; relative paths safe + root-confined)
+generated_manifest_transient=OK (generated manifest path is outside docs/release/public-devnet and not committed)
+anchor_manifest_compat=OK (Run 404 PACKAGE_INTEGRITY_MANIFEST.example.json still validates; hashes/sizes match)
+artifact_index_ref=OK (ARTIFACT_INDEX.md references full-tree integrity verification)
+operator_map_ref=OK (OPERATOR_VERIFICATION_MAP.md references full-tree integrity verification)
+read_order_numbering=OK (external-operator read order is 1..N consecutive, no duplicate index)
+readiness_reconciled=OK (M4 🟡; M6 🟡; S5 🟡; S7 🟡)
+launch_and_c4c5=OK (public DevNet NOT launch-ready; C4 OPEN; C5 OPEN)
+non_claim_grep=OK (no launch-ready / M4-M6-S5-S7-Green / C4-C5-closure / TestNet-MainNet-ready / deployment claim in full-tree guide)
+runtime_mutation=NONE (generated manifest non_claims all false; mutates_runtime_state=false)
+committed_private_material=NONE (no keys/certs/KEM/signing/API/raw logs/metrics/data dirs/private identity; no absolute path; no private endpoint)
+
+RESULT=POSITIVE (public-DevNet FULL-TREE package integrity verifier generated a transient, schema-valid manifest covering every publish-safe file under docs/release/public-devnet; all hashes/sizes match; Run 404 anchor manifest still validates; no committed generated output; no production source change; no readiness item moves Green; M4/M6/S5/S7 stay Yellow; C4/C5 OPEN; public DevNet NOT launch-ready)

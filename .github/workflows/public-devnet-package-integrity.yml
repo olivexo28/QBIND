@@ -1,0 +1,70 @@
+# Run 405 — public DevNet FULL-TREE package integrity check.
+#
+# Runs the Run 405 full-tree integrity verifier
+# (`scripts/devnet/run_405_public_devnet_full_tree_package_integrity.sh`) so every
+# change that touches the public DevNet package tree is checked: the verifier
+# generates a full-tree integrity manifest into the runner temp directory, validates
+# it against the committed schema, and confirms every publish-safe file under
+# docs/release/public-devnet is present with a matching SHA-256 + byte size.
+#
+# Decision gate: Route B (docs + schema + shell/CI only). This workflow makes NO
+# production Rust source change, NO build.rs change, NO runtime behaviour change, and
+# adds NO new qbind-node CLI flag.
+#
+# Safety posture:
+#   * Least-privilege permissions (contents: read only).
+#   * No secrets referenced.
+#   * Does NOT deploy a seed/bootnode/faucet/RPC/explorer/status service, open a
+#     public endpoint, create a release/tag, or start a node.
+#   * Does NOT commit or push anything. The generated full-tree manifest is written
+#     under the runner temp directory and is NEVER committed or uploaded as a
+#     repository file.
+
+name: public-devnet-package-integrity
+
+on:
+  workflow_dispatch: {}
+  pull_request:
+    paths:
+      - "docs/release/public-devnet/**"
+      - "scripts/devnet/run_405_public_devnet_full_tree_package_integrity.sh"
+      - "scripts/devnet/run_404_public_devnet_package_integrity_manifest.sh"
+      - ".github/workflows/public-devnet-package-integrity.yml"
+
+# Least privilege: the job only reads the checked-out source. It never writes to the
+# repository, so no write scope is granted.
+permissions:
+  contents: read
+
+concurrency:
+  group: public-devnet-package-integrity-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  full-tree-package-integrity:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      # Runner temp staging for the transient generated manifest (never committed).
+      RUN405_OUTDIR: ${{ runner.temp }}/qbind-run405-full-tree-package-integrity
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install manifest validation dependency
+        run: python3 -m pip install --user jsonschema >/dev/null 2>&1 || true
+
+      - name: Run the full-tree package integrity verifier
+        run: |
+          bash scripts/devnet/run_405_public_devnet_full_tree_package_integrity.sh "${RUN405_OUTDIR}"
+
+      - name: Confirm no generated manifest was committed to the tree
+        run: |
+          if git status --porcelain | grep -q .; then
+            echo "working tree unexpectedly dirty after verifier:" >&2
+            git status --porcelain >&2
+            exit 1
+          fi
+          echo "clean: verifier committed nothing; generated manifest stayed under runner temp"

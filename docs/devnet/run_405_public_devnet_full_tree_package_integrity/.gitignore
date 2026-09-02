@@ -1,0 +1,24 @@
+# Run 405 evidence archive — only README.md, summary.txt, and .gitignore are tracked.
+# All per-run artifacts contain absolute paths and ephemeral data and MUST NOT be committed.
+# Only publish-safe document/manifest hashes and OK/POSITIVE status lines appear in the tracked summary.
+# The full-tree manifest is generated transiently OUTSIDE the package tree and is never committed.
+material/
+node/
+nodes/
+logs/
+data/
+*.err
+*.log
+*.out
+*.help.txt
+*.usage.txt
+*.kem.sk.bin
+*.cert.bin
+*.key
+*.pem
+*.public.json
+*.candidate.json
+metrics*.txt
+disk_files.txt
+*.generated.json
+PACKAGE_INTEGRITY_FULL_TREE_MANIFEST.generated.json
