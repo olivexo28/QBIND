@@ -292,7 +292,11 @@ Each artifact group lists:
   `scripts/devnet/run_408_public_devnet_retained_drift_history_comparator.sh`. For the
   cross-document stale-prose lint that keeps these guides and the CI workflow honest,
   `docs/release/public-devnet/PACKAGE_INTEGRITY_STALE_PROSE_LINT.md` +
-  `scripts/devnet/run_410_public_devnet_package_integrity_stale_prose_lint.sh`.
+  `scripts/devnet/run_410_public_devnet_package_integrity_stale_prose_lint.sh`. For the
+  cross-**ledger** consistency lint that keeps the readiness matrix and the contradiction
+  ledger in agreement on the Run 402–410 run narratives and the fixed posture,
+  `docs/release/public-devnet/READINESS_CONTRADICTION_LEDGER_LINT.md` +
+  `scripts/devnet/run_411_public_devnet_readiness_contradiction_ledger_lint.sh`.
 - **Status:** docs-only; **moves no readiness item** (M4/M6/S5/S7 stay Yellow;
   C4/C5 OPEN; public DevNet NOT launch-ready).
 - **Non-claims:** not binary provenance; no signed release / SLSA claim; deploys

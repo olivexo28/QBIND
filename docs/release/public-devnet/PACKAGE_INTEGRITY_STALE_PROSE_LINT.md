@@ -33,6 +33,10 @@ Companion files:
   workflow that runs the verifier and, after it, this lint.
 - `scripts/devnet/run_410_public_devnet_package_integrity_stale_prose_lint.sh` — the Run 410
   harness / lint.
+- `docs/release/public-devnet/READINESS_CONTRADICTION_LEDGER_LINT.md` — the Run 411
+  cross-**ledger** consistency lint (its companion): where this lint keeps the
+  package-integrity prose internally consistent, Run 411 keeps the readiness matrix and the
+  contradiction ledger consistent with each other on the fixed posture and non-claims.
 
 ## 1. Why this lint exists
 
