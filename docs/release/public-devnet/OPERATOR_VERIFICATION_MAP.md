@@ -22,20 +22,23 @@ decision is **NO-GO / NOT launch-ready** (`LAUNCH_GO_NO_GO.md`).
 1. `docs/release/public-devnet/ARTIFACT_INDEX.md` — find every artifact.
 2. `docs/release/public-devnet/PACKAGE_INTEGRITY.md` — **first** confirm the
    documented package files are present and unchanged (SHA-256 + byte size) via the
-   package integrity check, before trusting the rest of the package.
+   package integrity check, before trusting the rest of the package. For exhaustive
+   coverage, also run the **full-tree** integrity verifier
+   (`docs/release/public-devnet/PACKAGE_INTEGRITY_FULL_TREE.md`), which hashes every
+   publish-safe file in the tree, not just the anchor set.
 3. `docs/release/public-devnet/operator/SAFETY.md` — understand the DevNet safety
    envelope (experimental, resettable, no value, no SLA).
-3. `docs/release/public-devnet/operator/QUICKSTART.md` — bring up a local node.
-4. `docs/release/public-devnet/genesis/VERIFY.md` — verify + pin genesis.
-5. `docs/release/public-devnet/binary/VERIFY.md` — verify the release binary.
-6. `docs/release/public-devnet/identity/IDENTITY_GENERATION.md` +
+4. `docs/release/public-devnet/operator/QUICKSTART.md` — bring up a local node.
+5. `docs/release/public-devnet/genesis/VERIFY.md` — verify + pin genesis.
+6. `docs/release/public-devnet/binary/VERIFY.md` — verify the release binary.
+7. `docs/release/public-devnet/identity/IDENTITY_GENERATION.md` +
    `identity/IDENTITY_CONTINUITY.md` — generate a durable identity.
-7. `docs/release/public-devnet/security/KEY_MANAGEMENT.md` +
+8. `docs/release/public-devnet/security/KEY_MANAGEMENT.md` +
    `security/PQC_TRUST_BOOTSTRAP.md` — key handling + trust bootstrap.
-8. `docs/release/public-devnet/observability/RUNBOOK.md` — metrics + alerts.
-9. `docs/release/public-devnet/ops/RESET_POLICY.md` +
-   `recovery/BACKUP_RESTORE.md` — reset / backup / recovery.
-10. `docs/release/public-devnet/LAUNCH_GO_NO_GO.md` — confirm the **NO-GO** posture
+9. `docs/release/public-devnet/observability/RUNBOOK.md` — metrics + alerts.
+10. `docs/release/public-devnet/ops/RESET_POLICY.md` +
+    `recovery/BACKUP_RESTORE.md` — reset / backup / recovery.
+11. `docs/release/public-devnet/LAUNCH_GO_NO_GO.md` — confirm the **NO-GO** posture
     before attempting anything network-facing.
 
 ## 2. Recommended read order — security reviewer
@@ -74,6 +77,7 @@ decision is **NO-GO / NOT launch-ready** (`LAUNCH_GO_NO_GO.md`).
 | Verify | How | Reference | Item / status |
 | ------ | --- | --------- | ------------- |
 | **Package integrity check** | Validate `PACKAGE_INTEGRITY_MANIFEST.example.json` against its schema; re-hash every listed file and confirm each SHA-256 + byte size matches the on-disk tree. Do this **first**. | `PACKAGE_INTEGRITY.md`, `run_404…` | package integrity — docs-only (moves nothing) |
+| **Full-tree integrity verification** | Run the full-tree verifier: it generates a transient manifest (outside the tree, never committed) covering **every** publish-safe file under `docs/release/public-devnet`, validates it against `PACKAGE_INTEGRITY_FULL_TREE_MANIFEST.schema.json`, and confirms every file is present with matching SHA-256 + byte size. | `PACKAGE_INTEGRITY_FULL_TREE.md`, `run_405…` | full-tree integrity — docs-only (moves nothing) |
 | **Genesis verification** | `sha256sum devnet-genesis.json` matches `devnet-genesis.sha256`; pin node with `--expect-genesis-hash`. | `genesis/VERIFY.md` | M1/M19/M20 — Green |
 | **Binary provenance verification** | Verify `qbind-node.sha256`; follow provenance + reproducibility; validate the release artifact manifest against its schema. | `binary/VERIFY.md`, `run_383…`, `run_384…`, `run_385…` | M2/M3 — Green |
 | **Identity verification** | `qbind-node identity verify` / `print-public` / non-mutating `register-check`; check continuity guidance. | `identity/IDENTITY_VERIFY.md`, `run_375…`, `run_376…`, `run_401…` | M6 — **Yellow / Partial** |
@@ -113,6 +117,7 @@ Read and obey these stops before doing anything network-facing:
 
 - `docs/release/public-devnet/ARTIFACT_INDEX.md` — artifact navigation index.
 - `docs/release/public-devnet/PACKAGE_INTEGRITY.md` — package integrity manifest guide (run the package integrity check first).
+- `docs/release/public-devnet/PACKAGE_INTEGRITY_FULL_TREE.md` — full-tree integrity verifier guide (exhaustive, transiently-generated coverage of every publish-safe file).
 - `docs/release/public-devnet/LAUNCH_GO_NO_GO.md` — launch decision gate.
 - `docs/release/public-devnet/BLOCKER_REGISTER.md` — blocker register.
 - `docs/release/QBIND_PUBLIC_DEVNET_READINESS_CRITERIA.md` — canonical readiness matrix.

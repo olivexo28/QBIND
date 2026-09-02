@@ -309,6 +309,31 @@ and mutates **no** validator/epoch/sequence/marker/`LivePqcTrustState` state. **
 this run adds integrity coverage only. **M4 stays Yellow/launch-blocking; M6 stays Yellow/Partial; S5/S7 stay
 Yellow; M1–M3/M5/M7–M20 remain Green; public DevNet stays NOT launch-ready; C4/C5 remain OPEN; MainNet/TestNet
 untouched.**
+Updated Run 405 — **full-tree package integrity verifier published; no readiness item moves (Route B — docs +
+schema + shell + optional CI only, no production source change, no `build.rs` change, no `Cargo.toml` change, no new
+CLI flag)**: adds the operator/reviewer public DevNet **full-tree package integrity verifier** —
+`docs/release/public-devnet/PACKAGE_INTEGRITY_FULL_TREE_MANIFEST.schema.json` (draft-07 schema fixing
+`manifest_version`, `generated_for_run: 405`, `scope: public-devnet-docs-release-package-full-tree`,
+`coverage: full-tree`, the eight safety labels, `package_root: docs/release/public-devnet`, `file_count`, minimal
+per-file `relative_path`/`sha256`/`byte_size` entries, and the eleven non-claim booleans all `false`),
+`PACKAGE_INTEGRITY_FULL_TREE.md` (guide: how full-tree verification differs from the Run 404 anchor manifest, why the
+full-tree manifest is generated transiently rather than committed, how to run the verifier locally and in CI, why it
+is not binary provenance, why it is not launch evidence, and why M4/M6/S5/S7 and C4/C5 are unchanged), the harness
+`scripts/devnet/run_405_public_devnet_full_tree_package_integrity.sh`, and the least-privilege
+`.github/workflows/public-devnet-package-integrity.yml` (contents:read; no secrets; no deployment; no commit/push;
+runs only the Run 405 verifier). The verifier generates a full-tree manifest into a temp dir **outside** the package
+tree (never committed) covering **every** publish-safe file under `docs/release/public-devnet` (86 files), validates
+it against the schema, asserts the manifest file set equals the on-disk set, re-hashes every file, re-validates the
+Run 404 anchor manifest (whose three narrowly-edited entries had their SHA-256/byte size refreshed with no status
+change), and runs the secret/non-claim scans. Verified against the on-disk package tree and this canonical readiness
+matrix by that harness (`RESULT=POSITIVE`; 21 checks), with `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_405.md` and archive
+`docs/devnet/run_405_public_devnet_full_tree_package_integrity/`; `ARTIFACT_INDEX.md` and
+`OPERATOR_VERIFICATION_MAP.md` are narrowly updated to reference full-tree verification (and the external-operator
+read-order numbering was cleaned to a consecutive 1..11). It adds **no** CLI flag, opens **no** port, deploys **no**
+seed/bootnode/faucet/RPC/explorer/status service, applies **no** trust bundle, and mutates **no**
+validator/epoch/sequence/marker/`LivePqcTrustState` state. **No readiness item moves Green** — this run adds full-tree
+integrity coverage only. **M4 stays Yellow/launch-blocking; M6 stays Yellow/Partial; S5/S7 stay Yellow;
+M1–M3/M5/M7–M20 remain Green; public DevNet stays NOT launch-ready; C4/C5 remain OPEN; MainNet/TestNet untouched.**
 Updated Run 374 — **M6 materially narrowed but remains Yellow/Partial**: a stable, release-built operator-facing
 identity **generation + verification** package is published under
 `docs/release/public-devnet/identity/` (`README.md`, `IDENTITY_GENERATION.md`, `IDENTITY_VERIFY.md`,
