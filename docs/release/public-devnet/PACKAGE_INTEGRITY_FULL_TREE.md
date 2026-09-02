@@ -20,6 +20,9 @@ Companion files:
   guide (one `VERIFY.md` per group + the top-level docs).
 - `docs/release/public-devnet/PACKAGE_INTEGRITY_FULL_TREE_MANIFEST.schema.json` — the
   full-tree manifest JSON Schema (draft-07).
+- `docs/release/public-devnet/PACKAGE_INTEGRITY_CI_ARTIFACTS.md` — the Run 406 guide
+  to the **download-only CI artifacts** (transient full-tree manifest + anchor-drift
+  report) emitted by the package-integrity workflow.
 - `scripts/devnet/run_405_public_devnet_full_tree_package_integrity.sh` — the local
   verifier / harness.
 - `docs/release/public-devnet/ARTIFACT_INDEX.md` — the navigation index.
@@ -87,6 +90,13 @@ release or tag, and **does not commit or push** anything. The generated full-tre
 manifest is produced under the runner temp directory and is **not** uploaded as a
 committed file and **not** written back to the repository — CI only asserts that the
 tree still hashes cleanly.
+
+The Run 406 wrapper
+(`scripts/devnet/run_406_public_devnet_full_tree_ci_artifact_anchor_drift.sh`) extends
+this so CI additionally uploads the transient full-tree manifest and a publish-safe
+**anchor-drift report** as **download-only** artifacts for reviewer inspection — still
+under the runner temp / staging directory, still never committed. See
+`docs/release/public-devnet/PACKAGE_INTEGRITY_CI_ARTIFACTS.md`.
 
 ## 5. Why this is not binary provenance
 

@@ -1,11 +1,17 @@
-# Run 405 — public DevNet FULL-TREE package integrity check.
+# Run 405/406 — public DevNet FULL-TREE package integrity check + download-only CI
+# artifacts (transient full-tree manifest + anchor-drift report).
 #
-# Runs the Run 405 full-tree integrity verifier
+# Runs the Run 406 artifact wrapper
+# (`scripts/devnet/run_406_public_devnet_full_tree_ci_artifact_anchor_drift.sh`),
+# which reuses the Run 405 full-tree integrity verifier
 # (`scripts/devnet/run_405_public_devnet_full_tree_package_integrity.sh`) so every
 # change that touches the public DevNet package tree is checked: the verifier
 # generates a full-tree integrity manifest into the runner temp directory, validates
-# it against the committed schema, and confirms every publish-safe file under
-# docs/release/public-devnet is present with a matching SHA-256 + byte size.
+# it against the committed schema, confirms every publish-safe file under
+# docs/release/public-devnet is present with a matching SHA-256 + byte size, and emits
+# a publish-safe anchor-drift report. The manifest, the anchor-drift report, and a
+# short CI summary are uploaded as DOWNLOAD-ONLY CI artifacts; none of them is
+# committed to the repository.
 #
 # Decision gate: Route B (docs + schema + shell/CI only). This workflow makes NO
 # production Rust source change, NO build.rs change, NO runtime behaviour change, and
@@ -16,9 +22,9 @@
 #   * No secrets referenced.
 #   * Does NOT deploy a seed/bootnode/faucet/RPC/explorer/status service, open a
 #     public endpoint, create a release/tag, or start a node.
-#   * Does NOT commit or push anything. The generated full-tree manifest is written
-#     under the runner temp directory and is NEVER committed or uploaded as a
-#     repository file.
+#   * Does NOT commit or push anything. The generated full-tree manifest, anchor-drift
+#     report, and CI summary are written under the runner temp directory and are
+#     uploaded only as download-only CI artifacts, never committed back to the repo.
 
 name: public-devnet-package-integrity
 
@@ -27,6 +33,7 @@ on:
   pull_request:
     paths:
       - "docs/release/public-devnet/**"
+      - "scripts/devnet/run_406_public_devnet_full_tree_ci_artifact_anchor_drift.sh"
       - "scripts/devnet/run_405_public_devnet_full_tree_package_integrity.sh"
       - "scripts/devnet/run_404_public_devnet_package_integrity_manifest.sh"
       - ".github/workflows/public-devnet-package-integrity.yml"
@@ -45,8 +52,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
-      # Runner temp staging for the transient generated manifest (never committed).
-      RUN405_OUTDIR: ${{ runner.temp }}/qbind-run405-full-tree-package-integrity
+      # Runner temp staging for the transient generated artifacts (never committed).
+      RUN406_OUTDIR: ${{ runner.temp }}/qbind-run406-full-tree-ci-artifact-anchor-drift
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -56,15 +63,26 @@ jobs:
       - name: Install manifest validation dependency
         run: python3 -m pip install --user jsonschema >/dev/null 2>&1 || true
 
-      - name: Run the full-tree package integrity verifier
+      - name: Run the full-tree integrity verifier + anchor-drift artifact wrapper
         run: |
-          bash scripts/devnet/run_405_public_devnet_full_tree_package_integrity.sh "${RUN405_OUTDIR}"
+          bash scripts/devnet/run_406_public_devnet_full_tree_ci_artifact_anchor_drift.sh "${RUN406_OUTDIR}"
 
-      - name: Confirm no generated manifest was committed to the tree
+      - name: Upload download-only integrity CI artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: public-devnet-full-tree-integrity
+          if-no-files-found: error
+          retention-days: 14
+          path: |
+            ${{ env.RUN406_OUTDIR }}/artifact-staging/PACKAGE_INTEGRITY_FULL_TREE_MANIFEST.generated.json
+            ${{ env.RUN406_OUTDIR }}/artifact-staging/ANCHOR_DRIFT_REPORT.md
+            ${{ env.RUN406_OUTDIR }}/artifact-staging/PACKAGE_INTEGRITY_CI_SUMMARY.txt
+
+      - name: Confirm no generated artifact was committed to the tree
         run: |
           if git status --porcelain | grep -q .; then
             echo "working tree unexpectedly dirty after verifier:" >&2
             git status --porcelain >&2
             exit 1
           fi
-          echo "clean: verifier committed nothing; generated manifest stayed under runner temp"
+          echo "clean: verifier committed nothing; generated artifacts stayed under runner temp"

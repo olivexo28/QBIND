@@ -334,6 +334,31 @@ seed/bootnode/faucet/RPC/explorer/status service, applies **no** trust bundle, a
 validator/epoch/sequence/marker/`LivePqcTrustState` state. **No readiness item moves Green** — this run adds full-tree
 integrity coverage only. **M4 stays Yellow/launch-blocking; M6 stays Yellow/Partial; S5/S7 stay Yellow;
 M1–M3/M5/M7–M20 remain Green; public DevNet stays NOT launch-ready; C4/C5 remain OPEN; MainNet/TestNet untouched.**
+Updated Run 406 — **full-tree integrity CI artifact + anchor-drift report published; no readiness item moves (Route B
+— docs + shell + YAML only, no production source change, no `build.rs` change, no `Cargo.toml` change, no new CLI
+flag)**: extends the Run 405 full-tree verifier so CI can emit, as **download-only** artifacts, the transient full-tree
+manifest (`PACKAGE_INTEGRITY_FULL_TREE_MANIFEST.generated.json`), a publish-safe **anchor-drift report**
+(`ANCHOR_DRIFT_REPORT.md`) comparing the Run 404 curated anchor set against the Run 405/406 full-tree file set, and a
+CI summary (`PACKAGE_INTEGRITY_CI_SUMMARY.txt`) — all staged **outside** `docs/release/public-devnet` and **never**
+committed. It adds `docs/release/public-devnet/PACKAGE_INTEGRITY_CI_ARTIFACTS.md` (guide: what artifacts are emitted,
+why they are download-only inspection artifacts not committed source, how to interpret anchor drift, why full-tree-only
+files are expected, what fails the check, why it is not binary provenance or launch evidence, and why M4/M6/S5/S7 and
+C4/C5 are unchanged), the harness
+`scripts/devnet/run_406_public_devnet_full_tree_ci_artifact_anchor_drift.sh` (`RESULT=POSITIVE`; 26 checks), and
+narrowly updates the least-privilege `.github/workflows/public-devnet-package-integrity.yml` to run the Run 406 wrapper
+and upload only the three publish-safe artifacts (still `contents: read`; no secrets; no deploy/release/tag/commit/push;
+fails if the working tree is dirty). The anchor-drift report is honest: every one of the 16 anchor entries is present in
+the full tree, no undocumented hash/size mismatch, and the 71 full-tree-only files (including the newly added
+`PACKAGE_INTEGRITY_CI_ARTIFACTS.md`) are reported as **expected curated-anchor drift**. The Run 404 anchor manifest had
+its SHA-256/byte size refreshed for exactly the three narrowly-edited anchor docs (`PACKAGE_INTEGRITY.md`,
+`ARTIFACT_INDEX.md`, `OPERATOR_VERIFICATION_MAP.md`) — a documented deliberate refresh, no entry added/removed, no
+`status` changed. Verified against the on-disk package tree and this canonical readiness matrix by that harness, with
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_406.md` and archive
+`docs/devnet/run_406_public_devnet_full_tree_ci_artifact_anchor_drift/`. It adds **no** CLI flag, opens **no** port,
+deploys **no** seed/bootnode/faucet/RPC/explorer/status service, applies **no** trust bundle, and mutates **no**
+validator/epoch/sequence/marker/`LivePqcTrustState` state. **No readiness item moves Green** — this run adds
+audit/reviewer usability only. **M4 stays Yellow/launch-blocking; M6 stays Yellow/Partial; S5/S7 stay Yellow;
+M1–M3/M5/M7–M20 remain Green; public DevNet stays NOT launch-ready; C4/C5 remain OPEN; MainNet/TestNet untouched.**
 Updated Run 374 — **M6 materially narrowed but remains Yellow/Partial**: a stable, release-built operator-facing
 identity **generation + verification** package is published under
 `docs/release/public-devnet/identity/` (`README.md`, `IDENTITY_GENERATION.md`, `IDENTITY_VERIFY.md`,
