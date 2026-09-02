@@ -296,7 +296,11 @@ Each artifact group lists:
   cross-**ledger** consistency lint that keeps the readiness matrix and the contradiction
   ledger in agreement on the Run 402–410 run narratives and the fixed posture,
   `docs/release/public-devnet/READINESS_CONTRADICTION_LEDGER_LINT.md` +
-  `scripts/devnet/run_411_public_devnet_readiness_contradiction_ledger_lint.sh`.
+  `scripts/devnet/run_411_public_devnet_readiness_contradiction_ledger_lint.sh`. For the
+  per-**milestone** status/blocker consistency lint that keeps the readiness matrix's §10
+  current-status table in agreement with its §4/§5 checklists and the blocker register,
+  `docs/release/public-devnet/READINESS_STATUS_BLOCKER_LINT.md` +
+  `scripts/devnet/run_412_public_devnet_readiness_status_blocker_lint.sh`.
 - **Status:** docs-only; **moves no readiness item** (M4/M6/S5/S7 stay Yellow;
   C4/C5 OPEN; public DevNet NOT launch-ready).
 - **Non-claims:** not binary provenance; no signed release / SLSA claim; deploys

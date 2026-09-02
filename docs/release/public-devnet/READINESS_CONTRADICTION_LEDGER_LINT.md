@@ -29,6 +29,11 @@ Companion files:
   package-integrity stale-prose lint; this Run 411 lint is its **cross-ledger** companion
   (Run 410 keeps the package-integrity prose internally consistent; Run 411 keeps the two
   readiness ledgers consistent with each other).
+- `docs/release/public-devnet/READINESS_STATUS_BLOCKER_LINT.md` — the Run 412 per-**milestone**
+  status/blocker consistency lint; where this Run 411 lint keeps the readiness matrix and the
+  contradiction ledger consistent on the per-run narratives, Run 412 keeps the readiness
+  matrix's §10 current-status table consistent with its §4/§5 checklists and the blocker
+  register on the per-milestone status rows.
 - `docs/release/public-devnet/LAUNCH_GO_NO_GO.md` — the launch decision gate (**NO-GO**).
 - `docs/release/public-devnet/BLOCKER_REGISTER.md` — the M4/M6/S5/S7 blocker register.
 - `docs/protocol/QBIND_C4_C5_CLOSURE_CRITERIA.md` — the C4/C5 closure criteria.
