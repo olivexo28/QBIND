@@ -1,0 +1,260 @@
+Run 413 — Public DevNet readiness recommendation/gap-matrix consistency lint
+
+Current state:
+Run 412 is accepted PASS.
+Run 412 added a per-milestone readiness table/checklist/blocker consistency lint.
+Public DevNet launch decision remains NO-GO / NOT launch-ready.
+M4 remains Yellow / launch-blocking.
+M6 remains Yellow / Partial.
+S5 remains Yellow.
+S7 remains Yellow.
+C4 remains OPEN.
+C5 remains OPEN.
+TestNet/MainNet remain untouched.
+N1–N7 remain Red.
+
+Objective:
+Extend the existing per-milestone consistency protection so the readiness matrix’s §11 next-run recommendation table and §16 consolidated gap matrix cannot drift away from the §10 current-status table, §4/§5 checklists, blocker register, and launch go/no-go gate.
+
+This run must only add documentation consistency protection.
+It must not add functionality and must not move any readiness item.
+
+Strict scope:
+Docs + shell only.
+
+No public DevNet launch.
+No M4 Green.
+No M6 Green.
+No S5 Green.
+No S7 Green.
+No C4 closure.
+No C5 closure.
+No TestNet readiness.
+No MainNet readiness.
+No Rust source change.
+No build.rs change.
+No Cargo.toml change.
+No public CLI change.
+No runtime behavior change.
+No seed/bootnode/faucet/RPC/explorer/status-service deployment.
+No port opened.
+No node started.
+No trust-bundle apply.
+No validator-set mutation.
+No epoch transition.
+No sequence/marker/LivePqcTrustState mutation.
+No peer-driven apply.
+No private material committed.
+
+Required investigation:
+Read:
+- docs/release/QBIND_PUBLIC_DEVNET_READINESS_CRITERIA.md
+- docs/release/public-devnet/READINESS_STATUS_BLOCKER_LINT.md
+- docs/release/public-devnet/READINESS_CONTRADICTION_LEDGER_LINT.md
+- docs/release/public-devnet/BLOCKER_REGISTER.md
+- docs/release/public-devnet/LAUNCH_GO_NO_GO.md
+- docs/release/public-devnet/ARTIFACT_INDEX.md
+- docs/release/public-devnet/OPERATOR_VERIFICATION_MAP.md
+- docs/whitepaper/contradiction.md
+- docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_412.md
+- docs/devnet/run_412_public_devnet_readiness_status_blocker_lint/summary.txt
+
+Required implementation:
+Create:
+- docs/release/public-devnet/READINESS_RECOMMENDATION_GAP_MATRIX_LINT.md
+- scripts/devnet/run_413_public_devnet_readiness_recommendation_gap_matrix_lint.sh
+- docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_413.md
+- docs/devnet/run_413_public_devnet_readiness_recommendation_gap_matrix_lint/{README.md,summary.txt,.gitignore}
+
+Update narrowly:
+- docs/release/QBIND_PUBLIC_DEVNET_READINESS_CRITERIA.md
+- docs/whitepaper/contradiction.md
+- docs/release/public-devnet/ARTIFACT_INDEX.md
+- docs/release/public-devnet/OPERATOR_VERIFICATION_MAP.md
+- docs/release/public-devnet/READINESS_STATUS_BLOCKER_LINT.md as a companion pointer
+- docs/release/public-devnet/PACKAGE_INTEGRITY_MANIFEST.example.json only if an edited anchor file requires SHA-256/byte_size refresh
+
+Do not update files unnecessarily.
+If an edited file is one of the 16 curated package-integrity anchors, refresh exactly that anchor entry and document it.
+Do not add or remove manifest entries unless a real anchor-set change is explicitly in scope, which it is not for this run.
+
+Canonical status expectations:
+The lint must preserve the Run 412 frozen truth:
+
+Must-have milestones:
+- M1 Green
+- M2 Green
+- M3 Green
+- M4 Yellow / launch-blocking
+- M5 Green
+- M6 Yellow / Partial
+- M7 Green
+- M8 Green
+- M9 Green
+- M10 Green
+- M11 Green
+- M12 Green / Green-for-scope as recorded from Run 371
+- M13 Green
+- M14 Green
+- M15 Green
+- M16 Green
+- M17 Green
+- M18 Green
+- M19 Green
+- M20 Green
+
+Should-have milestones:
+- S1 Green
+- S2 Green
+- S3 Green
+- S4 Green
+- S5 Yellow
+- S6 Green
+- S7 Yellow
+
+Network/testnet/mainnet posture:
+- Public DevNet remains NO-GO / NOT launch-ready.
+- C4 remains OPEN.
+- C5 remains OPEN.
+- TestNet/MainNet remain untouched.
+- N1–N7 remain Red, with N5 tied to C4 OPEN / Red and N6 tied to C5 OPEN / Red.
+
+Required lint behavior:
+The Run 413 harness must fail closed if:
+
+1. §11 next-run recommendation table disagrees with §10 current-status table for any M1–M20 or S1–S7 item it mentions.
+2. §16 consolidated gap matrix disagrees with §10 current-status table for any M1–M20 or S1–S7 item it mentions.
+3. §11 omits or misstates the still-open M4 / M6 / S5 / S7 follow-up posture.
+4. §16 omits or misstates the still-open M4 / M6 / S5 / S7 gap posture.
+5. §11 or §16 marks M4 resolved, Green, non-blocking, launch-complete, or not launch-blocking.
+6. §11 or §16 marks M6 fully Green, resolved, launch-complete, or no longer Partial.
+7. §11 or §16 marks S5 or S7 Green, resolved, or no longer M4-gated.
+8. §11 or §16 says public DevNet is launch-ready or GO.
+9. §11 or §16 says C4 or C5 is closed.
+10. §11 or §16 says TestNet or MainNet is ready.
+11. §11 or §16 says N1–N7 are anything other than Red / untouched, except N5 may be described as C4 OPEN / Red and N6 as C5 OPEN / Red.
+12. §11 or §16 claims a live seed, bootnode, faucet, RPC, explorer, or status service has been deployed.
+13. §11 or §16 claims `devnet-seeds.live.json` exists or may be created without real M4 evidence.
+14. §11 or §16 claims runtime state was mutated by a docs-only run.
+15. §11 or §16 implies a docs/shell/schema/YAML-only run moved a runtime readiness item Green unless that move is already historically recorded and scoped before Run 413.
+16. The Run 413 docs introduce any readiness overclaim.
+17. Generated output is committed.
+18. Private material or absolute paths are committed.
+
+READINESS_RECOMMENDATION_GAP_MATRIX_LINT.md must explain:
+- why this lint exists;
+- which documents and sections are compared;
+- why §10 remains the source of truth;
+- how §11 next-run recommendation rows are checked against §10;
+- how §16 consolidated gap matrix rows are checked against §10;
+- how this extends Run 412;
+- why M4 remains Yellow / launch-blocking;
+- why M6 remains Yellow / Partial;
+- why S5/S7 remain Yellow and M4-gated;
+- why public DevNet remains NO-GO / NOT launch-ready;
+- why C4/C5 remain OPEN;
+- why TestNet/MainNet remain untouched;
+- how to update expectations when a future real Route A run legitimately changes a status;
+- why this is not launch evidence;
+- why this is not C4/C5 closure evidence.
+
+Harness must verify:
+1. Recommendation/gap-matrix lint guide exists and is safety-labelled.
+2. Readiness matrix exists.
+3. §10 current-status table exists.
+4. §11 next-run recommendation table exists.
+5. §16 consolidated gap matrix exists.
+6. §11 and §10 agree for all scoped M/S items represented in §11.
+7. §16 and §10 agree for all scoped M/S items represented in §16.
+8. M4 remains Yellow / launch-blocking in §11 and §16.
+9. M6 remains Yellow / Partial in §11 and §16.
+10. S5/S7 remain Yellow or M4-gated in §11 and §16.
+11. Public DevNet remains NO-GO / NOT launch-ready.
+12. C4/C5 remain OPEN.
+13. TestNet/MainNet remain untouched and N1–N7 Red.
+14. No `devnet-seeds.live.json` live-publication claim appears.
+15. No seed/bootnode/faucet/RPC/explorer/status-service deployment claim appears.
+16. No runtime mutation claim appears.
+17. No readiness item moves Green.
+18. Run 412 regression remains positive.
+19. Run 411 regression remains positive.
+20. Run 410 regression remains positive.
+21. Run 405 full-tree integrity regression remains positive if anchor docs are refreshed.
+22. No generated output is committed.
+23. Working tree remains clean after the harness.
+24. Secret/private-material scan is clean.
+25. Non-claim grep passes.
+26. If PACKAGE_INTEGRITY_MANIFEST.example.json is refreshed for edited anchor docs, all 16 anchors still hash/size match and no entry/status changes.
+
+Allowed outputs:
+The harness may emit a publish-safe transient summary outside the repository tree.
+It must not commit generated output.
+
+Readiness rules:
+This run must not move any readiness item.
+M4 remains Yellow / launch-blocking.
+M6 remains Yellow / Partial.
+S5 remains Yellow.
+S7 remains Yellow.
+Public DevNet remains NOT launch-ready / NO-GO.
+C4/C5 remain OPEN.
+TestNet/MainNet remain untouched.
+
+Tests/checks:
+- bash scripts/devnet/run_413_public_devnet_readiness_recommendation_gap_matrix_lint.sh
+- §10 status table extraction
+- §11 recommendation table extraction
+- §16 consolidated gap matrix extraction
+- §11-vs-§10 consistency grep/checks
+- §16-vs-§10 consistency grep/checks
+- M4/M6/S5/S7 posture checks
+- C4/C5 and TestNet/MainNet non-claim grep
+- devnet-seeds.live.json non-claim grep
+- deployment/runtime non-claim grep
+- generated-output non-commit check
+- markdown path/link checks where practical
+- non-claim grep
+- secret/private-material scan
+- anchor manifest hash/size re-check only if anchor docs were edited
+- cargo test only if Rust source changed; otherwise record no-Rust-delta honestly
+
+CodeQL:
+Docs/shell only → trivial/not meaningful.
+Rust/build.rs/Cargo/source change → run CodeQL if available and record exact result.
+Never call skipped/trivial/timed-out/DB-too-large analysis clean.
+
+Expected verdict:
+PASS / public-DevNet readiness recommendation/gap-matrix consistency lint POSITIVE if the guide and harness land cleanly, §11 and §16 agree with the §10 current-status table, M4/M6/S5/S7 remain Yellow, launch remains NO-GO, C4/C5 stay OPEN, no generated/private material is committed, and no readiness overclaim is introduced.
+
+Final response format:
+1. Exact verdict
+2. Files changed
+3. Decision gate route
+4. Recommendation/gap-matrix lint guide contents
+5. Compared sections/documents
+6. §10 source-of-truth coverage
+7. §11 next-run recommendation consistency
+8. §16 consolidated gap matrix consistency
+9. M4 consistency check
+10. M6 consistency check
+11. S5/S7 consistency check
+12. Public DevNet NO-GO consistency
+13. C4/C5 consistency
+14. TestNet/MainNet non-claims
+15. devnet-seeds.live.json non-claim
+16. Deployment/runtime non-claim
+17. Generated-output behavior
+18. Non-claim checks
+19. Security scans
+20. Runtime mutation check
+21. Readiness delta
+22. M4 status
+23. M6 status
+24. S5/S7 status
+25. Public DevNet status
+26. C4/C5
+27. TestNet/MainNet non-claims
+28. Tests run
+29. CodeQL
+30. Honest limitations
+31. Suggested Run 414
