@@ -21,6 +21,9 @@ Companion documents:
 - `docs/release/public-devnet/PACKAGE_INTEGRITY_FULL_TREE.md` — the full-tree
   integrity verifier guide: exhaustive, transiently-generated hashing of **every**
   publish-safe file in the package tree.
+- `docs/release/public-devnet/PACKAGE_INTEGRITY_CI_ARTIFACTS.md` — the download-only
+  CI artifacts guide (Run 406): the transient full-tree manifest + a publish-safe
+  anchor-drift report, uploaded for inspection and never committed.
 - `docs/release/public-devnet/OPERATOR_VERIFICATION_MAP.md` — recommended read
   orders + the exact verification map + the launch stop rule.
 - `docs/release/public-devnet/LAUNCH_GO_NO_GO.md` — the current launch decision
@@ -233,14 +236,17 @@ Each artifact group lists:
   `PACKAGE_INTEGRITY_MANIFEST.schema.json`,
   `PACKAGE_INTEGRITY_MANIFEST.example.json`,
   `PACKAGE_INTEGRITY_FULL_TREE.md`,
-  `PACKAGE_INTEGRITY_FULL_TREE_MANIFEST.schema.json`.
+  `PACKAGE_INTEGRITY_FULL_TREE_MANIFEST.schema.json`,
+  `PACKAGE_INTEGRITY_CI_ARTIFACTS.md`.
 - **Purpose:** a machine-readable manifest (SHA-256 + byte size) so operators can
   confirm the documented public DevNet package files are present and unchanged
   **before** following `OPERATOR_VERIFICATION_MAP.md`. Two coverage levels: the
   Run 404 **anchor** manifest (one `VERIFY.md` per group + the top-level docs) and
   the Run 405 **full-tree** integrity verification, which hashes **every**
   publish-safe file under the package tree via a transiently-generated manifest
-  (never committed). This is documentation-tree integrity, **not** binary provenance
+  (never committed). Run 406 additionally emits that transient manifest and a
+  publish-safe **anchor-drift report** as **download-only CI artifacts** (never
+  committed). This is documentation-tree integrity, **not** binary provenance
   (see group 2 for the release-binary manifest).
 - **Readiness item:** package integrity (docs-only; moves nothing).
 - **Verify:** `docs/release/public-devnet/PACKAGE_INTEGRITY.md`;
@@ -248,12 +254,15 @@ Each artifact group lists:
   `PACKAGE_INTEGRITY_MANIFEST.example.json` against its schema and re-hash each
   listed file. For exhaustive coverage,
   `docs/release/public-devnet/PACKAGE_INTEGRITY_FULL_TREE.md` +
-  `scripts/devnet/run_405_public_devnet_full_tree_package_integrity.sh`.
+  `scripts/devnet/run_405_public_devnet_full_tree_package_integrity.sh`. For the
+  download-only CI artifacts + anchor-drift report,
+  `docs/release/public-devnet/PACKAGE_INTEGRITY_CI_ARTIFACTS.md` +
+  `scripts/devnet/run_406_public_devnet_full_tree_ci_artifact_anchor_drift.sh`.
 - **Status:** docs-only; **moves no readiness item** (M4/M6/S5/S7 stay Yellow;
   C4/C5 OPEN; public DevNet NOT launch-ready).
 - **Non-claims:** not binary provenance; no signed release / SLSA claim; deploys
-  nothing; mutates no runtime state; the full-tree manifest is generated
-  transiently and never committed.
+  nothing; mutates no runtime state; the full-tree manifest and the anchor-drift
+  report are generated transiently and never committed.
 
 ---
 

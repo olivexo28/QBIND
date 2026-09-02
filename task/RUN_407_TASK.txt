@@ -1,0 +1,253 @@
+Run 407 — Public DevNet machine-readable anchor drift artifact + CI retention policy
+
+Current state:
+Run 406 is accepted PASS.
+Public DevNet launch decision remains NO-GO / NOT launch-ready.
+M4 remains Yellow / launch-blocking.
+M6 remains Yellow / Partial.
+S5 remains Yellow.
+S7 remains Yellow.
+C4 remains OPEN.
+C5 remains OPEN.
+TestNet/MainNet remain untouched.
+
+Objective:
+Extend the Run 406 CI artifact wrapper to also emit a machine-readable JSON anchor-drift report and document CI artifact retention expectations.
+
+This run improves audit/reviewer automation only.
+It must not move M4, M6, S5, S7, C4, or C5.
+
+Strict scope:
+Docs + schema + shell + YAML only.
+
+No public DevNet launch.
+No M4 Green.
+No M6 Green.
+No S5 Green.
+No S7 Green.
+No C4 closure.
+No C5 closure.
+No TestNet readiness.
+No MainNet readiness.
+No Rust source change.
+No build.rs change.
+No Cargo.toml change.
+No public CLI change.
+No runtime behavior change.
+No seed/bootnode/faucet/RPC/explorer/status-service deployment.
+No port opened.
+No node started.
+No trust-bundle apply.
+No validator-set mutation.
+No epoch transition.
+No sequence/marker/LivePqcTrustState mutation.
+No peer-driven apply.
+No private material committed.
+
+Required investigation:
+Read:
+- docs/release/public-devnet/PACKAGE_INTEGRITY_CI_ARTIFACTS.md
+- docs/release/public-devnet/PACKAGE_INTEGRITY_FULL_TREE.md
+- docs/release/public-devnet/PACKAGE_INTEGRITY.md
+- docs/release/public-devnet/PACKAGE_INTEGRITY_MANIFEST.example.json
+- docs/release/public-devnet/PACKAGE_INTEGRITY_FULL_TREE_MANIFEST.schema.json
+- docs/release/public-devnet/ARTIFACT_INDEX.md
+- docs/release/public-devnet/OPERATOR_VERIFICATION_MAP.md
+- docs/release/public-devnet/LAUNCH_GO_NO_GO.md
+- docs/release/public-devnet/BLOCKER_REGISTER.md
+- docs/release/QBIND_PUBLIC_DEVNET_READINESS_CRITERIA.md
+- docs/whitepaper/contradiction.md
+- .github/workflows/public-devnet-package-integrity.yml
+- scripts/devnet/run_406_public_devnet_full_tree_ci_artifact_anchor_drift.sh
+
+Required implementation:
+Create:
+- docs/release/public-devnet/PACKAGE_INTEGRITY_ANCHOR_DRIFT_REPORT.schema.json
+- docs/release/public-devnet/PACKAGE_INTEGRITY_CI_RETENTION.md
+- scripts/devnet/run_407_public_devnet_anchor_drift_json_retention.sh
+- docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_407.md
+- docs/devnet/run_407_public_devnet_anchor_drift_json_retention/{README.md,summary.txt,.gitignore}
+
+Update narrowly:
+- .github/workflows/public-devnet-package-integrity.yml
+- docs/release/public-devnet/PACKAGE_INTEGRITY_CI_ARTIFACTS.md
+- docs/release/public-devnet/PACKAGE_INTEGRITY_FULL_TREE.md
+- docs/release/public-devnet/PACKAGE_INTEGRITY.md
+- docs/release/public-devnet/ARTIFACT_INDEX.md
+- docs/release/public-devnet/OPERATOR_VERIFICATION_MAP.md
+- docs/release/QBIND_PUBLIC_DEVNET_READINESS_CRITERIA.md
+- docs/whitepaper/contradiction.md
+
+Required behavior:
+The Run 407 harness must:
+- reuse the Run 406 wrapper behavior;
+- generate the full-tree manifest into a staging directory outside docs/release/public-devnet;
+- generate the existing Markdown ANCHOR_DRIFT_REPORT.md;
+- generate a new machine-readable ANCHOR_DRIFT_REPORT.json;
+- validate ANCHOR_DRIFT_REPORT.json against PACKAGE_INTEGRITY_ANCHOR_DRIFT_REPORT.schema.json;
+- ensure the JSON report contains:
+  - generated_for_run: 407;
+  - scope: public-devnet-docs-anchor-drift;
+  - package_root: docs/release/public-devnet;
+  - anchor_manifest_path;
+  - full_tree_manifest_artifact_name;
+  - counts:
+    - anchor_total;
+    - anchors_present_matching;
+    - anchors_missing;
+    - undocumented_mismatches;
+    - documented_refreshes;
+    - full_tree_only;
+  - arrays:
+    - anchors_present_matching;
+    - anchors_missing;
+    - undocumented_mismatches;
+    - documented_refreshes;
+    - full_tree_only;
+  - safety_labels:
+    - devnet
+    - experimental
+    - resettable
+    - no_value
+    - no_uptime_sla
+    - not_launch_ready
+    - c4_open
+    - c5_open
+  - non_claims all false:
+    - launches_public_devnet
+    - moves_m4_green
+    - moves_m6_green
+    - moves_s5_green
+    - moves_s7_green
+    - closes_c4
+    - closes_c5
+    - claims_testnet_ready
+    - claims_mainnet_ready
+    - deploys_seed_or_service
+    - mutates_runtime_state
+- classify full-tree-only files as expected curated-anchor drift, not failure;
+- fail on missing anchor entries;
+- fail on undocumented anchor hash/size mismatch;
+- fail on unsafe paths, absolute paths, private endpoints, private material, raw logs, raw metrics, data dirs, keys, certs, KEM secrets, signing secrets, API tokens, or generated private identity files;
+- never commit generated JSON/Markdown/full-tree artifacts.
+
+CI workflow requirements:
+Update .github/workflows/public-devnet-package-integrity.yml to:
+- keep permissions: contents: read;
+- use no secrets;
+- deploy nothing;
+- publish no release or tag;
+- commit/push nothing;
+- run only the integrity verifier / Run 407 wrapper;
+- upload only publish-safe CI artifact names:
+  - PACKAGE_INTEGRITY_FULL_TREE_MANIFEST.generated.json
+  - ANCHOR_DRIFT_REPORT.md
+  - ANCHOR_DRIFT_REPORT.json
+  - PACKAGE_INTEGRITY_CI_SUMMARY.txt
+- set an explicit retention-days value if supported by the upload-artifact action;
+- document that retention is convenience/audit usability only, not signed attestation or provenance;
+- fail if the working tree is dirty after the run.
+
+PACKAGE_INTEGRITY_CI_RETENTION.md must explain:
+- which CI artifacts are retained;
+- that retention is download-only and may depend on the CI provider settings;
+- how JSON and Markdown drift reports differ;
+- how to compare reports across runs manually;
+- why retained artifacts are not committed source artifacts;
+- why retention is not binary provenance;
+- why retention is not launch evidence;
+- why M4/M6/S5/S7 remain unchanged;
+- why C4/C5 remain OPEN.
+
+Harness must verify:
+1. JSON anchor-drift schema exists.
+2. CI retention guide exists and is safety-labelled.
+3. Run 406 wrapper compatibility remains positive.
+4. Full-tree manifest artifact is generated outside the tree.
+5. Markdown anchor-drift report is generated outside the tree.
+6. JSON anchor-drift report is generated outside the tree.
+7. JSON anchor-drift report validates against schema.
+8. JSON counts match Markdown summary counts.
+9. Every anchor entry exists in the full-tree set.
+10. No undocumented mismatch exists.
+11. Full-tree-only files are reported as expected curated drift.
+12. CI workflow uses permissions: contents: read.
+13. CI workflow references no secrets.
+14. CI workflow has no deploy/release/tag/commit/push step.
+15. CI workflow uploads only the four publish-safe artifact names.
+16. CI workflow sets or documents artifact retention-days.
+17. Generated artifacts are not committed.
+18. Working tree stays clean after verifier.
+19. M4 remains Yellow.
+20. M6 remains Yellow/Partial.
+21. S5 remains Yellow.
+22. S7 remains Yellow.
+23. Public DevNet remains NOT launch-ready.
+24. C4/C5 remain OPEN.
+25. No TestNet/MainNet readiness claim appears.
+26. No launch/faucet/RPC/explorer/status-service deployment claim appears.
+27. No runtime mutation claim appears.
+28. Secret/private-material scan is clean.
+29. Non-claim grep passes.
+
+Readiness rules:
+This run must not move any readiness item.
+M4 remains Yellow / launch-blocking.
+M6 remains Yellow / Partial.
+S5 remains Yellow.
+S7 remains Yellow.
+Public DevNet remains NOT launch-ready.
+C4/C5 remain OPEN.
+
+Tests/checks:
+- bash scripts/devnet/run_407_public_devnet_anchor_drift_json_retention.sh
+- Run 406 wrapper compatibility
+- full-tree schema validation
+- full-tree coverage verification
+- SHA-256 + byte-size verification
+- Markdown anchor-drift report verification
+- JSON anchor-drift schema validation
+- Markdown/JSON count consistency
+- CI workflow safety checks
+- artifact retention check
+- markdown path/link checks where practical
+- non-claim grep
+- secret/private-material scan
+- cargo test only if Rust source changed; otherwise record no-Rust-delta honestly
+
+CodeQL:
+Docs/schema/shell/YAML only → trivial/not meaningful.
+Rust/build.rs change → run CodeQL if available and record exact result.
+Never call skipped/trivial/timed-out/DB-too-large analysis clean.
+
+Expected verdict:
+PASS / public-DevNet machine-readable anchor drift artifact + CI retention policy POSITIVE if JSON drift output validates, Markdown/JSON drift counts agree, CI artifact retention is documented or configured safely, generated outputs remain uncommitted, and no readiness overclaim is introduced.
+
+Final response format:
+1. Exact verdict
+2. Files changed
+3. Decision gate route
+4. JSON anchor-drift schema contents
+5. CI retention guide contents
+6. Generated JSON drift artifact behavior
+7. Markdown/JSON drift consistency
+8. Anchor drift classification
+9. Full-tree coverage verification
+10. Hash verification
+11. Run 406 compatibility
+12. CI workflow safety
+13. Artifact upload and retention safety
+14. Non-claim checks
+15. Security scans
+16. Runtime mutation check
+17. Readiness delta
+18. M4 status
+19. M6 status
+20. S5/S7 status
+21. Public DevNet status
+22. C4/C5
+23. TestNet/MainNet non-claims
+24. Tests run
+25. CodeQL
+26. Honest limitations
+27. Suggested Run 408

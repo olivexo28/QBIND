@@ -116,8 +116,8 @@
     },
     {
       "relative_path": "ARTIFACT_INDEX.md",
-      "sha256": "306501a2c076b3e1addb255119bdfd7af2fd141d7f701bb97ea062c6ba8fd7a8",
-      "byte_size": 15502,
+      "sha256": "9e9e155cd499c2e1f9a990baa71ac060f1e7fe5abea0ad5abfab8451e358992d",
+      "byte_size": 16174,
       "artifact_group": "top-level",
       "readiness_item": "package-index",
       "status": "no-go",
@@ -125,8 +125,8 @@
     },
     {
       "relative_path": "OPERATOR_VERIFICATION_MAP.md",
-      "sha256": "2ae57b9e34f750019c29606d070926d935ba3f294fa900dc3fccbe29ab7efd45",
-      "byte_size": 9707,
+      "sha256": "3de6e960397d12506e141a1c9d824d9159e639787bb12e9435aac3824909df5a",
+      "byte_size": 10324,
       "artifact_group": "top-level",
       "readiness_item": "verification-map",
       "status": "no-go",
@@ -152,8 +152,8 @@
     },
     {
       "relative_path": "PACKAGE_INTEGRITY.md",
-      "sha256": "23025cf2621bfa55985cc3ecce729d9b98318c1064ad36ff68b299ee0ba26211",
-      "byte_size": 8716,
+      "sha256": "d8b4fc2ebd3a3eef0b0666befa44e5fcc2555d2f9d980f18a645036493129c0d",
+      "byte_size": 8966,
       "artifact_group": "top-level",
       "readiness_item": "package-integrity",
       "status": "no-go",
@@ -173,5 +173,5 @@
     "deploys_seed_or_service": false,
     "mutates_runtime_state": false
   },
-  "artifact_safety_label": "experimental · resettable · no value · no uptime SLA · NOT public-DevNet launch-ready · no MainNet readiness claim · no C4/C5 closure claim"
+  "artifact_safety_label": "experimental \u00b7 resettable \u00b7 no value \u00b7 no uptime SLA \u00b7 NOT public-DevNet launch-ready \u00b7 no MainNet readiness claim \u00b7 no C4/C5 closure claim"
 }
