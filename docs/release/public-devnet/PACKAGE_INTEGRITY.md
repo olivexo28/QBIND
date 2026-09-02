@@ -28,7 +28,10 @@ Companion files:
   one anchor per group plus the top-level docs.
 - `docs/release/public-devnet/PACKAGE_INTEGRITY_CI_ARTIFACTS.md` — the Run 406 guide
   to the **download-only CI artifacts** (transient full-tree manifest + anchor-drift
-  report) that compare this curated anchor manifest against the full tree.
+  report) that compare this curated anchor manifest against the full tree. The Run 407
+  guides `PACKAGE_INTEGRITY_ANCHOR_DRIFT_REPORT.schema.json` +
+  `PACKAGE_INTEGRITY_CI_RETENTION.md` add a **machine-readable** JSON anchor-drift
+  report and document CI artifact retention (download-only; convenience/audit only).
 - `docs/release/public-devnet/ARTIFACT_INDEX.md` — the navigation index.
 - `docs/release/public-devnet/OPERATOR_VERIFICATION_MAP.md` — the verification map
   (run the integrity check **first**, then follow this map).

@@ -1,0 +1,179 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://qbind.dev/schemas/public-devnet/PACKAGE_INTEGRITY_ANCHOR_DRIFT_REPORT.schema.json",
+  "title": "QBIND Public DevNet Machine-Readable Anchor Drift Report",
+  "description": "Canonical, publish-safe schema for the MACHINE-READABLE anchor-drift report of the QBIND public DevNet release package under docs/release/public-devnet. It is the JSON counterpart of the human-readable ANCHOR_DRIFT_REPORT.md (Run 406): both compare the Run 404 curated ANCHOR manifest (PACKAGE_INTEGRITY_MANIFEST.example.json) against the Run 405/406 FULL-TREE generated file set. The report is GENERATED TRANSIENTLY at verification time into a staging directory OUTSIDE the package tree and is NOT committed (the tree changes over time, so a committed drift report would immediately drift). Docs/artifact only: it embeds NO binary blob, NO secret, NO private path/hostname/endpoint, NO raw log, NO raw /metrics dump, and NO generated private identity. Retention of this report as a download-only CI artifact is convenience/audit usability only; it is NOT a signed attestation, NOT binary provenance, and NOT launch evidence. It moves NO readiness item: M4 stays Yellow, M6 stays Yellow/Partial, S5/S7 stay Yellow, public DevNet stays NOT launch-ready, and C4/C5 stay OPEN.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "report_version",
+    "generated_for_run",
+    "scope",
+    "package_root",
+    "anchor_manifest_path",
+    "full_tree_manifest_artifact_name",
+    "safety_labels",
+    "counts",
+    "anchors_present_matching",
+    "anchors_missing",
+    "undocumented_mismatches",
+    "documented_refreshes",
+    "full_tree_only",
+    "non_claims",
+    "artifact_safety_label"
+  ],
+  "definitions": {
+    "relativePath": {
+      "type": "string",
+      "pattern": "^(?!/)(?!.*\\.\\.)(?![A-Za-z]:)[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*$"
+    },
+    "relativePathArray": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "$ref": "#/definitions/relativePath" }
+    }
+  },
+  "properties": {
+    "report_version": {
+      "description": "Report schema version (semver of this schema contract).",
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+    },
+    "generated_for_run": {
+      "description": "The QBIND run number this machine-readable drift report was introduced for. Fixed to 407.",
+      "type": "integer",
+      "const": 407
+    },
+    "scope": {
+      "description": "Stable scope tag for this report. Curated anchor set vs. full documentation-package tree drift only.",
+      "type": "string",
+      "const": "public-devnet-docs-anchor-drift"
+    },
+    "package_root": {
+      "description": "Repository-relative root of the documented public DevNet package. All relative_path values are resolved against this root. Never an absolute path.",
+      "type": "string",
+      "const": "docs/release/public-devnet"
+    },
+    "anchor_manifest_path": {
+      "description": "Repository-relative path (resolved under package_root) of the Run 404 curated anchor manifest this report was compared against.",
+      "type": "string",
+      "const": "PACKAGE_INTEGRITY_MANIFEST.example.json"
+    },
+    "full_tree_manifest_artifact_name": {
+      "description": "Leaf name of the download-only full-tree manifest CI artifact this report was compared against.",
+      "type": "string",
+      "const": "PACKAGE_INTEGRITY_FULL_TREE_MANIFEST.generated.json"
+    },
+    "generated_at_utc": {
+      "description": "OPTIONAL UTC timestamp (ISO-8601, Zulu) when this report was generated. Informational only.",
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
+    },
+    "safety_labels": {
+      "description": "Standing safety labels this report carries. All required labels must be present.",
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "enum": [
+          "devnet",
+          "experimental",
+          "resettable",
+          "no_value",
+          "no_uptime_sla",
+          "not_launch_ready",
+          "c4_open",
+          "c5_open"
+        ]
+      },
+      "minItems": 8,
+      "allOf": [
+        { "contains": { "const": "devnet" } },
+        { "contains": { "const": "experimental" } },
+        { "contains": { "const": "resettable" } },
+        { "contains": { "const": "no_value" } },
+        { "contains": { "const": "no_uptime_sla" } },
+        { "contains": { "const": "not_launch_ready" } },
+        { "contains": { "const": "c4_open" } },
+        { "contains": { "const": "c5_open" } }
+      ]
+    },
+    "counts": {
+      "description": "Integer counts. Each must equal the length of the correspondingly-named array, and must agree with the Markdown ANCHOR_DRIFT_REPORT.md summary counts.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "anchor_total",
+        "anchors_present_matching",
+        "anchors_missing",
+        "undocumented_mismatches",
+        "documented_refreshes",
+        "full_tree_only"
+      ],
+      "properties": {
+        "anchor_total": { "type": "integer", "minimum": 0 },
+        "anchors_present_matching": { "type": "integer", "minimum": 0 },
+        "anchors_missing": { "type": "integer", "minimum": 0 },
+        "undocumented_mismatches": { "type": "integer", "minimum": 0 },
+        "documented_refreshes": { "type": "integer", "minimum": 0 },
+        "full_tree_only": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "anchors_present_matching": {
+      "description": "Curated anchor entries whose sha256 + byte_size equal the full-tree entry for the same path (unchanged).",
+      "$ref": "#/definitions/relativePathArray"
+    },
+    "anchors_missing": {
+      "description": "Curated anchor entries whose path is absent from the full-tree set. Always a failure; must be empty for a POSITIVE report.",
+      "$ref": "#/definitions/relativePathArray"
+    },
+    "undocumented_mismatches": {
+      "description": "Curated anchor entries whose sha256/byte_size differ from the full tree WITHOUT a documented deliberate refresh. Always a failure; must be empty for a POSITIVE report.",
+      "$ref": "#/definitions/relativePathArray"
+    },
+    "documented_refreshes": {
+      "description": "Curated anchor entries whose hash/size were deliberately refreshed and documented in the same run.",
+      "$ref": "#/definitions/relativePathArray"
+    },
+    "full_tree_only": {
+      "description": "Full-tree files not represented in the curated anchor set. Expected curated-anchor drift, not a failure.",
+      "$ref": "#/definitions/relativePathArray"
+    },
+    "non_claims": {
+      "description": "Explicit non-claim booleans. Every field must be exactly false (this report makes none of these claims).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "launches_public_devnet",
+        "moves_m4_green",
+        "moves_m6_green",
+        "moves_s5_green",
+        "moves_s7_green",
+        "closes_c4",
+        "closes_c5",
+        "claims_testnet_ready",
+        "claims_mainnet_ready",
+        "deploys_seed_or_service",
+        "mutates_runtime_state"
+      ],
+      "properties": {
+        "launches_public_devnet": { "type": "boolean", "const": false },
+        "moves_m4_green": { "type": "boolean", "const": false },
+        "moves_m6_green": { "type": "boolean", "const": false },
+        "moves_s5_green": { "type": "boolean", "const": false },
+        "moves_s7_green": { "type": "boolean", "const": false },
+        "closes_c4": { "type": "boolean", "const": false },
+        "closes_c5": { "type": "boolean", "const": false },
+        "claims_testnet_ready": { "type": "boolean", "const": false },
+        "claims_mainnet_ready": { "type": "boolean", "const": false },
+        "deploys_seed_or_service": { "type": "boolean", "const": false },
+        "mutates_runtime_state": { "type": "boolean", "const": false }
+      }
+    },
+    "artifact_safety_label": {
+      "description": "Standing human-readable safety label this report carries.",
+      "type": "string",
+      "const": "experimental · resettable · no value · no uptime SLA · NOT public-DevNet launch-ready · no MainNet readiness claim · no C4/C5 closure claim"
+    }
+  }
+}

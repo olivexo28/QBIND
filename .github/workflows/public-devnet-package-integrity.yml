@@ -1,17 +1,21 @@
-# Run 405/406 — public DevNet FULL-TREE package integrity check + download-only CI
-# artifacts (transient full-tree manifest + anchor-drift report).
+# Run 405/406/407 — public DevNet FULL-TREE package integrity check + download-only CI
+# artifacts (transient full-tree manifest + Markdown & machine-readable JSON anchor-drift
+# reports + CI summary).
 #
-# Runs the Run 406 artifact wrapper
-# (`scripts/devnet/run_406_public_devnet_full_tree_ci_artifact_anchor_drift.sh`),
-# which reuses the Run 405 full-tree integrity verifier
-# (`scripts/devnet/run_405_public_devnet_full_tree_package_integrity.sh`) so every
-# change that touches the public DevNet package tree is checked: the verifier
-# generates a full-tree integrity manifest into the runner temp directory, validates
-# it against the committed schema, confirms every publish-safe file under
-# docs/release/public-devnet is present with a matching SHA-256 + byte size, and emits
-# a publish-safe anchor-drift report. The manifest, the anchor-drift report, and a
-# short CI summary are uploaded as DOWNLOAD-ONLY CI artifacts; none of them is
-# committed to the repository.
+# Runs the Run 407 artifact wrapper
+# (`scripts/devnet/run_407_public_devnet_anchor_drift_json_retention.sh`), which reuses
+# the Run 406 wrapper
+# (`scripts/devnet/run_406_public_devnet_full_tree_ci_artifact_anchor_drift.sh`) and the
+# Run 405 full-tree integrity verifier
+# (`scripts/devnet/run_405_public_devnet_full_tree_package_integrity.sh`) so every change
+# that touches the public DevNet package tree is checked: the verifier generates a
+# full-tree integrity manifest into the runner temp directory, validates it against the
+# committed schema, confirms every publish-safe file under docs/release/public-devnet is
+# present with a matching SHA-256 + byte size, emits a publish-safe Markdown anchor-drift
+# report, and (Run 407) emits a machine-readable JSON anchor-drift report validated
+# against PACKAGE_INTEGRITY_ANCHOR_DRIFT_REPORT.schema.json. The manifest, both drift
+# reports, and a short CI summary are uploaded as DOWNLOAD-ONLY CI artifacts; none of
+# them is committed to the repository.
 #
 # Decision gate: Route B (docs + schema + shell/CI only). This workflow makes NO
 # production Rust source change, NO build.rs change, NO runtime behaviour change, and
@@ -22,9 +26,12 @@
 #   * No secrets referenced.
 #   * Does NOT deploy a seed/bootnode/faucet/RPC/explorer/status service, open a
 #     public endpoint, create a release/tag, or start a node.
-#   * Does NOT commit or push anything. The generated full-tree manifest, anchor-drift
-#     report, and CI summary are written under the runner temp directory and are
-#     uploaded only as download-only CI artifacts, never committed back to the repo.
+#   * Does NOT commit or push anything. The generated full-tree manifest, the Markdown
+#     and JSON anchor-drift reports, and the CI summary are written under the runner temp
+#     directory and are uploaded only as download-only CI artifacts, never committed back
+#     to the repo. Artifact retention (retention-days) is convenience/audit usability
+#     only — not a signed attestation, not binary provenance, and not launch evidence;
+#     see docs/release/public-devnet/PACKAGE_INTEGRITY_CI_RETENTION.md.
 
 name: public-devnet-package-integrity
 
@@ -33,6 +40,7 @@ on:
   pull_request:
     paths:
       - "docs/release/public-devnet/**"
+      - "scripts/devnet/run_407_public_devnet_anchor_drift_json_retention.sh"
       - "scripts/devnet/run_406_public_devnet_full_tree_ci_artifact_anchor_drift.sh"
       - "scripts/devnet/run_405_public_devnet_full_tree_package_integrity.sh"
       - "scripts/devnet/run_404_public_devnet_package_integrity_manifest.sh"
@@ -53,7 +61,7 @@ jobs:
     timeout-minutes: 15
     env:
       # Runner temp staging for the transient generated artifacts (never committed).
-      RUN406_OUTDIR: ${{ runner.temp }}/qbind-run406-full-tree-ci-artifact-anchor-drift
+      RUN407_OUTDIR: ${{ runner.temp }}/qbind-run407-anchor-drift-json-retention
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -63,20 +71,24 @@ jobs:
       - name: Install manifest validation dependency
         run: python3 -m pip install --user jsonschema >/dev/null 2>&1 || true
 
-      - name: Run the full-tree integrity verifier + anchor-drift artifact wrapper
+      - name: Run the full-tree integrity verifier + anchor-drift JSON/retention wrapper
         run: |
-          bash scripts/devnet/run_406_public_devnet_full_tree_ci_artifact_anchor_drift.sh "${RUN406_OUTDIR}"
+          bash scripts/devnet/run_407_public_devnet_anchor_drift_json_retention.sh "${RUN407_OUTDIR}"
 
       - name: Upload download-only integrity CI artifacts
         uses: actions/upload-artifact@v4
         with:
           name: public-devnet-full-tree-integrity
           if-no-files-found: error
+          # Retention is convenience/audit usability only — download-only, not a signed
+          # attestation, not binary provenance, not launch evidence. See
+          # docs/release/public-devnet/PACKAGE_INTEGRITY_CI_RETENTION.md.
           retention-days: 14
           path: |
-            ${{ env.RUN406_OUTDIR }}/artifact-staging/PACKAGE_INTEGRITY_FULL_TREE_MANIFEST.generated.json
-            ${{ env.RUN406_OUTDIR }}/artifact-staging/ANCHOR_DRIFT_REPORT.md
-            ${{ env.RUN406_OUTDIR }}/artifact-staging/PACKAGE_INTEGRITY_CI_SUMMARY.txt
+            ${{ env.RUN407_OUTDIR }}/run406/artifact-staging/PACKAGE_INTEGRITY_FULL_TREE_MANIFEST.generated.json
+            ${{ env.RUN407_OUTDIR }}/run406/artifact-staging/ANCHOR_DRIFT_REPORT.md
+            ${{ env.RUN407_OUTDIR }}/artifact-staging/ANCHOR_DRIFT_REPORT.json
+            ${{ env.RUN407_OUTDIR }}/run406/artifact-staging/PACKAGE_INTEGRITY_CI_SUMMARY.txt
 
       - name: Confirm no generated artifact was committed to the tree
         run: |
