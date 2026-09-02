@@ -1,0 +1,208 @@
+Run 405 — Public DevNet full-tree package integrity verifier + CI check
+
+Current state:
+Run 404 is accepted PASS.
+Public DevNet launch decision remains NO-GO / NOT launch-ready.
+M4 remains Yellow / launch-blocking.
+M6 remains Yellow / Partial.
+S5 remains Yellow.
+S7 remains Yellow.
+C4 remains OPEN.
+C5 remains OPEN.
+TestNet/MainNet remain untouched.
+
+Objective:
+Add a full-tree package integrity verifier for docs/release/public-devnet that hashes every publish-safe file in the public DevNet package tree at verification time.
+
+This run addresses the honest Run 404 limitation that the committed manifest covers anchors + top-level docs, not every file. It must add full-tree verification without committing a changing generated full-tree manifest and without moving any readiness item.
+
+Strict scope:
+Docs + schema + shell + optional CI workflow only.
+
+No public DevNet launch.
+No M4 Green.
+No M6 Green.
+No S5 Green.
+No S7 Green.
+No C4 closure.
+No C5 closure.
+No TestNet readiness.
+No MainNet readiness.
+No Rust source change.
+No build.rs change.
+No Cargo.toml change.
+No public CLI change.
+No runtime behavior change.
+No seed/bootnode/faucet/RPC/explorer/status-service deployment.
+No port opened.
+No node started.
+No trust-bundle apply.
+No validator-set mutation.
+No epoch transition.
+No sequence/marker/LivePqcTrustState mutation.
+No peer-driven apply.
+No private material committed.
+
+Required investigation:
+Read:
+- docs/release/public-devnet/PACKAGE_INTEGRITY.md
+- docs/release/public-devnet/PACKAGE_INTEGRITY_MANIFEST.schema.json
+- docs/release/public-devnet/PACKAGE_INTEGRITY_MANIFEST.example.json
+- docs/release/public-devnet/ARTIFACT_INDEX.md
+- docs/release/public-devnet/OPERATOR_VERIFICATION_MAP.md
+- docs/release/public-devnet/LAUNCH_GO_NO_GO.md
+- docs/release/public-devnet/BLOCKER_REGISTER.md
+- docs/release/QBIND_PUBLIC_DEVNET_READINESS_CRITERIA.md
+- docs/protocol/QBIND_C4_C5_CLOSURE_CRITERIA.md
+- docs/whitepaper/contradiction.md
+
+Required implementation:
+Create:
+- docs/release/public-devnet/PACKAGE_INTEGRITY_FULL_TREE.md
+- docs/release/public-devnet/PACKAGE_INTEGRITY_FULL_TREE_MANIFEST.schema.json
+- scripts/devnet/run_405_public_devnet_full_tree_package_integrity.sh
+- docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_405.md
+- docs/devnet/run_405_public_devnet_full_tree_package_integrity/{README.md,summary.txt,.gitignore}
+
+Optional CI, only if it can be done least-privilege and non-mutating:
+- .github/workflows/public-devnet-package-integrity.yml
+
+Update narrowly:
+- docs/release/public-devnet/PACKAGE_INTEGRITY.md
+- docs/release/public-devnet/ARTIFACT_INDEX.md
+- docs/release/public-devnet/OPERATOR_VERIFICATION_MAP.md
+- docs/release/QBIND_PUBLIC_DEVNET_READINESS_CRITERIA.md
+- docs/whitepaper/contradiction.md
+
+Full-tree verifier requirements:
+- Generate the full-tree manifest into a temporary directory outside docs/release/public-devnet.
+- Enumerate every regular tracked publish-safe file under docs/release/public-devnet.
+- Use only safe relative paths.
+- Include sha256 and byte_size for every listed file.
+- Include package_root: docs/release/public-devnet.
+- Include safety labels:
+  - devnet
+  - experimental
+  - resettable
+  - no_value
+  - no_uptime_sla
+  - not_launch_ready
+  - c4_open
+  - c5_open
+- Include non_claims all false:
+  - launches_public_devnet
+  - moves_m4_green
+  - moves_m6_green
+  - moves_s5_green
+  - moves_s7_green
+  - closes_c4
+  - closes_c5
+  - claims_testnet_ready
+  - claims_mainnet_ready
+  - deploys_seed_or_service
+  - mutates_runtime_state
+- Validate the generated manifest against PACKAGE_INTEGRITY_FULL_TREE_MANIFEST.schema.json.
+- Re-hash every listed file and verify sha256 + byte_size.
+- Fail if any regular file under docs/release/public-devnet is omitted.
+- Fail if any path escapes the package root.
+- Fail if any generated or committed content contains private material, private endpoints, absolute paths, raw logs, raw metrics, data dirs, keys, certs, KEM secrets, signing secrets, API tokens, or generated private identity files.
+
+PACKAGE_INTEGRITY_FULL_TREE.md must explain:
+- how full-tree verification differs from the Run 404 anchor manifest;
+- why the full-tree manifest is generated transiently rather than committed;
+- how to run the local verifier;
+- how CI uses the verifier without committing generated output;
+- why this is not binary provenance;
+- why this is not launch evidence;
+- why M4/M6/S5/S7 remain unchanged;
+- why C4/C5 remain OPEN.
+
+Optional CI workflow requirements:
+- manual and/or pull-request check only;
+- permissions: contents: read;
+- no secrets;
+- no deployment;
+- no release/tag publishing;
+- no commit/push;
+- no public endpoint;
+- run only the Run 405 verifier;
+- generated manifest must not be committed.
+
+Harness must verify:
+1. Full-tree guide exists and is safety-labelled.
+2. Full-tree schema exists.
+3. Generated full-tree manifest validates against schema.
+4. Every regular file under docs/release/public-devnet is included.
+5. Every manifest relative_path is safe and root-confined.
+6. Every listed SHA-256 and byte size matches.
+7. Existing Run 404 anchor manifest still validates.
+8. ARTIFACT_INDEX.md references full-tree integrity verification.
+9. OPERATOR_VERIFICATION_MAP.md references full-tree integrity verification.
+10. External-operator read-order numbering is cleaned or rendered consistently.
+11. M4 remains Yellow.
+12. M6 remains Yellow/Partial.
+13. S5 remains Yellow.
+14. S7 remains Yellow.
+15. Public DevNet remains NOT launch-ready.
+16. C4/C5 remain OPEN.
+17. No TestNet/MainNet readiness claim appears.
+18. No launch/faucet/RPC/explorer/status-service deployment claim appears.
+19. No runtime mutation claim appears.
+20. Secret/private-material scan is clean.
+21. Non-claim grep passes.
+
+Readiness rules:
+This run must not move any readiness item.
+M4 remains Yellow / launch-blocking.
+M6 remains Yellow / Partial.
+S5 remains Yellow.
+S7 remains Yellow.
+Public DevNet remains NOT launch-ready.
+C4/C5 remain OPEN.
+
+Tests/checks:
+- bash scripts/devnet/run_405_public_devnet_full_tree_package_integrity.sh
+- schema validation for generated full-tree manifest
+- full-tree file coverage check
+- SHA-256 + byte-size verification
+- existing Run 404 anchor manifest validation
+- markdown path/link checks where practical
+- non-claim grep
+- secret/private-material scan
+- cargo test only if Rust source changed; otherwise record no-Rust-delta honestly
+
+CodeQL:
+Docs/schema/shell/YAML only → trivial/not meaningful.
+Rust/build.rs change → run CodeQL if available and record exact result.
+Never call skipped/trivial/timed-out/DB-too-large analysis clean.
+
+Expected verdict:
+PASS / public-DevNet full-tree package integrity verifier POSITIVE if the transient full-tree manifest validates, covers every publish-safe package file, all hashes/sizes match, CI/local checks are non-mutating, and no readiness overclaim is introduced.
+
+Final response format:
+1. Exact verdict
+2. Files changed
+3. Decision gate route
+4. Full-tree guide contents
+5. Full-tree schema contents
+6. Generated manifest behavior
+7. Full-tree coverage verification
+8. Hash verification
+9. Existing Run 404 anchor-manifest compatibility
+10. Artifact index update
+11. Operator verification map update
+12. CI workflow, if added
+13. Non-claim checks
+14. Security scans
+15. Runtime mutation check
+16. Readiness delta
+17. M4 status
+18. M6 status
+19. S5/S7 status
+20. Public DevNet status
+21. C4/C5
+22. TestNet/MainNet non-claims
+23. Tests run
+24. CodeQL
+25. Honest limitations
+26. Suggested Run 406

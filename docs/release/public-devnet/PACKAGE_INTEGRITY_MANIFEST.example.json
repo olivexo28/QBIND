@@ -1,0 +1,177 @@
+{
+  "manifest_version": "1.0.0",
+  "generated_for_run": 404,
+  "scope": "public-devnet-docs-release-package",
+  "safety_labels": [
+    "devnet",
+    "experimental",
+    "resettable",
+    "no_value",
+    "no_uptime_sla",
+    "not_launch_ready",
+    "c4_open",
+    "c5_open"
+  ],
+  "package_root": "docs/release/public-devnet",
+  "generated_at_utc": "2026-09-02T01:49:44Z",
+  "files": [
+    {
+      "relative_path": "genesis/VERIFY.md",
+      "sha256": "1904ddbc84285d7d253d7bd6ad4d25d08202fb3c2f4ebaa6bda901054da86637",
+      "byte_size": 3948,
+      "artifact_group": "genesis",
+      "readiness_item": "M1/M19/M20",
+      "status": "green",
+      "verification_reference": "docs/release/public-devnet/genesis/VERIFY.md"
+    },
+    {
+      "relative_path": "binary/VERIFY.md",
+      "sha256": "0dab8e75f4e1e0dc104a11916e9e380b716f0ba698e253ae25d3c4256c163735",
+      "byte_size": 10116,
+      "artifact_group": "binary",
+      "readiness_item": "M2/M3",
+      "status": "green",
+      "verification_reference": "docs/release/public-devnet/binary/VERIFY.md"
+    },
+    {
+      "relative_path": "operator/VERIFY.md",
+      "sha256": "6f6c571086952d4f4310023ee6759da4a1ae4d876c676c01a94b8cfff7a00d16",
+      "byte_size": 8155,
+      "artifact_group": "operator",
+      "readiness_item": "M5/M17/M18",
+      "status": "green",
+      "verification_reference": "docs/release/public-devnet/operator/VERIFY.md"
+    },
+    {
+      "relative_path": "identity/VERIFY.md",
+      "sha256": "7ae57cf746a0542017b6209cf672e7a63c7b9648bed13a61eaeb3831cc99575f",
+      "byte_size": 5907,
+      "artifact_group": "identity",
+      "readiness_item": "M6",
+      "status": "yellow-partial",
+      "verification_reference": "docs/release/public-devnet/identity/VERIFY.md"
+    },
+    {
+      "relative_path": "p2p/VERIFY.md",
+      "sha256": "474b19af1db3d94e76186e0421c44f949ef1a16365a05657cf73d1ea58494466",
+      "byte_size": 32060,
+      "artifact_group": "p2p",
+      "readiness_item": "M10/M11/M12",
+      "status": "green-for-scope",
+      "verification_reference": "docs/release/public-devnet/p2p/VERIFY.md"
+    },
+    {
+      "relative_path": "network/VERIFY.md",
+      "sha256": "8fc0075a8d7dea494963baffed5809620d32fbbaef6de9bb48d54dccf2c162f9",
+      "byte_size": 13759,
+      "artifact_group": "network",
+      "readiness_item": "M4/S7",
+      "status": "yellow",
+      "verification_reference": "docs/release/public-devnet/network/VERIFY.md"
+    },
+    {
+      "relative_path": "security/VERIFY.md",
+      "sha256": "36a6e778923f2497c1d4fa2d1fd6c31d161ff03afb12991c07783d5e34333c30",
+      "byte_size": 6364,
+      "artifact_group": "security",
+      "readiness_item": "M7/M8/M9",
+      "status": "green",
+      "verification_reference": "docs/release/public-devnet/security/VERIFY.md"
+    },
+    {
+      "relative_path": "observability/VERIFY.md",
+      "sha256": "e186d9a638777034cd4d17338d2bd3b13b04993b45370ee6b8a7bbd6adabdde3",
+      "byte_size": 8264,
+      "artifact_group": "observability",
+      "readiness_item": "M13/M14",
+      "status": "green",
+      "verification_reference": "docs/release/public-devnet/observability/VERIFY.md"
+    },
+    {
+      "relative_path": "ops/VERIFY.md",
+      "sha256": "aec8bf9bbd1514fa80e25123ac4371b76acdc994c6b42eae81f50e61ea714c7a",
+      "byte_size": 4467,
+      "artifact_group": "ops",
+      "readiness_item": "M15/M16",
+      "status": "green",
+      "verification_reference": "docs/release/public-devnet/ops/VERIFY.md"
+    },
+    {
+      "relative_path": "recovery/VERIFY.md",
+      "sha256": "8f19074dfddc9a8482027176697ea1cff6d29c867e27fd30f74fd01d14d139ef",
+      "byte_size": 5301,
+      "artifact_group": "recovery",
+      "readiness_item": "recovery-pkg",
+      "status": "green-for-scope",
+      "verification_reference": "docs/release/public-devnet/recovery/VERIFY.md"
+    },
+    {
+      "relative_path": "status/VERIFY.md",
+      "sha256": "83018fc51c101bfcc5d2d6ceead0b867dd51ee3053e88c68ba468c1f973f2e65",
+      "byte_size": 2947,
+      "artifact_group": "status",
+      "readiness_item": "S5",
+      "status": "yellow",
+      "verification_reference": "docs/release/public-devnet/status/VERIFY.md"
+    },
+    {
+      "relative_path": "ARTIFACT_INDEX.md",
+      "sha256": "783ab4f789aa4b3334112bf59ef742c6d6782a3f6887493345f5265fe75275d5",
+      "byte_size": 14679,
+      "artifact_group": "top-level",
+      "readiness_item": "package-index",
+      "status": "no-go",
+      "verification_reference": "docs/release/public-devnet/ARTIFACT_INDEX.md"
+    },
+    {
+      "relative_path": "OPERATOR_VERIFICATION_MAP.md",
+      "sha256": "6d6deacf36b8cd76928ed6f8dac01a707f9e8921a3d46c7329d659c2330db32a",
+      "byte_size": 8850,
+      "artifact_group": "top-level",
+      "readiness_item": "verification-map",
+      "status": "no-go",
+      "verification_reference": "docs/release/public-devnet/OPERATOR_VERIFICATION_MAP.md"
+    },
+    {
+      "relative_path": "LAUNCH_GO_NO_GO.md",
+      "sha256": "4d2da20d2a34d7e94ebf0fd49bea84c3be9c60ce74d07268ee948b693827f6d3",
+      "byte_size": 10324,
+      "artifact_group": "top-level",
+      "readiness_item": "launch-gate",
+      "status": "no-go",
+      "verification_reference": "docs/release/public-devnet/LAUNCH_GO_NO_GO.md"
+    },
+    {
+      "relative_path": "BLOCKER_REGISTER.md",
+      "sha256": "dd23fe09cec0a05728b5a5a3e5798f72e304e954a24a032cf6bd4dee6d4e0ced",
+      "byte_size": 5818,
+      "artifact_group": "top-level",
+      "readiness_item": "M4/M6/S5/S7",
+      "status": "no-go",
+      "verification_reference": "docs/release/public-devnet/BLOCKER_REGISTER.md"
+    },
+    {
+      "relative_path": "PACKAGE_INTEGRITY.md",
+      "sha256": "edab8fb3365f77aa54ea93a9010a1721ecb24c2e06640b82a2783b5cd4ab1775",
+      "byte_size": 8163,
+      "artifact_group": "top-level",
+      "readiness_item": "package-integrity",
+      "status": "no-go",
+      "verification_reference": "docs/release/public-devnet/PACKAGE_INTEGRITY.md"
+    }
+  ],
+  "non_claims": {
+    "launches_public_devnet": false,
+    "moves_m4_green": false,
+    "moves_m6_green": false,
+    "moves_s5_green": false,
+    "moves_s7_green": false,
+    "closes_c4": false,
+    "closes_c5": false,
+    "claims_testnet_ready": false,
+    "claims_mainnet_ready": false,
+    "deploys_seed_or_service": false,
+    "mutates_runtime_state": false
+  },
+  "artifact_safety_label": "experimental · resettable · no value · no uptime SLA · NOT public-DevNet launch-ready · no MainNet readiness claim · no C4/C5 closure claim"
+}

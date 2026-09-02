@@ -1,0 +1,15 @@
+schema_present=OK (PACKAGE_INTEGRITY_MANIFEST.schema.json) sha256=23bc1343a8ca013f426dd939b81a0440f02b3060f81e83631a0b58147efd09b6
+example_present=OK (PACKAGE_INTEGRITY_MANIFEST.example.json) sha256=128f5374bda05c8cfb0f1a410f115cbf361636a4e8846972abf6a32ec19582f7
+guide_present=OK (PACKAGE_INTEGRITY.md present, safety-labelled) sha256=edab8fb3365f77aa54ea93a9010a1721ecb24c2e06640b82a2783b5cd4ab1775
+schema_validation=OK (PACKAGE_INTEGRITY_MANIFEST.example.json validates; generated_for_run=404; scope + safety labels + non_claims fixed)
+hash_verification=OK (every listed file exists; sha256 + byte_size match on-disk; relative paths resolve under docs/release/public-devnet)
+no_absolute_paths=OK (no /home|/root|/Users|/tmp|/var|/etc path in manifest/schema/guide)
+no_private_endpoints=OK (no IP:port / host:port endpoint embedded in manifest)
+committed_private_material=NONE (no keys/certs/KEM/signing/API/raw logs/metrics/data dirs/private identity listed or committed)
+artifact_index_ref=OK (ARTIFACT_INDEX.md references PACKAGE_INTEGRITY.md)
+operator_map_ref=OK (OPERATOR_VERIFICATION_MAP.md references the package integrity check)
+readiness_reconciled=OK (M4 🟡; M6 🟡; S5 🟡; S7 🟡)
+launch_and_c4c5=OK (public DevNet NOT launch-ready; C4 OPEN; C5 OPEN)
+non_claim_grep=OK (no launch-ready / M4-M6-S5-S7-Green / C4-C5-closure / TestNet-MainNet-ready / deployment claim; manifest non_claims all false)
+
+RESULT=POSITIVE (public-DevNet package integrity manifest published + verified against the on-disk package tree and the canonical readiness matrix; every listed file present + sha256/byte_size match; no production source change; no readiness item moves Green; M4/M6/S5/S7 stay Yellow; C4/C5 OPEN; public DevNet NOT launch-ready)
