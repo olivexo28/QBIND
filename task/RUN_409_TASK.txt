@@ -1,0 +1,176 @@
+Run 409 — Public DevNet integrity-doc consistency reconciliation
+
+Current state:
+Run 408 is accepted PASS for the retained drift artifact historical comparator.
+Public DevNet launch decision remains NO-GO / NOT launch-ready.
+M4 remains Yellow / launch-blocking.
+M6 remains Yellow / Partial.
+S5 remains Yellow.
+S7 remains Yellow.
+C4 remains OPEN.
+C5 remains OPEN.
+TestNet/MainNet remain untouched.
+
+Objective:
+Resolve narrow documentation inconsistencies introduced or surfaced across Runs 406–408, without adding new functionality and without changing readiness status.
+
+This run must reconcile:
+1. Whether PACKAGE_INTEGRITY_MANIFEST.example.json was edited/refreshed in Run 408.
+2. The stale Run 406 CI artifacts wording that still says “exactly three” artifacts after Run 407 expanded the workflow to four artifacts.
+3. Any adjacent package-integrity docs that now disagree about artifact counts, anchor refreshes, or generated-output behavior.
+
+Strict scope:
+Docs + shell verification harness only.
+
+No public DevNet launch.
+No M4 Green.
+No M6 Green.
+No S5 Green.
+No S7 Green.
+No C4 closure.
+No C5 closure.
+No TestNet readiness.
+No MainNet readiness.
+No Rust source change.
+No build.rs change.
+No Cargo.toml change.
+No public CLI change.
+No runtime behavior change.
+No seed/bootnode/faucet/RPC/explorer/status-service deployment.
+No port opened.
+No node started.
+No trust-bundle apply.
+No validator-set mutation.
+No epoch transition.
+No sequence/marker/LivePqcTrustState mutation.
+No peer-driven apply.
+No private material committed.
+
+Required investigation:
+Read:
+- docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_408.md
+- docs/devnet/run_408_public_devnet_retained_drift_history_comparator/README.md
+- docs/devnet/run_408_public_devnet_retained_drift_history_comparator/summary.txt
+- docs/release/public-devnet/PACKAGE_INTEGRITY_MANIFEST.example.json
+- docs/release/public-devnet/PACKAGE_INTEGRITY_CI_ARTIFACTS.md
+- docs/release/public-devnet/PACKAGE_INTEGRITY_CI_RETENTION.md
+- docs/release/public-devnet/PACKAGE_INTEGRITY_DRIFT_HISTORY.md
+- docs/release/public-devnet/ARTIFACT_INDEX.md
+- docs/release/public-devnet/OPERATOR_VERIFICATION_MAP.md
+- docs/release/QBIND_PUBLIC_DEVNET_READINESS_CRITERIA.md
+- docs/whitepaper/contradiction.md
+
+Required implementation:
+Create:
+- scripts/devnet/run_409_public_devnet_integrity_doc_consistency.sh
+- docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_409.md
+- docs/devnet/run_409_public_devnet_integrity_doc_consistency/{README.md,summary.txt,.gitignore}
+
+Update narrowly:
+- docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_408.md if its anchor-manifest-change statement is wrong.
+- docs/devnet/run_408_public_devnet_retained_drift_history_comparator/README.md if needed.
+- docs/release/QBIND_PUBLIC_DEVNET_READINESS_CRITERIA.md if its Run 408 anchor-refresh statement is wrong.
+- docs/release/public-devnet/PACKAGE_INTEGRITY_CI_ARTIFACTS.md to consistently describe the current four-artifact workflow after Run 407.
+- docs/release/public-devnet/PACKAGE_INTEGRITY_CI_RETENTION.md only if needed for consistency.
+- docs/release/public-devnet/PACKAGE_INTEGRITY_DRIFT_HISTORY.md only if needed for consistency.
+- docs/release/public-devnet/ARTIFACT_INDEX.md only if needed for consistency.
+- docs/release/public-devnet/OPERATOR_VERIFICATION_MAP.md only if needed for consistency.
+- docs/whitepaper/contradiction.md with “Run 409 — documentation consistency reconciliation; no protocol contradiction found.”
+
+Anchor-refresh reconciliation rule:
+Determine the truth from the committed Git history, not prose.
+
+Check:
+- Was docs/release/public-devnet/PACKAGE_INTEGRITY_MANIFEST.example.json changed in the Run 408 commit?
+- If yes:
+  - update Run 408 evidence/archive wording to say the Run 404 anchor manifest was refreshed for exactly the edited anchor docs;
+  - ensure the refreshed paths are listed precisely;
+  - ensure no entry was added/removed unless that truly happened;
+  - ensure no status changed.
+- If no:
+  - update the readiness matrix and any companion docs to remove the Run 408 anchor-refresh claim;
+  - keep the canonical statement: “Run 404 anchor manifest was not edited in Run 408.”
+
+CI artifact-count reconciliation rule:
+Current state after Run 407/408 must consistently say:
+- four download-only artifacts are emitted:
+  - PACKAGE_INTEGRITY_FULL_TREE_MANIFEST.generated.json
+  - ANCHOR_DRIFT_REPORT.md
+  - ANCHOR_DRIFT_REPORT.json
+  - PACKAGE_INTEGRITY_CI_SUMMARY.txt
+- generated artifacts are staged outside the repo/package tree;
+- generated artifacts are never committed;
+- retention is convenience/audit usability only;
+- not binary provenance;
+- not launch evidence;
+- no readiness item moves.
+
+Harness must verify:
+1. Run 408 anchor-manifest-change statement is internally consistent across evidence, archive README, readiness matrix, and manifest file.
+2. PACKAGE_INTEGRITY_CI_ARTIFACTS.md no longer contains stale “exactly three” current-artifact wording unless explicitly described as historical Run 406 behavior.
+3. Current artifact upload count is consistently four after Run 407.
+4. The four artifact names are consistent across CI artifacts guide, retention guide, operator verification map, and artifact index.
+5. Anchor-refresh wording is consistent across Run 408 evidence, readiness matrix, and package-integrity docs.
+6. No generated artifact is committed.
+7. No readiness item moves Green.
+8. M4 remains Yellow.
+9. M6 remains Yellow/Partial.
+10. S5 remains Yellow.
+11. S7 remains Yellow.
+12. Public DevNet remains NOT launch-ready / NO-GO.
+13. C4/C5 remain OPEN.
+14. No TestNet/MainNet readiness claim appears.
+15. No launch/faucet/RPC/explorer/status-service deployment claim appears.
+16. No runtime mutation claim appears.
+17. Secret/private-material scan is clean.
+18. Non-claim grep passes.
+
+Readiness rules:
+This run must not move any readiness item.
+M4 remains Yellow / launch-blocking.
+M6 remains Yellow / Partial.
+S5 remains Yellow.
+S7 remains Yellow.
+Public DevNet remains NOT launch-ready.
+C4/C5 remain OPEN.
+
+Tests/checks:
+- bash scripts/devnet/run_409_public_devnet_integrity_doc_consistency.sh
+- consistency grep for anchor-refresh statements
+- consistency grep for three-vs-four artifact wording
+- markdown path/link checks where practical
+- non-claim grep
+- secret/private-material scan
+- cargo test only if Rust source changed; otherwise record no-Rust-delta honestly
+
+CodeQL:
+Docs/shell only → trivial/not meaningful.
+Rust/build.rs change → run CodeQL if available and record exact result.
+Never call skipped/trivial/timed-out/DB-too-large analysis clean.
+
+Expected verdict:
+PASS / public-DevNet integrity documentation consistency reconciliation POSITIVE if the Run 408 anchor-refresh narrative and current CI artifact count are consistent everywhere, no readiness overclaim is introduced, and no generated/private material is committed.
+
+Final response format:
+1. Exact verdict
+2. Files changed
+3. Decision gate route
+4. Anchor manifest change finding
+5. Anchor-refresh reconciliation
+6. CI artifact-count reconciliation
+7. Package-integrity docs updated
+8. Cross-document consistency checks
+9. Non-claim checks
+10. Security scans
+11. Runtime mutation check
+12. Readiness delta
+13. M4 status
+14. M6 status
+15. S5/S7 status
+16. Public DevNet status
+17. C4/C5
+18. TestNet/MainNet non-claims
+19. Tests run
+20. CodeQL
+21. Honest limitations
+22. Suggested Run 410
