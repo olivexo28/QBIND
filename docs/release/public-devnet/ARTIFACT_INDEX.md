@@ -15,6 +15,9 @@ behavior, and moves **no** readiness item Green.
 
 Companion documents:
 
+- `docs/release/public-devnet/PACKAGE_INTEGRITY.md` — the package integrity
+  manifest guide: verify the documented package files are present + unchanged
+  (SHA-256 + byte size) **before** following the verification map.
 - `docs/release/public-devnet/OPERATOR_VERIFICATION_MAP.md` — recommended read
   orders + the exact verification map + the launch stop rule.
 - `docs/release/public-devnet/LAUNCH_GO_NO_GO.md` — the current launch decision
@@ -221,6 +224,25 @@ Each artifact group lists:
 - **Status:** four launch blockers open; C4/C5 OPEN.
 - **Non-claims:** no blocker is cleared by this index; no C4/C5 closure.
 
+## 14. Package integrity manifest
+
+- **Path:** `docs/release/public-devnet/PACKAGE_INTEGRITY.md`,
+  `PACKAGE_INTEGRITY_MANIFEST.schema.json`,
+  `PACKAGE_INTEGRITY_MANIFEST.example.json`.
+- **Purpose:** a machine-readable manifest (SHA-256 + byte size) so operators can
+  confirm the documented public DevNet package files are present and unchanged
+  **before** following `OPERATOR_VERIFICATION_MAP.md`. This is documentation-tree
+  integrity, **not** binary provenance (see group 2 for the release-binary manifest).
+- **Readiness item:** package integrity (docs-only; moves nothing).
+- **Verify:** `docs/release/public-devnet/PACKAGE_INTEGRITY.md`;
+  `scripts/devnet/run_404_public_devnet_package_integrity_manifest.sh`; validate
+  `PACKAGE_INTEGRITY_MANIFEST.example.json` against its schema and re-hash each
+  listed file.
+- **Status:** docs-only; **moves no readiness item** (M4/M6/S5/S7 stay Yellow;
+  C4/C5 OPEN; public DevNet NOT launch-ready).
+- **Non-claims:** not binary provenance; no signed release / SLSA claim; deploys
+  nothing; mutates no runtime state.
+
 ---
 
 ## Package coverage summary
@@ -240,6 +262,7 @@ Each artifact group lists:
 | Status decision | `status/` | S5 | **Yellow** |
 | Launch go/no-go | `LAUNCH_GO_NO_GO.md` | M1–M20 gate | **NO-GO** |
 | Blocker register | `BLOCKER_REGISTER.md` | M4/M6/S5/S7; C4/C5 | Yellow; OPEN |
+| Package integrity | `PACKAGE_INTEGRITY.md` | package integrity | docs-only (moves nothing) |
 
 All present package paths are listed above. No public DevNet package path is
 absent; if a package is later removed, mark it explicitly **absent** here rather
