@@ -1,0 +1,24 @@
+# Run 411 evidence archive — only README.md, summary.txt, and .gitignore are tracked.
+# The harness is a read-only cross-ledger consistency verifier; it generates nothing
+# under the repository tree. Any transient run output (summaries, reports) is written to a
+# staging directory OUTSIDE the package tree (runner temp) and MUST NOT be committed.
+# Only publish-safe OK/POSITIVE/NONE status lines appear in the tracked summary.
+material/
+node/
+nodes/
+logs/
+data/
+artifact-staging/
+*.err
+*.log
+*.out
+*.help.txt
+*.usage.txt
+*.kem.sk.bin
+*.cert.bin
+*.key
+*.pem
+metrics*.txt
+*.generated.json
+READINESS_CONTRADICTION_LEDGER_LINT_REPORT.json
+READINESS_CONTRADICTION_LEDGER_LINT_REPORT.txt

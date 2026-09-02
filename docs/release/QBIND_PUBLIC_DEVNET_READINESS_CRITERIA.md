@@ -462,6 +462,26 @@ trust bundle, and mutates **no** validator/epoch/sequence/marker/`LivePqcTrustSt
 Green** — this run lints documentation only. **M4 stays Yellow/launch-blocking; M6 stays Yellow/Partial; S5/S7 stay
 Yellow; M1–M3/M5/M7–M20 remain Green; public DevNet stays NOT launch-ready; C4/C5 remain OPEN; MainNet/TestNet
 untouched.**
+Updated Run 411 — **readiness/contradiction ledger consistency lint published; no readiness item moves (Route B —
+docs + shell only, no production source change, no `build.rs` change, no `Cargo.toml` change, no new CLI flag)**: adds a
+lightweight cross-**ledger** lint that checks the two canonical public DevNet ledgers — this readiness matrix and the
+contradiction ledger (`docs/whitepaper/contradiction.md`) — agree on the public DevNet run narratives, the fixed
+readiness posture, and the standing non-claims, extending consistency protection **beyond** the Run 410
+package-integrity stale-prose lint (which keeps only the package-integrity prose internally consistent). Publishes
+`docs/release/public-devnet/READINESS_CONTRADICTION_LEDGER_LINT.md` and
+`scripts/devnet/run_411_public_devnet_readiness_contradiction_ledger_lint.sh` (`RESULT=POSITIVE`), which fails closed if
+Runs **402–410** are not present in both ledgers, if the two ledgers disagree that M4/M6/S5/S7 remain Yellow, that
+public DevNet remains NOT launch-ready, or that C4/C5 remain OPEN, if a docs/shell/schema/YAML-only run is described as
+launch or runtime evidence, or if a deployment/runtime-mutation/TestNet-MainNet-readiness/C4-C5-closure claim appears.
+It adds `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_411.md` and
+`docs/devnet/run_411_public_devnet_readiness_contradiction_ledger_lint/`, and narrowly updates
+`docs/release/public-devnet/ARTIFACT_INDEX.md`, `docs/release/public-devnet/OPERATOR_VERIFICATION_MAP.md`,
+`docs/release/public-devnet/PACKAGE_INTEGRITY_STALE_PROSE_LINT.md` (companion pointer), this matrix, and
+`docs/whitepaper/contradiction.md`. It adds **no** CLI flag, opens **no** port, deploys **no**
+seed/bootnode/faucet/RPC/explorer/status service, applies **no** trust bundle, and mutates **no**
+validator/epoch/sequence/marker/`LivePqcTrustState` state. **No readiness item moves Green** — this run lints
+documentation only. **M4 stays Yellow/launch-blocking; M6 stays Yellow/Partial; S5/S7 stay Yellow; M1–M3/M5/M7–M20
+remain Green; public DevNet stays NOT launch-ready; C4/C5 remain OPEN; MainNet/TestNet untouched.**
 Updated Run 374 — **M6 materially narrowed but remains Yellow/Partial**: a stable, release-built operator-facing
 identity **generation + verification** package is published under
 `docs/release/public-devnet/identity/` (`README.md`, `IDENTITY_GENERATION.md`, `IDENTITY_VERIFY.md`,
