@@ -1,0 +1,21 @@
+drift_history_guide_present=OK (PACKAGE_INTEGRITY_DRIFT_HISTORY.md present, safety-labelled) sha256=578fe30f39512fb31b205e25df3882bc82b902d83f6d5770ecfd6e8c81ccf44b
+diff_schema_present=OK (PACKAGE_INTEGRITY_DRIFT_HISTORY_DIFF.schema.json present + valid JSON) sha256=bd93c25e43a9f8ca864f9293ee16970062d70e1c19fcf0317ef1e67c7a21ed63
+run407_compat=OK (Run 407 wrapper RESULT=POSITIVE; reused via LF-normalized transient copy)
+input_reports_valid=OK (base + candidate Run 407-style reports generated outside the tree; validate against PACKAGE_INTEGRITY_ANCHOR_DRIFT_REPORT.schema.json; counts == array lengths; non_claims all false)
+diff_outside_tree=OK (PACKAGE_INTEGRITY_DRIFT_HISTORY_DIFF.json generated into staging, outside the tree; not committed)
+diff_schema_validation=OK (diff validates against PACKAGE_INTEGRITY_DRIFT_HISTORY_DIFF.schema.json; non_claims all false)
+positive_case=OK (base vs candidate_positive -> verdict=positive-no-new-failures)
+full_tree_only_drift=OK (added/removed full-tree-only paths reported as expected curated-anchor drift, not a failure by itself)
+diff_safe_paths=OK (all diff path_delta arrays are safe relative paths; scope/package_root fixed)
+missing_anchor_fail_closed=OK (new missing anchor -> verdict=negative-new-missing-anchor; comparator exit=3)
+undocumented_mismatch_fail_closed=OK (new undocumented mismatch -> verdict=negative-new-undocumented-mismatch; comparator exit=3)
+generated_artifacts_transient=OK (diff JSON + fixtures + reused Run 407 artifacts staged outside the tree; none committed)
+working_tree_clean=OK (harness generated nothing under the repo tree; git status unchanged by this run)
+no_auto_fetch=OK (comparator + guide use manual local inputs only; no gh/curl/wget/GITHUB_TOKEN/secret usage)
+readiness_reconciled=OK (M4 🟡; M6 🟡; S5 🟡; S7 🟡)
+launch_and_c4c5=OK (public DevNet NOT launch-ready; C4 OPEN; C5 OPEN)
+non_claim_grep=OK (no launch-ready / M4-M6-S5-S7-Green / C4-C5-closure / TestNet-MainNet-ready / deployment claim in drift history guide)
+runtime_mutation=NONE (generated diff non_claims all false; mutates_runtime_state=false)
+committed_private_material=NONE (no keys/certs/KEM/signing/API/raw logs/metrics/data dirs/private identity; no absolute path; no private endpoint)
+
+RESULT=POSITIVE (public-DevNet retained anchor-drift history comparator: two Run 407-style ANCHOR_DRIFT_REPORT.json inputs validate against PACKAGE_INTEGRITY_ANCHOR_DRIFT_REPORT.schema.json; the Run 407 wrapper still passes; the comparator emits a transient PACKAGE_INTEGRITY_DRIFT_HISTORY_DIFF.json OUTSIDE the package tree that validates against PACKAGE_INTEGRITY_DRIFT_HISTORY_DIFF.schema.json with safe relative paths only; the positive no-new-failures case passes while reporting added/removed full-tree-only drift as expected; new missing-anchor and new undocumented-mismatch fixtures fail closed; the comparator never fetches CI artifacts and needs no token/secret; nothing generated is committed; the working tree stays clean; no readiness item moves Green; M4/M6/S5/S7 stay Yellow; C4/C5 OPEN; public DevNet NOT launch-ready)

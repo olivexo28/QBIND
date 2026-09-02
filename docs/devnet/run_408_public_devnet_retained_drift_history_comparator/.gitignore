@@ -1,0 +1,35 @@
+# Run 408 evidence archive — only README.md, summary.txt, and .gitignore are tracked.
+# All per-run artifacts contain absolute paths and ephemeral data and MUST NOT be committed.
+# Only publish-safe document/schema hashes and OK/POSITIVE status lines appear in the tracked summary.
+# The Run 407-style input fixtures, the reused Run 407 artifacts, and the emitted diff JSON
+# are generated transiently OUTSIDE the package tree (runner temp / staging) and are never committed.
+material/
+node/
+nodes/
+logs/
+data/
+run407/
+artifact-staging/
+fixtures/
+*.err
+*.log
+*.out
+*.help.txt
+*.usage.txt
+*.kem.sk.bin
+*.cert.bin
+*.key
+*.pem
+*.public.json
+*.candidate.json
+metrics*.txt
+comparator.py
+run407.log
+compare_positive.log
+compare_missing.log
+compare_mismatch.log
+*.generated.json
+ANCHOR_DRIFT_REPORT.md
+ANCHOR_DRIFT_REPORT.json
+PACKAGE_INTEGRITY_CI_SUMMARY.txt
+PACKAGE_INTEGRITY_DRIFT_HISTORY_DIFF.json

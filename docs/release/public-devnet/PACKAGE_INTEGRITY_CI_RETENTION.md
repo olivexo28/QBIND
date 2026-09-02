@@ -23,6 +23,11 @@ Companion files:
   Run 407 JSON anchor-drift report schema (draft-07).
 - `scripts/devnet/run_407_public_devnet_anchor_drift_json_retention.sh` — the Run 407
   harness / CI artifact wrapper.
+- `docs/release/public-devnet/PACKAGE_INTEGRITY_DRIFT_HISTORY.md` +
+  `PACKAGE_INTEGRITY_DRIFT_HISTORY_DIFF.schema.json` +
+  `scripts/devnet/run_408_public_devnet_retained_drift_history_comparator.sh` — the Run 408
+  **local, non-mutating historical comparator** for two retained `ANCHOR_DRIFT_REPORT.json`
+  artifacts (manual download; no auto-fetch; no token/secret; nothing committed).
 - `.github/workflows/public-devnet-package-integrity.yml` — the least-privilege CI
   workflow that runs the verifier and uploads the artifacts.
 

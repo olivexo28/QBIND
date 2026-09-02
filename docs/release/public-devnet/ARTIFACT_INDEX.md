@@ -26,6 +26,9 @@ Companion documents:
   anchor-drift report, uploaded for inspection and never committed. Run 407 adds
   `PACKAGE_INTEGRITY_ANCHOR_DRIFT_REPORT.schema.json` (machine-readable JSON drift
   report schema) + `PACKAGE_INTEGRITY_CI_RETENTION.md` (CI artifact retention policy).
+  Run 408 adds `PACKAGE_INTEGRITY_DRIFT_HISTORY.md` +
+  `PACKAGE_INTEGRITY_DRIFT_HISTORY_DIFF.schema.json` (a local, non-mutating comparator
+  for two retained JSON drift reports; manual download; nothing committed).
 - `docs/release/public-devnet/OPERATOR_VERIFICATION_MAP.md` — recommended read
   orders + the exact verification map + the launch stop rule.
 - `docs/release/public-devnet/LAUNCH_GO_NO_GO.md` — the current launch decision
@@ -241,7 +244,9 @@ Each artifact group lists:
   `PACKAGE_INTEGRITY_FULL_TREE_MANIFEST.schema.json`,
   `PACKAGE_INTEGRITY_CI_ARTIFACTS.md`,
   `PACKAGE_INTEGRITY_ANCHOR_DRIFT_REPORT.schema.json`,
-  `PACKAGE_INTEGRITY_CI_RETENTION.md`.
+  `PACKAGE_INTEGRITY_CI_RETENTION.md`,
+  `PACKAGE_INTEGRITY_DRIFT_HISTORY.md`,
+  `PACKAGE_INTEGRITY_DRIFT_HISTORY_DIFF.schema.json`.
 - **Purpose:** a machine-readable manifest (SHA-256 + byte size) so operators can
   confirm the documented public DevNet package files are present and unchanged
   **before** following `OPERATOR_VERIFICATION_MAP.md`. Two coverage levels: the
@@ -254,6 +259,10 @@ Each artifact group lists:
   (`ANCHOR_DRIFT_REPORT.json`, validated against
   `PACKAGE_INTEGRITY_ANCHOR_DRIFT_REPORT.schema.json`) and documents CI artifact
   retention (`PACKAGE_INTEGRITY_CI_RETENTION.md`; download-only, convenience/audit only).
+  Run 408 additionally publishes a **local, non-mutating historical comparator**
+  (`PACKAGE_INTEGRITY_DRIFT_HISTORY.md` + `PACKAGE_INTEGRITY_DRIFT_HISTORY_DIFF.schema.json`)
+  for two retained `ANCHOR_DRIFT_REPORT.json` reports (manual download; no auto-fetch; no
+  token/secret; transient diff never committed).
   This is documentation-tree integrity, **not** binary provenance
   (see group 2 for the release-binary manifest).
 - **Readiness item:** package integrity (docs-only; moves nothing).
@@ -269,7 +278,11 @@ Each artifact group lists:
   machine-readable JSON anchor-drift report + CI artifact retention policy,
   `docs/release/public-devnet/PACKAGE_INTEGRITY_ANCHOR_DRIFT_REPORT.schema.json` +
   `docs/release/public-devnet/PACKAGE_INTEGRITY_CI_RETENTION.md` +
-  `scripts/devnet/run_407_public_devnet_anchor_drift_json_retention.sh`.
+  `scripts/devnet/run_407_public_devnet_anchor_drift_json_retention.sh`. For the local,
+  non-mutating historical comparator over two retained JSON drift reports,
+  `docs/release/public-devnet/PACKAGE_INTEGRITY_DRIFT_HISTORY.md` +
+  `docs/release/public-devnet/PACKAGE_INTEGRITY_DRIFT_HISTORY_DIFF.schema.json` +
+  `scripts/devnet/run_408_public_devnet_retained_drift_history_comparator.sh`.
 - **Status:** docs-only; **moves no readiness item** (M4/M6/S5/S7 stay Yellow;
   C4/C5 OPEN; public DevNet NOT launch-ready).
 - **Non-claims:** not binary provenance; no signed release / SLSA claim; deploys
