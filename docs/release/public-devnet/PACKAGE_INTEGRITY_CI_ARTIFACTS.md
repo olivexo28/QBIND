@@ -46,7 +46,7 @@ Companion files:
 
 ## 1. What CI artifacts are emitted
 
-The workflow uploads exactly **three** publish-safe, download-only artifacts, all
+The workflow uploads exactly **four** publish-safe, download-only artifacts, all
 generated under the runner temp / staging directory (never under the repository
 tree):
 
@@ -59,7 +59,10 @@ tree):
 2. `ANCHOR_DRIFT_REPORT.md` — a publish-safe Markdown report comparing the Run 404
    curated **anchor** manifest against the Run 405/406 **full-tree** file set (see
    §3–§4).
-3. `PACKAGE_INTEGRITY_CI_SUMMARY.txt` — a short OK/POSITIVE status summary of the
+3. `ANCHOR_DRIFT_REPORT.json` — the machine-readable JSON counterpart of the Markdown
+   report (Run 407), validated against
+   `PACKAGE_INTEGRITY_ANCHOR_DRIFT_REPORT.schema.json`.
+4. `PACKAGE_INTEGRITY_CI_SUMMARY.txt` — a short OK/POSITIVE status summary of the
    run (counts, pass/fail lines only).
 
 ## 2. Why they are download-only inspection artifacts, not committed source
@@ -123,7 +126,7 @@ The check **fails** if:
   deliberate refresh in the same run;
 - the CI workflow requests more than `contents: read`, references a secret, or
   contains a deploy / release / tag / commit / push step;
-- the workflow uploads an artifact whose name is not one of the three publish-safe
+- the workflow uploads an artifact whose name is not one of the four publish-safe
   names above;
 - the working tree is dirty after the verifier (i.e. something generated was left in
   the tree);
