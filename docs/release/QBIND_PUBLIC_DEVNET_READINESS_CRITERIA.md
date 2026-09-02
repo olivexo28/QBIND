@@ -509,6 +509,30 @@ seed/bootnode/faucet/RPC/explorer/status service, applies **no** trust bundle, a
 validator/epoch/sequence/marker/`LivePqcTrustState` state. **No readiness item moves Green** — this run lints
 documentation only. **M4 stays Yellow/launch-blocking; M6 stays Yellow/Partial; S5/S7 stay Yellow; M1–M3/M5/M7–M20
 remain Green; public DevNet stays NOT launch-ready; C4/C5 remain OPEN; MainNet/TestNet untouched.**
+Updated Run 413 — **readiness recommendation/gap-matrix consistency lint published; no readiness item moves (Route B —
+docs + shell only, no production source change, no `build.rs` change, no `Cargo.toml` change, no new CLI flag)**: extends
+the Run 412 per-milestone status/blocker lint so this readiness matrix's **§11 next-run recommendation table** and
+**§16 consolidated gap matrix** cannot drift away from its **§10 canonical current-status table** (the source of truth),
+the §4/§5 checklists, the blocker register, and the launch go/no-go gate. Publishes
+`docs/release/public-devnet/READINESS_RECOMMENDATION_GAP_MATRIX_LINT.md` and
+`scripts/devnet/run_413_public_devnet_readiness_recommendation_gap_matrix_lint.sh` (`RESULT=POSITIVE`), which fails
+closed if the §11 recommendation table disagrees with the §10 table on any M1–M20 status, if the §16 gap matrix
+disagrees with the §10 table on any scoped M/S item it names, if §11 or §16 marks M4 resolved/Green/non-blocking/
+launch-complete or M6 fully-Green/no-longer-Partial, if the §16 seed/bootnodes row drops its **Launch blocker** posture
+or the §16 validator-identity/status-page rows drop their **M4-gated** posture, if the §16 C4/C5 rows stop being
+🔴 / OPEN, or if §11 or §16 claims public DevNet is launch-ready/GO, C4/C5 closed, TestNet/MainNet ready, a live
+seed/bootnode/faucet/RPC/explorer/status-service deployment, a `devnet-seeds.live.json`, or a runtime mutation. It adds
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_413.md` and
+`docs/devnet/run_413_public_devnet_readiness_recommendation_gap_matrix_lint/`, and narrowly updates
+`docs/release/public-devnet/ARTIFACT_INDEX.md`, `docs/release/public-devnet/OPERATOR_VERIFICATION_MAP.md`,
+`docs/release/public-devnet/READINESS_STATUS_BLOCKER_LINT.md` (companion pointer),
+`docs/release/public-devnet/PACKAGE_INTEGRITY_MANIFEST.example.json` (SHA-256/byte-size refresh for exactly the two
+narrowly-edited anchor docs `ARTIFACT_INDEX.md`/`OPERATOR_VERIFICATION_MAP.md`; no entry added/removed, no `status`
+changed), this matrix, and `docs/whitepaper/contradiction.md`. It adds **no** CLI flag, opens **no** port, deploys **no**
+seed/bootnode/faucet/RPC/explorer/status service, applies **no** trust bundle, and mutates **no**
+validator/epoch/sequence/marker/`LivePqcTrustState` state. **No readiness item moves Green** — this run lints
+documentation only. **M4 stays Yellow/launch-blocking; M6 stays Yellow/Partial; S5/S7 stay Yellow; M1–M3/M5/M7–M20
+remain Green; public DevNet stays NOT launch-ready; C4/C5 remain OPEN; MainNet/TestNet untouched.**
 identity **generation + verification** package is published under
 `docs/release/public-devnet/identity/` (`README.md`, `IDENTITY_GENERATION.md`, `IDENTITY_VERIFY.md`,
 `OPERATOR_IDENTITY_SCHEMA.json`, `EXAMPLE_PUBLIC_IDENTITY.json`, `SAFETY.md`, `VERIFY.md`) backed by the

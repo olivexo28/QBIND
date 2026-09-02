@@ -28,6 +28,11 @@ Compared documents:
 
 Companion files:
 
+- `docs/release/public-devnet/READINESS_RECOMMENDATION_GAP_MATRIX_LINT.md` — the Run 413
+  **recommendation/gap-matrix** extension of this lint; where this Run 412 lint keeps the §10
+  current-status table in step with the §4/§5 checklists and the blocker register, Run 413 keeps
+  the §10 table in step with the §11 next-run recommendation table and the §16 consolidated gap
+  matrix.
 - `docs/release/public-devnet/READINESS_CONTRADICTION_LEDGER_LINT.md` — the Run 411
   cross-**ledger** run-narrative lint; this Run 412 lint is its per-**milestone** companion
   (Run 411 keeps the readiness matrix and the contradiction ledger consistent on the per-run
