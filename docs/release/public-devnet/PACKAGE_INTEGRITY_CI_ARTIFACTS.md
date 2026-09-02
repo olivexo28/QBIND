@@ -26,8 +26,18 @@ Companion files:
   full-tree manifest JSON Schema (draft-07).
 - `scripts/devnet/run_406_public_devnet_full_tree_ci_artifact_anchor_drift.sh` — the
   Run 406 harness / CI artifact wrapper.
+- `docs/release/public-devnet/PACKAGE_INTEGRITY_ANCHOR_DRIFT_REPORT.schema.json` — the
+  Run 407 **machine-readable** JSON anchor-drift report schema (draft-07).
+- `docs/release/public-devnet/PACKAGE_INTEGRITY_CI_RETENTION.md` — the Run 407 CI
+  artifact **retention** policy (download-only; convenience/audit usability only).
 - `.github/workflows/public-devnet-package-integrity.yml` — the least-privilege CI
   workflow that runs the verifier and uploads the artifacts.
+
+> **Run 407 update:** the workflow now also emits a machine-readable
+> `ANCHOR_DRIFT_REPORT.json` (validated against
+> `PACKAGE_INTEGRITY_ANCHOR_DRIFT_REPORT.schema.json`) alongside the Markdown report —
+> **four** download-only artifacts in total. Retention (`retention-days`) is
+> convenience/audit usability only; see `PACKAGE_INTEGRITY_CI_RETENTION.md`.
 
 ## 1. What CI artifacts are emitted
 

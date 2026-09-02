@@ -359,6 +359,34 @@ deploys **no** seed/bootnode/faucet/RPC/explorer/status service, applies **no** 
 validator/epoch/sequence/marker/`LivePqcTrustState` state. **No readiness item moves Green** — this run adds
 audit/reviewer usability only. **M4 stays Yellow/launch-blocking; M6 stays Yellow/Partial; S5/S7 stay Yellow;
 M1–M3/M5/M7–M20 remain Green; public DevNet stays NOT launch-ready; C4/C5 remain OPEN; MainNet/TestNet untouched.**
+Updated Run 407 — **machine-readable anchor-drift artifact + CI artifact retention policy published; no readiness item
+moves (Route B — docs + schema + shell + YAML only, no production source change, no `build.rs` change, no `Cargo.toml`
+change, no new CLI flag)**: extends the Run 406 CI artifact wrapper so CI can additionally emit, as a **download-only**
+artifact, a **machine-readable** `ANCHOR_DRIFT_REPORT.json` (validated against the new
+`docs/release/public-devnet/PACKAGE_INTEGRITY_ANCHOR_DRIFT_REPORT.schema.json`; `generated_for_run: 407`,
+`scope: public-devnet-docs-anchor-drift`, a `counts` object + five relative-path arrays, the eight safety labels, and
+the eleven `non_claims` booleans all `false`) whose counts agree with the Markdown `ANCHOR_DRIFT_REPORT.md`. It adds
+`docs/release/public-devnet/PACKAGE_INTEGRITY_CI_RETENTION.md` (retention guide: which four artifacts are retained, that
+retention is download-only and provider-dependent, how the JSON and Markdown reports differ, how to compare reports
+across runs manually, why retained artifacts are not committed source, why retention is not binary provenance, why it is
+not launch evidence, and why M4/M6/S5/S7 and C4/C5 are unchanged), the harness
+`scripts/devnet/run_407_public_devnet_anchor_drift_json_retention.sh` (`RESULT=POSITIVE`; 29 checks), and narrowly
+updates the least-privilege `.github/workflows/public-devnet-package-integrity.yml` to run the Run 407 wrapper and upload
+the four publish-safe artifacts (`PACKAGE_INTEGRITY_FULL_TREE_MANIFEST.generated.json`, `ANCHOR_DRIFT_REPORT.md`,
+`ANCHOR_DRIFT_REPORT.json`, `PACKAGE_INTEGRITY_CI_SUMMARY.txt`) with an explicit `retention-days` documented as
+convenience/audit usability only (still `contents: read`; no secrets; no deploy/release/tag/commit/push; fails if the
+working tree is dirty). The JSON drift report is honest: every one of the 16 anchor entries is present in the full tree,
+no undocumented hash/size mismatch, and the full-tree-only files (including the two newly added package files) are
+reported as **expected curated-anchor drift**. The Run 404 anchor manifest had its SHA-256/byte size refreshed for
+exactly the three narrowly-edited anchor docs (`PACKAGE_INTEGRITY.md`, `ARTIFACT_INDEX.md`,
+`OPERATOR_VERIFICATION_MAP.md`) — a documented deliberate refresh, no entry added/removed, no `status` changed. Verified
+against the on-disk package tree and this canonical readiness matrix by that harness, with
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_407.md` and archive
+`docs/devnet/run_407_public_devnet_anchor_drift_json_retention/`. It adds **no** CLI flag, opens **no** port, deploys
+**no** seed/bootnode/faucet/RPC/explorer/status service, applies **no** trust bundle, and mutates **no**
+validator/epoch/sequence/marker/`LivePqcTrustState` state. **No readiness item moves Green** — this run adds
+audit/reviewer usability only. **M4 stays Yellow/launch-blocking; M6 stays Yellow/Partial; S5/S7 stay Yellow;
+M1–M3/M5/M7–M20 remain Green; public DevNet stays NOT launch-ready; C4/C5 remain OPEN; MainNet/TestNet untouched.**
 Updated Run 374 — **M6 materially narrowed but remains Yellow/Partial**: a stable, release-built operator-facing
 identity **generation + verification** package is published under
 `docs/release/public-devnet/identity/` (`README.md`, `IDENTITY_GENERATION.md`, `IDENTITY_VERIFY.md`,

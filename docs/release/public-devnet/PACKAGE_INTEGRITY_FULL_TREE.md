@@ -96,7 +96,13 @@ The Run 406 wrapper
 this so CI additionally uploads the transient full-tree manifest and a publish-safe
 **anchor-drift report** as **download-only** artifacts for reviewer inspection — still
 under the runner temp / staging directory, still never committed. See
-`docs/release/public-devnet/PACKAGE_INTEGRITY_CI_ARTIFACTS.md`.
+`docs/release/public-devnet/PACKAGE_INTEGRITY_CI_ARTIFACTS.md`. The Run 407 wrapper
+(`scripts/devnet/run_407_public_devnet_anchor_drift_json_retention.sh`) additionally
+emits a **machine-readable** `ANCHOR_DRIFT_REPORT.json` (validated against
+`PACKAGE_INTEGRITY_ANCHOR_DRIFT_REPORT.schema.json`) and documents CI artifact
+**retention** in `docs/release/public-devnet/PACKAGE_INTEGRITY_CI_RETENTION.md` —
+retention is download-only convenience/audit usability only, not provenance and not
+launch evidence.
 
 ## 5. Why this is not binary provenance
 

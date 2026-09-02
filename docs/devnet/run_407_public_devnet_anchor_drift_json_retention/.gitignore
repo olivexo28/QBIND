@@ -1,0 +1,33 @@
+# Run 407 evidence archive — only README.md, summary.txt, and .gitignore are tracked.
+# All per-run artifacts contain absolute paths and ephemeral data and MUST NOT be committed.
+# Only publish-safe document/schema hashes and OK/POSITIVE status lines appear in the tracked summary.
+# The full-tree manifest, the Markdown and JSON anchor-drift reports, and the CI summary are
+# generated transiently OUTSIDE the package tree (runner temp / staging) and are never committed.
+material/
+node/
+nodes/
+logs/
+data/
+run406/
+artifact-staging/
+*.err
+*.log
+*.out
+*.help.txt
+*.usage.txt
+*.kem.sk.bin
+*.cert.bin
+*.key
+*.pem
+*.public.json
+*.candidate.json
+metrics*.txt
+disk_files.txt
+workflow.lf.yml
+workflow.nocomment.yml
+run406.log
+*.generated.json
+PACKAGE_INTEGRITY_FULL_TREE_MANIFEST.generated.json
+ANCHOR_DRIFT_REPORT.md
+ANCHOR_DRIFT_REPORT.json
+PACKAGE_INTEGRITY_CI_SUMMARY.txt
