@@ -116,8 +116,8 @@
     },
     {
       "relative_path": "ARTIFACT_INDEX.md",
-      "sha256": "be5836d4bd3ec99f88f9fdf233165f0a0d7c9a8b9a71c688d23d1e3b76114392",
-      "byte_size": 20268,
+      "sha256": "97f858f8433b1eadde112d92abb2a525e5ca9c882ec9e8a75c6a36305f097bc0",
+      "byte_size": 20811,
       "artifact_group": "top-level",
       "readiness_item": "package-index",
       "status": "no-go",
@@ -125,8 +125,8 @@
     },
     {
       "relative_path": "OPERATOR_VERIFICATION_MAP.md",
-      "sha256": "3bbe40308895fe8746fc170ca68d3cc228ce4d228b6ad4c1409799ac645c75c4",
-      "byte_size": 18587,
+      "sha256": "b184521c1601b904b562935acb12c27ffe435c1d3b4a8d793d5ba54f5970f6e1",
+      "byte_size": 20436,
       "artifact_group": "top-level",
       "readiness_item": "verification-map",
       "status": "no-go",

@@ -309,7 +309,13 @@ Each artifact group lists:
   table and §16 consolidated gap matrix from silently dropping a milestone row that its §10
   current-status table still carries (coverage, not just status),
   `docs/release/public-devnet/READINESS_CROSS_SECTION_COVERAGE_LINT.md` +
-  `scripts/devnet/run_414_public_devnet_readiness_cross_section_coverage_lint.sh`.
+  `scripts/devnet/run_414_public_devnet_readiness_cross_section_coverage_lint.sh`. For the
+  **artifact path / reference** consistency lint that keeps the readiness matrix evidence paths, the
+  artifact-index package paths, the operator-map references, and the named verification scripts
+  resolving on disk, and every published public-DevNet artifact discoverable through the index /
+  operator map / an indexed package README/VERIFY / a documented exception,
+  `docs/release/public-devnet/READINESS_ARTIFACT_PATH_REFERENCE_LINT.md` +
+  `scripts/devnet/run_415_public_devnet_readiness_artifact_path_reference_lint.sh`.
 - **Status:** docs-only; **moves no readiness item** (M4/M6/S5/S7 stay Yellow;
   C4/C5 OPEN; public DevNet NOT launch-ready).
 - **Non-claims:** not binary provenance; no signed release / SLSA claim; deploys
