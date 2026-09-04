@@ -1,0 +1,31 @@
+# Run 414 evidence archive — only README.md, summary.txt, and .gitignore are tracked.
+# The harness is a read-only cross-section coverage verifier; it generates nothing under the
+# repository tree. Any transient run output (summaries, extracted sections, self-test scratch
+# copies) is written to a staging directory OUTSIDE the package tree (runner temp) and MUST NOT be
+# committed. Only publish-safe OK/POSITIVE/NONE status lines appear in the tracked summary.
+material/
+node/
+nodes/
+logs/
+data/
+artifact-staging/
+real.s10
+real.s11
+real.s16
+selftest.criteria.md
+st_*.s10
+st_*.s11
+st_*.s16
+*.err
+*.log
+*.out
+*.help.txt
+*.usage.txt
+*.kem.sk.bin
+*.cert.bin
+*.key
+*.pem
+metrics*.txt
+*.generated.json
+READINESS_CROSS_SECTION_COVERAGE_LINT_REPORT.json
+READINESS_CROSS_SECTION_COVERAGE_LINT_REPORT.txt
