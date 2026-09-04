@@ -1,0 +1,303 @@
+Run 414 — Public DevNet readiness cross-section coverage lint
+
+Current state:
+Run 413 is accepted PASS.
+Run 413 added a readiness recommendation/gap-matrix consistency lint.
+Public DevNet launch decision remains NO-GO / NOT launch-ready.
+M4 remains Yellow / launch-blocking.
+M6 remains Yellow / Partial.
+S5 remains Yellow.
+S7 remains Yellow.
+C4 remains OPEN.
+C5 remains OPEN.
+TestNet/MainNet remain untouched.
+N1–N7 remain Red.
+
+Objective:
+Add a lightweight cross-section coverage lint that proves status-bearing readiness views cannot silently drop milestone rows.
+
+Run 412 checked §10 against §4/§5, the blocker register, and the launch gate.
+Run 413 checked §11 and §16 status values against §10.
+Run 414 must now check coverage: every expected row that should exist in §11 and §16 must exist exactly once, and every §16 descriptive label must map to a known readiness item.
+
+This run must only add documentation consistency protection.
+It must not add functionality and must not move any readiness item.
+
+Strict scope:
+Docs + shell only.
+
+No public DevNet launch.
+No M4 Green.
+No M6 Green.
+No S5 Green.
+No S7 Green.
+No C4 closure.
+No C5 closure.
+No TestNet readiness.
+No MainNet readiness.
+No Rust source change.
+No build.rs change.
+No Cargo.toml change.
+No public CLI change.
+No runtime behavior change.
+No seed/bootnode/faucet/RPC/explorer/status-service deployment.
+No port opened.
+No node started.
+No trust-bundle apply.
+No validator-set mutation.
+No epoch transition.
+No sequence/marker/LivePqcTrustState mutation.
+No peer-driven apply.
+No private material committed.
+
+Required investigation:
+Read:
+- docs/release/QBIND_PUBLIC_DEVNET_READINESS_CRITERIA.md
+- docs/release/public-devnet/READINESS_RECOMMENDATION_GAP_MATRIX_LINT.md
+- docs/release/public-devnet/READINESS_STATUS_BLOCKER_LINT.md
+- docs/release/public-devnet/READINESS_CONTRADICTION_LEDGER_LINT.md
+- docs/release/public-devnet/BLOCKER_REGISTER.md
+- docs/release/public-devnet/LAUNCH_GO_NO_GO.md
+- docs/release/public-devnet/ARTIFACT_INDEX.md
+- docs/release/public-devnet/OPERATOR_VERIFICATION_MAP.md
+- docs/whitepaper/contradiction.md
+- docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_413.md
+- docs/devnet/run_413_public_devnet_readiness_recommendation_gap_matrix_lint/summary.txt
+
+Required implementation:
+Create:
+- docs/release/public-devnet/READINESS_CROSS_SECTION_COVERAGE_LINT.md
+- scripts/devnet/run_414_public_devnet_readiness_cross_section_coverage_lint.sh
+- docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_414.md
+- docs/devnet/run_414_public_devnet_readiness_cross_section_coverage_lint/{README.md,summary.txt,.gitignore}
+
+Update narrowly:
+- docs/release/QBIND_PUBLIC_DEVNET_READINESS_CRITERIA.md
+- docs/whitepaper/contradiction.md
+- docs/release/public-devnet/ARTIFACT_INDEX.md
+- docs/release/public-devnet/OPERATOR_VERIFICATION_MAP.md
+- docs/release/public-devnet/READINESS_RECOMMENDATION_GAP_MATRIX_LINT.md as a companion pointer
+- docs/release/public-devnet/READINESS_STATUS_BLOCKER_LINT.md as a companion pointer, if useful
+- docs/release/public-devnet/PACKAGE_INTEGRITY_MANIFEST.example.json only if an edited anchor file requires SHA-256/byte_size refresh
+
+Do not update files unnecessarily.
+If an edited file is one of the 16 curated package-integrity anchors, refresh exactly that anchor entry and document it.
+Do not add or remove manifest entries unless a real anchor-set change is explicitly in scope, which it is not for this run.
+
+Coverage policy:
+- §10 current-status table is the source of truth and must contain every M1–M20 and S1–S7 item exactly once.
+- §11 next-run recommendation table is the must-have recommendation view and must contain every M1–M20 item exactly once.
+- §11 is not required to contain S1–S7 unless the document explicitly changes its scope; if it remains must-have-only, the Run 414 guide must state this boundary clearly.
+- §16 consolidated gap matrix must have an explicit label-to-item coverage map.
+- Preferred outcome: §16 should cover every M1–M20 and S1–S7 item exactly once by mapped label, with unchanged statuses.
+- If a §10 item is intentionally not represented in §16 because it does not fit the gap-matrix semantics, that exception must be explicit, stable, and linted in a dedicated “§16 coverage exceptions” table with item code, reason, and the document/section that protects the item instead.
+- No existing Run 413 scoped §16 row may be silently removed or converted into an exception.
+- Any §16 status-bearing row whose label no longer maps to a known M/S/N/C item must fail closed.
+
+Canonical status expectations:
+Preserve the Run 413 frozen truth.
+
+Must-have milestones:
+- M1 Green
+- M2 Green
+- M3 Green
+- M4 Yellow / launch-blocking
+- M5 Green
+- M6 Yellow / Partial
+- M7 Green
+- M8 Green
+- M9 Green
+- M10 Green
+- M11 Green
+- M12 Green / Green-for-scope as recorded from Run 371
+- M13 Green
+- M14 Green
+- M15 Green
+- M16 Green
+- M17 Green
+- M18 Green
+- M19 Green
+- M20 Green
+
+Should-have milestones:
+- S1 Green
+- S2 Green
+- S3 Green
+- S4 Green
+- S5 Yellow
+- S6 Green
+- S7 Yellow
+
+Network/testnet/mainnet posture:
+- Public DevNet remains NO-GO / NOT launch-ready.
+- C4 remains OPEN.
+- C5 remains OPEN.
+- TestNet/MainNet remain untouched.
+- N1–N7 remain Red, with N5 tied to C4 OPEN / Red and N6 tied to C5 OPEN / Red.
+
+Required lint behavior:
+The Run 414 harness must fail closed if:
+
+1. §10 omits any M1–M20 or S1–S7 item.
+2. §10 contains any duplicate M/S item row.
+3. §11 omits any M1–M20 item.
+4. §11 contains any duplicate M1–M20 row.
+5. §11 includes S1–S7 rows without an explicit documented scope change.
+6. §16 omits any item required by the explicit §16 label-to-item coverage map.
+7. §16 contains duplicate mapped rows for the same M/S item.
+8. §16 contains a status-bearing row whose descriptive label does not map to a known M/S/N/C item.
+9. Any existing Run 413 scoped §16 mapped row is removed.
+10. Any §16 coverage exception is missing item code, reason, or protection source.
+11. Any §16 coverage exception is used for M4, M6, S5, or S7 without explicit M4/M6/S5/S7 Yellow/M4-gated protection.
+12. M4 is anything other than Yellow / launch-blocking everywhere it appears.
+13. M6 is anything other than Yellow / Partial everywhere it appears.
+14. S5 is anything other than Yellow or M4-gated everywhere it appears.
+15. S7 is anything other than Yellow or M4-gated everywhere it appears.
+16. Public DevNet is described as launch-ready or GO.
+17. C4 or C5 is described as closed.
+18. TestNet or MainNet is described as ready.
+19. N1–N7 are anything other than Red / untouched, except N5 may be described as C4 OPEN / Red and N6 as C5 OPEN / Red.
+20. A live seed, bootnode, faucet, RPC, explorer, or status service is claimed deployed.
+21. `devnet-seeds.live.json` is claimed to exist or may be created without real M4 evidence.
+22. Runtime state mutation is claimed by a docs-only run.
+23. A docs/shell/schema/YAML-only run is described as moving a runtime readiness item Green, unless that move is already historically recorded and scoped before Run 414.
+24. The Run 414 docs introduce any readiness overclaim.
+25. Generated output is committed.
+26. Private material or absolute paths are committed.
+
+READINESS_CROSS_SECTION_COVERAGE_LINT.md must explain:
+- why this lint exists;
+- which documents and sections are compared;
+- why §10 remains the source of truth;
+- how §11 coverage is checked for M1–M20;
+- why §11 is must-have-only unless explicitly changed;
+- how §16 label-to-item coverage is checked;
+- how §16 coverage exceptions work, if any are needed;
+- how this extends Runs 412 and 413;
+- why row deletion is different from status mutation and must fail closed;
+- why M4 remains Yellow / launch-blocking;
+- why M6 remains Yellow / Partial;
+- why S5/S7 remain Yellow and M4-gated;
+- why public DevNet remains NO-GO / NOT launch-ready;
+- why C4/C5 remain OPEN;
+- why TestNet/MainNet remain untouched;
+- how to update expectations when a future real Route A run legitimately changes a status or intentionally changes section coverage;
+- why this is not launch evidence;
+- why this is not C4/C5 closure evidence.
+
+Harness must verify:
+1. Cross-section coverage lint guide exists and is safety-labelled.
+2. Readiness matrix exists.
+3. §10 current-status table exists.
+4. §11 next-run recommendation table exists.
+5. §16 consolidated gap matrix exists.
+6. §10 covers M1–M20 and S1–S7 exactly once.
+7. §11 covers M1–M20 exactly once.
+8. §11 must-have-only scope is documented.
+9. §16 label-to-item map is present in the harness or guide.
+10. Every required §16 mapped label is present exactly once.
+11. Every §16 mapped row maps to a known readiness item.
+12. Any §16 coverage exception is explicit and safe.
+13. No existing Run 413 scoped §16 row was silently removed.
+14. §10/§11/§16 status values still agree for represented items.
+15. M4 remains Yellow / launch-blocking.
+16. M6 remains Yellow / Partial.
+17. S5/S7 remain Yellow or M4-gated.
+18. Public DevNet remains NO-GO / NOT launch-ready.
+19. C4/C5 remain OPEN.
+20. TestNet/MainNet remain untouched and N1–N7 Red.
+21. No `devnet-seeds.live.json` live-publication claim appears.
+22. No seed/bootnode/faucet/RPC/explorer/status-service deployment claim appears.
+23. No runtime mutation claim appears.
+24. No readiness item moves Green.
+25. Run 413 regression remains positive.
+26. Run 412 regression remains positive.
+27. Run 411 regression remains positive.
+28. Run 410 regression remains positive.
+29. Run 405 full-tree integrity regression remains positive if anchor docs are refreshed.
+30. No generated output is committed.
+31. Working tree remains clean after the harness.
+32. Secret/private-material scan is clean.
+33. Non-claim grep passes.
+34. If PACKAGE_INTEGRITY_MANIFEST.example.json is refreshed for edited anchor docs, all 16 anchors still hash/size match and no entry/status changes.
+
+Allowed outputs:
+The harness may emit a publish-safe transient summary outside the repository tree.
+It must not commit generated output.
+
+Readiness rules:
+This run must not move any readiness item.
+M4 remains Yellow / launch-blocking.
+M6 remains Yellow / Partial.
+S5 remains Yellow.
+S7 remains Yellow.
+Public DevNet remains NOT launch-ready / NO-GO.
+C4/C5 remain OPEN.
+TestNet/MainNet remain untouched.
+
+Tests/checks:
+- bash scripts/devnet/run_414_public_devnet_readiness_cross_section_coverage_lint.sh
+- §10 status table coverage extraction
+- §11 recommendation table coverage extraction
+- §16 consolidated gap matrix coverage extraction
+- §16 label-to-item map validation
+- §16 unmapped-label fail-closed test
+- §11 missing-M-row fail-closed test
+- §16 missing-mapped-row fail-closed test
+- M4/M6/S5/S7 posture checks
+- C4/C5 and TestNet/MainNet non-claim grep
+- devnet-seeds.live.json non-claim grep
+- deployment/runtime non-claim grep
+- generated-output non-commit check
+- markdown path/link checks where practical
+- non-claim grep
+- secret/private-material scan
+- anchor manifest hash/size re-check only if anchor docs were edited
+- cargo test only if Rust source changed; otherwise record no-Rust-delta honestly
+
+CodeQL:
+Docs/shell only → trivial/not meaningful.
+Rust/build.rs/Cargo/source change → run CodeQL if available and record exact result.
+Never call skipped/trivial/timed-out/DB-too-large analysis clean.
+
+Expected verdict:
+PASS / public-DevNet readiness cross-section coverage lint POSITIVE if the guide and harness land cleanly, §10 covers all M/S items, §11 covers every must-have row, §16 coverage is explicitly mapped and cannot silently drop status-bearing rows, M4/M6/S5/S7 remain Yellow, launch remains NO-GO, C4/C5 stay OPEN, no generated/private material is committed, and no readiness overclaim is introduced.
+
+Final response format:
+1. Exact verdict
+2. Files changed
+3. Decision gate route
+4. Cross-section coverage lint guide contents
+5. Compared sections/documents
+6. §10 source-of-truth coverage
+7. §11 must-have coverage
+8. §11 scope boundary
+9. §16 label-to-item coverage map
+10. §16 mapped-row coverage
+11. §16 unmapped-label check
+12. §16 coverage exceptions, if any
+13. Existing Run 413 scoped-row preservation
+14. Status consistency preservation
+15. M4 consistency check
+16. M6 consistency check
+17. S5/S7 consistency check
+18. Public DevNet NO-GO consistency
+19. C4/C5 consistency
+20. TestNet/MainNet non-claims
+21. devnet-seeds.live.json non-claim
+22. Deployment/runtime non-claim
+23. Generated-output behavior
+24. Non-claim checks
+25. Security scans
+26. Runtime mutation check
+27. Readiness delta
+28. M4 status
+29. M6 status
+30. S5/S7 status
+31. Public DevNet status
+32. C4/C5
+33. TestNet/MainNet non-claims
+34. Tests run
+35. CodeQL
+36. Honest limitations
+37. Suggested Run 415

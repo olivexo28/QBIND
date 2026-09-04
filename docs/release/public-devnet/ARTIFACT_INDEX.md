@@ -300,7 +300,11 @@ Each artifact group lists:
   per-**milestone** status/blocker consistency lint that keeps the readiness matrix's §10
   current-status table in agreement with its §4/§5 checklists and the blocker register,
   `docs/release/public-devnet/READINESS_STATUS_BLOCKER_LINT.md` +
-  `scripts/devnet/run_412_public_devnet_readiness_status_blocker_lint.sh`.
+  `scripts/devnet/run_412_public_devnet_readiness_status_blocker_lint.sh`. For the
+  **recommendation/gap-matrix** consistency lint that keeps the readiness matrix's §11 next-run
+  recommendation table and §16 consolidated gap matrix in agreement with its §10 current-status
+  table, `docs/release/public-devnet/READINESS_RECOMMENDATION_GAP_MATRIX_LINT.md` +
+  `scripts/devnet/run_413_public_devnet_readiness_recommendation_gap_matrix_lint.sh`.
 - **Status:** docs-only; **moves no readiness item** (M4/M6/S5/S7 stay Yellow;
   C4/C5 OPEN; public DevNet NOT launch-ready).
 - **Non-claims:** not binary provenance; no signed release / SLSA claim; deploys
