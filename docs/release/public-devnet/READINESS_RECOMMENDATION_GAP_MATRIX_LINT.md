@@ -27,6 +27,10 @@ Compared documents:
 
 Companion files:
 
+- `docs/release/public-devnet/READINESS_CROSS_SECTION_COVERAGE_LINT.md` — the Run 414 cross-section
+  **coverage** lint: this Run 413 lint protects the *status values* of the §11/§16 rows that exist;
+  Run 414 protects the *set of rows that must exist*, so a status-bearing row cannot be silently
+  **removed** (rather than mutated) without detection.
 - `docs/release/public-devnet/READINESS_STATUS_BLOCKER_LINT.md` — the Run 412 per-**milestone**
   status/blocker lint (§10 table vs §4/§5 checklists + blocker register + launch gate); this
   Run 413 lint is its **recommendation/gap-matrix** extension (Run 412 protects the §10 table

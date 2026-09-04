@@ -533,6 +533,34 @@ seed/bootnode/faucet/RPC/explorer/status service, applies **no** trust bundle, a
 validator/epoch/sequence/marker/`LivePqcTrustState` state. **No readiness item moves Green** — this run lints
 documentation only. **M4 stays Yellow/launch-blocking; M6 stays Yellow/Partial; S5/S7 stay Yellow; M1–M3/M5/M7–M20
 remain Green; public DevNet stays NOT launch-ready; C4/C5 remain OPEN; MainNet/TestNet untouched.**
+Updated Run 414 — **readiness cross-section coverage lint published; no readiness item moves (Route B —
+docs + shell only, no production source change, no `build.rs` change, no `Cargo.toml` change, no new CLI flag)**: extends
+the Run 412/413 status consistency lints from the *values* of the rows that exist to the **coverage** dimension — the
+*set* of rows that must exist — so this readiness matrix's status-bearing views cannot silently **drop** a milestone row
+that its **§10 canonical current-status table** (the source of truth) still carries. Publishes
+`docs/release/public-devnet/READINESS_CROSS_SECTION_COVERAGE_LINT.md` and
+`scripts/devnet/run_414_public_devnet_readiness_cross_section_coverage_lint.sh` (`RESULT=POSITIVE`), which fails closed if
+§10 omits or duplicates any M1–M20 / S1–S7 row, if §11 omits or duplicates any must-have M1–M20 row or gains an S row
+without a documented scope change, if §16 omits or duplicates any required mapped label or carries a status-bearing row
+whose descriptive label does not map to a known M/S/N/C/T item via the explicit **label-to-item map**, if an existing
+Run 413 scoped §16 mapped row is removed, if a §16 **coverage exception** (currently **S6**, **S7** — the two §10 items
+intentionally not given a distinct §16 mapped row) is missing its item code / reason / §10 protection source or is used
+for M4/M6/S5/S7 without explicit Yellow / M4-gated protection, if §10/§11/§16 status values disagree for a represented
+item, or if any view claims launch-ready/GO, C4/C5 closure, TestNet/MainNet readiness, a live
+seed/bootnode/faucet/RPC/explorer/status-service deployment, a `devnet-seeds.live.json`, or a runtime mutation. The
+harness carries three fail-closed **self-tests** (proving §11 row deletion, §16 row deletion, and §16 unmapped/renamed
+labels all abort) that run against temporary copies **outside** the repository tree. It adds
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_414.md` and
+`docs/devnet/run_414_public_devnet_readiness_cross_section_coverage_lint/`, and narrowly updates
+`docs/release/public-devnet/ARTIFACT_INDEX.md`, `docs/release/public-devnet/OPERATOR_VERIFICATION_MAP.md`,
+`docs/release/public-devnet/READINESS_RECOMMENDATION_GAP_MATRIX_LINT.md` (companion pointer),
+`docs/release/public-devnet/PACKAGE_INTEGRITY_MANIFEST.example.json` (SHA-256/byte-size refresh for exactly the two
+narrowly-edited anchor docs `ARTIFACT_INDEX.md`/`OPERATOR_VERIFICATION_MAP.md`; no entry added/removed, no `status`
+changed), this matrix, and `docs/whitepaper/contradiction.md`. It adds **no** CLI flag, opens **no** port, deploys **no**
+seed/bootnode/faucet/RPC/explorer/status service, applies **no** trust bundle, and mutates **no**
+validator/epoch/sequence/marker/`LivePqcTrustState` state. **No readiness item moves Green** — this run lints
+documentation only. **M4 stays Yellow/launch-blocking; M6 stays Yellow/Partial; S5/S7 stay Yellow; M1–M3/M5/M7–M20
+remain Green; public DevNet stays NOT launch-ready; C4/C5 remain OPEN; MainNet/TestNet untouched.**
 identity **generation + verification** package is published under
 `docs/release/public-devnet/identity/` (`README.md`, `IDENTITY_GENERATION.md`, `IDENTITY_VERIFY.md`,
 `OPERATOR_IDENTITY_SCHEMA.json`, `EXAMPLE_PUBLIC_IDENTITY.json`, `SAFETY.md`, `VERIFY.md`) backed by the

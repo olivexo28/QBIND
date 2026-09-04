@@ -304,7 +304,12 @@ Each artifact group lists:
   **recommendation/gap-matrix** consistency lint that keeps the readiness matrix's §11 next-run
   recommendation table and §16 consolidated gap matrix in agreement with its §10 current-status
   table, `docs/release/public-devnet/READINESS_RECOMMENDATION_GAP_MATRIX_LINT.md` +
-  `scripts/devnet/run_413_public_devnet_readiness_recommendation_gap_matrix_lint.sh`.
+  `scripts/devnet/run_413_public_devnet_readiness_recommendation_gap_matrix_lint.sh`. For the
+  **cross-section coverage** lint that keeps the readiness matrix's §11 next-run recommendation
+  table and §16 consolidated gap matrix from silently dropping a milestone row that its §10
+  current-status table still carries (coverage, not just status),
+  `docs/release/public-devnet/READINESS_CROSS_SECTION_COVERAGE_LINT.md` +
+  `scripts/devnet/run_414_public_devnet_readiness_cross_section_coverage_lint.sh`.
 - **Status:** docs-only; **moves no readiness item** (M4/M6/S5/S7 stay Yellow;
   C4/C5 OPEN; public DevNet NOT launch-ready).
 - **Non-claims:** not binary provenance; no signed release / SLSA claim; deploys
