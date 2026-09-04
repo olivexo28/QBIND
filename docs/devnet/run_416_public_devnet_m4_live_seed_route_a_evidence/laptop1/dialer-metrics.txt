@@ -1,0 +1,19 @@
+Run 416 — dialer metrics facts (Laptop 1 WSL, host olivegigi)
+=============================================================
+
+Publish-safe facts derived from the dialer qbind-node. Metrics are exposed only over a
+loopback QBIND_METRICS_HTTP_ADDR endpoint; no raw metrics dump is committed. The full raw
+scrape (if captured) is retained only in the gitignored bundle
+bundles/qbind-m4-evidence-laptop1.tgz.
+
+qbind_node_build_info{git_commit="1c2ba28d1532474a9e1124bc9873cd54193f29b6", env="devnet", chain_id="0x51424E4444455600"} 1
+qbind_p2p_pqc_root_mode 1        # pqc-static-root active
+p2p_mutual_auth required
+external_seed_dialed 188.166.227.87:30333
+
+Notes:
+- git_commit matches the runtime evidence commit recorded in the manifest
+  (1c2ba28d1532474a9e1124bc9873cd54193f29b6); the live binary was built from that commit
+  and NOT from the later Run 415 docs commit 50eed16b.
+- Only build/identity/posture facts are transcribed; no secret material, no absolute path,
+  and no full raw metrics body is committed.

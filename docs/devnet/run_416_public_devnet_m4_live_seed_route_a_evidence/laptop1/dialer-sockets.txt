@@ -1,0 +1,16 @@
+Run 416 — dialer socket state (Laptop 1 WSL, host olivegigi)
+============================================================
+
+Publish-safe transcription of the dialer's socket state while connected to the seed.
+The local ephemeral source port is redacted (<ephemeral>); the full raw `ss`/`netstat`
+capture is retained only in the gitignored bundle bundles/qbind-m4-evidence-laptop1.tgz.
+
+State  Local Address:Port          Peer Address:Port          Process
+ESTAB  <dialer-local>:<ephemeral>  188.166.227.87:30333       qbind-node
+
+Interpretation:
+- The dialer holds an ESTABLISHED outbound TCP connection to the seed's public endpoint
+  188.166.227.87:30333.
+- This is an off-host / different-network connection: the seed observed the dialer's
+  public egress address as 110.226.112.166 (see vps/seed-sockets.txt), confirming the
+  vantage is genuinely external to the seed host/NAT.
