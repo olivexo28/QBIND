@@ -1,0 +1,45 @@
+run=Run 416
+title=public DevNet M4 live seed Route A — real external reachability evidence
+route=Route A (real external infrastructure; independent off-host vantage)
+verdict=POSITIVE-FOR-EXTERNAL
+
+# --- Endpoints / topology (publish-safe) ---
+seed_addr=188.166.227.87:30333
+seed_listen=0.0.0.0:30333
+seed_host=ubuntu-s-1vcpu-1gb-sgp1 (DigitalOcean SGP1, 1vcpu-1gb)
+dialer_host=olivegigi (Laptop 1 WSL)
+dialer_target=0@188.166.227.87:30333
+dialer_public_egress_observed_by_seed=110.226.112.166
+transport_mode=--p2p-mutual-auth required
+pqc_root_mode=--p2p-pqc-root-mode pqc-static-root
+dialer_override=per-peer KEM public key + --validator-id override supplied by dialer
+pqc_material=temporary DevNet ML-DSA-44 root + ML-KEM-768 leaf via examples/devnet_pqc_root_helper (both sides; ephemeral; discarded)
+
+# --- Runtime provenance (publish-safe) ---
+runtime_evidence_commit=1c2ba28d1532474a9e1124bc9873cd54193f29b6 (recorded in BOTH manifests; live binary built from this commit)
+run_415_docs_commit=50eed16b (committed AFTER the live binary build; live binary was NOT built from 50eed16b)
+
+# --- Socket evidence (publish-safe) ---
+vps_socket_listen=LISTEN 0.0.0.0:30333 (qbind-node)
+vps_socket_estab=ESTAB local 188.166.227.87:30333 -> remote 110.226.112.166:<client-port>
+dialer_socket_estab=ESTAB local <dialer-host>:<ephemeral> -> remote 188.166.227.87:30333
+
+# --- Reachability conclusions ---
+external_tcp_reachability=true
+external_kemtls_reachability=true (mutual-auth required + pqc-static-root handshake completed off-host)
+independent_offhost_vantage=true (dialer on a different network from the seed host/NAT)
+live_reachability_claim=external reachability PROVEN for an EPHEMERAL seed
+durable_published_seed=false (temporary DevNet PQC material; no durable operator seed identity provisioned)
+devnet_seeds_live_json_published=false
+m4_green_claim=false (M4 stays Yellow/launch-blocking pending a durable published devnet-seeds.live.json)
+m6_fully_green_claim=false
+s5_green_claim=false
+s7_green_claim=false
+c4_c5_closure_claim=false
+testnet_mainnet_readiness_claim=false
+
+# --- Redaction ---
+committed_private_material=NONE (no ML-DSA root signing key, no ML-KEM leaf secret, no cert, no data dir, no raw log/metrics dump)
+raw_bundles=bundles/qbind-m4-evidence-laptop1.tgz, bundles/qbind-m4-evidence-vps.tgz (operator-side; gitignored; NOT committed)
+
+RESULT=POSITIVE-FOR-EXTERNAL (Route A: real external TCP + KEMTLS mutual-auth static-root reachability proven from an independent off-host vantage; M4 external-reachability blocker cleared; M4 stays Yellow pending a durable published devnet-seeds.live.json; C4/C5 OPEN)

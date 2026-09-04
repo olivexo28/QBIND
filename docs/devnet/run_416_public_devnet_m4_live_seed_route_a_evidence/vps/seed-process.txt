@@ -1,0 +1,26 @@
+Run 416 — seed process (VPS, host ubuntu-s-1vcpu-1gb-sgp1)
+==========================================================
+
+Publish-safe description of the seed qbind-node invocation. Exact PIDs, absolute paths,
+temp directories, and key/cert file paths are redacted; the full raw process listing is
+retained only in the gitignored bundle bundles/qbind-m4-evidence-vps.tgz.
+
+Invocation shape (publish-safe):
+
+  qbind-node \
+    --env devnet \
+    --network-mode p2p --enable-p2p \
+    --p2p-listen-addr 0.0.0.0:30333 \
+    --p2p-advertised-addr 188.166.227.87:30333 \
+    --p2p-mutual-auth required \
+    --p2p-pqc-root-mode pqc-static-root \
+    --p2p-trusted-root <temp-devnet-static-root>          # devnet_pqc_root_helper output
+    --p2p-leaf-cert <temp-leaf.cert.bin> \                # ephemeral; gitignored
+    --p2p-leaf-cert-key <temp-leaf.kem.sk.bin>            # ephemeral 0600; NEVER committed
+
+Notes:
+- The seed binds 0.0.0.0:30333 and is externally reachable at 188.166.227.87:30333.
+- All PQC material is temporary DevNet material from
+  crates/qbind-node/examples/devnet_pqc_root_helper.rs and was discarded after the run;
+  the seed identity is ephemeral (NOT a durable operator seed identity).
+- Angle-bracket <...> placeholders stand in for redacted local paths / values.

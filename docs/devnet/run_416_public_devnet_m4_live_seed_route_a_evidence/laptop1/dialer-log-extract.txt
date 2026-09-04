@@ -1,0 +1,21 @@
+Run 416 — dialer log extract (Laptop 1 WSL, host olivegigi)
+===========================================================
+
+Publish-safe extract of the dialer's P2P / handshake log lines. Timestamps, absolute
+paths, and any key/cert bytes are redacted; the full raw log is retained only in the
+gitignored bundle bundles/qbind-m4-evidence-laptop1.tgz. NodeId values shown are public
+identifiers (8-byte prefixes) only.
+
+[P2P] transport security: mutual-auth = required
+[P2P] PQC root mode: pqc-static-root
+[P2P] dialing peer 0@188.166.227.87:30333
+[P2P] TCP connect to 188.166.227.87:30333 succeeded
+[P2P] KEMTLS handshake (static-root, mutual-auth required) with 188.166.227.87:30333 completed
+[P2P] peer identity verified against per-peer KEM public key override (validator-id override applied)
+[P2P] connection ESTABLISHED to NodeId(<seed-prefix>) @ 188.166.227.87:30333
+
+Interpretation:
+- External TCP dial to the seed's public endpoint succeeded.
+- The KEMTLS mutual-auth static-root handshake completed off-host — external KEMTLS
+  reachability is proven, not just an external TCP dial.
+- No secret material appears in the log; only public NodeId prefixes and status lines.

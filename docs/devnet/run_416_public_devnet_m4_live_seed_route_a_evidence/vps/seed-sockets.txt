@@ -1,0 +1,18 @@
+Run 416 — seed socket state (VPS, host ubuntu-s-1vcpu-1gb-sgp1)
+===============================================================
+
+Publish-safe transcription of the seed's socket state. The inbound dialer's ephemeral
+source port is redacted (<client-port>); the full raw `ss`/`netstat` capture is retained
+only in the gitignored bundle bundles/qbind-m4-evidence-vps.tgz.
+
+State   Local Address:Port        Peer Address:Port            Process
+LISTEN  0.0.0.0:30333             *:*                          qbind-node
+ESTAB   188.166.227.87:30333      110.226.112.166:<client-port> qbind-node
+
+Interpretation:
+- LISTEN 0.0.0.0:30333 confirms the seed accepts inbound connections on all interfaces
+  (externally reachable at 188.166.227.87:30333).
+- ESTAB from 188.166.227.87:30333 to 110.226.112.166:<client-port> confirms an inbound
+  connection from the off-host dialer's public egress address (110.226.112.166) — an
+  independent, different-network vantage outside the seed host/NAT.
+- This is the external-reachability evidence Runs 378/388/391/393/397 could not capture.
