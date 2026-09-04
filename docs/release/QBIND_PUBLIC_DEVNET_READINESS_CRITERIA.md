@@ -561,6 +561,35 @@ seed/bootnode/faucet/RPC/explorer/status service, applies **no** trust bundle, a
 validator/epoch/sequence/marker/`LivePqcTrustState` state. **No readiness item moves Green** — this run lints
 documentation only. **M4 stays Yellow/launch-blocking; M6 stays Yellow/Partial; S5/S7 stay Yellow; M1–M3/M5/M7–M20
 remain Green; public DevNet stays NOT launch-ready; C4/C5 remain OPEN; MainNet/TestNet untouched.**
+Updated Run 415 — **readiness artifact path/reference consistency lint published; no readiness item moves
+(Route B — docs + shell only, no production source change, no `build.rs` change, no `Cargo.toml` change, no new
+CLI flag)**: extends the Run 412/413/414 status/coverage consistency lints (which protect the readiness *rows*) to
+the **path/reference** layer beneath them, catching drift between the readiness matrix, the artifact index, the
+operator verification map, the blocker register / launch gate where they name public DevNet artifacts, and the actual
+publish-safe files under `docs/release/public-devnet`. Publishes
+`docs/release/public-devnet/READINESS_ARTIFACT_PATH_REFERENCE_LINT.md` and
+`scripts/devnet/run_415_public_devnet_readiness_artifact_path_reference_lint.sh` (`RESULT=POSITIVE`), which fails closed
+if any readiness-matrix §9/§10/§11/§16 `docs/release/…` evidence path, any `ARTIFACT_INDEX.md` /
+`OPERATOR_VERIFICATION_MAP.md` `docs/release/public-devnet/…` package path (that is not explicitly marked
+generated/download-only/transient/not committed), any named `scripts/devnet/run_*.sh` verification command, or any
+matrix/ledger `docs/devnet/…` committed-evidence `.md` path no longer resolves on disk, if a package directory under
+`docs/release/public-devnet` is not represented in the artifact index, if a tracked publish-safe file is not
+discoverable through the index / operator map / an indexed package README/VERIFY / a documented exception, or if a
+documented exception lacks a relative path / reason / protecting indexed parent or hides an M4/M6/S5/S7/C4/C5 path
+without explicit Yellow / OPEN protection. The harness carries three fail-closed **self-tests** (a moved/renamed
+readiness-matrix evidence path, a package directory absent from the index, and an undiscoverable public-DevNet file)
+that run against temporary copies **outside** the repository tree. It adds
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_415.md` and
+`docs/devnet/run_415_public_devnet_readiness_artifact_path_reference_lint/`, and narrowly updates
+`docs/release/public-devnet/ARTIFACT_INDEX.md`, `docs/release/public-devnet/OPERATOR_VERIFICATION_MAP.md`,
+`docs/release/public-devnet/READINESS_CROSS_SECTION_COVERAGE_LINT.md` (companion pointer),
+`docs/release/public-devnet/PACKAGE_INTEGRITY_MANIFEST.example.json` (SHA-256/byte-size refresh for exactly the two
+narrowly-edited anchor docs `ARTIFACT_INDEX.md`/`OPERATOR_VERIFICATION_MAP.md`; no entry added/removed, no `status`
+changed), this matrix, and `docs/whitepaper/contradiction.md`. It adds **no** CLI flag, opens **no** port, deploys **no**
+seed/bootnode/faucet/RPC/explorer/status service, applies **no** trust bundle, and mutates **no**
+validator/epoch/sequence/marker/`LivePqcTrustState` state. **No readiness item moves Green** — this run lints
+documentation only. **M4 stays Yellow/launch-blocking; M6 stays Yellow/Partial; S5/S7 stay Yellow; M1–M3/M5/M7–M20
+remain Green; public DevNet stays NOT launch-ready; C4/C5 remain OPEN; MainNet/TestNet untouched.**
 identity **generation + verification** package is published under
 `docs/release/public-devnet/identity/` (`README.md`, `IDENTITY_GENERATION.md`, `IDENTITY_VERIFY.md`,
 `OPERATOR_IDENTITY_SCHEMA.json`, `EXAMPLE_PUBLIC_IDENTITY.json`, `SAFETY.md`, `VERIFY.md`) backed by the

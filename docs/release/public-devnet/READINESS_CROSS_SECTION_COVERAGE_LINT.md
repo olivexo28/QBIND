@@ -29,6 +29,10 @@ Compared documents:
 
 Companion files:
 
+- `docs/release/public-devnet/READINESS_ARTIFACT_PATH_REFERENCE_LINT.md` — the Run 415
+  artifact **path / reference** consistency lint. Run 414 protects which status-bearing rows must
+  exist; Run 415 protects that the file paths those rows and the artifact index name actually
+  resolve on disk, and that every published public-DevNet artifact is discoverable.
 - `docs/release/public-devnet/READINESS_RECOMMENDATION_GAP_MATRIX_LINT.md` — the Run 413
   recommendation/gap-matrix **status** consistency lint (checks the §11/§16 status *glyphs* against
   §10). This Run 414 lint is its **coverage** companion: Run 413 protects the *values* of the rows
