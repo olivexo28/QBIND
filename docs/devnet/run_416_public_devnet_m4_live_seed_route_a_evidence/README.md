@@ -21,16 +21,17 @@ Reachability evidence record: `docs/release/public-devnet/network/reachability/R
 ## What was run (Route A topology)
 
 - **Seed (VPS):** `qbind-node` listening on `0.0.0.0:30333`, externally reachable at
-  `188.166.227.87:30333`. Seed host: `ubuntu-s-1vcpu-1gb-sgp1` (DigitalOcean SGP1,
+  `188.166.227.87:30333`. Seed host: `<seed-host>` (DigitalOcean SGP1,
   `1vcpu-1gb`).
-- **Off-host dialer:** Laptop 1 WSL (host `olivegigi`), on a **different network**
-  (public egress address observed by the seed as `110.226.112.166`), dialing
+- **Off-host dialer:** Laptop 1 WSL (host `<dialer-host>`), on a **different network**
+  (public egress address observed by the seed as `<dialer-public-egress>`), dialing
   `0@188.166.227.87:30333`.
 - **Transport:** `--p2p-mutual-auth required`.
 - **PQC root mode:** `--p2p-pqc-root-mode pqc-static-root`.
-- **Dialer override:** a per-peer KEM public key + `--validator-id` override was supplied
-  by the dialer so it could complete the mutual-auth static-root handshake against the
-  seed's advertised identity.
+- **Dialer override:** the dialer ran as `--validator-id 1` and supplied the seed's certified
+  leaf via `--p2p-peer-leaf-cert 0:<redacted-temp-seed-cert-path>` (format `VID:PATH`; VID `0`
+  = the seed) so it could complete the mutual-auth static-root handshake against the seed's
+  advertised identity.
 - **PQC material:** **temporary DevNet** ML-DSA-44 root + ML-KEM-768 leaf material generated
   on **both** sides by `crates/qbind-node/examples/devnet_pqc_root_helper.rs`. It is
   ephemeral, dev-only, and **discarded**; only public identifiers and status lines are
@@ -55,12 +56,12 @@ Reachability evidence record: `docs/release/public-devnet/network/reachability/R
 | `laptop1/manifest.txt` | Dialer capture manifest (runtime commit, host, run parameters, redaction). |
 | `laptop1/dialer-process.txt` | Publish-safe description of the dialer `qbind-node` invocation. |
 | `laptop1/dialer-sockets.txt` | Publish-safe dialer socket state (established connection to the seed). |
-| `laptop1/dialer-log-extract.txt` | Publish-safe extract of the dialer P2P/handshake log lines. |
+| `laptop1/dialer-log-extract.txt` | Publish-safe **redacted/reconstructed log transcription** of the dialer P2P/handshake log lines (normalized, **not** verbatim raw log). |
 | `laptop1/dialer-metrics.txt` | Publish-safe `qbind-node` build/identity metrics facts from the dialer. |
 | `vps/manifest.txt` | Seed capture manifest (runtime commit, host, listen posture, redaction). |
 | `vps/seed-process.txt` | Publish-safe description of the seed `qbind-node` invocation. |
 | `vps/seed-sockets.txt` | Publish-safe seed socket state (`LISTEN` + inbound `ESTAB` from the dialer). |
-| `vps/seed-log-extract.txt` | Publish-safe extract of the seed P2P/accept log lines. |
+| `vps/seed-log-extract.txt` | Publish-safe **redacted/reconstructed log transcription** of the seed P2P/accept log lines (normalized, **not** verbatim raw log). |
 | `vps/seed-metrics.txt` | Publish-safe `qbind-node` build/identity metrics facts from the seed. |
 
 ## NOT committed (gitignored)

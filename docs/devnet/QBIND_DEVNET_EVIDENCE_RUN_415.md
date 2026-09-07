@@ -121,8 +121,8 @@ be dropped from the index without detection.
 ## 12. Discoverability check
 
 Every tracked publish-safe file under `docs/release/public-devnet` is discoverable: its basename
-appears in the artifact index **or** the operator verification map, **or** it is covered by an
-indexed package README/VERIFY, **or** it is a documented exception. A tracked file that is
+appears in the artifact index **or** the operator verification map, **or** it is a documented
+exception. A tracked file that is
 discoverable through none of these fails closed.
 
 ## 13. Exception model
@@ -134,8 +134,8 @@ reason / protecting parent).
 
 ## 14. Exception-set exactness
 
-The set of tracked publish-safe files that are **not** discoverable via the index / operator map /
-an indexed package README/VERIFY must equal **exactly** the documented exception set — a stale
+The set of tracked publish-safe files that are **not** discoverable via the index / operator map
+must equal **exactly** the documented exception set — a stale
 exception (for a file that is now discoverable or deleted) or a missing exception (for a new
 undiscoverable file) both fail closed. The current exception set is the six
 `network/reachability/RUN_*_qbind-devnet-seed-1.md` seed-reachability evidence templates, each

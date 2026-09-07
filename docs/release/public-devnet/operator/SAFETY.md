@@ -27,8 +27,9 @@ QBIND Public DevNet is:
   destroyed by a reset; do not rely on persistence. The full DevNet reset policy (triggers, notice,
   operator actions, evidence-record shape) and incident-response process are published in
   `docs/release/public-devnet/ops/` (`RESET_POLICY.md`, `INCIDENT_RESPONSE.md`; M15/M16, Run 390).
-- **Public DevNet is NOT launch-ready.** There are no externally reachable seeds (M4 is Yellow /
-  launch-blocking) and no documented release-binary reproducibility / BuildID (M3 is Red). This
+- **Public DevNet is NOT launch-ready.** No durable, published live seed exists — M4 is Yellow /
+  launch-blocking (external reachability was proven once in Run 416 against a temporary, discarded
+  seed, but no `devnet-seeds.live.json` is published). This
   package does **not** launch a public DevNet and deploys no seed node, bootnode, faucet, RPC
   gateway, explorer, or status page.
 - **TestNet and MainNet are separate future stages.** DevNet → TestNet Alpha → TestNet Beta →

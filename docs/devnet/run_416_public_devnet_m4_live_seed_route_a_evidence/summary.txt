@@ -6,14 +6,38 @@ verdict=POSITIVE-FOR-EXTERNAL
 # --- Endpoints / topology (publish-safe) ---
 seed_addr=188.166.227.87:30333
 seed_listen=0.0.0.0:30333
-seed_host=ubuntu-s-1vcpu-1gb-sgp1 (DigitalOcean SGP1, 1vcpu-1gb)
-dialer_host=olivegigi (Laptop 1 WSL)
+seed_host=<seed-host> (DigitalOcean SGP1, 1vcpu-1gb)
+dialer_host=<dialer-host> (Laptop 1 WSL)
 dialer_target=0@188.166.227.87:30333
-dialer_public_egress_observed_by_seed=110.226.112.166
+dialer_public_egress_observed_by_seed=<dialer-public-egress>
 transport_mode=--p2p-mutual-auth required
 pqc_root_mode=--p2p-pqc-root-mode pqc-static-root
-dialer_override=per-peer KEM public key + --validator-id override supplied by dialer
+dialer_override=dialer runs --validator-id 1 and supplies the seed leaf cert via --p2p-peer-leaf-cert 0:<redacted-temp-seed-cert-path> (format VID:PATH; VID 0 = seed)
 pqc_material=temporary DevNet ML-DSA-44 root + ML-KEM-768 leaf via examples/devnet_pqc_root_helper (both sides; ephemeral; discarded)
+
+# --- Cryptographic-provider shape (directly captured [Run040] provider line; both nodes) ---
+pqc_root_mode=pqc-static-root
+sig_suite_id=100
+transport_kem_suite_name=ml-kem-768
+transport_aead_suite_name=chacha20-poly1305
+dummy_kem_registered=false
+dummy_aead_registered=false
+
+# --- PQC cert-verify counters (directly captured) ---
+dialer_qbind_p2p_pqc_root_mode=1
+dialer_qbind_p2p_pqc_cert_verify_accepted_total=1
+dialer_qbind_p2p_pqc_cert_verify_rejected_total=0
+seed_qbind_p2p_pqc_root_mode=1
+seed_qbind_p2p_pqc_cert_verify_accepted_total=2
+seed_qbind_p2p_pqc_cert_verify_rejected_total=0
+
+# --- Peer-gauge discrepancy (mandatory evidence limitation; NOT a diagnosed bug) ---
+peer_gauges_observed=qbind_p2p_connections_current=0, qbind_p2p_inbound_peers=0, qbind_p2p_outbound_peers=0 (reported 0 on both nodes despite the admitted connection evidenced by sockets + logs + cert-verify counters)
+peer_gauge_note=observed gauge discrepancy / evidence limitation only; no root cause proven; NO peer-gauge health claim
+
+# --- Timestamp / genesis-pin limitations ---
+exact_utc_execution_timestamp=NOT retained in the publish-safe evidence (not derived from commit/upload/filename/mtime)
+genesis_pin=NOT evidenced by Run 416 (no --expect-genesis-hash or observed pin result in retained evidence; external reachability proven independently)
 
 # --- Runtime provenance (publish-safe) ---
 runtime_evidence_commit=1c2ba28d1532474a9e1124bc9873cd54193f29b6 (recorded in BOTH manifests; live binary built from this commit)
@@ -21,7 +45,7 @@ run_415_docs_commit=50eed16b (committed AFTER the live binary build; live binary
 
 # --- Socket evidence (publish-safe) ---
 vps_socket_listen=LISTEN 0.0.0.0:30333 (qbind-node)
-vps_socket_estab=ESTAB local 188.166.227.87:30333 -> remote 110.226.112.166:<client-port>
+vps_socket_estab=ESTAB local 188.166.227.87:30333 -> remote <dialer-public-egress>:<client-port>
 dialer_socket_estab=ESTAB local <dialer-host>:<ephemeral> -> remote 188.166.227.87:30333
 
 # --- Reachability conclusions ---

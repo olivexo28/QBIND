@@ -1,4 +1,4 @@
-Run 416 — seed metrics facts (VPS, host ubuntu-s-1vcpu-1gb-sgp1)
+Run 416 — seed metrics facts (VPS, host <seed-host>)
 ================================================================
 
 Publish-safe facts derived from the seed qbind-node. Metrics are exposed only over a
@@ -8,13 +8,37 @@ bundles/qbind-m4-evidence-vps.tgz.
 
 qbind_node_build_info{git_commit="1c2ba28d1532474a9e1124bc9873cd54193f29b6", env="devnet", chain_id="0x51424E4444455600"} 1
 qbind_p2p_pqc_root_mode 1        # pqc-static-root active
+qbind_p2p_pqc_cert_verify_accepted_total 2
+qbind_p2p_pqc_cert_verify_rejected_total 0
 p2p_mutual_auth required
 p2p_listen 0.0.0.0:30333
 p2p_advertised 188.166.227.87:30333
+
+# --- Run040 cryptographic-provider shape (directly captured [Run040] provider line) ---
+pqc_root_mode=pqc-static-root
+sig_suite_id=100
+transport_kem_suite_name=ml-kem-768
+transport_aead_suite_name=chacha20-poly1305
+dummy_kem_registered=false
+dummy_aead_registered=false
+
+# --- Peer-gauge discrepancy (mandatory evidence limitation) ---
+# During the observation window the following gauges reported 0 even though the socket
+# evidence (seed-sockets.txt: LISTEN + inbound ESTAB), the accept log, and the PQC cert-verify
+# counter above (accepted_total=2) demonstrate the admitted inbound external connection:
+qbind_p2p_connections_current 0
+qbind_p2p_inbound_peers 0
+qbind_p2p_outbound_peers 0
+# This is recorded as an OBSERVED gauge discrepancy / evidence limitation only. It is NOT a
+# diagnosed software bug (no root cause was separately proven) and Run 416 makes NO peer-gauge
+# health claim; the admitted connection is evidenced by sockets + logs + the cert-verify counter.
 
 Notes:
 - git_commit matches the runtime evidence commit recorded in the manifest
   (1c2ba28d1532474a9e1124bc9873cd54193f29b6); the live binary was built from that commit
   and NOT from the later Run 415 docs commit 50eed16b.
-- Only build/identity/posture facts are transcribed; no secret material, no absolute path,
-  and no full raw metrics body is committed.
+- The `pqc_root_mode`/`sig_suite_id`/`transport_*_suite_name`/`dummy_*_registered` values are the
+  directly captured `[Run040]` provider-shape facts (confirming a real ML-KEM-768 + ChaCha20-Poly1305
+  provider with no dummy KEM/AEAD registered), not an interpretation.
+- Only build/identity/posture/provider-shape facts are transcribed; no secret material, no absolute
+  path, and no full raw metrics body is committed.

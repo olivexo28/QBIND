@@ -20,7 +20,7 @@ It catches path/reference **drift** between:
 It is a **read-only** verifier: it reads the committed documents and **fails closed** if a
 readiness-matrix evidence path, an artifact-index package path, an operator-map verification
 reference, or a named verification script no longer resolves on disk, if a published public-DevNet
-artifact is not discoverable through the index / operator map / an indexed package README/VERIFY / a
+artifact is not discoverable through the index / operator map / a
 documented exception, or if any reference introduces a readiness / launch / deployment / runtime /
 C4-C5-closure overclaim.
 
@@ -70,8 +70,8 @@ would leave a **dangling reference** or an **undiscoverable artifact**: an opera
 matrix or the index would hit a missing file, or a published file would never be reachable from the
 index. Run 415 adds a lightweight **path/reference** lint so this drift fails closed: every
 readiness-matrix evidence path and artifact-index package path must resolve on disk, and every
-published public-DevNet artifact must be discoverable through the index, the operator map, an
-indexed package README/VERIFY, or an explicitly documented exception.
+published public-DevNet artifact must be discoverable through the index, the operator map, or an
+explicitly documented exception.
 
 ## 2. Which documents are checked
 
@@ -147,15 +147,16 @@ committed.
 Every publish-safe file currently tracked under `docs/release/public-devnet` must be **discoverable**
 through at least one of:
 
-1. the `ARTIFACT_INDEX.md` path / group listing (its basename or containing package path appears in
-   the index);
-2. the `OPERATOR_VERIFICATION_MAP.md` verification map or cross-reference (its basename appears in
-   the map);
-3. a package-level README / VERIFY file that is itself indexed; or
-4. an explicit linted exception in the exception table (§11 below).
+1. the `ARTIFACT_INDEX.md` index — **its basename appears** in the index; or
+2. the `OPERATOR_VERIFICATION_MAP.md` verification map — **its basename appears** in the map; or
+3. an explicit linted exception in the exception table (§11 below).
 
 A tracked publish-safe file that is reachable by none of these fails closed — it would be an
-orphaned artifact no operator could find from the index.
+orphaned artifact no operator could find from the index. The lint checks discoverability by
+searching for the file's **basename** in the artifact index and the operator map (this is exactly
+what `is_discoverable_in()` implements); a package-level README or VERIFY file that merely mentions a
+record collectively does **not** by itself satisfy the lint — such records are instead carried as
+documented **exceptions** in §11.
 
 ## 10. How exceptions work
 

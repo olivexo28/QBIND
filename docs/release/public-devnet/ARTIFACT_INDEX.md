@@ -136,15 +136,24 @@ Each artifact group lists:
   `devnet-seeds.live-candidate.json`, `reachability/`.
 - **Purpose:** the M4 Route-A deployment checklist, seed-node operations runbook,
   seed-list schema/placeholder, and the reachability evidence template.
+- **Route A external-reachability evidence record (positive):**
+  `docs/release/public-devnet/network/reachability/RUN_416_qbind-devnet-seed-1.md`
+  — Run 416, the first recorded **successful real Route A** external reachability
+  execution (external TCP + KEMTLS mutual-auth static-root proven from an
+  independent off-host vantage) using a **temporary, discarded** DevNet evidence
+  identity. **M4 stays Yellow / launch-blocking**; no durable published live seed.
 - **Readiness item:** M4 (**Yellow / launch-blocking**), S7 (**Yellow**).
 - **Verify:** `docs/release/public-devnet/network/VERIFY.md`;
   `scripts/devnet/run_392_public_devnet_seed_ops_route_a_checklist.sh`,
   `scripts/devnet/run_393_public_devnet_m4_real_external_seed_reachability.sh`.
-- **Status:** **Yellow** — no real, externally reachable public DevNet seed with
-  independent off-host reachability evidence exists; only a **placeholder** and a
-  **live-candidate** seed-list are published (no `devnet-seeds.live.json`).
-- **Non-claims:** no seed is live; no `devnet-seeds.live.json` exists; do **not**
-  create one without real off-host M4 evidence.
+- **Status:** **Yellow** — external TCP + KEMTLS static-root reachability to a real
+  public DevNet seed from an independent off-host vantage was **proven by Run 416**
+  using a **temporary, discarded** evidence identity, but **no durable published
+  live seed** exists; only a **placeholder** and a **live-candidate** seed-list are
+  published (no `devnet-seeds.live.json`).
+- **Non-claims:** no **durable** seed is live; no `devnet-seeds.live.json` exists; do
+  **not** create one without a durable operator identity and a valid live-list
+  publication (Run 416 used a temporary, discarded identity and does not authorize it).
 
 ## 7. Security / PQC trust bootstrap
 
@@ -313,7 +322,7 @@ Each artifact group lists:
   **artifact path / reference** consistency lint that keeps the readiness matrix evidence paths, the
   artifact-index package paths, the operator-map references, and the named verification scripts
   resolving on disk, and every published public-DevNet artifact discoverable through the index /
-  operator map / an indexed package README/VERIFY / a documented exception,
+  operator map / a documented exception,
   `docs/release/public-devnet/READINESS_ARTIFACT_PATH_REFERENCE_LINT.md` +
   `scripts/devnet/run_415_public_devnet_readiness_artifact_path_reference_lint.sh`.
 - **Status:** docs-only; **moves no readiness item** (M4/M6/S5/S7 stay Yellow;

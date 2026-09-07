@@ -1,10 +1,20 @@
-Run 416 — dialer log extract (Laptop 1 WSL, host olivegigi)
+Run 416 — dialer log extract (Laptop 1 WSL, host <dialer-host>)
 ===========================================================
 
-Publish-safe extract of the dialer's P2P / handshake log lines. Timestamps, absolute
-paths, and any key/cert bytes are redacted; the full raw log is retained only in the
-gitignored bundle bundles/qbind-m4-evidence-laptop1.tgz. NodeId values shown are public
-identifiers (8-byte prefixes) only.
+Publish-safe **redacted/reconstructed log transcription** of the dialer's P2P / handshake
+log lines. These lines are **not** a verbatim byte-for-byte raw log excerpt: timestamps,
+absolute paths, PIDs, and any key/cert bytes were removed and the surviving status lines were
+normalized/reconstructed for publication. The full raw log is retained only in the gitignored
+bundle bundles/qbind-m4-evidence-laptop1.tgz. NodeId values shown are public identifiers
+(8-byte prefixes) only.
+
+Evidence classification:
+- Directly captured facts: the external TCP connect to 188.166.227.87:30333 and the
+  socket/metric facts in `dialer-sockets.txt` / `dialer-metrics.txt`.
+- Redacted transcription: the normalized `[P2P] …` status lines below (reconstructed from the
+  raw operator log; not verbatim).
+- Interpretation: the "Interpretation" notes, derived from combining the log, socket, and
+  metric observations.
 
 [P2P] transport security: mutual-auth = required
 [P2P] PQC root mode: pqc-static-root
