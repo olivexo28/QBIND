@@ -1,340 +1,136 @@
-Run 416 corrective pass — repair the existing branch; do not create Run 417.
+Run 416 final reconciliation — same corrective branch
 
-Repository: `olivexo28/QBIND`
-Branch: `copilot/prepare-run-416-evidence-packaging`
-Current expected branch head: `778fba533278992c267f0880ea7343ba8f89ff5b`
-Base/main commit for this work: `50eed16b7b6932d3f79b4213619a4b0610bacd21`
+Repository: olivexo28/QBIND
+Branch: copilot/run-416-task-update-iconography
+Current HEAD: c97202c9b4302c1182bc4022269ea86a0eda25b0
 
-## Objective
+This is a final amendment to Run 416. Do not create Run 417 evidence, change Rust
+source, change runtime behavior, move any readiness status, publish
+devnet-seeds.live.json, or open a PR.
 
-Correct the existing Run 416 evidence package so it is accurate, privacy-safe, internally consistent, reproducible, and safe for later review.
+1. Reconcile devnet-seeds.live-candidate.json
 
-Make a new corrective commit on the same branch and push it normally. Do not create Run 417, do not rewrite or force-push existing history, do not merge into `main`, and do not open a PR.
+Update its top-level placeholder_statement so it states:
 
-Before editing:
+- the entry remains a preflight candidate;
+- status remains planned;
+- last_reachability_evidence remains null;
+- 203.0.113.10 remains an RFC 5737 documentation address;
+- Run 416 proved external TCP + KEMTLS reachability to a separate temporary,
+  discarded seed identity;
+- Run 416 did not prove reachability for this candidate identity/endpoint;
+- M4 remains Yellow pending a durable identity, genesis-pinned rerun and live
+  publication.
 
-1. Fetch the branch.
-2. Verify its current head. If it is no longer `778fba5`, inspect the additional commits and preserve them; do not reset or overwrite them.
-3. Read all Run 416 files, the active public-DevNet readiness documents, the Run 404–415 integrity/lint guides and harnesses, and the Run 415 contradiction entry before changing anything.
+Keep the existing seed identity fields and status unchanged.
 
-## Canonical Run 416 facts
+2. Correct false “unchanged/not modified” claims
 
-Preserve these facts exactly:
+Update:
 
-* Run 416 is the repository’s first recorded successful real Route A external-reachability execution for the public DevNet seed objective.
-* A real external TCP connection and KEMTLS mutual-auth/static-root admission were demonstrated from an independent off-host network.
-* Public seed endpoint: `188.166.227.87:30333`.
-* Seed listener: `0.0.0.0:30333`.
-* Runtime evidence commit on both nodes:
-  `1c2ba28d1532474a9e1124bc9873cd54193f29b6`.
-* The live binary was not built from the later Run 415 documentation commit.
-* Both sides used:
+- docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_416.md
+- docs/whitepaper/contradiction.md
+- any other affected Run 416 prose
 
-  * `--p2p-mutual-auth required`
-  * `--p2p-pqc-root-mode pqc-static-root`
-  * temporary DevNet ML-DSA-44 root and ML-KEM-768 leaf material
-* The dialer used validator ID `1` and the per-peer seed certificate/KEM-public-key override.
-* The seed used validator ID `0`.
-* The temporary root/leaf material was discarded and is not suitable for durable seed operation.
-* No private key, secret key, raw certificate bundle, credential, token, data directory, or raw operator bundle may be committed.
-* `devnet-seeds.live-candidate.json` remains `status: planned`.
-* Do not create or publish `devnet-seeds.live.json`.
-* M4 remains Yellow / launch-blocking:
+They must say the candidate JSON was modified only to reconcile its explanatory
+Run 416 narrative. Its schema fields, planned status, null evidence reference,
+RFC 5737 endpoint and non-live posture remain unchanged.
 
-  * external reachability half: PROVEN
-  * durable identity and published live-seed half: OPEN
-* M6 remains Yellow/Partial.
-* S5 and S7 remain Yellow.
-* Public DevNet remains NOT launch-ready / NO-GO.
-* C4 remains OPEN and C5 remains OPEN.
-* No TestNet or MainNet readiness is claimed.
-* Do not claim rotation/revocation, synthetic epoch, live/peer-driven apply, trust-state mutation, validator-set mutation, or runtime-state mutation.
+3. Repair command accuracy
 
-## Required corrections
+In:
 
-### 1. Fix Run 415 discoverability failure
+- archive/laptop1/dialer-process.txt
+- archive/vps/seed-process.txt
+- RUN_416_qbind-devnet-seed-1.md
+- any repeated command block
 
-The tracked file:
+Make each multiline shell command syntactically valid:
 
-`docs/release/public-devnet/network/reachability/RUN_416_qbind-devnet-seed-1.md`
+- every continuation backslash must be the final character before newline;
+- move inline comments to separate prose;
+- preserve --p2p-peer-leaf-cert 0:<redacted-temp-seed-cert-path>;
+- record --validator-id 1 for the dialer;
+- record --validator-id 0 for the seed, matching the actual Run 416 execution;
+- keep all private paths/material redacted.
 
-currently fails the Run 415 path/reference lint because its basename is absent from the locations the harness actually checks.
+4. State the evidence trust model
 
-Add a clear Run 416 reachability reference to:
+Add an honest limitation to the archive README, canonical evidence record and
+reachability record:
 
-* `docs/release/public-devnet/ARTIFACT_INDEX.md`
-* `docs/release/public-devnet/OPERATOR_VERIFICATION_MAP.md`
-* `docs/release/public-devnet/network/README.md`
+“Run 416 is operator-attested operational evidence. The committed socket,
+metric and log files are publish-safe transcriptions; reconstructed log lines
+are not independently authenticated raw captures. SHA256SUMS protects the
+committed evidence after publication but does not independently prove the
+original observations.”
 
-Do not rely only on `network/README.md`: the current `is_discoverable_in()` implementation searches the basename in the artifact index and operator map.
+Preserve the Route A positive result, but qualify “PROVEN” as proven within this
+operator-attested evidence scope. Do not downgrade it to Route B/C.
 
-Prefer genuine discoverability over adding an exception. Do not add a redundant §11 exception if the file is discoverable.
+Where possible, preserve the observed public line:
 
-Because `ARTIFACT_INDEX.md` and `OPERATOR_VERIFICATION_MAP.md` are package-integrity anchors, refresh their SHA-256 and byte-size entries in:
+Peer NodeId(f2de5c9d1f7dad59) connected
 
-`docs/release/public-devnet/PACKAGE_INTEGRITY_MANIFEST.example.json`
+Do not invent the reverse-direction NodeId.
 
-Also inspect the documented Run 415 claim that indexed package `README.md`/`VERIFY.md` files participate in discoverability. The harness, guide, and contradiction ledger must describe the same implemented behavior. Preserve fail-closed semantics and add/update self-tests if harness behavior changes.
+5. Correct the next-step recommendation
 
-### 2. Repair the contradiction ledger
+Do not recommend immediate durable-seed publication as Run 417.
 
-In `docs/whitepaper/contradiction.md`, Run 416 is concatenated directly onto the Run 415 entry.
+State that durable seed provisioning/publication is deferred until a separate
+foundational runtime-security reconciliation audits:
 
-Insert a proper physical newline so Run 416 is a separate ledger entry. Correct/redact the Run 416 entry as required below, but do not change the historical meaning of Run 415.
+- proposal/vote signing and inbound verification;
+- consensus sender identity binding to the authenticated KEMTLS peer;
+- QC signature verification and production suite enforcement;
+- transaction authentication, empty-auth behavior and keyset thresholds.
 
-### 3. Remove private operator identifiers
+Do not declare these findings resolved or change milestone status in this
+correction. Only record the audit prerequisite.
 
-Remove every occurrence from the current tracked tree of:
+6. Reconcile task-file scope
 
-* the dialer/home/mobile public egress IP `110.226.112.166`
-* workstation hostname `olivegigi`
-* VPS instance hostname `ubuntu-s-1vcpu-1gb-sgp1`
+Compare the branch against current main.
 
-Use consistent placeholders such as:
+- Do not re-add task/RUN_415_TASK.txt unless repository workflow explicitly
+  requires it.
+- Keep deletion/redaction of task/RUN_416_TASK.txt if necessary to remove the
+  completed task text and private identifiers.
+- Disclose every task-file change in the final report.
 
-* `<dialer-public-egress>`
-* `<dialer-host>`
-* `<seed-host>`
-* `<client-port>`
-
-Keep `188.166.227.87:30333`, because it is the intentionally public seed endpoint being evidenced.
-
-Search the entire tracked tree, not only the evidence archive. The final current tree must contain none of the three private operator identifiers.
-
-Do not force-push to remove them from historical Git objects. Report clearly that the new branch head is redacted but the earlier public commit remains in branch history; history rewriting is a separate owner decision.
-
-### 4. Correct the evidence terminology
-
-The two `*-log-extract.txt` files contain normalized/editorialized lines rather than demonstrably byte-for-byte raw log excerpts.
-
-Either rename them or clearly label them in-file and everywhere referenced as:
-
-“publish-safe redacted/reconstructed log transcription”
-
-Do not describe them as verbatim raw logs unless exact raw lines are available and verified.
-
-Likewise, distinguish:
-
-* directly captured command/socket/metric facts
-* redacted transcriptions
-* interpretation derived from multiple observations
-
-Never invent evidence.
-
-### 5. Add the omitted cryptographic-provider evidence
-
-Record the observed Run040 real-provider shape in the appropriate Run 416 evidence files:
-
-* `pqc_root_mode=pqc-static-root`
-* `sig_suite_id=100`
-* `transport_kem_suite_name=ml-kem-768`
-* `transport_aead_suite_name=chacha20-poly1305`
-* `dummy_kem_registered=false`
-* `dummy_aead_registered=false`
-
-This is the complete provider-shape evidence. Merely naming ML-DSA-44 and ML-KEM-768 is insufficient.
-
-Do not convert this into a production PKI, rotation/revocation, C4/C5 closure, TestNet, or MainNet claim.
-
-### 6. Add the omitted metrics and mandatory gauge caveat
-
-Record these observed metrics:
-
-Dialer:
-
-* `qbind_p2p_pqc_root_mode 1`
-* `qbind_p2p_pqc_cert_verify_accepted_total 1`
-* `qbind_p2p_pqc_cert_verify_rejected_total 0`
-
-Seed:
-
-* `qbind_p2p_pqc_root_mode 1`
-* `qbind_p2p_pqc_cert_verify_accepted_total 2`
-* `qbind_p2p_pqc_cert_verify_rejected_total 0`
-
-Also record this mandatory limitation:
-
-* `qbind_p2p_connections_current`
-* `qbind_p2p_inbound_peers`
-* `qbind_p2p_outbound_peers`
-
-reported `0` during the observation even though socket evidence, connection logs, and PQC verification counters demonstrated the admitted connection.
-
-Describe this as an observed gauge discrepancy or evidence limitation. Do not call it a diagnosed software bug unless a cause is separately proven. Do not claim peer-gauge health from Run 416.
-
-### 7. Correct the dialer command shape
-
-The public dialer process transcription currently says a per-peer KEM-public-key/certificate override was used but does not show the relevant option.
-
-Verify the exact CLI option against the runtime commit/source and preserve the redacted command shape, expected to include:
-
-`--p2p-peer-leaf-cert 0:<redacted-temp-seed-cert-path>`
-
-along with:
-
-* `--p2p-peer 0@188.166.227.87:30333`
-* `--validator-id 1`
-
-Never include certificate bytes, private key bytes, the KEM secret-key path, or an absolute operator path.
-
-The operator-supplied connected-peer log observation was:
-
-`Peer NodeId(f2de5c9d1f7dad59) connected`
-
-This public prefix may be preserved, but do not fabricate any other NodeId.
-
-### 8. Correct timestamp and genesis-pin claims
-
-Search the retained publish-safe evidence for an exact UTC execution timestamp.
-
-* If an exact timestamp is genuinely present, record it with its source.
-* If it is not available, explicitly state: “Exact UTC execution timestamp was not retained in the publish-safe evidence.”
-* Do not derive or invent an execution timestamp from commit time, upload time, filename, or filesystem mtime.
-
-The reachability record currently treats “pinned genesis” as satisfied, but the preserved process evidence does not show `--expect-genesis-hash` or another observed pin result.
-
-Either:
-
-* add proof only if it genuinely exists in retained evidence, or
-* change that requirement/result to “not evidenced by Run 416” and remove the satisfied claim.
-
-External reachability can remain proven while genesis pinning remains unproven for this execution.
-
-### 9. Reconcile current-state readiness prose
-
-Update all present-tense/current-state public-DevNet documents that incorrectly say external reachability remains unproven or that no externally reachable evidence seed has ever existed.
-
-Do not rewrite historically correct Run 377/378/388/391/393/397 evidence records. Historical negative results remain valid.
-
-The correct current distinction is:
-
-* Run 416 proved external TCP and KEMTLS static-root reachability using a temporary evidence identity.
-* No durable operator identity or published live seed exists.
-* Therefore M4 remains Yellow / launch-blocking.
-
-At minimum reconcile `docs/release/QBIND_PUBLIC_DEVNET_READINESS_CRITERIA.md`:
-
-* §2: replace the blanket “No seed-node/bootnode deployment by this run” statement with the temporary-evidence-versus-durable-live distinction.
-* §5/S7: replace “no externally reachable seed exists” with “no durable published live seed exists.”
-* §9/M4: qualify “no published seed list” as no durable live published seed list.
-* §9/M6: remove stale wording claiming no identity-generation command exists.
-* §9/M12: M12 is Green-for-scope since Run 371; do not call it Yellow/Partial.
-* §12: remove stale “as of Run 395/reconciled Run 396” framing and the claim that external reachability is still unproven.
-* §17: replace the stale recommendation that the next task is first external reachability; the remaining M4 task is durable seed identity/operation plus valid live-list publication.
-* Ensure §4, §5, §9, §10, §11, §12, §16 and §17 agree.
-
-Also inspect present-tense/current-state statements in:
-
-* `docs/release/public-devnet/BLOCKER_REGISTER.md`
-* `docs/release/public-devnet/ARTIFACT_INDEX.md`
-* `docs/release/public-devnet/OPERATOR_VERIFICATION_MAP.md`
-* `docs/release/public-devnet/network/README.md`
-* `docs/release/public-devnet/network/VERIFY.md`
-* `docs/release/public-devnet/network/devnet-seeds.live-candidate.json`
-* `docs/release/public-devnet/operator/SAFETY.md`
-* `docs/release/public-devnet/status/STATUS_PAGE_DECISION.md`
-* package-integrity/readiness-lint guides that purport to state the current M4 posture
-
-For old run-specific documents, preserve historical findings or explicitly qualify them with “as of Run N.” Do not turn historical Route C results into positive results.
-
-The candidate JSON must remain schema-valid, `status: planned`, and `last_reachability_evidence: null`. Its prose should explain that Run 416 used a separate discarded temporary identity and therefore does not authorize promotion of the existing illustrative candidate.
-
-### 10. Fix shell reproducibility
-
-The public-DevNet verification scripts currently have CRLF line endings and fail when invoked directly with `bash`.
-
-Normalize these scripts to LF while preserving executable permissions and behavior:
-
-* `scripts/devnet/run_404_public_devnet_package_integrity_manifest.sh`
-* `scripts/devnet/run_405_public_devnet_full_tree_package_integrity.sh`
-* `scripts/devnet/run_410_public_devnet_package_integrity_stale_prose_lint.sh`
-* `scripts/devnet/run_411_public_devnet_readiness_contradiction_ledger_lint.sh`
-* `scripts/devnet/run_412_public_devnet_readiness_status_blocker_lint.sh`
-* `scripts/devnet/run_413_public_devnet_readiness_recommendation_gap_matrix_lint.sh`
-* `scripts/devnet/run_414_public_devnet_readiness_cross_section_coverage_lint.sh`
-* `scripts/devnet/run_415_public_devnet_readiness_artifact_path_reference_lint.sh`
-
-Do not use a temporary pre-run normalization workaround. The committed scripts themselves must run successfully.
-
-Keep this correction narrowly scoped; do not normalize unrelated repository files merely for style.
-
-### 11. Regenerate integrity data
-
-After every evidence edit, regenerate:
-
-`docs/devnet/run_416_public_devnet_m4_live_seed_route_a_evidence/SHA256SUMS.txt`
-
-Preserve its existing intended file coverage unless the archive structure genuinely changes. Verify it from inside the archive directory using:
-
-```bash
-sha256sum -c SHA256SUMS.txt
-```
-
-Refresh any affected package-integrity manifest hashes and byte sizes. Do not alter readiness statuses in the manifest except to correct demonstrably stale status metadata such as M12.
-
-## Validation required
-
-Run these exact committed scripts directly, without preprocessing copies:
-
-```bash
-bash scripts/devnet/run_404_public_devnet_package_integrity_manifest.sh
-bash scripts/devnet/run_405_public_devnet_full_tree_package_integrity.sh
-bash scripts/devnet/run_410_public_devnet_package_integrity_stale_prose_lint.sh
-bash scripts/devnet/run_411_public_devnet_readiness_contradiction_ledger_lint.sh
-bash scripts/devnet/run_412_public_devnet_readiness_status_blocker_lint.sh
-bash scripts/devnet/run_413_public_devnet_readiness_recommendation_gap_matrix_lint.sh
-bash scripts/devnet/run_414_public_devnet_readiness_cross_section_coverage_lint.sh
-bash scripts/devnet/run_415_public_devnet_readiness_artifact_path_reference_lint.sh
-```
-
-Also run:
-
-```bash
-git diff --check
-```
-
-If pre-existing repository-wide line-ending conditions prevent a completely clean result without an unrelated mass rewrite, normalize every file changed by this correction, report the remaining diagnostics exactly, and do not falsely claim success.
-
-Perform focused scans confirming:
-
-* the three private identifiers are absent from the current tracked tree
-* no private-key block or secret material is tracked
-* no `.tgz`, private material, cert bundle, KEM secret, raw log dump, or data directory was added
-* `devnet-seeds.live.json` does not exist
-* the candidate remains `status: planned`
-* C4/C5 remain OPEN
-* no TestNet/MainNet readiness claim was added
-* the Run 416 reachability basename is discoverable by Run 415
-
-CodeQL may be recorded as not applicable/skipped for a docs plus shell-line-ending correction, but do not report it as executed if it was not executed.
-
-## Commit and response
-
-Create one new corrective commit on the existing branch with a message similar to:
-
-`docs: correct and harden Run 416 evidence`
-
-Push normally to:
-
-`copilot/prepare-run-416-evidence-packaging`
-
-Do not force-push and do not open a PR.
-
-In your final response provide:
-
-1. New commit SHA and pushed branch.
-2. Exact files changed.
-3. Exact validation commands and exit results.
-4. Confirmation that Run 415 now passes.
-5. Confirmation that SHA256SUMS verifies.
-6. Confirmation that the current tree no longer contains the private identifiers.
-7. Confirmation that M4 remains Yellow, M6 Yellow/Partial, S5/S7 Yellow, Public DevNet NO-GO, and C4/C5 OPEN.
-8. Any remaining evidence limitations, especially:
-
-   * exact UTC timestamp availability
-   * genesis-pin evidence
-   * peer-gauge discrepancy
-   * historical privacy exposure in the earlier public commit
-9. A clear final verdict: SAFE TO REVIEW or NOT SAFE TO REVIEW.
-
-Never invent evidence merely to obtain a passing result.
+7. Formatting and verification
+
+Make git diff --check exit 0. If necessary, normalize the edited
+PACKAGE_INTEGRITY_MANIFEST.example.json to LF without semantic changes.
+
+After edits:
+
+- regenerate Run 416 SHA256SUMS.txt;
+- refresh only genuinely affected package-integrity anchors;
+- run sha256sum -c;
+- run scripts 404, 405, 410, 411, 412, 413, 414 and 415 directly;
+- require every script to exit 0;
+- run a tracked-tree git grep, including task/, for:
+  110.226.112.166
+  olivegigi
+  ubuntu-s-1vcpu-1gb-sgp1
+- confirm no matches;
+- confirm candidate status=planned and last_reachability_evidence=null;
+- confirm devnet-seeds.live.json is absent;
+- confirm M4/M6/S5/S7 remain Yellow, DevNet NO-GO and C4/C5 OPEN.
+
+Commit and push normally to the same branch. No force-push and no PR.
+
+Final response must report:
+
+1. new commit and branch;
+2. exact files changed, including task files;
+3. git diff --check exit code;
+4. SHA verification result;
+5. each lint command and exit code;
+6. full tracked-tree privacy scan result;
+7. corrected candidate statement;
+8. evidence trust-model wording;
+9. preserved readiness status;
+10. confirmation that no PR was opened.
