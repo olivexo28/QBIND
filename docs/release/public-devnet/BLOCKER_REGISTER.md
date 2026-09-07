@@ -2,8 +2,8 @@
 
 > **Safety label:** DevNet · experimental · resettable · no value · no uptime SLA ·
 > NOT public-DevNet launch-ready · no M4 Green · no M6 fully-Green · no S5 Green ·
-> no S7 Green · no TestNet readiness · no MainNet readiness · **C4/C5 OPEN** ·
-> no C4/C5 closure claim.
+> no S7 Green · **RS1 OPEN / launch-blocking** · no TestNet readiness · no MainNet readiness ·
+> **C4/C5 OPEN** · no C4/C5 closure claim.
 
 This is the operator-facing **blocker register** for the QBIND public DevNet
 launch decision. It lists every item that still blocks launch, who owns it, the
@@ -18,14 +18,19 @@ item Green.
 
 ## Launch rule
 
-**No launch until every must-have (M1–M20) is Green and a public DevNet launch is
-explicitly in scope.** While any blocker below is open, the decision is
-**NO-GO** (see `LAUNCH_GO_NO_GO.md` §9).
+**No launch until every must-have (M1–M20) is Green, the foundational
+runtime-security blocker RS1 is closed with executable evidence that the deployed
+consensus path is fail-closed, and a public DevNet launch is explicitly in scope.**
+Public DevNet **GO requires both** (1) every required M1–M20 item Green **and**
+(2) RS1 closed. While any blocker below is open — **including RS1, even if every
+M1–M20 item were Green** — the decision is **NO-GO** (see
+`LAUNCH_GO_NO_GO.md` §9).
 
 ## Blocker register
 
 | ID | Blocker | Owner | Action required | Evidence needed | Status |
 | -- | ------- | ----- | --------------- | --------------- | ------ |
+| **RS1** | **Foundational runtime authentication and authorization is fail-open on the deployed consensus path** (Run 417 audit, `AUDIT-COMPLETE / NEGATIVE-FOR-RUNTIME-SECURITY`). The deployed `qbind-node` consensus loop (`crates/qbind-node/src/binary_consensus_loop.rs`) emits **unsigned** proposals/votes with the toy suite id `0`, accepts inbound proposals/votes **without** signature, membership, or suite verification, derives the consensus sender from a **self-declared** `proposer_index`/`validator_index` rather than the authenticated KEMTLS peer, and imports quorum certificates with **empty signer evidence**. Tracks Run 417 findings **F1–F8**. | Protocol / consensus | Make the deployed `binary_consensus_loop` path fail-closed: bind the authenticated KEMTLS peer to an authorized consensus sender (**F6**); sign + verify proposals/votes over domain-separated preimages with a production suite and reject suite `0`/unknown/disabled suites (**F3/F4/F8**); cryptographically verify imported QCs and make timeout/new-view verification mandatory (**F7/F5**); resolve transaction-authentication gaps (**F1/F2**) before transaction ingress is enabled. Do not suppress, weaken, or reclassify F1–F8 without new evidence. | Executable evidence captured on the deployed path (not a test harness) showing that unsigned, mismatched-identity, wrong/unknown-suite, and forged-QC inputs are **rejected with counters**, per `docs/protocol/QBIND_FOUNDATIONAL_RUNTIME_SECURITY_RECONCILIATION.md` and `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_417.md`. F1/F2 must be resolved **before** transaction ingress is enabled; their current lack of ingress is a **reachability mitigation, not cryptographic closure**. | **OPEN / launch-blocking** |
 | **M4** | External reachability is PROVEN (Run 416, Route A) but no durable, published live seed yet — no durably operated, externally reachable public DevNet seed/bootnode with a published `devnet-seeds.live.json` exists (the Run 416 seed used temporary, discarded PQC material). | Seed operator | Deploy a durable DevNet seed on a routable public host under strict KEMTLS mutual-auth + PQC static-root with the Run 356 genesis pinned; verify from a genuinely independent off-host vantage; promote to a schema-valid `devnet-seeds.live.json`. See `network/M4_ROUTE_A_DEPLOYMENT_CHECKLIST.md`. | Timestamped external TCP dial **and** external KEMTLS mutual-auth + static-root handshake from an independent off-host vantage (not same-host / same-NAT / same-VPC / RFC 5737), matching the published `node_id` (demonstrated once in Run 416 against a temporary seed); a **durable** live seed-list entry with non-null `last_reachability_evidence`; live `register-check` accepts and fails closed without evidence. Per `network/SEED_REACHABILITY_EVIDENCE_TEMPLATE.md`. | **Yellow / launch-blocking** |
 | **M6** | Live-registration half is **M4-gated**; operator-supplied durable-**root** reuse / rotation / revocation is **C4/C5-deferred**. Generation + verification and non-mutating `register-check` halves are Green-for-scope. | Validator/seed operator + protocol (C4/C5) | Once M4 is Green, register a continuous operator identity into the live network and prove durable `node_id`/`peer_id` reuse across restarts. Do **not** attempt durable-root reuse/rotation/revocation until C4/C5 work is scoped. See `identity/IDENTITY_CONTINUITY.md`, `identity/ROTATION_REVOCATION_DEFERRAL.md`. | Proof of an operator identity admitted into the **live** seed list with persistent published identity across DevNet restarts (requires M4 Green); C4/C5 closure for durable-root rotation/revocation. | **Yellow / Partial** |
 | **S5** | Live status / aggregate health view deferred until M4 / a live network — a live status page today would misrepresent a network that is not durably operating. Publish-safe static decision + schema published. | Ops / status | After M4 is Green, deploy a live health view wired to the real network using the frozen schema. See `status/STATUS_PAGE_DECISION.md`. | A live, externally usable status page / health view reflecting a **real** durably operating network (requires M4 Green). | **Yellow** |
@@ -37,6 +42,13 @@ explicitly in scope.** While any blocker below is open, the decision is
 | -- | ---- | ----- | ------ | ---- |
 | **C4** | Authority / trust-anchor closure. | Protocol | **OPEN** | MainNet authority rotation/revocation remains Red; not closed, advanced, or reinterpreted by this run. See `docs/protocol/QBIND_C4_C5_CLOSURE_CRITERIA.md`. |
 | **C5** | Governance / lifecycle closure. | Protocol | **OPEN** | Production key rotation/revocation documented as deferred, not delivered. |
+
+**RS1 vs C4/C5.** RS1 is an **independent, launch-blocking** must-have-class gate
+on the **deployed runtime** consensus authentication path; it is listed in the
+blocker register above (not in this separately-tracked C4/C5 table). Closing F6
+alone does not close F3, F4, F5, F7, F8, RS1, C4, or C5. RS1 remaining OPEN forces
+**NO-GO** even if every M1–M20 item is Green. See
+`docs/protocol/QBIND_FOUNDATIONAL_RUNTIME_SECURITY_RECONCILIATION.md`.
 
 ## TestNet / MainNet
 
@@ -57,4 +69,6 @@ MainNet readiness is claimed.**
 - `docs/release/public-devnet/identity/ROTATION_REVOCATION_DEFERRAL.md` — rotation/revocation deferral (M6).
 - `docs/release/public-devnet/status/STATUS_PAGE_DECISION.md` — status-page decision (S5).
 - `docs/protocol/QBIND_C4_C5_CLOSURE_CRITERIA.md` — C4/C5 closure criteria.
+- `docs/protocol/QBIND_FOUNDATIONAL_RUNTIME_SECURITY_RECONCILIATION.md` — RS1 foundational runtime-security reconciliation.
+- `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_417.md` — Run 417 audit evidence (RS1 findings F1–F8).
 - `docs/whitepaper/contradiction.md` — contradiction ledger.

@@ -116,8 +116,8 @@
     },
     {
       "relative_path": "ARTIFACT_INDEX.md",
-      "sha256": "72f54a2d83edf7f63bcff525a7c23515b3afb43e5df51ee7b065a7fe46c36ca8",
-      "byte_size": 21514,
+      "sha256": "566a3ab1672ef5ab20fd165a0cc0cd53fdd21eddc2e86ef90b3d67dffb088d54",
+      "byte_size": 22492,
       "artifact_group": "top-level",
       "readiness_item": "package-index",
       "status": "no-go",
@@ -125,8 +125,8 @@
     },
     {
       "relative_path": "OPERATOR_VERIFICATION_MAP.md",
-      "sha256": "6142840dede7d4cc4a253e84d649ae0ab91f6189aeea14a91d9026706da0d6cf",
-      "byte_size": 20726,
+      "sha256": "8fef9d7e23c2457d074eadcc8abca03045f7d74478429eb3520e942b99b03eb5",
+      "byte_size": 21718,
       "artifact_group": "top-level",
       "readiness_item": "verification-map",
       "status": "no-go",
@@ -134,8 +134,8 @@
     },
     {
       "relative_path": "LAUNCH_GO_NO_GO.md",
-      "sha256": "4d2da20d2a34d7e94ebf0fd49bea84c3be9c60ce74d07268ee948b693827f6d3",
-      "byte_size": 10324,
+      "sha256": "7843830ae621d496b607b685ea984d3de4f102621ea10ff5f0cc3c100e81e3a2",
+      "byte_size": 14636,
       "artifact_group": "top-level",
       "readiness_item": "launch-gate",
       "status": "no-go",
@@ -143,8 +143,8 @@
     },
     {
       "relative_path": "BLOCKER_REGISTER.md",
-      "sha256": "df3db787408b101a350a8bfb21d81b6151523aaeb73887ead06a5662c18ffb54",
-      "byte_size": 6078,
+      "sha256": "8599806aaa943a9247fecff0e153186e29ac77ed5c4aaf9739152b3d460d607d",
+      "byte_size": 8828,
       "artifact_group": "top-level",
       "readiness_item": "M4/M6/S5/S7",
       "status": "no-go",

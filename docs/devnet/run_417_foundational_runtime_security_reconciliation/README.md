@@ -3,6 +3,7 @@
 **Safety label:** DevNet · experimental · resettable · no value · no uptime SLA ·
 **audit/evidence only** · **no production Rust behavior changed** · **no live seed published** ·
 NOT public-DevNet launch-ready · M4 Yellow · M6 Yellow/Partial · S5 Yellow · S7 Yellow ·
+**RS1 OPEN / launch-blocking** ·
 **C4/C5 OPEN** · public DevNet **NO-GO**. **No private key material is committed.**
 
 ## What this archive is
@@ -23,6 +24,15 @@ authentication bypass, published no live seed, and moved **no** readiness item G
 
 - **Audit completeness:** `RESULT=POSITIVE-FOR-AUDIT-COMPLETENESS`
 - **Security verdict:** **`AUDIT-COMPLETE / NEGATIVE-FOR-RUNTIME-SECURITY`**
+
+A **corrective pass** (follow-up commit; docs + shell + JSON only, no production Rust/dependency
+change) adds an independent launch blocker **`RS1 — Foundational runtime authentication and
+authorization` (`OPEN / launch-blocking`)** carrying findings **F1–F8**; corrects the stale Run 416
+reachability wording in `LAUNCH_GO_NO_GO.md`; corrects the `cargo fmt --all -- --check` record (real
+result **exit 1** — a pre-existing repo-wide difference in ~574 `.rs` files Run 417 never modified);
+and records **CodeQL = SKIPPED / NOT APPLICABLE** (no analyzable production-code change; secret
+scanning is separate and does not substitute for CodeQL). The corrective pass resolves **no** F1–F8
+finding and changes **no** runtime-security verdict.
 
 The deployed `qbind-node` consensus path (`crates/qbind-node/src/binary_consensus_loop.rs`,
 driven by `main.rs`) emits **unsigned** proposals and votes with the **toy** suite id `0`,

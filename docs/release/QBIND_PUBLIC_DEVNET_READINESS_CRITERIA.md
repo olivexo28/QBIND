@@ -646,6 +646,25 @@ seed/bootnode/faucet/RPC/explorer/status service, publishes **no** `devnet-seeds
 Yellow/launch-blocking; M6 stays Yellow/Partial; S5/S7 stay Yellow; M1–M3/M5/M7–M20 remain Green; public
 DevNet stays NOT launch-ready; C4/C5 remain OPEN; MainNet/TestNet untouched.** Run 416 remains valid
 historical external-reachability evidence and is not weakened.
+Updated Run 417 (corrective pass — on top of the Run 417 audit commit; docs + shell + JSON only,
+no production Rust/dependency/runtime/deployment change) — **adds the explicit foundational
+runtime-security launch blocker `RS1 — Foundational runtime authentication and authorization`
+(`OPEN / launch-blocking`) to the blocker register, launch gate, this readiness matrix, the
+artifact index, the operator verification map, the C4/C5 criteria, the reconciliation doc, and the
+contradiction ledger**. RS1 tracks findings **F1–F8**; public DevNet **GO now requires both**
+every required must-have (M1–M20) Green **and** RS1 closed with executable evidence that the
+deployed consensus path is fail-closed (RS1 OPEN forces NO-GO even if every M1–M20 item were
+Green). This pass also **corrects the `cargo fmt --all -- --check` record**: the real result is
+**exit 1** — a pre-existing repo-wide formatting difference in ~574 `.rs` files (e.g.
+`crates/qbind-consensus/src/basic_hotstuff_engine.rs`) that Run 417 never modified; Run 417 changed
+no Rust source and claims no formatting pass — and records **CodeQL = SKIPPED / NOT APPLICABLE**
+(the corrective changes contain no analyzable production-code change; secret scanning is separate
+and does not substitute for CodeQL). It resolves **no** F1–F8, changes **no** runtime-security
+verdict, and moves **no** readiness item Green. M4 stays Yellow/launch-blocking; M6 Yellow/Partial;
+S5/S7 Yellow; C4/C5 OPEN; public DevNet NOT launch-ready; MainNet/TestNet untouched.
+Updated Run 374 — **M6 identity generation + verification package published (Route B — docs +
+schema + release-built example helper, no production source change, no `build.rs` change, no new
+CLI flag); M6 remains Yellow/Partial**:
 identity **generation + verification** package is published under
 `docs/release/public-devnet/identity/` (`README.md`, `IDENTITY_GENERATION.md`, `IDENTITY_VERIFY.md`,
 `OPERATOR_IDENTITY_SCHEMA.json`, `EXAMPLE_PUBLIC_IDENTITY.json`, `SAFETY.md`, `VERIFY.md`) backed by the
@@ -1456,7 +1475,16 @@ launch-blocking**; **M5 Green**; **M6 Yellow / Partial**; **M7, M8, M9 Green (Gr
 M13, M14, M15, M16, M17, M18, M19, M20 Green**. Should-haves: **S1, S2, S3, S4 Green**; **S5 Yellow**; **S6 Green**;
 **S7 Yellow**. TestNet-deferred: **T1–T4, T7, T8 N/A / deferred for DevNet**; **T5, T6 Yellow (TestNet-deferred
 boundary-only)**. MainNet-deferred: **N1, N2, N3, N4, N7 Red**; **N5 (C4) OPEN / Red**; **N6 (C5) OPEN / Red**.
-Because at least one must-have (M4) is not Green, **public DevNet remains NOT launch-ready**; C4 and C5 remain
-**OPEN**; no TestNet or MainNet readiness is claimed. Run 396 is a documentation-consistency reconciliation only
+Because at least one must-have (M4) is not Green — and because the foundational
+runtime-security blocker **RS1** (foundational runtime authentication and
+authorization; Run 417 audit, findings F1–F8) is **OPEN / launch-blocking** —
+**public DevNet remains NOT launch-ready**; C4 and C5 remain
+**OPEN**; no TestNet or MainNet readiness is claimed. Public DevNet **GO requires
+both** every required must-have (M1–M20) Green **and** RS1 closed with executable
+evidence that the deployed consensus path is fail-closed; RS1 OPEN forces NO-GO
+even if every M1–M20 item were Green (see
+`docs/release/public-devnet/BLOCKER_REGISTER.md`,
+`docs/release/public-devnet/LAUNCH_GO_NO_GO.md`, and
+`docs/protocol/QBIND_FOUNDATIONAL_RUNTIME_SECURITY_RECONCILIATION.md`). Run 396 is a documentation-consistency reconciliation only
 (the §10 status table and §4/§5 checklists are the source of truth); it changes no readiness semantics and adds no
 functionality.

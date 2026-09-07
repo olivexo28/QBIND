@@ -11,8 +11,8 @@ Run 417 changed **no production Rust behavior**, added **no** authentication byp
 
 **Safety label:** DevNet · experimental · resettable · no value · no uptime SLA ·
 **audit/evidence only** · NOT public-DevNet launch-ready · **M4 Yellow / launch-blocking** ·
-M6 Yellow/Partial · S5 Yellow · S7 Yellow · **C4/C5 OPEN** · public DevNet **NO-GO** ·
-no TestNet readiness · no MainNet readiness. **No private key material is committed.**
+M6 Yellow/Partial · S5 Yellow · S7 Yellow · **RS1 OPEN / launch-blocking** · **C4/C5 OPEN** ·
+public DevNet **NO-GO** · no TestNet readiness · no MainNet readiness. **No private key material is committed.**
 
 ## 1. Exact verdict
 
@@ -110,9 +110,13 @@ constrains present external reachability only; it does **not** reduce the code-l
    F6, F7, F8 are verified fail-open (deployed, reachable on a multi-node net); F5 and F2 are
    verified incomplete; F1 is fail-open in code but mitigated by current unreachability; no
    finding is UNKNOWN.
-9. **Which finding must be fixed first?** **F6** (bind the authenticated KEMTLS peer identity to
-   the consensus sender) — it is the prerequisite that makes proposal/vote/QC signature
-   verification meaningful.
+9. **Which finding must be fixed first?** **F6** — bind the authenticated KEMTLS
+   peer/session to an authorized consensus sender — is a suitable **first, narrow**
+   implementation target and provides **transport-level accountability**. It is
+   **not** what makes cryptographic signature verification meaningful: proposal,
+   vote, timeout, new-view, and QC signatures remain **independently necessary** for
+   **message-level cryptographic authorship**. **Closing F6 alone will not close F3,
+   F4, F5, F7, F8, RS1, C4, or C5.**
 10. **What evidence will prove the fix?** A two-node deployed `qbind-node` run where (a) inbound
     proposals/votes carry the authenticated peer NodeId; (b) messages with a mismatched or
     unsigned identity, wrong/unknown suite, or forged QC are rejected with a counter; (c) all
@@ -121,8 +125,14 @@ constrains present external reachability only; it does **not** reduce the code-l
 
 ## 7. Recommended smallest security-first sequence
 
-1. **Run 418 (F6):** propagate authenticated KEMTLS peer NodeId with each `ConsensusNetMsg` and
-   bind it to the claimed/signing validator identity in `binary_consensus_loop`.
+1. **Run 418 (F6):** propagate the authenticated KEMTLS peer identity with each
+   `ConsensusNetMsg` and bind it to an authorized consensus sender in
+   `binary_consensus_loop`. The design must derive the remote `NodeId` from the
+   authenticated KEMTLS session and resolve it through an **authoritative,
+   unambiguous `NodeId → ValidatorId` mapping**; unknown, duplicate, ambiguous, or
+   mismatched identities must **fail closed**. F6 delivers transport-level
+   accountability only; it does **not** substitute for message-level signature
+   verification and does **not** by itself close F3/F4/F5/F7/F8/RS1/C4/C5.
 2. **Run 419 (F3/F4/F8):** sign proposals and votes over a domain-separated preimage with a
    production suite; verify signature + validator-set membership before engine acceptance;
    fail closed on suite `0`/unknown/disabled suites.
@@ -143,8 +153,14 @@ commands and exit codes. Summary:
   `verify_transaction_auth_empty_auths_succeeds`, confirming F1).
 - `cargo test -p qbind-consensus --lib` → **162 passed** (validator_set / verify_job /
   timeout_verify units exist but are not wired into the deployed vote/proposal path).
-- `cargo fmt --all -- --check` → clean (no Rust files added/changed by Run 417).
-- `git diff --check` → clean.
+- `cargo fmt --all -- --check` → **exit 1 (fails)**. This is a **pre-existing,
+  repo-wide** formatting difference in ~574 `.rs` files (e.g.
+  `crates/qbind-consensus/src/basic_hotstuff_engine.rs:492`), present in the audited
+  base commit; **Run 417 changed no Rust source and claims no formatting pass**. The
+  affected files are not touched by Run 417, so the failure is pre-existing, not
+  introduced by this run. (An earlier draft of this record and `commands.txt`
+  incorrectly stated exit 0; corrected in the Run 417 corrective pass.)
+- `git diff --check` → clean (exit 0).
 - Run 404, 405, 410, 411, 412, 413, 414, 415 harnesses → all `RESULT=POSITIVE` (unchanged).
 - `scripts/devnet/run_417_foundational_runtime_security_reconciliation_audit.sh` →
   `RESULT=POSITIVE-FOR-AUDIT-COMPLETENESS` / `SECURITY_VERDICT=NEGATIVE-FOR-RUNTIME-SECURITY`.
@@ -169,15 +185,52 @@ and moves **no** item. Updated:
   recording the reconciled deployed-path authentication scope.
 
 No anchor file (ARTIFACT_INDEX / OPERATOR_VERIFICATION_MAP / LAUNCH_GO_NO_GO / BLOCKER_REGISTER /
-package-integrity manifest, or any group VERIFY.md) was edited, so the Run 404/405/410 package
-integrity manifests remain valid. Run 416 remains untouched historical external-reachability
-evidence.
+package-integrity manifest, or any group VERIFY.md) was edited **by the original audit run**, so
+the Run 404/405/410 package integrity manifests remained valid at that point. Run 416 remains
+untouched historical external-reachability evidence.
+
+### 9a. Run 417 corrective pass
+
+The Run 417 corrective pass (a follow-up commit on top of the audit commit; docs + shell + JSON
+only, no production Rust/dependency/runtime/deployment change) additionally:
+
+- **Adds the explicit foundational runtime-security launch blocker `RS1 — Foundational runtime
+  authentication and authorization` (`OPEN / launch-blocking`)** to
+  `docs/release/public-devnet/BLOCKER_REGISTER.md`,
+  `docs/release/public-devnet/LAUNCH_GO_NO_GO.md`,
+  `docs/release/QBIND_PUBLIC_DEVNET_READINESS_CRITERIA.md`,
+  `docs/release/public-devnet/ARTIFACT_INDEX.md`,
+  `docs/release/public-devnet/OPERATOR_VERIFICATION_MAP.md`,
+  `docs/protocol/QBIND_C4_C5_CLOSURE_CRITERIA.md`,
+  `docs/protocol/QBIND_FOUNDATIONAL_RUNTIME_SECURITY_RECONCILIATION.md`, and
+  `docs/whitepaper/contradiction.md`. RS1 tracks findings **F1–F8**. Public DevNet **GO requires
+  both** every required must-have (M1–M20) Green **and** RS1 closed with executable evidence that
+  the deployed consensus path is fail-closed; RS1 OPEN forces **NO-GO even if every M1–M20 item is
+  Green**.
+- **Corrects the stale Run 416 reachability wording** in `LAUNCH_GO_NO_GO.md`: Run 416 produced
+  operator-attested Route A evidence of external TCP and KEMTLS mutual-auth static-root
+  reachability using a temporary, discarded seed identity; it did not establish a durable
+  operator-controlled seed identity, genesis pinning was not evidenced, and
+  `devnet-seeds.live.json` remains absent — so **M4 remains Yellow / launch-blocking**.
+- **Corrects the `cargo fmt` and CodeQL records** (see §8 and §10).
+- **Refreshes the package-integrity anchor SHA-256 + byte-size** in
+  `docs/release/public-devnet/PACKAGE_INTEGRITY_MANIFEST.example.json` for the anchor docs edited
+  above (`ARTIFACT_INDEX.md`, `OPERATOR_VERIFICATION_MAP.md`, `LAUNCH_GO_NO_GO.md`,
+  `BLOCKER_REGISTER.md`), and re-runs Run 404/405/410–415 to confirm consistency.
+
+This corrective pass resolves **no** F1–F8 finding, changes **no** runtime-security verdict, and
+moves **no** readiness item Green. Adding RS1 closes a **launch-governance coverage gap** — the
+Run 417 findings previously were not represented by an independent launch blocker.
 
 ## 10. CodeQL
 
-CodeQL was requested via the repository's `codeql_checker` tooling for this run. Result is
-recorded in the final Run 417 response and `commands.txt`. Run 417 added no production Rust and
-no new code paths, so any analysis scope is limited to documentation and audit-only shell.
+CodeQL is **SKIPPED / NOT APPLICABLE** for the Run 417 corrective pass: the changes
+are documentation, text, JSON, and shell verification-harness edits only and contain
+**no analyzable production-code change** (no `.rs`, `Cargo.toml`, `Cargo.lock`,
+`build.rs`, or dependency change). **No CodeQL coverage is claimed.** Secret scanning
+is a **separate** control and does **not** substitute for CodeQL. This status is kept
+consistent across `commands.txt`, this record, the archive summary/README, and the
+final report.
 
 ## 11. Confirmations
 
@@ -185,6 +238,8 @@ no new code paths, so any analysis scope is limited to documentation and audit-o
 - **No live seed published**; `devnet-seeds.live.json` remains absent.
 - **M4 remains Yellow**, **C4/C5 remain OPEN**, public DevNet remains **NO-GO**.
 - **No readiness item moved Green.**
+- **RS1 (foundational runtime authentication and authorization) is OPEN / launch-blocking**; the
+  corrective pass adds it to the launch governance record but resolves no F1–F8 finding.
 - Run 416 remains valid historical external-reachability evidence and is not weakened.
 
 ## 12. Remaining unknowns

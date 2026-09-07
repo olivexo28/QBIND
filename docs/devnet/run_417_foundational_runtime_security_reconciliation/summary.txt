@@ -38,6 +38,10 @@ fix_4=Only after authored consensus lands, wire tx execution and require >=1 aut
 
 # --- Mandatory current-state protections (unchanged by this run) ---
 public_devnet=NO-GO / not launch-ready
+rs1=OPEN / launch-blocking (Foundational runtime authentication and authorization; tracks F1-F8)
+go_rule=GO requires BOTH every required M1-M20 Green AND RS1 closed with executable fail-closed evidence; RS1 OPEN forces NO-GO even if M1-M20 all Green
+cargo_fmt=EXIT 1 (pre-existing repo-wide formatting diff in ~574 .rs files; Run 417 changed no Rust and claims no formatting pass)
+codeql=SKIPPED / NOT APPLICABLE (no analyzable production-code change; secret scanning is separate and does not substitute for CodeQL)
 M4=Yellow / launch-blocking
 M6=Yellow / Partial
 S5=Yellow
