@@ -145,7 +145,8 @@ qbind-node --env devnet --network-mode p2p --enable-p2p \
     --p2p-advertised-addr 188.166.227.87:30333 \
     --p2p-mutual-auth required --p2p-pqc-root-mode pqc-static-root \
     --p2p-trusted-root <temp-devnet-static-root> \
-    --p2p-leaf-cert <temp-leaf.cert.bin> --p2p-leaf-cert-key <temp-leaf.kem.sk.bin>
+    --p2p-leaf-cert <temp-leaf.cert.bin> --p2p-leaf-cert-key <temp-leaf.kem.sk.bin> \
+    --validator-id 0
 
 # OFF-HOST DIALER (Laptop 1 WSL, host <dialer-host>) — independent, different network
 qbind-node --env devnet --network-mode p2p --enable-p2p \
@@ -153,7 +154,7 @@ qbind-node --env devnet --network-mode p2p --enable-p2p \
     --p2p-trusted-root <temp-devnet-static-root> \
     --p2p-leaf-cert <temp-leaf.cert.bin> --p2p-leaf-cert-key <temp-leaf.kem.sk.bin> \
     --validator-id 1 \
-    --p2p-peer-leaf-cert 0:<redacted-temp-seed-cert-path> \  # seed leaf cert (VID:PATH); VID 0 = seed
+    --p2p-peer-leaf-cert 0:<redacted-temp-seed-cert-path> \
     --p2p-peer 0@188.166.227.87:30333
 
 # external TCP dial confirmation (from the off-host vantage)
@@ -181,6 +182,15 @@ OK/ACCEPTED/COMPLETED status lines. **No** secret key, ML-DSA root signing key, 
 key, leaf certificate, mnemonic, seed phrase, credential, token, raw log, raw metrics dump,
 data directory, or absolute build path is committed. The raw operator-side capture bundles
 (`bundles/qbind-m4-evidence-laptop1.tgz`, `bundles/qbind-m4-evidence-vps.tgz`) are gitignored.
+
+## 13a. Evidence trust model
+
+Run 416 is operator-attested operational evidence. The committed socket, metric and log files
+are publish-safe transcriptions; reconstructed log lines are not independently authenticated raw
+captures. SHA256SUMS protects the committed evidence after publication but does not independently
+prove the original observations. The Route A positive result below is preserved, but "PROVEN"
+means proven **within this operator-attested evidence scope** — it is **not** downgraded to
+Route B/C.
 
 ## 14. Conclusion
 

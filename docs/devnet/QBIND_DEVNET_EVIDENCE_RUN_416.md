@@ -44,6 +44,9 @@ Created:
 
 Updated narrowly:
 
+- `docs/release/public-devnet/network/devnet-seeds.live-candidate.json` — top-level
+  `placeholder_statement` reconciled to the accurate Run 416 narrative (candidate stays a
+  preflight, `status: planned`, null evidence, RFC 5737 endpoint, non-live posture unchanged).
 - `docs/release/QBIND_PUBLIC_DEVNET_READINESS_CRITERIA.md` — Run 416 narrative row; M4 rows
   updated to record external reachability now PROVEN (Route A) while M4 stays
   Yellow/launch-blocking pending a durable published `devnet-seeds.live.json`.
@@ -62,8 +65,11 @@ Updated narrowly:
   committed verification scripts run directly under `bash`.
 
 No production Rust source, `build.rs`, `Cargo.toml`, or CLI file is changed. The committed
-`docs/release/public-devnet/network/devnet-seeds.live-candidate.json` is **not** modified —
-it stays `status: planned` (no durable live seed to promote).
+`docs/release/public-devnet/network/devnet-seeds.live-candidate.json` **was modified only to
+reconcile its explanatory Run 416 narrative** (its top-level `placeholder_statement`). Its
+schema fields, `status: planned`, null `last_reachability_evidence` reference, RFC 5737
+documentation endpoint (`203.0.113.10`), and non-live posture all remain **unchanged** — there
+is no durable live seed to promote.
 
 ## 3. Decision gate route
 
@@ -234,6 +240,12 @@ analyze; the CodeQL check was still run per policy with a trivial-change declara
 
 ## 24. Honest limitations
 
+- **Evidence trust model.** Run 416 is operator-attested operational evidence. The committed
+  socket, metric and log files are publish-safe transcriptions; reconstructed log lines are not
+  independently authenticated raw captures. SHA256SUMS protects the committed evidence after
+  publication but does not independently prove the original observations. The Route A positive
+  result stands, but "PROVEN" here means proven **within this operator-attested evidence scope**
+  (it is not downgraded to Route B/C).
 - The seed used **temporary** DevNet PQC material (discarded); the identity is illustrative
   and **not** the committed candidate identity. No durable seed is provisioned.
 - The raw operator-side capture bundles are **not** committed; the tracked files are
@@ -254,10 +266,21 @@ analyze; the CodeQL check was still run per policy with a trivial-change declara
 - No `devnet-seeds.live.json` is published, so **M4 stays Yellow**; this evidence proves
   external reachability, not a durably operated published seed.
 
-## 25. Suggested Run 417 next step
+## 25. Next step — durable-seed publication is DEFERRED (not recommended as Run 417)
 
-Provision a **durable operator-controlled DevNet seed identity** on an externally reachable
-host (keeping the ML-KEM leaf secret / ML-DSA root private and uncommitted), re-run the
-Route A reachability capture against that durable identity, then **publish
-`devnet-seeds.live.json`** with `status: live` and a non-null `last_reachability_evidence`
-reference — the final step required to move **M4** Yellow → Green.
+Durable-seed provisioning and `devnet-seeds.live.json` publication is **not** recommended as an
+immediate next run. It is **deferred** until a separate foundational **runtime-security
+reconciliation** first audits:
+
+- proposal/vote signing and inbound verification;
+- consensus sender identity binding to the authenticated KEMTLS peer;
+- QC signature verification and production suite enforcement;
+- transaction authentication, empty-auth behavior and keyset thresholds.
+
+This correction records that audit only as a **prerequisite**; it does **not** declare any of
+those findings resolved and does **not** change any milestone status. Once that audit is
+complete, provisioning a durable operator-controlled DevNet seed identity on an externally
+reachable host (keeping the ML-KEM leaf secret / ML-DSA root private and uncommitted), re-running
+the Route A reachability capture against that durable identity, and publishing
+`devnet-seeds.live.json` (`status: live`, non-null `last_reachability_evidence`) remains the
+final step required to move **M4** Yellow → Green.

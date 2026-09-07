@@ -14,9 +14,17 @@ Invocation shape (publish-safe):
     --p2p-advertised-addr 188.166.227.87:30333 \
     --p2p-mutual-auth required \
     --p2p-pqc-root-mode pqc-static-root \
-    --p2p-trusted-root <temp-devnet-static-root>          # devnet_pqc_root_helper output
-    --p2p-leaf-cert <temp-leaf.cert.bin> \                # ephemeral; gitignored
-    --p2p-leaf-cert-key <temp-leaf.kem.sk.bin>            # ephemeral 0600; NEVER committed
+    --p2p-trusted-root <temp-devnet-static-root> \
+    --p2p-leaf-cert <temp-leaf.cert.bin> \
+    --p2p-leaf-cert-key <temp-leaf.kem.sk.bin> \
+    --validator-id 0
+
+Flag notes (moved out of the command so every continuation `\` is the final character
+before the newline and the command is syntactically valid):
+- `--p2p-trusted-root <temp-devnet-static-root>` — the `devnet_pqc_root_helper` static-root output.
+- `--p2p-leaf-cert <temp-leaf.cert.bin>` / `--p2p-leaf-cert-key <temp-leaf.kem.sk.bin>` —
+  ephemeral, gitignored; the `0600` KEM secret is NEVER committed.
+- `--validator-id 0` — the seed's validator id, matching the actual Run 416 execution.
 
 Notes:
 - The seed binds 0.0.0.0:30333 and is externally reachable at 188.166.227.87:30333.

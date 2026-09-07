@@ -79,6 +79,13 @@ as a backstop. Only the publish-safe transcriptions above are tracked.
 handshake to a real, routable public DevNet seed from an independent off-host vantage on a
 different network — the exact external step Runs 378/388/391/393/397 could not demonstrate.
 
+**Evidence trust model.** Run 416 is operator-attested operational evidence. The committed
+socket, metric and log files are publish-safe transcriptions; reconstructed log lines are not
+independently authenticated raw captures. SHA256SUMS protects the committed evidence after
+publication but does not independently prove the original observations. The Route A positive
+result is preserved, but "PROVEN" here means proven **within this operator-attested evidence
+scope** — it is **not** downgraded to Route B/C.
+
 **Not proven / not claimed:** a **durable** published live seed. The seed identity used
 temporary DevNet PQC material that was discarded, the VPS is not committed as a permanent
 operator seed, and **no `devnet-seeds.live.json` is published**. The committed
