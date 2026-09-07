@@ -21,9 +21,9 @@ NOT public-DevNet launch-ready · **external reachability PROVEN (Route A)** · 
 ## 1. Exact verdict
 
 `RESULT=POSITIVE-FOR-EXTERNAL` — Route A. A real, routable public DevNet seed
-(`188.166.227.87:30333`, host `ubuntu-s-1vcpu-1gb-sgp1`, listening `0.0.0.0:30333`) was
-dialed from an independent off-host vantage (Laptop 1 WSL, host `olivegigi`, observed public
-egress `110.226.112.166`) under `--p2p-mutual-auth required --p2p-pqc-root-mode
+(`188.166.227.87:30333`, host `<seed-host>`, listening `0.0.0.0:30333`) was
+dialed from an independent off-host vantage (Laptop 1 WSL, host `<dialer-host>`, observed public
+egress `<dialer-public-egress>`) under `--p2p-mutual-auth required --p2p-pqc-root-mode
 pqc-static-root`. External TCP reachability and an external KEMTLS mutual-auth static-root
 handshake both succeeded (`external_tcp_reachability=true`,
 `external_kemtls_reachability=true`, `independent_offhost_vantage=true`). Because the seed
@@ -47,7 +47,19 @@ Updated narrowly:
 - `docs/release/QBIND_PUBLIC_DEVNET_READINESS_CRITERIA.md` — Run 416 narrative row; M4 rows
   updated to record external reachability now PROVEN (Route A) while M4 stays
   Yellow/launch-blocking pending a durable published `devnet-seeds.live.json`.
-- `docs/whitepaper/contradiction.md` — Run 416 entry.
+- `docs/whitepaper/contradiction.md` — Run 416 entry (kept as a separate ledger line).
+- `docs/release/public-devnet/ARTIFACT_INDEX.md`,
+  `docs/release/public-devnet/OPERATOR_VERIFICATION_MAP.md`,
+  `docs/release/public-devnet/network/README.md` — add the Run 416 reachability record so it
+  is discoverable by the Run 415 path/reference lint, and reconcile current-state prose.
+- `docs/release/public-devnet/READINESS_ARTIFACT_PATH_REFERENCE_LINT.md` and
+  `scripts/devnet/run_415_public_devnet_readiness_artifact_path_reference_lint.sh` — reconcile
+  the documented discoverability behavior with the implemented `is_discoverable_in()` (index /
+  operator map / documented exception).
+- `docs/release/public-devnet/PACKAGE_INTEGRITY_MANIFEST.example.json` — SHA-256 / byte-size
+  refresh for the edited package-integrity anchor docs.
+- `scripts/devnet/run_404/405/410/411/412/413/414/415_*.sh` — normalized CRLF → LF so the
+  committed verification scripts run directly under `bash`.
 
 No production Rust source, `build.rs`, `Cargo.toml`, or CLI file is changed. The committed
 `docs/release/public-devnet/network/devnet-seeds.live-candidate.json` is **not** modified —
@@ -61,7 +73,7 @@ operator infrastructure with a routable public endpoint and an independent off-h
 
 ## 4. External seed infrastructure
 
-A DigitalOcean SGP1 droplet (`1vcpu-1gb`, host `ubuntu-s-1vcpu-1gb-sgp1`) ran `qbind-node`
+A DigitalOcean SGP1 droplet (`1vcpu-1gb`, host `<seed-host>`) ran `qbind-node`
 bound to `0.0.0.0:30333`, externally reachable at `188.166.227.87:30333`, with exactly the
 P2P port `30333/tcp` opened inbound through the host firewall / cloud security group.
 
@@ -87,26 +99,54 @@ committed. `secret_scanning` and manual review confirm no key material in the tr
 
 ## 8. Independent vantage evidence
 
-The dialer ran on Laptop 1 WSL (host `olivegigi`) on a **different network**; the seed
-observed its public egress as `110.226.112.166` (≠ the seed's own `188.166.227.87`), proving
+The dialer ran on Laptop 1 WSL (host `<dialer-host>`) on a **different network**; the seed
+observed its public egress as `<dialer-public-egress>` (≠ the seed's own `188.166.227.87`), proving
 a genuinely independent, off-host, off-NAT vantage. **Independence PROVEN.**
 
 ## 9. External TCP evidence
 
 Seed sockets: `LISTEN 0.0.0.0:30333` and `ESTAB 188.166.227.87:30333 →
-110.226.112.166:<client-port>`; seed log `[P2P] Accepted connection from
-110.226.112.166:<client-port>`; dialer sockets show `ESTAB … → 188.166.227.87:30333`. See
+<dialer-public-egress>:<client-port>`; seed log `[P2P] Accepted connection from
+<dialer-public-egress>:<client-port>`; dialer sockets show `ESTAB … → 188.166.227.87:30333`. See
 `vps/seed-sockets.txt`, `vps/seed-log-extract.txt`, `laptop1/dialer-sockets.txt`.
 **`external_tcp_reachability=true`.**
 
 ## 10. External KEMTLS/static-root evidence
 
 Under `--p2p-mutual-auth required --p2p-pqc-root-mode pqc-static-root`, the KEMTLS
-mutual-auth static-root handshake completed over the external connection. The dialer
-presented a **per-peer KEM public key + `--validator-id` override** to verify against the
-seed's advertised identity. See `vps/seed-log-extract.txt` /
+mutual-auth static-root handshake completed over the external connection. The dialer supplied
+the seed's certified leaf via `--p2p-peer-leaf-cert 0:<redacted-temp-seed-cert-path>` (format
+`VID:PATH`; VID `0` = the seed) while running as `--validator-id 1`, so it could verify against
+the seed's advertised identity. See `vps/seed-log-extract.txt` /
 `laptop1/dialer-log-extract.txt`. **`external_kemtls_reachability=true`.** Certificate
 fingerprints are not committed (temporary discarded material).
+
+Directly captured `[Run040]` cryptographic-provider shape (both nodes; see
+`vps/seed-metrics.txt` / `laptop1/dialer-metrics.txt` / `summary.txt`) — this is the **complete**
+provider-shape evidence, not merely the ML-DSA-44 / ML-KEM-768 names:
+
+- `pqc_root_mode=pqc-static-root`
+- `sig_suite_id=100`
+- `transport_kem_suite_name=ml-kem-768`
+- `transport_aead_suite_name=chacha20-poly1305`
+- `dummy_kem_registered=false`
+- `dummy_aead_registered=false`
+
+Directly captured PQC cert-verify counters: dialer `qbind_p2p_pqc_root_mode 1`,
+`qbind_p2p_pqc_cert_verify_accepted_total 1`, `qbind_p2p_pqc_cert_verify_rejected_total 0`;
+seed `qbind_p2p_pqc_root_mode 1`, `qbind_p2p_pqc_cert_verify_accepted_total 2`,
+`qbind_p2p_pqc_cert_verify_rejected_total 0`. This provider shape and these counters confirm a
+real PQC provider (no dummy KEM/AEAD) and do **not** convert this run into a production PKI,
+rotation/revocation, C4/C5 closure, or TestNet/MainNet claim.
+
+### 10a. Peer-gauge discrepancy (mandatory evidence limitation)
+
+During the observation window `qbind_p2p_connections_current`, `qbind_p2p_inbound_peers`, and
+`qbind_p2p_outbound_peers` all reported `0` on both nodes even though the socket evidence, the
+connection/accept logs, and the PQC cert-verify counters above demonstrate the admitted external
+connection. This is recorded as an **observed gauge discrepancy / evidence limitation only** — it
+is **not** a diagnosed software bug (no root cause was separately proven), and Run 416 makes **no**
+peer-gauge health claim.
 
 ## 11. Observed NodeId / cert identity match
 
@@ -142,7 +182,8 @@ operated. Promotion is deferred until a durable operator seed identity is provis
 No new CLI flag, no `build.rs` change, no default change. The run exercises only existing
 `qbind-node` P2P/KEMTLS flags (`--p2p-listen-addr`, `--p2p-advertised-addr`,
 `--p2p-mutual-auth`, `--p2p-pqc-root-mode`, `--p2p-trusted-root`, `--p2p-leaf-cert[-key]`,
-`--validator-id`, `--p2p-peer`) and the existing `devnet_pqc_root_helper` example.
+`--p2p-peer-leaf-cert`, `--validator-id`, `--p2p-peer`) and the existing `devnet_pqc_root_helper`
+example.
 
 ## 16. Runtime mutation check
 
@@ -196,9 +237,20 @@ analyze; the CodeQL check was still run per policy with a trivial-change declara
 - The seed used **temporary** DevNet PQC material (discarded); the identity is illustrative
   and **not** the committed candidate identity. No durable seed is provisioned.
 - The raw operator-side capture bundles are **not** committed; the tracked files are
-  publish-safe transcriptions of the facts observed on the operator's machines. Fine-grained
-  values (PIDs, exact timestamps, ephemeral source ports, certificate fingerprints) are
-  redacted and retained only in the gitignored bundles.
+  publish-safe transcriptions of the facts observed on the operator's machines. The
+  `*-log-extract.txt` files are **redacted/reconstructed log transcriptions** (normalized, not
+  verbatim raw logs). Fine-grained values (PIDs, ephemeral source ports, certificate
+  fingerprints) are redacted and retained only in the gitignored bundles.
+- **Exact UTC execution timestamp was not retained in the publish-safe evidence.** It is not
+  derived or inferred from commit time, upload time, filename, or filesystem mtime.
+- **Genesis pinning was not evidenced by Run 416.** The retained process/log evidence shows no
+  `--expect-genesis-hash` or observed genesis-pin result; external reachability is proven
+  independently of genesis pinning.
+- **Peer-gauge discrepancy:** `qbind_p2p_connections_current` / `qbind_p2p_inbound_peers` /
+  `qbind_p2p_outbound_peers` reported `0` during the observation despite the admitted
+  connection (evidenced by sockets + logs + PQC cert-verify counters). Recorded as an observed
+  gauge discrepancy / evidence limitation only, **not** a diagnosed bug; no peer-gauge health
+  claim is made.
 - No `devnet-seeds.live.json` is published, so **M4 stays Yellow**; this evidence proves
   external reachability, not a durably operated published seed.
 

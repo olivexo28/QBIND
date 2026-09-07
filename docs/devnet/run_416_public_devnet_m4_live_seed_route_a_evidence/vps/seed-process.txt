@@ -1,4 +1,4 @@
-Run 416 — seed process (VPS, host ubuntu-s-1vcpu-1gb-sgp1)
+Run 416 — seed process (VPS, host <seed-host>)
 ==========================================================
 
 Publish-safe description of the seed qbind-node invocation. Exact PIDs, absolute paths,

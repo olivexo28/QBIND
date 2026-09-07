@@ -1,0 +1,281 @@
+Run 415 — Public DevNet readiness artifact path/reference consistency lint
+
+Current state:
+Run 414 is accepted PASS.
+Run 414 added a readiness cross-section coverage lint.
+Public DevNet launch decision remains NO-GO / NOT launch-ready.
+M4 remains Yellow / launch-blocking.
+M6 remains Yellow / Partial.
+S5 remains Yellow.
+S7 remains Yellow.
+C4 remains OPEN.
+C5 remains OPEN.
+TestNet/MainNet remain untouched.
+N1–N7 remain Red.
+
+Objective:
+Add a lightweight cross-package cross-reference lint that catches path/reference drift between:
+- the readiness matrix;
+- the public DevNet artifact index;
+- the operator verification map;
+- the blocker register / launch gate where they name public DevNet artifacts; and
+- the actual publish-safe files under docs/release/public-devnet.
+
+This run must verify that readiness-matrix evidence paths and artifact-index package paths still resolve on disk, and that published public-DevNet artifacts are discoverable through the artifact index or an explicitly documented exception.
+
+This run must only add documentation/path-reference consistency protection.
+It must not add functionality and must not move any readiness item.
+
+Strict scope:
+Docs + shell only.
+
+No public DevNet launch.
+No M4 Green.
+No M6 Green.
+No S5 Green.
+No S7 Green.
+No C4 closure.
+No C5 closure.
+No TestNet readiness.
+No MainNet readiness.
+No Rust source change.
+No build.rs change.
+No Cargo.toml change.
+No public CLI change.
+No runtime behavior change.
+No seed/bootnode/faucet/RPC/explorer/status-service deployment.
+No port opened.
+No node started.
+No trust-bundle apply.
+No validator-set mutation.
+No epoch transition.
+No sequence/marker/LivePqcTrustState mutation.
+No peer-driven apply.
+No private material committed.
+
+Required investigation:
+Read:
+- docs/release/QBIND_PUBLIC_DEVNET_READINESS_CRITERIA.md
+- docs/release/public-devnet/ARTIFACT_INDEX.md
+- docs/release/public-devnet/OPERATOR_VERIFICATION_MAP.md
+- docs/release/public-devnet/BLOCKER_REGISTER.md
+- docs/release/public-devnet/LAUNCH_GO_NO_GO.md
+- docs/release/public-devnet/READINESS_CROSS_SECTION_COVERAGE_LINT.md
+- docs/release/public-devnet/READINESS_RECOMMENDATION_GAP_MATRIX_LINT.md
+- docs/release/public-devnet/READINESS_STATUS_BLOCKER_LINT.md
+- docs/whitepaper/contradiction.md
+- docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_414.md
+- docs/devnet/run_414_public_devnet_readiness_cross_section_coverage_lint/summary.txt
+
+Required implementation:
+Create:
+- docs/release/public-devnet/READINESS_ARTIFACT_PATH_REFERENCE_LINT.md
+- scripts/devnet/run_415_public_devnet_readiness_artifact_path_reference_lint.sh
+- docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_415.md
+- docs/devnet/run_415_public_devnet_readiness_artifact_path_reference_lint/{README.md,summary.txt,.gitignore}
+
+Update narrowly:
+- docs/release/QBIND_PUBLIC_DEVNET_READINESS_CRITERIA.md
+- docs/whitepaper/contradiction.md
+- docs/release/public-devnet/ARTIFACT_INDEX.md
+- docs/release/public-devnet/OPERATOR_VERIFICATION_MAP.md
+- docs/release/public-devnet/READINESS_CROSS_SECTION_COVERAGE_LINT.md as a companion pointer
+- docs/release/public-devnet/PACKAGE_INTEGRITY_MANIFEST.example.json only if an edited anchor file requires SHA-256/byte_size refresh
+
+Do not update files unnecessarily.
+If an edited file is one of the 16 curated package-integrity anchors, refresh exactly that anchor entry and document it.
+Do not add or remove manifest entries unless a real anchor-set change is explicitly in scope, which it is not for this run.
+
+Path/reference policy:
+- Only validate repository-relative paths.
+- Validate paths under docs/release/public-devnet and docs/release where named as release artifacts.
+- Validate script paths under scripts/devnet only when referenced as verification commands.
+- Validate docs/devnet evidence/archive paths when referenced by the readiness matrix or contradiction ledger.
+- Do not require external URLs.
+- Do not execute referenced scripts except the Run 415 harness and explicitly listed regressions.
+- Do not require generated/download-only CI artifacts to exist in the repository tree.
+- Do not require transient manifests, transient drift reports, or CI downloads to be committed.
+- Treat generated/download-only artifact names as valid references only when the nearby prose clearly says they are not committed source.
+
+Artifact discoverability policy:
+- Every publish-safe file currently tracked under docs/release/public-devnet must be discoverable through at least one of:
+  1. ARTIFACT_INDEX.md path/group listing;
+  2. OPERATOR_VERIFICATION_MAP.md verification map or cross-reference;
+  3. a package-level README/VERIFY file that is itself indexed;
+  4. an explicit linted exception table in READINESS_ARTIFACT_PATH_REFERENCE_LINT.md.
+- Exceptions must be narrow and documented with: relative path, reason, and protecting indexed parent document.
+- Acceptable exception examples may include schema/example files that are intentionally referenced by their containing package guide rather than individually listed in the top-level index.
+- No package directory may be silently absent from ARTIFACT_INDEX.md.
+- No readiness-matrix evidence path may point to a missing file.
+- No top-level public-DevNet guide may be missing from ARTIFACT_INDEX.md or OPERATOR_VERIFICATION_MAP.md unless explicitly exceptioned.
+
+Required lint behavior:
+The Run 415 harness must fail closed if:
+
+1. READINESS_ARTIFACT_PATH_REFERENCE_LINT.md is missing or not safety-labelled.
+2. The readiness matrix is missing.
+3. ARTIFACT_INDEX.md is missing.
+4. OPERATOR_VERIFICATION_MAP.md is missing.
+5. Any repository-relative `docs/release/...` path named in §9, §10, §11, or §16 of the readiness matrix does not exist.
+6. Any repository-relative `docs/release/public-devnet/...` path named in ARTIFACT_INDEX.md does not exist, unless it is explicitly described as generated/download-only/transient and not committed.
+7. Any repository-relative `docs/release/public-devnet/...` path named in OPERATOR_VERIFICATION_MAP.md does not exist, unless it is explicitly described as generated/download-only/transient and not committed.
+8. Any `scripts/devnet/run_*.sh` verification command named in ARTIFACT_INDEX.md or OPERATOR_VERIFICATION_MAP.md does not exist.
+9. Any docs/devnet evidence path named in the readiness matrix or contradiction ledger does not exist, if that path is expected to be committed evidence.
+10. Any package directory under docs/release/public-devnet is not represented in ARTIFACT_INDEX.md.
+11. Any tracked publish-safe file under docs/release/public-devnet is not discoverable by the artifact index, operator map, an indexed package README/VERIFY, or a documented exception.
+12. Any documented exception lacks relative path, reason, or protecting indexed parent document.
+13. Any exception is used for a blocker-critical artifact path for M4, M6, S5, S7, C4, or C5 without explicit Yellow/OPEN protection.
+14. Any reference claims `devnet-seeds.live.json` exists as committed/live without real M4 evidence.
+15. Any reference claims a live seed, bootnode, faucet, RPC, explorer, or status service has been deployed.
+16. Any reference claims public DevNet is launch-ready or GO.
+17. Any reference claims C4 or C5 is closed.
+18. Any reference claims TestNet or MainNet is ready.
+19. Any reference claims runtime state was mutated by a docs-only run.
+20. Any readiness item moves Green.
+21. Generated output is committed.
+22. Private material or absolute paths are committed.
+
+READINESS_ARTIFACT_PATH_REFERENCE_LINT.md must explain:
+- why this lint exists;
+- which documents are checked;
+- which path classes are validated;
+- how readiness-matrix evidence paths are checked;
+- how artifact-index paths are checked;
+- how operator-map verification references are checked;
+- how script references are checked;
+- how generated/download-only/transient artifact names are handled;
+- how public-DevNet package-tree discoverability is checked;
+- how exceptions work;
+- how this extends Runs 412–414;
+- why M4 remains Yellow / launch-blocking;
+- why M6 remains Yellow / Partial;
+- why S5/S7 remain Yellow and M4-gated;
+- why public DevNet remains NO-GO / NOT launch-ready;
+- why C4/C5 remain OPEN;
+- why TestNet/MainNet remain untouched;
+- how to update expectations when a future real Route A run legitimately adds/removes/moves artifacts;
+- why this is not launch evidence;
+- why this is not C4/C5 closure evidence.
+
+Harness must verify:
+1. Path/reference lint guide exists and is safety-labelled.
+2. Readiness matrix exists.
+3. Artifact index exists.
+4. Operator verification map exists.
+5. Blocker register exists.
+6. Launch go/no-go gate exists.
+7. Referenced docs/release paths in readiness matrix scoped sections resolve.
+8. Referenced docs/release/public-devnet paths in artifact index resolve or are allowed generated/transient names.
+9. Referenced docs/release/public-devnet paths in operator map resolve or are allowed generated/transient names.
+10. Referenced scripts/devnet/run_*.sh paths resolve.
+11. Referenced docs/devnet evidence/archive paths resolve where committed.
+12. Every package directory under docs/release/public-devnet is represented in ARTIFACT_INDEX.md.
+13. Every tracked publish-safe file under docs/release/public-devnet is discoverable or explicitly exceptioned.
+14. Exception table, if present, is well-formed.
+15. No blocker-critical path is hidden by an unsafe exception.
+16. devnet-seeds.live.json remains absent/not-live unless M4 evidence is real and launch is explicitly in scope.
+17. No deployment claim appears.
+18. No runtime mutation claim appears.
+19. Public DevNet remains NO-GO / NOT launch-ready.
+20. C4/C5 remain OPEN.
+21. TestNet/MainNet remain untouched and N1–N7 Red.
+22. M4 remains Yellow / launch-blocking.
+23. M6 remains Yellow / Partial.
+24. S5/S7 remain Yellow or M4-gated.
+25. Run 414 regression remains positive.
+26. Run 413 regression remains positive.
+27. Run 412 regression remains positive.
+28. Run 411 regression remains positive.
+29. Run 410 regression remains positive.
+30. Run 405 full-tree integrity regression remains positive if anchor docs are refreshed.
+31. No generated output is committed.
+32. Working tree remains clean after the harness.
+33. Secret/private-material scan is clean.
+34. Non-claim grep passes.
+35. If PACKAGE_INTEGRITY_MANIFEST.example.json is refreshed for edited anchor docs, all 16 anchors still hash/size match and no entry/status changes.
+
+Allowed outputs:
+The harness may emit a publish-safe transient summary and extracted reference lists outside the repository tree.
+It must not commit generated output.
+
+Readiness rules:
+This run must not move any readiness item.
+M4 remains Yellow / launch-blocking.
+M6 remains Yellow / Partial.
+S5 remains Yellow.
+S7 remains Yellow.
+Public DevNet remains NOT launch-ready / NO-GO.
+C4/C5 remain OPEN.
+TestNet/MainNet remain untouched.
+
+Tests/checks:
+- bash scripts/devnet/run_415_public_devnet_readiness_artifact_path_reference_lint.sh
+- readiness matrix path extraction for §9/§10/§11/§16
+- artifact index path extraction
+- operator map path extraction
+- script-reference existence check
+- docs/devnet evidence-reference existence check where practical
+- public package directory coverage check
+- publish-safe file discoverability check
+- exception-table validation
+- missing-path fail-closed self-test
+- missing-package-index-row fail-closed self-test
+- undiscoverable-public-devnet-file fail-closed self-test
+- M4/M6/S5/S7 posture checks
+- C4/C5 and TestNet/MainNet non-claim grep
+- devnet-seeds.live.json non-claim grep
+- deployment/runtime non-claim grep
+- generated-output non-commit check
+- markdown path/link checks where practical
+- non-claim grep
+- secret/private-material scan
+- anchor manifest hash/size re-check only if anchor docs were edited
+- cargo test only if Rust source changed; otherwise record no-Rust-delta honestly
+
+CodeQL:
+Docs/shell only → trivial/not meaningful.
+Rust/build.rs/Cargo/source change → run CodeQL if available and record exact result.
+Never call skipped/trivial/timed-out/DB-too-large analysis clean.
+
+Expected verdict:
+PASS / public-DevNet readiness artifact path/reference consistency lint POSITIVE if the guide and harness land cleanly, readiness-matrix evidence paths resolve, artifact index/operator map references resolve or are explicitly transient, published public-DevNet artifacts are discoverable or safely exceptioned, M4/M6/S5/S7 remain Yellow, launch remains NO-GO, C4/C5 stay OPEN, no generated/private material is committed, and no readiness overclaim is introduced.
+
+Final response format:
+1. Exact verdict
+2. Files changed
+3. Decision gate route
+4. Artifact path/reference lint guide contents
+5. Compared documents
+6. Readiness-matrix path extraction
+7. Artifact-index path extraction
+8. Operator-map path extraction
+9. Script-reference checks
+10. Evidence/archive path checks
+11. Generated/transient artifact handling
+12. Public package directory coverage
+13. Publish-safe file discoverability
+14. Exception table, if any
+15. Blocker-critical exception safety
+16. devnet-seeds.live.json non-claim
+17. Deployment/runtime non-claim
+18. Public DevNet NO-GO consistency
+19. C4/C5 consistency
+20. TestNet/MainNet non-claims
+21. M4 consistency check
+22. M6 consistency check
+23. S5/S7 consistency check
+24. Generated-output behavior
+25. Non-claim checks
+26. Security scans
+27. Runtime mutation check
+28. Readiness delta
+29. M4 status
+30. M6 status
+31. S5/S7 status
+32. Public DevNet status
+33. C4/C5
+34. TestNet/MainNet non-claims
+35. Tests run
+36. CodeQL
+37. Honest limitations
+38. Suggested Run 416

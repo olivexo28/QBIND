@@ -1,21 +1,31 @@
-Run 416 — seed log extract (VPS, host ubuntu-s-1vcpu-1gb-sgp1)
+Run 416 — seed log extract (VPS, host <seed-host>)
 ==============================================================
 
-Publish-safe extract of the seed's P2P / accept log lines. Timestamps, absolute paths, and
-any key/cert bytes are redacted; the full raw log is retained only in the gitignored bundle
-bundles/qbind-m4-evidence-vps.tgz. NodeId values shown are public identifiers (8-byte
+Publish-safe **redacted/reconstructed log transcription** of the seed's P2P / accept log
+lines. These lines are **not** a verbatim byte-for-byte raw log excerpt: timestamps, absolute
+paths, PIDs, and any key/cert bytes were removed and the surviving status lines were
+normalized/reconstructed for publication. The full raw log is retained only in the gitignored
+bundle bundles/qbind-m4-evidence-vps.tgz. NodeId values shown are public identifiers (8-byte
 prefixes) only.
+
+Evidence classification:
+- Directly captured facts: the inbound `LISTEN`/`ESTAB` socket state in `seed-sockets.txt`
+  and the build/identity facts in `seed-metrics.txt`.
+- Redacted transcription: the normalized `[P2P] …` status lines below (reconstructed from the
+  raw operator log; not verbatim).
+- Interpretation: the "Interpretation" notes, derived from combining the log, socket, and
+  metric observations.
 
 [P2P] listening on 0.0.0.0:30333 (advertised 188.166.227.87:30333)
 [P2P] transport security: mutual-auth = required
 [P2P] PQC root mode: pqc-static-root
-[P2P] Accepted connection from 110.226.112.166:<client-port>
-[P2P] KEMTLS handshake (static-root, mutual-auth required) with 110.226.112.166:<client-port> completed
+[P2P] Accepted connection from <dialer-public-egress>:<client-port>
+[P2P] KEMTLS handshake (static-root, mutual-auth required) with <dialer-public-egress>:<client-port> completed
 [P2P] peer identity verified (per-peer KEM public key + validator-id override presented by dialer)
-[P2P] connection ESTABLISHED with NodeId(<dialer-prefix>) @ 110.226.112.166:<client-port>
+[P2P] connection ESTABLISHED with NodeId(<dialer-prefix>) @ <dialer-public-egress>:<client-port>
 
 Interpretation:
 - The seed accepted an inbound connection from an off-host / different-network vantage
-  (110.226.112.166), then completed the KEMTLS mutual-auth static-root handshake.
+  (<dialer-public-egress>), then completed the KEMTLS mutual-auth static-root handshake.
 - Both external TCP and external KEMTLS reachability are demonstrated from the seed side.
 - No secret material appears in the log; only public NodeId prefixes and status lines.

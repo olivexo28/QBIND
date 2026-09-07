@@ -8,8 +8,10 @@
 
 **A live public DevNet status page / aggregate health view is deferred** until a real, externally
 reachable public DevNet network exists (i.e. until **M4** is Green). A live status service that
-claimed to reflect network health today would be **misleading**, because no externally reachable
-seed/network is proven (M4 is Yellow/launch-blocking; see the readiness matrix).
+claimed to reflect network health today would be **misleading**, because no durable, live public
+DevNet network exists (M4 is Yellow/launch-blocking; external reachability was proven once in Run 416
+against a temporary, discarded seed, but no `devnet-seeds.live.json` seed is durably operated; see the
+readiness matrix).
 
 Instead, Run 395 publishes a **publish-safe, static decision + schema package** (this document, the
 `STATUS_HEALTH_VIEW_SCHEMA.json` schema, and the `EXAMPLE_STATUS_HEALTH_VIEW.json` illustrative
@@ -27,7 +29,9 @@ deployment) — the expected safe route while M4 is Yellow.
 
 Route A requires a real, externally usable status page or aggregate health view wired to live data.
 That depends on a live, externally reachable network (M4). M4 is Yellow, so a "live" status view
-would either be empty or would imply a reachable network that is **not proven**. Deploying it now
+would either be empty or would imply a durable reachable network that **does not exist** (external
+reachability was proven once in Run 416 against a temporary seed, but no durable live network is
+operated). Deploying it now
 would be a launch/liveness overclaim, which this run must not make.
 
 ## Why not Route C (defer entirely, keep Red)

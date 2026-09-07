@@ -1,4 +1,4 @@
-Run 416 — dialer process (Laptop 1 WSL, host olivegigi)
+Run 416 — dialer process (Laptop 1 WSL, host <dialer-host>)
 =======================================================
 
 Publish-safe description of the dialing qbind-node invocation. Exact PIDs, absolute
@@ -16,12 +16,17 @@ Invocation shape (publish-safe):
     --p2p-trusted-root <temp-devnet-static-root>          # devnet_pqc_root_helper output
     --p2p-leaf-cert <temp-leaf.cert.bin> \                # ephemeral; gitignored
     --p2p-leaf-cert-key <temp-leaf.kem.sk.bin> \          # ephemeral 0600; NEVER committed
-    --validator-id <override> \                           # dialer validator-id override
-    --p2p-peer 0@188.166.227.87:30333                     # per-peer KEM pubkey override supplied
+    --validator-id 1 \                                    # dialer validator id
+    --p2p-peer-leaf-cert 0:<redacted-temp-seed-cert-path> \  # per-peer seed leaf cert (VID:PATH); VID 0 = seed
+    --p2p-peer 0@188.166.227.87:30333                     # dial the seed (validator id 0)
 
 Notes:
-- The per-peer KEM public key + validator-id override let the dialer complete the
-  mutual-auth static-root handshake against the seed's advertised identity.
+- The per-peer leaf certificate (`--p2p-peer-leaf-cert 0:<...>`, format `VID:PATH`) supplies the
+  seed's certified ML-KEM-768 public key so the dialer can complete the mutual-auth static-root
+  handshake against the seed's advertised identity (VID 0). The dialer itself runs as
+  `--validator-id 1`.
+- No certificate bytes, private/KEM secret-key bytes, or absolute operator path are shown; the
+  `<redacted-temp-seed-cert-path>` placeholder stands in for the redacted temporary cert path.
 - All PQC material is temporary DevNet material from
   crates/qbind-node/examples/devnet_pqc_root_helper.rs and was discarded after the run.
 - Angle-bracket <...> placeholders stand in for redacted local paths / values.
