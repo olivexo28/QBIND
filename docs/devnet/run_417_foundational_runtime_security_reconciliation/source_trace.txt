@@ -1,0 +1,174 @@
+Run 417 — Foundational Runtime-Security Reconciliation Audit
+Source-to-runtime trace (publish-safe; file:line references against audited tree)
+
+Audited base commit: cb4c4dc94eaaa46689be15358ba48921e98a7797
+Audited working tree: 32b6561 (adds only task/RUN_417_TASK.txt on top of the base;
+                       no source difference from the base for the traced crates).
+Deployed binary: crates/qbind-node (bin `qbind-node`, path src/main.rs).
+Method: every conclusion is traced from message/tx construction or ingress through the
+real deployed runtime consumer. Verifier existence is NOT treated as proof of a call.
+All line numbers were read directly from the audited tree.
+
+================================================================================
+DEPLOYED CONSENSUS DRIVER (which engine the running node uses)
+================================================================================
+crates/qbind-node/src/main.rs:66      imports spawn_binary_consensus_loop{,_with_io}
+crates/qbind-node/src/main.rs:4752    run_local_mesh_node(...)
+crates/qbind-node/src/main.rs:4764    run_p2p_node(...)
+crates/qbind-node/src/main.rs:4813    run_local_mesh_node — deployed consensus driver
+main.rs contains NO reference to hotstuff_node_sim (grep: 0 hits). The deployed node
+drives crates/qbind-node/src/binary_consensus_loop.rs. The signing/verifying multi-node
+simulation crates/qbind-node/src/hotstuff_node_sim.rs (NodeHotstuffHarness) is a TEST
+harness and is NOT on the deployed path.
+
+================================================================================
+A. TRANSACTION AUTHENTICATION  (crates/qbind-ledger, qbind-runtime, qbind-node)
+================================================================================
+A1. Empty-auth acceptance (VERIFIED-FAIL-OPEN, code):
+crates/qbind-ledger/src/auth.rs:22-23  doc: "does NOT enforce thresholds/weights yet"
+crates/qbind-ledger/src/auth.rs:24     pub fn verify_transaction_auth(...)
+crates/qbind-ledger/src/auth.rs:29-33  "If there are no auths, we succeed trivially for now."
+                                       `if tx.auths.is_empty() { return Ok(()); }`
+=> Empty `auths` is accepted unconditionally, generically (no program_id / genesis /
+   bootstrap domain separation).
+
+A2. Per-auth verification is otherwise FAIL-CLOSED:
+crates/qbind-ledger/src/auth.rs:35     digest = tx_digest(tx)
+crates/qbind-ledger/src/auth.rs:37-39  loop verify_single_auth over each auth (NO dedup)
+crates/qbind-ledger/src/auth.rs:52-56  account_index out of range -> Err (fail closed)
+crates/qbind-ledger/src/auth.rs:63-64  missing keyset account -> AccountNotFound (fail closed)
+crates/qbind-ledger/src/auth.rs:78-85  no key in keyset for suite_id -> Err (fail closed)
+crates/qbind-ledger/src/auth.rs:89-91  unknown signature suite -> CryptoError (fail closed)
+crates/qbind-ledger/src/auth.rs:98-100 bad signature -> CryptoError (fail closed)
+
+A3. Thresholds/weights NOT enforced; duplicates NOT deduplicated (VERIFIED-INCOMPLETE):
+crates/qbind-ledger/src/auth.rs:22-23  explicit "does NOT enforce thresholds/weights"
+crates/qbind-types/src/state_keyset.rs KeysetEntry.weight / KeysetAccount.threshold
+                                       fields exist but are never read by verify path.
+crates/qbind-ledger/src/auth.rs:37-39  no per-account/per-key uniqueness set => a single
+                                       valid signature authorizes; a repeated key/sig is
+                                       verified independently each time.
+
+A4. Signing-bytes domain separation (FAIL-CLOSED for replay of body):
+crates/qbind-hash/src/tx.rs (tx_sign_body_preimage / tx_digest): domain tag "QBIND:TX";
+binds version, chain_id, payer, nonce (replay), fee_limit, accounts[], program_id,
+call_data. Comment states it does NOT include msg_type or auths[].
+
+A5. Production reachability of the tx-auth path (MITIGATED-BY-CURRENT-UNREACHABILITY):
+crates/qbind-runtime/src/lib.rs:139-159  TxExecutor::execute_transaction calls
+                                         ctx.verify_tx_auth(tx)? unconditionally before dispatch
+crates/qbind-ledger/src/context.rs:49    ExecutionContext::verify_tx_auth -> verify_transaction_auth
+crates/qbind-node/src/lib.rs:2553        Node::apply_block(...) (executes block txs)
+BUT the deployed binary never reaches it:
+  * grep '\.apply_block(' in deployed src => only crates/qbind-node/src/hotstuff_node_sim.rs:3156
+    (TEST harness) and execution_adapter.rs tests. No call in main.rs or binary_consensus_loop.rs.
+  * binary_consensus_loop.rs / main.rs wire NO ExecutionAdapter into the commit path (grep: 0).
+  * The deployed engine builds EMPTY proposals: basic_hotstuff_engine.rs:1359 tx_count:0,
+    :1381 txs: vec![]  => no transactions are carried or executed by the deployed loop.
+  * No RPC / mempool / submit-transaction ingress exists in main.rs (grep: 0).
+=> verify_transaction_auth's empty-auth fail-open is real in code but is NOT reachable
+   from the deployed qbind-node binary today (no tx ingress, empty proposals, apply_block
+   unwired). It is reachable only via the hotstuff_node_sim / execution-adapter test paths.
+
+================================================================================
+B. CONSENSUS MESSAGE AUTHENTICATION  (deployed binary path)
+================================================================================
+Toy suite marker:
+crates/qbind-wire/src/consensus.rs:13-18  DEFAULT_CONSENSUS_SUITE_ID: u16 = 0
+                                          "SUITE_TOY_SHA3 (0) - test-only ... NOT FOR PRODUCTION"
+
+B1. Outbound PROPOSAL (VERIFIED-FAIL-OPEN — unsigned, toy suite):
+crates/qbind-consensus/src/basic_hotstuff_engine.rs:1357  proposer_index = self.local_id.0
+crates/qbind-consensus/src/basic_hotstuff_engine.rs:1358  suite_id = DEFAULT_CONSENSUS_SUITE_ID (0)
+crates/qbind-consensus/src/basic_hotstuff_engine.rs:1381  txs: vec![]
+crates/qbind-consensus/src/basic_hotstuff_engine.rs:1382  signature: vec![]  (EMPTY)
+BlockProposal::signing_preimage() exists in qbind-wire but is never called on this path.
+
+B2. Outbound VOTE (VERIFIED-FAIL-OPEN — unsigned, toy suite):
+crates/qbind-consensus/src/basic_hotstuff_engine.rs:1537  validator_index = self.local_id.0
+crates/qbind-consensus/src/basic_hotstuff_engine.rs:1538  suite_id = DEFAULT_CONSENSUS_SUITE_ID (0)
+crates/qbind-consensus/src/basic_hotstuff_engine.rs:1539  signature: vec![]  (EMPTY)
+
+B3. Inbound PROPOSAL (VERIFIED-FAIL-OPEN — no signature/membership crypto):
+crates/qbind-node/src/binary_consensus_loop.rs:2666-2714 Proposal arm
+crates/qbind-node/src/binary_consensus_loop.rs:2682  from = ValidatorId::new(proposal.header.proposer_index)
+=> identity is taken from the self-declared wire field; on_proposal_event checks only
+   epoch and leader-for-view; NO signature verification, NO suite check.
+
+B4. Inbound VOTE (VERIFIED-FAIL-OPEN — no signature/membership crypto):
+crates/qbind-node/src/binary_consensus_loop.rs:2726-2761 Vote arm
+crates/qbind-node/src/binary_consensus_loop.rs:2730  from = ValidatorId::new(vote.validator_index)
+=> on_vote_event checks only epoch/view; NO signature verification, NO suite check.
+
+B5. Inbound TIMEOUT (VERIFIED-INCOMPLETE — verification OPTIONAL, default OFF):
+crates/qbind-node/src/binary_consensus_loop.rs:788   verification_ctx: Option<...> (default None)
+crates/qbind-node/src/binary_consensus_loop.rs:2827  `if let Some(ctx) = verification_ctx {`
+crates/qbind-node/src/binary_consensus_loop.rs:2829  verify_timeout_msg(...)
+=> Timeout signatures are verified ONLY when a TimeoutVerificationContext is supplied.
+   LocalMesh / single-validator runs pass None => no timeout signature verification.
+
+B6. Signing/verifying code that is NOT on the deployed path (TEST-OR-FIXTURE-ONLY):
+crates/qbind-node/src/hotstuff_node_sim.rs:~3570  harness DOES compute signing_preimage and
+                                                  sign_proposal/sign_vote (suite 100) — harness only.
+crates/qbind-consensus/src/driver.rs             Driver verifier verify_vote path exists but the
+                                                  deployed binary uses BasicHotStuffEngine directly.
+Consensus verify pool / CryptoConsensusVerifier exist but are not imported by
+binary_consensus_loop.rs.
+
+================================================================================
+C. AUTHENTICATED PEER -> CONSENSUS SENDER BINDING
+================================================================================
+C1. KEMTLS authenticates transport identity (leaf KEM key / derived NodeId), not authorship:
+    peer/leaf certificate + NodeId derivation is enforced at handshake time (Run 416
+    proved external KEMTLS mutual-auth static-root to a temporary seed).
+C2. Peer identity is NOT carried with consensus messages (VERIFIED-FAIL-OPEN):
+crates/qbind-node/src/p2p_inbound.rs:83   trait fn handle_consensus_msg(&self, msg: ConsensusNetMsg)
+                                          — NO sender/NodeId parameter (contrast:)
+crates/qbind-node/src/p2p_inbound.rs:118-119 handle_dag_msg_from(msg, _sender: NodeId) carries sender
+crates/qbind-node/src/p2p_inbound.rs:359-388 ChannelConsensusHandler forwards only
+                                          mpsc::Sender<ConsensusNetMsg> — peer identity dropped.
+C3. Engine `from` is self-declared, not transport-authenticated (VERIFIED-FAIL-OPEN):
+    see B3/B4 (binary_consensus_loop.rs:2682 / :2730). Any admitted KEMTLS peer can set an
+    arbitrary proposer_index/validator_index and speak as any validator.
+C4. Run 416 per-peer certificate override supplies handshake key material only; it establishes
+    no durable validator-authorship binding in the consensus accept path.
+=> Connection authentication (KEMTLS) and consensus-message authentication are independent.
+   KEMTLS admission is NOT a substitute for consensus authorship authentication, and today
+   the authorship authentication is absent on the deployed path.
+
+================================================================================
+D. QUORUM CERTIFICATE + SUITE ENFORCEMENT
+================================================================================
+D1. Vote accumulation into a QC dedups voters and enforces membership/quorum
+    (FAIL-CLOSED for the LOCAL accumulator):
+crates/qbind-consensus/src/vote_accumulator.rs  voter HashSet insert (duplicate voter rejected)
+crates/qbind-consensus/src/qc.rs                validate(): membership + duplicate checks
+    NOTE: these operate on locally-accumulated ValidatorId votes, not on cryptographic proof.
+D2. QC carried in a proposal is imported with EMPTY signer evidence (VERIFIED-FAIL-OPEN):
+crates/qbind-consensus/src/basic_hotstuff_engine.rs:1493
+    `.map(|wire_qc| QuorumCertificate::new(wire_qc.block_id, wire_qc.height, vec![]))`
+=> the wire QC's signer_bitmap/signatures are DISCARDED; the imported QC carries no signers.
+crates/qbind-wire/src/consensus.rs:266-267  QC wire fields signer_bitmap / signatures EXIST
+                                            but are never extracted/validated on the deployed path.
+D3. Received QC is NOT cryptographically verified before it influences the engine
+    (VERIFIED-FAIL-OPEN): the proposal arm (binary_consensus_loop.rs:2666-2714) calls
+    on_proposal_event with no prior QC signature verification.
+D4. Timeout certificate verification is optional/off by default (see B5).
+D5. Suite enforcement (VERIFIED-FAIL-OPEN on the deployed consensus path):
+    * Deployed votes/proposals emit suite_id = 0 (toy).
+    * binary_consensus_loop.rs performs NO suite_id validation on inbound Vote/Proposal.
+    * Suite 0 (toy consensus namespace), the Run 416 transport provider log sig_suite_id=100
+      (ML-DSA-44 TRANSPORT/KEMTLS suite), and the ledger/tx suite ids are SEPARATE namespaces.
+      Run 416's sig_suite_id=100 is a TRANSPORT provider value and does NOT imply consensus
+      messages or transactions use ML-DSA-44.
+
+================================================================================
+REACHABILITY SUMMARY
+================================================================================
+* Consensus B/C/D fail-open behaviors ARE reachable by any admitted KEMTLS peer on a
+  multi-node deployed run (the deployed binary_consensus_loop path).
+* Transaction empty-auth fail-open (A) is NOT reachable from the deployed binary today:
+  no tx ingress, empty proposals, apply_block unwired. Reachable only via test harnesses.
+* No durable public seed / devnet-seeds.live.json is published, so no public multi-node
+  deployment is currently exposed. This does not lower the severity of the code-level
+  fail-open; it constrains present external reachability only.

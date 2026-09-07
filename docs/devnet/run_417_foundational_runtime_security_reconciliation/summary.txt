@@ -1,0 +1,56 @@
+run=Run 417
+title=Foundational Runtime-Security Reconciliation Audit
+type=audit + evidence (READ-ONLY of production Rust; docs + audit-only shell tooling)
+audited_base_commit=cb4c4dc94eaaa46689be15358ba48921e98a7797
+audited_working_tree=32b6561 (adds only task/RUN_417_TASK.txt; no source delta vs base)
+overall_result=AUDIT-COMPLETE / NEGATIVE-FOR-RUNTIME-SECURITY
+audit_harness_result=POSITIVE-FOR-AUDIT-COMPLETENESS
+security_verdict=NEGATIVE — deployed consensus authentication is fail-open
+
+# --- Deployed driver (the running node) ---
+deployed_consensus_driver=crates/qbind-node/src/binary_consensus_loop.rs (via main.rs run_local_mesh_node / run_p2p_node)
+not_deployed=crates/qbind-node/src/hotstuff_node_sim.rs (NodeHotstuffHarness) is a TEST harness (main.rs references it 0 times)
+
+# --- Conclusion answers (canonical) ---
+q1_unauth_tx_reaches_state_mutation=NO on the deployed binary today (no tx ingress; empty proposals; apply_block unwired). YES in code path if wired (verify_transaction_auth accepts empty auths).
+q2_keyset_thresholds_weights_enforced=NO (auth.rs:22-23; weight/threshold fields unused)
+q3_real_binary_proposals_votes_signed=NO (signature: vec![]; suite 0)
+q4_inbound_proposal_vote_sigs_verified=NO (binary_consensus_loop accepts without crypto)
+q5_consensus_sender_bound_to_kemtls_peer=NO (peer NodeId not propagated; from=self-declared index)
+q6_received_qc_timeout_cert_verified=NO for QC (empty signers on import); timeout verify optional/off-by-default
+q7_production_suite_ids_unambiguous_failclosed=NO (suite 0 "NOT FOR PRODUCTION" reachable; no inbound suite gating)
+
+# --- Finding classifications (taxonomy) ---
+F1_transaction_empty_auth=VERIFIED-FAIL-OPEN(code)/MITIGATED-BY-CURRENT-UNREACHABILITY(deployed); High
+F2_threshold_weight_dedup=VERIFIED-INCOMPLETE; High
+F3_proposal_auth=VERIFIED-FAIL-OPEN; Critical
+F4_vote_auth=VERIFIED-FAIL-OPEN; Critical
+F5_timeout_newview_auth=VERIFIED-INCOMPLETE; High
+F6_peer_to_sender_binding=VERIFIED-FAIL-OPEN; Critical
+F7_qc_import_verification=VERIFIED-FAIL-OPEN; Critical
+F8_consensus_suite_enforcement=VERIFIED-FAIL-OPEN; High
+
+# --- First fix (smallest security-first sequence) ---
+fix_1=Propagate authenticated KEMTLS peer NodeId with each consensus message and bind it to the signing/claimed validator identity (F6) — prerequisite for meaningful proposal/vote/QC verification.
+fix_2=Sign + verify proposals and votes over domain-separated preimages with a production suite; reject suite 0/unknown (F3,F4,F8).
+fix_3=Cryptographically verify imported QCs and make timeout/new-view verification mandatory (F7,F5).
+fix_4=Only after authored consensus lands, wire tx execution and require >=1 auth + threshold/weight/dedup with explicit genesis exemption (F1,F2).
+
+# --- Mandatory current-state protections (unchanged by this run) ---
+public_devnet=NO-GO / not launch-ready
+M4=Yellow / launch-blocking
+M6=Yellow / Partial
+S5=Yellow
+S7=Yellow
+C4=OPEN
+C5=OPEN
+devnet_seeds_live_json=ABSENT
+devnet_seeds_live_candidate=status planned, last_reachability_evidence null
+run_416_scope=external TCP + KEMTLS static-root reachability to a temporary discarded seed identity only
+no_item_moved_green=true
+production_source_changed=false
+live_seed_published=false
+
+# --- Suite namespace note ---
+run_416_sig_suite_id_100=TRANSPORT/KEMTLS provider value only; NOT proof consensus/tx use ML-DSA-44
+deployed_consensus_suite=0 (toy, NOT FOR PRODUCTION)
