@@ -1,0 +1,402 @@
+# Run 417 — Foundational Runtime-Security Reconciliation Audit
+
+Repository: `olivexo28/QBIND`
+
+Expected baseline:
+
+`cb4c4dc94eaaa46689be15358ba48921e98a7797`
+
+Use the assigned working branch. Do not create or switch to another branch. Do not open a PR. Commit and push the completed audit normally to the assigned branch.
+
+## 1. Objective
+
+Perform a source-to-runtime security reconciliation of QBIND’s foundational authentication boundaries before any durable public DevNet seed is provisioned or published.
+
+Audit these four domains:
+
+1. Transaction authentication and authorization.
+2. Consensus proposal/vote/timeout/new-view authentication.
+3. Consensus sender identity binding to the authenticated P2P/KEMTLS peer.
+4. Quorum-certificate validation and production signature-suite enforcement.
+
+This is an audit and evidence run. Its purpose is to establish what the current production binary path actually enforces, where it fails closed, where it remains incomplete, and whether existing documentation or readiness statuses overstate the implementation.
+
+Do not implement the security fixes in Run 417.
+
+## 2. Baseline handling
+
+Before doing anything:
+
+1. Confirm the checked-out branch and current HEAD.
+2. Fetch current `main`.
+3. Confirm the audit is based on commit `cb4c4dc94eaaa46689be15358ba48921e98a7797`.
+4. If `main` has advanced, inspect and preserve the additional commits. Record the actual audited commit; do not reset, overwrite, force-push, or silently audit an older tree.
+5. Confirm the working tree is clean.
+6. Read repository instructions such as `AGENTS.md`, if present.
+
+## 3. Mandatory current-state protections
+
+Preserve these facts unless direct evidence requires a stricter downgrade:
+
+* Public DevNet remains `NO-GO` / not launch-ready.
+* M4 remains Yellow / launch-blocking.
+* M6 remains Yellow/Partial.
+* S5 and S7 remain Yellow.
+* C4 remains OPEN.
+* C5 remains OPEN.
+* `devnet-seeds.live.json` must remain absent.
+* `devnet-seeds.live-candidate.json` must remain `status: planned` with `last_reachability_evidence: null`.
+* Run 416 proves only operator-attested external TCP and KEMTLS static-root reachability to a temporary, discarded seed identity.
+* Run 416 does not prove genesis pinning, durable seed operation, peer-gauge health, consensus-message authentication, transaction authorization, or TestNet/MainNet readiness.
+* No readiness item may move Green in this run.
+* A currently Green item may be downgraded only if Run 417 proves its present status is materially false. Any downgrade must be reconciled consistently across all status documents and lints.
+
+## 4. Required reading
+
+Read the authoritative current files before drawing conclusions.
+
+At minimum:
+
+* `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_416.md`
+* `docs/devnet/run_416_public_devnet_m4_live_seed_route_a_evidence/README.md`
+* `docs/release/public-devnet/network/reachability/RUN_416_qbind-devnet-seed-1.md`
+* `docs/release/QBIND_PUBLIC_DEVNET_READINESS_CRITERIA.md`
+* `docs/release/public-devnet/BLOCKER_REGISTER.md`
+* `docs/release/public-devnet/LAUNCH_GO_NO_GO.md`
+* `docs/release/public-devnet/ARTIFACT_INDEX.md`
+* `docs/release/public-devnet/OPERATOR_VERIFICATION_MAP.md`
+* `docs/release/public-devnet/network/devnet-seeds.live-candidate.json`
+* `docs/protocol/QBIND_C4_C5_CLOSURE_CRITERIA.md`
+* `docs/whitepaper/QBIND_WHITEPAPER.md`
+* `docs/whitepaper/contradiction.md`
+* Relevant earlier consensus-authentication, forged-message, binary-path, PQC-provider, and transaction-authentication evidence records.
+
+Inspect at minimum these source areas and every reachable caller/implementation:
+
+* `crates/qbind-ledger/src/auth.rs`
+* `crates/qbind-ledger/src/context.rs`
+* Transaction execution and block-application paths under `qbind-runtime`, `qbind-ledger`, and `qbind-node`
+* `crates/qbind-wire/src/consensus.rs`
+* `crates/qbind-consensus/src/basic_hotstuff_engine.rs`
+* `crates/qbind-consensus/src/network.rs`
+* `crates/qbind-node/src/binary_consensus_loop.rs`
+* `crates/qbind-node/src/p2p.rs`
+* `crates/qbind-node/src/p2p_inbound.rs`
+* `crates/qbind-node/src/consensus_net_p2p.rs`
+* `crates/qbind-node/src/consensus_network_facade.rs`
+* Validator-key, suite-registry, peer-certificate, NodeId, KEMTLS and validator-set code used by the real binary.
+
+Search repository-wide for:
+
+* `verify_transaction_auth`
+* empty `auths`
+* keyset thresholds and weights
+* signing-byte/domain-separation functions
+* `DEFAULT_CONSENSUS_SUITE_ID`
+* `signature: vec![]`
+* proposal/vote/QC signature creation and verification
+* timeout/new-view signature creation and verification
+* `proposer_index`
+* `validator_index`
+* `signer_bitmap`
+* `ConsensusNetMsg`
+* authenticated peer identity/NodeId/validator-ID propagation
+* suite-ID validation
+* duplicate signer handling
+* unknown-validator handling
+
+Do not assume that a verifier’s existence means the production binary calls it. Trace every conclusion end-to-end from ingress or message construction through the real runtime consumer.
+
+## 5. Investigation A — transaction authentication
+
+Determine and evidence:
+
+1. Whether `verify_transaction_auth` accepts `tx.auths.is_empty()`.
+2. Whether that behavior is reachable from any real transaction execution, block application, proposal, replay, restore, RPC, mempool, or peer-controlled path.
+3. Whether all transaction types require authorization or whether narrowly defined system/genesis/bootstrap operations are intentionally exempt.
+4. Whether exemptions are explicit and domain-separated, or whether empty authentication is accepted generically.
+5. Whether keyset thresholds and key weights are enforced.
+6. Whether duplicate signatures or duplicate keys can contribute weight more than once.
+7. Whether the signer key must belong to the referenced keyset/account.
+8. Whether the authenticated account is bound to the state mutation being authorized.
+9. Whether transaction signing bytes bind at least the chain/domain, transaction body, nonce/replay field, fee/gas fields, and relevant authorization context.
+10. Whether unknown suite IDs, missing keys, malformed signatures and unavailable keysets fail closed.
+11. Whether tests explicitly depend on unauthenticated transactions and whether those tests represent production semantics or only fixtures.
+
+Do not call empty-auth behavior remotely exploitable unless a real attacker-controlled ingress-to-execution path is demonstrated. Distinguish:
+
+* verified fail-open behavior;
+* verified but currently unreachable behavior;
+* test/fixture-only behavior;
+* fail-closed behavior;
+* unknown/unproven behavior.
+
+## 6. Investigation B — consensus message authentication
+
+Trace the real binary construction and inbound processing of:
+
+* proposals;
+* votes;
+* quorum certificates;
+* timeout messages;
+* timeout certificates;
+* new-view messages.
+
+For every message type determine:
+
+1. Which identity is claimed inside the message.
+2. Whether the outbound real binary signs it.
+3. Which exact bytes and domain are signed.
+4. Which suite ID is emitted.
+5. Whether empty or placeholder signatures are emitted.
+6. Whether inbound signatures are verified before engine acceptance or state mutation.
+7. Whether the signer is a member of the active validator set.
+8. Whether the signer is authorized for the claimed role and view.
+9. Whether wrong-suite, unknown-signer, malformed-signature, replayed, cross-chain, cross-view and cross-message-type inputs fail closed.
+10. Which production entry point performs each check.
+11. Whether existing tests bypass transport identity or inject directly into an internal channel.
+
+Treat comments such as “NOT FOR PRODUCTION,” default/toy suite markers, empty signatures, or uncalled verification helpers as evidence requiring runtime tracing—not as conclusions by themselves.
+
+## 7. Investigation C — authenticated peer to consensus-sender binding
+
+Establish the complete identity flow:
+
+`KEMTLS handshake → authenticated certificate/peer identity → connection/session metadata → inbound P2P frame → ConsensusNetMsg → consensus engine sender identity`
+
+Determine:
+
+1. What KEMTLS actually authenticates: root, leaf key, NodeId, validator ID, or another identity.
+2. Whether the authenticated identity remains attached to each inbound consensus message.
+3. Whether `ChannelConsensusHandler` or another channel transmits peer/session identity with the message.
+4. Whether the engine’s `from` identity comes from authenticated transport metadata or from self-declared `proposer_index` / `validator_index`.
+5. Whether one admitted peer can claim another validator’s identity.
+6. Whether the per-peer certificate override used in Run 416 establishes a durable validator-binding rule or only supplies handshake key material.
+7. Whether reconnects, duplicate sessions, certificate reuse, or stale validator mappings can create identity ambiguity.
+8. Whether connection authentication and consensus-message authentication are independent, complementary controls or whether either is incorrectly assumed to replace the other.
+
+Do not claim that KEMTLS admission authenticates consensus authorship unless the binding is traced and enforced end-to-end.
+
+## 8. Investigation D — quorum certificate and suite enforcement
+
+Determine:
+
+1. How a QC is created from votes.
+2. Whether unique validator membership and quorum weight are enforced.
+3. Whether duplicate votes can contribute more than once.
+4. Whether the QC carries independently verifiable signer evidence.
+5. Whether `signer_bitmap`, aggregate signatures or individual signatures are populated and validated.
+6. Whether a QC received from a peer is cryptographically verified before it influences locking, view advancement, commit, restore or catch-up.
+7. Whether proposal-carried parent/high QCs receive the same verification.
+8. Whether timeout certificates receive equivalent validation.
+9. Whether suite ID `0` is a toy/test namespace and whether it is reachable in the production binary.
+10. How suite ID `0`, the observed Run 416 `sig_suite_id=100`, and any state/transaction suite identifiers relate or remain separate.
+11. Whether unsupported, disabled, classical, dummy or ambiguous suite IDs fail closed in each security domain.
+
+Do not equate the Run 416 transport-provider log with proof that consensus messages or transactions use the same signature suite.
+
+## 9. Required threat-model cases
+
+Evaluate at least:
+
+* an authenticated malicious validator claiming another validator ID;
+* an admitted peer replaying another validator’s signed message;
+* an admitted peer sending an unsigned or empty-signature proposal/vote;
+* duplicate votes or duplicated signer entries inflating quorum weight;
+* a forged QC or timeout certificate;
+* wrong-suite and unknown-suite messages;
+* cross-chain, cross-view and cross-message-type signature reuse;
+* a transaction with zero authentication entries;
+* signatures below the keyset threshold;
+* duplicate transaction signatures contributing repeated weight;
+* an authorized signer attempting an unrelated account mutation;
+* restore/catch-up importing insufficiently authenticated consensus evidence.
+
+For each case state the attacker prerequisite, entry point, enforced checks, resulting behavior, exploitability and confidence.
+
+## 10. Finding taxonomy
+
+Classify every finding using exactly one status:
+
+* `VERIFIED-FAIL-CLOSED`
+* `VERIFIED-FAIL-OPEN`
+* `VERIFIED-INCOMPLETE`
+* `MITIGATED-BY-CURRENT-UNREACHABILITY`
+* `TEST-OR-FIXTURE-ONLY`
+* `UNKNOWN-INSUFFICIENT-EVIDENCE`
+
+Assign severity separately:
+
+* Critical
+* High
+* Medium
+* Low
+* Informational
+
+Do not reduce severity merely because the public transaction ingress or durable seed is not currently published. Record reachability as a separate dimension.
+
+The overall Run 417 result must distinguish audit success from security success. Acceptable overall forms include:
+
+* `AUDIT-COMPLETE / NEGATIVE-FOR-RUNTIME-SECURITY`
+* `AUDIT-COMPLETE / PARTIAL`
+* `AUDIT-INCOMPLETE`
+
+Never report a generic `PASS` that could be misread as production-security readiness.
+
+## 11. Implementation restrictions
+
+Run 417 must not:
+
+* modify production Rust behavior;
+* add an authentication bypass;
+* implement transaction, consensus, QC or transport fixes;
+* create tests that permanently bless fail-open behavior as correct;
+* redesign HotStuff, networking, storage, snapshot/restore, governance or PQC lifecycle;
+* generate or publish a durable seed identity;
+* create `devnet-seeds.live.json`;
+* rotate/revoke roots;
+* invent a synthetic epoch;
+* enable peer-driven trust mutation;
+* claim C4/C5 closure;
+* claim DevNet launch readiness;
+* make TestNet/MainNet readiness claims;
+* commit keys, certificates, credentials, raw operator bundles, private endpoints or private host identifiers.
+
+Allowed changes are limited to documentation, audit evidence, audit-only shell tooling and narrowly scoped non-production evidence helpers if absolutely necessary. Prefer existing tests and source/runtime tracing.
+
+If a behavioral experiment would require production-source modification, record it as unproven and defer it.
+
+## 12. Required deliverables
+
+Create:
+
+1. `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_417.md`
+2. `docs/protocol/QBIND_FOUNDATIONAL_RUNTIME_SECURITY_RECONCILIATION.md`
+3. `docs/devnet/run_417_foundational_runtime_security_reconciliation/README.md`
+4. `docs/devnet/run_417_foundational_runtime_security_reconciliation/summary.txt`
+5. `docs/devnet/run_417_foundational_runtime_security_reconciliation/source_trace.txt`
+6. `docs/devnet/run_417_foundational_runtime_security_reconciliation/findings_matrix.txt`
+7. `docs/devnet/run_417_foundational_runtime_security_reconciliation/commands.txt`
+8. `docs/devnet/run_417_foundational_runtime_security_reconciliation/SHA256SUMS.txt`
+9. `docs/devnet/run_417_foundational_runtime_security_reconciliation/.gitignore`
+10. `scripts/devnet/run_417_foundational_runtime_security_reconciliation_audit.sh`
+
+The archive must be publish-safe. `SHA256SUMS.txt` must cover every intended tracked archive artifact except itself and `.gitignore`.
+
+The findings matrix must contain, at minimum:
+
+* security domain;
+* message/transaction type;
+* real construction entry point;
+* real inbound/execution entry point;
+* claimed identity source;
+* authenticated identity source;
+* identity-binding check;
+* signature creation;
+* signature verification;
+* membership/quorum/threshold enforcement;
+* suite enforcement;
+* replay/domain binding;
+* current reachability;
+* finding classification;
+* severity;
+* source evidence;
+* recommended next action.
+
+## 13. Documentation reconciliation
+
+Update only where required by proven findings:
+
+* `docs/release/QBIND_PUBLIC_DEVNET_READINESS_CRITERIA.md`
+* `docs/release/public-devnet/BLOCKER_REGISTER.md`
+* `docs/release/public-devnet/ARTIFACT_INDEX.md`
+* `docs/release/public-devnet/OPERATOR_VERIFICATION_MAP.md`
+* `docs/release/public-devnet/LAUNCH_GO_NO_GO.md`
+* `docs/protocol/QBIND_C4_C5_CLOSURE_CRITERIA.md`
+* `docs/whitepaper/contradiction.md`
+* package-integrity anchors/hashes affected by those edits.
+
+Do not rewrite historical evidence. Add current Run 417 findings as new entries and preserve the historical meaning of prior runs.
+
+If a verified finding contradicts a present-tense security or readiness statement, correct the current statement. If a milestone must be downgraded, update every table, checklist, blocker map and lint’s frozen truth consistently.
+
+Do not move any item Green.
+
+The Run 416 record should remain historical external-reachability evidence. Do not weaken or delete it merely because Run 417 identifies a different runtime-security boundary.
+
+## 14. Required execution and validation
+
+Record exact commands, exit codes and relevant output.
+
+At minimum run:
+
+* focused transaction-authentication tests;
+* focused consensus, proposal, vote, QC, timeout and new-view tests;
+* focused P2P mutual-auth and peer-identity tests;
+* binary-path consensus tests relevant to the traced paths;
+* the new Run 417 audit harness;
+* `cargo fmt --all -- --check` if any Rust file is added;
+* `git diff --check`;
+* Run 404, 405, 410, 411, 412, 413, 414 and 415 harnesses;
+* `sha256sum -c SHA256SUMS.txt` from inside the Run 417 archive;
+* tracked-tree secret/private-material scan;
+* confirmation that `devnet-seeds.live.json` is absent;
+* confirmation that the candidate remains planned with null reachability evidence;
+* confirmation that C4/C5 remain OPEN and public DevNet remains NO-GO.
+
+The Run 417 audit harness must fail closed when:
+
+* a required audit artifact is missing;
+* a required security domain is absent from the matrix;
+* a finding lacks source evidence or classification;
+* generic `PASS` wording could be mistaken for security readiness;
+* the audit claims a fix without production evidence;
+* current status documents contradict the audit;
+* a live seed file or readiness overclaim appears.
+
+Do not manufacture a positive result. An audit harness may return `RESULT=POSITIVE-FOR-AUDIT-COMPLETENESS` while the security verdict is negative, provided this distinction is unmistakable.
+
+Run CodeQL if available and technically feasible. If skipped, state the exact reason. Never report “0 alerts” when analysis did not execute successfully.
+
+## 15. Required conclusion
+
+The canonical evidence record must answer:
+
+1. Can an unauthenticated transaction reach a state-mutating production execution path?
+2. Are keyset thresholds and weights enforced?
+3. Are real binary proposals and votes cryptographically signed?
+4. Are inbound proposal/vote signatures verified before engine acceptance?
+5. Is the consensus sender bound to the authenticated KEMTLS peer?
+6. Are received QCs and timeout certificates independently verified?
+7. Are production suite IDs unambiguous and fail-closed?
+8. Which issues are verified vulnerabilities, incomplete controls, unreachable boundaries or unknowns?
+9. Which finding must be fixed first?
+10. What evidence will be required to prove the fix?
+
+Recommend the smallest security-first follow-up sequence. Do not assign future readiness closure in advance.
+
+## 16. Commit and final response
+
+Commit and push normally to the assigned branch. Do not force-push and do not open a PR.
+
+The final response must provide:
+
+1. Actual audited base commit.
+2. Final commit SHA and branch.
+3. Exact files changed.
+4. Overall audit verdict.
+5. Finding table with classification, severity and reachability.
+6. Transaction-authentication conclusion.
+7. Consensus-signing and verification conclusion.
+8. Peer-to-validator identity-binding conclusion.
+9. QC/timeout-certificate conclusion.
+10. Suite-enforcement conclusion.
+11. Exact tests/harnesses and exit codes.
+12. Documentation/readiness changes, including every downgrade.
+13. Confirmation that no production behavior was changed.
+14. Confirmation that no live seed was published.
+15. Confirmation that M4 remains Yellow, C4/C5 remain OPEN and public DevNet remains NO-GO.
+16. Remaining unknowns.
+17. Recommended smallest next implementation run.
+
+Never invent evidence or describe audit completeness as security readiness.
