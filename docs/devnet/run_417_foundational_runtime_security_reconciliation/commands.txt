@@ -1,0 +1,75 @@
+Run 417 — commands and exit codes (audit execution record)
+Audited base commit: cb4c4dc94eaaa46689be15358ba48921e98a7797 (working tree 32b6561, task-file-only delta)
+Environment: cargo 1.98.0; nproc=4; sandbox (no external network guarantees).
+
+# --- Baseline handling ---
+$ git branch --show-current                                  -> copilot/run-417-add-new-feature   (EXIT 0)
+$ git rev-parse HEAD                                          -> 32b6561...                          (EXIT 0)
+$ git fetch origin main                                       -> FETCH_HEAD = 32b6561 (main not advanced) (EXIT 0)
+$ git merge-base --is-ancestor cb4c4dc... HEAD                -> cb4c4dc is ancestor of HEAD          (EXIT 0)
+$ git status --porcelain                                      -> clean                                (EXIT 0)
+# No AGENTS.md / CLAUDE.md present.
+
+# --- Focused transaction-authentication tests ---
+$ cargo test -p qbind-ledger --test tx_auth_verifier_tests
+    running 9 tests ... test result: ok. 9 passed; 0 failed; 0 ignored     (EXIT 0)
+    incl. verify_transaction_auth_empty_auths_succeeds (confirms F1),
+          verify_transaction_auth_fails_on_bad_index / _invalid_signature / _unknown_suite /
+          _missing_keyset / _wrong_suite_id (confirm fail-closed A2/A8).
+
+# --- Focused consensus / proposal / vote / QC / timeout / new-view tests ---
+$ cargo test -p qbind-consensus --lib
+    test result: ok. 162 passed; 0 failed; 0 ignored                       (EXIT 0)
+    incl. validator_set::* (membership/quorum), verify_job::* (proposal/vote/timeout job kinds),
+          timeout_verify::{verify_valid_signed_timeout_is_accepted,
+                           verify_valid_2f_plus_1_tc_is_accepted,
+                           verify_wrong_suite_timeout_is_rejected}
+    NOTE: these verification primitives exist as isolated units but are NOT wired into the
+          deployed vote/proposal path (binary_consensus_loop.rs) — see source_trace.txt B/C/D.
+
+# --- P2P mutual-auth / peer-identity and binary-path consensus tracing ---
+# Peer→sender binding traced by source inspection of the deployed path (no production change):
+#   crates/qbind-node/src/p2p_inbound.rs:83,118-119,359-388
+#   crates/qbind-node/src/binary_consensus_loop.rs:2682,2730
+# Deployed-driver confirmation:
+$ grep -n 'spawn_binary_consensus_loop' crates/qbind-node/src/main.rs   -> present (EXIT 0)
+$ grep -n 'hotstuff_node_sim' crates/qbind-node/src/main.rs             -> 0 hits (harness not deployed)
+$ grep -rn '\.apply_block(' crates/qbind-node/src | grep -v test        -> only hotstuff_node_sim.rs:3156
+
+# --- rustfmt (no Rust files added/changed by Run 417) ---
+$ cargo fmt --all -- --check                                            -> clean (EXIT 0)
+
+# --- git diff --check ---
+$ git diff --check                                                     -> clean (EXIT 0)
+
+# --- Run 404/405/410/411/412/413/414/415 harnesses (before and after Run 417 doc edits) ---
+$ scripts/devnet/run_404_public_devnet_package_integrity_manifest.sh                      -> RESULT=POSITIVE (EXIT 0)
+$ scripts/devnet/run_405_public_devnet_full_tree_package_integrity.sh                     -> RESULT=POSITIVE (EXIT 0)
+$ scripts/devnet/run_410_public_devnet_package_integrity_stale_prose_lint.sh              -> RESULT=POSITIVE (EXIT 0)
+$ scripts/devnet/run_411_public_devnet_readiness_contradiction_ledger_lint.sh             -> RESULT=POSITIVE (EXIT 0)
+$ scripts/devnet/run_412_public_devnet_readiness_status_blocker_lint.sh                   -> RESULT=POSITIVE (EXIT 0)
+$ scripts/devnet/run_413_public_devnet_readiness_recommendation_gap_matrix_lint.sh        -> RESULT=POSITIVE (EXIT 0)
+$ scripts/devnet/run_414_public_devnet_readiness_cross_section_coverage_lint.sh           -> RESULT=POSITIVE (EXIT 0)
+$ scripts/devnet/run_415_public_devnet_readiness_artifact_path_reference_lint.sh          -> RESULT=POSITIVE (EXIT 0)
+
+# --- Run 417 audit harness ---
+$ scripts/devnet/run_417_foundational_runtime_security_reconciliation_audit.sh
+    RESULT=POSITIVE-FOR-AUDIT-COMPLETENESS
+    SECURITY_VERDICT=NEGATIVE-FOR-RUNTIME-SECURITY                       (EXIT 0)
+
+# --- Archive integrity ---
+$ ( cd docs/devnet/run_417_foundational_runtime_security_reconciliation && sha256sum -c SHA256SUMS.txt )
+    README.md: OK; summary.txt: OK; source_trace.txt: OK; findings_matrix.txt: OK; commands.txt: OK  (EXIT 0)
+
+# --- Current-state protection confirmations ---
+$ ls docs/release/public-devnet/network/devnet-seeds.live.json          -> No such file (ABSENT, EXIT 2)
+$ grep '"status": "planned"' .../devnet-seeds.live-candidate.json       -> present (EXIT 0)
+$ grep '"last_reachability_evidence": null' .../devnet-seeds.live-candidate.json -> present (EXIT 0)
+# C4/C5 remain OPEN; public DevNet remains NO-GO (readiness matrix, blocker register, launch gate unchanged).
+
+# --- Secret / private-material scan of tracked Run 417 files ---
+$ (git-tracked Run 417 files scanned for PEM/AWS/GH/Slack token patterns) -> clean (EXIT 0)
+
+# --- CodeQL ---
+# Requested via repository codeql_checker tooling; result recorded in the Run 417 final response.
+# Run 417 adds no production Rust and no new code paths (docs + audit-only shell only).

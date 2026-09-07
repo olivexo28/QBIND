@@ -1,0 +1,174 @@
+Run 417 — Findings Matrix (foundational runtime-security reconciliation)
+Format: one finding per block. Columns per finding are labelled. Classifications use the
+Run 417 taxonomy exactly: VERIFIED-FAIL-CLOSED | VERIFIED-FAIL-OPEN | VERIFIED-INCOMPLETE |
+MITIGATED-BY-CURRENT-UNREACHABILITY | TEST-OR-FIXTURE-ONLY | UNKNOWN-INSUFFICIENT-EVIDENCE.
+Severity is independent of reachability: Critical | High | Medium | Low | Informational.
+
+Security domains covered: TRANSACTION | CONSENSUS | PEER-IDENTITY-BINDING | QUORUM-CERTIFICATE.
+
+--------------------------------------------------------------------------------
+FINDING F1
+security_domain: TRANSACTION
+message_or_tx_type: any transaction (empty auths)
+real_construction_entry_point: n/a (caller-supplied Transaction)
+real_inbound_or_execution_entry_point: crates/qbind-runtime/src/lib.rs:139-159 execute_transaction -> crates/qbind-ledger/src/context.rs:49 verify_tx_auth -> crates/qbind-ledger/src/auth.rs:24 verify_transaction_auth
+claimed_identity_source: tx.auths (may be empty)
+authenticated_identity_source: none when auths empty
+identity_binding_check: none for empty auths (auth.rs:31-33)
+signature_creation: n/a
+signature_verification: skipped when auths empty (auth.rs:31-33); per-auth verify is fail-closed otherwise (auth.rs:52-100)
+membership_quorum_threshold_enforcement: thresholds/weights NOT enforced (auth.rs:22-23; KeysetAccount.threshold/KeysetEntry.weight unused)
+suite_enforcement: fail-closed per auth (unknown suite -> Err, auth.rs:89-91)
+replay_domain_binding: tx_digest domain "QBIND:TX" binds chain_id/nonce/body; excludes auths[] (crates/qbind-hash/src/tx.rs)
+current_reachability: MITIGATED-BY-CURRENT-UNREACHABILITY — deployed qbind-node has no tx ingress, builds empty proposals (basic_hotstuff_engine.rs:1359,1381), and never calls Node::apply_block (only hotstuff_node_sim.rs:3156 / execution_adapter tests do)
+finding_classification: VERIFIED-FAIL-OPEN (code) / MITIGATED-BY-CURRENT-UNREACHABILITY (deployed binary)
+severity: High
+source_evidence: crates/qbind-ledger/src/auth.rs:24-42; crates/qbind-runtime/src/lib.rs:139-159; crates/qbind-node/src/lib.rs:2553; grep apply_block deployed-src
+recommended_next_action: require >=1 authorization for non-genesis transactions with an explicit, domain-separated genesis/bootstrap exemption; keep the tx path unwired until authored consensus lands
+
+--------------------------------------------------------------------------------
+FINDING F2
+security_domain: TRANSACTION
+message_or_tx_type: multi-auth transaction (threshold/weight/duplicate)
+real_construction_entry_point: n/a (caller-supplied Transaction)
+real_inbound_or_execution_entry_point: crates/qbind-ledger/src/auth.rs:37-39 loop over tx.auths
+claimed_identity_source: TxAuth.account_index / TxAuth.suite_id
+authenticated_identity_source: keyset entry pubkey (auth.rs:94)
+identity_binding_check: key must exist in referenced keyset for suite_id (auth.rs:78-85) — fail-closed
+signature_creation: n/a
+signature_verification: per-auth suite.verify fail-closed (auth.rs:98-100)
+membership_quorum_threshold_enforcement: NONE — no weight accumulation, no threshold compare, no signer/key dedup (auth.rs:22-23,37-39)
+suite_enforcement: fail-closed per auth
+replay_domain_binding: as F1
+current_reachability: MITIGATED-BY-CURRENT-UNREACHABILITY (same deployed-path gap as F1)
+finding_classification: VERIFIED-INCOMPLETE
+severity: High
+source_evidence: crates/qbind-ledger/src/auth.rs:22-23,37-39,78-100; crates/qbind-types/src/state_keyset.rs (unused weight/threshold)
+recommended_next_action: implement cumulative weight vs keyset threshold and per-keyset signer/key uniqueness before any tx execution is wired
+
+--------------------------------------------------------------------------------
+FINDING F3
+security_domain: CONSENSUS
+message_or_tx_type: proposal (outbound + inbound)
+real_construction_entry_point: crates/qbind-consensus/src/basic_hotstuff_engine.rs:1357-1382 (proposer_index=self.local_id, suite_id=0, signature: vec![])
+real_inbound_or_execution_entry_point: crates/qbind-node/src/binary_consensus_loop.rs:2666-2714 (from=proposal.header.proposer_index @2682 -> on_proposal_event)
+claimed_identity_source: proposal.header.proposer_index (self-declared wire field)
+authenticated_identity_source: none propagated to the engine
+identity_binding_check: leader-for-view only (on_proposal_event); no crypto binding
+signature_creation: NONE — signature: vec![] (basic_hotstuff_engine.rs:1382)
+signature_verification: NONE on deployed path (binary_consensus_loop.rs:2666-2714)
+membership_quorum_threshold_enforcement: leader role check vs self-declared index only
+suite_enforcement: NONE — emits suite 0 (toy); no inbound suite validation
+replay_domain_binding: NONE — no signed preimage produced/verified
+current_reachability: reachable by any admitted KEMTLS peer on a multi-node deployed run
+finding_classification: VERIFIED-FAIL-OPEN
+severity: Critical
+source_evidence: crates/qbind-consensus/src/basic_hotstuff_engine.rs:1357-1382; crates/qbind-node/src/binary_consensus_loop.rs:2666-2714; crates/qbind-wire/src/consensus.rs:13-18
+recommended_next_action: sign proposals over a domain-separated preimage with a production suite and verify signature + validator-set membership before on_proposal_event
+
+--------------------------------------------------------------------------------
+FINDING F4
+security_domain: CONSENSUS
+message_or_tx_type: vote (outbound + inbound)
+real_construction_entry_point: crates/qbind-consensus/src/basic_hotstuff_engine.rs:1537-1539 (validator_index=self.local_id, suite_id=0, signature: vec![])
+real_inbound_or_execution_entry_point: crates/qbind-node/src/binary_consensus_loop.rs:2726-2761 (from=vote.validator_index @2730 -> on_vote_event)
+claimed_identity_source: vote.validator_index (self-declared wire field)
+authenticated_identity_source: none propagated to the engine
+identity_binding_check: none (epoch/view only)
+signature_creation: NONE — signature: vec![]
+signature_verification: NONE on deployed path
+membership_quorum_threshold_enforcement: local accumulator dedups voters (vote_accumulator.rs) but only over self-declared ValidatorId
+suite_enforcement: NONE — emits suite 0; no inbound suite validation
+replay_domain_binding: NONE
+current_reachability: reachable by any admitted KEMTLS peer on a multi-node deployed run
+finding_classification: VERIFIED-FAIL-OPEN
+severity: Critical
+source_evidence: crates/qbind-consensus/src/basic_hotstuff_engine.rs:1537-1539; crates/qbind-node/src/binary_consensus_loop.rs:2726-2761
+recommended_next_action: sign votes and verify signature + membership before on_vote_event; bind vote to authenticated sender
+
+--------------------------------------------------------------------------------
+FINDING F5
+security_domain: CONSENSUS
+message_or_tx_type: timeout message / new-view
+real_construction_entry_point: basic_hotstuff_engine timeout emission
+real_inbound_or_execution_entry_point: crates/qbind-node/src/binary_consensus_loop.rs:2827-2869
+claimed_identity_source: timeout signer index
+authenticated_identity_source: verify_timeout_msg validators when context present
+identity_binding_check: only when verification_ctx is Some
+signature_creation: present for timeout (unlike vote/proposal)
+signature_verification: OPTIONAL — gated on Option verification_ctx (default None => skipped); binary_consensus_loop.rs:788,2827-2829
+membership_quorum_threshold_enforcement: only within verify_timeout_msg when enabled
+suite_enforcement: only within verify path when enabled
+replay_domain_binding: within verify path when enabled
+current_reachability: reachable; verification off by default on LocalMesh/single-validator
+finding_classification: VERIFIED-INCOMPLETE
+severity: High
+source_evidence: crates/qbind-node/src/binary_consensus_loop.rs:759-788,2827-2887; crates/qbind-consensus/src/timeout_verify.rs
+recommended_next_action: make timeout/new-view verification mandatory (non-optional context) on the deployed path
+
+--------------------------------------------------------------------------------
+FINDING F6
+security_domain: PEER-IDENTITY-BINDING
+message_or_tx_type: all consensus messages (KEMTLS peer -> engine sender)
+real_construction_entry_point: KEMTLS handshake (Run 416 external KEMTLS mutual-auth static-root)
+real_inbound_or_execution_entry_point: crates/qbind-node/src/p2p_inbound.rs:83,359-388 -> binary_consensus_loop.rs:2682,2730
+claimed_identity_source: proposer_index / validator_index inside the message
+authenticated_identity_source: KEMTLS leaf/NodeId at connection level (NOT forwarded)
+identity_binding_check: NONE — handle_consensus_msg(msg) carries no sender NodeId (contrast handle_dag_msg_from(_, sender) at p2p_inbound.rs:118-119)
+signature_creation: n/a
+signature_verification: n/a (see F3/F4)
+membership_quorum_threshold_enforcement: n/a
+suite_enforcement: n/a
+replay_domain_binding: n/a
+current_reachability: reachable by any admitted KEMTLS peer on a multi-node deployed run
+finding_classification: VERIFIED-FAIL-OPEN
+severity: Critical
+source_evidence: crates/qbind-node/src/p2p_inbound.rs:83,118-119,359-388; crates/qbind-node/src/binary_consensus_loop.rs:2682,2730
+recommended_next_action: propagate authenticated peer NodeId with each consensus message and require it to match the claimed/signing validator identity
+
+--------------------------------------------------------------------------------
+FINDING F7
+security_domain: QUORUM-CERTIFICATE
+message_or_tx_type: quorum certificate (proposal-carried / high-QC)
+real_construction_entry_point: crates/qbind-consensus/src/vote_accumulator.rs, qc.rs (local build)
+real_inbound_or_execution_entry_point: crates/qbind-consensus/src/basic_hotstuff_engine.rs:1489-1506 (imported with empty signers) via binary_consensus_loop.rs:2666-2714
+claimed_identity_source: wire QC signer_bitmap / signatures
+authenticated_identity_source: discarded on import
+identity_binding_check: NONE for imported QC
+signature_creation: n/a (QC aggregates vote sigs — which are empty, see F4)
+signature_verification: NONE — QuorumCertificate::new(..., vec![]) at basic_hotstuff_engine.rs:1493 discards signer evidence
+membership_quorum_threshold_enforcement: local accumulator enforces membership/quorum/dedup (vote_accumulator.rs, qc.rs) but an IMPORTED QC arrives with empty signers and is not re-verified cryptographically
+suite_enforcement: NONE on import path
+replay_domain_binding: NONE on import path
+current_reachability: reachable by any admitted peer sending a proposal carrying a QC
+finding_classification: VERIFIED-FAIL-OPEN
+severity: Critical
+source_evidence: crates/qbind-consensus/src/basic_hotstuff_engine.rs:1489-1506; crates/qbind-wire/src/consensus.rs:266-267
+recommended_next_action: extract and cryptographically verify signer_bitmap/signatures against the validator set before a received QC influences locking/commit/catch-up
+
+--------------------------------------------------------------------------------
+FINDING F8
+security_domain: QUORUM-CERTIFICATE
+message_or_tx_type: consensus suite id
+real_construction_entry_point: crates/qbind-consensus/src/basic_hotstuff_engine.rs:1358,1412,1538 (suite 0)
+real_inbound_or_execution_entry_point: crates/qbind-node/src/binary_consensus_loop.rs (no suite validation)
+claimed_identity_source: message suite_id field
+authenticated_identity_source: n/a
+identity_binding_check: n/a
+signature_creation: suite 0 (toy) emitted
+signature_verification: no suite gating inbound
+membership_quorum_threshold_enforcement: n/a
+suite_enforcement: NONE — DEFAULT_CONSENSUS_SUITE_ID=0 marked "NOT FOR PRODUCTION" (consensus.rs:13-18); no allow-list; suite 0 reachable on deployed path
+replay_domain_binding: n/a
+current_reachability: deployed consensus messages use suite 0; inbound accepts any suite id
+finding_classification: VERIFIED-FAIL-OPEN
+severity: High
+source_evidence: crates/qbind-wire/src/consensus.rs:13-18; crates/qbind-consensus/src/basic_hotstuff_engine.rs:1358,1412,1538
+recommended_next_action: define a production consensus suite allow-list and fail closed on suite 0 / unknown / disabled suites; keep consensus, transport (Run 416 sig_suite_id=100), and tx suite namespaces explicitly separated
+
+--------------------------------------------------------------------------------
+NOTE ON SUITE NAMESPACES:
+Run 416's captured provider line sig_suite_id=100 (ml-dsa-44) is a TRANSPORT/KEMTLS
+provider value. It is NOT evidence that consensus messages or transactions are signed with
+ML-DSA-44. Deployed consensus emits suite 0; the tx path uses ledger suite ids resolved via
+CryptoProvider. These are separate security domains.

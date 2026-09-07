@@ -1,0 +1,27 @@
+# Run 417 evidence archive — foundational runtime-security reconciliation audit.
+#
+# Only publish-safe, transcribed text evidence is tracked in this directory:
+#   README.md, summary.txt, source_trace.txt, findings_matrix.txt, commands.txt, SHA256SUMS.txt
+#
+# This is an audit archive. It contains NO keys, certificates, credentials, raw operator
+# bundles, private endpoints, or private host identifiers. The patterns below are a backstop
+# to ensure no raw capture / private material is ever committed into this directory.
+bundles/
+material/
+node-data/
+nodes/
+logs/
+data/
+*.tgz
+*.tar.gz
+*.tar
+*.kem.sk.bin
+*.cert.bin
+*.root.bin
+*.signing.key
+*.sk.bin
+*.hex
+*.spec
+*.err
+*.log
+public-identity.json

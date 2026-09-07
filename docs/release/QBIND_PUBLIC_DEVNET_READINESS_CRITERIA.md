@@ -616,6 +616,36 @@ state; no private key material is committed. **M4 stays Yellow/launch-blocking (
 half now PROVEN; durable published-seed half OPEN); M6 stays Yellow/Partial; S5/S7 stay Yellow;
 M1–M3/M5/M7–M20 remain Green; public DevNet stays NOT launch-ready; C4/C5 remain OPEN; MainNet/TestNet
 untouched.**
+Updated Run 417 — **foundational runtime-security reconciliation AUDIT; no readiness item moves (audit +
+evidence only — docs + audit-only shell, no production Rust behavior change, no `build.rs` change, no new
+CLI flag)**: Run 417 source-to-runtime reconciles the four foundational authentication boundaries of the
+**deployed** `qbind-node` binary (transaction auth; consensus proposal/vote/timeout/new-view auth;
+authenticated KEMTLS peer → consensus-sender binding; QC/suite enforcement). It finds the deployed consensus
+path (`crates/qbind-node/src/binary_consensus_loop.rs`) is **fail-open** for consensus-message
+authentication — proposals/votes are emitted **unsigned** with toy suite id `0`
+(`crates/qbind-consensus/src/basic_hotstuff_engine.rs:1357-1382,1537-1539`;
+`crates/qbind-wire/src/consensus.rs:13-18`), inbound proposals/votes are accepted with **no** signature,
+membership, or suite verification (`binary_consensus_loop.rs:2666-2714,2726-2761`), the engine sender is a
+**self-declared** `proposer_index`/`validator_index` rather than the authenticated KEMTLS NodeId
+(`crates/qbind-node/src/p2p_inbound.rs:83,359-388`), and proposal-carried QCs are imported with **empty
+signer evidence** (`basic_hotstuff_engine.rs:1493`); timeout/new-view verification is optional/off by
+default (`binary_consensus_loop.rs:788,2827-2829`). Transaction empty-auth acceptance
+(`crates/qbind-ledger/src/auth.rs:31-33`) with unenforced thresholds/weights (`auth.rs:22-23`) is fail-open
+in code but is **not reachable** from the deployed binary today (no tx ingress, empty proposals,
+`Node::apply_block` invoked only by test harnesses). Overall verdict
+`AUDIT-COMPLETE / NEGATIVE-FOR-RUNTIME-SECURITY`; audit harness
+`scripts/devnet/run_417_foundational_runtime_security_reconciliation_audit.sh`
+(`RESULT=POSITIVE-FOR-AUDIT-COMPLETENESS`, `SECURITY_VERDICT=NEGATIVE-FOR-RUNTIME-SECURITY`), with
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_417.md`,
+`docs/protocol/QBIND_FOUNDATIONAL_RUNTIME_SECURITY_RECONCILIATION.md`, and archive
+`docs/devnet/run_417_foundational_runtime_security_reconciliation/`. **No downgrade is required** — these
+gaps are already reflected by **C4 OPEN** and **M4/M6 Yellow**, and no current document claims deployed
+consensus/transaction authentication. It adds **no** CLI flag, opens **no** port, deploys **no**
+seed/bootnode/faucet/RPC/explorer/status service, publishes **no** `devnet-seeds.live.json`, and mutates
+**no** validator/epoch/sequence/marker/`LivePqcTrustState` state. **No readiness item moves Green. M4 stays
+Yellow/launch-blocking; M6 stays Yellow/Partial; S5/S7 stay Yellow; M1–M3/M5/M7–M20 remain Green; public
+DevNet stays NOT launch-ready; C4/C5 remain OPEN; MainNet/TestNet untouched.** Run 416 remains valid
+historical external-reachability evidence and is not weakened.
 identity **generation + verification** package is published under
 `docs/release/public-devnet/identity/` (`README.md`, `IDENTITY_GENERATION.md`, `IDENTITY_VERIFY.md`,
 `OPERATOR_IDENTITY_SCHEMA.json`, `EXAMPLE_PUBLIC_IDENTITY.json`, `SAFETY.md`, `VERIFY.md`) backed by the
