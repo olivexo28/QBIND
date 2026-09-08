@@ -60,6 +60,69 @@ use tokio::sync::mpsc;
 
 use crate::metrics::P2pMetrics;
 use crate::p2p::{ConsensusNetMsg, ControlMsg, DagNetMsg, NodeId, P2pMessage};
+use crate::peer_consensus_binding::AuthenticatedConsensusOrigin;
+
+// ============================================================================
+// Authenticated-origin envelopes (Run 418, F6)
+// ============================================================================
+
+/// An inbound P2P message paired with the **authenticated** transport origin
+/// of the secure session it arrived on.
+///
+/// `origin` is `None` when the session did not establish an authenticated
+/// identity (e.g. `MutualAuthMode::Disabled`, or an `Optional` session that
+/// did not complete mutual auth). The origin is a purely in-process value: it
+/// is never serialized and never derived from the message payload, so a peer
+/// can neither self-assert nor overwrite it.
+#[derive(Clone, Debug)]
+pub struct InboundP2pEnvelope {
+    /// Authenticated transport origin, or `None` for an unauthenticated
+    /// session.
+    pub origin: Option<AuthenticatedConsensusOrigin>,
+    /// The decoded P2P message.
+    pub message: P2pMessage,
+}
+
+impl InboundP2pEnvelope {
+    /// Build an envelope with an explicit origin.
+    pub fn new(origin: Option<AuthenticatedConsensusOrigin>, message: P2pMessage) -> Self {
+        Self { origin, message }
+    }
+}
+
+impl From<P2pMessage> for InboundP2pEnvelope {
+    fn from(message: P2pMessage) -> Self {
+        Self {
+            origin: None,
+            message,
+        }
+    }
+}
+
+/// A decoded consensus message paired with its authenticated transport origin,
+/// forwarded from the inbound demuxer into the binary consensus loop's ingress
+/// gate. The origin never comes from the consensus payload.
+#[derive(Clone, Debug)]
+pub struct InboundConsensusEnvelope {
+    /// Authenticated transport origin, or `None` for an unauthenticated
+    /// session (the ingress gate fails closed on `None`).
+    pub origin: Option<AuthenticatedConsensusOrigin>,
+    /// The consensus network message.
+    pub msg: ConsensusNetMsg,
+}
+
+impl InboundConsensusEnvelope {
+    /// Build an envelope with an explicit origin.
+    pub fn new(origin: Option<AuthenticatedConsensusOrigin>, msg: ConsensusNetMsg) -> Self {
+        Self { origin, msg }
+    }
+}
+
+impl From<ConsensusNetMsg> for InboundConsensusEnvelope {
+    fn from(msg: ConsensusNetMsg) -> Self {
+        Self { origin: None, msg }
+    }
+}
 
 // ============================================================================
 // Handler Traits
@@ -81,6 +144,22 @@ pub trait ConsensusInboundHandler: Send + Sync {
     /// This method should be non-blocking. Heavy processing should be
     /// dispatched to a background task or channel.
     fn handle_consensus_msg(&self, msg: ConsensusNetMsg);
+
+    /// Handle an inbound consensus message together with the **authenticated**
+    /// transport origin of the secure session it arrived on (Run 418, F6).
+    ///
+    /// The default implementation ignores the origin and delegates to
+    /// [`ConsensusInboundHandler::handle_consensus_msg`], preserving the
+    /// behaviour of handlers that do not participate in sender binding. The
+    /// production [`ChannelConsensusHandler`] overrides this to carry the
+    /// origin through to the binary consensus loop's ingress gate.
+    fn handle_consensus_msg_from(
+        &self,
+        _origin: Option<AuthenticatedConsensusOrigin>,
+        msg: ConsensusNetMsg,
+    ) {
+        self.handle_consensus_msg(msg);
+    }
 }
 
 /// Handler trait for inbound DAG mempool messages over P2P (T174, T183).
@@ -196,8 +275,9 @@ impl ControlInboundHandler for NullControlHandler {
 /// - **Testable**: Handlers can be mocked for unit testing.
 /// - **Observable**: Increments P2P metrics for each message type.
 pub struct P2pInboundDemuxer {
-    /// Receiver for inbound P2P messages.
-    receiver: mpsc::Receiver<P2pMessage>,
+    /// Receiver for inbound P2P messages paired with their authenticated
+    /// transport origin.
+    receiver: mpsc::Receiver<InboundP2pEnvelope>,
     /// Handler for consensus messages.
     consensus_handler: Arc<dyn ConsensusInboundHandler>,
     /// Handler for DAG messages.
@@ -213,12 +293,12 @@ impl P2pInboundDemuxer {
     ///
     /// # Arguments
     ///
-    /// * `receiver` - Channel receiver for inbound P2P messages
+    /// * `receiver` - Channel receiver for inbound P2P message envelopes
     /// * `consensus_handler` - Handler for consensus messages
     /// * `dag_handler` - Handler for DAG messages
     /// * `control_handler` - Handler for control messages (optional, uses NullControlHandler if None)
     pub fn new(
-        receiver: mpsc::Receiver<P2pMessage>,
+        receiver: mpsc::Receiver<InboundP2pEnvelope>,
         consensus_handler: Arc<dyn ConsensusInboundHandler>,
         dag_handler: Arc<dyn DagInboundHandler>,
         control_handler: Option<Arc<dyn ControlInboundHandler>>,
@@ -233,7 +313,7 @@ impl P2pInboundDemuxer {
     }
 
     /// Create a demuxer with all null handlers (for testing).
-    pub fn with_null_handlers(receiver: mpsc::Receiver<P2pMessage>) -> Self {
+    pub fn with_null_handlers(receiver: mpsc::Receiver<InboundP2pEnvelope>) -> Self {
         Self {
             receiver,
             consensus_handler: Arc::new(NullConsensusHandler),
@@ -265,17 +345,18 @@ impl P2pInboundDemuxer {
     /// ```
     pub async fn run(mut self) {
         // Note: Using minimal logging to avoid noise during normal operation
-        while let Some(msg) = self.receiver.recv().await {
-            self.handle_message(msg);
+        while let Some(envelope) = self.receiver.recv().await {
+            self.handle_envelope(envelope);
         }
     }
 
-    /// Handle a single P2P message.
+    /// Handle a single inbound P2P envelope (message + authenticated origin).
     ///
     /// This method is also useful for testing: you can directly inject
-    /// messages without going through the channel.
-    pub fn handle_message(&self, msg: P2pMessage) {
-        match msg {
+    /// envelopes without going through the channel.
+    pub fn handle_envelope(&self, envelope: InboundP2pEnvelope) {
+        let InboundP2pEnvelope { origin, message } = envelope;
+        match message {
             P2pMessage::Consensus(net_msg) => {
                 // Record the message type for debug purposes
                 let _ = msg_type(&net_msg);
@@ -284,7 +365,11 @@ impl P2pInboundDemuxer {
                     m.inc_message_received("consensus");
                 }
 
-                self.consensus_handler.handle_consensus_msg(net_msg);
+                // Run 418: carry the authenticated transport origin through to
+                // the consensus ingress gate. The origin is never derived from
+                // the payload.
+                self.consensus_handler
+                    .handle_consensus_msg_from(origin, net_msg);
             }
             P2pMessage::Dag(dag_msg) => {
                 // Record the message type for debug purposes
@@ -307,6 +392,14 @@ impl P2pInboundDemuxer {
                 self.control_handler.handle_control_msg(ctrl_msg);
             }
         }
+    }
+
+    /// Handle a single P2P message with no authenticated origin.
+    ///
+    /// Retained for callers/tests that inject bare messages; equivalent to
+    /// [`P2pInboundDemuxer::handle_envelope`] with `origin = None`.
+    pub fn handle_message(&self, msg: P2pMessage) {
+        self.handle_envelope(InboundP2pEnvelope::from(msg));
     }
 }
 
@@ -357,24 +450,25 @@ fn control_msg_type(msg: &ControlMsg) -> &'static str {
 /// event loop.
 #[derive(Clone)]
 pub struct ChannelConsensusHandler {
-    sender: mpsc::Sender<ConsensusNetMsg>,
+    sender: mpsc::Sender<InboundConsensusEnvelope>,
 }
 
 impl ChannelConsensusHandler {
     /// Create a new channel-based consensus handler.
     ///
-    /// Returns the handler and a receiver for the forwarded messages.
-    pub fn new(capacity: usize) -> (Self, mpsc::Receiver<ConsensusNetMsg>) {
+    /// Returns the handler and a receiver for the forwarded consensus
+    /// envelopes (message + authenticated origin).
+    pub fn new(capacity: usize) -> (Self, mpsc::Receiver<InboundConsensusEnvelope>) {
         let (sender, receiver) = mpsc::channel(capacity);
         (Self { sender }, receiver)
     }
 
     /// Create from an existing sender.
-    pub fn from_sender(sender: mpsc::Sender<ConsensusNetMsg>) -> Self {
+    pub fn from_sender(sender: mpsc::Sender<InboundConsensusEnvelope>) -> Self {
         Self { sender }
     }
 
-    /// Run 035: clone the inbound `ConsensusNetMsg` sender so an opt-in,
+    /// Run 035: clone the inbound envelope sender so an opt-in,
     /// dev/test-only injection harness can push crafted frames into the
     /// **same** channel that the P2P inbound demuxer feeds. Frames pushed
     /// here traverse the identical binary-loop verification gate
@@ -385,14 +479,27 @@ impl ChannelConsensusHandler {
     /// `QBIND_DEVNET_FORGED_INJECTION=1`. See
     /// `crates/qbind-node/src/forged_injection.rs` and
     /// `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_035.md`.
-    pub fn sender_clone(&self) -> mpsc::Sender<ConsensusNetMsg> {
+    pub fn sender_clone(&self) -> mpsc::Sender<InboundConsensusEnvelope> {
         self.sender.clone()
     }
 }
 
 impl ConsensusInboundHandler for ChannelConsensusHandler {
     fn handle_consensus_msg(&self, msg: ConsensusNetMsg) {
-        if let Err(e) = self.sender.try_send(msg) {
+        // No authenticated origin available at this entry point; forward with
+        // `origin = None` so the binary-loop ingress gate fails closed.
+        self.handle_consensus_msg_from(None, msg);
+    }
+
+    fn handle_consensus_msg_from(
+        &self,
+        origin: Option<AuthenticatedConsensusOrigin>,
+        msg: ConsensusNetMsg,
+    ) {
+        if let Err(e) = self
+            .sender
+            .try_send(InboundConsensusEnvelope::new(origin, msg))
+        {
             eprintln!(
                 "[P2P Inbound] Failed to forward consensus message (channel full or closed): {}",
                 e
@@ -599,8 +706,9 @@ mod tests {
         let msg1 = rx.recv().await.expect("should receive first message");
         let msg2 = rx.recv().await.expect("should receive second message");
 
-        assert!(matches!(msg1, ConsensusNetMsg::Vote(_)));
-        assert!(matches!(msg2, ConsensusNetMsg::Proposal(_)));
+        assert!(msg1.origin.is_none());
+        assert!(matches!(msg1.msg, ConsensusNetMsg::Vote(_)));
+        assert!(matches!(msg2.msg, ConsensusNetMsg::Proposal(_)));
     }
 
     #[tokio::test]

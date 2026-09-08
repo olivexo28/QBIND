@@ -85,6 +85,8 @@ use tokio::task::JoinHandle;
 
 use crate::node_config::NetworkTransportConfig;
 use crate::p2p::{NodeId, P2pMessage, P2pService};
+use crate::p2p_inbound::InboundP2pEnvelope;
+use crate::peer_consensus_binding::AuthenticatedConsensusOrigin;
 use crate::secure_channel::{
     accept_kemtls_async_with_peer_init, connect_kemtls_async, AcceptedPeerInit, SecureChannelAsync,
 };
@@ -220,6 +222,20 @@ fn decode_frame(frame: &[u8]) -> Result<P2pMessage, P2pTransportError> {
 /// `p2p_node_builder::parse_test_validator_id_from_client_random`.
 pub type InboundIdentityResolver =
     Arc<dyn Fn(&AcceptedPeerInit) -> Option<NodeId> + Send + Sync>;
+
+/// Run 418: resolver that maps an accepted inbound session's **verified**
+/// KEMTLS identity to an [`AuthenticatedConsensusOrigin`], or `None` when the
+/// session did not establish a verified mutual-auth identity.
+///
+/// Unlike [`InboundIdentityResolver`] (which is test-grade and may consume
+/// self-asserted `client_random`), this resolver must only ever produce an
+/// origin from the cert-verified fields of `AcceptedPeerInit`
+/// (`mutual_auth_complete`, `verified_client_node_id`,
+/// `verified_peer_validator_id`). When it returns `None`, the read loop
+/// forwards consensus frames with no origin and the consensus ingress gate
+/// fails closed.
+pub type InboundConsensusOriginResolver =
+    Arc<dyn Fn(&AcceptedPeerInit) -> Option<AuthenticatedConsensusOrigin> + Send + Sync>;
 
 // ============================================================================
 // B8: Initial-dial retry policy
@@ -408,9 +424,9 @@ pub struct TcpKemTlsP2pService {
     /// Connected peers.
     peers: Arc<RwLock<HashMap<NodeId, PeerConnection>>>,
     /// Inbound message channel (sender).
-    inbound_tx: mpsc::Sender<P2pMessage>,
+    inbound_tx: mpsc::Sender<InboundP2pEnvelope>,
     /// Inbound message channel (receiver) for cloning.
-    inbound_rx: Arc<tokio::sync::Mutex<mpsc::Receiver<P2pMessage>>>,
+    inbound_rx: Arc<tokio::sync::Mutex<mpsc::Receiver<InboundP2pEnvelope>>>,
     /// Shutdown signal broadcaster.
     shutdown_tx: broadcast::Sender<()>,
     /// Listener task handle (optional).
@@ -529,6 +545,27 @@ pub struct TcpKemTlsP2pService {
     inbound_per_peer_limiter: Arc<
         RwLock<Option<Arc<crate::deployed_inbound_per_peer_limiter::DeployedInboundPerPeerLimiter>>>,
     >,
+    /// Run 418: optional resolver that maps an accepted inbound session's
+    /// **verified** KEMTLS identity to an authenticated consensus origin.
+    ///
+    /// When present and returning `Some(origin)` for an accepted session, the
+    /// per-peer read loop tags every inbound consensus frame from that session
+    /// with the origin so the consensus ingress gate can bind the claimed
+    /// sender to the authenticated validator. When absent or returning `None`,
+    /// consensus frames are forwarded with no origin and the ingress gate (when
+    /// installed) fails closed. Installed via
+    /// [`TcpKemTlsP2pService::set_inbound_consensus_origin_resolver`].
+    inbound_consensus_origin_resolver: Arc<RwLock<Option<InboundConsensusOriginResolver>>>,
+    /// Run 418: static-peer outbound authenticated consensus origins keyed by
+    /// dial address (the same string from `NetworkTransportConfig::static_peers`
+    /// after stripping any `vid@` prefix).
+    ///
+    /// When `dial_peer(addr)` completes a KEMTLS handshake and finds an entry
+    /// here, the resulting per-peer read loop tags inbound consensus frames from
+    /// that connection with the configured origin (bound to handshake success).
+    /// Empty by default. Installed via
+    /// [`TcpKemTlsP2pService::set_outbound_consensus_origins`].
+    outbound_consensus_origins: Arc<RwLock<HashMap<String, AuthenticatedConsensusOrigin>>>,
 }
 
 impl std::fmt::Debug for TcpKemTlsP2pService {
@@ -578,6 +615,8 @@ impl TcpKemTlsP2pService {
             peer_candidate_wire_sink: Arc::new(RwLock::new(None)),
             abuse_dos_runtime: Arc::new(RwLock::new(None)),
             inbound_per_peer_limiter: Arc::new(RwLock::new(None)),
+            inbound_consensus_origin_resolver: Arc::new(RwLock::new(None)),
+            outbound_consensus_origins: Arc::new(RwLock::new(HashMap::new())),
         })
     }
 
@@ -632,6 +671,29 @@ impl TcpKemTlsP2pService {
     pub fn set_inbound_identity_resolver(&mut self, resolver: InboundIdentityResolver) {
         let mut guard = self.inbound_identity_resolver.write();
         *guard = Some(resolver);
+    }
+
+    /// Run 418: install the inbound authenticated-consensus-origin resolver.
+    ///
+    /// When installed, every accepted inbound session has its consensus frames
+    /// tagged with the origin the resolver derives from the session's
+    /// **verified** KEMTLS identity (see [`InboundConsensusOriginResolver`]).
+    pub fn set_inbound_consensus_origin_resolver(
+        &mut self,
+        resolver: InboundConsensusOriginResolver,
+    ) {
+        let mut guard = self.inbound_consensus_origin_resolver.write();
+        *guard = Some(resolver);
+    }
+
+    /// Run 418: install the static-peer outbound authenticated consensus
+    /// origins keyed by dial address.
+    pub fn set_outbound_consensus_origins(
+        &mut self,
+        origins: HashMap<String, AuthenticatedConsensusOrigin>,
+    ) {
+        let mut guard = self.outbound_consensus_origins.write();
+        *guard = origins;
     }
 
     /// B8: install a bounded initial-dial retry policy.
@@ -909,6 +971,8 @@ impl TcpKemTlsP2pService {
         let peer_candidate_wire_sink = Arc::clone(&self.peer_candidate_wire_sink);
         let abuse_dos_runtime = Arc::clone(&self.abuse_dos_runtime);
         let inbound_per_peer_limiter = Arc::clone(&self.inbound_per_peer_limiter);
+        let inbound_consensus_origin_resolver =
+            Arc::clone(&self.inbound_consensus_origin_resolver);
 
         tokio::spawn(async move {
             let mut shutdown_rx = shutdown_rx;
@@ -961,6 +1025,8 @@ impl TcpKemTlsP2pService {
                                 let wire_sink_clone = Arc::clone(&peer_candidate_wire_sink);
                                 let inbound_per_peer_limiter_clone =
                                     Arc::clone(&inbound_per_peer_limiter);
+                                let inbound_consensus_origin_resolver_clone =
+                                    Arc::clone(&inbound_consensus_origin_resolver);
 
                                 tokio::spawn(async move {
                                     if let Err(e) = Self::handle_inbound_connection(
@@ -975,6 +1041,7 @@ impl TcpKemTlsP2pService {
                                         resolver_clone,
                                         wire_sink_clone,
                                         inbound_per_peer_limiter_clone,
+                                        inbound_consensus_origin_resolver_clone,
                                     )
                                     .await
                                     {
@@ -1027,7 +1094,7 @@ impl TcpKemTlsP2pService {
         peer_addr: std::net::SocketAddr,
         server_cfg: ServerConnectionConfig,
         peers: Arc<RwLock<HashMap<NodeId, PeerConnection>>>,
-        inbound_tx: mpsc::Sender<P2pMessage>,
+        inbound_tx: mpsc::Sender<InboundP2pEnvelope>,
         connections_current: Arc<AtomicU64>,
         bytes_received: Arc<AtomicU64>,
         inbound_session_counter: Arc<AtomicU64>,
@@ -1044,6 +1111,7 @@ impl TcpKemTlsP2pService {
                 >,
             >,
         >,
+        inbound_consensus_origin_resolver: Arc<RwLock<Option<InboundConsensusOriginResolver>>>,
     ) -> Result<(), P2pTransportError> {
         // Convert Tokio stream to std::net::TcpStream for KEMTLS handshake.
         //
@@ -1114,6 +1182,16 @@ impl TcpKemTlsP2pService {
             }
         };
 
+        // Run 418: derive the authenticated consensus origin from this
+        // session's *verified* KEMTLS identity (never from self-asserted
+        // fields). When no resolver is installed or the session did not
+        // authenticate, the origin is `None` and downstream consensus frames
+        // are forwarded without an origin (the ingress gate fails closed).
+        let consensus_origin: Option<AuthenticatedConsensusOrigin> = {
+            let guard = inbound_consensus_origin_resolver.read();
+            guard.as_ref().and_then(|f| f(&peer_init))
+        };
+
         connections_current.fetch_add(1, Ordering::Relaxed);
 
         // Spawn read/write loops
@@ -1126,6 +1204,7 @@ impl TcpKemTlsP2pService {
             bytes_received,
             peer_candidate_wire_sink,
             inbound_per_peer_limiter,
+            consensus_origin,
         )
         .await;
 
@@ -1208,6 +1287,15 @@ impl TcpKemTlsP2pService {
         let node_id_bytes = derive_node_id_from_pubkey(&client_cfg.peer_kem_pk);
         let node_id = NodeId::new(node_id_bytes);
 
+        // Run 418: an outbound dial that completed the KEMTLS handshake to a
+        // configured static peer carries the operator-configured authenticated
+        // consensus origin for that address (bound to handshake success).
+        let consensus_origin: Option<AuthenticatedConsensusOrigin> = self
+            .outbound_consensus_origins
+            .read()
+            .get(&peer_addr)
+            .cloned();
+
         self.connections_current.fetch_add(1, Ordering::Relaxed);
 
         // Spawn read/write loops
@@ -1220,6 +1308,7 @@ impl TcpKemTlsP2pService {
             Arc::clone(&self.bytes_received),
             Arc::clone(&self.peer_candidate_wire_sink),
             Arc::clone(&self.inbound_per_peer_limiter),
+            consensus_origin,
         )
         .await;
 
@@ -1231,7 +1320,7 @@ impl TcpKemTlsP2pService {
         node_id: NodeId,
         channel: SecureChannelAsync,
         peers: Arc<RwLock<HashMap<NodeId, PeerConnection>>>,
-        inbound_tx: mpsc::Sender<P2pMessage>,
+        inbound_tx: mpsc::Sender<InboundP2pEnvelope>,
         _connections_current: Arc<AtomicU64>,
         bytes_received: Arc<AtomicU64>,
         peer_candidate_wire_sink: Arc<RwLock<Option<Arc<dyn crate::pqc_peer_candidate_wire::PeerCandidateWireFrameSink>>>>,
@@ -1244,6 +1333,7 @@ impl TcpKemTlsP2pService {
                 >,
             >,
         >,
+        consensus_origin: Option<AuthenticatedConsensusOrigin>,
     ) {
         // Create outbound channel for this peer
         let (peer_tx, peer_rx) = mpsc::channel::<P2pMessage>(64);
@@ -1276,6 +1366,7 @@ impl TcpKemTlsP2pService {
                 bytes_received_clone,
                 wire_sink_clone,
                 inbound_per_peer_limiter_clone,
+                consensus_origin,
             )
             .await;
         });
@@ -1314,7 +1405,7 @@ impl TcpKemTlsP2pService {
     async fn read_loop(
         source_peer: NodeId,
         channel: SecureChannelAsync,
-        inbound_tx: mpsc::Sender<P2pMessage>,
+        inbound_tx: mpsc::Sender<InboundP2pEnvelope>,
         bytes_received: Arc<AtomicU64>,
         peer_candidate_wire_sink: Arc<
             RwLock<Option<Arc<dyn crate::pqc_peer_candidate_wire::PeerCandidateWireFrameSink>>>,
@@ -1328,6 +1419,7 @@ impl TcpKemTlsP2pService {
                 >,
             >,
         >,
+        consensus_origin: Option<AuthenticatedConsensusOrigin>,
     ) {
         loop {
             match channel.recv().await {
@@ -1373,7 +1465,14 @@ impl TcpKemTlsP2pService {
                                 }
                             }
 
-                            if inbound_tx.send(msg).await.is_err() {
+                            // Run 418: tag every inbound structured frame with
+                            // this connection's authenticated consensus origin
+                            // (may be `None` for unauthenticated sessions). The
+                            // origin is bound to the KEMTLS session, never
+                            // derived from the frame payload.
+                            let envelope =
+                                InboundP2pEnvelope::new(consensus_origin.clone(), msg);
+                            if inbound_tx.send(envelope).await.is_err() {
                                 break; // Receiver dropped
                             }
                         }
@@ -1506,8 +1605,9 @@ impl TcpKemTlsP2pService {
 
     /// Subscribe to inbound messages.
     ///
-    /// Returns a receiver that receives all inbound P2pMessages from all peers.
-    pub async fn subscribe(&self) -> mpsc::Receiver<P2pMessage> {
+    /// Returns a receiver that receives all inbound P2P message envelopes
+    /// (message + authenticated transport origin) from all peers.
+    pub async fn subscribe(&self) -> mpsc::Receiver<InboundP2pEnvelope> {
         let (tx, rx) = mpsc::channel(256);
 
         // Spawn a task to forward messages from the shared receiver to the new subscriber
@@ -1577,6 +1677,7 @@ impl TcpKemTlsP2pService {
             bytes_received: Arc::clone(&self.bytes_received),
             peer_candidate_wire_sink: Arc::clone(&self.peer_candidate_wire_sink),
             inbound_per_peer_limiter: Arc::clone(&self.inbound_per_peer_limiter),
+            outbound_consensus_origins: Arc::clone(&self.outbound_consensus_origins),
         }
     }
 
@@ -1752,7 +1853,7 @@ struct DialerHandle {
     peer_kem_pk_overrides: Arc<RwLock<HashMap<String, Vec<u8>>>>,
     peer_validator_id_overrides: Arc<RwLock<HashMap<String, [u8; 32]>>>,
     peers: Arc<RwLock<HashMap<NodeId, PeerConnection>>>,
-    inbound_tx: mpsc::Sender<P2pMessage>,
+    inbound_tx: mpsc::Sender<InboundP2pEnvelope>,
     connections_current: Arc<AtomicU64>,
     bytes_received: Arc<AtomicU64>,
     /// Run 079: shared optional wire sink (cloned from
@@ -1775,6 +1876,13 @@ struct DialerHandle {
             >,
         >,
     >,
+    /// Run 418: static-peer outbound authenticated consensus origins keyed by
+    /// dial address (cloned from
+    /// `TcpKemTlsP2pService::outbound_consensus_origins`). Threaded into
+    /// `spawn_peer_handlers` so retry-dialed peers tag inbound consensus frames
+    /// with the configured origin (bound to handshake success). Empty by
+    /// default → no origin, ingress gate fails closed.
+    outbound_consensus_origins: Arc<RwLock<HashMap<String, AuthenticatedConsensusOrigin>>>,
 }
 
 impl DialerHandle {
@@ -1839,6 +1947,13 @@ impl DialerHandle {
         let node_id_bytes = derive_node_id_from_pubkey(&client_cfg.peer_kem_pk);
         let node_id = NodeId::new(node_id_bytes);
 
+        // Run 418: outbound origin bound to handshake success for this address.
+        let consensus_origin: Option<AuthenticatedConsensusOrigin> = self
+            .outbound_consensus_origins
+            .read()
+            .get(&peer_addr)
+            .cloned();
+
         self.connections_current.fetch_add(1, Ordering::Relaxed);
 
         // Spawn read/write loops (same as `dial_peer`).
@@ -1851,6 +1966,7 @@ impl DialerHandle {
             Arc::clone(&self.bytes_received),
             Arc::clone(&self.peer_candidate_wire_sink),
             Arc::clone(&self.inbound_per_peer_limiter),
+            consensus_origin,
         )
         .await;
 
