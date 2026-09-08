@@ -916,9 +916,11 @@ where
             GovernanceMutationOutcome::ProductionMutationUnavailable
         }
         MutationWindow::MainNetUnavailable => GovernanceMutationOutcome::MainNetMutationUnavailable,
-        MutationWindow::BeforeAuthorization => GovernanceMutationOutcome::MutationRejectedBeforeApply {
-            reason: "mutation window before authorization".to_string(),
-        },
+        MutationWindow::BeforeAuthorization => {
+            GovernanceMutationOutcome::MutationRejectedBeforeApply {
+                reason: "mutation window before authorization".to_string(),
+            }
+        }
         // Every after-authorization / in-flight / after-report / unknown window
         // is ambiguous and fails closed.
         MutationWindow::AfterAuthorizationBeforeApply
@@ -975,7 +977,9 @@ pub fn project_mutation_outcome_to_durable_completion(
 ) -> MutationEngineDurableProjection {
     match outcome {
         GovernanceMutationOutcome::ProceedLegacyBypassNoMutation => {
-            MutationEngineDurableProjection::DurableCompletion(DurableMutationCompletion::NotAttempted)
+            MutationEngineDurableProjection::DurableCompletion(
+                DurableMutationCompletion::NotAttempted,
+            )
         }
         GovernanceMutationOutcome::MutationAuthorized => {
             MutationEngineDurableProjection::DurableCompletion(
@@ -988,10 +992,14 @@ pub fn project_mutation_outcome_to_durable_completion(
             )
         }
         GovernanceMutationOutcome::MutationApplyFailed => {
-            MutationEngineDurableProjection::DurableCompletion(DurableMutationCompletion::ApplyFailed)
+            MutationEngineDurableProjection::DurableCompletion(
+                DurableMutationCompletion::ApplyFailed,
+            )
         }
         GovernanceMutationOutcome::MutationRolledBack => {
-            MutationEngineDurableProjection::DurableCompletion(DurableMutationCompletion::RolledBack)
+            MutationEngineDurableProjection::DurableCompletion(
+                DurableMutationCompletion::RolledBack,
+            )
         }
         other => MutationEngineDurableProjection::FailClosedBeforeDurable(other.clone()),
     }
@@ -1250,7 +1258,10 @@ mod tests {
             MutationExecutionResult::AppliedSuccessfully,
         );
         let outcome = evaluate_governance_mutation_engine(&input, &exp, &mut exec);
-        assert_eq!(outcome, GovernanceMutationOutcome::MutationAppliedSuccessfully);
+        assert_eq!(
+            outcome,
+            GovernanceMutationOutcome::MutationAppliedSuccessfully
+        );
         assert_eq!(exec.attempts(), 1);
         let projection = project_mutation_outcome_to_durable_completion(&outcome);
         assert!(projection.authorizes_durable_consume());
@@ -1288,7 +1299,11 @@ mod tests {
             GovernanceMutationOutcome::MutationRejectedBeforeApply { .. }
         ));
         assert!(outcome.executor_must_not_run());
-        assert_eq!(exec.attempts(), 0, "rejected path never reaches the executor");
+        assert_eq!(
+            exec.attempts(),
+            0,
+            "rejected path never reaches the executor"
+        );
     }
 
     #[test]

@@ -223,9 +223,7 @@ impl CustodyAttestationPolicy {
             Self::KmsAttestationRequired => "kms-attestation-required",
             Self::HsmAttestationRequired => "hsm-attestation-required",
             Self::ProductionAttestationRequired => "production-attestation-required",
-            Self::MainnetProductionAttestationRequired => {
-                "mainnet-production-attestation-required"
-            }
+            Self::MainnetProductionAttestationRequired => "mainnet-production-attestation-required",
         }
     }
 
@@ -351,12 +349,18 @@ impl CustodyAttestationEvidence {
             h.update((value.len() as u64).to_le_bytes());
             h.update(value);
         };
-        field(b"attestation_class", self.attestation_class.tag().as_bytes());
+        field(
+            b"attestation_class",
+            self.attestation_class.tag().as_bytes(),
+        );
         field(
             b"attestation_version",
             &self.attestation_version.to_le_bytes(),
         );
-        field(b"environment", &self.environment.metric_code().to_le_bytes());
+        field(
+            b"environment",
+            &self.environment.metric_code().to_le_bytes(),
+        );
         field(b"chain_id", self.chain_id.as_bytes());
         field(b"genesis_hash", self.genesis_hash.as_bytes());
         field(
@@ -370,7 +374,10 @@ impl CustodyAttestationEvidence {
         field(b"custody_class", self.custody_class.tag().as_bytes());
         field(
             b"custody_backend_kind",
-            self.custody_backend_kind.as_deref().unwrap_or("").as_bytes(),
+            self.custody_backend_kind
+                .as_deref()
+                .unwrap_or("")
+                .as_bytes(),
         );
         field(
             b"custody_backend_kind_present",
@@ -445,10 +452,16 @@ impl CustodyAttestationEvidence {
             h.update((value.len() as u64).to_le_bytes());
             h.update(value);
         };
-        field(b"attestation_class", self.attestation_class.tag().as_bytes());
+        field(
+            b"attestation_class",
+            self.attestation_class.tag().as_bytes(),
+        );
         field(
             b"custody_backend_kind",
-            self.custody_backend_kind.as_deref().unwrap_or("").as_bytes(),
+            self.custody_backend_kind
+                .as_deref()
+                .unwrap_or("")
+                .as_bytes(),
         );
         field(
             b"backend_provider_signer_id",
@@ -518,7 +531,10 @@ impl CustodyAttestationInput {
             &self.expected_environment.metric_code().to_le_bytes(),
         );
         field(b"expected_chain_id", self.expected_chain_id.as_bytes());
-        field(b"expected_genesis_hash", self.expected_genesis_hash.as_bytes());
+        field(
+            b"expected_genesis_hash",
+            self.expected_genesis_hash.as_bytes(),
+        );
         field(
             b"expected_authority_root_fingerprint",
             self.expected_authority_root_fingerprint.as_bytes(),
@@ -1296,9 +1312,10 @@ pub fn verify_custody_attestation(
 
     // 25. Replay window: when both bounds are present, the issuance
     //     timestamp must fall inside `[since, until)`.
-    if let (Some(since), Some(until)) =
-        (input.replay_window_since_unix, input.replay_window_until_unix)
-    {
+    if let (Some(since), Some(until)) = (
+        input.replay_window_since_unix,
+        input.replay_window_until_unix,
+    ) {
         let issued = evidence.issued_at_unix.unwrap_or(0);
         if until <= since || issued < since || issued >= until {
             return CustodyAttestationOutcome::StaleOrReplayedAttestation;
@@ -1306,8 +1323,12 @@ pub fn verify_custody_attestation(
     }
 
     // 26. Freshness/expiry window.
-    if within_optional_window(input.now_unix, evidence.freshness_unix, evidence.expires_at_unix)
-        .is_err()
+    if within_optional_window(
+        input.now_unix,
+        evidence.freshness_unix,
+        evidence.expires_at_unix,
+    )
+    .is_err()
     {
         return CustodyAttestationOutcome::ExpiredAttestation {
             now_unix: input.now_unix,

@@ -158,29 +158,50 @@ impl std::fmt::Display for AbuseDosConfigError {
                 write!(f, "per-peer max messages/sec must be non-zero")
             }
             Self::MaxMessagesPerSecondTooLarge(v) => {
-                write!(f, "per-peer max messages/sec {v} exceeds maximum {MAX_MESSAGES_PER_SECOND}")
+                write!(
+                    f,
+                    "per-peer max messages/sec {v} exceeds maximum {MAX_MESSAGES_PER_SECOND}"
+                )
             }
             Self::BurstAllowanceTooLarge(v) => {
-                write!(f, "per-peer burst allowance {v} exceeds maximum {MAX_BURST_ALLOWANCE}")
+                write!(
+                    f,
+                    "per-peer burst allowance {v} exceeds maximum {MAX_BURST_ALLOWANCE}"
+                )
             }
             Self::ZeroConnectionRateWindow => {
-                write!(f, "connection-rate window must be non-zero when the limiter is enabled")
+                write!(
+                    f,
+                    "connection-rate window must be non-zero when the limiter is enabled"
+                )
             }
             Self::ConnectionRateWindowTooLarge(v) => {
-                write!(f, "connection-rate window {v}s exceeds maximum {MAX_CONNECTION_WINDOW_SECS}s")
+                write!(
+                    f,
+                    "connection-rate window {v}s exceeds maximum {MAX_CONNECTION_WINDOW_SECS}s"
+                )
             }
             Self::ZeroConnectionsPerWindow => {
-                write!(f, "connections per window must be non-zero when the limiter is enabled")
+                write!(
+                    f,
+                    "connections per window must be non-zero when the limiter is enabled"
+                )
             }
             Self::ConnectionsPerWindowTooLarge(v) => {
-                write!(f, "connections per window {v} exceeds maximum {MAX_CONNECTIONS_PER_WINDOW}")
+                write!(
+                    f,
+                    "connections per window {v} exceeds maximum {MAX_CONNECTIONS_PER_WINDOW}"
+                )
             }
             Self::WrongEnvironment(env) => {
                 write!(f, "expected DevNet environment, found {env:?}")
             }
             Self::GenesisBindingMismatch => write!(f, "genesis-hash binding mismatch"),
             Self::MainNetRefused => {
-                write!(f, "MainNet use refused: no production abuse/DoS policy exists")
+                write!(
+                    f,
+                    "MainNet use refused: no production abuse/DoS policy exists"
+                )
             }
             Self::ReadinessClaimRefused => {
                 write!(f, "TestNet/MainNet readiness claim refused for this run")
@@ -492,7 +513,9 @@ impl ConnTokenBucket {
     }
 
     fn refill(&mut self, now: Instant) {
-        let elapsed = now.saturating_duration_since(self.last_update).as_secs_f64();
+        let elapsed = now
+            .saturating_duration_since(self.last_update)
+            .as_secs_f64();
         if elapsed > 0.0 {
             let add = elapsed * self.refill_per_sec;
             self.tokens = (self.tokens + add).min(self.capacity);

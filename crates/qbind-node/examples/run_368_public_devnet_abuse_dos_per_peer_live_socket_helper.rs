@@ -137,7 +137,10 @@ fn deployed_builder_from_cli(args: &[&str]) -> P2pNodeBuilder {
 /// Build the live `AsyncPeerManagerImpl` (with metrics) that owns the per-peer
 /// `PeerRateLimiter`, threaded with the CLI-derived per-peer message-rate config
 /// via the Run 365 deployed builder config.
-fn peer_manager_with_metrics(args: &[&str], metrics: Arc<NodeMetrics>) -> Arc<AsyncPeerManagerImpl> {
+fn peer_manager_with_metrics(
+    args: &[&str],
+    metrics: Arc<NodeMetrics>,
+) -> Arc<AsyncPeerManagerImpl> {
     let cfg = deployed_builder_from_cli(args).deployed_async_peer_manager_config();
     Arc::new(AsyncPeerManagerImpl::with_metrics(cfg, metrics))
 }
@@ -154,7 +157,9 @@ fn frame(msg: &NetMessage) -> Vec<u8> {
 
 /// Create a connected pair of loopback TCP streams (client, server).
 async fn connected_streams() -> (TcpStream, TcpStream) {
-    let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind loopback");
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind loopback");
     let local = listener.local_addr().expect("local addr");
     let (client_res, accept_res) = tokio::join!(TcpStream::connect(local), listener.accept());
     let client = client_res.expect("connect");
@@ -298,7 +303,12 @@ async fn main() {
     {
         let metrics = Arc::new(NodeMetrics::new());
         let pm = peer_manager_with_metrics(
-            &["--p2p-max-messages-per-second", "1000", "--p2p-burst-allowance", "100"],
+            &[
+                "--p2p-max-messages-per-second",
+                "1000",
+                "--p2p-burst-allowance",
+                "100",
+            ],
             Arc::clone(&metrics),
         );
         let (mut client, server) = connected_streams().await;
@@ -316,8 +326,9 @@ async fn main() {
         let ok = registered && peer_count == 1 && drops == 0;
         scenarios.push(Scenario {
             id: "02_admitted_peer_live_socket_admission",
-            expected: "one admitted peer over a real loopback socket; in-budget ping accepted; 0 drops"
-                .to_string(),
+            expected:
+                "one admitted peer over a real loopback socket; in-budget ping accepted; 0 drops"
+                    .to_string(),
             actual: format!(
                 "registered={} peer_count={} drops={}",
                 registered, peer_count, drops
@@ -338,7 +349,12 @@ async fn main() {
     {
         let metrics = Arc::new(NodeMetrics::new());
         let pm = peer_manager_with_metrics(
-            &["--p2p-max-messages-per-second", "5", "--p2p-burst-allowance", "0"],
+            &[
+                "--p2p-max-messages-per-second",
+                "5",
+                "--p2p-burst-allowance",
+                "0",
+            ],
             Arc::clone(&metrics),
         );
         let cfg = pm.peer_rate_limiter().config();
@@ -347,8 +363,9 @@ async fn main() {
         let ok = cfg.max_messages_per_second == 5 && cfg.burst_allowance == 0 && drops == 0;
         scenarios.push(Scenario {
             id: "03_per_peer_message_rate_live_socket_under_budget",
-            expected: "bucket 5/0 installed; 5 framed messages over a real socket; 0 per-peer drops"
-                .to_string(),
+            expected:
+                "bucket 5/0 installed; 5 framed messages over a real socket; 0 per-peer drops"
+                    .to_string(),
             actual: format!(
                 "pm_max={} pm_burst={} sent=5 drops={}",
                 cfg.max_messages_per_second, cfg.burst_allowance, drops
@@ -367,7 +384,12 @@ async fn main() {
     {
         let metrics = Arc::new(NodeMetrics::new());
         let pm = peer_manager_with_metrics(
-            &["--p2p-max-messages-per-second", "5", "--p2p-burst-allowance", "0"],
+            &[
+                "--p2p-max-messages-per-second",
+                "5",
+                "--p2p-burst-allowance",
+                "0",
+            ],
             Arc::clone(&metrics),
         );
         let peer = PeerId(9);
@@ -382,7 +404,10 @@ async fn main() {
             id: "04_per_peer_message_rate_live_socket_over_budget",
             expected: "flood of 80 over bucket 5/0 → per-peer drops >= 60 via live PeerRateLimiter"
                 .to_string(),
-            actual: format!("sent={} per_peer_drops={} total_rate_limit_drops={}", sent, drops, total),
+            actual: format!(
+                "sent={} per_peer_drops={} total_rate_limit_drops={}",
+                sent, drops, total
+            ),
             matched: ok,
             detail: "80 framed NetMessages flood the admitted peer's real-socket receive \
                      loop faster than the 5/s bucket refills; the live PeerRateLimiter \
@@ -466,7 +491,12 @@ async fn main() {
         // Independent per-peer drop over a real socket.
         let peer_metrics = Arc::new(NodeMetrics::new());
         let pm = peer_manager_with_metrics(
-            &["--p2p-max-messages-per-second", "3", "--p2p-burst-allowance", "0"],
+            &[
+                "--p2p-max-messages-per-second",
+                "3",
+                "--p2p-burst-allowance",
+                "0",
+            ],
             Arc::clone(&peer_metrics),
         );
         let peer = PeerId(11);
@@ -556,8 +586,8 @@ async fn main() {
     // Scenario 08: mainnet_refused — an enabled MainNet abuse/DoS config is
     // refused, both directly and via the CLI.
     {
-        let direct = AbuseDosConfig::compatibility_default()
-            .with_environment(NetworkEnvironment::Mainnet);
+        let direct =
+            AbuseDosConfig::compatibility_default().with_environment(NetworkEnvironment::Mainnet);
         let r_direct = PublicDevnetAbuseDosRuntimeConfig::from_config({
             let mut c = direct;
             c.per_peer_max_messages_per_second = 500;
@@ -570,7 +600,11 @@ async fn main() {
         scenarios.push(Scenario {
             id: "08_mainnet_refused",
             expected: "MainNet abuse/DoS config refused (direct + CLI)".to_string(),
-            actual: format!("direct_err={} cli_err={}", r_direct.is_err(), r_cli.is_err()),
+            actual: format!(
+                "direct_err={} cli_err={}",
+                r_direct.is_err(),
+                r_cli.is_err()
+            ),
             matched: ok,
             detail: "MainNet has no production abuse/DoS policy; an enabled MainNet config \
                      never validates and no runtime state or peer manager exists."
@@ -610,8 +644,7 @@ async fn main() {
         let ok = all_hidden && real_parse && invented_rejected;
         scenarios.push(Scenario {
             id: "09_cli_surface_hidden_and_parse_checked",
-            expected: "hidden flags absent from --help; real parse; invented rejected"
-                .to_string(),
+            expected: "hidden flags absent from --help; real parse; invented rejected".to_string(),
             actual: format!(
                 "all_hidden={} real_parse={} invented_rejected={}",
                 all_hidden, real_parse, invented_rejected
@@ -644,15 +677,19 @@ async fn main() {
     // Prove the per-peer drop family renders on live NodeMetrics after a flood.
     let per_peer_metrics = Arc::new(NodeMetrics::new());
     let per_peer_pm = peer_manager_with_metrics(
-        &["--p2p-max-messages-per-second", "5", "--p2p-burst-allowance", "0"],
+        &[
+            "--p2p-max-messages-per-second",
+            "5",
+            "--p2p-burst-allowance",
+            "0",
+        ],
         Arc::clone(&per_peer_metrics),
     );
     let (_pc, per_peer_metric_drops) =
         admitted_peer_flood(&per_peer_pm, &per_peer_metrics, PeerId(21), 80).await;
     let per_peer_rendered = per_peer_metrics.peer_network().format_metrics();
-    let per_peer_family_present =
-        per_peer_rendered.contains("qbind_net_per_peer_drops_total") &&
-        per_peer_rendered.contains("reason=\"rate_limit\"");
+    let per_peer_family_present = per_peer_rendered.contains("qbind_net_per_peer_drops_total")
+        && per_peer_rendered.contains("reason=\"rate_limit\"");
 
     let metric_ok = conn_family_count == 1
         && !conn_label_leak

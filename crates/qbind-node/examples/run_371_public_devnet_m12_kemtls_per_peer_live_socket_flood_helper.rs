@@ -115,7 +115,10 @@ fn parse_cli(args: &[&str]) -> Result<CliArgs, clap::Error> {
 /// --p2p-peer ...`, mirroring the two-node bring-up used by the B7 KEMTLS
 /// integration tests. Kept local so the helper depends only on public config
 /// types.
-fn make_p2p_config(listen_addr: &str, static_peers: Vec<String>) -> qbind_node::node_config::NodeConfig {
+fn make_p2p_config(
+    listen_addr: &str,
+    static_peers: Vec<String>,
+) -> qbind_node::node_config::NodeConfig {
     use qbind_ledger::{FeeDistributionPolicy, MonetaryMode, SeigniorageSplit};
     use qbind_node::node_config::{
         DagCouplingMode, ExecutionProfile, FastSyncConfig, GenesisSourceConfig, MempoolDosConfig,
@@ -334,7 +337,10 @@ async fn build_node_a(
     {
         builder = builder.with_abuse_dos_runtime_config(rt);
     }
-    builder.build(&config, 0).await.expect("build deployed node A")
+    builder
+        .build(&config, 0)
+        .await
+        .expect("build deployed node A")
 }
 
 /// Drive a real KEMTLS flood from a freshly-dialed node B against `node_a` and
@@ -464,8 +470,10 @@ async fn run_scenarios(out_dir: &Path) -> bool {
         let r_unbounded = parse_cli(&["--p2p-max-messages-per-second", "2000000"])
             .unwrap()
             .abuse_dos_runtime_config();
-        let ok =
-            r_window.is_err() && r_zero_msg.is_err() && r_zero_conn.is_err() && r_unbounded.is_err();
+        let ok = r_window.is_err()
+            && r_zero_msg.is_err()
+            && r_zero_conn.is_err()
+            && r_unbounded.is_err();
         scenarios.push(Scenario {
             id: "03_invalid_configs_fail_closed",
             expected: "zero-window/zero-msg/zero-conn/unbounded all rejected".to_string(),
@@ -497,7 +505,11 @@ async fn run_scenarios(out_dir: &Path) -> bool {
         scenarios.push(Scenario {
             id: "04_mainnet_refused",
             expected: "MainNet abuse/DoS config refused (direct + CLI)".to_string(),
-            actual: format!("direct_err={} cli_err={}", r_direct.is_err(), r_cli.is_err()),
+            actual: format!(
+                "direct_err={} cli_err={}",
+                r_direct.is_err(),
+                r_cli.is_err()
+            ),
             matched: ok,
             detail: "MainNet has no production abuse/DoS policy; an enabled MainNet config never \
                      validates."
@@ -517,7 +529,12 @@ async fn run_scenarios(out_dir: &Path) -> bool {
     let node_a_addr = format!("127.0.0.1:{}", node_a_port);
     let ctx_a = build_node_a(
         &node_a_addr,
-        &["--p2p-max-messages-per-second", "5", "--p2p-burst-allowance", "5"],
+        &[
+            "--p2p-max-messages-per-second",
+            "5",
+            "--p2p-burst-allowance",
+            "5",
+        ],
         Arc::clone(&node_metrics),
     )
     .await;
@@ -595,9 +612,10 @@ async fn run_scenarios(out_dir: &Path) -> bool {
         ),
         matched: body_after_over.contains("qbind_net_per_peer_drops_total")
             && rendered_after_over > 0,
-        detail: "The exported per-peer drop family is rendered by the exact NodeMetrics string the \
+        detail:
+            "The exported per-peer drop family is rendered by the exact NodeMetrics string the \
                  live /metrics endpoint scrapes."
-            .to_string(),
+                .to_string(),
     });
 
     // combined_limiter_independence: per-peer drops must NOT appear as
@@ -653,10 +671,19 @@ async fn run_scenarios(out_dir: &Path) -> bool {
 
     metric_evidence.push_str(&format!("node_a_addr: {}\n", node_a_addr));
     metric_evidence.push_str(&format!("limiter_installed: {}\n", limiter_installed));
-    metric_evidence.push_str(&format!("under_budget_frames_enqueued: {}\n", under_enqueued));
-    metric_evidence.push_str(&format!("under_budget_per_peer_drops: {}\n", rendered_after_under));
+    metric_evidence.push_str(&format!(
+        "under_budget_frames_enqueued: {}\n",
+        under_enqueued
+    ));
+    metric_evidence.push_str(&format!(
+        "under_budget_per_peer_drops: {}\n",
+        rendered_after_under
+    ));
     metric_evidence.push_str(&format!("over_budget_frames_enqueued: {}\n", over_enqueued));
-    metric_evidence.push_str(&format!("over_budget_per_peer_drops: {}\n", rendered_after_over));
+    metric_evidence.push_str(&format!(
+        "over_budget_per_peer_drops: {}\n",
+        rendered_after_over
+    ));
     metric_evidence.push_str(&format!(
         "per_peer_family_present: {}\n",
         body_after_over.contains("qbind_net_per_peer_drops_total")
@@ -681,7 +708,10 @@ async fn run_scenarios(out_dir: &Path) -> bool {
             "id: {}\nexpected: {}\nactual: {}\nmatched: {}\ndetail: {}\n",
             s.id, s.expected, s.actual, s.matched, s.detail
         );
-        write_file(&out_dir.join("scenarios").join(format!("{}.txt", s.id)), &detail);
+        write_file(
+            &out_dir.join("scenarios").join(format!("{}.txt", s.id)),
+            &detail,
+        );
     }
     write_file(&out_dir.join("manifest.txt"), &manifest);
 
@@ -719,7 +749,11 @@ fn main() {
         // dial-flood <peer_spec> <listen_addr> <local_vid> <frames> <pace_ms> <out_file>
         let peer_spec = args.get(2).expect("peer_spec").clone();
         let listen_addr = args.get(3).expect("listen_addr").clone();
-        let local_vid: u64 = args.get(4).expect("local_vid").parse().expect("local_vid u64");
+        let local_vid: u64 = args
+            .get(4)
+            .expect("local_vid")
+            .parse()
+            .expect("local_vid u64");
         let frames: u64 = args.get(5).expect("frames").parse().expect("frames u64");
         let pace_ms: u64 = args.get(6).expect("pace_ms").parse().expect("pace_ms u64");
         let out_file = PathBuf::from(args.get(7).expect("out_file"));

@@ -23,8 +23,8 @@ use qbind_consensus::ids::ValidatorId;
 use qbind_consensus::network::ConsensusNetworkEvent;
 use qbind_crypto::{AeadSuite, CryptoError, KemSuite, SignatureSuite, StaticCryptoProvider};
 use qbind_net::{
-    ClientConnectionConfig, ClientHandshakeConfig, KemPrivateKey, MutualAuthMode, ServerConnectionConfig,
-    ServerHandshakeConfig,
+    ClientConnectionConfig, ClientHandshakeConfig, KemPrivateKey, MutualAuthMode,
+    ServerConnectionConfig, ServerHandshakeConfig,
 };
 use qbind_wire::consensus::{BlockHeader, BlockProposal, Vote};
 use qbind_wire::io::WireEncode;

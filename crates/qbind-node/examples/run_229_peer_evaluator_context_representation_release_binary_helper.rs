@@ -72,8 +72,8 @@ use qbind_node::pqc_governance_execution_payload_carrying::{
 };
 use qbind_node::pqc_governance_execution_policy::{
     GovernanceAction, GovernanceExecutionClass, GovernanceExecutionDecision,
-    GovernanceExecutionExpectations, GovernanceExecutionInput, GovernanceQuorumThreshold,
-    GovernanceExecutionPolicy, GOVERNANCE_EXECUTION_SUPPORTED_VERSION,
+    GovernanceExecutionExpectations, GovernanceExecutionInput, GovernanceExecutionPolicy,
+    GovernanceQuorumThreshold, GOVERNANCE_EXECUTION_SUPPORTED_VERSION,
 };
 use qbind_node::pqc_governance_execution_runtime_arming::{
     GovernanceExecutionRuntimeArmingConfig, GovernanceExecutionRuntimeSurface,
@@ -704,7 +704,11 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
             GENESIS,
             EvaluatorPolicy::Disabled,
         );
-        t.check("A1.live-0x05-disabled-absent", "legacy-validation-preserved", &ptag(&o));
+        t.check(
+            "A1.live-0x05-disabled-absent",
+            "legacy-validation-preserved",
+            &ptag(&o),
+        );
         t.assert_true("A1.is-legacy", o.is_legacy_validation_preserved(), "");
         t.assert_true("A1.not-apply", !is_apply(&o), "");
     }
@@ -718,7 +722,11 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
             GENESIS,
             EvaluatorPolicy::Disabled,
         );
-        t.check("A2.peer-drain-disabled-absent", "legacy-validation-preserved", &ptag(&o));
+        t.check(
+            "A2.peer-drain-disabled-absent",
+            "legacy-validation-preserved",
+            &ptag(&o),
+        );
     }
     // A3 — live inbound 0x05 local Present context binds every required field.
     {
@@ -738,8 +746,16 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
             &format!("{:?}", peer.selected_policy),
         );
         t.check("A3.load-status", "available", peer.load_status.tag());
-        t.check("A3.sequence", "7", &peer.authority_domain_sequence.to_string());
-        t.check("A3.lifecycle", "Rotate", &format!("{:?}", peer.lifecycle_action));
+        t.check(
+            "A3.sequence",
+            "7",
+            &peer.authority_domain_sequence.to_string(),
+        );
+        t.check(
+            "A3.lifecycle",
+            "Rotate",
+            &format!("{:?}", peer.lifecycle_action),
+        );
         t.check("A3.environment", "devnet", &peer.environment.to_string());
         t.check("A3.chain-id", CHAIN, &peer.chain_id);
         t.check("A3.genesis", GENESIS, &peer.genesis_hash);
@@ -756,12 +772,16 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
         t.check(
             "A3.source-identity-digest",
             fx.identity.source_identity_digest().as_str(),
-            peer.evaluator_source_identity_digest.as_deref().unwrap_or(""),
+            peer.evaluator_source_identity_digest
+                .as_deref()
+                .unwrap_or(""),
         );
         t.check(
             "A3.payload-digest",
             fx.request.governance_execution_input_digest.as_str(),
-            peer.governance_execution_payload_digest.as_deref().unwrap_or(""),
+            peer.governance_execution_payload_digest
+                .as_deref()
+                .unwrap_or(""),
         );
         t.check(
             "A3.candidate-trust-bundle-digest",
@@ -774,7 +794,11 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
             peer.candidate_v2_marker_digest.as_deref().unwrap_or(""),
         );
         t.assert_true("A3.bindings-complete", peer.present_bindings_complete(), "");
-        t.assert_true("A3.binds-consistently", peer.binds_consistently_with(&ctx), "");
+        t.assert_true(
+            "A3.binds-consistently",
+            peer.binds_consistently_with(&ctx),
+            "",
+        );
     }
     // A4 — peer-driven drain local Present context binds the same set.
     {
@@ -789,21 +813,33 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
             Some(MARKER_DIGEST.to_string()),
         );
         t.assert_true("A4.bindings-complete", peer.present_bindings_complete(), "");
-        t.assert_true("A4.binds-consistently", peer.binds_consistently_with(&ctx), "");
+        t.assert_true(
+            "A4.binds-consistently",
+            peer.binds_consistently_with(&ctx),
+            "",
+        );
         t.check("A4.carrier-present", "present", peer.carrier_status.tag());
     }
     // A5 — live inbound 0x05 valid fixture Present context routes to Run 226
     // integration and proceeds to mutate (representable).
     {
         let o = rotate_fixture(Env::Devnet, PS::LiveInbound0x05).route_present();
-        t.check("A5.live-0x05-routes-mutate", "routed-proceed-mutate", &ptag(&o));
+        t.check(
+            "A5.live-0x05-routes-mutate",
+            "routed-proceed-mutate",
+            &ptag(&o),
+        );
         t.assert_true("A5.apply-authorized", is_apply(&o), "");
         match &o {
             PeerEvaluatorContextOutcome::RoutedProceedMutate {
                 integration_outcome,
                 context_digest,
             } => {
-                t.assert_true("A5.integration-mutate", integration_outcome.is_mutate_authorized(), "");
+                t.assert_true(
+                    "A5.integration-mutate",
+                    integration_outcome.is_mutate_authorized(),
+                    "",
+                );
                 t.assert_true("A5.context-digest-nonempty", !context_digest.is_empty(), "");
             }
             other => t.assert_true("A5.shape", false, &format!("{other:?}")),
@@ -813,19 +849,31 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
             &FixtureGovernanceExecutionEvaluatorInterface,
             PeerEvaluatorCarrierStatus::UnsupportedSurface,
         );
-        t.check("A5.live-0x05-unsupported", "unsupported-surface", &ptag(&unsup));
+        t.check(
+            "A5.live-0x05-unsupported",
+            "unsupported-surface",
+            &ptag(&unsup),
+        );
         t.assert_true("A5.unsupported-no-apply", no_apply(&unsup), "");
     }
     // A6 — peer-driven drain valid fixture Present context routes and proceeds.
     {
         let o = rotate_fixture(Env::Devnet, PS::PeerDrivenDrain).route_present();
-        t.check("A6.peer-drain-routes-mutate", "routed-proceed-mutate", &ptag(&o));
+        t.check(
+            "A6.peer-drain-routes-mutate",
+            "routed-proceed-mutate",
+            &ptag(&o),
+        );
         t.assert_true("A6.apply-authorized", is_apply(&o), "");
         let unsup = rotate_fixture(Env::Devnet, PS::PeerDrivenDrain).route_with_status(
             &FixtureGovernanceExecutionEvaluatorInterface,
             PeerEvaluatorCarrierStatus::UnsupportedSurface,
         );
-        t.check("A6.peer-drain-unsupported", "unsupported-surface", &ptag(&unsup));
+        t.check(
+            "A6.peer-drain-unsupported",
+            "unsupported-surface",
+            &ptag(&unsup),
+        );
         t.assert_true("A6.unsupported-no-apply", no_apply(&unsup), "");
     }
     // A7 — explicit emergency fixture context accepted only for explicit
@@ -837,7 +885,11 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
         ] {
             let o = emergency_fixture(Env::Devnet, surface)
                 .route_present_with(&EmergencyCouncilFixtureGovernanceExecutionEvaluatorInterface);
-            t.check(&format!("{id}-emergency-accept"), "routed-proceed-mutate", &ptag(&o));
+            t.check(
+                &format!("{id}-emergency-accept"),
+                "routed-proceed-mutate",
+                &ptag(&o),
+            );
         }
         // The same context under a non-emergency fixture evaluator/policy is
         // rejected (kind/policy mismatch) — never accepted as production.
@@ -892,7 +944,11 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
     // approval.
     {
         let o = rotate_fixture(Env::Mainnet, PS::PeerDrivenDrain).route_present();
-        t.check("A11.mainnet-peer-driven-refused", "mainnet-refused", &ptag(&o));
+        t.check(
+            "A11.mainnet-peer-driven-refused",
+            "mainnet-refused",
+            &ptag(&o),
+        );
         t.assert_true("A11.is-mainnet-refused", o.is_mainnet_refused(), "");
         t.assert_true("A11.no-apply", no_apply(&o), "");
     }
@@ -925,7 +981,11 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
                 GENESIS,
                 EvaluatorPolicy::FixtureDecisionSourceAllowed,
             );
-            t.check(&format!("{id}-wire-schema-unavailable"), "wire-schema-unavailable", &ptag(&o));
+            t.check(
+                &format!("{id}-wire-schema-unavailable"),
+                "wire-schema-unavailable",
+                &ptag(&o),
+            );
             t.assert_true(&format!("{id}.not-apply"), !is_apply(&o), "");
             t.assert_true(&format!("{id}.no-apply"), no_apply(&o), "");
         }
@@ -954,19 +1014,31 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
             &FixtureGovernanceExecutionEvaluatorInterface,
             PeerEvaluatorCarrierStatus::UnsupportedSurface,
         );
-        t.check("A15.unsupported-surface", "unsupported-surface", &ptag(&unsupported));
+        t.check(
+            "A15.unsupported-surface",
+            "unsupported-surface",
+            &ptag(&unsupported),
+        );
         // WireSchemaUnavailable.
         let wire = rotate_fixture(Env::Devnet, PS::LiveInbound0x05).route_with_status(
             &FixtureGovernanceExecutionEvaluatorInterface,
             PeerEvaluatorCarrierStatus::WireSchemaUnavailable,
         );
-        t.check("A15.wire-schema-unavailable", "wire-schema-unavailable", &ptag(&wire));
+        t.check(
+            "A15.wire-schema-unavailable",
+            "wire-schema-unavailable",
+            &ptag(&wire),
+        );
         // PeerMajorityUnsupported.
         let pm = rotate_fixture(Env::Devnet, PS::PeerDrivenDrain).route_with_status(
             &FixtureGovernanceExecutionEvaluatorInterface,
             PeerEvaluatorCarrierStatus::PeerMajorityUnsupported,
         );
-        t.check("A15.peer-majority-unsupported", "peer-majority-unsupported", &ptag(&pm));
+        t.check(
+            "A15.peer-majority-unsupported",
+            "peer-majority-unsupported",
+            &ptag(&pm),
+        );
         // MainNetRefused.
         let mn = rotate_fixture(Env::Devnet, PS::PeerDrivenDrain).route_with_status(
             &FixtureGovernanceExecutionEvaluatorInterface,
@@ -991,8 +1063,15 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
     {
         let o = rotate_fixture(Env::Devnet, PS::LiveInbound0x05).route_present();
         match &o {
-            PeerEvaluatorContextOutcome::RoutedProceedMutate { integration_outcome, .. } => {
-                t.check("A16.integration-outcome", "proceed:Mutate", &itag(integration_outcome));
+            PeerEvaluatorContextOutcome::RoutedProceedMutate {
+                integration_outcome,
+                ..
+            } => {
+                t.check(
+                    "A16.integration-outcome",
+                    "proceed:Mutate",
+                    &itag(integration_outcome),
+                );
             }
             other => t.assert_true("A16.shape", false, &format!("{other:?}")),
         }
@@ -1017,7 +1096,11 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
             ("A17.peer-drain", PS::PeerDrivenDrain),
         ] {
             let o = rotate_fixture(Env::Testnet, surface).route_present();
-            t.check(&format!("{id}-testnet-routes-mutate"), "routed-proceed-mutate", &ptag(&o));
+            t.check(
+                &format!("{id}-testnet-routes-mutate"),
+                "routed-proceed-mutate",
+                &ptag(&o),
+            );
             t.assert_true(&format!("{id}.apply"), is_apply(&o), "");
         }
     }
@@ -1068,9 +1151,17 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
             None,
         );
         peer.evaluator_request_digest = None;
-        t.assert_true("R1b.bindings-incomplete", !peer.present_bindings_complete(), "");
+        t.assert_true(
+            "R1b.bindings-incomplete",
+            !peer.present_bindings_complete(),
+            "",
+        );
         let o = evaluate_peer_evaluator_context(&peer, &ctx);
-        t.check("R1b.missing-binding-malformed", "malformed-rejected", &ptag(&o));
+        t.check(
+            "R1b.missing-binding-malformed",
+            "malformed-rejected",
+            &ptag(&o),
+        );
     }
     // R2 — missing evaluator context rejected under explicit evaluator policy.
     {
@@ -1080,7 +1171,11 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
             &FixtureGovernanceExecutionEvaluatorInterface,
             PeerEvaluatorCarrierStatus::Absent,
         );
-        t.check("R2.missing-under-explicit", "missing-context-rejected", &ptag(&o));
+        t.check(
+            "R2.missing-under-explicit",
+            "missing-context-rejected",
+            &ptag(&o),
+        );
         t.assert_fail_closed("R2", &o);
     }
     // R3 — wrong environment rejected.
@@ -1107,38 +1202,63 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
     {
         let mut fx = rotate_fixture(Env::Devnet, PS::PeerDrivenDrain);
         fx.ev_exp.expected_candidate_digest = "wrong-candidate".to_string();
-        t.assert_true("R6.wrong-candidate", fx.route_present().is_fail_closed(), "");
+        t.assert_true(
+            "R6.wrong-candidate",
+            fx.route_present().is_fail_closed(),
+            "",
+        );
     }
     // R7 — wrong evaluator source identity digest rejected.
     {
         let mut fx = rotate_fixture(Env::Devnet, PS::LiveInbound0x05);
         fx.request.decision_source_identity_digest = "wrong-source-identity-digest".to_string();
         fx.response.request_digest = fx.request.request_digest();
-        t.assert_true("R7.wrong-source-identity", fx.route_present().is_fail_closed(), "");
+        t.assert_true(
+            "R7.wrong-source-identity",
+            fx.route_present().is_fail_closed(),
+            "",
+        );
     }
     // R8 — wrong evaluator request digest rejected.
     {
         let mut fx = rotate_fixture(Env::Devnet, PS::LiveInbound0x05);
         fx.response.request_digest = "stale-request-digest".to_string();
-        t.assert_true("R8.wrong-request-digest", fx.route_present().is_fail_closed(), "");
+        t.assert_true(
+            "R8.wrong-request-digest",
+            fx.route_present().is_fail_closed(),
+            "",
+        );
     }
     // R9 — wrong evaluator response digest rejected (invalid commitment).
     {
         let mut fx = rotate_fixture(Env::Devnet, PS::LiveInbound0x05);
-        fx.response.response_commitment = EVALUATOR_INVALID_RESPONSE_COMMITMENT_SENTINEL.to_string();
-        t.assert_true("R9.wrong-response-commitment", fx.route_present().is_fail_closed(), "");
+        fx.response.response_commitment =
+            EVALUATOR_INVALID_RESPONSE_COMMITMENT_SENTINEL.to_string();
+        t.assert_true(
+            "R9.wrong-response-commitment",
+            fx.route_present().is_fail_closed(),
+            "",
+        );
     }
     // R10 — wrong lifecycle action rejected.
     {
         let mut fx = rotate_fixture(Env::Devnet, PS::LiveInbound0x05);
         fx.ev_exp.expected_lifecycle_action = LocalLifecycleAction::Revoke;
-        t.assert_true("R10.wrong-lifecycle", fx.route_present().is_fail_closed(), "");
+        t.assert_true(
+            "R10.wrong-lifecycle",
+            fx.route_present().is_fail_closed(),
+            "",
+        );
     }
     // R11 — wrong authority-domain sequence rejected.
     {
         let mut fx = rotate_fixture(Env::Devnet, PS::LiveInbound0x05);
         fx.ev_exp.expected_authority_domain_sequence = 99;
-        t.assert_true("R11.wrong-sequence", fx.route_present().is_fail_closed(), "");
+        t.assert_true(
+            "R11.wrong-sequence",
+            fx.route_present().is_fail_closed(),
+            "",
+        );
     }
     // R12 — expired evaluator request rejected.
     {
@@ -1150,14 +1270,22 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
     {
         let mut fx = rotate_fixture(Env::Devnet, PS::LiveInbound0x05);
         fx.ev_exp.expected_replay_nonce = "different-nonce".to_string();
-        t.assert_true("R13.stale-replayed", fx.route_present().is_fail_closed(), "");
+        t.assert_true(
+            "R13.stale-replayed",
+            fx.route_present().is_fail_closed(),
+            "",
+        );
     }
     // R14 — quorum / threshold insufficient rejected.
     {
         let mut fx = rotate_fixture(Env::Devnet, PS::LiveInbound0x05);
         fx.request.quorum = GovernanceQuorumThreshold::new(1, 5, 3);
         fx.response.request_digest = fx.request.request_digest();
-        t.assert_true("R14.quorum-insufficient", fx.route_present().is_fail_closed(), "");
+        t.assert_true(
+            "R14.quorum-insufficient",
+            fx.route_present().is_fail_closed(),
+            "",
+        );
     }
     // R15 — emergency action not authorized rejected.
     {
@@ -1206,7 +1334,11 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
         let mut fx = rotate_fixture(Env::Devnet, PS::LiveInbound0x05);
         fx.request.governance_action = GovernanceAction::ValidatorSetRotationRequest;
         fx.response.request_digest = fx.request.request_digest();
-        t.assert_true("R19.validator-set-rotation", fx.route_present().is_fail_closed(), "");
+        t.assert_true(
+            "R19.validator-set-rotation",
+            fx.route_present().is_fail_closed(),
+            "",
+        );
     }
     // R20 — policy-change action unsupported rejected.
     {
@@ -1240,7 +1372,11 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
             &FixtureGovernanceExecutionEvaluatorInterface,
             PeerEvaluatorCarrierStatus::WireSchemaUnavailable,
         );
-        t.check("R23.live-0x05-unsupported", "wire-schema-unavailable", &ptag(&o));
+        t.check(
+            "R23.live-0x05-unsupported",
+            "wire-schema-unavailable",
+            &ptag(&o),
+        );
         t.assert_fail_closed("R23", &o);
     }
     // R24 — peer-driven drain unsupported carrier rejected without apply.
@@ -1249,7 +1385,11 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
             &FixtureGovernanceExecutionEvaluatorInterface,
             PeerEvaluatorCarrierStatus::UnsupportedSurface,
         );
-        t.check("R24.peer-drain-unsupported", "unsupported-surface", &ptag(&o));
+        t.check(
+            "R24.peer-drain-unsupported",
+            "unsupported-surface",
+            &ptag(&o),
+        );
         t.assert_fail_closed("R24", &o);
     }
     // R25 — validation-only rejection (live inbound 0x05) authorizes no
@@ -1283,14 +1423,22 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
             "",
         );
         let o = rotate_fixture(Env::Mainnet, PS::PeerDrivenDrain).route_present();
-        t.check("R27.mainnet-peer-driven-refused", "mainnet-refused", &ptag(&o));
+        t.check(
+            "R27.mainnet-peer-driven-refused",
+            "mainnet-refused",
+            &ptag(&o),
+        );
         t.assert_true("R27.not-apply", !is_apply(&o), "");
         // Even an explicit MainNetRefused carrier status routes to refusal.
         let explicit = rotate_fixture(Env::Mainnet, PS::PeerDrivenDrain).route_with_status(
             &FixtureGovernanceExecutionEvaluatorInterface,
             PeerEvaluatorCarrierStatus::MainNetRefused,
         );
-        t.check("R27.explicit-mainnet-refused", "mainnet-refused", &ptag(&explicit));
+        t.check(
+            "R27.explicit-mainnet-refused",
+            "mainnet-refused",
+            &ptag(&explicit),
+        );
     }
     t.finish(out)
 }
@@ -1331,10 +1479,22 @@ fn run_reachability_table(out: &Path) -> (u64, u64) {
         (PeerEvaluatorCarrierStatus::Absent, "absent"),
         (PeerEvaluatorCarrierStatus::Present, "present"),
         (PeerEvaluatorCarrierStatus::Malformed, "malformed"),
-        (PeerEvaluatorCarrierStatus::UnsupportedSurface, "unsupported-surface"),
-        (PeerEvaluatorCarrierStatus::WireSchemaUnavailable, "wire-schema-unavailable"),
-        (PeerEvaluatorCarrierStatus::PeerMajorityUnsupported, "peer-majority-unsupported"),
-        (PeerEvaluatorCarrierStatus::MainNetRefused, "mainnet-refused"),
+        (
+            PeerEvaluatorCarrierStatus::UnsupportedSurface,
+            "unsupported-surface",
+        ),
+        (
+            PeerEvaluatorCarrierStatus::WireSchemaUnavailable,
+            "wire-schema-unavailable",
+        ),
+        (
+            PeerEvaluatorCarrierStatus::PeerMajorityUnsupported,
+            "peer-majority-unsupported",
+        ),
+        (
+            PeerEvaluatorCarrierStatus::MainNetRefused,
+            "mainnet-refused",
+        ),
     ] {
         t.check(&format!("K.carrier-{tag}"), tag, status.tag());
     }
@@ -1351,10 +1511,22 @@ fn run_reachability_table(out: &Path) -> (u64, u64) {
 
     // Source-class tags + peer-majority predicate reachable.
     for (class, tag) in [
-        (PeerEvaluatorSourceClass::LiveInboundPeer, "live-inbound-peer"),
-        (PeerEvaluatorSourceClass::DrainStagedPeer, "drain-staged-peer"),
-        (PeerEvaluatorSourceClass::LocalSourceTest, "local-source-test"),
-        (PeerEvaluatorSourceClass::PeerMajorityGossip, "peer-majority-gossip"),
+        (
+            PeerEvaluatorSourceClass::LiveInboundPeer,
+            "live-inbound-peer",
+        ),
+        (
+            PeerEvaluatorSourceClass::DrainStagedPeer,
+            "drain-staged-peer",
+        ),
+        (
+            PeerEvaluatorSourceClass::LocalSourceTest,
+            "local-source-test",
+        ),
+        (
+            PeerEvaluatorSourceClass::PeerMajorityGossip,
+            "peer-majority-gossip",
+        ),
     ] {
         t.check(&format!("K.source-{tag}"), tag, class.tag());
     }
@@ -1384,12 +1556,20 @@ fn run_reachability_table(out: &Path) -> (u64, u64) {
         GENESIS,
         EvaluatorPolicy::Disabled,
     );
-    t.assert_true("O.legacy-is-legacy", legacy.is_legacy_validation_preserved(), "");
+    t.assert_true(
+        "O.legacy-is-legacy",
+        legacy.is_legacy_validation_preserved(),
+        "",
+    );
     t.assert_true("O.legacy-not-apply", !legacy.is_apply_authorized(), "");
     let refused = rotate_fixture(Env::Mainnet, PS::PeerDrivenDrain).route_present();
     t.assert_true("O.refused-mainnet", refused.is_mainnet_refused(), "");
     t.assert_true("O.refused-fail-closed", refused.is_fail_closed(), "");
-    t.assert_true("O.refused-no-apply", refused.no_propagation_no_staging_no_apply(), "");
+    t.assert_true(
+        "O.refused-no-apply",
+        refused.no_propagation_no_staging_no_apply(),
+        "",
+    );
 
     // Surface mismatch between peer and integration is unsupported.
     {
@@ -1405,7 +1585,11 @@ fn run_reachability_table(out: &Path) -> (u64, u64) {
         );
         peer.surface = PS::LiveInbound0x05;
         let o = evaluate_peer_evaluator_context(&peer, &ctx);
-        t.check("M.surface-mismatch-unsupported", "unsupported-surface", &ptag(&o));
+        t.check(
+            "M.surface-mismatch-unsupported",
+            "unsupported-surface",
+            &ptag(&o),
+        );
     }
 
     // Inconsistent Present binding is malformed.
@@ -1421,7 +1605,11 @@ fn run_reachability_table(out: &Path) -> (u64, u64) {
             None,
         );
         peer.evaluator_request_digest = Some("tampered-request-digest".to_string());
-        t.assert_true("M.inconsistent-binding", !peer.binds_consistently_with(&ctx), "");
+        t.assert_true(
+            "M.inconsistent-binding",
+            !peer.binds_consistently_with(&ctx),
+            "",
+        );
         let o = evaluate_peer_evaluator_context(&peer, &ctx);
         t.check("M.inconsistent-malformed", "malformed-rejected", &ptag(&o));
     }
@@ -1439,10 +1627,18 @@ fn run_reachability_table(out: &Path) -> (u64, u64) {
             Some(MARKER_DIGEST.to_string()),
         );
         let b = a.clone();
-        t.assert_true("D.digest-deterministic", a.context_digest() == b.context_digest(), "");
+        t.assert_true(
+            "D.digest-deterministic",
+            a.context_digest() == b.context_digest(),
+            "",
+        );
         let mut c = a.clone();
         c.peer_id = "different-peer".to_string();
-        t.assert_true("D.digest-field-sensitive", a.context_digest() != c.context_digest(), "");
+        t.assert_true(
+            "D.digest-field-sensitive",
+            a.context_digest() != c.context_digest(),
+            "",
+        );
     }
 
     // Explicit fail-closed helper symbols reachable.
@@ -1481,24 +1677,39 @@ fn run_fixture_dump(out: &Path) {
     );
 
     write_file(&dir.join("peer_context.txt"), &format!("{peer:#?}\n"));
-    write_file(&dir.join("context_digest.txt"), &format!("{}\n", peer.context_digest()));
+    write_file(
+        &dir.join("context_digest.txt"),
+        &format!("{}\n", peer.context_digest()),
+    );
     write_file(
         &dir.join("source_identity_digest.txt"),
         &format!("{}\n", fx.identity.source_identity_digest()),
     );
-    write_file(&dir.join("request_digest.txt"), &format!("{}\n", fx.request.request_digest()));
-    write_file(&dir.join("response_digest.txt"), &format!("{}\n", fx.response.response_digest()));
+    write_file(
+        &dir.join("request_digest.txt"),
+        &format!("{}\n", fx.request.request_digest()),
+    );
+    write_file(
+        &dir.join("response_digest.txt"),
+        &format!("{}\n", fx.response.response_digest()),
+    );
     write_file(
         &dir.join("governance_execution_input_digest.txt"),
         &format!("{}\n", fx.request.governance_execution_input_digest),
     );
 
     // Routed mutate outcome.
-    write_file(&dir.join("routed_mutate_outcome.txt"), &format!("{:#?}\n", fx.route_present()));
+    write_file(
+        &dir.join("routed_mutate_outcome.txt"),
+        &format!("{:#?}\n", fx.route_present()),
+    );
 
     // MainNet peer-driven refusal outcome.
     let mn = rotate_fixture(Env::Mainnet, PS::PeerDrivenDrain);
-    write_file(&dir.join("mainnet_refused_outcome.txt"), &format!("{:#?}\n", mn.route_present()));
+    write_file(
+        &dir.join("mainnet_refused_outcome.txt"),
+        &format!("{:#?}\n", mn.route_present()),
+    );
 
     // Carrier taxonomy outcome inventory.
     let mut inv = String::new();
@@ -1532,7 +1743,9 @@ fn run_fixture_dump(out: &Path) {
 
 fn main() {
     let out_dir = env::args().nth(1).map(PathBuf::from).unwrap_or_else(|| {
-        eprintln!("usage: run_229_peer_evaluator_context_representation_release_binary_helper <OUT_DIR>");
+        eprintln!(
+            "usage: run_229_peer_evaluator_context_representation_release_binary_helper <OUT_DIR>"
+        );
         std::process::exit(2);
     });
     fs::create_dir_all(&out_dir).unwrap();

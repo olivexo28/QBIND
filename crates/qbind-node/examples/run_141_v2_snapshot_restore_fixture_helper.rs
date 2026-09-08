@@ -72,17 +72,15 @@ use std::path::{Path, PathBuf};
 
 use qbind_crypto::MlDsa44Backend;
 use qbind_ledger::{
-    compute_canonical_genesis_hash, format_genesis_hash, AccountState,
-    AuthorityStateSnapshotMeta, AuthorityStateSnapshotMetaV2, BundleSigningRatificationV2Action,
-    GenesisAllocation, GenesisAuthorityConfig, GenesisAuthorityRoot, GenesisConfig,
-    GenesisCouncilConfig, GenesisMonetaryConfig, GenesisValidator, NetworkEnvironmentPolicy,
-    PersistentAccountState, RocksDbAccountState, StateSnapshotMeta, StateSnapshotter,
-    GENESIS_AUTHORITY_SUITE_ML_DSA_44,
+    compute_canonical_genesis_hash, format_genesis_hash, AccountState, AuthorityStateSnapshotMeta,
+    AuthorityStateSnapshotMetaV2, BundleSigningRatificationV2Action, GenesisAllocation,
+    GenesisAuthorityConfig, GenesisAuthorityRoot, GenesisConfig, GenesisCouncilConfig,
+    GenesisMonetaryConfig, GenesisValidator, NetworkEnvironmentPolicy, PersistentAccountState,
+    RocksDbAccountState, StateSnapshotMeta, StateSnapshotter, GENESIS_AUTHORITY_SUITE_ML_DSA_44,
 };
 use qbind_node::pqc_authority_state::{
-    persist_authority_state_atomic, persist_authority_state_v2_atomic,
-    AuthorityStateUpdateSource, PersistentAuthorityStateRecord,
-    PersistentAuthorityStateRecordV2,
+    persist_authority_state_atomic, persist_authority_state_v2_atomic, AuthorityStateUpdateSource,
+    PersistentAuthorityStateRecord, PersistentAuthorityStateRecordV2,
 };
 use qbind_node::pqc_trust_bundle::TrustBundleEnvironment;
 use qbind_node::pqc_trust_sequence::chain_id_hex;
@@ -162,13 +160,10 @@ fn build_snapshot(
 ) {
     // Fresh RocksDB state dir holds the source rows so `create_snapshot`
     // can take a real checkpoint. The state dir itself is throwaway.
-    let state_dir = target
-        .parent()
-        .expect("target has parent")
-        .join(format!(
-            ".state-{}",
-            target.file_name().unwrap().to_string_lossy()
-        ));
+    let state_dir = target.parent().expect("target has parent").join(format!(
+        ".state-{}",
+        target.file_name().unwrap().to_string_lossy()
+    ));
     fs::create_dir_all(&state_dir).expect("mkdir state dir");
     {
         let storage = RocksDbAccountState::open(&state_dir).expect("open source state");
@@ -178,14 +173,10 @@ fn build_snapshot(
             .put_account_state(&account, &state)
             .expect("put account state");
         storage.flush().expect("flush");
-        let meta = StateSnapshotMeta::new(
-            height,
-            [height as u8; 32],
-            1_700_000_000_000,
-            chain_id_u64,
-        )
-        .with_authority_state(auth_v1)
-        .with_authority_state_v2(auth_v2);
+        let meta =
+            StateSnapshotMeta::new(height, [height as u8; 32], 1_700_000_000_000, chain_id_u64)
+                .with_authority_state(auth_v1)
+                .with_authority_state_v2(auth_v2);
         storage
             .create_snapshot(&meta, target)
             .unwrap_or_else(|e| panic!("create_snapshot at {}: {:?}", target.display(), e));
@@ -224,7 +215,10 @@ fn main() {
     let mut genesis = GenesisConfig::new(
         "qbind-devnet-v0",
         1_738_000_000_000,
-        vec![GenesisAllocation::new(format!("0x{}", "11".repeat(32)), 100)],
+        vec![GenesisAllocation::new(
+            format!("0x{}", "11".repeat(32)),
+            100,
+        )],
         vec![GenesisValidator::new(
             format!("0x{}", "22".repeat(32)),
             "ab".repeat(32),

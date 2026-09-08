@@ -27,18 +27,18 @@ use qbind_node::pqc_governance_evaluator_peer_context::{
     GovernanceEvaluatorPeerContext, PeerEvaluatorContextSurface,
 };
 use qbind_node::pqc_governance_evaluator_replay_state::{
-    classify_evaluator_replay_freshness, consumed_decision_digest, evaluate_evaluator_replay_freshness,
-    freshness_transcript_digest, gate_evaluator_replay_freshness,
-    local_operator_cannot_satisfy_replay_state_policy,
+    classify_evaluator_replay_freshness, consumed_decision_digest,
+    evaluate_evaluator_replay_freshness, freshness_transcript_digest,
+    gate_evaluator_replay_freshness, local_operator_cannot_satisfy_replay_state_policy,
     mainnet_peer_driven_apply_remains_refused_under_replay_state,
     peer_majority_cannot_satisfy_replay_state_policy,
     policy_change_action_remains_unsupported_under_replay_state, replay_observation_digest,
     replay_state_key_digest, validator_set_rotation_remains_unsupported_under_replay_state,
     EvaluatorReplayFreshnessExpectations, EvaluatorReplayFreshnessInput,
-    EvaluatorReplayFreshnessOutcome, FixtureReplayStateStore,
-    GovernanceEvaluatorReplayStateReader, GovernanceEvaluatorReplayStateWriter,
-    MainnetReplayStateReader, PreviouslySeenState, ProductionReplayStateReader,
-    ReplayFreshnessState, ReplayStateGateOutcome, ReplayStatePolicy, SeenDecisionRecord,
+    EvaluatorReplayFreshnessOutcome, FixtureReplayStateStore, GovernanceEvaluatorReplayStateReader,
+    GovernanceEvaluatorReplayStateWriter, MainnetReplayStateReader, PreviouslySeenState,
+    ProductionReplayStateReader, ReplayFreshnessState, ReplayStateGateOutcome, ReplayStatePolicy,
+    SeenDecisionRecord,
 };
 use qbind_node::pqc_governance_execution_evaluator::{
     DecisionSourceIdentity, EvaluatorRequest, EvaluatorResponse, EvaluatorSourceKind,
@@ -285,7 +285,10 @@ fn a5_decision_before_expiry_is_fresh() {
 #[test]
 fn a6_replay_state_key_digest_deterministic() {
     let input = devnet_fresh_input();
-    assert_eq!(replay_state_key_digest(&input), replay_state_key_digest(&input));
+    assert_eq!(
+        replay_state_key_digest(&input),
+        replay_state_key_digest(&input)
+    );
 }
 
 #[test]
@@ -417,7 +420,10 @@ fn a13_production_reader_callable_returns_unavailable() {
     let reader = ProductionReplayStateReader;
     let mut input = devnet_fresh_input();
     input.previously_seen = reader.read_previous_state(&replay_state_key_digest(&input));
-    assert_eq!(input.previously_seen, PreviouslySeenState::ProductionUnavailable);
+    assert_eq!(
+        input.previously_seen,
+        PreviouslySeenState::ProductionUnavailable
+    );
     assert_eq!(
         evaluate_evaluator_replay_freshness(&input, &devnet_exp()),
         EvaluatorReplayFreshnessOutcome::FailClosedProductionUnavailable
@@ -440,7 +446,10 @@ fn a14_mainnet_reader_callable_returns_unavailable() {
         PreviouslySeenState::FirstSeen,
     );
     input.previously_seen = reader.read_previous_state(&replay_state_key_digest(&input));
-    assert_eq!(input.previously_seen, PreviouslySeenState::MainNetUnavailable);
+    assert_eq!(
+        input.previously_seen,
+        PreviouslySeenState::MainNetUnavailable
+    );
     assert_eq!(
         evaluate_evaluator_replay_freshness(&input, &exp),
         EvaluatorReplayFreshnessOutcome::FailClosedMainNetUnavailable
@@ -623,13 +632,19 @@ fn assert_wrong_binding(
         EvaluatorReplayFreshnessOutcome::FailClosedWrongBinding { state, .. } => {
             assert_eq!(state, expected_state);
         }
-        other => panic!("expected wrong-binding {:?}, got {:?}", expected_state, other),
+        other => panic!(
+            "expected wrong-binding {:?}, got {:?}",
+            expected_state, other
+        ),
     }
 }
 
 #[test]
 fn r6_wrong_effective_epoch_rejected() {
-    assert_wrong_binding(|i| i.effective_epoch = 101, ReplayFreshnessState::WrongEpoch);
+    assert_wrong_binding(
+        |i| i.effective_epoch = 101,
+        ReplayFreshnessState::WrongEpoch,
+    );
 }
 
 #[test]
@@ -889,9 +904,11 @@ fn r32_mainnet_peer_driven_apply_refused_even_when_fresh() {
         EvaluatorReplayFreshnessOutcome::FailClosedMainNetUnavailable
     );
     assert!(!outcome.authorizes_mutation());
-    assert!(mainnet_peer_driven_apply_remains_refused_under_replay_state(
-        TrustBundleEnvironment::Mainnet
-    ));
+    assert!(
+        mainnet_peer_driven_apply_remains_refused_under_replay_state(
+            TrustBundleEnvironment::Mainnet
+        )
+    );
 }
 
 // ===========================================================================

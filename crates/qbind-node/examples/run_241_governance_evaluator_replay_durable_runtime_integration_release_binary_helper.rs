@@ -420,7 +420,11 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
             &mut backend,
         );
         t.check_outcome("A2.outcome", "proceed-fresh-observed", &o);
-        t.check_state("A2.state", "observed-fresh", backend.read_durable_state(&c.key()));
+        t.check_state(
+            "A2.state",
+            "observed-fresh",
+            backend.read_durable_state(&c.key()),
+        );
     }
 
     // A3 — first-seen TestNet fixture decision is observed as fresh.
@@ -440,7 +444,11 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
             &mut backend,
         );
         t.check_outcome("A3.outcome", "proceed-fresh-observed", &o);
-        t.check_state("A3.state", "observed-fresh", backend.read_durable_state(&c.key()));
+        t.check_state(
+            "A3.state",
+            "observed-fresh",
+            backend.read_durable_state(&c.key()),
+        );
     }
 
     // A4 — known fresh decision proceeds as known fresh.
@@ -515,7 +523,11 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
             &c.input(K::FixtureDevNet, P::FixtureDevNet, MC::AppliedSuccessfully),
             &mut backend,
         );
-        t.check_outcome("A7.outcome", "consume-durable-after-mutation-success", &consume);
+        t.check_outcome(
+            "A7.outcome",
+            "consume-durable-after-mutation-success",
+            &consume,
+        );
         t.assert_true("A7.authorizes-consume", consume.authorizes_consume());
         t.assert_true("A7.is-consumed", backend.is_consumed(&c.key()));
     }
@@ -537,10 +549,18 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
             &mut backend,
         );
         let consume = integrate_durable_replay_runtime(
-            &c.input(K::FixtureTestNet, P::FixtureTestNet, MC::AppliedSuccessfully),
+            &c.input(
+                K::FixtureTestNet,
+                P::FixtureTestNet,
+                MC::AppliedSuccessfully,
+            ),
             &mut backend,
         );
-        t.check_outcome("A8.outcome", "consume-durable-after-mutation-success", &consume);
+        t.check_outcome(
+            "A8.outcome",
+            "consume-durable-after-mutation-success",
+            &consume,
+        );
         t.assert_true("A8.is-consumed", backend.is_consumed(&c.key()));
     }
 
@@ -830,7 +850,11 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
             &c.input(K::FixtureDevNet, P::FixtureDevNet, MC::AppliedSuccessfully),
             &mut backend,
         );
-        t.check_outcome("A24.consume", "consume-durable-after-mutation-success", &consume);
+        t.check_outcome(
+            "A24.consume",
+            "consume-durable-after-mutation-success",
+            &consume,
+        );
     }
 
     // A25 — integrate_durable_replay_runtime proves durable read/observe occurs
@@ -873,7 +897,10 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
                 &mut backend,
             );
             t.assert_true(&format!("A26.no-consume.{i}"), o.no_consume());
-            t.assert_true(&format!("A26.not-consumed.{i}"), !backend.is_consumed(&c.key()));
+            t.assert_true(
+                &format!("A26.not-consumed.{i}"),
+                !backend.is_consumed(&c.key()),
+            );
         }
         // AppliedSuccessfully consumes.
         let consume = integrate_durable_replay_runtime(
@@ -896,7 +923,9 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
         t.check_outcome("A27.outcome", "crash-window-fail-closed", &o);
         t.assert_true(
             "A27.unknown",
-            o == DurableReplayRuntimeOutcome::CrashWindowFailClosed(CrashWindow::UnknownCrashWindow),
+            o == DurableReplayRuntimeOutcome::CrashWindowFailClosed(
+                CrashWindow::UnknownCrashWindow,
+            ),
         );
         t.assert_true(
             "A27.guard",
@@ -1116,7 +1145,9 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
     assert_durable_binding_rejected(&mut t, "R10.wrong-environment", |i| {
         i.environment = Env::Testnet
     });
-    assert_durable_binding_rejected(&mut t, "R11.wrong-chain", |i| i.chain_id = "wrong".to_string());
+    assert_durable_binding_rejected(&mut t, "R11.wrong-chain", |i| {
+        i.chain_id = "wrong".to_string()
+    });
     assert_durable_binding_rejected(&mut t, "R12.wrong-genesis", |i| {
         i.genesis_hash = "wrong".to_string()
     });
@@ -1204,7 +1235,11 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
             &mut backend,
         );
         let o = integrate_durable_replay_runtime(
-            &c.input(K::FixtureDevNet, P::FixtureDevNet, MC::AuthorizedButNotApplied),
+            &c.input(
+                K::FixtureDevNet,
+                P::FixtureDevNet,
+                MC::AuthorizedButNotApplied,
+            ),
             &mut backend,
         );
         t.check_outcome("R29.outcome", "do-not-consume-before-apply", &o);
@@ -1253,7 +1288,9 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
         );
         t.assert_true(
             "R32.unknown",
-            o == DurableReplayRuntimeOutcome::CrashWindowFailClosed(CrashWindow::UnknownCrashWindow),
+            o == DurableReplayRuntimeOutcome::CrashWindowFailClosed(
+                CrashWindow::UnknownCrashWindow,
+            ),
         );
         t.assert_true("R32.fail-closed", o.is_fail_closed());
     }
@@ -1299,7 +1336,10 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
         );
         t.assert_true("R37.fail-closed", o.is_fail_closed());
         t.assert_true("R37.backend-empty", backend.is_empty());
-        t.assert_true("R37.non-mutating", durable_runtime_rejection_is_non_mutating());
+        t.assert_true(
+            "R37.non-mutating",
+            durable_runtime_rejection_is_non_mutating(),
+        );
 
         // A rejected consume after a legitimate observe leaves the record
         // unconsumed and the backend length unchanged.
@@ -1404,12 +1444,16 @@ fn run_reachability_table(out: &Path) -> (u64, u64) {
         (
             "T.crash-window-fail-closed",
             "crash-window-fail-closed",
-            DurableReplayRuntimeOutcome::CrashWindowFailClosed(CrashWindow::AfterMutationBeforeConsume),
+            DurableReplayRuntimeOutcome::CrashWindowFailClosed(
+                CrashWindow::AfterMutationBeforeConsume,
+            ),
         ),
         (
             "T.durable-replay-fail-closed",
             "durable-replay-fail-closed",
-            DurableReplayRuntimeOutcome::DurableReplayFailClosed(DurableBackendOutcome::FailClosedConsumed),
+            DurableReplayRuntimeOutcome::DurableReplayFailClosed(
+                DurableBackendOutcome::FailClosedConsumed,
+            ),
         ),
         (
             "T.consume-runtime-fail-closed",
@@ -1576,7 +1620,10 @@ fn run_fixture_dump(out: &Path) {
     let key = c.key();
 
     // Deterministic durable backend key digest (release mode).
-    write_file(&dir.join("durable_backend_key_digest.txt"), &format!("{key}\n"));
+    write_file(
+        &dir.join("durable_backend_key_digest.txt"),
+        &format!("{key}\n"),
+    );
 
     // Before / after fixture durable backend snapshots across the full runtime
     // observe -> authorize -> consume lifecycle.

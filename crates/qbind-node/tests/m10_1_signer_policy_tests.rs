@@ -10,9 +10,8 @@
 //! 4. **Production signer modes**: EncryptedFsV1, RemoteSigner, HsmPkcs11 accepted
 
 use qbind_node::node_config::{
-    is_production_signer_mode, validate_signer_mode_for_devnet,
-    validate_signer_mode_for_mainnet, validate_signer_mode_for_testnet, MainnetConfigError,
-    NodeConfig, SignerMode,
+    is_production_signer_mode, validate_signer_mode_for_devnet, validate_signer_mode_for_mainnet,
+    validate_signer_mode_for_testnet, MainnetConfigError, NodeConfig, SignerMode,
 };
 use std::path::PathBuf;
 
@@ -38,7 +37,10 @@ fn make_mainnet_config_for_signer_testing() -> NodeConfig {
 fn m10_1_validate_signer_mode_mainnet_rejects_loopback() {
     // LoopbackTesting is FORBIDDEN on MainNet
     let result = validate_signer_mode_for_mainnet(SignerMode::LoopbackTesting);
-    assert!(result.is_err(), "LoopbackTesting should be rejected on MainNet");
+    assert!(
+        result.is_err(),
+        "LoopbackTesting should be rejected on MainNet"
+    );
     let err_msg = result.unwrap_err();
     assert!(
         err_msg.contains("FORBIDDEN") && err_msg.contains("MainNet"),
@@ -51,7 +53,10 @@ fn m10_1_validate_signer_mode_mainnet_rejects_loopback() {
 fn m10_1_validate_signer_mode_mainnet_accepts_encrypted_fs() {
     // EncryptedFsV1 is allowed (with recommendation for higher security)
     let result = validate_signer_mode_for_mainnet(SignerMode::EncryptedFsV1);
-    assert!(result.is_ok(), "EncryptedFsV1 should be accepted on MainNet");
+    assert!(
+        result.is_ok(),
+        "EncryptedFsV1 should be accepted on MainNet"
+    );
 }
 
 #[test]
@@ -72,7 +77,10 @@ fn m10_1_validate_signer_mode_mainnet_accepts_hsm_pkcs11() {
 fn m10_1_validate_signer_mode_testnet_rejects_loopback() {
     // LoopbackTesting is FORBIDDEN on TestNet (same security posture as MainNet)
     let result = validate_signer_mode_for_testnet(SignerMode::LoopbackTesting);
-    assert!(result.is_err(), "LoopbackTesting should be rejected on TestNet");
+    assert!(
+        result.is_err(),
+        "LoopbackTesting should be rejected on TestNet"
+    );
     let err_msg = result.unwrap_err();
     assert!(
         err_msg.contains("FORBIDDEN") && err_msg.contains("TestNet"),
@@ -132,17 +140,17 @@ fn m10_1_mainnet_config_rejects_loopback_signer_mode() {
     config.signer_mode = SignerMode::LoopbackTesting;
 
     let result = config.validate_mainnet_invariants();
-    assert!(result.is_err(), "MainNet should reject LoopbackTesting signer mode");
+    assert!(
+        result.is_err(),
+        "MainNet should reject LoopbackTesting signer mode"
+    );
 
     match result {
         Err(MainnetConfigError::SignerModeLoopbackForbidden) => {
             // Expected error
         }
         Err(other) => {
-            panic!(
-                "Expected SignerModeLoopbackForbidden, got {:?}",
-                other
-            );
+            panic!("Expected SignerModeLoopbackForbidden, got {:?}", other);
         }
         Ok(()) => panic!("Should have failed validation"),
     }
@@ -155,17 +163,17 @@ fn m10_1_mainnet_config_requires_remote_signer_url() {
     config.remote_signer_url = None;
 
     let result = config.validate_mainnet_invariants();
-    assert!(result.is_err(), "MainNet should require remote_signer_url when RemoteSigner mode");
+    assert!(
+        result.is_err(),
+        "MainNet should require remote_signer_url when RemoteSigner mode"
+    );
 
     match result {
         Err(MainnetConfigError::RemoteSignerUrlMissing) => {
             // Expected error
         }
         Err(other) => {
-            panic!(
-                "Expected RemoteSignerUrlMissing, got {:?}",
-                other
-            );
+            panic!("Expected RemoteSignerUrlMissing, got {:?}", other);
         }
         Ok(()) => panic!("Should have failed validation"),
     }
@@ -179,17 +187,17 @@ fn m10_1_mainnet_config_requires_remote_signer_cert_paths() {
     config.remote_signer_cert_path = None;
 
     let result = config.validate_mainnet_invariants();
-    assert!(result.is_err(), "MainNet should require remote_signer_cert_path when RemoteSigner mode");
+    assert!(
+        result.is_err(),
+        "MainNet should require remote_signer_cert_path when RemoteSigner mode"
+    );
 
     match result {
         Err(MainnetConfigError::RemoteSignerCertPathMissing) => {
             // Expected error
         }
         Err(other) => {
-            panic!(
-                "Expected RemoteSignerCertPathMissing, got {:?}",
-                other
-            );
+            panic!("Expected RemoteSignerCertPathMissing, got {:?}", other);
         }
         Ok(()) => panic!("Should have failed validation"),
     }
@@ -204,7 +212,10 @@ fn m10_1_mainnet_config_requires_remote_signer_client_cert() {
     config.remote_signer_client_cert_path = None;
 
     let result = config.validate_mainnet_invariants();
-    assert!(result.is_err(), "MainNet should require remote_signer_client_cert_path when RemoteSigner mode");
+    assert!(
+        result.is_err(),
+        "MainNet should require remote_signer_client_cert_path when RemoteSigner mode"
+    );
 
     match result {
         Err(MainnetConfigError::RemoteSignerClientCertPathMissing) => {
@@ -230,17 +241,17 @@ fn m10_1_mainnet_config_requires_remote_signer_client_key() {
     config.remote_signer_client_key_path = None;
 
     let result = config.validate_mainnet_invariants();
-    assert!(result.is_err(), "MainNet should require remote_signer_client_key_path when RemoteSigner mode");
+    assert!(
+        result.is_err(),
+        "MainNet should require remote_signer_client_key_path when RemoteSigner mode"
+    );
 
     match result {
         Err(MainnetConfigError::RemoteSignerClientKeyPathMissing) => {
             // Expected error
         }
         Err(other) => {
-            panic!(
-                "Expected RemoteSignerClientKeyPathMissing, got {:?}",
-                other
-            );
+            panic!("Expected RemoteSignerClientKeyPathMissing, got {:?}", other);
         }
         Ok(()) => panic!("Should have failed validation"),
     }
@@ -252,7 +263,10 @@ fn m10_1_mainnet_config_requires_remote_signer_client_key() {
 
 #[test]
 fn m10_1_signer_mode_display() {
-    assert_eq!(format!("{}", SignerMode::LoopbackTesting), "loopback-testing");
+    assert_eq!(
+        format!("{}", SignerMode::LoopbackTesting),
+        "loopback-testing"
+    );
     assert_eq!(format!("{}", SignerMode::EncryptedFsV1), "encrypted-fs");
     assert_eq!(format!("{}", SignerMode::RemoteSigner), "remote-signer");
     assert_eq!(format!("{}", SignerMode::HsmPkcs11), "hsm-pkcs11");
@@ -262,15 +276,36 @@ fn m10_1_signer_mode_display() {
 fn m10_1_parse_signer_mode() {
     use qbind_node::node_config::parse_signer_mode;
 
-    assert_eq!(parse_signer_mode("loopback-testing"), Some(SignerMode::LoopbackTesting));
-    assert_eq!(parse_signer_mode("loopback"), Some(SignerMode::LoopbackTesting));
-    assert_eq!(parse_signer_mode("testing"), Some(SignerMode::LoopbackTesting));
+    assert_eq!(
+        parse_signer_mode("loopback-testing"),
+        Some(SignerMode::LoopbackTesting)
+    );
+    assert_eq!(
+        parse_signer_mode("loopback"),
+        Some(SignerMode::LoopbackTesting)
+    );
+    assert_eq!(
+        parse_signer_mode("testing"),
+        Some(SignerMode::LoopbackTesting)
+    );
 
-    assert_eq!(parse_signer_mode("encrypted-fs"), Some(SignerMode::EncryptedFsV1));
-    assert_eq!(parse_signer_mode("encrypted-fs-v1"), Some(SignerMode::EncryptedFsV1));
-    assert_eq!(parse_signer_mode("encrypted"), Some(SignerMode::EncryptedFsV1));
+    assert_eq!(
+        parse_signer_mode("encrypted-fs"),
+        Some(SignerMode::EncryptedFsV1)
+    );
+    assert_eq!(
+        parse_signer_mode("encrypted-fs-v1"),
+        Some(SignerMode::EncryptedFsV1)
+    );
+    assert_eq!(
+        parse_signer_mode("encrypted"),
+        Some(SignerMode::EncryptedFsV1)
+    );
 
-    assert_eq!(parse_signer_mode("remote-signer"), Some(SignerMode::RemoteSigner));
+    assert_eq!(
+        parse_signer_mode("remote-signer"),
+        Some(SignerMode::RemoteSigner)
+    );
     assert_eq!(parse_signer_mode("remote"), Some(SignerMode::RemoteSigner));
 
     assert_eq!(parse_signer_mode("hsm-pkcs11"), Some(SignerMode::HsmPkcs11));
@@ -291,7 +326,9 @@ fn m10_1_error_message_contains_guidance() {
     let result = validate_signer_mode_for_mainnet(SignerMode::LoopbackTesting);
     let err_msg = result.unwrap_err();
     assert!(
-        err_msg.contains("remote-signer") || err_msg.contains("hsm-pkcs11") || err_msg.contains("encrypted-fs"),
+        err_msg.contains("remote-signer")
+            || err_msg.contains("hsm-pkcs11")
+            || err_msg.contains("encrypted-fs"),
         "Error message should suggest alternatives: {}",
         err_msg
     );

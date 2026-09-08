@@ -94,8 +94,7 @@ use qbind_node::pqc_custody_attestation_policy_surface::{
     preflight_v2_marker_custody_attestation_for_reload_check,
     preflight_v2_marker_custody_attestation_for_sighup,
     preflight_v2_marker_custody_attestation_for_startup_p2p_trust_bundle,
-    CustodyAttestationPolicySelectorParseError,
-    CUSTODY_ATTESTATION_POLICY_TAG_DISABLED,
+    CustodyAttestationPolicySelectorParseError, CUSTODY_ATTESTATION_POLICY_TAG_DISABLED,
     CUSTODY_ATTESTATION_POLICY_TAG_FIXTURE_ATTESTATION_ALLOWED,
     CUSTODY_ATTESTATION_POLICY_TAG_HSM_ATTESTATION_REQUIRED,
     CUSTODY_ATTESTATION_POLICY_TAG_KMS_ATTESTATION_REQUIRED,
@@ -143,7 +142,13 @@ const WINDOW_UNTIL: u64 = 1_700_000_500;
 // ---------------------------------------------------------------------------
 
 fn domain(env: TrustBundleEnvironment) -> AuthorityTrustDomain {
-    AuthorityTrustDomain::new(env, CHAIN_ID, GENESIS_HASH, ROOT_FP, PQC_LIFECYCLE_SUITE_ML_DSA_44)
+    AuthorityTrustDomain::new(
+        env,
+        CHAIN_ID,
+        GENESIS_HASH,
+        ROOT_FP,
+        PQC_LIFECYCLE_SUITE_ML_DSA_44,
+    )
 }
 
 fn build_v2(
@@ -173,7 +178,14 @@ fn build_v2(
 }
 
 fn rotate_candidate(env: TrustBundleEnvironment) -> PersistentAuthorityStateRecordV2 {
-    build_v2(env, KEY_B, 2, BundleSigningRatificationV2Action::Rotate, Some(KEY_A), DIGEST_2)
+    build_v2(
+        env,
+        KEY_B,
+        2,
+        BundleSigningRatificationV2Action::Rotate,
+        Some(KEY_A),
+        DIGEST_2,
+    )
 }
 
 fn prior_versioned(env: TrustBundleEnvironment) -> PersistentAuthorityStateRecordVersioned {
@@ -291,12 +303,22 @@ fn accepted_scenario(env: TrustBundleEnvironment) -> Scenario {
     let input = input(env, &candidate);
     let custody = good_custody_attestation(env, &candidate);
     let prior = prior_versioned(env);
-    Scenario { domain: domain(env), candidate, prior, custody, evidence, input }
+    Scenario {
+        domain: domain(env),
+        candidate,
+        prior,
+        custody,
+        evidence,
+        input,
+    }
 }
 
 impl Scenario {
     fn parts(&self) -> CustodyAttestationParts {
-        CustodyAttestationParts { evidence: self.evidence.clone(), input: self.input.clone() }
+        CustodyAttestationParts {
+            evidence: self.evidence.clone(),
+            input: self.input.clone(),
+        }
     }
 
     fn loaded(&self) -> CustodyAttestationLoadStatus {
@@ -393,9 +415,7 @@ fn surface_wrapper(s: Surface) -> PreflightFn {
     match s {
         Surface::ReloadCheck => preflight_v2_marker_custody_attestation_for_reload_check,
         Surface::ReloadApply => preflight_v2_marker_custody_attestation_for_reload_apply,
-        Surface::StartupP2p => {
-            preflight_v2_marker_custody_attestation_for_startup_p2p_trust_bundle
-        }
+        Surface::StartupP2p => preflight_v2_marker_custody_attestation_for_startup_p2p_trust_bundle,
         Surface::Sighup => preflight_v2_marker_custody_attestation_for_sighup,
         Surface::LocalPeerCandidate => {
             preflight_v2_marker_custody_attestation_for_local_peer_candidate_check
@@ -502,9 +522,10 @@ fn routed_attestation(
     outcome: &CustodyAttestationPayloadCarryingDecisionOutcome,
 ) -> Option<&CustodyAttestationOutcome> {
     match outcome.callsite_outcome() {
-        Some(CustodyMetadataAttestationOutcome::AttestationRejected { attestation_outcome, .. }) => {
-            Some(attestation_outcome)
-        }
+        Some(CustodyMetadataAttestationOutcome::AttestationRejected {
+            attestation_outcome,
+            ..
+        }) => Some(attestation_outcome),
         _ => None,
     }
 }
@@ -623,7 +644,10 @@ fn run_selector_table(out: &Path) -> (u64, u64) {
     let mut t = Table::new("selector");
 
     let canonical: &[(&str, CustodyAttestationPolicy)] = &[
-        (CUSTODY_ATTESTATION_POLICY_TAG_DISABLED, CustodyAttestationPolicy::Disabled),
+        (
+            CUSTODY_ATTESTATION_POLICY_TAG_DISABLED,
+            CustodyAttestationPolicy::Disabled,
+        ),
         (
             CUSTODY_ATTESTATION_POLICY_TAG_FIXTURE_ATTESTATION_ALLOWED,
             CustodyAttestationPolicy::FixtureAttestationAllowed,
@@ -691,9 +715,12 @@ fn run_selector_table(out: &Path) -> (u64, u64) {
     // A11 — CLI-over-env precedence is deterministic: env fixture, CLI
     // disabled -> Disabled (and the reverse direction).
     {
-        let _g = EnvGuard::set(Some(CUSTODY_ATTESTATION_POLICY_TAG_FIXTURE_ATTESTATION_ALLOWED));
-        let resolved =
-            custody_attestation_policy_from_cli_or_env(Some(CUSTODY_ATTESTATION_POLICY_TAG_DISABLED));
+        let _g = EnvGuard::set(Some(
+            CUSTODY_ATTESTATION_POLICY_TAG_FIXTURE_ATTESTATION_ALLOWED,
+        ));
+        let resolved = custody_attestation_policy_from_cli_or_env(Some(
+            CUSTODY_ATTESTATION_POLICY_TAG_DISABLED,
+        ));
         t.check(
             "A11.cli-over-env",
             "disabled",
@@ -750,7 +777,10 @@ fn run_selector_table(out: &Path) -> (u64, u64) {
     // R3 — an unrelated env var does not enable the custody-attestation policy.
     {
         let _g = EnvGuard::set(None);
-        std::env::set_var("QBIND_SOME_UNRELATED_FLAG_210", "fixture-attestation-allowed");
+        std::env::set_var(
+            "QBIND_SOME_UNRELATED_FLAG_210",
+            "fixture-attestation-allowed",
+        );
         let resolved = custody_attestation_policy_from_cli_or_env(None);
         std::env::remove_var("QBIND_SOME_UNRELATED_FLAG_210");
         t.assert_true(
@@ -793,7 +823,12 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
         let s = accepted_scenario(Env::Devnet);
         let loaded = s.loaded();
         for surface in ALL_SURFACES {
-            let outcome = s.preflight(surface, AuthorityCustodyPolicy::FixtureOnly, policy, &loaded);
+            let outcome = s.preflight(
+                surface,
+                AuthorityCustodyPolicy::FixtureOnly,
+                policy,
+                &loaded,
+            );
             t.check(
                 &format!("A4.{}", surface_name(surface)),
                 "callsite:accept:Accepted",
@@ -805,13 +840,24 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
     // A5 — env fixture-attestation-allowed resolves and accepts TestNet
     // fixture attestation through the reload-check preflight wrapper.
     {
-        let _g = EnvGuard::set(Some(CUSTODY_ATTESTATION_POLICY_TAG_FIXTURE_ATTESTATION_ALLOWED));
-        let policy = custody_attestation_policy_from_cli_or_env(None).expect("env fixture resolves");
+        let _g = EnvGuard::set(Some(
+            CUSTODY_ATTESTATION_POLICY_TAG_FIXTURE_ATTESTATION_ALLOWED,
+        ));
+        let policy =
+            custody_attestation_policy_from_cli_or_env(None).expect("env fixture resolves");
         let s = accepted_scenario(Env::Testnet);
         let loaded = loaded_via_json(&s.parts());
-        let outcome =
-            s.preflight(Surface::ReloadCheck, AuthorityCustodyPolicy::FixtureOnly, policy, &loaded);
-        t.check("A5.env-testnet-fixture", "callsite:accept:Accepted", &decision_tag(&outcome));
+        let outcome = s.preflight(
+            Surface::ReloadCheck,
+            AuthorityCustodyPolicy::FixtureOnly,
+            policy,
+            &loaded,
+        );
+        t.check(
+            "A5.env-testnet-fixture",
+            "callsite:accept:Accepted",
+            &decision_tag(&outcome),
+        );
     }
 
     // A6..A9 — required policies reach the typed unavailable outcome (no real
@@ -840,29 +886,48 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
         ),
     ];
     for (id, tag, class) in required_cases {
-        let policy = custody_attestation_policy_from_cli_or_env(Some(tag)).expect("policy resolves");
+        let policy =
+            custody_attestation_policy_from_cli_or_env(Some(tag)).expect("policy resolves");
         let mut s = accepted_scenario(Env::Devnet);
         s.evidence.attestation_class = *class;
         let loaded = s.loaded();
-        let outcome =
-            s.preflight(Surface::ReloadCheck, AuthorityCustodyPolicy::FixtureOnly, policy, &loaded);
-        let unavailable = routed_attestation(&outcome).map(|o| o.is_unavailable()).unwrap_or(false);
+        let outcome = s.preflight(
+            Surface::ReloadCheck,
+            AuthorityCustodyPolicy::FixtureOnly,
+            policy,
+            &loaded,
+        );
+        let unavailable = routed_attestation(&outcome)
+            .map(|o| o.is_unavailable())
+            .unwrap_or(false);
         t.assert_true(id, !outcome.is_accept() && unavailable, "");
     }
 
     // A10 — env mainnet-production-attestation-required resolves and reaches
     // the typed MainNet production unavailable / refusal outcome.
     {
-        let _g =
-            EnvGuard::set(Some(CUSTODY_ATTESTATION_POLICY_TAG_MAINNET_PRODUCTION_ATTESTATION_REQUIRED));
-        let policy = custody_attestation_policy_from_cli_or_env(None).expect("env mainnet resolves");
+        let _g = EnvGuard::set(Some(
+            CUSTODY_ATTESTATION_POLICY_TAG_MAINNET_PRODUCTION_ATTESTATION_REQUIRED,
+        ));
+        let policy =
+            custody_attestation_policy_from_cli_or_env(None).expect("env mainnet resolves");
         let mut s = accepted_scenario(Env::Devnet);
         s.evidence.attestation_class = CustodyAttestationClass::ProductionAttestationUnavailable;
         let loaded = s.loaded();
-        let outcome =
-            s.preflight(Surface::ReloadCheck, AuthorityCustodyPolicy::FixtureOnly, policy, &loaded);
-        let tag = routed_attestation(&outcome).map(attestation_tag).unwrap_or_default();
-        t.check("A10.env-mainnet-production", "reject:MainNetProductionAttestationUnavailable", &tag);
+        let outcome = s.preflight(
+            Surface::ReloadCheck,
+            AuthorityCustodyPolicy::FixtureOnly,
+            policy,
+            &loaded,
+        );
+        let tag = routed_attestation(&outcome)
+            .map(attestation_tag)
+            .unwrap_or_default();
+        t.check(
+            "A10.env-mainnet-production",
+            "reject:MainNetProductionAttestationUnavailable",
+            &tag,
+        );
     }
 
     // A12 — no-attestation payload remains compatible under default Disabled
@@ -879,8 +944,16 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
             policy,
             &CustodyAttestationLoadStatus::Absent,
         );
-        t.check("A12.no-attestation-disabled", "bypass:NoCustodyAttestationSupplied", &decision_tag(&outcome));
-        t.assert_true("A12.bypassed", outcome.is_bypassed() && !outcome.is_reject(), "");
+        t.check(
+            "A12.no-attestation-disabled",
+            "bypass:NoCustodyAttestationSupplied",
+            &decision_tag(&outcome),
+        );
+        t.assert_true(
+            "A12.bypassed",
+            outcome.is_bypassed() && !outcome.is_reject(),
+            "",
+        );
     }
 
     // A13 — GenesisBound / EmergencyCouncil / OnChainGovernance proof
@@ -921,9 +994,17 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
         .expect("fixture resolves");
         let s = accepted_scenario(Env::Devnet);
         let loaded = s.loaded();
-        let outcome =
-            s.preflight(Surface::ReloadCheck, AuthorityCustodyPolicy::DevnetLocalAllowed, policy, &loaded);
-        t.check("A14.custody-policy-compat", "callsite:accept:Accepted", &decision_tag(&outcome));
+        let outcome = s.preflight(
+            Surface::ReloadCheck,
+            AuthorityCustodyPolicy::DevnetLocalAllowed,
+            policy,
+            &loaded,
+        );
+        t.check(
+            "A14.custody-policy-compat",
+            "callsite:accept:Accepted",
+            &decision_tag(&outcome),
+        );
     }
 
     // A15 — Run 199 RemoteSigner-policy selector behavior remains compatible:
@@ -938,9 +1019,17 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
         s.evidence.custody_class = AuthorityCustodyClass::RemoteSigner;
         s.input.expected_custody_class = AuthorityCustodyClass::RemoteSigner;
         let loaded = loaded_via_json(&s.parts());
-        let outcome =
-            s.preflight(Surface::ReloadCheck, AuthorityCustodyPolicy::FixtureOnly, policy, &loaded);
-        t.check("A15.remote-signer-policy-compat", "callsite:accept:Accepted", &decision_tag(&outcome));
+        let outcome = s.preflight(
+            Surface::ReloadCheck,
+            AuthorityCustodyPolicy::FixtureOnly,
+            policy,
+            &loaded,
+        );
+        t.check(
+            "A15.remote-signer-policy-compat",
+            "callsite:accept:Accepted",
+            &decision_tag(&outcome),
+        );
     }
 
     t.finish(out)
@@ -983,8 +1072,16 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
             CustodyAttestationPolicy::FixtureAttestationAllowed,
             &CustodyAttestationLoadStatus::Absent,
         );
-        t.check("R4", "reject:CustodyAttestationRequiredButAbsent", &decision_tag(&outcome));
-        t.assert_true("R4.flags", outcome.is_required_but_absent() && outcome.is_reject(), "");
+        t.check(
+            "R4",
+            "reject:CustodyAttestationRequiredButAbsent",
+            &decision_tag(&outcome),
+        );
+        t.assert_true(
+            "R4.flags",
+            outcome.is_required_but_absent() && outcome.is_reject(),
+            "",
+        );
     }
 
     // R5 — no-attestation payload rejected under ProductionAttestationRequired.
@@ -996,7 +1093,11 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
             CustodyAttestationPolicy::ProductionAttestationRequired,
             &CustodyAttestationLoadStatus::Absent,
         );
-        t.check("R5", "reject:CustodyAttestationRequiredButAbsent", &decision_tag(&outcome));
+        t.check(
+            "R5",
+            "reject:CustodyAttestationRequiredButAbsent",
+            &decision_tag(&outcome),
+        );
     }
 
     // R6 — fixture attestation rejected under ProductionAttestationRequired.
@@ -1009,7 +1110,9 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
             CustodyAttestationPolicy::ProductionAttestationRequired,
             &loaded,
         );
-        let tag = routed_attestation(&outcome).map(attestation_tag).unwrap_or_default();
+        let tag = routed_attestation(&outcome)
+            .map(attestation_tag)
+            .unwrap_or_default();
         t.check("R6", "reject:FixtureRejectedProductionRequired", &tag);
     }
 
@@ -1023,27 +1126,79 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
             CustodyAttestationPolicy::MainnetProductionAttestationRequired,
             &loaded,
         );
-        let tag = routed_attestation(&outcome).map(attestation_tag).unwrap_or_default();
-        t.check("R7", "reject:FixtureRejectedMainnetProductionRequired", &tag);
+        let tag = routed_attestation(&outcome)
+            .map(attestation_tag)
+            .unwrap_or_default();
+        t.check(
+            "R7",
+            "reject:FixtureRejectedMainnetProductionRequired",
+            &tag,
+        );
     }
 
     // R8–R14 — production-class attestations rejected as unavailable.
-    let unavailable_cases: &[(&str, &str, CustodyAttestationClass, CustodyAttestationPolicy)] = &[
-        ("R8", "remote-signer", CustodyAttestationClass::RemoteSignerAttestation, CustodyAttestationPolicy::FixtureAttestationAllowed),
-        ("R9", "kms", CustodyAttestationClass::KmsAttestation, CustodyAttestationPolicy::FixtureAttestationAllowed),
-        ("R10", "hsm", CustodyAttestationClass::HsmAttestation, CustodyAttestationPolicy::FixtureAttestationAllowed),
-        ("R11", "cloud-kms", CustodyAttestationClass::CloudKmsAttestationUnavailable, CustodyAttestationPolicy::FixtureAttestationAllowed),
-        ("R12", "pkcs11", CustodyAttestationClass::Pkcs11HsmAttestationUnavailable, CustodyAttestationPolicy::FixtureAttestationAllowed),
-        ("R13", "production", CustodyAttestationClass::ProductionAttestationUnavailable, CustodyAttestationPolicy::ProductionAttestationRequired),
-        ("R14", "mainnet-production", CustodyAttestationClass::ProductionAttestationUnavailable, CustodyAttestationPolicy::MainnetProductionAttestationRequired),
+    let unavailable_cases: &[(
+        &str,
+        &str,
+        CustodyAttestationClass,
+        CustodyAttestationPolicy,
+    )] = &[
+        (
+            "R8",
+            "remote-signer",
+            CustodyAttestationClass::RemoteSignerAttestation,
+            CustodyAttestationPolicy::FixtureAttestationAllowed,
+        ),
+        (
+            "R9",
+            "kms",
+            CustodyAttestationClass::KmsAttestation,
+            CustodyAttestationPolicy::FixtureAttestationAllowed,
+        ),
+        (
+            "R10",
+            "hsm",
+            CustodyAttestationClass::HsmAttestation,
+            CustodyAttestationPolicy::FixtureAttestationAllowed,
+        ),
+        (
+            "R11",
+            "cloud-kms",
+            CustodyAttestationClass::CloudKmsAttestationUnavailable,
+            CustodyAttestationPolicy::FixtureAttestationAllowed,
+        ),
+        (
+            "R12",
+            "pkcs11",
+            CustodyAttestationClass::Pkcs11HsmAttestationUnavailable,
+            CustodyAttestationPolicy::FixtureAttestationAllowed,
+        ),
+        (
+            "R13",
+            "production",
+            CustodyAttestationClass::ProductionAttestationUnavailable,
+            CustodyAttestationPolicy::ProductionAttestationRequired,
+        ),
+        (
+            "R14",
+            "mainnet-production",
+            CustodyAttestationClass::ProductionAttestationUnavailable,
+            CustodyAttestationPolicy::MainnetProductionAttestationRequired,
+        ),
     ];
     for (id, _name, class, policy) in unavailable_cases {
         let mut s = accepted_scenario(Env::Devnet);
         s.evidence.attestation_class = *class;
         let loaded = s.loaded();
-        let outcome =
-            s.preflight(Surface::ReloadCheck, AuthorityCustodyPolicy::FixtureOnly, *policy, &loaded);
-        let unavailable = routed_attestation(&outcome).map(|o| o.is_unavailable()).unwrap_or(false);
+        let outcome = s.preflight(
+            Surface::ReloadCheck,
+            AuthorityCustodyPolicy::FixtureOnly,
+            *policy,
+            &loaded,
+        );
+        let unavailable = routed_attestation(&outcome)
+            .map(|o| o.is_unavailable())
+            .unwrap_or(false);
         t.assert_true(id, !outcome.is_accept() && unavailable, "");
     }
 
@@ -1063,78 +1218,158 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
             CustodyAttestationPolicy::FixtureAttestationAllowed,
             &loaded,
         );
-        t.assert_true("R15", outcome.is_malformed_payload() && outcome.is_reject(), "");
+        t.assert_true(
+            "R15",
+            outcome.is_malformed_payload() && outcome.is_reject(),
+            "",
+        );
     }
 
     // R16–R31 — wrong-binding rejections route through the Run 205 verifier.
-    t.check("R16", "reject:WrongEnvironment", &attestation_tag(&assert_attestation_rejected(|s| {
-        s.evidence.environment = TrustBundleEnvironment::Testnet;
-    })));
-    t.check("R17", "reject:WrongChain", &attestation_tag(&assert_attestation_rejected(|s| {
-        s.evidence.chain_id = "deadbeef".to_string();
-        s.input.expected_chain_id = "deadbeef".to_string();
-    })));
-    t.check("R18", "reject:WrongGenesis", &attestation_tag(&assert_attestation_rejected(|s| {
-        s.evidence.genesis_hash = "ff".repeat(32);
-        s.input.expected_genesis_hash = "ff".repeat(32);
-    })));
-    t.check("R19", "reject:WrongAuthorityRoot", &attestation_tag(&assert_attestation_rejected(|s| {
-        s.evidence.authority_root_fingerprint = "9".repeat(40);
-        s.input.expected_authority_root_fingerprint = "9".repeat(40);
-    })));
-    t.check("R20", "reject:WrongSigningKeyFingerprint", &attestation_tag(&assert_attestation_rejected(|s| {
-        s.evidence.bundle_signing_key_fingerprint = "0".repeat(40);
-    })));
-    t.check("R21", "reject:WrongCustodyClass", &attestation_tag(&assert_attestation_rejected(|s| {
-        s.evidence.custody_class = AuthorityCustodyClass::Hsm;
-    })));
-    t.check("R22", "reject:WrongBackendProviderSignerId", &attestation_tag(&assert_attestation_rejected(|s| {
-        s.evidence.backend_provider_signer_id = "other-provider".to_string();
-    })));
-    t.check("R23", "reject:WrongKeyId", &attestation_tag(&assert_attestation_rejected(|s| {
-        s.evidence.custody_key_id = "other-key".to_string();
-    })));
-    t.check("R24", "reject:WrongSuite", &attestation_tag(&assert_attestation_rejected(|s| {
-        s.evidence.suite_id = 99;
-    })));
-    t.check("R25", "reject:WrongLifecycleAction", &attestation_tag(&assert_attestation_rejected(|s| {
-        s.evidence.lifecycle_action = LocalLifecycleAction::Revoke;
-    })));
-    t.check("R26", "reject:WrongCandidateDigest", &attestation_tag(&assert_attestation_rejected(|s| {
-        s.evidence.candidate_digest = "3".repeat(64);
-    })));
-    t.check("R27", "reject:WrongAuthorityDomainSequence", &attestation_tag(&assert_attestation_rejected(|s| {
-        s.evidence.authority_domain_sequence = 9;
-    })));
-    t.check("R28", "reject:WrongGovernanceProofDigest", &attestation_tag(&assert_attestation_rejected(|s| {
-        s.evidence.governance_proof_digest = Some("other-gov-proof".to_string());
-    })));
-    t.check("R29", "reject:WrongRequestDigest", &attestation_tag(&assert_attestation_rejected(|s| {
-        s.evidence.request_digest = Some("other-request".to_string());
-    })));
-    t.check("R30", "reject:WrongResponseDigest", &attestation_tag(&assert_attestation_rejected(|s| {
-        s.evidence.response_digest = Some("other-response".to_string());
-    })));
-    t.check("R31", "reject:WrongTranscriptDigest", &attestation_tag(&assert_attestation_rejected(|s| {
-        s.evidence.transcript_digest = Some("other-transcript".to_string());
-    })));
+    t.check(
+        "R16",
+        "reject:WrongEnvironment",
+        &attestation_tag(&assert_attestation_rejected(|s| {
+            s.evidence.environment = TrustBundleEnvironment::Testnet;
+        })),
+    );
+    t.check(
+        "R17",
+        "reject:WrongChain",
+        &attestation_tag(&assert_attestation_rejected(|s| {
+            s.evidence.chain_id = "deadbeef".to_string();
+            s.input.expected_chain_id = "deadbeef".to_string();
+        })),
+    );
+    t.check(
+        "R18",
+        "reject:WrongGenesis",
+        &attestation_tag(&assert_attestation_rejected(|s| {
+            s.evidence.genesis_hash = "ff".repeat(32);
+            s.input.expected_genesis_hash = "ff".repeat(32);
+        })),
+    );
+    t.check(
+        "R19",
+        "reject:WrongAuthorityRoot",
+        &attestation_tag(&assert_attestation_rejected(|s| {
+            s.evidence.authority_root_fingerprint = "9".repeat(40);
+            s.input.expected_authority_root_fingerprint = "9".repeat(40);
+        })),
+    );
+    t.check(
+        "R20",
+        "reject:WrongSigningKeyFingerprint",
+        &attestation_tag(&assert_attestation_rejected(|s| {
+            s.evidence.bundle_signing_key_fingerprint = "0".repeat(40);
+        })),
+    );
+    t.check(
+        "R21",
+        "reject:WrongCustodyClass",
+        &attestation_tag(&assert_attestation_rejected(|s| {
+            s.evidence.custody_class = AuthorityCustodyClass::Hsm;
+        })),
+    );
+    t.check(
+        "R22",
+        "reject:WrongBackendProviderSignerId",
+        &attestation_tag(&assert_attestation_rejected(|s| {
+            s.evidence.backend_provider_signer_id = "other-provider".to_string();
+        })),
+    );
+    t.check(
+        "R23",
+        "reject:WrongKeyId",
+        &attestation_tag(&assert_attestation_rejected(|s| {
+            s.evidence.custody_key_id = "other-key".to_string();
+        })),
+    );
+    t.check(
+        "R24",
+        "reject:WrongSuite",
+        &attestation_tag(&assert_attestation_rejected(|s| {
+            s.evidence.suite_id = 99;
+        })),
+    );
+    t.check(
+        "R25",
+        "reject:WrongLifecycleAction",
+        &attestation_tag(&assert_attestation_rejected(|s| {
+            s.evidence.lifecycle_action = LocalLifecycleAction::Revoke;
+        })),
+    );
+    t.check(
+        "R26",
+        "reject:WrongCandidateDigest",
+        &attestation_tag(&assert_attestation_rejected(|s| {
+            s.evidence.candidate_digest = "3".repeat(64);
+        })),
+    );
+    t.check(
+        "R27",
+        "reject:WrongAuthorityDomainSequence",
+        &attestation_tag(&assert_attestation_rejected(|s| {
+            s.evidence.authority_domain_sequence = 9;
+        })),
+    );
+    t.check(
+        "R28",
+        "reject:WrongGovernanceProofDigest",
+        &attestation_tag(&assert_attestation_rejected(|s| {
+            s.evidence.governance_proof_digest = Some("other-gov-proof".to_string());
+        })),
+    );
+    t.check(
+        "R29",
+        "reject:WrongRequestDigest",
+        &attestation_tag(&assert_attestation_rejected(|s| {
+            s.evidence.request_digest = Some("other-request".to_string());
+        })),
+    );
+    t.check(
+        "R30",
+        "reject:WrongResponseDigest",
+        &attestation_tag(&assert_attestation_rejected(|s| {
+            s.evidence.response_digest = Some("other-response".to_string());
+        })),
+    );
+    t.check(
+        "R31",
+        "reject:WrongTranscriptDigest",
+        &attestation_tag(&assert_attestation_rejected(|s| {
+            s.evidence.transcript_digest = Some("other-transcript".to_string());
+        })),
+    );
 
     // R32 — stale / replayed attestation rejected.
-    t.check("R32", "reject:StaleOrReplayedAttestation", &attestation_tag(&assert_attestation_rejected(|s| {
-        s.evidence.attestation_nonce = "stale-nonce".to_string();
-    })));
+    t.check(
+        "R32",
+        "reject:StaleOrReplayedAttestation",
+        &attestation_tag(&assert_attestation_rejected(|s| {
+            s.evidence.attestation_nonce = "stale-nonce".to_string();
+        })),
+    );
 
     // R33 — expired attestation rejected.
-    t.check("R33", "reject:ExpiredAttestation", &attestation_tag(&assert_attestation_rejected(|s| {
-        s.evidence.freshness_unix = Some(1);
-        s.evidence.expires_at_unix = Some(2);
-    })));
+    t.check(
+        "R33",
+        "reject:ExpiredAttestation",
+        &attestation_tag(&assert_attestation_rejected(|s| {
+            s.evidence.freshness_unix = Some(1);
+            s.evidence.expires_at_unix = Some(2);
+        })),
+    );
 
     // R34 — invalid attestation commitment rejected.
-    t.check("R34", "reject:InvalidAttestationCommitment", &attestation_tag(&assert_attestation_rejected(|s| {
-        s.evidence.attestation_commitment =
-            CUSTODY_ATTESTATION_INVALID_COMMITMENT_SENTINEL.to_string();
-    })));
+    t.check(
+        "R34",
+        "reject:InvalidAttestationCommitment",
+        &attestation_tag(&assert_attestation_rejected(|s| {
+            s.evidence.attestation_commitment =
+                CUSTODY_ATTESTATION_INVALID_COMMITMENT_SENTINEL.to_string();
+        })),
+    );
 
     // R35 — local operator cannot satisfy production attestation.
     {
@@ -1215,7 +1450,11 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
             CustodyAttestationPolicy::FixtureAttestationAllowed,
             &loaded,
         );
-        t.assert_true("R39", outcome.is_malformed_payload() && outcome.is_reject(), "");
+        t.assert_true(
+            "R39",
+            outcome.is_malformed_payload() && outcome.is_reject(),
+            "",
+        );
     }
 
     // R40 — MainNet peer-driven apply remains refused even with
@@ -1229,7 +1468,11 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
             CustodyAttestationPolicy::MainnetProductionAttestationRequired,
             &loaded,
         );
-        t.check("R40", "reject:MainNetPeerDrivenApplyRefused", &decision_tag(&outcome));
+        t.check(
+            "R40",
+            "reject:MainNetPeerDrivenApplyRefused",
+            &decision_tag(&outcome),
+        );
         t.assert_true(
             "R40.helper",
             outcome.is_mainnet_peer_driven_apply_refused()
@@ -1307,8 +1550,9 @@ fn run_loader_table(out: &Path) -> (u64, u64) {
         let value = make_v2_sidecar_value(Env::Devnet, None);
         let bytes = serde_json::to_vec(&value).unwrap();
         let path = PathBuf::from("/dev/null/run-210-legacy.json");
-        let loaded = load_v2_ratification_sidecar_with_custody_attestation_from_bytes(&bytes, &path)
-            .expect("legacy v2 sidecar parses");
+        let loaded =
+            load_v2_ratification_sidecar_with_custody_attestation_from_bytes(&bytes, &path)
+                .expect("legacy v2 sidecar parses");
         t.assert_true("L1", loaded.custody_attestation.is_absent(), "");
     }
 
@@ -1316,12 +1560,12 @@ fn run_loader_table(out: &Path) -> (u64, u64) {
     {
         let s = accepted_scenario(Env::Devnet);
         let wire = CustodyAttestationPayloadWire::from_parts(&s.evidence, &s.input);
-        let value =
-            make_v2_sidecar_value(Env::Devnet, Some(serde_json::to_value(&wire).unwrap()));
+        let value = make_v2_sidecar_value(Env::Devnet, Some(serde_json::to_value(&wire).unwrap()));
         let bytes = serde_json::to_vec(&value).unwrap();
         let path = PathBuf::from("/dev/null/run-210-carry.json");
-        let loaded = load_v2_ratification_sidecar_with_custody_attestation_from_bytes(&bytes, &path)
-            .expect("v2 sidecar with sibling parses");
+        let loaded =
+            load_v2_ratification_sidecar_with_custody_attestation_from_bytes(&bytes, &path)
+                .expect("v2 sidecar with sibling parses");
         t.assert_true(
             "L2",
             loaded.custody_attestation.is_available()
@@ -1339,14 +1583,23 @@ fn run_loader_table(out: &Path) -> (u64, u64) {
         );
         let bytes = serde_json::to_vec(&value).unwrap();
         let path = PathBuf::from("/dev/null/run-210-malformed.json");
-        let loaded = load_v2_ratification_sidecar_with_custody_attestation_from_bytes(&bytes, &path)
-            .expect("v2 ratification still parses");
+        let loaded =
+            load_v2_ratification_sidecar_with_custody_attestation_from_bytes(&bytes, &path)
+                .expect("v2 ratification still parses");
         t.assert_true("L3", loaded.custody_attestation.is_malformed(), "");
     }
 
     // L4 — canonical sibling field name + schema version.
-    t.check("L4.field", "custody_attestation", CUSTODY_ATTESTATION_PAYLOAD_SIBLING_FIELD);
-    t.check("L4.version", "1", &CUSTODY_ATTESTATION_PAYLOAD_WIRE_SCHEMA_VERSION.to_string());
+    t.check(
+        "L4.field",
+        "custody_attestation",
+        CUSTODY_ATTESTATION_PAYLOAD_SIBLING_FIELD,
+    );
+    t.check(
+        "L4.version",
+        "1",
+        &CUSTODY_ATTESTATION_PAYLOAD_WIRE_SCHEMA_VERSION.to_string(),
+    );
 
     // L5 — unsupported future schema version rejected as Malformed.
     {
@@ -1426,7 +1679,11 @@ fn run_reachability_table(out: &Path) -> (u64, u64) {
             CustodyAttestationPolicy::FixtureAttestationAllowed,
             &loaded,
         );
-        t.assert_true(&format!("S.{}", surface_name(surface)), outcome.is_accept(), "");
+        t.assert_true(
+            &format!("S.{}", surface_name(surface)),
+            outcome.is_accept(),
+            "",
+        );
     }
 
     // MainNet refusal helper.
@@ -1463,7 +1720,11 @@ fn run_reachability_table(out: &Path) -> (u64, u64) {
             CustodyAttestationPolicy::MainnetProductionAttestationRequired,
             &mloaded,
         );
-        t.assert_true("M4.drain_mainnet_refused", outcome.is_mainnet_peer_driven_apply_refused(), "");
+        t.assert_true(
+            "M4.drain_mainnet_refused",
+            outcome.is_mainnet_peer_driven_apply_refused(),
+            "",
+        );
     }
 
     t.finish(out)
@@ -1498,8 +1759,14 @@ fn run_fixture_dump(out: &Path) {
         &serde_json::to_string_pretty(&full).unwrap(),
     );
 
-    write_file(&dir.join("evidence_digest.txt"), &format!("{}\n", s.evidence.evidence_digest()));
-    write_file(&dir.join("input_digest.txt"), &format!("{}\n", s.input.input_digest()));
+    write_file(
+        &dir.join("evidence_digest.txt"),
+        &format!("{}\n", s.evidence.evidence_digest()),
+    );
+    write_file(
+        &dir.join("input_digest.txt"),
+        &format!("{}\n", s.input.input_digest()),
+    );
     write_file(
         &dir.join("transcript_digest.txt"),
         &format!(
@@ -1514,7 +1781,9 @@ fn run_fixture_dump(out: &Path) {
 
     // Canonical selector tags + env-var name for the archive.
     let mut tags = String::new();
-    tags.push_str(&format!("env_var\t{QBIND_P2P_TRUST_BUNDLE_CUSTODY_ATTESTATION_POLICY_ENV}\n"));
+    tags.push_str(&format!(
+        "env_var\t{QBIND_P2P_TRUST_BUNDLE_CUSTODY_ATTESTATION_POLICY_ENV}\n"
+    ));
     tags.push_str("cli_flag\t--p2p-trust-bundle-custody-attestation-policy\n");
     for p in [
         CustodyAttestationPolicy::Disabled,
@@ -1535,9 +1804,7 @@ fn main() {
     let out_dir = match args.next() {
         Some(a) => PathBuf::from(a),
         None => {
-            eprintln!(
-                "usage: run_210_custody_attestation_policy_release_binary_helper <OUT_DIR>"
-            );
+            eprintln!("usage: run_210_custody_attestation_policy_release_binary_helper <OUT_DIR>");
             std::process::exit(2);
         }
     };

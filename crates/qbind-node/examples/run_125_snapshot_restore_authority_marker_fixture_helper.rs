@@ -96,10 +96,10 @@ fn build_snapshot(
 ) {
     // Fresh RocksDB state dir holds the source rows so `create_snapshot`
     // can take a real checkpoint. The state dir itself is throwaway.
-    let state_dir = target
-        .parent()
-        .expect("target has parent")
-        .join(format!(".state-{}", target.file_name().unwrap().to_string_lossy()));
+    let state_dir = target.parent().expect("target has parent").join(format!(
+        ".state-{}",
+        target.file_name().unwrap().to_string_lossy()
+    ));
     fs::create_dir_all(&state_dir).expect("mkdir state dir");
     {
         let storage = RocksDbAccountState::open(&state_dir).expect("open source state");
@@ -109,13 +109,9 @@ fn build_snapshot(
             .put_account_state(&account, &state)
             .expect("put account state");
         storage.flush().expect("flush");
-        let meta = StateSnapshotMeta::new(
-            height,
-            [height as u8; 32],
-            1_700_000_000_000,
-            chain_id_u64,
-        )
-        .with_authority_state(auth);
+        let meta =
+            StateSnapshotMeta::new(height, [height as u8; 32], 1_700_000_000_000, chain_id_u64)
+                .with_authority_state(auth);
         storage
             .create_snapshot(&meta, target)
             .unwrap_or_else(|e| panic!("create_snapshot at {}: {:?}", target.display(), e));
@@ -155,7 +151,10 @@ fn main() {
     let mut genesis = GenesisConfig::new(
         "qbind-devnet-v0",
         1_738_000_000_000,
-        vec![GenesisAllocation::new(format!("0x{}", "11".repeat(32)), 100)],
+        vec![GenesisAllocation::new(
+            format!("0x{}", "11".repeat(32)),
+            100,
+        )],
         vec![GenesisValidator::new(
             format!("0x{}", "22".repeat(32)),
             "ab".repeat(32),
@@ -272,11 +271,8 @@ fn main() {
     // could be mistaken for an absent file), and they are not a stray
     // prefix of a valid JSON object — they are a stable, recognisable
     // garbage payload.
-    fs::write(
-        markers.join("corrupt.bin"),
-        b"NOT-A-VALID-JSON",
-    )
-    .expect("write corrupt marker fixture");
+    fs::write(markers.join("corrupt.bin"), b"NOT-A-VALID-JSON")
+        .expect("write corrupt marker fixture");
 
     // ----------------------------------------------------------------
     // 4. Shell-sourceable manifest.

@@ -723,7 +723,9 @@ fn durable_binding_mismatch(
     if input.evaluator_source_identity_digest
         != expectations.expected_evaluator_source_identity_digest
     {
-        return Some("evaluator source identity digest does not match expected binding".to_string());
+        return Some(
+            "evaluator source identity digest does not match expected binding".to_string(),
+        );
     }
     if input.evaluator_request_digest != expectations.expected_evaluator_request_digest {
         return Some("evaluator request digest does not match expected binding".to_string());
@@ -1412,8 +1414,16 @@ fn hash_field(h: &mut sha3::Sha3_256, label: &[u8], value: &[u8]) {
 /// identity fields only (never the freshness window, current epoch, or surface)
 /// so the key is stable across epochs and surfaces for a given decision.
 fn hash_durable_key(h: &mut sha3::Sha3_256, input: &DurableBackendDecisionInput) {
-    hash_field(h, b"replay_state_key_digest", input.replay_state_key_digest.as_bytes());
-    hash_field(h, b"environment", &input.environment.metric_code().to_le_bytes());
+    hash_field(
+        h,
+        b"replay_state_key_digest",
+        input.replay_state_key_digest.as_bytes(),
+    );
+    hash_field(
+        h,
+        b"environment",
+        &input.environment.metric_code().to_le_bytes(),
+    );
     hash_field(h, b"chain_id", input.chain_id.as_bytes());
     hash_field(h, b"genesis_hash", input.genesis_hash.as_bytes());
     hash_field(
@@ -1421,8 +1431,16 @@ fn hash_durable_key(h: &mut sha3::Sha3_256, input: &DurableBackendDecisionInput)
         b"evaluator_source_identity_digest",
         input.evaluator_source_identity_digest.as_bytes(),
     );
-    hash_field(h, b"evaluator_request_digest", input.evaluator_request_digest.as_bytes());
-    hash_field(h, b"evaluator_response_digest", input.evaluator_response_digest.as_bytes());
+    hash_field(
+        h,
+        b"evaluator_request_digest",
+        input.evaluator_request_digest.as_bytes(),
+    );
+    hash_field(
+        h,
+        b"evaluator_response_digest",
+        input.evaluator_response_digest.as_bytes(),
+    );
     hash_field(
         h,
         b"evaluator_transcript_digest",
@@ -1435,7 +1453,11 @@ fn hash_durable_key(h: &mut sha3::Sha3_256, input: &DurableBackendDecisionInput)
     );
     hash_field(h, b"proposal_id", input.proposal_id.as_bytes());
     hash_field(h, b"decision_id", input.decision_id.as_bytes());
-    hash_field(h, b"lifecycle_action", input.lifecycle_action.tag().as_bytes());
+    hash_field(
+        h,
+        b"lifecycle_action",
+        input.lifecycle_action.tag().as_bytes(),
+    );
     hash_field(h, b"candidate_digest", input.candidate_digest.as_bytes());
     hash_field(
         h,
@@ -1476,8 +1498,16 @@ pub fn durable_record_digest(
     h.update(DURABLE_RECORD_DOMAIN_TAG.as_bytes());
     hash_field(&mut h, b"key", durable_backend_key_digest(input).as_bytes());
     hash_field(&mut h, b"state", state.tag().as_bytes());
-    hash_field(&mut h, b"observation_count", &observation_count.to_le_bytes());
-    hash_field(&mut h, b"effective_epoch", &input.effective_epoch.to_le_bytes());
+    hash_field(
+        &mut h,
+        b"observation_count",
+        &observation_count.to_le_bytes(),
+    );
+    hash_field(
+        &mut h,
+        b"effective_epoch",
+        &input.effective_epoch.to_le_bytes(),
+    );
     hash_field(&mut h, b"expiry_epoch", &input.expiry_epoch.to_le_bytes());
     hex::encode(h.finalize())
 }
@@ -1517,8 +1547,16 @@ pub fn crash_window_transcript_digest(
     hash_field(&mut h, b"key", durable_backend_key_digest(input).as_bytes());
     hash_field(&mut h, b"backend_kind", obs.backend_kind.tag().as_bytes());
     hash_field(&mut h, b"observed", &[obs.observed as u8]);
-    hash_field(&mut h, b"mutation_attempted", &[obs.mutation_attempted as u8]);
-    hash_field(&mut h, b"mutation_succeeded", &[obs.mutation_succeeded as u8]);
+    hash_field(
+        &mut h,
+        b"mutation_attempted",
+        &[obs.mutation_attempted as u8],
+    );
+    hash_field(
+        &mut h,
+        b"mutation_succeeded",
+        &[obs.mutation_succeeded as u8],
+    );
     hash_field(&mut h, b"rolled_back", &[obs.rolled_back as u8]);
     hash_field(&mut h, b"apply_failed", &[obs.apply_failed as u8]);
     hash_field(&mut h, b"consumed", &[obs.consumed as u8]);

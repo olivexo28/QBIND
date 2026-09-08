@@ -42,7 +42,6 @@ use std::fs;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::PathBuf;
 
-
 use qbind_node::pqc_authority_custody::AuthorityCustodyClass;
 use qbind_node::pqc_authority_lifecycle::{
     AuthorityTrustDomain, LocalLifecycleAction, PQC_LIFECYCLE_SUITE_ML_DSA_44,
@@ -67,9 +66,12 @@ use qbind_node::pqc_production_live_validator_set_application_authorization::{
 };
 use qbind_node::pqc_production_staged_live_validator_set_epoch_transition_application_executor::*;
 use qbind_node::pqc_production_validator_set_rotation_application_executor::{
-    EmptyValidatorSetRotationApplicationReplaySet, ProductionValidatorSetRotationApplicationDecision,
-    ProductionValidatorSetRotationApplicationExecutor, ProductionValidatorSetRotationApplicationInputs,
-    ProductionValidatorSetRotationApplicationRequest, ValidatorSetRotationApplicationAuthoritySource,
+    EmptyValidatorSetRotationApplicationReplaySet,
+    ProductionValidatorSetRotationApplicationDecision,
+    ProductionValidatorSetRotationApplicationExecutor,
+    ProductionValidatorSetRotationApplicationInputs,
+    ProductionValidatorSetRotationApplicationRequest,
+    ValidatorSetRotationApplicationAuthoritySource,
 };
 use qbind_node::pqc_production_validator_set_rotation_intent::{
     CanonicalValidatorIdentity, CanonicalValidatorRecord, CanonicalValidatorSetSnapshot,
@@ -117,18 +119,33 @@ fn chain_for(env: TrustBundleEnvironment) -> &'static str {
 }
 
 fn trust_domain(env: TrustBundleEnvironment) -> AuthorityTrustDomain {
-    AuthorityTrustDomain::new(env, chain_for(env), GENESIS_HASH, ROOT_FP, PQC_LIFECYCLE_SUITE_ML_DSA_44)
+    AuthorityTrustDomain::new(
+        env,
+        chain_for(env),
+        GENESIS_HASH,
+        ROOT_FP,
+        PQC_LIFECYCLE_SUITE_ML_DSA_44,
+    )
 }
 
 fn quorum() -> OnChainGovernanceQuorum {
-    OnChainGovernanceQuorum { voters_voted: 8, total_voters: 10, required_quorum: 6 }
+    OnChainGovernanceQuorum {
+        voters_voted: 8,
+        total_voters: 10,
+        required_quorum: 6,
+    }
 }
 
 fn threshold() -> GovernanceThreshold {
     GovernanceThreshold::new(8, 6, 10)
 }
 
-fn validator(env: TrustBundleEnvironment, idx: u64, power: u64, act: u64) -> CanonicalValidatorRecord {
+fn validator(
+    env: TrustBundleEnvironment,
+    idx: u64,
+    power: u64,
+    act: u64,
+) -> CanonicalValidatorRecord {
     CanonicalValidatorRecord {
         identity: CanonicalValidatorIdentity {
             validator_index: idx,
@@ -147,7 +164,11 @@ fn validator(env: TrustBundleEnvironment, idx: u64, power: u64, act: u64) -> Can
 
 fn current_set(env: TrustBundleEnvironment) -> CanonicalValidatorSetSnapshot {
     CanonicalValidatorSetSnapshot::new(
-        vec![validator(env, 1, 100, 1), validator(env, 2, 100, 1), validator(env, 3, 100, 1)],
+        vec![
+            validator(env, 1, 100, 1),
+            validator(env, 2, 100, 1),
+            validator(env, 3, 100, 1),
+        ],
         CUR_EPOCH,
         CUR_VERSION,
     )
@@ -176,7 +197,10 @@ fn durable() -> GovernanceExecutionDurableReplayBinding {
     }
 }
 
-fn gov_intent(env: TrustBundleEnvironment, lifecycle: LocalLifecycleAction) -> ProductionGovernanceExecutionIntent {
+fn gov_intent(
+    env: TrustBundleEnvironment,
+    lifecycle: LocalLifecycleAction,
+) -> ProductionGovernanceExecutionIntent {
     ProductionGovernanceExecutionIntent {
         intent_kind: ProductionGovernanceExecutionIntentKind::AuthorityLifecycleRotationIntent,
         protocol_version: 1,
@@ -208,14 +232,17 @@ fn gov_intent(env: TrustBundleEnvironment, lifecycle: LocalLifecycleAction) -> P
     }
 }
 
-fn gov_decision(intent: ProductionGovernanceExecutionIntent) -> ProductionGovernanceExecutionDecision {
+fn gov_decision(
+    intent: ProductionGovernanceExecutionIntent,
+) -> ProductionGovernanceExecutionDecision {
     let idig = intent.intent_digest();
     ProductionGovernanceExecutionDecision {
-        outcome: ProductionGovernanceExecutionOutcome::AcceptedSourceTestGovernanceExecutionIntent {
-            intent_kind: intent.intent_kind,
-            environment: intent.environment,
-            decision_id: intent.decision_id.clone(),
-        },
+        outcome:
+            ProductionGovernanceExecutionOutcome::AcceptedSourceTestGovernanceExecutionIntent {
+                intent_kind: intent.intent_kind,
+                environment: intent.environment,
+                decision_id: intent.decision_id.clone(),
+            },
         decision_id: GOV_DECISION_ID.to_string(),
         request_id: GOV_REQUEST_ID.to_string(),
         intent: Some(intent),
@@ -234,7 +261,8 @@ fn rotation_decision(
 ) -> ProductionValidatorSetRotationDecision {
     let decision = gov_decision(gov_intent(env, lifecycle));
     let idig = decision.intent_digest.clone();
-    let source = ValidatorSetRotationAuthoritySource::VerifiedGovernanceExecutionIntent { decision };
+    let source =
+        ValidatorSetRotationAuthoritySource::VerifiedGovernanceExecutionIntent { decision };
     let request = ProductionValidatorSetRotationRequest::new(
         source,
         current.clone(),
@@ -275,7 +303,11 @@ fn rotation_decision(
         expected_durable_replay: None,
     };
     let boundary = ProductionValidatorSetRotationBoundary::source_test();
-    let d = boundary.evaluate_validator_set_rotation(&request, &inputs, &EmptyValidatorSetRotationReplaySet);
+    let d = boundary.evaluate_validator_set_rotation(
+        &request,
+        &inputs,
+        &EmptyValidatorSetRotationReplaySet,
+    );
     assert!(d.is_accept(), "rotation decision must accept for fixture");
     d
 }
@@ -348,7 +380,10 @@ fn app_decision(
             &inputs,
             &EmptyValidatorSetRotationApplicationReplaySet,
         );
-    assert!(d.is_accept(), "run 305 application decision must accept for fixture");
+    assert!(
+        d.is_accept(),
+        "run 305 application decision must accept for fixture"
+    );
     d
 }
 
@@ -417,7 +452,11 @@ fn auth_decision(
     proposed: CanonicalValidatorSetSnapshot,
 ) -> ProductionLiveValidatorSetApplicationAuthorizationDecision {
     let app = app_decision(env, lifecycle, requested_action, current, delta, proposed);
-    let target = app.application_intent.as_ref().unwrap().epoch_transition_target;
+    let target = app
+        .application_intent
+        .as_ref()
+        .unwrap()
+        .epoch_transition_target;
     let inputs = auth_inputs307(env, lifecycle, requested_action, &app);
     let request = ProductionLiveValidatorSetApplicationAuthorizationRequest::new(
         LiveValidatorSetApplicationAuthorizationAuthoritySource::VerifiedApplicationDecision {
@@ -432,7 +471,10 @@ fn auth_decision(
             &inputs,
             &EmptyLiveValidatorSetApplicationAuthorizationReplaySet,
         );
-    assert!(d.is_accept(), "run 307 authorization decision must accept for fixture");
+    assert!(
+        d.is_accept(),
+        "run 307 authorization decision must accept for fixture"
+    );
     d
 }
 
@@ -543,11 +585,22 @@ fn scenario(
             let v4 = validator(env, 4, 100, 2);
             let delta = ValidatorSetDelta::new(vec![ValidatorSetChange::add(v4.clone())]);
             let proposed = CanonicalValidatorSetSnapshot::new(
-                vec![validator(env, 1, 100, 1), validator(env, 2, 100, 1), validator(env, 3, 100, 1), v4],
+                vec![
+                    validator(env, 1, 100, 1),
+                    validator(env, 2, 100, 1),
+                    validator(env, 3, 100, 1),
+                    v4,
+                ],
                 CUR_EPOCH + 1,
                 CUR_VERSION + 1,
             );
-            (LocalLifecycleAction::Rotate, ValidatorSetRotationAction::ValidatorAdd, current, delta, proposed)
+            (
+                LocalLifecycleAction::Rotate,
+                ValidatorSetRotationAction::ValidatorAdd,
+                current,
+                delta,
+                proposed,
+            )
         }
         Sc::Remove => {
             let delta = ValidatorSetDelta::new(vec![ValidatorSetChange::remove(3)]);
@@ -556,32 +609,64 @@ fn scenario(
                 CUR_EPOCH + 1,
                 CUR_VERSION + 1,
             );
-            (LocalLifecycleAction::Rotate, ValidatorSetRotationAction::ValidatorRemove, current, delta, proposed)
+            (
+                LocalLifecycleAction::Rotate,
+                ValidatorSetRotationAction::ValidatorRemove,
+                current,
+                delta,
+                proposed,
+            )
         }
         Sc::Update => {
             let updated = validator(env, 2, 250, 1);
             let delta = ValidatorSetDelta::new(vec![ValidatorSetChange::update(updated.clone())]);
             let proposed = CanonicalValidatorSetSnapshot::new(
-                vec![validator(env, 1, 100, 1), updated, validator(env, 3, 100, 1)],
+                vec![
+                    validator(env, 1, 100, 1),
+                    updated,
+                    validator(env, 3, 100, 1),
+                ],
                 CUR_EPOCH + 1,
                 CUR_VERSION + 1,
             );
-            (LocalLifecycleAction::Rotate, ValidatorSetRotationAction::ValidatorUpdate, current, delta, proposed)
+            (
+                LocalLifecycleAction::Rotate,
+                ValidatorSetRotationAction::ValidatorUpdate,
+                current,
+                delta,
+                proposed,
+            )
         }
         Sc::NoOp => {
             let proposed = current_set(env);
-            (LocalLifecycleAction::Rotate, ValidatorSetRotationAction::NoOpSynchronization, current, ValidatorSetDelta::empty(), proposed)
+            (
+                LocalLifecycleAction::Rotate,
+                ValidatorSetRotationAction::NoOpSynchronization,
+                current,
+                ValidatorSetDelta::empty(),
+                proposed,
+            )
         }
         Sc::Identity => {
             let mut rotated = validator(env, 2, 100, 1);
             rotated.identity.consensus_key_fingerprint = "cons-2-rotated".to_string();
             let delta = ValidatorSetDelta::new(vec![ValidatorSetChange::update(rotated.clone())]);
             let proposed = CanonicalValidatorSetSnapshot::new(
-                vec![validator(env, 1, 100, 1), rotated, validator(env, 3, 100, 1)],
+                vec![
+                    validator(env, 1, 100, 1),
+                    rotated,
+                    validator(env, 3, 100, 1),
+                ],
                 CUR_EPOCH + 1,
                 CUR_VERSION + 1,
             );
-            (LocalLifecycleAction::Rotate, ValidatorSetRotationAction::ValidatorIdentityRotation, current, delta, proposed)
+            (
+                LocalLifecycleAction::Rotate,
+                ValidatorSetRotationAction::ValidatorIdentityRotation,
+                current,
+                delta,
+                proposed,
+            )
         }
         Sc::Retire => {
             let delta = ValidatorSetDelta::new(vec![ValidatorSetChange::remove(3)]);
@@ -590,7 +675,13 @@ fn scenario(
                 CUR_EPOCH + 1,
                 CUR_VERSION + 1,
             );
-            (LocalLifecycleAction::Retire, ValidatorSetRotationAction::ValidatorRetirement, current, delta, proposed)
+            (
+                LocalLifecycleAction::Retire,
+                ValidatorSetRotationAction::ValidatorRetirement,
+                current,
+                delta,
+                proposed,
+            )
         }
         Sc::Emergency => {
             let delta = ValidatorSetDelta::new(vec![ValidatorSetChange::remove(3)]);
@@ -599,27 +690,51 @@ fn scenario(
                 CUR_EPOCH + 1,
                 CUR_VERSION + 1,
             );
-            (LocalLifecycleAction::EmergencyRevoke, ValidatorSetRotationAction::EmergencyValidatorRemoval, current, delta, proposed)
+            (
+                LocalLifecycleAction::EmergencyRevoke,
+                ValidatorSetRotationAction::EmergencyValidatorRemoval,
+                current,
+                delta,
+                proposed,
+            )
         }
         Sc::AuthSync => {
             let v4 = validator(env, 4, 100, 2);
-            let delta = ValidatorSetDelta::new(vec![ValidatorSetChange::add(v4.clone()), ValidatorSetChange::remove(3)]);
+            let delta = ValidatorSetDelta::new(vec![
+                ValidatorSetChange::add(v4.clone()),
+                ValidatorSetChange::remove(3),
+            ]);
             let proposed = CanonicalValidatorSetSnapshot::new(
                 vec![validator(env, 1, 100, 1), validator(env, 2, 100, 1), v4],
                 CUR_EPOCH + 1,
                 CUR_VERSION + 1,
             );
-            (LocalLifecycleAction::Rotate, ValidatorSetRotationAction::AuthoritySetSynchronization, current, delta, proposed)
+            (
+                LocalLifecycleAction::Rotate,
+                ValidatorSetRotationAction::AuthoritySetSynchronization,
+                current,
+                delta,
+                proposed,
+            )
         }
         Sc::Bulk => {
             let v4 = validator(env, 4, 100, 2);
-            let delta = ValidatorSetDelta::new(vec![ValidatorSetChange::add(v4.clone()), ValidatorSetChange::remove(3)]);
+            let delta = ValidatorSetDelta::new(vec![
+                ValidatorSetChange::add(v4.clone()),
+                ValidatorSetChange::remove(3),
+            ]);
             let proposed = CanonicalValidatorSetSnapshot::new(
                 vec![validator(env, 1, 100, 1), validator(env, 2, 100, 1), v4],
                 CUR_EPOCH + 1,
                 CUR_VERSION + 1,
             );
-            (LocalLifecycleAction::Rotate, ValidatorSetRotationAction::BulkValidatorSetRotation, current, delta, proposed)
+            (
+                LocalLifecycleAction::Rotate,
+                ValidatorSetRotationAction::BulkValidatorSetRotation,
+                current,
+                delta,
+                proposed,
+            )
         }
     }
 }
@@ -640,14 +755,21 @@ fn expected_staged_kind(sc: Sc) -> StagedLiveValidatorSetEpochTransitionApplicat
 }
 
 /// Build an accepted Run 307 authorization decision for a scenario.
-fn auth_decision_for(env: TrustBundleEnvironment, sc: Sc) -> ProductionLiveValidatorSetApplicationAuthorizationDecision {
+fn auth_decision_for(
+    env: TrustBundleEnvironment,
+    sc: Sc,
+) -> ProductionLiveValidatorSetApplicationAuthorizationDecision {
     let (lifecycle, action, current, delta, proposed) = scenario(env, sc);
     auth_decision(env, lifecycle, action, current, delta, proposed)
 }
 
 fn stg_case309(env: TrustBundleEnvironment, sc: Sc) -> Stg309 {
     let decision = auth_decision_for(env, sc);
-    let target = decision.authorization_intent.as_ref().unwrap().epoch_transition_target;
+    let target = decision
+        .authorization_intent
+        .as_ref()
+        .unwrap()
+        .epoch_transition_target;
     let inputs = stg_inputs(env, &decision);
     let request = ProductionStagedLiveValidatorSetEpochTransitionApplicationRequest::new(
         StagedLiveValidatorSetEpochTransitionApplicationAuthoritySource::VerifiedLiveApplicationAuthorization {
@@ -668,11 +790,12 @@ fn empty_replay309() -> EmptyStagedLiveValidatorSetEpochTransitionApplicationRep
 }
 
 fn eval309(case: &Stg309) -> ProductionStagedLiveValidatorSetEpochTransitionApplicationDecision {
-    case.executor.evaluate_staged_live_validator_set_epoch_transition_application(
-        &case.request,
-        &case.inputs,
-        &empty_replay309(),
-    )
+    case.executor
+        .evaluate_staged_live_validator_set_epoch_transition_application(
+            &case.request,
+            &case.inputs,
+            &empty_replay309(),
+        )
 }
 
 // ===========================================================================
@@ -684,8 +807,8 @@ use qbind_node::pqc_production_guarded_epoch_transition_mutation_executor::*;
 const GUARDED_POLICY_ID: &str = "guarded-mutation-policy-1";
 const GUARDED_NONCE: u64 = 37;
 
-use ProductionGuardedEpochTransitionMutationOutcome as GO;
 use GuardedEpochTransitionMutationKind as GK;
+use ProductionGuardedEpochTransitionMutationOutcome as GO;
 
 /// Build an accepted Run 309 staged epoch-transition application decision — the
 /// sole accepted Run 311 authority source.
@@ -694,7 +817,10 @@ fn stg_decision(
     sc: Sc,
 ) -> ProductionStagedLiveValidatorSetEpochTransitionApplicationDecision {
     let d = eval309(&stg_case309(env, sc));
-    assert!(d.is_accept(), "run 309 staged decision must accept for fixture");
+    assert!(
+        d.is_accept(),
+        "run 309 staged decision must accept for fixture"
+    );
     d
 }
 
@@ -826,7 +952,10 @@ fn gem_eval(case: &Gem) -> ProductionGuardedEpochTransitionMutationDecision {
     )
 }
 
-fn gem_eval_replay(case: &Gem, replay: &[String]) -> ProductionGuardedEpochTransitionMutationDecision {
+fn gem_eval_replay(
+    case: &Gem,
+    replay: &[String],
+) -> ProductionGuardedEpochTransitionMutationDecision {
     case.executor
         .evaluate_guarded_epoch_transition_mutation(&case.request, &case.inputs, &replay)
 }
@@ -851,7 +980,10 @@ fn exec_with_policy(
 
 /// Common helper: build a Devnet/Add case, apply a mutation to the inputs, and
 /// assert the resulting outcome (fail-closed, no record).
-fn reject_inputs(mutate: impl FnOnce(&mut ProductionGuardedEpochTransitionMutationInputs), expected: GO) {
+fn reject_inputs(
+    mutate: impl FnOnce(&mut ProductionGuardedEpochTransitionMutationInputs),
+    expected: GO,
+) {
     let mut c = gem_case(TrustBundleEnvironment::Devnet, Sc::Add);
     mutate(&mut c.inputs);
     let d = gem_eval(&c);
@@ -1112,8 +1244,12 @@ fn reject_wrong_environment() {
 fn reject_wrong_chain() {
     reject_inputs(
         |i| {
-            i.trust_domain =
-                custom_domain(TrustBundleEnvironment::Devnet, "bad-chain", GENESIS_HASH, ROOT_FP)
+            i.trust_domain = custom_domain(
+                TrustBundleEnvironment::Devnet,
+                "bad-chain",
+                GENESIS_HASH,
+                ROOT_FP,
+            )
         },
         GO::WrongChain,
     );
@@ -1150,15 +1286,24 @@ fn reject_wrong_authority_root() {
 // ---- Governance / rotation tuple binding failures -------------------------
 
 fn reject_wrong_governance_domain() {
-    reject_inputs(|i| i.expected_governance_domain_id = "bad".to_string(), GO::WrongGovernanceDomain);
+    reject_inputs(
+        |i| i.expected_governance_domain_id = "bad".to_string(),
+        GO::WrongGovernanceDomain,
+    );
 }
 
 fn reject_wrong_governance_epoch() {
-    reject_inputs(|i| i.expected_governance_epoch = GOV_EPOCH + 1, GO::WrongGovernanceEpoch);
+    reject_inputs(
+        |i| i.expected_governance_epoch = GOV_EPOCH + 1,
+        GO::WrongGovernanceEpoch,
+    );
 }
 
 fn reject_wrong_proposal_id() {
-    reject_inputs(|i| i.expected_proposal_id = "bad".to_string(), GO::WrongProposalId);
+    reject_inputs(
+        |i| i.expected_proposal_id = "bad".to_string(),
+        GO::WrongProposalId,
+    );
 }
 
 fn reject_wrong_governance_execution_decision_id() {
@@ -1183,11 +1328,17 @@ fn reject_wrong_governance_execution_intent_digest() {
 }
 
 fn reject_wrong_rotation_decision_id() {
-    reject_inputs(|i| i.expected_rotation_decision_id = "bad".to_string(), GO::WrongRotationDecisionId);
+    reject_inputs(
+        |i| i.expected_rotation_decision_id = "bad".to_string(),
+        GO::WrongRotationDecisionId,
+    );
 }
 
 fn reject_wrong_rotation_request_id() {
-    reject_inputs(|i| i.expected_rotation_request_id = "bad".to_string(), GO::WrongRotationRequestId);
+    reject_inputs(
+        |i| i.expected_rotation_request_id = "bad".to_string(),
+        GO::WrongRotationRequestId,
+    );
 }
 
 fn reject_wrong_rotation_transcript_digest() {
@@ -1198,11 +1349,17 @@ fn reject_wrong_rotation_transcript_digest() {
 }
 
 fn reject_wrong_rotation_plan_digest() {
-    reject_inputs(|i| i.expected_rotation_plan_digest = "bad".to_string(), GO::WrongRotationPlanDigest);
+    reject_inputs(
+        |i| i.expected_rotation_plan_digest = "bad".to_string(),
+        GO::WrongRotationPlanDigest,
+    );
 }
 
 fn reject_wrong_lifecycle_action() {
-    reject_inputs(|i| i.expected_lifecycle_action = LocalLifecycleAction::Retire, GO::WrongLifecycleAction);
+    reject_inputs(
+        |i| i.expected_lifecycle_action = LocalLifecycleAction::Retire,
+        GO::WrongLifecycleAction,
+    );
 }
 
 fn reject_wrong_rotation_action() {
@@ -1213,62 +1370,104 @@ fn reject_wrong_rotation_action() {
 }
 
 fn reject_wrong_authority_sequence() {
-    reject_inputs(|i| i.expected_authority_domain_sequence = SEQ + 5, GO::WrongAuthoritySequence);
+    reject_inputs(
+        |i| i.expected_authority_domain_sequence = SEQ + 5,
+        GO::WrongAuthoritySequence,
+    );
 }
 
 fn reject_wrong_quorum() {
     reject_inputs(
-        |i| i.expected_quorum = OnChainGovernanceQuorum { voters_voted: 1, total_voters: 10, required_quorum: 6 },
+        |i| {
+            i.expected_quorum = OnChainGovernanceQuorum {
+                voters_voted: 1,
+                total_voters: 10,
+                required_quorum: 6,
+            }
+        },
         GO::WrongQuorum,
     );
 }
 
 fn reject_wrong_threshold() {
-    reject_inputs(|i| i.expected_threshold = GovernanceThreshold::new(9, 6, 10), GO::WrongThreshold);
+    reject_inputs(
+        |i| i.expected_threshold = GovernanceThreshold::new(9, 6, 10),
+        GO::WrongThreshold,
+    );
 }
 
 // ---- Validator-set tuple binding failures ---------------------------------
 
 fn reject_wrong_current_validator_set_digest() {
-    reject_inputs(|i| i.expected_current_set_digest = "bad".to_string(), GO::WrongCurrentValidatorSetDigest);
+    reject_inputs(
+        |i| i.expected_current_set_digest = "bad".to_string(),
+        GO::WrongCurrentValidatorSetDigest,
+    );
 }
 
 fn reject_wrong_proposed_validator_set_digest() {
-    reject_inputs(|i| i.expected_proposed_set_digest = "bad".to_string(), GO::WrongProposedValidatorSetDigest);
+    reject_inputs(
+        |i| i.expected_proposed_set_digest = "bad".to_string(),
+        GO::WrongProposedValidatorSetDigest,
+    );
 }
 
 fn reject_wrong_validator_set_delta_digest() {
-    reject_inputs(|i| i.expected_delta_digest = "bad".to_string(), GO::WrongValidatorSetDeltaDigest);
+    reject_inputs(
+        |i| i.expected_delta_digest = "bad".to_string(),
+        GO::WrongValidatorSetDeltaDigest,
+    );
 }
 
 fn reject_wrong_validator_set_epoch() {
-    reject_inputs(|i| i.expected_validator_set_epoch = 9999, GO::WrongValidatorSetEpoch);
+    reject_inputs(
+        |i| i.expected_validator_set_epoch = 9999,
+        GO::WrongValidatorSetEpoch,
+    );
 }
 
 fn reject_wrong_validator_set_version() {
-    reject_inputs(|i| i.expected_validator_set_version = 9999, GO::WrongValidatorSetVersion);
+    reject_inputs(
+        |i| i.expected_validator_set_version = 9999,
+        GO::WrongValidatorSetVersion,
+    );
 }
 
 fn reject_wrong_proposed_validator_count() {
-    reject_inputs(|i| i.expected_proposed_validator_count = 9999, GO::WrongProposedValidatorCount);
+    reject_inputs(
+        |i| i.expected_proposed_validator_count = 9999,
+        GO::WrongProposedValidatorCount,
+    );
 }
 
 fn reject_wrong_rotation_nonce() {
-    reject_inputs(|i| i.expected_rotation_nonce = ROT_NONCE + 1, GO::WrongRotationNonce);
+    reject_inputs(
+        |i| i.expected_rotation_nonce = ROT_NONCE + 1,
+        GO::WrongRotationNonce,
+    );
 }
 
 // ---- Epoch-transition / nonce binding failures ----------------------------
 
 fn reject_wrong_epoch_transition_target() {
-    reject_inputs(|i| i.expected_epoch_transition_target = 9999, GO::WrongEpochTransitionTarget);
+    reject_inputs(
+        |i| i.expected_epoch_transition_target = 9999,
+        GO::WrongEpochTransitionTarget,
+    );
 }
 
 fn reject_wrong_application_nonce() {
-    reject_inputs(|i| i.expected_application_nonce = APP_NONCE + 1, GO::WrongApplicationNonce);
+    reject_inputs(
+        |i| i.expected_application_nonce = APP_NONCE + 1,
+        GO::WrongApplicationNonce,
+    );
 }
 
 fn reject_wrong_live_application_nonce() {
-    reject_inputs(|i| i.expected_live_application_nonce = LIVE_APP_NONCE + 1, GO::WrongLiveApplicationNonce);
+    reject_inputs(
+        |i| i.expected_live_application_nonce = LIVE_APP_NONCE + 1,
+        GO::WrongLiveApplicationNonce,
+    );
 }
 
 // ===========================================================================
@@ -1285,7 +1484,9 @@ fn reject_missing_staged_application_decision() {
 fn reject_unverified_staged_application_decision() {
     let dec = stg_decision_rejected(TrustBundleEnvironment::Devnet, Sc::Add);
     reject_source(
-        GuardedEpochTransitionMutationAuthoritySource::UnverifiedStagedApplicationDecision { decision: dec },
+        GuardedEpochTransitionMutationAuthoritySource::UnverifiedStagedApplicationDecision {
+            decision: dec,
+        },
         GO::UnverifiedStagedApplicationDecisionRejected,
     );
 }
@@ -1293,7 +1494,9 @@ fn reject_unverified_staged_application_decision() {
 fn reject_accepted_staged_application_without_record() {
     let dec = stg_decision_rejected(TrustBundleEnvironment::Devnet, Sc::Add);
     reject_source(
-        GuardedEpochTransitionMutationAuthoritySource::AcceptedStagedApplicationWithoutRecord { decision: dec },
+        GuardedEpochTransitionMutationAuthoritySource::AcceptedStagedApplicationWithoutRecord {
+            decision: dec,
+        },
         GO::VerifiedStagedApplicationDecisionRequired,
     );
 }
@@ -1392,8 +1595,12 @@ fn reject_mainnet_policy_unavailable() {
     let exec = exec_with_policy(
         ProductionGuardedEpochTransitionMutationExecutorPolicy::MainnetProductionGuardedEpochTransitionMutationRequired,
     );
-    let d = exec.evaluate_guarded_epoch_transition_mutation(&c.request, &c.inputs, &empty_replay311());
-    assert_eq!(d.outcome, GO::MainNetProductionGuardedEpochTransitionMutationUnavailable);
+    let d =
+        exec.evaluate_guarded_epoch_transition_mutation(&c.request, &c.inputs, &empty_replay311());
+    assert_eq!(
+        d.outcome,
+        GO::MainNetProductionGuardedEpochTransitionMutationUnavailable
+    );
 }
 
 fn reject_mainnet_policy_on_mainnet_domain_unavailable() {
@@ -1402,8 +1609,12 @@ fn reject_mainnet_policy_on_mainnet_domain_unavailable() {
     let exec = exec_with_policy(
         ProductionGuardedEpochTransitionMutationExecutorPolicy::MainnetProductionGuardedEpochTransitionMutationRequired,
     );
-    let d = exec.evaluate_guarded_epoch_transition_mutation(&c.request, &c.inputs, &empty_replay311());
-    assert_eq!(d.outcome, GO::MainNetProductionGuardedEpochTransitionMutationUnavailable);
+    let d =
+        exec.evaluate_guarded_epoch_transition_mutation(&c.request, &c.inputs, &empty_replay311());
+    assert_eq!(
+        d.outcome,
+        GO::MainNetProductionGuardedEpochTransitionMutationUnavailable
+    );
 }
 
 fn reject_production_policy_unavailable() {
@@ -1411,14 +1622,19 @@ fn reject_production_policy_unavailable() {
     let exec = exec_with_policy(
         ProductionGuardedEpochTransitionMutationExecutorPolicy::RequireProductionGuardedEpochTransitionMutation,
     );
-    let d = exec.evaluate_guarded_epoch_transition_mutation(&c.request, &c.inputs, &empty_replay311());
-    assert_eq!(d.outcome, GO::ProductionGuardedEpochTransitionMutationUnavailable);
+    let d =
+        exec.evaluate_guarded_epoch_transition_mutation(&c.request, &c.inputs, &empty_replay311());
+    assert_eq!(
+        d.outcome,
+        GO::ProductionGuardedEpochTransitionMutationUnavailable
+    );
 }
 
 fn reject_disabled_policy() {
     let c = gem_case(TrustBundleEnvironment::Devnet, Sc::Add);
     let exec = exec_with_policy(ProductionGuardedEpochTransitionMutationExecutorPolicy::Disabled);
-    let d = exec.evaluate_guarded_epoch_transition_mutation(&c.request, &c.inputs, &empty_replay311());
+    let d =
+        exec.evaluate_guarded_epoch_transition_mutation(&c.request, &c.inputs, &empty_replay311());
     assert_eq!(d.outcome, GO::Disabled);
 }
 
@@ -1430,8 +1646,12 @@ fn reject_production_boundary_kind_unavailable() {
         ),
         ProductionGuardedEpochTransitionMutationExecutorPolicy::AllowSourceTestGuardedEpochTransitionMutation,
     );
-    let d = exec.evaluate_guarded_epoch_transition_mutation(&c.request, &c.inputs, &empty_replay311());
-    assert_eq!(d.outcome, GO::GuardedEpochTransitionMutationBoundaryUnavailable);
+    let d =
+        exec.evaluate_guarded_epoch_transition_mutation(&c.request, &c.inputs, &empty_replay311());
+    assert_eq!(
+        d.outcome,
+        GO::GuardedEpochTransitionMutationBoundaryUnavailable
+    );
 }
 
 // ===========================================================================
@@ -1446,7 +1666,9 @@ fn reject_replayed_staged_application() {
     let d2 = gem_eval_replay(&c, &replay);
     assert_eq!(
         d2.outcome,
-        GO::StagedApplicationReplayRejected { staged_application_id: d.request_id.clone() }
+        GO::StagedApplicationReplayRejected {
+            staged_application_id: d.request_id.clone()
+        }
     );
     assert!(d2.staged_application_record.is_none());
 }
@@ -1495,19 +1717,31 @@ fn recovery_disabled_under_disabled_policy() {
 }
 
 fn reject_stale_governance_epoch() {
-    reject_inputs(|i| i.min_governance_epoch = GOV_EPOCH + 1, GO::StaleGovernanceEpoch);
+    reject_inputs(
+        |i| i.min_governance_epoch = GOV_EPOCH + 1,
+        GO::StaleGovernanceEpoch,
+    );
 }
 
 fn reject_stale_authority_sequence() {
-    reject_inputs(|i| i.persisted_sequence = Some(SEQ + 1), GO::StaleAuthoritySequence);
+    reject_inputs(
+        |i| i.persisted_sequence = Some(SEQ + 1),
+        GO::StaleAuthoritySequence,
+    );
 }
 
 fn reject_stale_validator_set_epoch() {
-    reject_inputs(|i| i.min_validator_set_epoch = 100_000, GO::StaleValidatorSetEpoch);
+    reject_inputs(
+        |i| i.min_validator_set_epoch = 100_000,
+        GO::StaleValidatorSetEpoch,
+    );
 }
 
 fn reject_stale_validator_set_version() {
-    reject_inputs(|i| i.min_validator_set_version = 100_000, GO::StaleValidatorSetVersion);
+    reject_inputs(
+        |i| i.min_validator_set_version = 100_000,
+        GO::StaleValidatorSetVersion,
+    );
 }
 
 // ===========================================================================
@@ -1518,7 +1752,8 @@ fn fixture_ledger_apply_advances_state() {
     let c = gem_case(TrustBundleEnvironment::Devnet, Sc::Add);
     let d = gem_eval(&c);
     let rec = d.staged_application_record.as_ref().unwrap();
-    let mut ledger = GuardedEpochTransitionFixtureLedger::new(CUR_EPOCH, CUR_VERSION, "start-digest");
+    let mut ledger =
+        GuardedEpochTransitionFixtureLedger::new(CUR_EPOCH, CUR_VERSION, "start-digest");
     let applied = ledger.apply_prepared_execution(rec, &d.staged_application_id);
     assert!(applied);
     assert_eq!(ledger.current_epoch, rec.epoch_transition_target);
@@ -1531,7 +1766,8 @@ fn fixture_ledger_apply_is_idempotent() {
     let c = gem_case(TrustBundleEnvironment::Devnet, Sc::Add);
     let d = gem_eval(&c);
     let rec = d.staged_application_record.as_ref().unwrap();
-    let mut ledger = GuardedEpochTransitionFixtureLedger::new(CUR_EPOCH, CUR_VERSION, "start-digest");
+    let mut ledger =
+        GuardedEpochTransitionFixtureLedger::new(CUR_EPOCH, CUR_VERSION, "start-digest");
     assert!(ledger.apply_prepared_execution(rec, &d.staged_application_id));
     // Re-applying the same execution id is a no-op.
     assert!(!ledger.apply_prepared_execution(rec, &d.staged_application_id));
@@ -1745,8 +1981,12 @@ fn distinct_nonce_yields_distinct_request_id() {
 }
 
 fn transcript_digest_binds_outcome_tag() {
-    let a = production_guarded_epoch_transition_mutation_transcript_digest(1, "rid", "idig", "accepted");
-    let b = production_guarded_epoch_transition_mutation_transcript_digest(1, "rid", "idig", "rejected");
+    let a = production_guarded_epoch_transition_mutation_transcript_digest(
+        1, "rid", "idig", "accepted",
+    );
+    let b = production_guarded_epoch_transition_mutation_transcript_digest(
+        1, "rid", "idig", "rejected",
+    );
     assert_ne!(a, b);
 }
 
@@ -1790,130 +2030,626 @@ fn main() {
     fs::create_dir_all(outdir.join("fixtures")).expect("create helper output directory");
 
     let cases: &[(&str, &str, fn())] = &[
-        ("accepted_compatible", "accept_all_scenarios_devnet", accept_all_scenarios_devnet as fn()),
-        ("accepted_compatible", "accept_all_scenarios_testnet", accept_all_scenarios_testnet as fn()),
-        ("accepted_compatible", "accept_outcome_carries_kind_env_target_nonce", accept_outcome_carries_kind_env_target_nonce as fn()),
-        ("accepted_compatible", "accept_binds_staged_decision_transcript", accept_binds_staged_decision_transcript as fn()),
-        ("accepted_compatible", "accept_reexposes_live_authorization_tuple", accept_reexposes_live_authorization_tuple as fn()),
-        ("accepted_compatible", "accept_reexposes_application_and_governance_tuple", accept_reexposes_application_and_governance_tuple as fn()),
-        ("accepted_compatible", "accept_deterministic_digests_under_reevaluation", accept_deterministic_digests_under_reevaluation as fn()),
-        ("accepted_compatible", "accept_record_intent_digest_matches_named_helper", accept_record_intent_digest_matches_named_helper as fn()),
-        ("accepted_compatible", "accept_distinct_scenarios_have_distinct_digests", accept_distinct_scenarios_have_distinct_digests as fn()),
-        ("accepted_compatible", "accept_target_matches_record_epoch_transition_target", accept_target_matches_record_epoch_transition_target as fn()),
-        ("rejection_fail_closed", "reject_wrong_staged_application_decision_id", reject_wrong_staged_application_decision_id as fn()),
-        ("rejection_fail_closed", "reject_wrong_staged_application_request_id", reject_wrong_staged_application_request_id as fn()),
-        ("rejection_fail_closed", "reject_wrong_staged_application_intent_digest", reject_wrong_staged_application_intent_digest as fn()),
-        ("rejection_fail_closed", "reject_wrong_staged_application_transcript_digest", reject_wrong_staged_application_transcript_digest as fn()),
-        ("rejection_fail_closed", "reject_wrong_staged_application_nonce", reject_wrong_staged_application_nonce as fn()),
-        ("rejection_fail_closed", "reject_wrong_authorization_decision_id", reject_wrong_authorization_decision_id as fn()),
-        ("rejection_fail_closed", "reject_wrong_authorization_request_id", reject_wrong_authorization_request_id as fn()),
-        ("rejection_fail_closed", "reject_wrong_authorization_intent_digest", reject_wrong_authorization_intent_digest as fn()),
-        ("rejection_fail_closed", "reject_wrong_authorization_transcript_digest", reject_wrong_authorization_transcript_digest as fn()),
-        ("rejection_fail_closed", "reject_wrong_authorization_policy_id", reject_wrong_authorization_policy_id as fn()),
-        ("rejection_fail_closed", "reject_wrong_application_decision_id", reject_wrong_application_decision_id as fn()),
-        ("rejection_fail_closed", "reject_wrong_application_request_id", reject_wrong_application_request_id as fn()),
-        ("rejection_fail_closed", "reject_wrong_application_intent_digest", reject_wrong_application_intent_digest as fn()),
-        ("rejection_fail_closed", "reject_wrong_application_transcript_digest", reject_wrong_application_transcript_digest as fn()),
-        ("rejection_fail_closed", "reject_wrong_application_policy_id", reject_wrong_application_policy_id as fn()),
-        ("rejection_fail_closed", "reject_wrong_environment", reject_wrong_environment as fn()),
-        ("rejection_fail_closed", "reject_wrong_chain", reject_wrong_chain as fn()),
-        ("rejection_fail_closed", "reject_wrong_genesis", reject_wrong_genesis as fn()),
-        ("rejection_fail_closed", "reject_wrong_authority_root", reject_wrong_authority_root as fn()),
-        ("rejection_fail_closed", "reject_wrong_governance_domain", reject_wrong_governance_domain as fn()),
-        ("rejection_fail_closed", "reject_wrong_governance_epoch", reject_wrong_governance_epoch as fn()),
-        ("rejection_fail_closed", "reject_wrong_proposal_id", reject_wrong_proposal_id as fn()),
-        ("rejection_fail_closed", "reject_wrong_governance_execution_decision_id", reject_wrong_governance_execution_decision_id as fn()),
-        ("rejection_fail_closed", "reject_wrong_governance_execution_request_id", reject_wrong_governance_execution_request_id as fn()),
-        ("rejection_fail_closed", "reject_wrong_governance_execution_intent_digest", reject_wrong_governance_execution_intent_digest as fn()),
-        ("rejection_fail_closed", "reject_wrong_rotation_decision_id", reject_wrong_rotation_decision_id as fn()),
-        ("rejection_fail_closed", "reject_wrong_rotation_request_id", reject_wrong_rotation_request_id as fn()),
-        ("rejection_fail_closed", "reject_wrong_rotation_transcript_digest", reject_wrong_rotation_transcript_digest as fn()),
-        ("rejection_fail_closed", "reject_wrong_rotation_plan_digest", reject_wrong_rotation_plan_digest as fn()),
-        ("rejection_fail_closed", "reject_wrong_lifecycle_action", reject_wrong_lifecycle_action as fn()),
-        ("rejection_fail_closed", "reject_wrong_rotation_action", reject_wrong_rotation_action as fn()),
-        ("rejection_fail_closed", "reject_wrong_authority_sequence", reject_wrong_authority_sequence as fn()),
-        ("rejection_fail_closed", "reject_wrong_quorum", reject_wrong_quorum as fn()),
-        ("rejection_fail_closed", "reject_wrong_threshold", reject_wrong_threshold as fn()),
-        ("rejection_fail_closed", "reject_wrong_current_validator_set_digest", reject_wrong_current_validator_set_digest as fn()),
-        ("rejection_fail_closed", "reject_wrong_proposed_validator_set_digest", reject_wrong_proposed_validator_set_digest as fn()),
-        ("rejection_fail_closed", "reject_wrong_validator_set_delta_digest", reject_wrong_validator_set_delta_digest as fn()),
-        ("rejection_fail_closed", "reject_wrong_validator_set_epoch", reject_wrong_validator_set_epoch as fn()),
-        ("rejection_fail_closed", "reject_wrong_validator_set_version", reject_wrong_validator_set_version as fn()),
-        ("rejection_fail_closed", "reject_wrong_proposed_validator_count", reject_wrong_proposed_validator_count as fn()),
-        ("rejection_fail_closed", "reject_wrong_rotation_nonce", reject_wrong_rotation_nonce as fn()),
-        ("rejection_fail_closed", "reject_wrong_epoch_transition_target", reject_wrong_epoch_transition_target as fn()),
-        ("rejection_fail_closed", "reject_wrong_application_nonce", reject_wrong_application_nonce as fn()),
-        ("rejection_fail_closed", "reject_wrong_live_application_nonce", reject_wrong_live_application_nonce as fn()),
-        ("rejection_fail_closed", "reject_missing_staged_application_decision", reject_missing_staged_application_decision as fn()),
-        ("rejection_fail_closed", "reject_unverified_staged_application_decision", reject_unverified_staged_application_decision as fn()),
-        ("rejection_fail_closed", "reject_accepted_staged_application_without_record", reject_accepted_staged_application_without_record as fn()),
-        ("rejection_fail_closed", "reject_application_decision_alone", reject_application_decision_alone as fn()),
-        ("rejection_fail_closed", "reject_rotation_plan_alone", reject_rotation_plan_alone as fn()),
-        ("rejection_fail_closed", "reject_governance_execution_intent_alone", reject_governance_execution_intent_alone as fn()),
-        ("rejection_fail_closed", "reject_governance_proof_alone", reject_governance_proof_alone as fn()),
-        ("rejection_fail_closed", "reject_local_operator_assertion", reject_local_operator_assertion as fn()),
-        ("rejection_fail_closed", "reject_peer_majority_assertion", reject_peer_majority_assertion as fn()),
-        ("rejection_fail_closed", "reject_custody_only_evidence", reject_custody_only_evidence as fn()),
-        ("rejection_fail_closed", "reject_remote_signer_only_evidence", reject_remote_signer_only_evidence as fn()),
-        ("rejection_fail_closed", "reject_custody_attestation_only_evidence", reject_custody_attestation_only_evidence as fn()),
-        ("rejection_fail_closed", "reject_fixture_only_staged_application", reject_fixture_only_staged_application as fn()),
-        ("rejection_fail_closed", "reject_arbitrary_validator_set_bytes", reject_arbitrary_validator_set_bytes as fn()),
-        ("mainnet_authority_policy", "reject_mainnet_trust_domain", reject_mainnet_trust_domain as fn()),
-        ("mainnet_authority_policy", "reject_mainnet_policy_unavailable", reject_mainnet_policy_unavailable as fn()),
-        ("mainnet_authority_policy", "reject_mainnet_policy_on_mainnet_domain_unavailable", reject_mainnet_policy_on_mainnet_domain_unavailable as fn()),
-        ("mainnet_authority_policy", "reject_production_policy_unavailable", reject_production_policy_unavailable as fn()),
-        ("mainnet_authority_policy", "reject_disabled_policy", reject_disabled_policy as fn()),
-        ("mainnet_authority_policy", "reject_production_boundary_kind_unavailable", reject_production_boundary_kind_unavailable as fn()),
-        ("replay_recovery_idempotency", "reject_replayed_staged_application", reject_replayed_staged_application as fn()),
-        ("replay_recovery_idempotency", "accept_when_replay_set_has_unrelated_id", accept_when_replay_set_has_unrelated_id as fn()),
-        ("replay_recovery_idempotency", "recovery_clean_when_no_prior_window", recovery_clean_when_no_prior_window as fn()),
-        ("replay_recovery_idempotency", "recovery_idempotent_replay_observed", recovery_idempotent_replay_observed as fn()),
-        ("replay_recovery_idempotency", "recovery_disabled_under_disabled_policy", recovery_disabled_under_disabled_policy as fn()),
-        ("replay_recovery_idempotency", "reject_stale_governance_epoch", reject_stale_governance_epoch as fn()),
-        ("replay_recovery_idempotency", "reject_stale_authority_sequence", reject_stale_authority_sequence as fn()),
-        ("replay_recovery_idempotency", "reject_stale_validator_set_epoch", reject_stale_validator_set_epoch as fn()),
-        ("replay_recovery_idempotency", "reject_stale_validator_set_version", reject_stale_validator_set_version as fn()),
-        ("fixture_ledger", "fixture_ledger_apply_advances_state", fixture_ledger_apply_advances_state as fn()),
-        ("fixture_ledger", "fixture_ledger_apply_is_idempotent", fixture_ledger_apply_is_idempotent as fn()),
-        ("fixture_ledger", "fixture_ledger_starts_unapplied", fixture_ledger_starts_unapplied as fn()),
-        ("non_mutation", "invariant_all_outcomes_non_mutating", invariant_all_outcomes_non_mutating as fn()),
-        ("non_mutation", "invariant_source_test_not_release_binary", invariant_source_test_not_release_binary as fn()),
-        ("non_mutation", "invariant_mainnet_refused", invariant_mainnet_refused as fn()),
-        ("non_mutation", "invariant_is_non_mutating", invariant_is_non_mutating as fn()),
-        ("non_mutation", "invariant_never_falls_back", invariant_never_falls_back as fn()),
-        ("non_mutation", "invariant_no_default_runtime_wiring", invariant_no_default_runtime_wiring as fn()),
-        ("non_mutation", "invariant_requires_verified_application_decision", invariant_requires_verified_application_decision as fn()),
-        ("reachability_taxonomy", "policy_default_is_disabled", policy_default_is_disabled as fn()),
-        ("reachability_taxonomy", "policy_tags_are_distinct", policy_tags_are_distinct as fn()),
-        ("reachability_taxonomy", "kind_source_test_flag", kind_source_test_flag as fn()),
-        ("reachability_taxonomy", "mutation_kind_tags_are_distinct", mutation_kind_tags_are_distinct as fn()),
-        ("reachability_taxonomy", "mutation_kind_from_staged_kind_is_identity", mutation_kind_from_staged_kind_is_identity as fn()),
-        ("accepted_compatible", "accept_and_reject_classification", accept_and_reject_classification as fn()),
-        ("reachability_taxonomy", "config_and_inputs_well_formed", config_and_inputs_well_formed as fn()),
-        ("reachability_taxonomy", "every_mutation_kind_is_non_mutating", every_mutation_kind_is_non_mutating as fn()),
-        ("reachability_taxonomy", "distinct_environments_yield_distinct_digests", distinct_environments_yield_distinct_digests as fn()),
-        ("reachability_taxonomy", "distinct_nonce_yields_distinct_request_id", distinct_nonce_yields_distinct_request_id as fn()),
-        ("reachability_taxonomy", "transcript_digest_binds_outcome_tag", transcript_digest_binds_outcome_tag as fn()),
-        ("replay_recovery_idempotency", "recovery_independent_window_for_different_nonce", recovery_independent_window_for_different_nonce as fn()),
-        ("rejection_fail_closed", "reject_all_scenarios_wrong_proposal", reject_all_scenarios_wrong_proposal as fn()),
-        ("accepted_compatible", "scenario_accept_add", scenario_accept_add as fn()),
-        ("accepted_compatible", "scenario_accept_remove", scenario_accept_remove as fn()),
-        ("accepted_compatible", "scenario_accept_update", scenario_accept_update as fn()),
-        ("accepted_compatible", "scenario_accept_noop", scenario_accept_noop as fn()),
-        ("accepted_compatible", "scenario_accept_identity", scenario_accept_identity as fn()),
-        ("accepted_compatible", "scenario_accept_retire", scenario_accept_retire as fn()),
-        ("accepted_compatible", "scenario_accept_emergency", scenario_accept_emergency as fn()),
-        ("accepted_compatible", "scenario_accept_authsync", scenario_accept_authsync as fn()),
-        ("accepted_compatible", "scenario_accept_bulk", scenario_accept_bulk as fn()),
-        ("accepted_compatible", "scenario_testnet_accept_add", scenario_testnet_accept_add as fn()),
-        ("accepted_compatible", "scenario_testnet_accept_remove", scenario_testnet_accept_remove as fn()),
-        ("accepted_compatible", "scenario_testnet_accept_update", scenario_testnet_accept_update as fn()),
-        ("accepted_compatible", "scenario_testnet_accept_noop", scenario_testnet_accept_noop as fn()),
-        ("accepted_compatible", "scenario_testnet_accept_identity", scenario_testnet_accept_identity as fn()),
-        ("accepted_compatible", "scenario_testnet_accept_retire", scenario_testnet_accept_retire as fn()),
-        ("accepted_compatible", "scenario_testnet_accept_emergency", scenario_testnet_accept_emergency as fn()),
-        ("accepted_compatible", "scenario_testnet_accept_authsync", scenario_testnet_accept_authsync as fn()),
-        ("accepted_compatible", "scenario_testnet_accept_bulk", scenario_testnet_accept_bulk as fn()),
+        (
+            "accepted_compatible",
+            "accept_all_scenarios_devnet",
+            accept_all_scenarios_devnet as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "accept_all_scenarios_testnet",
+            accept_all_scenarios_testnet as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "accept_outcome_carries_kind_env_target_nonce",
+            accept_outcome_carries_kind_env_target_nonce as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "accept_binds_staged_decision_transcript",
+            accept_binds_staged_decision_transcript as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "accept_reexposes_live_authorization_tuple",
+            accept_reexposes_live_authorization_tuple as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "accept_reexposes_application_and_governance_tuple",
+            accept_reexposes_application_and_governance_tuple as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "accept_deterministic_digests_under_reevaluation",
+            accept_deterministic_digests_under_reevaluation as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "accept_record_intent_digest_matches_named_helper",
+            accept_record_intent_digest_matches_named_helper as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "accept_distinct_scenarios_have_distinct_digests",
+            accept_distinct_scenarios_have_distinct_digests as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "accept_target_matches_record_epoch_transition_target",
+            accept_target_matches_record_epoch_transition_target as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "reject_wrong_staged_application_decision_id",
+            reject_wrong_staged_application_decision_id as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "reject_wrong_staged_application_request_id",
+            reject_wrong_staged_application_request_id as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "reject_wrong_staged_application_intent_digest",
+            reject_wrong_staged_application_intent_digest as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "reject_wrong_staged_application_transcript_digest",
+            reject_wrong_staged_application_transcript_digest as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "reject_wrong_staged_application_nonce",
+            reject_wrong_staged_application_nonce as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "reject_wrong_authorization_decision_id",
+            reject_wrong_authorization_decision_id as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "reject_wrong_authorization_request_id",
+            reject_wrong_authorization_request_id as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "reject_wrong_authorization_intent_digest",
+            reject_wrong_authorization_intent_digest as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "reject_wrong_authorization_transcript_digest",
+            reject_wrong_authorization_transcript_digest as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "reject_wrong_authorization_policy_id",
+            reject_wrong_authorization_policy_id as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "reject_wrong_application_decision_id",
+            reject_wrong_application_decision_id as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "reject_wrong_application_request_id",
+            reject_wrong_application_request_id as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "reject_wrong_application_intent_digest",
+            reject_wrong_application_intent_digest as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "reject_wrong_application_transcript_digest",
+            reject_wrong_application_transcript_digest as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "reject_wrong_application_policy_id",
+            reject_wrong_application_policy_id as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "reject_wrong_environment",
+            reject_wrong_environment as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "reject_wrong_chain",
+            reject_wrong_chain as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "reject_wrong_genesis",
+            reject_wrong_genesis as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "reject_wrong_authority_root",
+            reject_wrong_authority_root as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "reject_wrong_governance_domain",
+            reject_wrong_governance_domain as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "reject_wrong_governance_epoch",
+            reject_wrong_governance_epoch as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "reject_wrong_proposal_id",
+            reject_wrong_proposal_id as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "reject_wrong_governance_execution_decision_id",
+            reject_wrong_governance_execution_decision_id as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "reject_wrong_governance_execution_request_id",
+            reject_wrong_governance_execution_request_id as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "reject_wrong_governance_execution_intent_digest",
+            reject_wrong_governance_execution_intent_digest as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "reject_wrong_rotation_decision_id",
+            reject_wrong_rotation_decision_id as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "reject_wrong_rotation_request_id",
+            reject_wrong_rotation_request_id as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "reject_wrong_rotation_transcript_digest",
+            reject_wrong_rotation_transcript_digest as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "reject_wrong_rotation_plan_digest",
+            reject_wrong_rotation_plan_digest as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "reject_wrong_lifecycle_action",
+            reject_wrong_lifecycle_action as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "reject_wrong_rotation_action",
+            reject_wrong_rotation_action as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "reject_wrong_authority_sequence",
+            reject_wrong_authority_sequence as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "reject_wrong_quorum",
+            reject_wrong_quorum as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "reject_wrong_threshold",
+            reject_wrong_threshold as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "reject_wrong_current_validator_set_digest",
+            reject_wrong_current_validator_set_digest as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "reject_wrong_proposed_validator_set_digest",
+            reject_wrong_proposed_validator_set_digest as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "reject_wrong_validator_set_delta_digest",
+            reject_wrong_validator_set_delta_digest as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "reject_wrong_validator_set_epoch",
+            reject_wrong_validator_set_epoch as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "reject_wrong_validator_set_version",
+            reject_wrong_validator_set_version as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "reject_wrong_proposed_validator_count",
+            reject_wrong_proposed_validator_count as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "reject_wrong_rotation_nonce",
+            reject_wrong_rotation_nonce as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "reject_wrong_epoch_transition_target",
+            reject_wrong_epoch_transition_target as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "reject_wrong_application_nonce",
+            reject_wrong_application_nonce as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "reject_wrong_live_application_nonce",
+            reject_wrong_live_application_nonce as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "reject_missing_staged_application_decision",
+            reject_missing_staged_application_decision as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "reject_unverified_staged_application_decision",
+            reject_unverified_staged_application_decision as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "reject_accepted_staged_application_without_record",
+            reject_accepted_staged_application_without_record as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "reject_application_decision_alone",
+            reject_application_decision_alone as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "reject_rotation_plan_alone",
+            reject_rotation_plan_alone as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "reject_governance_execution_intent_alone",
+            reject_governance_execution_intent_alone as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "reject_governance_proof_alone",
+            reject_governance_proof_alone as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "reject_local_operator_assertion",
+            reject_local_operator_assertion as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "reject_peer_majority_assertion",
+            reject_peer_majority_assertion as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "reject_custody_only_evidence",
+            reject_custody_only_evidence as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "reject_remote_signer_only_evidence",
+            reject_remote_signer_only_evidence as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "reject_custody_attestation_only_evidence",
+            reject_custody_attestation_only_evidence as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "reject_fixture_only_staged_application",
+            reject_fixture_only_staged_application as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "reject_arbitrary_validator_set_bytes",
+            reject_arbitrary_validator_set_bytes as fn(),
+        ),
+        (
+            "mainnet_authority_policy",
+            "reject_mainnet_trust_domain",
+            reject_mainnet_trust_domain as fn(),
+        ),
+        (
+            "mainnet_authority_policy",
+            "reject_mainnet_policy_unavailable",
+            reject_mainnet_policy_unavailable as fn(),
+        ),
+        (
+            "mainnet_authority_policy",
+            "reject_mainnet_policy_on_mainnet_domain_unavailable",
+            reject_mainnet_policy_on_mainnet_domain_unavailable as fn(),
+        ),
+        (
+            "mainnet_authority_policy",
+            "reject_production_policy_unavailable",
+            reject_production_policy_unavailable as fn(),
+        ),
+        (
+            "mainnet_authority_policy",
+            "reject_disabled_policy",
+            reject_disabled_policy as fn(),
+        ),
+        (
+            "mainnet_authority_policy",
+            "reject_production_boundary_kind_unavailable",
+            reject_production_boundary_kind_unavailable as fn(),
+        ),
+        (
+            "replay_recovery_idempotency",
+            "reject_replayed_staged_application",
+            reject_replayed_staged_application as fn(),
+        ),
+        (
+            "replay_recovery_idempotency",
+            "accept_when_replay_set_has_unrelated_id",
+            accept_when_replay_set_has_unrelated_id as fn(),
+        ),
+        (
+            "replay_recovery_idempotency",
+            "recovery_clean_when_no_prior_window",
+            recovery_clean_when_no_prior_window as fn(),
+        ),
+        (
+            "replay_recovery_idempotency",
+            "recovery_idempotent_replay_observed",
+            recovery_idempotent_replay_observed as fn(),
+        ),
+        (
+            "replay_recovery_idempotency",
+            "recovery_disabled_under_disabled_policy",
+            recovery_disabled_under_disabled_policy as fn(),
+        ),
+        (
+            "replay_recovery_idempotency",
+            "reject_stale_governance_epoch",
+            reject_stale_governance_epoch as fn(),
+        ),
+        (
+            "replay_recovery_idempotency",
+            "reject_stale_authority_sequence",
+            reject_stale_authority_sequence as fn(),
+        ),
+        (
+            "replay_recovery_idempotency",
+            "reject_stale_validator_set_epoch",
+            reject_stale_validator_set_epoch as fn(),
+        ),
+        (
+            "replay_recovery_idempotency",
+            "reject_stale_validator_set_version",
+            reject_stale_validator_set_version as fn(),
+        ),
+        (
+            "fixture_ledger",
+            "fixture_ledger_apply_advances_state",
+            fixture_ledger_apply_advances_state as fn(),
+        ),
+        (
+            "fixture_ledger",
+            "fixture_ledger_apply_is_idempotent",
+            fixture_ledger_apply_is_idempotent as fn(),
+        ),
+        (
+            "fixture_ledger",
+            "fixture_ledger_starts_unapplied",
+            fixture_ledger_starts_unapplied as fn(),
+        ),
+        (
+            "non_mutation",
+            "invariant_all_outcomes_non_mutating",
+            invariant_all_outcomes_non_mutating as fn(),
+        ),
+        (
+            "non_mutation",
+            "invariant_source_test_not_release_binary",
+            invariant_source_test_not_release_binary as fn(),
+        ),
+        (
+            "non_mutation",
+            "invariant_mainnet_refused",
+            invariant_mainnet_refused as fn(),
+        ),
+        (
+            "non_mutation",
+            "invariant_is_non_mutating",
+            invariant_is_non_mutating as fn(),
+        ),
+        (
+            "non_mutation",
+            "invariant_never_falls_back",
+            invariant_never_falls_back as fn(),
+        ),
+        (
+            "non_mutation",
+            "invariant_no_default_runtime_wiring",
+            invariant_no_default_runtime_wiring as fn(),
+        ),
+        (
+            "non_mutation",
+            "invariant_requires_verified_application_decision",
+            invariant_requires_verified_application_decision as fn(),
+        ),
+        (
+            "reachability_taxonomy",
+            "policy_default_is_disabled",
+            policy_default_is_disabled as fn(),
+        ),
+        (
+            "reachability_taxonomy",
+            "policy_tags_are_distinct",
+            policy_tags_are_distinct as fn(),
+        ),
+        (
+            "reachability_taxonomy",
+            "kind_source_test_flag",
+            kind_source_test_flag as fn(),
+        ),
+        (
+            "reachability_taxonomy",
+            "mutation_kind_tags_are_distinct",
+            mutation_kind_tags_are_distinct as fn(),
+        ),
+        (
+            "reachability_taxonomy",
+            "mutation_kind_from_staged_kind_is_identity",
+            mutation_kind_from_staged_kind_is_identity as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "accept_and_reject_classification",
+            accept_and_reject_classification as fn(),
+        ),
+        (
+            "reachability_taxonomy",
+            "config_and_inputs_well_formed",
+            config_and_inputs_well_formed as fn(),
+        ),
+        (
+            "reachability_taxonomy",
+            "every_mutation_kind_is_non_mutating",
+            every_mutation_kind_is_non_mutating as fn(),
+        ),
+        (
+            "reachability_taxonomy",
+            "distinct_environments_yield_distinct_digests",
+            distinct_environments_yield_distinct_digests as fn(),
+        ),
+        (
+            "reachability_taxonomy",
+            "distinct_nonce_yields_distinct_request_id",
+            distinct_nonce_yields_distinct_request_id as fn(),
+        ),
+        (
+            "reachability_taxonomy",
+            "transcript_digest_binds_outcome_tag",
+            transcript_digest_binds_outcome_tag as fn(),
+        ),
+        (
+            "replay_recovery_idempotency",
+            "recovery_independent_window_for_different_nonce",
+            recovery_independent_window_for_different_nonce as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "reject_all_scenarios_wrong_proposal",
+            reject_all_scenarios_wrong_proposal as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "scenario_accept_add",
+            scenario_accept_add as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "scenario_accept_remove",
+            scenario_accept_remove as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "scenario_accept_update",
+            scenario_accept_update as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "scenario_accept_noop",
+            scenario_accept_noop as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "scenario_accept_identity",
+            scenario_accept_identity as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "scenario_accept_retire",
+            scenario_accept_retire as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "scenario_accept_emergency",
+            scenario_accept_emergency as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "scenario_accept_authsync",
+            scenario_accept_authsync as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "scenario_accept_bulk",
+            scenario_accept_bulk as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "scenario_testnet_accept_add",
+            scenario_testnet_accept_add as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "scenario_testnet_accept_remove",
+            scenario_testnet_accept_remove as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "scenario_testnet_accept_update",
+            scenario_testnet_accept_update as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "scenario_testnet_accept_noop",
+            scenario_testnet_accept_noop as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "scenario_testnet_accept_identity",
+            scenario_testnet_accept_identity as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "scenario_testnet_accept_retire",
+            scenario_testnet_accept_retire as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "scenario_testnet_accept_emergency",
+            scenario_testnet_accept_emergency as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "scenario_testnet_accept_authsync",
+            scenario_testnet_accept_authsync as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "scenario_testnet_accept_bulk",
+            scenario_testnet_accept_bulk as fn(),
+        ),
     ];
 
     let mut rows: Vec<(String, String, bool)> = Vec::new();
@@ -1930,8 +2666,7 @@ fn main() {
         .as_ref()
         .expect("accepted Devnet Add case must carry a guarded mutation-execution record");
     let authorization_intent_digest = case.inputs.expected_authorization_intent_digest.clone();
-    let intent_digest =
-        production_guarded_epoch_transition_mutation_intent_digest(record);
+    let intent_digest = production_guarded_epoch_transition_mutation_intent_digest(record);
     let record_digest = record.intent_digest();
     let request_id = production_guarded_epoch_transition_mutation_request_id(
         PRODUCTION_GUARDED_EPOCH_TRANSITION_MUTATION_PROTOCOL_VERSION,
@@ -1949,15 +2684,23 @@ fn main() {
     );
 
     let mut digest_body = String::new();
-    digest_body.push_str(&format!("authorization_intent_digest={authorization_intent_digest}\n"));
-    digest_body.push_str(&format!("staged_application_id={}\n", decision.staged_application_id));
+    digest_body.push_str(&format!(
+        "authorization_intent_digest={authorization_intent_digest}\n"
+    ));
+    digest_body.push_str(&format!(
+        "staged_application_id={}\n",
+        decision.staged_application_id
+    ));
     digest_body.push_str(&format!("intent_digest={intent_digest}\n"));
     digest_body.push_str(&format!("record_digest={record_digest}\n"));
     digest_body.push_str(&format!("request_id={request_id}\n"));
     digest_body.push_str(&format!("transcript_digest={transcript_digest}\n"));
     digest_body.push_str(&format!("outcome_tag={outcome_tag}\n"));
-    fs::write(outdir.join("fixtures/run_312_deterministic_digests.txt"), &digest_body)
-        .expect("write deterministic-digest fixture");
+    fs::write(
+        outdir.join("fixtures/run_312_deterministic_digests.txt"),
+        &digest_body,
+    )
+    .expect("write deterministic-digest fixture");
 
     // Per-table tallies preserving first-seen order.
     let mut table_order: Vec<String> = Vec::new();
@@ -1977,7 +2720,9 @@ fn main() {
     let total_fail = rows.len() - total_pass;
 
     let mut summary = String::new();
-    summary.push_str("run_312_production_guarded_epoch_transition_mutation_executor_release_binary_helper\n");
+    summary.push_str(
+        "run_312_production_guarded_epoch_transition_mutation_executor_release_binary_helper\n",
+    );
     summary.push_str("boundary=crates/qbind-node/src/pqc_production_guarded_epoch_transition_mutation_executor.rs :: ProductionGuardedEpochTransitionMutationExecutor (Run 311 source/test boundary)\n");
     summary.push_str("mode=release-binary example linked against release-built production library symbols; source/test executor constructor only; DevNet/TestNet accept identities only; no production/MainNet enablement; no live validator-set mutation; no epoch transition\n");
     for table in &table_order {
@@ -1987,7 +2732,10 @@ fn main() {
     }
     summary.push_str(&format!("total_pass={total_pass}\n"));
     summary.push_str(&format!("total_fail={total_fail}\n"));
-    summary.push_str(&format!("verdict={}\n", if total_fail == 0 { "PASS" } else { "FAIL" }));
+    summary.push_str(&format!(
+        "verdict={}\n",
+        if total_fail == 0 { "PASS" } else { "FAIL" }
+    ));
     fs::write(outdir.join("helper_summary.txt"), &summary).expect("write helper summary");
 
     print!("{summary}");

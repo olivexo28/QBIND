@@ -214,9 +214,7 @@ pub fn load_versioned_ratification_from_path(
         })?;
 
     // v2 uses `schema_version`, v1 uses `version`.
-    let version_value = value
-        .get("schema_version")
-        .or_else(|| value.get("version"));
+    let version_value = value.get("schema_version").or_else(|| value.get("version"));
 
     let version_int = match version_value.and_then(|v| v.as_u64()) {
         Some(v) => v as u32,
@@ -240,13 +238,11 @@ pub fn load_versioned_ratification_from_path(
             Ok(VersionedRatificationSidecar::V1(r))
         }
         2 => {
-            let r: qbind_ledger::BundleSigningRatificationV2 =
-                serde_json::from_value(value).map_err(|e| {
-                    VersionedRatificationInputError::MalformedSidecar {
-                        path: path.to_path_buf(),
-                        schema_version: 2,
-                        error: e.to_string(),
-                    }
+            let r: qbind_ledger::BundleSigningRatificationV2 = serde_json::from_value(value)
+                .map_err(|e| VersionedRatificationInputError::MalformedSidecar {
+                    path: path.to_path_buf(),
+                    schema_version: 2,
+                    error: e.to_string(),
                 })?;
             Ok(VersionedRatificationSidecar::V2(r))
         }
@@ -324,9 +320,7 @@ pub fn load_v2_ratification_sidecar_with_governance_proof_from_path(
             error: e.to_string(),
         })?;
 
-    let version_value = value
-        .get("schema_version")
-        .or_else(|| value.get("version"));
+    let version_value = value.get("schema_version").or_else(|| value.get("version"));
     let version_int = match version_value.and_then(|v| v.as_u64()) {
         Some(v) => v as u32,
         None => {
@@ -420,7 +414,9 @@ impl VersionedRatificationSidecarWithGovernanceProof {
     pub fn governance_proof_load_status(&self) -> GovernanceProofLoadStatus {
         match self {
             Self::V1(_) => GovernanceProofLoadStatus::Absent,
-            Self::V2 { governance_proof, .. } => governance_proof.clone(),
+            Self::V2 {
+                governance_proof, ..
+            } => governance_proof.clone(),
         }
     }
 }
@@ -462,9 +458,7 @@ pub fn load_versioned_ratification_with_governance_proof_from_path(
             error: e.to_string(),
         })?;
 
-    let version_value = value
-        .get("schema_version")
-        .or_else(|| value.get("version"));
+    let version_value = value.get("schema_version").or_else(|| value.get("version"));
     let version_int = match version_value.and_then(|v| v.as_u64()) {
         Some(v) => v as u32,
         None => {
@@ -507,15 +501,15 @@ pub fn load_versioned_ratification_with_governance_proof_from_path(
 mod tests {
     use super::*;
     use qbind_crypto::MlDsa44Backend;
-    use qbind_ledger::{
-        compute_canonical_genesis_hash, BundleSigningRatification,
-        NetworkEnvironmentPolicy, RatificationEnvironment,
-    };
     use qbind_ledger::bundle_signing_ratification::test_helpers as ratification_helpers;
     use qbind_ledger::genesis::{
         GenesisAllocation, GenesisAuthorityConfig, GenesisAuthorityRoot, GenesisConfig,
         GenesisCouncilConfig, GenesisMonetaryConfig, GenesisValidator,
         GENESIS_AUTHORITY_SUITE_ML_DSA_44,
+    };
+    use qbind_ledger::{
+        compute_canonical_genesis_hash, BundleSigningRatification, NetworkEnvironmentPolicy,
+        RatificationEnvironment,
     };
 
     fn full_pk_hex(pk: &[u8]) -> String {
@@ -533,7 +527,10 @@ mod tests {
         let mut cfg = GenesisConfig::new(
             "qbind-mainnet-v0",
             1_738_000_000_000,
-            vec![GenesisAllocation::new(format!("0x{}", "11".repeat(32)), 100)],
+            vec![GenesisAllocation::new(
+                format!("0x{}", "11".repeat(32)),
+                100,
+            )],
             vec![GenesisValidator::new(
                 format!("0x{}", "22".repeat(32)),
                 "ab".repeat(32),
@@ -623,7 +620,10 @@ mod tests {
         let mut cfg = GenesisConfig::new(
             "qbind-mainnet-v0",
             1_738_000_000_000,
-            vec![GenesisAllocation::new(format!("0x{}", "11".repeat(32)), 100)],
+            vec![GenesisAllocation::new(
+                format!("0x{}", "11".repeat(32)),
+                100,
+            )],
             vec![GenesisValidator::new(
                 format!("0x{}", "22".repeat(32)),
                 "ab".repeat(32),
@@ -657,7 +657,12 @@ mod tests {
             &bsk_pk,
             1,
             BundleSigningRatificationV2Action::Ratify,
-            None, None, None, None, None, None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
         );
 
         let dir = tempfile::tempdir().unwrap();
@@ -713,10 +718,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("does-not-exist.json");
         let err = load_versioned_ratification_from_path(&path).unwrap_err();
-        assert!(matches!(
-            err,
-            VersionedRatificationInputError::Io { .. }
-        ));
+        assert!(matches!(err, VersionedRatificationInputError::Io { .. }));
     }
 
     #[test]

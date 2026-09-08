@@ -55,9 +55,12 @@ use qbind_node::pqc_production_live_validator_set_application_authorization::{
 };
 use qbind_node::pqc_production_staged_live_validator_set_epoch_transition_application_executor::*;
 use qbind_node::pqc_production_validator_set_rotation_application_executor::{
-    EmptyValidatorSetRotationApplicationReplaySet, ProductionValidatorSetRotationApplicationDecision,
-    ProductionValidatorSetRotationApplicationExecutor, ProductionValidatorSetRotationApplicationInputs,
-    ProductionValidatorSetRotationApplicationRequest, ValidatorSetRotationApplicationAuthoritySource,
+    EmptyValidatorSetRotationApplicationReplaySet,
+    ProductionValidatorSetRotationApplicationDecision,
+    ProductionValidatorSetRotationApplicationExecutor,
+    ProductionValidatorSetRotationApplicationInputs,
+    ProductionValidatorSetRotationApplicationRequest,
+    ValidatorSetRotationApplicationAuthoritySource,
 };
 use qbind_node::pqc_production_validator_set_rotation_intent::{
     CanonicalValidatorIdentity, CanonicalValidatorRecord, CanonicalValidatorSetSnapshot,
@@ -105,18 +108,33 @@ fn chain_for(env: TrustBundleEnvironment) -> &'static str {
 }
 
 fn trust_domain(env: TrustBundleEnvironment) -> AuthorityTrustDomain {
-    AuthorityTrustDomain::new(env, chain_for(env), GENESIS_HASH, ROOT_FP, PQC_LIFECYCLE_SUITE_ML_DSA_44)
+    AuthorityTrustDomain::new(
+        env,
+        chain_for(env),
+        GENESIS_HASH,
+        ROOT_FP,
+        PQC_LIFECYCLE_SUITE_ML_DSA_44,
+    )
 }
 
 fn quorum() -> OnChainGovernanceQuorum {
-    OnChainGovernanceQuorum { voters_voted: 8, total_voters: 10, required_quorum: 6 }
+    OnChainGovernanceQuorum {
+        voters_voted: 8,
+        total_voters: 10,
+        required_quorum: 6,
+    }
 }
 
 fn threshold() -> GovernanceThreshold {
     GovernanceThreshold::new(8, 6, 10)
 }
 
-fn validator(env: TrustBundleEnvironment, idx: u64, power: u64, act: u64) -> CanonicalValidatorRecord {
+fn validator(
+    env: TrustBundleEnvironment,
+    idx: u64,
+    power: u64,
+    act: u64,
+) -> CanonicalValidatorRecord {
     CanonicalValidatorRecord {
         identity: CanonicalValidatorIdentity {
             validator_index: idx,
@@ -135,7 +153,11 @@ fn validator(env: TrustBundleEnvironment, idx: u64, power: u64, act: u64) -> Can
 
 fn current_set(env: TrustBundleEnvironment) -> CanonicalValidatorSetSnapshot {
     CanonicalValidatorSetSnapshot::new(
-        vec![validator(env, 1, 100, 1), validator(env, 2, 100, 1), validator(env, 3, 100, 1)],
+        vec![
+            validator(env, 1, 100, 1),
+            validator(env, 2, 100, 1),
+            validator(env, 3, 100, 1),
+        ],
         CUR_EPOCH,
         CUR_VERSION,
     )
@@ -164,7 +186,10 @@ fn durable() -> GovernanceExecutionDurableReplayBinding {
     }
 }
 
-fn gov_intent(env: TrustBundleEnvironment, lifecycle: LocalLifecycleAction) -> ProductionGovernanceExecutionIntent {
+fn gov_intent(
+    env: TrustBundleEnvironment,
+    lifecycle: LocalLifecycleAction,
+) -> ProductionGovernanceExecutionIntent {
     ProductionGovernanceExecutionIntent {
         intent_kind: ProductionGovernanceExecutionIntentKind::AuthorityLifecycleRotationIntent,
         protocol_version: 1,
@@ -196,14 +221,17 @@ fn gov_intent(env: TrustBundleEnvironment, lifecycle: LocalLifecycleAction) -> P
     }
 }
 
-fn gov_decision(intent: ProductionGovernanceExecutionIntent) -> ProductionGovernanceExecutionDecision {
+fn gov_decision(
+    intent: ProductionGovernanceExecutionIntent,
+) -> ProductionGovernanceExecutionDecision {
     let idig = intent.intent_digest();
     ProductionGovernanceExecutionDecision {
-        outcome: ProductionGovernanceExecutionOutcome::AcceptedSourceTestGovernanceExecutionIntent {
-            intent_kind: intent.intent_kind,
-            environment: intent.environment,
-            decision_id: intent.decision_id.clone(),
-        },
+        outcome:
+            ProductionGovernanceExecutionOutcome::AcceptedSourceTestGovernanceExecutionIntent {
+                intent_kind: intent.intent_kind,
+                environment: intent.environment,
+                decision_id: intent.decision_id.clone(),
+            },
         decision_id: GOV_DECISION_ID.to_string(),
         request_id: GOV_REQUEST_ID.to_string(),
         intent: Some(intent),
@@ -222,7 +250,8 @@ fn rotation_decision(
 ) -> ProductionValidatorSetRotationDecision {
     let decision = gov_decision(gov_intent(env, lifecycle));
     let idig = decision.intent_digest.clone();
-    let source = ValidatorSetRotationAuthoritySource::VerifiedGovernanceExecutionIntent { decision };
+    let source =
+        ValidatorSetRotationAuthoritySource::VerifiedGovernanceExecutionIntent { decision };
     let request = ProductionValidatorSetRotationRequest::new(
         source,
         current.clone(),
@@ -263,7 +292,11 @@ fn rotation_decision(
         expected_durable_replay: None,
     };
     let boundary = ProductionValidatorSetRotationBoundary::source_test();
-    let d = boundary.evaluate_validator_set_rotation(&request, &inputs, &EmptyValidatorSetRotationReplaySet);
+    let d = boundary.evaluate_validator_set_rotation(
+        &request,
+        &inputs,
+        &EmptyValidatorSetRotationReplaySet,
+    );
     assert!(d.is_accept(), "rotation decision must accept for fixture");
     d
 }
@@ -336,7 +369,10 @@ fn app_decision(
             &inputs,
             &EmptyValidatorSetRotationApplicationReplaySet,
         );
-    assert!(d.is_accept(), "run 305 application decision must accept for fixture");
+    assert!(
+        d.is_accept(),
+        "run 305 application decision must accept for fixture"
+    );
     d
 }
 
@@ -405,7 +441,11 @@ fn auth_decision(
     proposed: CanonicalValidatorSetSnapshot,
 ) -> ProductionLiveValidatorSetApplicationAuthorizationDecision {
     let app = app_decision(env, lifecycle, requested_action, current, delta, proposed);
-    let target = app.application_intent.as_ref().unwrap().epoch_transition_target;
+    let target = app
+        .application_intent
+        .as_ref()
+        .unwrap()
+        .epoch_transition_target;
     let inputs = auth_inputs307(env, lifecycle, requested_action, &app);
     let request = ProductionLiveValidatorSetApplicationAuthorizationRequest::new(
         LiveValidatorSetApplicationAuthorizationAuthoritySource::VerifiedApplicationDecision {
@@ -420,7 +460,10 @@ fn auth_decision(
             &inputs,
             &EmptyLiveValidatorSetApplicationAuthorizationReplaySet,
         );
-    assert!(d.is_accept(), "run 307 authorization decision must accept for fixture");
+    assert!(
+        d.is_accept(),
+        "run 307 authorization decision must accept for fixture"
+    );
     d
 }
 
@@ -531,11 +574,22 @@ fn scenario(
             let v4 = validator(env, 4, 100, 2);
             let delta = ValidatorSetDelta::new(vec![ValidatorSetChange::add(v4.clone())]);
             let proposed = CanonicalValidatorSetSnapshot::new(
-                vec![validator(env, 1, 100, 1), validator(env, 2, 100, 1), validator(env, 3, 100, 1), v4],
+                vec![
+                    validator(env, 1, 100, 1),
+                    validator(env, 2, 100, 1),
+                    validator(env, 3, 100, 1),
+                    v4,
+                ],
                 CUR_EPOCH + 1,
                 CUR_VERSION + 1,
             );
-            (LocalLifecycleAction::Rotate, ValidatorSetRotationAction::ValidatorAdd, current, delta, proposed)
+            (
+                LocalLifecycleAction::Rotate,
+                ValidatorSetRotationAction::ValidatorAdd,
+                current,
+                delta,
+                proposed,
+            )
         }
         Sc::Remove => {
             let delta = ValidatorSetDelta::new(vec![ValidatorSetChange::remove(3)]);
@@ -544,32 +598,64 @@ fn scenario(
                 CUR_EPOCH + 1,
                 CUR_VERSION + 1,
             );
-            (LocalLifecycleAction::Rotate, ValidatorSetRotationAction::ValidatorRemove, current, delta, proposed)
+            (
+                LocalLifecycleAction::Rotate,
+                ValidatorSetRotationAction::ValidatorRemove,
+                current,
+                delta,
+                proposed,
+            )
         }
         Sc::Update => {
             let updated = validator(env, 2, 250, 1);
             let delta = ValidatorSetDelta::new(vec![ValidatorSetChange::update(updated.clone())]);
             let proposed = CanonicalValidatorSetSnapshot::new(
-                vec![validator(env, 1, 100, 1), updated, validator(env, 3, 100, 1)],
+                vec![
+                    validator(env, 1, 100, 1),
+                    updated,
+                    validator(env, 3, 100, 1),
+                ],
                 CUR_EPOCH + 1,
                 CUR_VERSION + 1,
             );
-            (LocalLifecycleAction::Rotate, ValidatorSetRotationAction::ValidatorUpdate, current, delta, proposed)
+            (
+                LocalLifecycleAction::Rotate,
+                ValidatorSetRotationAction::ValidatorUpdate,
+                current,
+                delta,
+                proposed,
+            )
         }
         Sc::NoOp => {
             let proposed = current_set(env);
-            (LocalLifecycleAction::Rotate, ValidatorSetRotationAction::NoOpSynchronization, current, ValidatorSetDelta::empty(), proposed)
+            (
+                LocalLifecycleAction::Rotate,
+                ValidatorSetRotationAction::NoOpSynchronization,
+                current,
+                ValidatorSetDelta::empty(),
+                proposed,
+            )
         }
         Sc::Identity => {
             let mut rotated = validator(env, 2, 100, 1);
             rotated.identity.consensus_key_fingerprint = "cons-2-rotated".to_string();
             let delta = ValidatorSetDelta::new(vec![ValidatorSetChange::update(rotated.clone())]);
             let proposed = CanonicalValidatorSetSnapshot::new(
-                vec![validator(env, 1, 100, 1), rotated, validator(env, 3, 100, 1)],
+                vec![
+                    validator(env, 1, 100, 1),
+                    rotated,
+                    validator(env, 3, 100, 1),
+                ],
                 CUR_EPOCH + 1,
                 CUR_VERSION + 1,
             );
-            (LocalLifecycleAction::Rotate, ValidatorSetRotationAction::ValidatorIdentityRotation, current, delta, proposed)
+            (
+                LocalLifecycleAction::Rotate,
+                ValidatorSetRotationAction::ValidatorIdentityRotation,
+                current,
+                delta,
+                proposed,
+            )
         }
         Sc::Retire => {
             let delta = ValidatorSetDelta::new(vec![ValidatorSetChange::remove(3)]);
@@ -578,7 +664,13 @@ fn scenario(
                 CUR_EPOCH + 1,
                 CUR_VERSION + 1,
             );
-            (LocalLifecycleAction::Retire, ValidatorSetRotationAction::ValidatorRetirement, current, delta, proposed)
+            (
+                LocalLifecycleAction::Retire,
+                ValidatorSetRotationAction::ValidatorRetirement,
+                current,
+                delta,
+                proposed,
+            )
         }
         Sc::Emergency => {
             let delta = ValidatorSetDelta::new(vec![ValidatorSetChange::remove(3)]);
@@ -587,27 +679,51 @@ fn scenario(
                 CUR_EPOCH + 1,
                 CUR_VERSION + 1,
             );
-            (LocalLifecycleAction::EmergencyRevoke, ValidatorSetRotationAction::EmergencyValidatorRemoval, current, delta, proposed)
+            (
+                LocalLifecycleAction::EmergencyRevoke,
+                ValidatorSetRotationAction::EmergencyValidatorRemoval,
+                current,
+                delta,
+                proposed,
+            )
         }
         Sc::AuthSync => {
             let v4 = validator(env, 4, 100, 2);
-            let delta = ValidatorSetDelta::new(vec![ValidatorSetChange::add(v4.clone()), ValidatorSetChange::remove(3)]);
+            let delta = ValidatorSetDelta::new(vec![
+                ValidatorSetChange::add(v4.clone()),
+                ValidatorSetChange::remove(3),
+            ]);
             let proposed = CanonicalValidatorSetSnapshot::new(
                 vec![validator(env, 1, 100, 1), validator(env, 2, 100, 1), v4],
                 CUR_EPOCH + 1,
                 CUR_VERSION + 1,
             );
-            (LocalLifecycleAction::Rotate, ValidatorSetRotationAction::AuthoritySetSynchronization, current, delta, proposed)
+            (
+                LocalLifecycleAction::Rotate,
+                ValidatorSetRotationAction::AuthoritySetSynchronization,
+                current,
+                delta,
+                proposed,
+            )
         }
         Sc::Bulk => {
             let v4 = validator(env, 4, 100, 2);
-            let delta = ValidatorSetDelta::new(vec![ValidatorSetChange::add(v4.clone()), ValidatorSetChange::remove(3)]);
+            let delta = ValidatorSetDelta::new(vec![
+                ValidatorSetChange::add(v4.clone()),
+                ValidatorSetChange::remove(3),
+            ]);
             let proposed = CanonicalValidatorSetSnapshot::new(
                 vec![validator(env, 1, 100, 1), validator(env, 2, 100, 1), v4],
                 CUR_EPOCH + 1,
                 CUR_VERSION + 1,
             );
-            (LocalLifecycleAction::Rotate, ValidatorSetRotationAction::BulkValidatorSetRotation, current, delta, proposed)
+            (
+                LocalLifecycleAction::Rotate,
+                ValidatorSetRotationAction::BulkValidatorSetRotation,
+                current,
+                delta,
+                proposed,
+            )
         }
     }
 }
@@ -628,14 +744,21 @@ fn expected_staged_kind(sc: Sc) -> StagedLiveValidatorSetEpochTransitionApplicat
 }
 
 /// Build an accepted Run 307 authorization decision for a scenario.
-fn auth_decision_for(env: TrustBundleEnvironment, sc: Sc) -> ProductionLiveValidatorSetApplicationAuthorizationDecision {
+fn auth_decision_for(
+    env: TrustBundleEnvironment,
+    sc: Sc,
+) -> ProductionLiveValidatorSetApplicationAuthorizationDecision {
     let (lifecycle, action, current, delta, proposed) = scenario(env, sc);
     auth_decision(env, lifecycle, action, current, delta, proposed)
 }
 
 fn stg_case309(env: TrustBundleEnvironment, sc: Sc) -> Stg309 {
     let decision = auth_decision_for(env, sc);
-    let target = decision.authorization_intent.as_ref().unwrap().epoch_transition_target;
+    let target = decision
+        .authorization_intent
+        .as_ref()
+        .unwrap()
+        .epoch_transition_target;
     let inputs = stg_inputs(env, &decision);
     let request = ProductionStagedLiveValidatorSetEpochTransitionApplicationRequest::new(
         StagedLiveValidatorSetEpochTransitionApplicationAuthoritySource::VerifiedLiveApplicationAuthorization {
@@ -656,11 +779,12 @@ fn empty_replay309() -> EmptyStagedLiveValidatorSetEpochTransitionApplicationRep
 }
 
 fn eval309(case: &Stg309) -> ProductionStagedLiveValidatorSetEpochTransitionApplicationDecision {
-    case.executor.evaluate_staged_live_validator_set_epoch_transition_application(
-        &case.request,
-        &case.inputs,
-        &empty_replay309(),
-    )
+    case.executor
+        .evaluate_staged_live_validator_set_epoch_transition_application(
+            &case.request,
+            &case.inputs,
+            &empty_replay309(),
+        )
 }
 
 // ===========================================================================
@@ -672,8 +796,8 @@ use qbind_node::pqc_production_guarded_epoch_transition_mutation_executor::*;
 const GUARDED_POLICY_ID: &str = "guarded-mutation-policy-1";
 const GUARDED_NONCE: u64 = 37;
 
-use ProductionGuardedEpochTransitionMutationOutcome as GO;
 use GuardedEpochTransitionMutationKind as GK;
+use ProductionGuardedEpochTransitionMutationOutcome as GO;
 
 /// Build an accepted Run 309 staged epoch-transition application decision — the
 /// sole accepted Run 311 authority source.
@@ -682,7 +806,10 @@ fn stg_decision(
     sc: Sc,
 ) -> ProductionStagedLiveValidatorSetEpochTransitionApplicationDecision {
     let d = eval309(&stg_case309(env, sc));
-    assert!(d.is_accept(), "run 309 staged decision must accept for fixture");
+    assert!(
+        d.is_accept(),
+        "run 309 staged decision must accept for fixture"
+    );
     d
 }
 
@@ -814,7 +941,10 @@ fn gem_eval(case: &Gem) -> ProductionGuardedEpochTransitionMutationDecision {
     )
 }
 
-fn gem_eval_replay(case: &Gem, replay: &[String]) -> ProductionGuardedEpochTransitionMutationDecision {
+fn gem_eval_replay(
+    case: &Gem,
+    replay: &[String],
+) -> ProductionGuardedEpochTransitionMutationDecision {
     case.executor
         .evaluate_guarded_epoch_transition_mutation(&case.request, &case.inputs, &replay)
 }
@@ -839,7 +969,10 @@ fn exec_with_policy(
 
 /// Common helper: build a Devnet/Add case, apply a mutation to the inputs, and
 /// assert the resulting outcome (fail-closed, no record).
-fn reject_inputs(mutate: impl FnOnce(&mut ProductionGuardedEpochTransitionMutationInputs), expected: GO) {
+fn reject_inputs(
+    mutate: impl FnOnce(&mut ProductionGuardedEpochTransitionMutationInputs),
+    expected: GO,
+) {
     let mut c = gem_case(TrustBundleEnvironment::Devnet, Sc::Add);
     mutate(&mut c.inputs);
     let d = gem_eval(&c);
@@ -1127,8 +1260,12 @@ fn reject_wrong_environment() {
 fn reject_wrong_chain() {
     reject_inputs(
         |i| {
-            i.trust_domain =
-                custom_domain(TrustBundleEnvironment::Devnet, "bad-chain", GENESIS_HASH, ROOT_FP)
+            i.trust_domain = custom_domain(
+                TrustBundleEnvironment::Devnet,
+                "bad-chain",
+                GENESIS_HASH,
+                ROOT_FP,
+            )
         },
         GO::WrongChain,
     );
@@ -1168,17 +1305,26 @@ fn reject_wrong_authority_root() {
 
 #[test]
 fn reject_wrong_governance_domain() {
-    reject_inputs(|i| i.expected_governance_domain_id = "bad".to_string(), GO::WrongGovernanceDomain);
+    reject_inputs(
+        |i| i.expected_governance_domain_id = "bad".to_string(),
+        GO::WrongGovernanceDomain,
+    );
 }
 
 #[test]
 fn reject_wrong_governance_epoch() {
-    reject_inputs(|i| i.expected_governance_epoch = GOV_EPOCH + 1, GO::WrongGovernanceEpoch);
+    reject_inputs(
+        |i| i.expected_governance_epoch = GOV_EPOCH + 1,
+        GO::WrongGovernanceEpoch,
+    );
 }
 
 #[test]
 fn reject_wrong_proposal_id() {
-    reject_inputs(|i| i.expected_proposal_id = "bad".to_string(), GO::WrongProposalId);
+    reject_inputs(
+        |i| i.expected_proposal_id = "bad".to_string(),
+        GO::WrongProposalId,
+    );
 }
 
 #[test]
@@ -1207,12 +1353,18 @@ fn reject_wrong_governance_execution_intent_digest() {
 
 #[test]
 fn reject_wrong_rotation_decision_id() {
-    reject_inputs(|i| i.expected_rotation_decision_id = "bad".to_string(), GO::WrongRotationDecisionId);
+    reject_inputs(
+        |i| i.expected_rotation_decision_id = "bad".to_string(),
+        GO::WrongRotationDecisionId,
+    );
 }
 
 #[test]
 fn reject_wrong_rotation_request_id() {
-    reject_inputs(|i| i.expected_rotation_request_id = "bad".to_string(), GO::WrongRotationRequestId);
+    reject_inputs(
+        |i| i.expected_rotation_request_id = "bad".to_string(),
+        GO::WrongRotationRequestId,
+    );
 }
 
 #[test]
@@ -1225,12 +1377,18 @@ fn reject_wrong_rotation_transcript_digest() {
 
 #[test]
 fn reject_wrong_rotation_plan_digest() {
-    reject_inputs(|i| i.expected_rotation_plan_digest = "bad".to_string(), GO::WrongRotationPlanDigest);
+    reject_inputs(
+        |i| i.expected_rotation_plan_digest = "bad".to_string(),
+        GO::WrongRotationPlanDigest,
+    );
 }
 
 #[test]
 fn reject_wrong_lifecycle_action() {
-    reject_inputs(|i| i.expected_lifecycle_action = LocalLifecycleAction::Retire, GO::WrongLifecycleAction);
+    reject_inputs(
+        |i| i.expected_lifecycle_action = LocalLifecycleAction::Retire,
+        GO::WrongLifecycleAction,
+    );
 }
 
 #[test]
@@ -1243,74 +1401,116 @@ fn reject_wrong_rotation_action() {
 
 #[test]
 fn reject_wrong_authority_sequence() {
-    reject_inputs(|i| i.expected_authority_domain_sequence = SEQ + 5, GO::WrongAuthoritySequence);
+    reject_inputs(
+        |i| i.expected_authority_domain_sequence = SEQ + 5,
+        GO::WrongAuthoritySequence,
+    );
 }
 
 #[test]
 fn reject_wrong_quorum() {
     reject_inputs(
-        |i| i.expected_quorum = OnChainGovernanceQuorum { voters_voted: 1, total_voters: 10, required_quorum: 6 },
+        |i| {
+            i.expected_quorum = OnChainGovernanceQuorum {
+                voters_voted: 1,
+                total_voters: 10,
+                required_quorum: 6,
+            }
+        },
         GO::WrongQuorum,
     );
 }
 
 #[test]
 fn reject_wrong_threshold() {
-    reject_inputs(|i| i.expected_threshold = GovernanceThreshold::new(9, 6, 10), GO::WrongThreshold);
+    reject_inputs(
+        |i| i.expected_threshold = GovernanceThreshold::new(9, 6, 10),
+        GO::WrongThreshold,
+    );
 }
 
 // ---- Validator-set tuple binding failures ---------------------------------
 
 #[test]
 fn reject_wrong_current_validator_set_digest() {
-    reject_inputs(|i| i.expected_current_set_digest = "bad".to_string(), GO::WrongCurrentValidatorSetDigest);
+    reject_inputs(
+        |i| i.expected_current_set_digest = "bad".to_string(),
+        GO::WrongCurrentValidatorSetDigest,
+    );
 }
 
 #[test]
 fn reject_wrong_proposed_validator_set_digest() {
-    reject_inputs(|i| i.expected_proposed_set_digest = "bad".to_string(), GO::WrongProposedValidatorSetDigest);
+    reject_inputs(
+        |i| i.expected_proposed_set_digest = "bad".to_string(),
+        GO::WrongProposedValidatorSetDigest,
+    );
 }
 
 #[test]
 fn reject_wrong_validator_set_delta_digest() {
-    reject_inputs(|i| i.expected_delta_digest = "bad".to_string(), GO::WrongValidatorSetDeltaDigest);
+    reject_inputs(
+        |i| i.expected_delta_digest = "bad".to_string(),
+        GO::WrongValidatorSetDeltaDigest,
+    );
 }
 
 #[test]
 fn reject_wrong_validator_set_epoch() {
-    reject_inputs(|i| i.expected_validator_set_epoch = 9999, GO::WrongValidatorSetEpoch);
+    reject_inputs(
+        |i| i.expected_validator_set_epoch = 9999,
+        GO::WrongValidatorSetEpoch,
+    );
 }
 
 #[test]
 fn reject_wrong_validator_set_version() {
-    reject_inputs(|i| i.expected_validator_set_version = 9999, GO::WrongValidatorSetVersion);
+    reject_inputs(
+        |i| i.expected_validator_set_version = 9999,
+        GO::WrongValidatorSetVersion,
+    );
 }
 
 #[test]
 fn reject_wrong_proposed_validator_count() {
-    reject_inputs(|i| i.expected_proposed_validator_count = 9999, GO::WrongProposedValidatorCount);
+    reject_inputs(
+        |i| i.expected_proposed_validator_count = 9999,
+        GO::WrongProposedValidatorCount,
+    );
 }
 
 #[test]
 fn reject_wrong_rotation_nonce() {
-    reject_inputs(|i| i.expected_rotation_nonce = ROT_NONCE + 1, GO::WrongRotationNonce);
+    reject_inputs(
+        |i| i.expected_rotation_nonce = ROT_NONCE + 1,
+        GO::WrongRotationNonce,
+    );
 }
 
 // ---- Epoch-transition / nonce binding failures ----------------------------
 
 #[test]
 fn reject_wrong_epoch_transition_target() {
-    reject_inputs(|i| i.expected_epoch_transition_target = 9999, GO::WrongEpochTransitionTarget);
+    reject_inputs(
+        |i| i.expected_epoch_transition_target = 9999,
+        GO::WrongEpochTransitionTarget,
+    );
 }
 
 #[test]
 fn reject_wrong_application_nonce() {
-    reject_inputs(|i| i.expected_application_nonce = APP_NONCE + 1, GO::WrongApplicationNonce);
+    reject_inputs(
+        |i| i.expected_application_nonce = APP_NONCE + 1,
+        GO::WrongApplicationNonce,
+    );
 }
 
 #[test]
 fn reject_wrong_live_application_nonce() {
-    reject_inputs(|i| i.expected_live_application_nonce = LIVE_APP_NONCE + 1, GO::WrongLiveApplicationNonce);
+    reject_inputs(
+        |i| i.expected_live_application_nonce = LIVE_APP_NONCE + 1,
+        GO::WrongLiveApplicationNonce,
+    );
 }
 
 // ===========================================================================
@@ -1329,7 +1529,9 @@ fn reject_missing_staged_application_decision() {
 fn reject_unverified_staged_application_decision() {
     let dec = stg_decision_rejected(TrustBundleEnvironment::Devnet, Sc::Add);
     reject_source(
-        GuardedEpochTransitionMutationAuthoritySource::UnverifiedStagedApplicationDecision { decision: dec },
+        GuardedEpochTransitionMutationAuthoritySource::UnverifiedStagedApplicationDecision {
+            decision: dec,
+        },
         GO::UnverifiedStagedApplicationDecisionRejected,
     );
 }
@@ -1338,7 +1540,9 @@ fn reject_unverified_staged_application_decision() {
 fn reject_accepted_staged_application_without_record() {
     let dec = stg_decision_rejected(TrustBundleEnvironment::Devnet, Sc::Add);
     reject_source(
-        GuardedEpochTransitionMutationAuthoritySource::AcceptedStagedApplicationWithoutRecord { decision: dec },
+        GuardedEpochTransitionMutationAuthoritySource::AcceptedStagedApplicationWithoutRecord {
+            decision: dec,
+        },
         GO::VerifiedStagedApplicationDecisionRequired,
     );
 }
@@ -1450,8 +1654,12 @@ fn reject_mainnet_policy_unavailable() {
     let exec = exec_with_policy(
         ProductionGuardedEpochTransitionMutationExecutorPolicy::MainnetProductionGuardedEpochTransitionMutationRequired,
     );
-    let d = exec.evaluate_guarded_epoch_transition_mutation(&c.request, &c.inputs, &empty_replay311());
-    assert_eq!(d.outcome, GO::MainNetProductionGuardedEpochTransitionMutationUnavailable);
+    let d =
+        exec.evaluate_guarded_epoch_transition_mutation(&c.request, &c.inputs, &empty_replay311());
+    assert_eq!(
+        d.outcome,
+        GO::MainNetProductionGuardedEpochTransitionMutationUnavailable
+    );
 }
 
 #[test]
@@ -1461,8 +1669,12 @@ fn reject_mainnet_policy_on_mainnet_domain_unavailable() {
     let exec = exec_with_policy(
         ProductionGuardedEpochTransitionMutationExecutorPolicy::MainnetProductionGuardedEpochTransitionMutationRequired,
     );
-    let d = exec.evaluate_guarded_epoch_transition_mutation(&c.request, &c.inputs, &empty_replay311());
-    assert_eq!(d.outcome, GO::MainNetProductionGuardedEpochTransitionMutationUnavailable);
+    let d =
+        exec.evaluate_guarded_epoch_transition_mutation(&c.request, &c.inputs, &empty_replay311());
+    assert_eq!(
+        d.outcome,
+        GO::MainNetProductionGuardedEpochTransitionMutationUnavailable
+    );
 }
 
 #[test]
@@ -1471,15 +1683,20 @@ fn reject_production_policy_unavailable() {
     let exec = exec_with_policy(
         ProductionGuardedEpochTransitionMutationExecutorPolicy::RequireProductionGuardedEpochTransitionMutation,
     );
-    let d = exec.evaluate_guarded_epoch_transition_mutation(&c.request, &c.inputs, &empty_replay311());
-    assert_eq!(d.outcome, GO::ProductionGuardedEpochTransitionMutationUnavailable);
+    let d =
+        exec.evaluate_guarded_epoch_transition_mutation(&c.request, &c.inputs, &empty_replay311());
+    assert_eq!(
+        d.outcome,
+        GO::ProductionGuardedEpochTransitionMutationUnavailable
+    );
 }
 
 #[test]
 fn reject_disabled_policy() {
     let c = gem_case(TrustBundleEnvironment::Devnet, Sc::Add);
     let exec = exec_with_policy(ProductionGuardedEpochTransitionMutationExecutorPolicy::Disabled);
-    let d = exec.evaluate_guarded_epoch_transition_mutation(&c.request, &c.inputs, &empty_replay311());
+    let d =
+        exec.evaluate_guarded_epoch_transition_mutation(&c.request, &c.inputs, &empty_replay311());
     assert_eq!(d.outcome, GO::Disabled);
 }
 
@@ -1492,8 +1709,12 @@ fn reject_production_boundary_kind_unavailable() {
         ),
         ProductionGuardedEpochTransitionMutationExecutorPolicy::AllowSourceTestGuardedEpochTransitionMutation,
     );
-    let d = exec.evaluate_guarded_epoch_transition_mutation(&c.request, &c.inputs, &empty_replay311());
-    assert_eq!(d.outcome, GO::GuardedEpochTransitionMutationBoundaryUnavailable);
+    let d =
+        exec.evaluate_guarded_epoch_transition_mutation(&c.request, &c.inputs, &empty_replay311());
+    assert_eq!(
+        d.outcome,
+        GO::GuardedEpochTransitionMutationBoundaryUnavailable
+    );
 }
 
 // ===========================================================================
@@ -1509,7 +1730,9 @@ fn reject_replayed_staged_application() {
     let d2 = gem_eval_replay(&c, &replay);
     assert_eq!(
         d2.outcome,
-        GO::StagedApplicationReplayRejected { staged_application_id: d.request_id.clone() }
+        GO::StagedApplicationReplayRejected {
+            staged_application_id: d.request_id.clone()
+        }
     );
     assert!(d2.staged_application_record.is_none());
 }
@@ -1563,22 +1786,34 @@ fn recovery_disabled_under_disabled_policy() {
 
 #[test]
 fn reject_stale_governance_epoch() {
-    reject_inputs(|i| i.min_governance_epoch = GOV_EPOCH + 1, GO::StaleGovernanceEpoch);
+    reject_inputs(
+        |i| i.min_governance_epoch = GOV_EPOCH + 1,
+        GO::StaleGovernanceEpoch,
+    );
 }
 
 #[test]
 fn reject_stale_authority_sequence() {
-    reject_inputs(|i| i.persisted_sequence = Some(SEQ + 1), GO::StaleAuthoritySequence);
+    reject_inputs(
+        |i| i.persisted_sequence = Some(SEQ + 1),
+        GO::StaleAuthoritySequence,
+    );
 }
 
 #[test]
 fn reject_stale_validator_set_epoch() {
-    reject_inputs(|i| i.min_validator_set_epoch = 100_000, GO::StaleValidatorSetEpoch);
+    reject_inputs(
+        |i| i.min_validator_set_epoch = 100_000,
+        GO::StaleValidatorSetEpoch,
+    );
 }
 
 #[test]
 fn reject_stale_validator_set_version() {
-    reject_inputs(|i| i.min_validator_set_version = 100_000, GO::StaleValidatorSetVersion);
+    reject_inputs(
+        |i| i.min_validator_set_version = 100_000,
+        GO::StaleValidatorSetVersion,
+    );
 }
 
 // ===========================================================================
@@ -1590,7 +1825,8 @@ fn fixture_ledger_apply_advances_state() {
     let c = gem_case(TrustBundleEnvironment::Devnet, Sc::Add);
     let d = gem_eval(&c);
     let rec = d.staged_application_record.as_ref().unwrap();
-    let mut ledger = GuardedEpochTransitionFixtureLedger::new(CUR_EPOCH, CUR_VERSION, "start-digest");
+    let mut ledger =
+        GuardedEpochTransitionFixtureLedger::new(CUR_EPOCH, CUR_VERSION, "start-digest");
     let applied = ledger.apply_prepared_execution(rec, &d.staged_application_id);
     assert!(applied);
     assert_eq!(ledger.current_epoch, rec.epoch_transition_target);
@@ -1604,7 +1840,8 @@ fn fixture_ledger_apply_is_idempotent() {
     let c = gem_case(TrustBundleEnvironment::Devnet, Sc::Add);
     let d = gem_eval(&c);
     let rec = d.staged_application_record.as_ref().unwrap();
-    let mut ledger = GuardedEpochTransitionFixtureLedger::new(CUR_EPOCH, CUR_VERSION, "start-digest");
+    let mut ledger =
+        GuardedEpochTransitionFixtureLedger::new(CUR_EPOCH, CUR_VERSION, "start-digest");
     assert!(ledger.apply_prepared_execution(rec, &d.staged_application_id));
     // Re-applying the same execution id is a no-op.
     assert!(!ledger.apply_prepared_execution(rec, &d.staged_application_id));
@@ -1839,8 +2076,12 @@ fn distinct_nonce_yields_distinct_request_id() {
 
 #[test]
 fn transcript_digest_binds_outcome_tag() {
-    let a = production_guarded_epoch_transition_mutation_transcript_digest(1, "rid", "idig", "accepted");
-    let b = production_guarded_epoch_transition_mutation_transcript_digest(1, "rid", "idig", "rejected");
+    let a = production_guarded_epoch_transition_mutation_transcript_digest(
+        1, "rid", "idig", "accepted",
+    );
+    let b = production_guarded_epoch_transition_mutation_transcript_digest(
+        1, "rid", "idig", "rejected",
+    );
     assert_ne!(a, b);
 }
 

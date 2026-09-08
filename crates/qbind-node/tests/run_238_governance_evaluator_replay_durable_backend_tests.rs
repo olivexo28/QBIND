@@ -40,10 +40,9 @@ use qbind_node::pqc_governance_evaluator_replay_durable_backend::{
     restart_durability_is_fixture_snapshot_only,
     validator_set_rotation_remains_unsupported_under_durable_backend, CrashWindow,
     CrashWindowObservation, DurableBackendDecisionExpectations, DurableBackendDecisionInput,
-    DurableBackendKind, DurableConsumeOutcome, DurableMutationCompletion, DurableBackendOutcome,
-    DurableRecordState, FixtureDurableReplayBackend,
-    GovernanceEvaluatorReplayDurableBackendReader, MainnetDurableReplayBackend,
-    ProductionDurableReplayBackend,
+    DurableBackendKind, DurableBackendOutcome, DurableConsumeOutcome, DurableMutationCompletion,
+    DurableRecordState, FixtureDurableReplayBackend, GovernanceEvaluatorReplayDurableBackendReader,
+    MainnetDurableReplayBackend, ProductionDurableReplayBackend,
 };
 use qbind_node::pqc_governance_evaluator_replay_state::{
     evaluate_evaluator_replay_freshness, replay_state_key_digest,
@@ -54,7 +53,9 @@ use qbind_node::pqc_governance_execution_evaluator::{
     DecisionSourceIdentity, EvaluatorRequest, EvaluatorResponse, EvaluatorSourceKind,
     EVALUATOR_SUPPORTED_VERSION,
 };
-use qbind_node::pqc_governance_execution_policy::{GovernanceAction, GovernanceExecutionClass, GovernanceQuorumThreshold};
+use qbind_node::pqc_governance_execution_policy::{
+    GovernanceAction, GovernanceExecutionClass, GovernanceQuorumThreshold,
+};
 use qbind_node::pqc_governance_execution_runtime_arming::GovernanceExecutionRuntimeSurface;
 use qbind_node::pqc_trust_bundle::TrustBundleEnvironment;
 
@@ -213,8 +214,12 @@ fn key_of(input: &DurableBackendDecisionInput) -> String {
 fn a1_first_seen_devnet_records_observed_fresh() {
     let (input, exp) = fresh_devnet();
     let mut backend = FixtureDurableReplayBackend::new(TrustBundleEnvironment::Devnet);
-    let outcome =
-        observe_decision_if_absent(DurableBackendKind::FixtureDevNet, &input, &exp, &mut backend);
+    let outcome = observe_decision_if_absent(
+        DurableBackendKind::FixtureDevNet,
+        &input,
+        &exp,
+        &mut backend,
+    );
     assert_eq!(outcome, DurableBackendOutcome::ProceedFirstSeen);
     assert_eq!(
         backend.read_durable_state(&key_of(&input)),
@@ -233,8 +238,12 @@ fn a2_first_seen_testnet_records_observed_fresh() {
         150,
     );
     let mut backend = FixtureDurableReplayBackend::new(TrustBundleEnvironment::Testnet);
-    let outcome =
-        observe_decision_if_absent(DurableBackendKind::FixtureTestNet, &input, &exp, &mut backend);
+    let outcome = observe_decision_if_absent(
+        DurableBackendKind::FixtureTestNet,
+        &input,
+        &exp,
+        &mut backend,
+    );
     assert_eq!(outcome, DurableBackendOutcome::ProceedFirstSeen);
     assert_eq!(
         backend.read_durable_state(&key_of(&input)),
@@ -246,7 +255,12 @@ fn a2_first_seen_testnet_records_observed_fresh() {
 fn a3_known_fresh_reads_proceed_known_fresh() {
     let (input, exp) = fresh_devnet();
     let mut backend = FixtureDurableReplayBackend::new(TrustBundleEnvironment::Devnet);
-    observe_decision_if_absent(DurableBackendKind::FixtureDevNet, &input, &exp, &mut backend);
+    observe_decision_if_absent(
+        DurableBackendKind::FixtureDevNet,
+        &input,
+        &exp,
+        &mut backend,
+    );
     let outcome = read_decision_state(DurableBackendKind::FixtureDevNet, &input, &exp, &backend);
     assert_eq!(outcome, DurableBackendOutcome::ProceedKnownFresh);
     assert!(outcome.authorizes_proceed());
@@ -263,8 +277,12 @@ fn a4_not_yet_effective_is_deferred_and_not_mutation_approval() {
         50, // canonical < effective
     );
     let mut backend = FixtureDurableReplayBackend::new(TrustBundleEnvironment::Devnet);
-    let observe =
-        observe_decision_if_absent(DurableBackendKind::FixtureDevNet, &input, &exp, &mut backend);
+    let observe = observe_decision_if_absent(
+        DurableBackendKind::FixtureDevNet,
+        &input,
+        &exp,
+        &mut backend,
+    );
     assert_eq!(observe, DurableBackendOutcome::ProceedDeferred);
     assert!(observe.is_deferred());
     assert!(!observe.authorizes_proceed());
@@ -287,8 +305,12 @@ fn a5_expired_is_fail_closed_expired() {
         250, // canonical >= expiry
     );
     let mut backend = FixtureDurableReplayBackend::new(TrustBundleEnvironment::Devnet);
-    let observe =
-        observe_decision_if_absent(DurableBackendKind::FixtureDevNet, &input, &exp, &mut backend);
+    let observe = observe_decision_if_absent(
+        DurableBackendKind::FixtureDevNet,
+        &input,
+        &exp,
+        &mut backend,
+    );
     assert_eq!(observe, DurableBackendOutcome::FailClosedExpired);
     assert!(observe.is_fail_closed());
     let read = read_decision_state(DurableBackendKind::FixtureDevNet, &input, &exp, &backend);
@@ -306,8 +328,12 @@ fn a6_stale_is_fail_closed_stale() {
         150,
     );
     let mut backend = FixtureDurableReplayBackend::new(TrustBundleEnvironment::Devnet);
-    let observe =
-        observe_decision_if_absent(DurableBackendKind::FixtureDevNet, &input, &exp, &mut backend);
+    let observe = observe_decision_if_absent(
+        DurableBackendKind::FixtureDevNet,
+        &input,
+        &exp,
+        &mut backend,
+    );
     assert_eq!(observe, DurableBackendOutcome::FailClosedStale);
     let read = read_decision_state(DurableBackendKind::FixtureDevNet, &input, &exp, &backend);
     assert_eq!(read, DurableBackendOutcome::FailClosedStale);
@@ -317,7 +343,12 @@ fn a6_stale_is_fail_closed_stale() {
 fn a7_explicit_consume_after_success_marks_consumed() {
     let (input, exp) = fresh_devnet();
     let mut backend = FixtureDurableReplayBackend::new(TrustBundleEnvironment::Devnet);
-    observe_decision_if_absent(DurableBackendKind::FixtureDevNet, &input, &exp, &mut backend);
+    observe_decision_if_absent(
+        DurableBackendKind::FixtureDevNet,
+        &input,
+        &exp,
+        &mut backend,
+    );
     let outcome = mark_consumed_after_success(
         DurableBackendKind::FixtureDevNet,
         &input,
@@ -333,7 +364,12 @@ fn a7_explicit_consume_after_success_marks_consumed() {
 fn a8_same_decision_after_consume_reads_consumed_fail_closed() {
     let (input, exp) = fresh_devnet();
     let mut backend = FixtureDurableReplayBackend::new(TrustBundleEnvironment::Devnet);
-    observe_decision_if_absent(DurableBackendKind::FixtureDevNet, &input, &exp, &mut backend);
+    observe_decision_if_absent(
+        DurableBackendKind::FixtureDevNet,
+        &input,
+        &exp,
+        &mut backend,
+    );
     mark_consumed_after_success(
         DurableBackendKind::FixtureDevNet,
         &input,
@@ -343,8 +379,12 @@ fn a8_same_decision_after_consume_reads_consumed_fail_closed() {
     );
     let read = read_decision_state(DurableBackendKind::FixtureDevNet, &input, &exp, &backend);
     assert_eq!(read, DurableBackendOutcome::FailClosedConsumed);
-    let observe_again =
-        observe_decision_if_absent(DurableBackendKind::FixtureDevNet, &input, &exp, &mut backend);
+    let observe_again = observe_decision_if_absent(
+        DurableBackendKind::FixtureDevNet,
+        &input,
+        &exp,
+        &mut backend,
+    );
     assert_eq!(observe_again, DurableBackendOutcome::FailClosedConsumed);
 }
 
@@ -352,7 +392,12 @@ fn a8_same_decision_after_consume_reads_consumed_fail_closed() {
 fn a9_read_only_validation_does_not_mark_consumed() {
     let (input, exp) = fresh_devnet();
     let mut backend = FixtureDurableReplayBackend::new(TrustBundleEnvironment::Devnet);
-    observe_decision_if_absent(DurableBackendKind::FixtureDevNet, &input, &exp, &mut backend);
+    observe_decision_if_absent(
+        DurableBackendKind::FixtureDevNet,
+        &input,
+        &exp,
+        &mut backend,
+    );
     for _ in 0..3 {
         let read = read_decision_state(DurableBackendKind::FixtureDevNet, &input, &exp, &backend);
         assert_eq!(read, DurableBackendOutcome::ProceedKnownFresh);
@@ -364,7 +409,12 @@ fn a9_read_only_validation_does_not_mark_consumed() {
 fn a10_observe_only_survives_restart_snapshot() {
     let (input, exp) = fresh_devnet();
     let mut backend = FixtureDurableReplayBackend::new(TrustBundleEnvironment::Devnet);
-    observe_decision_if_absent(DurableBackendKind::FixtureDevNet, &input, &exp, &mut backend);
+    observe_decision_if_absent(
+        DurableBackendKind::FixtureDevNet,
+        &input,
+        &exp,
+        &mut backend,
+    );
     let snapshot = backend.restart_snapshot();
     assert_eq!(snapshot.len(), 1);
     let restarted = FixtureDurableReplayBackend::from_snapshot(snapshot);
@@ -378,7 +428,12 @@ fn a10_observe_only_survives_restart_snapshot() {
 fn a11_consumed_state_survives_restart_snapshot() {
     let (input, exp) = fresh_devnet();
     let mut backend = FixtureDurableReplayBackend::new(TrustBundleEnvironment::Devnet);
-    observe_decision_if_absent(DurableBackendKind::FixtureDevNet, &input, &exp, &mut backend);
+    observe_decision_if_absent(
+        DurableBackendKind::FixtureDevNet,
+        &input,
+        &exp,
+        &mut backend,
+    );
     mark_consumed_after_success(
         DurableBackendKind::FixtureDevNet,
         &input,
@@ -396,7 +451,12 @@ fn a11_consumed_state_survives_restart_snapshot() {
 fn a12_rollback_after_observe_does_not_mark_consumed() {
     let (input, exp) = fresh_devnet();
     let mut backend = FixtureDurableReplayBackend::new(TrustBundleEnvironment::Devnet);
-    observe_decision_if_absent(DurableBackendKind::FixtureDevNet, &input, &exp, &mut backend);
+    observe_decision_if_absent(
+        DurableBackendKind::FixtureDevNet,
+        &input,
+        &exp,
+        &mut backend,
+    );
     let outcome = mark_consumed_after_success(
         DurableBackendKind::FixtureDevNet,
         &input,
@@ -412,7 +472,12 @@ fn a12_rollback_after_observe_does_not_mark_consumed() {
 fn a13_apply_failed_after_observe_does_not_mark_consumed() {
     let (input, exp) = fresh_devnet();
     let mut backend = FixtureDurableReplayBackend::new(TrustBundleEnvironment::Devnet);
-    observe_decision_if_absent(DurableBackendKind::FixtureDevNet, &input, &exp, &mut backend);
+    observe_decision_if_absent(
+        DurableBackendKind::FixtureDevNet,
+        &input,
+        &exp,
+        &mut backend,
+    );
     let outcome = mark_consumed_after_success(
         DurableBackendKind::FixtureDevNet,
         &input,
@@ -445,7 +510,12 @@ fn a14_after_mutation_before_consume_window_is_typed_and_not_silently_approved()
 fn a15_after_consume_window_reads_consumed_fail_closed_for_repeat() {
     let (input, exp) = fresh_devnet();
     let mut backend = FixtureDurableReplayBackend::new(TrustBundleEnvironment::Devnet);
-    observe_decision_if_absent(DurableBackendKind::FixtureDevNet, &input, &exp, &mut backend);
+    observe_decision_if_absent(
+        DurableBackendKind::FixtureDevNet,
+        &input,
+        &exp,
+        &mut backend,
+    );
     mark_consumed_after_success(
         DurableBackendKind::FixtureDevNet,
         &input,
@@ -470,10 +540,16 @@ fn a15_after_consume_window_reads_consumed_fail_closed_for_repeat() {
 #[test]
 fn a16_durable_backend_key_digest_is_deterministic() {
     let (input, _) = fresh_devnet();
-    assert_eq!(durable_backend_key_digest(&input), durable_backend_key_digest(&input));
+    assert_eq!(
+        durable_backend_key_digest(&input),
+        durable_backend_key_digest(&input)
+    );
     let mut other = input.clone();
     other.replay_nonce = "different-nonce".to_string();
-    assert_ne!(durable_backend_key_digest(&input), durable_backend_key_digest(&other));
+    assert_ne!(
+        durable_backend_key_digest(&input),
+        durable_backend_key_digest(&other)
+    );
 }
 
 #[test]
@@ -609,8 +685,12 @@ fn assert_wrong_binding_rejected(mut tamper: impl FnMut(&mut DurableBackendDecis
     let (mut input, exp) = fresh_devnet();
     tamper(&mut input);
     let mut backend = FixtureDurableReplayBackend::new(TrustBundleEnvironment::Devnet);
-    let outcome =
-        observe_decision_if_absent(DurableBackendKind::FixtureDevNet, &input, &exp, &mut backend);
+    let outcome = observe_decision_if_absent(
+        DurableBackendKind::FixtureDevNet,
+        &input,
+        &exp,
+        &mut backend,
+    );
     assert_eq!(outcome, DurableBackendOutcome::FailClosedMalformedRecord);
     assert!(backend.is_empty());
 }
@@ -723,9 +803,18 @@ fn r20_malformed_backend_record_rejected() {
 fn r21_replay_detected_rejected() {
     let (input, exp) = fresh_devnet();
     let mut backend = FixtureDurableReplayBackend::new(TrustBundleEnvironment::Devnet);
-    observe_decision_if_absent(DurableBackendKind::FixtureDevNet, &input, &exp, &mut backend);
-    let again =
-        observe_decision_if_absent(DurableBackendKind::FixtureDevNet, &input, &exp, &mut backend);
+    observe_decision_if_absent(
+        DurableBackendKind::FixtureDevNet,
+        &input,
+        &exp,
+        &mut backend,
+    );
+    let again = observe_decision_if_absent(
+        DurableBackendKind::FixtureDevNet,
+        &input,
+        &exp,
+        &mut backend,
+    );
     assert_eq!(again, DurableBackendOutcome::FailClosedReplay);
 }
 
@@ -733,7 +822,12 @@ fn r21_replay_detected_rejected() {
 fn r22_consumed_decision_rejected() {
     let (input, exp) = fresh_devnet();
     let mut backend = FixtureDurableReplayBackend::new(TrustBundleEnvironment::Devnet);
-    observe_decision_if_absent(DurableBackendKind::FixtureDevNet, &input, &exp, &mut backend);
+    observe_decision_if_absent(
+        DurableBackendKind::FixtureDevNet,
+        &input,
+        &exp,
+        &mut backend,
+    );
     mark_consumed_after_success(
         DurableBackendKind::FixtureDevNet,
         &input,
@@ -741,8 +835,12 @@ fn r22_consumed_decision_rejected() {
         DurableMutationCompletion::AppliedSuccessfully,
         &mut backend,
     );
-    let again =
-        observe_decision_if_absent(DurableBackendKind::FixtureDevNet, &input, &exp, &mut backend);
+    let again = observe_decision_if_absent(
+        DurableBackendKind::FixtureDevNet,
+        &input,
+        &exp,
+        &mut backend,
+    );
     assert_eq!(again, DurableBackendOutcome::FailClosedConsumed);
 }
 
@@ -750,12 +848,21 @@ fn r22_consumed_decision_rejected() {
 fn r23_superseded_decision_rejected() {
     let (input, exp) = fresh_devnet();
     let mut backend = FixtureDurableReplayBackend::new(TrustBundleEnvironment::Devnet);
-    observe_decision_if_absent(DurableBackendKind::FixtureDevNet, &input, &exp, &mut backend);
+    observe_decision_if_absent(
+        DurableBackendKind::FixtureDevNet,
+        &input,
+        &exp,
+        &mut backend,
+    );
     assert!(backend.mark_superseded(&key_of(&input)));
     let read = read_decision_state(DurableBackendKind::FixtureDevNet, &input, &exp, &backend);
     assert_eq!(read, DurableBackendOutcome::FailClosedSuperseded);
-    let observe =
-        observe_decision_if_absent(DurableBackendKind::FixtureDevNet, &input, &exp, &mut backend);
+    let observe = observe_decision_if_absent(
+        DurableBackendKind::FixtureDevNet,
+        &input,
+        &exp,
+        &mut backend,
+    );
     assert_eq!(observe, DurableBackendOutcome::FailClosedSuperseded);
 }
 
@@ -802,7 +909,12 @@ fn r26_mainnet_backend_unavailable_refused_rejected() {
 fn r27_compare_and_mark_consumed_wrong_expected_state_rejected() {
     let (input, exp) = fresh_devnet();
     let mut backend = FixtureDurableReplayBackend::new(TrustBundleEnvironment::Devnet);
-    observe_decision_if_absent(DurableBackendKind::FixtureDevNet, &input, &exp, &mut backend);
+    observe_decision_if_absent(
+        DurableBackendKind::FixtureDevNet,
+        &input,
+        &exp,
+        &mut backend,
+    );
     // Current state is ObservedFresh; expect ObservedDeferred -> rejected.
     let outcome = compare_and_mark_consumed(
         DurableBackendKind::FixtureDevNet,
@@ -846,7 +958,12 @@ fn r28_consume_before_observe_rejected() {
 fn r29_consume_before_successful_mutation_rejected() {
     let (input, exp) = fresh_devnet();
     let mut backend = FixtureDurableReplayBackend::new(TrustBundleEnvironment::Devnet);
-    observe_decision_if_absent(DurableBackendKind::FixtureDevNet, &input, &exp, &mut backend);
+    observe_decision_if_absent(
+        DurableBackendKind::FixtureDevNet,
+        &input,
+        &exp,
+        &mut backend,
+    );
     for completion in [
         DurableMutationCompletion::NotAttempted,
         DurableMutationCompletion::AuthorizedButNotApplied,
@@ -858,7 +975,10 @@ fn r29_consume_before_successful_mutation_rejected() {
             completion,
             &mut backend,
         );
-        assert_eq!(outcome, DurableConsumeOutcome::RejectedNotSuccessfulMutation);
+        assert_eq!(
+            outcome,
+            DurableConsumeOutcome::RejectedNotSuccessfulMutation
+        );
     }
     assert!(!backend.is_consumed(&key_of(&input)));
 }
@@ -867,7 +987,12 @@ fn r29_consume_before_successful_mutation_rejected() {
 fn r30_consume_after_failed_apply_rejected() {
     let (input, exp) = fresh_devnet();
     let mut backend = FixtureDurableReplayBackend::new(TrustBundleEnvironment::Devnet);
-    observe_decision_if_absent(DurableBackendKind::FixtureDevNet, &input, &exp, &mut backend);
+    observe_decision_if_absent(
+        DurableBackendKind::FixtureDevNet,
+        &input,
+        &exp,
+        &mut backend,
+    );
     let outcome = mark_consumed_after_success(
         DurableBackendKind::FixtureDevNet,
         &input,
@@ -883,7 +1008,12 @@ fn r30_consume_after_failed_apply_rejected() {
 fn r31_consume_after_rollback_rejected() {
     let (input, exp) = fresh_devnet();
     let mut backend = FixtureDurableReplayBackend::new(TrustBundleEnvironment::Devnet);
-    observe_decision_if_absent(DurableBackendKind::FixtureDevNet, &input, &exp, &mut backend);
+    observe_decision_if_absent(
+        DurableBackendKind::FixtureDevNet,
+        &input,
+        &exp,
+        &mut backend,
+    );
     let outcome = mark_consumed_after_success(
         DurableBackendKind::FixtureDevNet,
         &input,
@@ -921,8 +1051,12 @@ fn r36_rejection_produces_no_mutation() {
     let (mut input, exp) = fresh_devnet();
     input.replay_nonce = "tampered".to_string();
     let mut backend = FixtureDurableReplayBackend::new(TrustBundleEnvironment::Devnet);
-    let outcome =
-        observe_decision_if_absent(DurableBackendKind::FixtureDevNet, &input, &exp, &mut backend);
+    let outcome = observe_decision_if_absent(
+        DurableBackendKind::FixtureDevNet,
+        &input,
+        &exp,
+        &mut backend,
+    );
     assert_eq!(outcome, DurableBackendOutcome::FailClosedMalformedRecord);
     assert!(backend.is_empty());
 
@@ -992,9 +1126,11 @@ fn r37_mainnet_peer_driven_apply_refused_even_when_fixture_says_fresh() {
         &mut mn_backend,
     );
     assert_eq!(consume, DurableConsumeOutcome::FailClosedMainNetUnavailable);
-    assert!(mainnet_peer_driven_apply_remains_refused_under_durable_backend(
-        TrustBundleEnvironment::Mainnet
-    ));
+    assert!(
+        mainnet_peer_driven_apply_remains_refused_under_durable_backend(
+            TrustBundleEnvironment::Mainnet
+        )
+    );
 }
 
 // ===========================================================================
@@ -1046,7 +1182,10 @@ fn crash_window_rollback_after_observe() {
     obs.observed = true;
     obs.mutation_attempted = true;
     obs.rolled_back = true;
-    assert_eq!(classify_crash_window(&obs), CrashWindow::RollbackAfterObserve);
+    assert_eq!(
+        classify_crash_window(&obs),
+        CrashWindow::RollbackAfterObserve
+    );
 }
 
 #[test]

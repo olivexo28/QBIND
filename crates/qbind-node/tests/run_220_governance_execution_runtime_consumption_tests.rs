@@ -379,7 +379,10 @@ fn r2_invalid_env_selector_fails_closed() {
 #[test]
 fn r3_unrelated_env_does_not_arm() {
     let _g = EnvGuard::set(None);
-    std::env::set_var("QBIND_SOME_UNRELATED_FLAG_220", "fixture-governance-allowed");
+    std::env::set_var(
+        "QBIND_SOME_UNRELATED_FLAG_220",
+        "fixture-governance-allowed",
+    );
     assert!(arming_from_cli(None).is_disabled());
     std::env::remove_var("QBIND_SOME_UNRELATED_FLAG_220");
 }
@@ -392,7 +395,10 @@ fn r3_unrelated_env_does_not_arm() {
 // / TestNet governance-execution material (proceed-accepted).
 #[test]
 fn a2_a3_reload_check_consumes_and_accepts_fixture() {
-    for env in [TrustBundleEnvironment::Devnet, TrustBundleEnvironment::Testnet] {
+    for env in [
+        TrustBundleEnvironment::Devnet,
+        TrustBundleEnvironment::Testnet,
+    ] {
         let _g = EnvGuard::set(None);
         let arming = arming_from_cli(Some("fixture-governance-allowed"));
         let td = trust_domain(env);
@@ -424,8 +430,12 @@ fn a4_reload_apply_consumes_and_accepts() {
     let td = trust_domain(env);
     let exp = rotate_expectations(env);
     let loaded = available_from(&rotate_input(env), &rotate_decision());
-    let consumption =
-        arming.consume_surface(GovernanceExecutionRuntimeSurface::ReloadApply, &td, &exp, &loaded);
+    let consumption = arming.consume_surface(
+        GovernanceExecutionRuntimeSurface::ReloadApply,
+        &td,
+        &exp,
+        &loaded,
+    );
     assert!(consumption.is_proceed());
 }
 
@@ -464,7 +474,12 @@ fn a8_live_inbound_0x05_consumes_policy() {
     let exp = rotate_expectations(env);
     let loaded = available_from(&rotate_input(env), &rotate_decision());
     assert!(arming
-        .consume_surface(GovernanceExecutionRuntimeSurface::LiveInbound0x05, &td, &exp, &loaded)
+        .consume_surface(
+            GovernanceExecutionRuntimeSurface::LiveInbound0x05,
+            &td,
+            &exp,
+            &loaded
+        )
         .is_proceed());
 }
 
@@ -513,8 +528,12 @@ fn a12_production_required_consumes_unavailable_fail_closed() {
     let mut input = rotate_input(env);
     input.governance_class = GovernanceExecutionClass::ProductionGovernanceUnavailable;
     let loaded = available_from(&input, &rotate_decision());
-    let consumption =
-        arming.consume_surface(GovernanceExecutionRuntimeSurface::ReloadCheck, &td, &exp, &loaded);
+    let consumption = arming.consume_surface(
+        GovernanceExecutionRuntimeSurface::ReloadCheck,
+        &td,
+        &exp,
+        &loaded,
+    );
     assert!(consumption.is_fail_closed());
     assert_eq!(
         consumption.rejecting_outcome().unwrap().callsite_outcome(),
@@ -704,7 +723,9 @@ fn consumed_config_reaches_all_seven_surfaces() {
     for surface in GovernanceExecutionRuntimeSurface::ALL {
         // Every non-MainNet surface proceeds on valid fixture material.
         assert!(
-            arming.consume_surface(surface, &td, &exp, &loaded).is_proceed(),
+            arming
+                .consume_surface(surface, &td, &exp, &loaded)
+                .is_proceed(),
             "surface {} should consume-proceed",
             surface.tag()
         );
@@ -737,7 +758,10 @@ fn payload_routing_reaches_run_211_evaluator_under_consumed_policy() {
 #[test]
 fn r4_r5_absent_material_fails_closed() {
     let env = TrustBundleEnvironment::Devnet;
-    for policy in ["fixture-governance-allowed", "production-governance-required"] {
+    for policy in [
+        "fixture-governance-allowed",
+        "production-governance-required",
+    ] {
         let _g = EnvGuard::set(None);
         let arming = arming_from_cli(Some(policy));
         let consumption = arming.consume_surface(
@@ -881,8 +905,14 @@ fn r13_to_r22_evaluator_rejections_fail_closed() {
     let arming = arming_from_cli(Some("fixture-governance-allowed"));
     let td = trust_domain(env);
 
-    let consume = |exp: &GovernanceExecutionExpectations, loaded: &GovernanceExecutionLoadStatus| {
-        arming.consume_surface(GovernanceExecutionRuntimeSurface::ReloadCheck, &td, exp, loaded)
+    let consume = |exp: &GovernanceExecutionExpectations,
+                   loaded: &GovernanceExecutionLoadStatus| {
+        arming.consume_surface(
+            GovernanceExecutionRuntimeSurface::ReloadCheck,
+            &td,
+            exp,
+            loaded,
+        )
     };
 
     // R13 wrong lifecycle action.
@@ -891,10 +921,13 @@ fn r13_to_r22_evaluator_rejections_fail_closed() {
         d.authorized_lifecycle_action = LocalLifecycleAction::Revoke;
         d.authorized_governance_action = GovernanceAction::Revoke;
         assert!(matches!(
-            consume(&rotate_expectations(env), &available_from(&rotate_input(env), &d))
-                .rejecting_outcome()
-                .unwrap()
-                .callsite_outcome(),
+            consume(
+                &rotate_expectations(env),
+                &available_from(&rotate_input(env), &d)
+            )
+            .rejecting_outcome()
+            .unwrap()
+            .callsite_outcome(),
             Some(GovernanceExecutionOutcome::WrongLifecycleAction { .. })
         ));
     }
@@ -931,10 +964,13 @@ fn r13_to_r22_evaluator_rejections_fail_closed() {
         let mut input = rotate_input(env);
         input.governance_proof_digest = "wrong".to_string();
         assert!(matches!(
-            consume(&rotate_expectations(env), &available_from(&input, &rotate_decision()))
-                .rejecting_outcome()
-                .unwrap()
-                .callsite_outcome(),
+            consume(
+                &rotate_expectations(env),
+                &available_from(&input, &rotate_decision())
+            )
+            .rejecting_outcome()
+            .unwrap()
+            .callsite_outcome(),
             Some(GovernanceExecutionOutcome::WrongGovernanceProofDigest { .. })
         ));
     }
@@ -943,10 +979,13 @@ fn r13_to_r22_evaluator_rejections_fail_closed() {
         let mut exp = rotate_expectations(env);
         exp.now_epoch = 250;
         assert!(matches!(
-            consume(&exp, &available_from(&rotate_input(env), &rotate_decision()))
-                .rejecting_outcome()
-                .unwrap()
-                .callsite_outcome(),
+            consume(
+                &exp,
+                &available_from(&rotate_input(env), &rotate_decision())
+            )
+            .rejecting_outcome()
+            .unwrap()
+            .callsite_outcome(),
             Some(GovernanceExecutionOutcome::ExpiredDecision { .. })
         ));
     }
@@ -955,10 +994,13 @@ fn r13_to_r22_evaluator_rejections_fail_closed() {
         let mut exp = rotate_expectations(env);
         exp.expected_replay_nonce = "fresh".to_string();
         assert_eq!(
-            consume(&exp, &available_from(&rotate_input(env), &rotate_decision()))
-                .rejecting_outcome()
-                .unwrap()
-                .callsite_outcome(),
+            consume(
+                &exp,
+                &available_from(&rotate_input(env), &rotate_decision())
+            )
+            .rejecting_outcome()
+            .unwrap()
+            .callsite_outcome(),
             Some(&GovernanceExecutionOutcome::StaleOrReplayedDecision)
         );
     }
@@ -967,10 +1009,13 @@ fn r13_to_r22_evaluator_rejections_fail_closed() {
         let mut input = rotate_input(env);
         input.quorum = GovernanceQuorumThreshold::new(1, 5, 3);
         assert!(matches!(
-            consume(&rotate_expectations(env), &available_from(&input, &rotate_decision()))
-                .rejecting_outcome()
-                .unwrap()
-                .callsite_outcome(),
+            consume(
+                &rotate_expectations(env),
+                &available_from(&input, &rotate_decision())
+            )
+            .rejecting_outcome()
+            .unwrap()
+            .callsite_outcome(),
             Some(GovernanceExecutionOutcome::QuorumThresholdInsufficient { .. })
         ));
     }
@@ -993,10 +1038,13 @@ fn r13_to_r22_evaluator_rejections_fail_closed() {
         let mut input = rotate_input(env);
         input.governance_action = GovernanceAction::ValidatorSetRotationRequest;
         assert_eq!(
-            consume(&rotate_expectations(env), &available_from(&input, &rotate_decision()))
-                .rejecting_outcome()
-                .unwrap()
-                .callsite_outcome(),
+            consume(
+                &rotate_expectations(env),
+                &available_from(&input, &rotate_decision())
+            )
+            .rejecting_outcome()
+            .unwrap()
+            .callsite_outcome(),
             Some(&GovernanceExecutionOutcome::ValidatorSetRotationUnsupported)
         );
     }
@@ -1005,10 +1053,13 @@ fn r13_to_r22_evaluator_rejections_fail_closed() {
         let mut input = rotate_input(env);
         input.governance_action = GovernanceAction::PolicyChangeRequest;
         assert_eq!(
-            consume(&rotate_expectations(env), &available_from(&input, &rotate_decision()))
-                .rejecting_outcome()
-                .unwrap()
-                .callsite_outcome(),
+            consume(
+                &rotate_expectations(env),
+                &available_from(&input, &rotate_decision())
+            )
+            .rejecting_outcome()
+            .unwrap()
+            .callsite_outcome(),
             Some(&GovernanceExecutionOutcome::PolicyChangeActionUnsupported)
         );
     }
@@ -1055,7 +1106,12 @@ fn r25_validation_only_rejection_is_pure() {
     let mut decision = rotate_decision();
     decision.approved = false;
     let loaded = available_from(&rotate_input(env), &decision);
-    let a = arming.consume_surface(GovernanceExecutionRuntimeSurface::ReloadCheck, &td, &exp, &loaded);
+    let a = arming.consume_surface(
+        GovernanceExecutionRuntimeSurface::ReloadCheck,
+        &td,
+        &exp,
+        &loaded,
+    );
     let b = arming.consume_surface(
         GovernanceExecutionRuntimeSurface::LocalPeerCandidateCheck,
         &td,
@@ -1126,8 +1182,10 @@ fn compatibility_with_sibling_run_selectors() {
             qbind_node::pqc_authority_custody::AuthorityCustodyPolicy::Disabled
         );
         assert_eq!(
-            qbind_node::pqc_remote_signer_policy_surface::remote_signer_policy_from_cli_or_env(None)
-                .unwrap(),
+            qbind_node::pqc_remote_signer_policy_surface::remote_signer_policy_from_cli_or_env(
+                None
+            )
+            .unwrap(),
             qbind_node::pqc_remote_authority_signer::RemoteSignerPolicy::Disabled
         );
         assert_eq!(

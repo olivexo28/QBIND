@@ -38,13 +38,12 @@ use qbind_node::pqc_governance_modeled_durable_completion_attestation_projection
     modeled_attestation_policy_change_unsupported,
     modeled_attestation_production_mainnet_unavailable,
     modeled_attestation_record_required_before_durable_completion_attested,
-    modeled_attestation_rejection_is_non_mutating,
-    modeled_attestation_rollback_never_attests,
+    modeled_attestation_rejection_is_non_mutating, modeled_attestation_rollback_never_attests,
     modeled_attestation_sink_receipt_required_before_attestation,
     modeled_attestation_validator_set_rotation_unsupported,
     project_finalization_outcome_to_attestation_intent,
-    recover_modeled_durable_completion_attestation_window,
-    DurableCompletionAttestationIntent, FixtureModeledDurableCompletionAttestor,
+    recover_modeled_durable_completion_attestation_window, DurableCompletionAttestationIntent,
+    FixtureModeledDurableCompletionAttestor,
     GovernanceModeledDurableCompletionAttestationExpectations,
     GovernanceModeledDurableCompletionAttestationInput,
     GovernanceModeledDurableCompletionAttestationOutcome,
@@ -1413,7 +1412,10 @@ fn recover(
 
 #[test]
 fn recovery_before_pipeline_window_fails_closed_no_attestation() {
-    let outcome = recover(ModeledDurableCompletionAttestationWindow::BeforePipeline, None);
+    let outcome = recover(
+        ModeledDurableCompletionAttestationWindow::BeforePipeline,
+        None,
+    );
     assert_eq!(
         outcome,
         GovernanceModeledDurableCompletionAttestationOutcome::FinalizationDidNotFinalizeNoAttestation
@@ -1906,9 +1908,11 @@ fn invariant_helpers_hold() {
     assert!(modeled_attestation_mainnet_peer_driven_apply_refused_first(
         TrustBundleEnvironment::Mainnet
     ));
-    assert!(!modeled_attestation_mainnet_peer_driven_apply_refused_first(
-        TrustBundleEnvironment::Devnet
-    ));
+    assert!(
+        !modeled_attestation_mainnet_peer_driven_apply_refused_first(
+            TrustBundleEnvironment::Devnet
+        )
+    );
     assert!(modeled_attestation_production_mainnet_unavailable());
     assert!(modeled_attestation_validator_set_rotation_unsupported());
     assert!(modeled_attestation_policy_change_unsupported());

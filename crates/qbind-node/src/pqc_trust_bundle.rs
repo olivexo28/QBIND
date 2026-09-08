@@ -89,9 +89,7 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
-use qbind_crypto::{
-    MlDsa44Backend, ML_DSA_44_PUBLIC_KEY_SIZE, ML_DSA_44_SIGNATURE_SIZE,
-};
+use qbind_crypto::{MlDsa44Backend, ML_DSA_44_PUBLIC_KEY_SIZE, ML_DSA_44_SIGNATURE_SIZE};
 use qbind_types::{ChainId, NetworkEnvironment};
 
 use crate::pqc_root_config::{PqcTrustedRoot, PQC_TRANSPORT_SUITE_ML_DSA_44};
@@ -99,16 +97,13 @@ use crate::pqc_root_config::{PqcTrustedRoot, PQC_TRANSPORT_SUITE_ML_DSA_44};
 /// Domain separator for ML-DSA-44 trust-bundle signatures. Distinct
 /// from the bundle fingerprint domain separator (`QBIND:pqc-trust-bundle-fp:v1`)
 /// so a fingerprint hash and a signature preimage can never collide.
-pub const TRUST_BUNDLE_SIGNATURE_DOMAIN_SEPARATOR: &[u8] =
-    b"QBIND:pqc-trust-bundle-signature:v1";
+pub const TRUST_BUNDLE_SIGNATURE_DOMAIN_SEPARATOR: &[u8] = b"QBIND:pqc-trust-bundle-signature:v1";
 
 /// Environment label embedded in a bundle. Mirrors
 /// [`qbind_types::NetworkEnvironment`] but is serialised in a
 /// canonical lowercase form so that bundle files written for one
 /// runtime version are stable across versions.
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize,
-)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum TrustBundleEnvironment {
     Devnet,
@@ -159,9 +154,7 @@ impl std::fmt::Display for TrustBundleEnvironment {
 
 /// Lifecycle status of a single trust-anchor root entry. Mirrors the
 /// task definition exactly.
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize,
-)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum RootStatus {
     /// Root is in active rotation and accepted for cert verification.
@@ -460,9 +453,7 @@ impl BundleSigningKeySet {
     pub fn push_spec(&mut self, spec: &str) -> Result<(), BundleSigningKeySpecError> {
         let key = parse_bundle_signing_key_spec(spec)?;
         if self.keys.iter().any(|k| k.key_id_bytes == key.key_id_bytes) {
-            return Err(BundleSigningKeySpecError::DuplicateKeyId(
-                key.key_id_hex(),
-            ));
+            return Err(BundleSigningKeySpecError::DuplicateKeyId(key.key_id_hex()));
         }
         self.keys.push(key);
         Ok(())
@@ -587,10 +578,7 @@ pub enum TrustBundleError {
     /// 64-bit lowercase-hex representation.
     InvalidChainIdFormat(String),
     /// Runtime chain id did not match `bundle.chain_id`.
-    WrongChainId {
-        expected: ChainId,
-        found: ChainId,
-    },
+    WrongChainId { expected: ChainId, found: ChainId },
     /// `valid_from > valid_until` (inverted window).
     InvalidBundleValidityWindow,
     /// `validation_time < valid_from`.
@@ -635,7 +623,10 @@ pub enum TrustBundleError {
     MissingSigningKey { signing_key_id: String },
     /// Run 051: bundle signature suite is not supported. Today only
     /// `100` (ML-DSA-44) is accepted.
-    UnsupportedSignatureSuite { signing_key_id: String, suite_id: u8 },
+    UnsupportedSignatureSuite {
+        signing_key_id: String,
+        suite_id: u8,
+    },
     /// Run 051: bundle signature suite differs from the configured
     /// signing key's suite (cross-suite confusion). Fail closed.
     SignatureSuiteMismatch {
@@ -663,10 +654,7 @@ pub enum TrustBundleError {
     /// `leaf_cert_fingerprint` field (not 64 lowercase-hex chars, or
     /// hex-decode failure). Refusing the whole bundle catches operator
     /// typos rather than silently dropping the entry.
-    MalformedLeafFingerprint {
-        root_id: String,
-        reason: String,
-    },
+    MalformedLeafFingerprint { root_id: String, reason: String },
     /// Run 057: structurally valid + signed bundle was refused
     /// because its declared `activation_height` / `activation_epoch`
     /// gate is not yet satisfied at the supplied runtime context,
@@ -955,8 +943,7 @@ impl LoadedTrustBundle {
     /// by this loaded bundle but NOT yet enforced. Surfaced on
     /// `qbind_p2p_pqc_trust_bundle_revocations_pending_total`.
     pub fn pending_revocations_total(&self) -> usize {
-        self.pending_revoked_root_ids.len()
-            + self.pending_revoked_leaf_fingerprints.len()
+        self.pending_revoked_root_ids.len() + self.pending_revoked_leaf_fingerprints.len()
     }
 
     /// Run 062: total revocations declared in the underlying bundle
@@ -1104,7 +1091,10 @@ impl TrustBundle {
         signing_keys: &BundleSigningKeySet,
         activation_ctx: crate::pqc_trust_activation::ActivationContext,
     ) -> Result<
-        (LoadedTrustBundle, crate::pqc_trust_activation::ActivationCheckOutcome),
+        (
+            LoadedTrustBundle,
+            crate::pqc_trust_activation::ActivationCheckOutcome,
+        ),
         TrustBundleError,
     > {
         let bytes = std::fs::read(path)
@@ -1143,11 +1133,9 @@ impl TrustBundle {
         )
         .map_err(TrustBundleError::Activation)?;
         // Run 057: future-height gating (rejects activation_height > current_height).
-        let activation = crate::pqc_trust_activation::check_bundle_activation(
-            &loaded.bundle,
-            activation_ctx,
-        )
-        .map_err(TrustBundleError::Activation)?;
+        let activation =
+            crate::pqc_trust_activation::check_bundle_activation(&loaded.bundle, activation_ctx)
+                .map_err(TrustBundleError::Activation)?;
         Ok((loaded, activation))
     }
 
@@ -1327,8 +1315,9 @@ impl TrustBundle {
                     r.root_id.clone(),
                 ));
             }
-            let id_bytes = decode_hex_fixed_32(&r.root_id)
-                .map_err(|e| TrustBundleError::MalformedHex(format!("root_id {}: {}", r.root_id, e)))?;
+            let id_bytes = decode_hex_fixed_32(&r.root_id).map_err(|e| {
+                TrustBundleError::MalformedHex(format!("root_id {}: {}", r.root_id, e))
+            })?;
             let pk_bytes = decode_hex_var(&r.root_pk).map_err(|e| {
                 TrustBundleError::MalformedHex(format!("root_pk for {}: {}", r.root_id, e))
             })?;
@@ -1395,10 +1384,7 @@ impl TrustBundle {
         let mut seen_leaf_fingerprints: HashSet<[u8; 32]> = HashSet::new();
         for rev in &self.revocations {
             let id_bytes = decode_hex_fixed_32(&rev.root_id).map_err(|e| {
-                TrustBundleError::MalformedHex(format!(
-                    "revocation root_id {}: {}",
-                    rev.root_id, e
-                ))
+                TrustBundleError::MalformedHex(format!("revocation root_id {}: {}", rev.root_id, e))
             })?;
             if !seen_root_ids.contains(&id_bytes) {
                 return Err(TrustBundleError::RevocationReferencesUnknownRoot(
@@ -1422,9 +1408,7 @@ impl TrustBundle {
                 None => {
                     // Root-level revocation. Run 050 behaviour preserved.
                     if !seen_root_level_revocations.insert(id_bytes) {
-                        return Err(TrustBundleError::DuplicateRevocation(
-                            rev.root_id.clone(),
-                        ));
+                        return Err(TrustBundleError::DuplicateRevocation(rev.root_id.clone()));
                     }
                     if time_active && height_active {
                         revoked_root_ids.insert(id_bytes);
@@ -1439,17 +1423,14 @@ impl TrustBundle {
                 }
                 Some(leaf_fp_hex) => {
                     // Leaf-level revocation. Run 052 surface.
-                    let leaf_fp_bytes =
-                        decode_hex_fixed_32(leaf_fp_hex).map_err(|e| {
-                            TrustBundleError::MalformedLeafFingerprint {
-                                root_id: rev.root_id.clone(),
-                                reason: e,
-                            }
-                        })?;
+                    let leaf_fp_bytes = decode_hex_fixed_32(leaf_fp_hex).map_err(|e| {
+                        TrustBundleError::MalformedLeafFingerprint {
+                            root_id: rev.root_id.clone(),
+                            reason: e,
+                        }
+                    })?;
                     if !seen_leaf_fingerprints.insert(leaf_fp_bytes) {
-                        return Err(TrustBundleError::DuplicateRevocation(
-                            rev.root_id.clone(),
-                        ));
+                        return Err(TrustBundleError::DuplicateRevocation(rev.root_id.clone()));
                     }
                     if time_active && height_active {
                         revoked_leaf_fingerprints.insert(leaf_fp_bytes);
@@ -1534,11 +1515,11 @@ impl TrustBundle {
                 // separator || canonical JSON of bundle with
                 // signature stripped). Then verify with ML-DSA-44.
                 let preimage = canonical_signing_bytes(&self);
-                MlDsa44Backend::verify(&key.pk_bytes, &preimage, &sig_bytes).map_err(
-                    |_| TrustBundleError::BadSignature {
+                MlDsa44Backend::verify(&key.pk_bytes, &preimage, &sig_bytes).map_err(|_| {
+                    TrustBundleError::BadSignature {
                         signing_key_id: sig.signing_key_id.clone(),
-                    },
-                )?;
+                    }
+                })?;
                 BundleSignatureStatus::Verified {
                     signing_key_id: sig.signing_key_id.clone(),
                 }
@@ -1635,8 +1616,7 @@ pub fn canonical_signing_bytes(bundle: &TrustBundle) -> Vec<u8> {
     };
     let json = serde_json::to_vec(&stripped)
         .expect("TrustBundle is pure structs/Vec, serde_json::to_vec cannot fail");
-    let mut out =
-        Vec::with_capacity(TRUST_BUNDLE_SIGNATURE_DOMAIN_SEPARATOR.len() + json.len());
+    let mut out = Vec::with_capacity(TRUST_BUNDLE_SIGNATURE_DOMAIN_SEPARATOR.len() + json.len());
     out.extend_from_slice(TRUST_BUNDLE_SIGNATURE_DOMAIN_SEPARATOR);
     out.extend_from_slice(&json);
     out
@@ -2320,8 +2300,8 @@ mod tests {
 
     #[test]
     fn malformed_bundle_fails_closed() {
-        let err = TrustBundle::load_from_bytes(b"{not json", NetworkEnvironment::Devnet, 0)
-            .unwrap_err();
+        let err =
+            TrustBundle::load_from_bytes(b"{not json", NetworkEnvironment::Devnet, 0).unwrap_err();
         assert!(matches!(err, TrustBundleError::Malformed(_)));
     }
 
@@ -2361,7 +2341,10 @@ mod tests {
             &BundleSigningKeySet::empty(),
         )
         .expect("matching chain_id loads");
-        assert_eq!(loaded.bundle.chain_id.as_deref(), Some("0x51424e4444455600"));
+        assert_eq!(
+            loaded.bundle.chain_id.as_deref(),
+            Some("0x51424e4444455600")
+        );
     }
 
     #[test]
@@ -2434,8 +2417,8 @@ mod tests {
         let (id, pk) = fresh_root_pair();
         let mut bundle = build_helper_bundle(HelperBundleMode::Valid, &id, &pk, 0);
         bundle.signature = Some(TrustBundleSignature {
-            signing_key_id:
-                "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff".to_string(),
+            signing_key_id: "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+                .to_string(),
             suite_id: PQC_TRANSPORT_SUITE_ML_DSA_44,
             sig_bytes: "00".repeat(ML_DSA_44_SIGNATURE_SIZE),
         });
@@ -2509,7 +2492,10 @@ mod tests {
         let bytes = serde_json::to_vec(&bundle).unwrap();
         let err =
             TrustBundle::load_from_bytes(&bytes, NetworkEnvironment::Devnet, 150).unwrap_err();
-        assert!(matches!(err, TrustBundleError::InvalidRootValidityWindow(_)));
+        assert!(matches!(
+            err,
+            TrustBundleError::InvalidRootValidityWindow(_)
+        ));
     }
 
     #[test]
@@ -2552,7 +2538,10 @@ mod tests {
         let bytes = serde_json::to_vec(&bundle).unwrap();
         let err =
             TrustBundle::load_from_bytes(&bytes, NetworkEnvironment::Devnet, 100).unwrap_err();
-        assert!(matches!(err, TrustBundleError::MalformedRootPublicKey { .. }));
+        assert!(matches!(
+            err,
+            TrustBundleError::MalformedRootPublicKey { .. }
+        ));
     }
 
     #[test]
@@ -2907,8 +2896,14 @@ mod tests {
             TrustBundle::load_from_bytes(&bytes, NetworkEnvironment::Devnet, 100).expect("loads");
         let id_bytes = decode_hex_fixed_32(&id).unwrap();
         assert_eq!(loaded.active_roots[0].root_key_id, id_bytes);
-        assert_eq!(loaded.active_roots[0].suite_id, PQC_TRANSPORT_SUITE_ML_DSA_44);
-        assert_eq!(loaded.active_roots[0].root_pk.len(), ML_DSA_44_PUBLIC_KEY_SIZE);
+        assert_eq!(
+            loaded.active_roots[0].suite_id,
+            PQC_TRANSPORT_SUITE_ML_DSA_44
+        );
+        assert_eq!(
+            loaded.active_roots[0].root_pk.len(),
+            ML_DSA_44_PUBLIC_KEY_SIZE
+        );
     }
 
     // ================================================================
@@ -2947,11 +2942,7 @@ mod tests {
     #[test]
     fn signing_key_spec_rejects_malformed_keyid() {
         let (pk, _sk, _id) = fresh_signing_keypair();
-        let spec = format!(
-            "ZZ:{}:{}",
-            PQC_TRANSPORT_SUITE_ML_DSA_44,
-            hex_lower(&pk)
-        );
+        let spec = format!("ZZ:{}:{}", PQC_TRANSPORT_SUITE_ML_DSA_44, hex_lower(&pk));
         let err = parse_bundle_signing_key_spec(&spec).unwrap_err();
         assert!(matches!(err, BundleSigningKeySpecError::MalformedHex(_)));
     }
@@ -2961,7 +2952,10 @@ mod tests {
         let (pk, _sk, id) = fresh_signing_keypair();
         let spec = format!("{}:99:{}", hex_lower(&id), hex_lower(&pk));
         let err = parse_bundle_signing_key_spec(&spec).unwrap_err();
-        assert!(matches!(err, BundleSigningKeySpecError::UnsupportedSuite(99)));
+        assert!(matches!(
+            err,
+            BundleSigningKeySpecError::UnsupportedSuite(99)
+        ));
     }
 
     #[test]
@@ -3240,10 +3234,8 @@ mod tests {
         // Same id, but different pk bytes — sneak in a confused
         // entry. Forge the spec with the right id but a fresh
         // (unrelated) pk: verification with that pk must fail.
-        let signing_id = decode_hex_fixed_32(
-            &bundle.signature.as_ref().unwrap().signing_key_id,
-        )
-        .unwrap();
+        let signing_id =
+            decode_hex_fixed_32(&bundle.signature.as_ref().unwrap().signing_key_id).unwrap();
         let (other_pk, _other_sk) = MlDsa44Backend::generate_keypair().expect("kg");
         let mut set = BundleSigningKeySet::empty();
         set.keys.push(BundleSigningKey {
@@ -3396,8 +3388,8 @@ mod tests {
         let cert_bytes = encode_cert_bytes(&cert);
         let revoked: HashSet<[u8; 32]> = HashSet::new();
         let bundle_fp = [0u8; 32];
-        let fp = check_local_leaf_not_revoked(&cert_bytes, &revoked, &bundle_fp)
-            .expect("not revoked");
+        let fp =
+            check_local_leaf_not_revoked(&cert_bytes, &revoked, &bundle_fp).expect("not revoked");
         // The returned fingerprint is the same as cert_leaf_fingerprint.
         assert_eq!(fp, cert_leaf_fingerprint(&cert));
     }
@@ -3480,8 +3472,8 @@ mod tests {
         let net_fp = net_leaf_fp(&cert);
         let revoked: HashSet<[u8; 32]> = HashSet::new();
         let bundle_fp = [0u8; 32];
-        let node_fp = check_local_leaf_not_revoked(&cert_bytes, &revoked, &bundle_fp)
-            .expect("not revoked");
+        let node_fp =
+            check_local_leaf_not_revoked(&cert_bytes, &revoked, &bundle_fp).expect("not revoked");
         assert_eq!(
             node_fp, net_fp,
             "Run 061 startup self-check fingerprint must equal Run 052 handshake fingerprint"
@@ -3503,10 +3495,10 @@ mod tests {
         let bundle_fp = [0u8; 32];
         // Imaginary KEM secret bytes; must not affect the result.
         let _imaginary_kem_sk = vec![0u8; 32];
-        let fp_a = check_local_leaf_not_revoked(&cert_bytes, &revoked, &bundle_fp)
-            .expect("not revoked");
-        let fp_b = check_local_leaf_not_revoked(&cert_bytes, &revoked, &bundle_fp)
-            .expect("not revoked");
+        let fp_a =
+            check_local_leaf_not_revoked(&cert_bytes, &revoked, &bundle_fp).expect("not revoked");
+        let fp_b =
+            check_local_leaf_not_revoked(&cert_bytes, &revoked, &bundle_fp).expect("not revoked");
         assert_eq!(fp_a, fp_b);
         // Sanity: helper output is exactly the public cert digest.
         assert_eq!(fp_a, cert_leaf_fingerprint(&cert));
@@ -3650,8 +3642,8 @@ mod tests {
         // the helper itself fails closed on garbage input.
         let revoked: HashSet<[u8; 32]> = HashSet::new();
         let bundle_fp = [0u8; 32];
-        let err = check_local_leaf_issuer_root_not_revoked(&[0u8; 4], &revoked, &bundle_fp)
-            .unwrap_err();
+        let err =
+            check_local_leaf_issuer_root_not_revoked(&[0u8; 4], &revoked, &bundle_fp).unwrap_err();
         assert_eq!(err, LocalLeafIssuerRootSelfCheckError::DecodeFailed);
         assert!(format!("{}", err).contains("could not be decoded"));
     }
@@ -3672,8 +3664,8 @@ mod tests {
             check_local_leaf_issuer_root_not_revoked(&cert_bytes, &revoked, &bundle_fp)
                 .expect("not revoked");
         // The cert-verify path decodes the cert and reads root_key_id.
-        let decoded = crate::pqc_root_config::decode_network_delegation_cert(&cert_bytes)
-            .expect("decode");
+        let decoded =
+            crate::pqc_root_config::decode_network_delegation_cert(&cert_bytes).expect("decode");
         assert_eq!(
             helper_root_id, decoded.root_key_id,
             "Run 063 issuer-root identity must equal cert.root_key_id used by cert-verify path"
@@ -3809,8 +3801,7 @@ mod tests {
     /// set, NOT in pending set.
     #[test]
     fn run062_legacy_no_activation_height_is_immediately_active() {
-        let (bundle, _, _, leaf_fp_bytes) =
-            run062_unsigned_devnet_with_leaf_revocation(None, 0);
+        let (bundle, _, _, leaf_fp_bytes) = run062_unsigned_devnet_with_leaf_revocation(None, 0);
         let bytes = serde_json::to_vec(&bundle).unwrap();
         let parsed: TrustBundle = serde_json::from_slice(&bytes).unwrap();
         let loaded = parsed
@@ -3872,7 +3863,9 @@ mod tests {
             )
             .expect("loads");
         assert!(!loaded.revoked_leaf_fingerprints.contains(&leaf_fp_bytes));
-        assert!(loaded.pending_revoked_leaf_fingerprints.contains(&leaf_fp_bytes));
+        assert!(loaded
+            .pending_revoked_leaf_fingerprints
+            .contains(&leaf_fp_bytes));
         assert_eq!(loaded.active_revocations_total(), 0);
         assert_eq!(loaded.pending_revocations_total(), 1);
         assert_eq!(loaded.configured_revocations_total(), 1);
@@ -3897,7 +3890,9 @@ mod tests {
             )
             .expect("loads");
         assert!(!loaded.revoked_leaf_fingerprints.contains(&leaf_fp_bytes));
-        assert!(loaded.pending_revoked_leaf_fingerprints.contains(&leaf_fp_bytes));
+        assert!(loaded
+            .pending_revoked_leaf_fingerprints
+            .contains(&leaf_fp_bytes));
         assert_eq!(loaded.active_revocations_total(), 0);
         assert_eq!(loaded.pending_revocations_total(), 1);
     }
@@ -3921,7 +3916,9 @@ mod tests {
             )
             .expect("loads");
         assert!(!loaded.revoked_leaf_fingerprints.contains(&leaf_fp_bytes));
-        assert!(loaded.pending_revoked_leaf_fingerprints.contains(&leaf_fp_bytes));
+        assert!(loaded
+            .pending_revoked_leaf_fingerprints
+            .contains(&leaf_fp_bytes));
     }
 
     /// Run 062: a root-level revocation with future `activation_height`
@@ -4015,7 +4012,9 @@ mod tests {
             )
             .expect("loads");
         assert!(!loaded.revoked_leaf_fingerprints.contains(&leaf_fp_bytes));
-        assert!(!loaded.pending_revoked_leaf_fingerprints.contains(&leaf_fp_bytes));
+        assert!(!loaded
+            .pending_revoked_leaf_fingerprints
+            .contains(&leaf_fp_bytes));
         assert_eq!(loaded.active_revocations_total(), 0);
         assert_eq!(loaded.pending_revocations_total(), 0);
         // Still counted as configured.
@@ -4028,8 +4027,7 @@ mod tests {
     #[test]
     fn run062_tampered_revocation_activation_height_fails_signature() {
         let (id_hex, pk_hex) = fresh_root_pair();
-        let mut bundle =
-            build_helper_bundle(HelperBundleMode::Valid, &id_hex, &pk_hex, 0);
+        let mut bundle = build_helper_bundle(HelperBundleMode::Valid, &id_hex, &pk_hex, 0);
         bundle.revocations.push(TrustBundleRevocation {
             root_id: id_hex.clone(),
             leaf_cert_fingerprint: Some("22".repeat(32)),

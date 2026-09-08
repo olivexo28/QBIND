@@ -578,9 +578,7 @@ pub fn verify_onchain_governance_proof<R: OnChainGovernanceReplaySet + ?Sized>(
         return O::MalformedOnChainProof {
             reason: format!(
                 "OnChainGovernance quorum malformed: voted={} total={} required={}",
-                proof.quorum.voters_voted,
-                proof.quorum.total_voters,
-                proof.quorum.required_quorum
+                proof.quorum.voters_voted, proof.quorum.total_voters, proof.quorum.required_quorum
             ),
         };
     }
@@ -1065,7 +1063,9 @@ impl OnChainGovernanceProofWire {
             lifecycle_action: p.lifecycle_action,
             active_bundle_signing_key_fingerprint: p.active_bundle_signing_key_fingerprint.clone(),
             new_bundle_signing_key_fingerprint: p.new_bundle_signing_key_fingerprint.clone(),
-            revoked_bundle_signing_key_fingerprint: p.revoked_bundle_signing_key_fingerprint.clone(),
+            revoked_bundle_signing_key_fingerprint: p
+                .revoked_bundle_signing_key_fingerprint
+                .clone(),
             authority_domain_sequence: p.authority_domain_sequence,
             candidate_v2_digest: p.candidate_v2_digest.clone(),
             freshness: p.freshness,

@@ -43,12 +43,9 @@
 //!
 //! See `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_348.md`.
 
-
-
 #![allow(dead_code)]
 #![allow(unused_imports)]
 #![allow(unused_variables)]
-
 
 use qbind_node::pqc_authority_custody::AuthorityCustodyClass;
 use qbind_node::pqc_authority_lifecycle::{
@@ -74,9 +71,12 @@ use qbind_node::pqc_production_live_validator_set_application_authorization::{
 };
 use qbind_node::pqc_production_staged_live_validator_set_epoch_transition_application_executor::*;
 use qbind_node::pqc_production_validator_set_rotation_application_executor::{
-    EmptyValidatorSetRotationApplicationReplaySet, ProductionValidatorSetRotationApplicationDecision,
-    ProductionValidatorSetRotationApplicationExecutor, ProductionValidatorSetRotationApplicationInputs,
-    ProductionValidatorSetRotationApplicationRequest, ValidatorSetRotationApplicationAuthoritySource,
+    EmptyValidatorSetRotationApplicationReplaySet,
+    ProductionValidatorSetRotationApplicationDecision,
+    ProductionValidatorSetRotationApplicationExecutor,
+    ProductionValidatorSetRotationApplicationInputs,
+    ProductionValidatorSetRotationApplicationRequest,
+    ValidatorSetRotationApplicationAuthoritySource,
 };
 use qbind_node::pqc_production_validator_set_rotation_intent::{
     CanonicalValidatorIdentity, CanonicalValidatorRecord, CanonicalValidatorSetSnapshot,
@@ -124,18 +124,33 @@ fn chain_for(env: TrustBundleEnvironment) -> &'static str {
 }
 
 fn trust_domain(env: TrustBundleEnvironment) -> AuthorityTrustDomain {
-    AuthorityTrustDomain::new(env, chain_for(env), GENESIS_HASH, ROOT_FP, PQC_LIFECYCLE_SUITE_ML_DSA_44)
+    AuthorityTrustDomain::new(
+        env,
+        chain_for(env),
+        GENESIS_HASH,
+        ROOT_FP,
+        PQC_LIFECYCLE_SUITE_ML_DSA_44,
+    )
 }
 
 fn quorum() -> OnChainGovernanceQuorum {
-    OnChainGovernanceQuorum { voters_voted: 8, total_voters: 10, required_quorum: 6 }
+    OnChainGovernanceQuorum {
+        voters_voted: 8,
+        total_voters: 10,
+        required_quorum: 6,
+    }
 }
 
 fn threshold() -> GovernanceThreshold {
     GovernanceThreshold::new(8, 6, 10)
 }
 
-fn validator(env: TrustBundleEnvironment, idx: u64, power: u64, act: u64) -> CanonicalValidatorRecord {
+fn validator(
+    env: TrustBundleEnvironment,
+    idx: u64,
+    power: u64,
+    act: u64,
+) -> CanonicalValidatorRecord {
     CanonicalValidatorRecord {
         identity: CanonicalValidatorIdentity {
             validator_index: idx,
@@ -154,7 +169,11 @@ fn validator(env: TrustBundleEnvironment, idx: u64, power: u64, act: u64) -> Can
 
 fn current_set(env: TrustBundleEnvironment) -> CanonicalValidatorSetSnapshot {
     CanonicalValidatorSetSnapshot::new(
-        vec![validator(env, 1, 100, 1), validator(env, 2, 100, 1), validator(env, 3, 100, 1)],
+        vec![
+            validator(env, 1, 100, 1),
+            validator(env, 2, 100, 1),
+            validator(env, 3, 100, 1),
+        ],
         CUR_EPOCH,
         CUR_VERSION,
     )
@@ -183,7 +202,10 @@ fn durable() -> GovernanceExecutionDurableReplayBinding {
     }
 }
 
-fn gov_intent(env: TrustBundleEnvironment, lifecycle: LocalLifecycleAction) -> ProductionGovernanceExecutionIntent {
+fn gov_intent(
+    env: TrustBundleEnvironment,
+    lifecycle: LocalLifecycleAction,
+) -> ProductionGovernanceExecutionIntent {
     ProductionGovernanceExecutionIntent {
         intent_kind: ProductionGovernanceExecutionIntentKind::AuthorityLifecycleRotationIntent,
         protocol_version: 1,
@@ -215,14 +237,17 @@ fn gov_intent(env: TrustBundleEnvironment, lifecycle: LocalLifecycleAction) -> P
     }
 }
 
-fn gov_decision(intent: ProductionGovernanceExecutionIntent) -> ProductionGovernanceExecutionDecision {
+fn gov_decision(
+    intent: ProductionGovernanceExecutionIntent,
+) -> ProductionGovernanceExecutionDecision {
     let idig = intent.intent_digest();
     ProductionGovernanceExecutionDecision {
-        outcome: ProductionGovernanceExecutionOutcome::AcceptedSourceTestGovernanceExecutionIntent {
-            intent_kind: intent.intent_kind,
-            environment: intent.environment,
-            decision_id: intent.decision_id.clone(),
-        },
+        outcome:
+            ProductionGovernanceExecutionOutcome::AcceptedSourceTestGovernanceExecutionIntent {
+                intent_kind: intent.intent_kind,
+                environment: intent.environment,
+                decision_id: intent.decision_id.clone(),
+            },
         decision_id: GOV_DECISION_ID.to_string(),
         request_id: GOV_REQUEST_ID.to_string(),
         intent: Some(intent),
@@ -241,7 +266,8 @@ fn rotation_decision(
 ) -> ProductionValidatorSetRotationDecision {
     let decision = gov_decision(gov_intent(env, lifecycle));
     let idig = decision.intent_digest.clone();
-    let source = ValidatorSetRotationAuthoritySource::VerifiedGovernanceExecutionIntent { decision };
+    let source =
+        ValidatorSetRotationAuthoritySource::VerifiedGovernanceExecutionIntent { decision };
     let request = ProductionValidatorSetRotationRequest::new(
         source,
         current.clone(),
@@ -282,7 +308,11 @@ fn rotation_decision(
         expected_durable_replay: None,
     };
     let boundary = ProductionValidatorSetRotationBoundary::source_test();
-    let d = boundary.evaluate_validator_set_rotation(&request, &inputs, &EmptyValidatorSetRotationReplaySet);
+    let d = boundary.evaluate_validator_set_rotation(
+        &request,
+        &inputs,
+        &EmptyValidatorSetRotationReplaySet,
+    );
     assert!(d.is_accept(), "rotation decision must accept for fixture");
     d
 }
@@ -355,7 +385,10 @@ fn app_decision(
             &inputs,
             &EmptyValidatorSetRotationApplicationReplaySet,
         );
-    assert!(d.is_accept(), "run 305 application decision must accept for fixture");
+    assert!(
+        d.is_accept(),
+        "run 305 application decision must accept for fixture"
+    );
     d
 }
 
@@ -424,7 +457,11 @@ fn auth_decision(
     proposed: CanonicalValidatorSetSnapshot,
 ) -> ProductionLiveValidatorSetApplicationAuthorizationDecision {
     let app = app_decision(env, lifecycle, requested_action, current, delta, proposed);
-    let target = app.application_intent.as_ref().unwrap().epoch_transition_target;
+    let target = app
+        .application_intent
+        .as_ref()
+        .unwrap()
+        .epoch_transition_target;
     let inputs = auth_inputs307(env, lifecycle, requested_action, &app);
     let request = ProductionLiveValidatorSetApplicationAuthorizationRequest::new(
         LiveValidatorSetApplicationAuthorizationAuthoritySource::VerifiedApplicationDecision {
@@ -439,7 +476,10 @@ fn auth_decision(
             &inputs,
             &EmptyLiveValidatorSetApplicationAuthorizationReplaySet,
         );
-    assert!(d.is_accept(), "run 307 authorization decision must accept for fixture");
+    assert!(
+        d.is_accept(),
+        "run 307 authorization decision must accept for fixture"
+    );
     d
 }
 
@@ -550,11 +590,22 @@ fn scenario(
             let v4 = validator(env, 4, 100, 2);
             let delta = ValidatorSetDelta::new(vec![ValidatorSetChange::add(v4.clone())]);
             let proposed = CanonicalValidatorSetSnapshot::new(
-                vec![validator(env, 1, 100, 1), validator(env, 2, 100, 1), validator(env, 3, 100, 1), v4],
+                vec![
+                    validator(env, 1, 100, 1),
+                    validator(env, 2, 100, 1),
+                    validator(env, 3, 100, 1),
+                    v4,
+                ],
                 CUR_EPOCH + 1,
                 CUR_VERSION + 1,
             );
-            (LocalLifecycleAction::Rotate, ValidatorSetRotationAction::ValidatorAdd, current, delta, proposed)
+            (
+                LocalLifecycleAction::Rotate,
+                ValidatorSetRotationAction::ValidatorAdd,
+                current,
+                delta,
+                proposed,
+            )
         }
         Sc::Remove => {
             let delta = ValidatorSetDelta::new(vec![ValidatorSetChange::remove(3)]);
@@ -563,32 +614,64 @@ fn scenario(
                 CUR_EPOCH + 1,
                 CUR_VERSION + 1,
             );
-            (LocalLifecycleAction::Rotate, ValidatorSetRotationAction::ValidatorRemove, current, delta, proposed)
+            (
+                LocalLifecycleAction::Rotate,
+                ValidatorSetRotationAction::ValidatorRemove,
+                current,
+                delta,
+                proposed,
+            )
         }
         Sc::Update => {
             let updated = validator(env, 2, 250, 1);
             let delta = ValidatorSetDelta::new(vec![ValidatorSetChange::update(updated.clone())]);
             let proposed = CanonicalValidatorSetSnapshot::new(
-                vec![validator(env, 1, 100, 1), updated, validator(env, 3, 100, 1)],
+                vec![
+                    validator(env, 1, 100, 1),
+                    updated,
+                    validator(env, 3, 100, 1),
+                ],
                 CUR_EPOCH + 1,
                 CUR_VERSION + 1,
             );
-            (LocalLifecycleAction::Rotate, ValidatorSetRotationAction::ValidatorUpdate, current, delta, proposed)
+            (
+                LocalLifecycleAction::Rotate,
+                ValidatorSetRotationAction::ValidatorUpdate,
+                current,
+                delta,
+                proposed,
+            )
         }
         Sc::NoOp => {
             let proposed = current_set(env);
-            (LocalLifecycleAction::Rotate, ValidatorSetRotationAction::NoOpSynchronization, current, ValidatorSetDelta::empty(), proposed)
+            (
+                LocalLifecycleAction::Rotate,
+                ValidatorSetRotationAction::NoOpSynchronization,
+                current,
+                ValidatorSetDelta::empty(),
+                proposed,
+            )
         }
         Sc::Identity => {
             let mut rotated = validator(env, 2, 100, 1);
             rotated.identity.consensus_key_fingerprint = "cons-2-rotated".to_string();
             let delta = ValidatorSetDelta::new(vec![ValidatorSetChange::update(rotated.clone())]);
             let proposed = CanonicalValidatorSetSnapshot::new(
-                vec![validator(env, 1, 100, 1), rotated, validator(env, 3, 100, 1)],
+                vec![
+                    validator(env, 1, 100, 1),
+                    rotated,
+                    validator(env, 3, 100, 1),
+                ],
                 CUR_EPOCH + 1,
                 CUR_VERSION + 1,
             );
-            (LocalLifecycleAction::Rotate, ValidatorSetRotationAction::ValidatorIdentityRotation, current, delta, proposed)
+            (
+                LocalLifecycleAction::Rotate,
+                ValidatorSetRotationAction::ValidatorIdentityRotation,
+                current,
+                delta,
+                proposed,
+            )
         }
         Sc::Retire => {
             let delta = ValidatorSetDelta::new(vec![ValidatorSetChange::remove(3)]);
@@ -597,7 +680,13 @@ fn scenario(
                 CUR_EPOCH + 1,
                 CUR_VERSION + 1,
             );
-            (LocalLifecycleAction::Retire, ValidatorSetRotationAction::ValidatorRetirement, current, delta, proposed)
+            (
+                LocalLifecycleAction::Retire,
+                ValidatorSetRotationAction::ValidatorRetirement,
+                current,
+                delta,
+                proposed,
+            )
         }
         Sc::Emergency => {
             let delta = ValidatorSetDelta::new(vec![ValidatorSetChange::remove(3)]);
@@ -606,27 +695,51 @@ fn scenario(
                 CUR_EPOCH + 1,
                 CUR_VERSION + 1,
             );
-            (LocalLifecycleAction::EmergencyRevoke, ValidatorSetRotationAction::EmergencyValidatorRemoval, current, delta, proposed)
+            (
+                LocalLifecycleAction::EmergencyRevoke,
+                ValidatorSetRotationAction::EmergencyValidatorRemoval,
+                current,
+                delta,
+                proposed,
+            )
         }
         Sc::AuthSync => {
             let v4 = validator(env, 4, 100, 2);
-            let delta = ValidatorSetDelta::new(vec![ValidatorSetChange::add(v4.clone()), ValidatorSetChange::remove(3)]);
+            let delta = ValidatorSetDelta::new(vec![
+                ValidatorSetChange::add(v4.clone()),
+                ValidatorSetChange::remove(3),
+            ]);
             let proposed = CanonicalValidatorSetSnapshot::new(
                 vec![validator(env, 1, 100, 1), validator(env, 2, 100, 1), v4],
                 CUR_EPOCH + 1,
                 CUR_VERSION + 1,
             );
-            (LocalLifecycleAction::Rotate, ValidatorSetRotationAction::AuthoritySetSynchronization, current, delta, proposed)
+            (
+                LocalLifecycleAction::Rotate,
+                ValidatorSetRotationAction::AuthoritySetSynchronization,
+                current,
+                delta,
+                proposed,
+            )
         }
         Sc::Bulk => {
             let v4 = validator(env, 4, 100, 2);
-            let delta = ValidatorSetDelta::new(vec![ValidatorSetChange::add(v4.clone()), ValidatorSetChange::remove(3)]);
+            let delta = ValidatorSetDelta::new(vec![
+                ValidatorSetChange::add(v4.clone()),
+                ValidatorSetChange::remove(3),
+            ]);
             let proposed = CanonicalValidatorSetSnapshot::new(
                 vec![validator(env, 1, 100, 1), validator(env, 2, 100, 1), v4],
                 CUR_EPOCH + 1,
                 CUR_VERSION + 1,
             );
-            (LocalLifecycleAction::Rotate, ValidatorSetRotationAction::BulkValidatorSetRotation, current, delta, proposed)
+            (
+                LocalLifecycleAction::Rotate,
+                ValidatorSetRotationAction::BulkValidatorSetRotation,
+                current,
+                delta,
+                proposed,
+            )
         }
     }
 }
@@ -647,14 +760,21 @@ fn expected_staged_kind(sc: Sc) -> StagedLiveValidatorSetEpochTransitionApplicat
 }
 
 /// Build an accepted Run 307 authorization decision for a scenario.
-fn auth_decision_for(env: TrustBundleEnvironment, sc: Sc) -> ProductionLiveValidatorSetApplicationAuthorizationDecision {
+fn auth_decision_for(
+    env: TrustBundleEnvironment,
+    sc: Sc,
+) -> ProductionLiveValidatorSetApplicationAuthorizationDecision {
     let (lifecycle, action, current, delta, proposed) = scenario(env, sc);
     auth_decision(env, lifecycle, action, current, delta, proposed)
 }
 
 fn stg_case311(env: TrustBundleEnvironment, sc: Sc) -> Stg311 {
     let decision = auth_decision_for(env, sc);
-    let target = decision.authorization_intent.as_ref().unwrap().epoch_transition_target;
+    let target = decision
+        .authorization_intent
+        .as_ref()
+        .unwrap()
+        .epoch_transition_target;
     let inputs = stg_inputs(env, &decision);
     let request = ProductionStagedLiveValidatorSetEpochTransitionApplicationRequest::new(
         StagedLiveValidatorSetEpochTransitionApplicationAuthoritySource::VerifiedLiveApplicationAuthorization {
@@ -675,11 +795,12 @@ fn empty_replay311() -> EmptyStagedLiveValidatorSetEpochTransitionApplicationRep
 }
 
 fn eval311(case: &Stg311) -> ProductionStagedLiveValidatorSetEpochTransitionApplicationDecision {
-    case.executor.evaluate_staged_live_validator_set_epoch_transition_application(
-        &case.request,
-        &case.inputs,
-        &empty_replay311(),
-    )
+    case.executor
+        .evaluate_staged_live_validator_set_epoch_transition_application(
+            &case.request,
+            &case.inputs,
+            &empty_replay311(),
+        )
 }
 
 // ===========================================================================
@@ -700,7 +821,10 @@ fn stg_decision(
     sc: Sc,
 ) -> ProductionStagedLiveValidatorSetEpochTransitionApplicationDecision {
     let d = eval311(&stg_case311(env, sc));
-    assert!(d.is_accept(), "run 311 staged decision must accept for fixture");
+    assert!(
+        d.is_accept(),
+        "run 311 staged decision must accept for fixture"
+    );
     d
 }
 
@@ -832,7 +956,10 @@ fn gem_eval(case: &Gem) -> ProductionGuardedEpochTransitionMutationDecision {
     )
 }
 
-fn gem_eval_replay(case: &Gem, replay: &[String]) -> ProductionGuardedEpochTransitionMutationDecision {
+fn gem_eval_replay(
+    case: &Gem,
+    replay: &[String],
+) -> ProductionGuardedEpochTransitionMutationDecision {
     case.executor
         .evaluate_guarded_epoch_transition_mutation(&case.request, &case.inputs, &replay)
 }
@@ -865,7 +992,10 @@ fn guarded_decision(
     sc: Sc,
 ) -> ProductionGuardedEpochTransitionMutationDecision {
     let d = gem_eval(&gem_case(env, sc));
-    assert!(d.is_accept(), "run 313 guarded decision must accept for fixture");
+    assert!(
+        d.is_accept(),
+        "run 313 guarded decision must accept for fixture"
+    );
     d
 }
 
@@ -1007,7 +1137,10 @@ fn h_eval(case: &H315) -> ProductionEpochTransitionRuntimeHandoffDecision {
     )
 }
 
-fn h_eval_replay(case: &H315, replay: &[String]) -> ProductionEpochTransitionRuntimeHandoffDecision {
+fn h_eval_replay(
+    case: &H315,
+    replay: &[String],
+) -> ProductionEpochTransitionRuntimeHandoffDecision {
     case.executor
         .evaluate_epoch_transition_runtime_handoff(&case.request, &case.inputs, &replay)
 }
@@ -1021,8 +1154,8 @@ use qbind_node::pqc_production_live_epoch_transition_execution_preparation::*;
 const PREP_POLICY_ID: &str = "execution-preparation-policy-1";
 const PREP_NONCE: u64 = 43;
 
-use ProductionLiveEpochTransitionExecutionPreparationOutcome as PO;
 use LiveEpochTransitionExecutionPreparationKind as PK;
+use ProductionLiveEpochTransitionExecutionPreparationOutcome as PO;
 
 /// Build an accepted Run 315 epoch-transition runtime handoff decision — the
 /// sole accepted Run 317 authority source.
@@ -1031,7 +1164,10 @@ fn handoff_decision(
     sc: Sc,
 ) -> ProductionEpochTransitionRuntimeHandoffDecision {
     let d = h_eval(&h_case(env, sc));
-    assert!(d.is_accept(), "run 315 handoff decision must accept for fixture");
+    assert!(
+        d.is_accept(),
+        "run 315 handoff decision must accept for fixture"
+    );
     d
 }
 
@@ -1132,9 +1268,7 @@ fn p_inputs(
         expected_guarded_mutation_decision_id: pkg.guarded_mutation_decision_id.clone(),
         expected_guarded_mutation_request_id: pkg.guarded_mutation_request_id.clone(),
         expected_guarded_mutation_intent_digest: pkg.guarded_mutation_intent_digest.clone(),
-        expected_guarded_mutation_transcript_digest: pkg
-            .guarded_mutation_transcript_digest
-            .clone(),
+        expected_guarded_mutation_transcript_digest: pkg.guarded_mutation_transcript_digest.clone(),
         expected_guarded_mutation_nonce: pkg.guarded_mutation_nonce,
         expected_runtime_handoff_decision_id: dec.handoff_id.clone(),
         expected_runtime_handoff_request_id: dec.request_id.clone(),
@@ -1159,7 +1293,11 @@ fn p_inputs(
 
 fn p_case(env: TrustBundleEnvironment, sc: Sc) -> P317 {
     let dec = handoff_decision(env, sc);
-    let target = dec.handoff_package.as_ref().unwrap().epoch_transition_target;
+    let target = dec
+        .handoff_package
+        .as_ref()
+        .unwrap()
+        .epoch_transition_target;
     let inputs = p_inputs(env, &dec);
     let request = ProductionLiveEpochTransitionExecutionPreparationRequest::new(
         LiveEpochTransitionExecutionPreparationAuthoritySource::VerifiedRuntimeHandoffDecision {
@@ -1180,11 +1318,12 @@ fn empty_replay317() -> EmptyLiveEpochTransitionExecutionPreparationReplaySet {
 }
 
 fn p_eval(case: &P317) -> ProductionLiveEpochTransitionExecutionPreparationDecision {
-    case.executor.evaluate_live_epoch_transition_execution_preparation(
-        &case.request,
-        &case.inputs,
-        &empty_replay317(),
-    )
+    case.executor
+        .evaluate_live_epoch_transition_execution_preparation(
+            &case.request,
+            &case.inputs,
+            &empty_replay317(),
+        )
 }
 
 fn p_eval_replay(
@@ -1221,10 +1360,7 @@ fn p_reject_inputs(
 
 /// Common helper: build a Devnet/Add case, replace its authority source, and
 /// assert the resulting outcome.
-fn p_reject_source(
-    source: LiveEpochTransitionExecutionPreparationAuthoritySource,
-    expected: PO,
-) {
+fn p_reject_source(source: LiveEpochTransitionExecutionPreparationAuthoritySource, expected: PO) {
     let mut c = p_case(TrustBundleEnvironment::Devnet, Sc::Add);
     c.request.authority_source = source;
     let d = p_eval(&c);
@@ -1237,8 +1373,8 @@ use qbind_node::pqc_production_live_epoch_transition_mutation_execution::*;
 const MUT_POLICY_ID: &str = "mutation-execution-policy-1";
 const MUT_NONCE: u64 = 45;
 
-use ProductionLiveEpochTransitionMutationExecutionOutcome as MO;
 use LiveEpochTransitionMutationExecutionKind as MK;
+use ProductionLiveEpochTransitionMutationExecutionOutcome as MO;
 
 /// Build an accepted Run 317 epoch-transition runtime handoff decision — the
 /// sole accepted Run 319 authority source.
@@ -1347,9 +1483,7 @@ fn m_inputs(
         expected_guarded_mutation_decision_id: pkg.guarded_mutation_decision_id.clone(),
         expected_guarded_mutation_request_id: pkg.guarded_mutation_request_id.clone(),
         expected_guarded_mutation_intent_digest: pkg.guarded_mutation_intent_digest.clone(),
-        expected_guarded_mutation_transcript_digest: pkg
-            .guarded_mutation_transcript_digest
-            .clone(),
+        expected_guarded_mutation_transcript_digest: pkg.guarded_mutation_transcript_digest.clone(),
         expected_guarded_mutation_nonce: pkg.guarded_mutation_nonce,
         expected_execution_preparation_decision_id: dec.preparation_id.clone(),
         expected_execution_preparation_request_id: dec.request_id.clone(),
@@ -1359,9 +1493,7 @@ fn m_inputs(
         expected_runtime_handoff_decision_id: pkg.runtime_handoff_decision_id.clone(),
         expected_runtime_handoff_request_id: pkg.runtime_handoff_request_id.clone(),
         expected_runtime_handoff_intent_digest: pkg.runtime_handoff_intent_digest.clone(),
-        expected_runtime_handoff_transcript_digest: pkg
-            .runtime_handoff_transcript_digest
-            .clone(),
+        expected_runtime_handoff_transcript_digest: pkg.runtime_handoff_transcript_digest.clone(),
         expected_runtime_handoff_nonce: pkg.runtime_handoff_nonce,
         expected_current_validator_set_epoch: CUR_EPOCH,
         expected_current_validator_set_version: CUR_VERSION,
@@ -1381,7 +1513,11 @@ fn m_inputs(
 
 fn m_case(env: TrustBundleEnvironment, sc: Sc) -> M319 {
     let dec = prep_decision(env, sc);
-    let target = dec.preparation_artifact.as_ref().unwrap().epoch_transition_target;
+    let target = dec
+        .preparation_artifact
+        .as_ref()
+        .unwrap()
+        .epoch_transition_target;
     let inputs = m_inputs(env, &dec);
     let request = ProductionLiveEpochTransitionMutationExecutionRequest::new(
         LiveEpochTransitionMutationExecutionAuthoritySource::VerifiedExecutionPreparationDecision {
@@ -1402,11 +1538,12 @@ fn empty_replay319() -> EmptyLiveEpochTransitionMutationExecutionReplaySet {
 }
 
 fn m_eval(case: &M319) -> ProductionLiveEpochTransitionMutationExecutionDecision {
-    case.executor.evaluate_live_epoch_transition_mutation_execution(
-        &case.request,
-        &case.inputs,
-        &empty_replay319(),
-    )
+    case.executor
+        .evaluate_live_epoch_transition_mutation_execution(
+            &case.request,
+            &case.inputs,
+            &empty_replay319(),
+        )
 }
 
 fn m_eval_replay(
@@ -1443,10 +1580,7 @@ fn m_reject_inputs(
 
 /// Common helper: build a Devnet/Add case, replace its authority source, and
 /// assert the resulting outcome.
-fn m_reject_source(
-    source: LiveEpochTransitionMutationExecutionAuthoritySource,
-    expected: MO,
-) {
+fn m_reject_source(source: LiveEpochTransitionMutationExecutionAuthoritySource, expected: MO) {
     let mut c = m_case(TrustBundleEnvironment::Devnet, Sc::Add);
     c.request.authority_source = source;
     let d = m_eval(&c);
@@ -1458,7 +1592,6 @@ fn m_reject_source(
 // A. Accepted / compatible source-test mutation-execution artifacts
 // ===========================================================================
 
-
 // ===========================================================================
 // Run 321 — commit-authorization self layer (consumes verified Run 319/320
 // mutation-execution decisions produced by the m_ harness above).
@@ -1466,8 +1599,8 @@ fn m_reject_source(
 
 use qbind_node::pqc_production_live_epoch_transition_commit_authorization::*;
 
-use ProductionLiveEpochTransitionCommitAuthorizationOutcome as CO;
 use LiveEpochTransitionCommitAuthorizationKind as CK;
+use ProductionLiveEpochTransitionCommitAuthorizationOutcome as CO;
 
 const CMT_POLICY_ID: &str = "commit-authorization-policy-1";
 const CMT_NONCE: u64 = 47;
@@ -1579,9 +1712,7 @@ fn c_inputs(
         expected_guarded_mutation_decision_id: pkg.guarded_mutation_decision_id.clone(),
         expected_guarded_mutation_request_id: pkg.guarded_mutation_request_id.clone(),
         expected_guarded_mutation_intent_digest: pkg.guarded_mutation_intent_digest.clone(),
-        expected_guarded_mutation_transcript_digest: pkg
-            .guarded_mutation_transcript_digest
-            .clone(),
+        expected_guarded_mutation_transcript_digest: pkg.guarded_mutation_transcript_digest.clone(),
         expected_guarded_mutation_nonce: pkg.guarded_mutation_nonce,
         expected_mutation_execution_decision_id: dec.execution_id.clone(),
         expected_mutation_execution_request_id: dec.request_id.clone(),
@@ -1590,7 +1721,9 @@ fn c_inputs(
         expected_mutation_execution_nonce: pkg.mutation_execution_nonce,
         expected_execution_preparation_decision_id: pkg.execution_preparation_decision_id.clone(),
         expected_execution_preparation_request_id: pkg.execution_preparation_request_id.clone(),
-        expected_execution_preparation_intent_digest: pkg.execution_preparation_intent_digest.clone(),
+        expected_execution_preparation_intent_digest: pkg
+            .execution_preparation_intent_digest
+            .clone(),
         expected_execution_preparation_transcript_digest: pkg
             .execution_preparation_transcript_digest
             .clone(),
@@ -1598,9 +1731,7 @@ fn c_inputs(
         expected_runtime_handoff_decision_id: pkg.runtime_handoff_decision_id.clone(),
         expected_runtime_handoff_request_id: pkg.runtime_handoff_request_id.clone(),
         expected_runtime_handoff_intent_digest: pkg.runtime_handoff_intent_digest.clone(),
-        expected_runtime_handoff_transcript_digest: pkg
-            .runtime_handoff_transcript_digest
-            .clone(),
+        expected_runtime_handoff_transcript_digest: pkg.runtime_handoff_transcript_digest.clone(),
         expected_runtime_handoff_nonce: pkg.runtime_handoff_nonce,
         expected_current_validator_set_epoch: CUR_EPOCH,
         expected_current_validator_set_version: CUR_VERSION,
@@ -1620,7 +1751,11 @@ fn c_inputs(
 
 fn c_case(env: TrustBundleEnvironment, sc: Sc) -> C321 {
     let dec = mut_decision(env, sc);
-    let target = dec.execution_artifact.as_ref().unwrap().epoch_transition_target;
+    let target = dec
+        .execution_artifact
+        .as_ref()
+        .unwrap()
+        .epoch_transition_target;
     let inputs = c_inputs(env, &dec);
     let request = ProductionLiveEpochTransitionCommitAuthorizationRequest::new(
         LiveEpochTransitionCommitAuthorizationAuthoritySource::VerifiedMutationExecutionDecision {
@@ -1641,11 +1776,12 @@ fn empty_replay321() -> EmptyLiveEpochTransitionCommitAuthorizationReplaySet {
 }
 
 fn c_eval(case: &C321) -> ProductionLiveEpochTransitionCommitAuthorizationDecision {
-    case.executor.evaluate_live_epoch_transition_commit_authorization(
-        &case.request,
-        &case.inputs,
-        &empty_replay321(),
-    )
+    case.executor
+        .evaluate_live_epoch_transition_commit_authorization(
+            &case.request,
+            &case.inputs,
+            &empty_replay321(),
+        )
 }
 
 fn c_eval_replay(
@@ -1682,10 +1818,7 @@ fn c_reject_inputs(
 
 /// Common helper: build a Devnet/Add case, replace its authority source, and
 /// assert the resulting outcome.
-fn c_reject_source(
-    source: LiveEpochTransitionCommitAuthorizationAuthoritySource,
-    expected: CO,
-) {
+fn c_reject_source(source: LiveEpochTransitionCommitAuthorizationAuthoritySource, expected: CO) {
     let mut c = c_case(TrustBundleEnvironment::Devnet, Sc::Add);
     c.request.authority_source = source;
     let d = c_eval(&c);
@@ -1696,7 +1829,6 @@ fn c_reject_source(
 // ===========================================================================
 // A. Accepted / compatible source-test mutation-execution artifacts
 // ===========================================================================
-
 
 use qbind_node::pqc_production_live_epoch_transition_commit_execution::*;
 use qbind_node::pqc_production_live_epoch_transition_commit_receipt::*;
@@ -1821,9 +1953,7 @@ fn ce_inputs(
         expected_guarded_mutation_decision_id: pkg.guarded_mutation_decision_id.clone(),
         expected_guarded_mutation_request_id: pkg.guarded_mutation_request_id.clone(),
         expected_guarded_mutation_intent_digest: pkg.guarded_mutation_intent_digest.clone(),
-        expected_guarded_mutation_transcript_digest: pkg
-            .guarded_mutation_transcript_digest
-            .clone(),
+        expected_guarded_mutation_transcript_digest: pkg.guarded_mutation_transcript_digest.clone(),
         expected_guarded_mutation_nonce: pkg.guarded_mutation_nonce,
         expected_commit_authorization_decision_id: dec.commit_authorization_id.clone(),
         expected_commit_authorization_request_id: dec.request_id.clone(),
@@ -1839,7 +1969,9 @@ fn ce_inputs(
         expected_mutation_execution_nonce: pkg.mutation_execution_nonce,
         expected_execution_preparation_decision_id: pkg.execution_preparation_decision_id.clone(),
         expected_execution_preparation_request_id: pkg.execution_preparation_request_id.clone(),
-        expected_execution_preparation_intent_digest: pkg.execution_preparation_intent_digest.clone(),
+        expected_execution_preparation_intent_digest: pkg
+            .execution_preparation_intent_digest
+            .clone(),
         expected_execution_preparation_transcript_digest: pkg
             .execution_preparation_transcript_digest
             .clone(),
@@ -1847,9 +1979,7 @@ fn ce_inputs(
         expected_runtime_handoff_decision_id: pkg.runtime_handoff_decision_id.clone(),
         expected_runtime_handoff_request_id: pkg.runtime_handoff_request_id.clone(),
         expected_runtime_handoff_intent_digest: pkg.runtime_handoff_intent_digest.clone(),
-        expected_runtime_handoff_transcript_digest: pkg
-            .runtime_handoff_transcript_digest
-            .clone(),
+        expected_runtime_handoff_transcript_digest: pkg.runtime_handoff_transcript_digest.clone(),
         expected_runtime_handoff_nonce: pkg.runtime_handoff_nonce,
         expected_current_validator_set_epoch: CUR_EPOCH,
         expected_current_validator_set_version: CUR_VERSION,
@@ -1869,7 +1999,11 @@ fn ce_inputs(
 
 fn ce_case(env: TrustBundleEnvironment, sc: Sc) -> Xce {
     let dec = ca_decision(env, sc);
-    let target = dec.commit_authorization_artifact.as_ref().unwrap().epoch_transition_target;
+    let target = dec
+        .commit_authorization_artifact
+        .as_ref()
+        .unwrap()
+        .epoch_transition_target;
     let inputs = ce_inputs(env, &dec);
     let request = ProductionLiveEpochTransitionCommitExecutionRequest::new(
         LiveEpochTransitionCommitExecutionAuthoritySource::VerifiedCommitAuthorizationDecision {
@@ -1890,11 +2024,12 @@ fn empty_replay_ce() -> EmptyLiveEpochTransitionCommitExecutionReplaySet {
 }
 
 fn ce_eval(case: &Xce) -> ProductionLiveEpochTransitionCommitExecutionDecision {
-    case.executor.evaluate_live_epoch_transition_commit_execution(
-        &case.request,
-        &case.inputs,
-        &empty_replay_ce(),
-    )
+    case.executor
+        .evaluate_live_epoch_transition_commit_execution(
+            &case.request,
+            &case.inputs,
+            &empty_replay_ce(),
+        )
 }
 
 fn ce_decision(
@@ -1973,9 +2108,7 @@ fn x_inputs(
         expected_guarded_mutation_decision_id: pkg.guarded_mutation_decision_id.clone(),
         expected_guarded_mutation_request_id: pkg.guarded_mutation_request_id.clone(),
         expected_guarded_mutation_intent_digest: pkg.guarded_mutation_intent_digest.clone(),
-        expected_guarded_mutation_transcript_digest: pkg
-            .guarded_mutation_transcript_digest
-            .clone(),
+        expected_guarded_mutation_transcript_digest: pkg.guarded_mutation_transcript_digest.clone(),
         expected_guarded_mutation_nonce: pkg.guarded_mutation_nonce,
         expected_commit_execution_decision_id: dec.commit_execution_id.clone(),
         expected_commit_execution_request_id: dec.request_id.clone(),
@@ -1984,9 +2117,7 @@ fn x_inputs(
         expected_commit_execution_nonce: pkg.commit_execution_nonce,
         expected_commit_authorization_decision_id: pkg.commit_authorization_decision_id.clone(),
         expected_commit_authorization_request_id: pkg.commit_authorization_request_id.clone(),
-        expected_commit_authorization_intent_digest: pkg
-            .commit_authorization_intent_digest
-            .clone(),
+        expected_commit_authorization_intent_digest: pkg.commit_authorization_intent_digest.clone(),
         expected_commit_authorization_transcript_digest: pkg
             .commit_authorization_transcript_digest
             .clone(),
@@ -2000,7 +2131,9 @@ fn x_inputs(
         expected_mutation_execution_nonce: pkg.mutation_execution_nonce,
         expected_execution_preparation_decision_id: pkg.execution_preparation_decision_id.clone(),
         expected_execution_preparation_request_id: pkg.execution_preparation_request_id.clone(),
-        expected_execution_preparation_intent_digest: pkg.execution_preparation_intent_digest.clone(),
+        expected_execution_preparation_intent_digest: pkg
+            .execution_preparation_intent_digest
+            .clone(),
         expected_execution_preparation_transcript_digest: pkg
             .execution_preparation_transcript_digest
             .clone(),
@@ -2008,9 +2141,7 @@ fn x_inputs(
         expected_runtime_handoff_decision_id: pkg.runtime_handoff_decision_id.clone(),
         expected_runtime_handoff_request_id: pkg.runtime_handoff_request_id.clone(),
         expected_runtime_handoff_intent_digest: pkg.runtime_handoff_intent_digest.clone(),
-        expected_runtime_handoff_transcript_digest: pkg
-            .runtime_handoff_transcript_digest
-            .clone(),
+        expected_runtime_handoff_transcript_digest: pkg.runtime_handoff_transcript_digest.clone(),
         expected_runtime_handoff_nonce: pkg.runtime_handoff_nonce,
         expected_current_validator_set_epoch: CUR_EPOCH,
         expected_current_validator_set_version: CUR_VERSION,
@@ -2030,7 +2161,11 @@ fn x_inputs(
 
 fn x_case(env: TrustBundleEnvironment, sc: Sc) -> X323 {
     let dec = ce_decision(env, sc);
-    let target = dec.commit_execution_artifact.as_ref().unwrap().epoch_transition_target;
+    let target = dec
+        .commit_execution_artifact
+        .as_ref()
+        .unwrap()
+        .epoch_transition_target;
     let inputs = x_inputs(env, &dec);
     let request = ProductionLiveEpochTransitionCommitReceiptRequest::new(
         LiveEpochTransitionCommitReceiptAuthoritySource::VerifiedCommitExecutionDecision {
@@ -2064,8 +2199,8 @@ fn x_eval(case: &X323) -> ProductionLiveEpochTransitionCommitReceiptDecision {
 
 use qbind_node::pqc_production_live_epoch_transition_post_commit_audit::*;
 
-use ProductionLiveEpochTransitionPostCommitAuditOutcome as RO;
 use LiveEpochTransitionPostCommitAuditKind as RK;
+use ProductionLiveEpochTransitionPostCommitAuditOutcome as RO;
 
 const CRC_POLICY_ID: &str = "post-commit-audit-policy-1";
 const CRC_NONCE: u64 = 49;
@@ -2177,9 +2312,7 @@ fn r_inputs(
         expected_guarded_mutation_decision_id: pkg.guarded_mutation_decision_id.clone(),
         expected_guarded_mutation_request_id: pkg.guarded_mutation_request_id.clone(),
         expected_guarded_mutation_intent_digest: pkg.guarded_mutation_intent_digest.clone(),
-        expected_guarded_mutation_transcript_digest: pkg
-            .guarded_mutation_transcript_digest
-            .clone(),
+        expected_guarded_mutation_transcript_digest: pkg.guarded_mutation_transcript_digest.clone(),
         expected_guarded_mutation_nonce: pkg.guarded_mutation_nonce,
         expected_commit_receipt_decision_id: dec.commit_receipt_id.clone(),
         expected_commit_receipt_request_id: dec.request_id.clone(),
@@ -2188,9 +2321,7 @@ fn r_inputs(
         expected_commit_receipt_nonce: pkg.commit_receipt_nonce,
         expected_commit_authorization_decision_id: pkg.commit_authorization_decision_id.clone(),
         expected_commit_authorization_request_id: pkg.commit_authorization_request_id.clone(),
-        expected_commit_authorization_intent_digest: pkg
-            .commit_authorization_intent_digest
-            .clone(),
+        expected_commit_authorization_intent_digest: pkg.commit_authorization_intent_digest.clone(),
         expected_commit_authorization_transcript_digest: pkg
             .commit_authorization_transcript_digest
             .clone(),
@@ -2204,7 +2335,9 @@ fn r_inputs(
         expected_mutation_execution_nonce: pkg.mutation_execution_nonce,
         expected_execution_preparation_decision_id: pkg.execution_preparation_decision_id.clone(),
         expected_execution_preparation_request_id: pkg.execution_preparation_request_id.clone(),
-        expected_execution_preparation_intent_digest: pkg.execution_preparation_intent_digest.clone(),
+        expected_execution_preparation_intent_digest: pkg
+            .execution_preparation_intent_digest
+            .clone(),
         expected_execution_preparation_transcript_digest: pkg
             .execution_preparation_transcript_digest
             .clone(),
@@ -2212,9 +2345,7 @@ fn r_inputs(
         expected_runtime_handoff_decision_id: pkg.runtime_handoff_decision_id.clone(),
         expected_runtime_handoff_request_id: pkg.runtime_handoff_request_id.clone(),
         expected_runtime_handoff_intent_digest: pkg.runtime_handoff_intent_digest.clone(),
-        expected_runtime_handoff_transcript_digest: pkg
-            .runtime_handoff_transcript_digest
-            .clone(),
+        expected_runtime_handoff_transcript_digest: pkg.runtime_handoff_transcript_digest.clone(),
         expected_runtime_handoff_nonce: pkg.runtime_handoff_nonce,
         expected_current_validator_set_epoch: CUR_EPOCH,
         expected_current_validator_set_version: CUR_VERSION,
@@ -2234,7 +2365,11 @@ fn r_inputs(
 
 fn r_case(env: TrustBundleEnvironment, sc: Sc) -> R325 {
     let dec = cx_decision(env, sc);
-    let target = dec.commit_receipt_artifact.as_ref().unwrap().epoch_transition_target;
+    let target = dec
+        .commit_receipt_artifact
+        .as_ref()
+        .unwrap()
+        .epoch_transition_target;
     let inputs = r_inputs(env, &dec);
     let request = ProductionLiveEpochTransitionPostCommitAuditRequest::new(
         LiveEpochTransitionPostCommitAuditAuthoritySource::VerifiedCommitReceiptDecision {
@@ -2255,16 +2390,17 @@ fn empty_replay325() -> EmptyLiveEpochTransitionPostCommitAuditReplaySet {
 }
 
 fn r_eval(case: &R325) -> ProductionLiveEpochTransitionPostCommitAuditDecision {
-    case.executor.evaluate_live_epoch_transition_post_commit_audit(
-        &case.request,
-        &case.inputs,
-        &empty_replay325(),
-    )
+    case.executor
+        .evaluate_live_epoch_transition_post_commit_audit(
+            &case.request,
+            &case.inputs,
+            &empty_replay325(),
+        )
 }
 use qbind_node::pqc_production_live_epoch_transition_durable_audit_finalization::*;
 
-use ProductionLiveEpochTransitionDurableAuditFinalizationOutcome as SO;
 use LiveEpochTransitionDurableAuditFinalizationKind as SK;
+use ProductionLiveEpochTransitionDurableAuditFinalizationOutcome as SO;
 
 const CRC2_POLICY_ID: &str = "durable-audit-finalization-policy-1";
 const CRC2_NONCE: u64 = 49;
@@ -2376,9 +2512,7 @@ fn s_inputs(
         expected_guarded_mutation_decision_id: pkg.guarded_mutation_decision_id.clone(),
         expected_guarded_mutation_request_id: pkg.guarded_mutation_request_id.clone(),
         expected_guarded_mutation_intent_digest: pkg.guarded_mutation_intent_digest.clone(),
-        expected_guarded_mutation_transcript_digest: pkg
-            .guarded_mutation_transcript_digest
-            .clone(),
+        expected_guarded_mutation_transcript_digest: pkg.guarded_mutation_transcript_digest.clone(),
         expected_guarded_mutation_nonce: pkg.guarded_mutation_nonce,
         expected_post_commit_audit_decision_id: dec.post_commit_audit_id.clone(),
         expected_post_commit_audit_request_id: dec.request_id.clone(),
@@ -2387,9 +2521,7 @@ fn s_inputs(
         expected_post_commit_audit_nonce: pkg.post_commit_audit_nonce,
         expected_commit_authorization_decision_id: pkg.commit_authorization_decision_id.clone(),
         expected_commit_authorization_request_id: pkg.commit_authorization_request_id.clone(),
-        expected_commit_authorization_intent_digest: pkg
-            .commit_authorization_intent_digest
-            .clone(),
+        expected_commit_authorization_intent_digest: pkg.commit_authorization_intent_digest.clone(),
         expected_commit_authorization_transcript_digest: pkg
             .commit_authorization_transcript_digest
             .clone(),
@@ -2403,7 +2535,9 @@ fn s_inputs(
         expected_mutation_execution_nonce: pkg.mutation_execution_nonce,
         expected_execution_preparation_decision_id: pkg.execution_preparation_decision_id.clone(),
         expected_execution_preparation_request_id: pkg.execution_preparation_request_id.clone(),
-        expected_execution_preparation_intent_digest: pkg.execution_preparation_intent_digest.clone(),
+        expected_execution_preparation_intent_digest: pkg
+            .execution_preparation_intent_digest
+            .clone(),
         expected_execution_preparation_transcript_digest: pkg
             .execution_preparation_transcript_digest
             .clone(),
@@ -2411,9 +2545,7 @@ fn s_inputs(
         expected_runtime_handoff_decision_id: pkg.runtime_handoff_decision_id.clone(),
         expected_runtime_handoff_request_id: pkg.runtime_handoff_request_id.clone(),
         expected_runtime_handoff_intent_digest: pkg.runtime_handoff_intent_digest.clone(),
-        expected_runtime_handoff_transcript_digest: pkg
-            .runtime_handoff_transcript_digest
-            .clone(),
+        expected_runtime_handoff_transcript_digest: pkg.runtime_handoff_transcript_digest.clone(),
         expected_runtime_handoff_nonce: pkg.runtime_handoff_nonce,
         expected_current_validator_set_epoch: CUR_EPOCH,
         expected_current_validator_set_version: CUR_VERSION,
@@ -2433,7 +2565,11 @@ fn s_inputs(
 
 fn s_case(env: TrustBundleEnvironment, sc: Sc) -> S327 {
     let dec = cr_decision(env, sc);
-    let target = dec.post_commit_audit_artifact.as_ref().unwrap().epoch_transition_target;
+    let target = dec
+        .post_commit_audit_artifact
+        .as_ref()
+        .unwrap()
+        .epoch_transition_target;
     let inputs = s_inputs(env, &dec);
     let request = ProductionLiveEpochTransitionDurableAuditFinalizationRequest::new(
         LiveEpochTransitionDurableAuditFinalizationAuthoritySource::VerifiedPostCommitAuditDecision {
@@ -2454,16 +2590,17 @@ fn empty_replay327() -> EmptyLiveEpochTransitionDurableAuditFinalizationReplaySe
 }
 
 fn s_eval(case: &S327) -> ProductionLiveEpochTransitionDurableAuditFinalizationDecision {
-    case.executor.evaluate_live_epoch_transition_durable_audit_finalization(
-        &case.request,
-        &case.inputs,
-        &empty_replay327(),
-    )
+    case.executor
+        .evaluate_live_epoch_transition_durable_audit_finalization(
+            &case.request,
+            &case.inputs,
+            &empty_replay327(),
+        )
 }
 use qbind_node::pqc_production_live_epoch_transition_audit_ledger_commitment::*;
 
-use ProductionLiveEpochTransitionAuditLedgerCommitmentOutcome as TO;
 use LiveEpochTransitionAuditLedgerCommitmentKind as TK;
+use ProductionLiveEpochTransitionAuditLedgerCommitmentOutcome as TO;
 
 const CRC3_POLICY_ID: &str = "audit-ledger-commitment-policy-1";
 const CRC3_NONCE: u64 = 49;
@@ -2575,20 +2712,18 @@ fn t_inputs(
         expected_guarded_mutation_decision_id: pkg.guarded_mutation_decision_id.clone(),
         expected_guarded_mutation_request_id: pkg.guarded_mutation_request_id.clone(),
         expected_guarded_mutation_intent_digest: pkg.guarded_mutation_intent_digest.clone(),
-        expected_guarded_mutation_transcript_digest: pkg
-            .guarded_mutation_transcript_digest
-            .clone(),
+        expected_guarded_mutation_transcript_digest: pkg.guarded_mutation_transcript_digest.clone(),
         expected_guarded_mutation_nonce: pkg.guarded_mutation_nonce,
         expected_durable_audit_finalization_decision_id: dec.durable_audit_finalization_id.clone(),
         expected_durable_audit_finalization_request_id: dec.request_id.clone(),
-        expected_durable_audit_finalization_intent_digest: dec.durable_audit_finalization_digest.clone(),
+        expected_durable_audit_finalization_intent_digest: dec
+            .durable_audit_finalization_digest
+            .clone(),
         expected_durable_audit_finalization_transcript_digest: dec.transcript_digest.clone(),
         expected_durable_audit_finalization_nonce: pkg.durable_audit_finalization_nonce,
         expected_commit_authorization_decision_id: pkg.commit_authorization_decision_id.clone(),
         expected_commit_authorization_request_id: pkg.commit_authorization_request_id.clone(),
-        expected_commit_authorization_intent_digest: pkg
-            .commit_authorization_intent_digest
-            .clone(),
+        expected_commit_authorization_intent_digest: pkg.commit_authorization_intent_digest.clone(),
         expected_commit_authorization_transcript_digest: pkg
             .commit_authorization_transcript_digest
             .clone(),
@@ -2602,7 +2737,9 @@ fn t_inputs(
         expected_mutation_execution_nonce: pkg.mutation_execution_nonce,
         expected_execution_preparation_decision_id: pkg.execution_preparation_decision_id.clone(),
         expected_execution_preparation_request_id: pkg.execution_preparation_request_id.clone(),
-        expected_execution_preparation_intent_digest: pkg.execution_preparation_intent_digest.clone(),
+        expected_execution_preparation_intent_digest: pkg
+            .execution_preparation_intent_digest
+            .clone(),
         expected_execution_preparation_transcript_digest: pkg
             .execution_preparation_transcript_digest
             .clone(),
@@ -2610,9 +2747,7 @@ fn t_inputs(
         expected_runtime_handoff_decision_id: pkg.runtime_handoff_decision_id.clone(),
         expected_runtime_handoff_request_id: pkg.runtime_handoff_request_id.clone(),
         expected_runtime_handoff_intent_digest: pkg.runtime_handoff_intent_digest.clone(),
-        expected_runtime_handoff_transcript_digest: pkg
-            .runtime_handoff_transcript_digest
-            .clone(),
+        expected_runtime_handoff_transcript_digest: pkg.runtime_handoff_transcript_digest.clone(),
         expected_runtime_handoff_nonce: pkg.runtime_handoff_nonce,
         expected_current_validator_set_epoch: CUR_EPOCH,
         expected_current_validator_set_version: CUR_VERSION,
@@ -2632,7 +2767,11 @@ fn t_inputs(
 
 fn t_case(env: TrustBundleEnvironment, sc: Sc) -> T329 {
     let dec = cs_decision(env, sc);
-    let target = dec.durable_audit_finalization_artifact.as_ref().unwrap().epoch_transition_target;
+    let target = dec
+        .durable_audit_finalization_artifact
+        .as_ref()
+        .unwrap()
+        .epoch_transition_target;
     let inputs = t_inputs(env, &dec);
     let request = ProductionLiveEpochTransitionAuditLedgerCommitmentRequest::new(
         LiveEpochTransitionAuditLedgerCommitmentAuthoritySource::VerifiedDurableAuditFinalizationDecision {
@@ -2653,16 +2792,17 @@ fn empty_replay329() -> EmptyLiveEpochTransitionAuditLedgerCommitmentReplaySet {
 }
 
 fn t_eval(case: &T329) -> ProductionLiveEpochTransitionAuditLedgerCommitmentDecision {
-    case.executor.evaluate_live_epoch_transition_audit_ledger_commitment(
-        &case.request,
-        &case.inputs,
-        &empty_replay329(),
-    )
+    case.executor
+        .evaluate_live_epoch_transition_audit_ledger_commitment(
+            &case.request,
+            &case.inputs,
+            &empty_replay329(),
+        )
 }
 use qbind_node::pqc_production_live_epoch_transition_durable_audit_publication::*;
 
-use ProductionLiveEpochTransitionDurableAuditPublicationOutcome as UO;
 use LiveEpochTransitionDurableAuditPublicationKind as UK;
+use ProductionLiveEpochTransitionDurableAuditPublicationOutcome as UO;
 
 const CRC4_POLICY_ID: &str = "durable-audit-publication-policy-1";
 const CRC4_NONCE: u64 = 49;
@@ -2774,9 +2914,7 @@ fn u_inputs(
         expected_guarded_mutation_decision_id: pkg.guarded_mutation_decision_id.clone(),
         expected_guarded_mutation_request_id: pkg.guarded_mutation_request_id.clone(),
         expected_guarded_mutation_intent_digest: pkg.guarded_mutation_intent_digest.clone(),
-        expected_guarded_mutation_transcript_digest: pkg
-            .guarded_mutation_transcript_digest
-            .clone(),
+        expected_guarded_mutation_transcript_digest: pkg.guarded_mutation_transcript_digest.clone(),
         expected_guarded_mutation_nonce: pkg.guarded_mutation_nonce,
         expected_audit_ledger_commitment_decision_id: dec.audit_ledger_commitment_id.clone(),
         expected_audit_ledger_commitment_request_id: dec.request_id.clone(),
@@ -2785,9 +2923,7 @@ fn u_inputs(
         expected_audit_ledger_commitment_nonce: pkg.audit_ledger_commitment_nonce,
         expected_commit_authorization_decision_id: pkg.commit_authorization_decision_id.clone(),
         expected_commit_authorization_request_id: pkg.commit_authorization_request_id.clone(),
-        expected_commit_authorization_intent_digest: pkg
-            .commit_authorization_intent_digest
-            .clone(),
+        expected_commit_authorization_intent_digest: pkg.commit_authorization_intent_digest.clone(),
         expected_commit_authorization_transcript_digest: pkg
             .commit_authorization_transcript_digest
             .clone(),
@@ -2801,7 +2937,9 @@ fn u_inputs(
         expected_mutation_execution_nonce: pkg.mutation_execution_nonce,
         expected_execution_preparation_decision_id: pkg.execution_preparation_decision_id.clone(),
         expected_execution_preparation_request_id: pkg.execution_preparation_request_id.clone(),
-        expected_execution_preparation_intent_digest: pkg.execution_preparation_intent_digest.clone(),
+        expected_execution_preparation_intent_digest: pkg
+            .execution_preparation_intent_digest
+            .clone(),
         expected_execution_preparation_transcript_digest: pkg
             .execution_preparation_transcript_digest
             .clone(),
@@ -2809,9 +2947,7 @@ fn u_inputs(
         expected_runtime_handoff_decision_id: pkg.runtime_handoff_decision_id.clone(),
         expected_runtime_handoff_request_id: pkg.runtime_handoff_request_id.clone(),
         expected_runtime_handoff_intent_digest: pkg.runtime_handoff_intent_digest.clone(),
-        expected_runtime_handoff_transcript_digest: pkg
-            .runtime_handoff_transcript_digest
-            .clone(),
+        expected_runtime_handoff_transcript_digest: pkg.runtime_handoff_transcript_digest.clone(),
         expected_runtime_handoff_nonce: pkg.runtime_handoff_nonce,
         expected_current_validator_set_epoch: CUR_EPOCH,
         expected_current_validator_set_version: CUR_VERSION,
@@ -2831,7 +2967,11 @@ fn u_inputs(
 
 fn u_case(env: TrustBundleEnvironment, sc: Sc) -> U331 {
     let dec = ct_decision(env, sc);
-    let target = dec.audit_ledger_commitment_artifact.as_ref().unwrap().epoch_transition_target;
+    let target = dec
+        .audit_ledger_commitment_artifact
+        .as_ref()
+        .unwrap()
+        .epoch_transition_target;
     let inputs = u_inputs(env, &dec);
     let request = ProductionLiveEpochTransitionDurableAuditPublicationRequest::new(
         LiveEpochTransitionDurableAuditPublicationAuthoritySource::VerifiedAuditLedgerCommitmentDecision {
@@ -2852,11 +2992,12 @@ fn empty_replay331() -> EmptyLiveEpochTransitionDurableAuditPublicationReplaySet
 }
 
 fn u_eval(case: &U331) -> ProductionLiveEpochTransitionDurableAuditPublicationDecision {
-    case.executor.evaluate_live_epoch_transition_durable_audit_publication(
-        &case.request,
-        &case.inputs,
-        &empty_replay331(),
-    )
+    case.executor
+        .evaluate_live_epoch_transition_durable_audit_publication(
+            &case.request,
+            &case.inputs,
+            &empty_replay331(),
+        )
 }
 
 fn u_eval_replay(
@@ -2864,13 +3005,17 @@ fn u_eval_replay(
     replay: &[String],
 ) -> ProductionLiveEpochTransitionDurableAuditPublicationDecision {
     case.executor
-        .evaluate_live_epoch_transition_durable_audit_publication(&case.request, &case.inputs, &replay)
+        .evaluate_live_epoch_transition_durable_audit_publication(
+            &case.request,
+            &case.inputs,
+            &replay,
+        )
 }
 
 use qbind_node::pqc_production_live_epoch_transition_external_publication::*;
 
-use ProductionLiveEpochTransitionExternalPublicationOutcome as VO;
 use LiveEpochTransitionExternalPublicationKind as VK;
+use ProductionLiveEpochTransitionExternalPublicationOutcome as VO;
 
 const CRC5_POLICY_ID: &str = "external-publication-policy-1";
 const CRC5_NONCE: u64 = 49;
@@ -2982,20 +3127,18 @@ fn v_inputs(
         expected_guarded_mutation_decision_id: pkg.guarded_mutation_decision_id.clone(),
         expected_guarded_mutation_request_id: pkg.guarded_mutation_request_id.clone(),
         expected_guarded_mutation_intent_digest: pkg.guarded_mutation_intent_digest.clone(),
-        expected_guarded_mutation_transcript_digest: pkg
-            .guarded_mutation_transcript_digest
-            .clone(),
+        expected_guarded_mutation_transcript_digest: pkg.guarded_mutation_transcript_digest.clone(),
         expected_guarded_mutation_nonce: pkg.guarded_mutation_nonce,
         expected_durable_audit_publication_decision_id: dec.durable_audit_publication_id.clone(),
         expected_durable_audit_publication_request_id: dec.request_id.clone(),
-        expected_durable_audit_publication_intent_digest: dec.durable_audit_publication_digest.clone(),
+        expected_durable_audit_publication_intent_digest: dec
+            .durable_audit_publication_digest
+            .clone(),
         expected_durable_audit_publication_transcript_digest: dec.transcript_digest.clone(),
         expected_durable_audit_publication_nonce: pkg.durable_audit_publication_nonce,
         expected_commit_authorization_decision_id: pkg.commit_authorization_decision_id.clone(),
         expected_commit_authorization_request_id: pkg.commit_authorization_request_id.clone(),
-        expected_commit_authorization_intent_digest: pkg
-            .commit_authorization_intent_digest
-            .clone(),
+        expected_commit_authorization_intent_digest: pkg.commit_authorization_intent_digest.clone(),
         expected_commit_authorization_transcript_digest: pkg
             .commit_authorization_transcript_digest
             .clone(),
@@ -3009,7 +3152,9 @@ fn v_inputs(
         expected_mutation_execution_nonce: pkg.mutation_execution_nonce,
         expected_execution_preparation_decision_id: pkg.execution_preparation_decision_id.clone(),
         expected_execution_preparation_request_id: pkg.execution_preparation_request_id.clone(),
-        expected_execution_preparation_intent_digest: pkg.execution_preparation_intent_digest.clone(),
+        expected_execution_preparation_intent_digest: pkg
+            .execution_preparation_intent_digest
+            .clone(),
         expected_execution_preparation_transcript_digest: pkg
             .execution_preparation_transcript_digest
             .clone(),
@@ -3017,9 +3162,7 @@ fn v_inputs(
         expected_runtime_handoff_decision_id: pkg.runtime_handoff_decision_id.clone(),
         expected_runtime_handoff_request_id: pkg.runtime_handoff_request_id.clone(),
         expected_runtime_handoff_intent_digest: pkg.runtime_handoff_intent_digest.clone(),
-        expected_runtime_handoff_transcript_digest: pkg
-            .runtime_handoff_transcript_digest
-            .clone(),
+        expected_runtime_handoff_transcript_digest: pkg.runtime_handoff_transcript_digest.clone(),
         expected_runtime_handoff_nonce: pkg.runtime_handoff_nonce,
         expected_current_validator_set_epoch: CUR_EPOCH,
         expected_current_validator_set_version: CUR_VERSION,
@@ -3039,7 +3182,11 @@ fn v_inputs(
 
 fn v_case(env: TrustBundleEnvironment, sc: Sc) -> V333 {
     let dec = cu_decision(env, sc);
-    let target = dec.durable_audit_publication_artifact.as_ref().unwrap().epoch_transition_target;
+    let target = dec
+        .durable_audit_publication_artifact
+        .as_ref()
+        .unwrap()
+        .epoch_transition_target;
     let inputs = v_inputs(env, &dec);
     let request = ProductionLiveEpochTransitionExternalPublicationRequest::new(
         LiveEpochTransitionExternalPublicationAuthoritySource::VerifiedDurableAuditPublicationDecision {
@@ -3060,11 +3207,12 @@ fn empty_replay333() -> EmptyLiveEpochTransitionExternalPublicationReplaySet {
 }
 
 fn v_eval(case: &V333) -> ProductionLiveEpochTransitionExternalPublicationDecision {
-    case.executor.evaluate_live_epoch_transition_external_publication(
-        &case.request,
-        &case.inputs,
-        &empty_replay333(),
-    )
+    case.executor
+        .evaluate_live_epoch_transition_external_publication(
+            &case.request,
+            &case.inputs,
+            &empty_replay333(),
+        )
 }
 
 fn v_eval_replay(
@@ -3077,8 +3225,8 @@ fn v_eval_replay(
 
 use qbind_node::pqc_production_live_epoch_transition_settlement_preparation::*;
 
-use ProductionLiveEpochTransitionSettlementPreparationOutcome as WO;
 use LiveEpochTransitionSettlementPreparationKind as WK;
+use ProductionLiveEpochTransitionSettlementPreparationOutcome as WO;
 
 const CRC6_POLICY_ID: &str = "settlement-preparation-policy-1";
 const CRC6_NONCE: u64 = 49;
@@ -3190,9 +3338,7 @@ fn w_inputs(
         expected_guarded_mutation_decision_id: pkg.guarded_mutation_decision_id.clone(),
         expected_guarded_mutation_request_id: pkg.guarded_mutation_request_id.clone(),
         expected_guarded_mutation_intent_digest: pkg.guarded_mutation_intent_digest.clone(),
-        expected_guarded_mutation_transcript_digest: pkg
-            .guarded_mutation_transcript_digest
-            .clone(),
+        expected_guarded_mutation_transcript_digest: pkg.guarded_mutation_transcript_digest.clone(),
         expected_guarded_mutation_nonce: pkg.guarded_mutation_nonce,
         expected_external_publication_decision_id: dec.external_publication_id.clone(),
         expected_external_publication_request_id: dec.request_id.clone(),
@@ -3201,9 +3347,7 @@ fn w_inputs(
         expected_external_publication_nonce: pkg.external_publication_nonce,
         expected_commit_authorization_decision_id: pkg.commit_authorization_decision_id.clone(),
         expected_commit_authorization_request_id: pkg.commit_authorization_request_id.clone(),
-        expected_commit_authorization_intent_digest: pkg
-            .commit_authorization_intent_digest
-            .clone(),
+        expected_commit_authorization_intent_digest: pkg.commit_authorization_intent_digest.clone(),
         expected_commit_authorization_transcript_digest: pkg
             .commit_authorization_transcript_digest
             .clone(),
@@ -3217,7 +3361,9 @@ fn w_inputs(
         expected_mutation_execution_nonce: pkg.mutation_execution_nonce,
         expected_execution_preparation_decision_id: pkg.execution_preparation_decision_id.clone(),
         expected_execution_preparation_request_id: pkg.execution_preparation_request_id.clone(),
-        expected_execution_preparation_intent_digest: pkg.execution_preparation_intent_digest.clone(),
+        expected_execution_preparation_intent_digest: pkg
+            .execution_preparation_intent_digest
+            .clone(),
         expected_execution_preparation_transcript_digest: pkg
             .execution_preparation_transcript_digest
             .clone(),
@@ -3225,9 +3371,7 @@ fn w_inputs(
         expected_runtime_handoff_decision_id: pkg.runtime_handoff_decision_id.clone(),
         expected_runtime_handoff_request_id: pkg.runtime_handoff_request_id.clone(),
         expected_runtime_handoff_intent_digest: pkg.runtime_handoff_intent_digest.clone(),
-        expected_runtime_handoff_transcript_digest: pkg
-            .runtime_handoff_transcript_digest
-            .clone(),
+        expected_runtime_handoff_transcript_digest: pkg.runtime_handoff_transcript_digest.clone(),
         expected_runtime_handoff_nonce: pkg.runtime_handoff_nonce,
         expected_current_validator_set_epoch: CUR_EPOCH,
         expected_current_validator_set_version: CUR_VERSION,
@@ -3247,7 +3391,11 @@ fn w_inputs(
 
 fn w_case(env: TrustBundleEnvironment, sc: Sc) -> W335 {
     let dec = cv_decision(env, sc);
-    let target = dec.external_publication_artifact.as_ref().unwrap().epoch_transition_target;
+    let target = dec
+        .external_publication_artifact
+        .as_ref()
+        .unwrap()
+        .epoch_transition_target;
     let inputs = w_inputs(env, &dec);
     let request = ProductionLiveEpochTransitionSettlementPreparationRequest::new(
         LiveEpochTransitionSettlementPreparationAuthoritySource::VerifiedExternalPublicationDecision {
@@ -3268,11 +3416,12 @@ fn empty_replay335() -> EmptyLiveEpochTransitionSettlementPreparationReplaySet {
 }
 
 fn w_eval(case: &W335) -> ProductionLiveEpochTransitionSettlementPreparationDecision {
-    case.executor.evaluate_live_epoch_transition_settlement_preparation(
-        &case.request,
-        &case.inputs,
-        &empty_replay335(),
-    )
+    case.executor
+        .evaluate_live_epoch_transition_settlement_preparation(
+            &case.request,
+            &case.inputs,
+            &empty_replay335(),
+        )
 }
 
 fn w_eval_replay(
@@ -3289,8 +3438,8 @@ fn w_eval_replay(
 
 use qbind_node::pqc_production_live_epoch_transition_settlement_execution_preparation::*;
 
-use ProductionLiveEpochTransitionSettlementExecutionPreparationOutcome as YO;
 use LiveEpochTransitionSettlementExecutionPreparationKind as YK;
+use ProductionLiveEpochTransitionSettlementExecutionPreparationOutcome as YO;
 
 const CRC7_POLICY_ID: &str = "settlement-execution-preparation-policy-1";
 const CRC7_NONCE: u64 = 49;
@@ -3402,9 +3551,7 @@ fn y_inputs(
         expected_guarded_mutation_decision_id: pkg.guarded_mutation_decision_id.clone(),
         expected_guarded_mutation_request_id: pkg.guarded_mutation_request_id.clone(),
         expected_guarded_mutation_intent_digest: pkg.guarded_mutation_intent_digest.clone(),
-        expected_guarded_mutation_transcript_digest: pkg
-            .guarded_mutation_transcript_digest
-            .clone(),
+        expected_guarded_mutation_transcript_digest: pkg.guarded_mutation_transcript_digest.clone(),
         expected_guarded_mutation_nonce: pkg.guarded_mutation_nonce,
         expected_settlement_preparation_decision_id: dec.settlement_preparation_id.clone(),
         expected_settlement_preparation_request_id: dec.request_id.clone(),
@@ -3413,9 +3560,7 @@ fn y_inputs(
         expected_settlement_preparation_nonce: pkg.settlement_preparation_nonce,
         expected_commit_authorization_decision_id: pkg.commit_authorization_decision_id.clone(),
         expected_commit_authorization_request_id: pkg.commit_authorization_request_id.clone(),
-        expected_commit_authorization_intent_digest: pkg
-            .commit_authorization_intent_digest
-            .clone(),
+        expected_commit_authorization_intent_digest: pkg.commit_authorization_intent_digest.clone(),
         expected_commit_authorization_transcript_digest: pkg
             .commit_authorization_transcript_digest
             .clone(),
@@ -3429,7 +3574,9 @@ fn y_inputs(
         expected_mutation_execution_nonce: pkg.mutation_execution_nonce,
         expected_execution_preparation_decision_id: pkg.execution_preparation_decision_id.clone(),
         expected_execution_preparation_request_id: pkg.execution_preparation_request_id.clone(),
-        expected_execution_preparation_intent_digest: pkg.execution_preparation_intent_digest.clone(),
+        expected_execution_preparation_intent_digest: pkg
+            .execution_preparation_intent_digest
+            .clone(),
         expected_execution_preparation_transcript_digest: pkg
             .execution_preparation_transcript_digest
             .clone(),
@@ -3437,9 +3584,7 @@ fn y_inputs(
         expected_runtime_handoff_decision_id: pkg.runtime_handoff_decision_id.clone(),
         expected_runtime_handoff_request_id: pkg.runtime_handoff_request_id.clone(),
         expected_runtime_handoff_intent_digest: pkg.runtime_handoff_intent_digest.clone(),
-        expected_runtime_handoff_transcript_digest: pkg
-            .runtime_handoff_transcript_digest
-            .clone(),
+        expected_runtime_handoff_transcript_digest: pkg.runtime_handoff_transcript_digest.clone(),
         expected_runtime_handoff_nonce: pkg.runtime_handoff_nonce,
         expected_current_validator_set_epoch: CUR_EPOCH,
         expected_current_validator_set_version: CUR_VERSION,
@@ -3459,7 +3604,11 @@ fn y_inputs(
 
 fn y_case(env: TrustBundleEnvironment, sc: Sc) -> Y337 {
     let dec = cw_decision(env, sc);
-    let target = dec.settlement_preparation_artifact.as_ref().unwrap().epoch_transition_target;
+    let target = dec
+        .settlement_preparation_artifact
+        .as_ref()
+        .unwrap()
+        .epoch_transition_target;
     let inputs = y_inputs(env, &dec);
     let request = ProductionLiveEpochTransitionSettlementExecutionPreparationRequest::new(
         LiveEpochTransitionSettlementExecutionPreparationAuthoritySource::VerifiedSettlementPreparationDecision {
@@ -3469,7 +3618,8 @@ fn y_case(env: TrustBundleEnvironment, sc: Sc) -> Y337 {
         CRC7_NONCE,
     );
     Y337 {
-        executor: ProductionLiveEpochTransitionSettlementExecutionPreparationExecutor::source_test(),
+        executor: ProductionLiveEpochTransitionSettlementExecutionPreparationExecutor::source_test(
+        ),
         request,
         inputs,
     }
@@ -3480,11 +3630,12 @@ fn empty_replay337() -> EmptyLiveEpochTransitionSettlementExecutionPreparationRe
 }
 
 fn y_eval(case: &Y337) -> ProductionLiveEpochTransitionSettlementExecutionPreparationDecision {
-    case.executor.evaluate_live_epoch_transition_settlement_execution_preparation(
-        &case.request,
-        &case.inputs,
-        &empty_replay337(),
-    )
+    case.executor
+        .evaluate_live_epoch_transition_settlement_execution_preparation(
+            &case.request,
+            &case.inputs,
+            &empty_replay337(),
+        )
 }
 
 fn y_eval_replay(
@@ -3492,7 +3643,11 @@ fn y_eval_replay(
     replay: &[String],
 ) -> ProductionLiveEpochTransitionSettlementExecutionPreparationDecision {
     case.executor
-        .evaluate_live_epoch_transition_settlement_execution_preparation(&case.request, &case.inputs, &replay)
+        .evaluate_live_epoch_transition_settlement_execution_preparation(
+            &case.request,
+            &case.inputs,
+            &replay,
+        )
 }
 
 fn y_exec_with_policy(
@@ -3542,7 +3697,10 @@ fn accept_all_scenarios_devnet() {
         let d = y_eval(&c);
         assert!(d.is_accept(), "scenario must accept");
         assert!(d.authorizes_future_mutation_only());
-        let art = d.settlement_execution_preparation_artifact.as_ref().unwrap();
+        let art = d
+            .settlement_execution_preparation_artifact
+            .as_ref()
+            .unwrap();
         assert_eq!(art.staged_kind, expected_crc7_kind(sc));
         assert_eq!(art.settlement_execution_preparation_nonce, CRC7_NONCE);
         assert_eq!(art.settlement_preparation_nonce, CRC4_NONCE);
@@ -3556,7 +3714,10 @@ fn accept_all_scenarios_testnet() {
         let c = y_case(TrustBundleEnvironment::Testnet, sc);
         let d = y_eval(&c);
         assert!(d.is_accept());
-        let art = d.settlement_execution_preparation_artifact.as_ref().unwrap();
+        let art = d
+            .settlement_execution_preparation_artifact
+            .as_ref()
+            .unwrap();
         assert_eq!(art.environment, TrustBundleEnvironment::Testnet);
         assert_eq!(art.staged_kind, expected_crc7_kind(sc));
     }
@@ -3574,7 +3735,10 @@ fn accept_outcome_carries_kind_env_target_nonce() {
         } => {
             assert_eq!(execution_kind, YK::StageApplyValidatorAdd);
             assert_eq!(environment, TrustBundleEnvironment::Devnet);
-            assert_eq!(epoch_transition_target, c.request.proposed_epoch_transition_target);
+            assert_eq!(
+                epoch_transition_target,
+                c.request.proposed_epoch_transition_target
+            );
             assert_eq!(settlement_execution_preparation_nonce, CRC7_NONCE);
         }
         other => panic!("unexpected outcome: {other:?}"),
@@ -3583,7 +3747,11 @@ fn accept_outcome_carries_kind_env_target_nonce() {
 
 fn accept_artifact_reexposes_consumed_settlement_preparation_transcript() {
     let dec = cw_decision(TrustBundleEnvironment::Devnet, Sc::Add);
-    let target = dec.settlement_preparation_artifact.as_ref().unwrap().epoch_transition_target;
+    let target = dec
+        .settlement_preparation_artifact
+        .as_ref()
+        .unwrap()
+        .epoch_transition_target;
     let inputs = y_inputs(TrustBundleEnvironment::Devnet, &dec);
     let handoff_id = dec.settlement_preparation_id.clone();
     let handoff_req = dec.request_id.clone();
@@ -3602,35 +3770,71 @@ fn accept_artifact_reexposes_consumed_settlement_preparation_transcript() {
         &inputs,
         &empty_replay337(),
     );
-    let art = d.settlement_execution_preparation_artifact.as_ref().unwrap();
+    let art = d
+        .settlement_execution_preparation_artifact
+        .as_ref()
+        .unwrap();
     assert_eq!(art.settlement_preparation_decision_id, handoff_id);
     assert_eq!(art.settlement_preparation_request_id, handoff_req);
     assert_eq!(art.settlement_preparation_intent_digest, handoff_digest);
-    assert_eq!(art.settlement_preparation_transcript_digest, handoff_transcript);
+    assert_eq!(
+        art.settlement_preparation_transcript_digest,
+        handoff_transcript
+    );
 }
 
 fn accept_artifact_encodes_future_executor_preconditions() {
     let c = y_case(TrustBundleEnvironment::Devnet, Sc::Add);
     let d = y_eval(&c);
-    let art = d.settlement_execution_preparation_artifact.as_ref().unwrap();
-    assert_eq!(art.precondition_current_validator_set_epoch, art.validator_set_epoch);
-    assert_eq!(art.precondition_current_validator_set_version, art.validator_set_version);
+    let art = d
+        .settlement_execution_preparation_artifact
+        .as_ref()
+        .unwrap();
+    assert_eq!(
+        art.precondition_current_validator_set_epoch,
+        art.validator_set_epoch
+    );
+    assert_eq!(
+        art.precondition_current_validator_set_version,
+        art.validator_set_version
+    );
     assert_eq!(art.precondition_target_epoch, art.epoch_transition_target);
-    assert_eq!(art.precondition_required_governance_epoch, art.governance_epoch);
-    assert_eq!(art.precondition_required_authority_sequence, art.authority_domain_sequence);
+    assert_eq!(
+        art.precondition_required_governance_epoch,
+        art.governance_epoch
+    );
+    assert_eq!(
+        art.precondition_required_authority_sequence,
+        art.authority_domain_sequence
+    );
     assert_eq!(art.precondition_required_replay_window, REPLAY_WINDOW);
-    assert_eq!(art.precondition_proposed_validator_set_digest, art.proposed_set_digest);
+    assert_eq!(
+        art.precondition_proposed_validator_set_digest,
+        art.proposed_set_digest
+    );
     assert_eq!(art.precondition_delta_digest, art.delta_digest);
-    assert_eq!(art.precondition_current_validator_set_digest, art.current_set_digest);
+    assert_eq!(
+        art.precondition_current_validator_set_digest,
+        art.current_set_digest
+    );
 }
 
 fn accept_decision_ids_match_artifact_ids() {
     let c = y_case(TrustBundleEnvironment::Devnet, Sc::Add);
     let d = y_eval(&c);
-    let art = d.settlement_execution_preparation_artifact.as_ref().unwrap();
-    assert_eq!(d.settlement_execution_preparation_id, art.settlement_execution_preparation_id);
+    let art = d
+        .settlement_execution_preparation_artifact
+        .as_ref()
+        .unwrap();
+    assert_eq!(
+        d.settlement_execution_preparation_id,
+        art.settlement_execution_preparation_id
+    );
     assert_eq!(d.request_id, art.request_id);
-    assert_eq!(d.settlement_execution_preparation_digest, art.settlement_execution_preparation_digest);
+    assert_eq!(
+        d.settlement_execution_preparation_digest,
+        art.settlement_execution_preparation_digest
+    );
     assert_eq!(d.transcript_digest, art.transcript_digest);
     assert!(!d.settlement_execution_preparation_id.is_empty());
     assert!(!d.request_id.is_empty());
@@ -3647,9 +3851,15 @@ fn deterministic_digests_under_reevaluation() {
         let c = y_case(TrustBundleEnvironment::Devnet, sc);
         let d1 = y_eval(&c);
         let d2 = y_eval(&c);
-        assert_eq!(d1.settlement_execution_preparation_id, d2.settlement_execution_preparation_id);
+        assert_eq!(
+            d1.settlement_execution_preparation_id,
+            d2.settlement_execution_preparation_id
+        );
         assert_eq!(d1.request_id, d2.request_id);
-        assert_eq!(d1.settlement_execution_preparation_digest, d2.settlement_execution_preparation_digest);
+        assert_eq!(
+            d1.settlement_execution_preparation_digest,
+            d2.settlement_execution_preparation_digest
+        );
         assert_eq!(d1.transcript_digest, d2.transcript_digest);
     }
 }
@@ -3657,8 +3867,14 @@ fn deterministic_digests_under_reevaluation() {
 fn artifact_content_digest_is_stable() {
     let c = y_case(TrustBundleEnvironment::Devnet, Sc::Bulk);
     let d = y_eval(&c);
-    let art = d.settlement_execution_preparation_artifact.as_ref().unwrap();
-    assert_eq!(art.content_digest(), art.settlement_execution_preparation_digest);
+    let art = d
+        .settlement_execution_preparation_artifact
+        .as_ref()
+        .unwrap();
+    assert_eq!(
+        art.content_digest(),
+        art.settlement_execution_preparation_digest
+    );
     assert_eq!(art.content_digest(), art.content_digest());
 }
 
@@ -3705,9 +3921,16 @@ fn tampered_settlement_preparation_package_integrity_mismatch() {
     // Mutate the consumed package so its content digest no longer matches the
     // bound handoff decision digest.
     let mut dec = cw_decision(TrustBundleEnvironment::Devnet, Sc::Add);
-    let target = dec.settlement_preparation_artifact.as_ref().unwrap().epoch_transition_target;
+    let target = dec
+        .settlement_preparation_artifact
+        .as_ref()
+        .unwrap()
+        .epoch_transition_target;
     let inputs = y_inputs(TrustBundleEnvironment::Devnet, &dec);
-    dec.settlement_preparation_artifact.as_mut().unwrap().proposal_digest = "tampered".to_string();
+    dec.settlement_preparation_artifact
+        .as_mut()
+        .unwrap()
+        .proposal_digest = "tampered".to_string();
     let request = ProductionLiveEpochTransitionSettlementExecutionPreparationRequest::new(
         LiveEpochTransitionSettlementExecutionPreparationAuthoritySource::VerifiedSettlementPreparationDecision {
             decision: dec,
@@ -3721,7 +3944,10 @@ fn tampered_settlement_preparation_package_integrity_mismatch() {
         &inputs,
         &empty_replay337(),
     );
-    assert_eq!(d.outcome, YO::SettlementPreparationDecisionIntegrityMismatch);
+    assert_eq!(
+        d.outcome,
+        YO::SettlementPreparationDecisionIntegrityMismatch
+    );
     assert!(d.settlement_execution_preparation_artifact.is_none());
 }
 
@@ -3883,28 +4109,56 @@ fn wrong_authorization_policy_id() {
 
 fn wrong_environment() {
     y_reject_inputs(
-        |i| i.trust_domain = custom_domain(TrustBundleEnvironment::Testnet, "qbind-devnet", GENESIS_HASH, ROOT_FP),
+        |i| {
+            i.trust_domain = custom_domain(
+                TrustBundleEnvironment::Testnet,
+                "qbind-devnet",
+                GENESIS_HASH,
+                ROOT_FP,
+            )
+        },
         YO::WrongEnvironment,
     );
 }
 
 fn wrong_chain() {
     y_reject_inputs(
-        |i| i.trust_domain = custom_domain(TrustBundleEnvironment::Devnet, "wrong-chain", GENESIS_HASH, ROOT_FP),
+        |i| {
+            i.trust_domain = custom_domain(
+                TrustBundleEnvironment::Devnet,
+                "wrong-chain",
+                GENESIS_HASH,
+                ROOT_FP,
+            )
+        },
         YO::WrongChain,
     );
 }
 
 fn wrong_genesis() {
     y_reject_inputs(
-        |i| i.trust_domain = custom_domain(TrustBundleEnvironment::Devnet, "qbind-devnet", "wrong-genesis", ROOT_FP),
+        |i| {
+            i.trust_domain = custom_domain(
+                TrustBundleEnvironment::Devnet,
+                "qbind-devnet",
+                "wrong-genesis",
+                ROOT_FP,
+            )
+        },
         YO::WrongGenesis,
     );
 }
 
 fn wrong_authority_root() {
     y_reject_inputs(
-        |i| i.trust_domain = custom_domain(TrustBundleEnvironment::Devnet, "qbind-devnet", GENESIS_HASH, "wrong-root"),
+        |i| {
+            i.trust_domain = custom_domain(
+                TrustBundleEnvironment::Devnet,
+                "qbind-devnet",
+                GENESIS_HASH,
+                "wrong-root",
+            )
+        },
         YO::WrongAuthorityRoot,
     );
 }
@@ -3917,11 +4171,17 @@ fn wrong_governance_domain() {
 }
 
 fn wrong_governance_epoch() {
-    y_reject_inputs(|i| i.expected_governance_epoch = 999, YO::WrongGovernanceEpoch);
+    y_reject_inputs(
+        |i| i.expected_governance_epoch = 999,
+        YO::WrongGovernanceEpoch,
+    );
 }
 
 fn wrong_proposal_id() {
-    y_reject_inputs(|i| i.expected_proposal_id = "bad".to_string(), YO::WrongProposalId);
+    y_reject_inputs(
+        |i| i.expected_proposal_id = "bad".to_string(),
+        YO::WrongProposalId,
+    );
 }
 
 fn wrong_governance_execution_intent_digest() {
@@ -3974,7 +4234,10 @@ fn wrong_rotation_action() {
 }
 
 fn wrong_authority_sequence() {
-    y_reject_inputs(|i| i.expected_authority_domain_sequence = 999, YO::WrongAuthoritySequence);
+    y_reject_inputs(
+        |i| i.expected_authority_domain_sequence = 999,
+        YO::WrongAuthoritySequence,
+    );
 }
 
 // ===========================================================================
@@ -4003,11 +4266,17 @@ fn wrong_validator_set_delta_digest() {
 }
 
 fn wrong_validator_set_epoch() {
-    y_reject_inputs(|i| i.expected_validator_set_epoch = 999, YO::WrongValidatorSetEpoch);
+    y_reject_inputs(
+        |i| i.expected_validator_set_epoch = 999,
+        YO::WrongValidatorSetEpoch,
+    );
 }
 
 fn wrong_validator_set_version() {
-    y_reject_inputs(|i| i.expected_validator_set_version = 999, YO::WrongValidatorSetVersion);
+    y_reject_inputs(
+        |i| i.expected_validator_set_version = 999,
+        YO::WrongValidatorSetVersion,
+    );
 }
 
 fn wrong_current_validator_set_epoch() {
@@ -4025,7 +4294,10 @@ fn wrong_current_validator_set_version() {
 }
 
 fn wrong_proposed_validator_count() {
-    y_reject_inputs(|i| i.expected_proposed_validator_count = 999, YO::WrongProposedValidatorCount);
+    y_reject_inputs(
+        |i| i.expected_proposed_validator_count = 999,
+        YO::WrongProposedValidatorCount,
+    );
 }
 
 fn wrong_rotation_nonce() {
@@ -4037,7 +4309,10 @@ fn wrong_rotation_nonce() {
 // ===========================================================================
 
 fn wrong_epoch_transition_target_inputs() {
-    y_reject_inputs(|i| i.expected_epoch_transition_target = 999, YO::WrongEpochTransitionTarget);
+    y_reject_inputs(
+        |i| i.expected_epoch_transition_target = 999,
+        YO::WrongEpochTransitionTarget,
+    );
 }
 
 fn wrong_epoch_transition_target_request() {
@@ -4049,11 +4324,17 @@ fn wrong_epoch_transition_target_request() {
 }
 
 fn wrong_application_nonce() {
-    y_reject_inputs(|i| i.expected_application_nonce = 999, YO::WrongApplicationNonce);
+    y_reject_inputs(
+        |i| i.expected_application_nonce = 999,
+        YO::WrongApplicationNonce,
+    );
 }
 
 fn wrong_live_application_nonce() {
-    y_reject_inputs(|i| i.expected_live_application_nonce = 999, YO::WrongLiveApplicationNonce);
+    y_reject_inputs(
+        |i| i.expected_live_application_nonce = 999,
+        YO::WrongLiveApplicationNonce,
+    );
 }
 
 // ===========================================================================
@@ -4292,7 +4573,12 @@ fn reserved_production_kind_fails_closed() {
 fn replay_rejected_when_id_present() {
     let c = y_case(TrustBundleEnvironment::Devnet, Sc::Add);
     let d = y_eval(&c);
-    let id = d.settlement_execution_preparation_artifact.as_ref().unwrap().request_id.clone();
+    let id = d
+        .settlement_execution_preparation_artifact
+        .as_ref()
+        .unwrap()
+        .request_id
+        .clone();
     let replay = vec![id];
     let d2 = y_eval_replay(&c, &replay);
     match d2.outcome {
@@ -4310,19 +4596,31 @@ fn no_replay_when_id_absent() {
 }
 
 fn stale_governance_epoch() {
-    y_reject_inputs(|i| i.min_governance_epoch = u64::MAX, YO::StaleGovernanceEpoch);
+    y_reject_inputs(
+        |i| i.min_governance_epoch = u64::MAX,
+        YO::StaleGovernanceEpoch,
+    );
 }
 
 fn stale_authority_sequence() {
-    y_reject_inputs(|i| i.persisted_sequence = Some(u64::MAX), YO::StaleAuthoritySequence);
+    y_reject_inputs(
+        |i| i.persisted_sequence = Some(u64::MAX),
+        YO::StaleAuthoritySequence,
+    );
 }
 
 fn stale_validator_set_epoch() {
-    y_reject_inputs(|i| i.min_validator_set_epoch = u64::MAX, YO::StaleValidatorSetEpoch);
+    y_reject_inputs(
+        |i| i.min_validator_set_epoch = u64::MAX,
+        YO::StaleValidatorSetEpoch,
+    );
 }
 
 fn stale_validator_set_version() {
-    y_reject_inputs(|i| i.min_validator_set_version = u64::MAX, YO::StaleValidatorSetVersion);
+    y_reject_inputs(
+        |i| i.min_validator_set_version = u64::MAX,
+        YO::StaleValidatorSetVersion,
+    );
 }
 
 // ===========================================================================
@@ -4332,8 +4630,15 @@ fn stale_validator_set_version() {
 fn fixture_state_apply_is_idempotent() {
     let c = y_case(TrustBundleEnvironment::Devnet, Sc::Add);
     let d = y_eval(&c);
-    let art = d.settlement_execution_preparation_artifact.as_ref().unwrap();
-    let mut state = LiveEpochTransitionSettlementExecutionPreparationFixtureState::new(CUR_EPOCH, CUR_VERSION, "start");
+    let art = d
+        .settlement_execution_preparation_artifact
+        .as_ref()
+        .unwrap();
+    let mut state = LiveEpochTransitionSettlementExecutionPreparationFixtureState::new(
+        CUR_EPOCH,
+        CUR_VERSION,
+        "start",
+    );
     assert!(state.apply_prepared_execution(art, &d.settlement_execution_preparation_id));
     assert_eq!(state.current_epoch, art.epoch_transition_target);
     assert_eq!(state.validator_set_version, art.validator_set_version);
@@ -4347,8 +4652,15 @@ fn fixture_state_apply_all_scenarios() {
     for sc in ALL_SC {
         let c = y_case(TrustBundleEnvironment::Devnet, sc);
         let d = y_eval(&c);
-        let art = d.settlement_execution_preparation_artifact.as_ref().unwrap();
-        let mut state = LiveEpochTransitionSettlementExecutionPreparationFixtureState::new(CUR_EPOCH, CUR_VERSION, "start");
+        let art = d
+            .settlement_execution_preparation_artifact
+            .as_ref()
+            .unwrap();
+        let mut state = LiveEpochTransitionSettlementExecutionPreparationFixtureState::new(
+            CUR_EPOCH,
+            CUR_VERSION,
+            "start",
+        );
         assert!(state.apply_prepared_execution(art, &d.settlement_execution_preparation_id));
         assert_eq!(state.current_epoch, art.epoch_transition_target);
     }
@@ -4372,7 +4684,12 @@ fn accept_authorizes_future_mutation_only() {
     let d = y_eval(&c);
     assert!(d.outcome.authorizes_future_mutation_only());
     assert!(d.authorizes_future_mutation_only());
-    assert!(d.settlement_execution_preparation_artifact.as_ref().unwrap().staged_kind.is_non_mutating());
+    assert!(d
+        .settlement_execution_preparation_artifact
+        .as_ref()
+        .unwrap()
+        .staged_kind
+        .is_non_mutating());
 }
 
 fn reject_never_authorizes_future_mutation() {
@@ -4395,9 +4712,16 @@ fn reject_never_authorizes_future_mutation() {
 fn policy_predicates() {
     use ProductionLiveEpochTransitionSettlementExecutionPreparationExecutorPolicy as Pol;
     assert!(Pol::Disabled.is_disabled());
-    assert!(Pol::AllowSourceTestLiveEpochTransitionSettlementExecutionPreparation.allows_source_test());
-    assert!(Pol::RequireProductionLiveEpochTransitionSettlementExecutionPreparation.is_production());
-    assert!(Pol::MainnetProductionLiveEpochTransitionSettlementExecutionPreparationRequired.is_mainnet());
+    assert!(
+        Pol::AllowSourceTestLiveEpochTransitionSettlementExecutionPreparation.allows_source_test()
+    );
+    assert!(
+        Pol::RequireProductionLiveEpochTransitionSettlementExecutionPreparation.is_production()
+    );
+    assert!(
+        Pol::MainnetProductionLiveEpochTransitionSettlementExecutionPreparationRequired
+            .is_mainnet()
+    );
     assert_eq!(Pol::default(), Pol::Disabled);
 }
 
@@ -4420,7 +4744,9 @@ fn execution_kind_mapping_matches_handoff_kind() {
 }
 
 fn unsupported_staged_application_kind_is_unsupported() {
-    let pk = YK::from_staged_application_kind(LiveEpochTransitionSettlementPreparationKind::UnsupportedStagedApplication);
+    let pk = YK::from_staged_application_kind(
+        LiveEpochTransitionSettlementPreparationKind::UnsupportedStagedApplication,
+    );
     assert!(pk.is_unsupported());
 }
 
@@ -4435,9 +4761,15 @@ fn outcome_tags_are_stable_and_distinct() {
 fn config_and_inputs_well_formed() {
     let c = y_case(TrustBundleEnvironment::Devnet, Sc::Add);
     assert!(c.inputs.is_well_formed());
-    assert!(ProductionLiveEpochTransitionSettlementExecutionPreparationConfig::source_test().is_well_formed());
+    assert!(
+        ProductionLiveEpochTransitionSettlementExecutionPreparationConfig::source_test()
+            .is_well_formed()
+    );
     // The default config still pins the supported protocol version.
-    assert!(ProductionLiveEpochTransitionSettlementExecutionPreparationConfig::default().is_well_formed());
+    assert!(
+        ProductionLiveEpochTransitionSettlementExecutionPreparationConfig::default()
+            .is_well_formed()
+    );
 }
 
 // ===========================================================================
@@ -4450,11 +4782,17 @@ macro_rules! per_scenario_accept {
             let c = y_case(TrustBundleEnvironment::Devnet, $sc);
             let d = y_eval(&c);
             assert!(d.is_accept());
-            let art = d.settlement_execution_preparation_artifact.as_ref().unwrap();
+            let art = d
+                .settlement_execution_preparation_artifact
+                .as_ref()
+                .unwrap();
             assert_eq!(art.staged_kind, expected_crc7_kind($sc));
             assert!(art.staged_kind.is_non_mutating());
             let d2 = y_eval(&c);
-            assert_eq!(d.settlement_execution_preparation_digest, d2.settlement_execution_preparation_digest);
+            assert_eq!(
+                d.settlement_execution_preparation_digest,
+                d2.settlement_execution_preparation_digest
+            );
             assert_eq!(d.transcript_digest, d2.transcript_digest);
             let mut state = LiveEpochTransitionSettlementExecutionPreparationFixtureState::new(
                 CUR_EPOCH,
@@ -4484,7 +4822,10 @@ macro_rules! per_scenario_testnet_accept {
             let d = y_eval(&c);
             assert!(d.is_accept());
             assert_eq!(
-                d.settlement_execution_preparation_artifact.as_ref().unwrap().environment,
+                d.settlement_execution_preparation_artifact
+                    .as_ref()
+                    .unwrap()
+                    .environment,
                 TrustBundleEnvironment::Testnet
             );
         }
@@ -4552,14 +4893,30 @@ per_scenario_guarded_binding!(scenario_guarded_binding_bulk, Sc::Bulk);
 
 fn accept_reexposes_runtime_handoff_tuple_from_parent() {
     let parent = cw_decision(TrustBundleEnvironment::Devnet, Sc::Add);
-    let ppkg = parent.settlement_preparation_artifact.as_ref().unwrap().clone();
+    let ppkg = parent
+        .settlement_preparation_artifact
+        .as_ref()
+        .unwrap()
+        .clone();
     let c = y_case(TrustBundleEnvironment::Devnet, Sc::Add);
     let d = y_eval(&c);
     assert!(d.is_accept());
-    let art = d.settlement_execution_preparation_artifact.as_ref().unwrap();
-    assert_eq!(art.runtime_handoff_decision_id, ppkg.runtime_handoff_decision_id);
-    assert_eq!(art.runtime_handoff_request_id, ppkg.runtime_handoff_request_id);
-    assert_eq!(art.runtime_handoff_intent_digest, ppkg.runtime_handoff_intent_digest);
+    let art = d
+        .settlement_execution_preparation_artifact
+        .as_ref()
+        .unwrap();
+    assert_eq!(
+        art.runtime_handoff_decision_id,
+        ppkg.runtime_handoff_decision_id
+    );
+    assert_eq!(
+        art.runtime_handoff_request_id,
+        ppkg.runtime_handoff_request_id
+    );
+    assert_eq!(
+        art.runtime_handoff_intent_digest,
+        ppkg.runtime_handoff_intent_digest
+    );
     assert_eq!(
         art.runtime_handoff_transcript_digest,
         ppkg.runtime_handoff_transcript_digest
@@ -4649,8 +5006,14 @@ fn accept_content_digest_binds_runtime_handoff_tuple() {
     let c = y_case(TrustBundleEnvironment::Devnet, Sc::Add);
     let d1 = y_eval(&c);
     let d2 = y_eval(&c);
-    let a1 = d1.settlement_execution_preparation_artifact.as_ref().unwrap();
-    let a2 = d2.settlement_execution_preparation_artifact.as_ref().unwrap();
+    let a1 = d1
+        .settlement_execution_preparation_artifact
+        .as_ref()
+        .unwrap();
+    let a2 = d2
+        .settlement_execution_preparation_artifact
+        .as_ref()
+        .unwrap();
     assert_eq!(a1.content_digest(), a2.content_digest());
 }
 
@@ -4721,10 +5084,7 @@ fn reject_commit_authorization_request_id_mismatch() {
 
 fn reject_commit_authorization_intent_digest_mismatch() {
     y_reject_inputs(
-        |i| {
-            i.expected_commit_authorization_intent_digest =
-                "wrong-commit-auth-digest".to_string()
-        },
+        |i| i.expected_commit_authorization_intent_digest = "wrong-commit-auth-digest".to_string(),
         YO::CommitAuthorizationDecisionIntentDigestMismatch,
     );
 }
@@ -4770,7 +5130,10 @@ fn commit_authorization_binding_rejects_are_non_mutating() {
 fn accept_artifact_reexposes_commit_authorization_tuple() {
     let c = y_case(TrustBundleEnvironment::Devnet, Sc::Add);
     let d = y_eval(&c);
-    let art = d.settlement_execution_preparation_artifact.as_ref().unwrap();
+    let art = d
+        .settlement_execution_preparation_artifact
+        .as_ref()
+        .unwrap();
     assert_eq!(art.commit_authorization_nonce, CMT_NONCE);
     assert!(!art.commit_authorization_decision_id.is_empty());
     assert!(!art.commit_authorization_transcript_digest.is_empty());
@@ -4795,7 +5158,10 @@ fn accepted_artifact_re_exposes_mutation_execution_ancestor() {
     let c = y_case(TrustBundleEnvironment::Devnet, Sc::Add);
     let d = y_eval(&c);
     assert!(d.is_accept());
-    let art = d.settlement_execution_preparation_artifact.as_ref().unwrap();
+    let art = d
+        .settlement_execution_preparation_artifact
+        .as_ref()
+        .unwrap();
     // Grandparent Run 327/328 mutation-execution nonce re-exposed intact.
     assert_eq!(art.mutation_execution_nonce, MUT_NONCE);
     // Parent Run 333/334 settlement-preparation nonce re-exposed intact.
@@ -4882,7 +5248,10 @@ fn accepted_artifact_re_exposes_execution_preparation_ancestor() {
     let c = y_case(TrustBundleEnvironment::Devnet, Sc::Add);
     let d = y_eval(&c);
     assert!(d.is_accept());
-    let art = d.settlement_execution_preparation_artifact.as_ref().unwrap();
+    let art = d
+        .settlement_execution_preparation_artifact
+        .as_ref()
+        .unwrap();
     // Grandparent Run 327/328 execution-preparation nonce re-exposed intact.
     assert_eq!(art.execution_preparation_nonce, PREP_NONCE);
     // Parent Run 333/334 settlement-preparation nonce re-exposed intact.
@@ -4903,19 +5272,19 @@ fn execution_preparation_binding_rejects_are_non_mutating() {
         assert!(o.is_non_mutating());
         assert!(!o.tag().is_empty());
     }
-}// ===========================================================================
-// Run 339 — live epoch-transition settlement / finalization EXECUTION
-// boundary (under test). Consumes the verified Run 337/338 settlement /
-// finalization execution-preparation decision built above and produces a
-// typed, non-mutating settlement / finalization execution artifact.
-// ===========================================================================
+} // ===========================================================================
+  // Run 339 — live epoch-transition settlement / finalization EXECUTION
+  // boundary (under test). Consumes the verified Run 337/338 settlement /
+  // finalization execution-preparation decision built above and produces a
+  // typed, non-mutating settlement / finalization execution artifact.
+  // ===========================================================================
 mod run_339_settlement_execution {
     #![allow(unused_imports)]
     use super::*;
     use qbind_node::pqc_production_live_epoch_transition_settlement_execution::*;
 
-    use ProductionLiveEpochTransitionSettlementExecutionOutcome as ZO;
     use LiveEpochTransitionSettlementExecutionKind as ZK;
+    use ProductionLiveEpochTransitionSettlementExecutionOutcome as ZO;
 
     const CRC8_POLICY_ID: &str = "settlement-execution-policy-1";
     const CRC8_NONCE: u64 = 49;
@@ -4978,7 +5347,10 @@ mod run_339_settlement_execution {
         env: TrustBundleEnvironment,
         dec: &ProductionLiveEpochTransitionSettlementExecutionPreparationDecision,
     ) -> ProductionLiveEpochTransitionSettlementExecutionInputs {
-        let pkg = dec.settlement_execution_preparation_artifact.as_ref().unwrap();
+        let pkg = dec
+            .settlement_execution_preparation_artifact
+            .as_ref()
+            .unwrap();
         ProductionLiveEpochTransitionSettlementExecutionInputs {
             trust_domain: trust_domain(env),
             settlement_execution_policy_id: CRC8_POLICY_ID.to_string(),
@@ -5031,11 +5403,18 @@ mod run_339_settlement_execution {
                 .guarded_mutation_transcript_digest
                 .clone(),
             expected_guarded_mutation_nonce: pkg.guarded_mutation_nonce,
-            expected_settlement_execution_preparation_decision_id: dec.settlement_execution_preparation_id.clone(),
+            expected_settlement_execution_preparation_decision_id: dec
+                .settlement_execution_preparation_id
+                .clone(),
             expected_settlement_execution_preparation_request_id: dec.request_id.clone(),
-            expected_settlement_execution_preparation_intent_digest: dec.settlement_execution_preparation_digest.clone(),
-            expected_settlement_execution_preparation_transcript_digest: dec.transcript_digest.clone(),
-            expected_settlement_execution_preparation_nonce: pkg.settlement_execution_preparation_nonce,
+            expected_settlement_execution_preparation_intent_digest: dec
+                .settlement_execution_preparation_digest
+                .clone(),
+            expected_settlement_execution_preparation_transcript_digest: dec
+                .transcript_digest
+                .clone(),
+            expected_settlement_execution_preparation_nonce: pkg
+                .settlement_execution_preparation_nonce,
             expected_commit_authorization_decision_id: pkg.commit_authorization_decision_id.clone(),
             expected_commit_authorization_request_id: pkg.commit_authorization_request_id.clone(),
             expected_commit_authorization_intent_digest: pkg
@@ -5052,9 +5431,13 @@ mod run_339_settlement_execution {
                 .mutation_execution_transcript_digest
                 .clone(),
             expected_mutation_execution_nonce: pkg.mutation_execution_nonce,
-            expected_execution_preparation_decision_id: pkg.execution_preparation_decision_id.clone(),
+            expected_execution_preparation_decision_id: pkg
+                .execution_preparation_decision_id
+                .clone(),
             expected_execution_preparation_request_id: pkg.execution_preparation_request_id.clone(),
-            expected_execution_preparation_intent_digest: pkg.execution_preparation_intent_digest.clone(),
+            expected_execution_preparation_intent_digest: pkg
+                .execution_preparation_intent_digest
+                .clone(),
             expected_execution_preparation_transcript_digest: pkg
                 .execution_preparation_transcript_digest
                 .clone(),
@@ -5084,7 +5467,11 @@ mod run_339_settlement_execution {
 
     fn z_case(env: TrustBundleEnvironment, sc: Sc) -> Z339 {
         let dec = cz_decision(env, sc);
-        let target = dec.settlement_execution_preparation_artifact.as_ref().unwrap().epoch_transition_target;
+        let target = dec
+            .settlement_execution_preparation_artifact
+            .as_ref()
+            .unwrap()
+            .epoch_transition_target;
         let inputs = z_inputs(env, &dec);
         let request = ProductionLiveEpochTransitionSettlementExecutionRequest::new(
             LiveEpochTransitionSettlementExecutionAuthoritySource::VerifiedSettlementExecutionPreparationDecision {
@@ -5105,11 +5492,12 @@ mod run_339_settlement_execution {
     }
 
     fn z_eval(case: &Z339) -> ProductionLiveEpochTransitionSettlementExecutionDecision {
-        case.executor.evaluate_live_epoch_transition_settlement_execution(
-            &case.request,
-            &case.inputs,
-            &empty_replay339(),
-        )
+        case.executor
+            .evaluate_live_epoch_transition_settlement_execution(
+                &case.request,
+                &case.inputs,
+                &empty_replay339(),
+            )
     }
 
     fn z_eval_replay(
@@ -5117,7 +5505,11 @@ mod run_339_settlement_execution {
         replay: &[String],
     ) -> ProductionLiveEpochTransitionSettlementExecutionDecision {
         case.executor
-            .evaluate_live_epoch_transition_settlement_execution(&case.request, &case.inputs, &replay)
+            .evaluate_live_epoch_transition_settlement_execution(
+                &case.request,
+                &case.inputs,
+                &replay,
+            )
     }
 
     fn z_exec_with_policy(
@@ -5199,7 +5591,10 @@ mod run_339_settlement_execution {
             } => {
                 assert_eq!(execution_kind, ZK::StageApplyValidatorAdd);
                 assert_eq!(environment, TrustBundleEnvironment::Devnet);
-                assert_eq!(epoch_transition_target, c.request.proposed_epoch_transition_target);
+                assert_eq!(
+                    epoch_transition_target,
+                    c.request.proposed_epoch_transition_target
+                );
                 assert_eq!(settlement_execution_nonce, CRC8_NONCE);
             }
             other => panic!("unexpected outcome: {other:?}"),
@@ -5208,7 +5603,11 @@ mod run_339_settlement_execution {
 
     fn accept_artifact_reexposes_consumed_settlement_execution_preparation_transcript() {
         let dec = cz_decision(TrustBundleEnvironment::Devnet, Sc::Add);
-        let target = dec.settlement_execution_preparation_artifact.as_ref().unwrap().epoch_transition_target;
+        let target = dec
+            .settlement_execution_preparation_artifact
+            .as_ref()
+            .unwrap()
+            .epoch_transition_target;
         let inputs = z_inputs(TrustBundleEnvironment::Devnet, &dec);
         let handoff_id = dec.settlement_execution_preparation_id.clone();
         let handoff_req = dec.request_id.clone();
@@ -5230,23 +5629,47 @@ mod run_339_settlement_execution {
         let art = d.settlement_execution_artifact.as_ref().unwrap();
         assert_eq!(art.settlement_execution_preparation_decision_id, handoff_id);
         assert_eq!(art.settlement_execution_preparation_request_id, handoff_req);
-        assert_eq!(art.settlement_execution_preparation_intent_digest, handoff_digest);
-        assert_eq!(art.settlement_execution_preparation_transcript_digest, handoff_transcript);
+        assert_eq!(
+            art.settlement_execution_preparation_intent_digest,
+            handoff_digest
+        );
+        assert_eq!(
+            art.settlement_execution_preparation_transcript_digest,
+            handoff_transcript
+        );
     }
 
     fn accept_artifact_encodes_future_executor_preconditions() {
         let c = z_case(TrustBundleEnvironment::Devnet, Sc::Add);
         let d = z_eval(&c);
         let art = d.settlement_execution_artifact.as_ref().unwrap();
-        assert_eq!(art.precondition_current_validator_set_epoch, art.validator_set_epoch);
-        assert_eq!(art.precondition_current_validator_set_version, art.validator_set_version);
+        assert_eq!(
+            art.precondition_current_validator_set_epoch,
+            art.validator_set_epoch
+        );
+        assert_eq!(
+            art.precondition_current_validator_set_version,
+            art.validator_set_version
+        );
         assert_eq!(art.precondition_target_epoch, art.epoch_transition_target);
-        assert_eq!(art.precondition_required_governance_epoch, art.governance_epoch);
-        assert_eq!(art.precondition_required_authority_sequence, art.authority_domain_sequence);
+        assert_eq!(
+            art.precondition_required_governance_epoch,
+            art.governance_epoch
+        );
+        assert_eq!(
+            art.precondition_required_authority_sequence,
+            art.authority_domain_sequence
+        );
         assert_eq!(art.precondition_required_replay_window, REPLAY_WINDOW);
-        assert_eq!(art.precondition_proposed_validator_set_digest, art.proposed_set_digest);
+        assert_eq!(
+            art.precondition_proposed_validator_set_digest,
+            art.proposed_set_digest
+        );
         assert_eq!(art.precondition_delta_digest, art.delta_digest);
-        assert_eq!(art.precondition_current_validator_set_digest, art.current_set_digest);
+        assert_eq!(
+            art.precondition_current_validator_set_digest,
+            art.current_set_digest
+        );
     }
 
     fn accept_decision_ids_match_artifact_ids() {
@@ -5255,7 +5678,10 @@ mod run_339_settlement_execution {
         let art = d.settlement_execution_artifact.as_ref().unwrap();
         assert_eq!(d.settlement_execution_id, art.settlement_execution_id);
         assert_eq!(d.request_id, art.request_id);
-        assert_eq!(d.settlement_execution_digest, art.settlement_execution_digest);
+        assert_eq!(
+            d.settlement_execution_digest,
+            art.settlement_execution_digest
+        );
         assert_eq!(d.transcript_digest, art.transcript_digest);
         assert!(!d.settlement_execution_id.is_empty());
         assert!(!d.request_id.is_empty());
@@ -5274,7 +5700,10 @@ mod run_339_settlement_execution {
             let d2 = z_eval(&c);
             assert_eq!(d1.settlement_execution_id, d2.settlement_execution_id);
             assert_eq!(d1.request_id, d2.request_id);
-            assert_eq!(d1.settlement_execution_digest, d2.settlement_execution_digest);
+            assert_eq!(
+                d1.settlement_execution_digest,
+                d2.settlement_execution_digest
+            );
             assert_eq!(d1.transcript_digest, d2.transcript_digest);
         }
     }
@@ -5330,9 +5759,16 @@ mod run_339_settlement_execution {
         // Mutate the consumed package so its content digest no longer matches the
         // bound handoff decision digest.
         let mut dec = cz_decision(TrustBundleEnvironment::Devnet, Sc::Add);
-        let target = dec.settlement_execution_preparation_artifact.as_ref().unwrap().epoch_transition_target;
+        let target = dec
+            .settlement_execution_preparation_artifact
+            .as_ref()
+            .unwrap()
+            .epoch_transition_target;
         let inputs = z_inputs(TrustBundleEnvironment::Devnet, &dec);
-        dec.settlement_execution_preparation_artifact.as_mut().unwrap().proposal_digest = "tampered".to_string();
+        dec.settlement_execution_preparation_artifact
+            .as_mut()
+            .unwrap()
+            .proposal_digest = "tampered".to_string();
         let request = ProductionLiveEpochTransitionSettlementExecutionRequest::new(
             LiveEpochTransitionSettlementExecutionAuthoritySource::VerifiedSettlementExecutionPreparationDecision {
                 decision: dec,
@@ -5346,7 +5782,10 @@ mod run_339_settlement_execution {
             &inputs,
             &empty_replay339(),
         );
-        assert_eq!(d.outcome, ZO::SettlementExecutionPreparationDecisionIntegrityMismatch);
+        assert_eq!(
+            d.outcome,
+            ZO::SettlementExecutionPreparationDecisionIntegrityMismatch
+        );
         assert!(d.settlement_execution_artifact.is_none());
     }
 
@@ -5508,28 +5947,56 @@ mod run_339_settlement_execution {
 
     fn wrong_environment() {
         z_reject_inputs(
-            |i| i.trust_domain = custom_domain(TrustBundleEnvironment::Testnet, "qbind-devnet", GENESIS_HASH, ROOT_FP),
+            |i| {
+                i.trust_domain = custom_domain(
+                    TrustBundleEnvironment::Testnet,
+                    "qbind-devnet",
+                    GENESIS_HASH,
+                    ROOT_FP,
+                )
+            },
             ZO::WrongEnvironment,
         );
     }
 
     fn wrong_chain() {
         z_reject_inputs(
-            |i| i.trust_domain = custom_domain(TrustBundleEnvironment::Devnet, "wrong-chain", GENESIS_HASH, ROOT_FP),
+            |i| {
+                i.trust_domain = custom_domain(
+                    TrustBundleEnvironment::Devnet,
+                    "wrong-chain",
+                    GENESIS_HASH,
+                    ROOT_FP,
+                )
+            },
             ZO::WrongChain,
         );
     }
 
     fn wrong_genesis() {
         z_reject_inputs(
-            |i| i.trust_domain = custom_domain(TrustBundleEnvironment::Devnet, "qbind-devnet", "wrong-genesis", ROOT_FP),
+            |i| {
+                i.trust_domain = custom_domain(
+                    TrustBundleEnvironment::Devnet,
+                    "qbind-devnet",
+                    "wrong-genesis",
+                    ROOT_FP,
+                )
+            },
             ZO::WrongGenesis,
         );
     }
 
     fn wrong_authority_root() {
         z_reject_inputs(
-            |i| i.trust_domain = custom_domain(TrustBundleEnvironment::Devnet, "qbind-devnet", GENESIS_HASH, "wrong-root"),
+            |i| {
+                i.trust_domain = custom_domain(
+                    TrustBundleEnvironment::Devnet,
+                    "qbind-devnet",
+                    GENESIS_HASH,
+                    "wrong-root",
+                )
+            },
             ZO::WrongAuthorityRoot,
         );
     }
@@ -5542,11 +6009,17 @@ mod run_339_settlement_execution {
     }
 
     fn wrong_governance_epoch() {
-        z_reject_inputs(|i| i.expected_governance_epoch = 999, ZO::WrongGovernanceEpoch);
+        z_reject_inputs(
+            |i| i.expected_governance_epoch = 999,
+            ZO::WrongGovernanceEpoch,
+        );
     }
 
     fn wrong_proposal_id() {
-        z_reject_inputs(|i| i.expected_proposal_id = "bad".to_string(), ZO::WrongProposalId);
+        z_reject_inputs(
+            |i| i.expected_proposal_id = "bad".to_string(),
+            ZO::WrongProposalId,
+        );
     }
 
     fn wrong_governance_execution_intent_digest() {
@@ -5599,7 +6072,10 @@ mod run_339_settlement_execution {
     }
 
     fn wrong_authority_sequence() {
-        z_reject_inputs(|i| i.expected_authority_domain_sequence = 999, ZO::WrongAuthoritySequence);
+        z_reject_inputs(
+            |i| i.expected_authority_domain_sequence = 999,
+            ZO::WrongAuthoritySequence,
+        );
     }
 
     // ===========================================================================
@@ -5628,11 +6104,17 @@ mod run_339_settlement_execution {
     }
 
     fn wrong_validator_set_epoch() {
-        z_reject_inputs(|i| i.expected_validator_set_epoch = 999, ZO::WrongValidatorSetEpoch);
+        z_reject_inputs(
+            |i| i.expected_validator_set_epoch = 999,
+            ZO::WrongValidatorSetEpoch,
+        );
     }
 
     fn wrong_validator_set_version() {
-        z_reject_inputs(|i| i.expected_validator_set_version = 999, ZO::WrongValidatorSetVersion);
+        z_reject_inputs(
+            |i| i.expected_validator_set_version = 999,
+            ZO::WrongValidatorSetVersion,
+        );
     }
 
     fn wrong_current_validator_set_epoch() {
@@ -5650,7 +6132,10 @@ mod run_339_settlement_execution {
     }
 
     fn wrong_proposed_validator_count() {
-        z_reject_inputs(|i| i.expected_proposed_validator_count = 999, ZO::WrongProposedValidatorCount);
+        z_reject_inputs(
+            |i| i.expected_proposed_validator_count = 999,
+            ZO::WrongProposedValidatorCount,
+        );
     }
 
     fn wrong_rotation_nonce() {
@@ -5662,7 +6147,10 @@ mod run_339_settlement_execution {
     // ===========================================================================
 
     fn wrong_epoch_transition_target_inputs() {
-        z_reject_inputs(|i| i.expected_epoch_transition_target = 999, ZO::WrongEpochTransitionTarget);
+        z_reject_inputs(
+            |i| i.expected_epoch_transition_target = 999,
+            ZO::WrongEpochTransitionTarget,
+        );
     }
 
     fn wrong_epoch_transition_target_request() {
@@ -5674,11 +6162,17 @@ mod run_339_settlement_execution {
     }
 
     fn wrong_application_nonce() {
-        z_reject_inputs(|i| i.expected_application_nonce = 999, ZO::WrongApplicationNonce);
+        z_reject_inputs(
+            |i| i.expected_application_nonce = 999,
+            ZO::WrongApplicationNonce,
+        );
     }
 
     fn wrong_live_application_nonce() {
-        z_reject_inputs(|i| i.expected_live_application_nonce = 999, ZO::WrongLiveApplicationNonce);
+        z_reject_inputs(
+            |i| i.expected_live_application_nonce = 999,
+            ZO::WrongLiveApplicationNonce,
+        );
     }
 
     // ===========================================================================
@@ -5917,7 +6411,12 @@ mod run_339_settlement_execution {
     fn replay_rejected_when_id_present() {
         let c = z_case(TrustBundleEnvironment::Devnet, Sc::Add);
         let d = z_eval(&c);
-        let id = d.settlement_execution_artifact.as_ref().unwrap().request_id.clone();
+        let id = d
+            .settlement_execution_artifact
+            .as_ref()
+            .unwrap()
+            .request_id
+            .clone();
         let replay = vec![id];
         let d2 = z_eval_replay(&c, &replay);
         match d2.outcome {
@@ -5935,19 +6434,31 @@ mod run_339_settlement_execution {
     }
 
     fn stale_governance_epoch() {
-        z_reject_inputs(|i| i.min_governance_epoch = u64::MAX, ZO::StaleGovernanceEpoch);
+        z_reject_inputs(
+            |i| i.min_governance_epoch = u64::MAX,
+            ZO::StaleGovernanceEpoch,
+        );
     }
 
     fn stale_authority_sequence() {
-        z_reject_inputs(|i| i.persisted_sequence = Some(u64::MAX), ZO::StaleAuthoritySequence);
+        z_reject_inputs(
+            |i| i.persisted_sequence = Some(u64::MAX),
+            ZO::StaleAuthoritySequence,
+        );
     }
 
     fn stale_validator_set_epoch() {
-        z_reject_inputs(|i| i.min_validator_set_epoch = u64::MAX, ZO::StaleValidatorSetEpoch);
+        z_reject_inputs(
+            |i| i.min_validator_set_epoch = u64::MAX,
+            ZO::StaleValidatorSetEpoch,
+        );
     }
 
     fn stale_validator_set_version() {
-        z_reject_inputs(|i| i.min_validator_set_version = u64::MAX, ZO::StaleValidatorSetVersion);
+        z_reject_inputs(
+            |i| i.min_validator_set_version = u64::MAX,
+            ZO::StaleValidatorSetVersion,
+        );
     }
 
     // ===========================================================================
@@ -5958,7 +6469,11 @@ mod run_339_settlement_execution {
         let c = z_case(TrustBundleEnvironment::Devnet, Sc::Add);
         let d = z_eval(&c);
         let art = d.settlement_execution_artifact.as_ref().unwrap();
-        let mut state = LiveEpochTransitionSettlementExecutionFixtureState::new(CUR_EPOCH, CUR_VERSION, "start");
+        let mut state = LiveEpochTransitionSettlementExecutionFixtureState::new(
+            CUR_EPOCH,
+            CUR_VERSION,
+            "start",
+        );
         assert!(state.apply_prepared_execution(art, &d.settlement_execution_id));
         assert_eq!(state.current_epoch, art.epoch_transition_target);
         assert_eq!(state.validator_set_version, art.validator_set_version);
@@ -5973,7 +6488,11 @@ mod run_339_settlement_execution {
             let c = z_case(TrustBundleEnvironment::Devnet, sc);
             let d = z_eval(&c);
             let art = d.settlement_execution_artifact.as_ref().unwrap();
-            let mut state = LiveEpochTransitionSettlementExecutionFixtureState::new(CUR_EPOCH, CUR_VERSION, "start");
+            let mut state = LiveEpochTransitionSettlementExecutionFixtureState::new(
+                CUR_EPOCH,
+                CUR_VERSION,
+                "start",
+            );
             assert!(state.apply_prepared_execution(art, &d.settlement_execution_id));
             assert_eq!(state.current_epoch, art.epoch_transition_target);
         }
@@ -5997,7 +6516,12 @@ mod run_339_settlement_execution {
         let d = z_eval(&c);
         assert!(d.outcome.authorizes_future_mutation_only());
         assert!(d.authorizes_future_mutation_only());
-        assert!(d.settlement_execution_artifact.as_ref().unwrap().staged_kind.is_non_mutating());
+        assert!(d
+            .settlement_execution_artifact
+            .as_ref()
+            .unwrap()
+            .staged_kind
+            .is_non_mutating());
     }
 
     fn reject_never_authorizes_future_mutation() {
@@ -6045,7 +6569,9 @@ mod run_339_settlement_execution {
     }
 
     fn unsupported_staged_application_kind_is_unsupported() {
-        let pk = ZK::from_staged_application_kind(LiveEpochTransitionSettlementExecutionPreparationKind::UnsupportedStagedApplication);
+        let pk = ZK::from_staged_application_kind(
+            LiveEpochTransitionSettlementExecutionPreparationKind::UnsupportedStagedApplication,
+        );
         assert!(pk.is_unsupported());
     }
 
@@ -6053,14 +6579,19 @@ mod run_339_settlement_execution {
         let a = ZO::SettlementExecutionPreparationDecisionIdMismatch;
         let b = ZO::GuardedMutationDecisionIdMismatch;
         assert_ne!(a.tag(), b.tag());
-        assert_eq!(a.tag(), ZO::SettlementExecutionPreparationDecisionIdMismatch.tag());
+        assert_eq!(
+            a.tag(),
+            ZO::SettlementExecutionPreparationDecisionIdMismatch.tag()
+        );
         assert!(!ZO::MainNetRefused.tag().is_empty());
     }
 
     fn config_and_inputs_well_formed() {
         let c = z_case(TrustBundleEnvironment::Devnet, Sc::Add);
         assert!(c.inputs.is_well_formed());
-        assert!(ProductionLiveEpochTransitionSettlementExecutionConfig::source_test().is_well_formed());
+        assert!(
+            ProductionLiveEpochTransitionSettlementExecutionConfig::source_test().is_well_formed()
+        );
         // The default config still pins the supported protocol version.
         assert!(ProductionLiveEpochTransitionSettlementExecutionConfig::default().is_well_formed());
     }
@@ -6079,7 +6610,10 @@ mod run_339_settlement_execution {
                 assert_eq!(art.staged_kind, expected_crc8_kind($sc));
                 assert!(art.staged_kind.is_non_mutating());
                 let d2 = z_eval(&c);
-                assert_eq!(d.settlement_execution_digest, d2.settlement_execution_digest);
+                assert_eq!(
+                    d.settlement_execution_digest,
+                    d2.settlement_execution_digest
+                );
                 assert_eq!(d.transcript_digest, d2.transcript_digest);
                 let mut state = LiveEpochTransitionSettlementExecutionFixtureState::new(
                     CUR_EPOCH,
@@ -6109,7 +6643,10 @@ mod run_339_settlement_execution {
                 let d = z_eval(&c);
                 assert!(d.is_accept());
                 assert_eq!(
-                    d.settlement_execution_artifact.as_ref().unwrap().environment,
+                    d.settlement_execution_artifact
+                        .as_ref()
+                        .unwrap()
+                        .environment,
                     TrustBundleEnvironment::Testnet
                 );
             }
@@ -6130,22 +6667,44 @@ mod run_339_settlement_execution {
         ($name:ident, $sc:expr) => {
             fn $name() {
                 let mut c = z_case(TrustBundleEnvironment::Devnet, $sc);
-                c.inputs.expected_settlement_execution_preparation_decision_id = "bad".to_string();
+                c.inputs
+                    .expected_settlement_execution_preparation_decision_id = "bad".to_string();
                 let d = z_eval(&c);
-                assert_eq!(d.outcome, ZO::SettlementExecutionPreparationDecisionIdMismatch);
+                assert_eq!(
+                    d.outcome,
+                    ZO::SettlementExecutionPreparationDecisionIdMismatch
+                );
                 assert!(d.settlement_execution_artifact.is_none());
             }
         };
     }
 
     per_scenario_settlement_execution_preparation_binding!(scenario_handoff_binding_add, Sc::Add);
-    per_scenario_settlement_execution_preparation_binding!(scenario_handoff_binding_remove, Sc::Remove);
-    per_scenario_settlement_execution_preparation_binding!(scenario_handoff_binding_update, Sc::Update);
+    per_scenario_settlement_execution_preparation_binding!(
+        scenario_handoff_binding_remove,
+        Sc::Remove
+    );
+    per_scenario_settlement_execution_preparation_binding!(
+        scenario_handoff_binding_update,
+        Sc::Update
+    );
     per_scenario_settlement_execution_preparation_binding!(scenario_handoff_binding_noop, Sc::NoOp);
-    per_scenario_settlement_execution_preparation_binding!(scenario_handoff_binding_identity, Sc::Identity);
-    per_scenario_settlement_execution_preparation_binding!(scenario_handoff_binding_retire, Sc::Retire);
-    per_scenario_settlement_execution_preparation_binding!(scenario_handoff_binding_emergency, Sc::Emergency);
-    per_scenario_settlement_execution_preparation_binding!(scenario_handoff_binding_authsync, Sc::AuthSync);
+    per_scenario_settlement_execution_preparation_binding!(
+        scenario_handoff_binding_identity,
+        Sc::Identity
+    );
+    per_scenario_settlement_execution_preparation_binding!(
+        scenario_handoff_binding_retire,
+        Sc::Retire
+    );
+    per_scenario_settlement_execution_preparation_binding!(
+        scenario_handoff_binding_emergency,
+        Sc::Emergency
+    );
+    per_scenario_settlement_execution_preparation_binding!(
+        scenario_handoff_binding_authsync,
+        Sc::AuthSync
+    );
     per_scenario_settlement_execution_preparation_binding!(scenario_handoff_binding_bulk, Sc::Bulk);
 
     macro_rules! per_scenario_guarded_binding {
@@ -6177,14 +6736,27 @@ mod run_339_settlement_execution {
 
     fn accept_reexposes_runtime_handoff_tuple_from_parent() {
         let parent = cz_decision(TrustBundleEnvironment::Devnet, Sc::Add);
-        let ppkg = parent.settlement_execution_preparation_artifact.as_ref().unwrap().clone();
+        let ppkg = parent
+            .settlement_execution_preparation_artifact
+            .as_ref()
+            .unwrap()
+            .clone();
         let c = z_case(TrustBundleEnvironment::Devnet, Sc::Add);
         let d = z_eval(&c);
         assert!(d.is_accept());
         let art = d.settlement_execution_artifact.as_ref().unwrap();
-        assert_eq!(art.runtime_handoff_decision_id, ppkg.runtime_handoff_decision_id);
-        assert_eq!(art.runtime_handoff_request_id, ppkg.runtime_handoff_request_id);
-        assert_eq!(art.runtime_handoff_intent_digest, ppkg.runtime_handoff_intent_digest);
+        assert_eq!(
+            art.runtime_handoff_decision_id,
+            ppkg.runtime_handoff_decision_id
+        );
+        assert_eq!(
+            art.runtime_handoff_request_id,
+            ppkg.runtime_handoff_request_id
+        );
+        assert_eq!(
+            art.runtime_handoff_intent_digest,
+            ppkg.runtime_handoff_intent_digest
+        );
         assert_eq!(
             art.runtime_handoff_transcript_digest,
             ppkg.runtime_handoff_transcript_digest
@@ -6210,7 +6782,10 @@ mod run_339_settlement_execution {
 
     fn reject_runtime_handoff_intent_digest_mismatch() {
         z_reject_inputs(
-            |i| i.expected_runtime_handoff_intent_digest = "wrong-runtime-handoff-digest".to_string(),
+            |i| {
+                i.expected_runtime_handoff_intent_digest =
+                    "wrong-runtime-handoff-digest".to_string()
+            },
             ZO::RuntimeHandoffDecisionIntentDigestMismatch,
         );
     }
@@ -6459,7 +7034,10 @@ mod run_339_settlement_execution {
 
     fn reject_execution_preparation_intent_digest_mismatch() {
         z_reject_inputs(
-            |i| i.expected_execution_preparation_intent_digest = "wrong-exec-prep-digest".to_string(),
+            |i| {
+                i.expected_execution_preparation_intent_digest =
+                    "wrong-exec-prep-digest".to_string()
+            },
             ZO::ExecutionPreparationDecisionIntentDigestMismatch,
         );
     }
@@ -6551,8 +7129,8 @@ mod run_341_final_settlement_completion {
     // ---- Run 339 (input) decision builder layer (verbatim) ----
     use qbind_node::pqc_production_live_epoch_transition_settlement_execution::*;
 
-    use ProductionLiveEpochTransitionSettlementExecutionOutcome as ZO;
     use LiveEpochTransitionSettlementExecutionKind as ZK;
+    use ProductionLiveEpochTransitionSettlementExecutionOutcome as ZO;
 
     const CRC8_POLICY_ID: &str = "settlement-execution-policy-1";
     const CRC8_NONCE: u64 = 49;
@@ -6615,7 +7193,10 @@ mod run_341_final_settlement_completion {
         env: TrustBundleEnvironment,
         dec: &ProductionLiveEpochTransitionSettlementExecutionPreparationDecision,
     ) -> ProductionLiveEpochTransitionSettlementExecutionInputs {
-        let pkg = dec.settlement_execution_preparation_artifact.as_ref().unwrap();
+        let pkg = dec
+            .settlement_execution_preparation_artifact
+            .as_ref()
+            .unwrap();
         ProductionLiveEpochTransitionSettlementExecutionInputs {
             trust_domain: trust_domain(env),
             settlement_execution_policy_id: CRC8_POLICY_ID.to_string(),
@@ -6668,11 +7249,18 @@ mod run_341_final_settlement_completion {
                 .guarded_mutation_transcript_digest
                 .clone(),
             expected_guarded_mutation_nonce: pkg.guarded_mutation_nonce,
-            expected_settlement_execution_preparation_decision_id: dec.settlement_execution_preparation_id.clone(),
+            expected_settlement_execution_preparation_decision_id: dec
+                .settlement_execution_preparation_id
+                .clone(),
             expected_settlement_execution_preparation_request_id: dec.request_id.clone(),
-            expected_settlement_execution_preparation_intent_digest: dec.settlement_execution_preparation_digest.clone(),
-            expected_settlement_execution_preparation_transcript_digest: dec.transcript_digest.clone(),
-            expected_settlement_execution_preparation_nonce: pkg.settlement_execution_preparation_nonce,
+            expected_settlement_execution_preparation_intent_digest: dec
+                .settlement_execution_preparation_digest
+                .clone(),
+            expected_settlement_execution_preparation_transcript_digest: dec
+                .transcript_digest
+                .clone(),
+            expected_settlement_execution_preparation_nonce: pkg
+                .settlement_execution_preparation_nonce,
             expected_commit_authorization_decision_id: pkg.commit_authorization_decision_id.clone(),
             expected_commit_authorization_request_id: pkg.commit_authorization_request_id.clone(),
             expected_commit_authorization_intent_digest: pkg
@@ -6689,9 +7277,13 @@ mod run_341_final_settlement_completion {
                 .mutation_execution_transcript_digest
                 .clone(),
             expected_mutation_execution_nonce: pkg.mutation_execution_nonce,
-            expected_execution_preparation_decision_id: pkg.execution_preparation_decision_id.clone(),
+            expected_execution_preparation_decision_id: pkg
+                .execution_preparation_decision_id
+                .clone(),
             expected_execution_preparation_request_id: pkg.execution_preparation_request_id.clone(),
-            expected_execution_preparation_intent_digest: pkg.execution_preparation_intent_digest.clone(),
+            expected_execution_preparation_intent_digest: pkg
+                .execution_preparation_intent_digest
+                .clone(),
             expected_execution_preparation_transcript_digest: pkg
                 .execution_preparation_transcript_digest
                 .clone(),
@@ -6721,7 +7313,11 @@ mod run_341_final_settlement_completion {
 
     fn z_case(env: TrustBundleEnvironment, sc: Sc) -> Z339 {
         let dec = cz_decision(env, sc);
-        let target = dec.settlement_execution_preparation_artifact.as_ref().unwrap().epoch_transition_target;
+        let target = dec
+            .settlement_execution_preparation_artifact
+            .as_ref()
+            .unwrap()
+            .epoch_transition_target;
         let inputs = z_inputs(env, &dec);
         let request = ProductionLiveEpochTransitionSettlementExecutionRequest::new(
             LiveEpochTransitionSettlementExecutionAuthoritySource::VerifiedSettlementExecutionPreparationDecision {
@@ -6742,11 +7338,12 @@ mod run_341_final_settlement_completion {
     }
 
     fn z_eval(case: &Z339) -> ProductionLiveEpochTransitionSettlementExecutionDecision {
-        case.executor.evaluate_live_epoch_transition_settlement_execution(
-            &case.request,
-            &case.inputs,
-            &empty_replay339(),
-        )
+        case.executor
+            .evaluate_live_epoch_transition_settlement_execution(
+                &case.request,
+                &case.inputs,
+                &empty_replay339(),
+            )
     }
 
     fn z_eval_replay(
@@ -6754,7 +7351,11 @@ mod run_341_final_settlement_completion {
         replay: &[String],
     ) -> ProductionLiveEpochTransitionSettlementExecutionDecision {
         case.executor
-            .evaluate_live_epoch_transition_settlement_execution(&case.request, &case.inputs, &replay)
+            .evaluate_live_epoch_transition_settlement_execution(
+                &case.request,
+                &case.inputs,
+                &replay,
+            )
     }
 
     fn z_exec_with_policy(
@@ -6798,12 +7399,11 @@ mod run_341_final_settlement_completion {
     // A. Accepted / compatible source-test settlement-execution-preparation artifacts
     // ===========================================================================
 
-
     // ---- Run 341 (self) final-settlement / authority-lifecycle completion layer ----
     use qbind_node::pqc_production_live_epoch_transition_final_settlement_completion::*;
 
-    use ProductionLiveEpochTransitionFinalSettlementCompletionOutcome as AO;
     use LiveEpochTransitionFinalSettlementCompletionKind as AK;
+    use ProductionLiveEpochTransitionFinalSettlementCompletionOutcome as AO;
 
     const CRC9_POLICY_ID: &str = "final-settlement-completion-policy-1";
     const CRC9_NONCE: u64 = 49;
@@ -6940,9 +7540,13 @@ mod run_341_final_settlement_completion {
                 .mutation_execution_transcript_digest
                 .clone(),
             expected_mutation_execution_nonce: pkg.mutation_execution_nonce,
-            expected_execution_preparation_decision_id: pkg.execution_preparation_decision_id.clone(),
+            expected_execution_preparation_decision_id: pkg
+                .execution_preparation_decision_id
+                .clone(),
             expected_execution_preparation_request_id: pkg.execution_preparation_request_id.clone(),
-            expected_execution_preparation_intent_digest: pkg.execution_preparation_intent_digest.clone(),
+            expected_execution_preparation_intent_digest: pkg
+                .execution_preparation_intent_digest
+                .clone(),
             expected_execution_preparation_transcript_digest: pkg
                 .execution_preparation_transcript_digest
                 .clone(),
@@ -6972,7 +7576,11 @@ mod run_341_final_settlement_completion {
 
     fn a_case(env: TrustBundleEnvironment, sc: Sc) -> A341 {
         let dec = ca_decision(env, sc);
-        let target = dec.settlement_execution_artifact.as_ref().unwrap().epoch_transition_target;
+        let target = dec
+            .settlement_execution_artifact
+            .as_ref()
+            .unwrap()
+            .epoch_transition_target;
         let inputs = a_inputs(env, &dec);
         let request = ProductionLiveEpochTransitionFinalSettlementCompletionRequest::new(
             LiveEpochTransitionFinalSettlementCompletionAuthoritySource::VerifiedSettlementExecutionDecision {
@@ -6993,11 +7601,12 @@ mod run_341_final_settlement_completion {
     }
 
     fn a_eval(case: &A341) -> ProductionLiveEpochTransitionFinalSettlementCompletionDecision {
-        case.executor.evaluate_live_epoch_transition_final_settlement_completion(
-            &case.request,
-            &case.inputs,
-            &empty_replay341(),
-        )
+        case.executor
+            .evaluate_live_epoch_transition_final_settlement_completion(
+                &case.request,
+                &case.inputs,
+                &empty_replay341(),
+            )
     }
 
     fn a_eval_replay(
@@ -7005,7 +7614,11 @@ mod run_341_final_settlement_completion {
         replay: &[String],
     ) -> ProductionLiveEpochTransitionFinalSettlementCompletionDecision {
         case.executor
-            .evaluate_live_epoch_transition_final_settlement_completion(&case.request, &case.inputs, &replay)
+            .evaluate_live_epoch_transition_final_settlement_completion(
+                &case.request,
+                &case.inputs,
+                &replay,
+            )
     }
 
     fn a_exec_with_policy(
@@ -7087,7 +7700,10 @@ mod run_341_final_settlement_completion {
             } => {
                 assert_eq!(execution_kind, AK::StageApplyValidatorAdd);
                 assert_eq!(environment, TrustBundleEnvironment::Devnet);
-                assert_eq!(epoch_transition_target, c.request.proposed_epoch_transition_target);
+                assert_eq!(
+                    epoch_transition_target,
+                    c.request.proposed_epoch_transition_target
+                );
                 assert_eq!(final_settlement_completion_nonce, CRC9_NONCE);
             }
             other => panic!("unexpected outcome: {other:?}"),
@@ -7096,7 +7712,11 @@ mod run_341_final_settlement_completion {
 
     fn accept_artifact_reexposes_consumed_settlement_execution_transcript() {
         let dec = ca_decision(TrustBundleEnvironment::Devnet, Sc::Add);
-        let target = dec.settlement_execution_artifact.as_ref().unwrap().epoch_transition_target;
+        let target = dec
+            .settlement_execution_artifact
+            .as_ref()
+            .unwrap()
+            .epoch_transition_target;
         let inputs = a_inputs(TrustBundleEnvironment::Devnet, &dec);
         let handoff_id = dec.settlement_execution_id.clone();
         let handoff_req = dec.request_id.clone();
@@ -7119,31 +7739,58 @@ mod run_341_final_settlement_completion {
         assert_eq!(art.settlement_execution_decision_id, handoff_id);
         assert_eq!(art.settlement_execution_request_id, handoff_req);
         assert_eq!(art.settlement_execution_intent_digest, handoff_digest);
-        assert_eq!(art.settlement_execution_transcript_digest, handoff_transcript);
+        assert_eq!(
+            art.settlement_execution_transcript_digest,
+            handoff_transcript
+        );
     }
 
     fn accept_artifact_encodes_future_executor_preconditions() {
         let c = a_case(TrustBundleEnvironment::Devnet, Sc::Add);
         let d = a_eval(&c);
         let art = d.final_settlement_completion_artifact.as_ref().unwrap();
-        assert_eq!(art.precondition_current_validator_set_epoch, art.validator_set_epoch);
-        assert_eq!(art.precondition_current_validator_set_version, art.validator_set_version);
+        assert_eq!(
+            art.precondition_current_validator_set_epoch,
+            art.validator_set_epoch
+        );
+        assert_eq!(
+            art.precondition_current_validator_set_version,
+            art.validator_set_version
+        );
         assert_eq!(art.precondition_target_epoch, art.epoch_transition_target);
-        assert_eq!(art.precondition_required_governance_epoch, art.governance_epoch);
-        assert_eq!(art.precondition_required_authority_sequence, art.authority_domain_sequence);
+        assert_eq!(
+            art.precondition_required_governance_epoch,
+            art.governance_epoch
+        );
+        assert_eq!(
+            art.precondition_required_authority_sequence,
+            art.authority_domain_sequence
+        );
         assert_eq!(art.precondition_required_replay_window, REPLAY_WINDOW);
-        assert_eq!(art.precondition_proposed_validator_set_digest, art.proposed_set_digest);
+        assert_eq!(
+            art.precondition_proposed_validator_set_digest,
+            art.proposed_set_digest
+        );
         assert_eq!(art.precondition_delta_digest, art.delta_digest);
-        assert_eq!(art.precondition_current_validator_set_digest, art.current_set_digest);
+        assert_eq!(
+            art.precondition_current_validator_set_digest,
+            art.current_set_digest
+        );
     }
 
     fn accept_decision_ids_match_artifact_ids() {
         let c = a_case(TrustBundleEnvironment::Devnet, Sc::Add);
         let d = a_eval(&c);
         let art = d.final_settlement_completion_artifact.as_ref().unwrap();
-        assert_eq!(d.final_settlement_completion_id, art.final_settlement_completion_id);
+        assert_eq!(
+            d.final_settlement_completion_id,
+            art.final_settlement_completion_id
+        );
         assert_eq!(d.request_id, art.request_id);
-        assert_eq!(d.final_settlement_completion_digest, art.final_settlement_completion_digest);
+        assert_eq!(
+            d.final_settlement_completion_digest,
+            art.final_settlement_completion_digest
+        );
         assert_eq!(d.transcript_digest, art.transcript_digest);
         assert!(!d.final_settlement_completion_id.is_empty());
         assert!(!d.request_id.is_empty());
@@ -7160,9 +7807,15 @@ mod run_341_final_settlement_completion {
             let c = a_case(TrustBundleEnvironment::Devnet, sc);
             let d1 = a_eval(&c);
             let d2 = a_eval(&c);
-            assert_eq!(d1.final_settlement_completion_id, d2.final_settlement_completion_id);
+            assert_eq!(
+                d1.final_settlement_completion_id,
+                d2.final_settlement_completion_id
+            );
             assert_eq!(d1.request_id, d2.request_id);
-            assert_eq!(d1.final_settlement_completion_digest, d2.final_settlement_completion_digest);
+            assert_eq!(
+                d1.final_settlement_completion_digest,
+                d2.final_settlement_completion_digest
+            );
             assert_eq!(d1.transcript_digest, d2.transcript_digest);
         }
     }
@@ -7218,9 +7871,16 @@ mod run_341_final_settlement_completion {
         // Mutate the consumed package so its content digest no longer matches the
         // bound handoff decision digest.
         let mut dec = ca_decision(TrustBundleEnvironment::Devnet, Sc::Add);
-        let target = dec.settlement_execution_artifact.as_ref().unwrap().epoch_transition_target;
+        let target = dec
+            .settlement_execution_artifact
+            .as_ref()
+            .unwrap()
+            .epoch_transition_target;
         let inputs = a_inputs(TrustBundleEnvironment::Devnet, &dec);
-        dec.settlement_execution_artifact.as_mut().unwrap().proposal_digest = "tampered".to_string();
+        dec.settlement_execution_artifact
+            .as_mut()
+            .unwrap()
+            .proposal_digest = "tampered".to_string();
         let request = ProductionLiveEpochTransitionFinalSettlementCompletionRequest::new(
             LiveEpochTransitionFinalSettlementCompletionAuthoritySource::VerifiedSettlementExecutionDecision {
                 decision: dec,
@@ -7396,28 +8056,56 @@ mod run_341_final_settlement_completion {
 
     fn wrong_environment() {
         a_reject_inputs(
-            |i| i.trust_domain = custom_domain(TrustBundleEnvironment::Testnet, "qbind-devnet", GENESIS_HASH, ROOT_FP),
+            |i| {
+                i.trust_domain = custom_domain(
+                    TrustBundleEnvironment::Testnet,
+                    "qbind-devnet",
+                    GENESIS_HASH,
+                    ROOT_FP,
+                )
+            },
             AO::WrongEnvironment,
         );
     }
 
     fn wrong_chain() {
         a_reject_inputs(
-            |i| i.trust_domain = custom_domain(TrustBundleEnvironment::Devnet, "wrong-chain", GENESIS_HASH, ROOT_FP),
+            |i| {
+                i.trust_domain = custom_domain(
+                    TrustBundleEnvironment::Devnet,
+                    "wrong-chain",
+                    GENESIS_HASH,
+                    ROOT_FP,
+                )
+            },
             AO::WrongChain,
         );
     }
 
     fn wrong_genesis() {
         a_reject_inputs(
-            |i| i.trust_domain = custom_domain(TrustBundleEnvironment::Devnet, "qbind-devnet", "wrong-genesis", ROOT_FP),
+            |i| {
+                i.trust_domain = custom_domain(
+                    TrustBundleEnvironment::Devnet,
+                    "qbind-devnet",
+                    "wrong-genesis",
+                    ROOT_FP,
+                )
+            },
             AO::WrongGenesis,
         );
     }
 
     fn wrong_authority_root() {
         a_reject_inputs(
-            |i| i.trust_domain = custom_domain(TrustBundleEnvironment::Devnet, "qbind-devnet", GENESIS_HASH, "wrong-root"),
+            |i| {
+                i.trust_domain = custom_domain(
+                    TrustBundleEnvironment::Devnet,
+                    "qbind-devnet",
+                    GENESIS_HASH,
+                    "wrong-root",
+                )
+            },
             AO::WrongAuthorityRoot,
         );
     }
@@ -7430,11 +8118,17 @@ mod run_341_final_settlement_completion {
     }
 
     fn wrong_governance_epoch() {
-        a_reject_inputs(|i| i.expected_governance_epoch = 999, AO::WrongGovernanceEpoch);
+        a_reject_inputs(
+            |i| i.expected_governance_epoch = 999,
+            AO::WrongGovernanceEpoch,
+        );
     }
 
     fn wrong_proposal_id() {
-        a_reject_inputs(|i| i.expected_proposal_id = "bad".to_string(), AO::WrongProposalId);
+        a_reject_inputs(
+            |i| i.expected_proposal_id = "bad".to_string(),
+            AO::WrongProposalId,
+        );
     }
 
     fn wrong_governance_execution_intent_digest() {
@@ -7487,7 +8181,10 @@ mod run_341_final_settlement_completion {
     }
 
     fn wrong_authority_sequence() {
-        a_reject_inputs(|i| i.expected_authority_domain_sequence = 999, AO::WrongAuthoritySequence);
+        a_reject_inputs(
+            |i| i.expected_authority_domain_sequence = 999,
+            AO::WrongAuthoritySequence,
+        );
     }
 
     // ===========================================================================
@@ -7516,11 +8213,17 @@ mod run_341_final_settlement_completion {
     }
 
     fn wrong_validator_set_epoch() {
-        a_reject_inputs(|i| i.expected_validator_set_epoch = 999, AO::WrongValidatorSetEpoch);
+        a_reject_inputs(
+            |i| i.expected_validator_set_epoch = 999,
+            AO::WrongValidatorSetEpoch,
+        );
     }
 
     fn wrong_validator_set_version() {
-        a_reject_inputs(|i| i.expected_validator_set_version = 999, AO::WrongValidatorSetVersion);
+        a_reject_inputs(
+            |i| i.expected_validator_set_version = 999,
+            AO::WrongValidatorSetVersion,
+        );
     }
 
     fn wrong_current_validator_set_epoch() {
@@ -7538,7 +8241,10 @@ mod run_341_final_settlement_completion {
     }
 
     fn wrong_proposed_validator_count() {
-        a_reject_inputs(|i| i.expected_proposed_validator_count = 999, AO::WrongProposedValidatorCount);
+        a_reject_inputs(
+            |i| i.expected_proposed_validator_count = 999,
+            AO::WrongProposedValidatorCount,
+        );
     }
 
     fn wrong_rotation_nonce() {
@@ -7550,7 +8256,10 @@ mod run_341_final_settlement_completion {
     // ===========================================================================
 
     fn wrong_epoch_transition_target_inputs() {
-        a_reject_inputs(|i| i.expected_epoch_transition_target = 999, AO::WrongEpochTransitionTarget);
+        a_reject_inputs(
+            |i| i.expected_epoch_transition_target = 999,
+            AO::WrongEpochTransitionTarget,
+        );
     }
 
     fn wrong_epoch_transition_target_request() {
@@ -7562,11 +8271,17 @@ mod run_341_final_settlement_completion {
     }
 
     fn wrong_application_nonce() {
-        a_reject_inputs(|i| i.expected_application_nonce = 999, AO::WrongApplicationNonce);
+        a_reject_inputs(
+            |i| i.expected_application_nonce = 999,
+            AO::WrongApplicationNonce,
+        );
     }
 
     fn wrong_live_application_nonce() {
-        a_reject_inputs(|i| i.expected_live_application_nonce = 999, AO::WrongLiveApplicationNonce);
+        a_reject_inputs(
+            |i| i.expected_live_application_nonce = 999,
+            AO::WrongLiveApplicationNonce,
+        );
     }
 
     // ===========================================================================
@@ -7805,7 +8520,12 @@ mod run_341_final_settlement_completion {
     fn replay_rejected_when_id_present() {
         let c = a_case(TrustBundleEnvironment::Devnet, Sc::Add);
         let d = a_eval(&c);
-        let id = d.final_settlement_completion_artifact.as_ref().unwrap().request_id.clone();
+        let id = d
+            .final_settlement_completion_artifact
+            .as_ref()
+            .unwrap()
+            .request_id
+            .clone();
         let replay = vec![id];
         let d2 = a_eval_replay(&c, &replay);
         match d2.outcome {
@@ -7823,19 +8543,31 @@ mod run_341_final_settlement_completion {
     }
 
     fn stale_governance_epoch() {
-        a_reject_inputs(|i| i.min_governance_epoch = u64::MAX, AO::StaleGovernanceEpoch);
+        a_reject_inputs(
+            |i| i.min_governance_epoch = u64::MAX,
+            AO::StaleGovernanceEpoch,
+        );
     }
 
     fn stale_authority_sequence() {
-        a_reject_inputs(|i| i.persisted_sequence = Some(u64::MAX), AO::StaleAuthoritySequence);
+        a_reject_inputs(
+            |i| i.persisted_sequence = Some(u64::MAX),
+            AO::StaleAuthoritySequence,
+        );
     }
 
     fn stale_validator_set_epoch() {
-        a_reject_inputs(|i| i.min_validator_set_epoch = u64::MAX, AO::StaleValidatorSetEpoch);
+        a_reject_inputs(
+            |i| i.min_validator_set_epoch = u64::MAX,
+            AO::StaleValidatorSetEpoch,
+        );
     }
 
     fn stale_validator_set_version() {
-        a_reject_inputs(|i| i.min_validator_set_version = u64::MAX, AO::StaleValidatorSetVersion);
+        a_reject_inputs(
+            |i| i.min_validator_set_version = u64::MAX,
+            AO::StaleValidatorSetVersion,
+        );
     }
 
     // ===========================================================================
@@ -7846,7 +8578,11 @@ mod run_341_final_settlement_completion {
         let c = a_case(TrustBundleEnvironment::Devnet, Sc::Add);
         let d = a_eval(&c);
         let art = d.final_settlement_completion_artifact.as_ref().unwrap();
-        let mut state = LiveEpochTransitionFinalSettlementCompletionFixtureState::new(CUR_EPOCH, CUR_VERSION, "start");
+        let mut state = LiveEpochTransitionFinalSettlementCompletionFixtureState::new(
+            CUR_EPOCH,
+            CUR_VERSION,
+            "start",
+        );
         assert!(state.apply_prepared_execution(art, &d.final_settlement_completion_id));
         assert_eq!(state.current_epoch, art.epoch_transition_target);
         assert_eq!(state.validator_set_version, art.validator_set_version);
@@ -7861,7 +8597,11 @@ mod run_341_final_settlement_completion {
             let c = a_case(TrustBundleEnvironment::Devnet, sc);
             let d = a_eval(&c);
             let art = d.final_settlement_completion_artifact.as_ref().unwrap();
-            let mut state = LiveEpochTransitionFinalSettlementCompletionFixtureState::new(CUR_EPOCH, CUR_VERSION, "start");
+            let mut state = LiveEpochTransitionFinalSettlementCompletionFixtureState::new(
+                CUR_EPOCH,
+                CUR_VERSION,
+                "start",
+            );
             assert!(state.apply_prepared_execution(art, &d.final_settlement_completion_id));
             assert_eq!(state.current_epoch, art.epoch_transition_target);
         }
@@ -7885,7 +8625,12 @@ mod run_341_final_settlement_completion {
         let d = a_eval(&c);
         assert!(d.outcome.authorizes_future_mutation_only());
         assert!(d.authorizes_future_mutation_only());
-        assert!(d.final_settlement_completion_artifact.as_ref().unwrap().staged_kind.is_non_mutating());
+        assert!(d
+            .final_settlement_completion_artifact
+            .as_ref()
+            .unwrap()
+            .staged_kind
+            .is_non_mutating());
     }
 
     fn reject_never_authorizes_future_mutation() {
@@ -7908,9 +8653,13 @@ mod run_341_final_settlement_completion {
     fn policy_predicates() {
         use ProductionLiveEpochTransitionFinalSettlementCompletionExecutorPolicy as Pol;
         assert!(Pol::Disabled.is_disabled());
-        assert!(Pol::AllowSourceTestLiveEpochTransitionFinalSettlementCompletion.allows_source_test());
+        assert!(
+            Pol::AllowSourceTestLiveEpochTransitionFinalSettlementCompletion.allows_source_test()
+        );
         assert!(Pol::RequireProductionLiveEpochTransitionFinalSettlementCompletion.is_production());
-        assert!(Pol::MainnetProductionLiveEpochTransitionFinalSettlementCompletionRequired.is_mainnet());
+        assert!(
+            Pol::MainnetProductionLiveEpochTransitionFinalSettlementCompletionRequired.is_mainnet()
+        );
         assert_eq!(Pol::default(), Pol::Disabled);
     }
 
@@ -7933,7 +8682,9 @@ mod run_341_final_settlement_completion {
     }
 
     fn unsupported_staged_application_kind_is_unsupported() {
-        let pk = AK::from_staged_application_kind(LiveEpochTransitionSettlementExecutionKind::UnsupportedStagedApplication);
+        let pk = AK::from_staged_application_kind(
+            LiveEpochTransitionSettlementExecutionKind::UnsupportedStagedApplication,
+        );
         assert!(pk.is_unsupported());
     }
 
@@ -7948,9 +8699,15 @@ mod run_341_final_settlement_completion {
     fn config_and_inputs_well_formed() {
         let c = a_case(TrustBundleEnvironment::Devnet, Sc::Add);
         assert!(c.inputs.is_well_formed());
-        assert!(ProductionLiveEpochTransitionFinalSettlementCompletionConfig::source_test().is_well_formed());
+        assert!(
+            ProductionLiveEpochTransitionFinalSettlementCompletionConfig::source_test()
+                .is_well_formed()
+        );
         // The default config still pins the supported protocol version.
-        assert!(ProductionLiveEpochTransitionFinalSettlementCompletionConfig::default().is_well_formed());
+        assert!(
+            ProductionLiveEpochTransitionFinalSettlementCompletionConfig::default()
+                .is_well_formed()
+        );
     }
 
     // ===========================================================================
@@ -7967,7 +8724,10 @@ mod run_341_final_settlement_completion {
                 assert_eq!(art.staged_kind, expected_crc9_kind($sc));
                 assert!(art.staged_kind.is_non_mutating());
                 let d2 = a_eval(&c);
-                assert_eq!(d.final_settlement_completion_digest, d2.final_settlement_completion_digest);
+                assert_eq!(
+                    d.final_settlement_completion_digest,
+                    d2.final_settlement_completion_digest
+                );
                 assert_eq!(d.transcript_digest, d2.transcript_digest);
                 let mut state = LiveEpochTransitionFinalSettlementCompletionFixtureState::new(
                     CUR_EPOCH,
@@ -7997,7 +8757,10 @@ mod run_341_final_settlement_completion {
                 let d = a_eval(&c);
                 assert!(d.is_accept());
                 assert_eq!(
-                    d.final_settlement_completion_artifact.as_ref().unwrap().environment,
+                    d.final_settlement_completion_artifact
+                        .as_ref()
+                        .unwrap()
+                        .environment,
                     TrustBundleEnvironment::Testnet
                 );
             }
@@ -8065,14 +8828,27 @@ mod run_341_final_settlement_completion {
 
     fn accept_reexposes_runtime_handoff_tuple_from_parent() {
         let parent = ca_decision(TrustBundleEnvironment::Devnet, Sc::Add);
-        let ppkg = parent.settlement_execution_artifact.as_ref().unwrap().clone();
+        let ppkg = parent
+            .settlement_execution_artifact
+            .as_ref()
+            .unwrap()
+            .clone();
         let c = a_case(TrustBundleEnvironment::Devnet, Sc::Add);
         let d = a_eval(&c);
         assert!(d.is_accept());
         let art = d.final_settlement_completion_artifact.as_ref().unwrap();
-        assert_eq!(art.runtime_handoff_decision_id, ppkg.runtime_handoff_decision_id);
-        assert_eq!(art.runtime_handoff_request_id, ppkg.runtime_handoff_request_id);
-        assert_eq!(art.runtime_handoff_intent_digest, ppkg.runtime_handoff_intent_digest);
+        assert_eq!(
+            art.runtime_handoff_decision_id,
+            ppkg.runtime_handoff_decision_id
+        );
+        assert_eq!(
+            art.runtime_handoff_request_id,
+            ppkg.runtime_handoff_request_id
+        );
+        assert_eq!(
+            art.runtime_handoff_intent_digest,
+            ppkg.runtime_handoff_intent_digest
+        );
         assert_eq!(
             art.runtime_handoff_transcript_digest,
             ppkg.runtime_handoff_transcript_digest
@@ -8098,7 +8874,10 @@ mod run_341_final_settlement_completion {
 
     fn reject_runtime_handoff_intent_digest_mismatch() {
         a_reject_inputs(
-            |i| i.expected_runtime_handoff_intent_digest = "wrong-runtime-handoff-digest".to_string(),
+            |i| {
+                i.expected_runtime_handoff_intent_digest =
+                    "wrong-runtime-handoff-digest".to_string()
+            },
             AO::RuntimeHandoffDecisionIntentDigestMismatch,
         );
     }
@@ -8347,7 +9126,10 @@ mod run_341_final_settlement_completion {
 
     fn reject_execution_preparation_intent_digest_mismatch() {
         a_reject_inputs(
-            |i| i.expected_execution_preparation_intent_digest = "wrong-exec-prep-digest".to_string(),
+            |i| {
+                i.expected_execution_preparation_intent_digest =
+                    "wrong-exec-prep-digest".to_string()
+            },
             AO::ExecutionPreparationDecisionIntentDigestMismatch,
         );
     }
@@ -8440,8 +9222,8 @@ mod run_347_authority_activation_execution_preparation {
     // ---- Run 339 (input) decision builder layer (verbatim) ----
     use qbind_node::pqc_production_live_epoch_transition_settlement_execution::*;
 
-    use ProductionLiveEpochTransitionSettlementExecutionOutcome as ZO;
     use LiveEpochTransitionSettlementExecutionKind as ZK;
+    use ProductionLiveEpochTransitionSettlementExecutionOutcome as ZO;
 
     const CRC8_POLICY_ID: &str = "settlement-execution-policy-1";
     const CRC8_NONCE: u64 = 49;
@@ -8504,7 +9286,10 @@ mod run_347_authority_activation_execution_preparation {
         env: TrustBundleEnvironment,
         dec: &ProductionLiveEpochTransitionSettlementExecutionPreparationDecision,
     ) -> ProductionLiveEpochTransitionSettlementExecutionInputs {
-        let pkg = dec.settlement_execution_preparation_artifact.as_ref().unwrap();
+        let pkg = dec
+            .settlement_execution_preparation_artifact
+            .as_ref()
+            .unwrap();
         ProductionLiveEpochTransitionSettlementExecutionInputs {
             trust_domain: trust_domain(env),
             settlement_execution_policy_id: CRC8_POLICY_ID.to_string(),
@@ -8557,11 +9342,18 @@ mod run_347_authority_activation_execution_preparation {
                 .guarded_mutation_transcript_digest
                 .clone(),
             expected_guarded_mutation_nonce: pkg.guarded_mutation_nonce,
-            expected_settlement_execution_preparation_decision_id: dec.settlement_execution_preparation_id.clone(),
+            expected_settlement_execution_preparation_decision_id: dec
+                .settlement_execution_preparation_id
+                .clone(),
             expected_settlement_execution_preparation_request_id: dec.request_id.clone(),
-            expected_settlement_execution_preparation_intent_digest: dec.settlement_execution_preparation_digest.clone(),
-            expected_settlement_execution_preparation_transcript_digest: dec.transcript_digest.clone(),
-            expected_settlement_execution_preparation_nonce: pkg.settlement_execution_preparation_nonce,
+            expected_settlement_execution_preparation_intent_digest: dec
+                .settlement_execution_preparation_digest
+                .clone(),
+            expected_settlement_execution_preparation_transcript_digest: dec
+                .transcript_digest
+                .clone(),
+            expected_settlement_execution_preparation_nonce: pkg
+                .settlement_execution_preparation_nonce,
             expected_commit_authorization_decision_id: pkg.commit_authorization_decision_id.clone(),
             expected_commit_authorization_request_id: pkg.commit_authorization_request_id.clone(),
             expected_commit_authorization_intent_digest: pkg
@@ -8578,9 +9370,13 @@ mod run_347_authority_activation_execution_preparation {
                 .mutation_execution_transcript_digest
                 .clone(),
             expected_mutation_execution_nonce: pkg.mutation_execution_nonce,
-            expected_execution_preparation_decision_id: pkg.execution_preparation_decision_id.clone(),
+            expected_execution_preparation_decision_id: pkg
+                .execution_preparation_decision_id
+                .clone(),
             expected_execution_preparation_request_id: pkg.execution_preparation_request_id.clone(),
-            expected_execution_preparation_intent_digest: pkg.execution_preparation_intent_digest.clone(),
+            expected_execution_preparation_intent_digest: pkg
+                .execution_preparation_intent_digest
+                .clone(),
             expected_execution_preparation_transcript_digest: pkg
                 .execution_preparation_transcript_digest
                 .clone(),
@@ -8610,7 +9406,11 @@ mod run_347_authority_activation_execution_preparation {
 
     fn z_case(env: TrustBundleEnvironment, sc: Sc) -> Z339 {
         let dec = cz_decision(env, sc);
-        let target = dec.settlement_execution_preparation_artifact.as_ref().unwrap().epoch_transition_target;
+        let target = dec
+            .settlement_execution_preparation_artifact
+            .as_ref()
+            .unwrap()
+            .epoch_transition_target;
         let inputs = z_inputs(env, &dec);
         let request = ProductionLiveEpochTransitionSettlementExecutionRequest::new(
             LiveEpochTransitionSettlementExecutionAuthoritySource::VerifiedSettlementExecutionPreparationDecision {
@@ -8631,11 +9431,12 @@ mod run_347_authority_activation_execution_preparation {
     }
 
     fn z_eval(case: &Z339) -> ProductionLiveEpochTransitionSettlementExecutionDecision {
-        case.executor.evaluate_live_epoch_transition_settlement_execution(
-            &case.request,
-            &case.inputs,
-            &empty_replay339(),
-        )
+        case.executor
+            .evaluate_live_epoch_transition_settlement_execution(
+                &case.request,
+                &case.inputs,
+                &empty_replay339(),
+            )
     }
 
     fn z_eval_replay(
@@ -8643,7 +9444,11 @@ mod run_347_authority_activation_execution_preparation {
         replay: &[String],
     ) -> ProductionLiveEpochTransitionSettlementExecutionDecision {
         case.executor
-            .evaluate_live_epoch_transition_settlement_execution(&case.request, &case.inputs, &replay)
+            .evaluate_live_epoch_transition_settlement_execution(
+                &case.request,
+                &case.inputs,
+                &replay,
+            )
     }
 
     fn z_exec_with_policy(
@@ -8687,8 +9492,8 @@ mod run_347_authority_activation_execution_preparation {
     // ---- Run 341 (self) final-settlement / authority-lifecycle completion layer ----
     use qbind_node::pqc_production_live_epoch_transition_final_settlement_completion::*;
 
-    use ProductionLiveEpochTransitionFinalSettlementCompletionOutcome as AO;
     use LiveEpochTransitionFinalSettlementCompletionKind as AK;
+    use ProductionLiveEpochTransitionFinalSettlementCompletionOutcome as AO;
 
     const CRC9_POLICY_ID: &str = "final-settlement-completion-policy-1";
     const CRC9_NONCE: u64 = 49;
@@ -8825,9 +9630,13 @@ mod run_347_authority_activation_execution_preparation {
                 .mutation_execution_transcript_digest
                 .clone(),
             expected_mutation_execution_nonce: pkg.mutation_execution_nonce,
-            expected_execution_preparation_decision_id: pkg.execution_preparation_decision_id.clone(),
+            expected_execution_preparation_decision_id: pkg
+                .execution_preparation_decision_id
+                .clone(),
             expected_execution_preparation_request_id: pkg.execution_preparation_request_id.clone(),
-            expected_execution_preparation_intent_digest: pkg.execution_preparation_intent_digest.clone(),
+            expected_execution_preparation_intent_digest: pkg
+                .execution_preparation_intent_digest
+                .clone(),
             expected_execution_preparation_transcript_digest: pkg
                 .execution_preparation_transcript_digest
                 .clone(),
@@ -8857,7 +9666,11 @@ mod run_347_authority_activation_execution_preparation {
 
     fn a_case(env: TrustBundleEnvironment, sc: Sc) -> A341 {
         let dec = ca_decision(env, sc);
-        let target = dec.settlement_execution_artifact.as_ref().unwrap().epoch_transition_target;
+        let target = dec
+            .settlement_execution_artifact
+            .as_ref()
+            .unwrap()
+            .epoch_transition_target;
         let inputs = a_inputs(env, &dec);
         let request = ProductionLiveEpochTransitionFinalSettlementCompletionRequest::new(
             LiveEpochTransitionFinalSettlementCompletionAuthoritySource::VerifiedSettlementExecutionDecision {
@@ -8878,11 +9691,12 @@ mod run_347_authority_activation_execution_preparation {
     }
 
     fn a_eval(case: &A341) -> ProductionLiveEpochTransitionFinalSettlementCompletionDecision {
-        case.executor.evaluate_live_epoch_transition_final_settlement_completion(
-            &case.request,
-            &case.inputs,
-            &empty_replay341(),
-        )
+        case.executor
+            .evaluate_live_epoch_transition_final_settlement_completion(
+                &case.request,
+                &case.inputs,
+                &empty_replay341(),
+            )
     }
 
     fn a_eval_replay(
@@ -8890,7 +9704,11 @@ mod run_347_authority_activation_execution_preparation {
         replay: &[String],
     ) -> ProductionLiveEpochTransitionFinalSettlementCompletionDecision {
         case.executor
-            .evaluate_live_epoch_transition_final_settlement_completion(&case.request, &case.inputs, &replay)
+            .evaluate_live_epoch_transition_final_settlement_completion(
+                &case.request,
+                &case.inputs,
+                &replay,
+            )
     }
 
     fn a_exec_with_policy(
@@ -8934,8 +9752,8 @@ mod run_347_authority_activation_execution_preparation {
     // ---- Run 341 (self) final-settlement / authority-lifecycle completion layer ----
     use qbind_node::pqc_production_live_epoch_transition_authority_lifecycle_post_completion_attestation::*;
 
-    use ProductionLiveEpochTransitionPostCompletionAttestationOutcome as BO;
     use LiveEpochTransitionPostCompletionAttestationKind as BK;
+    use ProductionLiveEpochTransitionPostCompletionAttestationOutcome as BO;
 
     const CRC10_POLICY_ID: &str = "post-completion-attestation-policy-1";
     const CRC10_NONCE: u64 = 49;
@@ -9051,9 +9869,13 @@ mod run_347_authority_activation_execution_preparation {
                 .guarded_mutation_transcript_digest
                 .clone(),
             expected_guarded_mutation_nonce: pkg.guarded_mutation_nonce,
-            expected_final_settlement_completion_decision_id: dec.final_settlement_completion_id.clone(),
+            expected_final_settlement_completion_decision_id: dec
+                .final_settlement_completion_id
+                .clone(),
             expected_final_settlement_completion_request_id: dec.request_id.clone(),
-            expected_final_settlement_completion_intent_digest: dec.final_settlement_completion_digest.clone(),
+            expected_final_settlement_completion_intent_digest: dec
+                .final_settlement_completion_digest
+                .clone(),
             expected_final_settlement_completion_transcript_digest: dec.transcript_digest.clone(),
             expected_final_settlement_completion_nonce: pkg.final_settlement_completion_nonce,
             expected_commit_authorization_decision_id: pkg.commit_authorization_decision_id.clone(),
@@ -9072,9 +9894,13 @@ mod run_347_authority_activation_execution_preparation {
                 .mutation_execution_transcript_digest
                 .clone(),
             expected_mutation_execution_nonce: pkg.mutation_execution_nonce,
-            expected_execution_preparation_decision_id: pkg.execution_preparation_decision_id.clone(),
+            expected_execution_preparation_decision_id: pkg
+                .execution_preparation_decision_id
+                .clone(),
             expected_execution_preparation_request_id: pkg.execution_preparation_request_id.clone(),
-            expected_execution_preparation_intent_digest: pkg.execution_preparation_intent_digest.clone(),
+            expected_execution_preparation_intent_digest: pkg
+                .execution_preparation_intent_digest
+                .clone(),
             expected_execution_preparation_transcript_digest: pkg
                 .execution_preparation_transcript_digest
                 .clone(),
@@ -9104,7 +9930,11 @@ mod run_347_authority_activation_execution_preparation {
 
     fn b_case(env: TrustBundleEnvironment, sc: Sc) -> B343 {
         let dec = cb_decision(env, sc);
-        let target = dec.final_settlement_completion_artifact.as_ref().unwrap().epoch_transition_target;
+        let target = dec
+            .final_settlement_completion_artifact
+            .as_ref()
+            .unwrap()
+            .epoch_transition_target;
         let inputs = b_inputs(env, &dec);
         let request = ProductionLiveEpochTransitionPostCompletionAttestationRequest::new(
             LiveEpochTransitionPostCompletionAttestationAuthoritySource::VerifiedFinalSettlementCompletionDecision {
@@ -9125,11 +9955,12 @@ mod run_347_authority_activation_execution_preparation {
     }
 
     fn b_eval(case: &B343) -> ProductionLiveEpochTransitionPostCompletionAttestationDecision {
-        case.executor.evaluate_live_epoch_transition_post_completion_attestation(
-            &case.request,
-            &case.inputs,
-            &empty_replay343(),
-        )
+        case.executor
+            .evaluate_live_epoch_transition_post_completion_attestation(
+                &case.request,
+                &case.inputs,
+                &empty_replay343(),
+            )
     }
 
     fn b_eval_replay(
@@ -9137,7 +9968,11 @@ mod run_347_authority_activation_execution_preparation {
         replay: &[String],
     ) -> ProductionLiveEpochTransitionPostCompletionAttestationDecision {
         case.executor
-            .evaluate_live_epoch_transition_post_completion_attestation(&case.request, &case.inputs, &replay)
+            .evaluate_live_epoch_transition_post_completion_attestation(
+                &case.request,
+                &case.inputs,
+                &replay,
+            )
     }
 
     fn b_exec_with_policy(
@@ -9185,8 +10020,8 @@ mod run_347_authority_activation_execution_preparation {
     // ---- Run 343 (self) final-settlement / authority-lifecycle completion layer ----
     use qbind_node::pqc_production_live_epoch_transition_authority_activation_authorization::*;
 
-    use ProductionLiveEpochTransitionAuthorityActivationAuthorizationOutcome as CO;
     use LiveEpochTransitionAuthorityActivationAuthorizationKind as CK;
+    use ProductionLiveEpochTransitionAuthorityActivationAuthorizationOutcome as CO;
 
     const CRC11_POLICY_ID: &str = "authority-activation-authorization-policy-1";
     const CRC11_NONCE: u64 = 49;
@@ -9302,9 +10137,13 @@ mod run_347_authority_activation_execution_preparation {
                 .guarded_mutation_transcript_digest
                 .clone(),
             expected_guarded_mutation_nonce: pkg.guarded_mutation_nonce,
-            expected_post_completion_attestation_decision_id: dec.post_completion_attestation_id.clone(),
+            expected_post_completion_attestation_decision_id: dec
+                .post_completion_attestation_id
+                .clone(),
             expected_post_completion_attestation_request_id: dec.request_id.clone(),
-            expected_post_completion_attestation_intent_digest: dec.post_completion_attestation_digest.clone(),
+            expected_post_completion_attestation_intent_digest: dec
+                .post_completion_attestation_digest
+                .clone(),
             expected_post_completion_attestation_transcript_digest: dec.transcript_digest.clone(),
             expected_post_completion_attestation_nonce: pkg.post_completion_attestation_nonce,
             expected_commit_authorization_decision_id: pkg.commit_authorization_decision_id.clone(),
@@ -9323,9 +10162,13 @@ mod run_347_authority_activation_execution_preparation {
                 .mutation_execution_transcript_digest
                 .clone(),
             expected_mutation_execution_nonce: pkg.mutation_execution_nonce,
-            expected_execution_preparation_decision_id: pkg.execution_preparation_decision_id.clone(),
+            expected_execution_preparation_decision_id: pkg
+                .execution_preparation_decision_id
+                .clone(),
             expected_execution_preparation_request_id: pkg.execution_preparation_request_id.clone(),
-            expected_execution_preparation_intent_digest: pkg.execution_preparation_intent_digest.clone(),
+            expected_execution_preparation_intent_digest: pkg
+                .execution_preparation_intent_digest
+                .clone(),
             expected_execution_preparation_transcript_digest: pkg
                 .execution_preparation_transcript_digest
                 .clone(),
@@ -9355,7 +10198,11 @@ mod run_347_authority_activation_execution_preparation {
 
     fn c_case(env: TrustBundleEnvironment, sc: Sc) -> C345 {
         let dec = cc_decision(env, sc);
-        let target = dec.post_completion_attestation_artifact.as_ref().unwrap().epoch_transition_target;
+        let target = dec
+            .post_completion_attestation_artifact
+            .as_ref()
+            .unwrap()
+            .epoch_transition_target;
         let inputs = c_inputs(env, &dec);
         let request = ProductionLiveEpochTransitionAuthorityActivationAuthorizationRequest::new(
             LiveEpochTransitionAuthorityActivationAuthorizationAuthoritySource::VerifiedPostCompletionAttestationDecision {
@@ -9365,7 +10212,8 @@ mod run_347_authority_activation_execution_preparation {
             CRC11_NONCE,
         );
         C345 {
-            executor: ProductionLiveEpochTransitionAuthorityActivationAuthorizationExecutor::source_test(),
+            executor:
+                ProductionLiveEpochTransitionAuthorityActivationAuthorizationExecutor::source_test(),
             request,
             inputs,
         }
@@ -9375,12 +10223,15 @@ mod run_347_authority_activation_execution_preparation {
         EmptyLiveEpochTransitionAuthorityActivationAuthorizationReplaySet
     }
 
-    fn c_eval(case: &C345) -> ProductionLiveEpochTransitionAuthorityActivationAuthorizationDecision {
-        case.executor.evaluate_live_epoch_transition_authority_activation_authorization(
-            &case.request,
-            &case.inputs,
-            &empty_replay345(),
-        )
+    fn c_eval(
+        case: &C345,
+    ) -> ProductionLiveEpochTransitionAuthorityActivationAuthorizationDecision {
+        case.executor
+            .evaluate_live_epoch_transition_authority_activation_authorization(
+                &case.request,
+                &case.inputs,
+                &empty_replay345(),
+            )
     }
 
     fn c_eval_replay(
@@ -9388,7 +10239,11 @@ mod run_347_authority_activation_execution_preparation {
         replay: &[String],
     ) -> ProductionLiveEpochTransitionAuthorityActivationAuthorizationDecision {
         case.executor
-            .evaluate_live_epoch_transition_authority_activation_authorization(&case.request, &case.inputs, &replay)
+            .evaluate_live_epoch_transition_authority_activation_authorization(
+                &case.request,
+                &case.inputs,
+                &replay,
+            )
     }
 
     fn c_exec_with_policy(
@@ -9432,7 +10287,6 @@ mod run_347_authority_activation_execution_preparation {
     // A. Accepted / compatible source-test post-completion-attestation artifacts
     // ===========================================================================
 
-
     // =======================================================================
     // Run 347 layer (module under test): consumes the verified Run 345/346
     // authority-activation-authorization decision and produces the typed,
@@ -9441,8 +10295,8 @@ mod run_347_authority_activation_execution_preparation {
     // =======================================================================
     use qbind_node::pqc_production_live_epoch_transition_authority_activation_execution_preparation::*;
 
-    use ProductionLiveEpochTransitionAuthorityActivationExecutionPreparationOutcome as DO;
     use LiveEpochTransitionAuthorityActivationExecutionPreparationKind as DK;
+    use ProductionLiveEpochTransitionAuthorityActivationExecutionPreparationOutcome as DO;
 
     const CRC12_POLICY_ID: &str = "authority-activation-execution-preparation-policy-1";
     const CRC12_NONCE: u64 = 49;
@@ -9505,7 +10359,10 @@ mod run_347_authority_activation_execution_preparation {
         env: TrustBundleEnvironment,
         dec: &ProductionLiveEpochTransitionAuthorityActivationAuthorizationDecision,
     ) -> ProductionLiveEpochTransitionAuthorityActivationExecutionPreparationInputs {
-        let pkg = dec.authority_activation_authorization_artifact.as_ref().unwrap();
+        let pkg = dec
+            .authority_activation_authorization_artifact
+            .as_ref()
+            .unwrap();
         ProductionLiveEpochTransitionAuthorityActivationExecutionPreparationInputs {
             trust_domain: trust_domain(env),
             authority_activation_execution_preparation_policy_id: CRC12_POLICY_ID.to_string(),
@@ -9558,11 +10415,18 @@ mod run_347_authority_activation_execution_preparation {
                 .guarded_mutation_transcript_digest
                 .clone(),
             expected_guarded_mutation_nonce: pkg.guarded_mutation_nonce,
-            expected_authority_activation_authorization_decision_id: dec.authority_activation_authorization_id.clone(),
+            expected_authority_activation_authorization_decision_id: dec
+                .authority_activation_authorization_id
+                .clone(),
             expected_authority_activation_authorization_request_id: dec.request_id.clone(),
-            expected_authority_activation_authorization_intent_digest: dec.authority_activation_authorization_digest.clone(),
-            expected_authority_activation_authorization_transcript_digest: dec.transcript_digest.clone(),
-            expected_authority_activation_authorization_nonce: pkg.authority_activation_authorization_nonce,
+            expected_authority_activation_authorization_intent_digest: dec
+                .authority_activation_authorization_digest
+                .clone(),
+            expected_authority_activation_authorization_transcript_digest: dec
+                .transcript_digest
+                .clone(),
+            expected_authority_activation_authorization_nonce: pkg
+                .authority_activation_authorization_nonce,
             expected_commit_authorization_decision_id: pkg.commit_authorization_decision_id.clone(),
             expected_commit_authorization_request_id: pkg.commit_authorization_request_id.clone(),
             expected_commit_authorization_intent_digest: pkg
@@ -9579,9 +10443,13 @@ mod run_347_authority_activation_execution_preparation {
                 .mutation_execution_transcript_digest
                 .clone(),
             expected_mutation_execution_nonce: pkg.mutation_execution_nonce,
-            expected_execution_preparation_decision_id: pkg.execution_preparation_decision_id.clone(),
+            expected_execution_preparation_decision_id: pkg
+                .execution_preparation_decision_id
+                .clone(),
             expected_execution_preparation_request_id: pkg.execution_preparation_request_id.clone(),
-            expected_execution_preparation_intent_digest: pkg.execution_preparation_intent_digest.clone(),
+            expected_execution_preparation_intent_digest: pkg
+                .execution_preparation_intent_digest
+                .clone(),
             expected_execution_preparation_transcript_digest: pkg
                 .execution_preparation_transcript_digest
                 .clone(),
@@ -9611,7 +10479,11 @@ mod run_347_authority_activation_execution_preparation {
 
     fn d_case(env: TrustBundleEnvironment, sc: Sc) -> D347 {
         let dec = dc_decision(env, sc);
-        let target = dec.authority_activation_authorization_artifact.as_ref().unwrap().epoch_transition_target;
+        let target = dec
+            .authority_activation_authorization_artifact
+            .as_ref()
+            .unwrap()
+            .epoch_transition_target;
         let inputs = d_inputs(env, &dec);
         let request = ProductionLiveEpochTransitionAuthorityActivationExecutionPreparationRequest::new(
             LiveEpochTransitionAuthorityActivationExecutionPreparationAuthoritySource::VerifiedAuthorityActivationAuthorizationDecision {
@@ -9627,16 +10499,20 @@ mod run_347_authority_activation_execution_preparation {
         }
     }
 
-    fn empty_replay347() -> EmptyLiveEpochTransitionAuthorityActivationExecutionPreparationReplaySet {
+    fn empty_replay347() -> EmptyLiveEpochTransitionAuthorityActivationExecutionPreparationReplaySet
+    {
         EmptyLiveEpochTransitionAuthorityActivationExecutionPreparationReplaySet
     }
 
-    fn d_eval(case: &D347) -> ProductionLiveEpochTransitionAuthorityActivationExecutionPreparationDecision {
-        case.executor.evaluate_live_epoch_transition_authority_activation_execution_preparation(
-            &case.request,
-            &case.inputs,
-            &empty_replay347(),
-        )
+    fn d_eval(
+        case: &D347,
+    ) -> ProductionLiveEpochTransitionAuthorityActivationExecutionPreparationDecision {
+        case.executor
+            .evaluate_live_epoch_transition_authority_activation_execution_preparation(
+                &case.request,
+                &case.inputs,
+                &empty_replay347(),
+            )
     }
 
     fn d_eval_replay(
@@ -9644,14 +10520,19 @@ mod run_347_authority_activation_execution_preparation {
         replay: &[String],
     ) -> ProductionLiveEpochTransitionAuthorityActivationExecutionPreparationDecision {
         case.executor
-            .evaluate_live_epoch_transition_authority_activation_execution_preparation(&case.request, &case.inputs, &replay)
+            .evaluate_live_epoch_transition_authority_activation_execution_preparation(
+                &case.request,
+                &case.inputs,
+                &replay,
+            )
     }
 
     fn d_exec_with_policy(
         policy: ProductionLiveEpochTransitionAuthorityActivationExecutionPreparationExecutorPolicy,
     ) -> ProductionLiveEpochTransitionAuthorityActivationExecutionPreparationExecutor {
         ProductionLiveEpochTransitionAuthorityActivationExecutionPreparationExecutor::new(
-            ProductionLiveEpochTransitionAuthorityActivationExecutionPreparationConfig::source_test(),
+            ProductionLiveEpochTransitionAuthorityActivationExecutionPreparationConfig::source_test(
+            ),
             policy,
         )
     }
@@ -9659,14 +10540,18 @@ mod run_347_authority_activation_execution_preparation {
     /// Common helper: build a Devnet/Add case, apply a mutation to the inputs, and
     /// assert the resulting outcome (fail-closed, no artifact).
     fn d_reject_inputs(
-        mutate: impl FnOnce(&mut ProductionLiveEpochTransitionAuthorityActivationExecutionPreparationInputs),
+        mutate: impl FnOnce(
+            &mut ProductionLiveEpochTransitionAuthorityActivationExecutionPreparationInputs,
+        ),
         expected: DO,
     ) {
         let mut c = d_case(TrustBundleEnvironment::Devnet, Sc::Add);
         mutate(&mut c.inputs);
         let d = d_eval(&c);
         assert_eq!(d.outcome, expected, "outcome tag: {}", d.outcome.tag());
-        assert!(d.authority_activation_execution_preparation_artifact.is_none());
+        assert!(d
+            .authority_activation_execution_preparation_artifact
+            .is_none());
         assert!(!d.is_accept());
         assert!(d.outcome.is_non_mutating());
     }
@@ -9681,7 +10566,9 @@ mod run_347_authority_activation_execution_preparation {
         c.request.authority_source = source;
         let d = d_eval(&c);
         assert_eq!(d.outcome, expected, "outcome tag: {}", d.outcome.tag());
-        assert!(d.authority_activation_execution_preparation_artifact.is_none());
+        assert!(d
+            .authority_activation_execution_preparation_artifact
+            .is_none());
     }
 
     // ===========================================================================
@@ -9694,9 +10581,15 @@ mod run_347_authority_activation_execution_preparation {
             let d = d_eval(&c);
             assert!(d.is_accept(), "scenario must accept");
             assert!(d.authorizes_future_mutation_only());
-            let art = d.authority_activation_execution_preparation_artifact.as_ref().unwrap();
+            let art = d
+                .authority_activation_execution_preparation_artifact
+                .as_ref()
+                .unwrap();
             assert_eq!(art.staged_kind, expected_crc12_kind(sc));
-            assert_eq!(art.authority_activation_execution_preparation_nonce, CRC12_NONCE);
+            assert_eq!(
+                art.authority_activation_execution_preparation_nonce,
+                CRC12_NONCE
+            );
             assert_eq!(art.authority_activation_authorization_nonce, CRC4_NONCE);
             assert_eq!(art.guarded_mutation_nonce, GUARDED_NONCE);
             assert_eq!(art.staged_application_nonce, STAGED_NONCE);
@@ -9708,7 +10601,10 @@ mod run_347_authority_activation_execution_preparation {
             let c = d_case(TrustBundleEnvironment::Testnet, sc);
             let d = d_eval(&c);
             assert!(d.is_accept());
-            let art = d.authority_activation_execution_preparation_artifact.as_ref().unwrap();
+            let art = d
+                .authority_activation_execution_preparation_artifact
+                .as_ref()
+                .unwrap();
             assert_eq!(art.environment, TrustBundleEnvironment::Testnet);
             assert_eq!(art.staged_kind, expected_crc12_kind(sc));
         }
@@ -9726,8 +10622,14 @@ mod run_347_authority_activation_execution_preparation {
             } => {
                 assert_eq!(execution_kind, DK::StageApplyValidatorAdd);
                 assert_eq!(environment, TrustBundleEnvironment::Devnet);
-                assert_eq!(epoch_transition_target, c.request.proposed_epoch_transition_target);
-                assert_eq!(authority_activation_execution_preparation_nonce, CRC12_NONCE);
+                assert_eq!(
+                    epoch_transition_target,
+                    c.request.proposed_epoch_transition_target
+                );
+                assert_eq!(
+                    authority_activation_execution_preparation_nonce,
+                    CRC12_NONCE
+                );
             }
             other => panic!("unexpected outcome: {other:?}"),
         }
@@ -9735,7 +10637,11 @@ mod run_347_authority_activation_execution_preparation {
 
     fn accept_artifact_reexposes_consumed_authority_activation_authorization_transcript() {
         let dec = dc_decision(TrustBundleEnvironment::Devnet, Sc::Add);
-        let target = dec.authority_activation_authorization_artifact.as_ref().unwrap().epoch_transition_target;
+        let target = dec
+            .authority_activation_authorization_artifact
+            .as_ref()
+            .unwrap()
+            .epoch_transition_target;
         let inputs = d_inputs(TrustBundleEnvironment::Devnet, &dec);
         let handoff_id = dec.authority_activation_authorization_id.clone();
         let handoff_req = dec.request_id.clone();
@@ -9754,39 +10660,86 @@ mod run_347_authority_activation_execution_preparation {
             &inputs,
             &empty_replay347(),
         );
-        let art = d.authority_activation_execution_preparation_artifact.as_ref().unwrap();
-        assert_eq!(art.authority_activation_authorization_decision_id, handoff_id);
-        assert_eq!(art.authority_activation_authorization_request_id, handoff_req);
-        assert_eq!(art.authority_activation_authorization_intent_digest, handoff_digest);
-        assert_eq!(art.authority_activation_authorization_transcript_digest, handoff_transcript);
+        let art = d
+            .authority_activation_execution_preparation_artifact
+            .as_ref()
+            .unwrap();
+        assert_eq!(
+            art.authority_activation_authorization_decision_id,
+            handoff_id
+        );
+        assert_eq!(
+            art.authority_activation_authorization_request_id,
+            handoff_req
+        );
+        assert_eq!(
+            art.authority_activation_authorization_intent_digest,
+            handoff_digest
+        );
+        assert_eq!(
+            art.authority_activation_authorization_transcript_digest,
+            handoff_transcript
+        );
     }
 
     fn accept_artifact_encodes_future_executor_preconditions() {
         let c = d_case(TrustBundleEnvironment::Devnet, Sc::Add);
         let d = d_eval(&c);
-        let art = d.authority_activation_execution_preparation_artifact.as_ref().unwrap();
-        assert_eq!(art.precondition_current_validator_set_epoch, art.validator_set_epoch);
-        assert_eq!(art.precondition_current_validator_set_version, art.validator_set_version);
+        let art = d
+            .authority_activation_execution_preparation_artifact
+            .as_ref()
+            .unwrap();
+        assert_eq!(
+            art.precondition_current_validator_set_epoch,
+            art.validator_set_epoch
+        );
+        assert_eq!(
+            art.precondition_current_validator_set_version,
+            art.validator_set_version
+        );
         assert_eq!(art.precondition_target_epoch, art.epoch_transition_target);
-        assert_eq!(art.precondition_required_governance_epoch, art.governance_epoch);
-        assert_eq!(art.precondition_required_authority_sequence, art.authority_domain_sequence);
+        assert_eq!(
+            art.precondition_required_governance_epoch,
+            art.governance_epoch
+        );
+        assert_eq!(
+            art.precondition_required_authority_sequence,
+            art.authority_domain_sequence
+        );
         assert_eq!(art.precondition_required_replay_window, REPLAY_WINDOW);
-        assert_eq!(art.precondition_proposed_validator_set_digest, art.proposed_set_digest);
+        assert_eq!(
+            art.precondition_proposed_validator_set_digest,
+            art.proposed_set_digest
+        );
         assert_eq!(art.precondition_delta_digest, art.delta_digest);
-        assert_eq!(art.precondition_current_validator_set_digest, art.current_set_digest);
+        assert_eq!(
+            art.precondition_current_validator_set_digest,
+            art.current_set_digest
+        );
     }
 
     fn accept_decision_ids_match_artifact_ids() {
         let c = d_case(TrustBundleEnvironment::Devnet, Sc::Add);
         let d = d_eval(&c);
-        let art = d.authority_activation_execution_preparation_artifact.as_ref().unwrap();
-        assert_eq!(d.authority_activation_execution_preparation_id, art.authority_activation_execution_preparation_id);
+        let art = d
+            .authority_activation_execution_preparation_artifact
+            .as_ref()
+            .unwrap();
+        assert_eq!(
+            d.authority_activation_execution_preparation_id,
+            art.authority_activation_execution_preparation_id
+        );
         assert_eq!(d.request_id, art.request_id);
-        assert_eq!(d.authority_activation_execution_preparation_digest, art.authority_activation_execution_preparation_digest);
+        assert_eq!(
+            d.authority_activation_execution_preparation_digest,
+            art.authority_activation_execution_preparation_digest
+        );
         assert_eq!(d.transcript_digest, art.transcript_digest);
         assert!(!d.authority_activation_execution_preparation_id.is_empty());
         assert!(!d.request_id.is_empty());
-        assert!(!d.authority_activation_execution_preparation_digest.is_empty());
+        assert!(!d
+            .authority_activation_execution_preparation_digest
+            .is_empty());
         assert!(!d.transcript_digest.is_empty());
     }
 
@@ -9799,9 +10752,15 @@ mod run_347_authority_activation_execution_preparation {
             let c = d_case(TrustBundleEnvironment::Devnet, sc);
             let d1 = d_eval(&c);
             let d2 = d_eval(&c);
-            assert_eq!(d1.authority_activation_execution_preparation_id, d2.authority_activation_execution_preparation_id);
+            assert_eq!(
+                d1.authority_activation_execution_preparation_id,
+                d2.authority_activation_execution_preparation_id
+            );
             assert_eq!(d1.request_id, d2.request_id);
-            assert_eq!(d1.authority_activation_execution_preparation_digest, d2.authority_activation_execution_preparation_digest);
+            assert_eq!(
+                d1.authority_activation_execution_preparation_digest,
+                d2.authority_activation_execution_preparation_digest
+            );
             assert_eq!(d1.transcript_digest, d2.transcript_digest);
         }
     }
@@ -9809,8 +10768,14 @@ mod run_347_authority_activation_execution_preparation {
     fn artifact_content_digest_is_stable() {
         let c = d_case(TrustBundleEnvironment::Devnet, Sc::Bulk);
         let d = d_eval(&c);
-        let art = d.authority_activation_execution_preparation_artifact.as_ref().unwrap();
-        assert_eq!(art.content_digest(), art.authority_activation_execution_preparation_digest);
+        let art = d
+            .authority_activation_execution_preparation_artifact
+            .as_ref()
+            .unwrap();
+        assert_eq!(
+            art.content_digest(),
+            art.authority_activation_execution_preparation_digest
+        );
         assert_eq!(art.content_digest(), art.content_digest());
     }
 
@@ -9857,9 +10822,16 @@ mod run_347_authority_activation_execution_preparation {
         // Mutate the consumed package so its content digest no longer matches the
         // bound handoff decision digest.
         let mut dec = dc_decision(TrustBundleEnvironment::Devnet, Sc::Add);
-        let target = dec.authority_activation_authorization_artifact.as_ref().unwrap().epoch_transition_target;
+        let target = dec
+            .authority_activation_authorization_artifact
+            .as_ref()
+            .unwrap()
+            .epoch_transition_target;
         let inputs = d_inputs(TrustBundleEnvironment::Devnet, &dec);
-        dec.authority_activation_authorization_artifact.as_mut().unwrap().proposal_digest = "tampered".to_string();
+        dec.authority_activation_authorization_artifact
+            .as_mut()
+            .unwrap()
+            .proposal_digest = "tampered".to_string();
         let request = ProductionLiveEpochTransitionAuthorityActivationExecutionPreparationRequest::new(
             LiveEpochTransitionAuthorityActivationExecutionPreparationAuthoritySource::VerifiedAuthorityActivationAuthorizationDecision {
                 decision: dec,
@@ -9873,8 +10845,13 @@ mod run_347_authority_activation_execution_preparation {
             &inputs,
             &empty_replay347(),
         );
-        assert_eq!(d.outcome, DO::AuthorityActivationAuthorizationDecisionIntegrityMismatch);
-        assert!(d.authority_activation_execution_preparation_artifact.is_none());
+        assert_eq!(
+            d.outcome,
+            DO::AuthorityActivationAuthorizationDecisionIntegrityMismatch
+        );
+        assert!(d
+            .authority_activation_execution_preparation_artifact
+            .is_none());
     }
 
     // ===========================================================================
@@ -10035,28 +11012,56 @@ mod run_347_authority_activation_execution_preparation {
 
     fn wrong_environment() {
         d_reject_inputs(
-            |i| i.trust_domain = custom_domain(TrustBundleEnvironment::Testnet, "qbind-devnet", GENESIS_HASH, ROOT_FP),
+            |i| {
+                i.trust_domain = custom_domain(
+                    TrustBundleEnvironment::Testnet,
+                    "qbind-devnet",
+                    GENESIS_HASH,
+                    ROOT_FP,
+                )
+            },
             DO::WrongEnvironment,
         );
     }
 
     fn wrong_chain() {
         d_reject_inputs(
-            |i| i.trust_domain = custom_domain(TrustBundleEnvironment::Devnet, "wrong-chain", GENESIS_HASH, ROOT_FP),
+            |i| {
+                i.trust_domain = custom_domain(
+                    TrustBundleEnvironment::Devnet,
+                    "wrong-chain",
+                    GENESIS_HASH,
+                    ROOT_FP,
+                )
+            },
             DO::WrongChain,
         );
     }
 
     fn wrong_genesis() {
         d_reject_inputs(
-            |i| i.trust_domain = custom_domain(TrustBundleEnvironment::Devnet, "qbind-devnet", "wrong-genesis", ROOT_FP),
+            |i| {
+                i.trust_domain = custom_domain(
+                    TrustBundleEnvironment::Devnet,
+                    "qbind-devnet",
+                    "wrong-genesis",
+                    ROOT_FP,
+                )
+            },
             DO::WrongGenesis,
         );
     }
 
     fn wrong_authority_root() {
         d_reject_inputs(
-            |i| i.trust_domain = custom_domain(TrustBundleEnvironment::Devnet, "qbind-devnet", GENESIS_HASH, "wrong-root"),
+            |i| {
+                i.trust_domain = custom_domain(
+                    TrustBundleEnvironment::Devnet,
+                    "qbind-devnet",
+                    GENESIS_HASH,
+                    "wrong-root",
+                )
+            },
             DO::WrongAuthorityRoot,
         );
     }
@@ -10069,11 +11074,17 @@ mod run_347_authority_activation_execution_preparation {
     }
 
     fn wrong_governance_epoch() {
-        d_reject_inputs(|i| i.expected_governance_epoch = 999, DO::WrongGovernanceEpoch);
+        d_reject_inputs(
+            |i| i.expected_governance_epoch = 999,
+            DO::WrongGovernanceEpoch,
+        );
     }
 
     fn wrong_proposal_id() {
-        d_reject_inputs(|i| i.expected_proposal_id = "bad".to_string(), DO::WrongProposalId);
+        d_reject_inputs(
+            |i| i.expected_proposal_id = "bad".to_string(),
+            DO::WrongProposalId,
+        );
     }
 
     fn wrong_governance_execution_intent_digest() {
@@ -10126,7 +11137,10 @@ mod run_347_authority_activation_execution_preparation {
     }
 
     fn wrong_authority_sequence() {
-        d_reject_inputs(|i| i.expected_authority_domain_sequence = 999, DO::WrongAuthoritySequence);
+        d_reject_inputs(
+            |i| i.expected_authority_domain_sequence = 999,
+            DO::WrongAuthoritySequence,
+        );
     }
 
     // ===========================================================================
@@ -10155,11 +11169,17 @@ mod run_347_authority_activation_execution_preparation {
     }
 
     fn wrong_validator_set_epoch() {
-        d_reject_inputs(|i| i.expected_validator_set_epoch = 999, DO::WrongValidatorSetEpoch);
+        d_reject_inputs(
+            |i| i.expected_validator_set_epoch = 999,
+            DO::WrongValidatorSetEpoch,
+        );
     }
 
     fn wrong_validator_set_version() {
-        d_reject_inputs(|i| i.expected_validator_set_version = 999, DO::WrongValidatorSetVersion);
+        d_reject_inputs(
+            |i| i.expected_validator_set_version = 999,
+            DO::WrongValidatorSetVersion,
+        );
     }
 
     fn wrong_current_validator_set_epoch() {
@@ -10177,7 +11197,10 @@ mod run_347_authority_activation_execution_preparation {
     }
 
     fn wrong_proposed_validator_count() {
-        d_reject_inputs(|i| i.expected_proposed_validator_count = 999, DO::WrongProposedValidatorCount);
+        d_reject_inputs(
+            |i| i.expected_proposed_validator_count = 999,
+            DO::WrongProposedValidatorCount,
+        );
     }
 
     fn wrong_rotation_nonce() {
@@ -10189,7 +11212,10 @@ mod run_347_authority_activation_execution_preparation {
     // ===========================================================================
 
     fn wrong_epoch_transition_target_inputs() {
-        d_reject_inputs(|i| i.expected_epoch_transition_target = 999, DO::WrongEpochTransitionTarget);
+        d_reject_inputs(
+            |i| i.expected_epoch_transition_target = 999,
+            DO::WrongEpochTransitionTarget,
+        );
     }
 
     fn wrong_epoch_transition_target_request() {
@@ -10197,15 +11223,23 @@ mod run_347_authority_activation_execution_preparation {
         c.request.proposed_epoch_transition_target = 4242;
         let d = d_eval(&c);
         assert_eq!(d.outcome, DO::WrongEpochTransitionTarget);
-        assert!(d.authority_activation_execution_preparation_artifact.is_none());
+        assert!(d
+            .authority_activation_execution_preparation_artifact
+            .is_none());
     }
 
     fn wrong_application_nonce() {
-        d_reject_inputs(|i| i.expected_application_nonce = 999, DO::WrongApplicationNonce);
+        d_reject_inputs(
+            |i| i.expected_application_nonce = 999,
+            DO::WrongApplicationNonce,
+        );
     }
 
     fn wrong_live_application_nonce() {
-        d_reject_inputs(|i| i.expected_live_application_nonce = 999, DO::WrongLiveApplicationNonce);
+        d_reject_inputs(
+            |i| i.expected_live_application_nonce = 999,
+            DO::WrongLiveApplicationNonce,
+        );
     }
 
     // ===========================================================================
@@ -10366,7 +11400,9 @@ mod run_347_authority_activation_execution_preparation {
         c.inputs.trust_domain = trust_domain(TrustBundleEnvironment::Mainnet);
         let d = d_eval(&c);
         assert_eq!(d.outcome, DO::MainNetRefused);
-        assert!(d.authority_activation_execution_preparation_artifact.is_none());
+        assert!(d
+            .authority_activation_execution_preparation_artifact
+            .is_none());
     }
 
     fn mainnet_policy_unavailable() {
@@ -10383,7 +11419,9 @@ mod run_347_authority_activation_execution_preparation {
             d.outcome,
             DO::MainNetProductionLiveEpochTransitionAuthorityActivationExecutionPreparationUnavailable
         );
-        assert!(d.authority_activation_execution_preparation_artifact.is_none());
+        assert!(d
+            .authority_activation_execution_preparation_artifact
+            .is_none());
     }
 
     fn production_policy_unavailable() {
@@ -10400,7 +11438,9 @@ mod run_347_authority_activation_execution_preparation {
             d.outcome,
             DO::ProductionLiveEpochTransitionAuthorityActivationExecutionPreparationUnavailable
         );
-        assert!(d.authority_activation_execution_preparation_artifact.is_none());
+        assert!(d
+            .authority_activation_execution_preparation_artifact
+            .is_none());
     }
 
     fn disabled_policy_fails_closed() {
@@ -10414,7 +11454,9 @@ mod run_347_authority_activation_execution_preparation {
             &empty_replay347(),
         );
         assert_eq!(d.outcome, DO::Disabled);
-        assert!(d.authority_activation_execution_preparation_artifact.is_none());
+        assert!(d
+            .authority_activation_execution_preparation_artifact
+            .is_none());
         assert!(!d.is_accept());
     }
 
@@ -10444,14 +11486,21 @@ mod run_347_authority_activation_execution_preparation {
     fn replay_rejected_when_id_present() {
         let c = d_case(TrustBundleEnvironment::Devnet, Sc::Add);
         let d = d_eval(&c);
-        let id = d.authority_activation_execution_preparation_artifact.as_ref().unwrap().request_id.clone();
+        let id = d
+            .authority_activation_execution_preparation_artifact
+            .as_ref()
+            .unwrap()
+            .request_id
+            .clone();
         let replay = vec![id];
         let d2 = d_eval_replay(&c, &replay);
         match d2.outcome {
             DO::StagedApplicationReplayRejected { .. } => {}
             other => panic!("expected replay rejection, got {other:?}"),
         }
-        assert!(d2.authority_activation_execution_preparation_artifact.is_none());
+        assert!(d2
+            .authority_activation_execution_preparation_artifact
+            .is_none());
     }
 
     fn no_replay_when_id_absent() {
@@ -10462,19 +11511,31 @@ mod run_347_authority_activation_execution_preparation {
     }
 
     fn stale_governance_epoch() {
-        d_reject_inputs(|i| i.min_governance_epoch = u64::MAX, DO::StaleGovernanceEpoch);
+        d_reject_inputs(
+            |i| i.min_governance_epoch = u64::MAX,
+            DO::StaleGovernanceEpoch,
+        );
     }
 
     fn stale_authority_sequence() {
-        d_reject_inputs(|i| i.persisted_sequence = Some(u64::MAX), DO::StaleAuthoritySequence);
+        d_reject_inputs(
+            |i| i.persisted_sequence = Some(u64::MAX),
+            DO::StaleAuthoritySequence,
+        );
     }
 
     fn stale_validator_set_epoch() {
-        d_reject_inputs(|i| i.min_validator_set_epoch = u64::MAX, DO::StaleValidatorSetEpoch);
+        d_reject_inputs(
+            |i| i.min_validator_set_epoch = u64::MAX,
+            DO::StaleValidatorSetEpoch,
+        );
     }
 
     fn stale_validator_set_version() {
-        d_reject_inputs(|i| i.min_validator_set_version = u64::MAX, DO::StaleValidatorSetVersion);
+        d_reject_inputs(
+            |i| i.min_validator_set_version = u64::MAX,
+            DO::StaleValidatorSetVersion,
+        );
     }
 
     // ===========================================================================
@@ -10484,14 +11545,25 @@ mod run_347_authority_activation_execution_preparation {
     fn fixture_state_apply_is_idempotent() {
         let c = d_case(TrustBundleEnvironment::Devnet, Sc::Add);
         let d = d_eval(&c);
-        let art = d.authority_activation_execution_preparation_artifact.as_ref().unwrap();
-        let mut state = LiveEpochTransitionAuthorityActivationExecutionPreparationFixtureState::new(CUR_EPOCH, CUR_VERSION, "start");
-        assert!(state.apply_prepared_execution(art, &d.authority_activation_execution_preparation_id));
+        let art = d
+            .authority_activation_execution_preparation_artifact
+            .as_ref()
+            .unwrap();
+        let mut state = LiveEpochTransitionAuthorityActivationExecutionPreparationFixtureState::new(
+            CUR_EPOCH,
+            CUR_VERSION,
+            "start",
+        );
+        assert!(
+            state.apply_prepared_execution(art, &d.authority_activation_execution_preparation_id)
+        );
         assert_eq!(state.current_epoch, art.epoch_transition_target);
         assert_eq!(state.validator_set_version, art.validator_set_version);
         assert_eq!(state.current_set_digest, art.proposed_set_digest);
         // Re-applying the same id is a no-op.
-        assert!(!state.apply_prepared_execution(art, &d.authority_activation_execution_preparation_id));
+        assert!(
+            !state.apply_prepared_execution(art, &d.authority_activation_execution_preparation_id)
+        );
         assert!(state.has_applied(&d.authority_activation_execution_preparation_id));
     }
 
@@ -10499,9 +11571,18 @@ mod run_347_authority_activation_execution_preparation {
         for sc in ALL_SC {
             let c = d_case(TrustBundleEnvironment::Devnet, sc);
             let d = d_eval(&c);
-            let art = d.authority_activation_execution_preparation_artifact.as_ref().unwrap();
-            let mut state = LiveEpochTransitionAuthorityActivationExecutionPreparationFixtureState::new(CUR_EPOCH, CUR_VERSION, "start");
-            assert!(state.apply_prepared_execution(art, &d.authority_activation_execution_preparation_id));
+            let art = d
+                .authority_activation_execution_preparation_artifact
+                .as_ref()
+                .unwrap();
+            let mut state =
+                LiveEpochTransitionAuthorityActivationExecutionPreparationFixtureState::new(
+                    CUR_EPOCH,
+                    CUR_VERSION,
+                    "start",
+                );
+            assert!(state
+                .apply_prepared_execution(art, &d.authority_activation_execution_preparation_id));
             assert_eq!(state.current_epoch, art.epoch_transition_target);
         }
     }
@@ -10515,7 +11596,10 @@ mod run_347_authority_activation_execution_preparation {
         let d = d_eval(&c);
         assert!(d.outcome.is_non_mutating());
         let bad = d_case(TrustBundleEnvironment::Devnet, Sc::Add);
-        let dbad = d_eval_replay(&bad, &[d_eval(&bad).authority_activation_execution_preparation_id]);
+        let dbad = d_eval_replay(
+            &bad,
+            &[d_eval(&bad).authority_activation_execution_preparation_id],
+        );
         assert!(dbad.outcome.is_non_mutating());
     }
 
@@ -10524,7 +11608,12 @@ mod run_347_authority_activation_execution_preparation {
         let d = d_eval(&c);
         assert!(d.outcome.authorizes_future_mutation_only());
         assert!(d.authorizes_future_mutation_only());
-        assert!(d.authority_activation_execution_preparation_artifact.as_ref().unwrap().staged_kind.is_non_mutating());
+        assert!(d
+            .authority_activation_execution_preparation_artifact
+            .as_ref()
+            .unwrap()
+            .staged_kind
+            .is_non_mutating());
     }
 
     fn reject_never_authorizes_future_mutation() {
@@ -10547,17 +11636,29 @@ mod run_347_authority_activation_execution_preparation {
     fn policy_predicates() {
         use ProductionLiveEpochTransitionAuthorityActivationExecutionPreparationExecutorPolicy as Pol;
         assert!(Pol::Disabled.is_disabled());
-        assert!(Pol::AllowSourceTestLiveEpochTransitionAuthorityActivationExecutionPreparation.allows_source_test());
-        assert!(Pol::RequireProductionLiveEpochTransitionAuthorityActivationExecutionPreparation.is_production());
+        assert!(
+            Pol::AllowSourceTestLiveEpochTransitionAuthorityActivationExecutionPreparation
+                .allows_source_test()
+        );
+        assert!(
+            Pol::RequireProductionLiveEpochTransitionAuthorityActivationExecutionPreparation
+                .is_production()
+        );
         assert!(Pol::MainnetProductionLiveEpochTransitionAuthorityActivationExecutionPreparationRequired.is_mainnet());
         assert_eq!(Pol::default(), Pol::Disabled);
     }
 
     fn kind_predicates() {
         use ProductionLiveEpochTransitionAuthorityActivationExecutionPreparationExecutorKind as K;
-        assert!(K::SourceTestLiveEpochTransitionAuthorityActivationExecutionPreparation.is_source_test());
+        assert!(
+            K::SourceTestLiveEpochTransitionAuthorityActivationExecutionPreparation
+                .is_source_test()
+        );
         assert!(!K::Disabled.is_source_test());
-        assert!(!K::ProductionLiveEpochTransitionAuthorityActivationExecutionPreparation.is_source_test());
+        assert!(
+            !K::ProductionLiveEpochTransitionAuthorityActivationExecutionPreparation
+                .is_source_test()
+        );
         assert_eq!(K::default(), K::Disabled);
     }
 
@@ -10572,7 +11673,9 @@ mod run_347_authority_activation_execution_preparation {
     }
 
     fn unsupported_staged_application_kind_is_unsupported() {
-        let pk = DK::from_staged_application_kind(LiveEpochTransitionAuthorityActivationAuthorizationKind::UnsupportedStagedApplication);
+        let pk = DK::from_staged_application_kind(
+            LiveEpochTransitionAuthorityActivationAuthorizationKind::UnsupportedStagedApplication,
+        );
         assert!(pk.is_unsupported());
     }
 
@@ -10580,7 +11683,10 @@ mod run_347_authority_activation_execution_preparation {
         let a = DO::AuthorityActivationAuthorizationDecisionIdMismatch;
         let b = DO::GuardedMutationDecisionIdMismatch;
         assert_ne!(a.tag(), b.tag());
-        assert_eq!(a.tag(), DO::AuthorityActivationAuthorizationDecisionIdMismatch.tag());
+        assert_eq!(
+            a.tag(),
+            DO::AuthorityActivationAuthorizationDecisionIdMismatch.tag()
+        );
         assert!(!DO::MainNetRefused.tag().is_empty());
     }
 
@@ -10589,7 +11695,10 @@ mod run_347_authority_activation_execution_preparation {
         assert!(c.inputs.is_well_formed());
         assert!(ProductionLiveEpochTransitionAuthorityActivationExecutionPreparationConfig::source_test().is_well_formed());
         // The default config still pins the supported protocol version.
-        assert!(ProductionLiveEpochTransitionAuthorityActivationExecutionPreparationConfig::default().is_well_formed());
+        assert!(
+            ProductionLiveEpochTransitionAuthorityActivationExecutionPreparationConfig::default()
+                .is_well_formed()
+        );
     }
 
     // ===========================================================================
@@ -10602,18 +11711,28 @@ mod run_347_authority_activation_execution_preparation {
                 let c = d_case(TrustBundleEnvironment::Devnet, $sc);
                 let d = d_eval(&c);
                 assert!(d.is_accept());
-                let art = d.authority_activation_execution_preparation_artifact.as_ref().unwrap();
+                let art = d
+                    .authority_activation_execution_preparation_artifact
+                    .as_ref()
+                    .unwrap();
                 assert_eq!(art.staged_kind, expected_crc12_kind($sc));
                 assert!(art.staged_kind.is_non_mutating());
                 let d2 = d_eval(&c);
-                assert_eq!(d.authority_activation_execution_preparation_digest, d2.authority_activation_execution_preparation_digest);
-                assert_eq!(d.transcript_digest, d2.transcript_digest);
-                let mut state = LiveEpochTransitionAuthorityActivationExecutionPreparationFixtureState::new(
-                    CUR_EPOCH,
-                    CUR_VERSION,
-                    "start",
+                assert_eq!(
+                    d.authority_activation_execution_preparation_digest,
+                    d2.authority_activation_execution_preparation_digest
                 );
-                assert!(state.apply_prepared_execution(art, &d.authority_activation_execution_preparation_id));
+                assert_eq!(d.transcript_digest, d2.transcript_digest);
+                let mut state =
+                    LiveEpochTransitionAuthorityActivationExecutionPreparationFixtureState::new(
+                        CUR_EPOCH,
+                        CUR_VERSION,
+                        "start",
+                    );
+                assert!(state.apply_prepared_execution(
+                    art,
+                    &d.authority_activation_execution_preparation_id
+                ));
                 assert_eq!(state.current_epoch, art.epoch_transition_target);
             }
         };
@@ -10636,7 +11755,10 @@ mod run_347_authority_activation_execution_preparation {
                 let d = d_eval(&c);
                 assert!(d.is_accept());
                 assert_eq!(
-                    d.authority_activation_execution_preparation_artifact.as_ref().unwrap().environment,
+                    d.authority_activation_execution_preparation_artifact
+                        .as_ref()
+                        .unwrap()
+                        .environment,
                     TrustBundleEnvironment::Testnet
                 );
             }
@@ -10657,23 +11779,53 @@ mod run_347_authority_activation_execution_preparation {
         ($name:ident, $sc:expr) => {
             fn $name() {
                 let mut c = d_case(TrustBundleEnvironment::Devnet, $sc);
-                c.inputs.expected_authority_activation_authorization_decision_id = "bad".to_string();
+                c.inputs
+                    .expected_authority_activation_authorization_decision_id = "bad".to_string();
                 let d = d_eval(&c);
-                assert_eq!(d.outcome, DO::AuthorityActivationAuthorizationDecisionIdMismatch);
-                assert!(d.authority_activation_execution_preparation_artifact.is_none());
+                assert_eq!(
+                    d.outcome,
+                    DO::AuthorityActivationAuthorizationDecisionIdMismatch
+                );
+                assert!(d
+                    .authority_activation_execution_preparation_artifact
+                    .is_none());
             }
         };
     }
 
     per_scenario_authority_activation_authorization_binding!(scenario_handoff_binding_add, Sc::Add);
-    per_scenario_authority_activation_authorization_binding!(scenario_handoff_binding_remove, Sc::Remove);
-    per_scenario_authority_activation_authorization_binding!(scenario_handoff_binding_update, Sc::Update);
-    per_scenario_authority_activation_authorization_binding!(scenario_handoff_binding_noop, Sc::NoOp);
-    per_scenario_authority_activation_authorization_binding!(scenario_handoff_binding_identity, Sc::Identity);
-    per_scenario_authority_activation_authorization_binding!(scenario_handoff_binding_retire, Sc::Retire);
-    per_scenario_authority_activation_authorization_binding!(scenario_handoff_binding_emergency, Sc::Emergency);
-    per_scenario_authority_activation_authorization_binding!(scenario_handoff_binding_authsync, Sc::AuthSync);
-    per_scenario_authority_activation_authorization_binding!(scenario_handoff_binding_bulk, Sc::Bulk);
+    per_scenario_authority_activation_authorization_binding!(
+        scenario_handoff_binding_remove,
+        Sc::Remove
+    );
+    per_scenario_authority_activation_authorization_binding!(
+        scenario_handoff_binding_update,
+        Sc::Update
+    );
+    per_scenario_authority_activation_authorization_binding!(
+        scenario_handoff_binding_noop,
+        Sc::NoOp
+    );
+    per_scenario_authority_activation_authorization_binding!(
+        scenario_handoff_binding_identity,
+        Sc::Identity
+    );
+    per_scenario_authority_activation_authorization_binding!(
+        scenario_handoff_binding_retire,
+        Sc::Retire
+    );
+    per_scenario_authority_activation_authorization_binding!(
+        scenario_handoff_binding_emergency,
+        Sc::Emergency
+    );
+    per_scenario_authority_activation_authorization_binding!(
+        scenario_handoff_binding_authsync,
+        Sc::AuthSync
+    );
+    per_scenario_authority_activation_authorization_binding!(
+        scenario_handoff_binding_bulk,
+        Sc::Bulk
+    );
 
     macro_rules! per_scenario_guarded_binding {
         ($name:ident, $sc:expr) => {
@@ -10682,7 +11834,9 @@ mod run_347_authority_activation_execution_preparation {
                 c.inputs.expected_guarded_mutation_decision_id = "bad".to_string();
                 let d = d_eval(&c);
                 assert_eq!(d.outcome, DO::GuardedMutationDecisionIdMismatch);
-                assert!(d.authority_activation_execution_preparation_artifact.is_none());
+                assert!(d
+                    .authority_activation_execution_preparation_artifact
+                    .is_none());
             }
         };
     }
@@ -10704,21 +11858,40 @@ mod run_347_authority_activation_execution_preparation {
 
     fn accept_reexposes_runtime_handoff_tuple_from_parent() {
         let parent = dc_decision(TrustBundleEnvironment::Devnet, Sc::Add);
-        let ppkg = parent.authority_activation_authorization_artifact.as_ref().unwrap().clone();
+        let ppkg = parent
+            .authority_activation_authorization_artifact
+            .as_ref()
+            .unwrap()
+            .clone();
         let c = d_case(TrustBundleEnvironment::Devnet, Sc::Add);
         let d = d_eval(&c);
         assert!(d.is_accept());
-        let art = d.authority_activation_execution_preparation_artifact.as_ref().unwrap();
-        assert_eq!(art.runtime_handoff_decision_id, ppkg.runtime_handoff_decision_id);
-        assert_eq!(art.runtime_handoff_request_id, ppkg.runtime_handoff_request_id);
-        assert_eq!(art.runtime_handoff_intent_digest, ppkg.runtime_handoff_intent_digest);
+        let art = d
+            .authority_activation_execution_preparation_artifact
+            .as_ref()
+            .unwrap();
+        assert_eq!(
+            art.runtime_handoff_decision_id,
+            ppkg.runtime_handoff_decision_id
+        );
+        assert_eq!(
+            art.runtime_handoff_request_id,
+            ppkg.runtime_handoff_request_id
+        );
+        assert_eq!(
+            art.runtime_handoff_intent_digest,
+            ppkg.runtime_handoff_intent_digest
+        );
         assert_eq!(
             art.runtime_handoff_transcript_digest,
             ppkg.runtime_handoff_transcript_digest
         );
         assert_eq!(art.runtime_handoff_nonce, HANDOFF_NONCE);
         assert_eq!(art.authority_activation_authorization_nonce, CRC4_NONCE);
-        assert_eq!(art.authority_activation_execution_preparation_nonce, CRC12_NONCE);
+        assert_eq!(
+            art.authority_activation_execution_preparation_nonce,
+            CRC12_NONCE
+        );
     }
 
     fn reject_runtime_handoff_decision_id_mismatch() {
@@ -10737,7 +11910,10 @@ mod run_347_authority_activation_execution_preparation {
 
     fn reject_runtime_handoff_intent_digest_mismatch() {
         d_reject_inputs(
-            |i| i.expected_runtime_handoff_intent_digest = "wrong-runtime-handoff-digest".to_string(),
+            |i| {
+                i.expected_runtime_handoff_intent_digest =
+                    "wrong-runtime-handoff-digest".to_string()
+            },
             DO::RuntimeHandoffDecisionIntentDigestMismatch,
         );
     }
@@ -10801,8 +11977,14 @@ mod run_347_authority_activation_execution_preparation {
         let c = d_case(TrustBundleEnvironment::Devnet, Sc::Add);
         let d1 = d_eval(&c);
         let d2 = d_eval(&c);
-        let a1 = d1.authority_activation_execution_preparation_artifact.as_ref().unwrap();
-        let a2 = d2.authority_activation_execution_preparation_artifact.as_ref().unwrap();
+        let a1 = d1
+            .authority_activation_execution_preparation_artifact
+            .as_ref()
+            .unwrap();
+        let a2 = d2
+            .authority_activation_execution_preparation_artifact
+            .as_ref()
+            .unwrap();
         assert_eq!(a1.content_digest(), a2.content_digest());
     }
 
@@ -10922,7 +12104,10 @@ mod run_347_authority_activation_execution_preparation {
     fn accept_artifact_reexposes_commit_authorization_tuple() {
         let c = d_case(TrustBundleEnvironment::Devnet, Sc::Add);
         let d = d_eval(&c);
-        let art = d.authority_activation_execution_preparation_artifact.as_ref().unwrap();
+        let art = d
+            .authority_activation_execution_preparation_artifact
+            .as_ref()
+            .unwrap();
         assert_eq!(art.commit_authorization_nonce, CMT_NONCE);
         assert!(!art.commit_authorization_decision_id.is_empty());
         assert!(!art.commit_authorization_transcript_digest.is_empty());
@@ -10947,13 +12132,19 @@ mod run_347_authority_activation_execution_preparation {
         let c = d_case(TrustBundleEnvironment::Devnet, Sc::Add);
         let d = d_eval(&c);
         assert!(d.is_accept());
-        let art = d.authority_activation_execution_preparation_artifact.as_ref().unwrap();
+        let art = d
+            .authority_activation_execution_preparation_artifact
+            .as_ref()
+            .unwrap();
         // Grandparent Run 329/330 mutation-execution nonce re-exposed intact.
         assert_eq!(art.mutation_execution_nonce, MUT_NONCE);
         // Parent Run 335/336 authority-activation-authorization nonce re-exposed intact.
         assert_eq!(art.authority_activation_authorization_nonce, CRC4_NONCE);
         // Self Run 337 authority-activation-execution-preparation proposed nonce.
-        assert_eq!(art.authority_activation_execution_preparation_nonce, CRC12_NONCE);
+        assert_eq!(
+            art.authority_activation_execution_preparation_nonce,
+            CRC12_NONCE
+        );
     }
 
     fn mutation_execution_binding_rejects_are_non_mutating() {
@@ -10986,7 +12177,10 @@ mod run_347_authority_activation_execution_preparation {
 
     fn reject_execution_preparation_intent_digest_mismatch() {
         d_reject_inputs(
-            |i| i.expected_execution_preparation_intent_digest = "wrong-exec-prep-digest".to_string(),
+            |i| {
+                i.expected_execution_preparation_intent_digest =
+                    "wrong-exec-prep-digest".to_string()
+            },
             DO::ExecutionPreparationDecisionIntentDigestMismatch,
         );
     }
@@ -11034,13 +12228,19 @@ mod run_347_authority_activation_execution_preparation {
         let c = d_case(TrustBundleEnvironment::Devnet, Sc::Add);
         let d = d_eval(&c);
         assert!(d.is_accept());
-        let art = d.authority_activation_execution_preparation_artifact.as_ref().unwrap();
+        let art = d
+            .authority_activation_execution_preparation_artifact
+            .as_ref()
+            .unwrap();
         // Grandparent Run 329/330 execution-preparation nonce re-exposed intact.
         assert_eq!(art.execution_preparation_nonce, PREP_NONCE);
         // Parent Run 335/336 authority-activation-authorization nonce re-exposed intact.
         assert_eq!(art.authority_activation_authorization_nonce, CRC4_NONCE);
         // Self Run 337 authority-activation-execution-preparation proposed nonce.
-        assert_eq!(art.authority_activation_execution_preparation_nonce, CRC12_NONCE);
+        assert_eq!(
+            art.authority_activation_execution_preparation_nonce,
+            CRC12_NONCE
+        );
     }
 
     fn execution_preparation_binding_rejects_are_non_mutating() {
@@ -11056,7 +12256,6 @@ mod run_347_authority_activation_execution_preparation {
             assert!(!o.tag().is_empty());
         }
     }
-
 
     // =======================================================================
     // Run 347 supplemental coverage: additional deterministic / tag / invariant
@@ -11310,7 +12509,10 @@ mod run_347_authority_activation_execution_preparation {
                 .authority_activation_execution_preparation_artifact
                 .as_ref()
                 .expect("accepted preflight must carry an artifact");
-            assert_eq!(art.content_digest(), d.authority_activation_execution_preparation_digest);
+            assert_eq!(
+                art.content_digest(),
+                d.authority_activation_execution_preparation_digest
+            );
             assert!(art.protocol_version >= 1);
             assert!(d.authorizes_future_mutation_only());
         }
@@ -11323,7 +12525,10 @@ mod run_347_authority_activation_execution_preparation {
                 .authority_activation_execution_preparation_artifact
                 .as_ref()
                 .expect("accepted preflight must carry an artifact");
-            assert_eq!(art.content_digest(), d.authority_activation_execution_preparation_digest);
+            assert_eq!(
+                art.content_digest(),
+                d.authority_activation_execution_preparation_digest
+            );
             assert!(art.protocol_version >= 1);
             assert!(d.authorizes_future_mutation_only());
         }
@@ -11336,7 +12541,10 @@ mod run_347_authority_activation_execution_preparation {
                 .authority_activation_execution_preparation_artifact
                 .as_ref()
                 .expect("accepted preflight must carry an artifact");
-            assert_eq!(art.content_digest(), d.authority_activation_execution_preparation_digest);
+            assert_eq!(
+                art.content_digest(),
+                d.authority_activation_execution_preparation_digest
+            );
             assert!(art.protocol_version >= 1);
             assert!(d.authorizes_future_mutation_only());
         }
@@ -11349,7 +12557,10 @@ mod run_347_authority_activation_execution_preparation {
                 .authority_activation_execution_preparation_artifact
                 .as_ref()
                 .expect("accepted preflight must carry an artifact");
-            assert_eq!(art.content_digest(), d.authority_activation_execution_preparation_digest);
+            assert_eq!(
+                art.content_digest(),
+                d.authority_activation_execution_preparation_digest
+            );
             assert!(art.protocol_version >= 1);
             assert!(d.authorizes_future_mutation_only());
         }
@@ -11362,7 +12573,10 @@ mod run_347_authority_activation_execution_preparation {
                 .authority_activation_execution_preparation_artifact
                 .as_ref()
                 .expect("accepted preflight must carry an artifact");
-            assert_eq!(art.content_digest(), d.authority_activation_execution_preparation_digest);
+            assert_eq!(
+                art.content_digest(),
+                d.authority_activation_execution_preparation_digest
+            );
             assert!(art.protocol_version >= 1);
             assert!(d.authorizes_future_mutation_only());
         }
@@ -11375,7 +12589,10 @@ mod run_347_authority_activation_execution_preparation {
                 .authority_activation_execution_preparation_artifact
                 .as_ref()
                 .expect("accepted preflight must carry an artifact");
-            assert_eq!(art.content_digest(), d.authority_activation_execution_preparation_digest);
+            assert_eq!(
+                art.content_digest(),
+                d.authority_activation_execution_preparation_digest
+            );
             assert!(art.protocol_version >= 1);
             assert!(d.authorizes_future_mutation_only());
         }
@@ -11388,7 +12605,10 @@ mod run_347_authority_activation_execution_preparation {
                 .authority_activation_execution_preparation_artifact
                 .as_ref()
                 .expect("accepted preflight must carry an artifact");
-            assert_eq!(art.content_digest(), d.authority_activation_execution_preparation_digest);
+            assert_eq!(
+                art.content_digest(),
+                d.authority_activation_execution_preparation_digest
+            );
             assert!(art.protocol_version >= 1);
             assert!(d.authorizes_future_mutation_only());
         }
@@ -11401,7 +12621,10 @@ mod run_347_authority_activation_execution_preparation {
                 .authority_activation_execution_preparation_artifact
                 .as_ref()
                 .expect("accepted preflight must carry an artifact");
-            assert_eq!(art.content_digest(), d.authority_activation_execution_preparation_digest);
+            assert_eq!(
+                art.content_digest(),
+                d.authority_activation_execution_preparation_digest
+            );
             assert!(art.protocol_version >= 1);
             assert!(d.authorizes_future_mutation_only());
         }
@@ -11414,19 +12637,24 @@ mod run_347_authority_activation_execution_preparation {
                 .authority_activation_execution_preparation_artifact
                 .as_ref()
                 .expect("accepted preflight must carry an artifact");
-            assert_eq!(art.content_digest(), d.authority_activation_execution_preparation_digest);
+            assert_eq!(
+                art.content_digest(),
+                d.authority_activation_execution_preparation_digest
+            );
             assert!(art.protocol_version >= 1);
             assert!(d.authorizes_future_mutation_only());
         }
 
         fn supp_policy_default_is_disabled() {
-            type P = ProductionLiveEpochTransitionAuthorityActivationExecutionPreparationExecutorPolicy;
+            type P =
+                ProductionLiveEpochTransitionAuthorityActivationExecutionPreparationExecutorPolicy;
             assert_eq!(P::default(), P::Disabled);
             assert_eq!(P::Disabled.tag(), "disabled");
         }
 
         fn supp_policy_tags_nonempty() {
-            type P = ProductionLiveEpochTransitionAuthorityActivationExecutionPreparationExecutorPolicy;
+            type P =
+                ProductionLiveEpochTransitionAuthorityActivationExecutionPreparationExecutorPolicy;
             for p in [
                 P::Disabled,
                 P::AllowSourceTestLiveEpochTransitionAuthorityActivationExecutionPreparation,
@@ -11462,7 +12690,10 @@ mod run_347_authority_activation_execution_preparation {
         fn supp_non_mutation_flag_is_true() {
             let c = d_case(TrustBundleEnvironment::Devnet, Sc::Add);
             let d = d_eval(&c);
-            let art = d.authority_activation_execution_preparation_artifact.as_ref().unwrap();
+            let art = d
+                .authority_activation_execution_preparation_artifact
+                .as_ref()
+                .unwrap();
             assert!(art.staged_kind.is_non_mutating());
         }
     }
@@ -11769,7 +13000,6 @@ mod run_347_authority_activation_execution_preparation {
             std::process::exit(1);
         }
     }
-
 }
 
 fn main() {

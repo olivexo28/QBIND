@@ -108,7 +108,8 @@ pub const REMOTE_SIGNER_TRANSPORT_PROTOCOL_VERSION: u16 = 1;
 /// source/test rejection vectors. A config carrying this attestation
 /// digest is rejected as
 /// [`RemoteSignerTransportOutcome::InvalidTransportAttestation`].
-pub const REMOTE_SIGNER_TRANSPORT_INVALID_ATTESTATION_SENTINEL: &str = "INVALID-TRANSPORT-ATTESTATION";
+pub const REMOTE_SIGNER_TRANSPORT_INVALID_ATTESTATION_SENTINEL: &str =
+    "INVALID-TRANSPORT-ATTESTATION";
 
 // ===========================================================================
 // Timeout / retry policy
@@ -305,7 +306,10 @@ impl RemoteSignerTransportRequestEnvelope {
         field(b"domain_tag", self.domain_tag.as_bytes());
         field(b"request_id", self.request_id.as_bytes());
         field(b"timestamp_unix", &self.timestamp_unix.to_le_bytes());
-        field(b"environment", &self.environment.metric_code().to_le_bytes());
+        field(
+            b"environment",
+            &self.environment.metric_code().to_le_bytes(),
+        );
         field(b"chain_id", self.chain_id.as_bytes());
         field(b"genesis_hash", self.genesis_hash.as_bytes());
         field(
@@ -499,7 +503,10 @@ pub fn transport_transcript_digest(
         h.update((value.len() as u64).to_le_bytes());
         h.update(value);
     };
-    field(b"request_envelope_digest", request_envelope_digest.as_bytes());
+    field(
+        b"request_envelope_digest",
+        request_envelope_digest.as_bytes(),
+    );
     field(
         b"response_envelope_digest",
         response_envelope_digest.as_bytes(),
@@ -1044,11 +1051,14 @@ pub fn validate_remote_signer_transport(
         .primary_signing_key_fingerprint()
         .unwrap_or("")
         .to_string();
-    if config.bundle_signing_key_fingerprint != remote_signer_expected.expected_signing_key_fingerprint
+    if config.bundle_signing_key_fingerprint
+        != remote_signer_expected.expected_signing_key_fingerprint
         || request_signing_fp != remote_signer_expected.expected_signing_key_fingerprint
     {
         return RemoteSignerTransportOutcome::WrongSigningKeyFingerprint {
-            expected: remote_signer_expected.expected_signing_key_fingerprint.clone(),
+            expected: remote_signer_expected
+                .expected_signing_key_fingerprint
+                .clone(),
             attested: config.bundle_signing_key_fingerprint.clone(),
         };
     }
@@ -1101,7 +1111,8 @@ pub fn validate_remote_signer_transport(
     }
 
     // 20. Canonical response-digest binding (envelope ↔ inner response).
-    let inner_response_digest = remote_signer_response_canonical_digest(&response_env.inner_response);
+    let inner_response_digest =
+        remote_signer_response_canonical_digest(&response_env.inner_response);
     if response_env.canonical_response_digest != inner_response_digest {
         return RemoteSignerTransportOutcome::WrongResponseDigest {
             expected: inner_response_digest,
@@ -1129,11 +1140,13 @@ pub fn validate_remote_signer_transport(
             return RemoteSignerTransportOutcome::InvalidTransportAttestation;
         }
     }
-    if config.transport_attestation_digest != transport_expected.expected_transport_attestation_digest
+    if config.transport_attestation_digest
+        != transport_expected.expected_transport_attestation_digest
     {
         return RemoteSignerTransportOutcome::InvalidTransportAttestation;
     }
-    if config.expected_signer_identity_digest != transport_expected.expected_signer_identity_digest {
+    if config.expected_signer_identity_digest != transport_expected.expected_signer_identity_digest
+    {
         return RemoteSignerTransportOutcome::InvalidTransportAttestation;
     }
 
@@ -1418,7 +1431,9 @@ mod tests {
 
     #[test]
     fn endpoint_well_formedness() {
-        assert!(endpoint_is_well_formed("qbind-signer://signer.example:8443"));
+        assert!(endpoint_is_well_formed(
+            "qbind-signer://signer.example:8443"
+        ));
         assert!(endpoint_is_well_formed("abstract:signer-1"));
         assert!(endpoint_is_well_formed("fixture:loopback"));
         assert!(!endpoint_is_well_formed(""));

@@ -14,47 +14,11 @@ use std::fs;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::PathBuf;
 
-
-use qbind_node::pqc_governance_durable_completion_attestation_backend::{
-    backend_identity_digest, evaluate_durable_completion_attestation_backend,
-    DurableCompletionAttestationBackendExpectations, DurableCompletionAttestationBackendIdentity,
-    DurableCompletionAttestationBackendInput, DurableCompletionAttestationBackendKind,
-    DurableCompletionAttestationBackendLedger, DurableCompletionAttestationBackendOutcome,
-    DurableCompletionAttestationBackendPolicy, DurableCompletionAttestationBackendRequest,
-    FixtureDurableCompletionAttestationBackend,
-};
-use qbind_node::pqc_governance_durable_completion_audit_publication_receipt::{
-    evaluate_durable_completion_audit_publication_receipt, receipt_identity_digest,
-    DurableCompletionAuditPublicationReceiptExpectations,
-    DurableCompletionAuditPublicationReceiptIdentity,
-    DurableCompletionAuditPublicationReceiptInput, DurableCompletionAuditPublicationReceiptKind,
-    DurableCompletionAuditPublicationReceiptLedger,
-    DurableCompletionAuditPublicationReceiptOutcome,
-    DurableCompletionAuditPublicationReceiptPolicy,
-    DurableCompletionAuditPublicationReceiptRequest,
-    FixtureDurableCompletionAuditPublicationReceiptSink,
-};
-use qbind_node::pqc_governance_durable_completion_audit_receipt_acknowledgement::{
-    acknowledgement_identity_digest, evaluate_durable_completion_audit_receipt_acknowledgement,
-    DurableCompletionAuditReceiptAcknowledgementExpectations,
-    DurableCompletionAuditReceiptAcknowledgementIdentity,
-    DurableCompletionAuditReceiptAcknowledgementInput,
-    DurableCompletionAuditReceiptAcknowledgementKind,
-    DurableCompletionAuditReceiptAcknowledgementLedger,
-    DurableCompletionAuditReceiptAcknowledgementOutcome,
-    DurableCompletionAuditReceiptAcknowledgementPolicy,
-    DurableCompletionAuditReceiptAcknowledgementRequest,
-    FixtureDurableCompletionAuditReceiptAcknowledgementSink,
-};
 use qbind_node::pqc_governance_durable_completion_acknowledgement_consumer::{
     acknowledgement_consumer_outcome_authorizes_consumer_record,
-    acknowledgement_consumer_outcome_projects_to_consumed,
-    consumer_identity_digest,
-    consumer_record_digest,
-    consumer_request_digest,
-    consumer_response_digest,
-    consumer_transcript_digest,
-    durable_completion_ack_consumer_acknowledgement_required,
+    acknowledgement_consumer_outcome_projects_to_consumed, consumer_identity_digest,
+    consumer_record_digest, consumer_request_digest, consumer_response_digest,
+    consumer_transcript_digest, durable_completion_ack_consumer_acknowledgement_required,
     durable_completion_ack_consumer_ambiguous_window_fails_closed,
     durable_completion_ack_consumer_attestation_required,
     durable_completion_ack_consumer_backend_submission_required,
@@ -94,8 +58,7 @@ use qbind_node::pqc_governance_durable_completion_acknowledgement_consumer::{
     DurableCompletionAcknowledgementConsumerFault,
     DurableCompletionAcknowledgementConsumerFinalizationBinding,
     DurableCompletionAcknowledgementConsumerIdentity,
-    DurableCompletionAcknowledgementConsumerInput,
-    DurableCompletionAcknowledgementConsumerKind,
+    DurableCompletionAcknowledgementConsumerInput, DurableCompletionAcknowledgementConsumerKind,
     DurableCompletionAcknowledgementConsumerLedger,
     DurableCompletionAcknowledgementConsumerLedgerRecord,
     DurableCompletionAcknowledgementConsumerLedgerSnapshot,
@@ -113,13 +76,43 @@ use qbind_node::pqc_governance_durable_completion_acknowledgement_consumer::{
     DurableCompletionAcknowledgementConsumerSinkBinding,
     DurableCompletionAcknowledgementConsumerSurface,
     DurableCompletionAcknowledgementConsumerTranscriptDigest,
-    DurableCompletionAcknowledgementConsumerWindow,
-    ExternalDurableCompletionSettlementConsumer,
+    DurableCompletionAcknowledgementConsumerWindow, ExternalDurableCompletionSettlementConsumer,
     FixtureDurableCompletionAcknowledgementConsumer,
-    GovernanceDurableCompletionAcknowledgementConsumer,
-    MainNetDurableCompletionSettlementConsumer,
+    GovernanceDurableCompletionAcknowledgementConsumer, MainNetDurableCompletionSettlementConsumer,
     ProductionDurableCompletionSettlementConsumer,
-};use qbind_node::pqc_governance_execution_runtime_arming::GovernanceExecutionRuntimeSurface;
+};
+use qbind_node::pqc_governance_durable_completion_attestation_backend::{
+    backend_identity_digest, evaluate_durable_completion_attestation_backend,
+    DurableCompletionAttestationBackendExpectations, DurableCompletionAttestationBackendIdentity,
+    DurableCompletionAttestationBackendInput, DurableCompletionAttestationBackendKind,
+    DurableCompletionAttestationBackendLedger, DurableCompletionAttestationBackendOutcome,
+    DurableCompletionAttestationBackendPolicy, DurableCompletionAttestationBackendRequest,
+    FixtureDurableCompletionAttestationBackend,
+};
+use qbind_node::pqc_governance_durable_completion_audit_publication_receipt::{
+    evaluate_durable_completion_audit_publication_receipt, receipt_identity_digest,
+    DurableCompletionAuditPublicationReceiptExpectations,
+    DurableCompletionAuditPublicationReceiptIdentity,
+    DurableCompletionAuditPublicationReceiptInput, DurableCompletionAuditPublicationReceiptKind,
+    DurableCompletionAuditPublicationReceiptLedger,
+    DurableCompletionAuditPublicationReceiptOutcome,
+    DurableCompletionAuditPublicationReceiptPolicy,
+    DurableCompletionAuditPublicationReceiptRequest,
+    FixtureDurableCompletionAuditPublicationReceiptSink,
+};
+use qbind_node::pqc_governance_durable_completion_audit_receipt_acknowledgement::{
+    acknowledgement_identity_digest, evaluate_durable_completion_audit_receipt_acknowledgement,
+    DurableCompletionAuditReceiptAcknowledgementExpectations,
+    DurableCompletionAuditReceiptAcknowledgementIdentity,
+    DurableCompletionAuditReceiptAcknowledgementInput,
+    DurableCompletionAuditReceiptAcknowledgementKind,
+    DurableCompletionAuditReceiptAcknowledgementLedger,
+    DurableCompletionAuditReceiptAcknowledgementOutcome,
+    DurableCompletionAuditReceiptAcknowledgementPolicy,
+    DurableCompletionAuditReceiptAcknowledgementRequest,
+    FixtureDurableCompletionAuditReceiptAcknowledgementSink,
+};
+use qbind_node::pqc_governance_execution_runtime_arming::GovernanceExecutionRuntimeSurface;
 use qbind_node::pqc_governance_modeled_durable_completion_attestation_projection::GovernanceModeledDurableCompletionAttestationOutcome;
 use qbind_node::pqc_governance_modeled_durable_completion_finalization_projection::GovernanceModeledDurableCompletionFinalizationOutcome;
 use qbind_node::pqc_governance_modeled_durable_consume_completion_reporter::GovernanceModeledDurableConsumeCompletionReporterOutcome;
@@ -646,7 +639,8 @@ fn attach_run260_acknowledgement(
         expected_receipt_transcript_digest: receipt.transcript_digest.clone(),
         expected_receipt_record_id: receipt.receipt_record_id.clone(),
         expected_identity: id.clone(),
-        expected_acknowledgement_kind: DurableCompletionAuditReceiptAcknowledgementKind::FixtureInMemory,
+        expected_acknowledgement_kind:
+            DurableCompletionAuditReceiptAcknowledgementKind::FixtureInMemory,
         expected_acknowledgement_policy:
             DurableCompletionAuditReceiptAcknowledgementPolicy::FixtureAllowed,
         expected_domain_separation_tag: ACK_DOMAIN_TAG.to_string(),
@@ -1034,7 +1028,9 @@ fn devnet_fixture_chain_records_exactly_one_receipt_only_after_backend_submissio
     assert!(acknowledgement_consumer_outcome_authorizes_consumer_record(
         &outcome
     ));
-    assert!(acknowledgement_consumer_outcome_projects_to_consumed(&outcome));
+    assert!(acknowledgement_consumer_outcome_projects_to_consumed(
+        &outcome
+    ));
     assert_eq!(sink.invocations(), 1);
     assert_eq!(ledger.len(), 1);
     assert!(ledger.contains(CONSUMER_RECORD_ID));
@@ -1130,10 +1126,10 @@ fn duplicate_identical_receipt_is_idempotent() {
         second,
         DurableCompletionAcknowledgementConsumerOutcome::AcknowledgementConsumerDuplicateIdempotent
     );
-    assert!(!acknowledgement_consumer_outcome_authorizes_consumer_record(
+    assert!(!acknowledgement_consumer_outcome_authorizes_consumer_record(&second));
+    assert!(acknowledgement_consumer_outcome_projects_to_consumed(
         &second
     ));
-    assert!(acknowledgement_consumer_outcome_projects_to_consumed(&second));
     assert_eq!(ledger.len(), 1);
 }
 
@@ -1791,10 +1787,10 @@ fn only_recorded_acknowledgement_creates_consumer_request_intent() {
         project_acknowledgement_outcome_to_consumer_request(&Ack::AcknowledgementRecorded),
         Intent::CreateRequest
     );
-    assert!(project_acknowledgement_outcome_to_consumer_request(
-        &Ack::AcknowledgementRecorded
-    )
-    .creates_request());
+    assert!(
+        project_acknowledgement_outcome_to_consumer_request(&Ack::AcknowledgementRecorded)
+            .creates_request()
+    );
     assert_eq!(
         project_acknowledgement_outcome_to_consumer_request(
             &Ack::AcknowledgementDuplicateIdempotent
@@ -2124,9 +2120,13 @@ fn invariant_helpers_assert_fail_closed_contract() {
 fn release_symbol_reachability_probe() {
     let c = devnet_ctx();
     let input: DurableCompletionAcknowledgementConsumerInput = c.recorded();
-    let intent = project_acknowledgement_outcome_to_consumer_request(&input.acknowledgement_binding);
+    let intent =
+        project_acknowledgement_outcome_to_consumer_request(&input.acknowledgement_binding);
     assert!(intent.creates_request());
-    assert!(matches!(intent, DurableCompletionAcknowledgementConsumerRequestIntent::CreateRequest));
+    assert!(matches!(
+        intent,
+        DurableCompletionAcknowledgementConsumerRequestIntent::CreateRequest
+    ));
     let mut ledger = DurableCompletionAcknowledgementConsumerLedger::new();
     let mut consumer = FixtureDurableCompletionAcknowledgementConsumer::new();
     let outcome = evaluate_durable_completion_acknowledgement_consumer(
@@ -2135,18 +2135,30 @@ fn release_symbol_reachability_probe() {
         &mut consumer,
         &mut ledger,
     );
-    assert_eq!(outcome, DurableCompletionAcknowledgementConsumerOutcome::AcknowledgementConsumed);
-    assert!(acknowledgement_consumer_outcome_authorizes_consumer_record(&outcome));
-    assert!(acknowledgement_consumer_outcome_projects_to_consumed(&outcome));
+    assert_eq!(
+        outcome,
+        DurableCompletionAcknowledgementConsumerOutcome::AcknowledgementConsumed
+    );
+    assert!(acknowledgement_consumer_outcome_authorizes_consumer_record(
+        &outcome
+    ));
+    assert!(acknowledgement_consumer_outcome_projects_to_consumed(
+        &outcome
+    ));
     assert!(outcome.authorizes_consumer_record());
     assert!(outcome.projects_to_consumed());
     assert!(!outcome.no_consumer());
     assert_eq!(outcome.tag(), "acknowledgement-consumed");
-    assert_eq!(consumer.kind(), DurableCompletionAcknowledgementConsumerKind::FixtureInMemory);
+    assert_eq!(
+        consumer.kind(),
+        DurableCompletionAcknowledgementConsumerKind::FixtureInMemory
+    );
     assert_eq!(consumer.invocations(), 1);
 
-    let identity_digest: DurableCompletionAcknowledgementConsumerDigest = consumer_identity_digest(&c.request.identity);
-    let request_digest: DurableCompletionAcknowledgementConsumerDigest = consumer_request_digest(&c.request);
+    let identity_digest: DurableCompletionAcknowledgementConsumerDigest =
+        consumer_identity_digest(&c.request.identity);
+    let request_digest: DurableCompletionAcknowledgementConsumerDigest =
+        consumer_request_digest(&c.request);
     let response = DurableCompletionAcknowledgementConsumerResponse {
         consumer_record_id: c.request.consumer_record_id.clone(),
         request_digest: request_digest.clone(),
@@ -2154,50 +2166,101 @@ fn release_symbol_reachability_probe() {
         consumer_kind: DurableCompletionAcknowledgementConsumerKind::FixtureInMemory,
     };
     assert!(response.is_well_formed());
-    let response_digest: DurableCompletionAcknowledgementConsumerDigest = consumer_response_digest(&response);
+    let response_digest: DurableCompletionAcknowledgementConsumerDigest =
+        consumer_response_digest(&response);
     let record: DurableCompletionAcknowledgementConsumerRecord = c.request.to_record();
-    let record_digest: DurableCompletionAcknowledgementConsumerDigest = consumer_record_digest(&record);
+    let record_digest: DurableCompletionAcknowledgementConsumerDigest =
+        consumer_record_digest(&record);
     let transcript_digest: DurableCompletionAcknowledgementConsumerTranscriptDigest =
         consumer_transcript_digest(&request_digest, &response_digest, &record_digest);
     assert!(!identity_digest.as_hex().is_empty());
     assert!(!transcript_digest.as_hex().is_empty());
-    let ledger_record: &DurableCompletionAcknowledgementConsumerLedgerRecord =
-        ledger.find(CONSUMER_RECORD_ID).expect("consumer ledger record");
-    assert_eq!(ledger_record.status, DurableCompletionAcknowledgementConsumerLedgerStatus::Recorded);
+    let ledger_record: &DurableCompletionAcknowledgementConsumerLedgerRecord = ledger
+        .find(CONSUMER_RECORD_ID)
+        .expect("consumer ledger record");
+    assert_eq!(
+        ledger_record.status,
+        DurableCompletionAcknowledgementConsumerLedgerStatus::Recorded
+    );
     let snapshot: DurableCompletionAcknowledgementConsumerLedgerSnapshot = ledger.snapshot();
     assert_eq!(snapshot.len(), 1);
 
     let _surface: DurableCompletionAcknowledgementConsumerSurface = input.surface();
-    let _environment: DurableCompletionAcknowledgementConsumerEnvironment = input.environment_binding.clone();
+    let _environment: DurableCompletionAcknowledgementConsumerEnvironment =
+        input.environment_binding.clone();
     let _binding: DurableCompletionAcknowledgementConsumerBinding = input.runtime_binding.clone();
-    let _replay: DurableCompletionAcknowledgementConsumerReplayBinding = input.replay_binding.clone();
-    let _pipeline: DurableCompletionAcknowledgementConsumerPipelineBinding = input.pipeline_binding.clone();
+    let _replay: DurableCompletionAcknowledgementConsumerReplayBinding =
+        input.replay_binding.clone();
+    let _pipeline: DurableCompletionAcknowledgementConsumerPipelineBinding =
+        input.pipeline_binding.clone();
     let _sink: DurableCompletionAcknowledgementConsumerSinkBinding = input.sink_binding.clone();
-    let _reporter: DurableCompletionAcknowledgementConsumerReporterBinding = input.reporter_binding.clone();
-    let _finalization: DurableCompletionAcknowledgementConsumerFinalizationBinding = input.finalization_binding.clone();
-    let _attestation: DurableCompletionAcknowledgementConsumerAttestationBinding = input.attestation_binding.clone();
-    let _backend: DurableCompletionAcknowledgementConsumerBackendBinding = input.backend_binding.clone();
-    let _receipt: DurableCompletionAcknowledgementConsumerReceiptBinding = input.receipt_binding.clone();
-    let _acknowledgement: DurableCompletionAcknowledgementConsumerAcknowledgementBinding = input.acknowledgement_binding.clone();
+    let _reporter: DurableCompletionAcknowledgementConsumerReporterBinding =
+        input.reporter_binding.clone();
+    let _finalization: DurableCompletionAcknowledgementConsumerFinalizationBinding =
+        input.finalization_binding.clone();
+    let _attestation: DurableCompletionAcknowledgementConsumerAttestationBinding =
+        input.attestation_binding.clone();
+    let _backend: DurableCompletionAcknowledgementConsumerBackendBinding =
+        input.backend_binding.clone();
+    let _receipt: DurableCompletionAcknowledgementConsumerReceiptBinding =
+        input.receipt_binding.clone();
+    let _acknowledgement: DurableCompletionAcknowledgementConsumerAcknowledgementBinding =
+        input.acknowledgement_binding.clone();
 
     assert!(DurableCompletionAcknowledgementConsumerPolicy::Disabled.is_disabled());
     assert!(DurableCompletionAcknowledgementConsumerPolicy::FixtureAllowed.allows_fixture());
-    assert_eq!(DurableCompletionAcknowledgementConsumerPolicy::ProductionSettlementRequired.tag(), "production-settlement-required");
+    assert_eq!(
+        DurableCompletionAcknowledgementConsumerPolicy::ProductionSettlementRequired.tag(),
+        "production-settlement-required"
+    );
     assert!(DurableCompletionAcknowledgementConsumerKind::FixtureInMemory.is_fixture());
-    assert!(DurableCompletionAcknowledgementConsumerKind::ProductionSettlementUnavailable.is_unavailable());
-    assert_eq!(DurableCompletionAcknowledgementConsumerKind::Disabled.tag(), "disabled");
+    assert!(
+        DurableCompletionAcknowledgementConsumerKind::ProductionSettlementUnavailable
+            .is_unavailable()
+    );
+    assert_eq!(
+        DurableCompletionAcknowledgementConsumerKind::Disabled.tag(),
+        "disabled"
+    );
     let no_consumer = DurableCompletionAcknowledgementConsumerOutcome::LegacyBypassNoConsumer;
     assert!(no_consumer.is_legacy_bypass());
     assert!(no_consumer.no_consumer());
-    assert!(DurableCompletionAcknowledgementConsumerOutcome::MainNetPeerDrivenApplyRefusedNoConsumer.is_mainnet_peer_driven_apply_refused());
+    assert!(
+        DurableCompletionAcknowledgementConsumerOutcome::MainNetPeerDrivenApplyRefusedNoConsumer
+            .is_mainnet_peer_driven_apply_refused()
+    );
 
     let mut prod = ProductionDurableCompletionSettlementConsumer::default();
     let mut mainnet = MainNetDurableCompletionSettlementConsumer::default();
     let mut external = ExternalDurableCompletionSettlementConsumer::default();
     let mut prod_ledger = DurableCompletionAcknowledgementConsumerLedger::new();
-    assert_eq!(prod.consume_durable_completion_acknowledgement(&c.request, &c.expectations, false, &mut prod_ledger), DurableCompletionAcknowledgementConsumerOutcome::ProductionSettlementUnavailableNoConsumer);
-    assert_eq!(mainnet.consume_durable_completion_acknowledgement(&c.request, &c.expectations, false, &mut prod_ledger), DurableCompletionAcknowledgementConsumerOutcome::MainNetSettlementUnavailableNoConsumer);
-    assert_eq!(external.consume_durable_completion_acknowledgement(&c.request, &c.expectations, false, &mut prod_ledger), DurableCompletionAcknowledgementConsumerOutcome::ExternalSettlementUnavailableNoConsumer);
+    assert_eq!(
+        prod.consume_durable_completion_acknowledgement(
+            &c.request,
+            &c.expectations,
+            false,
+            &mut prod_ledger
+        ),
+        DurableCompletionAcknowledgementConsumerOutcome::ProductionSettlementUnavailableNoConsumer
+    );
+    assert_eq!(
+        mainnet.consume_durable_completion_acknowledgement(
+            &c.request,
+            &c.expectations,
+            false,
+            &mut prod_ledger
+        ),
+        DurableCompletionAcknowledgementConsumerOutcome::MainNetSettlementUnavailableNoConsumer
+    );
+    assert_eq!(
+        external.consume_durable_completion_acknowledgement(
+            &c.request,
+            &c.expectations,
+            false,
+            &mut prod_ledger
+        ),
+        DurableCompletionAcknowledgementConsumerOutcome::ExternalSettlementUnavailableNoConsumer
+    );
 }
 
 fn run_case(table: &str, name: &str, f: fn(), rows: &mut Vec<(String, String, bool)>) {
@@ -2213,77 +2276,364 @@ fn main() {
     fs::create_dir_all(outdir.join("fixtures")).expect("create helper output directory");
     let mut rows: Vec<(String, String, bool)> = Vec::new();
     let cases: &[(&str, &str, fn())] = &[
-        ("accepted_compatible", "disabled_receipt_policy_preserves_legacy_bypass_no_record_no_invocation", disabled_receipt_policy_preserves_legacy_bypass_no_record_no_invocation as fn()),
-        ("accepted_compatible", "disabled_backend_policy_never_invokes_receipt_sink", disabled_backend_policy_never_invokes_receipt_sink as fn()),
-        ("accepted_compatible", "devnet_fixture_chain_records_exactly_one_receipt_only_after_backend_submission", devnet_fixture_chain_records_exactly_one_receipt_only_after_backend_submission as fn()),
-        ("accepted_compatible", "testnet_fixture_chain_records_exactly_one_receipt", testnet_fixture_chain_records_exactly_one_receipt as fn()),
-        ("accepted_compatible", "governance_action_variants_record_only_after_backend_submission", governance_action_variants_record_only_after_backend_submission as fn()),
-        ("accepted_compatible", "duplicate_identical_receipt_is_idempotent", duplicate_identical_receipt_is_idempotent as fn()),
-        ("accepted_compatible", "run258_duplicate_idempotent_receipt_only_matches_existing_never_creates", run258_duplicate_idempotent_receipt_only_matches_existing_never_creates as fn()),
-        ("accepted_compatible", "production_audit_ledger_path_reachable_but_unavailable_records_nothing", production_audit_ledger_path_reachable_but_unavailable_records_nothing as fn()),
-        ("accepted_compatible", "mainnet_audit_ledger_path_reachable_but_unavailable_records_nothing", mainnet_audit_ledger_path_reachable_but_unavailable_records_nothing as fn()),
-        ("accepted_compatible", "external_publication_path_reachable_but_unavailable_records_nothing", external_publication_path_reachable_but_unavailable_records_nothing as fn()),
-        ("accepted_compatible", "mainnet_peer_driven_apply_refused_before_receipt_sink_invocation", mainnet_peer_driven_apply_refused_before_receipt_sink_invocation as fn()),
-        ("accepted_compatible", "validator_set_rotation_and_policy_change_unsupported", validator_set_rotation_and_policy_change_unsupported as fn()),
-        ("accepted_compatible", "mainnet_peer_driven_refusal_precedes_recovery_classification", mainnet_peer_driven_refusal_precedes_recovery_classification as fn()),
-        ("rejection_fail_closed", "non_recording_acknowledgement_outcomes_never_record_consumer", non_recording_acknowledgement_outcomes_never_record_consumer as fn()),
-        ("rejection_fail_closed", "wrong_environment_rejected_before_sink_invocation", wrong_environment_rejected_before_sink_invocation as fn()),
-        ("rejection_fail_closed", "wrong_chain_rejected_before_sink_invocation", wrong_chain_rejected_before_sink_invocation as fn()),
-        ("rejection_fail_closed", "wrong_genesis_rejected_before_sink_invocation", wrong_genesis_rejected_before_sink_invocation as fn()),
-        ("rejection_fail_closed", "wrong_governance_surface_rejected_before_sink_invocation", wrong_governance_surface_rejected_before_sink_invocation as fn()),
-        ("rejection_fail_closed", "wrong_mutation_surface_rejected_before_sink_invocation", wrong_mutation_surface_rejected_before_sink_invocation as fn()),
-        ("rejection_fail_closed", "wrong_ack_record_id_rejected_before_record", wrong_ack_record_id_rejected_before_record as fn()),
-        ("rejection_fail_closed", "wrong_proposal_id_rejected_before_record", wrong_proposal_id_rejected_before_record as fn()),
-        ("rejection_fail_closed", "wrong_decision_id_rejected_before_record", wrong_decision_id_rejected_before_record as fn()),
-        ("rejection_fail_closed", "wrong_candidate_digest_rejected_before_record", wrong_candidate_digest_rejected_before_record as fn()),
-        ("rejection_fail_closed", "wrong_authority_domain_sequence_rejected_before_record", wrong_authority_domain_sequence_rejected_before_record as fn()),
-        ("rejection_fail_closed", "wrong_pipeline_decision_digest_rejected_before_record", wrong_pipeline_decision_digest_rejected_before_record as fn()),
-        ("rejection_fail_closed", "wrong_sink_decision_digest_rejected_before_record", wrong_sink_decision_digest_rejected_before_record as fn()),
-        ("rejection_fail_closed", "wrong_reporter_decision_digest_rejected_before_record", wrong_reporter_decision_digest_rejected_before_record as fn()),
-        ("rejection_fail_closed", "wrong_finalization_decision_digest_rejected_before_record", wrong_finalization_decision_digest_rejected_before_record as fn()),
-        ("rejection_fail_closed", "wrong_attestation_digest_rejected_before_record", wrong_attestation_digest_rejected_before_record as fn()),
-        ("rejection_fail_closed", "wrong_attestation_id_rejected_before_record", wrong_attestation_id_rejected_before_record as fn()),
-        ("rejection_fail_closed", "wrong_backend_identity_digest_rejected_before_record", wrong_backend_identity_digest_rejected_before_record as fn()),
-        ("rejection_fail_closed", "wrong_backend_request_digest_rejected_before_record", wrong_backend_request_digest_rejected_before_record as fn()),
-        ("rejection_fail_closed", "wrong_backend_response_digest_rejected_before_record", wrong_backend_response_digest_rejected_before_record as fn()),
-        ("rejection_fail_closed", "wrong_backend_receipt_digest_rejected_before_record", wrong_backend_receipt_digest_rejected_before_record as fn()),
-        ("rejection_fail_closed", "wrong_backend_transcript_digest_rejected_before_record", wrong_backend_transcript_digest_rejected_before_record as fn()),
-        ("rejection_fail_closed", "wrong_backend_record_id_rejected_before_record", wrong_backend_record_id_rejected_before_record as fn()),
-        ("rejection_fail_closed", "wrong_acknowledgement_identity_rejected_before_record", wrong_acknowledgement_identity_rejected_before_record as fn()),
-        ("rejection_fail_closed", "wrong_receipt_policy_rejected_before_record", wrong_receipt_policy_rejected_before_record as fn()),
-        ("rejection_fail_closed", "wrong_receipt_kind_rejected_before_record", wrong_receipt_kind_rejected_before_record as fn()),
-        ("rejection_fail_closed", "wrong_domain_separation_tag_rejected_before_record", wrong_domain_separation_tag_rejected_before_record as fn()),
-        ("rejection_fail_closed", "same_ack_record_id_different_digest_is_equivocation_no_second_receipt", same_ack_record_id_different_digest_is_equivocation_no_second_receipt as fn()),
-        ("rejection_fail_closed", "fixture_sink_rejects_non_devnet_testnet_environment", fixture_sink_rejects_non_devnet_testnet_environment as fn()),
-        ("rejection_fail_closed", "receipt_record_failed_never_records", receipt_record_failed_never_records as fn()),
-        ("rejection_fail_closed", "receipt_rollback_completed_never_records", receipt_rollback_completed_never_records as fn()),
-        ("rejection_fail_closed", "receipt_rollback_failed_fatal_never_records", receipt_rollback_failed_fatal_never_records as fn()),
-        ("rejection_fail_closed", "receipt_ambiguous_window_fails_closed", receipt_ambiguous_window_fails_closed as fn()),
-        ("rejection_fail_closed", "non_recording_acknowledgements_create_no_consumer_request", non_recording_acknowledgements_create_no_consumer_request as fn()),
-        ("recovery_crash_window", "devnet_fixture_chain_records_exactly_one_receipt_only_after_backend_submission", devnet_fixture_chain_records_exactly_one_receipt_only_after_backend_submission as fn()),
-        ("recovery_crash_window", "governance_action_variants_record_only_after_backend_submission", governance_action_variants_record_only_after_backend_submission as fn()),
-        ("recovery_crash_window", "pre_backend_success_windows_fail_closed_no_receipt", pre_backend_success_windows_fail_closed_no_receipt as fn()),
-        ("recovery_crash_window", "after_backend_success_before_receipt_request_and_record_reject_before_record", after_backend_success_before_receipt_request_and_record_reject_before_record as fn()),
-        ("recovery_crash_window", "after_receipt_record_before_success_requires_explicit_matching_record", after_receipt_record_before_success_requires_explicit_matching_record as fn()),
-        ("recovery_crash_window", "after_receipt_success_recovers_as_recorded", after_receipt_success_recovers_as_recorded as fn()),
-        ("recovery_crash_window", "ambiguous_record_failed_rollback_and_unknown_windows_fail_closed", ambiguous_record_failed_rollback_and_unknown_windows_fail_closed as fn()),
-        ("recovery_crash_window", "production_mainnet_external_recovery_classification_unavailable", production_mainnet_external_recovery_classification_unavailable as fn()),
-        ("recovery_crash_window", "mainnet_peer_driven_refusal_precedes_recovery_classification", mainnet_peer_driven_refusal_precedes_recovery_classification as fn()),
-        ("projection", "only_recorded_acknowledgement_creates_consumer_request_intent", only_recorded_acknowledgement_creates_consumer_request_intent as fn()),
-        ("consumer_ledger", "duplicate_identical_receipt_is_idempotent", duplicate_identical_receipt_is_idempotent as fn()),
-        ("consumer_ledger", "same_ack_record_id_different_digest_is_equivocation_no_second_receipt", same_ack_record_id_different_digest_is_equivocation_no_second_receipt as fn()),
-        ("consumer_ledger", "rollback_restores_receipt_ledger_snapshot", rollback_restores_receipt_ledger_snapshot as fn()),
-        ("non_mutation", "disabled_receipt_policy_preserves_legacy_bypass_no_record_no_invocation", disabled_receipt_policy_preserves_legacy_bypass_no_record_no_invocation as fn()),
-        ("non_mutation", "disabled_backend_policy_never_invokes_receipt_sink", disabled_backend_policy_never_invokes_receipt_sink as fn()),
-        ("non_mutation", "non_recording_acknowledgement_outcomes_never_record_consumer", non_recording_acknowledgement_outcomes_never_record_consumer as fn()),
-        ("non_mutation", "non_recording_acknowledgements_create_no_consumer_request", non_recording_acknowledgements_create_no_consumer_request as fn()),
-        ("non_mutation", "invariant_helpers_assert_fail_closed_contract", invariant_helpers_assert_fail_closed_contract as fn()),
-        ("reachability", "release_symbol_reachability_probe", release_symbol_reachability_probe as fn()),
-        ("stage_ordering", "malformed_receipt_request_rejected_before_record", malformed_receipt_request_rejected_before_record as fn()),
-        ("stage_ordering", "devnet_fixture_chain_records_exactly_one_receipt_only_after_backend_submission", devnet_fixture_chain_records_exactly_one_receipt_only_after_backend_submission as fn()),
-        ("stage_ordering", "governance_action_variants_record_only_after_backend_submission", governance_action_variants_record_only_after_backend_submission as fn()),
-        ("stage_ordering", "mainnet_peer_driven_apply_refused_before_receipt_sink_invocation", mainnet_peer_driven_apply_refused_before_receipt_sink_invocation as fn()),
-        ("stage_ordering", "mainnet_peer_driven_refusal_precedes_recovery_classification", mainnet_peer_driven_refusal_precedes_recovery_classification as fn()),
+        (
+            "accepted_compatible",
+            "disabled_receipt_policy_preserves_legacy_bypass_no_record_no_invocation",
+            disabled_receipt_policy_preserves_legacy_bypass_no_record_no_invocation as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "disabled_backend_policy_never_invokes_receipt_sink",
+            disabled_backend_policy_never_invokes_receipt_sink as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "devnet_fixture_chain_records_exactly_one_receipt_only_after_backend_submission",
+            devnet_fixture_chain_records_exactly_one_receipt_only_after_backend_submission
+                as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "testnet_fixture_chain_records_exactly_one_receipt",
+            testnet_fixture_chain_records_exactly_one_receipt as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "governance_action_variants_record_only_after_backend_submission",
+            governance_action_variants_record_only_after_backend_submission as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "duplicate_identical_receipt_is_idempotent",
+            duplicate_identical_receipt_is_idempotent as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "run258_duplicate_idempotent_receipt_only_matches_existing_never_creates",
+            run258_duplicate_idempotent_receipt_only_matches_existing_never_creates as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "production_audit_ledger_path_reachable_but_unavailable_records_nothing",
+            production_audit_ledger_path_reachable_but_unavailable_records_nothing as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "mainnet_audit_ledger_path_reachable_but_unavailable_records_nothing",
+            mainnet_audit_ledger_path_reachable_but_unavailable_records_nothing as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "external_publication_path_reachable_but_unavailable_records_nothing",
+            external_publication_path_reachable_but_unavailable_records_nothing as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "mainnet_peer_driven_apply_refused_before_receipt_sink_invocation",
+            mainnet_peer_driven_apply_refused_before_receipt_sink_invocation as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "validator_set_rotation_and_policy_change_unsupported",
+            validator_set_rotation_and_policy_change_unsupported as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "mainnet_peer_driven_refusal_precedes_recovery_classification",
+            mainnet_peer_driven_refusal_precedes_recovery_classification as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "non_recording_acknowledgement_outcomes_never_record_consumer",
+            non_recording_acknowledgement_outcomes_never_record_consumer as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "wrong_environment_rejected_before_sink_invocation",
+            wrong_environment_rejected_before_sink_invocation as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "wrong_chain_rejected_before_sink_invocation",
+            wrong_chain_rejected_before_sink_invocation as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "wrong_genesis_rejected_before_sink_invocation",
+            wrong_genesis_rejected_before_sink_invocation as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "wrong_governance_surface_rejected_before_sink_invocation",
+            wrong_governance_surface_rejected_before_sink_invocation as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "wrong_mutation_surface_rejected_before_sink_invocation",
+            wrong_mutation_surface_rejected_before_sink_invocation as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "wrong_ack_record_id_rejected_before_record",
+            wrong_ack_record_id_rejected_before_record as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "wrong_proposal_id_rejected_before_record",
+            wrong_proposal_id_rejected_before_record as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "wrong_decision_id_rejected_before_record",
+            wrong_decision_id_rejected_before_record as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "wrong_candidate_digest_rejected_before_record",
+            wrong_candidate_digest_rejected_before_record as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "wrong_authority_domain_sequence_rejected_before_record",
+            wrong_authority_domain_sequence_rejected_before_record as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "wrong_pipeline_decision_digest_rejected_before_record",
+            wrong_pipeline_decision_digest_rejected_before_record as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "wrong_sink_decision_digest_rejected_before_record",
+            wrong_sink_decision_digest_rejected_before_record as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "wrong_reporter_decision_digest_rejected_before_record",
+            wrong_reporter_decision_digest_rejected_before_record as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "wrong_finalization_decision_digest_rejected_before_record",
+            wrong_finalization_decision_digest_rejected_before_record as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "wrong_attestation_digest_rejected_before_record",
+            wrong_attestation_digest_rejected_before_record as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "wrong_attestation_id_rejected_before_record",
+            wrong_attestation_id_rejected_before_record as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "wrong_backend_identity_digest_rejected_before_record",
+            wrong_backend_identity_digest_rejected_before_record as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "wrong_backend_request_digest_rejected_before_record",
+            wrong_backend_request_digest_rejected_before_record as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "wrong_backend_response_digest_rejected_before_record",
+            wrong_backend_response_digest_rejected_before_record as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "wrong_backend_receipt_digest_rejected_before_record",
+            wrong_backend_receipt_digest_rejected_before_record as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "wrong_backend_transcript_digest_rejected_before_record",
+            wrong_backend_transcript_digest_rejected_before_record as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "wrong_backend_record_id_rejected_before_record",
+            wrong_backend_record_id_rejected_before_record as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "wrong_acknowledgement_identity_rejected_before_record",
+            wrong_acknowledgement_identity_rejected_before_record as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "wrong_receipt_policy_rejected_before_record",
+            wrong_receipt_policy_rejected_before_record as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "wrong_receipt_kind_rejected_before_record",
+            wrong_receipt_kind_rejected_before_record as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "wrong_domain_separation_tag_rejected_before_record",
+            wrong_domain_separation_tag_rejected_before_record as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "same_ack_record_id_different_digest_is_equivocation_no_second_receipt",
+            same_ack_record_id_different_digest_is_equivocation_no_second_receipt as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "fixture_sink_rejects_non_devnet_testnet_environment",
+            fixture_sink_rejects_non_devnet_testnet_environment as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "receipt_record_failed_never_records",
+            receipt_record_failed_never_records as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "receipt_rollback_completed_never_records",
+            receipt_rollback_completed_never_records as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "receipt_rollback_failed_fatal_never_records",
+            receipt_rollback_failed_fatal_never_records as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "receipt_ambiguous_window_fails_closed",
+            receipt_ambiguous_window_fails_closed as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "non_recording_acknowledgements_create_no_consumer_request",
+            non_recording_acknowledgements_create_no_consumer_request as fn(),
+        ),
+        (
+            "recovery_crash_window",
+            "devnet_fixture_chain_records_exactly_one_receipt_only_after_backend_submission",
+            devnet_fixture_chain_records_exactly_one_receipt_only_after_backend_submission
+                as fn(),
+        ),
+        (
+            "recovery_crash_window",
+            "governance_action_variants_record_only_after_backend_submission",
+            governance_action_variants_record_only_after_backend_submission as fn(),
+        ),
+        (
+            "recovery_crash_window",
+            "pre_backend_success_windows_fail_closed_no_receipt",
+            pre_backend_success_windows_fail_closed_no_receipt as fn(),
+        ),
+        (
+            "recovery_crash_window",
+            "after_backend_success_before_receipt_request_and_record_reject_before_record",
+            after_backend_success_before_receipt_request_and_record_reject_before_record as fn(),
+        ),
+        (
+            "recovery_crash_window",
+            "after_receipt_record_before_success_requires_explicit_matching_record",
+            after_receipt_record_before_success_requires_explicit_matching_record as fn(),
+        ),
+        (
+            "recovery_crash_window",
+            "after_receipt_success_recovers_as_recorded",
+            after_receipt_success_recovers_as_recorded as fn(),
+        ),
+        (
+            "recovery_crash_window",
+            "ambiguous_record_failed_rollback_and_unknown_windows_fail_closed",
+            ambiguous_record_failed_rollback_and_unknown_windows_fail_closed as fn(),
+        ),
+        (
+            "recovery_crash_window",
+            "production_mainnet_external_recovery_classification_unavailable",
+            production_mainnet_external_recovery_classification_unavailable as fn(),
+        ),
+        (
+            "recovery_crash_window",
+            "mainnet_peer_driven_refusal_precedes_recovery_classification",
+            mainnet_peer_driven_refusal_precedes_recovery_classification as fn(),
+        ),
+        (
+            "projection",
+            "only_recorded_acknowledgement_creates_consumer_request_intent",
+            only_recorded_acknowledgement_creates_consumer_request_intent as fn(),
+        ),
+        (
+            "consumer_ledger",
+            "duplicate_identical_receipt_is_idempotent",
+            duplicate_identical_receipt_is_idempotent as fn(),
+        ),
+        (
+            "consumer_ledger",
+            "same_ack_record_id_different_digest_is_equivocation_no_second_receipt",
+            same_ack_record_id_different_digest_is_equivocation_no_second_receipt as fn(),
+        ),
+        (
+            "consumer_ledger",
+            "rollback_restores_receipt_ledger_snapshot",
+            rollback_restores_receipt_ledger_snapshot as fn(),
+        ),
+        (
+            "non_mutation",
+            "disabled_receipt_policy_preserves_legacy_bypass_no_record_no_invocation",
+            disabled_receipt_policy_preserves_legacy_bypass_no_record_no_invocation as fn(),
+        ),
+        (
+            "non_mutation",
+            "disabled_backend_policy_never_invokes_receipt_sink",
+            disabled_backend_policy_never_invokes_receipt_sink as fn(),
+        ),
+        (
+            "non_mutation",
+            "non_recording_acknowledgement_outcomes_never_record_consumer",
+            non_recording_acknowledgement_outcomes_never_record_consumer as fn(),
+        ),
+        (
+            "non_mutation",
+            "non_recording_acknowledgements_create_no_consumer_request",
+            non_recording_acknowledgements_create_no_consumer_request as fn(),
+        ),
+        (
+            "non_mutation",
+            "invariant_helpers_assert_fail_closed_contract",
+            invariant_helpers_assert_fail_closed_contract as fn(),
+        ),
+        (
+            "reachability",
+            "release_symbol_reachability_probe",
+            release_symbol_reachability_probe as fn(),
+        ),
+        (
+            "stage_ordering",
+            "malformed_receipt_request_rejected_before_record",
+            malformed_receipt_request_rejected_before_record as fn(),
+        ),
+        (
+            "stage_ordering",
+            "devnet_fixture_chain_records_exactly_one_receipt_only_after_backend_submission",
+            devnet_fixture_chain_records_exactly_one_receipt_only_after_backend_submission
+                as fn(),
+        ),
+        (
+            "stage_ordering",
+            "governance_action_variants_record_only_after_backend_submission",
+            governance_action_variants_record_only_after_backend_submission as fn(),
+        ),
+        (
+            "stage_ordering",
+            "mainnet_peer_driven_apply_refused_before_receipt_sink_invocation",
+            mainnet_peer_driven_apply_refused_before_receipt_sink_invocation as fn(),
+        ),
+        (
+            "stage_ordering",
+            "mainnet_peer_driven_refusal_precedes_recovery_classification",
+            mainnet_peer_driven_refusal_precedes_recovery_classification as fn(),
+        ),
     ];
     for (table, name, f) in cases {
         run_case(table, name, *f, &mut rows);
@@ -2291,13 +2641,20 @@ fn main() {
     let mut tables = std::collections::BTreeMap::<String, (usize, usize)>::new();
     for (table, _name, ok) in &rows {
         let entry = tables.entry(table.clone()).or_insert((0, 0));
-        if *ok { entry.0 += 1; } else { entry.1 += 1; }
+        if *ok {
+            entry.0 += 1;
+        } else {
+            entry.1 += 1;
+        }
     }
     let total_pass: usize = rows.iter().filter(|(_, _, ok)| *ok).count();
     let total_fail = rows.len() - total_pass;
     let mut summary = String::new();
     summary.push_str("Run 263 durable-completion acknowledgement consumer release helper\n");
-    summary.push_str(&format!("verdict: {}\n", if total_fail == 0 { "PASS" } else { "FAIL" }));
+    summary.push_str(&format!(
+        "verdict: {}\n",
+        if total_fail == 0 { "PASS" } else { "FAIL" }
+    ));
     summary.push_str("projection_rule: input.acknowledgement_binding -> project_acknowledgement_outcome_to_consumer_request\n");
     summary.push_str("attached_chain: Run256 backend -> Run258 receipt -> Run260 acknowledgement -> Run262 consumer\n");
     for (table, (pass, fail)) in &tables {

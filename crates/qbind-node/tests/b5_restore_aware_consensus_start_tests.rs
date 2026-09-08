@@ -43,8 +43,7 @@ use tokio::sync::watch;
 
 use qbind_consensus::ids::ValidatorId;
 use qbind_ledger::{
-    AccountState, PersistentAccountState, RocksDbAccountState, StateSnapshotMeta,
-    StateSnapshotter,
+    AccountState, PersistentAccountState, RocksDbAccountState, StateSnapshotMeta, StateSnapshotter,
 };
 use qbind_node::binary_consensus_loop::{
     run_binary_consensus_loop, BinaryConsensusLoopConfig, BinaryConsensusLoopProgress,
@@ -52,9 +51,7 @@ use qbind_node::binary_consensus_loop::{
 };
 use qbind_node::metrics::NodeMetrics;
 use qbind_node::node_config::{FastSyncConfig, NodeConfig};
-use qbind_node::snapshot_restore::{
-    apply_snapshot_restore_if_requested, RestoreError,
-};
+use qbind_node::snapshot_restore::{apply_snapshot_restore_if_requested, RestoreError};
 
 // ============================================================================
 // Helpers
@@ -104,8 +101,9 @@ async fn run_loop(
         cfg = cfg.with_restore_baseline(b);
     }
     let (_shutdown_tx, shutdown_rx) = watch::channel(());
-    let progress =
-        Arc::new(parking_lot::Mutex::new(BinaryConsensusLoopProgress::default()));
+    let progress = Arc::new(parking_lot::Mutex::new(
+        BinaryConsensusLoopProgress::default(),
+    ));
     let metrics = Arc::new(NodeMetrics::new());
     run_binary_consensus_loop(cfg, shutdown_rx, progress, metrics).await
 }
@@ -151,9 +149,9 @@ async fn b5_real_snapshot_restore_seeds_consensus_baseline() {
 
     // 5. Post-restore committed height must be strictly above the snapshot
     //    height — the central B5 / Run 004 evidence claim.
-    let committed_height = progress.committed_height.expect(
-        "post-restore loop should commit at least one block above the baseline anchor",
-    );
+    let committed_height = progress
+        .committed_height
+        .expect("post-restore loop should commit at least one block above the baseline anchor");
     assert!(
         committed_height > SNAPSHOT_HEIGHT,
         "post-restore committed_height ({}) must advance above snapshot_height ({})",
@@ -187,8 +185,8 @@ async fn b5_no_restore_requested_leaves_loop_unchanged() {
     // No fast_sync_config → restore is disabled.
 
     // The library entry point yields no outcome → no baseline.
-    let outcome = apply_snapshot_restore_if_requested(&config)
-        .expect("no-restore path returns Ok(None)");
+    let outcome =
+        apply_snapshot_restore_if_requested(&config).expect("no-restore path returns Ok(None)");
     assert!(outcome.is_none(), "no-restore path must yield None");
 
     // Run the loop with no baseline; engine should start from view 0 and
@@ -250,11 +248,10 @@ fn b5_invalid_restore_still_rejected_no_silent_baseline_from_zero() {
     let mut config = NodeConfig::default();
     config.data_dir = Some(data_dir.path().to_path_buf());
     // Point to a non-existent snapshot dir.
-    config.fast_sync_config =
-        FastSyncConfig::from_snapshot(data_dir.path().join("does-not-exist"));
+    config.fast_sync_config = FastSyncConfig::from_snapshot(data_dir.path().join("does-not-exist"));
 
-    let err = apply_snapshot_restore_if_requested(&config)
-        .expect_err("invalid restore must be rejected");
+    let err =
+        apply_snapshot_restore_if_requested(&config).expect_err("invalid restore must be rejected");
     assert!(
         matches!(err, RestoreError::SnapshotPathMissing(_)),
         "expected SnapshotPathMissing, got {:?}",

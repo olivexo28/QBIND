@@ -70,8 +70,13 @@ fn run_094_no_engine_advance_no_persistence() {
     let storage: Arc<dyn ConsensusStorage> = Arc::new(InMemoryConsensusStorage::new());
 
     let mut last_persisted = engine.current_epoch();
-    let persisted = maybe_persist_engine_epoch_transition(&engine, &storage, &mut last_persisted, Some([0x95u8; 32]))
-        .expect("no advance ⇒ Ok(false)");
+    let persisted = maybe_persist_engine_epoch_transition(
+        &engine,
+        &storage,
+        &mut last_persisted,
+        Some([0x95u8; 32]),
+    )
+    .expect("no advance ⇒ Ok(false)");
     assert!(!persisted, "no engine epoch advance ⇒ no persistence");
     assert_eq!(
         storage.get_current_epoch().expect("read ok"),
@@ -97,8 +102,13 @@ fn run_094_engine_advance_triggers_canonical_atomic_persistence() {
     // Engine advances epoch under existing consensus/epoch rules.
     engine.set_current_epoch(7);
 
-    let persisted = maybe_persist_engine_epoch_transition(&engine, &storage, &mut last_persisted, Some([0x95u8; 32]))
-        .expect("advance ⇒ persistence ok");
+    let persisted = maybe_persist_engine_epoch_transition(
+        &engine,
+        &storage,
+        &mut last_persisted,
+        Some([0x95u8; 32]),
+    )
+    .expect("advance ⇒ persistence ok");
     assert!(persisted);
     assert_eq!(last_persisted, 7);
     assert_eq!(
@@ -109,8 +119,13 @@ fn run_094_engine_advance_triggers_canonical_atomic_persistence() {
 
     // Idempotent: a second call without further advance must not
     // re-persist (no thrash, no spurious atomic writes).
-    let again = maybe_persist_engine_epoch_transition(&engine, &storage, &mut last_persisted, Some([0x95u8; 32]))
-        .expect("no advance ⇒ Ok(false)");
+    let again = maybe_persist_engine_epoch_transition(
+        &engine,
+        &storage,
+        &mut last_persisted,
+        Some([0x95u8; 32]),
+    )
+    .expect("no advance ⇒ Ok(false)");
     assert!(!again);
     assert_eq!(storage.get_current_epoch().expect("read ok"), Some(7));
 }
@@ -129,9 +144,13 @@ fn run_094_persistence_trigger_is_engine_current_epoch_only() {
     // Time passes, callers call repeatedly — none of this is a
     // trigger.
     for _ in 0..32 {
-        let persisted =
-            maybe_persist_engine_epoch_transition(&engine, &storage, &mut last_persisted, Some([0x95u8; 32]))
-                .expect("ok");
+        let persisted = maybe_persist_engine_epoch_transition(
+            &engine,
+            &storage,
+            &mut last_persisted,
+            Some([0x95u8; 32]),
+        )
+        .expect("ok");
         assert!(!persisted);
     }
     assert_eq!(storage.get_current_epoch().expect("read ok"), None);
@@ -149,9 +168,13 @@ fn run_094_multi_step_engine_advance_persists_each_step_once() {
 
     for new_epoch in [1u64, 2, 5] {
         engine.set_current_epoch(new_epoch);
-        let persisted =
-            maybe_persist_engine_epoch_transition(&engine, &storage, &mut last_persisted, Some([0x95u8; 32]))
-                .expect("advance ⇒ ok");
+        let persisted = maybe_persist_engine_epoch_transition(
+            &engine,
+            &storage,
+            &mut last_persisted,
+            Some([0x95u8; 32]),
+        )
+        .expect("advance ⇒ ok");
         assert!(persisted);
         assert_eq!(last_persisted, new_epoch);
         assert_eq!(
@@ -159,9 +182,13 @@ fn run_094_multi_step_engine_advance_persists_each_step_once() {
             Some(new_epoch)
         );
         // No-op repeat: no second write.
-        let again =
-            maybe_persist_engine_epoch_transition(&engine, &storage, &mut last_persisted, Some([0x95u8; 32]))
-                .expect("ok");
+        let again = maybe_persist_engine_epoch_transition(
+            &engine,
+            &storage,
+            &mut last_persisted,
+            Some([0x95u8; 32]),
+        )
+        .expect("ok");
         assert!(!again);
     }
 }
@@ -238,9 +265,13 @@ fn run_094_persistence_failure_is_fail_closed_with_canonical_epoch_pair() {
     let mut last_persisted = engine.current_epoch();
     engine.set_current_epoch(3);
 
-    let err: EpochPersistenceFailed =
-        maybe_persist_engine_epoch_transition(&engine, &storage, &mut last_persisted, Some([0x95u8; 32]))
-            .expect_err("write failure ⇒ fail-closed Err");
+    let err: EpochPersistenceFailed = maybe_persist_engine_epoch_transition(
+        &engine,
+        &storage,
+        &mut last_persisted,
+        Some([0x95u8; 32]),
+    )
+    .expect_err("write failure ⇒ fail-closed Err");
     assert_eq!(err.previous_epoch, 0);
     assert_eq!(err.target_epoch, 3);
     // The helper must NOT have advanced `last_persisted` on failure.
@@ -284,9 +315,13 @@ fn run_094_committed_epoch_survives_restart_via_run_093_surface() {
         engine.set_current_epoch(target_epoch);
 
         let storage_dyn: Arc<dyn ConsensusStorage> = handle.clone();
-        let persisted =
-            maybe_persist_engine_epoch_transition(&engine, &storage_dyn, &mut last_persisted, Some([0x95u8; 32]))
-                .expect("persistence ok");
+        let persisted = maybe_persist_engine_epoch_transition(
+            &engine,
+            &storage_dyn,
+            &mut last_persisted,
+            Some([0x95u8; 32]),
+        )
+        .expect("persistence ok");
         assert!(persisted);
 
         // Drop both `handle` and `opened` so RocksDB releases its
@@ -326,7 +361,10 @@ fn run_094_consensus_storage_state_committed_epoch_is_isolated_from_activation()
     // continues to surface a strict `Option<u64>` and the three
     // variants remain explicit. No coercion of "missing" or
     // "no-storage" into `Some(0)`.
-    assert_eq!(ConsensusStorageState::NoConsensusStorage.committed_epoch(), None);
+    assert_eq!(
+        ConsensusStorageState::NoConsensusStorage.committed_epoch(),
+        None
+    );
     assert_eq!(
         ConsensusStorageState::PresentNoCommittedEpoch.committed_epoch(),
         None

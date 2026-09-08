@@ -287,7 +287,10 @@ fn a2_fixture_attestation_accepted_testnet() {
 fn a1_fixture_attestation_accepted_via_trait() {
     let s = accepted_scenario(TrustBundleEnvironment::Devnet);
     let verifier = FixtureCustodyAttestationVerifier;
-    assert_eq!(verifier.class(), CustodyAttestationClass::FixtureAttestation);
+    assert_eq!(
+        verifier.class(),
+        CustodyAttestationClass::FixtureAttestation
+    );
     let outcome = verifier.verify_custody_attestation(
         &s.evidence,
         &s.input,
@@ -337,11 +340,15 @@ fn a6_evidence_binds_full_tuple() {
     mutate_checks.push(Box::new(|e| e.chain_id = "x".to_string()));
     mutate_checks.push(Box::new(|e| e.genesis_hash = "x".to_string()));
     mutate_checks.push(Box::new(|e| e.authority_root_fingerprint = "x".to_string()));
-    mutate_checks.push(Box::new(|e| e.bundle_signing_key_fingerprint = "x".to_string()));
+    mutate_checks.push(Box::new(|e| {
+        e.bundle_signing_key_fingerprint = "x".to_string()
+    }));
     mutate_checks.push(Box::new(|e| e.custody_class = AuthorityCustodyClass::Hsm));
     mutate_checks.push(Box::new(|e| e.backend_provider_signer_id = "x".to_string()));
     mutate_checks.push(Box::new(|e| e.custody_key_id = "x".to_string()));
-    mutate_checks.push(Box::new(|e| e.lifecycle_action = LocalLifecycleAction::Retire));
+    mutate_checks.push(Box::new(|e| {
+        e.lifecycle_action = LocalLifecycleAction::Retire
+    }));
     mutate_checks.push(Box::new(|e| e.candidate_digest = "x".to_string()));
     mutate_checks.push(Box::new(|e| e.authority_domain_sequence = 99));
 
@@ -605,7 +612,10 @@ fn r4_remote_signer_attestation_unavailable() {
     );
     // Also via the required policy.
     assert_eq!(
-        verify(&s, CustodyAttestationPolicy::RemoteSignerAttestationRequired),
+        verify(
+            &s,
+            CustodyAttestationPolicy::RemoteSignerAttestationRequired
+        ),
         CustodyAttestationOutcome::RemoteSignerAttestationUnavailable
     );
 }
@@ -907,8 +917,7 @@ fn r31_unsupported_attestation_version_rejected() {
 #[test]
 fn r32_invalid_attestation_commitment_rejected() {
     let mut s = accepted_scenario(TrustBundleEnvironment::Devnet);
-    s.evidence.attestation_commitment =
-        CUSTODY_ATTESTATION_INVALID_COMMITMENT_SENTINEL.to_string();
+    s.evidence.attestation_commitment = CUSTODY_ATTESTATION_INVALID_COMMITMENT_SENTINEL.to_string();
     assert_eq!(
         verify(&s, CustodyAttestationPolicy::FixtureAttestationAllowed),
         CustodyAttestationOutcome::InvalidAttestationCommitment
@@ -1022,8 +1031,7 @@ fn r37_lifecycle_governance_custody_valid_production_attestation_unavailable() {
     assert!(matches!(
         outcome,
         CustodyMetadataAttestationOutcome::AttestationRejected {
-            attestation_outcome:
-                CustodyAttestationOutcome::FixtureRejectedProductionRequired,
+            attestation_outcome: CustodyAttestationOutcome::FixtureRejectedProductionRequired,
             ..
         }
     ));
@@ -1051,8 +1059,7 @@ fn r39_mutating_preflight_rejection_produces_no_side_effects() {
     // leaves the candidate untouched.
     let env = TrustBundleEnvironment::Devnet;
     let mut s = accepted_scenario(env);
-    s.evidence.attestation_commitment =
-        CUSTODY_ATTESTATION_INVALID_COMMITMENT_SENTINEL.to_string();
+    s.evidence.attestation_commitment = CUSTODY_ATTESTATION_INVALID_COMMITMENT_SENTINEL.to_string();
     let custody = good_custody_attestation(env, &s.candidate);
     let prior = prior_versioned(env);
     let candidate_before = s.candidate.clone();
@@ -1160,14 +1167,19 @@ fn provider_identity_digest_deterministic_and_distinct() {
 
 #[test]
 fn class_and_policy_tags_are_stable() {
-    assert_eq!(CustodyAttestationClass::FixtureAttestation.tag(), "fixture-attestation");
+    assert_eq!(
+        CustodyAttestationClass::FixtureAttestation.tag(),
+        "fixture-attestation"
+    );
     assert_eq!(
         CustodyAttestationPolicy::MainnetProductionAttestationRequired.tag(),
         "mainnet-production-attestation-required"
     );
     assert!(CustodyAttestationClass::KmsAttestation.is_production_unavailable());
     assert!(CustodyAttestationClass::FixtureAttestation.is_fixture());
-    assert!(CustodyAttestationPolicy::ProductionAttestationRequired.requires_production_attestation());
+    assert!(
+        CustodyAttestationPolicy::ProductionAttestationRequired.requires_production_attestation()
+    );
 }
 
 #[test]

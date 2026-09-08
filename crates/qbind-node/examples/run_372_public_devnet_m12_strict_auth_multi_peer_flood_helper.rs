@@ -509,10 +509,16 @@ async fn pqc_static_root_two_node_observes() -> (bool, bool) {
     let nid_v0 = node_id_from_leaf(&leaf_v0);
     let nid_v1 = node_id_from_leaf(&leaf_v1);
 
-    let pqc_v0 =
-        pqc_static_root_config_for(&root, leaf_v0.clone(), vec![peer_leaf_cert_for(1, &leaf_v1)]);
-    let pqc_v1 =
-        pqc_static_root_config_for(&root, leaf_v1.clone(), vec![peer_leaf_cert_for(0, &leaf_v0)]);
+    let pqc_v0 = pqc_static_root_config_for(
+        &root,
+        leaf_v0.clone(),
+        vec![peer_leaf_cert_for(1, &leaf_v1)],
+    );
+    let pqc_v1 = pqc_static_root_config_for(
+        &root,
+        leaf_v1.clone(),
+        vec![peer_leaf_cert_for(0, &leaf_v0)],
+    );
 
     let ctx_v1 = P2pNodeBuilder::new()
         .with_num_validators(2)
@@ -616,9 +622,10 @@ async fn run_scenarios(out_dir: &Path) -> bool {
                 all_hidden, real_parse, invented_rejected, strict_flag_public
             ),
             matched: ok,
-            detail: "Run 372 adds NO new public CLI surface; the abuse/DoS flags stay hidden and \
+            detail:
+                "Run 372 adds NO new public CLI surface; the abuse/DoS flags stay hidden and \
                      the pre-existing public --p2p-mutual-auth flag is reused for strict admission."
-                .to_string(),
+                    .to_string(),
         });
     }
 
@@ -642,8 +649,10 @@ async fn run_scenarios(out_dir: &Path) -> bool {
         let r_unbounded = parse_cli(&["--p2p-max-messages-per-second", "2000000"])
             .unwrap()
             .abuse_dos_runtime_config();
-        let ok =
-            r_window.is_err() && r_zero_msg.is_err() && r_zero_conn.is_err() && r_unbounded.is_err();
+        let ok = r_window.is_err()
+            && r_zero_msg.is_err()
+            && r_zero_conn.is_err()
+            && r_unbounded.is_err();
         scenarios.push(Scenario {
             id: "10_invalid_configs_fail_closed",
             expected: "zero-window/zero-msg/zero-conn/unbounded all rejected".to_string(),
@@ -675,7 +684,11 @@ async fn run_scenarios(out_dir: &Path) -> bool {
         scenarios.push(Scenario {
             id: "11_mainnet_refused",
             expected: "MainNet abuse/DoS config refused (direct + CLI)".to_string(),
-            actual: format!("direct_err={} cli_err={}", r_direct.is_err(), r_cli.is_err()),
+            actual: format!(
+                "direct_err={} cli_err={}",
+                r_direct.is_err(),
+                r_cli.is_err()
+            ),
             matched: ok,
             detail: "MainNet has no production abuse/DoS policy; an enabled MainNet config never \
                      validates."
@@ -690,9 +703,10 @@ async fn run_scenarios(out_dir: &Path) -> bool {
         let ok = saw_v1_on_v0 && saw_v0_on_v1;
         scenarios.push(Scenario {
             id: "03_pqc_static_root_or_production_grade_material_path",
-            expected: "two nodes complete Required mutual-auth under PqcStaticRoot with real \
+            expected:
+                "two nodes complete Required mutual-auth under PqcStaticRoot with real \
                        ML-DSA-44/ML-KEM-768 material; each observes the other's cert-derived NodeId"
-                .to_string(),
+                    .to_string(),
             actual: format!(
                 "dialer_saw_listener={} listener_saw_dialer={}",
                 saw_v1_on_v0, saw_v0_on_v1
@@ -718,7 +732,12 @@ async fn run_scenarios(out_dir: &Path) -> bool {
     let node_a_addr = format!("127.0.0.1:{}", node_a_port);
     let ctx_a = build_strict_node_a(
         &node_a_addr,
-        &["--p2p-max-messages-per-second", "5", "--p2p-burst-allowance", "5"],
+        &[
+            "--p2p-max-messages-per-second",
+            "5",
+            "--p2p-burst-allowance",
+            "5",
+        ],
         Arc::clone(&node_metrics),
     )
     .await;
@@ -818,8 +837,9 @@ async fn run_scenarios(out_dir: &Path) -> bool {
     // the abusive bucket; the honest peer's bucket records zero drops.
     scenarios.push(Scenario {
         id: "06_multi_peer_bucket_isolation",
-        expected: "abusive bucket records drops>0; honest bucket records 0 drops (isolated buckets)"
-            .to_string(),
+        expected:
+            "abusive bucket records drops>0; honest bucket records 0 drops (isolated buckets)"
+                .to_string(),
         actual: format!(
             "abusive_label={} abusive_bucket_drops={} honest_label={} honest_bucket_drops={}",
             abusive_label, abusive_bucket_drops, honest_label, honest_bucket_drops
@@ -855,9 +875,7 @@ async fn run_scenarios(out_dir: &Path) -> bool {
             honest_drops_before_recheck,
             honest_bucket_drops_after
         ),
-        matched: honest2_connected
-            && honest2_enqueued > 0
-            && honest_bucket_drops_after == 0,
+        matched: honest2_connected && honest2_enqueued > 0 && honest_bucket_drops_after == 0,
         detail: "The abusive peer's over-budget flood consumed only its OWN bucket; the honest \
                  peer keeps a full budget and its under-budget frames are never dropped."
             .to_string(),
@@ -917,10 +935,7 @@ async fn run_scenarios(out_dir: &Path) -> bool {
             id: "08_connection_rate_regression",
             expected: "connection-rate config validates + installs; per-peer defaults untouched"
                 .to_string(),
-            actual: format!(
-                "cr_ok={} per_peer_defaulted={}",
-                cr_ok, per_peer_defaulted
-            ),
+            actual: format!("cr_ok={} per_peer_defaulted={}", cr_ok, per_peer_defaulted),
             matched: cr_ok && per_peer_defaulted,
             detail: "The connection-rate control is configured and validated independently of the \
                      per-peer message-rate control; enabling one does not alter the other."
@@ -958,10 +973,19 @@ async fn run_scenarios(out_dir: &Path) -> bool {
     metric_evidence.push_str(&format!("limiter_installed: {}\n", limiter_installed));
     metric_evidence.push_str(&format!("honest_peer_label: {}\n", honest_label));
     metric_evidence.push_str(&format!("abusive_peer_label: {}\n", abusive_label));
-    metric_evidence.push_str(&format!("honest_bucket_drops: {}\n", honest_bucket_drops_after));
+    metric_evidence.push_str(&format!(
+        "honest_bucket_drops: {}\n",
+        honest_bucket_drops_after
+    ));
     metric_evidence.push_str(&format!("abusive_bucket_drops: {}\n", abusive_bucket_drops));
-    metric_evidence.push_str(&format!("under_budget_per_peer_drops: {}\n", rendered_after_under));
-    metric_evidence.push_str(&format!("over_budget_per_peer_drops: {}\n", rendered_after_over));
+    metric_evidence.push_str(&format!(
+        "under_budget_per_peer_drops: {}\n",
+        rendered_after_under
+    ));
+    metric_evidence.push_str(&format!(
+        "over_budget_per_peer_drops: {}\n",
+        rendered_after_over
+    ));
     metric_evidence.push_str(&format!(
         "per_peer_family_present: {}\n",
         body_after_over.contains("qbind_net_per_peer_drops_total")
@@ -986,7 +1010,10 @@ async fn run_scenarios(out_dir: &Path) -> bool {
             "id: {}\nexpected: {}\nactual: {}\nmatched: {}\ndetail: {}\n",
             s.id, s.expected, s.actual, s.matched, s.detail
         );
-        write_file(&out_dir.join("scenarios").join(format!("{}.txt", s.id)), &detail);
+        write_file(
+            &out_dir.join("scenarios").join(format!("{}.txt", s.id)),
+            &detail,
+        );
     }
     write_file(&out_dir.join("manifest.txt"), &manifest);
 
@@ -1033,7 +1060,11 @@ fn main() {
             // dial-flood <peer_spec> <listen_addr> <local_vid> <frames> <pace_ms> <mutual_auth> <out_file>
             let peer_spec = args.get(2).expect("peer_spec").clone();
             let listen_addr = args.get(3).expect("listen_addr").clone();
-            let local_vid: u64 = args.get(4).expect("local_vid").parse().expect("local_vid u64");
+            let local_vid: u64 = args
+                .get(4)
+                .expect("local_vid")
+                .parse()
+                .expect("local_vid u64");
             let frames: u64 = args.get(5).expect("frames").parse().expect("frames u64");
             let pace_ms: u64 = args.get(6).expect("pace_ms").parse().expect("pace_ms u64");
             let mutual_auth = parse_dial_mutual_auth(args.get(7).expect("mutual_auth"));

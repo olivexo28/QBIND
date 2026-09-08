@@ -60,18 +60,16 @@ use qbind_node::pqc_devnet_helper::mint_devnet_root;
 use qbind_node::pqc_root_config::PQC_TRANSPORT_SUITE_ML_DSA_44;
 use qbind_node::pqc_trust_activation::ActivationContext;
 use qbind_node::pqc_trust_bundle::{
-    cert_leaf_fingerprint, derive_signing_key_id, sign_bundle_devnet_helper,
-    BundleSigningKey, BundleSigningKeySet, LoadedTrustBundle, RootStatus, TrustBundle,
-    TrustBundleEnvironment, TrustBundleRevocation, TrustBundleRoot,
+    cert_leaf_fingerprint, derive_signing_key_id, sign_bundle_devnet_helper, BundleSigningKey,
+    BundleSigningKeySet, LoadedTrustBundle, RootStatus, TrustBundle, TrustBundleEnvironment,
+    TrustBundleRevocation, TrustBundleRoot,
 };
 use qbind_node::pqc_trust_reload::{
-    apply_validated_candidate, apply_validated_candidate_with_previous,
-    validate_candidate_bundle, ApplyMode, LiveTrustApplyContext, ReloadApplyError,
-    ReloadCheckError, ReloadCheckInputs,
+    apply_validated_candidate, apply_validated_candidate_with_previous, validate_candidate_bundle,
+    ApplyMode, LiveTrustApplyContext, ReloadApplyError, ReloadCheckError, ReloadCheckInputs,
 };
 use qbind_node::pqc_trust_sequence::{
-    chain_id_hex, check_and_update_sequence, load_record, sequence_file_path,
-    SequenceCheckOutcome,
+    chain_id_hex, check_and_update_sequence, load_record, sequence_file_path, SequenceCheckOutcome,
 };
 use qbind_types::NetworkEnvironment;
 use qbind_wire::io::WireEncode;
@@ -209,10 +207,7 @@ fn snapshot_seq_file(path: &Path) -> Option<(Vec<u8>, std::time::SystemTime)> {
     Some((bytes, mtime))
 }
 
-fn assert_seq_file_unchanged(
-    path: &Path,
-    snapshot: Option<(Vec<u8>, std::time::SystemTime)>,
-) {
+fn assert_seq_file_unchanged(path: &Path, snapshot: Option<(Vec<u8>, std::time::SystemTime)>) {
     match (snapshot, path.exists()) {
         (None, false) => {}
         (None, true) => panic!(
@@ -320,17 +315,12 @@ impl FakeLiveTrustApplyContext {
 }
 
 impl LiveTrustApplyContext for FakeLiveTrustApplyContext {
-    fn snapshot_active(
-        &mut self,
-    ) -> Result<Box<dyn std::any::Any + Send + Sync>, String> {
+    fn snapshot_active(&mut self) -> Result<Box<dyn std::any::Any + Send + Sync>, String> {
         self.log.lock().unwrap().push("snapshot_active");
         let prev: String = self.active_fingerprint.lock().unwrap().clone();
         Ok(Box::new(prev))
     }
-    fn swap_trust_state(
-        &mut self,
-        candidate: &LoadedTrustBundle,
-    ) -> Result<(), String> {
+    fn swap_trust_state(&mut self, candidate: &LoadedTrustBundle) -> Result<(), String> {
         self.log.lock().unwrap().push("swap_trust_state");
         match &self.swap_action {
             ActionPlan::Err(m) => Err(m.clone()),
@@ -348,10 +338,7 @@ impl LiveTrustApplyContext for FakeLiveTrustApplyContext {
             ActionPlan::Ok => Ok(self.eviction_count),
         }
     }
-    fn commit_sequence(
-        &mut self,
-        _candidate: &LoadedTrustBundle,
-    ) -> Result<(), String> {
+    fn commit_sequence(&mut self, _candidate: &LoadedTrustBundle) -> Result<(), String> {
         self.log.lock().unwrap().push("commit_sequence");
         match &self.commit_action {
             ActionPlan::Err(m) => Err(m.clone()),
@@ -486,7 +473,10 @@ fn run070_apply_live_happy_path_runs_callbacks_in_exact_order() {
     assert!(line.contains("sequence_commit=ok"), "{}", line);
 
     // Active fingerprint changed to candidate prefix.
-    assert_eq!(*active.lock().unwrap(), applied.validated.fingerprint_prefix);
+    assert_eq!(
+        *active.lock().unwrap(),
+        applied.validated.fingerprint_prefix
+    );
 
     // Exact ordering: snapshot → swap → evict → commit (no rollback).
     let events = log.lock().unwrap().events.clone();
@@ -571,7 +561,11 @@ fn run070_session_eviction_failure_triggers_rollback_and_does_not_commit() {
             message,
             rollback_ok,
         } => {
-            assert!(message.contains("session manager unavailable"), "msg={}", message);
+            assert!(
+                message.contains("session manager unavailable"),
+                "msg={}",
+                message
+            );
             assert!(rollback_ok, "rollback must succeed on the default plan");
         }
         other => panic!("expected SessionEvictionFailed, got {:?}", other),
@@ -662,7 +656,11 @@ fn run070_commit_failure_with_rollback_failure_surfaces_fatal_variant() {
             commit_message,
             rollback_message,
         } => {
-            assert!(commit_message.contains("disk full"), "msg={}", commit_message);
+            assert!(
+                commit_message.contains("disk full"),
+                "msg={}",
+                commit_message
+            );
             assert!(
                 rollback_message.contains("snapshot drained"),
                 "msg={}",
@@ -741,8 +739,7 @@ fn run070_validation_failure_rollback_does_not_call_apply_context() {
     // Prime persistence at seq=5.
     let prime = build_signed_devnet_bundle(&h, 5, 500, None, vec![]);
     let prime_path = write_bundle_to_disk(&dir, "prime.json", &prime);
-    let prime_inputs =
-        devnet_inputs(&prime_path, &h.signing_keys, Some(&seq_path), 0, None);
+    let prime_inputs = devnet_inputs(&prime_path, &h.signing_keys, Some(&seq_path), 0, None);
     validate_candidate_bundle(prime_inputs).expect("prime candidate valid");
     // Now commit it through the live persistence path so seq=5 is on disk.
     let prime_loaded =
@@ -915,14 +912,15 @@ fn run070_apply_against_fake_context_leaves_on_disk_sequence_file_untouched() {
     // The live startup path may still be invoked afterwards and MUST
     // be able to write the record (i.e. nothing in Run 070 made the
     // on-disk path unwritable).
-    let live_loaded = qbind_node::pqc_trust_bundle::TrustBundle::load_from_path_with_signing_keys_and_chain_id(
-        &candidate_path,
-        NetworkEnvironment::Devnet,
-        NetworkEnvironment::Devnet.chain_id(),
-        100,
-        &h.signing_keys,
-    )
-    .expect("live load");
+    let live_loaded =
+        qbind_node::pqc_trust_bundle::TrustBundle::load_from_path_with_signing_keys_and_chain_id(
+            &candidate_path,
+            NetworkEnvironment::Devnet,
+            NetworkEnvironment::Devnet.chain_id(),
+            100,
+            &h.signing_keys,
+        )
+        .expect("live load");
     match check_and_update_sequence(
         &seq_path,
         NetworkEnvironment::Devnet,
@@ -933,7 +931,9 @@ fn run070_apply_against_fake_context_leaves_on_disk_sequence_file_untouched() {
     )
     .expect("live commit")
     {
-        SequenceCheckOutcome::FirstLoad { persisted_sequence, .. } => {
+        SequenceCheckOutcome::FirstLoad {
+            persisted_sequence, ..
+        } => {
             assert_eq!(persisted_sequence, 2);
         }
         other => panic!("expected FirstLoad after run070 apply, got {:?}", other),

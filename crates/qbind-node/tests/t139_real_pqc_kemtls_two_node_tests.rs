@@ -40,8 +40,8 @@ use qbind_crypto::{
     StaticCryptoProvider, AEAD_SUITE_CHACHA20_POLY1305, KEM_SUITE_ML_KEM_768,
 };
 use qbind_net::{
-    ClientConnectionConfig, ClientHandshakeConfig, KemOpMetrics, KemPrivateKey,
-    MutualAuthMode, ServerConnectionConfig, ServerHandshakeConfig,
+    ClientConnectionConfig, ClientHandshakeConfig, KemOpMetrics, KemPrivateKey, MutualAuthMode,
+    ServerConnectionConfig, ServerHandshakeConfig,
 };
 use qbind_node::secure_channel::{SecureChannel, SecureChannelAsync};
 use qbind_wire::io::WireEncode;

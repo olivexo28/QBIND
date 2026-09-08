@@ -93,10 +93,8 @@ const ROOT_FP: &str = "1111111111111111111111111111111111111111";
 const OTHER_ROOT_FP: &str = "9999999999999999999999999999999999999999";
 const CHAIN_ID: &str = "0000000000000001";
 const OTHER_CHAIN: &str = "00000000000000ff";
-const GENESIS_HASH_A: &str =
-    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
-const GENESIS_HASH_B: &str =
-    "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+const GENESIS_HASH_A: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+const GENESIS_HASH_B: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 const DIGEST_1: &str = "1111111111111111111111111111111111111111111111111111111111111111";
 const DIGEST_2: &str = "2222222222222222222222222222222222222222222222222222222222222222";
 const DIGEST_3: &str = "3333333333333333333333333333333333333333333333333333333333333333";
@@ -109,8 +107,8 @@ const NON_PQC_SUITE_ED25519: u8 = 1;
 const UNSUPPORTED_SUITE: u8 = 200;
 
 // Compile-time sanity: the verifier accepts only ML-DSA-44 today.
-const _ASSERT_PQC_SUITE_MATCHES: u8 =
-    [PQC_LIFECYCLE_SUITE_ML_DSA_44][(PQC_GOVERNANCE_ISSUER_SUITE_ML_DSA_44 != PQC_LIFECYCLE_SUITE_ML_DSA_44) as usize];
+const _ASSERT_PQC_SUITE_MATCHES: u8 = [PQC_LIFECYCLE_SUITE_ML_DSA_44]
+    [(PQC_GOVERNANCE_ISSUER_SUITE_ML_DSA_44 != PQC_LIFECYCLE_SUITE_ML_DSA_44) as usize];
 
 // ---------- tiny JSON helpers ------------------------------------------------
 
@@ -294,8 +292,7 @@ fn write_scenario(out: &Path, s: &Scenario, actual_buf: &mut String, combined_bu
     s.candidate
         .validate_structure()
         .expect("candidate must structurally validate");
-    let cand_json =
-        serde_json::to_string_pretty(&s.candidate).expect("serialize candidate");
+    let cand_json = serde_json::to_string_pretty(&s.candidate).expect("serialize candidate");
     write_text(&scen_dir.join("candidate.json"), &cand_json);
 
     match &s.persisted {
@@ -308,10 +305,7 @@ fn write_scenario(out: &Path, s: &Scenario, actual_buf: &mut String, combined_bu
         }
     }
 
-    write_text(
-        &scen_dir.join("proof.txt"),
-        &format!("{:#?}\n", s.proof),
-    );
+    write_text(&scen_dir.join("proof.txt"), &format!("{:#?}\n", s.proof));
     write_file(&scen_dir.join("signature.bin"), &s.proof.issuer_signature);
     write_text(
         &scen_dir.join("trust_domain.txt"),
@@ -344,7 +338,10 @@ fn write_scenario(out: &Path, s: &Scenario, actual_buf: &mut String, combined_bu
             outcome_dump
         ),
     );
-    actual_buf.push_str(&format!("{}\t{}\t{}\n", s.id, s.expected_label, outcome_dump));
+    actual_buf.push_str(&format!(
+        "{}\t{}\t{}\n",
+        s.id, s.expected_label, outcome_dump
+    ));
 
     // Also exercise the combined Run 159 + Run 163 helper for every
     // scenario. The combined outcome is used as cross-validation: any
@@ -849,9 +846,13 @@ fn main() {
     let mut manifest = String::new();
     let mut expected = String::from("# Run 164 — expected typed-outcome class per scenario\n");
     let mut actual_buf = String::from("# Run 164 — actual verifier outcome per scenario\n");
-    let mut combined_buf = String::from("# Run 164 — combined lifecycle+governance helper outcome per scenario\n");
+    let mut combined_buf =
+        String::from("# Run 164 — combined lifecycle+governance helper outcome per scenario\n");
     for s in &scenarios {
-        manifest.push_str(&format!("{}\t{}\t{}\n", s.id, s.expected_label, s.expected_match));
+        manifest.push_str(&format!(
+            "{}\t{}\t{}\n",
+            s.id, s.expected_label, s.expected_match
+        ));
         expected.push_str(&format!(
             "{}: {} ({})\n",
             s.id, s.expected_label, s.expected_match
@@ -888,7 +889,9 @@ fn main() {
          surface.\n",
     );
 
-    println!("run_164_governance_authority_fixture_helper: wrote {} scenarios to {}",
+    println!(
+        "run_164_governance_authority_fixture_helper: wrote {} scenarios to {}",
         scenarios.len(),
-        out.display());
+        out.display()
+    );
 }

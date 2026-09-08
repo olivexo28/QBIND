@@ -73,11 +73,10 @@ use qbind_node::pqc_production_custody_attestation_verifier::{
     PRODUCTION_CUSTODY_ATTESTATION_PROTOCOL_VERSION,
 };
 use qbind_node::pqc_production_kms_hsm_custody_backend::{
-    FixtureHsmCustodyProvider, FixtureKmsCustodyProvider,
-    GovernanceProductionKmsHsmCustodyBackend, ProductionCustodyProviderKind,
-    ProductionCustodyRequestKind, ProductionCustodyRequestSpec, ProductionKmsHsmCustodyBackend,
-    ProductionKmsHsmCustodyBackendConfig, ProductionKmsHsmCustodyBackendPolicy,
-    SubmittedCustodyRequest,
+    FixtureHsmCustodyProvider, FixtureKmsCustodyProvider, GovernanceProductionKmsHsmCustodyBackend,
+    ProductionCustodyProviderKind, ProductionCustodyRequestKind, ProductionCustodyRequestSpec,
+    ProductionKmsHsmCustodyBackend, ProductionKmsHsmCustodyBackendConfig,
+    ProductionKmsHsmCustodyBackendPolicy, SubmittedCustodyRequest,
 };
 use qbind_node::pqc_trust_bundle::TrustBundleEnvironment;
 
@@ -392,7 +391,11 @@ fn mainnet_scenario(
     binding.custody_class = custody_class;
     let evidence = valid_evidence(binding, class, policy);
     let expectations = expectations_from(&evidence);
-    (evidence, expectations, domain(TrustBundleEnvironment::Mainnet))
+    (
+        evidence,
+        expectations,
+        domain(TrustBundleEnvironment::Mainnet),
+    )
 }
 
 fn kms_reject(
@@ -663,7 +666,10 @@ fn a19_evaluate_produces_decision_with_bound_request_id() {
         kms_verifier(ProductionCustodyAttestationVerifierPolicy::FixtureKmsAttestationAllowed);
     let decision = verifier.evaluate_custody_attestation(&evidence, &expectations, &td);
     assert!(decision.is_verified());
-    assert_eq!(decision.custody_request_id, evidence.binding.custody_request_id);
+    assert_eq!(
+        decision.custody_request_id,
+        evidence.binding.custody_request_id
+    );
     assert!(!decision.transcript_digest.is_empty());
 }
 
@@ -681,8 +687,10 @@ fn a20_decision_digest_is_deterministic_and_outcome_bound() {
         decision.outcome.tag(),
     );
     assert_eq!(d1, d2);
-    let d3 =
-        production_custody_attestation_decision_digest(&decision.transcript_digest, "mainnet-refused");
+    let d3 = production_custody_attestation_decision_digest(
+        &decision.transcript_digest,
+        "mainnet-refused",
+    );
     assert_ne!(d1, d3);
 }
 
@@ -722,7 +730,10 @@ fn b03_malformed_attestation_rejected() {
 }
 
 fn b04_unsupported_attestation_class_rejected() {
-    let out = kms_reject(|e| e.attestation_class = ProductionCustodyAttestationClass::Unknown, |_| {});
+    let out = kms_reject(
+        |e| e.attestation_class = ProductionCustodyAttestationClass::Unknown,
+        |_| {},
+    );
     assert_eq!(
         out,
         ProductionCustodyAttestationOutcome::ProductionAttestationUnsupportedClass
@@ -736,7 +747,9 @@ fn b05_unsupported_protocol_version_rejected() {
     );
     assert_eq!(
         out,
-        ProductionCustodyAttestationOutcome::ProductionAttestationUnsupportedProtocol { version: 99 }
+        ProductionCustodyAttestationOutcome::ProductionAttestationUnsupportedProtocol {
+            version: 99
+        }
     );
 }
 
@@ -771,7 +784,10 @@ fn b08_wrong_provider_kind_rejected() {
 }
 
 fn b09_wrong_provider_identity_rejected() {
-    let out = kms_reject(|e| e.binding.provider_id = "other-provider".to_string(), |_| {});
+    let out = kms_reject(
+        |e| e.binding.provider_id = "other-provider".to_string(),
+        |_| {},
+    );
     assert_eq!(
         out,
         ProductionCustodyAttestationOutcome::ProductionAttestationProviderMismatch
@@ -787,7 +803,10 @@ fn b10_wrong_key_handle_rejected() {
 }
 
 fn b11_wrong_signer_identity_rejected() {
-    let out = kms_reject(|e| e.binding.signer_identity = "other-signer".to_string(), |_| {});
+    let out = kms_reject(
+        |e| e.binding.signer_identity = "other-signer".to_string(),
+        |_| {},
+    );
     assert_eq!(
         out,
         ProductionCustodyAttestationOutcome::ProductionAttestationSignerMismatch
@@ -795,7 +814,10 @@ fn b11_wrong_signer_identity_rejected() {
 }
 
 fn b12_wrong_custody_class_rejected() {
-    let out = kms_reject(|e| e.binding.custody_class = AuthorityCustodyClass::Hsm, |_| {});
+    let out = kms_reject(
+        |e| e.binding.custody_class = AuthorityCustodyClass::Hsm,
+        |_| {},
+    );
     assert_eq!(
         out,
         ProductionCustodyAttestationOutcome::ProductionAttestationCustodyClassMismatch
@@ -803,7 +825,10 @@ fn b12_wrong_custody_class_rejected() {
 }
 
 fn b13_wrong_request_id_rejected() {
-    let out = kms_reject(|e| e.binding.custody_request_id = "other-req-id".to_string(), |_| {});
+    let out = kms_reject(
+        |e| e.binding.custody_request_id = "other-req-id".to_string(),
+        |_| {},
+    );
     assert_eq!(
         out,
         ProductionCustodyAttestationOutcome::ProductionAttestationRequestIdMismatch
@@ -844,7 +869,10 @@ fn b16_wrong_response_envelope_digest_rejected() {
 }
 
 fn b17_wrong_candidate_digest_rejected() {
-    let out = kms_reject(|e| e.binding.candidate_digest = "other-candidate".to_string(), |_| {});
+    let out = kms_reject(
+        |e| e.binding.candidate_digest = "other-candidate".to_string(),
+        |_| {},
+    );
     assert_eq!(
         out,
         ProductionCustodyAttestationOutcome::ProductionAttestationCandidateDigestMismatch
@@ -915,7 +943,10 @@ fn b23_wrong_authority_root_rejected() {
 }
 
 fn b24_wrong_nonce_challenge_rejected() {
-    let out = kms_reject(|e| e.challenge.challenge = "other-challenge".to_string(), |_| {});
+    let out = kms_reject(
+        |e| e.challenge.challenge = "other-challenge".to_string(),
+        |_| {},
+    );
     assert_eq!(
         out,
         ProductionCustodyAttestationOutcome::ProductionAttestationNonceReplay
@@ -945,7 +976,10 @@ fn b26_wrong_measurement_digest_rejected() {
 }
 
 fn b27_wrong_certificate_proof_digest_rejected() {
-    let out = kms_reject(|e| e.certificate_proof_digest = "wrong-proof".to_string(), |_| {});
+    let out = kms_reject(
+        |e| e.certificate_proof_digest = "wrong-proof".to_string(),
+        |_| {},
+    );
     assert_eq!(
         out,
         ProductionCustodyAttestationOutcome::ProductionAttestationMalformed
@@ -964,7 +998,10 @@ fn b28_ambiguous_durable_replay_binding_rejected() {
 }
 
 fn b29_wrong_domain_separation_tag_rejected() {
-    let out = kms_reject(|e| e.domain_separation_tag = "wrong-tag".to_string(), |_| {});
+    let out = kms_reject(
+        |e| e.domain_separation_tag = "wrong-tag".to_string(),
+        |_| {},
+    );
     assert_eq!(
         out,
         ProductionCustodyAttestationOutcome::ProductionAttestationMalformed
@@ -1295,10 +1332,16 @@ fn c11_disabled_default_refuses_mainnet() {
 
 fn d01_every_reject_is_non_mutating() {
     let rejects = vec![
-        kms_reject(|e| e.attestation_class = ProductionCustodyAttestationClass::Unknown, |_| {}),
+        kms_reject(
+            |e| e.attestation_class = ProductionCustodyAttestationClass::Unknown,
+            |_| {},
+        ),
         kms_reject(|e| e.binding.key_handle = "x".to_string(), |_| {}),
         kms_reject(|e| e.trust_root.root_id = "x".to_string(), |_| {}),
-        kms_reject(|e| e.measurement.measurement_digest = "x".to_string(), |_| {}),
+        kms_reject(
+            |e| e.measurement.measurement_digest = "x".to_string(),
+            |_| {},
+        ),
     ];
     for r in rejects {
         assert!(r.is_non_mutating());
@@ -1599,7 +1642,9 @@ fn f14_scripted_mock_consumes_steps_then_default() {
     let (evidence, _, _) = kms_accept_scenario(TrustBundleEnvironment::Devnet);
     let tr = trust_root();
     let mock = MockCustodyAttestationVerifier::scripted(
-        vec![Err(ProductionCustodyAttestationError::AttestationUnavailable)],
+        vec![Err(
+            ProductionCustodyAttestationError::AttestationUnavailable,
+        )],
         Err(ProductionCustodyAttestationError::TrustRootMissing),
     );
     assert_eq!(
@@ -1734,9 +1779,7 @@ fn g01_release_symbol_reachability_probe() {
         ProductionCustodyAttestationError::AttestationMissing,
     );
     let boundary: &dyn CustodyAttestationEvidenceVerifier = &mock;
-    assert!(boundary
-        .verify_evidence(&evidence, &trust_root())
-        .is_err());
+    assert!(boundary.verify_evidence(&evidence, &trust_root()).is_err());
     let _ = <MockCustodyAttestationVerifier as CustodyAttestationEvidenceVerifier>::verify_evidence;
 
     // Run 295 backend composition symbol is linked in release mode.
@@ -1785,112 +1828,536 @@ fn main() {
     fs::create_dir_all(outdir.join("fixtures")).expect("create helper output directory");
 
     let cases: &[(&str, &str, fn())] = &[
-        ("accepted_compatible", "a01_disabled_default_policy_is_explicit_and_inert", a01_disabled_default_policy_is_explicit_and_inert as fn()),
-        ("accepted_compatible", "a02_disabled_verifier_returns_disabled_no_verification", a02_disabled_verifier_returns_disabled_no_verification as fn()),
-        ("accepted_compatible", "a03_devnet_fixture_kms_verifies_under_fixture_policy", a03_devnet_fixture_kms_verifies_under_fixture_policy as fn()),
-        ("accepted_compatible", "a04_devnet_fixture_hsm_verifies_under_fixture_policy", a04_devnet_fixture_hsm_verifies_under_fixture_policy as fn()),
-        ("accepted_compatible", "a05_testnet_fixture_kms_verifies_under_fixture_policy", a05_testnet_fixture_kms_verifies_under_fixture_policy as fn()),
-        ("accepted_compatible", "a06_testnet_fixture_hsm_verifies_under_fixture_policy", a06_testnet_fixture_hsm_verifies_under_fixture_policy as fn()),
-        ("accepted_compatible", "a07_valid_fixture_binds_to_matching_custody_request_id", a07_valid_fixture_binds_to_matching_custody_request_id as fn()),
-        ("accepted_compatible", "a08_valid_fixture_binds_to_matching_backend_transcript", a08_valid_fixture_binds_to_matching_backend_transcript as fn()),
-        ("accepted_compatible", "a09_valid_fixture_binds_provider_key_class_signer_candidate_action", a09_valid_fixture_binds_provider_key_class_signer_candidate_action as fn()),
-        ("accepted_compatible", "a10_attestation_challenge_digest_is_deterministic", a10_attestation_challenge_digest_is_deterministic as fn()),
-        ("accepted_compatible", "a11_attestation_evidence_digest_is_deterministic", a11_attestation_evidence_digest_is_deterministic as fn()),
-        ("accepted_compatible", "a12_attestation_transcript_digest_is_deterministic", a12_attestation_transcript_digest_is_deterministic as fn()),
-        ("accepted_compatible", "a13_two_identical_evidence_objects_produce_identical_transcripts", a13_two_identical_evidence_objects_produce_identical_transcripts as fn()),
-        ("accepted_compatible", "a14_production_cloud_kms_path_reachable_and_fail_closed", a14_production_cloud_kms_path_reachable_and_fail_closed as fn()),
-        ("accepted_compatible", "a15_production_pkcs11_hsm_path_reachable_and_fail_closed", a15_production_pkcs11_hsm_path_reachable_and_fail_closed as fn()),
-        ("accepted_compatible", "a16_production_generic_kms_path_reachable_and_fail_closed", a16_production_generic_kms_path_reachable_and_fail_closed as fn()),
-        ("accepted_compatible", "a17_production_generic_hsm_path_reachable_and_fail_closed", a17_production_generic_hsm_path_reachable_and_fail_closed as fn()),
-        ("accepted_compatible", "a18_run295_backend_submit_remains_compatible", a18_run295_backend_submit_remains_compatible as fn()),
-        ("accepted_compatible", "a19_evaluate_produces_decision_with_bound_request_id", a19_evaluate_produces_decision_with_bound_request_id as fn()),
-        ("accepted_compatible", "a20_decision_digest_is_deterministic_and_outcome_bound", a20_decision_digest_is_deterministic_and_outcome_bound as fn()),
-        ("rejection_fail_closed", "b01_disabled_policy_produces_no_verification", b01_disabled_policy_produces_no_verification as fn()),
-        ("rejection_fail_closed", "b02_missing_attestation_evidence_rejected", b02_missing_attestation_evidence_rejected as fn()),
-        ("rejection_fail_closed", "b03_malformed_attestation_rejected", b03_malformed_attestation_rejected as fn()),
-        ("rejection_fail_closed", "b04_unsupported_attestation_class_rejected", b04_unsupported_attestation_class_rejected as fn()),
-        ("rejection_fail_closed", "b05_unsupported_protocol_version_rejected", b05_unsupported_protocol_version_rejected as fn()),
-        ("rejection_fail_closed", "b06_missing_trust_root_rejected", b06_missing_trust_root_rejected as fn()),
-        ("rejection_fail_closed", "b07_wrong_trust_root_rejected", b07_wrong_trust_root_rejected as fn()),
-        ("rejection_fail_closed", "b08_wrong_provider_kind_rejected", b08_wrong_provider_kind_rejected as fn()),
-        ("rejection_fail_closed", "b09_wrong_provider_identity_rejected", b09_wrong_provider_identity_rejected as fn()),
-        ("rejection_fail_closed", "b10_wrong_key_handle_rejected", b10_wrong_key_handle_rejected as fn()),
-        ("rejection_fail_closed", "b11_wrong_signer_identity_rejected", b11_wrong_signer_identity_rejected as fn()),
-        ("rejection_fail_closed", "b12_wrong_custody_class_rejected", b12_wrong_custody_class_rejected as fn()),
-        ("rejection_fail_closed", "b13_wrong_request_id_rejected", b13_wrong_request_id_rejected as fn()),
-        ("rejection_fail_closed", "b14_wrong_backend_transcript_rejected", b14_wrong_backend_transcript_rejected as fn()),
-        ("rejection_fail_closed", "b15_wrong_request_envelope_digest_rejected", b15_wrong_request_envelope_digest_rejected as fn()),
-        ("rejection_fail_closed", "b16_wrong_response_envelope_digest_rejected", b16_wrong_response_envelope_digest_rejected as fn()),
-        ("rejection_fail_closed", "b17_wrong_candidate_digest_rejected", b17_wrong_candidate_digest_rejected as fn()),
-        ("rejection_fail_closed", "b18_wrong_authorized_action_rejected", b18_wrong_authorized_action_rejected as fn()),
-        ("rejection_fail_closed", "b19_wrong_environment_rejected", b19_wrong_environment_rejected as fn()),
-        ("rejection_fail_closed", "b20_wrong_chain_rejected", b20_wrong_chain_rejected as fn()),
-        ("rejection_fail_closed", "b21_wrong_genesis_domain_rejected", b21_wrong_genesis_domain_rejected as fn()),
-        ("rejection_fail_closed", "b22_wrong_authority_sequence_rejected", b22_wrong_authority_sequence_rejected as fn()),
-        ("rejection_fail_closed", "b23_wrong_authority_root_rejected", b23_wrong_authority_root_rejected as fn()),
-        ("rejection_fail_closed", "b24_wrong_nonce_challenge_rejected", b24_wrong_nonce_challenge_rejected as fn()),
-        ("rejection_fail_closed", "b25_replayed_stale_nonce_rejected", b25_replayed_stale_nonce_rejected as fn()),
-        ("rejection_fail_closed", "b26_wrong_measurement_digest_rejected", b26_wrong_measurement_digest_rejected as fn()),
-        ("rejection_fail_closed", "b27_wrong_certificate_proof_digest_rejected", b27_wrong_certificate_proof_digest_rejected as fn()),
-        ("rejection_fail_closed", "b28_ambiguous_durable_replay_binding_rejected", b28_ambiguous_durable_replay_binding_rejected as fn()),
-        ("rejection_fail_closed", "b29_wrong_domain_separation_tag_rejected", b29_wrong_domain_separation_tag_rejected as fn()),
-        ("rejection_fail_closed", "b30_attestation_unavailable_rejected", b30_attestation_unavailable_rejected as fn()),
-        ("rejection_fail_closed", "b31_attestation_unverified_rejected", b31_attestation_unverified_rejected as fn()),
-        ("rejection_fail_closed", "b32_production_provider_without_verification_material_rejected", b32_production_provider_without_verification_material_rejected as fn()),
-        ("rejection_fail_closed", "b33_remote_signer_evidence_rejected_for_kms_hsm", b33_remote_signer_evidence_rejected_for_kms_hsm as fn()),
-        ("rejection_fail_closed", "b34_local_operator_material_rejected", b34_local_operator_material_rejected as fn()),
-        ("rejection_fail_closed", "b35_peer_majority_evidence_rejected", b35_peer_majority_evidence_rejected as fn()),
-        ("rejection_fail_closed", "b36_validator_set_rotation_request_kind_fail_closed", b36_validator_set_rotation_request_kind_fail_closed as fn()),
-        ("rejection_fail_closed", "b37_policy_change_request_kind_fail_closed", b37_policy_change_request_kind_fail_closed as fn()),
-        ("rejection_fail_closed", "b38_onchain_governance_request_kind_fail_closed", b38_onchain_governance_request_kind_fail_closed as fn()),
-        ("rejection_fail_closed", "b39_fixture_kms_evidence_under_hsm_policy_rejected", b39_fixture_kms_evidence_under_hsm_policy_rejected as fn()),
-        ("rejection_fail_closed", "b40_malformed_expectations_rejected", b40_malformed_expectations_rejected as fn()),
-        ("mainnet_authority_policy", "c01_mainnet_cannot_be_satisfied_by_fixture_kms", c01_mainnet_cannot_be_satisfied_by_fixture_kms as fn()),
-        ("mainnet_authority_policy", "c02_mainnet_cannot_be_satisfied_by_fixture_hsm", c02_mainnet_cannot_be_satisfied_by_fixture_hsm as fn()),
-        ("mainnet_authority_policy", "c03_mainnet_cannot_be_satisfied_by_remote_signer", c03_mainnet_cannot_be_satisfied_by_remote_signer as fn()),
-        ("mainnet_authority_policy", "c04_mainnet_cannot_be_satisfied_by_local_operator", c04_mainnet_cannot_be_satisfied_by_local_operator as fn()),
-        ("mainnet_authority_policy", "c05_mainnet_cannot_be_satisfied_by_peer_majority", c05_mainnet_cannot_be_satisfied_by_peer_majority as fn()),
-        ("mainnet_authority_policy", "c06_mainnet_production_policy_is_unavailable", c06_mainnet_production_policy_is_unavailable as fn()),
-        ("mainnet_authority_policy", "c07_mainnet_non_production_policy_refused", c07_mainnet_non_production_policy_refused as fn()),
-        ("mainnet_authority_policy", "c08_mainnet_production_policy_on_non_mainnet_is_unavailable", c08_mainnet_production_policy_on_non_mainnet_is_unavailable as fn()),
-        ("mainnet_authority_policy", "c09_mainnet_cannot_bypass_missing_production_attestation", c09_mainnet_cannot_bypass_missing_production_attestation as fn()),
-        ("mainnet_authority_policy", "c10_mainnet_production_attestation_unavailable_records_no_verification", c10_mainnet_production_attestation_unavailable_records_no_verification as fn()),
-        ("mainnet_authority_policy", "c11_disabled_default_refuses_mainnet", c11_disabled_default_refuses_mainnet as fn()),
-        ("replay_recovery_idempotency", "e01_no_prior_attestation_window_is_clean_no_op", e01_no_prior_attestation_window_is_clean_no_op as fn()),
-        ("replay_recovery_idempotency", "e02_byte_identical_duplicate_is_idempotent", e02_byte_identical_duplicate_is_idempotent as fn()),
-        ("replay_recovery_idempotency", "e03_same_id_different_transcript_fails_closed", e03_same_id_different_transcript_fails_closed as fn()),
-        ("replay_recovery_idempotency", "e04_same_id_different_key_handle_fails_closed", e04_same_id_different_key_handle_fails_closed as fn()),
-        ("replay_recovery_idempotency", "e05_same_id_different_measurement_fails_closed", e05_same_id_different_measurement_fails_closed as fn()),
-        ("replay_recovery_idempotency", "e06_same_nonce_across_different_request_id_fails_closed", e06_same_nonce_across_different_request_id_fails_closed as fn()),
-        ("replay_recovery_idempotency", "e07_unrelated_request_id_is_no_prior", e07_unrelated_request_id_is_no_prior as fn()),
-        ("replay_recovery_idempotency", "e08_no_durable_persistence_claimed", e08_no_durable_persistence_claimed as fn()),
-        ("non_mutation", "d01_every_reject_is_non_mutating", d01_every_reject_is_non_mutating as fn()),
-        ("non_mutation", "d02_reject_does_not_invoke_evidence_verifier_before_binding_checks", d02_reject_does_not_invoke_evidence_verifier_before_binding_checks as fn()),
-        ("non_mutation", "d03_disabled_never_invokes_evidence_verifier", d03_disabled_never_invokes_evidence_verifier as fn()),
-        ("non_mutation", "d04_no_fallback_to_fixture_under_production_policy", d04_no_fallback_to_fixture_under_production_policy as fn()),
-        ("non_mutation", "d05_no_fallback_to_remote_signer_under_kms_hsm_policy", d05_no_fallback_to_remote_signer_under_kms_hsm_policy as fn()),
-        ("non_mutation", "d06_scope_helpers_assert_non_mutation_invariants", d06_scope_helpers_assert_non_mutation_invariants as fn()),
-        ("reachability_taxonomy", "f01_run297_is_source_test_not_release_binary_evidence", f01_run297_is_source_test_not_release_binary_evidence as fn()),
-        ("reachability_taxonomy", "f02_default_is_disabled_fail_closed", f02_default_is_disabled_fail_closed as fn()),
-        ("reachability_taxonomy", "f03_mainnet_refuses_fixture", f03_mainnet_refuses_fixture as fn()),
-        ("reachability_taxonomy", "f04_production_classes_fail_closed", f04_production_classes_fail_closed as fn()),
-        ("reachability_taxonomy", "f05_protocol_version_is_one", f05_protocol_version_is_one as fn()),
-        ("reachability_taxonomy", "f06_class_taxonomy_tags_are_distinct", f06_class_taxonomy_tags_are_distinct as fn()),
-        ("reachability_taxonomy", "f07_policy_taxonomy_tags_are_distinct", f07_policy_taxonomy_tags_are_distinct as fn()),
-        ("reachability_taxonomy", "f08_class_maps_to_custody_class", f08_class_maps_to_custody_class as fn()),
-        ("reachability_taxonomy", "f09_class_for_provider_kind_round_trips", f09_class_for_provider_kind_round_trips as fn()),
-        ("reachability_taxonomy", "f10_policy_allowed_class_matches_taxonomy", f10_policy_allowed_class_matches_taxonomy as fn()),
-        ("reachability_taxonomy", "f11_error_tags_are_distinct", f11_error_tags_are_distinct as fn()),
-        ("reachability_taxonomy", "f12_config_pins_supported_protocol", f12_config_pins_supported_protocol as fn()),
-        ("reachability_taxonomy", "f13_evidence_verifier_boundary_is_object_safe_mockable", f13_evidence_verifier_boundary_is_object_safe_mockable as fn()),
-        ("reachability_taxonomy", "f14_scripted_mock_consumes_steps_then_default", f14_scripted_mock_consumes_steps_then_default as fn()),
-        ("reachability_taxonomy", "f15_production_stub_reports_class_and_counts_calls", f15_production_stub_reports_class_and_counts_calls as fn()),
-        ("reachability_taxonomy", "f16_trust_root_digest_is_deterministic", f16_trust_root_digest_is_deterministic as fn()),
-        ("reachability_taxonomy", "f17_provider_identity_digest_binds_provider_and_key", f17_provider_identity_digest_binds_provider_and_key as fn()),
-        ("reachability_taxonomy", "f18_fixture_kms_and_hsm_verified_outcomes_are_evidence_only_accepts", f18_fixture_kms_and_hsm_verified_outcomes_are_evidence_only_accepts as fn()),
-        ("reachability_taxonomy", "f19_evaluate_on_disabled_records_disabled_outcome_in_decision", f19_evaluate_on_disabled_records_disabled_outcome_in_decision as fn()),
-        ("reachability_taxonomy", "f20_build_attestation_challenge_binds_request_id", f20_build_attestation_challenge_binds_request_id as fn()),
-        ("reachability_taxonomy", "g01_release_symbol_reachability_probe", g01_release_symbol_reachability_probe as fn()),
+        (
+            "accepted_compatible",
+            "a01_disabled_default_policy_is_explicit_and_inert",
+            a01_disabled_default_policy_is_explicit_and_inert as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "a02_disabled_verifier_returns_disabled_no_verification",
+            a02_disabled_verifier_returns_disabled_no_verification as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "a03_devnet_fixture_kms_verifies_under_fixture_policy",
+            a03_devnet_fixture_kms_verifies_under_fixture_policy as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "a04_devnet_fixture_hsm_verifies_under_fixture_policy",
+            a04_devnet_fixture_hsm_verifies_under_fixture_policy as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "a05_testnet_fixture_kms_verifies_under_fixture_policy",
+            a05_testnet_fixture_kms_verifies_under_fixture_policy as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "a06_testnet_fixture_hsm_verifies_under_fixture_policy",
+            a06_testnet_fixture_hsm_verifies_under_fixture_policy as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "a07_valid_fixture_binds_to_matching_custody_request_id",
+            a07_valid_fixture_binds_to_matching_custody_request_id as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "a08_valid_fixture_binds_to_matching_backend_transcript",
+            a08_valid_fixture_binds_to_matching_backend_transcript as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "a09_valid_fixture_binds_provider_key_class_signer_candidate_action",
+            a09_valid_fixture_binds_provider_key_class_signer_candidate_action as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "a10_attestation_challenge_digest_is_deterministic",
+            a10_attestation_challenge_digest_is_deterministic as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "a11_attestation_evidence_digest_is_deterministic",
+            a11_attestation_evidence_digest_is_deterministic as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "a12_attestation_transcript_digest_is_deterministic",
+            a12_attestation_transcript_digest_is_deterministic as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "a13_two_identical_evidence_objects_produce_identical_transcripts",
+            a13_two_identical_evidence_objects_produce_identical_transcripts as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "a14_production_cloud_kms_path_reachable_and_fail_closed",
+            a14_production_cloud_kms_path_reachable_and_fail_closed as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "a15_production_pkcs11_hsm_path_reachable_and_fail_closed",
+            a15_production_pkcs11_hsm_path_reachable_and_fail_closed as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "a16_production_generic_kms_path_reachable_and_fail_closed",
+            a16_production_generic_kms_path_reachable_and_fail_closed as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "a17_production_generic_hsm_path_reachable_and_fail_closed",
+            a17_production_generic_hsm_path_reachable_and_fail_closed as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "a18_run295_backend_submit_remains_compatible",
+            a18_run295_backend_submit_remains_compatible as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "a19_evaluate_produces_decision_with_bound_request_id",
+            a19_evaluate_produces_decision_with_bound_request_id as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "a20_decision_digest_is_deterministic_and_outcome_bound",
+            a20_decision_digest_is_deterministic_and_outcome_bound as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "b01_disabled_policy_produces_no_verification",
+            b01_disabled_policy_produces_no_verification as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "b02_missing_attestation_evidence_rejected",
+            b02_missing_attestation_evidence_rejected as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "b03_malformed_attestation_rejected",
+            b03_malformed_attestation_rejected as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "b04_unsupported_attestation_class_rejected",
+            b04_unsupported_attestation_class_rejected as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "b05_unsupported_protocol_version_rejected",
+            b05_unsupported_protocol_version_rejected as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "b06_missing_trust_root_rejected",
+            b06_missing_trust_root_rejected as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "b07_wrong_trust_root_rejected",
+            b07_wrong_trust_root_rejected as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "b08_wrong_provider_kind_rejected",
+            b08_wrong_provider_kind_rejected as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "b09_wrong_provider_identity_rejected",
+            b09_wrong_provider_identity_rejected as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "b10_wrong_key_handle_rejected",
+            b10_wrong_key_handle_rejected as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "b11_wrong_signer_identity_rejected",
+            b11_wrong_signer_identity_rejected as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "b12_wrong_custody_class_rejected",
+            b12_wrong_custody_class_rejected as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "b13_wrong_request_id_rejected",
+            b13_wrong_request_id_rejected as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "b14_wrong_backend_transcript_rejected",
+            b14_wrong_backend_transcript_rejected as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "b15_wrong_request_envelope_digest_rejected",
+            b15_wrong_request_envelope_digest_rejected as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "b16_wrong_response_envelope_digest_rejected",
+            b16_wrong_response_envelope_digest_rejected as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "b17_wrong_candidate_digest_rejected",
+            b17_wrong_candidate_digest_rejected as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "b18_wrong_authorized_action_rejected",
+            b18_wrong_authorized_action_rejected as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "b19_wrong_environment_rejected",
+            b19_wrong_environment_rejected as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "b20_wrong_chain_rejected",
+            b20_wrong_chain_rejected as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "b21_wrong_genesis_domain_rejected",
+            b21_wrong_genesis_domain_rejected as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "b22_wrong_authority_sequence_rejected",
+            b22_wrong_authority_sequence_rejected as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "b23_wrong_authority_root_rejected",
+            b23_wrong_authority_root_rejected as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "b24_wrong_nonce_challenge_rejected",
+            b24_wrong_nonce_challenge_rejected as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "b25_replayed_stale_nonce_rejected",
+            b25_replayed_stale_nonce_rejected as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "b26_wrong_measurement_digest_rejected",
+            b26_wrong_measurement_digest_rejected as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "b27_wrong_certificate_proof_digest_rejected",
+            b27_wrong_certificate_proof_digest_rejected as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "b28_ambiguous_durable_replay_binding_rejected",
+            b28_ambiguous_durable_replay_binding_rejected as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "b29_wrong_domain_separation_tag_rejected",
+            b29_wrong_domain_separation_tag_rejected as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "b30_attestation_unavailable_rejected",
+            b30_attestation_unavailable_rejected as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "b31_attestation_unverified_rejected",
+            b31_attestation_unverified_rejected as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "b32_production_provider_without_verification_material_rejected",
+            b32_production_provider_without_verification_material_rejected as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "b33_remote_signer_evidence_rejected_for_kms_hsm",
+            b33_remote_signer_evidence_rejected_for_kms_hsm as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "b34_local_operator_material_rejected",
+            b34_local_operator_material_rejected as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "b35_peer_majority_evidence_rejected",
+            b35_peer_majority_evidence_rejected as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "b36_validator_set_rotation_request_kind_fail_closed",
+            b36_validator_set_rotation_request_kind_fail_closed as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "b37_policy_change_request_kind_fail_closed",
+            b37_policy_change_request_kind_fail_closed as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "b38_onchain_governance_request_kind_fail_closed",
+            b38_onchain_governance_request_kind_fail_closed as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "b39_fixture_kms_evidence_under_hsm_policy_rejected",
+            b39_fixture_kms_evidence_under_hsm_policy_rejected as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "b40_malformed_expectations_rejected",
+            b40_malformed_expectations_rejected as fn(),
+        ),
+        (
+            "mainnet_authority_policy",
+            "c01_mainnet_cannot_be_satisfied_by_fixture_kms",
+            c01_mainnet_cannot_be_satisfied_by_fixture_kms as fn(),
+        ),
+        (
+            "mainnet_authority_policy",
+            "c02_mainnet_cannot_be_satisfied_by_fixture_hsm",
+            c02_mainnet_cannot_be_satisfied_by_fixture_hsm as fn(),
+        ),
+        (
+            "mainnet_authority_policy",
+            "c03_mainnet_cannot_be_satisfied_by_remote_signer",
+            c03_mainnet_cannot_be_satisfied_by_remote_signer as fn(),
+        ),
+        (
+            "mainnet_authority_policy",
+            "c04_mainnet_cannot_be_satisfied_by_local_operator",
+            c04_mainnet_cannot_be_satisfied_by_local_operator as fn(),
+        ),
+        (
+            "mainnet_authority_policy",
+            "c05_mainnet_cannot_be_satisfied_by_peer_majority",
+            c05_mainnet_cannot_be_satisfied_by_peer_majority as fn(),
+        ),
+        (
+            "mainnet_authority_policy",
+            "c06_mainnet_production_policy_is_unavailable",
+            c06_mainnet_production_policy_is_unavailable as fn(),
+        ),
+        (
+            "mainnet_authority_policy",
+            "c07_mainnet_non_production_policy_refused",
+            c07_mainnet_non_production_policy_refused as fn(),
+        ),
+        (
+            "mainnet_authority_policy",
+            "c08_mainnet_production_policy_on_non_mainnet_is_unavailable",
+            c08_mainnet_production_policy_on_non_mainnet_is_unavailable as fn(),
+        ),
+        (
+            "mainnet_authority_policy",
+            "c09_mainnet_cannot_bypass_missing_production_attestation",
+            c09_mainnet_cannot_bypass_missing_production_attestation as fn(),
+        ),
+        (
+            "mainnet_authority_policy",
+            "c10_mainnet_production_attestation_unavailable_records_no_verification",
+            c10_mainnet_production_attestation_unavailable_records_no_verification as fn(),
+        ),
+        (
+            "mainnet_authority_policy",
+            "c11_disabled_default_refuses_mainnet",
+            c11_disabled_default_refuses_mainnet as fn(),
+        ),
+        (
+            "replay_recovery_idempotency",
+            "e01_no_prior_attestation_window_is_clean_no_op",
+            e01_no_prior_attestation_window_is_clean_no_op as fn(),
+        ),
+        (
+            "replay_recovery_idempotency",
+            "e02_byte_identical_duplicate_is_idempotent",
+            e02_byte_identical_duplicate_is_idempotent as fn(),
+        ),
+        (
+            "replay_recovery_idempotency",
+            "e03_same_id_different_transcript_fails_closed",
+            e03_same_id_different_transcript_fails_closed as fn(),
+        ),
+        (
+            "replay_recovery_idempotency",
+            "e04_same_id_different_key_handle_fails_closed",
+            e04_same_id_different_key_handle_fails_closed as fn(),
+        ),
+        (
+            "replay_recovery_idempotency",
+            "e05_same_id_different_measurement_fails_closed",
+            e05_same_id_different_measurement_fails_closed as fn(),
+        ),
+        (
+            "replay_recovery_idempotency",
+            "e06_same_nonce_across_different_request_id_fails_closed",
+            e06_same_nonce_across_different_request_id_fails_closed as fn(),
+        ),
+        (
+            "replay_recovery_idempotency",
+            "e07_unrelated_request_id_is_no_prior",
+            e07_unrelated_request_id_is_no_prior as fn(),
+        ),
+        (
+            "replay_recovery_idempotency",
+            "e08_no_durable_persistence_claimed",
+            e08_no_durable_persistence_claimed as fn(),
+        ),
+        (
+            "non_mutation",
+            "d01_every_reject_is_non_mutating",
+            d01_every_reject_is_non_mutating as fn(),
+        ),
+        (
+            "non_mutation",
+            "d02_reject_does_not_invoke_evidence_verifier_before_binding_checks",
+            d02_reject_does_not_invoke_evidence_verifier_before_binding_checks as fn(),
+        ),
+        (
+            "non_mutation",
+            "d03_disabled_never_invokes_evidence_verifier",
+            d03_disabled_never_invokes_evidence_verifier as fn(),
+        ),
+        (
+            "non_mutation",
+            "d04_no_fallback_to_fixture_under_production_policy",
+            d04_no_fallback_to_fixture_under_production_policy as fn(),
+        ),
+        (
+            "non_mutation",
+            "d05_no_fallback_to_remote_signer_under_kms_hsm_policy",
+            d05_no_fallback_to_remote_signer_under_kms_hsm_policy as fn(),
+        ),
+        (
+            "non_mutation",
+            "d06_scope_helpers_assert_non_mutation_invariants",
+            d06_scope_helpers_assert_non_mutation_invariants as fn(),
+        ),
+        (
+            "reachability_taxonomy",
+            "f01_run297_is_source_test_not_release_binary_evidence",
+            f01_run297_is_source_test_not_release_binary_evidence as fn(),
+        ),
+        (
+            "reachability_taxonomy",
+            "f02_default_is_disabled_fail_closed",
+            f02_default_is_disabled_fail_closed as fn(),
+        ),
+        (
+            "reachability_taxonomy",
+            "f03_mainnet_refuses_fixture",
+            f03_mainnet_refuses_fixture as fn(),
+        ),
+        (
+            "reachability_taxonomy",
+            "f04_production_classes_fail_closed",
+            f04_production_classes_fail_closed as fn(),
+        ),
+        (
+            "reachability_taxonomy",
+            "f05_protocol_version_is_one",
+            f05_protocol_version_is_one as fn(),
+        ),
+        (
+            "reachability_taxonomy",
+            "f06_class_taxonomy_tags_are_distinct",
+            f06_class_taxonomy_tags_are_distinct as fn(),
+        ),
+        (
+            "reachability_taxonomy",
+            "f07_policy_taxonomy_tags_are_distinct",
+            f07_policy_taxonomy_tags_are_distinct as fn(),
+        ),
+        (
+            "reachability_taxonomy",
+            "f08_class_maps_to_custody_class",
+            f08_class_maps_to_custody_class as fn(),
+        ),
+        (
+            "reachability_taxonomy",
+            "f09_class_for_provider_kind_round_trips",
+            f09_class_for_provider_kind_round_trips as fn(),
+        ),
+        (
+            "reachability_taxonomy",
+            "f10_policy_allowed_class_matches_taxonomy",
+            f10_policy_allowed_class_matches_taxonomy as fn(),
+        ),
+        (
+            "reachability_taxonomy",
+            "f11_error_tags_are_distinct",
+            f11_error_tags_are_distinct as fn(),
+        ),
+        (
+            "reachability_taxonomy",
+            "f12_config_pins_supported_protocol",
+            f12_config_pins_supported_protocol as fn(),
+        ),
+        (
+            "reachability_taxonomy",
+            "f13_evidence_verifier_boundary_is_object_safe_mockable",
+            f13_evidence_verifier_boundary_is_object_safe_mockable as fn(),
+        ),
+        (
+            "reachability_taxonomy",
+            "f14_scripted_mock_consumes_steps_then_default",
+            f14_scripted_mock_consumes_steps_then_default as fn(),
+        ),
+        (
+            "reachability_taxonomy",
+            "f15_production_stub_reports_class_and_counts_calls",
+            f15_production_stub_reports_class_and_counts_calls as fn(),
+        ),
+        (
+            "reachability_taxonomy",
+            "f16_trust_root_digest_is_deterministic",
+            f16_trust_root_digest_is_deterministic as fn(),
+        ),
+        (
+            "reachability_taxonomy",
+            "f17_provider_identity_digest_binds_provider_and_key",
+            f17_provider_identity_digest_binds_provider_and_key as fn(),
+        ),
+        (
+            "reachability_taxonomy",
+            "f18_fixture_kms_and_hsm_verified_outcomes_are_evidence_only_accepts",
+            f18_fixture_kms_and_hsm_verified_outcomes_are_evidence_only_accepts as fn(),
+        ),
+        (
+            "reachability_taxonomy",
+            "f19_evaluate_on_disabled_records_disabled_outcome_in_decision",
+            f19_evaluate_on_disabled_records_disabled_outcome_in_decision as fn(),
+        ),
+        (
+            "reachability_taxonomy",
+            "f20_build_attestation_challenge_binds_request_id",
+            f20_build_attestation_challenge_binds_request_id as fn(),
+        ),
+        (
+            "reachability_taxonomy",
+            "g01_release_symbol_reachability_probe",
+            g01_release_symbol_reachability_probe as fn(),
+        ),
     ];
 
     let mut rows: Vec<(String, String, bool)> = Vec::new();

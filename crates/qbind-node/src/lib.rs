@@ -105,12 +105,12 @@ pub mod net_service;
 pub mod node_config;
 pub mod p2p;
 pub mod p2p_inbound;
-pub mod peer_consensus_binding;
 pub mod p2p_node_builder;
 /// Run 072 — production-honest internal P2P session-eviction hook.
 pub mod p2p_session_eviction;
 pub mod p2p_tcp;
-pub mod peer_key_provider;// Run 037 — production-honest PQC KEMTLS root-key distribution config.
+pub mod peer_consensus_binding;
+pub mod peer_key_provider; // Run 037 — production-honest PQC KEMTLS root-key distribution config.
 pub mod pqc_root_config;
 // Run 037 — DevNet-only helper to mint real ML-DSA-44-signed delegation certs.
 pub mod pqc_devnet_helper;
@@ -2133,13 +2133,13 @@ pub mod public_devnet_abuse_dos_runtime;
 // the validated per-peer PeerRateLimiter onto the TcpKemTls inbound receive
 // path (consulted before demuxer/handler dispatch).
 pub mod deployed_inbound_per_peer_limiter;
+pub mod production_consensus_storage;
 pub mod remote_signer;
 pub mod secure_channel;
 pub mod signer_loader;
 pub mod snapshot_restore;
 pub mod startup_validation;
 pub mod storage;
-pub mod production_consensus_storage;
 // Run 098 — canonical activation epoch source helper. Wires the
 // Run 093 production `ConsensusStorage` `meta:current_epoch` value
 // into `ActivationContext.current_epoch` at all production trust-

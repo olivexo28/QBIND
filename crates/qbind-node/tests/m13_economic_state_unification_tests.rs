@@ -22,7 +22,9 @@
 
 use tempfile::TempDir;
 
-use qbind_consensus::slashing::{AtomicPenaltyRequest, AtomicSlashingBackend, OffenseKind, SlashingBackend};
+use qbind_consensus::slashing::{
+    AtomicPenaltyRequest, AtomicSlashingBackend, OffenseKind, SlashingBackend,
+};
 use qbind_consensus::validator_set::{
     build_validator_set_with_stake_and_jail_filter, ValidatorCandidateWithJailStatus,
 };
@@ -44,7 +46,11 @@ use qbind_types::{ValidatorRecord, ValidatorStatus};
 /// protocol, a validator's status transitions from Active to Jailed when jailed,
 /// and should transition back to Active after unjailing. The `is_eligible_at_epoch`
 /// method checks both `status == Active` AND `!is_jailed_at_epoch()`.
-fn make_validator_record(stake: u64, jailed_until_epoch: Option<u64>, status: ValidatorStatus) -> ValidatorRecord {
+fn make_validator_record(
+    stake: u64,
+    jailed_until_epoch: Option<u64>,
+    status: ValidatorStatus,
+) -> ValidatorRecord {
     ValidatorRecord {
         version: 1,
         status,
@@ -142,11 +148,18 @@ fn test_a2_slash_preserves_validator_record_stake_semantics() {
     // Create a ValidatorRecord representing post-slash state
     // Status is Active - the jail is controlled by jailed_until_epoch, not status.
     // In a real scenario, the validator would be re-activated after unjail.
-    let record = make_validator_record(initial_stake - 75_000, jailed_until, ValidatorStatus::Active);
+    let record = make_validator_record(
+        initial_stake - 75_000,
+        jailed_until,
+        ValidatorStatus::Active,
+    );
 
     // Verify the M13 canonical eligibility checks
     // During jail (before epoch 15), not eligible due to jailed_until_epoch check
-    assert!(!record.is_eligible_at_epoch(10), "Jailed validator not eligible");
+    assert!(
+        !record.is_eligible_at_epoch(10),
+        "Jailed validator not eligible"
+    );
     // After jail expires (epoch 15+), eligible again
     assert!(
         record.is_eligible_at_epoch(15),
@@ -154,9 +167,18 @@ fn test_a2_slash_preserves_validator_record_stake_semantics() {
     );
 
     // Verify canonical jail check
-    assert!(record.is_jailed_at_epoch(10), "Should be jailed at epoch 10");
-    assert!(record.is_jailed_at_epoch(14), "Should be jailed at epoch 14");
-    assert!(!record.is_jailed_at_epoch(15), "Should be unjailed at epoch 15");
+    assert!(
+        record.is_jailed_at_epoch(10),
+        "Should be jailed at epoch 10"
+    );
+    assert!(
+        record.is_jailed_at_epoch(14),
+        "Should be jailed at epoch 14"
+    );
+    assert!(
+        !record.is_jailed_at_epoch(15),
+        "Should be unjailed at epoch 15"
+    );
 }
 
 // ============================================================================
@@ -223,7 +245,8 @@ fn test_b1_jail_excludes_validator_from_set_after_restart() {
         ];
 
         // At epoch 10, validator 2 should be excluded (jailed until 15)
-        let result = build_validator_set_with_stake_and_jail_filter(candidates.clone(), 0, 10).unwrap();
+        let result =
+            build_validator_set_with_stake_and_jail_filter(candidates.clone(), 0, 10).unwrap();
         assert_eq!(result.validator_set.len(), 2);
         assert_eq!(result.excluded_jailed.len(), 1);
         assert_eq!(result.excluded_jailed[0].validator_id, ValidatorId::new(2));
@@ -271,7 +294,11 @@ fn test_b2_jailed_validator_not_eligible_via_validator_record() {
 
         // Create a ValidatorRecord with the canonical state
         // Status remains Active - jail is enforced via jailed_until_epoch
-        let record = make_validator_record(state.stake, state.jailed_until_epoch, ValidatorStatus::Active);
+        let record = make_validator_record(
+            state.stake,
+            state.jailed_until_epoch,
+            ValidatorStatus::Active,
+        );
 
         assert!(!record.is_eligible_at_epoch(10));
         assert!(!record.is_eligible_at_epoch(14));
@@ -341,7 +368,11 @@ fn test_c1_multiple_offenses_accumulate_correctly_across_restart() {
         assert_eq!(stake, Some(878_750), "Stake should reflect both slashes");
 
         let jailed_until = backend.get_jailed_until_epoch(ValidatorId(1));
-        assert_eq!(jailed_until, Some(15), "Jail should be from longer sentence (O1)");
+        assert_eq!(
+            jailed_until,
+            Some(15),
+            "Jail should be from longer sentence (O1)"
+        );
 
         // Verify total slashed via state
         let state = backend.ledger().get_validator_state(1).unwrap();
@@ -472,7 +503,10 @@ fn test_d1_atomic_batch_all_or_nothing() {
         let state = ledger.get_validator_state(1).unwrap();
         assert_eq!(state.stake, 925_000, "Stake should be updated");
         assert_eq!(state.jailed_until_epoch, Some(15), "Jail should be updated");
-        assert_eq!(state.total_slashed, 75_000, "Total slashed should be updated");
+        assert_eq!(
+            state.total_slashed, 75_000,
+            "Total slashed should be updated"
+        );
 
         // Evidence should be marked as seen
         assert!(
@@ -659,8 +693,14 @@ fn test_e1_deterministic_validator_set_from_same_state() {
 
     // Specifically check validator 2 is excluded on both
     assert_eq!(result_a.excluded_jailed.len(), 1);
-    assert_eq!(result_a.excluded_jailed[0].validator_id, ValidatorId::new(2));
-    assert_eq!(result_b.excluded_jailed[0].validator_id, ValidatorId::new(2));
+    assert_eq!(
+        result_a.excluded_jailed[0].validator_id,
+        ValidatorId::new(2)
+    );
+    assert_eq!(
+        result_b.excluded_jailed[0].validator_id,
+        ValidatorId::new(2)
+    );
 }
 
 #[test]
@@ -730,11 +770,17 @@ fn test_e2_quorum_voting_power_consistent_after_restart() {
             "1 vote should not be quorum for 3 validators"
         );
         assert!(
-            result.validator_set.has_quorum(vec![ValidatorId::new(1), ValidatorId::new(2)]),
+            result
+                .validator_set
+                .has_quorum(vec![ValidatorId::new(1), ValidatorId::new(2)]),
             "2 votes should be quorum for 3 validators"
         );
         assert!(
-            result.validator_set.has_quorum(vec![ValidatorId::new(1), ValidatorId::new(2), ValidatorId::new(4)]),
+            result.validator_set.has_quorum(vec![
+                ValidatorId::new(1),
+                ValidatorId::new(2),
+                ValidatorId::new(4)
+            ]),
             "3 votes should be quorum for 3 validators"
         );
     }

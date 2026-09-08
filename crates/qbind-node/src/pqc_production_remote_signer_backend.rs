@@ -178,7 +178,10 @@ impl ProductionRemoteSignerBackendPolicy {
     /// Returns `true` iff this policy requires a real production backend
     /// (and therefore Run 293 fails closed as unavailable).
     pub const fn requires_production_backend(self) -> bool {
-        matches!(self, Self::ProductionRequired | Self::MainnetProductionRequired)
+        matches!(
+            self,
+            Self::ProductionRequired | Self::MainnetProductionRequired
+        )
     }
 
     /// Map the backend policy onto the Run 194 [`RemoteSignerPolicy`]
@@ -388,7 +391,10 @@ pub fn production_remote_signer_request_id(spec: &ProductionRemoteSignerRequestS
         h.update(value);
     };
     field(b"request_kind", spec.request_kind.tag().as_bytes());
-    field(b"environment", &spec.environment.metric_code().to_le_bytes());
+    field(
+        b"environment",
+        &spec.environment.metric_code().to_le_bytes(),
+    );
     field(b"chain_id", spec.chain_id.as_bytes());
     field(b"genesis_hash", spec.genesis_hash.as_bytes());
     field(
@@ -415,7 +421,10 @@ pub fn production_remote_signer_request_id(spec: &ProductionRemoteSignerRequestS
             .unwrap_or("")
             .as_bytes(),
     );
-    field(b"request_replay_nonce", spec.request_replay_nonce.as_bytes());
+    field(
+        b"request_replay_nonce",
+        spec.request_replay_nonce.as_bytes(),
+    );
     field(
         b"transport_anti_replay_nonce",
         spec.transport_anti_replay_nonce.as_bytes(),
@@ -642,8 +651,11 @@ impl<T: RemoteSignerTransport> RemoteSignerBackendTransport for LoopbackRemoteSi
 /// unavailable / malformed / oversized fail-closed paths and inject
 /// tampered response envelopes without any real I/O.
 pub struct MockRemoteSignerBackendTransport {
-    steps: RefCell<VecDeque<Result<RemoteSignerTransportResponseEnvelope, ProductionRemoteSignerError>>>,
-    default_result: RefCell<Result<RemoteSignerTransportResponseEnvelope, ProductionRemoteSignerError>>,
+    steps: RefCell<
+        VecDeque<Result<RemoteSignerTransportResponseEnvelope, ProductionRemoteSignerError>>,
+    >,
+    default_result:
+        RefCell<Result<RemoteSignerTransportResponseEnvelope, ProductionRemoteSignerError>>,
     call_count: Cell<u32>,
 }
 
@@ -1392,9 +1404,13 @@ impl<T: RemoteSignerBackendTransport> GovernanceProductionRemoteSignerBackend
         now_unix: u64,
     ) -> ProductionRemoteSignerOutcome {
         match self.submit_remote_signing_request(spec, trust_domain) {
-            Ok(submitted) => {
-                self.verify_remote_signer_response(spec, &submitted, trust_domain, identity, now_unix)
-            }
+            Ok(submitted) => self.verify_remote_signer_response(
+                spec,
+                &submitted,
+                trust_domain,
+                identity,
+                now_unix,
+            ),
             Err(outcome) => outcome,
         }
     }
@@ -1417,7 +1433,8 @@ impl<T: RemoteSignerBackendTransport> GovernanceProductionRemoteSignerBackend
             return ProductionRemoteSignerRecoveryOutcome::ConflictingRequestForSameId;
         }
         // Same request, different response commitment => conflict.
-        let prior_resp = remote_signer_response_canonical_digest(&prior.response_env.inner_response);
+        let prior_resp =
+            remote_signer_response_canonical_digest(&prior.response_env.inner_response);
         let current_resp =
             remote_signer_response_canonical_digest(&current.response_env.inner_response);
         if prior_resp != current_resp {
@@ -1440,9 +1457,7 @@ impl<T: RemoteSignerBackendTransport> GovernanceProductionRemoteSignerBackend
 /// real I/O; the estimate is the length of the response commitment plus
 /// canonical digest, so an absurdly large source/test response can
 /// exercise the oversized fail-closed path.
-fn oversized_response_bytes(
-    response_env: &RemoteSignerTransportResponseEnvelope,
-) -> Option<usize> {
+fn oversized_response_bytes(response_env: &RemoteSignerTransportResponseEnvelope) -> Option<usize> {
     let bytes = response_env.response_commitment.len()
         + response_env.canonical_response_digest.len()
         + response_env.inner_response.signature_commitment.len();
@@ -1526,7 +1541,8 @@ mod tests {
             RemoteSignerPolicy::ProductionRemoteSignerRequired
         );
         assert_eq!(
-            ProductionRemoteSignerBackendPolicy::MainnetProductionRequired.to_remote_signer_policy(),
+            ProductionRemoteSignerBackendPolicy::MainnetProductionRequired
+                .to_remote_signer_policy(),
             RemoteSignerPolicy::MainnetProductionRemoteSignerRequired
         );
     }

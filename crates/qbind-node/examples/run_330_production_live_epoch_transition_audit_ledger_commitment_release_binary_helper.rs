@@ -48,7 +48,6 @@ use std::fs;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::PathBuf;
 
-
 use qbind_node::pqc_authority_custody::AuthorityCustodyClass;
 use qbind_node::pqc_authority_lifecycle::{
     AuthorityTrustDomain, LocalLifecycleAction, PQC_LIFECYCLE_SUITE_ML_DSA_44,
@@ -73,9 +72,12 @@ use qbind_node::pqc_production_live_validator_set_application_authorization::{
 };
 use qbind_node::pqc_production_staged_live_validator_set_epoch_transition_application_executor::*;
 use qbind_node::pqc_production_validator_set_rotation_application_executor::{
-    EmptyValidatorSetRotationApplicationReplaySet, ProductionValidatorSetRotationApplicationDecision,
-    ProductionValidatorSetRotationApplicationExecutor, ProductionValidatorSetRotationApplicationInputs,
-    ProductionValidatorSetRotationApplicationRequest, ValidatorSetRotationApplicationAuthoritySource,
+    EmptyValidatorSetRotationApplicationReplaySet,
+    ProductionValidatorSetRotationApplicationDecision,
+    ProductionValidatorSetRotationApplicationExecutor,
+    ProductionValidatorSetRotationApplicationInputs,
+    ProductionValidatorSetRotationApplicationRequest,
+    ValidatorSetRotationApplicationAuthoritySource,
 };
 use qbind_node::pqc_production_validator_set_rotation_intent::{
     CanonicalValidatorIdentity, CanonicalValidatorRecord, CanonicalValidatorSetSnapshot,
@@ -123,18 +125,33 @@ fn chain_for(env: TrustBundleEnvironment) -> &'static str {
 }
 
 fn trust_domain(env: TrustBundleEnvironment) -> AuthorityTrustDomain {
-    AuthorityTrustDomain::new(env, chain_for(env), GENESIS_HASH, ROOT_FP, PQC_LIFECYCLE_SUITE_ML_DSA_44)
+    AuthorityTrustDomain::new(
+        env,
+        chain_for(env),
+        GENESIS_HASH,
+        ROOT_FP,
+        PQC_LIFECYCLE_SUITE_ML_DSA_44,
+    )
 }
 
 fn quorum() -> OnChainGovernanceQuorum {
-    OnChainGovernanceQuorum { voters_voted: 8, total_voters: 10, required_quorum: 6 }
+    OnChainGovernanceQuorum {
+        voters_voted: 8,
+        total_voters: 10,
+        required_quorum: 6,
+    }
 }
 
 fn threshold() -> GovernanceThreshold {
     GovernanceThreshold::new(8, 6, 10)
 }
 
-fn validator(env: TrustBundleEnvironment, idx: u64, power: u64, act: u64) -> CanonicalValidatorRecord {
+fn validator(
+    env: TrustBundleEnvironment,
+    idx: u64,
+    power: u64,
+    act: u64,
+) -> CanonicalValidatorRecord {
     CanonicalValidatorRecord {
         identity: CanonicalValidatorIdentity {
             validator_index: idx,
@@ -153,7 +170,11 @@ fn validator(env: TrustBundleEnvironment, idx: u64, power: u64, act: u64) -> Can
 
 fn current_set(env: TrustBundleEnvironment) -> CanonicalValidatorSetSnapshot {
     CanonicalValidatorSetSnapshot::new(
-        vec![validator(env, 1, 100, 1), validator(env, 2, 100, 1), validator(env, 3, 100, 1)],
+        vec![
+            validator(env, 1, 100, 1),
+            validator(env, 2, 100, 1),
+            validator(env, 3, 100, 1),
+        ],
         CUR_EPOCH,
         CUR_VERSION,
     )
@@ -182,7 +203,10 @@ fn durable() -> GovernanceExecutionDurableReplayBinding {
     }
 }
 
-fn gov_intent(env: TrustBundleEnvironment, lifecycle: LocalLifecycleAction) -> ProductionGovernanceExecutionIntent {
+fn gov_intent(
+    env: TrustBundleEnvironment,
+    lifecycle: LocalLifecycleAction,
+) -> ProductionGovernanceExecutionIntent {
     ProductionGovernanceExecutionIntent {
         intent_kind: ProductionGovernanceExecutionIntentKind::AuthorityLifecycleRotationIntent,
         protocol_version: 1,
@@ -214,14 +238,17 @@ fn gov_intent(env: TrustBundleEnvironment, lifecycle: LocalLifecycleAction) -> P
     }
 }
 
-fn gov_decision(intent: ProductionGovernanceExecutionIntent) -> ProductionGovernanceExecutionDecision {
+fn gov_decision(
+    intent: ProductionGovernanceExecutionIntent,
+) -> ProductionGovernanceExecutionDecision {
     let idig = intent.intent_digest();
     ProductionGovernanceExecutionDecision {
-        outcome: ProductionGovernanceExecutionOutcome::AcceptedSourceTestGovernanceExecutionIntent {
-            intent_kind: intent.intent_kind,
-            environment: intent.environment,
-            decision_id: intent.decision_id.clone(),
-        },
+        outcome:
+            ProductionGovernanceExecutionOutcome::AcceptedSourceTestGovernanceExecutionIntent {
+                intent_kind: intent.intent_kind,
+                environment: intent.environment,
+                decision_id: intent.decision_id.clone(),
+            },
         decision_id: GOV_DECISION_ID.to_string(),
         request_id: GOV_REQUEST_ID.to_string(),
         intent: Some(intent),
@@ -240,7 +267,8 @@ fn rotation_decision(
 ) -> ProductionValidatorSetRotationDecision {
     let decision = gov_decision(gov_intent(env, lifecycle));
     let idig = decision.intent_digest.clone();
-    let source = ValidatorSetRotationAuthoritySource::VerifiedGovernanceExecutionIntent { decision };
+    let source =
+        ValidatorSetRotationAuthoritySource::VerifiedGovernanceExecutionIntent { decision };
     let request = ProductionValidatorSetRotationRequest::new(
         source,
         current.clone(),
@@ -281,7 +309,11 @@ fn rotation_decision(
         expected_durable_replay: None,
     };
     let boundary = ProductionValidatorSetRotationBoundary::source_test();
-    let d = boundary.evaluate_validator_set_rotation(&request, &inputs, &EmptyValidatorSetRotationReplaySet);
+    let d = boundary.evaluate_validator_set_rotation(
+        &request,
+        &inputs,
+        &EmptyValidatorSetRotationReplaySet,
+    );
     assert!(d.is_accept(), "rotation decision must accept for fixture");
     d
 }
@@ -354,7 +386,10 @@ fn app_decision(
             &inputs,
             &EmptyValidatorSetRotationApplicationReplaySet,
         );
-    assert!(d.is_accept(), "run 305 application decision must accept for fixture");
+    assert!(
+        d.is_accept(),
+        "run 305 application decision must accept for fixture"
+    );
     d
 }
 
@@ -423,7 +458,11 @@ fn auth_decision(
     proposed: CanonicalValidatorSetSnapshot,
 ) -> ProductionLiveValidatorSetApplicationAuthorizationDecision {
     let app = app_decision(env, lifecycle, requested_action, current, delta, proposed);
-    let target = app.application_intent.as_ref().unwrap().epoch_transition_target;
+    let target = app
+        .application_intent
+        .as_ref()
+        .unwrap()
+        .epoch_transition_target;
     let inputs = auth_inputs307(env, lifecycle, requested_action, &app);
     let request = ProductionLiveValidatorSetApplicationAuthorizationRequest::new(
         LiveValidatorSetApplicationAuthorizationAuthoritySource::VerifiedApplicationDecision {
@@ -438,7 +477,10 @@ fn auth_decision(
             &inputs,
             &EmptyLiveValidatorSetApplicationAuthorizationReplaySet,
         );
-    assert!(d.is_accept(), "run 307 authorization decision must accept for fixture");
+    assert!(
+        d.is_accept(),
+        "run 307 authorization decision must accept for fixture"
+    );
     d
 }
 
@@ -549,11 +591,22 @@ fn scenario(
             let v4 = validator(env, 4, 100, 2);
             let delta = ValidatorSetDelta::new(vec![ValidatorSetChange::add(v4.clone())]);
             let proposed = CanonicalValidatorSetSnapshot::new(
-                vec![validator(env, 1, 100, 1), validator(env, 2, 100, 1), validator(env, 3, 100, 1), v4],
+                vec![
+                    validator(env, 1, 100, 1),
+                    validator(env, 2, 100, 1),
+                    validator(env, 3, 100, 1),
+                    v4,
+                ],
                 CUR_EPOCH + 1,
                 CUR_VERSION + 1,
             );
-            (LocalLifecycleAction::Rotate, ValidatorSetRotationAction::ValidatorAdd, current, delta, proposed)
+            (
+                LocalLifecycleAction::Rotate,
+                ValidatorSetRotationAction::ValidatorAdd,
+                current,
+                delta,
+                proposed,
+            )
         }
         Sc::Remove => {
             let delta = ValidatorSetDelta::new(vec![ValidatorSetChange::remove(3)]);
@@ -562,32 +615,64 @@ fn scenario(
                 CUR_EPOCH + 1,
                 CUR_VERSION + 1,
             );
-            (LocalLifecycleAction::Rotate, ValidatorSetRotationAction::ValidatorRemove, current, delta, proposed)
+            (
+                LocalLifecycleAction::Rotate,
+                ValidatorSetRotationAction::ValidatorRemove,
+                current,
+                delta,
+                proposed,
+            )
         }
         Sc::Update => {
             let updated = validator(env, 2, 250, 1);
             let delta = ValidatorSetDelta::new(vec![ValidatorSetChange::update(updated.clone())]);
             let proposed = CanonicalValidatorSetSnapshot::new(
-                vec![validator(env, 1, 100, 1), updated, validator(env, 3, 100, 1)],
+                vec![
+                    validator(env, 1, 100, 1),
+                    updated,
+                    validator(env, 3, 100, 1),
+                ],
                 CUR_EPOCH + 1,
                 CUR_VERSION + 1,
             );
-            (LocalLifecycleAction::Rotate, ValidatorSetRotationAction::ValidatorUpdate, current, delta, proposed)
+            (
+                LocalLifecycleAction::Rotate,
+                ValidatorSetRotationAction::ValidatorUpdate,
+                current,
+                delta,
+                proposed,
+            )
         }
         Sc::NoOp => {
             let proposed = current_set(env);
-            (LocalLifecycleAction::Rotate, ValidatorSetRotationAction::NoOpSynchronization, current, ValidatorSetDelta::empty(), proposed)
+            (
+                LocalLifecycleAction::Rotate,
+                ValidatorSetRotationAction::NoOpSynchronization,
+                current,
+                ValidatorSetDelta::empty(),
+                proposed,
+            )
         }
         Sc::Identity => {
             let mut rotated = validator(env, 2, 100, 1);
             rotated.identity.consensus_key_fingerprint = "cons-2-rotated".to_string();
             let delta = ValidatorSetDelta::new(vec![ValidatorSetChange::update(rotated.clone())]);
             let proposed = CanonicalValidatorSetSnapshot::new(
-                vec![validator(env, 1, 100, 1), rotated, validator(env, 3, 100, 1)],
+                vec![
+                    validator(env, 1, 100, 1),
+                    rotated,
+                    validator(env, 3, 100, 1),
+                ],
                 CUR_EPOCH + 1,
                 CUR_VERSION + 1,
             );
-            (LocalLifecycleAction::Rotate, ValidatorSetRotationAction::ValidatorIdentityRotation, current, delta, proposed)
+            (
+                LocalLifecycleAction::Rotate,
+                ValidatorSetRotationAction::ValidatorIdentityRotation,
+                current,
+                delta,
+                proposed,
+            )
         }
         Sc::Retire => {
             let delta = ValidatorSetDelta::new(vec![ValidatorSetChange::remove(3)]);
@@ -596,7 +681,13 @@ fn scenario(
                 CUR_EPOCH + 1,
                 CUR_VERSION + 1,
             );
-            (LocalLifecycleAction::Retire, ValidatorSetRotationAction::ValidatorRetirement, current, delta, proposed)
+            (
+                LocalLifecycleAction::Retire,
+                ValidatorSetRotationAction::ValidatorRetirement,
+                current,
+                delta,
+                proposed,
+            )
         }
         Sc::Emergency => {
             let delta = ValidatorSetDelta::new(vec![ValidatorSetChange::remove(3)]);
@@ -605,27 +696,51 @@ fn scenario(
                 CUR_EPOCH + 1,
                 CUR_VERSION + 1,
             );
-            (LocalLifecycleAction::EmergencyRevoke, ValidatorSetRotationAction::EmergencyValidatorRemoval, current, delta, proposed)
+            (
+                LocalLifecycleAction::EmergencyRevoke,
+                ValidatorSetRotationAction::EmergencyValidatorRemoval,
+                current,
+                delta,
+                proposed,
+            )
         }
         Sc::AuthSync => {
             let v4 = validator(env, 4, 100, 2);
-            let delta = ValidatorSetDelta::new(vec![ValidatorSetChange::add(v4.clone()), ValidatorSetChange::remove(3)]);
+            let delta = ValidatorSetDelta::new(vec![
+                ValidatorSetChange::add(v4.clone()),
+                ValidatorSetChange::remove(3),
+            ]);
             let proposed = CanonicalValidatorSetSnapshot::new(
                 vec![validator(env, 1, 100, 1), validator(env, 2, 100, 1), v4],
                 CUR_EPOCH + 1,
                 CUR_VERSION + 1,
             );
-            (LocalLifecycleAction::Rotate, ValidatorSetRotationAction::AuthoritySetSynchronization, current, delta, proposed)
+            (
+                LocalLifecycleAction::Rotate,
+                ValidatorSetRotationAction::AuthoritySetSynchronization,
+                current,
+                delta,
+                proposed,
+            )
         }
         Sc::Bulk => {
             let v4 = validator(env, 4, 100, 2);
-            let delta = ValidatorSetDelta::new(vec![ValidatorSetChange::add(v4.clone()), ValidatorSetChange::remove(3)]);
+            let delta = ValidatorSetDelta::new(vec![
+                ValidatorSetChange::add(v4.clone()),
+                ValidatorSetChange::remove(3),
+            ]);
             let proposed = CanonicalValidatorSetSnapshot::new(
                 vec![validator(env, 1, 100, 1), validator(env, 2, 100, 1), v4],
                 CUR_EPOCH + 1,
                 CUR_VERSION + 1,
             );
-            (LocalLifecycleAction::Rotate, ValidatorSetRotationAction::BulkValidatorSetRotation, current, delta, proposed)
+            (
+                LocalLifecycleAction::Rotate,
+                ValidatorSetRotationAction::BulkValidatorSetRotation,
+                current,
+                delta,
+                proposed,
+            )
         }
     }
 }
@@ -646,14 +761,21 @@ fn expected_staged_kind(sc: Sc) -> StagedLiveValidatorSetEpochTransitionApplicat
 }
 
 /// Build an accepted Run 307 authorization decision for a scenario.
-fn auth_decision_for(env: TrustBundleEnvironment, sc: Sc) -> ProductionLiveValidatorSetApplicationAuthorizationDecision {
+fn auth_decision_for(
+    env: TrustBundleEnvironment,
+    sc: Sc,
+) -> ProductionLiveValidatorSetApplicationAuthorizationDecision {
     let (lifecycle, action, current, delta, proposed) = scenario(env, sc);
     auth_decision(env, lifecycle, action, current, delta, proposed)
 }
 
 fn stg_case311(env: TrustBundleEnvironment, sc: Sc) -> Stg311 {
     let decision = auth_decision_for(env, sc);
-    let target = decision.authorization_intent.as_ref().unwrap().epoch_transition_target;
+    let target = decision
+        .authorization_intent
+        .as_ref()
+        .unwrap()
+        .epoch_transition_target;
     let inputs = stg_inputs(env, &decision);
     let request = ProductionStagedLiveValidatorSetEpochTransitionApplicationRequest::new(
         StagedLiveValidatorSetEpochTransitionApplicationAuthoritySource::VerifiedLiveApplicationAuthorization {
@@ -674,11 +796,12 @@ fn empty_replay311() -> EmptyStagedLiveValidatorSetEpochTransitionApplicationRep
 }
 
 fn eval311(case: &Stg311) -> ProductionStagedLiveValidatorSetEpochTransitionApplicationDecision {
-    case.executor.evaluate_staged_live_validator_set_epoch_transition_application(
-        &case.request,
-        &case.inputs,
-        &empty_replay311(),
-    )
+    case.executor
+        .evaluate_staged_live_validator_set_epoch_transition_application(
+            &case.request,
+            &case.inputs,
+            &empty_replay311(),
+        )
 }
 
 // ===========================================================================
@@ -699,7 +822,10 @@ fn stg_decision(
     sc: Sc,
 ) -> ProductionStagedLiveValidatorSetEpochTransitionApplicationDecision {
     let d = eval311(&stg_case311(env, sc));
-    assert!(d.is_accept(), "run 311 staged decision must accept for fixture");
+    assert!(
+        d.is_accept(),
+        "run 311 staged decision must accept for fixture"
+    );
     d
 }
 
@@ -831,7 +957,10 @@ fn gem_eval(case: &Gem) -> ProductionGuardedEpochTransitionMutationDecision {
     )
 }
 
-fn gem_eval_replay(case: &Gem, replay: &[String]) -> ProductionGuardedEpochTransitionMutationDecision {
+fn gem_eval_replay(
+    case: &Gem,
+    replay: &[String],
+) -> ProductionGuardedEpochTransitionMutationDecision {
     case.executor
         .evaluate_guarded_epoch_transition_mutation(&case.request, &case.inputs, &replay)
 }
@@ -864,7 +993,10 @@ fn guarded_decision(
     sc: Sc,
 ) -> ProductionGuardedEpochTransitionMutationDecision {
     let d = gem_eval(&gem_case(env, sc));
-    assert!(d.is_accept(), "run 313 guarded decision must accept for fixture");
+    assert!(
+        d.is_accept(),
+        "run 313 guarded decision must accept for fixture"
+    );
     d
 }
 
@@ -1006,7 +1138,10 @@ fn h_eval(case: &H315) -> ProductionEpochTransitionRuntimeHandoffDecision {
     )
 }
 
-fn h_eval_replay(case: &H315, replay: &[String]) -> ProductionEpochTransitionRuntimeHandoffDecision {
+fn h_eval_replay(
+    case: &H315,
+    replay: &[String],
+) -> ProductionEpochTransitionRuntimeHandoffDecision {
     case.executor
         .evaluate_epoch_transition_runtime_handoff(&case.request, &case.inputs, &replay)
 }
@@ -1020,8 +1155,8 @@ use qbind_node::pqc_production_live_epoch_transition_execution_preparation::*;
 const PREP_POLICY_ID: &str = "execution-preparation-policy-1";
 const PREP_NONCE: u64 = 43;
 
-use ProductionLiveEpochTransitionExecutionPreparationOutcome as PO;
 use LiveEpochTransitionExecutionPreparationKind as PK;
+use ProductionLiveEpochTransitionExecutionPreparationOutcome as PO;
 
 /// Build an accepted Run 315 epoch-transition runtime handoff decision — the
 /// sole accepted Run 317 authority source.
@@ -1030,7 +1165,10 @@ fn handoff_decision(
     sc: Sc,
 ) -> ProductionEpochTransitionRuntimeHandoffDecision {
     let d = h_eval(&h_case(env, sc));
-    assert!(d.is_accept(), "run 315 handoff decision must accept for fixture");
+    assert!(
+        d.is_accept(),
+        "run 315 handoff decision must accept for fixture"
+    );
     d
 }
 
@@ -1131,9 +1269,7 @@ fn p_inputs(
         expected_guarded_mutation_decision_id: pkg.guarded_mutation_decision_id.clone(),
         expected_guarded_mutation_request_id: pkg.guarded_mutation_request_id.clone(),
         expected_guarded_mutation_intent_digest: pkg.guarded_mutation_intent_digest.clone(),
-        expected_guarded_mutation_transcript_digest: pkg
-            .guarded_mutation_transcript_digest
-            .clone(),
+        expected_guarded_mutation_transcript_digest: pkg.guarded_mutation_transcript_digest.clone(),
         expected_guarded_mutation_nonce: pkg.guarded_mutation_nonce,
         expected_runtime_handoff_decision_id: dec.handoff_id.clone(),
         expected_runtime_handoff_request_id: dec.request_id.clone(),
@@ -1158,7 +1294,11 @@ fn p_inputs(
 
 fn p_case(env: TrustBundleEnvironment, sc: Sc) -> P317 {
     let dec = handoff_decision(env, sc);
-    let target = dec.handoff_package.as_ref().unwrap().epoch_transition_target;
+    let target = dec
+        .handoff_package
+        .as_ref()
+        .unwrap()
+        .epoch_transition_target;
     let inputs = p_inputs(env, &dec);
     let request = ProductionLiveEpochTransitionExecutionPreparationRequest::new(
         LiveEpochTransitionExecutionPreparationAuthoritySource::VerifiedRuntimeHandoffDecision {
@@ -1179,11 +1319,12 @@ fn empty_replay317() -> EmptyLiveEpochTransitionExecutionPreparationReplaySet {
 }
 
 fn p_eval(case: &P317) -> ProductionLiveEpochTransitionExecutionPreparationDecision {
-    case.executor.evaluate_live_epoch_transition_execution_preparation(
-        &case.request,
-        &case.inputs,
-        &empty_replay317(),
-    )
+    case.executor
+        .evaluate_live_epoch_transition_execution_preparation(
+            &case.request,
+            &case.inputs,
+            &empty_replay317(),
+        )
 }
 
 fn p_eval_replay(
@@ -1220,10 +1361,7 @@ fn p_reject_inputs(
 
 /// Common helper: build a Devnet/Add case, replace its authority source, and
 /// assert the resulting outcome.
-fn p_reject_source(
-    source: LiveEpochTransitionExecutionPreparationAuthoritySource,
-    expected: PO,
-) {
+fn p_reject_source(source: LiveEpochTransitionExecutionPreparationAuthoritySource, expected: PO) {
     let mut c = p_case(TrustBundleEnvironment::Devnet, Sc::Add);
     c.request.authority_source = source;
     let d = p_eval(&c);
@@ -1236,8 +1374,8 @@ use qbind_node::pqc_production_live_epoch_transition_mutation_execution::*;
 const MUT_POLICY_ID: &str = "mutation-execution-policy-1";
 const MUT_NONCE: u64 = 45;
 
-use ProductionLiveEpochTransitionMutationExecutionOutcome as MO;
 use LiveEpochTransitionMutationExecutionKind as MK;
+use ProductionLiveEpochTransitionMutationExecutionOutcome as MO;
 
 /// Build an accepted Run 317 epoch-transition runtime handoff decision — the
 /// sole accepted Run 319 authority source.
@@ -1346,9 +1484,7 @@ fn m_inputs(
         expected_guarded_mutation_decision_id: pkg.guarded_mutation_decision_id.clone(),
         expected_guarded_mutation_request_id: pkg.guarded_mutation_request_id.clone(),
         expected_guarded_mutation_intent_digest: pkg.guarded_mutation_intent_digest.clone(),
-        expected_guarded_mutation_transcript_digest: pkg
-            .guarded_mutation_transcript_digest
-            .clone(),
+        expected_guarded_mutation_transcript_digest: pkg.guarded_mutation_transcript_digest.clone(),
         expected_guarded_mutation_nonce: pkg.guarded_mutation_nonce,
         expected_execution_preparation_decision_id: dec.preparation_id.clone(),
         expected_execution_preparation_request_id: dec.request_id.clone(),
@@ -1358,9 +1494,7 @@ fn m_inputs(
         expected_runtime_handoff_decision_id: pkg.runtime_handoff_decision_id.clone(),
         expected_runtime_handoff_request_id: pkg.runtime_handoff_request_id.clone(),
         expected_runtime_handoff_intent_digest: pkg.runtime_handoff_intent_digest.clone(),
-        expected_runtime_handoff_transcript_digest: pkg
-            .runtime_handoff_transcript_digest
-            .clone(),
+        expected_runtime_handoff_transcript_digest: pkg.runtime_handoff_transcript_digest.clone(),
         expected_runtime_handoff_nonce: pkg.runtime_handoff_nonce,
         expected_current_validator_set_epoch: CUR_EPOCH,
         expected_current_validator_set_version: CUR_VERSION,
@@ -1380,7 +1514,11 @@ fn m_inputs(
 
 fn m_case(env: TrustBundleEnvironment, sc: Sc) -> M319 {
     let dec = prep_decision(env, sc);
-    let target = dec.preparation_artifact.as_ref().unwrap().epoch_transition_target;
+    let target = dec
+        .preparation_artifact
+        .as_ref()
+        .unwrap()
+        .epoch_transition_target;
     let inputs = m_inputs(env, &dec);
     let request = ProductionLiveEpochTransitionMutationExecutionRequest::new(
         LiveEpochTransitionMutationExecutionAuthoritySource::VerifiedExecutionPreparationDecision {
@@ -1401,11 +1539,12 @@ fn empty_replay319() -> EmptyLiveEpochTransitionMutationExecutionReplaySet {
 }
 
 fn m_eval(case: &M319) -> ProductionLiveEpochTransitionMutationExecutionDecision {
-    case.executor.evaluate_live_epoch_transition_mutation_execution(
-        &case.request,
-        &case.inputs,
-        &empty_replay319(),
-    )
+    case.executor
+        .evaluate_live_epoch_transition_mutation_execution(
+            &case.request,
+            &case.inputs,
+            &empty_replay319(),
+        )
 }
 
 fn m_eval_replay(
@@ -1442,10 +1581,7 @@ fn m_reject_inputs(
 
 /// Common helper: build a Devnet/Add case, replace its authority source, and
 /// assert the resulting outcome.
-fn m_reject_source(
-    source: LiveEpochTransitionMutationExecutionAuthoritySource,
-    expected: MO,
-) {
+fn m_reject_source(source: LiveEpochTransitionMutationExecutionAuthoritySource, expected: MO) {
     let mut c = m_case(TrustBundleEnvironment::Devnet, Sc::Add);
     c.request.authority_source = source;
     let d = m_eval(&c);
@@ -1457,7 +1593,6 @@ fn m_reject_source(
 // A. Accepted / compatible source-test mutation-execution artifacts
 // ===========================================================================
 
-
 // ===========================================================================
 // Run 321 — commit-authorization self layer (consumes verified Run 319/320
 // mutation-execution decisions produced by the m_ harness above).
@@ -1465,8 +1600,8 @@ fn m_reject_source(
 
 use qbind_node::pqc_production_live_epoch_transition_commit_authorization::*;
 
-use ProductionLiveEpochTransitionCommitAuthorizationOutcome as CO;
 use LiveEpochTransitionCommitAuthorizationKind as CK;
+use ProductionLiveEpochTransitionCommitAuthorizationOutcome as CO;
 
 const CMT_POLICY_ID: &str = "commit-authorization-policy-1";
 const CMT_NONCE: u64 = 47;
@@ -1578,9 +1713,7 @@ fn c_inputs(
         expected_guarded_mutation_decision_id: pkg.guarded_mutation_decision_id.clone(),
         expected_guarded_mutation_request_id: pkg.guarded_mutation_request_id.clone(),
         expected_guarded_mutation_intent_digest: pkg.guarded_mutation_intent_digest.clone(),
-        expected_guarded_mutation_transcript_digest: pkg
-            .guarded_mutation_transcript_digest
-            .clone(),
+        expected_guarded_mutation_transcript_digest: pkg.guarded_mutation_transcript_digest.clone(),
         expected_guarded_mutation_nonce: pkg.guarded_mutation_nonce,
         expected_mutation_execution_decision_id: dec.execution_id.clone(),
         expected_mutation_execution_request_id: dec.request_id.clone(),
@@ -1589,7 +1722,9 @@ fn c_inputs(
         expected_mutation_execution_nonce: pkg.mutation_execution_nonce,
         expected_execution_preparation_decision_id: pkg.execution_preparation_decision_id.clone(),
         expected_execution_preparation_request_id: pkg.execution_preparation_request_id.clone(),
-        expected_execution_preparation_intent_digest: pkg.execution_preparation_intent_digest.clone(),
+        expected_execution_preparation_intent_digest: pkg
+            .execution_preparation_intent_digest
+            .clone(),
         expected_execution_preparation_transcript_digest: pkg
             .execution_preparation_transcript_digest
             .clone(),
@@ -1597,9 +1732,7 @@ fn c_inputs(
         expected_runtime_handoff_decision_id: pkg.runtime_handoff_decision_id.clone(),
         expected_runtime_handoff_request_id: pkg.runtime_handoff_request_id.clone(),
         expected_runtime_handoff_intent_digest: pkg.runtime_handoff_intent_digest.clone(),
-        expected_runtime_handoff_transcript_digest: pkg
-            .runtime_handoff_transcript_digest
-            .clone(),
+        expected_runtime_handoff_transcript_digest: pkg.runtime_handoff_transcript_digest.clone(),
         expected_runtime_handoff_nonce: pkg.runtime_handoff_nonce,
         expected_current_validator_set_epoch: CUR_EPOCH,
         expected_current_validator_set_version: CUR_VERSION,
@@ -1619,7 +1752,11 @@ fn c_inputs(
 
 fn c_case(env: TrustBundleEnvironment, sc: Sc) -> C321 {
     let dec = mut_decision(env, sc);
-    let target = dec.execution_artifact.as_ref().unwrap().epoch_transition_target;
+    let target = dec
+        .execution_artifact
+        .as_ref()
+        .unwrap()
+        .epoch_transition_target;
     let inputs = c_inputs(env, &dec);
     let request = ProductionLiveEpochTransitionCommitAuthorizationRequest::new(
         LiveEpochTransitionCommitAuthorizationAuthoritySource::VerifiedMutationExecutionDecision {
@@ -1640,11 +1777,12 @@ fn empty_replay321() -> EmptyLiveEpochTransitionCommitAuthorizationReplaySet {
 }
 
 fn c_eval(case: &C321) -> ProductionLiveEpochTransitionCommitAuthorizationDecision {
-    case.executor.evaluate_live_epoch_transition_commit_authorization(
-        &case.request,
-        &case.inputs,
-        &empty_replay321(),
-    )
+    case.executor
+        .evaluate_live_epoch_transition_commit_authorization(
+            &case.request,
+            &case.inputs,
+            &empty_replay321(),
+        )
 }
 
 fn c_eval_replay(
@@ -1681,10 +1819,7 @@ fn c_reject_inputs(
 
 /// Common helper: build a Devnet/Add case, replace its authority source, and
 /// assert the resulting outcome.
-fn c_reject_source(
-    source: LiveEpochTransitionCommitAuthorizationAuthoritySource,
-    expected: CO,
-) {
+fn c_reject_source(source: LiveEpochTransitionCommitAuthorizationAuthoritySource, expected: CO) {
     let mut c = c_case(TrustBundleEnvironment::Devnet, Sc::Add);
     c.request.authority_source = source;
     let d = c_eval(&c);
@@ -1695,7 +1830,6 @@ fn c_reject_source(
 // ===========================================================================
 // A. Accepted / compatible source-test mutation-execution artifacts
 // ===========================================================================
-
 
 use qbind_node::pqc_production_live_epoch_transition_commit_execution::*;
 use qbind_node::pqc_production_live_epoch_transition_commit_receipt::*;
@@ -1820,9 +1954,7 @@ fn ce_inputs(
         expected_guarded_mutation_decision_id: pkg.guarded_mutation_decision_id.clone(),
         expected_guarded_mutation_request_id: pkg.guarded_mutation_request_id.clone(),
         expected_guarded_mutation_intent_digest: pkg.guarded_mutation_intent_digest.clone(),
-        expected_guarded_mutation_transcript_digest: pkg
-            .guarded_mutation_transcript_digest
-            .clone(),
+        expected_guarded_mutation_transcript_digest: pkg.guarded_mutation_transcript_digest.clone(),
         expected_guarded_mutation_nonce: pkg.guarded_mutation_nonce,
         expected_commit_authorization_decision_id: dec.commit_authorization_id.clone(),
         expected_commit_authorization_request_id: dec.request_id.clone(),
@@ -1838,7 +1970,9 @@ fn ce_inputs(
         expected_mutation_execution_nonce: pkg.mutation_execution_nonce,
         expected_execution_preparation_decision_id: pkg.execution_preparation_decision_id.clone(),
         expected_execution_preparation_request_id: pkg.execution_preparation_request_id.clone(),
-        expected_execution_preparation_intent_digest: pkg.execution_preparation_intent_digest.clone(),
+        expected_execution_preparation_intent_digest: pkg
+            .execution_preparation_intent_digest
+            .clone(),
         expected_execution_preparation_transcript_digest: pkg
             .execution_preparation_transcript_digest
             .clone(),
@@ -1846,9 +1980,7 @@ fn ce_inputs(
         expected_runtime_handoff_decision_id: pkg.runtime_handoff_decision_id.clone(),
         expected_runtime_handoff_request_id: pkg.runtime_handoff_request_id.clone(),
         expected_runtime_handoff_intent_digest: pkg.runtime_handoff_intent_digest.clone(),
-        expected_runtime_handoff_transcript_digest: pkg
-            .runtime_handoff_transcript_digest
-            .clone(),
+        expected_runtime_handoff_transcript_digest: pkg.runtime_handoff_transcript_digest.clone(),
         expected_runtime_handoff_nonce: pkg.runtime_handoff_nonce,
         expected_current_validator_set_epoch: CUR_EPOCH,
         expected_current_validator_set_version: CUR_VERSION,
@@ -1868,7 +2000,11 @@ fn ce_inputs(
 
 fn ce_case(env: TrustBundleEnvironment, sc: Sc) -> Xce {
     let dec = ca_decision(env, sc);
-    let target = dec.commit_authorization_artifact.as_ref().unwrap().epoch_transition_target;
+    let target = dec
+        .commit_authorization_artifact
+        .as_ref()
+        .unwrap()
+        .epoch_transition_target;
     let inputs = ce_inputs(env, &dec);
     let request = ProductionLiveEpochTransitionCommitExecutionRequest::new(
         LiveEpochTransitionCommitExecutionAuthoritySource::VerifiedCommitAuthorizationDecision {
@@ -1889,11 +2025,12 @@ fn empty_replay_ce() -> EmptyLiveEpochTransitionCommitExecutionReplaySet {
 }
 
 fn ce_eval(case: &Xce) -> ProductionLiveEpochTransitionCommitExecutionDecision {
-    case.executor.evaluate_live_epoch_transition_commit_execution(
-        &case.request,
-        &case.inputs,
-        &empty_replay_ce(),
-    )
+    case.executor
+        .evaluate_live_epoch_transition_commit_execution(
+            &case.request,
+            &case.inputs,
+            &empty_replay_ce(),
+        )
 }
 
 fn ce_decision(
@@ -1972,9 +2109,7 @@ fn x_inputs(
         expected_guarded_mutation_decision_id: pkg.guarded_mutation_decision_id.clone(),
         expected_guarded_mutation_request_id: pkg.guarded_mutation_request_id.clone(),
         expected_guarded_mutation_intent_digest: pkg.guarded_mutation_intent_digest.clone(),
-        expected_guarded_mutation_transcript_digest: pkg
-            .guarded_mutation_transcript_digest
-            .clone(),
+        expected_guarded_mutation_transcript_digest: pkg.guarded_mutation_transcript_digest.clone(),
         expected_guarded_mutation_nonce: pkg.guarded_mutation_nonce,
         expected_commit_execution_decision_id: dec.commit_execution_id.clone(),
         expected_commit_execution_request_id: dec.request_id.clone(),
@@ -1983,9 +2118,7 @@ fn x_inputs(
         expected_commit_execution_nonce: pkg.commit_execution_nonce,
         expected_commit_authorization_decision_id: pkg.commit_authorization_decision_id.clone(),
         expected_commit_authorization_request_id: pkg.commit_authorization_request_id.clone(),
-        expected_commit_authorization_intent_digest: pkg
-            .commit_authorization_intent_digest
-            .clone(),
+        expected_commit_authorization_intent_digest: pkg.commit_authorization_intent_digest.clone(),
         expected_commit_authorization_transcript_digest: pkg
             .commit_authorization_transcript_digest
             .clone(),
@@ -1999,7 +2132,9 @@ fn x_inputs(
         expected_mutation_execution_nonce: pkg.mutation_execution_nonce,
         expected_execution_preparation_decision_id: pkg.execution_preparation_decision_id.clone(),
         expected_execution_preparation_request_id: pkg.execution_preparation_request_id.clone(),
-        expected_execution_preparation_intent_digest: pkg.execution_preparation_intent_digest.clone(),
+        expected_execution_preparation_intent_digest: pkg
+            .execution_preparation_intent_digest
+            .clone(),
         expected_execution_preparation_transcript_digest: pkg
             .execution_preparation_transcript_digest
             .clone(),
@@ -2007,9 +2142,7 @@ fn x_inputs(
         expected_runtime_handoff_decision_id: pkg.runtime_handoff_decision_id.clone(),
         expected_runtime_handoff_request_id: pkg.runtime_handoff_request_id.clone(),
         expected_runtime_handoff_intent_digest: pkg.runtime_handoff_intent_digest.clone(),
-        expected_runtime_handoff_transcript_digest: pkg
-            .runtime_handoff_transcript_digest
-            .clone(),
+        expected_runtime_handoff_transcript_digest: pkg.runtime_handoff_transcript_digest.clone(),
         expected_runtime_handoff_nonce: pkg.runtime_handoff_nonce,
         expected_current_validator_set_epoch: CUR_EPOCH,
         expected_current_validator_set_version: CUR_VERSION,
@@ -2029,7 +2162,11 @@ fn x_inputs(
 
 fn x_case(env: TrustBundleEnvironment, sc: Sc) -> X323 {
     let dec = ce_decision(env, sc);
-    let target = dec.commit_execution_artifact.as_ref().unwrap().epoch_transition_target;
+    let target = dec
+        .commit_execution_artifact
+        .as_ref()
+        .unwrap()
+        .epoch_transition_target;
     let inputs = x_inputs(env, &dec);
     let request = ProductionLiveEpochTransitionCommitReceiptRequest::new(
         LiveEpochTransitionCommitReceiptAuthoritySource::VerifiedCommitExecutionDecision {
@@ -2063,8 +2200,8 @@ fn x_eval(case: &X323) -> ProductionLiveEpochTransitionCommitReceiptDecision {
 
 use qbind_node::pqc_production_live_epoch_transition_post_commit_audit::*;
 
-use ProductionLiveEpochTransitionPostCommitAuditOutcome as RO;
 use LiveEpochTransitionPostCommitAuditKind as RK;
+use ProductionLiveEpochTransitionPostCommitAuditOutcome as RO;
 
 const CRC_POLICY_ID: &str = "post-commit-audit-policy-1";
 const CRC_NONCE: u64 = 49;
@@ -2176,9 +2313,7 @@ fn r_inputs(
         expected_guarded_mutation_decision_id: pkg.guarded_mutation_decision_id.clone(),
         expected_guarded_mutation_request_id: pkg.guarded_mutation_request_id.clone(),
         expected_guarded_mutation_intent_digest: pkg.guarded_mutation_intent_digest.clone(),
-        expected_guarded_mutation_transcript_digest: pkg
-            .guarded_mutation_transcript_digest
-            .clone(),
+        expected_guarded_mutation_transcript_digest: pkg.guarded_mutation_transcript_digest.clone(),
         expected_guarded_mutation_nonce: pkg.guarded_mutation_nonce,
         expected_commit_receipt_decision_id: dec.commit_receipt_id.clone(),
         expected_commit_receipt_request_id: dec.request_id.clone(),
@@ -2187,9 +2322,7 @@ fn r_inputs(
         expected_commit_receipt_nonce: pkg.commit_receipt_nonce,
         expected_commit_authorization_decision_id: pkg.commit_authorization_decision_id.clone(),
         expected_commit_authorization_request_id: pkg.commit_authorization_request_id.clone(),
-        expected_commit_authorization_intent_digest: pkg
-            .commit_authorization_intent_digest
-            .clone(),
+        expected_commit_authorization_intent_digest: pkg.commit_authorization_intent_digest.clone(),
         expected_commit_authorization_transcript_digest: pkg
             .commit_authorization_transcript_digest
             .clone(),
@@ -2203,7 +2336,9 @@ fn r_inputs(
         expected_mutation_execution_nonce: pkg.mutation_execution_nonce,
         expected_execution_preparation_decision_id: pkg.execution_preparation_decision_id.clone(),
         expected_execution_preparation_request_id: pkg.execution_preparation_request_id.clone(),
-        expected_execution_preparation_intent_digest: pkg.execution_preparation_intent_digest.clone(),
+        expected_execution_preparation_intent_digest: pkg
+            .execution_preparation_intent_digest
+            .clone(),
         expected_execution_preparation_transcript_digest: pkg
             .execution_preparation_transcript_digest
             .clone(),
@@ -2211,9 +2346,7 @@ fn r_inputs(
         expected_runtime_handoff_decision_id: pkg.runtime_handoff_decision_id.clone(),
         expected_runtime_handoff_request_id: pkg.runtime_handoff_request_id.clone(),
         expected_runtime_handoff_intent_digest: pkg.runtime_handoff_intent_digest.clone(),
-        expected_runtime_handoff_transcript_digest: pkg
-            .runtime_handoff_transcript_digest
-            .clone(),
+        expected_runtime_handoff_transcript_digest: pkg.runtime_handoff_transcript_digest.clone(),
         expected_runtime_handoff_nonce: pkg.runtime_handoff_nonce,
         expected_current_validator_set_epoch: CUR_EPOCH,
         expected_current_validator_set_version: CUR_VERSION,
@@ -2233,7 +2366,11 @@ fn r_inputs(
 
 fn r_case(env: TrustBundleEnvironment, sc: Sc) -> R325 {
     let dec = cx_decision(env, sc);
-    let target = dec.commit_receipt_artifact.as_ref().unwrap().epoch_transition_target;
+    let target = dec
+        .commit_receipt_artifact
+        .as_ref()
+        .unwrap()
+        .epoch_transition_target;
     let inputs = r_inputs(env, &dec);
     let request = ProductionLiveEpochTransitionPostCommitAuditRequest::new(
         LiveEpochTransitionPostCommitAuditAuthoritySource::VerifiedCommitReceiptDecision {
@@ -2254,16 +2391,17 @@ fn empty_replay325() -> EmptyLiveEpochTransitionPostCommitAuditReplaySet {
 }
 
 fn r_eval(case: &R325) -> ProductionLiveEpochTransitionPostCommitAuditDecision {
-    case.executor.evaluate_live_epoch_transition_post_commit_audit(
-        &case.request,
-        &case.inputs,
-        &empty_replay325(),
-    )
+    case.executor
+        .evaluate_live_epoch_transition_post_commit_audit(
+            &case.request,
+            &case.inputs,
+            &empty_replay325(),
+        )
 }
 use qbind_node::pqc_production_live_epoch_transition_durable_audit_finalization::*;
 
-use ProductionLiveEpochTransitionDurableAuditFinalizationOutcome as SO;
 use LiveEpochTransitionDurableAuditFinalizationKind as SK;
+use ProductionLiveEpochTransitionDurableAuditFinalizationOutcome as SO;
 
 const CRC2_POLICY_ID: &str = "durable-audit-finalization-policy-1";
 const CRC2_NONCE: u64 = 49;
@@ -2375,9 +2513,7 @@ fn s_inputs(
         expected_guarded_mutation_decision_id: pkg.guarded_mutation_decision_id.clone(),
         expected_guarded_mutation_request_id: pkg.guarded_mutation_request_id.clone(),
         expected_guarded_mutation_intent_digest: pkg.guarded_mutation_intent_digest.clone(),
-        expected_guarded_mutation_transcript_digest: pkg
-            .guarded_mutation_transcript_digest
-            .clone(),
+        expected_guarded_mutation_transcript_digest: pkg.guarded_mutation_transcript_digest.clone(),
         expected_guarded_mutation_nonce: pkg.guarded_mutation_nonce,
         expected_post_commit_audit_decision_id: dec.post_commit_audit_id.clone(),
         expected_post_commit_audit_request_id: dec.request_id.clone(),
@@ -2386,9 +2522,7 @@ fn s_inputs(
         expected_post_commit_audit_nonce: pkg.post_commit_audit_nonce,
         expected_commit_authorization_decision_id: pkg.commit_authorization_decision_id.clone(),
         expected_commit_authorization_request_id: pkg.commit_authorization_request_id.clone(),
-        expected_commit_authorization_intent_digest: pkg
-            .commit_authorization_intent_digest
-            .clone(),
+        expected_commit_authorization_intent_digest: pkg.commit_authorization_intent_digest.clone(),
         expected_commit_authorization_transcript_digest: pkg
             .commit_authorization_transcript_digest
             .clone(),
@@ -2402,7 +2536,9 @@ fn s_inputs(
         expected_mutation_execution_nonce: pkg.mutation_execution_nonce,
         expected_execution_preparation_decision_id: pkg.execution_preparation_decision_id.clone(),
         expected_execution_preparation_request_id: pkg.execution_preparation_request_id.clone(),
-        expected_execution_preparation_intent_digest: pkg.execution_preparation_intent_digest.clone(),
+        expected_execution_preparation_intent_digest: pkg
+            .execution_preparation_intent_digest
+            .clone(),
         expected_execution_preparation_transcript_digest: pkg
             .execution_preparation_transcript_digest
             .clone(),
@@ -2410,9 +2546,7 @@ fn s_inputs(
         expected_runtime_handoff_decision_id: pkg.runtime_handoff_decision_id.clone(),
         expected_runtime_handoff_request_id: pkg.runtime_handoff_request_id.clone(),
         expected_runtime_handoff_intent_digest: pkg.runtime_handoff_intent_digest.clone(),
-        expected_runtime_handoff_transcript_digest: pkg
-            .runtime_handoff_transcript_digest
-            .clone(),
+        expected_runtime_handoff_transcript_digest: pkg.runtime_handoff_transcript_digest.clone(),
         expected_runtime_handoff_nonce: pkg.runtime_handoff_nonce,
         expected_current_validator_set_epoch: CUR_EPOCH,
         expected_current_validator_set_version: CUR_VERSION,
@@ -2432,7 +2566,11 @@ fn s_inputs(
 
 fn s_case(env: TrustBundleEnvironment, sc: Sc) -> S327 {
     let dec = cr_decision(env, sc);
-    let target = dec.post_commit_audit_artifact.as_ref().unwrap().epoch_transition_target;
+    let target = dec
+        .post_commit_audit_artifact
+        .as_ref()
+        .unwrap()
+        .epoch_transition_target;
     let inputs = s_inputs(env, &dec);
     let request = ProductionLiveEpochTransitionDurableAuditFinalizationRequest::new(
         LiveEpochTransitionDurableAuditFinalizationAuthoritySource::VerifiedPostCommitAuditDecision {
@@ -2453,16 +2591,17 @@ fn empty_replay327() -> EmptyLiveEpochTransitionDurableAuditFinalizationReplaySe
 }
 
 fn s_eval(case: &S327) -> ProductionLiveEpochTransitionDurableAuditFinalizationDecision {
-    case.executor.evaluate_live_epoch_transition_durable_audit_finalization(
-        &case.request,
-        &case.inputs,
-        &empty_replay327(),
-    )
+    case.executor
+        .evaluate_live_epoch_transition_durable_audit_finalization(
+            &case.request,
+            &case.inputs,
+            &empty_replay327(),
+        )
 }
 use qbind_node::pqc_production_live_epoch_transition_audit_ledger_commitment::*;
 
-use ProductionLiveEpochTransitionAuditLedgerCommitmentOutcome as TO;
 use LiveEpochTransitionAuditLedgerCommitmentKind as TK;
+use ProductionLiveEpochTransitionAuditLedgerCommitmentOutcome as TO;
 
 const CRC3_POLICY_ID: &str = "audit-ledger-commitment-policy-1";
 const CRC3_NONCE: u64 = 49;
@@ -2574,20 +2713,18 @@ fn t_inputs(
         expected_guarded_mutation_decision_id: pkg.guarded_mutation_decision_id.clone(),
         expected_guarded_mutation_request_id: pkg.guarded_mutation_request_id.clone(),
         expected_guarded_mutation_intent_digest: pkg.guarded_mutation_intent_digest.clone(),
-        expected_guarded_mutation_transcript_digest: pkg
-            .guarded_mutation_transcript_digest
-            .clone(),
+        expected_guarded_mutation_transcript_digest: pkg.guarded_mutation_transcript_digest.clone(),
         expected_guarded_mutation_nonce: pkg.guarded_mutation_nonce,
         expected_durable_audit_finalization_decision_id: dec.durable_audit_finalization_id.clone(),
         expected_durable_audit_finalization_request_id: dec.request_id.clone(),
-        expected_durable_audit_finalization_intent_digest: dec.durable_audit_finalization_digest.clone(),
+        expected_durable_audit_finalization_intent_digest: dec
+            .durable_audit_finalization_digest
+            .clone(),
         expected_durable_audit_finalization_transcript_digest: dec.transcript_digest.clone(),
         expected_durable_audit_finalization_nonce: pkg.durable_audit_finalization_nonce,
         expected_commit_authorization_decision_id: pkg.commit_authorization_decision_id.clone(),
         expected_commit_authorization_request_id: pkg.commit_authorization_request_id.clone(),
-        expected_commit_authorization_intent_digest: pkg
-            .commit_authorization_intent_digest
-            .clone(),
+        expected_commit_authorization_intent_digest: pkg.commit_authorization_intent_digest.clone(),
         expected_commit_authorization_transcript_digest: pkg
             .commit_authorization_transcript_digest
             .clone(),
@@ -2601,7 +2738,9 @@ fn t_inputs(
         expected_mutation_execution_nonce: pkg.mutation_execution_nonce,
         expected_execution_preparation_decision_id: pkg.execution_preparation_decision_id.clone(),
         expected_execution_preparation_request_id: pkg.execution_preparation_request_id.clone(),
-        expected_execution_preparation_intent_digest: pkg.execution_preparation_intent_digest.clone(),
+        expected_execution_preparation_intent_digest: pkg
+            .execution_preparation_intent_digest
+            .clone(),
         expected_execution_preparation_transcript_digest: pkg
             .execution_preparation_transcript_digest
             .clone(),
@@ -2609,9 +2748,7 @@ fn t_inputs(
         expected_runtime_handoff_decision_id: pkg.runtime_handoff_decision_id.clone(),
         expected_runtime_handoff_request_id: pkg.runtime_handoff_request_id.clone(),
         expected_runtime_handoff_intent_digest: pkg.runtime_handoff_intent_digest.clone(),
-        expected_runtime_handoff_transcript_digest: pkg
-            .runtime_handoff_transcript_digest
-            .clone(),
+        expected_runtime_handoff_transcript_digest: pkg.runtime_handoff_transcript_digest.clone(),
         expected_runtime_handoff_nonce: pkg.runtime_handoff_nonce,
         expected_current_validator_set_epoch: CUR_EPOCH,
         expected_current_validator_set_version: CUR_VERSION,
@@ -2631,7 +2768,11 @@ fn t_inputs(
 
 fn t_case(env: TrustBundleEnvironment, sc: Sc) -> T329 {
     let dec = cs_decision(env, sc);
-    let target = dec.durable_audit_finalization_artifact.as_ref().unwrap().epoch_transition_target;
+    let target = dec
+        .durable_audit_finalization_artifact
+        .as_ref()
+        .unwrap()
+        .epoch_transition_target;
     let inputs = t_inputs(env, &dec);
     let request = ProductionLiveEpochTransitionAuditLedgerCommitmentRequest::new(
         LiveEpochTransitionAuditLedgerCommitmentAuthoritySource::VerifiedDurableAuditFinalizationDecision {
@@ -2652,11 +2793,12 @@ fn empty_replay329() -> EmptyLiveEpochTransitionAuditLedgerCommitmentReplaySet {
 }
 
 fn t_eval(case: &T329) -> ProductionLiveEpochTransitionAuditLedgerCommitmentDecision {
-    case.executor.evaluate_live_epoch_transition_audit_ledger_commitment(
-        &case.request,
-        &case.inputs,
-        &empty_replay329(),
-    )
+    case.executor
+        .evaluate_live_epoch_transition_audit_ledger_commitment(
+            &case.request,
+            &case.inputs,
+            &empty_replay329(),
+        )
 }
 
 fn t_eval_replay(
@@ -2664,7 +2806,11 @@ fn t_eval_replay(
     replay: &[String],
 ) -> ProductionLiveEpochTransitionAuditLedgerCommitmentDecision {
     case.executor
-        .evaluate_live_epoch_transition_audit_ledger_commitment(&case.request, &case.inputs, &replay)
+        .evaluate_live_epoch_transition_audit_ledger_commitment(
+            &case.request,
+            &case.inputs,
+            &replay,
+        )
 }
 
 fn t_exec_with_policy(
@@ -2693,10 +2839,7 @@ fn t_reject_inputs(
 
 /// Common helper: build a Devnet/Add case, replace its authority source, and
 /// assert the resulting outcome.
-fn t_reject_source(
-    source: LiveEpochTransitionAuditLedgerCommitmentAuthoritySource,
-    expected: TO,
-) {
+fn t_reject_source(source: LiveEpochTransitionAuditLedgerCommitmentAuthoritySource, expected: TO) {
     let mut c = t_case(TrustBundleEnvironment::Devnet, Sc::Add);
     c.request.authority_source = source;
     let d = t_eval(&c);
@@ -2746,7 +2889,10 @@ fn accept_outcome_carries_kind_env_target_nonce() {
         } => {
             assert_eq!(execution_kind, TK::StageApplyValidatorAdd);
             assert_eq!(environment, TrustBundleEnvironment::Devnet);
-            assert_eq!(epoch_transition_target, c.request.proposed_epoch_transition_target);
+            assert_eq!(
+                epoch_transition_target,
+                c.request.proposed_epoch_transition_target
+            );
             assert_eq!(audit_ledger_commitment_nonce, CRC3_NONCE);
         }
         other => panic!("unexpected outcome: {other:?}"),
@@ -2755,7 +2901,11 @@ fn accept_outcome_carries_kind_env_target_nonce() {
 
 fn accept_artifact_reexposes_consumed_durable_audit_finalization_transcript() {
     let dec = cs_decision(TrustBundleEnvironment::Devnet, Sc::Add);
-    let target = dec.durable_audit_finalization_artifact.as_ref().unwrap().epoch_transition_target;
+    let target = dec
+        .durable_audit_finalization_artifact
+        .as_ref()
+        .unwrap()
+        .epoch_transition_target;
     let inputs = t_inputs(TrustBundleEnvironment::Devnet, &dec);
     let handoff_id = dec.durable_audit_finalization_id.clone();
     let handoff_req = dec.request_id.clone();
@@ -2778,22 +2928,43 @@ fn accept_artifact_reexposes_consumed_durable_audit_finalization_transcript() {
     assert_eq!(art.durable_audit_finalization_decision_id, handoff_id);
     assert_eq!(art.durable_audit_finalization_request_id, handoff_req);
     assert_eq!(art.durable_audit_finalization_intent_digest, handoff_digest);
-    assert_eq!(art.durable_audit_finalization_transcript_digest, handoff_transcript);
+    assert_eq!(
+        art.durable_audit_finalization_transcript_digest,
+        handoff_transcript
+    );
 }
 
 fn accept_artifact_encodes_future_executor_preconditions() {
     let c = t_case(TrustBundleEnvironment::Devnet, Sc::Add);
     let d = t_eval(&c);
     let art = d.audit_ledger_commitment_artifact.as_ref().unwrap();
-    assert_eq!(art.precondition_current_validator_set_epoch, art.validator_set_epoch);
-    assert_eq!(art.precondition_current_validator_set_version, art.validator_set_version);
+    assert_eq!(
+        art.precondition_current_validator_set_epoch,
+        art.validator_set_epoch
+    );
+    assert_eq!(
+        art.precondition_current_validator_set_version,
+        art.validator_set_version
+    );
     assert_eq!(art.precondition_target_epoch, art.epoch_transition_target);
-    assert_eq!(art.precondition_required_governance_epoch, art.governance_epoch);
-    assert_eq!(art.precondition_required_authority_sequence, art.authority_domain_sequence);
+    assert_eq!(
+        art.precondition_required_governance_epoch,
+        art.governance_epoch
+    );
+    assert_eq!(
+        art.precondition_required_authority_sequence,
+        art.authority_domain_sequence
+    );
     assert_eq!(art.precondition_required_replay_window, REPLAY_WINDOW);
-    assert_eq!(art.precondition_proposed_validator_set_digest, art.proposed_set_digest);
+    assert_eq!(
+        art.precondition_proposed_validator_set_digest,
+        art.proposed_set_digest
+    );
     assert_eq!(art.precondition_delta_digest, art.delta_digest);
-    assert_eq!(art.precondition_current_validator_set_digest, art.current_set_digest);
+    assert_eq!(
+        art.precondition_current_validator_set_digest,
+        art.current_set_digest
+    );
 }
 
 fn accept_decision_ids_match_artifact_ids() {
@@ -2802,7 +2973,10 @@ fn accept_decision_ids_match_artifact_ids() {
     let art = d.audit_ledger_commitment_artifact.as_ref().unwrap();
     assert_eq!(d.audit_ledger_commitment_id, art.audit_ledger_commitment_id);
     assert_eq!(d.request_id, art.request_id);
-    assert_eq!(d.audit_ledger_commitment_digest, art.audit_ledger_commitment_digest);
+    assert_eq!(
+        d.audit_ledger_commitment_digest,
+        art.audit_ledger_commitment_digest
+    );
     assert_eq!(d.transcript_digest, art.transcript_digest);
     assert!(!d.audit_ledger_commitment_id.is_empty());
     assert!(!d.request_id.is_empty());
@@ -2821,7 +2995,10 @@ fn deterministic_digests_under_reevaluation() {
         let d2 = t_eval(&c);
         assert_eq!(d1.audit_ledger_commitment_id, d2.audit_ledger_commitment_id);
         assert_eq!(d1.request_id, d2.request_id);
-        assert_eq!(d1.audit_ledger_commitment_digest, d2.audit_ledger_commitment_digest);
+        assert_eq!(
+            d1.audit_ledger_commitment_digest,
+            d2.audit_ledger_commitment_digest
+        );
         assert_eq!(d1.transcript_digest, d2.transcript_digest);
     }
 }
@@ -2877,9 +3054,16 @@ fn tampered_durable_audit_finalization_package_integrity_mismatch() {
     // Mutate the consumed package so its content digest no longer matches the
     // bound handoff decision digest.
     let mut dec = cs_decision(TrustBundleEnvironment::Devnet, Sc::Add);
-    let target = dec.durable_audit_finalization_artifact.as_ref().unwrap().epoch_transition_target;
+    let target = dec
+        .durable_audit_finalization_artifact
+        .as_ref()
+        .unwrap()
+        .epoch_transition_target;
     let inputs = t_inputs(TrustBundleEnvironment::Devnet, &dec);
-    dec.durable_audit_finalization_artifact.as_mut().unwrap().proposal_digest = "tampered".to_string();
+    dec.durable_audit_finalization_artifact
+        .as_mut()
+        .unwrap()
+        .proposal_digest = "tampered".to_string();
     let request = ProductionLiveEpochTransitionAuditLedgerCommitmentRequest::new(
         LiveEpochTransitionAuditLedgerCommitmentAuthoritySource::VerifiedDurableAuditFinalizationDecision {
             decision: dec,
@@ -2893,7 +3077,10 @@ fn tampered_durable_audit_finalization_package_integrity_mismatch() {
         &inputs,
         &empty_replay329(),
     );
-    assert_eq!(d.outcome, TO::DurableAuditFinalizationDecisionIntegrityMismatch);
+    assert_eq!(
+        d.outcome,
+        TO::DurableAuditFinalizationDecisionIntegrityMismatch
+    );
     assert!(d.audit_ledger_commitment_artifact.is_none());
 }
 
@@ -3055,28 +3242,56 @@ fn wrong_authorization_policy_id() {
 
 fn wrong_environment() {
     t_reject_inputs(
-        |i| i.trust_domain = custom_domain(TrustBundleEnvironment::Testnet, "qbind-devnet", GENESIS_HASH, ROOT_FP),
+        |i| {
+            i.trust_domain = custom_domain(
+                TrustBundleEnvironment::Testnet,
+                "qbind-devnet",
+                GENESIS_HASH,
+                ROOT_FP,
+            )
+        },
         TO::WrongEnvironment,
     );
 }
 
 fn wrong_chain() {
     t_reject_inputs(
-        |i| i.trust_domain = custom_domain(TrustBundleEnvironment::Devnet, "wrong-chain", GENESIS_HASH, ROOT_FP),
+        |i| {
+            i.trust_domain = custom_domain(
+                TrustBundleEnvironment::Devnet,
+                "wrong-chain",
+                GENESIS_HASH,
+                ROOT_FP,
+            )
+        },
         TO::WrongChain,
     );
 }
 
 fn wrong_genesis() {
     t_reject_inputs(
-        |i| i.trust_domain = custom_domain(TrustBundleEnvironment::Devnet, "qbind-devnet", "wrong-genesis", ROOT_FP),
+        |i| {
+            i.trust_domain = custom_domain(
+                TrustBundleEnvironment::Devnet,
+                "qbind-devnet",
+                "wrong-genesis",
+                ROOT_FP,
+            )
+        },
         TO::WrongGenesis,
     );
 }
 
 fn wrong_authority_root() {
     t_reject_inputs(
-        |i| i.trust_domain = custom_domain(TrustBundleEnvironment::Devnet, "qbind-devnet", GENESIS_HASH, "wrong-root"),
+        |i| {
+            i.trust_domain = custom_domain(
+                TrustBundleEnvironment::Devnet,
+                "qbind-devnet",
+                GENESIS_HASH,
+                "wrong-root",
+            )
+        },
         TO::WrongAuthorityRoot,
     );
 }
@@ -3089,11 +3304,17 @@ fn wrong_governance_domain() {
 }
 
 fn wrong_governance_epoch() {
-    t_reject_inputs(|i| i.expected_governance_epoch = 999, TO::WrongGovernanceEpoch);
+    t_reject_inputs(
+        |i| i.expected_governance_epoch = 999,
+        TO::WrongGovernanceEpoch,
+    );
 }
 
 fn wrong_proposal_id() {
-    t_reject_inputs(|i| i.expected_proposal_id = "bad".to_string(), TO::WrongProposalId);
+    t_reject_inputs(
+        |i| i.expected_proposal_id = "bad".to_string(),
+        TO::WrongProposalId,
+    );
 }
 
 fn wrong_governance_execution_intent_digest() {
@@ -3146,7 +3367,10 @@ fn wrong_rotation_action() {
 }
 
 fn wrong_authority_sequence() {
-    t_reject_inputs(|i| i.expected_authority_domain_sequence = 999, TO::WrongAuthoritySequence);
+    t_reject_inputs(
+        |i| i.expected_authority_domain_sequence = 999,
+        TO::WrongAuthoritySequence,
+    );
 }
 
 // ===========================================================================
@@ -3175,11 +3399,17 @@ fn wrong_validator_set_delta_digest() {
 }
 
 fn wrong_validator_set_epoch() {
-    t_reject_inputs(|i| i.expected_validator_set_epoch = 999, TO::WrongValidatorSetEpoch);
+    t_reject_inputs(
+        |i| i.expected_validator_set_epoch = 999,
+        TO::WrongValidatorSetEpoch,
+    );
 }
 
 fn wrong_validator_set_version() {
-    t_reject_inputs(|i| i.expected_validator_set_version = 999, TO::WrongValidatorSetVersion);
+    t_reject_inputs(
+        |i| i.expected_validator_set_version = 999,
+        TO::WrongValidatorSetVersion,
+    );
 }
 
 fn wrong_current_validator_set_epoch() {
@@ -3197,7 +3427,10 @@ fn wrong_current_validator_set_version() {
 }
 
 fn wrong_proposed_validator_count() {
-    t_reject_inputs(|i| i.expected_proposed_validator_count = 999, TO::WrongProposedValidatorCount);
+    t_reject_inputs(
+        |i| i.expected_proposed_validator_count = 999,
+        TO::WrongProposedValidatorCount,
+    );
 }
 
 fn wrong_rotation_nonce() {
@@ -3209,7 +3442,10 @@ fn wrong_rotation_nonce() {
 // ===========================================================================
 
 fn wrong_epoch_transition_target_inputs() {
-    t_reject_inputs(|i| i.expected_epoch_transition_target = 999, TO::WrongEpochTransitionTarget);
+    t_reject_inputs(
+        |i| i.expected_epoch_transition_target = 999,
+        TO::WrongEpochTransitionTarget,
+    );
 }
 
 fn wrong_epoch_transition_target_request() {
@@ -3221,11 +3457,17 @@ fn wrong_epoch_transition_target_request() {
 }
 
 fn wrong_application_nonce() {
-    t_reject_inputs(|i| i.expected_application_nonce = 999, TO::WrongApplicationNonce);
+    t_reject_inputs(
+        |i| i.expected_application_nonce = 999,
+        TO::WrongApplicationNonce,
+    );
 }
 
 fn wrong_live_application_nonce() {
-    t_reject_inputs(|i| i.expected_live_application_nonce = 999, TO::WrongLiveApplicationNonce);
+    t_reject_inputs(
+        |i| i.expected_live_application_nonce = 999,
+        TO::WrongLiveApplicationNonce,
+    );
 }
 
 // ===========================================================================
@@ -3464,7 +3706,12 @@ fn reserved_production_kind_fails_closed() {
 fn replay_rejected_when_id_present() {
     let c = t_case(TrustBundleEnvironment::Devnet, Sc::Add);
     let d = t_eval(&c);
-    let id = d.audit_ledger_commitment_artifact.as_ref().unwrap().request_id.clone();
+    let id = d
+        .audit_ledger_commitment_artifact
+        .as_ref()
+        .unwrap()
+        .request_id
+        .clone();
     let replay = vec![id];
     let d2 = t_eval_replay(&c, &replay);
     match d2.outcome {
@@ -3482,19 +3729,31 @@ fn no_replay_when_id_absent() {
 }
 
 fn stale_governance_epoch() {
-    t_reject_inputs(|i| i.min_governance_epoch = u64::MAX, TO::StaleGovernanceEpoch);
+    t_reject_inputs(
+        |i| i.min_governance_epoch = u64::MAX,
+        TO::StaleGovernanceEpoch,
+    );
 }
 
 fn stale_authority_sequence() {
-    t_reject_inputs(|i| i.persisted_sequence = Some(u64::MAX), TO::StaleAuthoritySequence);
+    t_reject_inputs(
+        |i| i.persisted_sequence = Some(u64::MAX),
+        TO::StaleAuthoritySequence,
+    );
 }
 
 fn stale_validator_set_epoch() {
-    t_reject_inputs(|i| i.min_validator_set_epoch = u64::MAX, TO::StaleValidatorSetEpoch);
+    t_reject_inputs(
+        |i| i.min_validator_set_epoch = u64::MAX,
+        TO::StaleValidatorSetEpoch,
+    );
 }
 
 fn stale_validator_set_version() {
-    t_reject_inputs(|i| i.min_validator_set_version = u64::MAX, TO::StaleValidatorSetVersion);
+    t_reject_inputs(
+        |i| i.min_validator_set_version = u64::MAX,
+        TO::StaleValidatorSetVersion,
+    );
 }
 
 // ===========================================================================
@@ -3505,7 +3764,8 @@ fn fixture_state_apply_is_idempotent() {
     let c = t_case(TrustBundleEnvironment::Devnet, Sc::Add);
     let d = t_eval(&c);
     let art = d.audit_ledger_commitment_artifact.as_ref().unwrap();
-    let mut state = LiveEpochTransitionAuditLedgerCommitmentFixtureState::new(CUR_EPOCH, CUR_VERSION, "start");
+    let mut state =
+        LiveEpochTransitionAuditLedgerCommitmentFixtureState::new(CUR_EPOCH, CUR_VERSION, "start");
     assert!(state.apply_prepared_execution(art, &d.audit_ledger_commitment_id));
     assert_eq!(state.current_epoch, art.epoch_transition_target);
     assert_eq!(state.validator_set_version, art.validator_set_version);
@@ -3520,7 +3780,11 @@ fn fixture_state_apply_all_scenarios() {
         let c = t_case(TrustBundleEnvironment::Devnet, sc);
         let d = t_eval(&c);
         let art = d.audit_ledger_commitment_artifact.as_ref().unwrap();
-        let mut state = LiveEpochTransitionAuditLedgerCommitmentFixtureState::new(CUR_EPOCH, CUR_VERSION, "start");
+        let mut state = LiveEpochTransitionAuditLedgerCommitmentFixtureState::new(
+            CUR_EPOCH,
+            CUR_VERSION,
+            "start",
+        );
         assert!(state.apply_prepared_execution(art, &d.audit_ledger_commitment_id));
         assert_eq!(state.current_epoch, art.epoch_transition_target);
     }
@@ -3544,7 +3808,12 @@ fn accept_authorizes_future_mutation_only() {
     let d = t_eval(&c);
     assert!(d.outcome.authorizes_future_mutation_only());
     assert!(d.authorizes_future_mutation_only());
-    assert!(d.audit_ledger_commitment_artifact.as_ref().unwrap().staged_kind.is_non_mutating());
+    assert!(d
+        .audit_ledger_commitment_artifact
+        .as_ref()
+        .unwrap()
+        .staged_kind
+        .is_non_mutating());
 }
 
 fn reject_never_authorizes_future_mutation() {
@@ -3592,7 +3861,9 @@ fn execution_kind_mapping_matches_handoff_kind() {
 }
 
 fn unsupported_staged_application_kind_is_unsupported() {
-    let pk = TK::from_staged_application_kind(LiveEpochTransitionDurableAuditFinalizationKind::UnsupportedStagedApplication);
+    let pk = TK::from_staged_application_kind(
+        LiveEpochTransitionDurableAuditFinalizationKind::UnsupportedStagedApplication,
+    );
     assert!(pk.is_unsupported());
 }
 
@@ -3600,14 +3871,19 @@ fn outcome_tags_are_stable_and_distinct() {
     let a = TO::DurableAuditFinalizationDecisionIdMismatch;
     let b = TO::GuardedMutationDecisionIdMismatch;
     assert_ne!(a.tag(), b.tag());
-    assert_eq!(a.tag(), TO::DurableAuditFinalizationDecisionIdMismatch.tag());
+    assert_eq!(
+        a.tag(),
+        TO::DurableAuditFinalizationDecisionIdMismatch.tag()
+    );
     assert!(!TO::MainNetRefused.tag().is_empty());
 }
 
 fn config_and_inputs_well_formed() {
     let c = t_case(TrustBundleEnvironment::Devnet, Sc::Add);
     assert!(c.inputs.is_well_formed());
-    assert!(ProductionLiveEpochTransitionAuditLedgerCommitmentConfig::source_test().is_well_formed());
+    assert!(
+        ProductionLiveEpochTransitionAuditLedgerCommitmentConfig::source_test().is_well_formed()
+    );
     // The default config still pins the supported protocol version.
     assert!(ProductionLiveEpochTransitionAuditLedgerCommitmentConfig::default().is_well_formed());
 }
@@ -3627,7 +3903,10 @@ macro_rules! per_scenario_accept {
             assert_eq!(art.staged_kind, expected_crc3_kind($sc));
             assert!(art.staged_kind.is_non_mutating());
             let d2 = t_eval(&c);
-            assert_eq!(d.audit_ledger_commitment_digest, d2.audit_ledger_commitment_digest);
+            assert_eq!(
+                d.audit_ledger_commitment_digest,
+                d2.audit_ledger_commitment_digest
+            );
             assert_eq!(d.transcript_digest, d2.transcript_digest);
             let mut state = LiveEpochTransitionAuditLedgerCommitmentFixtureState::new(
                 CUR_EPOCH,
@@ -3658,7 +3937,10 @@ macro_rules! per_scenario_testnet_accept {
             let d = t_eval(&c);
             assert!(d.is_accept());
             assert_eq!(
-                d.audit_ledger_commitment_artifact.as_ref().unwrap().environment,
+                d.audit_ledger_commitment_artifact
+                    .as_ref()
+                    .unwrap()
+                    .environment,
                 TrustBundleEnvironment::Testnet
             );
         }
@@ -3728,14 +4010,27 @@ per_scenario_guarded_binding!(scenario_guarded_binding_bulk, Sc::Bulk);
 
 fn accept_reexposes_runtime_handoff_tuple_from_parent() {
     let parent = cs_decision(TrustBundleEnvironment::Devnet, Sc::Add);
-    let ppkg = parent.durable_audit_finalization_artifact.as_ref().unwrap().clone();
+    let ppkg = parent
+        .durable_audit_finalization_artifact
+        .as_ref()
+        .unwrap()
+        .clone();
     let c = t_case(TrustBundleEnvironment::Devnet, Sc::Add);
     let d = t_eval(&c);
     assert!(d.is_accept());
     let art = d.audit_ledger_commitment_artifact.as_ref().unwrap();
-    assert_eq!(art.runtime_handoff_decision_id, ppkg.runtime_handoff_decision_id);
-    assert_eq!(art.runtime_handoff_request_id, ppkg.runtime_handoff_request_id);
-    assert_eq!(art.runtime_handoff_intent_digest, ppkg.runtime_handoff_intent_digest);
+    assert_eq!(
+        art.runtime_handoff_decision_id,
+        ppkg.runtime_handoff_decision_id
+    );
+    assert_eq!(
+        art.runtime_handoff_request_id,
+        ppkg.runtime_handoff_request_id
+    );
+    assert_eq!(
+        art.runtime_handoff_intent_digest,
+        ppkg.runtime_handoff_intent_digest
+    );
     assert_eq!(
         art.runtime_handoff_transcript_digest,
         ppkg.runtime_handoff_transcript_digest
@@ -3897,10 +4192,7 @@ fn reject_commit_authorization_request_id_mismatch() {
 
 fn reject_commit_authorization_intent_digest_mismatch() {
     t_reject_inputs(
-        |i| {
-            i.expected_commit_authorization_intent_digest =
-                "wrong-commit-auth-digest".to_string()
-        },
+        |i| i.expected_commit_authorization_intent_digest = "wrong-commit-auth-digest".to_string(),
         TO::CommitAuthorizationDecisionIntentDigestMismatch,
     );
 }
@@ -4094,7 +4386,10 @@ macro_rules! per_scenario_accept {
             assert_eq!(art.staged_kind, expected_crc3_kind($sc));
             assert!(art.staged_kind.is_non_mutating());
             let d2 = t_eval(&c);
-            assert_eq!(d.audit_ledger_commitment_digest, d2.audit_ledger_commitment_digest);
+            assert_eq!(
+                d.audit_ledger_commitment_digest,
+                d2.audit_ledger_commitment_digest
+            );
             assert_eq!(d.transcript_digest, d2.transcript_digest);
             let mut state = LiveEpochTransitionAuditLedgerCommitmentFixtureState::new(
                 CUR_EPOCH,
@@ -4124,7 +4419,10 @@ macro_rules! per_scenario_testnet_accept {
             let d = t_eval(&c);
             assert!(d.is_accept());
             assert_eq!(
-                d.audit_ledger_commitment_artifact.as_ref().unwrap().environment,
+                d.audit_ledger_commitment_artifact
+                    .as_ref()
+                    .unwrap()
+                    .environment,
                 TrustBundleEnvironment::Testnet
             );
         }
@@ -4198,181 +4496,878 @@ fn main() {
     fs::create_dir_all(outdir.join("fixtures")).expect("create helper output directory");
 
     let cases: &[(&str, &str, fn())] = &[
-        ("accepted_compatible", "accept_all_scenarios_devnet", accept_all_scenarios_devnet as fn()),
-        ("accepted_compatible", "accept_all_scenarios_testnet", accept_all_scenarios_testnet as fn()),
-        ("accepted_compatible", "accept_outcome_carries_kind_env_target_nonce", accept_outcome_carries_kind_env_target_nonce as fn()),
-        ("accepted_compatible", "accept_artifact_reexposes_consumed_durable_audit_finalization_transcript", accept_artifact_reexposes_consumed_durable_audit_finalization_transcript as fn()),
-        ("accepted_compatible", "accept_artifact_encodes_future_executor_preconditions", accept_artifact_encodes_future_executor_preconditions as fn()),
-        ("accepted_compatible", "accept_decision_ids_match_artifact_ids", accept_decision_ids_match_artifact_ids as fn()),
-        ("accepted_compatible", "deterministic_digests_under_reevaluation", deterministic_digests_under_reevaluation as fn()),
-        ("accepted_compatible", "artifact_content_digest_is_stable", artifact_content_digest_is_stable as fn()),
-        ("rejection_fail_closed", "wrong_durable_audit_finalization_decision_id", wrong_durable_audit_finalization_decision_id as fn()),
-        ("rejection_fail_closed", "wrong_durable_audit_finalization_request_id", wrong_durable_audit_finalization_request_id as fn()),
-        ("rejection_fail_closed", "wrong_durable_audit_finalization_intent_digest", wrong_durable_audit_finalization_intent_digest as fn()),
-        ("rejection_fail_closed", "wrong_durable_audit_finalization_transcript_digest", wrong_durable_audit_finalization_transcript_digest as fn()),
-        ("rejection_fail_closed", "wrong_durable_audit_finalization_nonce", wrong_durable_audit_finalization_nonce as fn()),
-        ("rejection_fail_closed", "tampered_durable_audit_finalization_package_integrity_mismatch", tampered_durable_audit_finalization_package_integrity_mismatch as fn()),
-        ("rejection_fail_closed", "wrong_guarded_mutation_decision_id", wrong_guarded_mutation_decision_id as fn()),
-        ("rejection_fail_closed", "wrong_guarded_mutation_request_id", wrong_guarded_mutation_request_id as fn()),
-        ("rejection_fail_closed", "wrong_guarded_mutation_intent_digest", wrong_guarded_mutation_intent_digest as fn()),
-        ("rejection_fail_closed", "wrong_guarded_mutation_transcript_digest", wrong_guarded_mutation_transcript_digest as fn()),
-        ("rejection_fail_closed", "wrong_guarded_mutation_nonce", wrong_guarded_mutation_nonce as fn()),
-        ("rejection_fail_closed", "wrong_staged_application_decision_id", wrong_staged_application_decision_id as fn()),
-        ("rejection_fail_closed", "wrong_staged_application_request_id", wrong_staged_application_request_id as fn()),
-        ("rejection_fail_closed", "wrong_staged_application_intent_digest", wrong_staged_application_intent_digest as fn()),
-        ("rejection_fail_closed", "wrong_staged_application_transcript_digest", wrong_staged_application_transcript_digest as fn()),
-        ("rejection_fail_closed", "wrong_staged_application_nonce", wrong_staged_application_nonce as fn()),
-        ("rejection_fail_closed", "wrong_authorization_decision_id", wrong_authorization_decision_id as fn()),
-        ("rejection_fail_closed", "wrong_authorization_request_id", wrong_authorization_request_id as fn()),
-        ("rejection_fail_closed", "wrong_authorization_intent_digest", wrong_authorization_intent_digest as fn()),
-        ("rejection_fail_closed", "wrong_authorization_transcript_digest", wrong_authorization_transcript_digest as fn()),
-        ("rejection_fail_closed", "wrong_application_decision_id", wrong_application_decision_id as fn()),
-        ("rejection_fail_closed", "wrong_application_request_id", wrong_application_request_id as fn()),
-        ("rejection_fail_closed", "wrong_application_intent_digest", wrong_application_intent_digest as fn()),
-        ("rejection_fail_closed", "wrong_application_transcript_digest", wrong_application_transcript_digest as fn()),
-        ("rejection_fail_closed", "wrong_application_policy_id", wrong_application_policy_id as fn()),
-        ("rejection_fail_closed", "wrong_authorization_policy_id", wrong_authorization_policy_id as fn()),
-        ("rejection_fail_closed", "wrong_environment", wrong_environment as fn()),
+        (
+            "accepted_compatible",
+            "accept_all_scenarios_devnet",
+            accept_all_scenarios_devnet as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "accept_all_scenarios_testnet",
+            accept_all_scenarios_testnet as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "accept_outcome_carries_kind_env_target_nonce",
+            accept_outcome_carries_kind_env_target_nonce as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "accept_artifact_reexposes_consumed_durable_audit_finalization_transcript",
+            accept_artifact_reexposes_consumed_durable_audit_finalization_transcript as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "accept_artifact_encodes_future_executor_preconditions",
+            accept_artifact_encodes_future_executor_preconditions as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "accept_decision_ids_match_artifact_ids",
+            accept_decision_ids_match_artifact_ids as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "deterministic_digests_under_reevaluation",
+            deterministic_digests_under_reevaluation as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "artifact_content_digest_is_stable",
+            artifact_content_digest_is_stable as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "wrong_durable_audit_finalization_decision_id",
+            wrong_durable_audit_finalization_decision_id as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "wrong_durable_audit_finalization_request_id",
+            wrong_durable_audit_finalization_request_id as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "wrong_durable_audit_finalization_intent_digest",
+            wrong_durable_audit_finalization_intent_digest as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "wrong_durable_audit_finalization_transcript_digest",
+            wrong_durable_audit_finalization_transcript_digest as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "wrong_durable_audit_finalization_nonce",
+            wrong_durable_audit_finalization_nonce as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "tampered_durable_audit_finalization_package_integrity_mismatch",
+            tampered_durable_audit_finalization_package_integrity_mismatch as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "wrong_guarded_mutation_decision_id",
+            wrong_guarded_mutation_decision_id as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "wrong_guarded_mutation_request_id",
+            wrong_guarded_mutation_request_id as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "wrong_guarded_mutation_intent_digest",
+            wrong_guarded_mutation_intent_digest as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "wrong_guarded_mutation_transcript_digest",
+            wrong_guarded_mutation_transcript_digest as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "wrong_guarded_mutation_nonce",
+            wrong_guarded_mutation_nonce as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "wrong_staged_application_decision_id",
+            wrong_staged_application_decision_id as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "wrong_staged_application_request_id",
+            wrong_staged_application_request_id as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "wrong_staged_application_intent_digest",
+            wrong_staged_application_intent_digest as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "wrong_staged_application_transcript_digest",
+            wrong_staged_application_transcript_digest as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "wrong_staged_application_nonce",
+            wrong_staged_application_nonce as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "wrong_authorization_decision_id",
+            wrong_authorization_decision_id as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "wrong_authorization_request_id",
+            wrong_authorization_request_id as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "wrong_authorization_intent_digest",
+            wrong_authorization_intent_digest as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "wrong_authorization_transcript_digest",
+            wrong_authorization_transcript_digest as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "wrong_application_decision_id",
+            wrong_application_decision_id as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "wrong_application_request_id",
+            wrong_application_request_id as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "wrong_application_intent_digest",
+            wrong_application_intent_digest as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "wrong_application_transcript_digest",
+            wrong_application_transcript_digest as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "wrong_application_policy_id",
+            wrong_application_policy_id as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "wrong_authorization_policy_id",
+            wrong_authorization_policy_id as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "wrong_environment",
+            wrong_environment as fn(),
+        ),
         ("rejection_fail_closed", "wrong_chain", wrong_chain as fn()),
-        ("rejection_fail_closed", "wrong_genesis", wrong_genesis as fn()),
-        ("rejection_fail_closed", "wrong_authority_root", wrong_authority_root as fn()),
-        ("rejection_fail_closed", "wrong_governance_domain", wrong_governance_domain as fn()),
-        ("rejection_fail_closed", "wrong_governance_epoch", wrong_governance_epoch as fn()),
-        ("rejection_fail_closed", "wrong_proposal_id", wrong_proposal_id as fn()),
-        ("rejection_fail_closed", "wrong_governance_execution_intent_digest", wrong_governance_execution_intent_digest as fn()),
-        ("rejection_fail_closed", "wrong_rotation_decision_id", wrong_rotation_decision_id as fn()),
-        ("rejection_fail_closed", "wrong_rotation_request_id", wrong_rotation_request_id as fn()),
-        ("rejection_fail_closed", "wrong_rotation_transcript_digest", wrong_rotation_transcript_digest as fn()),
-        ("rejection_fail_closed", "wrong_rotation_plan_digest", wrong_rotation_plan_digest as fn()),
-        ("rejection_fail_closed", "wrong_lifecycle_action", wrong_lifecycle_action as fn()),
-        ("rejection_fail_closed", "wrong_rotation_action", wrong_rotation_action as fn()),
-        ("rejection_fail_closed", "wrong_authority_sequence", wrong_authority_sequence as fn()),
-        ("rejection_fail_closed", "wrong_current_validator_set_digest", wrong_current_validator_set_digest as fn()),
-        ("rejection_fail_closed", "wrong_proposed_validator_set_digest", wrong_proposed_validator_set_digest as fn()),
-        ("rejection_fail_closed", "wrong_validator_set_delta_digest", wrong_validator_set_delta_digest as fn()),
-        ("rejection_fail_closed", "wrong_validator_set_epoch", wrong_validator_set_epoch as fn()),
-        ("rejection_fail_closed", "wrong_validator_set_version", wrong_validator_set_version as fn()),
-        ("rejection_fail_closed", "wrong_current_validator_set_epoch", wrong_current_validator_set_epoch as fn()),
-        ("rejection_fail_closed", "wrong_current_validator_set_version", wrong_current_validator_set_version as fn()),
-        ("rejection_fail_closed", "wrong_proposed_validator_count", wrong_proposed_validator_count as fn()),
-        ("rejection_fail_closed", "wrong_rotation_nonce", wrong_rotation_nonce as fn()),
-        ("rejection_fail_closed", "wrong_epoch_transition_target_inputs", wrong_epoch_transition_target_inputs as fn()),
-        ("rejection_fail_closed", "wrong_epoch_transition_target_request", wrong_epoch_transition_target_request as fn()),
-        ("rejection_fail_closed", "wrong_application_nonce", wrong_application_nonce as fn()),
-        ("rejection_fail_closed", "wrong_live_application_nonce", wrong_live_application_nonce as fn()),
-        ("rejection_fail_closed", "reject_missing_durable_audit_finalization_decision", reject_missing_durable_audit_finalization_decision as fn()),
-        ("rejection_fail_closed", "reject_unverified_durable_audit_finalization_decision", reject_unverified_durable_audit_finalization_decision as fn()),
-        ("rejection_fail_closed", "reject_verified_source_with_non_accept_decision", reject_verified_source_with_non_accept_decision as fn()),
-        ("rejection_fail_closed", "reject_accepted_durable_audit_finalization_without_package_via_verified_source", reject_accepted_durable_audit_finalization_without_package_via_verified_source as fn()),
-        ("rejection_fail_closed", "reject_accepted_durable_audit_finalization_without_package_variant", reject_accepted_durable_audit_finalization_without_package_variant as fn()),
-        ("rejection_fail_closed", "reject_guarded_mutation_decision_alone", reject_guarded_mutation_decision_alone as fn()),
-        ("rejection_fail_closed", "reject_staged_application_decision_alone", reject_staged_application_decision_alone as fn()),
-        ("rejection_fail_closed", "reject_live_application_authorization_alone", reject_live_application_authorization_alone as fn()),
-        ("rejection_fail_closed", "reject_application_decision_alone", reject_application_decision_alone as fn()),
-        ("rejection_fail_closed", "reject_rotation_plan_alone", reject_rotation_plan_alone as fn()),
-        ("rejection_fail_closed", "reject_governance_execution_intent_alone", reject_governance_execution_intent_alone as fn()),
-        ("rejection_fail_closed", "reject_governance_proof_alone", reject_governance_proof_alone as fn()),
-        ("rejection_fail_closed", "reject_local_operator_assertion", reject_local_operator_assertion as fn()),
-        ("rejection_fail_closed", "reject_peer_majority_assertion", reject_peer_majority_assertion as fn()),
-        ("rejection_fail_closed", "reject_custody_only_evidence", reject_custody_only_evidence as fn()),
-        ("rejection_fail_closed", "reject_remote_signer_only_evidence", reject_remote_signer_only_evidence as fn()),
-        ("rejection_fail_closed", "reject_custody_attestation_only_evidence", reject_custody_attestation_only_evidence as fn()),
-        ("rejection_fail_closed", "reject_fixture_only_durable_audit_finalization", reject_fixture_only_durable_audit_finalization as fn()),
-        ("rejection_fail_closed", "reject_arbitrary_validator_set_bytes", reject_arbitrary_validator_set_bytes as fn()),
-        ("mainnet_authority_policy", "mainnet_domain_refused_under_source_test_policy", mainnet_domain_refused_under_source_test_policy as fn()),
-        ("mainnet_authority_policy", "mainnet_policy_unavailable", mainnet_policy_unavailable as fn()),
-        ("mainnet_authority_policy", "production_policy_unavailable", production_policy_unavailable as fn()),
-        ("mainnet_authority_policy", "disabled_policy_fails_closed", disabled_policy_fails_closed as fn()),
-        ("mainnet_authority_policy", "reserved_production_kind_fails_closed", reserved_production_kind_fails_closed as fn()),
-        ("replay_recovery_idempotency", "replay_rejected_when_id_present", replay_rejected_when_id_present as fn()),
-        ("replay_recovery_idempotency", "no_replay_when_id_absent", no_replay_when_id_absent as fn()),
-        ("replay_recovery_idempotency", "stale_governance_epoch", stale_governance_epoch as fn()),
-        ("replay_recovery_idempotency", "stale_authority_sequence", stale_authority_sequence as fn()),
-        ("replay_recovery_idempotency", "stale_validator_set_epoch", stale_validator_set_epoch as fn()),
-        ("replay_recovery_idempotency", "stale_validator_set_version", stale_validator_set_version as fn()),
-        ("fixture_state", "fixture_state_apply_is_idempotent", fixture_state_apply_is_idempotent as fn()),
-        ("fixture_state", "fixture_state_apply_all_scenarios", fixture_state_apply_all_scenarios as fn()),
-        ("non_mutation", "every_outcome_is_non_mutating", every_outcome_is_non_mutating as fn()),
-        ("accepted_compatible", "accept_authorizes_future_mutation_only", accept_authorizes_future_mutation_only as fn()),
-        ("non_mutation", "reject_never_authorizes_future_mutation", reject_never_authorizes_future_mutation as fn()),
-        ("reachability_taxonomy", "policy_predicates", policy_predicates as fn()),
-        ("reachability_taxonomy", "kind_predicates", kind_predicates as fn()),
-        ("reachability_taxonomy", "execution_kind_mapping_matches_handoff_kind", execution_kind_mapping_matches_handoff_kind as fn()),
-        ("reachability_taxonomy", "unsupported_staged_application_kind_is_unsupported", unsupported_staged_application_kind_is_unsupported as fn()),
-        ("reachability_taxonomy", "outcome_tags_are_stable_and_distinct", outcome_tags_are_stable_and_distinct as fn()),
-        ("reachability_taxonomy", "config_and_inputs_well_formed", config_and_inputs_well_formed as fn()),
-        ("accepted_compatible", "accept_reexposes_runtime_handoff_tuple_from_parent", accept_reexposes_runtime_handoff_tuple_from_parent as fn()),
-        ("rejection_fail_closed", "reject_runtime_handoff_decision_id_mismatch", reject_runtime_handoff_decision_id_mismatch as fn()),
-        ("rejection_fail_closed", "reject_runtime_handoff_request_id_mismatch", reject_runtime_handoff_request_id_mismatch as fn()),
-        ("rejection_fail_closed", "reject_runtime_handoff_intent_digest_mismatch", reject_runtime_handoff_intent_digest_mismatch as fn()),
-        ("rejection_fail_closed", "reject_runtime_handoff_transcript_mismatch", reject_runtime_handoff_transcript_mismatch as fn()),
-        ("rejection_fail_closed", "reject_wrong_runtime_handoff_nonce", reject_wrong_runtime_handoff_nonce as fn()),
-        ("rejection_fail_closed", "reject_runtime_handoff_decision_alone", reject_runtime_handoff_decision_alone as fn()),
-        ("reachability_taxonomy", "runtime_handoff_alone_tag_is_stable", runtime_handoff_alone_tag_is_stable as fn()),
-        ("non_mutation", "runtime_handoff_binding_rejects_are_non_mutating", runtime_handoff_binding_rejects_are_non_mutating as fn()),
-        ("accepted_compatible", "accept_content_digest_binds_runtime_handoff_tuple", accept_content_digest_binds_runtime_handoff_tuple as fn()),
-        ("rejection_fail_closed", "reject_mutation_execution_decision_id_mismatch", reject_mutation_execution_decision_id_mismatch as fn()),
-        ("rejection_fail_closed", "reject_mutation_execution_request_id_mismatch", reject_mutation_execution_request_id_mismatch as fn()),
-        ("rejection_fail_closed", "reject_mutation_execution_intent_digest_mismatch", reject_mutation_execution_intent_digest_mismatch as fn()),
-        ("rejection_fail_closed", "reject_mutation_execution_transcript_mismatch", reject_mutation_execution_transcript_mismatch as fn()),
-        ("rejection_fail_closed", "reject_wrong_mutation_execution_nonce", reject_wrong_mutation_execution_nonce as fn()),
-        ("rejection_fail_closed", "reject_mutation_execution_decision_alone", reject_mutation_execution_decision_alone as fn()),
-        ("rejection_fail_closed", "reject_commit_authorization_decision_id_mismatch", reject_commit_authorization_decision_id_mismatch as fn()),
-        ("rejection_fail_closed", "reject_commit_authorization_request_id_mismatch", reject_commit_authorization_request_id_mismatch as fn()),
-        ("rejection_fail_closed", "reject_commit_authorization_intent_digest_mismatch", reject_commit_authorization_intent_digest_mismatch as fn()),
-        ("rejection_fail_closed", "reject_commit_authorization_transcript_mismatch", reject_commit_authorization_transcript_mismatch as fn()),
-        ("rejection_fail_closed", "reject_wrong_commit_authorization_nonce", reject_wrong_commit_authorization_nonce as fn()),
-        ("rejection_fail_closed", "reject_commit_authorization_decision_alone", reject_commit_authorization_decision_alone as fn()),
-        ("non_mutation", "commit_authorization_binding_rejects_are_non_mutating", commit_authorization_binding_rejects_are_non_mutating as fn()),
-        ("accepted_compatible", "accept_artifact_reexposes_commit_authorization_tuple", accept_artifact_reexposes_commit_authorization_tuple as fn()),
-        ("reachability_taxonomy", "mutation_execution_alone_tag_is_stable", mutation_execution_alone_tag_is_stable as fn()),
-        ("accepted_compatible", "accepted_artifact_re_exposes_mutation_execution_ancestor", accepted_artifact_re_exposes_mutation_execution_ancestor as fn()),
-        ("non_mutation", "mutation_execution_binding_rejects_are_non_mutating", mutation_execution_binding_rejects_are_non_mutating as fn()),
-        ("rejection_fail_closed", "reject_execution_preparation_decision_id_mismatch", reject_execution_preparation_decision_id_mismatch as fn()),
-        ("rejection_fail_closed", "reject_execution_preparation_request_id_mismatch", reject_execution_preparation_request_id_mismatch as fn()),
-        ("rejection_fail_closed", "reject_execution_preparation_intent_digest_mismatch", reject_execution_preparation_intent_digest_mismatch as fn()),
-        ("rejection_fail_closed", "reject_execution_preparation_transcript_mismatch", reject_execution_preparation_transcript_mismatch as fn()),
-        ("rejection_fail_closed", "reject_wrong_execution_preparation_nonce", reject_wrong_execution_preparation_nonce as fn()),
-        ("rejection_fail_closed", "reject_execution_preparation_decision_alone", reject_execution_preparation_decision_alone as fn()),
-        ("reachability_taxonomy", "execution_preparation_alone_tag_is_stable", execution_preparation_alone_tag_is_stable as fn()),
-        ("accepted_compatible", "accepted_artifact_re_exposes_execution_preparation_ancestor", accepted_artifact_re_exposes_execution_preparation_ancestor as fn()),
-        ("non_mutation", "execution_preparation_binding_rejects_are_non_mutating", execution_preparation_binding_rejects_are_non_mutating as fn()),
-        ("accepted_compatible", "scenario_accept_add", scenario_accept_add as fn()),
-        ("accepted_compatible", "scenario_accept_remove", scenario_accept_remove as fn()),
-        ("accepted_compatible", "scenario_accept_update", scenario_accept_update as fn()),
-        ("accepted_compatible", "scenario_accept_noop", scenario_accept_noop as fn()),
-        ("accepted_compatible", "scenario_accept_identity", scenario_accept_identity as fn()),
-        ("accepted_compatible", "scenario_accept_retire", scenario_accept_retire as fn()),
-        ("accepted_compatible", "scenario_accept_emergency", scenario_accept_emergency as fn()),
-        ("accepted_compatible", "scenario_accept_authsync", scenario_accept_authsync as fn()),
-        ("accepted_compatible", "scenario_accept_bulk", scenario_accept_bulk as fn()),
-        ("accepted_compatible", "scenario_testnet_accept_add", scenario_testnet_accept_add as fn()),
-        ("accepted_compatible", "scenario_testnet_accept_remove", scenario_testnet_accept_remove as fn()),
-        ("accepted_compatible", "scenario_testnet_accept_update", scenario_testnet_accept_update as fn()),
-        ("accepted_compatible", "scenario_testnet_accept_noop", scenario_testnet_accept_noop as fn()),
-        ("accepted_compatible", "scenario_testnet_accept_identity", scenario_testnet_accept_identity as fn()),
-        ("accepted_compatible", "scenario_testnet_accept_retire", scenario_testnet_accept_retire as fn()),
-        ("accepted_compatible", "scenario_testnet_accept_emergency", scenario_testnet_accept_emergency as fn()),
-        ("accepted_compatible", "scenario_testnet_accept_authsync", scenario_testnet_accept_authsync as fn()),
-        ("accepted_compatible", "scenario_testnet_accept_bulk", scenario_testnet_accept_bulk as fn()),
-        ("rejection_fail_closed", "scenario_handoff_binding_add", scenario_handoff_binding_add as fn()),
-        ("rejection_fail_closed", "scenario_handoff_binding_remove", scenario_handoff_binding_remove as fn()),
-        ("rejection_fail_closed", "scenario_handoff_binding_update", scenario_handoff_binding_update as fn()),
-        ("rejection_fail_closed", "scenario_handoff_binding_noop", scenario_handoff_binding_noop as fn()),
-        ("rejection_fail_closed", "scenario_handoff_binding_identity", scenario_handoff_binding_identity as fn()),
-        ("rejection_fail_closed", "scenario_handoff_binding_retire", scenario_handoff_binding_retire as fn()),
-        ("rejection_fail_closed", "scenario_handoff_binding_emergency", scenario_handoff_binding_emergency as fn()),
-        ("rejection_fail_closed", "scenario_handoff_binding_authsync", scenario_handoff_binding_authsync as fn()),
-        ("rejection_fail_closed", "scenario_handoff_binding_bulk", scenario_handoff_binding_bulk as fn()),
-        ("rejection_fail_closed", "scenario_guarded_binding_add", scenario_guarded_binding_add as fn()),
-        ("rejection_fail_closed", "scenario_guarded_binding_remove", scenario_guarded_binding_remove as fn()),
-        ("rejection_fail_closed", "scenario_guarded_binding_update", scenario_guarded_binding_update as fn()),
-        ("rejection_fail_closed", "scenario_guarded_binding_noop", scenario_guarded_binding_noop as fn()),
-        ("rejection_fail_closed", "scenario_guarded_binding_identity", scenario_guarded_binding_identity as fn()),
-        ("rejection_fail_closed", "scenario_guarded_binding_retire", scenario_guarded_binding_retire as fn()),
-        ("rejection_fail_closed", "scenario_guarded_binding_emergency", scenario_guarded_binding_emergency as fn()),
-        ("rejection_fail_closed", "scenario_guarded_binding_authsync", scenario_guarded_binding_authsync as fn()),
-        ("rejection_fail_closed", "scenario_guarded_binding_bulk", scenario_guarded_binding_bulk as fn()),
+        (
+            "rejection_fail_closed",
+            "wrong_genesis",
+            wrong_genesis as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "wrong_authority_root",
+            wrong_authority_root as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "wrong_governance_domain",
+            wrong_governance_domain as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "wrong_governance_epoch",
+            wrong_governance_epoch as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "wrong_proposal_id",
+            wrong_proposal_id as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "wrong_governance_execution_intent_digest",
+            wrong_governance_execution_intent_digest as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "wrong_rotation_decision_id",
+            wrong_rotation_decision_id as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "wrong_rotation_request_id",
+            wrong_rotation_request_id as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "wrong_rotation_transcript_digest",
+            wrong_rotation_transcript_digest as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "wrong_rotation_plan_digest",
+            wrong_rotation_plan_digest as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "wrong_lifecycle_action",
+            wrong_lifecycle_action as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "wrong_rotation_action",
+            wrong_rotation_action as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "wrong_authority_sequence",
+            wrong_authority_sequence as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "wrong_current_validator_set_digest",
+            wrong_current_validator_set_digest as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "wrong_proposed_validator_set_digest",
+            wrong_proposed_validator_set_digest as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "wrong_validator_set_delta_digest",
+            wrong_validator_set_delta_digest as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "wrong_validator_set_epoch",
+            wrong_validator_set_epoch as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "wrong_validator_set_version",
+            wrong_validator_set_version as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "wrong_current_validator_set_epoch",
+            wrong_current_validator_set_epoch as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "wrong_current_validator_set_version",
+            wrong_current_validator_set_version as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "wrong_proposed_validator_count",
+            wrong_proposed_validator_count as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "wrong_rotation_nonce",
+            wrong_rotation_nonce as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "wrong_epoch_transition_target_inputs",
+            wrong_epoch_transition_target_inputs as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "wrong_epoch_transition_target_request",
+            wrong_epoch_transition_target_request as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "wrong_application_nonce",
+            wrong_application_nonce as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "wrong_live_application_nonce",
+            wrong_live_application_nonce as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "reject_missing_durable_audit_finalization_decision",
+            reject_missing_durable_audit_finalization_decision as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "reject_unverified_durable_audit_finalization_decision",
+            reject_unverified_durable_audit_finalization_decision as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "reject_verified_source_with_non_accept_decision",
+            reject_verified_source_with_non_accept_decision as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "reject_accepted_durable_audit_finalization_without_package_via_verified_source",
+            reject_accepted_durable_audit_finalization_without_package_via_verified_source
+                as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "reject_accepted_durable_audit_finalization_without_package_variant",
+            reject_accepted_durable_audit_finalization_without_package_variant as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "reject_guarded_mutation_decision_alone",
+            reject_guarded_mutation_decision_alone as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "reject_staged_application_decision_alone",
+            reject_staged_application_decision_alone as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "reject_live_application_authorization_alone",
+            reject_live_application_authorization_alone as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "reject_application_decision_alone",
+            reject_application_decision_alone as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "reject_rotation_plan_alone",
+            reject_rotation_plan_alone as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "reject_governance_execution_intent_alone",
+            reject_governance_execution_intent_alone as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "reject_governance_proof_alone",
+            reject_governance_proof_alone as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "reject_local_operator_assertion",
+            reject_local_operator_assertion as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "reject_peer_majority_assertion",
+            reject_peer_majority_assertion as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "reject_custody_only_evidence",
+            reject_custody_only_evidence as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "reject_remote_signer_only_evidence",
+            reject_remote_signer_only_evidence as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "reject_custody_attestation_only_evidence",
+            reject_custody_attestation_only_evidence as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "reject_fixture_only_durable_audit_finalization",
+            reject_fixture_only_durable_audit_finalization as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "reject_arbitrary_validator_set_bytes",
+            reject_arbitrary_validator_set_bytes as fn(),
+        ),
+        (
+            "mainnet_authority_policy",
+            "mainnet_domain_refused_under_source_test_policy",
+            mainnet_domain_refused_under_source_test_policy as fn(),
+        ),
+        (
+            "mainnet_authority_policy",
+            "mainnet_policy_unavailable",
+            mainnet_policy_unavailable as fn(),
+        ),
+        (
+            "mainnet_authority_policy",
+            "production_policy_unavailable",
+            production_policy_unavailable as fn(),
+        ),
+        (
+            "mainnet_authority_policy",
+            "disabled_policy_fails_closed",
+            disabled_policy_fails_closed as fn(),
+        ),
+        (
+            "mainnet_authority_policy",
+            "reserved_production_kind_fails_closed",
+            reserved_production_kind_fails_closed as fn(),
+        ),
+        (
+            "replay_recovery_idempotency",
+            "replay_rejected_when_id_present",
+            replay_rejected_when_id_present as fn(),
+        ),
+        (
+            "replay_recovery_idempotency",
+            "no_replay_when_id_absent",
+            no_replay_when_id_absent as fn(),
+        ),
+        (
+            "replay_recovery_idempotency",
+            "stale_governance_epoch",
+            stale_governance_epoch as fn(),
+        ),
+        (
+            "replay_recovery_idempotency",
+            "stale_authority_sequence",
+            stale_authority_sequence as fn(),
+        ),
+        (
+            "replay_recovery_idempotency",
+            "stale_validator_set_epoch",
+            stale_validator_set_epoch as fn(),
+        ),
+        (
+            "replay_recovery_idempotency",
+            "stale_validator_set_version",
+            stale_validator_set_version as fn(),
+        ),
+        (
+            "fixture_state",
+            "fixture_state_apply_is_idempotent",
+            fixture_state_apply_is_idempotent as fn(),
+        ),
+        (
+            "fixture_state",
+            "fixture_state_apply_all_scenarios",
+            fixture_state_apply_all_scenarios as fn(),
+        ),
+        (
+            "non_mutation",
+            "every_outcome_is_non_mutating",
+            every_outcome_is_non_mutating as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "accept_authorizes_future_mutation_only",
+            accept_authorizes_future_mutation_only as fn(),
+        ),
+        (
+            "non_mutation",
+            "reject_never_authorizes_future_mutation",
+            reject_never_authorizes_future_mutation as fn(),
+        ),
+        (
+            "reachability_taxonomy",
+            "policy_predicates",
+            policy_predicates as fn(),
+        ),
+        (
+            "reachability_taxonomy",
+            "kind_predicates",
+            kind_predicates as fn(),
+        ),
+        (
+            "reachability_taxonomy",
+            "execution_kind_mapping_matches_handoff_kind",
+            execution_kind_mapping_matches_handoff_kind as fn(),
+        ),
+        (
+            "reachability_taxonomy",
+            "unsupported_staged_application_kind_is_unsupported",
+            unsupported_staged_application_kind_is_unsupported as fn(),
+        ),
+        (
+            "reachability_taxonomy",
+            "outcome_tags_are_stable_and_distinct",
+            outcome_tags_are_stable_and_distinct as fn(),
+        ),
+        (
+            "reachability_taxonomy",
+            "config_and_inputs_well_formed",
+            config_and_inputs_well_formed as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "accept_reexposes_runtime_handoff_tuple_from_parent",
+            accept_reexposes_runtime_handoff_tuple_from_parent as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "reject_runtime_handoff_decision_id_mismatch",
+            reject_runtime_handoff_decision_id_mismatch as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "reject_runtime_handoff_request_id_mismatch",
+            reject_runtime_handoff_request_id_mismatch as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "reject_runtime_handoff_intent_digest_mismatch",
+            reject_runtime_handoff_intent_digest_mismatch as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "reject_runtime_handoff_transcript_mismatch",
+            reject_runtime_handoff_transcript_mismatch as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "reject_wrong_runtime_handoff_nonce",
+            reject_wrong_runtime_handoff_nonce as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "reject_runtime_handoff_decision_alone",
+            reject_runtime_handoff_decision_alone as fn(),
+        ),
+        (
+            "reachability_taxonomy",
+            "runtime_handoff_alone_tag_is_stable",
+            runtime_handoff_alone_tag_is_stable as fn(),
+        ),
+        (
+            "non_mutation",
+            "runtime_handoff_binding_rejects_are_non_mutating",
+            runtime_handoff_binding_rejects_are_non_mutating as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "accept_content_digest_binds_runtime_handoff_tuple",
+            accept_content_digest_binds_runtime_handoff_tuple as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "reject_mutation_execution_decision_id_mismatch",
+            reject_mutation_execution_decision_id_mismatch as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "reject_mutation_execution_request_id_mismatch",
+            reject_mutation_execution_request_id_mismatch as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "reject_mutation_execution_intent_digest_mismatch",
+            reject_mutation_execution_intent_digest_mismatch as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "reject_mutation_execution_transcript_mismatch",
+            reject_mutation_execution_transcript_mismatch as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "reject_wrong_mutation_execution_nonce",
+            reject_wrong_mutation_execution_nonce as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "reject_mutation_execution_decision_alone",
+            reject_mutation_execution_decision_alone as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "reject_commit_authorization_decision_id_mismatch",
+            reject_commit_authorization_decision_id_mismatch as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "reject_commit_authorization_request_id_mismatch",
+            reject_commit_authorization_request_id_mismatch as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "reject_commit_authorization_intent_digest_mismatch",
+            reject_commit_authorization_intent_digest_mismatch as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "reject_commit_authorization_transcript_mismatch",
+            reject_commit_authorization_transcript_mismatch as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "reject_wrong_commit_authorization_nonce",
+            reject_wrong_commit_authorization_nonce as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "reject_commit_authorization_decision_alone",
+            reject_commit_authorization_decision_alone as fn(),
+        ),
+        (
+            "non_mutation",
+            "commit_authorization_binding_rejects_are_non_mutating",
+            commit_authorization_binding_rejects_are_non_mutating as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "accept_artifact_reexposes_commit_authorization_tuple",
+            accept_artifact_reexposes_commit_authorization_tuple as fn(),
+        ),
+        (
+            "reachability_taxonomy",
+            "mutation_execution_alone_tag_is_stable",
+            mutation_execution_alone_tag_is_stable as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "accepted_artifact_re_exposes_mutation_execution_ancestor",
+            accepted_artifact_re_exposes_mutation_execution_ancestor as fn(),
+        ),
+        (
+            "non_mutation",
+            "mutation_execution_binding_rejects_are_non_mutating",
+            mutation_execution_binding_rejects_are_non_mutating as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "reject_execution_preparation_decision_id_mismatch",
+            reject_execution_preparation_decision_id_mismatch as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "reject_execution_preparation_request_id_mismatch",
+            reject_execution_preparation_request_id_mismatch as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "reject_execution_preparation_intent_digest_mismatch",
+            reject_execution_preparation_intent_digest_mismatch as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "reject_execution_preparation_transcript_mismatch",
+            reject_execution_preparation_transcript_mismatch as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "reject_wrong_execution_preparation_nonce",
+            reject_wrong_execution_preparation_nonce as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "reject_execution_preparation_decision_alone",
+            reject_execution_preparation_decision_alone as fn(),
+        ),
+        (
+            "reachability_taxonomy",
+            "execution_preparation_alone_tag_is_stable",
+            execution_preparation_alone_tag_is_stable as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "accepted_artifact_re_exposes_execution_preparation_ancestor",
+            accepted_artifact_re_exposes_execution_preparation_ancestor as fn(),
+        ),
+        (
+            "non_mutation",
+            "execution_preparation_binding_rejects_are_non_mutating",
+            execution_preparation_binding_rejects_are_non_mutating as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "scenario_accept_add",
+            scenario_accept_add as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "scenario_accept_remove",
+            scenario_accept_remove as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "scenario_accept_update",
+            scenario_accept_update as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "scenario_accept_noop",
+            scenario_accept_noop as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "scenario_accept_identity",
+            scenario_accept_identity as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "scenario_accept_retire",
+            scenario_accept_retire as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "scenario_accept_emergency",
+            scenario_accept_emergency as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "scenario_accept_authsync",
+            scenario_accept_authsync as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "scenario_accept_bulk",
+            scenario_accept_bulk as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "scenario_testnet_accept_add",
+            scenario_testnet_accept_add as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "scenario_testnet_accept_remove",
+            scenario_testnet_accept_remove as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "scenario_testnet_accept_update",
+            scenario_testnet_accept_update as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "scenario_testnet_accept_noop",
+            scenario_testnet_accept_noop as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "scenario_testnet_accept_identity",
+            scenario_testnet_accept_identity as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "scenario_testnet_accept_retire",
+            scenario_testnet_accept_retire as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "scenario_testnet_accept_emergency",
+            scenario_testnet_accept_emergency as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "scenario_testnet_accept_authsync",
+            scenario_testnet_accept_authsync as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "scenario_testnet_accept_bulk",
+            scenario_testnet_accept_bulk as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "scenario_handoff_binding_add",
+            scenario_handoff_binding_add as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "scenario_handoff_binding_remove",
+            scenario_handoff_binding_remove as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "scenario_handoff_binding_update",
+            scenario_handoff_binding_update as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "scenario_handoff_binding_noop",
+            scenario_handoff_binding_noop as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "scenario_handoff_binding_identity",
+            scenario_handoff_binding_identity as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "scenario_handoff_binding_retire",
+            scenario_handoff_binding_retire as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "scenario_handoff_binding_emergency",
+            scenario_handoff_binding_emergency as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "scenario_handoff_binding_authsync",
+            scenario_handoff_binding_authsync as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "scenario_handoff_binding_bulk",
+            scenario_handoff_binding_bulk as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "scenario_guarded_binding_add",
+            scenario_guarded_binding_add as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "scenario_guarded_binding_remove",
+            scenario_guarded_binding_remove as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "scenario_guarded_binding_update",
+            scenario_guarded_binding_update as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "scenario_guarded_binding_noop",
+            scenario_guarded_binding_noop as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "scenario_guarded_binding_identity",
+            scenario_guarded_binding_identity as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "scenario_guarded_binding_retire",
+            scenario_guarded_binding_retire as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "scenario_guarded_binding_emergency",
+            scenario_guarded_binding_emergency as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "scenario_guarded_binding_authsync",
+            scenario_guarded_binding_authsync as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "scenario_guarded_binding_bulk",
+            scenario_guarded_binding_bulk as fn(),
+        ),
     ];
 
     let mut rows: Vec<(String, String, bool)> = Vec::new();
@@ -4426,9 +5421,15 @@ fn main() {
         let case = t_case(TrustBundleEnvironment::Devnet, sc);
         let decision = t_eval(&case);
         digest_body.push_str(&format!("scenario={:?}\n", sc));
-        digest_body.push_str(&format!("audit_ledger_commitment_id={}\n", decision.audit_ledger_commitment_id));
+        digest_body.push_str(&format!(
+            "audit_ledger_commitment_id={}\n",
+            decision.audit_ledger_commitment_id
+        ));
         digest_body.push_str(&format!("request_id={}\n", decision.request_id));
-        digest_body.push_str(&format!("audit_ledger_commitment_digest={}\n", decision.audit_ledger_commitment_digest));
+        digest_body.push_str(&format!(
+            "audit_ledger_commitment_digest={}\n",
+            decision.audit_ledger_commitment_digest
+        ));
         digest_body.push_str(&format!(
             "content_digest={}\n",
             decision
@@ -4437,9 +5438,14 @@ fn main() {
                 .expect("accepted scenario must carry artifact")
                 .content_digest()
         ));
-        digest_body.push_str(&format!("transcript_digest={}\n", decision.transcript_digest));
+        digest_body.push_str(&format!(
+            "transcript_digest={}\n",
+            decision.transcript_digest
+        ));
     }
-    digest_body.push_str(&format!("named_audit_ledger_commitment_id={audit_ledger_commitment_id}\n"));
+    digest_body.push_str(&format!(
+        "named_audit_ledger_commitment_id={audit_ledger_commitment_id}\n"
+    ));
     digest_body.push_str(&format!("named_request_id={request_id}\n"));
     digest_body.push_str(&format!("named_content_digest={content_digest}\n"));
     digest_body.push_str(&format!("named_transcript_digest={transcript_digest}\n"));
@@ -4456,11 +5462,8 @@ fn main() {
     // `ProductionLiveEpochTransitionAuditLedgerCommitmentRecoveryOutcome`.
     let recover_exec = ProductionLiveEpochTransitionAuditLedgerCommitmentExecutor::source_test();
     let current_artifact: &ProductionLiveEpochTransitionAuditLedgerCommitmentArtifact = artifact;
-    let clean: ProductionLiveEpochTransitionAuditLedgerCommitmentRecoveryOutcome =
-        recover_exec.recover_live_epoch_transition_audit_ledger_commitment_window(
-            None,
-            current_artifact,
-        );
+    let clean: ProductionLiveEpochTransitionAuditLedgerCommitmentRecoveryOutcome = recover_exec
+        .recover_live_epoch_transition_audit_ledger_commitment_window(None, current_artifact);
     let idempotent: ProductionLiveEpochTransitionAuditLedgerCommitmentRecoveryOutcome =
         recover_exec.recover_live_epoch_transition_audit_ledger_commitment_window(
             Some(current_artifact),
@@ -4509,7 +5512,9 @@ fn main() {
     let total_fail = rows.len() - total_pass;
 
     let mut summary = String::new();
-    summary.push_str("run_330_production_live_epoch_transition_audit_ledger_commitment_release_binary_helper\n");
+    summary.push_str(
+        "run_330_production_live_epoch_transition_audit_ledger_commitment_release_binary_helper\n",
+    );
     summary.push_str("boundary=crates/qbind-node/src/pqc_production_live_epoch_transition_audit_ledger_commitment.rs :: ProductionLiveEpochTransitionAuditLedgerCommitmentExecutor (Run 329 source/test boundary)\n");
     summary.push_str("mode=release-binary example linked against release-built production library symbols; source/test executor constructor only; DevNet/TestNet accept identities only; no production/MainNet enablement; no live validator-set mutation; no epoch transition; no production commit; no production finalization\n");
     for table in &table_order {
@@ -4519,7 +5524,10 @@ fn main() {
     }
     summary.push_str(&format!("total_pass={total_pass}\n"));
     summary.push_str(&format!("total_fail={total_fail}\n"));
-    summary.push_str(&format!("verdict={}\n", if total_fail == 0 { "PASS" } else { "FAIL" }));
+    summary.push_str(&format!(
+        "verdict={}\n",
+        if total_fail == 0 { "PASS" } else { "FAIL" }
+    ));
     fs::write(outdir.join("helper_summary.txt"), &summary).expect("write helper summary");
 
     print!("{summary}");

@@ -35,8 +35,8 @@ use qbind_consensus::validator_set::{ConsensusValidatorSet, ValidatorSetEntry};
 use qbind_consensus::BasicHotStuffEngine;
 use qbind_crypto::{AeadSuite, CryptoError, KemSuite, SignatureSuite, StaticCryptoProvider};
 use qbind_net::{
-    CookieConfig, ClientConnectionConfig, ClientHandshakeConfig, KemPrivateKey,
-    MutualAuthMode, ServerConnectionConfig, ServerHandshakeConfig,
+    ClientConnectionConfig, ClientHandshakeConfig, CookieConfig, KemPrivateKey, MutualAuthMode,
+    ServerConnectionConfig, ServerHandshakeConfig,
 };
 use qbind_node::storage::{ConsensusStorage, InMemoryConsensusStorage};
 use qbind_wire::consensus::{BlockHeader, BlockProposal, QuorumCertificate as WireQc};
@@ -296,7 +296,8 @@ fn create_localmesh_kemtls_config(node_index: usize, with_cookie: bool) -> Local
         let mut secret = [0u8; 32];
         let cookie_secret_str = format!("cookie-secret-{:02}", node_index);
         let secret_bytes = cookie_secret_str.as_bytes();
-        secret[0..secret_bytes.len().min(32)].copy_from_slice(&secret_bytes[..secret_bytes.len().min(32)]);
+        secret[0..secret_bytes.len().min(32)]
+            .copy_from_slice(&secret_bytes[..secret_bytes.len().min(32)]);
         Some(CookieConfig::new(secret.to_vec()))
     } else {
         None
@@ -449,23 +450,19 @@ fn localmesh_cookie_protection_config() {
 
     // Config without cookie
     let config_no_cookie = create_localmesh_kemtls_config(0, false);
-    assert!(
-        config_no_cookie
-            .server_cfg
-            .handshake_config
-            .cookie_config
-            .is_none()
-    );
+    assert!(config_no_cookie
+        .server_cfg
+        .handshake_config
+        .cookie_config
+        .is_none());
 
     // Config with cookie
     let config_with_cookie = create_localmesh_kemtls_config(1, true);
-    assert!(
-        config_with_cookie
-            .server_cfg
-            .handshake_config
-            .cookie_config
-            .is_some()
-    );
+    assert!(config_with_cookie
+        .server_cfg
+        .handshake_config
+        .cookie_config
+        .is_some());
 
     eprintln!("[LocalMesh A2] ✓ Cookie protection configured correctly");
 }
@@ -491,8 +488,7 @@ fn localmesh_unique_node_identities() {
                 i, j
             );
             assert_ne!(
-                configs[i].client_cfg.peer_kem_pk,
-                configs[j].client_cfg.peer_kem_pk,
+                configs[i].client_cfg.peer_kem_pk, configs[j].client_cfg.peer_kem_pk,
                 "Node {} and {} have same KEM public key",
                 i, j
             );
@@ -696,7 +692,11 @@ fn localmesh_restart_preserves_locked_qc() {
     // Restart with locked QC
     let committed_block_id = [42u8; 32];
     let committed_height = 10;
-    engine.initialize_from_restart(committed_block_id, committed_height, Some(locked_qc.clone()));
+    engine.initialize_from_restart(
+        committed_block_id,
+        committed_height,
+        Some(locked_qc.clone()),
+    );
 
     // Verify locked QC is preserved
     let stored_qc = engine.locked_qc().expect("should have locked QC");
@@ -741,11 +741,8 @@ fn localmesh_storage_based_restart() {
     let mut engine: BasicHotStuffEngine<[u8; 32]> =
         BasicHotStuffEngine::new(ValidatorId::new(0), validators);
 
-    let locked_qc = qbind_consensus::qc::QuorumCertificate::new(
-        loaded_qc.block_id,
-        loaded_qc.height,
-        vec![],
-    );
+    let locked_qc =
+        qbind_consensus::qc::QuorumCertificate::new(loaded_qc.block_id, loaded_qc.height, vec![]);
     engine.initialize_from_restart(block_id, loaded_block.header.height, Some(locked_qc));
 
     // Verify engine state matches persisted state
@@ -820,7 +817,10 @@ fn localmesh_restart_resets_flags() {
 
     // Should be able to propose again (flags reset)
     let actions3 = engine.try_propose();
-    assert!(!actions3.is_empty(), "Should be able to propose after restart");
+    assert!(
+        !actions3.is_empty(),
+        "Should be able to propose after restart"
+    );
 
     eprintln!("[LocalMesh C6] ✓ Proposal/vote flags reset after restart");
 }

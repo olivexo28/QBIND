@@ -86,10 +86,10 @@
 //! match an already-recorded settlement-outcome report record.
 
 use crate::pqc_governance_durable_completion_acknowledgement_consumer::DurableCompletionAcknowledgementConsumerOutcome;
-use crate::pqc_governance_durable_completion_settlement_receipt_acknowledgement::DurableCompletionSettlementReceiptAcknowledgementOutcome;
 use crate::pqc_governance_durable_completion_attestation_backend::DurableCompletionAttestationBackendOutcome;
 use crate::pqc_governance_durable_completion_audit_publication_receipt::DurableCompletionAuditPublicationReceiptOutcome;
 use crate::pqc_governance_durable_completion_audit_receipt_acknowledgement::DurableCompletionAuditReceiptAcknowledgementOutcome;
+use crate::pqc_governance_durable_completion_settlement_receipt_acknowledgement::DurableCompletionSettlementReceiptAcknowledgementOutcome;
 use crate::pqc_governance_execution_runtime_arming::GovernanceExecutionRuntimeSurface;
 use crate::pqc_governance_modeled_durable_completion_attestation_projection::GovernanceModeledDurableCompletionAttestationOutcome;
 use crate::pqc_governance_modeled_durable_completion_finalization_projection::GovernanceModeledDurableCompletionFinalizationOutcome;
@@ -111,8 +111,7 @@ use sha3::{Digest, Sha3_256};
 // ===========================================================================
 
 /// Run 272 — the validation / mutation surface pair the receipt binds to.
-pub type DurableCompletionSettlementOutcomeReportSurface =
-    ModeledGovernanceTrustMutationSurface;
+pub type DurableCompletionSettlementOutcomeReportSurface = ModeledGovernanceTrustMutationSurface;
 
 /// Run 272 — the trust-domain environment binding the receipt is bound to.
 pub type DurableCompletionSettlementOutcomeReportEnvironment =
@@ -273,8 +272,12 @@ impl DurableCompletionSettlementOutcomeReportPolicy {
             Self::ProductionSettlementOutcomeReportRequired => {
                 "production-settlement-outcome-report-required"
             }
-            Self::MainNetSettlementOutcomeReportRequired => "mainnet-settlement-outcome-report-required",
-            Self::ExternalSettlementOutcomeReportRequired => "external-settlement-outcome-report-required",
+            Self::MainNetSettlementOutcomeReportRequired => {
+                "mainnet-settlement-outcome-report-required"
+            }
+            Self::ExternalSettlementOutcomeReportRequired => {
+                "external-settlement-outcome-report-required"
+            }
         }
     }
 
@@ -678,11 +681,21 @@ impl DurableCompletionSettlementOutcomeReportRequest {
             && !self.consumer_record_digest.is_empty()
             && !self.consumer_transcript_digest.is_empty()
             && !self.consumer_record_id.is_empty()
-            && !self.settlement_receipt_acknowledgement_identity_digest.is_empty()
-            && !self.settlement_receipt_acknowledgement_request_digest.is_empty()
-            && !self.settlement_receipt_acknowledgement_response_digest.is_empty()
-            && !self.settlement_receipt_acknowledgement_record_digest.is_empty()
-            && !self.settlement_receipt_acknowledgement_transcript_digest.is_empty()
+            && !self
+                .settlement_receipt_acknowledgement_identity_digest
+                .is_empty()
+            && !self
+                .settlement_receipt_acknowledgement_request_digest
+                .is_empty()
+            && !self
+                .settlement_receipt_acknowledgement_response_digest
+                .is_empty()
+            && !self
+                .settlement_receipt_acknowledgement_record_digest
+                .is_empty()
+            && !self
+                .settlement_receipt_acknowledgement_transcript_digest
+                .is_empty()
             && !self.settlement_receipt_acknowledgement_record_id.is_empty()
             && !self.domain_separation_tag.is_empty()
             && self.identity.is_well_formed()
@@ -852,10 +865,7 @@ impl DurableCompletionSettlementOutcomeReportLedger {
     }
 
     /// Restore the ledger to a previously captured snapshot (modeled rollback).
-    pub fn restore(
-        &mut self,
-        snapshot: &DurableCompletionSettlementOutcomeReportLedgerSnapshot,
-    ) {
+    pub fn restore(&mut self, snapshot: &DurableCompletionSettlementOutcomeReportLedgerSnapshot) {
         self.records = snapshot.records.clone();
     }
 
@@ -1013,10 +1023,7 @@ impl DurableCompletionSettlementOutcomeReportExpectations {
     }
 
     /// `true` iff the pre-sink environment / surface binding matches.
-    pub fn binding_matches(
-        &self,
-        input: &DurableCompletionSettlementOutcomeReportInput,
-    ) -> bool {
+    pub fn binding_matches(&self, input: &DurableCompletionSettlementOutcomeReportInput) -> bool {
         self.binding_mismatch_reason(input).is_none()
     }
 
@@ -1180,7 +1187,9 @@ impl DurableCompletionSettlementOutcomeReportExpectations {
         {
             return Some("wrong settlement-receipt_acknowledgement transcript digest");
         }
-        if request.settlement_receipt_acknowledgement_record_id != self.expected_settlement_receipt_acknowledgement_record_id {
+        if request.settlement_receipt_acknowledgement_record_id
+            != self.expected_settlement_receipt_acknowledgement_record_id
+        {
             return Some("wrong settlement-receipt_acknowledgement record id");
         }
         if request.domain_separation_tag != self.expected_domain_separation_tag {
@@ -1231,7 +1240,8 @@ pub struct DurableCompletionSettlementOutcomeReportInput {
     /// The Run 250 reporter outcome.
     pub reporter_binding: DurableCompletionSettlementOutcomeReportReporterBinding,
     /// The Run 252 outcome_report outcome.
-    pub receipt_acknowledgement_binding: DurableCompletionSettlementOutcomeReportFinalizationBinding,
+    pub receipt_acknowledgement_binding:
+        DurableCompletionSettlementOutcomeReportFinalizationBinding,
     /// The Run 254 attestation outcome.
     pub attestation_binding: DurableCompletionSettlementOutcomeReportAttestationBinding,
     /// The Run 256 backend outcome carried as backend-record context.
@@ -1241,8 +1251,7 @@ pub struct DurableCompletionSettlementOutcomeReportInput {
     pub receipt_binding: DurableCompletionSettlementOutcomeReportReceiptBinding,
     /// The Run 260 audit-receipt acknowledgement outcome carried as
     /// acknowledgement-record context.
-    pub acknowledgement_binding:
-        DurableCompletionSettlementOutcomeReportAcknowledgementBinding,
+    pub acknowledgement_binding: DurableCompletionSettlementOutcomeReportAcknowledgementBinding,
     /// The Run 262 acknowledgement consumer outcome the settlement-receipt_acknowledgement
     /// boundary projects to a settlement-receipt_acknowledgement request.
     pub consumer_binding: DurableCompletionSettlementOutcomeReportConsumerBinding,
@@ -1389,7 +1398,8 @@ impl DurableCompletionSettlementOutcomeReportOutcome {
     pub fn projects_to_recorded(&self) -> bool {
         matches!(
             self,
-            Self::SettlementOutcomeReportRecorded | Self::SettlementOutcomeReportDuplicateIdempotent
+            Self::SettlementOutcomeReportRecorded
+                | Self::SettlementOutcomeReportDuplicateIdempotent
         )
     }
 
@@ -1412,7 +1422,9 @@ impl DurableCompletionSettlementOutcomeReportOutcome {
     /// Stable operator-facing tag.
     pub fn tag(&self) -> &'static str {
         match self {
-            Self::LegacyBypassNoSettlementOutcomeReport => "legacy-bypass-no-settlement-outcome-report",
+            Self::LegacyBypassNoSettlementOutcomeReport => {
+                "legacy-bypass-no-settlement-outcome-report"
+            }
             Self::RejectedBeforeSettlementReceiptAcknowledgementNoOutcomeReport => {
                 "rejected-before-settlement-receipt_acknowledgement-no-receipt-acknowledgement"
             }
@@ -1453,7 +1465,9 @@ impl DurableCompletionSettlementOutcomeReportOutcome {
             Self::ValidatorSetRotationUnsupportedNoOutcomeReport => {
                 "validator-set-rotation-unsupported-no-receipt-acknowledgement"
             }
-            Self::PolicyChangeUnsupportedNoOutcomeReport => "policy-change-unsupported-no-receipt-acknowledgement",
+            Self::PolicyChangeUnsupportedNoOutcomeReport => {
+                "policy-change-unsupported-no-receipt-acknowledgement"
+            }
         }
     }
 }
@@ -1502,9 +1516,9 @@ impl DurableCompletionSettlementOutcomeReportRequestIntent {
 pub fn project_settlement_receipt_acknowledgement_outcome_to_outcome_report_request(
     outcome: &DurableCompletionSettlementOutcomeReportSettlementReceiptAcknowledgementBinding,
 ) -> DurableCompletionSettlementOutcomeReportRequestIntent {
-    use DurableCompletionSettlementReceiptAcknowledgementOutcome as Finalization;
     use DurableCompletionSettlementOutcomeReportOutcome as OutcomeReport;
     use DurableCompletionSettlementOutcomeReportRequestIntent as Intent;
+    use DurableCompletionSettlementReceiptAcknowledgementOutcome as Finalization;
     match outcome {
         Finalization::SettlementReceiptAcknowledgementRecorded => Intent::CreateRequest,
         Finalization::SettlementReceiptAcknowledgementDuplicateIdempotent => Intent::IdempotentOnly,
@@ -1512,13 +1526,19 @@ pub fn project_settlement_receipt_acknowledgement_outcome_to_outcome_report_requ
             Intent::NoReceiptAcknowledgement(OutcomeReport::LegacyBypassNoSettlementOutcomeReport)
         }
         Finalization::RejectedBeforeSettlementFinalizationNoReceiptAcknowledgement => {
-            Intent::NoReceiptAcknowledgement(OutcomeReport::RejectedBeforeSettlementReceiptAcknowledgementNoOutcomeReport)
+            Intent::NoReceiptAcknowledgement(
+                OutcomeReport::RejectedBeforeSettlementReceiptAcknowledgementNoOutcomeReport,
+            )
         }
         Finalization::MainNetPeerDrivenApplyRefusedNoReceiptAcknowledgement => {
-            Intent::NoReceiptAcknowledgement(OutcomeReport::MainNetPeerDrivenApplyRefusedNoOutcomeReport)
+            Intent::NoReceiptAcknowledgement(
+                OutcomeReport::MainNetPeerDrivenApplyRefusedNoOutcomeReport,
+            )
         }
         Finalization::ValidatorSetRotationUnsupportedNoReceiptAcknowledgement => {
-            Intent::NoReceiptAcknowledgement(OutcomeReport::ValidatorSetRotationUnsupportedNoOutcomeReport)
+            Intent::NoReceiptAcknowledgement(
+                OutcomeReport::ValidatorSetRotationUnsupportedNoOutcomeReport,
+            )
         }
         Finalization::PolicyChangeUnsupportedNoReceiptAcknowledgement => {
             Intent::NoReceiptAcknowledgement(OutcomeReport::PolicyChangeUnsupportedNoOutcomeReport)
@@ -1526,7 +1546,9 @@ pub fn project_settlement_receipt_acknowledgement_outcome_to_outcome_report_requ
         // Every remaining settlement-receipt_acknowledgement outcome is a non-recording rejection /
         // failure / rollback / ambiguous window: the settlement receipt_acknowledgement did not
         // record, so no settlement-outcome-report record may exist.
-        _ => Intent::NoReceiptAcknowledgement(OutcomeReport::SettlementReceiptAcknowledgementDidNotRecordNoOutcomeReport),
+        _ => Intent::NoReceiptAcknowledgement(
+            OutcomeReport::SettlementReceiptAcknowledgementDidNotRecordNoOutcomeReport,
+        ),
     }
 }
 
@@ -1792,9 +1814,7 @@ pub struct MainNetSettlementOutcomeReportSink {
     invocations: u32,
 }
 
-impl GovernanceDurableCompletionSettlementOutcomeReportSink
-    for MainNetSettlementOutcomeReportSink
-{
+impl GovernanceDurableCompletionSettlementOutcomeReportSink for MainNetSettlementOutcomeReportSink {
     fn kind(&self) -> DurableCompletionSettlementOutcomeReportKind {
         DurableCompletionSettlementOutcomeReportKind::MainNetSettlementOutcomeReportUnavailable
     }
@@ -2066,8 +2086,7 @@ pub fn recover_durable_completion_settlement_outcome_report_window(
         |record: &DurableCompletionSettlementOutcomeReportLedgerRecord| -> bool {
             record.outcome_report_record_id == expectations.expected_outcome_report_record_id
                 && record.request_digest == input.request.digest()
-                && record.status
-                    == DurableCompletionSettlementOutcomeReportLedgerStatus::Recorded
+                && record.status == DurableCompletionSettlementOutcomeReportLedgerStatus::Recorded
         };
 
     match window {
@@ -2181,7 +2200,8 @@ pub fn durable_completion_settlement_outcome_report_never_writes_sequence_or_mar
 }
 
 /// Run 272 — the receipt boundary changes no RocksDB file schema / migration.
-pub fn durable_completion_settlement_outcome_report_no_rocksdb_file_schema_migration_change() -> bool {
+pub fn durable_completion_settlement_outcome_report_no_rocksdb_file_schema_migration_change() -> bool
+{
     true
 }
 
@@ -2268,7 +2288,8 @@ pub fn durable_completion_settlement_outcome_report_no_real_settlement_receipt()
 /// record is a modeled in-memory fixture record. Production / MainNet / external
 /// settlement-outcome report sinks are reachable but unavailable / fail closed
 /// and never confer any real acknowledgement.
-pub fn durable_completion_settlement_outcome_report_no_real_settlement_receipt_acknowledgement() -> bool {
+pub fn durable_completion_settlement_outcome_report_no_real_settlement_receipt_acknowledgement(
+) -> bool {
     true
 }
 
@@ -2276,7 +2297,8 @@ pub fn durable_completion_settlement_outcome_report_no_real_settlement_receipt_a
 /// settlement-finality projection; the only settlement-finality projection is a modeled
 /// in-memory fixture record with no external publication, network I/O, or persistent
 /// backend.
-pub fn durable_completion_settlement_outcome_report_no_real_settlement_finality_projection() -> bool {
+pub fn durable_completion_settlement_outcome_report_no_real_settlement_finality_projection() -> bool
+{
     true
 }
 
@@ -2284,7 +2306,8 @@ pub fn durable_completion_settlement_outcome_report_no_real_settlement_finality_
 /// settlement-outcome publication; the only settlement-outcome report is a modeled
 /// in-memory fixture record with no external publication, network I/O, or persistent
 /// backend.
-pub fn durable_completion_settlement_outcome_report_no_real_settlement_outcome_publication() -> bool {
+pub fn durable_completion_settlement_outcome_report_no_real_settlement_outcome_publication() -> bool
+{
     true
 }
 

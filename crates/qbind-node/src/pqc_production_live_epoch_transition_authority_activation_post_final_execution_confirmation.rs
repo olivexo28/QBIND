@@ -94,9 +94,9 @@ use crate::pqc_production_governance_execution_engine::{
     GovernanceExecutionDurableReplayBinding,
 };
 use crate::pqc_production_live_epoch_transition_authority_activation_final_execution::{
-    ProductionLiveEpochTransitionAuthorityActivationFinalExecutionDecision,
-    ProductionLiveEpochTransitionAuthorityActivationFinalExecutionArtifact,
     LiveEpochTransitionAuthorityActivationFinalExecutionKind,
+    ProductionLiveEpochTransitionAuthorityActivationFinalExecutionArtifact,
+    ProductionLiveEpochTransitionAuthorityActivationFinalExecutionDecision,
 };
 use crate::pqc_production_validator_set_rotation_intent::ValidatorSetRotationAction;
 use crate::pqc_trust_bundle::TrustBundleEnvironment;
@@ -107,14 +107,16 @@ use crate::pqc_trust_bundle::TrustBundleEnvironment;
 
 /// Run 351 — the only live validator-set application authorization boundary
 /// protocol version this run accepts.
-pub const PRODUCTION_LIVE_EPOCH_TRANSITION_AUTHORITY_ACTIVATION_FINAL_EXECUTION_PROTOCOL_VERSION: u16 = 1;
+pub const PRODUCTION_LIVE_EPOCH_TRANSITION_AUTHORITY_ACTIVATION_FINAL_EXECUTION_PROTOCOL_VERSION:
+    u16 = 1;
 
 /// Run 351 — runtime handoff content digest domain tag.
 pub const PRODUCTION_LIVE_EPOCH_TRANSITION_AUTHORITY_ACTIVATION_FINAL_EXECUTION_INTENT_DOMAIN_TAG: &str =
     "QBIND:351-epoch-transition-authority-activation-post-final-execution-confirmation-intent:v1";
 
 /// Run 351 — runtime handoff id domain tag.
-pub const PRODUCTION_LIVE_EPOCH_TRANSITION_AUTHORITY_ACTIVATION_FINAL_EXECUTION_ID_DOMAIN_TAG: &str =
+pub const PRODUCTION_LIVE_EPOCH_TRANSITION_AUTHORITY_ACTIVATION_FINAL_EXECUTION_ID_DOMAIN_TAG:
+    &str =
     "QBIND:351-epoch-transition-authority-activation-post-final-execution-confirmation-id:v1";
 
 /// Run 351 — runtime handoff request-id domain tag.
@@ -144,7 +146,9 @@ fn hash_field(h: &mut sha3::Sha3_256, label: &[u8], value: &[u8]) {
 /// [`PRODUCTION_LIVE_EPOCH_TRANSITION_AUTHORITY_ACTIVATION_FINAL_EXECUTION_PROTOCOL_VERSION`]
 /// is supported.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationProtocolVersion(pub u16);
+pub struct ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationProtocolVersion(
+    pub u16,
+);
 
 impl ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationProtocolVersion {
     /// The single supported protocol version.
@@ -183,7 +187,8 @@ impl Default for ProductionLiveEpochTransitionAuthorityActivationPostFinalExecut
 /// live validator-set application authorization authority is wired, so they
 /// fail closed as unavailable/refused.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
-pub enum ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationExecutorPolicy {
+pub enum ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationExecutorPolicy
+{
     /// Default. Refuses every request before any binding.
     #[default]
     Disabled,
@@ -260,7 +265,8 @@ impl ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmat
 /// `ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmation` kind is fail-closed as
 /// unavailable in Run 351 (no production authority is wired).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
-pub enum ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationExecutorKind {
+pub enum ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationExecutorKind
+{
     /// Inert default; every request is refused.
     #[default]
     Disabled,
@@ -309,7 +315,9 @@ pub struct ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionCon
 }
 
 impl ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationConfig {
-    pub fn new(kind: ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationExecutorKind) -> Self {
+    pub fn new(
+        kind: ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationExecutorKind,
+    ) -> Self {
         Self {
             protocol_version:
                 ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationProtocolVersion::supported(),
@@ -330,7 +338,9 @@ impl ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmat
     }
 }
 
-impl Default for ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationConfig {
+impl Default
+    for ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationConfig
+{
     fn default() -> Self {
         Self::new(ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationExecutorKind::Disabled)
     }
@@ -363,27 +373,17 @@ pub enum LiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationKin
 impl LiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationKind {
     pub const fn tag(self) -> &'static str {
         match self {
-            Self::StageApplyNoOpAlreadySynchronized => {
-                "stage-apply-no-op-already-synchronized"
-            }
+            Self::StageApplyNoOpAlreadySynchronized => "stage-apply-no-op-already-synchronized",
             Self::StageApplyValidatorAdd => "stage-apply-validator-add",
             Self::StageApplyValidatorRemove => "stage-apply-validator-remove",
-            Self::StageApplyValidatorMetadataUpdate => {
-                "stage-apply-validator-metadata-update"
-            }
-            Self::StageApplyValidatorIdentityRotation => {
-                "stage-apply-validator-identity-rotation"
-            }
+            Self::StageApplyValidatorMetadataUpdate => "stage-apply-validator-metadata-update",
+            Self::StageApplyValidatorIdentityRotation => "stage-apply-validator-identity-rotation",
             Self::StageApplyValidatorRetirement => "stage-apply-validator-retirement",
-            Self::StageApplyEmergencyValidatorRemoval => {
-                "stage-apply-emergency-validator-removal"
-            }
+            Self::StageApplyEmergencyValidatorRemoval => "stage-apply-emergency-validator-removal",
             Self::StageApplyAuthoritySetSynchronization => {
                 "stage-apply-authority-set-synchronization"
             }
-            Self::StageApplyBulkValidatorSetRotation => {
-                "stage-apply-bulk-validator-set-rotation"
-            }
+            Self::StageApplyBulkValidatorSetRotation => "stage-apply-bulk-validator-set-rotation",
             Self::UnsupportedStagedApplication => "unsupported-staged-application",
         }
     }
@@ -407,14 +407,10 @@ impl LiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationKind {
             A::StageApplyValidatorAdd => Self::StageApplyValidatorAdd,
             A::StageApplyValidatorRemove => Self::StageApplyValidatorRemove,
             A::StageApplyValidatorMetadataUpdate => Self::StageApplyValidatorMetadataUpdate,
-            A::StageApplyValidatorIdentityRotation => {
-                Self::StageApplyValidatorIdentityRotation
-            }
+            A::StageApplyValidatorIdentityRotation => Self::StageApplyValidatorIdentityRotation,
             A::StageApplyValidatorRetirement => Self::StageApplyValidatorRetirement,
             A::StageApplyEmergencyValidatorRemoval => Self::StageApplyEmergencyValidatorRemoval,
-            A::StageApplyAuthoritySetSynchronization => {
-                Self::StageApplyAuthoritySetSynchronization
-            }
+            A::StageApplyAuthoritySetSynchronization => Self::StageApplyAuthoritySetSynchronization,
             A::StageApplyBulkValidatorSetRotation => Self::StageApplyBulkValidatorSetRotation,
             A::UnsupportedStagedApplication => Self::UnsupportedStagedApplication,
         }
@@ -726,7 +722,9 @@ impl ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmat
         !self.trust_domain.chain_id.is_empty()
             && !self.trust_domain.genesis_hash.is_empty()
             && !self.trust_domain.authority_root_fingerprint.is_empty()
-            && !self.authority_activation_post_final_execution_confirmation_policy_id.is_empty()
+            && !self
+                .authority_activation_post_final_execution_confirmation_policy_id
+                .is_empty()
             && !self.expected_authorization_policy_id.is_empty()
             && !self.expected_application_policy_id.is_empty()
             && !self.expected_governance_domain_id.is_empty()
@@ -752,27 +750,43 @@ impl ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmat
             && !self.expected_staged_application_decision_id.is_empty()
             && !self.expected_staged_application_request_id.is_empty()
             && !self.expected_staged_application_intent_digest.is_empty()
-            && !self.expected_staged_application_transcript_digest.is_empty()
+            && !self
+                .expected_staged_application_transcript_digest
+                .is_empty()
             && !self.expected_guarded_mutation_decision_id.is_empty()
             && !self.expected_guarded_mutation_request_id.is_empty()
             && !self.expected_guarded_mutation_intent_digest.is_empty()
             && !self.expected_guarded_mutation_transcript_digest.is_empty()
-            && !self.expected_authority_activation_final_execution_decision_id.is_empty()
-            && !self.expected_authority_activation_final_execution_request_id.is_empty()
-            && !self.expected_authority_activation_final_execution_intent_digest.is_empty()
-            && !self.expected_authority_activation_final_execution_transcript_digest.is_empty()
+            && !self
+                .expected_authority_activation_final_execution_decision_id
+                .is_empty()
+            && !self
+                .expected_authority_activation_final_execution_request_id
+                .is_empty()
+            && !self
+                .expected_authority_activation_final_execution_intent_digest
+                .is_empty()
+            && !self
+                .expected_authority_activation_final_execution_transcript_digest
+                .is_empty()
             && !self.expected_commit_authorization_decision_id.is_empty()
             && !self.expected_commit_authorization_request_id.is_empty()
             && !self.expected_commit_authorization_intent_digest.is_empty()
-            && !self.expected_commit_authorization_transcript_digest.is_empty()
+            && !self
+                .expected_commit_authorization_transcript_digest
+                .is_empty()
             && !self.expected_mutation_execution_decision_id.is_empty()
             && !self.expected_mutation_execution_request_id.is_empty()
             && !self.expected_mutation_execution_intent_digest.is_empty()
-            && !self.expected_mutation_execution_transcript_digest.is_empty()
+            && !self
+                .expected_mutation_execution_transcript_digest
+                .is_empty()
             && !self.expected_execution_preparation_decision_id.is_empty()
             && !self.expected_execution_preparation_request_id.is_empty()
             && !self.expected_execution_preparation_intent_digest.is_empty()
-            && !self.expected_execution_preparation_transcript_digest.is_empty()
+            && !self
+                .expected_execution_preparation_transcript_digest
+                .is_empty()
             && !self.expected_runtime_handoff_decision_id.is_empty()
             && !self.expected_runtime_handoff_request_id.is_empty()
             && !self.expected_runtime_handoff_intent_digest.is_empty()
@@ -793,7 +807,8 @@ impl ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmat
 /// custody / attestation / durable-replay evidence bindings.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationRequest {
-    pub authority_source: LiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationAuthoritySource,
+    pub authority_source:
+        LiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationAuthoritySource,
     /// The epoch a future epoch-transition executor would transition to.
     pub proposed_epoch_transition_target: u64,
     /// The authority-activation-final-execution nonce (idempotency / replay binding).
@@ -1043,18 +1058,36 @@ impl ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmat
         use sha3::{Digest, Sha3_256};
         let mut h = Sha3_256::new();
         h.update(
-            PRODUCTION_LIVE_EPOCH_TRANSITION_AUTHORITY_ACTIVATION_FINAL_EXECUTION_INTENT_DOMAIN_TAG.as_bytes(),
+            PRODUCTION_LIVE_EPOCH_TRANSITION_AUTHORITY_ACTIVATION_FINAL_EXECUTION_INTENT_DOMAIN_TAG
+                .as_bytes(),
         );
         hash_field(&mut h, b"staged_kind", self.staged_kind.tag().as_bytes());
-        hash_field(&mut h, b"protocol_version", &self.protocol_version.to_le_bytes());
+        hash_field(
+            &mut h,
+            b"protocol_version",
+            &self.protocol_version.to_le_bytes(),
+        );
         hash_field(
             &mut h,
             b"authority_activation_post_final_execution_confirmation_policy_id",
-            self.authority_activation_post_final_execution_confirmation_policy_id.as_bytes(),
+            self.authority_activation_post_final_execution_confirmation_policy_id
+                .as_bytes(),
         );
-        hash_field(&mut h, b"authorization_policy_id", self.authorization_policy_id.as_bytes());
-        hash_field(&mut h, b"application_policy_id", self.application_policy_id.as_bytes());
-        hash_field(&mut h, b"environment", &self.environment.metric_code().to_le_bytes());
+        hash_field(
+            &mut h,
+            b"authorization_policy_id",
+            self.authorization_policy_id.as_bytes(),
+        );
+        hash_field(
+            &mut h,
+            b"application_policy_id",
+            self.application_policy_id.as_bytes(),
+        );
+        hash_field(
+            &mut h,
+            b"environment",
+            &self.environment.metric_code().to_le_bytes(),
+        );
         hash_field(&mut h, b"chain_id", self.chain_id.as_bytes());
         hash_field(&mut h, b"genesis_hash", self.genesis_hash.as_bytes());
         hash_field(
@@ -1062,58 +1095,174 @@ impl ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmat
             b"authority_root_fingerprint",
             self.authority_root_fingerprint.as_bytes(),
         );
-        hash_field(&mut h, b"authority_root_suite_id", &[self.authority_root_suite_id]);
-        hash_field(&mut h, b"governance_domain_id", self.governance_domain_id.as_bytes());
-        hash_field(&mut h, b"governance_epoch", &self.governance_epoch.to_le_bytes());
-        hash_field(&mut h, b"governance_height", &self.governance_height.to_le_bytes());
+        hash_field(
+            &mut h,
+            b"authority_root_suite_id",
+            &[self.authority_root_suite_id],
+        );
+        hash_field(
+            &mut h,
+            b"governance_domain_id",
+            self.governance_domain_id.as_bytes(),
+        );
+        hash_field(
+            &mut h,
+            b"governance_epoch",
+            &self.governance_epoch.to_le_bytes(),
+        );
+        hash_field(
+            &mut h,
+            b"governance_height",
+            &self.governance_height.to_le_bytes(),
+        );
         hash_field(&mut h, b"proposal_id", self.proposal_id.as_bytes());
         hash_field(&mut h, b"proposal_digest", self.proposal_digest.as_bytes());
-        hash_field(&mut h, b"quorum_voted", &self.quorum.voters_voted.to_le_bytes());
-        hash_field(&mut h, b"quorum_total", &self.quorum.total_voters.to_le_bytes());
-        hash_field(&mut h, b"quorum_required", &self.quorum.required_quorum.to_le_bytes());
-        hash_field(&mut h, b"threshold_approvals", &self.threshold.approvals.to_le_bytes());
-        hash_field(&mut h, b"threshold_required", &self.threshold.required.to_le_bytes());
-        hash_field(&mut h, b"threshold_total", &self.threshold.total.to_le_bytes());
-        hash_field(&mut h, b"lifecycle_action", self.lifecycle_action.tag().as_bytes());
-        hash_field(&mut h, b"rotation_action", self.rotation_action.tag().as_bytes());
+        hash_field(
+            &mut h,
+            b"quorum_voted",
+            &self.quorum.voters_voted.to_le_bytes(),
+        );
+        hash_field(
+            &mut h,
+            b"quorum_total",
+            &self.quorum.total_voters.to_le_bytes(),
+        );
+        hash_field(
+            &mut h,
+            b"quorum_required",
+            &self.quorum.required_quorum.to_le_bytes(),
+        );
+        hash_field(
+            &mut h,
+            b"threshold_approvals",
+            &self.threshold.approvals.to_le_bytes(),
+        );
+        hash_field(
+            &mut h,
+            b"threshold_required",
+            &self.threshold.required.to_le_bytes(),
+        );
+        hash_field(
+            &mut h,
+            b"threshold_total",
+            &self.threshold.total.to_le_bytes(),
+        );
+        hash_field(
+            &mut h,
+            b"lifecycle_action",
+            self.lifecycle_action.tag().as_bytes(),
+        );
+        hash_field(
+            &mut h,
+            b"rotation_action",
+            self.rotation_action.tag().as_bytes(),
+        );
         hash_field(
             &mut h,
             b"authority_domain_sequence",
             &self.authority_domain_sequence.to_le_bytes(),
         );
-        hash_field(&mut h, b"governance_decision_id", self.governance_decision_id.as_bytes());
-        hash_field(&mut h, b"governance_request_id", self.governance_request_id.as_bytes());
-        hash_field(&mut h, b"governance_intent_digest", self.governance_intent_digest.as_bytes());
-        hash_field(&mut h, b"rotation_decision_id", self.rotation_decision_id.as_bytes());
-        hash_field(&mut h, b"rotation_request_id", self.rotation_request_id.as_bytes());
+        hash_field(
+            &mut h,
+            b"governance_decision_id",
+            self.governance_decision_id.as_bytes(),
+        );
+        hash_field(
+            &mut h,
+            b"governance_request_id",
+            self.governance_request_id.as_bytes(),
+        );
+        hash_field(
+            &mut h,
+            b"governance_intent_digest",
+            self.governance_intent_digest.as_bytes(),
+        );
+        hash_field(
+            &mut h,
+            b"rotation_decision_id",
+            self.rotation_decision_id.as_bytes(),
+        );
+        hash_field(
+            &mut h,
+            b"rotation_request_id",
+            self.rotation_request_id.as_bytes(),
+        );
         hash_field(
             &mut h,
             b"rotation_transcript_digest",
             self.rotation_transcript_digest.as_bytes(),
         );
-        hash_field(&mut h, b"rotation_plan_digest", self.rotation_plan_digest.as_bytes());
-        hash_field(&mut h, b"current_set_digest", self.current_set_digest.as_bytes());
-        hash_field(&mut h, b"proposed_set_digest", self.proposed_set_digest.as_bytes());
+        hash_field(
+            &mut h,
+            b"rotation_plan_digest",
+            self.rotation_plan_digest.as_bytes(),
+        );
+        hash_field(
+            &mut h,
+            b"current_set_digest",
+            self.current_set_digest.as_bytes(),
+        );
+        hash_field(
+            &mut h,
+            b"proposed_set_digest",
+            self.proposed_set_digest.as_bytes(),
+        );
         hash_field(&mut h, b"delta_digest", self.delta_digest.as_bytes());
-        hash_field(&mut h, b"validator_set_epoch", &self.validator_set_epoch.to_le_bytes());
-        hash_field(&mut h, b"validator_set_version", &self.validator_set_version.to_le_bytes());
+        hash_field(
+            &mut h,
+            b"validator_set_epoch",
+            &self.validator_set_epoch.to_le_bytes(),
+        );
+        hash_field(
+            &mut h,
+            b"validator_set_version",
+            &self.validator_set_version.to_le_bytes(),
+        );
         hash_field(
             &mut h,
             b"proposed_validator_count",
             &self.proposed_validator_count.to_le_bytes(),
         );
-        hash_field(&mut h, b"rotation_nonce", &self.rotation_nonce.to_le_bytes());
-        hash_field(&mut h, b"application_decision_id", self.application_decision_id.as_bytes());
-        hash_field(&mut h, b"application_request_id", self.application_request_id.as_bytes());
-        hash_field(&mut h, b"application_intent_digest", self.application_intent_digest.as_bytes());
+        hash_field(
+            &mut h,
+            b"rotation_nonce",
+            &self.rotation_nonce.to_le_bytes(),
+        );
+        hash_field(
+            &mut h,
+            b"application_decision_id",
+            self.application_decision_id.as_bytes(),
+        );
+        hash_field(
+            &mut h,
+            b"application_request_id",
+            self.application_request_id.as_bytes(),
+        );
+        hash_field(
+            &mut h,
+            b"application_intent_digest",
+            self.application_intent_digest.as_bytes(),
+        );
         hash_field(
             &mut h,
             b"application_transcript_digest",
             self.application_transcript_digest.as_bytes(),
         );
-        hash_field(&mut h, b"application_nonce", &self.application_nonce.to_le_bytes());
-        hash_field(&mut h, b"epoch_transition_target", &self.epoch_transition_target.to_le_bytes());
-        hash_field(&mut h, b"live_application_nonce", &self.live_application_nonce.to_le_bytes());
+        hash_field(
+            &mut h,
+            b"application_nonce",
+            &self.application_nonce.to_le_bytes(),
+        );
+        hash_field(
+            &mut h,
+            b"epoch_transition_target",
+            &self.epoch_transition_target.to_le_bytes(),
+        );
+        hash_field(
+            &mut h,
+            b"live_application_nonce",
+            &self.live_application_nonce.to_le_bytes(),
+        );
         hash_field(
             &mut h,
             b"authorization_decision_id",
@@ -1187,27 +1336,33 @@ impl ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmat
         hash_field(
             &mut h,
             b"authority_activation_final_execution_decision_id",
-            self.authority_activation_final_execution_decision_id.as_bytes(),
+            self.authority_activation_final_execution_decision_id
+                .as_bytes(),
         );
         hash_field(
             &mut h,
             b"authority_activation_final_execution_request_id",
-            self.authority_activation_final_execution_request_id.as_bytes(),
+            self.authority_activation_final_execution_request_id
+                .as_bytes(),
         );
         hash_field(
             &mut h,
             b"authority_activation_final_execution_intent_digest",
-            self.authority_activation_final_execution_intent_digest.as_bytes(),
+            self.authority_activation_final_execution_intent_digest
+                .as_bytes(),
         );
         hash_field(
             &mut h,
             b"authority_activation_final_execution_transcript_digest",
-            self.authority_activation_final_execution_transcript_digest.as_bytes(),
+            self.authority_activation_final_execution_transcript_digest
+                .as_bytes(),
         );
         hash_field(
             &mut h,
             b"authority_activation_final_execution_nonce",
-            &self.authority_activation_final_execution_nonce.to_le_bytes(),
+            &self
+                .authority_activation_final_execution_nonce
+                .to_le_bytes(),
         );
         hash_field(
             &mut h,
@@ -1312,7 +1467,9 @@ impl ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmat
         hash_field(
             &mut h,
             b"authority_activation_post_final_execution_confirmation_nonce",
-            &self.authority_activation_post_final_execution_confirmation_nonce.to_le_bytes(),
+            &self
+                .authority_activation_post_final_execution_confirmation_nonce
+                .to_le_bytes(),
         );
         hash_field(
             &mut h,
@@ -1327,7 +1484,9 @@ impl ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmat
         hash_field(
             &mut h,
             b"precondition_current_validator_set_version",
-            &self.precondition_current_validator_set_version.to_le_bytes(),
+            &self
+                .precondition_current_validator_set_version
+                .to_le_bytes(),
         );
         hash_field(
             &mut h,
@@ -1393,9 +1552,17 @@ impl ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmat
 /// Custody binding canonical hashing (module-local; mirrors Run 321/323/325
 /// field order for cross-run digest stability).
 fn custody_hash_into(c: &GovernanceExecutionCustodyBinding, h: &mut sha3::Sha3_256) {
-    hash_field(h, b"custody_provider_class", c.provider_class.tag().as_bytes());
+    hash_field(
+        h,
+        b"custody_provider_class",
+        c.provider_class.tag().as_bytes(),
+    );
     hash_field(h, b"custody_key_handle", c.key_handle.as_bytes());
-    hash_field(h, b"custody_signer_fingerprint", c.signer_fingerprint.as_bytes());
+    hash_field(
+        h,
+        b"custody_signer_fingerprint",
+        c.signer_fingerprint.as_bytes(),
+    );
     hash_field(
         h,
         b"custody_transcript_digest",
@@ -1414,7 +1581,11 @@ fn attestation_hash_into(a: &GovernanceExecutionAttestationBinding, h: &mut sha3
 
 fn durable_hash_into(d: &GovernanceExecutionDurableReplayBinding, h: &mut sha3::Sha3_256) {
     hash_field(h, b"durable_record_id", d.durable_record_id.as_bytes());
-    hash_field(h, b"durable_record_digest", d.durable_record_digest.as_bytes());
+    hash_field(
+        h,
+        b"durable_record_digest",
+        d.durable_record_digest.as_bytes(),
+    );
 }
 
 /// Run 351 — deterministic runtime handoff package content digest wrapper
@@ -1439,7 +1610,8 @@ pub fn production_live_epoch_transition_authority_activation_post_final_executio
     use sha3::{Digest, Sha3_256};
     let mut h = Sha3_256::new();
     h.update(
-        PRODUCTION_LIVE_EPOCH_TRANSITION_AUTHORITY_ACTIVATION_FINAL_EXECUTION_REQUEST_DOMAIN_TAG.as_bytes(),
+        PRODUCTION_LIVE_EPOCH_TRANSITION_AUTHORITY_ACTIVATION_FINAL_EXECUTION_REQUEST_DOMAIN_TAG
+            .as_bytes(),
     );
     hash_field(&mut h, b"protocol_version", &protocol_version.to_le_bytes());
     hash_field(
@@ -1480,7 +1652,8 @@ pub fn production_live_epoch_transition_authority_activation_post_final_executio
     use sha3::{Digest, Sha3_256};
     let mut h = Sha3_256::new();
     h.update(
-        PRODUCTION_LIVE_EPOCH_TRANSITION_AUTHORITY_ACTIVATION_FINAL_EXECUTION_ID_DOMAIN_TAG.as_bytes(),
+        PRODUCTION_LIVE_EPOCH_TRANSITION_AUTHORITY_ACTIVATION_FINAL_EXECUTION_ID_DOMAIN_TAG
+            .as_bytes(),
     );
     hash_field(&mut h, b"protocol_version", &protocol_version.to_le_bytes());
     hash_field(
@@ -1488,7 +1661,11 @@ pub fn production_live_epoch_transition_authority_activation_post_final_executio
         b"guarded_mutation_intent_digest",
         guarded_mutation_intent_digest.as_bytes(),
     );
-    hash_field(&mut h, b"authority_activation_post_final_execution_confirmation_policy_id", authority_activation_post_final_execution_confirmation_policy_id.as_bytes());
+    hash_field(
+        &mut h,
+        b"authority_activation_post_final_execution_confirmation_policy_id",
+        authority_activation_post_final_execution_confirmation_policy_id.as_bytes(),
+    );
     hash_field(
         &mut h,
         b"epoch_transition_target",
@@ -1514,7 +1691,8 @@ pub fn production_live_epoch_transition_authority_activation_post_final_executio
     use sha3::{Digest, Sha3_256};
     let mut h = Sha3_256::new();
     h.update(
-        PRODUCTION_LIVE_EPOCH_TRANSITION_AUTHORITY_ACTIVATION_FINAL_EXECUTION_TRANSCRIPT_DOMAIN_TAG.as_bytes(),
+        PRODUCTION_LIVE_EPOCH_TRANSITION_AUTHORITY_ACTIVATION_FINAL_EXECUTION_TRANSCRIPT_DOMAIN_TAG
+            .as_bytes(),
     );
     hash_field(&mut h, b"protocol_version", &protocol_version.to_le_bytes());
     hash_field(&mut h, b"request_id", request_id.as_bytes());
@@ -1694,13 +1872,17 @@ pub enum ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfi
     DurableReplayUnavailable,
 
     // ---- Replay / freshness -------------------------------------------
-    StagedApplicationReplayRejected { staged_application_id: String },
+    StagedApplicationReplayRejected {
+        staged_application_id: String,
+    },
     StaleGovernanceEpoch,
     StaleAuthoritySequence,
     StaleValidatorSetEpoch,
     StaleValidatorSetVersion,
     ConflictingStagedApplicationForSameAuthorization,
-    LiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationAmbiguous { reason: String },
+    LiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationAmbiguous {
+        reason: String,
+    },
     MainNetRefused,
 }
 
@@ -1964,11 +2146,13 @@ impl ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmat
 /// transcript digest.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationDecision {
-    pub outcome: ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationOutcome,
+    pub outcome:
+        ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationOutcome,
     pub authority_activation_post_final_execution_confirmation_id: String,
     pub request_id: String,
-    pub authority_activation_post_final_execution_confirmation_artifact:
-        Option<ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationArtifact>,
+    pub authority_activation_post_final_execution_confirmation_artifact: Option<
+        ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationArtifact,
+    >,
     pub authority_activation_post_final_execution_confirmation_digest: String,
     pub transcript_digest: String,
 }
@@ -1982,7 +2166,10 @@ impl ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmat
     /// runtime handoff package (only on accept). The boundary never applies
     /// it.
     pub fn authorizes_future_mutation_only(&self) -> bool {
-        self.outcome.authorizes_future_mutation_only() && self.authority_activation_post_final_execution_confirmation_artifact.is_some()
+        self.outcome.authorizes_future_mutation_only()
+            && self
+                .authority_activation_post_final_execution_confirmation_artifact
+                .is_some()
     }
 }
 
@@ -1994,7 +2181,8 @@ impl ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmat
 /// application window. Every variant is non-mutating; no durable state is
 /// written.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationRecoveryOutcome {
+pub enum ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationRecoveryOutcome
+{
     /// No prior prepared staged application for this window — clean.
     NoPriorStagedApplicationWindow,
     /// A prior prepared staged application for this window was observed; the
@@ -2059,8 +2247,8 @@ impl ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmat
         ),
         ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationOutcome,
     > {
-        use ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationOutcome as O;
         use LiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationAuthoritySource as S;
+        use ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationOutcome as O;
         match source {
             S::VerifiedAuthorityActivationFinalExecutionDecision { decision } => {
                 if !decision.is_accept() {
@@ -2104,7 +2292,9 @@ impl ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmat
             S::LiveApplicationAuthorizationWithoutAuthorityActivationFinalExecution => {
                 Err(O::LiveApplicationAuthorizationAloneRejected)
             }
-            S::RotationPlanWithoutAuthorityActivationFinalExecution => Err(O::RotationPlanAloneRejected),
+            S::RotationPlanWithoutAuthorityActivationFinalExecution => {
+                Err(O::RotationPlanAloneRejected)
+            }
             S::GovernanceExecutionIntentWithoutAuthorityActivationFinalExecution => {
                 Err(O::GovernanceExecutionIntentAloneRejected)
             }
@@ -2129,7 +2319,8 @@ impl ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmat
         &self,
         binding_env: TrustBundleEnvironment,
         inputs: &ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationInputs,
-    ) -> Option<ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationOutcome> {
+    ) -> Option<ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationOutcome>
+    {
         use ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationOutcome as O;
 
         // 1. Disabled fails closed before any binding.
@@ -2189,22 +2380,29 @@ impl ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmat
         decision: &ProductionLiveEpochTransitionAuthorityActivationFinalExecutionDecision,
         intent: &ProductionLiveEpochTransitionAuthorityActivationFinalExecutionArtifact,
         inputs: &ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationInputs,
-    ) -> Option<ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationOutcome> {
+    ) -> Option<ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationOutcome>
+    {
         use ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationOutcome as O;
         let td = &inputs.trust_domain;
 
         // Consumed Run 349/350 epoch-transition runtime handoff decision
         // transcript binding.
-        if decision.authority_activation_final_execution_id != inputs.expected_authority_activation_final_execution_decision_id {
+        if decision.authority_activation_final_execution_id
+            != inputs.expected_authority_activation_final_execution_decision_id
+        {
             return Some(O::AuthorityActivationFinalExecutionDecisionIdMismatch);
         }
         if decision.request_id != inputs.expected_authority_activation_final_execution_request_id {
             return Some(O::AuthorityActivationFinalExecutionDecisionRequestIdMismatch);
         }
-        if decision.authority_activation_final_execution_digest != inputs.expected_authority_activation_final_execution_intent_digest {
+        if decision.authority_activation_final_execution_digest
+            != inputs.expected_authority_activation_final_execution_intent_digest
+        {
             return Some(O::AuthorityActivationFinalExecutionDecisionIntentDigestMismatch);
         }
-        if decision.transcript_digest != inputs.expected_authority_activation_final_execution_transcript_digest {
+        if decision.transcript_digest
+            != inputs.expected_authority_activation_final_execution_transcript_digest
+        {
             return Some(O::AuthorityActivationFinalExecutionDecisionTranscriptMismatch);
         }
         // The prepared runtime handoff package must reproduce the bound
@@ -2214,7 +2412,9 @@ impl ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmat
         }
         // The consumed runtime handoff package's re-exposed authority-activation-final-execution
         // nonce binding.
-        if intent.authority_activation_final_execution_nonce != inputs.expected_authority_activation_final_execution_nonce {
+        if intent.authority_activation_final_execution_nonce
+            != inputs.expected_authority_activation_final_execution_nonce
+        {
             return Some(O::WrongAuthorityActivationFinalExecutionNonce);
         }
 
@@ -2226,8 +2426,7 @@ impl ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmat
         {
             return Some(O::CommitAuthorizationDecisionIdMismatch);
         }
-        if intent.commit_authorization_request_id
-            != inputs.expected_commit_authorization_request_id
+        if intent.commit_authorization_request_id != inputs.expected_commit_authorization_request_id
         {
             return Some(O::CommitAuthorizationDecisionRequestIdMismatch);
         }
@@ -2249,14 +2448,10 @@ impl ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmat
         // Re-exposed Run 331/332 mutation-execution decision authority
         // tuple binding (carried through the consumed Run 349/350
         // authority-activation-final-execution artifact).
-        if intent.mutation_execution_decision_id
-            != inputs.expected_mutation_execution_decision_id
-        {
+        if intent.mutation_execution_decision_id != inputs.expected_mutation_execution_decision_id {
             return Some(O::MutationExecutionDecisionIdMismatch);
         }
-        if intent.mutation_execution_request_id
-            != inputs.expected_mutation_execution_request_id
-        {
+        if intent.mutation_execution_request_id != inputs.expected_mutation_execution_request_id {
             return Some(O::MutationExecutionDecisionRequestIdMismatch);
         }
         if intent.mutation_execution_intent_digest
@@ -2392,7 +2587,8 @@ impl ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmat
         if intent.authorization_intent_digest != inputs.expected_authorization_intent_digest {
             return Some(O::AuthorizationDecisionIntentDigestMismatch);
         }
-        if intent.authorization_transcript_digest != inputs.expected_authorization_transcript_digest {
+        if intent.authorization_transcript_digest != inputs.expected_authorization_transcript_digest
+        {
             return Some(O::AuthorizationDecisionTranscriptMismatch);
         }
 
@@ -2518,7 +2714,8 @@ impl ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmat
         request: &ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationRequest,
         intent: &ProductionLiveEpochTransitionAuthorityActivationFinalExecutionArtifact,
         inputs: &ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationInputs,
-    ) -> Option<ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationOutcome> {
+    ) -> Option<ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationOutcome>
+    {
         use ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationOutcome as O;
 
         if inputs.require_custody_evidence {
@@ -2598,14 +2795,18 @@ impl ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmat
 
     /// Core non-mutating evaluation. Returns the typed outcome plus, on
     /// accept, the prepared authorization intent.
-    fn evaluate_core<R: LiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationReplaySet + ?Sized>(
+    fn evaluate_core<
+        R: LiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationReplaySet + ?Sized,
+    >(
         &self,
         request: &ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationRequest,
         inputs: &ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationInputs,
         replay_set: &R,
     ) -> (
         ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationOutcome,
-        Option<ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationArtifact>,
+        Option<
+            ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationArtifact,
+        >,
     ) {
         use ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationOutcome as O;
 
@@ -2630,7 +2831,8 @@ impl ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmat
         };
 
         // Step 3: application-decision binding cross-checks.
-        if let Some(outcome) = self.check_application_binding(decision, application_intent, inputs) {
+        if let Some(outcome) = self.check_application_binding(decision, application_intent, inputs)
+        {
             return (outcome, None);
         }
 
@@ -2648,7 +2850,12 @@ impl ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmat
             request.authority_activation_post_final_execution_confirmation_nonce,
         );
         if replay_set.contains(&staged_application_id) {
-            return (O::StagedApplicationReplayRejected { staged_application_id }, None);
+            return (
+                O::StagedApplicationReplayRejected {
+                    staged_application_id,
+                },
+                None,
+            );
         }
         if application_intent.governance_epoch < inputs.min_governance_epoch {
             return (O::StaleGovernanceEpoch, None);
@@ -2875,8 +3082,10 @@ impl ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmat
             request.proposed_epoch_transition_target,
             request.authority_activation_post_final_execution_confirmation_nonce,
         );
-        record.authority_activation_post_final_execution_confirmation_digest = record.content_digest();
-        record.authority_activation_post_final_execution_confirmation_id = authority_activation_post_final_execution_confirmation_id;
+        record.authority_activation_post_final_execution_confirmation_digest =
+            record.content_digest();
+        record.authority_activation_post_final_execution_confirmation_id =
+            authority_activation_post_final_execution_confirmation_id;
         record.request_id = request_id.clone();
         record.transcript_digest =
             production_live_epoch_transition_authority_activation_post_final_execution_confirmation_transcript_digest(
@@ -2900,7 +3109,8 @@ impl ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmat
         request: &ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationRequest,
         inputs: &ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationInputs,
         replay_set: &R,
-    ) -> ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationDecision {
+    ) -> ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationDecision
+    {
         let (outcome, record) = self.evaluate_core(request, inputs, replay_set);
 
         // On accept the package carries the deterministic identifiers already;
@@ -2969,9 +3179,12 @@ impl ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmat
     /// Non-mutating; writes no durable state.
     pub fn recover_live_epoch_transition_authority_activation_post_final_execution_confirmation_window(
         &self,
-        prior: Option<&ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationArtifact>,
+        prior: Option<
+            &ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationArtifact,
+        >,
         current: &ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationArtifact,
-    ) -> ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationRecoveryOutcome {
+    ) -> ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationRecoveryOutcome
+    {
         use ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationRecoveryOutcome as R;
         if self.policy.is_disabled()
             || self.config.kind
@@ -3008,8 +3221,8 @@ impl ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmat
 // ===========================================================================
 
 /// Run 351 — the executor default policy is Disabled / fail-closed.
-pub fn production_live_epoch_transition_authority_activation_post_final_execution_confirmation_executor_default_is_disabled() -> bool
-{
+pub fn production_live_epoch_transition_authority_activation_post_final_execution_confirmation_executor_default_is_disabled(
+) -> bool {
     ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationExecutorPolicy::default()
         == ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationExecutorPolicy::Disabled
         && ProductionLiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationConfig::default().kind
@@ -3024,14 +3237,16 @@ pub fn production_live_epoch_transition_authority_activation_post_final_executio
 }
 
 /// Run 351 — the executor refuses MainNet absent production authority.
-pub fn production_live_epoch_transition_authority_activation_post_final_execution_confirmation_executor_mainnet_refused() -> bool {
+pub fn production_live_epoch_transition_authority_activation_post_final_execution_confirmation_executor_mainnet_refused(
+) -> bool {
     true
 }
 
 /// Run 351 — the executor never applies a live validator-set change,
 /// consensus epoch transition, or trust-state mutation; every outcome is
 /// non-mutating.
-pub fn production_live_epoch_transition_authority_activation_post_final_execution_confirmation_executor_is_non_mutating() -> bool {
+pub fn production_live_epoch_transition_authority_activation_post_final_execution_confirmation_executor_is_non_mutating(
+) -> bool {
     true
 }
 
@@ -3039,7 +3254,8 @@ pub fn production_live_epoch_transition_authority_activation_post_final_executio
 /// governance-proof-alone / governance-execution-intent-alone / fixture /
 /// local-operator / peer-majority / custody-only / RemoteSigner-only /
 /// arbitrary-bytes authority.
-pub fn production_live_epoch_transition_authority_activation_post_final_execution_confirmation_executor_never_falls_back() -> bool {
+pub fn production_live_epoch_transition_authority_activation_post_final_execution_confirmation_executor_never_falls_back(
+) -> bool {
     true
 }
 
@@ -3098,8 +3314,13 @@ impl LiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationFixture
 
     /// Returns `true` iff the given execution id was already applied to this
     /// fixture ledger.
-    pub fn has_applied(&self, authority_activation_post_final_execution_confirmation_id: &str) -> bool {
-        self.applied_execution_ids.iter().any(|id| id == authority_activation_post_final_execution_confirmation_id)
+    pub fn has_applied(
+        &self,
+        authority_activation_post_final_execution_confirmation_id: &str,
+    ) -> bool {
+        self.applied_execution_ids
+            .iter()
+            .any(|id| id == authority_activation_post_final_execution_confirmation_id)
     }
 
     /// Applies a prepared, accepted guarded mutation record to *this* in-memory
@@ -3121,7 +3342,8 @@ impl LiveEpochTransitionAuthorityActivationPostFinalExecutionConfirmationFixture
         self.current_epoch = record.epoch_transition_target;
         self.validator_set_version = record.validator_set_version;
         self.current_set_digest = record.proposed_set_digest.clone();
-        self.applied_execution_ids.push(authority_activation_post_final_execution_confirmation_id.to_string());
+        self.applied_execution_ids
+            .push(authority_activation_post_final_execution_confirmation_id.to_string());
         true
     }
 }

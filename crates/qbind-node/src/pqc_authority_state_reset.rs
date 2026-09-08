@@ -82,8 +82,8 @@ use qbind_types::NetworkEnvironment;
 use crate::pqc_authority_state::{
     authority_state_file_path, canonical_authority_state_digest, chain_id_hex,
     derive_authority_state_from_ratification, genesis_hash_hex, load_authority_state,
-    persist_authority_state_atomic, AuthorityStateDerivationError,
-    AuthorityStateDerivationInputs, AuthorityStateUpdateSource, PersistentAuthorityStateRecord,
+    persist_authority_state_atomic, AuthorityStateDerivationError, AuthorityStateDerivationInputs,
+    AuthorityStateUpdateSource, PersistentAuthorityStateRecord,
 };
 use crate::pqc_boot_genesis::{load_external_genesis, map_environment, BootGenesisError};
 use crate::pqc_ratification_input::{load_ratification_from_path, RatificationInputError};
@@ -209,8 +209,7 @@ impl AuthorityResetRefusal {
     pub fn detail(&self) -> String {
         match self {
             Self::MissingDataDir => {
-                "--data-dir is required for authority-state-reset (no implicit default)"
-                    .to_string()
+                "--data-dir is required for authority-state-reset (no implicit default)".to_string()
             }
             Self::MissingGenesisPath => {
                 "--genesis-path is required for authority-state-reset".to_string()
@@ -255,7 +254,10 @@ impl AuthorityResetRefusal {
                     .to_string()
             }
             Self::InvalidAuthorityConfig(s) => {
-                format!("genesis authority block failed structural validation: {}", s)
+                format!(
+                    "genesis authority block failed structural validation: {}",
+                    s
+                )
             }
             Self::ChainIdMismatch {
                 runtime_env,
@@ -464,9 +466,8 @@ fn format_hash_hex(h: &GenesisHash) -> String {
 /// lowercase hex.
 fn parse_expected_hash(raw: &str) -> Result<[u8; 32], AuthorityResetRefusal> {
     let trimmed = raw.strip_prefix("0x").unwrap_or(raw);
-    hex_decode_32(trimmed).ok_or_else(|| {
-        AuthorityResetRefusal::MalformedExpectedGenesisHash(raw.to_string())
-    })
+    hex_decode_32(trimmed)
+        .ok_or_else(|| AuthorityResetRefusal::MalformedExpectedGenesisHash(raw.to_string()))
 }
 
 fn binary_sha256_best_effort() -> String {
@@ -643,17 +644,16 @@ pub fn verify_authority_reset_inputs(
         current_height: None,
         current_epoch: None,
     };
-    let loaded =
-        TrustBundle::load_from_path_with_signing_keys_chain_id_and_activation(
-            trust_bundle_path,
-            inputs.environment,
-            runtime_chain_id,
-            inputs.validation_time_secs,
-            &bundle_signing_keys,
-            activation_ctx,
-        )
-        .map_err(|e: TrustBundleError| AuthorityResetRefusal::InvalidTrustBundle(e.to_string()))
-        .map(|(l, _activation)| l)?;
+    let loaded = TrustBundle::load_from_path_with_signing_keys_chain_id_and_activation(
+        trust_bundle_path,
+        inputs.environment,
+        runtime_chain_id,
+        inputs.validation_time_secs,
+        &bundle_signing_keys,
+        activation_ctx,
+    )
+    .map_err(|e: TrustBundleError| AuthorityResetRefusal::InvalidTrustBundle(e.to_string()))
+    .map(|(l, _activation)| l)?;
 
     let trust_bundle_fingerprint_hex = {
         let mut s = String::with_capacity(64);
@@ -679,8 +679,8 @@ pub fn verify_authority_reset_inputs(
         .ok_or(AuthorityResetRefusal::AuthorityKeyMaterialUnavailable)?;
 
     // ---- Ratification sidecar load + parse --------------------------------
-    let ratification = load_ratification_from_path(ratification_path)
-        .map_err(|e: RatificationInputError| {
+    let ratification =
+        load_ratification_from_path(ratification_path).map_err(|e: RatificationInputError| {
             AuthorityResetRefusal::InvalidRatification(e.to_string())
         })?;
 
@@ -696,9 +696,7 @@ pub fn verify_authority_reset_inputs(
         // must never authorize a marker reset.
         policy: RatificationEnforcementPolicy::Strict,
     })
-    .map_err(|e| {
-        AuthorityResetRefusal::RatificationEnforcementFailed(format!("{}", e))
-    })?;
+    .map_err(|e| AuthorityResetRefusal::RatificationEnforcementFailed(format!("{}", e)))?;
 
     let ratified = match outcome {
         RatificationEnforcementOutcome::Ratified(r) => r,
@@ -720,22 +718,21 @@ pub fn verify_authority_reset_inputs(
     let runtime_genesis_hash_hex = format_hash_hex(&computed_hash);
 
     // ---- Marker derivation (Run 118) --------------------------------------
-    let new_marker =
-        derive_authority_state_from_ratification(AuthorityStateDerivationInputs {
-            runtime_env: inputs.environment,
-            runtime_chain_id,
-            runtime_genesis_hash_hex: &runtime_genesis_hash_hex,
-            authority_policy_version: authority.authority_policy_version,
-            authority_sequence: authority.authority_sequence,
-            authority_epoch: authority.authority_epoch,
-            ratification: &ratification,
-            ratified: &ratified,
-            update_source: AuthorityStateUpdateSource::OperatorReset,
-            updated_at_unix_secs: inputs.updated_at_unix_secs,
-        })
-        .map_err(|e: AuthorityStateDerivationError| {
-            AuthorityResetRefusal::TargetMarkerDerivationFailed(e.to_string())
-        })?;
+    let new_marker = derive_authority_state_from_ratification(AuthorityStateDerivationInputs {
+        runtime_env: inputs.environment,
+        runtime_chain_id,
+        runtime_genesis_hash_hex: &runtime_genesis_hash_hex,
+        authority_policy_version: authority.authority_policy_version,
+        authority_sequence: authority.authority_sequence,
+        authority_epoch: authority.authority_epoch,
+        ratification: &ratification,
+        ratified: &ratified,
+        update_source: AuthorityStateUpdateSource::OperatorReset,
+        updated_at_unix_secs: inputs.updated_at_unix_secs,
+    })
+    .map_err(|e: AuthorityStateDerivationError| {
+        AuthorityResetRefusal::TargetMarkerDerivationFailed(e.to_string())
+    })?;
 
     // ---- Existing on-disk marker archive ----------------------------------
     let marker_path = authority_state_file_path(data_dir);
@@ -1008,9 +1005,7 @@ pub fn execute_authority_state_reset(
     }
 
     // Step 3b — persist the marker atomically.
-    if let Err(persist_err) =
-        persist_authority_state_atomic(&plan.marker_path, &plan.new_marker)
-    {
+    if let Err(persist_err) = persist_authority_state_atomic(&plan.marker_path, &plan.new_marker) {
         let refusal = AuthorityResetRefusal::MarkerPersistFailed(persist_err.to_string());
         let final_record = build_refusal_audit_record(inputs, Some(&plan), &refusal);
         let _ = write_authority_reset_audit(&audit_path, &final_record);
@@ -1062,8 +1057,8 @@ mod tests {
 
     #[test]
     fn run127_refuses_when_data_dir_missing() {
-        let err = verify_authority_reset_inputs(&base_inputs(NetworkEnvironment::Devnet))
-            .unwrap_err();
+        let err =
+            verify_authority_reset_inputs(&base_inputs(NetworkEnvironment::Devnet)).unwrap_err();
         assert_eq!(err, AuthorityResetRefusal::MissingDataDir);
         assert_eq!(err.stable_id(), "MissingDataDir");
     }
@@ -1270,16 +1265,46 @@ mod tests {
     fn run127_refusal_stable_ids_are_stable() {
         let cases: &[(&dyn Fn() -> AuthorityResetRefusal, &str)] = &[
             (&|| AuthorityResetRefusal::MissingDataDir, "MissingDataDir"),
-            (&|| AuthorityResetRefusal::MissingGenesisPath, "MissingGenesisPath"),
-            (&|| AuthorityResetRefusal::MissingExpectedGenesisHash, "MissingExpectedGenesisHash"),
-            (&|| AuthorityResetRefusal::MissingTrustBundle, "MissingTrustBundle"),
-            (&|| AuthorityResetRefusal::MissingRatification, "MissingRatification"),
-            (&|| AuthorityResetRefusal::AuditOutputMissing, "AuditOutputMissing"),
-            (&|| AuthorityResetRefusal::MainNetLocalResetUnsupported, "MainNetLocalResetUnsupported"),
-            (&|| AuthorityResetRefusal::MissingAuthorityConfig, "MissingAuthorityConfig"),
-            (&|| AuthorityResetRefusal::AuthorityKeyMaterialUnavailable, "AuthorityKeyMaterialUnavailable"),
-            (&|| AuthorityResetRefusal::AuthorityKeyMaterialMalformed, "AuthorityKeyMaterialMalformed"),
-            (&|| AuthorityResetRefusal::TransportRootNotAllowed, "TransportRootNotAllowed"),
+            (
+                &|| AuthorityResetRefusal::MissingGenesisPath,
+                "MissingGenesisPath",
+            ),
+            (
+                &|| AuthorityResetRefusal::MissingExpectedGenesisHash,
+                "MissingExpectedGenesisHash",
+            ),
+            (
+                &|| AuthorityResetRefusal::MissingTrustBundle,
+                "MissingTrustBundle",
+            ),
+            (
+                &|| AuthorityResetRefusal::MissingRatification,
+                "MissingRatification",
+            ),
+            (
+                &|| AuthorityResetRefusal::AuditOutputMissing,
+                "AuditOutputMissing",
+            ),
+            (
+                &|| AuthorityResetRefusal::MainNetLocalResetUnsupported,
+                "MainNetLocalResetUnsupported",
+            ),
+            (
+                &|| AuthorityResetRefusal::MissingAuthorityConfig,
+                "MissingAuthorityConfig",
+            ),
+            (
+                &|| AuthorityResetRefusal::AuthorityKeyMaterialUnavailable,
+                "AuthorityKeyMaterialUnavailable",
+            ),
+            (
+                &|| AuthorityResetRefusal::AuthorityKeyMaterialMalformed,
+                "AuthorityKeyMaterialMalformed",
+            ),
+            (
+                &|| AuthorityResetRefusal::TransportRootNotAllowed,
+                "TransportRootNotAllowed",
+            ),
         ];
         for (f, expected) in cases {
             assert_eq!(f().stable_id(), *expected);

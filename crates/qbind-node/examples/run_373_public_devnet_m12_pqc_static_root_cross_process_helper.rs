@@ -346,7 +346,11 @@ fn load_static_root_config_from_files(
     let peer_leaf_certs: Vec<PqcPeerLeafCert> = peer_vids
         .iter()
         .map(|vid| {
-            let spec = format!("{}:{}", vid, dir.join(format!("v{}.cert.bin", vid)).display());
+            let spec = format!(
+                "{}:{}",
+                vid,
+                dir.join(format!("v{}.cert.bin", vid)).display()
+            );
             parse_pqc_peer_leaf_cert_spec(&spec).expect("parse peer leaf cert spec")
         })
         .collect();
@@ -400,18 +404,14 @@ async fn dial_and_flood_static_root(
     .expect("load local leaf credentials");
     let local_node_id = cert_derived_node_id_from_bytes(&leaf_credentials.cert_bytes);
 
-    let trusted_roots =
-        parse_pqc_trusted_root_specs(&[trusted_root_spec.trim().to_string()], true)
-            .expect("parse trusted root spec");
+    let trusted_roots = parse_pqc_trusted_root_specs(&[trusted_root_spec.trim().to_string()], true)
+        .expect("parse trusted root spec");
 
     // The deployed node A's leaf cert is attached as a peer-leaf-cert so this
     // dialer can build the KEMTLS ClientInit against node A's certified pk.
-    let peer_leaf = parse_pqc_peer_leaf_cert_spec(&format!(
-        "{}:{}",
-        peer_vid,
-        target_cert_path.display()
-    ))
-    .expect("parse target peer leaf cert");
+    let peer_leaf =
+        parse_pqc_peer_leaf_cert_spec(&format!("{}:{}", peer_vid, target_cert_path.display()))
+            .expect("parse target peer leaf cert");
 
     let pqc_config = PqcStaticRootConfig {
         mode: PqcRootMode::PqcStaticRoot,
@@ -618,8 +618,11 @@ async fn run_scenarios(out_dir: &Path) -> bool {
         let static_root_flags_public = help.contains("--p2p-pqc-root-mode")
             && help.contains("--p2p-trusted-root")
             && help.contains("--p2p-leaf-cert");
-        let ok =
-            all_hidden && real_parse && invented_rejected && strict_flag_public && static_root_flags_public;
+        let ok = all_hidden
+            && real_parse
+            && invented_rejected
+            && strict_flag_public
+            && static_root_flags_public;
         scenarios.push(Scenario {
             id: "12_hidden_cli_surface_checked",
             expected: "hidden abuse/DoS flags absent from --help; real parse; invented rejected; \
@@ -703,7 +706,11 @@ async fn run_scenarios(out_dir: &Path) -> bool {
         scenarios.push(Scenario {
             id: "11_mainnet_refused",
             expected: "MainNet abuse/DoS config refused (direct + CLI)".to_string(),
-            actual: format!("direct_err={} cli_err={}", r_direct.is_err(), r_cli.is_err()),
+            actual: format!(
+                "direct_err={} cli_err={}",
+                r_direct.is_err(),
+                r_cli.is_err()
+            ),
             matched: ok,
             detail: "MainNet has no production abuse/DoS policy; an enabled MainNet config never \
                      validates."
@@ -780,7 +787,12 @@ async fn run_scenarios(out_dir: &Path) -> bool {
         &node_a_addr,
         node_a_static_peers,
         pqc_a,
-        &["--p2p-max-messages-per-second", "5", "--p2p-burst-allowance", "5"],
+        &[
+            "--p2p-max-messages-per-second",
+            "5",
+            "--p2p-burst-allowance",
+            "5",
+        ],
         Arc::clone(&node_metrics),
     )
     .await;
@@ -798,8 +810,16 @@ async fn run_scenarios(out_dir: &Path) -> bool {
     // static-root mutual-auth handshake and sends a small number of frames well
     // under the 5/s budget, paced. Expect zero per-peer drops and node A to
     // observe the honest peer's cert-derived NodeId.
-    let (honest_connected, honest_saw_a, honest_enqueued) =
-        static_root_flood_against(&material_dir, honest_port, node_a_port, node_a_node_id, 1, 4, 400).await;
+    let (honest_connected, honest_saw_a, honest_enqueued) = static_root_flood_against(
+        &material_dir,
+        honest_port,
+        node_a_port,
+        node_a_node_id,
+        1,
+        4,
+        400,
+    )
+    .await;
     let a_peers_after_honest = ctx_a.p2p_service.connected_peers();
     let honest_admitted = a_peers_after_honest.contains(&honest_nid);
     let drops_after_under = node_metrics.peer_network().total_rate_limit_drops();
@@ -849,10 +869,11 @@ async fn run_scenarios(out_dir: &Path) -> bool {
             drops_after_under, rendered_after_under
         ),
         matched: drops_after_under == 0 && rendered_after_under == 0,
-        detail: "Frames sent under the 5 msg/s budget over the static-root strict-auth socket were \
+        detail:
+            "Frames sent under the 5 msg/s budget over the static-root strict-auth socket were \
                  all forwarded; the deployed per-peer limiter dropped nothing and the exported \
                  counter stayed absent."
-            .to_string(),
+                .to_string(),
     });
 
     // 06 over_budget_static_root_peer: the abusive peer (vid 2) floods many
@@ -860,9 +881,16 @@ async fn run_scenarios(out_dir: &Path) -> bool {
     // over-budget frames and the exported counter to increment, attributed to the
     // abusive peer's cert-derived bucket label.
     let over_frames = 60u64;
-    let (abusive_connected, _abusive_saw_a, abusive_enqueued) =
-        static_root_flood_against(&material_dir, abusive_port, node_a_port, node_a_node_id, 2, over_frames, 8)
-            .await;
+    let (abusive_connected, _abusive_saw_a, abusive_enqueued) = static_root_flood_against(
+        &material_dir,
+        abusive_port,
+        node_a_port,
+        node_a_node_id,
+        2,
+        over_frames,
+        8,
+    )
+    .await;
     let drops_after_over = node_metrics.peer_network().total_rate_limit_drops();
     let body_after_over = node_metrics.format_metrics();
     let rendered_after_over = sum_per_peer_rate_limit_drops(&body_after_over);
@@ -900,8 +928,16 @@ async fn run_scenarios(out_dir: &Path) -> bool {
     // attributed to the abusive bucket; the honest peer's bucket records zero
     // drops. Re-drive the honest peer AFTER the abusive flood to confirm it is
     // still under budget (its bucket still records zero drops).
-    let (honest2_connected, _honest2_saw_a, honest2_enqueued) =
-        static_root_flood_against(&material_dir, honest_port, node_a_port, node_a_node_id, 1, 4, 400).await;
+    let (honest2_connected, _honest2_saw_a, honest2_enqueued) = static_root_flood_against(
+        &material_dir,
+        honest_port,
+        node_a_port,
+        node_a_node_id,
+        1,
+        4,
+        400,
+    )
+    .await;
     let honest_bucket_drops_after = node_metrics
         .peer_network()
         .peer_rate_limit_drop_count(PeerId(honest_label))
@@ -1035,8 +1071,14 @@ async fn run_scenarios(out_dir: &Path) -> bool {
         honest_bucket_drops_after
     ));
     metric_evidence.push_str(&format!("abusive_bucket_drops: {}\n", abusive_bucket_drops));
-    metric_evidence.push_str(&format!("under_budget_per_peer_drops: {}\n", rendered_after_under));
-    metric_evidence.push_str(&format!("over_budget_per_peer_drops: {}\n", rendered_after_over));
+    metric_evidence.push_str(&format!(
+        "under_budget_per_peer_drops: {}\n",
+        rendered_after_under
+    ));
+    metric_evidence.push_str(&format!(
+        "over_budget_per_peer_drops: {}\n",
+        rendered_after_over
+    ));
     metric_evidence.push_str(&format!(
         "per_peer_family_present: {}\n",
         body_after_over.contains("qbind_net_per_peer_drops_total")
@@ -1061,7 +1103,10 @@ async fn run_scenarios(out_dir: &Path) -> bool {
             "id: {}\nexpected: {}\nactual: {}\nmatched: {}\ndetail: {}\n",
             s.id, s.expected, s.actual, s.matched, s.detail
         );
-        write_file(&out_dir.join("scenarios").join(format!("{}.txt", s.id)), &detail);
+        write_file(
+            &out_dir.join("scenarios").join(format!("{}.txt", s.id)),
+            &detail,
+        );
     }
     write_file(&out_dir.join("manifest.txt"), &manifest);
 
@@ -1078,7 +1123,10 @@ async fn run_scenarios(out_dir: &Path) -> bool {
     write_file(&out_dir.join("helper_summary.txt"), &summary);
 
     for s in &scenarios {
-        println!("[run373-helper] {} matched={} ({})", s.id, s.matched, s.actual);
+        println!(
+            "[run373-helper] {} matched={} ({})",
+            s.id, s.matched, s.actual
+        );
     }
     println!("[run373-helper] verdict: {}", verdict);
     all_ok
@@ -1107,17 +1155,22 @@ fn main() {
             //   <target_cert_file> <out_file>
             let peer_spec = args.get(2).expect("peer_spec").clone();
             let listen_addr = args.get(3).expect("listen_addr").clone();
-            let local_vid: u64 = args.get(4).expect("local_vid").parse().expect("local_vid u64");
+            let local_vid: u64 = args
+                .get(4)
+                .expect("local_vid")
+                .parse()
+                .expect("local_vid u64");
             let frames: u64 = args.get(5).expect("frames").parse().expect("frames u64");
             let pace_ms: u64 = args.get(6).expect("pace_ms").parse().expect("pace_ms u64");
-            let trusted_root_spec_file = PathBuf::from(args.get(7).expect("trusted_root_spec_file"));
+            let trusted_root_spec_file =
+                PathBuf::from(args.get(7).expect("trusted_root_spec_file"));
             let leaf_cert_file = PathBuf::from(args.get(8).expect("leaf_cert_file"));
             let leaf_key_file = PathBuf::from(args.get(9).expect("leaf_key_file"));
             let target_cert_file = PathBuf::from(args.get(10).expect("target_cert_file"));
             let out_file = PathBuf::from(args.get(11).expect("out_file"));
 
-            let trusted_root_spec = fs::read_to_string(&trusted_root_spec_file)
-                .expect("read trusted root spec file");
+            let trusted_root_spec =
+                fs::read_to_string(&trusted_root_spec_file).expect("read trusted root spec file");
 
             let rt = build_runtime();
             let result = rt.block_on(dial_and_flood_static_root(

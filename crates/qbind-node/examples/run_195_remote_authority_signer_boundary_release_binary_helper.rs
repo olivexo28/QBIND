@@ -119,7 +119,13 @@ const EXPIRES: u64 = 1_700_001_000;
 // ---------------------------------------------------------------------------
 
 fn domain_for(env: TrustBundleEnvironment) -> AuthorityTrustDomain {
-    AuthorityTrustDomain::new(env, CHAIN_ID, GENESIS_HASH, ROOT_FP, PQC_LIFECYCLE_SUITE_ML_DSA_44)
+    AuthorityTrustDomain::new(
+        env,
+        CHAIN_ID,
+        GENESIS_HASH,
+        ROOT_FP,
+        PQC_LIFECYCLE_SUITE_ML_DSA_44,
+    )
 }
 
 fn build_v2(
@@ -149,7 +155,14 @@ fn build_v2(
 }
 
 fn rotate_candidate(env: TrustBundleEnvironment) -> PersistentAuthorityStateRecordV2 {
-    build_v2(env, KEY_B, 2, BundleSigningRatificationV2Action::Rotate, Some(KEY_A), DIGEST_2)
+    build_v2(
+        env,
+        KEY_B,
+        2,
+        BundleSigningRatificationV2Action::Rotate,
+        Some(KEY_A),
+        DIGEST_2,
+    )
 }
 
 fn prior_versioned(env: TrustBundleEnvironment) -> PersistentAuthorityStateRecordVersioned {
@@ -287,7 +300,14 @@ fn scenario(env: TrustBundleEnvironment) -> Scenario {
 }
 
 fn validate(s: &Scenario, policy: RemoteSignerPolicy) -> RemoteSignerOutcome {
-    validate_remote_signer(&s.identity, &s.request, &s.response, &s.domain, &s.expected, policy)
+    validate_remote_signer(
+        &s.identity,
+        &s.request,
+        &s.response,
+        &s.domain,
+        &s.expected,
+        policy,
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -330,8 +350,10 @@ fn matches_expect(actual: &RemoteSignerOutcome, expected: Expect) -> bool {
     use RemoteSignerOutcome as O;
     matches!(
         (actual, expected),
-        (O::FixtureLoopbackAccepted { .. }, Expect::FixtureLoopbackAccepted)
-            | (O::Disabled, Expect::Disabled)
+        (
+            O::FixtureLoopbackAccepted { .. },
+            Expect::FixtureLoopbackAccepted
+        ) | (O::Disabled, Expect::Disabled)
             | (
                 O::FixtureRejectedProductionRequired,
                 Expect::FixtureRejectedProductionRequired
@@ -368,8 +390,14 @@ fn matches_expect(actual: &RemoteSignerOutcome, expected: Expect) -> bool {
                 Expect::WrongAuthorityDomainSequence
             )
             | (O::WrongRequestDigest { .. }, Expect::WrongRequestDigest)
-            | (O::StaleOrReplayedRequest { .. }, Expect::StaleOrReplayedRequest)
-            | (O::StaleOrReplayedResponse { .. }, Expect::StaleOrReplayedResponse)
+            | (
+                O::StaleOrReplayedRequest { .. },
+                Expect::StaleOrReplayedRequest
+            )
+            | (
+                O::StaleOrReplayedResponse { .. },
+                Expect::StaleOrReplayedResponse
+            )
             | (O::ExpiredAttestation { .. }, Expect::ExpiredAttestation)
             | (O::ExpiredResponse { .. }, Expect::ExpiredResponse)
             | (O::UnsupportedSuite { .. }, Expect::UnsupportedSuite)
@@ -837,7 +865,10 @@ fn run_scenarios(
             scn_dir.join("actual.txt"),
             format!("outcome={:?}\tmatch={}\n", outcome, ok),
         )?;
-        let line = format!("{}\t{:?}\t{:?}\tmatch={}\n", case.id, case.expected, outcome, ok);
+        let line = format!(
+            "{}\t{:?}\t{:?}\tmatch={}\n",
+            case.id, case.expected, outcome, ok
+        );
         manifest.push_str(&line);
         expected_buf.push_str(&format!("{}\t{:?}\n", case.id, case.expected));
         actual_buf.push_str(&format!("{}\t{:?}\n", case.id, outcome));
@@ -865,7 +896,10 @@ fn run_canonical_digest_table(out_dir: &Path) -> std::io::Result<(usize, usize)>
             pass += 1;
         } else {
             fail += 1;
-            eprintln!("[run-195-helper] FAIL canonical-digest: {} {}", label, detail);
+            eprintln!(
+                "[run-195-helper] FAIL canonical-digest: {} {}",
+                label, detail
+            );
         }
         buf.push_str(&format!("{}\tok={}\t{}\n", label, ok, detail));
     };
@@ -885,15 +919,27 @@ fn run_canonical_digest_table(out_dir: &Path) -> std::io::Result<(usize, usize)>
     // Field sensitivity: changing each bound field changes the digest.
     let mut env_req = base_req.clone();
     env_req.environment = TrustBundleEnvironment::Testnet;
-    record("env_changes_digest", env_req.canonical_digest() != base, "environment");
+    record(
+        "env_changes_digest",
+        env_req.canonical_digest() != base,
+        "environment",
+    );
 
     let mut chain_req = base_req.clone();
     chain_req.chain_id = OTHER_CHAIN.to_string();
-    record("chain_changes_digest", chain_req.canonical_digest() != base, "chain_id");
+    record(
+        "chain_changes_digest",
+        chain_req.canonical_digest() != base,
+        "chain_id",
+    );
 
     let mut gen_req = base_req.clone();
     gen_req.genesis_hash = OTHER_GENESIS.to_string();
-    record("genesis_changes_digest", gen_req.canonical_digest() != base, "genesis_hash");
+    record(
+        "genesis_changes_digest",
+        gen_req.canonical_digest() != base,
+        "genesis_hash",
+    );
 
     let mut root_req = base_req.clone();
     root_req.authority_root_fingerprint = OTHER_ROOT_FP.to_string();
@@ -905,7 +951,11 @@ fn run_canonical_digest_table(out_dir: &Path) -> std::io::Result<(usize, usize)>
 
     let mut act_req = base_req.clone();
     act_req.lifecycle_action = LocalLifecycleAction::Revoke;
-    record("action_changes_digest", act_req.canonical_digest() != base, "lifecycle_action");
+    record(
+        "action_changes_digest",
+        act_req.canonical_digest() != base,
+        "lifecycle_action",
+    );
 
     let mut cand_req = base_req.clone();
     cand_req.candidate_digest = DIGEST_OTHER.to_string();
@@ -933,7 +983,11 @@ fn run_canonical_digest_table(out_dir: &Path) -> std::io::Result<(usize, usize)>
 
     let mut nonce_req = base_req.clone();
     nonce_req.replay_nonce = "different".to_string();
-    record("nonce_changes_digest", nonce_req.canonical_digest() != base, "replay_nonce");
+    record(
+        "nonce_changes_digest",
+        nonce_req.canonical_digest() != base,
+        "replay_nonce",
+    );
 
     // Fixture loopback response echoes the canonical request digest.
     let fixture = fixture_signer(TrustBundleEnvironment::Devnet, &candidate);
@@ -973,8 +1027,14 @@ fn run_policy_mode_table(out_dir: &Path) -> std::io::Result<(usize, usize)> {
         buf.push_str(&format!("{}\tok={}\n", label, ok));
     };
 
-    record("default_policy_is_disabled", RemoteSignerPolicy::default() == RemoteSignerPolicy::Disabled);
-    record("tag_disabled", RemoteSignerPolicy::Disabled.tag() == "disabled");
+    record(
+        "default_policy_is_disabled",
+        RemoteSignerPolicy::default() == RemoteSignerPolicy::Disabled,
+    );
+    record(
+        "tag_disabled",
+        RemoteSignerPolicy::Disabled.tag() == "disabled",
+    );
     record(
         "tag_fixture_loopback_allowed",
         RemoteSignerPolicy::FixtureLoopbackAllowed.tag() == "fixture-loopback-allowed",
@@ -995,14 +1055,21 @@ fn run_policy_mode_table(out_dir: &Path) -> std::io::Result<(usize, usize)> {
     );
     record(
         "requires_production_remote_signer_mainnet",
-        RemoteSignerPolicy::MainnetProductionRemoteSignerRequired.requires_production_remote_signer(),
+        RemoteSignerPolicy::MainnetProductionRemoteSignerRequired
+            .requires_production_remote_signer(),
     );
     record(
         "fixture_policy_does_not_require_production",
         !RemoteSignerPolicy::FixtureLoopbackAllowed.requires_production_remote_signer(),
     );
-    record("tag_mode_fixture_loopback", RemoteSignerMode::FixtureLoopback.tag() == "fixture-loopback");
-    record("tag_mode_production", RemoteSignerMode::Production.tag() == "production");
+    record(
+        "tag_mode_fixture_loopback",
+        RemoteSignerMode::FixtureLoopback.tag() == "fixture-loopback",
+    );
+    record(
+        "tag_mode_production",
+        RemoteSignerMode::Production.tag() == "production",
+    );
 
     // Fixture vs production signer separation: the production signer is
     // callable through the trait object but always returns the typed
@@ -1020,7 +1087,10 @@ fn run_policy_mode_table(out_dir: &Path) -> std::io::Result<(usize, usize)> {
         identity: identity(TrustBundleEnvironment::Devnet, &candidate),
     };
     let prod_dyn: &dyn RemoteAuthoritySigner = &prod;
-    record("production_signer_identity_reachable", prod_dyn.identity().signer_id == SIGNER_ID);
+    record(
+        "production_signer_identity_reachable",
+        prod_dyn.identity().signer_id == SIGNER_ID,
+    );
     record(
         "production_signer_fails_closed",
         prod_dyn.sign(&req) == Err(RemoteSignerOutcome::ProductionRemoteSignerUnavailable),
@@ -1045,7 +1115,10 @@ fn run_custody_routing_table(out_dir: &Path) -> std::io::Result<(usize, usize)> 
             pass += 1;
         } else {
             fail += 1;
-            eprintln!("[run-195-helper] FAIL custody-routing: {} {}", label, detail);
+            eprintln!(
+                "[run-195-helper] FAIL custody-routing: {} {}",
+                label, detail
+            );
         }
         buf.push_str(&format!("{}\tok={}\t{}\n", label, ok, detail));
     };
@@ -1171,7 +1244,10 @@ fn run_composition_table(out_dir: &Path) -> std::io::Result<(usize, usize)> {
             pass += 1;
         } else {
             fail += 1;
-            eprintln!("[run-195-helper] FAIL composition: {} actual={:?}", label, outcome);
+            eprintln!(
+                "[run-195-helper] FAIL composition: {} actual={:?}",
+                label, outcome
+            );
         }
         buf.push_str(&format!("{}\tok={}\toutcome={:?}\n", label, ok, outcome));
     };
@@ -1222,7 +1298,10 @@ fn run_composition_table(out_dir: &Path) -> std::io::Result<(usize, usize)> {
         );
         record(
             "R26_custody_invalid_rejected_before_remote_signer",
-            matches!(o, LifecycleCustodyRemoteSignerOutcome::LifecycleOrCustodyRejected(_)),
+            matches!(
+                o,
+                LifecycleCustodyRemoteSignerOutcome::LifecycleOrCustodyRejected(_)
+            ),
             &o,
         );
     }
@@ -1247,7 +1326,10 @@ fn run_composition_table(out_dir: &Path) -> std::io::Result<(usize, usize)> {
         );
         record(
             "R27_custody_valid_remote_signer_invalid_rejected",
-            matches!(o, LifecycleCustodyRemoteSignerOutcome::RemoteSignerRejected { .. }),
+            matches!(
+                o,
+                LifecycleCustodyRemoteSignerOutcome::RemoteSignerRejected { .. }
+            ),
             &o,
         );
     }
@@ -1573,10 +1655,8 @@ fn main() {
     fs::write(out_dir.join("expected_outcomes.txt"), &expected_buf).expect("write expected");
     fs::write(out_dir.join("actual_outcomes.txt"), &actual_buf).expect("write actual");
 
-    let total_pass =
-        s_pass + g_pass + p_pass + c_pass + m_pass + r_pass + n_pass + d_pass;
-    let total_fail =
-        s_fail + g_fail + p_fail + c_fail + m_fail + r_fail + n_fail + d_fail;
+    let total_pass = s_pass + g_pass + p_pass + c_pass + m_pass + r_pass + n_pass + d_pass;
+    let total_fail = s_fail + g_fail + p_fail + c_fail + m_fail + r_fail + n_fail + d_fail;
     let verdict = if total_fail == 0 { "PASS" } else { "FAIL" };
 
     let mut summary =

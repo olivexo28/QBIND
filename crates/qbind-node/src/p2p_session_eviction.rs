@@ -159,12 +159,7 @@ impl EvictionReport {
     /// the registry size they just drained — a violation would
     /// indicate a programming error in the eviction loop, not an
     /// operator-driven condition.
-    pub fn new(
-        reason: EvictionReason,
-        attempted: usize,
-        evicted: usize,
-        failed: usize,
-    ) -> Self {
+    pub fn new(reason: EvictionReason, attempted: usize, evicted: usize, failed: usize) -> Self {
         assert_eq!(
             attempted,
             evicted + failed,
@@ -270,10 +265,7 @@ pub trait P2pSessionEvictor: Send + Sync {
     ///
     /// MUST NOT mutate the trust bundle, the active roots /
     /// revocation sets, or the persisted sequence record.
-    fn evict_all_sessions(
-        &self,
-        reason: EvictionReason,
-    ) -> Result<EvictionReport, EvictionError>;
+    fn evict_all_sessions(&self, reason: EvictionReason) -> Result<EvictionReport, EvictionError>;
 }
 
 /// Deterministic in-memory [`P2pSessionEvictor`] for tests.
@@ -340,10 +332,7 @@ impl P2pSessionEvictor for MockP2pSessionEvictor {
         self.live.load(Ordering::Relaxed)
     }
 
-    fn evict_all_sessions(
-        &self,
-        reason: EvictionReason,
-    ) -> Result<EvictionReport, EvictionError> {
+    fn evict_all_sessions(&self, reason: EvictionReason) -> Result<EvictionReport, EvictionError> {
         self.attempt_counter.fetch_add(1, Ordering::Relaxed);
         let attempted = self.live.swap(0, Ordering::Relaxed);
         let failed = self.failure_seed.swap(0, Ordering::Relaxed).min(attempted);
@@ -425,7 +414,11 @@ mod tests {
         let line = r.log_line();
         assert!(line.contains("Run 072"), "{}", line);
         assert!(line.contains("p2p session eviction"), "{}", line);
-        assert!(line.contains("reason=trust_bundle_reload_apply"), "{}", line);
+        assert!(
+            line.contains("reason=trust_bundle_reload_apply"),
+            "{}",
+            line
+        );
         assert!(line.contains("attempted=4"), "{}", line);
         assert!(line.contains("evicted=4"), "{}", line);
         assert!(line.contains("failed=0"), "{}", line);

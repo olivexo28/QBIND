@@ -298,9 +298,7 @@ impl CustodyAttestationEvidenceWire {
             attestation_commitment: self.attestation_commitment.clone(),
         };
         if !evidence.is_well_formed() {
-            return Err(CustodyAttestationWireParseError::EmptyRequiredField {
-                part: "evidence",
-            });
+            return Err(CustodyAttestationWireParseError::EmptyRequiredField { part: "evidence" });
         }
         Ok(evidence)
     }
@@ -483,7 +481,10 @@ impl CustodyAttestationPayloadWire {
 
     /// Source/test helper: build a Run 207 combined wire form from
     /// in-process Run 205 parts.
-    pub fn from_parts(evidence: &CustodyAttestationEvidence, input: &CustodyAttestationInput) -> Self {
+    pub fn from_parts(
+        evidence: &CustodyAttestationEvidence,
+        input: &CustodyAttestationInput,
+    ) -> Self {
         Self {
             schema_version: CUSTODY_ATTESTATION_PAYLOAD_WIRE_SCHEMA_VERSION,
             evidence: CustodyAttestationEvidenceWire::from_evidence(evidence),
@@ -681,11 +682,11 @@ pub fn parse_optional_custody_attestation_sibling_from_json_value(
                     CustodyAttestationPayloadParseError::Wire(e),
                 ),
             },
-            Err(e) => CustodyAttestationLoadStatus::Malformed(
-                CustodyAttestationPayloadParseError::Json {
+            Err(e) => {
+                CustodyAttestationLoadStatus::Malformed(CustodyAttestationPayloadParseError::Json {
                     error: e.to_string(),
-                },
-            ),
+                })
+            }
         },
     }
 }

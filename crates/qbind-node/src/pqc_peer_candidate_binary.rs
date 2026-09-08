@@ -81,8 +81,8 @@ use crate::metrics::P2pMetrics;
 use crate::pqc_trust_activation::ActivationContext;
 use crate::pqc_trust_bundle::BundleSigningKeySet;
 use crate::pqc_trust_peer_candidate::{
-    PeerCandidateConfig, PeerCandidateEnvelope, PeerCandidateOutcome,
-    PeerCandidateRuntimeContext, PeerCandidateValidator,
+    PeerCandidateConfig, PeerCandidateEnvelope, PeerCandidateOutcome, PeerCandidateRuntimeContext,
+    PeerCandidateValidator,
 };
 use crate::pqc_trust_reload::RatificationEnforcementContext;
 
@@ -101,40 +101,26 @@ pub enum Run077RefusalReason {
     EnvelopePathMissing,
     /// TestNet/MainNet require at least one
     /// `--p2p-trust-bundle-signing-key`. Same precondition as Run 069.
-    UnsignedRequiredOnEnvironment {
-        environment: NetworkEnvironment,
-    },
+    UnsignedRequiredOnEnvironment { environment: NetworkEnvironment },
     /// TestNet/MainNet require `--data-dir` so the candidate's
     /// sequence can be peeked against the persisted record. Same
     /// precondition as Run 069.
-    DataDirRequiredOnEnvironment {
-        environment: NetworkEnvironment,
-    },
+    DataDirRequiredOnEnvironment { environment: NetworkEnvironment },
     /// `--p2p-leaf-cert` and `--p2p-leaf-cert-key` must be supplied
     /// together for the Run 061 / Run 063 self-checks. Same
     /// precondition as Run 069.
     LeafCredentialFlagsUnpaired,
     /// The fixture file could not be read.
-    FixtureIoError {
-        path: PathBuf,
-        message: String,
-    },
+    FixtureIoError { path: PathBuf, message: String },
     /// The fixture file did not parse as a `PeerCandidateEnvelope`
     /// JSON document.
-    FixtureParseError {
-        path: PathBuf,
-        message: String,
-    },
+    FixtureParseError { path: PathBuf, message: String },
     /// `--p2p-trust-bundle-signing-key` could not be parsed. Same
     /// precondition as Run 069.
-    SigningKeyParseError {
-        message: String,
-    },
+    SigningKeyParseError { message: String },
     /// The leaf credentials at `--p2p-leaf-cert{,-key}` could not be
     /// loaded. Same precondition as Run 069.
-    LeafCredentialLoadError {
-        message: String,
-    },
+    LeafCredentialLoadError { message: String },
 }
 
 impl std::fmt::Display for Run077RefusalReason {
@@ -305,9 +291,7 @@ pub enum Run077Result {
     /// unconditional `received_total` when an envelope path was
     /// supplied) was bumped; the live trust state, on-disk sequence
     /// record, and P2P sessions are all guaranteed unchanged.
-    Refused {
-        reason: Run077RefusalReason,
-    },
+    Refused { reason: Run077RefusalReason },
     /// Validator ran. Carries the outcome and the canonical
     /// `VERDICT=...` log line. `metrics` was bumped for the outcome
     /// (and once for `received_total`).
@@ -667,8 +651,7 @@ mod tests {
         let scratch = std::env::temp_dir();
         let bogus = scratch.join("definitely-does-not-exist-run077-XYZ.json");
         let metrics = P2pMetrics::default();
-        let result =
-            run_local_check(inputs_with(Some(&bogus), true, &keys, &scratch), &metrics);
+        let result = run_local_check(inputs_with(Some(&bogus), true, &keys, &scratch), &metrics);
         match result {
             Run077Result::Refused {
                 reason: Run077RefusalReason::FixtureIoError { .. },
@@ -695,8 +678,7 @@ mod tests {
         let bad = dir.join("bad.json");
         std::fs::write(&bad, b"not-json").unwrap();
         let metrics = P2pMetrics::default();
-        let result =
-            run_local_check(inputs_with(Some(&bad), true, &keys, &scratch), &metrics);
+        let result = run_local_check(inputs_with(Some(&bad), true, &keys, &scratch), &metrics);
         match result {
             Run077Result::Refused {
                 reason: Run077RefusalReason::FixtureParseError { .. },

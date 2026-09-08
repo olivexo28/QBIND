@@ -30,13 +30,13 @@ use qbind_node::pqc_authority_kms_hsm_backend::{
     backend_transcript_digest, custody_class_routes_to_kms_hsm_backend,
     local_operator_cannot_satisfy_backend_policy,
     mainnet_peer_driven_apply_remains_refused_under_kms_hsm_backend_boundary,
-    peer_majority_cannot_satisfy_backend_policy,
-    validate_backend_for_custody_class, validate_lifecycle_governance_custody_and_backend,
-    verify_authority_custody_backend_response, AuthorityCustodyBackend, BackendExpectations,
-    BackendIdentity, BackendKind, BackendOutcome, BackendPolicy, BackendRequest, BackendResponse,
-    CloudKmsBackend, FixtureHsmBackend, FixtureKmsBackend, LifecycleCustodyBackendOutcome,
-    Pkcs11HsmBackend, ProductionHsmBackend, ProductionKmsBackend,
-    KMS_HSM_BACKEND_INVALID_ATTESTATION_SENTINEL, KMS_HSM_BACKEND_INVALID_SIGNATURE_SENTINEL,
+    peer_majority_cannot_satisfy_backend_policy, validate_backend_for_custody_class,
+    validate_lifecycle_governance_custody_and_backend, verify_authority_custody_backend_response,
+    AuthorityCustodyBackend, BackendExpectations, BackendIdentity, BackendKind, BackendOutcome,
+    BackendPolicy, BackendRequest, BackendResponse, CloudKmsBackend, FixtureHsmBackend,
+    FixtureKmsBackend, LifecycleCustodyBackendOutcome, Pkcs11HsmBackend, ProductionHsmBackend,
+    ProductionKmsBackend, KMS_HSM_BACKEND_INVALID_ATTESTATION_SENTINEL,
+    KMS_HSM_BACKEND_INVALID_SIGNATURE_SENTINEL,
 };
 use qbind_node::pqc_authority_lifecycle::{
     AuthorityTrustDomain, LocalLifecycleAction, PQC_LIFECYCLE_SUITE_ML_DSA_44,
@@ -56,11 +56,9 @@ const KEY_A: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const KEY_B: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 const ROOT_FP: &str = "1111111111111111111111111111111111111111";
 const CHAIN_ID: &str = "0000000000000001";
-const GENESIS_HASH: &str =
-    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+const GENESIS_HASH: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const DIGEST_2: &str = "2222222222222222222222222222222222222222222222222222222222222222";
-const PRIOR_DIGEST: &str =
-    "1111111111111111111111111111111111111111111111111111111111111111";
+const PRIOR_DIGEST: &str = "1111111111111111111111111111111111111111111111111111111111111111";
 const CUSTODY_ATTEST_DIGEST: &str = "custody-att-digest-203";
 const KEY_ID: &str = "kms-hsm-key-id-203";
 const BACKEND_ID: &str = "kms-hsm-backend-203";
@@ -237,7 +235,8 @@ fn expectations(
 ) -> BackendExpectations {
     let req_digest = request.request_digest();
     let resp_digest = response.response_digest();
-    let transcript = backend_transcript_digest(&identity.identity_digest(), &req_digest, &resp_digest);
+    let transcript =
+        backend_transcript_digest(&identity.identity_digest(), &req_digest, &resp_digest);
     BackendExpectations {
         expected_custody_class: request.custody_class,
         expected_lifecycle_action: LocalLifecycleAction::Rotate,
@@ -335,8 +334,14 @@ fn default_backend_policy_and_kind_are_fail_closed() {
 #[test]
 fn policy_and_kind_tags_are_stable() {
     assert_eq!(BackendPolicy::Disabled.tag(), "disabled");
-    assert_eq!(BackendPolicy::FixtureKmsAllowed.tag(), "fixture-kms-allowed");
-    assert_eq!(BackendPolicy::FixtureHsmAllowed.tag(), "fixture-hsm-allowed");
+    assert_eq!(
+        BackendPolicy::FixtureKmsAllowed.tag(),
+        "fixture-kms-allowed"
+    );
+    assert_eq!(
+        BackendPolicy::FixtureHsmAllowed.tag(),
+        "fixture-hsm-allowed"
+    );
     assert_eq!(
         BackendPolicy::ProductionKmsRequired.tag(),
         "production-kms-required"
@@ -351,7 +356,10 @@ fn policy_and_kind_tags_are_stable() {
     );
     assert_eq!(BackendKind::FixtureKms.tag(), "fixture-kms");
     assert_eq!(BackendKind::FixtureHsm.tag(), "fixture-hsm");
-    assert_eq!(BackendKind::CloudKmsUnavailable.tag(), "cloud-kms-unavailable");
+    assert_eq!(
+        BackendKind::CloudKmsUnavailable.tag(),
+        "cloud-kms-unavailable"
+    );
     assert_eq!(
         BackendKind::Pkcs11HsmUnavailable.tag(),
         "pkcs11-hsm-unavailable"
@@ -637,7 +645,10 @@ fn a15_disabled_policy_does_not_disturb_governance() {
     ] {
         let _ = class; // governance class is orthogonal to a Disabled backend
         let s = scenario(BackendKind::FixtureKms, TrustBundleEnvironment::Devnet);
-        assert_eq!(validate(&s, BackendPolicy::Disabled), BackendOutcome::Disabled);
+        assert_eq!(
+            validate(&s, BackendPolicy::Disabled),
+            BackendOutcome::Disabled
+        );
     }
 }
 
@@ -648,7 +659,10 @@ fn a15_disabled_policy_does_not_disturb_governance() {
 #[test]
 fn r1_rejected_under_disabled_policy() {
     let s = scenario(BackendKind::FixtureKms, TrustBundleEnvironment::Devnet);
-    assert_eq!(validate(&s, BackendPolicy::Disabled), BackendOutcome::Disabled);
+    assert_eq!(
+        validate(&s, BackendPolicy::Disabled),
+        BackendOutcome::Disabled
+    );
 }
 
 #[test]
@@ -1157,10 +1171,17 @@ fn r36_custody_valid_but_backend_response_invalid_rejected() {
     // Use a LocalOperatorKey custody class that Run 188 accepts under
     // DevnetLocalAllowed, then feed an invalid backend response.
     let candidate = rotate_candidate(TrustBundleEnvironment::Devnet);
-    let identity = identity(BackendKind::FixtureKms, TrustBundleEnvironment::Devnet, &candidate);
-    let request = request(BackendKind::FixtureKms, TrustBundleEnvironment::Devnet, &candidate);
-    let mut response =
-        sign_with_kind(BackendKind::FixtureKms, &identity, &request).expect("signs");
+    let identity = identity(
+        BackendKind::FixtureKms,
+        TrustBundleEnvironment::Devnet,
+        &candidate,
+    );
+    let request = request(
+        BackendKind::FixtureKms,
+        TrustBundleEnvironment::Devnet,
+        &candidate,
+    );
+    let mut response = sign_with_kind(BackendKind::FixtureKms, &identity, &request).expect("signs");
     response.signature_commitment = KMS_HSM_BACKEND_INVALID_SIGNATURE_SENTINEL.to_string();
     let mut expected = expectations(&identity, &request, &response, &candidate);
     expected.expected_response_digest = response.response_digest();
@@ -1368,12 +1389,16 @@ fn r40_mutating_preflight_rejection_produces_no_run070() {
 
 #[test]
 fn r41_mainnet_peer_driven_apply_remains_refused() {
-    assert!(mainnet_peer_driven_apply_remains_refused_under_kms_hsm_backend_boundary(
-        TrustBundleEnvironment::Mainnet
-    ));
-    assert!(!mainnet_peer_driven_apply_remains_refused_under_kms_hsm_backend_boundary(
-        TrustBundleEnvironment::Devnet
-    ));
+    assert!(
+        mainnet_peer_driven_apply_remains_refused_under_kms_hsm_backend_boundary(
+            TrustBundleEnvironment::Mainnet
+        )
+    );
+    assert!(
+        !mainnet_peer_driven_apply_remains_refused_under_kms_hsm_backend_boundary(
+            TrustBundleEnvironment::Devnet
+        )
+    );
     // Even a fully-valid fixture KMS round-trip on a MainNet domain is
     // refused: the verifier rejects fixture-for-MainNet, and the
     // composition short-circuits to the peer-driven-apply refusal.

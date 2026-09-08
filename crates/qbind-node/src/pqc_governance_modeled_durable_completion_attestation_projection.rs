@@ -72,6 +72,7 @@
 //! never creates a new attestation by itself — it can only match an
 //! already-attested record.
 
+use crate::pqc_governance_execution_runtime_arming::GovernanceExecutionRuntimeSurface;
 use crate::pqc_governance_modeled_durable_completion_finalization_projection::GovernanceModeledDurableCompletionFinalizationOutcome;
 use crate::pqc_governance_modeled_durable_consume_completion_reporter::GovernanceModeledDurableConsumeCompletionReporterOutcome;
 use crate::pqc_governance_modeled_durable_consume_projection_sink::GovernanceModeledDurableConsumeSinkOutcome;
@@ -82,7 +83,6 @@ use crate::pqc_governance_modeled_trust_mutation_applier::{
     ModeledGovernanceTrustMutationEnvironmentBinding, ModeledGovernanceTrustMutationRuntimeBinding,
     ModeledGovernanceTrustMutationSurface,
 };
-use crate::pqc_governance_execution_runtime_arming::GovernanceExecutionRuntimeSurface;
 use crate::pqc_trust_bundle::TrustBundleEnvironment;
 
 // ===========================================================================
@@ -821,8 +821,7 @@ impl GovernanceModeledDurableCompletionAttestationOutcome {
     pub fn projects_to_durable_completion_attested(&self) -> bool {
         matches!(
             self,
-            Self::DurableCompletionAttested
-                | Self::DurableCompletionAttestationDuplicateIdempotent
+            Self::DurableCompletionAttested | Self::DurableCompletionAttestationDuplicateIdempotent
         )
     }
 

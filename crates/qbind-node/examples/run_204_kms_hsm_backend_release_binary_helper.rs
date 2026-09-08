@@ -69,12 +69,12 @@ use qbind_node::pqc_authority_kms_hsm_backend::{
     local_operator_cannot_satisfy_backend_policy,
     mainnet_peer_driven_apply_remains_refused_under_kms_hsm_backend_boundary,
     peer_majority_cannot_satisfy_backend_policy, validate_backend_for_custody_class,
-    validate_lifecycle_governance_custody_and_backend,
-    verify_authority_custody_backend_response, AuthorityCustodyBackend, BackendExpectations,
-    BackendIdentity, BackendKind, BackendOutcome, BackendPolicy, BackendRequest, BackendResponse,
-    CloudKmsBackend, FixtureHsmBackend, FixtureKmsBackend, LifecycleCustodyBackendOutcome,
-    Pkcs11HsmBackend, ProductionHsmBackend, ProductionKmsBackend,
-    KMS_HSM_BACKEND_INVALID_ATTESTATION_SENTINEL, KMS_HSM_BACKEND_INVALID_SIGNATURE_SENTINEL,
+    validate_lifecycle_governance_custody_and_backend, verify_authority_custody_backend_response,
+    AuthorityCustodyBackend, BackendExpectations, BackendIdentity, BackendKind, BackendOutcome,
+    BackendPolicy, BackendRequest, BackendResponse, CloudKmsBackend, FixtureHsmBackend,
+    FixtureKmsBackend, LifecycleCustodyBackendOutcome, Pkcs11HsmBackend, ProductionHsmBackend,
+    ProductionKmsBackend, KMS_HSM_BACKEND_INVALID_ATTESTATION_SENTINEL,
+    KMS_HSM_BACKEND_INVALID_SIGNATURE_SENTINEL,
 };
 use qbind_node::pqc_authority_lifecycle::{
     AuthorityTrustDomain, LocalLifecycleAction, PQC_LIFECYCLE_SUITE_ML_DSA_44,
@@ -119,7 +119,13 @@ const EXPIRES: u64 = 1_700_001_000;
 // ---------------------------------------------------------------------------
 
 fn domain(env: TrustBundleEnvironment) -> AuthorityTrustDomain {
-    AuthorityTrustDomain::new(env, CHAIN_ID, GENESIS_HASH, ROOT_FP, PQC_LIFECYCLE_SUITE_ML_DSA_44)
+    AuthorityTrustDomain::new(
+        env,
+        CHAIN_ID,
+        GENESIS_HASH,
+        ROOT_FP,
+        PQC_LIFECYCLE_SUITE_ML_DSA_44,
+    )
 }
 
 fn build_v2(
@@ -149,7 +155,14 @@ fn build_v2(
 }
 
 fn rotate_candidate(env: TrustBundleEnvironment) -> PersistentAuthorityStateRecordV2 {
-    build_v2(env, KEY_B, 2, BundleSigningRatificationV2Action::Rotate, Some(KEY_A), DIGEST_2)
+    build_v2(
+        env,
+        KEY_B,
+        2,
+        BundleSigningRatificationV2Action::Rotate,
+        Some(KEY_A),
+        DIGEST_2,
+    )
 }
 
 fn prior_versioned(env: TrustBundleEnvironment) -> PersistentAuthorityStateRecordVersioned {
@@ -531,19 +544,35 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
 
     // A1 — fixture KMS accepted under explicit fixture policy on DevNet.
     let a1 = scenario(BackendKind::FixtureKms, Env::Devnet);
-    t.check("A1", "accept:FixtureKmsAccepted", &backend_tag(&validate(&a1, BackendPolicy::FixtureKmsAllowed)));
+    t.check(
+        "A1",
+        "accept:FixtureKmsAccepted",
+        &backend_tag(&validate(&a1, BackendPolicy::FixtureKmsAllowed)),
+    );
 
     // A2 — fixture HSM accepted under explicit fixture policy on DevNet.
     let a2 = scenario(BackendKind::FixtureHsm, Env::Devnet);
-    t.check("A2", "accept:FixtureHsmAccepted", &backend_tag(&validate(&a2, BackendPolicy::FixtureHsmAllowed)));
+    t.check(
+        "A2",
+        "accept:FixtureHsmAccepted",
+        &backend_tag(&validate(&a2, BackendPolicy::FixtureHsmAllowed)),
+    );
 
     // A3 — fixture KMS accepted under explicit fixture policy on TestNet.
     let a3 = scenario(BackendKind::FixtureKms, Env::Testnet);
-    t.check("A3", "accept:FixtureKmsAccepted", &backend_tag(&validate(&a3, BackendPolicy::FixtureKmsAllowed)));
+    t.check(
+        "A3",
+        "accept:FixtureKmsAccepted",
+        &backend_tag(&validate(&a3, BackendPolicy::FixtureKmsAllowed)),
+    );
 
     // A4 — fixture HSM accepted under explicit fixture policy on TestNet.
     let a4 = scenario(BackendKind::FixtureHsm, Env::Testnet);
-    t.check("A4", "accept:FixtureHsmAccepted", &backend_tag(&validate(&a4, BackendPolicy::FixtureHsmAllowed)));
+    t.check(
+        "A4",
+        "accept:FixtureHsmAccepted",
+        &backend_tag(&validate(&a4, BackendPolicy::FixtureHsmAllowed)),
+    );
 
     // A5 — backend identity digest deterministic + domain-bound.
     let s = scenario(BackendKind::FixtureKms, Env::Devnet);
@@ -625,8 +654,16 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
     // A11 — production KMS boundary callable, returns typed unavailable.
     {
         let candidate = rotate_candidate(Env::Devnet);
-        let pid = identity(BackendKind::ProductionKmsUnavailable, Env::Devnet, &candidate);
-        let preq = request(BackendKind::ProductionKmsUnavailable, Env::Devnet, &candidate);
+        let pid = identity(
+            BackendKind::ProductionKmsUnavailable,
+            Env::Devnet,
+            &candidate,
+        );
+        let preq = request(
+            BackendKind::ProductionKmsUnavailable,
+            Env::Devnet,
+            &candidate,
+        );
         let backend = ProductionKmsBackend { identity: pid };
         t.assert_true(
             "A11",
@@ -640,8 +677,16 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
     // A12 — production HSM boundary callable, returns typed unavailable.
     {
         let candidate = rotate_candidate(Env::Devnet);
-        let pid = identity(BackendKind::ProductionHsmUnavailable, Env::Devnet, &candidate);
-        let preq = request(BackendKind::ProductionHsmUnavailable, Env::Devnet, &candidate);
+        let pid = identity(
+            BackendKind::ProductionHsmUnavailable,
+            Env::Devnet,
+            &candidate,
+        );
+        let preq = request(
+            BackendKind::ProductionHsmUnavailable,
+            Env::Devnet,
+            &candidate,
+        );
         let backend = ProductionHsmBackend { identity: pid };
         t.assert_true(
             "A12",
@@ -754,7 +799,11 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
     let dev = || scenario(BackendKind::FixtureKms, Env::Devnet);
 
     // R1 — Disabled policy.
-    t.check("R1", "reject:Disabled", &backend_tag(&validate(&dev(), BackendPolicy::Disabled)));
+    t.check(
+        "R1",
+        "reject:Disabled",
+        &backend_tag(&validate(&dev(), BackendPolicy::Disabled)),
+    );
 
     // R2 — fixture KMS rejected under ProductionKmsRequired.
     t.check(
@@ -781,7 +830,11 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
             r4_ok &= validate(&s, BackendPolicy::MainnetProductionCustodyRequired)
                 == BackendOutcome::FixtureRejectedMainnetProductionRequired;
         }
-        t.assert_true("R4", r4_ok, "fixture KMS/HSM rejected under mainnet-production-custody-required");
+        t.assert_true(
+            "R4",
+            r4_ok,
+            "fixture KMS/HSM rejected under mainnet-production-custody-required",
+        );
     }
 
     // R5 — production KMS rejected as unavailable.
@@ -798,13 +851,19 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
     // R6 — production HSM rejected as unavailable.
     {
         let s = production_response(BackendKind::ProductionHsmUnavailable, Env::Devnet);
-        t.check("R6", "reject:ProductionHsmUnavailable", &backend_tag(&validate(&s, BackendPolicy::FixtureHsmAllowed)));
+        t.check(
+            "R6",
+            "reject:ProductionHsmUnavailable",
+            &backend_tag(&validate(&s, BackendPolicy::FixtureHsmAllowed)),
+        );
     }
 
     // R7 — cloud KMS rejected as unavailable (verifier + struct).
     {
         let s = production_response(BackendKind::CloudKmsUnavailable, Env::Devnet);
-        let backend = CloudKmsBackend { identity: s.identity.clone() };
+        let backend = CloudKmsBackend {
+            identity: s.identity.clone(),
+        };
         t.assert_true(
             "R7",
             validate(&s, BackendPolicy::FixtureKmsAllowed) == BackendOutcome::CloudKmsUnavailable
@@ -817,7 +876,9 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
     // R8 — PKCS#11 HSM rejected as unavailable (verifier + struct).
     {
         let s = production_response(BackendKind::Pkcs11HsmUnavailable, Env::Devnet);
-        let backend = Pkcs11HsmBackend { identity: s.identity.clone() };
+        let backend = Pkcs11HsmBackend {
+            identity: s.identity.clone(),
+        };
         t.assert_true(
             "R8",
             validate(&s, BackendPolicy::FixtureHsmAllowed) == BackendOutcome::Pkcs11HsmUnavailable
@@ -833,112 +894,175 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
         t.check(
             "R9",
             "reject:MainNetProductionCustodyUnavailable",
-            &backend_tag(&validate(&s, BackendPolicy::MainnetProductionCustodyRequired)),
+            &backend_tag(&validate(
+                &s,
+                BackendPolicy::MainnetProductionCustodyRequired,
+            )),
         );
     }
 
     // R10 — unknown backend rejected.
     {
         let s = production_response(BackendKind::Unknown, Env::Devnet);
-        t.check("R10", "reject:UnknownBackendRejected", &backend_tag(&validate(&s, BackendPolicy::FixtureKmsAllowed)));
+        t.check(
+            "R10",
+            "reject:UnknownBackendRejected",
+            &backend_tag(&validate(&s, BackendPolicy::FixtureKmsAllowed)),
+        );
     }
 
     // R11 — wrong environment rejected.
     {
         let mut s = dev();
         s.request.environment = Env::Testnet;
-        t.check("R11", "reject:WrongEnvironment", &backend_tag(&validate(&s, BackendPolicy::FixtureKmsAllowed)));
+        t.check(
+            "R11",
+            "reject:WrongEnvironment",
+            &backend_tag(&validate(&s, BackendPolicy::FixtureKmsAllowed)),
+        );
     }
 
     // R12 — wrong chain rejected.
     {
         let mut s = dev();
         s.request.chain_id = OTHER_CHAIN.to_string();
-        t.check("R12", "reject:WrongChain", &backend_tag(&validate(&s, BackendPolicy::FixtureKmsAllowed)));
+        t.check(
+            "R12",
+            "reject:WrongChain",
+            &backend_tag(&validate(&s, BackendPolicy::FixtureKmsAllowed)),
+        );
     }
 
     // R13 — wrong genesis rejected.
     {
         let mut s = dev();
         s.request.genesis_hash = OTHER_GENESIS.to_string();
-        t.check("R13", "reject:WrongGenesis", &backend_tag(&validate(&s, BackendPolicy::FixtureKmsAllowed)));
+        t.check(
+            "R13",
+            "reject:WrongGenesis",
+            &backend_tag(&validate(&s, BackendPolicy::FixtureKmsAllowed)),
+        );
     }
 
     // R14 — wrong authority root rejected.
     {
         let mut s = dev();
         s.request.authority_root_fingerprint = OTHER_ROOT_FP.to_string();
-        t.check("R14", "reject:WrongAuthorityRoot", &backend_tag(&validate(&s, BackendPolicy::FixtureKmsAllowed)));
+        t.check(
+            "R14",
+            "reject:WrongAuthorityRoot",
+            &backend_tag(&validate(&s, BackendPolicy::FixtureKmsAllowed)),
+        );
     }
 
     // R15 — wrong key id / key label rejected.
     {
         let mut s = dev();
         s.response.key_id = "other-key".to_string();
-        t.check("R15", "reject:WrongKeyId", &backend_tag(&validate(&s, BackendPolicy::FixtureKmsAllowed)));
+        t.check(
+            "R15",
+            "reject:WrongKeyId",
+            &backend_tag(&validate(&s, BackendPolicy::FixtureKmsAllowed)),
+        );
     }
 
     // R16 — wrong signing-key fingerprint rejected.
     {
         let mut s = dev();
         s.expected.expected_signing_key_fingerprint = "deadbeef".to_string();
-        t.check("R16", "reject:WrongSigningKeyFingerprint", &backend_tag(&validate(&s, BackendPolicy::FixtureKmsAllowed)));
+        t.check(
+            "R16",
+            "reject:WrongSigningKeyFingerprint",
+            &backend_tag(&validate(&s, BackendPolicy::FixtureKmsAllowed)),
+        );
     }
 
     // R17 — wrong lifecycle action rejected.
     {
         let mut s = dev();
         s.expected.expected_lifecycle_action = LocalLifecycleAction::Revoke;
-        t.check("R17", "reject:WrongLifecycleAction", &backend_tag(&validate(&s, BackendPolicy::FixtureKmsAllowed)));
+        t.check(
+            "R17",
+            "reject:WrongLifecycleAction",
+            &backend_tag(&validate(&s, BackendPolicy::FixtureKmsAllowed)),
+        );
     }
 
     // R18 — wrong candidate digest rejected.
     {
         let mut s = dev();
         s.expected.expected_candidate_digest = "3".repeat(64);
-        t.check("R18", "reject:WrongCandidateDigest", &backend_tag(&validate(&s, BackendPolicy::FixtureKmsAllowed)));
+        t.check(
+            "R18",
+            "reject:WrongCandidateDigest",
+            &backend_tag(&validate(&s, BackendPolicy::FixtureKmsAllowed)),
+        );
     }
 
     // R19 — wrong authority-domain sequence rejected.
     {
         let mut s = dev();
         s.expected.expected_authority_domain_sequence = 7;
-        t.check("R19", "reject:WrongAuthorityDomainSequence", &backend_tag(&validate(&s, BackendPolicy::FixtureKmsAllowed)));
+        t.check(
+            "R19",
+            "reject:WrongAuthorityDomainSequence",
+            &backend_tag(&validate(&s, BackendPolicy::FixtureKmsAllowed)),
+        );
     }
 
     // R20 — wrong request digest rejected.
     {
         let mut s = dev();
         s.expected.expected_request_digest = "0".repeat(64);
-        t.check("R20", "reject:WrongRequestDigest", &backend_tag(&validate(&s, BackendPolicy::FixtureKmsAllowed)));
+        t.check(
+            "R20",
+            "reject:WrongRequestDigest",
+            &backend_tag(&validate(&s, BackendPolicy::FixtureKmsAllowed)),
+        );
     }
 
     // R21 — wrong response digest rejected.
     {
         let mut s = dev();
         s.expected.expected_response_digest = "0".repeat(64);
-        t.check("R21", "reject:WrongResponseDigest", &backend_tag(&validate(&s, BackendPolicy::FixtureKmsAllowed)));
+        t.check(
+            "R21",
+            "reject:WrongResponseDigest",
+            &backend_tag(&validate(&s, BackendPolicy::FixtureKmsAllowed)),
+        );
     }
 
     // R22 — wrong transcript digest rejected.
     {
         let mut s = dev();
         s.expected.expected_transcript_digest = "0".repeat(64);
-        t.check("R22", "reject:WrongTranscriptDigest", &backend_tag(&validate(&s, BackendPolicy::FixtureKmsAllowed)));
+        t.check(
+            "R22",
+            "reject:WrongTranscriptDigest",
+            &backend_tag(&validate(&s, BackendPolicy::FixtureKmsAllowed)),
+        );
     }
 
     // R23 — stale/replayed request rejected.
     {
         let mut s = dev();
         s.expected.expected_request_nonce = "stale".to_string();
-        t.check("R23", "reject:StaleOrReplayedRequest", &backend_tag(&validate(&s, BackendPolicy::FixtureKmsAllowed)));
+        t.check(
+            "R23",
+            "reject:StaleOrReplayedRequest",
+            &backend_tag(&validate(&s, BackendPolicy::FixtureKmsAllowed)),
+        );
     }
 
     // R24 — stale/replayed response rejected.
     {
         let mut s = dev();
         s.expected.expected_response_nonce = "stale".to_string();
-        t.check("R24", "reject:StaleOrReplayedResponse", &backend_tag(&validate(&s, BackendPolicy::FixtureKmsAllowed)));
+        t.check(
+            "R24",
+            "reject:StaleOrReplayedResponse",
+            &backend_tag(&validate(&s, BackendPolicy::FixtureKmsAllowed)),
+        );
     }
 
     // R25 — expired attestation rejected. Changing the identity expiry
@@ -952,7 +1076,11 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
             &s.request.request_digest(),
             &s.response.response_digest(),
         );
-        t.check("R25", "reject:ExpiredAttestation", &backend_tag(&validate(&s, BackendPolicy::FixtureKmsAllowed)));
+        t.check(
+            "R25",
+            "reject:ExpiredAttestation",
+            &backend_tag(&validate(&s, BackendPolicy::FixtureKmsAllowed)),
+        );
     }
 
     // R26 — expired response rejected.
@@ -965,7 +1093,11 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
             &s.request.request_digest(),
             &s.response.response_digest(),
         );
-        t.check("R26", "reject:ExpiredResponse", &backend_tag(&validate(&s, BackendPolicy::FixtureKmsAllowed)));
+        t.check(
+            "R26",
+            "reject:ExpiredResponse",
+            &backend_tag(&validate(&s, BackendPolicy::FixtureKmsAllowed)),
+        );
     }
 
     // R27 — unsupported suite rejected.
@@ -978,7 +1110,11 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
             &s.request.request_digest(),
             &s.response.response_digest(),
         );
-        t.check("R27", "reject:UnsupportedSuite", &backend_tag(&validate(&s, BackendPolicy::FixtureKmsAllowed)));
+        t.check(
+            "R27",
+            "reject:UnsupportedSuite",
+            &backend_tag(&validate(&s, BackendPolicy::FixtureKmsAllowed)),
+        );
     }
 
     // R28 — invalid attestation rejected.
@@ -991,7 +1127,11 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
             &s.request.request_digest(),
             &s.response.response_digest(),
         );
-        t.check("R28", "reject:InvalidAttestation", &backend_tag(&validate(&s, BackendPolicy::FixtureKmsAllowed)));
+        t.check(
+            "R28",
+            "reject:InvalidAttestation",
+            &backend_tag(&validate(&s, BackendPolicy::FixtureKmsAllowed)),
+        );
     }
 
     // R29 — invalid signature / placeholder signature rejected.
@@ -1004,28 +1144,44 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
             &s.request.request_digest(),
             &s.response.response_digest(),
         );
-        t.check("R29", "reject:InvalidSignature", &backend_tag(&validate(&s, BackendPolicy::FixtureKmsAllowed)));
+        t.check(
+            "R29",
+            "reject:InvalidSignature",
+            &backend_tag(&validate(&s, BackendPolicy::FixtureKmsAllowed)),
+        );
     }
 
     // R30 — malformed backend identity rejected.
     {
         let mut s = dev();
         s.identity.backend_id = String::new();
-        t.check("R30", "reject:MalformedIdentity", &backend_tag(&validate(&s, BackendPolicy::FixtureKmsAllowed)));
+        t.check(
+            "R30",
+            "reject:MalformedIdentity",
+            &backend_tag(&validate(&s, BackendPolicy::FixtureKmsAllowed)),
+        );
     }
 
     // R31 — malformed backend request rejected.
     {
         let mut s = dev();
         s.request.candidate_digest = String::new();
-        t.check("R31", "reject:MalformedRequest", &backend_tag(&validate(&s, BackendPolicy::FixtureKmsAllowed)));
+        t.check(
+            "R31",
+            "reject:MalformedRequest",
+            &backend_tag(&validate(&s, BackendPolicy::FixtureKmsAllowed)),
+        );
     }
 
     // R32 — malformed backend response rejected.
     {
         let mut s = dev();
         s.response.signature_commitment = String::new();
-        t.check("R32", "reject:MalformedResponse", &backend_tag(&validate(&s, BackendPolicy::FixtureKmsAllowed)));
+        t.check(
+            "R32",
+            "reject:MalformedResponse",
+            &backend_tag(&validate(&s, BackendPolicy::FixtureKmsAllowed)),
+        );
     }
 
     // R33 — local operator cannot satisfy backend policy.
@@ -1095,8 +1251,10 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
         );
         t.assert_true(
             "R35",
-            matches!(outcome, LifecycleCustodyBackendOutcome::LifecycleOrCustodyRejected(_))
-                && outcome.is_reject(),
+            matches!(
+                outcome,
+                LifecycleCustodyBackendOutcome::LifecycleOrCustodyRejected(_)
+            ) && outcome.is_reject(),
             "backend valid but invalid custody metadata rejects at the Run 188 layer",
         );
     }
@@ -1119,7 +1277,11 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
         );
         let custody = AuthorityCustodyAttestation {
             custody_class: AuthorityCustodyClass::LocalOperatorKey,
-            ..good_custody_attestation(Env::Devnet, &candidate, AuthorityCustodyClass::LocalOperatorKey)
+            ..good_custody_attestation(
+                Env::Devnet,
+                &candidate,
+                AuthorityCustodyClass::LocalOperatorKey,
+            )
         };
         let prior = prior_versioned(Env::Devnet);
         let outcome = validate_lifecycle_governance_custody_and_backend(
@@ -1161,7 +1323,11 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
         let s = production_response(BackendKind::ProductionKmsUnavailable, Env::Devnet);
         let custody = AuthorityCustodyAttestation {
             custody_class: AuthorityCustodyClass::LocalOperatorKey,
-            ..good_custody_attestation(Env::Devnet, &candidate, AuthorityCustodyClass::LocalOperatorKey)
+            ..good_custody_attestation(
+                Env::Devnet,
+                &candidate,
+                AuthorityCustodyClass::LocalOperatorKey,
+            )
         };
         let prior = prior_versioned(Env::Devnet);
         let outcome = validate_lifecycle_governance_custody_and_backend(
@@ -1203,7 +1369,11 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
         let s = production_response(BackendKind::ProductionHsmUnavailable, Env::Devnet);
         let custody = AuthorityCustodyAttestation {
             custody_class: AuthorityCustodyClass::LocalOperatorKey,
-            ..good_custody_attestation(Env::Devnet, &candidate, AuthorityCustodyClass::LocalOperatorKey)
+            ..good_custody_attestation(
+                Env::Devnet,
+                &candidate,
+                AuthorityCustodyClass::LocalOperatorKey,
+            )
         };
         let prior = prior_versioned(Env::Devnet);
         let outcome = validate_lifecycle_governance_custody_and_backend(
@@ -1265,7 +1435,11 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
         let s = production_response(BackendKind::ProductionKmsUnavailable, Env::Devnet);
         let custody = AuthorityCustodyAttestation {
             custody_class: AuthorityCustodyClass::LocalOperatorKey,
-            ..good_custody_attestation(Env::Devnet, &candidate, AuthorityCustodyClass::LocalOperatorKey)
+            ..good_custody_attestation(
+                Env::Devnet,
+                &candidate,
+                AuthorityCustodyClass::LocalOperatorKey,
+            )
         };
         let prior = prior_versioned(Env::Devnet);
         let outcome = validate_lifecycle_governance_custody_and_backend(
@@ -1298,8 +1472,8 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
     //       KMS/HSM.
     {
         let s = scenario(BackendKind::FixtureKms, Env::Mainnet);
-        let verifier_refused =
-            validate(&s, BackendPolicy::FixtureKmsAllowed) == BackendOutcome::FixtureRejectedForMainNet;
+        let verifier_refused = validate(&s, BackendPolicy::FixtureKmsAllowed)
+            == BackendOutcome::FixtureRejectedForMainNet;
         let custody = good_custody_attestation(s.env, &s.candidate, AuthorityCustodyClass::Kms);
         let prior = prior_versioned(s.env);
         let outcome = validate_lifecycle_governance_custody_and_backend(
@@ -1377,11 +1551,9 @@ fn run_separation_table(out: &Path) -> (u64, u64) {
             prod_ok &= ProductionHsmBackend { identity: hid }
                 .sign_authority_lifecycle_request(&req_h)
                 == Err(BackendOutcome::ProductionHsmUnavailable);
-            prod_ok &= CloudKmsBackend { identity: cid }
-                .sign_authority_lifecycle_request(&req_k)
+            prod_ok &= CloudKmsBackend { identity: cid }.sign_authority_lifecycle_request(&req_k)
                 == Err(BackendOutcome::CloudKmsUnavailable);
-            prod_ok &= Pkcs11HsmBackend { identity: pid }
-                .sign_authority_lifecycle_request(&req_h)
+            prod_ok &= Pkcs11HsmBackend { identity: pid }.sign_authority_lifecycle_request(&req_h)
                 == Err(BackendOutcome::Pkcs11HsmUnavailable);
         }
         t.assert_true(
@@ -1494,7 +1666,11 @@ fn run_composition_table(out: &Path) -> (u64, u64) {
         let s = production_response(BackendKind::ProductionKmsUnavailable, Env::Devnet);
         let custody = AuthorityCustodyAttestation {
             custody_class: AuthorityCustodyClass::LocalOperatorKey,
-            ..good_custody_attestation(Env::Devnet, &candidate, AuthorityCustodyClass::LocalOperatorKey)
+            ..good_custody_attestation(
+                Env::Devnet,
+                &candidate,
+                AuthorityCustodyClass::LocalOperatorKey,
+            )
         };
         let prior = prior_versioned(Env::Devnet);
         let outcome = validate_lifecycle_governance_custody_and_backend(
@@ -1516,7 +1692,11 @@ fn run_composition_table(out: &Path) -> (u64, u64) {
             NOW,
             false,
         );
-        t.check("compose-backend-rejected", "reject:BackendRejected", &composition_tag(&outcome));
+        t.check(
+            "compose-backend-rejected",
+            "reject:BackendRejected",
+            &composition_tag(&outcome),
+        );
     }
 
     // Disabled backend policy rejects at the backend layer after custody
@@ -1526,7 +1706,11 @@ fn run_composition_table(out: &Path) -> (u64, u64) {
         let s = scenario(BackendKind::FixtureKms, Env::Devnet);
         let custody = AuthorityCustodyAttestation {
             custody_class: AuthorityCustodyClass::LocalOperatorKey,
-            ..good_custody_attestation(Env::Devnet, &candidate, AuthorityCustodyClass::LocalOperatorKey)
+            ..good_custody_attestation(
+                Env::Devnet,
+                &candidate,
+                AuthorityCustodyClass::LocalOperatorKey,
+            )
         };
         let prior = prior_versioned(Env::Devnet);
         let outcome = validate_lifecycle_governance_custody_and_backend(
@@ -1548,7 +1732,11 @@ fn run_composition_table(out: &Path) -> (u64, u64) {
             NOW,
             false,
         );
-        t.check("compose-backend-disabled", "reject:BackendRejected", &composition_tag(&outcome));
+        t.check(
+            "compose-backend-disabled",
+            "reject:BackendRejected",
+            &composition_tag(&outcome),
+        );
     }
 
     // MainNet peer-driven apply refused even with fixture KMS.
@@ -1575,7 +1763,11 @@ fn run_composition_table(out: &Path) -> (u64, u64) {
             NOW,
             true,
         );
-        t.check("compose-mainnet-refused", "reject:MainNetPeerDrivenApplyRefused", &composition_tag(&outcome));
+        t.check(
+            "compose-mainnet-refused",
+            "reject:MainNetPeerDrivenApplyRefused",
+            &composition_tag(&outcome),
+        );
     }
 
     t.finish(out)
@@ -1597,7 +1789,8 @@ fn run_determinism_table(out: &Path) -> (u64, u64) {
         let id_eq = a.identity.identity_digest() == b.identity.identity_digest();
         let req_eq = a.request.request_digest() == b.request.request_digest();
         let resp_eq = a.response.response_digest() == b.response.response_digest();
-        let trans_eq = a.expected.expected_transcript_digest == b.expected.expected_transcript_digest;
+        let trans_eq =
+            a.expected.expected_transcript_digest == b.expected.expected_transcript_digest;
         t.assert_true(
             &format!("determinism-{label}"),
             outcome_a == outcome_b && id_eq && req_eq && resp_eq && trans_eq,
@@ -1619,8 +1812,12 @@ fn run_refusal_helpers_table(out: &Path) -> (u64, u64) {
     t.assert_true(
         "mainnet-refusal-helper",
         mainnet_peer_driven_apply_remains_refused_under_kms_hsm_backend_boundary(Env::Mainnet)
-            && !mainnet_peer_driven_apply_remains_refused_under_kms_hsm_backend_boundary(Env::Devnet)
-            && !mainnet_peer_driven_apply_remains_refused_under_kms_hsm_backend_boundary(Env::Testnet),
+            && !mainnet_peer_driven_apply_remains_refused_under_kms_hsm_backend_boundary(
+                Env::Devnet,
+            )
+            && !mainnet_peer_driven_apply_remains_refused_under_kms_hsm_backend_boundary(
+                Env::Testnet,
+            ),
         "MainNet refused; DevNet/TestNet not flagged by the refusal helper",
     );
     t.assert_true(
@@ -1645,15 +1842,27 @@ fn run_fixture_dump(out: &Path) {
     let s = scenario(BackendKind::FixtureKms, TrustBundleEnvironment::Devnet);
     write_file(
         &out.join("fixtures").join("identity.txt"),
-        &format!("{:#?}\nidentity_digest={}\n", s.identity, s.identity.identity_digest()),
+        &format!(
+            "{:#?}\nidentity_digest={}\n",
+            s.identity,
+            s.identity.identity_digest()
+        ),
     );
     write_file(
         &out.join("fixtures").join("request.txt"),
-        &format!("{:#?}\nrequest_digest={}\n", s.request, s.request.request_digest()),
+        &format!(
+            "{:#?}\nrequest_digest={}\n",
+            s.request,
+            s.request.request_digest()
+        ),
     );
     write_file(
         &out.join("fixtures").join("response.txt"),
-        &format!("{:#?}\nresponse_digest={}\n", s.response, s.response.response_digest()),
+        &format!(
+            "{:#?}\nresponse_digest={}\n",
+            s.response,
+            s.response.response_digest()
+        ),
     );
     write_file(
         &out.join("fixtures").join("transcript_digest.txt"),

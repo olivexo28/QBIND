@@ -646,13 +646,13 @@ pub fn is_production_signer_mode(mode: SignerMode) -> bool {
 /// ```
 pub fn validate_signer_mode_for_mainnet(mode: SignerMode) -> Result<(), String> {
     match mode {
-        SignerMode::LoopbackTesting => {
-            Err("signer_mode 'loopback-testing' is FORBIDDEN for MainNet (M10.1); \
+        SignerMode::LoopbackTesting => Err(
+            "signer_mode 'loopback-testing' is FORBIDDEN for MainNet (M10.1); \
                  MainNet validators must use 'remote-signer', 'hsm-pkcs11', or 'encrypted-fs' \
                  to protect validator signing keys. LoopbackTesting keys expose the validator \
                  to key theft if the host is compromised."
-                .to_string())
-        }
+                .to_string(),
+        ),
         SignerMode::EncryptedFsV1 => {
             // Allowed but emit a recommendation for higher security
             eprintln!(
@@ -2221,10 +2221,12 @@ impl SlashingConfig {
                     .to_string());
             }
             SlashingMode::RecordOnly => {
-                return Err("slashing mode 'record_only' is forbidden for MainNet (M4); \
+                return Err(
+                    "slashing mode 'record_only' is forbidden for MainNet (M4); \
                             MainNet requires enforcement to deter Byzantine behavior; \
                             use 'enforce_critical' or 'enforce_all'"
-                    .to_string());
+                        .to_string(),
+                );
             }
             SlashingMode::EnforceCritical | SlashingMode::EnforceAll => {
                 // Valid modes for MainNet
@@ -3123,18 +3125,18 @@ impl MutualAuthConfig {
     pub fn validate_for_mainnet(&self) -> Result<(), String> {
         match self.mode {
             MutualAuthMode::Required => Ok(()),
-            MutualAuthMode::Optional => {
-                Err("mutual_auth_mode 'optional' is forbidden for MainNet (M8); \
+            MutualAuthMode::Optional => Err(
+                "mutual_auth_mode 'optional' is forbidden for MainNet (M8); \
                      MainNet requires mutual KEMTLS authentication for all connections; \
                      use 'required'"
-                    .to_string())
-            }
-            MutualAuthMode::Disabled => {
-                Err("mutual_auth_mode 'disabled' is forbidden for MainNet (M8); \
+                    .to_string(),
+            ),
+            MutualAuthMode::Disabled => Err(
+                "mutual_auth_mode 'disabled' is forbidden for MainNet (M8); \
                      MainNet requires mutual KEMTLS authentication for all connections; \
                      use 'required'"
-                    .to_string())
-            }
+                    .to_string(),
+            ),
         }
     }
 
@@ -3156,12 +3158,12 @@ impl MutualAuthConfig {
                 );
                 Ok(())
             }
-            MutualAuthMode::Disabled => {
-                Err("mutual_auth_mode 'disabled' is forbidden for TestNet (M8); \
+            MutualAuthMode::Disabled => Err(
+                "mutual_auth_mode 'disabled' is forbidden for TestNet (M8); \
                      TestNet requires mutual KEMTLS authentication; \
                      use 'required' or 'optional'"
-                    .to_string())
-            }
+                    .to_string(),
+            ),
         }
     }
 }
@@ -6515,7 +6517,10 @@ impl std::fmt::Display for MainnetConfigError {
                 )
             }
             // M0: Unsupported signature suite
-            MainnetConfigError::UnsupportedSignatureSuite { validator_id, suite_id } => {
+            MainnetConfigError::UnsupportedSignatureSuite {
+                validator_id,
+                suite_id,
+            } => {
                 write!(
                     f,
                     "MainNet/TestNet invariant violated: validator {} uses unsupported signature suite {} \
@@ -6659,7 +6664,10 @@ impl std::fmt::Display for TestnetConfigError {
                     expected, actual
                 )
             }
-            TestnetConfigError::UnsupportedSignatureSuite { validator_id, suite_id } => {
+            TestnetConfigError::UnsupportedSignatureSuite {
+                validator_id,
+                suite_id,
+            } => {
                 write!(
                     f,
                     "TestNet invariant violated: validator {} uses unsupported signature suite {} \
@@ -8673,10 +8681,7 @@ mod tests {
             },
         ];
         let result = validate_validators_use_ml_dsa_44(&validators);
-        assert!(
-            result.is_ok(),
-            "Should accept validators using ML-DSA-44"
-        );
+        assert!(result.is_ok(), "Should accept validators using ML-DSA-44");
     }
 
     #[test]
@@ -8733,10 +8738,7 @@ mod tests {
             },
         ];
         let result = validate_testnet_invariants(NetworkEnvironment::Testnet, &validators);
-        assert!(
-            result.is_ok(),
-            "TestNet should accept ML-DSA-44 validators"
-        );
+        assert!(result.is_ok(), "TestNet should accept ML-DSA-44 validators");
     }
 
     #[test]
@@ -8800,10 +8802,7 @@ mod tests {
             },
         ];
         let result = validate_mainnet_validator_suites(&validators);
-        assert!(
-            result.is_ok(),
-            "MainNet should accept ML-DSA-44 validators"
-        );
+        assert!(result.is_ok(), "MainNet should accept ML-DSA-44 validators");
     }
 
     #[test]

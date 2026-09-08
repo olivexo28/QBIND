@@ -11,9 +11,9 @@
 //! This closes Spec Gap 2.3 (Gas accounting formal definition) in the QBIND protocol.
 
 use qbind_ledger::{
-    AccountStateView, ExecutionGasConfig, InMemoryAccountState, QbindTransaction,
-    TransferPayload, TransferPayloadV1, VmV0Error, VmV0ExecutionEngine,
-    GAS_BASE_TX, GAS_PER_ACCOUNT_READ, GAS_PER_ACCOUNT_WRITE, GAS_PER_BYTE_PAYLOAD,
+    AccountStateView, ExecutionGasConfig, InMemoryAccountState, QbindTransaction, TransferPayload,
+    TransferPayloadV1, VmV0Error, VmV0ExecutionEngine, GAS_BASE_TX, GAS_PER_ACCOUNT_READ,
+    GAS_PER_ACCOUNT_WRITE, GAS_PER_BYTE_PAYLOAD,
 };
 use qbind_types::AccountId;
 
@@ -53,18 +53,12 @@ fn expected_gas_for_v1_transfer() -> u64 {
     // Gas formula: base + 2*read + 2*write + bytes*16
     // For normal transfer (sender != recipient): 2 reads, 2 writes
     // V1 payload is 72 bytes
-    GAS_BASE_TX
-        + GAS_PER_ACCOUNT_READ * 2
-        + GAS_PER_ACCOUNT_WRITE * 2
-        + GAS_PER_BYTE_PAYLOAD * 72
+    GAS_BASE_TX + GAS_PER_ACCOUNT_READ * 2 + GAS_PER_ACCOUNT_WRITE * 2 + GAS_PER_BYTE_PAYLOAD * 72
 }
 
 fn expected_gas_for_v0_transfer() -> u64 {
     // V0 payload is 48 bytes
-    GAS_BASE_TX
-        + GAS_PER_ACCOUNT_READ * 2
-        + GAS_PER_ACCOUNT_WRITE * 2
-        + GAS_PER_BYTE_PAYLOAD * 48
+    GAS_BASE_TX + GAS_PER_ACCOUNT_READ * 2 + GAS_PER_ACCOUNT_WRITE * 2 + GAS_PER_BYTE_PAYLOAD * 48
 }
 
 // ============================================================================
@@ -93,13 +87,16 @@ fn m18_a1_gas_deducted_for_successful_transfer() {
 
     assert_eq!(results.len(), 1);
     assert!(results[0].success, "Transaction should succeed");
-    
+
     // Gas used should be the computed cost
     let expected_gas = expected_gas_for_v1_transfer();
     assert_eq!(results[0].gas_used, expected_gas);
-    
+
     // Invariant: gas_used_tx ≤ gas_limit_tx
-    assert!(results[0].gas_used <= gas_limit, "INV-1: gas_used_tx <= gas_limit_tx");
+    assert!(
+        results[0].gas_used <= gas_limit,
+        "INV-1: gas_used_tx <= gas_limit_tx"
+    );
 }
 
 /// M18.A2: Verify gas_used_tx <= gas_limit_tx invariant holds.
@@ -192,10 +189,10 @@ fn m18_b1_failure_reports_gas_usage() {
 
     assert_eq!(results.len(), 1);
     assert!(!results[0].success, "Transaction should fail");
-    
+
     // Gas used should still be computed
     assert!(results[0].gas_used > 0, "Failed tx should report gas used");
-    
+
     // Error should indicate insufficient balance
     match &results[0].error {
         Some(VmV0Error::InsufficientBalanceForFee { .. }) => {}
@@ -224,8 +221,11 @@ fn m18_b2_gas_limit_exceeded_failure() {
     let results = engine.execute_block_with_proposer(&mut state, &[tx], &proposer);
 
     assert_eq!(results.len(), 1);
-    assert!(!results[0].success, "Transaction should fail due to gas limit");
-    
+    assert!(
+        !results[0].success,
+        "Transaction should fail due to gas limit"
+    );
+
     match &results[0].error {
         Some(VmV0Error::GasLimitExceeded { required, limit }) => {
             assert!(required > limit);
@@ -259,7 +259,7 @@ fn m18_b3_nonce_mismatch_failure() {
 
     assert_eq!(results.len(), 1);
     assert!(!results[0].success);
-    
+
     match &results[0].error {
         Some(VmV0Error::NonceMismatch { expected, got }) => {
             assert_eq!(*expected, 5);
@@ -357,7 +357,8 @@ fn m18_c3_block_stats_consistency() {
         .map(|i| create_v1_transfer(&sender, &recipient, 100, i, 100_000, 10))
         .collect();
 
-    let (results, stats) = engine.execute_block_with_proposer_and_stats(&mut state, &txs, &proposer);
+    let (results, stats) =
+        engine.execute_block_with_proposer_and_stats(&mut state, &txs, &proposer);
 
     // Verify stats match sum of results
     let sum_gas: u64 = results.iter().map(|r| r.gas_used).sum();
@@ -703,11 +704,11 @@ fn m18_g2_v0_payload_with_gas_enabled() {
     // V0 payloads are fee-free (max_fee_per_gas = 0)
     // They should still succeed and report gas used
     assert!(results[0].success, "V0 transaction should succeed");
-    
+
     // Gas should be computed even if fee is 0
     let expected_gas = expected_gas_for_v0_transfer();
     assert_eq!(results[0].gas_used, expected_gas);
-    
+
     // Fee should be 0 for V0 payloads
     assert_eq!(results[0].fee_paid, 0);
 }

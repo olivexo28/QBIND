@@ -86,7 +86,9 @@ fn json_str<'a>(json: &'a serde_json::Value, key: &str) -> &'a str {
 }
 
 fn is_hex(s: &str, len: usize) -> bool {
-    s.len() == len && s.bytes().all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
+    s.len() == len
+        && s.bytes()
+            .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
 }
 
 // ---------------------------------------------------------------------------
@@ -126,7 +128,11 @@ fn generate_full_node_seed_validator_candidate_succeed_with_run374_file_set() {
     // validator-candidate with explicit index.
     let vc = base.join("validator-candidate");
     let out = generate("validator-candidate", &vc, Some("2"));
-    assert_eq!(out.code, 0, "generate validator-candidate failed: {}", out.stderr);
+    assert_eq!(
+        out.code, 0,
+        "generate validator-candidate failed: {}",
+        out.stderr
+    );
     assert_file_set(&vc);
 }
 
@@ -156,7 +162,10 @@ fn public_identity_json_is_schema_shaped_and_public_only() {
     assert!(is_hex(json_str(&json, "root_key_id"), 64));
     assert!(is_hex(json_str(&json, "root_pk_fingerprint"), 8));
     assert!(json.get("validator_address").expect("field").is_null());
-    assert_eq!(json.get("devnet_only").and_then(|v| v.as_bool()), Some(true));
+    assert_eq!(
+        json.get("devnet_only").and_then(|v| v.as_bool()),
+        Some(true)
+    );
 
     let sl = json.get("safety_label").expect("safety_label");
     for flag in [
@@ -182,7 +191,9 @@ fn public_identity_json_is_schema_shaped_and_public_only() {
     let raw = read(&dir.join("public-identity.json"));
     let lower = raw.to_lowercase();
     assert!(
-        !lower.contains("secret_key") && !lower.contains("private_key") && !lower.contains("mnemonic"),
+        !lower.contains("secret_key")
+            && !lower.contains("private_key")
+            && !lower.contains("mnemonic"),
         "public JSON leaked a secret label"
     );
     // The KEM secret key bytes are never embedded (only a *_path reference).
@@ -271,7 +282,10 @@ fn seed_candidate_maps_public_identity_without_live_claim() {
         json_str(&cand, "transport_security_mode"),
         json_str(&pub_json, "transport_security_mode")
     );
-    assert_eq!(json_str(&cand, "pqc_suite"), json_str(&pub_json, "pqc_suite"));
+    assert_eq!(
+        json_str(&cand, "pqc_suite"),
+        json_str(&pub_json, "pqc_suite")
+    );
     // no live/reachability claim.
     assert_eq!(json_str(&cand, "status"), "planned");
     assert!(cand.get("last_reachability_evidence").unwrap().is_null());
@@ -410,8 +424,8 @@ fn non_u64_validator_index_is_refused() {
 
 #[test]
 fn committed_example_identity_has_no_secret_material() {
-    let example = workspace_root()
-        .join("docs/release/public-devnet/identity/EXAMPLE_PUBLIC_IDENTITY.json");
+    let example =
+        workspace_root().join("docs/release/public-devnet/identity/EXAMPLE_PUBLIC_IDENTITY.json");
     let raw = read(&example).to_lowercase();
     // `private_material.leaf_kem_sk_path` legitimately references the secret-key
     // *path*; the check targets embedded secret material, not path references.
@@ -424,7 +438,10 @@ fn committed_example_identity_has_no_secret_material() {
     }
     // The example must still be schema-shaped public material.
     let json: serde_json::Value = serde_json::from_str(&read(&example)).expect("example JSON");
-    assert_eq!(json.get("devnet_only").and_then(|v| v.as_bool()), Some(true));
+    assert_eq!(
+        json.get("devnet_only").and_then(|v| v.as_bool()),
+        Some(true)
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -439,5 +456,8 @@ fn print_public_round_trips_generated_identity() {
     let on_disk = read(&dir.join("public-identity.json"));
     let out = run_identity(&["print-public", dir.to_str().unwrap()]);
     assert_eq!(out.code, 0, "print-public failed: {}", out.stderr);
-    assert_eq!(out.stdout, on_disk, "print-public must echo the stored identity");
+    assert_eq!(
+        out.stdout, on_disk,
+        "print-public must echo the stored identity"
+    );
 }

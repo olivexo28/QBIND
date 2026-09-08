@@ -112,14 +112,12 @@ const KEY_A: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const KEY_B: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 const ROOT_FP: &str = "1111111111111111111111111111111111111111";
 const CHAIN_ID: &str = "0000000000000001";
-const GENESIS_HASH_HEX: &str =
-    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+const GENESIS_HASH_HEX: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const DIGEST_2: &str = "2222222222222222222222222222222222222222222222222222222222222222";
 const GOV_DOMAIN: &str = "qbind-onchain-gov-1";
 const GOV_EPOCH: u64 = 42;
 const PROPOSAL_ID: &str = "prop-001";
-const PROPOSAL_DIGEST: &str =
-    "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef";
+const PROPOSAL_DIGEST: &str = "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef";
 const UNIQUE_DECISION_ID: &str = "decision-185";
 const NOW: u64 = 1_700_000_000;
 
@@ -358,9 +356,7 @@ fn route_with<R: OnChainGovernanceReplaySet + ?Sized>(
                 &ctx, loaded,
             )
         }
-        "sighup" => {
-            route_loaded_onchain_governance_proof_to_sighup_callsite_decision(&ctx, loaded)
-        }
+        "sighup" => route_loaded_onchain_governance_proof_to_sighup_callsite_decision(&ctx, loaded),
         "local_peer_candidate_check" => {
             route_loaded_onchain_governance_proof_to_local_peer_candidate_check_callsite_decision(
                 &ctx, loaded,
@@ -439,8 +435,7 @@ fn run_scenarios(out_dir: &Path) -> std::io::Result<(usize, usize)> {
     // to pass into real `target/release/qbind-node` via
     // `--p2p-trust-bundle-reload-check <path>` /
     // `--p2p-trust-bundle-reload-apply-path <path>`).
-    let legacy =
-        make_v2_sidecar_value_with_proof_sibling(TrustBundleEnvironment::Devnet, None);
+    let legacy = make_v2_sidecar_value_with_proof_sibling(TrustBundleEnvironment::Devnet, None);
     let devnet_candidate = rotate_candidate(TrustBundleEnvironment::Devnet);
     let devnet_wire = good_wire_for(&devnet_candidate);
     let devnet_valid = make_v2_sidecar_value_with_proof_sibling(
@@ -484,9 +479,18 @@ fn run_scenarios(out_dir: &Path) -> std::io::Result<(usize, usize)> {
     );
 
     write_sidecar(&sidecars_dir.join("legacy_no_proof.json"), &legacy)?;
-    write_sidecar(&sidecars_dir.join("devnet_rotate_valid.json"), &devnet_valid)?;
-    write_sidecar(&sidecars_dir.join("testnet_rotate_valid.json"), &testnet_valid)?;
-    write_sidecar(&sidecars_dir.join("mainnet_rotate_valid.json"), &mainnet_valid)?;
+    write_sidecar(
+        &sidecars_dir.join("devnet_rotate_valid.json"),
+        &devnet_valid,
+    )?;
+    write_sidecar(
+        &sidecars_dir.join("testnet_rotate_valid.json"),
+        &testnet_valid,
+    )?;
+    write_sidecar(
+        &sidecars_dir.join("mainnet_rotate_valid.json"),
+        &mainnet_valid,
+    )?;
     write_sidecar(
         &sidecars_dir.join("malformed_non_object.json"),
         &malformed_non_object,
@@ -562,9 +566,15 @@ fn run_scenarios(out_dir: &Path) -> std::io::Result<(usize, usize)> {
     //                              every surface, regardless of policy.
     let malformed_inputs = [
         ("R2a_malformed_non_object", &malformed_non_object),
-        ("R2b_malformed_unknown_schema_version", &malformed_unknown_schema),
+        (
+            "R2b_malformed_unknown_schema_version",
+            &malformed_unknown_schema,
+        ),
         ("R2c_malformed_empty_required_field", &malformed_empty_field),
-        ("R2d_malformed_empty_proof_bytes", &malformed_empty_proof_bytes),
+        (
+            "R2d_malformed_empty_proof_bytes",
+            &malformed_empty_proof_bytes,
+        ),
     ];
     for (label, sidecar) in &malformed_inputs {
         for surface in ALL_SURFACES {
@@ -611,7 +621,10 @@ fn run_scenarios(out_dir: &Path) -> std::io::Result<(usize, usize)> {
         let sha = sha256_hex(&bytes);
         fs::write(scenario_dir.join("sidecar.sha256"), format!("{}\n", sha))?;
         fs::write(scenario_dir.join("note.txt"), format!("{}\n", s.note))?;
-        fs::write(scenario_dir.join("expected.txt"), format!("{}\n", s.expect.label()))?;
+        fs::write(
+            scenario_dir.join("expected.txt"),
+            format!("{}\n", s.expect.label()),
+        )?;
         fs::write(scenario_dir.join("policy.txt"), format!("{:?}\n", s.policy))?;
 
         // Parse the sibling out of the sidecar value. (We could also
@@ -713,17 +726,14 @@ fn main() {
     let out_dir: PathBuf = match args.next() {
         Some(p) => PathBuf::from(p),
         None => {
-            eprintln!(
-                "usage: run_185_onchain_governance_payload_release_binary_helper <OUT_DIR>"
-            );
+            eprintln!("usage: run_185_onchain_governance_payload_release_binary_helper <OUT_DIR>");
             std::process::exit(2);
         }
     };
     fs::create_dir_all(&out_dir).expect("create out_dir");
 
     let (pass, fail) = run_scenarios(&out_dir).expect("scenarios");
-    let mut summary =
-        fs::File::create(out_dir.join("helper_summary.txt")).expect("create summary");
+    let mut summary = fs::File::create(out_dir.join("helper_summary.txt")).expect("create summary");
     let verdict = if fail == 0 { "PASS" } else { "FAIL" };
     writeln!(
         summary,

@@ -432,7 +432,13 @@ fn run077_valid_candidate_validates_and_does_not_apply() {
     let metrics = P2pMetrics::default();
 
     let result = run_local_check(
-        inputs(Some(&path), true, &h.signing_keys, &scratch, Some(&seq_path)),
+        inputs(
+            Some(&path),
+            true,
+            &h.signing_keys,
+            &scratch,
+            Some(&seq_path),
+        ),
         &metrics,
     );
     let exit_code = result.exit_code();
@@ -497,8 +503,7 @@ fn run077_oversize_candidate_dropped_pre_crypto_no_scratch() {
     let seq_path = sequence_file_path(&dir);
     let h = devnet_signing_harness();
 
-    let mut envelope =
-        envelope_with(vec![0u8; 8], 1, "deadbeef".to_string());
+    let mut envelope = envelope_with(vec![0u8; 8], 1, "deadbeef".to_string());
     envelope.bundle_bytes = vec![0u8; MAX_PEER_CANDIDATE_BUNDLE_BYTES + 1];
     envelope.declared_length = envelope.bundle_bytes.len();
     let path = write_envelope_fixture(&dir, &envelope);
@@ -506,7 +511,13 @@ fn run077_oversize_candidate_dropped_pre_crypto_no_scratch() {
     let metrics = P2pMetrics::default();
 
     let result = run_local_check(
-        inputs(Some(&path), true, &h.signing_keys, &scratch, Some(&seq_path)),
+        inputs(
+            Some(&path),
+            true,
+            &h.signing_keys,
+            &scratch,
+            Some(&seq_path),
+        ),
         &metrics,
     );
     let exit_code = result.exit_code();
@@ -547,7 +558,13 @@ fn run077_wrong_environment_envelope_rejected_pre_crypto() {
     let metrics = P2pMetrics::default();
 
     let result = run_local_check(
-        inputs(Some(&path), true, &h.signing_keys, &scratch, Some(&seq_path)),
+        inputs(
+            Some(&path),
+            true,
+            &h.signing_keys,
+            &scratch,
+            Some(&seq_path),
+        ),
         &metrics,
     );
     let exit_code = result.exit_code();
@@ -626,7 +643,13 @@ fn run077_tampered_signature_rejected_at_loader() {
     let metrics = P2pMetrics::default();
 
     let result = run_local_check(
-        inputs(Some(&path), true, &h.signing_keys, &scratch, Some(&seq_path)),
+        inputs(
+            Some(&path),
+            true,
+            &h.signing_keys,
+            &scratch,
+            Some(&seq_path),
+        ),
         &metrics,
     );
     let exit_code = result.exit_code();
@@ -665,7 +688,13 @@ fn run077_does_not_affect_run069_reload_check_path() {
     let path = write_envelope_fixture(&dir, &envelope);
     let metrics = P2pMetrics::default();
     let result = run_local_check(
-        inputs(Some(&path), true, &h.signing_keys, &scratch, Some(&seq_path)),
+        inputs(
+            Some(&path),
+            true,
+            &h.signing_keys,
+            &scratch,
+            Some(&seq_path),
+        ),
         &metrics,
     );
     assert_eq!(result.exit_code(), 0);

@@ -50,13 +50,11 @@ use qbind_consensus::ids::ValidatorId;
 use qbind_crypto::ConsensusSigSuiteId;
 
 use crate::keystore::{
-    EncryptedFsValidatorKeystore, FsValidatorKeystore, KeystoreConfig,
-    KeystoreError, LocalKeystoreEntryId, ValidatorKeystore,
+    EncryptedFsValidatorKeystore, FsValidatorKeystore, KeystoreConfig, KeystoreError,
+    LocalKeystoreEntryId, ValidatorKeystore,
 };
 use crate::node_config::{NodeConfig, SignerMode};
-use crate::validator_config::{
-    derive_validator_public_key, EXPECTED_SUITE_ID,
-};
+use crate::validator_config::{derive_validator_public_key, EXPECTED_SUITE_ID};
 use crate::validator_signer::{LocalKeySigner, ValidatorSigner};
 
 /// Backend kind a loaded signer was constructed from.
@@ -197,11 +195,9 @@ impl std::fmt::Display for SignerLoadError {
                 "keystore entry {:?} not found under the configured signer_keystore_path",
                 entry
             ),
-            Self::KeystoreLoadFailed { kind, detail } => write!(
-                f,
-                "keystore load failed (kind={}): {}",
-                kind, detail
-            ),
+            Self::KeystoreLoadFailed { kind, detail } => {
+                write!(f, "keystore load failed (kind={}): {}", kind, detail)
+            }
             Self::PublicKeyDerivationFailed { detail } => write!(
                 f,
                 "public-key derivation failed for loaded signing key: {}",
@@ -465,8 +461,7 @@ mod tests {
         );
         let cfg = devnet_config_with_keystore(tmp.path().to_path_buf());
 
-        let loaded =
-            load_validator_signer_from_config(&cfg, validator_id).expect("signer load");
+        let loaded = load_validator_signer_from_config(&cfg, validator_id).expect("signer load");
         assert_eq!(loaded.validator_id, validator_id);
         assert_eq!(loaded.suite_id, EXPECTED_SUITE_ID);
         assert_eq!(loaded.backend, SignerBackendKind::LocalKeystorePlain);
@@ -515,9 +510,10 @@ mod tests {
     fn malformed_keystore_fails_closed() {
         let tmp = tempfile::tempdir().unwrap();
         let validator_id = ValidatorId::new(2);
-        let path = tmp
-            .path()
-            .join(format!("{}.json", keystore_entry_for_validator(validator_id)));
+        let path = tmp.path().join(format!(
+            "{}.json",
+            keystore_entry_for_validator(validator_id)
+        ));
         fs::write(&path, "this is not valid json").unwrap();
         let cfg = devnet_config_with_keystore(tmp.path().to_path_buf());
         let err = load_validator_signer_from_config(&cfg, validator_id)
@@ -656,19 +652,24 @@ mod tests {
         assert!(!dbg.contains("private_key"));
         assert!(!dbg.to_ascii_lowercase().contains("secret"));
         // Confirm Debug of LocalKeySigner directly redacts.
-        let inner_dbg = format!("{:?}", LocalKeySigner::new(
-            validator_id,
-            100,
-            Arc::new(ValidatorSigningKey::new(sk)),
-        ));
+        let inner_dbg = format!(
+            "{:?}",
+            LocalKeySigner::new(validator_id, 100, Arc::new(ValidatorSigningKey::new(sk)),)
+        );
         assert!(inner_dbg.contains("<redacted>"));
         assert!(!inner_dbg.contains("private_key"));
     }
 
     #[test]
     fn entry_name_convention_is_stable() {
-        assert_eq!(keystore_entry_for_validator(ValidatorId::new(0)), "validator-0");
-        assert_eq!(keystore_entry_for_validator(ValidatorId::new(42)), "validator-42");
+        assert_eq!(
+            keystore_entry_for_validator(ValidatorId::new(0)),
+            "validator-0"
+        );
+        assert_eq!(
+            keystore_entry_for_validator(ValidatorId::new(42)),
+            "validator-42"
+        );
     }
 
     #[test]

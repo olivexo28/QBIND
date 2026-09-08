@@ -31,7 +31,11 @@ use qbind_types::{ValidatorRecord, ValidatorStatus};
 // ============================================================================
 
 /// Create a sample ValidatorRecord for testing.
-fn make_validator_record(stake: u64, jailed_until_epoch: Option<u64>, status: ValidatorStatus) -> ValidatorRecord {
+fn make_validator_record(
+    stake: u64,
+    jailed_until_epoch: Option<u64>,
+    status: ValidatorStatus,
+) -> ValidatorRecord {
     ValidatorRecord {
         version: 1,
         status,
@@ -102,14 +106,27 @@ fn test_restart_after_o1_penalty_preserves_all_markers_and_records() {
 
         // M19 Invariant A: Stake decreased exactly once
         let state = ledger.get_validator_state(1).unwrap();
-        assert_eq!(state.stake, expected_remaining, "Stake should be reduced after restart");
-        assert_eq!(state.total_slashed, expected_slash, "Total slashed should be recorded");
+        assert_eq!(
+            state.stake, expected_remaining,
+            "Stake should be reduced after restart"
+        );
+        assert_eq!(
+            state.total_slashed, expected_slash,
+            "Total slashed should be recorded"
+        );
 
         // M19 Invariant B: Jail until epoch matches policy
-        assert_eq!(state.jailed_until_epoch, Some(15), "Jailed until epoch 15 (5 + 10)");
+        assert_eq!(
+            state.jailed_until_epoch,
+            Some(15),
+            "Jailed until epoch 15 (5 + 10)"
+        );
 
         // M19 Invariant C: Evidence seen set contains evidence_id
-        assert!(ledger.is_evidence_seen(&evidence_id), "Evidence ID should be in seen set");
+        assert!(
+            ledger.is_evidence_seen(&evidence_id),
+            "Evidence ID should be in seen set"
+        );
 
         // M19 Invariant D: Slashing record exists with matching evidence_id
         let records = ledger.get_slashing_records(1);
@@ -222,7 +239,10 @@ fn test_duplicate_evidence_never_double_penalizes_across_restart() {
         let ledger = RocksDbSlashingLedger::open(temp_dir.path()).unwrap();
 
         // Verify evidence is already seen
-        assert!(ledger.is_evidence_seen(&evidence_id), "Evidence should be marked as seen");
+        assert!(
+            ledger.is_evidence_seen(&evidence_id),
+            "Evidence should be marked as seen"
+        );
 
         // Try to apply the same penalty - should be deduplicated
         let mut backend = LedgerSlashingBackend::new(ledger);
@@ -268,7 +288,11 @@ fn test_duplicate_evidence_never_double_penalizes_across_restart() {
 
         // Verify only ONE record exists
         let records = backend.ledger().get_slashing_records(3);
-        assert_eq!(records.len(), 1, "Should have exactly one slashing record (no duplicates)");
+        assert_eq!(
+            records.len(),
+            1,
+            "Should have exactly one slashing record (no duplicates)"
+        );
     }
 
     // Session 3: Reopen one more time to confirm persistence
@@ -337,7 +361,11 @@ fn test_corruption_detection_fails_closed() {
         ledger.verify_slashing_consistency_on_startup().unwrap();
 
         // Verify the diagnostic methods work
-        assert_eq!(ledger.evidence_seen_count(), 1, "Should have 1 evidence marker");
+        assert_eq!(
+            ledger.evidence_seen_count(),
+            1,
+            "Should have 1 evidence marker"
+        );
         let record_count = ledger.slashing_record_count().unwrap();
         assert_eq!(record_count, 1, "Should have 1 slashing record");
     }
@@ -415,17 +443,30 @@ fn test_ensure_no_api_reads_mirrored_stake_for_eligibility() {
 
         // Create ValidatorRecord with the canonical state from slashing ledger
         // The key point: eligibility is determined by ValidatorRecord::is_eligible_at_epoch()
-        let record = make_validator_record(state.stake, state.jailed_until_epoch, ValidatorStatus::Active);
+        let record = make_validator_record(
+            state.stake,
+            state.jailed_until_epoch,
+            ValidatorStatus::Active,
+        );
 
         // M19 Invariant E: Eligibility must come from ValidatorRecord
         // ValidatorSlashingState mirrors but is NOT authoritative
 
         // During jail period: not eligible
-        assert!(!record.is_eligible_at_epoch(10), "Should NOT be eligible during jail");
-        assert!(!record.is_eligible_at_epoch(14), "Should NOT be eligible during jail");
+        assert!(
+            !record.is_eligible_at_epoch(10),
+            "Should NOT be eligible during jail"
+        );
+        assert!(
+            !record.is_eligible_at_epoch(14),
+            "Should NOT be eligible during jail"
+        );
 
         // After jail expires: eligible
-        assert!(record.is_eligible_at_epoch(15), "Should be eligible after jail expires");
+        assert!(
+            record.is_eligible_at_epoch(15),
+            "Should be eligible after jail expires"
+        );
 
         // Verify the canonical predicates work correctly
         assert!(record.is_jailed_at_epoch(10));
@@ -531,8 +572,16 @@ fn test_verify_slashing_consistency_multiple_validators_multiple_offenses() {
         ledger.verify_slashing_consistency_on_startup().unwrap();
 
         // Verify counts
-        assert_eq!(ledger.evidence_seen_count(), 3, "Should have 3 evidence markers");
-        assert_eq!(ledger.slashing_record_count().unwrap(), 3, "Should have 3 slashing records");
+        assert_eq!(
+            ledger.evidence_seen_count(),
+            3,
+            "Should have 3 evidence markers"
+        );
+        assert_eq!(
+            ledger.slashing_record_count().unwrap(),
+            3,
+            "Should have 3 slashing records"
+        );
 
         // Verify each validator's state
         let state_1 = ledger.get_validator_state(1).unwrap();

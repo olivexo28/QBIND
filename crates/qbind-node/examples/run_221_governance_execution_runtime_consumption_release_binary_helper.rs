@@ -467,7 +467,11 @@ fn run_selector_table(out: &Path) -> (u64, u64) {
             cfg.unwrap().governance_execution_policy(),
             &GovernanceExecutionLoadStatus::Absent,
         );
-        t.check("A1.consumes-legacy-bypass", "proceed:legacy-bypass", &consumption_tag(&c));
+        t.check(
+            "A1.consumes-legacy-bypass",
+            "proceed:legacy-bypass",
+            &consumption_tag(&c),
+        );
         t.assert_true("A1.is-proceed", c.is_proceed(), "");
         t.assert_true("A1.is-legacy-bypass", c.is_legacy_bypass(), "");
         t.assert_true("A1.not-fail-closed", !c.is_fail_closed(), "");
@@ -507,14 +511,19 @@ fn run_selector_table(out: &Path) -> (u64, u64) {
             GovernanceExecutionPolicy::Disabled,
             &GovernanceExecutionLoadStatus::Absent,
         );
-        t.check("A3.cli-disabled-bypass", "proceed:legacy-bypass", &consumption_tag(&c));
+        t.check(
+            "A3.cli-disabled-bypass",
+            "proceed:legacy-bypass",
+            &consumption_tag(&c),
+        );
     }
     // A4 — env `disabled` resolves through consumption to Disabled + bypass.
     {
         let _g = EnvGuard::set(Some(GOVERNANCE_EXECUTION_POLICY_TAG_DISABLED));
         t.assert_true(
             "A4.env-disabled",
-            governance_execution_policy_env_selector() == Ok(Some(GovernanceExecutionPolicy::Disabled))
+            governance_execution_policy_env_selector()
+                == Ok(Some(GovernanceExecutionPolicy::Disabled))
                 && policy_from_cli_or_env(None) == Ok(GovernanceExecutionPolicy::Disabled),
             "",
         );
@@ -538,7 +547,11 @@ fn run_selector_table(out: &Path) -> (u64, u64) {
             resolved.unwrap(),
             &GovernanceExecutionLoadStatus::Absent,
         );
-        t.check("A10.cli-over-env-bypass", "proceed:legacy-bypass", &consumption_tag(&c));
+        t.check(
+            "A10.cli-over-env-bypass",
+            "proceed:legacy-bypass",
+            &consumption_tag(&c),
+        );
     }
     // R1 — invalid CLI selector fails closed before any runtime mutation:
     // the carrier (and hence any consumption) is never constructed.
@@ -572,7 +585,10 @@ fn run_selector_table(out: &Path) -> (u64, u64) {
     // R3 — unrelated CLI/env does not enable governance-execution consumption.
     {
         let _g = EnvGuard::set(None);
-        env::set_var("QBIND_SOME_UNRELATED_FLAG_221", "fixture-governance-allowed");
+        env::set_var(
+            "QBIND_SOME_UNRELATED_FLAG_221",
+            "fixture-governance-allowed",
+        );
         let resolved = GovernanceExecutionRuntimeArmingConfig::from_cli_or_env(None);
         env::remove_var("QBIND_SOME_UNRELATED_FLAG_221");
         t.assert_true(
@@ -750,11 +766,21 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
         let policy = GovernanceExecutionPolicy::FixtureGovernanceAllowed;
         let value = sidecar_value_with(&rotate_input(env), &rotate_decision());
         for (id, s) in [
-            ("A11.reload-check", GovernanceExecutionRuntimeSurface::ReloadCheck),
-            ("A12.reload-apply", GovernanceExecutionRuntimeSurface::ReloadApply),
+            (
+                "A11.reload-check",
+                GovernanceExecutionRuntimeSurface::ReloadCheck,
+            ),
+            (
+                "A12.reload-apply",
+                GovernanceExecutionRuntimeSurface::ReloadApply,
+            ),
         ] {
             let c = consume_from_value(s, env, &rotate_expectations(env), policy, Some(&value));
-            t.check(id, "proceed:accept:FixtureGovernanceAccepted", &consumption_tag(&c));
+            t.check(
+                id,
+                "proceed:accept:FixtureGovernanceAccepted",
+                &consumption_tag(&c),
+            );
         }
     }
     // A13/A14/A15 — startup --p2p-trust-bundle, SIGHUP, and local
@@ -765,12 +791,22 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
         let policy = GovernanceExecutionPolicy::FixtureGovernanceAllowed;
         let value = sidecar_value_with(&rotate_input(env), &rotate_decision());
         for (id, s) in [
-            ("A13.startup-p2p", GovernanceExecutionRuntimeSurface::StartupP2pTrustBundle),
+            (
+                "A13.startup-p2p",
+                GovernanceExecutionRuntimeSurface::StartupP2pTrustBundle,
+            ),
             ("A14.sighup", GovernanceExecutionRuntimeSurface::Sighup),
-            ("A15.local-peer-candidate", GovernanceExecutionRuntimeSurface::LocalPeerCandidateCheck),
+            (
+                "A15.local-peer-candidate",
+                GovernanceExecutionRuntimeSurface::LocalPeerCandidateCheck,
+            ),
         ] {
             let c = consume_from_value(s, env, &rotate_expectations(env), policy, Some(&value));
-            t.check(id, "proceed:accept:FixtureGovernanceAccepted", &consumption_tag(&c));
+            t.check(
+                id,
+                "proceed:accept:FixtureGovernanceAccepted",
+                &consumption_tag(&c),
+            );
         }
     }
     // A16 — live inbound 0x05 consumes the selected policy where representable
@@ -851,7 +887,10 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
         );
         t.assert_true(
             "A18.rotate-authorized",
-            matches!(ok, GovernanceExecutionRuntimeConsumption::ProceedAccepted(_)),
+            matches!(
+                ok,
+                GovernanceExecutionRuntimeConsumption::ProceedAccepted(_)
+            ),
             "",
         );
         // mismatched candidate digest is consumed as FailClosed.
@@ -881,7 +920,10 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
         );
         t.assert_true(
             "A19.revoke-authorized",
-            matches!(ok, GovernanceExecutionRuntimeConsumption::ProceedAccepted(_)),
+            matches!(
+                ok,
+                GovernanceExecutionRuntimeConsumption::ProceedAccepted(_)
+            ),
             "",
         );
     }
@@ -894,8 +936,10 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
         let arming = GovernanceExecutionRuntimeArmingConfig::with_policy(policy);
         let loaded = available_from(&rotate_input(env), &rotate_decision());
         for s in ALL_SURFACES {
-            let armed = arming.arm_surface(s, &trust_domain(env), &rotate_expectations(env), &loaded);
-            let consumed = arming.consume_surface(s, &trust_domain(env), &rotate_expectations(env), &loaded);
+            let armed =
+                arming.arm_surface(s, &trust_domain(env), &rotate_expectations(env), &loaded);
+            let consumed =
+                arming.consume_surface(s, &trust_domain(env), &rotate_expectations(env), &loaded);
             t.assert_true(
                 &format!("A20.consume-eq-from-outcome.{}", surface_name(s)),
                 consumed == GovernanceExecutionRuntimeConsumption::from_outcome(armed),
@@ -1124,7 +1168,8 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
         "fail-closed:callsite:reject:WrongGovernanceProofDigest",
         |i: &mut GovernanceExecutionInput,
          _d: &mut GovernanceExecutionDecision,
-         _e: &mut GovernanceExecutionExpectations| i.governance_proof_digest = "wrong".into()
+         _e: &mut GovernanceExecutionExpectations| i.governance_proof_digest =
+            "wrong".into()
     );
     // R17 — expired decision rejected.
     one!(
@@ -1378,7 +1423,8 @@ fn run_loader_table(out: &Path) -> (u64, u64) {
     let via_parser = parse_optional_governance_execution_sibling_from_json_value(&carry);
     t.assert_true(
         "L3.carry-available",
-        matches!(via_helper, GovernanceExecutionLoadStatus::Available(_)) && via_helper == via_parser,
+        matches!(via_helper, GovernanceExecutionLoadStatus::Available(_))
+            && via_helper == via_parser,
         "",
     );
     // L4 — a v2 sidecar value with a malformed sibling ⇒ Malformed.
@@ -1392,8 +1438,16 @@ fn run_loader_table(out: &Path) -> (u64, u64) {
         "",
     );
     // L5/L6 — schema constants.
-    t.check("L5.field", "governance_execution", GOVERNANCE_EXECUTION_PAYLOAD_SIBLING_FIELD);
-    t.check("L6.version", "1", &GOVERNANCE_EXECUTION_PAYLOAD_WIRE_SCHEMA_VERSION.to_string());
+    t.check(
+        "L5.field",
+        "governance_execution",
+        GOVERNANCE_EXECUTION_PAYLOAD_SIBLING_FIELD,
+    );
+    t.check(
+        "L6.version",
+        "1",
+        &GOVERNANCE_EXECUTION_PAYLOAD_WIRE_SCHEMA_VERSION.to_string(),
+    );
     t.finish(out)
 }
 
@@ -1488,7 +1542,11 @@ fn run_reachability_table(out: &Path) -> (u64, u64) {
             GovernanceExecutionPolicy::Disabled,
             &GovernanceExecutionLoadStatus::Absent,
         );
-        t.assert_true("R.reason-absent-on-bypass", bypass.fail_closed_reason().is_none(), "");
+        t.assert_true(
+            "R.reason-absent-on-bypass",
+            bypass.fail_closed_reason().is_none(),
+            "",
+        );
     }
     let p1 = governance_execution_policy_digest(
         GovernanceExecutionPolicy::FixtureGovernanceAllowed,

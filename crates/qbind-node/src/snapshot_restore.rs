@@ -391,16 +391,15 @@ pub fn restore_from_snapshot_with_authority_marker_check(
     //      without consulting either block.
     //    - Otherwise: Run 124 v1 path verbatim (no v1 regression).
     if meta.authority_state_v2.is_some() {
-        let check_outcome_v2 = verify_snapshot_authority_state_for_restore_v2(
-            SnapshotRestoreAuthorityCheckV2Inputs {
+        let check_outcome_v2 =
+            verify_snapshot_authority_state_for_restore_v2(SnapshotRestoreAuthorityCheckV2Inputs {
                 marker_path: &marker_path,
                 snapshot_meta_v2: meta.authority_state_v2.as_ref(),
                 snapshot_also_carries_v1_block: meta.authority_state.is_some(),
                 runtime_env: authority_ctx.runtime_env,
                 runtime_chain_id: authority_ctx.runtime_chain_id,
                 runtime_genesis_hash_hex: authority_ctx.runtime_genesis_hash_hex,
-            },
-        );
+            });
 
         if check_outcome_v2.is_reject() {
             eprintln!(
@@ -453,7 +452,9 @@ fn validate_snapshot_for_restore(
     expected_chain_id: u64,
 ) -> Result<StateSnapshotMeta, RestoreError> {
     if !snapshot_dir.exists() {
-        return Err(RestoreError::SnapshotPathMissing(snapshot_dir.to_path_buf()));
+        return Err(RestoreError::SnapshotPathMissing(
+            snapshot_dir.to_path_buf(),
+        ));
     }
     match validate_snapshot_dir(snapshot_dir, expected_chain_id) {
         SnapshotValidationResult::Valid(m) => Ok(m),
@@ -507,7 +508,13 @@ fn materialize_validated_snapshot(
 
     // 6. Write audit marker (append a JSON line per restore for full history).
     let marker_path = data_dir.join(RESTORE_MARKER_FILENAME);
-    write_restore_marker(&marker_path, &meta, snapshot_dir, &target_state_dir, bytes_copied)?;
+    write_restore_marker(
+        &marker_path,
+        &meta,
+        snapshot_dir,
+        &target_state_dir,
+        bytes_copied,
+    )?;
 
     Ok(RestoreOutcome {
         meta,
@@ -526,8 +533,8 @@ fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<u64, RestoreError> {
         RestoreError::Io(format!("cannot read source dir {}: {}", src.display(), e))
     })?;
     for entry in entries {
-        let entry = entry
-            .map_err(|e| RestoreError::Io(format!("cannot read source entry: {}", e)))?;
+        let entry =
+            entry.map_err(|e| RestoreError::Io(format!("cannot read source entry: {}", e)))?;
         let file_type = entry
             .file_type()
             .map_err(|e| RestoreError::Io(format!("cannot stat source entry: {}", e)))?;

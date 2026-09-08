@@ -61,6 +61,7 @@ use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
 
 use crate::pqc_authority_lifecycle::{AuthorityTrustDomain, LocalLifecycleAction};
+use crate::pqc_governance_authority::GovernanceThreshold;
 use crate::pqc_onchain_governance_proof::{
     is_fixture_onchain_governance_proof_suite, OnChainGovernanceProposalOutcome,
     OnChainGovernanceQuorum,
@@ -68,7 +69,6 @@ use crate::pqc_onchain_governance_proof::{
 use crate::pqc_onchain_governance_verifier::{
     classify_onchain_governance_proof_class, OnChainGovernanceProofClass,
 };
-use crate::pqc_governance_authority::GovernanceThreshold;
 use crate::pqc_trust_bundle::TrustBundleEnvironment;
 
 // ===========================================================================
@@ -547,12 +547,24 @@ impl ProductionOnChainGovernanceTrustedCheckpoint {
         let mut h = Sha3_256::new();
         h.update(PRODUCTION_ONCHAIN_GOVERNANCE_CHECKPOINT_DOMAIN_TAG.as_bytes());
         hash_field(&mut h, b"checkpoint_id", self.checkpoint_id.as_bytes());
-        hash_field(&mut h, b"governance_root", self.governance_root_hex.as_bytes());
+        hash_field(
+            &mut h,
+            b"governance_root",
+            self.governance_root_hex.as_bytes(),
+        );
         hash_opt(&mut h, b"receipt_root", self.receipt_root_hex.as_deref());
         hash_opt(&mut h, b"event_root", self.event_root_hex.as_deref());
         hash_opt(&mut h, b"state_root", self.state_root_hex.as_deref());
-        hash_field(&mut h, b"governance_height", &self.governance_height.to_le_bytes());
-        hash_field(&mut h, b"governance_epoch", &self.governance_epoch.to_le_bytes());
+        hash_field(
+            &mut h,
+            b"governance_height",
+            &self.governance_height.to_le_bytes(),
+        );
+        hash_field(
+            &mut h,
+            b"governance_epoch",
+            &self.governance_epoch.to_le_bytes(),
+        );
         hex::encode(h.finalize())
     }
 }
@@ -654,7 +666,11 @@ impl ProductionOnChainGovernanceDecisionCommitment {
         use sha3::{Digest, Sha3_256};
         let mut h = Sha3_256::new();
         h.update(PRODUCTION_ONCHAIN_GOVERNANCE_DECISION_DOMAIN_TAG.as_bytes());
-        hash_field(&mut h, b"environment", &self.environment.metric_code().to_le_bytes());
+        hash_field(
+            &mut h,
+            b"environment",
+            &self.environment.metric_code().to_le_bytes(),
+        );
         hash_field(&mut h, b"chain_id", self.chain_id.as_bytes());
         hash_field(&mut h, b"genesis_hash", self.genesis_hash.as_bytes());
         hash_field(
@@ -662,10 +678,26 @@ impl ProductionOnChainGovernanceDecisionCommitment {
             b"authority_root_fingerprint",
             self.authority_root_fingerprint.as_bytes(),
         );
-        hash_field(&mut h, b"authority_root_suite_id", &[self.authority_root_suite_id]);
-        hash_field(&mut h, b"governance_domain_id", self.governance_domain_id.as_bytes());
-        hash_field(&mut h, b"governance_epoch", &self.governance_epoch.to_le_bytes());
-        hash_field(&mut h, b"governance_height", &self.governance_height.to_le_bytes());
+        hash_field(
+            &mut h,
+            b"authority_root_suite_id",
+            &[self.authority_root_suite_id],
+        );
+        hash_field(
+            &mut h,
+            b"governance_domain_id",
+            self.governance_domain_id.as_bytes(),
+        );
+        hash_field(
+            &mut h,
+            b"governance_epoch",
+            &self.governance_epoch.to_le_bytes(),
+        );
+        hash_field(
+            &mut h,
+            b"governance_height",
+            &self.governance_height.to_le_bytes(),
+        );
         hash_field(&mut h, b"proposal_id", self.proposal_id.as_bytes());
         hash_field(&mut h, b"proposal_digest", self.proposal_digest.as_bytes());
         hash_field(
@@ -673,13 +705,41 @@ impl ProductionOnChainGovernanceDecisionCommitment {
             b"proposal_outcome",
             proposal_outcome_tag(self.proposal_outcome).as_bytes(),
         );
-        hash_field(&mut h, b"quorum_voted", &self.quorum.voters_voted.to_le_bytes());
-        hash_field(&mut h, b"quorum_total", &self.quorum.total_voters.to_le_bytes());
-        hash_field(&mut h, b"quorum_required", &self.quorum.required_quorum.to_le_bytes());
-        hash_field(&mut h, b"threshold_approvals", &self.threshold.approvals.to_le_bytes());
-        hash_field(&mut h, b"threshold_required", &self.threshold.required.to_le_bytes());
-        hash_field(&mut h, b"threshold_total", &self.threshold.total.to_le_bytes());
-        hash_field(&mut h, b"lifecycle_action", self.lifecycle_action.tag().as_bytes());
+        hash_field(
+            &mut h,
+            b"quorum_voted",
+            &self.quorum.voters_voted.to_le_bytes(),
+        );
+        hash_field(
+            &mut h,
+            b"quorum_total",
+            &self.quorum.total_voters.to_le_bytes(),
+        );
+        hash_field(
+            &mut h,
+            b"quorum_required",
+            &self.quorum.required_quorum.to_le_bytes(),
+        );
+        hash_field(
+            &mut h,
+            b"threshold_approvals",
+            &self.threshold.approvals.to_le_bytes(),
+        );
+        hash_field(
+            &mut h,
+            b"threshold_required",
+            &self.threshold.required.to_le_bytes(),
+        );
+        hash_field(
+            &mut h,
+            b"threshold_total",
+            &self.threshold.total.to_le_bytes(),
+        );
+        hash_field(
+            &mut h,
+            b"lifecycle_action",
+            self.lifecycle_action.tag().as_bytes(),
+        );
         hash_field(
             &mut h,
             b"active_bundle_signing_key_fingerprint",
@@ -700,7 +760,11 @@ impl ProductionOnChainGovernanceDecisionCommitment {
             b"authority_domain_sequence",
             &self.authority_domain_sequence.to_le_bytes(),
         );
-        hash_field(&mut h, b"candidate_v2_digest", self.candidate_v2_digest.as_bytes());
+        hash_field(
+            &mut h,
+            b"candidate_v2_digest",
+            self.candidate_v2_digest.as_bytes(),
+        );
         hash_field(&mut h, b"decision_id", self.decision_id.as_bytes());
         hex::encode(h.finalize())
     }
@@ -755,14 +819,22 @@ impl ProductionOnChainGovernanceProof {
         use sha3::{Digest, Sha3_256};
         let mut h = Sha3_256::new();
         h.update(PRODUCTION_ONCHAIN_GOVERNANCE_PROOF_DOMAIN_TAG.as_bytes());
-        hash_field(&mut h, b"protocol_version", &self.protocol_version.0.to_le_bytes());
+        hash_field(
+            &mut h,
+            b"protocol_version",
+            &self.protocol_version.0.to_le_bytes(),
+        );
         hash_field(&mut h, b"proof_suite", &[self.proof_suite.0]);
         hash_field(
             &mut h,
             b"domain_separation_tag",
             self.domain_separation_tag.as_bytes(),
         );
-        hash_field(&mut h, b"decision_digest", self.commitment.decision_digest().as_bytes());
+        hash_field(
+            &mut h,
+            b"decision_digest",
+            self.commitment.decision_digest().as_bytes(),
+        );
         hash_field(
             &mut h,
             b"leaf_index",
@@ -955,17 +1027,27 @@ pub enum ProductionOnChainGovernanceProofOutcome {
     /// root/checkpoint.
     ProductionTrustedRootMismatch,
     /// The proof was structurally malformed.
-    ProductionProofMalformed { reason: String },
+    ProductionProofMalformed {
+        reason: String,
+    },
     /// The proof suite was unsupported.
-    ProductionProofUnsupportedSuite { suite_id: u8 },
+    ProductionProofUnsupportedSuite {
+        suite_id: u8,
+    },
     /// The proof protocol version was unsupported.
-    ProductionProofUnsupportedProtocol { version: u16 },
+    ProductionProofUnsupportedProtocol {
+        version: u16,
+    },
     /// The proof failed verification for an unclassified reason.
-    ProductionProofInvalid { reason: String },
+    ProductionProofInvalid {
+        reason: String,
+    },
     /// The proof was outside the explicit freshness bounds.
     ProductionProofExpired,
     /// The decision id was replayed.
-    ProductionProofReplayRejected { decision_id: String },
+    ProductionProofReplayRejected {
+        decision_id: String,
+    },
 
     // ---- Binding mismatches -------------------------------------------
     ProductionProofWrongEnvironment,
@@ -988,7 +1070,9 @@ pub enum ProductionOnChainGovernanceProofOutcome {
     ProductionProofInclusionFailed,
     ProductionProofRootMismatch,
     ProductionProofCheckpointMismatch,
-    ProductionProofAmbiguous { reason: String },
+    ProductionProofAmbiguous {
+        reason: String,
+    },
 
     // ---- Explicit non-authority rejects -------------------------------
     LocalOperatorConfigOnlyRejected,
@@ -1004,16 +1088,15 @@ pub enum ProductionOnChainGovernanceProofOutcome {
 
     /// The request / config was structurally malformed or the outcome
     /// could not be classified — fail closed.
-    AmbiguousFailClosed { reason: String },
+    AmbiguousFailClosed {
+        reason: String,
+    },
 }
 
 impl ProductionOnChainGovernanceProofOutcome {
     /// Returns `true` iff this outcome accepted a production proof.
     pub fn is_accept(&self) -> bool {
-        matches!(
-            self,
-            Self::AcceptedProductionOnChainGovernanceProof { .. }
-        )
+        matches!(self, Self::AcceptedProductionOnChainGovernanceProof { .. })
     }
 
     /// Every Run 299 outcome is non-mutating.
@@ -1051,14 +1134,18 @@ impl ProductionOnChainGovernanceProofOutcome {
             Self::ProductionProofWrongChain => "production-proof-wrong-chain",
             Self::ProductionProofWrongGenesis => "production-proof-wrong-genesis",
             Self::ProductionProofWrongAuthorityRoot => "production-proof-wrong-authority-root",
-            Self::ProductionProofWrongGovernanceDomain => "production-proof-wrong-governance-domain",
+            Self::ProductionProofWrongGovernanceDomain => {
+                "production-proof-wrong-governance-domain"
+            }
             Self::ProductionProofWrongGovernanceEpoch => "production-proof-wrong-governance-epoch",
             Self::ProductionProofWrongProposalId => "production-proof-wrong-proposal-id",
             Self::ProductionProofWrongProposalDigest => "production-proof-wrong-proposal-digest",
             Self::ProductionProofWrongProposalOutcome => "production-proof-wrong-proposal-outcome",
             Self::ProductionProofWrongLifecycleAction => "production-proof-wrong-lifecycle-action",
             Self::ProductionProofWrongCandidateDigest => "production-proof-wrong-candidate-digest",
-            Self::ProductionProofWrongAuthoritySequence => "production-proof-wrong-authority-sequence",
+            Self::ProductionProofWrongAuthoritySequence => {
+                "production-proof-wrong-authority-sequence"
+            }
             Self::ProductionProofWrongDecisionId => "production-proof-wrong-decision-id",
             Self::ProductionProofQuorumNotMet => "production-proof-quorum-not-met",
             Self::ProductionProofThresholdNotMet => "production-proof-threshold-not-met",
@@ -1096,9 +1183,9 @@ fn error_to_outcome(
             reason: reason.clone(),
         },
         E::TrustedRootMissing => O::ProductionTrustedRootMissing,
-        E::UnsupportedSuite { suite_id } => {
-            O::ProductionProofUnsupportedSuite { suite_id: *suite_id }
-        }
+        E::UnsupportedSuite { suite_id } => O::ProductionProofUnsupportedSuite {
+            suite_id: *suite_id,
+        },
         E::UnsupportedProtocol { version } => {
             O::ProductionProofUnsupportedProtocol { version: *version }
         }
@@ -1282,10 +1369,10 @@ impl OnChainGovernanceInclusionVerifier for UnavailableInclusionVerifierStub {
 /// Run 299 — programmable source/test inclusion verifier for fault
 /// injection.
 pub struct MockInclusionVerifier {
-    steps: RefCell<
-        VecDeque<Result<VerifiedInclusionMaterial, ProductionOnChainGovernanceProofError>>,
-    >,
-    default_result: RefCell<Result<VerifiedInclusionMaterial, ProductionOnChainGovernanceProofError>>,
+    steps:
+        RefCell<VecDeque<Result<VerifiedInclusionMaterial, ProductionOnChainGovernanceProofError>>>,
+    default_result:
+        RefCell<Result<VerifiedInclusionMaterial, ProductionOnChainGovernanceProofError>>,
     call_count: Cell<u32>,
 }
 
@@ -1463,11 +1550,13 @@ impl<V: OnChainGovernanceInclusionVerifier> ProductionOnChainGovernanceProofVeri
         //    186 classifier drives this (fixture suite => Fixture). A
         //    fixture proof's suite is rejected up front.
         if proof.proof_suite.is_fixture() {
-            return Some(if trust_domain.environment == TrustBundleEnvironment::Mainnet {
-                O::FixtureProofRejectedAsMainNetProductionAuthority
-            } else {
-                O::FixtureProofRejectedAsProductionAuthority
-            });
+            return Some(
+                if trust_domain.environment == TrustBundleEnvironment::Mainnet {
+                    O::FixtureProofRejectedAsMainNetProductionAuthority
+                } else {
+                    O::FixtureProofRejectedAsProductionAuthority
+                },
+            );
         }
 
         // 3. MainNet gate. A MainNet trust domain requires the explicit

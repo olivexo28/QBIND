@@ -41,8 +41,8 @@ use qbind_consensus::ids::ValidatorId;
 use qbind_consensus::validator_set::{ConsensusValidatorSet, ValidatorSetEntry};
 use qbind_crypto::{AeadSuite, CryptoError, KemSuite, SignatureSuite, StaticCryptoProvider};
 use qbind_net::{
-    ClientConnectionConfig, ClientHandshakeConfig, KemPrivateKey, MutualAuthMode, ServerConnectionConfig,
-    ServerHandshakeConfig,
+    ClientConnectionConfig, ClientHandshakeConfig, KemPrivateKey, MutualAuthMode,
+    ServerConnectionConfig, ServerHandshakeConfig,
 };
 use qbind_node::peer::PeerId;
 use qbind_node::validator_config::inject_kem_metrics_into_configs;

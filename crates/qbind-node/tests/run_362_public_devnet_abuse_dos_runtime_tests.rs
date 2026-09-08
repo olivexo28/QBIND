@@ -53,7 +53,10 @@ fn parse(args: &[&str]) -> Result<CliArgs, clap::Error> {
 fn t01_default_cli_produces_no_config() {
     let args = parse(&[]).expect("default parse");
     let cfg = args.abuse_dos_runtime_config().expect("no error");
-    assert!(cfg.is_none(), "default CLI must not produce an abuse/DoS config");
+    assert!(
+        cfg.is_none(),
+        "default CLI must not produce an abuse/DoS config"
+    );
 }
 
 // 2. Default per-peer values remain 1000 msg/s + 100 burst.
@@ -62,7 +65,10 @@ fn t02_default_per_peer_values_preserved() {
     let cfg = AbuseDosConfig::compatibility_default();
     assert_eq!(cfg.per_peer_max_messages_per_second, 1000);
     assert_eq!(cfg.per_peer_burst_allowance, 100);
-    assert_eq!(cfg.per_peer_max_messages_per_second, DEFAULT_MAX_MESSAGES_PER_SECOND);
+    assert_eq!(
+        cfg.per_peer_max_messages_per_second,
+        DEFAULT_MAX_MESSAGES_PER_SECOND
+    );
     assert_eq!(cfg.per_peer_burst_allowance, DEFAULT_BURST_ALLOWANCE);
 }
 
@@ -86,7 +92,10 @@ fn t03_connection_limiter_disabled_by_default() {
 #[test]
 fn t04_peer_rate_limiter_with_defaults_preserved() {
     let limiter = PeerRateLimiter::with_defaults();
-    assert_eq!(limiter.config().max_messages_per_second, DEFAULT_MAX_MESSAGES_PER_SECOND);
+    assert_eq!(
+        limiter.config().max_messages_per_second,
+        DEFAULT_MAX_MESSAGES_PER_SECOND
+    );
     assert_eq!(limiter.config().burst_allowance, DEFAULT_BURST_ALLOWANCE);
 }
 
@@ -129,7 +138,10 @@ fn t07_valid_global_connection_rate_accepted() {
     assert!(cfg.connection_limiter_enabled());
     assert_eq!(cfg.config().max_connections_per_window, 20);
     assert_eq!(cfg.config().connection_burst_allowance, 10);
-    assert_eq!(cfg.config().connection_rate_window, Duration::from_millis(1000));
+    assert_eq!(
+        cfg.config().connection_rate_window,
+        Duration::from_millis(1000)
+    );
     assert_eq!(cfg.config().profile, AbuseDosProfile::Custom);
 }
 
@@ -149,7 +161,10 @@ fn t08_valid_per_address_connection_rate_accepted() {
     ])
     .unwrap();
     let cfg = args.abuse_dos_runtime_config().unwrap().expect("config");
-    assert_eq!(cfg.config().per_address_rate_window, Some(Duration::from_millis(1000)));
+    assert_eq!(
+        cfg.config().per_address_rate_window,
+        Some(Duration::from_millis(1000))
+    );
     assert_eq!(cfg.config().max_connections_per_address_window, 5);
 }
 
@@ -357,7 +372,7 @@ fn t21_unusual_remote_address_handled() {
     let state = enabled_state(None);
     let now = Instant::now();
     let v6: SocketAddr = "[2001:db8::1]:0".parse().unwrap(); // RFC 3849 doc range
-    // Must not panic; returns a deterministic decision.
+                                                             // Must not panic; returns a deterministic decision.
     let _ = state.check_inbound(v6, now);
     let zero_port = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(198, 51, 100, 1)), 0);
     let _ = state.check_inbound(zero_port, now);

@@ -81,8 +81,7 @@ use qbind_node::pqc_remote_signer_transport::{
     RemoteSignerTransport, RemoteSignerTransportConfig, RemoteSignerTransportExpectations,
     RemoteSignerTransportOutcome, RemoteSignerTransportRequestEnvelope,
     RemoteSignerTransportResponseEnvelope, SimulatedTransportFault, TransportTimeoutRetryPolicy,
-    REMOTE_SIGNER_TRANSPORT_INVALID_ATTESTATION_SENTINEL,
-    REMOTE_SIGNER_TRANSPORT_PROTOCOL_VERSION,
+    REMOTE_SIGNER_TRANSPORT_INVALID_ATTESTATION_SENTINEL, REMOTE_SIGNER_TRANSPORT_PROTOCOL_VERSION,
     REMOTE_SIGNER_TRANSPORT_REQUEST_ENVELOPE_DOMAIN_TAG,
 };
 use qbind_node::pqc_trust_bundle::TrustBundleEnvironment;
@@ -125,7 +124,13 @@ const EXPIRES: u64 = 1_700_001_000;
 // ---------------------------------------------------------------------------
 
 fn domain(env: TrustBundleEnvironment) -> AuthorityTrustDomain {
-    AuthorityTrustDomain::new(env, CHAIN_ID, GENESIS_HASH, ROOT_FP, PQC_LIFECYCLE_SUITE_ML_DSA_44)
+    AuthorityTrustDomain::new(
+        env,
+        CHAIN_ID,
+        GENESIS_HASH,
+        ROOT_FP,
+        PQC_LIFECYCLE_SUITE_ML_DSA_44,
+    )
 }
 
 fn build_v2(
@@ -155,7 +160,14 @@ fn build_v2(
 }
 
 fn rotate_candidate(env: TrustBundleEnvironment) -> PersistentAuthorityStateRecordV2 {
-    build_v2(env, KEY_B, 2, BundleSigningRatificationV2Action::Rotate, Some(KEY_A), DIGEST_2)
+    build_v2(
+        env,
+        KEY_B,
+        2,
+        BundleSigningRatificationV2Action::Rotate,
+        Some(KEY_A),
+        DIGEST_2,
+    )
 }
 
 fn prior_versioned(env: TrustBundleEnvironment) -> PersistentAuthorityStateRecordVersioned {
@@ -508,11 +520,19 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
 
     // A1 — fixture loopback transport accepted on DevNet.
     let dev = scenario(TrustBundleEnvironment::Devnet);
-    t.check("A1", "accept:FixtureLoopbackTransportAccepted", &transport_tag(&validate_fixture(&dev)));
+    t.check(
+        "A1",
+        "accept:FixtureLoopbackTransportAccepted",
+        &transport_tag(&validate_fixture(&dev)),
+    );
 
     // A2 — fixture loopback transport accepted on TestNet.
     let test = scenario(TrustBundleEnvironment::Testnet);
-    t.check("A2", "accept:FixtureLoopbackTransportAccepted", &transport_tag(&validate_fixture(&test)));
+    t.check(
+        "A2",
+        "accept:FixtureLoopbackTransportAccepted",
+        &transport_tag(&validate_fixture(&test)),
+    );
 
     // A3 — request envelope digest deterministic + domain-bound.
     let a = request_envelope(TrustBundleEnvironment::Devnet);
@@ -575,7 +595,8 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
         resp.request_id_echo == REQUEST_ID
             && resp.signer_id == SIGNER_ID
             && resp.custody_key_id == CUSTODY_KEY_ID
-            && resp.inner_response.request_digest == dev.request_env.inner_request.canonical_digest()
+            && resp.inner_response.request_digest
+                == dev.request_env.inner_request.canonical_digest()
             && resp.canonical_response_digest
                 == remote_signer_response_canonical_digest(&resp.inner_response)
             && resp.transcript_digest == expected_transcript,
@@ -641,20 +662,30 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
     let dev = || scenario(Env::Devnet);
 
     // R1 — Disabled policy.
-    t.check("R1", "reject:TransportDisabled", &transport_tag(&validate(&dev(), RemoteSignerPolicy::Disabled)));
+    t.check(
+        "R1",
+        "reject:TransportDisabled",
+        &transport_tag(&validate(&dev(), RemoteSignerPolicy::Disabled)),
+    );
 
     // R2 — fixture rejected under ProductionRemoteSignerRequired.
     t.check(
         "R2",
         "reject:FixtureTransportRejectedProductionRequired",
-        &transport_tag(&validate(&dev(), RemoteSignerPolicy::ProductionRemoteSignerRequired)),
+        &transport_tag(&validate(
+            &dev(),
+            RemoteSignerPolicy::ProductionRemoteSignerRequired,
+        )),
     );
 
     // R3 — fixture rejected under MainnetProductionRemoteSignerRequired.
     t.check(
         "R3",
         "reject:FixtureTransportRejectedMainnetProductionRequired",
-        &transport_tag(&validate(&dev(), RemoteSignerPolicy::MainnetProductionRemoteSignerRequired)),
+        &transport_tag(&validate(
+            &dev(),
+            RemoteSignerPolicy::MainnetProductionRemoteSignerRequired,
+        )),
     );
 
     // R4 — production transport unavailable (production-mode response).
@@ -662,7 +693,11 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
         let base = dev();
         let mut s = dev();
         s.response_env = production_mode_response(&base);
-        t.check("R4", "reject:ProductionTransportUnavailable", &transport_tag(&validate_fixture(&s)));
+        t.check(
+            "R4",
+            "reject:ProductionTransportUnavailable",
+            &transport_tag(&validate_fixture(&s)),
+        );
     }
 
     // R5 — MainNet production transport unavailable.
@@ -676,7 +711,10 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
         let base = dev();
         let mut s = dev();
         s.response_env = production_mode_response(&base);
-        let via = validate(&s, RemoteSignerPolicy::MainnetProductionRemoteSignerRequired);
+        let via = validate(
+            &s,
+            RemoteSignerPolicy::MainnetProductionRemoteSignerRequired,
+        );
         t.assert_true(
             "R5",
             direct && via == RemoteSignerTransportOutcome::MainNetProductionTransportUnavailable,
@@ -688,14 +726,22 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
     {
         let mut s = dev();
         s.config.endpoint = String::new();
-        t.check("R6", "reject:EndpointMissing", &transport_tag(&validate_fixture(&s)));
+        t.check(
+            "R6",
+            "reject:EndpointMissing",
+            &transport_tag(&validate_fixture(&s)),
+        );
     }
 
     // R7 — endpoint malformed.
     {
         let mut s = dev();
         s.config.endpoint = "no-scheme-here".to_string();
-        t.check("R7", "reject:EndpointMalformed", &transport_tag(&validate_fixture(&s)));
+        t.check(
+            "R7",
+            "reject:EndpointMalformed",
+            &transport_tag(&validate_fixture(&s)),
+        );
     }
 
     // R8 — wrong environment (TestNet scenario against DevNet domain).
@@ -719,77 +765,121 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
     {
         let mut s = dev();
         s.config.chain_id = OTHER_CHAIN.to_string();
-        t.check("R9", "reject:WrongChain", &transport_tag(&validate_fixture(&s)));
+        t.check(
+            "R9",
+            "reject:WrongChain",
+            &transport_tag(&validate_fixture(&s)),
+        );
     }
 
     // R10 — wrong genesis.
     {
         let mut s = dev();
         s.config.genesis_hash = OTHER_GENESIS.to_string();
-        t.check("R10", "reject:WrongGenesis", &transport_tag(&validate_fixture(&s)));
+        t.check(
+            "R10",
+            "reject:WrongGenesis",
+            &transport_tag(&validate_fixture(&s)),
+        );
     }
 
     // R11 — wrong signer id.
     {
         let mut s = dev();
         s.config.signer_id = "wrong-signer".to_string();
-        t.check("R11", "reject:WrongSignerId", &transport_tag(&validate_fixture(&s)));
+        t.check(
+            "R11",
+            "reject:WrongSignerId",
+            &transport_tag(&validate_fixture(&s)),
+        );
     }
 
     // R12 — wrong custody key id.
     {
         let mut s = dev();
         s.config.custody_key_id = "wrong-custody".to_string();
-        t.check("R12", "reject:WrongCustodyKeyId", &transport_tag(&validate_fixture(&s)));
+        t.check(
+            "R12",
+            "reject:WrongCustodyKeyId",
+            &transport_tag(&validate_fixture(&s)),
+        );
     }
 
     // R13 — wrong authority root.
     {
         let mut s = dev();
         s.config.authority_root_fingerprint = OTHER_ROOT_FP.to_string();
-        t.check("R13", "reject:WrongAuthorityRoot", &transport_tag(&validate_fixture(&s)));
+        t.check(
+            "R13",
+            "reject:WrongAuthorityRoot",
+            &transport_tag(&validate_fixture(&s)),
+        );
     }
 
     // R14 — wrong signing-key fingerprint.
     {
         let mut s = dev();
         s.config.bundle_signing_key_fingerprint = KEY_A.to_string();
-        t.check("R14", "reject:WrongSigningKeyFingerprint", &transport_tag(&validate_fixture(&s)));
+        t.check(
+            "R14",
+            "reject:WrongSigningKeyFingerprint",
+            &transport_tag(&validate_fixture(&s)),
+        );
     }
 
     // R15 — wrong request id.
     {
         let mut s = dev();
         s.response_env.request_id_echo = "wrong-echo".to_string();
-        t.check("R15", "reject:WrongRequestId", &transport_tag(&validate_fixture(&s)));
+        t.check(
+            "R15",
+            "reject:WrongRequestId",
+            &transport_tag(&validate_fixture(&s)),
+        );
     }
 
     // R16 — wrong request digest.
     {
         let mut s = dev();
         s.request_env.canonical_request_digest = "deadbeef".to_string();
-        t.check("R16", "reject:WrongRequestDigest", &transport_tag(&validate_fixture(&s)));
+        t.check(
+            "R16",
+            "reject:WrongRequestDigest",
+            &transport_tag(&validate_fixture(&s)),
+        );
     }
 
     // R17 — wrong response digest.
     {
         let mut s = dev();
         s.response_env.canonical_response_digest = "deadbeef".to_string();
-        t.check("R17", "reject:WrongResponseDigest", &transport_tag(&validate_fixture(&s)));
+        t.check(
+            "R17",
+            "reject:WrongResponseDigest",
+            &transport_tag(&validate_fixture(&s)),
+        );
     }
 
     // R18 — wrong transcript digest.
     {
         let mut s = dev();
         s.response_env.transcript_digest = "deadbeef".to_string();
-        t.check("R18", "reject:WrongTranscriptDigest", &transport_tag(&validate_fixture(&s)));
+        t.check(
+            "R18",
+            "reject:WrongTranscriptDigest",
+            &transport_tag(&validate_fixture(&s)),
+        );
     }
 
     // R19 — stale/replayed request.
     {
         let mut s = dev();
         s.request_env.anti_replay_nonce = "stale-nonce".to_string();
-        t.check("R19", "reject:StaleOrReplayedRequest", &transport_tag(&validate_fixture(&s)));
+        t.check(
+            "R19",
+            "reject:StaleOrReplayedRequest",
+            &transport_tag(&validate_fixture(&s)),
+        );
     }
 
     // R20 — stale/replayed response (now beyond expiry).
@@ -797,7 +887,11 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
         let mut s = dev();
         s.transport_expected.now_unix = EXPIRES + 1;
         s.rs_expected.now_unix = EXPIRES + 1;
-        t.check("R20", "reject:StaleOrReplayedResponse", &transport_tag(&validate_fixture(&s)));
+        t.check(
+            "R20",
+            "reject:StaleOrReplayedResponse",
+            &transport_tag(&validate_fixture(&s)),
+        );
     }
 
     // R21 — timeout (simulated transport fault at the trait boundary).
@@ -830,28 +924,44 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
     {
         let mut s = dev();
         s.request_env.request_id = String::new();
-        t.check("R23", "reject:MalformedRequestEnvelope", &transport_tag(&validate_fixture(&s)));
+        t.check(
+            "R23",
+            "reject:MalformedRequestEnvelope",
+            &transport_tag(&validate_fixture(&s)),
+        );
     }
 
     // R24 — malformed response envelope.
     {
         let mut s = dev();
         s.response_env.response_commitment = String::new();
-        t.check("R24", "reject:MalformedResponseEnvelope", &transport_tag(&validate_fixture(&s)));
+        t.check(
+            "R24",
+            "reject:MalformedResponseEnvelope",
+            &transport_tag(&validate_fixture(&s)),
+        );
     }
 
     // R25 — unsupported protocol version.
     {
         let mut s = dev();
         s.request_env.protocol_version = 99;
-        t.check("R25", "reject:UnsupportedProtocolVersion", &transport_tag(&validate_fixture(&s)));
+        t.check(
+            "R25",
+            "reject:UnsupportedProtocolVersion",
+            &transport_tag(&validate_fixture(&s)),
+        );
     }
 
     // R26 — unsupported suite.
     {
         let mut s = dev();
         s.config.suite_id = 7;
-        t.check("R26", "reject:UnsupportedSuite", &transport_tag(&validate_fixture(&s)));
+        t.check(
+            "R26",
+            "reject:UnsupportedSuite",
+            &transport_tag(&validate_fixture(&s)),
+        );
     }
 
     // R27 — invalid transport attestation.
@@ -859,7 +969,11 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
         let mut s = dev();
         s.config.transport_attestation_digest =
             Some(REMOTE_SIGNER_TRANSPORT_INVALID_ATTESTATION_SENTINEL.to_string());
-        t.check("R27", "reject:InvalidTransportAttestation", &transport_tag(&validate_fixture(&s)));
+        t.check(
+            "R27",
+            "reject:InvalidTransportAttestation",
+            &transport_tag(&validate_fixture(&s)),
+        );
     }
 
     // R28 — local operator cannot satisfy transport.
@@ -896,7 +1010,11 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
     {
         let mut s = dev();
         s.rs_expected.expected_response_nonce = "wrong-response-nonce".to_string();
-        t.check("R30", "reject:RemoteSignerResponseInvalid", &transport_tag(&validate_fixture(&s)));
+        t.check(
+            "R30",
+            "reject:RemoteSignerResponseInvalid",
+            &transport_tag(&validate_fixture(&s)),
+        );
     }
 
     // R31 — RemoteSigner valid but transport transcript invalid.
@@ -904,7 +1022,11 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
         let mut s = dev();
         s.response_env.transcript_digest =
             transport_transcript_digest("not-the-request", "not-the-response");
-        t.check("R31", "reject:WrongTranscriptDigest", &transport_tag(&validate_fixture(&s)));
+        t.check(
+            "R31",
+            "reject:WrongTranscriptDigest",
+            &transport_tag(&validate_fixture(&s)),
+        );
     }
 
     // R32 — lifecycle/governance/custody valid but production transport unavailable.
@@ -954,8 +1076,11 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
         let s = dev();
         let candidate = rotate_candidate(Env::Devnet);
         let prior = prior_versioned(Env::Devnet);
-        let custody =
-            good_custody_attestation(Env::Devnet, &candidate, AuthorityCustodyClass::FixtureLocalKey);
+        let custody = good_custody_attestation(
+            Env::Devnet,
+            &candidate,
+            AuthorityCustodyClass::FixtureLocalKey,
+        );
         let candidate_before = candidate.clone();
         let outcome = validate_lifecycle_custody_remote_signer_and_transport(
             &custody,
@@ -1210,8 +1335,11 @@ fn run_composition_table(out: &Path) -> (u64, u64) {
         let s = scenario(Env::Devnet);
         let candidate = rotate_candidate(Env::Devnet);
         let prior = prior_versioned(Env::Devnet);
-        let custody =
-            good_custody_attestation(Env::Devnet, &candidate, AuthorityCustodyClass::FixtureLocalKey);
+        let custody = good_custody_attestation(
+            Env::Devnet,
+            &candidate,
+            AuthorityCustodyClass::FixtureLocalKey,
+        );
         let outcome = compose(
             &s,
             &candidate,
@@ -1220,7 +1348,11 @@ fn run_composition_table(out: &Path) -> (u64, u64) {
             RemoteSignerPolicy::FixtureLoopbackAllowed,
             false,
         );
-        t.check("compose-accept-devnet", "accept:Accepted", &composition_tag(&outcome));
+        t.check(
+            "compose-accept-devnet",
+            "accept:Accepted",
+            &composition_tag(&outcome),
+        );
     }
 
     // Inner accepts but transport boundary rejects (corrupt transcript).
@@ -1229,8 +1361,11 @@ fn run_composition_table(out: &Path) -> (u64, u64) {
         s.response_env.transcript_digest = "deadbeef".to_string();
         let candidate = rotate_candidate(Env::Devnet);
         let prior = prior_versioned(Env::Devnet);
-        let custody =
-            good_custody_attestation(Env::Devnet, &candidate, AuthorityCustodyClass::FixtureLocalKey);
+        let custody = good_custody_attestation(
+            Env::Devnet,
+            &candidate,
+            AuthorityCustodyClass::FixtureLocalKey,
+        );
         let outcome = compose(
             &s,
             &candidate,
@@ -1239,7 +1374,11 @@ fn run_composition_table(out: &Path) -> (u64, u64) {
             RemoteSignerPolicy::FixtureLoopbackAllowed,
             false,
         );
-        t.check("compose-transport-rejected", "reject:TransportRejected", &composition_tag(&outcome));
+        t.check(
+            "compose-transport-rejected",
+            "reject:TransportRejected",
+            &composition_tag(&outcome),
+        );
     }
 
     // Disabled policy rejects the inner composition (no mutation).
@@ -1247,8 +1386,11 @@ fn run_composition_table(out: &Path) -> (u64, u64) {
         let s = scenario(Env::Devnet);
         let candidate = rotate_candidate(Env::Devnet);
         let prior = prior_versioned(Env::Devnet);
-        let custody =
-            good_custody_attestation(Env::Devnet, &candidate, AuthorityCustodyClass::FixtureLocalKey);
+        let custody = good_custody_attestation(
+            Env::Devnet,
+            &candidate,
+            AuthorityCustodyClass::FixtureLocalKey,
+        );
         let outcome = compose(
             &s,
             &candidate,
@@ -1269,8 +1411,11 @@ fn run_composition_table(out: &Path) -> (u64, u64) {
         let s = scenario(Env::Mainnet);
         let candidate = rotate_candidate(Env::Mainnet);
         let prior = prior_versioned(Env::Mainnet);
-        let custody =
-            good_custody_attestation(Env::Mainnet, &candidate, AuthorityCustodyClass::FixtureLocalKey);
+        let custody = good_custody_attestation(
+            Env::Mainnet,
+            &candidate,
+            AuthorityCustodyClass::FixtureLocalKey,
+        );
         let outcome = compose(
             &s,
             &candidate,
@@ -1325,13 +1470,13 @@ fn run_refusal_helpers_table(out: &Path) -> (u64, u64) {
 
     t.assert_true(
         "mainnet-refusal-helper",
-        mainnet_peer_driven_apply_remains_refused_under_remote_signer_transport_boundary(Env::Mainnet)
-            && !mainnet_peer_driven_apply_remains_refused_under_remote_signer_transport_boundary(
-                Env::Devnet,
-            )
-            && !mainnet_peer_driven_apply_remains_refused_under_remote_signer_transport_boundary(
-                Env::Testnet,
-            ),
+        mainnet_peer_driven_apply_remains_refused_under_remote_signer_transport_boundary(
+            Env::Mainnet,
+        ) && !mainnet_peer_driven_apply_remains_refused_under_remote_signer_transport_boundary(
+            Env::Devnet,
+        ) && !mainnet_peer_driven_apply_remains_refused_under_remote_signer_transport_boundary(
+            Env::Testnet,
+        ),
         "MainNet refused; DevNet/TestNet not flagged by the refusal helper",
     );
     t.assert_true(

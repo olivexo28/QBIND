@@ -179,7 +179,10 @@ impl ProductionCustodyAttestationClass {
     /// Returns `true` iff this class is a DevNet/TestNet source/test
     /// fixture attestation.
     pub const fn is_fixture(self) -> bool {
-        matches!(self, Self::FixtureKmsAttestation | Self::FixtureHsmAttestation)
+        matches!(
+            self,
+            Self::FixtureKmsAttestation | Self::FixtureHsmAttestation
+        )
     }
 
     /// Returns `true` iff this class is a production attestation class.
@@ -213,7 +216,9 @@ impl ProductionCustodyAttestationClass {
         match kind {
             ProductionCustodyProviderKind::FixtureKms => Self::FixtureKmsAttestation,
             ProductionCustodyProviderKind::FixtureHsm => Self::FixtureHsmAttestation,
-            ProductionCustodyProviderKind::ProductionCloudKms => Self::ProductionCloudKmsAttestation,
+            ProductionCustodyProviderKind::ProductionCloudKms => {
+                Self::ProductionCloudKmsAttestation
+            }
             ProductionCustodyProviderKind::ProductionPkcs11Hsm => {
                 Self::ProductionPkcs11HsmAttestation
             }
@@ -440,7 +445,11 @@ impl ProductionCustodyAttestationChallenge {
         hash_field(&mut h, b"nonce", self.nonce.as_bytes());
         hash_field(&mut h, b"challenge", self.challenge.as_bytes());
         hash_field(&mut h, b"sequence", &self.sequence.to_le_bytes());
-        hash_field(&mut h, b"bound_request_id", self.bound_request_id.as_bytes());
+        hash_field(
+            &mut h,
+            b"bound_request_id",
+            self.bound_request_id.as_bytes(),
+        );
         hex::encode(h.finalize())
     }
 }
@@ -538,7 +547,11 @@ impl ProductionCustodyAttestationBinding {
     }
 
     fn hash_into(&self, h: &mut sha3::Sha3_256) {
-        hash_field(h, b"environment", &self.environment.metric_code().to_le_bytes());
+        hash_field(
+            h,
+            b"environment",
+            &self.environment.metric_code().to_le_bytes(),
+        );
         hash_field(h, b"chain_id", self.chain_id.as_bytes());
         hash_field(h, b"genesis_hash", self.genesis_hash.as_bytes());
         hash_field(
@@ -558,7 +571,11 @@ impl ProductionCustodyAttestationBinding {
         hash_field(h, b"key_fingerprint", self.key_fingerprint.as_bytes());
         hash_field(h, b"signer_identity", self.signer_identity.as_bytes());
         hash_field(h, b"request_kind", self.request_kind.tag().as_bytes());
-        hash_field(h, b"authorized_action", self.authorized_action.tag().as_bytes());
+        hash_field(
+            h,
+            b"authorized_action",
+            self.authorized_action.tag().as_bytes(),
+        );
         hash_field(h, b"candidate_digest", self.candidate_digest.as_bytes());
         hash_field(h, b"custody_request_id", self.custody_request_id.as_bytes());
         hash_field(
@@ -620,7 +637,8 @@ impl ProductionCustodyAttestationEvidence {
         self.binding.is_well_formed()
             && self.challenge.is_well_formed()
             && !self.certificate_proof_digest.is_empty()
-            && self.certificate_proof_digest != PRODUCTION_CUSTODY_ATTESTATION_INVALID_PROOF_SENTINEL
+            && self.certificate_proof_digest
+                != PRODUCTION_CUSTODY_ATTESTATION_INVALID_PROOF_SENTINEL
             && self.domain_separation_tag == PRODUCTION_CUSTODY_ATTESTATION_DOMAIN_SEPARATION_TAG
     }
 
@@ -629,26 +647,42 @@ impl ProductionCustodyAttestationEvidence {
         use sha3::{Digest, Sha3_256};
         let mut h = Sha3_256::new();
         h.update(PRODUCTION_CUSTODY_ATTESTATION_EVIDENCE_DOMAIN_TAG.as_bytes());
-        hash_field(&mut h, b"protocol_version", &self.protocol_version.0.to_le_bytes());
+        hash_field(
+            &mut h,
+            b"protocol_version",
+            &self.protocol_version.0.to_le_bytes(),
+        );
         hash_field(
             &mut h,
             b"attestation_class",
             self.attestation_class.tag().as_bytes(),
         );
         self.binding.hash_into(&mut h);
-        hash_field(&mut h, b"trust_root_digest", self.trust_root.trust_root_digest().as_bytes());
+        hash_field(
+            &mut h,
+            b"trust_root_digest",
+            self.trust_root.trust_root_digest().as_bytes(),
+        );
         hash_field(
             &mut h,
             b"measurement_digest",
             self.measurement.measurement_digest.as_bytes(),
         );
-        hash_field(&mut h, b"challenge_digest", self.challenge.challenge_digest().as_bytes());
+        hash_field(
+            &mut h,
+            b"challenge_digest",
+            self.challenge.challenge_digest().as_bytes(),
+        );
         hash_field(
             &mut h,
             b"certificate_proof_digest",
             self.certificate_proof_digest.as_bytes(),
         );
-        hash_field(&mut h, b"verifier_policy", self.verifier_policy.tag().as_bytes());
+        hash_field(
+            &mut h,
+            b"verifier_policy",
+            self.verifier_policy.tag().as_bytes(),
+        );
         hash_field(
             &mut h,
             b"domain_separation_tag",
@@ -916,15 +950,21 @@ impl ProductionCustodyAttestationOutcome {
             Self::ProductionAttestationUnavailable => "production-attestation-unavailable",
             Self::ProductionAttestationUnverified => "production-attestation-unverified",
             Self::ProductionAttestationMalformed => "production-attestation-malformed",
-            Self::ProductionAttestationUnsupportedClass => "production-attestation-unsupported-class",
+            Self::ProductionAttestationUnsupportedClass => {
+                "production-attestation-unsupported-class"
+            }
             Self::ProductionAttestationUnsupportedProtocol { .. } => {
                 "production-attestation-unsupported-protocol"
             }
-            Self::ProductionAttestationTrustRootMissing => "production-attestation-trust-root-missing",
+            Self::ProductionAttestationTrustRootMissing => {
+                "production-attestation-trust-root-missing"
+            }
             Self::ProductionAttestationTrustRootMismatch => {
                 "production-attestation-trust-root-mismatch"
             }
-            Self::ProductionAttestationProviderMismatch => "production-attestation-provider-mismatch",
+            Self::ProductionAttestationProviderMismatch => {
+                "production-attestation-provider-mismatch"
+            }
             Self::ProductionAttestationKeyHandleMismatch => {
                 "production-attestation-key-handle-mismatch"
             }
@@ -932,7 +972,9 @@ impl ProductionCustodyAttestationOutcome {
             Self::ProductionAttestationCustodyClassMismatch => {
                 "production-attestation-custody-class-mismatch"
             }
-            Self::ProductionAttestationRequestIdMismatch => "production-attestation-request-id-mismatch",
+            Self::ProductionAttestationRequestIdMismatch => {
+                "production-attestation-request-id-mismatch"
+            }
             Self::ProductionAttestationBackendTranscriptMismatch => {
                 "production-attestation-backend-transcript-mismatch"
             }
@@ -954,7 +996,9 @@ impl ProductionCustodyAttestationOutcome {
             Self::ProductionAttestationEvidenceAmbiguous { .. } => {
                 "production-attestation-evidence-ambiguous"
             }
-            Self::FixtureAttestationRejectedForMainNet => "fixture-attestation-rejected-for-mainnet",
+            Self::FixtureAttestationRejectedForMainNet => {
+                "fixture-attestation-rejected-for-mainnet"
+            }
             Self::RemoteSignerAttestationIsNotKmsHsmCustody => {
                 "remote-signer-attestation-is-not-kms-hsm-custody"
             }
@@ -1131,7 +1175,11 @@ pub fn fixture_attestation_expected_proof(
     use sha3::{Digest, Sha3_256};
     let mut h = Sha3_256::new();
     h.update(b"QBIND:run297-fixture-custody-attestation-proof:v1");
-    hash_field(&mut h, b"trust_root_digest", trust_root.trust_root_digest().as_bytes());
+    hash_field(
+        &mut h,
+        b"trust_root_digest",
+        trust_root.trust_root_digest().as_bytes(),
+    );
     hash_field(
         &mut h,
         b"provider_identity_digest",
@@ -1142,7 +1190,11 @@ pub fn fixture_attestation_expected_proof(
         b"measurement_digest",
         evidence.measurement.measurement_digest.as_bytes(),
     );
-    hash_field(&mut h, b"challenge_digest", evidence.challenge.challenge_digest().as_bytes());
+    hash_field(
+        &mut h,
+        b"challenge_digest",
+        evidence.challenge.challenge_digest().as_bytes(),
+    );
     hex::encode(h.finalize())
 }
 
@@ -1313,9 +1365,8 @@ impl CustodyAttestationEvidenceVerifier for ProductionCustodyAttestationVerifier
 /// injection. Each call consumes the next programmed step; when exhausted
 /// it returns the configured default.
 pub struct MockCustodyAttestationVerifier {
-    steps: RefCell<
-        VecDeque<Result<VerifiedAttestationMaterial, ProductionCustodyAttestationError>>,
-    >,
+    steps:
+        RefCell<VecDeque<Result<VerifiedAttestationMaterial, ProductionCustodyAttestationError>>>,
     default_result: RefCell<Result<VerifiedAttestationMaterial, ProductionCustodyAttestationError>>,
     call_count: Cell<u32>,
 }
@@ -1518,8 +1569,7 @@ impl<V: CustodyAttestationEvidenceVerifier> ProductionCustodyAttestationVerifier
 
         // 3. RemoteSigner / local operator / peer custody material cannot
         //    satisfy the KMS/HSM custody attestation row.
-        if evidence.attestation_class
-            == ProductionCustodyAttestationClass::RemoteSignerAttestation
+        if evidence.attestation_class == ProductionCustodyAttestationClass::RemoteSignerAttestation
         {
             return Some(O::RemoteSignerAttestationIsNotKmsHsmCustody);
         }
@@ -1854,7 +1904,8 @@ pub fn production_custody_attestation_verifier_never_falls_back() -> bool {
 
 /// Run 297 — returns `true`: this run is a source/test implementation and
 /// is NOT release-binary evidence (deferred to Run 298).
-pub fn production_custody_attestation_verifier_is_source_test_not_release_binary_evidence() -> bool {
+pub fn production_custody_attestation_verifier_is_source_test_not_release_binary_evidence() -> bool
+{
     true
 }
 

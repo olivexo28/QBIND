@@ -35,8 +35,7 @@ use qbind_node::pqc_governance_modeled_durable_completion_attestation_projection
     modeled_attestation_policy_change_unsupported,
     modeled_attestation_production_mainnet_unavailable,
     modeled_attestation_record_required_before_durable_completion_attested,
-    modeled_attestation_rejection_is_non_mutating,
-    modeled_attestation_rollback_never_attests,
+    modeled_attestation_rejection_is_non_mutating, modeled_attestation_rollback_never_attests,
     modeled_attestation_sink_receipt_required_before_attestation,
     modeled_attestation_validator_set_rotation_unsupported,
     project_finalization_outcome_to_attestation_intent,
@@ -54,12 +53,13 @@ use qbind_node::pqc_governance_modeled_durable_completion_attestation_projection
     GovernanceModeledDurableCompletionAttestationReporterBinding,
     GovernanceModeledDurableCompletionAttestationRuntimeBinding,
     GovernanceModeledDurableCompletionAttestationSinkBinding,
-    GovernanceModeledDurableCompletionAttestationSurface, GovernanceModeledDurableCompletionAttestor,
-    MainNetModeledDurableCompletionAttestor, ModeledDurableCompletionAttestationDigest,
-    ModeledDurableCompletionAttestationFault, ModeledDurableCompletionAttestationLedger,
-    ModeledDurableCompletionAttestationRecord, ModeledDurableCompletionAttestationSnapshot,
-    ModeledDurableCompletionAttestationStatus, ModeledDurableCompletionAttestationWindow,
-    ModeledDurableCompletionAttestorKind, ProductionModeledDurableCompletionAttestor,
+    GovernanceModeledDurableCompletionAttestationSurface,
+    GovernanceModeledDurableCompletionAttestor, MainNetModeledDurableCompletionAttestor,
+    ModeledDurableCompletionAttestationDigest, ModeledDurableCompletionAttestationFault,
+    ModeledDurableCompletionAttestationLedger, ModeledDurableCompletionAttestationRecord,
+    ModeledDurableCompletionAttestationSnapshot, ModeledDurableCompletionAttestationStatus,
+    ModeledDurableCompletionAttestationWindow, ModeledDurableCompletionAttestorKind,
+    ProductionModeledDurableCompletionAttestor,
 };
 use qbind_node::pqc_governance_modeled_durable_completion_finalization_projection::GovernanceModeledDurableCompletionFinalizationOutcome;
 use qbind_node::pqc_governance_modeled_durable_consume_completion_reporter::GovernanceModeledDurableConsumeCompletionReporterOutcome;
@@ -276,16 +276,21 @@ fn drive(
     attestor: &mut FixtureModeledDurableCompletionAttestor,
     ledger: &mut ModeledDurableCompletionAttestationLedger,
 ) -> GovernanceModeledDurableCompletionAttestationOutcome {
-    evaluate_modeled_durable_completion_attestation_projection(input, expectations, attestor, ledger)
+    evaluate_modeled_durable_completion_attestation_projection(
+        input,
+        expectations,
+        attestor,
+        ledger,
+    )
 }
 
 fn run_accepted_table(out: &Path) -> (u64, u64) {
+    use DurableReplayObservation as R;
     use GovernanceModeledDurableCompletionAttestationPolicy as P;
+    use GovernanceModeledDurableCompletionFinalizationOutcome as Final;
     use GovernanceModeledDurableConsumeCompletionReporterOutcome as Report;
     use GovernanceModeledDurableConsumeSinkOutcome as Sink;
-    use GovernanceModeledDurableCompletionFinalizationOutcome as Final;
     use GovernanceModeledEndToEndPipelineOutcome as Pipe;
-    use DurableReplayObservation as R;
     let mut t = Table::new("accepted");
     // Disabled-stage legacy bypasses never invoke the attestor and never record.
     for (id, policy) in [
@@ -314,8 +319,18 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
     }
     // DevNet / TestNet fixture success records exactly one attestation.
     for (id, c, env, kind) in [
-        ("A7.devnet", devnet_ctx(), TrustBundleEnvironment::Devnet, "fixture-devnet"),
-        ("A8.testnet", testnet_ctx(), TrustBundleEnvironment::Testnet, "fixture-testnet"),
+        (
+            "A7.devnet",
+            devnet_ctx(),
+            TrustBundleEnvironment::Devnet,
+            "fixture-devnet",
+        ),
+        (
+            "A8.testnet",
+            testnet_ctx(),
+            TrustBundleEnvironment::Testnet,
+            "fixture-testnet",
+        ),
     ] {
         let mut ledger = ModeledDurableCompletionAttestationLedger::new();
         let mut attestor = FixtureModeledDurableCompletionAttestor::new(env);
@@ -344,7 +359,11 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
         let mut ledger = ModeledDurableCompletionAttestationLedger::new();
         let mut attestor = devnet_attestor();
         let o = drive(&c.finalized(), &c.expectations, &mut attestor, &mut ledger);
-        t.check_outcome(&format!("A9.{action}.outcome"), "durable-completion-attested", &o);
+        t.check_outcome(
+            &format!("A9.{action}.outcome"),
+            "durable-completion-attested",
+            &o,
+        );
         t.assert_true(&format!("A9.{action}.ledger-one"), ledger.len() == 1);
     }
     // Duplicate identical attestation is idempotent (no second attestation).
@@ -405,7 +424,11 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
             &mut a,
             &mut ledger,
         );
-        t.check_outcome("A12.production", "production-attestor-unavailable-no-attestation", &o);
+        t.check_outcome(
+            "A12.production",
+            "production-attestor-unavailable-no-attestation",
+            &o,
+        );
         t.assert_true("A12.no-record", ledger.is_empty());
         t.check("A12.kind", "production-unavailable", a.kind().tag());
     }
@@ -424,7 +447,11 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
             &mut a,
             &mut ledger,
         );
-        t.check_outcome("A13.mainnet", "mainnet-attestor-unavailable-no-attestation", &o);
+        t.check_outcome(
+            "A13.mainnet",
+            "mainnet-attestor-unavailable-no-attestation",
+            &o,
+        );
         t.assert_true("A13.no-record", ledger.is_empty());
     }
     // MainNet peer-driven apply refused before any attestor invocation.
@@ -437,7 +464,11 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
         let mut ledger = ModeledDurableCompletionAttestationLedger::new();
         let mut attestor = devnet_attestor();
         let o = drive(&c.finalized(), &c.expectations, &mut attestor, &mut ledger);
-        t.check_outcome("A14.mainnet-peer", "mainnet-peer-driven-apply-refused-no-attestation", &o);
+        t.check_outcome(
+            "A14.mainnet-peer",
+            "mainnet-peer-driven-apply-refused-no-attestation",
+            &o,
+        );
         t.assert_true("A14.no-invocation", attestor.invocations() == 0);
     }
     // Validator-set rotation and policy-change actions never attest.
@@ -472,12 +503,12 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
 }
 
 fn run_rejection_table(out: &Path) -> (u64, u64) {
+    use DurableReplayObservation as R;
     use GovernanceModeledDurableCompletionAttestationPolicy as P;
+    use GovernanceModeledDurableCompletionFinalizationOutcome as Final;
     use GovernanceModeledDurableConsumeCompletionReporterOutcome as Report;
     use GovernanceModeledDurableConsumeSinkOutcome as Sink;
-    use GovernanceModeledDurableCompletionFinalizationOutcome as Final;
     use GovernanceModeledEndToEndPipelineOutcome as Pipe;
-    use DurableReplayObservation as R;
     let mut t = Table::new("rejection");
     // Every non-finalizing Run 252 finalization outcome maps to a no-attestation
     // outcome and never invokes the attestor.
@@ -557,9 +588,18 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
         let mut a = devnet_attestor();
         let o = drive(&input, &c.expectations, &mut a, &mut ledger);
         t.check_outcome(&format!("B.finalization.{label}"), tag, &o);
-        t.assert_true(&format!("B.finalization.{label}.no-invocation"), a.invocations() == 0);
-        t.assert_true(&format!("B.finalization.{label}.no-record"), ledger.is_empty());
-        t.assert_true(&format!("B.finalization.{label}.no-attestation"), o.no_attestation());
+        t.assert_true(
+            &format!("B.finalization.{label}.no-invocation"),
+            a.invocations() == 0,
+        );
+        t.assert_true(
+            &format!("B.finalization.{label}.no-record"),
+            ledger.is_empty(),
+        );
+        t.assert_true(
+            &format!("B.finalization.{label}.no-attestation"),
+            o.no_attestation(),
+        );
     }
     // MainNet peer-driven refusal also reachable through every prior-stage binding.
     for (label, input) in [
@@ -595,7 +635,10 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
             "mainnet-peer-driven-apply-refused-no-attestation",
             &o,
         );
-        t.assert_true(&format!("B.mainnet-peer.{label}.no-invocation"), a.invocations() == 0);
+        t.assert_true(
+            &format!("B.mainnet-peer.{label}.no-invocation"),
+            a.invocations() == 0,
+        );
     }
     // Injected attestor faults: invoked once, never leave a recorded attestation.
     for (label, fault, tag) in [
@@ -622,8 +665,10 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
     ] {
         let c = devnet_ctx();
         let mut ledger = ModeledDurableCompletionAttestationLedger::new();
-        let mut a =
-            FixtureModeledDurableCompletionAttestor::with_fault(TrustBundleEnvironment::Devnet, fault);
+        let mut a = FixtureModeledDurableCompletionAttestor::with_fault(
+            TrustBundleEnvironment::Devnet,
+            fault,
+        );
         let o = drive(&c.finalized(), &c.expectations, &mut a, &mut ledger);
         t.check_outcome(&format!("B.fault.{label}"), tag, &o);
         t.assert_true(&format!("B.fault.{label}.invoked"), a.invocations() == 1);
@@ -667,7 +712,10 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
             "rejected-before-finalization-no-attestation",
             &o,
         );
-        t.assert_true(&format!("B.binding.{label}.no-invocation"), a.invocations() == 0);
+        t.assert_true(
+            &format!("B.binding.{label}.no-invocation"),
+            a.invocations() == 0,
+        );
         t.assert_true(&format!("B.binding.{label}.empty"), ledger.is_empty());
     }
     // Attestation-identity mismatch / malformed: attestor invoked once, no record.
@@ -690,7 +738,8 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
         ),
         (
             "wrong-sink-decision-digest",
-            (|c: &mut Ctx| c.attestation.sink_decision_digest = "wrong".to_string()) as fn(&mut Ctx),
+            (|c: &mut Ctx| c.attestation.sink_decision_digest = "wrong".to_string())
+                as fn(&mut Ctx),
         ),
         (
             "wrong-reporter-decision-digest",
@@ -743,7 +792,10 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
             "durable-completion-attestation-rejected-before-record",
             &o,
         );
-        t.assert_true(&format!("B.attestation.{label}.invoked"), a.invocations() == 1);
+        t.assert_true(
+            &format!("B.attestation.{label}.invoked"),
+            a.invocations() == 1,
+        );
         t.assert_true(&format!("B.attestation.{label}.empty"), ledger.is_empty());
     }
     // Same attestation id with a different digest is equivocation (no second attestation).
@@ -792,7 +844,11 @@ fn run_recovery_table(out: &Path) -> (u64, u64) {
     use ModeledDurableCompletionAttestationWindow as W;
     let mut t = Table::new("recovery");
     for (id, w, tag) in [
-        ("C.before-pipeline", W::BeforePipeline, "finalization-did-not-finalize-no-attestation"),
+        (
+            "C.before-pipeline",
+            W::BeforePipeline,
+            "finalization-did-not-finalize-no-attestation",
+        ),
         (
             "C.after-pipeline-before-sink-intent",
             W::AfterPipelineSuccessBeforeSinkIntent,
@@ -871,7 +927,10 @@ fn run_recovery_table(out: &Path) -> (u64, u64) {
     t.check_outcome(
         "C.after-record-before-success-with-attestation",
         "durable-completion-attested",
-        &recover_devnet(W::AfterAttestationRecordBeforeAttestationSuccess, Some(&att)),
+        &recover_devnet(
+            W::AfterAttestationRecordBeforeAttestationSuccess,
+            Some(&att),
+        ),
     );
     t.check_outcome(
         "C.after-success",
@@ -886,7 +945,11 @@ fn run_recovery_table(out: &Path) -> (u64, u64) {
         None,
         &c.expectations,
     );
-    t.check_outcome("C.production", "production-attestor-unavailable-no-attestation", &o);
+    t.check_outcome(
+        "C.production",
+        "production-attestor-unavailable-no-attestation",
+        &o,
+    );
     let c2 = ctx(
         TrustBundleEnvironment::Mainnet,
         GovernanceExecutionRuntimeSurface::ReloadApply,
@@ -899,7 +962,11 @@ fn run_recovery_table(out: &Path) -> (u64, u64) {
         None,
         &c2.expectations,
     );
-    t.check_outcome("C.mainnet", "mainnet-attestor-unavailable-no-attestation", &o2);
+    t.check_outcome(
+        "C.mainnet",
+        "mainnet-attestor-unavailable-no-attestation",
+        &o2,
+    );
     // MainNet peer-driven refusal precedes recovery classification.
     let c3 = ctx(
         TrustBundleEnvironment::Mainnet,
@@ -940,20 +1007,56 @@ fn run_projection_table(out: &Path) -> (u64, u64) {
     );
     // Earlier-stage success alone (a non-finalized finalization outcome) creates no intent.
     for (label, fin) in [
-        ("pipeline-success-alone", Final::ReporterDidNotRecordCompletionNoFinalization),
-        ("sink-receipt-alone", Final::ReporterDidNotRecordCompletionNoFinalization),
-        ("completion-report-alone", Final::ReporterDidNotRecordCompletionNoFinalization),
-        ("finalization-intent-alone", Final::RejectedBeforeReporterNoFinalization),
+        (
+            "pipeline-success-alone",
+            Final::ReporterDidNotRecordCompletionNoFinalization,
+        ),
+        (
+            "sink-receipt-alone",
+            Final::ReporterDidNotRecordCompletionNoFinalization,
+        ),
+        (
+            "completion-report-alone",
+            Final::ReporterDidNotRecordCompletionNoFinalization,
+        ),
+        (
+            "finalization-intent-alone",
+            Final::RejectedBeforeReporterNoFinalization,
+        ),
         ("legacy-bypass", Final::LegacyBypassNoFinalization),
-        ("rejected-before-record", Final::DurableCompletionRejectedBeforeRecord),
-        ("record-failed", Final::DurableCompletionRecordFailedNoFinalization),
-        ("rolled-back", Final::DurableCompletionRolledBackNoFinalization),
-        ("rollback-failed", Final::DurableCompletionRollbackFailedFatalNoFinalization),
-        ("ambiguous", Final::DurableCompletionAmbiguousFailClosedNoFinalization),
-        ("production", Final::ProductionFinalizerUnavailableNoFinalization),
+        (
+            "rejected-before-record",
+            Final::DurableCompletionRejectedBeforeRecord,
+        ),
+        (
+            "record-failed",
+            Final::DurableCompletionRecordFailedNoFinalization,
+        ),
+        (
+            "rolled-back",
+            Final::DurableCompletionRolledBackNoFinalization,
+        ),
+        (
+            "rollback-failed",
+            Final::DurableCompletionRollbackFailedFatalNoFinalization,
+        ),
+        (
+            "ambiguous",
+            Final::DurableCompletionAmbiguousFailClosedNoFinalization,
+        ),
+        (
+            "production",
+            Final::ProductionFinalizerUnavailableNoFinalization,
+        ),
         ("mainnet", Final::MainNetFinalizerUnavailableNoFinalization),
-        ("mainnet-peer", Final::MainNetPeerDrivenApplyRefusedNoFinalization),
-        ("validator", Final::ValidatorSetRotationUnsupportedNoFinalization),
+        (
+            "mainnet-peer",
+            Final::MainNetPeerDrivenApplyRefusedNoFinalization,
+        ),
+        (
+            "validator",
+            Final::ValidatorSetRotationUnsupportedNoFinalization,
+        ),
         ("policy", Final::PolicyChangeUnsupportedNoFinalization),
     ] {
         t.assert_true(
@@ -968,7 +1071,9 @@ fn run_projection_table(out: &Path) -> (u64, u64) {
     );
     t.assert_true(
         "D.attested-projects",
-        attestation_outcome_projects_to_durable_completion_attested(&Att::DurableCompletionAttested),
+        attestation_outcome_projects_to_durable_completion_attested(
+            &Att::DurableCompletionAttested,
+        ),
     );
     // A duplicate-idempotent attestation projects but does not authorize a new attestation.
     t.assert_true(
@@ -986,11 +1091,26 @@ fn run_projection_table(out: &Path) -> (u64, u64) {
     // Every other attestation outcome neither authorizes nor projects.
     for (label, outcome) in [
         ("legacy-bypass", Att::LegacyBypassNoAttestation),
-        ("rejected-before-finalization", Att::RejectedBeforeFinalizationNoAttestation),
-        ("finalization-did-not-finalize", Att::FinalizationDidNotFinalizeNoAttestation),
-        ("rejected-before-record", Att::DurableCompletionAttestationRejectedBeforeRecord),
-        ("record-failed", Att::DurableCompletionAttestationRecordFailedNoAttestation),
-        ("rolled-back", Att::DurableCompletionAttestationRolledBackNoAttestation),
+        (
+            "rejected-before-finalization",
+            Att::RejectedBeforeFinalizationNoAttestation,
+        ),
+        (
+            "finalization-did-not-finalize",
+            Att::FinalizationDidNotFinalizeNoAttestation,
+        ),
+        (
+            "rejected-before-record",
+            Att::DurableCompletionAttestationRejectedBeforeRecord,
+        ),
+        (
+            "record-failed",
+            Att::DurableCompletionAttestationRecordFailedNoAttestation,
+        ),
+        (
+            "rolled-back",
+            Att::DurableCompletionAttestationRolledBackNoAttestation,
+        ),
         (
             "rollback-failed",
             Att::DurableCompletionAttestationRollbackFailedFatalNoAttestation,
@@ -999,10 +1119,19 @@ fn run_projection_table(out: &Path) -> (u64, u64) {
             "ambiguous",
             Att::DurableCompletionAttestationAmbiguousFailClosedNoAttestation,
         ),
-        ("production", Att::ProductionAttestorUnavailableNoAttestation),
+        (
+            "production",
+            Att::ProductionAttestorUnavailableNoAttestation,
+        ),
         ("mainnet", Att::MainNetAttestorUnavailableNoAttestation),
-        ("mainnet-peer", Att::MainNetPeerDrivenApplyRefusedNoAttestation),
-        ("validator", Att::ValidatorSetRotationUnsupportedNoAttestation),
+        (
+            "mainnet-peer",
+            Att::MainNetPeerDrivenApplyRefusedNoAttestation,
+        ),
+        (
+            "validator",
+            Att::ValidatorSetRotationUnsupportedNoAttestation,
+        ),
         ("policy", Att::PolicyChangeUnsupportedNoAttestation),
     ] {
         t.assert_true(
@@ -1151,8 +1280,14 @@ fn run_attestation_ledger_table(out: &Path) -> (u64, u64) {
 
 fn run_non_mutation_table(out: &Path) -> (u64, u64) {
     let mut t = Table::new("non_mutation");
-    t.assert_true("G.rejection-non-mutating", modeled_attestation_rejection_is_non_mutating());
-    t.assert_true("G.never-calls-run-070", modeled_attestation_never_calls_run_070());
+    t.assert_true(
+        "G.rejection-non-mutating",
+        modeled_attestation_rejection_is_non_mutating(),
+    );
+    t.assert_true(
+        "G.never-calls-run-070",
+        modeled_attestation_never_calls_run_070(),
+    );
     t.assert_true(
         "G.never-mutates-live",
         modeled_attestation_never_mutates_live_pqc_trust_state(),
@@ -1189,18 +1324,25 @@ fn run_non_mutation_table(out: &Path) -> (u64, u64) {
         "G.failed-record-never-attests",
         modeled_attestation_failed_record_never_attests(),
     );
-    t.assert_true("G.rollback-never-attests", modeled_attestation_rollback_never_attests());
+    t.assert_true(
+        "G.rollback-never-attests",
+        modeled_attestation_rollback_never_attests(),
+    );
     t.assert_true(
         "G.ambiguous-fails-closed",
         modeled_attestation_ambiguous_window_fails_closed(),
     );
     t.assert_true(
         "G.mainnet-refused-mainnet",
-        modeled_attestation_mainnet_peer_driven_apply_refused_first(TrustBundleEnvironment::Mainnet),
+        modeled_attestation_mainnet_peer_driven_apply_refused_first(
+            TrustBundleEnvironment::Mainnet,
+        ),
     );
     t.assert_true(
         "G.mainnet-refused-not-devnet",
-        !modeled_attestation_mainnet_peer_driven_apply_refused_first(TrustBundleEnvironment::Devnet),
+        !modeled_attestation_mainnet_peer_driven_apply_refused_first(
+            TrustBundleEnvironment::Devnet,
+        ),
     );
     t.assert_true(
         "G.production-mainnet-unavailable",
@@ -1239,7 +1381,10 @@ fn run_reachability_table(out: &Path) -> (u64, u64) {
     use GovernanceModeledDurableCompletionAttestationOutcome as Att;
     let mut t = Table::new("reachability");
     let tags = [
-        (Att::LegacyBypassNoAttestation, "legacy-bypass-no-attestation"),
+        (
+            Att::LegacyBypassNoAttestation,
+            "legacy-bypass-no-attestation",
+        ),
         (
             Att::RejectedBeforeFinalizationNoAttestation,
             "rejected-before-finalization-no-attestation",
@@ -1248,7 +1393,10 @@ fn run_reachability_table(out: &Path) -> (u64, u64) {
             Att::FinalizationDidNotFinalizeNoAttestation,
             "finalization-did-not-finalize-no-attestation",
         ),
-        (Att::DurableCompletionAttested, "durable-completion-attested"),
+        (
+            Att::DurableCompletionAttested,
+            "durable-completion-attested",
+        ),
         (
             Att::DurableCompletionAttestationDuplicateIdempotent,
             "durable-completion-attestation-duplicate-idempotent",

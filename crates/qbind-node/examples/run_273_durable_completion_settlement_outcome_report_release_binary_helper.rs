@@ -73,46 +73,23 @@ use qbind_node::pqc_governance_durable_completion_consumer_settlement_projection
     FixtureDurableCompletionConsumerSettlementProjectionSink,
 };
 use qbind_node::pqc_governance_durable_completion_settlement_commitment::{
-    settlement_commitment_identity_digest,
-    evaluate_durable_completion_settlement_commitment,
+    evaluate_durable_completion_settlement_commitment, settlement_commitment_identity_digest,
     DurableCompletionSettlementCommitmentExpectations,
-    DurableCompletionSettlementCommitmentIdentity,
-    DurableCompletionSettlementCommitmentInput,
-    DurableCompletionSettlementCommitmentKind,
-    DurableCompletionSettlementCommitmentLedger,
-    DurableCompletionSettlementCommitmentOutcome,
-    DurableCompletionSettlementCommitmentPolicy,
-    DurableCompletionSettlementCommitmentRequest,
-    FixtureDurableCompletionSettlementCommitmentSink,
+    DurableCompletionSettlementCommitmentIdentity, DurableCompletionSettlementCommitmentInput,
+    DurableCompletionSettlementCommitmentKind, DurableCompletionSettlementCommitmentLedger,
+    DurableCompletionSettlementCommitmentOutcome, DurableCompletionSettlementCommitmentPolicy,
+    DurableCompletionSettlementCommitmentRequest, FixtureDurableCompletionSettlementCommitmentSink,
 };
 use qbind_node::pqc_governance_durable_completion_settlement_finalization::{
-    settlement_finalization_identity_digest,
-    evaluate_durable_completion_settlement_finalization,
+    evaluate_durable_completion_settlement_finalization, settlement_finalization_identity_digest,
     DurableCompletionSettlementFinalizationExpectations,
-    DurableCompletionSettlementFinalizationIdentity,
-    DurableCompletionSettlementFinalizationInput,
-    DurableCompletionSettlementFinalizationKind,
-    DurableCompletionSettlementFinalizationLedger,
-    DurableCompletionSettlementFinalizationOutcome,
-    DurableCompletionSettlementFinalizationPolicy,
+    DurableCompletionSettlementFinalizationIdentity, DurableCompletionSettlementFinalizationInput,
+    DurableCompletionSettlementFinalizationKind, DurableCompletionSettlementFinalizationLedger,
+    DurableCompletionSettlementFinalizationOutcome, DurableCompletionSettlementFinalizationPolicy,
     DurableCompletionSettlementFinalizationRequest,
     FixtureDurableCompletionSettlementFinalizationSink,
 };
-use qbind_node::pqc_governance_durable_completion_settlement_receipt_acknowledgement::{
-    evaluate_durable_completion_settlement_receipt_acknowledgement,
-    settlement_receipt_acknowledgement_identity_digest,
-    DurableCompletionSettlementReceiptAcknowledgementExpectations,
-    DurableCompletionSettlementReceiptAcknowledgementIdentity,
-    DurableCompletionSettlementReceiptAcknowledgementInput,
-    DurableCompletionSettlementReceiptAcknowledgementKind,
-    DurableCompletionSettlementReceiptAcknowledgementLedger,
-    DurableCompletionSettlementReceiptAcknowledgementOutcome,
-    DurableCompletionSettlementReceiptAcknowledgementPolicy,
-    DurableCompletionSettlementReceiptAcknowledgementRequest,
-    FixtureDurableCompletionSettlementReceiptAcknowledgementSink,
-};
 use qbind_node::pqc_governance_durable_completion_settlement_outcome_report::{
-    settlement_outcome_report_identity_digest,
     durable_completion_settlement_outcome_report_ambiguous_window_fails_closed,
     durable_completion_settlement_outcome_report_attestation_required,
     durable_completion_settlement_outcome_report_backend_submission_required,
@@ -141,13 +118,12 @@ use qbind_node::pqc_governance_durable_completion_settlement_outcome_report::{
     evaluate_durable_completion_settlement_outcome_report,
     project_settlement_receipt_acknowledgement_outcome_to_outcome_report_request,
     recover_durable_completion_settlement_outcome_report_window,
-    settlement_outcome_report_outcome_authorizes_record,
+    settlement_outcome_report_identity_digest, settlement_outcome_report_outcome_authorizes_record,
     settlement_outcome_report_outcome_projects_to_recorded,
     DurableCompletionSettlementOutcomeReportExpectations,
     DurableCompletionSettlementOutcomeReportFault,
     DurableCompletionSettlementOutcomeReportIdentity,
-    DurableCompletionSettlementOutcomeReportInput,
-    DurableCompletionSettlementOutcomeReportKind,
+    DurableCompletionSettlementOutcomeReportInput, DurableCompletionSettlementOutcomeReportKind,
     DurableCompletionSettlementOutcomeReportLedger,
     DurableCompletionSettlementOutcomeReportOutcome,
     DurableCompletionSettlementOutcomeReportPolicy,
@@ -157,6 +133,19 @@ use qbind_node::pqc_governance_durable_completion_settlement_outcome_report::{
     FixtureDurableCompletionSettlementOutcomeReportSink,
     GovernanceDurableCompletionSettlementOutcomeReportSink, MainNetSettlementOutcomeReportSink,
     ProductionSettlementOutcomeReportSink,
+};
+use qbind_node::pqc_governance_durable_completion_settlement_receipt_acknowledgement::{
+    evaluate_durable_completion_settlement_receipt_acknowledgement,
+    settlement_receipt_acknowledgement_identity_digest,
+    DurableCompletionSettlementReceiptAcknowledgementExpectations,
+    DurableCompletionSettlementReceiptAcknowledgementIdentity,
+    DurableCompletionSettlementReceiptAcknowledgementInput,
+    DurableCompletionSettlementReceiptAcknowledgementKind,
+    DurableCompletionSettlementReceiptAcknowledgementLedger,
+    DurableCompletionSettlementReceiptAcknowledgementOutcome,
+    DurableCompletionSettlementReceiptAcknowledgementPolicy,
+    DurableCompletionSettlementReceiptAcknowledgementRequest,
+    FixtureDurableCompletionSettlementReceiptAcknowledgementSink,
 };
 use qbind_node::pqc_governance_execution_runtime_arming::GovernanceExecutionRuntimeSurface;
 use qbind_node::pqc_governance_modeled_durable_completion_attestation_projection::GovernanceModeledDurableCompletionAttestationOutcome;
@@ -177,17 +166,15 @@ use qbind_node::pqc_trust_bundle::TrustBundleEnvironment;
 // grep-proves it links the real Run 272 boundary symbols in release mode).
 use qbind_node::pqc_governance_durable_completion_settlement_outcome_report::{
     durable_completion_settlement_outcome_report_consumer_required,
-    durable_completion_settlement_outcome_report_receipt_acknowledgement_required,
     durable_completion_settlement_outcome_report_no_real_settlement,
     durable_completion_settlement_outcome_report_no_real_settlement_finality,
     durable_completion_settlement_outcome_report_no_real_settlement_finality_projection,
     durable_completion_settlement_outcome_report_no_real_settlement_outcome_publication,
     durable_completion_settlement_outcome_report_no_real_settlement_receipt,
     durable_completion_settlement_outcome_report_no_real_settlement_receipt_acknowledgement,
-    settlement_outcome_report_record_digest,
-    settlement_outcome_report_request_digest,
-    settlement_outcome_report_response_digest,
-    settlement_outcome_report_transcript_digest,
+    durable_completion_settlement_outcome_report_receipt_acknowledgement_required,
+    settlement_outcome_report_record_digest, settlement_outcome_report_request_digest,
+    settlement_outcome_report_response_digest, settlement_outcome_report_transcript_digest,
     DurableCompletionSettlementOutcomeReportBinding,
     DurableCompletionSettlementOutcomeReportDigest,
     DurableCompletionSettlementOutcomeReportEnvironment,
@@ -240,8 +227,7 @@ const RECEIPT_ACKNOWLEDGEMENT_ID: &str = "fixture-settlement-receipt-acknowledge
 const RECEIPT_ACKNOWLEDGEMENT_DOMAIN_TAG: &str = "QBIND:run270:domain-separation:v1";
 const OUTCOME_REPORT_ID: &str = "fixture-settlement-outcome-report-0001";
 const OUTCOME_REPORT_DOMAIN_TAG: &str = "QBIND:run272:domain-separation:v1";
-const OUTCOME_REPORT_RECORD_ID: &str =
-    "durable-completion-settlement-outcome-report-0001";
+const OUTCOME_REPORT_RECORD_ID: &str = "durable-completion-settlement-outcome-report-0001";
 
 /// The real Run 256 backend submission digests, captured from an *actual*
 /// `evaluate_durable_completion_attestation_backend` round-trip. The receipt is
@@ -285,9 +271,7 @@ fn action_label(label: &str) -> ActionLabel {
         receipt_acknowledgement_record_id: format!(
             "durable-completion-settlement-receipt-acknowledgement-{label}"
         ),
-        outcome_report_record_id: format!(
-            "durable-completion-settlement-outcome-report-{label}"
-        ),
+        outcome_report_record_id: format!("durable-completion-settlement-outcome-report-{label}"),
         proposal_id: format!("proposal-{label}"),
         decision_id: format!("decision-{label}"),
         candidate_digest: format!("candidate-digest-{label}"),
@@ -999,7 +983,6 @@ fn attach_run262_consumer(
     }
 }
 
-
 // ===========================================================================
 // Run 264 settlement-projection attachment (carried upstream input)
 // ===========================================================================
@@ -1142,7 +1125,8 @@ fn attach_run264_settlement_projection(
         expected_consumer_transcript_digest: consumer.transcript_digest.clone(),
         expected_consumer_record_id: consumer.consumer_record_id.clone(),
         expected_identity: id.clone(),
-        expected_projection_kind: DurableCompletionConsumerSettlementProjectionKind::FixtureInMemory,
+        expected_projection_kind:
+            DurableCompletionConsumerSettlementProjectionKind::FixtureInMemory,
         expected_projection_policy:
             DurableCompletionConsumerSettlementProjectionPolicy::FixtureAllowed,
         expected_domain_separation_tag: PROJECTION_DOMAIN_TAG.to_string(),
@@ -1241,8 +1225,7 @@ fn attach_run266_settlement_commitment(
     action: &ActionLabel,
     commitment_duplicate: bool,
 ) -> AttachedSettlementCommitment {
-    let settlement_projection =
-        attach_run264_settlement_projection(environment, action, false);
+    let settlement_projection = attach_run264_settlement_projection(environment, action, false);
     let consumer = settlement_projection.consumer.clone();
     let ack = &consumer.ack;
     let commitment_env = match environment {
@@ -1360,15 +1343,11 @@ fn attach_run266_settlement_commitment(
         expected_settlement_projection_identity_digest: settlement_projection
             .identity_digest
             .clone(),
-        expected_settlement_projection_request_digest: settlement_projection
-            .request_digest
-            .clone(),
+        expected_settlement_projection_request_digest: settlement_projection.request_digest.clone(),
         expected_settlement_projection_response_digest: settlement_projection
             .response_digest
             .clone(),
-        expected_settlement_projection_record_digest: settlement_projection
-            .record_digest
-            .clone(),
+        expected_settlement_projection_record_digest: settlement_projection.record_digest.clone(),
         expected_settlement_projection_transcript_digest: settlement_projection
             .transcript_digest
             .clone(),
@@ -1377,8 +1356,7 @@ fn attach_run266_settlement_commitment(
             .clone(),
         expected_identity: id.clone(),
         expected_commitment_kind: DurableCompletionSettlementCommitmentKind::FixtureInMemory,
-        expected_commitment_policy:
-            DurableCompletionSettlementCommitmentPolicy::FixtureAllowed,
+        expected_commitment_policy: DurableCompletionSettlementCommitmentPolicy::FixtureAllowed,
         expected_domain_separation_tag: COMMITMENT_DOMAIN_TAG.to_string(),
     };
     let input = DurableCompletionSettlementCommitmentInput {
@@ -1470,8 +1448,7 @@ fn attach_run268_settlement_finalization(
     action: &ActionLabel,
     finalization_duplicate: bool,
 ) -> AttachedSettlementFinalization {
-    let settlement_commitment =
-        attach_run266_settlement_commitment(environment, action, false);
+    let settlement_commitment = attach_run266_settlement_commitment(environment, action, false);
     let consumer = settlement_commitment.consumer.clone();
     let ack = &consumer.ack;
     let finalization_env = match environment {
@@ -1589,15 +1566,11 @@ fn attach_run268_settlement_finalization(
         expected_settlement_commitment_identity_digest: settlement_commitment
             .identity_digest
             .clone(),
-        expected_settlement_commitment_request_digest: settlement_commitment
-            .request_digest
-            .clone(),
+        expected_settlement_commitment_request_digest: settlement_commitment.request_digest.clone(),
         expected_settlement_commitment_response_digest: settlement_commitment
             .response_digest
             .clone(),
-        expected_settlement_commitment_record_digest: settlement_commitment
-            .record_digest
-            .clone(),
+        expected_settlement_commitment_record_digest: settlement_commitment.record_digest.clone(),
         expected_settlement_commitment_transcript_digest: settlement_commitment
             .transcript_digest
             .clone(),
@@ -1606,8 +1579,7 @@ fn attach_run268_settlement_finalization(
             .clone(),
         expected_identity: id.clone(),
         expected_finalization_kind: DurableCompletionSettlementFinalizationKind::FixtureInMemory,
-        expected_finalization_policy:
-            DurableCompletionSettlementFinalizationPolicy::FixtureAllowed,
+        expected_finalization_policy: DurableCompletionSettlementFinalizationPolicy::FixtureAllowed,
         expected_domain_separation_tag: FINALIZATION_DOMAIN_TAG.to_string(),
     };
     let input = DurableCompletionSettlementFinalizationInput {
@@ -1689,7 +1661,8 @@ struct AttachedSettlementReceiptAcknowledgement {
     settlement_finalization: AttachedSettlementFinalization,
 }
 
-fn run270_receipt_acknowledgement_identity() -> DurableCompletionSettlementReceiptAcknowledgementIdentity {
+fn run270_receipt_acknowledgement_identity(
+) -> DurableCompletionSettlementReceiptAcknowledgementIdentity {
     DurableCompletionSettlementReceiptAcknowledgementIdentity {
         finalization_id: RECEIPT_ACKNOWLEDGEMENT_ID.to_string(),
         kind: DurableCompletionSettlementReceiptAcknowledgementKind::FixtureInMemory,
@@ -1703,8 +1676,7 @@ fn attach_run270_settlement_receipt_acknowledgement(
     action: &ActionLabel,
     receipt_acknowledgement_duplicate: bool,
 ) -> AttachedSettlementReceiptAcknowledgement {
-    let settlement_finalization =
-        attach_run268_settlement_finalization(environment, action, false);
+    let settlement_finalization = attach_run268_settlement_finalization(environment, action, false);
     let consumer = settlement_finalization.consumer.clone();
     let ack = &consumer.ack;
     let receipt_acknowledgement_env = match environment {
@@ -1772,13 +1744,17 @@ fn attach_run270_settlement_receipt_acknowledgement(
         settlement_finalization_request_digest: settlement_finalization.request_digest.clone(),
         settlement_finalization_response_digest: settlement_finalization.response_digest.clone(),
         settlement_finalization_record_digest: settlement_finalization.record_digest.clone(),
-        settlement_finalization_transcript_digest: settlement_finalization.transcript_digest.clone(),
+        settlement_finalization_transcript_digest: settlement_finalization
+            .transcript_digest
+            .clone(),
         settlement_finalization_record_id: settlement_finalization.finalization_record_id.clone(),
         identity: id.clone(),
         domain_separation_tag: RECEIPT_ACKNOWLEDGEMENT_DOMAIN_TAG.to_string(),
     };
     let expectations = DurableCompletionSettlementReceiptAcknowledgementExpectations {
-        expected_receipt_acknowledgement_record_id: action.receipt_acknowledgement_record_id.clone(),
+        expected_receipt_acknowledgement_record_id: action
+            .receipt_acknowledgement_record_id
+            .clone(),
         expected_environment: receipt_acknowledgement_env,
         expected_chain_id: CHAIN.to_string(),
         expected_genesis_hash: GENESIS.to_string(),
@@ -1819,19 +1795,29 @@ fn attach_run270_settlement_receipt_acknowledgement(
         expected_consumer_record_digest: consumer.record_digest.clone(),
         expected_consumer_transcript_digest: consumer.transcript_digest.clone(),
         expected_consumer_record_id: consumer.consumer_record_id.clone(),
-        expected_settlement_finalization_identity_digest: settlement_finalization.identity_digest.clone(),
-        expected_settlement_finalization_request_digest: settlement_finalization.request_digest.clone(),
+        expected_settlement_finalization_identity_digest: settlement_finalization
+            .identity_digest
+            .clone(),
+        expected_settlement_finalization_request_digest: settlement_finalization
+            .request_digest
+            .clone(),
         expected_settlement_finalization_response_digest: settlement_finalization
             .response_digest
             .clone(),
-        expected_settlement_finalization_record_digest: settlement_finalization.record_digest.clone(),
+        expected_settlement_finalization_record_digest: settlement_finalization
+            .record_digest
+            .clone(),
         expected_settlement_finalization_transcript_digest: settlement_finalization
             .transcript_digest
             .clone(),
-        expected_settlement_finalization_record_id: settlement_finalization.finalization_record_id.clone(),
+        expected_settlement_finalization_record_id: settlement_finalization
+            .finalization_record_id
+            .clone(),
         expected_identity: id.clone(),
-        expected_receipt_acknowledgement_kind: DurableCompletionSettlementReceiptAcknowledgementKind::FixtureInMemory,
-        expected_receipt_acknowledgement_policy: DurableCompletionSettlementReceiptAcknowledgementPolicy::FixtureAllowed,
+        expected_receipt_acknowledgement_kind:
+            DurableCompletionSettlementReceiptAcknowledgementKind::FixtureInMemory,
+        expected_receipt_acknowledgement_policy:
+            DurableCompletionSettlementReceiptAcknowledgementPolicy::FixtureAllowed,
         expected_domain_separation_tag: RECEIPT_ACKNOWLEDGEMENT_DOMAIN_TAG.to_string(),
     };
     let input = DurableCompletionSettlementReceiptAcknowledgementInput {
@@ -1994,12 +1980,24 @@ fn ctx_action(
         consumer_record_digest: consumer.record_digest.clone(),
         consumer_transcript_digest: consumer.transcript_digest.clone(),
         consumer_record_id: consumer.consumer_record_id.clone(),
-        settlement_receipt_acknowledgement_identity_digest: settlement_receipt_acknowledgement.identity_digest.clone(),
-        settlement_receipt_acknowledgement_request_digest: settlement_receipt_acknowledgement.request_digest.clone(),
-        settlement_receipt_acknowledgement_response_digest: settlement_receipt_acknowledgement.response_digest.clone(),
-        settlement_receipt_acknowledgement_record_digest: settlement_receipt_acknowledgement.record_digest.clone(),
-        settlement_receipt_acknowledgement_transcript_digest: settlement_receipt_acknowledgement.transcript_digest.clone(),
-        settlement_receipt_acknowledgement_record_id: settlement_receipt_acknowledgement.receipt_acknowledgement_record_id.clone(),
+        settlement_receipt_acknowledgement_identity_digest: settlement_receipt_acknowledgement
+            .identity_digest
+            .clone(),
+        settlement_receipt_acknowledgement_request_digest: settlement_receipt_acknowledgement
+            .request_digest
+            .clone(),
+        settlement_receipt_acknowledgement_response_digest: settlement_receipt_acknowledgement
+            .response_digest
+            .clone(),
+        settlement_receipt_acknowledgement_record_digest: settlement_receipt_acknowledgement
+            .record_digest
+            .clone(),
+        settlement_receipt_acknowledgement_transcript_digest: settlement_receipt_acknowledgement
+            .transcript_digest
+            .clone(),
+        settlement_receipt_acknowledgement_record_id: settlement_receipt_acknowledgement
+            .receipt_acknowledgement_record_id
+            .clone(),
         identity: id.clone(),
         domain_separation_tag: OUTCOME_REPORT_DOMAIN_TAG.to_string(),
     };
@@ -2045,16 +2043,19 @@ fn ctx_action(
         expected_consumer_record_digest: consumer.record_digest.clone(),
         expected_consumer_transcript_digest: consumer.transcript_digest.clone(),
         expected_consumer_record_id: consumer.consumer_record_id.clone(),
-        expected_settlement_receipt_acknowledgement_identity_digest: settlement_receipt_acknowledgement.identity_digest.clone(),
-        expected_settlement_receipt_acknowledgement_request_digest: settlement_receipt_acknowledgement.request_digest.clone(),
-        expected_settlement_receipt_acknowledgement_response_digest: settlement_receipt_acknowledgement
-            .response_digest
+        expected_settlement_receipt_acknowledgement_identity_digest:
+            settlement_receipt_acknowledgement.identity_digest.clone(),
+        expected_settlement_receipt_acknowledgement_request_digest:
+            settlement_receipt_acknowledgement.request_digest.clone(),
+        expected_settlement_receipt_acknowledgement_response_digest:
+            settlement_receipt_acknowledgement.response_digest.clone(),
+        expected_settlement_receipt_acknowledgement_record_digest:
+            settlement_receipt_acknowledgement.record_digest.clone(),
+        expected_settlement_receipt_acknowledgement_transcript_digest:
+            settlement_receipt_acknowledgement.transcript_digest.clone(),
+        expected_settlement_receipt_acknowledgement_record_id: settlement_receipt_acknowledgement
+            .receipt_acknowledgement_record_id
             .clone(),
-        expected_settlement_receipt_acknowledgement_record_digest: settlement_receipt_acknowledgement.record_digest.clone(),
-        expected_settlement_receipt_acknowledgement_transcript_digest: settlement_receipt_acknowledgement
-            .transcript_digest
-            .clone(),
-        expected_settlement_receipt_acknowledgement_record_id: settlement_receipt_acknowledgement.receipt_acknowledgement_record_id.clone(),
         expected_identity: id,
         expected_outcome_report_kind: kind,
         expected_outcome_report_policy: policy,
@@ -2266,8 +2267,12 @@ fn devnet_fixture_chain_records_exactly_one_receipt_only_after_backend_submissio
         outcome,
         DurableCompletionSettlementOutcomeReportOutcome::SettlementOutcomeReportRecorded
     );
-    assert!(settlement_outcome_report_outcome_authorizes_record(&outcome));
-    assert!(settlement_outcome_report_outcome_projects_to_recorded(&outcome));
+    assert!(settlement_outcome_report_outcome_authorizes_record(
+        &outcome
+    ));
+    assert!(settlement_outcome_report_outcome_projects_to_recorded(
+        &outcome
+    ));
     assert_eq!(sink.invocations(), 1);
     assert_eq!(ledger.len(), 1);
     assert!(ledger.contains(OUTCOME_REPORT_RECORD_ID));
@@ -2363,8 +2368,12 @@ fn duplicate_identical_receipt_is_idempotent() {
         second,
         DurableCompletionSettlementOutcomeReportOutcome::SettlementOutcomeReportDuplicateIdempotent
     );
-    assert!(!settlement_outcome_report_outcome_authorizes_record(&second));
-    assert!(settlement_outcome_report_outcome_projects_to_recorded(&second));
+    assert!(!settlement_outcome_report_outcome_authorizes_record(
+        &second
+    ));
+    assert!(settlement_outcome_report_outcome_projects_to_recorded(
+        &second
+    ));
     assert_eq!(ledger.len(), 1);
 }
 
@@ -2629,8 +2638,8 @@ fn assert_non_recording_receipt_acknowledgement(
 }
 
 fn non_recording_receipt_acknowledgement_outcomes_never_record_outcome_report() {
-    use DurableCompletionSettlementReceiptAcknowledgementOutcome as Finalization;
     use DurableCompletionSettlementOutcomeReportOutcome as OutcomeReport;
+    use DurableCompletionSettlementReceiptAcknowledgementOutcome as Finalization;
     assert_non_recording_receipt_acknowledgement(
         Finalization::LegacyBypassNoSettlementReceiptAcknowledgement,
         OutcomeReport::LegacyBypassNoSettlementOutcomeReport,
@@ -3057,34 +3066,39 @@ fn receipt_ambiguous_window_fails_closed() {
 // Finalization cases
 // ===========================================================================
 
-fn only_recorded_receipt_acknowledgement_outcome_creates_settlement_outcome_report_request_intent() {
-    use DurableCompletionSettlementReceiptAcknowledgementOutcome as Finalization;
+fn only_recorded_receipt_acknowledgement_outcome_creates_settlement_outcome_report_request_intent()
+{
     use DurableCompletionSettlementOutcomeReportRequestIntent as Intent;
+    use DurableCompletionSettlementReceiptAcknowledgementOutcome as Finalization;
     assert_eq!(
         project_settlement_receipt_acknowledgement_outcome_to_outcome_report_request(
             &Finalization::SettlementReceiptAcknowledgementRecorded
         ),
         Intent::CreateRequest
     );
-    assert!(project_settlement_receipt_acknowledgement_outcome_to_outcome_report_request(
-        &Finalization::SettlementReceiptAcknowledgementRecorded
-    )
-    .creates_request());
+    assert!(
+        project_settlement_receipt_acknowledgement_outcome_to_outcome_report_request(
+            &Finalization::SettlementReceiptAcknowledgementRecorded
+        )
+        .creates_request()
+    );
     assert_eq!(
         project_settlement_receipt_acknowledgement_outcome_to_outcome_report_request(
             &Finalization::SettlementReceiptAcknowledgementDuplicateIdempotent
         ),
         Intent::IdempotentOnly
     );
-    assert!(!project_settlement_receipt_acknowledgement_outcome_to_outcome_report_request(
-        &Finalization::LegacyBypassNoSettlementReceiptAcknowledgement
-    )
-    .creates_request());
+    assert!(
+        !project_settlement_receipt_acknowledgement_outcome_to_outcome_report_request(
+            &Finalization::LegacyBypassNoSettlementReceiptAcknowledgement
+        )
+        .creates_request()
+    );
 }
 
 fn non_recording_receipt_acknowledgement_outcomes_create_no_settlement_outcome_report_request() {
-    use DurableCompletionSettlementReceiptAcknowledgementOutcome as Finalization;
     use DurableCompletionSettlementOutcomeReportRequestIntent as Intent;
+    use DurableCompletionSettlementReceiptAcknowledgementOutcome as Finalization;
     for receipt_acknowledgement in [
         Finalization::LegacyBypassNoSettlementReceiptAcknowledgement,
         Finalization::RejectedBeforeSettlementFinalizationNoReceiptAcknowledgement,
@@ -3094,7 +3108,9 @@ fn non_recording_receipt_acknowledgement_outcomes_create_no_settlement_outcome_r
         Finalization::ProductionSettlementReceiptAcknowledgementUnavailableNoReceiptAcknowledgement,
     ] {
         assert!(matches!(
-            project_settlement_receipt_acknowledgement_outcome_to_outcome_report_request(&receipt_acknowledgement),
+            project_settlement_receipt_acknowledgement_outcome_to_outcome_report_request(
+                &receipt_acknowledgement
+            ),
             Intent::NoReceiptAcknowledgement(_)
         ));
     }
@@ -3188,7 +3204,8 @@ fn after_settlement_receipt_acknowledgement_request_before_record_rejects_before
     );
 }
 
-fn after_settlement_receipt_acknowledgement_record_before_success_requires_explicit_matching_record() {
+fn after_settlement_receipt_acknowledgement_record_before_success_requires_explicit_matching_record(
+) {
     use DurableCompletionSettlementOutcomeReportOutcome as Finalization;
     use DurableCompletionSettlementOutcomeReportWindow as Window;
     assert_window(
@@ -3406,7 +3423,8 @@ fn invariant_helpers_assert_fail_closed_contract() {
         durable_completion_settlement_outcome_report_local_operator_cannot_satisfy_mainnet_authority()
     );
     assert!(
-        durable_completion_settlement_outcome_report_peer_majority_cannot_satisfy_mainnet_authority()
+        durable_completion_settlement_outcome_report_peer_majority_cannot_satisfy_mainnet_authority(
+        )
     );
 }
 
@@ -3441,8 +3459,12 @@ fn release_symbol_reachability_probe() {
         outcome,
         DurableCompletionSettlementOutcomeReportOutcome::SettlementOutcomeReportRecorded
     );
-    assert!(settlement_outcome_report_outcome_authorizes_record(&outcome));
-    assert!(settlement_outcome_report_outcome_projects_to_recorded(&outcome));
+    assert!(settlement_outcome_report_outcome_authorizes_record(
+        &outcome
+    ));
+    assert!(settlement_outcome_report_outcome_projects_to_recorded(
+        &outcome
+    ));
     assert!(outcome.authorizes_record());
     assert!(outcome.projects_to_recorded());
     assert!(!outcome.no_commitment());
@@ -3470,7 +3492,11 @@ fn release_symbol_reachability_probe() {
     let record_digest: DurableCompletionSettlementOutcomeReportDigest =
         settlement_outcome_report_record_digest(&record);
     let transcript_digest: DurableCompletionSettlementOutcomeReportTranscriptDigest =
-        settlement_outcome_report_transcript_digest(&request_digest, &response_digest, &record_digest);
+        settlement_outcome_report_transcript_digest(
+            &request_digest,
+            &response_digest,
+            &record_digest,
+        );
     assert!(!identity_digest.as_hex().is_empty());
     assert!(!transcript_digest.as_hex().is_empty());
 
@@ -3492,11 +3518,15 @@ fn release_symbol_reachability_probe() {
     assert!(DurableCompletionSettlementOutcomeReportPolicy::Disabled.is_disabled());
     assert!(DurableCompletionSettlementOutcomeReportPolicy::FixtureAllowed.allows_fixture());
     assert_eq!(
-        DurableCompletionSettlementOutcomeReportPolicy::ProductionSettlementOutcomeReportRequired.tag(),
+        DurableCompletionSettlementOutcomeReportPolicy::ProductionSettlementOutcomeReportRequired
+            .tag(),
         "production-settlement-outcome-report-required"
     );
     assert!(DurableCompletionSettlementOutcomeReportKind::FixtureInMemory.is_fixture());
-    assert!(DurableCompletionSettlementOutcomeReportKind::ProductionSettlementOutcomeReportUnavailable.is_unavailable());
+    assert!(
+        DurableCompletionSettlementOutcomeReportKind::ProductionSettlementOutcomeReportUnavailable
+            .is_unavailable()
+    );
     assert_eq!(
         DurableCompletionSettlementOutcomeReportKind::Disabled.tag(),
         "disabled"
@@ -3516,7 +3546,9 @@ fn release_symbol_reachability_probe() {
     assert!(durable_completion_settlement_outcome_report_no_real_settlement());
     assert!(durable_completion_settlement_outcome_report_no_real_settlement_finality());
     assert!(durable_completion_settlement_outcome_report_no_real_settlement_receipt());
-    assert!(durable_completion_settlement_outcome_report_no_real_settlement_receipt_acknowledgement());
+    assert!(
+        durable_completion_settlement_outcome_report_no_real_settlement_receipt_acknowledgement()
+    );
     assert!(durable_completion_settlement_outcome_report_no_real_settlement_finality_projection());
     assert!(durable_completion_settlement_outcome_report_no_real_settlement_outcome_publication());
 
@@ -3654,13 +3686,20 @@ fn main() {
     let mut tables = BTreeMap::<String, (usize, usize)>::new();
     for (table, _name, ok) in &rows {
         let entry = tables.entry(table.clone()).or_insert((0, 0));
-        if *ok { entry.0 += 1; } else { entry.1 += 1; }
+        if *ok {
+            entry.0 += 1;
+        } else {
+            entry.1 += 1;
+        }
     }
     let total_pass: usize = rows.iter().filter(|(_, _, ok)| *ok).count();
     let total_fail = rows.len() - total_pass;
     let mut summary = String::new();
     summary.push_str("Run 273 durable-completion settlement-outcome-report release helper\n");
-    summary.push_str(&format!("verdict: {}\n", if total_fail == 0 { "PASS" } else { "FAIL" }));
+    summary.push_str(&format!(
+        "verdict: {}\n",
+        if total_fail == 0 { "PASS" } else { "FAIL" }
+    ));
     summary.push_str("projection_rule: input.settlement_receipt_acknowledgement_binding -> project_settlement_receipt_acknowledgement_outcome_to_outcome_report_request\n");
     summary.push_str("attached_chain: Run256 backend -> Run258 receipt -> Run260 acknowledgement -> Run262 consumer -> Run264 settlement projection -> Run266 settlement commitment -> Run268 settlement finalization -> Run270 settlement-receipt acknowledgement -> Run272 settlement-outcome report\n");
     for (table, (pass, fail)) in &tables {

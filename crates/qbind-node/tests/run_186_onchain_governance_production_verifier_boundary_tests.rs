@@ -38,8 +38,7 @@ use qbind_node::pqc_onchain_governance_proof::{
     ONCHAIN_GOVERNANCE_PROOF_SUITE_RESERVED_PRODUCTION,
 };
 use qbind_node::pqc_onchain_governance_proof_surface::{
-    reload_check_compose_onchain_governance_marker_decision,
-    OnChainGovernanceMarkerDecisionOutcome,
+    reload_check_compose_onchain_governance_marker_decision, OnChainGovernanceMarkerDecisionOutcome,
 };
 use qbind_node::pqc_onchain_governance_verifier::{
     classify_onchain_governance_proof_class,
@@ -64,18 +63,15 @@ const KEY_B: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 const ROOT_FP: &str = "1111111111111111111111111111111111111111";
 const CHAIN_ID: &str = "0000000000000001";
 const OTHER_CHAIN: &str = "00000000000000ff";
-const GENESIS_HASH_A: &str =
-    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
-const GENESIS_HASH_B: &str =
-    "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+const GENESIS_HASH_A: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+const GENESIS_HASH_B: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 const DIGEST_2: &str = "2222222222222222222222222222222222222222222222222222222222222222";
 const DIGEST_OTHER: &str = "3333333333333333333333333333333333333333333333333333333333333333";
 
 const GOV_DOMAIN: &str = "qbind-onchain-gov-1";
 const GOV_EPOCH: u64 = 42;
 const PROPOSAL_ID: &str = "prop-001";
-const PROPOSAL_DIGEST: &str =
-    "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef";
+const PROPOSAL_DIGEST: &str = "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef";
 const UNIQUE_DECISION_ID: &str = "decision-186";
 const NOW: u64 = 1_700_000_000;
 
@@ -502,7 +498,10 @@ fn r1_fixture_proof_rejected_under_disabled_policy() {
         OnChainGovernanceVerifierPolicy::disabled(),
         Some(1),
     );
-    assert_eq!(out, OnChainGovernanceVerifierBoundaryOutcome::FixtureDisabled);
+    assert_eq!(
+        out,
+        OnChainGovernanceVerifierBoundaryOutcome::FixtureDisabled
+    );
 }
 
 /// R2. fixture proof rejected if presented as MainNet production proof.
@@ -668,8 +667,7 @@ fn r8_wrong_genesis_rejected() {
 fn r9_wrong_authority_root_rejected() {
     let cand = rotate_candidate(TrustBundleEnvironment::Devnet);
     let mut proof = good_fixture_proof(&cand, LocalLifecycleAction::Rotate);
-    proof.authority_root_fingerprint =
-        "9999999999999999999999999999999999999999".to_string();
+    proof.authority_root_fingerprint = "9999999999999999999999999999999999999999".to_string();
     recommit(&mut proof);
     let out = dispatch(
         &proof,
@@ -1330,7 +1328,10 @@ fn production_unavailable_verifier_refuses_every_proof() {
     let cand = rotate_candidate(TrustBundleEnvironment::Devnet);
     let fixture = good_fixture_proof(&cand, LocalLifecycleAction::Rotate);
     let v = ProductionUnavailableOnChainGovernanceVerifier;
-    assert_eq!(v.kind(), OnChainGovernanceVerifierKind::ProductionUnavailable);
+    assert_eq!(
+        v.kind(),
+        OnChainGovernanceVerifierKind::ProductionUnavailable
+    );
     let out = v.verify(
         &fixture,
         &cand,

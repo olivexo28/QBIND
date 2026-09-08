@@ -419,17 +419,15 @@ fn main() {
     // Scenario 6: mainnet_refused — an enabled MainNet abuse/DoS config is
     // refused (no production abuse/DoS policy), both directly and via the CLI.
     {
-        let direct = AbuseDosConfig::compatibility_default()
-            .with_environment(NetworkEnvironment::Mainnet);
-        let r_direct = PublicDevnetAbuseDosRuntimeConfig::from_config(
-            {
-                // Force an enabled/overridden config so validation reaches the
-                // MainNet refusal rather than a trivial no-op default.
-                let mut c = direct;
-                c.per_peer_max_messages_per_second = 500;
-                c
-            },
-        );
+        let direct =
+            AbuseDosConfig::compatibility_default().with_environment(NetworkEnvironment::Mainnet);
+        let r_direct = PublicDevnetAbuseDosRuntimeConfig::from_config({
+            // Force an enabled/overridden config so validation reaches the
+            // MainNet refusal rather than a trivial no-op default.
+            let mut c = direct;
+            c.per_peer_max_messages_per_second = 500;
+            c
+        });
         let r_cli = parse_cli(&["--env", "mainnet", "--p2p-max-messages-per-second", "500"])
             .unwrap()
             .abuse_dos_runtime_config();
@@ -437,7 +435,11 @@ fn main() {
         scenarios.push(Scenario {
             id: "06_mainnet_refused",
             expected: "MainNet abuse/DoS config refused (direct + CLI)".to_string(),
-            actual: format!("direct_err={} cli_err={}", r_direct.is_err(), r_cli.is_err()),
+            actual: format!(
+                "direct_err={} cli_err={}",
+                r_direct.is_err(),
+                r_cli.is_err()
+            ),
             matched: ok,
             detail: "MainNet has no production abuse/DoS policy; an enabled MainNet \
                      config never validates and no runtime state exists."
@@ -477,8 +479,7 @@ fn main() {
         let ok = all_hidden && real_parse && invented_rejected;
         scenarios.push(Scenario {
             id: "07_cli_surface_hidden_and_parse_checked",
-            expected: "hidden flags absent from --help; real parse; invented rejected"
-                .to_string(),
+            expected: "hidden flags absent from --help; real parse; invented rejected".to_string(),
             actual: format!(
                 "all_hidden={} real_parse={} invented_rejected={}",
                 all_hidden, real_parse, invented_rejected

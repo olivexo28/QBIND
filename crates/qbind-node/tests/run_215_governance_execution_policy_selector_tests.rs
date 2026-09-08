@@ -415,7 +415,8 @@ fn a4_cli_emergency_devnet_accepted() {
 fn a5_cli_production_required_unavailable() {
     let env = TrustBundleEnvironment::Devnet;
     let policy =
-        governance_execution_policy_from_cli_or_env(Some("production-governance-required")).unwrap();
+        governance_execution_policy_from_cli_or_env(Some("production-governance-required"))
+            .unwrap();
     let td = trust_domain(env);
     let exp = rotate_expectations(env);
     let mut input = rotate_input(env);

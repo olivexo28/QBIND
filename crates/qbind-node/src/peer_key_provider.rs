@@ -68,7 +68,9 @@ impl StaticConsensusKeyProvider {
     /// Iterate over `(validator_id, suite_id, fingerprint)` entries.
     /// Used by startup logs to surface what was configured without
     /// printing full key material.
-    pub fn iter_safe(&self) -> impl Iterator<Item = (ValidatorId, ConsensusSigSuiteId, String)> + '_ {
+    pub fn iter_safe(
+        &self,
+    ) -> impl Iterator<Item = (ValidatorId, ConsensusSigSuiteId, String)> + '_ {
         self.keys
             .iter()
             .map(|(vid, (s, pk))| (*vid, *s, public_key_fingerprint(pk)))
@@ -89,10 +91,7 @@ impl StaticConsensusKeyProvider {
 }
 
 impl SuiteAwareValidatorKeyProvider for StaticConsensusKeyProvider {
-    fn get_suite_and_key(
-        &self,
-        id: ValidatorId,
-    ) -> Option<(ConsensusSigSuiteId, Vec<u8>)> {
+    fn get_suite_and_key(&self, id: ValidatorId) -> Option<(ConsensusSigSuiteId, Vec<u8>)> {
         self.keys.get(&id).cloned()
     }
 }
@@ -402,11 +401,10 @@ pub fn build_validator_set_and_key_provider(
     // 3. Walk `--p2p-peer` static peers; every `vid@addr` peer must
     //    have a configured key, and bare `addr` peers fail closed.
     for spec in &config.network.static_peers {
-        let (peer_vid_opt, addr) = parse_peer_spec(spec).map_err(|_| {
-            PeerKeyProviderError::PeerWithoutValidatorId {
+        let (peer_vid_opt, addr) =
+            parse_peer_spec(spec).map_err(|_| PeerKeyProviderError::PeerWithoutValidatorId {
                 peer_addr: spec.clone(),
-            }
-        })?;
+            })?;
         match peer_vid_opt {
             Some(vid_u64) => {
                 let vid = ValidatorId::new(vid_u64);
@@ -421,9 +419,7 @@ pub fn build_validator_set_and_key_provider(
                 // validator (no peer) setup `static_peers` is
                 // empty; a non-empty `static_peers` entry without
                 // `vid@` is a deterministic-mapping blocker.
-                return Err(PeerKeyProviderError::PeerWithoutValidatorId {
-                    peer_addr: addr,
-                });
+                return Err(PeerKeyProviderError::PeerWithoutValidatorId { peer_addr: addr });
             }
         }
     }
@@ -437,9 +433,8 @@ pub fn build_validator_set_and_key_provider(
         })
         .collect();
     entries.sort_by_key(|e| e.id.as_u64());
-    let validators = ConsensusValidatorSet::new(entries).map_err(|detail| {
-        PeerKeyProviderError::ValidatorSetBuildFailed { detail }
-    })?;
+    let validators = ConsensusValidatorSet::new(entries)
+        .map_err(|detail| PeerKeyProviderError::ValidatorSetBuildFailed { detail })?;
 
     let mut peer_ids: Vec<ValidatorId> = keys
         .keys()
@@ -541,12 +536,9 @@ mod tests {
         cfg.network.static_peer_consensus_keys = vec![entry(1, 100, &peer_pk)];
 
         let local_pk = fake_pk(0, 16);
-        let loaded = build_validator_set_and_key_provider(
-            &cfg,
-            ValidatorId::new(0),
-            Some(&local_pk),
-        )
-        .expect("build must succeed");
+        let loaded =
+            build_validator_set_and_key_provider(&cfg, ValidatorId::new(0), Some(&local_pk))
+                .expect("build must succeed");
 
         assert_eq!(loaded.validator_count, 2);
         assert_eq!(loaded.local_validator_id, ValidatorId::new(0));
@@ -581,17 +573,12 @@ mod tests {
         let local_pk = fake_pk(0, 16);
         let peer_pk = fake_pk(7, 16);
         cfg.network.static_peers = vec!["1@127.0.0.1:9001".to_string()];
-        cfg.network.static_peer_consensus_keys = vec![
-            entry(0, 100, &local_pk),
-            entry(1, 100, &peer_pk),
-        ];
+        cfg.network.static_peer_consensus_keys =
+            vec![entry(0, 100, &local_pk), entry(1, 100, &peer_pk)];
 
-        let loaded = build_validator_set_and_key_provider(
-            &cfg,
-            ValidatorId::new(0),
-            Some(&local_pk),
-        )
-        .expect("matching local entry must succeed");
+        let loaded =
+            build_validator_set_and_key_provider(&cfg, ValidatorId::new(0), Some(&local_pk))
+                .expect("matching local entry must succeed");
         assert_eq!(loaded.validator_count, 2);
     }
 
@@ -602,12 +589,9 @@ mod tests {
         cfg.network.static_peers = vec!["1@127.0.0.1:9001".to_string()];
         cfg.network.static_peer_consensus_keys = vec![entry(1, 100, &peer_pk)];
         let local_pk = fake_pk(0, 16);
-        let loaded = build_validator_set_and_key_provider(
-            &cfg,
-            ValidatorId::new(0),
-            Some(&local_pk),
-        )
-        .unwrap();
+        let loaded =
+            build_validator_set_and_key_provider(&cfg, ValidatorId::new(0), Some(&local_pk))
+                .unwrap();
         for (_vid, _suite, fp) in &loaded.fingerprints {
             // Short prefix only (≤ 8 hex chars + "..." ellipsis).
             assert!(fp.len() <= 11, "fingerprint too long: {}", fp);
@@ -621,12 +605,9 @@ mod tests {
     #[test]
     fn empty_keys_fails_closed() {
         let cfg = devnet_config();
-        let err = build_validator_set_and_key_provider(
-            &cfg,
-            ValidatorId::new(0),
-            Some(&fake_pk(0, 8)),
-        )
-        .expect_err("empty must fail");
+        let err =
+            build_validator_set_and_key_provider(&cfg, ValidatorId::new(0), Some(&fake_pk(0, 8)))
+                .expect_err("empty must fail");
         assert!(matches!(err, PeerKeyProviderError::NoConfiguredKeys));
     }
 
@@ -638,26 +619,17 @@ mod tests {
             suite_id: 100,
             public_key_hex: "zzzzzzzz".to_string(),
         }];
-        let err = build_validator_set_and_key_provider(
-            &cfg,
-            ValidatorId::new(0),
-            None,
-        )
-        .expect_err("invalid hex must fail");
+        let err = build_validator_set_and_key_provider(&cfg, ValidatorId::new(0), None)
+            .expect_err("invalid hex must fail");
         assert!(matches!(err, PeerKeyProviderError::InvalidHex { .. }));
     }
 
     #[test]
     fn unsupported_suite_fails_closed() {
         let mut cfg = devnet_config();
-        cfg.network.static_peer_consensus_keys =
-            vec![entry(0, 99, &fake_pk(1, 8))];
-        let err = build_validator_set_and_key_provider(
-            &cfg,
-            ValidatorId::new(0),
-            None,
-        )
-        .expect_err("wrong suite must fail");
+        cfg.network.static_peer_consensus_keys = vec![entry(0, 99, &fake_pk(1, 8))];
+        let err = build_validator_set_and_key_provider(&cfg, ValidatorId::new(0), None)
+            .expect_err("wrong suite must fail");
         assert!(matches!(
             err,
             PeerKeyProviderError::UnsupportedSuite {
@@ -671,16 +643,10 @@ mod tests {
     #[test]
     fn duplicate_validator_id_fails_closed() {
         let mut cfg = devnet_config();
-        cfg.network.static_peer_consensus_keys = vec![
-            entry(0, 100, &fake_pk(1, 8)),
-            entry(0, 100, &fake_pk(2, 8)),
-        ];
-        let err = build_validator_set_and_key_provider(
-            &cfg,
-            ValidatorId::new(0),
-            None,
-        )
-        .expect_err("dup must fail");
+        cfg.network.static_peer_consensus_keys =
+            vec![entry(0, 100, &fake_pk(1, 8)), entry(0, 100, &fake_pk(2, 8))];
+        let err = build_validator_set_and_key_provider(&cfg, ValidatorId::new(0), None)
+            .expect_err("dup must fail");
         assert!(matches!(
             err,
             PeerKeyProviderError::DuplicateValidatorId { validator_id: 0 }
@@ -697,12 +663,8 @@ mod tests {
         // Only configure key for vid=1; vid=2 is missing.
         cfg.network.static_peer_consensus_keys = vec![entry(1, 100, &fake_pk(7, 8))];
         let local_pk = fake_pk(0, 16);
-        let err = build_validator_set_and_key_provider(
-            &cfg,
-            ValidatorId::new(0),
-            Some(&local_pk),
-        )
-        .expect_err("peer missing must fail");
+        let err = build_validator_set_and_key_provider(&cfg, ValidatorId::new(0), Some(&local_pk))
+            .expect_err("peer missing must fail");
         assert!(matches!(
             err,
             PeerKeyProviderError::PeerMissingKey { validator_id: 2 }
@@ -715,12 +677,8 @@ mod tests {
         cfg.network.static_peers = vec!["127.0.0.1:9001".to_string()];
         cfg.network.static_peer_consensus_keys = vec![entry(1, 100, &fake_pk(7, 8))];
         let local_pk = fake_pk(0, 16);
-        let err = build_validator_set_and_key_provider(
-            &cfg,
-            ValidatorId::new(0),
-            Some(&local_pk),
-        )
-        .expect_err("bare peer must fail");
+        let err = build_validator_set_and_key_provider(&cfg, ValidatorId::new(0), Some(&local_pk))
+            .expect_err("bare peer must fail");
         assert!(matches!(
             err,
             PeerKeyProviderError::PeerWithoutValidatorId { .. }
@@ -731,12 +689,8 @@ mod tests {
     fn local_key_missing_without_signer_fails_closed() {
         let mut cfg = devnet_config();
         cfg.network.static_peer_consensus_keys = vec![entry(1, 100, &fake_pk(7, 8))];
-        let err = build_validator_set_and_key_provider(
-            &cfg,
-            ValidatorId::new(0),
-            None,
-        )
-        .expect_err("local missing must fail");
+        let err = build_validator_set_and_key_provider(&cfg, ValidatorId::new(0), None)
+            .expect_err("local missing must fail");
         assert!(matches!(
             err,
             PeerKeyProviderError::LocalKeyMissing { validator_id: 0 }
@@ -752,12 +706,8 @@ mod tests {
         ];
         cfg.network.static_peers = vec!["1@127.0.0.1:9001".to_string()];
         let signer_pk = fake_pk(0xBB, 16); // different from configured.
-        let err = build_validator_set_and_key_provider(
-            &cfg,
-            ValidatorId::new(0),
-            Some(&signer_pk),
-        )
-        .expect_err("mismatch must fail");
+        let err = build_validator_set_and_key_provider(&cfg, ValidatorId::new(0), Some(&signer_pk))
+            .expect_err("mismatch must fail");
         match err {
             PeerKeyProviderError::LocalKeyMismatchesSigner {
                 validator_id,
@@ -780,12 +730,7 @@ mod tests {
         // semantics under the static provider.
         let mut cfg = devnet_config();
         cfg.network.static_peer_consensus_keys = vec![entry(0, 100, &fake_pk(0, 8))];
-        let loaded = build_validator_set_and_key_provider(
-            &cfg,
-            ValidatorId::new(0),
-            None,
-        )
-        .unwrap();
+        let loaded = build_validator_set_and_key_provider(&cfg, ValidatorId::new(0), None).unwrap();
         assert!(loaded
             .key_provider
             .get_suite_and_key(ValidatorId::new(42))
@@ -800,12 +745,9 @@ mod tests {
             entry(0, 100, &fake_pk(0, 16)),
             entry(1, 100, &fake_pk(7, 16)),
         ];
-        let loaded = build_validator_set_and_key_provider(
-            &cfg,
-            ValidatorId::new(0),
-            Some(&fake_pk(0, 16)),
-        )
-        .unwrap();
+        let loaded =
+            build_validator_set_and_key_provider(&cfg, ValidatorId::new(0), Some(&fake_pk(0, 16)))
+                .unwrap();
         assert_eq!(loaded.suite_ids, vec![SUPPORTED_TIMEOUT_SUITE_ID]);
     }
 
@@ -820,15 +762,14 @@ mod tests {
     // ------------------------------------------------------------------
 
     use crate::timeout_verification_bridge::{
-        enforce_policy, try_build_timeout_verification_context,
-        TimeoutVerificationActivation, TimeoutVerificationBridgeInputs,
-        TimeoutVerificationPolicy,
+        enforce_policy, try_build_timeout_verification_context, TimeoutVerificationActivation,
+        TimeoutVerificationBridgeInputs, TimeoutVerificationPolicy,
     };
     use crate::validator_signer::{LocalKeySigner, ValidatorSigner};
     use qbind_consensus::crypto_verifier::SimpleBackendRegistry;
-    use qbind_types::ChainId;
     use qbind_crypto::ml_dsa44::MlDsa44Backend;
     use qbind_crypto::ValidatorSigningKey;
+    use qbind_types::ChainId;
     use std::sync::Arc;
 
     fn make_real_keypair() -> (Vec<u8>, Arc<ValidatorSigningKey>) {
@@ -869,12 +810,9 @@ mod tests {
         cfg.network.static_peers = vec!["1@127.0.0.1:9001".to_string()];
         cfg.network.static_peer_consensus_keys = vec![entry(1, 100, &peer_pk)];
 
-        let loaded = build_validator_set_and_key_provider(
-            &cfg,
-            ValidatorId::new(0),
-            Some(&local_pk),
-        )
-        .expect("provider must build");
+        let loaded =
+            build_validator_set_and_key_provider(&cfg, ValidatorId::new(0), Some(&local_pk))
+                .expect("provider must build");
 
         let signer: Arc<dyn ValidatorSigner> =
             Arc::new(LocalKeySigner::new(ValidatorId::new(0), 100, local_sk));
@@ -901,10 +839,7 @@ mod tests {
         let outcome3 = try_build_timeout_verification_context(inputs3);
         // No-signer is permitted by the bridge — still Active because
         // the bridge's signer cross-check is conditional on Some.
-        assert!(matches!(
-            outcome3,
-            TimeoutVerificationActivation::Active(_)
-        ));
+        assert!(matches!(outcome3, TimeoutVerificationActivation::Active(_)));
     }
 
     #[test]
@@ -919,10 +854,8 @@ mod tests {
                 .unwrap();
         let signer: Arc<dyn ValidatorSigner> =
             Arc::new(LocalKeySigner::new(ValidatorId::new(0), 100, local_sk));
-        let outcome = try_build_timeout_verification_context(make_bridge_inputs(
-            &loaded,
-            Some(signer),
-        ));
+        let outcome =
+            try_build_timeout_verification_context(make_bridge_inputs(&loaded, Some(signer)));
         let res = enforce_policy(TimeoutVerificationPolicy::RequireOrFail, outcome);
         assert!(res.is_ok());
         assert!(res.unwrap().is_some());
@@ -935,12 +868,9 @@ mod tests {
         // returns None (verified by the Run 032 tests; here we
         // simply prove the provider-build is the gating step).
         let cfg = devnet_config();
-        let err = build_validator_set_and_key_provider(
-            &cfg,
-            ValidatorId::new(0),
-            Some(&fake_pk(0, 8)),
-        )
-        .expect_err("must fail");
+        let err =
+            build_validator_set_and_key_provider(&cfg, ValidatorId::new(0), Some(&fake_pk(0, 8)))
+                .expect_err("must fail");
         assert!(matches!(err, PeerKeyProviderError::NoConfiguredKeys));
     }
 }

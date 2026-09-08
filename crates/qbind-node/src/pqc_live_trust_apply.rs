@@ -134,9 +134,7 @@ use std::sync::Arc;
 
 use qbind_types::{ChainId, NetworkEnvironment};
 
-use crate::p2p_session_eviction::{
-    EvictionError, EvictionReason, P2pSessionEvictor,
-};
+use crate::p2p_session_eviction::{EvictionError, EvictionReason, P2pSessionEvictor};
 use crate::pqc_live_trust::{LivePqcTrustSnapshot, LivePqcTrustState};
 use crate::pqc_trust_bundle::LoadedTrustBundle;
 use crate::pqc_trust_reload::LiveTrustApplyContext;
@@ -250,9 +248,7 @@ impl LiveTrustApplyContext for ProductionLiveTrustApplyContext {
     /// a short read lock and the lock is dropped before this method
     /// returns. The boxed `Arc` is what Run 070 hands back to
     /// [`Self::rollback_trust_state`] if any post-swap step fails.
-    fn snapshot_active(
-        &mut self,
-    ) -> Result<Box<dyn std::any::Any + Send + Sync>, String> {
+    fn snapshot_active(&mut self) -> Result<Box<dyn std::any::Any + Send + Sync>, String> {
         match self.live.snapshot() {
             Ok(prev) => Ok(Box::new(prev)),
             Err(e) => Err(format!(
@@ -266,10 +262,7 @@ impl LiveTrustApplyContext for ProductionLiveTrustApplyContext {
     /// candidate bundle and install it via `swap_snapshot` under a
     /// single short write lock. Swap is all-or-nothing: a poisoned
     /// lock fails closed without touching the inner Arc.
-    fn swap_trust_state(
-        &mut self,
-        candidate: &LoadedTrustBundle,
-    ) -> Result<(), String> {
+    fn swap_trust_state(&mut self, candidate: &LoadedTrustBundle) -> Result<(), String> {
         let new_snap = LivePqcTrustSnapshot::from_loaded(candidate);
         match self.live.swap_snapshot(new_snap) {
             Ok(_previous_arc) => Ok(()),
@@ -323,10 +316,7 @@ impl LiveTrustApplyContext for ProductionLiveTrustApplyContext {
     /// method returns `Err`, no partial on-disk state exists, so
     /// rolling back the in-memory live trust state in
     /// [`Self::rollback_trust_state`] restores full consistency.
-    fn commit_sequence(
-        &mut self,
-        candidate: &LoadedTrustBundle,
-    ) -> Result<(), String> {
+    fn commit_sequence(&mut self, candidate: &LoadedTrustBundle) -> Result<(), String> {
         let path = match self.sequence_path.as_ref() {
             Some(p) => p,
             None => {
@@ -363,19 +353,18 @@ impl LiveTrustApplyContext for ProductionLiveTrustApplyContext {
         &mut self,
         snapshot: Box<dyn std::any::Any + Send + Sync>,
     ) -> Result<(), String> {
-        let prev_arc: Arc<LivePqcTrustSnapshot> = match snapshot
-            .downcast::<Arc<LivePqcTrustSnapshot>>()
-        {
-            Ok(boxed) => *boxed,
-            Err(_) => {
-                return Err(
-                    "Run 073: rollback snapshot was not an Arc<LivePqcTrustSnapshot>; this \
+        let prev_arc: Arc<LivePqcTrustSnapshot> =
+            match snapshot.downcast::<Arc<LivePqcTrustSnapshot>>() {
+                Ok(boxed) => *boxed,
+                Err(_) => {
+                    return Err(
+                        "Run 073: rollback snapshot was not an Arc<LivePqcTrustSnapshot>; this \
                      is a programming error in the Run 070 apply pipeline. Live trust \
                      state may be ahead of the on-disk sequence record — fail-closed."
-                        .to_string(),
-                );
-            }
-        };
+                            .to_string(),
+                    );
+                }
+            };
         // Clone the inner snapshot data into a fresh
         // `LivePqcTrustSnapshot` so we can hand it to `swap_snapshot`
         // (which takes ownership of a value). The Arc bump from
@@ -467,10 +456,7 @@ impl P2pSessionEvictor for NoActiveSessionsEvictor {
     fn evict_all_sessions(
         &self,
         reason: EvictionReason,
-    ) -> Result<
-        crate::p2p_session_eviction::EvictionReport,
-        EvictionError,
-    > {
+    ) -> Result<crate::p2p_session_eviction::EvictionReport, EvictionError> {
         // Truthful zero-report: no sessions attempted, zero
         // evicted, zero failed. Run 072 invariant trivially holds.
         Ok(crate::p2p_session_eviction::EvictionReport::new(
@@ -484,9 +470,7 @@ mod tests {
     use super::*;
     use crate::p2p_session_eviction::MockP2pSessionEvictor;
     use crate::pqc_devnet_helper::mint_devnet_root;
-    use crate::pqc_trust_bundle::{
-        build_helper_bundle, HelperBundleMode, TrustBundle,
-    };
+    use crate::pqc_trust_bundle::{build_helper_bundle, HelperBundleMode, TrustBundle};
     use crate::pqc_trust_sequence::{load_record, sequence_file_path};
 
     fn hex_lower(b: &[u8]) -> String {
@@ -502,14 +486,12 @@ mod tests {
         let root = mint_devnet_root().expect("mint devnet root");
         let id_hex = hex_lower(&root.root_key_id);
         let pk_hex = hex_lower(&root.root_pk);
-        let mut bundle =
-            build_helper_bundle(HelperBundleMode::Valid, &id_hex, &pk_hex, 200);
+        let mut bundle = build_helper_bundle(HelperBundleMode::Valid, &id_hex, &pk_hex, 200);
         // `build_helper_bundle` hard-codes sequence=1; override so
         // tests can distinguish swap / rollback by sequence value.
         bundle.sequence = sequence;
         let bytes = serde_json::to_vec(&bundle).expect("serialise");
-        TrustBundle::load_from_bytes(&bytes, NetworkEnvironment::Devnet, 200)
-            .expect("loads")
+        TrustBundle::load_from_bytes(&bytes, NetworkEnvironment::Devnet, 200).expect("loads")
     }
 
     fn tmpdir(tag: &str) -> PathBuf {
@@ -556,8 +538,7 @@ mod tests {
     fn snapshot_active_captures_arc_snapshot_for_rollback() {
         let loaded = fresh_loaded_devnet_bundle(5);
         let live = Arc::new(LivePqcTrustState::initialize_from_loaded_bundle(&loaded));
-        let evictor: Arc<dyn P2pSessionEvictor> =
-            Arc::new(MockP2pSessionEvictor::new(0));
+        let evictor: Arc<dyn P2pSessionEvictor> = Arc::new(MockP2pSessionEvictor::new(0));
         let mut ctx = ProductionLiveTrustApplyContext::new(
             live.clone(),
             evictor,
@@ -582,8 +563,7 @@ mod tests {
         let loaded_a = fresh_loaded_devnet_bundle(1);
         let loaded_b = fresh_loaded_devnet_bundle(2);
         let live = Arc::new(LivePqcTrustState::initialize_from_loaded_bundle(&loaded_a));
-        let evictor: Arc<dyn P2pSessionEvictor> =
-            Arc::new(MockP2pSessionEvictor::new(0));
+        let evictor: Arc<dyn P2pSessionEvictor> = Arc::new(MockP2pSessionEvictor::new(0));
         let mut ctx = ProductionLiveTrustApplyContext::new(
             live.clone(),
             evictor,
@@ -606,8 +586,7 @@ mod tests {
         let loaded_a = fresh_loaded_devnet_bundle(1);
         let loaded_b = fresh_loaded_devnet_bundle(2);
         let live = Arc::new(LivePqcTrustState::initialize_from_loaded_bundle(&loaded_a));
-        let evictor: Arc<dyn P2pSessionEvictor> =
-            Arc::new(MockP2pSessionEvictor::new(0));
+        let evictor: Arc<dyn P2pSessionEvictor> = Arc::new(MockP2pSessionEvictor::new(0));
         let mut ctx = ProductionLiveTrustApplyContext::new(
             live.clone(),
             evictor,
@@ -634,8 +613,7 @@ mod tests {
         // error rather than panicking on downcast.
         let loaded = fresh_loaded_devnet_bundle(1);
         let live = Arc::new(LivePqcTrustState::initialize_from_loaded_bundle(&loaded));
-        let evictor: Arc<dyn P2pSessionEvictor> =
-            Arc::new(MockP2pSessionEvictor::new(0));
+        let evictor: Arc<dyn P2pSessionEvictor> = Arc::new(MockP2pSessionEvictor::new(0));
         let mut ctx = ProductionLiveTrustApplyContext::new(
             live,
             evictor,
@@ -711,8 +689,7 @@ mod tests {
     fn commit_sequence_first_load_writes_persistence_record() {
         let loaded = fresh_loaded_devnet_bundle(7);
         let live = Arc::new(LivePqcTrustState::initialize_from_loaded_bundle(&loaded));
-        let evictor: Arc<dyn P2pSessionEvictor> =
-            Arc::new(NoActiveSessionsEvictor::new());
+        let evictor: Arc<dyn P2pSessionEvictor> = Arc::new(NoActiveSessionsEvictor::new());
         let dir = tmpdir("commit-first-load");
         let path = sequence_file_path(&dir);
         let mut ctx = ProductionLiveTrustApplyContext::new(
@@ -735,8 +712,7 @@ mod tests {
     fn commit_sequence_without_data_dir_surfaces_clean_error() {
         let loaded = fresh_loaded_devnet_bundle(1);
         let live = Arc::new(LivePqcTrustState::initialize_from_loaded_bundle(&loaded));
-        let evictor: Arc<dyn P2pSessionEvictor> =
-            Arc::new(NoActiveSessionsEvictor::new());
+        let evictor: Arc<dyn P2pSessionEvictor> = Arc::new(NoActiveSessionsEvictor::new());
         let mut ctx = ProductionLiveTrustApplyContext::new(
             live,
             evictor,

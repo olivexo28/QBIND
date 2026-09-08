@@ -164,20 +164,16 @@ use qbind_types::{ChainId, NetworkEnvironment};
 use crate::metrics::P2pMetrics;
 use crate::p2p_session_eviction::P2pSessionEvictor;
 use crate::pqc_authority_marker_acceptance::{
-    decide_marker_acceptance,
-    persist_accepted_marker_after_commit_boundary,
-    persist_accepted_v2_marker_after_commit_boundary, MarkerAcceptDecision,
-    MarkerAcceptDecisionV2, MarkerAcceptanceInputs, MarkerAcceptanceV2Inputs,
-    MutatingSurfaceMarkerError, MutatingSurfaceMarkerV2Error,
+    decide_marker_acceptance, persist_accepted_marker_after_commit_boundary,
+    persist_accepted_v2_marker_after_commit_boundary, MarkerAcceptDecision, MarkerAcceptDecisionV2,
+    MarkerAcceptanceInputs, MarkerAcceptanceV2Inputs, MutatingSurfaceMarkerError,
+    MutatingSurfaceMarkerV2Error,
 };
-use crate::pqc_authority_state::{
-    AuthorityMarkerV2ComparisonOutcome, AuthorityStateUpdateSource,
-};
+use crate::pqc_authority_state::{AuthorityMarkerV2ComparisonOutcome, AuthorityStateUpdateSource};
 use crate::pqc_live_trust::LivePqcTrustState;
 use crate::pqc_live_trust_apply::ProductionLiveTrustApplyContext;
 use crate::pqc_ratification_input::{
-    load_versioned_ratification_with_governance_proof_from_path,
-    VersionedRatificationInputError,
+    load_versioned_ratification_with_governance_proof_from_path, VersionedRatificationInputError,
     VersionedRatificationSidecarWithGovernanceProof,
 };
 use crate::pqc_trust_activation::ActivationContext;
@@ -186,7 +182,7 @@ use crate::pqc_trust_bundle::{
 };
 use crate::pqc_trust_reload::{
     apply_validated_candidate_with_previous,
-    apply_validated_candidate_with_previous_and_ratification, ApplyMode, AppliedCandidate,
+    apply_validated_candidate_with_previous_and_ratification, AppliedCandidate, ApplyMode,
     RatificationEnforcementContext, ReloadApplyError, ReloadCheckError, ReloadCheckInputs,
 };
 
@@ -688,10 +684,7 @@ impl std::fmt::Debug for LiveReloadController {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("LiveReloadController")
             .field("config", &self.config)
-            .field(
-                "in_progress",
-                &self.in_progress.load(Ordering::Relaxed),
-            )
+            .field("in_progress", &self.in_progress.load(Ordering::Relaxed))
             .finish_non_exhaustive()
     }
 }
@@ -921,65 +914,66 @@ impl LiveReloadController {
                 // verifier path which surfaces the typed `Missing`
                 // refusal under Strict policy.
                 let ratification_obj_v1 = match rcfg.ratification_sidecar_path.as_ref() {
-                    Some(path) => match load_versioned_ratification_with_governance_proof_from_path(path) {
-                        Ok(VersionedRatificationSidecarWithGovernanceProof::V1(r)) => Some(r),
-                        Ok(VersionedRatificationSidecarWithGovernanceProof::V2 {
-                            ratification: r2,
-                            governance_proof,
-                        }) => {
-                            // Run 138 — v2 dispatch. Skip the v1
-                            // ratification context entirely; the v2
-                            // verifier runs inside the preflight
-                            // helper. Apply via
-                            // `apply_validated_candidate_with_previous`
-                            // (no v1 ratification ctx), mirroring the
-                            // Run 134 reload-apply v2 branch.
-                            // Run 169 — additionally feed the typed
-                            // Run 167 `GovernanceProofLoadStatus`
-                            // parsed from the same sidecar load into
-                            // the SIGHUP preflight so the Run 165
-                            // governance gate sees the actual proof
-                            // carrier (Available / Absent / Malformed)
-                            // instead of a hardcoded `Unavailable`.
-                            // Run 220 — additionally parse the real Run
-                            // 213 governance-execution sibling from the same
-                            // SIGHUP-trigger sidecar so the SIGHUP preflight
-                            // consumes real sidecar load status (Absent /
-                            // Available / Malformed) instead of a forced
-                            // `Absent`. A v2 sidecar without the optional
-                            // `governance_execution` sibling yields `Absent`
-                            // (legacy no-governance-execution payload, pre-Run
-                            // 220 behaviour bit-for-bit).
-                            let governance_execution_load =
+                    Some(path) => {
+                        match load_versioned_ratification_with_governance_proof_from_path(path) {
+                            Ok(VersionedRatificationSidecarWithGovernanceProof::V1(r)) => Some(r),
+                            Ok(VersionedRatificationSidecarWithGovernanceProof::V2 {
+                                ratification: r2,
+                                governance_proof,
+                            }) => {
+                                // Run 138 — v2 dispatch. Skip the v1
+                                // ratification context entirely; the v2
+                                // verifier runs inside the preflight
+                                // helper. Apply via
+                                // `apply_validated_candidate_with_previous`
+                                // (no v1 ratification ctx), mirroring the
+                                // Run 134 reload-apply v2 branch.
+                                // Run 169 — additionally feed the typed
+                                // Run 167 `GovernanceProofLoadStatus`
+                                // parsed from the same sidecar load into
+                                // the SIGHUP preflight so the Run 165
+                                // governance gate sees the actual proof
+                                // carrier (Available / Absent / Malformed)
+                                // instead of a hardcoded `Unavailable`.
+                                // Run 220 — additionally parse the real Run
+                                // 213 governance-execution sibling from the same
+                                // SIGHUP-trigger sidecar so the SIGHUP preflight
+                                // consumes real sidecar load status (Absent /
+                                // Available / Malformed) instead of a forced
+                                // `Absent`. A v2 sidecar without the optional
+                                // `governance_execution` sibling yields `Absent`
+                                // (legacy no-governance-execution payload, pre-Run
+                                // 220 behaviour bit-for-bit).
+                                let governance_execution_load =
                                 crate::pqc_governance_execution_runtime_arming::governance_execution_load_status_from_optional_sidecar_value(
                                     std::fs::read(path)
                                         .ok()
                                         .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
                                         .as_ref(),
                                 );
-                            let marker_decision_v2 =
-                                match self.preflight_sighup_v2_marker_decision(
-                                    rcfg,
-                                    &r2,
-                                    &governance_proof,
-                                    &governance_execution_load,
-                                    now_unix_secs,
-                                ) {
+                                let marker_decision_v2 = match self
+                                    .preflight_sighup_v2_marker_decision(
+                                        rcfg,
+                                        &r2,
+                                        &governance_proof,
+                                        &governance_execution_load,
+                                        now_unix_secs,
+                                    ) {
                                     Ok(opt) => opt,
                                     Err(e) => {
                                         return LiveReloadOutcome::MarkerRejectedV2(e);
                                     }
                                 };
 
-                            let apply_outcome = apply_validated_candidate_with_previous(
-                                inputs,
-                                ApplyMode::ApplyLive,
-                                Some(&mut apply_ctx),
-                                prev_fp_prefix,
-                                prev_seq,
-                            );
+                                let apply_outcome = apply_validated_candidate_with_previous(
+                                    inputs,
+                                    ApplyMode::ApplyLive,
+                                    Some(&mut apply_ctx),
+                                    prev_fp_prefix,
+                                    prev_seq,
+                                );
 
-                            return match apply_outcome {
+                                return match apply_outcome {
                                 Ok(applied) => {
                                     if let Some(decision) = marker_decision_v2.as_ref() {
                                         if let Err(e) =
@@ -1000,17 +994,18 @@ impl LiveReloadController {
                                 ) => LiveReloadOutcome::Fatal(e),
                                 Err(e) => LiveReloadOutcome::Invalid(e),
                             };
-                        }
-                        Err(e) => {
-                            return LiveReloadOutcome::Invalid(
-                                ReloadApplyError::ValidationFailed(
-                                    ReloadCheckError::Bundle(TrustBundleError::Io(
-                                        versioned_ratification_input_io_message(&e),
+                            }
+                            Err(e) => {
+                                return LiveReloadOutcome::Invalid(
+                                    ReloadApplyError::ValidationFailed(ReloadCheckError::Bundle(
+                                        TrustBundleError::Io(
+                                            versioned_ratification_input_io_message(&e),
+                                        ),
                                     )),
-                                ),
-                            );
+                                );
+                            }
                         }
-                    },
+                    }
                     None => None,
                 };
                 let ratification_obj = ratification_obj_v1;
@@ -1107,8 +1102,7 @@ impl LiveReloadController {
                         // `SequenceCommitFailedRollbackAlsoFailed`
                         // branch.
                         if let Some(decision) = marker_decision.as_ref() {
-                            if let Err(e) =
-                                persist_accepted_marker_after_commit_boundary(decision)
+                            if let Err(e) = persist_accepted_marker_after_commit_boundary(decision)
                             {
                                 return LiveReloadOutcome::MarkerPersistFailureAfterCommit {
                                     applied,
@@ -1241,17 +1235,15 @@ impl LiveReloadController {
         // Run 105 enforcement — re-runs the precise verifier the
         // apply pipeline will run, so a verified ratification is in
         // hand for the marker derivation step.
-        let outcome = match enforce_bundle_signing_key_ratification(
-            RatificationEnforcementInputs {
-                ratification: ratification_obj,
-                authority: &rcfg.authority,
-                expected_chain_id: &rcfg.expected_chain_id_str,
-                expected_environment: rcfg.expected_environment_policy,
-                expected_genesis_hash: &rcfg.expected_genesis_hash,
-                candidate_bundle_signing_public_key: &candidate_signing_pk_bytes,
-                policy: rcfg.policy,
-            },
-        ) {
+        let outcome = match enforce_bundle_signing_key_ratification(RatificationEnforcementInputs {
+            ratification: ratification_obj,
+            authority: &rcfg.authority,
+            expected_chain_id: &rcfg.expected_chain_id_str,
+            expected_environment: rcfg.expected_environment_policy,
+            expected_genesis_hash: &rcfg.expected_genesis_hash,
+            candidate_bundle_signing_public_key: &candidate_signing_pk_bytes,
+            policy: rcfg.policy,
+        }) {
             Ok(o) => o,
             Err(_e) => {
                 // Defer to the apply pipeline's own typed reporting —
@@ -1371,15 +1363,13 @@ impl LiveReloadController {
         // verifier is a pure function and the binary's other v2
         // surfaces (Run 134/136) run the SAME verifier with
         // bit-identical results.
-        let ratified_v2 = verify_bundle_signing_key_ratification_v2(
-            RatificationV2VerifierInputs {
-                ratification: ratification_v2,
-                authority: &rcfg.authority,
-                expected_chain_id: &rcfg.expected_chain_id_str,
-                expected_environment: rcfg.expected_environment_policy,
-                expected_genesis_hash: &rcfg.expected_genesis_hash,
-            },
-        )
+        let ratified_v2 = verify_bundle_signing_key_ratification_v2(RatificationV2VerifierInputs {
+            ratification: ratification_v2,
+            authority: &rcfg.authority,
+            expected_chain_id: &rcfg.expected_chain_id_str,
+            expected_environment: rcfg.expected_environment_policy,
+            expected_genesis_hash: &rcfg.expected_genesis_hash,
+        })
         .map_err(|e| {
             // Map verifier failure into the typed marker error so
             // the SIGHUP operator log line names the exact failure
@@ -1421,8 +1411,7 @@ impl LiveReloadController {
         // evidence is deferred to Run 172. MainNet peer-driven apply
         // remains refused at the calling surface regardless of
         // governance proof.
-        let verifier =
-            crate::pqc_governance_authority::fixture_issuer_signature_verifier();
+        let verifier = crate::pqc_governance_authority::fixture_issuer_signature_verifier();
         let decision = crate::pqc_governance_proof_surface::preflight_v2_marker_decision_with_governance_proof_load(
             MarkerAcceptanceV2Inputs {
                 marker_path: marker_cfg.marker_path.as_path(),
@@ -1484,8 +1473,7 @@ fn invoke_run_182_sighup_callsite_onchain_governance_marker_decision(
 ) {
     use crate::pqc_authority_lifecycle::AuthorityTrustDomain;
     use crate::pqc_onchain_governance_callsite_wiring::{
-        sighup_callsite_onchain_governance_marker_decision,
-        OnChainGovernanceCallsiteContext,
+        sighup_callsite_onchain_governance_marker_decision, OnChainGovernanceCallsiteContext,
     };
     use crate::pqc_onchain_governance_proof::EmptyOnChainGovernanceReplaySet;
     use crate::pqc_onchain_governance_proof_surface::onchain_governance_proof_policy_from_cli_or_env;
@@ -1678,9 +1666,7 @@ mod tests {
         EvictionError, EvictionReason, EvictionReport, MockP2pSessionEvictor,
     };
     use crate::pqc_devnet_helper::mint_devnet_root;
-    use crate::pqc_trust_bundle::{
-        build_helper_bundle, HelperBundleMode, TrustBundle,
-    };
+    use crate::pqc_trust_bundle::{build_helper_bundle, HelperBundleMode, TrustBundle};
 
     fn hex_lower(b: &[u8]) -> String {
         let mut s = String::with_capacity(b.len() * 2);
@@ -1733,10 +1719,7 @@ mod tests {
         TrustBundle::load_from_bytes(&bytes, NetworkEnvironment::Devnet, 200).expect("loads")
     }
 
-    fn devnet_config(
-        candidate_path: PathBuf,
-        sequence_path: Option<PathBuf>,
-    ) -> LiveReloadConfig {
+    fn devnet_config(candidate_path: PathBuf, sequence_path: Option<PathBuf>) -> LiveReloadConfig {
         LiveReloadConfig {
             candidate_path,
             environment: NetworkEnvironment::Devnet,
@@ -1813,12 +1796,8 @@ mod tests {
         ));
         let metrics = Arc::new(P2pMetrics::new());
         let mock: Arc<dyn P2pSessionEvictor> = Arc::new(MockP2pSessionEvictor::new(0));
-        let ctl = LiveReloadController::new(
-            live,
-            mock,
-            metrics,
-            devnet_config(dir.join("c.json"), None),
-        );
+        let ctl =
+            LiveReloadController::new(live, mock, metrics, devnet_config(dir.join("c.json"), None));
         let clone = ctl.clone();
         // Flip in_progress through the original; the clone observes
         // the same shared flag.

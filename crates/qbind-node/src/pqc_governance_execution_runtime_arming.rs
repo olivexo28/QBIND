@@ -203,9 +203,9 @@ impl GovernanceExecutionRuntimeArmingConfig {
     pub fn from_cli_or_env(
         cli_value: Option<&str>,
     ) -> Result<Self, GovernanceExecutionPolicySelectorParseError> {
-        Ok(Self::with_policy(governance_execution_policy_from_cli_or_env(
-            cli_value,
-        )?))
+        Ok(Self::with_policy(
+            governance_execution_policy_from_cli_or_env(cli_value)?,
+        ))
     }
 
     /// The resolved [`GovernanceExecutionPolicy`] this runtime config
@@ -474,9 +474,7 @@ impl GovernanceExecutionRuntimeConsumption {
 
     /// Borrow the rejecting Run 213 outcome when this is a
     /// [`Self::FailClosed`] decision.
-    pub fn rejecting_outcome(
-        &self,
-    ) -> Option<&GovernanceExecutionPayloadCarryingDecisionOutcome> {
+    pub fn rejecting_outcome(&self) -> Option<&GovernanceExecutionPayloadCarryingDecisionOutcome> {
         match self {
             Self::FailClosed(o) => Some(o),
             Self::ProceedLegacyBypass | Self::ProceedAccepted(_) => None,

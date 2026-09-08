@@ -23,10 +23,9 @@
 //! - DevNet may use fallback defaults; TestNet/MainNet must have schedule present
 
 use qbind_consensus::slashing::{
-    EvidencePayloadV1, GovernanceSlashingSchedule,
-    InMemorySlashingBackend, OffenseKind, PenaltyDecision, PenaltyEngineConfig,
-    PenaltySlashingContext, PenaltySlashingEngine, SignedBlockHeader,
-    SlashingEvidence, SlashingMode,
+    EvidencePayloadV1, GovernanceSlashingSchedule, InMemorySlashingBackend, OffenseKind,
+    PenaltyDecision, PenaltyEngineConfig, PenaltySlashingContext, PenaltySlashingEngine,
+    SignedBlockHeader, SlashingEvidence, SlashingMode,
 };
 use qbind_consensus::{ValidatorId, ValidatorInfo, ValidatorSet};
 use qbind_types::{MainnetStatus, NetworkEnvironment, ParamRegistry, SlashingPenaltySchedule};
@@ -432,7 +431,7 @@ fn test_d1_o1_penalty_with_governance_schedule() {
     // O1 penalty should apply using governance schedule parameters
 
     let schedule = SlashingPenaltySchedule {
-        slash_bps_o1: 800, // 8% (different from default 7.5%)
+        slash_bps_o1: 800,  // 8% (different from default 7.5%)
         jail_epochs_o1: 15, // 15 epochs (different from default 10)
         ..Default::default()
     };
@@ -465,11 +464,7 @@ fn test_d1_o1_penalty_with_governance_schedule() {
         } => {
             // 1_000_000 * 800 / 10000 = 80_000 (8%)
             assert_eq!(*slashed_amount, 80_000, "slashed amount should be 80_000");
-            assert_eq!(
-                *jailed_until_epoch,
-                Some(20),
-                "jailed until epoch 5+15=20"
-            );
+            assert_eq!(*jailed_until_epoch, Some(20), "jailed until epoch 5+15=20");
         }
         _ => panic!("Expected PenaltyApplied"),
     }

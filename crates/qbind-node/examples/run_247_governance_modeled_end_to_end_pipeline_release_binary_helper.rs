@@ -341,7 +341,11 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
         let mut state = ModeledGovernanceTrustState::new();
         let mut applier = devnet_applier();
         let d = drive(&input, &c.expectations, &mut state, &mut applier);
-        t.check_outcome("A1.outcome", "proceed-legacy-bypass-no-mutation", &d.outcome);
+        t.check_outcome(
+            "A1.outcome",
+            "proceed-legacy-bypass-no-mutation",
+            &d.outcome,
+        );
         t.assert_true("A1.no-consume", d.outcome.no_consume());
         t.assert_true("A1.no-applier", !d.applier_invoked());
         t.assert_true("A1.attempts-zero", applier.attempts() == 0);
@@ -361,7 +365,11 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
         let mut state = ModeledGovernanceTrustState::new();
         let mut applier = devnet_applier();
         let d = drive(&input, &c.expectations, &mut state, &mut applier);
-        t.check_outcome("A2.outcome", "proceed-legacy-bypass-no-mutation", &d.outcome);
+        t.check_outcome(
+            "A2.outcome",
+            "proceed-legacy-bypass-no-mutation",
+            &d.outcome,
+        );
         t.assert_true("A2.no-applier", !d.applier_invoked());
         t.assert_true("A2.attempts-zero", applier.attempts() == 0);
         t.assert_true("A2.state-empty", state.is_empty());
@@ -380,7 +388,10 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
             &d.outcome,
         );
         t.assert_true("A3.authorizes-consume", d.authorizes_durable_consume());
-        t.assert_true("A3.decision-authorized", d.durable_consume_decision.authorized);
+        t.assert_true(
+            "A3.decision-authorized",
+            d.durable_consume_decision.authorized,
+        );
         t.assert_true("A3.applier-invoked", d.applier_invoked());
         t.assert_true("A3.attempts-one", applier.attempts() == 1);
         t.assert_true("A3.state-active", state.contains_active(ROOT));
@@ -435,7 +446,10 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
             "modeled-applier-applied-and-durable-consume-authorized",
             &d.outcome,
         );
-        t.assert_true(&format!("{id}.authorizes-consume"), d.authorizes_durable_consume());
+        t.assert_true(
+            &format!("{id}.authorizes-consume"),
+            d.authorizes_durable_consume(),
+        );
         t.assert_true(&format!("{id}.applier-invoked"), d.applier_invoked());
     }
 
@@ -470,7 +484,11 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
         let mut state = ModeledGovernanceTrustState::new();
         let mut applier = ProductionModeledTrustMutationApplier::default();
         let d = run_modeled_end_to_end_pipeline(&input, &c.expectations, &mut state, &mut applier);
-        t.check_outcome("A9.outcome", "production-unavailable-no-consume", &d.outcome);
+        t.check_outcome(
+            "A9.outcome",
+            "production-unavailable-no-consume",
+            &d.outcome,
+        );
         t.assert_true("A9.no-consume", d.outcome.no_consume());
         t.assert_true("A9.no-applier", !d.applier_invoked());
     }
@@ -569,7 +587,8 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
         let mut state = ModeledGovernanceTrustState::new();
         let mut applier = devnet_applier();
         let exec = DefaultGovernanceModeledEndToEndPipelineExecutor;
-        let d = exec.run_modeled_end_to_end_pipeline(&input, &c.expectations, &mut state, &mut applier);
+        let d =
+            exec.run_modeled_end_to_end_pipeline(&input, &c.expectations, &mut state, &mut applier);
         t.check_outcome(
             "A14.outcome",
             "modeled-applier-applied-and-durable-consume-authorized",
@@ -608,12 +627,7 @@ fn engine_reject(t: &mut Table, id: &str, mutate: impl FnOnce(&mut Ctx)) {
 }
 
 /// Helper: a rejecting replay observation that must never reach mutation/applier.
-fn replay_reject(
-    t: &mut Table,
-    id: &str,
-    replay: DurableReplayObservation,
-    expected: &str,
-) {
+fn replay_reject(t: &mut Table, id: &str, replay: DurableReplayObservation, expected: &str) {
     let c = devnet_ctx(ModeledTrustMutationAction::AddTrustRoot);
     let input = c.pipeline_input(
         GovernanceModeledEndToEndPipelinePolicy::wired(),
@@ -627,7 +641,10 @@ fn replay_reject(
     let d = drive(&input, &c.expectations, &mut state, &mut applier);
     t.check_outcome(&format!("{id}.outcome"), expected, &d.outcome);
     t.assert_true(&format!("{id}.no-consume"), d.outcome.no_consume());
-    t.assert_true(&format!("{id}.before-mutation-engine"), d.mutation_engine.is_none());
+    t.assert_true(
+        &format!("{id}.before-mutation-engine"),
+        d.mutation_engine.is_none(),
+    );
     t.assert_true(&format!("{id}.attempts-zero"), applier.attempts() == 0);
     t.assert_true(&format!("{id}.state-empty"), state.is_empty());
 }
@@ -676,15 +693,23 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
         let mut state = ModeledGovernanceTrustState::new();
         let mut applier = devnet_applier();
         let d = drive(&input, &c.expectations, &mut state, &mut applier);
-        t.check_outcome("B2.outcome", "proceed-legacy-bypass-no-mutation", &d.outcome);
+        t.check_outcome(
+            "B2.outcome",
+            "proceed-legacy-bypass-no-mutation",
+            &d.outcome,
+        );
         t.assert_true("B2.no-consume", d.outcome.no_consume());
         t.assert_true("B2.attempts-zero", applier.attempts() == 0);
     }
 
     // B3..B13 — binding mismatches rejected before snapshot at the mutation-engine gate.
-    engine_reject(&mut t, "B3", |c| c.env.environment = TrustBundleEnvironment::Testnet);
+    engine_reject(&mut t, "B3", |c| {
+        c.env.environment = TrustBundleEnvironment::Testnet
+    });
     engine_reject(&mut t, "B4", |c| c.env.chain_id = "qbind-other".to_string());
-    engine_reject(&mut t, "B5", |c| c.env.genesis_hash = "genesis-wrong".to_string());
+    engine_reject(&mut t, "B5", |c| {
+        c.env.genesis_hash = "genesis-wrong".to_string()
+    });
     engine_reject(&mut t, "B6", |c| {
         c.runtime.governance_surface = GovernanceExecutionRuntimeSurface::Sighup
     });
@@ -741,13 +766,48 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
     }
 
     // B16..B20 — replay rejections cannot reach mutation or consume.
-    replay_reject(&mut t, "B16", DurableReplayObservation::StaleOrExpired, "replay-stale-or-expired-no-consume");
-    replay_reject(&mut t, "B17", DurableReplayObservation::Consumed, "replay-consumed-no-consume");
-    replay_reject(&mut t, "B18", DurableReplayObservation::Superseded, "replay-superseded-no-consume");
-    replay_reject(&mut t, "B19", DurableReplayObservation::BackendUnavailable, "backend-unavailable-no-consume");
-    replay_reject(&mut t, "B20", DurableReplayObservation::DeferredOrReadOnly, "durable-replay-rejected-before-mutation");
-    replay_reject(&mut t, "B21", DurableReplayObservation::ProductionUnavailable, "production-unavailable-no-consume");
-    replay_reject(&mut t, "B22", DurableReplayObservation::MainNetUnavailable, "mainnet-unavailable-no-consume");
+    replay_reject(
+        &mut t,
+        "B16",
+        DurableReplayObservation::StaleOrExpired,
+        "replay-stale-or-expired-no-consume",
+    );
+    replay_reject(
+        &mut t,
+        "B17",
+        DurableReplayObservation::Consumed,
+        "replay-consumed-no-consume",
+    );
+    replay_reject(
+        &mut t,
+        "B18",
+        DurableReplayObservation::Superseded,
+        "replay-superseded-no-consume",
+    );
+    replay_reject(
+        &mut t,
+        "B19",
+        DurableReplayObservation::BackendUnavailable,
+        "backend-unavailable-no-consume",
+    );
+    replay_reject(
+        &mut t,
+        "B20",
+        DurableReplayObservation::DeferredOrReadOnly,
+        "durable-replay-rejected-before-mutation",
+    );
+    replay_reject(
+        &mut t,
+        "B21",
+        DurableReplayObservation::ProductionUnavailable,
+        "production-unavailable-no-consume",
+    );
+    replay_reject(
+        &mut t,
+        "B22",
+        DurableReplayObservation::MainNetUnavailable,
+        "mainnet-unavailable-no-consume",
+    );
 
     // B23 — consume before modeled applier success is rejected (apply failed).
     {
@@ -756,7 +816,11 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
         let mut state = ModeledGovernanceTrustState::new();
         let mut applier = devnet_applier_fault(ModeledApplierFault::ApplyFailedBeforeMutation);
         let d = drive(&input, &c.expectations, &mut state, &mut applier);
-        t.check_outcome("B23.outcome", "modeled-applier-apply-failed-no-consume", &d.outcome);
+        t.check_outcome(
+            "B23.outcome",
+            "modeled-applier-apply-failed-no-consume",
+            &d.outcome,
+        );
         t.assert_true("B23.no-consume", d.outcome.no_consume());
         t.assert_true("B23.applier-invoked", d.applier_invoked());
         t.assert_true("B23.state-empty", state.is_empty());
@@ -769,7 +833,11 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
         let mut state = ModeledGovernanceTrustState::new();
         let mut applier = devnet_applier_fault(ModeledApplierFault::ApplyFailedRolledBack);
         let d = drive(&input, &c.expectations, &mut state, &mut applier);
-        t.check_outcome("B24.outcome", "modeled-applier-rolled-back-no-consume", &d.outcome);
+        t.check_outcome(
+            "B24.outcome",
+            "modeled-applier-rolled-back-no-consume",
+            &d.outcome,
+        );
         t.assert_true("B24.no-consume", d.outcome.no_consume());
         t.assert_true("B24.state-empty", state.is_empty());
     }
@@ -976,7 +1044,11 @@ fn run_recovery_table(out: &Path) -> (u64, u64) {
             &input2,
             &ModeledTrustMutationOutcome::ModeledMutationApplied,
         );
-        t.check_outcome("C8.outcome", "mainnet-peer-driven-apply-refused-no-consume", &o);
+        t.check_outcome(
+            "C8.outcome",
+            "mainnet-peer-driven-apply-refused-no-consume",
+            &o,
+        );
     }
 
     t.finish(out)
@@ -1074,7 +1146,10 @@ fn run_projection_table(out: &Path) -> (u64, u64) {
 
     // D6 — validator-set rotation / policy-change unsupported do not consume.
     for (id, action) in [
-        ("D6a", ModeledTrustMutationAction::ValidatorSetRotationUnsupported),
+        (
+            "D6a",
+            ModeledTrustMutationAction::ValidatorSetRotationUnsupported,
+        ),
         ("D6b", ModeledTrustMutationAction::PolicyChangeUnsupported),
     ] {
         let c = devnet_ctx(action);
@@ -1108,7 +1183,11 @@ fn run_stage_ordering_table(out: &Path) -> (u64, u64) {
         let mut state = ModeledGovernanceTrustState::new();
         let mut applier = devnet_applier();
         let d = drive(&input, &c.expectations, &mut state, &mut applier);
-        t.check_outcome("E1.outcome", "mainnet-peer-driven-apply-refused-no-consume", &d.outcome);
+        t.check_outcome(
+            "E1.outcome",
+            "mainnet-peer-driven-apply-refused-no-consume",
+            &d.outcome,
+        );
         t.assert_true("E1.no-mutation-engine", d.mutation_engine.is_none());
         t.assert_true("E1.no-applier", !d.applier_invoked());
         t.assert_true("E1.attempts-zero", applier.attempts() == 0);
@@ -1183,7 +1262,10 @@ fn run_stage_ordering_table(out: &Path) -> (u64, u64) {
         let mut applier = devnet_applier_fault(fault);
         let d = drive(&input, &c.expectations, &mut state, &mut applier);
         t.assert_true(&format!("{id}.applier-invoked"), d.applier_invoked());
-        t.assert_true(&format!("{id}.no-consume"), !d.durable_consume_decision.authorized);
+        t.assert_true(
+            &format!("{id}.no-consume"),
+            !d.durable_consume_decision.authorized,
+        );
     }
 
     // E6 — modeled applier success is evaluated before durable consume authorization.
@@ -1194,7 +1276,10 @@ fn run_stage_ordering_table(out: &Path) -> (u64, u64) {
         let mut applier = devnet_applier();
         let d = drive(&input, &c.expectations, &mut state, &mut applier);
         t.assert_true("E6.applier-invoked", d.applier_invoked());
-        t.assert_true("E6.consume-authorized", d.durable_consume_decision.authorized);
+        t.assert_true(
+            "E6.consume-authorized",
+            d.durable_consume_decision.authorized,
+        );
         t.assert_true(
             "E6.modeled-applier-stage-present",
             d.modeled_applier.is_some(),
@@ -1216,7 +1301,10 @@ fn run_non_mutation_table(out: &Path) -> (u64, u64) {
         "F1.rejection-non-mutating",
         modeled_end_to_end_pipeline_rejection_is_non_mutating(),
     );
-    t.assert_true("F1.never-run-070", modeled_end_to_end_pipeline_never_calls_run_070());
+    t.assert_true(
+        "F1.never-run-070",
+        modeled_end_to_end_pipeline_never_calls_run_070(),
+    );
     t.assert_true(
         "F1.never-mutates-live",
         modeled_end_to_end_pipeline_never_mutates_live_pqc_trust_state(),
@@ -1311,7 +1399,10 @@ fn run_reachability_table(out: &Path) -> (u64, u64) {
         "G.rejection-non-mutating",
         modeled_end_to_end_pipeline_rejection_is_non_mutating(),
     );
-    t.assert_true("G.never-calls-run-070", modeled_end_to_end_pipeline_never_calls_run_070());
+    t.assert_true(
+        "G.never-calls-run-070",
+        modeled_end_to_end_pipeline_never_calls_run_070(),
+    );
     t.assert_true(
         "G.never-mutates-live",
         modeled_end_to_end_pipeline_never_mutates_live_pqc_trust_state(),
@@ -1469,12 +1560,30 @@ fn run_fixture_dump(out: &Path) {
     // Recovery window classifications.
     let mut windows = String::new();
     for (label, modeled) in [
-        ("after-report-success", ModeledTrustMutationOutcome::ModeledMutationApplied),
-        ("rolled-back", ModeledTrustMutationOutcome::ModeledMutationRolledBack),
-        ("apply-failed", ModeledTrustMutationOutcome::ModeledMutationApplyFailed),
-        ("ambiguous", ModeledTrustMutationOutcome::ModeledMutationAmbiguousFailClosed),
-        ("rollback-failed", ModeledTrustMutationOutcome::ModeledMutationRollbackFailedFatal),
-        ("not-attempted", ModeledTrustMutationOutcome::ModeledMutationNotAttempted),
+        (
+            "after-report-success",
+            ModeledTrustMutationOutcome::ModeledMutationApplied,
+        ),
+        (
+            "rolled-back",
+            ModeledTrustMutationOutcome::ModeledMutationRolledBack,
+        ),
+        (
+            "apply-failed",
+            ModeledTrustMutationOutcome::ModeledMutationApplyFailed,
+        ),
+        (
+            "ambiguous",
+            ModeledTrustMutationOutcome::ModeledMutationAmbiguousFailClosed,
+        ),
+        (
+            "rollback-failed",
+            ModeledTrustMutationOutcome::ModeledMutationRollbackFailedFatal,
+        ),
+        (
+            "not-attempted",
+            ModeledTrustMutationOutcome::ModeledMutationNotAttempted,
+        ),
     ] {
         let o = recover_modeled_end_to_end_pipeline_window(&input, &modeled);
         windows.push_str(&format!("{label}={}\n", o.tag()));

@@ -134,8 +134,7 @@ fn build_signed_devnet_bundle(
         activation_epoch: bundle_act_e,
         activation_height: None,
     };
-    let sig =
-        sign_bundle_devnet_helper(&bundle, h.signing_key_id, &h.signing_sk).expect("sign");
+    let sig = sign_bundle_devnet_helper(&bundle, h.signing_key_id, &h.signing_sk).expect("sign");
     bundle.signature = Some(sig);
     bundle
 }
@@ -326,7 +325,10 @@ fn run098_bundle_with_activation_epoch_rejects_when_no_storage_handle_at_all() {
     let err = check_bundle_activation(&b, ctx).expect_err("unavailable epoch rejected");
     assert!(matches!(
         err,
-        TrustBundleActivationError::CurrentEpochUnavailable { required_epoch: 3, .. }
+        TrustBundleActivationError::CurrentEpochUnavailable {
+            required_epoch: 3,
+            ..
+        }
     ));
 }
 
@@ -387,7 +389,10 @@ fn run098_old_snapshot_without_epoch_still_rejects_activation_epoch() {
     let err = check_bundle_activation(&b, ctx).expect_err("unavailable epoch rejected");
     assert!(matches!(
         err,
-        TrustBundleActivationError::CurrentEpochUnavailable { required_epoch: 3, .. }
+        TrustBundleActivationError::CurrentEpochUnavailable {
+            required_epoch: 3,
+            ..
+        }
     ));
 }
 

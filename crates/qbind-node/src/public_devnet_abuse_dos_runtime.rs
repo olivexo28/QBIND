@@ -269,11 +269,15 @@ mod tests {
 
     #[test]
     fn enabled_profile_refuses_over_budget() {
-        let cfg =
-            PublicDevnetAbuseDosRuntimeConfig::from_config(AbuseDosConfig::public_devnet_recommended())
-                .unwrap();
+        let cfg = PublicDevnetAbuseDosRuntimeConfig::from_config(
+            AbuseDosConfig::public_devnet_recommended(),
+        )
+        .unwrap();
         assert!(cfg.connection_limiter_enabled());
-        assert_eq!(cfg.config().profile, AbuseDosProfile::PublicDevnetRecommended);
+        assert_eq!(
+            cfg.config().profile,
+            AbuseDosProfile::PublicDevnetRecommended
+        );
         let state = cfg.into_runtime_state(None).unwrap();
         // Capacity = max_per_window (20) + burst (10) = 30 global tokens at t0.
         let now = Instant::now();

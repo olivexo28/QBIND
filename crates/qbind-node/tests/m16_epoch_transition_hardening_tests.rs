@@ -249,7 +249,10 @@ fn m16_b2_failed_transition_invisible_after_restart() {
         storage.verify_epoch_consistency_on_startup().unwrap();
 
         assert_eq!(storage.get_current_epoch().unwrap(), Some(5));
-        assert_eq!(storage.get_last_committed().unwrap(), Some(make_block_id(10)));
+        assert_eq!(
+            storage.get_last_committed().unwrap(),
+            Some(make_block_id(10))
+        );
         assert!(storage.get_block(&block_id).unwrap().is_none());
     }
 }
@@ -382,7 +385,10 @@ fn m16_d2_successful_transition_clears_marker() {
     storage.write_epoch_transition_marker(&marker).unwrap();
 
     // Verify marker exists
-    assert!(storage.check_for_incomplete_epoch_transition().unwrap().is_some());
+    assert!(storage
+        .check_for_incomplete_epoch_transition()
+        .unwrap()
+        .is_some());
 
     // Now apply the atomic transition (which clears the marker)
     let block = make_reconfig_proposal(1500, 15, 16);
@@ -393,7 +399,10 @@ fn m16_d2_successful_transition_clears_marker() {
     storage.apply_epoch_transition_atomic(batch).unwrap();
 
     // Verify marker is cleared
-    assert!(storage.check_for_incomplete_epoch_transition().unwrap().is_none());
+    assert!(storage
+        .check_for_incomplete_epoch_transition()
+        .unwrap()
+        .is_none());
 
     // Verify consistency check passes
     storage.verify_epoch_consistency_on_startup().unwrap();
@@ -445,7 +454,10 @@ fn m16_e1_fresh_database_no_incomplete_transition() {
     let storage = RocksDbConsensusStorage::open(temp_dir.path()).unwrap();
 
     // Fresh DB should have no marker
-    assert!(storage.check_for_incomplete_epoch_transition().unwrap().is_none());
+    assert!(storage
+        .check_for_incomplete_epoch_transition()
+        .unwrap()
+        .is_none());
 
     // Consistency check should pass
     storage.verify_epoch_consistency_on_startup().unwrap();
@@ -499,13 +511,19 @@ fn m16_e4_test_clear_marker_method() {
     storage.write_epoch_transition_marker(&marker).unwrap();
 
     // Verify marker exists
-    assert!(storage.check_for_incomplete_epoch_transition().unwrap().is_some());
+    assert!(storage
+        .check_for_incomplete_epoch_transition()
+        .unwrap()
+        .is_some());
 
     // Clear it using test helper
     storage.clear_epoch_transition_marker().unwrap();
 
     // Verify marker is gone
-    assert!(storage.check_for_incomplete_epoch_transition().unwrap().is_none());
+    assert!(storage
+        .check_for_incomplete_epoch_transition()
+        .unwrap()
+        .is_none());
 }
 
 // ============================================================================

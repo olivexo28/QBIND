@@ -379,19 +379,15 @@ mod tests {
     // ========================================================================
 
     fn pqc_crypto_provider() -> Arc<StaticCryptoProvider> {
-        Arc::new(
-            StaticCryptoProvider::new()
-                .with_signature_suite(Arc::new(MlDsa44SignatureSuite::new(
-                    PQC_TRANSPORT_SUITE_ML_DSA_44,
-                ))),
-        )
+        Arc::new(StaticCryptoProvider::new().with_signature_suite(Arc::new(
+            MlDsa44SignatureSuite::new(PQC_TRANSPORT_SUITE_ML_DSA_44),
+        )))
     }
 
     #[test]
     fn helper_default_cert_is_currently_valid() {
         let root = mint_devnet_root().expect("root");
-        let spec =
-            LeafCertSpec::currently_valid([7u8; 32], root.root_key_id, mock_leaf_kem_pk());
+        let spec = LeafCertSpec::currently_valid([7u8; 32], root.root_key_id, mock_leaf_kem_pk());
         assert_eq!(spec.not_before, 0);
         assert_eq!(spec.not_after, u64::MAX);
         let cert = issue_leaf_delegation_cert(&spec, &root.root_sk).expect("issue");
@@ -403,8 +399,7 @@ mod tests {
     #[test]
     fn helper_can_create_expired_cert_that_fails_closed() {
         let root = mint_devnet_root().expect("root");
-        let spec =
-            LeafCertSpec::expired_for_test([7u8; 32], root.root_key_id, mock_leaf_kem_pk());
+        let spec = LeafCertSpec::expired_for_test([7u8; 32], root.root_key_id, mock_leaf_kem_pk());
         let cert = issue_leaf_delegation_cert(&spec, &root.root_sk).expect("issue");
         // Real signature MUST still verify against the digest preimage
         // (validity fields are signature-covered).
@@ -414,8 +409,8 @@ mod tests {
         qbind_net::verify_delegation_cert_at(provider.as_ref(), &cert, &root.root_pk, 1)
             .expect("expired cert verifies at validation_time within window");
         // Under wall-clock, it must fail closed as expired.
-        let err = qbind_net::verify_delegation_cert(provider.as_ref(), &cert, &root.root_pk)
-            .unwrap_err();
+        let err =
+            qbind_net::verify_delegation_cert(provider.as_ref(), &cert, &root.root_pk).unwrap_err();
         assert!(
             matches!(err, qbind_net::NetError::ClientCertInvalid("cert expired")),
             "got {:?}",
@@ -426,26 +421,21 @@ mod tests {
     #[test]
     fn helper_can_create_not_yet_valid_cert_that_fails_closed() {
         let root = mint_devnet_root().expect("root");
-        let spec = LeafCertSpec::not_yet_valid_for_test(
-            [7u8; 32],
-            root.root_key_id,
-            mock_leaf_kem_pk(),
-        );
+        let spec =
+            LeafCertSpec::not_yet_valid_for_test([7u8; 32], root.root_key_id, mock_leaf_kem_pk());
         let cert = issue_leaf_delegation_cert(&spec, &root.root_sk).expect("issue");
         let provider = pqc_crypto_provider();
         // Inside future window: passes.
-        qbind_net::verify_delegation_cert_at(
-            provider.as_ref(),
-            &cert,
-            &root.root_pk,
-            u64::MAX,
-        )
-        .expect("not-yet-valid cert verifies at validation_time inside future window");
+        qbind_net::verify_delegation_cert_at(provider.as_ref(), &cert, &root.root_pk, u64::MAX)
+            .expect("not-yet-valid cert verifies at validation_time inside future window");
         // Wall-clock: fails closed.
-        let err = qbind_net::verify_delegation_cert(provider.as_ref(), &cert, &root.root_pk)
-            .unwrap_err();
+        let err =
+            qbind_net::verify_delegation_cert(provider.as_ref(), &cert, &root.root_pk).unwrap_err();
         assert!(
-            matches!(err, qbind_net::NetError::ClientCertInvalid("cert not yet valid")),
+            matches!(
+                err,
+                qbind_net::NetError::ClientCertInvalid("cert not yet valid")
+            ),
             "got {:?}",
             err
         );
@@ -526,7 +516,10 @@ mod tests {
         )
         .unwrap_err();
         assert!(
-            matches!(err, qbind_net::NetError::KeySchedule("signature verify error")),
+            matches!(
+                err,
+                qbind_net::NetError::KeySchedule("signature verify error")
+            ),
             "got {:?}",
             err
         );

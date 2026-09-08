@@ -80,7 +80,8 @@ use crate::pqc_governance_modeled_trust_mutation_applier::{
     ModeledGovernanceTrustMutation, ModeledGovernanceTrustMutationApplier,
     ModeledGovernanceTrustMutationEnvironmentBinding, ModeledGovernanceTrustMutationExpectations,
     ModeledGovernanceTrustMutationInput, ModeledGovernanceTrustMutationRuntimeBinding,
-    ModeledGovernanceTrustMutationSurface, ModeledGovernanceTrustState, ModeledTrustMutationOutcome,
+    ModeledGovernanceTrustMutationSurface, ModeledGovernanceTrustState,
+    ModeledTrustMutationOutcome,
 };
 use crate::pqc_trust_bundle::TrustBundleEnvironment;
 
@@ -116,8 +117,7 @@ pub type GovernanceModeledEndToEndPipelineCandidate = ModeledGovernanceTrustMuta
 ///
 /// A type alias over the Run 244 expectations; the pipeline reuses the Run 244
 /// binding-validation contract verbatim.
-pub type GovernanceModeledEndToEndPipelineExpectations =
-    ModeledGovernanceTrustMutationExpectations;
+pub type GovernanceModeledEndToEndPipelineExpectations = ModeledGovernanceTrustMutationExpectations;
 
 /// Run 246 — the Run 244 modeled mutation binding (candidate + environment +
 /// runtime) the pipeline carries into the mutation-engine / applier stage.
@@ -246,7 +246,9 @@ impl DurableReplayObservation {
             DurableReplayRuntimeOutcome::ProceedDeferredObserved
             | DurableReplayRuntimeOutcome::ProceedFreshObserved
             | DurableReplayRuntimeOutcome::ProceedKnownFresh => Self::DeferredOrReadOnly,
-            DurableReplayRuntimeOutcome::ProductionDurableUnavailable => Self::ProductionUnavailable,
+            DurableReplayRuntimeOutcome::ProductionDurableUnavailable => {
+                Self::ProductionUnavailable
+            }
             DurableReplayRuntimeOutcome::MainNetDurableUnavailable => Self::MainNetUnavailable,
             DurableReplayRuntimeOutcome::MainNetPeerDrivenApplyRefused => {
                 Self::MainNetPeerDrivenApplyRefused
@@ -602,8 +604,7 @@ pub struct GovernanceModeledEndToEndPipelineDecision {
 impl GovernanceModeledEndToEndPipelineDecision {
     /// `true` iff the decision authorizes a durable consume.
     pub fn authorizes_durable_consume(&self) -> bool {
-        self.outcome.authorizes_durable_consume()
-            && self.durable_consume_decision.authorized
+        self.outcome.authorizes_durable_consume() && self.durable_consume_decision.authorized
     }
 
     /// `true` iff the modeled applier was invoked.
@@ -644,7 +645,9 @@ pub trait GovernanceModeledEndToEndPipelineExecutor {
 #[derive(Debug, Clone, Copy, Default)]
 pub struct DefaultGovernanceModeledEndToEndPipelineExecutor;
 
-impl GovernanceModeledEndToEndPipelineExecutor for DefaultGovernanceModeledEndToEndPipelineExecutor {
+impl GovernanceModeledEndToEndPipelineExecutor
+    for DefaultGovernanceModeledEndToEndPipelineExecutor
+{
     fn run_modeled_end_to_end_pipeline<A>(
         &self,
         input: &GovernanceModeledEndToEndPipelineInput<'_>,

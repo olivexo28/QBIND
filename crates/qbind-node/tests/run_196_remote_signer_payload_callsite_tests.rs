@@ -64,11 +64,9 @@ const KEY_A: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const KEY_B: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 const ROOT_FP: &str = "1111111111111111111111111111111111111111";
 const CHAIN_ID: &str = "0000000000000001";
-const GENESIS_HASH: &str =
-    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+const GENESIS_HASH: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const DIGEST_2: &str = "2222222222222222222222222222222222222222222222222222222222222222";
-const PRIOR_DIGEST: &str =
-    "1111111111111111111111111111111111111111111111111111111111111111";
+const PRIOR_DIGEST: &str = "1111111111111111111111111111111111111111111111111111111111111111";
 const CUSTODY_ATTEST_DIGEST: &str = "custody-att-digest-196";
 const CUSTODY_KEY_ID: &str = "custody-key-id-196";
 const SIGNER_ID: &str = "remote-signer-196";
@@ -81,7 +79,13 @@ const FRESH: u64 = 1_699_999_900;
 const EXPIRES: u64 = 1_700_001_000;
 
 fn domain(env: TrustBundleEnvironment) -> AuthorityTrustDomain {
-    AuthorityTrustDomain::new(env, CHAIN_ID, GENESIS_HASH, ROOT_FP, PQC_LIFECYCLE_SUITE_ML_DSA_44)
+    AuthorityTrustDomain::new(
+        env,
+        CHAIN_ID,
+        GENESIS_HASH,
+        ROOT_FP,
+        PQC_LIFECYCLE_SUITE_ML_DSA_44,
+    )
 }
 
 fn rotate_candidate(env: TrustBundleEnvironment) -> PersistentAuthorityStateRecordV2 {
@@ -252,10 +256,7 @@ struct Ctx {
     expected: RemoteSignerExpectations,
 }
 
-fn ctx_for(
-    env: TrustBundleEnvironment,
-    custody_class: AuthorityCustodyClass,
-) -> Ctx {
+fn ctx_for(env: TrustBundleEnvironment, custody_class: AuthorityCustodyClass) -> Ctx {
     Ctx {
         custody: custody_attestation(env, custody_class),
         candidate: rotate_candidate(env),
@@ -475,10 +476,10 @@ fn make_v2_sidecar_value(
     );
     let mut value = serde_json::to_value(&v2).expect("ratification serializes");
     if let Some(p) = remote_signer_sibling {
-        value
-            .as_object_mut()
-            .unwrap()
-            .insert(REMOTE_SIGNER_ATTESTATION_PAYLOAD_SIBLING_FIELD.to_string(), p);
+        value.as_object_mut().unwrap().insert(
+            REMOTE_SIGNER_ATTESTATION_PAYLOAD_SIBLING_FIELD.to_string(),
+            p,
+        );
     }
     value
 }
@@ -518,8 +519,15 @@ fn loader_v2_sidecar_with_remote_signer_sibling_yields_available() {
 
 #[test]
 fn a1_no_remote_signer_payload_compatible_under_default_disabled() {
-    let c = ctx_for(TrustBundleEnvironment::Devnet, AuthorityCustodyClass::FixtureLocalKey);
-    let ctx = ctx_view(&c, AuthorityCustodyPolicy::Disabled, RemoteSignerPolicy::default());
+    let c = ctx_for(
+        TrustBundleEnvironment::Devnet,
+        AuthorityCustodyClass::FixtureLocalKey,
+    );
+    let ctx = ctx_view(
+        &c,
+        AuthorityCustodyPolicy::Disabled,
+        RemoteSignerPolicy::default(),
+    );
     let loaded = RemoteSignerLoadStatus::Absent;
     let outcome =
         route_loaded_remote_signer_attestation_to_reload_check_callsite_decision(&ctx, &loaded);
@@ -534,7 +542,10 @@ fn a1_no_remote_signer_payload_compatible_under_default_disabled() {
 
 #[test]
 fn a2_devnet_fixture_loopback_carried_through_reload_check_accepted() {
-    let c = ctx_for(TrustBundleEnvironment::Devnet, AuthorityCustodyClass::FixtureLocalKey);
+    let c = ctx_for(
+        TrustBundleEnvironment::Devnet,
+        AuthorityCustodyClass::FixtureLocalKey,
+    );
     let ctx = ctx_view(
         &c,
         AuthorityCustodyPolicy::DevnetLocalAllowed,
@@ -552,7 +563,10 @@ fn a2_devnet_fixture_loopback_carried_through_reload_check_accepted() {
 
 #[test]
 fn a3_testnet_fixture_loopback_carried_through_reload_check_accepted() {
-    let c = ctx_for(TrustBundleEnvironment::Testnet, AuthorityCustodyClass::FixtureLocalKey);
+    let c = ctx_for(
+        TrustBundleEnvironment::Testnet,
+        AuthorityCustodyClass::FixtureLocalKey,
+    );
     let ctx = ctx_view(
         &c,
         AuthorityCustodyPolicy::TestnetLocalAllowed,
@@ -566,7 +580,10 @@ fn a3_testnet_fixture_loopback_carried_through_reload_check_accepted() {
 
 #[test]
 fn a4_devnet_fixture_loopback_carried_through_reload_apply_accepted() {
-    let c = ctx_for(TrustBundleEnvironment::Devnet, AuthorityCustodyClass::FixtureLocalKey);
+    let c = ctx_for(
+        TrustBundleEnvironment::Devnet,
+        AuthorityCustodyClass::FixtureLocalKey,
+    );
     let ctx = ctx_view(
         &c,
         AuthorityCustodyPolicy::DevnetLocalAllowed,
@@ -580,7 +597,10 @@ fn a4_devnet_fixture_loopback_carried_through_reload_apply_accepted() {
 
 #[test]
 fn a6_custody_class_remote_signer_routes_to_remote_signer_boundary() {
-    let c = ctx_for(TrustBundleEnvironment::Devnet, AuthorityCustodyClass::RemoteSigner);
+    let c = ctx_for(
+        TrustBundleEnvironment::Devnet,
+        AuthorityCustodyClass::RemoteSigner,
+    );
     let ctx = ctx_view(
         &c,
         AuthorityCustodyPolicy::DevnetLocalAllowed,
@@ -600,16 +620,20 @@ fn a6_custody_class_remote_signer_routes_to_remote_signer_boundary() {
 
 #[test]
 fn a7_combined_lifecycle_governance_custody_fixture_remote_signer_accepted_devnet() {
-    let c = ctx_for(TrustBundleEnvironment::Devnet, AuthorityCustodyClass::FixtureLocalKey);
+    let c = ctx_for(
+        TrustBundleEnvironment::Devnet,
+        AuthorityCustodyClass::FixtureLocalKey,
+    );
     let ctx = ctx_view(
         &c,
         AuthorityCustodyPolicy::DevnetLocalAllowed,
         RemoteSignerPolicy::FixtureLoopbackAllowed,
     );
     let loaded = available_via_wire(&parts(TrustBundleEnvironment::Devnet));
-    let outcome = route_loaded_remote_signer_attestation_to_startup_p2p_trust_bundle_callsite_decision(
-        &ctx, &loaded,
-    );
+    let outcome =
+        route_loaded_remote_signer_attestation_to_startup_p2p_trust_bundle_callsite_decision(
+            &ctx, &loaded,
+        );
     assert!(outcome.is_accept(), "expected accept, got {outcome:?}");
 }
 
@@ -624,7 +648,10 @@ fn a8_governance_classes_unchanged_when_remote_signer_policy_disabled() {
         GovernanceAuthorityClass::EmergencyCouncil,
         GovernanceAuthorityClass::OnChainGovernance,
     ] {
-        let c = ctx_for(TrustBundleEnvironment::Devnet, AuthorityCustodyClass::FixtureLocalKey);
+        let c = ctx_for(
+            TrustBundleEnvironment::Devnet,
+            AuthorityCustodyClass::FixtureLocalKey,
+        );
         let ctx = callsite_context_for_remote_signer(
             &c.custody,
             Some(&c.prior),
@@ -657,7 +684,11 @@ fn a9_other_custody_paths_compatible_with_remote_signer_absent() {
         AuthorityCustodyClass::Hsm,
     ] {
         let c = ctx_for(TrustBundleEnvironment::Devnet, class);
-        let ctx = ctx_view(&c, AuthorityCustodyPolicy::Disabled, RemoteSignerPolicy::Disabled);
+        let ctx = ctx_view(
+            &c,
+            AuthorityCustodyPolicy::Disabled,
+            RemoteSignerPolicy::Disabled,
+        );
         let outcome = route_loaded_remote_signer_attestation_to_reload_check_callsite_decision(
             &ctx,
             &RemoteSignerLoadStatus::Absent,
@@ -668,7 +699,10 @@ fn a9_other_custody_paths_compatible_with_remote_signer_absent() {
 
 #[test]
 fn a10_production_remote_signer_reaches_boundary_and_is_unavailable() {
-    let c = ctx_for(TrustBundleEnvironment::Devnet, AuthorityCustodyClass::FixtureLocalKey);
+    let c = ctx_for(
+        TrustBundleEnvironment::Devnet,
+        AuthorityCustodyClass::FixtureLocalKey,
+    );
     let ctx = ctx_view(
         &c,
         AuthorityCustodyPolicy::DevnetLocalAllowed,
@@ -695,7 +729,10 @@ fn a10_production_remote_signer_reaches_boundary_and_is_unavailable() {
 
 #[test]
 fn r1_absent_where_policy_requires_fails_closed() {
-    let c = ctx_for(TrustBundleEnvironment::Devnet, AuthorityCustodyClass::FixtureLocalKey);
+    let c = ctx_for(
+        TrustBundleEnvironment::Devnet,
+        AuthorityCustodyClass::FixtureLocalKey,
+    );
     let ctx = ctx_view(
         &c,
         AuthorityCustodyPolicy::DevnetLocalAllowed,
@@ -709,7 +746,9 @@ fn r1_absent_where_policy_requires_fails_closed() {
     assert!(outcome.is_reject());
 }
 
-fn malformed_loaded(mutate: impl FnOnce(&mut RemoteSignerAttestationWire)) -> RemoteSignerLoadStatus {
+fn malformed_loaded(
+    mutate: impl FnOnce(&mut RemoteSignerAttestationWire),
+) -> RemoteSignerLoadStatus {
     let p = parts(TrustBundleEnvironment::Devnet);
     let mut wire = RemoteSignerAttestationWire::from_parts(&p.identity, &p.request, &p.response);
     mutate(&mut wire);
@@ -721,7 +760,10 @@ fn malformed_loaded(mutate: impl FnOnce(&mut RemoteSignerAttestationWire)) -> Re
 
 #[test]
 fn r2_malformed_identity_rejected() {
-    let c = ctx_for(TrustBundleEnvironment::Devnet, AuthorityCustodyClass::FixtureLocalKey);
+    let c = ctx_for(
+        TrustBundleEnvironment::Devnet,
+        AuthorityCustodyClass::FixtureLocalKey,
+    );
     let ctx = ctx_view(
         &c,
         AuthorityCustodyPolicy::DevnetLocalAllowed,
@@ -736,7 +778,10 @@ fn r2_malformed_identity_rejected() {
 
 #[test]
 fn r3_malformed_request_rejected() {
-    let c = ctx_for(TrustBundleEnvironment::Devnet, AuthorityCustodyClass::FixtureLocalKey);
+    let c = ctx_for(
+        TrustBundleEnvironment::Devnet,
+        AuthorityCustodyClass::FixtureLocalKey,
+    );
     let ctx = ctx_view(
         &c,
         AuthorityCustodyPolicy::DevnetLocalAllowed,
@@ -750,7 +795,10 @@ fn r3_malformed_request_rejected() {
 
 #[test]
 fn r4_malformed_response_rejected() {
-    let c = ctx_for(TrustBundleEnvironment::Devnet, AuthorityCustodyClass::FixtureLocalKey);
+    let c = ctx_for(
+        TrustBundleEnvironment::Devnet,
+        AuthorityCustodyClass::FixtureLocalKey,
+    );
     let ctx = ctx_view(
         &c,
         AuthorityCustodyPolicy::DevnetLocalAllowed,
@@ -764,7 +812,10 @@ fn r4_malformed_response_rejected() {
 
 #[test]
 fn r5_malformed_combined_attestation_rejected() {
-    let c = ctx_for(TrustBundleEnvironment::Devnet, AuthorityCustodyClass::FixtureLocalKey);
+    let c = ctx_for(
+        TrustBundleEnvironment::Devnet,
+        AuthorityCustodyClass::FixtureLocalKey,
+    );
     let ctx = ctx_view(
         &c,
         AuthorityCustodyPolicy::DevnetLocalAllowed,
@@ -924,8 +975,7 @@ fn r12_wrong_genesis_rejected() {
 #[test]
 fn r13_wrong_authority_root_rejected() {
     let mut p = parts(TrustBundleEnvironment::Devnet);
-    p.request.authority_root_fingerprint =
-        "9999999999999999999999999999999999999999".to_string();
+    p.request.authority_root_fingerprint = "9999999999999999999999999999999999999999".to_string();
     let outcome = route_available(
         TrustBundleEnvironment::Devnet,
         AuthorityCustodyClass::FixtureLocalKey,
@@ -1152,7 +1202,10 @@ fn r25_invalid_signature_rejected() {
 
 #[test]
 fn r26_local_operator_key_cannot_satisfy_remote_signer() {
-    let c = ctx_for(TrustBundleEnvironment::Devnet, AuthorityCustodyClass::LocalOperatorKey);
+    let c = ctx_for(
+        TrustBundleEnvironment::Devnet,
+        AuthorityCustodyClass::LocalOperatorKey,
+    );
     let ctx = ctx_view(
         &c,
         AuthorityCustodyPolicy::DevnetLocalAllowed,
@@ -1179,7 +1232,10 @@ fn r27_peer_majority_cannot_satisfy_remote_signer() {
 fn r28_remote_signer_valid_but_custody_invalid_rejected() {
     // Custody candidate-digest mismatch makes the Run 188 custody
     // validation reject before the RemoteSigner is consulted.
-    let mut c = ctx_for(TrustBundleEnvironment::Devnet, AuthorityCustodyClass::FixtureLocalKey);
+    let mut c = ctx_for(
+        TrustBundleEnvironment::Devnet,
+        AuthorityCustodyClass::FixtureLocalKey,
+    );
     c.custody.candidate_digest =
         "3333333333333333333333333333333333333333333333333333333333333333".to_string();
     let ctx = ctx_view(
@@ -1235,7 +1291,10 @@ fn r31_validation_only_rejection_is_pure_no_mutation() {
     // The reload-check / local-peer-candidate-check helpers are pure
     // functions returning typed outcomes; a rejection cannot write a
     // marker or sequence because no such API is reachable from here.
-    let c = ctx_for(TrustBundleEnvironment::Devnet, AuthorityCustodyClass::FixtureLocalKey);
+    let c = ctx_for(
+        TrustBundleEnvironment::Devnet,
+        AuthorityCustodyClass::FixtureLocalKey,
+    );
     let ctx = ctx_view(
         &c,
         AuthorityCustodyPolicy::DevnetLocalAllowed,
@@ -1255,7 +1314,10 @@ fn r32_mutating_rejection_produces_no_mutation() {
     // The mutating-preflight helpers (reload-apply / startup / sighup)
     // short-circuit a malformed carrier before the Run 194 verifier and
     // therefore before any sequence/marker write or Run 070 call.
-    let c = ctx_for(TrustBundleEnvironment::Devnet, AuthorityCustodyClass::FixtureLocalKey);
+    let c = ctx_for(
+        TrustBundleEnvironment::Devnet,
+        AuthorityCustodyClass::FixtureLocalKey,
+    );
     let ctx = ctx_view(
         &c,
         AuthorityCustodyPolicy::DevnetLocalAllowed,
@@ -1276,7 +1338,10 @@ fn r32_mutating_rejection_produces_no_mutation() {
 
 #[test]
 fn r33_invalid_live_0x05_remote_signer_not_propagated() {
-    let c = ctx_for(TrustBundleEnvironment::Devnet, AuthorityCustodyClass::FixtureLocalKey);
+    let c = ctx_for(
+        TrustBundleEnvironment::Devnet,
+        AuthorityCustodyClass::FixtureLocalKey,
+    );
     let ctx = ctx_view(
         &c,
         AuthorityCustodyPolicy::DevnetLocalAllowed,
@@ -1293,20 +1358,26 @@ fn r33_invalid_live_0x05_remote_signer_not_propagated() {
 
 #[test]
 fn r34_mainnet_peer_driven_apply_refused_even_with_fixture_loopback() {
-    let c = ctx_for(TrustBundleEnvironment::Mainnet, AuthorityCustodyClass::FixtureLocalKey);
+    let c = ctx_for(
+        TrustBundleEnvironment::Mainnet,
+        AuthorityCustodyClass::FixtureLocalKey,
+    );
     let ctx = ctx_view(
         &c,
         AuthorityCustodyPolicy::DevnetLocalAllowed,
         RemoteSignerPolicy::FixtureLoopbackAllowed,
     );
     let loaded = available_via_wire(&parts(TrustBundleEnvironment::Mainnet));
-    let outcome =
-        route_loaded_remote_signer_attestation_to_peer_driven_drain_callsite_decision(&ctx, &loaded);
+    let outcome = route_loaded_remote_signer_attestation_to_peer_driven_drain_callsite_decision(
+        &ctx, &loaded,
+    );
     assert!(outcome.is_mainnet_peer_driven_apply_refused());
     assert!(outcome.is_reject());
-    assert!(mainnet_peer_driven_apply_remains_refused_under_remote_signer_payload_carrying(
-        TrustBundleEnvironment::Mainnet
-    ));
+    assert!(
+        mainnet_peer_driven_apply_remains_refused_under_remote_signer_payload_carrying(
+            TrustBundleEnvironment::Mainnet
+        )
+    );
 }
 
 // ===========================================================================
@@ -1317,21 +1388,26 @@ fn r34_mainnet_peer_driven_apply_refused_even_with_fixture_loopback() {
 fn reachability_remote_signer_material_reaches_production_callsite_context() {
     // The carried wire material reaches a production call-site context
     // and drives the Run 194 composition to an accept.
-    let c = ctx_for(TrustBundleEnvironment::Devnet, AuthorityCustodyClass::FixtureLocalKey);
+    let c = ctx_for(
+        TrustBundleEnvironment::Devnet,
+        AuthorityCustodyClass::FixtureLocalKey,
+    );
     let ctx = ctx_view(
         &c,
         AuthorityCustodyPolicy::DevnetLocalAllowed,
         RemoteSignerPolicy::FixtureLoopbackAllowed,
     );
     let loaded = available_via_wire(&parts(TrustBundleEnvironment::Devnet));
-    let outcome =
-        route_loaded_remote_signer_attestation_to_sighup_callsite_decision(&ctx, &loaded);
+    let outcome = route_loaded_remote_signer_attestation_to_sighup_callsite_decision(&ctx, &loaded);
     assert!(outcome.is_accept());
 }
 
 #[test]
 fn reachability_validate_remote_signer_reached_from_payload_layer() {
-    let c = ctx_for(TrustBundleEnvironment::Devnet, AuthorityCustodyClass::RemoteSigner);
+    let c = ctx_for(
+        TrustBundleEnvironment::Devnet,
+        AuthorityCustodyClass::RemoteSigner,
+    );
     let ctx = ctx_view(
         &c,
         AuthorityCustodyPolicy::DevnetLocalAllowed,
@@ -1347,7 +1423,10 @@ fn reachability_validate_remote_signer_reached_from_payload_layer() {
 
 #[test]
 fn reachability_composition_reached_from_payload_layer() {
-    let c = ctx_for(TrustBundleEnvironment::Devnet, AuthorityCustodyClass::FixtureLocalKey);
+    let c = ctx_for(
+        TrustBundleEnvironment::Devnet,
+        AuthorityCustodyClass::FixtureLocalKey,
+    );
     let ctx = ctx_view(
         &c,
         AuthorityCustodyPolicy::DevnetLocalAllowed,

@@ -449,8 +449,7 @@ fn run_selector_table(out: &Path) -> (u64, u64) {
         let _g = EnvGuard::set(Some(
             GOVERNANCE_EXECUTION_POLICY_TAG_FIXTURE_GOVERNANCE_ALLOWED,
         ));
-        let resolved =
-            arm_from_cli_or_env(Some(GOVERNANCE_EXECUTION_POLICY_TAG_DISABLED));
+        let resolved = arm_from_cli_or_env(Some(GOVERNANCE_EXECUTION_POLICY_TAG_DISABLED));
         t.check(
             "A9.cli-over-env-at-runtime-boundary",
             "disabled",
@@ -1285,7 +1284,10 @@ fn run_reachability_table(out: &Path) -> (u64, u64) {
         );
     }
     // The per-method preflight entry points agree with arm_surface dispatch.
-    let pairs: [(GovernanceExecutionRuntimeSurface, GovernanceExecutionPayloadCarryingDecisionOutcome); 7] = [
+    let pairs: [(
+        GovernanceExecutionRuntimeSurface,
+        GovernanceExecutionPayloadCarryingDecisionOutcome,
+    ); 7] = [
         (
             GovernanceExecutionRuntimeSurface::ReloadCheck,
             arming.preflight_reload_check(&trust_domain(env), &rotate_expectations(env), &loaded),
@@ -1444,7 +1446,9 @@ fn run_fixture_dump(out: &Path) {
 
 fn main() {
     let out_dir = env::args().nth(1).map(PathBuf::from).unwrap_or_else(|| {
-        eprintln!("usage: run_218_governance_execution_runtime_arming_release_binary_helper <OUT_DIR>");
+        eprintln!(
+            "usage: run_218_governance_execution_runtime_arming_release_binary_helper <OUT_DIR>"
+        );
         std::process::exit(2);
     });
     fs::create_dir_all(&out_dir).unwrap();

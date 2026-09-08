@@ -511,12 +511,11 @@ fn test_e2_unjailed_validator_included_after_expiry() {
 fn test_e3_both_stake_and_jail_filtering() {
     let candidates = vec![
         ValidatorCandidateWithJailStatus::new(ValidatorId::new(1), 1_000_000, 1, None), // OK
-        ValidatorCandidateWithJailStatus::new(ValidatorId::new(2), 500_000, 1, None), // Low stake
+        ValidatorCandidateWithJailStatus::new(ValidatorId::new(2), 500_000, 1, None),   // Low stake
         ValidatorCandidateWithJailStatus::new(ValidatorId::new(3), 1_000_000, 1, Some(20)), // Jailed
     ];
 
-    let result =
-        build_validator_set_with_stake_and_jail_filter(candidates, 1_000_000, 10).unwrap();
+    let result = build_validator_set_with_stake_and_jail_filter(candidates, 1_000_000, 10).unwrap();
 
     assert_eq!(result.validator_set.len(), 1); // Only validator 1
     assert_eq!(result.excluded_low_stake.len(), 1);
@@ -526,9 +525,12 @@ fn test_e3_both_stake_and_jail_filtering() {
 #[test]
 fn test_e4_jail_filtering_epoch_boundary() {
     // Test exact boundary conditions
-    let candidates = vec![
-        ValidatorCandidateWithJailStatus::new(ValidatorId::new(1), 1_000_000, 1, Some(10)),
-    ];
+    let candidates = vec![ValidatorCandidateWithJailStatus::new(
+        ValidatorId::new(1),
+        1_000_000,
+        1,
+        Some(10),
+    )];
 
     // At epoch 9: still jailed (9 < 10)
     let result9 = build_validator_set_with_stake_and_jail_filter(candidates.clone(), 0, 9);
@@ -558,7 +560,10 @@ fn test_f1_all_validators_jailed_fail_closed() {
 
     // All validators jailed - should fail
     let result = build_validator_set_with_stake_and_jail_filter(candidates, 0, 50);
-    assert!(result.is_err(), "should fail when all validators are jailed");
+    assert!(
+        result.is_err(),
+        "should fail when all validators are jailed"
+    );
 }
 
 #[test]
@@ -648,10 +653,7 @@ fn test_g2_total_slashed_tracked() {
     backend.apply_penalty_atomic(request).unwrap();
 
     // After
-    assert_eq!(
-        backend.get_validator_total_slashed(ValidatorId(1)),
-        75_000
-    );
+    assert_eq!(backend.get_validator_total_slashed(ValidatorId(1)), 75_000);
 }
 
 #[test]
@@ -682,9 +684,10 @@ fn test_g3_enforce_all_mode_applies_o1_o2() {
     // O1
     let evidence1 = make_o1_evidence(1, 100, 0);
     let record1 = engine.handle_evidence(&ctx, evidence1);
-    assert!(
-        matches!(record1.penalty_decision, PenaltyDecision::PenaltyApplied { .. })
-    );
+    assert!(matches!(
+        record1.penalty_decision,
+        PenaltyDecision::PenaltyApplied { .. }
+    ));
 
     // O2 (use view=1 for validator 2 to be leader)
     let ctx2 = PenaltySlashingContext {
@@ -695,9 +698,10 @@ fn test_g3_enforce_all_mode_applies_o1_o2() {
     };
     let evidence2 = make_o2_evidence(2, 100, 1);
     let record2 = engine.handle_evidence(&ctx2, evidence2);
-    assert!(
-        matches!(record2.penalty_decision, PenaltyDecision::PenaltyApplied { .. })
-    );
+    assert!(matches!(
+        record2.penalty_decision,
+        PenaltyDecision::PenaltyApplied { .. }
+    ));
 }
 
 #[test]

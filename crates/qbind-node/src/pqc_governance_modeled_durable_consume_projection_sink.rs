@@ -61,6 +61,7 @@
 //! receipt is idempotent; the same receipt id with a different digest fails closed
 //! as equivocation and records no second receipt.
 
+use crate::pqc_governance_execution_runtime_arming::GovernanceExecutionRuntimeSurface;
 use crate::pqc_governance_modeled_end_to_end_pipeline::{
     DurableReplayObservation, GovernanceModeledEndToEndPipelineOutcome,
 };
@@ -68,7 +69,6 @@ use crate::pqc_governance_modeled_trust_mutation_applier::{
     ModeledGovernanceTrustMutationEnvironmentBinding, ModeledGovernanceTrustMutationRuntimeBinding,
     ModeledGovernanceTrustMutationSurface,
 };
-use crate::pqc_governance_execution_runtime_arming::GovernanceExecutionRuntimeSurface;
 use crate::pqc_trust_bundle::TrustBundleEnvironment;
 
 // ===========================================================================

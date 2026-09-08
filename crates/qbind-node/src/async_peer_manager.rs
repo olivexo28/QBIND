@@ -1130,10 +1130,7 @@ impl AsyncPeerManagerConfig {
     ///   [`crate::public_devnet_abuse_dos_runtime::PublicDevnetAbuseDosRuntimeConfig`]
     ///   via its `peer_rate_limiter_config()` so only accepted (non-zero,
     ///   bounded) thresholds ever reach the live limiter.
-    pub fn with_peer_rate_limiter_config(
-        mut self,
-        config: Option<PeerRateLimiterConfig>,
-    ) -> Self {
+    pub fn with_peer_rate_limiter_config(mut self, config: Option<PeerRateLimiterConfig>) -> Self {
         self.peer_rate_limiter_config = config;
         self
     }

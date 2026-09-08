@@ -306,9 +306,7 @@ fn a09_deterministic_transcript_digest_stable() {
 
 fn a10_run186_classifier_routes_production_suite_as_production() {
     assert_eq!(
-        classify_production_suite_through_run186(
-            ProductionOnChainGovernanceProofSuite::merkle_v1()
-        ),
+        classify_production_suite_through_run186(ProductionOnChainGovernanceProofSuite::merkle_v1()),
         OnChainGovernanceProofClass::Production
     );
 }
@@ -865,7 +863,9 @@ fn e01_no_prior_proof_is_clean_noop() {
 fn e02_byte_identical_proof_is_idempotent() {
     let v = source_test_verifier();
     let (proof, _cp, _inputs) = valid_bundle(TrustBundleEnvironment::Devnet);
-    assert!(v.recover_proof_window(Some(&proof), &proof, 0).is_idempotent());
+    assert!(v
+        .recover_proof_window(Some(&proof), &proof, 0)
+        .is_idempotent());
 }
 
 fn e03_same_decision_id_different_proposal_digest_fails_closed() {
@@ -999,11 +999,15 @@ fn g01_release_symbol_reachability_probe() {
 
     // Real Merkle verifier over the source/test proof.
     let verifier = source_test_verifier();
-    let outcome: ProductionOnChainGovernanceProofOutcome =
-        verify(&verifier, &proof, &inputs, env);
+    let outcome: ProductionOnChainGovernanceProofOutcome = verify(&verifier, &proof, &inputs, env);
     assert!(outcome.is_accept());
     let decision: ProductionOnChainGovernanceProofDecision = verifier
-        .evaluate_production_onchain_governance_proof(&proof, &inputs, &domain(env), &empty_replay());
+        .evaluate_production_onchain_governance_proof(
+            &proof,
+            &inputs,
+            &domain(env),
+            &empty_replay(),
+        );
     assert!(decision.is_accept());
     let recovery: ProductionOnChainGovernanceRecoveryOutcome =
         verifier.recover_proof_window(None, &proof, 0);
@@ -1032,9 +1036,7 @@ fn g01_release_symbol_reachability_probe() {
         ProductionOnChainGovernanceVerifierPolicy::AllowSourceTestProductionProof,
         counting,
     );
-    assert!(
-        verify(&counting_verifier, &proof, &inputs, env).is_accept()
-    );
+    assert!(verify(&counting_verifier, &proof, &inputs, env).is_accept());
     assert!(counting_verifier.inclusion_verifier.call_count() >= 1);
 
     // Reachable-but-fail-closed unavailable inclusion stub.
@@ -1072,9 +1074,7 @@ fn g01_release_symbol_reachability_probe() {
 
     // Run 186 classifier composition is linked in release mode.
     assert_eq!(
-        classify_production_suite_through_run186(
-            ProductionOnChainGovernanceProofSuite::merkle_v1()
-        ),
+        classify_production_suite_through_run186(ProductionOnChainGovernanceProofSuite::merkle_v1()),
         OnChainGovernanceProofClass::Production
     );
 
@@ -1108,77 +1108,361 @@ fn main() {
     fs::create_dir_all(outdir.join("fixtures")).expect("create helper output directory");
 
     let cases: &[(&str, &str, fn())] = &[
-        ("accepted_compatible", "a01_default_policy_is_disabled_and_inert", a01_default_policy_is_disabled_and_inert as fn()),
-        ("accepted_compatible", "a02_valid_production_proof_accepted_devnet", a02_valid_production_proof_accepted_devnet as fn()),
-        ("accepted_compatible", "a03_valid_production_proof_accepted_testnet", a03_valid_production_proof_accepted_testnet as fn()),
-        ("accepted_compatible", "a04_accept_binds_environment", a04_accept_binds_environment as fn()),
-        ("accepted_compatible", "a05_accept_binds_epoch_sequence_action_decision", a05_accept_binds_epoch_sequence_action_decision as fn()),
-        ("accepted_compatible", "a06_valid_proof_verifies_inclusion_against_trusted_root", a06_valid_proof_verifies_inclusion_against_trusted_root as fn()),
-        ("accepted_compatible", "a07_deterministic_proof_digest_stable", a07_deterministic_proof_digest_stable as fn()),
-        ("accepted_compatible", "a08_deterministic_decision_digest_stable", a08_deterministic_decision_digest_stable as fn()),
-        ("accepted_compatible", "a09_deterministic_transcript_digest_stable", a09_deterministic_transcript_digest_stable as fn()),
-        ("accepted_compatible", "a10_run186_classifier_routes_production_suite_as_production", a10_run186_classifier_routes_production_suite_as_production as fn()),
-        ("accepted_compatible", "a11_run186_classifier_routes_fixture_suite_as_fixture", a11_run186_classifier_routes_fixture_suite_as_fixture as fn()),
-        ("accepted_compatible", "a12_checkpoint_digest_stable", a12_checkpoint_digest_stable as fn()),
-        ("accepted_compatible", "a13_supported_protocol_and_suite_helpers", a13_supported_protocol_and_suite_helpers as fn()),
-        ("accepted_compatible", "a14_evaluate_produces_bound_decision_id_and_proof_digest", a14_evaluate_produces_bound_decision_id_and_proof_digest as fn()),
-        ("rejection_fail_closed", "b01_disabled_rejects_before_parsing", b01_disabled_rejects_before_parsing as fn()),
-        ("rejection_fail_closed", "b02_disabled_kind_config_rejects", b02_disabled_kind_config_rejects as fn()),
-        ("rejection_fail_closed", "b03_empty_proof_bytes_digest_malformed", b03_empty_proof_bytes_digest_malformed as fn()),
-        ("rejection_fail_closed", "b04_invalid_proof_sentinel_malformed", b04_invalid_proof_sentinel_malformed as fn()),
-        ("rejection_fail_closed", "b05_wrong_domain_separation_tag_malformed", b05_wrong_domain_separation_tag_malformed as fn()),
-        ("rejection_fail_closed", "b06_unsupported_protocol_rejected", b06_unsupported_protocol_rejected as fn()),
-        ("rejection_fail_closed", "b07_unsupported_suite_rejected", b07_unsupported_suite_rejected as fn()),
-        ("rejection_fail_closed", "b08_fixture_suite_rejected_as_production_authority", b08_fixture_suite_rejected_as_production_authority as fn()),
-        ("rejection_fail_closed", "b09_proof_bytes_digest_mismatch_invalid", b09_proof_bytes_digest_mismatch_invalid as fn()),
-        ("rejection_fail_closed", "b10_missing_trusted_root_rejected", b10_missing_trusted_root_rejected as fn()),
-        ("rejection_fail_closed", "b11_wrong_trusted_root_rejected", b11_wrong_trusted_root_rejected as fn()),
-        ("rejection_fail_closed", "b12_proof_supplied_untrusted_root_not_self_authorizing", b12_proof_supplied_untrusted_root_not_self_authorizing as fn()),
-        ("rejection_fail_closed", "b13_wrong_environment_rejected", b13_wrong_environment_rejected as fn()),
-        ("rejection_fail_closed", "b14_wrong_chain_rejected", b14_wrong_chain_rejected as fn()),
-        ("rejection_fail_closed", "b15_wrong_genesis_rejected", b15_wrong_genesis_rejected as fn()),
-        ("rejection_fail_closed", "b16_wrong_authority_root_rejected", b16_wrong_authority_root_rejected as fn()),
-        ("rejection_fail_closed", "b17_wrong_governance_domain_rejected", b17_wrong_governance_domain_rejected as fn()),
-        ("rejection_fail_closed", "b18_wrong_governance_epoch_rejected", b18_wrong_governance_epoch_rejected as fn()),
-        ("rejection_fail_closed", "b19_wrong_candidate_digest_rejected", b19_wrong_candidate_digest_rejected as fn()),
-        ("rejection_fail_closed", "b20_wrong_authority_sequence_rejected", b20_wrong_authority_sequence_rejected as fn()),
-        ("rejection_fail_closed", "b21_expired_proof_rejected_by_height_bounds", b21_expired_proof_rejected_by_height_bounds as fn()),
-        ("rejection_fail_closed", "b22_replayed_decision_id_rejected", b22_replayed_decision_id_rejected as fn()),
-        ("rejection_fail_closed", "b23_quorum_not_met_rejected", b23_quorum_not_met_rejected as fn()),
-        ("rejection_fail_closed", "b24_threshold_not_met_rejected", b24_threshold_not_met_rejected as fn()),
-        ("rejection_fail_closed", "b25_wrong_merkle_path_inclusion_failed", b25_wrong_merkle_path_inclusion_failed as fn()),
-        ("rejection_fail_closed", "b26_malformed_sibling_hex_malformed", b26_malformed_sibling_hex_malformed as fn()),
-        ("rejection_fail_closed", "b27_production_reserved_kind_unavailable", b27_production_reserved_kind_unavailable as fn()),
-        ("rejection_fail_closed", "b28_injected_verifier_unavailable_maps_to_unavailable", b28_injected_verifier_unavailable_maps_to_unavailable as fn()),
-        ("rejection_fail_closed", "b29_unavailable_inclusion_stub_fails_closed", b29_unavailable_inclusion_stub_fails_closed as fn()),
-        ("rejection_fail_closed", "b30_malformed_verification_inputs_rejected", b30_malformed_verification_inputs_rejected as fn()),
-        ("mainnet_authority_policy", "c01_mainnet_refused_under_source_test_policy", c01_mainnet_refused_under_source_test_policy as fn()),
-        ("mainnet_authority_policy", "c02_mainnet_policy_fails_closed_on_mainnet", c02_mainnet_policy_fails_closed_on_mainnet as fn()),
-        ("mainnet_authority_policy", "c03_mainnet_policy_fails_closed_on_devnet", c03_mainnet_policy_fails_closed_on_devnet as fn()),
-        ("mainnet_authority_policy", "c04_mainnet_fixture_proof_rejected", c04_mainnet_fixture_proof_rejected as fn()),
-        ("mainnet_authority_policy", "c05_mainnet_proof_environment_binding_refused", c05_mainnet_proof_environment_binding_refused as fn()),
-        ("mainnet_authority_policy", "c06_valid_source_test_proof_does_not_enable_mainnet", c06_valid_source_test_proof_does_not_enable_mainnet as fn()),
-        ("mainnet_authority_policy", "c07_mainnet_cannot_be_satisfied_by_valid_synthetic_proof", c07_mainnet_cannot_be_satisfied_by_valid_synthetic_proof as fn()),
-        ("non_mutation", "d01_all_outcomes_are_non_mutating", d01_all_outcomes_are_non_mutating as fn()),
-        ("non_mutation", "d02_never_falls_back_helper", d02_never_falls_back_helper as fn()),
-        ("non_mutation", "d03_root_supplied_out_of_band_helper", d03_root_supplied_out_of_band_helper as fn()),
-        ("non_mutation", "d04_rejected_paths_do_not_accept", d04_rejected_paths_do_not_accept as fn()),
-        ("non_mutation", "d05_non_authority_outcomes_are_non_accepting", d05_non_authority_outcomes_are_non_accepting as fn()),
-        ("replay_recovery_idempotency", "e01_no_prior_proof_is_clean_noop", e01_no_prior_proof_is_clean_noop as fn()),
-        ("replay_recovery_idempotency", "e02_byte_identical_proof_is_idempotent", e02_byte_identical_proof_is_idempotent as fn()),
-        ("replay_recovery_idempotency", "e03_same_decision_id_different_proposal_digest_fails_closed", e03_same_decision_id_different_proposal_digest_fails_closed as fn()),
-        ("replay_recovery_idempotency", "e04_same_decision_id_different_candidate_digest_fails_closed", e04_same_decision_id_different_candidate_digest_fails_closed as fn()),
-        ("replay_recovery_idempotency", "e05_same_decision_id_different_lifecycle_action_fails_closed", e05_same_decision_id_different_lifecycle_action_fails_closed as fn()),
-        ("replay_recovery_idempotency", "e06_stale_governance_epoch_fails_closed", e06_stale_governance_epoch_fails_closed as fn()),
-        ("replay_recovery_idempotency", "e07_different_decision_id_is_independent_window", e07_different_decision_id_is_independent_window as fn()),
-        ("replay_recovery_idempotency", "e08_same_decision_id_conflicting_transcript_fails_closed", e08_same_decision_id_conflicting_transcript_fails_closed as fn()),
-        ("reachability_taxonomy", "f01_run299_is_source_test_not_release_binary", f01_run299_is_source_test_not_release_binary as fn()),
-        ("reachability_taxonomy", "f02_default_disabled_taxonomy", f02_default_disabled_taxonomy as fn()),
-        ("reachability_taxonomy", "f03_mainnet_refused_taxonomy", f03_mainnet_refused_taxonomy as fn()),
-        ("reachability_taxonomy", "f04_non_mutating_taxonomy", f04_non_mutating_taxonomy as fn()),
-        ("reachability_taxonomy", "f05_policy_and_kind_tags_are_stable", f05_policy_and_kind_tags_are_stable as fn()),
-        ("reachability_taxonomy", "f06_outcome_tags_are_stable", f06_outcome_tags_are_stable as fn()),
-        ("reachability_taxonomy", "g01_release_symbol_reachability_probe", g01_release_symbol_reachability_probe as fn()),
+        (
+            "accepted_compatible",
+            "a01_default_policy_is_disabled_and_inert",
+            a01_default_policy_is_disabled_and_inert as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "a02_valid_production_proof_accepted_devnet",
+            a02_valid_production_proof_accepted_devnet as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "a03_valid_production_proof_accepted_testnet",
+            a03_valid_production_proof_accepted_testnet as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "a04_accept_binds_environment",
+            a04_accept_binds_environment as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "a05_accept_binds_epoch_sequence_action_decision",
+            a05_accept_binds_epoch_sequence_action_decision as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "a06_valid_proof_verifies_inclusion_against_trusted_root",
+            a06_valid_proof_verifies_inclusion_against_trusted_root as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "a07_deterministic_proof_digest_stable",
+            a07_deterministic_proof_digest_stable as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "a08_deterministic_decision_digest_stable",
+            a08_deterministic_decision_digest_stable as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "a09_deterministic_transcript_digest_stable",
+            a09_deterministic_transcript_digest_stable as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "a10_run186_classifier_routes_production_suite_as_production",
+            a10_run186_classifier_routes_production_suite_as_production as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "a11_run186_classifier_routes_fixture_suite_as_fixture",
+            a11_run186_classifier_routes_fixture_suite_as_fixture as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "a12_checkpoint_digest_stable",
+            a12_checkpoint_digest_stable as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "a13_supported_protocol_and_suite_helpers",
+            a13_supported_protocol_and_suite_helpers as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "a14_evaluate_produces_bound_decision_id_and_proof_digest",
+            a14_evaluate_produces_bound_decision_id_and_proof_digest as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "b01_disabled_rejects_before_parsing",
+            b01_disabled_rejects_before_parsing as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "b02_disabled_kind_config_rejects",
+            b02_disabled_kind_config_rejects as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "b03_empty_proof_bytes_digest_malformed",
+            b03_empty_proof_bytes_digest_malformed as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "b04_invalid_proof_sentinel_malformed",
+            b04_invalid_proof_sentinel_malformed as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "b05_wrong_domain_separation_tag_malformed",
+            b05_wrong_domain_separation_tag_malformed as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "b06_unsupported_protocol_rejected",
+            b06_unsupported_protocol_rejected as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "b07_unsupported_suite_rejected",
+            b07_unsupported_suite_rejected as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "b08_fixture_suite_rejected_as_production_authority",
+            b08_fixture_suite_rejected_as_production_authority as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "b09_proof_bytes_digest_mismatch_invalid",
+            b09_proof_bytes_digest_mismatch_invalid as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "b10_missing_trusted_root_rejected",
+            b10_missing_trusted_root_rejected as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "b11_wrong_trusted_root_rejected",
+            b11_wrong_trusted_root_rejected as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "b12_proof_supplied_untrusted_root_not_self_authorizing",
+            b12_proof_supplied_untrusted_root_not_self_authorizing as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "b13_wrong_environment_rejected",
+            b13_wrong_environment_rejected as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "b14_wrong_chain_rejected",
+            b14_wrong_chain_rejected as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "b15_wrong_genesis_rejected",
+            b15_wrong_genesis_rejected as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "b16_wrong_authority_root_rejected",
+            b16_wrong_authority_root_rejected as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "b17_wrong_governance_domain_rejected",
+            b17_wrong_governance_domain_rejected as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "b18_wrong_governance_epoch_rejected",
+            b18_wrong_governance_epoch_rejected as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "b19_wrong_candidate_digest_rejected",
+            b19_wrong_candidate_digest_rejected as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "b20_wrong_authority_sequence_rejected",
+            b20_wrong_authority_sequence_rejected as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "b21_expired_proof_rejected_by_height_bounds",
+            b21_expired_proof_rejected_by_height_bounds as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "b22_replayed_decision_id_rejected",
+            b22_replayed_decision_id_rejected as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "b23_quorum_not_met_rejected",
+            b23_quorum_not_met_rejected as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "b24_threshold_not_met_rejected",
+            b24_threshold_not_met_rejected as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "b25_wrong_merkle_path_inclusion_failed",
+            b25_wrong_merkle_path_inclusion_failed as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "b26_malformed_sibling_hex_malformed",
+            b26_malformed_sibling_hex_malformed as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "b27_production_reserved_kind_unavailable",
+            b27_production_reserved_kind_unavailable as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "b28_injected_verifier_unavailable_maps_to_unavailable",
+            b28_injected_verifier_unavailable_maps_to_unavailable as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "b29_unavailable_inclusion_stub_fails_closed",
+            b29_unavailable_inclusion_stub_fails_closed as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "b30_malformed_verification_inputs_rejected",
+            b30_malformed_verification_inputs_rejected as fn(),
+        ),
+        (
+            "mainnet_authority_policy",
+            "c01_mainnet_refused_under_source_test_policy",
+            c01_mainnet_refused_under_source_test_policy as fn(),
+        ),
+        (
+            "mainnet_authority_policy",
+            "c02_mainnet_policy_fails_closed_on_mainnet",
+            c02_mainnet_policy_fails_closed_on_mainnet as fn(),
+        ),
+        (
+            "mainnet_authority_policy",
+            "c03_mainnet_policy_fails_closed_on_devnet",
+            c03_mainnet_policy_fails_closed_on_devnet as fn(),
+        ),
+        (
+            "mainnet_authority_policy",
+            "c04_mainnet_fixture_proof_rejected",
+            c04_mainnet_fixture_proof_rejected as fn(),
+        ),
+        (
+            "mainnet_authority_policy",
+            "c05_mainnet_proof_environment_binding_refused",
+            c05_mainnet_proof_environment_binding_refused as fn(),
+        ),
+        (
+            "mainnet_authority_policy",
+            "c06_valid_source_test_proof_does_not_enable_mainnet",
+            c06_valid_source_test_proof_does_not_enable_mainnet as fn(),
+        ),
+        (
+            "mainnet_authority_policy",
+            "c07_mainnet_cannot_be_satisfied_by_valid_synthetic_proof",
+            c07_mainnet_cannot_be_satisfied_by_valid_synthetic_proof as fn(),
+        ),
+        (
+            "non_mutation",
+            "d01_all_outcomes_are_non_mutating",
+            d01_all_outcomes_are_non_mutating as fn(),
+        ),
+        (
+            "non_mutation",
+            "d02_never_falls_back_helper",
+            d02_never_falls_back_helper as fn(),
+        ),
+        (
+            "non_mutation",
+            "d03_root_supplied_out_of_band_helper",
+            d03_root_supplied_out_of_band_helper as fn(),
+        ),
+        (
+            "non_mutation",
+            "d04_rejected_paths_do_not_accept",
+            d04_rejected_paths_do_not_accept as fn(),
+        ),
+        (
+            "non_mutation",
+            "d05_non_authority_outcomes_are_non_accepting",
+            d05_non_authority_outcomes_are_non_accepting as fn(),
+        ),
+        (
+            "replay_recovery_idempotency",
+            "e01_no_prior_proof_is_clean_noop",
+            e01_no_prior_proof_is_clean_noop as fn(),
+        ),
+        (
+            "replay_recovery_idempotency",
+            "e02_byte_identical_proof_is_idempotent",
+            e02_byte_identical_proof_is_idempotent as fn(),
+        ),
+        (
+            "replay_recovery_idempotency",
+            "e03_same_decision_id_different_proposal_digest_fails_closed",
+            e03_same_decision_id_different_proposal_digest_fails_closed as fn(),
+        ),
+        (
+            "replay_recovery_idempotency",
+            "e04_same_decision_id_different_candidate_digest_fails_closed",
+            e04_same_decision_id_different_candidate_digest_fails_closed as fn(),
+        ),
+        (
+            "replay_recovery_idempotency",
+            "e05_same_decision_id_different_lifecycle_action_fails_closed",
+            e05_same_decision_id_different_lifecycle_action_fails_closed as fn(),
+        ),
+        (
+            "replay_recovery_idempotency",
+            "e06_stale_governance_epoch_fails_closed",
+            e06_stale_governance_epoch_fails_closed as fn(),
+        ),
+        (
+            "replay_recovery_idempotency",
+            "e07_different_decision_id_is_independent_window",
+            e07_different_decision_id_is_independent_window as fn(),
+        ),
+        (
+            "replay_recovery_idempotency",
+            "e08_same_decision_id_conflicting_transcript_fails_closed",
+            e08_same_decision_id_conflicting_transcript_fails_closed as fn(),
+        ),
+        (
+            "reachability_taxonomy",
+            "f01_run299_is_source_test_not_release_binary",
+            f01_run299_is_source_test_not_release_binary as fn(),
+        ),
+        (
+            "reachability_taxonomy",
+            "f02_default_disabled_taxonomy",
+            f02_default_disabled_taxonomy as fn(),
+        ),
+        (
+            "reachability_taxonomy",
+            "f03_mainnet_refused_taxonomy",
+            f03_mainnet_refused_taxonomy as fn(),
+        ),
+        (
+            "reachability_taxonomy",
+            "f04_non_mutating_taxonomy",
+            f04_non_mutating_taxonomy as fn(),
+        ),
+        (
+            "reachability_taxonomy",
+            "f05_policy_and_kind_tags_are_stable",
+            f05_policy_and_kind_tags_are_stable as fn(),
+        ),
+        (
+            "reachability_taxonomy",
+            "f06_outcome_tags_are_stable",
+            f06_outcome_tags_are_stable as fn(),
+        ),
+        (
+            "reachability_taxonomy",
+            "g01_release_symbol_reachability_probe",
+            g01_release_symbol_reachability_probe as fn(),
+        ),
     ];
 
     let mut rows: Vec<(String, String, bool)> = Vec::new();

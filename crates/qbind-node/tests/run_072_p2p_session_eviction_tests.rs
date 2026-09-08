@@ -56,9 +56,7 @@ use std::time::Duration;
 use qbind_node::metrics::P2pMetrics;
 use qbind_node::node_config::NetworkTransportConfig;
 use qbind_node::p2p::{NodeId, P2pService};
-use qbind_node::p2p_node_builder::{
-    derive_test_node_id_from_validator_id, P2pNodeBuilder,
-};
+use qbind_node::p2p_node_builder::{derive_test_node_id_from_validator_id, P2pNodeBuilder};
 use qbind_node::p2p_session_eviction::{
     EvictionError, EvictionReason, EvictionReport, MockP2pSessionEvictor, P2pSessionEvictor,
 };
@@ -69,7 +67,10 @@ use qbind_node::p2p_tcp::TcpKemTlsP2pService;
 // `b7_kemtls_bringup_identity_closure_tests.rs`.
 // ---------------------------------------------------------------------------
 
-fn make_test_transport_config(listen_addr: &str, static_peers: Vec<String>) -> NetworkTransportConfig {
+fn make_test_transport_config(
+    listen_addr: &str,
+    static_peers: Vec<String>,
+) -> NetworkTransportConfig {
     NetworkTransportConfig {
         enable_p2p: true,
         max_outbound: 4,
@@ -100,11 +101,10 @@ fn make_p2p_test_node_config(
 ) -> qbind_node::node_config::NodeConfig {
     use qbind_ledger::{FeeDistributionPolicy, MonetaryMode, SeigniorageSplit};
     use qbind_node::node_config::{
-        DagCouplingMode, ExecutionProfile, FastSyncConfig, GenesisSourceConfig,
-        MempoolDosConfig, MempoolEvictionConfig, MempoolMode, NetworkMode, NodeConfig,
-        P2pAntiEclipseConfig, P2pDiscoveryConfig, P2pLivenessConfig, SignerFailureMode,
-        SignerMode, SlashingConfig, SnapshotConfig, StateRetentionConfig,
-        ValidatorStakeConfig,
+        DagCouplingMode, ExecutionProfile, FastSyncConfig, GenesisSourceConfig, MempoolDosConfig,
+        MempoolEvictionConfig, MempoolMode, NetworkMode, NodeConfig, P2pAntiEclipseConfig,
+        P2pDiscoveryConfig, P2pLivenessConfig, SignerFailureMode, SignerMode, SlashingConfig,
+        SnapshotConfig, StateRetentionConfig, ValidatorStakeConfig,
     };
     use qbind_types::NetworkEnvironment;
 
@@ -202,14 +202,9 @@ async fn build_solo_service() -> (TcpKemTlsP2pService, u16) {
     };
     let port = reserve_local_port().await;
     let cfg = make_test_transport_config(&format!("127.0.0.1:{}", port), vec![]);
-    let mut svc = TcpKemTlsP2pService::new(
-        NodeId::new([7u8; 32]),
-        cfg,
-        crypto,
-        server_cfg,
-        client_cfg,
-    )
-    .expect("build solo service");
+    let mut svc =
+        TcpKemTlsP2pService::new(NodeId::new([7u8; 32]), cfg, crypto, server_cfg, client_cfg)
+            .expect("build solo service");
     svc.start().await.expect("start solo service");
     (svc, port)
 }
@@ -299,10 +294,7 @@ async fn run072_n2_kemtls_bringup_then_evict_drains_connected_peers() {
     // one peer under the dialer-side deterministic NodeId.
     let nid_v0 = derive_test_node_id_from_validator_id(0);
     let nid_v1 = derive_test_node_id_from_validator_id(1);
-    let (side_with_session, observed_other_node_id): (
-        Arc<TcpKemTlsP2pService>,
-        NodeId,
-    ) = {
+    let (side_with_session, observed_other_node_id): (Arc<TcpKemTlsP2pService>, NodeId) = {
         let deadline = std::time::Instant::now() + Duration::from_secs(5);
         loop {
             let v0_peers: Vec<NodeId> = ctx_v0.p2p_service.connected_peers();
@@ -459,27 +451,21 @@ fn run072_mock_evictor_satisfies_run070_evict_sessions_contract() {
         reason: EvictionReason,
     }
     impl<E: P2pSessionEvictor> LiveTrustApplyContext for SessionEvictionOnlyAdapter<E> {
-        fn snapshot_active(
-            &mut self,
-        ) -> Result<Box<dyn std::any::Any + Send + Sync>, String> {
+        fn snapshot_active(&mut self) -> Result<Box<dyn std::any::Any + Send + Sync>, String> {
             // Deliberately unsupported: Run 072 ships only the
             // eviction step. A Run 073 adapter must wire
             // `LivePqcTrustState::snapshot`.
-            Err(
-                "Run 072 adapter only implements evict_sessions; \
+            Err("Run 072 adapter only implements evict_sessions; \
                  snapshot_active is Run 073's responsibility"
-                    .to_string(),
-            )
+                .to_string())
         }
         fn swap_trust_state(
             &mut self,
             _candidate: &qbind_node::pqc_trust_bundle::LoadedTrustBundle,
         ) -> Result<(), String> {
-            Err(
-                "Run 072 adapter only implements evict_sessions; \
+            Err("Run 072 adapter only implements evict_sessions; \
                  swap_trust_state is Run 073's responsibility"
-                    .to_string(),
-            )
+                .to_string())
         }
         fn evict_sessions(&mut self) -> Result<usize, String> {
             self.ev
@@ -491,21 +477,17 @@ fn run072_mock_evictor_satisfies_run070_evict_sessions_contract() {
             &mut self,
             _candidate: &qbind_node::pqc_trust_bundle::LoadedTrustBundle,
         ) -> Result<(), String> {
-            Err(
-                "Run 072 adapter only implements evict_sessions; \
+            Err("Run 072 adapter only implements evict_sessions; \
                  commit_sequence is Run 073's responsibility"
-                    .to_string(),
-            )
+                .to_string())
         }
         fn rollback_trust_state(
             &mut self,
             _snapshot: Box<dyn std::any::Any + Send + Sync>,
         ) -> Result<(), String> {
-            Err(
-                "Run 072 adapter only implements evict_sessions; \
+            Err("Run 072 adapter only implements evict_sessions; \
                  rollback_trust_state is Run 073's responsibility"
-                    .to_string(),
-            )
+                .to_string())
         }
     }
 
@@ -539,9 +521,8 @@ fn run072_mock_evictor_satisfies_run070_evict_sessions_contract() {
 
 #[test]
 fn run072_unsupported_session_eviction_display_surfaces_no_mutation_safely() {
-    let err = EvictionError::UnsupportedSessionEviction(
-        "this runtime has no session registry".into(),
-    );
+    let err =
+        EvictionError::UnsupportedSessionEviction("this runtime has no session registry".into());
     let s = format!("{}", err);
     assert!(s.contains("Run 072"));
     assert!(s.contains("unsupported"));
@@ -596,14 +577,8 @@ async fn run072_eviction_on_not_started_transport_returns_empty_report() {
         peer_kem_pk: vec![0u8; 32],
     };
     let cfg = make_test_transport_config("127.0.0.1:0", vec![]);
-    let svc = TcpKemTlsP2pService::new(
-        NodeId::new([0u8; 32]),
-        cfg,
-        crypto,
-        server_cfg,
-        client_cfg,
-    )
-    .expect("build service");
+    let svc = TcpKemTlsP2pService::new(NodeId::new([0u8; 32]), cfg, crypto, server_cfg, client_cfg)
+        .expect("build service");
     // Not started — registry is empty.
     let report = svc
         .evict_all_sessions(EvictionReason::OperatorTest)

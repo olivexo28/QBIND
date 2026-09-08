@@ -232,9 +232,9 @@ pub fn remote_signer_policy_from_selector(
         .eq_ignore_ascii_case(REMOTE_SIGNER_POLICY_TAG_PRODUCTION_REMOTE_SIGNER_REQUIRED)
     {
         Ok(RemoteSignerPolicy::ProductionRemoteSignerRequired)
-    } else if trimmed.eq_ignore_ascii_case(
-        REMOTE_SIGNER_POLICY_TAG_MAINNET_PRODUCTION_REMOTE_SIGNER_REQUIRED,
-    ) {
+    } else if trimmed
+        .eq_ignore_ascii_case(REMOTE_SIGNER_POLICY_TAG_MAINNET_PRODUCTION_REMOTE_SIGNER_REQUIRED)
+    {
         Ok(RemoteSignerPolicy::MainnetProductionRemoteSignerRequired)
     } else {
         Err(RemoteSignerPolicySelectorParseError::UnknownValue {

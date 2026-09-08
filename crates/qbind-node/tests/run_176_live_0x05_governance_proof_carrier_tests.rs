@@ -60,8 +60,8 @@ use qbind_ledger::{
     bundle_signing_ratification::v2_test_helpers as ratification_v2_helpers,
     compute_canonical_genesis_hash, pqc_public_key_fingerprint, BundleSigningRatificationV2,
     BundleSigningRatificationV2Action, GenesisAllocation, GenesisAuthorityConfig,
-    GenesisAuthorityRoot, GenesisConfig, GenesisCouncilConfig, GenesisHash,
-    GenesisMonetaryConfig, GenesisValidator, NetworkEnvironmentPolicy, RatificationEnvironment,
+    GenesisAuthorityRoot, GenesisConfig, GenesisCouncilConfig, GenesisHash, GenesisMonetaryConfig,
+    GenesisValidator, NetworkEnvironmentPolicy, RatificationEnvironment,
     GENESIS_AUTHORITY_SUITE_ML_DSA_44,
 };
 use qbind_node::pqc_authority_lifecycle::{
@@ -88,8 +88,8 @@ use qbind_node::pqc_governance_proof_wire::{
 };
 use qbind_node::pqc_peer_candidate_wire::{
     decode_peer_candidate_wire_frame, encode_peer_candidate_wire_frame,
-    PeerCandidateWireEnvelopeV1, DISCRIMINATOR_PEER_CANDIDATE_WIRE,
-    PEER_CANDIDATE_WIRE_DOMAIN_TAG, PEER_CANDIDATE_WIRE_VERSION,
+    PeerCandidateWireEnvelopeV1, DISCRIMINATOR_PEER_CANDIDATE_WIRE, PEER_CANDIDATE_WIRE_DOMAIN_TAG,
+    PEER_CANDIDATE_WIRE_VERSION,
 };
 use qbind_node::pqc_trust_bundle::TrustBundleEnvironment;
 use qbind_node::pqc_trust_sequence::chain_id_hex;
@@ -169,7 +169,10 @@ fn devnet_harness() -> Harness {
     let mut genesis_cfg = GenesisConfig::new(
         &chain_id_str,
         1_738_000_000_000,
-        vec![GenesisAllocation::new(format!("0x{}", "11".repeat(32)), 100)],
+        vec![GenesisAllocation::new(
+            format!("0x{}", "11".repeat(32)),
+            100,
+        )],
         vec![GenesisValidator::new(
             format!("0x{}", "22".repeat(32)),
             "ab".repeat(32),
@@ -222,13 +225,11 @@ impl Harness {
             .authority_policy_version;
         let previous_digest = matches!(
             action,
-            BundleSigningRatificationV2Action::Rotate
-                | BundleSigningRatificationV2Action::Revoke
+            BundleSigningRatificationV2Action::Rotate | BundleSigningRatificationV2Action::Revoke
         )
         .then(|| "ab".repeat(32));
-        let revocation_reason =
-            matches!(action, BundleSigningRatificationV2Action::Revoke)
-                .then(|| "run176-test-revocation".to_string());
+        let revocation_reason = matches!(action, BundleSigningRatificationV2Action::Revoke)
+            .then(|| "run176-test-revocation".to_string());
         ratification_v2_helpers::build_signed_ratification_v2(
             &self.chain_id_str,
             RatificationEnvironment::Devnet,
@@ -420,7 +421,12 @@ fn assert_no_marker_on_disk(marker_path: &Path) {
 /// sequence 1 so a subsequent Rotate at sequence 2 reaches the
 /// lifecycle/governance layers.
 fn seed_prior_v2_marker(h: &Harness, marker_path: &Path) -> Vec<u8> {
-    let r1 = h.build_v2(&h.signing_pk_a, 1, BundleSigningRatificationV2Action::Ratify, None);
+    let r1 = h.build_v2(
+        &h.signing_pk_a,
+        1,
+        BundleSigningRatificationV2Action::Ratify,
+        None,
+    );
     let ratified1 = h.verify_v2(&r1);
     let gh = h.genesis_hex();
     let inputs1 = MarkerAcceptanceV2Inputs {
@@ -565,14 +571,13 @@ fn malformed_proof_carrier_yields_malformed_load_status_no_partial_parse() {
         &ratified2,
         AuthorityStateUpdateSource::TestOrFixture,
     );
-    let mut proof_wire = GovernanceAuthorityProofWire::from_governance_authority_proof(
-        &good_proof(
+    let mut proof_wire =
+        GovernanceAuthorityProofWire::from_governance_authority_proof(&good_proof(
             &h,
             &candidate,
             GovernanceAuthorityClass::GenesisBound,
             LocalLifecycleAction::Rotate,
-        ),
-    );
+        ));
     // Empty issuer signature -> EmptyIssuerSignature parse error.
     proof_wire.issuer_signature = vec![];
     let env = make_wire_envelope(&h, Some(proof_wire));
@@ -602,23 +607,22 @@ fn future_unknown_schema_version_proof_carrier_fails_closed() {
         &ratified2,
         AuthorityStateUpdateSource::TestOrFixture,
     );
-    let mut proof_wire = GovernanceAuthorityProofWire::from_governance_authority_proof(
-        &good_proof(
+    let mut proof_wire =
+        GovernanceAuthorityProofWire::from_governance_authority_proof(&good_proof(
             &h,
             &candidate,
             GovernanceAuthorityClass::GenesisBound,
             LocalLifecycleAction::Rotate,
-        ),
-    );
+        ));
     proof_wire.schema_version = u32::MAX;
     let env = make_wire_envelope(&h, Some(proof_wire));
     let frame = encode_peer_candidate_wire_frame(&env).expect("encode frame");
     let decoded = decode_peer_candidate_wire_frame(&frame).expect("decode frame");
     assert!(matches!(
         decoded.governance_proof_load_status(),
-        GovernanceProofLoadStatus::Malformed(GovernanceProofWireParseError::UnknownSchemaVersion {
-            ..
-        })
+        GovernanceProofLoadStatus::Malformed(
+            GovernanceProofWireParseError::UnknownSchemaVersion { .. }
+        )
     ));
 }
 
@@ -636,7 +640,12 @@ fn a1_legacy_no_proof_envelope_accepted_under_not_required() {
     let h = devnet_harness();
     let dir = tmpdir("a1");
     let marker_path = authority_state_file_path(&dir);
-    let r = h.build_v2(&h.signing_pk_a, 1, BundleSigningRatificationV2Action::Ratify, None);
+    let r = h.build_v2(
+        &h.signing_pk_a,
+        1,
+        BundleSigningRatificationV2Action::Ratify,
+        None,
+    );
     let ratified = h.verify_v2(&r);
     let env = make_wire_envelope(&h, None);
     let load_status = env.governance_proof_load_status();
@@ -680,14 +689,20 @@ fn a2_proof_carrying_rotate_accepted_under_required_policy() {
         Some(GovernanceAuthorityProofWire::from_governance_authority_proof(&proof)),
     );
     let load_status = env.governance_proof_load_status();
-    assert!(matches!(load_status, GovernanceProofLoadStatus::Available(_)));
+    assert!(matches!(
+        load_status,
+        GovernanceProofLoadStatus::Available(_)
+    ));
     let gh = h.genesis_hex();
     let policy = governance_proof_policy_from_cli_or_env(true);
     assert_eq!(policy, GovernanceProofPolicy::RequiredForLifecycleSensitive);
     let inputs = make_inputs(&marker_path, &gh, &r2, &ratified2);
     let _decision =
         shim_run(inputs, policy, &load_status).expect("A2 valid proof accepted under Required");
-    assert_eq!(__seed_bytes, std::fs::read(&marker_path).expect("re-read marker"));
+    assert_eq!(
+        __seed_bytes,
+        std::fs::read(&marker_path).expect("re-read marker")
+    );
 }
 
 /// A3 — proof-carrying live `0x05` Rotate accepted under CLI Required
@@ -723,9 +738,12 @@ fn a3_proof_carrying_rotate_accepted_under_cli_required_selector() {
     assert_eq!(policy, GovernanceProofPolicy::RequiredForLifecycleSensitive);
     let gh = h.genesis_hex();
     let inputs = make_inputs(&marker_path, &gh, &r2, &ratified2);
-    let _decision =
-        shim_run(inputs, policy, &env.governance_proof_load_status()).expect("A3 CLI-Required accepts");
-    assert_eq!(__seed_bytes, std::fs::read(&marker_path).expect("re-read marker"));
+    let _decision = shim_run(inputs, policy, &env.governance_proof_load_status())
+        .expect("A3 CLI-Required accepts");
+    assert_eq!(
+        __seed_bytes,
+        std::fs::read(&marker_path).expect("re-read marker")
+    );
 }
 
 /// A4 — proof-carrying live `0x05` Rotate accepted under env Required
@@ -761,9 +779,12 @@ fn a4_proof_carrying_rotate_accepted_under_env_required_selector() {
     assert_eq!(policy, GovernanceProofPolicy::RequiredForLifecycleSensitive);
     let gh = h.genesis_hex();
     let inputs = make_inputs(&marker_path, &gh, &r2, &ratified2);
-    let _decision =
-        shim_run(inputs, policy, &env.governance_proof_load_status()).expect("A4 env-Required accepts");
-    assert_eq!(__seed_bytes, std::fs::read(&marker_path).expect("re-read marker"));
+    let _decision = shim_run(inputs, policy, &env.governance_proof_load_status())
+        .expect("A4 env-Required accepts");
+    assert_eq!(
+        __seed_bytes,
+        std::fs::read(&marker_path).expect("re-read marker")
+    );
 }
 
 /// A5 — proof-carrying live `0x05` Revoke candidate accepted where
@@ -840,7 +861,10 @@ fn a5_proof_carrying_revoke_accepted_where_representable() {
             other
         ),
     }
-    assert_eq!(__seed_bytes, std::fs::read(&marker_path).expect("re-read marker"));
+    assert_eq!(
+        __seed_bytes,
+        std::fs::read(&marker_path).expect("re-read marker")
+    );
 }
 
 /// A6 — proof-carrying live `0x05` EmergencyRevoke candidate accepted
@@ -910,7 +934,10 @@ fn a7_idempotent_proof_carrying_candidate_is_deterministic_and_pure() {
     let _ok1 = shim_run(inputs1, policy, &load_status).expect("A7 first call accepts");
     let inputs2 = make_inputs(&marker_path, &gh, &r2, &ratified2);
     let _ok2 = shim_run(inputs2, policy, &load_status).expect("A7 second call accepts");
-    assert_eq!(__seed_bytes, std::fs::read(&marker_path).expect("re-read marker"));
+    assert_eq!(
+        __seed_bytes,
+        std::fs::read(&marker_path).expect("re-read marker")
+    );
 }
 
 // ===========================================================================
@@ -939,7 +966,10 @@ fn r1_required_no_proof_rejected_required_but_missing() {
         err,
         MutatingSurfaceMarkerV2Error::GovernanceAuthorityRequiredButMissing { .. }
     ));
-    assert_eq!(__seed_bytes, std::fs::read(&marker_path).expect("re-read marker"));
+    assert_eq!(
+        __seed_bytes,
+        std::fs::read(&marker_path).expect("re-read marker")
+    );
 }
 
 /// R2 — malformed governance proof in live `0x05` envelope rejected.
@@ -970,16 +1000,24 @@ fn r2_required_malformed_proof_rejected() {
     wire.issuer_signature = vec![];
     let env = make_wire_envelope(&h, Some(wire));
     let load_status = env.governance_proof_load_status();
-    assert!(matches!(load_status, GovernanceProofLoadStatus::Malformed(_)));
+    assert!(matches!(
+        load_status,
+        GovernanceProofLoadStatus::Malformed(_)
+    ));
     let gh = h.genesis_hex();
     let policy = governance_proof_policy_from_cli_or_env(true);
     let inputs = make_inputs(&marker_path, &gh, &r2, &ratified2);
-    let err = shim_run(inputs, policy, &load_status).err().expect("R2 fails closed");
+    let err = shim_run(inputs, policy, &load_status)
+        .err()
+        .expect("R2 fails closed");
     assert!(matches!(
         err,
         MutatingSurfaceMarkerV2Error::GovernanceAuthorityRequiredButMissing { .. }
     ));
-    assert_eq!(__seed_bytes, std::fs::read(&marker_path).expect("re-read marker"));
+    assert_eq!(
+        __seed_bytes,
+        std::fs::read(&marker_path).expect("re-read marker")
+    );
 }
 
 /// Helper: build a Rotate candidate context for the rejection matrix.
@@ -1036,7 +1074,9 @@ fn drive_rejection<F: FnOnce(&mut GovernanceAuthorityProof)>(
     let gh = ctx.h.genesis_hex();
     let policy = governance_proof_policy_from_cli_or_env(true);
     let inputs = make_inputs(&ctx.marker_path, &gh, &ctx.r2, &ctx.ratified2);
-    let err = shim_run(inputs, policy, &load_status).err().expect("rejection expected");
+    let err = shim_run(inputs, policy, &load_status)
+        .err()
+        .expect("rejection expected");
     // Marker must still be the seed bytes (no mutation).
     assert_eq!(
         ctx.seed_bytes,
@@ -1398,7 +1438,12 @@ fn run176_validation_only_surface_writes_nothing_on_accept_or_reject() {
 
     // Accept under NotRequired + Absent (no seed: marker file must
     // not appear).
-    let r = h.build_v2(&h.signing_pk_a, 1, BundleSigningRatificationV2Action::Ratify, None);
+    let r = h.build_v2(
+        &h.signing_pk_a,
+        1,
+        BundleSigningRatificationV2Action::Ratify,
+        None,
+    );
     let ratified = h.verify_v2(&r);
     let env_no_proof = make_wire_envelope(&h, None);
     let gh = h.genesis_hex();
@@ -1465,9 +1510,12 @@ fn source_reachability_live_0x05_carrier_reaches_governance_gate() {
     let env_legacy = make_wire_envelope(&h, None);
     let policy_default = governance_proof_policy_from_cli_or_env(false);
     let inputs_default = make_inputs(&marker_path, &gh, &r2, &ratified2);
-    let _ok =
-        shim_run(inputs_default, policy_default, &env_legacy.governance_proof_load_status())
-            .expect("default selector accepts no-proof live envelope");
+    let _ok = shim_run(
+        inputs_default,
+        policy_default,
+        &env_legacy.governance_proof_load_status(),
+    )
+    .expect("default selector accepts no-proof live envelope");
 
     // Required + Absent → RequiredButMissing.
     let policy_required = governance_proof_policy_from_cli_or_env(true);
@@ -1505,7 +1553,10 @@ fn source_reachability_live_0x05_carrier_reaches_governance_gate() {
     .expect("Required + Available reaches gate Available context and accepts");
 
     // The seeded marker is unchanged through every transition above.
-    assert_eq!(__seed_bytes, std::fs::read(&marker_path).expect("re-read marker"));
+    assert_eq!(
+        __seed_bytes,
+        std::fs::read(&marker_path).expect("re-read marker")
+    );
 }
 
 // ---------------------------------------------------------------------------

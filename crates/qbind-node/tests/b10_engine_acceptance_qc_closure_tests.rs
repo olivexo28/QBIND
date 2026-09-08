@@ -338,34 +338,39 @@ async fn b10_a_pre_fix_run_008_shape_reproduces_in_tree() {
     }
     impl ConsensusNetworkFacade for SelectiveConnectFacade {
         fn send_vote_to(&self, _t: ValidatorId, vote: &Vote) -> Result<(), NetworkError> {
-            if self.votes_connected.load(std::sync::atomic::Ordering::Relaxed) {
-                let _ = self
-                    .peer_inbound
-                    .try_send(InboundConsensusEnvelope::from(ConsensusNetMsg::Vote(encode(vote))));
+            if self
+                .votes_connected
+                .load(std::sync::atomic::Ordering::Relaxed)
+            {
+                let _ = self.peer_inbound.try_send(InboundConsensusEnvelope::from(
+                    ConsensusNetMsg::Vote(encode(vote)),
+                ));
             }
             Ok(())
         }
         fn broadcast_vote(&self, vote: &Vote) -> Result<(), NetworkError> {
-            if self.votes_connected.load(std::sync::atomic::Ordering::Relaxed) {
-                let _ = self
-                    .peer_inbound
-                    .try_send(InboundConsensusEnvelope::from(ConsensusNetMsg::Vote(encode(vote))));
+            if self
+                .votes_connected
+                .load(std::sync::atomic::Ordering::Relaxed)
+            {
+                let _ = self.peer_inbound.try_send(InboundConsensusEnvelope::from(
+                    ConsensusNetMsg::Vote(encode(vote)),
+                ));
             }
             Ok(())
         }
         fn broadcast_proposal(&self, proposal: &BlockProposal) -> Result<(), NetworkError> {
-            if self.proposals_connected.load(std::sync::atomic::Ordering::Relaxed) {
-                let _ = self
-                    .peer_inbound
-                    .try_send(InboundConsensusEnvelope::from(ConsensusNetMsg::Proposal(encode(proposal))));
+            if self
+                .proposals_connected
+                .load(std::sync::atomic::Ordering::Relaxed)
+            {
+                let _ = self.peer_inbound.try_send(InboundConsensusEnvelope::from(
+                    ConsensusNetMsg::Proposal(encode(proposal)),
+                ));
             }
             Ok(())
         }
-        fn send_timeout_msg(
-            &self,
-            _t: PeerId,
-            _b: Vec<u8>,
-        ) -> Result<(), NetworkError> {
+        fn send_timeout_msg(&self, _t: PeerId, _b: Vec<u8>) -> Result<(), NetworkError> {
             Ok(())
         }
     }
@@ -418,18 +423,10 @@ async fn b10_a_pre_fix_run_008_shape_reproduces_in_tree() {
     let metrics_v0 = Arc::new(NodeMetrics::new());
     let metrics_v1 = Arc::new(NodeMetrics::new());
 
-    let (handle_v0, _progress_v0) = spawn_binary_consensus_loop_with_io(
-        cfg_v0,
-        shutdown_rx_v0,
-        Arc::clone(&metrics_v0),
-        io_v0,
-    );
-    let (handle_v1, _progress_v1) = spawn_binary_consensus_loop_with_io(
-        cfg_v1,
-        shutdown_rx_v1,
-        Arc::clone(&metrics_v1),
-        io_v1,
-    );
+    let (handle_v0, _progress_v0) =
+        spawn_binary_consensus_loop_with_io(cfg_v0, shutdown_rx_v0, Arc::clone(&metrics_v0), io_v0);
+    let (handle_v1, _progress_v1) =
+        spawn_binary_consensus_loop_with_io(cfg_v1, shutdown_rx_v1, Arc::clone(&metrics_v1), io_v1);
 
     // Let V0 emit its first leader-step proposal+vote. Both are
     // dropped (Run-008 timing).
@@ -601,18 +598,10 @@ async fn b10_b_post_fix_engine_acceptance_qc_closure() {
     let metrics_v0 = Arc::new(NodeMetrics::new());
     let metrics_v1 = Arc::new(NodeMetrics::new());
 
-    let (handle_v0, _progress_v0) = spawn_binary_consensus_loop_with_io(
-        cfg_v0,
-        shutdown_rx_v0,
-        Arc::clone(&metrics_v0),
-        io_v0,
-    );
-    let (handle_v1, _progress_v1) = spawn_binary_consensus_loop_with_io(
-        cfg_v1,
-        shutdown_rx_v1,
-        Arc::clone(&metrics_v1),
-        io_v1,
-    );
+    let (handle_v0, _progress_v0) =
+        spawn_binary_consensus_loop_with_io(cfg_v0, shutdown_rx_v0, Arc::clone(&metrics_v0), io_v0);
+    let (handle_v1, _progress_v1) =
+        spawn_binary_consensus_loop_with_io(cfg_v1, shutdown_rx_v1, Arc::clone(&metrics_v1), io_v1);
 
     // Let V0 emit its first leader-step proposal+vote while disconnected.
     tokio::time::sleep(Duration::from_millis(40)).await;
@@ -904,8 +893,7 @@ async fn b10_d_late_peer_reconnect_churn_stays_single_shot() {
     };
     let (shutdown_tx, shutdown_rx) = watch::channel(());
     let metrics = Arc::new(NodeMetrics::new());
-    let (handle, progress) =
-        spawn_binary_consensus_loop_with_io(cfg, shutdown_rx, metrics, io);
+    let (handle, progress) = spawn_binary_consensus_loop_with_io(cfg, shutdown_rx, metrics, io);
 
     // Let V0 emit the initial proposal/vote (which now go straight
     // through because connected=true; but no peer is consuming from
@@ -962,16 +950,13 @@ async fn b10_e_io_none_single_validator_still_commits() {
         .with_max_ticks(50);
     let (_shutdown_tx, shutdown_rx) = watch::channel(());
     let metrics = Arc::new(NodeMetrics::new());
-    let progress = Arc::new(parking_lot::Mutex::new(BinaryConsensusLoopProgress::default()));
+    let progress = Arc::new(parking_lot::Mutex::new(
+        BinaryConsensusLoopProgress::default(),
+    ));
 
-    let final_progress = run_binary_consensus_loop_with_io(
-        cfg,
-        shutdown_rx,
-        progress,
-        Arc::clone(&metrics),
-        None,
-    )
-    .await;
+    let final_progress =
+        run_binary_consensus_loop_with_io(cfg, shutdown_rx, progress, Arc::clone(&metrics), None)
+            .await;
 
     assert!(
         final_progress.proposals_emitted >= 1,
@@ -998,6 +983,9 @@ async fn b10_e_io_none_single_validator_still_commits() {
     );
     // No inbound activity on io=None.
     assert_eq!(final_progress.inbound.inbound_msgs_received, 0);
-    assert_eq!(final_progress.inbound.outbound_proposal_late_peer_reemits, 0);
+    assert_eq!(
+        final_progress.inbound.outbound_proposal_late_peer_reemits,
+        0
+    );
     assert_eq!(final_progress.inbound.outbound_vote_late_peer_reemits, 0);
 }

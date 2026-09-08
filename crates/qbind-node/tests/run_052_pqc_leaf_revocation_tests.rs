@@ -47,11 +47,13 @@ use qbind_net::{
 };
 use qbind_node::metrics::{NodeMetrics, P2pMetrics};
 use qbind_node::pqc_devnet_helper::mint_devnet_root;
-use qbind_node::pqc_root_config::{PqcRootMode, PqcStaticRootConfig, PQC_TRANSPORT_SUITE_ML_DSA_44};
+use qbind_node::pqc_root_config::{
+    PqcRootMode, PqcStaticRootConfig, PQC_TRANSPORT_SUITE_ML_DSA_44,
+};
 use qbind_node::pqc_trust_bundle::{
     build_helper_bundle, cert_leaf_fingerprint, cert_leaf_fingerprint_hex, derive_signing_key_id,
-    sign_bundle_devnet_helper, BundleSignatureStatus, BundleSigningKeySet,
-    HelperBundleMode, TrustBundle, TrustBundleEnvironment, TrustBundleError, TrustBundleRevocation,
+    sign_bundle_devnet_helper, BundleSignatureStatus, BundleSigningKeySet, HelperBundleMode,
+    TrustBundle, TrustBundleEnvironment, TrustBundleError, TrustBundleRevocation,
     TRUST_BUNDLE_LEAF_FINGERPRINT_DOMAIN_SEPARATOR,
 };
 use qbind_types::NetworkEnvironment;

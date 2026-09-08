@@ -379,8 +379,9 @@ fn main() {
             && limiter.config().max_messages_per_second == 3;
         scenarios.push(Scenario {
             id: "04_combined_independence",
-            expected: "conn refusal doesn't admit; msg drop on admitted deployed path; counters distinct"
-                .to_string(),
+            expected:
+                "conn refusal doesn't admit; msg drop on admitted deployed path; counters distinct"
+                    .to_string(),
             actual: format!(
                 "first_admitted={} second_admitted={} conn_metric={} msg_allowed={} msg_dropped={}",
                 first_admitted, second_admitted, conn_metric_final, msg_allowed, msg_dropped
@@ -460,8 +461,8 @@ fn main() {
     // Scenario 6: mainnet_refused — an enabled MainNet abuse/DoS config is
     // refused (no production abuse/DoS policy), both directly and via the CLI.
     {
-        let direct = AbuseDosConfig::compatibility_default()
-            .with_environment(NetworkEnvironment::Mainnet);
+        let direct =
+            AbuseDosConfig::compatibility_default().with_environment(NetworkEnvironment::Mainnet);
         let r_direct = PublicDevnetAbuseDosRuntimeConfig::from_config({
             // Force an enabled/overridden config so validation reaches the
             // MainNet refusal rather than a trivial no-op default.
@@ -476,7 +477,11 @@ fn main() {
         scenarios.push(Scenario {
             id: "06_mainnet_refused",
             expected: "MainNet abuse/DoS config refused (direct + CLI)".to_string(),
-            actual: format!("direct_err={} cli_err={}", r_direct.is_err(), r_cli.is_err()),
+            actual: format!(
+                "direct_err={} cli_err={}",
+                r_direct.is_err(),
+                r_cli.is_err()
+            ),
             matched: ok,
             detail: "MainNet has no production abuse/DoS policy; an enabled MainNet \
                      config never validates and no runtime state or deployed peer \
@@ -517,8 +522,7 @@ fn main() {
         let ok = all_hidden && real_parse && invented_rejected;
         scenarios.push(Scenario {
             id: "07_cli_surface_hidden_and_parse_checked",
-            expected: "hidden flags absent from --help; real parse; invented rejected"
-                .to_string(),
+            expected: "hidden flags absent from --help; real parse; invented rejected".to_string(),
             actual: format!(
                 "all_hidden={} real_parse={} invented_rejected={}",
                 all_hidden, real_parse, invented_rejected
@@ -541,8 +545,14 @@ fn main() {
         let direct_pm = AsyncPeerManagerImpl::new(AsyncPeerManagerConfig::default());
         let ok = deployed_default.peer_rate_limiter_config.is_none()
             == direct_default.peer_rate_limiter_config.is_none()
-            && deployed_pm.peer_rate_limiter().config().max_messages_per_second
-                == direct_pm.peer_rate_limiter().config().max_messages_per_second
+            && deployed_pm
+                .peer_rate_limiter()
+                .config()
+                .max_messages_per_second
+                == direct_pm
+                    .peer_rate_limiter()
+                    .config()
+                    .max_messages_per_second
             && deployed_pm.peer_rate_limiter().config().burst_allowance
                 == direct_pm.peer_rate_limiter().config().burst_allowance;
         scenarios.push(Scenario {

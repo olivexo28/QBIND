@@ -355,9 +355,7 @@ fn parse_mode(s: &str) -> Mode {
         "wrong-environment" => Mode::Unsigned(HelperBundleMode::WrongEnvironment, None),
         "expired-bundle" => Mode::Unsigned(HelperBundleMode::ExpiredBundle, None),
         "expired-root" => Mode::Unsigned(HelperBundleMode::ExpiredRoot, None),
-        "root-revocation-listed" => {
-            Mode::Unsigned(HelperBundleMode::RootRevocationListed, None)
-        }
+        "root-revocation-listed" => Mode::Unsigned(HelperBundleMode::RootRevocationListed, None),
         "root-status-revoked" => Mode::Unsigned(HelperBundleMode::RootStatusRevoked, None),
         "duplicate-root" => Mode::Unsigned(HelperBundleMode::DuplicateRoot, None),
         "unsupported-suite" => Mode::Unsigned(HelperBundleMode::UnsupportedSuite, None),
@@ -371,11 +369,56 @@ fn parse_mode(s: &str) -> Mode {
             Some(TrustBundleEnvironment::Mainnet),
         ),
         // Run 051 signed fixtures.
-        "signed-devnet" => Mode::Signed(TrustBundleEnvironment::Devnet, SignedMode::Honest, LeafRevocationTarget::None, Run062RevocationGate { revocation_activation_height: None, emit_root_revocation: false, emit_second_unrelated_root: false }),
-        "signed-testnet" => Mode::Signed(TrustBundleEnvironment::Testnet, SignedMode::Honest, LeafRevocationTarget::None, Run062RevocationGate { revocation_activation_height: None, emit_root_revocation: false, emit_second_unrelated_root: false }),
-        "signed-mainnet" => Mode::Signed(TrustBundleEnvironment::Mainnet, SignedMode::Honest, LeafRevocationTarget::None, Run062RevocationGate { revocation_activation_height: None, emit_root_revocation: false, emit_second_unrelated_root: false }),
-        "signed-tampered" => Mode::Signed(TrustBundleEnvironment::Devnet, SignedMode::TamperRootAfterSigning, LeafRevocationTarget::None, Run062RevocationGate { revocation_activation_height: None, emit_root_revocation: false, emit_second_unrelated_root: false }),
-        "signed-wrong-key" => Mode::Signed(TrustBundleEnvironment::Devnet, SignedMode::WrongSigningKey, LeafRevocationTarget::None, Run062RevocationGate { revocation_activation_height: None, emit_root_revocation: false, emit_second_unrelated_root: false }),
+        "signed-devnet" => Mode::Signed(
+            TrustBundleEnvironment::Devnet,
+            SignedMode::Honest,
+            LeafRevocationTarget::None,
+            Run062RevocationGate {
+                revocation_activation_height: None,
+                emit_root_revocation: false,
+                emit_second_unrelated_root: false,
+            },
+        ),
+        "signed-testnet" => Mode::Signed(
+            TrustBundleEnvironment::Testnet,
+            SignedMode::Honest,
+            LeafRevocationTarget::None,
+            Run062RevocationGate {
+                revocation_activation_height: None,
+                emit_root_revocation: false,
+                emit_second_unrelated_root: false,
+            },
+        ),
+        "signed-mainnet" => Mode::Signed(
+            TrustBundleEnvironment::Mainnet,
+            SignedMode::Honest,
+            LeafRevocationTarget::None,
+            Run062RevocationGate {
+                revocation_activation_height: None,
+                emit_root_revocation: false,
+                emit_second_unrelated_root: false,
+            },
+        ),
+        "signed-tampered" => Mode::Signed(
+            TrustBundleEnvironment::Devnet,
+            SignedMode::TamperRootAfterSigning,
+            LeafRevocationTarget::None,
+            Run062RevocationGate {
+                revocation_activation_height: None,
+                emit_root_revocation: false,
+                emit_second_unrelated_root: false,
+            },
+        ),
+        "signed-wrong-key" => Mode::Signed(
+            TrustBundleEnvironment::Devnet,
+            SignedMode::WrongSigningKey,
+            LeafRevocationTarget::None,
+            Run062RevocationGate {
+                revocation_activation_height: None,
+                emit_root_revocation: false,
+                emit_second_unrelated_root: false,
+            },
+        ),
         // Run 059 MainNet evidence fixtures: same tamper / wrong-key
         // semantics as the existing DevNet-env signed-tampered /
         // signed-wrong-key modes, but emitted with
@@ -383,15 +426,87 @@ fn parse_mode(s: &str) -> Mode {
         // MainNet bundle path. The env is the only difference from
         // the existing DevNet-env modes; the per-mode signing /
         // tampering logic below is unchanged.
-        "signed-mainnet-tampered" => Mode::Signed(TrustBundleEnvironment::Mainnet, SignedMode::TamperRootAfterSigning, LeafRevocationTarget::None, Run062RevocationGate { revocation_activation_height: None, emit_root_revocation: false, emit_second_unrelated_root: false }),
-        "signed-mainnet-wrong-key" => Mode::Signed(TrustBundleEnvironment::Mainnet, SignedMode::WrongSigningKey, LeafRevocationTarget::None, Run062RevocationGate { revocation_activation_height: None, emit_root_revocation: false, emit_second_unrelated_root: false }),
-        "signed-unsupported-suite" => Mode::Signed(TrustBundleEnvironment::Devnet, SignedMode::UnsupportedSuite, LeafRevocationTarget::None, Run062RevocationGate { revocation_activation_height: None, emit_root_revocation: false, emit_second_unrelated_root: false }),
-        "signed-malformed" => Mode::Signed(TrustBundleEnvironment::Devnet, SignedMode::MalformedSignatureBytes, LeafRevocationTarget::None, Run062RevocationGate { revocation_activation_height: None, emit_root_revocation: false, emit_second_unrelated_root: false }),
-        "signed-key-root-collision" => Mode::Signed(TrustBundleEnvironment::Devnet, SignedMode::KeyRootCollision, LeafRevocationTarget::None, Run062RevocationGate { revocation_activation_height: None, emit_root_revocation: false, emit_second_unrelated_root: false }),
+        "signed-mainnet-tampered" => Mode::Signed(
+            TrustBundleEnvironment::Mainnet,
+            SignedMode::TamperRootAfterSigning,
+            LeafRevocationTarget::None,
+            Run062RevocationGate {
+                revocation_activation_height: None,
+                emit_root_revocation: false,
+                emit_second_unrelated_root: false,
+            },
+        ),
+        "signed-mainnet-wrong-key" => Mode::Signed(
+            TrustBundleEnvironment::Mainnet,
+            SignedMode::WrongSigningKey,
+            LeafRevocationTarget::None,
+            Run062RevocationGate {
+                revocation_activation_height: None,
+                emit_root_revocation: false,
+                emit_second_unrelated_root: false,
+            },
+        ),
+        "signed-unsupported-suite" => Mode::Signed(
+            TrustBundleEnvironment::Devnet,
+            SignedMode::UnsupportedSuite,
+            LeafRevocationTarget::None,
+            Run062RevocationGate {
+                revocation_activation_height: None,
+                emit_root_revocation: false,
+                emit_second_unrelated_root: false,
+            },
+        ),
+        "signed-malformed" => Mode::Signed(
+            TrustBundleEnvironment::Devnet,
+            SignedMode::MalformedSignatureBytes,
+            LeafRevocationTarget::None,
+            Run062RevocationGate {
+                revocation_activation_height: None,
+                emit_root_revocation: false,
+                emit_second_unrelated_root: false,
+            },
+        ),
+        "signed-key-root-collision" => Mode::Signed(
+            TrustBundleEnvironment::Devnet,
+            SignedMode::KeyRootCollision,
+            LeafRevocationTarget::None,
+            Run062RevocationGate {
+                revocation_activation_height: None,
+                emit_root_revocation: false,
+                emit_second_unrelated_root: false,
+            },
+        ),
         // Run 054 signed-bundle leaf-revocation fixtures.
-        "signed-devnet-revoked-v0" => Mode::Signed(TrustBundleEnvironment::Devnet, SignedMode::Honest, LeafRevocationTarget::Validator(0), Run062RevocationGate { revocation_activation_height: None, emit_root_revocation: false, emit_second_unrelated_root: false }),
-        "signed-devnet-revoked-v1" => Mode::Signed(TrustBundleEnvironment::Devnet, SignedMode::Honest, LeafRevocationTarget::Validator(1), Run062RevocationGate { revocation_activation_height: None, emit_root_revocation: false, emit_second_unrelated_root: false }),
-        "signed-devnet-revoked-unknown" => Mode::Signed(TrustBundleEnvironment::Devnet, SignedMode::Honest, LeafRevocationTarget::UnknownAllZeros, Run062RevocationGate { revocation_activation_height: None, emit_root_revocation: false, emit_second_unrelated_root: false }),
+        "signed-devnet-revoked-v0" => Mode::Signed(
+            TrustBundleEnvironment::Devnet,
+            SignedMode::Honest,
+            LeafRevocationTarget::Validator(0),
+            Run062RevocationGate {
+                revocation_activation_height: None,
+                emit_root_revocation: false,
+                emit_second_unrelated_root: false,
+            },
+        ),
+        "signed-devnet-revoked-v1" => Mode::Signed(
+            TrustBundleEnvironment::Devnet,
+            SignedMode::Honest,
+            LeafRevocationTarget::Validator(1),
+            Run062RevocationGate {
+                revocation_activation_height: None,
+                emit_root_revocation: false,
+                emit_second_unrelated_root: false,
+            },
+        ),
+        "signed-devnet-revoked-unknown" => Mode::Signed(
+            TrustBundleEnvironment::Devnet,
+            SignedMode::Honest,
+            LeafRevocationTarget::UnknownAllZeros,
+            Run062RevocationGate {
+                revocation_activation_height: None,
+                emit_root_revocation: false,
+                emit_second_unrelated_root: false,
+            },
+        ),
         // Run 062 leaf-revocation activation gates. The
         // `[revocation_activation_height_for_target]` positional arg
         // (see `main` below) sets the `activation_height` field on
@@ -535,16 +650,16 @@ fn main() {
     // wraps whether the positional was supplied; the inner
     // `Option<u64>` is the value to write into
     // `bundle.activation_height`.
-    let activation_height_override: Option<Option<u64>> = args.next().map(|s| {
-        if s.eq_ignore_ascii_case("none") {
-            None
-        } else {
-            Some(
-                s.parse::<u64>()
-                    .expect("optional [activation_height_override] must be a u64 decimal or 'none'"),
-            )
-        }
-    });
+    let activation_height_override: Option<Option<u64>> =
+        args.next().map(|s| {
+            if s.eq_ignore_ascii_case("none") {
+                None
+            } else {
+                Some(s.parse::<u64>().expect(
+                    "optional [activation_height_override] must be a u64 decimal or 'none'",
+                ))
+            }
+        });
     // Run 059: optional bundle `chain_id` override. The string `none`
     // forces `chain_id = null` explicitly; any other value is written
     // verbatim into the bundle (the loader parses it the same way it
@@ -624,8 +739,7 @@ fn main() {
         fs::write(format!("{}/v{}.leaf-fp.hex", outdir, vid), &leaf_fp_hex)
             .expect("write v{vid}.leaf-fp.hex");
 
-        fs::write(format!("{}/v{}.cert.bin", outdir, vid), encode_cert(&cert))
-            .expect("write cert");
+        fs::write(format!("{}/v{}.cert.bin", outdir, vid), encode_cert(&cert)).expect("write cert");
 
         let sk_path = format!("{}/v{}.kem.sk.bin", outdir, vid);
         fs::write(&sk_path, &kem_sk).expect("write kem sk");
@@ -838,8 +952,8 @@ fn main() {
             };
 
             // Sign the bundle.
-            let mut sig = sign_bundle_devnet_helper(&b, signing_id, &signing_sk)
-                .expect("sign trust bundle");
+            let mut sig =
+                sign_bundle_devnet_helper(&b, signing_id, &signing_sk).expect("sign trust bundle");
 
             // Apply post-signing tampering as requested.
             match signed_mode {
@@ -862,16 +976,10 @@ fn main() {
             b.signature = Some(sig);
 
             // Write signing-key fixtures.
-            fs::write(
-                format!("{}/signing-key.id.hex", outdir),
-                &pub_id_hex,
-            )
-            .expect("write signing-key.id.hex");
-            fs::write(
-                format!("{}/signing-key.pk.hex", outdir),
-                &pub_pk_hex,
-            )
-            .expect("write signing-key.pk.hex");
+            fs::write(format!("{}/signing-key.id.hex", outdir), &pub_id_hex)
+                .expect("write signing-key.id.hex");
+            fs::write(format!("{}/signing-key.pk.hex", outdir), &pub_pk_hex)
+                .expect("write signing-key.pk.hex");
             let signing_spec = format!(
                 "{}:{}:{}",
                 pub_id_hex, PQC_TRANSPORT_SUITE_ML_DSA_44, pub_pk_hex

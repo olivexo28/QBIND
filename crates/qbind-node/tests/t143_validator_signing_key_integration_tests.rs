@@ -15,8 +15,8 @@ use qbind_consensus::ids::ValidatorId;
 use qbind_crypto::consensus_sig::ConsensusSigVerifier;
 use qbind_crypto::ml_dsa44::{MlDsa44Backend, ValidatorSigningKey, ML_DSA_44_SECRET_KEY_SIZE};
 use qbind_net::{
-    ClientConnectionConfig, ClientHandshakeConfig, KemPrivateKey, MutualAuthMode, ServerConnectionConfig,
-    ServerHandshakeConfig,
+    ClientConnectionConfig, ClientHandshakeConfig, KemPrivateKey, MutualAuthMode,
+    ServerConnectionConfig, ServerHandshakeConfig,
 };
 use qbind_node::hotstuff_node_sim::NodeHotstuffHarness;
 use qbind_node::validator_config::{

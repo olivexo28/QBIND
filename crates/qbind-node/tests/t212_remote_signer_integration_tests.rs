@@ -58,19 +58,19 @@ fn make_test_signer(validator_id: ValidatorId) -> (Vec<u8>, Arc<LocalKeySigner>)
 fn encode_request(request: &RemoteSignRequest) -> Vec<u8> {
     let domain_tag = b"QBIND:remote-signer:v1";
     let mut buf = Vec::with_capacity(domain_tag.len() + 32 + request.preimage.len());
-    
+
     // Domain tag
     buf.extend_from_slice(domain_tag);
-    
+
     // request_id
     buf.extend_from_slice(&request.request_id.to_le_bytes());
-    
+
     // validator_id
     buf.extend_from_slice(&request.validator_id.as_u64().to_le_bytes());
-    
+
     // suite_id
     buf.extend_from_slice(&request.suite_id.to_le_bytes());
-    
+
     // kind (using message_type constants)
     let kind_byte = match request.kind {
         RemoteSignRequestKind::Proposal => 0x01u8,
@@ -78,7 +78,7 @@ fn encode_request(request: &RemoteSignRequest) -> Vec<u8> {
         RemoteSignRequestKind::Timeout => 0x03u8,
     };
     buf.push(kind_byte);
-    
+
     // view
     if let Some(v) = request.view {
         buf.push(1u8);
@@ -87,7 +87,7 @@ fn encode_request(request: &RemoteSignRequest) -> Vec<u8> {
         buf.push(0u8);
         buf.extend_from_slice(&[0u8; 8]);
     }
-    
+
     // preimage_len and preimage
     buf.extend_from_slice(&(request.preimage.len() as u32).to_le_bytes());
     buf.extend_from_slice(&request.preimage);
@@ -165,33 +165,52 @@ fn t212_request_encode_proposal() {
 
     // M10: Validate structure starts with domain tag
     let domain_tag = b"QBIND:remote-signer:v1";
-    assert!(encoded.len() >= domain_tag.len() + 32 + 4, "encoded too short");
-    
+    assert!(
+        encoded.len() >= domain_tag.len() + 32 + 4,
+        "encoded too short"
+    );
+
     // Verify domain tag prefix
-    assert_eq!(&encoded[..domain_tag.len()], domain_tag, "domain tag mismatch");
+    assert_eq!(
+        &encoded[..domain_tag.len()],
+        domain_tag,
+        "domain tag mismatch"
+    );
 
     let offset = domain_tag.len();
 
     // Decode request_id
     let request_id = u64::from_le_bytes([
-        encoded[offset], encoded[offset+1], encoded[offset+2], encoded[offset+3],
-        encoded[offset+4], encoded[offset+5], encoded[offset+6], encoded[offset+7],
+        encoded[offset],
+        encoded[offset + 1],
+        encoded[offset + 2],
+        encoded[offset + 3],
+        encoded[offset + 4],
+        encoded[offset + 5],
+        encoded[offset + 6],
+        encoded[offset + 7],
     ]);
     assert_eq!(request_id, 1);
 
     // Decode validator_id
     let validator_id = u64::from_le_bytes([
-        encoded[offset+8], encoded[offset+9], encoded[offset+10], encoded[offset+11],
-        encoded[offset+12], encoded[offset+13], encoded[offset+14], encoded[offset+15],
+        encoded[offset + 8],
+        encoded[offset + 9],
+        encoded[offset + 10],
+        encoded[offset + 11],
+        encoded[offset + 12],
+        encoded[offset + 13],
+        encoded[offset + 14],
+        encoded[offset + 15],
     ]);
     assert_eq!(validator_id, 42);
 
     // Decode suite_id
-    let suite_id = u16::from_le_bytes([encoded[offset+16], encoded[offset+17]]);
+    let suite_id = u16::from_le_bytes([encoded[offset + 16], encoded[offset + 17]]);
     assert_eq!(suite_id, 100);
 
     // Decode kind (using message_type)
-    assert_eq!(encoded[offset+18], 0x01); // SIGN_PROPOSAL
+    assert_eq!(encoded[offset + 18], 0x01); // SIGN_PROPOSAL
 }
 
 #[test]
@@ -210,15 +229,21 @@ fn t212_request_encode_vote_with_view() {
     let offset = domain_tag.len();
 
     // Validate kind
-    assert_eq!(encoded[offset+18], 0x02); // SIGN_VOTE
+    assert_eq!(encoded[offset + 18], 0x02); // SIGN_VOTE
 
     // Validate view_present
-    assert_eq!(encoded[offset+19], 1);
+    assert_eq!(encoded[offset + 19], 1);
 
     // Validate view value
     let view = u64::from_le_bytes([
-        encoded[offset+20], encoded[offset+21], encoded[offset+22], encoded[offset+23],
-        encoded[offset+24], encoded[offset+25], encoded[offset+26], encoded[offset+27],
+        encoded[offset + 20],
+        encoded[offset + 21],
+        encoded[offset + 22],
+        encoded[offset + 23],
+        encoded[offset + 24],
+        encoded[offset + 25],
+        encoded[offset + 26],
+        encoded[offset + 27],
     ]);
     assert_eq!(view, 42);
 }
@@ -237,7 +262,7 @@ fn t212_request_encode_timeout() {
     let encoded = encode_request(&request);
     let domain_tag = b"QBIND:remote-signer:v1";
     let offset = domain_tag.len();
-    assert_eq!(encoded[offset+18], 0x03); // SIGN_TIMEOUT
+    assert_eq!(encoded[offset + 18], 0x03); // SIGN_TIMEOUT
 }
 
 #[test]
@@ -247,7 +272,7 @@ fn t212_response_decode_success() {
     data.extend_from_slice(&42u64.to_le_bytes()); // request_id
     data.extend_from_slice(&3u32.to_le_bytes()); // sig_len
     data.extend_from_slice(&[1, 2, 3]); // signature
-    
+
     let response = decode_response(&data).expect("decode failed");
 
     assert!(response.signature.is_some());
@@ -262,7 +287,7 @@ fn t212_response_decode_error() {
     let mut data = vec![1]; // status
     data.extend_from_slice(&123u64.to_le_bytes()); // request_id
     data.push(3); // error_code
-    
+
     let response = decode_response(&data).expect("decode failed");
 
     assert!(response.signature.is_none());
@@ -275,7 +300,7 @@ fn t212_response_decode_rate_limited() {
     let mut data = vec![1]; // status
     data.extend_from_slice(&1u64.to_le_bytes()); // request_id
     data.push(6); // error_code
-    
+
     let response = decode_response(&data).expect("decode failed");
     assert_eq!(response.error, Some(RemoteSignError::RateLimited));
 }
@@ -285,7 +310,7 @@ fn t212_response_decode_server_error() {
     let mut data = vec![1]; // status
     data.extend_from_slice(&1u64.to_le_bytes()); // request_id
     data.push(7); // error_code
-    
+
     let response = decode_response(&data).expect("decode failed");
     assert_eq!(response.error, Some(RemoteSignError::ServerError));
 }
@@ -296,7 +321,7 @@ fn t212_response_decode_replay_detected_m10() {
     let mut data = vec![1]; // status
     data.extend_from_slice(&1u64.to_le_bytes()); // request_id
     data.push(8); // error_code for ReplayDetected
-    
+
     let response = decode_response(&data).expect("decode failed");
     assert_eq!(response.error, Some(RemoteSignError::ReplayDetected));
 }

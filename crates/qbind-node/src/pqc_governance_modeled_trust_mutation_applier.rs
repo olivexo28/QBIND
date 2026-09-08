@@ -83,6 +83,7 @@
 use crate::pqc_governance_evaluator_replay_consume_boundary::surface_is_validation_only;
 // Imported so the `DurableMutationCompletion` intra-doc links resolve; the type
 // itself is reached transitively through [`MutationEngineDurableProjection`].
+use crate::pqc_authority_lifecycle::LocalLifecycleAction;
 #[allow(unused_imports)]
 use crate::pqc_governance_evaluator_replay_durable_backend::DurableMutationCompletion;
 use crate::pqc_governance_execution_mutation_engine::{
@@ -90,7 +91,6 @@ use crate::pqc_governance_execution_mutation_engine::{
     MutationEngineDurableProjection,
 };
 use crate::pqc_governance_execution_runtime_arming::GovernanceExecutionRuntimeSurface;
-use crate::pqc_authority_lifecycle::LocalLifecycleAction;
 use crate::pqc_trust_bundle::TrustBundleEnvironment;
 
 // ===========================================================================
@@ -1425,7 +1425,10 @@ pub fn peer_majority_cannot_satisfy_modeled_trust_applier_authority() -> bool {
 mod tests {
     use super::*;
 
-    fn mutation(action: ModeledTrustMutationAction, root_id: &str) -> ModeledGovernanceTrustMutation {
+    fn mutation(
+        action: ModeledTrustMutationAction,
+        root_id: &str,
+    ) -> ModeledGovernanceTrustMutation {
         ModeledGovernanceTrustMutation {
             action,
             root_id: root_id.to_string(),
@@ -1438,7 +1441,9 @@ mod tests {
         }
     }
 
-    fn env_binding(env: TrustBundleEnvironment) -> ModeledGovernanceTrustMutationEnvironmentBinding {
+    fn env_binding(
+        env: TrustBundleEnvironment,
+    ) -> ModeledGovernanceTrustMutationEnvironmentBinding {
         ModeledGovernanceTrustMutationEnvironmentBinding {
             environment: env,
             chain_id: "qbind-devnet".to_string(),
@@ -1502,8 +1507,7 @@ mod tests {
             GovernanceExecutionRuntimeSurface::ReloadApply,
         );
         let mut state = ModeledGovernanceTrustState::new();
-        let mut applier =
-            FixtureModeledTrustMutationApplier::new(TrustBundleEnvironment::Devnet);
+        let mut applier = FixtureModeledTrustMutationApplier::new(TrustBundleEnvironment::Devnet);
         let outcome = evaluate_modeled_trust_mutation(&input, &exp, &mut state, &mut applier);
         assert_eq!(outcome, ModeledTrustMutationOutcome::ModeledMutationApplied);
         assert!(state.contains_active("root-A"));
@@ -1533,8 +1537,7 @@ mod tests {
         );
         exp.expected_genesis_hash = "other-genesis".to_string();
         let mut state = ModeledGovernanceTrustState::new();
-        let mut applier =
-            FixtureModeledTrustMutationApplier::new(TrustBundleEnvironment::Devnet);
+        let mut applier = FixtureModeledTrustMutationApplier::new(TrustBundleEnvironment::Devnet);
         let outcome = evaluate_modeled_trust_mutation(&input, &exp, &mut state, &mut applier);
         assert!(matches!(
             outcome,

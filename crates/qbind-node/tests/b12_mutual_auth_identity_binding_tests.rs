@@ -57,11 +57,10 @@ fn make_p2p_test_config(
 ) -> qbind_node::node_config::NodeConfig {
     use qbind_ledger::{FeeDistributionPolicy, MonetaryMode, SeigniorageSplit};
     use qbind_node::node_config::{
-        DagCouplingMode, ExecutionProfile, FastSyncConfig, GenesisSourceConfig,
-        MempoolDosConfig, MempoolEvictionConfig, MempoolMode, NetworkMode,
-        NetworkTransportConfig, NodeConfig, P2pAntiEclipseConfig, P2pDiscoveryConfig,
-        P2pLivenessConfig, SignerFailureMode, SignerMode, SlashingConfig, SnapshotConfig,
-        StateRetentionConfig, ValidatorStakeConfig,
+        DagCouplingMode, ExecutionProfile, FastSyncConfig, GenesisSourceConfig, MempoolDosConfig,
+        MempoolEvictionConfig, MempoolMode, NetworkMode, NetworkTransportConfig, NodeConfig,
+        P2pAntiEclipseConfig, P2pDiscoveryConfig, P2pLivenessConfig, SignerFailureMode, SignerMode,
+        SlashingConfig, SnapshotConfig, StateRetentionConfig, ValidatorStakeConfig,
     };
     use qbind_node::p2p_diversity::DiversityEnforcementMode;
     use qbind_types::NetworkEnvironment;
@@ -254,8 +253,7 @@ async fn b12_a_two_node_mutual_auth_required_handshake_succeeds() {
         build_two_node_cluster(qbind_net::MutualAuthMode::Required).await;
 
     let (saw_v1_on_v0, saw_v0_on_v1) =
-        poll_peer_observability(&ctx_v0, &ctx_v1, nid_v0, nid_v1, Duration::from_secs(8))
-            .await;
+        poll_peer_observability(&ctx_v0, &ctx_v1, nid_v0, nid_v1, Duration::from_secs(8)).await;
 
     // Dialer-side closure (B7 shape, retained under B12).
     assert!(
@@ -396,8 +394,7 @@ async fn b12_c_bidirectional_message_delivery_under_required_mode() {
 
     // Wait for both directions to be observable.
     let (saw_v1_on_v0, saw_v0_on_v1) =
-        poll_peer_observability(&ctx_v0, &ctx_v1, nid_v0, nid_v1, Duration::from_secs(8))
-            .await;
+        poll_peer_observability(&ctx_v0, &ctx_v1, nid_v0, nid_v1, Duration::from_secs(8)).await;
     assert!(
         saw_v1_on_v0 && saw_v0_on_v1,
         "B12.C: bidirectional NodeId observability must hold before exercising send_to (got {} / {})",
@@ -415,9 +412,15 @@ async fn b12_c_bidirectional_message_delivery_under_required_mode() {
     // c4_b6 / b9 / b10 tests on top of this transport; here we only
     // need to confirm the transport accepts a payload under the new
     // mutual-auth-bound session.
-    use qbind_node::p2p::{P2pMessage, ControlMsg};
-    let msg_v0 = P2pMessage::Control(ControlMsg::Heartbeat { view: 0, timestamp_ms: 0 });
-    let msg_v1 = P2pMessage::Control(ControlMsg::Heartbeat { view: 0, timestamp_ms: 0 });
+    use qbind_node::p2p::{ControlMsg, P2pMessage};
+    let msg_v0 = P2pMessage::Control(ControlMsg::Heartbeat {
+        view: 0,
+        timestamp_ms: 0,
+    });
+    let msg_v1 = P2pMessage::Control(ControlMsg::Heartbeat {
+        view: 0,
+        timestamp_ms: 0,
+    });
 
     ctx_v0.p2p_service.broadcast(msg_v0);
     ctx_v1.p2p_service.broadcast(msg_v1);
@@ -444,8 +447,7 @@ async fn b12_d_disabled_mode_preserves_pre_b12_behaviour() {
         build_two_node_cluster(qbind_net::MutualAuthMode::Disabled).await;
 
     let (saw_v1_on_v0, saw_v0_on_v1) =
-        poll_peer_observability(&ctx_v0, &ctx_v1, nid_v0, nid_v1, Duration::from_secs(8))
-            .await;
+        poll_peer_observability(&ctx_v0, &ctx_v1, nid_v0, nid_v1, Duration::from_secs(8)).await;
 
     assert!(
         saw_v1_on_v0,

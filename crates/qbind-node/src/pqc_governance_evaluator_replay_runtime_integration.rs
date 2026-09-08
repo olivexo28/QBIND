@@ -450,10 +450,12 @@ where
     if outcome.is_proceed() {
         Ok(outcome)
     } else {
-        Err(GovernanceEvaluatorReplayRuntimeCallsiteFailClosed::from_outcome(
-            ctx.integration.surface,
-            outcome,
-        ))
+        Err(
+            GovernanceEvaluatorReplayRuntimeCallsiteFailClosed::from_outcome(
+                ctx.integration.surface,
+                outcome,
+            ),
+        )
     }
 }
 
@@ -614,12 +616,16 @@ mod tests {
 
     #[test]
     fn refusal_helpers_are_fail_closed() {
-        assert!(mainnet_peer_driven_apply_remains_refused_under_replay_runtime(
-            TrustBundleEnvironment::Mainnet
-        ));
-        assert!(!mainnet_peer_driven_apply_remains_refused_under_replay_runtime(
-            TrustBundleEnvironment::Devnet
-        ));
+        assert!(
+            mainnet_peer_driven_apply_remains_refused_under_replay_runtime(
+                TrustBundleEnvironment::Mainnet
+            )
+        );
+        assert!(
+            !mainnet_peer_driven_apply_remains_refused_under_replay_runtime(
+                TrustBundleEnvironment::Devnet
+            )
+        );
         assert!(fresh_replay_state_required_before_mutation());
         assert!(deferred_is_never_mutation_approval());
         assert!(production_mainnet_replay_state_remains_unavailable());

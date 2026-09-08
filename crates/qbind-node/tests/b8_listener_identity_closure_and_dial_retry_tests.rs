@@ -76,11 +76,10 @@ fn make_p2p_test_config(
 ) -> qbind_node::node_config::NodeConfig {
     use qbind_ledger::{FeeDistributionPolicy, MonetaryMode, SeigniorageSplit};
     use qbind_node::node_config::{
-        DagCouplingMode, ExecutionProfile, FastSyncConfig, GenesisSourceConfig,
-        MempoolDosConfig, MempoolEvictionConfig, MempoolMode, NetworkMode,
-        NetworkTransportConfig, NodeConfig, P2pAntiEclipseConfig, P2pDiscoveryConfig,
-        P2pLivenessConfig, SignerFailureMode, SignerMode, SlashingConfig, SnapshotConfig,
-        StateRetentionConfig, ValidatorStakeConfig,
+        DagCouplingMode, ExecutionProfile, FastSyncConfig, GenesisSourceConfig, MempoolDosConfig,
+        MempoolEvictionConfig, MempoolMode, NetworkMode, NetworkTransportConfig, NodeConfig,
+        P2pAntiEclipseConfig, P2pDiscoveryConfig, P2pLivenessConfig, SignerFailureMode, SignerMode,
+        SlashingConfig, SnapshotConfig, StateRetentionConfig, ValidatorStakeConfig,
     };
     use qbind_node::p2p_diversity::DiversityEnforcementMode;
     use qbind_types::NetworkEnvironment;
@@ -275,8 +274,7 @@ async fn b8_b_listener_side_accepted_session_bound_to_deterministic_node_id() {
     let nid_v1 = derive_test_node_id_from_validator_id(1);
 
     let (saw_v1_on_v0, saw_v0_on_v1) =
-        poll_peer_observability(&ctx_v0, &ctx_v1, nid_v0, nid_v1, Duration::from_secs(8))
-            .await;
+        poll_peer_observability(&ctx_v0, &ctx_v1, nid_v0, nid_v1, Duration::from_secs(8)).await;
 
     // Dialer-side closure (B7) — kept as a sanity check.
     assert!(
@@ -356,8 +354,7 @@ async fn b8_c_initial_dial_retry_recovers_from_stagger() {
     // (default ~5.5s wall-clock).
     let nid_v0 = derive_test_node_id_from_validator_id(0);
     let (saw_v1_on_v0, _) =
-        poll_peer_observability(&ctx_v0, &ctx_v1, nid_v0, nid_v1, Duration::from_secs(8))
-            .await;
+        poll_peer_observability(&ctx_v0, &ctx_v1, nid_v0, nid_v1, Duration::from_secs(8)).await;
     assert!(
         saw_v1_on_v0,
         "B8.C: after V1 comes up, V0's background dialer task must have retried \
@@ -413,8 +410,7 @@ async fn b8_d_two_node_bidirectional_send_precondition_holds() {
     let nid_v0 = derive_test_node_id_from_validator_id(0);
     let nid_v1 = derive_test_node_id_from_validator_id(1);
     let (saw_v1_on_v0, saw_v0_on_v1) =
-        poll_peer_observability(&ctx_v0, &ctx_v1, nid_v0, nid_v1, Duration::from_secs(8))
-            .await;
+        poll_peer_observability(&ctx_v0, &ctx_v1, nid_v0, nid_v1, Duration::from_secs(8)).await;
 
     assert!(
         saw_v1_on_v0 && saw_v0_on_v1,

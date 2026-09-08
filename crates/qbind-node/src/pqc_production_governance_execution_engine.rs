@@ -176,9 +176,7 @@ impl ProductionGovernanceExecutionEnginePolicy {
             Self::AllowSourceTestVerifiedGovernanceExecution => {
                 "allow-source-test-verified-governance-execution"
             }
-            Self::RequireProductionGovernanceExecution => {
-                "require-production-governance-execution"
-            }
+            Self::RequireProductionGovernanceExecution => "require-production-governance-execution",
             Self::MainnetProductionGovernanceExecutionRequired => {
                 "mainnet-production-governance-execution-required"
             }
@@ -232,12 +230,8 @@ impl ProductionGovernanceExecutionEngineKind {
     pub const fn tag(self) -> &'static str {
         match self {
             Self::Disabled => "disabled",
-            Self::SourceTestGovernanceExecutionEngine => {
-                "source-test-governance-execution-engine"
-            }
-            Self::ProductionGovernanceExecutionEngine => {
-                "production-governance-execution-engine"
-            }
+            Self::SourceTestGovernanceExecutionEngine => "source-test-governance-execution-engine",
+            Self::ProductionGovernanceExecutionEngine => "production-governance-execution-engine",
         }
     }
 
@@ -468,9 +462,17 @@ impl GovernanceExecutionCustodyBinding {
     }
 
     fn hash_into(&self, h: &mut sha3::Sha3_256) {
-        hash_field(h, b"custody_provider_class", self.provider_class.tag().as_bytes());
+        hash_field(
+            h,
+            b"custody_provider_class",
+            self.provider_class.tag().as_bytes(),
+        );
         hash_field(h, b"custody_key_handle", self.key_handle.as_bytes());
-        hash_field(h, b"custody_signer_fingerprint", self.signer_fingerprint.as_bytes());
+        hash_field(
+            h,
+            b"custody_signer_fingerprint",
+            self.signer_fingerprint.as_bytes(),
+        );
         hash_field(
             h,
             b"custody_transcript_digest",
@@ -520,7 +522,11 @@ impl GovernanceExecutionDurableReplayBinding {
 
     fn hash_into(&self, h: &mut sha3::Sha3_256) {
         hash_field(h, b"durable_record_id", self.durable_record_id.as_bytes());
-        hash_field(h, b"durable_record_digest", self.durable_record_digest.as_bytes());
+        hash_field(
+            h,
+            b"durable_record_digest",
+            self.durable_record_digest.as_bytes(),
+        );
     }
 }
 
@@ -749,9 +755,21 @@ impl ProductionGovernanceExecutionIntent {
         let mut h = Sha3_256::new();
         h.update(PRODUCTION_GOVERNANCE_EXECUTION_INTENT_DOMAIN_TAG.as_bytes());
         hash_field(&mut h, b"intent_kind", self.intent_kind.tag().as_bytes());
-        hash_field(&mut h, b"protocol_version", &self.protocol_version.to_le_bytes());
-        hash_field(&mut h, b"execution_policy_id", self.execution_policy_id.as_bytes());
-        hash_field(&mut h, b"environment", &self.environment.metric_code().to_le_bytes());
+        hash_field(
+            &mut h,
+            b"protocol_version",
+            &self.protocol_version.to_le_bytes(),
+        );
+        hash_field(
+            &mut h,
+            b"execution_policy_id",
+            self.execution_policy_id.as_bytes(),
+        );
+        hash_field(
+            &mut h,
+            b"environment",
+            &self.environment.metric_code().to_le_bytes(),
+        );
         hash_field(&mut h, b"chain_id", self.chain_id.as_bytes());
         hash_field(&mut h, b"genesis_hash", self.genesis_hash.as_bytes());
         hash_field(
@@ -759,10 +777,26 @@ impl ProductionGovernanceExecutionIntent {
             b"authority_root_fingerprint",
             self.authority_root_fingerprint.as_bytes(),
         );
-        hash_field(&mut h, b"authority_root_suite_id", &[self.authority_root_suite_id]);
-        hash_field(&mut h, b"governance_domain_id", self.governance_domain_id.as_bytes());
-        hash_field(&mut h, b"governance_epoch", &self.governance_epoch.to_le_bytes());
-        hash_field(&mut h, b"governance_height", &self.governance_height.to_le_bytes());
+        hash_field(
+            &mut h,
+            b"authority_root_suite_id",
+            &[self.authority_root_suite_id],
+        );
+        hash_field(
+            &mut h,
+            b"governance_domain_id",
+            self.governance_domain_id.as_bytes(),
+        );
+        hash_field(
+            &mut h,
+            b"governance_epoch",
+            &self.governance_epoch.to_le_bytes(),
+        );
+        hash_field(
+            &mut h,
+            b"governance_height",
+            &self.governance_height.to_le_bytes(),
+        );
         hash_field(&mut h, b"proposal_id", self.proposal_id.as_bytes());
         hash_field(&mut h, b"proposal_digest", self.proposal_digest.as_bytes());
         hash_field(
@@ -770,22 +804,62 @@ impl ProductionGovernanceExecutionIntent {
             b"proposal_outcome",
             proposal_outcome_tag(self.proposal_outcome).as_bytes(),
         );
-        hash_field(&mut h, b"quorum_voted", &self.quorum.voters_voted.to_le_bytes());
-        hash_field(&mut h, b"quorum_total", &self.quorum.total_voters.to_le_bytes());
-        hash_field(&mut h, b"quorum_required", &self.quorum.required_quorum.to_le_bytes());
-        hash_field(&mut h, b"threshold_approvals", &self.threshold.approvals.to_le_bytes());
-        hash_field(&mut h, b"threshold_required", &self.threshold.required.to_le_bytes());
-        hash_field(&mut h, b"threshold_total", &self.threshold.total.to_le_bytes());
-        hash_field(&mut h, b"lifecycle_action", self.lifecycle_action.tag().as_bytes());
-        hash_field(&mut h, b"requested_operation", self.requested_operation.tag().as_bytes());
-        hash_field(&mut h, b"candidate_v2_digest", self.candidate_v2_digest.as_bytes());
+        hash_field(
+            &mut h,
+            b"quorum_voted",
+            &self.quorum.voters_voted.to_le_bytes(),
+        );
+        hash_field(
+            &mut h,
+            b"quorum_total",
+            &self.quorum.total_voters.to_le_bytes(),
+        );
+        hash_field(
+            &mut h,
+            b"quorum_required",
+            &self.quorum.required_quorum.to_le_bytes(),
+        );
+        hash_field(
+            &mut h,
+            b"threshold_approvals",
+            &self.threshold.approvals.to_le_bytes(),
+        );
+        hash_field(
+            &mut h,
+            b"threshold_required",
+            &self.threshold.required.to_le_bytes(),
+        );
+        hash_field(
+            &mut h,
+            b"threshold_total",
+            &self.threshold.total.to_le_bytes(),
+        );
+        hash_field(
+            &mut h,
+            b"lifecycle_action",
+            self.lifecycle_action.tag().as_bytes(),
+        );
+        hash_field(
+            &mut h,
+            b"requested_operation",
+            self.requested_operation.tag().as_bytes(),
+        );
+        hash_field(
+            &mut h,
+            b"candidate_v2_digest",
+            self.candidate_v2_digest.as_bytes(),
+        );
         hash_field(
             &mut h,
             b"authority_domain_sequence",
             &self.authority_domain_sequence.to_le_bytes(),
         );
         hash_field(&mut h, b"decision_id", self.decision_id.as_bytes());
-        hash_field(&mut h, b"proof_transcript_digest", self.proof_transcript_digest.as_bytes());
+        hash_field(
+            &mut h,
+            b"proof_transcript_digest",
+            self.proof_transcript_digest.as_bytes(),
+        );
         hash_field(&mut h, b"proof_digest", self.proof_digest.as_bytes());
         hash_field(
             &mut h,
@@ -845,8 +919,16 @@ pub fn production_governance_execution_request_id(
     h.update(PRODUCTION_GOVERNANCE_EXECUTION_REQUEST_DOMAIN_TAG.as_bytes());
     hash_field(&mut h, b"protocol_version", &protocol_version.to_le_bytes());
     hash_field(&mut h, b"decision_id", decision_id.as_bytes());
-    hash_field(&mut h, b"proof_transcript_digest", proof_transcript_digest.as_bytes());
-    hash_field(&mut h, b"execution_policy_id", execution_policy_id.as_bytes());
+    hash_field(
+        &mut h,
+        b"proof_transcript_digest",
+        proof_transcript_digest.as_bytes(),
+    );
+    hash_field(
+        &mut h,
+        b"execution_policy_id",
+        execution_policy_id.as_bytes(),
+    );
     hex::encode(h.finalize())
 }
 
@@ -937,13 +1019,17 @@ pub enum ProductionGovernanceExecutionOutcome {
     DurableReplayUnavailable,
 
     // ---- Replay / freshness / action ----------------------------------
-    DecisionReplayRejected { decision_id: String },
+    DecisionReplayRejected {
+        decision_id: String,
+    },
     StaleGovernanceEpoch,
     StaleAuthoritySequence,
     ConflictingIntentForSameDecision,
     UnsupportedLifecycleAction,
     ValidatorSetRotationUnsupported,
-    GovernanceExecutionAmbiguous { reason: String },
+    GovernanceExecutionAmbiguous {
+        reason: String,
+    },
     MainNetRefused,
 }
 

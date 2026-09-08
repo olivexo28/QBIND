@@ -179,12 +179,12 @@ impl BackendKind {
     /// `None` for the inert / unknown kinds.
     pub const fn custody_class(self) -> Option<AuthorityCustodyClass> {
         match self {
-            Self::FixtureKms
-            | Self::CloudKmsUnavailable
-            | Self::ProductionKmsUnavailable => Some(AuthorityCustodyClass::Kms),
-            Self::FixtureHsm
-            | Self::Pkcs11HsmUnavailable
-            | Self::ProductionHsmUnavailable => Some(AuthorityCustodyClass::Hsm),
+            Self::FixtureKms | Self::CloudKmsUnavailable | Self::ProductionKmsUnavailable => {
+                Some(AuthorityCustodyClass::Kms)
+            }
+            Self::FixtureHsm | Self::Pkcs11HsmUnavailable | Self::ProductionHsmUnavailable => {
+                Some(AuthorityCustodyClass::Hsm)
+            }
             Self::Disabled | Self::Unknown => None,
         }
     }
@@ -350,7 +350,10 @@ impl BackendIdentity {
             b"bundle_signing_key_fingerprint",
             self.bundle_signing_key_fingerprint.as_bytes(),
         );
-        field(b"environment", &self.environment.metric_code().to_le_bytes());
+        field(
+            b"environment",
+            &self.environment.metric_code().to_le_bytes(),
+        );
         field(b"chain_id", self.chain_id.as_bytes());
         field(b"genesis_hash", self.genesis_hash.as_bytes());
         field(b"suite_id", &[self.suite_id]);
@@ -463,7 +466,10 @@ impl BackendRequest {
             h.update((value.len() as u64).to_le_bytes());
             h.update(value);
         };
-        field(b"environment", &self.environment.metric_code().to_le_bytes());
+        field(
+            b"environment",
+            &self.environment.metric_code().to_le_bytes(),
+        );
         field(b"chain_id", self.chain_id.as_bytes());
         field(b"genesis_hash", self.genesis_hash.as_bytes());
         field(
@@ -586,12 +592,18 @@ impl BackendResponse {
             h.update(value);
         };
         field(b"backend_kind", self.backend_kind.tag().as_bytes());
-        field(b"bound_request_digest", self.bound_request_digest.as_bytes());
+        field(
+            b"bound_request_digest",
+            self.bound_request_digest.as_bytes(),
+        );
         field(b"backend_id", self.backend_id.as_bytes());
         field(b"provider_id", self.provider_id.as_bytes());
         field(b"key_id", self.key_id.as_bytes());
         field(b"signature_suite_id", &[self.signature_suite_id]);
-        field(b"signature_commitment", self.signature_commitment.as_bytes());
+        field(
+            b"signature_commitment",
+            self.signature_commitment.as_bytes(),
+        );
         field(b"attestation_digest", self.attestation_digest.as_bytes());
         field(b"response_nonce", self.response_nonce.as_bytes());
         field(
@@ -1155,12 +1167,8 @@ pub fn verify_authority_custody_backend_response(
     //    response is still unavailable (no real backend exists), and an
     //    unknown/disabled response is rejected.
     match response.backend_kind {
-        BackendKind::ProductionKmsUnavailable => {
-            return BackendOutcome::ProductionKmsUnavailable
-        }
-        BackendKind::ProductionHsmUnavailable => {
-            return BackendOutcome::ProductionHsmUnavailable
-        }
+        BackendKind::ProductionKmsUnavailable => return BackendOutcome::ProductionKmsUnavailable,
+        BackendKind::ProductionHsmUnavailable => return BackendOutcome::ProductionHsmUnavailable,
         BackendKind::CloudKmsUnavailable => return BackendOutcome::CloudKmsUnavailable,
         BackendKind::Pkcs11HsmUnavailable => return BackendOutcome::Pkcs11HsmUnavailable,
         BackendKind::Disabled | BackendKind::Unknown => {
@@ -1397,8 +1405,12 @@ pub fn verify_authority_custody_backend_response(
     }
 
     // 26. Identity attestation freshness/expiry window.
-    if within_optional_window(expected.now_unix, identity.freshness_unix, identity.expires_at_unix)
-        .is_err()
+    if within_optional_window(
+        expected.now_unix,
+        identity.freshness_unix,
+        identity.expires_at_unix,
+    )
+    .is_err()
     {
         return BackendOutcome::ExpiredAttestation {
             now_unix: expected.now_unix,
@@ -1406,8 +1418,12 @@ pub fn verify_authority_custody_backend_response(
     }
 
     // 27. Response freshness/expiry window.
-    if within_optional_window(expected.now_unix, response.freshness_unix, response.expires_at_unix)
-        .is_err()
+    if within_optional_window(
+        expected.now_unix,
+        response.freshness_unix,
+        response.expires_at_unix,
+    )
+    .is_err()
     {
         return BackendOutcome::ExpiredResponse {
             now_unix: expected.now_unix,
@@ -1438,7 +1454,10 @@ pub fn verify_authority_custody_backend_response(
 /// Run 203 — returns `true` iff the custody class routes into the
 /// KMS/HSM backend boundary (i.e. `Kms` or `Hsm`).
 pub const fn custody_class_routes_to_kms_hsm_backend(class: AuthorityCustodyClass) -> bool {
-    matches!(class, AuthorityCustodyClass::Kms | AuthorityCustodyClass::Hsm)
+    matches!(
+        class,
+        AuthorityCustodyClass::Kms | AuthorityCustodyClass::Hsm
+    )
 }
 
 /// Run 203 — route a Run 188 custody class into the KMS/HSM backend

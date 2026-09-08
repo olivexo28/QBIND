@@ -6,7 +6,7 @@
 //! 3. DevNet allows all modes
 //! 4. Default configurations are correct for each environment
 
-use qbind_node::node_config::{MutualAuthConfig, MutualAuthMode, parse_mutual_auth_mode};
+use qbind_node::node_config::{parse_mutual_auth_mode, MutualAuthConfig, MutualAuthMode};
 
 // ============================================================================
 // Parsing Tests
@@ -14,25 +14,58 @@ use qbind_node::node_config::{MutualAuthConfig, MutualAuthMode, parse_mutual_aut
 
 #[test]
 fn test_parse_mutual_auth_mode_required() {
-    assert_eq!(parse_mutual_auth_mode("required"), Some(MutualAuthMode::Required));
-    assert_eq!(parse_mutual_auth_mode("REQUIRED"), Some(MutualAuthMode::Required));
-    assert_eq!(parse_mutual_auth_mode("require"), Some(MutualAuthMode::Required));
+    assert_eq!(
+        parse_mutual_auth_mode("required"),
+        Some(MutualAuthMode::Required)
+    );
+    assert_eq!(
+        parse_mutual_auth_mode("REQUIRED"),
+        Some(MutualAuthMode::Required)
+    );
+    assert_eq!(
+        parse_mutual_auth_mode("require"),
+        Some(MutualAuthMode::Required)
+    );
 }
 
 #[test]
 fn test_parse_mutual_auth_mode_optional() {
-    assert_eq!(parse_mutual_auth_mode("optional"), Some(MutualAuthMode::Optional));
-    assert_eq!(parse_mutual_auth_mode("OPTIONAL"), Some(MutualAuthMode::Optional));
-    assert_eq!(parse_mutual_auth_mode("opt"), Some(MutualAuthMode::Optional));
+    assert_eq!(
+        parse_mutual_auth_mode("optional"),
+        Some(MutualAuthMode::Optional)
+    );
+    assert_eq!(
+        parse_mutual_auth_mode("OPTIONAL"),
+        Some(MutualAuthMode::Optional)
+    );
+    assert_eq!(
+        parse_mutual_auth_mode("opt"),
+        Some(MutualAuthMode::Optional)
+    );
 }
 
 #[test]
 fn test_parse_mutual_auth_mode_disabled() {
-    assert_eq!(parse_mutual_auth_mode("disabled"), Some(MutualAuthMode::Disabled));
-    assert_eq!(parse_mutual_auth_mode("DISABLED"), Some(MutualAuthMode::Disabled));
-    assert_eq!(parse_mutual_auth_mode("disable"), Some(MutualAuthMode::Disabled));
-    assert_eq!(parse_mutual_auth_mode("off"), Some(MutualAuthMode::Disabled));
-    assert_eq!(parse_mutual_auth_mode("none"), Some(MutualAuthMode::Disabled));
+    assert_eq!(
+        parse_mutual_auth_mode("disabled"),
+        Some(MutualAuthMode::Disabled)
+    );
+    assert_eq!(
+        parse_mutual_auth_mode("DISABLED"),
+        Some(MutualAuthMode::Disabled)
+    );
+    assert_eq!(
+        parse_mutual_auth_mode("disable"),
+        Some(MutualAuthMode::Disabled)
+    );
+    assert_eq!(
+        parse_mutual_auth_mode("off"),
+        Some(MutualAuthMode::Disabled)
+    );
+    assert_eq!(
+        parse_mutual_auth_mode("none"),
+        Some(MutualAuthMode::Disabled)
+    );
 }
 
 #[test]
@@ -156,10 +189,16 @@ fn test_testnet_rejects_disabled_mode() {
 fn test_devnet_allows_all_modes() {
     // DevNet doesn't have validate_for_devnet() because all modes are allowed
     // This test verifies that all modes can be constructed without error
-    let _required = MutualAuthConfig { mode: MutualAuthMode::Required };
-    let _optional = MutualAuthConfig { mode: MutualAuthMode::Optional };
-    let _disabled = MutualAuthConfig { mode: MutualAuthMode::Disabled };
-    
+    let _required = MutualAuthConfig {
+        mode: MutualAuthMode::Required,
+    };
+    let _optional = MutualAuthConfig {
+        mode: MutualAuthMode::Optional,
+    };
+    let _disabled = MutualAuthConfig {
+        mode: MutualAuthMode::Disabled,
+    };
+
     // DevNet default is Disabled for testing flexibility
     let devnet = MutualAuthConfig::devnet_default();
     assert_eq!(devnet.mode, MutualAuthMode::Disabled);

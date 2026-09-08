@@ -688,7 +688,10 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
             );
             t.assert_true(
                 "A2.evaluator-authorized",
-                matches!(evaluator, EvaluatorOutcome::EvaluatorResponseAuthorized { .. }),
+                matches!(
+                    evaluator,
+                    EvaluatorOutcome::EvaluatorResponseAuthorized { .. }
+                ),
                 "",
             );
             t.check("A2.lifecycle", "Rotate", &format!("{lifecycle_action:?}"));
@@ -728,16 +731,36 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
             r.request_digest()
         };
         let fields: [(&str, &dyn Fn(&mut EvaluatorRequest)); 10] = [
-            ("input_digest", &|r: &mut EvaluatorRequest| r.governance_execution_input_digest = "x".to_string()),
-            ("proposal_id", &|r: &mut EvaluatorRequest| r.proposal_id = "x".to_string()),
-            ("decision_id", &|r: &mut EvaluatorRequest| r.decision_id = "x".to_string()),
-            ("lifecycle_action", &|r: &mut EvaluatorRequest| r.lifecycle_action = LocalLifecycleAction::Revoke),
-            ("candidate_digest", &|r: &mut EvaluatorRequest| r.candidate_digest = "x".to_string()),
-            ("sequence", &|r: &mut EvaluatorRequest| r.authority_domain_sequence = 999),
-            ("effective_epoch", &|r: &mut EvaluatorRequest| r.effective_epoch = 5),
-            ("expiry_epoch", &|r: &mut EvaluatorRequest| r.expiry_epoch = 5),
-            ("replay_nonce", &|r: &mut EvaluatorRequest| r.replay_nonce = "x".to_string()),
-            ("source_identity", &|r: &mut EvaluatorRequest| r.decision_source_identity_digest = "x".to_string()),
+            ("input_digest", &|r: &mut EvaluatorRequest| {
+                r.governance_execution_input_digest = "x".to_string()
+            }),
+            ("proposal_id", &|r: &mut EvaluatorRequest| {
+                r.proposal_id = "x".to_string()
+            }),
+            ("decision_id", &|r: &mut EvaluatorRequest| {
+                r.decision_id = "x".to_string()
+            }),
+            ("lifecycle_action", &|r: &mut EvaluatorRequest| {
+                r.lifecycle_action = LocalLifecycleAction::Revoke
+            }),
+            ("candidate_digest", &|r: &mut EvaluatorRequest| {
+                r.candidate_digest = "x".to_string()
+            }),
+            ("sequence", &|r: &mut EvaluatorRequest| {
+                r.authority_domain_sequence = 999
+            }),
+            ("effective_epoch", &|r: &mut EvaluatorRequest| {
+                r.effective_epoch = 5
+            }),
+            ("expiry_epoch", &|r: &mut EvaluatorRequest| {
+                r.expiry_epoch = 5
+            }),
+            ("replay_nonce", &|r: &mut EvaluatorRequest| {
+                r.replay_nonce = "x".to_string()
+            }),
+            ("source_identity", &|r: &mut EvaluatorRequest| {
+                r.decision_source_identity_digest = "x".to_string()
+            }),
         ];
         for (name, f) in fields {
             t.assert_true(&format!("A5.binds-{name}"), base != mutate(f), "");
@@ -747,21 +770,41 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
     {
         let fx = rotate_fixture(Env::Devnet);
         let base = fx.response.response_digest();
-        t.assert_true("A6.deterministic", base == fx.response.response_digest(), "");
+        t.assert_true(
+            "A6.deterministic",
+            base == fx.response.response_digest(),
+            "",
+        );
         let mutate = |f: &dyn Fn(&mut EvaluatorResponse)| {
             let mut r = fx.response.clone();
             f(&mut r);
             r.response_digest()
         };
         let fields: [(&str, &dyn Fn(&mut EvaluatorResponse)); 8] = [
-            ("request_digest", &|r: &mut EvaluatorResponse| r.request_digest = "x".to_string()),
-            ("decision_digest", &|r: &mut EvaluatorResponse| r.decision_digest = "x".to_string()),
-            ("action", &|r: &mut EvaluatorResponse| r.authorized_lifecycle_action = LocalLifecycleAction::Revoke),
-            ("candidate_digest", &|r: &mut EvaluatorResponse| r.authorized_candidate_digest = "x".to_string()),
-            ("sequence", &|r: &mut EvaluatorResponse| r.authorized_authority_domain_sequence = 999),
-            ("effective_epoch", &|r: &mut EvaluatorResponse| r.effective_epoch = 5),
-            ("expiry_epoch", &|r: &mut EvaluatorResponse| r.expiry_epoch = 5),
-            ("replay_nonce", &|r: &mut EvaluatorResponse| r.replay_nonce = "x".to_string()),
+            ("request_digest", &|r: &mut EvaluatorResponse| {
+                r.request_digest = "x".to_string()
+            }),
+            ("decision_digest", &|r: &mut EvaluatorResponse| {
+                r.decision_digest = "x".to_string()
+            }),
+            ("action", &|r: &mut EvaluatorResponse| {
+                r.authorized_lifecycle_action = LocalLifecycleAction::Revoke
+            }),
+            ("candidate_digest", &|r: &mut EvaluatorResponse| {
+                r.authorized_candidate_digest = "x".to_string()
+            }),
+            ("sequence", &|r: &mut EvaluatorResponse| {
+                r.authorized_authority_domain_sequence = 999
+            }),
+            ("effective_epoch", &|r: &mut EvaluatorResponse| {
+                r.effective_epoch = 5
+            }),
+            ("expiry_epoch", &|r: &mut EvaluatorResponse| {
+                r.expiry_epoch = 5
+            }),
+            ("replay_nonce", &|r: &mut EvaluatorResponse| {
+                r.replay_nonce = "x".to_string()
+            }),
         ];
         for (name, f) in fields {
             t.assert_true(&format!("A6.binds-{name}"), base != mutate(f), "");
@@ -771,22 +814,42 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
     // governance decision, candidate digest, and sequence all match.
     {
         let env = Env::Devnet;
-        t.check("A7.rotate-all-match", "proceed:Mutate", &itag(&rotate_fixture(env).run()));
+        t.check(
+            "A7.rotate-all-match",
+            "proceed:Mutate",
+            &itag(&rotate_fixture(env).run()),
+        );
         let mut bad_cand = rotate_fixture(env);
         bad_cand.response.authorized_candidate_digest = "different-candidate".to_string();
-        t.assert_true("A7.wrong-candidate-not-mutate", !bad_cand.run().is_mutate_authorized(), "");
+        t.assert_true(
+            "A7.wrong-candidate-not-mutate",
+            !bad_cand.run().is_mutate_authorized(),
+            "",
+        );
         let mut bad_seq = rotate_fixture(env);
         bad_seq.response.authorized_authority_domain_sequence = 8;
-        t.assert_true("A7.wrong-sequence-not-mutate", !bad_seq.run().is_mutate_authorized(), "");
+        t.assert_true(
+            "A7.wrong-sequence-not-mutate",
+            !bad_seq.run().is_mutate_authorized(),
+            "",
+        );
     }
     // A8 — revoke accepted only when runtime consumption, evaluator response,
     // governance decision, revoked/candidate material, and sequence all match.
     {
         let env = Env::Devnet;
-        t.check("A8.revoke-all-match", "proceed:Mutate", &itag(&revoke_fixture(env).run()));
+        t.check(
+            "A8.revoke-all-match",
+            "proceed:Mutate",
+            &itag(&revoke_fixture(env).run()),
+        );
         let mut bad_seq = revoke_fixture(env);
         bad_seq.response.authorized_authority_domain_sequence = 9;
-        t.assert_true("A8.wrong-sequence-not-mutate", !bad_seq.run().is_mutate_authorized(), "");
+        t.assert_true(
+            "A8.wrong-sequence-not-mutate",
+            !bad_seq.run().is_mutate_authorized(),
+            "",
+        );
     }
     // A9 — production evaluator path reached and fails closed as unavailable.
     {
@@ -823,18 +886,34 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
         fx.surface = GovernanceExecutionRuntimeSurface::PeerDrivenDrain;
         fx.peer_driven = true;
         let o = fx.run();
-        t.check("A12.mainnet-peer-driven-refused", "reject:MainNetPeerDrivenApplyRefused", &itag(&o));
-        t.assert_true("A12.is-refused", o.is_mainnet_peer_driven_apply_refused(), "");
+        t.check(
+            "A12.mainnet-peer-driven-refused",
+            "reject:MainNetPeerDrivenApplyRefused",
+            &itag(&o),
+        );
+        t.assert_true(
+            "A12.is-refused",
+            o.is_mainnet_peer_driven_apply_refused(),
+            "",
+        );
         t.assert_true("A12.not-mutate", !o.is_mutate_authorized(), "");
     }
     // A13 — integration ordering: both stages gate mutation.
     {
         let env = Env::Devnet;
-        t.check("A13.both-valid-mutate", "proceed:Mutate", &itag(&rotate_fixture(env).run()));
+        t.check(
+            "A13.both-valid-mutate",
+            "proceed:Mutate",
+            &itag(&rotate_fixture(env).run()),
+        );
         // Flip ONLY the evaluator stage to reject (carrier still valid).
         let mut ev_only = rotate_fixture(env);
         ev_only.response.approved = false;
-        t.assert_true("A13.evaluator-only-reject", !ev_only.run().is_mutate_authorized(), "");
+        t.assert_true(
+            "A13.evaluator-only-reject",
+            !ev_only.run().is_mutate_authorized(),
+            "",
+        );
         // Flip ONLY the runtime-consumption stage to reject (evaluator valid).
         let mut rc_only = rotate_fixture(env);
         rc_only.load = GovernanceExecutionLoadStatus::Absent;
@@ -865,7 +944,11 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
         let mut disabled = rotate_fixture(env);
         disabled.ev_policy = EvaluatorPolicy::Disabled;
         let o = disabled.run();
-        t.check("A15.disabled-evaluator", "reject:Evaluator:reject:EvaluatorDisabled", &itag(&o));
+        t.check(
+            "A15.disabled-evaluator",
+            "reject:Evaluator:reject:EvaluatorDisabled",
+            &itag(&o),
+        );
         t.assert_true(
             "A15.production-unavailable",
             matches!(
@@ -904,9 +987,10 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
     // R2 — malformed material rejected.
     {
         let mut fx = rotate_fixture(env);
-        fx.load = GovernanceExecutionLoadStatus::Malformed(GovernanceExecutionPayloadParseError::Json {
-            error: "broken".to_string(),
-        });
+        fx.load =
+            GovernanceExecutionLoadStatus::Malformed(GovernanceExecutionPayloadParseError::Json {
+                error: "broken".to_string(),
+            });
         t.check(
             "R2.malformed",
             "reject:RuntimeConsumptionFailClosed:MalformedGovernanceExecutionPayload",
@@ -919,7 +1003,11 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
         fx.identity.source_kind = EvaluatorSourceKind::EmergencyCouncilFixtureSource;
         fx.request.decision_source_identity_digest = fx.identity.source_identity_digest();
         fx.response.request_digest = fx.request.request_digest();
-        t.check("R3.wrong-source", "reject:Evaluator:reject:SourceKindPolicyMismatch", &itag(&fx.run()));
+        t.check(
+            "R3.wrong-source",
+            "reject:Evaluator:reject:SourceKindPolicyMismatch",
+            &itag(&fx.run()),
+        );
     }
     // R4 — wrong environment rejected.
     {
@@ -928,7 +1016,11 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
         fx.identity.environment = Env::Testnet;
         fx.request.decision_source_identity_digest = fx.identity.source_identity_digest();
         fx.response.request_digest = fx.request.request_digest();
-        t.check("R4.wrong-environment", "reject:Evaluator:reject:WrongEnvironment", &itag(&fx.run()));
+        t.check(
+            "R4.wrong-environment",
+            "reject:Evaluator:reject:WrongEnvironment",
+            &itag(&fx.run()),
+        );
     }
     // R5 — wrong chain rejected.
     {
@@ -937,7 +1029,11 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
         fx.ev_exp.expected_chain_id = "other-chain".to_string();
         fx.request.decision_source_identity_digest = fx.identity.source_identity_digest();
         fx.response.request_digest = fx.request.request_digest();
-        t.check("R5.wrong-chain", "reject:Evaluator:reject:WrongChain", &itag(&fx.run()));
+        t.check(
+            "R5.wrong-chain",
+            "reject:Evaluator:reject:WrongChain",
+            &itag(&fx.run()),
+        );
     }
     // R6 — wrong genesis rejected.
     {
@@ -946,7 +1042,11 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
         fx.ev_exp.expected_genesis_hash = "other-genesis".to_string();
         fx.request.decision_source_identity_digest = fx.identity.source_identity_digest();
         fx.response.request_digest = fx.request.request_digest();
-        t.check("R6.wrong-genesis", "reject:Evaluator:reject:WrongGenesis", &itag(&fx.run()));
+        t.check(
+            "R6.wrong-genesis",
+            "reject:Evaluator:reject:WrongGenesis",
+            &itag(&fx.run()),
+        );
     }
     // R7 — wrong authority root rejected.
     {
@@ -955,7 +1055,11 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
         fx.ev_exp.expected_authority_root_fingerprint = "other-root".to_string();
         fx.request.decision_source_identity_digest = fx.identity.source_identity_digest();
         fx.response.request_digest = fx.request.request_digest();
-        t.check("R7.wrong-authority-root", "reject:Evaluator:reject:WrongAuthorityRoot", &itag(&fx.run()));
+        t.check(
+            "R7.wrong-authority-root",
+            "reject:Evaluator:reject:WrongAuthorityRoot",
+            &itag(&fx.run()),
+        );
     }
     // R8 — wrong governance proof digest rejected.
     {
@@ -963,68 +1067,112 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
         fx.identity.governance_proof_digest = "other-gov-proof".to_string();
         fx.request.decision_source_identity_digest = fx.identity.source_identity_digest();
         fx.response.request_digest = fx.request.request_digest();
-        t.check("R8.wrong-gov-proof", "reject:Evaluator:reject:WrongGovernanceProofDigest", &itag(&fx.run()));
+        t.check(
+            "R8.wrong-gov-proof",
+            "reject:Evaluator:reject:WrongGovernanceProofDigest",
+            &itag(&fx.run()),
+        );
     }
     // R9 — wrong on-chain proof digest rejected.
     {
         let mut fx = rotate_fixture(env);
         fx.ev_exp.expected_on_chain_proof_digest = Some("expected-onchain".to_string());
-        t.check("R9.wrong-onchain-proof", "reject:Evaluator:reject:WrongOnChainProofDigest", &itag(&fx.run()));
+        t.check(
+            "R9.wrong-onchain-proof",
+            "reject:Evaluator:reject:WrongOnChainProofDigest",
+            &itag(&fx.run()),
+        );
     }
     // R10 — wrong custody attestation digest rejected.
     {
         let mut fx = rotate_fixture(env);
         fx.ev_exp.expected_custody_attestation_digest = Some("expected-custody".to_string());
-        t.check("R10.wrong-custody", "reject:Evaluator:reject:WrongCustodyAttestationDigest", &itag(&fx.run()));
+        t.check(
+            "R10.wrong-custody",
+            "reject:Evaluator:reject:WrongCustodyAttestationDigest",
+            &itag(&fx.run()),
+        );
     }
     // R11 — wrong proposal id rejected.
     {
         let mut fx = rotate_fixture(env);
         fx.ev_exp.expected_proposal_id = "other-proposal".to_string();
-        t.check("R11.wrong-proposal", "reject:Evaluator:reject:WrongProposalId", &itag(&fx.run()));
+        t.check(
+            "R11.wrong-proposal",
+            "reject:Evaluator:reject:WrongProposalId",
+            &itag(&fx.run()),
+        );
     }
     // R12 — wrong decision id rejected.
     {
         let mut fx = rotate_fixture(env);
         fx.ev_exp.expected_decision_id = "other-decision".to_string();
-        t.check("R12.wrong-decision", "reject:Evaluator:reject:WrongDecisionId", &itag(&fx.run()));
+        t.check(
+            "R12.wrong-decision",
+            "reject:Evaluator:reject:WrongDecisionId",
+            &itag(&fx.run()),
+        );
     }
     // R13 — wrong lifecycle action rejected.
     {
         let mut fx = rotate_fixture(env);
         fx.ev_exp.expected_lifecycle_action = LocalLifecycleAction::Revoke;
-        t.check("R13.wrong-lifecycle", "reject:Evaluator:reject:WrongLifecycleAction", &itag(&fx.run()));
+        t.check(
+            "R13.wrong-lifecycle",
+            "reject:Evaluator:reject:WrongLifecycleAction",
+            &itag(&fx.run()),
+        );
     }
     // R14 — wrong candidate digest rejected.
     {
         let mut fx = rotate_fixture(env);
         fx.ev_exp.expected_candidate_digest = "other-candidate".to_string();
-        t.check("R14.wrong-candidate", "reject:Evaluator:reject:WrongCandidateDigest", &itag(&fx.run()));
+        t.check(
+            "R14.wrong-candidate",
+            "reject:Evaluator:reject:WrongCandidateDigest",
+            &itag(&fx.run()),
+        );
     }
     // R15 — wrong authority-domain sequence rejected.
     {
         let mut fx = rotate_fixture(env);
         fx.ev_exp.expected_authority_domain_sequence = 8;
-        t.check("R15.wrong-sequence", "reject:Evaluator:reject:WrongAuthorityDomainSequence", &itag(&fx.run()));
+        t.check(
+            "R15.wrong-sequence",
+            "reject:Evaluator:reject:WrongAuthorityDomainSequence",
+            &itag(&fx.run()),
+        );
     }
     // R16 — expired evaluator request rejected.
     {
         let mut fx = rotate_fixture(env);
         fx.ev_exp.now_epoch = 250;
-        t.check("R16.expired", "reject:Evaluator:reject:ExpiredDecision", &itag(&fx.run()));
+        t.check(
+            "R16.expired",
+            "reject:Evaluator:reject:ExpiredDecision",
+            &itag(&fx.run()),
+        );
     }
     // R17 — stale/replayed evaluator request rejected.
     {
         let mut fx = rotate_fixture(env);
         fx.ev_exp.expected_replay_nonce = "fresh-nonce".to_string();
-        t.check("R17.stale-replayed", "reject:Evaluator:reject:StaleOrReplayedDecision", &itag(&fx.run()));
+        t.check(
+            "R17.stale-replayed",
+            "reject:Evaluator:reject:StaleOrReplayedDecision",
+            &itag(&fx.run()),
+        );
     }
     // R18 — quorum/threshold insufficient rejected.
     {
         let mut fx = rotate_fixture(env);
         fx.request.quorum = GovernanceQuorumThreshold::new(1, 5, 3);
         fx.response.request_digest = fx.request.request_digest();
-        t.check("R18.quorum-insufficient", "reject:Evaluator:reject:QuorumThresholdInsufficient", &itag(&fx.run()));
+        t.check(
+            "R18.quorum-insufficient",
+            "reject:Evaluator:reject:QuorumThresholdInsufficient",
+            &itag(&fx.run()),
+        );
     }
     // R19 — emergency action not authorized rejected.
     {
@@ -1032,51 +1180,95 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
         fx.request.emergency_flag = true;
         fx.response.request_digest = fx.request.request_digest();
         fx.response.emergency_flag = true;
-        t.check("R19.emergency-not-authorized", "reject:Evaluator:reject:EmergencyActionNotAuthorized", &itag(&fx.run()));
+        t.check(
+            "R19.emergency-not-authorized",
+            "reject:Evaluator:reject:EmergencyActionNotAuthorized",
+            &itag(&fx.run()),
+        );
     }
     // R20 — validator-set rotation unsupported rejected.
     {
         let mut fx = rotate_fixture(env);
         fx.request.governance_action = GovernanceAction::ValidatorSetRotationRequest;
         fx.response.request_digest = fx.request.request_digest();
-        t.check("R20.validator-set-rotation", "reject:Evaluator:reject:ValidatorSetRotationUnsupported", &itag(&fx.run()));
-        t.assert_true("R20.helper-unsupported", validator_set_rotation_remains_unsupported_under_evaluator(), "");
+        t.check(
+            "R20.validator-set-rotation",
+            "reject:Evaluator:reject:ValidatorSetRotationUnsupported",
+            &itag(&fx.run()),
+        );
+        t.assert_true(
+            "R20.helper-unsupported",
+            validator_set_rotation_remains_unsupported_under_evaluator(),
+            "",
+        );
     }
     // R21 — policy-change action unsupported rejected.
     {
         let mut fx = rotate_fixture(env);
         fx.request.governance_action = GovernanceAction::PolicyChangeRequest;
         fx.response.request_digest = fx.request.request_digest();
-        t.check("R21.policy-change", "reject:Evaluator:reject:PolicyChangeActionUnsupported", &itag(&fx.run()));
+        t.check(
+            "R21.policy-change",
+            "reject:Evaluator:reject:PolicyChangeActionUnsupported",
+            &itag(&fx.run()),
+        );
     }
     // R22 — production evaluator unavailable rejected.
     {
         let o = rotate_fixture(env).run_with(&ProductionDecisionSourceEvaluatorInterface);
-        t.check("R22.production-unavailable", "reject:Evaluator:reject:ProductionDecisionSourceUnavailable", &itag(&o));
+        t.check(
+            "R22.production-unavailable",
+            "reject:Evaluator:reject:ProductionDecisionSourceUnavailable",
+            &itag(&o),
+        );
     }
     // R23 — on-chain evaluator unavailable rejected.
     {
         let o = rotate_fixture(env).run_with(&OnChainDecisionSourceEvaluatorInterface);
-        t.check("R23.onchain-unavailable", "reject:Evaluator:reject:OnChainDecisionSourceUnavailable", &itag(&o));
+        t.check(
+            "R23.onchain-unavailable",
+            "reject:Evaluator:reject:OnChainDecisionSourceUnavailable",
+            &itag(&o),
+        );
     }
     // R24 — MainNet evaluator unavailable/refused rejected.
     {
         let o = rotate_fixture(env).run_with(&MainnetDecisionSourceEvaluatorInterface);
-        t.check("R24.mainnet-unavailable", "reject:Evaluator:reject:MainnetDecisionSourceUnavailable", &itag(&o));
+        t.check(
+            "R24.mainnet-unavailable",
+            "reject:Evaluator:reject:MainnetDecisionSourceUnavailable",
+            &itag(&o),
+        );
     }
     // R25 — local operator cannot satisfy evaluator policy.
     {
-        t.assert_true("R25.local-operator-cannot-satisfy", local_operator_cannot_satisfy_evaluator_policy(), "");
+        t.assert_true(
+            "R25.local-operator-cannot-satisfy",
+            local_operator_cannot_satisfy_evaluator_policy(),
+            "",
+        );
         let mut fx = rotate_fixture(env);
         fx.ev_policy = EvaluatorPolicy::ProductionDecisionSourceRequired;
-        t.assert_true("R25.production-required-not-mutate", !fx.run().is_mutate_authorized(), "");
+        t.assert_true(
+            "R25.production-required-not-mutate",
+            !fx.run().is_mutate_authorized(),
+            "",
+        );
     }
     // R26 — peer majority cannot satisfy evaluator policy.
     {
-        t.assert_true("R26.peer-majority-cannot-satisfy", peer_majority_cannot_satisfy_evaluator_policy(), "");
+        t.assert_true(
+            "R26.peer-majority-cannot-satisfy",
+            peer_majority_cannot_satisfy_evaluator_policy(),
+            "",
+        );
         let mut fx = rotate_fixture(env);
         fx.ev_policy = EvaluatorPolicy::MainnetDecisionSourceRequired;
-        t.assert_true("R26.mainnet-required-not-mutate", !fx.run().is_mutate_authorized(), "");
+        t.assert_true(
+            "R26.mainnet-required-not-mutate",
+            !fx.run().is_mutate_authorized(),
+            "",
+        );
     }
     // R27 — evaluator valid but governance execution decision invalid rejected.
     {
@@ -1084,13 +1276,22 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
         let mut decision = rotate_decision();
         decision.authorized_sequence = 999; // mismatched -> Run 211 rejects
         fx.load = available_from(&rotate_input(env), &decision);
-        t.check("R27.governance-decision-invalid", "reject:Evaluator:reject:GovernanceExecutionDecisionInvalid", &itag(&fx.run()));
+        t.check(
+            "R27.governance-decision-invalid",
+            "reject:Evaluator:reject:GovernanceExecutionDecisionInvalid",
+            &itag(&fx.run()),
+        );
     }
     // R28 — governance execution decision valid but evaluator response invalid.
     {
         let mut fx = rotate_fixture(env);
-        fx.response.response_commitment = EVALUATOR_INVALID_RESPONSE_COMMITMENT_SENTINEL.to_string();
-        t.check("R28.response-invalid", "reject:Evaluator:reject:InvalidResponseCommitment", &itag(&fx.run()));
+        fx.response.response_commitment =
+            EVALUATOR_INVALID_RESPONSE_COMMITMENT_SENTINEL.to_string();
+        t.check(
+            "R28.response-invalid",
+            "reject:Evaluator:reject:InvalidResponseCommitment",
+            &itag(&fx.run()),
+        );
     }
     // R29 — validation-only rejection writes no marker and no sequence (pure/repeatable).
     {
@@ -1127,7 +1328,11 @@ fn run_reachability_table(out: &Path) -> (u64, u64) {
 
     // The two integration entry points are reachable and agree.
     let explicit = rotate_fixture(env).run();
-    t.check("K.explicit-entry-mutate", "proceed:Mutate", &itag(&explicit));
+    t.check(
+        "K.explicit-entry-mutate",
+        "proceed:Mutate",
+        &itag(&explicit),
+    );
 
     // Sidecar-derivation convenience wrapper reaches the same ProceedMutate.
     {
@@ -1179,7 +1384,11 @@ fn run_reachability_table(out: &Path) -> (u64, u64) {
                 EvaluatorPolicy::FixtureDecisionSourceAllowed,
                 false,
             );
-        t.check("K.sidecar-some-mutate", "proceed:Mutate", &itag(&some_outcome));
+        t.check(
+            "K.sidecar-some-mutate",
+            "proceed:Mutate",
+            &itag(&some_outcome),
+        );
         let none_outcome =
             integrate_governance_evaluator_runtime_consumption_from_optional_sidecar_value(
                 &arming,
@@ -1195,7 +1404,11 @@ fn run_reachability_table(out: &Path) -> (u64, u64) {
                 EvaluatorPolicy::FixtureDecisionSourceAllowed,
                 false,
             );
-        t.assert_true("K.sidecar-none-not-mutate", !none_outcome.is_mutate_authorized(), "");
+        t.assert_true(
+            "K.sidecar-none-not-mutate",
+            !none_outcome.is_mutate_authorized(),
+            "",
+        );
     }
 
     // Outcome predicate partitioning is reachable and correct.
@@ -1206,18 +1419,46 @@ fn run_reachability_table(out: &Path) -> (u64, u64) {
     t.assert_true("O.bypass-not-fail-closed", !bypass.is_fail_closed(), "");
     let refused = GovernanceEvaluatorRuntimeIntegrationOutcome::MainNetPeerDrivenApplyRefused;
     t.assert_true("O.refused-fail-closed", refused.is_fail_closed(), "");
-    t.assert_true("O.refused-is-refused", refused.is_mainnet_peer_driven_apply_refused(), "");
+    t.assert_true(
+        "O.refused-is-refused",
+        refused.is_mainnet_peer_driven_apply_refused(),
+        "",
+    );
     t.assert_true("O.refused-not-mutate", !refused.is_mutate_authorized(), "");
 
     // Explicit fail-closed helper symbols reachable.
-    t.assert_true("H.validator-set-rotation-unsupported", validator_set_rotation_remains_unsupported_under_evaluator(), "");
-    t.assert_true("H.mainnet-refused-helper", mainnet_peer_driven_apply_remains_refused_under_evaluator(Env::Mainnet), "");
-    t.assert_true("H.mainnet-refused-devnet-false", !mainnet_peer_driven_apply_remains_refused_under_evaluator(Env::Devnet), "");
-    t.assert_true("H.local-operator-cannot-satisfy", local_operator_cannot_satisfy_evaluator_policy(), "");
-    t.assert_true("H.peer-majority-cannot-satisfy", peer_majority_cannot_satisfy_evaluator_policy(), "");
+    t.assert_true(
+        "H.validator-set-rotation-unsupported",
+        validator_set_rotation_remains_unsupported_under_evaluator(),
+        "",
+    );
+    t.assert_true(
+        "H.mainnet-refused-helper",
+        mainnet_peer_driven_apply_remains_refused_under_evaluator(Env::Mainnet),
+        "",
+    );
+    t.assert_true(
+        "H.mainnet-refused-devnet-false",
+        !mainnet_peer_driven_apply_remains_refused_under_evaluator(Env::Devnet),
+        "",
+    );
+    t.assert_true(
+        "H.local-operator-cannot-satisfy",
+        local_operator_cannot_satisfy_evaluator_policy(),
+        "",
+    );
+    t.assert_true(
+        "H.peer-majority-cannot-satisfy",
+        peer_majority_cannot_satisfy_evaluator_policy(),
+        "",
+    );
 
     // MainNet fixture runtime consumption is refused off the peer-driven path.
-    t.assert_true("M.mainnet-fixture-not-mutate", !rotate_fixture(Env::Mainnet).run().is_mutate_authorized(), "");
+    t.assert_true(
+        "M.mainnet-fixture-not-mutate",
+        !rotate_fixture(Env::Mainnet).run().is_mutate_authorized(),
+        "",
+    );
 
     t.finish(out)
 }
@@ -1246,19 +1487,49 @@ fn run_fixture_dump(out: &Path) {
         LocalLifecycleAction::Rotate,
         false,
     );
-    write_file(&dir.join("governance_execution_input.txt"), &format!("{input:#?}\n"));
-    write_file(&dir.join("governance_execution_decision.txt"), &format!("{decision:#?}\n"));
-    write_file(&dir.join("decision_source_identity.txt"), &format!("{identity:#?}\n"));
-    write_file(&dir.join("evaluator_request.txt"), &format!("{request:#?}\n"));
-    write_file(&dir.join("evaluator_response.txt"), &format!("{response:#?}\n"));
-    write_file(&dir.join("governance_execution_input_digest.txt"), &format!("{input_digest}\n"));
-    write_file(&dir.join("source_identity_digest.txt"), &format!("{}\n", identity.source_identity_digest()));
-    write_file(&dir.join("request_digest.txt"), &format!("{}\n", request.request_digest()));
-    write_file(&dir.join("response_digest.txt"), &format!("{}\n", response.response_digest()));
+    write_file(
+        &dir.join("governance_execution_input.txt"),
+        &format!("{input:#?}\n"),
+    );
+    write_file(
+        &dir.join("governance_execution_decision.txt"),
+        &format!("{decision:#?}\n"),
+    );
+    write_file(
+        &dir.join("decision_source_identity.txt"),
+        &format!("{identity:#?}\n"),
+    );
+    write_file(
+        &dir.join("evaluator_request.txt"),
+        &format!("{request:#?}\n"),
+    );
+    write_file(
+        &dir.join("evaluator_response.txt"),
+        &format!("{response:#?}\n"),
+    );
+    write_file(
+        &dir.join("governance_execution_input_digest.txt"),
+        &format!("{input_digest}\n"),
+    );
+    write_file(
+        &dir.join("source_identity_digest.txt"),
+        &format!("{}\n", identity.source_identity_digest()),
+    );
+    write_file(
+        &dir.join("request_digest.txt"),
+        &format!("{}\n", request.request_digest()),
+    );
+    write_file(
+        &dir.join("response_digest.txt"),
+        &format!("{}\n", response.response_digest()),
+    );
 
     // Capture the ProceedMutate integration outcome (authorized fields).
     let outcome = rotate_fixture(env).run();
-    write_file(&dir.join("integration_outcome.txt"), &format!("{outcome:#?}\n"));
+    write_file(
+        &dir.join("integration_outcome.txt"),
+        &format!("{outcome:#?}\n"),
+    );
 
     // Integration-layer inventory — typed symbols the release binary exposes.
     let mut inv = String::new();

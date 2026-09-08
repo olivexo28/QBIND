@@ -80,17 +80,16 @@ use std::path::{Path, PathBuf};
 use qbind_crypto::MlDsa44Backend;
 use qbind_ledger::{
     bundle_signing_ratification::v2_test_helpers as ratification_v2_helpers,
-    compute_canonical_genesis_hash, BundleSigningRatificationV2,
-    BundleSigningRatificationV2Action, GenesisAllocation, GenesisAuthorityConfig,
-    GenesisAuthorityRoot, GenesisConfig, GenesisCouncilConfig, GenesisHash,
-    GenesisMonetaryConfig, GenesisValidator, NetworkEnvironmentPolicy, RatificationEnvironment,
-    GENESIS_AUTHORITY_SUITE_ML_DSA_44,
+    compute_canonical_genesis_hash, BundleSigningRatificationV2, BundleSigningRatificationV2Action,
+    GenesisAllocation, GenesisAuthorityConfig, GenesisAuthorityRoot, GenesisConfig,
+    GenesisCouncilConfig, GenesisHash, GenesisMonetaryConfig, GenesisValidator,
+    NetworkEnvironmentPolicy, RatificationEnvironment, GENESIS_AUTHORITY_SUITE_ML_DSA_44,
 };
 use qbind_node::pqc_authority_lifecycle::LocalLifecycleAction;
 use qbind_node::pqc_authority_marker_acceptance::{
     decide_v2_marker_acceptance_with_lifecycle_and_governance,
-    persist_accepted_v2_marker_after_commit_boundary, MarkerAcceptDecisionV2,
-    MarkerAcceptKindV2, MarkerAcceptanceV2Inputs, MutatingSurfaceMarkerV2Error,
+    persist_accepted_v2_marker_after_commit_boundary, MarkerAcceptDecisionV2, MarkerAcceptKindV2,
+    MarkerAcceptanceV2Inputs, MutatingSurfaceMarkerV2Error,
 };
 use qbind_node::pqc_authority_state::{
     authority_state_file_path, AuthorityStateUpdateSource, PersistentAuthorityStateRecordV2,
@@ -158,7 +157,10 @@ fn devnet_harness() -> Harness {
     let mut genesis_cfg = GenesisConfig::new(
         &chain_id_str,
         1_738_000_000_000,
-        vec![GenesisAllocation::new(format!("0x{}", "11".repeat(32)), 100)],
+        vec![GenesisAllocation::new(
+            format!("0x{}", "11".repeat(32)),
+            100,
+        )],
         vec![GenesisValidator::new(
             format!("0x{}", "22".repeat(32)),
             "ab".repeat(32),
@@ -208,8 +210,8 @@ impl Harness {
             .as_ref()
             .unwrap()
             .authority_policy_version;
-        let previous_digest = matches!(action, BundleSigningRatificationV2Action::Rotate)
-            .then(|| "ab".repeat(32));
+        let previous_digest =
+            matches!(action, BundleSigningRatificationV2Action::Rotate).then(|| "ab".repeat(32));
         ratification_v2_helpers::build_signed_ratification_v2(
             &self.chain_id_str,
             RatificationEnvironment::Devnet,
@@ -357,9 +359,7 @@ struct ScenarioRecord {
     expect_no_mutation: bool,
 }
 
-fn record_actual<T: std::fmt::Debug, E: std::fmt::Debug>(
-    result: &Result<T, E>,
-) -> String {
+fn record_actual<T: std::fmt::Debug, E: std::fmt::Debug>(result: &Result<T, E>) -> String {
     match result {
         Ok(v) => format!("Ok({:?})", v),
         Err(e) => format!("Err({:?})", e),
@@ -392,10 +392,21 @@ fn run() -> Vec<ScenarioRecord> {
         let dir = out_dir.join("scenarios").join(id);
         fs::create_dir_all(&dir).expect("h1 dir");
         let marker_path = authority_state_file_path(&dir);
-        let r = h.build_v2(&h.signing_pk_a, 1, BundleSigningRatificationV2Action::Ratify, None);
+        let r = h.build_v2(
+            &h.signing_pk_a,
+            1,
+            BundleSigningRatificationV2Action::Ratify,
+            None,
+        );
         let ratified = h.verify_v2(&r);
         let result = decide_v2_marker_acceptance_with_lifecycle_and_governance(
-            make_inputs(&marker_path, &gh, &r, &ratified, AuthorityStateUpdateSource::StartupLoad),
+            make_inputs(
+                &marker_path,
+                &gh,
+                &r,
+                &ratified,
+                AuthorityStateUpdateSource::StartupLoad,
+            ),
             GovernanceProofPolicy::NotRequired,
             GovernanceProofContext::Unavailable,
         );
@@ -406,7 +417,10 @@ fn run() -> Vec<ScenarioRecord> {
             None
         };
         // Sanity: helper itself must not have written a marker.
-        assert!(post_sha.is_none(), "H1: helper must not write marker before post-commit boundary");
+        assert!(
+            post_sha.is_none(),
+            "H1: helper must not write marker before post-commit boundary"
+        );
         // Confirm typed accept kind locally (cheap structural assertion;
         // the full Debug dump goes into actual.txt for the harness).
         if let Ok(d) = &result {
@@ -441,10 +455,21 @@ fn run() -> Vec<ScenarioRecord> {
         fs::create_dir_all(&dir).expect("h2 dir");
         let marker_path = authority_state_file_path(&dir);
         // Seed generation A at seq 1 via NotRequired accept + post-commit persist.
-        let r1 = h.build_v2(&h.signing_pk_a, 1, BundleSigningRatificationV2Action::Ratify, None);
+        let r1 = h.build_v2(
+            &h.signing_pk_a,
+            1,
+            BundleSigningRatificationV2Action::Ratify,
+            None,
+        );
         let ratified1 = h.verify_v2(&r1);
         let d1: MarkerAcceptDecisionV2 = decide_v2_marker_acceptance_with_lifecycle_and_governance(
-            make_inputs(&marker_path, &gh, &r1, &ratified1, AuthorityStateUpdateSource::StartupLoad),
+            make_inputs(
+                &marker_path,
+                &gh,
+                &r1,
+                &ratified1,
+                AuthorityStateUpdateSource::StartupLoad,
+            ),
             GovernanceProofPolicy::NotRequired,
             GovernanceProofContext::Unavailable,
         )
@@ -461,7 +486,13 @@ fn run() -> Vec<ScenarioRecord> {
         );
         let ratified2 = h.verify_v2(&r2);
         let result = decide_v2_marker_acceptance_with_lifecycle_and_governance(
-            make_inputs(&marker_path, &gh, &r2, &ratified2, AuthorityStateUpdateSource::ReloadApply),
+            make_inputs(
+                &marker_path,
+                &gh,
+                &r2,
+                &ratified2,
+                AuthorityStateUpdateSource::ReloadApply,
+            ),
             GovernanceProofPolicy::NotRequired,
             GovernanceProofContext::Unavailable,
         );
@@ -469,14 +500,20 @@ fn run() -> Vec<ScenarioRecord> {
         if let Ok(d) = &result {
             assert!(matches!(
                 d.kind(),
-                MarkerAcceptKindV2::UpgradeV2 { previous_sequence: 1, new_sequence: 2 }
+                MarkerAcceptKindV2::UpgradeV2 {
+                    previous_sequence: 1,
+                    new_sequence: 2
+                }
             ));
         } else {
             panic!("H2: expected Ok rotate decision");
         }
         // Helper itself never persists past the seeded marker.
         let post_sha = sha256_hex_of(&marker_path);
-        assert_eq!(pre_sha, post_sha, "H2: seed marker bytes must remain unchanged after non-persisted decision");
+        assert_eq!(
+            pre_sha, post_sha,
+            "H2: seed marker bytes must remain unchanged after non-persisted decision"
+        );
         out.push(ScenarioRecord {
             id,
             policy: "NotRequired",
@@ -506,10 +543,21 @@ fn run() -> Vec<ScenarioRecord> {
         let marker_path = authority_state_file_path(&dir);
 
         // Seed A at seq 1 (NotRequired + Unavailable).
-        let r1 = h.build_v2(&h.signing_pk_a, 1, BundleSigningRatificationV2Action::Ratify, None);
+        let r1 = h.build_v2(
+            &h.signing_pk_a,
+            1,
+            BundleSigningRatificationV2Action::Ratify,
+            None,
+        );
         let ratified1 = h.verify_v2(&r1);
         let d1 = decide_v2_marker_acceptance_with_lifecycle_and_governance(
-            make_inputs(&marker_path, &gh, &r1, &ratified1, AuthorityStateUpdateSource::StartupLoad),
+            make_inputs(
+                &marker_path,
+                &gh,
+                &r1,
+                &ratified1,
+                AuthorityStateUpdateSource::StartupLoad,
+            ),
             GovernanceProofPolicy::NotRequired,
             GovernanceProofContext::Unavailable,
         )
@@ -526,7 +574,13 @@ fn run() -> Vec<ScenarioRecord> {
         );
         let ratified2 = h.verify_v2(&r2);
         let result = decide_v2_marker_acceptance_with_lifecycle_and_governance(
-            make_inputs(&marker_path, &gh, &r2, &ratified2, AuthorityStateUpdateSource::ReloadApply),
+            make_inputs(
+                &marker_path,
+                &gh,
+                &r2,
+                &ratified2,
+                AuthorityStateUpdateSource::ReloadApply,
+            ),
             GovernanceProofPolicy::RequiredForLifecycleSensitive,
             GovernanceProofContext::Unavailable,
         );
@@ -535,10 +589,16 @@ fn run() -> Vec<ScenarioRecord> {
             Err(MutatingSurfaceMarkerV2Error::GovernanceAuthorityRequiredButMissing {
                 action: LocalLifecycleAction::Rotate,
             }) => {}
-            other => panic!("H3: expected GovernanceAuthorityRequiredButMissing(Rotate), got {:?}", other),
+            other => panic!(
+                "H3: expected GovernanceAuthorityRequiredButMissing(Rotate), got {:?}",
+                other
+            ),
         }
         let post_sha = sha256_hex_of(&marker_path);
-        assert_eq!(pre_sha, post_sha, "H3: seed marker bytes must remain byte-for-byte untouched on RequiredButMissing");
+        assert_eq!(
+            pre_sha, post_sha,
+            "H3: seed marker bytes must remain byte-for-byte untouched on RequiredButMissing"
+        );
         out.push(ScenarioRecord {
             id,
             policy: "RequiredForLifecycleSensitive",
@@ -563,10 +623,21 @@ fn run() -> Vec<ScenarioRecord> {
         let dir = out_dir.join("scenarios").join(id);
         fs::create_dir_all(&dir).expect("h4 dir");
         let marker_path = authority_state_file_path(&dir);
-        let r = h.build_v2(&h.signing_pk_a, 1, BundleSigningRatificationV2Action::Ratify, None);
+        let r = h.build_v2(
+            &h.signing_pk_a,
+            1,
+            BundleSigningRatificationV2Action::Ratify,
+            None,
+        );
         let ratified = h.verify_v2(&r);
         let result = decide_v2_marker_acceptance_with_lifecycle_and_governance(
-            make_inputs(&marker_path, &gh, &r, &ratified, AuthorityStateUpdateSource::StartupLoad),
+            make_inputs(
+                &marker_path,
+                &gh,
+                &r,
+                &ratified,
+                AuthorityStateUpdateSource::StartupLoad,
+            ),
             GovernanceProofPolicy::RequiredForLifecycleSensitive,
             GovernanceProofContext::Unavailable,
         );
@@ -581,7 +652,10 @@ fn run() -> Vec<ScenarioRecord> {
         } else {
             None
         };
-        assert!(post_sha.is_none(), "H4: helper must not write marker before post-commit boundary");
+        assert!(
+            post_sha.is_none(),
+            "H4: helper must not write marker before post-commit boundary"
+        );
         out.push(ScenarioRecord {
             id,
             policy: "RequiredForLifecycleSensitive",
@@ -607,10 +681,21 @@ fn run() -> Vec<ScenarioRecord> {
         let dir = out_dir.join("scenarios").join(id);
         fs::create_dir_all(&dir).expect("h5 dir");
         let marker_path = authority_state_file_path(&dir);
-        let r1 = h.build_v2(&h.signing_pk_a, 1, BundleSigningRatificationV2Action::Ratify, None);
+        let r1 = h.build_v2(
+            &h.signing_pk_a,
+            1,
+            BundleSigningRatificationV2Action::Ratify,
+            None,
+        );
         let ratified1 = h.verify_v2(&r1);
         let d1 = decide_v2_marker_acceptance_with_lifecycle_and_governance(
-            make_inputs(&marker_path, &gh, &r1, &ratified1, AuthorityStateUpdateSource::StartupLoad),
+            make_inputs(
+                &marker_path,
+                &gh,
+                &r1,
+                &ratified1,
+                AuthorityStateUpdateSource::StartupLoad,
+            ),
             GovernanceProofPolicy::NotRequired,
             GovernanceProofContext::Unavailable,
         )
@@ -625,8 +710,12 @@ fn run() -> Vec<ScenarioRecord> {
             Some(qbind_ledger::pqc_public_key_fingerprint(&h.signing_pk_a)),
         );
         let ratified2 = h.verify_v2(&r2);
-        let candidate =
-            h.derive_candidate(&gh, &r2, &ratified2, AuthorityStateUpdateSource::ReloadApply);
+        let candidate = h.derive_candidate(
+            &gh,
+            &r2,
+            &ratified2,
+            AuthorityStateUpdateSource::ReloadApply,
+        );
         let proof = good_proof(
             &h,
             &candidate,
@@ -635,22 +724,37 @@ fn run() -> Vec<ScenarioRecord> {
         );
         let verifier = fixture_issuer_signature_verifier();
         let result = decide_v2_marker_acceptance_with_lifecycle_and_governance(
-            make_inputs(&marker_path, &gh, &r2, &ratified2, AuthorityStateUpdateSource::ReloadApply),
+            make_inputs(
+                &marker_path,
+                &gh,
+                &r2,
+                &ratified2,
+                AuthorityStateUpdateSource::ReloadApply,
+            ),
             GovernanceProofPolicy::RequiredForLifecycleSensitive,
-            GovernanceProofContext::Supplied { proof: &proof, verifier: &verifier },
+            GovernanceProofContext::Supplied {
+                proof: &proof,
+                verifier: &verifier,
+            },
         );
         let actual = record_actual(&result);
         if let Ok(d) = &result {
             assert!(matches!(
                 d.kind(),
-                MarkerAcceptKindV2::UpgradeV2 { previous_sequence: 1, new_sequence: 2 }
+                MarkerAcceptKindV2::UpgradeV2 {
+                    previous_sequence: 1,
+                    new_sequence: 2
+                }
             ));
         } else {
             panic!("H5: expected Ok rotate decision with supplied governance proof");
         }
         // Decision is pre-commit; helper does not persist here.
         let post_sha = sha256_hex_of(&marker_path);
-        assert_eq!(pre_sha, post_sha, "H5: seed marker bytes must remain unchanged before post-commit boundary");
+        assert_eq!(
+            pre_sha, post_sha,
+            "H5: seed marker bytes must remain unchanged before post-commit boundary"
+        );
         out.push(ScenarioRecord {
             id,
             policy: "RequiredForLifecycleSensitive",
@@ -675,7 +779,12 @@ fn run() -> Vec<ScenarioRecord> {
         let dir = out_dir.join("scenarios").join(id);
         fs::create_dir_all(&dir).expect("h6 dir");
         let marker_path = authority_state_file_path(&dir);
-        let r = h.build_v2(&h.signing_pk_a, 1, BundleSigningRatificationV2Action::Ratify, None);
+        let r = h.build_v2(
+            &h.signing_pk_a,
+            1,
+            BundleSigningRatificationV2Action::Ratify,
+            None,
+        );
         let ratified = h.verify_v2(&r);
         let candidate =
             h.derive_candidate(&gh, &r, &ratified, AuthorityStateUpdateSource::StartupLoad);
@@ -688,9 +797,18 @@ fn run() -> Vec<ScenarioRecord> {
         proof.issuer_signature = b"tampered".to_vec();
         let verifier = fixture_issuer_signature_verifier();
         let result = decide_v2_marker_acceptance_with_lifecycle_and_governance(
-            make_inputs(&marker_path, &gh, &r, &ratified, AuthorityStateUpdateSource::StartupLoad),
+            make_inputs(
+                &marker_path,
+                &gh,
+                &r,
+                &ratified,
+                AuthorityStateUpdateSource::StartupLoad,
+            ),
             GovernanceProofPolicy::RequiredForLifecycleSensitive,
-            GovernanceProofContext::Supplied { proof: &proof, verifier: &verifier },
+            GovernanceProofContext::Supplied {
+                proof: &proof,
+                verifier: &verifier,
+            },
         );
         let actual = record_actual(&result);
         match &result {
@@ -702,7 +820,10 @@ fn run() -> Vec<ScenarioRecord> {
         } else {
             None
         };
-        assert!(post_sha.is_none(), "H6: rejected governance decision must NOT write marker");
+        assert!(
+            post_sha.is_none(),
+            "H6: rejected governance decision must NOT write marker"
+        );
         out.push(ScenarioRecord {
             id,
             policy: "RequiredForLifecycleSensitive",
@@ -731,16 +852,33 @@ fn run() -> Vec<ScenarioRecord> {
         let dir = out_dir.join("scenarios").join(id);
         fs::create_dir_all(&dir).expect("h7 dir");
         let marker_path = authority_state_file_path(&dir);
-        let r = h.build_v2(&h.signing_pk_a, 1, BundleSigningRatificationV2Action::Ratify, None);
+        let r = h.build_v2(
+            &h.signing_pk_a,
+            1,
+            BundleSigningRatificationV2Action::Ratify,
+            None,
+        );
         let ratified = h.verify_v2(&r);
         let r1 = decide_v2_marker_acceptance_with_lifecycle_and_governance(
-            make_inputs(&marker_path, &gh, &r, &ratified, AuthorityStateUpdateSource::StartupLoad),
+            make_inputs(
+                &marker_path,
+                &gh,
+                &r,
+                &ratified,
+                AuthorityStateUpdateSource::StartupLoad,
+            ),
             GovernanceProofPolicy::NotRequired,
             GovernanceProofContext::Unavailable,
         )
         .expect("h7 first eval");
         let r2 = decide_v2_marker_acceptance_with_lifecycle_and_governance(
-            make_inputs(&marker_path, &gh, &r, &ratified, AuthorityStateUpdateSource::StartupLoad),
+            make_inputs(
+                &marker_path,
+                &gh,
+                &r,
+                &ratified,
+                AuthorityStateUpdateSource::StartupLoad,
+            ),
             GovernanceProofPolicy::NotRequired,
             GovernanceProofContext::Unavailable,
         )
@@ -801,9 +939,15 @@ fn main() {
             // For seeded scenarios, pre/post SHA must match. For non-seeded
             // scenarios, post must be absent. Both invariants are asserted
             // inside `run()` already; we re-record them here as text.
-            write_text(&dir.join("no_mutation_invariant.txt"), "asserted: pre==post (seeded) or post=ABSENT (unseeded)\n");
+            write_text(
+                &dir.join("no_mutation_invariant.txt"),
+                "asserted: pre==post (seeded) or post=ABSENT (unseeded)\n",
+            );
         }
-        manifest.push_str(&format!("{}\t{}\t{}\n", r.id, r.expected_label, r.expected_match));
+        manifest.push_str(&format!(
+            "{}\t{}\t{}\n",
+            r.id, r.expected_label, r.expected_match
+        ));
         expected_outcomes.push_str(&format!(
             "{}: policy={} context={} -> {}\n",
             r.id, r.policy, r.context, r.expected_label

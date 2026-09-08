@@ -358,7 +358,14 @@ fn rotate_fixture(
     let surface = GovernanceExecutionRuntimeSurface::ReloadApply;
 
     let replay_exp = EvaluatorReplayFreshnessExpectations::from_evaluator_material(
-        &identity, &request, &response, TRANSCRIPT_DIGEST, DECISION_DIGEST, env, CHAIN, GENESIS,
+        &identity,
+        &request,
+        &response,
+        TRANSCRIPT_DIGEST,
+        DECISION_DIGEST,
+        env,
+        CHAIN,
+        GENESIS,
         surface,
     );
     let replay_input = EvaluatorReplayFreshnessInput::from_evaluator_material(
@@ -464,7 +471,10 @@ fn a2_deferred_no_consume_no_authorization() {
     fx.replay_input.current_canonical_epoch = 50;
     let mut store = store_with_observation(&fx);
     let outcome = fx.run(&mut store);
-    assert_eq!(outcome, ReplayConsumeRuntimeOutcome::ProceedDeferredNoConsume);
+    assert_eq!(
+        outcome,
+        ReplayConsumeRuntimeOutcome::ProceedDeferredNoConsume
+    );
     assert!(outcome.no_consume());
     assert!(!store.is_consumed(&fx.consume_input.replay_state_key_digest));
 }
@@ -598,7 +608,10 @@ fn a9_failed_apply_never_consumes() {
     );
     let mut store = store_with_observation(&fx);
     let outcome = fx.run(&mut store);
-    assert_eq!(outcome, ReplayConsumeRuntimeOutcome::DoNotConsumeApplyFailed);
+    assert_eq!(
+        outcome,
+        ReplayConsumeRuntimeOutcome::DoNotConsumeApplyFailed
+    );
     assert!(!store.is_consumed(&fx.consume_input.replay_state_key_digest));
 }
 
@@ -644,9 +657,11 @@ fn a12_mainnet_refused_never_consumes() {
         ReplayConsumeRuntimeOutcome::MainNetPeerDrivenApplyRefused
     );
     assert!(outcome.no_consume());
-    assert!(mainnet_peer_driven_apply_remains_refused_under_consume_runtime(
-        TrustBundleEnvironment::Mainnet
-    ));
+    assert!(
+        mainnet_peer_driven_apply_remains_refused_under_consume_runtime(
+            TrustBundleEnvironment::Mainnet
+        )
+    );
 }
 
 // A13. production consume writer path is reached and fails closed unavailable.
@@ -808,7 +823,10 @@ fn assert_consume_fail_closed(mutate: impl FnOnce(&mut Fixture)) {
     let mut store = store_with_observation(&fx);
     let outcome = fx.run(&mut store);
     assert!(
-        matches!(outcome, ReplayConsumeRuntimeOutcome::ConsumeFailClosed { .. }),
+        matches!(
+            outcome,
+            ReplayConsumeRuntimeOutcome::ConsumeFailClosed { .. }
+        ),
         "expected ConsumeFailClosed, got {:?}",
         outcome
     );
@@ -849,19 +867,25 @@ fn seen_record(consumed: bool, superseded: bool) -> PreviouslySeenState {
 // R3. replayed decision rejected before consume.
 #[test]
 fn r3_replayed_rejected_before_consume() {
-    assert_replay_runtime_fail_closed(|fx| fx.replay_input.previously_seen = seen_record(false, false));
+    assert_replay_runtime_fail_closed(|fx| {
+        fx.replay_input.previously_seen = seen_record(false, false)
+    });
 }
 
 // R4. already-consumed decision rejected before consume.
 #[test]
 fn r4_already_consumed_rejected_before_consume() {
-    assert_replay_runtime_fail_closed(|fx| fx.replay_input.previously_seen = seen_record(true, false));
+    assert_replay_runtime_fail_closed(|fx| {
+        fx.replay_input.previously_seen = seen_record(true, false)
+    });
 }
 
 // R5. superseded decision rejected before consume.
 #[test]
 fn r5_superseded_rejected_before_consume() {
-    assert_replay_runtime_fail_closed(|fx| fx.replay_input.previously_seen = seen_record(false, true));
+    assert_replay_runtime_fail_closed(|fx| {
+        fx.replay_input.previously_seen = seen_record(false, true)
+    });
 }
 
 // R6. wrong environment rejected before consume.
@@ -881,7 +905,9 @@ fn r7_wrong_chain_rejected_before_consume() {
 // R8. wrong genesis rejected before consume.
 #[test]
 fn r8_wrong_genesis_rejected_before_consume() {
-    assert_replay_runtime_fail_closed(|fx| fx.replay_input.genesis_hash = "wrong-genesis".to_string());
+    assert_replay_runtime_fail_closed(|fx| {
+        fx.replay_input.genesis_hash = "wrong-genesis".to_string()
+    });
 }
 
 // R9. wrong validation surface rejected before consume.
@@ -961,7 +987,9 @@ fn r18_wrong_candidate_digest_rejected_before_consume() {
 // R19. wrong authority-domain sequence rejected before consume.
 #[test]
 fn r19_wrong_authority_domain_sequence_rejected_before_consume() {
-    assert_replay_runtime_fail_closed(|fx| fx.replay_input.authority_domain_sequence = SEQUENCE + 1);
+    assert_replay_runtime_fail_closed(|fx| {
+        fx.replay_input.authority_domain_sequence = SEQUENCE + 1
+    });
 }
 
 // R20. wrong replay nonce rejected before consume.
@@ -995,7 +1023,10 @@ fn r23_consume_before_apply_rejected() {
     );
     let mut store = store_with_observation(&fx);
     let outcome = fx.run(&mut store);
-    assert_eq!(outcome, ReplayConsumeRuntimeOutcome::DoNotConsumeBeforeApply);
+    assert_eq!(
+        outcome,
+        ReplayConsumeRuntimeOutcome::DoNotConsumeBeforeApply
+    );
     assert!(!store.is_consumed(&fx.consume_input.replay_state_key_digest));
 }
 
@@ -1137,7 +1168,10 @@ fn r34_rejection_is_non_mutating() {
     );
     let mut store = store_with_observation(&fx);
     let outcome = fx.run(&mut store);
-    assert_eq!(outcome, ReplayConsumeRuntimeOutcome::DoNotConsumeApplyFailed);
+    assert_eq!(
+        outcome,
+        ReplayConsumeRuntimeOutcome::DoNotConsumeApplyFailed
+    );
     assert!(!store.is_consumed(&fx.consume_input.replay_state_key_digest));
 
     // A replay-side rejection against an empty store records nothing at all.
@@ -1192,7 +1226,11 @@ fn consume_only_after_successful_mutation_completion() {
             assert!(outcome.authorizes_consume(), "{:?}", completion);
             assert!(store.is_consumed(&fx.consume_input.replay_state_key_digest));
         } else {
-            assert!(outcome.no_consume(), "{:?} unexpectedly consumed", completion);
+            assert!(
+                outcome.no_consume(),
+                "{:?} unexpectedly consumed",
+                completion
+            );
             assert!(!store.is_consumed(&fx.consume_input.replay_state_key_digest));
         }
     }
@@ -1208,7 +1246,10 @@ fn fixture_consume_without_prior_observation_fails_closed() {
     let mut empty = FixtureReplayStateStore::new(TrustBundleEnvironment::Devnet);
     let outcome = fx.run(&mut empty);
     assert!(
-        matches!(outcome, ReplayConsumeRuntimeOutcome::ConsumeFailClosed { .. }),
+        matches!(
+            outcome,
+            ReplayConsumeRuntimeOutcome::ConsumeFailClosed { .. }
+        ),
         "{:?}",
         outcome
     );

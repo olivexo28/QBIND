@@ -83,7 +83,12 @@ fn threshold() -> GovernanceThreshold {
     GovernanceThreshold::new(8, 6, 10)
 }
 
-fn validator(env: TrustBundleEnvironment, idx: u64, power: u64, act: u64) -> CanonicalValidatorRecord {
+fn validator(
+    env: TrustBundleEnvironment,
+    idx: u64,
+    power: u64,
+    act: u64,
+) -> CanonicalValidatorRecord {
     CanonicalValidatorRecord {
         identity: CanonicalValidatorIdentity {
             validator_index: idx,
@@ -147,14 +152,17 @@ fn gov_intent(
     }
 }
 
-fn gov_decision(intent: ProductionGovernanceExecutionIntent) -> ProductionGovernanceExecutionDecision {
+fn gov_decision(
+    intent: ProductionGovernanceExecutionIntent,
+) -> ProductionGovernanceExecutionDecision {
     let idig = intent.intent_digest();
     ProductionGovernanceExecutionDecision {
-        outcome: ProductionGovernanceExecutionOutcome::AcceptedSourceTestGovernanceExecutionIntent {
-            intent_kind: intent.intent_kind,
-            environment: intent.environment,
-            decision_id: intent.decision_id.clone(),
-        },
+        outcome:
+            ProductionGovernanceExecutionOutcome::AcceptedSourceTestGovernanceExecutionIntent {
+                intent_kind: intent.intent_kind,
+                environment: intent.environment,
+                decision_id: intent.decision_id.clone(),
+            },
         decision_id: GOV_DECISION_ID.to_string(),
         request_id: GOV_REQUEST_ID.to_string(),
         intent: Some(intent),
@@ -310,7 +318,11 @@ fn update_case(env: TrustBundleEnvironment) -> Case {
     let updated = validator(env, 2, 250, 1);
     let delta = ValidatorSetDelta::new(vec![ValidatorSetChange::update(updated.clone())]);
     let proposed = CanonicalValidatorSetSnapshot::new(
-        vec![validator(env, 1, 100, 1), updated, validator(env, 3, 100, 1)],
+        vec![
+            validator(env, 1, 100, 1),
+            updated,
+            validator(env, 3, 100, 1),
+        ],
         CUR_EPOCH + 1,
         CUR_VERSION + 1,
     );
@@ -386,7 +398,10 @@ fn a04_noop_plan_accepted_non_mutating() {
 fn a05_validator_add_plan_non_mutating() {
     let d = eval(&add_case(TrustBundleEnvironment::Devnet));
     let plan = d.plan.unwrap();
-    assert_eq!(plan.plan_kind, ProductionValidatorSetRotationPlanKind::ValidatorAdd);
+    assert_eq!(
+        plan.plan_kind,
+        ProductionValidatorSetRotationPlanKind::ValidatorAdd
+    );
     assert!(plan.is_non_mutating());
 }
 
@@ -394,7 +409,10 @@ fn a05_validator_add_plan_non_mutating() {
 fn a06_validator_remove_plan_non_mutating() {
     let d = eval(&remove_case(TrustBundleEnvironment::Devnet));
     let plan = d.plan.unwrap();
-    assert_eq!(plan.plan_kind, ProductionValidatorSetRotationPlanKind::ValidatorRemove);
+    assert_eq!(
+        plan.plan_kind,
+        ProductionValidatorSetRotationPlanKind::ValidatorRemove
+    );
     assert!(plan.is_non_mutating());
 }
 
@@ -418,7 +436,11 @@ fn a08_validator_identity_rotation_plan_non_mutating() {
     rotated.identity.consensus_key_fingerprint = "cons-2-rotated".to_string();
     let delta = ValidatorSetDelta::new(vec![ValidatorSetChange::update(rotated.clone())]);
     let proposed = CanonicalValidatorSetSnapshot::new(
-        vec![validator(env, 1, 100, 1), rotated, validator(env, 3, 100, 1)],
+        vec![
+            validator(env, 1, 100, 1),
+            rotated,
+            validator(env, 3, 100, 1),
+        ],
         CUR_EPOCH + 1,
         CUR_VERSION + 1,
     );
@@ -506,7 +528,14 @@ fn bulk_case(env: TrustBundleEnvironment, action: ValidatorSetRotationAction) ->
         CUR_EPOCH + 1,
         CUR_VERSION + 1,
     );
-    make_case(env, LocalLifecycleAction::Rotate, action, current, delta, proposed)
+    make_case(
+        env,
+        LocalLifecycleAction::Rotate,
+        action,
+        current,
+        delta,
+        proposed,
+    )
 }
 
 #[test]
@@ -550,7 +579,9 @@ fn a13_accepted_plan_binds_environment_chain_genesis_root() {
 
 #[test]
 fn a14_accepted_plan_binds_governance_tuple() {
-    let plan = eval(&add_case(TrustBundleEnvironment::Devnet)).plan.unwrap();
+    let plan = eval(&add_case(TrustBundleEnvironment::Devnet))
+        .plan
+        .unwrap();
     assert_eq!(plan.governance_domain_id, GOV_DOMAIN);
     assert_eq!(plan.governance_epoch, GOV_EPOCH);
     assert_eq!(plan.proposal_id, PROPOSAL_ID);
@@ -560,7 +591,9 @@ fn a14_accepted_plan_binds_governance_tuple() {
 
 #[test]
 fn a15_accepted_plan_binds_governance_execution_ids_and_digests() {
-    let plan = eval(&add_case(TrustBundleEnvironment::Devnet)).plan.unwrap();
+    let plan = eval(&add_case(TrustBundleEnvironment::Devnet))
+        .plan
+        .unwrap();
     assert_eq!(plan.governance_decision_id, GOV_DECISION_ID);
     assert_eq!(plan.governance_request_id, GOV_REQUEST_ID);
     assert!(!plan.governance_intent_digest.is_empty());
@@ -581,7 +614,9 @@ fn a16_accepted_plan_binds_validator_set_digests_and_versions() {
 
 #[test]
 fn a17_accepted_plan_binds_rotation_nonce_and_quorum_threshold() {
-    let plan = eval(&add_case(TrustBundleEnvironment::Devnet)).plan.unwrap();
+    let plan = eval(&add_case(TrustBundleEnvironment::Devnet))
+        .plan
+        .unwrap();
     assert_eq!(plan.rotation_nonce, NONCE);
     assert_eq!(plan.quorum, quorum());
     assert_eq!(plan.threshold, threshold());
@@ -636,12 +671,20 @@ fn a21_transcript_digest_deterministic() {
 fn a22_records_sorted_canonically_before_digesting() {
     let env = TrustBundleEnvironment::Devnet;
     let ordered = CanonicalValidatorSetSnapshot::new(
-        vec![validator(env, 1, 100, 1), validator(env, 2, 100, 1), validator(env, 3, 100, 1)],
+        vec![
+            validator(env, 1, 100, 1),
+            validator(env, 2, 100, 1),
+            validator(env, 3, 100, 1),
+        ],
         CUR_EPOCH,
         CUR_VERSION,
     );
     let shuffled = CanonicalValidatorSetSnapshot::new(
-        vec![validator(env, 3, 100, 1), validator(env, 1, 100, 1), validator(env, 2, 100, 1)],
+        vec![
+            validator(env, 3, 100, 1),
+            validator(env, 1, 100, 1),
+            validator(env, 2, 100, 1),
+        ],
         CUR_EPOCH,
         CUR_VERSION,
     );
@@ -653,7 +696,11 @@ fn a23_different_validator_id_changes_set_digest() {
     let env = TrustBundleEnvironment::Devnet;
     let a = current_set(env);
     let b = CanonicalValidatorSetSnapshot::new(
-        vec![validator(env, 1, 100, 1), validator(env, 2, 100, 1), validator(env, 9, 100, 1)],
+        vec![
+            validator(env, 1, 100, 1),
+            validator(env, 2, 100, 1),
+            validator(env, 9, 100, 1),
+        ],
         CUR_EPOCH,
         CUR_VERSION,
     );
@@ -679,7 +726,11 @@ fn a25_different_voting_power_changes_set_digest() {
     let env = TrustBundleEnvironment::Devnet;
     let a = current_set(env);
     let b = CanonicalValidatorSetSnapshot::new(
-        vec![validator(env, 1, 100, 1), validator(env, 2, 999, 1), validator(env, 3, 100, 1)],
+        vec![
+            validator(env, 1, 100, 1),
+            validator(env, 2, 999, 1),
+            validator(env, 3, 100, 1),
+        ],
         CUR_EPOCH,
         CUR_VERSION,
     );
@@ -691,7 +742,11 @@ fn a26_different_activation_epoch_changes_set_digest() {
     let env = TrustBundleEnvironment::Devnet;
     let a = current_set(env);
     let b = CanonicalValidatorSetSnapshot::new(
-        vec![validator(env, 1, 100, 1), validator(env, 2, 100, 9), validator(env, 3, 100, 1)],
+        vec![
+            validator(env, 1, 100, 1),
+            validator(env, 2, 100, 9),
+            validator(env, 3, 100, 1),
+        ],
         CUR_EPOCH,
         CUR_VERSION,
     );
@@ -700,15 +755,23 @@ fn a26_different_activation_epoch_changes_set_digest() {
 
 #[test]
 fn a27_different_rotation_action_changes_plan_digest() {
-    let add = eval(&add_case(TrustBundleEnvironment::Devnet)).plan.unwrap();
-    let remove = eval(&remove_case(TrustBundleEnvironment::Devnet)).plan.unwrap();
+    let add = eval(&add_case(TrustBundleEnvironment::Devnet))
+        .plan
+        .unwrap();
+    let remove = eval(&remove_case(TrustBundleEnvironment::Devnet))
+        .plan
+        .unwrap();
     assert_ne!(add.plan_digest(), remove.plan_digest());
 }
 
 #[test]
 fn a28_different_proposed_set_changes_plan_digest() {
-    let add = eval(&add_case(TrustBundleEnvironment::Devnet)).plan.unwrap();
-    let update = eval(&update_case(TrustBundleEnvironment::Devnet)).plan.unwrap();
+    let add = eval(&add_case(TrustBundleEnvironment::Devnet))
+        .plan
+        .unwrap();
+    let update = eval(&update_case(TrustBundleEnvironment::Devnet))
+        .plan
+        .unwrap();
     assert_ne!(add.proposed_set_digest, update.proposed_set_digest);
     assert_ne!(add.plan_digest(), update.plan_digest());
 }
@@ -781,7 +844,9 @@ fn b01_disabled_rejects_before_plan_construction() {
     assert!(d.plan.is_none());
 }
 
-fn eval_with_source(source: ValidatorSetRotationAuthoritySource) -> ProductionValidatorSetRotationDecision {
+fn eval_with_source(
+    source: ValidatorSetRotationAuthoritySource,
+) -> ProductionValidatorSetRotationDecision {
     let mut case = add_case(TrustBundleEnvironment::Devnet);
     case.request.authority_source = source;
     eval(&case)
@@ -795,7 +860,10 @@ fn b02_missing_governance_intent_rejected() {
 
 #[test]
 fn b03_unverified_governance_intent_rejected() {
-    let decision = gov_decision(gov_intent(TrustBundleEnvironment::Devnet, LocalLifecycleAction::Rotate));
+    let decision = gov_decision(gov_intent(
+        TrustBundleEnvironment::Devnet,
+        LocalLifecycleAction::Rotate,
+    ));
     let d = eval_with_source(
         ValidatorSetRotationAuthoritySource::UnverifiedGovernanceExecutionDecision { decision },
     );
@@ -804,7 +872,8 @@ fn b03_unverified_governance_intent_rejected() {
 
 #[test]
 fn b04_onchain_proof_alone_rejected() {
-    let d = eval_with_source(ValidatorSetRotationAuthoritySource::OnChainProofWithoutExecutionIntent);
+    let d =
+        eval_with_source(ValidatorSetRotationAuthoritySource::OnChainProofWithoutExecutionIntent);
     assert_reject(&d, &O::OnChainProofAloneRejected);
 }
 
@@ -846,7 +915,10 @@ fn b10_custody_attestation_only_evidence_rejected() {
 
 #[test]
 fn b11_accepted_decision_without_intent_rejected() {
-    let mut decision = gov_decision(gov_intent(TrustBundleEnvironment::Devnet, LocalLifecycleAction::Rotate));
+    let mut decision = gov_decision(gov_intent(
+        TrustBundleEnvironment::Devnet,
+        LocalLifecycleAction::Rotate,
+    ));
     decision.intent = None;
     let d = eval_with_source(
         ValidatorSetRotationAuthoritySource::VerifiedGovernanceExecutionIntent { decision },
@@ -1117,7 +1189,8 @@ fn b38_unknown_validator_removal_rejected() {
 fn b39_unknown_validator_update_rejected() {
     let env = TrustBundleEnvironment::Devnet;
     let current = current_set(env);
-    let delta = ValidatorSetDelta::new(vec![ValidatorSetChange::update(validator(env, 99, 100, 1))]);
+    let delta =
+        ValidatorSetDelta::new(vec![ValidatorSetChange::update(validator(env, 99, 100, 1))]);
     let proposed = current_set(env);
     let case = make_case(
         env,
@@ -1380,7 +1453,9 @@ fn mainnet_case() -> Case {
     )
 }
 
-fn mainnet_reject_with(source: ValidatorSetRotationAuthoritySource) -> ProductionValidatorSetRotationDecision {
+fn mainnet_reject_with(
+    source: ValidatorSetRotationAuthoritySource,
+) -> ProductionValidatorSetRotationDecision {
     let mut case = mainnet_case();
     case.request.authority_source = source;
     eval(&case)
@@ -1418,13 +1493,16 @@ fn c05_mainnet_not_satisfied_by_custody_alone() {
 
 #[test]
 fn c06_mainnet_not_satisfied_by_custody_attestation_alone() {
-    let d = mainnet_reject_with(ValidatorSetRotationAuthoritySource::CustodyAttestationOnlyEvidence);
+    let d =
+        mainnet_reject_with(ValidatorSetRotationAuthoritySource::CustodyAttestationOnlyEvidence);
     assert_eq!(d.outcome, O::MainNetRefused);
 }
 
 #[test]
 fn c07_mainnet_not_satisfied_by_onchain_proof_alone() {
-    let d = mainnet_reject_with(ValidatorSetRotationAuthoritySource::OnChainProofWithoutExecutionIntent);
+    let d = mainnet_reject_with(
+        ValidatorSetRotationAuthoritySource::OnChainProofWithoutExecutionIntent,
+    );
     assert_eq!(d.outcome, O::MainNetRefused);
 }
 
@@ -1445,7 +1523,10 @@ fn c09_mainnet_production_required_policy_returns_unavailable() {
     );
     let case = mainnet_case();
     let d = b.evaluate_validator_set_rotation(&case.request, &case.inputs, &empty_replay());
-    assert_eq!(d.outcome, O::MainNetProductionValidatorSetRotationUnavailable);
+    assert_eq!(
+        d.outcome,
+        O::MainNetProductionValidatorSetRotationUnavailable
+    );
     assert!(d.plan.is_none());
 }
 
@@ -1457,7 +1538,10 @@ fn c10_mainnet_policy_on_non_mainnet_domain_unavailable() {
     );
     let case = add_case(TrustBundleEnvironment::Devnet);
     let d = b.evaluate_validator_set_rotation(&case.request, &case.inputs, &empty_replay());
-    assert_eq!(d.outcome, O::MainNetProductionValidatorSetRotationUnavailable);
+    assert_eq!(
+        d.outcome,
+        O::MainNetProductionValidatorSetRotationUnavailable
+    );
 }
 
 #[test]
@@ -1466,7 +1550,10 @@ fn c11_valid_devnet_source_test_does_not_enable_mainnet() {
     // is DevNet and mainnet is still refused.
     let devnet = eval(&add_case(TrustBundleEnvironment::Devnet));
     assert!(devnet.is_accept());
-    assert_eq!(devnet.plan.unwrap().environment, TrustBundleEnvironment::Devnet);
+    assert_eq!(
+        devnet.plan.unwrap().environment,
+        TrustBundleEnvironment::Devnet
+    );
     assert!(production_validator_set_rotation_boundary_mainnet_refused());
     assert_eq!(eval(&mainnet_case()).outcome, O::MainNetRefused);
 }
@@ -1724,7 +1811,10 @@ fn f02_default_disabled_is_fail_closed() {
 
 #[test]
 fn f03_policy_tags_are_stable() {
-    assert_eq!(ProductionValidatorSetRotationPolicy::Disabled.tag(), "disabled");
+    assert_eq!(
+        ProductionValidatorSetRotationPolicy::Disabled.tag(),
+        "disabled"
+    );
     assert_eq!(
         ProductionValidatorSetRotationPolicy::AllowSourceTestValidatorSetRotationIntent.tag(),
         "allow-source-test-validator-set-rotation-intent"
@@ -1757,7 +1847,10 @@ fn f05_outcome_tags_are_stable() {
         "accepted-source-test-validator-set-rotation-plan"
     );
     assert_eq!(O::MainNetRefused.tag(), "mainnet-refused");
-    assert_eq!(O::ConflictingValidatorDelta.tag(), "conflicting-validator-delta");
+    assert_eq!(
+        O::ConflictingValidatorDelta.tag(),
+        "conflicting-validator-delta"
+    );
 }
 
 #[test]
@@ -1785,7 +1878,10 @@ fn f08_rotation_action_plan_kind_mapping() {
         ValidatorSetRotationAction::ValidatorAdd.plan_kind(),
         Some(ProductionValidatorSetRotationPlanKind::ValidatorAdd)
     );
-    assert_eq!(ValidatorSetRotationAction::UnsupportedRotation.plan_kind(), None);
+    assert_eq!(
+        ValidatorSetRotationAction::UnsupportedRotation.plan_kind(),
+        None
+    );
     assert!(ValidatorSetRotationAction::UnsupportedRotation.is_unsupported());
 }
 
@@ -1796,9 +1892,11 @@ fn f09_derived_action_composition() {
         ValidatorSetDelta::empty().derived_action(),
         ValidatorSetRotationAction::NoOpSynchronization
     );
-    let all_add =
-        ValidatorSetDelta::new(vec![ValidatorSetChange::add(validator(env, 4, 1, 1))]);
-    assert_eq!(all_add.derived_action(), ValidatorSetRotationAction::ValidatorAdd);
+    let all_add = ValidatorSetDelta::new(vec![ValidatorSetChange::add(validator(env, 4, 1, 1))]);
+    assert_eq!(
+        all_add.derived_action(),
+        ValidatorSetRotationAction::ValidatorAdd
+    );
     let mixed = ValidatorSetDelta::new(vec![
         ValidatorSetChange::add(validator(env, 4, 1, 1)),
         ValidatorSetChange::remove(1),

@@ -30,8 +30,8 @@ use std::time::Duration;
 use qbind_consensus::ids::ValidatorId;
 use qbind_crypto::{AeadSuite, CryptoError, KemSuite, SignatureSuite, StaticCryptoProvider};
 use qbind_net::{
-    ClientConnectionConfig, ClientHandshakeConfig, KemPrivateKey, MutualAuthMode, ServerConnectionConfig,
-    ServerHandshakeConfig,
+    ClientConnectionConfig, ClientHandshakeConfig, KemPrivateKey, MutualAuthMode,
+    ServerConnectionConfig, ServerHandshakeConfig,
 };
 use qbind_node::validator_config::{make_test_local_validator_config, NodeValidatorConfig};
 use qbind_node::{NodeHotstuffHarness, NodeMetrics, TransportSecurityMode};

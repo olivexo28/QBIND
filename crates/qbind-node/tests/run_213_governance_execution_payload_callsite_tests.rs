@@ -41,16 +41,16 @@ use qbind_node::pqc_governance_execution_payload_carrying::{
     route_loaded_governance_execution_to_startup_p2p_trust_bundle_callsite_decision,
     GovernanceExecutionActionWire, GovernanceExecutionCallsiteContext,
     GovernanceExecutionClassWire, GovernanceExecutionDecisionWire, GovernanceExecutionInputWire,
-    GovernanceExecutionLoadStatus, GovernanceExecutionPayloadCarryingDecisionOutcome,
-    GovernanceExecutionPayloadParseError, GovernanceExecutionPayloadWire,
-    GovernanceExecutionParts, GovernanceExecutionWireParseError,
+    GovernanceExecutionLoadStatus, GovernanceExecutionParts,
+    GovernanceExecutionPayloadCarryingDecisionOutcome, GovernanceExecutionPayloadParseError,
+    GovernanceExecutionPayloadWire, GovernanceExecutionWireParseError,
     GOVERNANCE_EXECUTION_PAYLOAD_SIBLING_FIELD, GOVERNANCE_EXECUTION_PAYLOAD_WIRE_SCHEMA_VERSION,
 };
 use qbind_node::pqc_governance_execution_policy::{
-    governance_execution_policy_digest, governance_execution_transcript_digest,
-    GovernanceAction, GovernanceExecutionClass, GovernanceExecutionComposedOutcome,
-    GovernanceExecutionDecision, GovernanceExecutionExpectations, GovernanceExecutionInput,
-    GovernanceExecutionOutcome, GovernanceExecutionPolicy, GovernanceQuorumThreshold,
+    governance_execution_policy_digest, governance_execution_transcript_digest, GovernanceAction,
+    GovernanceExecutionClass, GovernanceExecutionComposedOutcome, GovernanceExecutionDecision,
+    GovernanceExecutionExpectations, GovernanceExecutionInput, GovernanceExecutionOutcome,
+    GovernanceExecutionPolicy, GovernanceQuorumThreshold,
     GOVERNANCE_EXECUTION_INVALID_COMMITMENT_SENTINEL, GOVERNANCE_EXECUTION_SUPPORTED_VERSION,
 };
 use qbind_node::pqc_trust_bundle::TrustBundleEnvironment;
@@ -231,10 +231,7 @@ impl Scenario {
         available_from(&self.input, &self.decision)
     }
 
-    fn ctx<'a>(
-        &'a self,
-        td: &'a AuthorityTrustDomain,
-    ) -> GovernanceExecutionCallsiteContext<'a> {
+    fn ctx<'a>(&'a self, td: &'a AuthorityTrustDomain) -> GovernanceExecutionCallsiteContext<'a> {
         callsite_context_for_governance_execution(td, &self.expectations, self.policy)
     }
 }
@@ -250,11 +247,8 @@ fn a1_absent_payload_compatible_under_disabled() {
     let env = TrustBundleEnvironment::Devnet;
     let td = trust_domain(env);
     let exp = rotate_expectations(env);
-    let ctx = callsite_context_for_governance_execution(
-        &td,
-        &exp,
-        GovernanceExecutionPolicy::Disabled,
-    );
+    let ctx =
+        callsite_context_for_governance_execution(&td, &exp, GovernanceExecutionPolicy::Disabled);
     let outcome = route_loaded_governance_execution_to_reload_check_callsite_decision(
         &ctx,
         &GovernanceExecutionLoadStatus::Absent,
@@ -329,10 +323,8 @@ fn a7_transcript_digest_preserved_through_wire() {
     let decision = rotate_decision();
     let wire = GovernanceExecutionPayloadWire::from_parts(&input, &decision);
     let parts = wire.to_parts().expect("wire converts");
-    let before = governance_execution_transcript_digest(
-        &input.input_digest(),
-        &decision.decision_digest(),
-    );
+    let before =
+        governance_execution_transcript_digest(&input.input_digest(), &decision.decision_digest());
     let after =
         governance_execution_transcript_digest(&parts.input_digest(), &parts.decision_digest());
     assert_eq!(before, after);
@@ -387,7 +379,8 @@ fn a10_rotate_authorized_with_matching_candidate_and_sequence() {
     let mut bad_decision = s.decision.clone();
     bad_decision.authorized_candidate_digest = "wrong-candidate".to_string();
     let loaded = available_from(&s.input, &bad_decision);
-    let outcome = route_loaded_governance_execution_to_reload_apply_callsite_decision(&ctx, &loaded);
+    let outcome =
+        route_loaded_governance_execution_to_reload_apply_callsite_decision(&ctx, &loaded);
     assert!(outcome.is_reject());
 }
 
@@ -404,7 +397,8 @@ fn a11_revoke_authorized_with_matching_material() {
         GovernanceExecutionPolicy::FixtureGovernanceAllowed,
     );
     let loaded = available_from(&revoke_input(env), &revoke_decision());
-    let outcome = route_loaded_governance_execution_to_reload_apply_callsite_decision(&ctx, &loaded);
+    let outcome =
+        route_loaded_governance_execution_to_reload_apply_callsite_decision(&ctx, &loaded);
     assert!(outcome.is_accept());
 }
 
@@ -420,7 +414,8 @@ fn a12_emergency_revoke_accepted_under_emergency_policy() {
         GovernanceExecutionPolicy::EmergencyCouncilFixtureAllowed,
     );
     let loaded = available_from(&emergency_input(env), &emergency_decision());
-    let outcome = route_loaded_governance_execution_to_reload_apply_callsite_decision(&ctx, &loaded);
+    let outcome =
+        route_loaded_governance_execution_to_reload_apply_callsite_decision(&ctx, &loaded);
     assert!(outcome.is_accept());
     assert!(matches!(
         outcome.callsite_outcome(),
@@ -447,7 +442,8 @@ fn a13_combined_bound_digests_accepted_devnet() {
         GovernanceExecutionPolicy::FixtureGovernanceAllowed,
     );
     let loaded = available_from(&input, &decision);
-    let outcome = route_loaded_governance_execution_to_reload_apply_callsite_decision(&ctx, &loaded);
+    let outcome =
+        route_loaded_governance_execution_to_reload_apply_callsite_decision(&ctx, &loaded);
     assert!(outcome.is_accept());
 }
 
@@ -458,11 +454,8 @@ fn a14_disabled_policy_bypasses_absent_carrier() {
     let env = TrustBundleEnvironment::Devnet;
     let td = trust_domain(env);
     let exp = rotate_expectations(env);
-    let ctx = callsite_context_for_governance_execution(
-        &td,
-        &exp,
-        GovernanceExecutionPolicy::Disabled,
-    );
+    let ctx =
+        callsite_context_for_governance_execution(&td, &exp, GovernanceExecutionPolicy::Disabled);
     for surface in [
         route_loaded_governance_execution_to_reload_check_callsite_decision,
         route_loaded_governance_execution_to_sighup_callsite_decision,
@@ -479,11 +472,8 @@ fn a15_compatible_paths_under_disabled() {
     let env = TrustBundleEnvironment::Testnet;
     let td = trust_domain(env);
     let exp = rotate_expectations(env);
-    let ctx = callsite_context_for_governance_execution(
-        &td,
-        &exp,
-        GovernanceExecutionPolicy::Disabled,
-    );
+    let ctx =
+        callsite_context_for_governance_execution(&td, &exp, GovernanceExecutionPolicy::Disabled);
     let outcome = route_loaded_governance_execution_to_startup_p2p_trust_bundle_callsite_decision(
         &ctx,
         &GovernanceExecutionLoadStatus::Absent,
@@ -539,9 +529,8 @@ fn r1_absent_when_required_fails_closed() {
 // R2. malformed governance execution input rejected.
 #[test]
 fn r2_malformed_input_rejected() {
-    let mut wire = GovernanceExecutionInputWire::from_input(&rotate_input(
-        TrustBundleEnvironment::Devnet,
-    ));
+    let mut wire =
+        GovernanceExecutionInputWire::from_input(&rotate_input(TrustBundleEnvironment::Devnet));
     wire.candidate_digest = String::new();
     assert_eq!(
         wire.to_input().unwrap_err(),
@@ -577,7 +566,8 @@ fn r4_malformed_combined_payload_rejected() {
         &exp,
         GovernanceExecutionPolicy::FixtureGovernanceAllowed,
     );
-    let outcome = route_loaded_governance_execution_to_reload_apply_callsite_decision(&ctx, &loaded);
+    let outcome =
+        route_loaded_governance_execution_to_reload_apply_callsite_decision(&ctx, &loaded);
     assert!(outcome.is_malformed_payload());
     assert!(outcome.is_reject());
 }
@@ -612,7 +602,8 @@ fn r6_fixture_rejected_production_required() {
         GovernanceExecutionPolicy::ProductionGovernanceRequired,
     );
     let loaded = available_from(&rotate_input(env), &rotate_decision());
-    let outcome = route_loaded_governance_execution_to_reload_apply_callsite_decision(&ctx, &loaded);
+    let outcome =
+        route_loaded_governance_execution_to_reload_apply_callsite_decision(&ctx, &loaded);
     assert_eq!(
         outcome.callsite_outcome(),
         Some(&GovernanceExecutionOutcome::FixtureRejectedProductionRequired)
@@ -686,7 +677,10 @@ fn r9_r10_r11_production_onchain_mainnet_unavailable() {
         let mut input = rotate_input(env);
         input.governance_class = class;
         let loaded = available_from(&input, &rotate_decision());
-        assert_eq!(evaluate_loaded_governance_execution(&ctx, &loaded), Some(expected));
+        assert_eq!(
+            evaluate_loaded_governance_execution(&ctx, &loaded),
+            Some(expected)
+        );
     }
 }
 
@@ -725,7 +719,10 @@ fn r13_r14_r15_wrong_domain_rejected() {
     let mut wrong_chain = rotate_input(env);
     wrong_chain.chain_id = "other-chain".to_string();
     assert!(matches!(
-        evaluate_loaded_governance_execution(&ctx, &available_from(&wrong_chain, &rotate_decision())),
+        evaluate_loaded_governance_execution(
+            &ctx,
+            &available_from(&wrong_chain, &rotate_decision())
+        ),
         Some(GovernanceExecutionOutcome::WrongChain { .. })
     ));
 
@@ -1161,12 +1158,12 @@ fn r38_mutating_rejection_is_pure() {
         &exp,
         GovernanceExecutionPolicy::FixtureGovernanceAllowed,
     );
-    let loaded = GovernanceExecutionLoadStatus::Malformed(
-        GovernanceExecutionPayloadParseError::Json {
+    let loaded =
+        GovernanceExecutionLoadStatus::Malformed(GovernanceExecutionPayloadParseError::Json {
             error: "broken".to_string(),
-        },
-    );
-    let outcome = route_loaded_governance_execution_to_reload_apply_callsite_decision(&ctx, &loaded);
+        });
+    let outcome =
+        route_loaded_governance_execution_to_reload_apply_callsite_decision(&ctx, &loaded);
     assert!(outcome.is_malformed_payload());
 }
 
@@ -1183,11 +1180,10 @@ fn r39_invalid_live_0x05_not_propagated() {
         &exp,
         GovernanceExecutionPolicy::FixtureGovernanceAllowed,
     );
-    let loaded = GovernanceExecutionLoadStatus::Malformed(
-        GovernanceExecutionPayloadParseError::Json {
+    let loaded =
+        GovernanceExecutionLoadStatus::Malformed(GovernanceExecutionPayloadParseError::Json {
             error: "broken".to_string(),
-        },
-    );
+        });
     let outcome =
         route_loaded_governance_execution_to_live_inbound_0x05_callsite_decision(&ctx, &loaded);
     assert!(outcome.is_reject());
@@ -1211,9 +1207,9 @@ fn r40_mainnet_peer_driven_apply_refused_with_fixture_approval() {
     let outcome =
         route_loaded_governance_execution_to_peer_driven_drain_callsite_decision(&ctx, &loaded);
     assert!(outcome.is_mainnet_peer_driven_apply_refused());
-    assert!(mainnet_peer_driven_apply_remains_refused_under_governance_execution_payload_carrying(
-        env
-    ));
+    assert!(
+        mainnet_peer_driven_apply_remains_refused_under_governance_execution_payload_carrying(env)
+    );
 }
 
 // ===========================================================================
@@ -1222,7 +1218,10 @@ fn r40_mainnet_peer_driven_apply_refused_with_fixture_approval() {
 
 #[test]
 fn sibling_field_and_schema_version_are_canonical() {
-    assert_eq!(GOVERNANCE_EXECUTION_PAYLOAD_SIBLING_FIELD, "governance_execution");
+    assert_eq!(
+        GOVERNANCE_EXECUTION_PAYLOAD_SIBLING_FIELD,
+        "governance_execution"
+    );
     assert_eq!(GOVERNANCE_EXECUTION_PAYLOAD_WIRE_SCHEMA_VERSION, 1);
 }
 
@@ -1301,9 +1300,8 @@ fn loader_legacy_v2_sidecar_without_sibling_yields_absent() {
     let value = make_v2_sidecar_value(TrustBundleEnvironment::Devnet, None);
     let bytes = serde_json::to_vec(&value).unwrap();
     let path = std::path::PathBuf::from("/dev/null/run-213-legacy.json");
-    let loaded =
-        load_v2_ratification_sidecar_with_governance_execution_from_bytes(&bytes, &path)
-            .expect("legacy v2 sidecar parses");
+    let loaded = load_v2_ratification_sidecar_with_governance_execution_from_bytes(&bytes, &path)
+        .expect("legacy v2 sidecar parses");
     assert!(loaded.governance_execution.is_absent());
 }
 
@@ -1318,9 +1316,8 @@ fn loader_v2_sidecar_with_sibling_yields_available() {
     );
     let bytes = serde_json::to_vec(&value).unwrap();
     let path = std::path::PathBuf::from("/dev/null/run-213-carry.json");
-    let loaded =
-        load_v2_ratification_sidecar_with_governance_execution_from_bytes(&bytes, &path)
-            .expect("v2 sidecar with sibling parses");
+    let loaded = load_v2_ratification_sidecar_with_governance_execution_from_bytes(&bytes, &path)
+        .expect("v2 sidecar with sibling parses");
     assert!(loaded.governance_execution.is_available());
     assert_eq!(
         loaded.governance_execution.as_parts().unwrap(),
@@ -1336,9 +1333,8 @@ fn loader_v2_sidecar_with_malformed_sibling_yields_malformed() {
     );
     let bytes = serde_json::to_vec(&value).unwrap();
     let path = std::path::PathBuf::from("/dev/null/run-213-malformed.json");
-    let loaded =
-        load_v2_ratification_sidecar_with_governance_execution_from_bytes(&bytes, &path)
-            .expect("v2 ratification still parses");
+    let loaded = load_v2_ratification_sidecar_with_governance_execution_from_bytes(&bytes, &path)
+        .expect("v2 ratification still parses");
     assert!(loaded.governance_execution.is_malformed());
 }
 

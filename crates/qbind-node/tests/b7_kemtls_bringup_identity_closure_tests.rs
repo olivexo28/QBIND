@@ -90,11 +90,10 @@ fn make_p2p_test_config(
 ) -> qbind_node::node_config::NodeConfig {
     use qbind_ledger::{FeeDistributionPolicy, MonetaryMode, SeigniorageSplit};
     use qbind_node::node_config::{
-        DagCouplingMode, ExecutionProfile, FastSyncConfig, GenesisSourceConfig,
-        MempoolDosConfig, MempoolEvictionConfig, MempoolMode, NetworkMode,
-        NetworkTransportConfig, NodeConfig, P2pAntiEclipseConfig, P2pDiscoveryConfig,
-        P2pLivenessConfig, SignerFailureMode, SignerMode, SlashingConfig, SnapshotConfig,
-        StateRetentionConfig, ValidatorStakeConfig,
+        DagCouplingMode, ExecutionProfile, FastSyncConfig, GenesisSourceConfig, MempoolDosConfig,
+        MempoolEvictionConfig, MempoolMode, NetworkMode, NetworkTransportConfig, NodeConfig,
+        P2pAntiEclipseConfig, P2pDiscoveryConfig, P2pLivenessConfig, SignerFailureMode, SignerMode,
+        SlashingConfig, SnapshotConfig, StateRetentionConfig, ValidatorStakeConfig,
     };
     use qbind_node::p2p_diversity::DiversityEnforcementMode;
     use qbind_types::NetworkEnvironment;
@@ -271,8 +270,7 @@ async fn b7_b_dialed_peer_identity_closes_to_validator_node_id() {
     // override is the peer's test-grade KEM public key. Verify the
     // two derivations agree end-to-end.
     let (peer_pk, _) = derive_test_kem_keypair_from_validator_id(1);
-    let dialer_node_id_for_peer =
-        NodeId::new(qbind_hash::derive_node_id_from_pubkey(&peer_pk));
+    let dialer_node_id_for_peer = NodeId::new(qbind_hash::derive_node_id_from_pubkey(&peer_pk));
     assert_eq!(
         dialer_node_id_for_peer, expected,
         "B7.B: dialer's peer NodeId must equal the consensus mapping's NodeId for V1"

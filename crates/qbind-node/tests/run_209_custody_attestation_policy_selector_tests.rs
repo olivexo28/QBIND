@@ -67,7 +67,8 @@ use qbind_node::pqc_custody_attestation_policy_surface::{
     preflight_v2_marker_custody_attestation_for_reload_check,
     preflight_v2_marker_custody_attestation_for_sighup,
     preflight_v2_marker_custody_attestation_for_startup_p2p_trust_bundle,
-    CustodyAttestationPolicySelectorParseError, QBIND_P2P_TRUST_BUNDLE_CUSTODY_ATTESTATION_POLICY_ENV,
+    CustodyAttestationPolicySelectorParseError,
+    QBIND_P2P_TRUST_BUNDLE_CUSTODY_ATTESTATION_POLICY_ENV,
 };
 use qbind_node::pqc_custody_attestation_verifier::{
     CustodyAttestationClass, CustodyAttestationEvidence, CustodyAttestationInput,
@@ -96,9 +97,7 @@ impl EnvGuard {
         let lock = env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let prior = std::env::var(QBIND_P2P_TRUST_BUNDLE_CUSTODY_ATTESTATION_POLICY_ENV).ok();
         match value {
-            Some(v) => {
-                std::env::set_var(QBIND_P2P_TRUST_BUNDLE_CUSTODY_ATTESTATION_POLICY_ENV, v)
-            }
+            Some(v) => std::env::set_var(QBIND_P2P_TRUST_BUNDLE_CUSTODY_ATTESTATION_POLICY_ENV, v),
             None => std::env::remove_var(QBIND_P2P_TRUST_BUNDLE_CUSTODY_ATTESTATION_POLICY_ENV),
         }
         EnvGuard { prior, _lock: lock }
@@ -108,9 +107,7 @@ impl EnvGuard {
 impl Drop for EnvGuard {
     fn drop(&mut self) {
         match self.prior.take() {
-            Some(v) => {
-                std::env::set_var(QBIND_P2P_TRUST_BUNDLE_CUSTODY_ATTESTATION_POLICY_ENV, v)
-            }
+            Some(v) => std::env::set_var(QBIND_P2P_TRUST_BUNDLE_CUSTODY_ATTESTATION_POLICY_ENV, v),
             None => std::env::remove_var(QBIND_P2P_TRUST_BUNDLE_CUSTODY_ATTESTATION_POLICY_ENV),
         }
     }
@@ -471,7 +468,10 @@ fn selector_parses_all_canonical_tags() {
         ),
     ];
     for (tag, policy) in cases {
-        assert_eq!(custody_attestation_policy_from_selector(tag).unwrap(), policy);
+        assert_eq!(
+            custody_attestation_policy_from_selector(tag).unwrap(),
+            policy
+        );
         // tags round-trip with the verifier's canonical tag method
         assert_eq!(tag, policy.tag());
     }
@@ -578,8 +578,11 @@ fn r3_unrelated_env_does_not_enable_policy() {
 fn a1_a10_no_attestation_payload_bypassed_under_disabled_all_surfaces() {
     let s = accepted_scenario(TrustBundleEnvironment::Devnet);
     for surface in Surface::NON_DRAIN {
-        let outcome =
-            s.run_surface(surface, CustodyAttestationPolicy::Disabled, &CustodyAttestationLoadStatus::Absent);
+        let outcome = s.run_surface(
+            surface,
+            CustodyAttestationPolicy::Disabled,
+            &CustodyAttestationLoadStatus::Absent,
+        );
         assert!(
             matches!(
                 outcome,
@@ -603,7 +606,11 @@ fn a2_a14_devnet_fixture_attestation_reaches_all_seven_surfaces() {
     let loaded = loaded_via_json(&s.parts());
     assert!(loaded.is_available());
     for surface in Surface::ALL {
-        let outcome = s.run_surface(surface, CustodyAttestationPolicy::FixtureAttestationAllowed, &loaded);
+        let outcome = s.run_surface(
+            surface,
+            CustodyAttestationPolicy::FixtureAttestationAllowed,
+            &loaded,
+        );
         // Every non-drain surface accepts the fixture attestation; the
         // peer-driven drain on DevNet is not a MainNet refusal so it also
         // accepts. (MainNet refusal is exercised separately.)
@@ -616,7 +623,11 @@ fn a3_testnet_fixture_attestation_reaches_all_seven_surfaces() {
     let s = accepted_scenario(TrustBundleEnvironment::Testnet);
     let loaded = loaded_via_json(&s.parts());
     for surface in Surface::ALL {
-        let outcome = s.run_surface(surface, CustodyAttestationPolicy::FixtureAttestationAllowed, &loaded);
+        let outcome = s.run_surface(
+            surface,
+            CustodyAttestationPolicy::FixtureAttestationAllowed,
+            &loaded,
+        );
         assert!(outcome.is_accept(), "surface={surface:?} got {outcome:?}");
     }
 }
@@ -634,7 +645,10 @@ fn assert_unavailable_via_surface(
     s.evidence.attestation_class = class;
     let loaded = s.loaded();
     let outcome = s.run_surface(Surface::ReloadCheck, policy, &loaded);
-    assert!(!outcome.is_accept(), "class={class:?} unexpectedly accepted");
+    assert!(
+        !outcome.is_accept(),
+        "class={class:?} unexpectedly accepted"
+    );
     match outcome.callsite_outcome() {
         Some(CustodyMetadataAttestationOutcome::AttestationRejected {
             attestation_outcome,
@@ -818,7 +832,10 @@ fn r15_malformed_custody_attestation_material_rejected() {
     );
     assert!(outcome.is_malformed_payload(), "got {outcome:?}");
     assert!(outcome.is_reject());
-    assert!(outcome.callsite_outcome().is_none(), "verifier must not run");
+    assert!(
+        outcome.callsite_outcome().is_none(),
+        "verifier must not run"
+    );
 }
 
 // ===========================================================================
@@ -896,7 +913,12 @@ fn r19_wrong_authority_root_rejected() {
 fn r20_wrong_signing_key_fingerprint_rejected() {
     assert_reject_with(
         |s| s.evidence.bundle_signing_key_fingerprint = "9".repeat(40),
-        |o| matches!(o, CustodyAttestationOutcome::WrongSigningKeyFingerprint { .. }),
+        |o| {
+            matches!(
+                o,
+                CustodyAttestationOutcome::WrongSigningKeyFingerprint { .. }
+            )
+        },
     );
 }
 
@@ -912,7 +934,12 @@ fn r21_wrong_custody_class_rejected() {
 fn r22_wrong_backend_provider_signer_id_rejected() {
     assert_reject_with(
         |s| s.evidence.backend_provider_signer_id = "other-provider".to_string(),
-        |o| matches!(o, CustodyAttestationOutcome::WrongBackendProviderSignerId { .. }),
+        |o| {
+            matches!(
+                o,
+                CustodyAttestationOutcome::WrongBackendProviderSignerId { .. }
+            )
+        },
     );
 }
 
@@ -952,7 +979,12 @@ fn r26_wrong_candidate_digest_rejected() {
 fn r27_wrong_authority_domain_sequence_rejected() {
     assert_reject_with(
         |s| s.evidence.authority_domain_sequence = 99,
-        |o| matches!(o, CustodyAttestationOutcome::WrongAuthorityDomainSequence { .. }),
+        |o| {
+            matches!(
+                o,
+                CustodyAttestationOutcome::WrongAuthorityDomainSequence { .. }
+            )
+        },
     );
 }
 
@@ -960,7 +992,12 @@ fn r27_wrong_authority_domain_sequence_rejected() {
 fn r28_wrong_governance_proof_digest_rejected() {
     assert_reject_with(
         |s| s.evidence.governance_proof_digest = Some("wrong-gov".to_string()),
-        |o| matches!(o, CustodyAttestationOutcome::WrongGovernanceProofDigest { .. }),
+        |o| {
+            matches!(
+                o,
+                CustodyAttestationOutcome::WrongGovernanceProofDigest { .. }
+            )
+        },
     );
 }
 
@@ -1053,7 +1090,10 @@ fn r37_validation_only_rejection_is_non_mutating() {
         // No accept, no panic, and the function returned a pure value —
         // there is no I/O surface to mutate. The required-but-absent
         // rejection is the typed non-mutating outcome.
-        assert!(outcome.is_required_but_absent(), "surface={surface:?} got {outcome:?}");
+        assert!(
+            outcome.is_required_but_absent(),
+            "surface={surface:?} got {outcome:?}"
+        );
     }
 }
 
@@ -1075,8 +1115,15 @@ fn r38_mutating_rejection_is_non_mutating() {
         Surface::Sighup,
         Surface::PeerDrivenDrain,
     ] {
-        let outcome = s.run_surface(surface, CustodyAttestationPolicy::FixtureAttestationAllowed, &loaded);
-        assert!(!outcome.is_accept(), "surface={surface:?} unexpectedly accepted");
+        let outcome = s.run_surface(
+            surface,
+            CustodyAttestationPolicy::FixtureAttestationAllowed,
+            &loaded,
+        );
+        assert!(
+            !outcome.is_accept(),
+            "surface={surface:?} unexpectedly accepted"
+        );
         assert!(outcome.is_reject(), "surface={surface:?} got {outcome:?}");
     }
 }
@@ -1089,8 +1136,7 @@ fn r38_mutating_rejection_is_non_mutating() {
 #[test]
 fn r39_invalid_live_inbound_0x05_candidate_not_propagated() {
     let mut s = accepted_scenario(TrustBundleEnvironment::Devnet);
-    s.evidence.attestation_commitment =
-        CUSTODY_ATTESTATION_INVALID_COMMITMENT_SENTINEL.to_string();
+    s.evidence.attestation_commitment = CUSTODY_ATTESTATION_INVALID_COMMITMENT_SENTINEL.to_string();
     let loaded = s.loaded();
     let outcome = s.run_surface(
         Surface::LiveInbound0x05,
@@ -1133,7 +1179,10 @@ fn r40_mainnet_peer_driven_drain_refused_under_disabled_too() {
         CustodyAttestationPolicy::Disabled,
         &CustodyAttestationLoadStatus::Absent,
     );
-    assert!(outcome.is_mainnet_peer_driven_apply_refused(), "got {outcome:?}");
+    assert!(
+        outcome.is_mainnet_peer_driven_apply_refused(),
+        "got {outcome:?}"
+    );
 }
 
 // ===========================================================================

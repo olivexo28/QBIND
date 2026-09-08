@@ -22,14 +22,14 @@ use std::path::PathBuf;
 use qbind_node::pqc_devnet_helper::mint_devnet_root;
 use qbind_node::pqc_root_config::PQC_TRANSPORT_SUITE_ML_DSA_44;
 use qbind_node::pqc_trust_bundle::{
-    derive_signing_key_id, sign_bundle_devnet_helper, BundleSigningKey,
-    BundleSigningKeySet, HelperBundleMode, RootStatus, TrustBundle, TrustBundleEnvironment,
-    TrustBundleRoot, TrustBundleSignature,
+    derive_signing_key_id, sign_bundle_devnet_helper, BundleSigningKey, BundleSigningKeySet,
+    HelperBundleMode, RootStatus, TrustBundle, TrustBundleEnvironment, TrustBundleRoot,
+    TrustBundleSignature,
 };
 use qbind_node::pqc_trust_sequence::{
-    atomic_write_record, chain_id_hex, check_and_update_sequence, fingerprint_hex,
-    load_record, sequence_file_path, PersistentTrustBundleSequenceRecord,
-    SequenceCheckOutcome, TrustBundleSequenceError, TRUST_BUNDLE_SEQUENCE_RECORD_VERSION,
+    atomic_write_record, chain_id_hex, check_and_update_sequence, fingerprint_hex, load_record,
+    sequence_file_path, PersistentTrustBundleSequenceRecord, SequenceCheckOutcome,
+    TrustBundleSequenceError, TRUST_BUNDLE_SEQUENCE_RECORD_VERSION,
 };
 use qbind_types::NetworkEnvironment;
 
@@ -185,7 +185,10 @@ fn first_load_signed_devnet_seq1_accepts_and_writes_record() {
         chain_id_hex(NetworkEnvironment::Devnet.chain_id())
     );
     assert_eq!(record.highest_sequence, 1);
-    assert_eq!(record.bundle_fingerprint, fingerprint_hex(&loaded.fingerprint));
+    assert_eq!(
+        record.bundle_fingerprint,
+        fingerprint_hex(&loaded.fingerprint)
+    );
 }
 
 // -----------------------------------------------------------------
@@ -499,7 +502,10 @@ fn tampered_signature_fails_before_sequence_update() {
     assert!(res.is_err());
     let record = load_record(&path).unwrap().unwrap();
     assert_eq!(record.highest_sequence, 3);
-    assert_eq!(record.bundle_fingerprint, fingerprint_hex(&l_good.fingerprint));
+    assert_eq!(
+        record.bundle_fingerprint,
+        fingerprint_hex(&l_good.fingerprint)
+    );
 }
 
 // -----------------------------------------------------------------
@@ -520,8 +526,12 @@ fn revoked_root_only_bundle_still_loads_and_does_not_disturb_sequence() {
         let r = mint_devnet_root().unwrap();
         (hex_lower(&r.root_key_id), hex_lower(&r.root_pk))
     };
-    let bundle =
-        qbind_node::pqc_trust_bundle::build_helper_bundle(HelperBundleMode::RootStatusRevoked, &id, &pk, 0);
+    let bundle = qbind_node::pqc_trust_bundle::build_helper_bundle(
+        HelperBundleMode::RootStatusRevoked,
+        &id,
+        &pk,
+        0,
+    );
     // Unsigned DevNet bundle (Run 050 path) — empty signing key set.
     let bytes = serde_json::to_vec(&bundle).unwrap();
     let loaded = TrustBundle::load_from_bytes(&bytes, NetworkEnvironment::Devnet, 100)
@@ -640,7 +650,8 @@ fn null_chain_id_bundle_persists_under_runtime_chain_id() {
     // Drop chain_id and re-sign.
     bundle.chain_id = None;
     bundle.signature = None;
-    bundle.signature = Some(sign_bundle_devnet_helper(&bundle, h.signing_key_id, &h.signing_sk).unwrap());
+    bundle.signature =
+        Some(sign_bundle_devnet_helper(&bundle, h.signing_key_id, &h.signing_sk).unwrap());
     let loaded = load_validate_devnet(&bundle, &h.signing_keys);
     check_and_update_sequence(
         &path,

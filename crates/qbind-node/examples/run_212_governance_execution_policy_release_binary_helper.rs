@@ -389,15 +389,33 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
     // A1 — fixture governance accepted under fixture policy on DevNet.
     {
         let env = Env::Devnet;
-        let outcome = eval_fixture(&rotate_input(env), &rotate_decision(), &rotate_expectations(env), env);
-        t.check("A1.fixture-devnet", "accept:FixtureGovernanceAccepted", outcome_tag(&outcome));
+        let outcome = eval_fixture(
+            &rotate_input(env),
+            &rotate_decision(),
+            &rotate_expectations(env),
+            env,
+        );
+        t.check(
+            "A1.fixture-devnet",
+            "accept:FixtureGovernanceAccepted",
+            outcome_tag(&outcome),
+        );
     }
 
     // A2 — fixture governance accepted under fixture policy on TestNet.
     {
         let env = Env::Testnet;
-        let outcome = eval_fixture(&rotate_input(env), &rotate_decision(), &rotate_expectations(env), env);
-        t.check("A2.fixture-testnet", "accept:FixtureGovernanceAccepted", outcome_tag(&outcome));
+        let outcome = eval_fixture(
+            &rotate_input(env),
+            &rotate_decision(),
+            &rotate_expectations(env),
+            env,
+        );
+        t.check(
+            "A2.fixture-testnet",
+            "accept:FixtureGovernanceAccepted",
+            outcome_tag(&outcome),
+        );
     }
 
     // A3 — emergency council fixture accepted under emergency fixture policy.
@@ -424,7 +442,11 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
         let b = rotate_input(env).input_digest();
         let mut c = rotate_input(env);
         c.proposal_id = "different".to_string();
-        t.assert_true("A4.input-digest-deterministic", a == b && a != c.input_digest(), "");
+        t.assert_true(
+            "A4.input-digest-deterministic",
+            a == b && a != c.input_digest(),
+            "",
+        );
     }
 
     // A5 — governance execution decision digest deterministic + domain-bound.
@@ -433,7 +455,11 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
         let b = rotate_decision().decision_digest();
         let mut c = rotate_decision();
         c.authorized_sequence = 8;
-        t.assert_true("A5.decision-digest-deterministic", a == b && a != c.decision_digest(), "");
+        t.assert_true(
+            "A5.decision-digest-deterministic",
+            a == b && a != c.decision_digest(),
+            "",
+        );
     }
 
     // A6 — governance execution transcript digest deterministic + bound.
@@ -441,17 +467,25 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
         let env = Env::Devnet;
         let input = rotate_input(env);
         let decision = rotate_decision();
-        let t1 =
-            governance_execution_transcript_digest(&input.input_digest(), &decision.decision_digest());
-        let t2 =
-            governance_execution_transcript_digest(&input.input_digest(), &decision.decision_digest());
+        let t1 = governance_execution_transcript_digest(
+            &input.input_digest(),
+            &decision.decision_digest(),
+        );
+        let t2 = governance_execution_transcript_digest(
+            &input.input_digest(),
+            &decision.decision_digest(),
+        );
         let mut other = rotate_input(env);
         other.replay_nonce = "other-nonce".to_string();
         let t3 = governance_execution_transcript_digest(
             &other.input_digest(),
             &decision.decision_digest(),
         );
-        t.assert_true("A6.transcript-digest-deterministic", t1 == t2 && t1 != t3, "");
+        t.assert_true(
+            "A6.transcript-digest-deterministic",
+            t1 == t2 && t1 != t3,
+            "",
+        );
     }
 
     // A7 — governance policy digest deterministic (optional helper, implemented).
@@ -530,13 +564,31 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
     // A10 — lifecycle rotate authorized only when the decision authorizes rotate.
     {
         let env = Env::Devnet;
-        let ok = eval_fixture(&rotate_input(env), &rotate_decision(), &rotate_expectations(env), env);
+        let ok = eval_fixture(
+            &rotate_input(env),
+            &rotate_decision(),
+            &rotate_expectations(env),
+            env,
+        );
         let mut decision = rotate_decision();
         decision.authorized_lifecycle_action = LocalLifecycleAction::Revoke;
         decision.authorized_governance_action = GovernanceAction::Revoke;
-        let bad = eval_fixture(&rotate_input(env), &decision, &rotate_expectations(env), env);
-        t.check("A10.rotate-accepted", "accept:FixtureGovernanceAccepted", outcome_tag(&ok));
-        t.check("A10.rotate-mismatch", "reject:WrongLifecycleAction", outcome_tag(&bad));
+        let bad = eval_fixture(
+            &rotate_input(env),
+            &decision,
+            &rotate_expectations(env),
+            env,
+        );
+        t.check(
+            "A10.rotate-accepted",
+            "accept:FixtureGovernanceAccepted",
+            outcome_tag(&ok),
+        );
+        t.check(
+            "A10.rotate-mismatch",
+            "reject:WrongLifecycleAction",
+            outcome_tag(&bad),
+        );
     }
 
     // A11 — lifecycle revoke authorized only when the decision authorizes revoke.
@@ -544,7 +596,11 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
         let env = Env::Devnet;
         let (input, decision, exp) = revoke_triple(env);
         let outcome = eval_fixture(&input, &decision, &exp, env);
-        t.check("A11.revoke-accepted", "accept:FixtureGovernanceAccepted", outcome_tag(&outcome));
+        t.check(
+            "A11.revoke-accepted",
+            "accept:FixtureGovernanceAccepted",
+            outcome_tag(&outcome),
+        );
     }
 
     // A12 — emergency revoke accepted only under the explicit emergency fixture
@@ -558,9 +614,22 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
             &trust_domain(env),
             GovernanceExecutionPolicy::EmergencyCouncilFixtureAllowed,
         );
-        let bad = eval_fixture(&emergency_input(env), &emergency_decision(), &emergency_expectations(env), env);
-        t.check("A12.emergency-accepted", "accept:EmergencyCouncilFixtureAccepted", outcome_tag(&ok));
-        t.check("A12.emergency-under-fixture", "reject:GovernanceClassPolicyMismatch", outcome_tag(&bad));
+        let bad = eval_fixture(
+            &emergency_input(env),
+            &emergency_decision(),
+            &emergency_expectations(env),
+            env,
+        );
+        t.check(
+            "A12.emergency-accepted",
+            "accept:EmergencyCouncilFixtureAccepted",
+            outcome_tag(&ok),
+        );
+        t.check(
+            "A12.emergency-under-fixture",
+            "reject:GovernanceClassPolicyMismatch",
+            outcome_tag(&bad),
+        );
     }
 
     // A13 — production governance boundary callable, returns typed unavailable.
@@ -574,7 +643,11 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
             &trust_domain(env),
             GovernanceExecutionPolicy::ProductionGovernanceRequired,
         );
-        t.check("A13.production-unavailable", "reject:ProductionGovernanceUnavailable", outcome_tag(&outcome));
+        t.check(
+            "A13.production-unavailable",
+            "reject:ProductionGovernanceUnavailable",
+            outcome_tag(&outcome),
+        );
         t.assert_true("A13.is-unavailable", outcome.is_unavailable(), "");
     }
 
@@ -589,7 +662,11 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
             &trust_domain(env),
             GovernanceExecutionPolicy::ProductionGovernanceRequired,
         );
-        t.check("A14.onchain-unavailable", "reject:OnChainGovernanceUnavailable", outcome_tag(&outcome));
+        t.check(
+            "A14.onchain-unavailable",
+            "reject:OnChainGovernanceUnavailable",
+            outcome_tag(&outcome),
+        );
         t.assert_true("A14.is-unavailable", outcome.is_unavailable(), "");
     }
 
@@ -638,7 +715,11 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
             &trust_domain(env),
             GovernanceExecutionPolicy::Disabled,
         );
-        t.check("A16.custody-signer-compat", "reject:GovernanceExecutionDisabled", outcome_tag(&outcome));
+        t.check(
+            "A16.custody-signer-compat",
+            "reject:GovernanceExecutionDisabled",
+            outcome_tag(&outcome),
+        );
     }
 
     // Extra — the fixture evaluator trait accepts on DevNet and reports its class.
@@ -654,8 +735,7 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
         );
         t.assert_true(
             "X.fixture-evaluator-trait",
-            outcome.is_accept()
-                && evaluator.class() == GovernanceExecutionClass::FixtureGovernance,
+            outcome.is_accept() && evaluator.class() == GovernanceExecutionClass::FixtureGovernance,
             "",
         );
     }
@@ -681,7 +761,11 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
             &trust_domain(env),
             GovernanceExecutionPolicy::Disabled,
         );
-        t.check("R1.disabled", "reject:GovernanceExecutionDisabled", outcome_tag(&outcome));
+        t.check(
+            "R1.disabled",
+            "reject:GovernanceExecutionDisabled",
+            outcome_tag(&outcome),
+        );
     }
 
     // R2 — fixture governance rejected under ProductionGovernanceRequired.
@@ -693,7 +777,11 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
             &trust_domain(env),
             GovernanceExecutionPolicy::ProductionGovernanceRequired,
         );
-        t.check("R2.fixture-production-required", "reject:FixtureRejectedProductionRequired", outcome_tag(&outcome));
+        t.check(
+            "R2.fixture-production-required",
+            "reject:FixtureRejectedProductionRequired",
+            outcome_tag(&outcome),
+        );
     }
 
     // R3 — emergency fixture rejected under ProductionGovernanceRequired.
@@ -721,7 +809,11 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
             &trust_domain(env),
             GovernanceExecutionPolicy::MainnetGovernanceRequired,
         );
-        t.check("R4.fixture-mainnet-required", "reject:FixtureRejectedMainnetRequired", outcome_tag(&outcome));
+        t.check(
+            "R4.fixture-mainnet-required",
+            "reject:FixtureRejectedMainnetRequired",
+            outcome_tag(&outcome),
+        );
     }
 
     // R5 — production governance rejected as unavailable.
@@ -729,7 +821,11 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
         let mut input = rotate_input(env);
         input.governance_class = GovernanceExecutionClass::ProductionGovernanceUnavailable;
         let outcome = eval_fixture(&input, &rotate_decision(), &rotate_expectations(env), env);
-        t.check("R5.production-unavailable", "reject:ProductionGovernanceUnavailable", outcome_tag(&outcome));
+        t.check(
+            "R5.production-unavailable",
+            "reject:ProductionGovernanceUnavailable",
+            outcome_tag(&outcome),
+        );
     }
 
     // R6 — on-chain governance rejected as unavailable.
@@ -737,7 +833,11 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
         let mut input = rotate_input(env);
         input.governance_class = GovernanceExecutionClass::OnChainGovernanceUnavailable;
         let outcome = eval_fixture(&input, &rotate_decision(), &rotate_expectations(env), env);
-        t.check("R6.onchain-unavailable", "reject:OnChainGovernanceUnavailable", outcome_tag(&outcome));
+        t.check(
+            "R6.onchain-unavailable",
+            "reject:OnChainGovernanceUnavailable",
+            outcome_tag(&outcome),
+        );
     }
 
     // R7 — MainNet governance rejected as unavailable (class + MainNet evaluator).
@@ -745,7 +845,11 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
         let mut input = rotate_input(env);
         input.governance_class = GovernanceExecutionClass::MainnetGovernanceUnavailable;
         let outcome = eval_fixture(&input, &rotate_decision(), &rotate_expectations(env), env);
-        t.check("R7.mainnet-unavailable", "reject:MainNetGovernanceUnavailable", outcome_tag(&outcome));
+        t.check(
+            "R7.mainnet-unavailable",
+            "reject:MainNetGovernanceUnavailable",
+            outcome_tag(&outcome),
+        );
         let evaluator = MainnetGovernanceExecutionEvaluator;
         let placeholder = evaluator.evaluate_governance_execution_policy(
             &rotate_input(env),
@@ -754,7 +858,11 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
             &trust_domain(env),
             GovernanceExecutionPolicy::MainnetGovernanceRequired,
         );
-        t.check("R7.mainnet-evaluator", "reject:MainNetGovernanceUnavailable", outcome_tag(&placeholder));
+        t.check(
+            "R7.mainnet-evaluator",
+            "reject:MainNetGovernanceUnavailable",
+            outcome_tag(&placeholder),
+        );
     }
 
     // R8 — unknown governance class rejected.
@@ -762,52 +870,104 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
         let mut input = rotate_input(env);
         input.governance_class = GovernanceExecutionClass::Unknown;
         let outcome = eval_fixture(&input, &rotate_decision(), &rotate_expectations(env), env);
-        t.check("R8.unknown-class", "reject:UnknownGovernanceClassRejected", outcome_tag(&outcome));
+        t.check(
+            "R8.unknown-class",
+            "reject:UnknownGovernanceClassRejected",
+            outcome_tag(&outcome),
+        );
     }
 
     // R9..R21 — wrong-binding rejections. Each mutates one bound field.
-    let wrong_input_cases: &[(&str, &str, fn(&mut GovernanceExecutionInput, &mut GovernanceExecutionExpectations))] = &[
-        ("R9.wrong-environment", "reject:WrongEnvironment", |i, _e| {
-            i.environment = TrustBundleEnvironment::Testnet;
-        }),
+    let wrong_input_cases: &[(
+        &str,
+        &str,
+        fn(&mut GovernanceExecutionInput, &mut GovernanceExecutionExpectations),
+    )] = &[
+        (
+            "R9.wrong-environment",
+            "reject:WrongEnvironment",
+            |i, _e| {
+                i.environment = TrustBundleEnvironment::Testnet;
+            },
+        ),
         ("R10.wrong-chain", "reject:WrongChain", |i, _e| {
             i.chain_id = "wrong-chain".to_string();
         }),
         ("R11.wrong-genesis", "reject:WrongGenesis", |i, _e| {
             i.genesis_hash = "wrong-genesis".to_string();
         }),
-        ("R12.wrong-authority-root", "reject:WrongAuthorityRoot", |i, _e| {
-            i.authority_root_fingerprint = "wrong-root".to_string();
-        }),
-        ("R13.wrong-lifecycle-action", "reject:WrongLifecycleAction", |i, _e| {
-            i.lifecycle_action = LocalLifecycleAction::Retire;
-        }),
-        ("R14.wrong-candidate-digest", "reject:WrongCandidateDigest", |i, _e| {
-            i.candidate_digest = "wrong-candidate".to_string();
-        }),
-        ("R15.wrong-sequence", "reject:WrongAuthorityDomainSequence", |i, _e| {
-            i.authority_domain_sequence = 99;
-        }),
-        ("R16.wrong-governance-proof", "reject:WrongGovernanceProofDigest", |i, _e| {
-            i.governance_proof_digest = "wrong-proof".to_string();
-        }),
-        ("R17.wrong-onchain-proof", "reject:WrongOnChainProofDigest", |i, e| {
-            i.on_chain_proof_digest = Some("wrong-onchain".to_string());
-            e.expected_on_chain_proof_digest = Some("expected-onchain".to_string());
-        }),
-        ("R18.wrong-custody-attestation", "reject:WrongCustodyAttestationDigest", |i, e| {
-            i.custody_attestation_digest = Some("wrong-custody".to_string());
-            e.expected_custody_attestation_digest = Some("expected-custody".to_string());
-        }),
-        ("R19.wrong-proposal-id", "reject:WrongProposalId", |i, _e| {
-            i.proposal_id = "wrong-proposal".to_string();
-        }),
-        ("R20.wrong-decision-id", "reject:WrongDecisionId", |i, _e| {
-            i.decision_id = "wrong-decision".to_string();
-        }),
-        ("R21.wrong-effective-epoch", "reject:WrongEffectiveEpoch", |i, _e| {
-            i.effective_epoch = 101;
-        }),
+        (
+            "R12.wrong-authority-root",
+            "reject:WrongAuthorityRoot",
+            |i, _e| {
+                i.authority_root_fingerprint = "wrong-root".to_string();
+            },
+        ),
+        (
+            "R13.wrong-lifecycle-action",
+            "reject:WrongLifecycleAction",
+            |i, _e| {
+                i.lifecycle_action = LocalLifecycleAction::Retire;
+            },
+        ),
+        (
+            "R14.wrong-candidate-digest",
+            "reject:WrongCandidateDigest",
+            |i, _e| {
+                i.candidate_digest = "wrong-candidate".to_string();
+            },
+        ),
+        (
+            "R15.wrong-sequence",
+            "reject:WrongAuthorityDomainSequence",
+            |i, _e| {
+                i.authority_domain_sequence = 99;
+            },
+        ),
+        (
+            "R16.wrong-governance-proof",
+            "reject:WrongGovernanceProofDigest",
+            |i, _e| {
+                i.governance_proof_digest = "wrong-proof".to_string();
+            },
+        ),
+        (
+            "R17.wrong-onchain-proof",
+            "reject:WrongOnChainProofDigest",
+            |i, e| {
+                i.on_chain_proof_digest = Some("wrong-onchain".to_string());
+                e.expected_on_chain_proof_digest = Some("expected-onchain".to_string());
+            },
+        ),
+        (
+            "R18.wrong-custody-attestation",
+            "reject:WrongCustodyAttestationDigest",
+            |i, e| {
+                i.custody_attestation_digest = Some("wrong-custody".to_string());
+                e.expected_custody_attestation_digest = Some("expected-custody".to_string());
+            },
+        ),
+        (
+            "R19.wrong-proposal-id",
+            "reject:WrongProposalId",
+            |i, _e| {
+                i.proposal_id = "wrong-proposal".to_string();
+            },
+        ),
+        (
+            "R20.wrong-decision-id",
+            "reject:WrongDecisionId",
+            |i, _e| {
+                i.decision_id = "wrong-decision".to_string();
+            },
+        ),
+        (
+            "R21.wrong-effective-epoch",
+            "reject:WrongEffectiveEpoch",
+            |i, _e| {
+                i.effective_epoch = 101;
+            },
+        ),
     ];
     for (id, expected, mutate) in wrong_input_cases {
         let mut input = rotate_input(env);
@@ -822,7 +982,11 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
         let mut exp = rotate_expectations(env);
         exp.now_epoch = 250; // past expiry_epoch (200)
         let outcome = eval_fixture(&rotate_input(env), &rotate_decision(), &exp, env);
-        t.check("R22.expired-decision", "reject:ExpiredDecision", outcome_tag(&outcome));
+        t.check(
+            "R22.expired-decision",
+            "reject:ExpiredDecision",
+            outcome_tag(&outcome),
+        );
     }
 
     // R23 — stale / replayed decision rejected.
@@ -830,7 +994,11 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
         let mut input = rotate_input(env);
         input.replay_nonce = "stale-nonce".to_string();
         let outcome = eval_fixture(&input, &rotate_decision(), &rotate_expectations(env), env);
-        t.check("R23.stale-replayed", "reject:StaleOrReplayedDecision", outcome_tag(&outcome));
+        t.check(
+            "R23.stale-replayed",
+            "reject:StaleOrReplayedDecision",
+            outcome_tag(&outcome),
+        );
     }
 
     // R24 — quorum threshold insufficient rejected.
@@ -838,7 +1006,11 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
         let mut input = rotate_input(env);
         input.quorum = GovernanceQuorumThreshold::new(2, 5, 3);
         let outcome = eval_fixture(&input, &rotate_decision(), &rotate_expectations(env), env);
-        t.check("R24.quorum-insufficient", "reject:QuorumThresholdInsufficient", outcome_tag(&outcome));
+        t.check(
+            "R24.quorum-insufficient",
+            "reject:QuorumThresholdInsufficient",
+            outcome_tag(&outcome),
+        );
     }
 
     // R25 — emergency action not authorized rejected.
@@ -852,7 +1024,11 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
             &trust_domain(env),
             GovernanceExecutionPolicy::EmergencyCouncilFixtureAllowed,
         );
-        t.check("R25.emergency-not-authorized", "reject:EmergencyActionNotAuthorized", outcome_tag(&outcome));
+        t.check(
+            "R25.emergency-not-authorized",
+            "reject:EmergencyActionNotAuthorized",
+            outcome_tag(&outcome),
+        );
     }
 
     // R26 — validator-set rotation unsupported rejected.
@@ -860,8 +1036,16 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
         let mut input = rotate_input(env);
         input.governance_action = GovernanceAction::ValidatorSetRotationRequest;
         let outcome = eval_fixture(&input, &rotate_decision(), &rotate_expectations(env), env);
-        t.check("R26.validator-set-rotation", "reject:ValidatorSetRotationUnsupported", outcome_tag(&outcome));
-        t.assert_true("R26.helper", validator_set_rotation_remains_unsupported(), "");
+        t.check(
+            "R26.validator-set-rotation",
+            "reject:ValidatorSetRotationUnsupported",
+            outcome_tag(&outcome),
+        );
+        t.assert_true(
+            "R26.helper",
+            validator_set_rotation_remains_unsupported(),
+            "",
+        );
     }
 
     // R27 — policy-change action unsupported rejected (all four placeholders).
@@ -876,7 +1060,10 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
             let mut input = rotate_input(env);
             input.governance_action = action;
             let outcome = eval_fixture(&input, &rotate_decision(), &rotate_expectations(env), env);
-            all_ok &= matches!(outcome, GovernanceExecutionOutcome::PolicyChangeActionUnsupported);
+            all_ok &= matches!(
+                outcome,
+                GovernanceExecutionOutcome::PolicyChangeActionUnsupported
+            );
         }
         t.assert_true("R27.policy-change-unsupported", all_ok, "");
     }
@@ -886,15 +1073,28 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
         let mut input = rotate_input(env);
         input.proposal_id = String::new();
         let outcome = eval_fixture(&input, &rotate_decision(), &rotate_expectations(env), env);
-        t.check("R28.malformed-input", "reject:MalformedExecutionInput", outcome_tag(&outcome));
+        t.check(
+            "R28.malformed-input",
+            "reject:MalformedExecutionInput",
+            outcome_tag(&outcome),
+        );
     }
 
     // R29 — malformed governance execution decision rejected.
     {
         let mut decision = rotate_decision();
         decision.decision_commitment = GOVERNANCE_EXECUTION_INVALID_COMMITMENT_SENTINEL.to_string();
-        let outcome = eval_fixture(&rotate_input(env), &decision, &rotate_expectations(env), env);
-        t.check("R29.malformed-decision", "reject:MalformedExecutionDecision", outcome_tag(&outcome));
+        let outcome = eval_fixture(
+            &rotate_input(env),
+            &decision,
+            &rotate_expectations(env),
+            env,
+        );
+        t.check(
+            "R29.malformed-decision",
+            "reject:MalformedExecutionDecision",
+            outcome_tag(&outcome),
+        );
     }
 
     // R30 — unsupported governance execution version rejected.
@@ -902,17 +1102,29 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
         let mut input = rotate_input(env);
         input.execution_version = 99;
         let outcome = eval_fixture(&input, &rotate_decision(), &rotate_expectations(env), env);
-        t.check("R30.unsupported-version", "reject:UnsupportedGovernanceExecutionVersion", outcome_tag(&outcome));
+        t.check(
+            "R30.unsupported-version",
+            "reject:UnsupportedGovernanceExecutionVersion",
+            outcome_tag(&outcome),
+        );
     }
 
     // R31 — local operator cannot satisfy governance execution.
     {
-        t.assert_true("R31.local-operator", local_operator_cannot_satisfy_governance_execution(), "");
+        t.assert_true(
+            "R31.local-operator",
+            local_operator_cannot_satisfy_governance_execution(),
+            "",
+        );
     }
 
     // R32 — peer majority cannot satisfy governance execution.
     {
-        t.assert_true("R32.peer-majority", peer_majority_cannot_satisfy_governance_execution(), "");
+        t.assert_true(
+            "R32.peer-majority",
+            peer_majority_cannot_satisfy_governance_execution(),
+            "",
+        );
     }
 
     // R33 — governance valid but lifecycle action mismatch rejected (input
@@ -925,15 +1137,28 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
         exp.expected_governance_action = GovernanceAction::Revoke;
         exp.expected_lifecycle_action = LocalLifecycleAction::Revoke;
         let outcome = eval_fixture(&input, &rotate_decision(), &exp, env);
-        t.check("R33.lifecycle-action-mismatch", "reject:WrongLifecycleAction", outcome_tag(&outcome));
+        t.check(
+            "R33.lifecycle-action-mismatch",
+            "reject:WrongLifecycleAction",
+            outcome_tag(&outcome),
+        );
     }
 
     // R34 — lifecycle valid but governance decision invalid (not approved).
     {
         let mut decision = rotate_decision();
         decision.approved = false;
-        let outcome = eval_fixture(&rotate_input(env), &decision, &rotate_expectations(env), env);
-        t.check("R34.decision-not-approved", "reject:GovernanceDecisionRejected", outcome_tag(&outcome));
+        let outcome = eval_fixture(
+            &rotate_input(env),
+            &decision,
+            &rotate_expectations(env),
+            env,
+        );
+        t.check(
+            "R34.decision-not-approved",
+            "reject:GovernanceDecisionRejected",
+            outcome_tag(&outcome),
+        );
     }
 
     // R35 — lifecycle + governance proof + custody valid but production
@@ -948,7 +1173,11 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
             &trust_domain(env),
             GovernanceExecutionPolicy::ProductionGovernanceRequired,
         );
-        t.check("R35.production-unavailable-with-valid", "reject:FixtureRejectedProductionRequired", outcome_tag(&outcome));
+        t.check(
+            "R35.production-unavailable-with-valid",
+            "reject:FixtureRejectedProductionRequired",
+            outcome_tag(&outcome),
+        );
         t.assert_true("R35.is-reject", outcome.is_reject(), "");
     }
 
@@ -1014,7 +1243,11 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
             GovernanceExecutionPolicy::FixtureGovernanceAllowed,
             true,
         );
-        t.check("R38.mainnet-peer-driven-refused", "MainNetPeerDrivenApplyRefused", &composed_tag(&composed));
+        t.check(
+            "R38.mainnet-peer-driven-refused",
+            "MainNetPeerDrivenApplyRefused",
+            &composed_tag(&composed),
+        );
         t.assert_true(
             "R38.helper",
             mainnet_peer_driven_apply_remains_refused_under_governance_execution(Env::Mainnet),
@@ -1029,7 +1262,11 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
             &trust_domain(menv),
             GovernanceExecutionPolicy::FixtureGovernanceAllowed,
         );
-        t.check("R38.fixture-for-mainnet", "reject:FixtureRejectedForMainNet", outcome_tag(&direct));
+        t.check(
+            "R38.fixture-for-mainnet",
+            "reject:FixtureRejectedForMainNet",
+            outcome_tag(&direct),
+        );
     }
 
     t.finish(out)
@@ -1152,16 +1389,28 @@ fn run_fixture_dump(out: &Path) {
     // Canonical governance-execution input fixture (debug rendering — Run 211
     // input/decision/expectations are not wire types and carry no serde
     // surface; the helper records their debug form + digests).
-    write_file(&dir.join("governance_execution_input.txt"), &format!("{input:#?}\n"));
-    write_file(&dir.join("governance_execution_decision.txt"), &format!("{decision:#?}\n"));
+    write_file(
+        &dir.join("governance_execution_input.txt"),
+        &format!("{input:#?}\n"),
+    );
+    write_file(
+        &dir.join("governance_execution_decision.txt"),
+        &format!("{decision:#?}\n"),
+    );
     write_file(
         &dir.join("governance_execution_expectations.txt"),
         &format!("{:#?}\n", rotate_expectations(env)),
     );
 
     write_file(&dir.join("input_digest.txt"), &format!("{input_digest}\n"));
-    write_file(&dir.join("decision_digest.txt"), &format!("{decision_digest}\n"));
-    write_file(&dir.join("transcript_digest.txt"), &format!("{transcript_digest}\n"));
+    write_file(
+        &dir.join("decision_digest.txt"),
+        &format!("{decision_digest}\n"),
+    );
+    write_file(
+        &dir.join("transcript_digest.txt"),
+        &format!("{transcript_digest}\n"),
+    );
 
     // Per-policy / per-class policy digests.
     let mut policy = String::new();
@@ -1221,9 +1470,7 @@ fn main() {
     let out_dir = match args.next() {
         Some(a) => PathBuf::from(a),
         None => {
-            eprintln!(
-                "usage: run_212_governance_execution_policy_release_binary_helper <OUT_DIR>"
-            );
+            eprintln!("usage: run_212_governance_execution_policy_release_binary_helper <OUT_DIR>");
             std::process::exit(2);
         }
     };

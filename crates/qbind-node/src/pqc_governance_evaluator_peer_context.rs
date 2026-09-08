@@ -416,7 +416,11 @@ impl GovernanceEvaluatorPeerContext {
         field(b"surface", 1, self.surface.tag().as_bytes());
         field(b"carrier_status", 1, self.carrier_status.tag().as_bytes());
         field(b"selected_policy", 1, self.selected_policy.tag().as_bytes());
-        field(b"evaluator_policy", 1, self.evaluator_policy.tag().as_bytes());
+        field(
+            b"evaluator_policy",
+            1,
+            self.evaluator_policy.tag().as_bytes(),
+        );
         field(b"load_status", 1, self.load_status.tag().as_bytes());
         let opt = |v: &Option<String>| match v {
             Some(s) => (1u8, s.clone()),
@@ -733,12 +737,12 @@ where
             // Route through the Run 226 call-site wiring and surface the
             // composed outcome.
             match wire_governance_evaluator_runtime_callsite(integration) {
-                Ok(outcome @ GovernanceEvaluatorRuntimeIntegrationOutcome::ProceedMutate { .. }) => {
-                    PeerEvaluatorContextOutcome::RoutedProceedMutate {
-                        integration_outcome: outcome,
-                        context_digest: peer.context_digest(),
-                    }
-                }
+                Ok(
+                    outcome @ GovernanceEvaluatorRuntimeIntegrationOutcome::ProceedMutate { .. },
+                ) => PeerEvaluatorContextOutcome::RoutedProceedMutate {
+                    integration_outcome: outcome,
+                    context_digest: peer.context_digest(),
+                },
                 Ok(GovernanceEvaluatorRuntimeIntegrationOutcome::ProceedLegacyBypass) => {
                     PeerEvaluatorContextOutcome::LegacyValidationPreserved
                 }

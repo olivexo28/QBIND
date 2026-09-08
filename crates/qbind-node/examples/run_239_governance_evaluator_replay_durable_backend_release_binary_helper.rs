@@ -68,9 +68,8 @@ use qbind_node::pqc_governance_evaluator_replay_durable_backend::{
     validator_set_rotation_remains_unsupported_under_durable_backend, CrashWindow,
     CrashWindowObservation, DurableBackendDecisionExpectations, DurableBackendDecisionInput,
     DurableBackendKind, DurableBackendOutcome, DurableConsumeOutcome, DurableMutationCompletion,
-    DurableRecordState, FixtureDurableReplayBackend,
-    GovernanceEvaluatorReplayDurableBackendReader, MainnetDurableReplayBackend,
-    ProductionDurableReplayBackend,
+    DurableRecordState, FixtureDurableReplayBackend, GovernanceEvaluatorReplayDurableBackendReader,
+    MainnetDurableReplayBackend, ProductionDurableReplayBackend,
 };
 use qbind_node::pqc_governance_evaluator_replay_state::{
     evaluate_evaluator_replay_freshness, replay_state_key_digest,
@@ -467,10 +466,7 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
             "proceed-known-fresh",
             read_decision_state(K::FixtureDevNet, &input, &exp, &restarted),
         );
-        t.assert_true(
-            "A10.not-consumed",
-            !restarted.is_consumed(&key_of(&input)),
-        );
+        t.assert_true("A10.not-consumed", !restarted.is_consumed(&key_of(&input)));
     }
 
     // A11 — consumed state survives fixture restart snapshot.
@@ -540,7 +536,10 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
         let w = classify_crash_window(&obs);
         t.check_window("A14.window", "after-mutation-before-consume", w);
         t.assert_true("A14.is-amc", w.is_after_mutation_before_consume());
-        t.assert_true("A14.fail-closed-recovery", w.requires_fail_closed_recovery());
+        t.assert_true(
+            "A14.fail-closed-recovery",
+            w.requires_fail_closed_recovery(),
+        );
     }
 
     // A15 — after-consume crash window reads consumed / fail-closed for repeat.
@@ -623,8 +622,10 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
             apply_failed: false,
             consumed: false,
         };
-        let a = crash_window_transcript_digest(&input, &obs, CrashWindow::AfterMutationBeforeConsume);
-        let b = crash_window_transcript_digest(&input, &obs, CrashWindow::AfterMutationBeforeConsume);
+        let a =
+            crash_window_transcript_digest(&input, &obs, CrashWindow::AfterMutationBeforeConsume);
+        let b =
+            crash_window_transcript_digest(&input, &obs, CrashWindow::AfterMutationBeforeConsume);
         t.assert_true("A19.stable", a == b);
         t.assert_true(
             "A19.window-bound",
@@ -757,12 +758,28 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
         let request = ev_request(&identity, 100, 200);
         let response = ev_response(&request, 100, 200);
         let input = EvaluatorReplayFreshnessInput::from_evaluator_material(
-            &identity, &request, &response, TRANSCRIPT_DIGEST, DECISION_DIGEST, Env::Devnet,
-            CHAIN, GENESIS, S::ReloadApply, 150, PreviouslySeenState::FirstSeen,
+            &identity,
+            &request,
+            &response,
+            TRANSCRIPT_DIGEST,
+            DECISION_DIGEST,
+            Env::Devnet,
+            CHAIN,
+            GENESIS,
+            S::ReloadApply,
+            150,
+            PreviouslySeenState::FirstSeen,
         );
         let exp = EvaluatorReplayFreshnessExpectations::from_evaluator_material(
-            &identity, &request, &response, TRANSCRIPT_DIGEST, DECISION_DIGEST, Env::Devnet,
-            CHAIN, GENESIS, S::ReloadApply,
+            &identity,
+            &request,
+            &response,
+            TRANSCRIPT_DIGEST,
+            DECISION_DIGEST,
+            Env::Devnet,
+            CHAIN,
+            GENESIS,
+            S::ReloadApply,
         );
         t.check(
             "A25.run230-fresh",
@@ -791,7 +808,12 @@ fn assert_wrong_binding_rejected(
     let (mut input, exp) = fresh_devnet();
     tamper(&mut input);
     let mut backend = FixtureDurableReplayBackend::new(TrustBundleEnvironment::Devnet);
-    let o = observe_decision_if_absent(DurableBackendKind::FixtureDevNet, &input, &exp, &mut backend);
+    let o = observe_decision_if_absent(
+        DurableBackendKind::FixtureDevNet,
+        &input,
+        &exp,
+        &mut backend,
+    );
     t.check_outcome(&format!("{id}.outcome"), "fail-closed-malformed-record", o);
     t.assert_true(&format!("{id}.backend-empty"), backend.is_empty());
 }
@@ -841,9 +863,7 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
     assert_wrong_binding_rejected(&mut t, "R12.wrong-effective-epoch", |i| {
         i.effective_epoch = 999
     });
-    assert_wrong_binding_rejected(&mut t, "R13.wrong-expiry-epoch", |i| {
-        i.expiry_epoch = 999
-    });
+    assert_wrong_binding_rejected(&mut t, "R13.wrong-expiry-epoch", |i| i.expiry_epoch = 999);
     assert_wrong_binding_rejected(&mut t, "R14.wrong-replay-nonce", |i| {
         i.replay_nonce = "wrong".to_string()
     });
@@ -902,7 +922,10 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
         let (input, exp) = fresh_devnet();
         let mut backend = FixtureDurableReplayBackend::new(Env::Devnet);
         observe_decision_if_absent(K::FixtureDevNet, &input, &exp, &mut backend);
-        t.assert_true("R23.mark-superseded", backend.mark_superseded(&key_of(&input)));
+        t.assert_true(
+            "R23.mark-superseded",
+            backend.mark_superseded(&key_of(&input)),
+        );
         t.check_outcome(
             "R23.read",
             "fail-closed-superseded",
@@ -1016,7 +1039,13 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
             t.check_consume(
                 &format!("R29.{i}"),
                 "rejected-not-successful-mutation",
-                mark_consumed_after_success(K::FixtureDevNet, &input, &exp, completion, &mut backend),
+                mark_consumed_after_success(
+                    K::FixtureDevNet,
+                    &input,
+                    &exp,
+                    completion,
+                    &mut backend,
+                ),
             );
         }
         t.assert_true("R29.not-consumed", !backend.is_consumed(&key_of(&input)));
@@ -1030,7 +1059,13 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
         t.check_consume(
             "R30.apply-failed",
             "rejected-apply-failed",
-            mark_consumed_after_success(K::FixtureDevNet, &input, &exp, MC::ApplyFailed, &mut backend),
+            mark_consumed_after_success(
+                K::FixtureDevNet,
+                &input,
+                &exp,
+                MC::ApplyFailed,
+                &mut backend,
+            ),
         );
         t.assert_true("R30.not-consumed", !backend.is_consumed(&key_of(&input)));
     }
@@ -1043,7 +1078,13 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
         t.check_consume(
             "R31.rolled-back",
             "rejected-rolled-back",
-            mark_consumed_after_success(K::FixtureDevNet, &input, &exp, MC::RolledBack, &mut backend),
+            mark_consumed_after_success(
+                K::FixtureDevNet,
+                &input,
+                &exp,
+                MC::RolledBack,
+                &mut backend,
+            ),
         );
         t.assert_true("R31.not-consumed", !backend.is_consumed(&key_of(&input)));
     }
@@ -1114,7 +1155,14 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
         );
 
         // A MainNet peer-driven apply variant is refused regardless.
-        let (mn_input, mn_exp) = di(Env::Mainnet, S::PeerDrivenDrain, S::PeerDrivenDrain, 100, 200, 150);
+        let (mn_input, mn_exp) = di(
+            Env::Mainnet,
+            S::PeerDrivenDrain,
+            S::PeerDrivenDrain,
+            100,
+            200,
+            150,
+        );
         let mut mn_backend = FixtureDurableReplayBackend::new(Env::Devnet);
         t.check_outcome(
             "R37.observe-refused",
@@ -1152,36 +1200,132 @@ fn run_reachability_table(out: &Path) -> (u64, u64) {
 
     // Durable backend outcome tags reachable / stable.
     for (id, expected, o) in [
-        ("T.proceed-first-seen", "proceed-first-seen", DurableBackendOutcome::ProceedFirstSeen),
-        ("T.proceed-known-fresh", "proceed-known-fresh", DurableBackendOutcome::ProceedKnownFresh),
-        ("T.proceed-deferred", "proceed-deferred", DurableBackendOutcome::ProceedDeferred),
-        ("T.fail-closed-expired", "fail-closed-expired", DurableBackendOutcome::FailClosedExpired),
-        ("T.fail-closed-stale", "fail-closed-stale", DurableBackendOutcome::FailClosedStale),
-        ("T.fail-closed-replay", "fail-closed-replay", DurableBackendOutcome::FailClosedReplay),
-        ("T.fail-closed-consumed", "fail-closed-consumed", DurableBackendOutcome::FailClosedConsumed),
-        ("T.fail-closed-superseded", "fail-closed-superseded", DurableBackendOutcome::FailClosedSuperseded),
-        ("T.fail-closed-malformed", "fail-closed-malformed-record", DurableBackendOutcome::FailClosedMalformedRecord),
-        ("T.fail-closed-backend-unavail", "fail-closed-backend-unavailable", DurableBackendOutcome::FailClosedBackendUnavailable),
-        ("T.fail-closed-prod-unavail", "fail-closed-production-unavailable", DurableBackendOutcome::FailClosedProductionUnavailable),
-        ("T.fail-closed-mainnet-unavail", "fail-closed-mainnet-unavailable", DurableBackendOutcome::FailClosedMainNetUnavailable),
+        (
+            "T.proceed-first-seen",
+            "proceed-first-seen",
+            DurableBackendOutcome::ProceedFirstSeen,
+        ),
+        (
+            "T.proceed-known-fresh",
+            "proceed-known-fresh",
+            DurableBackendOutcome::ProceedKnownFresh,
+        ),
+        (
+            "T.proceed-deferred",
+            "proceed-deferred",
+            DurableBackendOutcome::ProceedDeferred,
+        ),
+        (
+            "T.fail-closed-expired",
+            "fail-closed-expired",
+            DurableBackendOutcome::FailClosedExpired,
+        ),
+        (
+            "T.fail-closed-stale",
+            "fail-closed-stale",
+            DurableBackendOutcome::FailClosedStale,
+        ),
+        (
+            "T.fail-closed-replay",
+            "fail-closed-replay",
+            DurableBackendOutcome::FailClosedReplay,
+        ),
+        (
+            "T.fail-closed-consumed",
+            "fail-closed-consumed",
+            DurableBackendOutcome::FailClosedConsumed,
+        ),
+        (
+            "T.fail-closed-superseded",
+            "fail-closed-superseded",
+            DurableBackendOutcome::FailClosedSuperseded,
+        ),
+        (
+            "T.fail-closed-malformed",
+            "fail-closed-malformed-record",
+            DurableBackendOutcome::FailClosedMalformedRecord,
+        ),
+        (
+            "T.fail-closed-backend-unavail",
+            "fail-closed-backend-unavailable",
+            DurableBackendOutcome::FailClosedBackendUnavailable,
+        ),
+        (
+            "T.fail-closed-prod-unavail",
+            "fail-closed-production-unavailable",
+            DurableBackendOutcome::FailClosedProductionUnavailable,
+        ),
+        (
+            "T.fail-closed-mainnet-unavail",
+            "fail-closed-mainnet-unavailable",
+            DurableBackendOutcome::FailClosedMainNetUnavailable,
+        ),
     ] {
         t.check(id, expected, o.tag());
     }
 
     // Durable consume outcome tags reachable / stable.
     for (id, expected, o) in [
-        ("C.consumed-after-success", "consumed-after-success", DurableConsumeOutcome::ConsumedAfterSuccess),
-        ("C.rejected-not-observed", "rejected-not-observed", DurableConsumeOutcome::RejectedNotObserved),
-        ("C.rejected-not-successful", "rejected-not-successful-mutation", DurableConsumeOutcome::RejectedNotSuccessfulMutation),
-        ("C.rejected-apply-failed", "rejected-apply-failed", DurableConsumeOutcome::RejectedApplyFailed),
-        ("C.rejected-rolled-back", "rejected-rolled-back", DurableConsumeOutcome::RejectedRolledBack),
-        ("C.rejected-wrong-expected", "rejected-wrong-expected-state", DurableConsumeOutcome::RejectedWrongExpectedState),
-        ("C.rejected-already-consumed", "rejected-already-consumed", DurableConsumeOutcome::RejectedAlreadyConsumed),
-        ("C.rejected-superseded", "rejected-superseded", DurableConsumeOutcome::RejectedSuperseded),
-        ("C.rejected-malformed", "rejected-malformed-record", DurableConsumeOutcome::RejectedMalformedRecord),
-        ("C.fail-closed-backend-unavail", "fail-closed-backend-unavailable", DurableConsumeOutcome::FailClosedBackendUnavailable),
-        ("C.fail-closed-prod-unavail", "fail-closed-production-unavailable", DurableConsumeOutcome::FailClosedProductionUnavailable),
-        ("C.fail-closed-mainnet-unavail", "fail-closed-mainnet-unavailable", DurableConsumeOutcome::FailClosedMainNetUnavailable),
+        (
+            "C.consumed-after-success",
+            "consumed-after-success",
+            DurableConsumeOutcome::ConsumedAfterSuccess,
+        ),
+        (
+            "C.rejected-not-observed",
+            "rejected-not-observed",
+            DurableConsumeOutcome::RejectedNotObserved,
+        ),
+        (
+            "C.rejected-not-successful",
+            "rejected-not-successful-mutation",
+            DurableConsumeOutcome::RejectedNotSuccessfulMutation,
+        ),
+        (
+            "C.rejected-apply-failed",
+            "rejected-apply-failed",
+            DurableConsumeOutcome::RejectedApplyFailed,
+        ),
+        (
+            "C.rejected-rolled-back",
+            "rejected-rolled-back",
+            DurableConsumeOutcome::RejectedRolledBack,
+        ),
+        (
+            "C.rejected-wrong-expected",
+            "rejected-wrong-expected-state",
+            DurableConsumeOutcome::RejectedWrongExpectedState,
+        ),
+        (
+            "C.rejected-already-consumed",
+            "rejected-already-consumed",
+            DurableConsumeOutcome::RejectedAlreadyConsumed,
+        ),
+        (
+            "C.rejected-superseded",
+            "rejected-superseded",
+            DurableConsumeOutcome::RejectedSuperseded,
+        ),
+        (
+            "C.rejected-malformed",
+            "rejected-malformed-record",
+            DurableConsumeOutcome::RejectedMalformedRecord,
+        ),
+        (
+            "C.fail-closed-backend-unavail",
+            "fail-closed-backend-unavailable",
+            DurableConsumeOutcome::FailClosedBackendUnavailable,
+        ),
+        (
+            "C.fail-closed-prod-unavail",
+            "fail-closed-production-unavailable",
+            DurableConsumeOutcome::FailClosedProductionUnavailable,
+        ),
+        (
+            "C.fail-closed-mainnet-unavail",
+            "fail-closed-mainnet-unavailable",
+            DurableConsumeOutcome::FailClosedMainNetUnavailable,
+        ),
     ] {
         t.check(id, expected, o.tag());
     }
@@ -1189,17 +1333,53 @@ fn run_reachability_table(out: &Path) -> (u64, u64) {
     // Durable record state tags reachable / stable.
     for (id, expected, s) in [
         ("S.missing", "missing", DurableRecordState::Missing),
-        ("S.observed-fresh", "observed-fresh", DurableRecordState::ObservedFresh),
-        ("S.observed-deferred", "observed-deferred", DurableRecordState::ObservedDeferred),
-        ("S.observed-expired", "observed-expired", DurableRecordState::ObservedExpired),
-        ("S.observed-stale", "observed-stale", DurableRecordState::ObservedStale),
+        (
+            "S.observed-fresh",
+            "observed-fresh",
+            DurableRecordState::ObservedFresh,
+        ),
+        (
+            "S.observed-deferred",
+            "observed-deferred",
+            DurableRecordState::ObservedDeferred,
+        ),
+        (
+            "S.observed-expired",
+            "observed-expired",
+            DurableRecordState::ObservedExpired,
+        ),
+        (
+            "S.observed-stale",
+            "observed-stale",
+            DurableRecordState::ObservedStale,
+        ),
         ("S.consumed", "consumed", DurableRecordState::Consumed),
-        ("S.replay-detected", "replay-detected", DurableRecordState::ReplayDetected),
+        (
+            "S.replay-detected",
+            "replay-detected",
+            DurableRecordState::ReplayDetected,
+        ),
         ("S.superseded", "superseded", DurableRecordState::Superseded),
-        ("S.malformed-record", "malformed-record", DurableRecordState::MalformedRecord),
-        ("S.backend-unavailable", "backend-unavailable", DurableRecordState::BackendUnavailable),
-        ("S.prod-backend-unavailable", "production-backend-unavailable", DurableRecordState::ProductionBackendUnavailable),
-        ("S.mainnet-backend-unavailable", "mainnet-backend-unavailable", DurableRecordState::MainNetBackendUnavailable),
+        (
+            "S.malformed-record",
+            "malformed-record",
+            DurableRecordState::MalformedRecord,
+        ),
+        (
+            "S.backend-unavailable",
+            "backend-unavailable",
+            DurableRecordState::BackendUnavailable,
+        ),
+        (
+            "S.prod-backend-unavailable",
+            "production-backend-unavailable",
+            DurableRecordState::ProductionBackendUnavailable,
+        ),
+        (
+            "S.mainnet-backend-unavailable",
+            "mainnet-backend-unavailable",
+            DurableRecordState::MainNetBackendUnavailable,
+        ),
     ] {
         t.check(id, expected, s.tag());
     }
@@ -1216,7 +1396,11 @@ fn run_reachability_table(out: &Path) -> (u64, u64) {
     };
     {
         let obs = base(K::FixtureDevNet);
-        t.check_window("W.before-observe", "before-observe", classify_crash_window(&obs));
+        t.check_window(
+            "W.before-observe",
+            "before-observe",
+            classify_crash_window(&obs),
+        );
     }
     {
         let mut obs = base(K::FixtureDevNet);
@@ -1246,14 +1430,21 @@ fn run_reachability_table(out: &Path) -> (u64, u64) {
         obs.consumed = true;
         let w = classify_crash_window(&obs);
         t.check_window("W.after-consume", "after-consume", w);
-        t.assert_true("W.after-consume-no-recovery", !w.requires_fail_closed_recovery());
+        t.assert_true(
+            "W.after-consume-no-recovery",
+            !w.requires_fail_closed_recovery(),
+        );
     }
     {
         let mut obs = base(K::FixtureDevNet);
         obs.observed = true;
         obs.mutation_attempted = true;
         obs.rolled_back = true;
-        t.check_window("W.rollback-after-observe", "rollback-after-observe", classify_crash_window(&obs));
+        t.check_window(
+            "W.rollback-after-observe",
+            "rollback-after-observe",
+            classify_crash_window(&obs),
+        );
     }
     {
         let mut obs = base(K::FixtureDevNet);
@@ -1270,7 +1461,11 @@ fn run_reachability_table(out: &Path) -> (u64, u64) {
         let mut obs = base(K::FixtureDevNet);
         obs.observed = true;
         obs.mutation_attempted = true;
-        t.check_window("W.unknown", "unknown-crash-window", classify_crash_window(&obs));
+        t.check_window(
+            "W.unknown",
+            "unknown-crash-window",
+            classify_crash_window(&obs),
+        );
     }
     {
         let mut prod = base(K::Production);
@@ -1294,14 +1489,24 @@ fn run_reachability_table(out: &Path) -> (u64, u64) {
     // Backend-kind tags + fixture-serves predicate.
     {
         t.check("K.fixture-devnet", "fixture-devnet", K::FixtureDevNet.tag());
-        t.check("K.fixture-testnet", "fixture-testnet", K::FixtureTestNet.tag());
+        t.check(
+            "K.fixture-testnet",
+            "fixture-testnet",
+            K::FixtureTestNet.tag(),
+        );
         t.check("K.production", "production", K::Production.tag());
         t.check("K.mainnet", "mainnet", K::MainNet.tag());
         t.assert_true("K.fixture-is-fixture", K::FixtureDevNet.is_fixture());
         t.assert_true("K.production-not-fixture", !K::Production.is_fixture());
         let backend = FixtureDurableReplayBackend::new(TrustBundleEnvironment::Devnet);
-        t.assert_true("K.serves-devnet", backend.serves(TrustBundleEnvironment::Devnet));
-        t.assert_true("K.not-serve-mainnet", !backend.serves(TrustBundleEnvironment::Mainnet));
+        t.assert_true(
+            "K.serves-devnet",
+            backend.serves(TrustBundleEnvironment::Devnet),
+        );
+        t.assert_true(
+            "K.not-serve-mainnet",
+            !backend.serves(TrustBundleEnvironment::Mainnet),
+        );
     }
 
     // Grep-verifiable invariant / fail-closed helper invariants.
@@ -1371,7 +1576,10 @@ fn run_fixture_dump(out: &Path) {
     let key = key_of(&input);
 
     // Deterministic durable digests (release mode).
-    write_file(&dir.join("durable_backend_key_digest.txt"), &format!("{key}\n"));
+    write_file(
+        &dir.join("durable_backend_key_digest.txt"),
+        &format!("{key}\n"),
+    );
     write_file(
         &dir.join("durable_record_digest.txt"),
         &format!(
@@ -1400,7 +1608,11 @@ fn run_fixture_dump(out: &Path) {
             &dir.join("crash_window_transcript_digest.txt"),
             &format!(
                 "{}\n",
-                crash_window_transcript_digest(&input, &obs, CrashWindow::AfterMutationBeforeConsume)
+                crash_window_transcript_digest(
+                    &input,
+                    &obs,
+                    CrashWindow::AfterMutationBeforeConsume
+                )
             ),
         );
     }
@@ -1424,8 +1636,7 @@ fn run_fixture_dump(out: &Path) {
         backend.read_durable_state(&key).tag()
     );
     // Restart snapshot durability across the observe-only state.
-    let restarted_observed =
-        FixtureDurableReplayBackend::from_snapshot(backend.restart_snapshot());
+    let restarted_observed = FixtureDurableReplayBackend::from_snapshot(backend.restart_snapshot());
     let snap_restart_observed = format!(
         "restart len={} contains={} is_consumed={} state={}\n",
         restarted_observed.len(),
@@ -1475,8 +1686,14 @@ fn run_fixture_dump(out: &Path) {
         ("expired", 100, 200, 250),
         ("stale", 200, 100, 150),
     ] {
-        let (di_input, di_exp) =
-            di(Env::Devnet, S::ReloadApply, S::ReloadApply, eff, exp_epoch, can);
+        let (di_input, di_exp) = di(
+            Env::Devnet,
+            S::ReloadApply,
+            S::ReloadApply,
+            eff,
+            exp_epoch,
+            can,
+        );
         let mut b = FixtureDurableReplayBackend::new(Env::Devnet);
         let o = observe_decision_if_absent(K::FixtureDevNet, &di_input, &di_exp, &mut b);
         let r = read_decision_state(K::FixtureDevNet, &di_input, &di_exp, &b);

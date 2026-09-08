@@ -86,8 +86,8 @@ use qbind_node::pqc_authority_lifecycle::{
     REVOKED_METADATA_PREFIX_RETIRE, REVOKED_METADATA_PREFIX_REVOKE,
 };
 use qbind_node::pqc_authority_state::{
-    AuthorityStateUpdateSource, PersistentAuthorityStateRecord,
-    PersistentAuthorityStateRecordV2, PersistentAuthorityStateRecordVersioned,
+    AuthorityStateUpdateSource, PersistentAuthorityStateRecord, PersistentAuthorityStateRecordV2,
+    PersistentAuthorityStateRecordVersioned,
 };
 use qbind_node::pqc_trust_bundle::TrustBundleEnvironment;
 
@@ -100,10 +100,8 @@ const ROOT_FP: &str = "1111111111111111111111111111111111111111";
 const ROOT_FP_OTHER: &str = "2222222222222222222222222222222222222222";
 const CHAIN_ID: &str = "0000000000000001";
 const CHAIN_ID_OTHER: &str = "00000000000000ff";
-const GENESIS_HASH: &str =
-    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
-const GENESIS_HASH_OTHER: &str =
-    "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+const GENESIS_HASH: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+const GENESIS_HASH_OTHER: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 const DIGEST_1: &str = "1111111111111111111111111111111111111111111111111111111111111111";
 const DIGEST_2: &str = "2222222222222222222222222222222222222222222222222222222222222222";
 const DIGEST_3: &str = "3333333333333333333333333333333333333333333333333333333333333333";
@@ -182,9 +180,13 @@ fn rotate_to_b_seq2() -> PersistentAuthorityStateRecordV2 {
     )
 }
 
-fn revoke_target(active: &str, target: &str, sequence: u64, prefix: &str, digest: &str)
-    -> PersistentAuthorityStateRecordV2
-{
+fn revoke_target(
+    active: &str,
+    target: &str,
+    sequence: u64,
+    prefix: &str,
+    digest: &str,
+) -> PersistentAuthorityStateRecordV2 {
     let metadata = format!("{}{}", prefix, target);
     v2(
         TrustBundleEnvironment::Devnet,
@@ -303,13 +305,8 @@ fn main() {
     );
 
     // Persisted EmergencyRevoke@seq=3 marking KEY_B (active stays B).
-    let p_seq3_emergency_b = revoke_target(
-        KEY_B,
-        KEY_B,
-        3,
-        REVOKED_METADATA_PREFIX_EMERGENCY,
-        DIGEST_3,
-    );
+    let p_seq3_emergency_b =
+        revoke_target(KEY_B, KEY_B, 3, REVOKED_METADATA_PREFIX_EMERGENCY, DIGEST_3);
     write_versioned(
         &out.join("persisted").join("seq3_emergency_b.json"),
         &PersistentAuthorityStateRecordVersioned::V2(p_seq3_emergency_b),
@@ -424,7 +421,10 @@ fn main() {
         DIGEST_1,
         None,
     );
-    write_v2_validated(&out.join("candidates").join("R3_wrong_environment.json"), &r3);
+    write_v2_validated(
+        &out.join("candidates").join("R3_wrong_environment.json"),
+        &r3,
+    );
 
     // R4 — wrong chain.
     let r4 = v2(
@@ -520,7 +520,10 @@ fn main() {
         DIGEST_4,
         None,
     );
-    write_v2_validated(&out.join("candidates").join("R8_revoked_key_reuse.json"), &r8);
+    write_v2_validated(
+        &out.join("candidates").join("R8_revoked_key_reuse.json"),
+        &r8,
+    );
 
     // R9 — retired key reuse: candidate Rotate@seq=4 making retired KEY_A
     // active again, paired with persisted/seq3_retire_b.json.
@@ -538,7 +541,10 @@ fn main() {
         DIGEST_4,
         None,
     );
-    write_v2_validated(&out.join("candidates").join("R9_retired_key_reuse.json"), &r9);
+    write_v2_validated(
+        &out.join("candidates").join("R9_retired_key_reuse.json"),
+        &r9,
+    );
 
     // R10 — emergency-revoke replay: same-sequence-different-digest replay
     // of persisted/seq3_emergency_b.json.
@@ -596,7 +602,8 @@ fn main() {
     // R14 — V1-persisted / V2-candidate refusal: any structurally valid
     // V2 candidate paired with persisted/seq1_v1.json.
     write_v2(
-        &out.join("candidates").join("R14_v1_persisted_v2_candidate.json"),
+        &out.join("candidates")
+            .join("R14_v1_persisted_v2_candidate.json"),
         &p_seq1,
     );
 

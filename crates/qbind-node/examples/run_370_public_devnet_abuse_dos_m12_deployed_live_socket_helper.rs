@@ -326,7 +326,11 @@ fn main() {
         scenarios.push(Scenario {
             id: "04_mainnet_refused",
             expected: "MainNet abuse/DoS config refused (direct + CLI)".to_string(),
-            actual: format!("direct_err={} cli_err={}", r_direct.is_err(), r_cli.is_err()),
+            actual: format!(
+                "direct_err={} cli_err={}",
+                r_direct.is_err(),
+                r_cli.is_err()
+            ),
             matched: ok,
             detail: "MainNet has no production abuse/DoS policy; an enabled MainNet config never \
                      validates and no runtime state or deployed adapter exists."
@@ -354,7 +358,8 @@ fn main() {
                 admitted += 1;
             }
         }
-        let ok = admitted == 4 && metrics.connection_rate_drop_total() == 0 && state.drop_count() == 0;
+        let ok =
+            admitted == 4 && metrics.connection_rate_drop_total() == 0 && state.drop_count() == 0;
         scenarios.push(Scenario {
             id: "05_connection_rate_live_socket_under_budget",
             expected: "4 under-budget connections admitted; conn drop metric 0".to_string(),
@@ -425,7 +430,12 @@ fn main() {
     {
         let metrics = Arc::new(NodeMetrics::new());
         let adapter = deployed_adapter(
-            &["--p2p-max-messages-per-second", "5", "--p2p-burst-allowance", "0"],
+            &[
+                "--p2p-max-messages-per-second",
+                "5",
+                "--p2p-burst-allowance",
+                "0",
+            ],
             Some(Arc::clone(&metrics)),
         );
         let now = Instant::now();
@@ -469,7 +479,12 @@ fn main() {
     {
         let metrics = Arc::new(NodeMetrics::new());
         let adapter = deployed_adapter(
-            &["--p2p-max-messages-per-second", "5", "--p2p-burst-allowance", "0"],
+            &[
+                "--p2p-max-messages-per-second",
+                "5",
+                "--p2p-burst-allowance",
+                "0",
+            ],
             Some(Arc::clone(&metrics)),
         );
         let now = Instant::now();
@@ -541,7 +556,12 @@ fn main() {
         // Independent per-peer drop on the deployed adapter.
         let peer_metrics = Arc::new(NodeMetrics::new());
         let adapter = deployed_adapter(
-            &["--p2p-max-messages-per-second", "1", "--p2p-burst-allowance", "0"],
+            &[
+                "--p2p-max-messages-per-second",
+                "1",
+                "--p2p-burst-allowance",
+                "0",
+            ],
             Some(Arc::clone(&peer_metrics)),
         );
         let n = node(13);
@@ -592,7 +612,12 @@ fn main() {
 
     let per_peer_metrics = Arc::new(NodeMetrics::new());
     let per_peer_adapter = deployed_adapter(
-        &["--p2p-max-messages-per-second", "1", "--p2p-burst-allowance", "0"],
+        &[
+            "--p2p-max-messages-per-second",
+            "1",
+            "--p2p-burst-allowance",
+            "0",
+        ],
         Some(Arc::clone(&per_peer_metrics)),
     );
     {

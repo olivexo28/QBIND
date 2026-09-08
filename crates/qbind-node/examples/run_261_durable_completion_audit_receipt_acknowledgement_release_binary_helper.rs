@@ -875,7 +875,11 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
         let mut ledger = DurableCompletionAuditReceiptAcknowledgementLedger::new();
         let mut sink = fixture_sink();
         let o = drive(&input, &c.expectations, &mut sink, &mut ledger);
-        t.check_outcome("A1.ack-policy-disabled", "legacy-bypass-no-acknowledgement", &o);
+        t.check_outcome(
+            "A1.ack-policy-disabled",
+            "legacy-bypass-no-acknowledgement",
+            &o,
+        );
         t.assert_true("A1.no-invocation", sink.invocations() == 0);
         t.assert_true("A1.ledger-empty", ledger.is_empty());
     }
@@ -979,7 +983,11 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
         let mut ledger = DurableCompletionAuditReceiptAcknowledgementLedger::new();
         let mut sink = fixture_sink();
         let o = drive(&c.recorded(), &c.expectations, &mut sink, &mut ledger);
-        t.check_outcome(&format!("A12.{action}.outcome"), "acknowledgement-recorded", &o);
+        t.check_outcome(
+            &format!("A12.{action}.outcome"),
+            "acknowledgement-recorded",
+            &o,
+        );
         t.assert_true(
             &format!("A12.{action}.ledger-one"),
             ledger.len() == 1 && ledger.contains(&label.ack_record_id),
@@ -994,7 +1002,11 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
         let first = drive(&c.recorded(), &c.expectations, &mut sink, &mut ledger);
         let second = drive(&c.recorded(), &c.expectations, &mut sink, &mut ledger);
         t.check_outcome("A13.first", "acknowledgement-recorded", &first);
-        t.check_outcome("A13.duplicate", "acknowledgement-duplicate-idempotent", &second);
+        t.check_outcome(
+            "A13.duplicate",
+            "acknowledgement-duplicate-idempotent",
+            &second,
+        );
         t.assert_true("A13.ledger-one", ledger.len() == 1);
         t.assert_true(
             "A13.duplicate-no-new-authorize",
@@ -1016,7 +1028,12 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
         );
         let mut ledger = DurableCompletionAuditReceiptAcknowledgementLedger::new();
         let mut sink = fixture_sink();
-        let o = drive(&dup_ctx.recorded(), &dup_ctx.expectations, &mut sink, &mut ledger);
+        let o = drive(
+            &dup_ctx.recorded(),
+            &dup_ctx.expectations,
+            &mut sink,
+            &mut ledger,
+        );
         t.check_outcome(
             "A14.receipt-duplicate-empty",
             "acknowledgement-rejected-before-record",
@@ -1099,7 +1116,10 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
             "mainnet-peer-driven-apply-refused-no-acknowledgement",
             &o,
         );
-        t.assert_true("A18.no-invocation", sink.invocations() == 0 && ledger.is_empty());
+        t.assert_true(
+            "A18.no-invocation",
+            sink.invocations() == 0 && ledger.is_empty(),
+        );
     }
     // A19/A20: validator-set rotation / policy-change unsupported and record no
     // acknowledgement.
@@ -1147,7 +1167,10 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
             "rejected-before-audit-receipt-no-acknowledgement",
             &o,
         );
-        t.assert_true("B1.no-invocation", sink.invocations() == 0 && ledger.is_empty());
+        t.assert_true(
+            "B1.no-invocation",
+            sink.invocations() == 0 && ledger.is_empty(),
+        );
     }
     // B1c: a chain-id / environment binding mismatch also rejects before any
     // acknowledgement.
@@ -1162,7 +1185,10 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
             "rejected-before-audit-receipt-no-acknowledgement",
             &o,
         );
-        t.assert_true("B1c.no-invocation", sink.invocations() == 0 && ledger.is_empty());
+        t.assert_true(
+            "B1c.no-invocation",
+            sink.invocations() == 0 && ledger.is_empty(),
+        );
     }
     // B2..: every request-identity / digest mismatch is caught by the sink and fails
     // closed before record (sink invoked once, nothing written).
@@ -1176,13 +1202,19 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
         ("wrong-proposal", |r| r.proposal_id = "x".to_string()),
         ("wrong-decision", |r| r.decision_id = "x".to_string()),
         ("wrong-candidate", |r| r.candidate_digest = "x".to_string()),
-        ("wrong-pipeline", |r| r.pipeline_decision_digest = "x".to_string()),
+        ("wrong-pipeline", |r| {
+            r.pipeline_decision_digest = "x".to_string()
+        }),
         ("wrong-sink", |r| r.sink_decision_digest = "x".to_string()),
-        ("wrong-reporter", |r| r.reporter_decision_digest = "x".to_string()),
+        ("wrong-reporter", |r| {
+            r.reporter_decision_digest = "x".to_string()
+        }),
         ("wrong-finalization", |r| {
             r.finalization_decision_digest = "x".to_string()
         }),
-        ("wrong-attestation", |r| r.attestation_digest = "x".to_string()),
+        ("wrong-attestation", |r| {
+            r.attestation_digest = "x".to_string()
+        }),
         ("wrong-backend-identity", |r| {
             r.backend_identity_digest = "x".to_string()
         }),
@@ -1244,8 +1276,7 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
     ] {
         let c = devnet_ctx();
         let mut ledger = DurableCompletionAuditReceiptAcknowledgementLedger::new();
-        let mut sink =
-            FixtureDurableCompletionAuditReceiptAcknowledgementSink::with_fault(fault);
+        let mut sink = FixtureDurableCompletionAuditReceiptAcknowledgementSink::with_fault(fault);
         let o = drive(&c.recorded(), &c.expectations, &mut sink, &mut ledger);
         t.check_outcome(&format!("B3.{label}"), tag, &o);
         t.assert_true(&format!("B3.{label}.invoked"), sink.invocations() == 1);
@@ -1269,7 +1300,10 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
             "acknowledgement-rejected-before-record",
             &o,
         );
-        t.assert_true("B4.invoked-once", sink.invocations() == 1 && ledger.is_empty());
+        t.assert_true(
+            "B4.invoked-once",
+            sink.invocations() == 1 && ledger.is_empty(),
+        );
     }
     t.finish(out)
 }
@@ -1311,40 +1345,95 @@ fn run_recovery_table(out: &Path) -> (u64, u64) {
     for (id, w) in [
         ("C.before-pipeline", W::BeforePipeline),
         ("C.after-pipeline", W::AfterPipelineSuccessBeforeSinkIntent),
-        ("C.after-sink-intent", W::AfterSinkIntentBeforeSinkReceiptRecord),
-        ("C.after-sink-record", W::AfterSinkReceiptRecordBeforeReportIntent),
-        ("C.after-report-intent", W::AfterReportIntentBeforeReportRecord),
-        ("C.after-report-record", W::AfterReportRecordBeforeFinalizationIntent),
-        ("C.after-finalization-intent", W::AfterFinalizationIntentBeforeFinalizationRecord),
-        ("C.after-finalization-record", W::AfterFinalizationRecordBeforeAttestationIntent),
-        ("C.after-attestation-intent", W::AfterAttestationIntentBeforeAttestationRecord),
-        ("C.after-attestation-record", W::AfterAttestationRecordBeforeBackendRequest),
-        ("C.after-backend-request", W::AfterBackendRequestBeforeBackendRecord),
-        ("C.after-backend-record", W::AfterBackendRecordBeforeBackendSuccess),
-        ("C.after-backend-success", W::AfterBackendSuccessBeforeReceiptRequest),
-        ("C.after-receipt-request", W::AfterReceiptRequestBeforeReceiptRecord),
-        ("C.after-receipt-record", W::AfterReceiptRecordBeforeReceiptSuccess),
-        ("C.after-receipt-success", W::AfterReceiptSuccessBeforeAcknowledgementRequest),
+        (
+            "C.after-sink-intent",
+            W::AfterSinkIntentBeforeSinkReceiptRecord,
+        ),
+        (
+            "C.after-sink-record",
+            W::AfterSinkReceiptRecordBeforeReportIntent,
+        ),
+        (
+            "C.after-report-intent",
+            W::AfterReportIntentBeforeReportRecord,
+        ),
+        (
+            "C.after-report-record",
+            W::AfterReportRecordBeforeFinalizationIntent,
+        ),
+        (
+            "C.after-finalization-intent",
+            W::AfterFinalizationIntentBeforeFinalizationRecord,
+        ),
+        (
+            "C.after-finalization-record",
+            W::AfterFinalizationRecordBeforeAttestationIntent,
+        ),
+        (
+            "C.after-attestation-intent",
+            W::AfterAttestationIntentBeforeAttestationRecord,
+        ),
+        (
+            "C.after-attestation-record",
+            W::AfterAttestationRecordBeforeBackendRequest,
+        ),
+        (
+            "C.after-backend-request",
+            W::AfterBackendRequestBeforeBackendRecord,
+        ),
+        (
+            "C.after-backend-record",
+            W::AfterBackendRecordBeforeBackendSuccess,
+        ),
+        (
+            "C.after-backend-success",
+            W::AfterBackendSuccessBeforeReceiptRequest,
+        ),
+        (
+            "C.after-receipt-request",
+            W::AfterReceiptRequestBeforeReceiptRecord,
+        ),
+        (
+            "C.after-receipt-record",
+            W::AfterReceiptRecordBeforeReceiptSuccess,
+        ),
+        (
+            "C.after-receipt-success",
+            W::AfterReceiptSuccessBeforeAcknowledgementRequest,
+        ),
     ] {
-        t.check_outcome(id, "audit-receipt-did-not-record-no-acknowledgement", &recover_devnet(w, false));
+        t.check_outcome(
+            id,
+            "audit-receipt-did-not-record-no-acknowledgement",
+            &recover_devnet(w, false),
+        );
     }
     // The acknowledgement request window itself rejects before record.
     t.check_outcome(
         "C.after-ack-request",
         "acknowledgement-rejected-before-record",
-        &recover_devnet(W::AfterAcknowledgementRequestBeforeAcknowledgementRecord, false),
+        &recover_devnet(
+            W::AfterAcknowledgementRequestBeforeAcknowledgementRecord,
+            false,
+        ),
     );
     // After-record / after-success windows recover an acknowledgement only with a
     // matching recovered record; otherwise reject before record.
     t.check_outcome(
         "C.after-ack-record-no-record",
         "acknowledgement-rejected-before-record",
-        &recover_devnet(W::AfterAcknowledgementRecordBeforeAcknowledgementSuccess, false),
+        &recover_devnet(
+            W::AfterAcknowledgementRecordBeforeAcknowledgementSuccess,
+            false,
+        ),
     );
     t.check_outcome(
         "C.after-ack-record-with-record",
         "acknowledgement-recorded",
-        &recover_devnet(W::AfterAcknowledgementRecordBeforeAcknowledgementSuccess, true),
+        &recover_devnet(
+            W::AfterAcknowledgementRecordBeforeAcknowledgementSuccess,
+            true,
+        ),
     );
     t.check_outcome(
         "C.after-ack-success-no-record",
@@ -1443,7 +1532,8 @@ fn run_projection_table(out: &Path) -> (u64, u64) {
     use DurableCompletionAuditPublicationReceiptOutcome as Receipt;
     use DurableCompletionAuditReceiptAcknowledgementRequestIntent as Intent;
     let mut t = Table::new("projection");
-    let create = project_audit_receipt_outcome_to_acknowledgement_request(&Receipt::AuditReceiptRecorded);
+    let create =
+        project_audit_receipt_outcome_to_acknowledgement_request(&Receipt::AuditReceiptRecorded);
     t.assert_true("D.only-recorded-creates", create.creates_request());
     let dup = project_audit_receipt_outcome_to_acknowledgement_request(
         &Receipt::AuditReceiptDuplicateIdempotent,
@@ -1453,7 +1543,11 @@ fn run_projection_table(out: &Path) -> (u64, u64) {
         dup == Intent::IdempotentOnly && !dup.creates_request(),
     );
     for (label, receipt, tag) in [
-        ("legacy", Receipt::LegacyBypassNoAuditReceipt, "legacy-bypass-no-acknowledgement"),
+        (
+            "legacy",
+            Receipt::LegacyBypassNoAuditReceipt,
+            "legacy-bypass-no-acknowledgement",
+        ),
         (
             "rejected-before-backend",
             Receipt::RejectedBeforeBackendSubmissionNoAuditReceipt,
@@ -1644,7 +1738,10 @@ fn run_acknowledgement_ledger_table(out: &Path) -> (u64, u64) {
     );
     let request_digest: DurableCompletionAuditReceiptAcknowledgementDigest = c.request.digest();
     let record: DurableCompletionAuditReceiptAcknowledgementRecord = c.request.to_record();
-    t.assert_true("F.record-id", record.acknowledgement_record_id == ACK_RECORD_ID);
+    t.assert_true(
+        "F.record-id",
+        record.acknowledgement_record_id == ACK_RECORD_ID,
+    );
     t.assert_true(
         "F.record-request-digest",
         record.request_digest == request_digest,
@@ -1669,14 +1766,22 @@ fn run_acknowledgement_ledger_table(out: &Path) -> (u64, u64) {
     t.assert_true("F.transcript-digest-hex", !transcript.as_hex().is_empty());
     // Duplicate identical acknowledgement is idempotent.
     let second = drive(&c.recorded(), &c.expectations, &mut sink, &mut ledger);
-    t.check_outcome("F.duplicate", "acknowledgement-duplicate-idempotent", &second);
+    t.check_outcome(
+        "F.duplicate",
+        "acknowledgement-duplicate-idempotent",
+        &second,
+    );
     t.assert_true("F.duplicate-len-one", ledger.len() == 1);
     // Equivocation (same record id, different request) fails closed.
     let mut c2 = devnet_ctx();
     c2.request.candidate_digest = "different-candidate-digest".to_string();
     c2.expectations.expected_candidate_digest = "different-candidate-digest".to_string();
     let o2 = drive(&c2.recorded(), &c2.expectations, &mut sink, &mut ledger);
-    t.check_outcome("F.equivocation", "acknowledgement-rejected-before-record", &o2);
+    t.check_outcome(
+        "F.equivocation",
+        "acknowledgement-rejected-before-record",
+        &o2,
+    );
     t.assert_true("F.equivocation-len-one", ledger.len() == 1);
     // Rollback restores the ledger and records nothing new.
     let mut existing = ledger.clone();
@@ -1693,8 +1798,17 @@ fn run_acknowledgement_ledger_table(out: &Path) -> (u64, u64) {
     let mut faulted = FixtureDurableCompletionAuditReceiptAcknowledgementSink::with_fault(
         DurableCompletionAuditReceiptAcknowledgementFault::RolledBackNoAcknowledgement,
     );
-    let rolled = drive(&c3.recorded(), &c3.expectations, &mut faulted, &mut existing);
-    t.check_outcome("F.rollback-restores", "acknowledgement-rolled-back-no-acknowledgement", &rolled);
+    let rolled = drive(
+        &c3.recorded(),
+        &c3.expectations,
+        &mut faulted,
+        &mut existing,
+    );
+    t.check_outcome(
+        "F.rollback-restores",
+        "acknowledgement-rolled-back-no-acknowledgement",
+        &rolled,
+    );
     t.assert_true(
         "F.rollback-len-one",
         existing.len() == 1 && !existing.contains(&second_action.ack_record_id),
@@ -1710,8 +1824,14 @@ fn run_acknowledgement_ledger_table(out: &Path) -> (u64, u64) {
 
 fn run_non_mutation_table(out: &Path) -> (u64, u64) {
     let mut t = Table::new("non_mutation");
-    t.assert_true("G.rejection-non-mutating", durable_completion_audit_ack_rejection_is_non_mutating());
-    t.assert_true("G.never-calls-run-070", durable_completion_audit_ack_never_calls_run_070());
+    t.assert_true(
+        "G.rejection-non-mutating",
+        durable_completion_audit_ack_rejection_is_non_mutating(),
+    );
+    t.assert_true(
+        "G.never-calls-run-070",
+        durable_completion_audit_ack_never_calls_run_070(),
+    );
     t.assert_true(
         "G.never-mutates-live",
         durable_completion_audit_ack_never_mutates_live_pqc_trust_state(),
@@ -1724,26 +1844,69 @@ fn run_non_mutation_table(out: &Path) -> (u64, u64) {
         "G.no-rocksdb-file-schema-migration",
         durable_completion_audit_ack_no_rocksdb_file_schema_migration_change(),
     );
-    t.assert_true("G.no-external-publication", durable_completion_audit_ack_no_external_publication());
-    t.assert_true("G.no-real-audit-ledger", durable_completion_audit_ack_no_real_audit_ledger());
-    t.assert_true("G.pipeline-success-required", durable_completion_audit_ack_pipeline_success_required());
-    t.assert_true("G.sink-receipt-required", durable_completion_audit_ack_sink_receipt_required());
-    t.assert_true("G.completion-report-required", durable_completion_audit_ack_completion_report_required());
-    t.assert_true("G.finalization-required", durable_completion_audit_ack_finalization_required());
-    t.assert_true("G.attestation-required", durable_completion_audit_ack_attestation_required());
-    t.assert_true("G.backend-submission-required", durable_completion_audit_ack_backend_submission_required());
-    t.assert_true("G.receipt-required", durable_completion_audit_ack_receipt_required());
-    t.assert_true("G.record-required-before-ack", durable_completion_audit_ack_record_required_before_ack());
-    t.assert_true("G.failed-record-never-records", durable_completion_audit_ack_failed_record_never_records());
-    t.assert_true("G.rollback-never-records", durable_completion_audit_ack_rollback_never_records());
-    t.assert_true("G.ambiguous-fails-closed", durable_completion_audit_ack_ambiguous_window_fails_closed());
+    t.assert_true(
+        "G.no-external-publication",
+        durable_completion_audit_ack_no_external_publication(),
+    );
+    t.assert_true(
+        "G.no-real-audit-ledger",
+        durable_completion_audit_ack_no_real_audit_ledger(),
+    );
+    t.assert_true(
+        "G.pipeline-success-required",
+        durable_completion_audit_ack_pipeline_success_required(),
+    );
+    t.assert_true(
+        "G.sink-receipt-required",
+        durable_completion_audit_ack_sink_receipt_required(),
+    );
+    t.assert_true(
+        "G.completion-report-required",
+        durable_completion_audit_ack_completion_report_required(),
+    );
+    t.assert_true(
+        "G.finalization-required",
+        durable_completion_audit_ack_finalization_required(),
+    );
+    t.assert_true(
+        "G.attestation-required",
+        durable_completion_audit_ack_attestation_required(),
+    );
+    t.assert_true(
+        "G.backend-submission-required",
+        durable_completion_audit_ack_backend_submission_required(),
+    );
+    t.assert_true(
+        "G.receipt-required",
+        durable_completion_audit_ack_receipt_required(),
+    );
+    t.assert_true(
+        "G.record-required-before-ack",
+        durable_completion_audit_ack_record_required_before_ack(),
+    );
+    t.assert_true(
+        "G.failed-record-never-records",
+        durable_completion_audit_ack_failed_record_never_records(),
+    );
+    t.assert_true(
+        "G.rollback-never-records",
+        durable_completion_audit_ack_rollback_never_records(),
+    );
+    t.assert_true(
+        "G.ambiguous-fails-closed",
+        durable_completion_audit_ack_ambiguous_window_fails_closed(),
+    );
     t.assert_true(
         "G.mainnet-refused-mainnet",
-        durable_completion_audit_ack_mainnet_peer_driven_apply_refused_first(TrustBundleEnvironment::Mainnet),
+        durable_completion_audit_ack_mainnet_peer_driven_apply_refused_first(
+            TrustBundleEnvironment::Mainnet,
+        ),
     );
     t.assert_true(
         "G.mainnet-refused-not-devnet",
-        !durable_completion_audit_ack_mainnet_peer_driven_apply_refused_first(TrustBundleEnvironment::Devnet),
+        !durable_completion_audit_ack_mainnet_peer_driven_apply_refused_first(
+            TrustBundleEnvironment::Devnet,
+        ),
     );
     t.assert_true(
         "G.production-mainnet-unavailable",
@@ -1757,7 +1920,10 @@ fn run_non_mutation_table(out: &Path) -> (u64, u64) {
         "G.validator-rotation-unsupported",
         durable_completion_audit_ack_validator_set_rotation_unsupported(),
     );
-    t.assert_true("G.policy-change-unsupported", durable_completion_audit_ack_policy_change_unsupported());
+    t.assert_true(
+        "G.policy-change-unsupported",
+        durable_completion_audit_ack_policy_change_unsupported(),
+    );
     t.assert_true(
         "G.local-operator-cannot",
         durable_completion_audit_ack_local_operator_cannot_satisfy_mainnet_authority(),
@@ -1780,7 +1946,12 @@ fn run_non_mutation_table(out: &Path) -> (u64, u64) {
     let c2 = devnet_ctx();
     let mut prod_ledger = DurableCompletionAuditReceiptAcknowledgementLedger::new();
     let mut prod = ProductionAuditLedgerDurableCompletionAcknowledgementSink::default();
-    let _ = drive(&c2.recorded(), &c2.expectations, &mut prod, &mut prod_ledger);
+    let _ = drive(
+        &c2.recorded(),
+        &c2.expectations,
+        &mut prod,
+        &mut prod_ledger,
+    );
     t.assert_true("G.production-path-no-record", prod_ledger.is_empty());
     t.finish(out)
 }
@@ -1790,21 +1961,66 @@ fn run_reachability_table(out: &Path) -> (u64, u64) {
     let mut t = Table::new("reachability");
     for (o, tag) in [
         (Ack::AcknowledgementRecorded, "acknowledgement-recorded"),
-        (Ack::AcknowledgementDuplicateIdempotent, "acknowledgement-duplicate-idempotent"),
-        (Ack::AcknowledgementRejectedBeforeRecord, "acknowledgement-rejected-before-record"),
-        (Ack::LegacyBypassNoAcknowledgement, "legacy-bypass-no-acknowledgement"),
-        (Ack::RejectedBeforeAuditReceiptNoAcknowledgement, "rejected-before-audit-receipt-no-acknowledgement"),
-        (Ack::AuditReceiptDidNotRecordNoAcknowledgement, "audit-receipt-did-not-record-no-acknowledgement"),
-        (Ack::AcknowledgementRecordFailedNoAcknowledgement, "acknowledgement-record-failed-no-acknowledgement"),
-        (Ack::AcknowledgementRolledBackNoAcknowledgement, "acknowledgement-rolled-back-no-acknowledgement"),
-        (Ack::AcknowledgementRollbackFailedFatalNoAcknowledgement, "acknowledgement-rollback-failed-fatal-no-acknowledgement"),
-        (Ack::AcknowledgementAmbiguousFailClosedNoAcknowledgement, "acknowledgement-ambiguous-fail-closed-no-acknowledgement"),
-        (Ack::ProductionAuditLedgerAckUnavailableNoAcknowledgement, "production-audit-ledger-ack-unavailable-no-acknowledgement"),
-        (Ack::MainNetAuditLedgerAckUnavailableNoAcknowledgement, "mainnet-audit-ledger-ack-unavailable-no-acknowledgement"),
-        (Ack::ExternalPublicationConfirmationUnavailableNoAcknowledgement, "external-publication-confirmation-unavailable-no-acknowledgement"),
-        (Ack::MainNetPeerDrivenApplyRefusedNoAcknowledgement, "mainnet-peer-driven-apply-refused-no-acknowledgement"),
-        (Ack::ValidatorSetRotationUnsupportedNoAcknowledgement, "validator-set-rotation-unsupported-no-acknowledgement"),
-        (Ack::PolicyChangeUnsupportedNoAcknowledgement, "policy-change-unsupported-no-acknowledgement"),
+        (
+            Ack::AcknowledgementDuplicateIdempotent,
+            "acknowledgement-duplicate-idempotent",
+        ),
+        (
+            Ack::AcknowledgementRejectedBeforeRecord,
+            "acknowledgement-rejected-before-record",
+        ),
+        (
+            Ack::LegacyBypassNoAcknowledgement,
+            "legacy-bypass-no-acknowledgement",
+        ),
+        (
+            Ack::RejectedBeforeAuditReceiptNoAcknowledgement,
+            "rejected-before-audit-receipt-no-acknowledgement",
+        ),
+        (
+            Ack::AuditReceiptDidNotRecordNoAcknowledgement,
+            "audit-receipt-did-not-record-no-acknowledgement",
+        ),
+        (
+            Ack::AcknowledgementRecordFailedNoAcknowledgement,
+            "acknowledgement-record-failed-no-acknowledgement",
+        ),
+        (
+            Ack::AcknowledgementRolledBackNoAcknowledgement,
+            "acknowledgement-rolled-back-no-acknowledgement",
+        ),
+        (
+            Ack::AcknowledgementRollbackFailedFatalNoAcknowledgement,
+            "acknowledgement-rollback-failed-fatal-no-acknowledgement",
+        ),
+        (
+            Ack::AcknowledgementAmbiguousFailClosedNoAcknowledgement,
+            "acknowledgement-ambiguous-fail-closed-no-acknowledgement",
+        ),
+        (
+            Ack::ProductionAuditLedgerAckUnavailableNoAcknowledgement,
+            "production-audit-ledger-ack-unavailable-no-acknowledgement",
+        ),
+        (
+            Ack::MainNetAuditLedgerAckUnavailableNoAcknowledgement,
+            "mainnet-audit-ledger-ack-unavailable-no-acknowledgement",
+        ),
+        (
+            Ack::ExternalPublicationConfirmationUnavailableNoAcknowledgement,
+            "external-publication-confirmation-unavailable-no-acknowledgement",
+        ),
+        (
+            Ack::MainNetPeerDrivenApplyRefusedNoAcknowledgement,
+            "mainnet-peer-driven-apply-refused-no-acknowledgement",
+        ),
+        (
+            Ack::ValidatorSetRotationUnsupportedNoAcknowledgement,
+            "validator-set-rotation-unsupported-no-acknowledgement",
+        ),
+        (
+            Ack::PolicyChangeUnsupportedNoAcknowledgement,
+            "policy-change-unsupported-no-acknowledgement",
+        ),
     ] {
         t.check(&format!("H.tag.{tag}"), tag, o.tag());
     }
@@ -1824,7 +2040,8 @@ fn run_reachability_table(out: &Path) -> (u64, u64) {
     );
     t.assert_true(
         "H.kind-is-unavailable",
-        DurableCompletionAuditReceiptAcknowledgementKind::ProductionAuditLedgerAckUnavailable.is_unavailable(),
+        DurableCompletionAuditReceiptAcknowledgementKind::ProductionAuditLedgerAckUnavailable
+            .is_unavailable(),
     );
     for (id, policy, tag) in [
         ("H.policy-disabled", DurableCompletionAuditReceiptAcknowledgementPolicy::Disabled, "disabled"),
@@ -1843,21 +2060,31 @@ fn run_reachability_table(out: &Path) -> (u64, u64) {
         "H.policy-allows-fixture",
         DurableCompletionAuditReceiptAcknowledgementPolicy::FixtureAllowed.allows_fixture(),
     );
-    t.check("H.trait-fixture-kind", "fixture-in-memory", fixture_sink().kind().tag());
+    t.check(
+        "H.trait-fixture-kind",
+        "fixture-in-memory",
+        fixture_sink().kind().tag(),
+    );
     t.check(
         "H.trait-production-kind",
         "production-audit-ledger-ack-unavailable",
-        ProductionAuditLedgerDurableCompletionAcknowledgementSink::default().kind().tag(),
+        ProductionAuditLedgerDurableCompletionAcknowledgementSink::default()
+            .kind()
+            .tag(),
     );
     t.check(
         "H.trait-mainnet-kind",
         "mainnet-audit-ledger-ack-unavailable",
-        MainNetAuditLedgerDurableCompletionAcknowledgementSink::default().kind().tag(),
+        MainNetAuditLedgerDurableCompletionAcknowledgementSink::default()
+            .kind()
+            .tag(),
     );
     t.check(
         "H.trait-external-kind",
         "external-publication-confirmation-unavailable",
-        ExternalPublicationDurableCompletionConfirmationSink::default().kind().tag(),
+        ExternalPublicationDurableCompletionConfirmationSink::default()
+            .kind()
+            .tag(),
     );
     let _aliases = std::any::type_name::<(
         DurableCompletionAuditReceiptAcknowledgementSurface,

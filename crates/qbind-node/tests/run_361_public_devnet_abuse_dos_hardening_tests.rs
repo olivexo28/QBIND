@@ -18,7 +18,9 @@
 use std::time::{Duration, Instant};
 
 use qbind_node::peer::PeerId;
-use qbind_node::peer_rate_limiter::{PeerRateLimiter, DEFAULT_BURST_ALLOWANCE, DEFAULT_MAX_MESSAGES_PER_SECOND};
+use qbind_node::peer_rate_limiter::{
+    PeerRateLimiter, DEFAULT_BURST_ALLOWANCE, DEFAULT_MAX_MESSAGES_PER_SECOND,
+};
 use qbind_node::public_devnet_abuse_dos_config::{
     connection_rate_metric_plan, inbound_connection_adapter_shape, AbuseDosConfig,
     AbuseDosConfigError, AbuseDosProfile, ConnectionDecision, ConnectionRateLimiter,
@@ -34,7 +36,10 @@ use qbind_types::primitives::NetworkEnvironment;
 #[test]
 fn t01_default_profile_preserves_current_values() {
     let cfg = AbuseDosConfig::default();
-    assert_eq!(cfg.per_peer_max_messages_per_second, DEFAULT_MAX_MESSAGES_PER_SECOND);
+    assert_eq!(
+        cfg.per_peer_max_messages_per_second,
+        DEFAULT_MAX_MESSAGES_PER_SECOND
+    );
     assert_eq!(cfg.per_peer_burst_allowance, DEFAULT_BURST_ALLOWANCE);
     assert_eq!(cfg.per_peer_max_messages_per_second, 1000);
     assert_eq!(cfg.per_peer_burst_allowance, 100);
@@ -83,7 +88,9 @@ fn t05_testnet_mainnet_not_accepted_as_devnet() {
     assert!(!testnet.is_devnet_profile());
     assert_eq!(
         testnet.validate_devnet(),
-        Err(AbuseDosConfigError::WrongEnvironment(NetworkEnvironment::Testnet))
+        Err(AbuseDosConfigError::WrongEnvironment(
+            NetworkEnvironment::Testnet
+        ))
     );
 
     let mainnet = AbuseDosConfig::default().with_environment(NetworkEnvironment::Mainnet);
@@ -91,7 +98,9 @@ fn t05_testnet_mainnet_not_accepted_as_devnet() {
     // validate_devnet rejects a non-DevNet environment before anything else.
     assert_eq!(
         mainnet.validate_devnet(),
-        Err(AbuseDosConfigError::WrongEnvironment(NetworkEnvironment::Mainnet))
+        Err(AbuseDosConfigError::WrongEnvironment(
+            NetworkEnvironment::Mainnet
+        ))
     );
     // The base validate() still refuses MainNet outright.
     assert_eq!(mainnet.validate(), Err(AbuseDosConfigError::MainNetRefused));
@@ -106,7 +115,10 @@ fn t05_testnet_mainnet_not_accepted_as_devnet() {
 fn t06_zero_max_messages_rejected() {
     let mut cfg = AbuseDosConfig::default();
     cfg.per_peer_max_messages_per_second = 0;
-    assert_eq!(cfg.validate(), Err(AbuseDosConfigError::ZeroMaxMessagesPerSecond));
+    assert_eq!(
+        cfg.validate(),
+        Err(AbuseDosConfigError::ZeroMaxMessagesPerSecond)
+    );
 }
 
 // 7. Zero or invalid burst rejected where unsafe (unbounded burst).
@@ -131,7 +143,10 @@ fn t07_invalid_burst_rejected_where_unsafe() {
 fn t08_impossible_connection_window_rejected() {
     let mut cfg = AbuseDosConfig::public_devnet_recommended();
     cfg.connection_rate_window = Duration::from_secs(0);
-    assert_eq!(cfg.validate(), Err(AbuseDosConfigError::ZeroConnectionRateWindow));
+    assert_eq!(
+        cfg.validate(),
+        Err(AbuseDosConfigError::ZeroConnectionRateWindow)
+    );
 }
 
 // 9. Unbounded/too-large values rejected or explicitly marked unsafe.
@@ -155,7 +170,9 @@ fn t09_unbounded_values_rejected() {
     huge_window.connection_rate_window = Duration::from_secs(48 * 60 * 60);
     assert_eq!(
         huge_window.validate(),
-        Err(AbuseDosConfigError::ConnectionRateWindowTooLarge(48 * 60 * 60))
+        Err(AbuseDosConfigError::ConnectionRateWindowTooLarge(
+            48 * 60 * 60
+        ))
     );
 }
 
@@ -164,7 +181,10 @@ fn t09_unbounded_values_rejected() {
 fn t10_malformed_config_rejected() {
     let mut cfg = AbuseDosConfig::public_devnet_recommended();
     cfg.max_connections_per_window = 0;
-    assert_eq!(cfg.validate(), Err(AbuseDosConfigError::ZeroConnectionsPerWindow));
+    assert_eq!(
+        cfg.validate(),
+        Err(AbuseDosConfigError::ZeroConnectionsPerWindow)
+    );
 }
 
 // 11. Wrong environment rejected.
@@ -173,7 +193,9 @@ fn t11_wrong_environment_rejected() {
     let cfg = AbuseDosConfig::default().with_environment(NetworkEnvironment::Testnet);
     assert_eq!(
         cfg.validate_devnet(),
-        Err(AbuseDosConfigError::WrongEnvironment(NetworkEnvironment::Testnet))
+        Err(AbuseDosConfigError::WrongEnvironment(
+            NetworkEnvironment::Testnet
+        ))
     );
 }
 
@@ -491,7 +513,11 @@ fn t26_no_trust_bundle_mutation() {
     let cfg = AbuseDosConfig::public_devnet_recommended();
     let limiter = ConnectionRateLimiter::new(cfg).unwrap();
     let mut state = ConnectionRateLimiterState::new();
-    let _ = limiter.check(&mut state, &RemoteAddr::new("203.0.113.2:1"), Instant::now());
+    let _ = limiter.check(
+        &mut state,
+        &RemoteAddr::new("203.0.113.2:1"),
+        Instant::now(),
+    );
     // Nothing here can touch trust-bundle / LivePqcTrustState / sequence files.
 }
 
@@ -533,11 +559,17 @@ fn t32_no_launch_claim_metric_plan_reserved() {
 #[test]
 fn t33_peer_rate_limiter_with_defaults_compatible() {
     let limiter = PeerRateLimiter::with_defaults();
-    assert_eq!(limiter.config().max_messages_per_second, DEFAULT_MAX_MESSAGES_PER_SECOND);
+    assert_eq!(
+        limiter.config().max_messages_per_second,
+        DEFAULT_MAX_MESSAGES_PER_SECOND
+    );
     assert_eq!(limiter.config().burst_allowance, DEFAULT_BURST_ALLOWANCE);
     // A default AbuseDosConfig derives exactly the same peer-limiter config.
     let derived = AbuseDosConfig::default().peer_rate_limiter_config();
-    assert_eq!(derived.max_messages_per_second, limiter.config().max_messages_per_second);
+    assert_eq!(
+        derived.max_messages_per_second,
+        limiter.config().max_messages_per_second
+    );
     assert_eq!(derived.burst_allowance, limiter.config().burst_allowance);
 }
 

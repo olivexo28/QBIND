@@ -256,7 +256,10 @@ impl RemoteSignerRequest {
             h.update((value.len() as u64).to_le_bytes());
             h.update(value);
         };
-        field(b"environment", &self.environment.metric_code().to_le_bytes());
+        field(
+            b"environment",
+            &self.environment.metric_code().to_le_bytes(),
+        );
         field(b"chain_id", self.chain_id.as_bytes());
         field(b"genesis_hash", self.genesis_hash.as_bytes());
         field(
@@ -535,7 +538,10 @@ pub trait RemoteAuthoritySigner {
 
     /// Attempt to sign `request`. Returns a typed response on success,
     /// or a typed [`RemoteSignerOutcome`] reject. No I/O is performed.
-    fn sign(&self, request: &RemoteSignerRequest) -> Result<RemoteSignerResponse, RemoteSignerOutcome>;
+    fn sign(
+        &self,
+        request: &RemoteSignerRequest,
+    ) -> Result<RemoteSignerResponse, RemoteSignerOutcome>;
 }
 
 /// Run 194 — DevNet/TestNet fixture loopback remote signer.
@@ -559,7 +565,10 @@ impl RemoteAuthoritySigner for FixtureLoopbackRemoteSigner {
         &self.identity
     }
 
-    fn sign(&self, request: &RemoteSignerRequest) -> Result<RemoteSignerResponse, RemoteSignerOutcome> {
+    fn sign(
+        &self,
+        request: &RemoteSignerRequest,
+    ) -> Result<RemoteSignerResponse, RemoteSignerOutcome> {
         if !request.is_well_formed() {
             return Err(RemoteSignerOutcome::MalformedRequest {
                 reason: "request missing one or more mandatory fields".to_string(),
@@ -864,8 +873,12 @@ pub fn validate_remote_signer(
     }
 
     // 21. Identity attestation freshness/expiry window.
-    if within_optional_window(expected.now_unix, identity.freshness_unix, identity.expires_at_unix)
-        .is_err()
+    if within_optional_window(
+        expected.now_unix,
+        identity.freshness_unix,
+        identity.expires_at_unix,
+    )
+    .is_err()
     {
         return RemoteSignerOutcome::ExpiredAttestation {
             now_unix: expected.now_unix,
@@ -873,8 +886,12 @@ pub fn validate_remote_signer(
     }
 
     // 22. Response freshness/expiry window.
-    if within_optional_window(expected.now_unix, response.freshness_unix, response.expires_at_unix)
-        .is_err()
+    if within_optional_window(
+        expected.now_unix,
+        response.freshness_unix,
+        response.expires_at_unix,
+    )
+    .is_err()
     {
         return RemoteSignerOutcome::ExpiredResponse {
             now_unix: expected.now_unix,
@@ -1011,8 +1028,7 @@ pub fn validate_lifecycle_governance_custody_and_remote_signer(
 ) -> LifecycleCustodyRemoteSignerOutcome {
     // MainNet peer-driven apply remains refused regardless of any
     // fixture loopback remote signer success.
-    if is_peer_driven_apply_preflight
-        && trust_domain.environment == TrustBundleEnvironment::Mainnet
+    if is_peer_driven_apply_preflight && trust_domain.environment == TrustBundleEnvironment::Mainnet
     {
         return LifecycleCustodyRemoteSignerOutcome::MainNetPeerDrivenApplyRefused;
     }

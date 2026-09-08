@@ -125,13 +125,14 @@ fn binding(env: TrustBundleEnvironment) -> GovernanceExecutionProofBinding {
 
 fn decision_for(b: &GovernanceExecutionProofBinding) -> ProductionOnChainGovernanceProofDecision {
     ProductionOnChainGovernanceProofDecision {
-        outcome: ProductionOnChainGovernanceProofOutcome::AcceptedProductionOnChainGovernanceProof {
-            environment: b.environment,
-            governance_epoch: b.governance_epoch,
-            authority_domain_sequence: b.authority_domain_sequence,
-            lifecycle_action: b.lifecycle_action,
-            decision_id: b.decision_id.clone(),
-        },
+        outcome:
+            ProductionOnChainGovernanceProofOutcome::AcceptedProductionOnChainGovernanceProof {
+                environment: b.environment,
+                governance_epoch: b.governance_epoch,
+                authority_domain_sequence: b.authority_domain_sequence,
+                lifecycle_action: b.lifecycle_action,
+                decision_id: b.decision_id.clone(),
+            },
         decision_id: b.decision_id.clone(),
         proof_digest: b.proof_digest.clone(),
         transcript_digest: b.proof_transcript_digest.clone(),
@@ -261,7 +262,10 @@ fn a03_valid_testnet_decision_produces_intent() {
 fn a04_accepted_intent_binds_environment() {
     let b = binding(TrustBundleEnvironment::Devnet);
     let d = eval_verified(&engine(), &b, &inputs(TrustBundleEnvironment::Devnet));
-    assert_eq!(d.intent.unwrap().environment, TrustBundleEnvironment::Devnet);
+    assert_eq!(
+        d.intent.unwrap().environment,
+        TrustBundleEnvironment::Devnet
+    );
 }
 
 fn a05_accepted_intent_binds_chain_id() {
@@ -320,7 +324,10 @@ fn a12_accepted_intent_binds_proposal_outcome() {
 fn a13_accepted_intent_binds_lifecycle_action() {
     let b = binding(TrustBundleEnvironment::Devnet);
     let d = eval_verified(&engine(), &b, &inputs(TrustBundleEnvironment::Devnet));
-    assert_eq!(d.intent.unwrap().lifecycle_action, LocalLifecycleAction::Rotate);
+    assert_eq!(
+        d.intent.unwrap().lifecycle_action,
+        LocalLifecycleAction::Rotate
+    );
 }
 
 fn a14_accepted_intent_binds_candidate_digest() {
@@ -358,7 +365,10 @@ fn a18_accepted_intent_binds_proof_transcript_digest() {
 fn a19_accepted_intent_binds_checkpoint_digest() {
     let b = binding(TrustBundleEnvironment::Devnet);
     let d = eval_verified(&engine(), &b, &inputs(TrustBundleEnvironment::Devnet));
-    assert_eq!(d.intent.unwrap().trusted_checkpoint_digest, CHECKPOINT_DIGEST);
+    assert_eq!(
+        d.intent.unwrap().trusted_checkpoint_digest,
+        CHECKPOINT_DIGEST
+    );
 }
 
 fn a20_accepted_intent_binds_custody_evidence_when_represented() {
@@ -465,8 +475,7 @@ fn a29_emergency_revocation_is_prepared_intent_only() {
     b.requested_operation = GovernanceExecutionRequestedOperation::EmergencyRevocation;
     let mut ins = inputs(TrustBundleEnvironment::Devnet);
     ins.expected_lifecycle_action = LocalLifecycleAction::EmergencyRevoke;
-    ins.expected_requested_operation =
-        GovernanceExecutionRequestedOperation::EmergencyRevocation;
+    ins.expected_requested_operation = GovernanceExecutionRequestedOperation::EmergencyRevocation;
     let d = eval_verified(&engine(), &b, &ins);
     assert!(d.is_accept());
     let i = d.intent.unwrap();
@@ -1256,13 +1265,19 @@ fn c02_mainnet_cannot_be_satisfied_by_local_operator() {
 fn c03_mainnet_domain_refused_under_source_test_policy() {
     let b = binding(TrustBundleEnvironment::Mainnet);
     let d = eval_verified(&engine(), &b, &inputs(TrustBundleEnvironment::Mainnet));
-    assert_eq!(d.outcome, ProductionGovernanceExecutionOutcome::MainNetRefused);
+    assert_eq!(
+        d.outcome,
+        ProductionGovernanceExecutionOutcome::MainNetRefused
+    );
 }
 
 fn c04_mainnet_decision_env_refused_even_on_devnet_domain() {
     let b = binding(TrustBundleEnvironment::Mainnet);
     let d = eval_verified(&engine(), &b, &inputs(TrustBundleEnvironment::Devnet));
-    assert_eq!(d.outcome, ProductionGovernanceExecutionOutcome::MainNetRefused);
+    assert_eq!(
+        d.outcome,
+        ProductionGovernanceExecutionOutcome::MainNetRefused
+    );
 }
 
 fn c05_mainnet_production_policy_on_devnet_fails_closed() {
@@ -1294,7 +1309,10 @@ fn c07_mainnet_validator_set_rotation_still_refused() {
     let mut ins = inputs(TrustBundleEnvironment::Mainnet);
     ins.expected_requested_operation = GovernanceExecutionRequestedOperation::ValidatorSetRotation;
     let d = eval_verified(&engine(), &b, &ins);
-    assert_eq!(d.outcome, ProductionGovernanceExecutionOutcome::MainNetRefused);
+    assert_eq!(
+        d.outcome,
+        ProductionGovernanceExecutionOutcome::MainNetRefused
+    );
 }
 
 fn c08_named_mainnet_refused_helper() {
@@ -1318,8 +1336,7 @@ fn d01_no_prior_window_is_clean_no_op() {
 fn d02_byte_identical_intent_is_idempotent() {
     let cur = accepted_intent(TrustBundleEnvironment::Devnet);
     let prior = cur.clone();
-    let out =
-        engine().recover_production_governance_execution_window(Some(&prior), &cur, 0, None);
+    let out = engine().recover_production_governance_execution_window(Some(&prior), &cur, 0, None);
     assert_eq!(
         out,
         ProductionGovernanceExecutionRecoveryOutcome::IdempotentReplayOfSameIntent
@@ -1331,8 +1348,7 @@ fn d03_conflicting_proposal_digest_fails_closed() {
     let mut prior = accepted_intent(TrustBundleEnvironment::Devnet);
     let cur = accepted_intent(TrustBundleEnvironment::Devnet);
     prior.proposal_digest = "other".to_string();
-    let out =
-        engine().recover_production_governance_execution_window(Some(&prior), &cur, 0, None);
+    let out = engine().recover_production_governance_execution_window(Some(&prior), &cur, 0, None);
     assert_eq!(
         out,
         ProductionGovernanceExecutionRecoveryOutcome::ConflictingProposalDigestForSameDecisionId
@@ -1343,8 +1359,7 @@ fn d04_conflicting_candidate_digest_fails_closed() {
     let mut prior = accepted_intent(TrustBundleEnvironment::Devnet);
     let cur = accepted_intent(TrustBundleEnvironment::Devnet);
     prior.candidate_v2_digest = "other".to_string();
-    let out =
-        engine().recover_production_governance_execution_window(Some(&prior), &cur, 0, None);
+    let out = engine().recover_production_governance_execution_window(Some(&prior), &cur, 0, None);
     assert_eq!(
         out,
         ProductionGovernanceExecutionRecoveryOutcome::ConflictingCandidateDigestForSameDecisionId
@@ -1355,8 +1370,7 @@ fn d05_conflicting_lifecycle_action_fails_closed() {
     let mut prior = accepted_intent(TrustBundleEnvironment::Devnet);
     let cur = accepted_intent(TrustBundleEnvironment::Devnet);
     prior.lifecycle_action = LocalLifecycleAction::Revoke;
-    let out =
-        engine().recover_production_governance_execution_window(Some(&prior), &cur, 0, None);
+    let out = engine().recover_production_governance_execution_window(Some(&prior), &cur, 0, None);
     assert_eq!(
         out,
         ProductionGovernanceExecutionRecoveryOutcome::ConflictingLifecycleActionForSameDecisionId
@@ -1367,8 +1381,7 @@ fn d06_conflicting_proof_transcript_fails_closed() {
     let mut prior = accepted_intent(TrustBundleEnvironment::Devnet);
     let cur = accepted_intent(TrustBundleEnvironment::Devnet);
     prior.proof_transcript_digest = "other".to_string();
-    let out =
-        engine().recover_production_governance_execution_window(Some(&prior), &cur, 0, None);
+    let out = engine().recover_production_governance_execution_window(Some(&prior), &cur, 0, None);
     assert_eq!(
         out,
         ProductionGovernanceExecutionRecoveryOutcome::ConflictingProofTranscriptForSameDecisionId
@@ -1379,8 +1392,7 @@ fn d07_conflicting_custody_evidence_fails_closed() {
     let mut prior = accepted_intent(TrustBundleEnvironment::Devnet);
     let cur = accepted_intent(TrustBundleEnvironment::Devnet);
     prior.custody_binding = Some(custody());
-    let out =
-        engine().recover_production_governance_execution_window(Some(&prior), &cur, 0, None);
+    let out = engine().recover_production_governance_execution_window(Some(&prior), &cur, 0, None);
     assert_eq!(
         out,
         ProductionGovernanceExecutionRecoveryOutcome::ConflictingCustodyEvidenceForSameDecisionId
@@ -1391,8 +1403,7 @@ fn d08_conflicting_attestation_evidence_fails_closed() {
     let mut prior = accepted_intent(TrustBundleEnvironment::Devnet);
     let cur = accepted_intent(TrustBundleEnvironment::Devnet);
     prior.attestation_binding = Some(attestation());
-    let out =
-        engine().recover_production_governance_execution_window(Some(&prior), &cur, 0, None);
+    let out = engine().recover_production_governance_execution_window(Some(&prior), &cur, 0, None);
     assert_eq!(
         out,
         ProductionGovernanceExecutionRecoveryOutcome::ConflictingAttestationEvidenceForSameDecisionId
@@ -1433,8 +1444,7 @@ fn d11_unrelated_decision_id_is_independent_window() {
     let mut prior = accepted_intent(TrustBundleEnvironment::Devnet);
     let cur = accepted_intent(TrustBundleEnvironment::Devnet);
     prior.decision_id = "unrelated".to_string();
-    let out =
-        engine().recover_production_governance_execution_window(Some(&prior), &cur, 0, None);
+    let out = engine().recover_production_governance_execution_window(Some(&prior), &cur, 0, None);
     assert_eq!(
         out,
         ProductionGovernanceExecutionRecoveryOutcome::NoPriorExecutionWindow
@@ -1445,8 +1455,7 @@ fn d12_ambiguous_recovery_fails_closed() {
     let mut prior = accepted_intent(TrustBundleEnvironment::Devnet);
     let cur = accepted_intent(TrustBundleEnvironment::Devnet);
     prior.governance_height = GOV_HEIGHT + 1;
-    let out =
-        engine().recover_production_governance_execution_window(Some(&prior), &cur, 0, None);
+    let out = engine().recover_production_governance_execution_window(Some(&prior), &cur, 0, None);
     assert!(matches!(
         out,
         ProductionGovernanceExecutionRecoveryOutcome::AmbiguousRecoveryFailClosed { .. }
@@ -1560,9 +1569,7 @@ fn e10_evaluation_is_pure_repeatable() {
 // ===========================================================================
 
 fn f01_run301_is_source_test_not_release_binary_evidence() {
-    assert!(
-        production_governance_execution_engine_is_source_test_not_release_binary_evidence()
-    );
+    assert!(production_governance_execution_engine_is_source_test_not_release_binary_evidence());
 }
 
 fn f02_default_is_disabled_fail_closed() {
@@ -1700,7 +1707,12 @@ fn g01_release_symbol_reachability_probe() {
         ProductionGovernanceExecutionEnginePolicy::MainnetProductionGovernanceExecutionRequired,
     ] {
         assert!(!p.tag().is_empty());
-        let _ = (p.is_disabled(), p.allows_source_test(), p.is_production(), p.is_mainnet());
+        let _ = (
+            p.is_disabled(),
+            p.allows_source_test(),
+            p.is_production(),
+            p.is_mainnet(),
+        );
     }
 
     let env = TrustBundleEnvironment::Devnet;
@@ -1790,124 +1802,596 @@ fn main() {
     fs::create_dir_all(outdir.join("fixtures")).expect("create helper output directory");
 
     let cases: &[(&str, &str, fn())] = &[
-        ("accepted_compatible", "a01_default_policy_is_disabled_and_inert", a01_default_policy_is_disabled_and_inert as fn()),
-        ("accepted_compatible", "a02_valid_devnet_decision_produces_intent", a02_valid_devnet_decision_produces_intent as fn()),
-        ("accepted_compatible", "a03_valid_testnet_decision_produces_intent", a03_valid_testnet_decision_produces_intent as fn()),
-        ("accepted_compatible", "a04_accepted_intent_binds_environment", a04_accepted_intent_binds_environment as fn()),
-        ("accepted_compatible", "a05_accepted_intent_binds_chain_id", a05_accepted_intent_binds_chain_id as fn()),
-        ("accepted_compatible", "a06_accepted_intent_binds_genesis", a06_accepted_intent_binds_genesis as fn()),
-        ("accepted_compatible", "a07_accepted_intent_binds_authority_root", a07_accepted_intent_binds_authority_root as fn()),
-        ("accepted_compatible", "a08_accepted_intent_binds_governance_domain", a08_accepted_intent_binds_governance_domain as fn()),
-        ("accepted_compatible", "a09_accepted_intent_binds_governance_epoch", a09_accepted_intent_binds_governance_epoch as fn()),
-        ("accepted_compatible", "a10_accepted_intent_binds_proposal_id", a10_accepted_intent_binds_proposal_id as fn()),
-        ("accepted_compatible", "a11_accepted_intent_binds_proposal_digest", a11_accepted_intent_binds_proposal_digest as fn()),
-        ("accepted_compatible", "a12_accepted_intent_binds_proposal_outcome", a12_accepted_intent_binds_proposal_outcome as fn()),
-        ("accepted_compatible", "a13_accepted_intent_binds_lifecycle_action", a13_accepted_intent_binds_lifecycle_action as fn()),
-        ("accepted_compatible", "a14_accepted_intent_binds_candidate_digest", a14_accepted_intent_binds_candidate_digest as fn()),
-        ("accepted_compatible", "a15_accepted_intent_binds_authority_sequence", a15_accepted_intent_binds_authority_sequence as fn()),
-        ("accepted_compatible", "a16_accepted_intent_binds_decision_id", a16_accepted_intent_binds_decision_id as fn()),
-        ("accepted_compatible", "a17_accepted_intent_binds_quorum_threshold", a17_accepted_intent_binds_quorum_threshold as fn()),
-        ("accepted_compatible", "a18_accepted_intent_binds_proof_transcript_digest", a18_accepted_intent_binds_proof_transcript_digest as fn()),
-        ("accepted_compatible", "a19_accepted_intent_binds_checkpoint_digest", a19_accepted_intent_binds_checkpoint_digest as fn()),
-        ("accepted_compatible", "a20_accepted_intent_binds_custody_evidence_when_represented", a20_accepted_intent_binds_custody_evidence_when_represented as fn()),
-        ("accepted_compatible", "a21_accepted_intent_binds_attestation_evidence_when_represented", a21_accepted_intent_binds_attestation_evidence_when_represented as fn()),
-        ("accepted_compatible", "a22_accepted_intent_binds_durable_replay_evidence_when_represented", a22_accepted_intent_binds_durable_replay_evidence_when_represented as fn()),
-        ("accepted_compatible", "a23_intent_digest_deterministic", a23_intent_digest_deterministic as fn()),
-        ("accepted_compatible", "a24_request_id_deterministic", a24_request_id_deterministic as fn()),
-        ("accepted_compatible", "a25_transcript_digest_deterministic", a25_transcript_digest_deterministic as fn()),
-        ("accepted_compatible", "a26_same_decision_same_intent_digest", a26_same_decision_same_intent_digest as fn()),
-        ("accepted_compatible", "a27_different_lifecycle_action_changes_intent_digest", a27_different_lifecycle_action_changes_intent_digest as fn()),
-        ("accepted_compatible", "a28_different_candidate_digest_changes_intent_digest", a28_different_candidate_digest_changes_intent_digest as fn()),
-        ("accepted_compatible", "a29_emergency_revocation_is_prepared_intent_only", a29_emergency_revocation_is_prepared_intent_only as fn()),
-        ("accepted_compatible", "a30_rotate_retire_revoke_are_prepared_intents_only", a30_rotate_retire_revoke_are_prepared_intents_only as fn()),
-        ("accepted_compatible", "a31_bundle_signing_key_authorization_intent", a31_bundle_signing_key_authorization_intent as fn()),
-        ("accepted_compatible", "a32_run299_accept_output_composes_into_engine", a32_run299_accept_output_composes_into_engine as fn()),
-        ("accepted_compatible", "a33_accept_outcome_helpers", a33_accept_outcome_helpers as fn()),
-        ("rejection_fail_closed", "b01_disabled_rejects_before_evaluation", b01_disabled_rejects_before_evaluation as fn()),
-        ("rejection_fail_closed", "b02_missing_proof_rejected", b02_missing_proof_rejected as fn()),
-        ("rejection_fail_closed", "b03_unverified_proof_rejected", b03_unverified_proof_rejected as fn()),
-        ("rejection_fail_closed", "b04_explicit_unverified_source_rejected", b04_explicit_unverified_source_rejected as fn()),
-        ("rejection_fail_closed", "b05_fixture_proof_rejected_as_production_authority", b05_fixture_proof_rejected_as_production_authority as fn()),
-        ("rejection_fail_closed", "b06_local_operator_assertion_rejected", b06_local_operator_assertion_rejected as fn()),
-        ("rejection_fail_closed", "b07_peer_majority_assertion_rejected", b07_peer_majority_assertion_rejected as fn()),
-        ("rejection_fail_closed", "b08_custody_only_evidence_rejected", b08_custody_only_evidence_rejected as fn()),
-        ("rejection_fail_closed", "b09_remote_signer_only_evidence_rejected", b09_remote_signer_only_evidence_rejected as fn()),
-        ("rejection_fail_closed", "b10_custody_attestation_only_evidence_rejected", b10_custody_attestation_only_evidence_rejected as fn()),
-        ("rejection_fail_closed", "b11_wrong_proof_transcript_rejected", b11_wrong_proof_transcript_rejected as fn()),
-        ("rejection_fail_closed", "b12_transcript_mismatch_between_binding_and_decision", b12_transcript_mismatch_between_binding_and_decision as fn()),
-        ("rejection_fail_closed", "b13_wrong_environment_rejected", b13_wrong_environment_rejected as fn()),
-        ("rejection_fail_closed", "b14_wrong_chain_rejected", b14_wrong_chain_rejected as fn()),
-        ("rejection_fail_closed", "b15_wrong_genesis_rejected", b15_wrong_genesis_rejected as fn()),
-        ("rejection_fail_closed", "b16_wrong_authority_root_rejected", b16_wrong_authority_root_rejected as fn()),
-        ("rejection_fail_closed", "b17_wrong_governance_domain_rejected", b17_wrong_governance_domain_rejected as fn()),
-        ("rejection_fail_closed", "b18_wrong_governance_epoch_rejected", b18_wrong_governance_epoch_rejected as fn()),
-        ("rejection_fail_closed", "b19_wrong_proposal_id_rejected", b19_wrong_proposal_id_rejected as fn()),
-        ("rejection_fail_closed", "b20_wrong_proposal_digest_rejected", b20_wrong_proposal_digest_rejected as fn()),
-        ("rejection_fail_closed", "b21_wrong_proposal_outcome_rejected", b21_wrong_proposal_outcome_rejected as fn()),
-        ("rejection_fail_closed", "b22_wrong_lifecycle_action_rejected", b22_wrong_lifecycle_action_rejected as fn()),
-        ("rejection_fail_closed", "b23_wrong_candidate_digest_rejected", b23_wrong_candidate_digest_rejected as fn()),
-        ("rejection_fail_closed", "b24_wrong_authority_sequence_rejected", b24_wrong_authority_sequence_rejected as fn()),
-        ("rejection_fail_closed", "b25_wrong_decision_id_rejected", b25_wrong_decision_id_rejected as fn()),
-        ("rejection_fail_closed", "b26_wrong_quorum_rejected", b26_wrong_quorum_rejected as fn()),
-        ("rejection_fail_closed", "b27_wrong_threshold_rejected", b27_wrong_threshold_rejected as fn()),
-        ("rejection_fail_closed", "b28_missing_custody_evidence_rejected_when_required", b28_missing_custody_evidence_rejected_when_required as fn()),
-        ("rejection_fail_closed", "b29_wrong_custody_backend_rejected", b29_wrong_custody_backend_rejected as fn()),
-        ("rejection_fail_closed", "b30_missing_attestation_rejected_when_required", b30_missing_attestation_rejected_when_required as fn()),
-        ("rejection_fail_closed", "b31_wrong_attestation_rejected", b31_wrong_attestation_rejected as fn()),
-        ("rejection_fail_closed", "b32_missing_durable_replay_rejected_when_required", b32_missing_durable_replay_rejected_when_required as fn()),
-        ("rejection_fail_closed", "b33_wrong_durable_replay_rejected", b33_wrong_durable_replay_rejected as fn()),
-        ("rejection_fail_closed", "b34_replayed_decision_id_rejected", b34_replayed_decision_id_rejected as fn()),
-        ("rejection_fail_closed", "b35_stale_governance_epoch_rejected", b35_stale_governance_epoch_rejected as fn()),
-        ("rejection_fail_closed", "b36_stale_authority_sequence_rejected", b36_stale_authority_sequence_rejected as fn()),
-        ("rejection_fail_closed", "b37_unsupported_lifecycle_action_rejected", b37_unsupported_lifecycle_action_rejected as fn()),
-        ("rejection_fail_closed", "b38_validator_set_rotation_unsupported", b38_validator_set_rotation_unsupported as fn()),
-        ("rejection_fail_closed", "b39_engine_kind_disabled_fails_closed", b39_engine_kind_disabled_fails_closed as fn()),
-        ("rejection_fail_closed", "b40_reserved_production_engine_kind_unavailable", b40_reserved_production_engine_kind_unavailable as fn()),
-        ("rejection_fail_closed", "b41_production_policy_without_prereqs_fails_closed", b41_production_policy_without_prereqs_fails_closed as fn()),
-        ("rejection_fail_closed", "b42_ambiguous_inputs_fail_closed", b42_ambiguous_inputs_fail_closed as fn()),
-        ("rejection_fail_closed", "b43_malformed_binding_fails_closed", b43_malformed_binding_fails_closed as fn()),
-        ("mainnet_authority_policy", "c01_mainnet_cannot_be_satisfied_by_fixture_proof", c01_mainnet_cannot_be_satisfied_by_fixture_proof as fn()),
-        ("mainnet_authority_policy", "c02_mainnet_cannot_be_satisfied_by_local_operator", c02_mainnet_cannot_be_satisfied_by_local_operator as fn()),
-        ("mainnet_authority_policy", "c03_mainnet_domain_refused_under_source_test_policy", c03_mainnet_domain_refused_under_source_test_policy as fn()),
-        ("mainnet_authority_policy", "c04_mainnet_decision_env_refused_even_on_devnet_domain", c04_mainnet_decision_env_refused_even_on_devnet_domain as fn()),
-        ("mainnet_authority_policy", "c05_mainnet_production_policy_on_devnet_fails_closed", c05_mainnet_production_policy_on_devnet_fails_closed as fn()),
-        ("mainnet_authority_policy", "c06_valid_devnet_source_test_does_not_enable_mainnet", c06_valid_devnet_source_test_does_not_enable_mainnet as fn()),
-        ("mainnet_authority_policy", "c07_mainnet_validator_set_rotation_still_refused", c07_mainnet_validator_set_rotation_still_refused as fn()),
-        ("mainnet_authority_policy", "c08_named_mainnet_refused_helper", c08_named_mainnet_refused_helper as fn()),
-        ("replay_recovery_idempotency", "d01_no_prior_window_is_clean_no_op", d01_no_prior_window_is_clean_no_op as fn()),
-        ("replay_recovery_idempotency", "d02_byte_identical_intent_is_idempotent", d02_byte_identical_intent_is_idempotent as fn()),
-        ("replay_recovery_idempotency", "d03_conflicting_proposal_digest_fails_closed", d03_conflicting_proposal_digest_fails_closed as fn()),
-        ("replay_recovery_idempotency", "d04_conflicting_candidate_digest_fails_closed", d04_conflicting_candidate_digest_fails_closed as fn()),
-        ("replay_recovery_idempotency", "d05_conflicting_lifecycle_action_fails_closed", d05_conflicting_lifecycle_action_fails_closed as fn()),
-        ("replay_recovery_idempotency", "d06_conflicting_proof_transcript_fails_closed", d06_conflicting_proof_transcript_fails_closed as fn()),
-        ("replay_recovery_idempotency", "d07_conflicting_custody_evidence_fails_closed", d07_conflicting_custody_evidence_fails_closed as fn()),
-        ("replay_recovery_idempotency", "d08_conflicting_attestation_evidence_fails_closed", d08_conflicting_attestation_evidence_fails_closed as fn()),
-        ("replay_recovery_idempotency", "d09_stale_governance_epoch_in_recovery_fails_closed", d09_stale_governance_epoch_in_recovery_fails_closed as fn()),
-        ("replay_recovery_idempotency", "d10_stale_authority_sequence_in_recovery_fails_closed", d10_stale_authority_sequence_in_recovery_fails_closed as fn()),
-        ("replay_recovery_idempotency", "d11_unrelated_decision_id_is_independent_window", d11_unrelated_decision_id_is_independent_window as fn()),
-        ("replay_recovery_idempotency", "d12_ambiguous_recovery_fails_closed", d12_ambiguous_recovery_fails_closed as fn()),
-        ("replay_recovery_idempotency", "d13_recovery_outcomes_are_non_mutating", d13_recovery_outcomes_are_non_mutating as fn()),
-        ("non_mutation", "e01_accept_outcome_is_non_mutating", e01_accept_outcome_is_non_mutating as fn()),
-        ("non_mutation", "e02_every_reject_outcome_is_non_mutating", e02_every_reject_outcome_is_non_mutating as fn()),
-        ("non_mutation", "e03_reject_does_not_authorize_future_mutation", e03_reject_does_not_authorize_future_mutation as fn()),
-        ("non_mutation", "e04_only_accept_authorizes_future_mutation_only", e04_only_accept_authorizes_future_mutation_only as fn()),
-        ("non_mutation", "e05_disabled_is_not_a_reject_and_not_accept", e05_disabled_is_not_a_reject_and_not_accept as fn()),
-        ("non_mutation", "e06_engine_never_falls_back", e06_engine_never_falls_back as fn()),
-        ("non_mutation", "e07_engine_no_default_runtime_wiring", e07_engine_no_default_runtime_wiring as fn()),
-        ("non_mutation", "e08_engine_is_non_mutating_helper", e08_engine_is_non_mutating_helper as fn()),
-        ("non_mutation", "e09_evaluation_does_not_mutate_replay_set", e09_evaluation_does_not_mutate_replay_set as fn()),
-        ("non_mutation", "e10_evaluation_is_pure_repeatable", e10_evaluation_is_pure_repeatable as fn()),
-        ("reachability_taxonomy", "f01_run301_is_source_test_not_release_binary_evidence", f01_run301_is_source_test_not_release_binary_evidence as fn()),
-        ("reachability_taxonomy", "f02_default_is_disabled_fail_closed", f02_default_is_disabled_fail_closed as fn()),
-        ("reachability_taxonomy", "f03_validator_set_rotation_remains_unsupported", f03_validator_set_rotation_remains_unsupported as fn()),
-        ("reachability_taxonomy", "f04_policy_taxonomy_tags_stable", f04_policy_taxonomy_tags_stable as fn()),
-        ("reachability_taxonomy", "f05_intent_kind_tags_stable", f05_intent_kind_tags_stable as fn()),
-        ("reachability_taxonomy", "f06_all_policies_default_to_disabled", f06_all_policies_default_to_disabled as fn()),
-        ("reachability_taxonomy", "f07_free_functions_expose_named_digests", f07_free_functions_expose_named_digests as fn()),
-        ("reachability_taxonomy", "f08_outcome_tags_are_stable_and_distinct", f08_outcome_tags_are_stable_and_distinct as fn()),
-        ("reachability_taxonomy", "f09_protocol_version_supported", f09_protocol_version_supported as fn()),
-        ("reachability_taxonomy", "f10_config_default_is_disabled_kind", f10_config_default_is_disabled_kind as fn()),
-        ("reachability_taxonomy", "g01_release_symbol_reachability_probe", g01_release_symbol_reachability_probe as fn()),
+        (
+            "accepted_compatible",
+            "a01_default_policy_is_disabled_and_inert",
+            a01_default_policy_is_disabled_and_inert as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "a02_valid_devnet_decision_produces_intent",
+            a02_valid_devnet_decision_produces_intent as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "a03_valid_testnet_decision_produces_intent",
+            a03_valid_testnet_decision_produces_intent as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "a04_accepted_intent_binds_environment",
+            a04_accepted_intent_binds_environment as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "a05_accepted_intent_binds_chain_id",
+            a05_accepted_intent_binds_chain_id as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "a06_accepted_intent_binds_genesis",
+            a06_accepted_intent_binds_genesis as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "a07_accepted_intent_binds_authority_root",
+            a07_accepted_intent_binds_authority_root as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "a08_accepted_intent_binds_governance_domain",
+            a08_accepted_intent_binds_governance_domain as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "a09_accepted_intent_binds_governance_epoch",
+            a09_accepted_intent_binds_governance_epoch as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "a10_accepted_intent_binds_proposal_id",
+            a10_accepted_intent_binds_proposal_id as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "a11_accepted_intent_binds_proposal_digest",
+            a11_accepted_intent_binds_proposal_digest as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "a12_accepted_intent_binds_proposal_outcome",
+            a12_accepted_intent_binds_proposal_outcome as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "a13_accepted_intent_binds_lifecycle_action",
+            a13_accepted_intent_binds_lifecycle_action as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "a14_accepted_intent_binds_candidate_digest",
+            a14_accepted_intent_binds_candidate_digest as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "a15_accepted_intent_binds_authority_sequence",
+            a15_accepted_intent_binds_authority_sequence as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "a16_accepted_intent_binds_decision_id",
+            a16_accepted_intent_binds_decision_id as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "a17_accepted_intent_binds_quorum_threshold",
+            a17_accepted_intent_binds_quorum_threshold as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "a18_accepted_intent_binds_proof_transcript_digest",
+            a18_accepted_intent_binds_proof_transcript_digest as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "a19_accepted_intent_binds_checkpoint_digest",
+            a19_accepted_intent_binds_checkpoint_digest as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "a20_accepted_intent_binds_custody_evidence_when_represented",
+            a20_accepted_intent_binds_custody_evidence_when_represented as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "a21_accepted_intent_binds_attestation_evidence_when_represented",
+            a21_accepted_intent_binds_attestation_evidence_when_represented as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "a22_accepted_intent_binds_durable_replay_evidence_when_represented",
+            a22_accepted_intent_binds_durable_replay_evidence_when_represented as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "a23_intent_digest_deterministic",
+            a23_intent_digest_deterministic as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "a24_request_id_deterministic",
+            a24_request_id_deterministic as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "a25_transcript_digest_deterministic",
+            a25_transcript_digest_deterministic as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "a26_same_decision_same_intent_digest",
+            a26_same_decision_same_intent_digest as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "a27_different_lifecycle_action_changes_intent_digest",
+            a27_different_lifecycle_action_changes_intent_digest as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "a28_different_candidate_digest_changes_intent_digest",
+            a28_different_candidate_digest_changes_intent_digest as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "a29_emergency_revocation_is_prepared_intent_only",
+            a29_emergency_revocation_is_prepared_intent_only as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "a30_rotate_retire_revoke_are_prepared_intents_only",
+            a30_rotate_retire_revoke_are_prepared_intents_only as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "a31_bundle_signing_key_authorization_intent",
+            a31_bundle_signing_key_authorization_intent as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "a32_run299_accept_output_composes_into_engine",
+            a32_run299_accept_output_composes_into_engine as fn(),
+        ),
+        (
+            "accepted_compatible",
+            "a33_accept_outcome_helpers",
+            a33_accept_outcome_helpers as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "b01_disabled_rejects_before_evaluation",
+            b01_disabled_rejects_before_evaluation as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "b02_missing_proof_rejected",
+            b02_missing_proof_rejected as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "b03_unverified_proof_rejected",
+            b03_unverified_proof_rejected as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "b04_explicit_unverified_source_rejected",
+            b04_explicit_unverified_source_rejected as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "b05_fixture_proof_rejected_as_production_authority",
+            b05_fixture_proof_rejected_as_production_authority as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "b06_local_operator_assertion_rejected",
+            b06_local_operator_assertion_rejected as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "b07_peer_majority_assertion_rejected",
+            b07_peer_majority_assertion_rejected as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "b08_custody_only_evidence_rejected",
+            b08_custody_only_evidence_rejected as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "b09_remote_signer_only_evidence_rejected",
+            b09_remote_signer_only_evidence_rejected as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "b10_custody_attestation_only_evidence_rejected",
+            b10_custody_attestation_only_evidence_rejected as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "b11_wrong_proof_transcript_rejected",
+            b11_wrong_proof_transcript_rejected as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "b12_transcript_mismatch_between_binding_and_decision",
+            b12_transcript_mismatch_between_binding_and_decision as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "b13_wrong_environment_rejected",
+            b13_wrong_environment_rejected as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "b14_wrong_chain_rejected",
+            b14_wrong_chain_rejected as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "b15_wrong_genesis_rejected",
+            b15_wrong_genesis_rejected as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "b16_wrong_authority_root_rejected",
+            b16_wrong_authority_root_rejected as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "b17_wrong_governance_domain_rejected",
+            b17_wrong_governance_domain_rejected as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "b18_wrong_governance_epoch_rejected",
+            b18_wrong_governance_epoch_rejected as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "b19_wrong_proposal_id_rejected",
+            b19_wrong_proposal_id_rejected as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "b20_wrong_proposal_digest_rejected",
+            b20_wrong_proposal_digest_rejected as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "b21_wrong_proposal_outcome_rejected",
+            b21_wrong_proposal_outcome_rejected as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "b22_wrong_lifecycle_action_rejected",
+            b22_wrong_lifecycle_action_rejected as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "b23_wrong_candidate_digest_rejected",
+            b23_wrong_candidate_digest_rejected as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "b24_wrong_authority_sequence_rejected",
+            b24_wrong_authority_sequence_rejected as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "b25_wrong_decision_id_rejected",
+            b25_wrong_decision_id_rejected as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "b26_wrong_quorum_rejected",
+            b26_wrong_quorum_rejected as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "b27_wrong_threshold_rejected",
+            b27_wrong_threshold_rejected as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "b28_missing_custody_evidence_rejected_when_required",
+            b28_missing_custody_evidence_rejected_when_required as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "b29_wrong_custody_backend_rejected",
+            b29_wrong_custody_backend_rejected as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "b30_missing_attestation_rejected_when_required",
+            b30_missing_attestation_rejected_when_required as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "b31_wrong_attestation_rejected",
+            b31_wrong_attestation_rejected as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "b32_missing_durable_replay_rejected_when_required",
+            b32_missing_durable_replay_rejected_when_required as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "b33_wrong_durable_replay_rejected",
+            b33_wrong_durable_replay_rejected as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "b34_replayed_decision_id_rejected",
+            b34_replayed_decision_id_rejected as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "b35_stale_governance_epoch_rejected",
+            b35_stale_governance_epoch_rejected as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "b36_stale_authority_sequence_rejected",
+            b36_stale_authority_sequence_rejected as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "b37_unsupported_lifecycle_action_rejected",
+            b37_unsupported_lifecycle_action_rejected as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "b38_validator_set_rotation_unsupported",
+            b38_validator_set_rotation_unsupported as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "b39_engine_kind_disabled_fails_closed",
+            b39_engine_kind_disabled_fails_closed as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "b40_reserved_production_engine_kind_unavailable",
+            b40_reserved_production_engine_kind_unavailable as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "b41_production_policy_without_prereqs_fails_closed",
+            b41_production_policy_without_prereqs_fails_closed as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "b42_ambiguous_inputs_fail_closed",
+            b42_ambiguous_inputs_fail_closed as fn(),
+        ),
+        (
+            "rejection_fail_closed",
+            "b43_malformed_binding_fails_closed",
+            b43_malformed_binding_fails_closed as fn(),
+        ),
+        (
+            "mainnet_authority_policy",
+            "c01_mainnet_cannot_be_satisfied_by_fixture_proof",
+            c01_mainnet_cannot_be_satisfied_by_fixture_proof as fn(),
+        ),
+        (
+            "mainnet_authority_policy",
+            "c02_mainnet_cannot_be_satisfied_by_local_operator",
+            c02_mainnet_cannot_be_satisfied_by_local_operator as fn(),
+        ),
+        (
+            "mainnet_authority_policy",
+            "c03_mainnet_domain_refused_under_source_test_policy",
+            c03_mainnet_domain_refused_under_source_test_policy as fn(),
+        ),
+        (
+            "mainnet_authority_policy",
+            "c04_mainnet_decision_env_refused_even_on_devnet_domain",
+            c04_mainnet_decision_env_refused_even_on_devnet_domain as fn(),
+        ),
+        (
+            "mainnet_authority_policy",
+            "c05_mainnet_production_policy_on_devnet_fails_closed",
+            c05_mainnet_production_policy_on_devnet_fails_closed as fn(),
+        ),
+        (
+            "mainnet_authority_policy",
+            "c06_valid_devnet_source_test_does_not_enable_mainnet",
+            c06_valid_devnet_source_test_does_not_enable_mainnet as fn(),
+        ),
+        (
+            "mainnet_authority_policy",
+            "c07_mainnet_validator_set_rotation_still_refused",
+            c07_mainnet_validator_set_rotation_still_refused as fn(),
+        ),
+        (
+            "mainnet_authority_policy",
+            "c08_named_mainnet_refused_helper",
+            c08_named_mainnet_refused_helper as fn(),
+        ),
+        (
+            "replay_recovery_idempotency",
+            "d01_no_prior_window_is_clean_no_op",
+            d01_no_prior_window_is_clean_no_op as fn(),
+        ),
+        (
+            "replay_recovery_idempotency",
+            "d02_byte_identical_intent_is_idempotent",
+            d02_byte_identical_intent_is_idempotent as fn(),
+        ),
+        (
+            "replay_recovery_idempotency",
+            "d03_conflicting_proposal_digest_fails_closed",
+            d03_conflicting_proposal_digest_fails_closed as fn(),
+        ),
+        (
+            "replay_recovery_idempotency",
+            "d04_conflicting_candidate_digest_fails_closed",
+            d04_conflicting_candidate_digest_fails_closed as fn(),
+        ),
+        (
+            "replay_recovery_idempotency",
+            "d05_conflicting_lifecycle_action_fails_closed",
+            d05_conflicting_lifecycle_action_fails_closed as fn(),
+        ),
+        (
+            "replay_recovery_idempotency",
+            "d06_conflicting_proof_transcript_fails_closed",
+            d06_conflicting_proof_transcript_fails_closed as fn(),
+        ),
+        (
+            "replay_recovery_idempotency",
+            "d07_conflicting_custody_evidence_fails_closed",
+            d07_conflicting_custody_evidence_fails_closed as fn(),
+        ),
+        (
+            "replay_recovery_idempotency",
+            "d08_conflicting_attestation_evidence_fails_closed",
+            d08_conflicting_attestation_evidence_fails_closed as fn(),
+        ),
+        (
+            "replay_recovery_idempotency",
+            "d09_stale_governance_epoch_in_recovery_fails_closed",
+            d09_stale_governance_epoch_in_recovery_fails_closed as fn(),
+        ),
+        (
+            "replay_recovery_idempotency",
+            "d10_stale_authority_sequence_in_recovery_fails_closed",
+            d10_stale_authority_sequence_in_recovery_fails_closed as fn(),
+        ),
+        (
+            "replay_recovery_idempotency",
+            "d11_unrelated_decision_id_is_independent_window",
+            d11_unrelated_decision_id_is_independent_window as fn(),
+        ),
+        (
+            "replay_recovery_idempotency",
+            "d12_ambiguous_recovery_fails_closed",
+            d12_ambiguous_recovery_fails_closed as fn(),
+        ),
+        (
+            "replay_recovery_idempotency",
+            "d13_recovery_outcomes_are_non_mutating",
+            d13_recovery_outcomes_are_non_mutating as fn(),
+        ),
+        (
+            "non_mutation",
+            "e01_accept_outcome_is_non_mutating",
+            e01_accept_outcome_is_non_mutating as fn(),
+        ),
+        (
+            "non_mutation",
+            "e02_every_reject_outcome_is_non_mutating",
+            e02_every_reject_outcome_is_non_mutating as fn(),
+        ),
+        (
+            "non_mutation",
+            "e03_reject_does_not_authorize_future_mutation",
+            e03_reject_does_not_authorize_future_mutation as fn(),
+        ),
+        (
+            "non_mutation",
+            "e04_only_accept_authorizes_future_mutation_only",
+            e04_only_accept_authorizes_future_mutation_only as fn(),
+        ),
+        (
+            "non_mutation",
+            "e05_disabled_is_not_a_reject_and_not_accept",
+            e05_disabled_is_not_a_reject_and_not_accept as fn(),
+        ),
+        (
+            "non_mutation",
+            "e06_engine_never_falls_back",
+            e06_engine_never_falls_back as fn(),
+        ),
+        (
+            "non_mutation",
+            "e07_engine_no_default_runtime_wiring",
+            e07_engine_no_default_runtime_wiring as fn(),
+        ),
+        (
+            "non_mutation",
+            "e08_engine_is_non_mutating_helper",
+            e08_engine_is_non_mutating_helper as fn(),
+        ),
+        (
+            "non_mutation",
+            "e09_evaluation_does_not_mutate_replay_set",
+            e09_evaluation_does_not_mutate_replay_set as fn(),
+        ),
+        (
+            "non_mutation",
+            "e10_evaluation_is_pure_repeatable",
+            e10_evaluation_is_pure_repeatable as fn(),
+        ),
+        (
+            "reachability_taxonomy",
+            "f01_run301_is_source_test_not_release_binary_evidence",
+            f01_run301_is_source_test_not_release_binary_evidence as fn(),
+        ),
+        (
+            "reachability_taxonomy",
+            "f02_default_is_disabled_fail_closed",
+            f02_default_is_disabled_fail_closed as fn(),
+        ),
+        (
+            "reachability_taxonomy",
+            "f03_validator_set_rotation_remains_unsupported",
+            f03_validator_set_rotation_remains_unsupported as fn(),
+        ),
+        (
+            "reachability_taxonomy",
+            "f04_policy_taxonomy_tags_stable",
+            f04_policy_taxonomy_tags_stable as fn(),
+        ),
+        (
+            "reachability_taxonomy",
+            "f05_intent_kind_tags_stable",
+            f05_intent_kind_tags_stable as fn(),
+        ),
+        (
+            "reachability_taxonomy",
+            "f06_all_policies_default_to_disabled",
+            f06_all_policies_default_to_disabled as fn(),
+        ),
+        (
+            "reachability_taxonomy",
+            "f07_free_functions_expose_named_digests",
+            f07_free_functions_expose_named_digests as fn(),
+        ),
+        (
+            "reachability_taxonomy",
+            "f08_outcome_tags_are_stable_and_distinct",
+            f08_outcome_tags_are_stable_and_distinct as fn(),
+        ),
+        (
+            "reachability_taxonomy",
+            "f09_protocol_version_supported",
+            f09_protocol_version_supported as fn(),
+        ),
+        (
+            "reachability_taxonomy",
+            "f10_config_default_is_disabled_kind",
+            f10_config_default_is_disabled_kind as fn(),
+        ),
+        (
+            "reachability_taxonomy",
+            "g01_release_symbol_reachability_probe",
+            g01_release_symbol_reachability_probe as fn(),
+        ),
     ];
 
     let mut rows: Vec<(String, String, bool)> = Vec::new();

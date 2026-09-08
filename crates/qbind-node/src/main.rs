@@ -102,10 +102,7 @@ fn binary_periodic_snapshot_config(
 fn derive_run_096_reconfig_proposal(
     config: &qbind_node::node_config::NodeConfig,
     args: &CliArgs,
-) -> Result<
-    Option<qbind_node::binary_consensus_loop::BinaryReconfigProposalConfig>,
-    String,
-> {
+) -> Result<Option<qbind_node::binary_consensus_loop::BinaryReconfigProposalConfig>, String> {
     use qbind_node::binary_consensus_loop::derive_reconfig_proposal_from_cli_flag;
     use qbind_types::NetworkEnvironment;
 
@@ -204,10 +201,8 @@ fn apply_run_105_ratification_gate_at_startup(
         )
     })?;
     let env_policy = map_environment(config.environment);
-    let canonical_hash =
-        qbind_ledger::compute_canonical_genesis_hash(&genesis_cfg, env_policy);
-    let chain_id_str =
-        qbind_node::pqc_trust_sequence::chain_id_hex(config.chain_id());
+    let canonical_hash = qbind_ledger::compute_canonical_genesis_hash(&genesis_cfg, env_policy);
+    let chain_id_str = qbind_node::pqc_trust_sequence::chain_id_hex(config.chain_id());
 
     // 2. Resolve the candidate bundle's signing public-key bytes.
     //    For unsigned DevNet bundles there is no key to ratify and
@@ -246,10 +241,7 @@ fn apply_run_105_ratification_gate_at_startup(
 
     // 3. Resolve the operator-supplied ratification sidecar (if any).
     let ratification_obj = match args.p2p_trust_bundle_ratification.as_ref() {
-        Some(path) => Some(
-            load_ratification_from_path(path)
-                .map_err(|e| format!("{}", e))?,
-        ),
+        Some(path) => Some(load_ratification_from_path(path).map_err(|e| format!("{}", e))?),
         None => None,
     };
 
@@ -331,7 +323,10 @@ fn fingerprint_for_log(
 
 fn decode_run_105_hex_into_32(s: &str, out: &mut [u8; 32]) -> Result<(), String> {
     if s.len() != 64 {
-        return Err(format!("expected 64-char lowercase hex, got len={}", s.len()));
+        return Err(format!(
+            "expected 64-char lowercase hex, got len={}",
+            s.len()
+        ));
     }
     let bytes = s.as_bytes();
     for (i, pair) in bytes.chunks_exact(2).enumerate() {
@@ -375,8 +370,7 @@ struct Run105ReloadCheckContextData {
     /// startup `--p2p-trust-bundle` / SIGHUP / live inbound `0x05`
     /// preflights so they no longer hardcode
     /// `GovernanceProofContext::Unavailable`.
-    governance_proof_load:
-        qbind_node::pqc_governance_proof_wire::GovernanceProofLoadStatus,
+    governance_proof_load: qbind_node::pqc_governance_proof_wire::GovernanceProofLoadStatus,
     /// Run 171 — captured value of the hidden
     /// `--p2p-trust-bundle-governance-proof-required` CLI flag at
     /// `Run105ReloadCheckContext` build time.
@@ -458,13 +452,13 @@ fn build_run_105_reload_check_context(
     config: &qbind_node::node_config::NodeConfig,
 ) -> Result<Run105ReloadCheckContextData, String> {
     use qbind_node::pqc_boot_genesis::{load_external_genesis, map_environment};
+    use qbind_node::pqc_governance_execution_payload_carrying::{
+        parse_optional_governance_execution_sibling_from_json_value, GovernanceExecutionLoadStatus,
+    };
+    use qbind_node::pqc_governance_proof_wire::GovernanceProofLoadStatus;
     use qbind_node::pqc_ratification_input::{
         load_versioned_ratification_with_governance_proof_from_path,
         VersionedRatificationSidecarWithGovernanceProof,
-    };
-    use qbind_node::pqc_governance_proof_wire::GovernanceProofLoadStatus;
-    use qbind_node::pqc_governance_execution_payload_carrying::{
-        parse_optional_governance_execution_sibling_from_json_value, GovernanceExecutionLoadStatus,
     };
     use qbind_types::NetworkEnvironment;
 
@@ -489,10 +483,8 @@ fn build_run_105_reload_check_context(
         )
     })?;
     let env_policy = map_environment(config.environment);
-    let canonical_hash =
-        qbind_ledger::compute_canonical_genesis_hash(&genesis_cfg, env_policy);
-    let chain_id_str =
-        qbind_node::pqc_trust_sequence::chain_id_hex(config.chain_id());
+    let canonical_hash = qbind_ledger::compute_canonical_genesis_hash(&genesis_cfg, env_policy);
+    let chain_id_str = qbind_node::pqc_trust_sequence::chain_id_hex(config.chain_id());
     // Run 132: load with versioned dispatcher to support v1 and v2 sidecars.
     // Run 169: when the operator supplies a v2 sidecar, additionally
     // attempt to parse the optional Run 167 `governance_authority_proof`
@@ -506,11 +498,9 @@ fn build_run_105_reload_check_context(
     let (ratification, ratification_v2, governance_proof_load) =
         match args.p2p_trust_bundle_ratification.as_ref() {
             Some(path) => match load_versioned_ratification_with_governance_proof_from_path(path) {
-                Ok(VersionedRatificationSidecarWithGovernanceProof::V1(v1)) => (
-                    Some(v1),
-                    None,
-                    GovernanceProofLoadStatus::Absent,
-                ),
+                Ok(VersionedRatificationSidecarWithGovernanceProof::V1(v1)) => {
+                    (Some(v1), None, GovernanceProofLoadStatus::Absent)
+                }
                 Ok(VersionedRatificationSidecarWithGovernanceProof::V2 {
                     ratification,
                     governance_proof,
@@ -574,8 +564,8 @@ fn build_run_105_reload_check_context(
         // `OnChainGovernanceProofPolicy::Disabled` and the existing
         // pre-Run-182 reload-check / reload-apply / startup /
         // peer-candidate-check flow bit-for-bit.
-        onchain_governance_fixture_allowed_selector:
-            args.p2p_trust_bundle_onchain_governance_fixture_allowed,
+        onchain_governance_fixture_allowed_selector: args
+            .p2p_trust_bundle_onchain_governance_fixture_allowed,
         // Run 217 — capture the hidden governance-execution policy
         // selector at context-build time. Resolved at preflight time via
         // the Run 215 CLI/env resolver. Default (absent) arms
@@ -843,11 +833,9 @@ fn preflight_run_134_v2_marker_decision(
     use qbind_node::pqc_authority_marker_acceptance::{
         MarkerAcceptanceV2Inputs, MutatingSurfaceMarkerV2Error,
     };
-    use qbind_node::pqc_governance_authority::{
-        fixture_issuer_signature_verifier,
-    };
-    use qbind_node::pqc_governance_proof_surface::preflight_v2_marker_decision_with_governance_proof_load;
     use qbind_node::pqc_authority_state::{authority_state_file_path, AuthorityStateUpdateSource};
+    use qbind_node::pqc_governance_authority::fixture_issuer_signature_verifier;
+    use qbind_node::pqc_governance_proof_surface::preflight_v2_marker_decision_with_governance_proof_load;
 
     let Some(ratification_v2) = ctx_data.ratification_v2.as_ref() else {
         // Caller bug: this helper is only meaningful when the operator
@@ -979,8 +967,7 @@ fn invoke_run_182_reload_apply_callsite_onchain_governance_marker_decision(
 ) {
     use qbind_node::pqc_authority_lifecycle::AuthorityTrustDomain;
     use qbind_node::pqc_onchain_governance_callsite_wiring::{
-        reload_apply_callsite_onchain_governance_marker_decision,
-        OnChainGovernanceCallsiteContext,
+        reload_apply_callsite_onchain_governance_marker_decision, OnChainGovernanceCallsiteContext,
     };
     use qbind_node::pqc_onchain_governance_proof::EmptyOnChainGovernanceReplaySet;
     use qbind_node::pqc_onchain_governance_proof_surface::onchain_governance_proof_policy_from_cli_or_env;
@@ -1068,10 +1055,10 @@ fn consume_run_220_governance_execution_runtime_outcome(
     surface: qbind_node::pqc_governance_execution_runtime_arming::GovernanceExecutionRuntimeSurface,
 ) -> Result<(), String> {
     use qbind_node::pqc_authority_lifecycle::{AuthorityTrustDomain, LocalLifecycleAction};
+    use qbind_node::pqc_governance_execution_evaluator_runtime_integration::wire_governance_evaluator_runtime_callsite_without_evaluator_context;
     use qbind_node::pqc_governance_execution_policy::{
         GovernanceAction, GovernanceExecutionExpectations,
     };
-    use qbind_node::pqc_governance_execution_evaluator_runtime_integration::wire_governance_evaluator_runtime_callsite_without_evaluator_context;
     use qbind_node::pqc_governance_execution_runtime_arming::GovernanceExecutionRuntimeArmingConfig;
 
     let candidate = decision.candidate();
@@ -1185,11 +1172,9 @@ fn preflight_run_136_v2_marker_decision_for_startup(
     use qbind_node::pqc_authority_marker_acceptance::{
         MarkerAcceptanceV2Inputs, MutatingSurfaceMarkerV2Error,
     };
-    use qbind_node::pqc_governance_authority::{
-        fixture_issuer_signature_verifier,
-    };
-    use qbind_node::pqc_governance_proof_surface::preflight_v2_marker_decision_with_governance_proof_load;
     use qbind_node::pqc_authority_state::{authority_state_file_path, AuthorityStateUpdateSource};
+    use qbind_node::pqc_governance_authority::fixture_issuer_signature_verifier;
+    use qbind_node::pqc_governance_proof_surface::preflight_v2_marker_decision_with_governance_proof_load;
 
     let Some(ratification_v2) = ctx_data.ratification_v2.as_ref() else {
         // Caller bug: this helper is only meaningful when the operator
@@ -1341,8 +1326,7 @@ fn invoke_run_182_startup_p2p_trust_bundle_callsite_onchain_governance_marker_de
         now_unix: 0,
         replay_set: &EmptyOnChainGovernanceReplaySet,
     };
-    let _outcome =
-        startup_p2p_trust_bundle_callsite_onchain_governance_marker_decision(&ctx);
+    let _outcome = startup_p2p_trust_bundle_callsite_onchain_governance_marker_decision(&ctx);
 }
 
 /// Run 120 — pre-mutation authority-marker accept-and-persist preflight
@@ -1927,8 +1911,7 @@ fn invoke_run_182_reload_check_callsite_onchain_governance_marker_decision(
 ) {
     use qbind_node::pqc_authority_lifecycle::AuthorityTrustDomain;
     use qbind_node::pqc_onchain_governance_callsite_wiring::{
-        reload_check_callsite_onchain_governance_marker_decision,
-        OnChainGovernanceCallsiteContext,
+        reload_check_callsite_onchain_governance_marker_decision, OnChainGovernanceCallsiteContext,
     };
     use qbind_node::pqc_onchain_governance_proof::EmptyOnChainGovernanceReplaySet;
     use qbind_node::pqc_onchain_governance_proof_surface::onchain_governance_proof_policy_from_cli_or_env;
@@ -1998,8 +1981,7 @@ fn invoke_run_182_local_peer_candidate_check_callsite_onchain_governance_marker_
         now_unix: 0,
         replay_set: &EmptyOnChainGovernanceReplaySet,
     };
-    let _outcome =
-        local_peer_candidate_check_callsite_onchain_governance_marker_decision(&ctx);
+    let _outcome = local_peer_candidate_check_callsite_onchain_governance_marker_decision(&ctx);
 }
 
 /// Main entry point for qbind-node binary.
@@ -2219,7 +2201,7 @@ async fn main() {
     // ------------------------------------------------------------------
     if args.authority_state_reset {
         use qbind_node::pqc_authority_state_reset::{
-            AuthorityResetInputs, execute_authority_state_reset,
+            execute_authority_state_reset, AuthorityResetInputs,
         };
         let validation_time_secs = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -2316,7 +2298,10 @@ async fn main() {
                     },
                     genesis_path.display(),
                 );
-                println!("{}", qbind_node::pqc_boot_genesis::format_for_operator(&hash));
+                println!(
+                    "{}",
+                    qbind_node::pqc_boot_genesis::format_for_operator(&hash)
+                );
                 std::process::exit(0);
             }
             Err(e) => {
@@ -2393,7 +2378,12 @@ async fn main() {
                 // Run 124: surface the 64-char lowercase-hex (no `0x` prefix)
                 // form for the snapshot/restore authority-marker check, which
                 // matches PersistentAuthorityStateRecord.genesis_hash.
-                Some(canonical_hash.iter().map(|b| format!("{:02x}", b)).collect())
+                Some(
+                    canonical_hash
+                        .iter()
+                        .map(|b| format!("{:02x}", b))
+                        .collect(),
+                )
             }
             Ok(qbind_node::pqc_boot_genesis::BootGenesisOutcome::SkippedNoExternalGenesis {
                 env,
@@ -2468,28 +2458,28 @@ async fn main() {
         None => qbind_node::snapshot_restore::apply_snapshot_restore_if_requested(&config),
     };
     let restore_outcome: Option<RestoreOutcome> = match restore_result {
-            Ok(None) => {
-                eprintln!("[restore] no --restore-from-snapshot requested; normal startup.");
-                None
-            }
-            Ok(Some(outcome)) => {
-                eprintln!(
-                    "[restore] OK: restored from snapshot height={} chain_id=0x{:016x}",
-                    outcome.meta.height, outcome.meta.chain_id,
-                );
-                Some(outcome)
-            }
-            Err(e) => {
-                eprintln!("[restore] ERROR: {}", e);
-                eprintln!(
-                    "[restore] qbind-node refuses to start because the requested snapshot \
+        Ok(None) => {
+            eprintln!("[restore] no --restore-from-snapshot requested; normal startup.");
+            None
+        }
+        Ok(Some(outcome)) => {
+            eprintln!(
+                "[restore] OK: restored from snapshot height={} chain_id=0x{:016x}",
+                outcome.meta.height, outcome.meta.chain_id,
+            );
+            Some(outcome)
+        }
+        Err(e) => {
+            eprintln!("[restore] ERROR: {}", e);
+            eprintln!(
+                "[restore] qbind-node refuses to start because the requested snapshot \
                      restore could not be honestly applied. See \
                      docs/ops/QBIND_BACKUP_AND_RECOVERY_BASELINE.md and \
                      docs/whitepaper/contradiction.md C4 (B3)."
-                );
-                std::process::exit(1);
-            }
-        };
+            );
+            std::process::exit(1);
+        }
+    };
 
     // Translate the (optional) restore outcome into a consensus baseline.
     // Today this uses only `meta.height` (as the consensus monotonicity
@@ -2563,38 +2553,36 @@ async fn main() {
         }
         // Optional local-leaf bytes drive the Run 061 / Run 063 self-
         // checks. Same loader as the live path so the verdict matches.
-        let leaf_credentials_opt = match (
-            args.p2p_leaf_cert.as_ref(),
-            args.p2p_leaf_cert_key.as_ref(),
-        ) {
-            (Some(cert), Some(sk)) => {
-                let paths = PqcLeafCredentialPaths {
-                    cert_path: cert.clone(),
-                    kem_sk_path: sk.clone(),
-                };
-                match paths.load() {
-                    Ok(creds) => Some(creds),
-                    Err(e) => {
-                        eprintln!(
+        let leaf_credentials_opt =
+            match (args.p2p_leaf_cert.as_ref(), args.p2p_leaf_cert_key.as_ref()) {
+                (Some(cert), Some(sk)) => {
+                    let paths = PqcLeafCredentialPaths {
+                        cert_path: cert.clone(),
+                        kem_sk_path: sk.clone(),
+                    };
+                    match paths.load() {
+                        Ok(creds) => Some(creds),
+                        Err(e) => {
+                            eprintln!(
                             "[binary] FATAL: --p2p-trust-bundle-reload-check {} could not load \
                              local PQC leaf credentials for the Run 061/063 self-checks: {}. \
                              See docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_069.md.",
                             candidate_path.display(),
                             e
                         );
-                        std::process::exit(1);
+                            std::process::exit(1);
+                        }
                     }
                 }
-            }
-            (None, None) => None,
-            _ => {
-                eprintln!(
-                    "[binary] FATAL: --p2p-leaf-cert and --p2p-leaf-cert-key must be set \
+                (None, None) => None,
+                _ => {
+                    eprintln!(
+                        "[binary] FATAL: --p2p-leaf-cert and --p2p-leaf-cert-key must be set \
                      together (--p2p-trust-bundle-reload-check inherits the same precondition)."
-                );
-                std::process::exit(1);
-            }
-        };
+                    );
+                    std::process::exit(1);
+                }
+            };
         // Anti-rollback persistence parity with startup: TestNet/MainNet
         // require --data-dir so the candidate's sequence can be peeked
         // against the persisted record.
@@ -2603,9 +2591,7 @@ async fn main() {
             .as_ref()
             .map(|d| qbind_node::pqc_trust_sequence::sequence_file_path(d));
         let seq_path_ref = seq_path_buf.as_deref();
-        if seq_path_ref.is_none()
-            && !matches!(config.environment, NetworkEnvironment::Devnet)
-        {
+        if seq_path_ref.is_none() && !matches!(config.environment, NetworkEnvironment::Devnet) {
             eprintln!(
                 "[binary] FATAL: --p2p-trust-bundle-reload-check {} on environment={} requires \
                  --data-dir so the candidate's sequence can be peeked against the persisted \
@@ -2647,8 +2633,9 @@ async fn main() {
             current_height: Some(activation_current_height),
             current_epoch: activation_epoch_source.as_option(),
         };
-        let local_leaf_bytes_opt =
-            leaf_credentials_opt.as_ref().map(|c| c.cert_bytes.as_slice());
+        let local_leaf_bytes_opt = leaf_credentials_opt
+            .as_ref()
+            .map(|c| c.cert_bytes.as_slice());
         let inputs = qbind_node::pqc_trust_reload::ReloadCheckInputs {
             candidate_path: candidate_path.as_path(),
             environment: config.environment,
@@ -2688,17 +2675,18 @@ async fn main() {
             );
             match build_run_105_reload_check_context(&args, &config) {
                 Ok(ctx_data) => {
-                    let result = qbind_node::pqc_trust_reload::validate_candidate_bundle_with_ratification(
-                        inputs,
-                        &qbind_node::pqc_trust_reload::RatificationEnforcementContext {
-                            authority: &ctx_data.authority,
-                            expected_genesis_hash: &ctx_data.canonical_hash,
-                            expected_environment_policy: ctx_data.env_policy,
-                            expected_chain_id_str: &ctx_data.chain_id_str,
-                            ratification: ctx_data.ratification.as_ref(),
-                            policy: ctx_data.policy,
-                        },
-                    );
+                    let result =
+                        qbind_node::pqc_trust_reload::validate_candidate_bundle_with_ratification(
+                            inputs,
+                            &qbind_node::pqc_trust_reload::RatificationEnforcementContext {
+                                authority: &ctx_data.authority,
+                                expected_genesis_hash: &ctx_data.canonical_hash,
+                                expected_environment_policy: ctx_data.env_policy,
+                                expected_chain_id_str: &ctx_data.chain_id_str,
+                                ratification: ctx_data.ratification.as_ref(),
+                                policy: ctx_data.policy,
+                            },
+                        );
                     (result, Some(ctx_data))
                 }
                 Err(reason) => {
@@ -2722,7 +2710,10 @@ async fn main() {
                 gate_decision.label(),
                 config.environment
             );
-            (qbind_node::pqc_trust_reload::validate_candidate_bundle(inputs), None)
+            (
+                qbind_node::pqc_trust_reload::validate_candidate_bundle(inputs),
+                None,
+            )
         };
         match reload_check_result {
             Ok(candidate) => {
@@ -2943,37 +2934,35 @@ async fn main() {
 
         // Optional local-leaf bytes drive the Run 061 / Run 063 self-
         // checks. Same loader as the live path so the verdict matches.
-        let leaf_credentials_opt = match (
-            args.p2p_leaf_cert.as_ref(),
-            args.p2p_leaf_cert_key.as_ref(),
-        ) {
-            (Some(cert), Some(sk)) => {
-                let paths = PqcLeafCredentialPaths {
-                    cert_path: cert.clone(),
-                    kem_sk_path: sk.clone(),
-                };
-                match paths.load() {
-                    Ok(creds) => Some(creds),
-                    Err(e) => {
-                        eprintln!(
-                            "[binary] FATAL: {}",
-                            Run077RefusalReason::LeafCredentialLoadError {
-                                message: e.to_string(),
-                            }
-                        );
-                        std::process::exit(1);
+        let leaf_credentials_opt =
+            match (args.p2p_leaf_cert.as_ref(), args.p2p_leaf_cert_key.as_ref()) {
+                (Some(cert), Some(sk)) => {
+                    let paths = PqcLeafCredentialPaths {
+                        cert_path: cert.clone(),
+                        kem_sk_path: sk.clone(),
+                    };
+                    match paths.load() {
+                        Ok(creds) => Some(creds),
+                        Err(e) => {
+                            eprintln!(
+                                "[binary] FATAL: {}",
+                                Run077RefusalReason::LeafCredentialLoadError {
+                                    message: e.to_string(),
+                                }
+                            );
+                            std::process::exit(1);
+                        }
                     }
                 }
-            }
-            (None, None) => None,
-            _ => {
-                eprintln!(
-                    "[binary] FATAL: {}",
-                    Run077RefusalReason::LeafCredentialFlagsUnpaired
-                );
-                std::process::exit(1);
-            }
-        };
+                (None, None) => None,
+                _ => {
+                    eprintln!(
+                        "[binary] FATAL: {}",
+                        Run077RefusalReason::LeafCredentialFlagsUnpaired
+                    );
+                    std::process::exit(1);
+                }
+            };
 
         // Anti-rollback persistence parity with Run 069: TestNet /
         // MainNet require `--data-dir`. The on-disk sequence record
@@ -2983,9 +2972,7 @@ async fn main() {
             .as_ref()
             .map(|d| qbind_node::pqc_trust_sequence::sequence_file_path(d));
         let seq_path_ref = seq_path_buf.as_deref();
-        if seq_path_ref.is_none()
-            && !matches!(config.environment, NetworkEnvironment::Devnet)
-        {
+        if seq_path_ref.is_none() && !matches!(config.environment, NetworkEnvironment::Devnet) {
             eprintln!(
                 "[binary] FATAL: {}",
                 Run077RefusalReason::DataDirRequiredOnEnvironment {
@@ -3050,8 +3037,9 @@ async fn main() {
             current_height: Some(activation_current_height),
             current_epoch: activation_epoch_source.as_option(),
         };
-        let local_leaf_bytes_opt =
-            leaf_credentials_opt.as_ref().map(|c| c.cert_bytes.as_slice());
+        let local_leaf_bytes_opt = leaf_credentials_opt
+            .as_ref()
+            .map(|c| c.cert_bytes.as_slice());
 
         // No real `/metrics` HTTP server is bound at this point —
         // the process exits before `metrics::serve_metrics_http` is
@@ -3282,7 +3270,6 @@ async fn main() {
         }
     }
 
-
     // Run 078 — disabled-by-default P2P wire receive-path banner.
     //
     // This block is positioned AFTER the Run 077 binary-facing
@@ -3341,7 +3328,8 @@ async fn main() {
     // default peer-candidate wire publisher.
     match (
         args.p2p_trust_bundle_peer_candidate_wire_publish_enabled,
-        args.p2p_trust_bundle_peer_candidate_wire_publish_path.as_ref(),
+        args.p2p_trust_bundle_peer_candidate_wire_publish_path
+            .as_ref(),
     ) {
         (true, Some(_)) => {}
         (true, None) => {
@@ -3520,9 +3508,7 @@ async fn main() {
         {
             use qbind_node::pqc_peer_candidate_apply::PeerDrivenApplyPolicy;
             let policy = match config.environment {
-                qbind_types::NetworkEnvironment::Devnet => {
-                    PeerDrivenApplyPolicy::devnet_enabled()
-                }
+                qbind_types::NetworkEnvironment::Devnet => PeerDrivenApplyPolicy::devnet_enabled(),
                 qbind_types::NetworkEnvironment::Testnet => {
                     PeerDrivenApplyPolicy::testnet_enabled()
                 }
@@ -3659,9 +3645,7 @@ async fn main() {
                 PeerDrivenApplyDrain, PeerDrivenDrainPolicy,
             };
             let drain_policy = match config.environment {
-                qbind_types::NetworkEnvironment::Devnet => {
-                    PeerDrivenDrainPolicy::devnet_enabled()
-                }
+                qbind_types::NetworkEnvironment::Devnet => PeerDrivenDrainPolicy::devnet_enabled(),
                 qbind_types::NetworkEnvironment::Testnet => {
                     PeerDrivenDrainPolicy::testnet_enabled()
                 }
@@ -3787,12 +3771,10 @@ async fn main() {
                  governance / KMS / HSM unimplemented; signing-key rotation/revocation \
                  lifecycle open; full C4 open; C5 open. See \
                  docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_152.md.",
-                _binary_reachable_plumbing[0],
-                _binary_reachable_plumbing[1],
+                _binary_reachable_plumbing[0], _binary_reachable_plumbing[1],
             );
         }
     }
-
 
     // Run 073 — production adapter wiring (composes Run 069
     // validation + Run 070 apply contract + Run 071
@@ -3935,47 +3917,43 @@ async fn main() {
             );
             std::process::exit(1);
         }
-        let leaf_credentials_opt = match (
-            args.p2p_leaf_cert.as_ref(),
-            args.p2p_leaf_cert_key.as_ref(),
-        ) {
-            (Some(cert), Some(sk)) => {
-                let paths = PqcLeafCredentialPaths {
-                    cert_path: cert.clone(),
-                    kem_sk_path: sk.clone(),
-                };
-                match paths.load() {
-                    Ok(creds) => Some(creds),
-                    Err(e) => {
-                        eprintln!(
+        let leaf_credentials_opt =
+            match (args.p2p_leaf_cert.as_ref(), args.p2p_leaf_cert_key.as_ref()) {
+                (Some(cert), Some(sk)) => {
+                    let paths = PqcLeafCredentialPaths {
+                        cert_path: cert.clone(),
+                        kem_sk_path: sk.clone(),
+                    };
+                    match paths.load() {
+                        Ok(creds) => Some(creds),
+                        Err(e) => {
+                            eprintln!(
                             "[binary] FATAL: --p2p-trust-bundle-reload-apply-path {} could not \
                              load local PQC leaf credentials for the Run 061/063 self-checks: \
                              {}. See docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_070.md.",
                             candidate_path.display(),
                             e
                         );
-                        std::process::exit(1);
+                            std::process::exit(1);
+                        }
                     }
                 }
-            }
-            (None, None) => None,
-            _ => {
-                eprintln!(
-                    "[binary] FATAL: --p2p-leaf-cert and --p2p-leaf-cert-key must be set \
+                (None, None) => None,
+                _ => {
+                    eprintln!(
+                        "[binary] FATAL: --p2p-leaf-cert and --p2p-leaf-cert-key must be set \
                      together (--p2p-trust-bundle-reload-apply-path inherits the same \
                      precondition)."
-                );
-                std::process::exit(1);
-            }
-        };
+                    );
+                    std::process::exit(1);
+                }
+            };
         let seq_path_buf = config
             .data_dir
             .as_ref()
             .map(|d| qbind_node::pqc_trust_sequence::sequence_file_path(d));
         let seq_path_ref = seq_path_buf.as_deref();
-        if seq_path_ref.is_none()
-            && !matches!(config.environment, NetworkEnvironment::Devnet)
-        {
+        if seq_path_ref.is_none() && !matches!(config.environment, NetworkEnvironment::Devnet) {
             eprintln!(
                 "[binary] FATAL: --p2p-trust-bundle-reload-apply-path {} on environment={} \
                  requires --data-dir so the candidate's sequence can be peeked against the \
@@ -4017,8 +3995,9 @@ async fn main() {
             current_height: Some(activation_current_height),
             current_epoch: activation_epoch_source.as_option(),
         };
-        let local_leaf_bytes_opt =
-            leaf_credentials_opt.as_ref().map(|c| c.cert_bytes.as_slice());
+        let local_leaf_bytes_opt = leaf_credentials_opt
+            .as_ref()
+            .map(|c| c.cert_bytes.as_slice());
         let inputs = ReloadCheckInputs {
             candidate_path: candidate_path.as_path(),
             environment: config.environment,
@@ -4246,88 +4225,89 @@ async fn main() {
 
                         apply_outcome
                     } else {
-                    // Run 119 — authority-marker accept-and-persist
-                    // preflight. Runs BEFORE the apply pipeline so a
-                    // rollback / same-sequence-equivocation / wrong-
-                    // domain marker fail-closes the operation without
-                    // mutating live trust state or burning a sequence
-                    // number. No-op when:
-                    //   * `--data-dir` is unset (DevNet-only convenience
-                    //     branch — the binary already FATAL-exits if
-                    //     --data-dir is unset on MainNet/TestNet for
-                    //     this CLI path);
-                    //   * the operator-supplied ratification is `None`
-                    //     under `AllowLegacyUnratified` (DevNet
-                    //     legacy ergonomics — no ratified key, so no
-                    //     marker is derivable);
-                    //   * the candidate cannot be pre-loaded (the
-                    //     apply pipeline will surface the precise
-                    //     load error itself).
-                    //
-                    // See docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_119.md.
-                    let marker_decision = match preflight_run_119_marker_decision(
-                        &candidate_path,
-                        config.environment,
-                        config.chain_id(),
-                        now_secs,
-                        &bundle_signing_keys,
-                        &ctx_data,
-                        config.data_dir.as_deref(),
-                        now_secs,
-                    ) {
-                        Ok(opt) => opt,
-                        Err(reason) => {
-                            eprintln!(
-                                "[run-119] FATAL: reload-apply refused by authority-marker \
+                        // Run 119 — authority-marker accept-and-persist
+                        // preflight. Runs BEFORE the apply pipeline so a
+                        // rollback / same-sequence-equivocation / wrong-
+                        // domain marker fail-closes the operation without
+                        // mutating live trust state or burning a sequence
+                        // number. No-op when:
+                        //   * `--data-dir` is unset (DevNet-only convenience
+                        //     branch — the binary already FATAL-exits if
+                        //     --data-dir is unset on MainNet/TestNet for
+                        //     this CLI path);
+                        //   * the operator-supplied ratification is `None`
+                        //     under `AllowLegacyUnratified` (DevNet
+                        //     legacy ergonomics — no ratified key, so no
+                        //     marker is derivable);
+                        //   * the candidate cannot be pre-loaded (the
+                        //     apply pipeline will surface the precise
+                        //     load error itself).
+                        //
+                        // See docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_119.md.
+                        let marker_decision = match preflight_run_119_marker_decision(
+                            &candidate_path,
+                            config.environment,
+                            config.chain_id(),
+                            now_secs,
+                            &bundle_signing_keys,
+                            &ctx_data,
+                            config.data_dir.as_deref(),
+                            now_secs,
+                        ) {
+                            Ok(opt) => opt,
+                            Err(reason) => {
+                                eprintln!(
+                                    "[run-119] FATAL: reload-apply refused by authority-marker \
                                  preflight: {}. Candidate path={}. No live trust apply, no \
                                  sequence write, no session eviction, no metrics mutation, \
                                  no marker write. See \
                                  docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_119.md.",
-                                reason,
-                                candidate_path.display()
+                                    reason,
+                                    candidate_path.display()
+                                );
+                                std::process::exit(1);
+                            }
+                        };
+
+                        let apply_outcome =
+                            apply_validated_candidate_with_previous_and_ratification(
+                                inputs,
+                                &RatificationEnforcementContext {
+                                    authority: &ctx_data.authority,
+                                    expected_genesis_hash: &ctx_data.canonical_hash,
+                                    expected_environment_policy: ctx_data.env_policy,
+                                    expected_chain_id_str: &ctx_data.chain_id_str,
+                                    ratification: ctx_data.ratification.as_ref(),
+                                    policy: ctx_data.policy,
+                                },
+                                ApplyMode::ApplyLive,
+                                Some(&mut apply_ctx),
+                                prev_fp_prefix.clone(),
+                                prev_seq,
                             );
-                            std::process::exit(1);
-                        }
-                    };
 
-                    let apply_outcome = apply_validated_candidate_with_previous_and_ratification(
-                        inputs,
-                        &RatificationEnforcementContext {
-                            authority: &ctx_data.authority,
-                            expected_genesis_hash: &ctx_data.canonical_hash,
-                            expected_environment_policy: ctx_data.env_policy,
-                            expected_chain_id_str: &ctx_data.chain_id_str,
-                            ratification: ctx_data.ratification.as_ref(),
-                            policy: ctx_data.policy,
-                        },
-                        ApplyMode::ApplyLive,
-                        Some(&mut apply_ctx),
-                        prev_fp_prefix.clone(),
-                        prev_seq,
-                    );
-
-                    // Run 119 — persist the previously-accepted marker
-                    // AFTER the existing `commit_sequence` boundary.
-                    // No-op when:
-                    //   * preflight returned `None` (no marker context
-                    //     applicable on this branch);
-                    //   * preflight decision was `Idempotent` (the
-                    //     on-disk marker is bit-for-bit identical to
-                    //     the candidate; rewriting would only update
-                    //     the audit-only `updated_at_unix_secs` field
-                    //     for no operator benefit);
-                    //   * the apply pipeline returned `Err`.
-                    //
-                    // A persist failure here means the trust-bundle
-                    // sequence already advanced and the on-disk
-                    // authority marker is stale-by-one. This is
-                    // intentionally safe per Run 118 §D (the next
-                    // accepted mutation will replay it as an
-                    // `Upgrade`), but the operator MUST be told so we
-                    // exit non-zero and surface the precise reason.
-                    if apply_outcome.is_ok() {
-                        if let Some(decision) = marker_decision.as_ref() {
-                            match qbind_node::pqc_authority_marker_acceptance::persist_accepted_marker_after_commit_boundary(decision) {
+                        // Run 119 — persist the previously-accepted marker
+                        // AFTER the existing `commit_sequence` boundary.
+                        // No-op when:
+                        //   * preflight returned `None` (no marker context
+                        //     applicable on this branch);
+                        //   * preflight decision was `Idempotent` (the
+                        //     on-disk marker is bit-for-bit identical to
+                        //     the candidate; rewriting would only update
+                        //     the audit-only `updated_at_unix_secs` field
+                        //     for no operator benefit);
+                        //   * the apply pipeline returned `Err`.
+                        //
+                        // A persist failure here means the trust-bundle
+                        // sequence already advanced and the on-disk
+                        // authority marker is stale-by-one. This is
+                        // intentionally safe per Run 118 §D (the next
+                        // accepted mutation will replay it as an
+                        // `Upgrade`), but the operator MUST be told so we
+                        // exit non-zero and surface the precise reason.
+                        if apply_outcome.is_ok() {
+                            if let Some(decision) = marker_decision.as_ref() {
+                                match qbind_node::pqc_authority_marker_acceptance::persist_accepted_marker_after_commit_boundary(decision) {
                                 Ok(()) => {
                                     if decision.should_persist() {
                                         eprintln!(
@@ -4360,10 +4340,10 @@ async fn main() {
                                     std::process::exit(1);
                                 }
                             }
+                            }
                         }
-                    }
 
-                    apply_outcome
+                        apply_outcome
                     }
                 }
                 Err(reason) => {
@@ -4469,8 +4449,7 @@ async fn main() {
     //
     // See `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_074.md` and
     // `docs/whitepaper/contradiction.md` C4.
-    if args.p2p_trust_bundle_live_reload_path.is_some()
-        || args.p2p_trust_bundle_live_reload_enabled
+    if args.p2p_trust_bundle_live_reload_path.is_some() || args.p2p_trust_bundle_live_reload_enabled
     {
         match (
             args.p2p_trust_bundle_live_reload_path.as_ref(),
@@ -4615,8 +4594,7 @@ async fn main() {
             qbind_types::NetworkEnvironment::Testnet => "testnet",
             qbind_types::NetworkEnvironment::Mainnet => "mainnet",
         };
-        let chain_id_label =
-            qbind_node::pqc_trust_sequence::chain_id_hex(config.chain_id());
+        let chain_id_label = qbind_node::pqc_trust_sequence::chain_id_hex(config.chain_id());
         node_metrics.set_build_context(env_label, &chain_id_label);
         if let Some(ref dir) = config.data_dir {
             node_metrics.set_data_dir(dir.clone());
@@ -4681,7 +4659,10 @@ async fn main() {
                 opened
             }
             Err(e) => {
-                eprintln!("[binary] FATAL: Run 093 production consensus storage open failed: {}", e);
+                eprintln!(
+                    "[binary] FATAL: Run 093 production consensus storage open failed: {}",
+                    e
+                );
                 eprintln!(
                     "[binary] qbind-node refuses to start because the canonical \
                      <data_dir>/consensus directory could not be honestly opened, \
@@ -4734,7 +4715,10 @@ async fn main() {
                 );
             }
             Err(e) => {
-                eprintln!("[binary] FATAL: Run 097 snapshot epoch parity failed: {}", e);
+                eprintln!(
+                    "[binary] FATAL: Run 097 snapshot epoch parity failed: {}",
+                    e
+                );
                 eprintln!(
                     "[binary] qbind-node refuses to start because the restored \
                      on-disk state cannot be honestly reconciled with the \
@@ -5160,20 +5144,18 @@ async fn run_p2p_node(
     // weakening the pre-bundle invariant.
     let cli_trusted_roots_required = pqc_required && args.p2p_trust_bundle.is_none();
 
-    let mut trusted_roots = match parse_pqc_trusted_root_specs(
-        &args.p2p_trusted_roots,
-        cli_trusted_roots_required,
-    ) {
-        Ok(roots) => roots,
-        Err(e) => {
-            eprintln!(
-                "[binary] FATAL: --p2p-trusted-root parse error: {}. See \
+    let mut trusted_roots =
+        match parse_pqc_trusted_root_specs(&args.p2p_trusted_roots, cli_trusted_roots_required) {
+            Ok(roots) => roots,
+            Err(e) => {
+                eprintln!(
+                    "[binary] FATAL: --p2p-trusted-root parse error: {}. See \
                  docs/whitepaper/contradiction.md C4(c).",
-                e
-            );
-            std::process::exit(1);
-        }
-    };
+                    e
+                );
+                std::process::exit(1);
+            }
+        };
 
     let leaf_credentials = match (args.p2p_leaf_cert.as_ref(), args.p2p_leaf_cert_key.as_ref()) {
         (Some(cert), Some(sk)) => {
@@ -5252,20 +5234,19 @@ async fn run_p2p_node(
     // Run 051: parse the bundle-signing key list once up front so we
     // can both enforce trust separation against `trusted_roots` and
     // surface the gauge for the configured-keys count.
-    let bundle_signing_keys =
-        match qbind_node::pqc_trust_bundle::BundleSigningKeySet::parse_specs(
-            &args.p2p_trust_bundle_signing_keys,
-        ) {
-            Ok(set) => set,
-            Err(e) => {
-                eprintln!(
-                    "[binary] FATAL: --p2p-trust-bundle-signing-key parse error: {}. \
+    let bundle_signing_keys = match qbind_node::pqc_trust_bundle::BundleSigningKeySet::parse_specs(
+        &args.p2p_trust_bundle_signing_keys,
+    ) {
+        Ok(set) => set,
+        Err(e) => {
+            eprintln!(
+                "[binary] FATAL: --p2p-trust-bundle-signing-key parse error: {}. \
                      See docs/whitepaper/contradiction.md C4 (signed root distribution).",
-                    e
-                );
-                std::process::exit(1);
-            }
-        };
+                e
+            );
+            std::process::exit(1);
+        }
+    };
 
     // Trust-separation between bundle-signing keys and transport
     // root IDs (CLI `--p2p-trusted-root` set). A separate check
@@ -5361,8 +5342,8 @@ async fn run_p2p_node(
                 .as_ref()
                 .map(|b| b.snapshot_height)
                 .unwrap_or(0);
-            let activation_epoch_source = match
-                qbind_node::pqc_trust_activation_epoch::activation_epoch_source_from_storage(
+            let activation_epoch_source =
+                match qbind_node::pqc_trust_activation_epoch::activation_epoch_source_from_storage(
                     consensus_storage.as_ref(),
                 ) {
                     Ok(src) => src,
@@ -6140,16 +6121,14 @@ async fn run_p2p_node(
                 loaded.configured_revocations_total() as u64,
             );
             p2p.set_pqc_trust_bundle_revocations_active_total(
-                loaded.active_revocations_total() as u64,
+                loaded.active_revocations_total() as u64
             );
             p2p.set_pqc_trust_bundle_revocations_pending_total(
-                loaded.pending_revocations_total() as u64,
+                loaded.pending_revocations_total() as u64
             );
-            p2p.set_pqc_trust_bundle_revocations_root_active(
-                loaded.revoked_root_count() as u64,
-            );
+            p2p.set_pqc_trust_bundle_revocations_root_active(loaded.revoked_root_count() as u64);
             p2p.set_pqc_trust_bundle_revocations_root_pending(
-                loaded.pending_revoked_root_count() as u64,
+                loaded.pending_revoked_root_count() as u64
             );
             p2p.set_pqc_trust_bundle_revocations_leaf_active(
                 loaded.revoked_leaf_fingerprint_count() as u64,
@@ -6324,37 +6303,37 @@ async fn run_p2p_node(
             &loaded.revoked_root_ids,
             &loaded.fingerprint,
         ) {
-                Ok(local_root_id) => {
-                    let local_root_hex =
-                        qbind_node::pqc_trust_bundle::cert_leaf_fingerprint_hex(&local_root_id);
-                    eprintln!(
-                        "[binary] Run 063: local-leaf issuer-root startup self-check passed \
+            Ok(local_root_id) => {
+                let local_root_hex =
+                    qbind_node::pqc_trust_bundle::cert_leaf_fingerprint_hex(&local_root_id);
+                eprintln!(
+                    "[binary] Run 063: local-leaf issuer-root startup self-check passed \
                          (local_issuer_root_id={}.. bundle_fp={}.. \
                          active_revoked_root_ids={})",
-                        &local_root_hex[..8],
-                        &loaded.fingerprint_hex()[..8],
-                        loaded.revoked_root_count(),
-                    );
-                }
-                Err(e) => {
-                    use qbind_node::pqc_trust_bundle::LocalLeafIssuerRootSelfCheckError;
-                    // We deliberately do NOT bump
-                    // `qbind_p2p_pqc_cert_verify_rejected_revoked_total`
-                    // here: that family is the Run 052 peer-handshake
-                    // contract and must remain a handshake-only signal.
-                    // A dedicated startup metric is not added in Run
-                    // 063 because the node exits before `/metrics` is
-                    // bound by the live HTTP path, so a counter would
-                    // never be scrapeable — adding it would be
-                    // misleading per task §4 (metrics/logging).
-                    match &e {
-                        LocalLeafIssuerRootSelfCheckError::IssuerRootRevoked {
-                            root_id_prefix,
-                            leaf_fingerprint_prefix,
-                            bundle_fingerprint_prefix,
-                        } => {
-                            eprintln!(
-                                "[binary] FATAL: Run 063 local leaf certificate issuer root revoked: \
+                    &local_root_hex[..8],
+                    &loaded.fingerprint_hex()[..8],
+                    loaded.revoked_root_count(),
+                );
+            }
+            Err(e) => {
+                use qbind_node::pqc_trust_bundle::LocalLeafIssuerRootSelfCheckError;
+                // We deliberately do NOT bump
+                // `qbind_p2p_pqc_cert_verify_rejected_revoked_total`
+                // here: that family is the Run 052 peer-handshake
+                // contract and must remain a handshake-only signal.
+                // A dedicated startup metric is not added in Run
+                // 063 because the node exits before `/metrics` is
+                // bound by the live HTTP path, so a counter would
+                // never be scrapeable — adding it would be
+                // misleading per task §4 (metrics/logging).
+                match &e {
+                    LocalLeafIssuerRootSelfCheckError::IssuerRootRevoked {
+                        root_id_prefix,
+                        leaf_fingerprint_prefix,
+                        bundle_fingerprint_prefix,
+                    } => {
+                        eprintln!(
+                            "[binary] FATAL: Run 063 local leaf certificate issuer root revoked: \
                                  the local --p2p-leaf-cert was issued by transport root id ({}..) \
                                  which appears in the active revoked_root_ids set of the loaded \
                                  trust bundle (bundle fp {}.., local leaf fp {}..). Refusing to \
@@ -6363,26 +6342,26 @@ async fn run_p2p_node(
                                  docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_063.md and \
                                  docs/whitepaper/contradiction.md C4 (signed root \
                                  distribution).",
-                                root_id_prefix, bundle_fingerprint_prefix, leaf_fingerprint_prefix,
-                            );
-                            std::process::exit(1);
-                        }
-                        LocalLeafIssuerRootSelfCheckError::DecodeFailed => {
-                            // Unreachable on this path —
-                            // `PqcLeafCredentialPaths::load` already
-                            // validated the cert shape. Preserve
-                            // fail-closed behaviour anyway.
-                            eprintln!(
-                                "[binary] FATAL: Run 063 local --p2p-leaf-cert could not be \
+                            root_id_prefix, bundle_fingerprint_prefix, leaf_fingerprint_prefix,
+                        );
+                        std::process::exit(1);
+                    }
+                    LocalLeafIssuerRootSelfCheckError::DecodeFailed => {
+                        // Unreachable on this path —
+                        // `PqcLeafCredentialPaths::load` already
+                        // validated the cert shape. Preserve
+                        // fail-closed behaviour anyway.
+                        eprintln!(
+                            "[binary] FATAL: Run 063 local --p2p-leaf-cert could not be \
                                  decoded as NetworkDelegationCert during startup issuer-root \
                                  self-check. Refusing to start P2P. See \
                                  docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_063.md."
-                            );
-                            std::process::exit(1);
-                        }
+                        );
+                        std::process::exit(1);
                     }
                 }
             }
+        }
     }
 
     // Run 074: extract the local leaf cert bytes (if any) NOW,
@@ -6390,9 +6369,8 @@ async fn run_p2p_node(
     // We can't keep a borrow because the SIGHUP task lives across
     // an await boundary; an owned `Option<Vec<u8>>` is the smallest
     // clone we can make.
-    let live_reload_leaf_bytes: Option<Vec<u8>> = leaf_credentials
-        .as_ref()
-        .map(|c| c.cert_bytes.clone());
+    let live_reload_leaf_bytes: Option<Vec<u8>> =
+        leaf_credentials.as_ref().map(|c| c.cert_bytes.clone());
 
     let pqc_config = PqcStaticRootConfig {
         mode: pqc_root_mode,
@@ -6471,10 +6449,9 @@ async fn run_p2p_node(
     // wrapper here merely Arc-bumps the shared lock).
     let live_for_reload_apply: Option<qbind_node::pqc_live_trust::LivePqcTrustState> =
         trust_bundle_loaded.as_ref().map(|loaded| {
-            let live =
-                qbind_node::pqc_live_trust::LivePqcTrustState::initialize_from_loaded_bundle(
-                    loaded,
-                );
+            let live = qbind_node::pqc_live_trust::LivePqcTrustState::initialize_from_loaded_bundle(
+                loaded,
+            );
             eprintln!(
                 "[binary] Run 071: live PQC trust-state initialized \
                  (env={} sequence={} fingerprint={} active_roots={} \
@@ -6529,7 +6506,9 @@ async fn run_p2p_node(
     // SAME `Arc<Mutex<PeerCandidateStagingQueue>>` the live inbound
     // `0x05` dispatcher stages into. No second queue, no copy.
     let mut drain_once_staging_queue: Option<
-        std::sync::Arc<parking_lot::Mutex<qbind_node::pqc_peer_candidate_staging::PeerCandidateStagingQueue>>,
+        std::sync::Arc<
+            parking_lot::Mutex<qbind_node::pqc_peer_candidate_staging::PeerCandidateStagingQueue>,
+        >,
     > = None;
     let builder = if args.p2p_trust_bundle_peer_candidate_wire_validation_enabled
         || args.p2p_trust_bundle_peer_candidate_propagation_enabled
@@ -6541,9 +6520,7 @@ async fn run_p2p_node(
         };
         use qbind_node::pqc_trust_peer_candidate::PeerCandidateConfig;
         let metrics_arc = node_metrics.p2p_arc();
-        let sink: Arc<dyn PeerCandidateWireFrameSink> = match trust_bundle_loaded
-            .as_ref()
-        {
+        let sink: Arc<dyn PeerCandidateWireFrameSink> = match trust_bundle_loaded.as_ref() {
             Some(loaded) => {
                 // Use the same scratch directory shape Run 077 /
                 // Run 070 helpers use: a process-scoped temp dir.
@@ -6551,10 +6528,8 @@ async fn run_p2p_node(
                 // temp candidate files here; never the persistent
                 // sequence file (that path is read-only on the
                 // wire-receive path).
-                let scratch_dir = std::env::temp_dir().join(format!(
-                    "qbind-run079-wire-scratch-{}",
-                    std::process::id()
-                ));
+                let scratch_dir = std::env::temp_dir()
+                    .join(format!("qbind-run079-wire-scratch-{}", std::process::id()));
                 if let Err(e) = std::fs::create_dir_all(&scratch_dir) {
                     eprintln!(
                         "[binary] Run 079: FATAL: scratch dir create failed at {}: {}. \
@@ -6597,9 +6572,7 @@ async fn run_p2p_node(
                         sequence_persistence_path: config
                             .data_dir
                             .as_ref()
-                            .map(|d| {
-                                qbind_node::pqc_trust_sequence::sequence_file_path(d)
-                            }),
+                            .map(|d| qbind_node::pqc_trust_sequence::sequence_file_path(d)),
                         // Local leaf bytes are optional on the Run
                         // 076/077/078 receive path (the local-leaf
                         // self-check only fires when the operator
@@ -6709,7 +6682,10 @@ async fn run_p2p_node(
                                 );
                             if gate_decision.should_invoke() {
                                 config.data_dir.as_ref().map(|d| {
-                                    let p = qbind_node::pqc_authority_state::authority_state_file_path(d);
+                                    let p =
+                                        qbind_node::pqc_authority_state::authority_state_file_path(
+                                            d,
+                                        );
                                     eprintln!(
                                         "[run-123] live 0x05 authority-marker validation-only \
                                          check ARMED (marker_path={}).",
@@ -6740,13 +6716,11 @@ async fn run_p2p_node(
                         // reload-apply. See `task/RUN_147_TASK.txt`,
                         // `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_147.md`,
                         // and `docs/protocol/QBIND_PEER_DRIVEN_TRUST_BUNDLE_APPLY_SAFETY.md`.
-                        staging_queue: if args
-                            .p2p_trust_bundle_peer_candidate_staging_enabled
-                        {
+                        staging_queue: if args.p2p_trust_bundle_peer_candidate_staging_enabled {
+                            use parking_lot::Mutex;
                             use qbind_node::pqc_peer_candidate_staging::{
                                 PeerCandidateStagingQueue, PeerDrivenStagingPolicy,
                             };
-                            use parking_lot::Mutex;
                             if matches!(
                                 config.environment,
                                 qbind_types::NetworkEnvironment::Mainnet
@@ -6914,8 +6888,8 @@ async fn run_p2p_node(
         && args.p2p_trust_bundle_peer_candidate_wire_publish_once
     {
         use qbind_node::pqc_peer_candidate_wire::{
-            wire_publish_log_line, LivePeerCandidateWirePublisher,
-            PeerCandidateWireFrameSender, PeerCandidateWirePublishConfig,
+            wire_publish_log_line, LivePeerCandidateWirePublisher, PeerCandidateWireFrameSender,
+            PeerCandidateWirePublishConfig,
         };
         let sender: Arc<dyn PeerCandidateWireFrameSender> = node_context.p2p_service.clone();
         let publisher =
@@ -6993,59 +6967,59 @@ async fn run_p2p_node(
             let drain_live_state = live_for_reload_apply.as_ref().cloned();
 
             if let Some(drain_live_state) = drain_live_state {
+                let evictor: Arc<dyn qbind_node::p2p_session_eviction::P2pSessionEvictor> =
+                    node_context.p2p_service.clone();
 
-            let evictor: Arc<dyn qbind_node::p2p_session_eviction::P2pSessionEvictor> =
-                node_context.p2p_service.clone();
+                let seq_path = config
+                    .data_dir
+                    .as_ref()
+                    .map(|d| qbind_node::pqc_trust_sequence::sequence_file_path(d));
 
-            let seq_path = config
-                .data_dir
-                .as_ref()
-                .map(|d| qbind_node::pqc_trust_sequence::sequence_file_path(d));
+                let live_arc = std::sync::Arc::new(drain_live_state);
+                let apply_ctx =
+                    qbind_node::pqc_live_trust_apply::ProductionLiveTrustApplyContext::new(
+                        live_arc,
+                        evictor,
+                        config.environment,
+                        config.chain_id(),
+                        seq_path.clone(),
+                        now_secs,
+                    );
 
-            let live_arc = std::sync::Arc::new(drain_live_state);
-            let apply_ctx = qbind_node::pqc_live_trust_apply::ProductionLiveTrustApplyContext::new(
-                live_arc,
-                evictor,
-                config.environment,
-                config.chain_id(),
-                seq_path.clone(),
-                now_secs,
-            );
+                // Scratch directory for the drain builder's candidate material.
+                let scratch_dir = std::env::temp_dir()
+                    .join(format!("qbind-run153-drain-scratch-{}", std::process::id()));
+                let _ = std::fs::create_dir_all(&scratch_dir);
+                let candidate_path = scratch_dir.join("drain_candidate.bundle");
 
-            // Scratch directory for the drain builder's candidate material.
-            let scratch_dir = std::env::temp_dir().join(format!(
-                "qbind-run153-drain-scratch-{}",
-                std::process::id()
-            ));
-            let _ = std::fs::create_dir_all(&scratch_dir);
-            let candidate_path = scratch_dir.join("drain_candidate.bundle");
+                let (prev_fp_prefix, prev_seq) = {
+                    let snap = apply_ctx.snapshot_previous_metadata();
+                    snap
+                };
 
-            let (prev_fp_prefix, prev_seq) = {
-                let snap = apply_ctx.snapshot_previous_metadata();
-                snap
-            };
+                // Construct the production drain invocation builder.
+                let mut invocation_builder =
+                    qbind_node::pqc_peer_candidate_drain::ProductionDrainInvocationBuilder::new(
+                        candidate_path,
+                        bundle_signing_keys.clone(),
+                        seq_path,
+                        config.environment,
+                        config.chain_id(),
+                        now_secs,
+                        qbind_node::pqc_trust_activation::ActivationContext::height_only(0),
+                        None, // local_leaf_cert_bytes
+                        apply_ctx,
+                        prev_fp_prefix,
+                        prev_seq,
+                        3600, // max_candidate_age_secs (1 hour)
+                        now_secs,
+                    );
 
-            // Construct the production drain invocation builder.
-            let mut invocation_builder = qbind_node::pqc_peer_candidate_drain::ProductionDrainInvocationBuilder::new(
-                candidate_path,
-                bundle_signing_keys.clone(),
-                seq_path,
-                config.environment,
-                config.chain_id(),
-                now_secs,
-                qbind_node::pqc_trust_activation::ActivationContext::height_only(0),
-                None, // local_leaf_cert_bytes
-                apply_ctx,
-                prev_fp_prefix,
-                prev_seq,
-                3600, // max_candidate_age_secs (1 hour)
-                now_secs,
-            );
-
-            // Construct the v2 marker coordinator (or no-op if v2
-            // ratification is unavailable).
-            let mut marker_coordinator: Box<dyn qbind_node::pqc_peer_candidate_apply::V2MarkerCoordinator> =
-                match build_run_105_reload_check_context(&args, &config) {
+                // Construct the v2 marker coordinator (or no-op if v2
+                // ratification is unavailable).
+                let mut marker_coordinator: Box<
+                    dyn qbind_node::pqc_peer_candidate_apply::V2MarkerCoordinator,
+                > = match build_run_105_reload_check_context(&args, &config) {
                     Ok(ctx_data) => {
                         if let Some(ratification_v2) = ctx_data.ratification_v2 {
                             use qbind_ledger::{
@@ -7135,9 +7109,7 @@ async fn run_p2p_node(
                                 "[run-153] drain-once: no v2 ratification sidecar available. \
                                  Using NoV2MarkerCoordinator."
                             );
-                            Box::new(
-                                qbind_node::pqc_peer_candidate_apply::NoV2MarkerCoordinator,
-                            )
+                            Box::new(qbind_node::pqc_peer_candidate_apply::NoV2MarkerCoordinator)
                         }
                     }
                     Err(e) => {
@@ -7146,81 +7118,77 @@ async fn run_p2p_node(
                              {}. Using NoV2MarkerCoordinator.",
                             e
                         );
-                        Box::new(
-                            qbind_node::pqc_peer_candidate_apply::NoV2MarkerCoordinator,
-                        )
+                        Box::new(qbind_node::pqc_peer_candidate_apply::NoV2MarkerCoordinator)
                     }
                 };
 
-            // Construct drain policy and apply policy.
-            use qbind_node::pqc_peer_candidate_drain::{
-                PeerDrivenApplyDrain, PeerDrivenDrainPolicy,
-            };
-            use qbind_node::pqc_peer_candidate_apply::{
-                PeerDrivenApplyPolicy, PeerDrivenApplyRuntimeDomain,
-            };
-            let drain_policy = match config.environment {
-                qbind_types::NetworkEnvironment::Devnet => {
-                    PeerDrivenDrainPolicy::devnet_enabled()
-                }
-                qbind_types::NetworkEnvironment::Testnet => {
-                    PeerDrivenDrainPolicy::testnet_enabled()
-                }
-                qbind_types::NetworkEnvironment::Mainnet => {
-                    eprintln!(
-                        "[run-153] FATAL: MainNet peer-driven apply drain refused \
+                // Construct drain policy and apply policy.
+                use qbind_node::pqc_peer_candidate_apply::{
+                    PeerDrivenApplyPolicy, PeerDrivenApplyRuntimeDomain,
+                };
+                use qbind_node::pqc_peer_candidate_drain::{
+                    PeerDrivenApplyDrain, PeerDrivenDrainPolicy,
+                };
+                let drain_policy = match config.environment {
+                    qbind_types::NetworkEnvironment::Devnet => {
+                        PeerDrivenDrainPolicy::devnet_enabled()
+                    }
+                    qbind_types::NetworkEnvironment::Testnet => {
+                        PeerDrivenDrainPolicy::testnet_enabled()
+                    }
+                    qbind_types::NetworkEnvironment::Mainnet => {
+                        eprintln!(
+                            "[run-153] FATAL: MainNet peer-driven apply drain refused \
                          unconditionally at drain-once invocation (defensive guard)."
-                    );
-                    std::process::exit(1);
-                }
-            };
-            let apply_policy = match config.environment {
-                qbind_types::NetworkEnvironment::Devnet => {
-                    PeerDrivenApplyPolicy::devnet_enabled()
-                }
-                qbind_types::NetworkEnvironment::Testnet => {
-                    PeerDrivenApplyPolicy::testnet_enabled()
-                }
-                qbind_types::NetworkEnvironment::Mainnet => {
-                    eprintln!(
-                        "[run-153] FATAL: MainNet peer-driven apply policy refused \
+                        );
+                        std::process::exit(1);
+                    }
+                };
+                let apply_policy = match config.environment {
+                    qbind_types::NetworkEnvironment::Devnet => {
+                        PeerDrivenApplyPolicy::devnet_enabled()
+                    }
+                    qbind_types::NetworkEnvironment::Testnet => {
+                        PeerDrivenApplyPolicy::testnet_enabled()
+                    }
+                    qbind_types::NetworkEnvironment::Mainnet => {
+                        eprintln!(
+                            "[run-153] FATAL: MainNet peer-driven apply policy refused \
                          unconditionally at drain-once invocation (defensive guard)."
-                    );
-                    std::process::exit(1);
-                }
-            };
-            let runtime_domain = PeerDrivenApplyRuntimeDomain::new(
-                config.environment,
-                qbind_node::pqc_trust_sequence::chain_id_hex(config.chain_id()),
-            );
-            let drain = PeerDrivenApplyDrain::new();
+                        );
+                        std::process::exit(1);
+                    }
+                };
+                let runtime_domain = PeerDrivenApplyRuntimeDomain::new(
+                    config.environment,
+                    qbind_node::pqc_trust_sequence::chain_id_hex(config.chain_id()),
+                );
+                let drain = PeerDrivenApplyDrain::new();
 
-            eprintln!(
-                "[run-153] drain-once: invoking try_drain_once_shared (env={:?}, \
+                eprintln!(
+                    "[run-153] drain-once: invoking try_drain_once_shared (env={:?}, \
                  drain_enabled={}, apply_enabled={}).",
-                config.environment,
-                drain_policy.enabled,
-                apply_policy.enabled,
-            );
+                    config.environment, drain_policy.enabled, apply_policy.enabled,
+                );
 
-            let outcome = qbind_node::pqc_peer_candidate_drain::try_drain_once_shared(
-                &drain,
-                shared_queue,
-                &mut invocation_builder,
-                marker_coordinator.as_mut(),
-                &drain_policy,
-                &apply_policy,
-                &runtime_domain,
-                now_secs,
-            );
+                let outcome = qbind_node::pqc_peer_candidate_drain::try_drain_once_shared(
+                    &drain,
+                    shared_queue,
+                    &mut invocation_builder,
+                    marker_coordinator.as_mut(),
+                    &drain_policy,
+                    &apply_policy,
+                    &runtime_domain,
+                    now_secs,
+                );
 
-            eprintln!(
-                "[run-153] drain-once outcome: {:?}. No autonomous repeat drain; \
+                eprintln!(
+                    "[run-153] drain-once outcome: {:?}. No autonomous repeat drain; \
                  no automatic apply on receipt; MainNet refused unconditionally; \
                  governance / KMS / HSM unimplemented; signing-key rotation/revocation \
                  lifecycle open; full C4 open; C5 open.",
-                outcome
-            );
+                    outcome
+                );
             } else {
                 eprintln!(
                     "[run-153] drain-once skipped: no baseline LivePqcTrustState is \
@@ -8044,56 +8012,57 @@ fn spawn_run074_live_reload_task(
         config.environment,
         args.p2p_trust_bundle_ratification_enforcement_enabled,
     );
-    let ratification_cfg_opt: Option<qbind_node::pqc_live_trust_reload::LiveReloadRatificationConfig> =
-        if gate_decision.should_invoke() {
-            match build_run_105_reload_check_context(args, config) {
-                Ok(ctx_data) => {
-                    eprintln!(
-                        "[run-114] SIGHUP live reload ratification gate INVOKED \
+    let ratification_cfg_opt: Option<
+        qbind_node::pqc_live_trust_reload::LiveReloadRatificationConfig,
+    > = if gate_decision.should_invoke() {
+        match build_run_105_reload_check_context(args, config) {
+            Ok(ctx_data) => {
+                eprintln!(
+                    "[run-114] SIGHUP live reload ratification gate INVOKED \
                          (policy={}, env={:?}). On every SIGHUP the ratification \
                          sidecar JSON is re-read and verified BEFORE any snapshot, \
                          swap, eviction, or sequence commit.",
-                        gate_decision.label(),
-                        config.environment
-                    );
-                    Some(qbind_node::pqc_live_trust_reload::LiveReloadRatificationConfig {
+                    gate_decision.label(),
+                    config.environment
+                );
+                Some(
+                    qbind_node::pqc_live_trust_reload::LiveReloadRatificationConfig {
                         authority: ctx_data.authority,
                         expected_genesis_hash: ctx_data.canonical_hash,
                         expected_environment_policy: ctx_data.env_policy,
                         expected_chain_id_str: ctx_data.chain_id_str,
                         policy: ctx_data.policy,
-                        ratification_sidecar_path: args
-                            .p2p_trust_bundle_ratification
-                            .clone(),
-                    })
-                }
-                Err(reason) => {
-                    eprintln!(
-                        "[run-114] FATAL: SIGHUP live reload ratification gate INVOKED \
+                        ratification_sidecar_path: args.p2p_trust_bundle_ratification.clone(),
+                    },
+                )
+            }
+            Err(reason) => {
+                eprintln!(
+                    "[run-114] FATAL: SIGHUP live reload ratification gate INVOKED \
                          (policy={}, env={:?}) but ratification context could not be \
                          built: {}. SIGHUP trigger NOT installed; the node continues \
                          running on the baseline trust bundle. No live trust apply, \
                          no sequence write, no session eviction will occur via \
                          SIGHUP. See docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_114.md.",
-                        gate_decision.label(),
-                        config.environment,
-                        reason,
-                    );
-                    return None;
-                }
+                    gate_decision.label(),
+                    config.environment,
+                    reason,
+                );
+                return None;
             }
-        } else {
-            eprintln!(
-                "[run-114] SIGHUP live reload ratification gate SKIPPED \
+        }
+    } else {
+        eprintln!(
+            "[run-114] SIGHUP live reload ratification gate SKIPPED \
                  (policy={}, env={:?}). This is NOT a passed ratification; it \
                  preserves pre-Run-114 DevNet behaviour for developer workflows. \
                  MainNet/TestNet always invoke the gate by default and never \
                  reach this branch.",
-                gate_decision.label(),
-                config.environment
-            );
-            None
-        };
+            gate_decision.label(),
+            config.environment
+        );
+        None
+    };
 
     // Run 121 — SIGHUP authority anti-rollback marker
     // accept-and-persist context.
@@ -8119,8 +8088,7 @@ fn spawn_run074_live_reload_task(
         qbind_node::pqc_live_trust_reload::LiveReloadAuthorityMarkerConfig,
     > = match (ratification_cfg_opt.as_ref(), config.data_dir.as_ref()) {
         (Some(_), Some(data_dir)) => {
-            let marker_path =
-                qbind_node::pqc_authority_state::authority_state_file_path(data_dir);
+            let marker_path = qbind_node::pqc_authority_state::authority_state_file_path(data_dir);
             eprintln!(
                 "[run-121] SIGHUP live reload authority-marker gate INVOKED \
                  (policy={}, env={:?}). On every SIGHUP the on-disk authority \
@@ -8132,11 +8100,7 @@ fn spawn_run074_live_reload_task(
                 config.environment,
                 marker_path.display(),
             );
-            Some(
-                qbind_node::pqc_live_trust_reload::LiveReloadAuthorityMarkerConfig {
-                    marker_path,
-                },
-            )
+            Some(qbind_node::pqc_live_trust_reload::LiveReloadAuthorityMarkerConfig { marker_path })
         }
         (Some(_), None) => {
             eprintln!(
@@ -8215,12 +8179,7 @@ fn spawn_run074_live_reload_task(
             )
             .unwrap_or_default(),
     };
-    let controller = LiveReloadController::new(
-        Arc::new(live_state),
-        p2p_service,
-        p2p_metrics,
-        cfg,
-    );
+    let controller = LiveReloadController::new(Arc::new(live_state), p2p_service, p2p_metrics, cfg);
     eprintln!(
         "[binary] Run 074: SIGHUP-driven live trust-bundle reload-apply trigger \
          ENABLED. Candidate path: {}. Sequence persistence: {}. On each SIGHUP \
@@ -8236,19 +8195,18 @@ fn spawn_run074_live_reload_task(
             .unwrap_or_else(|| "<no --data-dir; commit will fail-closed>".to_string()),
     );
 
-    let mut sighup =
-        match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::hangup()) {
-            Ok(s) => s,
-            Err(e) => {
-                eprintln!(
-                    "[binary] Run 074: ERROR installing SIGHUP signal handler: {}. \
+    let mut sighup = match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::hangup()) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!(
+                "[binary] Run 074: ERROR installing SIGHUP signal handler: {}. \
                      Live trust-bundle reload-apply trigger is NOT active. The node \
                      continues running with the baseline trust bundle.",
-                    e
-                );
-                return None;
-            }
-        };
+                e
+            );
+            return None;
+        }
+    };
 
     let handle = tokio::spawn(async move {
         loop {

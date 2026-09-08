@@ -35,11 +35,10 @@ use std::sync::{Arc, Mutex};
 use qbind_crypto::MlDsa44Backend;
 use qbind_ledger::{
     bundle_signing_ratification::v2_test_helpers as ratification_v2_helpers,
-    compute_canonical_genesis_hash, BundleSigningRatificationV2,
-    BundleSigningRatificationV2Action, GenesisAllocation, GenesisAuthorityConfig,
-    GenesisAuthorityRoot, GenesisConfig, GenesisCouncilConfig, GenesisHash,
-    GenesisMonetaryConfig, GenesisValidator, NetworkEnvironmentPolicy,
-    RatificationEnvironment, GENESIS_AUTHORITY_SUITE_ML_DSA_44,
+    compute_canonical_genesis_hash, BundleSigningRatificationV2, BundleSigningRatificationV2Action,
+    GenesisAllocation, GenesisAuthorityConfig, GenesisAuthorityRoot, GenesisConfig,
+    GenesisCouncilConfig, GenesisHash, GenesisMonetaryConfig, GenesisValidator,
+    NetworkEnvironmentPolicy, RatificationEnvironment, GENESIS_AUTHORITY_SUITE_ML_DSA_44,
 };
 use qbind_node::pqc_authority_marker_acceptance::{
     decide_marker_acceptance_v2, persist_accepted_v2_marker_after_commit_boundary,
@@ -58,8 +57,7 @@ use qbind_node::pqc_trust_bundle::{
     TrustBundleRoot,
 };
 use qbind_node::pqc_trust_reload::{
-    apply_validated_candidate_with_previous, ApplyMode, LiveTrustApplyContext,
-    ReloadCheckInputs,
+    apply_validated_candidate_with_previous, ApplyMode, LiveTrustApplyContext, ReloadCheckInputs,
 };
 use qbind_node::pqc_trust_sequence::{chain_id_hex, sequence_file_path};
 use qbind_types::NetworkEnvironment;
@@ -124,7 +122,10 @@ fn devnet_harness() -> Harness {
     let mut genesis_cfg = GenesisConfig::new(
         &chain_id_str,
         1_738_000_000_000,
-        vec![GenesisAllocation::new(format!("0x{}", "11".repeat(32)), 100)],
+        vec![GenesisAllocation::new(
+            format!("0x{}", "11".repeat(32)),
+            100,
+        )],
         vec![GenesisValidator::new(
             format!("0x{}", "22".repeat(32)),
             "ab".repeat(32),
@@ -434,7 +435,10 @@ fn run134_clean_v2_first_write_decide_then_apply_then_persist() {
             );
             assert!(v2.previous_bundle_signing_key_fingerprint.is_none());
             assert!(v2.revoked_key_metadata.is_none());
-            assert_eq!(v2.last_update_source, AuthorityStateUpdateSource::ReloadApply);
+            assert_eq!(
+                v2.last_update_source,
+                AuthorityStateUpdateSource::ReloadApply
+            );
         }
         other => panic!("expected V2 marker on disk, got {:?}", other),
     }
@@ -502,7 +506,10 @@ fn run134_pre_persisted_v2_marker_rollback_rejects_before_apply() {
 
     let marker_bytes_after = std::fs::read(&marker_path).unwrap();
     assert_eq!(marker_bytes_before, marker_bytes_after);
-    assert!(!seq_path.exists(), "sequence file must not be created on reject");
+    assert!(
+        !seq_path.exists(),
+        "sequence file must not be created on reject"
+    );
 }
 
 /// §C.3 — decide_v2 accepts but apply fails at swap; the v2 marker is

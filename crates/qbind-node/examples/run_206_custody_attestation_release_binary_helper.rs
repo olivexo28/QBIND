@@ -121,7 +121,13 @@ const WINDOW_UNTIL: u64 = 1_700_000_500;
 // ---------------------------------------------------------------------------
 
 fn domain(env: TrustBundleEnvironment) -> AuthorityTrustDomain {
-    AuthorityTrustDomain::new(env, CHAIN_ID, GENESIS_HASH, ROOT_FP, PQC_LIFECYCLE_SUITE_ML_DSA_44)
+    AuthorityTrustDomain::new(
+        env,
+        CHAIN_ID,
+        GENESIS_HASH,
+        ROOT_FP,
+        PQC_LIFECYCLE_SUITE_ML_DSA_44,
+    )
 }
 
 fn build_v2(
@@ -151,7 +157,14 @@ fn build_v2(
 }
 
 fn rotate_candidate(env: TrustBundleEnvironment) -> PersistentAuthorityStateRecordV2 {
-    build_v2(env, KEY_B, 2, BundleSigningRatificationV2Action::Rotate, Some(KEY_A), DIGEST_2)
+    build_v2(
+        env,
+        KEY_B,
+        2,
+        BundleSigningRatificationV2Action::Rotate,
+        Some(KEY_A),
+        DIGEST_2,
+    )
 }
 
 fn prior_versioned(env: TrustBundleEnvironment) -> PersistentAuthorityStateRecordVersioned {
@@ -272,7 +285,12 @@ fn accepted_scenario(env: TrustBundleEnvironment) -> Scenario {
     let candidate = rotate_candidate(env);
     let evidence = evidence(CustodyAttestationClass::FixtureAttestation, env, &candidate);
     let input = input(env, &candidate);
-    Scenario { domain: domain(env), candidate, evidence, input }
+    Scenario {
+        domain: domain(env),
+        candidate,
+        evidence,
+        input,
+    }
 }
 
 fn verify(s: &Scenario, policy: CustodyAttestationPolicy) -> CustodyAttestationOutcome {
@@ -431,7 +449,10 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
     t.check(
         "A1",
         "accept:FixtureAttestationAccepted",
-        &attestation_tag(&verify(&a1, CustodyAttestationPolicy::FixtureAttestationAllowed)),
+        &attestation_tag(&verify(
+            &a1,
+            CustodyAttestationPolicy::FixtureAttestationAllowed,
+        )),
     );
 
     // A2 — fixture attestation accepted under explicit fixture policy on TestNet.
@@ -439,7 +460,10 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
     t.check(
         "A2",
         "accept:FixtureAttestationAccepted",
-        &attestation_tag(&verify(&a2, CustodyAttestationPolicy::FixtureAttestationAllowed)),
+        &attestation_tag(&verify(
+            &a2,
+            CustodyAttestationPolicy::FixtureAttestationAllowed,
+        )),
     );
 
     let s = accepted_scenario(Env::Devnet);
@@ -540,7 +564,10 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
         t.check(
             "A9",
             "accept:FixtureAttestationAccepted",
-            &attestation_tag(&verify(&s9, CustodyAttestationPolicy::FixtureAttestationAllowed)),
+            &attestation_tag(&verify(
+                &s9,
+                CustodyAttestationPolicy::FixtureAttestationAllowed,
+            )),
         );
     }
 
@@ -554,7 +581,10 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
         t.check(
             "A10",
             "accept:FixtureAttestationAccepted",
-            &attestation_tag(&verify(&s10, CustodyAttestationPolicy::FixtureAttestationAllowed)),
+            &attestation_tag(&verify(
+                &s10,
+                CustodyAttestationPolicy::FixtureAttestationAllowed,
+            )),
         );
     }
 
@@ -562,8 +592,11 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
     //       transport evidence (request/response/transcript bound as opaque
     //       evidence fields; the RemoteSigner path stays separate).
     {
-        let rs_transcript =
-            backend_transcript_digest("rs-identity-digest", "rs-request-digest", "rs-response-digest");
+        let rs_transcript = backend_transcript_digest(
+            "rs-identity-digest",
+            "rs-request-digest",
+            "rs-response-digest",
+        );
         let mut s11 = accepted_scenario(Env::Devnet);
         s11.evidence.custody_backend_kind = Some("remote-signer-transport".to_string());
         s11.evidence.request_digest = Some("rs-request-digest".to_string());
@@ -575,7 +608,10 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
         t.check(
             "A11",
             "accept:FixtureAttestationAccepted",
-            &attestation_tag(&verify(&s11, CustodyAttestationPolicy::FixtureAttestationAllowed)),
+            &attestation_tag(&verify(
+                &s11,
+                CustodyAttestationPolicy::FixtureAttestationAllowed,
+            )),
         );
     }
 
@@ -709,7 +745,10 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
     t.check(
         "R2",
         "reject:FixtureRejectedProductionRequired",
-        &attestation_tag(&verify(&dev(), CustodyAttestationPolicy::ProductionAttestationRequired)),
+        &attestation_tag(&verify(
+            &dev(),
+            CustodyAttestationPolicy::ProductionAttestationRequired,
+        )),
     );
 
     // R3 — fixture attestation rejected under MainnetProductionAttestationRequired.
@@ -730,8 +769,10 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
             "R4",
             verify(&s, CustodyAttestationPolicy::FixtureAttestationAllowed)
                 == CustodyAttestationOutcome::RemoteSignerAttestationUnavailable
-                && verify(&s, CustodyAttestationPolicy::RemoteSignerAttestationRequired)
-                    == CustodyAttestationOutcome::RemoteSignerAttestationUnavailable,
+                && verify(
+                    &s,
+                    CustodyAttestationPolicy::RemoteSignerAttestationRequired,
+                ) == CustodyAttestationOutcome::RemoteSignerAttestationUnavailable,
             "RemoteSigner attestation refused as unavailable under both policies",
         );
     }
@@ -771,7 +812,10 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
         t.check(
             "R7",
             "reject:CloudKmsAttestationUnavailable",
-            &attestation_tag(&verify(&s, CustodyAttestationPolicy::FixtureAttestationAllowed)),
+            &attestation_tag(&verify(
+                &s,
+                CustodyAttestationPolicy::FixtureAttestationAllowed,
+            )),
         );
     }
 
@@ -782,7 +826,10 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
         t.check(
             "R8",
             "reject:Pkcs11HsmAttestationUnavailable",
-            &attestation_tag(&verify(&s, CustodyAttestationPolicy::FixtureAttestationAllowed)),
+            &attestation_tag(&verify(
+                &s,
+                CustodyAttestationPolicy::FixtureAttestationAllowed,
+            )),
         );
     }
 
@@ -821,7 +868,10 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
         t.check(
             "R11",
             "reject:UnknownAttestationClassRejected",
-            &attestation_tag(&verify(&s, CustodyAttestationPolicy::FixtureAttestationAllowed)),
+            &attestation_tag(&verify(
+                &s,
+                CustodyAttestationPolicy::FixtureAttestationAllowed,
+            )),
         );
     }
 
@@ -832,7 +882,10 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
         t.check(
             "R12",
             "reject:WrongEnvironment",
-            &attestation_tag(&verify(&s, CustodyAttestationPolicy::FixtureAttestationAllowed)),
+            &attestation_tag(&verify(
+                &s,
+                CustodyAttestationPolicy::FixtureAttestationAllowed,
+            )),
         );
     }
 
@@ -843,7 +896,10 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
         t.check(
             "R13",
             "reject:WrongChain",
-            &attestation_tag(&verify(&s, CustodyAttestationPolicy::FixtureAttestationAllowed)),
+            &attestation_tag(&verify(
+                &s,
+                CustodyAttestationPolicy::FixtureAttestationAllowed,
+            )),
         );
     }
 
@@ -854,7 +910,10 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
         t.check(
             "R14",
             "reject:WrongGenesis",
-            &attestation_tag(&verify(&s, CustodyAttestationPolicy::FixtureAttestationAllowed)),
+            &attestation_tag(&verify(
+                &s,
+                CustodyAttestationPolicy::FixtureAttestationAllowed,
+            )),
         );
     }
 
@@ -865,7 +924,10 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
         t.check(
             "R15",
             "reject:WrongAuthorityRoot",
-            &attestation_tag(&verify(&s, CustodyAttestationPolicy::FixtureAttestationAllowed)),
+            &attestation_tag(&verify(
+                &s,
+                CustodyAttestationPolicy::FixtureAttestationAllowed,
+            )),
         );
     }
 
@@ -876,7 +938,10 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
         t.check(
             "R16",
             "reject:WrongSigningKeyFingerprint",
-            &attestation_tag(&verify(&s, CustodyAttestationPolicy::FixtureAttestationAllowed)),
+            &attestation_tag(&verify(
+                &s,
+                CustodyAttestationPolicy::FixtureAttestationAllowed,
+            )),
         );
     }
 
@@ -887,7 +952,10 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
         t.check(
             "R17",
             "reject:WrongCustodyClass",
-            &attestation_tag(&verify(&s, CustodyAttestationPolicy::FixtureAttestationAllowed)),
+            &attestation_tag(&verify(
+                &s,
+                CustodyAttestationPolicy::FixtureAttestationAllowed,
+            )),
         );
     }
 
@@ -898,7 +966,10 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
         t.check(
             "R18",
             "reject:WrongBackendProviderSignerId",
-            &attestation_tag(&verify(&s, CustodyAttestationPolicy::FixtureAttestationAllowed)),
+            &attestation_tag(&verify(
+                &s,
+                CustodyAttestationPolicy::FixtureAttestationAllowed,
+            )),
         );
     }
 
@@ -909,7 +980,10 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
         t.check(
             "R19",
             "reject:WrongKeyId",
-            &attestation_tag(&verify(&s, CustodyAttestationPolicy::FixtureAttestationAllowed)),
+            &attestation_tag(&verify(
+                &s,
+                CustodyAttestationPolicy::FixtureAttestationAllowed,
+            )),
         );
     }
 
@@ -920,7 +994,10 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
         t.check(
             "R20",
             "reject:WrongSuite",
-            &attestation_tag(&verify(&s, CustodyAttestationPolicy::FixtureAttestationAllowed)),
+            &attestation_tag(&verify(
+                &s,
+                CustodyAttestationPolicy::FixtureAttestationAllowed,
+            )),
         );
     }
 
@@ -931,7 +1008,10 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
         t.check(
             "R21",
             "reject:WrongLifecycleAction",
-            &attestation_tag(&verify(&s, CustodyAttestationPolicy::FixtureAttestationAllowed)),
+            &attestation_tag(&verify(
+                &s,
+                CustodyAttestationPolicy::FixtureAttestationAllowed,
+            )),
         );
     }
 
@@ -942,7 +1022,10 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
         t.check(
             "R22",
             "reject:WrongCandidateDigest",
-            &attestation_tag(&verify(&s, CustodyAttestationPolicy::FixtureAttestationAllowed)),
+            &attestation_tag(&verify(
+                &s,
+                CustodyAttestationPolicy::FixtureAttestationAllowed,
+            )),
         );
     }
 
@@ -953,7 +1036,10 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
         t.check(
             "R23",
             "reject:WrongAuthorityDomainSequence",
-            &attestation_tag(&verify(&s, CustodyAttestationPolicy::FixtureAttestationAllowed)),
+            &attestation_tag(&verify(
+                &s,
+                CustodyAttestationPolicy::FixtureAttestationAllowed,
+            )),
         );
     }
 
@@ -964,7 +1050,10 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
         t.check(
             "R24",
             "reject:WrongGovernanceProofDigest",
-            &attestation_tag(&verify(&s, CustodyAttestationPolicy::FixtureAttestationAllowed)),
+            &attestation_tag(&verify(
+                &s,
+                CustodyAttestationPolicy::FixtureAttestationAllowed,
+            )),
         );
     }
 
@@ -975,7 +1064,10 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
         t.check(
             "R25",
             "reject:WrongRequestDigest",
-            &attestation_tag(&verify(&s, CustodyAttestationPolicy::FixtureAttestationAllowed)),
+            &attestation_tag(&verify(
+                &s,
+                CustodyAttestationPolicy::FixtureAttestationAllowed,
+            )),
         );
     }
 
@@ -986,7 +1078,10 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
         t.check(
             "R26",
             "reject:WrongResponseDigest",
-            &attestation_tag(&verify(&s, CustodyAttestationPolicy::FixtureAttestationAllowed)),
+            &attestation_tag(&verify(
+                &s,
+                CustodyAttestationPolicy::FixtureAttestationAllowed,
+            )),
         );
     }
 
@@ -997,7 +1092,10 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
         t.check(
             "R27",
             "reject:WrongTranscriptDigest",
-            &attestation_tag(&verify(&s, CustodyAttestationPolicy::FixtureAttestationAllowed)),
+            &attestation_tag(&verify(
+                &s,
+                CustodyAttestationPolicy::FixtureAttestationAllowed,
+            )),
         );
     }
 
@@ -1026,7 +1124,10 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
         t.check(
             "R29",
             "reject:ExpiredAttestation",
-            &attestation_tag(&verify(&s, CustodyAttestationPolicy::FixtureAttestationAllowed)),
+            &attestation_tag(&verify(
+                &s,
+                CustodyAttestationPolicy::FixtureAttestationAllowed,
+            )),
         );
     }
 
@@ -1037,7 +1138,10 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
         t.check(
             "R30",
             "reject:MalformedAttestationEvidence",
-            &attestation_tag(&verify(&s, CustodyAttestationPolicy::FixtureAttestationAllowed)),
+            &attestation_tag(&verify(
+                &s,
+                CustodyAttestationPolicy::FixtureAttestationAllowed,
+            )),
         );
     }
 
@@ -1048,7 +1152,10 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
         t.check(
             "R31",
             "reject:UnsupportedAttestationVersion",
-            &attestation_tag(&verify(&s, CustodyAttestationPolicy::FixtureAttestationAllowed)),
+            &attestation_tag(&verify(
+                &s,
+                CustodyAttestationPolicy::FixtureAttestationAllowed,
+            )),
         );
     }
 
@@ -1060,7 +1167,10 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
         t.check(
             "R32",
             "reject:InvalidAttestationCommitment",
-            &attestation_tag(&verify(&s, CustodyAttestationPolicy::FixtureAttestationAllowed)),
+            &attestation_tag(&verify(
+                &s,
+                CustodyAttestationPolicy::FixtureAttestationAllowed,
+            )),
         );
     }
 
@@ -1301,7 +1411,10 @@ fn run_separation_table(out: &Path) -> (u64, u64) {
         t.check(
             "fixture-rejected-mainnet",
             "reject:FixtureRejectedForMainNet",
-            &attestation_tag(&verify(&s, CustodyAttestationPolicy::FixtureAttestationAllowed)),
+            &attestation_tag(&verify(
+                &s,
+                CustodyAttestationPolicy::FixtureAttestationAllowed,
+            )),
         );
     }
 
@@ -1395,7 +1508,10 @@ fn run_separation_table(out: &Path) -> (u64, u64) {
         t.check(
             "production-class-required-unavailable",
             "reject:KmsAttestationUnavailable",
-            &attestation_tag(&verify(&s, CustodyAttestationPolicy::KmsAttestationRequired)),
+            &attestation_tag(&verify(
+                &s,
+                CustodyAttestationPolicy::KmsAttestationRequired,
+            )),
         );
     }
 
@@ -1432,7 +1548,11 @@ fn run_composition_table(out: &Path) -> (u64, u64) {
             NOW,
             false,
         );
-        t.check("compose-accepted", "accept:Accepted", &composition_tag(&outcome));
+        t.check(
+            "compose-accepted",
+            "accept:Accepted",
+            &composition_tag(&outcome),
+        );
     }
 
     // Custody rejected at the Run 188 layer (attestation not consulted).
@@ -1544,20 +1664,24 @@ fn run_determinism_table(out: &Path) -> (u64, u64) {
     for (label, env) in [("devnet", Env::Devnet), ("testnet", Env::Testnet)] {
         let a = accepted_scenario(env);
         let b = accepted_scenario(env);
-        let outcome_a =
-            attestation_tag(&verify(&a, CustodyAttestationPolicy::FixtureAttestationAllowed));
-        let outcome_b =
-            attestation_tag(&verify(&b, CustodyAttestationPolicy::FixtureAttestationAllowed));
+        let outcome_a = attestation_tag(&verify(
+            &a,
+            CustodyAttestationPolicy::FixtureAttestationAllowed,
+        ));
+        let outcome_b = attestation_tag(&verify(
+            &b,
+            CustodyAttestationPolicy::FixtureAttestationAllowed,
+        ));
         let ev_eq = a.evidence.evidence_digest() == b.evidence.evidence_digest();
         let in_eq = a.input.input_digest() == b.input.input_digest();
-        let prov_eq = a.evidence.provider_identity_digest() == b.evidence.provider_identity_digest();
-        let trans_eq = attestation_transcript_digest(
-            &a.evidence.evidence_digest(),
-            &a.input.input_digest(),
-        ) == attestation_transcript_digest(
-            &b.evidence.evidence_digest(),
-            &b.input.input_digest(),
-        );
+        let prov_eq =
+            a.evidence.provider_identity_digest() == b.evidence.provider_identity_digest();
+        let trans_eq =
+            attestation_transcript_digest(&a.evidence.evidence_digest(), &a.input.input_digest())
+                == attestation_transcript_digest(
+                    &b.evidence.evidence_digest(),
+                    &b.input.input_digest(),
+                );
         t.assert_true(
             &format!("determinism-{label}"),
             outcome_a == outcome_b && ev_eq && in_eq && prov_eq && trans_eq,
@@ -1605,7 +1729,11 @@ fn run_fixture_dump(out: &Path) {
     let s = accepted_scenario(TrustBundleEnvironment::Devnet);
     write_file(
         &out.join("fixtures").join("evidence.txt"),
-        &format!("{:#?}\nevidence_digest={}\n", s.evidence, s.evidence.evidence_digest()),
+        &format!(
+            "{:#?}\nevidence_digest={}\n",
+            s.evidence,
+            s.evidence.evidence_digest()
+        ),
     );
     write_file(
         &out.join("fixtures").join("input.txt"),
@@ -1613,7 +1741,10 @@ fn run_fixture_dump(out: &Path) {
     );
     write_file(
         &out.join("fixtures").join("provider_identity.txt"),
-        &format!("provider_identity_digest={}\n", s.evidence.provider_identity_digest()),
+        &format!(
+            "provider_identity_digest={}\n",
+            s.evidence.provider_identity_digest()
+        ),
     );
     write_file(
         &out.join("fixtures").join("transcript_digest.txt"),
@@ -1621,10 +1752,7 @@ fn run_fixture_dump(out: &Path) {
             "evidence_digest={}\ninput_digest={}\ntranscript_digest={}\n",
             s.evidence.evidence_digest(),
             s.input.input_digest(),
-            attestation_transcript_digest(
-                &s.evidence.evidence_digest(),
-                &s.input.input_digest()
-            ),
+            attestation_transcript_digest(&s.evidence.evidence_digest(), &s.input.input_digest()),
         ),
     );
 }

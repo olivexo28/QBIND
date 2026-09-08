@@ -103,17 +103,16 @@ use std::path::{Path, PathBuf};
 use qbind_crypto::MlDsa44Backend;
 use qbind_ledger::{
     bundle_signing_ratification::v2_test_helpers as ratification_v2_helpers,
-    compute_canonical_genesis_hash, BundleSigningRatificationV2,
-    BundleSigningRatificationV2Action, GenesisAllocation, GenesisAuthorityConfig,
-    GenesisAuthorityRoot, GenesisConfig, GenesisCouncilConfig, GenesisHash,
-    GenesisMonetaryConfig, GenesisValidator, NetworkEnvironmentPolicy, RatificationEnvironment,
-    GENESIS_AUTHORITY_SUITE_ML_DSA_44,
+    compute_canonical_genesis_hash, BundleSigningRatificationV2, BundleSigningRatificationV2Action,
+    GenesisAllocation, GenesisAuthorityConfig, GenesisAuthorityRoot, GenesisConfig,
+    GenesisCouncilConfig, GenesisHash, GenesisMonetaryConfig, GenesisValidator,
+    NetworkEnvironmentPolicy, RatificationEnvironment, GENESIS_AUTHORITY_SUITE_ML_DSA_44,
 };
 use qbind_node::pqc_authority_lifecycle::LocalLifecycleAction;
 use qbind_node::pqc_authority_marker_acceptance::{
     decide_v2_marker_acceptance_with_lifecycle_and_governance,
-    persist_accepted_v2_marker_after_commit_boundary, MarkerAcceptDecisionV2,
-    MarkerAcceptKindV2, MarkerAcceptanceV2Inputs, MutatingSurfaceMarkerV2Error,
+    persist_accepted_v2_marker_after_commit_boundary, MarkerAcceptDecisionV2, MarkerAcceptKindV2,
+    MarkerAcceptanceV2Inputs, MutatingSurfaceMarkerV2Error,
 };
 use qbind_node::pqc_authority_state::{
     authority_state_file_path, AuthorityStateUpdateSource, PersistentAuthorityStateRecordV2,
@@ -181,7 +180,10 @@ fn devnet_harness() -> Harness {
     let mut genesis_cfg = GenesisConfig::new(
         &chain_id_str,
         1_738_000_000_000,
-        vec![GenesisAllocation::new(format!("0x{}", "11".repeat(32)), 100)],
+        vec![GenesisAllocation::new(
+            format!("0x{}", "11".repeat(32)),
+            100,
+        )],
         vec![GenesisValidator::new(
             format!("0x{}", "22".repeat(32)),
             "ab".repeat(32),
@@ -231,8 +233,8 @@ impl Harness {
             .as_ref()
             .unwrap()
             .authority_policy_version;
-        let previous_digest = matches!(action, BundleSigningRatificationV2Action::Rotate)
-            .then(|| "ab".repeat(32));
+        let previous_digest =
+            matches!(action, BundleSigningRatificationV2Action::Rotate).then(|| "ab".repeat(32));
         ratification_v2_helpers::build_signed_ratification_v2(
             &self.chain_id_str,
             RatificationEnvironment::Devnet,
@@ -372,8 +374,7 @@ fn build_sidecar_json(
 ) -> Vec<u8> {
     let mut value = serde_json::to_value(ratification).expect("v2 ratification serialises");
     if let Some(wire) = proof_sibling {
-        value["governance_authority_proof"] =
-            serde_json::to_value(wire).expect("wire serialises");
+        value["governance_authority_proof"] = serde_json::to_value(wire).expect("wire serialises");
     }
     serde_json::to_vec_pretty(&value).expect("serialise sidecar")
 }
@@ -443,7 +444,12 @@ fn run() -> Vec<ScenarioRecord> {
         fs::create_dir_all(&dir).expect("h1 dir");
         let sidecar_path = dir.join("sidecar.json");
         let marker_path = authority_state_file_path(&dir);
-        let r = h.build_v2(&h.signing_pk_a, 1, BundleSigningRatificationV2Action::Ratify, None);
+        let r = h.build_v2(
+            &h.signing_pk_a,
+            1,
+            BundleSigningRatificationV2Action::Ratify,
+            None,
+        );
         let bytes = build_sidecar_json(&r, None);
         fs::write(&sidecar_path, &bytes).expect("write sidecar");
         let sidecar_sha = sha256_hex_of(&sidecar_path);
@@ -510,7 +516,12 @@ fn run() -> Vec<ScenarioRecord> {
         fs::create_dir_all(&dir).expect("h2 dir");
         let sidecar_path = dir.join("sidecar.json");
         let marker_path = authority_state_file_path(&dir);
-        let r = h.build_v2(&h.signing_pk_a, 1, BundleSigningRatificationV2Action::Ratify, None);
+        let r = h.build_v2(
+            &h.signing_pk_a,
+            1,
+            BundleSigningRatificationV2Action::Ratify,
+            None,
+        );
         let bytes = build_sidecar_json(&r, None);
         fs::write(&sidecar_path, &bytes).expect("write sidecar");
         let sidecar_sha = sha256_hex_of(&sidecar_path);
@@ -539,7 +550,10 @@ fn run() -> Vec<ScenarioRecord> {
         if let Ok(d) = &result {
             assert!(matches!(d.kind(), MarkerAcceptKindV2::FirstV2Write));
         } else {
-            panic!("H2: expected Ok (ActivateInitial governance-optional), got {:?}", result);
+            panic!(
+                "H2: expected Ok (ActivateInitial governance-optional), got {:?}",
+                result
+            );
         }
         let post_sha = if marker_path.exists() {
             Some(sha256_hex_of(&marker_path))
@@ -579,21 +593,25 @@ fn run() -> Vec<ScenarioRecord> {
         let marker_path = authority_state_file_path(&dir);
 
         // Seed A at seq 1 via NotRequired accept + post-commit persist.
-        let r1 = h.build_v2(&h.signing_pk_a, 1, BundleSigningRatificationV2Action::Ratify, None);
+        let r1 = h.build_v2(
+            &h.signing_pk_a,
+            1,
+            BundleSigningRatificationV2Action::Ratify,
+            None,
+        );
         let ratified1 = h.verify_v2(&r1);
-        let d1: MarkerAcceptDecisionV2 =
-            decide_v2_marker_acceptance_with_lifecycle_and_governance(
-                make_inputs(
-                    &marker_path,
-                    &gh,
-                    &r1,
-                    &ratified1,
-                    AuthorityStateUpdateSource::StartupLoad,
-                ),
-                GovernanceProofPolicy::NotRequired,
-                GovernanceProofContext::Unavailable,
-            )
-            .expect("h3 seed accept");
+        let d1: MarkerAcceptDecisionV2 = decide_v2_marker_acceptance_with_lifecycle_and_governance(
+            make_inputs(
+                &marker_path,
+                &gh,
+                &r1,
+                &ratified1,
+                AuthorityStateUpdateSource::StartupLoad,
+            ),
+            GovernanceProofPolicy::NotRequired,
+            GovernanceProofContext::Unavailable,
+        )
+        .expect("h3 seed accept");
         persist_accepted_v2_marker_after_commit_boundary(&d1).expect("h3 persist seed");
         let pre_sha = sha256_hex_of(&marker_path);
 
@@ -605,8 +623,12 @@ fn run() -> Vec<ScenarioRecord> {
             Some(qbind_ledger::pqc_public_key_fingerprint(&h.signing_pk_a)),
         );
         let ratified2 = h.verify_v2(&r2);
-        let candidate2 =
-            h.derive_candidate(&gh, &r2, &ratified2, AuthorityStateUpdateSource::ReloadApply);
+        let candidate2 = h.derive_candidate(
+            &gh,
+            &r2,
+            &ratified2,
+            AuthorityStateUpdateSource::ReloadApply,
+        );
         let proof = good_proof(
             &h,
             &candidate2,
@@ -621,7 +643,10 @@ fn run() -> Vec<ScenarioRecord> {
         // Parse via the Run 167 production loader.
         let loaded = load_v2_ratification_sidecar_with_governance_proof_from_path(&sidecar_path)
             .expect("load proof-carrying sidecar");
-        assert!(loaded.governance_proof.is_available(), "H3: must parse Available");
+        assert!(
+            loaded.governance_proof.is_available(),
+            "H3: must parse Available"
+        );
         let load_status = load_status_label(&loaded.governance_proof);
 
         // Decide via the Run 165 gate.
@@ -683,7 +708,12 @@ fn run() -> Vec<ScenarioRecord> {
         fs::create_dir_all(&dir).expect("h4 dir");
         let sidecar_path = dir.join("sidecar.json");
         let marker_path = authority_state_file_path(&dir);
-        let r = h.build_v2(&h.signing_pk_a, 1, BundleSigningRatificationV2Action::Ratify, None);
+        let r = h.build_v2(
+            &h.signing_pk_a,
+            1,
+            BundleSigningRatificationV2Action::Ratify,
+            None,
+        );
         let ratified = h.verify_v2(&r);
         let candidate =
             h.derive_candidate(&gh, &r, &ratified, AuthorityStateUpdateSource::StartupLoad);
@@ -762,7 +792,12 @@ fn run() -> Vec<ScenarioRecord> {
         let sidecar_path = dir.join("sidecar.json");
         let marker_path = authority_state_file_path(&dir);
 
-        let r1 = h.build_v2(&h.signing_pk_a, 1, BundleSigningRatificationV2Action::Ratify, None);
+        let r1 = h.build_v2(
+            &h.signing_pk_a,
+            1,
+            BundleSigningRatificationV2Action::Ratify,
+            None,
+        );
         let ratified1 = h.verify_v2(&r1);
         let d1 = decide_v2_marker_acceptance_with_lifecycle_and_governance(
             make_inputs(
@@ -852,7 +887,12 @@ fn run() -> Vec<ScenarioRecord> {
         let sidecar_path = dir.join("sidecar.json");
         let marker_path = authority_state_file_path(&dir);
 
-        let r1 = h.build_v2(&h.signing_pk_a, 1, BundleSigningRatificationV2Action::Ratify, None);
+        let r1 = h.build_v2(
+            &h.signing_pk_a,
+            1,
+            BundleSigningRatificationV2Action::Ratify,
+            None,
+        );
         let ratified1 = h.verify_v2(&r1);
         let d1 = decide_v2_marker_acceptance_with_lifecycle_and_governance(
             make_inputs(
@@ -960,7 +1000,12 @@ fn run() -> Vec<ScenarioRecord> {
         fs::create_dir_all(&dir).expect("h7 dir");
         let sidecar_path = dir.join("sidecar.json");
         let marker_path = authority_state_file_path(&dir);
-        let r = h.build_v2(&h.signing_pk_a, 1, BundleSigningRatificationV2Action::Ratify, None);
+        let r = h.build_v2(
+            &h.signing_pk_a,
+            1,
+            BundleSigningRatificationV2Action::Ratify,
+            None,
+        );
         let ratified = h.verify_v2(&r);
         let candidate =
             h.derive_candidate(&gh, &r, &ratified, AuthorityStateUpdateSource::StartupLoad);
@@ -998,14 +1043,20 @@ fn run() -> Vec<ScenarioRecord> {
             Err(MutatingSurfaceMarkerV2Error::GovernanceAuthorityRejected(
                 GovernanceAuthorityVerificationOutcome::InvalidIssuerSignature { .. },
             )) => {}
-            other => panic!("H7: expected GovernanceAuthorityRejected(InvalidIssuerSignature), got {:?}", other),
+            other => panic!(
+                "H7: expected GovernanceAuthorityRejected(InvalidIssuerSignature), got {:?}",
+                other
+            ),
         }
         let post_sha = if marker_path.exists() {
             Some(sha256_hex_of(&marker_path))
         } else {
             None
         };
-        assert!(post_sha.is_none(), "H7: rejected gate must not write marker");
+        assert!(
+            post_sha.is_none(),
+            "H7: rejected gate must not write marker"
+        );
         out.push(ScenarioRecord {
             id,
             policy: "RequiredForLifecycleSensitive",
@@ -1034,7 +1085,12 @@ fn run() -> Vec<ScenarioRecord> {
         fs::create_dir_all(&dir).expect("h8 dir");
         let sidecar_path = dir.join("sidecar.json");
         let marker_path = authority_state_file_path(&dir);
-        let r = h.build_v2(&h.signing_pk_a, 1, BundleSigningRatificationV2Action::Ratify, None);
+        let r = h.build_v2(
+            &h.signing_pk_a,
+            1,
+            BundleSigningRatificationV2Action::Ratify,
+            None,
+        );
         let ratified = h.verify_v2(&r);
         let candidate =
             h.derive_candidate(&gh, &r, &ratified, AuthorityStateUpdateSource::StartupLoad);
@@ -1074,14 +1130,20 @@ fn run() -> Vec<ScenarioRecord> {
             Err(MutatingSurfaceMarkerV2Error::GovernanceAuthorityRejected(
                 GovernanceAuthorityVerificationOutcome::WrongAuthorityRoot { .. },
             )) => {}
-            other => panic!("H8: expected GovernanceAuthorityRejected(WrongAuthorityRoot), got {:?}", other),
+            other => panic!(
+                "H8: expected GovernanceAuthorityRejected(WrongAuthorityRoot), got {:?}",
+                other
+            ),
         }
         let post_sha = if marker_path.exists() {
             Some(sha256_hex_of(&marker_path))
         } else {
             None
         };
-        assert!(post_sha.is_none(), "H8: rejected gate must not write marker");
+        assert!(
+            post_sha.is_none(),
+            "H8: rejected gate must not write marker"
+        );
         out.push(ScenarioRecord {
             id,
             policy: "RequiredForLifecycleSensitive",
@@ -1111,7 +1173,12 @@ fn run() -> Vec<ScenarioRecord> {
         fs::create_dir_all(&dir).expect("h9 dir");
         let sidecar_path = dir.join("sidecar.json");
         let marker_path = authority_state_file_path(&dir);
-        let r = h.build_v2(&h.signing_pk_a, 1, BundleSigningRatificationV2Action::Ratify, None);
+        let r = h.build_v2(
+            &h.signing_pk_a,
+            1,
+            BundleSigningRatificationV2Action::Ratify,
+            None,
+        );
         let ratified = h.verify_v2(&r);
         let candidate =
             h.derive_candidate(&gh, &r, &ratified, AuthorityStateUpdateSource::StartupLoad);
@@ -1159,14 +1226,20 @@ fn run() -> Vec<ScenarioRecord> {
             Err(MutatingSurfaceMarkerV2Error::GovernanceAuthorityRejected(
                 GovernanceAuthorityVerificationOutcome::WrongLifecycleAction { .. },
             )) => {}
-            other => panic!("H9: expected GovernanceAuthorityRejected(WrongLifecycleAction), got {:?}", other),
+            other => panic!(
+                "H9: expected GovernanceAuthorityRejected(WrongLifecycleAction), got {:?}",
+                other
+            ),
         }
         let post_sha = if marker_path.exists() {
             Some(sha256_hex_of(&marker_path))
         } else {
             None
         };
-        assert!(post_sha.is_none(), "H9: rejected gate must not write marker");
+        assert!(
+            post_sha.is_none(),
+            "H9: rejected gate must not write marker"
+        );
         out.push(ScenarioRecord {
             id,
             policy: "RequiredForLifecycleSensitive",
@@ -1195,7 +1268,12 @@ fn run() -> Vec<ScenarioRecord> {
         fs::create_dir_all(&dir).expect("h10 dir");
         let sidecar_path = dir.join("sidecar.json");
         let marker_path = authority_state_file_path(&dir);
-        let r = h.build_v2(&h.signing_pk_a, 1, BundleSigningRatificationV2Action::Ratify, None);
+        let r = h.build_v2(
+            &h.signing_pk_a,
+            1,
+            BundleSigningRatificationV2Action::Ratify,
+            None,
+        );
         let ratified = h.verify_v2(&r);
         let candidate =
             h.derive_candidate(&gh, &r, &ratified, AuthorityStateUpdateSource::StartupLoad);
@@ -1240,14 +1318,20 @@ fn run() -> Vec<ScenarioRecord> {
             Err(MutatingSurfaceMarkerV2Error::GovernanceAuthorityRejected(
                 GovernanceAuthorityVerificationOutcome::WrongCandidateDigest { .. },
             )) => {}
-            other => panic!("H10: expected GovernanceAuthorityRejected(WrongCandidateDigest), got {:?}", other),
+            other => panic!(
+                "H10: expected GovernanceAuthorityRejected(WrongCandidateDigest), got {:?}",
+                other
+            ),
         }
         let post_sha = if marker_path.exists() {
             Some(sha256_hex_of(&marker_path))
         } else {
             None
         };
-        assert!(post_sha.is_none(), "H10: rejected gate must not write marker");
+        assert!(
+            post_sha.is_none(),
+            "H10: rejected gate must not write marker"
+        );
         out.push(ScenarioRecord {
             id,
             policy: "RequiredForLifecycleSensitive",
@@ -1275,7 +1359,12 @@ fn run() -> Vec<ScenarioRecord> {
         fs::create_dir_all(&dir).expect("h11 dir");
         let sidecar_path = dir.join("sidecar.json");
         let marker_path = authority_state_file_path(&dir);
-        let r = h.build_v2(&h.signing_pk_a, 1, BundleSigningRatificationV2Action::Ratify, None);
+        let r = h.build_v2(
+            &h.signing_pk_a,
+            1,
+            BundleSigningRatificationV2Action::Ratify,
+            None,
+        );
         let ratified = h.verify_v2(&r);
         let candidate =
             h.derive_candidate(&gh, &r, &ratified, AuthorityStateUpdateSource::StartupLoad);
@@ -1318,14 +1407,20 @@ fn run() -> Vec<ScenarioRecord> {
             Err(MutatingSurfaceMarkerV2Error::GovernanceAuthorityRejected(
                 GovernanceAuthorityVerificationOutcome::WrongAuthoritySequence { .. },
             )) => {}
-            other => panic!("H11: expected GovernanceAuthorityRejected(WrongAuthoritySequence), got {:?}", other),
+            other => panic!(
+                "H11: expected GovernanceAuthorityRejected(WrongAuthoritySequence), got {:?}",
+                other
+            ),
         }
         let post_sha = if marker_path.exists() {
             Some(sha256_hex_of(&marker_path))
         } else {
             None
         };
-        assert!(post_sha.is_none(), "H11: rejected gate must not write marker");
+        assert!(
+            post_sha.is_none(),
+            "H11: rejected gate must not write marker"
+        );
         out.push(ScenarioRecord {
             id,
             policy: "RequiredForLifecycleSensitive",
@@ -1354,7 +1449,12 @@ fn run() -> Vec<ScenarioRecord> {
         fs::create_dir_all(&dir).expect("h12 dir");
         let sidecar_path = dir.join("sidecar.json");
         let marker_path = authority_state_file_path(&dir);
-        let r = h.build_v2(&h.signing_pk_a, 1, BundleSigningRatificationV2Action::Ratify, None);
+        let r = h.build_v2(
+            &h.signing_pk_a,
+            1,
+            BundleSigningRatificationV2Action::Ratify,
+            None,
+        );
         let ratified = h.verify_v2(&r);
         let candidate =
             h.derive_candidate(&gh, &r, &ratified, AuthorityStateUpdateSource::StartupLoad);
@@ -1400,19 +1500,26 @@ fn run() -> Vec<ScenarioRecord> {
             Err(MutatingSurfaceMarkerV2Error::GovernanceAuthorityRejected(
                 GovernanceAuthorityVerificationOutcome::UnsupportedOnChainGovernance,
             )) => {}
-            other => panic!("H12: expected GovernanceAuthorityRejected(UnsupportedOnChainGovernance), got {:?}", other),
+            other => panic!(
+                "H12: expected GovernanceAuthorityRejected(UnsupportedOnChainGovernance), got {:?}",
+                other
+            ),
         }
         let post_sha = if marker_path.exists() {
             Some(sha256_hex_of(&marker_path))
         } else {
             None
         };
-        assert!(post_sha.is_none(), "H12: rejected gate must not write marker");
+        assert!(
+            post_sha.is_none(),
+            "H12: rejected gate must not write marker"
+        );
         out.push(ScenarioRecord {
             id,
             policy: "RequiredForLifecycleSensitive",
             load_status,
-            expected_label: "GovernanceAuthorityRejected(UnsupportedOnChainGovernance); no mutation",
+            expected_label:
+                "GovernanceAuthorityRejected(UnsupportedOnChainGovernance); no mutation",
             expected_match: r"Err\(GovernanceAuthorityRejected\(UnsupportedOnChainGovernance",
             actual,
             sidecar_path,
@@ -1439,7 +1546,12 @@ fn run() -> Vec<ScenarioRecord> {
         let sidecar_path = dir.join("sidecar.json");
         let marker_path = authority_state_file_path(&dir);
 
-        let r1 = h.build_v2(&h.signing_pk_a, 1, BundleSigningRatificationV2Action::Ratify, None);
+        let r1 = h.build_v2(
+            &h.signing_pk_a,
+            1,
+            BundleSigningRatificationV2Action::Ratify,
+            None,
+        );
         let ratified1 = h.verify_v2(&r1);
         let d1 = decide_v2_marker_acceptance_with_lifecycle_and_governance(
             make_inputs(
@@ -1507,7 +1619,10 @@ fn run() -> Vec<ScenarioRecord> {
             Err(MutatingSurfaceMarkerV2Error::GovernanceAuthorityRequiredButMissing {
                 action: LocalLifecycleAction::Rotate,
             }) => {}
-            other => panic!("H13: expected GovernanceAuthorityRequiredButMissing(Rotate), got {:?}", other),
+            other => panic!(
+                "H13: expected GovernanceAuthorityRequiredButMissing(Rotate), got {:?}",
+                other
+            ),
         }
         let post_sha = sha256_hex_of(&marker_path);
         assert_eq!(

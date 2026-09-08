@@ -42,8 +42,7 @@ use qbind_node::pqc_trust_bundle::{
     TrustBundleRoot,
 };
 use qbind_node::pqc_trust_reload::{
-    validate_candidate_bundle, validate_candidate_bundle_full, ReloadCheckError,
-    ReloadCheckInputs,
+    validate_candidate_bundle, validate_candidate_bundle_full, ReloadCheckError, ReloadCheckInputs,
 };
 use qbind_node::pqc_trust_sequence::{
     chain_id_hex, check_and_update_sequence, fingerprint_hex, load_record, peek_sequence,
@@ -189,10 +188,7 @@ fn snapshot_seq_file(path: &Path) -> Option<(Vec<u8>, std::time::SystemTime)> {
     Some((bytes, mtime))
 }
 
-fn assert_seq_file_unchanged(
-    path: &Path,
-    snapshot: Option<(Vec<u8>, std::time::SystemTime)>,
-) {
+fn assert_seq_file_unchanged(path: &Path, snapshot: Option<(Vec<u8>, std::time::SystemTime)>) {
     match (snapshot, path.exists()) {
         (None, false) => { /* both absent — ok */ }
         (None, true) => panic!(
@@ -301,7 +297,10 @@ fn run069_valid_higher_sequence_candidate_validates_and_does_not_write_sequence(
     assert_seq_file_unchanged(&seq_path, seq_snapshot);
     let record_after = load_record(&seq_path).unwrap().unwrap();
     assert_eq!(record_after.highest_sequence, 1);
-    assert_eq!(record_after.bundle_fingerprint, fingerprint_hex(&loaded1.fingerprint));
+    assert_eq!(
+        record_after.bundle_fingerprint,
+        fingerprint_hex(&loaded1.fingerprint)
+    );
 }
 
 // ============================================================================
@@ -394,9 +393,10 @@ fn run069_equal_sequence_different_fingerprint_rejected_without_mutation() {
     let err = validate_candidate_bundle(inputs).expect_err("equivocation rejected");
     assert!(matches!(
         err,
-        ReloadCheckError::Sequence(
-            TrustBundleSequenceError::EqualSequenceFingerprintMismatch { sequence: 2, .. }
-        )
+        ReloadCheckError::Sequence(TrustBundleSequenceError::EqualSequenceFingerprintMismatch {
+            sequence: 2,
+            ..
+        })
     ));
     assert_seq_file_unchanged(&seq_path, snap);
 }
@@ -461,7 +461,10 @@ fn run069_tampered_signature_candidate_rejected_without_mutation() {
     match err {
         ReloadCheckError::Bundle(TrustBundleError::BadSignature { .. }) => {}
         ReloadCheckError::Bundle(TrustBundleError::MalformedSignatureBytes { .. }) => {}
-        other => panic!("expected BadSignature/MalformedSignatureBytes, got {:?}", other),
+        other => panic!(
+            "expected BadSignature/MalformedSignatureBytes, got {:?}",
+            other
+        ),
     }
     assert_seq_file_unchanged(&seq_path, snap);
 }
@@ -513,8 +516,7 @@ fn run069_local_revoked_leaf_candidate_rejected_without_mutation() {
     // for that fingerprint to the candidate bundle.
     let cert = fixture_cert_with_root(0xA1, h.root_id);
     let cert_bytes = encode_cert_bytes(&cert);
-    let leaf_fp =
-        qbind_node::pqc_trust_bundle::cert_leaf_fingerprint(&cert);
+    let leaf_fp = qbind_node::pqc_trust_bundle::cert_leaf_fingerprint(&cert);
     let leaf_fp_hex = hex_lower(&leaf_fp);
 
     let revocation = TrustBundleRevocation {
@@ -576,8 +578,7 @@ fn run069_local_issuer_root_revoked_candidate_rejected_without_mutation() {
         0,
         Some(&cert_bytes),
     );
-    let err = validate_candidate_bundle(inputs)
-        .expect_err("local issuer-root revoked rejected");
+    let err = validate_candidate_bundle(inputs).expect_err("local issuer-root revoked rejected");
     match err {
         ReloadCheckError::LocalIssuerRootRevoked(_) => {}
         other => panic!("expected LocalIssuerRootRevoked, got {:?}", other),
@@ -693,17 +694,19 @@ fn run069_reload_check_and_live_loader_agree_on_active_roots() {
     assert!(candidate.signature_verified);
 
     // Live loader path on the same file.
-    let (loaded_live, _) =
-        TrustBundle::load_from_path_with_signing_keys_chain_id_and_activation(
-            &bundle_path,
-            NetworkEnvironment::Devnet,
-            NetworkEnvironment::Devnet.chain_id(),
-            100,
-            &h.signing_keys,
-            ActivationContext::height_only(0),
-        )
-        .expect("live loader");
-    assert_eq!(loaded_live.active_root_count(), loaded_reload.active_root_count());
+    let (loaded_live, _) = TrustBundle::load_from_path_with_signing_keys_chain_id_and_activation(
+        &bundle_path,
+        NetworkEnvironment::Devnet,
+        NetworkEnvironment::Devnet.chain_id(),
+        100,
+        &h.signing_keys,
+        ActivationContext::height_only(0),
+    )
+    .expect("live loader");
+    assert_eq!(
+        loaded_live.active_root_count(),
+        loaded_reload.active_root_count()
+    );
     assert_eq!(loaded_live.fingerprint, loaded_reload.fingerprint);
 }
 

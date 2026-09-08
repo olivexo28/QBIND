@@ -270,8 +270,7 @@ fn a1_a15_default_runtime_arming_is_disabled_and_compatible() {
     let env = TrustBundleEnvironment::Devnet;
     let td = trust_domain(env);
     let exp = rotate_expectations(env);
-    let outcome =
-        arming.preflight_reload_check(&td, &exp, &GovernanceExecutionLoadStatus::Absent);
+    let outcome = arming.preflight_reload_check(&td, &exp, &GovernanceExecutionLoadStatus::Absent);
     assert!(outcome.is_bypassed());
     assert!(!outcome.is_reject());
 }
@@ -315,8 +314,8 @@ fn a10_cli_over_env_precedence_through_runtime_config() {
 #[test]
 fn a11_r1_invalid_cli_selector_fails_closed_before_runtime_config() {
     let _g = EnvGuard::set(None);
-    let err = GovernanceExecutionRuntimeArmingConfig::from_cli_or_env(Some("totally-bogus"))
-        .unwrap_err();
+    let err =
+        GovernanceExecutionRuntimeArmingConfig::from_cli_or_env(Some("totally-bogus")).unwrap_err();
     assert!(matches!(
         err,
         GovernanceExecutionPolicySelectorParseError::UnknownValue { .. }
@@ -349,7 +348,10 @@ fn r2_invalid_env_selector_fails_closed() {
 #[test]
 fn r3_unrelated_env_does_not_arm_policy() {
     let _g = EnvGuard::set(None);
-    std::env::set_var("QBIND_SOME_UNRELATED_FLAG_217", "fixture-governance-allowed");
+    std::env::set_var(
+        "QBIND_SOME_UNRELATED_FLAG_217",
+        "fixture-governance-allowed",
+    );
     let arming = arming_from_cli(None);
     assert!(arming.is_disabled());
     std::env::remove_var("QBIND_SOME_UNRELATED_FLAG_217");
@@ -484,7 +486,9 @@ fn a9_peer_driven_drain_consumes_policy_and_mainnet_refused() {
     let td = trust_domain(dev);
     let exp = rotate_expectations(dev);
     let loaded = available_from(&rotate_input(dev), &rotate_decision());
-    assert!(arming.preflight_peer_driven_drain(&td, &exp, &loaded).is_accept());
+    assert!(arming
+        .preflight_peer_driven_drain(&td, &exp, &loaded)
+        .is_accept());
 
     // MainNet: refused unconditionally.
     let main = TrustBundleEnvironment::Mainnet;
@@ -613,8 +617,7 @@ fn r4_absent_rejected_under_fixture_allowed() {
     let arming = arming_from_cli(Some("fixture-governance-allowed"));
     let td = trust_domain(env);
     let exp = rotate_expectations(env);
-    let outcome =
-        arming.preflight_reload_check(&td, &exp, &GovernanceExecutionLoadStatus::Absent);
+    let outcome = arming.preflight_reload_check(&td, &exp, &GovernanceExecutionLoadStatus::Absent);
     assert!(outcome.is_required_but_absent());
     assert!(outcome.is_reject());
 }
@@ -628,8 +631,7 @@ fn r5_absent_rejected_under_production_required() {
     let arming = arming_from_cli(Some("production-governance-required"));
     let td = trust_domain(env);
     let exp = rotate_expectations(env);
-    let outcome =
-        arming.preflight_reload_check(&td, &exp, &GovernanceExecutionLoadStatus::Absent);
+    let outcome = arming.preflight_reload_check(&td, &exp, &GovernanceExecutionLoadStatus::Absent);
     assert!(outcome.is_required_but_absent());
 }
 
@@ -1076,8 +1078,10 @@ fn compatibility_with_sibling_run_selectors() {
         );
         // Run 199 RemoteSigner selector default.
         assert_eq!(
-            qbind_node::pqc_remote_signer_policy_surface::remote_signer_policy_from_cli_or_env(None)
-                .unwrap(),
+            qbind_node::pqc_remote_signer_policy_surface::remote_signer_policy_from_cli_or_env(
+                None
+            )
+            .unwrap(),
             qbind_node::pqc_remote_authority_signer::RemoteSignerPolicy::Disabled
         );
         // Run 210 custody-attestation selector default.

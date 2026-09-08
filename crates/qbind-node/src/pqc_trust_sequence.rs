@@ -205,9 +205,7 @@ impl PersistentTrustBundleSequenceRecord {
                 self.chain_id
             )));
         }
-        if self.bundle_fingerprint.len() != 64
-            || !is_lower_hex(&self.bundle_fingerprint)
-        {
+        if self.bundle_fingerprint.len() != 64 || !is_lower_hex(&self.bundle_fingerprint) {
             return Err(TrustBundleSequenceError::Malformed(format!(
                 "bundle_fingerprint must be exactly 64 lowercase hex chars (length {})",
                 self.bundle_fingerprint.len()
@@ -457,9 +455,8 @@ pub fn atomic_write_record(
     record: &PersistentTrustBundleSequenceRecord,
 ) -> Result<(), TrustBundleSequenceError> {
     use std::io::Write;
-    let bytes = serde_json::to_vec(record).map_err(|e| {
-        TrustBundleSequenceError::PersistFailure(format!("serialise: {}", e))
-    })?;
+    let bytes = serde_json::to_vec(record)
+        .map_err(|e| TrustBundleSequenceError::PersistFailure(format!("serialise: {}", e)))?;
     if let Some(parent) = path.parent() {
         if !parent.as_os_str().is_empty() {
             std::fs::create_dir_all(parent).map_err(|e| {
@@ -581,13 +578,11 @@ pub fn check_and_update_sequence(
                         fingerprint_hex: new_fp_hex,
                     });
                 }
-                return Err(
-                    TrustBundleSequenceError::EqualSequenceFingerprintMismatch {
-                        sequence: new_sequence,
-                        persisted_fingerprint_hex: record.bundle_fingerprint.clone(),
-                        new_fingerprint_hex: new_fp_hex,
-                    },
-                );
+                return Err(TrustBundleSequenceError::EqualSequenceFingerprintMismatch {
+                    sequence: new_sequence,
+                    persisted_fingerprint_hex: record.bundle_fingerprint.clone(),
+                    new_fingerprint_hex: new_fp_hex,
+                });
             }
             // new_sequence > record.highest_sequence — upgrade.
             let previous_sequence = record.highest_sequence;
@@ -743,13 +738,11 @@ pub fn peek_sequence(
                         fingerprint_hex: new_fp_hex,
                     });
                 }
-                return Err(
-                    TrustBundleSequenceError::EqualSequenceFingerprintMismatch {
-                        sequence: candidate_sequence,
-                        persisted_fingerprint_hex: record.bundle_fingerprint.clone(),
-                        new_fingerprint_hex: new_fp_hex,
-                    },
-                );
+                return Err(TrustBundleSequenceError::EqualSequenceFingerprintMismatch {
+                    sequence: candidate_sequence,
+                    persisted_fingerprint_hex: record.bundle_fingerprint.clone(),
+                    new_fingerprint_hex: new_fp_hex,
+                });
             }
             Ok(SequencePeekOutcome::WouldUpgrade {
                 previous_sequence: record.highest_sequence,
@@ -762,9 +755,7 @@ pub fn peek_sequence(
 }
 
 fn is_lower_hex(s: &str) -> bool {
-    !s.is_empty()
-        && s.bytes()
-            .all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
+    !s.is_empty() && s.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
 }
 
 #[cfg(test)]
@@ -1033,10 +1024,7 @@ mod tests {
         .expect("equal same fp");
         assert!(matches!(
             outcome,
-            SequenceCheckOutcome::EqualSequenceSameFingerprint {
-                sequence: 3,
-                ..
-            }
+            SequenceCheckOutcome::EqualSequenceSameFingerprint { sequence: 3, .. }
         ));
         assert!(!outcome.record_written());
         let mtime_after = std::fs::metadata(&path).unwrap().modified().unwrap();
@@ -1073,10 +1061,7 @@ mod tests {
         .expect("equiv");
         assert!(matches!(
             err,
-            TrustBundleSequenceError::EqualSequenceFingerprintMismatch {
-                sequence: 4,
-                ..
-            }
+            TrustBundleSequenceError::EqualSequenceFingerprintMismatch { sequence: 4, .. }
         ));
         let loaded = load_record(&path).expect("ok").expect("some");
         assert_eq!(loaded.highest_sequence, 4);
@@ -1335,7 +1320,10 @@ mod tests {
         .expect("peek ok");
         assert!(matches!(
             out,
-            SequencePeekOutcome::NoPriorRecord { candidate_sequence: 5, .. }
+            SequencePeekOutcome::NoPriorRecord {
+                candidate_sequence: 5,
+                ..
+            }
         ));
         assert!(out.persisted_sequence_before().is_none());
         // File must NOT have been created by the peek.
@@ -1480,10 +1468,7 @@ mod tests {
         .expect("err");
         assert!(matches!(
             err,
-            TrustBundleSequenceError::EqualSequenceFingerprintMismatch {
-                sequence: 5,
-                ..
-            }
+            TrustBundleSequenceError::EqualSequenceFingerprintMismatch { sequence: 5, .. }
         ));
         let bytes_after = std::fs::read(&path).unwrap();
         assert_eq!(bytes_before, bytes_after);

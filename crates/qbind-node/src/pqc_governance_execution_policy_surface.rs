@@ -106,6 +106,7 @@
 //! command line is the authoritative source for a single invocation. The
 //! env var still propagates when the CLI flag is absent.
 
+use crate::pqc_authority_lifecycle::AuthorityTrustDomain;
 use crate::pqc_governance_execution_payload_carrying::{
     callsite_context_for_governance_execution,
     route_loaded_governance_execution_to_live_inbound_0x05_callsite_decision,
@@ -121,7 +122,6 @@ use crate::pqc_governance_execution_payload_carrying::{
 use crate::pqc_governance_execution_policy::{
     GovernanceExecutionExpectations, GovernanceExecutionPolicy,
 };
-use crate::pqc_authority_lifecycle::AuthorityTrustDomain;
 
 // ===========================================================================
 // Env-var name + canonical selector tags

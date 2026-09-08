@@ -83,11 +83,10 @@ use parking_lot::Mutex as PlMutex;
 use qbind_crypto::MlDsa44Backend;
 use qbind_ledger::{
     bundle_signing_ratification::v2_test_helpers as ratification_v2_helpers,
-    compute_canonical_genesis_hash, BundleSigningRatificationV2,
-    BundleSigningRatificationV2Action, GenesisAllocation, GenesisAuthorityConfig,
-    GenesisAuthorityRoot, GenesisConfig, GenesisCouncilConfig, GenesisHash,
-    GenesisMonetaryConfig, GenesisValidator, NetworkEnvironmentPolicy, RatificationEnvironment,
-    GENESIS_AUTHORITY_SUITE_ML_DSA_44,
+    compute_canonical_genesis_hash, BundleSigningRatificationV2, BundleSigningRatificationV2Action,
+    GenesisAllocation, GenesisAuthorityConfig, GenesisAuthorityRoot, GenesisConfig,
+    GenesisCouncilConfig, GenesisHash, GenesisMonetaryConfig, GenesisValidator,
+    NetworkEnvironmentPolicy, RatificationEnvironment, GENESIS_AUTHORITY_SUITE_ML_DSA_44,
 };
 use qbind_node::pqc_authority_state::{
     authority_state_file_path, load_authority_state_versioned, AuthorityStateUpdateSource,
@@ -196,7 +195,10 @@ fn harness(env: NetworkEnvironment) -> Harness {
     let mut genesis_cfg = GenesisConfig::new(
         &chain_id_str,
         1_738_000_000_000,
-        vec![GenesisAllocation::new(format!("0x{}", "11".repeat(32)), 100)],
+        vec![GenesisAllocation::new(
+            format!("0x{}", "11".repeat(32)),
+            100,
+        )],
         vec![GenesisValidator::new(
             format!("0x{}", "22".repeat(32)),
             "ab".repeat(32),
@@ -492,7 +494,10 @@ impl MockMarker {
 
 impl V2MarkerCoordinator for MockMarker {
     fn decide_pre_apply(&mut self) -> Result<(), String> {
-        self.timeline.lock().unwrap().push("decide_pre_apply".into());
+        self.timeline
+            .lock()
+            .unwrap()
+            .push("decide_pre_apply".into());
         self.pre.clone()
     }
     fn persist_after_commit(&mut self) -> Result<(), String> {
@@ -564,8 +569,10 @@ fn pre_persist_marker(
     ratified: qbind_ledger::RatifiedBundleSigningKeyV2,
 ) {
     let mut c = prod_marker(h, marker_path, ratification, ratified, 50);
-    c.decide_pre_apply().expect("prime: decide accepts first write");
-    c.persist_after_commit().expect("prime: persist first marker");
+    c.decide_pre_apply()
+        .expect("prime: decide accepts first write");
+    c.persist_after_commit()
+        .expect("prime: persist first marker");
 }
 
 fn shared_queue(policy: PeerDrivenStagingPolicy) -> SharedQueue {
@@ -610,8 +617,9 @@ fn marker_file_absent(marker_path: &Path) {
     );
 }
 
-fn load_marker_v2(marker_path: &Path) -> qbind_node::pqc_authority_state::PersistentAuthorityStateRecordV2
-{
+fn load_marker_v2(
+    marker_path: &Path,
+) -> qbind_node::pqc_authority_state::PersistentAuthorityStateRecordV2 {
     match load_authority_state_versioned(marker_path).expect("load marker") {
         Some(PersistentAuthorityStateRecordVersioned::V2(v2)) => v2,
         other => panic!("expected a persisted v2 marker, got {:?}", other),
@@ -646,11 +654,23 @@ fn a1_shared_queue_is_the_same_queue_the_drain_consumes() {
         Some("digest-a1".into()),
     );
     // A *different* clone of the same Arc sees the staged candidate.
-    assert_eq!(drain_view.lock().len(), 1, "drain sees the staged candidate");
+    assert_eq!(
+        drain_view.lock().len(),
+        1,
+        "drain sees the staged candidate"
+    );
 
     // A disabled drain must not mutate the shared queue.
     let ctx = FakeCtx::new("aaaaaaaa");
-    let mut builder = prod_builder(&h, &candidate_path, Some(&seq_path), ctx, "aaaaaaaa", Some(3), 1_001);
+    let mut builder = prod_builder(
+        &h,
+        &candidate_path,
+        Some(&seq_path),
+        ctx,
+        "aaaaaaaa",
+        Some(3),
+        1_001,
+    );
     let ratification = build_ratification(&h, 5);
     let ratified = ratified_v2(&h, &ratification);
     let mut marker = prod_marker(&h, &marker_path, ratification, ratified, 1_001);
@@ -666,7 +686,11 @@ fn a1_shared_queue_is_the_same_queue_the_drain_consumes() {
         1_001,
     );
     assert!(matches!(disabled, PeerDrivenDrainOutcome::Disabled));
-    assert_eq!(queue.lock().len(), 1, "disabled drain must not mutate queue");
+    assert_eq!(
+        queue.lock().len(),
+        1,
+        "disabled drain must not mutate queue"
+    );
     marker_file_absent(&marker_path);
 
     // An enabled drain consumes the candidate from the shared queue.
@@ -681,13 +705,21 @@ fn a1_shared_queue_is_the_same_queue_the_drain_consumes() {
         1_002,
     );
     match &applied {
-        PeerDrivenDrainOutcome::Applied { sequence, fingerprint_prefix, .. } => {
+        PeerDrivenDrainOutcome::Applied {
+            sequence,
+            fingerprint_prefix,
+            ..
+        } => {
             assert_eq!(*sequence, 5);
             assert_eq!(fingerprint_prefix, &validated.fingerprint_prefix);
         }
         other => panic!("expected Applied, got {:?}", other),
     }
-    assert_eq!(queue.lock().len(), 0, "drained candidate removed from shared queue");
+    assert_eq!(
+        queue.lock().len(),
+        0,
+        "drained candidate removed from shared queue"
+    );
 }
 
 // =====================================================================
@@ -707,7 +739,12 @@ fn a2_devnet_production_builder_and_marker_apply_end_to_end() {
 
     let queue = shared_queue(PeerDrivenStagingPolicy::devnet_enabled());
     let _v = stage_into_shared(
-        &queue, &h, &candidate_path, Some(&seq_path), Some("peer-a2"), 1_000,
+        &queue,
+        &h,
+        &candidate_path,
+        Some(&seq_path),
+        Some("peer-a2"),
+        1_000,
         Some("digest-a2".into()),
     );
 
@@ -715,9 +752,19 @@ fn a2_devnet_production_builder_and_marker_apply_end_to_end() {
     {
         let staged = queue.lock().entries()[0].clone();
         let ctx = FakeCtx::new("aaaaaaaa");
-        let mut probe = prod_builder(&h, &candidate_path, Some(&seq_path), ctx, "aaaaaaaa", Some(3), 1_001);
+        let mut probe = prod_builder(
+            &h,
+            &candidate_path,
+            Some(&seq_path),
+            ctx,
+            "aaaaaaaa",
+            Some(3),
+            1_001,
+        );
         use qbind_node::pqc_peer_candidate_drain::PeerDrivenDrainInvocationBuilder;
-        let inv = probe.build_for(&staged).expect("production builder constructs invocation");
+        let inv = probe
+            .build_for(&staged)
+            .expect("production builder constructs invocation");
         drop(inv);
         marker_file_absent(&marker_path);
         assert!(!seq_path.exists(), "build must not write the sequence file");
@@ -725,7 +772,15 @@ fn a2_devnet_production_builder_and_marker_apply_end_to_end() {
 
     // Now drive the full drain.
     let ctx = FakeCtx::new("aaaaaaaa");
-    let mut builder = prod_builder(&h, &candidate_path, Some(&seq_path), ctx, "aaaaaaaa", Some(3), 1_001);
+    let mut builder = prod_builder(
+        &h,
+        &candidate_path,
+        Some(&seq_path),
+        ctx,
+        "aaaaaaaa",
+        Some(3),
+        1_001,
+    );
     let ratification = build_ratification(&h, 5);
     let ratified = ratified_v2(&h, &ratification);
     let mut marker = prod_marker(&h, &marker_path, ratification, ratified, 1_001);
@@ -741,9 +796,16 @@ fn a2_devnet_production_builder_and_marker_apply_end_to_end() {
         1_002,
     );
     match &outcome {
-        PeerDrivenDrainOutcome::Applied { marker_persisted, sequence, .. } => {
+        PeerDrivenDrainOutcome::Applied {
+            marker_persisted,
+            sequence,
+            ..
+        } => {
             assert_eq!(*sequence, 5);
-            assert!(*marker_persisted, "production v2 marker persisted after commit");
+            assert!(
+                *marker_persisted,
+                "production v2 marker persisted after commit"
+            );
         }
         other => panic!("expected Applied, got {:?}", other),
     }
@@ -769,12 +831,25 @@ fn a3_testnet_production_builder_and_marker_apply_under_testnet_policy() {
 
     let queue = shared_queue(PeerDrivenStagingPolicy::testnet_enabled());
     let _v = stage_into_shared(
-        &queue, &h, &candidate_path, Some(&seq_path), Some("peer-a3"), 1_000,
+        &queue,
+        &h,
+        &candidate_path,
+        Some(&seq_path),
+        Some("peer-a3"),
+        1_000,
         Some("digest-a3".into()),
     );
 
     let ctx = FakeCtx::new("aaaaaaaa");
-    let mut builder = prod_builder(&h, &candidate_path, Some(&seq_path), ctx, "aaaaaaaa", Some(3), 1_001);
+    let mut builder = prod_builder(
+        &h,
+        &candidate_path,
+        Some(&seq_path),
+        ctx,
+        "aaaaaaaa",
+        Some(3),
+        1_001,
+    );
     let ratification = build_ratification(&h, 9);
     let ratified = ratified_v2(&h, &ratification);
     let mut marker = prod_marker(&h, &marker_path, ratification, ratified, 1_001);
@@ -790,7 +865,11 @@ fn a3_testnet_production_builder_and_marker_apply_under_testnet_policy() {
         1_002,
     );
     match &outcome {
-        PeerDrivenDrainOutcome::Applied { sequence, marker_persisted, .. } => {
+        PeerDrivenDrainOutcome::Applied {
+            sequence,
+            marker_persisted,
+            ..
+        } => {
             assert_eq!(*sequence, 9);
             assert!(*marker_persisted);
         }
@@ -815,19 +894,35 @@ fn a4_routes_through_run150_run148_run070_in_strict_order() {
 
     let queue = shared_queue(PeerDrivenStagingPolicy::devnet_enabled());
     let _v = stage_into_shared(
-        &queue, &h, &candidate_path, Some(&seq_path), Some("peer-a4"), 1_000,
+        &queue,
+        &h,
+        &candidate_path,
+        Some(&seq_path),
+        Some("peer-a4"),
+        1_000,
         Some("digest-a4".into()),
     );
 
     let ctx = FakeCtx::new("aaaaaaaa");
     let timeline = ctx.timeline();
-    let mut builder = prod_builder(&h, &candidate_path, Some(&seq_path), ctx, "aaaaaaaa", Some(3), 1_001);
+    let mut builder = prod_builder(
+        &h,
+        &candidate_path,
+        Some(&seq_path),
+        ctx,
+        "aaaaaaaa",
+        Some(3),
+        1_001,
+    );
     let ratification = build_ratification(&h, 5);
     let ratified = ratified_v2(&h, &ratification);
     let mut marker = prod_marker(&h, &marker_path, ratification, ratified, 1_001);
     let drain = PeerDrivenApplyDrain::new();
     let outcome = try_drain_once_shared(
-        &drain, &queue, &mut builder, &mut marker,
+        &drain,
+        &queue,
+        &mut builder,
+        &mut marker,
         &PeerDrivenDrainPolicy::devnet_enabled(),
         &PeerDrivenApplyPolicy::devnet_enabled(),
         &runtime_domain(&h),
@@ -862,17 +957,33 @@ fn a5_marker_persist_is_strictly_after_commit_sequence() {
 
     let queue = shared_queue(PeerDrivenStagingPolicy::devnet_enabled());
     let _v = stage_into_shared(
-        &queue, &h, &candidate_path, Some(&seq_path), Some("peer-a5"), 1_000,
+        &queue,
+        &h,
+        &candidate_path,
+        Some(&seq_path),
+        Some("peer-a5"),
+        1_000,
         Some("digest-a5".into()),
     );
 
     let timeline = Arc::new(Mutex::new(Vec::new()));
     let ctx = FakeCtx::with_timeline("aaaaaaaa", Arc::clone(&timeline));
-    let mut builder = prod_builder(&h, &candidate_path, Some(&seq_path), ctx, "aaaaaaaa", Some(3), 1_001);
+    let mut builder = prod_builder(
+        &h,
+        &candidate_path,
+        Some(&seq_path),
+        ctx,
+        "aaaaaaaa",
+        Some(3),
+        1_001,
+    );
     let mut marker = MockMarker::with_timeline(Arc::clone(&timeline));
     let drain = PeerDrivenApplyDrain::new();
     let outcome = try_drain_once_shared(
-        &drain, &queue, &mut builder, &mut marker,
+        &drain,
+        &queue,
+        &mut builder,
+        &mut marker,
         &PeerDrivenDrainPolicy::devnet_enabled(),
         &PeerDrivenApplyPolicy::devnet_enabled(),
         &runtime_domain(&h),
@@ -908,7 +1019,12 @@ fn a6_second_drain_cannot_double_apply() {
 
     let queue = shared_queue(PeerDrivenStagingPolicy::devnet_enabled());
     let _v = stage_into_shared(
-        &queue, &h, &candidate_path, Some(&seq_path), Some("peer-a6"), 1_000,
+        &queue,
+        &h,
+        &candidate_path,
+        Some(&seq_path),
+        Some("peer-a6"),
+        1_000,
         Some("digest-a6".into()),
     );
 
@@ -916,12 +1032,23 @@ fn a6_second_drain_cannot_double_apply() {
 
     // First drain: Applied.
     let ctx = FakeCtx::new("aaaaaaaa");
-    let mut builder = prod_builder(&h, &candidate_path, Some(&seq_path), ctx, "aaaaaaaa", Some(3), 1_001);
+    let mut builder = prod_builder(
+        &h,
+        &candidate_path,
+        Some(&seq_path),
+        ctx,
+        "aaaaaaaa",
+        Some(3),
+        1_001,
+    );
     let r = build_ratification(&h, 5);
     let rd = ratified_v2(&h, &r);
     let mut marker = prod_marker(&h, &marker_path, r, rd, 1_001);
     let first = try_drain_once_shared(
-        &drain, &queue, &mut builder, &mut marker,
+        &drain,
+        &queue,
+        &mut builder,
+        &mut marker,
         &PeerDrivenDrainPolicy::devnet_enabled(),
         &PeerDrivenApplyPolicy::devnet_enabled(),
         &runtime_domain(&h),
@@ -934,19 +1061,33 @@ fn a6_second_drain_cannot_double_apply() {
     // Run 070 pipeline is never invoked again.
     let ctx2 = FakeCtx::new("zzzzzzzz");
     let timeline2 = ctx2.timeline();
-    let mut builder2 = prod_builder(&h, &candidate_path, Some(&seq_path), ctx2, "aaaaaaaa", Some(3), 1_003);
+    let mut builder2 = prod_builder(
+        &h,
+        &candidate_path,
+        Some(&seq_path),
+        ctx2,
+        "aaaaaaaa",
+        Some(3),
+        1_003,
+    );
     let r2 = build_ratification(&h, 5);
     let rd2 = ratified_v2(&h, &r2);
     let mut marker2 = prod_marker(&h, &marker_path, r2, rd2, 1_003);
     let second = try_drain_once_shared(
-        &drain, &queue, &mut builder2, &mut marker2,
+        &drain,
+        &queue,
+        &mut builder2,
+        &mut marker2,
         &PeerDrivenDrainPolicy::devnet_enabled(),
         &PeerDrivenApplyPolicy::devnet_enabled(),
         &runtime_domain(&h),
         1_003,
     );
     assert!(matches!(second, PeerDrivenDrainOutcome::NoCandidate));
-    assert!(timeline2.lock().unwrap().is_empty(), "no second Run 070 apply");
+    assert!(
+        timeline2.lock().unwrap().is_empty(),
+        "no second Run 070 apply"
+    );
 }
 
 // =====================================================================
@@ -964,13 +1105,26 @@ fn a7_concurrency_guard_prevents_reentrant_drain() {
 
     let queue = shared_queue(PeerDrivenStagingPolicy::devnet_enabled());
     let _v = stage_into_shared(
-        &queue, &h, &candidate_path, Some(&seq_path), Some("peer-a7"), 1_000,
+        &queue,
+        &h,
+        &candidate_path,
+        Some(&seq_path),
+        Some("peer-a7"),
+        1_000,
         Some("digest-a7".into()),
     );
 
     let ctx = FakeCtx::new("aaaaaaaa");
     let timeline = ctx.timeline();
-    let mut builder = prod_builder(&h, &candidate_path, Some(&seq_path), ctx, "aaaaaaaa", Some(3), 1_001);
+    let mut builder = prod_builder(
+        &h,
+        &candidate_path,
+        Some(&seq_path),
+        ctx,
+        "aaaaaaaa",
+        Some(3),
+        1_001,
+    );
     let r = build_ratification(&h, 5);
     let rd = ratified_v2(&h, &r);
     let mut marker = prod_marker(&h, &marker_path, r, rd, 1_001);
@@ -980,27 +1134,40 @@ fn a7_concurrency_guard_prevents_reentrant_drain() {
     let flag = drain.in_progress_flag();
     flag.store(true, Ordering::Release);
     let blocked = try_drain_once_shared(
-        &drain, &queue, &mut builder, &mut marker,
+        &drain,
+        &queue,
+        &mut builder,
+        &mut marker,
         &PeerDrivenDrainPolicy::devnet_enabled(),
         &PeerDrivenApplyPolicy::devnet_enabled(),
         &runtime_domain(&h),
         1_002,
     );
     assert!(matches!(blocked, PeerDrivenDrainOutcome::AlreadyInProgress));
-    assert!(timeline.lock().unwrap().is_empty(), "no Run 070 apply while blocked");
+    assert!(
+        timeline.lock().unwrap().is_empty(),
+        "no Run 070 apply while blocked"
+    );
     assert_eq!(queue.lock().len(), 1);
     marker_file_absent(&marker_path);
 
     // Release: a subsequent trigger proceeds.
     flag.store(false, Ordering::Release);
     let ok = try_drain_once_shared(
-        &drain, &queue, &mut builder, &mut marker,
+        &drain,
+        &queue,
+        &mut builder,
+        &mut marker,
         &PeerDrivenDrainPolicy::devnet_enabled(),
         &PeerDrivenApplyPolicy::devnet_enabled(),
         &runtime_domain(&h),
         1_003,
     );
-    assert!(ok.is_applied(), "after guard release, drain proceeds; got {:?}", ok);
+    assert!(
+        ok.is_applied(),
+        "after guard release, drain proceeds; got {:?}",
+        ok
+    );
 }
 
 // =====================================================================
@@ -1018,19 +1185,35 @@ fn r1_disabled_policy_no_mutation() {
 
     let queue = shared_queue(PeerDrivenStagingPolicy::devnet_enabled());
     let _v = stage_into_shared(
-        &queue, &h, &candidate_path, Some(&seq_path), Some("peer-r1"), 1_000,
+        &queue,
+        &h,
+        &candidate_path,
+        Some(&seq_path),
+        Some("peer-r1"),
+        1_000,
         Some("digest-r1".into()),
     );
 
     let ctx = FakeCtx::new("aaaaaaaa");
     let timeline = ctx.timeline();
-    let mut builder = prod_builder(&h, &candidate_path, Some(&seq_path), ctx, "aaaaaaaa", Some(3), 1_001);
+    let mut builder = prod_builder(
+        &h,
+        &candidate_path,
+        Some(&seq_path),
+        ctx,
+        "aaaaaaaa",
+        Some(3),
+        1_001,
+    );
     let r = build_ratification(&h, 5);
     let rd = ratified_v2(&h, &r);
     let mut marker = prod_marker(&h, &marker_path, r, rd, 1_001);
     let drain = PeerDrivenApplyDrain::new();
     let outcome = try_drain_once_shared(
-        &drain, &queue, &mut builder, &mut marker,
+        &drain,
+        &queue,
+        &mut builder,
+        &mut marker,
         &PeerDrivenDrainPolicy::default(),
         &PeerDrivenApplyPolicy::default(),
         &runtime_domain(&h),
@@ -1058,19 +1241,35 @@ fn r2_mainnet_refused_before_queue_consulted() {
 
     let queue = shared_queue(PeerDrivenStagingPolicy::devnet_enabled());
     let _v = stage_into_shared(
-        &queue, &h, &candidate_path, Some(&seq_path), Some("peer-r2"), 1_000,
+        &queue,
+        &h,
+        &candidate_path,
+        Some(&seq_path),
+        Some("peer-r2"),
+        1_000,
         Some("digest-r2".into()),
     );
 
     let ctx = FakeCtx::new("aaaaaaaa");
     let timeline = ctx.timeline();
-    let mut builder = prod_builder(&h, &candidate_path, Some(&seq_path), ctx, "aaaaaaaa", Some(3), 1_001);
+    let mut builder = prod_builder(
+        &h,
+        &candidate_path,
+        Some(&seq_path),
+        ctx,
+        "aaaaaaaa",
+        Some(3),
+        1_001,
+    );
     let r = build_ratification(&h, 5);
     let rd = ratified_v2(&h, &r);
     let mut marker = prod_marker(&h, &marker_path, r, rd, 1_001);
     let drain = PeerDrivenApplyDrain::new();
     let outcome = try_drain_once_shared(
-        &drain, &queue, &mut builder, &mut marker,
+        &drain,
+        &queue,
+        &mut builder,
+        &mut marker,
         &PeerDrivenDrainPolicy::mainnet_attempted(),
         &PeerDrivenApplyPolicy::mainnet_attempted(),
         &mainnet_runtime_domain(),
@@ -1079,7 +1278,11 @@ fn r2_mainnet_refused_before_queue_consulted() {
     assert!(matches!(outcome, PeerDrivenDrainOutcome::MainNetRefused));
     assert!(outcome.is_pre_controller_refusal());
     assert!(timeline.lock().unwrap().is_empty());
-    assert_eq!(queue.lock().len(), 1, "queue not consulted on MainNet refusal");
+    assert_eq!(
+        queue.lock().len(),
+        1,
+        "queue not consulted on MainNet refusal"
+    );
     marker_file_absent(&marker_path);
 }
 
@@ -1100,13 +1303,24 @@ fn r3_empty_shared_queue_no_candidate() {
 
     let ctx = FakeCtx::new("aaaaaaaa");
     let timeline = ctx.timeline();
-    let mut builder = prod_builder(&h, &candidate_path, Some(&seq_path), ctx, "aaaaaaaa", Some(3), 1_001);
+    let mut builder = prod_builder(
+        &h,
+        &candidate_path,
+        Some(&seq_path),
+        ctx,
+        "aaaaaaaa",
+        Some(3),
+        1_001,
+    );
     let r = build_ratification(&h, 5);
     let rd = ratified_v2(&h, &r);
     let mut marker = prod_marker(&h, &marker_path, r, rd, 1_001);
     let drain = PeerDrivenApplyDrain::new();
     let outcome = try_drain_once_shared(
-        &drain, &queue, &mut builder, &mut marker,
+        &drain,
+        &queue,
+        &mut builder,
+        &mut marker,
         &PeerDrivenDrainPolicy::devnet_enabled(),
         &PeerDrivenApplyPolicy::devnet_enabled(),
         &runtime_domain(&h),
@@ -1136,13 +1350,26 @@ fn r4_expired_candidate_not_selected() {
         sp
     });
     let _v = stage_into_shared(
-        &queue, &h, &candidate_path, Some(&seq_path), Some("peer-r4"), 1_000,
+        &queue,
+        &h,
+        &candidate_path,
+        Some(&seq_path),
+        Some("peer-r4"),
+        1_000,
         Some("digest-r4".into()),
     );
 
     let ctx = FakeCtx::new("aaaaaaaa");
     let timeline = ctx.timeline();
-    let mut builder = prod_builder(&h, &candidate_path, Some(&seq_path), ctx, "aaaaaaaa", Some(3), 5_000);
+    let mut builder = prod_builder(
+        &h,
+        &candidate_path,
+        Some(&seq_path),
+        ctx,
+        "aaaaaaaa",
+        Some(3),
+        5_000,
+    );
     let r = build_ratification(&h, 5);
     let rd = ratified_v2(&h, &r);
     let mut marker = prod_marker(&h, &marker_path, r, rd, 5_000);
@@ -1150,7 +1377,10 @@ fn r4_expired_candidate_not_selected() {
     drain_policy.max_candidate_age_secs = 10;
     let drain = PeerDrivenApplyDrain::new();
     let outcome = try_drain_once_shared(
-        &drain, &queue, &mut builder, &mut marker,
+        &drain,
+        &queue,
+        &mut builder,
+        &mut marker,
         &drain_policy,
         &PeerDrivenApplyPolicy::devnet_enabled(),
         &runtime_domain(&h),
@@ -1183,13 +1413,26 @@ fn r5_lower_sequence_real_marker_conflict_no_run070() {
 
     let queue = shared_queue(PeerDrivenStagingPolicy::devnet_enabled());
     let _v = stage_into_shared(
-        &queue, &h, &candidate_path, Some(&seq_path), Some("peer-r5"), 1_000,
+        &queue,
+        &h,
+        &candidate_path,
+        Some(&seq_path),
+        Some("peer-r5"),
+        1_000,
         Some("digest-r5".into()),
     );
 
     let ctx = FakeCtx::new("aaaaaaaa");
     let timeline = ctx.timeline();
-    let mut builder = prod_builder(&h, &candidate_path, Some(&seq_path), ctx, "aaaaaaaa", Some(3), 1_001);
+    let mut builder = prod_builder(
+        &h,
+        &candidate_path,
+        Some(&seq_path),
+        ctx,
+        "aaaaaaaa",
+        Some(3),
+        1_001,
+    );
     // Drain coordinator ratification sequence (5) is LOWER than the
     // persisted marker (10) → real rollback refusal.
     let r = build_ratification(&h, 5);
@@ -1197,17 +1440,30 @@ fn r5_lower_sequence_real_marker_conflict_no_run070() {
     let mut marker = prod_marker(&h, &marker_path, r, rd, 1_001);
     let drain = PeerDrivenApplyDrain::new();
     let outcome = try_drain_once_shared(
-        &drain, &queue, &mut builder, &mut marker,
+        &drain,
+        &queue,
+        &mut builder,
+        &mut marker,
         &PeerDrivenDrainPolicy::devnet_enabled(),
         &PeerDrivenApplyPolicy::devnet_enabled(),
         &runtime_domain(&h),
         1_002,
     );
-    assert!(matches!(outcome, PeerDrivenDrainOutcome::CandidateMarkerConflict { .. }));
+    assert!(matches!(
+        outcome,
+        PeerDrivenDrainOutcome::CandidateMarkerConflict { .. }
+    ));
     assert!(timeline.lock().unwrap().is_empty(), "no Run 070 apply");
     let marker_after = std::fs::read(&marker_path).expect("read marker after");
-    assert_eq!(marker_before, marker_after, "persisted marker must be untouched");
-    assert_eq!(queue.lock().len(), 1, "conflict leaves queue for reconciliation");
+    assert_eq!(
+        marker_before, marker_after,
+        "persisted marker must be untouched"
+    );
+    assert_eq!(
+        queue.lock().len(),
+        1,
+        "conflict leaves queue for reconciliation"
+    );
 }
 
 // =====================================================================
@@ -1232,13 +1488,26 @@ fn r6_same_sequence_different_digest_real_marker_conflict() {
 
     let queue = shared_queue(PeerDrivenStagingPolicy::devnet_enabled());
     let _v = stage_into_shared(
-        &queue, &h, &candidate_path, Some(&seq_path), Some("peer-r6"), 1_000,
+        &queue,
+        &h,
+        &candidate_path,
+        Some(&seq_path),
+        Some("peer-r6"),
+        1_000,
         Some("digest-r6".into()),
     );
 
     let ctx = FakeCtx::new("aaaaaaaa");
     let timeline = ctx.timeline();
-    let mut builder = prod_builder(&h, &candidate_path, Some(&seq_path), ctx, "aaaaaaaa", Some(3), 1_001);
+    let mut builder = prod_builder(
+        &h,
+        &candidate_path,
+        Some(&seq_path),
+        ctx,
+        "aaaaaaaa",
+        Some(3),
+        1_001,
+    );
     // Same seq (5) but ratifying a DIFFERENT signing key → conflicting
     // digest at the same authority_domain_sequence.
     let r = build_ratification_for(&h, 5, &h.alt_signing_pk);
@@ -1246,16 +1515,25 @@ fn r6_same_sequence_different_digest_real_marker_conflict() {
     let mut marker = prod_marker(&h, &marker_path, r, rd, 1_001);
     let drain = PeerDrivenApplyDrain::new();
     let outcome = try_drain_once_shared(
-        &drain, &queue, &mut builder, &mut marker,
+        &drain,
+        &queue,
+        &mut builder,
+        &mut marker,
         &PeerDrivenDrainPolicy::devnet_enabled(),
         &PeerDrivenApplyPolicy::devnet_enabled(),
         &runtime_domain(&h),
         1_002,
     );
-    assert!(matches!(outcome, PeerDrivenDrainOutcome::CandidateMarkerConflict { .. }));
+    assert!(matches!(
+        outcome,
+        PeerDrivenDrainOutcome::CandidateMarkerConflict { .. }
+    ));
     assert!(timeline.lock().unwrap().is_empty(), "no Run 070 apply");
     let marker_after = std::fs::read(&marker_path).expect("read marker after");
-    assert_eq!(marker_before, marker_after, "persisted marker must be untouched");
+    assert_eq!(
+        marker_before, marker_after,
+        "persisted marker must be untouched"
+    );
 }
 
 // =====================================================================
@@ -1276,7 +1554,12 @@ fn r7_bad_signature_on_disk_bundle_rejected_before_swap() {
 
     let queue = shared_queue(PeerDrivenStagingPolicy::devnet_enabled());
     let _v = stage_into_shared(
-        &queue, &h, &candidate_path, Some(&seq_path), Some("peer-r7"), 1_000,
+        &queue,
+        &h,
+        &candidate_path,
+        Some(&seq_path),
+        Some("peer-r7"),
+        1_000,
         Some("digest-r7".into()),
     );
 
@@ -1293,13 +1576,24 @@ fn r7_bad_signature_on_disk_bundle_rejected_before_swap() {
 
     let ctx = FakeCtx::new("aaaaaaaa");
     let timeline = ctx.timeline();
-    let mut builder = prod_builder(&h, &candidate_path, Some(&seq_path), ctx, "aaaaaaaa", Some(3), 1_001);
+    let mut builder = prod_builder(
+        &h,
+        &candidate_path,
+        Some(&seq_path),
+        ctx,
+        "aaaaaaaa",
+        Some(3),
+        1_001,
+    );
     let r = build_ratification(&h, 5);
     let rd = ratified_v2(&h, &r);
     let mut marker = prod_marker(&h, &marker_path, r, rd, 1_001);
     let drain = PeerDrivenApplyDrain::new();
     let outcome = try_drain_once_shared(
-        &drain, &queue, &mut builder, &mut marker,
+        &drain,
+        &queue,
+        &mut builder,
+        &mut marker,
         &PeerDrivenDrainPolicy::devnet_enabled(),
         &PeerDrivenApplyPolicy::devnet_enabled(),
         &runtime_domain(&h),
@@ -1307,12 +1601,18 @@ fn r7_bad_signature_on_disk_bundle_rejected_before_swap() {
     );
     match &outcome {
         PeerDrivenDrainOutcome::ApplyRejected { inner, .. } => {
-            assert!(matches!(inner, PeerDrivenApplyOutcome::ApplyRejected { .. }));
+            assert!(matches!(
+                inner,
+                PeerDrivenApplyOutcome::ApplyRejected { .. }
+            ));
         }
         other => panic!("expected ApplyRejected (bad signature), got {:?}", other),
     }
     let ev = timeline.lock().unwrap().clone();
-    assert!(!ev.contains(&"swap_trust_state".to_string()), "no swap on bad sig");
+    assert!(
+        !ev.contains(&"swap_trust_state".to_string()),
+        "no swap on bad sig"
+    );
     marker_file_absent(&marker_path);
 }
 
@@ -1332,20 +1632,36 @@ fn r8_wrong_domain_candidate_not_selected() {
 
     let queue = shared_queue(PeerDrivenStagingPolicy::devnet_enabled());
     let _v = stage_into_shared(
-        &queue, &dh, &candidate_path, Some(&seq_path), Some("peer-r8"), 1_000,
+        &queue,
+        &dh,
+        &candidate_path,
+        Some(&seq_path),
+        Some("peer-r8"),
+        1_000,
         Some("digest-r8".into()),
     );
 
     let th = harness(NetworkEnvironment::Testnet);
     let ctx = FakeCtx::new("aaaaaaaa");
     let timeline = ctx.timeline();
-    let mut builder = prod_builder(&th, &candidate_path, Some(&seq_path), ctx, "aaaaaaaa", Some(3), 1_001);
+    let mut builder = prod_builder(
+        &th,
+        &candidate_path,
+        Some(&seq_path),
+        ctx,
+        "aaaaaaaa",
+        Some(3),
+        1_001,
+    );
     let r = build_ratification(&th, 5);
     let rd = ratified_v2(&th, &r);
     let mut marker = prod_marker(&th, &marker_path, r, rd, 1_001);
     let drain = PeerDrivenApplyDrain::new();
     let outcome = try_drain_once_shared(
-        &drain, &queue, &mut builder, &mut marker,
+        &drain,
+        &queue,
+        &mut builder,
+        &mut marker,
         &PeerDrivenDrainPolicy::testnet_enabled(),
         &PeerDrivenApplyPolicy::testnet_enabled(),
         &runtime_domain(&th),
@@ -1353,7 +1669,11 @@ fn r8_wrong_domain_candidate_not_selected() {
     );
     assert!(matches!(outcome, PeerDrivenDrainOutcome::NoCandidate));
     assert!(timeline.lock().unwrap().is_empty());
-    assert_eq!(queue.lock().len(), 1, "wrong-domain candidate left in queue");
+    assert_eq!(
+        queue.lock().len(),
+        1,
+        "wrong-domain candidate left in queue"
+    );
     marker_file_absent(&marker_path);
 }
 
@@ -1374,19 +1694,36 @@ fn r9_missing_v2_digest_builder_fail_closed() {
     let queue = shared_queue(PeerDrivenStagingPolicy::devnet_enabled());
     // Stage WITHOUT a v2 authority_marker_digest.
     let _v = stage_into_shared(
-        &queue, &h, &candidate_path, Some(&seq_path), Some("peer-r9"), 1_000, None,
+        &queue,
+        &h,
+        &candidate_path,
+        Some(&seq_path),
+        Some("peer-r9"),
+        1_000,
+        None,
     );
 
     let ctx = FakeCtx::new("aaaaaaaa");
     let timeline = ctx.timeline();
     // require_v2_marker_digest defaults to true.
-    let mut builder = prod_builder(&h, &candidate_path, Some(&seq_path), ctx, "aaaaaaaa", Some(3), 1_001);
+    let mut builder = prod_builder(
+        &h,
+        &candidate_path,
+        Some(&seq_path),
+        ctx,
+        "aaaaaaaa",
+        Some(3),
+        1_001,
+    );
     let r = build_ratification(&h, 5);
     let rd = ratified_v2(&h, &r);
     let mut marker = prod_marker(&h, &marker_path, r, rd, 1_001);
     let drain = PeerDrivenApplyDrain::new();
     let outcome = try_drain_once_shared(
-        &drain, &queue, &mut builder, &mut marker,
+        &drain,
+        &queue,
+        &mut builder,
+        &mut marker,
         &PeerDrivenDrainPolicy::devnet_enabled(),
         &PeerDrivenApplyPolicy::devnet_enabled(),
         &runtime_domain(&h),
@@ -1394,7 +1731,11 @@ fn r9_missing_v2_digest_builder_fail_closed() {
     );
     match &outcome {
         PeerDrivenDrainOutcome::CandidateRejectedBeforeApply { reason, .. } => {
-            assert!(reason.contains("v2"), "reason should cite missing v2 material: {}", reason);
+            assert!(
+                reason.contains("v2"),
+                "reason should cite missing v2 material: {}",
+                reason
+            );
         }
         other => panic!("expected CandidateRejectedBeforeApply, got {:?}", other),
     }
@@ -1427,28 +1768,53 @@ fn r10_corrupted_local_marker_conflict_bytes_preserved() {
 
     let queue = shared_queue(PeerDrivenStagingPolicy::devnet_enabled());
     let _v = stage_into_shared(
-        &queue, &h, &candidate_path, Some(&seq_path), Some("peer-r10"), 1_000,
+        &queue,
+        &h,
+        &candidate_path,
+        Some(&seq_path),
+        Some("peer-r10"),
+        1_000,
         Some("digest-r10".into()),
     );
 
     let ctx = FakeCtx::new("aaaaaaaa");
     let timeline = ctx.timeline();
-    let mut builder = prod_builder(&h, &candidate_path, Some(&seq_path), ctx, "aaaaaaaa", Some(3), 1_001);
+    let mut builder = prod_builder(
+        &h,
+        &candidate_path,
+        Some(&seq_path),
+        ctx,
+        "aaaaaaaa",
+        Some(3),
+        1_001,
+    );
     let r = build_ratification(&h, 5);
     let rd = ratified_v2(&h, &r);
     let mut marker = prod_marker(&h, &marker_path, r, rd, 1_001);
     let drain = PeerDrivenApplyDrain::new();
     let outcome = try_drain_once_shared(
-        &drain, &queue, &mut builder, &mut marker,
+        &drain,
+        &queue,
+        &mut builder,
+        &mut marker,
         &PeerDrivenDrainPolicy::devnet_enabled(),
         &PeerDrivenApplyPolicy::devnet_enabled(),
         &runtime_domain(&h),
         1_002,
     );
-    assert!(matches!(outcome, PeerDrivenDrainOutcome::CandidateMarkerConflict { .. }));
-    assert!(timeline.lock().unwrap().is_empty(), "no Run 070 apply on corrupt marker");
+    assert!(matches!(
+        outcome,
+        PeerDrivenDrainOutcome::CandidateMarkerConflict { .. }
+    ));
+    assert!(
+        timeline.lock().unwrap().is_empty(),
+        "no Run 070 apply on corrupt marker"
+    );
     let after = std::fs::read(&marker_path).expect("read marker after");
-    assert_eq!(after, garbage, "corrupt marker must never be repaired/overwritten");
+    assert_eq!(
+        after, garbage,
+        "corrupt marker must never be repaired/overwritten"
+    );
 }
 
 // =====================================================================
@@ -1469,7 +1835,12 @@ fn r11_run070_validation_failure_before_swap() {
 
     let queue = shared_queue(PeerDrivenStagingPolicy::devnet_enabled());
     let _v = stage_into_shared(
-        &queue, &h, &candidate_path, None, Some("peer-r11"), 1_000,
+        &queue,
+        &h,
+        &candidate_path,
+        None,
+        Some("peer-r11"),
+        1_000,
         Some("digest-r11".into()),
     );
 
@@ -1486,13 +1857,24 @@ fn r11_run070_validation_failure_before_swap() {
 
     let ctx = FakeCtx::new("aaaaaaaa");
     let timeline = ctx.timeline();
-    let mut builder = prod_builder(&h, &candidate_path, Some(&seq_path), ctx, "aaaaaaaa", Some(3), 1_001);
+    let mut builder = prod_builder(
+        &h,
+        &candidate_path,
+        Some(&seq_path),
+        ctx,
+        "aaaaaaaa",
+        Some(3),
+        1_001,
+    );
     let r = build_ratification(&h, 5);
     let rd = ratified_v2(&h, &r);
     let mut marker = prod_marker(&h, &marker_path, r, rd, 1_001);
     let drain = PeerDrivenApplyDrain::new();
     let outcome = try_drain_once_shared(
-        &drain, &queue, &mut builder, &mut marker,
+        &drain,
+        &queue,
+        &mut builder,
+        &mut marker,
         &PeerDrivenDrainPolicy::devnet_enabled(),
         &PeerDrivenApplyPolicy::devnet_enabled(),
         &runtime_domain(&h),
@@ -1504,7 +1886,10 @@ fn r11_run070_validation_failure_before_swap() {
         outcome
     );
     let ev = timeline.lock().unwrap().clone();
-    assert!(!ev.contains(&"swap_trust_state".to_string()), "no swap on validation failure");
+    assert!(
+        !ev.contains(&"swap_trust_state".to_string()),
+        "no swap on validation failure"
+    );
     marker_file_absent(&marker_path);
 }
 
@@ -1523,7 +1908,12 @@ fn r12_eviction_failure_rollback_no_commit_no_marker() {
 
     let queue = shared_queue(PeerDrivenStagingPolicy::devnet_enabled());
     let _v = stage_into_shared(
-        &queue, &h, &candidate_path, Some(&seq_path), Some("peer-r12"), 1_000,
+        &queue,
+        &h,
+        &candidate_path,
+        Some(&seq_path),
+        Some("peer-r12"),
+        1_000,
         Some("digest-r12".into()),
     );
 
@@ -1531,13 +1921,24 @@ fn r12_eviction_failure_rollback_no_commit_no_marker() {
     ctx.evict_action = ActionPlan::Err("session-eviction failed (sim)".into());
     let timeline = ctx.timeline();
     let active = ctx.active();
-    let mut builder = prod_builder(&h, &candidate_path, Some(&seq_path), ctx, "aaaaaaaa", Some(2), 1_001);
+    let mut builder = prod_builder(
+        &h,
+        &candidate_path,
+        Some(&seq_path),
+        ctx,
+        "aaaaaaaa",
+        Some(2),
+        1_001,
+    );
     let r = build_ratification(&h, 5);
     let rd = ratified_v2(&h, &r);
     let mut marker = prod_marker(&h, &marker_path, r, rd, 1_001);
     let drain = PeerDrivenApplyDrain::new();
     let outcome = try_drain_once_shared(
-        &drain, &queue, &mut builder, &mut marker,
+        &drain,
+        &queue,
+        &mut builder,
+        &mut marker,
         &PeerDrivenDrainPolicy::devnet_enabled(),
         &PeerDrivenApplyPolicy::devnet_enabled(),
         &runtime_domain(&h),
@@ -1545,11 +1946,18 @@ fn r12_eviction_failure_rollback_no_commit_no_marker() {
     );
     match &outcome {
         PeerDrivenDrainOutcome::ApplyRejected { inner, .. } => {
-            assert!(matches!(inner, PeerDrivenApplyOutcome::ApplyRollbackSucceeded { .. }));
+            assert!(matches!(
+                inner,
+                PeerDrivenApplyOutcome::ApplyRollbackSucceeded { .. }
+            ));
         }
         other => panic!("expected ApplyRejected, got {:?}", other),
     }
-    assert_eq!(*active.lock().unwrap(), "aaaaaaaa", "live state rolled back");
+    assert_eq!(
+        *active.lock().unwrap(),
+        "aaaaaaaa",
+        "live state rolled back"
+    );
     let ev = timeline.lock().unwrap().clone();
     assert!(ev.contains(&"rollback_trust_state".to_string()));
     assert!(!ev.contains(&"commit_sequence".to_string()), "no commit");
@@ -1572,20 +1980,36 @@ fn r13_commit_failure_rollback_no_marker() {
 
     let queue = shared_queue(PeerDrivenStagingPolicy::devnet_enabled());
     let _v = stage_into_shared(
-        &queue, &h, &candidate_path, Some(&seq_path), Some("peer-r13"), 1_000,
+        &queue,
+        &h,
+        &candidate_path,
+        Some(&seq_path),
+        Some("peer-r13"),
+        1_000,
         Some("digest-r13".into()),
     );
 
     let mut ctx = FakeCtx::new("aaaaaaaa");
     ctx.commit_action = ActionPlan::Err("commit-sim".into());
     let active = ctx.active();
-    let mut builder = prod_builder(&h, &candidate_path, Some(&seq_path), ctx, "aaaaaaaa", Some(2), 1_001);
+    let mut builder = prod_builder(
+        &h,
+        &candidate_path,
+        Some(&seq_path),
+        ctx,
+        "aaaaaaaa",
+        Some(2),
+        1_001,
+    );
     let r = build_ratification(&h, 5);
     let rd = ratified_v2(&h, &r);
     let mut marker = prod_marker(&h, &marker_path, r, rd, 1_001);
     let drain = PeerDrivenApplyDrain::new();
     let outcome = try_drain_once_shared(
-        &drain, &queue, &mut builder, &mut marker,
+        &drain,
+        &queue,
+        &mut builder,
+        &mut marker,
         &PeerDrivenDrainPolicy::devnet_enabled(),
         &PeerDrivenApplyPolicy::devnet_enabled(),
         &runtime_domain(&h),
@@ -1593,11 +2017,18 @@ fn r13_commit_failure_rollback_no_marker() {
     );
     match &outcome {
         PeerDrivenDrainOutcome::ApplyRejected { inner, .. } => {
-            assert!(matches!(inner, PeerDrivenApplyOutcome::ApplyRollbackSucceeded { .. }));
+            assert!(matches!(
+                inner,
+                PeerDrivenApplyOutcome::ApplyRollbackSucceeded { .. }
+            ));
         }
         other => panic!("expected ApplyRejected (commit failure), got {:?}", other),
     }
-    assert_eq!(*active.lock().unwrap(), "aaaaaaaa", "live state rolled back");
+    assert_eq!(
+        *active.lock().unwrap(),
+        "aaaaaaaa",
+        "live state rolled back"
+    );
     // The production coordinator's persist_after_commit was never
     // reached → no marker file.
     marker_file_absent(&marker_path);
@@ -1619,18 +2050,34 @@ fn r14_marker_persist_failure_after_commit_is_fatal() {
 
     let queue = shared_queue(PeerDrivenStagingPolicy::devnet_enabled());
     let _v = stage_into_shared(
-        &queue, &h, &candidate_path, Some(&seq_path), Some("peer-r14"), 1_000,
+        &queue,
+        &h,
+        &candidate_path,
+        Some(&seq_path),
+        Some("peer-r14"),
+        1_000,
         Some("digest-r14".into()),
     );
 
     let timeline = Arc::new(Mutex::new(Vec::new()));
     let ctx = FakeCtx::with_timeline("aaaaaaaa", Arc::clone(&timeline));
-    let mut builder = prod_builder(&h, &candidate_path, Some(&seq_path), ctx, "aaaaaaaa", Some(2), 1_001);
+    let mut builder = prod_builder(
+        &h,
+        &candidate_path,
+        Some(&seq_path),
+        ctx,
+        "aaaaaaaa",
+        Some(2),
+        1_001,
+    );
     let mut marker = MockMarker::with_timeline(Arc::clone(&timeline))
         .with_post_commit_err("marker-persist-failed-after-commit (sim)");
     let drain = PeerDrivenApplyDrain::new();
     let outcome = try_drain_once_shared(
-        &drain, &queue, &mut builder, &mut marker,
+        &drain,
+        &queue,
+        &mut builder,
+        &mut marker,
         &PeerDrivenDrainPolicy::devnet_enabled(),
         &PeerDrivenApplyPolicy::devnet_enabled(),
         &runtime_domain(&h),
@@ -1638,7 +2085,10 @@ fn r14_marker_persist_failure_after_commit_is_fatal() {
     );
     match &outcome {
         PeerDrivenDrainOutcome::ApplyFatal { inner, .. } => {
-            assert!(matches!(inner, PeerDrivenApplyOutcome::MarkerPersistFailedAfterCommit { .. }));
+            assert!(matches!(
+                inner,
+                PeerDrivenApplyOutcome::MarkerPersistFailedAfterCommit { .. }
+            ));
         }
         other => panic!("expected ApplyFatal, got {:?}", other),
     }
@@ -1647,7 +2097,11 @@ fn r14_marker_persist_failure_after_commit_is_fatal() {
     let ev = timeline.lock().unwrap().clone();
     assert!(ev.contains(&"commit_sequence".to_string()));
     assert!(ev.contains(&"persist_after_commit".to_string()));
-    assert_eq!(queue.lock().len(), 1, "fatal leaves queue for offline reconciliation");
+    assert_eq!(
+        queue.lock().len(),
+        1,
+        "fatal leaves queue for offline reconciliation"
+    );
 }
 
 // =====================================================================
@@ -1667,14 +2121,27 @@ fn r15_v1_legacy_path_unchanged_builder_allows_no_digest_when_v2_gate_off() {
 
     let queue = shared_queue(PeerDrivenStagingPolicy::devnet_enabled());
     let _v = stage_into_shared(
-        &queue, &h, &candidate_path, Some(&seq_path), Some("peer-r15"), 1_000, None,
+        &queue,
+        &h,
+        &candidate_path,
+        Some(&seq_path),
+        Some("peer-r15"),
+        1_000,
+        None,
     );
     let staged = queue.lock().entries()[0].clone();
 
     let ctx = FakeCtx::new("aaaaaaaa");
-    let mut builder =
-        prod_builder(&h, &candidate_path, Some(&seq_path), ctx, "aaaaaaaa", Some(3), 1_001)
-            .with_require_v2_marker_digest(false);
+    let mut builder = prod_builder(
+        &h,
+        &candidate_path,
+        Some(&seq_path),
+        ctx,
+        "aaaaaaaa",
+        Some(3),
+        1_001,
+    )
+    .with_require_v2_marker_digest(false);
     use qbind_node::pqc_peer_candidate_drain::PeerDrivenDrainInvocationBuilder;
     let inv = builder
         .build_for(&staged)
@@ -1701,27 +2168,47 @@ fn r16_propagation_only_behaviour_unchanged() {
 
     let queue = shared_queue(PeerDrivenStagingPolicy::devnet_enabled());
     let _v = stage_into_shared(
-        &queue, &h, &candidate_path, Some(&seq_path), Some("peer-r16"), 1_000,
+        &queue,
+        &h,
+        &candidate_path,
+        Some(&seq_path),
+        Some("peer-r16"),
+        1_000,
         Some("digest-r16".into()),
     );
     let entries_before = queue.lock().entries();
 
     let ctx = FakeCtx::new("aaaaaaaa");
     let timeline = ctx.timeline();
-    let mut builder = prod_builder(&h, &candidate_path, Some(&seq_path), ctx, "aaaaaaaa", Some(3), 1_001);
+    let mut builder = prod_builder(
+        &h,
+        &candidate_path,
+        Some(&seq_path),
+        ctx,
+        "aaaaaaaa",
+        Some(3),
+        1_001,
+    );
     let r = build_ratification(&h, 5);
     let rd = ratified_v2(&h, &r);
     let mut marker = prod_marker(&h, &marker_path, r, rd, 1_001);
     let drain = PeerDrivenApplyDrain::new();
     let outcome = try_drain_once_shared(
-        &drain, &queue, &mut builder, &mut marker,
+        &drain,
+        &queue,
+        &mut builder,
+        &mut marker,
         &PeerDrivenDrainPolicy::default(),
         &PeerDrivenApplyPolicy::default(),
         &runtime_domain(&h),
         1_002,
     );
     assert!(matches!(outcome, PeerDrivenDrainOutcome::Disabled));
-    assert_eq!(queue.lock().entries(), entries_before, "queue unchanged on Disabled");
+    assert_eq!(
+        queue.lock().entries(),
+        entries_before,
+        "queue unchanged on Disabled"
+    );
     assert!(timeline.lock().unwrap().is_empty());
     marker_file_absent(&marker_path);
 }

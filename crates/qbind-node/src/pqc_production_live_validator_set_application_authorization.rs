@@ -72,8 +72,7 @@ use crate::pqc_production_governance_execution_engine::{
 };
 use crate::pqc_production_validator_set_rotation_application_executor::{
     ProductionValidatorSetRotationApplicationDecision,
-    ProductionValidatorSetRotationApplicationIntent,
-    ValidatorSetRotationApplicationDecisionKind,
+    ProductionValidatorSetRotationApplicationIntent, ValidatorSetRotationApplicationDecisionKind,
 };
 use crate::pqc_production_validator_set_rotation_intent::ValidatorSetRotationAction;
 use crate::pqc_trust_bundle::TrustBundleEnvironment;
@@ -725,11 +724,31 @@ impl ProductionLiveValidatorSetApplicationAuthorizationIntent {
         h.update(
             PRODUCTION_LIVE_VALIDATOR_SET_APPLICATION_AUTHORIZATION_INTENT_DOMAIN_TAG.as_bytes(),
         );
-        hash_field(&mut h, b"authorization_kind", self.authorization_kind.tag().as_bytes());
-        hash_field(&mut h, b"protocol_version", &self.protocol_version.to_le_bytes());
-        hash_field(&mut h, b"authorization_policy_id", self.authorization_policy_id.as_bytes());
-        hash_field(&mut h, b"application_policy_id", self.application_policy_id.as_bytes());
-        hash_field(&mut h, b"environment", &self.environment.metric_code().to_le_bytes());
+        hash_field(
+            &mut h,
+            b"authorization_kind",
+            self.authorization_kind.tag().as_bytes(),
+        );
+        hash_field(
+            &mut h,
+            b"protocol_version",
+            &self.protocol_version.to_le_bytes(),
+        );
+        hash_field(
+            &mut h,
+            b"authorization_policy_id",
+            self.authorization_policy_id.as_bytes(),
+        );
+        hash_field(
+            &mut h,
+            b"application_policy_id",
+            self.application_policy_id.as_bytes(),
+        );
+        hash_field(
+            &mut h,
+            b"environment",
+            &self.environment.metric_code().to_le_bytes(),
+        );
         hash_field(&mut h, b"chain_id", self.chain_id.as_bytes());
         hash_field(&mut h, b"genesis_hash", self.genesis_hash.as_bytes());
         hash_field(
@@ -737,58 +756,174 @@ impl ProductionLiveValidatorSetApplicationAuthorizationIntent {
             b"authority_root_fingerprint",
             self.authority_root_fingerprint.as_bytes(),
         );
-        hash_field(&mut h, b"authority_root_suite_id", &[self.authority_root_suite_id]);
-        hash_field(&mut h, b"governance_domain_id", self.governance_domain_id.as_bytes());
-        hash_field(&mut h, b"governance_epoch", &self.governance_epoch.to_le_bytes());
-        hash_field(&mut h, b"governance_height", &self.governance_height.to_le_bytes());
+        hash_field(
+            &mut h,
+            b"authority_root_suite_id",
+            &[self.authority_root_suite_id],
+        );
+        hash_field(
+            &mut h,
+            b"governance_domain_id",
+            self.governance_domain_id.as_bytes(),
+        );
+        hash_field(
+            &mut h,
+            b"governance_epoch",
+            &self.governance_epoch.to_le_bytes(),
+        );
+        hash_field(
+            &mut h,
+            b"governance_height",
+            &self.governance_height.to_le_bytes(),
+        );
         hash_field(&mut h, b"proposal_id", self.proposal_id.as_bytes());
         hash_field(&mut h, b"proposal_digest", self.proposal_digest.as_bytes());
-        hash_field(&mut h, b"quorum_voted", &self.quorum.voters_voted.to_le_bytes());
-        hash_field(&mut h, b"quorum_total", &self.quorum.total_voters.to_le_bytes());
-        hash_field(&mut h, b"quorum_required", &self.quorum.required_quorum.to_le_bytes());
-        hash_field(&mut h, b"threshold_approvals", &self.threshold.approvals.to_le_bytes());
-        hash_field(&mut h, b"threshold_required", &self.threshold.required.to_le_bytes());
-        hash_field(&mut h, b"threshold_total", &self.threshold.total.to_le_bytes());
-        hash_field(&mut h, b"lifecycle_action", self.lifecycle_action.tag().as_bytes());
-        hash_field(&mut h, b"rotation_action", self.rotation_action.tag().as_bytes());
+        hash_field(
+            &mut h,
+            b"quorum_voted",
+            &self.quorum.voters_voted.to_le_bytes(),
+        );
+        hash_field(
+            &mut h,
+            b"quorum_total",
+            &self.quorum.total_voters.to_le_bytes(),
+        );
+        hash_field(
+            &mut h,
+            b"quorum_required",
+            &self.quorum.required_quorum.to_le_bytes(),
+        );
+        hash_field(
+            &mut h,
+            b"threshold_approvals",
+            &self.threshold.approvals.to_le_bytes(),
+        );
+        hash_field(
+            &mut h,
+            b"threshold_required",
+            &self.threshold.required.to_le_bytes(),
+        );
+        hash_field(
+            &mut h,
+            b"threshold_total",
+            &self.threshold.total.to_le_bytes(),
+        );
+        hash_field(
+            &mut h,
+            b"lifecycle_action",
+            self.lifecycle_action.tag().as_bytes(),
+        );
+        hash_field(
+            &mut h,
+            b"rotation_action",
+            self.rotation_action.tag().as_bytes(),
+        );
         hash_field(
             &mut h,
             b"authority_domain_sequence",
             &self.authority_domain_sequence.to_le_bytes(),
         );
-        hash_field(&mut h, b"governance_decision_id", self.governance_decision_id.as_bytes());
-        hash_field(&mut h, b"governance_request_id", self.governance_request_id.as_bytes());
-        hash_field(&mut h, b"governance_intent_digest", self.governance_intent_digest.as_bytes());
-        hash_field(&mut h, b"rotation_decision_id", self.rotation_decision_id.as_bytes());
-        hash_field(&mut h, b"rotation_request_id", self.rotation_request_id.as_bytes());
+        hash_field(
+            &mut h,
+            b"governance_decision_id",
+            self.governance_decision_id.as_bytes(),
+        );
+        hash_field(
+            &mut h,
+            b"governance_request_id",
+            self.governance_request_id.as_bytes(),
+        );
+        hash_field(
+            &mut h,
+            b"governance_intent_digest",
+            self.governance_intent_digest.as_bytes(),
+        );
+        hash_field(
+            &mut h,
+            b"rotation_decision_id",
+            self.rotation_decision_id.as_bytes(),
+        );
+        hash_field(
+            &mut h,
+            b"rotation_request_id",
+            self.rotation_request_id.as_bytes(),
+        );
         hash_field(
             &mut h,
             b"rotation_transcript_digest",
             self.rotation_transcript_digest.as_bytes(),
         );
-        hash_field(&mut h, b"rotation_plan_digest", self.rotation_plan_digest.as_bytes());
-        hash_field(&mut h, b"current_set_digest", self.current_set_digest.as_bytes());
-        hash_field(&mut h, b"proposed_set_digest", self.proposed_set_digest.as_bytes());
+        hash_field(
+            &mut h,
+            b"rotation_plan_digest",
+            self.rotation_plan_digest.as_bytes(),
+        );
+        hash_field(
+            &mut h,
+            b"current_set_digest",
+            self.current_set_digest.as_bytes(),
+        );
+        hash_field(
+            &mut h,
+            b"proposed_set_digest",
+            self.proposed_set_digest.as_bytes(),
+        );
         hash_field(&mut h, b"delta_digest", self.delta_digest.as_bytes());
-        hash_field(&mut h, b"validator_set_epoch", &self.validator_set_epoch.to_le_bytes());
-        hash_field(&mut h, b"validator_set_version", &self.validator_set_version.to_le_bytes());
+        hash_field(
+            &mut h,
+            b"validator_set_epoch",
+            &self.validator_set_epoch.to_le_bytes(),
+        );
+        hash_field(
+            &mut h,
+            b"validator_set_version",
+            &self.validator_set_version.to_le_bytes(),
+        );
         hash_field(
             &mut h,
             b"proposed_validator_count",
             &self.proposed_validator_count.to_le_bytes(),
         );
-        hash_field(&mut h, b"rotation_nonce", &self.rotation_nonce.to_le_bytes());
-        hash_field(&mut h, b"application_decision_id", self.application_decision_id.as_bytes());
-        hash_field(&mut h, b"application_request_id", self.application_request_id.as_bytes());
-        hash_field(&mut h, b"application_intent_digest", self.application_intent_digest.as_bytes());
+        hash_field(
+            &mut h,
+            b"rotation_nonce",
+            &self.rotation_nonce.to_le_bytes(),
+        );
+        hash_field(
+            &mut h,
+            b"application_decision_id",
+            self.application_decision_id.as_bytes(),
+        );
+        hash_field(
+            &mut h,
+            b"application_request_id",
+            self.application_request_id.as_bytes(),
+        );
+        hash_field(
+            &mut h,
+            b"application_intent_digest",
+            self.application_intent_digest.as_bytes(),
+        );
         hash_field(
             &mut h,
             b"application_transcript_digest",
             self.application_transcript_digest.as_bytes(),
         );
-        hash_field(&mut h, b"application_nonce", &self.application_nonce.to_le_bytes());
-        hash_field(&mut h, b"epoch_transition_target", &self.epoch_transition_target.to_le_bytes());
-        hash_field(&mut h, b"live_application_nonce", &self.live_application_nonce.to_le_bytes());
+        hash_field(
+            &mut h,
+            b"application_nonce",
+            &self.application_nonce.to_le_bytes(),
+        );
+        hash_field(
+            &mut h,
+            b"epoch_transition_target",
+            &self.epoch_transition_target.to_le_bytes(),
+        );
+        hash_field(
+            &mut h,
+            b"live_application_nonce",
+            &self.live_application_nonce.to_le_bytes(),
+        );
         match &self.custody_binding {
             Some(c) => {
                 hash_field(&mut h, b"custody_present", &[1u8]);
@@ -823,9 +958,17 @@ impl ProductionLiveValidatorSetApplicationAuthorizationIntent {
 /// Custody binding canonical hashing (module-local; mirrors Run 301/303/305
 /// field order for cross-run digest stability).
 fn custody_hash_into(c: &GovernanceExecutionCustodyBinding, h: &mut sha3::Sha3_256) {
-    hash_field(h, b"custody_provider_class", c.provider_class.tag().as_bytes());
+    hash_field(
+        h,
+        b"custody_provider_class",
+        c.provider_class.tag().as_bytes(),
+    );
     hash_field(h, b"custody_key_handle", c.key_handle.as_bytes());
-    hash_field(h, b"custody_signer_fingerprint", c.signer_fingerprint.as_bytes());
+    hash_field(
+        h,
+        b"custody_signer_fingerprint",
+        c.signer_fingerprint.as_bytes(),
+    );
     hash_field(
         h,
         b"custody_transcript_digest",
@@ -844,7 +987,11 @@ fn attestation_hash_into(a: &GovernanceExecutionAttestationBinding, h: &mut sha3
 
 fn durable_hash_into(d: &GovernanceExecutionDurableReplayBinding, h: &mut sha3::Sha3_256) {
     hash_field(h, b"durable_record_id", d.durable_record_id.as_bytes());
-    hash_field(h, b"durable_record_digest", d.durable_record_digest.as_bytes());
+    hash_field(
+        h,
+        b"durable_record_digest",
+        d.durable_record_digest.as_bytes(),
+    );
 }
 
 /// Run 307 — deterministic authorization intent digest wrapper exposed as a
@@ -868,12 +1015,18 @@ pub fn production_live_validator_set_application_authorization_request_id(
 ) -> String {
     use sha3::{Digest, Sha3_256};
     let mut h = Sha3_256::new();
-    h.update(
-        PRODUCTION_LIVE_VALIDATOR_SET_APPLICATION_AUTHORIZATION_REQUEST_DOMAIN_TAG.as_bytes(),
-    );
+    h.update(PRODUCTION_LIVE_VALIDATOR_SET_APPLICATION_AUTHORIZATION_REQUEST_DOMAIN_TAG.as_bytes());
     hash_field(&mut h, b"protocol_version", &protocol_version.to_le_bytes());
-    hash_field(&mut h, b"application_intent_digest", application_intent_digest.as_bytes());
-    hash_field(&mut h, b"authorization_policy_id", authorization_policy_id.as_bytes());
+    hash_field(
+        &mut h,
+        b"application_intent_digest",
+        application_intent_digest.as_bytes(),
+    );
+    hash_field(
+        &mut h,
+        b"authorization_policy_id",
+        authorization_policy_id.as_bytes(),
+    );
     hash_field(
         &mut h,
         b"epoch_transition_target",
@@ -1009,13 +1162,17 @@ pub enum ProductionLiveValidatorSetApplicationAuthorizationOutcome {
     DurableReplayUnavailable,
 
     // ---- Replay / freshness -------------------------------------------
-    LiveApplicationReplayRejected { authorization_id: String },
+    LiveApplicationReplayRejected {
+        authorization_id: String,
+    },
     StaleGovernanceEpoch,
     StaleAuthoritySequence,
     StaleValidatorSetEpoch,
     StaleValidatorSetVersion,
     ConflictingAuthorizationForSameApplication,
-    LiveValidatorSetApplicationAuthorizationAmbiguous { reason: String },
+    LiveValidatorSetApplicationAuthorizationAmbiguous {
+        reason: String,
+    },
     MainNetRefused,
 }
 
@@ -1099,7 +1256,9 @@ impl ProductionLiveValidatorSetApplicationAuthorizationOutcome {
             Self::WrongProposalId => "wrong-proposal-id",
             Self::WrongGovernanceExecutionDecisionId => "wrong-governance-execution-decision-id",
             Self::WrongGovernanceExecutionRequestId => "wrong-governance-execution-request-id",
-            Self::WrongGovernanceExecutionIntentDigest => "wrong-governance-execution-intent-digest",
+            Self::WrongGovernanceExecutionIntentDigest => {
+                "wrong-governance-execution-intent-digest"
+            }
             Self::WrongRotationDecisionId => "wrong-rotation-decision-id",
             Self::WrongRotationRequestId => "wrong-rotation-request-id",
             Self::WrongRotationTranscriptDigest => "wrong-rotation-transcript-digest",
@@ -1293,8 +1452,7 @@ impl ProductionLiveValidatorSetApplicationAuthorizationExecutor {
 
         // 1. Disabled fails closed before any binding.
         if self.policy.is_disabled()
-            || self.config.kind
-                == ProductionLiveValidatorSetApplicationAuthorizationKind::Disabled
+            || self.config.kind == ProductionLiveValidatorSetApplicationAuthorizationKind::Disabled
         {
             return Some(O::Disabled);
         }
@@ -1584,7 +1742,8 @@ impl ProductionLiveValidatorSetApplicationAuthorizationExecutor {
         };
 
         // Step 3: application-decision binding cross-checks.
-        if let Some(outcome) = self.check_application_binding(decision, application_intent, inputs) {
+        if let Some(outcome) = self.check_application_binding(decision, application_intent, inputs)
+        {
             return (outcome, None);
         }
 
@@ -1741,7 +1900,10 @@ impl ProductionLiveValidatorSetApplicationAuthorizationExecutor {
             request.proposed_epoch_transition_target,
             request.live_application_nonce,
         );
-        let intent_digest = intent.as_ref().map(|i| i.intent_digest()).unwrap_or_default();
+        let intent_digest = intent
+            .as_ref()
+            .map(|i| i.intent_digest())
+            .unwrap_or_default();
         let transcript_digest =
             production_live_validator_set_application_authorization_transcript_digest(
                 self.config.protocol_version.0,
@@ -1769,8 +1931,7 @@ impl ProductionLiveValidatorSetApplicationAuthorizationExecutor {
     ) -> ProductionLiveValidatorSetApplicationAuthorizationRecoveryOutcome {
         use ProductionLiveValidatorSetApplicationAuthorizationRecoveryOutcome as R;
         if self.policy.is_disabled()
-            || self.config.kind
-                == ProductionLiveValidatorSetApplicationAuthorizationKind::Disabled
+            || self.config.kind == ProductionLiveValidatorSetApplicationAuthorizationKind::Disabled
         {
             return R::RecoveryDisabled;
         }

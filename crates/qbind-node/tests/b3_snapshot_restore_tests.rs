@@ -147,10 +147,9 @@ fn b3_wrong_chain_id_is_rejected() {
     let err = restore_from_snapshot(&snapshot_dir, data_dir.path(), expected_chain_id)
         .expect_err("chain mismatch must fail");
     match err {
-        RestoreError::SnapshotInvalid(qbind_ledger::SnapshotValidationResult::ChainIdMismatch {
-            expected,
-            actual,
-        }) => {
+        RestoreError::SnapshotInvalid(
+            qbind_ledger::SnapshotValidationResult::ChainIdMismatch { expected, actual },
+        ) => {
             assert_eq!(expected, expected_chain_id);
             assert_eq!(actual, snap_chain_id);
         }
@@ -165,7 +164,11 @@ fn b3_missing_meta_json_is_rejected() {
     let data_dir = tempdir().expect("tempdir");
     let snapshot_dir = snap_root.path().join("incomplete");
     std::fs::create_dir_all(snapshot_dir.join("state").join("dummy_subdir")).unwrap();
-    std::fs::write(snapshot_dir.join("state").join("dummy_subdir").join("a"), b"x").unwrap();
+    std::fs::write(
+        snapshot_dir.join("state").join("dummy_subdir").join("a"),
+        b"x",
+    )
+    .unwrap();
 
     let err = restore_from_snapshot(&snapshot_dir, data_dir.path(), devnet_chain_id())
         .expect_err("missing meta must fail");
@@ -233,8 +236,7 @@ fn b3_apply_with_no_data_dir_is_rejected() {
     config.fast_sync_config = FastSyncConfig::from_snapshot(snapshot_dir);
     // intentionally: config.data_dir = None
 
-    let err = apply_snapshot_restore_if_requested(&config)
-        .expect_err("no data_dir must fail");
+    let err = apply_snapshot_restore_if_requested(&config).expect_err("no data_dir must fail");
     assert!(matches!(err, RestoreError::MissingDataDir));
 }
 

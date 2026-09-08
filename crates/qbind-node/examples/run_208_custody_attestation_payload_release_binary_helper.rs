@@ -130,7 +130,13 @@ const WINDOW_UNTIL: u64 = 1_700_000_500;
 // ---------------------------------------------------------------------------
 
 fn domain(env: TrustBundleEnvironment) -> AuthorityTrustDomain {
-    AuthorityTrustDomain::new(env, CHAIN_ID, GENESIS_HASH, ROOT_FP, PQC_LIFECYCLE_SUITE_ML_DSA_44)
+    AuthorityTrustDomain::new(
+        env,
+        CHAIN_ID,
+        GENESIS_HASH,
+        ROOT_FP,
+        PQC_LIFECYCLE_SUITE_ML_DSA_44,
+    )
 }
 
 fn build_v2(
@@ -160,7 +166,14 @@ fn build_v2(
 }
 
 fn rotate_candidate(env: TrustBundleEnvironment) -> PersistentAuthorityStateRecordV2 {
-    build_v2(env, KEY_B, 2, BundleSigningRatificationV2Action::Rotate, Some(KEY_A), DIGEST_2)
+    build_v2(
+        env,
+        KEY_B,
+        2,
+        BundleSigningRatificationV2Action::Rotate,
+        Some(KEY_A),
+        DIGEST_2,
+    )
 }
 
 fn prior_versioned(env: TrustBundleEnvironment) -> PersistentAuthorityStateRecordVersioned {
@@ -278,12 +291,22 @@ fn accepted_scenario(env: TrustBundleEnvironment) -> Scenario {
     let input = input(env, &candidate);
     let custody = good_custody_attestation(env, &candidate);
     let prior = prior_versioned(env);
-    Scenario { domain: domain(env), candidate, prior, custody, evidence, input }
+    Scenario {
+        domain: domain(env),
+        candidate,
+        prior,
+        custody,
+        evidence,
+        input,
+    }
 }
 
 impl Scenario {
     fn parts(&self) -> CustodyAttestationParts {
-        CustodyAttestationParts { evidence: self.evidence.clone(), input: self.input.clone() }
+        CustodyAttestationParts {
+            evidence: self.evidence.clone(),
+            input: self.input.clone(),
+        }
     }
 
     fn loaded(&self) -> CustodyAttestationLoadStatus {
@@ -417,9 +440,10 @@ fn routed_attestation(
     outcome: &CustodyAttestationPayloadCarryingDecisionOutcome,
 ) -> Option<&CustodyAttestationOutcome> {
     match outcome.callsite_outcome() {
-        Some(CustodyMetadataAttestationOutcome::AttestationRejected { attestation_outcome, .. }) => {
-            Some(attestation_outcome)
-        }
+        Some(CustodyMetadataAttestationOutcome::AttestationRejected {
+            attestation_outcome,
+            ..
+        }) => Some(attestation_outcome),
         _ => None,
     }
 }
@@ -450,7 +474,14 @@ struct Table {
 
 impl Table {
     fn new(name: &'static str) -> Self {
-        Table { name, rows: String::new(), expected: String::new(), actual: String::new(), pass: 0, fail: 0 }
+        Table {
+            name,
+            rows: String::new(),
+            expected: String::new(),
+            actual: String::new(),
+            pass: 0,
+            fail: 0,
+        }
     }
 
     /// Record an equality check on a typed-outcome tag.
@@ -500,13 +531,24 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
     // A1 — legacy no-attestation payload compatible under Disabled.
     {
         let s = accepted_scenario(Env::Devnet);
-        let ctx = s.ctx(AuthorityCustodyPolicy::FixtureOnly, CustodyAttestationPolicy::Disabled);
+        let ctx = s.ctx(
+            AuthorityCustodyPolicy::FixtureOnly,
+            CustodyAttestationPolicy::Disabled,
+        );
         let outcome = route_loaded_custody_attestation_to_reload_check_callsite_decision(
             &ctx,
             &CustodyAttestationLoadStatus::Absent,
         );
-        t.check("A1", "bypass:NoCustodyAttestationSupplied", &decision_tag(&outcome));
-        t.assert_true("A1.bypassed", outcome.is_bypassed() && !outcome.is_reject(), "");
+        t.check(
+            "A1",
+            "bypass:NoCustodyAttestationSupplied",
+            &decision_tag(&outcome),
+        );
+        t.assert_true(
+            "A1.bypassed",
+            outcome.is_bypassed() && !outcome.is_reject(),
+            "",
+        );
     }
 
     // A2 — DevNet fixture attestation carried through reload-check (via JSON).
@@ -583,7 +625,10 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
         let loaded = s.loaded();
         let ctx = s.fixture_ctx();
         let outcome = verify_loaded_custody_attestation(&ctx, &loaded);
-        let tag = outcome.as_ref().map(attestation_tag).unwrap_or_else(|| "none".to_string());
+        let tag = outcome
+            .as_ref()
+            .map(attestation_tag)
+            .unwrap_or_else(|| "none".to_string());
         t.check("A9", "accept:FixtureAttestationAccepted", &tag);
     }
 
@@ -593,7 +638,10 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
         let loaded = s.loaded();
         let ctx = s.fixture_ctx();
         let outcome = validate_loaded_lifecycle_custody_and_attestation(&ctx, &loaded, false);
-        let tag = outcome.as_ref().map(composition_tag).unwrap_or_else(|| "none".to_string());
+        let tag = outcome
+            .as_ref()
+            .map(composition_tag)
+            .unwrap_or_else(|| "none".to_string());
         t.check("A10", "accept:Accepted", &tag);
     }
 
@@ -675,7 +723,9 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
         );
         let outcome =
             route_loaded_custody_attestation_to_reload_check_callsite_decision(&ctx, &loaded);
-        let unavailable = routed_attestation(&outcome).map(|o| o.is_unavailable()).unwrap_or(false);
+        let unavailable = routed_attestation(&outcome)
+            .map(|o| o.is_unavailable())
+            .unwrap_or(false);
         t.assert_true("A15", !outcome.is_accept() && unavailable, "");
     }
 
@@ -715,8 +765,16 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
             &ctx,
             &CustodyAttestationLoadStatus::Absent,
         );
-        t.check("R1", "reject:CustodyAttestationRequiredButAbsent", &decision_tag(&outcome));
-        t.assert_true("R1.flags", outcome.is_required_but_absent() && outcome.is_reject(), "");
+        t.check(
+            "R1",
+            "reject:CustodyAttestationRequiredButAbsent",
+            &decision_tag(&outcome),
+        );
+        t.assert_true(
+            "R1.flags",
+            outcome.is_required_but_absent() && outcome.is_reject(),
+            "",
+        );
     }
 
     // R2 — malformed evidence (empty required field) rejected.
@@ -732,7 +790,11 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
         let ctx = s.fixture_ctx();
         let outcome =
             route_loaded_custody_attestation_to_reload_check_callsite_decision(&ctx, &loaded);
-        t.assert_true("R2", outcome.is_malformed_payload() && outcome.is_reject(), "");
+        t.assert_true(
+            "R2",
+            outcome.is_malformed_payload() && outcome.is_reject(),
+            "",
+        );
     }
 
     // R3 — malformed input (empty required field) rejected.
@@ -749,7 +811,8 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
 
     // R4 — malformed combined payload (sibling not an object) rejected.
     {
-        let value = serde_json::json!({ CUSTODY_ATTESTATION_PAYLOAD_SIBLING_FIELD: "not-an-object" });
+        let value =
+            serde_json::json!({ CUSTODY_ATTESTATION_PAYLOAD_SIBLING_FIELD: "not-an-object" });
         let loaded = parse_optional_custody_attestation_sibling_from_json_value(&value);
         t.assert_true("R4", loaded.is_malformed(), "");
     }
@@ -782,7 +845,9 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
         );
         let outcome =
             route_loaded_custody_attestation_to_reload_check_callsite_decision(&ctx, &loaded);
-        let tag = routed_attestation(&outcome).map(attestation_tag).unwrap_or_default();
+        let tag = routed_attestation(&outcome)
+            .map(attestation_tag)
+            .unwrap_or_default();
         t.check("R6", "reject:FixtureRejectedProductionRequired", &tag);
     }
     {
@@ -794,18 +859,48 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
         );
         let outcome =
             route_loaded_custody_attestation_to_reload_check_callsite_decision(&ctx, &loaded);
-        let tag = routed_attestation(&outcome).map(attestation_tag).unwrap_or_default();
-        t.check("R7", "reject:FixtureRejectedMainnetProductionRequired", &tag);
+        let tag = routed_attestation(&outcome)
+            .map(attestation_tag)
+            .unwrap_or_default();
+        t.check(
+            "R7",
+            "reject:FixtureRejectedMainnetProductionRequired",
+            &tag,
+        );
     }
 
     // R8–R13 — production-class attestations rejected as unavailable.
     let unavailable_cases: &[(&str, CustodyAttestationClass, CustodyAttestationPolicy)] = &[
-        ("R8", CustodyAttestationClass::RemoteSignerAttestation, CustodyAttestationPolicy::FixtureAttestationAllowed),
-        ("R9", CustodyAttestationClass::KmsAttestation, CustodyAttestationPolicy::FixtureAttestationAllowed),
-        ("R10", CustodyAttestationClass::HsmAttestation, CustodyAttestationPolicy::FixtureAttestationAllowed),
-        ("R11", CustodyAttestationClass::CloudKmsAttestationUnavailable, CustodyAttestationPolicy::FixtureAttestationAllowed),
-        ("R12", CustodyAttestationClass::Pkcs11HsmAttestationUnavailable, CustodyAttestationPolicy::FixtureAttestationAllowed),
-        ("R13", CustodyAttestationClass::ProductionAttestationUnavailable, CustodyAttestationPolicy::ProductionAttestationRequired),
+        (
+            "R8",
+            CustodyAttestationClass::RemoteSignerAttestation,
+            CustodyAttestationPolicy::FixtureAttestationAllowed,
+        ),
+        (
+            "R9",
+            CustodyAttestationClass::KmsAttestation,
+            CustodyAttestationPolicy::FixtureAttestationAllowed,
+        ),
+        (
+            "R10",
+            CustodyAttestationClass::HsmAttestation,
+            CustodyAttestationPolicy::FixtureAttestationAllowed,
+        ),
+        (
+            "R11",
+            CustodyAttestationClass::CloudKmsAttestationUnavailable,
+            CustodyAttestationPolicy::FixtureAttestationAllowed,
+        ),
+        (
+            "R12",
+            CustodyAttestationClass::Pkcs11HsmAttestationUnavailable,
+            CustodyAttestationPolicy::FixtureAttestationAllowed,
+        ),
+        (
+            "R13",
+            CustodyAttestationClass::ProductionAttestationUnavailable,
+            CustodyAttestationPolicy::ProductionAttestationRequired,
+        ),
     ];
     for (id, class, policy) in unavailable_cases {
         let mut s = accepted_scenario(Env::Devnet);
@@ -814,7 +909,9 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
         let ctx = s.ctx(AuthorityCustodyPolicy::FixtureOnly, *policy);
         let outcome =
             route_loaded_custody_attestation_to_reload_check_callsite_decision(&ctx, &loaded);
-        let unavailable = routed_attestation(&outcome).map(|o| o.is_unavailable()).unwrap_or(false);
+        let unavailable = routed_attestation(&outcome)
+            .map(|o| o.is_unavailable())
+            .unwrap_or(false);
         t.assert_true(id, !outcome.is_accept() && unavailable, "");
     }
 
@@ -829,8 +926,14 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
         );
         let outcome =
             route_loaded_custody_attestation_to_reload_check_callsite_decision(&ctx, &loaded);
-        let tag = routed_attestation(&outcome).map(attestation_tag).unwrap_or_default();
-        t.check("R14", "reject:MainNetProductionAttestationUnavailable", &tag);
+        let tag = routed_attestation(&outcome)
+            .map(attestation_tag)
+            .unwrap_or_default();
+        t.check(
+            "R14",
+            "reject:MainNetProductionAttestationUnavailable",
+            &tag,
+        );
     }
 
     // R15 — unknown attestation class rejected.
@@ -841,7 +944,9 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
         let ctx = s.fixture_ctx();
         let outcome =
             route_loaded_custody_attestation_to_reload_check_callsite_decision(&ctx, &loaded);
-        let tag = routed_attestation(&outcome).map(attestation_tag).unwrap_or_default();
+        let tag = routed_attestation(&outcome)
+            .map(attestation_tag)
+            .unwrap_or_default();
         t.check("R15", "reject:UnknownAttestationClassRejected", &tag);
     }
 
@@ -1047,11 +1152,15 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
         let mut s = accepted_scenario(Env::Devnet);
         s.evidence.attestation_class = CustodyAttestationClass::KmsAttestation;
         let loaded = s.loaded();
-        let ctx =
-            s.ctx(AuthorityCustodyPolicy::FixtureOnly, CustodyAttestationPolicy::KmsAttestationRequired);
+        let ctx = s.ctx(
+            AuthorityCustodyPolicy::FixtureOnly,
+            CustodyAttestationPolicy::KmsAttestationRequired,
+        );
         let outcome =
             route_loaded_custody_attestation_to_reload_apply_callsite_decision(&ctx, &loaded);
-        let unavailable = routed_attestation(&outcome).map(|o| o.is_unavailable()).unwrap_or(false);
+        let unavailable = routed_attestation(&outcome)
+            .map(|o| o.is_unavailable())
+            .unwrap_or(false);
         t.assert_true("R39", !outcome.is_accept() && unavailable, "");
     }
 
@@ -1063,8 +1172,10 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
             AuthorityCustodyPolicy::FixtureOnly,
             CustodyAttestationPolicy::ProductionAttestationRequired,
         );
-        let first = route_loaded_custody_attestation_to_reload_check_callsite_decision(&ctx, &loaded);
-        let again = route_loaded_custody_attestation_to_reload_check_callsite_decision(&ctx, &loaded);
+        let first =
+            route_loaded_custody_attestation_to_reload_check_callsite_decision(&ctx, &loaded);
+        let again =
+            route_loaded_custody_attestation_to_reload_check_callsite_decision(&ctx, &loaded);
         t.assert_true("R40", first == again, "");
     }
 
@@ -1094,7 +1205,11 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
         let ctx = s.fixture_ctx();
         let outcome =
             route_loaded_custody_attestation_to_live_inbound_0x05_callsite_decision(&ctx, &loaded);
-        t.assert_true("R42", outcome.is_malformed_payload() && outcome.is_reject(), "");
+        t.assert_true(
+            "R42",
+            outcome.is_malformed_payload() && outcome.is_reject(),
+            "",
+        );
     }
 
     // R43 — MainNet peer-driven apply refused even with fixture attestation.
@@ -1104,7 +1219,11 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
         let ctx = s.fixture_ctx();
         let outcome =
             route_loaded_custody_attestation_to_peer_driven_drain_callsite_decision(&ctx, &loaded);
-        t.check("R43", "reject:MainNetPeerDrivenApplyRefused", &decision_tag(&outcome));
+        t.check(
+            "R43",
+            "reject:MainNetPeerDrivenApplyRefused",
+            &decision_tag(&outcome),
+        );
         t.assert_true(
             "R43.helper",
             outcome.is_mainnet_peer_driven_apply_refused()
@@ -1182,8 +1301,9 @@ fn run_loader_table(out: &Path) -> (u64, u64) {
         let value = make_v2_sidecar_value(Env::Devnet, None);
         let bytes = serde_json::to_vec(&value).unwrap();
         let path = PathBuf::from("/dev/null/run-208-legacy.json");
-        let loaded = load_v2_ratification_sidecar_with_custody_attestation_from_bytes(&bytes, &path)
-            .expect("legacy v2 sidecar parses");
+        let loaded =
+            load_v2_ratification_sidecar_with_custody_attestation_from_bytes(&bytes, &path)
+                .expect("legacy v2 sidecar parses");
         t.assert_true("L1", loaded.custody_attestation.is_absent(), "");
     }
 
@@ -1191,12 +1311,12 @@ fn run_loader_table(out: &Path) -> (u64, u64) {
     {
         let s = accepted_scenario(Env::Devnet);
         let wire = CustodyAttestationPayloadWire::from_parts(&s.evidence, &s.input);
-        let value =
-            make_v2_sidecar_value(Env::Devnet, Some(serde_json::to_value(&wire).unwrap()));
+        let value = make_v2_sidecar_value(Env::Devnet, Some(serde_json::to_value(&wire).unwrap()));
         let bytes = serde_json::to_vec(&value).unwrap();
         let path = PathBuf::from("/dev/null/run-208-carry.json");
-        let loaded = load_v2_ratification_sidecar_with_custody_attestation_from_bytes(&bytes, &path)
-            .expect("v2 sidecar with sibling parses");
+        let loaded =
+            load_v2_ratification_sidecar_with_custody_attestation_from_bytes(&bytes, &path)
+                .expect("v2 sidecar with sibling parses");
         t.assert_true(
             "L2",
             loaded.custody_attestation.is_available()
@@ -1214,14 +1334,23 @@ fn run_loader_table(out: &Path) -> (u64, u64) {
         );
         let bytes = serde_json::to_vec(&value).unwrap();
         let path = PathBuf::from("/dev/null/run-208-malformed.json");
-        let loaded = load_v2_ratification_sidecar_with_custody_attestation_from_bytes(&bytes, &path)
-            .expect("v2 ratification still parses");
+        let loaded =
+            load_v2_ratification_sidecar_with_custody_attestation_from_bytes(&bytes, &path)
+                .expect("v2 ratification still parses");
         t.assert_true("L3", loaded.custody_attestation.is_malformed(), "");
     }
 
     // L4 — canonical sibling field name + schema version.
-    t.check("L4.field", "custody_attestation", CUSTODY_ATTESTATION_PAYLOAD_SIBLING_FIELD);
-    t.check("L4.version", "1", &CUSTODY_ATTESTATION_PAYLOAD_WIRE_SCHEMA_VERSION.to_string());
+    t.check(
+        "L4.field",
+        "custody_attestation",
+        CUSTODY_ATTESTATION_PAYLOAD_SIBLING_FIELD,
+    );
+    t.check(
+        "L4.version",
+        "1",
+        &CUSTODY_ATTESTATION_PAYLOAD_WIRE_SCHEMA_VERSION.to_string(),
+    );
 
     // L5 — absent sibling when field missing or explicitly null.
     {
@@ -1398,8 +1527,14 @@ fn run_fixture_dump(out: &Path) {
         &serde_json::to_string_pretty(&full).unwrap(),
     );
 
-    write_file(&dir.join("evidence_digest.txt"), &format!("{}\n", s.evidence.evidence_digest()));
-    write_file(&dir.join("input_digest.txt"), &format!("{}\n", s.input.input_digest()));
+    write_file(
+        &dir.join("evidence_digest.txt"),
+        &format!("{}\n", s.evidence.evidence_digest()),
+    );
+    write_file(
+        &dir.join("input_digest.txt"),
+        &format!("{}\n", s.input.input_digest()),
+    );
     write_file(
         &dir.join("transcript_digest.txt"),
         &format!(
@@ -1418,9 +1553,7 @@ fn main() {
     let out_dir = match args.next() {
         Some(a) => PathBuf::from(a),
         None => {
-            eprintln!(
-                "usage: run_208_custody_attestation_payload_release_binary_helper <OUT_DIR>"
-            );
+            eprintln!("usage: run_208_custody_attestation_payload_release_binary_helper <OUT_DIR>");
             std::process::exit(2);
         }
     };

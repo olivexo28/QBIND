@@ -32,7 +32,8 @@ use qbind_node::pqc_governance_execution_evaluator::{
     evaluate_governance_decision_source, evaluate_governance_evaluator_with_peer_driven_guard,
     evaluator_transcript_digest, local_operator_cannot_satisfy_evaluator_policy,
     mainnet_peer_driven_apply_remains_refused_under_evaluator,
-    peer_majority_cannot_satisfy_evaluator_policy, validator_set_rotation_remains_unsupported_under_evaluator,
+    peer_majority_cannot_satisfy_evaluator_policy,
+    validator_set_rotation_remains_unsupported_under_evaluator,
     verify_governance_evaluator_response, DecisionSourceIdentity,
     EmergencyCouncilFixtureGovernanceExecutionEvaluatorInterface, EvaluatorComposedOutcome,
     EvaluatorExpectations, EvaluatorOutcome, EvaluatorPolicy, EvaluatorRequest, EvaluatorResponse,
@@ -41,7 +42,9 @@ use qbind_node::pqc_governance_execution_evaluator::{
     ProductionDecisionSourceEvaluatorInterface, ProductionGovernanceExecutionEvaluator,
     EVALUATOR_INVALID_RESPONSE_COMMITMENT_SENTINEL, EVALUATOR_SUPPORTED_VERSION,
 };
-use qbind_node::pqc_governance_execution_policy::{GovernanceAction, GovernanceExecutionClass, GovernanceQuorumThreshold};
+use qbind_node::pqc_governance_execution_policy::{
+    GovernanceAction, GovernanceExecutionClass, GovernanceQuorumThreshold,
+};
 use qbind_node::pqc_trust_bundle::TrustBundleEnvironment;
 
 // ===========================================================================
@@ -370,7 +373,11 @@ fn a10_rotate_authorization_requires_matching_candidate_and_sequence() {
     let mut resp = rotate_response(env);
     resp.authorized_candidate_digest = "mismatch".to_string();
     resp.request_digest = rotate_request(env).request_digest();
-    let bad = verify_governance_evaluator_response(&resp, &rotate_request(env), &rotate_expectations(env));
+    let bad = verify_governance_evaluator_response(
+        &resp,
+        &rotate_request(env),
+        &rotate_expectations(env),
+    );
     assert!(matches!(bad, EvaluatorOutcome::WrongCandidateDigest { .. }));
 }
 
@@ -419,7 +426,10 @@ fn a12_emergency_revoke_only_under_emergency_policy() {
         &trust_domain(env),
         EvaluatorPolicy::EmergencyCouncilFixtureSourceAllowed,
     );
-    assert!(matches!(ok, EvaluatorOutcome::EmergencyFixtureAccepted { .. }));
+    assert!(matches!(
+        ok,
+        EvaluatorOutcome::EmergencyFixtureAccepted { .. }
+    ));
     // The emergency response verifies and authorizes the emergency revoke.
     let resp_outcome = verify_governance_evaluator_response(
         &emergency_response(env),
@@ -458,7 +468,10 @@ fn a13_production_evaluator_callable_returns_unavailable() {
         &trust_domain(env),
         EvaluatorPolicy::ProductionDecisionSourceRequired,
     );
-    assert_eq!(outcome, EvaluatorOutcome::ProductionDecisionSourceUnavailable);
+    assert_eq!(
+        outcome,
+        EvaluatorOutcome::ProductionDecisionSourceUnavailable
+    );
     assert!(outcome.is_unavailable());
 }
 
@@ -1046,8 +1059,11 @@ fn r30_malformed_evaluator_response_rejected() {
     let env = TrustBundleEnvironment::Devnet;
     let mut resp = rotate_response(env);
     resp.evaluator_source_id = String::new();
-    let outcome =
-        verify_governance_evaluator_response(&resp, &rotate_request(env), &rotate_expectations(env));
+    let outcome = verify_governance_evaluator_response(
+        &resp,
+        &rotate_request(env),
+        &rotate_expectations(env),
+    );
     assert!(matches!(
         outcome,
         EvaluatorOutcome::MalformedEvaluatorResponse { .. }
@@ -1078,8 +1094,11 @@ fn r32_invalid_response_commitment_rejected() {
     let env = TrustBundleEnvironment::Devnet;
     let mut resp = rotate_response(env);
     resp.response_commitment = EVALUATOR_INVALID_RESPONSE_COMMITMENT_SENTINEL.to_string();
-    let outcome =
-        verify_governance_evaluator_response(&resp, &rotate_request(env), &rotate_expectations(env));
+    let outcome = verify_governance_evaluator_response(
+        &resp,
+        &rotate_request(env),
+        &rotate_expectations(env),
+    );
     assert_eq!(outcome, EvaluatorOutcome::InvalidResponseCommitment);
 }
 
@@ -1101,9 +1120,15 @@ fn r35_evaluator_valid_but_governance_decision_invalid_rejected() {
     let mut resp = rotate_response(env);
     resp.authorized_lifecycle_action = LocalLifecycleAction::Retire;
     resp.request_digest = rotate_request(env).request_digest();
-    let outcome =
-        verify_governance_evaluator_response(&resp, &rotate_request(env), &rotate_expectations(env));
-    assert!(matches!(outcome, EvaluatorOutcome::WrongLifecycleAction { .. }));
+    let outcome = verify_governance_evaluator_response(
+        &resp,
+        &rotate_request(env),
+        &rotate_expectations(env),
+    );
+    assert!(matches!(
+        outcome,
+        EvaluatorOutcome::WrongLifecycleAction { .. }
+    ));
 }
 
 #[test]
@@ -1113,8 +1138,11 @@ fn r36_governance_valid_but_evaluator_response_invalid_rejected() {
     let env = TrustBundleEnvironment::Devnet;
     let mut resp = rotate_response(env);
     resp.request_digest = "not-the-request-digest".to_string();
-    let outcome =
-        verify_governance_evaluator_response(&resp, &rotate_request(env), &rotate_expectations(env));
+    let outcome = verify_governance_evaluator_response(
+        &resp,
+        &rotate_request(env),
+        &rotate_expectations(env),
+    );
     assert!(matches!(
         outcome,
         EvaluatorOutcome::MalformedEvaluatorResponse { .. }
@@ -1197,7 +1225,10 @@ fn r40_mainnet_peer_driven_apply_refused_even_with_fixture_approval() {
         EvaluatorPolicy::FixtureDecisionSourceAllowed,
         true,
     );
-    assert_eq!(outcome, EvaluatorComposedOutcome::MainNetPeerDrivenApplyRefused);
+    assert_eq!(
+        outcome,
+        EvaluatorComposedOutcome::MainNetPeerDrivenApplyRefused
+    );
     assert!(mainnet_peer_driven_apply_remains_refused_under_evaluator(
         TrustBundleEnvironment::Mainnet
     ));

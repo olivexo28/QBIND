@@ -114,7 +114,10 @@ fn run_071_live_snapshot_matches_loaded_bundle_active_roots() {
     assert_eq!(snap.active_root_count(), 1);
     assert_eq!(snap.active_roots()[0].root_key_id, expected_id);
     assert_eq!(snap.active_roots()[0].root_pk, expected_pk);
-    assert_eq!(snap.active_roots()[0].suite_id, PQC_TRANSPORT_SUITE_ML_DSA_44);
+    assert_eq!(
+        snap.active_roots()[0].suite_id,
+        PQC_TRANSPORT_SUITE_ML_DSA_44
+    );
     assert_eq!(snap.environment(), TrustBundleEnvironment::Devnet);
     assert_eq!(snap.sequence(), loaded.bundle.sequence);
     assert_eq!(snap.fingerprint(), &loaded.fingerprint);
@@ -149,16 +152,18 @@ fn run_071_live_snapshot_excludes_active_revoked_root_from_lookup() {
     // Introduce a second active root so the bundle is still loadable
     // after the first root is revoked.
     let (_id2_bytes, id2_hex, pk2_hex) = fresh_root_pair();
-    bundle.roots.push(qbind_node::pqc_trust_bundle::TrustBundleRoot {
-        root_id: id2_hex.clone(),
-        suite_id: PQC_TRANSPORT_SUITE_ML_DSA_44,
-        root_pk: pk2_hex.clone(),
-        status: qbind_node::pqc_trust_bundle::RootStatus::Active,
-        not_before: 0,
-        not_after: u64::MAX,
-        activation_epoch: None,
-        activation_height: None,
-    });
+    bundle
+        .roots
+        .push(qbind_node::pqc_trust_bundle::TrustBundleRoot {
+            root_id: id2_hex.clone(),
+            suite_id: PQC_TRANSPORT_SUITE_ML_DSA_44,
+            root_pk: pk2_hex.clone(),
+            status: qbind_node::pqc_trust_bundle::RootStatus::Active,
+            not_before: 0,
+            not_after: u64::MAX,
+            activation_epoch: None,
+            activation_height: None,
+        });
     bundle.revocations.push(TrustBundleRevocation {
         root_id: id_hex.clone(),
         leaf_cert_fingerprint: None,
@@ -203,16 +208,18 @@ fn run_071_live_snapshot_pending_root_revocation_is_not_enforced() {
     // Second active root so the bundle still has a usable active
     // root if we want to verify lookup_active works.
     let (_id2_bytes, id2_hex, pk2_hex) = fresh_root_pair();
-    bundle.roots.push(qbind_node::pqc_trust_bundle::TrustBundleRoot {
-        root_id: id2_hex.clone(),
-        suite_id: PQC_TRANSPORT_SUITE_ML_DSA_44,
-        root_pk: pk2_hex.clone(),
-        status: qbind_node::pqc_trust_bundle::RootStatus::Active,
-        not_before: 0,
-        not_after: u64::MAX,
-        activation_epoch: None,
-        activation_height: None,
-    });
+    bundle
+        .roots
+        .push(qbind_node::pqc_trust_bundle::TrustBundleRoot {
+            root_id: id2_hex.clone(),
+            suite_id: PQC_TRANSPORT_SUITE_ML_DSA_44,
+            root_pk: pk2_hex.clone(),
+            status: qbind_node::pqc_trust_bundle::RootStatus::Active,
+            not_before: 0,
+            not_after: u64::MAX,
+            activation_epoch: None,
+            activation_height: None,
+        });
     bundle.revocations.push(TrustBundleRevocation {
         root_id: id_hex.clone(),
         leaf_cert_fingerprint: None,
@@ -319,7 +326,9 @@ fn run_071_live_snapshot_pending_leaf_revocation_is_not_enforced() {
     assert_eq!(live.active_leaf_revocation_count().expect("ok"), 0);
 
     let snap = live.snapshot().expect("snap");
-    assert!(snap.pending_revoked_leaf_fingerprints().contains(&pending_fp));
+    assert!(snap
+        .pending_revoked_leaf_fingerprints()
+        .contains(&pending_fp));
     assert!(!snap.revoked_leaf_fingerprints().contains(&pending_fp));
 }
 
@@ -444,16 +453,18 @@ fn run_071_active_revocation_sets_match_loaded_bundle_counts() {
 
     let mut bundle = build_helper_bundle(HelperBundleMode::Valid, &id_hex, &pk_hex, 100);
     let (_id2_bytes, id2_hex, pk2_hex) = fresh_root_pair();
-    bundle.roots.push(qbind_node::pqc_trust_bundle::TrustBundleRoot {
-        root_id: id2_hex.clone(),
-        suite_id: PQC_TRANSPORT_SUITE_ML_DSA_44,
-        root_pk: pk2_hex.clone(),
-        status: qbind_node::pqc_trust_bundle::RootStatus::Active,
-        not_before: 0,
-        not_after: u64::MAX,
-        activation_epoch: None,
-        activation_height: None,
-    });
+    bundle
+        .roots
+        .push(qbind_node::pqc_trust_bundle::TrustBundleRoot {
+            root_id: id2_hex.clone(),
+            suite_id: PQC_TRANSPORT_SUITE_ML_DSA_44,
+            root_pk: pk2_hex.clone(),
+            status: qbind_node::pqc_trust_bundle::RootStatus::Active,
+            not_before: 0,
+            not_after: u64::MAX,
+            activation_epoch: None,
+            activation_height: None,
+        });
     bundle.revocations.push(TrustBundleRevocation {
         root_id: id_hex.clone(),
         leaf_cert_fingerprint: Some(hex_lower(&active_leaf_fp)),
@@ -495,14 +506,20 @@ fn run_071_active_revocation_sets_match_loaded_bundle_counts() {
     // Active sets match loaded bundle.
     let expected_active_leaves: HashSet<[u8; 32]> =
         loaded.revoked_leaf_fingerprints.iter().copied().collect();
-    let expected_pending_leaves: HashSet<[u8; 32]> =
-        loaded.pending_revoked_leaf_fingerprints.iter().copied().collect();
+    let expected_pending_leaves: HashSet<[u8; 32]> = loaded
+        .pending_revoked_leaf_fingerprints
+        .iter()
+        .copied()
+        .collect();
     let expected_active_roots: HashSet<[u8; 32]> =
         loaded.revoked_root_ids.iter().copied().collect();
     let expected_pending_roots: HashSet<[u8; 32]> =
         loaded.pending_revoked_root_ids.iter().copied().collect();
     assert_eq!(snap.revoked_leaf_fingerprints(), &expected_active_leaves);
-    assert_eq!(snap.pending_revoked_leaf_fingerprints(), &expected_pending_leaves);
+    assert_eq!(
+        snap.pending_revoked_leaf_fingerprints(),
+        &expected_pending_leaves
+    );
     assert_eq!(snap.revoked_root_ids(), &expected_active_roots);
     assert_eq!(snap.pending_revoked_root_ids(), &expected_pending_roots);
 

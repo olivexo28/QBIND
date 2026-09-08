@@ -64,9 +64,8 @@ use qbind_node::pqc_authority_custody::{
     local_operator_config_alone_cannot_satisfy_mainnet_production_custody,
     mainnet_peer_driven_apply_remains_refused_under_custody_boundary,
     peer_majority_cannot_satisfy_custody, validate_authority_custody_attestation,
-    validate_lifecycle_governance_and_custody, AuthorityCustodyAttestation,
-    AuthorityCustodyClass, AuthorityCustodyPolicy, AuthorityCustodyValidationOutcome,
-    LifecycleGovernanceCustodyOutcome,
+    validate_lifecycle_governance_and_custody, AuthorityCustodyAttestation, AuthorityCustodyClass,
+    AuthorityCustodyPolicy, AuthorityCustodyValidationOutcome, LifecycleGovernanceCustodyOutcome,
 };
 use qbind_node::pqc_authority_lifecycle::{
     AuthorityTrustDomain, LocalLifecycleAction, PQC_LIFECYCLE_SUITE_ML_DSA_44,
@@ -92,15 +91,11 @@ const ROOT_FP: &str = "1111111111111111111111111111111111111111";
 const OTHER_ROOT_FP: &str = "9999999999999999999999999999999999999999";
 const CHAIN_ID: &str = "0000000000000001";
 const OTHER_CHAIN: &str = "00000000000000ff";
-const GENESIS_HASH: &str =
-    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
-const OTHER_GENESIS: &str =
-    "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+const GENESIS_HASH: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+const OTHER_GENESIS: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 const DIGEST_2: &str = "2222222222222222222222222222222222222222222222222222222222222222";
-const DIGEST_OTHER: &str =
-    "3333333333333333333333333333333333333333333333333333333333333333";
-const PRIOR_DIGEST: &str =
-    "1111111111111111111111111111111111111111111111111111111111111111";
+const DIGEST_OTHER: &str = "3333333333333333333333333333333333333333333333333333333333333333";
+const PRIOR_DIGEST: &str = "1111111111111111111111111111111111111111111111111111111111111111";
 const CUSTODY_ATTEST_DIGEST: &str = "custody-att-digest-189";
 const CUSTODY_KEY_ID: &str = "custody-key-id-189";
 const NOW: u64 = 1_700_000_000;
@@ -112,7 +107,13 @@ const EXPIRES: u64 = 1_700_001_000;
 // ---------------------------------------------------------------------------
 
 fn domain_for(env: TrustBundleEnvironment) -> AuthorityTrustDomain {
-    AuthorityTrustDomain::new(env, CHAIN_ID, GENESIS_HASH, ROOT_FP, PQC_LIFECYCLE_SUITE_ML_DSA_44)
+    AuthorityTrustDomain::new(
+        env,
+        CHAIN_ID,
+        GENESIS_HASH,
+        ROOT_FP,
+        PQC_LIFECYCLE_SUITE_ML_DSA_44,
+    )
 }
 
 fn build_v2(
@@ -293,30 +294,90 @@ impl Expect {
 
     fn matches_boundary(&self, outcome: &AuthorityCustodyValidationOutcome) -> bool {
         match (self, outcome) {
-            (Expect::AcceptedFixtureCustody, AuthorityCustodyValidationOutcome::AcceptedFixtureCustody { .. }) => true,
-            (Expect::AcceptedLocalOperatorCustody, AuthorityCustodyValidationOutcome::AcceptedLocalOperatorCustody { .. }) => true,
-            (Expect::ProductionCustodyUnavailable, AuthorityCustodyValidationOutcome::ProductionCustodyUnavailable { .. }) => true,
+            (
+                Expect::AcceptedFixtureCustody,
+                AuthorityCustodyValidationOutcome::AcceptedFixtureCustody { .. },
+            ) => true,
+            (
+                Expect::AcceptedLocalOperatorCustody,
+                AuthorityCustodyValidationOutcome::AcceptedLocalOperatorCustody { .. },
+            ) => true,
+            (
+                Expect::ProductionCustodyUnavailable,
+                AuthorityCustodyValidationOutcome::ProductionCustodyUnavailable { .. },
+            ) => true,
             (Expect::KmsUnavailable, AuthorityCustodyValidationOutcome::KmsUnavailable) => true,
             (Expect::HsmUnavailable, AuthorityCustodyValidationOutcome::HsmUnavailable) => true,
-            (Expect::RemoteSignerUnavailable, AuthorityCustodyValidationOutcome::RemoteSignerUnavailable) => true,
-            (Expect::UnknownCustodyClassRejected, AuthorityCustodyValidationOutcome::UnknownCustodyClassRejected) => true,
-            (Expect::WrongEnvironment, AuthorityCustodyValidationOutcome::WrongEnvironment { .. }) => true,
+            (
+                Expect::RemoteSignerUnavailable,
+                AuthorityCustodyValidationOutcome::RemoteSignerUnavailable,
+            ) => true,
+            (
+                Expect::UnknownCustodyClassRejected,
+                AuthorityCustodyValidationOutcome::UnknownCustodyClassRejected,
+            ) => true,
+            (
+                Expect::WrongEnvironment,
+                AuthorityCustodyValidationOutcome::WrongEnvironment { .. },
+            ) => true,
             (Expect::WrongChain, AuthorityCustodyValidationOutcome::WrongChain { .. }) => true,
             (Expect::WrongGenesis, AuthorityCustodyValidationOutcome::WrongGenesis { .. }) => true,
-            (Expect::WrongAuthorityRoot, AuthorityCustodyValidationOutcome::WrongAuthorityRoot { .. }) => true,
-            (Expect::WrongSigningKeyFingerprint, AuthorityCustodyValidationOutcome::WrongSigningKeyFingerprint { .. }) => true,
-            (Expect::WrongCandidateDigest, AuthorityCustodyValidationOutcome::WrongCandidateDigest { .. }) => true,
-            (Expect::WrongAuthorityDomainSequence, AuthorityCustodyValidationOutcome::WrongAuthorityDomainSequence { .. }) => true,
-            (Expect::WrongLifecycleAction, AuthorityCustodyValidationOutcome::WrongLifecycleAction { .. }) => true,
-            (Expect::CustodyAttestationMissing, AuthorityCustodyValidationOutcome::CustodyAttestationMissing) => true,
-            (Expect::CustodyAttestationMalformed, AuthorityCustodyValidationOutcome::CustodyAttestationMalformed { .. }) => true,
-            (Expect::CustodyAttestationExpired, AuthorityCustodyValidationOutcome::CustodyAttestationExpired { .. }) => true,
-            (Expect::CustodyKeyIdMismatch, AuthorityCustodyValidationOutcome::CustodyKeyIdMismatch { .. }) => true,
-            (Expect::UnsupportedCustodySuite, AuthorityCustodyValidationOutcome::UnsupportedCustodySuite { .. }) => true,
-            (Expect::FixtureCustodyRejectedForMainNet, AuthorityCustodyValidationOutcome::FixtureCustodyRejectedForMainNet) => true,
-            (Expect::LocalCustodyRejectedForMainNet, AuthorityCustodyValidationOutcome::LocalCustodyRejectedForMainNet) => true,
-            (Expect::MainNetProductionCustodyUnavailable, AuthorityCustodyValidationOutcome::MainNetProductionCustodyUnavailable) => true,
-            (Expect::PolicyRefusesCustodyClass, AuthorityCustodyValidationOutcome::PolicyRefusesCustodyClass { .. }) => true,
+            (
+                Expect::WrongAuthorityRoot,
+                AuthorityCustodyValidationOutcome::WrongAuthorityRoot { .. },
+            ) => true,
+            (
+                Expect::WrongSigningKeyFingerprint,
+                AuthorityCustodyValidationOutcome::WrongSigningKeyFingerprint { .. },
+            ) => true,
+            (
+                Expect::WrongCandidateDigest,
+                AuthorityCustodyValidationOutcome::WrongCandidateDigest { .. },
+            ) => true,
+            (
+                Expect::WrongAuthorityDomainSequence,
+                AuthorityCustodyValidationOutcome::WrongAuthorityDomainSequence { .. },
+            ) => true,
+            (
+                Expect::WrongLifecycleAction,
+                AuthorityCustodyValidationOutcome::WrongLifecycleAction { .. },
+            ) => true,
+            (
+                Expect::CustodyAttestationMissing,
+                AuthorityCustodyValidationOutcome::CustodyAttestationMissing,
+            ) => true,
+            (
+                Expect::CustodyAttestationMalformed,
+                AuthorityCustodyValidationOutcome::CustodyAttestationMalformed { .. },
+            ) => true,
+            (
+                Expect::CustodyAttestationExpired,
+                AuthorityCustodyValidationOutcome::CustodyAttestationExpired { .. },
+            ) => true,
+            (
+                Expect::CustodyKeyIdMismatch,
+                AuthorityCustodyValidationOutcome::CustodyKeyIdMismatch { .. },
+            ) => true,
+            (
+                Expect::UnsupportedCustodySuite,
+                AuthorityCustodyValidationOutcome::UnsupportedCustodySuite { .. },
+            ) => true,
+            (
+                Expect::FixtureCustodyRejectedForMainNet,
+                AuthorityCustodyValidationOutcome::FixtureCustodyRejectedForMainNet,
+            ) => true,
+            (
+                Expect::LocalCustodyRejectedForMainNet,
+                AuthorityCustodyValidationOutcome::LocalCustodyRejectedForMainNet,
+            ) => true,
+            (
+                Expect::MainNetProductionCustodyUnavailable,
+                AuthorityCustodyValidationOutcome::MainNetProductionCustodyUnavailable,
+            ) => true,
+            (
+                Expect::PolicyRefusesCustodyClass,
+                AuthorityCustodyValidationOutcome::PolicyRefusesCustodyClass { .. },
+            ) => true,
             _ => false,
         }
     }
@@ -324,8 +385,14 @@ impl Expect {
     fn matches_combo(&self, outcome: &LifecycleGovernanceCustodyOutcome) -> bool {
         match (self, outcome) {
             (Expect::ComboAccepted, LifecycleGovernanceCustodyOutcome::Accepted { .. }) => true,
-            (Expect::ComboCustodyRejected, LifecycleGovernanceCustodyOutcome::CustodyRejected { .. }) => true,
-            (Expect::ComboLifecycleRejected, LifecycleGovernanceCustodyOutcome::LifecycleRejected(_)) => true,
+            (
+                Expect::ComboCustodyRejected,
+                LifecycleGovernanceCustodyOutcome::CustodyRejected { .. },
+            ) => true,
+            (
+                Expect::ComboLifecycleRejected,
+                LifecycleGovernanceCustodyOutcome::LifecycleRejected(_),
+            ) => true,
             _ => false,
         }
     }
@@ -437,7 +504,10 @@ fn run_boundary_scenarios(
         let cand = rotate_candidate(env);
         let att = good_fixture_attestation(env, &cand, class);
         scenarios.push(BoundaryScenario {
-            id: format!("A8_production_custody_boundary_returns_typed_unavailable_{}", label),
+            id: format!(
+                "A8_production_custody_boundary_returns_typed_unavailable_{}",
+                label
+            ),
             note: format!(
                 "DevNet ProductionCustodyRequired + {} placeholder -> {}_unavailable",
                 label, label
@@ -458,7 +528,9 @@ fn run_boundary_scenarios(
         let att = good_fixture_attestation(env, &cand, AuthorityCustodyClass::FixtureLocalKey);
         scenarios.push(BoundaryScenario {
             id: "R1_fixture_custody_rejected_under_production_custody_policy".into(),
-            note: "DevNet ProductionCustodyRequired + FixtureLocalKey -> ProductionCustodyUnavailable".into(),
+            note:
+                "DevNet ProductionCustodyRequired + FixtureLocalKey -> ProductionCustodyUnavailable"
+                    .into(),
             att,
             candidate: cand,
             trust_domain: domain_for(env),
@@ -488,7 +560,8 @@ fn run_boundary_scenarios(
         let att = good_fixture_attestation(env, &cand, AuthorityCustodyClass::FixtureLocalKey);
         scenarios.push(BoundaryScenario {
             id: "R3_fixture_custody_rejected_for_mainnet".into(),
-            note: "MainNet FixtureOnly + FixtureLocalKey -> FixtureCustodyRejectedForMainNet".into(),
+            note: "MainNet FixtureOnly + FixtureLocalKey -> FixtureCustodyRejectedForMainNet"
+                .into(),
             att,
             candidate: cand,
             trust_domain: domain_for(env),
@@ -535,7 +608,10 @@ fn run_boundary_scenarios(
             };
             scenarios.push(BoundaryScenario {
                 id: id.into(),
-                note: format!("DevNet FixtureOnly + {} placeholder -> {}_unavailable", label, label),
+                note: format!(
+                    "DevNet FixtureOnly + {} placeholder -> {}_unavailable",
+                    label, label
+                ),
                 att,
                 candidate: cand,
                 trust_domain: domain_for(env),
@@ -631,7 +707,9 @@ fn run_boundary_scenarios(
         att.bundle_signing_key_fingerprint = KEY_A.to_string();
         scenarios.push(BoundaryScenario {
             id: "R13_wrong_signing_key_fingerprint_rejected".into(),
-            note: "DevNet + non-matching bundle_signing_key_fingerprint -> WrongSigningKeyFingerprint".into(),
+            note:
+                "DevNet + non-matching bundle_signing_key_fingerprint -> WrongSigningKeyFingerprint"
+                    .into(),
             att,
             candidate: cand,
             trust_domain: domain_for(env),
@@ -663,7 +741,8 @@ fn run_boundary_scenarios(
         att.authority_domain_sequence = 99;
         scenarios.push(BoundaryScenario {
             id: "R15_wrong_authority_domain_sequence_rejected".into(),
-            note: "DevNet + non-matching authority_domain_sequence -> WrongAuthorityDomainSequence".into(),
+            note: "DevNet + non-matching authority_domain_sequence -> WrongAuthorityDomainSequence"
+                .into(),
             att,
             candidate: cand,
             trust_domain: domain_for(env),
@@ -794,7 +873,8 @@ fn run_boundary_scenarios(
         att.governance_authority_class = GovernanceAuthorityClass::EmergencyCouncil;
         scenarios.push(BoundaryScenario {
             id: "R22_custody_valid_but_governance_proof_invalid_rejected".into(),
-            note: "DevNet + governance_authority_class != expected -> CustodyAttestationMalformed".into(),
+            note: "DevNet + governance_authority_class != expected -> CustodyAttestationMalformed"
+                .into(),
             att,
             candidate: cand,
             trust_domain: domain_for(env),
@@ -891,7 +971,8 @@ fn run_boundary_scenarios(
         let att = good_fixture_attestation(env, &cand, AuthorityCustodyClass::LocalOperatorKey);
         scenarios.push(BoundaryScenario {
             id: "Rc_devnet_local_policy_on_testnet_domain_is_refused_by_policy".into(),
-            note: "TestNet DevnetLocalAllowed + LocalOperatorKey -> PolicyRefusesCustodyClass".into(),
+            note: "TestNet DevnetLocalAllowed + LocalOperatorKey -> PolicyRefusesCustodyClass"
+                .into(),
             att,
             candidate: cand,
             trust_domain: domain_for(env),
@@ -910,9 +991,8 @@ fn run_boundary_scenarios(
 
         let outcome = validate(&s.att, &s.candidate, &s.trust_domain, s.policy);
 
-        let no_mut = s.candidate == cand_before
-            && s.att == att_before
-            && s.trust_domain == dom_before;
+        let no_mut =
+            s.candidate == cand_before && s.att == att_before && s.trust_domain == dom_before;
         let matched = s.expect.matches_boundary(&outcome) && no_mut;
 
         fs::write(scenario_dir.join("note.txt"), format!("{}\n", s.note))?;
@@ -1003,7 +1083,9 @@ fn run_combo_scenarios(
         let att = good_fixture_attestation(env, &cand, AuthorityCustodyClass::LocalOperatorKey);
         scenarios.push(ComboScenario {
             id: "A7_combined_lifecycle_governance_local_custody_accepted_testnet".into(),
-            note: "TestNet TestnetLocalAllowed + valid lifecycle + valid local-operator -> Accepted".into(),
+            note:
+                "TestNet TestnetLocalAllowed + valid lifecycle + valid local-operator -> Accepted"
+                    .into(),
             att,
             candidate: cand,
             persisted: Some(prior),
@@ -1098,7 +1180,11 @@ fn run_combo_scenarios(
             DIGEST_2,
         );
         let prior = prior_versioned(env);
-        let att = good_fixture_attestation(env, &rotate_candidate(env), AuthorityCustodyClass::FixtureLocalKey);
+        let att = good_fixture_attestation(
+            env,
+            &rotate_candidate(env),
+            AuthorityCustodyClass::FixtureLocalKey,
+        );
         scenarios.push(ComboScenario {
             id: "Lifecycle_short_circuits_combo_helper_when_lifecycle_rejects".into(),
             note: "DevNet trust domain + TestNet candidate -> LifecycleRejected; custody validation skipped".into(),
@@ -1202,7 +1288,10 @@ fn run_custody_class_table(out_dir: &Path) -> std::io::Result<(usize, usize)> {
     record(
         "AuthorityCustodyClass::LocalOperatorKey.is_local_only",
         AuthorityCustodyClass::LocalOperatorKey.is_local_only(),
-        format!("{}", AuthorityCustodyClass::LocalOperatorKey.is_local_only()),
+        format!(
+            "{}",
+            AuthorityCustodyClass::LocalOperatorKey.is_local_only()
+        ),
     );
     record(
         "!AuthorityCustodyClass::Kms.is_local_only",
@@ -1222,17 +1311,26 @@ fn run_custody_class_table(out_dir: &Path) -> std::io::Result<(usize, usize)> {
     record(
         "AuthorityCustodyClass::RemoteSigner.is_production_placeholder",
         AuthorityCustodyClass::RemoteSigner.is_production_placeholder(),
-        format!("{}", AuthorityCustodyClass::RemoteSigner.is_production_placeholder()),
+        format!(
+            "{}",
+            AuthorityCustodyClass::RemoteSigner.is_production_placeholder()
+        ),
     );
     record(
         "!AuthorityCustodyClass::FixtureLocalKey.is_production_placeholder",
         !AuthorityCustodyClass::FixtureLocalKey.is_production_placeholder(),
-        format!("{}", AuthorityCustodyClass::FixtureLocalKey.is_production_placeholder()),
+        format!(
+            "{}",
+            AuthorityCustodyClass::FixtureLocalKey.is_production_placeholder()
+        ),
     );
     record(
         "!AuthorityCustodyClass::Unknown.is_production_placeholder",
         !AuthorityCustodyClass::Unknown.is_production_placeholder(),
-        format!("{}", AuthorityCustodyClass::Unknown.is_production_placeholder()),
+        format!(
+            "{}",
+            AuthorityCustodyClass::Unknown.is_production_placeholder()
+        ),
     );
 
     record(
@@ -1298,7 +1396,9 @@ fn run_custody_class_table(out_dir: &Path) -> std::io::Result<(usize, usize)> {
         "AuthorityCustodyPolicy::MainnetProductionCustodyRequired.tag()",
         AuthorityCustodyPolicy::MainnetProductionCustodyRequired.tag()
             == "mainnet-production-custody-required",
-        AuthorityCustodyPolicy::MainnetProductionCustodyRequired.tag().to_string(),
+        AuthorityCustodyPolicy::MainnetProductionCustodyRequired
+            .tag()
+            .to_string(),
     );
 
     fs::write(out_dir.join("custody_class_table.txt"), buf)?;
@@ -1319,7 +1419,10 @@ fn run_named_helpers_table(out_dir: &Path) -> std::io::Result<(usize, usize)> {
             pass += 1;
         } else {
             fail += 1;
-            eprintln!("[run-189-helper] FAIL named-helper row {} got {}", label, got);
+            eprintln!(
+                "[run-189-helper] FAIL named-helper row {} got {}",
+                label, got
+            );
         }
         buf.push_str(&format!("{}\tok={}\tgot={}\n", label, ok, got));
     };
@@ -1350,7 +1453,11 @@ fn run_named_helpers_table(out_dir: &Path) -> std::io::Result<(usize, usize)> {
     );
 
     let pm = peer_majority_cannot_satisfy_custody();
-    record("peer_majority_cannot_satisfy_custody==true", pm, format!("{}", pm));
+    record(
+        "peer_majority_cannot_satisfy_custody==true",
+        pm,
+        format!("{}", pm),
+    );
     let lo = local_operator_config_alone_cannot_satisfy_mainnet_production_custody();
     record(
         "local_operator_config_alone_cannot_satisfy_mainnet_production_custody==true",
@@ -1496,9 +1603,7 @@ fn main() {
     let out_dir: PathBuf = match args.next() {
         Some(p) => PathBuf::from(p),
         None => {
-            eprintln!(
-                "usage: run_189_authority_custody_boundary_release_binary_helper <OUT_DIR>"
-            );
+            eprintln!("usage: run_189_authority_custody_boundary_release_binary_helper <OUT_DIR>");
             std::process::exit(2);
         }
     };
@@ -1526,16 +1631,26 @@ fn main() {
     let total_fail = b_fail + c_fail + k_fail + h_fail + n_fail + d_fail;
     let verdict = if total_fail == 0 { "PASS" } else { "FAIL" };
 
-    let mut summary = fs::File::create(out_dir.join("helper_summary.txt"))
-        .expect("create helper_summary.txt");
+    let mut summary =
+        fs::File::create(out_dir.join("helper_summary.txt")).expect("create helper_summary.txt");
     writeln!(
         summary,
         "Run 189 helper — release-mode authority-custody boundary corpus"
     )
     .unwrap();
     writeln!(summary, "verdict: {}", verdict).unwrap();
-    writeln!(summary, "total_pass: {}\ntotal_fail: {}", total_pass, total_fail).unwrap();
-    writeln!(summary, "boundary_pass: {}\nboundary_fail: {}", b_pass, b_fail).unwrap();
+    writeln!(
+        summary,
+        "total_pass: {}\ntotal_fail: {}",
+        total_pass, total_fail
+    )
+    .unwrap();
+    writeln!(
+        summary,
+        "boundary_pass: {}\nboundary_fail: {}",
+        b_pass, b_fail
+    )
+    .unwrap();
     writeln!(summary, "combo_pass: {}\ncombo_fail: {}", c_pass, c_fail).unwrap();
     writeln!(
         summary,
@@ -1549,8 +1664,18 @@ fn main() {
         h_pass, h_fail
     )
     .unwrap();
-    writeln!(summary, "no_mutation_pass: {}\nno_mutation_fail: {}", n_pass, n_fail).unwrap();
-    writeln!(summary, "determinism_pass: {}\ndeterminism_fail: {}", d_pass, d_fail).unwrap();
+    writeln!(
+        summary,
+        "no_mutation_pass: {}\nno_mutation_fail: {}",
+        n_pass, n_fail
+    )
+    .unwrap();
+    writeln!(
+        summary,
+        "determinism_pass: {}\ndeterminism_fail: {}",
+        d_pass, d_fail
+    )
+    .unwrap();
     writeln!(summary, "production_symbols_exercised:").unwrap();
     for s in &[
         "qbind_node::pqc_authority_custody::AuthorityCustodyClass",

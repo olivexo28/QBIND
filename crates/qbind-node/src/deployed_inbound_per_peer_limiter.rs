@@ -222,10 +222,7 @@ mod tests {
 
     #[test]
     fn over_budget_drops_and_counts() {
-        let adapter = DeployedInboundPerPeerLimiter::new(
-            PeerRateLimiterConfig::new(5, 0),
-            None,
-        );
+        let adapter = DeployedInboundPerPeerLimiter::new(PeerRateLimiterConfig::new(5, 0), None);
         let now = Instant::now();
         let n = node(7);
         for _ in 0..5 {

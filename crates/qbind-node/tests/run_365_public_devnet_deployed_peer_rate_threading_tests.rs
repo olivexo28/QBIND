@@ -106,7 +106,10 @@ fn t07_deployed_default_matches_direct_default() {
     let deployed = deployed_peer_manager_from_cli(&[]);
     let direct = AsyncPeerManagerImpl::new(AsyncPeerManagerConfig::default());
     assert_eq!(
-        deployed.peer_rate_limiter().config().max_messages_per_second,
+        deployed
+            .peer_rate_limiter()
+            .config()
+            .max_messages_per_second,
         direct.peer_rate_limiter().config().max_messages_per_second
     );
     assert_eq!(
@@ -149,7 +152,10 @@ fn t04_custom_burst_reaches_deployed() {
         .deployed_peer_rate_limiter_config()
         .expect("override present");
     assert_eq!(derived.burst_allowance, 42);
-    assert_eq!(derived.max_messages_per_second, DEFAULT_MAX_MESSAGES_PER_SECOND);
+    assert_eq!(
+        derived.max_messages_per_second,
+        DEFAULT_MAX_MESSAGES_PER_SECOND
+    );
 
     let pm = builder.build_deployed_peer_manager();
     assert_eq!(pm.peer_rate_limiter().config().burst_allowance, 42);
@@ -242,7 +248,10 @@ fn t08_connection_limiter_still_reaches_accept_path() {
     let derived = builder
         .deployed_peer_rate_limiter_config()
         .expect("config present");
-    assert_eq!(derived.max_messages_per_second, DEFAULT_MAX_MESSAGES_PER_SECOND);
+    assert_eq!(
+        derived.max_messages_per_second,
+        DEFAULT_MAX_MESSAGES_PER_SECOND
+    );
     assert_eq!(derived.burst_allowance, DEFAULT_BURST_ALLOWANCE);
 }
 
@@ -276,7 +285,7 @@ fn t10_connection_metric_untouched_by_message_drops() {
     let now = Instant::now();
     assert!(limiter.allow(&peer, now));
     assert!(!limiter.allow(&peer, now)); // per-peer message-rate drop
-    // The connection-rate drop counter is a *separate* metric and stays zero.
+                                         // The connection-rate drop counter is a *separate* metric and stays zero.
     assert_eq!(metrics.connection_rate_drop_total(), 0);
 }
 
@@ -298,7 +307,8 @@ fn t12_unbounded_message_rate_rejected() {
     assert!(parsed.abuse_dos_runtime_config().is_err());
 
     // Direct runtime-config path: an unbounded burst is also rejected.
-    let mut bad = qbind_node::public_devnet_abuse_dos_config::AbuseDosConfig::compatibility_default();
+    let mut bad =
+        qbind_node::public_devnet_abuse_dos_config::AbuseDosConfig::compatibility_default();
     bad.per_peer_burst_allowance = 5_000_000;
     assert!(PublicDevnetAbuseDosRuntimeConfig::from_config(bad).is_err());
 }
@@ -426,7 +436,12 @@ fn t26_28_defaults_preserve_matrix_neutrality() {
 // so the deployed builder introduces no divergence from Run 363's seam.
 #[test]
 fn t29_31_deployed_config_matches_runtime_config() {
-    let args = ["--p2p-max-messages-per-second", "321", "--p2p-burst-allowance", "12"];
+    let args = [
+        "--p2p-max-messages-per-second",
+        "321",
+        "--p2p-burst-allowance",
+        "12",
+    ];
     let parsed = parse(&args).unwrap();
     let rt = parsed.abuse_dos_runtime_config().unwrap().expect("config");
     let expected: PeerRateLimiterConfig = rt.peer_rate_limiter_config();
@@ -435,7 +450,10 @@ fn t29_31_deployed_config_matches_runtime_config() {
     let derived = builder
         .deployed_peer_rate_limiter_config()
         .expect("override present");
-    assert_eq!(derived.max_messages_per_second, expected.max_messages_per_second);
+    assert_eq!(
+        derived.max_messages_per_second,
+        expected.max_messages_per_second
+    );
     assert_eq!(derived.burst_allowance, expected.burst_allowance);
     assert_eq!(derived.max_messages_per_second, 321);
     assert_eq!(derived.burst_allowance, 12);

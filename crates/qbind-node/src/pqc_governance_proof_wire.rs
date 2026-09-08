@@ -238,9 +238,7 @@ impl GovernanceAuthorityProofWire {
             authority_root_fingerprint: p.authority_root_fingerprint.clone(),
             authority_root_suite_id: p.authority_root_suite_id,
             lifecycle_action: p.lifecycle_action,
-            active_bundle_signing_key_fingerprint: p
-                .active_bundle_signing_key_fingerprint
-                .clone(),
+            active_bundle_signing_key_fingerprint: p.active_bundle_signing_key_fingerprint.clone(),
             new_bundle_signing_key_fingerprint: p.new_bundle_signing_key_fingerprint.clone(),
             revoked_bundle_signing_key_fingerprint: p
                 .revoked_bundle_signing_key_fingerprint
@@ -413,21 +411,17 @@ mod hex_bytes {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::pqc_authority_lifecycle::PQC_LIFECYCLE_SUITE_ML_DSA_44;
     use crate::pqc_governance_authority::{
         fixture_issuer_signature, GovernanceAuthorityClass, GovernanceThreshold,
         PQC_GOVERNANCE_ISSUER_SUITE_ML_DSA_44,
     };
-    use crate::pqc_authority_lifecycle::PQC_LIFECYCLE_SUITE_ML_DSA_44;
 
     fn proof_fixture() -> GovernanceAuthorityProof {
         let root_fp = "1111111111111111111111111111111111111111";
         let digest = "2222222222222222222222222222222222222222222222222222222222222222";
-        let sig = fixture_issuer_signature(
-            GovernanceAuthorityClass::GenesisBound,
-            root_fp,
-            digest,
-            7,
-        );
+        let sig =
+            fixture_issuer_signature(GovernanceAuthorityClass::GenesisBound, root_fp, digest, 7);
         GovernanceAuthorityProof {
             environment: TrustBundleEnvironment::Devnet,
             chain_id: "0000000000000001".to_string(),
@@ -460,35 +454,41 @@ mod tests {
 
     #[test]
     fn wire_unknown_schema_version_is_rejected() {
-        let mut wire = GovernanceAuthorityProofWire::from_governance_authority_proof(
-            &proof_fixture(),
-        );
+        let mut wire =
+            GovernanceAuthorityProofWire::from_governance_authority_proof(&proof_fixture());
         wire.schema_version = 99;
         let err = wire.to_governance_authority_proof().unwrap_err();
         assert!(matches!(
             err,
-            GovernanceProofWireParseError::UnknownSchemaVersion { got: 99, expected: 1 }
+            GovernanceProofWireParseError::UnknownSchemaVersion {
+                got: 99,
+                expected: 1
+            }
         ));
     }
 
     #[test]
     fn wire_empty_required_field_is_rejected() {
-        let mut wire = GovernanceAuthorityProofWire::from_governance_authority_proof(
-            &proof_fixture(),
-        );
+        let mut wire =
+            GovernanceAuthorityProofWire::from_governance_authority_proof(&proof_fixture());
         wire.chain_id.clear();
         let err = wire.to_governance_authority_proof().unwrap_err();
-        assert!(matches!(err, GovernanceProofWireParseError::EmptyRequiredField));
+        assert!(matches!(
+            err,
+            GovernanceProofWireParseError::EmptyRequiredField
+        ));
     }
 
     #[test]
     fn wire_empty_issuer_signature_is_rejected() {
-        let mut wire = GovernanceAuthorityProofWire::from_governance_authority_proof(
-            &proof_fixture(),
-        );
+        let mut wire =
+            GovernanceAuthorityProofWire::from_governance_authority_proof(&proof_fixture());
         wire.issuer_signature.clear();
         let err = wire.to_governance_authority_proof().unwrap_err();
-        assert!(matches!(err, GovernanceProofWireParseError::EmptyIssuerSignature));
+        assert!(matches!(
+            err,
+            GovernanceProofWireParseError::EmptyIssuerSignature
+        ));
     }
 
     #[test]
@@ -497,8 +497,7 @@ mod tests {
         assert_eq!(s, "\"genesis-bound\"");
         let s = serde_json::to_string(&GovernanceAuthorityClassWire::EmergencyCouncil).unwrap();
         assert_eq!(s, "\"emergency-council\"");
-        let s = serde_json::to_string(&GovernanceAuthorityClassWire::OnChainGovernance)
-            .unwrap();
+        let s = serde_json::to_string(&GovernanceAuthorityClassWire::OnChainGovernance).unwrap();
         assert_eq!(s, "\"on-chain-governance\"");
     }
 }

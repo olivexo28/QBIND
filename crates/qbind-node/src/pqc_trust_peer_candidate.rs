@@ -247,10 +247,7 @@ pub enum PeerCandidateEnvelopeError {
     /// Domain tag did not match [`PeerCandidateEnvelope::DOMAIN_TAG`].
     UnknownDomainTag(String),
     /// `declared_length` did not equal `bundle_bytes.len()`.
-    DeclaredLengthMismatch {
-        declared: usize,
-        actual: usize,
-    },
+    DeclaredLengthMismatch { declared: usize, actual: usize },
     /// `declared_fingerprint_prefix` was not 8 lowercase hex chars.
     MalformedDeclaredFingerprintPrefix(String),
     /// `chain_id_hex` was not 16 lowercase hex chars.
@@ -426,23 +423,15 @@ pub enum PeerCandidateOutcome {
     /// `declared_length > MAX_PEER_CANDIDATE_BUNDLE_BYTES`. Dropped
     /// **before** any crypto, before any temp file was written, and
     /// before the duplicate-suppression cache was consulted.
-    Oversize {
-        observed_len: usize,
-        cap: usize,
-    },
+    Oversize { observed_len: usize, cap: usize },
     /// The configured rate limit fired. No crypto, no temp file.
-    RateLimited {
-        attempts_in_window: u32,
-        cap: u32,
-    },
+    RateLimited { attempts_in_window: u32, cap: u32 },
     /// A previous call already validated (or rejected) a candidate
     /// with the same 8-hex-char fingerprint prefix within the
     /// duplicate cache window. The new call is suppressed before
     /// any crypto runs. Cache lookup is O(1) amortised and bounded
     /// by `duplicate_lru_capacity`.
-    DuplicateSuppressed {
-        fingerprint_prefix: String,
-    },
+    DuplicateSuppressed { fingerprint_prefix: String },
     /// The candidate validated successfully through the same Run 069
     /// pipeline used at startup and by the local reload-check.
     /// **The candidate is NOT applied** — the validator never applies.
@@ -679,7 +668,8 @@ impl PeerCandidateValidator {
                 cap: MAX_PEER_CANDIDATE_BUNDLE_BYTES,
             };
         }
-        if let Err(e) = pre_check_envelope(&envelope, ctx.expected_environment, ctx.expected_chain_id)
+        if let Err(e) =
+            pre_check_envelope(&envelope, ctx.expected_environment, ctx.expected_chain_id)
         {
             return PeerCandidateOutcome::Rejected(PeerCandidateRejection::Envelope(e));
         }
@@ -849,9 +839,11 @@ fn pre_check_envelope(
         });
     }
     if !is_lower_hex(&envelope.declared_fingerprint_prefix, 8) {
-        return Err(PeerCandidateEnvelopeError::MalformedDeclaredFingerprintPrefix(
-            envelope.declared_fingerprint_prefix.clone(),
-        ));
+        return Err(
+            PeerCandidateEnvelopeError::MalformedDeclaredFingerprintPrefix(
+                envelope.declared_fingerprint_prefix.clone(),
+            ),
+        );
     }
     if !is_lower_hex(&envelope.chain_id_hex, 16) {
         return Err(PeerCandidateEnvelopeError::MalformedChainIdHex(
@@ -865,8 +857,7 @@ fn pre_check_envelope(
             envelope: envelope.environment,
         });
     }
-    let expected_chain_hex =
-        crate::pqc_trust_sequence::chain_id_hex(expected_chain_id);
+    let expected_chain_hex = crate::pqc_trust_sequence::chain_id_hex(expected_chain_id);
     if envelope.chain_id_hex != expected_chain_hex {
         return Err(PeerCandidateEnvelopeError::ChainIdMismatch {
             expected_hex: expected_chain_hex,
@@ -1214,12 +1205,10 @@ mod tests {
                 PeerCandidateEnvelopeError::UnsupportedEnvelopeVersion(7),
             ),
             PeerCandidateRejection::Envelope(PeerCandidateEnvelopeError::EmptyPayload),
-            PeerCandidateRejection::Envelope(
-                PeerCandidateEnvelopeError::DeclaredLengthMismatch {
-                    declared: 9,
-                    actual: 8,
-                },
-            ),
+            PeerCandidateRejection::Envelope(PeerCandidateEnvelopeError::DeclaredLengthMismatch {
+                declared: 9,
+                actual: 8,
+            }),
             PeerCandidateRejection::DeclaredMetadataMismatch("seq mismatch".into()),
         ];
         for r in cases {
@@ -1251,11 +1240,10 @@ mod tests {
                     required_epoch: None,
                     current_epoch: None,
                 },
-                sequence_peek:
-                    crate::pqc_trust_sequence::SequencePeekOutcome::NoPriorRecord {
-                        candidate_sequence: 3,
-                        candidate_fingerprint_hex: "ab".repeat(32),
-                    },
+                sequence_peek: crate::pqc_trust_sequence::SequencePeekOutcome::NoPriorRecord {
+                    candidate_sequence: 3,
+                    candidate_fingerprint_hex: "ab".repeat(32),
+                },
                 sequence_persistence_path: None,
             },
             peer_id: Some("peer-42".into()),

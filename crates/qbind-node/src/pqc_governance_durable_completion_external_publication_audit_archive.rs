@@ -86,10 +86,10 @@
 //! match an already-recorded external-publication-audit-completion record.
 
 use crate::pqc_governance_durable_completion_acknowledgement_consumer::DurableCompletionAcknowledgementConsumerOutcome;
-use crate::pqc_governance_durable_completion_external_publication_audit_completion::DurableCompletionExternalPublicationAuditCompletionOutcome;
 use crate::pqc_governance_durable_completion_attestation_backend::DurableCompletionAttestationBackendOutcome;
 use crate::pqc_governance_durable_completion_audit_publication_receipt::DurableCompletionAuditPublicationReceiptOutcome;
 use crate::pqc_governance_durable_completion_audit_receipt_acknowledgement::DurableCompletionAuditReceiptAcknowledgementOutcome;
+use crate::pqc_governance_durable_completion_external_publication_audit_completion::DurableCompletionExternalPublicationAuditCompletionOutcome;
 use crate::pqc_governance_execution_runtime_arming::GovernanceExecutionRuntimeSurface;
 use crate::pqc_governance_modeled_durable_completion_attestation_projection::GovernanceModeledDurableCompletionAttestationOutcome;
 use crate::pqc_governance_modeled_durable_completion_finalization_projection::GovernanceModeledDurableCompletionFinalizationOutcome;
@@ -273,8 +273,12 @@ impl DurableCompletionExternalPublicationAuditArchivePolicy {
             Self::ProductionExternalPublicationAuditArchiveRequired => {
                 "production-external-publication-audit-archive-required"
             }
-            Self::MainNetExternalPublicationAuditArchiveRequired => "mainnet-external-publication-audit-archive-required",
-            Self::ExternalExternalPublicationAuditArchiveRequired => "external-external-publication-audit-archive-required",
+            Self::MainNetExternalPublicationAuditArchiveRequired => {
+                "mainnet-external-publication-audit-archive-required"
+            }
+            Self::ExternalExternalPublicationAuditArchiveRequired => {
+                "external-external-publication-audit-archive-required"
+            }
         }
     }
 
@@ -678,12 +682,24 @@ impl DurableCompletionExternalPublicationAuditArchiveRequest {
             && !self.consumer_record_digest.is_empty()
             && !self.consumer_transcript_digest.is_empty()
             && !self.consumer_record_id.is_empty()
-            && !self.external_publication_audit_completion_identity_digest.is_empty()
-            && !self.external_publication_audit_completion_request_digest.is_empty()
-            && !self.external_publication_audit_completion_response_digest.is_empty()
-            && !self.external_publication_audit_completion_record_digest.is_empty()
-            && !self.external_publication_audit_completion_transcript_digest.is_empty()
-            && !self.external_publication_audit_completion_record_id.is_empty()
+            && !self
+                .external_publication_audit_completion_identity_digest
+                .is_empty()
+            && !self
+                .external_publication_audit_completion_request_digest
+                .is_empty()
+            && !self
+                .external_publication_audit_completion_response_digest
+                .is_empty()
+            && !self
+                .external_publication_audit_completion_record_digest
+                .is_empty()
+            && !self
+                .external_publication_audit_completion_transcript_digest
+                .is_empty()
+            && !self
+                .external_publication_audit_completion_record_id
+                .is_empty()
             && !self.domain_separation_tag.is_empty()
             && self.identity.is_well_formed()
     }
@@ -696,7 +712,9 @@ impl DurableCompletionExternalPublicationAuditArchiveRequest {
     /// The canonical immutable record derived from this request.
     pub fn to_record(&self) -> DurableCompletionExternalPublicationAuditArchiveRecord {
         DurableCompletionExternalPublicationAuditArchiveRecord {
-            external_publication_audit_archive_record_id: self.external_publication_audit_archive_record_id.clone(),
+            external_publication_audit_archive_record_id: self
+                .external_publication_audit_archive_record_id
+                .clone(),
             request_digest: self.digest(),
             identity_digest: self.identity.digest(),
         }
@@ -713,14 +731,16 @@ pub struct DurableCompletionExternalPublicationAuditArchiveResponse {
     /// `true` iff the receipt sink accepted the request.
     pub accepted: bool,
     /// The responding receipt kind.
-    pub external_publication_audit_archive_kind: DurableCompletionExternalPublicationAuditArchiveKind,
+    pub external_publication_audit_archive_kind:
+        DurableCompletionExternalPublicationAuditArchiveKind,
 }
 
 impl DurableCompletionExternalPublicationAuditArchiveResponse {
     /// `true` iff the response is structurally well-formed.
     pub fn is_well_formed(&self) -> bool {
         !self.external_publication_audit_archive_record_id.is_empty()
-            && self.external_publication_audit_archive_kind != DurableCompletionExternalPublicationAuditArchiveKind::Unknown
+            && self.external_publication_audit_archive_kind
+                != DurableCompletionExternalPublicationAuditArchiveKind::Unknown
     }
 
     /// The deterministic receipt response digest.
@@ -834,14 +854,16 @@ impl DurableCompletionExternalPublicationAuditArchiveLedger {
         &self,
         external_publication_audit_archive_record_id: &str,
     ) -> Option<&DurableCompletionExternalPublicationAuditArchiveLedgerRecord> {
-        self.records
-            .iter()
-            .find(|r| r.external_publication_audit_archive_record_id == external_publication_audit_archive_record_id)
+        self.records.iter().find(|r| {
+            r.external_publication_audit_archive_record_id
+                == external_publication_audit_archive_record_id
+        })
     }
 
     /// `true` iff a receipt with `external_publication_audit_archive_record_id` is recorded.
     pub fn contains(&self, external_publication_audit_archive_record_id: &str) -> bool {
-        self.find(external_publication_audit_archive_record_id).is_some()
+        self.find(external_publication_audit_archive_record_id)
+            .is_some()
     }
 
     /// Capture an immutable snapshot for a modeled rollback.
@@ -976,9 +998,11 @@ pub struct DurableCompletionExternalPublicationAuditArchiveExpectations {
     /// Expected settlement-confirmation identity.
     pub expected_identity: DurableCompletionExternalPublicationAuditArchiveIdentity,
     /// Expected settlement-confirmation kind.
-    pub expected_external_publication_audit_archive_kind: DurableCompletionExternalPublicationAuditArchiveKind,
+    pub expected_external_publication_audit_archive_kind:
+        DurableCompletionExternalPublicationAuditArchiveKind,
     /// Expected settlement-confirmation policy.
-    pub expected_external_publication_audit_archive_policy: DurableCompletionExternalPublicationAuditArchivePolicy,
+    pub expected_external_publication_audit_archive_policy:
+        DurableCompletionExternalPublicationAuditArchivePolicy,
     /// Expected domain separation tag.
     pub expected_domain_separation_tag: String,
 }
@@ -1028,7 +1052,9 @@ impl DurableCompletionExternalPublicationAuditArchiveExpectations {
         if !request.is_well_formed() {
             return Some("malformed receipt request");
         }
-        if request.external_publication_audit_archive_record_id != self.expected_external_publication_audit_archive_record_id {
+        if request.external_publication_audit_archive_record_id
+            != self.expected_external_publication_audit_archive_record_id
+        {
             return Some("wrong receipt record id");
         }
         if request.environment != self.expected_environment {
@@ -1180,7 +1206,9 @@ impl DurableCompletionExternalPublicationAuditArchiveExpectations {
         {
             return Some("wrong settlement-confirmation transcript digest");
         }
-        if request.external_publication_audit_completion_record_id != self.expected_external_publication_audit_completion_record_id {
+        if request.external_publication_audit_completion_record_id
+            != self.expected_external_publication_audit_completion_record_id
+        {
             return Some("wrong settlement-confirmation record id");
         }
         if request.domain_separation_tag != self.expected_domain_separation_tag {
@@ -1389,7 +1417,8 @@ impl DurableCompletionExternalPublicationAuditArchiveOutcome {
     pub fn projects_to_recorded(&self) -> bool {
         matches!(
             self,
-            Self::ExternalPublicationAuditArchiveRecorded | Self::ExternalPublicationAuditArchiveDuplicateIdempotent
+            Self::ExternalPublicationAuditArchiveRecorded
+                | Self::ExternalPublicationAuditArchiveDuplicateIdempotent
         )
     }
 
@@ -1412,14 +1441,18 @@ impl DurableCompletionExternalPublicationAuditArchiveOutcome {
     /// Stable operator-facing tag.
     pub fn tag(&self) -> &'static str {
         match self {
-            Self::LegacyBypassNoExternalPublicationAuditArchive => "legacy-bypass-no-external-publication-audit-archive",
+            Self::LegacyBypassNoExternalPublicationAuditArchive => {
+                "legacy-bypass-no-external-publication-audit-archive"
+            }
             Self::RejectedBeforeExternalPublicationAuditCompletionNoAuditArchive => {
                 "rejected-before-settlement-confirmation-no-outcome-publication"
             }
             Self::ExternalPublicationAuditCompletionDidNotRecordNoAuditArchive => {
                 "settlement-confirmation-did-not-record-no-outcome-publication"
             }
-            Self::ExternalPublicationAuditArchiveRecorded => "external-publication-audit-archive-recorded",
+            Self::ExternalPublicationAuditArchiveRecorded => {
+                "external-publication-audit-archive-recorded"
+            }
             Self::ExternalPublicationAuditArchiveDuplicateIdempotent => {
                 "external-publication-audit-archive-duplicate-idempotent"
             }
@@ -1453,7 +1486,9 @@ impl DurableCompletionExternalPublicationAuditArchiveOutcome {
             Self::ValidatorSetRotationUnsupportedNoAuditArchive => {
                 "validator-set-rotation-unsupported-no-outcome-publication"
             }
-            Self::PolicyChangeUnsupportedNoAuditArchive => "policy-change-unsupported-no-outcome-publication",
+            Self::PolicyChangeUnsupportedNoAuditArchive => {
+                "policy-change-unsupported-no-outcome-publication"
+            }
         }
     }
 }
@@ -1502,17 +1537,21 @@ impl DurableCompletionExternalPublicationAuditArchiveRequestIntent {
 pub fn project_external_publication_audit_completion_outcome_to_external_publication_audit_archive_request(
     outcome: &DurableCompletionExternalPublicationAuditArchiveExternalPublicationAuditCompletionBinding,
 ) -> DurableCompletionExternalPublicationAuditArchiveRequestIntent {
-    use DurableCompletionExternalPublicationAuditCompletionOutcome as Finalization;
     use DurableCompletionExternalPublicationAuditArchiveOutcome as Receipt;
     use DurableCompletionExternalPublicationAuditArchiveRequestIntent as Intent;
+    use DurableCompletionExternalPublicationAuditCompletionOutcome as Finalization;
     match outcome {
         Finalization::ExternalPublicationAuditCompletionRecorded => Intent::CreateRequest,
-        Finalization::ExternalPublicationAuditCompletionDuplicateIdempotent => Intent::IdempotentOnly,
+        Finalization::ExternalPublicationAuditCompletionDuplicateIdempotent => {
+            Intent::IdempotentOnly
+        }
         Finalization::LegacyBypassNoExternalPublicationAuditCompletion => {
             Intent::NoReceipt(Receipt::LegacyBypassNoExternalPublicationAuditArchive)
         }
         Finalization::RejectedBeforeExternalPublicationAuditFinalizationNoAuditCompletion => {
-            Intent::NoReceipt(Receipt::RejectedBeforeExternalPublicationAuditCompletionNoAuditArchive)
+            Intent::NoReceipt(
+                Receipt::RejectedBeforeExternalPublicationAuditCompletionNoAuditArchive,
+            )
         }
         Finalization::MainNetPeerDrivenApplyRefusedNoAuditCompletion => {
             Intent::NoReceipt(Receipt::MainNetPeerDrivenApplyRefusedNoAuditArchive)
@@ -1526,7 +1565,9 @@ pub fn project_external_publication_audit_completion_outcome_to_external_publica
         // Every remaining settlement-confirmation outcome is a non-recording rejection /
         // failure / rollback / ambiguous window: the settlement confirmation did not
         // record, so no external-publication-audit-archive record may exist.
-        _ => Intent::NoReceipt(Receipt::ExternalPublicationAuditCompletionDidNotRecordNoAuditArchive),
+        _ => {
+            Intent::NoReceipt(Receipt::ExternalPublicationAuditCompletionDidNotRecordNoAuditArchive)
+        }
     }
 }
 
@@ -1705,10 +1746,13 @@ impl GovernanceDurableCompletionExternalPublicationAuditArchiveSink
         // Build the deterministic request / response / record / transcript digests.
         let request_digest = request.digest();
         let response = DurableCompletionExternalPublicationAuditArchiveResponse {
-            external_publication_audit_archive_record_id: request.external_publication_audit_archive_record_id.clone(),
+            external_publication_audit_archive_record_id: request
+                .external_publication_audit_archive_record_id
+                .clone(),
             request_digest: request_digest.clone(),
             accepted: true,
-            external_publication_audit_archive_kind: DurableCompletionExternalPublicationAuditArchiveKind::FixtureInMemory,
+            external_publication_audit_archive_kind:
+                DurableCompletionExternalPublicationAuditArchiveKind::FixtureInMemory,
         };
         let response_digest = response.digest();
         let record = request.to_record();
@@ -1739,14 +1783,18 @@ impl GovernanceDurableCompletionExternalPublicationAuditArchiveSink
             return Receipt::ExternalPublicationAuditArchiveRejectedBeforeRecord;
         }
 
-        ledger.insert(DurableCompletionExternalPublicationAuditArchiveLedgerRecord {
-            external_publication_audit_archive_record_id: request.external_publication_audit_archive_record_id.clone(),
-            request_digest,
-            response_digest,
-            record_digest,
-            transcript_digest,
-            status: DurableCompletionExternalPublicationAuditArchiveLedgerStatus::Recorded,
-        });
+        ledger.insert(
+            DurableCompletionExternalPublicationAuditArchiveLedgerRecord {
+                external_publication_audit_archive_record_id: request
+                    .external_publication_audit_archive_record_id
+                    .clone(),
+                request_digest,
+                response_digest,
+                record_digest,
+                transcript_digest,
+                status: DurableCompletionExternalPublicationAuditArchiveLedgerStatus::Recorded,
+            },
+        );
         Receipt::ExternalPublicationAuditArchiveRecorded
     }
 }
@@ -2064,7 +2112,8 @@ pub fn recover_durable_completion_external_publication_audit_archive_window(
     // the expected receipt record id and the canonical request digest.
     let recovered_matches =
         |record: &DurableCompletionExternalPublicationAuditArchiveLedgerRecord| -> bool {
-            record.external_publication_audit_archive_record_id == expectations.expected_external_publication_audit_archive_record_id
+            record.external_publication_audit_archive_record_id
+                == expectations.expected_external_publication_audit_archive_record_id
                 && record.request_digest == input.request.digest()
                 && record.status
                     == DurableCompletionExternalPublicationAuditArchiveLedgerStatus::Recorded
@@ -2171,17 +2220,20 @@ pub fn durable_completion_external_publication_audit_archive_never_calls_run_070
 }
 
 /// Run 286 — the receipt boundary never mutates live PQC trust state.
-pub fn durable_completion_external_publication_audit_archive_never_mutates_live_pqc_trust_state() -> bool {
+pub fn durable_completion_external_publication_audit_archive_never_mutates_live_pqc_trust_state(
+) -> bool {
     true
 }
 
 /// Run 286 — the receipt boundary never writes a sequence or a marker.
-pub fn durable_completion_external_publication_audit_archive_never_writes_sequence_or_marker() -> bool {
+pub fn durable_completion_external_publication_audit_archive_never_writes_sequence_or_marker(
+) -> bool {
     true
 }
 
 /// Run 286 — the receipt boundary changes no RocksDB file schema / migration.
-pub fn durable_completion_external_publication_audit_archive_no_rocksdb_file_schema_migration_change() -> bool {
+pub fn durable_completion_external_publication_audit_archive_no_rocksdb_file_schema_migration_change(
+) -> bool {
     true
 }
 
@@ -2211,7 +2263,8 @@ pub fn durable_completion_external_publication_audit_archive_completion_report_r
 }
 
 /// Run 286 — a receipt requires a Run 252 external_publication_audit_archive upstream.
-pub fn durable_completion_external_publication_audit_archive_finalization_projection_required() -> bool {
+pub fn durable_completion_external_publication_audit_archive_finalization_projection_required(
+) -> bool {
     true
 }
 
@@ -2268,7 +2321,8 @@ pub fn durable_completion_external_publication_audit_archive_no_real_settlement_
 /// record is a modeled in-memory fixture record. Production / MainNet / external
 /// external-publication-audit-completion sinks are reachable but unavailable / fail closed
 /// and never confer any real acknowledgement.
-pub fn durable_completion_external_publication_audit_archive_no_real_external_publication_audit_completion() -> bool {
+pub fn durable_completion_external_publication_audit_archive_no_real_external_publication_audit_completion(
+) -> bool {
     true
 }
 
@@ -2276,7 +2330,8 @@ pub fn durable_completion_external_publication_audit_archive_no_real_external_pu
 /// settlement-finality projection; the only settlement-finality projection is a modeled
 /// in-memory fixture record with no external publication, network I/O, or persistent
 /// backend.
-pub fn durable_completion_external_publication_audit_archive_no_real_settlement_finality_projection() -> bool {
+pub fn durable_completion_external_publication_audit_archive_no_real_settlement_finality_projection(
+) -> bool {
     true
 }
 
@@ -2284,12 +2339,14 @@ pub fn durable_completion_external_publication_audit_archive_no_real_settlement_
 /// external-publication-audit-completion; the only external-publication-audit-completion is a modeled
 /// in-memory fixture record with no external publication, network I/O, or persistent
 /// backend.
-pub fn durable_completion_external_publication_audit_archive_no_real_external_publication_audit_archive() -> bool {
+pub fn durable_completion_external_publication_audit_archive_no_real_external_publication_audit_archive(
+) -> bool {
     true
 }
 
 /// Run 286 — a receipt record is required before a receipt is acknowledged.
-pub fn durable_completion_external_publication_audit_archive_record_required_before_reported() -> bool {
+pub fn durable_completion_external_publication_audit_archive_record_required_before_reported(
+) -> bool {
     true
 }
 
@@ -2304,7 +2361,8 @@ pub fn durable_completion_external_publication_audit_archive_rollback_never_reco
 }
 
 /// Run 286 — an ambiguous after-record receipt window fails closed.
-pub fn durable_completion_external_publication_audit_archive_ambiguous_window_fails_closed() -> bool {
+pub fn durable_completion_external_publication_audit_archive_ambiguous_window_fails_closed() -> bool
+{
     true
 }
 
@@ -2316,7 +2374,8 @@ pub fn durable_completion_external_publication_audit_archive_mainnet_peer_driven
 }
 
 /// Run 286 — production / MainNet audit-ledger sinks are reachable but unavailable.
-pub fn durable_completion_external_publication_audit_archive_production_mainnet_unavailable() -> bool {
+pub fn durable_completion_external_publication_audit_archive_production_mainnet_unavailable() -> bool
+{
     true
 }
 
@@ -2326,7 +2385,8 @@ pub fn durable_completion_external_publication_audit_archive_external_unavailabl
 }
 
 /// Run 286 — validator-set rotation remains unsupported at the receipt boundary.
-pub fn durable_completion_external_publication_audit_archive_validator_set_rotation_unsupported() -> bool {
+pub fn durable_completion_external_publication_audit_archive_validator_set_rotation_unsupported(
+) -> bool {
     true
 }
 

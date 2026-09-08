@@ -109,7 +109,12 @@ fn t02_no_flag_under_budget_dispatches() {
 #[test]
 fn t03_custom_max_messages_reaches_inbound() {
     let limiter = deployed_inbound_limiter_from_cli(
-        &["--p2p-max-messages-per-second", "5", "--p2p-burst-allowance", "0"],
+        &[
+            "--p2p-max-messages-per-second",
+            "5",
+            "--p2p-burst-allowance",
+            "0",
+        ],
         None,
     );
     assert_eq!(limiter.config().max_messages_per_second, 5);
@@ -131,7 +136,12 @@ fn t04_custom_burst_reaches_inbound() {
 #[test]
 fn t05_under_budget_accepted() {
     let limiter = deployed_inbound_limiter_from_cli(
-        &["--p2p-max-messages-per-second", "5", "--p2p-burst-allowance", "0"],
+        &[
+            "--p2p-max-messages-per-second",
+            "5",
+            "--p2p-burst-allowance",
+            "0",
+        ],
         None,
     );
     let now = Instant::now();
@@ -146,7 +156,12 @@ fn t05_under_budget_accepted() {
 #[test]
 fn t06_over_budget_dropped() {
     let limiter = deployed_inbound_limiter_from_cli(
-        &["--p2p-max-messages-per-second", "5", "--p2p-burst-allowance", "0"],
+        &[
+            "--p2p-max-messages-per-second",
+            "5",
+            "--p2p-burst-allowance",
+            "0",
+        ],
         None,
     );
     let now = Instant::now();
@@ -169,7 +184,12 @@ fn t06_over_budget_dropped() {
 fn t07_drop_counter_increments() {
     // Adapter self-contained counter.
     let limiter = deployed_inbound_limiter_from_cli(
-        &["--p2p-max-messages-per-second", "1", "--p2p-burst-allowance", "0"],
+        &[
+            "--p2p-max-messages-per-second",
+            "1",
+            "--p2p-burst-allowance",
+            "0",
+        ],
         None,
     );
     let now = Instant::now();
@@ -182,7 +202,12 @@ fn t07_drop_counter_increments() {
     // increments when a NodeMetrics handle is installed.
     let metrics = Arc::new(NodeMetrics::new());
     let limiter = deployed_inbound_limiter_from_cli(
-        &["--p2p-max-messages-per-second", "1", "--p2p-burst-allowance", "0"],
+        &[
+            "--p2p-max-messages-per-second",
+            "1",
+            "--p2p-burst-allowance",
+            "0",
+        ],
         Some(Arc::clone(&metrics)),
     );
     let n = node(5);
@@ -197,14 +222,19 @@ fn t08_connection_metric_untouched_by_message_drops() {
     let p2p_metrics = P2pMetrics::new();
     let node_metrics = Arc::new(NodeMetrics::new());
     let limiter = deployed_inbound_limiter_from_cli(
-        &["--p2p-max-messages-per-second", "1", "--p2p-burst-allowance", "0"],
+        &[
+            "--p2p-max-messages-per-second",
+            "1",
+            "--p2p-burst-allowance",
+            "0",
+        ],
         Some(Arc::clone(&node_metrics)),
     );
     let now = Instant::now();
     let n = node(6);
     assert!(limiter.allow_node(&n, now));
     assert!(!limiter.allow_node(&n, now)); // per-peer message-rate drop
-    // Per-peer drop recorded, connection-rate metric untouched (separate metric).
+                                           // Per-peer drop recorded, connection-rate metric untouched (separate metric).
     assert_eq!(node_metrics.peer_network().total_rate_limit_drops(), 1);
     assert_eq!(p2p_metrics.connection_rate_drop_total(), 0);
 }
@@ -328,7 +358,12 @@ fn t17_invented_flags_rejected() {
 #[test]
 fn t18_24_additive_no_state_mutation() {
     let limiter = deployed_inbound_limiter_from_cli(
-        &["--p2p-max-messages-per-second", "500", "--p2p-burst-allowance", "10"],
+        &[
+            "--p2p-max-messages-per-second",
+            "500",
+            "--p2p-burst-allowance",
+            "10",
+        ],
         None,
     );
     assert_eq!(limiter.config().max_messages_per_second, 500);
@@ -356,7 +391,8 @@ fn t18_24_additive_no_state_mutation() {
 fn t25_26_no_run070_or_authority_wiring() {
     // Building the adapter starts no listener/dialer and touches no authority
     // state. It only holds token buckets.
-    let limiter = deployed_inbound_limiter_from_cli(&["--p2p-max-messages-per-second", "500"], None);
+    let limiter =
+        deployed_inbound_limiter_from_cli(&["--p2p-max-messages-per-second", "500"], None);
     assert_eq!(limiter.config().max_messages_per_second, 500);
     assert!(!limiter.has_metrics());
 }
@@ -420,7 +456,12 @@ fn t31_run367_connection_rate_compatible() {
 // builder's derived per-peer config equals the runtime config's per-peer config.
 #[test]
 fn t32_run365_builder_derivation_compatible() {
-    let args = ["--p2p-max-messages-per-second", "321", "--p2p-burst-allowance", "12"];
+    let args = [
+        "--p2p-max-messages-per-second",
+        "321",
+        "--p2p-burst-allowance",
+        "12",
+    ];
     let parsed = parse(&args).unwrap();
     let rt = parsed.abuse_dos_runtime_config().unwrap().expect("config");
     let expected: PeerRateLimiterConfig = rt.peer_rate_limiter_config();
@@ -429,7 +470,10 @@ fn t32_run365_builder_derivation_compatible() {
     let derived = builder
         .deployed_peer_rate_limiter_config()
         .expect("override present");
-    assert_eq!(derived.max_messages_per_second, expected.max_messages_per_second);
+    assert_eq!(
+        derived.max_messages_per_second,
+        expected.max_messages_per_second
+    );
     assert_eq!(derived.burst_allowance, expected.burst_allowance);
 
     // The adapter built from that derived config carries the same thresholds.
@@ -448,5 +492,8 @@ fn t33_defaults_stable_across_paths() {
 
     // Bucket keying is deterministic (first 8 bytes, big-endian) and used only
     // for rate-limit bucket selection — not as an identity claim.
-    assert_eq!(DeployedInboundPerPeerLimiter::bucket_key(&node(77)), PeerId(77));
+    assert_eq!(
+        DeployedInboundPerPeerLimiter::bucket_key(&node(77)),
+        PeerId(77)
+    );
 }

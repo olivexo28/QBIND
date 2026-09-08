@@ -33,8 +33,7 @@ use qbind_node::pqc_onchain_governance_proof_surface::{
     local_peer_candidate_check_compose_onchain_governance_marker_decision,
     mainnet_peer_driven_apply_remains_refused_for_onchain_governance,
     onchain_governance_fixture_allowed_env_selector_enabled,
-    onchain_governance_proof_policy_from_cli_or_env,
-    onchain_governance_proof_policy_from_selector,
+    onchain_governance_proof_policy_from_cli_or_env, onchain_governance_proof_policy_from_selector,
     peer_driven_drain_compose_onchain_governance_marker_decision,
     reload_apply_compose_onchain_governance_marker_decision,
     reload_check_compose_onchain_governance_marker_decision,
@@ -77,9 +76,9 @@ impl EnvGuard {
                 QBIND_P2P_TRUST_BUNDLE_ONCHAIN_GOVERNANCE_FIXTURE_ALLOWED_ENV,
                 v,
             ),
-            None => std::env::remove_var(
-                QBIND_P2P_TRUST_BUNDLE_ONCHAIN_GOVERNANCE_FIXTURE_ALLOWED_ENV,
-            ),
+            None => {
+                std::env::remove_var(QBIND_P2P_TRUST_BUNDLE_ONCHAIN_GOVERNANCE_FIXTURE_ALLOWED_ENV)
+            }
         }
         EnvGuard { prior, _lock: lock }
     }
@@ -92,9 +91,9 @@ impl Drop for EnvGuard {
                 QBIND_P2P_TRUST_BUNDLE_ONCHAIN_GOVERNANCE_FIXTURE_ALLOWED_ENV,
                 v,
             ),
-            None => std::env::remove_var(
-                QBIND_P2P_TRUST_BUNDLE_ONCHAIN_GOVERNANCE_FIXTURE_ALLOWED_ENV,
-            ),
+            None => {
+                std::env::remove_var(QBIND_P2P_TRUST_BUNDLE_ONCHAIN_GOVERNANCE_FIXTURE_ALLOWED_ENV)
+            }
         }
     }
 }
@@ -109,10 +108,8 @@ const ROOT_FP: &str = "1111111111111111111111111111111111111111";
 const OTHER_ROOT_FP: &str = "9999999999999999999999999999999999999999";
 const CHAIN_ID: &str = "0000000000000001";
 const OTHER_CHAIN: &str = "00000000000000ff";
-const GENESIS_HASH_A: &str =
-    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
-const GENESIS_HASH_B: &str =
-    "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+const GENESIS_HASH_A: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+const GENESIS_HASH_B: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 const DIGEST_2: &str = "2222222222222222222222222222222222222222222222222222222222222222";
 const DIGEST_3: &str = "3333333333333333333333333333333333333333333333333333333333333333";
 
@@ -121,8 +118,7 @@ const OTHER_GOV_DOMAIN: &str = "qbind-onchain-gov-other";
 const GOV_EPOCH: u64 = 42;
 const PROPOSAL_ID: &str = "prop-001";
 const OTHER_PROPOSAL_ID: &str = "prop-999";
-const PROPOSAL_DIGEST: &str =
-    "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef";
+const PROPOSAL_DIGEST: &str = "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef";
 const OTHER_PROPOSAL_DIGEST: &str =
     "feedfeedfeedfeedfeedfeedfeedfeedfeedfeedfeedfeedfeedfeedfeedfeed";
 const UNIQUE_DECISION_ID: &str = "decision-180";
@@ -251,9 +247,7 @@ fn good_proof(
         _ => None,
     };
     let revoked_fp = match action {
-        LocalLifecycleAction::Rotate => {
-            candidate.previous_bundle_signing_key_fingerprint.clone()
-        }
+        LocalLifecycleAction::Rotate => candidate.previous_bundle_signing_key_fingerprint.clone(),
         LocalLifecycleAction::Retire
         | LocalLifecycleAction::Revoke
         | LocalLifecycleAction::EmergencyRevoke => candidate
@@ -402,7 +396,10 @@ fn a1_default_policy_is_disabled_and_proof_rejected() {
     let candidate = rotate_to(KEY_B, KEY_A, 2, DIGEST_2, TrustBundleEnvironment::Devnet);
     let proof = good_proof(&candidate, LocalLifecycleAction::Rotate);
     let outcome = run_compose(None, &candidate, Some(&proof), &devnet_domain(), policy);
-    assert_eq!(outcome, OnChainGovernanceMarkerDecisionOutcome::PolicyDisabled);
+    assert_eq!(
+        outcome,
+        OnChainGovernanceMarkerDecisionOutcome::PolicyDisabled
+    );
     assert!(!outcome.is_accept());
     assert!(!outcome.is_reject());
     assert!(outcome.is_bypassed());
@@ -508,21 +505,20 @@ fn a4_reload_check_testnet_fixture_rotate_accepted() {
     let candidate = rotate_to(KEY_B, KEY_A, 2, DIGEST_2, TrustBundleEnvironment::Testnet);
     let proof = good_proof(&candidate, LocalLifecycleAction::Rotate);
     let persisted = prior_v2_for_rotate(TrustBundleEnvironment::Testnet);
-    let outcome = reload_check_compose_onchain_governance_marker_decision::<
-        EmptyOnChainGovernanceReplaySet,
-    >(
-        Some(&persisted),
-        &candidate,
-        Some(&proof),
-        &testnet_domain(),
-        OnChainGovernanceProofPolicy::AllowFixtureSourceTest,
-        GOV_DOMAIN,
-        GOV_EPOCH,
-        PROPOSAL_ID,
-        PROPOSAL_DIGEST,
-        NOW,
-        &EmptyOnChainGovernanceReplaySet,
-    );
+    let outcome =
+        reload_check_compose_onchain_governance_marker_decision::<EmptyOnChainGovernanceReplaySet>(
+            Some(&persisted),
+            &candidate,
+            Some(&proof),
+            &testnet_domain(),
+            OnChainGovernanceProofPolicy::AllowFixtureSourceTest,
+            GOV_DOMAIN,
+            GOV_EPOCH,
+            PROPOSAL_ID,
+            PROPOSAL_DIGEST,
+            NOW,
+            &EmptyOnChainGovernanceReplaySet,
+        );
     assert!(outcome.is_accept(), "got {:?}", outcome);
 }
 
@@ -535,21 +531,20 @@ fn a5_reload_apply_devnet_fixture_rotate_accepted() {
     let candidate = rotate_to(KEY_B, KEY_A, 2, DIGEST_2, TrustBundleEnvironment::Devnet);
     let proof = good_proof(&candidate, LocalLifecycleAction::Rotate);
     let persisted = prior_v2_for_rotate(TrustBundleEnvironment::Devnet);
-    let outcome = reload_apply_compose_onchain_governance_marker_decision::<
-        EmptyOnChainGovernanceReplaySet,
-    >(
-        Some(&persisted),
-        &candidate,
-        Some(&proof),
-        &devnet_domain(),
-        OnChainGovernanceProofPolicy::AllowFixtureSourceTest,
-        GOV_DOMAIN,
-        GOV_EPOCH,
-        PROPOSAL_ID,
-        PROPOSAL_DIGEST,
-        NOW,
-        &EmptyOnChainGovernanceReplaySet,
-    );
+    let outcome =
+        reload_apply_compose_onchain_governance_marker_decision::<EmptyOnChainGovernanceReplaySet>(
+            Some(&persisted),
+            &candidate,
+            Some(&proof),
+            &devnet_domain(),
+            OnChainGovernanceProofPolicy::AllowFixtureSourceTest,
+            GOV_DOMAIN,
+            GOV_EPOCH,
+            PROPOSAL_ID,
+            PROPOSAL_DIGEST,
+            NOW,
+            &EmptyOnChainGovernanceReplaySet,
+        );
     assert!(outcome.is_accept(), "got {:?}", outcome);
 }
 
@@ -642,21 +637,20 @@ fn a8b_sighup_fixture_rotate_accepted() {
     let candidate = rotate_to(KEY_B, KEY_A, 2, DIGEST_2, TrustBundleEnvironment::Devnet);
     let proof = good_proof(&candidate, LocalLifecycleAction::Rotate);
     let persisted = prior_v2_for_rotate(TrustBundleEnvironment::Devnet);
-    let outcome = sighup_compose_onchain_governance_marker_decision::<
-        EmptyOnChainGovernanceReplaySet,
-    >(
-        Some(&persisted),
-        &candidate,
-        Some(&proof),
-        &devnet_domain(),
-        OnChainGovernanceProofPolicy::AllowFixtureSourceTest,
-        GOV_DOMAIN,
-        GOV_EPOCH,
-        PROPOSAL_ID,
-        PROPOSAL_DIGEST,
-        NOW,
-        &EmptyOnChainGovernanceReplaySet,
-    );
+    let outcome =
+        sighup_compose_onchain_governance_marker_decision::<EmptyOnChainGovernanceReplaySet>(
+            Some(&persisted),
+            &candidate,
+            Some(&proof),
+            &devnet_domain(),
+            OnChainGovernanceProofPolicy::AllowFixtureSourceTest,
+            GOV_DOMAIN,
+            GOV_EPOCH,
+            PROPOSAL_ID,
+            PROPOSAL_DIGEST,
+            NOW,
+            &EmptyOnChainGovernanceReplaySet,
+        );
     assert!(outcome.is_accept(), "got {:?}", outcome);
 }
 
@@ -726,7 +720,10 @@ fn r1_default_disabled_policy_rejects_proof() {
         &devnet_domain(),
         OnChainGovernanceProofPolicy::Disabled,
     );
-    assert_eq!(outcome, OnChainGovernanceMarkerDecisionOutcome::PolicyDisabled);
+    assert_eq!(
+        outcome,
+        OnChainGovernanceMarkerDecisionOutcome::PolicyDisabled
+    );
 }
 
 // ===========================================================================
@@ -756,13 +753,18 @@ fn r3_mainnet_peer_driven_apply_remains_refused_even_under_allow_fixture_source_
         &mainnet_domain(),
         OnChainGovernanceProofPolicy::AllowFixtureSourceTest,
     );
-    assert_eq!(outcome, OnChainGovernanceMarkerDecisionOutcome::MainNetRefused);
+    assert_eq!(
+        outcome,
+        OnChainGovernanceMarkerDecisionOutcome::MainNetRefused
+    );
     assert!(outcome.is_reject());
 
     // The pure environment-driven helper agrees.
-    assert!(mainnet_peer_driven_apply_remains_refused_for_onchain_governance(
-        TrustBundleEnvironment::Mainnet
-    ));
+    assert!(
+        mainnet_peer_driven_apply_remains_refused_for_onchain_governance(
+            TrustBundleEnvironment::Mainnet
+        )
+    );
 }
 
 // ===========================================================================
@@ -798,8 +800,7 @@ fn r4_wrong_environment_rejected() {
     // Build a candidate on Testnet with the same shape so the
     // composed lifecycle accepts but the proof environment binding
     // mismatches the trust domain.
-    let testnet_candidate =
-        rotate_to(KEY_B, KEY_A, 2, DIGEST_2, TrustBundleEnvironment::Testnet);
+    let testnet_candidate = rotate_to(KEY_B, KEY_A, 2, DIGEST_2, TrustBundleEnvironment::Testnet);
     assert_helper_rejects(&testnet_candidate, &proof, &testnet_domain());
 }
 
@@ -1062,21 +1063,20 @@ fn r25_validation_only_rejection_is_non_mutating_and_deterministic() {
     recommit(&mut proof);
     let domain = devnet_domain();
 
-    let first = reload_check_compose_onchain_governance_marker_decision::<
-        EmptyOnChainGovernanceReplaySet,
-    >(
-        None,
-        &candidate,
-        Some(&proof),
-        &domain,
-        OnChainGovernanceProofPolicy::AllowFixtureSourceTest,
-        GOV_DOMAIN,
-        GOV_EPOCH,
-        PROPOSAL_ID,
-        PROPOSAL_DIGEST,
-        NOW,
-        &EmptyOnChainGovernanceReplaySet,
-    );
+    let first =
+        reload_check_compose_onchain_governance_marker_decision::<EmptyOnChainGovernanceReplaySet>(
+            None,
+            &candidate,
+            Some(&proof),
+            &domain,
+            OnChainGovernanceProofPolicy::AllowFixtureSourceTest,
+            GOV_DOMAIN,
+            GOV_EPOCH,
+            PROPOSAL_ID,
+            PROPOSAL_DIGEST,
+            NOW,
+            &EmptyOnChainGovernanceReplaySet,
+        );
     let second = local_peer_candidate_check_compose_onchain_governance_marker_decision::<
         EmptyOnChainGovernanceReplaySet,
     >(
@@ -1134,21 +1134,20 @@ fn r26_mutating_preflight_rejection_is_pure() {
     recommit(&mut proof);
     let d = devnet_domain();
 
-    let r1 = reload_apply_compose_onchain_governance_marker_decision::<
-        EmptyOnChainGovernanceReplaySet,
-    >(
-        None,
-        &candidate,
-        Some(&proof),
-        &d,
-        OnChainGovernanceProofPolicy::AllowFixtureSourceTest,
-        GOV_DOMAIN,
-        GOV_EPOCH,
-        PROPOSAL_ID,
-        PROPOSAL_DIGEST,
-        NOW,
-        &EmptyOnChainGovernanceReplaySet,
-    );
+    let r1 =
+        reload_apply_compose_onchain_governance_marker_decision::<EmptyOnChainGovernanceReplaySet>(
+            None,
+            &candidate,
+            Some(&proof),
+            &d,
+            OnChainGovernanceProofPolicy::AllowFixtureSourceTest,
+            GOV_DOMAIN,
+            GOV_EPOCH,
+            PROPOSAL_ID,
+            PROPOSAL_DIGEST,
+            NOW,
+            &EmptyOnChainGovernanceReplaySet,
+        );
     let r2 = startup_p2p_trust_bundle_compose_onchain_governance_marker_decision::<
         EmptyOnChainGovernanceReplaySet,
     >(
@@ -1164,9 +1163,7 @@ fn r26_mutating_preflight_rejection_is_pure() {
         NOW,
         &EmptyOnChainGovernanceReplaySet,
     );
-    let r3 = sighup_compose_onchain_governance_marker_decision::<
-        EmptyOnChainGovernanceReplaySet,
-    >(
+    let r3 = sighup_compose_onchain_governance_marker_decision::<EmptyOnChainGovernanceReplaySet>(
         None,
         &candidate,
         Some(&proof),

@@ -79,7 +79,11 @@ fn build_v2(
     )
 }
 
-fn ratify_initial(active_fp: &str, sequence: u64, digest: &str) -> PersistentAuthorityStateRecordV2 {
+fn ratify_initial(
+    active_fp: &str,
+    sequence: u64,
+    digest: &str,
+) -> PersistentAuthorityStateRecordV2 {
     build_v2(
         active_fp,
         sequence,
@@ -239,13 +243,7 @@ fn a2_genesis_bound_revoke_proof_accepted() {
 
 #[test]
 fn a3_genesis_bound_emergency_revoke_proof_accepted() {
-    let candidate = revoke_record(
-        KEY_B,
-        4,
-        DIGEST_3,
-        REVOKED_METADATA_PREFIX_EMERGENCY,
-        KEY_A,
-    );
+    let candidate = revoke_record(KEY_B, 4, DIGEST_3, REVOKED_METADATA_PREFIX_EMERGENCY, KEY_A);
     let proof = good_proof_for(
         &candidate,
         GovernanceAuthorityClass::GenesisBound,
@@ -273,13 +271,7 @@ fn a3_genesis_bound_emergency_revoke_proof_accepted() {
 
 #[test]
 fn a4_emergency_council_emergency_revoke_proof_accepted() {
-    let candidate = revoke_record(
-        KEY_B,
-        4,
-        DIGEST_3,
-        REVOKED_METADATA_PREFIX_EMERGENCY,
-        KEY_A,
-    );
+    let candidate = revoke_record(KEY_B, 4, DIGEST_3, REVOKED_METADATA_PREFIX_EMERGENCY, KEY_A);
     let proof = good_proof_for(
         &candidate,
         GovernanceAuthorityClass::EmergencyCouncil,
@@ -731,7 +723,10 @@ fn r16b_peer_majority_class_is_not_an_enum_variant() {
             GovernanceAuthorityClass::OnChainGovernance => "o",
         }
     }
-    assert_eq!(assert_three_variants(GovernanceAuthorityClass::GenesisBound), "g");
+    assert_eq!(
+        assert_three_variants(GovernanceAuthorityClass::GenesisBound),
+        "g"
+    );
     assert_eq!(
         assert_three_variants(GovernanceAuthorityClass::EmergencyCouncil),
         "e"
@@ -838,7 +833,10 @@ fn combined_helper_accepts_when_lifecycle_and_governance_both_pass() {
                 lifecycle,
                 AuthorityLifecycleTransitionOutcome::RotationAccepted { .. }
             ));
-            assert!(matches!(governance, GovOutcome::AcceptedGenesisBound { .. }));
+            assert!(matches!(
+                governance,
+                GovOutcome::AcceptedGenesisBound { .. }
+            ));
         }
         other => panic!("expected Accepted, got {:?}", other),
     }
@@ -872,7 +870,10 @@ fn combined_helper_rejects_when_lifecycle_passes_but_governance_fails() {
                 lifecycle,
                 AuthorityLifecycleTransitionOutcome::RotationAccepted { .. }
             ));
-            assert!(matches!(governance, GovOutcome::InvalidIssuerSignature { .. }));
+            assert!(matches!(
+                governance,
+                GovOutcome::InvalidIssuerSignature { .. }
+            ));
         }
         other => panic!("expected GovernanceRejected, got {:?}", other),
     }

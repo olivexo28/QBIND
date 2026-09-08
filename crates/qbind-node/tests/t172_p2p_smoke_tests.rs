@@ -5,7 +5,7 @@
 
 use qbind_crypto::{CryptoProvider, StaticCryptoProvider};
 use qbind_net::connection::{ClientConnectionConfig, ServerConnectionConfig};
-use qbind_net::handshake::{ClientHandshakeConfig, ServerHandshakeConfig, MutualAuthMode};
+use qbind_net::handshake::{ClientHandshakeConfig, MutualAuthMode, ServerHandshakeConfig};
 use qbind_net::keys::KemPrivateKey;
 use qbind_node::metrics::P2pMetrics;
 use qbind_node::node_config::NetworkTransportConfig;

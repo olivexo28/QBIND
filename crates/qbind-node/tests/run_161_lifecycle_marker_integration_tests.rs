@@ -17,11 +17,10 @@ use std::path::{Path, PathBuf};
 use qbind_crypto::MlDsa44Backend;
 use qbind_ledger::{
     bundle_signing_ratification::v2_test_helpers as ratification_v2_helpers,
-    compute_canonical_genesis_hash, BundleSigningRatificationV2,
-    BundleSigningRatificationV2Action, GenesisAllocation, GenesisAuthorityConfig,
-    GenesisAuthorityRoot, GenesisConfig, GenesisCouncilConfig, GenesisHash,
-    GenesisMonetaryConfig, GenesisValidator, NetworkEnvironmentPolicy, RatificationEnvironment,
-    GENESIS_AUTHORITY_SUITE_ML_DSA_44,
+    compute_canonical_genesis_hash, BundleSigningRatificationV2, BundleSigningRatificationV2Action,
+    GenesisAllocation, GenesisAuthorityConfig, GenesisAuthorityRoot, GenesisConfig,
+    GenesisCouncilConfig, GenesisHash, GenesisMonetaryConfig, GenesisValidator,
+    NetworkEnvironmentPolicy, RatificationEnvironment, GENESIS_AUTHORITY_SUITE_ML_DSA_44,
 };
 use qbind_node::pqc_authority_lifecycle::{
     AuthorityLifecycleTransitionOutcome, REVOKED_METADATA_PREFIX_EMERGENCY,
@@ -31,9 +30,7 @@ use qbind_node::pqc_authority_marker_acceptance::{
     decide_marker_acceptance_v2, persist_accepted_v2_marker_after_commit_boundary,
     MarkerAcceptKindV2, MarkerAcceptanceV2Inputs, MutatingSurfaceMarkerV2Error,
 };
-use qbind_node::pqc_authority_state::{
-    authority_state_file_path, AuthorityStateUpdateSource,
-};
+use qbind_node::pqc_authority_state::{authority_state_file_path, AuthorityStateUpdateSource};
 use qbind_node::pqc_peer_candidate_apply::{ProductionV2MarkerCoordinator, V2MarkerCoordinator};
 use qbind_node::pqc_trust_sequence::chain_id_hex;
 use qbind_types::{ChainId, NetworkEnvironment};
@@ -86,7 +83,10 @@ fn devnet_harness() -> Harness {
     let mut genesis_cfg = GenesisConfig::new(
         &chain_id_str,
         1_738_000_000_000,
-        vec![GenesisAllocation::new(format!("0x{}", "11".repeat(32)), 100)],
+        vec![GenesisAllocation::new(
+            format!("0x{}", "11".repeat(32)),
+            100,
+        )],
         vec![GenesisValidator::new(
             format!("0x{}", "22".repeat(32)),
             "ab".repeat(32),
@@ -153,8 +153,8 @@ impl Harness {
         // Revoke requires at least one of revocation_reason / capabilities_scope.
         // Provide format-valid stand-ins so the wire verifier accepts these
         // synthetic test ratifications.
-        let previous_digest = matches!(action, BundleSigningRatificationV2Action::Rotate)
-            .then(|| "ab".repeat(32));
+        let previous_digest =
+            matches!(action, BundleSigningRatificationV2Action::Rotate).then(|| "ab".repeat(32));
         let revocation_reason = match action {
             BundleSigningRatificationV2Action::Revoke => {
                 Some(revocation_reason.unwrap_or_else(|| "test-revoke".to_string()))
@@ -305,7 +305,13 @@ fn a1_activate_initial_accepted_no_persisted_marker() {
     let h = devnet_harness();
     let dir = tmpdir("a1");
     let marker_path = authority_state_file_path(&dir);
-    let r = h.build_v2(&h.signing_pk_a, 1, BundleSigningRatificationV2Action::Ratify, None, None);
+    let r = h.build_v2(
+        &h.signing_pk_a,
+        1,
+        BundleSigningRatificationV2Action::Ratify,
+        None,
+        None,
+    );
     let ratified = h.verify_v2(&r);
     let gh = h.genesis_hex();
     assert!(!marker_path.exists());
@@ -320,7 +326,10 @@ fn a1_activate_initial_accepted_no_persisted_marker() {
     assert!(matches!(decision.kind(), MarkerAcceptKindV2::FirstV2Write));
     assert!(decision.should_persist());
     // Decision must not have touched disk.
-    assert!(!marker_path.exists(), "decide_marker_acceptance_v2 must NOT write before commit");
+    assert!(
+        !marker_path.exists(),
+        "decide_marker_acceptance_v2 must NOT write before commit"
+    );
 }
 
 /// A2 — Rotate accepted through the reload-apply marker path when the
@@ -367,7 +376,10 @@ fn a2_rotate_accepted_through_reload_apply_path() {
         }
         other => panic!("expected UpgradeV2 for rotate, got {:?}", other),
     }
-    assert_eq!(decision.candidate().active_bundle_signing_key_fingerprint, h.fp_b());
+    assert_eq!(
+        decision.candidate().active_bundle_signing_key_fingerprint,
+        h.fp_b()
+    );
 }
 
 /// A3 — Rotate accepted through the startup marker path.
@@ -403,7 +415,10 @@ fn a3_rotate_accepted_through_startup_path() {
         AuthorityStateUpdateSource::StartupLoad,
     ))
     .expect("Rotate accepts on startup path");
-    assert!(matches!(decision.kind(), MarkerAcceptKindV2::UpgradeV2 { .. }));
+    assert!(matches!(
+        decision.kind(),
+        MarkerAcceptKindV2::UpgradeV2 { .. }
+    ));
 }
 
 /// A4 — Rotate accepted through the SIGHUP marker path.
@@ -439,7 +454,10 @@ fn a4_rotate_accepted_through_sighup_path() {
         AuthorityStateUpdateSource::SighupReload,
     ))
     .expect("Rotate accepts on SIGHUP path");
-    assert!(matches!(decision.kind(), MarkerAcceptKindV2::UpgradeV2 { .. }));
+    assert!(matches!(
+        decision.kind(),
+        MarkerAcceptKindV2::UpgradeV2 { .. }
+    ));
 }
 
 /// A5 — Rotate accepted through the Run 152 `ProductionV2MarkerCoordinator`
@@ -490,7 +508,10 @@ fn a5_rotate_accepted_through_peer_drain_coordinator() {
     let accepted = coordinator
         .accepted_decision()
         .expect("coordinator carries accepted decision");
-    assert!(matches!(accepted.kind(), MarkerAcceptKindV2::UpgradeV2 { .. }));
+    assert!(matches!(
+        accepted.kind(),
+        MarkerAcceptKindV2::UpgradeV2 { .. }
+    ));
 
     coordinator.persist_after_commit().expect("persist commits");
     let after = std::fs::read(&marker_path).unwrap();
@@ -659,7 +680,13 @@ fn a9_idempotent_same_record_accepted() {
     let h = devnet_harness();
     let dir = tmpdir("a9");
     let marker_path = authority_state_file_path(&dir);
-    let r = h.build_v2(&h.signing_pk_a, 1, BundleSigningRatificationV2Action::Ratify, None, None);
+    let r = h.build_v2(
+        &h.signing_pk_a,
+        1,
+        BundleSigningRatificationV2Action::Ratify,
+        None,
+        None,
+    );
     let ratified = h.verify_v2(&r);
     let gh = h.genesis_hex();
 
@@ -782,7 +809,13 @@ fn r3_wrong_environment_rejected() {
     let h = devnet_harness();
     let dir = tmpdir("r3");
     let marker_path = authority_state_file_path(&dir);
-    let r = h.build_v2(&h.signing_pk_a, 1, BundleSigningRatificationV2Action::Ratify, None, None);
+    let r = h.build_v2(
+        &h.signing_pk_a,
+        1,
+        BundleSigningRatificationV2Action::Ratify,
+        None,
+        None,
+    );
     let ratified = h.verify_v2(&r);
     let gh = h.genesis_hex();
     let mut inputs = make_inputs(
@@ -809,7 +842,13 @@ fn r4_wrong_chain_rejected() {
     let h = devnet_harness();
     let dir = tmpdir("r4");
     let marker_path = authority_state_file_path(&dir);
-    let r = h.build_v2(&h.signing_pk_a, 1, BundleSigningRatificationV2Action::Ratify, None, None);
+    let r = h.build_v2(
+        &h.signing_pk_a,
+        1,
+        BundleSigningRatificationV2Action::Ratify,
+        None,
+        None,
+    );
     let ratified = h.verify_v2(&r);
     let gh = h.genesis_hex();
     let mut inputs = make_inputs(
@@ -836,7 +875,13 @@ fn r5_wrong_genesis_rejected() {
     let h = devnet_harness();
     let dir = tmpdir("r5");
     let marker_path = authority_state_file_path(&dir);
-    let r = h.build_v2(&h.signing_pk_a, 1, BundleSigningRatificationV2Action::Ratify, None, None);
+    let r = h.build_v2(
+        &h.signing_pk_a,
+        1,
+        BundleSigningRatificationV2Action::Ratify,
+        None,
+        None,
+    );
     let ratified = h.verify_v2(&r);
     let bad_gh = "ff".repeat(32);
     let err = decide_marker_acceptance_v2(make_inputs(
@@ -874,7 +919,13 @@ fn r6_wrong_authority_root_rejected() {
     );
 
     let h2 = devnet_harness();
-    let r = h2.build_v2(&h2.signing_pk_a, 2, BundleSigningRatificationV2Action::Ratify, None, None);
+    let r = h2.build_v2(
+        &h2.signing_pk_a,
+        2,
+        BundleSigningRatificationV2Action::Ratify,
+        None,
+        None,
+    );
     let ratified = h2.verify_v2(&r);
     let gh = h2.genesis_hex();
     let err = decide_marker_acceptance_v2(make_inputs(
@@ -1160,7 +1211,13 @@ fn r14_corrupted_local_marker_rejects_fail_closed() {
     let dir = tmpdir("r14");
     let marker_path = authority_state_file_path(&dir);
     std::fs::write(&marker_path, b"not json").unwrap();
-    let r = h.build_v2(&h.signing_pk_a, 1, BundleSigningRatificationV2Action::Ratify, None, None);
+    let r = h.build_v2(
+        &h.signing_pk_a,
+        1,
+        BundleSigningRatificationV2Action::Ratify,
+        None,
+        None,
+    );
     let ratified = h.verify_v2(&r);
     let gh = h.genesis_hex();
     let err = decide_marker_acceptance_v2(make_inputs(
@@ -1441,7 +1498,13 @@ fn r20_existing_ratify_after_persisted_remains_accepted() {
 
     // Higher-sequence Ratify on top of persisted v2: pre-Run-161 fixtures
     // expect this to be accepted as `UpgradeV2`.
-    let r = h.build_v2(&h.signing_pk_a, 5, BundleSigningRatificationV2Action::Ratify, None, None);
+    let r = h.build_v2(
+        &h.signing_pk_a,
+        5,
+        BundleSigningRatificationV2Action::Ratify,
+        None,
+        None,
+    );
     let ratified = h.verify_v2(&r);
     let gh = h.genesis_hex();
     let decision = decide_marker_acceptance_v2(make_inputs(
@@ -1460,7 +1523,10 @@ fn r20_existing_ratify_after_persisted_remains_accepted() {
             assert_eq!(*previous_sequence, 1);
             assert_eq!(*new_sequence, 5);
         }
-        other => panic!("expected UpgradeV2 for ratify-after-persisted, got {:?}", other),
+        other => panic!(
+            "expected UpgradeV2 for ratify-after-persisted, got {:?}",
+            other
+        ),
     }
 }
 
