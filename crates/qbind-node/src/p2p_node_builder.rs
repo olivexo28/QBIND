@@ -552,6 +552,15 @@ pub fn parse_test_validator_id_from_client_random(client_random: &[u8; 32]) -> O
 /// `verified_peer_validator_id` bytes (never on the self-asserted
 /// `ClientInit.validator_id`).
 pub fn parse_test_validator_id_from_cert_validator_id(validator_id: &[u8; 32]) -> Option<u64> {
+    // Run 418: strict canonical parsing. `qbind-val-<N>` must be followed
+    // ONLY by canonical zero padding, `<N>` must be a canonical decimal
+    // integer (no leading zeros, except the single digit `0`), and the value
+    // must fit in a `u64`. Any trailing nonzero/arbitrary byte, noncanonical
+    // decimal form, or overflow is rejected. The definitive check is a
+    // round-trip against [`validator_id_bytes_for_index`]: it holds iff the
+    // input is the exact canonical encoding of the parsed index, which
+    // simultaneously enforces canonical digits, canonical zero padding, and
+    // the absence of any trailing bytes.
     const PREFIX: &[u8] = b"qbind-val-";
     if !validator_id.starts_with(PREFIX) {
         return None;
@@ -561,13 +570,29 @@ pub fn parse_test_validator_id_from_cert_validator_id(validator_id: &[u8; 32]) -
     while end < tail.len() && tail[end].is_ascii_digit() {
         end += 1;
     }
-    // u64::MAX is 20 decimal digits, so any longer prefix cannot
-    // fit in a `u64` — reject without attempting to parse.
+    // At least one digit; `u64::MAX` is 20 decimal digits, so any longer
+    // run cannot fit in a `u64` — reject without attempting to parse.
     if end == 0 || end > 20 {
         return None;
     }
+    // Reject noncanonical leading zeros (e.g. `qbind-val-01`), while still
+    // permitting the single canonical digit `0`.
+    if end > 1 && tail[0] == b'0' {
+        return None;
+    }
+    // Every byte after the decimal run must be canonical zero padding — no
+    // trailing nonzero or arbitrary bytes are admitted.
+    if tail[end..].iter().any(|&b| b != 0) {
+        return None;
+    }
     let s = std::str::from_utf8(&tail[..end]).ok()?;
-    s.parse::<u64>().ok()
+    let n = s.parse::<u64>().ok()?;
+    // Definitive canonical round-trip: the input must be byte-identical to the
+    // canonical encoding of `n`.
+    if validator_id_bytes_for_index(n) != *validator_id {
+        return None;
+    }
+    Some(n)
 }
 
 /// Parse a `--p2p-peer` spec which may be either `addr` or `vid@addr`.
@@ -643,11 +668,85 @@ fn certified_peer_kem_pk_for_validator(
 
 /// Run 418: derive the canonical cert-bound `NodeId` from an encoded
 /// `NetworkDelegationCert`, matching exactly the `verified_client_node_id`
-/// the KEMTLS handshake surfaces (`derive_node_id_from_cert`). Used to build
-/// the authenticated peer→validator consensus binding map so the map key is
-/// byte-identical to the origin the transport resolves at session time.
+/// the KEMTLS handshake surfaces (`derive_node_id_from_cert`).
+///
+/// NOTE: this bare form performs decode-only and MUST NOT be used to admit a
+/// certificate into the authoritative binding map. Admitting on decode success
+/// alone would let an arbitrary, root-invalid, or wrong-validator certificate
+/// mint a binding. Use [`validated_cert_bound_node_id`] for the map path.
+#[cfg(test)]
 fn cert_bound_node_id(cert_bytes: &[u8]) -> Result<NodeId, String> {
     let cert = decode_network_delegation_cert(cert_bytes)?;
+    Ok(NodeId::new(qbind_hash::net::derive_node_id_from_cert(&cert)))
+}
+
+/// Run 418: fully validate a leaf certificate before deriving its authoritative
+/// cert-bound `NodeId` for the peer→validator consensus binding map.
+///
+/// A certificate is only admitted into the map when EVERY check passes:
+/// * it decodes as a `NetworkDelegationCert`;
+/// * its structure/suite is valid (ML-KEM-768 leaf shape);
+/// * it verifies against the configured PQC static root
+///   (`verify_delegation_cert`, which also enforces the validity/time window
+///   already implemented by the active handshake policy);
+/// * its `validator_id` equals the canonical encoding of the configured
+///   validator index (`qbind-val-<N>` + canonical zero padding);
+/// * the configured validator index is within `num_validators`;
+/// * where an active revocation set is installed, the leaf fingerprint is not
+///   revoked.
+///
+/// The returned `NodeId` is the full 32-byte `derive_node_id_from_cert`, which
+/// is byte-identical to the `verified_client_node_id` the KEMTLS handshake
+/// surfaces at session time. One-to-one NodeId↔ValidatorId uniqueness is
+/// enforced separately by [`crate::peer_consensus_binding::PeerConsensusBindingMap`].
+fn validated_cert_bound_node_id(
+    crypto: &StaticCryptoProvider,
+    cfg: &PqcStaticRootConfig,
+    revoked_leaf_fingerprints: Option<&HashSet<[u8; 32]>>,
+    num_validators: usize,
+    expected_validator_index: u64,
+    cert_bytes: &[u8],
+) -> Result<NodeId, String> {
+    // Validator index must be within the configured validator set.
+    if (expected_validator_index as usize) >= num_validators {
+        return Err(format!(
+            "validator index {} is out of range (num_validators={})",
+            expected_validator_index, num_validators
+        ));
+    }
+    // Structural + suite validation.
+    let cert = decode_network_delegation_cert(cert_bytes)?;
+    validate_ml_kem_768_leaf_cert_shape(&cert)?;
+    // Cryptographic verification against the configured PQC static root
+    // (also enforces the cert validity/time window).
+    verify_cert_with_configured_root(crypto, cfg, &cert)?;
+    // Validator identity must equal the canonical configured index encoding.
+    let expected_vid = validator_id_bytes_for_index(expected_validator_index);
+    if cert.validator_id != expected_vid {
+        return Err(format!(
+            "leaf cert validator_id mismatch for validator {}",
+            expected_validator_index
+        ));
+    }
+    if parse_test_validator_id_from_cert_validator_id(&cert.validator_id)
+        != Some(expected_validator_index)
+    {
+        return Err(format!(
+            "leaf cert validator_id is not canonical for validator {}",
+            expected_validator_index
+        ));
+    }
+    // Revocation enforcement where an active revocation set is installed.
+    if let Some(revoked) = revoked_leaf_fingerprints {
+        let fp = qbind_net::handshake::leaf_cert_fingerprint(&cert);
+        if revoked.contains(&fp) {
+            return Err(format!(
+                "leaf cert for validator {} is revoked",
+                expected_validator_index
+            ));
+        }
+    }
+    // Full 32-byte cert-derived NodeId (never a truncation).
     Ok(NodeId::new(qbind_hash::net::derive_node_id_from_cert(&cert)))
 }
 
@@ -1349,8 +1448,13 @@ impl P2pNodeBuilder {
         }
         transport_config.static_peers = stripped_peers;
 
-        let mut p2p_service =
-            TcpKemTlsP2pService::new(node_id, transport_config, crypto, server_cfg, client_cfg)?;
+        let mut p2p_service = TcpKemTlsP2pService::new(
+            node_id,
+            transport_config,
+            crypto.clone(),
+            server_cfg,
+            client_cfg,
+        )?;
         // B7: install per-peer KEM-pk + validator-id overrides before `start()` dials.
         if !peer_kem_pk_overrides.is_empty() {
             p2p_service.set_peer_kem_pk_overrides(peer_kem_pk_overrides);
@@ -1486,22 +1590,47 @@ impl P2pNodeBuilder {
                 let cfg = self.pqc_root_config.as_ref().ok_or_else(|| {
                     P2pNodeError::Config("missing pqc-static-root config".to_string())
                 })?;
-                // Local (self) identity.
+                let revoked = self
+                    .pqc_revoked_leaf_fingerprints
+                    .as_ref()
+                    .map(|s| s.as_ref());
+                // Local (self) identity. Admit the local leaf cert into the
+                // authoritative map only after full structural/suite/root/
+                // validator validation (never on decode success alone).
                 if let Some(leaf) = cfg.leaf_credentials.as_ref() {
-                    let self_node_id =
-                        cert_bound_node_id(&leaf.cert_bytes).map_err(P2pNodeError::Config)?;
+                    let self_node_id = validated_cert_bound_node_id(
+                        crypto.as_ref(),
+                        cfg,
+                        revoked,
+                        self.num_validators,
+                        validator_id.as_u64(),
+                        &leaf.cert_bytes,
+                    )
+                    .map_err(P2pNodeError::Config)?;
                     entries.push((self_node_id, validator_id));
                 }
-                // Every configured peer leaf cert.
+                // Every configured peer leaf cert, fully validated before
+                // admission into the authoritative map.
                 let mut node_id_by_vid: HashMap<u64, NodeId> = HashMap::new();
                 for peer in &cfg.peer_leaf_certs {
-                    let peer_node_id =
-                        cert_bound_node_id(&peer.cert_bytes).map_err(P2pNodeError::Config)?;
+                    let peer_node_id = validated_cert_bound_node_id(
+                        crypto.as_ref(),
+                        cfg,
+                        revoked,
+                        self.num_validators,
+                        peer.validator_index,
+                        &peer.cert_bytes,
+                    )
+                    .map_err(P2pNodeError::Config)?;
                     entries.push((peer_node_id, ValidatorId::new(peer.validator_index)));
                     node_id_by_vid.insert(peer.validator_index, peer_node_id);
                 }
-                // Outbound origins keyed by dial address (bound to handshake
-                // success by the transport dial path).
+                // Run 418: the expected outbound identity for each configured
+                // `vid@addr` dial target. This is only the *expected* pair; the
+                // dial path verifies the ACTUAL server certificate identity
+                // surfaced by the KEMTLS handshake against the authoritative
+                // map and rejects the session on any mismatch — the dial
+                // address never mints the authenticated origin by itself.
                 for (addr, vid) in &peer_addr_vid {
                     if let Some(node_id) = node_id_by_vid.get(vid) {
                         outbound_origins.insert(

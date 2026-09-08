@@ -88,7 +88,8 @@ use crate::p2p::{NodeId, P2pMessage, P2pService};
 use crate::p2p_inbound::InboundP2pEnvelope;
 use crate::peer_consensus_binding::AuthenticatedConsensusOrigin;
 use crate::secure_channel::{
-    accept_kemtls_async_with_peer_init, connect_kemtls_async, AcceptedPeerInit, SecureChannelAsync,
+    accept_kemtls_async_with_peer_init, connect_kemtls_async_with_server_identity, AcceptedPeerInit,
+    SecureChannelAsync,
 };
 use qbind_crypto::CryptoProvider;
 use qbind_hash::{derive_node_id_from_pubkey, INBOUND_SESSION_DOMAIN_TAG};
@@ -1271,10 +1272,12 @@ impl TcpKemTlsP2pService {
             cfg
         };
 
-        // Perform KEMTLS handshake (blocking)
-        let channel = connect_kemtls_async(peer_addr.clone(), client_cfg.clone())
-            .await
-            .map_err(|e| P2pTransportError::Handshake(e.to_string()))?;
+        // Perform KEMTLS handshake (blocking), surfacing the ACTUAL verified
+        // server identity established by the handshake (Run 418, F6).
+        let (channel, verified_server_identity) =
+            connect_kemtls_async_with_server_identity(peer_addr.clone(), client_cfg.clone())
+                .await
+                .map_err(|e| P2pTransportError::Handshake(e.to_string()))?;
 
         // M7: Derive NodeId from peer's KEM public key (cryptographic binding)
         // The peer_kem_pk in client_cfg is the server's KEM public key that we
@@ -1287,14 +1290,50 @@ impl TcpKemTlsP2pService {
         let node_id_bytes = derive_node_id_from_pubkey(&client_cfg.peer_kem_pk);
         let node_id = NodeId::new(node_id_bytes);
 
-        // Run 418: an outbound dial that completed the KEMTLS handshake to a
-        // configured static peer carries the operator-configured authenticated
-        // consensus origin for that address (bound to handshake success).
-        let consensus_origin: Option<AuthenticatedConsensusOrigin> = self
-            .outbound_consensus_origins
-            .read()
-            .get(&peer_addr)
-            .cloned();
+        // Run 418 (F6): the authenticated outbound consensus origin is derived
+        // from the ACTUAL verified server certificate identity surfaced by the
+        // KEMTLS handshake — NOT by looking up the dial address. The configured
+        // `vid@addr` map (`outbound_consensus_origins`) records only the
+        // *expected* pair for that address; the verified pair must match it
+        // exactly (full 32-byte NodeId AND validator id AND authenticated
+        // state), or the session is rejected. The dial address alone never
+        // mints the authenticated origin.
+        let expected_origin: Option<AuthenticatedConsensusOrigin> =
+            self.outbound_consensus_origins.read().get(&peer_addr).cloned();
+        let consensus_origin: Option<AuthenticatedConsensusOrigin> = match expected_origin {
+            Some(expected) => {
+                let verified = verified_server_identity.ok_or_else(|| {
+                    P2pTransportError::Handshake(format!(
+                        "Run 418: dial {} completed without a verified server identity; \
+                         refusing to mint an authenticated origin from the dial address",
+                        peer_addr
+                    ))
+                })?;
+                let verified_vid = crate::p2p_node_builder::parse_test_validator_id_from_cert_validator_id(
+                    &verified.validator_id,
+                );
+                let node_matches = verified.node_id == *expected.node_id().as_bytes();
+                let vid_matches = verified_vid == Some(expected.validator_id().as_u64());
+                if !verified.authenticated || !node_matches || !vid_matches {
+                    return Err(P2pTransportError::Handshake(format!(
+                        "Run 418: verified server identity for {} does not match the configured \
+                         authoritative mapping (authenticated={}, node_match={}, vid_match={}); \
+                         rejecting session",
+                        peer_addr, verified.authenticated, node_matches, vid_matches
+                    )));
+                }
+                // Build the origin from the VERIFIED identity (identical to the
+                // expected pair on a match).
+                Some(AuthenticatedConsensusOrigin::new(
+                    NodeId::new(verified.node_id),
+                    expected.validator_id(),
+                ))
+            }
+            // No configured expectation for this address: do not fabricate an
+            // authenticated origin. The consensus ingress gate fails closed on
+            // a `None` origin, so unauthenticated remote consensus cannot enter.
+            None => None,
+        };
 
         self.connections_current.fetch_add(1, Ordering::Relaxed);
 
@@ -1937,22 +1976,54 @@ impl DialerHandle {
             cfg
         };
 
-        // Perform KEMTLS handshake (blocking, in spawn_blocking).
-        let channel = connect_kemtls_async(peer_addr.clone(), client_cfg.clone())
-            .await
-            .map_err(|e| P2pTransportError::Handshake(e.to_string()))?;
+        // Perform KEMTLS handshake (blocking, in spawn_blocking), surfacing the
+        // ACTUAL verified server identity established by the handshake
+        // (Run 418, F6).
+        let (channel, verified_server_identity) =
+            connect_kemtls_async_with_server_identity(peer_addr.clone(), client_cfg.clone())
+                .await
+                .map_err(|e| P2pTransportError::Handshake(e.to_string()))?;
 
         // B7: NodeId derived from the peer's KEM pk (deterministic,
         // matches `derive_test_node_id_from_validator_id`).
         let node_id_bytes = derive_node_id_from_pubkey(&client_cfg.peer_kem_pk);
         let node_id = NodeId::new(node_id_bytes);
 
-        // Run 418: outbound origin bound to handshake success for this address.
-        let consensus_origin: Option<AuthenticatedConsensusOrigin> = self
-            .outbound_consensus_origins
-            .read()
-            .get(&peer_addr)
-            .cloned();
+        // Run 418 (F6): derive the authenticated outbound consensus origin from
+        // the ACTUAL verified server certificate identity, matched against the
+        // configured authoritative mapping. Never mint the origin from the dial
+        // address. (Mirrors `TcpKemTlsP2pService::dial_peer`.)
+        let expected_origin: Option<AuthenticatedConsensusOrigin> =
+            self.outbound_consensus_origins.read().get(&peer_addr).cloned();
+        let consensus_origin: Option<AuthenticatedConsensusOrigin> = match expected_origin {
+            Some(expected) => {
+                let verified = verified_server_identity.ok_or_else(|| {
+                    P2pTransportError::Handshake(format!(
+                        "Run 418: dial {} completed without a verified server identity; \
+                         refusing to mint an authenticated origin from the dial address",
+                        peer_addr
+                    ))
+                })?;
+                let verified_vid = crate::p2p_node_builder::parse_test_validator_id_from_cert_validator_id(
+                    &verified.validator_id,
+                );
+                let node_matches = verified.node_id == *expected.node_id().as_bytes();
+                let vid_matches = verified_vid == Some(expected.validator_id().as_u64());
+                if !verified.authenticated || !node_matches || !vid_matches {
+                    return Err(P2pTransportError::Handshake(format!(
+                        "Run 418: verified server identity for {} does not match the configured \
+                         authoritative mapping (authenticated={}, node_match={}, vid_match={}); \
+                         rejecting session",
+                        peer_addr, verified.authenticated, node_matches, vid_matches
+                    )));
+                }
+                Some(AuthenticatedConsensusOrigin::new(
+                    NodeId::new(verified.node_id),
+                    expected.validator_id(),
+                ))
+            }
+            None => None,
+        };
 
         self.connections_current.fetch_add(1, Ordering::Relaxed);
 

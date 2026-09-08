@@ -2422,8 +2422,8 @@ pub use async_peer_manager::{
 
 // Secure channel exports (T92)
 pub use secure_channel::{
-    accept_kemtls_async, connect_kemtls_async, AsyncChannelError, ChannelError, SecureChannel,
-    SecureChannelAsync,
+    accept_kemtls_async, connect_kemtls_async, connect_kemtls_async_with_server_identity,
+    AsyncChannelError, ChannelError, SecureChannel, SecureChannelAsync, VerifiedServerIdentity,
 };
 
 // Consensus network facade exports (T96)

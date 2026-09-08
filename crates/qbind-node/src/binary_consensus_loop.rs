@@ -2663,9 +2663,15 @@ fn forward_actions_to_facade(
 /// observation is recorded. On success the **authenticated** validator id is
 /// used as the `from` handed to the engine.
 ///
-/// `NewView` (a `TimeoutCertificate`) has no single immediate sender — it is a
-/// multi-signer aggregate whose signers are already cryptographically verified
-/// by `verify_timeout_certificate_with_evidence` — so it is not gated here.
+/// `NewView` (a `TimeoutCertificate`) and `Timeout` do not expose a single
+/// immediate transport-sender field the way `Proposal`/`Vote` do, so F6's
+/// claimed-sender comparison cannot be applied to `NewView` (it carries no
+/// single self-declared sender to bind). This does NOT mean their signatures
+/// are verified: Timeout/NewView cryptographic signer verification remains the
+/// independently unresolved **F5** boundary, and it may be optional or entirely
+/// off in the audited deployed path. Run 418 neither closes nor claims to close
+/// F5; it only binds the immediate self-declared sender of `Proposal`, `Vote`,
+/// and the restore-catchup request/response variants.
 ///
 /// When `binding_gate` is `None` (test-only), the legacy payload-derived-sender
 /// behavior is preserved.

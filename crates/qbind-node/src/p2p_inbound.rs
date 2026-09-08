@@ -133,32 +133,42 @@ impl From<ConsensusNetMsg> for InboundConsensusEnvelope {
 /// Implementations receive deserialized consensus messages and route them
 /// to the appropriate consensus processing logic.
 pub trait ConsensusInboundHandler: Send + Sync {
-    /// Handle an inbound consensus message.
+    /// Handle an inbound consensus message together with the **authenticated**
+    /// transport origin of the secure session it arrived on (Run 418, F6).
+    ///
+    /// This is the mandatory production entry point: the origin (or `None` for
+    /// an unauthenticated session) is carried through to the binary consensus
+    /// loop's ingress gate, which fails closed on a missing/mismatched origin
+    /// whenever a production `PeerConsensusBindingGate` is installed. There is
+    /// deliberately **no** default implementation that discards the origin —
+    /// every consensus handler must decide, explicitly, what to do with it.
     ///
     /// # Arguments
     ///
-    /// * `msg` - The consensus network message (Proposal, Vote, Timeout, NewView)
+    /// * `origin` - The authenticated transport origin, or `None`.
+    /// * `msg` - The consensus network message (Proposal, Vote, Timeout, NewView).
     ///
     /// # Note
     ///
     /// This method should be non-blocking. Heavy processing should be
     /// dispatched to a background task or channel.
-    fn handle_consensus_msg(&self, msg: ConsensusNetMsg);
-
-    /// Handle an inbound consensus message together with the **authenticated**
-    /// transport origin of the secure session it arrived on (Run 418, F6).
-    ///
-    /// The default implementation ignores the origin and delegates to
-    /// [`ConsensusInboundHandler::handle_consensus_msg`], preserving the
-    /// behaviour of handlers that do not participate in sender binding. The
-    /// production [`ChannelConsensusHandler`] overrides this to carry the
-    /// origin through to the binary consensus loop's ingress gate.
     fn handle_consensus_msg_from(
         &self,
-        _origin: Option<AuthenticatedConsensusOrigin>,
+        origin: Option<AuthenticatedConsensusOrigin>,
         msg: ConsensusNetMsg,
-    ) {
-        self.handle_consensus_msg(msg);
+    );
+
+    /// Test-only / explicitly-local convenience: handle a bare consensus
+    /// message with no authenticated origin.
+    ///
+    /// The default forwards `origin = None` to
+    /// [`ConsensusInboundHandler::handle_consensus_msg_from`], so any bare-
+    /// message path **fails closed** at the consensus ingress gate whenever a
+    /// production binding gate is installed (the gate rejects a `None` origin
+    /// with `MissingOrigin`). This is not a production fallback: it never
+    /// discards a present origin and never bypasses the gate.
+    fn handle_consensus_msg(&self, msg: ConsensusNetMsg) {
+        self.handle_consensus_msg_from(None, msg);
     }
 }
 
@@ -225,8 +235,12 @@ pub trait ControlInboundHandler: Send + Sync {
 pub struct NullConsensusHandler;
 
 impl ConsensusInboundHandler for NullConsensusHandler {
-    fn handle_consensus_msg(&self, msg: ConsensusNetMsg) {
-        // Debug logging for null handler - discards message
+    fn handle_consensus_msg_from(
+        &self,
+        _origin: Option<AuthenticatedConsensusOrigin>,
+        msg: ConsensusNetMsg,
+    ) {
+        // Debug logging for null handler - discards message (and any origin).
         let _ = msg_type(&msg);
     }
 }
@@ -485,12 +499,10 @@ impl ChannelConsensusHandler {
 }
 
 impl ConsensusInboundHandler for ChannelConsensusHandler {
-    fn handle_consensus_msg(&self, msg: ConsensusNetMsg) {
-        // No authenticated origin available at this entry point; forward with
-        // `origin = None` so the binary-loop ingress gate fails closed.
-        self.handle_consensus_msg_from(None, msg);
-    }
-
+    // The production handler implements only the mandatory origin-carrying
+    // entry point. The bare `handle_consensus_msg` uses the trait default,
+    // which forwards `origin = None` and therefore fails closed at the ingress
+    // gate — it never discards a present origin.
     fn handle_consensus_msg_from(
         &self,
         origin: Option<AuthenticatedConsensusOrigin>,
@@ -570,7 +582,11 @@ mod tests {
     }
 
     impl ConsensusInboundHandler for CountingConsensusHandler {
-        fn handle_consensus_msg(&self, _msg: ConsensusNetMsg) {
+        fn handle_consensus_msg_from(
+            &self,
+            _origin: Option<AuthenticatedConsensusOrigin>,
+            _msg: ConsensusNetMsg,
+        ) {
             self.count.fetch_add(1, Ordering::Relaxed);
         }
     }

@@ -190,19 +190,20 @@ impl Connection {
         self.peer_validator_id
     }
 
-    /// B12 — peer's NodeId derived from the verified client delegation
-    /// cert (server side, `MutualAuthMode::Required` only).
+    /// B12 — peer's NodeId derived from the verified delegation cert.
     ///
-    /// Returns `None` on the client side (the client doesn't bind a
-    /// NodeId for itself from the handshake) and on the server side
-    /// when mutual auth was not performed.
+    /// - Server side (`MutualAuthMode::Required`): the verified *client*
+    ///   cert-bound NodeId, or `None` when mutual auth was not performed.
+    /// - Client side (Run 418, F6): the verified *server* cert-bound NodeId
+    ///   (`derive_node_id_from_cert` of the server's delegation cert, which the
+    ///   client already parsed, root-verified, validator-id-matched and
+    ///   revocation-checked during `handle_server_accept`).
     ///
-    /// When this returns `Some(node_id)`, the server has cryptographically
-    /// bound the inbound session to the validator identity claimed by
-    /// the client cert: a transport peer cannot have completed the
-    /// handshake without holding the leaf KEM secret matching the
-    /// cert's `leaf_kem_pk`, and the cert's `validator_id` was bundled
-    /// into the transcript hash that derived the AEAD session keys.
+    /// When this returns `Some(node_id)`, the transport has cryptographically
+    /// bound the session to the peer's certificate identity: the peer cannot
+    /// have completed the handshake without holding the leaf KEM secret
+    /// matching the cert's `leaf_kem_pk`, and the cert's `validator_id` was
+    /// bundled into the transcript hash that derived the AEAD session keys.
     pub fn peer_node_id(&self) -> Option<[u8; 32]> {
         self.peer_node_id
     }
@@ -340,8 +341,14 @@ impl Connection {
                 // client-side `HandshakeResult` (the server's
                 // validator id from the verified server cert, and the
                 // mutual-auth flag).
+                //
+                // Run 418 (F6): bind the actual verified SERVER identity as
+                // this connection's peer NodeId. `result.server_node_id` is the
+                // full 32-byte cert-derived NodeId of the server's verified
+                // delegation certificate — the real authenticated server
+                // identity, never the dial address.
                 self.peer_validator_id = Some(result.peer_validator_id);
-                self.peer_node_id = result.client_node_id;
+                self.peer_node_id = result.server_node_id;
                 self.mutual_auth_complete = result.mutual_auth_complete;
 
                 // Transition to Established state
