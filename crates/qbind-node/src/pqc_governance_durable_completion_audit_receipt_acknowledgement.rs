@@ -99,8 +99,7 @@ use sha3::{Digest, Sha3_256};
 // ===========================================================================
 
 /// Run 260 — the validation / mutation surface pair the receipt binds to.
-pub type DurableCompletionAuditReceiptAcknowledgementSurface =
-    ModeledGovernanceTrustMutationSurface;
+pub type DurableCompletionAuditReceiptAcknowledgementSurface = ModeledGovernanceTrustMutationSurface;
 
 /// Run 260 — the trust-domain environment binding the receipt is bound to.
 pub type DurableCompletionAuditReceiptAcknowledgementEnvironment =
@@ -178,9 +177,7 @@ impl DurableCompletionAuditReceiptAcknowledgementKind {
             Self::FixtureInMemory => "fixture-in-memory",
             Self::ProductionAuditLedgerAckUnavailable => "production-audit-ledger-ack-unavailable",
             Self::MainNetAuditLedgerAckUnavailable => "mainnet-audit-ledger-ack-unavailable",
-            Self::ExternalPublicationConfirmationUnavailable => {
-                "external-publication-confirmation-unavailable"
-            }
+            Self::ExternalPublicationConfirmationUnavailable => "external-publication-confirmation-unavailable",
             Self::Unknown => "unknown",
         }
     }
@@ -237,9 +234,7 @@ impl DurableCompletionAuditReceiptAcknowledgementPolicy {
             Self::FixtureAllowed => "fixture-allowed",
             Self::ProductionAuditLedgerAckRequired => "production-audit-ledger-ack-required",
             Self::MainNetAuditLedgerAckRequired => "mainnet-audit-ledger-ack-required",
-            Self::ExternalPublicationConfirmationRequired => {
-                "external-publication-confirmation-required"
-            }
+            Self::ExternalPublicationConfirmationRequired => "external-publication-confirmation-required",
         }
     }
 
@@ -436,11 +431,7 @@ pub fn acknowledgement_response_digest(
     let mut w = CanonicalWriter::new(ACKNOWLEDGEMENT_RESPONSE_DOMAIN);
     w.str_field(&response.acknowledgement_record_id)
         .str_field(response.request_digest.as_hex())
-        .str_field(if response.accepted {
-            "accepted"
-        } else {
-            "rejected"
-        })
+        .str_field(if response.accepted { "accepted" } else { "rejected" })
         .str_field(response.acknowledgement_kind.tag());
     DurableCompletionAuditReceiptAcknowledgementDigest(w.finish())
 }
@@ -613,8 +604,7 @@ impl DurableCompletionAuditReceiptAcknowledgementResponse {
     /// `true` iff the response is structurally well-formed.
     pub fn is_well_formed(&self) -> bool {
         !self.acknowledgement_record_id.is_empty()
-            && self.acknowledgement_kind
-                != DurableCompletionAuditReceiptAcknowledgementKind::Unknown
+            && self.acknowledgement_kind != DurableCompletionAuditReceiptAcknowledgementKind::Unknown
     }
 
     /// The deterministic receipt response digest.
@@ -746,10 +736,7 @@ impl DurableCompletionAuditReceiptAcknowledgementLedger {
     }
 
     /// Restore the ledger to a previously captured snapshot (modeled rollback).
-    pub fn restore(
-        &mut self,
-        snapshot: &DurableCompletionAuditReceiptAcknowledgementLedgerSnapshot,
-    ) {
+    pub fn restore(&mut self, snapshot: &DurableCompletionAuditReceiptAcknowledgementLedgerSnapshot) {
         self.records = snapshot.records.clone();
     }
 
@@ -871,10 +858,7 @@ impl DurableCompletionAuditReceiptAcknowledgementExpectations {
     }
 
     /// `true` iff the pre-sink environment / surface binding matches.
-    pub fn binding_matches(
-        &self,
-        input: &DurableCompletionAuditReceiptAcknowledgementInput,
-    ) -> bool {
+    pub fn binding_matches(&self, input: &DurableCompletionAuditReceiptAcknowledgementInput) -> bool {
         self.binding_mismatch_reason(input).is_none()
     }
 
@@ -1183,18 +1167,12 @@ impl DurableCompletionAuditReceiptAcknowledgementOutcome {
             Self::RejectedBeforeAuditReceiptNoAcknowledgement => {
                 "rejected-before-audit-receipt-no-acknowledgement"
             }
-            Self::AuditReceiptDidNotRecordNoAcknowledgement => {
-                "audit-receipt-did-not-record-no-acknowledgement"
-            }
+            Self::AuditReceiptDidNotRecordNoAcknowledgement => "audit-receipt-did-not-record-no-acknowledgement",
             Self::AcknowledgementRecorded => "acknowledgement-recorded",
             Self::AcknowledgementDuplicateIdempotent => "acknowledgement-duplicate-idempotent",
             Self::AcknowledgementRejectedBeforeRecord => "acknowledgement-rejected-before-record",
-            Self::AcknowledgementRecordFailedNoAcknowledgement => {
-                "acknowledgement-record-failed-no-acknowledgement"
-            }
-            Self::AcknowledgementRolledBackNoAcknowledgement => {
-                "acknowledgement-rolled-back-no-acknowledgement"
-            }
+            Self::AcknowledgementRecordFailedNoAcknowledgement => "acknowledgement-record-failed-no-acknowledgement",
+            Self::AcknowledgementRolledBackNoAcknowledgement => "acknowledgement-rolled-back-no-acknowledgement",
             Self::AcknowledgementRollbackFailedFatalNoAcknowledgement => {
                 "acknowledgement-rollback-failed-fatal-no-acknowledgement"
             }
@@ -1216,9 +1194,7 @@ impl DurableCompletionAuditReceiptAcknowledgementOutcome {
             Self::ValidatorSetRotationUnsupportedNoAcknowledgement => {
                 "validator-set-rotation-unsupported-no-acknowledgement"
             }
-            Self::PolicyChangeUnsupportedNoAcknowledgement => {
-                "policy-change-unsupported-no-acknowledgement"
-            }
+            Self::PolicyChangeUnsupportedNoAcknowledgement => "policy-change-unsupported-no-acknowledgement",
         }
     }
 }
@@ -1663,12 +1639,13 @@ where
     // Step 3: project the Run 258 audit/publication receipt outcome onto an
     // acknowledgement request. Every non-recording receipt outcome returns a
     // no-acknowledgement outcome without invoking the acknowledgement sink.
-    let idempotent_only =
-        match project_audit_receipt_outcome_to_acknowledgement_request(&input.receipt_binding) {
-            Intent::NoAcknowledgement(outcome) => return outcome,
-            Intent::CreateRequest => false,
-            Intent::IdempotentOnly => true,
-        };
+    let idempotent_only = match project_audit_receipt_outcome_to_acknowledgement_request(
+        &input.receipt_binding,
+    ) {
+        Intent::NoAcknowledgement(outcome) => return outcome,
+        Intent::CreateRequest => false,
+        Intent::IdempotentOnly => true,
+    };
 
     // Step 4: pre-acknowledgement environment / surface binding validation. A
     // mismatch fails closed before the acknowledgement sink is invoked, leaving the
@@ -1844,9 +1821,7 @@ pub fn recover_durable_completion_audit_receipt_acknowledgement_window(
         Window::AfterAcknowledgementAmbiguous => {
             Receipt::AcknowledgementAmbiguousFailClosedNoAcknowledgement
         }
-        Window::AcknowledgementRecordFailed => {
-            Receipt::AcknowledgementRecordFailedNoAcknowledgement
-        }
+        Window::AcknowledgementRecordFailed => Receipt::AcknowledgementRecordFailedNoAcknowledgement,
         Window::AcknowledgementRollbackCompleted => {
             Receipt::AcknowledgementRolledBackNoAcknowledgement
         }

@@ -476,11 +476,7 @@ fn assert_pipeline_no_receipt(
     );
     assert_eq!(outcome, expected, "pipeline outcome projected wrong");
     assert!(outcome.no_consume());
-    assert_eq!(
-        sink.invocations(),
-        0,
-        "no sink invocation before sink stage"
-    );
+    assert_eq!(sink.invocations(), 0, "no sink invocation before sink stage");
     assert!(ledger.is_empty());
 }
 
@@ -633,10 +629,8 @@ fn assert_record_fault(
     let c = devnet_ctx();
     let input = c.authorized();
     let mut ledger = ModeledDurableConsumeReceiptLedger::new();
-    let mut sink = FixtureModeledDurableConsumeProjectionSink::with_fault(
-        TrustBundleEnvironment::Devnet,
-        fault,
-    );
+    let mut sink =
+        FixtureModeledDurableConsumeProjectionSink::with_fault(TrustBundleEnvironment::Devnet, fault);
     let outcome = evaluate_modeled_durable_consume_projection_sink(
         &input,
         &c.expectations,
@@ -741,11 +735,7 @@ fn assert_binding_rejected(mutate: impl FnOnce(&mut Ctx)) {
         GovernanceModeledDurableConsumeSinkOutcome::RejectedBeforePipelineNoReceipt
     );
     assert!(outcome.no_consume());
-    assert_eq!(
-        sink.invocations(),
-        0,
-        "no sink invocation before sink stage"
-    );
+    assert_eq!(sink.invocations(), 0, "no sink invocation before sink stage");
     assert!(ledger.is_empty());
 }
 
@@ -807,11 +797,7 @@ fn assert_receipt_rejected_before_record(mutate: impl FnOnce(&mut Ctx)) {
         GovernanceModeledDurableConsumeSinkOutcome::ConsumeReceiptRejectedBeforeRecord
     );
     assert!(outcome.no_consume());
-    assert_eq!(
-        sink.invocations(),
-        1,
-        "sink invoked but rejected before record"
-    );
+    assert_eq!(sink.invocations(), 1, "sink invoked but rejected before record");
     assert!(ledger.is_empty(), "no receipt recorded");
 }
 
@@ -1214,10 +1200,9 @@ fn sink_record_failure_does_not_invalidate_pipeline_but_does_not_consume() {
     // does not authorize consume.
     let c = devnet_ctx();
     let input = c.authorized();
-    assert!(
-        input.pipeline_binding.authorizes_durable_consume(),
-        "pipeline still says authorized"
-    );
+    assert!(input
+        .pipeline_binding
+        .authorizes_durable_consume(), "pipeline still says authorized");
     let mut ledger = ModeledDurableConsumeReceiptLedger::new();
     let mut sink = FixtureModeledDurableConsumeProjectionSink::with_fault(
         TrustBundleEnvironment::Devnet,
@@ -1273,16 +1258,12 @@ fn invariant_helpers_hold() {
     assert!(modeled_consume_sink_failed_record_never_consumes());
     assert!(modeled_consume_sink_rollback_never_consumes());
     assert!(modeled_consume_sink_ambiguous_window_fails_closed());
-    assert!(
-        modeled_consume_sink_mainnet_peer_driven_apply_refused_first(
-            TrustBundleEnvironment::Mainnet
-        )
-    );
-    assert!(
-        !modeled_consume_sink_mainnet_peer_driven_apply_refused_first(
-            TrustBundleEnvironment::Devnet
-        )
-    );
+    assert!(modeled_consume_sink_mainnet_peer_driven_apply_refused_first(
+        TrustBundleEnvironment::Mainnet
+    ));
+    assert!(!modeled_consume_sink_mainnet_peer_driven_apply_refused_first(
+        TrustBundleEnvironment::Devnet
+    ));
     assert!(modeled_consume_sink_production_mainnet_unavailable());
     assert!(modeled_consume_sink_validator_set_rotation_unsupported());
     assert!(modeled_consume_sink_policy_change_unsupported());

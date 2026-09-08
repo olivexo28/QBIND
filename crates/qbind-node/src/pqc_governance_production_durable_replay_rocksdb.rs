@@ -569,35 +569,20 @@ impl std::fmt::Display for DurableReplayRocksDbError {
                 write!(f, "durable replay rocksdb: domain mismatch on {field}")
             }
             Self::PartialResidueDetected(n) => {
-                write!(
-                    f,
-                    "durable replay rocksdb: {n} partial-write residue key(s) detected"
-                )
+                write!(f, "durable replay rocksdb: {n} partial-write residue key(s) detected")
             }
             Self::CorruptRecord(e) => write!(f, "durable replay rocksdb: corrupt record: {e}"),
             Self::CorruptDigest { record_id } => {
-                write!(
-                    f,
-                    "durable replay rocksdb: corrupt digest for record {record_id}"
-                )
+                write!(f, "durable replay rocksdb: corrupt digest for record {record_id}")
             }
             Self::EventDomainMismatch { field } => {
-                write!(
-                    f,
-                    "durable replay rocksdb: event domain mismatch on {field}"
-                )
+                write!(f, "durable replay rocksdb: event domain mismatch on {field}")
             }
             Self::Equivocation { record_id } => {
-                write!(
-                    f,
-                    "durable replay rocksdb: equivocation on record {record_id}"
-                )
+                write!(f, "durable replay rocksdb: equivocation on record {record_id}")
             }
             Self::OrderingViolation { record_id } => {
-                write!(
-                    f,
-                    "durable replay rocksdb: ordering violation on record {record_id}"
-                )
+                write!(f, "durable replay rocksdb: ordering violation on record {record_id}")
             }
             Self::MalformedEvent => write!(f, "durable replay rocksdb: malformed event"),
         }
@@ -645,7 +630,9 @@ pub trait GovernanceProductionDurableReplayBackend {
     ) -> DurableReplayRocksDbResult<DurableReplayRocksDbReadOutcome>;
 
     /// Scan every persisted record in deterministic (key-sorted) order.
-    fn scan_replay_records(&self) -> DurableReplayRocksDbResult<Vec<DurableReplayRocksDbRecord>>;
+    fn scan_replay_records(
+        &self,
+    ) -> DurableReplayRocksDbResult<Vec<DurableReplayRocksDbRecord>>;
 
     /// Deterministically roll back any partial-write residue.
     fn recover_replay_window(
@@ -675,28 +662,16 @@ pub fn durable_replay_rocksdb_domain_digest(identity: &DurableReplayRocksDbIdent
     use sha3::{Digest, Sha3_256};
     let mut h = Sha3_256::new();
     h.update(DURABLE_REPLAY_ROCKSDB_DOMAIN_TAG.as_bytes());
-    hash_field(
-        &mut h,
-        b"environment",
-        &identity.environment.metric_code().to_le_bytes(),
-    );
+    hash_field(&mut h, b"environment", &identity.environment.metric_code().to_le_bytes());
     hash_field(&mut h, b"chain_id", identity.chain_id.as_bytes());
     hash_field(&mut h, b"genesis_hash", identity.genesis_hash.as_bytes());
-    hash_field(
-        &mut h,
-        b"replay_namespace",
-        identity.replay_namespace.as_bytes(),
-    );
+    hash_field(&mut h, b"replay_namespace", identity.replay_namespace.as_bytes());
     hash_field(
         &mut h,
         b"authority_domain_sequence",
         &identity.authority_domain_sequence.to_le_bytes(),
     );
-    hash_field(
-        &mut h,
-        b"schema_version",
-        &identity.schema_version.to_le_bytes(),
-    );
+    hash_field(&mut h, b"schema_version", &identity.schema_version.to_le_bytes());
     hex::encode(h.finalize())
 }
 
@@ -724,23 +699,11 @@ pub fn durable_replay_rocksdb_record_digest(
     let mut h = Sha3_256::new();
     h.update(DURABLE_REPLAY_ROCKSDB_RECORD_TAG.as_bytes());
     hash_field(&mut h, b"domain", identity.domain_digest().as_bytes());
-    hash_field(
-        &mut h,
-        b"schema_version",
-        &identity.schema_version.to_le_bytes(),
-    );
-    hash_field(
-        &mut h,
-        b"environment",
-        &identity.environment.metric_code().to_le_bytes(),
-    );
+    hash_field(&mut h, b"schema_version", &identity.schema_version.to_le_bytes());
+    hash_field(&mut h, b"environment", &identity.environment.metric_code().to_le_bytes());
     hash_field(&mut h, b"chain_id", identity.chain_id.as_bytes());
     hash_field(&mut h, b"genesis_hash", identity.genesis_hash.as_bytes());
-    hash_field(
-        &mut h,
-        b"replay_namespace",
-        identity.replay_namespace.as_bytes(),
-    );
+    hash_field(&mut h, b"replay_namespace", identity.replay_namespace.as_bytes());
     hash_field(
         &mut h,
         b"authority_domain_sequence",
@@ -748,11 +711,7 @@ pub fn durable_replay_rocksdb_record_digest(
     );
     hash_field(&mut h, b"record_id", record_id.as_bytes());
     hash_field(&mut h, b"stage", stage.tag().as_bytes());
-    hash_field(
-        &mut h,
-        b"prior_stage_digest",
-        prior_stage_digest.unwrap_or("").as_bytes(),
-    );
+    hash_field(&mut h, b"prior_stage_digest", prior_stage_digest.unwrap_or("").as_bytes());
     hash_field(&mut h, b"payload_digest", payload_digest.as_bytes());
     hash_field(&mut h, b"replay_sequence", &replay_sequence.to_le_bytes());
     hex::encode(h.finalize())
@@ -897,17 +856,13 @@ impl ProductionDurableReplayRocksDbBackend {
         let want = &self.identity;
         let got = &event.identity;
         if want.environment != got.environment {
-            return Err(DurableReplayRocksDbError::EventDomainMismatch {
-                field: "environment",
-            });
+            return Err(DurableReplayRocksDbError::EventDomainMismatch { field: "environment" });
         }
         if want.chain_id != got.chain_id {
             return Err(DurableReplayRocksDbError::EventDomainMismatch { field: "chain_id" });
         }
         if want.genesis_hash != got.genesis_hash {
-            return Err(DurableReplayRocksDbError::EventDomainMismatch {
-                field: "genesis_hash",
-            });
+            return Err(DurableReplayRocksDbError::EventDomainMismatch { field: "genesis_hash" });
         }
         if want.replay_namespace != got.replay_namespace {
             return Err(DurableReplayRocksDbError::EventDomainMismatch {
@@ -920,9 +875,7 @@ impl ProductionDurableReplayRocksDbBackend {
             });
         }
         if want.schema_version != got.schema_version {
-            return Err(DurableReplayRocksDbError::EventDomainMismatch {
-                field: "schema_version",
-            });
+            return Err(DurableReplayRocksDbError::EventDomainMismatch { field: "schema_version" });
         }
         Ok(())
     }
@@ -974,9 +927,7 @@ impl GovernanceProductionDurableReplayBackend for ProductionDurableReplayRocksDb
         // Idempotency / equivocation on the same id+stage.
         if let Some(existing) = self.read_verified_record(&event.record_id, event.stage)? {
             if existing.digest == new_record.digest {
-                return Ok(DurableReplayRocksDbWriteOutcome::IdempotentDuplicate(
-                    existing,
-                ));
+                return Ok(DurableReplayRocksDbWriteOutcome::IdempotentDuplicate(existing));
             }
             return Err(DurableReplayRocksDbError::Equivocation {
                 record_id: event.record_id.clone(),
@@ -986,8 +937,8 @@ impl GovernanceProductionDurableReplayBackend for ProductionDurableReplayRocksDb
         // Ordering: a Consumed record requires the prior Observed record with a
         // matching prior-stage digest.
         if event.stage == DurableReplayRecordStage::Consumed {
-            let prior =
-                self.read_verified_record(&event.record_id, DurableReplayRecordStage::Observed)?;
+            let prior = self
+                .read_verified_record(&event.record_id, DurableReplayRecordStage::Observed)?;
             match (prior, event.prior_stage_digest.as_deref()) {
                 (Some(observed), Some(expected)) if observed.digest == expected => {}
                 _ => {
@@ -1019,7 +970,9 @@ impl GovernanceProductionDurableReplayBackend for ProductionDurableReplayRocksDb
         }
     }
 
-    fn scan_replay_records(&self) -> DurableReplayRocksDbResult<Vec<DurableReplayRocksDbRecord>> {
+    fn scan_replay_records(
+        &self,
+    ) -> DurableReplayRocksDbResult<Vec<DurableReplayRocksDbRecord>> {
         let mut out = Vec::new();
         let iter = self.db.iterator(rocksdb::IteratorMode::Start);
         for item in iter {
@@ -1054,7 +1007,8 @@ impl GovernanceProductionDurableReplayBackend for ProductionDurableReplayRocksDb
         let mut residue_keys = Vec::new();
         let iter = self.db.iterator(rocksdb::IteratorMode::Start);
         for item in iter {
-            let (key, _) = item.map_err(|e| DurableReplayRocksDbError::RocksDbIo(e.to_string()))?;
+            let (key, _) =
+                item.map_err(|e| DurableReplayRocksDbError::RocksDbIo(e.to_string()))?;
             if key.starts_with(KEY_PARTIAL_PREFIX) {
                 residue_keys.push(key.to_vec());
             }
@@ -1116,10 +1070,7 @@ impl ProductionDurableReplayRocksDbBackend {
         }
         self.ensure_event_domain(event)?;
         let mut batch = rocksdb::WriteBatch::default();
-        batch.put(
-            partial_key(&event.record_id),
-            event.payload_digest.as_bytes(),
-        );
+        batch.put(partial_key(&event.record_id), event.payload_digest.as_bytes());
         self.db
             .write(batch)
             .map_err(|e| DurableReplayRocksDbError::RocksDbIo(e.to_string()))?;
@@ -1207,22 +1158,16 @@ fn validate_open(
     // Domain binding.
     let stored = &meta.identity;
     if stored.environment != identity.environment {
-        return Err(DurableReplayRocksDbError::DomainMismatch {
-            field: "environment",
-        });
+        return Err(DurableReplayRocksDbError::DomainMismatch { field: "environment" });
     }
     if stored.chain_id != identity.chain_id {
         return Err(DurableReplayRocksDbError::DomainMismatch { field: "chain_id" });
     }
     if stored.genesis_hash != identity.genesis_hash {
-        return Err(DurableReplayRocksDbError::DomainMismatch {
-            field: "genesis_hash",
-        });
+        return Err(DurableReplayRocksDbError::DomainMismatch { field: "genesis_hash" });
     }
     if stored.replay_namespace != identity.replay_namespace {
-        return Err(DurableReplayRocksDbError::DomainMismatch {
-            field: "replay_namespace",
-        });
+        return Err(DurableReplayRocksDbError::DomainMismatch { field: "replay_namespace" });
     }
     if stored.authority_domain_sequence != identity.authority_domain_sequence {
         return Err(DurableReplayRocksDbError::DomainMismatch {
@@ -1280,9 +1225,7 @@ impl GovernanceProductionDurableReplayBackend for MockDurableReplayBackend {
         let key = record_key(&event.record_id, event.stage);
         if let Some(existing) = self.records.get(&key) {
             if existing.digest == new_record.digest {
-                return Ok(DurableReplayRocksDbWriteOutcome::IdempotentDuplicate(
-                    existing.clone(),
-                ));
+                return Ok(DurableReplayRocksDbWriteOutcome::IdempotentDuplicate(existing.clone()));
             }
             return Err(DurableReplayRocksDbError::Equivocation {
                 record_id: event.record_id.clone(),
@@ -1290,10 +1233,7 @@ impl GovernanceProductionDurableReplayBackend for MockDurableReplayBackend {
         }
         if event.stage == DurableReplayRecordStage::Consumed {
             let prior_key = record_key(&event.record_id, DurableReplayRecordStage::Observed);
-            match (
-                self.records.get(&prior_key),
-                event.prior_stage_digest.as_deref(),
-            ) {
+            match (self.records.get(&prior_key), event.prior_stage_digest.as_deref()) {
                 (Some(observed), Some(expected)) if observed.digest == expected => {}
                 _ => {
                     return Err(DurableReplayRocksDbError::OrderingViolation {
@@ -1318,7 +1258,9 @@ impl GovernanceProductionDurableReplayBackend for MockDurableReplayBackend {
         }
     }
 
-    fn scan_replay_records(&self) -> DurableReplayRocksDbResult<Vec<DurableReplayRocksDbRecord>> {
+    fn scan_replay_records(
+        &self,
+    ) -> DurableReplayRocksDbResult<Vec<DurableReplayRocksDbRecord>> {
         Ok(self.records.values().cloned().collect())
     }
 

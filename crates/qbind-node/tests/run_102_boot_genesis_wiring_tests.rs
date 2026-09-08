@@ -69,11 +69,13 @@ fn mainnet_genesis_with_chain(chain_id: &str) -> GenesisConfig {
     );
     // Run 104: full ML-DSA-44 public-key material is required on MainNet
     // for the bundle-signing-authority root.
-    let mut auth = GenesisAuthorityConfig::new(vec![GenesisAuthorityRoot::with_public_key_bytes(
-        GENESIS_AUTHORITY_SUITE_ML_DSA_44,
-        &synthetic_ml_dsa_44_pk(0xab),
-        "foundation-bundle-signer-1",
-    )]);
+    let mut auth = GenesisAuthorityConfig::new(vec![
+        GenesisAuthorityRoot::with_public_key_bytes(
+            GENESIS_AUTHORITY_SUITE_ML_DSA_44,
+            &synthetic_ml_dsa_44_pk(0xab),
+            "foundation-bundle-signer-1",
+        ),
+    ]);
     auth.pqc_transport_roots = vec![GenesisAuthorityRoot::new(
         GENESIS_AUTHORITY_SUITE_ML_DSA_44,
         fingerprint(0xcd),
@@ -189,10 +191,7 @@ fn run_102_mainnet_missing_authority_rejects() {
 #[test]
 fn run_102_mainnet_empty_authority_roots_rejects() {
     let mut cfg = mainnet_genesis_with_chain("qbind-mainnet-v0");
-    cfg.authority
-        .as_mut()
-        .unwrap()
-        .bundle_signing_authority_roots = vec![];
+    cfg.authority.as_mut().unwrap().bundle_signing_authority_roots = vec![];
     let path = write_tmp_genesis(&cfg, "empty_roots");
 
     let mut node_cfg = mainnet_config_with_external(&path);
@@ -203,7 +202,8 @@ fn run_102_mainnet_empty_authority_roots_rejects() {
         .expect_err("MainNet with empty bundle-signing authority roots must fail closed");
     let msg = err.to_string();
     assert!(
-        msg.to_lowercase().contains("authority") || msg.to_lowercase().contains("bundle-signing"),
+        msg.to_lowercase().contains("authority")
+            || msg.to_lowercase().contains("bundle-signing"),
         "operator error must mention authority/bundle-signing, got: {}",
         msg
     );
@@ -217,11 +217,8 @@ fn run_102_mainnet_empty_authority_roots_rejects() {
 #[test]
 fn run_102_mainnet_malformed_authority_root_rejects() {
     let mut cfg = mainnet_genesis_with_chain("qbind-mainnet-v0");
-    cfg.authority
-        .as_mut()
-        .unwrap()
-        .bundle_signing_authority_roots[0]
-        .key_fingerprint = "not-hex".into();
+    cfg.authority.as_mut().unwrap().bundle_signing_authority_roots[0].key_fingerprint =
+        "not-hex".into();
     let path = write_tmp_genesis(&cfg, "malformed_root");
 
     let mut node_cfg = mainnet_config_with_external(&path);

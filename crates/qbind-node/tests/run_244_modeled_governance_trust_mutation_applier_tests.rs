@@ -26,26 +26,29 @@ use qbind_node::pqc_governance_execution_runtime_arming::GovernanceExecutionRunt
 use qbind_node::pqc_governance_modeled_trust_mutation_applier::{
     evaluate_modeled_trust_mutation, local_operator_cannot_satisfy_modeled_trust_applier_authority,
     mainnet_peer_driven_apply_refused_by_modeled_trust_applier,
-    map_modeled_outcome_to_mutation_engine_outcome, modeled_outcome_authorizes_durable_consume,
+    map_modeled_outcome_to_mutation_engine_outcome,
+    modeled_outcome_authorizes_durable_consume,
     modeled_trust_applier_ambiguous_window_fails_closed,
-    modeled_trust_applier_failure_never_consumes, modeled_trust_applier_never_calls_run_070,
+    modeled_trust_applier_failure_never_consumes,
+    modeled_trust_applier_never_calls_run_070,
     modeled_trust_applier_never_mutates_live_pqc_trust_state,
     modeled_trust_applier_no_rocksdb_file_schema_migration_change,
-    modeled_trust_applier_rejection_is_non_mutating, modeled_trust_applier_rollback_never_consumes,
+    modeled_trust_applier_rejection_is_non_mutating,
+    modeled_trust_applier_rollback_never_consumes,
     modeled_trust_applier_success_required_before_durable_consume,
     peer_majority_cannot_satisfy_modeled_trust_applier_authority,
     policy_change_unsupported_by_modeled_trust_applier,
     production_mainnet_modeled_trust_applier_unavailable,
     project_modeled_outcome_to_durable_completion, recover_modeled_trust_mutation,
-    validator_set_rotation_unsupported_by_modeled_trust_applier,
-    FixtureModeledTrustMutationApplier, MainNetModeledTrustMutationApplier, ModeledApplierFault,
-    ModeledGovernanceTrustMutation, ModeledGovernanceTrustMutationApplier,
-    ModeledGovernanceTrustMutationApplierKind, ModeledGovernanceTrustMutationEnvironmentBinding,
-    ModeledGovernanceTrustMutationExpectations, ModeledGovernanceTrustMutationInput,
-    ModeledGovernanceTrustMutationPolicy, ModeledGovernanceTrustMutationRuntimeBinding,
-    ModeledGovernanceTrustMutationSurface, ModeledGovernanceTrustRoot, ModeledGovernanceTrustState,
-    ModeledTrustMutationAction, ModeledTrustMutationOutcome, ModeledTrustMutationWindowObservation,
-    ModeledTrustRootStatus, ProductionModeledTrustMutationApplier,
+    validator_set_rotation_unsupported_by_modeled_trust_applier, FixtureModeledTrustMutationApplier,
+    MainNetModeledTrustMutationApplier, ModeledApplierFault, ModeledGovernanceTrustMutation,
+    ModeledGovernanceTrustMutationApplier, ModeledGovernanceTrustMutationApplierKind,
+    ModeledGovernanceTrustMutationEnvironmentBinding, ModeledGovernanceTrustMutationExpectations,
+    ModeledGovernanceTrustMutationInput, ModeledGovernanceTrustMutationPolicy,
+    ModeledGovernanceTrustMutationRuntimeBinding, ModeledGovernanceTrustMutationSurface,
+    ModeledGovernanceTrustRoot, ModeledGovernanceTrustState, ModeledTrustMutationAction,
+    ModeledTrustMutationOutcome, ModeledTrustMutationWindowObservation, ModeledTrustRootStatus,
+    ProductionModeledTrustMutationApplier,
 };
 use qbind_node::pqc_trust_bundle::TrustBundleEnvironment;
 
@@ -165,17 +168,10 @@ fn disabled_policy_preserves_legacy_bypass_no_modeled_mutation() {
     );
     let mut state = ModeledGovernanceTrustState::new();
     let mut applier = FixtureModeledTrustMutationApplier::new(TrustBundleEnvironment::Devnet);
-    let outcome =
-        evaluate_modeled_trust_mutation(&input, &c.expectations, &mut state, &mut applier);
-    assert_eq!(
-        outcome,
-        ModeledTrustMutationOutcome::ModeledMutationNotAttempted
-    );
+    let outcome = evaluate_modeled_trust_mutation(&input, &c.expectations, &mut state, &mut applier);
+    assert_eq!(outcome, ModeledTrustMutationOutcome::ModeledMutationNotAttempted);
     assert_eq!(applier.attempts(), 0);
-    assert!(
-        state.is_empty(),
-        "legacy bypass performs no modeled mutation"
-    );
+    assert!(state.is_empty(), "legacy bypass performs no modeled mutation");
     assert!(outcome.no_consume());
     assert_eq!(
         map_modeled_outcome_to_mutation_engine_outcome(&outcome),
@@ -198,8 +194,7 @@ fn devnet_fixture_add_root_succeeds_only_in_modeled_state() {
     );
     let mut state = ModeledGovernanceTrustState::new();
     let mut applier = FixtureModeledTrustMutationApplier::new(TrustBundleEnvironment::Devnet);
-    let outcome =
-        evaluate_modeled_trust_mutation(&input, &c.expectations, &mut state, &mut applier);
+    let outcome = evaluate_modeled_trust_mutation(&input, &c.expectations, &mut state, &mut applier);
     assert_eq!(outcome, ModeledTrustMutationOutcome::ModeledMutationApplied);
     assert!(state.contains_active(ROOT));
     assert_eq!(state.len(), 1);
@@ -222,8 +217,7 @@ fn testnet_fixture_add_root_succeeds_only_in_modeled_state() {
     );
     let mut state = ModeledGovernanceTrustState::new();
     let mut applier = FixtureModeledTrustMutationApplier::new(TrustBundleEnvironment::Testnet);
-    let outcome =
-        evaluate_modeled_trust_mutation(&input, &c.expectations, &mut state, &mut applier);
+    let outcome = evaluate_modeled_trust_mutation(&input, &c.expectations, &mut state, &mut applier);
     assert_eq!(outcome, ModeledTrustMutationOutcome::ModeledMutationApplied);
     assert!(state.contains_active(ROOT));
     assert_eq!(applier.attempts(), 1);
@@ -244,8 +238,7 @@ fn fixture_retire_root_succeeds_in_modeled_state_only() {
     );
     let mut state = state_with_active_root();
     let mut applier = FixtureModeledTrustMutationApplier::new(TrustBundleEnvironment::Devnet);
-    let outcome =
-        evaluate_modeled_trust_mutation(&input, &c.expectations, &mut state, &mut applier);
+    let outcome = evaluate_modeled_trust_mutation(&input, &c.expectations, &mut state, &mut applier);
     assert_eq!(outcome, ModeledTrustMutationOutcome::ModeledMutationApplied);
     assert_eq!(state.status_of(ROOT), Some(ModeledTrustRootStatus::Retired));
 }
@@ -265,8 +258,7 @@ fn fixture_revoke_root_succeeds_in_modeled_state_only() {
     );
     let mut state = state_with_active_root();
     let mut applier = FixtureModeledTrustMutationApplier::new(TrustBundleEnvironment::Devnet);
-    let outcome =
-        evaluate_modeled_trust_mutation(&input, &c.expectations, &mut state, &mut applier);
+    let outcome = evaluate_modeled_trust_mutation(&input, &c.expectations, &mut state, &mut applier);
     assert_eq!(outcome, ModeledTrustMutationOutcome::ModeledMutationApplied);
     assert_eq!(state.status_of(ROOT), Some(ModeledTrustRootStatus::Revoked));
 }
@@ -286,8 +278,7 @@ fn fixture_emergency_revoke_root_succeeds_in_modeled_state_only() {
     );
     let mut state = state_with_active_root();
     let mut applier = FixtureModeledTrustMutationApplier::new(TrustBundleEnvironment::Devnet);
-    let outcome =
-        evaluate_modeled_trust_mutation(&input, &c.expectations, &mut state, &mut applier);
+    let outcome = evaluate_modeled_trust_mutation(&input, &c.expectations, &mut state, &mut applier);
     assert_eq!(outcome, ModeledTrustMutationOutcome::ModeledMutationApplied);
     assert_eq!(
         state.status_of(ROOT),
@@ -311,8 +302,7 @@ fn fixture_noop_succeeds_without_state_drift() {
     let mut state = state_with_active_root();
     let before = state.clone();
     let mut applier = FixtureModeledTrustMutationApplier::new(TrustBundleEnvironment::Devnet);
-    let outcome =
-        evaluate_modeled_trust_mutation(&input, &c.expectations, &mut state, &mut applier);
+    let outcome = evaluate_modeled_trust_mutation(&input, &c.expectations, &mut state, &mut applier);
     assert_eq!(outcome, ModeledTrustMutationOutcome::ModeledMutationApplied);
     assert_eq!(state, before, "noop performs no modeled state drift");
 }
@@ -354,8 +344,7 @@ fn duplicate_root_handled_idempotently_under_explicit_typed_outcome() {
     );
     let mut state = state_with_active_root();
     let mut applier = FixtureModeledTrustMutationApplier::new(TrustBundleEnvironment::Devnet);
-    let outcome =
-        evaluate_modeled_trust_mutation(&input, &c.expectations, &mut state, &mut applier);
+    let outcome = evaluate_modeled_trust_mutation(&input, &c.expectations, &mut state, &mut applier);
     // Idempotent: explicit applied outcome, no duplicate root added.
     assert_eq!(outcome, ModeledTrustMutationOutcome::ModeledMutationApplied);
     assert_eq!(state.len(), 1, "duplicate add is idempotent");
@@ -433,8 +422,7 @@ fn mainnet_peer_driven_apply_refused_before_snapshot_and_applier_invocation() {
     );
     let mut state = ModeledGovernanceTrustState::new();
     let mut applier = FixtureModeledTrustMutationApplier::new(TrustBundleEnvironment::Mainnet);
-    let outcome =
-        evaluate_modeled_trust_mutation(&input, &c.expectations, &mut state, &mut applier);
+    let outcome = evaluate_modeled_trust_mutation(&input, &c.expectations, &mut state, &mut applier);
     assert_eq!(
         outcome,
         ModeledTrustMutationOutcome::MainNetPeerDrivenApplyRefused
@@ -459,8 +447,7 @@ fn validator_set_rotation_unsupported() {
     );
     let mut state = ModeledGovernanceTrustState::new();
     let mut applier = FixtureModeledTrustMutationApplier::new(TrustBundleEnvironment::Devnet);
-    let outcome =
-        evaluate_modeled_trust_mutation(&input, &c.expectations, &mut state, &mut applier);
+    let outcome = evaluate_modeled_trust_mutation(&input, &c.expectations, &mut state, &mut applier);
     assert_eq!(
         outcome,
         ModeledTrustMutationOutcome::ValidatorSetRotationUnsupported
@@ -487,12 +474,8 @@ fn policy_change_unsupported() {
     );
     let mut state = ModeledGovernanceTrustState::new();
     let mut applier = FixtureModeledTrustMutationApplier::new(TrustBundleEnvironment::Devnet);
-    let outcome =
-        evaluate_modeled_trust_mutation(&input, &c.expectations, &mut state, &mut applier);
-    assert_eq!(
-        outcome,
-        ModeledTrustMutationOutcome::PolicyChangeUnsupported
-    );
+    let outcome = evaluate_modeled_trust_mutation(&input, &c.expectations, &mut state, &mut applier);
+    assert_eq!(outcome, ModeledTrustMutationOutcome::PolicyChangeUnsupported);
     assert_eq!(applier.attempts(), 0);
     assert_eq!(
         map_modeled_outcome_to_mutation_engine_outcome(&outcome),
@@ -504,9 +487,7 @@ fn policy_change_unsupported() {
 // Rejected-before-snapshot matrix (binding mismatches never invoke the applier)
 // ===========================================================================
 
-fn assert_rejected_before_snapshot(
-    mutate_exp: impl Fn(&mut ModeledGovernanceTrustMutationExpectations),
-) {
+fn assert_rejected_before_snapshot(mutate_exp: impl Fn(&mut ModeledGovernanceTrustMutationExpectations)) {
     let c = ctx(
         TrustBundleEnvironment::Devnet,
         GovernanceExecutionRuntimeSurface::ReloadApply,
@@ -531,11 +512,7 @@ fn assert_rejected_before_snapshot(
         "expected rejected-before-snapshot, got {:?}",
         outcome
     );
-    assert_eq!(
-        applier.attempts(),
-        0,
-        "rejected-before-snapshot never invokes applier"
-    );
+    assert_eq!(applier.attempts(), 0, "rejected-before-snapshot never invokes applier");
     assert!(state.is_empty());
     assert!(outcome.no_consume());
     assert!(outcome.applier_must_not_run());
@@ -572,9 +549,7 @@ fn wrong_mutation_surface_rejected_before_snapshot() {
 
 #[test]
 fn wrong_candidate_digest_rejected_before_snapshot() {
-    assert_rejected_before_snapshot(|e| {
-        e.expected_candidate_digest = "other-candidate".to_string()
-    });
+    assert_rejected_before_snapshot(|e| e.expected_candidate_digest = "other-candidate".to_string());
 }
 
 #[test]
@@ -614,8 +589,7 @@ fn malformed_modeled_mutation_rejected_before_snapshot() {
     );
     let mut state = ModeledGovernanceTrustState::new();
     let mut applier = FixtureModeledTrustMutationApplier::new(TrustBundleEnvironment::Devnet);
-    let outcome =
-        evaluate_modeled_trust_mutation(&input, &c.expectations, &mut state, &mut applier);
+    let outcome = evaluate_modeled_trust_mutation(&input, &c.expectations, &mut state, &mut applier);
     assert!(matches!(
         outcome,
         ModeledTrustMutationOutcome::ModeledMutationRejectedBeforeSnapshot { .. }
@@ -639,8 +613,7 @@ fn wrong_governance_surface_validation_only_rejected_before_snapshot() {
     );
     let mut state = ModeledGovernanceTrustState::new();
     let mut applier = FixtureModeledTrustMutationApplier::new(TrustBundleEnvironment::Devnet);
-    let outcome =
-        evaluate_modeled_trust_mutation(&input, &c.expectations, &mut state, &mut applier);
+    let outcome = evaluate_modeled_trust_mutation(&input, &c.expectations, &mut state, &mut applier);
     assert!(matches!(
         outcome,
         ModeledTrustMutationOutcome::ModeledMutationRejectedBeforeSnapshot { .. }
@@ -669,18 +642,14 @@ fn retiring_missing_root_rejected_before_apply() {
     let mut state = ModeledGovernanceTrustState::new();
     let before = state.clone();
     let mut applier = FixtureModeledTrustMutationApplier::new(TrustBundleEnvironment::Devnet);
-    let outcome =
-        evaluate_modeled_trust_mutation(&input, &c.expectations, &mut state, &mut applier);
+    let outcome = evaluate_modeled_trust_mutation(&input, &c.expectations, &mut state, &mut applier);
     assert!(matches!(
         outcome,
         ModeledTrustMutationOutcome::ModeledMutationRejectedBeforeApply { .. }
     ));
     // The applier was invoked (it snapshotted) but the modeled state is unchanged.
     assert_eq!(applier.attempts(), 1);
-    assert_eq!(
-        state, before,
-        "rejected-before-apply leaves modeled state unchanged"
-    );
+    assert_eq!(state, before, "rejected-before-apply leaves modeled state unchanged");
     assert!(outcome.no_consume());
     assert!(matches!(
         map_modeled_outcome_to_mutation_engine_outcome(&outcome),
@@ -703,8 +672,7 @@ fn revoking_missing_root_rejected_before_apply() {
     );
     let mut state = ModeledGovernanceTrustState::new();
     let mut applier = FixtureModeledTrustMutationApplier::new(TrustBundleEnvironment::Devnet);
-    let outcome =
-        evaluate_modeled_trust_mutation(&input, &c.expectations, &mut state, &mut applier);
+    let outcome = evaluate_modeled_trust_mutation(&input, &c.expectations, &mut state, &mut applier);
     assert!(matches!(
         outcome,
         ModeledTrustMutationOutcome::ModeledMutationRejectedBeforeApply { .. }
@@ -736,16 +704,9 @@ fn apply_failure_before_mutation_never_consumes() {
         TrustBundleEnvironment::Devnet,
         ModeledApplierFault::ApplyFailedBeforeMutation,
     );
-    let outcome =
-        evaluate_modeled_trust_mutation(&input, &c.expectations, &mut state, &mut applier);
-    assert_eq!(
-        outcome,
-        ModeledTrustMutationOutcome::ModeledMutationApplyFailed
-    );
-    assert!(
-        state.is_empty(),
-        "apply failure leaves modeled state unchanged"
-    );
+    let outcome = evaluate_modeled_trust_mutation(&input, &c.expectations, &mut state, &mut applier);
+    assert_eq!(outcome, ModeledTrustMutationOutcome::ModeledMutationApplyFailed);
+    assert!(state.is_empty(), "apply failure leaves modeled state unchanged");
     assert!(outcome.no_consume());
     assert_eq!(
         map_modeled_outcome_to_mutation_engine_outcome(&outcome),
@@ -772,16 +733,9 @@ fn apply_failure_rolls_back_modeled_state_and_never_consumes() {
         TrustBundleEnvironment::Devnet,
         ModeledApplierFault::ApplyFailedRolledBack,
     );
-    let outcome =
-        evaluate_modeled_trust_mutation(&input, &c.expectations, &mut state, &mut applier);
-    assert_eq!(
-        outcome,
-        ModeledTrustMutationOutcome::ModeledMutationRolledBack
-    );
-    assert_eq!(
-        state, before,
-        "rollback restores the pre-apply modeled state"
-    );
+    let outcome = evaluate_modeled_trust_mutation(&input, &c.expectations, &mut state, &mut applier);
+    assert_eq!(outcome, ModeledTrustMutationOutcome::ModeledMutationRolledBack);
+    assert_eq!(state, before, "rollback restores the pre-apply modeled state");
     assert!(outcome.no_consume());
     assert_eq!(
         map_modeled_outcome_to_mutation_engine_outcome(&outcome),
@@ -807,8 +761,7 @@ fn rollback_failure_is_fatal_fail_closed_and_never_consumes() {
         TrustBundleEnvironment::Devnet,
         ModeledApplierFault::RollbackFailedFatal,
     );
-    let outcome =
-        evaluate_modeled_trust_mutation(&input, &c.expectations, &mut state, &mut applier);
+    let outcome = evaluate_modeled_trust_mutation(&input, &c.expectations, &mut state, &mut applier);
     assert_eq!(
         outcome,
         ModeledTrustMutationOutcome::ModeledMutationRollbackFailedFatal
@@ -838,8 +791,7 @@ fn ambiguous_window_fails_closed_and_never_consumes() {
         TrustBundleEnvironment::Devnet,
         ModeledApplierFault::AmbiguousAfterApply,
     );
-    let outcome =
-        evaluate_modeled_trust_mutation(&input, &c.expectations, &mut state, &mut applier);
+    let outcome = evaluate_modeled_trust_mutation(&input, &c.expectations, &mut state, &mut applier);
     assert_eq!(
         outcome,
         ModeledTrustMutationOutcome::ModeledMutationAmbiguousFailClosed
@@ -913,10 +865,7 @@ fn recovery_before_snapshot_recovers_as_not_attempted() {
     let applier = FixtureModeledTrustMutationApplier::new(TrustBundleEnvironment::Devnet);
     let obs = ModeledTrustMutationWindowObservation::default();
     let outcome = recover_modeled_trust_mutation(&input, &obs, &applier);
-    assert_eq!(
-        outcome,
-        ModeledTrustMutationOutcome::ModeledMutationNotAttempted
-    );
+    assert_eq!(outcome, ModeledTrustMutationOutcome::ModeledMutationNotAttempted);
     assert!(outcome.no_consume());
 }
 
@@ -933,10 +882,7 @@ fn recovery_after_snapshot_before_apply_rolls_back_no_consume() {
         ..Default::default()
     };
     let outcome = recover_modeled_trust_mutation(&input, &obs, &applier);
-    assert_eq!(
-        outcome,
-        ModeledTrustMutationOutcome::ModeledMutationRolledBack
-    );
+    assert_eq!(outcome, ModeledTrustMutationOutcome::ModeledMutationRolledBack);
     assert!(outcome.no_consume());
 }
 
@@ -1160,13 +1106,12 @@ fn local_operator_and_peer_majority_cannot_satisfy_mainnet_authority() {
         },
         authority_domain_sequence: SEQUENCE,
     };
-    let request =
-        qbind_node::pqc_governance_modeled_trust_mutation_applier::ModeledTrustMutationRequest {
-            applier_kind: request_kind,
-            mutation: &mutation,
-            environment_binding: &env,
-            runtime_binding: &rt,
-        };
+    let request = qbind_node::pqc_governance_modeled_trust_mutation_applier::ModeledTrustMutationRequest {
+        applier_kind: request_kind,
+        mutation: &mutation,
+        environment_binding: &env,
+        runtime_binding: &rt,
+    };
     let outcome = applier.apply_modeled_mutation(&mut state, &request);
     assert_eq!(
         outcome,

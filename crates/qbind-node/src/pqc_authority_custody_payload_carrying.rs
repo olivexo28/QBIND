@@ -321,12 +321,10 @@ impl AuthorityCustodyAttestationWire {
         &self,
     ) -> Result<AuthorityCustodyAttestation, AuthorityCustodyAttestationWireParseError> {
         if self.schema_version != AUTHORITY_CUSTODY_ATTESTATION_WIRE_SCHEMA_VERSION {
-            return Err(
-                AuthorityCustodyAttestationWireParseError::UnknownSchemaVersion {
-                    got: self.schema_version,
-                    expected: AUTHORITY_CUSTODY_ATTESTATION_WIRE_SCHEMA_VERSION,
-                },
-            );
+            return Err(AuthorityCustodyAttestationWireParseError::UnknownSchemaVersion {
+                got: self.schema_version,
+                expected: AUTHORITY_CUSTODY_ATTESTATION_WIRE_SCHEMA_VERSION,
+            });
         }
         if self.custody_key_id.is_empty()
             || self.custody_attestation_digest.is_empty()
@@ -657,7 +655,9 @@ pub fn load_v2_ratification_sidecar_with_authority_custody_attestation_from_byte
             error: e.to_string(),
         })?;
 
-    let version_value = value.get("schema_version").or_else(|| value.get("version"));
+    let version_value = value
+        .get("schema_version")
+        .or_else(|| value.get("version"));
     let version_int = match version_value.and_then(|v| v.as_u64()) {
         Some(v) => v as u32,
         None => {
@@ -1155,8 +1155,10 @@ mod tests {
     const KEY_B: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
     const ROOT_FP: &str = "1111111111111111111111111111111111111111";
     const CHAIN_ID: &str = "0000000000000001";
-    const GENESIS_HASH: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
-    const DIGEST_2: &str = "2222222222222222222222222222222222222222222222222222222222222222";
+    const GENESIS_HASH: &str =
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    const DIGEST_2: &str =
+        "2222222222222222222222222222222222222222222222222222222222222222";
     const CUSTODY_ATTEST_DIGEST: &str = "custody-att-digest-190";
     const CUSTODY_KEY_ID: &str = "custody-key-id-190";
     const NOW: u64 = 1_700_000_000;
@@ -1263,7 +1265,8 @@ mod tests {
             &good_fixture_attestation(TrustBundleEnvironment::Devnet),
         );
         wire.schema_version = 999;
-        let value = serde_json::json!({ "authority_custody_attestation": serde_json::to_value(&wire).unwrap() });
+        let value =
+            serde_json::json!({ "authority_custody_attestation": serde_json::to_value(&wire).unwrap() });
         let s = parse_optional_authority_custody_attestation_sibling_from_json_value(&value);
         assert!(s.is_malformed());
         assert!(matches!(
@@ -1278,7 +1281,8 @@ mod tests {
     fn well_formed_wire_round_trips_to_attestation() {
         let att = good_fixture_attestation(TrustBundleEnvironment::Devnet);
         let wire = AuthorityCustodyAttestationWire::from_attestation(&att);
-        let value = serde_json::json!({ "authority_custody_attestation": serde_json::to_value(&wire).unwrap() });
+        let value =
+            serde_json::json!({ "authority_custody_attestation": serde_json::to_value(&wire).unwrap() });
         let s = parse_optional_authority_custody_attestation_sibling_from_json_value(&value);
         assert!(s.is_available());
         assert_eq!(s.as_attestation().unwrap(), &att);
@@ -1305,9 +1309,10 @@ mod tests {
             Some(CUSTODY_KEY_ID),
             NOW,
         );
-        let outcome = route_loaded_authority_custody_attestation_to_reload_check_callsite_decision(
-            &ctx, &loaded,
-        );
+        let outcome =
+            route_loaded_authority_custody_attestation_to_reload_check_callsite_decision(
+                &ctx, &loaded,
+            );
         assert!(outcome.is_malformed_payload());
         assert!(outcome.is_reject());
         assert!(!outcome.is_accept());
@@ -1331,9 +1336,10 @@ mod tests {
             Some(CUSTODY_KEY_ID),
             NOW,
         );
-        let outcome = route_loaded_authority_custody_attestation_to_reload_check_callsite_decision(
-            &ctx, &loaded,
-        );
+        let outcome =
+            route_loaded_authority_custody_attestation_to_reload_check_callsite_decision(
+                &ctx, &loaded,
+            );
         assert_eq!(
             outcome,
             AuthorityCustodyPayloadCarryingDecisionOutcome::NoCustodyAttestationSupplied
@@ -1360,9 +1366,10 @@ mod tests {
             Some(CUSTODY_KEY_ID),
             NOW,
         );
-        let outcome = route_loaded_authority_custody_attestation_to_reload_check_callsite_decision(
-            &ctx, &loaded,
-        );
+        let outcome =
+            route_loaded_authority_custody_attestation_to_reload_check_callsite_decision(
+                &ctx, &loaded,
+            );
         assert!(outcome.is_required_but_absent());
         assert!(outcome.is_reject());
     }
@@ -1413,11 +1420,9 @@ mod tests {
             );
         assert!(outcome.is_mainnet_peer_driven_apply_refused());
         assert!(outcome.is_reject());
-        assert!(
-            mainnet_peer_driven_apply_remains_refused_under_custody_payload_carrying(
-                TrustBundleEnvironment::Mainnet
-            )
-        );
+        assert!(mainnet_peer_driven_apply_remains_refused_under_custody_payload_carrying(
+            TrustBundleEnvironment::Mainnet
+        ));
     }
 
     #[test]
@@ -1439,15 +1444,14 @@ mod tests {
             Some(CUSTODY_KEY_ID),
             NOW,
         );
-        let outcome = route_loaded_authority_custody_attestation_to_reload_check_callsite_decision(
-            &ctx, &loaded,
-        );
+        let outcome =
+            route_loaded_authority_custody_attestation_to_reload_check_callsite_decision(
+                &ctx, &loaded,
+            );
         assert!(outcome.is_accept());
         match outcome {
             AuthorityCustodyPayloadCarryingDecisionOutcome::Callsite(
-                LifecycleGovernanceCustodyOutcome::Accepted {
-                    custody_outcome, ..
-                },
+                LifecycleGovernanceCustodyOutcome::Accepted { custody_outcome, .. },
             ) => {
                 assert!(matches!(
                     custody_outcome,

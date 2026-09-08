@@ -28,16 +28,17 @@ use qbind_node::pqc_governance_execution_mutation_engine::{
     mutation_success_is_required_before_durable_consume,
     no_rocksdb_file_schema_migration_change_under_mutation_engine,
     peer_majority_cannot_satisfy_mutation_engine_authority,
-    policy_change_unsupported_by_mutation_engine, production_mainnet_mutation_engine_unavailable,
+    policy_change_unsupported_by_mutation_engine,
+    production_mainnet_mutation_engine_unavailable,
     project_mutation_outcome_to_durable_completion, recover_governance_mutation_window,
     validator_set_rotation_unsupported_by_mutation_engine,
     wire_governance_mutation_engine_callsite, AuthorizedMutationRequest, FixtureMutationExecutor,
     GovernanceMutationAction, GovernanceMutationCandidate, GovernanceMutationEngineExpectations,
-    GovernanceMutationEngineInput, GovernanceMutationEngineKind,
-    GovernanceMutationEnvironmentBinding, GovernanceMutationExecutor, GovernanceMutationOutcome,
-    GovernanceMutationPolicy, GovernanceMutationRuntimeBinding, GovernanceMutationSurface,
-    MainNetMutationExecutor, MutationEngineDurableProjection, MutationExecutionResult,
-    MutationWindow, MutationWindowObservation, ProductionMutationExecutor,
+    GovernanceMutationEngineInput, GovernanceMutationEngineKind, GovernanceMutationEnvironmentBinding,
+    GovernanceMutationExecutor, GovernanceMutationOutcome, GovernanceMutationPolicy,
+    GovernanceMutationRuntimeBinding, GovernanceMutationSurface, MainNetMutationExecutor,
+    MutationEngineDurableProjection, MutationExecutionResult, MutationWindow,
+    MutationWindowObservation, ProductionMutationExecutor,
 };
 use qbind_node::pqc_governance_execution_runtime_arming::GovernanceExecutionRuntimeSurface;
 use qbind_node::pqc_trust_bundle::TrustBundleEnvironment;
@@ -179,15 +180,8 @@ fn a1_disabled_policy_preserves_legacy_bypass_no_mutation() {
         &c.expectations,
         &mut exec,
     );
-    assert_eq!(
-        outcome,
-        GovernanceMutationOutcome::ProceedLegacyBypassNoMutation
-    );
-    assert_eq!(
-        exec.attempts(),
-        0,
-        "legacy bypass never invokes the executor"
-    );
+    assert_eq!(outcome, GovernanceMutationOutcome::ProceedLegacyBypassNoMutation);
+    assert_eq!(exec.attempts(), 0, "legacy bypass never invokes the executor");
     assert!(outcome.is_legacy_bypass());
     assert!(outcome.no_consume());
 }
@@ -204,10 +198,7 @@ fn a1b_disabled_engine_kind_preserves_legacy_bypass() {
         &c.expectations,
         &mut exec,
     );
-    assert_eq!(
-        outcome,
-        GovernanceMutationOutcome::ProceedLegacyBypassNoMutation
-    );
+    assert_eq!(outcome, GovernanceMutationOutcome::ProceedLegacyBypassNoMutation);
     assert_eq!(exec.attempts(), 0);
 }
 
@@ -223,10 +214,7 @@ fn a2_devnet_fixture_mutation_success() {
         &c.expectations,
         &mut exec,
     );
-    assert_eq!(
-        outcome,
-        GovernanceMutationOutcome::MutationAppliedSuccessfully
-    );
+    assert_eq!(outcome, GovernanceMutationOutcome::MutationAppliedSuccessfully);
     assert_eq!(exec.attempts(), 1);
     assert!(outcome.is_applied_successfully());
 }
@@ -246,10 +234,7 @@ fn a3_testnet_fixture_mutation_success() {
         &c.expectations,
         &mut exec,
     );
-    assert_eq!(
-        outcome,
-        GovernanceMutationOutcome::MutationAppliedSuccessfully
-    );
+    assert_eq!(outcome, GovernanceMutationOutcome::MutationAppliedSuccessfully);
     assert_eq!(exec.attempts(), 1);
 }
 
@@ -291,11 +276,7 @@ fn a5_read_only_validation_never_mutates() {
         outcome,
         GovernanceMutationOutcome::MutationRejectedBeforeApply { .. }
     ));
-    assert_eq!(
-        exec.attempts(),
-        0,
-        "validation surface never reaches the executor"
-    );
+    assert_eq!(exec.attempts(), 0, "validation surface never reaches the executor");
     let projection = project_mutation_outcome_to_durable_completion(&outcome);
     assert!(!projection.authorizes_durable_consume());
 }
@@ -379,10 +360,7 @@ fn a9_ambiguous_after_authorization_window_fails_closed() {
         &c.expectations,
         &mut exec,
     );
-    assert_eq!(
-        outcome,
-        GovernanceMutationOutcome::MutationAmbiguousFailClosed
-    );
+    assert_eq!(outcome, GovernanceMutationOutcome::MutationAmbiguousFailClosed);
     assert!(outcome.is_fail_closed());
     let projection = project_mutation_outcome_to_durable_completion(&outcome);
     assert!(matches!(
@@ -403,10 +381,7 @@ fn a10_production_mutation_path_reachable_but_unavailable() {
         &c.expectations,
         &mut exec,
     );
-    assert_eq!(
-        outcome,
-        GovernanceMutationOutcome::ProductionMutationUnavailable
-    );
+    assert_eq!(outcome, GovernanceMutationOutcome::ProductionMutationUnavailable);
     assert!(outcome.executor_must_not_run());
     assert!(matches!(
         project_mutation_outcome_to_durable_completion(&outcome),
@@ -432,10 +407,7 @@ fn a11_mainnet_mutation_path_reachable_but_unavailable() {
         &c.expectations,
         &mut exec,
     );
-    assert_eq!(
-        outcome,
-        GovernanceMutationOutcome::MainNetMutationUnavailable
-    );
+    assert_eq!(outcome, GovernanceMutationOutcome::MainNetMutationUnavailable);
     assert!(outcome.executor_must_not_run());
 }
 
@@ -465,11 +437,7 @@ fn a12_mainnet_peer_driven_apply_refused_before_mutation() {
         GovernanceMutationOutcome::MainNetPeerDrivenApplyRefused
     );
     assert!(outcome.is_mainnet_peer_driven_apply_refused());
-    assert_eq!(
-        exec.attempts(),
-        0,
-        "refusal happens before any mutation attempt"
-    );
+    assert_eq!(exec.attempts(), 0, "refusal happens before any mutation attempt");
 }
 
 #[test]
@@ -572,11 +540,7 @@ fn assert_rejected_before_apply(mutate: impl FnOnce(&mut GovernanceMutationEngin
         "expected rejected-before-apply, got {:?}",
         outcome
     );
-    assert_eq!(
-        exec.attempts(),
-        0,
-        "rejected path never reaches the executor"
-    );
+    assert_eq!(exec.attempts(), 0, "rejected path never reaches the executor");
     assert!(outcome.executor_must_not_run());
     assert!(matches!(
         project_mutation_outcome_to_durable_completion(&outcome),
@@ -721,10 +685,7 @@ fn recovery_ambiguous_after_apply_before_report_fails_closed() {
         &observation,
         &exec,
     );
-    assert_eq!(
-        outcome,
-        GovernanceMutationOutcome::MutationAmbiguousFailClosed
-    );
+    assert_eq!(outcome, GovernanceMutationOutcome::MutationAmbiguousFailClosed);
 }
 
 #[test]
@@ -798,10 +759,7 @@ fn recovery_production_unavailable() {
         &observation,
         &exec,
     );
-    assert_eq!(
-        outcome,
-        GovernanceMutationOutcome::ProductionMutationUnavailable
-    );
+    assert_eq!(outcome, GovernanceMutationOutcome::ProductionMutationUnavailable);
 }
 
 // ===========================================================================

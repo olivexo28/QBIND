@@ -44,12 +44,13 @@ use qbind_node::pqc_governance_execution_evaluator_runtime_integration::{
     GovernanceEvaluatorRuntimeIntegrationContext, GovernanceEvaluatorRuntimeIntegrationOutcome,
 };
 use qbind_node::pqc_governance_execution_payload_carrying::{
-    GovernanceExecutionLoadStatus, GovernanceExecutionPayloadWire,
+    GovernanceExecutionLoadStatus,
+    GovernanceExecutionPayloadWire,
 };
 use qbind_node::pqc_governance_execution_policy::{
     GovernanceAction, GovernanceExecutionClass, GovernanceExecutionDecision,
-    GovernanceExecutionExpectations, GovernanceExecutionInput, GovernanceExecutionPolicy,
-    GovernanceQuorumThreshold, GOVERNANCE_EXECUTION_SUPPORTED_VERSION,
+    GovernanceExecutionExpectations, GovernanceExecutionInput, GovernanceQuorumThreshold,
+    GovernanceExecutionPolicy, GOVERNANCE_EXECUTION_SUPPORTED_VERSION,
 };
 use qbind_node::pqc_governance_execution_runtime_arming::{
     GovernanceExecutionRuntimeArmingConfig, GovernanceExecutionRuntimeSurface,
@@ -433,17 +434,16 @@ fn rotate_fixture(env: TrustBundleEnvironment, surface: PeerEvaluatorContextSurf
         response,
         ev_policy: EvaluatorPolicy::FixtureDecisionSourceAllowed,
         source_class: match surface {
-            PeerEvaluatorContextSurface::LiveInbound0x05 => {
-                PeerEvaluatorSourceClass::LiveInboundPeer
-            }
-            PeerEvaluatorContextSurface::PeerDrivenDrain => {
-                PeerEvaluatorSourceClass::DrainStagedPeer
-            }
+            PeerEvaluatorContextSurface::LiveInbound0x05 => PeerEvaluatorSourceClass::LiveInboundPeer,
+            PeerEvaluatorContextSurface::PeerDrivenDrain => PeerEvaluatorSourceClass::DrainStagedPeer,
         },
     }
 }
 
-fn emergency_fixture(env: TrustBundleEnvironment, surface: PeerEvaluatorContextSurface) -> Fixture {
+fn emergency_fixture(
+    env: TrustBundleEnvironment,
+    surface: PeerEvaluatorContextSurface,
+) -> Fixture {
     let input = emergency_input(env);
     let decision = emergency_decision();
     let input_digest = input.input_digest();
@@ -525,10 +525,7 @@ fn a1_live_inbound_disabled_absent_preserves_legacy() {
     let td = trust_domain(TrustBundleEnvironment::Devnet);
     let load = GovernanceExecutionLoadStatus::Absent;
     let gov_exp = rotate_gov_expectations(TrustBundleEnvironment::Devnet);
-    let identity = ev_identity(
-        TrustBundleEnvironment::Devnet,
-        EvaluatorSourceKind::Disabled,
-    );
+    let identity = ev_identity(TrustBundleEnvironment::Devnet, EvaluatorSourceKind::Disabled);
     let request = ev_request(
         &identity,
         "input",
@@ -563,10 +560,7 @@ fn a1_live_inbound_disabled_absent_preserves_legacy() {
         is_peer_driven_apply_preflight: false,
     };
     let outcome = evaluate_peer_evaluator_context(&peer, &ctx);
-    assert_eq!(
-        outcome,
-        PeerEvaluatorContextOutcome::LegacyValidationPreserved
-    );
+    assert_eq!(outcome, PeerEvaluatorContextOutcome::LegacyValidationPreserved);
     assert!(outcome.is_legacy_validation_preserved());
     assert!(!outcome.is_apply_authorized());
 }
@@ -585,10 +579,7 @@ fn a2_peer_driven_drain_disabled_absent_preserves_legacy() {
     let td = trust_domain(TrustBundleEnvironment::Devnet);
     let load = GovernanceExecutionLoadStatus::Absent;
     let gov_exp = rotate_gov_expectations(TrustBundleEnvironment::Devnet);
-    let identity = ev_identity(
-        TrustBundleEnvironment::Devnet,
-        EvaluatorSourceKind::Disabled,
-    );
+    let identity = ev_identity(TrustBundleEnvironment::Devnet, EvaluatorSourceKind::Disabled);
     let request = ev_request(
         &identity,
         "input",
@@ -623,10 +614,7 @@ fn a2_peer_driven_drain_disabled_absent_preserves_legacy() {
         is_peer_driven_apply_preflight: true,
     };
     let outcome = evaluate_peer_evaluator_context(&peer, &ctx);
-    assert_eq!(
-        outcome,
-        PeerEvaluatorContextOutcome::LegacyValidationPreserved
-    );
+    assert_eq!(outcome, PeerEvaluatorContextOutcome::LegacyValidationPreserved);
 }
 
 // A3. live inbound 0x05 local context binds selected policy, candidate digest,
@@ -647,10 +635,7 @@ fn a3_live_inbound_present_binds_all_fields() {
         Some(TRUST_BUNDLE_DIGEST.to_string()),
         Some(MARKER_DIGEST.to_string()),
     );
-    assert_eq!(
-        peer.selected_policy,
-        GovernanceExecutionPolicy::FixtureGovernanceAllowed
-    );
+    assert_eq!(peer.selected_policy, GovernanceExecutionPolicy::FixtureGovernanceAllowed);
     assert_eq!(peer.load_status, PeerEvaluatorLoadStatus::Available);
     assert_eq!(peer.authority_domain_sequence, 7);
     assert_eq!(peer.lifecycle_action, LocalLifecycleAction::Rotate);
@@ -691,14 +676,8 @@ fn a4_peer_driven_drain_present_binds_all_fields() {
     );
     assert!(peer.present_bindings_complete());
     assert!(peer.binds_consistently_with(&ctx));
-    assert_eq!(
-        peer.candidate_trust_bundle_digest.as_deref(),
-        Some(TRUST_BUNDLE_DIGEST)
-    );
-    assert_eq!(
-        peer.candidate_v2_marker_digest.as_deref(),
-        Some(MARKER_DIGEST)
-    );
+    assert_eq!(peer.candidate_trust_bundle_digest.as_deref(), Some(TRUST_BUNDLE_DIGEST));
+    assert_eq!(peer.candidate_v2_marker_digest.as_deref(), Some(MARKER_DIGEST));
 }
 
 // A5. live inbound 0x05 with valid DevNet fixture context reaches the Run 226
@@ -906,10 +885,7 @@ fn a14_wire_schema_unavailable_is_typed_not_approval() {
         GENESIS,
         EvaluatorPolicy::Disabled,
     );
-    assert_eq!(
-        legacy,
-        PeerEvaluatorContextOutcome::LegacyValidationPreserved
-    );
+    assert_eq!(legacy, PeerEvaluatorContextOutcome::LegacyValidationPreserved);
 }
 
 // ===========================================================================
@@ -968,10 +944,7 @@ fn r2_missing_context_under_explicit_policy_rejected() {
     );
     let load = GovernanceExecutionLoadStatus::Absent;
     let gov_exp = rotate_gov_expectations(TrustBundleEnvironment::Devnet);
-    let identity = ev_identity(
-        TrustBundleEnvironment::Devnet,
-        EvaluatorSourceKind::FixtureDecisionSource,
-    );
+    let identity = ev_identity(TrustBundleEnvironment::Devnet, EvaluatorSourceKind::FixtureDecisionSource);
     let request = ev_request(
         &identity,
         "input",
@@ -1241,10 +1214,7 @@ fn r21_peer_majority_cannot_satisfy_policy() {
     );
     fx.source_class = PeerEvaluatorSourceClass::PeerMajorityGossip;
     let outcome = fx.route_present();
-    assert_eq!(
-        outcome,
-        PeerEvaluatorContextOutcome::PeerMajorityUnsupported
-    );
+    assert_eq!(outcome, PeerEvaluatorContextOutcome::PeerMajorityUnsupported);
     assert!(outcome.no_propagation_no_staging_no_apply());
 }
 

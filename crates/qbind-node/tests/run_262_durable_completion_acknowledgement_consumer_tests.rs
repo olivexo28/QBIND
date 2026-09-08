@@ -4,9 +4,40 @@
 //! Run 258 audit/publication receipt, and the real Run 260 audit-receipt
 //! acknowledgement before evaluating the Run 262 consumer.
 
+use qbind_node::pqc_governance_durable_completion_attestation_backend::{
+    backend_identity_digest, evaluate_durable_completion_attestation_backend,
+    DurableCompletionAttestationBackendExpectations, DurableCompletionAttestationBackendIdentity,
+    DurableCompletionAttestationBackendInput, DurableCompletionAttestationBackendKind,
+    DurableCompletionAttestationBackendLedger, DurableCompletionAttestationBackendOutcome,
+    DurableCompletionAttestationBackendPolicy, DurableCompletionAttestationBackendRequest,
+    FixtureDurableCompletionAttestationBackend,
+};
+use qbind_node::pqc_governance_durable_completion_audit_publication_receipt::{
+    evaluate_durable_completion_audit_publication_receipt, receipt_identity_digest,
+    DurableCompletionAuditPublicationReceiptExpectations,
+    DurableCompletionAuditPublicationReceiptIdentity,
+    DurableCompletionAuditPublicationReceiptInput, DurableCompletionAuditPublicationReceiptKind,
+    DurableCompletionAuditPublicationReceiptLedger,
+    DurableCompletionAuditPublicationReceiptOutcome,
+    DurableCompletionAuditPublicationReceiptPolicy,
+    DurableCompletionAuditPublicationReceiptRequest,
+    FixtureDurableCompletionAuditPublicationReceiptSink,
+};
+use qbind_node::pqc_governance_durable_completion_audit_receipt_acknowledgement::{
+    acknowledgement_identity_digest, evaluate_durable_completion_audit_receipt_acknowledgement,
+    DurableCompletionAuditReceiptAcknowledgementExpectations,
+    DurableCompletionAuditReceiptAcknowledgementIdentity,
+    DurableCompletionAuditReceiptAcknowledgementInput,
+    DurableCompletionAuditReceiptAcknowledgementKind,
+    DurableCompletionAuditReceiptAcknowledgementLedger,
+    DurableCompletionAuditReceiptAcknowledgementOutcome,
+    DurableCompletionAuditReceiptAcknowledgementPolicy,
+    DurableCompletionAuditReceiptAcknowledgementRequest,
+    FixtureDurableCompletionAuditReceiptAcknowledgementSink,
+};
 use qbind_node::pqc_governance_durable_completion_acknowledgement_consumer::{
-    acknowledgement_consumer_outcome_authorizes_consumer_record,
-    acknowledgement_consumer_outcome_projects_to_consumed, consumer_identity_digest,
+    consumer_identity_digest, acknowledgement_consumer_outcome_authorizes_consumer_record,
+    acknowledgement_consumer_outcome_projects_to_consumed,
     durable_completion_ack_consumer_ambiguous_window_fails_closed,
     durable_completion_ack_consumer_attestation_required,
     durable_completion_ack_consumer_backend_submission_required,
@@ -38,47 +69,19 @@ use qbind_node::pqc_governance_durable_completion_acknowledgement_consumer::{
     DurableCompletionAcknowledgementConsumerExpectations,
     DurableCompletionAcknowledgementConsumerFault,
     DurableCompletionAcknowledgementConsumerIdentity,
-    DurableCompletionAcknowledgementConsumerInput, DurableCompletionAcknowledgementConsumerKind,
+    DurableCompletionAcknowledgementConsumerInput,
+    DurableCompletionAcknowledgementConsumerKind,
     DurableCompletionAcknowledgementConsumerLedger,
     DurableCompletionAcknowledgementConsumerOutcome,
     DurableCompletionAcknowledgementConsumerPolicy,
     DurableCompletionAcknowledgementConsumerRequest,
     DurableCompletionAcknowledgementConsumerRequestIntent,
-    DurableCompletionAcknowledgementConsumerWindow, ExternalDurableCompletionSettlementConsumer,
+    DurableCompletionAcknowledgementConsumerWindow,
+    ExternalDurableCompletionSettlementConsumer,
     FixtureDurableCompletionAcknowledgementConsumer,
-    GovernanceDurableCompletionAcknowledgementConsumer, MainNetDurableCompletionSettlementConsumer,
+    GovernanceDurableCompletionAcknowledgementConsumer,
+    MainNetDurableCompletionSettlementConsumer,
     ProductionDurableCompletionSettlementConsumer,
-};
-use qbind_node::pqc_governance_durable_completion_attestation_backend::{
-    backend_identity_digest, evaluate_durable_completion_attestation_backend,
-    DurableCompletionAttestationBackendExpectations, DurableCompletionAttestationBackendIdentity,
-    DurableCompletionAttestationBackendInput, DurableCompletionAttestationBackendKind,
-    DurableCompletionAttestationBackendLedger, DurableCompletionAttestationBackendOutcome,
-    DurableCompletionAttestationBackendPolicy, DurableCompletionAttestationBackendRequest,
-    FixtureDurableCompletionAttestationBackend,
-};
-use qbind_node::pqc_governance_durable_completion_audit_publication_receipt::{
-    evaluate_durable_completion_audit_publication_receipt, receipt_identity_digest,
-    DurableCompletionAuditPublicationReceiptExpectations,
-    DurableCompletionAuditPublicationReceiptIdentity,
-    DurableCompletionAuditPublicationReceiptInput, DurableCompletionAuditPublicationReceiptKind,
-    DurableCompletionAuditPublicationReceiptLedger,
-    DurableCompletionAuditPublicationReceiptOutcome,
-    DurableCompletionAuditPublicationReceiptPolicy,
-    DurableCompletionAuditPublicationReceiptRequest,
-    FixtureDurableCompletionAuditPublicationReceiptSink,
-};
-use qbind_node::pqc_governance_durable_completion_audit_receipt_acknowledgement::{
-    acknowledgement_identity_digest, evaluate_durable_completion_audit_receipt_acknowledgement,
-    DurableCompletionAuditReceiptAcknowledgementExpectations,
-    DurableCompletionAuditReceiptAcknowledgementIdentity,
-    DurableCompletionAuditReceiptAcknowledgementInput,
-    DurableCompletionAuditReceiptAcknowledgementKind,
-    DurableCompletionAuditReceiptAcknowledgementLedger,
-    DurableCompletionAuditReceiptAcknowledgementOutcome,
-    DurableCompletionAuditReceiptAcknowledgementPolicy,
-    DurableCompletionAuditReceiptAcknowledgementRequest,
-    FixtureDurableCompletionAuditReceiptAcknowledgementSink,
 };
 use qbind_node::pqc_governance_execution_runtime_arming::GovernanceExecutionRuntimeSurface;
 use qbind_node::pqc_governance_modeled_durable_completion_attestation_projection::GovernanceModeledDurableCompletionAttestationOutcome;
@@ -607,8 +610,7 @@ fn attach_run260_acknowledgement(
         expected_receipt_transcript_digest: receipt.transcript_digest.clone(),
         expected_receipt_record_id: receipt.receipt_record_id.clone(),
         expected_identity: id.clone(),
-        expected_acknowledgement_kind:
-            DurableCompletionAuditReceiptAcknowledgementKind::FixtureInMemory,
+        expected_acknowledgement_kind: DurableCompletionAuditReceiptAcknowledgementKind::FixtureInMemory,
         expected_acknowledgement_policy:
             DurableCompletionAuditReceiptAcknowledgementPolicy::FixtureAllowed,
         expected_domain_separation_tag: ACK_DOMAIN_TAG.to_string(),
@@ -999,9 +1001,7 @@ fn devnet_fixture_chain_records_exactly_one_receipt_only_after_backend_submissio
     assert!(acknowledgement_consumer_outcome_authorizes_consumer_record(
         &outcome
     ));
-    assert!(acknowledgement_consumer_outcome_projects_to_consumed(
-        &outcome
-    ));
+    assert!(acknowledgement_consumer_outcome_projects_to_consumed(&outcome));
     assert_eq!(sink.invocations(), 1);
     assert_eq!(ledger.len(), 1);
     assert!(ledger.contains(CONSUMER_RECORD_ID));
@@ -1100,10 +1100,10 @@ fn duplicate_identical_receipt_is_idempotent() {
         second,
         DurableCompletionAcknowledgementConsumerOutcome::AcknowledgementConsumerDuplicateIdempotent
     );
-    assert!(!acknowledgement_consumer_outcome_authorizes_consumer_record(&second));
-    assert!(acknowledgement_consumer_outcome_projects_to_consumed(
+    assert!(!acknowledgement_consumer_outcome_authorizes_consumer_record(
         &second
     ));
+    assert!(acknowledgement_consumer_outcome_projects_to_consumed(&second));
     assert_eq!(ledger.len(), 1);
 }
 
@@ -1802,10 +1802,10 @@ fn only_recorded_acknowledgement_creates_consumer_request_intent() {
         project_acknowledgement_outcome_to_consumer_request(&Ack::AcknowledgementRecorded),
         Intent::CreateRequest
     );
-    assert!(
-        project_acknowledgement_outcome_to_consumer_request(&Ack::AcknowledgementRecorded)
-            .creates_request()
-    );
+    assert!(project_acknowledgement_outcome_to_consumer_request(
+        &Ack::AcknowledgementRecorded
+    )
+    .creates_request());
     assert_eq!(
         project_acknowledgement_outcome_to_consumer_request(
             &Ack::AcknowledgementDuplicateIdempotent

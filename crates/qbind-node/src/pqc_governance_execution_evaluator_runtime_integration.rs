@@ -301,10 +301,8 @@ where
 
     // The Run 211 governance execution decision validity carried out of the
     // runtime-consumption stage (step 6 input).
-    let governance_execution_decision_valid = matches!(
-        consumption,
-        GovernanceExecutionRuntimeConsumption::ProceedAccepted(_)
-    );
+    let governance_execution_decision_valid =
+        matches!(consumption, GovernanceExecutionRuntimeConsumption::ProceedAccepted(_));
 
     // Steps 4–5: evaluator request construction (caller-supplied) +
     // evaluator evaluation. The decision source is evaluated first; only a
@@ -342,11 +340,7 @@ where
                         lifecycle_action,
                         candidate_digest,
                         authority_domain_sequence,
-                    } => (
-                        *lifecycle_action,
-                        candidate_digest.clone(),
-                        *authority_domain_sequence,
-                    ),
+                    } => (*lifecycle_action, candidate_digest.clone(), *authority_domain_sequence),
                     // `evaluator_valid` is only `true` for an authorized
                     // response; the source-accept outcomes are superseded by
                     // the response verification above.
@@ -552,10 +546,7 @@ impl GovernanceEvaluatorRuntimeCallsiteFailClosed {
 /// context and forwards to the pure integration entry point).
 pub fn wire_governance_evaluator_runtime_callsite<E>(
     ctx: &GovernanceEvaluatorRuntimeIntegrationContext<'_, E>,
-) -> Result<
-    GovernanceEvaluatorRuntimeIntegrationOutcome,
-    GovernanceEvaluatorRuntimeCallsiteFailClosed,
->
+) -> Result<GovernanceEvaluatorRuntimeIntegrationOutcome, GovernanceEvaluatorRuntimeCallsiteFailClosed>
 where
     E: ProductionGovernanceExecutionEvaluator,
 {
@@ -611,10 +602,8 @@ pub fn wire_governance_evaluator_runtime_callsite_without_evaluator_context(
     governance_execution_expectations: &GovernanceExecutionExpectations,
     load_status: &GovernanceExecutionLoadStatus,
     is_peer_driven_apply_preflight: bool,
-) -> Result<
-    GovernanceEvaluatorRuntimeIntegrationOutcome,
-    GovernanceEvaluatorRuntimeCallsiteFailClosed,
-> {
+) -> Result<GovernanceEvaluatorRuntimeIntegrationOutcome, GovernanceEvaluatorRuntimeCallsiteFailClosed>
+{
     // Placeholder evaluator material: never consulted under the representable
     // legacy bypass (the integration short-circuits before the evaluator
     // stage). For a present carrier the unavailable production evaluator

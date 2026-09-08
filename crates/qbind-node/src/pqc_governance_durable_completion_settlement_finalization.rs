@@ -75,10 +75,10 @@
 //! already-recorded consumer record.
 
 use crate::pqc_governance_durable_completion_acknowledgement_consumer::DurableCompletionAcknowledgementConsumerOutcome;
+use crate::pqc_governance_durable_completion_settlement_commitment::DurableCompletionSettlementCommitmentOutcome;
 use crate::pqc_governance_durable_completion_attestation_backend::DurableCompletionAttestationBackendOutcome;
 use crate::pqc_governance_durable_completion_audit_publication_receipt::DurableCompletionAuditPublicationReceiptOutcome;
 use crate::pqc_governance_durable_completion_audit_receipt_acknowledgement::DurableCompletionAuditReceiptAcknowledgementOutcome;
-use crate::pqc_governance_durable_completion_settlement_commitment::DurableCompletionSettlementCommitmentOutcome;
 use crate::pqc_governance_execution_runtime_arming::GovernanceExecutionRuntimeSurface;
 use crate::pqc_governance_modeled_durable_completion_attestation_projection::GovernanceModeledDurableCompletionAttestationOutcome;
 use crate::pqc_governance_modeled_durable_completion_finalization_projection::GovernanceModeledDurableCompletionFinalizationOutcome;
@@ -100,7 +100,8 @@ use sha3::{Digest, Sha3_256};
 // ===========================================================================
 
 /// Run 268 — the validation / mutation surface pair the receipt binds to.
-pub type DurableCompletionSettlementFinalizationSurface = ModeledGovernanceTrustMutationSurface;
+pub type DurableCompletionSettlementFinalizationSurface =
+    ModeledGovernanceTrustMutationSurface;
 
 /// Run 268 — the trust-domain environment binding the receipt is bound to.
 pub type DurableCompletionSettlementFinalizationEnvironment =
@@ -261,12 +262,8 @@ impl DurableCompletionSettlementFinalizationPolicy {
             Self::ProductionSettlementFinalizationRequired => {
                 "production-settlement-finalization-required"
             }
-            Self::MainNetSettlementFinalizationRequired => {
-                "mainnet-settlement-finalization-required"
-            }
-            Self::ExternalSettlementFinalizationRequired => {
-                "external-settlement-finalization-required"
-            }
+            Self::MainNetSettlementFinalizationRequired => "mainnet-settlement-finalization-required",
+            Self::ExternalSettlementFinalizationRequired => "external-settlement-finalization-required",
         }
     }
 
@@ -844,7 +841,10 @@ impl DurableCompletionSettlementFinalizationLedger {
     }
 
     /// Restore the ledger to a previously captured snapshot (modeled rollback).
-    pub fn restore(&mut self, snapshot: &DurableCompletionSettlementFinalizationLedgerSnapshot) {
+    pub fn restore(
+        &mut self,
+        snapshot: &DurableCompletionSettlementFinalizationLedgerSnapshot,
+    ) {
         self.records = snapshot.records.clone();
     }
 
@@ -1002,7 +1002,10 @@ impl DurableCompletionSettlementFinalizationExpectations {
     }
 
     /// `true` iff the pre-sink environment / surface binding matches.
-    pub fn binding_matches(&self, input: &DurableCompletionSettlementFinalizationInput) -> bool {
+    pub fn binding_matches(
+        &self,
+        input: &DurableCompletionSettlementFinalizationInput,
+    ) -> bool {
         self.binding_mismatch_reason(input).is_none()
     }
 
@@ -1166,8 +1169,7 @@ impl DurableCompletionSettlementFinalizationExpectations {
         {
             return Some("wrong settlement-commitment transcript digest");
         }
-        if request.settlement_commitment_record_id != self.expected_settlement_commitment_record_id
-        {
+        if request.settlement_commitment_record_id != self.expected_settlement_commitment_record_id {
             return Some("wrong settlement-commitment record id");
         }
         if request.domain_separation_tag != self.expected_domain_separation_tag {
@@ -1228,7 +1230,8 @@ pub struct DurableCompletionSettlementFinalizationInput {
     pub receipt_binding: DurableCompletionSettlementFinalizationReceiptBinding,
     /// The Run 260 audit-receipt acknowledgement outcome carried as
     /// acknowledgement-record context.
-    pub acknowledgement_binding: DurableCompletionSettlementFinalizationAcknowledgementBinding,
+    pub acknowledgement_binding:
+        DurableCompletionSettlementFinalizationAcknowledgementBinding,
     /// The Run 262 acknowledgement consumer outcome the settlement-commitment
     /// boundary projects to a settlement-commitment request.
     pub consumer_binding: DurableCompletionSettlementFinalizationConsumerBinding,
@@ -1398,9 +1401,7 @@ impl DurableCompletionSettlementFinalizationOutcome {
     /// Stable operator-facing tag.
     pub fn tag(&self) -> &'static str {
         match self {
-            Self::LegacyBypassNoSettlementFinalization => {
-                "legacy-bypass-no-settlement-finalization"
-            }
+            Self::LegacyBypassNoSettlementFinalization => "legacy-bypass-no-settlement-finalization",
             Self::RejectedBeforeSettlementCommitmentNoFinalization => {
                 "rejected-before-settlement-commitment-no-finalization"
             }
@@ -1441,9 +1442,7 @@ impl DurableCompletionSettlementFinalizationOutcome {
             Self::ValidatorSetRotationUnsupportedNoFinalization => {
                 "validator-set-rotation-unsupported-no-finalization"
             }
-            Self::PolicyChangeUnsupportedNoFinalization => {
-                "policy-change-unsupported-no-finalization"
-            }
+            Self::PolicyChangeUnsupportedNoFinalization => "policy-change-unsupported-no-finalization",
         }
     }
 }
@@ -1782,7 +1781,9 @@ pub struct MainNetSettlementFinalizationSink {
     invocations: u32,
 }
 
-impl GovernanceDurableCompletionSettlementFinalizationSink for MainNetSettlementFinalizationSink {
+impl GovernanceDurableCompletionSettlementFinalizationSink
+    for MainNetSettlementFinalizationSink
+{
     fn kind(&self) -> DurableCompletionSettlementFinalizationKind {
         DurableCompletionSettlementFinalizationKind::MainNetSettlementFinalizationUnavailable
     }
@@ -1811,7 +1812,9 @@ pub struct ExternalSettlementFinalizationSink {
     invocations: u32,
 }
 
-impl GovernanceDurableCompletionSettlementFinalizationSink for ExternalSettlementFinalizationSink {
+impl GovernanceDurableCompletionSettlementFinalizationSink
+    for ExternalSettlementFinalizationSink
+{
     fn kind(&self) -> DurableCompletionSettlementFinalizationKind {
         DurableCompletionSettlementFinalizationKind::ExternalSettlementFinalizationUnavailable
     }
@@ -1889,13 +1892,14 @@ where
     // Step 3: project the Run 262 acknowledgement consumer outcome onto a
     // settlement-commitment request. Every non-recording consumer outcome returns a
     // no-commitment outcome without invoking the settlement-commitment sink.
-    let idempotent_only = match project_settlement_commitment_outcome_to_finalization_request(
-        &input.settlement_commitment_binding,
-    ) {
-        Intent::NoCommitment(outcome) => return outcome,
-        Intent::CreateRequest => false,
-        Intent::IdempotentOnly => true,
-    };
+    let idempotent_only =
+        match project_settlement_commitment_outcome_to_finalization_request(
+            &input.settlement_commitment_binding,
+        ) {
+            Intent::NoCommitment(outcome) => return outcome,
+            Intent::CreateRequest => false,
+            Intent::IdempotentOnly => true,
+        };
 
     // Step 4: pre-commitment environment / surface binding validation. A mismatch
     // fails closed before the settlement-commitment sink is invoked, leaving the
@@ -2047,11 +2051,13 @@ pub fn recover_durable_completion_settlement_finalization_window(
 
     // Helper: an explicit recovered record recovers as a receipt only if it matches
     // the expected receipt record id and the canonical request digest.
-    let recovered_matches = |record: &DurableCompletionSettlementFinalizationLedgerRecord| -> bool {
-        record.finalization_record_id == expectations.expected_finalization_record_id
-            && record.request_digest == input.request.digest()
-            && record.status == DurableCompletionSettlementFinalizationLedgerStatus::Recorded
-    };
+    let recovered_matches =
+        |record: &DurableCompletionSettlementFinalizationLedgerRecord| -> bool {
+            record.finalization_record_id == expectations.expected_finalization_record_id
+                && record.request_digest == input.request.digest()
+                && record.status
+                    == DurableCompletionSettlementFinalizationLedgerStatus::Recorded
+        };
 
     match window {
         // Through settlement-commitment success but before a settlement-finalization
@@ -2093,9 +2099,7 @@ pub fn recover_durable_completion_settlement_finalization_window(
         // exists.
         Window::AfterSettlementFinalizationRecordBeforeSettlementFinalizationSuccess => {
             match recovered_record {
-                Some(record) if recovered_matches(record) => {
-                    Receipt::SettlementFinalizationRecorded
-                }
+                Some(record) if recovered_matches(record) => Receipt::SettlementFinalizationRecorded,
                 _ => Receipt::SettlementFinalizationRejectedBeforeRecord,
             }
         }
@@ -2166,8 +2170,7 @@ pub fn durable_completion_settlement_finalization_never_writes_sequence_or_marke
 }
 
 /// Run 268 — the receipt boundary changes no RocksDB file schema / migration.
-pub fn durable_completion_settlement_finalization_no_rocksdb_file_schema_migration_change() -> bool
-{
+pub fn durable_completion_settlement_finalization_no_rocksdb_file_schema_migration_change() -> bool {
     true
 }
 

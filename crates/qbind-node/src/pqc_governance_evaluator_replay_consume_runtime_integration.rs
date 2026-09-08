@@ -619,16 +619,12 @@ mod tests {
         assert!(consume_integrated_as_after_success_only_post_mutation_step());
         assert!(fresh_required_before_mutation_authorization_under_consume_runtime());
         assert!(deferred_validation_only_failed_rollback_do_not_consume_under_consume_runtime());
-        assert!(
-            mainnet_peer_driven_apply_remains_refused_under_consume_runtime(
-                TrustBundleEnvironment::Mainnet
-            )
-        );
-        assert!(
-            !mainnet_peer_driven_apply_remains_refused_under_consume_runtime(
-                TrustBundleEnvironment::Devnet
-            )
-        );
+        assert!(mainnet_peer_driven_apply_remains_refused_under_consume_runtime(
+            TrustBundleEnvironment::Mainnet
+        ));
+        assert!(!mainnet_peer_driven_apply_remains_refused_under_consume_runtime(
+            TrustBundleEnvironment::Devnet
+        ));
         assert!(production_mainnet_consume_remains_unavailable_under_consume_runtime());
         assert!(validator_set_rotation_remains_unsupported_under_consume_runtime());
         assert!(policy_change_action_remains_unsupported_under_consume_runtime());

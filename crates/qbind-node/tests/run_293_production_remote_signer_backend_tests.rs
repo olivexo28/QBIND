@@ -70,13 +70,7 @@ const FRESH: u64 = 1_699_999_900;
 const EXPIRES: u64 = 1_700_001_000;
 
 fn domain(env: TrustBundleEnvironment) -> AuthorityTrustDomain {
-    AuthorityTrustDomain::new(
-        env,
-        CHAIN_ID,
-        GENESIS_HASH,
-        ROOT_FP,
-        PQC_LIFECYCLE_SUITE_ML_DSA_44,
-    )
+    AuthorityTrustDomain::new(env, CHAIN_ID, GENESIS_HASH, ROOT_FP, PQC_LIFECYCLE_SUITE_ML_DSA_44)
 }
 
 fn identity(env: TrustBundleEnvironment) -> RemoteSignerIdentity {
@@ -160,9 +154,8 @@ fn fixture_transport(env: TrustBundleEnvironment) -> FixtureLoopbackRemoteSigner
     }
 }
 
-type LoopbackBackend = ProductionRemoteSignerBackend<
-    LoopbackRemoteSignerService<FixtureLoopbackRemoteSignerTransport>,
->;
+type LoopbackBackend =
+    ProductionRemoteSignerBackend<LoopbackRemoteSignerService<FixtureLoopbackRemoteSignerTransport>>;
 
 fn loopback_backend(
     env: TrustBundleEnvironment,
@@ -178,10 +171,7 @@ fn loopback_backend(
 /// Build a valid response envelope for `env` by driving the fixture
 /// transport with the backend's own request envelope.
 fn valid_submission(env: TrustBundleEnvironment) -> SubmittedRemoteSignerRequest {
-    let backend = loopback_backend(
-        env,
-        ProductionRemoteSignerBackendPolicy::DevTestLoopbackEnabled,
-    );
+    let backend = loopback_backend(env, ProductionRemoteSignerBackendPolicy::DevTestLoopbackEnabled);
     backend
         .submit_remote_signing_request(&request_spec(env), &domain(env))
         .expect("valid submission")
@@ -206,10 +196,7 @@ fn mock_backend(
 #[test]
 fn a01_disabled_default_policy_is_explicit_and_inert() {
     assert!(production_remote_signer_backend_default_is_disabled());
-    let backend = loopback_backend(
-        TrustBundleEnvironment::Devnet,
-        ProductionRemoteSignerBackendPolicy::Disabled,
-    );
+    let backend = loopback_backend(TrustBundleEnvironment::Devnet, ProductionRemoteSignerBackendPolicy::Disabled);
     let outcome = backend.evaluate_remote_signer_backend(
         &request_spec(TrustBundleEnvironment::Devnet),
         &domain(TrustBundleEnvironment::Devnet),
@@ -224,10 +211,7 @@ fn a01_disabled_default_policy_is_explicit_and_inert() {
 #[test]
 fn a02_devnet_loopback_accepts_valid_request_response() {
     let env = TrustBundleEnvironment::Devnet;
-    let backend = loopback_backend(
-        env,
-        ProductionRemoteSignerBackendPolicy::DevTestLoopbackEnabled,
-    );
+    let backend = loopback_backend(env, ProductionRemoteSignerBackendPolicy::DevTestLoopbackEnabled);
     let outcome = backend.evaluate_remote_signer_backend(
         &request_spec(env),
         &domain(env),
@@ -241,10 +225,7 @@ fn a02_devnet_loopback_accepts_valid_request_response() {
 #[test]
 fn a03_testnet_loopback_accepts_when_policy_allows() {
     let env = TrustBundleEnvironment::Testnet;
-    let backend = loopback_backend(
-        env,
-        ProductionRemoteSignerBackendPolicy::DevTestLoopbackEnabled,
-    );
+    let backend = loopback_backend(env, ProductionRemoteSignerBackendPolicy::DevTestLoopbackEnabled);
     let outcome = backend.evaluate_remote_signer_backend(
         &request_spec(env),
         &domain(env),
@@ -303,18 +284,10 @@ fn a08_two_identical_requests_produce_identical_digests() {
 #[test]
 fn a09_valid_response_authorizes_exactly_matching_request() {
     let env = TrustBundleEnvironment::Devnet;
-    let backend = loopback_backend(
-        env,
-        ProductionRemoteSignerBackendPolicy::DevTestLoopbackEnabled,
-    );
+    let backend = loopback_backend(env, ProductionRemoteSignerBackendPolicy::DevTestLoopbackEnabled);
     let submitted = valid_submission(env);
-    let outcome = backend.verify_remote_signer_response(
-        &request_spec(env),
-        &submitted,
-        &domain(env),
-        &identity(env),
-        NOW,
-    );
+    let outcome =
+        backend.verify_remote_signer_response(&request_spec(env), &submitted, &domain(env), &identity(env), NOW);
     match outcome {
         ProductionRemoteSignerOutcome::RemoteSignerAccepted { request_id, .. } => {
             assert_eq!(request_id, submitted.request_id);
@@ -350,10 +323,7 @@ fn a11_backend_composes_with_run291_durable_replay_record_digest() {
     let id_with = production_remote_signer_request_id(&spec);
     assert_ne!(id_without, id_with);
 
-    let backend = loopback_backend(
-        env,
-        ProductionRemoteSignerBackendPolicy::DevTestLoopbackEnabled,
-    );
+    let backend = loopback_backend(env, ProductionRemoteSignerBackendPolicy::DevTestLoopbackEnabled);
     let outcome = backend.evaluate_remote_signer_backend(&spec, &domain(env), &identity(env), NOW);
     assert!(outcome.is_accept(), "expected accept, got {outcome:?}");
 }
@@ -361,17 +331,11 @@ fn a11_backend_composes_with_run291_durable_replay_record_digest() {
 #[test]
 fn a12_build_only_reports_request_built_without_transport_call() {
     let env = TrustBundleEnvironment::Devnet;
-    let backend = loopback_backend(
-        env,
-        ProductionRemoteSignerBackendPolicy::DevTestLoopbackEnabled,
-    );
+    let backend = loopback_backend(env, ProductionRemoteSignerBackendPolicy::DevTestLoopbackEnabled);
     let built = backend
         .build_request_envelope(&request_spec(env), &domain(env))
         .expect("request built");
-    assert_eq!(
-        built.request_id,
-        production_remote_signer_request_id(&request_spec(env))
-    );
+    assert_eq!(built.request_id, production_remote_signer_request_id(&request_spec(env)));
     // build_request_envelope must not invoke the transport.
     assert_eq!(backend.transport.call_count(), 0);
 }
@@ -381,10 +345,7 @@ fn a13_governance_execution_signing_kind_is_supported() {
     let env = TrustBundleEnvironment::Devnet;
     let mut spec = request_spec(env);
     spec.request_kind = ProductionRemoteSignerRequestKind::GovernanceExecutionSigning;
-    let backend = loopback_backend(
-        env,
-        ProductionRemoteSignerBackendPolicy::DevTestLoopbackEnabled,
-    );
+    let backend = loopback_backend(env, ProductionRemoteSignerBackendPolicy::DevTestLoopbackEnabled);
     // Note: the request id/kind change but the loopback still echoes the
     // request; the accept path still holds because the transport verifier
     // does not inspect the backend request kind.
@@ -410,26 +371,15 @@ fn b01_disabled_produces_no_request_and_no_transport_call() {
     let env = TrustBundleEnvironment::Devnet;
     let backend = loopback_backend(env, ProductionRemoteSignerBackendPolicy::Disabled);
     let built = backend.build_request_envelope(&request_spec(env), &domain(env));
-    assert_eq!(
-        built.err(),
-        Some(ProductionRemoteSignerOutcome::DisabledNoRequest)
-    );
+    assert_eq!(built.err(), Some(ProductionRemoteSignerOutcome::DisabledNoRequest));
     assert_eq!(backend.transport.call_count(), 0);
 }
 
 #[test]
 fn b02_mainnet_identity_refused() {
     let env = TrustBundleEnvironment::Mainnet;
-    let backend = loopback_backend(
-        env,
-        ProductionRemoteSignerBackendPolicy::DevTestLoopbackEnabled,
-    );
-    let outcome = backend.evaluate_remote_signer_backend(
-        &request_spec(env),
-        &domain(env),
-        &identity(env),
-        NOW,
-    );
+    let backend = loopback_backend(env, ProductionRemoteSignerBackendPolicy::DevTestLoopbackEnabled);
+    let outcome = backend.evaluate_remote_signer_backend(&request_spec(env), &domain(env), &identity(env), NOW);
     assert_eq!(outcome, ProductionRemoteSignerOutcome::MainNetRefused);
     assert_eq!(backend.transport.call_count(), 0);
 }
@@ -437,16 +387,9 @@ fn b02_mainnet_identity_refused() {
 #[test]
 fn b03_fixture_loopback_material_refused_for_mainnet_production_policy() {
     let env = TrustBundleEnvironment::Mainnet;
-    let backend = loopback_backend(
-        env,
-        ProductionRemoteSignerBackendPolicy::MainnetProductionRequired,
-    );
-    let outcome = backend.evaluate_remote_signer_backend(
-        &request_spec(env),
-        &domain(env),
-        &identity(env),
-        NOW,
-    );
+    let backend =
+        loopback_backend(env, ProductionRemoteSignerBackendPolicy::MainnetProductionRequired);
+    let outcome = backend.evaluate_remote_signer_backend(&request_spec(env), &domain(env), &identity(env), NOW);
     assert_eq!(
         outcome,
         ProductionRemoteSignerOutcome::MainNetProductionAuthorityUnavailable
@@ -469,95 +412,51 @@ fn b04_wrong_environment_rejected() {
         &identity(TrustBundleEnvironment::Testnet),
         NOW,
     );
-    assert_eq!(
-        outcome,
-        ProductionRemoteSignerOutcome::RemoteSignerDomainMismatch
-    );
+    assert_eq!(outcome, ProductionRemoteSignerOutcome::RemoteSignerDomainMismatch);
 }
 
 #[test]
 fn b05_wrong_chain_rejected() {
     let env = TrustBundleEnvironment::Devnet;
-    let backend = loopback_backend(
-        env,
-        ProductionRemoteSignerBackendPolicy::DevTestLoopbackEnabled,
-    );
+    let backend = loopback_backend(env, ProductionRemoteSignerBackendPolicy::DevTestLoopbackEnabled);
     let submitted = valid_submission(env);
     let mut wrong = domain(env);
     wrong.chain_id = "00000000000000ff".to_string();
-    let outcome = backend.verify_remote_signer_response(
-        &request_spec(env),
-        &submitted,
-        &wrong,
-        &identity(env),
-        NOW,
-    );
-    assert_eq!(
-        outcome,
-        ProductionRemoteSignerOutcome::RemoteSignerDomainMismatch
-    );
+    let outcome = backend.verify_remote_signer_response(&request_spec(env), &submitted, &wrong, &identity(env), NOW);
+    assert_eq!(outcome, ProductionRemoteSignerOutcome::RemoteSignerDomainMismatch);
 }
 
 #[test]
 fn b06_wrong_genesis_rejected() {
     let env = TrustBundleEnvironment::Devnet;
-    let backend = loopback_backend(
-        env,
-        ProductionRemoteSignerBackendPolicy::DevTestLoopbackEnabled,
-    );
+    let backend = loopback_backend(env, ProductionRemoteSignerBackendPolicy::DevTestLoopbackEnabled);
     let submitted = valid_submission(env);
     let mut wrong = domain(env);
-    wrong.genesis_hash =
-        "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc".to_string();
-    let outcome = backend.verify_remote_signer_response(
-        &request_spec(env),
-        &submitted,
-        &wrong,
-        &identity(env),
-        NOW,
-    );
-    assert_eq!(
-        outcome,
-        ProductionRemoteSignerOutcome::RemoteSignerDomainMismatch
-    );
+    wrong.genesis_hash = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc".to_string();
+    let outcome = backend.verify_remote_signer_response(&request_spec(env), &submitted, &wrong, &identity(env), NOW);
+    assert_eq!(outcome, ProductionRemoteSignerOutcome::RemoteSignerDomainMismatch);
 }
 
 #[test]
 fn b07_wrong_authority_root_rejected() {
     let env = TrustBundleEnvironment::Devnet;
-    let backend = loopback_backend(
-        env,
-        ProductionRemoteSignerBackendPolicy::DevTestLoopbackEnabled,
-    );
+    let backend = loopback_backend(env, ProductionRemoteSignerBackendPolicy::DevTestLoopbackEnabled);
     let submitted = valid_submission(env);
     let mut wrong = domain(env);
     wrong.authority_root_fingerprint = "9999999999999999999999999999999999999999".to_string();
-    let outcome = backend.verify_remote_signer_response(
-        &request_spec(env),
-        &submitted,
-        &wrong,
-        &identity(env),
-        NOW,
-    );
-    assert_eq!(
-        outcome,
-        ProductionRemoteSignerOutcome::RemoteSignerDomainMismatch
-    );
+    let outcome = backend.verify_remote_signer_response(&request_spec(env), &submitted, &wrong, &identity(env), NOW);
+    assert_eq!(outcome, ProductionRemoteSignerOutcome::RemoteSignerDomainMismatch);
 }
 
 #[test]
 fn b08_wrong_authority_sequence_rejected() {
     let env = TrustBundleEnvironment::Devnet;
-    let backend = loopback_backend(
-        env,
-        ProductionRemoteSignerBackendPolicy::DevTestLoopbackEnabled,
-    );
+    let backend = loopback_backend(env, ProductionRemoteSignerBackendPolicy::DevTestLoopbackEnabled);
     let submitted = valid_submission(env);
     // Expected sequence differs from the request's bound sequence.
     let mut spec = request_spec(env);
     spec.authority_domain_sequence = 3;
-    let outcome =
-        backend.verify_remote_signer_response(&spec, &submitted, &domain(env), &identity(env), NOW);
+    let outcome = backend.verify_remote_signer_response(&spec, &submitted, &domain(env), &identity(env), NOW);
     // The submitted request bound sequence 2; expectations now expect 3.
     assert!(
         matches!(
@@ -572,82 +471,42 @@ fn b08_wrong_authority_sequence_rejected() {
 #[test]
 fn b09_wrong_signer_identity_rejected() {
     let env = TrustBundleEnvironment::Devnet;
-    let backend = loopback_backend(
-        env,
-        ProductionRemoteSignerBackendPolicy::DevTestLoopbackEnabled,
-    );
+    let backend = loopback_backend(env, ProductionRemoteSignerBackendPolicy::DevTestLoopbackEnabled);
     let submitted = valid_submission(env);
     let mut wrong_identity = identity(env);
     wrong_identity.signer_id = "other-signer".to_string();
-    let outcome = backend.verify_remote_signer_response(
-        &request_spec(env),
-        &submitted,
-        &domain(env),
-        &wrong_identity,
-        NOW,
-    );
-    assert_eq!(
-        outcome,
-        ProductionRemoteSignerOutcome::RemoteSignerWrongSigner
-    );
+    let outcome = backend.verify_remote_signer_response(&request_spec(env), &submitted, &domain(env), &wrong_identity, NOW);
+    assert_eq!(outcome, ProductionRemoteSignerOutcome::RemoteSignerWrongSigner);
 }
 
 #[test]
 fn b10_wrong_request_id_echo_rejected() {
     let env = TrustBundleEnvironment::Devnet;
-    let backend = loopback_backend(
-        env,
-        ProductionRemoteSignerBackendPolicy::DevTestLoopbackEnabled,
-    );
+    let backend = loopback_backend(env, ProductionRemoteSignerBackendPolicy::DevTestLoopbackEnabled);
     let mut submitted = valid_submission(env);
     submitted.response_env.request_id_echo = "tampered-request-id".to_string();
-    let outcome = backend.verify_remote_signer_response(
-        &request_spec(env),
-        &submitted,
-        &domain(env),
-        &identity(env),
-        NOW,
-    );
-    assert_eq!(
-        outcome,
-        ProductionRemoteSignerOutcome::RemoteSignerRequestIdMismatch
-    );
+    let outcome = backend.verify_remote_signer_response(&request_spec(env), &submitted, &domain(env), &identity(env), NOW);
+    assert_eq!(outcome, ProductionRemoteSignerOutcome::RemoteSignerRequestIdMismatch);
 }
 
 #[test]
 fn b11_wrong_transcript_digest_rejected() {
     let env = TrustBundleEnvironment::Devnet;
-    let backend = loopback_backend(
-        env,
-        ProductionRemoteSignerBackendPolicy::DevTestLoopbackEnabled,
-    );
+    let backend = loopback_backend(env, ProductionRemoteSignerBackendPolicy::DevTestLoopbackEnabled);
     let mut submitted = valid_submission(env);
     submitted.response_env.transcript_digest = "0".repeat(64);
-    let outcome = backend.verify_remote_signer_response(
-        &request_spec(env),
-        &submitted,
-        &domain(env),
-        &identity(env),
-        NOW,
-    );
-    assert_eq!(
-        outcome,
-        ProductionRemoteSignerOutcome::RemoteSignerTranscriptMismatch
-    );
+    let outcome = backend.verify_remote_signer_response(&request_spec(env), &submitted, &domain(env), &identity(env), NOW);
+    assert_eq!(outcome, ProductionRemoteSignerOutcome::RemoteSignerTranscriptMismatch);
 }
 
 #[test]
 fn b12_wrong_candidate_digest_rejected() {
     let env = TrustBundleEnvironment::Devnet;
-    let backend = loopback_backend(
-        env,
-        ProductionRemoteSignerBackendPolicy::DevTestLoopbackEnabled,
-    );
+    let backend = loopback_backend(env, ProductionRemoteSignerBackendPolicy::DevTestLoopbackEnabled);
     let submitted = valid_submission(env);
     let mut spec = request_spec(env);
     spec.candidate_digest = "3".repeat(64);
-    let outcome =
-        backend.verify_remote_signer_response(&spec, &submitted, &domain(env), &identity(env), NOW);
+    let outcome = backend.verify_remote_signer_response(&spec, &submitted, &domain(env), &identity(env), NOW);
     // Expectation candidate digest now differs from the bound request.
     assert!(
         matches!(
@@ -663,15 +522,11 @@ fn b12_wrong_candidate_digest_rejected() {
 #[test]
 fn b13_wrong_authorized_action_rejected() {
     let env = TrustBundleEnvironment::Devnet;
-    let backend = loopback_backend(
-        env,
-        ProductionRemoteSignerBackendPolicy::DevTestLoopbackEnabled,
-    );
+    let backend = loopback_backend(env, ProductionRemoteSignerBackendPolicy::DevTestLoopbackEnabled);
     let submitted = valid_submission(env);
     let mut spec = request_spec(env);
     spec.lifecycle_action = LocalLifecycleAction::ActivateInitial;
-    let outcome =
-        backend.verify_remote_signer_response(&spec, &submitted, &domain(env), &identity(env), NOW);
+    let outcome = backend.verify_remote_signer_response(&spec, &submitted, &domain(env), &identity(env), NOW);
     assert!(
         matches!(
             outcome,
@@ -686,19 +541,10 @@ fn b13_wrong_authorized_action_rejected() {
 #[test]
 fn b14_wrong_protocol_version_rejected() {
     let env = TrustBundleEnvironment::Devnet;
-    let backend = loopback_backend(
-        env,
-        ProductionRemoteSignerBackendPolicy::DevTestLoopbackEnabled,
-    );
+    let backend = loopback_backend(env, ProductionRemoteSignerBackendPolicy::DevTestLoopbackEnabled);
     let mut submitted = valid_submission(env);
     submitted.response_env.protocol_version = 99;
-    let outcome = backend.verify_remote_signer_response(
-        &request_spec(env),
-        &submitted,
-        &domain(env),
-        &identity(env),
-        NOW,
-    );
+    let outcome = backend.verify_remote_signer_response(&request_spec(env), &submitted, &domain(env), &identity(env), NOW);
     assert_eq!(
         outcome,
         ProductionRemoteSignerOutcome::RemoteSignerUnsupportedProtocol { version: 99 }
@@ -708,20 +554,11 @@ fn b14_wrong_protocol_version_rejected() {
 #[test]
 fn b15_missing_response_signature_rejected() {
     let env = TrustBundleEnvironment::Devnet;
-    let backend = loopback_backend(
-        env,
-        ProductionRemoteSignerBackendPolicy::DevTestLoopbackEnabled,
-    );
+    let backend = loopback_backend(env, ProductionRemoteSignerBackendPolicy::DevTestLoopbackEnabled);
     let mut submitted = valid_submission(env);
     submitted.response_env.inner_response.signature_commitment =
         REMOTE_SIGNER_INVALID_SIGNATURE_SENTINEL.to_string();
-    let outcome = backend.verify_remote_signer_response(
-        &request_spec(env),
-        &submitted,
-        &domain(env),
-        &identity(env),
-        NOW,
-    );
+    let outcome = backend.verify_remote_signer_response(&request_spec(env), &submitted, &domain(env), &identity(env), NOW);
     // Tampering the inner signature breaks the canonical response digest
     // binding first (transcript mismatch), then the inner signature check.
     assert!(outcome.is_non_mutating());
@@ -731,19 +568,10 @@ fn b15_missing_response_signature_rejected() {
 #[test]
 fn b16_malformed_response_rejected() {
     let env = TrustBundleEnvironment::Devnet;
-    let backend = loopback_backend(
-        env,
-        ProductionRemoteSignerBackendPolicy::DevTestLoopbackEnabled,
-    );
+    let backend = loopback_backend(env, ProductionRemoteSignerBackendPolicy::DevTestLoopbackEnabled);
     let mut submitted = valid_submission(env);
     submitted.response_env.signer_id = String::new();
-    let outcome = backend.verify_remote_signer_response(
-        &request_spec(env),
-        &submitted,
-        &domain(env),
-        &identity(env),
-        NOW,
-    );
+    let outcome = backend.verify_remote_signer_response(&request_spec(env), &submitted, &domain(env), &identity(env), NOW);
     assert!(!outcome.is_accept(), "got {outcome:?}");
 }
 
@@ -753,113 +581,47 @@ fn b17_oversized_response_rejected() {
     let mut big = valid_response_env(env);
     big.response_commitment = "x".repeat(PRODUCTION_REMOTE_SIGNER_MAX_RESPONSE_BYTES + 1);
     let mock = MockRemoteSignerBackendTransport::respond(big);
-    let backend = mock_backend(
-        env,
-        ProductionRemoteSignerBackendPolicy::DevTestLoopbackEnabled,
-        mock,
-    );
-    let outcome = backend.evaluate_remote_signer_backend(
-        &request_spec(env),
-        &domain(env),
-        &identity(env),
-        NOW,
-    );
-    assert_eq!(
-        outcome,
-        ProductionRemoteSignerOutcome::RemoteSignerMalformedResponse
-    );
+    let backend = mock_backend(env, ProductionRemoteSignerBackendPolicy::DevTestLoopbackEnabled, mock);
+    let outcome = backend.evaluate_remote_signer_backend(&request_spec(env), &domain(env), &identity(env), NOW);
+    assert_eq!(outcome, ProductionRemoteSignerOutcome::RemoteSignerMalformedResponse);
 }
 
 #[test]
 fn b18_signer_unavailable_rejected() {
     let env = TrustBundleEnvironment::Devnet;
-    let mock = MockRemoteSignerBackendTransport::always_fail(
-        ProductionRemoteSignerError::SignerUnavailable,
-    );
-    let backend = mock_backend(
-        env,
-        ProductionRemoteSignerBackendPolicy::DevTestLoopbackEnabled,
-        mock,
-    );
-    let outcome = backend.evaluate_remote_signer_backend(
-        &request_spec(env),
-        &domain(env),
-        &identity(env),
-        NOW,
-    );
-    assert_eq!(
-        outcome,
-        ProductionRemoteSignerOutcome::RemoteSignerUnavailable
-    );
+    let mock = MockRemoteSignerBackendTransport::always_fail(ProductionRemoteSignerError::SignerUnavailable);
+    let backend = mock_backend(env, ProductionRemoteSignerBackendPolicy::DevTestLoopbackEnabled, mock);
+    let outcome = backend.evaluate_remote_signer_backend(&request_spec(env), &domain(env), &identity(env), NOW);
+    assert_eq!(outcome, ProductionRemoteSignerOutcome::RemoteSignerUnavailable);
 }
 
 #[test]
 fn b19_transport_unavailable_rejected() {
     let env = TrustBundleEnvironment::Devnet;
-    let mock = MockRemoteSignerBackendTransport::always_fail(
-        ProductionRemoteSignerError::EndpointUnavailable,
-    );
-    let backend = mock_backend(
-        env,
-        ProductionRemoteSignerBackendPolicy::DevTestLoopbackEnabled,
-        mock,
-    );
-    let outcome = backend.evaluate_remote_signer_backend(
-        &request_spec(env),
-        &domain(env),
-        &identity(env),
-        NOW,
-    );
-    assert_eq!(
-        outcome,
-        ProductionRemoteSignerOutcome::RemoteSignerUnavailable
-    );
+    let mock = MockRemoteSignerBackendTransport::always_fail(ProductionRemoteSignerError::EndpointUnavailable);
+    let backend = mock_backend(env, ProductionRemoteSignerBackendPolicy::DevTestLoopbackEnabled, mock);
+    let outcome = backend.evaluate_remote_signer_backend(&request_spec(env), &domain(env), &identity(env), NOW);
+    assert_eq!(outcome, ProductionRemoteSignerOutcome::RemoteSignerUnavailable);
     // Endpoint unavailable is retryable → exhausts all attempts.
-    assert_eq!(
-        backend.transport.call_count(),
-        TransportTimeoutRetryPolicy::default().max_attempts
-    );
+    assert_eq!(backend.transport.call_count(), TransportTimeoutRetryPolicy::default().max_attempts);
 }
 
 #[test]
 fn b20_timeout_rejected() {
     let env = TrustBundleEnvironment::Devnet;
     let mock = MockRemoteSignerBackendTransport::always_fail(ProductionRemoteSignerError::Timeout);
-    let backend = mock_backend(
-        env,
-        ProductionRemoteSignerBackendPolicy::DevTestLoopbackEnabled,
-        mock,
-    );
-    let outcome = backend.evaluate_remote_signer_backend(
-        &request_spec(env),
-        &domain(env),
-        &identity(env),
-        NOW,
-    );
+    let backend = mock_backend(env, ProductionRemoteSignerBackendPolicy::DevTestLoopbackEnabled, mock);
+    let outcome = backend.evaluate_remote_signer_backend(&request_spec(env), &domain(env), &identity(env), NOW);
     assert_eq!(outcome, ProductionRemoteSignerOutcome::RemoteSignerTimeout);
 }
 
 #[test]
 fn b21_decode_error_rejected() {
     let env = TrustBundleEnvironment::Devnet;
-    let mock = MockRemoteSignerBackendTransport::always_fail(
-        ProductionRemoteSignerError::TransportDecodeError,
-    );
-    let backend = mock_backend(
-        env,
-        ProductionRemoteSignerBackendPolicy::DevTestLoopbackEnabled,
-        mock,
-    );
-    let outcome = backend.evaluate_remote_signer_backend(
-        &request_spec(env),
-        &domain(env),
-        &identity(env),
-        NOW,
-    );
-    assert_eq!(
-        outcome,
-        ProductionRemoteSignerOutcome::RemoteSignerTransportDecodeFailed
-    );
+    let mock = MockRemoteSignerBackendTransport::always_fail(ProductionRemoteSignerError::TransportDecodeError);
+    let backend = mock_backend(env, ProductionRemoteSignerBackendPolicy::DevTestLoopbackEnabled, mock);
+    let outcome = backend.evaluate_remote_signer_backend(&request_spec(env), &domain(env), &identity(env), NOW);
+    assert_eq!(outcome, ProductionRemoteSignerOutcome::RemoteSignerTransportDecodeFailed);
     // Decode error is terminal (non-retryable) → single attempt.
     assert_eq!(backend.transport.call_count(), 1);
 }
@@ -867,75 +629,28 @@ fn b21_decode_error_rejected() {
 #[test]
 fn b22_signer_refused_rejected() {
     let env = TrustBundleEnvironment::Devnet;
-    let mock =
-        MockRemoteSignerBackendTransport::always_fail(ProductionRemoteSignerError::SignerRefused);
-    let backend = mock_backend(
-        env,
-        ProductionRemoteSignerBackendPolicy::DevTestLoopbackEnabled,
-        mock,
-    );
-    let outcome = backend.evaluate_remote_signer_backend(
-        &request_spec(env),
-        &domain(env),
-        &identity(env),
-        NOW,
-    );
-    assert!(
-        matches!(
-            outcome,
-            ProductionRemoteSignerOutcome::RemoteSignerRejected { .. }
-        ),
-        "got {outcome:?}"
-    );
+    let mock = MockRemoteSignerBackendTransport::always_fail(ProductionRemoteSignerError::SignerRefused);
+    let backend = mock_backend(env, ProductionRemoteSignerBackendPolicy::DevTestLoopbackEnabled, mock);
+    let outcome = backend.evaluate_remote_signer_backend(&request_spec(env), &domain(env), &identity(env), NOW);
+    assert!(matches!(outcome, ProductionRemoteSignerOutcome::RemoteSignerRejected { .. }), "got {outcome:?}");
 }
 
 #[test]
 fn b23_signer_policy_rejected_rejected() {
     let env = TrustBundleEnvironment::Devnet;
-    let mock = MockRemoteSignerBackendTransport::always_fail(
-        ProductionRemoteSignerError::SignerPolicyRejected,
-    );
-    let backend = mock_backend(
-        env,
-        ProductionRemoteSignerBackendPolicy::DevTestLoopbackEnabled,
-        mock,
-    );
-    let outcome = backend.evaluate_remote_signer_backend(
-        &request_spec(env),
-        &domain(env),
-        &identity(env),
-        NOW,
-    );
-    assert!(
-        matches!(
-            outcome,
-            ProductionRemoteSignerOutcome::RemoteSignerRejected { .. }
-        ),
-        "got {outcome:?}"
-    );
+    let mock = MockRemoteSignerBackendTransport::always_fail(ProductionRemoteSignerError::SignerPolicyRejected);
+    let backend = mock_backend(env, ProductionRemoteSignerBackendPolicy::DevTestLoopbackEnabled, mock);
+    let outcome = backend.evaluate_remote_signer_backend(&request_spec(env), &domain(env), &identity(env), NOW);
+    assert!(matches!(outcome, ProductionRemoteSignerOutcome::RemoteSignerRejected { .. }), "got {outcome:?}");
 }
 
 #[test]
 fn b24_signer_attestation_unavailable_rejected() {
     let env = TrustBundleEnvironment::Devnet;
-    let mock = MockRemoteSignerBackendTransport::always_fail(
-        ProductionRemoteSignerError::SignerAttestationUnavailable,
-    );
-    let backend = mock_backend(
-        env,
-        ProductionRemoteSignerBackendPolicy::DevTestLoopbackEnabled,
-        mock,
-    );
-    let outcome = backend.evaluate_remote_signer_backend(
-        &request_spec(env),
-        &domain(env),
-        &identity(env),
-        NOW,
-    );
-    assert_eq!(
-        outcome,
-        ProductionRemoteSignerOutcome::RemoteSignerAttestationUnavailable
-    );
+    let mock = MockRemoteSignerBackendTransport::always_fail(ProductionRemoteSignerError::SignerAttestationUnavailable);
+    let backend = mock_backend(env, ProductionRemoteSignerBackendPolicy::DevTestLoopbackEnabled, mock);
+    let outcome = backend.evaluate_remote_signer_backend(&request_spec(env), &domain(env), &identity(env), NOW);
+    assert_eq!(outcome, ProductionRemoteSignerOutcome::RemoteSignerAttestationUnavailable);
 }
 
 #[test]
@@ -944,17 +659,8 @@ fn b25_unsupported_protocol_transport_error_rejected() {
     let mock = MockRemoteSignerBackendTransport::always_fail(
         ProductionRemoteSignerError::UnsupportedProtocolVersion { version: 7 },
     );
-    let backend = mock_backend(
-        env,
-        ProductionRemoteSignerBackendPolicy::DevTestLoopbackEnabled,
-        mock,
-    );
-    let outcome = backend.evaluate_remote_signer_backend(
-        &request_spec(env),
-        &domain(env),
-        &identity(env),
-        NOW,
-    );
+    let backend = mock_backend(env, ProductionRemoteSignerBackendPolicy::DevTestLoopbackEnabled, mock);
+    let outcome = backend.evaluate_remote_signer_backend(&request_spec(env), &domain(env), &identity(env), NOW);
     assert_eq!(
         outcome,
         ProductionRemoteSignerOutcome::RemoteSignerUnsupportedProtocol { version: 7 }
@@ -964,43 +670,22 @@ fn b25_unsupported_protocol_transport_error_rejected() {
 #[test]
 fn b26_response_from_wrong_signer_key_rejected() {
     let env = TrustBundleEnvironment::Devnet;
-    let backend = loopback_backend(
-        env,
-        ProductionRemoteSignerBackendPolicy::DevTestLoopbackEnabled,
-    );
+    let backend = loopback_backend(env, ProductionRemoteSignerBackendPolicy::DevTestLoopbackEnabled);
     let mut submitted = valid_submission(env);
     submitted.response_env.custody_key_id = "other-custody-key".to_string();
     submitted.response_env.inner_response.custody_key_id = "other-custody-key".to_string();
-    let outcome = backend.verify_remote_signer_response(
-        &request_spec(env),
-        &submitted,
-        &domain(env),
-        &identity(env),
-        NOW,
-    );
+    let outcome = backend.verify_remote_signer_response(&request_spec(env), &submitted, &domain(env), &identity(env), NOW);
     assert!(!outcome.is_accept(), "got {outcome:?}");
 }
 
 #[test]
 fn b27_production_mode_response_never_accepted() {
     let env = TrustBundleEnvironment::Devnet;
-    let backend = loopback_backend(
-        env,
-        ProductionRemoteSignerBackendPolicy::DevTestLoopbackEnabled,
-    );
+    let backend = loopback_backend(env, ProductionRemoteSignerBackendPolicy::DevTestLoopbackEnabled);
     let mut submitted = valid_submission(env);
     submitted.response_env.inner_response.signer_mode = RemoteSignerMode::Production;
-    let outcome = backend.verify_remote_signer_response(
-        &request_spec(env),
-        &submitted,
-        &domain(env),
-        &identity(env),
-        NOW,
-    );
-    assert_eq!(
-        outcome,
-        ProductionRemoteSignerOutcome::RemoteSignerUnavailable
-    );
+    let outcome = backend.verify_remote_signer_response(&request_spec(env), &submitted, &domain(env), &identity(env), NOW);
+    assert_eq!(outcome, ProductionRemoteSignerOutcome::RemoteSignerUnavailable);
 }
 
 #[test]
@@ -1008,15 +693,9 @@ fn b28_validator_set_rotation_kind_unsupported() {
     let env = TrustBundleEnvironment::Devnet;
     let mut spec = request_spec(env);
     spec.request_kind = ProductionRemoteSignerRequestKind::ValidatorSetRotation;
-    let backend = loopback_backend(
-        env,
-        ProductionRemoteSignerBackendPolicy::DevTestLoopbackEnabled,
-    );
+    let backend = loopback_backend(env, ProductionRemoteSignerBackendPolicy::DevTestLoopbackEnabled);
     let outcome = backend.evaluate_remote_signer_backend(&spec, &domain(env), &identity(env), NOW);
-    assert_eq!(
-        outcome,
-        ProductionRemoteSignerOutcome::ValidatorSetRotationUnsupported
-    );
+    assert_eq!(outcome, ProductionRemoteSignerOutcome::ValidatorSetRotationUnsupported);
     assert_eq!(backend.transport.call_count(), 0);
 }
 
@@ -1025,15 +704,9 @@ fn b29_policy_change_kind_unsupported() {
     let env = TrustBundleEnvironment::Devnet;
     let mut spec = request_spec(env);
     spec.request_kind = ProductionRemoteSignerRequestKind::PolicyChange;
-    let backend = loopback_backend(
-        env,
-        ProductionRemoteSignerBackendPolicy::DevTestLoopbackEnabled,
-    );
+    let backend = loopback_backend(env, ProductionRemoteSignerBackendPolicy::DevTestLoopbackEnabled);
     let outcome = backend.evaluate_remote_signer_backend(&spec, &domain(env), &identity(env), NOW);
-    assert_eq!(
-        outcome,
-        ProductionRemoteSignerOutcome::PolicyChangeUnsupported
-    );
+    assert_eq!(outcome, ProductionRemoteSignerOutcome::PolicyChangeUnsupported);
 }
 
 #[test]
@@ -1041,15 +714,9 @@ fn b30_onchain_governance_proof_kind_unavailable() {
     let env = TrustBundleEnvironment::Devnet;
     let mut spec = request_spec(env);
     spec.request_kind = ProductionRemoteSignerRequestKind::OnChainGovernanceProofVerification;
-    let backend = loopback_backend(
-        env,
-        ProductionRemoteSignerBackendPolicy::DevTestLoopbackEnabled,
-    );
+    let backend = loopback_backend(env, ProductionRemoteSignerBackendPolicy::DevTestLoopbackEnabled);
     let outcome = backend.evaluate_remote_signer_backend(&spec, &domain(env), &identity(env), NOW);
-    assert_eq!(
-        outcome,
-        ProductionRemoteSignerOutcome::GovernanceVerifierUnavailable
-    );
+    assert_eq!(outcome, ProductionRemoteSignerOutcome::GovernanceVerifierUnavailable);
 }
 
 #[test]
@@ -1057,37 +724,21 @@ fn b31_malformed_spec_fails_closed() {
     let env = TrustBundleEnvironment::Devnet;
     let mut spec = request_spec(env);
     spec.chain_id = String::new();
-    let backend = loopback_backend(
-        env,
-        ProductionRemoteSignerBackendPolicy::DevTestLoopbackEnabled,
-    );
+    let backend = loopback_backend(env, ProductionRemoteSignerBackendPolicy::DevTestLoopbackEnabled);
     let outcome = backend.evaluate_remote_signer_backend(&spec, &domain(env), &identity(env), NOW);
-    assert!(
-        matches!(
-            outcome,
-            ProductionRemoteSignerOutcome::AmbiguousFailClosed { .. }
-        ),
-        "got {outcome:?}"
-    );
+    assert!(matches!(outcome, ProductionRemoteSignerOutcome::AmbiguousFailClosed { .. }), "got {outcome:?}");
     assert_eq!(backend.transport.call_count(), 0);
 }
 
 #[test]
 fn b32_stale_response_nonce_replay_rejected() {
     let env = TrustBundleEnvironment::Devnet;
-    let backend = loopback_backend(
-        env,
-        ProductionRemoteSignerBackendPolicy::DevTestLoopbackEnabled,
-    );
+    let backend = loopback_backend(env, ProductionRemoteSignerBackendPolicy::DevTestLoopbackEnabled);
     let submitted = valid_submission(env);
     let mut spec = request_spec(env);
     spec.response_nonce = "different-response-nonce".to_string();
-    let outcome =
-        backend.verify_remote_signer_response(&spec, &submitted, &domain(env), &identity(env), NOW);
-    assert_eq!(
-        outcome,
-        ProductionRemoteSignerOutcome::RemoteSignerReplayRejected
-    );
+    let outcome = backend.verify_remote_signer_response(&spec, &submitted, &domain(env), &identity(env), NOW);
+    assert_eq!(outcome, ProductionRemoteSignerOutcome::RemoteSignerReplayRejected);
 }
 
 // ===========================================================================
@@ -1100,28 +751,15 @@ fn c01_mainnet_not_satisfied_by_local_operator_material() {
     // refused before any transport call.
     let env = TrustBundleEnvironment::Mainnet;
     let backend = loopback_backend(env, ProductionRemoteSignerBackendPolicy::ProductionRequired);
-    let outcome = backend.evaluate_remote_signer_backend(
-        &request_spec(env),
-        &domain(env),
-        &identity(env),
-        NOW,
-    );
+    let outcome = backend.evaluate_remote_signer_backend(&request_spec(env), &domain(env), &identity(env), NOW);
     assert_eq!(outcome, ProductionRemoteSignerOutcome::MainNetRefused);
 }
 
 #[test]
 fn c02_mainnet_not_satisfied_by_fixture_loopback_signer() {
     let env = TrustBundleEnvironment::Mainnet;
-    let backend = loopback_backend(
-        env,
-        ProductionRemoteSignerBackendPolicy::DevTestLoopbackEnabled,
-    );
-    let outcome = backend.evaluate_remote_signer_backend(
-        &request_spec(env),
-        &domain(env),
-        &identity(env),
-        NOW,
-    );
+    let backend = loopback_backend(env, ProductionRemoteSignerBackendPolicy::DevTestLoopbackEnabled);
+    let outcome = backend.evaluate_remote_signer_backend(&request_spec(env), &domain(env), &identity(env), NOW);
     assert_eq!(outcome, ProductionRemoteSignerOutcome::MainNetRefused);
     assert!(production_remote_signer_backend_mainnet_refuses_fixture_material());
 }
@@ -1129,20 +767,10 @@ fn c02_mainnet_not_satisfied_by_fixture_loopback_signer() {
 #[test]
 fn c03_mainnet_production_required_is_unavailable() {
     let env = TrustBundleEnvironment::Mainnet;
-    let backend = loopback_backend(
-        env,
-        ProductionRemoteSignerBackendPolicy::MainnetProductionRequired,
-    );
-    let outcome = backend.evaluate_remote_signer_backend(
-        &request_spec(env),
-        &domain(env),
-        &identity(env),
-        NOW,
-    );
-    assert_eq!(
-        outcome,
-        ProductionRemoteSignerOutcome::MainNetProductionAuthorityUnavailable
-    );
+    let backend =
+        loopback_backend(env, ProductionRemoteSignerBackendPolicy::MainnetProductionRequired);
+    let outcome = backend.evaluate_remote_signer_backend(&request_spec(env), &domain(env), &identity(env), NOW);
+    assert_eq!(outcome, ProductionRemoteSignerOutcome::MainNetProductionAuthorityUnavailable);
 }
 
 #[test]
@@ -1151,16 +779,8 @@ fn c04_production_required_devnet_unavailable_no_fallback() {
     // it must NOT fall back to the fixture loopback transport.
     let env = TrustBundleEnvironment::Devnet;
     let backend = loopback_backend(env, ProductionRemoteSignerBackendPolicy::ProductionRequired);
-    let outcome = backend.evaluate_remote_signer_backend(
-        &request_spec(env),
-        &domain(env),
-        &identity(env),
-        NOW,
-    );
-    assert_eq!(
-        outcome,
-        ProductionRemoteSignerOutcome::RemoteSignerUnavailable
-    );
+    let outcome = backend.evaluate_remote_signer_backend(&request_spec(env), &domain(env), &identity(env), NOW);
+    assert_eq!(outcome, ProductionRemoteSignerOutcome::RemoteSignerUnavailable);
     assert_eq!(backend.transport.call_count(), 0);
     assert!(production_remote_signer_backend_never_falls_back());
 }
@@ -1169,12 +789,7 @@ fn c04_production_required_devnet_unavailable_no_fallback() {
 fn c05_production_unavailable_records_no_mutation() {
     let env = TrustBundleEnvironment::Devnet;
     let backend = loopback_backend(env, ProductionRemoteSignerBackendPolicy::ProductionRequired);
-    let outcome = backend.evaluate_remote_signer_backend(
-        &request_spec(env),
-        &domain(env),
-        &identity(env),
-        NOW,
-    );
+    let outcome = backend.evaluate_remote_signer_backend(&request_spec(env), &domain(env), &identity(env), NOW);
     assert!(outcome.is_non_mutating());
     assert!(!outcome.is_accept());
 }
@@ -1189,12 +804,7 @@ fn c06_mainnet_cannot_be_satisfied_by_peer_majority() {
     ] {
         let env = TrustBundleEnvironment::Mainnet;
         let backend = loopback_backend(env, policy);
-        let outcome = backend.evaluate_remote_signer_backend(
-            &request_spec(env),
-            &domain(env),
-            &identity(env),
-            NOW,
-        );
+        let outcome = backend.evaluate_remote_signer_backend(&request_spec(env), &domain(env), &identity(env), NOW);
         assert_eq!(outcome, ProductionRemoteSignerOutcome::MainNetRefused);
     }
 }
@@ -1206,29 +816,13 @@ fn c06_mainnet_cannot_be_satisfied_by_peer_majority() {
 #[test]
 fn d01_every_reject_is_non_mutating() {
     let env = TrustBundleEnvironment::Devnet;
-    let backend = loopback_backend(
-        env,
-        ProductionRemoteSignerBackendPolicy::DevTestLoopbackEnabled,
-    );
+    let backend = loopback_backend(env, ProductionRemoteSignerBackendPolicy::DevTestLoopbackEnabled);
     // A representative set of rejects.
     let disabled = loopback_backend(env, ProductionRemoteSignerBackendPolicy::Disabled)
         .evaluate_remote_signer_backend(&request_spec(env), &domain(env), &identity(env), NOW);
-    let mainnet = loopback_backend(
-        TrustBundleEnvironment::Mainnet,
-        ProductionRemoteSignerBackendPolicy::DevTestLoopbackEnabled,
-    )
-    .evaluate_remote_signer_backend(
-        &request_spec(TrustBundleEnvironment::Mainnet),
-        &domain(TrustBundleEnvironment::Mainnet),
-        &identity(TrustBundleEnvironment::Mainnet),
-        NOW,
-    );
-    let accept = backend.evaluate_remote_signer_backend(
-        &request_spec(env),
-        &domain(env),
-        &identity(env),
-        NOW,
-    );
+    let mainnet = loopback_backend(TrustBundleEnvironment::Mainnet, ProductionRemoteSignerBackendPolicy::DevTestLoopbackEnabled)
+        .evaluate_remote_signer_backend(&request_spec(TrustBundleEnvironment::Mainnet), &domain(TrustBundleEnvironment::Mainnet), &identity(TrustBundleEnvironment::Mainnet), NOW);
+    let accept = backend.evaluate_remote_signer_backend(&request_spec(env), &domain(env), &identity(env), NOW);
     for o in [disabled, mainnet, accept] {
         assert!(o.is_non_mutating());
     }
@@ -1245,12 +839,7 @@ fn d02_non_mutation_scope_helpers_hold() {
 fn d03_disabled_never_touches_transport() {
     let env = TrustBundleEnvironment::Devnet;
     let backend = loopback_backend(env, ProductionRemoteSignerBackendPolicy::Disabled);
-    let _ = backend.evaluate_remote_signer_backend(
-        &request_spec(env),
-        &domain(env),
-        &identity(env),
-        NOW,
-    );
+    let _ = backend.evaluate_remote_signer_backend(&request_spec(env), &domain(env), &identity(env), NOW);
     let _ = backend.submit_remote_signing_request(&request_spec(env), &domain(env));
     let _ = backend.build_request_envelope(&request_spec(env), &domain(env));
     assert_eq!(backend.transport.call_count(), 0);
@@ -1261,16 +850,8 @@ fn d04_accept_is_evidence_only_not_authorizing_beyond_signer() {
     // Acceptance carries only signer id / environment / request id /
     // transcript — no mutation payload, no apply.
     let env = TrustBundleEnvironment::Devnet;
-    let backend = loopback_backend(
-        env,
-        ProductionRemoteSignerBackendPolicy::DevTestLoopbackEnabled,
-    );
-    let outcome = backend.evaluate_remote_signer_backend(
-        &request_spec(env),
-        &domain(env),
-        &identity(env),
-        NOW,
-    );
+    let backend = loopback_backend(env, ProductionRemoteSignerBackendPolicy::DevTestLoopbackEnabled);
+    let outcome = backend.evaluate_remote_signer_backend(&request_spec(env), &domain(env), &identity(env), NOW);
     match outcome {
         ProductionRemoteSignerOutcome::RemoteSignerAccepted { environment, .. } => {
             assert_eq!(environment, TrustBundleEnvironment::Devnet);
@@ -1286,60 +867,39 @@ fn d04_accept_is_evidence_only_not_authorizing_beyond_signer() {
 #[test]
 fn e01_no_prior_request_recovery() {
     let env = TrustBundleEnvironment::Devnet;
-    let backend = loopback_backend(
-        env,
-        ProductionRemoteSignerBackendPolicy::DevTestLoopbackEnabled,
-    );
+    let backend = loopback_backend(env, ProductionRemoteSignerBackendPolicy::DevTestLoopbackEnabled);
     let current = valid_submission(env);
     let outcome = backend.recover_remote_signer_request_window(None, &current);
-    assert_eq!(
-        outcome,
-        ProductionRemoteSignerRecoveryOutcome::NoPriorRequest
-    );
+    assert_eq!(outcome, ProductionRemoteSignerRecoveryOutcome::NoPriorRequest);
 }
 
 #[test]
 fn e02_idempotent_replay_of_identical_request() {
     let env = TrustBundleEnvironment::Devnet;
-    let backend = loopback_backend(
-        env,
-        ProductionRemoteSignerBackendPolicy::DevTestLoopbackEnabled,
-    );
+    let backend = loopback_backend(env, ProductionRemoteSignerBackendPolicy::DevTestLoopbackEnabled);
     let a = valid_submission(env);
     let b = valid_submission(env);
     let outcome = backend.recover_remote_signer_request_window(Some(&a), &b);
-    assert_eq!(
-        outcome,
-        ProductionRemoteSignerRecoveryOutcome::IdempotentReplayOfSameRequest
-    );
+    assert_eq!(outcome, ProductionRemoteSignerRecoveryOutcome::IdempotentReplayOfSameRequest);
     assert!(outcome.is_idempotent());
 }
 
 #[test]
 fn e03_same_request_id_different_transcript_fails_closed() {
     let env = TrustBundleEnvironment::Devnet;
-    let backend = loopback_backend(
-        env,
-        ProductionRemoteSignerBackendPolicy::DevTestLoopbackEnabled,
-    );
+    let backend = loopback_backend(env, ProductionRemoteSignerBackendPolicy::DevTestLoopbackEnabled);
     let a = valid_submission(env);
     let mut b = valid_submission(env);
     // Keep the same request id but mutate the request envelope framing.
     b.request_env.payload_digest = "different-payload".to_string();
     let outcome = backend.recover_remote_signer_request_window(Some(&a), &b);
-    assert_eq!(
-        outcome,
-        ProductionRemoteSignerRecoveryOutcome::ConflictingRequestForSameId
-    );
+    assert_eq!(outcome, ProductionRemoteSignerRecoveryOutcome::ConflictingRequestForSameId);
 }
 
 #[test]
 fn e04_same_request_different_response_commitment_fails_closed() {
     let env = TrustBundleEnvironment::Devnet;
-    let backend = loopback_backend(
-        env,
-        ProductionRemoteSignerBackendPolicy::DevTestLoopbackEnabled,
-    );
+    let backend = loopback_backend(env, ProductionRemoteSignerBackendPolicy::DevTestLoopbackEnabled);
     let a = valid_submission(env);
     let mut b = valid_submission(env);
     b.response_env.inner_response.signature_commitment = "tampered-commitment".to_string();
@@ -1359,21 +919,9 @@ fn e05_retry_then_success_is_idempotent_over_attempts() {
         vec![Err(ProductionRemoteSignerError::Timeout)],
         Ok(good),
     );
-    let backend = mock_backend(
-        env,
-        ProductionRemoteSignerBackendPolicy::DevTestLoopbackEnabled,
-        mock,
-    );
-    let outcome = backend.evaluate_remote_signer_backend(
-        &request_spec(env),
-        &domain(env),
-        &identity(env),
-        NOW,
-    );
-    assert!(
-        outcome.is_accept(),
-        "expected accept after retry, got {outcome:?}"
-    );
+    let backend = mock_backend(env, ProductionRemoteSignerBackendPolicy::DevTestLoopbackEnabled, mock);
+    let outcome = backend.evaluate_remote_signer_backend(&request_spec(env), &domain(env), &identity(env), NOW);
+    assert!(outcome.is_accept(), "expected accept after retry, got {outcome:?}");
     assert_eq!(backend.transport.call_count(), 2);
 }
 
@@ -1391,22 +939,10 @@ fn e06_retry_budget_exhausted_fails_closed() {
         ],
         Err(ProductionRemoteSignerError::Timeout),
     );
-    let backend = mock_backend(
-        env,
-        ProductionRemoteSignerBackendPolicy::DevTestLoopbackEnabled,
-        mock,
-    );
-    let outcome = backend.evaluate_remote_signer_backend(
-        &request_spec(env),
-        &domain(env),
-        &identity(env),
-        NOW,
-    );
+    let backend = mock_backend(env, ProductionRemoteSignerBackendPolicy::DevTestLoopbackEnabled, mock);
+    let outcome = backend.evaluate_remote_signer_backend(&request_spec(env), &domain(env), &identity(env), NOW);
     assert_eq!(outcome, ProductionRemoteSignerOutcome::RemoteSignerTimeout);
-    assert_eq!(
-        backend.transport.call_count(),
-        TransportTimeoutRetryPolicy::default().max_attempts
-    );
+    assert_eq!(backend.transport.call_count(), TransportTimeoutRetryPolicy::default().max_attempts);
 }
 
 #[test]
@@ -1416,21 +952,9 @@ fn e07_terminal_error_not_retried() {
         vec![Err(ProductionRemoteSignerError::MalformedResponse)],
         Ok(valid_response_env(env)),
     );
-    let backend = mock_backend(
-        env,
-        ProductionRemoteSignerBackendPolicy::DevTestLoopbackEnabled,
-        mock,
-    );
-    let outcome = backend.evaluate_remote_signer_backend(
-        &request_spec(env),
-        &domain(env),
-        &identity(env),
-        NOW,
-    );
-    assert_eq!(
-        outcome,
-        ProductionRemoteSignerOutcome::RemoteSignerMalformedResponse
-    );
+    let backend = mock_backend(env, ProductionRemoteSignerBackendPolicy::DevTestLoopbackEnabled, mock);
+    let outcome = backend.evaluate_remote_signer_backend(&request_spec(env), &domain(env), &identity(env), NOW);
+    assert_eq!(outcome, ProductionRemoteSignerOutcome::RemoteSignerMalformedResponse);
     assert_eq!(backend.transport.call_count(), 1);
 }
 
@@ -1462,22 +986,10 @@ fn f04_backend_is_non_mutating_no_run070() {
 fn f05_backend_never_falls_back_to_fixture_when_production() {
     assert!(production_remote_signer_backend_never_falls_back());
     // A production policy never produces an accept in Run 293.
-    for env in [
-        TrustBundleEnvironment::Devnet,
-        TrustBundleEnvironment::Testnet,
-    ] {
-        let backend =
-            loopback_backend(env, ProductionRemoteSignerBackendPolicy::ProductionRequired);
-        let outcome = backend.evaluate_remote_signer_backend(
-            &request_spec(env),
-            &domain(env),
-            &identity(env),
-            NOW,
-        );
-        assert!(
-            !outcome.is_accept(),
-            "production must not accept in Run 293, got {outcome:?}"
-        );
+    for env in [TrustBundleEnvironment::Devnet, TrustBundleEnvironment::Testnet] {
+        let backend = loopback_backend(env, ProductionRemoteSignerBackendPolicy::ProductionRequired);
+        let outcome = backend.evaluate_remote_signer_backend(&request_spec(env), &domain(env), &identity(env), NOW);
+        assert!(!outcome.is_accept(), "production must not accept in Run 293, got {outcome:?}");
     }
 }
 
@@ -1486,13 +998,6 @@ fn f06_transcript_digest_binds_durable_replay_record_digest() {
     // Changing the durable replay record digest changes the backend
     // transcript digest — proving Run 291 composition is representable.
     let a = production_remote_signer_backend_transcript_digest(1, "rid", "req", "resp", "tt", None);
-    let b = production_remote_signer_backend_transcript_digest(
-        1,
-        "rid",
-        "req",
-        "resp",
-        "tt",
-        Some(DURABLE_REPLAY_DIGEST),
-    );
+    let b = production_remote_signer_backend_transcript_digest(1, "rid", "req", "resp", "tt", Some(DURABLE_REPLAY_DIGEST));
     assert_ne!(a, b);
 }

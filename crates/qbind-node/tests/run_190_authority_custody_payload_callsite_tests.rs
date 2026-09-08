@@ -70,11 +70,15 @@ const ROOT_FP: &str = "1111111111111111111111111111111111111111";
 const OTHER_ROOT_FP: &str = "9999999999999999999999999999999999999999";
 const CHAIN_ID: &str = "0000000000000001";
 const OTHER_CHAIN: &str = "00000000000000ff";
-const GENESIS_HASH: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
-const OTHER_GENESIS: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+const GENESIS_HASH: &str =
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+const OTHER_GENESIS: &str =
+    "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 const DIGEST_2: &str = "2222222222222222222222222222222222222222222222222222222222222222";
-const DIGEST_OTHER: &str = "3333333333333333333333333333333333333333333333333333333333333333";
-const PRIOR_DIGEST: &str = "1111111111111111111111111111111111111111111111111111111111111111";
+const DIGEST_OTHER: &str =
+    "3333333333333333333333333333333333333333333333333333333333333333";
+const PRIOR_DIGEST: &str =
+    "1111111111111111111111111111111111111111111111111111111111111111";
 const CUSTODY_ATTEST_DIGEST: &str = "custody-att-digest-190";
 const CUSTODY_KEY_ID: &str = "custody-key-id-190";
 const OTHER_CUSTODY_KEY_ID: &str = "custody-key-id-other";
@@ -176,7 +180,9 @@ fn good_attestation(
         chain_id: CHAIN_ID.to_string(),
         genesis_hash: GENESIS_HASH.to_string(),
         authority_root_fingerprint: ROOT_FP.to_string(),
-        bundle_signing_key_fingerprint: candidate.active_bundle_signing_key_fingerprint.clone(),
+        bundle_signing_key_fingerprint: candidate
+            .active_bundle_signing_key_fingerprint
+            .clone(),
         governance_authority_class: GovernanceAuthorityClass::GenesisBound,
         lifecycle_action: LocalLifecycleAction::Rotate,
         candidate_digest: DIGEST_2.to_string(),
@@ -221,10 +227,7 @@ fn sibling_value_for(att: &AuthorityCustodyAttestation) -> serde_json::Value {
 
 #[test]
 fn run_190_default_custody_policy_remains_disabled_fail_closed() {
-    assert_eq!(
-        AuthorityCustodyPolicy::default(),
-        AuthorityCustodyPolicy::Disabled
-    );
+    assert_eq!(AuthorityCustodyPolicy::default(), AuthorityCustodyPolicy::Disabled);
 }
 
 #[test]
@@ -436,9 +439,7 @@ fn a2_devnet_fixture_custody_carried_through_reload_check_accepted() {
         route_loaded_authority_custody_attestation_to_reload_check_callsite_decision(&ctx, &loaded);
     assert!(outcome.is_accept());
     match outcome.callsite_outcome().unwrap() {
-        LifecycleGovernanceCustodyOutcome::Accepted {
-            custody_outcome, ..
-        } => assert!(matches!(
+        LifecycleGovernanceCustodyOutcome::Accepted { custody_outcome, .. } => assert!(matches!(
             custody_outcome,
             AuthorityCustodyValidationOutcome::AcceptedFixtureCustody { .. }
         )),
@@ -497,9 +498,7 @@ fn a4_devnet_local_operator_custody_accepted_under_devnet_local_policy() {
         route_loaded_authority_custody_attestation_to_reload_check_callsite_decision(&ctx, &loaded);
     assert!(outcome.is_accept());
     match outcome.callsite_outcome().unwrap() {
-        LifecycleGovernanceCustodyOutcome::Accepted {
-            custody_outcome, ..
-        } => assert!(matches!(
+        LifecycleGovernanceCustodyOutcome::Accepted { custody_outcome, .. } => assert!(matches!(
             custody_outcome,
             AuthorityCustodyValidationOutcome::AcceptedLocalOperatorCustody { .. }
         )),
@@ -651,9 +650,10 @@ fn a9_governance_proof_paths_compatible_under_custody_disabled() {
             Some(CUSTODY_KEY_ID),
             NOW,
         );
-        let outcome = route_loaded_authority_custody_attestation_to_reload_check_callsite_decision(
-            &ctx, &loaded,
-        );
+        let outcome =
+            route_loaded_authority_custody_attestation_to_reload_check_callsite_decision(
+                &ctx, &loaded,
+            );
         assert_eq!(
             outcome,
             AuthorityCustodyPayloadCarryingDecisionOutcome::NoCustodyAttestationSupplied,
@@ -698,13 +698,14 @@ fn a10_kms_hsm_remote_signer_placeholders_reach_validator_and_return_unavailable
             &domain,
             AuthorityCustodyPolicy::ProductionCustodyRequired,
         );
-        let outcome = route_loaded_authority_custody_attestation_to_reload_check_callsite_decision(
-            &ctx, &loaded,
-        );
+        let outcome =
+            route_loaded_authority_custody_attestation_to_reload_check_callsite_decision(
+                &ctx, &loaded,
+            );
         let custody = match outcome.callsite_outcome().unwrap() {
-            LifecycleGovernanceCustodyOutcome::CustodyRejected {
-                custody_outcome, ..
-            } => custody_outcome,
+            LifecycleGovernanceCustodyOutcome::CustodyRejected { custody_outcome, .. } => {
+                custody_outcome
+            }
             other => panic!("expected custody-rejected, got {:?}", other),
         };
         assert_eq!(custody, &expected, "class {:?}", class);
@@ -731,9 +732,10 @@ fn r1_absent_custody_under_required_policy_fails_closed() {
         AuthorityCustodyPolicy::MainnetProductionCustodyRequired,
     ] {
         let ctx = devnet_ctx(Some(&persisted), &candidate, &domain, policy);
-        let outcome = route_loaded_authority_custody_attestation_to_reload_check_callsite_decision(
-            &ctx, &loaded,
-        );
+        let outcome =
+            route_loaded_authority_custody_attestation_to_reload_check_callsite_decision(
+                &ctx, &loaded,
+            );
         assert!(
             outcome.is_required_but_absent(),
             "policy {:?} must require custody",
@@ -754,10 +756,11 @@ fn r2_malformed_custody_payload_rejected_on_every_surface() {
     let candidate = rotate_candidate(TrustBundleEnvironment::Devnet);
     let persisted = prior_versioned(TrustBundleEnvironment::Devnet);
     let domain = devnet_domain();
-    let loaded =
-        AuthorityCustodyLoadStatus::Malformed(AuthorityCustodyAttestationPayloadParseError::Json {
+    let loaded = AuthorityCustodyLoadStatus::Malformed(
+        AuthorityCustodyAttestationPayloadParseError::Json {
             error: "synthetic".to_string(),
-        });
+        },
+    );
     let ctx = devnet_ctx(
         Some(&persisted),
         &candidate,
@@ -781,10 +784,7 @@ fn r2_malformed_custody_payload_rejected_on_every_surface() {
             &ctx, &loaded,
         ),
     ] {
-        assert!(
-            outcome.is_malformed_payload(),
-            "expected malformed-payload reject"
-        );
+        assert!(outcome.is_malformed_payload(), "expected malformed-payload reject");
         assert!(outcome.is_reject());
         assert!(!outcome.is_accept());
     }
@@ -815,9 +815,9 @@ fn r3_fixture_custody_rejected_under_production_custody_required() {
         route_loaded_authority_custody_attestation_to_reload_check_callsite_decision(&ctx, &loaded);
     assert!(!outcome.is_accept());
     let custody = match outcome.callsite_outcome().unwrap() {
-        LifecycleGovernanceCustodyOutcome::CustodyRejected {
-            custody_outcome, ..
-        } => custody_outcome,
+        LifecycleGovernanceCustodyOutcome::CustodyRejected { custody_outcome, .. } => {
+            custody_outcome
+        }
         other => panic!("expected custody-rejected, got {:?}", other),
     };
     assert!(custody.is_production_unavailable());
@@ -847,9 +847,9 @@ fn r4_local_operator_custody_rejected_under_production_custody_required() {
     let outcome =
         route_loaded_authority_custody_attestation_to_reload_check_callsite_decision(&ctx, &loaded);
     let custody = match outcome.callsite_outcome().unwrap() {
-        LifecycleGovernanceCustodyOutcome::CustodyRejected {
-            custody_outcome, ..
-        } => custody_outcome,
+        LifecycleGovernanceCustodyOutcome::CustodyRejected { custody_outcome, .. } => {
+            custody_outcome
+        }
         other => panic!("expected custody-rejected, got {:?}", other),
     };
     assert!(custody.is_production_unavailable());
@@ -939,9 +939,9 @@ fn r7_kms_placeholder_rejected_as_unavailable() {
     let custody = outcome
         .callsite_outcome()
         .and_then(|o| match o {
-            LifecycleGovernanceCustodyOutcome::CustodyRejected {
-                custody_outcome, ..
-            } => Some(custody_outcome),
+            LifecycleGovernanceCustodyOutcome::CustodyRejected { custody_outcome, .. } => {
+                Some(custody_outcome)
+            }
             _ => None,
         })
         .expect("custody-rejected expected");
@@ -968,9 +968,9 @@ fn r8_hsm_placeholder_rejected_as_unavailable() {
     let outcome =
         route_loaded_authority_custody_attestation_to_reload_check_callsite_decision(&ctx, &loaded);
     let custody = match outcome.callsite_outcome().unwrap() {
-        LifecycleGovernanceCustodyOutcome::CustodyRejected {
-            custody_outcome, ..
-        } => custody_outcome,
+        LifecycleGovernanceCustodyOutcome::CustodyRejected { custody_outcome, .. } => {
+            custody_outcome
+        }
         _ => panic!("expected custody-rejected"),
     };
     assert_eq!(custody, &AuthorityCustodyValidationOutcome::HsmUnavailable);
@@ -996,9 +996,9 @@ fn r9_remote_signer_placeholder_rejected_as_unavailable() {
     let outcome =
         route_loaded_authority_custody_attestation_to_reload_check_callsite_decision(&ctx, &loaded);
     let custody = match outcome.callsite_outcome().unwrap() {
-        LifecycleGovernanceCustodyOutcome::CustodyRejected {
-            custody_outcome, ..
-        } => custody_outcome,
+        LifecycleGovernanceCustodyOutcome::CustodyRejected { custody_outcome, .. } => {
+            custody_outcome
+        }
         _ => panic!("expected custody-rejected"),
     };
     assert_eq!(
@@ -1032,9 +1032,9 @@ fn r10_unknown_custody_class_rejected() {
     let outcome =
         route_loaded_authority_custody_attestation_to_reload_check_callsite_decision(&ctx, &loaded);
     let custody = match outcome.callsite_outcome().unwrap() {
-        LifecycleGovernanceCustodyOutcome::CustodyRejected {
-            custody_outcome, ..
-        } => custody_outcome,
+        LifecycleGovernanceCustodyOutcome::CustodyRejected { custody_outcome, .. } => {
+            custody_outcome
+        }
         _ => panic!("expected custody-rejected"),
     };
     assert_eq!(
@@ -1302,9 +1302,9 @@ fn r26_lifecycle_governance_valid_but_custody_placeholder_unavailable_rejected()
     let outcome =
         route_loaded_authority_custody_attestation_to_reload_check_callsite_decision(&ctx, &loaded);
     let custody = match outcome.callsite_outcome().unwrap() {
-        LifecycleGovernanceCustodyOutcome::CustodyRejected {
-            custody_outcome, ..
-        } => custody_outcome,
+        LifecycleGovernanceCustodyOutcome::CustodyRejected { custody_outcome, .. } => {
+            custody_outcome
+        }
         _ => panic!("expected custody-rejected"),
     };
     assert!(custody.is_production_unavailable());
@@ -1364,10 +1364,11 @@ fn r29_validation_only_rejection_is_pure() {
     let candidate = rotate_candidate(TrustBundleEnvironment::Devnet);
     let persisted = prior_versioned(TrustBundleEnvironment::Devnet);
     let domain = devnet_domain();
-    let loaded =
-        AuthorityCustodyLoadStatus::Malformed(AuthorityCustodyAttestationPayloadParseError::Json {
+    let loaded = AuthorityCustodyLoadStatus::Malformed(
+        AuthorityCustodyAttestationPayloadParseError::Json {
             error: "synthetic".to_string(),
-        });
+        },
+    );
     let ctx = devnet_ctx(
         Some(&persisted),
         &candidate,
@@ -1393,10 +1394,7 @@ fn r29_validation_only_rejection_is_pure() {
     }
     // Inputs must remain bit-for-bit unchanged (the routing helpers
     // borrow immutably).
-    assert_eq!(
-        candidate.latest_ratification_v2_digest,
-        before_candidate_digest
-    );
+    assert_eq!(candidate.latest_ratification_v2_digest, before_candidate_digest);
     if let PersistentAuthorityStateRecordVersioned::V2(v2) = &persisted {
         assert_eq!(v2.latest_authority_domain_sequence, before_persisted_seq);
     }
@@ -1451,10 +1449,11 @@ fn r31_invalid_live_0x05_custody_is_not_staged_or_applied() {
     let candidate = rotate_candidate(TrustBundleEnvironment::Devnet);
     let persisted = prior_versioned(TrustBundleEnvironment::Devnet);
     let domain = devnet_domain();
-    let loaded_malformed =
-        AuthorityCustodyLoadStatus::Malformed(AuthorityCustodyAttestationPayloadParseError::Json {
+    let loaded_malformed = AuthorityCustodyLoadStatus::Malformed(
+        AuthorityCustodyAttestationPayloadParseError::Json {
             error: "synthetic-live-0x05".to_string(),
-        });
+        },
+    );
     let ctx = devnet_ctx(
         Some(&persisted),
         &candidate,
@@ -1477,10 +1476,9 @@ fn r31_invalid_live_0x05_custody_is_not_staged_or_applied() {
     );
     bad_att.candidate_digest = DIGEST_OTHER.to_string();
     let loaded = AuthorityCustodyLoadStatus::Available(bad_att);
-    let outcome2 =
-        route_loaded_authority_custody_attestation_to_live_inbound_0x05_callsite_decision(
-            &ctx, &loaded,
-        );
+    let outcome2 = route_loaded_authority_custody_attestation_to_live_inbound_0x05_callsite_decision(
+        &ctx, &loaded,
+    );
     assert!(!outcome2.is_accept());
 }
 
@@ -1491,16 +1489,12 @@ fn r31_invalid_live_0x05_custody_is_not_staged_or_applied() {
 
 #[test]
 fn r32_mainnet_peer_driven_apply_refused_even_with_kms_hsm_custody() {
-    assert!(
-        mainnet_peer_driven_apply_remains_refused_under_custody_boundary(
-            TrustBundleEnvironment::Mainnet
-        )
-    );
-    assert!(
-        mainnet_peer_driven_apply_remains_refused_under_custody_payload_carrying(
-            TrustBundleEnvironment::Mainnet
-        )
-    );
+    assert!(mainnet_peer_driven_apply_remains_refused_under_custody_boundary(
+        TrustBundleEnvironment::Mainnet
+    ));
+    assert!(mainnet_peer_driven_apply_remains_refused_under_custody_payload_carrying(
+        TrustBundleEnvironment::Mainnet
+    ));
     let candidate = rotate_candidate(TrustBundleEnvironment::Mainnet);
     let persisted = prior_versioned(TrustBundleEnvironment::Mainnet);
     let domain = mainnet_domain();
@@ -1605,8 +1599,5 @@ fn source_reachability_custody_metadata_reaches_production_callsite_context() {
     );
     let outcome =
         route_loaded_authority_custody_attestation_to_reload_check_callsite_decision(&ctx, &loaded);
-    assert!(
-        outcome.callsite_outcome().is_some(),
-        "validator must be reached"
-    );
+    assert!(outcome.callsite_outcome().is_some(), "validator must be reached");
 }

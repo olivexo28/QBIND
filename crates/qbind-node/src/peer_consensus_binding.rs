@@ -77,7 +77,10 @@ impl AuthenticatedConsensusOrigin {
     /// secrets, or paths.
     pub fn node_id_prefix(&self) -> String {
         let b = self.node_id.as_bytes();
-        format!("{:02x}{:02x}{:02x}{:02x}", b[0], b[1], b[2], b[3])
+        format!(
+            "{:02x}{:02x}{:02x}{:02x}",
+            b[0], b[1], b[2], b[3]
+        )
     }
 }
 

@@ -173,8 +173,8 @@ fn main() {
 
     // Scenario 4: MainNet is refused (no production abuse/DoS policy).
     {
-        let mainnet =
-            AbuseDosConfig::compatibility_default().with_environment(NetworkEnvironment::Mainnet);
+        let mainnet = AbuseDosConfig::compatibility_default()
+            .with_environment(NetworkEnvironment::Mainnet);
         let result = PublicDevnetAbuseDosRuntimeConfig::from_config(mainnet);
         let ok = result.is_err();
         scenarios.push(Scenario {
@@ -209,7 +209,8 @@ fn main() {
                 metrics.connection_rate_drop_total()
             ),
             matched: ok,
-            detail: "The drop counter is bumped only on ConnectionRateLimited.".to_string(),
+            detail: "The drop counter is bumped only on ConnectionRateLimited."
+                .to_string(),
         });
     }
 

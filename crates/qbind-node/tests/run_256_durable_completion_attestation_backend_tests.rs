@@ -52,8 +52,7 @@ use qbind_node::pqc_governance_durable_completion_attestation_backend::{
     DurableCompletionAttestationBackendKind, DurableCompletionAttestationBackendLedger,
     DurableCompletionAttestationBackendOutcome, DurableCompletionAttestationBackendPolicy,
     DurableCompletionAttestationBackendRequest, DurableCompletionAttestationBackendRequestIntent,
-    DurableCompletionAttestationBackendWindow,
-    ExternalPublicationDurableCompletionAttestationBackend,
+    DurableCompletionAttestationBackendWindow, ExternalPublicationDurableCompletionAttestationBackend,
     FixtureDurableCompletionAttestationBackend, GovernanceDurableCompletionAttestationBackend,
     MainNetDurableCompletionAttestationBackend, ProductionDurableCompletionAttestationBackend,
 };
@@ -723,7 +722,8 @@ fn wrong_genesis_rejected_before_backend_invocation() {
 #[test]
 fn wrong_governance_surface_rejected_before_backend_invocation() {
     assert_binding_mismatch_rejected(|c| {
-        c.expectations.expected_governance_surface = GovernanceExecutionRuntimeSurface::ReloadCheck;
+        c.expectations.expected_governance_surface =
+            GovernanceExecutionRuntimeSurface::ReloadCheck;
     });
 }
 
@@ -736,9 +736,7 @@ fn wrong_mutation_surface_rejected_before_backend_invocation() {
 
 /// Helper: a request-identity mismatch where the request differs from the
 /// expectations (binding passes, but the backend rejects before record).
-fn assert_request_mismatch_rejected(
-    mut mutate: impl FnMut(&mut DurableCompletionAttestationBackendRequest),
-) {
+fn assert_request_mismatch_rejected(mut mutate: impl FnMut(&mut DurableCompletionAttestationBackendRequest)) {
     let c = devnet_ctx();
     let mut input = c.attested();
     mutate(&mut input.request);
@@ -970,10 +968,8 @@ fn only_attested_creates_backend_request_intent() {
         project_attestation_outcome_to_backend_request(&Att::DurableCompletionAttested),
         Intent::CreateRequest
     );
-    assert!(
-        project_attestation_outcome_to_backend_request(&Att::DurableCompletionAttested)
-            .creates_request()
-    );
+    assert!(project_attestation_outcome_to_backend_request(&Att::DurableCompletionAttested)
+        .creates_request());
     assert_eq!(
         project_attestation_outcome_to_backend_request(
             &Att::DurableCompletionAttestationDuplicateIdempotent
@@ -981,10 +977,8 @@ fn only_attested_creates_backend_request_intent() {
         Intent::IdempotentOnly
     );
     // A non-attesting outcome never creates a request.
-    assert!(
-        !project_attestation_outcome_to_backend_request(&Att::LegacyBypassNoAttestation)
-            .creates_request()
-    );
+    assert!(!project_attestation_outcome_to_backend_request(&Att::LegacyBypassNoAttestation)
+        .creates_request());
 }
 
 // ===========================================================================
@@ -1042,11 +1036,7 @@ fn pre_attestation_windows_fail_closed_no_submission() {
         Window::AfterFinalizationRecordBeforeAttestationIntent,
         Window::AfterAttestationIntentBeforeAttestationRecord,
     ] {
-        assert_window(
-            w,
-            false,
-            Backend::AttestationDidNotAttestNoBackendSubmission,
-        );
+        assert_window(w, false, Backend::AttestationDidNotAttestNoBackendSubmission);
     }
 }
 
@@ -1217,9 +1207,10 @@ fn rollback_restores_backend_ledger_snapshot() {
     assert!(!snapshot.is_empty());
 
     // A faulted submission rolls back, leaving the prior snapshot intact.
-    let mut faulted = FixtureDurableCompletionAttestationBackend::with_fault(
-        DurableCompletionAttestationBackendFault::RolledBackNoSubmission,
-    );
+    let mut faulted =
+        FixtureDurableCompletionAttestationBackend::with_fault(
+            DurableCompletionAttestationBackendFault::RolledBackNoSubmission,
+        );
     let mut c2 = devnet_ctx();
     c2.request.backend_record_id = "second-record".to_string();
     c2.expectations.expected_backend_record_id = "second-record".to_string();
@@ -1259,23 +1250,15 @@ fn invariant_helpers_assert_fail_closed_contract() {
     assert!(durable_completion_attestation_backend_failed_record_never_submits());
     assert!(durable_completion_attestation_backend_rollback_never_submits());
     assert!(durable_completion_attestation_backend_ambiguous_window_fails_closed());
-    assert!(
-        durable_completion_attestation_backend_mainnet_peer_driven_apply_refused_first(
-            TrustBundleEnvironment::Mainnet
-        )
-    );
-    assert!(
-        !durable_completion_attestation_backend_mainnet_peer_driven_apply_refused_first(
-            TrustBundleEnvironment::Devnet
-        )
-    );
+    assert!(durable_completion_attestation_backend_mainnet_peer_driven_apply_refused_first(
+        TrustBundleEnvironment::Mainnet
+    ));
+    assert!(!durable_completion_attestation_backend_mainnet_peer_driven_apply_refused_first(
+        TrustBundleEnvironment::Devnet
+    ));
     assert!(durable_completion_attestation_backend_production_mainnet_unavailable());
     assert!(durable_completion_attestation_backend_validator_set_rotation_unsupported());
     assert!(durable_completion_attestation_backend_policy_change_unsupported());
-    assert!(
-        durable_completion_attestation_backend_local_operator_cannot_satisfy_mainnet_authority()
-    );
-    assert!(
-        durable_completion_attestation_backend_peer_majority_cannot_satisfy_mainnet_authority()
-    );
+    assert!(durable_completion_attestation_backend_local_operator_cannot_satisfy_mainnet_authority());
+    assert!(durable_completion_attestation_backend_peer_majority_cannot_satisfy_mainnet_authority());
 }

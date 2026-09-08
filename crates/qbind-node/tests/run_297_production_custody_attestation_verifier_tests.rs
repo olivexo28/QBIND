@@ -22,7 +22,8 @@ use qbind_node::pqc_authority_lifecycle::{
     AuthorityTrustDomain, LocalLifecycleAction, PQC_LIFECYCLE_SUITE_ML_DSA_44,
 };
 use qbind_node::pqc_production_custody_attestation_verifier::{
-    fixture_attestation_expected_proof, production_custody_attestation_decision_digest,
+    fixture_attestation_expected_proof,
+    production_custody_attestation_decision_digest,
     production_custody_attestation_transcript_digest,
     production_custody_attestation_verifier_default_is_disabled,
     production_custody_attestation_verifier_is_non_mutating,
@@ -46,10 +47,11 @@ use qbind_node::pqc_production_custody_attestation_verifier::{
     PRODUCTION_CUSTODY_ATTESTATION_PROTOCOL_VERSION,
 };
 use qbind_node::pqc_production_kms_hsm_custody_backend::{
-    FixtureHsmCustodyProvider, FixtureKmsCustodyProvider, GovernanceProductionKmsHsmCustodyBackend,
-    ProductionCustodyProviderKind, ProductionCustodyRequestKind, ProductionCustodyRequestSpec,
-    ProductionKmsHsmCustodyBackend, ProductionKmsHsmCustodyBackendConfig,
-    ProductionKmsHsmCustodyBackendPolicy, SubmittedCustodyRequest,
+    FixtureHsmCustodyProvider, FixtureKmsCustodyProvider,
+    GovernanceProductionKmsHsmCustodyBackend, ProductionCustodyProviderKind,
+    ProductionCustodyRequestKind, ProductionCustodyRequestSpec, ProductionKmsHsmCustodyBackend,
+    ProductionKmsHsmCustodyBackendConfig, ProductionKmsHsmCustodyBackendPolicy,
+    SubmittedCustodyRequest,
 };
 use qbind_node::pqc_trust_bundle::TrustBundleEnvironment;
 
@@ -229,7 +231,9 @@ fn challenge_for(request_id: &str) -> ProductionCustodyAttestationChallenge {
     }
 }
 
-fn binding_from(submitted: &SubmittedCustodyRequest) -> ProductionCustodyAttestationBinding {
+fn binding_from(
+    submitted: &SubmittedCustodyRequest,
+) -> ProductionCustodyAttestationBinding {
     ProductionCustodyAttestationBinding::from_submitted_request(
         submitted,
         SIGNER_ID,
@@ -423,11 +427,8 @@ fn a07_valid_fixture_binds_to_matching_custody_request_id() {
     let expectations = expectations_from(&evidence);
     let verifier =
         kms_verifier(ProductionCustodyAttestationVerifierPolicy::FixtureKmsAttestationAllowed);
-    let outcome = verifier.verify_custody_attestation(
-        &evidence,
-        &expectations,
-        &domain(TrustBundleEnvironment::Devnet),
-    );
+    let outcome =
+        verifier.verify_custody_attestation(&evidence, &expectations, &domain(TrustBundleEnvironment::Devnet));
     match outcome {
         ProductionCustodyAttestationOutcome::FixtureKmsAttestationVerified {
             custody_request_id,
@@ -607,10 +608,7 @@ fn a19_evaluate_produces_decision_with_bound_request_id() {
         kms_verifier(ProductionCustodyAttestationVerifierPolicy::FixtureKmsAttestationAllowed);
     let decision = verifier.evaluate_custody_attestation(&evidence, &expectations, &td);
     assert!(decision.is_verified());
-    assert_eq!(
-        decision.custody_request_id,
-        evidence.binding.custody_request_id
-    );
+    assert_eq!(decision.custody_request_id, evidence.binding.custody_request_id);
     assert!(!decision.transcript_digest.is_empty());
 }
 
@@ -699,10 +697,7 @@ fn b02_missing_attestation_evidence_rejected() {
 #[test]
 fn b03_malformed_attestation_rejected() {
     let out = kms_reject(
-        |e| {
-            e.certificate_proof_digest =
-                PRODUCTION_CUSTODY_ATTESTATION_INVALID_PROOF_SENTINEL.to_string()
-        },
+        |e| e.certificate_proof_digest = PRODUCTION_CUSTODY_ATTESTATION_INVALID_PROOF_SENTINEL.to_string(),
         |_| {},
     );
     assert_eq!(
@@ -713,10 +708,7 @@ fn b03_malformed_attestation_rejected() {
 
 #[test]
 fn b04_unsupported_attestation_class_rejected() {
-    let out = kms_reject(
-        |e| e.attestation_class = ProductionCustodyAttestationClass::Unknown,
-        |_| {},
-    );
+    let out = kms_reject(|e| e.attestation_class = ProductionCustodyAttestationClass::Unknown, |_| {});
     assert_eq!(
         out,
         ProductionCustodyAttestationOutcome::ProductionAttestationUnsupportedClass
@@ -731,9 +723,7 @@ fn b05_unsupported_protocol_version_rejected() {
     );
     assert_eq!(
         out,
-        ProductionCustodyAttestationOutcome::ProductionAttestationUnsupportedProtocol {
-            version: 99
-        }
+        ProductionCustodyAttestationOutcome::ProductionAttestationUnsupportedProtocol { version: 99 }
     );
 }
 
@@ -751,7 +741,10 @@ fn b06_missing_trust_root_rejected() {
 
 #[test]
 fn b07_wrong_trust_root_rejected() {
-    let out = kms_reject(|e| e.trust_root.root_id = "other-root".to_string(), |_| {});
+    let out = kms_reject(
+        |e| e.trust_root.root_id = "other-root".to_string(),
+        |_| {},
+    );
     assert_eq!(
         out,
         ProductionCustodyAttestationOutcome::ProductionAttestationTrustRootMismatch
@@ -772,10 +765,7 @@ fn b08_wrong_provider_kind_rejected() {
 
 #[test]
 fn b09_wrong_provider_identity_rejected() {
-    let out = kms_reject(
-        |e| e.binding.provider_id = "other-provider".to_string(),
-        |_| {},
-    );
+    let out = kms_reject(|e| e.binding.provider_id = "other-provider".to_string(), |_| {});
     assert_eq!(
         out,
         ProductionCustodyAttestationOutcome::ProductionAttestationProviderMismatch
@@ -793,10 +783,7 @@ fn b10_wrong_key_handle_rejected() {
 
 #[test]
 fn b11_wrong_signer_identity_rejected() {
-    let out = kms_reject(
-        |e| e.binding.signer_identity = "other-signer".to_string(),
-        |_| {},
-    );
+    let out = kms_reject(|e| e.binding.signer_identity = "other-signer".to_string(), |_| {});
     assert_eq!(
         out,
         ProductionCustodyAttestationOutcome::ProductionAttestationSignerMismatch
@@ -805,10 +792,7 @@ fn b11_wrong_signer_identity_rejected() {
 
 #[test]
 fn b12_wrong_custody_class_rejected() {
-    let out = kms_reject(
-        |e| e.binding.custody_class = AuthorityCustodyClass::Hsm,
-        |_| {},
-    );
+    let out = kms_reject(|e| e.binding.custody_class = AuthorityCustodyClass::Hsm, |_| {});
     assert_eq!(
         out,
         ProductionCustodyAttestationOutcome::ProductionAttestationCustodyClassMismatch
@@ -817,10 +801,7 @@ fn b12_wrong_custody_class_rejected() {
 
 #[test]
 fn b13_wrong_request_id_rejected() {
-    let out = kms_reject(
-        |e| e.binding.custody_request_id = "other-req-id".to_string(),
-        |_| {},
-    );
+    let out = kms_reject(|e| e.binding.custody_request_id = "other-req-id".to_string(), |_| {});
     // Different request id no longer matches the bound challenge either;
     // the request-id binding is checked and rejected precisely.
     assert_eq!(
@@ -867,10 +848,7 @@ fn b16_wrong_response_envelope_digest_rejected() {
 
 #[test]
 fn b17_wrong_candidate_digest_rejected() {
-    let out = kms_reject(
-        |e| e.binding.candidate_digest = "other-candidate".to_string(),
-        |_| {},
-    );
+    let out = kms_reject(|e| e.binding.candidate_digest = "other-candidate".to_string(), |_| {});
     assert_eq!(
         out,
         ProductionCustodyAttestationOutcome::ProductionAttestationCandidateDigestMismatch
@@ -891,12 +869,9 @@ fn b18_wrong_authorized_action_rejected() {
 
 #[test]
 fn b19_wrong_environment_rejected() {
-    let out = kms_reject(
-        |e| e.binding.environment = TrustBundleEnvironment::Testnet,
-        |x| {
-            x.binding.environment = TrustBundleEnvironment::Testnet;
-        },
-    );
+    let out = kms_reject(|e| e.binding.environment = TrustBundleEnvironment::Testnet, |x| {
+        x.binding.environment = TrustBundleEnvironment::Testnet;
+    });
     assert_eq!(
         out,
         ProductionCustodyAttestationOutcome::ProductionAttestationDomainMismatch
@@ -905,12 +880,9 @@ fn b19_wrong_environment_rejected() {
 
 #[test]
 fn b20_wrong_chain_rejected() {
-    let out = kms_reject(
-        |e| e.binding.chain_id = "other-chain".to_string(),
-        |x| {
-            x.binding.chain_id = "other-chain".to_string();
-        },
-    );
+    let out = kms_reject(|e| e.binding.chain_id = "other-chain".to_string(), |x| {
+        x.binding.chain_id = "other-chain".to_string();
+    });
     assert_eq!(
         out,
         ProductionCustodyAttestationOutcome::ProductionAttestationDomainMismatch
@@ -919,12 +891,9 @@ fn b20_wrong_chain_rejected() {
 
 #[test]
 fn b21_wrong_genesis_domain_rejected() {
-    let out = kms_reject(
-        |e| e.binding.genesis_hash = "other-genesis".to_string(),
-        |x| {
-            x.binding.genesis_hash = "other-genesis".to_string();
-        },
-    );
+    let out = kms_reject(|e| e.binding.genesis_hash = "other-genesis".to_string(), |x| {
+        x.binding.genesis_hash = "other-genesis".to_string();
+    });
     assert_eq!(
         out,
         ProductionCustodyAttestationOutcome::ProductionAttestationDomainMismatch
@@ -956,10 +925,7 @@ fn b23_wrong_authority_root_rejected() {
 
 #[test]
 fn b24_wrong_nonce_challenge_rejected() {
-    let out = kms_reject(
-        |e| e.challenge.challenge = "other-challenge".to_string(),
-        |_| {},
-    );
+    let out = kms_reject(|e| e.challenge.challenge = "other-challenge".to_string(), |_| {});
     assert_eq!(
         out,
         ProductionCustodyAttestationOutcome::ProductionAttestationNonceReplay
@@ -994,10 +960,7 @@ fn b26_wrong_measurement_digest_rejected() {
 
 #[test]
 fn b27_wrong_certificate_proof_digest_rejected() {
-    let out = kms_reject(
-        |e| e.certificate_proof_digest = "wrong-proof".to_string(),
-        |_| {},
-    );
+    let out = kms_reject(|e| e.certificate_proof_digest = "wrong-proof".to_string(), |_| {});
     // Fixture verifier recomputes the expected proof and rejects mismatch.
     assert_eq!(
         out,
@@ -1019,10 +982,7 @@ fn b28_ambiguous_durable_replay_binding_rejected() {
 
 #[test]
 fn b29_wrong_domain_separation_tag_rejected() {
-    let out = kms_reject(
-        |e| e.domain_separation_tag = "wrong-tag".to_string(),
-        |_| {},
-    );
+    let out = kms_reject(|e| e.domain_separation_tag = "wrong-tag".to_string(), |_| {});
     assert_eq!(
         out,
         ProductionCustodyAttestationOutcome::ProductionAttestationMalformed
@@ -1216,11 +1176,7 @@ fn mainnet_scenario(
     binding.custody_class = custody_class;
     let evidence = valid_evidence(binding, class, policy);
     let expectations = expectations_from(&evidence);
-    (
-        evidence,
-        expectations,
-        domain(TrustBundleEnvironment::Mainnet),
-    )
+    (evidence, expectations, domain(TrustBundleEnvironment::Mainnet))
 }
 
 #[test]
@@ -1408,16 +1364,10 @@ fn c11_disabled_default_refuses_mainnet() {
 #[test]
 fn d01_every_reject_is_non_mutating() {
     let rejects = vec![
-        kms_reject(
-            |e| e.attestation_class = ProductionCustodyAttestationClass::Unknown,
-            |_| {},
-        ),
+        kms_reject(|e| e.attestation_class = ProductionCustodyAttestationClass::Unknown, |_| {}),
         kms_reject(|e| e.binding.key_handle = "x".to_string(), |_| {}),
         kms_reject(|e| e.trust_root.root_id = "x".to_string(), |_| {}),
-        kms_reject(
-            |e| e.measurement.measurement_digest = "x".to_string(),
-            |_| {},
-        ),
+        kms_reject(|e| e.measurement.measurement_digest = "x".to_string(), |_| {}),
     ];
     for r in rejects {
         assert!(r.is_non_mutating());
@@ -1752,9 +1702,7 @@ fn f14_scripted_mock_consumes_steps_then_default() {
     let (evidence, _, _) = kms_accept_scenario(TrustBundleEnvironment::Devnet);
     let tr = trust_root();
     let mock = MockCustodyAttestationVerifier::scripted(
-        vec![Err(
-            ProductionCustodyAttestationError::AttestationUnavailable,
-        )],
+        vec![Err(ProductionCustodyAttestationError::AttestationUnavailable)],
         Err(ProductionCustodyAttestationError::TrustRootMissing),
     );
     assert_eq!(

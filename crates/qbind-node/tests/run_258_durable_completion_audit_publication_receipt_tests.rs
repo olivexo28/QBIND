@@ -63,13 +63,10 @@ use qbind_node::pqc_governance_durable_completion_audit_publication_receipt::{
     project_backend_submission_outcome_to_audit_receipt_request,
     recover_durable_completion_audit_publication_receipt_window,
     DurableCompletionAuditPublicationReceiptExpectations,
-    DurableCompletionAuditPublicationReceiptFault,
-    DurableCompletionAuditPublicationReceiptIdentity,
+    DurableCompletionAuditPublicationReceiptFault, DurableCompletionAuditPublicationReceiptIdentity,
     DurableCompletionAuditPublicationReceiptInput, DurableCompletionAuditPublicationReceiptKind,
-    DurableCompletionAuditPublicationReceiptLedger,
-    DurableCompletionAuditPublicationReceiptOutcome,
-    DurableCompletionAuditPublicationReceiptPolicy,
-    DurableCompletionAuditPublicationReceiptRequest,
+    DurableCompletionAuditPublicationReceiptLedger, DurableCompletionAuditPublicationReceiptOutcome,
+    DurableCompletionAuditPublicationReceiptPolicy, DurableCompletionAuditPublicationReceiptRequest,
     DurableCompletionAuditPublicationReceiptRequestIntent,
     DurableCompletionAuditPublicationReceiptWindow,
     ExternalPublicationDurableCompletionReceiptSink,
@@ -1245,8 +1242,7 @@ fn wrong_receipt_policy_rejected_before_record() {
 #[test]
 fn wrong_receipt_kind_rejected_before_record() {
     assert_request_mismatch_rejected(|r| {
-        r.identity.kind =
-            DurableCompletionAuditPublicationReceiptKind::ProductionAuditLedgerUnavailable;
+        r.identity.kind = DurableCompletionAuditPublicationReceiptKind::ProductionAuditLedgerUnavailable;
     });
 }
 
@@ -1408,12 +1404,10 @@ fn only_backend_submission_creates_receipt_request_intent() {
         Intent::IdempotentOnly
     );
     // A non-submitting backend outcome never creates a request.
-    assert!(
-        !project_backend_submission_outcome_to_audit_receipt_request(
-            &Backend::LegacyBypassNoBackendSubmission
-        )
-        .creates_request()
-    );
+    assert!(!project_backend_submission_outcome_to_audit_receipt_request(
+        &Backend::LegacyBypassNoBackendSubmission
+    )
+    .creates_request());
 }
 
 #[test]
@@ -1537,11 +1531,7 @@ fn after_receipt_record_before_success_requires_explicit_matching_record() {
 fn after_receipt_success_recovers_as_recorded() {
     use DurableCompletionAuditPublicationReceiptOutcome as Receipt;
     use DurableCompletionAuditPublicationReceiptWindow as Window;
-    assert_window(
-        Window::AfterReceiptSuccess,
-        true,
-        Receipt::AuditReceiptRecorded,
-    );
+    assert_window(Window::AfterReceiptSuccess, true, Receipt::AuditReceiptRecorded);
     // Without an explicit matching record, even after-success fails closed.
     assert_window(
         Window::AfterReceiptSuccess,
@@ -1723,16 +1713,12 @@ fn invariant_helpers_assert_fail_closed_contract() {
     assert!(durable_completion_audit_receipt_failed_record_never_records());
     assert!(durable_completion_audit_receipt_rollback_never_records());
     assert!(durable_completion_audit_receipt_ambiguous_window_fails_closed());
-    assert!(
-        durable_completion_audit_receipt_mainnet_peer_driven_apply_refused_first(
-            TrustBundleEnvironment::Mainnet
-        )
-    );
-    assert!(
-        !durable_completion_audit_receipt_mainnet_peer_driven_apply_refused_first(
-            TrustBundleEnvironment::Devnet
-        )
-    );
+    assert!(durable_completion_audit_receipt_mainnet_peer_driven_apply_refused_first(
+        TrustBundleEnvironment::Mainnet
+    ));
+    assert!(!durable_completion_audit_receipt_mainnet_peer_driven_apply_refused_first(
+        TrustBundleEnvironment::Devnet
+    ));
     assert!(durable_completion_audit_receipt_production_mainnet_unavailable());
     assert!(durable_completion_audit_receipt_external_publication_unavailable());
     assert!(durable_completion_audit_receipt_validator_set_rotation_unsupported());

@@ -442,11 +442,7 @@ pub fn consumer_response_digest(
     let mut w = CanonicalWriter::new(CONSUMER_RESPONSE_DOMAIN);
     w.str_field(&response.consumer_record_id)
         .str_field(response.request_digest.as_hex())
-        .str_field(if response.accepted {
-            "accepted"
-        } else {
-            "rejected"
-        })
+        .str_field(if response.accepted { "accepted" } else { "rejected" })
         .str_field(response.consumer_kind.tag());
     DurableCompletionAcknowledgementConsumerDigest(w.finish())
 }
@@ -1002,15 +998,13 @@ impl DurableCompletionAcknowledgementConsumerExpectations {
         if request.receipt_record_id != self.expected_receipt_record_id {
             return Some("wrong receipt record id");
         }
-        if request.acknowledgement_identity_digest != self.expected_acknowledgement_identity_digest
-        {
+        if request.acknowledgement_identity_digest != self.expected_acknowledgement_identity_digest {
             return Some("wrong acknowledgement identity digest");
         }
         if request.acknowledgement_request_digest != self.expected_acknowledgement_request_digest {
             return Some("wrong acknowledgement request digest");
         }
-        if request.acknowledgement_response_digest != self.expected_acknowledgement_response_digest
-        {
+        if request.acknowledgement_response_digest != self.expected_acknowledgement_response_digest {
             return Some("wrong acknowledgement response digest");
         }
         if request.acknowledgement_record_digest != self.expected_acknowledgement_record_digest {
@@ -1241,22 +1235,12 @@ impl DurableCompletionAcknowledgementConsumerOutcome {
             Self::RejectedBeforeAcknowledgementNoConsumer => {
                 "rejected-before-acknowledgement-no-consumer"
             }
-            Self::AcknowledgementDidNotRecordNoConsumer => {
-                "acknowledgement-did-not-record-no-consumer"
-            }
+            Self::AcknowledgementDidNotRecordNoConsumer => "acknowledgement-did-not-record-no-consumer",
             Self::AcknowledgementConsumed => "acknowledgement-consumed",
-            Self::AcknowledgementConsumerDuplicateIdempotent => {
-                "acknowledgement-consumer-duplicate-idempotent"
-            }
-            Self::AcknowledgementConsumerRejectedBeforeRecord => {
-                "acknowledgement-consumer-rejected-before-record"
-            }
-            Self::AcknowledgementConsumerRecordFailedNoConsumer => {
-                "acknowledgement-consumer-record-failed-no-consumer"
-            }
-            Self::AcknowledgementConsumerRolledBackNoConsumer => {
-                "acknowledgement-consumer-rolled-back-no-consumer"
-            }
+            Self::AcknowledgementConsumerDuplicateIdempotent => "acknowledgement-consumer-duplicate-idempotent",
+            Self::AcknowledgementConsumerRejectedBeforeRecord => "acknowledgement-consumer-rejected-before-record",
+            Self::AcknowledgementConsumerRecordFailedNoConsumer => "acknowledgement-consumer-record-failed-no-consumer",
+            Self::AcknowledgementConsumerRolledBackNoConsumer => "acknowledgement-consumer-rolled-back-no-consumer",
             Self::AcknowledgementConsumerRollbackFailedFatalNoConsumer => {
                 "acknowledgement-consumer-rollback-failed-fatal-no-consumer"
             }
@@ -1333,7 +1317,9 @@ pub fn project_acknowledgement_outcome_to_consumer_request(
     match outcome {
         Ack::AcknowledgementRecorded => Intent::CreateRequest,
         Ack::AcknowledgementDuplicateIdempotent => Intent::IdempotentOnly,
-        Ack::LegacyBypassNoAcknowledgement => Intent::NoConsumer(Consumer::LegacyBypassNoConsumer),
+        Ack::LegacyBypassNoAcknowledgement => {
+            Intent::NoConsumer(Consumer::LegacyBypassNoConsumer)
+        }
         Ack::RejectedBeforeAuditReceiptNoAcknowledgement => {
             Intent::NoConsumer(Consumer::RejectedBeforeAcknowledgementNoConsumer)
         }
@@ -1721,12 +1707,13 @@ where
     // Step 3: project the Run 260 audit-receipt acknowledgement outcome onto a
     // consumer request. Every non-recording acknowledgement outcome returns a
     // no-consumer outcome without invoking the consumer.
-    let idempotent_only =
-        match project_acknowledgement_outcome_to_consumer_request(&input.acknowledgement_binding) {
-            Intent::NoConsumer(outcome) => return outcome,
-            Intent::CreateRequest => false,
-            Intent::IdempotentOnly => true,
-        };
+    let idempotent_only = match project_acknowledgement_outcome_to_consumer_request(
+        &input.acknowledgement_binding,
+    ) {
+        Intent::NoConsumer(outcome) => return outcome,
+        Intent::CreateRequest => false,
+        Intent::IdempotentOnly => true,
+    };
 
     // Step 4: pre-acknowledgement environment / surface binding validation. A
     // mismatch fails closed before the acknowledgement sink is invoked, leaving the
@@ -1857,7 +1844,8 @@ pub fn recover_durable_completion_acknowledgement_consumer_window(
         |record: &DurableCompletionAcknowledgementConsumerLedgerRecord| -> bool {
             record.consumer_record_id == expectations.expected_consumer_record_id
                 && record.request_digest == input.request.digest()
-                && record.status == DurableCompletionAcknowledgementConsumerLedgerStatus::Recorded
+                && record.status
+                    == DurableCompletionAcknowledgementConsumerLedgerStatus::Recorded
         };
 
     match window {
@@ -1901,9 +1889,7 @@ pub fn recover_durable_completion_acknowledgement_consumer_window(
         Window::AfterAcknowledgementAmbiguous => {
             Receipt::AcknowledgementConsumerAmbiguousFailClosedNoConsumer
         }
-        Window::AcknowledgementRecordFailed => {
-            Receipt::AcknowledgementConsumerRecordFailedNoConsumer
-        }
+        Window::AcknowledgementRecordFailed => Receipt::AcknowledgementConsumerRecordFailedNoConsumer,
         Window::AcknowledgementRollbackCompleted => {
             Receipt::AcknowledgementConsumerRolledBackNoConsumer
         }

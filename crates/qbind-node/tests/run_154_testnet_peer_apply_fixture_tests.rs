@@ -50,11 +50,11 @@ use std::path::{Path, PathBuf};
 use qbind_crypto::MlDsa44Backend;
 use qbind_ledger::{
     bundle_signing_ratification::v2_test_helpers as ratification_v2_helpers,
-    compute_canonical_genesis_hash, BundleSigningRatificationV2, BundleSigningRatificationV2Action,
-    GenesisAllocation, GenesisAuthorityConfig, GenesisAuthorityRoot, GenesisConfig,
-    GenesisCouncilConfig, GenesisHash, GenesisMonetaryConfig, GenesisValidator,
-    NetworkEnvironmentPolicy, RatificationEnvironment, RatificationV2VerifierInputs,
-    GENESIS_AUTHORITY_SUITE_ML_DSA_44,
+    compute_canonical_genesis_hash, BundleSigningRatificationV2,
+    BundleSigningRatificationV2Action, GenesisAllocation, GenesisAuthorityConfig,
+    GenesisAuthorityRoot, GenesisConfig, GenesisCouncilConfig, GenesisHash,
+    GenesisMonetaryConfig, GenesisValidator, NetworkEnvironmentPolicy,
+    RatificationEnvironment, RatificationV2VerifierInputs, GENESIS_AUTHORITY_SUITE_ML_DSA_44,
 };
 use qbind_node::pqc_authority_marker_acceptance::{
     verify_marker_for_validation_only_v2, ValidationOnlyMarkerV2AcceptReason,
@@ -73,8 +73,8 @@ use qbind_node::pqc_trust_bundle::{
     BundleSigningKeySet, RootStatus, TrustBundle, TrustBundleEnvironment, TrustBundleRoot,
 };
 use qbind_node::pqc_trust_peer_candidate::{
-    PeerCandidateConfig, PeerCandidateEnvelope, PeerCandidateOutcome, PeerCandidateRuntimeContext,
-    PeerCandidateValidator,
+    PeerCandidateConfig, PeerCandidateEnvelope, PeerCandidateOutcome,
+    PeerCandidateRuntimeContext, PeerCandidateValidator,
 };
 use qbind_node::pqc_trust_reload::{validate_candidate_bundle, ReloadCheckInputs};
 use qbind_node::pqc_trust_sequence::chain_id_hex;
@@ -174,10 +174,7 @@ fn harness(env: NetworkEnvironment) -> Harness {
     let mut genesis_cfg = GenesisConfig::new(
         genesis_chain_id(env),
         1_738_000_000_000,
-        vec![GenesisAllocation::new(
-            format!("0x{}", "11".repeat(32)),
-            100,
-        )],
+        vec![GenesisAllocation::new(format!("0x{}", "11".repeat(32)), 100)],
         vec![GenesisValidator::new(
             format!("0x{}", "22".repeat(32)),
             "ab".repeat(32),
@@ -744,15 +741,10 @@ fn run154_testnet_same_sequence_different_digest_fails_through_v2_marker() {
         MlDsa44Backend::generate_keypair().expect("ML-DSA-44 conflicting target key");
     let candidate = v2_ratification_for_target(&h, &other_pk, 3);
     match marker_check(&h, &marker_path, &candidate) {
-        Err(ValidationOnlyMarkerV2Error::SameSequenceDifferentDigestRefused {
-            sequence, ..
-        }) => {
+        Err(ValidationOnlyMarkerV2Error::SameSequenceDifferentDigestRefused { sequence, .. }) => {
             assert_eq!(sequence, 3);
         }
-        other => panic!(
-            "expected SameSequenceDifferentDigestRefused, got {:?}",
-            other
-        ),
+        other => panic!("expected SameSequenceDifferentDigestRefused, got {:?}", other),
     }
     assert_eq!(
         std::fs::read(&marker_path).expect("marker still exists"),
@@ -850,22 +842,18 @@ fn run154_devnet_fixture_behavior_unchanged() {
 
     // A DevNet v2 ratification verifies under DevNet and not under TestNet.
     let devnet_rat = v2_ratification_for(&devnet, 1);
-    assert!(
-        qbind_ledger::verify_bundle_signing_key_ratification_v2(verifier_inputs(
-            &devnet,
-            NetworkEnvironment::Devnet,
-            &devnet_rat
-        ))
-        .is_ok()
-    );
-    assert!(
-        qbind_ledger::verify_bundle_signing_key_ratification_v2(verifier_inputs(
-            &devnet,
-            NetworkEnvironment::Testnet,
-            &devnet_rat
-        ))
-        .is_err()
-    );
+    assert!(qbind_ledger::verify_bundle_signing_key_ratification_v2(verifier_inputs(
+        &devnet,
+        NetworkEnvironment::Devnet,
+        &devnet_rat
+    ))
+    .is_ok());
+    assert!(qbind_ledger::verify_bundle_signing_key_ratification_v2(verifier_inputs(
+        &devnet,
+        NetworkEnvironment::Testnet,
+        &devnet_rat
+    ))
+    .is_err());
 }
 
 // =====================================================================
@@ -919,10 +907,7 @@ fn run154_no_production_anchor_or_fallback_material() {
     // is non-empty and differs between independent harnesses.
     assert!(!a.root_pk_hex.is_empty());
     assert!(!a.signing_pk.is_empty());
-    assert_ne!(
-        a.root_pk_hex, b.root_pk_hex,
-        "transport root must be ephemeral"
-    );
+    assert_ne!(a.root_pk_hex, b.root_pk_hex, "transport root must be ephemeral");
     assert_ne!(a.signing_pk, b.signing_pk, "signing key must be ephemeral");
     assert_ne!(
         a.authority_pk, b.authority_pk,

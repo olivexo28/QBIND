@@ -26,8 +26,9 @@ use qbind_node::pqc_authority_custody::{
     local_operator_config_alone_cannot_satisfy_mainnet_production_custody,
     mainnet_peer_driven_apply_remains_refused_under_custody_boundary,
     peer_majority_cannot_satisfy_custody, validate_authority_custody_attestation,
-    validate_lifecycle_governance_and_custody, AuthorityCustodyAttestation, AuthorityCustodyClass,
-    AuthorityCustodyPolicy, AuthorityCustodyValidationOutcome, LifecycleGovernanceCustodyOutcome,
+    validate_lifecycle_governance_and_custody, AuthorityCustodyAttestation,
+    AuthorityCustodyClass, AuthorityCustodyPolicy, AuthorityCustodyValidationOutcome,
+    LifecycleGovernanceCustodyOutcome,
 };
 use qbind_node::pqc_authority_lifecycle::{
     AuthorityTrustDomain, LocalLifecycleAction, PQC_LIFECYCLE_SUITE_ML_DSA_44,
@@ -52,11 +53,15 @@ const ROOT_FP: &str = "1111111111111111111111111111111111111111";
 const OTHER_ROOT_FP: &str = "9999999999999999999999999999999999999999";
 const CHAIN_ID: &str = "0000000000000001";
 const OTHER_CHAIN: &str = "00000000000000ff";
-const GENESIS_HASH: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
-const OTHER_GENESIS: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+const GENESIS_HASH: &str =
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+const OTHER_GENESIS: &str =
+    "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 const DIGEST_2: &str = "2222222222222222222222222222222222222222222222222222222222222222";
-const DIGEST_OTHER: &str = "3333333333333333333333333333333333333333333333333333333333333333";
-const PRIOR_DIGEST: &str = "1111111111111111111111111111111111111111111111111111111111111111";
+const DIGEST_OTHER: &str =
+    "3333333333333333333333333333333333333333333333333333333333333333";
+const PRIOR_DIGEST: &str =
+    "1111111111111111111111111111111111111111111111111111111111111111";
 const CUSTODY_ATTEST_DIGEST: &str = "custody-att-digest-188";
 const CUSTODY_KEY_ID: &str = "custody-key-id-188";
 const NOW: u64 = 1_700_000_000;
@@ -157,7 +162,9 @@ fn good_fixture_attestation(
         chain_id: CHAIN_ID.to_string(),
         genesis_hash: GENESIS_HASH.to_string(),
         authority_root_fingerprint: ROOT_FP.to_string(),
-        bundle_signing_key_fingerprint: candidate.active_bundle_signing_key_fingerprint.clone(),
+        bundle_signing_key_fingerprint: candidate
+            .active_bundle_signing_key_fingerprint
+            .clone(),
         governance_authority_class: GovernanceAuthorityClass::GenesisBound,
         lifecycle_action: LocalLifecycleAction::Rotate,
         candidate_digest: DIGEST_2.to_string(),
@@ -191,17 +198,11 @@ fn validate_default(
 
 #[test]
 fn default_custody_policy_is_disabled_fail_closed() {
-    assert_eq!(
-        AuthorityCustodyPolicy::default(),
-        AuthorityCustodyPolicy::Disabled
-    );
+    assert_eq!(AuthorityCustodyPolicy::default(), AuthorityCustodyPolicy::Disabled);
     let domain = devnet_domain();
     let candidate = rotate_candidate(TrustBundleEnvironment::Devnet);
-    let att = good_fixture_attestation(
-        TrustBundleEnvironment::Devnet,
-        &candidate,
-        AuthorityCustodyClass::FixtureLocalKey,
-    );
+    let att =
+        good_fixture_attestation(TrustBundleEnvironment::Devnet, &candidate, AuthorityCustodyClass::FixtureLocalKey);
     let outcome = validate_default(&att, &candidate, &domain, AuthorityCustodyPolicy::default());
     assert!(outcome.is_reject());
     assert!(matches!(
@@ -255,12 +256,7 @@ fn a1_devnet_fixture_custody_accepted_under_fixture_only_policy() {
         &candidate,
         AuthorityCustodyClass::FixtureLocalKey,
     );
-    let outcome = validate_default(
-        &att,
-        &candidate,
-        &domain,
-        AuthorityCustodyPolicy::FixtureOnly,
-    );
+    let outcome = validate_default(&att, &candidate, &domain, AuthorityCustodyPolicy::FixtureOnly);
     assert!(matches!(
         outcome,
         AuthorityCustodyValidationOutcome::AcceptedFixtureCustody {
@@ -278,12 +274,7 @@ fn a2_testnet_fixture_custody_accepted_under_fixture_only_policy() {
         &candidate,
         AuthorityCustodyClass::FixtureLocalKey,
     );
-    let outcome = validate_default(
-        &att,
-        &candidate,
-        &domain,
-        AuthorityCustodyPolicy::FixtureOnly,
-    );
+    let outcome = validate_default(&att, &candidate, &domain, AuthorityCustodyPolicy::FixtureOnly);
     assert!(matches!(
         outcome,
         AuthorityCustodyValidationOutcome::AcceptedFixtureCustody {
@@ -302,12 +293,8 @@ fn a3_devnet_local_operator_accepted_under_devnet_local_policy() {
         &candidate,
         AuthorityCustodyClass::LocalOperatorKey,
     );
-    let outcome = validate_default(
-        &att,
-        &candidate,
-        &domain,
-        AuthorityCustodyPolicy::DevnetLocalAllowed,
-    );
+    let outcome =
+        validate_default(&att, &candidate, &domain, AuthorityCustodyPolicy::DevnetLocalAllowed);
     assert!(matches!(
         outcome,
         AuthorityCustodyValidationOutcome::AcceptedLocalOperatorCustody {
@@ -326,12 +313,8 @@ fn a4_testnet_local_operator_accepted_under_testnet_local_policy() {
         &candidate,
         AuthorityCustodyClass::LocalOperatorKey,
     );
-    let outcome = validate_default(
-        &att,
-        &candidate,
-        &domain,
-        AuthorityCustodyPolicy::TestnetLocalAllowed,
-    );
+    let outcome =
+        validate_default(&att, &candidate, &domain, AuthorityCustodyPolicy::TestnetLocalAllowed);
     assert!(matches!(
         outcome,
         AuthorityCustodyValidationOutcome::AcceptedLocalOperatorCustody {
@@ -386,10 +369,7 @@ fn a6_combined_lifecycle_governance_fixture_custody_accepted_devnet() {
         NOW,
     );
     assert!(outcome.is_accept(), "expected Accepted, got {:?}", outcome);
-    if let LifecycleGovernanceCustodyOutcome::Accepted {
-        custody_outcome, ..
-    } = outcome
-    {
+    if let LifecycleGovernanceCustodyOutcome::Accepted { custody_outcome, .. } = outcome {
         assert!(matches!(
             custody_outcome,
             AuthorityCustodyValidationOutcome::AcceptedFixtureCustody { .. }
@@ -421,10 +401,7 @@ fn a7_combined_lifecycle_governance_local_custody_accepted_testnet() {
         NOW,
     );
     assert!(outcome.is_accept());
-    if let LifecycleGovernanceCustodyOutcome::Accepted {
-        custody_outcome, ..
-    } = outcome
-    {
+    if let LifecycleGovernanceCustodyOutcome::Accepted { custody_outcome, .. } = outcome {
         assert!(matches!(
             custody_outcome,
             AuthorityCustodyValidationOutcome::AcceptedLocalOperatorCustody { .. }
@@ -452,12 +429,7 @@ fn a8_production_custody_boundary_returns_typed_unavailable_for_each_placeholder
         ),
     ] {
         let att = good_fixture_attestation(TrustBundleEnvironment::Devnet, &candidate, class);
-        let outcome = validate_default(
-            &att,
-            &candidate,
-            &domain,
-            AuthorityCustodyPolicy::ProductionCustodyRequired,
-        );
+        let outcome = validate_default(&att, &candidate, &domain, AuthorityCustodyPolicy::ProductionCustodyRequired);
         assert_eq!(outcome, expected, "class={:?}", class);
         assert!(outcome.is_production_unavailable());
     }
@@ -522,12 +494,7 @@ fn r3_fixture_custody_rejected_for_mainnet() {
         &candidate,
         AuthorityCustodyClass::FixtureLocalKey,
     );
-    let outcome = validate_default(
-        &att,
-        &candidate,
-        &domain,
-        AuthorityCustodyPolicy::FixtureOnly,
-    );
+    let outcome = validate_default(&att, &candidate, &domain, AuthorityCustodyPolicy::FixtureOnly);
     assert_eq!(
         outcome,
         AuthorityCustodyValidationOutcome::FixtureCustodyRejectedForMainNet
@@ -565,12 +532,7 @@ fn r5_kms_placeholder_rejected_as_unavailable() {
         &candidate,
         AuthorityCustodyClass::Kms,
     );
-    let outcome = validate_default(
-        &att,
-        &candidate,
-        &domain,
-        AuthorityCustodyPolicy::FixtureOnly,
-    );
+    let outcome = validate_default(&att, &candidate, &domain, AuthorityCustodyPolicy::FixtureOnly);
     assert_eq!(outcome, AuthorityCustodyValidationOutcome::KmsUnavailable);
 }
 
@@ -583,12 +545,7 @@ fn r6_hsm_placeholder_rejected_as_unavailable() {
         &candidate,
         AuthorityCustodyClass::Hsm,
     );
-    let outcome = validate_default(
-        &att,
-        &candidate,
-        &domain,
-        AuthorityCustodyPolicy::FixtureOnly,
-    );
+    let outcome = validate_default(&att, &candidate, &domain, AuthorityCustodyPolicy::FixtureOnly);
     assert_eq!(outcome, AuthorityCustodyValidationOutcome::HsmUnavailable);
 }
 
@@ -601,12 +558,7 @@ fn r7_remote_signer_placeholder_rejected_as_unavailable() {
         &candidate,
         AuthorityCustodyClass::RemoteSigner,
     );
-    let outcome = validate_default(
-        &att,
-        &candidate,
-        &domain,
-        AuthorityCustodyPolicy::FixtureOnly,
-    );
+    let outcome = validate_default(&att, &candidate, &domain, AuthorityCustodyPolicy::FixtureOnly);
     assert_eq!(
         outcome,
         AuthorityCustodyValidationOutcome::RemoteSignerUnavailable
@@ -622,12 +574,7 @@ fn r8_unknown_custody_class_rejected() {
         &candidate,
         AuthorityCustodyClass::Unknown,
     );
-    let outcome = validate_default(
-        &att,
-        &candidate,
-        &domain,
-        AuthorityCustodyPolicy::FixtureOnly,
-    );
+    let outcome = validate_default(&att, &candidate, &domain, AuthorityCustodyPolicy::FixtureOnly);
     assert_eq!(
         outcome,
         AuthorityCustodyValidationOutcome::UnknownCustodyClassRejected
@@ -644,12 +591,7 @@ fn r9_wrong_environment_rejected() {
         AuthorityCustodyClass::FixtureLocalKey,
     );
     att.environment = TrustBundleEnvironment::Testnet;
-    let outcome = validate_default(
-        &att,
-        &candidate,
-        &domain,
-        AuthorityCustodyPolicy::FixtureOnly,
-    );
+    let outcome = validate_default(&att, &candidate, &domain, AuthorityCustodyPolicy::FixtureOnly);
     assert!(matches!(
         outcome,
         AuthorityCustodyValidationOutcome::WrongEnvironment { .. }
@@ -666,12 +608,7 @@ fn r10_wrong_chain_rejected() {
         AuthorityCustodyClass::FixtureLocalKey,
     );
     att.chain_id = OTHER_CHAIN.to_string();
-    let outcome = validate_default(
-        &att,
-        &candidate,
-        &domain,
-        AuthorityCustodyPolicy::FixtureOnly,
-    );
+    let outcome = validate_default(&att, &candidate, &domain, AuthorityCustodyPolicy::FixtureOnly);
     assert!(matches!(
         outcome,
         AuthorityCustodyValidationOutcome::WrongChain { .. }
@@ -688,12 +625,7 @@ fn r11_wrong_genesis_rejected() {
         AuthorityCustodyClass::FixtureLocalKey,
     );
     att.genesis_hash = OTHER_GENESIS.to_string();
-    let outcome = validate_default(
-        &att,
-        &candidate,
-        &domain,
-        AuthorityCustodyPolicy::FixtureOnly,
-    );
+    let outcome = validate_default(&att, &candidate, &domain, AuthorityCustodyPolicy::FixtureOnly);
     assert!(matches!(
         outcome,
         AuthorityCustodyValidationOutcome::WrongGenesis { .. }
@@ -710,12 +642,7 @@ fn r12_wrong_authority_root_rejected() {
         AuthorityCustodyClass::FixtureLocalKey,
     );
     att.authority_root_fingerprint = OTHER_ROOT_FP.to_string();
-    let outcome = validate_default(
-        &att,
-        &candidate,
-        &domain,
-        AuthorityCustodyPolicy::FixtureOnly,
-    );
+    let outcome = validate_default(&att, &candidate, &domain, AuthorityCustodyPolicy::FixtureOnly);
     assert!(matches!(
         outcome,
         AuthorityCustodyValidationOutcome::WrongAuthorityRoot { .. }
@@ -732,12 +659,7 @@ fn r13_wrong_signing_key_fingerprint_rejected() {
         AuthorityCustodyClass::FixtureLocalKey,
     );
     att.bundle_signing_key_fingerprint = KEY_A.to_string(); // candidate active is KEY_B
-    let outcome = validate_default(
-        &att,
-        &candidate,
-        &domain,
-        AuthorityCustodyPolicy::FixtureOnly,
-    );
+    let outcome = validate_default(&att, &candidate, &domain, AuthorityCustodyPolicy::FixtureOnly);
     assert!(matches!(
         outcome,
         AuthorityCustodyValidationOutcome::WrongSigningKeyFingerprint { .. }
@@ -754,12 +676,7 @@ fn r14_wrong_candidate_digest_rejected() {
         AuthorityCustodyClass::FixtureLocalKey,
     );
     att.candidate_digest = DIGEST_OTHER.to_string();
-    let outcome = validate_default(
-        &att,
-        &candidate,
-        &domain,
-        AuthorityCustodyPolicy::FixtureOnly,
-    );
+    let outcome = validate_default(&att, &candidate, &domain, AuthorityCustodyPolicy::FixtureOnly);
     assert!(matches!(
         outcome,
         AuthorityCustodyValidationOutcome::WrongCandidateDigest { .. }
@@ -776,12 +693,7 @@ fn r15_wrong_authority_domain_sequence_rejected() {
         AuthorityCustodyClass::FixtureLocalKey,
     );
     att.authority_domain_sequence = 99;
-    let outcome = validate_default(
-        &att,
-        &candidate,
-        &domain,
-        AuthorityCustodyPolicy::FixtureOnly,
-    );
+    let outcome = validate_default(&att, &candidate, &domain, AuthorityCustodyPolicy::FixtureOnly);
     assert!(matches!(
         outcome,
         AuthorityCustodyValidationOutcome::WrongAuthorityDomainSequence { .. }
@@ -798,12 +710,7 @@ fn r16_wrong_lifecycle_action_rejected() {
         AuthorityCustodyClass::FixtureLocalKey,
     );
     att.lifecycle_action = LocalLifecycleAction::EmergencyRevoke;
-    let outcome = validate_default(
-        &att,
-        &candidate,
-        &domain,
-        AuthorityCustodyPolicy::FixtureOnly,
-    );
+    let outcome = validate_default(&att, &candidate, &domain, AuthorityCustodyPolicy::FixtureOnly);
     assert!(matches!(
         outcome,
         AuthorityCustodyValidationOutcome::WrongLifecycleAction { .. }
@@ -820,12 +727,7 @@ fn r17_missing_custody_attestation_rejected() {
         AuthorityCustodyClass::FixtureLocalKey,
     );
     att.custody_attestation_digest = String::new();
-    let outcome = validate_default(
-        &att,
-        &candidate,
-        &domain,
-        AuthorityCustodyPolicy::FixtureOnly,
-    );
+    let outcome = validate_default(&att, &candidate, &domain, AuthorityCustodyPolicy::FixtureOnly);
     assert_eq!(
         outcome,
         AuthorityCustodyValidationOutcome::CustodyAttestationMissing
@@ -842,12 +744,7 @@ fn r18_malformed_custody_attestation_rejected() {
         AuthorityCustodyClass::FixtureLocalKey,
     );
     att.custody_key_id = String::new();
-    let outcome = validate_default(
-        &att,
-        &candidate,
-        &domain,
-        AuthorityCustodyPolicy::FixtureOnly,
-    );
+    let outcome = validate_default(&att, &candidate, &domain, AuthorityCustodyPolicy::FixtureOnly);
     assert!(matches!(
         outcome,
         AuthorityCustodyValidationOutcome::CustodyAttestationMalformed { .. }
@@ -865,12 +762,7 @@ fn r18b_malformed_when_only_one_of_freshness_expiry_set() {
     );
     att.freshness_unix = Some(FRESH);
     att.expires_at_unix = None;
-    let outcome = validate_default(
-        &att,
-        &candidate,
-        &domain,
-        AuthorityCustodyPolicy::FixtureOnly,
-    );
+    let outcome = validate_default(&att, &candidate, &domain, AuthorityCustodyPolicy::FixtureOnly);
     assert!(matches!(
         outcome,
         AuthorityCustodyValidationOutcome::CustodyAttestationMalformed { .. }
@@ -888,12 +780,7 @@ fn r19_expired_custody_attestation_rejected() {
     );
     att.expires_at_unix = Some(NOW - 1);
     att.freshness_unix = Some(NOW - 100);
-    let outcome = validate_default(
-        &att,
-        &candidate,
-        &domain,
-        AuthorityCustodyPolicy::FixtureOnly,
-    );
+    let outcome = validate_default(&att, &candidate, &domain, AuthorityCustodyPolicy::FixtureOnly);
     assert!(matches!(
         outcome,
         AuthorityCustodyValidationOutcome::CustodyAttestationExpired { .. }
@@ -938,12 +825,7 @@ fn r21_unsupported_custody_suite_rejected() {
         AuthorityCustodyClass::FixtureLocalKey,
     );
     att.custody_suite_id = 0xFE;
-    let outcome = validate_default(
-        &att,
-        &candidate,
-        &domain,
-        AuthorityCustodyPolicy::FixtureOnly,
-    );
+    let outcome = validate_default(&att, &candidate, &domain, AuthorityCustodyPolicy::FixtureOnly);
     assert_eq!(
         outcome,
         AuthorityCustodyValidationOutcome::UnsupportedCustodySuite { suite_id: 0xFE }
@@ -966,12 +848,7 @@ fn r22_custody_valid_but_governance_proof_invalid_rejected() {
         AuthorityCustodyClass::FixtureLocalKey,
     );
     att.governance_authority_class = GovernanceAuthorityClass::EmergencyCouncil;
-    let outcome = validate_default(
-        &att,
-        &candidate,
-        &domain,
-        AuthorityCustodyPolicy::FixtureOnly,
-    );
+    let outcome = validate_default(&att, &candidate, &domain, AuthorityCustodyPolicy::FixtureOnly);
     assert!(matches!(
         outcome,
         AuthorityCustodyValidationOutcome::CustodyAttestationMalformed { .. }
@@ -1048,21 +925,15 @@ fn r24_lifecycle_valid_governance_valid_custody_placeholder_unavailable_rejected
 fn r25_mainnet_peer_driven_apply_remains_refused_even_if_custody_claims_kms() {
     // Run 188 typed boundary helper: the rule is encoded by symbol
     // and is independent of any custody attestation contents.
-    assert!(
-        mainnet_peer_driven_apply_remains_refused_under_custody_boundary(
-            TrustBundleEnvironment::Mainnet
-        )
-    );
-    assert!(
-        !mainnet_peer_driven_apply_remains_refused_under_custody_boundary(
-            TrustBundleEnvironment::Devnet
-        )
-    );
-    assert!(
-        !mainnet_peer_driven_apply_remains_refused_under_custody_boundary(
-            TrustBundleEnvironment::Testnet
-        )
-    );
+    assert!(mainnet_peer_driven_apply_remains_refused_under_custody_boundary(
+        TrustBundleEnvironment::Mainnet
+    ));
+    assert!(!mainnet_peer_driven_apply_remains_refused_under_custody_boundary(
+        TrustBundleEnvironment::Devnet
+    ));
+    assert!(!mainnet_peer_driven_apply_remains_refused_under_custody_boundary(
+        TrustBundleEnvironment::Testnet
+    ));
     // Even a "claims KMS" attestation on MainNet under the
     // `MainnetProductionCustodyRequired` policy fails closed at the
     // typed `MainNetProductionCustodyUnavailable` surface.
@@ -1123,18 +994,10 @@ fn r28_validation_only_rejection_remains_non_mutating() {
         &candidate,
         AuthorityCustodyClass::Kms,
     );
-    let outcome = validate_default(
-        &att,
-        &candidate,
-        &domain,
-        AuthorityCustodyPolicy::FixtureOnly,
-    );
+    let outcome = validate_default(&att, &candidate, &domain, AuthorityCustodyPolicy::FixtureOnly);
     assert_eq!(outcome, AuthorityCustodyValidationOutcome::KmsUnavailable);
     let snap_after = format!("{:?}", candidate);
-    assert_eq!(
-        snap_before, snap_after,
-        "validate_authority_custody_attestation must not mutate the candidate"
-    );
+    assert_eq!(snap_before, snap_after, "validate_authority_custody_attestation must not mutate the candidate");
 }
 
 #[test]
@@ -1205,24 +1068,9 @@ fn fixture_vs_production_custody_separation_is_typed() {
         AuthorityCustodyClass::FixtureLocalKey,
     );
 
-    let r_fix_d = validate_default(
-        &fix_d,
-        &cand_d,
-        &domain_d,
-        AuthorityCustodyPolicy::FixtureOnly,
-    );
-    let r_kms_d = validate_default(
-        &kms_d,
-        &cand_d,
-        &domain_d,
-        AuthorityCustodyPolicy::FixtureOnly,
-    );
-    let r_fix_m = validate_default(
-        &fix_m,
-        &cand_m,
-        &domain_m,
-        AuthorityCustodyPolicy::FixtureOnly,
-    );
+    let r_fix_d = validate_default(&fix_d, &cand_d, &domain_d, AuthorityCustodyPolicy::FixtureOnly);
+    let r_kms_d = validate_default(&kms_d, &cand_d, &domain_d, AuthorityCustodyPolicy::FixtureOnly);
+    let r_fix_m = validate_default(&fix_m, &cand_m, &domain_m, AuthorityCustodyPolicy::FixtureOnly);
 
     assert!(matches!(
         r_fix_d,
@@ -1301,12 +1149,7 @@ fn fixture_only_policy_refuses_local_operator_with_typed_policy_refusal() {
         &candidate,
         AuthorityCustodyClass::LocalOperatorKey,
     );
-    let outcome = validate_default(
-        &att,
-        &candidate,
-        &domain,
-        AuthorityCustodyPolicy::FixtureOnly,
-    );
+    let outcome = validate_default(&att, &candidate, &domain, AuthorityCustodyPolicy::FixtureOnly);
     assert!(matches!(
         outcome,
         AuthorityCustodyValidationOutcome::PolicyRefusesCustodyClass {
@@ -1327,12 +1170,8 @@ fn devnet_local_policy_on_testnet_domain_is_refused_by_policy() {
         &candidate,
         AuthorityCustodyClass::LocalOperatorKey,
     );
-    let outcome = validate_default(
-        &att,
-        &candidate,
-        &domain,
-        AuthorityCustodyPolicy::DevnetLocalAllowed,
-    );
+    let outcome =
+        validate_default(&att, &candidate, &domain, AuthorityCustodyPolicy::DevnetLocalAllowed);
     assert!(matches!(
         outcome,
         AuthorityCustodyValidationOutcome::PolicyRefusesCustodyClass { .. }
@@ -1382,17 +1221,7 @@ fn validator_is_deterministic() {
         &candidate,
         AuthorityCustodyClass::FixtureLocalKey,
     );
-    let r1 = validate_default(
-        &att,
-        &candidate,
-        &domain,
-        AuthorityCustodyPolicy::FixtureOnly,
-    );
-    let r2 = validate_default(
-        &att,
-        &candidate,
-        &domain,
-        AuthorityCustodyPolicy::FixtureOnly,
-    );
+    let r1 = validate_default(&att, &candidate, &domain, AuthorityCustodyPolicy::FixtureOnly);
+    let r2 = validate_default(&att, &candidate, &domain, AuthorityCustodyPolicy::FixtureOnly);
     assert_eq!(r1, r2);
 }

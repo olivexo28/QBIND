@@ -30,13 +30,14 @@ use qbind_node::pqc_production_kms_hsm_custody_backend::{
     production_kms_hsm_custody_backend_never_falls_back,
     production_kms_hsm_custody_backend_remote_signer_is_not_kms_hsm,
     production_kms_hsm_custody_request_id, production_kms_hsm_custody_transcript_digest,
-    FixtureHsmCustodyProvider, FixtureKmsCustodyProvider, GovernanceProductionKmsHsmCustodyBackend,
+    FixtureHsmCustodyProvider, FixtureKmsCustodyProvider,
+    GovernanceProductionKmsHsmCustodyBackend,
     MockKmsHsmCustodyTransport, ProductionCustodyError, ProductionCustodyOutcome,
     ProductionCustodyProviderKind, ProductionCustodyProviderStub, ProductionCustodyRecoveryOutcome,
-    ProductionCustodyRequestKind, ProductionCustodyRequestSpec, ProductionKmsHsmCustodyBackend,
-    ProductionKmsHsmCustodyBackendConfig, ProductionKmsHsmCustodyBackendPolicy,
-    SubmittedCustodyRequest, PRODUCTION_KMS_HSM_CUSTODY_BACKEND_PROTOCOL_VERSION,
-    PRODUCTION_KMS_HSM_CUSTODY_MAX_RESPONSE_BYTES,
+    ProductionCustodyRequestKind, ProductionCustodyRequestSpec,
+    ProductionKmsHsmCustodyBackend, ProductionKmsHsmCustodyBackendConfig,
+    ProductionKmsHsmCustodyBackendPolicy, SubmittedCustodyRequest,
+    PRODUCTION_KMS_HSM_CUSTODY_BACKEND_PROTOCOL_VERSION, PRODUCTION_KMS_HSM_CUSTODY_MAX_RESPONSE_BYTES,
 };
 use qbind_node::pqc_trust_bundle::TrustBundleEnvironment;
 
@@ -199,17 +200,10 @@ fn a02_devnet_fixture_kms_accepts_valid_request_under_fixture_policy() {
         ProductionKmsHsmCustodyBackendPolicy::FixtureKmsAllowed,
         TrustBundleEnvironment::Devnet,
     );
-    let spec = fixture_spec(
-        ProductionCustodyProviderKind::FixtureKms,
-        TrustBundleEnvironment::Devnet,
-    );
+    let spec = fixture_spec(ProductionCustodyProviderKind::FixtureKms, TrustBundleEnvironment::Devnet);
     let identity = fixture_identity(BackendKind::FixtureKms, TrustBundleEnvironment::Devnet);
-    let outcome = backend.evaluate_custody_backend(
-        &spec,
-        &domain(TrustBundleEnvironment::Devnet),
-        &identity,
-        NOW,
-    );
+    let outcome =
+        backend.evaluate_custody_backend(&spec, &domain(TrustBundleEnvironment::Devnet), &identity, NOW);
     assert!(matches!(
         outcome,
         ProductionCustodyOutcome::FixtureKmsAccepted { .. }
@@ -224,17 +218,10 @@ fn a03_devnet_fixture_hsm_accepts_valid_request_under_fixture_policy() {
         ProductionKmsHsmCustodyBackendPolicy::FixtureHsmAllowed,
         TrustBundleEnvironment::Devnet,
     );
-    let spec = fixture_spec(
-        ProductionCustodyProviderKind::FixtureHsm,
-        TrustBundleEnvironment::Devnet,
-    );
+    let spec = fixture_spec(ProductionCustodyProviderKind::FixtureHsm, TrustBundleEnvironment::Devnet);
     let identity = fixture_identity(BackendKind::FixtureHsm, TrustBundleEnvironment::Devnet);
-    let outcome = backend.evaluate_custody_backend(
-        &spec,
-        &domain(TrustBundleEnvironment::Devnet),
-        &identity,
-        NOW,
-    );
+    let outcome =
+        backend.evaluate_custody_backend(&spec, &domain(TrustBundleEnvironment::Devnet), &identity, NOW);
     assert!(matches!(
         outcome,
         ProductionCustodyOutcome::FixtureHsmAccepted { .. }
@@ -248,17 +235,10 @@ fn a04_testnet_fixture_kms_accepts_under_allowed_policy() {
         ProductionKmsHsmCustodyBackendPolicy::FixtureKmsAllowed,
         TrustBundleEnvironment::Testnet,
     );
-    let spec = fixture_spec(
-        ProductionCustodyProviderKind::FixtureKms,
-        TrustBundleEnvironment::Testnet,
-    );
+    let spec = fixture_spec(ProductionCustodyProviderKind::FixtureKms, TrustBundleEnvironment::Testnet);
     let identity = fixture_identity(BackendKind::FixtureKms, TrustBundleEnvironment::Testnet);
-    let outcome = backend.evaluate_custody_backend(
-        &spec,
-        &domain(TrustBundleEnvironment::Testnet),
-        &identity,
-        NOW,
-    );
+    let outcome =
+        backend.evaluate_custody_backend(&spec, &domain(TrustBundleEnvironment::Testnet), &identity, NOW);
     assert!(matches!(
         outcome,
         ProductionCustodyOutcome::FixtureKmsAccepted { .. }
@@ -271,17 +251,10 @@ fn a05_testnet_fixture_hsm_accepts_under_allowed_policy() {
         ProductionKmsHsmCustodyBackendPolicy::FixtureHsmAllowed,
         TrustBundleEnvironment::Testnet,
     );
-    let spec = fixture_spec(
-        ProductionCustodyProviderKind::FixtureHsm,
-        TrustBundleEnvironment::Testnet,
-    );
+    let spec = fixture_spec(ProductionCustodyProviderKind::FixtureHsm, TrustBundleEnvironment::Testnet);
     let identity = fixture_identity(BackendKind::FixtureHsm, TrustBundleEnvironment::Testnet);
-    let outcome = backend.evaluate_custody_backend(
-        &spec,
-        &domain(TrustBundleEnvironment::Testnet),
-        &identity,
-        NOW,
-    );
+    let outcome =
+        backend.evaluate_custody_backend(&spec, &domain(TrustBundleEnvironment::Testnet), &identity, NOW);
     assert!(matches!(
         outcome,
         ProductionCustodyOutcome::FixtureHsmAccepted { .. }
@@ -316,8 +289,7 @@ fn a07_production_cloud_kms_path_reachable_and_fail_closed() {
         ProductionCustodyProviderKind::ProductionCloudKms,
         TrustBundleEnvironment::Devnet,
     );
-    let out =
-        backend.submit_custody_signing_request(&spec, &domain(TrustBundleEnvironment::Devnet));
+    let out = backend.submit_custody_signing_request(&spec, &domain(TrustBundleEnvironment::Devnet));
     assert_eq!(
         out,
         Err(ProductionCustodyOutcome::ProductionCustodyMisconfigured)
@@ -337,8 +309,7 @@ fn a08_production_pkcs11_hsm_path_reachable_and_fail_closed() {
         ProductionCustodyProviderKind::ProductionPkcs11Hsm,
         TrustBundleEnvironment::Devnet,
     );
-    let out =
-        backend.submit_custody_signing_request(&spec, &domain(TrustBundleEnvironment::Devnet));
+    let out = backend.submit_custody_signing_request(&spec, &domain(TrustBundleEnvironment::Devnet));
     assert_eq!(
         out,
         Err(ProductionCustodyOutcome::ProductionCustodyMisconfigured)
@@ -348,10 +319,7 @@ fn a08_production_pkcs11_hsm_path_reachable_and_fail_closed() {
 
 #[test]
 fn a09_request_id_is_deterministic() {
-    let spec = fixture_spec(
-        ProductionCustodyProviderKind::FixtureKms,
-        TrustBundleEnvironment::Devnet,
-    );
+    let spec = fixture_spec(ProductionCustodyProviderKind::FixtureKms, TrustBundleEnvironment::Devnet);
     assert_eq!(
         production_kms_hsm_custody_request_id(&spec),
         production_kms_hsm_custody_request_id(&spec)
@@ -373,10 +341,12 @@ fn a10_response_digest_is_deterministic() {
 
 #[test]
 fn a11_transcript_digest_is_deterministic() {
-    let a =
-        production_kms_hsm_custody_transcript_digest(1, "rid", "idd", "reqd", "respd", "btd", None);
-    let b =
-        production_kms_hsm_custody_transcript_digest(1, "rid", "idd", "reqd", "respd", "btd", None);
+    let a = production_kms_hsm_custody_transcript_digest(
+        1, "rid", "idd", "reqd", "respd", "btd", None,
+    );
+    let b = production_kms_hsm_custody_transcript_digest(
+        1, "rid", "idd", "reqd", "respd", "btd", None,
+    );
     assert_eq!(a, b);
 }
 
@@ -385,7 +355,10 @@ fn a12_two_identical_requests_produce_identical_digests() {
     let s1 = build_submitted_kms(TrustBundleEnvironment::Devnet);
     let s2 = build_submitted_kms(TrustBundleEnvironment::Devnet);
     assert_eq!(s1.request.envelope_digest(), s2.request.envelope_digest());
-    assert_eq!(s1.response.transcript_digest, s2.response.transcript_digest);
+    assert_eq!(
+        s1.response.transcript_digest,
+        s2.response.transcript_digest
+    );
     assert_eq!(s1.request_id, s2.request_id);
 }
 
@@ -395,10 +368,7 @@ fn a13_valid_fixture_response_authorizes_matching_request() {
         ProductionKmsHsmCustodyBackendPolicy::FixtureKmsAllowed,
         TrustBundleEnvironment::Devnet,
     );
-    let spec = fixture_spec(
-        ProductionCustodyProviderKind::FixtureKms,
-        TrustBundleEnvironment::Devnet,
-    );
+    let spec = fixture_spec(ProductionCustodyProviderKind::FixtureKms, TrustBundleEnvironment::Devnet);
     let identity = fixture_identity(BackendKind::FixtureKms, TrustBundleEnvironment::Devnet);
     let submitted = backend
         .submit_custody_signing_request(&spec, &domain(TrustBundleEnvironment::Devnet))
@@ -487,17 +457,10 @@ fn b01_disabled_policy_no_request_no_provider_invocation() {
         ProductionKmsHsmCustodyBackendPolicy::Disabled,
         TrustBundleEnvironment::Devnet,
     );
-    let spec = fixture_spec(
-        ProductionCustodyProviderKind::FixtureKms,
-        TrustBundleEnvironment::Devnet,
-    );
+    let spec = fixture_spec(ProductionCustodyProviderKind::FixtureKms, TrustBundleEnvironment::Devnet);
     let identity = fixture_identity(BackendKind::FixtureKms, TrustBundleEnvironment::Devnet);
-    let out = backend.evaluate_custody_backend(
-        &spec,
-        &domain(TrustBundleEnvironment::Devnet),
-        &identity,
-        NOW,
-    );
+    let out =
+        backend.evaluate_custody_backend(&spec, &domain(TrustBundleEnvironment::Devnet), &identity, NOW);
     assert_eq!(out, ProductionCustodyOutcome::DisabledNoRequest);
     assert_eq!(backend.transport.call_count(), 0);
     assert!(backend
@@ -511,21 +474,11 @@ fn b02_mainnet_identity_refused() {
         ProductionKmsHsmCustodyBackendPolicy::FixtureKmsAllowed,
         TrustBundleEnvironment::Mainnet,
     );
-    let spec = fixture_spec(
-        ProductionCustodyProviderKind::FixtureKms,
-        TrustBundleEnvironment::Mainnet,
-    );
+    let spec = fixture_spec(ProductionCustodyProviderKind::FixtureKms, TrustBundleEnvironment::Mainnet);
     let identity = fixture_identity(BackendKind::FixtureKms, TrustBundleEnvironment::Mainnet);
-    let out = backend.evaluate_custody_backend(
-        &spec,
-        &domain(TrustBundleEnvironment::Mainnet),
-        &identity,
-        NOW,
-    );
-    assert_eq!(
-        out,
-        ProductionCustodyOutcome::FixtureMaterialRejectedForMainNet
-    );
+    let out =
+        backend.evaluate_custody_backend(&spec, &domain(TrustBundleEnvironment::Mainnet), &identity, NOW);
+    assert_eq!(out, ProductionCustodyOutcome::FixtureMaterialRejectedForMainNet);
     assert_eq!(backend.transport.call_count(), 0);
 }
 
@@ -535,10 +488,7 @@ fn b03_fixture_kms_material_refused_for_mainnet() {
         ProductionKmsHsmCustodyBackendPolicy::FixtureKmsAllowed,
         TrustBundleEnvironment::Mainnet,
     );
-    let spec = fixture_spec(
-        ProductionCustodyProviderKind::FixtureKms,
-        TrustBundleEnvironment::Mainnet,
-    );
+    let spec = fixture_spec(ProductionCustodyProviderKind::FixtureKms, TrustBundleEnvironment::Mainnet);
     let out = backend.build_custody_request(&spec, &domain(TrustBundleEnvironment::Mainnet));
     assert_eq!(
         out,
@@ -552,10 +502,7 @@ fn b04_fixture_hsm_material_refused_for_mainnet() {
         ProductionKmsHsmCustodyBackendPolicy::FixtureHsmAllowed,
         TrustBundleEnvironment::Mainnet,
     );
-    let spec = fixture_spec(
-        ProductionCustodyProviderKind::FixtureHsm,
-        TrustBundleEnvironment::Mainnet,
-    );
+    let spec = fixture_spec(ProductionCustodyProviderKind::FixtureHsm, TrustBundleEnvironment::Mainnet);
     let out = backend.build_custody_request(&spec, &domain(TrustBundleEnvironment::Mainnet));
     assert_eq!(
         out,
@@ -569,10 +516,7 @@ fn b05_remote_signer_material_cannot_satisfy_kms_hsm() {
         ProductionKmsHsmCustodyBackendPolicy::FixtureKmsAllowed,
         TrustBundleEnvironment::Devnet,
     );
-    let mut spec = fixture_spec(
-        ProductionCustodyProviderKind::FixtureKms,
-        TrustBundleEnvironment::Devnet,
-    );
+    let mut spec = fixture_spec(ProductionCustodyProviderKind::FixtureKms, TrustBundleEnvironment::Devnet);
     spec.custody_class = AuthorityCustodyClass::RemoteSigner;
     let out = backend.build_custody_request(&spec, &domain(TrustBundleEnvironment::Devnet));
     assert_eq!(
@@ -588,10 +532,7 @@ fn b06_local_operator_material_refused() {
         ProductionKmsHsmCustodyBackendPolicy::FixtureKmsAllowed,
         TrustBundleEnvironment::Devnet,
     );
-    let mut spec = fixture_spec(
-        ProductionCustodyProviderKind::FixtureKms,
-        TrustBundleEnvironment::Devnet,
-    );
+    let mut spec = fixture_spec(ProductionCustodyProviderKind::FixtureKms, TrustBundleEnvironment::Devnet);
     spec.custody_class = AuthorityCustodyClass::LocalOperatorKey;
     let out = backend.build_custody_request(&spec, &domain(TrustBundleEnvironment::Devnet));
     assert!(matches!(
@@ -606,10 +547,7 @@ fn b07_fixture_local_key_material_refused() {
         ProductionKmsHsmCustodyBackendPolicy::FixtureKmsAllowed,
         TrustBundleEnvironment::Devnet,
     );
-    let mut spec = fixture_spec(
-        ProductionCustodyProviderKind::FixtureKms,
-        TrustBundleEnvironment::Devnet,
-    );
+    let mut spec = fixture_spec(ProductionCustodyProviderKind::FixtureKms, TrustBundleEnvironment::Devnet);
     spec.custody_class = AuthorityCustodyClass::FixtureLocalKey;
     let out = backend.build_custody_request(&spec, &domain(TrustBundleEnvironment::Devnet));
     assert!(matches!(
@@ -632,10 +570,7 @@ fn b08_wrong_environment_rejected() {
         )),
         NOW,
     );
-    assert_eq!(
-        out,
-        ProductionCustodyOutcome::ProductionCustodyDomainMismatch
-    );
+    assert_eq!(out, ProductionCustodyOutcome::ProductionCustodyDomainMismatch);
 }
 
 #[test]
@@ -652,10 +587,7 @@ fn b09_wrong_chain_rejected() {
         )),
         NOW,
     );
-    assert_eq!(
-        out,
-        ProductionCustodyOutcome::ProductionCustodyDomainMismatch
-    );
+    assert_eq!(out, ProductionCustodyOutcome::ProductionCustodyDomainMismatch);
 }
 
 #[test]
@@ -672,10 +604,7 @@ fn b10_wrong_genesis_rejected() {
         )),
         NOW,
     );
-    assert_eq!(
-        out,
-        ProductionCustodyOutcome::ProductionCustodyDomainMismatch
-    );
+    assert_eq!(out, ProductionCustodyOutcome::ProductionCustodyDomainMismatch);
 }
 
 #[test]
@@ -692,10 +621,7 @@ fn b11_wrong_authority_root_rejected() {
         )),
         NOW,
     );
-    assert_eq!(
-        out,
-        ProductionCustodyOutcome::ProductionCustodyDomainMismatch
-    );
+    assert_eq!(out, ProductionCustodyOutcome::ProductionCustodyDomainMismatch);
 }
 
 #[test]
@@ -714,30 +640,16 @@ fn b13_wrong_provider_kind_rejected() {
         TrustBundleEnvironment::Devnet,
     );
     // Fixture KMS policy but a cloud-KMS provider kind in the spec.
-    let mut spec = fixture_spec(
-        ProductionCustodyProviderKind::FixtureKms,
-        TrustBundleEnvironment::Devnet,
-    );
+    let mut spec = fixture_spec(ProductionCustodyProviderKind::FixtureKms, TrustBundleEnvironment::Devnet);
     spec.provider_kind = ProductionCustodyProviderKind::ProductionCloudKms;
     let out = backend.build_custody_request(&spec, &domain(TrustBundleEnvironment::Devnet));
-    assert_eq!(
-        out,
-        Err(ProductionCustodyOutcome::ProductionCustodyWrongProvider)
-    );
+    assert_eq!(out, Err(ProductionCustodyOutcome::ProductionCustodyWrongProvider));
 }
 
 #[test]
 fn b14_wrong_key_handle_rejected() {
-    let (out, _) = verify_with(
-        |s| s.key_id = "wrong-key".to_string(),
-        |i| i.key_id = "wrong-key".to_string(),
-        None,
-        NOW,
-    );
-    assert_eq!(
-        out,
-        ProductionCustodyOutcome::ProductionCustodyWrongKeyHandle
-    );
+    let (out, _) = verify_with(|s| s.key_id = "wrong-key".to_string(), |i| i.key_id = "wrong-key".to_string(), None, NOW);
+    assert_eq!(out, ProductionCustodyOutcome::ProductionCustodyWrongKeyHandle);
 }
 
 #[test]
@@ -765,10 +677,7 @@ fn b16_wrong_request_id_rejected() {
         .expect("submit");
     submitted.response.request_id_echo = "tampered-id".to_string();
     let out = backend.verify_custody_response(&spec, &submitted, &domain(env), &identity, NOW);
-    assert_eq!(
-        out,
-        ProductionCustodyOutcome::ProductionCustodyRequestIdMismatch
-    );
+    assert_eq!(out, ProductionCustodyOutcome::ProductionCustodyRequestIdMismatch);
 }
 
 #[test]
@@ -782,36 +691,20 @@ fn b17_wrong_transcript_digest_rejected() {
         .expect("submit");
     submitted.response.transcript_digest = "tampered-transcript".to_string();
     let out = backend.verify_custody_response(&spec, &submitted, &domain(env), &identity, NOW);
-    assert_eq!(
-        out,
-        ProductionCustodyOutcome::ProductionCustodyTranscriptMismatch
-    );
+    assert_eq!(out, ProductionCustodyOutcome::ProductionCustodyTranscriptMismatch);
 }
 
 #[test]
 fn b18_wrong_candidate_digest_rejected() {
-    let (out, _) = verify_with(
-        |s| s.candidate_digest = "wrong-candidate".to_string(),
-        |_| {},
-        None,
-        NOW,
-    );
-    assert_eq!(
-        out,
-        ProductionCustodyOutcome::ProductionCustodyWrongCandidateDigest
-    );
+    let (out, _) = verify_with(|s| s.candidate_digest = "wrong-candidate".to_string(), |_| {}, None, NOW);
+    assert_eq!(out, ProductionCustodyOutcome::ProductionCustodyWrongCandidateDigest);
 }
 
 #[test]
 fn b19_wrong_authorized_action_rejected() {
-    let (out, _) = verify_with(
-        |s| s.lifecycle_action = LocalLifecycleAction::Revoke,
-        |i| {
-            i.allowed_lifecycle_actions = vec![LocalLifecycleAction::Revoke];
-        },
-        None,
-        NOW,
-    );
+    let (out, _) = verify_with(|s| s.lifecycle_action = LocalLifecycleAction::Revoke, |i| {
+        i.allowed_lifecycle_actions = vec![LocalLifecycleAction::Revoke];
+    }, None, NOW);
     assert_eq!(out, ProductionCustodyOutcome::ProductionCustodyWrongAction);
 }
 
@@ -893,10 +786,7 @@ fn b24_response_replay_from_prior_request_rejected() {
     let identity = fixture_identity(BackendKind::FixtureKms, env);
     // Verify prior response against the new request spec.
     let out = backend.verify_custody_response(&spec_b, &submitted_a, &domain(env), &identity, NOW);
-    assert_eq!(
-        out,
-        ProductionCustodyOutcome::ProductionCustodyWrongCandidateDigest
-    );
+    assert_eq!(out, ProductionCustodyOutcome::ProductionCustodyWrongCandidateDigest);
 }
 
 #[test]
@@ -938,10 +828,7 @@ fn b29_provider_policy_rejected_rejected() {
 #[test]
 fn b30_unsupported_provider_rejected() {
     let out = submit_mock_error(ProductionCustodyError::UnsupportedProvider);
-    assert_eq!(
-        out,
-        ProductionCustodyOutcome::ProductionCustodyUnsupportedProvider
-    );
+    assert_eq!(out, ProductionCustodyOutcome::ProductionCustodyUnsupportedProvider);
 }
 
 #[test]
@@ -962,19 +849,13 @@ fn b32_endpoint_unavailable_rejected() {
 #[test]
 fn b33_attestation_missing_rejected() {
     let out = submit_mock_error(ProductionCustodyError::AttestationMissing);
-    assert_eq!(
-        out,
-        ProductionCustodyOutcome::ProductionCustodyAttestationMissing
-    );
+    assert_eq!(out, ProductionCustodyOutcome::ProductionCustodyAttestationMissing);
 }
 
 #[test]
 fn b34_attestation_unavailable_fail_closed() {
     let out = submit_mock_error(ProductionCustodyError::AttestationUnavailable);
-    assert_eq!(
-        out,
-        ProductionCustodyOutcome::ProductionCustodyAttestationUnavailable
-    );
+    assert_eq!(out, ProductionCustodyOutcome::ProductionCustodyAttestationUnavailable);
 }
 
 #[test]
@@ -983,10 +864,7 @@ fn b35_validator_set_rotation_request_unsupported() {
         ProductionKmsHsmCustodyBackendPolicy::FixtureKmsAllowed,
         TrustBundleEnvironment::Devnet,
     );
-    let mut spec = fixture_spec(
-        ProductionCustodyProviderKind::FixtureKms,
-        TrustBundleEnvironment::Devnet,
-    );
+    let mut spec = fixture_spec(ProductionCustodyProviderKind::FixtureKms, TrustBundleEnvironment::Devnet);
     spec.request_kind = ProductionCustodyRequestKind::ValidatorSetRotation;
     let out = backend.build_custody_request(&spec, &domain(TrustBundleEnvironment::Devnet));
     assert_eq!(
@@ -1001,16 +879,10 @@ fn b36_governance_verifier_request_unavailable() {
         ProductionKmsHsmCustodyBackendPolicy::FixtureKmsAllowed,
         TrustBundleEnvironment::Devnet,
     );
-    let mut spec = fixture_spec(
-        ProductionCustodyProviderKind::FixtureKms,
-        TrustBundleEnvironment::Devnet,
-    );
+    let mut spec = fixture_spec(ProductionCustodyProviderKind::FixtureKms, TrustBundleEnvironment::Devnet);
     spec.request_kind = ProductionCustodyRequestKind::OnChainGovernanceProofVerification;
     let out = backend.build_custody_request(&spec, &domain(TrustBundleEnvironment::Devnet));
-    assert_eq!(
-        out,
-        Err(ProductionCustodyOutcome::GovernanceVerifierUnavailable)
-    );
+    assert_eq!(out, Err(ProductionCustodyOutcome::GovernanceVerifierUnavailable));
 }
 
 fn submit_mock_error(err: ProductionCustodyError) -> ProductionCustodyOutcome {
@@ -1037,15 +909,9 @@ fn c01_mainnet_cannot_be_satisfied_by_fixture_kms() {
         ProductionKmsHsmCustodyBackendPolicy::FixtureKmsAllowed,
         TrustBundleEnvironment::Mainnet,
     );
-    let spec = fixture_spec(
-        ProductionCustodyProviderKind::FixtureKms,
-        TrustBundleEnvironment::Mainnet,
-    );
+    let spec = fixture_spec(ProductionCustodyProviderKind::FixtureKms, TrustBundleEnvironment::Mainnet);
     let out = backend.build_custody_request(&spec, &domain(TrustBundleEnvironment::Mainnet));
-    assert_eq!(
-        out,
-        Err(ProductionCustodyOutcome::FixtureMaterialRejectedForMainNet)
-    );
+    assert_eq!(out, Err(ProductionCustodyOutcome::FixtureMaterialRejectedForMainNet));
     assert_eq!(backend.transport.call_count(), 0);
 }
 
@@ -1055,15 +921,9 @@ fn c02_mainnet_cannot_be_satisfied_by_fixture_hsm() {
         ProductionKmsHsmCustodyBackendPolicy::FixtureHsmAllowed,
         TrustBundleEnvironment::Mainnet,
     );
-    let spec = fixture_spec(
-        ProductionCustodyProviderKind::FixtureHsm,
-        TrustBundleEnvironment::Mainnet,
-    );
+    let spec = fixture_spec(ProductionCustodyProviderKind::FixtureHsm, TrustBundleEnvironment::Mainnet);
     let out = backend.build_custody_request(&spec, &domain(TrustBundleEnvironment::Mainnet));
-    assert_eq!(
-        out,
-        Err(ProductionCustodyOutcome::FixtureMaterialRejectedForMainNet)
-    );
+    assert_eq!(out, Err(ProductionCustodyOutcome::FixtureMaterialRejectedForMainNet));
 }
 
 #[test]
@@ -1072,16 +932,10 @@ fn c03_mainnet_cannot_be_satisfied_by_remote_signer_only() {
         ProductionKmsHsmCustodyBackendPolicy::FixtureKmsAllowed,
         TrustBundleEnvironment::Mainnet,
     );
-    let mut spec = fixture_spec(
-        ProductionCustodyProviderKind::FixtureKms,
-        TrustBundleEnvironment::Mainnet,
-    );
+    let mut spec = fixture_spec(ProductionCustodyProviderKind::FixtureKms, TrustBundleEnvironment::Mainnet);
     spec.custody_class = AuthorityCustodyClass::RemoteSigner;
     let out = backend.build_custody_request(&spec, &domain(TrustBundleEnvironment::Mainnet));
-    assert_eq!(
-        out,
-        Err(ProductionCustodyOutcome::RemoteSignerIsNotKmsHsmCustody)
-    );
+    assert_eq!(out, Err(ProductionCustodyOutcome::RemoteSignerIsNotKmsHsmCustody));
 }
 
 #[test]
@@ -1090,10 +944,7 @@ fn c04_mainnet_cannot_be_satisfied_by_local_operator_material() {
         ProductionKmsHsmCustodyBackendPolicy::FixtureKmsAllowed,
         TrustBundleEnvironment::Mainnet,
     );
-    let mut spec = fixture_spec(
-        ProductionCustodyProviderKind::FixtureKms,
-        TrustBundleEnvironment::Mainnet,
-    );
+    let mut spec = fixture_spec(ProductionCustodyProviderKind::FixtureKms, TrustBundleEnvironment::Mainnet);
     spec.custody_class = AuthorityCustodyClass::LocalOperatorKey;
     let out = backend.build_custody_request(&spec, &domain(TrustBundleEnvironment::Mainnet));
     assert!(matches!(
@@ -1117,16 +968,10 @@ fn c05_mainnet_production_policy_unavailable_no_provider_call() {
     let out = backend.evaluate_custody_backend(
         &spec,
         &domain(TrustBundleEnvironment::Mainnet),
-        &fixture_identity(
-            BackendKind::CloudKmsUnavailable,
-            TrustBundleEnvironment::Mainnet,
-        ),
+        &fixture_identity(BackendKind::CloudKmsUnavailable, TrustBundleEnvironment::Mainnet),
         NOW,
     );
-    assert_eq!(
-        out,
-        ProductionCustodyOutcome::MainNetProductionCustodyUnavailable
-    );
+    assert_eq!(out, ProductionCustodyOutcome::MainNetProductionCustodyUnavailable);
     assert_eq!(backend.transport.call_count(), 0);
 }
 
@@ -1194,10 +1039,7 @@ fn c10_mainnet_peer_majority_material_refused() {
         ProductionKmsHsmCustodyBackendPolicy::FixtureKmsAllowed,
         TrustBundleEnvironment::Mainnet,
     );
-    let mut spec = fixture_spec(
-        ProductionCustodyProviderKind::FixtureKms,
-        TrustBundleEnvironment::Mainnet,
-    );
+    let mut spec = fixture_spec(ProductionCustodyProviderKind::FixtureKms, TrustBundleEnvironment::Mainnet);
     // A peer-majority-derived local key cannot satisfy KMS/HSM custody.
     spec.custody_class = AuthorityCustodyClass::LocalOperatorKey;
     let out = backend.build_custody_request(&spec, &domain(TrustBundleEnvironment::Mainnet));
@@ -1215,10 +1057,7 @@ fn d01_disabled_reject_is_non_mutating() {
         ProductionKmsHsmCustodyBackendPolicy::Disabled,
         TrustBundleEnvironment::Devnet,
     );
-    let spec = fixture_spec(
-        ProductionCustodyProviderKind::FixtureKms,
-        TrustBundleEnvironment::Devnet,
-    );
+    let spec = fixture_spec(ProductionCustodyProviderKind::FixtureKms, TrustBundleEnvironment::Devnet);
     let out = backend.build_custody_request(&spec, &domain(TrustBundleEnvironment::Devnet));
     assert!(out.is_err());
     assert_eq!(backend.transport.call_count(), 0);
@@ -1253,10 +1092,7 @@ fn d03_reject_domain_mismatch_no_provider_after_verify() {
         )),
         NOW,
     );
-    assert_eq!(
-        out,
-        ProductionCustodyOutcome::ProductionCustodyDomainMismatch
-    );
+    assert_eq!(out, ProductionCustodyOutcome::ProductionCustodyDomainMismatch);
     // Exactly one submit during the setup, none added by verify.
     assert_eq!(calls, 1);
 }
@@ -1292,12 +1128,8 @@ fn d08_production_unavailable_records_single_reachable_call_only() {
         ProductionCustodyProviderKind::ProductionGenericKms,
         TrustBundleEnvironment::Devnet,
     );
-    let out =
-        backend.submit_custody_signing_request(&spec, &domain(TrustBundleEnvironment::Devnet));
-    assert_eq!(
-        out,
-        Err(ProductionCustodyOutcome::ProductionCustodyUnavailable)
-    );
+    let out = backend.submit_custody_signing_request(&spec, &domain(TrustBundleEnvironment::Devnet));
+    assert_eq!(out, Err(ProductionCustodyOutcome::ProductionCustodyUnavailable));
     assert_eq!(backend.transport.call_count(), 1);
 }
 
@@ -1309,10 +1141,7 @@ fn d09_reject_wrong_key_handle_no_extra_provider_call() {
         None,
         NOW,
     );
-    assert_eq!(
-        out,
-        ProductionCustodyOutcome::ProductionCustodyWrongKeyHandle
-    );
+    assert_eq!(out, ProductionCustodyOutcome::ProductionCustodyWrongKeyHandle);
     assert_eq!(calls, 1);
 }
 

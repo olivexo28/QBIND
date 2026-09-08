@@ -465,10 +465,7 @@ mod tests {
             // under the default `Disabled` policy.
             peer_driven_drain_callsite_onchain_governance_marker_decision(&c),
         ] {
-            assert_eq!(
-                outcome,
-                OnChainGovernanceMarkerDecisionOutcome::PolicyDisabled
-            );
+            assert_eq!(outcome, OnChainGovernanceMarkerDecisionOutcome::PolicyDisabled);
         }
     }
 
@@ -490,10 +487,7 @@ mod tests {
         let mut c = ctx(&candidate, &domain, &replay);
         c.policy = OnChainGovernanceProofPolicy::AllowFixtureSourceTest;
         let outcome = peer_driven_drain_callsite_onchain_governance_marker_decision(&c);
-        assert_eq!(
-            outcome,
-            OnChainGovernanceMarkerDecisionOutcome::MainNetRefused
-        );
+        assert_eq!(outcome, OnChainGovernanceMarkerDecisionOutcome::MainNetRefused);
     }
 
     #[test]

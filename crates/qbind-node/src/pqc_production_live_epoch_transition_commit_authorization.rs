@@ -74,9 +74,9 @@ use crate::pqc_production_governance_execution_engine::{
     GovernanceExecutionDurableReplayBinding,
 };
 use crate::pqc_production_live_epoch_transition_mutation_execution::{
-    LiveEpochTransitionMutationExecutionKind,
-    ProductionLiveEpochTransitionMutationExecutionArtifact,
     ProductionLiveEpochTransitionMutationExecutionDecision,
+    ProductionLiveEpochTransitionMutationExecutionArtifact,
+    LiveEpochTransitionMutationExecutionKind,
 };
 use crate::pqc_production_validator_set_rotation_intent::ValidatorSetRotationAction;
 use crate::pqc_trust_bundle::TrustBundleEnvironment;
@@ -267,7 +267,10 @@ impl ProductionLiveEpochTransitionCommitAuthorizationExecutorKind {
     /// Returns `true` iff this kind performs real source/test authorization
     /// construction.
     pub const fn is_source_test(self) -> bool {
-        matches!(self, Self::SourceTestLiveEpochTransitionCommitAuthorization)
+        matches!(
+            self,
+            Self::SourceTestLiveEpochTransitionCommitAuthorization
+        )
     }
 }
 
@@ -340,17 +343,27 @@ pub enum LiveEpochTransitionCommitAuthorizationKind {
 impl LiveEpochTransitionCommitAuthorizationKind {
     pub const fn tag(self) -> &'static str {
         match self {
-            Self::StageApplyNoOpAlreadySynchronized => "stage-apply-no-op-already-synchronized",
+            Self::StageApplyNoOpAlreadySynchronized => {
+                "stage-apply-no-op-already-synchronized"
+            }
             Self::StageApplyValidatorAdd => "stage-apply-validator-add",
             Self::StageApplyValidatorRemove => "stage-apply-validator-remove",
-            Self::StageApplyValidatorMetadataUpdate => "stage-apply-validator-metadata-update",
-            Self::StageApplyValidatorIdentityRotation => "stage-apply-validator-identity-rotation",
+            Self::StageApplyValidatorMetadataUpdate => {
+                "stage-apply-validator-metadata-update"
+            }
+            Self::StageApplyValidatorIdentityRotation => {
+                "stage-apply-validator-identity-rotation"
+            }
             Self::StageApplyValidatorRetirement => "stage-apply-validator-retirement",
-            Self::StageApplyEmergencyValidatorRemoval => "stage-apply-emergency-validator-removal",
+            Self::StageApplyEmergencyValidatorRemoval => {
+                "stage-apply-emergency-validator-removal"
+            }
             Self::StageApplyAuthoritySetSynchronization => {
                 "stage-apply-authority-set-synchronization"
             }
-            Self::StageApplyBulkValidatorSetRotation => "stage-apply-bulk-validator-set-rotation",
+            Self::StageApplyBulkValidatorSetRotation => {
+                "stage-apply-bulk-validator-set-rotation"
+            }
             Self::UnsupportedStagedApplication => "unsupported-staged-application",
         }
     }
@@ -374,10 +387,14 @@ impl LiveEpochTransitionCommitAuthorizationKind {
             A::StageApplyValidatorAdd => Self::StageApplyValidatorAdd,
             A::StageApplyValidatorRemove => Self::StageApplyValidatorRemove,
             A::StageApplyValidatorMetadataUpdate => Self::StageApplyValidatorMetadataUpdate,
-            A::StageApplyValidatorIdentityRotation => Self::StageApplyValidatorIdentityRotation,
+            A::StageApplyValidatorIdentityRotation => {
+                Self::StageApplyValidatorIdentityRotation
+            }
             A::StageApplyValidatorRetirement => Self::StageApplyValidatorRetirement,
             A::StageApplyEmergencyValidatorRemoval => Self::StageApplyEmergencyValidatorRemoval,
-            A::StageApplyAuthoritySetSynchronization => Self::StageApplyAuthoritySetSynchronization,
+            A::StageApplyAuthoritySetSynchronization => {
+                Self::StageApplyAuthoritySetSynchronization
+            }
             A::StageApplyBulkValidatorSetRotation => Self::StageApplyBulkValidatorSetRotation,
             A::UnsupportedStagedApplication => Self::UnsupportedStagedApplication,
         }
@@ -685,9 +702,7 @@ impl ProductionLiveEpochTransitionCommitAuthorizationInputs {
             && !self.expected_staged_application_decision_id.is_empty()
             && !self.expected_staged_application_request_id.is_empty()
             && !self.expected_staged_application_intent_digest.is_empty()
-            && !self
-                .expected_staged_application_transcript_digest
-                .is_empty()
+            && !self.expected_staged_application_transcript_digest.is_empty()
             && !self.expected_guarded_mutation_decision_id.is_empty()
             && !self.expected_guarded_mutation_request_id.is_empty()
             && !self.expected_guarded_mutation_intent_digest.is_empty()
@@ -695,15 +710,11 @@ impl ProductionLiveEpochTransitionCommitAuthorizationInputs {
             && !self.expected_mutation_execution_decision_id.is_empty()
             && !self.expected_mutation_execution_request_id.is_empty()
             && !self.expected_mutation_execution_intent_digest.is_empty()
-            && !self
-                .expected_mutation_execution_transcript_digest
-                .is_empty()
+            && !self.expected_mutation_execution_transcript_digest.is_empty()
             && !self.expected_execution_preparation_decision_id.is_empty()
             && !self.expected_execution_preparation_request_id.is_empty()
             && !self.expected_execution_preparation_intent_digest.is_empty()
-            && !self
-                .expected_execution_preparation_transcript_digest
-                .is_empty()
+            && !self.expected_execution_preparation_transcript_digest.is_empty()
             && !self.expected_runtime_handoff_decision_id.is_empty()
             && !self.expected_runtime_handoff_request_id.is_empty()
             && !self.expected_runtime_handoff_intent_digest.is_empty()
@@ -959,31 +970,15 @@ impl ProductionLiveEpochTransitionCommitAuthorizationArtifact {
             PRODUCTION_LIVE_EPOCH_TRANSITION_COMMIT_AUTHORIZATION_INTENT_DOMAIN_TAG.as_bytes(),
         );
         hash_field(&mut h, b"staged_kind", self.staged_kind.tag().as_bytes());
-        hash_field(
-            &mut h,
-            b"protocol_version",
-            &self.protocol_version.to_le_bytes(),
-        );
+        hash_field(&mut h, b"protocol_version", &self.protocol_version.to_le_bytes());
         hash_field(
             &mut h,
             b"commit_authorization_policy_id",
             self.commit_authorization_policy_id.as_bytes(),
         );
-        hash_field(
-            &mut h,
-            b"authorization_policy_id",
-            self.authorization_policy_id.as_bytes(),
-        );
-        hash_field(
-            &mut h,
-            b"application_policy_id",
-            self.application_policy_id.as_bytes(),
-        );
-        hash_field(
-            &mut h,
-            b"environment",
-            &self.environment.metric_code().to_le_bytes(),
-        );
+        hash_field(&mut h, b"authorization_policy_id", self.authorization_policy_id.as_bytes());
+        hash_field(&mut h, b"application_policy_id", self.application_policy_id.as_bytes());
+        hash_field(&mut h, b"environment", &self.environment.metric_code().to_le_bytes());
         hash_field(&mut h, b"chain_id", self.chain_id.as_bytes());
         hash_field(&mut h, b"genesis_hash", self.genesis_hash.as_bytes());
         hash_field(
@@ -991,174 +986,58 @@ impl ProductionLiveEpochTransitionCommitAuthorizationArtifact {
             b"authority_root_fingerprint",
             self.authority_root_fingerprint.as_bytes(),
         );
-        hash_field(
-            &mut h,
-            b"authority_root_suite_id",
-            &[self.authority_root_suite_id],
-        );
-        hash_field(
-            &mut h,
-            b"governance_domain_id",
-            self.governance_domain_id.as_bytes(),
-        );
-        hash_field(
-            &mut h,
-            b"governance_epoch",
-            &self.governance_epoch.to_le_bytes(),
-        );
-        hash_field(
-            &mut h,
-            b"governance_height",
-            &self.governance_height.to_le_bytes(),
-        );
+        hash_field(&mut h, b"authority_root_suite_id", &[self.authority_root_suite_id]);
+        hash_field(&mut h, b"governance_domain_id", self.governance_domain_id.as_bytes());
+        hash_field(&mut h, b"governance_epoch", &self.governance_epoch.to_le_bytes());
+        hash_field(&mut h, b"governance_height", &self.governance_height.to_le_bytes());
         hash_field(&mut h, b"proposal_id", self.proposal_id.as_bytes());
         hash_field(&mut h, b"proposal_digest", self.proposal_digest.as_bytes());
-        hash_field(
-            &mut h,
-            b"quorum_voted",
-            &self.quorum.voters_voted.to_le_bytes(),
-        );
-        hash_field(
-            &mut h,
-            b"quorum_total",
-            &self.quorum.total_voters.to_le_bytes(),
-        );
-        hash_field(
-            &mut h,
-            b"quorum_required",
-            &self.quorum.required_quorum.to_le_bytes(),
-        );
-        hash_field(
-            &mut h,
-            b"threshold_approvals",
-            &self.threshold.approvals.to_le_bytes(),
-        );
-        hash_field(
-            &mut h,
-            b"threshold_required",
-            &self.threshold.required.to_le_bytes(),
-        );
-        hash_field(
-            &mut h,
-            b"threshold_total",
-            &self.threshold.total.to_le_bytes(),
-        );
-        hash_field(
-            &mut h,
-            b"lifecycle_action",
-            self.lifecycle_action.tag().as_bytes(),
-        );
-        hash_field(
-            &mut h,
-            b"rotation_action",
-            self.rotation_action.tag().as_bytes(),
-        );
+        hash_field(&mut h, b"quorum_voted", &self.quorum.voters_voted.to_le_bytes());
+        hash_field(&mut h, b"quorum_total", &self.quorum.total_voters.to_le_bytes());
+        hash_field(&mut h, b"quorum_required", &self.quorum.required_quorum.to_le_bytes());
+        hash_field(&mut h, b"threshold_approvals", &self.threshold.approvals.to_le_bytes());
+        hash_field(&mut h, b"threshold_required", &self.threshold.required.to_le_bytes());
+        hash_field(&mut h, b"threshold_total", &self.threshold.total.to_le_bytes());
+        hash_field(&mut h, b"lifecycle_action", self.lifecycle_action.tag().as_bytes());
+        hash_field(&mut h, b"rotation_action", self.rotation_action.tag().as_bytes());
         hash_field(
             &mut h,
             b"authority_domain_sequence",
             &self.authority_domain_sequence.to_le_bytes(),
         );
-        hash_field(
-            &mut h,
-            b"governance_decision_id",
-            self.governance_decision_id.as_bytes(),
-        );
-        hash_field(
-            &mut h,
-            b"governance_request_id",
-            self.governance_request_id.as_bytes(),
-        );
-        hash_field(
-            &mut h,
-            b"governance_intent_digest",
-            self.governance_intent_digest.as_bytes(),
-        );
-        hash_field(
-            &mut h,
-            b"rotation_decision_id",
-            self.rotation_decision_id.as_bytes(),
-        );
-        hash_field(
-            &mut h,
-            b"rotation_request_id",
-            self.rotation_request_id.as_bytes(),
-        );
+        hash_field(&mut h, b"governance_decision_id", self.governance_decision_id.as_bytes());
+        hash_field(&mut h, b"governance_request_id", self.governance_request_id.as_bytes());
+        hash_field(&mut h, b"governance_intent_digest", self.governance_intent_digest.as_bytes());
+        hash_field(&mut h, b"rotation_decision_id", self.rotation_decision_id.as_bytes());
+        hash_field(&mut h, b"rotation_request_id", self.rotation_request_id.as_bytes());
         hash_field(
             &mut h,
             b"rotation_transcript_digest",
             self.rotation_transcript_digest.as_bytes(),
         );
-        hash_field(
-            &mut h,
-            b"rotation_plan_digest",
-            self.rotation_plan_digest.as_bytes(),
-        );
-        hash_field(
-            &mut h,
-            b"current_set_digest",
-            self.current_set_digest.as_bytes(),
-        );
-        hash_field(
-            &mut h,
-            b"proposed_set_digest",
-            self.proposed_set_digest.as_bytes(),
-        );
+        hash_field(&mut h, b"rotation_plan_digest", self.rotation_plan_digest.as_bytes());
+        hash_field(&mut h, b"current_set_digest", self.current_set_digest.as_bytes());
+        hash_field(&mut h, b"proposed_set_digest", self.proposed_set_digest.as_bytes());
         hash_field(&mut h, b"delta_digest", self.delta_digest.as_bytes());
-        hash_field(
-            &mut h,
-            b"validator_set_epoch",
-            &self.validator_set_epoch.to_le_bytes(),
-        );
-        hash_field(
-            &mut h,
-            b"validator_set_version",
-            &self.validator_set_version.to_le_bytes(),
-        );
+        hash_field(&mut h, b"validator_set_epoch", &self.validator_set_epoch.to_le_bytes());
+        hash_field(&mut h, b"validator_set_version", &self.validator_set_version.to_le_bytes());
         hash_field(
             &mut h,
             b"proposed_validator_count",
             &self.proposed_validator_count.to_le_bytes(),
         );
-        hash_field(
-            &mut h,
-            b"rotation_nonce",
-            &self.rotation_nonce.to_le_bytes(),
-        );
-        hash_field(
-            &mut h,
-            b"application_decision_id",
-            self.application_decision_id.as_bytes(),
-        );
-        hash_field(
-            &mut h,
-            b"application_request_id",
-            self.application_request_id.as_bytes(),
-        );
-        hash_field(
-            &mut h,
-            b"application_intent_digest",
-            self.application_intent_digest.as_bytes(),
-        );
+        hash_field(&mut h, b"rotation_nonce", &self.rotation_nonce.to_le_bytes());
+        hash_field(&mut h, b"application_decision_id", self.application_decision_id.as_bytes());
+        hash_field(&mut h, b"application_request_id", self.application_request_id.as_bytes());
+        hash_field(&mut h, b"application_intent_digest", self.application_intent_digest.as_bytes());
         hash_field(
             &mut h,
             b"application_transcript_digest",
             self.application_transcript_digest.as_bytes(),
         );
-        hash_field(
-            &mut h,
-            b"application_nonce",
-            &self.application_nonce.to_le_bytes(),
-        );
-        hash_field(
-            &mut h,
-            b"epoch_transition_target",
-            &self.epoch_transition_target.to_le_bytes(),
-        );
-        hash_field(
-            &mut h,
-            b"live_application_nonce",
-            &self.live_application_nonce.to_le_bytes(),
-        );
+        hash_field(&mut h, b"application_nonce", &self.application_nonce.to_le_bytes());
+        hash_field(&mut h, b"epoch_transition_target", &self.epoch_transition_target.to_le_bytes());
+        hash_field(&mut h, b"live_application_nonce", &self.live_application_nonce.to_le_bytes());
         hash_field(
             &mut h,
             b"authorization_decision_id",
@@ -1322,9 +1201,7 @@ impl ProductionLiveEpochTransitionCommitAuthorizationArtifact {
         hash_field(
             &mut h,
             b"precondition_current_validator_set_version",
-            &self
-                .precondition_current_validator_set_version
-                .to_le_bytes(),
+            &self.precondition_current_validator_set_version.to_le_bytes(),
         );
         hash_field(
             &mut h,
@@ -1390,17 +1267,9 @@ impl ProductionLiveEpochTransitionCommitAuthorizationArtifact {
 /// Custody binding canonical hashing (module-local; mirrors Run 305/307/309
 /// field order for cross-run digest stability).
 fn custody_hash_into(c: &GovernanceExecutionCustodyBinding, h: &mut sha3::Sha3_256) {
-    hash_field(
-        h,
-        b"custody_provider_class",
-        c.provider_class.tag().as_bytes(),
-    );
+    hash_field(h, b"custody_provider_class", c.provider_class.tag().as_bytes());
     hash_field(h, b"custody_key_handle", c.key_handle.as_bytes());
-    hash_field(
-        h,
-        b"custody_signer_fingerprint",
-        c.signer_fingerprint.as_bytes(),
-    );
+    hash_field(h, b"custody_signer_fingerprint", c.signer_fingerprint.as_bytes());
     hash_field(
         h,
         b"custody_transcript_digest",
@@ -1419,11 +1288,7 @@ fn attestation_hash_into(a: &GovernanceExecutionAttestationBinding, h: &mut sha3
 
 fn durable_hash_into(d: &GovernanceExecutionDurableReplayBinding, h: &mut sha3::Sha3_256) {
     hash_field(h, b"durable_record_id", d.durable_record_id.as_bytes());
-    hash_field(
-        h,
-        b"durable_record_digest",
-        d.durable_record_digest.as_bytes(),
-    );
+    hash_field(h, b"durable_record_digest", d.durable_record_digest.as_bytes());
 }
 
 /// Run 319 — deterministic runtime handoff package content digest wrapper
@@ -1447,7 +1312,9 @@ pub fn production_live_epoch_transition_commit_authorization_request_id(
 ) -> String {
     use sha3::{Digest, Sha3_256};
     let mut h = Sha3_256::new();
-    h.update(PRODUCTION_LIVE_EPOCH_TRANSITION_COMMIT_AUTHORIZATION_REQUEST_DOMAIN_TAG.as_bytes());
+    h.update(
+        PRODUCTION_LIVE_EPOCH_TRANSITION_COMMIT_AUTHORIZATION_REQUEST_DOMAIN_TAG.as_bytes(),
+    );
     hash_field(&mut h, b"protocol_version", &protocol_version.to_le_bytes());
     hash_field(
         &mut h,
@@ -1486,18 +1353,16 @@ pub fn production_live_epoch_transition_commit_authorization_id(
 ) -> String {
     use sha3::{Digest, Sha3_256};
     let mut h = Sha3_256::new();
-    h.update(PRODUCTION_LIVE_EPOCH_TRANSITION_COMMIT_AUTHORIZATION_ID_DOMAIN_TAG.as_bytes());
+    h.update(
+        PRODUCTION_LIVE_EPOCH_TRANSITION_COMMIT_AUTHORIZATION_ID_DOMAIN_TAG.as_bytes(),
+    );
     hash_field(&mut h, b"protocol_version", &protocol_version.to_le_bytes());
     hash_field(
         &mut h,
         b"guarded_mutation_intent_digest",
         guarded_mutation_intent_digest.as_bytes(),
     );
-    hash_field(
-        &mut h,
-        b"commit_authorization_policy_id",
-        commit_authorization_policy_id.as_bytes(),
-    );
+    hash_field(&mut h, b"commit_authorization_policy_id", commit_authorization_policy_id.as_bytes());
     hash_field(
         &mut h,
         b"epoch_transition_target",
@@ -1687,17 +1552,13 @@ pub enum ProductionLiveEpochTransitionCommitAuthorizationOutcome {
     DurableReplayUnavailable,
 
     // ---- Replay / freshness -------------------------------------------
-    StagedApplicationReplayRejected {
-        staged_application_id: String,
-    },
+    StagedApplicationReplayRejected { staged_application_id: String },
     StaleGovernanceEpoch,
     StaleAuthoritySequence,
     StaleValidatorSetEpoch,
     StaleValidatorSetVersion,
     ConflictingStagedApplicationForSameAuthorization,
-    LiveEpochTransitionCommitAuthorizationAmbiguous {
-        reason: String,
-    },
+    LiveEpochTransitionCommitAuthorizationAmbiguous { reason: String },
     MainNetRefused,
 }
 
@@ -1748,7 +1609,9 @@ impl ProductionLiveEpochTransitionCommitAuthorizationOutcome {
             Self::UnverifiedMutationExecutionDecisionRejected => {
                 "unverified-mutation-execution-decision-rejected"
             }
-            Self::RuntimeHandoffDecisionAloneRejected => "runtime-handoff-decision-alone-rejected",
+            Self::RuntimeHandoffDecisionAloneRejected => {
+                "runtime-handoff-decision-alone-rejected"
+            }
             Self::GuardedMutationDecisionAloneRejected => {
                 "guarded-mutation-decision-alone-rejected"
             }
@@ -1839,7 +1702,9 @@ impl ProductionLiveEpochTransitionCommitAuthorizationOutcome {
             Self::AuthorizationDecisionIntegrityMismatch => {
                 "authorization-decision-integrity-mismatch"
             }
-            Self::StagedApplicationDecisionIdMismatch => "staged-application-decision-id-mismatch",
+            Self::StagedApplicationDecisionIdMismatch => {
+                "staged-application-decision-id-mismatch"
+            }
             Self::StagedApplicationDecisionRequestIdMismatch => {
                 "staged-application-decision-request-id-mismatch"
             }
@@ -1867,9 +1732,7 @@ impl ProductionLiveEpochTransitionCommitAuthorizationOutcome {
             Self::WrongProposalId => "wrong-proposal-id",
             Self::WrongGovernanceExecutionDecisionId => "wrong-governance-execution-decision-id",
             Self::WrongGovernanceExecutionRequestId => "wrong-governance-execution-request-id",
-            Self::WrongGovernanceExecutionIntentDigest => {
-                "wrong-governance-execution-intent-digest"
-            }
+            Self::WrongGovernanceExecutionIntentDigest => "wrong-governance-execution-intent-digest",
             Self::WrongRotationDecisionId => "wrong-rotation-decision-id",
             Self::WrongRotationRequestId => "wrong-rotation-request-id",
             Self::WrongRotationTranscriptDigest => "wrong-rotation-transcript-digest",
@@ -1888,7 +1751,9 @@ impl ProductionLiveEpochTransitionCommitAuthorizationOutcome {
             Self::WrongCurrentValidatorSetVersion => "wrong-current-validator-set-version",
             Self::WrongProposedValidatorCount => "wrong-proposed-validator-count",
             Self::WrongRotationNonce => "wrong-rotation-nonce",
-            Self::UnsupportedStagedLiveApplication => "unsupported-staged-live-application",
+            Self::UnsupportedStagedLiveApplication => {
+                "unsupported-staged-live-application"
+            }
             Self::WrongEpochTransitionTarget => "wrong-epoch-transition-target",
             Self::WrongApplicationNonce => "wrong-application-nonce",
             Self::WrongLiveApplicationNonce => "wrong-live-application-nonce",
@@ -1943,8 +1808,7 @@ impl ProductionLiveEpochTransitionCommitAuthorizationDecision {
     /// runtime handoff package (only on accept). The boundary never applies
     /// it.
     pub fn authorizes_future_mutation_only(&self) -> bool {
-        self.outcome.authorizes_future_mutation_only()
-            && self.commit_authorization_artifact.is_some()
+        self.outcome.authorizes_future_mutation_only() && self.commit_authorization_artifact.is_some()
     }
 }
 
@@ -2021,8 +1885,8 @@ impl ProductionLiveEpochTransitionCommitAuthorizationExecutor {
         ),
         ProductionLiveEpochTransitionCommitAuthorizationOutcome,
     > {
-        use LiveEpochTransitionCommitAuthorizationAuthoritySource as S;
         use ProductionLiveEpochTransitionCommitAuthorizationOutcome as O;
+        use LiveEpochTransitionCommitAuthorizationAuthoritySource as S;
         match source {
             S::VerifiedMutationExecutionDecision { decision } => {
                 if !decision.is_accept() {
@@ -2064,7 +1928,9 @@ impl ProductionLiveEpochTransitionCommitAuthorizationExecutor {
             S::GovernanceExecutionIntentWithoutMutationExecution => {
                 Err(O::GovernanceExecutionIntentAloneRejected)
             }
-            S::GovernanceProofWithoutMutationExecution => Err(O::GovernanceProofAloneRejected),
+            S::GovernanceProofWithoutMutationExecution => {
+                Err(O::GovernanceProofAloneRejected)
+            }
             S::LocalOperatorAssertion => Err(O::LocalOperatorProofRejected),
             S::PeerMajorityAssertion => Err(O::PeerMajorityProofRejected),
             S::CustodyOnlyEvidence => Err(O::CustodyOnlyProofRejected),
@@ -2290,8 +2156,7 @@ impl ProductionLiveEpochTransitionCommitAuthorizationExecutor {
         if intent.authorization_intent_digest != inputs.expected_authorization_intent_digest {
             return Some(O::AuthorizationDecisionIntentDigestMismatch);
         }
-        if intent.authorization_transcript_digest != inputs.expected_authorization_transcript_digest
-        {
+        if intent.authorization_transcript_digest != inputs.expected_authorization_transcript_digest {
             return Some(O::AuthorizationDecisionTranscriptMismatch);
         }
 
@@ -2529,8 +2394,7 @@ impl ProductionLiveEpochTransitionCommitAuthorizationExecutor {
         };
 
         // Step 3: application-decision binding cross-checks.
-        if let Some(outcome) = self.check_application_binding(decision, application_intent, inputs)
-        {
+        if let Some(outcome) = self.check_application_binding(decision, application_intent, inputs) {
             return (outcome, None);
         }
 
@@ -2540,21 +2404,15 @@ impl ProductionLiveEpochTransitionCommitAuthorizationExecutor {
                 return (O::StaleAuthoritySequence, None);
             }
         }
-        let staged_application_id =
-            production_live_epoch_transition_commit_authorization_request_id(
-                self.config.protocol_version.0,
-                &decision.execution_digest,
-                &inputs.commit_authorization_policy_id,
-                request.proposed_epoch_transition_target,
-                request.commit_authorization_nonce,
-            );
+        let staged_application_id = production_live_epoch_transition_commit_authorization_request_id(
+            self.config.protocol_version.0,
+            &decision.execution_digest,
+            &inputs.commit_authorization_policy_id,
+            request.proposed_epoch_transition_target,
+            request.commit_authorization_nonce,
+        );
         if replay_set.contains(&staged_application_id) {
-            return (
-                O::StagedApplicationReplayRejected {
-                    staged_application_id,
-                },
-                None,
-            );
+            return (O::StagedApplicationReplayRejected { staged_application_id }, None);
         }
         if application_intent.governance_epoch < inputs.min_governance_epoch {
             return (O::StaleGovernanceEpoch, None);
@@ -2593,9 +2451,10 @@ impl ProductionLiveEpochTransitionCommitAuthorizationExecutor {
 
         // Step 8: derive the typed guarded mutation kind from the consumed
         // staged record's staged-application kind.
-        let staged_kind = LiveEpochTransitionCommitAuthorizationKind::from_staged_application_kind(
-            application_intent.staged_kind,
-        );
+        let staged_kind =
+            LiveEpochTransitionCommitAuthorizationKind::from_staged_application_kind(
+                application_intent.staged_kind,
+            );
         if staged_kind.is_unsupported() {
             return (O::UnsupportedStagedLiveApplication, None);
         }
@@ -2649,9 +2508,7 @@ impl ProductionLiveEpochTransitionCommitAuthorizationExecutor {
             authorization_transcript_digest: application_intent
                 .authorization_transcript_digest
                 .clone(),
-            staged_application_decision_id: application_intent
-                .staged_application_decision_id
-                .clone(),
+            staged_application_decision_id: application_intent.staged_application_decision_id.clone(),
             staged_application_request_id: application_intent.staged_application_request_id.clone(),
             staged_application_intent_digest: application_intent
                 .staged_application_intent_digest
@@ -2664,9 +2521,7 @@ impl ProductionLiveEpochTransitionCommitAuthorizationExecutor {
             // transcript (carried through the consumed runtime handoff package).
             guarded_mutation_decision_id: application_intent.guarded_mutation_decision_id.clone(),
             guarded_mutation_request_id: application_intent.guarded_mutation_request_id.clone(),
-            guarded_mutation_intent_digest: application_intent
-                .guarded_mutation_intent_digest
-                .clone(),
+            guarded_mutation_intent_digest: application_intent.guarded_mutation_intent_digest.clone(),
             guarded_mutation_transcript_digest: application_intent
                 .guarded_mutation_transcript_digest
                 .clone(),
@@ -2700,7 +2555,9 @@ impl ProductionLiveEpochTransitionCommitAuthorizationExecutor {
             // (carried through the consumed mutation-execution artifact).
             runtime_handoff_decision_id: application_intent.runtime_handoff_decision_id.clone(),
             runtime_handoff_request_id: application_intent.runtime_handoff_request_id.clone(),
-            runtime_handoff_intent_digest: application_intent.runtime_handoff_intent_digest.clone(),
+            runtime_handoff_intent_digest: application_intent
+                .runtime_handoff_intent_digest
+                .clone(),
             runtime_handoff_transcript_digest: application_intent
                 .runtime_handoff_transcript_digest
                 .clone(),
@@ -2709,14 +2566,10 @@ impl ProductionLiveEpochTransitionCommitAuthorizationExecutor {
             // Newly proposed commit-authorization nonce.
             commit_authorization_nonce: request.commit_authorization_nonce,
             // Exact future-executor preconditions.
-            precondition_current_validator_set_digest: application_intent
-                .current_set_digest
-                .clone(),
+            precondition_current_validator_set_digest: application_intent.current_set_digest.clone(),
             precondition_current_validator_set_epoch: application_intent.validator_set_epoch,
             precondition_current_validator_set_version: application_intent.validator_set_version,
-            precondition_proposed_validator_set_digest: application_intent
-                .proposed_set_digest
-                .clone(),
+            precondition_proposed_validator_set_digest: application_intent.proposed_set_digest.clone(),
             precondition_delta_digest: application_intent.delta_digest.clone(),
             precondition_target_epoch: application_intent.epoch_transition_target,
             precondition_required_governance_epoch: application_intent.governance_epoch,
@@ -2978,9 +2831,7 @@ impl LiveEpochTransitionCommitAuthorizationFixtureState {
     /// Returns `true` iff the given execution id was already applied to this
     /// fixture ledger.
     pub fn has_applied(&self, commit_authorization_id: &str) -> bool {
-        self.applied_execution_ids
-            .iter()
-            .any(|id| id == commit_authorization_id)
+        self.applied_execution_ids.iter().any(|id| id == commit_authorization_id)
     }
 
     /// Applies a prepared, accepted guarded mutation record to *this* in-memory
@@ -3002,8 +2853,7 @@ impl LiveEpochTransitionCommitAuthorizationFixtureState {
         self.current_epoch = record.epoch_transition_target;
         self.validator_set_version = record.validator_set_version;
         self.current_set_digest = record.proposed_set_digest.clone();
-        self.applied_execution_ids
-            .push(commit_authorization_id.to_string());
+        self.applied_execution_ids.push(commit_authorization_id.to_string());
         true
     }
 }

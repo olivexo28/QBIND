@@ -101,8 +101,7 @@
 
 use crate::pqc_authority_custody::AuthorityCustodyPolicy;
 use crate::pqc_authority_custody_payload_carrying::{
-    callsite_context_for_authority_custody,
-    route_loaded_authority_custody_attestation_to_live_inbound_0x05_callsite_decision,
+    callsite_context_for_authority_custody, route_loaded_authority_custody_attestation_to_live_inbound_0x05_callsite_decision,
     route_loaded_authority_custody_attestation_to_local_peer_candidate_check_callsite_decision,
     route_loaded_authority_custody_attestation_to_peer_driven_drain_callsite_decision,
     route_loaded_authority_custody_attestation_to_reload_apply_callsite_decision,
@@ -236,12 +235,13 @@ pub fn authority_custody_policy_from_selector(
         Ok(AuthorityCustodyPolicy::DevnetLocalAllowed)
     } else if trimmed.eq_ignore_ascii_case(AUTHORITY_CUSTODY_POLICY_TAG_TESTNET_LOCAL_ALLOWED) {
         Ok(AuthorityCustodyPolicy::TestnetLocalAllowed)
-    } else if trimmed.eq_ignore_ascii_case(AUTHORITY_CUSTODY_POLICY_TAG_PRODUCTION_CUSTODY_REQUIRED)
+    } else if trimmed
+        .eq_ignore_ascii_case(AUTHORITY_CUSTODY_POLICY_TAG_PRODUCTION_CUSTODY_REQUIRED)
     {
         Ok(AuthorityCustodyPolicy::ProductionCustodyRequired)
-    } else if trimmed
-        .eq_ignore_ascii_case(AUTHORITY_CUSTODY_POLICY_TAG_MAINNET_PRODUCTION_CUSTODY_REQUIRED)
-    {
+    } else if trimmed.eq_ignore_ascii_case(
+        AUTHORITY_CUSTODY_POLICY_TAG_MAINNET_PRODUCTION_CUSTODY_REQUIRED,
+    ) {
         Ok(AuthorityCustodyPolicy::MainnetProductionCustodyRequired)
     } else {
         Err(AuthorityCustodyPolicySelectorParseError::UnknownValue {
@@ -293,7 +293,8 @@ pub fn authority_custody_policy_from_cli_or_env(
     if let Some(v) = cli_value {
         return authority_custody_policy_from_selector(v);
     }
-    Ok(authority_custody_policy_env_selector()?.unwrap_or(AuthorityCustodyPolicy::Disabled))
+    Ok(authority_custody_policy_env_selector()?
+        .unwrap_or(AuthorityCustodyPolicy::Disabled))
 }
 
 // ===========================================================================

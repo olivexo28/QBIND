@@ -59,7 +59,6 @@ use qbind_node::pqc_governance_execution_evaluator_runtime_integration::Governan
 use qbind_node::pqc_governance_execution_payload_carrying::{
     GovernanceExecutionLoadStatus, GovernanceExecutionPayloadWire,
 };
-use qbind_node::pqc_governance_execution_policy::GovernanceExecutionPolicy;
 use qbind_node::pqc_governance_execution_policy::{
     GovernanceAction, GovernanceExecutionClass, GovernanceExecutionDecision,
     GovernanceExecutionExpectations, GovernanceExecutionInput, GovernanceQuorumThreshold,
@@ -68,6 +67,7 @@ use qbind_node::pqc_governance_execution_policy::{
 use qbind_node::pqc_governance_execution_runtime_arming::{
     GovernanceExecutionRuntimeArmingConfig, GovernanceExecutionRuntimeSurface,
 };
+use qbind_node::pqc_governance_execution_policy::GovernanceExecutionPolicy;
 use qbind_node::pqc_trust_bundle::TrustBundleEnvironment;
 
 // ===========================================================================
@@ -327,10 +327,7 @@ fn a7_unsupported_surface_does_not_consume() {
     );
     let outcome =
         evaluate_post_mutation_consume(ReplayStatePolicy::FixtureDevNet, &input, &devnet_exp());
-    assert_eq!(
-        outcome,
-        ConsumeBoundaryOutcome::DoNotConsumeUnsupportedSurface
-    );
+    assert_eq!(outcome, ConsumeBoundaryOutcome::DoNotConsumeUnsupportedSurface);
 }
 
 #[test]
@@ -349,11 +346,9 @@ fn a8_mainnet_refused_does_not_consume() {
     );
     let outcome = evaluate_post_mutation_consume(ReplayStatePolicy::MainNet, &input, &exp);
     assert_eq!(outcome, ConsumeBoundaryOutcome::DoNotConsumeMainNetRefused);
-    assert!(
-        mainnet_peer_driven_apply_remains_refused_under_consume_boundary(
-            TrustBundleEnvironment::Mainnet
-        )
-    );
+    assert!(mainnet_peer_driven_apply_remains_refused_under_consume_boundary(
+        TrustBundleEnvironment::Mainnet
+    ));
 }
 
 #[test]
@@ -487,18 +482,12 @@ fn a15_consume_binding_includes_every_required_field() {
     mutators.push(Box::new(|i| i.replay_state_key_digest = "x".to_string()));
     mutators.push(Box::new(|i| i.evaluator_request_digest = "x".to_string()));
     mutators.push(Box::new(|i| i.evaluator_response_digest = "x".to_string()));
-    mutators.push(Box::new(|i| {
-        i.governance_execution_decision_digest = "x".to_string()
-    }));
-    mutators.push(Box::new(|i| {
-        i.lifecycle_action = LocalLifecycleAction::Revoke
-    }));
+    mutators.push(Box::new(|i| i.governance_execution_decision_digest = "x".to_string()));
+    mutators.push(Box::new(|i| i.lifecycle_action = LocalLifecycleAction::Revoke));
     mutators.push(Box::new(|i| i.candidate_digest = "x".to_string()));
     mutators.push(Box::new(|i| i.authority_domain_sequence += 1));
     mutators.push(Box::new(|i| i.replay_nonce = "x".to_string()));
-    mutators.push(Box::new(|i| {
-        i.environment = TrustBundleEnvironment::Testnet
-    }));
+    mutators.push(Box::new(|i| i.environment = TrustBundleEnvironment::Testnet));
     mutators.push(Box::new(|i| i.chain_id = "x".to_string()));
     mutators.push(Box::new(|i| i.genesis_hash = "x".to_string()));
     mutators.push(Box::new(|i| {
@@ -636,10 +625,7 @@ fn assert_wrong_binding(input: &PostMutationConsumeInput) {
     let outcome =
         evaluate_post_mutation_consume(ReplayStatePolicy::FixtureDevNet, input, &devnet_exp());
     assert!(
-        matches!(
-            outcome,
-            ConsumeBoundaryOutcome::FailClosedWrongBinding { .. }
-        ),
+        matches!(outcome, ConsumeBoundaryOutcome::FailClosedWrongBinding { .. }),
         "expected FailClosedWrongBinding, got {:?}",
         outcome
     );
@@ -1010,11 +996,7 @@ fn consume_after_success_only_across_every_completion_status() {
         if completion == MutationCompletionStatus::AppliedSuccessfully {
             assert!(outcome.authorizes_consume());
         } else {
-            assert!(
-                outcome.no_consume(),
-                "{:?} unexpectedly consumed",
-                completion
-            );
+            assert!(outcome.no_consume(), "{:?} unexpectedly consumed", completion);
         }
     }
     assert!(consume_only_after_successful_mutation());
@@ -1057,12 +1039,10 @@ fn failed_and_rolled_back_mutations_never_consume() {
             MutationAuthorizationOutcome::AuthorizedFresh,
             completion,
         );
-        assert!(evaluate_post_mutation_consume(
-            ReplayStatePolicy::FixtureDevNet,
-            &input,
-            &devnet_exp()
-        )
-        .no_consume());
+        assert!(
+            evaluate_post_mutation_consume(ReplayStatePolicy::FixtureDevNet, &input, &devnet_exp())
+                .no_consume()
+        );
     }
     assert!(deferred_is_never_consumed());
 }
@@ -1111,10 +1091,7 @@ fn fixture_consume_without_prior_observation_fails_closed() {
         &devnet_exp(),
         &mut store,
     );
-    assert_eq!(
-        outcome,
-        ConsumeBoundaryOutcome::FailClosedConsumeUnavailable
-    );
+    assert_eq!(outcome, ConsumeBoundaryOutcome::FailClosedConsumeUnavailable);
     assert!(!store.is_consumed(&input.replay_state_key_digest));
 }
 
@@ -1137,10 +1114,7 @@ fn run230_state_key_matches_consume_binding() {
         PreviouslySeenState::FirstSeen,
     );
     let input = devnet_success_input();
-    assert_eq!(
-        input.replay_state_key_digest,
-        replay_state_key_digest(&fresh)
-    );
+    assert_eq!(input.replay_state_key_digest, replay_state_key_digest(&fresh));
 }
 
 // ===========================================================================
@@ -1323,14 +1297,7 @@ fn rotate_fixture(env: TrustBundleEnvironment) -> Fixture {
     let surface = GovernanceExecutionRuntimeSurface::ReloadApply;
 
     let replay_exp = EvaluatorReplayFreshnessExpectations::from_evaluator_material(
-        &identity,
-        &request,
-        &response,
-        TRANSCRIPT_DIGEST,
-        DECISION_DIGEST,
-        env,
-        CHAIN,
-        GENESIS,
+        &identity, &request, &response, TRANSCRIPT_DIGEST, DECISION_DIGEST, env, CHAIN, GENESIS,
         surface,
     );
     let replay_input = EvaluatorReplayFreshnessInput::from_evaluator_material(

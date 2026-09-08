@@ -126,14 +126,16 @@ use qbind_types::{ChainId, NetworkEnvironment};
 
 use crate::metrics::P2pMetrics;
 use crate::p2p::NodeId;
-use crate::pqc_governance_proof_wire::{GovernanceAuthorityProofWire, GovernanceProofLoadStatus};
+use crate::pqc_governance_proof_wire::{
+    GovernanceAuthorityProofWire, GovernanceProofLoadStatus,
+};
 use crate::pqc_peer_candidate_staging::{PeerCandidateStagingQueue, StagingOutcome};
 use crate::pqc_ratification_policy::RatificationGateDecision;
 use crate::pqc_trust_activation::ActivationContext;
 use crate::pqc_trust_bundle::{BundleSigningKeySet, TrustBundleEnvironment};
 use crate::pqc_trust_peer_candidate::{
-    PeerCandidateConfig, PeerCandidateEnvelope, PeerCandidateOutcome, PeerCandidateRuntimeContext,
-    PeerCandidateValidator, MAX_PEER_CANDIDATE_BUNDLE_BYTES,
+    PeerCandidateConfig, PeerCandidateEnvelope, PeerCandidateOutcome,
+    PeerCandidateRuntimeContext, PeerCandidateValidator, MAX_PEER_CANDIDATE_BUNDLE_BYTES,
 };
 use crate::pqc_trust_reload::RatificationEnforcementContext;
 
@@ -172,7 +174,8 @@ pub const MAX_PEER_CANDIDATE_WIRE_FRAME_BYTES: usize = 1
 /// from the Run 076 [`PeerCandidateEnvelope::DOMAIN_TAG`] fixture
 /// tag (`"qbind-peer-trust-bundle-candidate-v0"`) so a fixture file
 /// can never be replayed as a wire frame and vice versa.
-pub const PEER_CANDIDATE_WIRE_DOMAIN_TAG: &str = "QBIND:PQC_TRUST_BUNDLE_PEER_CANDIDATE_WIRE:v1";
+pub const PEER_CANDIDATE_WIRE_DOMAIN_TAG: &str =
+    "QBIND:PQC_TRUST_BUNDLE_PEER_CANDIDATE_WIRE:v1";
 
 /// Current Run 078 wire envelope version. Bumped only on layout
 /// changes; the receiver MUST reject unknown versions.
@@ -350,24 +353,40 @@ impl PeerCandidateWireEnvelopeV1 {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PeerCandidateWireFrameError {
     /// Frame is shorter than the 5-byte header.
-    FrameTooShort { observed_len: usize },
+    FrameTooShort {
+        observed_len: usize,
+    },
     /// First byte is not [`DISCRIMINATOR_PEER_CANDIDATE_WIRE`].
-    UnknownDiscriminator { observed: u8 },
+    UnknownDiscriminator {
+        observed: u8,
+    },
     /// `payload_len` field exceeds
     /// [`MAX_PEER_CANDIDATE_WIRE_FRAME_BYTES`] **before** any
     /// allocation. Adversary cannot force a large allocation here.
-    DeclaredPayloadOversize { declared: usize, cap: usize },
+    DeclaredPayloadOversize {
+        declared: usize,
+        cap: usize,
+    },
     /// Frame is shorter than `5 + payload_len` bytes (truncated).
-    FrameTruncated { declared: usize, observed: usize },
+    FrameTruncated {
+        declared: usize,
+        observed: usize,
+    },
     /// Payload did not parse as a [`PeerCandidateWireEnvelopeV1`]
     /// JSON document.
-    PayloadParseError { message: String },
+    PayloadParseError {
+        message: String,
+    },
     /// Decoded envelope's `envelope_version` field is not
     /// [`PEER_CANDIDATE_WIRE_VERSION`].
-    UnsupportedEnvelopeVersion { observed: u16 },
+    UnsupportedEnvelopeVersion {
+        observed: u16,
+    },
     /// Decoded envelope's `domain_tag` is not
     /// [`PEER_CANDIDATE_WIRE_DOMAIN_TAG`].
-    UnknownDomainTag { observed: String },
+    UnknownDomainTag {
+        observed: String,
+    },
 }
 
 impl std::fmt::Display for PeerCandidateWireFrameError {
@@ -471,7 +490,9 @@ pub fn decode_peer_candidate_wire_frame(
         });
     }
     if frame[0] != DISCRIMINATOR_PEER_CANDIDATE_WIRE {
-        return Err(PeerCandidateWireFrameError::UnknownDiscriminator { observed: frame[0] });
+        return Err(PeerCandidateWireFrameError::UnknownDiscriminator {
+            observed: frame[0],
+        });
     }
     let declared = u32::from_be_bytes([frame[1], frame[2], frame[3], frame[4]]) as usize;
     // Cap BEFORE allocation / decode (DoS-resistant).
@@ -488,11 +509,12 @@ pub fn decode_peer_candidate_wire_frame(
         });
     }
     let payload = &frame[5..5 + declared];
-    let envelope: PeerCandidateWireEnvelopeV1 = serde_json::from_slice(payload).map_err(|e| {
-        PeerCandidateWireFrameError::PayloadParseError {
-            message: e.to_string(),
-        }
-    })?;
+    let envelope: PeerCandidateWireEnvelopeV1 =
+        serde_json::from_slice(payload).map_err(|e| {
+            PeerCandidateWireFrameError::PayloadParseError {
+                message: e.to_string(),
+            }
+        })?;
     if envelope.envelope_version != PEER_CANDIDATE_WIRE_VERSION {
         return Err(PeerCandidateWireFrameError::UnsupportedEnvelopeVersion {
             observed: envelope.envelope_version,
@@ -645,7 +667,9 @@ impl PeerCandidateWireOutcome {
         match self {
             Self::Disabled => "disabled",
             Self::FrameRejected(e) => match e {
-                PeerCandidateWireFrameError::DeclaredPayloadOversize { .. } => "frame-oversize",
+                PeerCandidateWireFrameError::DeclaredPayloadOversize { .. } => {
+                    "frame-oversize"
+                }
                 PeerCandidateWireFrameError::FrameTooShort { .. } => "frame-too-short",
                 PeerCandidateWireFrameError::UnknownDiscriminator { .. } => {
                     "frame-unknown-discriminator"
@@ -657,7 +681,9 @@ impl PeerCandidateWireOutcome {
                 PeerCandidateWireFrameError::UnsupportedEnvelopeVersion { .. } => {
                     "frame-unsupported-version"
                 }
-                PeerCandidateWireFrameError::UnknownDomainTag { .. } => "frame-unknown-domain-tag",
+                PeerCandidateWireFrameError::UnknownDomainTag { .. } => {
+                    "frame-unknown-domain-tag"
+                }
             },
             Self::ValidatorRan(o) => match o {
                 PeerCandidateOutcome::Validated(_) => "validated",
@@ -869,10 +895,9 @@ impl PeerCandidateWireReceiver {
             now_ms: ctx.now_ms,
         };
         let outcome = match ratification_ctx {
-            Some(rctx) => {
-                self.validator
-                    .try_accept_with_ratification(run076_envelope, &inner_ctx, rctx)
-            }
+            Some(rctx) => self
+                .validator
+                .try_accept_with_ratification(run076_envelope, &inner_ctx, rctx),
             None => self.validator.try_accept(run076_envelope, &inner_ctx),
         };
 
@@ -912,7 +937,10 @@ impl PeerCandidateWireReceiver {
 /// (`Run 078`, `NOT applied`, `not propagated`, `sequence not
 /// persisted`, `live trust state unchanged`, `sessions untouched`)
 /// so tests and operator log scrapers agree.
-pub fn wire_observed_log_line(outcome: &PeerCandidateWireOutcome, peer_id: Option<&str>) -> String {
+pub fn wire_observed_log_line(
+    outcome: &PeerCandidateWireOutcome,
+    peer_id: Option<&str>,
+) -> String {
     format!(
         "[binary] Run 078: peer-candidate wire frame observed; outcome={}; NOT \
          applied; not propagated; sequence not persisted; live trust state \
@@ -1026,7 +1054,8 @@ pub struct LivePeerCandidateWireDispatcher {
     /// handle. When present, `dispatch_frame_from_peer_for_test`
     /// reads `meta:current_epoch` and overrides
     /// `activation_ctx.current_epoch` per-dispatch.
-    consensus_storage_for_epoch: Option<std::sync::Arc<crate::storage::RocksDbConsensusStorage>>,
+    consensus_storage_for_epoch:
+        Option<std::sync::Arc<crate::storage::RocksDbConsensusStorage>>,
     sequence_persistence_path: Option<PathBuf>,
     local_leaf_cert_bytes: Option<Vec<u8>>,
     validation_time_secs: u64,
@@ -1071,7 +1100,10 @@ impl std::fmt::Debug for LivePeerCandidateWireDispatcher {
             .field("expected_environment", &self.expected_environment)
             .field("expected_chain_id", &self.expected_chain_id)
             .field("scratch_dir", &self.scratch_dir)
-            .field("sequence_persistence_path", &self.sequence_persistence_path)
+            .field(
+                "sequence_persistence_path",
+                &self.sequence_persistence_path,
+            )
             .field(
                 "local_leaf_cert_bytes_present",
                 &self.local_leaf_cert_bytes.is_some(),
@@ -1087,8 +1119,14 @@ impl std::fmt::Debug for LivePeerCandidateWireDispatcher {
                 "ratification_gate_invoked",
                 &self.ratification_gate_is_invoked(),
             )
-            .field("authority_marker_path", &self.authority_marker_path)
-            .field("staging_queue_installed", &self.staging_queue.is_some())
+            .field(
+                "authority_marker_path",
+                &self.authority_marker_path,
+            )
+            .field(
+                "staging_queue_installed",
+                &self.staging_queue.is_some(),
+            )
             .finish()
     }
 }
@@ -1277,7 +1315,10 @@ impl LivePeerCandidateWireDispatcher {
     /// `LivePeerCandidateWireDispatcher::new` uses
     /// `std::time::SystemTime::now()`; tests inject a deterministic
     /// clock via [`LivePeerCandidateWireDispatcher::with_clock`].
-    pub fn new(config: LivePeerCandidateWireDispatcherConfig, metrics: Arc<P2pMetrics>) -> Self {
+    pub fn new(
+        config: LivePeerCandidateWireDispatcherConfig,
+        metrics: Arc<P2pMetrics>,
+    ) -> Self {
         let clock_ms_fn: Arc<dyn Fn() -> u64 + Send + Sync + 'static> = Arc::new(|| {
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -1434,9 +1475,7 @@ impl LivePeerCandidateWireDispatcher {
                 // activation gate (fail-closed direction). The error is
                 // logged so operators can see the storage degradation
                 // rather than it being silently absorbed.
-                match crate::pqc_trust_activation_epoch::activation_epoch_source_from_storage(Some(
-                    storage,
-                )) {
+                match crate::pqc_trust_activation_epoch::activation_epoch_source_from_storage(Some(storage)) {
                     Ok(epoch_source) => {
                         ctx.current_epoch = epoch_source.as_option();
                     }
@@ -1463,7 +1502,9 @@ impl LivePeerCandidateWireDispatcher {
             validation_time_secs: self.validation_time_secs,
             signing_keys: &self.signing_keys,
             activation_ctx,
-            sequence_persistence_path: self.sequence_persistence_path.as_deref(),
+            sequence_persistence_path: self
+                .sequence_persistence_path
+                .as_deref(),
             local_leaf_cert_bytes: self.local_leaf_cert_bytes.as_deref(),
             now_ms,
         };
@@ -1493,13 +1534,16 @@ impl LivePeerCandidateWireDispatcher {
                  no live trust mutation, no session eviction)."
             );
             self.metrics.record_peer_candidate_rejected();
-            let outcome = PeerCandidateWireOutcome::ValidatorRan(PeerCandidateOutcome::Rejected(
-                crate::pqc_trust_peer_candidate::PeerCandidateRejection::ValidationFailed(
-                    crate::pqc_trust_reload::ReloadCheckError::MarkerConflict(
-                        "Run 142: ambiguous v1+v2 authority material; fail-closed".to_string(),
+            let outcome = PeerCandidateWireOutcome::ValidatorRan(
+                PeerCandidateOutcome::Rejected(
+                    crate::pqc_trust_peer_candidate::PeerCandidateRejection::ValidationFailed(
+                        crate::pqc_trust_reload::ReloadCheckError::MarkerConflict(
+                            "Run 142: ambiguous v1+v2 authority material; fail-closed"
+                                .to_string(),
+                        ),
                     ),
                 ),
-            ));
+            );
             self.maybe_propagate_after_validation(frame, source_peer, now_ms, &outcome);
             return outcome;
         }
@@ -1658,14 +1702,16 @@ impl LivePeerCandidateWireDispatcher {
                     marker_err
                 );
                 self.metrics.record_peer_candidate_rejected();
-                return PeerCandidateWireOutcome::ValidatorRan(PeerCandidateOutcome::Rejected(
-                    crate::pqc_trust_peer_candidate::PeerCandidateRejection::ValidationFailed(
-                        crate::pqc_trust_reload::ReloadCheckError::MarkerConflict(format!(
-                            "{}",
-                            marker_err
-                        )),
+                return PeerCandidateWireOutcome::ValidatorRan(
+                    PeerCandidateOutcome::Rejected(
+                        crate::pqc_trust_peer_candidate::PeerCandidateRejection::ValidationFailed(
+                            crate::pqc_trust_reload::ReloadCheckError::MarkerConflict(format!(
+                                "{}",
+                                marker_err
+                            )),
+                        ),
                     ),
-                ));
+                );
             }
         };
 
@@ -1741,14 +1787,16 @@ impl LivePeerCandidateWireDispatcher {
                     marker_err
                 );
                 self.metrics.record_peer_candidate_rejected();
-                PeerCandidateWireOutcome::ValidatorRan(PeerCandidateOutcome::Rejected(
-                    crate::pqc_trust_peer_candidate::PeerCandidateRejection::ValidationFailed(
-                        crate::pqc_trust_reload::ReloadCheckError::MarkerConflict(format!(
-                            "{}",
-                            marker_err
-                        )),
+                PeerCandidateWireOutcome::ValidatorRan(
+                    PeerCandidateOutcome::Rejected(
+                        crate::pqc_trust_peer_candidate::PeerCandidateRejection::ValidationFailed(
+                            crate::pqc_trust_reload::ReloadCheckError::MarkerConflict(format!(
+                                "{}",
+                                marker_err
+                            )),
+                        ),
                     ),
-                ))
+                )
             }
         }
     }
@@ -1819,17 +1867,17 @@ impl LivePeerCandidateWireDispatcher {
         // The `bundle_signing_public_key` in the ratification is the key
         // that was ratified; we need a RatifiedBundleSigningKey from
         // enforce_bundle_signing_key_ratification. Let's call the enforcer.
-        use crate::pqc_authority_marker_acceptance::{
-            verify_marker_for_validation_only, ValidationOnlyMarkerInputs,
-        };
         use qbind_ledger::{
             enforce_bundle_signing_key_ratification, RatificationEnforcementInputs,
             RatificationEnforcementOutcome,
         };
+        use crate::pqc_authority_marker_acceptance::{
+            verify_marker_for_validation_only, ValidationOnlyMarkerInputs,
+        };
 
         let signing_pk = &ratification.bundle_signing_public_key;
-        let enforcer_result =
-            enforce_bundle_signing_key_ratification(RatificationEnforcementInputs {
+        let enforcer_result = enforce_bundle_signing_key_ratification(
+            RatificationEnforcementInputs {
                 ratification: Some(ratification),
                 authority: &rc.authority,
                 expected_chain_id: &rc.expected_chain_id_str,
@@ -1837,7 +1885,8 @@ impl LivePeerCandidateWireDispatcher {
                 expected_genesis_hash: &rc.expected_genesis_hash,
                 candidate_bundle_signing_public_key: signing_pk,
                 policy: rc.policy,
-            });
+            },
+        );
         let ratified = match enforcer_result {
             Ok(RatificationEnforcementOutcome::Ratified(rk)) => rk,
             _ => return outcome, // Skip if not ratified (legacy path, etc.)
@@ -1875,14 +1924,15 @@ impl LivePeerCandidateWireDispatcher {
                 self.metrics.record_peer_candidate_rejected();
                 // Convert to a Rejected outcome so downstream propagation
                 // and log lines see a non-validated state.
-                PeerCandidateWireOutcome::ValidatorRan(PeerCandidateOutcome::Rejected(
-                    crate::pqc_trust_peer_candidate::PeerCandidateRejection::ValidationFailed(
-                        crate::pqc_trust_reload::ReloadCheckError::MarkerConflict(format!(
-                            "{}",
-                            marker_err
-                        )),
+                PeerCandidateWireOutcome::ValidatorRan(
+                    PeerCandidateOutcome::Rejected(
+                        crate::pqc_trust_peer_candidate::PeerCandidateRejection::ValidationFailed(
+                            crate::pqc_trust_reload::ReloadCheckError::MarkerConflict(
+                                format!("{}", marker_err)
+                            ),
+                        ),
                     ),
-                ))
+                )
             }
         }
     }
@@ -1923,7 +1973,11 @@ impl LivePeerCandidateWireDispatcher {
     /// field when present; the staging queue contributes this digest
     /// to its dedup key so byte-identical resubmissions return
     /// `AlreadyStaged` rather than growing the queue.
-    fn maybe_stage_after_validation(&self, now_ms: u64, outcome: &PeerCandidateWireOutcome) {
+    fn maybe_stage_after_validation(
+        &self,
+        now_ms: u64,
+        outcome: &PeerCandidateWireOutcome,
+    ) {
         let queue = match self.staging_queue.as_ref() {
             Some(q) => q,
             None => return,
@@ -2036,18 +2090,13 @@ impl LivePeerCandidateWireDispatcher {
 
         let validated = match outcome {
             PeerCandidateWireOutcome::ValidatorRan(PeerCandidateOutcome::Validated(v)) => v,
-            PeerCandidateWireOutcome::ValidatorRan(PeerCandidateOutcome::DuplicateSuppressed {
-                ..
-            }) => {
+            PeerCandidateWireOutcome::ValidatorRan(PeerCandidateOutcome::DuplicateSuppressed { .. }) => {
                 self.metrics
                     .record_peer_candidate_propagation_suppressed_duplicate();
                 return;
             }
-            PeerCandidateWireOutcome::ValidatorRan(PeerCandidateOutcome::RateLimited {
-                ..
-            }) => {
-                self.metrics
-                    .record_peer_candidate_propagation_rate_limited();
+            PeerCandidateWireOutcome::ValidatorRan(PeerCandidateOutcome::RateLimited { .. }) => {
+                self.metrics.record_peer_candidate_propagation_rate_limited();
                 return;
             }
             PeerCandidateWireOutcome::ValidatorRan(PeerCandidateOutcome::Rejected(_))
@@ -2072,8 +2121,7 @@ impl LivePeerCandidateWireDispatcher {
         {
             let mut state = self.propagation_state.lock();
             if let Err((_attempts, _cap)) = state.rate_limiter.try_admit(now_ms) {
-                self.metrics
-                    .record_peer_candidate_propagation_rate_limited();
+                self.metrics.record_peer_candidate_propagation_rate_limited();
                 eprintln!(
                     "[binary] Run 088: peer-candidate validated before propagation but propagation rate-limited; NOT applied; sequence not persisted; live trust unchanged; sessions untouched; rebroadcast_count=0; source_peer_excluded=true; candidate_fp={}.. sequence={}",
                     validated.validated.fingerprint_prefix,
@@ -2472,7 +2520,10 @@ pub struct LivePeerCandidateWirePublisher {
 }
 
 impl LivePeerCandidateWirePublisher {
-    pub fn new(sender: Arc<dyn PeerCandidateWireFrameSender>, metrics: Arc<P2pMetrics>) -> Self {
+    pub fn new(
+        sender: Arc<dyn PeerCandidateWireFrameSender>,
+        metrics: Arc<P2pMetrics>,
+    ) -> Self {
         Self { sender, metrics }
     }
 
@@ -2505,12 +2556,10 @@ impl LivePeerCandidateWirePublisher {
                     message: e.to_string(),
                 }
             })?;
-            let proof_wire: GovernanceAuthorityProofWire =
-                serde_json::from_slice(&raw).map_err(|e| {
-                    PeerCandidateWirePublishError::GovernanceProofParse {
-                        path: proof_path.clone(),
-                        message: e.to_string(),
-                    }
+            let proof_wire: GovernanceAuthorityProofWire = serde_json::from_slice(&raw)
+                .map_err(|e| PeerCandidateWirePublishError::GovernanceProofParse {
+                    path: proof_path.clone(),
+                    message: e.to_string(),
                 })?;
             wire_envelope.governance_authority_proof = Some(proof_wire);
         }
@@ -2585,16 +2634,16 @@ pub fn wire_publish_log_line(
 fn load_run076_envelope_file(
     envelope_path: &Path,
 ) -> Result<PeerCandidateEnvelope, PeerCandidateWirePublishError> {
-    let bytes =
-        std::fs::read(envelope_path).map_err(|e| PeerCandidateWirePublishError::EnvelopeIo {
-            path: envelope_path.to_path_buf(),
-            message: e.to_string(),
-        })?;
+    let bytes = std::fs::read(envelope_path).map_err(|e| PeerCandidateWirePublishError::EnvelopeIo {
+        path: envelope_path.to_path_buf(),
+        message: e.to_string(),
+    })?;
     serde_json::from_slice(&bytes).map_err(|e| PeerCandidateWirePublishError::EnvelopeParse {
         path: envelope_path.to_path_buf(),
         message: e.to_string(),
     })
 }
+
 
 /// Run 182 — live inbound `0x05` production call-site reachability hook.
 ///
@@ -2625,8 +2674,8 @@ fn invoke_run_182_live_inbound_0x05_callsite_onchain_governance_marker_decision(
     use crate::pqc_onchain_governance_proof::EmptyOnChainGovernanceReplaySet;
     use crate::pqc_onchain_governance_proof_surface::onchain_governance_proof_policy_from_cli_or_env;
 
-    let candidate =
-        match derive_authority_state_v2_from_ratification(AuthorityStateDerivationV2Inputs {
+    let candidate = match derive_authority_state_v2_from_ratification(
+        AuthorityStateDerivationV2Inputs {
             runtime_env,
             runtime_chain_id,
             runtime_genesis_hash_hex,
@@ -2634,10 +2683,11 @@ fn invoke_run_182_live_inbound_0x05_callsite_onchain_governance_marker_decision(
             ratified,
             update_source: AuthorityStateUpdateSource::ReloadApply,
             updated_at_unix_secs: 0,
-        }) {
-            Ok(c) => c,
-            Err(_) => return,
-        };
+        },
+    ) {
+        Ok(c) => c,
+        Err(_) => return,
+    };
     let trust_domain = AuthorityTrustDomain::new(
         candidate.environment,
         candidate.chain_id.clone(),
@@ -2663,6 +2713,7 @@ fn invoke_run_182_live_inbound_0x05_callsite_onchain_governance_marker_decision(
     };
     let _outcome = live_inbound_0x05_callsite_onchain_governance_marker_decision(&ctx);
 }
+
 
 // ---------------------------------------------------------------------
 // Unit tests (frame codec / disabled-by-default / metrics +
@@ -2904,10 +2955,7 @@ mod tests {
             PeerCandidateWireOutcome::FrameRejected(
                 PeerCandidateWireFrameError::DeclaredPayloadOversize { .. },
             ) => {}
-            other => panic!(
-                "expected FrameRejected(DeclaredPayloadOversize), got {:?}",
-                other
-            ),
+            other => panic!("expected FrameRejected(DeclaredPayloadOversize), got {:?}", other),
         }
         assert_eq!(metrics.peer_candidate_received_total(), 1);
         assert_eq!(metrics.peer_candidate_dropped_oversize_total(), 1);
@@ -3034,7 +3082,10 @@ mod tests {
         let sink_arc: Arc<dyn PeerCandidateWireFrameSink> = sink.clone();
         for d in [0x00u8, 0x01, 0x02, 0x03, 0x04, 0x06, 0xff] {
             let frame = vec![d, 0, 0, 0, 0];
-            let decision = read_loop_dispatch_peer_candidate_wire_frame(&frame, Some(&sink_arc));
+            let decision = read_loop_dispatch_peer_candidate_wire_frame(
+                &frame,
+                Some(&sink_arc),
+            );
             assert_eq!(decision, ReadLoopFrameDecision::PassThrough);
         }
         assert!(sink.seen.lock().is_empty());
@@ -3045,7 +3096,10 @@ mod tests {
         let sink = RecordingSink::new();
         let sink_arc: Arc<dyn PeerCandidateWireFrameSink> = sink.clone();
         let frame = vec![DISCRIMINATOR_PEER_CANDIDATE_WIRE, 0, 0, 0, 0];
-        let decision = read_loop_dispatch_peer_candidate_wire_frame(&frame, Some(&sink_arc));
+        let decision = read_loop_dispatch_peer_candidate_wire_frame(
+            &frame,
+            Some(&sink_arc),
+        );
         assert_eq!(decision, ReadLoopFrameDecision::ConsumedPeerCandidateWire);
         let seen = sink.seen.lock();
         assert_eq!(seen.len(), 1);
@@ -3187,10 +3241,12 @@ mod tests {
         // the inner rate limiter could not see).
         let clock_counter = Arc::new(std::sync::atomic::AtomicU64::new(0));
         let clock_counter_for_fn = Arc::clone(&clock_counter);
-        let clock_fn: Arc<dyn Fn() -> u64 + Send + Sync + 'static> = Arc::new(move || {
-            clock_counter_for_fn.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            42
-        });
+        let clock_fn: Arc<dyn Fn() -> u64 + Send + Sync + 'static> =
+            Arc::new(move || {
+                clock_counter_for_fn
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                42
+            });
         let metrics = Arc::new(P2pMetrics::default());
         let cfg = LivePeerCandidateWireDispatcherConfig {
             inner: PeerCandidateWireReceiverConfig::default(),
@@ -3209,15 +3265,23 @@ mod tests {
             authority_marker_path: None,
             staging_queue: None,
         };
-        let disp = LivePeerCandidateWireDispatcher::with_clock(cfg, Arc::clone(&metrics), clock_fn);
+        let disp = LivePeerCandidateWireDispatcher::with_clock(
+            cfg,
+            Arc::clone(&metrics),
+            clock_fn,
+        );
         // Disabled path still calls the clock once before the
         // short-circuit (cheap; the inner receiver receives the
         // ctx even on the disabled path so the contract is the
         // same as Run 078).
         for _ in 0..3 {
-            let _ = disp.dispatch_frame_for_test(&[DISCRIMINATOR_PEER_CANDIDATE_WIRE, 0, 0, 0, 0]);
+            let _ = disp
+                .dispatch_frame_for_test(&[DISCRIMINATOR_PEER_CANDIDATE_WIRE, 0, 0, 0, 0]);
         }
-        assert_eq!(clock_counter.load(std::sync::atomic::Ordering::Relaxed), 3);
+        assert_eq!(
+            clock_counter.load(std::sync::atomic::Ordering::Relaxed),
+            3
+        );
     }
 
     struct FakeRun080Sender {

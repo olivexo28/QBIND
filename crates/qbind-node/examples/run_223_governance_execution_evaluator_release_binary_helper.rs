@@ -36,14 +36,14 @@ use qbind_node::pqc_governance_execution_evaluator::{
     evaluator_transcript_digest, local_operator_cannot_satisfy_evaluator_policy,
     mainnet_peer_driven_apply_remains_refused_under_evaluator,
     peer_majority_cannot_satisfy_evaluator_policy,
-    validator_set_rotation_remains_unsupported_under_evaluator,
-    verify_governance_evaluator_response, DecisionSourceIdentity,
-    EmergencyCouncilFixtureGovernanceExecutionEvaluatorInterface, EvaluatorComposedOutcome,
-    EvaluatorExpectations, EvaluatorOutcome, EvaluatorPolicy, EvaluatorRequest, EvaluatorResponse,
-    EvaluatorSourceKind, FixtureGovernanceExecutionEvaluatorInterface,
-    MainnetDecisionSourceEvaluatorInterface, OnChainDecisionSourceEvaluatorInterface,
-    ProductionDecisionSourceEvaluatorInterface, ProductionGovernanceExecutionEvaluator,
-    EVALUATOR_INVALID_RESPONSE_COMMITMENT_SENTINEL, EVALUATOR_SUPPORTED_VERSION,
+    validator_set_rotation_remains_unsupported_under_evaluator, verify_governance_evaluator_response,
+    DecisionSourceIdentity, EmergencyCouncilFixtureGovernanceExecutionEvaluatorInterface,
+    EvaluatorComposedOutcome, EvaluatorExpectations, EvaluatorOutcome, EvaluatorPolicy,
+    EvaluatorRequest, EvaluatorResponse, EvaluatorSourceKind,
+    FixtureGovernanceExecutionEvaluatorInterface, MainnetDecisionSourceEvaluatorInterface,
+    OnChainDecisionSourceEvaluatorInterface, ProductionDecisionSourceEvaluatorInterface,
+    ProductionGovernanceExecutionEvaluator, EVALUATOR_INVALID_RESPONSE_COMMITMENT_SENTINEL,
+    EVALUATOR_SUPPORTED_VERSION,
 };
 use qbind_node::pqc_governance_execution_policy::{
     GovernanceAction, GovernanceExecutionClass, GovernanceQuorumThreshold,
@@ -354,11 +354,7 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
             &rotate_expectations(env),
             env,
         );
-        t.check(
-            "A1.fixture-devnet",
-            "accept:FixtureDecisionSourceAccepted",
-            outcome_tag(&o),
-        );
+        t.check("A1.fixture-devnet", "accept:FixtureDecisionSourceAccepted", outcome_tag(&o));
         t.assert_true("A1.is-accept", o.is_accept(), "");
     }
     // A2 — fixture accepts TestNet under explicit fixture policy.
@@ -371,11 +367,7 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
             &rotate_expectations(env),
             env,
         );
-        t.check(
-            "A2.fixture-testnet",
-            "accept:FixtureDecisionSourceAccepted",
-            outcome_tag(&o),
-        );
+        t.check("A2.fixture-testnet", "accept:FixtureDecisionSourceAccepted", outcome_tag(&o));
     }
     // A3 — emergency fixture accepts explicit emergency decision/policy.
     {
@@ -387,62 +379,34 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
             &emergency_expectations(env),
             env,
         );
-        t.check(
-            "A3.emergency-fixture",
-            "accept:EmergencyFixtureAccepted",
-            outcome_tag(&o),
-        );
+        t.check("A3.emergency-fixture", "accept:EmergencyFixtureAccepted", outcome_tag(&o));
     }
     // A4 — source-identity digest deterministic + binding.
     {
         let env = Env::Devnet;
         let id = rotate_identity(env);
-        t.assert_true(
-            "A4.digest-stable",
-            id.source_identity_digest() == id.source_identity_digest(),
-            "",
-        );
+        t.assert_true("A4.digest-stable", id.source_identity_digest() == id.source_identity_digest(), "");
         let mut other = rotate_identity(env);
         other.source_id = "different".to_string();
-        t.assert_true(
-            "A4.digest-binds",
-            id.source_identity_digest() != other.source_identity_digest(),
-            "",
-        );
+        t.assert_true("A4.digest-binds", id.source_identity_digest() != other.source_identity_digest(), "");
     }
     // A5 — request digest deterministic + binding.
     {
         let env = Env::Devnet;
         let req = rotate_request(env);
-        t.assert_true(
-            "A5.digest-stable",
-            req.request_digest() == req.request_digest(),
-            "",
-        );
+        t.assert_true("A5.digest-stable", req.request_digest() == req.request_digest(), "");
         let mut other = rotate_request(env);
         other.proposal_id = "proposal-9999".to_string();
-        t.assert_true(
-            "A5.digest-binds",
-            req.request_digest() != other.request_digest(),
-            "",
-        );
+        t.assert_true("A5.digest-binds", req.request_digest() != other.request_digest(), "");
     }
     // A6 — response digest deterministic + binding.
     {
         let env = Env::Devnet;
         let resp = rotate_response(env);
-        t.assert_true(
-            "A6.digest-stable",
-            resp.response_digest() == resp.response_digest(),
-            "",
-        );
+        t.assert_true("A6.digest-stable", resp.response_digest() == resp.response_digest(), "");
         let mut other = rotate_response(env);
         other.authorized_authority_domain_sequence = 99;
-        t.assert_true(
-            "A6.digest-binds",
-            resp.response_digest() != other.response_digest(),
-            "",
-        );
+        t.assert_true("A6.digest-binds", resp.response_digest() != other.response_digest(), "");
     }
     // A7 — transcript digest deterministic + binding.
     {
@@ -474,33 +438,15 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
             r.request_digest()
         };
         let fields: [(&str, &dyn Fn(&mut EvaluatorRequest)); 9] = [
-            ("proposal_id", &|r: &mut EvaluatorRequest| {
-                r.proposal_id = "x".to_string()
-            }),
-            ("decision_id", &|r: &mut EvaluatorRequest| {
-                r.decision_id = "x".to_string()
-            }),
-            ("lifecycle_action", &|r: &mut EvaluatorRequest| {
-                r.lifecycle_action = LocalLifecycleAction::Revoke
-            }),
-            ("candidate_digest", &|r: &mut EvaluatorRequest| {
-                r.candidate_digest = "x".to_string()
-            }),
-            ("authority_domain_sequence", &|r: &mut EvaluatorRequest| {
-                r.authority_domain_sequence = 999
-            }),
-            ("effective_epoch", &|r: &mut EvaluatorRequest| {
-                r.effective_epoch = 5
-            }),
-            ("expiry_epoch", &|r: &mut EvaluatorRequest| {
-                r.expiry_epoch = 5
-            }),
-            ("replay_nonce", &|r: &mut EvaluatorRequest| {
-                r.replay_nonce = "x".to_string()
-            }),
-            ("source_identity_digest", &|r: &mut EvaluatorRequest| {
-                r.decision_source_identity_digest = "x".to_string()
-            }),
+            ("proposal_id", &|r: &mut EvaluatorRequest| r.proposal_id = "x".to_string()),
+            ("decision_id", &|r: &mut EvaluatorRequest| r.decision_id = "x".to_string()),
+            ("lifecycle_action", &|r: &mut EvaluatorRequest| r.lifecycle_action = LocalLifecycleAction::Revoke),
+            ("candidate_digest", &|r: &mut EvaluatorRequest| r.candidate_digest = "x".to_string()),
+            ("authority_domain_sequence", &|r: &mut EvaluatorRequest| r.authority_domain_sequence = 999),
+            ("effective_epoch", &|r: &mut EvaluatorRequest| r.effective_epoch = 5),
+            ("expiry_epoch", &|r: &mut EvaluatorRequest| r.expiry_epoch = 5),
+            ("replay_nonce", &|r: &mut EvaluatorRequest| r.replay_nonce = "x".to_string()),
+            ("source_identity_digest", &|r: &mut EvaluatorRequest| r.decision_source_identity_digest = "x".to_string()),
         ];
         for (name, f) in fields {
             t.assert_true(&format!("A8.binds-{name}"), base != mutate(f), "");
@@ -516,34 +462,14 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
             r.response_digest()
         };
         let fields: [(&str, &dyn Fn(&mut EvaluatorResponse)); 8] = [
-            ("request_digest", &|r: &mut EvaluatorResponse| {
-                r.request_digest = "x".to_string()
-            }),
-            ("decision_digest", &|r: &mut EvaluatorResponse| {
-                r.decision_digest = "x".to_string()
-            }),
-            (
-                "authorized_lifecycle_action",
-                &|r: &mut EvaluatorResponse| {
-                    r.authorized_lifecycle_action = LocalLifecycleAction::Revoke
-                },
-            ),
-            (
-                "authorized_candidate_digest",
-                &|r: &mut EvaluatorResponse| r.authorized_candidate_digest = "x".to_string(),
-            ),
-            ("authorized_sequence", &|r: &mut EvaluatorResponse| {
-                r.authorized_authority_domain_sequence = 999
-            }),
-            ("effective_epoch", &|r: &mut EvaluatorResponse| {
-                r.effective_epoch = 5
-            }),
-            ("expiry_epoch", &|r: &mut EvaluatorResponse| {
-                r.expiry_epoch = 5
-            }),
-            ("replay_nonce", &|r: &mut EvaluatorResponse| {
-                r.replay_nonce = "x".to_string()
-            }),
+            ("request_digest", &|r: &mut EvaluatorResponse| r.request_digest = "x".to_string()),
+            ("decision_digest", &|r: &mut EvaluatorResponse| r.decision_digest = "x".to_string()),
+            ("authorized_lifecycle_action", &|r: &mut EvaluatorResponse| r.authorized_lifecycle_action = LocalLifecycleAction::Revoke),
+            ("authorized_candidate_digest", &|r: &mut EvaluatorResponse| r.authorized_candidate_digest = "x".to_string()),
+            ("authorized_sequence", &|r: &mut EvaluatorResponse| r.authorized_authority_domain_sequence = 999),
+            ("effective_epoch", &|r: &mut EvaluatorResponse| r.effective_epoch = 5),
+            ("expiry_epoch", &|r: &mut EvaluatorResponse| r.expiry_epoch = 5),
+            ("replay_nonce", &|r: &mut EvaluatorResponse| r.replay_nonce = "x".to_string()),
         ];
         for (name, f) in fields {
             t.assert_true(&format!("A9.binds-{name}"), base != mutate(f), "");
@@ -557,24 +483,12 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
             &rotate_request(env),
             &rotate_expectations(env),
         );
-        t.check(
-            "A10.rotate-authorized",
-            "accept:EvaluatorResponseAuthorized",
-            outcome_tag(&ok),
-        );
+        t.check("A10.rotate-authorized", "accept:EvaluatorResponseAuthorized", outcome_tag(&ok));
         let mut resp = rotate_response(env);
         resp.authorized_candidate_digest = "mismatch".to_string();
         resp.request_digest = rotate_request(env).request_digest();
-        let bad = verify_governance_evaluator_response(
-            &resp,
-            &rotate_request(env),
-            &rotate_expectations(env),
-        );
-        t.check(
-            "A10.rotate-wrong-candidate",
-            "reject:WrongCandidateDigest",
-            outcome_tag(&bad),
-        );
+        let bad = verify_governance_evaluator_response(&resp, &rotate_request(env), &rotate_expectations(env));
+        t.check("A10.rotate-wrong-candidate", "reject:WrongCandidateDigest", outcome_tag(&bad));
     }
     // A11 — revoke authorization only with matching material + sequence.
     {
@@ -584,24 +498,12 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
             &revoke_request(env),
             &revoke_expectations(env),
         );
-        t.check(
-            "A11.revoke-authorized",
-            "accept:EvaluatorResponseAuthorized",
-            outcome_tag(&ok),
-        );
+        t.check("A11.revoke-authorized", "accept:EvaluatorResponseAuthorized", outcome_tag(&ok));
         let mut resp = revoke_response(env);
         resp.authorized_authority_domain_sequence = 99;
         resp.request_digest = revoke_request(env).request_digest();
-        let bad = verify_governance_evaluator_response(
-            &resp,
-            &revoke_request(env),
-            &revoke_expectations(env),
-        );
-        t.check(
-            "A11.revoke-wrong-sequence",
-            "reject:WrongAuthorityDomainSequence",
-            outcome_tag(&bad),
-        );
+        let bad = verify_governance_evaluator_response(&resp, &revoke_request(env), &revoke_expectations(env));
+        t.check("A11.revoke-wrong-sequence", "reject:WrongAuthorityDomainSequence", outcome_tag(&bad));
     }
     // A12 — emergency revoke only under explicit emergency fixture policy.
     {
@@ -613,21 +515,13 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
             &emergency_expectations(env),
             env,
         );
-        t.check(
-            "A12.emergency-accepted",
-            "accept:EmergencyFixtureAccepted",
-            outcome_tag(&ok),
-        );
+        t.check("A12.emergency-accepted", "accept:EmergencyFixtureAccepted", outcome_tag(&ok));
         let auth = verify_governance_evaluator_response(
             &emergency_response(env),
             &emergency_request(env),
             &emergency_expectations(env),
         );
-        t.check(
-            "A12.emergency-authorized",
-            "accept:EvaluatorResponseAuthorized",
-            outcome_tag(&auth),
-        );
+        t.check("A12.emergency-authorized", "accept:EvaluatorResponseAuthorized", outcome_tag(&auth));
         let mismatch = src(
             EvaluatorPolicy::FixtureDecisionSourceAllowed,
             &emergency_identity(env),
@@ -635,11 +529,7 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
             &emergency_expectations(env),
             env,
         );
-        t.check(
-            "A12.emergency-under-plain-fixture",
-            "reject:SourceKindPolicyMismatch",
-            outcome_tag(&mismatch),
-        );
+        t.check("A12.emergency-under-plain-fixture", "reject:SourceKindPolicyMismatch", outcome_tag(&mismatch));
     }
     // A13 — production evaluator boundary callable, typed unavailable.
     {
@@ -652,11 +542,7 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
             &trust_domain(env),
             EvaluatorPolicy::ProductionDecisionSourceRequired,
         );
-        t.check(
-            "A13.production-unavailable",
-            "reject:ProductionDecisionSourceUnavailable",
-            outcome_tag(&o),
-        );
+        t.check("A13.production-unavailable", "reject:ProductionDecisionSourceUnavailable", outcome_tag(&o));
         t.assert_true("A13.is-unavailable", o.is_unavailable(), "");
         t.assert_true(
             "A13.source-kind",
@@ -675,11 +561,7 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
             &trust_domain(env),
             EvaluatorPolicy::ProductionDecisionSourceRequired,
         );
-        t.check(
-            "A14.onchain-unavailable",
-            "reject:OnChainDecisionSourceUnavailable",
-            outcome_tag(&o),
-        );
+        t.check("A14.onchain-unavailable", "reject:OnChainDecisionSourceUnavailable", outcome_tag(&o));
         t.assert_true("A14.is-unavailable", o.is_unavailable(), "");
     }
     // A15 — MainNet evaluator boundary callable, typed unavailable/refusal.
@@ -693,11 +575,7 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
             &trust_domain(env),
             EvaluatorPolicy::MainnetDecisionSourceRequired,
         );
-        t.check(
-            "A15.mainnet-unavailable",
-            "reject:MainnetDecisionSourceUnavailable",
-            outcome_tag(&o),
-        );
+        t.check("A15.mainnet-unavailable", "reject:MainnetDecisionSourceUnavailable", outcome_tag(&o));
         t.assert_true("A15.is-unavailable", o.is_unavailable(), "");
     }
     // A16 — Run 220 runtime-consumption compatibility: Disabled policy inert.
@@ -710,11 +588,7 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
             &rotate_expectations(env),
             env,
         );
-        t.check(
-            "A16.disabled-inert",
-            "reject:EvaluatorDisabled",
-            outcome_tag(&o),
-        );
+        t.check("A16.disabled-inert", "reject:EvaluatorDisabled", outcome_tag(&o));
     }
     // A17 — peer-driven guard preserves MainNet refusal even when fixture would approve.
     {
@@ -728,11 +602,7 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
             EvaluatorPolicy::FixtureDecisionSourceAllowed,
             true,
         );
-        t.check(
-            "A17.mainnet-refused",
-            "MainNetPeerDrivenApplyRefused",
-            &composed_tag(&c),
-        );
+        t.check("A17.mainnet-refused", "MainNetPeerDrivenApplyRefused", &composed_tag(&c));
         t.assert_true("A17.is-reject", c.is_reject(), "");
         // Non-MainNet round-trip accepts through the guard.
         let env = Env::Devnet;
@@ -745,11 +615,7 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
             EvaluatorPolicy::FixtureDecisionSourceAllowed,
             false,
         );
-        t.check(
-            "A17.devnet-accepted",
-            "accepted:accept:EvaluatorResponseAuthorized",
-            &composed_tag(&ok),
-        );
+        t.check("A17.devnet-accepted", "accepted:accept:EvaluatorResponseAuthorized", &composed_tag(&ok));
     }
     // A18 — evaluator interface remains pure: repeated calls equal, inputs unchanged.
     {
@@ -759,26 +625,10 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
         let exp = rotate_expectations(env);
         let id_before = id.clone();
         let req_before = req.clone();
-        let o1 = evaluate_governance_decision_source(
-            &id,
-            &req,
-            &exp,
-            &trust_domain(env),
-            EvaluatorPolicy::FixtureDecisionSourceAllowed,
-        );
-        let o2 = evaluate_governance_decision_source(
-            &id,
-            &req,
-            &exp,
-            &trust_domain(env),
-            EvaluatorPolicy::FixtureDecisionSourceAllowed,
-        );
+        let o1 = evaluate_governance_decision_source(&id, &req, &exp, &trust_domain(env), EvaluatorPolicy::FixtureDecisionSourceAllowed);
+        let o2 = evaluate_governance_decision_source(&id, &req, &exp, &trust_domain(env), EvaluatorPolicy::FixtureDecisionSourceAllowed);
         t.assert_true("A18.pure-repeatable", o1 == o2, "");
-        t.assert_true(
-            "A18.inputs-unchanged",
-            id == id_before && req == req_before,
-            "",
-        );
+        t.assert_true("A18.inputs-unchanged", id == id_before && req == req_before, "");
     }
     t.finish(out)
 }
@@ -792,161 +642,67 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
     t.check(
         "R1.disabled",
         "reject:EvaluatorDisabled",
-        outcome_tag(&src(
-            EvaluatorPolicy::Disabled,
-            &rotate_identity(env),
-            &rotate_request(env),
-            &rotate_expectations(env),
-            env,
-        )),
+        outcome_tag(&src(EvaluatorPolicy::Disabled, &rotate_identity(env), &rotate_request(env), &rotate_expectations(env), env)),
     );
     // R2 — fixture rejected under production-required.
     t.check(
         "R2.fixture-production-required",
         "reject:FixtureRejectedUnderProductionPolicy",
-        outcome_tag(&src(
-            EvaluatorPolicy::ProductionDecisionSourceRequired,
-            &rotate_identity(env),
-            &rotate_request(env),
-            &rotate_expectations(env),
-            env,
-        )),
+        outcome_tag(&src(EvaluatorPolicy::ProductionDecisionSourceRequired, &rotate_identity(env), &rotate_request(env), &rotate_expectations(env), env)),
     );
     // R3 — emergency fixture rejected under production-required.
     t.check(
         "R3.emergency-production-required",
         "reject:EmergencyFixtureRejectedUnderProductionPolicy",
-        outcome_tag(&src(
-            EvaluatorPolicy::ProductionDecisionSourceRequired,
-            &emergency_identity(env),
-            &emergency_request(env),
-            &emergency_expectations(env),
-            env,
-        )),
+        outcome_tag(&src(EvaluatorPolicy::ProductionDecisionSourceRequired, &emergency_identity(env), &emergency_request(env), &emergency_expectations(env), env)),
     );
     // R4 — fixture rejected under MainNet-required.
     t.check(
         "R4.fixture-mainnet-required",
         "reject:FixtureRejectedUnderProductionPolicy",
-        outcome_tag(&src(
-            EvaluatorPolicy::MainnetDecisionSourceRequired,
-            &rotate_identity(env),
-            &rotate_request(env),
-            &rotate_expectations(env),
-            env,
-        )),
+        outcome_tag(&src(EvaluatorPolicy::MainnetDecisionSourceRequired, &rotate_identity(env), &rotate_request(env), &rotate_expectations(env), env)),
     );
     // R5 — production evaluator rejected as unavailable (fixture policy).
     {
         let mut id = rotate_identity(env);
         id.source_kind = EvaluatorSourceKind::ProductionDecisionSourceUnavailable;
-        t.check(
-            "R5.production-unavailable",
-            "reject:ProductionDecisionSourceUnavailable",
-            outcome_tag(&src(
-                EvaluatorPolicy::FixtureDecisionSourceAllowed,
-                &id,
-                &rotate_request(env),
-                &rotate_expectations(env),
-                env,
-            )),
-        );
+        t.check("R5.production-unavailable", "reject:ProductionDecisionSourceUnavailable", outcome_tag(&src(EvaluatorPolicy::FixtureDecisionSourceAllowed, &id, &rotate_request(env), &rotate_expectations(env), env)));
     }
     // R6 — on-chain unavailable.
     {
         let mut id = rotate_identity(env);
         id.source_kind = EvaluatorSourceKind::OnChainDecisionSourceUnavailable;
-        t.check(
-            "R6.onchain-unavailable",
-            "reject:OnChainDecisionSourceUnavailable",
-            outcome_tag(&src(
-                EvaluatorPolicy::FixtureDecisionSourceAllowed,
-                &id,
-                &rotate_request(env),
-                &rotate_expectations(env),
-                env,
-            )),
-        );
+        t.check("R6.onchain-unavailable", "reject:OnChainDecisionSourceUnavailable", outcome_tag(&src(EvaluatorPolicy::FixtureDecisionSourceAllowed, &id, &rotate_request(env), &rotate_expectations(env), env)));
     }
     // R7 — MainNet unavailable.
     {
         let mut id = rotate_identity(env);
         id.source_kind = EvaluatorSourceKind::MainnetDecisionSourceUnavailable;
-        t.check(
-            "R7.mainnet-unavailable",
-            "reject:MainnetDecisionSourceUnavailable",
-            outcome_tag(&src(
-                EvaluatorPolicy::FixtureDecisionSourceAllowed,
-                &id,
-                &rotate_request(env),
-                &rotate_expectations(env),
-                env,
-            )),
-        );
+        t.check("R7.mainnet-unavailable", "reject:MainnetDecisionSourceUnavailable", outcome_tag(&src(EvaluatorPolicy::FixtureDecisionSourceAllowed, &id, &rotate_request(env), &rotate_expectations(env), env)));
     }
     // R8 — unknown source rejected.
     {
         let mut id = rotate_identity(env);
         id.source_kind = EvaluatorSourceKind::Unknown;
-        t.check(
-            "R8.unknown-source",
-            "reject:UnknownSourceRejected",
-            outcome_tag(&src(
-                EvaluatorPolicy::FixtureDecisionSourceAllowed,
-                &id,
-                &rotate_request(env),
-                &rotate_expectations(env),
-                env,
-            )),
-        );
+        t.check("R8.unknown-source", "reject:UnknownSourceRejected", outcome_tag(&src(EvaluatorPolicy::FixtureDecisionSourceAllowed, &id, &rotate_request(env), &rotate_expectations(env), env)));
     }
     // R9 — wrong environment.
     {
         let mut id = rotate_identity(env);
         id.environment = Env::Testnet;
-        t.check(
-            "R9.wrong-environment",
-            "reject:WrongEnvironment",
-            outcome_tag(&src(
-                EvaluatorPolicy::FixtureDecisionSourceAllowed,
-                &id,
-                &rotate_request(env),
-                &rotate_expectations(env),
-                env,
-            )),
-        );
+        t.check("R9.wrong-environment", "reject:WrongEnvironment", outcome_tag(&src(EvaluatorPolicy::FixtureDecisionSourceAllowed, &id, &rotate_request(env), &rotate_expectations(env), env)));
     }
     // R10 — wrong chain.
     {
         let mut id = rotate_identity(env);
         id.chain_id = "other-chain".to_string();
-        t.check(
-            "R10.wrong-chain",
-            "reject:WrongChain",
-            outcome_tag(&src(
-                EvaluatorPolicy::FixtureDecisionSourceAllowed,
-                &id,
-                &rotate_request(env),
-                &rotate_expectations(env),
-                env,
-            )),
-        );
+        t.check("R10.wrong-chain", "reject:WrongChain", outcome_tag(&src(EvaluatorPolicy::FixtureDecisionSourceAllowed, &id, &rotate_request(env), &rotate_expectations(env), env)));
     }
     // R11 — wrong genesis.
     {
         let mut id = rotate_identity(env);
         id.genesis_hash = "other-genesis".to_string();
-        t.check(
-            "R11.wrong-genesis",
-            "reject:WrongGenesis",
-            outcome_tag(&src(
-                EvaluatorPolicy::FixtureDecisionSourceAllowed,
-                &id,
-                &rotate_request(env),
-                &rotate_expectations(env),
-                env,
-            )),
-        );
+        t.check("R11.wrong-genesis", "reject:WrongGenesis", outcome_tag(&src(EvaluatorPolicy::FixtureDecisionSourceAllowed, &id, &rotate_request(env), &rotate_expectations(env), env)));
     }
     // R12 — wrong authority root (re-bind identity digest so root check fires).
     {
@@ -954,17 +710,7 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
         id.authority_root_fingerprint = "other-root".to_string();
         let mut req = rotate_request(env);
         req.decision_source_identity_digest = id.source_identity_digest();
-        t.check(
-            "R12.wrong-authority-root",
-            "reject:WrongAuthorityRoot",
-            outcome_tag(&src(
-                EvaluatorPolicy::FixtureDecisionSourceAllowed,
-                &id,
-                &req,
-                &rotate_expectations(env),
-                env,
-            )),
-        );
+        t.check("R12.wrong-authority-root", "reject:WrongAuthorityRoot", outcome_tag(&src(EvaluatorPolicy::FixtureDecisionSourceAllowed, &id, &req, &rotate_expectations(env), env)));
     }
     // R13 — wrong governance proof digest.
     {
@@ -972,17 +718,7 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
         id.governance_proof_digest = "other-proof".to_string();
         let mut req = rotate_request(env);
         req.decision_source_identity_digest = id.source_identity_digest();
-        t.check(
-            "R13.wrong-governance-proof",
-            "reject:WrongGovernanceProofDigest",
-            outcome_tag(&src(
-                EvaluatorPolicy::FixtureDecisionSourceAllowed,
-                &id,
-                &req,
-                &rotate_expectations(env),
-                env,
-            )),
-        );
+        t.check("R13.wrong-governance-proof", "reject:WrongGovernanceProofDigest", outcome_tag(&src(EvaluatorPolicy::FixtureDecisionSourceAllowed, &id, &req, &rotate_expectations(env), env)));
     }
     // R14 — wrong on-chain proof digest.
     {
@@ -990,17 +726,7 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
         id.on_chain_proof_digest = Some("unexpected-onchain".to_string());
         let mut req = rotate_request(env);
         req.decision_source_identity_digest = id.source_identity_digest();
-        t.check(
-            "R14.wrong-onchain-proof",
-            "reject:WrongOnChainProofDigest",
-            outcome_tag(&src(
-                EvaluatorPolicy::FixtureDecisionSourceAllowed,
-                &id,
-                &req,
-                &rotate_expectations(env),
-                env,
-            )),
-        );
+        t.check("R14.wrong-onchain-proof", "reject:WrongOnChainProofDigest", outcome_tag(&src(EvaluatorPolicy::FixtureDecisionSourceAllowed, &id, &req, &rotate_expectations(env), env)));
     }
     // R15 — wrong custody attestation digest.
     {
@@ -1008,51 +734,21 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
         id.custody_attestation_digest = Some("unexpected-custody".to_string());
         let mut req = rotate_request(env);
         req.decision_source_identity_digest = id.source_identity_digest();
-        t.check(
-            "R15.wrong-custody-attestation",
-            "reject:WrongCustodyAttestationDigest",
-            outcome_tag(&src(
-                EvaluatorPolicy::FixtureDecisionSourceAllowed,
-                &id,
-                &req,
-                &rotate_expectations(env),
-                env,
-            )),
-        );
+        t.check("R15.wrong-custody-attestation", "reject:WrongCustodyAttestationDigest", outcome_tag(&src(EvaluatorPolicy::FixtureDecisionSourceAllowed, &id, &req, &rotate_expectations(env), env)));
     }
     // R16 — wrong proposal id.
     {
         let mut req = rotate_request(env);
         req.proposal_id = "other-proposal".to_string();
         req.decision_source_identity_digest = rotate_identity(env).source_identity_digest();
-        t.check(
-            "R16.wrong-proposal-id",
-            "reject:WrongProposalId",
-            outcome_tag(&src(
-                EvaluatorPolicy::FixtureDecisionSourceAllowed,
-                &rotate_identity(env),
-                &req,
-                &rotate_expectations(env),
-                env,
-            )),
-        );
+        t.check("R16.wrong-proposal-id", "reject:WrongProposalId", outcome_tag(&src(EvaluatorPolicy::FixtureDecisionSourceAllowed, &rotate_identity(env), &req, &rotate_expectations(env), env)));
     }
     // R17 — wrong decision id.
     {
         let mut req = rotate_request(env);
         req.decision_id = "other-decision".to_string();
         req.decision_source_identity_digest = rotate_identity(env).source_identity_digest();
-        t.check(
-            "R17.wrong-decision-id",
-            "reject:WrongDecisionId",
-            outcome_tag(&src(
-                EvaluatorPolicy::FixtureDecisionSourceAllowed,
-                &rotate_identity(env),
-                &req,
-                &rotate_expectations(env),
-                env,
-            )),
-        );
+        t.check("R17.wrong-decision-id", "reject:WrongDecisionId", outcome_tag(&src(EvaluatorPolicy::FixtureDecisionSourceAllowed, &rotate_identity(env), &req, &rotate_expectations(env), env)));
     }
     // R18 — wrong lifecycle action.
     {
@@ -1060,118 +756,48 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
         req.governance_action = GovernanceAction::Retire;
         req.lifecycle_action = LocalLifecycleAction::Retire;
         req.decision_source_identity_digest = rotate_identity(env).source_identity_digest();
-        t.check(
-            "R18.wrong-lifecycle-action",
-            "reject:WrongLifecycleAction",
-            outcome_tag(&src(
-                EvaluatorPolicy::FixtureDecisionSourceAllowed,
-                &rotate_identity(env),
-                &req,
-                &rotate_expectations(env),
-                env,
-            )),
-        );
+        t.check("R18.wrong-lifecycle-action", "reject:WrongLifecycleAction", outcome_tag(&src(EvaluatorPolicy::FixtureDecisionSourceAllowed, &rotate_identity(env), &req, &rotate_expectations(env), env)));
     }
     // R19 — wrong candidate digest.
     {
         let mut req = rotate_request(env);
         req.candidate_digest = "other-candidate".to_string();
         req.decision_source_identity_digest = rotate_identity(env).source_identity_digest();
-        t.check(
-            "R19.wrong-candidate-digest",
-            "reject:WrongCandidateDigest",
-            outcome_tag(&src(
-                EvaluatorPolicy::FixtureDecisionSourceAllowed,
-                &rotate_identity(env),
-                &req,
-                &rotate_expectations(env),
-                env,
-            )),
-        );
+        t.check("R19.wrong-candidate-digest", "reject:WrongCandidateDigest", outcome_tag(&src(EvaluatorPolicy::FixtureDecisionSourceAllowed, &rotate_identity(env), &req, &rotate_expectations(env), env)));
     }
     // R20 — wrong authority-domain sequence.
     {
         let mut req = rotate_request(env);
         req.authority_domain_sequence = 999;
         req.decision_source_identity_digest = rotate_identity(env).source_identity_digest();
-        t.check(
-            "R20.wrong-sequence",
-            "reject:WrongAuthorityDomainSequence",
-            outcome_tag(&src(
-                EvaluatorPolicy::FixtureDecisionSourceAllowed,
-                &rotate_identity(env),
-                &req,
-                &rotate_expectations(env),
-                env,
-            )),
-        );
+        t.check("R20.wrong-sequence", "reject:WrongAuthorityDomainSequence", outcome_tag(&src(EvaluatorPolicy::FixtureDecisionSourceAllowed, &rotate_identity(env), &req, &rotate_expectations(env), env)));
     }
     // R21 — wrong effective epoch.
     {
         let mut req = rotate_request(env);
         req.effective_epoch = 50;
         req.decision_source_identity_digest = rotate_identity(env).source_identity_digest();
-        t.check(
-            "R21.wrong-effective-epoch",
-            "reject:WrongEffectiveEpoch",
-            outcome_tag(&src(
-                EvaluatorPolicy::FixtureDecisionSourceAllowed,
-                &rotate_identity(env),
-                &req,
-                &rotate_expectations(env),
-                env,
-            )),
-        );
+        t.check("R21.wrong-effective-epoch", "reject:WrongEffectiveEpoch", outcome_tag(&src(EvaluatorPolicy::FixtureDecisionSourceAllowed, &rotate_identity(env), &req, &rotate_expectations(env), env)));
     }
     // R22 — expired decision.
     {
         let mut exp = rotate_expectations(env);
         exp.now_epoch = 250;
-        t.check(
-            "R22.expired-decision",
-            "reject:ExpiredDecision",
-            outcome_tag(&src(
-                EvaluatorPolicy::FixtureDecisionSourceAllowed,
-                &rotate_identity(env),
-                &rotate_request(env),
-                &exp,
-                env,
-            )),
-        );
+        t.check("R22.expired-decision", "reject:ExpiredDecision", outcome_tag(&src(EvaluatorPolicy::FixtureDecisionSourceAllowed, &rotate_identity(env), &rotate_request(env), &exp, env)));
     }
     // R23 — stale/replayed decision.
     {
         let mut req = rotate_request(env);
         req.replay_nonce = "stale-nonce".to_string();
         req.decision_source_identity_digest = rotate_identity(env).source_identity_digest();
-        t.check(
-            "R23.stale-replayed",
-            "reject:StaleOrReplayedDecision",
-            outcome_tag(&src(
-                EvaluatorPolicy::FixtureDecisionSourceAllowed,
-                &rotate_identity(env),
-                &req,
-                &rotate_expectations(env),
-                env,
-            )),
-        );
+        t.check("R23.stale-replayed", "reject:StaleOrReplayedDecision", outcome_tag(&src(EvaluatorPolicy::FixtureDecisionSourceAllowed, &rotate_identity(env), &req, &rotate_expectations(env), env)));
     }
     // R24 — quorum/threshold insufficient.
     {
         let mut req = rotate_request(env);
         req.quorum = GovernanceQuorumThreshold::new(1, 5, 3);
         req.decision_source_identity_digest = rotate_identity(env).source_identity_digest();
-        t.check(
-            "R24.quorum-insufficient",
-            "reject:QuorumThresholdInsufficient",
-            outcome_tag(&src(
-                EvaluatorPolicy::FixtureDecisionSourceAllowed,
-                &rotate_identity(env),
-                &req,
-                &rotate_expectations(env),
-                env,
-            )),
-        );
+        t.check("R24.quorum-insufficient", "reject:QuorumThresholdInsufficient", outcome_tag(&src(EvaluatorPolicy::FixtureDecisionSourceAllowed, &rotate_identity(env), &req, &rotate_expectations(env), env)));
     }
     // R25 — emergency action not authorized (emergency action under plain fixture policy).
     {
@@ -1183,51 +809,21 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
         let mut exp = rotate_expectations(env);
         exp.expected_lifecycle_action = LocalLifecycleAction::EmergencyRevoke;
         exp.expected_governance_action = GovernanceAction::EmergencyRevoke;
-        t.check(
-            "R25.emergency-not-authorized",
-            "reject:EmergencyActionNotAuthorized",
-            outcome_tag(&src(
-                EvaluatorPolicy::FixtureDecisionSourceAllowed,
-                &rotate_identity(env),
-                &req,
-                &exp,
-                env,
-            )),
-        );
+        t.check("R25.emergency-not-authorized", "reject:EmergencyActionNotAuthorized", outcome_tag(&src(EvaluatorPolicy::FixtureDecisionSourceAllowed, &rotate_identity(env), &req, &exp, env)));
     }
     // R26 — validator-set rotation unsupported.
     {
         let mut req = rotate_request(env);
         req.governance_action = GovernanceAction::ValidatorSetRotationRequest;
         req.decision_source_identity_digest = rotate_identity(env).source_identity_digest();
-        t.check(
-            "R26.validator-set-rotation",
-            "reject:ValidatorSetRotationUnsupported",
-            outcome_tag(&src(
-                EvaluatorPolicy::FixtureDecisionSourceAllowed,
-                &rotate_identity(env),
-                &req,
-                &rotate_expectations(env),
-                env,
-            )),
-        );
+        t.check("R26.validator-set-rotation", "reject:ValidatorSetRotationUnsupported", outcome_tag(&src(EvaluatorPolicy::FixtureDecisionSourceAllowed, &rotate_identity(env), &req, &rotate_expectations(env), env)));
     }
     // R27 — policy-change action unsupported.
     {
         let mut req = rotate_request(env);
         req.governance_action = GovernanceAction::PolicyChangeRequest;
         req.decision_source_identity_digest = rotate_identity(env).source_identity_digest();
-        t.check(
-            "R27.policy-change",
-            "reject:PolicyChangeActionUnsupported",
-            outcome_tag(&src(
-                EvaluatorPolicy::FixtureDecisionSourceAllowed,
-                &rotate_identity(env),
-                &req,
-                &rotate_expectations(env),
-                env,
-            )),
-        );
+        t.check("R27.policy-change", "reject:PolicyChangeActionUnsupported", outcome_tag(&src(EvaluatorPolicy::FixtureDecisionSourceAllowed, &rotate_identity(env), &req, &rotate_expectations(env), env)));
     }
     // R28 — malformed source identity.
     {
@@ -1235,48 +831,20 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
         id.source_id = String::new();
         let mut req = rotate_request(env);
         req.decision_source_identity_digest = id.source_identity_digest();
-        t.check(
-            "R28.malformed-source-identity",
-            "reject:MalformedSourceIdentity",
-            outcome_tag(&src(
-                EvaluatorPolicy::FixtureDecisionSourceAllowed,
-                &id,
-                &req,
-                &rotate_expectations(env),
-                env,
-            )),
-        );
+        t.check("R28.malformed-source-identity", "reject:MalformedSourceIdentity", outcome_tag(&src(EvaluatorPolicy::FixtureDecisionSourceAllowed, &id, &req, &rotate_expectations(env), env)));
     }
     // R29 — malformed evaluator request.
     {
         let mut req = rotate_request(env);
         req.replay_nonce = String::new();
         req.decision_source_identity_digest = rotate_identity(env).source_identity_digest();
-        t.check(
-            "R29.malformed-request",
-            "reject:MalformedEvaluatorRequest",
-            outcome_tag(&src(
-                EvaluatorPolicy::FixtureDecisionSourceAllowed,
-                &rotate_identity(env),
-                &req,
-                &rotate_expectations(env),
-                env,
-            )),
-        );
+        t.check("R29.malformed-request", "reject:MalformedEvaluatorRequest", outcome_tag(&src(EvaluatorPolicy::FixtureDecisionSourceAllowed, &rotate_identity(env), &req, &rotate_expectations(env), env)));
     }
     // R30 — malformed evaluator response.
     {
         let mut resp = rotate_response(env);
         resp.evaluator_source_id = String::new();
-        t.check(
-            "R30.malformed-response",
-            "reject:MalformedEvaluatorResponse",
-            outcome_tag(&verify_governance_evaluator_response(
-                &resp,
-                &rotate_request(env),
-                &rotate_expectations(env),
-            )),
-        );
+        t.check("R30.malformed-response", "reject:MalformedEvaluatorResponse", outcome_tag(&verify_governance_evaluator_response(&resp, &rotate_request(env), &rotate_expectations(env))));
     }
     // R31 — unsupported evaluator version.
     {
@@ -1284,88 +852,36 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
         id.evaluator_version = 99;
         let mut req = rotate_request(env);
         req.decision_source_identity_digest = id.source_identity_digest();
-        t.check(
-            "R31.unsupported-version",
-            "reject:UnsupportedEvaluatorVersion",
-            outcome_tag(&src(
-                EvaluatorPolicy::FixtureDecisionSourceAllowed,
-                &id,
-                &req,
-                &rotate_expectations(env),
-                env,
-            )),
-        );
+        t.check("R31.unsupported-version", "reject:UnsupportedEvaluatorVersion", outcome_tag(&src(EvaluatorPolicy::FixtureDecisionSourceAllowed, &id, &req, &rotate_expectations(env), env)));
     }
     // R32 — invalid response commitment.
     {
         let mut resp = rotate_response(env);
         resp.response_commitment = EVALUATOR_INVALID_RESPONSE_COMMITMENT_SENTINEL.to_string();
-        t.check(
-            "R32.invalid-commitment",
-            "reject:InvalidResponseCommitment",
-            outcome_tag(&verify_governance_evaluator_response(
-                &resp,
-                &rotate_request(env),
-                &rotate_expectations(env),
-            )),
-        );
+        t.check("R32.invalid-commitment", "reject:InvalidResponseCommitment", outcome_tag(&verify_governance_evaluator_response(&resp, &rotate_request(env), &rotate_expectations(env))));
     }
     // R33 — local operator cannot satisfy evaluator policy.
-    t.assert_true(
-        "R33.local-operator-cannot-satisfy",
-        local_operator_cannot_satisfy_evaluator_policy(),
-        "",
-    );
+    t.assert_true("R33.local-operator-cannot-satisfy", local_operator_cannot_satisfy_evaluator_policy(), "");
     // R34 — peer majority cannot satisfy evaluator policy.
-    t.assert_true(
-        "R34.peer-majority-cannot-satisfy",
-        peer_majority_cannot_satisfy_evaluator_policy(),
-        "",
-    );
+    t.assert_true("R34.peer-majority-cannot-satisfy", peer_majority_cannot_satisfy_evaluator_policy(), "");
     // R35 — evaluator valid but governance execution decision invalid (response action disagrees).
     {
         let mut resp = rotate_response(env);
         resp.authorized_lifecycle_action = LocalLifecycleAction::Retire;
         resp.request_digest = rotate_request(env).request_digest();
-        t.check(
-            "R35.governance-decision-invalid",
-            "reject:WrongLifecycleAction",
-            outcome_tag(&verify_governance_evaluator_response(
-                &resp,
-                &rotate_request(env),
-                &rotate_expectations(env),
-            )),
-        );
+        t.check("R35.governance-decision-invalid", "reject:WrongLifecycleAction", outcome_tag(&verify_governance_evaluator_response(&resp, &rotate_request(env), &rotate_expectations(env))));
     }
     // R36 — governance valid but evaluator response invalid (response does not bind request digest).
     {
         let mut resp = rotate_response(env);
         resp.request_digest = "not-the-request-digest".to_string();
-        t.check(
-            "R36.response-invalid",
-            "reject:MalformedEvaluatorResponse",
-            outcome_tag(&verify_governance_evaluator_response(
-                &resp,
-                &rotate_request(env),
-                &rotate_expectations(env),
-            )),
-        );
+        t.check("R36.response-invalid", "reject:MalformedEvaluatorResponse", outcome_tag(&verify_governance_evaluator_response(&resp, &rotate_request(env), &rotate_expectations(env))));
     }
     // R37 — lifecycle+proof+custody valid but production evaluator unavailable.
     {
         let mut id = rotate_identity(env);
         id.source_kind = EvaluatorSourceKind::ProductionDecisionSourceUnavailable;
-        t.check(
-            "R37.production-unavailable-required",
-            "reject:ProductionDecisionSourceUnavailable",
-            outcome_tag(&src(
-                EvaluatorPolicy::ProductionDecisionSourceRequired,
-                &id,
-                &rotate_request(env),
-                &rotate_expectations(env),
-                env,
-            )),
-        );
+        t.check("R37.production-unavailable-required", "reject:ProductionDecisionSourceUnavailable", outcome_tag(&src(EvaluatorPolicy::ProductionDecisionSourceRequired, &id, &rotate_request(env), &rotate_expectations(env), env)));
     }
     // R38 — validation-only rejection remains non-mutating (inputs unchanged).
     {
@@ -1374,18 +890,8 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
         let exp = rotate_expectations(env);
         let id_before = id.clone();
         let req_before = req.clone();
-        let _ = evaluate_governance_decision_source(
-            &id,
-            &req,
-            &exp,
-            &trust_domain(env),
-            EvaluatorPolicy::Disabled,
-        );
-        t.assert_true(
-            "R38.inputs-unchanged",
-            id == id_before && req == req_before,
-            "",
-        );
+        let _ = evaluate_governance_decision_source(&id, &req, &exp, &trust_domain(env), EvaluatorPolicy::Disabled);
+        t.assert_true("R38.inputs-unchanged", id == id_before && req == req_before, "");
     }
     // R39 — mutating rejection produces no mutation (composed guard rejects, no APIs).
     {
@@ -1398,11 +904,7 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
             EvaluatorPolicy::Disabled,
             false,
         );
-        t.check(
-            "R39.composed-rejected",
-            "rejected:reject:EvaluatorDisabled",
-            &composed_tag(&c),
-        );
+        t.check("R39.composed-rejected", "rejected:reject:EvaluatorDisabled", &composed_tag(&c));
         t.assert_true("R39.is-reject", c.is_reject(), "");
     }
     // R40 — MainNet peer-driven apply refused even with fixture approval.
@@ -1417,16 +919,8 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
             EvaluatorPolicy::FixtureDecisionSourceAllowed,
             true,
         );
-        t.check(
-            "R40.mainnet-refused",
-            "MainNetPeerDrivenApplyRefused",
-            &composed_tag(&c),
-        );
-        t.assert_true(
-            "R40.helper-refuses",
-            mainnet_peer_driven_apply_remains_refused_under_evaluator(Env::Mainnet),
-            "",
-        );
+        t.check("R40.mainnet-refused", "MainNetPeerDrivenApplyRefused", &composed_tag(&c));
+        t.assert_true("R40.helper-refuses", mainnet_peer_driven_apply_remains_refused_under_evaluator(Env::Mainnet), "");
     }
     t.finish(out)
 }
@@ -1437,125 +931,44 @@ fn run_reachability_table(out: &Path) -> (u64, u64) {
     let env = Env::Devnet;
 
     // Source kind / policy tags reachable.
-    t.assert_true(
-        "K.fixture-is-fixture",
-        EvaluatorSourceKind::FixtureDecisionSource.is_fixture(),
-        "",
-    );
-    t.assert_true(
-        "K.emergency-is-fixture",
-        EvaluatorSourceKind::EmergencyCouncilFixtureSource.is_fixture(),
-        "",
-    );
-    t.assert_true(
-        "K.production-is-unavailable",
-        EvaluatorSourceKind::ProductionDecisionSourceUnavailable.is_production_unavailable(),
-        "",
-    );
-    t.assert_true(
-        "P.production-requires-source",
-        EvaluatorPolicy::ProductionDecisionSourceRequired.requires_production_source(),
-        "",
-    );
-    t.assert_true(
-        "P.fixture-allowed-source",
-        EvaluatorPolicy::FixtureDecisionSourceAllowed.allowed_fixture_source()
-            == Some(EvaluatorSourceKind::FixtureDecisionSource),
-        "",
-    );
+    t.assert_true("K.fixture-is-fixture", EvaluatorSourceKind::FixtureDecisionSource.is_fixture(), "");
+    t.assert_true("K.emergency-is-fixture", EvaluatorSourceKind::EmergencyCouncilFixtureSource.is_fixture(), "");
+    t.assert_true("K.production-is-unavailable", EvaluatorSourceKind::ProductionDecisionSourceUnavailable.is_production_unavailable(), "");
+    t.assert_true("P.production-requires-source", EvaluatorPolicy::ProductionDecisionSourceRequired.requires_production_source(), "");
+    t.assert_true("P.fixture-allowed-source", EvaluatorPolicy::FixtureDecisionSourceAllowed.allowed_fixture_source() == Some(EvaluatorSourceKind::FixtureDecisionSource), "");
 
     // Trait implementations reachable; each presents its kind.
     let fixture = FixtureGovernanceExecutionEvaluatorInterface;
     let emergency = EmergencyCouncilFixtureGovernanceExecutionEvaluatorInterface;
-    t.assert_true(
-        "T.fixture-kind",
-        fixture.source_kind() == EvaluatorSourceKind::FixtureDecisionSource,
-        "",
-    );
-    t.assert_true(
-        "T.emergency-kind",
-        emergency.source_kind() == EvaluatorSourceKind::EmergencyCouncilFixtureSource,
-        "",
-    );
-    t.assert_true(
-        "T.production-kind",
-        ProductionDecisionSourceEvaluatorInterface.source_kind()
-            == EvaluatorSourceKind::ProductionDecisionSourceUnavailable,
-        "",
-    );
-    t.assert_true(
-        "T.onchain-kind",
-        OnChainDecisionSourceEvaluatorInterface.source_kind()
-            == EvaluatorSourceKind::OnChainDecisionSourceUnavailable,
-        "",
-    );
-    t.assert_true(
-        "T.mainnet-kind",
-        MainnetDecisionSourceEvaluatorInterface.source_kind()
-            == EvaluatorSourceKind::MainnetDecisionSourceUnavailable,
-        "",
-    );
+    t.assert_true("T.fixture-kind", fixture.source_kind() == EvaluatorSourceKind::FixtureDecisionSource, "");
+    t.assert_true("T.emergency-kind", emergency.source_kind() == EvaluatorSourceKind::EmergencyCouncilFixtureSource, "");
+    t.assert_true("T.production-kind", ProductionDecisionSourceEvaluatorInterface.source_kind() == EvaluatorSourceKind::ProductionDecisionSourceUnavailable, "");
+    t.assert_true("T.onchain-kind", OnChainDecisionSourceEvaluatorInterface.source_kind() == EvaluatorSourceKind::OnChainDecisionSourceUnavailable, "");
+    t.assert_true("T.mainnet-kind", MainnetDecisionSourceEvaluatorInterface.source_kind() == EvaluatorSourceKind::MainnetDecisionSourceUnavailable, "");
 
     // Fixture trait verify path reaches authorize.
-    let auth = fixture.verify_governance_evaluator_response(
-        &rotate_response(env),
-        &rotate_request(env),
-        &rotate_expectations(env),
-    );
-    t.check(
-        "T.fixture-verify-authorized",
-        "accept:EvaluatorResponseAuthorized",
-        outcome_tag(&auth),
-    );
+    let auth = fixture.verify_governance_evaluator_response(&rotate_response(env), &rotate_request(env), &rotate_expectations(env));
+    t.check("T.fixture-verify-authorized", "accept:EvaluatorResponseAuthorized", outcome_tag(&auth));
 
     // Deterministic digest helpers reachable and non-empty.
     let id = rotate_identity(env);
     let req = rotate_request(env);
     let resp = rotate_response(env);
-    t.assert_true(
-        "D.source-identity-digest",
-        !id.source_identity_digest().is_empty(),
-        "",
-    );
+    t.assert_true("D.source-identity-digest", !id.source_identity_digest().is_empty(), "");
     t.assert_true("D.request-digest", !req.request_digest().is_empty(), "");
     t.assert_true("D.response-digest", !resp.response_digest().is_empty(), "");
     t.assert_true(
         "D.transcript-digest",
-        !evaluator_transcript_digest(
-            &id.source_identity_digest(),
-            &req.request_digest(),
-            &resp.response_digest(),
-        )
-        .is_empty(),
+        !evaluator_transcript_digest(&id.source_identity_digest(), &req.request_digest(), &resp.response_digest()).is_empty(),
         "",
     );
 
     // Explicit fail-closed helper symbols reachable.
-    t.assert_true(
-        "H.validator-set-rotation-unsupported",
-        validator_set_rotation_remains_unsupported_under_evaluator(),
-        "",
-    );
-    t.assert_true(
-        "H.mainnet-refused-helper",
-        mainnet_peer_driven_apply_remains_refused_under_evaluator(Env::Mainnet),
-        "",
-    );
-    t.assert_true(
-        "H.mainnet-refused-helper-devnet-false",
-        !mainnet_peer_driven_apply_remains_refused_under_evaluator(Env::Devnet),
-        "",
-    );
-    t.assert_true(
-        "H.local-operator-cannot-satisfy",
-        local_operator_cannot_satisfy_evaluator_policy(),
-        "",
-    );
-    t.assert_true(
-        "H.peer-majority-cannot-satisfy",
-        peer_majority_cannot_satisfy_evaluator_policy(),
-        "",
-    );
+    t.assert_true("H.validator-set-rotation-unsupported", validator_set_rotation_remains_unsupported_under_evaluator(), "");
+    t.assert_true("H.mainnet-refused-helper", mainnet_peer_driven_apply_remains_refused_under_evaluator(Env::Mainnet), "");
+    t.assert_true("H.mainnet-refused-helper-devnet-false", !mainnet_peer_driven_apply_remains_refused_under_evaluator(Env::Devnet), "");
+    t.assert_true("H.local-operator-cannot-satisfy", local_operator_cannot_satisfy_evaluator_policy(), "");
+    t.assert_true("H.peer-majority-cannot-satisfy", peer_majority_cannot_satisfy_evaluator_policy(), "");
 
     t.finish(out)
 }
@@ -1566,46 +979,24 @@ fn run_fixture_dump(out: &Path) {
     let id = rotate_identity(env);
     let req = rotate_request(env);
     let resp = rotate_response(env);
-    write_file(
-        &dir.join("decision_source_identity.txt"),
-        &format!("{id:#?}\n"),
-    );
+    write_file(&dir.join("decision_source_identity.txt"), &format!("{id:#?}\n"));
     write_file(&dir.join("evaluator_request.txt"), &format!("{req:#?}\n"));
     write_file(&dir.join("evaluator_response.txt"), &format!("{resp:#?}\n"));
-    write_file(
-        &dir.join("evaluator_expectations.txt"),
-        &format!("{:#?}\n", rotate_expectations(env)),
-    );
-    write_file(
-        &dir.join("source_identity_digest.txt"),
-        &format!("{}\n", id.source_identity_digest()),
-    );
-    write_file(
-        &dir.join("request_digest.txt"),
-        &format!("{}\n", req.request_digest()),
-    );
-    write_file(
-        &dir.join("response_digest.txt"),
-        &format!("{}\n", resp.response_digest()),
-    );
+    write_file(&dir.join("evaluator_expectations.txt"), &format!("{:#?}\n", rotate_expectations(env)));
+    write_file(&dir.join("source_identity_digest.txt"), &format!("{}\n", id.source_identity_digest()));
+    write_file(&dir.join("request_digest.txt"), &format!("{}\n", req.request_digest()));
+    write_file(&dir.join("response_digest.txt"), &format!("{}\n", resp.response_digest()));
     write_file(
         &dir.join("transcript_digest.txt"),
         &format!(
             "{}\n",
-            evaluator_transcript_digest(
-                &id.source_identity_digest(),
-                &req.request_digest(),
-                &resp.response_digest()
-            )
+            evaluator_transcript_digest(&id.source_identity_digest(), &req.request_digest(), &resp.response_digest())
         ),
     );
     // Evaluator interface inventory — typed symbols the release binary exposes.
     let mut inv = String::new();
     inv.push_str("module\tpqc_governance_execution_evaluator\n");
-    inv.push_str(&format!(
-        "supported_version\t{}\n",
-        EVALUATOR_SUPPORTED_VERSION
-    ));
+    inv.push_str(&format!("supported_version\t{}\n", EVALUATOR_SUPPORTED_VERSION));
     for k in [
         EvaluatorSourceKind::Disabled,
         EvaluatorSourceKind::FixtureDecisionSource,

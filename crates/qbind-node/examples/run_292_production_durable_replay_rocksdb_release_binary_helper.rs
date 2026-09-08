@@ -28,7 +28,6 @@ use std::fs;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::PathBuf;
 
-use qbind_node::pqc_authority_lifecycle::LocalLifecycleAction;
 use qbind_node::pqc_governance_authority::GovernanceAuthorityClass;
 use qbind_node::pqc_governance_evaluator_replay_durable_backend::{
     durable_backend_key_digest, durable_record_digest, DurableBackendDecisionInput,
@@ -45,8 +44,10 @@ use qbind_node::pqc_governance_execution_policy::{
     GovernanceAction, GovernanceExecutionClass, GovernanceQuorumThreshold,
 };
 use qbind_node::pqc_governance_execution_runtime_arming::GovernanceExecutionRuntimeSurface;
+use qbind_node::pqc_authority_lifecycle::LocalLifecycleAction;
 use qbind_node::pqc_governance_production_durable_replay_rocksdb::{
-    durable_replay_rocksdb_default_is_disabled, durable_replay_rocksdb_domain_digest,
+    durable_replay_rocksdb_default_is_disabled,
+    durable_replay_rocksdb_domain_digest,
     durable_replay_rocksdb_is_source_test_not_release_binary_evidence,
     durable_replay_rocksdb_mainnet_remains_refused,
     durable_replay_rocksdb_never_falls_back_to_in_memory, durable_replay_rocksdb_record_digest,
@@ -171,13 +172,7 @@ fn decision_input(
 }
 
 fn devnet_input() -> DurableBackendDecisionInput {
-    decision_input(
-        TrustBundleEnvironment::Devnet,
-        CHAIN,
-        GENESIS,
-        SEQUENCE,
-        DECISION,
-    )
+    decision_input(TrustBundleEnvironment::Devnet, CHAIN, GENESIS, SEQUENCE, DECISION)
 }
 
 fn identity_devnet() -> DurableReplayRocksDbIdentity {
@@ -205,14 +200,8 @@ fn a01_open_empty_initializes_metadata() {
     let (backend, outcome) =
         ProductionDurableReplayRocksDbBackend::open_or_initialize(&cfg).expect("open");
     assert_eq!(outcome, DurableReplayRocksDbOpenOutcome::InitializedEmpty);
-    assert_eq!(
-        backend.open_outcome(),
-        DurableReplayRocksDbOpenOutcome::InitializedEmpty
-    );
-    assert_eq!(
-        backend.identity().environment,
-        TrustBundleEnvironment::Devnet
-    );
+    assert_eq!(backend.open_outcome(), DurableReplayRocksDbOpenOutcome::InitializedEmpty);
+    assert_eq!(backend.identity().environment, TrustBundleEnvironment::Devnet);
 }
 
 fn a02_reopen_same_identity_opens_existing() {
@@ -228,15 +217,10 @@ fn a03_write_observed_and_read_back() {
     let dir = TempDir::new().unwrap();
     let mut backend = open_devnet(&dir);
     let input = devnet_input();
-    let out = backend
-        .record_replay_event(&observed_event(&input))
-        .unwrap();
+    let out = backend.record_replay_event(&observed_event(&input)).unwrap();
     assert_eq!(out.tag(), "written");
     let read = backend
-        .read_replay_record(
-            &durable_backend_key_digest(&input),
-            DurableReplayRecordStage::Observed,
-        )
+        .read_replay_record(&durable_backend_key_digest(&input), DurableReplayRecordStage::Observed)
         .unwrap();
     match read {
         DurableReplayRocksDbReadOutcome::Found(r) => {
@@ -251,18 +235,14 @@ fn a04_write_consumed_after_observed() {
     let dir = TempDir::new().unwrap();
     let mut backend = open_devnet(&dir);
     let input = devnet_input();
-    let observed = backend
-        .record_replay_event(&observed_event(&input))
-        .unwrap();
+    let observed = backend.record_replay_event(&observed_event(&input)).unwrap();
     let observed_digest = observed.record().digest.clone();
-    let consume = DurableReplayEventInput::consumed_from_decision_input(&input, observed_digest);
+    let consume =
+        DurableReplayEventInput::consumed_from_decision_input(&input, observed_digest);
     let out = backend.record_replay_event(&consume).unwrap();
     assert_eq!(out.tag(), "written");
     assert!(backend
-        .read_replay_record(
-            &durable_backend_key_digest(&input),
-            DurableReplayRecordStage::Consumed
-        )
+        .read_replay_record(&durable_backend_key_digest(&input), DurableReplayRecordStage::Consumed)
         .unwrap()
         .is_found());
 }
@@ -311,9 +291,7 @@ fn a06_scan_deterministic_order() {
                 SEQUENCE,
                 &format!("decision-{i:04}"),
             );
-            backend
-                .record_replay_event(&observed_event(&input))
-                .unwrap();
+            backend.record_replay_event(&observed_event(&input)).unwrap();
         }
     }
     let cfg = DurableReplayRocksDbConfig::source_test(dir.path(), identity_devnet());
@@ -332,10 +310,7 @@ fn a07_record_id_from_run238_decision_input() {
     let input = devnet_input();
     let ev = observed_event(&input);
     assert_eq!(ev.record_id, durable_backend_key_digest(&input));
-    assert_eq!(
-        durable_replay_rocksdb_record_id(&input),
-        durable_backend_key_digest(&input)
-    );
+    assert_eq!(durable_replay_rocksdb_record_id(&input), durable_backend_key_digest(&input));
     // Payload digest is derived from the Run 238 durable record digest.
     assert_eq!(
         ev.payload_digest,
@@ -364,10 +339,7 @@ fn a08_deterministic_digest_stability() {
         ev.replay_sequence,
     );
     assert_eq!(d1, d2, "record digest must be deterministic");
-    assert_eq!(
-        identity.domain_digest(),
-        durable_replay_rocksdb_domain_digest(&identity)
-    );
+    assert_eq!(identity.domain_digest(), durable_replay_rocksdb_domain_digest(&identity));
     // The record is persisted with exactly this digest.
     let dir = TempDir::new().unwrap();
     let mut backend = open_devnet(&dir);
@@ -385,10 +357,7 @@ fn a09_mock_backend_trait_compatible() {
     let dup = mock.record_replay_event(&observed_event(&input)).unwrap();
     assert_eq!(dup.tag(), "idempotent-duplicate");
     assert!(mock
-        .read_replay_record(
-            &durable_backend_key_digest(&input),
-            DurableReplayRecordStage::Observed
-        )
+        .read_replay_record(&durable_backend_key_digest(&input), DurableReplayRecordStage::Observed)
         .unwrap()
         .is_found());
     assert_eq!(mock.scan_replay_records().unwrap().len(), 1);
@@ -406,10 +375,7 @@ fn a10_testnet_domain_opens_and_binds() {
     let (backend, outcome) =
         ProductionDurableReplayRocksDbBackend::open_or_initialize(&cfg).expect("open testnet");
     assert_eq!(outcome, DurableReplayRocksDbOpenOutcome::InitializedEmpty);
-    assert_eq!(
-        backend.identity().environment,
-        TrustBundleEnvironment::Testnet
-    );
+    assert_eq!(backend.identity().environment, TrustBundleEnvironment::Testnet);
 }
 
 // ===========================================================================
@@ -437,9 +403,7 @@ fn b02_mainnet_identity_refused() {
     assert_eq!(err, DurableReplayRocksDbError::MainNetRefused);
 }
 
-fn reopen_wrong(
-    mutate: impl FnOnce(&mut DurableReplayRocksDbIdentity),
-) -> DurableReplayRocksDbError {
+fn reopen_wrong(mutate: impl FnOnce(&mut DurableReplayRocksDbIdentity)) -> DurableReplayRocksDbError {
     let dir = TempDir::new().unwrap();
     let _ = open_devnet(&dir);
     let mut id = identity_devnet();
@@ -450,42 +414,27 @@ fn reopen_wrong(
 
 fn b03_wrong_environment_refuses_reopen() {
     let err = reopen_wrong(|id| id.environment = TrustBundleEnvironment::Testnet);
-    assert!(matches!(
-        err,
-        DurableReplayRocksDbError::DomainMismatch { .. }
-    ));
+    assert!(matches!(err, DurableReplayRocksDbError::DomainMismatch { .. }));
 }
 
 fn b04_wrong_chain_refuses_reopen() {
     let err = reopen_wrong(|id| id.chain_id = "other-chain".to_string());
-    assert!(matches!(
-        err,
-        DurableReplayRocksDbError::DomainMismatch { .. }
-    ));
+    assert!(matches!(err, DurableReplayRocksDbError::DomainMismatch { .. }));
 }
 
 fn b05_wrong_genesis_refuses_reopen() {
     let err = reopen_wrong(|id| id.genesis_hash = "other-genesis".to_string());
-    assert!(matches!(
-        err,
-        DurableReplayRocksDbError::DomainMismatch { .. }
-    ));
+    assert!(matches!(err, DurableReplayRocksDbError::DomainMismatch { .. }));
 }
 
 fn b06_wrong_namespace_refuses_reopen() {
     let err = reopen_wrong(|id| id.replay_namespace = "other-namespace".to_string());
-    assert!(matches!(
-        err,
-        DurableReplayRocksDbError::DomainMismatch { .. }
-    ));
+    assert!(matches!(err, DurableReplayRocksDbError::DomainMismatch { .. }));
 }
 
 fn b07_wrong_authority_domain_sequence_refuses_reopen() {
     let err = reopen_wrong(|id| id.authority_domain_sequence += 1);
-    assert!(matches!(
-        err,
-        DurableReplayRocksDbError::DomainMismatch { .. }
-    ));
+    assert!(matches!(err, DurableReplayRocksDbError::DomainMismatch { .. }));
 }
 
 fn b08_unsupported_future_schema_refuses_open() {
@@ -493,11 +442,8 @@ fn b08_unsupported_future_schema_refuses_open() {
     // Write a future schema marker into an otherwise-metadata-less DB.
     {
         let db = rocksdb::DB::open_default(dir.path()).unwrap();
-        db.put(
-            KEY_SCHEMA,
-            (DURABLE_REPLAY_ROCKSDB_SCHEMA_VERSION + 1).to_le_bytes(),
-        )
-        .unwrap();
+        db.put(KEY_SCHEMA, (DURABLE_REPLAY_ROCKSDB_SCHEMA_VERSION + 1).to_le_bytes())
+            .unwrap();
         db.put(KEY_DOMAIN, b"unused-domain-metadata").unwrap();
     }
     let cfg = DurableReplayRocksDbConfig::source_test(dir.path(), identity_devnet());
@@ -530,14 +476,14 @@ fn b10_missing_metadata_nonempty_db_refuses_open() {
     {
         let db = rocksdb::DB::open_default(dir.path()).unwrap();
         // A non-empty DB carrying an unrelated key but no schema/domain markers.
-        db.put(b"qbind.run291.rec.observed.some-id", b"data")
-            .unwrap();
+        db.put(b"qbind.run291.rec.observed.some-id", b"data").unwrap();
     }
     let cfg = DurableReplayRocksDbConfig::source_test(dir.path(), identity_devnet());
     let err = ProductionDurableReplayRocksDbBackend::open_or_initialize(&cfg).unwrap_err();
     assert!(matches!(
         err,
-        DurableReplayRocksDbError::SchemaMarkerMissing | DurableReplayRocksDbError::MetadataMissing
+        DurableReplayRocksDbError::SchemaMarkerMissing
+            | DurableReplayRocksDbError::MetadataMissing
     ));
 }
 
@@ -547,15 +493,13 @@ fn b11_corrupted_metadata_refuses_open() {
     // Corrupt the domain metadata (keep a valid schema marker).
     {
         let db = rocksdb::DB::open_default(dir.path()).unwrap();
-        db.put(KEY_DOMAIN, b"totally-corrupt-domain-metadata")
-            .unwrap();
+        db.put(KEY_DOMAIN, b"totally-corrupt-domain-metadata").unwrap();
     }
     let cfg = DurableReplayRocksDbConfig::source_test(dir.path(), identity_devnet());
     let err = ProductionDurableReplayRocksDbBackend::open_or_initialize(&cfg).unwrap_err();
     assert!(matches!(
         err,
-        DurableReplayRocksDbError::MetadataMalformed
-            | DurableReplayRocksDbError::DomainMismatch { .. }
+        DurableReplayRocksDbError::MetadataMalformed | DurableReplayRocksDbError::DomainMismatch { .. }
     ));
 }
 
@@ -569,8 +513,7 @@ fn b12_lock_contention_second_open_fails_closed() {
 
 fn b13_malformed_identity_refused() {
     let dir = TempDir::new().unwrap();
-    let id =
-        DurableReplayRocksDbIdentity::new(TrustBundleEnvironment::Devnet, "", GENESIS, SEQUENCE);
+    let id = DurableReplayRocksDbIdentity::new(TrustBundleEnvironment::Devnet, "", GENESIS, SEQUENCE);
     let cfg = DurableReplayRocksDbConfig::source_test(dir.path(), id);
     let err = ProductionDurableReplayRocksDbBackend::open_or_initialize(&cfg).unwrap_err();
     assert_eq!(err, DurableReplayRocksDbError::MalformedIdentity);
@@ -585,10 +528,7 @@ fn c01_duplicate_observed_idempotent() {
     let mut backend = open_devnet(&dir);
     let ev = observed_event(&devnet_input());
     assert_eq!(backend.record_replay_event(&ev).unwrap().tag(), "written");
-    assert_eq!(
-        backend.record_replay_event(&ev).unwrap().tag(),
-        "idempotent-duplicate"
-    );
+    assert_eq!(backend.record_replay_event(&ev).unwrap().tag(), "idempotent-duplicate");
     assert_eq!(backend.scan_replay_records().unwrap().len(), 1);
 }
 
@@ -597,15 +537,11 @@ fn c02_duplicate_observed_after_reopen_idempotent() {
     let input = devnet_input();
     {
         let mut backend = open_devnet(&dir);
-        backend
-            .record_replay_event(&observed_event(&input))
-            .unwrap();
+        backend.record_replay_event(&observed_event(&input)).unwrap();
     }
     let cfg = DurableReplayRocksDbConfig::source_test(dir.path(), identity_devnet());
     let (mut backend, _) = ProductionDurableReplayRocksDbBackend::open_or_initialize(&cfg).unwrap();
-    let out = backend
-        .record_replay_event(&observed_event(&input))
-        .unwrap();
+    let out = backend.record_replay_event(&observed_event(&input)).unwrap();
     assert_eq!(out.tag(), "idempotent-duplicate");
     assert_eq!(backend.scan_replay_records().unwrap().len(), 1);
 }
@@ -621,10 +557,7 @@ fn c03_duplicate_consumed_idempotent() {
         .digest
         .clone();
     let consume = DurableReplayEventInput::consumed_from_decision_input(&input, observed_digest);
-    assert_eq!(
-        backend.record_replay_event(&consume).unwrap().tag(),
-        "written"
-    );
+    assert_eq!(backend.record_replay_event(&consume).unwrap().tag(), "written");
     assert_eq!(
         backend.record_replay_event(&consume).unwrap().tag(),
         "idempotent-duplicate"
@@ -663,10 +596,7 @@ fn c05_same_id_different_sequence_is_equivocation() {
     backend.record_replay_event(&ev).unwrap();
     ev.replay_sequence += 1;
     let err = backend.record_replay_event(&ev).unwrap_err();
-    assert!(matches!(
-        err,
-        DurableReplayRocksDbError::Equivocation { .. }
-    ));
+    assert!(matches!(err, DurableReplayRocksDbError::Equivocation { .. }));
 }
 
 fn c06_same_id_different_payload_is_equivocation() {
@@ -676,10 +606,7 @@ fn c06_same_id_different_payload_is_equivocation() {
     backend.record_replay_event(&ev).unwrap();
     ev.payload_digest = "tampered-payload-digest".to_string();
     let err = backend.record_replay_event(&ev).unwrap_err();
-    assert!(matches!(
-        err,
-        DurableReplayRocksDbError::Equivocation { .. }
-    ));
+    assert!(matches!(err, DurableReplayRocksDbError::Equivocation { .. }));
 }
 
 fn c07_equivocation_does_not_overwrite_original() {
@@ -731,10 +658,7 @@ fn d01_consumed_before_observed_fails_ordering() {
     let input = devnet_input();
     let consume = DurableReplayEventInput::consumed_from_decision_input(&input, "prior-digest");
     let err = backend.record_replay_event(&consume).unwrap_err();
-    assert!(matches!(
-        err,
-        DurableReplayRocksDbError::OrderingViolation { .. }
-    ));
+    assert!(matches!(err, DurableReplayRocksDbError::OrderingViolation { .. }));
     assert!(backend.scan_replay_records().unwrap().is_empty());
 }
 
@@ -742,16 +666,11 @@ fn d02_consumed_wrong_prior_digest_fails_ordering() {
     let dir = TempDir::new().unwrap();
     let mut backend = open_devnet(&dir);
     let input = devnet_input();
-    backend
-        .record_replay_event(&observed_event(&input))
-        .unwrap();
+    backend.record_replay_event(&observed_event(&input)).unwrap();
     let consume =
         DurableReplayEventInput::consumed_from_decision_input(&input, "wrong-prior-stage-digest");
     let err = backend.record_replay_event(&consume).unwrap_err();
-    assert!(matches!(
-        err,
-        DurableReplayRocksDbError::OrderingViolation { .. }
-    ));
+    assert!(matches!(err, DurableReplayRocksDbError::OrderingViolation { .. }));
 }
 
 fn d03_read_missing_returns_not_found_no_mutation() {
@@ -781,10 +700,7 @@ fn d05_partial_residue_detected_at_open() {
     }
     let cfg = DurableReplayRocksDbConfig::source_test(dir.path(), identity_devnet());
     let err = ProductionDurableReplayRocksDbBackend::open_or_initialize(&cfg).unwrap_err();
-    assert!(matches!(
-        err,
-        DurableReplayRocksDbError::PartialResidueDetected(_)
-    ));
+    assert!(matches!(err, DurableReplayRocksDbError::PartialResidueDetected(_)));
 }
 
 fn d06_recover_rolls_back_safe_residue() {
@@ -812,10 +728,7 @@ fn d07_recover_clean_db_nothing_to_recover() {
     let dir = TempDir::new().unwrap();
     let mut backend = open_devnet(&dir);
     let outcome = backend.recover_replay_window().unwrap();
-    assert_eq!(
-        outcome,
-        DurableReplayRocksDbRecoveryOutcome::NothingToRecover
-    );
+    assert_eq!(outcome, DurableReplayRocksDbRecoveryOutcome::NothingToRecover);
 }
 
 fn d08_precommit_failure_leaves_no_record() {
@@ -844,9 +757,7 @@ fn e01_mutated_payload_fails_closed_on_read() {
     let key = durable_backend_key_digest(&input);
     {
         let mut backend = open_devnet(&dir);
-        backend
-            .record_replay_event(&observed_event(&input))
-            .unwrap();
+        backend.record_replay_event(&observed_event(&input)).unwrap();
     }
     {
         let db = rocksdb::DB::open_default(dir.path()).unwrap();
@@ -878,18 +789,14 @@ fn e02_stale_digest_fails_closed() {
     {
         let db = rocksdb::DB::open_default(dir.path()).unwrap();
         let rec_key = durable_replay_rocksdb_record_key(&key, DurableReplayRecordStage::Observed);
-        db.put(&rec_key, bincode::serialize(&record).unwrap())
-            .unwrap();
+        db.put(&rec_key, bincode::serialize(&record).unwrap()).unwrap();
     }
     let cfg = DurableReplayRocksDbConfig::source_test(dir.path(), identity_devnet());
     let (backend, _) = ProductionDurableReplayRocksDbBackend::open_or_initialize(&cfg).unwrap();
     let err = backend
         .read_replay_record(&key, DurableReplayRecordStage::Observed)
         .unwrap_err();
-    assert!(matches!(
-        err,
-        DurableReplayRocksDbError::CorruptDigest { .. }
-    ));
+    assert!(matches!(err, DurableReplayRocksDbError::CorruptDigest { .. }));
 }
 
 fn e03_truncated_record_fails_closed_on_scan() {
@@ -898,9 +805,7 @@ fn e03_truncated_record_fails_closed_on_scan() {
     let key = durable_backend_key_digest(&input);
     {
         let mut backend = open_devnet(&dir);
-        backend
-            .record_replay_event(&observed_event(&input))
-            .unwrap();
+        backend.record_replay_event(&observed_event(&input)).unwrap();
     }
     {
         let db = rocksdb::DB::open_default(dir.path()).unwrap();
@@ -915,20 +820,8 @@ fn e03_truncated_record_fails_closed_on_scan() {
 
 fn e04_corrupt_record_healthy_sibling_still_reads() {
     let dir = TempDir::new().unwrap();
-    let good = decision_input(
-        TrustBundleEnvironment::Devnet,
-        CHAIN,
-        GENESIS,
-        SEQUENCE,
-        "good",
-    );
-    let bad = decision_input(
-        TrustBundleEnvironment::Devnet,
-        CHAIN,
-        GENESIS,
-        SEQUENCE,
-        "bad",
-    );
+    let good = decision_input(TrustBundleEnvironment::Devnet, CHAIN, GENESIS, SEQUENCE, "good");
+    let bad = decision_input(TrustBundleEnvironment::Devnet, CHAIN, GENESIS, SEQUENCE, "bad");
     let bad_key = durable_backend_key_digest(&bad);
     {
         let mut backend = open_devnet(&dir);
@@ -964,8 +857,7 @@ fn e05_corrupted_metadata_fails_closed() {
     let err = ProductionDurableReplayRocksDbBackend::open_or_initialize(&cfg).unwrap_err();
     assert!(matches!(
         err,
-        DurableReplayRocksDbError::MetadataMalformed
-            | DurableReplayRocksDbError::DomainMismatch { .. }
+        DurableReplayRocksDbError::MetadataMalformed | DurableReplayRocksDbError::DomainMismatch { .. }
     ));
 }
 
@@ -977,9 +869,7 @@ fn e06_corruption_never_falls_back_to_in_memory() {
     let key = durable_backend_key_digest(&input);
     {
         let mut backend = open_devnet(&dir);
-        backend
-            .record_replay_event(&observed_event(&input))
-            .unwrap();
+        backend.record_replay_event(&observed_event(&input)).unwrap();
     }
     {
         let db = rocksdb::DB::open_default(dir.path()).unwrap();
@@ -1004,10 +894,7 @@ fn f01_invariant_no_in_memory_fallback() {
 
 fn f02_invariant_default_disabled() {
     assert!(durable_replay_rocksdb_default_is_disabled());
-    assert_eq!(
-        DurableReplayRocksDbPolicy::default(),
-        DurableReplayRocksDbPolicy::Disabled
-    );
+    assert_eq!(DurableReplayRocksDbPolicy::default(), DurableReplayRocksDbPolicy::Disabled);
     assert!(!DurableReplayRocksDbPolicy::default().permits_open());
 }
 
@@ -1017,12 +904,7 @@ fn f03_invariant_mainnet_refused() {
     let dir = TempDir::new().unwrap();
     let cfg = DurableReplayRocksDbConfig::source_test(
         dir.path(),
-        DurableReplayRocksDbIdentity::new(
-            TrustBundleEnvironment::Mainnet,
-            CHAIN,
-            GENESIS,
-            SEQUENCE,
-        ),
+        DurableReplayRocksDbIdentity::new(TrustBundleEnvironment::Mainnet, CHAIN, GENESIS, SEQUENCE),
     );
     assert!(ProductionDurableReplayRocksDbBackend::open_or_initialize(&cfg).is_err());
 }
@@ -1049,12 +931,7 @@ fn f06_event_domain_mismatch_is_non_mutating() {
     let mut ev = observed_event(&devnet_input());
     ev.identity.environment = TrustBundleEnvironment::Testnet;
     let err = backend.record_replay_event(&ev).unwrap_err();
-    assert_eq!(
-        err,
-        DurableReplayRocksDbError::EventDomainMismatch {
-            field: "environment"
-        }
-    );
+    assert_eq!(err, DurableReplayRocksDbError::EventDomainMismatch { field: "environment" });
     assert!(backend.scan_replay_records().unwrap().is_empty());
 }
 
@@ -1075,14 +952,9 @@ fn g01_release_symbol_reachability_probe() {
     let cfg: DurableReplayRocksDbConfig =
         DurableReplayRocksDbConfig::source_test(dir.path(), identity.clone());
     assert_eq!(cfg.policy, DurableReplayRocksDbPolicy::ProductionSourceTest);
-    let (mut backend, open_outcome): (
-        ProductionDurableReplayRocksDbBackend,
-        DurableReplayRocksDbOpenOutcome,
-    ) = ProductionDurableReplayRocksDbBackend::open_or_initialize(&cfg).unwrap();
-    assert_eq!(
-        open_outcome,
-        DurableReplayRocksDbOpenOutcome::InitializedEmpty
-    );
+    let (mut backend, open_outcome): (ProductionDurableReplayRocksDbBackend, DurableReplayRocksDbOpenOutcome) =
+        ProductionDurableReplayRocksDbBackend::open_or_initialize(&cfg).unwrap();
+    assert_eq!(open_outcome, DurableReplayRocksDbOpenOutcome::InitializedEmpty);
 
     let ev: DurableReplayEventInput = observed_event(&input);
     let write: DurableReplayRocksDbWriteOutcome = backend.record_replay_event(&ev).unwrap();
@@ -1109,10 +981,7 @@ fn g01_release_symbol_reachability_probe() {
     let scan = backend.scan_replay_records().unwrap();
     assert_eq!(scan.len(), 2);
     let recovery: DurableReplayRocksDbRecoveryOutcome = backend.recover_replay_window().unwrap();
-    assert_eq!(
-        recovery,
-        DurableReplayRocksDbRecoveryOutcome::NothingToRecover
-    );
+    assert_eq!(recovery, DurableReplayRocksDbRecoveryOutcome::NothingToRecover);
     backend.close_or_flush().unwrap();
 
     // Mock backend implements the same trait surface.
@@ -1150,266 +1019,58 @@ fn main() {
     fs::create_dir_all(outdir.join("fixtures")).expect("create helper output directory");
 
     let cases: &[(&str, &str, fn())] = &[
-        (
-            "accepted_compatible",
-            "a01_open_empty_initializes_metadata",
-            a01_open_empty_initializes_metadata as fn(),
-        ),
-        (
-            "accepted_compatible",
-            "a02_reopen_same_identity_opens_existing",
-            a02_reopen_same_identity_opens_existing as fn(),
-        ),
-        (
-            "accepted_compatible",
-            "a03_write_observed_and_read_back",
-            a03_write_observed_and_read_back as fn(),
-        ),
-        (
-            "accepted_compatible",
-            "a04_write_consumed_after_observed",
-            a04_write_consumed_after_observed as fn(),
-        ),
-        (
-            "accepted_compatible",
-            "a05_close_reopen_records_survive",
-            a05_close_reopen_records_survive as fn(),
-        ),
-        (
-            "accepted_compatible",
-            "a06_scan_deterministic_order",
-            a06_scan_deterministic_order as fn(),
-        ),
-        (
-            "accepted_compatible",
-            "a07_record_id_from_run238_decision_input",
-            a07_record_id_from_run238_decision_input as fn(),
-        ),
-        (
-            "accepted_compatible",
-            "a08_deterministic_digest_stability",
-            a08_deterministic_digest_stability as fn(),
-        ),
-        (
-            "accepted_compatible",
-            "a09_mock_backend_trait_compatible",
-            a09_mock_backend_trait_compatible as fn(),
-        ),
-        (
-            "accepted_compatible",
-            "a10_testnet_domain_opens_and_binds",
-            a10_testnet_domain_opens_and_binds as fn(),
-        ),
-        (
-            "rejection_fail_closed",
-            "b01_default_disabled_refuses_open",
-            b01_default_disabled_refuses_open as fn(),
-        ),
-        (
-            "rejection_fail_closed",
-            "b02_mainnet_identity_refused",
-            b02_mainnet_identity_refused as fn(),
-        ),
-        (
-            "rejection_fail_closed",
-            "b03_wrong_environment_refuses_reopen",
-            b03_wrong_environment_refuses_reopen as fn(),
-        ),
-        (
-            "rejection_fail_closed",
-            "b04_wrong_chain_refuses_reopen",
-            b04_wrong_chain_refuses_reopen as fn(),
-        ),
-        (
-            "rejection_fail_closed",
-            "b05_wrong_genesis_refuses_reopen",
-            b05_wrong_genesis_refuses_reopen as fn(),
-        ),
-        (
-            "rejection_fail_closed",
-            "b06_wrong_namespace_refuses_reopen",
-            b06_wrong_namespace_refuses_reopen as fn(),
-        ),
-        (
-            "rejection_fail_closed",
-            "b07_wrong_authority_domain_sequence_refuses_reopen",
-            b07_wrong_authority_domain_sequence_refuses_reopen as fn(),
-        ),
-        (
-            "rejection_fail_closed",
-            "b08_unsupported_future_schema_refuses_open",
-            b08_unsupported_future_schema_refuses_open as fn(),
-        ),
-        (
-            "rejection_fail_closed",
-            "b09_malformed_schema_marker_refuses_open",
-            b09_malformed_schema_marker_refuses_open as fn(),
-        ),
-        (
-            "rejection_fail_closed",
-            "b10_missing_metadata_nonempty_db_refuses_open",
-            b10_missing_metadata_nonempty_db_refuses_open as fn(),
-        ),
-        (
-            "rejection_fail_closed",
-            "b11_corrupted_metadata_refuses_open",
-            b11_corrupted_metadata_refuses_open as fn(),
-        ),
-        (
-            "rejection_fail_closed",
-            "b12_lock_contention_second_open_fails_closed",
-            b12_lock_contention_second_open_fails_closed as fn(),
-        ),
-        (
-            "rejection_fail_closed",
-            "b13_malformed_identity_refused",
-            b13_malformed_identity_refused as fn(),
-        ),
-        (
-            "idempotency_equivocation",
-            "c01_duplicate_observed_idempotent",
-            c01_duplicate_observed_idempotent as fn(),
-        ),
-        (
-            "idempotency_equivocation",
-            "c02_duplicate_observed_after_reopen_idempotent",
-            c02_duplicate_observed_after_reopen_idempotent as fn(),
-        ),
-        (
-            "idempotency_equivocation",
-            "c03_duplicate_consumed_idempotent",
-            c03_duplicate_consumed_idempotent as fn(),
-        ),
-        (
-            "idempotency_equivocation",
-            "c04_duplicate_consumed_after_reopen_idempotent",
-            c04_duplicate_consumed_after_reopen_idempotent as fn(),
-        ),
-        (
-            "idempotency_equivocation",
-            "c05_same_id_different_sequence_is_equivocation",
-            c05_same_id_different_sequence_is_equivocation as fn(),
-        ),
-        (
-            "idempotency_equivocation",
-            "c06_same_id_different_payload_is_equivocation",
-            c06_same_id_different_payload_is_equivocation as fn(),
-        ),
-        (
-            "idempotency_equivocation",
-            "c07_equivocation_does_not_overwrite_original",
-            c07_equivocation_does_not_overwrite_original as fn(),
-        ),
-        (
-            "idempotency_equivocation",
-            "c08_original_survives_reopen_after_equivocation",
-            c08_original_survives_reopen_after_equivocation as fn(),
-        ),
-        (
-            "ordering_replay",
-            "d01_consumed_before_observed_fails_ordering",
-            d01_consumed_before_observed_fails_ordering as fn(),
-        ),
-        (
-            "ordering_replay",
-            "d02_consumed_wrong_prior_digest_fails_ordering",
-            d02_consumed_wrong_prior_digest_fails_ordering as fn(),
-        ),
-        (
-            "ordering_replay",
-            "d03_read_missing_returns_not_found_no_mutation",
-            d03_read_missing_returns_not_found_no_mutation as fn(),
-        ),
-        (
-            "ordering_replay",
-            "d04_scan_empty_returns_empty",
-            d04_scan_empty_returns_empty as fn(),
-        ),
-        (
-            "ordering_replay",
-            "d05_partial_residue_detected_at_open",
-            d05_partial_residue_detected_at_open as fn(),
-        ),
-        (
-            "ordering_replay",
-            "d06_recover_rolls_back_safe_residue",
-            d06_recover_rolls_back_safe_residue as fn(),
-        ),
-        (
-            "ordering_replay",
-            "d07_recover_clean_db_nothing_to_recover",
-            d07_recover_clean_db_nothing_to_recover as fn(),
-        ),
-        (
-            "ordering_replay",
-            "d08_precommit_failure_leaves_no_record",
-            d08_precommit_failure_leaves_no_record as fn(),
-        ),
-        (
-            "corruption",
-            "e01_mutated_payload_fails_closed_on_read",
-            e01_mutated_payload_fails_closed_on_read as fn(),
-        ),
-        (
-            "corruption",
-            "e02_stale_digest_fails_closed",
-            e02_stale_digest_fails_closed as fn(),
-        ),
-        (
-            "corruption",
-            "e03_truncated_record_fails_closed_on_scan",
-            e03_truncated_record_fails_closed_on_scan as fn(),
-        ),
-        (
-            "corruption",
-            "e04_corrupt_record_healthy_sibling_still_reads",
-            e04_corrupt_record_healthy_sibling_still_reads as fn(),
-        ),
-        (
-            "corruption",
-            "e05_corrupted_metadata_fails_closed",
-            e05_corrupted_metadata_fails_closed as fn(),
-        ),
-        (
-            "corruption",
-            "e06_corruption_never_falls_back_to_in_memory",
-            e06_corruption_never_falls_back_to_in_memory as fn(),
-        ),
-        (
-            "non_mutation",
-            "f01_invariant_no_in_memory_fallback",
-            f01_invariant_no_in_memory_fallback as fn(),
-        ),
-        (
-            "non_mutation",
-            "f02_invariant_default_disabled",
-            f02_invariant_default_disabled as fn(),
-        ),
-        (
-            "non_mutation",
-            "f03_invariant_mainnet_refused",
-            f03_invariant_mainnet_refused as fn(),
-        ),
-        (
-            "non_mutation",
-            "f04_invariant_source_test_not_release_evidence_flag",
-            f04_invariant_source_test_not_release_evidence_flag as fn(),
-        ),
-        (
-            "non_mutation",
-            "f05_rejected_write_is_non_mutating",
-            f05_rejected_write_is_non_mutating as fn(),
-        ),
-        (
-            "non_mutation",
-            "f06_event_domain_mismatch_is_non_mutating",
-            f06_event_domain_mismatch_is_non_mutating as fn(),
-        ),
-        (
-            "reachability",
-            "g01_release_symbol_reachability_probe",
-            g01_release_symbol_reachability_probe as fn(),
-        ),
+        ("accepted_compatible", "a01_open_empty_initializes_metadata", a01_open_empty_initializes_metadata as fn()),
+        ("accepted_compatible", "a02_reopen_same_identity_opens_existing", a02_reopen_same_identity_opens_existing as fn()),
+        ("accepted_compatible", "a03_write_observed_and_read_back", a03_write_observed_and_read_back as fn()),
+        ("accepted_compatible", "a04_write_consumed_after_observed", a04_write_consumed_after_observed as fn()),
+        ("accepted_compatible", "a05_close_reopen_records_survive", a05_close_reopen_records_survive as fn()),
+        ("accepted_compatible", "a06_scan_deterministic_order", a06_scan_deterministic_order as fn()),
+        ("accepted_compatible", "a07_record_id_from_run238_decision_input", a07_record_id_from_run238_decision_input as fn()),
+        ("accepted_compatible", "a08_deterministic_digest_stability", a08_deterministic_digest_stability as fn()),
+        ("accepted_compatible", "a09_mock_backend_trait_compatible", a09_mock_backend_trait_compatible as fn()),
+        ("accepted_compatible", "a10_testnet_domain_opens_and_binds", a10_testnet_domain_opens_and_binds as fn()),
+        ("rejection_fail_closed", "b01_default_disabled_refuses_open", b01_default_disabled_refuses_open as fn()),
+        ("rejection_fail_closed", "b02_mainnet_identity_refused", b02_mainnet_identity_refused as fn()),
+        ("rejection_fail_closed", "b03_wrong_environment_refuses_reopen", b03_wrong_environment_refuses_reopen as fn()),
+        ("rejection_fail_closed", "b04_wrong_chain_refuses_reopen", b04_wrong_chain_refuses_reopen as fn()),
+        ("rejection_fail_closed", "b05_wrong_genesis_refuses_reopen", b05_wrong_genesis_refuses_reopen as fn()),
+        ("rejection_fail_closed", "b06_wrong_namespace_refuses_reopen", b06_wrong_namespace_refuses_reopen as fn()),
+        ("rejection_fail_closed", "b07_wrong_authority_domain_sequence_refuses_reopen", b07_wrong_authority_domain_sequence_refuses_reopen as fn()),
+        ("rejection_fail_closed", "b08_unsupported_future_schema_refuses_open", b08_unsupported_future_schema_refuses_open as fn()),
+        ("rejection_fail_closed", "b09_malformed_schema_marker_refuses_open", b09_malformed_schema_marker_refuses_open as fn()),
+        ("rejection_fail_closed", "b10_missing_metadata_nonempty_db_refuses_open", b10_missing_metadata_nonempty_db_refuses_open as fn()),
+        ("rejection_fail_closed", "b11_corrupted_metadata_refuses_open", b11_corrupted_metadata_refuses_open as fn()),
+        ("rejection_fail_closed", "b12_lock_contention_second_open_fails_closed", b12_lock_contention_second_open_fails_closed as fn()),
+        ("rejection_fail_closed", "b13_malformed_identity_refused", b13_malformed_identity_refused as fn()),
+        ("idempotency_equivocation", "c01_duplicate_observed_idempotent", c01_duplicate_observed_idempotent as fn()),
+        ("idempotency_equivocation", "c02_duplicate_observed_after_reopen_idempotent", c02_duplicate_observed_after_reopen_idempotent as fn()),
+        ("idempotency_equivocation", "c03_duplicate_consumed_idempotent", c03_duplicate_consumed_idempotent as fn()),
+        ("idempotency_equivocation", "c04_duplicate_consumed_after_reopen_idempotent", c04_duplicate_consumed_after_reopen_idempotent as fn()),
+        ("idempotency_equivocation", "c05_same_id_different_sequence_is_equivocation", c05_same_id_different_sequence_is_equivocation as fn()),
+        ("idempotency_equivocation", "c06_same_id_different_payload_is_equivocation", c06_same_id_different_payload_is_equivocation as fn()),
+        ("idempotency_equivocation", "c07_equivocation_does_not_overwrite_original", c07_equivocation_does_not_overwrite_original as fn()),
+        ("idempotency_equivocation", "c08_original_survives_reopen_after_equivocation", c08_original_survives_reopen_after_equivocation as fn()),
+        ("ordering_replay", "d01_consumed_before_observed_fails_ordering", d01_consumed_before_observed_fails_ordering as fn()),
+        ("ordering_replay", "d02_consumed_wrong_prior_digest_fails_ordering", d02_consumed_wrong_prior_digest_fails_ordering as fn()),
+        ("ordering_replay", "d03_read_missing_returns_not_found_no_mutation", d03_read_missing_returns_not_found_no_mutation as fn()),
+        ("ordering_replay", "d04_scan_empty_returns_empty", d04_scan_empty_returns_empty as fn()),
+        ("ordering_replay", "d05_partial_residue_detected_at_open", d05_partial_residue_detected_at_open as fn()),
+        ("ordering_replay", "d06_recover_rolls_back_safe_residue", d06_recover_rolls_back_safe_residue as fn()),
+        ("ordering_replay", "d07_recover_clean_db_nothing_to_recover", d07_recover_clean_db_nothing_to_recover as fn()),
+        ("ordering_replay", "d08_precommit_failure_leaves_no_record", d08_precommit_failure_leaves_no_record as fn()),
+        ("corruption", "e01_mutated_payload_fails_closed_on_read", e01_mutated_payload_fails_closed_on_read as fn()),
+        ("corruption", "e02_stale_digest_fails_closed", e02_stale_digest_fails_closed as fn()),
+        ("corruption", "e03_truncated_record_fails_closed_on_scan", e03_truncated_record_fails_closed_on_scan as fn()),
+        ("corruption", "e04_corrupt_record_healthy_sibling_still_reads", e04_corrupt_record_healthy_sibling_still_reads as fn()),
+        ("corruption", "e05_corrupted_metadata_fails_closed", e05_corrupted_metadata_fails_closed as fn()),
+        ("corruption", "e06_corruption_never_falls_back_to_in_memory", e06_corruption_never_falls_back_to_in_memory as fn()),
+        ("non_mutation", "f01_invariant_no_in_memory_fallback", f01_invariant_no_in_memory_fallback as fn()),
+        ("non_mutation", "f02_invariant_default_disabled", f02_invariant_default_disabled as fn()),
+        ("non_mutation", "f03_invariant_mainnet_refused", f03_invariant_mainnet_refused as fn()),
+        ("non_mutation", "f04_invariant_source_test_not_release_evidence_flag", f04_invariant_source_test_not_release_evidence_flag as fn()),
+        ("non_mutation", "f05_rejected_write_is_non_mutating", f05_rejected_write_is_non_mutating as fn()),
+        ("non_mutation", "f06_event_domain_mismatch_is_non_mutating", f06_event_domain_mismatch_is_non_mutating as fn()),
+        ("reachability", "g01_release_symbol_reachability_probe", g01_release_symbol_reachability_probe as fn()),
     ];
 
     let mut rows: Vec<(String, String, bool)> = Vec::new();

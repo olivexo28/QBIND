@@ -332,19 +332,14 @@ struct Fixture {
     peer_driven: bool,
 }
 
-type CallsiteResult = Result<
-    GovernanceEvaluatorRuntimeIntegrationOutcome,
-    GovernanceEvaluatorRuntimeCallsiteFailClosed,
->;
+type CallsiteResult =
+    Result<GovernanceEvaluatorRuntimeIntegrationOutcome, GovernanceEvaluatorRuntimeCallsiteFailClosed>;
 
 impl Fixture {
     /// Route this fixture through the Run 226 call-site wiring entry point
     /// using the supplied evaluator (the entry the representable call sites
     /// invoke). The result is consumed, never discarded.
-    fn callsite_with<E: ProductionGovernanceExecutionEvaluator>(
-        &self,
-        evaluator: &E,
-    ) -> CallsiteResult {
+    fn callsite_with<E: ProductionGovernanceExecutionEvaluator>(&self, evaluator: &E) -> CallsiteResult {
         let ctx = GovernanceEvaluatorRuntimeIntegrationContext {
             arming: &self.arming,
             surface: self.surface,
@@ -365,6 +360,7 @@ impl Fixture {
     fn callsite(&self) -> CallsiteResult {
         self.callsite_with(&FixtureGovernanceExecutionEvaluatorInterface)
     }
+
 }
 
 fn rotate_fixture(env: TrustBundleEnvironment) -> Fixture {
@@ -502,10 +498,7 @@ fn assert_runtime_fail_closed(
             }
             other => panic!("expected RuntimeConsumptionFailClosed, got {:?}", other),
         },
-        Ok(o) => panic!(
-            "expected Err(RuntimeConsumptionFailClosed), got Ok({:?})",
-            o
-        ),
+        Ok(o) => panic!("expected Err(RuntimeConsumptionFailClosed), got Ok({:?})", o),
     }
 }
 
@@ -627,9 +620,7 @@ fn a9_local_peer_candidate_check_testnet_fixture_routes_through_integration() {
 fn a10_emergency_fixture_accepts_only_explicit_emergency_action() {
     let env = TrustBundleEnvironment::Devnet;
     let fx = emergency_fixture(env);
-    assert_proceed_mutate(
-        &fx.callsite_with(&EmergencyCouncilFixtureGovernanceExecutionEvaluatorInterface),
-    );
+    assert_proceed_mutate(&fx.callsite_with(&EmergencyCouncilFixtureGovernanceExecutionEvaluatorInterface));
 
     let mut non_emergency = emergency_fixture(env);
     non_emergency.request.emergency_flag = false;
@@ -723,10 +714,11 @@ fn a16_live_inbound_0x05_invalid_candidate_not_applied() {
     // An invalid (malformed) candidate fails closed -> not applied.
     let mut invalid = rotate_fixture(TrustBundleEnvironment::Devnet);
     invalid.surface = GovernanceExecutionRuntimeSurface::LiveInbound0x05;
-    invalid.load =
-        GovernanceExecutionLoadStatus::Malformed(GovernanceExecutionPayloadParseError::Json {
+    invalid.load = GovernanceExecutionLoadStatus::Malformed(
+        GovernanceExecutionPayloadParseError::Json {
             error: "broken-live-0x05".to_string(),
-        });
+        },
+    );
     assert_no_mutation(&invalid.callsite());
 }
 
@@ -745,10 +737,7 @@ fn a17_peer_driven_drain_mainnet_refused() {
                 GovernanceEvaluatorRuntimeIntegrationOutcome::MainNetPeerDrivenApplyRefused
             );
         }
-        Ok(o) => panic!(
-            "expected MainNet peer-driven apply refused, got Ok({:?})",
-            o
-        ),
+        Ok(o) => panic!("expected MainNet peer-driven apply refused, got Ok({:?})", o),
     }
 }
 
@@ -774,16 +763,13 @@ fn r1_missing_material_required_rejected() {
 #[test]
 fn r2_malformed_material_rejected() {
     let mut fx = rotate_fixture(TrustBundleEnvironment::Devnet);
-    fx.load =
-        GovernanceExecutionLoadStatus::Malformed(GovernanceExecutionPayloadParseError::Json {
-            error: "broken".to_string(),
-        });
+    fx.load = GovernanceExecutionLoadStatus::Malformed(GovernanceExecutionPayloadParseError::Json {
+        error: "broken".to_string(),
+    });
     assert_runtime_fail_closed(&fx.callsite(), |o| {
         matches!(
             o,
-            GovernanceExecutionPayloadCarryingDecisionOutcome::MalformedGovernanceExecutionPayload(
-                _
-            )
+            GovernanceExecutionPayloadCarryingDecisionOutcome::MalformedGovernanceExecutionPayload(_)
         )
     });
 }
@@ -1055,10 +1041,7 @@ fn r27_evaluator_valid_but_governance_decision_invalid_rejected() {
     decision.authorized_sequence = 999; // Run 211 rejects the carrier
     fx.load = available_from(&rotate_input(env), &decision);
     assert_evaluator_rejected(&fx.callsite(), |o| {
-        matches!(
-            o,
-            EvaluatorOutcome::GovernanceExecutionDecisionInvalid { .. }
-        )
+        matches!(o, EvaluatorOutcome::GovernanceExecutionDecisionInvalid { .. })
     });
 }
 
@@ -1096,10 +1079,7 @@ fn r30_mutating_rejection_is_non_mutating_and_pure() {
     let first = fx.callsite();
     let second = fx.callsite();
     assert_no_mutation(&first);
-    assert!(
-        first.is_err(),
-        "mutating-surface rejection must fail closed"
-    );
+    assert!(first.is_err(), "mutating-surface rejection must fail closed");
     assert_eq!(first, second, "call-site wiring is pure / repeatable");
 }
 
@@ -1112,10 +1092,7 @@ fn r31_mainnet_peer_driven_apply_refused_even_with_fixture_approval() {
     fx.peer_driven = true;
     match fx.callsite() {
         Err(fc) => assert!(fc.is_mainnet_peer_driven_apply_refused()),
-        Ok(o) => panic!(
-            "expected MainNet peer-driven apply refused, got Ok({:?})",
-            o
-        ),
+        Ok(o) => panic!("expected MainNet peer-driven apply refused, got Ok({:?})", o),
     }
     assert!(mainnet_peer_driven_apply_remains_refused_under_evaluator(
         TrustBundleEnvironment::Mainnet
@@ -1313,21 +1290,13 @@ fn deterministic_request_response_digest_binding() {
     let fx = rotate_fixture(TrustBundleEnvironment::Devnet);
 
     let req = fx.request.request_digest();
-    assert_eq!(
-        req,
-        fx.request.request_digest(),
-        "request digest deterministic"
-    );
+    assert_eq!(req, fx.request.request_digest(), "request digest deterministic");
     let mut perturbed = fx.request.clone();
     perturbed.candidate_digest = "other".to_string();
     assert_ne!(req, perturbed.request_digest());
 
     let resp = fx.response.response_digest();
-    assert_eq!(
-        resp,
-        fx.response.response_digest(),
-        "response digest deterministic"
-    );
+    assert_eq!(resp, fx.response.response_digest(), "response digest deterministic");
     let mut perturbed = fx.response.clone();
     perturbed.authorized_authority_domain_sequence = 999;
     assert_ne!(resp, perturbed.response_digest());

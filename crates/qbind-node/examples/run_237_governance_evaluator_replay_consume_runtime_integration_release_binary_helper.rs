@@ -79,9 +79,9 @@ use qbind_node::pqc_governance_evaluator_replay_runtime_integration::{
 use qbind_node::pqc_governance_evaluator_replay_state::{
     evaluate_evaluator_replay_freshness, replay_state_key_digest,
     EvaluatorReplayFreshnessExpectations, EvaluatorReplayFreshnessInput,
-    EvaluatorReplayFreshnessOutcome, FixtureReplayStateStore, GovernanceEvaluatorReplayStateWriter,
-    MainnetReplayStateReader, PreviouslySeenState, ProductionReplayStateReader, ReplayStatePolicy,
-    SeenDecisionRecord,
+    EvaluatorReplayFreshnessOutcome, FixtureReplayStateStore,
+    GovernanceEvaluatorReplayStateWriter, MainnetReplayStateReader, PreviouslySeenState,
+    ProductionReplayStateReader, ReplayStatePolicy, SeenDecisionRecord,
 };
 use qbind_node::pqc_governance_execution_evaluator::{
     DecisionSourceIdentity, EvaluatorExpectations, EvaluatorPolicy, EvaluatorRequest,
@@ -396,14 +396,7 @@ fn rotate_fixture(
     let surface = GovernanceExecutionRuntimeSurface::ReloadApply;
 
     let replay_exp = EvaluatorReplayFreshnessExpectations::from_evaluator_material(
-        &identity,
-        &request,
-        &response,
-        TRANSCRIPT_DIGEST,
-        DECISION_DIGEST,
-        env,
-        CHAIN,
-        GENESIS,
+        &identity, &request, &response, TRANSCRIPT_DIGEST, DECISION_DIGEST, env, CHAIN, GENESIS,
         surface,
     );
     let replay_input = EvaluatorReplayFreshnessInput::from_evaluator_material(
@@ -648,15 +641,14 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
 
     // A4 — fresh decision authorizes mutation but does not consume before apply.
     {
-        let fx = rotate_fixture(
-            Env::Devnet,
-            S::ReloadApply,
-            MC::NotAttempted,
-            P::FixtureDevNet,
-        );
+        let fx = rotate_fixture(Env::Devnet, S::ReloadApply, MC::NotAttempted, P::FixtureDevNet);
         let mut store = store_with_observation(&fx);
         let o = fx.run(&mut store);
-        t.check_outcome("A4.before-apply", "proceed-fresh-mutation-authorized", &o);
+        t.check_outcome(
+            "A4.before-apply",
+            "proceed-fresh-mutation-authorized",
+            &o,
+        );
         t.assert_true("A4.is-proceed", o.is_proceed());
         t.assert_no_consume("A4", &o);
     }
@@ -741,12 +733,7 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
 
     // A9 — failed apply never consumes.
     {
-        let fx = rotate_fixture(
-            Env::Devnet,
-            S::ReloadApply,
-            MC::ApplyFailed,
-            P::FixtureDevNet,
-        );
+        let fx = rotate_fixture(Env::Devnet, S::ReloadApply, MC::ApplyFailed, P::FixtureDevNet);
         let mut store = store_with_observation(&fx);
         let o = fx.run(&mut store);
         t.check_outcome("A9.apply-failed", "do-not-consume-apply-failed", &o);
@@ -755,12 +742,7 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
 
     // A10 — rollback never consumes.
     {
-        let fx = rotate_fixture(
-            Env::Devnet,
-            S::ReloadApply,
-            MC::RolledBack,
-            P::FixtureDevNet,
-        );
+        let fx = rotate_fixture(Env::Devnet, S::ReloadApply, MC::RolledBack, P::FixtureDevNet);
         let mut store = store_with_observation(&fx);
         let o = fx.run(&mut store);
         t.check_outcome("A10.rolled-back", "do-not-consume-rolled-back", &o);
@@ -788,11 +770,7 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
     // A12 — MainNet refused never consumes.
     {
         let o = mainnet_peer_driven_outcome();
-        t.check_outcome(
-            "A12.mainnet-refused",
-            "mainnet-peer-driven-apply-refused",
-            &o,
-        );
+        t.check_outcome("A12.mainnet-refused", "mainnet-peer-driven-apply-refused", &o);
         t.assert_no_consume("A12", &o);
         t.assert_true(
             "A12.guard",
@@ -957,15 +935,8 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
     {
         let fx = devnet_success_fixture();
         let exp230 = EvaluatorReplayFreshnessExpectations::from_evaluator_material(
-            &fx.identity,
-            &fx.request,
-            &fx.response,
-            TRANSCRIPT_DIGEST,
-            DECISION_DIGEST,
-            Env::Devnet,
-            CHAIN,
-            GENESIS,
-            S::ReloadApply,
+            &fx.identity, &fx.request, &fx.response, TRANSCRIPT_DIGEST, DECISION_DIGEST,
+            Env::Devnet, CHAIN, GENESIS, S::ReloadApply,
         );
         t.check(
             "A20.run230-alone-fresh",
@@ -1003,12 +974,7 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
     // A22 — non-ProceedFresh outcomes do not call the writer: a failed-apply path
     // performed against a store with a prior observation never marks consumed.
     {
-        let fx = rotate_fixture(
-            Env::Devnet,
-            S::ReloadApply,
-            MC::ApplyFailed,
-            P::FixtureDevNet,
-        );
+        let fx = rotate_fixture(Env::Devnet, S::ReloadApply, MC::ApplyFailed, P::FixtureDevNet);
         let mut store = store_with_observation(&fx);
         let len_before = store.len();
         let o = fx.run(&mut store);
@@ -1049,7 +1015,11 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
 
 /// Assert a replay-side perturbation fails closed before consume (a Run 232
 /// replay-runtime fail-closed), performing no consume.
-fn assert_replay_runtime_fail_closed(t: &mut Table, id: &str, mutate: impl FnOnce(&mut Fixture)) {
+fn assert_replay_runtime_fail_closed(
+    t: &mut Table,
+    id: &str,
+    mutate: impl FnOnce(&mut Fixture),
+) {
     let mut fx = devnet_success_fixture();
     mutate(&mut fx);
     let mut store = store_with_observation(&fx);
@@ -1198,12 +1168,7 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
     }
     // R24. consume attempted after failed apply rejected.
     {
-        let fx = rotate_fixture(
-            Env::Devnet,
-            S::ReloadApply,
-            MC::ApplyFailed,
-            P::FixtureDevNet,
-        );
+        let fx = rotate_fixture(Env::Devnet, S::ReloadApply, MC::ApplyFailed, P::FixtureDevNet);
         let mut store = store_with_observation(&fx);
         let o = fx.run(&mut store);
         t.check_outcome("R24.apply-failed", "do-not-consume-apply-failed", &o);
@@ -1211,12 +1176,7 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
     }
     // R25. consume attempted after rollback rejected.
     {
-        let fx = rotate_fixture(
-            Env::Devnet,
-            S::ReloadApply,
-            MC::RolledBack,
-            P::FixtureDevNet,
-        );
+        let fx = rotate_fixture(Env::Devnet, S::ReloadApply, MC::RolledBack, P::FixtureDevNet);
         let mut store = store_with_observation(&fx);
         let o = fx.run(&mut store);
         t.check_outcome("R25.rolled-back", "do-not-consume-rolled-back", &o);
@@ -1318,12 +1278,7 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
     {
         // A failed-apply rejection against a store with a prior observation
         // records no consume.
-        let fx = rotate_fixture(
-            Env::Devnet,
-            S::ReloadApply,
-            MC::ApplyFailed,
-            P::FixtureDevNet,
-        );
+        let fx = rotate_fixture(Env::Devnet, S::ReloadApply, MC::ApplyFailed, P::FixtureDevNet);
         let mut store = store_with_observation(&fx);
         let o = fx.run(&mut store);
         t.check_outcome("R34.apply-failed", "do-not-consume-apply-failed", &o);
@@ -1431,12 +1386,7 @@ fn run_reachability_table(out: &Path) -> (u64, u64) {
         let mut store = store_with_observation(&fx);
         t.assert_true("CW.consume-ok", fx.run_callsite(&mut store).is_ok());
         // Fail-closed (failed apply).
-        let fx2 = rotate_fixture(
-            Env::Devnet,
-            S::ReloadApply,
-            MC::ApplyFailed,
-            P::FixtureDevNet,
-        );
+        let fx2 = rotate_fixture(Env::Devnet, S::ReloadApply, MC::ApplyFailed, P::FixtureDevNet);
         let mut store2 = store_with_observation(&fx2);
         match fx2.run_callsite(&mut store2) {
             Ok(_) => t.assert_true("CW.apply-failed-err", false),
@@ -1588,25 +1538,14 @@ fn run_fixture_dump(out: &Path) {
             post_mutation_consume_record_digest(&fx.consume_input, CANONICAL)
         ),
     );
-    write_file(
-        &dir.join("replay_state_key_digest.txt"),
-        &format!("{key}\n"),
-    );
+    write_file(&dir.join("replay_state_key_digest.txt"), &format!("{key}\n"));
 
     // Before/after fixture replay-store snapshots across the composed
     // after-success consume. Consume records consumed only after success.
     let mut store = FixtureReplayStateStore::new(Env::Devnet);
-    let snap_before = format!(
-        "len={} is_consumed={}\n",
-        store.len(),
-        store.is_consumed(&key)
-    );
+    let snap_before = format!("len={} is_consumed={}\n", store.len(), store.is_consumed(&key));
     store.record_for(&fx.replay_input);
-    let snap_observed = format!(
-        "len={} is_consumed={}\n",
-        store.len(),
-        store.is_consumed(&key)
-    );
+    let snap_observed = format!("len={} is_consumed={}\n", store.len(), store.is_consumed(&key));
     let outcome = fx.run(&mut store);
     let snap_consumed = format!(
         "outcome={} len={} is_consumed={}\n",

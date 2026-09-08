@@ -286,9 +286,11 @@ pub fn parse_optional_onchain_governance_proof_sibling_from_json_value(
         Some(raw) => match serde_json::from_value::<OnChainGovernanceProofWire>(raw.clone()) {
             Ok(wire) => match wire.to_proof() {
                 Ok(p) => OnChainGovernanceProofLoadStatus::Available(p),
-                Err(e) => OnChainGovernanceProofLoadStatus::Malformed(
-                    OnChainGovernanceProofPayloadParseError::Wire(e),
-                ),
+                Err(e) => {
+                    OnChainGovernanceProofLoadStatus::Malformed(
+                        OnChainGovernanceProofPayloadParseError::Wire(e),
+                    )
+                }
             },
             Err(e) => OnChainGovernanceProofLoadStatus::Malformed(
                 OnChainGovernanceProofPayloadParseError::Json {
@@ -377,7 +379,9 @@ pub fn load_v2_ratification_sidecar_with_onchain_governance_proof_from_bytes(
             error: e.to_string(),
         })?;
 
-    let version_value = value.get("schema_version").or_else(|| value.get("version"));
+    let version_value = value
+        .get("schema_version")
+        .or_else(|| value.get("version"));
     let version_int = match version_value.and_then(|v| v.as_u64()) {
         Some(v) => v as u32,
         None => {
@@ -791,8 +795,9 @@ mod tests {
             1_700_000_000,
             &replay,
         );
-        let outcome =
-            route_loaded_onchain_governance_proof_to_reload_check_callsite_decision(&ctx, &loaded);
+        let outcome = route_loaded_onchain_governance_proof_to_reload_check_callsite_decision(
+            &ctx, &loaded,
+        );
         assert!(outcome.is_malformed_payload());
         assert!(outcome.is_reject());
         assert!(!outcome.is_accept());
@@ -818,8 +823,9 @@ mod tests {
             1_700_000_000,
             &replay,
         );
-        let outcome =
-            route_loaded_onchain_governance_proof_to_reload_check_callsite_decision(&ctx, &loaded);
+        let outcome = route_loaded_onchain_governance_proof_to_reload_check_callsite_decision(
+            &ctx, &loaded,
+        );
         assert_eq!(
             outcome,
             OnChainGovernancePayloadCarryingDecisionOutcome::Callsite(

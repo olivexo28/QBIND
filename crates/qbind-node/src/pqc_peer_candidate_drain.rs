@@ -126,7 +126,9 @@ use crate::pqc_peer_candidate_apply::{
     PeerDrivenApplyPolicy, PeerDrivenApplyRuntimeDomain, StagedPeerCandidateId,
     V2MarkerCoordinator,
 };
-use crate::pqc_peer_candidate_staging::{PeerCandidateStagingQueue, StagedPeerCandidate};
+use crate::pqc_peer_candidate_staging::{
+    PeerCandidateStagingQueue, StagedPeerCandidate,
+};
 use crate::pqc_trust_activation::ActivationContext;
 use crate::pqc_trust_bundle::{BundleSigningKeySet, TrustBundleEnvironment};
 use crate::pqc_trust_reload::{LiveTrustApplyContext, ReloadCheckInputs};
@@ -178,7 +180,8 @@ impl Default for PeerDrivenDrainPolicy {
             environment: NetworkEnvironment::Devnet,
             allow_devnet: false,
             allow_testnet: false,
-            max_candidate_age_secs: crate::pqc_peer_candidate_apply::DEFAULT_MAX_CANDIDATE_AGE_SECS,
+            max_candidate_age_secs:
+                crate::pqc_peer_candidate_apply::DEFAULT_MAX_CANDIDATE_AGE_SECS,
             remove_after_apply: true,
         }
     }
@@ -574,7 +577,9 @@ impl PeerDrivenApplyDrain {
                 sequence: staged.sequence,
             };
         }
-        if staged.environment != runtime_trust_env || staged.chain_id_hex != runtime_chain_id_hex {
+        if staged.environment != runtime_trust_env
+            || staged.chain_id_hex != runtime_chain_id_hex
+        {
             staging_queue.remove_by_id(&staged.fingerprint_prefix, staged.sequence);
             return PeerDrivenDrainOutcome::CandidateWrongDomain {
                 fingerprint_prefix: staged.fingerprint_prefix.clone(),
@@ -656,11 +661,7 @@ impl PeerDrivenApplyDrain {
                     reason,
                 }
             }
-            PeerDrivenApplyOutcome::CandidateExpired {
-                age_secs,
-                max_age_secs,
-                ..
-            } => {
+            PeerDrivenApplyOutcome::CandidateExpired { age_secs, max_age_secs, .. } => {
                 // Run 148 also detected expiry — defence-in-depth.
                 staging_queue.remove_by_id(&staged.fingerprint_prefix, staged.sequence);
                 PeerDrivenDrainOutcome::CandidateExpired {
@@ -906,17 +907,16 @@ impl<C: LiveTrustApplyContext> ProductionDrainInvocationBuilder<C> {
         }
         // malformed staged metadata
         let fp = &staged.fingerprint_hex;
-        if fp.len() != 64
-            || !fp
-                .bytes()
-                .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
+        if fp.len() != 64 || !fp.bytes().all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
         {
             return Err(format!(
                 "malformed staged fingerprint_hex (expected 64 lowercase hex chars): {:?}",
                 fp
             ));
         }
-        if staged.fingerprint_prefix.is_empty() || !fp.starts_with(&staged.fingerprint_prefix) {
+        if staged.fingerprint_prefix.is_empty()
+            || !fp.starts_with(&staged.fingerprint_prefix)
+        {
             return Err(format!(
                 "malformed staged metadata: fingerprint_prefix {:?} is not a prefix of \
                  fingerprint_hex",
@@ -924,9 +924,7 @@ impl<C: LiveTrustApplyContext> ProductionDrainInvocationBuilder<C> {
             ));
         }
         // freshness / expiry
-        let age = self
-            .now_unix_secs
-            .saturating_sub(staged.staged_at_unix_secs);
+        let age = self.now_unix_secs.saturating_sub(staged.staged_at_unix_secs);
         if age > self.max_candidate_age_secs {
             return Err(format!(
                 "staged candidate expired: age={}s > max_candidate_age_secs={}s",
@@ -1157,15 +1155,7 @@ mod tests {
         // Touch the helpers so `stage_raw` / `entry` are linked even
         // when only selector smoke is exercised.
         let mut q2 = PeerCandidateStagingQueue::new(PeerDrivenStagingPolicy::devnet_enabled());
-        let e = entry(
-            "aabbccdd",
-            &"aabbccdd".repeat(8),
-            5,
-            100,
-            true,
-            TrustBundleEnvironment::Devnet,
-            &chain,
-        );
+        let e = entry("aabbccdd", &"aabbccdd".repeat(8), 5, 100, true, TrustBundleEnvironment::Devnet, &chain);
         stage_raw(&mut q2, e);
     }
 

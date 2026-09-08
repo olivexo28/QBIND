@@ -86,10 +86,10 @@
 //! match an already-recorded settlement-receipt acknowledgement record.
 
 use crate::pqc_governance_durable_completion_acknowledgement_consumer::DurableCompletionAcknowledgementConsumerOutcome;
+use crate::pqc_governance_durable_completion_settlement_finalization::DurableCompletionSettlementFinalizationOutcome;
 use crate::pqc_governance_durable_completion_attestation_backend::DurableCompletionAttestationBackendOutcome;
 use crate::pqc_governance_durable_completion_audit_publication_receipt::DurableCompletionAuditPublicationReceiptOutcome;
 use crate::pqc_governance_durable_completion_audit_receipt_acknowledgement::DurableCompletionAuditReceiptAcknowledgementOutcome;
-use crate::pqc_governance_durable_completion_settlement_finalization::DurableCompletionSettlementFinalizationOutcome;
 use crate::pqc_governance_execution_runtime_arming::GovernanceExecutionRuntimeSurface;
 use crate::pqc_governance_modeled_durable_completion_attestation_projection::GovernanceModeledDurableCompletionAttestationOutcome;
 use crate::pqc_governance_modeled_durable_completion_finalization_projection::GovernanceModeledDurableCompletionFinalizationOutcome;
@@ -273,12 +273,8 @@ impl DurableCompletionSettlementReceiptAcknowledgementPolicy {
             Self::ProductionSettlementReceiptAcknowledgementRequired => {
                 "production-settlement-receipt-acknowledgement-required"
             }
-            Self::MainNetSettlementReceiptAcknowledgementRequired => {
-                "mainnet-settlement-receipt-acknowledgement-required"
-            }
-            Self::ExternalSettlementReceiptAcknowledgementRequired => {
-                "external-settlement-receipt-acknowledgement-required"
-            }
+            Self::MainNetSettlementReceiptAcknowledgementRequired => "mainnet-settlement-receipt-acknowledgement-required",
+            Self::ExternalSettlementReceiptAcknowledgementRequired => "external-settlement-receipt-acknowledgement-required",
         }
     }
 
@@ -724,8 +720,7 @@ impl DurableCompletionSettlementReceiptAcknowledgementResponse {
     /// `true` iff the response is structurally well-formed.
     pub fn is_well_formed(&self) -> bool {
         !self.receipt_acknowledgement_record_id.is_empty()
-            && self.receipt_acknowledgement_kind
-                != DurableCompletionSettlementReceiptAcknowledgementKind::Unknown
+            && self.receipt_acknowledgement_kind != DurableCompletionSettlementReceiptAcknowledgementKind::Unknown
     }
 
     /// The deterministic receipt response digest.
@@ -981,11 +976,9 @@ pub struct DurableCompletionSettlementReceiptAcknowledgementExpectations {
     /// Expected settlement-finalization identity.
     pub expected_identity: DurableCompletionSettlementReceiptAcknowledgementIdentity,
     /// Expected settlement-finalization kind.
-    pub expected_receipt_acknowledgement_kind:
-        DurableCompletionSettlementReceiptAcknowledgementKind,
+    pub expected_receipt_acknowledgement_kind: DurableCompletionSettlementReceiptAcknowledgementKind,
     /// Expected settlement-finalization policy.
-    pub expected_receipt_acknowledgement_policy:
-        DurableCompletionSettlementReceiptAcknowledgementPolicy,
+    pub expected_receipt_acknowledgement_policy: DurableCompletionSettlementReceiptAcknowledgementPolicy,
     /// Expected domain separation tag.
     pub expected_domain_separation_tag: String,
 }
@@ -1035,9 +1028,7 @@ impl DurableCompletionSettlementReceiptAcknowledgementExpectations {
         if !request.is_well_formed() {
             return Some("malformed receipt request");
         }
-        if request.receipt_acknowledgement_record_id
-            != self.expected_receipt_acknowledgement_record_id
-        {
+        if request.receipt_acknowledgement_record_id != self.expected_receipt_acknowledgement_record_id {
             return Some("wrong receipt record id");
         }
         if request.environment != self.expected_environment {
@@ -1189,9 +1180,7 @@ impl DurableCompletionSettlementReceiptAcknowledgementExpectations {
         {
             return Some("wrong settlement-finalization transcript digest");
         }
-        if request.settlement_finalization_record_id
-            != self.expected_settlement_finalization_record_id
-        {
+        if request.settlement_finalization_record_id != self.expected_settlement_finalization_record_id {
             return Some("wrong settlement-finalization record id");
         }
         if request.domain_separation_tag != self.expected_domain_separation_tag {
@@ -1400,8 +1389,7 @@ impl DurableCompletionSettlementReceiptAcknowledgementOutcome {
     pub fn projects_to_recorded(&self) -> bool {
         matches!(
             self,
-            Self::SettlementReceiptAcknowledgementRecorded
-                | Self::SettlementReceiptAcknowledgementDuplicateIdempotent
+            Self::SettlementReceiptAcknowledgementRecorded | Self::SettlementReceiptAcknowledgementDuplicateIdempotent
         )
     }
 
@@ -1418,10 +1406,7 @@ impl DurableCompletionSettlementReceiptAcknowledgementOutcome {
 
     /// `true` iff this is the MainNet peer-driven-apply refusal.
     pub fn is_mainnet_peer_driven_apply_refused(&self) -> bool {
-        matches!(
-            self,
-            Self::MainNetPeerDrivenApplyRefusedNoReceiptAcknowledgement
-        )
+        matches!(self, Self::MainNetPeerDrivenApplyRefusedNoReceiptAcknowledgement)
     }
 
     /// Stable operator-facing tag.
@@ -1523,27 +1508,25 @@ pub fn project_settlement_finalization_outcome_to_receipt_acknowledgement_reques
     match outcome {
         Finalization::SettlementFinalizationRecorded => Intent::CreateRequest,
         Finalization::SettlementFinalizationDuplicateIdempotent => Intent::IdempotentOnly,
-        Finalization::LegacyBypassNoSettlementFinalization => Intent::NoFinalization(
-            ReceiptAcknowledgement::LegacyBypassNoSettlementReceiptAcknowledgement,
-        ),
-        Finalization::RejectedBeforeSettlementCommitmentNoFinalization => Intent::NoFinalization(
-            ReceiptAcknowledgement::RejectedBeforeSettlementFinalizationNoReceiptAcknowledgement,
-        ),
-        Finalization::MainNetPeerDrivenApplyRefusedNoFinalization => Intent::NoFinalization(
-            ReceiptAcknowledgement::MainNetPeerDrivenApplyRefusedNoReceiptAcknowledgement,
-        ),
-        Finalization::ValidatorSetRotationUnsupportedNoFinalization => Intent::NoFinalization(
-            ReceiptAcknowledgement::ValidatorSetRotationUnsupportedNoReceiptAcknowledgement,
-        ),
-        Finalization::PolicyChangeUnsupportedNoFinalization => Intent::NoFinalization(
-            ReceiptAcknowledgement::PolicyChangeUnsupportedNoReceiptAcknowledgement,
-        ),
+        Finalization::LegacyBypassNoSettlementFinalization => {
+            Intent::NoFinalization(ReceiptAcknowledgement::LegacyBypassNoSettlementReceiptAcknowledgement)
+        }
+        Finalization::RejectedBeforeSettlementCommitmentNoFinalization => {
+            Intent::NoFinalization(ReceiptAcknowledgement::RejectedBeforeSettlementFinalizationNoReceiptAcknowledgement)
+        }
+        Finalization::MainNetPeerDrivenApplyRefusedNoFinalization => {
+            Intent::NoFinalization(ReceiptAcknowledgement::MainNetPeerDrivenApplyRefusedNoReceiptAcknowledgement)
+        }
+        Finalization::ValidatorSetRotationUnsupportedNoFinalization => {
+            Intent::NoFinalization(ReceiptAcknowledgement::ValidatorSetRotationUnsupportedNoReceiptAcknowledgement)
+        }
+        Finalization::PolicyChangeUnsupportedNoFinalization => {
+            Intent::NoFinalization(ReceiptAcknowledgement::PolicyChangeUnsupportedNoReceiptAcknowledgement)
+        }
         // Every remaining settlement-finalization outcome is a non-recording rejection /
         // failure / rollback / ambiguous window: the settlement finalization did not
         // record, so no settlement-receipt-acknowledgement record may exist.
-        _ => Intent::NoFinalization(
-            ReceiptAcknowledgement::SettlementFinalizationDidNotRecordNoReceiptAcknowledgement,
-        ),
+        _ => Intent::NoFinalization(ReceiptAcknowledgement::SettlementFinalizationDidNotRecordNoReceiptAcknowledgement),
     }
 }
 
@@ -1725,8 +1708,7 @@ impl GovernanceDurableCompletionSettlementReceiptAcknowledgementSink
             receipt_acknowledgement_record_id: request.receipt_acknowledgement_record_id.clone(),
             request_digest: request_digest.clone(),
             accepted: true,
-            receipt_acknowledgement_kind:
-                DurableCompletionSettlementReceiptAcknowledgementKind::FixtureInMemory,
+            receipt_acknowledgement_kind: DurableCompletionSettlementReceiptAcknowledgementKind::FixtureInMemory,
         };
         let response_digest = response.digest();
         let record = request.to_record();
@@ -1757,18 +1739,14 @@ impl GovernanceDurableCompletionSettlementReceiptAcknowledgementSink
             return Receipt::SettlementReceiptAcknowledgementRejectedBeforeRecord;
         }
 
-        ledger.insert(
-            DurableCompletionSettlementReceiptAcknowledgementLedgerRecord {
-                receipt_acknowledgement_record_id: request
-                    .receipt_acknowledgement_record_id
-                    .clone(),
-                request_digest,
-                response_digest,
-                record_digest,
-                transcript_digest,
-                status: DurableCompletionSettlementReceiptAcknowledgementLedgerStatus::Recorded,
-            },
-        );
+        ledger.insert(DurableCompletionSettlementReceiptAcknowledgementLedgerRecord {
+            receipt_acknowledgement_record_id: request.receipt_acknowledgement_record_id.clone(),
+            request_digest,
+            response_digest,
+            record_digest,
+            transcript_digest,
+            status: DurableCompletionSettlementReceiptAcknowledgementLedgerStatus::Recorded,
+        });
         Receipt::SettlementReceiptAcknowledgementRecorded
     }
 }
@@ -2086,8 +2064,7 @@ pub fn recover_durable_completion_settlement_receipt_acknowledgement_window(
     // the expected receipt record id and the canonical request digest.
     let recovered_matches =
         |record: &DurableCompletionSettlementReceiptAcknowledgementLedgerRecord| -> bool {
-            record.receipt_acknowledgement_record_id
-                == expectations.expected_receipt_acknowledgement_record_id
+            record.receipt_acknowledgement_record_id == expectations.expected_receipt_acknowledgement_record_id
                 && record.request_digest == input.request.digest()
                 && record.status
                     == DurableCompletionSettlementReceiptAcknowledgementLedgerStatus::Recorded
@@ -2194,20 +2171,17 @@ pub fn durable_completion_settlement_receipt_acknowledgement_never_calls_run_070
 }
 
 /// Run 270 — the receipt boundary never mutates live PQC trust state.
-pub fn durable_completion_settlement_receipt_acknowledgement_never_mutates_live_pqc_trust_state(
-) -> bool {
+pub fn durable_completion_settlement_receipt_acknowledgement_never_mutates_live_pqc_trust_state() -> bool {
     true
 }
 
 /// Run 270 — the receipt boundary never writes a sequence or a marker.
-pub fn durable_completion_settlement_receipt_acknowledgement_never_writes_sequence_or_marker(
-) -> bool {
+pub fn durable_completion_settlement_receipt_acknowledgement_never_writes_sequence_or_marker() -> bool {
     true
 }
 
 /// Run 270 — the receipt boundary changes no RocksDB file schema / migration.
-pub fn durable_completion_settlement_receipt_acknowledgement_no_rocksdb_file_schema_migration_change(
-) -> bool {
+pub fn durable_completion_settlement_receipt_acknowledgement_no_rocksdb_file_schema_migration_change() -> bool {
     true
 }
 
@@ -2237,8 +2211,7 @@ pub fn durable_completion_settlement_receipt_acknowledgement_completion_report_r
 }
 
 /// Run 270 — a receipt requires a Run 252 receipt_acknowledgement upstream.
-pub fn durable_completion_settlement_receipt_acknowledgement_finalization_projection_required(
-) -> bool {
+pub fn durable_completion_settlement_receipt_acknowledgement_finalization_projection_required() -> bool {
     true
 }
 
@@ -2295,8 +2268,7 @@ pub fn durable_completion_settlement_receipt_acknowledgement_no_real_settlement_
 /// record is a modeled in-memory fixture record. Production / MainNet / external
 /// settlement-receipt acknowledgement sinks are reachable but unavailable / fail closed
 /// and never confer any real acknowledgement.
-pub fn durable_completion_settlement_receipt_acknowledgement_no_real_settlement_receipt_acknowledgement(
-) -> bool {
+pub fn durable_completion_settlement_receipt_acknowledgement_no_real_settlement_receipt_acknowledgement() -> bool {
     true
 }
 
@@ -2304,14 +2276,12 @@ pub fn durable_completion_settlement_receipt_acknowledgement_no_real_settlement_
 /// settlement-finality projection; the only settlement-finality projection is a modeled
 /// in-memory fixture record with no external publication, network I/O, or persistent
 /// backend.
-pub fn durable_completion_settlement_receipt_acknowledgement_no_real_settlement_finality_projection(
-) -> bool {
+pub fn durable_completion_settlement_receipt_acknowledgement_no_real_settlement_finality_projection() -> bool {
     true
 }
 
 /// Run 270 — a receipt record is required before a receipt is acknowledged.
-pub fn durable_completion_settlement_receipt_acknowledgement_record_required_before_acknowledged(
-) -> bool {
+pub fn durable_completion_settlement_receipt_acknowledgement_record_required_before_acknowledged() -> bool {
     true
 }
 
@@ -2326,8 +2296,7 @@ pub fn durable_completion_settlement_receipt_acknowledgement_rollback_never_reco
 }
 
 /// Run 270 — an ambiguous after-record receipt window fails closed.
-pub fn durable_completion_settlement_receipt_acknowledgement_ambiguous_window_fails_closed() -> bool
-{
+pub fn durable_completion_settlement_receipt_acknowledgement_ambiguous_window_fails_closed() -> bool {
     true
 }
 
@@ -2339,8 +2308,7 @@ pub fn durable_completion_settlement_receipt_acknowledgement_mainnet_peer_driven
 }
 
 /// Run 270 — production / MainNet audit-ledger sinks are reachable but unavailable.
-pub fn durable_completion_settlement_receipt_acknowledgement_production_mainnet_unavailable() -> bool
-{
+pub fn durable_completion_settlement_receipt_acknowledgement_production_mainnet_unavailable() -> bool {
     true
 }
 
@@ -2350,8 +2318,7 @@ pub fn durable_completion_settlement_receipt_acknowledgement_external_unavailabl
 }
 
 /// Run 270 — validator-set rotation remains unsupported at the receipt boundary.
-pub fn durable_completion_settlement_receipt_acknowledgement_validator_set_rotation_unsupported(
-) -> bool {
+pub fn durable_completion_settlement_receipt_acknowledgement_validator_set_rotation_unsupported() -> bool {
     true
 }
 

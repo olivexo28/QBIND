@@ -111,7 +111,13 @@ fn run_095_detector_fresh_state() {
 fn run_095_detector_record_observed_proposal_caches_headers() {
     let mut det = BinaryReconfigDetector::new(0);
     let p1 = make_proposal(0, 1, qbind_wire::PAYLOAD_KIND_NORMAL, 0, [0u8; 32]);
-    let p2 = make_proposal(0, 2, qbind_wire::PAYLOAD_KIND_RECONFIG, 1, [0u8; 32]);
+    let p2 = make_proposal(
+        0,
+        2,
+        qbind_wire::PAYLOAD_KIND_RECONFIG,
+        1,
+        [0u8; 32],
+    );
     det.record_observed_proposal(&p1);
     det.record_observed_proposal(&p2);
     assert_eq!(det.cached_headers(), 2);
@@ -128,7 +134,8 @@ fn run_095_detector_record_observed_proposal_caches_headers() {
 fn run_095_observed_but_not_committed_no_transition() {
     let mut engine = single_validator_engine();
     let mut det = BinaryReconfigDetector::new(engine.commit_log().len());
-    let reconfig = make_proposal(0, 1, qbind_wire::PAYLOAD_KIND_RECONFIG, 1, [0u8; 32]);
+    let reconfig =
+        make_proposal(0, 1, qbind_wire::PAYLOAD_KIND_RECONFIG, 1, [0u8; 32]);
     det.record_observed_proposal(&reconfig);
 
     let res = maybe_transition_epoch_from_committed_block(&mut engine, &mut det)
@@ -145,7 +152,8 @@ fn run_095_no_commits_no_observations_no_transition() {
     let mut engine = single_validator_engine();
     let mut det = BinaryReconfigDetector::new(engine.commit_log().len());
 
-    let res = maybe_transition_epoch_from_committed_block(&mut engine, &mut det).expect("ok");
+    let res = maybe_transition_epoch_from_committed_block(&mut engine, &mut det)
+        .expect("ok");
     assert_eq!(res, None);
     assert_eq!(engine.current_epoch(), 0);
 }
@@ -171,8 +179,13 @@ fn run_095_persistence_refuses_zero_fallback_for_real_transition() {
     // engine epoch-transition machinery (Run 094 helper test pattern).
     engine.set_current_epoch(1);
 
-    let err = maybe_persist_engine_epoch_transition(&engine, &storage, &mut last_persisted, None)
-        .expect_err("missing reconfig_block_id ⇒ fail-closed Err");
+    let err = maybe_persist_engine_epoch_transition(
+        &engine,
+        &storage,
+        &mut last_persisted,
+        None,
+    )
+    .expect_err("missing reconfig_block_id ⇒ fail-closed Err");
 
     assert!(matches!(
         err.source,
@@ -227,9 +240,13 @@ fn run_095_persistence_no_advance_no_persistence_even_without_block_id() {
     let storage: Arc<dyn ConsensusStorage> = Arc::new(InMemoryConsensusStorage::new());
     let mut last_persisted = engine.current_epoch();
 
-    let persisted =
-        maybe_persist_engine_epoch_transition(&engine, &storage, &mut last_persisted, None)
-            .expect("no advance ⇒ Ok(false)");
+    let persisted = maybe_persist_engine_epoch_transition(
+        &engine,
+        &storage,
+        &mut last_persisted,
+        None,
+    )
+    .expect("no advance ⇒ Ok(false)");
     assert!(!persisted);
     assert_eq!(last_persisted, 0);
 

@@ -365,7 +365,10 @@ fn test_testnet_validates_slash_parameters() {
         ..SlashingConfig::testnet_alpha_default()
     };
     let result = config_low.validate_for_testnet();
-    assert!(result.is_err(), "Should reject O2 slash below 450 bps");
+    assert!(
+        result.is_err(),
+        "Should reject O2 slash below 450 bps"
+    );
 
     // Invalid O2 slash percentage (too high)
     let config_high = SlashingConfig {
@@ -374,7 +377,10 @@ fn test_testnet_validates_slash_parameters() {
         ..SlashingConfig::testnet_alpha_default()
     };
     let result = config_high.validate_for_testnet();
-    assert!(result.is_err(), "Should reject O2 slash above 550 bps");
+    assert!(
+        result.is_err(),
+        "Should reject O2 slash above 550 bps"
+    );
 
     // Valid O2 slash percentage
     let config_valid = SlashingConfig {
@@ -383,7 +389,10 @@ fn test_testnet_validates_slash_parameters() {
         ..SlashingConfig::testnet_alpha_default()
     };
     let result = config_valid.validate_for_testnet();
-    assert!(result.is_ok(), "Should accept O2 slash at 500 bps");
+    assert!(
+        result.is_ok(),
+        "Should accept O2 slash at 500 bps"
+    );
 }
 
 // ============================================================================

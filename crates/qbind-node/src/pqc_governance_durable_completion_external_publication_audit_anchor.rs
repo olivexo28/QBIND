@@ -86,10 +86,10 @@
 //! match an already-recorded external-publication-audit-seal record.
 
 use crate::pqc_governance_durable_completion_acknowledgement_consumer::DurableCompletionAcknowledgementConsumerOutcome;
+use crate::pqc_governance_durable_completion_external_publication_audit_seal::DurableCompletionExternalPublicationAuditSealOutcome;
 use crate::pqc_governance_durable_completion_attestation_backend::DurableCompletionAttestationBackendOutcome;
 use crate::pqc_governance_durable_completion_audit_publication_receipt::DurableCompletionAuditPublicationReceiptOutcome;
 use crate::pqc_governance_durable_completion_audit_receipt_acknowledgement::DurableCompletionAuditReceiptAcknowledgementOutcome;
-use crate::pqc_governance_durable_completion_external_publication_audit_seal::DurableCompletionExternalPublicationAuditSealOutcome;
 use crate::pqc_governance_execution_runtime_arming::GovernanceExecutionRuntimeSurface;
 use crate::pqc_governance_modeled_durable_completion_attestation_projection::GovernanceModeledDurableCompletionAttestationOutcome;
 use crate::pqc_governance_modeled_durable_completion_finalization_projection::GovernanceModeledDurableCompletionFinalizationOutcome;
@@ -273,12 +273,8 @@ impl DurableCompletionExternalPublicationAuditAnchorPolicy {
             Self::ProductionExternalPublicationAuditAnchorRequired => {
                 "production-external-publication-audit-anchor-required"
             }
-            Self::MainNetExternalPublicationAuditAnchorRequired => {
-                "mainnet-external-publication-audit-anchor-required"
-            }
-            Self::ExternalExternalPublicationAuditAnchorRequired => {
-                "external-external-publication-audit-anchor-required"
-            }
+            Self::MainNetExternalPublicationAuditAnchorRequired => "mainnet-external-publication-audit-anchor-required",
+            Self::ExternalExternalPublicationAuditAnchorRequired => "external-external-publication-audit-anchor-required",
         }
     }
 
@@ -682,21 +678,11 @@ impl DurableCompletionExternalPublicationAuditAnchorRequest {
             && !self.consumer_record_digest.is_empty()
             && !self.consumer_transcript_digest.is_empty()
             && !self.consumer_record_id.is_empty()
-            && !self
-                .external_publication_audit_seal_identity_digest
-                .is_empty()
-            && !self
-                .external_publication_audit_seal_request_digest
-                .is_empty()
-            && !self
-                .external_publication_audit_seal_response_digest
-                .is_empty()
-            && !self
-                .external_publication_audit_seal_record_digest
-                .is_empty()
-            && !self
-                .external_publication_audit_seal_transcript_digest
-                .is_empty()
+            && !self.external_publication_audit_seal_identity_digest.is_empty()
+            && !self.external_publication_audit_seal_request_digest.is_empty()
+            && !self.external_publication_audit_seal_response_digest.is_empty()
+            && !self.external_publication_audit_seal_record_digest.is_empty()
+            && !self.external_publication_audit_seal_transcript_digest.is_empty()
             && !self.external_publication_audit_seal_record_id.is_empty()
             && !self.domain_separation_tag.is_empty()
             && self.identity.is_well_formed()
@@ -710,9 +696,7 @@ impl DurableCompletionExternalPublicationAuditAnchorRequest {
     /// The canonical immutable record derived from this request.
     pub fn to_record(&self) -> DurableCompletionExternalPublicationAuditAnchorRecord {
         DurableCompletionExternalPublicationAuditAnchorRecord {
-            external_publication_audit_anchor_record_id: self
-                .external_publication_audit_anchor_record_id
-                .clone(),
+            external_publication_audit_anchor_record_id: self.external_publication_audit_anchor_record_id.clone(),
             request_digest: self.digest(),
             identity_digest: self.identity.digest(),
         }
@@ -736,8 +720,7 @@ impl DurableCompletionExternalPublicationAuditAnchorResponse {
     /// `true` iff the response is structurally well-formed.
     pub fn is_well_formed(&self) -> bool {
         !self.external_publication_audit_anchor_record_id.is_empty()
-            && self.external_publication_audit_anchor_kind
-                != DurableCompletionExternalPublicationAuditAnchorKind::Unknown
+            && self.external_publication_audit_anchor_kind != DurableCompletionExternalPublicationAuditAnchorKind::Unknown
     }
 
     /// The deterministic receipt response digest.
@@ -851,16 +834,14 @@ impl DurableCompletionExternalPublicationAuditAnchorLedger {
         &self,
         external_publication_audit_anchor_record_id: &str,
     ) -> Option<&DurableCompletionExternalPublicationAuditAnchorLedgerRecord> {
-        self.records.iter().find(|r| {
-            r.external_publication_audit_anchor_record_id
-                == external_publication_audit_anchor_record_id
-        })
+        self.records
+            .iter()
+            .find(|r| r.external_publication_audit_anchor_record_id == external_publication_audit_anchor_record_id)
     }
 
     /// `true` iff a receipt with `external_publication_audit_anchor_record_id` is recorded.
     pub fn contains(&self, external_publication_audit_anchor_record_id: &str) -> bool {
-        self.find(external_publication_audit_anchor_record_id)
-            .is_some()
+        self.find(external_publication_audit_anchor_record_id).is_some()
     }
 
     /// Capture an immutable snapshot for a modeled rollback.
@@ -995,11 +976,9 @@ pub struct DurableCompletionExternalPublicationAuditAnchorExpectations {
     /// Expected settlement-confirmation identity.
     pub expected_identity: DurableCompletionExternalPublicationAuditAnchorIdentity,
     /// Expected settlement-confirmation kind.
-    pub expected_external_publication_audit_anchor_kind:
-        DurableCompletionExternalPublicationAuditAnchorKind,
+    pub expected_external_publication_audit_anchor_kind: DurableCompletionExternalPublicationAuditAnchorKind,
     /// Expected settlement-confirmation policy.
-    pub expected_external_publication_audit_anchor_policy:
-        DurableCompletionExternalPublicationAuditAnchorPolicy,
+    pub expected_external_publication_audit_anchor_policy: DurableCompletionExternalPublicationAuditAnchorPolicy,
     /// Expected domain separation tag.
     pub expected_domain_separation_tag: String,
 }
@@ -1049,9 +1028,7 @@ impl DurableCompletionExternalPublicationAuditAnchorExpectations {
         if !request.is_well_formed() {
             return Some("malformed receipt request");
         }
-        if request.external_publication_audit_anchor_record_id
-            != self.expected_external_publication_audit_anchor_record_id
-        {
+        if request.external_publication_audit_anchor_record_id != self.expected_external_publication_audit_anchor_record_id {
             return Some("wrong receipt record id");
         }
         if request.environment != self.expected_environment {
@@ -1203,9 +1180,7 @@ impl DurableCompletionExternalPublicationAuditAnchorExpectations {
         {
             return Some("wrong settlement-confirmation transcript digest");
         }
-        if request.external_publication_audit_seal_record_id
-            != self.expected_external_publication_audit_seal_record_id
-        {
+        if request.external_publication_audit_seal_record_id != self.expected_external_publication_audit_seal_record_id {
             return Some("wrong settlement-confirmation record id");
         }
         if request.domain_separation_tag != self.expected_domain_separation_tag {
@@ -1414,8 +1389,7 @@ impl DurableCompletionExternalPublicationAuditAnchorOutcome {
     pub fn projects_to_recorded(&self) -> bool {
         matches!(
             self,
-            Self::ExternalPublicationAuditAnchorRecorded
-                | Self::ExternalPublicationAuditAnchorDuplicateIdempotent
+            Self::ExternalPublicationAuditAnchorRecorded | Self::ExternalPublicationAuditAnchorDuplicateIdempotent
         )
     }
 
@@ -1438,18 +1412,14 @@ impl DurableCompletionExternalPublicationAuditAnchorOutcome {
     /// Stable operator-facing tag.
     pub fn tag(&self) -> &'static str {
         match self {
-            Self::LegacyBypassNoExternalPublicationAuditAnchor => {
-                "legacy-bypass-no-external-publication-audit-anchor"
-            }
+            Self::LegacyBypassNoExternalPublicationAuditAnchor => "legacy-bypass-no-external-publication-audit-anchor",
             Self::RejectedBeforeExternalPublicationAuditSealNoAuditAnchor => {
                 "rejected-before-settlement-confirmation-no-outcome-publication"
             }
             Self::ExternalPublicationAuditSealDidNotRecordNoAuditAnchor => {
                 "settlement-confirmation-did-not-record-no-outcome-publication"
             }
-            Self::ExternalPublicationAuditAnchorRecorded => {
-                "external-publication-audit-anchor-recorded"
-            }
+            Self::ExternalPublicationAuditAnchorRecorded => "external-publication-audit-anchor-recorded",
             Self::ExternalPublicationAuditAnchorDuplicateIdempotent => {
                 "external-publication-audit-anchor-duplicate-idempotent"
             }
@@ -1483,9 +1453,7 @@ impl DurableCompletionExternalPublicationAuditAnchorOutcome {
             Self::ValidatorSetRotationUnsupportedNoAuditAnchor => {
                 "validator-set-rotation-unsupported-no-outcome-publication"
             }
-            Self::PolicyChangeUnsupportedNoAuditAnchor => {
-                "policy-change-unsupported-no-outcome-publication"
-            }
+            Self::PolicyChangeUnsupportedNoAuditAnchor => "policy-change-unsupported-no-outcome-publication",
         }
     }
 }
@@ -1534,9 +1502,9 @@ impl DurableCompletionExternalPublicationAuditAnchorRequestIntent {
 pub fn project_external_publication_audit_seal_outcome_to_external_publication_audit_anchor_request(
     outcome: &DurableCompletionExternalPublicationAuditAnchorExternalPublicationAuditSealBinding,
 ) -> DurableCompletionExternalPublicationAuditAnchorRequestIntent {
+    use DurableCompletionExternalPublicationAuditSealOutcome as Finalization;
     use DurableCompletionExternalPublicationAuditAnchorOutcome as Receipt;
     use DurableCompletionExternalPublicationAuditAnchorRequestIntent as Intent;
-    use DurableCompletionExternalPublicationAuditSealOutcome as Finalization;
     match outcome {
         Finalization::ExternalPublicationAuditSealRecorded => Intent::CreateRequest,
         Finalization::ExternalPublicationAuditSealDuplicateIdempotent => Intent::IdempotentOnly,
@@ -1737,13 +1705,10 @@ impl GovernanceDurableCompletionExternalPublicationAuditAnchorSink
         // Build the deterministic request / response / record / transcript digests.
         let request_digest = request.digest();
         let response = DurableCompletionExternalPublicationAuditAnchorResponse {
-            external_publication_audit_anchor_record_id: request
-                .external_publication_audit_anchor_record_id
-                .clone(),
+            external_publication_audit_anchor_record_id: request.external_publication_audit_anchor_record_id.clone(),
             request_digest: request_digest.clone(),
             accepted: true,
-            external_publication_audit_anchor_kind:
-                DurableCompletionExternalPublicationAuditAnchorKind::FixtureInMemory,
+            external_publication_audit_anchor_kind: DurableCompletionExternalPublicationAuditAnchorKind::FixtureInMemory,
         };
         let response_digest = response.digest();
         let record = request.to_record();
@@ -1774,18 +1739,14 @@ impl GovernanceDurableCompletionExternalPublicationAuditAnchorSink
             return Receipt::ExternalPublicationAuditAnchorRejectedBeforeRecord;
         }
 
-        ledger.insert(
-            DurableCompletionExternalPublicationAuditAnchorLedgerRecord {
-                external_publication_audit_anchor_record_id: request
-                    .external_publication_audit_anchor_record_id
-                    .clone(),
-                request_digest,
-                response_digest,
-                record_digest,
-                transcript_digest,
-                status: DurableCompletionExternalPublicationAuditAnchorLedgerStatus::Recorded,
-            },
-        );
+        ledger.insert(DurableCompletionExternalPublicationAuditAnchorLedgerRecord {
+            external_publication_audit_anchor_record_id: request.external_publication_audit_anchor_record_id.clone(),
+            request_digest,
+            response_digest,
+            record_digest,
+            transcript_digest,
+            status: DurableCompletionExternalPublicationAuditAnchorLedgerStatus::Recorded,
+        });
         Receipt::ExternalPublicationAuditAnchorRecorded
     }
 }
@@ -2103,8 +2064,7 @@ pub fn recover_durable_completion_external_publication_audit_anchor_window(
     // the expected receipt record id and the canonical request digest.
     let recovered_matches =
         |record: &DurableCompletionExternalPublicationAuditAnchorLedgerRecord| -> bool {
-            record.external_publication_audit_anchor_record_id
-                == expectations.expected_external_publication_audit_anchor_record_id
+            record.external_publication_audit_anchor_record_id == expectations.expected_external_publication_audit_anchor_record_id
                 && record.request_digest == input.request.digest()
                 && record.status
                     == DurableCompletionExternalPublicationAuditAnchorLedgerStatus::Recorded
@@ -2211,20 +2171,17 @@ pub fn durable_completion_external_publication_audit_anchor_never_calls_run_070(
 }
 
 /// Run 290 — the receipt boundary never mutates live PQC trust state.
-pub fn durable_completion_external_publication_audit_anchor_never_mutates_live_pqc_trust_state(
-) -> bool {
+pub fn durable_completion_external_publication_audit_anchor_never_mutates_live_pqc_trust_state() -> bool {
     true
 }
 
 /// Run 290 — the receipt boundary never writes a sequence or a marker.
-pub fn durable_completion_external_publication_audit_anchor_never_writes_sequence_or_marker() -> bool
-{
+pub fn durable_completion_external_publication_audit_anchor_never_writes_sequence_or_marker() -> bool {
     true
 }
 
 /// Run 290 — the receipt boundary changes no RocksDB file schema / migration.
-pub fn durable_completion_external_publication_audit_anchor_no_rocksdb_file_schema_migration_change(
-) -> bool {
+pub fn durable_completion_external_publication_audit_anchor_no_rocksdb_file_schema_migration_change() -> bool {
     true
 }
 
@@ -2254,8 +2211,7 @@ pub fn durable_completion_external_publication_audit_anchor_completion_report_re
 }
 
 /// Run 290 — a receipt requires a Run 252 external_publication_audit_anchor upstream.
-pub fn durable_completion_external_publication_audit_anchor_finalization_projection_required(
-) -> bool {
+pub fn durable_completion_external_publication_audit_anchor_finalization_projection_required() -> bool {
     true
 }
 
@@ -2312,8 +2268,7 @@ pub fn durable_completion_external_publication_audit_anchor_no_real_settlement_r
 /// record is a modeled in-memory fixture record. Production / MainNet / external
 /// external-publication-audit-seal sinks are reachable but unavailable / fail closed
 /// and never confer any real acknowledgement.
-pub fn durable_completion_external_publication_audit_anchor_no_real_external_publication_audit_seal(
-) -> bool {
+pub fn durable_completion_external_publication_audit_anchor_no_real_external_publication_audit_seal() -> bool {
     true
 }
 
@@ -2321,8 +2276,7 @@ pub fn durable_completion_external_publication_audit_anchor_no_real_external_pub
 /// settlement-finality projection; the only settlement-finality projection is a modeled
 /// in-memory fixture record with no external publication, network I/O, or persistent
 /// backend.
-pub fn durable_completion_external_publication_audit_anchor_no_real_settlement_finality_projection(
-) -> bool {
+pub fn durable_completion_external_publication_audit_anchor_no_real_settlement_finality_projection() -> bool {
     true
 }
 
@@ -2330,14 +2284,12 @@ pub fn durable_completion_external_publication_audit_anchor_no_real_settlement_f
 /// external-publication-audit-seal; the only external-publication-audit-seal is a modeled
 /// in-memory fixture record with no external publication, network I/O, or persistent
 /// backend.
-pub fn durable_completion_external_publication_audit_anchor_no_real_external_publication_audit_anchor(
-) -> bool {
+pub fn durable_completion_external_publication_audit_anchor_no_real_external_publication_audit_anchor() -> bool {
     true
 }
 
 /// Run 290 — a receipt record is required before a receipt is acknowledged.
-pub fn durable_completion_external_publication_audit_anchor_record_required_before_reported() -> bool
-{
+pub fn durable_completion_external_publication_audit_anchor_record_required_before_reported() -> bool {
     true
 }
 
@@ -2352,8 +2304,7 @@ pub fn durable_completion_external_publication_audit_anchor_rollback_never_recor
 }
 
 /// Run 290 — an ambiguous after-record receipt window fails closed.
-pub fn durable_completion_external_publication_audit_anchor_ambiguous_window_fails_closed() -> bool
-{
+pub fn durable_completion_external_publication_audit_anchor_ambiguous_window_fails_closed() -> bool {
     true
 }
 
@@ -2365,8 +2316,7 @@ pub fn durable_completion_external_publication_audit_anchor_mainnet_peer_driven_
 }
 
 /// Run 290 — production / MainNet audit-ledger sinks are reachable but unavailable.
-pub fn durable_completion_external_publication_audit_anchor_production_mainnet_unavailable() -> bool
-{
+pub fn durable_completion_external_publication_audit_anchor_production_mainnet_unavailable() -> bool {
     true
 }
 
@@ -2376,8 +2326,7 @@ pub fn durable_completion_external_publication_audit_anchor_external_unavailable
 }
 
 /// Run 290 — validator-set rotation remains unsupported at the receipt boundary.
-pub fn durable_completion_external_publication_audit_anchor_validator_set_rotation_unsupported(
-) -> bool {
+pub fn durable_completion_external_publication_audit_anchor_validator_set_rotation_unsupported() -> bool {
     true
 }
 

@@ -109,16 +109,15 @@ use qbind_node::pqc_governance_modeled_durable_consume_completion_reporter::{
     modeled_completion_reporter_validator_set_rotation_unsupported,
     project_sink_outcome_to_completion_report_intent,
     recover_modeled_durable_consume_completion_reporter_window, CompletionReportIntent,
-    FixtureModeledDurableConsumeCompletionReporter,
-    GovernanceModeledDurableConsumeCompletionReport,
+    FixtureModeledDurableConsumeCompletionReporter, GovernanceModeledDurableConsumeCompletionReport,
     GovernanceModeledDurableConsumeCompletionReporter,
     GovernanceModeledDurableConsumeCompletionReporterExpectations,
     GovernanceModeledDurableConsumeCompletionReporterInput,
     GovernanceModeledDurableConsumeCompletionReporterOutcome,
     GovernanceModeledDurableConsumeCompletionReporterPolicy,
     MainNetModeledDurableConsumeCompletionReporter, ModeledCompletionReportFault,
-    ModeledDurableConsumeCompletionReportLedger, ModeledDurableConsumeCompletionReportStatus,
-    ModeledDurableConsumeCompletionReportWindow, ModeledDurableConsumeCompletionReporterKind,
+    ModeledDurableConsumeCompletionReportLedger, ModeledDurableConsumeCompletionReporterKind,
+    ModeledDurableConsumeCompletionReportStatus, ModeledDurableConsumeCompletionReportWindow,
     ProductionModeledDurableConsumeCompletionReporter,
 };
 use qbind_node::pqc_governance_modeled_durable_consume_projection_sink::GovernanceModeledDurableConsumeSinkOutcome;
@@ -465,16 +464,9 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
         let first = drive(&input, &c.expectations, &mut reporter, &mut ledger);
         t.check_outcome("A7.first", "completion-report-recorded", &first);
         let second = drive(&input, &c.expectations, &mut reporter, &mut ledger);
-        t.check_outcome(
-            "A7.second",
-            "completion-report-duplicate-idempotent",
-            &second,
-        );
+        t.check_outcome("A7.second", "completion-report-duplicate-idempotent", &second);
         t.assert_true("A7.projects", second.projects_to_durable_completion());
-        t.assert_true(
-            "A7.no-authorize-new",
-            !second.authorizes_modeled_completion(),
-        );
+        t.assert_true("A7.no-authorize-new", !second.authorizes_modeled_completion());
         t.assert_true("A7.ledger-one", ledger.len() == 1);
     }
 
@@ -495,21 +487,12 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
             Sink::ConsumeReceiptDuplicateIdempotent,
         );
         let dup = drive(&dup_input, &c.expectations, &mut reporter, &mut ledger);
-        t.check_outcome(
-            "A8.duplicate-matches",
-            "completion-report-duplicate-idempotent",
-            &dup,
-        );
+        t.check_outcome("A8.duplicate-matches", "completion-report-duplicate-idempotent", &dup);
         t.assert_true("A8.ledger-one", ledger.len() == 1);
         // And against an EMPTY ledger, an idempotent-duplicate creates nothing.
         let mut empty_ledger = ModeledDurableConsumeCompletionReportLedger::new();
         let mut reporter2 = devnet_reporter();
-        let dup_empty = drive(
-            &dup_input,
-            &c.expectations,
-            &mut reporter2,
-            &mut empty_ledger,
-        );
+        let dup_empty = drive(&dup_input, &c.expectations, &mut reporter2, &mut empty_ledger);
         t.check_outcome(
             "A8.duplicate-empty",
             "completion-report-rejected-before-record",
@@ -539,11 +522,7 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
         let mut ledger = ModeledDurableConsumeCompletionReportLedger::new();
         let mut reporter = devnet_reporter();
         let o = drive(&input, &c.expectations, &mut reporter, &mut ledger);
-        t.check_outcome(
-            &format!("A9.{label}.outcome"),
-            "completion-report-recorded",
-            &o,
-        );
+        t.check_outcome(&format!("A9.{label}.outcome"), "completion-report-recorded", &o);
         t.assert_true(&format!("A9.{label}.ledger-one"), ledger.len() == 1);
     }
 
@@ -560,11 +539,7 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
             &mut reporter,
             &mut ledger,
         );
-        t.check_outcome(
-            "A10.outcome",
-            "production-reporter-unavailable-no-completion",
-            &o,
-        );
+        t.check_outcome("A10.outcome", "production-reporter-unavailable-no-completion", &o);
         t.assert_true("A10.no-completion", o.no_completion());
         t.assert_true("A10.ledger-empty", ledger.is_empty());
         t.check("A10.kind", "production-unavailable", reporter.kind().tag());
@@ -590,11 +565,7 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
             &mut reporter,
             &mut ledger,
         );
-        t.check_outcome(
-            "A11.outcome",
-            "mainnet-reporter-unavailable-no-completion",
-            &o,
-        );
+        t.check_outcome("A11.outcome", "mainnet-reporter-unavailable-no-completion", &o);
         t.assert_true("A11.ledger-empty", ledger.is_empty());
         t.check("A11.kind", "mainnet-unavailable", reporter.kind().tag());
     }
@@ -665,10 +636,7 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
         let create =
             project_sink_outcome_to_completion_report_intent(&Sink::ConsumeReceiptRecorded);
         t.assert_true("A15.recorded-creates-intent", create.creates_intent());
-        t.assert_true(
-            "A15.recorded-is-create",
-            create == CompletionReportIntent::CreateIntent,
-        );
+        t.assert_true("A15.recorded-is-create", create == CompletionReportIntent::CreateIntent);
         let idem = project_sink_outcome_to_completion_report_intent(
             &Sink::ConsumeReceiptDuplicateIdempotent,
         );
@@ -697,22 +665,13 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
     // no completion report.
     let sink_cases: [(&str, GovernanceModeledDurableConsumeSinkOutcome); 11] = [
         ("legacy-bypass", Sink::LegacyBypassNoReceipt),
-        (
-            "rejected-before-pipeline",
-            Sink::RejectedBeforePipelineNoReceipt,
-        ),
+        ("rejected-before-pipeline", Sink::RejectedBeforePipelineNoReceipt),
         (
             "pipeline-did-not-authorize",
             Sink::PipelineDidNotAuthorizeConsumeNoReceipt,
         ),
-        (
-            "sink-rejected-before-record",
-            Sink::ConsumeReceiptRejectedBeforeRecord,
-        ),
-        (
-            "sink-record-failed",
-            Sink::ConsumeReceiptRecordFailedNoConsume,
-        ),
+        ("sink-rejected-before-record", Sink::ConsumeReceiptRejectedBeforeRecord),
+        ("sink-record-failed", Sink::ConsumeReceiptRecordFailedNoConsume),
         ("sink-rolled-back", Sink::ConsumeReceiptRolledBackNoConsume),
         (
             "sink-rollback-failed",
@@ -722,14 +681,8 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
             "sink-ambiguous",
             Sink::ConsumeReceiptAmbiguousFailClosedNoConsume,
         ),
-        (
-            "production-sink-unavailable",
-            Sink::ProductionSinkUnavailableNoConsume,
-        ),
-        (
-            "mainnet-sink-unavailable",
-            Sink::MainNetSinkUnavailableNoConsume,
-        ),
+        ("production-sink-unavailable", Sink::ProductionSinkUnavailableNoConsume),
+        ("mainnet-sink-unavailable", Sink::MainNetSinkUnavailableNoConsume),
         (
             "validator-set-rotation",
             Sink::ValidatorSetRotationUnsupportedNoConsume,
@@ -771,11 +724,7 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
         let mut ledger = ModeledDurableConsumeCompletionReportLedger::new();
         let mut reporter = devnet_reporter();
         let o = drive(&input, &c.expectations, &mut reporter, &mut ledger);
-        t.check_outcome(
-            "B.policy-change.outcome",
-            "policy-change-unsupported-no-completion",
-            &o,
-        );
+        t.check_outcome("B.policy-change.outcome", "policy-change-unsupported-no-completion", &o);
         t.assert_true("B.policy-change.no-invocation", reporter.invocations() == 0);
     }
 
@@ -813,10 +762,7 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
         let o = drive(&input, &c.expectations, &mut reporter, &mut ledger);
         t.check_outcome(&format!("B.fault.{label}.outcome"), tag, &o);
         t.assert_true(&format!("B.fault.{label}.no-completion"), o.no_completion());
-        t.assert_true(
-            &format!("B.fault.{label}.invoked"),
-            reporter.invocations() == 1,
-        );
+        t.assert_true(&format!("B.fault.{label}.invoked"), reporter.invocations() == 1);
         t.assert_true(&format!("B.fault.{label}.ledger-empty"), ledger.is_empty());
     }
 
@@ -877,10 +823,7 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
             &format!("B.binding.{label}.no-invocation"),
             reporter.invocations() == 0,
         );
-        t.assert_true(
-            &format!("B.binding.{label}.ledger-empty"),
-            ledger.is_empty(),
-        );
+        t.assert_true(&format!("B.binding.{label}.ledger-empty"), ledger.is_empty());
     }
 
     // B-report — report-identity mismatches reject BEFORE record (reporter IS invoked).
@@ -980,10 +923,7 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
             "sink-did-not-record-receipt-no-completion-report",
             &o,
         );
-        t.assert_true(
-            "B.completion-before-sink-receipt.no-invocation",
-            reporter.invocations() == 0,
-        );
+        t.assert_true("B.completion-before-sink-receipt.no-invocation", reporter.invocations() == 0);
     }
 
     t.finish(out)
@@ -1180,15 +1120,9 @@ fn run_projection_table(out: &Path) -> (u64, u64) {
 
     // Predecessor authorizations alone create no completion-report intent.
     for (label, sink) in [
-        (
-            "sink-rejected-before-record",
-            Sink::ConsumeReceiptRejectedBeforeRecord,
-        ),
+        ("sink-rejected-before-record", Sink::ConsumeReceiptRejectedBeforeRecord),
         ("legacy-bypass", Sink::LegacyBypassNoReceipt),
-        (
-            "rejected-before-pipeline",
-            Sink::RejectedBeforePipelineNoReceipt,
-        ),
+        ("rejected-before-pipeline", Sink::RejectedBeforePipelineNoReceipt),
         (
             "pipeline-did-not-authorize",
             Sink::PipelineDidNotAuthorizeConsumeNoReceipt,
@@ -1203,37 +1137,20 @@ fn run_projection_table(out: &Path) -> (u64, u64) {
     // Only CompletionReportRecorded authorizes a new modeled completion-reported state.
     t.assert_true(
         "D.recorded-authorizes",
-        completion_reporter_outcome_authorizes_modeled_completion(
-            &Report::CompletionReportRecorded,
-        ),
+        completion_reporter_outcome_authorizes_modeled_completion(&Report::CompletionReportRecorded),
     );
 
     // Every no-completion outcome does not authorize a new completion.
-    let no_completion: [(
-        &str,
-        GovernanceModeledDurableConsumeCompletionReporterOutcome,
-    ); 13] = [
+    let no_completion: [(&str, GovernanceModeledDurableConsumeCompletionReporterOutcome); 13] = [
         ("legacy-bypass", Report::LegacyBypassNoCompletionReport),
-        (
-            "rejected-before-sink",
-            Report::RejectedBeforeSinkNoCompletionReport,
-        ),
+        ("rejected-before-sink", Report::RejectedBeforeSinkNoCompletionReport),
         (
             "sink-did-not-record-receipt",
             Report::SinkDidNotRecordReceiptNoCompletionReport,
         ),
-        (
-            "rejected-before-record",
-            Report::CompletionReportRejectedBeforeRecord,
-        ),
-        (
-            "record-failed",
-            Report::CompletionReportRecordFailedNoCompletion,
-        ),
-        (
-            "rolled-back",
-            Report::CompletionReportRolledBackNoCompletion,
-        ),
+        ("rejected-before-record", Report::CompletionReportRejectedBeforeRecord),
+        ("record-failed", Report::CompletionReportRecordFailedNoCompletion),
+        ("rolled-back", Report::CompletionReportRolledBackNoCompletion),
         (
             "rollback-failed-fatal",
             Report::CompletionReportRollbackFailedFatalNoCompletion,
@@ -1246,10 +1163,7 @@ fn run_projection_table(out: &Path) -> (u64, u64) {
             "production-unavailable",
             Report::ProductionReporterUnavailableNoCompletion,
         ),
-        (
-            "mainnet-unavailable",
-            Report::MainNetReporterUnavailableNoCompletion,
-        ),
+        ("mainnet-unavailable", Report::MainNetReporterUnavailableNoCompletion),
         (
             "mainnet-peer-driven-refused",
             Report::MainNetPeerDrivenApplyRefusedNoCompletion,
@@ -1275,9 +1189,7 @@ fn run_projection_table(out: &Path) -> (u64, u64) {
     // duplicate must not be counted as a new completion.
     t.assert_true(
         "D.recorded-projects",
-        completion_reporter_outcome_projects_to_durable_completion(
-            &Report::CompletionReportRecorded,
-        ),
+        completion_reporter_outcome_projects_to_durable_completion(&Report::CompletionReportRecorded),
     );
     t.assert_true(
         "D.duplicate-projects",
@@ -1874,10 +1786,7 @@ fn main() {
         ("recovery", run_recovery_table),
         ("projection", run_projection_table),
         ("stage_ordering", run_stage_ordering_table),
-        (
-            "completion_report_ledger",
-            run_completion_report_ledger_table,
-        ),
+        ("completion_report_ledger", run_completion_report_ledger_table),
         ("non_mutation", run_non_mutation_table),
         ("reachability", run_reachability_table),
     ];

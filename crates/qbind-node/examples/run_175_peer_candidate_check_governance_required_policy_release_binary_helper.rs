@@ -83,8 +83,8 @@ use qbind_ledger::bundle_signing_ratification::v2_test_helpers;
 use qbind_ledger::{
     compute_canonical_genesis_hash, format_genesis_hash, BundleSigningRatificationV2,
     BundleSigningRatificationV2Action, GenesisAllocation, GenesisAuthorityConfig,
-    GenesisAuthorityRoot, GenesisConfig, GenesisCouncilConfig, GenesisHash, GenesisMonetaryConfig,
-    GenesisValidator, NetworkEnvironmentPolicy, RatificationEnvironment,
+    GenesisAuthorityRoot, GenesisConfig, GenesisCouncilConfig, GenesisHash,
+    GenesisMonetaryConfig, GenesisValidator, NetworkEnvironmentPolicy, RatificationEnvironment,
     GENESIS_AUTHORITY_SUITE_ML_DSA_44,
 };
 use qbind_node::pqc_authority_lifecycle::LocalLifecycleAction;
@@ -93,7 +93,8 @@ use qbind_node::pqc_authority_state::{
 };
 use qbind_node::pqc_devnet_helper::mint_devnet_root;
 use qbind_node::pqc_governance_authority::{
-    fixture_issuer_signature, GovernanceAuthorityClass, PQC_GOVERNANCE_ISSUER_SUITE_ML_DSA_44,
+    fixture_issuer_signature, GovernanceAuthorityClass,
+    PQC_GOVERNANCE_ISSUER_SUITE_ML_DSA_44,
 };
 use qbind_node::pqc_governance_proof_wire::{
     GovernanceAuthorityClassWire, GovernanceAuthorityProofWire,
@@ -174,12 +175,7 @@ fn mint_signing() -> Signing {
         PQC_TRANSPORT_SUITE_ML_DSA_44,
         hex_lower(&pk)
     );
-    Signing {
-        pk,
-        sk,
-        key_id,
-        spec,
-    }
+    Signing { pk, sk, key_id, spec }
 }
 
 struct Harness {
@@ -211,10 +207,7 @@ fn harness(env: NetworkEnvironment) -> Harness {
     let mut genesis = GenesisConfig::new(
         genesis_chain_id(env),
         1_738_000_000_000,
-        vec![GenesisAllocation::new(
-            format!("0x{}", "11".repeat(32)),
-            100,
-        )],
+        vec![GenesisAllocation::new(format!("0x{}", "11".repeat(32)), 100)],
         vec![GenesisValidator::new(
             format!("0x{}", "22".repeat(32)),
             "ab".repeat(32),
@@ -399,7 +392,8 @@ fn build_sidecar_json(
 ) -> Vec<u8> {
     let mut value = serde_json::to_value(rat).expect("v2 serialise");
     if let Some(wire) = proof_sibling {
-        value["governance_authority_proof"] = serde_json::to_value(wire).expect("wire serialise");
+        value["governance_authority_proof"] =
+            serde_json::to_value(wire).expect("wire serialise");
     }
     serde_json::to_vec_pretty(&value).expect("sidecar serialise")
 }
@@ -516,7 +510,8 @@ fn write_env_fixtures(base: &Path, env: NetworkEnvironment) {
     );
 
     // Valid GenesisBound Rotate proof.
-    let good_proof = good_genesis_rotate_proof_wire(&h, &v2_rotate_seq2, &rotated.pk, &active.pk);
+    let good_proof =
+        good_genesis_rotate_proof_wire(&h, &v2_rotate_seq2, &rotated.pk, &active.pk);
     write_bytes(
         &base.join("ratification.valid_proof.rotate.seq2.json"),
         &build_sidecar_json(&v2_rotate_seq2, Some(&good_proof)),

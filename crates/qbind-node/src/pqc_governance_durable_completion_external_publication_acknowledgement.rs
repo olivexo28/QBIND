@@ -86,10 +86,10 @@
 //! match an already-recorded external-publication-receipt record.
 
 use crate::pqc_governance_durable_completion_acknowledgement_consumer::DurableCompletionAcknowledgementConsumerOutcome;
+use crate::pqc_governance_durable_completion_external_publication_receipt::DurableCompletionExternalPublicationReceiptOutcome;
 use crate::pqc_governance_durable_completion_attestation_backend::DurableCompletionAttestationBackendOutcome;
 use crate::pqc_governance_durable_completion_audit_publication_receipt::DurableCompletionAuditPublicationReceiptOutcome;
 use crate::pqc_governance_durable_completion_audit_receipt_acknowledgement::DurableCompletionAuditReceiptAcknowledgementOutcome;
-use crate::pqc_governance_durable_completion_external_publication_receipt::DurableCompletionExternalPublicationReceiptOutcome;
 use crate::pqc_governance_execution_runtime_arming::GovernanceExecutionRuntimeSurface;
 use crate::pqc_governance_modeled_durable_completion_attestation_projection::GovernanceModeledDurableCompletionAttestationOutcome;
 use crate::pqc_governance_modeled_durable_completion_finalization_projection::GovernanceModeledDurableCompletionFinalizationOutcome;
@@ -125,8 +125,7 @@ pub type DurableCompletionExternalPublicationAcknowledgementBinding =
 
 /// Run 280 — the Run 240/246 durable replay observation carried as freshness
 /// context.
-pub type DurableCompletionExternalPublicationAcknowledgementReplayBinding =
-    DurableReplayObservation;
+pub type DurableCompletionExternalPublicationAcknowledgementReplayBinding = DurableReplayObservation;
 
 /// Run 280 — the Run 246 pipeline outcome carried as consume authorization context.
 pub type DurableCompletionExternalPublicationAcknowledgementPipelineBinding =
@@ -274,12 +273,8 @@ impl DurableCompletionExternalPublicationAcknowledgementPolicy {
             Self::ProductionExternalPublicationAcknowledgementRequired => {
                 "production-external-publication-acknowledgement-required"
             }
-            Self::MainNetExternalPublicationAcknowledgementRequired => {
-                "mainnet-external-publication-acknowledgement-required"
-            }
-            Self::ExternalExternalPublicationAcknowledgementRequired => {
-                "external-external-publication-acknowledgement-required"
-            }
+            Self::MainNetExternalPublicationAcknowledgementRequired => "mainnet-external-publication-acknowledgement-required",
+            Self::ExternalExternalPublicationAcknowledgementRequired => "external-external-publication-acknowledgement-required",
         }
     }
 
@@ -481,9 +476,7 @@ pub fn external_publication_acknowledgement_request_digest(
         .str_field(&request.external_publication_receipt_transcript_digest)
         .str_field(&request.external_publication_receipt_record_id)
         .str_field(&request.domain_separation_tag)
-        .str_field(
-            external_publication_acknowledgement_identity_digest(&request.identity).as_hex(),
-        );
+        .str_field(external_publication_acknowledgement_identity_digest(&request.identity).as_hex());
     DurableCompletionExternalPublicationAcknowledgementDigest(w.finish())
 }
 
@@ -649,9 +642,7 @@ impl DurableCompletionExternalPublicationAcknowledgementRequest {
     /// `true` iff every mandatory field is structurally present (non-empty) and the
     /// identity is well-formed.
     pub fn is_well_formed(&self) -> bool {
-        !self
-            .external_publication_acknowledgement_record_id
-            .is_empty()
+        !self.external_publication_acknowledgement_record_id.is_empty()
             && !self.chain_id.is_empty()
             && !self.genesis_hash.is_empty()
             && !self.proposal_id.is_empty()
@@ -691,9 +682,7 @@ impl DurableCompletionExternalPublicationAcknowledgementRequest {
             && !self.external_publication_receipt_request_digest.is_empty()
             && !self.external_publication_receipt_response_digest.is_empty()
             && !self.external_publication_receipt_record_digest.is_empty()
-            && !self
-                .external_publication_receipt_transcript_digest
-                .is_empty()
+            && !self.external_publication_receipt_transcript_digest.is_empty()
             && !self.external_publication_receipt_record_id.is_empty()
             && !self.domain_separation_tag.is_empty()
             && self.identity.is_well_formed()
@@ -707,9 +696,7 @@ impl DurableCompletionExternalPublicationAcknowledgementRequest {
     /// The canonical immutable record derived from this request.
     pub fn to_record(&self) -> DurableCompletionExternalPublicationAcknowledgementRecord {
         DurableCompletionExternalPublicationAcknowledgementRecord {
-            external_publication_acknowledgement_record_id: self
-                .external_publication_acknowledgement_record_id
-                .clone(),
+            external_publication_acknowledgement_record_id: self.external_publication_acknowledgement_record_id.clone(),
             request_digest: self.digest(),
             identity_digest: self.identity.digest(),
         }
@@ -726,18 +713,14 @@ pub struct DurableCompletionExternalPublicationAcknowledgementResponse {
     /// `true` iff the receipt sink accepted the request.
     pub accepted: bool,
     /// The responding receipt kind.
-    pub external_publication_acknowledgement_kind:
-        DurableCompletionExternalPublicationAcknowledgementKind,
+    pub external_publication_acknowledgement_kind: DurableCompletionExternalPublicationAcknowledgementKind,
 }
 
 impl DurableCompletionExternalPublicationAcknowledgementResponse {
     /// `true` iff the response is structurally well-formed.
     pub fn is_well_formed(&self) -> bool {
-        !self
-            .external_publication_acknowledgement_record_id
-            .is_empty()
-            && self.external_publication_acknowledgement_kind
-                != DurableCompletionExternalPublicationAcknowledgementKind::Unknown
+        !self.external_publication_acknowledgement_record_id.is_empty()
+            && self.external_publication_acknowledgement_kind != DurableCompletionExternalPublicationAcknowledgementKind::Unknown
     }
 
     /// The deterministic receipt response digest.
@@ -851,16 +834,14 @@ impl DurableCompletionExternalPublicationAcknowledgementLedger {
         &self,
         external_publication_acknowledgement_record_id: &str,
     ) -> Option<&DurableCompletionExternalPublicationAcknowledgementLedgerRecord> {
-        self.records.iter().find(|r| {
-            r.external_publication_acknowledgement_record_id
-                == external_publication_acknowledgement_record_id
-        })
+        self.records
+            .iter()
+            .find(|r| r.external_publication_acknowledgement_record_id == external_publication_acknowledgement_record_id)
     }
 
     /// `true` iff a receipt with `external_publication_acknowledgement_record_id` is recorded.
     pub fn contains(&self, external_publication_acknowledgement_record_id: &str) -> bool {
-        self.find(external_publication_acknowledgement_record_id)
-            .is_some()
+        self.find(external_publication_acknowledgement_record_id).is_some()
     }
 
     /// Capture an immutable snapshot for a modeled rollback.
@@ -995,11 +976,9 @@ pub struct DurableCompletionExternalPublicationAcknowledgementExpectations {
     /// Expected settlement-confirmation identity.
     pub expected_identity: DurableCompletionExternalPublicationAcknowledgementIdentity,
     /// Expected settlement-confirmation kind.
-    pub expected_external_publication_acknowledgement_kind:
-        DurableCompletionExternalPublicationAcknowledgementKind,
+    pub expected_external_publication_acknowledgement_kind: DurableCompletionExternalPublicationAcknowledgementKind,
     /// Expected settlement-confirmation policy.
-    pub expected_external_publication_acknowledgement_policy:
-        DurableCompletionExternalPublicationAcknowledgementPolicy,
+    pub expected_external_publication_acknowledgement_policy: DurableCompletionExternalPublicationAcknowledgementPolicy,
     /// Expected domain separation tag.
     pub expected_domain_separation_tag: String,
 }
@@ -1049,9 +1028,7 @@ impl DurableCompletionExternalPublicationAcknowledgementExpectations {
         if !request.is_well_formed() {
             return Some("malformed receipt request");
         }
-        if request.external_publication_acknowledgement_record_id
-            != self.expected_external_publication_acknowledgement_record_id
-        {
+        if request.external_publication_acknowledgement_record_id != self.expected_external_publication_acknowledgement_record_id {
             return Some("wrong receipt record id");
         }
         if request.environment != self.expected_environment {
@@ -1203,9 +1180,7 @@ impl DurableCompletionExternalPublicationAcknowledgementExpectations {
         {
             return Some("wrong settlement-confirmation transcript digest");
         }
-        if request.external_publication_receipt_record_id
-            != self.expected_external_publication_receipt_record_id
-        {
+        if request.external_publication_receipt_record_id != self.expected_external_publication_receipt_record_id {
             return Some("wrong settlement-confirmation record id");
         }
         if request.domain_separation_tag != self.expected_domain_separation_tag {
@@ -1256,8 +1231,7 @@ pub struct DurableCompletionExternalPublicationAcknowledgementInput {
     /// The Run 250 reporter outcome.
     pub reporter_binding: DurableCompletionExternalPublicationAcknowledgementReporterBinding,
     /// The Run 252 external_publication_acknowledgement outcome.
-    pub confirmation_binding:
-        DurableCompletionExternalPublicationAcknowledgementFinalizationBinding,
+    pub confirmation_binding: DurableCompletionExternalPublicationAcknowledgementFinalizationBinding,
     /// The Run 254 attestation outcome.
     pub attestation_binding: DurableCompletionExternalPublicationAcknowledgementAttestationBinding,
     /// The Run 256 backend outcome carried as backend-record context.
@@ -1415,8 +1389,7 @@ impl DurableCompletionExternalPublicationAcknowledgementOutcome {
     pub fn projects_to_recorded(&self) -> bool {
         matches!(
             self,
-            Self::ExternalPublicationAcknowledgementRecorded
-                | Self::ExternalPublicationAcknowledgementDuplicateIdempotent
+            Self::ExternalPublicationAcknowledgementRecorded | Self::ExternalPublicationAcknowledgementDuplicateIdempotent
         )
     }
 
@@ -1439,18 +1412,14 @@ impl DurableCompletionExternalPublicationAcknowledgementOutcome {
     /// Stable operator-facing tag.
     pub fn tag(&self) -> &'static str {
         match self {
-            Self::LegacyBypassNoExternalPublicationAcknowledgement => {
-                "legacy-bypass-no-external-publication-acknowledgement"
-            }
+            Self::LegacyBypassNoExternalPublicationAcknowledgement => "legacy-bypass-no-external-publication-acknowledgement",
             Self::RejectedBeforeExternalPublicationReceiptNoAcknowledgement => {
                 "rejected-before-settlement-confirmation-no-outcome-publication"
             }
             Self::ExternalPublicationReceiptDidNotRecordNoAcknowledgement => {
                 "settlement-confirmation-did-not-record-no-outcome-publication"
             }
-            Self::ExternalPublicationAcknowledgementRecorded => {
-                "external-publication-acknowledgement-recorded"
-            }
+            Self::ExternalPublicationAcknowledgementRecorded => "external-publication-acknowledgement-recorded",
             Self::ExternalPublicationAcknowledgementDuplicateIdempotent => {
                 "external-publication-acknowledgement-duplicate-idempotent"
             }
@@ -1484,9 +1453,7 @@ impl DurableCompletionExternalPublicationAcknowledgementOutcome {
             Self::ValidatorSetRotationUnsupportedNoAcknowledgement => {
                 "validator-set-rotation-unsupported-no-outcome-publication"
             }
-            Self::PolicyChangeUnsupportedNoAcknowledgement => {
-                "policy-change-unsupported-no-outcome-publication"
-            }
+            Self::PolicyChangeUnsupportedNoAcknowledgement => "policy-change-unsupported-no-outcome-publication",
         }
     }
 }
@@ -1535,9 +1502,9 @@ impl DurableCompletionExternalPublicationAcknowledgementRequestIntent {
 pub fn project_external_publication_receipt_outcome_to_external_publication_acknowledgement_request(
     outcome: &DurableCompletionExternalPublicationAcknowledgementExternalPublicationReceiptBinding,
 ) -> DurableCompletionExternalPublicationAcknowledgementRequestIntent {
+    use DurableCompletionExternalPublicationReceiptOutcome as Finalization;
     use DurableCompletionExternalPublicationAcknowledgementOutcome as Receipt;
     use DurableCompletionExternalPublicationAcknowledgementRequestIntent as Intent;
-    use DurableCompletionExternalPublicationReceiptOutcome as Finalization;
     match outcome {
         Finalization::ExternalPublicationReceiptRecorded => Intent::CreateRequest,
         Finalization::ExternalPublicationReceiptDuplicateIdempotent => Intent::IdempotentOnly,
@@ -1738,13 +1705,10 @@ impl GovernanceDurableCompletionExternalPublicationAcknowledgementSink
         // Build the deterministic request / response / record / transcript digests.
         let request_digest = request.digest();
         let response = DurableCompletionExternalPublicationAcknowledgementResponse {
-            external_publication_acknowledgement_record_id: request
-                .external_publication_acknowledgement_record_id
-                .clone(),
+            external_publication_acknowledgement_record_id: request.external_publication_acknowledgement_record_id.clone(),
             request_digest: request_digest.clone(),
             accepted: true,
-            external_publication_acknowledgement_kind:
-                DurableCompletionExternalPublicationAcknowledgementKind::FixtureInMemory,
+            external_publication_acknowledgement_kind: DurableCompletionExternalPublicationAcknowledgementKind::FixtureInMemory,
         };
         let response_digest = response.digest();
         let record = request.to_record();
@@ -1756,8 +1720,7 @@ impl GovernanceDurableCompletionExternalPublicationAcknowledgementSink
         );
 
         // Idempotency / equivocation gate.
-        if let Some(existing) = ledger.find(&request.external_publication_acknowledgement_record_id)
-        {
+        if let Some(existing) = ledger.find(&request.external_publication_acknowledgement_record_id) {
             if existing.request_digest == request_digest
                 && existing.response_digest == response_digest
                 && existing.record_digest == record_digest
@@ -1776,18 +1739,14 @@ impl GovernanceDurableCompletionExternalPublicationAcknowledgementSink
             return Receipt::ExternalPublicationAcknowledgementRejectedBeforeRecord;
         }
 
-        ledger.insert(
-            DurableCompletionExternalPublicationAcknowledgementLedgerRecord {
-                external_publication_acknowledgement_record_id: request
-                    .external_publication_acknowledgement_record_id
-                    .clone(),
-                request_digest,
-                response_digest,
-                record_digest,
-                transcript_digest,
-                status: DurableCompletionExternalPublicationAcknowledgementLedgerStatus::Recorded,
-            },
-        );
+        ledger.insert(DurableCompletionExternalPublicationAcknowledgementLedgerRecord {
+            external_publication_acknowledgement_record_id: request.external_publication_acknowledgement_record_id.clone(),
+            request_digest,
+            response_digest,
+            record_digest,
+            transcript_digest,
+            status: DurableCompletionExternalPublicationAcknowledgementLedgerStatus::Recorded,
+        });
         Receipt::ExternalPublicationAcknowledgementRecorded
     }
 }
@@ -2105,8 +2064,7 @@ pub fn recover_durable_completion_external_publication_acknowledgement_window(
     // the expected receipt record id and the canonical request digest.
     let recovered_matches =
         |record: &DurableCompletionExternalPublicationAcknowledgementLedgerRecord| -> bool {
-            record.external_publication_acknowledgement_record_id
-                == expectations.expected_external_publication_acknowledgement_record_id
+            record.external_publication_acknowledgement_record_id == expectations.expected_external_publication_acknowledgement_record_id
                 && record.request_digest == input.request.digest()
                 && record.status
                     == DurableCompletionExternalPublicationAcknowledgementLedgerStatus::Recorded
@@ -2213,20 +2171,17 @@ pub fn durable_completion_external_publication_acknowledgement_never_calls_run_0
 }
 
 /// Run 280 — the receipt boundary never mutates live PQC trust state.
-pub fn durable_completion_external_publication_acknowledgement_never_mutates_live_pqc_trust_state(
-) -> bool {
+pub fn durable_completion_external_publication_acknowledgement_never_mutates_live_pqc_trust_state() -> bool {
     true
 }
 
 /// Run 280 — the receipt boundary never writes a sequence or a marker.
-pub fn durable_completion_external_publication_acknowledgement_never_writes_sequence_or_marker(
-) -> bool {
+pub fn durable_completion_external_publication_acknowledgement_never_writes_sequence_or_marker() -> bool {
     true
 }
 
 /// Run 280 — the receipt boundary changes no RocksDB file schema / migration.
-pub fn durable_completion_external_publication_acknowledgement_no_rocksdb_file_schema_migration_change(
-) -> bool {
+pub fn durable_completion_external_publication_acknowledgement_no_rocksdb_file_schema_migration_change() -> bool {
     true
 }
 
@@ -2251,14 +2206,12 @@ pub fn durable_completion_external_publication_acknowledgement_sink_receipt_requ
 }
 
 /// Run 280 — a receipt requires a Run 250 completion report upstream.
-pub fn durable_completion_external_publication_acknowledgement_completion_report_required() -> bool
-{
+pub fn durable_completion_external_publication_acknowledgement_completion_report_required() -> bool {
     true
 }
 
 /// Run 280 — a receipt requires a Run 252 external_publication_acknowledgement upstream.
-pub fn durable_completion_external_publication_acknowledgement_finalization_projection_required(
-) -> bool {
+pub fn durable_completion_external_publication_acknowledgement_finalization_projection_required() -> bool {
     true
 }
 
@@ -2268,8 +2221,7 @@ pub fn durable_completion_external_publication_acknowledgement_attestation_requi
 }
 
 /// Run 280 — an acknowledgement requires a Run 256 backend submission upstream.
-pub fn durable_completion_external_publication_acknowledgement_backend_submission_required() -> bool
-{
+pub fn durable_completion_external_publication_acknowledgement_backend_submission_required() -> bool {
     true
 }
 
@@ -2300,16 +2252,14 @@ pub fn durable_completion_external_publication_acknowledgement_no_real_settlemen
 /// finality; the only external-publication-acknowledgement record is a modeled in-memory fixture
 /// record. Production / MainNet / external external-publication-acknowledgement sinks are reachable
 /// but unavailable / fail closed and never confer any real finality.
-pub fn durable_completion_external_publication_acknowledgement_no_real_settlement_finality() -> bool
-{
+pub fn durable_completion_external_publication_acknowledgement_no_real_settlement_finality() -> bool {
     true
 }
 
 /// Run 280 — the external-publication-acknowledgement boundary never emits a real settlement
 /// receipt; the only external-publication-acknowledgement record is a modeled in-memory fixture
 /// record with no external publication, network I/O, or persistent backend.
-pub fn durable_completion_external_publication_acknowledgement_no_real_settlement_receipt() -> bool
-{
+pub fn durable_completion_external_publication_acknowledgement_no_real_settlement_receipt() -> bool {
     true
 }
 
@@ -2318,8 +2268,7 @@ pub fn durable_completion_external_publication_acknowledgement_no_real_settlemen
 /// record is a modeled in-memory fixture record. Production / MainNet / external
 /// external-publication-receipt sinks are reachable but unavailable / fail closed
 /// and never confer any real acknowledgement.
-pub fn durable_completion_external_publication_acknowledgement_no_real_external_publication_receipt(
-) -> bool {
+pub fn durable_completion_external_publication_acknowledgement_no_real_external_publication_receipt() -> bool {
     true
 }
 
@@ -2327,8 +2276,7 @@ pub fn durable_completion_external_publication_acknowledgement_no_real_external_
 /// settlement-finality projection; the only settlement-finality projection is a modeled
 /// in-memory fixture record with no external publication, network I/O, or persistent
 /// backend.
-pub fn durable_completion_external_publication_acknowledgement_no_real_settlement_finality_projection(
-) -> bool {
+pub fn durable_completion_external_publication_acknowledgement_no_real_settlement_finality_projection() -> bool {
     true
 }
 
@@ -2336,20 +2284,17 @@ pub fn durable_completion_external_publication_acknowledgement_no_real_settlemen
 /// external-publication-receipt; the only external-publication-receipt is a modeled
 /// in-memory fixture record with no external publication, network I/O, or persistent
 /// backend.
-pub fn durable_completion_external_publication_acknowledgement_no_real_external_publication_acknowledgement(
-) -> bool {
+pub fn durable_completion_external_publication_acknowledgement_no_real_external_publication_acknowledgement() -> bool {
     true
 }
 
 /// Run 280 — a receipt record is required before a receipt is acknowledged.
-pub fn durable_completion_external_publication_acknowledgement_record_required_before_reported(
-) -> bool {
+pub fn durable_completion_external_publication_acknowledgement_record_required_before_reported() -> bool {
     true
 }
 
 /// Run 280 — a failed receipt record never records a receipt.
-pub fn durable_completion_external_publication_acknowledgement_failed_record_never_records() -> bool
-{
+pub fn durable_completion_external_publication_acknowledgement_failed_record_never_records() -> bool {
     true
 }
 
@@ -2359,8 +2304,7 @@ pub fn durable_completion_external_publication_acknowledgement_rollback_never_re
 }
 
 /// Run 280 — an ambiguous after-record receipt window fails closed.
-pub fn durable_completion_external_publication_acknowledgement_ambiguous_window_fails_closed(
-) -> bool {
+pub fn durable_completion_external_publication_acknowledgement_ambiguous_window_fails_closed() -> bool {
     true
 }
 
@@ -2372,8 +2316,7 @@ pub fn durable_completion_external_publication_acknowledgement_mainnet_peer_driv
 }
 
 /// Run 280 — production / MainNet audit-ledger sinks are reachable but unavailable.
-pub fn durable_completion_external_publication_acknowledgement_production_mainnet_unavailable(
-) -> bool {
+pub fn durable_completion_external_publication_acknowledgement_production_mainnet_unavailable() -> bool {
     true
 }
 
@@ -2383,8 +2326,7 @@ pub fn durable_completion_external_publication_acknowledgement_external_unavaila
 }
 
 /// Run 280 — validator-set rotation remains unsupported at the receipt boundary.
-pub fn durable_completion_external_publication_acknowledgement_validator_set_rotation_unsupported(
-) -> bool {
+pub fn durable_completion_external_publication_acknowledgement_validator_set_rotation_unsupported() -> bool {
     true
 }
 

@@ -70,7 +70,6 @@
 //! never creates a new finalization by itself — it can only match an
 //! already-finalized record.
 
-use crate::pqc_governance_execution_runtime_arming::GovernanceExecutionRuntimeSurface;
 use crate::pqc_governance_modeled_durable_consume_completion_reporter::GovernanceModeledDurableConsumeCompletionReporterOutcome;
 use crate::pqc_governance_modeled_durable_consume_projection_sink::GovernanceModeledDurableConsumeSinkOutcome;
 use crate::pqc_governance_modeled_end_to_end_pipeline::{
@@ -80,6 +79,7 @@ use crate::pqc_governance_modeled_trust_mutation_applier::{
     ModeledGovernanceTrustMutationEnvironmentBinding, ModeledGovernanceTrustMutationRuntimeBinding,
     ModeledGovernanceTrustMutationSurface,
 };
+use crate::pqc_governance_execution_runtime_arming::GovernanceExecutionRuntimeSurface;
 use crate::pqc_trust_bundle::TrustBundleEnvironment;
 
 // ===========================================================================
@@ -382,10 +382,7 @@ impl ModeledDurableCompletionFinalizationLedger {
     }
 
     /// The record for `finalization_id`, if present.
-    pub fn find(
-        &self,
-        finalization_id: &str,
-    ) -> Option<&ModeledDurableCompletionFinalizationRecord> {
+    pub fn find(&self, finalization_id: &str) -> Option<&ModeledDurableCompletionFinalizationRecord> {
         self.records
             .iter()
             .find(|r| r.finalization_id == finalization_id)
@@ -791,7 +788,9 @@ impl GovernanceModeledDurableCompletionFinalizationOutcome {
                 "rejected-before-reporter-no-finalization"
             }
             Self::DurableCompletionFinalized => "durable-completion-finalized",
-            Self::DurableCompletionDuplicateIdempotent => "durable-completion-duplicate-idempotent",
+            Self::DurableCompletionDuplicateIdempotent => {
+                "durable-completion-duplicate-idempotent"
+            }
             Self::DurableCompletionRejectedBeforeRecord => {
                 "durable-completion-rejected-before-record"
             }

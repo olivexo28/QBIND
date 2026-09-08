@@ -62,10 +62,10 @@ use std::path::Path;
 use std::os::unix::fs::PermissionsExt;
 
 use qbind_crypto::{MlKem768Backend, KEM_SUITE_ML_KEM_768};
+use serde_json::Value;
 use qbind_net::handshake::leaf_cert_fingerprint;
 use qbind_wire::io::WireDecode;
 use qbind_wire::net::NetworkDelegationCert;
-use serde_json::Value;
 
 use crate::pqc_devnet_helper::{
     encode_cert, issue_leaf_delegation_cert, mint_devnet_root, LeafCertSpec,
@@ -307,10 +307,7 @@ fn cmd_generate(mut args: impl Iterator<Item = String>) -> i32 {
     let (kem_pk, kem_sk) = match MlKem768Backend::generate_keypair() {
         Ok(kp) => kp,
         Err(e) => {
-            eprintln!(
-                "[qbind-node identity] ERROR: ML-KEM-768 keygen failed: {:?}",
-                e
-            );
+            eprintln!("[qbind-node identity] ERROR: ML-KEM-768 keygen failed: {:?}", e);
             return EXIT_IO;
         }
     };
@@ -324,10 +321,7 @@ fn cmd_generate(mut args: impl Iterator<Item = String>) -> i32 {
     let cert = match issue_leaf_delegation_cert(&spec, &root.root_sk) {
         Ok(c) => c,
         Err(e) => {
-            eprintln!(
-                "[qbind-node identity] ERROR: issue leaf cert failed: {:?}",
-                e
-            );
+            eprintln!("[qbind-node identity] ERROR: issue leaf cert failed: {:?}", e);
             return EXIT_IO;
         }
     };
@@ -549,13 +543,7 @@ fn cmd_seed_candidate(mut args: impl Iterator<Item = String>) -> i32 {
     let validator_address = json_value_field(&raw, "validator_address");
 
     match (node_id, peer_id, transport, pqc_suite, validator_address) {
-        (
-            Some(node_id),
-            Some(peer_id),
-            Some(transport),
-            Some(pqc_suite),
-            Some(validator_address),
-        ) => {
+        (Some(node_id), Some(peer_id), Some(transport), Some(pqc_suite), Some(validator_address)) => {
             // status=planned, last_reachability_evidence=null — no live claim.
             print!(
                 "{{\n  \
@@ -629,9 +617,7 @@ fn json_value_field(json: &str, key: &str) -> Option<String> {
 /// Returns the validated role on success. `raw` is the original file text, used
 /// to catch embedded secret material that a structural walk might miss.
 fn validate_public_identity(v: &Value, raw: &str) -> Result<String, String> {
-    let obj = v
-        .as_object()
-        .ok_or("public-identity.json is not a JSON object")?;
+    let obj = v.as_object().ok_or("public-identity.json is not a JSON object")?;
 
     // additionalProperties: false — reject any unknown top-level field (this also
     // fail-closes on an injected secret-key field smuggled into the public doc).
@@ -657,10 +643,7 @@ fn validate_public_identity(v: &Value, raw: &str) -> Result<String, String> {
     ];
     for k in obj.keys() {
         if !ALLOWED_TOP.contains(&k.as_str()) {
-            return Err(format!(
-                "unexpected/forbidden field in public identity: `{}`",
-                k
-            ));
+            return Err(format!("unexpected/forbidden field in public identity: `{}`", k));
         }
     }
 
@@ -745,9 +728,7 @@ fn validate_public_identity(v: &Value, raw: &str) -> Result<String, String> {
     }
 
     // validator_address: null unless role == validator-candidate.
-    let va = obj
-        .get("validator_address")
-        .ok_or("missing validator_address")?;
+    let va = obj.get("validator_address").ok_or("missing validator_address")?;
     match role.as_str() {
         "validator-candidate" => {
             if !va.is_string() {
@@ -812,9 +793,7 @@ fn is_valid_trusted_root_spec(spec: &str) -> bool {
         && !parts[1].is_empty()
         && parts[1].bytes().all(|b| b.is_ascii_digit())
         && !parts[2].is_empty()
-        && parts[2]
-            .bytes()
-            .all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
+        && parts[2].bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
 }
 
 /// `register-check <public-identity.json> --seed-list <path> [--role <role>]
@@ -859,10 +838,7 @@ fn cmd_register_check(mut args: impl Iterator<Item = String>) -> i32 {
                 None => return usage(),
             },
             other => {
-                eprintln!(
-                    "[qbind-node identity register-check] unknown flag `{}`",
-                    other
-                );
+                eprintln!("[qbind-node identity register-check] unknown flag `{}`", other);
                 return usage();
             }
         }
@@ -871,9 +847,7 @@ fn cmd_register_check(mut args: impl Iterator<Item = String>) -> i32 {
     let seed_list = match seed_list {
         Some(v) => v,
         None => {
-            eprintln!(
-                "[qbind-node identity register-check] REFUSED: --seed-list <path> is required"
-            );
+            eprintln!("[qbind-node identity register-check] REFUSED: --seed-list <path> is required");
             return usage();
         }
     };
@@ -980,26 +954,14 @@ fn cmd_register_check(mut args: impl Iterator<Item = String>) -> i32 {
     }
 
     // 3. (cont.) Map the identity into a seed_node candidate and validate it.
-    let node_id = identity
-        .get("node_id")
-        .and_then(|x| x.as_str())
-        .unwrap_or_default();
-    let peer_id = identity
-        .get("peer_id")
-        .and_then(|x| x.as_str())
-        .unwrap_or_default();
+    let node_id = identity.get("node_id").and_then(|x| x.as_str()).unwrap_or_default();
+    let peer_id = identity.get("peer_id").and_then(|x| x.as_str()).unwrap_or_default();
     let transport = identity
         .get("transport_security_mode")
         .and_then(|x| x.as_str())
         .unwrap_or_default();
-    let pqc_suite = identity
-        .get("pqc_suite")
-        .and_then(|x| x.as_str())
-        .unwrap_or_default();
-    let validator_address = identity
-        .get("validator_address")
-        .cloned()
-        .unwrap_or(Value::Null);
+    let pqc_suite = identity.get("pqc_suite").and_then(|x| x.as_str()).unwrap_or_default();
+    let validator_address = identity.get("validator_address").cloned().unwrap_or(Value::Null);
     let reach_val = match &reachability {
         Some(r) => Value::String(r.clone()),
         None => Value::Null,
@@ -1112,9 +1074,7 @@ fn validate_seed_list_doc(v: &Value) -> Result<String, String> {
 fn is_genesis_hash(s: &str) -> bool {
     s.len() == 66
         && s.starts_with("0x")
-        && s[2..]
-            .bytes()
-            .all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
+        && s[2..].bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
 }
 
 /// Validate a single `seed_node` object (structural subset of the seed-list
@@ -1187,11 +1147,7 @@ fn validate_seed_node(v: &Value) -> Result<(), String> {
 /// root id, and confirm the cert binds to the same identity. For a
 /// validator-candidate, also confirm the cert's validator_id matches the
 /// identity's `validator_address` index. Fails closed on any mismatch.
-fn verify_cert_against_identity(
-    cert_path: &str,
-    identity: &Value,
-    role: &str,
-) -> Result<(), String> {
+fn verify_cert_against_identity(cert_path: &str, identity: &Value, role: &str) -> Result<(), String> {
     let bytes = fs::read(Path::new(cert_path))
         .map_err(|e| format!("could not read leaf cert `{}`: {}", cert_path, e))?;
     let mut slice: &[u8] = &bytes;
@@ -1199,10 +1155,7 @@ fn verify_cert_against_identity(
         .map_err(|e| format!("could not decode leaf cert `{}`: {:?}", cert_path, e))?;
 
     let node_id = hex_lower(&qbind_hash::derive_node_id_from_pubkey(&cert.leaf_kem_pk));
-    let want_node_id = identity
-        .get("node_id")
-        .and_then(|x| x.as_str())
-        .unwrap_or_default();
+    let want_node_id = identity.get("node_id").and_then(|x| x.as_str()).unwrap_or_default();
     if node_id != want_node_id {
         return Err(format!(
             "leaf cert NodeId `{}` does not match public identity node_id `{}`",
@@ -1221,10 +1174,7 @@ fn verify_cert_against_identity(
         ));
     }
     let root_id = hex_lower(&cert.root_key_id);
-    let want_root = identity
-        .get("root_key_id")
-        .and_then(|x| x.as_str())
-        .unwrap_or_default();
+    let want_root = identity.get("root_key_id").and_then(|x| x.as_str()).unwrap_or_default();
     if root_id != want_root {
         return Err(format!(
             "leaf cert root_key_id `{}` does not match public identity root_key_id `{}`",
@@ -1297,10 +1247,7 @@ mod tests {
             "/tmp/x/leaf.kem.sk.bin",
         );
         assert_eq!(json_string_field(&json, "node_id").as_deref(), Some("aa"));
-        assert_eq!(
-            json_value_field(&json, "validator_address").as_deref(),
-            Some("null")
-        );
+        assert_eq!(json_value_field(&json, "validator_address").as_deref(), Some("null"));
     }
 
     #[test]

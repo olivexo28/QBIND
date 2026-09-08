@@ -133,12 +133,7 @@ fn t03_node_metrics_preserves_defaults() {
 fn t04_custom_overrides_reach_adapter() {
     let metrics = Arc::new(NodeMetrics::new());
     let limiter = deployed_inbound_limiter(
-        &[
-            "--p2p-max-messages-per-second",
-            "5",
-            "--p2p-burst-allowance",
-            "0",
-        ],
+        &["--p2p-max-messages-per-second", "5", "--p2p-burst-allowance", "0"],
         Some(metrics),
     );
     assert_eq!(limiter.config().max_messages_per_second, 5);
@@ -156,19 +151,14 @@ fn t04_custom_overrides_reach_adapter() {
 fn t05_over_budget_bumps_exported_metric() {
     let metrics = Arc::new(NodeMetrics::new());
     let limiter = deployed_inbound_limiter(
-        &[
-            "--p2p-max-messages-per-second",
-            "1",
-            "--p2p-burst-allowance",
-            "0",
-        ],
+        &["--p2p-max-messages-per-second", "1", "--p2p-burst-allowance", "0"],
         Some(Arc::clone(&metrics)),
     );
     let now = Instant::now();
     let n = node(2);
     assert!(limiter.allow_node(&n, now)); // within budget
     assert!(!limiter.allow_node(&n, now)); // over budget → drop
-                                           // Adapter's own counter AND the exported per-peer counter both moved.
+    // Adapter's own counter AND the exported per-peer counter both moved.
     assert_eq!(limiter.drop_count(), 1);
     assert_eq!(metrics.peer_network().total_rate_limit_drops(), 1);
 
@@ -189,12 +179,7 @@ fn t05_over_budget_bumps_exported_metric() {
 fn t06_under_budget_leaves_exported_metric_zero() {
     let metrics = Arc::new(NodeMetrics::new());
     let limiter = deployed_inbound_limiter(
-        &[
-            "--p2p-max-messages-per-second",
-            "50",
-            "--p2p-burst-allowance",
-            "10",
-        ],
+        &["--p2p-max-messages-per-second", "50", "--p2p-burst-allowance", "10"],
         Some(Arc::clone(&metrics)),
     );
     let now = Instant::now();
@@ -211,12 +196,7 @@ fn t06_under_budget_leaves_exported_metric_zero() {
 #[test]
 fn t07_no_handle_no_exported_metric() {
     let limiter = deployed_inbound_limiter(
-        &[
-            "--p2p-max-messages-per-second",
-            "1",
-            "--p2p-burst-allowance",
-            "0",
-        ],
+        &["--p2p-max-messages-per-second", "1", "--p2p-burst-allowance", "0"],
         None,
     );
     let now = Instant::now();
@@ -236,12 +216,7 @@ fn t07_no_handle_no_exported_metric() {
 fn t08_exported_metric_records_bucket_peer() {
     let metrics = Arc::new(NodeMetrics::new());
     let limiter = deployed_inbound_limiter(
-        &[
-            "--p2p-max-messages-per-second",
-            "1",
-            "--p2p-burst-allowance",
-            "0",
-        ],
+        &["--p2p-max-messages-per-second", "1", "--p2p-burst-allowance", "0"],
         Some(Arc::clone(&metrics)),
     );
     let now = Instant::now();
@@ -260,12 +235,7 @@ fn t08_exported_metric_records_bucket_peer() {
 fn t09_exported_metric_accumulates() {
     let metrics = Arc::new(NodeMetrics::new());
     let limiter = deployed_inbound_limiter(
-        &[
-            "--p2p-max-messages-per-second",
-            "2",
-            "--p2p-burst-allowance",
-            "0",
-        ],
+        &["--p2p-max-messages-per-second", "2", "--p2p-burst-allowance", "0"],
         Some(Arc::clone(&metrics)),
     );
     let now = Instant::now();
@@ -289,12 +259,7 @@ fn t10_per_peer_drops_do_not_touch_connection_metric() {
     let node_metrics = Arc::new(NodeMetrics::new());
     let p2p_metrics = P2pMetrics::new();
     let limiter = deployed_inbound_limiter(
-        &[
-            "--p2p-max-messages-per-second",
-            "1",
-            "--p2p-burst-allowance",
-            "0",
-        ],
+        &["--p2p-max-messages-per-second", "1", "--p2p-burst-allowance", "0"],
         Some(Arc::clone(&node_metrics)),
     );
     let now = Instant::now();
@@ -370,12 +335,10 @@ fn t16_zero_connection_rate_fails_closed() {
 // 17. MainNet abuse/DoS enablement refused.
 #[test]
 fn t17_mainnet_refused() {
-    assert!(
-        parse(&["--env", "mainnet", "--p2p-max-messages-per-second", "500"])
-            .unwrap()
-            .abuse_dos_runtime_config()
-            .is_err()
-    );
+    assert!(parse(&["--env", "mainnet", "--p2p-max-messages-per-second", "500"])
+        .unwrap()
+        .abuse_dos_runtime_config()
+        .is_err());
     let cfg = AbuseDosConfig::default()
         .with_environment(qbind_types::primitives::NetworkEnvironment::Mainnet);
     assert!(PublicDevnetAbuseDosRuntimeConfig::from_config(cfg).is_err());
@@ -409,12 +372,7 @@ fn t18_additive_no_admission_change() {
 fn t19_seam_matches_direct_construction() {
     let metrics = Arc::new(NodeMetrics::new());
     let via_seam = deployed_inbound_limiter(
-        &[
-            "--p2p-max-messages-per-second",
-            "250",
-            "--p2p-burst-allowance",
-            "25",
-        ],
+        &["--p2p-max-messages-per-second", "250", "--p2p-burst-allowance", "25"],
         Some(Arc::clone(&metrics)),
     );
     let direct = DeployedInboundPerPeerLimiter::from_optional_config(

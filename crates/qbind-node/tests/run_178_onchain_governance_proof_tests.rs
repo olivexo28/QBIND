@@ -19,8 +19,8 @@ use qbind_node::pqc_authority_state::{
     PersistentAuthorityStateRecordVersioned,
 };
 use qbind_node::pqc_governance_authority::{
-    fixture_issuer_signature, fixture_issuer_signature_verifier, verify_governance_authority_proof,
-    GovernanceAuthorityClass, GovernanceAuthorityProof,
+    fixture_issuer_signature, fixture_issuer_signature_verifier,
+    verify_governance_authority_proof, GovernanceAuthorityClass, GovernanceAuthorityProof,
     GovernanceAuthorityVerificationOutcome as Run163GovOutcome, GovernanceThreshold,
     PQC_GOVERNANCE_ISSUER_SUITE_ML_DSA_44,
 };
@@ -60,7 +60,8 @@ const OTHER_GOV_DOMAIN: &str = "qbind-onchain-gov-other";
 const GOV_EPOCH: u64 = 42;
 const PROPOSAL_ID: &str = "prop-001";
 const OTHER_PROPOSAL_ID: &str = "prop-999";
-const PROPOSAL_DIGEST: &str = "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef";
+const PROPOSAL_DIGEST: &str =
+    "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef";
 const OTHER_PROPOSAL_DIGEST: &str =
     "feedfeedfeedfeedfeedfeedfeedfeedfeedfeedfeedfeedfeedfeedfeedfeed";
 const UNIQUE_DECISION_ID: &str = "decision-001";
@@ -345,15 +346,16 @@ fn a4_testnet_fixture_emergency_revoke_accepted() {
 
 #[test]
 fn a5_combined_lifecycle_with_onchain_governance_proof_accepted() {
-    let prev = build_v2_with_env(
-        TrustBundleEnvironment::Devnet,
-        KEY_A,
-        1,
-        BundleSigningRatificationV2Action::Ratify,
-        None,
-        "1111111111111111111111111111111111111111111111111111111111111111",
-        None,
-    );
+    let prev =
+        build_v2_with_env(
+            TrustBundleEnvironment::Devnet,
+            KEY_A,
+            1,
+            BundleSigningRatificationV2Action::Ratify,
+            None,
+            "1111111111111111111111111111111111111111111111111111111111111111",
+            None,
+        );
     let persisted = PersistentAuthorityStateRecordVersioned::V2(prev);
     let candidate = rotate_to(KEY_B, KEY_A, 2, DIGEST_2, TrustBundleEnvironment::Devnet);
     let proof = good_proof(&candidate, LocalLifecycleAction::Rotate);
@@ -371,11 +373,7 @@ fn a5_combined_lifecycle_with_onchain_governance_proof_accepted() {
         NOW,
         &EmptyOnChainGovernanceReplaySet,
     );
-    assert!(
-        combined.is_accept(),
-        "combined should accept: {:?}",
-        combined
-    );
+    assert!(combined.is_accept(), "combined should accept: {:?}", combined);
     assert!(matches!(
         combined,
         CombinedLifecycleOnChainGovernanceOutcome::Accepted { .. }
@@ -830,10 +828,7 @@ fn r18_mainnet_proof_unavailable() {
         NOW,
         &EmptyOnChainGovernanceReplaySet,
     );
-    assert!(matches!(
-        outcome,
-        Outcome::MainNetProductionProofUnavailable
-    ));
+    assert!(matches!(outcome, Outcome::MainNetProductionProofUnavailable));
 }
 
 // ===========================================================================
@@ -1009,8 +1004,12 @@ fn r24_old_run167_carrier_without_onchain_sibling_still_parses() {
     // OnChainGovernance sibling. Round-trip a Run 167 wire object
     // through JSON and confirm it still parses back to the same typed
     // Run 163 proof — backward compatibility is preserved.
-    let signature =
-        fixture_issuer_signature(GovernanceAuthorityClass::GenesisBound, ROOT_FP, DIGEST_2, 2);
+    let signature = fixture_issuer_signature(
+        GovernanceAuthorityClass::GenesisBound,
+        ROOT_FP,
+        DIGEST_2,
+        2,
+    );
     let r163_proof = GovernanceAuthorityProof {
         environment: TrustBundleEnvironment::Devnet,
         chain_id: CHAIN_ID.to_string(),
@@ -1168,10 +1167,7 @@ fn combined_decision_pure_and_non_mutating() {
     }
     // Inputs unchanged.
     assert_eq!(candidate.latest_authority_domain_sequence, snapshot_seq);
-    assert_eq!(
-        candidate.active_bundle_signing_key_fingerprint,
-        snapshot_active
-    );
+    assert_eq!(candidate.active_bundle_signing_key_fingerprint, snapshot_active);
 }
 
 // ===========================================================================

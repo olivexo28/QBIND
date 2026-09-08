@@ -88,8 +88,8 @@ use crate::p2p::{NodeId, P2pMessage, P2pService};
 use crate::p2p_inbound::InboundP2pEnvelope;
 use crate::peer_consensus_binding::AuthenticatedConsensusOrigin;
 use crate::secure_channel::{
-    accept_kemtls_async_with_peer_init, connect_kemtls_async_with_server_identity,
-    AcceptedPeerInit, SecureChannelAsync,
+    accept_kemtls_async_with_peer_init, connect_kemtls_async_with_server_identity, AcceptedPeerInit,
+    SecureChannelAsync,
 };
 use qbind_crypto::CryptoProvider;
 use qbind_hash::{derive_node_id_from_pubkey, INBOUND_SESSION_DOMAIN_TAG};
@@ -221,7 +221,8 @@ fn decode_frame(frame: &[u8]) -> Result<P2pMessage, P2pTransportError> {
 /// self-asserted by the dialer under `MutualAuthMode::Disabled`. See
 /// `secure_channel::AcceptedPeerInit` and
 /// `p2p_node_builder::parse_test_validator_id_from_client_random`.
-pub type InboundIdentityResolver = Arc<dyn Fn(&AcceptedPeerInit) -> Option<NodeId> + Send + Sync>;
+pub type InboundIdentityResolver =
+    Arc<dyn Fn(&AcceptedPeerInit) -> Option<NodeId> + Send + Sync>;
 
 /// Run 418: resolver that maps an accepted inbound session's **verified**
 /// KEMTLS identity to an [`AuthenticatedConsensusOrigin`], or `None` when the
@@ -375,6 +376,7 @@ struct PeerConnection {
 /// silently absorbing the frame into a long queue.
 const RAW_FRAME_CHANNEL_CAPACITY: usize = 8;
 
+
 impl PeerConnection {
     /// Shutdown the peer connection gracefully.
     async fn shutdown(self) {
@@ -510,8 +512,7 @@ pub struct TcpKemTlsP2pService {
     /// production-binary path by `p2p_node_builder` when the
     /// `--p2p-trust-bundle-peer-candidate-wire-validation-enabled`
     /// flag is set.
-    peer_candidate_wire_sink:
-        Arc<RwLock<Option<Arc<dyn crate::pqc_peer_candidate_wire::PeerCandidateWireFrameSink>>>>,
+    peer_candidate_wire_sink: Arc<RwLock<Option<Arc<dyn crate::pqc_peer_candidate_wire::PeerCandidateWireFrameSink>>>>,
     /// Run 362: optional runtime-owned abuse/DoS connection-rate limiter
     /// state consulted at the top of the accept loop, before any expensive
     /// per-connection admission work (KEMTLS handshake, trust-bundle /
@@ -526,11 +527,8 @@ pub struct TcpKemTlsP2pService {
     /// peer, never mutates trust state, and never writes any sequence/marker
     /// file. Installed via
     /// [`TcpKemTlsP2pService::set_abuse_dos_runtime_state`].
-    abuse_dos_runtime: Arc<
-        RwLock<
-            Option<Arc<crate::public_devnet_abuse_dos_runtime::PublicDevnetAbuseDosRuntimeState>>,
-        >,
-    >,
+    abuse_dos_runtime:
+        Arc<RwLock<Option<Arc<crate::public_devnet_abuse_dos_runtime::PublicDevnetAbuseDosRuntimeState>>>>,
     /// Run 369: optional deployed inbound per-peer message-rate limiter
     /// consulted by every per-peer `read_loop` AFTER a frame decodes to a
     /// structured `P2pMessage` and BEFORE it is forwarded to the inbound
@@ -546,9 +544,7 @@ pub struct TcpKemTlsP2pService {
     /// admission / trust / sequence / validator / epoch state. The default
     /// posture is `1000` msg/s + `100` burst so normal traffic is unaffected.
     inbound_per_peer_limiter: Arc<
-        RwLock<
-            Option<Arc<crate::deployed_inbound_per_peer_limiter::DeployedInboundPerPeerLimiter>>,
-        >,
+        RwLock<Option<Arc<crate::deployed_inbound_per_peer_limiter::DeployedInboundPerPeerLimiter>>>,
     >,
     /// Run 418: optional resolver that maps an accepted inbound session's
     /// **verified** KEMTLS identity to an authenticated consensus origin.
@@ -652,7 +648,10 @@ impl TcpKemTlsP2pService {
     /// dialer otherwise defaults to its own local validator id which
     /// would fail this check the moment two distinct binaries try to
     /// connect to each other.
-    pub fn set_peer_validator_id_overrides(&mut self, overrides: HashMap<String, [u8; 32]>) {
+    pub fn set_peer_validator_id_overrides(
+        &mut self,
+        overrides: HashMap<String, [u8; 32]>,
+    ) {
         let mut guard = self.peer_validator_id_overrides.write();
         *guard = overrides;
     }
@@ -859,10 +858,8 @@ impl TcpKemTlsP2pService {
                 .collect()
         };
 
-        let mut per_peer: Vec<(
-            NodeId,
-            crate::pqc_peer_candidate_wire::RawFramePeerSendOutcome,
-        )> = Vec::with_capacity(peer_snapshot.len());
+        let mut per_peer: Vec<(NodeId, crate::pqc_peer_candidate_wire::RawFramePeerSendOutcome)> =
+            Vec::with_capacity(peer_snapshot.len());
         for (peer, tx) in peer_snapshot {
             let outcome = match tx.try_send(frame_bytes.clone()) {
                 Ok(()) => crate::pqc_peer_candidate_wire::RawFramePeerSendOutcome::Enqueued,
@@ -894,10 +891,8 @@ impl TcpKemTlsP2pService {
                 .collect()
         };
 
-        let mut per_peer: Vec<(
-            NodeId,
-            crate::pqc_peer_candidate_wire::RawFramePeerSendOutcome,
-        )> = Vec::with_capacity(selected_peers.len());
+        let mut per_peer: Vec<(NodeId, crate::pqc_peer_candidate_wire::RawFramePeerSendOutcome)> =
+            Vec::with_capacity(selected_peers.len());
         for selected in selected_peers {
             if !peer_snapshot.iter().any(|(peer, _)| peer == selected) {
                 per_peer.push((
@@ -977,7 +972,8 @@ impl TcpKemTlsP2pService {
         let peer_candidate_wire_sink = Arc::clone(&self.peer_candidate_wire_sink);
         let abuse_dos_runtime = Arc::clone(&self.abuse_dos_runtime);
         let inbound_per_peer_limiter = Arc::clone(&self.inbound_per_peer_limiter);
-        let inbound_consensus_origin_resolver = Arc::clone(&self.inbound_consensus_origin_resolver);
+        let inbound_consensus_origin_resolver =
+            Arc::clone(&self.inbound_consensus_origin_resolver);
 
         tokio::spawn(async move {
             let mut shutdown_rx = shutdown_rx;
@@ -1110,7 +1106,9 @@ impl TcpKemTlsP2pService {
         inbound_per_peer_limiter: Arc<
             RwLock<
                 Option<
-                    Arc<crate::deployed_inbound_per_peer_limiter::DeployedInboundPerPeerLimiter>,
+                    Arc<
+                        crate::deployed_inbound_per_peer_limiter::DeployedInboundPerPeerLimiter,
+                    >,
                 >,
             >,
         >,
@@ -1300,11 +1298,8 @@ impl TcpKemTlsP2pService {
         // exactly (full 32-byte NodeId AND validator id AND authenticated
         // state), or the session is rejected. The dial address alone never
         // mints the authenticated origin.
-        let expected_origin: Option<AuthenticatedConsensusOrigin> = self
-            .outbound_consensus_origins
-            .read()
-            .get(&peer_addr)
-            .cloned();
+        let expected_origin: Option<AuthenticatedConsensusOrigin> =
+            self.outbound_consensus_origins.read().get(&peer_addr).cloned();
         let consensus_origin: Option<AuthenticatedConsensusOrigin> = match expected_origin {
             Some(expected) => {
                 let verified = verified_server_identity.ok_or_else(|| {
@@ -1314,10 +1309,9 @@ impl TcpKemTlsP2pService {
                         peer_addr
                     ))
                 })?;
-                let verified_vid =
-                    crate::p2p_node_builder::parse_test_validator_id_from_cert_validator_id(
-                        &verified.validator_id,
-                    );
+                let verified_vid = crate::p2p_node_builder::parse_test_validator_id_from_cert_validator_id(
+                    &verified.validator_id,
+                );
                 let node_matches = verified.node_id == *expected.node_id().as_bytes();
                 let vid_matches = verified_vid == Some(expected.validator_id().as_u64());
                 if !verified.authenticated || !node_matches || !vid_matches {
@@ -1368,13 +1362,13 @@ impl TcpKemTlsP2pService {
         inbound_tx: mpsc::Sender<InboundP2pEnvelope>,
         _connections_current: Arc<AtomicU64>,
         bytes_received: Arc<AtomicU64>,
-        peer_candidate_wire_sink: Arc<
-            RwLock<Option<Arc<dyn crate::pqc_peer_candidate_wire::PeerCandidateWireFrameSink>>>,
-        >,
+        peer_candidate_wire_sink: Arc<RwLock<Option<Arc<dyn crate::pqc_peer_candidate_wire::PeerCandidateWireFrameSink>>>>,
         inbound_per_peer_limiter: Arc<
             RwLock<
                 Option<
-                    Arc<crate::deployed_inbound_per_peer_limiter::DeployedInboundPerPeerLimiter>,
+                    Arc<
+                        crate::deployed_inbound_per_peer_limiter::DeployedInboundPerPeerLimiter,
+                    >,
                 >,
             >,
         >,
@@ -1388,7 +1382,8 @@ impl TcpKemTlsP2pService {
         // uses `try_send` and treats queue-full as a per-peer
         // failure rather than backpressure on the structured
         // consensus/DAG/control encoder path).
-        let (peer_raw_tx, peer_raw_rx) = mpsc::channel::<Vec<u8>>(RAW_FRAME_CHANNEL_CAPACITY);
+        let (peer_raw_tx, peer_raw_rx) =
+            mpsc::channel::<Vec<u8>>(RAW_FRAME_CHANNEL_CAPACITY);
 
         // Spawn write loop
         let channel_write = channel.clone();
@@ -1457,7 +1452,9 @@ impl TcpKemTlsP2pService {
         inbound_per_peer_limiter: Arc<
             RwLock<
                 Option<
-                    Arc<crate::deployed_inbound_per_peer_limiter::DeployedInboundPerPeerLimiter>,
+                    Arc<
+                        crate::deployed_inbound_per_peer_limiter::DeployedInboundPerPeerLimiter,
+                    >,
                 >,
             >,
         >,
@@ -1512,7 +1509,8 @@ impl TcpKemTlsP2pService {
                             // (may be `None` for unauthenticated sessions). The
                             // origin is bound to the KEMTLS session, never
                             // derived from the frame payload.
-                            let envelope = InboundP2pEnvelope::new(consensus_origin.clone(), msg);
+                            let envelope =
+                                InboundP2pEnvelope::new(consensus_origin.clone(), msg);
                             if inbound_tx.send(envelope).await.is_err() {
                                 break; // Receiver dropped
                             }
@@ -1902,8 +1900,9 @@ struct DialerHandle {
     /// into `spawn_peer_handlers` so retry-dialed peers' read loops
     /// see the same sink the accept-loop sees. Default `None` →
     /// cheap-drop behaviour preserved bit-for-bit.
-    peer_candidate_wire_sink:
-        Arc<RwLock<Option<Arc<dyn crate::pqc_peer_candidate_wire::PeerCandidateWireFrameSink>>>>,
+    peer_candidate_wire_sink: Arc<
+        RwLock<Option<Arc<dyn crate::pqc_peer_candidate_wire::PeerCandidateWireFrameSink>>>,
+    >,
     /// Run 369: shared optional deployed inbound per-peer message-rate
     /// limiter (cloned from `TcpKemTlsP2pService::inbound_per_peer_limiter`).
     /// Threaded into `spawn_peer_handlers` so retry-dialed peers' read loops
@@ -1911,7 +1910,9 @@ struct DialerHandle {
     /// `None` → prior behaviour preserved bit-for-bit.
     inbound_per_peer_limiter: Arc<
         RwLock<
-            Option<Arc<crate::deployed_inbound_per_peer_limiter::DeployedInboundPerPeerLimiter>>,
+            Option<
+                Arc<crate::deployed_inbound_per_peer_limiter::DeployedInboundPerPeerLimiter>,
+            >,
         >,
     >,
     /// Run 418: static-peer outbound authenticated consensus origins keyed by
@@ -1992,11 +1993,8 @@ impl DialerHandle {
         // the ACTUAL verified server certificate identity, matched against the
         // configured authoritative mapping. Never mint the origin from the dial
         // address. (Mirrors `TcpKemTlsP2pService::dial_peer`.)
-        let expected_origin: Option<AuthenticatedConsensusOrigin> = self
-            .outbound_consensus_origins
-            .read()
-            .get(&peer_addr)
-            .cloned();
+        let expected_origin: Option<AuthenticatedConsensusOrigin> =
+            self.outbound_consensus_origins.read().get(&peer_addr).cloned();
         let consensus_origin: Option<AuthenticatedConsensusOrigin> = match expected_origin {
             Some(expected) => {
                 let verified = verified_server_identity.ok_or_else(|| {
@@ -2006,10 +2004,9 @@ impl DialerHandle {
                         peer_addr
                     ))
                 })?;
-                let verified_vid =
-                    crate::p2p_node_builder::parse_test_validator_id_from_cert_validator_id(
-                        &verified.validator_id,
-                    );
+                let verified_vid = crate::p2p_node_builder::parse_test_validator_id_from_cert_validator_id(
+                    &verified.validator_id,
+                );
                 let node_matches = verified.node_id == *expected.node_id().as_bytes();
                 let vid_matches = verified_vid == Some(expected.validator_id().as_u64());
                 if !verified.authenticated || !node_matches || !vid_matches {

@@ -75,10 +75,10 @@
 //! already-recorded consumer record.
 
 use crate::pqc_governance_durable_completion_acknowledgement_consumer::DurableCompletionAcknowledgementConsumerOutcome;
+use crate::pqc_governance_durable_completion_consumer_settlement_projection::DurableCompletionConsumerSettlementProjectionOutcome;
 use crate::pqc_governance_durable_completion_attestation_backend::DurableCompletionAttestationBackendOutcome;
 use crate::pqc_governance_durable_completion_audit_publication_receipt::DurableCompletionAuditPublicationReceiptOutcome;
 use crate::pqc_governance_durable_completion_audit_receipt_acknowledgement::DurableCompletionAuditReceiptAcknowledgementOutcome;
-use crate::pqc_governance_durable_completion_consumer_settlement_projection::DurableCompletionConsumerSettlementProjectionOutcome;
 use crate::pqc_governance_execution_runtime_arming::GovernanceExecutionRuntimeSurface;
 use crate::pqc_governance_modeled_durable_completion_attestation_projection::GovernanceModeledDurableCompletionAttestationOutcome;
 use crate::pqc_governance_modeled_durable_completion_finalization_projection::GovernanceModeledDurableCompletionFinalizationOutcome;
@@ -100,7 +100,8 @@ use sha3::{Digest, Sha3_256};
 // ===========================================================================
 
 /// Run 266 — the validation / mutation surface pair the receipt binds to.
-pub type DurableCompletionSettlementCommitmentSurface = ModeledGovernanceTrustMutationSurface;
+pub type DurableCompletionSettlementCommitmentSurface =
+    ModeledGovernanceTrustMutationSurface;
 
 /// Run 266 — the trust-domain environment binding the receipt is bound to.
 pub type DurableCompletionSettlementCommitmentEnvironment =
@@ -840,7 +841,10 @@ impl DurableCompletionSettlementCommitmentLedger {
     }
 
     /// Restore the ledger to a previously captured snapshot (modeled rollback).
-    pub fn restore(&mut self, snapshot: &DurableCompletionSettlementCommitmentLedgerSnapshot) {
+    pub fn restore(
+        &mut self,
+        snapshot: &DurableCompletionSettlementCommitmentLedgerSnapshot,
+    ) {
         self.records = snapshot.records.clone();
     }
 
@@ -998,7 +1002,10 @@ impl DurableCompletionSettlementCommitmentExpectations {
     }
 
     /// `true` iff the pre-sink environment / surface binding matches.
-    pub fn binding_matches(&self, input: &DurableCompletionSettlementCommitmentInput) -> bool {
+    pub fn binding_matches(
+        &self,
+        input: &DurableCompletionSettlementCommitmentInput,
+    ) -> bool {
         self.binding_mismatch_reason(input).is_none()
     }
 
@@ -1162,8 +1169,7 @@ impl DurableCompletionSettlementCommitmentExpectations {
         {
             return Some("wrong settlement-projection transcript digest");
         }
-        if request.settlement_projection_record_id != self.expected_settlement_projection_record_id
-        {
+        if request.settlement_projection_record_id != self.expected_settlement_projection_record_id {
             return Some("wrong settlement-projection record id");
         }
         if request.domain_separation_tag != self.expected_domain_separation_tag {
@@ -1182,7 +1188,10 @@ impl DurableCompletionSettlementCommitmentExpectations {
     }
 
     /// `true` iff the receipt-request identity matches and is well-formed.
-    pub fn request_matches(&self, request: &DurableCompletionSettlementCommitmentRequest) -> bool {
+    pub fn request_matches(
+        &self,
+        request: &DurableCompletionSettlementCommitmentRequest,
+    ) -> bool {
         self.request_mismatch_reason(request).is_none()
     }
 }
@@ -1221,7 +1230,8 @@ pub struct DurableCompletionSettlementCommitmentInput {
     pub receipt_binding: DurableCompletionSettlementCommitmentReceiptBinding,
     /// The Run 260 audit-receipt acknowledgement outcome carried as
     /// acknowledgement-record context.
-    pub acknowledgement_binding: DurableCompletionSettlementCommitmentAcknowledgementBinding,
+    pub acknowledgement_binding:
+        DurableCompletionSettlementCommitmentAcknowledgementBinding,
     /// The Run 262 acknowledgement consumer outcome the settlement-projection
     /// boundary projects to a settlement-projection request.
     pub consumer_binding: DurableCompletionSettlementCommitmentConsumerBinding,
@@ -1741,7 +1751,9 @@ pub struct ProductionSettlementCommitmentSink {
     invocations: u32,
 }
 
-impl GovernanceDurableCompletionSettlementCommitmentSink for ProductionSettlementCommitmentSink {
+impl GovernanceDurableCompletionSettlementCommitmentSink
+    for ProductionSettlementCommitmentSink
+{
     fn kind(&self) -> DurableCompletionSettlementCommitmentKind {
         DurableCompletionSettlementCommitmentKind::ProductionSettlementCommitmentUnavailable
     }
@@ -1769,7 +1781,9 @@ pub struct MainNetSettlementCommitmentSink {
     invocations: u32,
 }
 
-impl GovernanceDurableCompletionSettlementCommitmentSink for MainNetSettlementCommitmentSink {
+impl GovernanceDurableCompletionSettlementCommitmentSink
+    for MainNetSettlementCommitmentSink
+{
     fn kind(&self) -> DurableCompletionSettlementCommitmentKind {
         DurableCompletionSettlementCommitmentKind::MainNetSettlementCommitmentUnavailable
     }
@@ -1798,7 +1812,9 @@ pub struct ExternalSettlementCommitmentSink {
     invocations: u32,
 }
 
-impl GovernanceDurableCompletionSettlementCommitmentSink for ExternalSettlementCommitmentSink {
+impl GovernanceDurableCompletionSettlementCommitmentSink
+    for ExternalSettlementCommitmentSink
+{
     fn kind(&self) -> DurableCompletionSettlementCommitmentKind {
         DurableCompletionSettlementCommitmentKind::ExternalSettlementCommitmentUnavailable
     }
@@ -1876,13 +1892,14 @@ where
     // Step 3: project the Run 262 acknowledgement consumer outcome onto a
     // settlement-projection request. Every non-recording consumer outcome returns a
     // no-projection outcome without invoking the settlement-projection sink.
-    let idempotent_only = match project_settlement_projection_outcome_to_commitment_request(
-        &input.settlement_projection_binding,
-    ) {
-        Intent::NoProjection(outcome) => return outcome,
-        Intent::CreateRequest => false,
-        Intent::IdempotentOnly => true,
-    };
+    let idempotent_only =
+        match project_settlement_projection_outcome_to_commitment_request(
+            &input.settlement_projection_binding,
+        ) {
+            Intent::NoProjection(outcome) => return outcome,
+            Intent::CreateRequest => false,
+            Intent::IdempotentOnly => true,
+        };
 
     // Step 4: pre-projection environment / surface binding validation. A mismatch
     // fails closed before the settlement-projection sink is invoked, leaving the
@@ -2034,11 +2051,13 @@ pub fn recover_durable_completion_settlement_commitment_window(
 
     // Helper: an explicit recovered record recovers as a receipt only if it matches
     // the expected receipt record id and the canonical request digest.
-    let recovered_matches = |record: &DurableCompletionSettlementCommitmentLedgerRecord| -> bool {
-        record.commitment_record_id == expectations.expected_commitment_record_id
-            && record.request_digest == input.request.digest()
-            && record.status == DurableCompletionSettlementCommitmentLedgerStatus::Recorded
-    };
+    let recovered_matches =
+        |record: &DurableCompletionSettlementCommitmentLedgerRecord| -> bool {
+            record.commitment_record_id == expectations.expected_commitment_record_id
+                && record.request_digest == input.request.digest()
+                && record.status
+                    == DurableCompletionSettlementCommitmentLedgerStatus::Recorded
+        };
 
     match window {
         // Through settlement-projection success but before a settlement-commitment

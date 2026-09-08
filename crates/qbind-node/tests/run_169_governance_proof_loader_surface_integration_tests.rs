@@ -75,8 +75,8 @@ use qbind_ledger::{
     bundle_signing_ratification::v2_test_helpers as ratification_v2_helpers,
     compute_canonical_genesis_hash, pqc_public_key_fingerprint, BundleSigningRatificationV2,
     BundleSigningRatificationV2Action, GenesisAllocation, GenesisAuthorityConfig,
-    GenesisAuthorityRoot, GenesisConfig, GenesisCouncilConfig, GenesisHash, GenesisMonetaryConfig,
-    GenesisValidator, NetworkEnvironmentPolicy, RatificationEnvironment,
+    GenesisAuthorityRoot, GenesisConfig, GenesisCouncilConfig, GenesisHash,
+    GenesisMonetaryConfig, GenesisValidator, NetworkEnvironmentPolicy, RatificationEnvironment,
     GENESIS_AUTHORITY_SUITE_ML_DSA_44,
 };
 use qbind_node::pqc_authority_lifecycle::LocalLifecycleAction;
@@ -140,10 +140,7 @@ fn devnet_harness() -> Harness {
     let mut genesis_cfg = GenesisConfig::new(
         &chain_id_str,
         1_738_000_000_000,
-        vec![GenesisAllocation::new(
-            format!("0x{}", "11".repeat(32)),
-            100,
-        )],
+        vec![GenesisAllocation::new(format!("0x{}", "11".repeat(32)), 100)],
         vec![GenesisValidator::new(
             format!("0x{}", "22".repeat(32)),
             "ab".repeat(32),
@@ -193,8 +190,8 @@ impl Harness {
             .as_ref()
             .unwrap()
             .authority_policy_version;
-        let previous_digest =
-            matches!(action, BundleSigningRatificationV2Action::Rotate).then(|| "ab".repeat(32));
+        let previous_digest = matches!(action, BundleSigningRatificationV2Action::Rotate)
+            .then(|| "ab".repeat(32));
         ratification_v2_helpers::build_signed_ratification_v2(
             &self.chain_id_str,
             RatificationEnvironment::Devnet,
@@ -345,10 +342,7 @@ fn shim_run(
     inputs: MarkerAcceptanceV2Inputs<'_>,
     policy: GovernanceProofPolicy,
     proof_load: &GovernanceProofLoadStatus,
-) -> Result<
-    qbind_node::pqc_authority_marker_acceptance::MarkerAcceptDecisionV2,
-    MutatingSurfaceMarkerV2Error,
-> {
+) -> Result<qbind_node::pqc_authority_marker_acceptance::MarkerAcceptDecisionV2, MutatingSurfaceMarkerV2Error> {
     let verifier = fixture_issuer_signature_verifier();
     preflight_v2_marker_decision_with_governance_proof_load(inputs, policy, proof_load, &verifier)
 }
@@ -366,12 +360,7 @@ fn assert_first_v2_write(
 /// lifecycle/governance layers (instead of being short-circuited by
 /// the "Rotate at first-write" lifecycle refusal).
 fn seed_prior_v2_marker(h: &Harness, marker_path: &Path) -> Vec<u8> {
-    let r1 = h.build_v2(
-        &h.signing_pk_a,
-        1,
-        BundleSigningRatificationV2Action::Ratify,
-        None,
-    );
+    let r1 = h.build_v2(&h.signing_pk_a, 1, BundleSigningRatificationV2Action::Ratify, None);
     let ratified1 = h.verify_v2(&r1);
     let gh = h.genesis_hex();
     let d1 = qbind_node::pqc_authority_marker_acceptance::decide_v2_marker_acceptance_with_lifecycle_and_governance(
@@ -380,10 +369,8 @@ fn seed_prior_v2_marker(h: &Harness, marker_path: &Path) -> Vec<u8> {
         qbind_node::pqc_governance_authority::GovernanceProofContext::Unavailable,
     )
     .expect("seed activate-initial accepts");
-    qbind_node::pqc_authority_marker_acceptance::persist_accepted_v2_marker_after_commit_boundary(
-        &d1,
-    )
-    .expect("persist seed marker");
+    qbind_node::pqc_authority_marker_acceptance::persist_accepted_v2_marker_after_commit_boundary(&d1)
+        .expect("persist seed marker");
     std::fs::read(marker_path).expect("read seed marker bytes")
 }
 
@@ -403,10 +390,10 @@ fn write_v2_sidecar_with_optional_proof(
 ) {
     let mut value = serde_json::to_value(rat).expect("rat to value");
     if let Some(w) = proof_wire {
-        value.as_object_mut().unwrap().insert(
-            "governance_authority_proof".to_string(),
-            serde_json::to_value(w).unwrap(),
-        );
+        value
+            .as_object_mut()
+            .unwrap()
+            .insert("governance_authority_proof".to_string(), serde_json::to_value(w).unwrap());
     }
     std::fs::write(path, serde_json::to_vec_pretty(&value).expect("ser")).expect("write sidecar");
 }
@@ -444,16 +431,12 @@ fn loader_versioned_dispatcher_v1_yields_absent() {
 #[test]
 fn loader_versioned_dispatcher_v2_no_proof_yields_absent() {
     let h = devnet_harness();
-    let r = h.build_v2(
-        &h.signing_pk_a,
-        1,
-        BundleSigningRatificationV2Action::Ratify,
-        None,
-    );
+    let r = h.build_v2(&h.signing_pk_a, 1, BundleSigningRatificationV2Action::Ratify, None);
     let dir = tmpdir("disp-v2-noproof");
     let p = dir.join("v2.json");
     write_v2_sidecar_with_optional_proof(&p, &r, None);
-    let loaded = load_versioned_ratification_with_governance_proof_from_path(&p).expect("v2 loads");
+    let loaded = load_versioned_ratification_with_governance_proof_from_path(&p)
+        .expect("v2 loads");
     let status = loaded.governance_proof_load_status();
     assert!(matches!(status, GovernanceProofLoadStatus::Absent));
 }
@@ -468,23 +451,14 @@ fn loader_versioned_dispatcher_v2_with_proof_yields_available() {
         Some(pqc_public_key_fingerprint(&h.signing_pk_a)),
     );
     let ratified = h.verify_v2(&r);
-    let candidate = h.derive_candidate(
-        &h.genesis_hex(),
-        &r,
-        &ratified,
-        AuthorityStateUpdateSource::ReloadApply,
-    );
-    let proof = good_proof(
-        &h,
-        &candidate,
-        GovernanceAuthorityClass::GenesisBound,
-        LocalLifecycleAction::Rotate,
-    );
+    let candidate = h.derive_candidate(&h.genesis_hex(), &r, &ratified, AuthorityStateUpdateSource::ReloadApply);
+    let proof = good_proof(&h, &candidate, GovernanceAuthorityClass::GenesisBound, LocalLifecycleAction::Rotate);
     let wire = GovernanceAuthorityProofWire::from_governance_authority_proof(&proof);
     let dir = tmpdir("disp-v2-proof");
     let p = dir.join("v2.json");
     write_v2_sidecar_with_optional_proof(&p, &r, Some(wire));
-    let loaded = load_versioned_ratification_with_governance_proof_from_path(&p).expect("v2 loads");
+    let loaded = load_versioned_ratification_with_governance_proof_from_path(&p)
+        .expect("v2 loads");
     let status = loaded.governance_proof_load_status();
     assert!(matches!(status, GovernanceProofLoadStatus::Available(_)));
 }
@@ -492,16 +466,12 @@ fn loader_versioned_dispatcher_v2_with_proof_yields_available() {
 #[test]
 fn loader_versioned_dispatcher_v2_with_garbage_proof_yields_malformed() {
     let h = devnet_harness();
-    let r = h.build_v2(
-        &h.signing_pk_a,
-        1,
-        BundleSigningRatificationV2Action::Ratify,
-        None,
-    );
+    let r = h.build_v2(&h.signing_pk_a, 1, BundleSigningRatificationV2Action::Ratify, None);
     let dir = tmpdir("disp-v2-malformed");
     let p = dir.join("v2.json");
     write_garbage_proof_v2_sidecar(&p, &r);
-    let loaded = load_versioned_ratification_with_governance_proof_from_path(&p).expect("v2 loads");
+    let loaded = load_versioned_ratification_with_governance_proof_from_path(&p)
+        .expect("v2 loads");
     let status = loaded.governance_proof_load_status();
     assert!(matches!(status, GovernanceProofLoadStatus::Malformed(_)));
 }
@@ -511,12 +481,7 @@ fn loader_v2_only_sidecar_path_reachable_for_governance_proof_carrier() {
     // Run 167 entry — the dispatcher delegates to this same loader on
     // the v2 branch, which is what every production preflight uses.
     let h = devnet_harness();
-    let r = h.build_v2(
-        &h.signing_pk_a,
-        1,
-        BundleSigningRatificationV2Action::Ratify,
-        None,
-    );
+    let r = h.build_v2(&h.signing_pk_a, 1, BundleSigningRatificationV2Action::Ratify, None);
     let dir = tmpdir("v2-only");
     let p = dir.join("v2.json");
     write_v2_sidecar_with_optional_proof(&p, &r, None);
@@ -535,12 +500,7 @@ fn a1_reload_check_no_proof_under_not_required_accepted_no_write() {
     let h = devnet_harness();
     let dir = tmpdir("a1");
     let marker_path = authority_state_file_path(&dir);
-    let r = h.build_v2(
-        &h.signing_pk_a,
-        1,
-        BundleSigningRatificationV2Action::Ratify,
-        None,
-    );
+    let r = h.build_v2(&h.signing_pk_a, 1, BundleSigningRatificationV2Action::Ratify, None);
     let ratified = h.verify_v2(&r);
     let gh = h.genesis_hex();
     let inputs = make_inputs(
@@ -551,12 +511,8 @@ fn a1_reload_check_no_proof_under_not_required_accepted_no_write() {
         // Validation-only audit tag.
         AuthorityStateUpdateSource::TestOrFixture,
     );
-    let decision = shim_run(
-        inputs,
-        GovernanceProofPolicy::NotRequired,
-        &GovernanceProofLoadStatus::Absent,
-    )
-    .expect("A1 accepts");
+    let decision = shim_run(inputs, GovernanceProofPolicy::NotRequired, &GovernanceProofLoadStatus::Absent)
+        .expect("A1 accepts");
     assert_first_v2_write(&decision);
     // Reload-check is validation-only; the shim itself never writes.
     assert_no_marker_on_disk(&marker_path);
@@ -570,12 +526,7 @@ fn a2_reload_check_valid_rotate_proof_under_required_accepted_no_write() {
     let dir = tmpdir("a2");
     let marker_path = authority_state_file_path(&dir);
     let __seed_bytes = seed_prior_v2_marker(&h, &marker_path);
-    let r1 = h.build_v2(
-        &h.signing_pk_a,
-        1,
-        BundleSigningRatificationV2Action::Ratify,
-        None,
-    );
+    let r1 = h.build_v2(&h.signing_pk_a, 1, BundleSigningRatificationV2Action::Ratify, None);
     let _ = h.verify_v2(&r1);
     let r2 = h.build_v2(
         &h.signing_pk_b,
@@ -584,18 +535,8 @@ fn a2_reload_check_valid_rotate_proof_under_required_accepted_no_write() {
         Some(pqc_public_key_fingerprint(&h.signing_pk_a)),
     );
     let ratified2 = h.verify_v2(&r2);
-    let candidate = h.derive_candidate(
-        &h.genesis_hex(),
-        &r2,
-        &ratified2,
-        AuthorityStateUpdateSource::TestOrFixture,
-    );
-    let proof = good_proof(
-        &h,
-        &candidate,
-        GovernanceAuthorityClass::GenesisBound,
-        LocalLifecycleAction::Rotate,
-    );
+    let candidate = h.derive_candidate(&h.genesis_hex(), &r2, &ratified2, AuthorityStateUpdateSource::TestOrFixture);
+    let proof = good_proof(&h, &candidate, GovernanceAuthorityClass::GenesisBound, LocalLifecycleAction::Rotate);
     let gh = h.genesis_hex();
     let inputs = make_inputs(
         &marker_path,
@@ -611,10 +552,7 @@ fn a2_reload_check_valid_rotate_proof_under_required_accepted_no_write() {
     )
     .expect("A2 accepts");
     assert_first_v2_write(&decision);
-    assert_eq!(
-        __seed_bytes,
-        std::fs::read(&marker_path).expect("re-read marker")
-    );
+    assert_eq!(__seed_bytes, std::fs::read(&marker_path).expect("re-read marker"));
 }
 
 /// A3 — reload-apply valid proof-carrying Rotate sidecar under Required
@@ -633,18 +571,8 @@ fn a3_reload_apply_valid_rotate_under_required_accepted_no_premature_write() {
         Some(pqc_public_key_fingerprint(&h.signing_pk_a)),
     );
     let ratified2 = h.verify_v2(&r2);
-    let candidate = h.derive_candidate(
-        &h.genesis_hex(),
-        &r2,
-        &ratified2,
-        AuthorityStateUpdateSource::ReloadApply,
-    );
-    let proof = good_proof(
-        &h,
-        &candidate,
-        GovernanceAuthorityClass::GenesisBound,
-        LocalLifecycleAction::Rotate,
-    );
+    let candidate = h.derive_candidate(&h.genesis_hex(), &r2, &ratified2, AuthorityStateUpdateSource::ReloadApply);
+    let proof = good_proof(&h, &candidate, GovernanceAuthorityClass::GenesisBound, LocalLifecycleAction::Rotate);
     let gh = h.genesis_hex();
     let inputs = make_inputs(
         &marker_path,
@@ -662,10 +590,7 @@ fn a3_reload_apply_valid_rotate_under_required_accepted_no_premature_write() {
     .expect("A3 accepts");
     // Mutating preflight: still must not have written before
     // `commit_sequence` boundary.
-    assert_eq!(
-        __seed_bytes,
-        std::fs::read(&marker_path).expect("re-read marker")
-    );
+    assert_eq!(__seed_bytes, std::fs::read(&marker_path).expect("re-read marker"));
 }
 
 /// A4 — startup `--p2p-trust-bundle` valid proof-carrying Rotate under
@@ -684,18 +609,8 @@ fn a4_startup_valid_rotate_under_required_accepted_no_premature_write() {
         Some(pqc_public_key_fingerprint(&h.signing_pk_a)),
     );
     let ratified2 = h.verify_v2(&r2);
-    let candidate = h.derive_candidate(
-        &h.genesis_hex(),
-        &r2,
-        &ratified2,
-        AuthorityStateUpdateSource::StartupLoad,
-    );
-    let proof = good_proof(
-        &h,
-        &candidate,
-        GovernanceAuthorityClass::GenesisBound,
-        LocalLifecycleAction::Rotate,
-    );
+    let candidate = h.derive_candidate(&h.genesis_hex(), &r2, &ratified2, AuthorityStateUpdateSource::StartupLoad);
+    let proof = good_proof(&h, &candidate, GovernanceAuthorityClass::GenesisBound, LocalLifecycleAction::Rotate);
     let gh = h.genesis_hex();
     let inputs = make_inputs(
         &marker_path,
@@ -711,10 +626,7 @@ fn a4_startup_valid_rotate_under_required_accepted_no_premature_write() {
     )
     .expect("A4 accepts");
     assert_first_v2_write(&decision);
-    assert_eq!(
-        __seed_bytes,
-        std::fs::read(&marker_path).expect("re-read marker")
-    );
+    assert_eq!(__seed_bytes, std::fs::read(&marker_path).expect("re-read marker"));
 }
 
 /// A5 — SIGHUP valid proof-carrying Rotate under Required policy
@@ -732,18 +644,8 @@ fn a5_sighup_valid_rotate_under_required_accepted_no_premature_write() {
         Some(pqc_public_key_fingerprint(&h.signing_pk_a)),
     );
     let ratified2 = h.verify_v2(&r2);
-    let candidate = h.derive_candidate(
-        &h.genesis_hex(),
-        &r2,
-        &ratified2,
-        AuthorityStateUpdateSource::SighupReload,
-    );
-    let proof = good_proof(
-        &h,
-        &candidate,
-        GovernanceAuthorityClass::GenesisBound,
-        LocalLifecycleAction::Rotate,
-    );
+    let candidate = h.derive_candidate(&h.genesis_hex(), &r2, &ratified2, AuthorityStateUpdateSource::SighupReload);
+    let proof = good_proof(&h, &candidate, GovernanceAuthorityClass::GenesisBound, LocalLifecycleAction::Rotate);
     let gh = h.genesis_hex();
     let inputs = make_inputs(
         &marker_path,
@@ -759,10 +661,7 @@ fn a5_sighup_valid_rotate_under_required_accepted_no_premature_write() {
     )
     .expect("A5 accepts");
     assert_first_v2_write(&decision);
-    assert_eq!(
-        __seed_bytes,
-        std::fs::read(&marker_path).expect("re-read marker")
-    );
+    assert_eq!(__seed_bytes, std::fs::read(&marker_path).expect("re-read marker"));
 }
 
 /// A6 — peer-driven drain `ProductionV2MarkerCoordinator` valid
@@ -781,18 +680,8 @@ fn a6_peer_driven_coordinator_valid_rotate_under_required_accepted() {
         Some(pqc_public_key_fingerprint(&h.signing_pk_a)),
     );
     let ratified2 = h.verify_v2(&r2);
-    let candidate = h.derive_candidate(
-        &h.genesis_hex(),
-        &r2,
-        &ratified2,
-        AuthorityStateUpdateSource::ReloadApply,
-    );
-    let proof = good_proof(
-        &h,
-        &candidate,
-        GovernanceAuthorityClass::GenesisBound,
-        LocalLifecycleAction::Rotate,
-    );
+    let candidate = h.derive_candidate(&h.genesis_hex(), &r2, &ratified2, AuthorityStateUpdateSource::ReloadApply);
+    let proof = good_proof(&h, &candidate, GovernanceAuthorityClass::GenesisBound, LocalLifecycleAction::Rotate);
     let mut coord = ProductionV2MarkerCoordinator::new(
         marker_path.clone(),
         NetworkEnvironment::Devnet,
@@ -809,10 +698,7 @@ fn a6_peer_driven_coordinator_valid_rotate_under_required_accepted() {
     );
     coord.decide_pre_apply().expect("A6 accepts at coordinator");
     assert!(coord.accepted_decision().is_some());
-    assert_eq!(
-        __seed_bytes,
-        std::fs::read(&marker_path).expect("re-read marker")
-    );
+    assert_eq!(__seed_bytes, std::fs::read(&marker_path).expect("re-read marker"));
 }
 
 /// A7 — old no-proof v2 sidecar remains compatible across production
@@ -823,12 +709,7 @@ fn a7_old_no_proof_v2_sidecar_remains_compatible_across_callers() {
     let h = devnet_harness();
     let dir = tmpdir("a7");
     let marker_path = authority_state_file_path(&dir);
-    let r = h.build_v2(
-        &h.signing_pk_a,
-        1,
-        BundleSigningRatificationV2Action::Ratify,
-        None,
-    );
+    let r = h.build_v2(&h.signing_pk_a, 1, BundleSigningRatificationV2Action::Ratify, None);
     let ratified = h.verify_v2(&r);
     // Each caller surface (binary preflight, SIGHUP, peer-driven
     // drain) flows through the shim with `Absent` + `NotRequired`.
@@ -839,21 +720,12 @@ fn a7_old_no_proof_v2_sidecar_remains_compatible_across_callers() {
     ] {
         let gh = h.genesis_hex();
         let inputs = make_inputs(&marker_path, &gh, &r, &ratified, source);
-        let decision = shim_run(
-            inputs,
-            GovernanceProofPolicy::NotRequired,
-            &GovernanceProofLoadStatus::Absent,
-        )
-        .expect("A7 accepts");
+        let decision = shim_run(inputs, GovernanceProofPolicy::NotRequired, &GovernanceProofLoadStatus::Absent)
+            .expect("A7 accepts");
         assert_first_v2_write(&decision);
     }
     // Coordinator default — no governance carrier attached.
-    let r2 = h.build_v2(
-        &h.signing_pk_a,
-        1,
-        BundleSigningRatificationV2Action::Ratify,
-        None,
-    );
+    let r2 = h.build_v2(&h.signing_pk_a, 1, BundleSigningRatificationV2Action::Ratify, None);
     let ratified2 = h.verify_v2(&r2);
     let mut coord = ProductionV2MarkerCoordinator::new(
         marker_path.clone(),
@@ -865,9 +737,7 @@ fn a7_old_no_proof_v2_sidecar_remains_compatible_across_callers() {
         AuthorityStateUpdateSource::ReloadApply,
         1_700_000_000,
     );
-    coord
-        .decide_pre_apply()
-        .expect("A7 coordinator accepts default");
+    coord.decide_pre_apply().expect("A7 coordinator accepts default");
     assert_no_marker_on_disk(&marker_path);
 }
 
@@ -886,33 +756,12 @@ fn a8_valid_revoke_proof_accepted_where_representable_or_documented_gap() {
     // this as ActivateInitial. The test asserts the shim's behaviour
     // is consistent: proof reaches the gate; either Accepted or
     // documented-gap reject is surfaced (no silent acceptance bypass).
-    let r = h.build_v2(
-        &h.signing_pk_a,
-        1,
-        BundleSigningRatificationV2Action::Ratify,
-        None,
-    );
+    let r = h.build_v2(&h.signing_pk_a, 1, BundleSigningRatificationV2Action::Ratify, None);
     let ratified = h.verify_v2(&r);
-    let candidate = h.derive_candidate(
-        &h.genesis_hex(),
-        &r,
-        &ratified,
-        AuthorityStateUpdateSource::ReloadApply,
-    );
-    let proof = good_proof(
-        &h,
-        &candidate,
-        GovernanceAuthorityClass::GenesisBound,
-        LocalLifecycleAction::ActivateInitial,
-    );
+    let candidate = h.derive_candidate(&h.genesis_hex(), &r, &ratified, AuthorityStateUpdateSource::ReloadApply);
+    let proof = good_proof(&h, &candidate, GovernanceAuthorityClass::GenesisBound, LocalLifecycleAction::ActivateInitial);
     let gh = h.genesis_hex();
-    let inputs = make_inputs(
-        &marker_path,
-        &gh,
-        &r,
-        &ratified,
-        AuthorityStateUpdateSource::ReloadApply,
-    );
+    let inputs = make_inputs(&marker_path, &gh, &r, &ratified, AuthorityStateUpdateSource::ReloadApply);
     let decision = shim_run(
         inputs,
         GovernanceProofPolicy::RequiredForLifecycleSensitive,
@@ -964,13 +813,7 @@ fn r1_required_but_absent_rejected_on_reload_check_no_write() {
     );
     let ratified = h.verify_v2(&r);
     let gh = h.genesis_hex();
-    let inputs = make_inputs(
-        &marker_path,
-        &gh,
-        &r,
-        &ratified,
-        AuthorityStateUpdateSource::TestOrFixture,
-    );
+    let inputs = make_inputs(&marker_path, &gh, &r, &ratified, AuthorityStateUpdateSource::TestOrFixture);
     let err = shim_run(
         inputs,
         GovernanceProofPolicy::RequiredForLifecycleSensitive,
@@ -978,14 +821,8 @@ fn r1_required_but_absent_rejected_on_reload_check_no_write() {
     )
     .err()
     .expect("R1 fails closed");
-    assert!(matches!(
-        err,
-        MutatingSurfaceMarkerV2Error::GovernanceAuthorityRequiredButMissing { .. }
-    ));
-    assert_eq!(
-        __seed_bytes,
-        std::fs::read(&marker_path).expect("re-read marker")
-    );
+    assert!(matches!(err, MutatingSurfaceMarkerV2Error::GovernanceAuthorityRequiredButMissing { .. }));
+    assert_eq!(__seed_bytes, std::fs::read(&marker_path).expect("re-read marker"));
 }
 
 /// R2 — proof required but no proof rejected on reload-apply with no
@@ -1005,13 +842,7 @@ fn r2_required_but_absent_rejected_on_reload_apply_no_run070() {
     );
     let ratified = h.verify_v2(&r);
     let gh = h.genesis_hex();
-    let inputs = make_inputs(
-        &marker_path,
-        &gh,
-        &r,
-        &ratified,
-        AuthorityStateUpdateSource::ReloadApply,
-    );
+    let inputs = make_inputs(&marker_path, &gh, &r, &ratified, AuthorityStateUpdateSource::ReloadApply);
     let err = shim_run(
         inputs,
         GovernanceProofPolicy::RequiredForLifecycleSensitive,
@@ -1019,14 +850,8 @@ fn r2_required_but_absent_rejected_on_reload_apply_no_run070() {
     )
     .err()
     .expect("R2 fails closed");
-    assert!(matches!(
-        err,
-        MutatingSurfaceMarkerV2Error::GovernanceAuthorityRequiredButMissing { .. }
-    ));
-    assert_eq!(
-        __seed_bytes,
-        std::fs::read(&marker_path).expect("re-read marker")
-    );
+    assert!(matches!(err, MutatingSurfaceMarkerV2Error::GovernanceAuthorityRequiredButMissing { .. }));
+    assert_eq!(__seed_bytes, std::fs::read(&marker_path).expect("re-read marker"));
 }
 
 /// R3 — malformed proof rejected before mutation. The Run 167 loader
@@ -1050,30 +875,15 @@ fn r3_malformed_proof_rejected_before_mutation() {
     );
     let ratified = h.verify_v2(&r);
     let gh = h.genesis_hex();
-    let inputs = make_inputs(
-        &marker_path,
-        &gh,
-        &r,
-        &ratified,
-        AuthorityStateUpdateSource::ReloadApply,
+    let inputs = make_inputs(&marker_path, &gh, &r, &ratified, AuthorityStateUpdateSource::ReloadApply);
+    let malformed = GovernanceProofLoadStatus::Malformed(
+        GovernanceProofWireParseError::EmptyIssuerSignature,
     );
-    let malformed =
-        GovernanceProofLoadStatus::Malformed(GovernanceProofWireParseError::EmptyIssuerSignature);
-    let err = shim_run(
-        inputs,
-        GovernanceProofPolicy::RequiredForLifecycleSensitive,
-        &malformed,
-    )
-    .err()
-    .expect("R3 fails closed");
-    assert!(matches!(
-        err,
-        MutatingSurfaceMarkerV2Error::GovernanceAuthorityRequiredButMissing { .. }
-    ));
-    assert_eq!(
-        __seed_bytes,
-        std::fs::read(&marker_path).expect("re-read marker")
-    );
+    let err = shim_run(inputs, GovernanceProofPolicy::RequiredForLifecycleSensitive, &malformed)
+        .err()
+        .expect("R3 fails closed");
+    assert!(matches!(err, MutatingSurfaceMarkerV2Error::GovernanceAuthorityRequiredButMissing { .. }));
+    assert_eq!(__seed_bytes, std::fs::read(&marker_path).expect("re-read marker"));
 }
 
 /// R4 — wrong environment proof rejected. (Mainnet-bound proof for a
@@ -1091,27 +901,11 @@ fn r4_wrong_environment_proof_rejected() {
         Some(pqc_public_key_fingerprint(&h.signing_pk_a)),
     );
     let ratified = h.verify_v2(&r);
-    let candidate = h.derive_candidate(
-        &h.genesis_hex(),
-        &r,
-        &ratified,
-        AuthorityStateUpdateSource::ReloadApply,
-    );
-    let mut proof = good_proof(
-        &h,
-        &candidate,
-        GovernanceAuthorityClass::GenesisBound,
-        LocalLifecycleAction::Rotate,
-    );
+    let candidate = h.derive_candidate(&h.genesis_hex(), &r, &ratified, AuthorityStateUpdateSource::ReloadApply);
+    let mut proof = good_proof(&h, &candidate, GovernanceAuthorityClass::GenesisBound, LocalLifecycleAction::Rotate);
     proof.environment = TrustBundleEnvironment::Mainnet;
     let gh = h.genesis_hex();
-    let inputs = make_inputs(
-        &marker_path,
-        &gh,
-        &r,
-        &ratified,
-        AuthorityStateUpdateSource::ReloadApply,
-    );
+    let inputs = make_inputs(&marker_path, &gh, &r, &ratified, AuthorityStateUpdateSource::ReloadApply);
     let err = shim_run(
         inputs,
         GovernanceProofPolicy::RequiredForLifecycleSensitive,
@@ -1119,14 +913,8 @@ fn r4_wrong_environment_proof_rejected() {
     )
     .err()
     .expect("R4 fails closed");
-    assert!(matches!(
-        err,
-        MutatingSurfaceMarkerV2Error::GovernanceAuthorityRejected(_)
-    ));
-    assert_eq!(
-        __seed_bytes,
-        std::fs::read(&marker_path).expect("re-read marker")
-    );
+    assert!(matches!(err, MutatingSurfaceMarkerV2Error::GovernanceAuthorityRejected(_)));
+    assert_eq!(__seed_bytes, std::fs::read(&marker_path).expect("re-read marker"));
 }
 
 /// R5 — wrong chain proof rejected.
@@ -1143,27 +931,11 @@ fn r5_wrong_chain_proof_rejected() {
         Some(pqc_public_key_fingerprint(&h.signing_pk_a)),
     );
     let ratified = h.verify_v2(&r);
-    let candidate = h.derive_candidate(
-        &h.genesis_hex(),
-        &r,
-        &ratified,
-        AuthorityStateUpdateSource::ReloadApply,
-    );
-    let mut proof = good_proof(
-        &h,
-        &candidate,
-        GovernanceAuthorityClass::GenesisBound,
-        LocalLifecycleAction::Rotate,
-    );
+    let candidate = h.derive_candidate(&h.genesis_hex(), &r, &ratified, AuthorityStateUpdateSource::ReloadApply);
+    let mut proof = good_proof(&h, &candidate, GovernanceAuthorityClass::GenesisBound, LocalLifecycleAction::Rotate);
     proof.chain_id = "00000000000000ff".to_string();
     let gh = h.genesis_hex();
-    let inputs = make_inputs(
-        &marker_path,
-        &gh,
-        &r,
-        &ratified,
-        AuthorityStateUpdateSource::ReloadApply,
-    );
+    let inputs = make_inputs(&marker_path, &gh, &r, &ratified, AuthorityStateUpdateSource::ReloadApply);
     let err = shim_run(
         inputs,
         GovernanceProofPolicy::RequiredForLifecycleSensitive,
@@ -1171,14 +943,8 @@ fn r5_wrong_chain_proof_rejected() {
     )
     .err()
     .expect("R5 fails closed");
-    assert!(matches!(
-        err,
-        MutatingSurfaceMarkerV2Error::GovernanceAuthorityRejected(_)
-    ));
-    assert_eq!(
-        __seed_bytes,
-        std::fs::read(&marker_path).expect("re-read marker")
-    );
+    assert!(matches!(err, MutatingSurfaceMarkerV2Error::GovernanceAuthorityRejected(_)));
+    assert_eq!(__seed_bytes, std::fs::read(&marker_path).expect("re-read marker"));
 }
 
 /// R6 — wrong genesis proof rejected.
@@ -1195,27 +961,11 @@ fn r6_wrong_genesis_proof_rejected() {
         Some(pqc_public_key_fingerprint(&h.signing_pk_a)),
     );
     let ratified = h.verify_v2(&r);
-    let candidate = h.derive_candidate(
-        &h.genesis_hex(),
-        &r,
-        &ratified,
-        AuthorityStateUpdateSource::ReloadApply,
-    );
-    let mut proof = good_proof(
-        &h,
-        &candidate,
-        GovernanceAuthorityClass::GenesisBound,
-        LocalLifecycleAction::Rotate,
-    );
+    let candidate = h.derive_candidate(&h.genesis_hex(), &r, &ratified, AuthorityStateUpdateSource::ReloadApply);
+    let mut proof = good_proof(&h, &candidate, GovernanceAuthorityClass::GenesisBound, LocalLifecycleAction::Rotate);
     proof.genesis_hash = "ee".repeat(32);
     let gh = h.genesis_hex();
-    let inputs = make_inputs(
-        &marker_path,
-        &gh,
-        &r,
-        &ratified,
-        AuthorityStateUpdateSource::ReloadApply,
-    );
+    let inputs = make_inputs(&marker_path, &gh, &r, &ratified, AuthorityStateUpdateSource::ReloadApply);
     let err = shim_run(
         inputs,
         GovernanceProofPolicy::RequiredForLifecycleSensitive,
@@ -1223,14 +973,8 @@ fn r6_wrong_genesis_proof_rejected() {
     )
     .err()
     .expect("R6 fails closed");
-    assert!(matches!(
-        err,
-        MutatingSurfaceMarkerV2Error::GovernanceAuthorityRejected(_)
-    ));
-    assert_eq!(
-        __seed_bytes,
-        std::fs::read(&marker_path).expect("re-read marker")
-    );
+    assert!(matches!(err, MutatingSurfaceMarkerV2Error::GovernanceAuthorityRejected(_)));
+    assert_eq!(__seed_bytes, std::fs::read(&marker_path).expect("re-read marker"));
 }
 
 /// R7 — wrong authority root proof rejected.
@@ -1247,27 +991,11 @@ fn r7_wrong_authority_root_proof_rejected() {
         Some(pqc_public_key_fingerprint(&h.signing_pk_a)),
     );
     let ratified = h.verify_v2(&r);
-    let candidate = h.derive_candidate(
-        &h.genesis_hex(),
-        &r,
-        &ratified,
-        AuthorityStateUpdateSource::ReloadApply,
-    );
-    let mut proof = good_proof(
-        &h,
-        &candidate,
-        GovernanceAuthorityClass::GenesisBound,
-        LocalLifecycleAction::Rotate,
-    );
+    let candidate = h.derive_candidate(&h.genesis_hex(), &r, &ratified, AuthorityStateUpdateSource::ReloadApply);
+    let mut proof = good_proof(&h, &candidate, GovernanceAuthorityClass::GenesisBound, LocalLifecycleAction::Rotate);
     proof.authority_root_fingerprint = "9".repeat(40);
     let gh = h.genesis_hex();
-    let inputs = make_inputs(
-        &marker_path,
-        &gh,
-        &r,
-        &ratified,
-        AuthorityStateUpdateSource::ReloadApply,
-    );
+    let inputs = make_inputs(&marker_path, &gh, &r, &ratified, AuthorityStateUpdateSource::ReloadApply);
     let err = shim_run(
         inputs,
         GovernanceProofPolicy::RequiredForLifecycleSensitive,
@@ -1275,14 +1003,8 @@ fn r7_wrong_authority_root_proof_rejected() {
     )
     .err()
     .expect("R7 fails closed");
-    assert!(matches!(
-        err,
-        MutatingSurfaceMarkerV2Error::GovernanceAuthorityRejected(_)
-    ));
-    assert_eq!(
-        __seed_bytes,
-        std::fs::read(&marker_path).expect("re-read marker")
-    );
+    assert!(matches!(err, MutatingSurfaceMarkerV2Error::GovernanceAuthorityRejected(_)));
+    assert_eq!(__seed_bytes, std::fs::read(&marker_path).expect("re-read marker"));
 }
 
 /// R8 — wrong lifecycle action proof rejected.
@@ -1299,27 +1021,11 @@ fn r8_wrong_lifecycle_action_proof_rejected() {
         Some(pqc_public_key_fingerprint(&h.signing_pk_a)),
     );
     let ratified = h.verify_v2(&r);
-    let candidate = h.derive_candidate(
-        &h.genesis_hex(),
-        &r,
-        &ratified,
-        AuthorityStateUpdateSource::ReloadApply,
-    );
-    let mut proof = good_proof(
-        &h,
-        &candidate,
-        GovernanceAuthorityClass::GenesisBound,
-        LocalLifecycleAction::Rotate,
-    );
+    let candidate = h.derive_candidate(&h.genesis_hex(), &r, &ratified, AuthorityStateUpdateSource::ReloadApply);
+    let mut proof = good_proof(&h, &candidate, GovernanceAuthorityClass::GenesisBound, LocalLifecycleAction::Rotate);
     proof.lifecycle_action = LocalLifecycleAction::Retire;
     let gh = h.genesis_hex();
-    let inputs = make_inputs(
-        &marker_path,
-        &gh,
-        &r,
-        &ratified,
-        AuthorityStateUpdateSource::ReloadApply,
-    );
+    let inputs = make_inputs(&marker_path, &gh, &r, &ratified, AuthorityStateUpdateSource::ReloadApply);
     let err = shim_run(
         inputs,
         GovernanceProofPolicy::RequiredForLifecycleSensitive,
@@ -1327,14 +1033,8 @@ fn r8_wrong_lifecycle_action_proof_rejected() {
     )
     .err()
     .expect("R8 fails closed");
-    assert!(matches!(
-        err,
-        MutatingSurfaceMarkerV2Error::GovernanceAuthorityRejected(_)
-    ));
-    assert_eq!(
-        __seed_bytes,
-        std::fs::read(&marker_path).expect("re-read marker")
-    );
+    assert!(matches!(err, MutatingSurfaceMarkerV2Error::GovernanceAuthorityRejected(_)));
+    assert_eq!(__seed_bytes, std::fs::read(&marker_path).expect("re-read marker"));
 }
 
 /// R9 — wrong candidate digest proof rejected.
@@ -1351,27 +1051,11 @@ fn r9_wrong_candidate_digest_proof_rejected() {
         Some(pqc_public_key_fingerprint(&h.signing_pk_a)),
     );
     let ratified = h.verify_v2(&r);
-    let candidate = h.derive_candidate(
-        &h.genesis_hex(),
-        &r,
-        &ratified,
-        AuthorityStateUpdateSource::ReloadApply,
-    );
-    let mut proof = good_proof(
-        &h,
-        &candidate,
-        GovernanceAuthorityClass::GenesisBound,
-        LocalLifecycleAction::Rotate,
-    );
+    let candidate = h.derive_candidate(&h.genesis_hex(), &r, &ratified, AuthorityStateUpdateSource::ReloadApply);
+    let mut proof = good_proof(&h, &candidate, GovernanceAuthorityClass::GenesisBound, LocalLifecycleAction::Rotate);
     proof.candidate_v2_digest = "f".repeat(64);
     let gh = h.genesis_hex();
-    let inputs = make_inputs(
-        &marker_path,
-        &gh,
-        &r,
-        &ratified,
-        AuthorityStateUpdateSource::ReloadApply,
-    );
+    let inputs = make_inputs(&marker_path, &gh, &r, &ratified, AuthorityStateUpdateSource::ReloadApply);
     let err = shim_run(
         inputs,
         GovernanceProofPolicy::RequiredForLifecycleSensitive,
@@ -1379,14 +1063,8 @@ fn r9_wrong_candidate_digest_proof_rejected() {
     )
     .err()
     .expect("R9 fails closed");
-    assert!(matches!(
-        err,
-        MutatingSurfaceMarkerV2Error::GovernanceAuthorityRejected(_)
-    ));
-    assert_eq!(
-        __seed_bytes,
-        std::fs::read(&marker_path).expect("re-read marker")
-    );
+    assert!(matches!(err, MutatingSurfaceMarkerV2Error::GovernanceAuthorityRejected(_)));
+    assert_eq!(__seed_bytes, std::fs::read(&marker_path).expect("re-read marker"));
 }
 
 /// R10 — wrong authority-domain sequence proof rejected.
@@ -1403,27 +1081,11 @@ fn r10_wrong_authority_sequence_proof_rejected() {
         Some(pqc_public_key_fingerprint(&h.signing_pk_a)),
     );
     let ratified = h.verify_v2(&r);
-    let candidate = h.derive_candidate(
-        &h.genesis_hex(),
-        &r,
-        &ratified,
-        AuthorityStateUpdateSource::ReloadApply,
-    );
-    let mut proof = good_proof(
-        &h,
-        &candidate,
-        GovernanceAuthorityClass::GenesisBound,
-        LocalLifecycleAction::Rotate,
-    );
+    let candidate = h.derive_candidate(&h.genesis_hex(), &r, &ratified, AuthorityStateUpdateSource::ReloadApply);
+    let mut proof = good_proof(&h, &candidate, GovernanceAuthorityClass::GenesisBound, LocalLifecycleAction::Rotate);
     proof.authority_domain_sequence = candidate.latest_authority_domain_sequence + 7;
     let gh = h.genesis_hex();
-    let inputs = make_inputs(
-        &marker_path,
-        &gh,
-        &r,
-        &ratified,
-        AuthorityStateUpdateSource::ReloadApply,
-    );
+    let inputs = make_inputs(&marker_path, &gh, &r, &ratified, AuthorityStateUpdateSource::ReloadApply);
     let err = shim_run(
         inputs,
         GovernanceProofPolicy::RequiredForLifecycleSensitive,
@@ -1431,14 +1093,8 @@ fn r10_wrong_authority_sequence_proof_rejected() {
     )
     .err()
     .expect("R10 fails closed");
-    assert!(matches!(
-        err,
-        MutatingSurfaceMarkerV2Error::GovernanceAuthorityRejected(_)
-    ));
-    assert_eq!(
-        __seed_bytes,
-        std::fs::read(&marker_path).expect("re-read marker")
-    );
+    assert!(matches!(err, MutatingSurfaceMarkerV2Error::GovernanceAuthorityRejected(_)));
+    assert_eq!(__seed_bytes, std::fs::read(&marker_path).expect("re-read marker"));
 }
 
 /// R11 — invalid issuer signature rejected.
@@ -1455,27 +1111,11 @@ fn r11_invalid_issuer_signature_rejected() {
         Some(pqc_public_key_fingerprint(&h.signing_pk_a)),
     );
     let ratified = h.verify_v2(&r);
-    let candidate = h.derive_candidate(
-        &h.genesis_hex(),
-        &r,
-        &ratified,
-        AuthorityStateUpdateSource::ReloadApply,
-    );
-    let mut proof = good_proof(
-        &h,
-        &candidate,
-        GovernanceAuthorityClass::GenesisBound,
-        LocalLifecycleAction::Rotate,
-    );
+    let candidate = h.derive_candidate(&h.genesis_hex(), &r, &ratified, AuthorityStateUpdateSource::ReloadApply);
+    let mut proof = good_proof(&h, &candidate, GovernanceAuthorityClass::GenesisBound, LocalLifecycleAction::Rotate);
     proof.issuer_signature = b"corrupted".to_vec();
     let gh = h.genesis_hex();
-    let inputs = make_inputs(
-        &marker_path,
-        &gh,
-        &r,
-        &ratified,
-        AuthorityStateUpdateSource::ReloadApply,
-    );
+    let inputs = make_inputs(&marker_path, &gh, &r, &ratified, AuthorityStateUpdateSource::ReloadApply);
     let err = shim_run(
         inputs,
         GovernanceProofPolicy::RequiredForLifecycleSensitive,
@@ -1485,14 +1125,9 @@ fn r11_invalid_issuer_signature_rejected() {
     .expect("R11 fails closed");
     assert!(matches!(
         err,
-        MutatingSurfaceMarkerV2Error::GovernanceAuthorityRejected(
-            GovOutcome::InvalidIssuerSignature { .. }
-        )
+        MutatingSurfaceMarkerV2Error::GovernanceAuthorityRejected(GovOutcome::InvalidIssuerSignature { .. })
     ));
-    assert_eq!(
-        __seed_bytes,
-        std::fs::read(&marker_path).expect("re-read marker")
-    );
+    assert_eq!(__seed_bytes, std::fs::read(&marker_path).expect("re-read marker"));
 }
 
 /// R12 — unsupported issuer suite rejected.
@@ -1509,27 +1144,11 @@ fn r12_unsupported_issuer_suite_rejected() {
         Some(pqc_public_key_fingerprint(&h.signing_pk_a)),
     );
     let ratified = h.verify_v2(&r);
-    let candidate = h.derive_candidate(
-        &h.genesis_hex(),
-        &r,
-        &ratified,
-        AuthorityStateUpdateSource::ReloadApply,
-    );
-    let mut proof = good_proof(
-        &h,
-        &candidate,
-        GovernanceAuthorityClass::GenesisBound,
-        LocalLifecycleAction::Rotate,
-    );
+    let candidate = h.derive_candidate(&h.genesis_hex(), &r, &ratified, AuthorityStateUpdateSource::ReloadApply);
+    let mut proof = good_proof(&h, &candidate, GovernanceAuthorityClass::GenesisBound, LocalLifecycleAction::Rotate);
     proof.issuer_signature_suite_id = 0x99;
     let gh = h.genesis_hex();
-    let inputs = make_inputs(
-        &marker_path,
-        &gh,
-        &r,
-        &ratified,
-        AuthorityStateUpdateSource::ReloadApply,
-    );
+    let inputs = make_inputs(&marker_path, &gh, &r, &ratified, AuthorityStateUpdateSource::ReloadApply);
     let err = shim_run(
         inputs,
         GovernanceProofPolicy::RequiredForLifecycleSensitive,
@@ -1537,14 +1156,8 @@ fn r12_unsupported_issuer_suite_rejected() {
     )
     .err()
     .expect("R12 fails closed");
-    assert!(matches!(
-        err,
-        MutatingSurfaceMarkerV2Error::GovernanceAuthorityRejected(_)
-    ));
-    assert_eq!(
-        __seed_bytes,
-        std::fs::read(&marker_path).expect("re-read marker")
-    );
+    assert!(matches!(err, MutatingSurfaceMarkerV2Error::GovernanceAuthorityRejected(_)));
+    assert_eq!(__seed_bytes, std::fs::read(&marker_path).expect("re-read marker"));
 }
 
 /// R13 — non-PQC suite rejected (alias for R12 at the surface; the
@@ -1573,28 +1186,12 @@ fn r14_threshold_not_met_rejected_if_representable() {
         Some(pqc_public_key_fingerprint(&h.signing_pk_a)),
     );
     let ratified = h.verify_v2(&r);
-    let candidate = h.derive_candidate(
-        &h.genesis_hex(),
-        &r,
-        &ratified,
-        AuthorityStateUpdateSource::ReloadApply,
-    );
-    let mut proof = good_proof(
-        &h,
-        &candidate,
-        GovernanceAuthorityClass::GenesisBound,
-        LocalLifecycleAction::Rotate,
-    );
+    let candidate = h.derive_candidate(&h.genesis_hex(), &r, &ratified, AuthorityStateUpdateSource::ReloadApply);
+    let mut proof = good_proof(&h, &candidate, GovernanceAuthorityClass::GenesisBound, LocalLifecycleAction::Rotate);
     // Threshold present and not met (signers < required).
     proof.threshold = Some(GovernanceThreshold::new(2, 5, 5));
     let gh = h.genesis_hex();
-    let inputs = make_inputs(
-        &marker_path,
-        &gh,
-        &r,
-        &ratified,
-        AuthorityStateUpdateSource::ReloadApply,
-    );
+    let inputs = make_inputs(&marker_path, &gh, &r, &ratified, AuthorityStateUpdateSource::ReloadApply);
     let err = shim_run(
         inputs,
         GovernanceProofPolicy::RequiredForLifecycleSensitive,
@@ -1602,14 +1199,8 @@ fn r14_threshold_not_met_rejected_if_representable() {
     )
     .err()
     .expect("R14 fails closed");
-    assert!(matches!(
-        err,
-        MutatingSurfaceMarkerV2Error::GovernanceAuthorityRejected(_)
-    ));
-    assert_eq!(
-        __seed_bytes,
-        std::fs::read(&marker_path).expect("re-read marker")
-    );
+    assert!(matches!(err, MutatingSurfaceMarkerV2Error::GovernanceAuthorityRejected(_)));
+    assert_eq!(__seed_bytes, std::fs::read(&marker_path).expect("re-read marker"));
 }
 
 /// R15 — stale / replayed proof rejected. A proof whose
@@ -1628,28 +1219,12 @@ fn r15_stale_replayed_proof_rejected() {
         Some(pqc_public_key_fingerprint(&h.signing_pk_a)),
     );
     let ratified = h.verify_v2(&r);
-    let candidate = h.derive_candidate(
-        &h.genesis_hex(),
-        &r,
-        &ratified,
-        AuthorityStateUpdateSource::ReloadApply,
-    );
-    let mut proof = good_proof(
-        &h,
-        &candidate,
-        GovernanceAuthorityClass::GenesisBound,
-        LocalLifecycleAction::Rotate,
-    );
+    let candidate = h.derive_candidate(&h.genesis_hex(), &r, &ratified, AuthorityStateUpdateSource::ReloadApply);
+    let mut proof = good_proof(&h, &candidate, GovernanceAuthorityClass::GenesisBound, LocalLifecycleAction::Rotate);
     // Stale: lower than the candidate's sequence.
     proof.authority_domain_sequence = candidate.latest_authority_domain_sequence - 1;
     let gh = h.genesis_hex();
-    let inputs = make_inputs(
-        &marker_path,
-        &gh,
-        &r,
-        &ratified,
-        AuthorityStateUpdateSource::ReloadApply,
-    );
+    let inputs = make_inputs(&marker_path, &gh, &r, &ratified, AuthorityStateUpdateSource::ReloadApply);
     let err = shim_run(
         inputs,
         GovernanceProofPolicy::RequiredForLifecycleSensitive,
@@ -1657,14 +1232,8 @@ fn r15_stale_replayed_proof_rejected() {
     )
     .err()
     .expect("R15 fails closed");
-    assert!(matches!(
-        err,
-        MutatingSurfaceMarkerV2Error::GovernanceAuthorityRejected(_)
-    ));
-    assert_eq!(
-        __seed_bytes,
-        std::fs::read(&marker_path).expect("re-read marker")
-    );
+    assert!(matches!(err, MutatingSurfaceMarkerV2Error::GovernanceAuthorityRejected(_)));
+    assert_eq!(__seed_bytes, std::fs::read(&marker_path).expect("re-read marker"));
 }
 
 /// R16 — OnChainGovernance proof rejected as unsupported / fail-closed.
@@ -1681,26 +1250,10 @@ fn r16_on_chain_governance_unsupported() {
         Some(pqc_public_key_fingerprint(&h.signing_pk_a)),
     );
     let ratified = h.verify_v2(&r);
-    let candidate = h.derive_candidate(
-        &h.genesis_hex(),
-        &r,
-        &ratified,
-        AuthorityStateUpdateSource::ReloadApply,
-    );
-    let proof = good_proof(
-        &h,
-        &candidate,
-        GovernanceAuthorityClass::OnChainGovernance,
-        LocalLifecycleAction::Rotate,
-    );
+    let candidate = h.derive_candidate(&h.genesis_hex(), &r, &ratified, AuthorityStateUpdateSource::ReloadApply);
+    let proof = good_proof(&h, &candidate, GovernanceAuthorityClass::OnChainGovernance, LocalLifecycleAction::Rotate);
     let gh = h.genesis_hex();
-    let inputs = make_inputs(
-        &marker_path,
-        &gh,
-        &r,
-        &ratified,
-        AuthorityStateUpdateSource::ReloadApply,
-    );
+    let inputs = make_inputs(&marker_path, &gh, &r, &ratified, AuthorityStateUpdateSource::ReloadApply);
     let err = shim_run(
         inputs,
         GovernanceProofPolicy::RequiredForLifecycleSensitive,
@@ -1710,14 +1263,9 @@ fn r16_on_chain_governance_unsupported() {
     .expect("R16 fails closed");
     assert!(matches!(
         err,
-        MutatingSurfaceMarkerV2Error::GovernanceAuthorityRejected(
-            GovOutcome::UnsupportedOnChainGovernance { .. }
-        )
+        MutatingSurfaceMarkerV2Error::GovernanceAuthorityRejected(GovOutcome::UnsupportedOnChainGovernance { .. })
     ));
-    assert_eq!(
-        __seed_bytes,
-        std::fs::read(&marker_path).expect("re-read marker")
-    );
+    assert_eq!(__seed_bytes, std::fs::read(&marker_path).expect("re-read marker"));
 }
 
 /// R17 — local operator config alone rejected as governance authority
@@ -1778,33 +1326,12 @@ fn r19_proof_valid_but_lifecycle_invalid_rejects() {
     )
     .expect("seed prior v2 marker");
     // New candidate at lower sequence.
-    let r = h.build_v2(
-        &h.signing_pk_b,
-        2,
-        BundleSigningRatificationV2Action::Ratify,
-        None,
-    );
+    let r = h.build_v2(&h.signing_pk_b, 2, BundleSigningRatificationV2Action::Ratify, None);
     let ratified = h.verify_v2(&r);
-    let candidate = h.derive_candidate(
-        &h.genesis_hex(),
-        &r,
-        &ratified,
-        AuthorityStateUpdateSource::ReloadApply,
-    );
-    let proof = good_proof(
-        &h,
-        &candidate,
-        GovernanceAuthorityClass::GenesisBound,
-        LocalLifecycleAction::ActivateInitial,
-    );
+    let candidate = h.derive_candidate(&h.genesis_hex(), &r, &ratified, AuthorityStateUpdateSource::ReloadApply);
+    let proof = good_proof(&h, &candidate, GovernanceAuthorityClass::GenesisBound, LocalLifecycleAction::ActivateInitial);
     let gh = h.genesis_hex();
-    let inputs = make_inputs(
-        &marker_path,
-        &gh,
-        &r,
-        &ratified,
-        AuthorityStateUpdateSource::ReloadApply,
-    );
+    let inputs = make_inputs(&marker_path, &gh, &r, &ratified, AuthorityStateUpdateSource::ReloadApply);
     let err = shim_run(
         inputs,
         GovernanceProofPolicy::RequiredForLifecycleSensitive,
@@ -1814,10 +1341,7 @@ fn r19_proof_valid_but_lifecycle_invalid_rejects() {
     .expect("R19 fails closed at lifecycle layer");
     // Lifecycle/anti-rollback layer fires first; not a governance
     // reject.
-    assert!(!matches!(
-        err,
-        MutatingSurfaceMarkerV2Error::GovernanceAuthorityRejected(_)
-    ));
+    assert!(!matches!(err, MutatingSurfaceMarkerV2Error::GovernanceAuthorityRejected(_)));
 }
 
 /// R20 — lifecycle valid but proof invalid rejected. (Mirrors R11 at
@@ -1841,27 +1365,11 @@ fn r21_governance_rejection_on_startup_no_marker_write() {
         Some(pqc_public_key_fingerprint(&h.signing_pk_a)),
     );
     let ratified = h.verify_v2(&r);
-    let candidate = h.derive_candidate(
-        &h.genesis_hex(),
-        &r,
-        &ratified,
-        AuthorityStateUpdateSource::StartupLoad,
-    );
-    let mut proof = good_proof(
-        &h,
-        &candidate,
-        GovernanceAuthorityClass::GenesisBound,
-        LocalLifecycleAction::Rotate,
-    );
+    let candidate = h.derive_candidate(&h.genesis_hex(), &r, &ratified, AuthorityStateUpdateSource::StartupLoad);
+    let mut proof = good_proof(&h, &candidate, GovernanceAuthorityClass::GenesisBound, LocalLifecycleAction::Rotate);
     proof.issuer_signature = b"bad".to_vec();
     let gh = h.genesis_hex();
-    let inputs = make_inputs(
-        &marker_path,
-        &gh,
-        &r,
-        &ratified,
-        AuthorityStateUpdateSource::StartupLoad,
-    );
+    let inputs = make_inputs(&marker_path, &gh, &r, &ratified, AuthorityStateUpdateSource::StartupLoad);
     let err = shim_run(
         inputs,
         GovernanceProofPolicy::RequiredForLifecycleSensitive,
@@ -1869,14 +1377,8 @@ fn r21_governance_rejection_on_startup_no_marker_write() {
     )
     .err()
     .expect("R21 fails closed");
-    assert!(matches!(
-        err,
-        MutatingSurfaceMarkerV2Error::GovernanceAuthorityRejected(_)
-    ));
-    assert_eq!(
-        __seed_bytes,
-        std::fs::read(&marker_path).expect("re-read marker")
-    );
+    assert!(matches!(err, MutatingSurfaceMarkerV2Error::GovernanceAuthorityRejected(_)));
+    assert_eq!(__seed_bytes, std::fs::read(&marker_path).expect("re-read marker"));
 }
 
 /// R22 — governance rejection on SIGHUP produces no live trust swap, no
@@ -1896,27 +1398,11 @@ fn r22_governance_rejection_on_sighup_no_mutation() {
         Some(pqc_public_key_fingerprint(&h.signing_pk_a)),
     );
     let ratified = h.verify_v2(&r);
-    let candidate = h.derive_candidate(
-        &h.genesis_hex(),
-        &r,
-        &ratified,
-        AuthorityStateUpdateSource::SighupReload,
-    );
-    let mut proof = good_proof(
-        &h,
-        &candidate,
-        GovernanceAuthorityClass::GenesisBound,
-        LocalLifecycleAction::Rotate,
-    );
+    let candidate = h.derive_candidate(&h.genesis_hex(), &r, &ratified, AuthorityStateUpdateSource::SighupReload);
+    let mut proof = good_proof(&h, &candidate, GovernanceAuthorityClass::GenesisBound, LocalLifecycleAction::Rotate);
     proof.issuer_signature = b"bad".to_vec();
     let gh = h.genesis_hex();
-    let inputs = make_inputs(
-        &marker_path,
-        &gh,
-        &r,
-        &ratified,
-        AuthorityStateUpdateSource::SighupReload,
-    );
+    let inputs = make_inputs(&marker_path, &gh, &r, &ratified, AuthorityStateUpdateSource::SighupReload);
     let err = shim_run(
         inputs,
         GovernanceProofPolicy::RequiredForLifecycleSensitive,
@@ -1924,14 +1410,8 @@ fn r22_governance_rejection_on_sighup_no_mutation() {
     )
     .err()
     .expect("R22 fails closed");
-    assert!(matches!(
-        err,
-        MutatingSurfaceMarkerV2Error::GovernanceAuthorityRejected(_)
-    ));
-    assert_eq!(
-        __seed_bytes,
-        std::fs::read(&marker_path).expect("re-read marker")
-    );
+    assert!(matches!(err, MutatingSurfaceMarkerV2Error::GovernanceAuthorityRejected(_)));
+    assert_eq!(__seed_bytes, std::fs::read(&marker_path).expect("re-read marker"));
 }
 
 /// R23 — governance rejection on peer-driven drain produces no apply,
@@ -1949,18 +1429,8 @@ fn r23_governance_rejection_on_peer_driven_drain_no_mutation() {
         Some(pqc_public_key_fingerprint(&h.signing_pk_a)),
     );
     let ratified = h.verify_v2(&r);
-    let candidate = h.derive_candidate(
-        &h.genesis_hex(),
-        &r,
-        &ratified,
-        AuthorityStateUpdateSource::ReloadApply,
-    );
-    let mut proof = good_proof(
-        &h,
-        &candidate,
-        GovernanceAuthorityClass::GenesisBound,
-        LocalLifecycleAction::Rotate,
-    );
+    let candidate = h.derive_candidate(&h.genesis_hex(), &r, &ratified, AuthorityStateUpdateSource::ReloadApply);
+    let mut proof = good_proof(&h, &candidate, GovernanceAuthorityClass::GenesisBound, LocalLifecycleAction::Rotate);
     proof.issuer_signature = b"bad".to_vec();
     let mut coord = ProductionV2MarkerCoordinator::new(
         marker_path.clone(),
@@ -1979,10 +1449,7 @@ fn r23_governance_rejection_on_peer_driven_drain_no_mutation() {
     let err = coord.decide_pre_apply().expect_err("R23 fails closed");
     assert!(err.contains("governance") || err.contains("GovernanceAuthority"));
     assert!(coord.accepted_decision().is_none());
-    assert_eq!(
-        __seed_bytes,
-        std::fs::read(&marker_path).expect("re-read marker")
-    );
+    assert_eq!(__seed_bytes, std::fs::read(&marker_path).expect("re-read marker"));
 }
 
 /// R24 — validation-only surfaces remain non-mutating regardless of
@@ -1992,29 +1459,14 @@ fn r24_validation_only_surfaces_remain_non_mutating() {
     let h = devnet_harness();
     let dir = tmpdir("r24");
     let marker_path = authority_state_file_path(&dir);
-    let r = h.build_v2(
-        &h.signing_pk_a,
-        1,
-        BundleSigningRatificationV2Action::Ratify,
-        None,
-    );
+    let r = h.build_v2(&h.signing_pk_a, 1, BundleSigningRatificationV2Action::Ratify, None);
     let ratified = h.verify_v2(&r);
     // ReloadCheck audit tag is the validation-only marker; the shim
     // never writes to disk for any tag.
     let gh = h.genesis_hex();
-    let inputs = make_inputs(
-        &marker_path,
-        &gh,
-        &r,
-        &ratified,
-        AuthorityStateUpdateSource::TestOrFixture,
-    );
-    let _ = shim_run(
-        inputs,
-        GovernanceProofPolicy::NotRequired,
-        &GovernanceProofLoadStatus::Absent,
-    )
-    .expect("R24 accepts absent under NotRequired");
+    let inputs = make_inputs(&marker_path, &gh, &r, &ratified, AuthorityStateUpdateSource::TestOrFixture);
+    let _ = shim_run(inputs, GovernanceProofPolicy::NotRequired, &GovernanceProofLoadStatus::Absent)
+        .expect("R24 accepts absent under NotRequired");
     assert_no_marker_on_disk(&marker_path);
 }
 
@@ -2043,12 +1495,7 @@ fn r25_mainnet_peer_driven_apply_remains_refused_even_with_valid_proof() {
     let h = devnet_harness();
     let dir = tmpdir("r25");
     let marker_path = authority_state_file_path(&dir);
-    let r = h.build_v2(
-        &h.signing_pk_a,
-        1,
-        BundleSigningRatificationV2Action::Ratify,
-        None,
-    );
+    let r = h.build_v2(&h.signing_pk_a, 1, BundleSigningRatificationV2Action::Ratify, None);
     let ratified = h.verify_v2(&r);
     let _coord = ProductionV2MarkerCoordinator::new(
         marker_path,

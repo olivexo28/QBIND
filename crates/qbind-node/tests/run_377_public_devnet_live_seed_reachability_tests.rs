@@ -167,12 +167,7 @@ fn planned_status_with_reachability_evidence_fails_closed() {
     let out = register_check(
         &dir.join("public-identity.json"),
         &dir.join("leaf.cert.bin"),
-        &[
-            "--status",
-            "planned",
-            "--reachability-evidence",
-            &reach_ref(),
-        ],
+        &["--status", "planned", "--reachability-evidence", &reach_ref()],
     );
     assert_ne!(out.code, 0, "planned+reachability was NOT refused");
     let v = verdict(&out);
@@ -203,13 +198,7 @@ fn committed_live_candidate_is_not_falsely_live() {
             serde_json::Value::Null,
             "non-live entry must carry null reachability evidence"
         );
-        assert!(n["node_id"]
-            .as_str()
-            .map(|s| !s.is_empty())
-            .unwrap_or(false));
-        assert!(n["peer_id"]
-            .as_str()
-            .map(|s| !s.is_empty())
-            .unwrap_or(false));
+        assert!(n["node_id"].as_str().map(|s| !s.is_empty()).unwrap_or(false));
+        assert!(n["peer_id"].as_str().map(|s| !s.is_empty()).unwrap_or(false));
     }
 }

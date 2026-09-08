@@ -384,7 +384,11 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
         t.assert_true("A4.invoked-once", sink.invocations() == 1);
         t.assert_true("A4.ledger-one", ledger.len() == 1);
         t.assert_true("A4.contains", ledger.contains(RECEIPT_ID));
-        t.check("A4.kind", "fixture-devnet", sink.kind().tag());
+        t.check(
+            "A4.kind",
+            "fixture-devnet",
+            sink.kind().tag(),
+        );
         t.assert_true(
             "A4.record-status",
             ledger.find(RECEIPT_ID).map(|r| r.status)
@@ -397,8 +401,7 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
         let c = testnet_ctx();
         let input = c.authorized();
         let mut ledger = ModeledDurableConsumeReceiptLedger::new();
-        let mut sink =
-            FixtureModeledDurableConsumeProjectionSink::new(TrustBundleEnvironment::Testnet);
+        let mut sink = FixtureModeledDurableConsumeProjectionSink::new(TrustBundleEnvironment::Testnet);
         let o = drive(&input, &c.expectations, &mut sink, &mut ledger);
         t.check_outcome("A5.outcome", "consume-receipt-recorded", &o);
         t.assert_true("A5.ledger-one", ledger.len() == 1);
@@ -416,10 +419,7 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
         let second = drive(&input, &c.expectations, &mut sink, &mut ledger);
         t.check_outcome("A6.second", "consume-receipt-duplicate-idempotent", &second);
         t.assert_true("A6.projects", second.projects_to_durable_completion());
-        t.assert_true(
-            "A6.no-authorize-new",
-            !second.authorizes_modeled_consume_receipt(),
-        );
+        t.assert_true("A6.no-authorize-new", !second.authorizes_modeled_consume_receipt());
         t.assert_true("A6.ledger-one", ledger.len() == 1);
     }
 
@@ -561,10 +561,7 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
         ("replay-stale", Pipe::ReplayStaleOrExpiredNoConsume),
         ("replay-consumed", Pipe::ReplayConsumedNoConsume),
         ("replay-superseded", Pipe::ReplaySupersededNoConsume),
-        (
-            "replay-backend-unavailable",
-            Pipe::BackendUnavailableNoConsume,
-        ),
+        ("replay-backend-unavailable", Pipe::BackendUnavailableNoConsume),
         (
             "durable-replay-rejected",
             Pipe::DurableReplayRejectedBeforeMutation,
@@ -703,10 +700,7 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
             &format!("B.binding.{label}.no-invocation"),
             sink.invocations() == 0,
         );
-        t.assert_true(
-            &format!("B.binding.{label}.ledger-empty"),
-            ledger.is_empty(),
-        );
+        t.assert_true(&format!("B.binding.{label}.ledger-empty"), ledger.is_empty());
     }
 
     // B-receipt — receipt-identity mismatches reject BEFORE record (sink IS invoked).
@@ -749,10 +743,7 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
             &format!("B.receipt.{label}.invoked"),
             sink.invocations() == 1,
         );
-        t.assert_true(
-            &format!("B.receipt.{label}.ledger-empty"),
-            ledger.is_empty(),
-        );
+        t.assert_true(&format!("B.receipt.{label}.ledger-empty"), ledger.is_empty());
     }
 
     // B-mainnet-authority — local operator / peer majority cannot satisfy MainNet authority.
@@ -965,10 +956,7 @@ fn run_projection_table(out: &Path) -> (u64, u64) {
                 reason: "x".to_string(),
             },
         ),
-        (
-            "replay-freshness-alone",
-            Pipe::DurableReplayRejectedBeforeMutation,
-        ),
+        ("replay-freshness-alone", Pipe::DurableReplayRejectedBeforeMutation),
         (
             "mutation-engine-alone",
             Pipe::MutationEngineRejectedBeforeApplier {
@@ -997,22 +985,13 @@ fn run_projection_table(out: &Path) -> (u64, u64) {
     // Every no-receipt / no-consume outcome does not consume.
     let no_consume: [(&str, GovernanceModeledDurableConsumeSinkOutcome); 13] = [
         ("legacy-bypass", Sink::LegacyBypassNoReceipt),
-        (
-            "rejected-before-pipeline",
-            Sink::RejectedBeforePipelineNoReceipt,
-        ),
+        ("rejected-before-pipeline", Sink::RejectedBeforePipelineNoReceipt),
         (
             "pipeline-did-not-authorize",
             Sink::PipelineDidNotAuthorizeConsumeNoReceipt,
         ),
-        (
-            "duplicate-idempotent",
-            Sink::ConsumeReceiptDuplicateIdempotent,
-        ),
-        (
-            "rejected-before-record",
-            Sink::ConsumeReceiptRejectedBeforeRecord,
-        ),
+        ("duplicate-idempotent", Sink::ConsumeReceiptDuplicateIdempotent),
+        ("rejected-before-record", Sink::ConsumeReceiptRejectedBeforeRecord),
         ("record-failed", Sink::ConsumeReceiptRecordFailedNoConsume),
         ("rolled-back", Sink::ConsumeReceiptRolledBackNoConsume),
         (
@@ -1023,10 +1002,7 @@ fn run_projection_table(out: &Path) -> (u64, u64) {
             "ambiguous-fail-closed",
             Sink::ConsumeReceiptAmbiguousFailClosedNoConsume,
         ),
-        (
-            "production-unavailable",
-            Sink::ProductionSinkUnavailableNoConsume,
-        ),
+        ("production-unavailable", Sink::ProductionSinkUnavailableNoConsume),
         ("mainnet-unavailable", Sink::MainNetSinkUnavailableNoConsume),
         (
             "mainnet-peer-driven-refused",
@@ -1345,15 +1321,11 @@ fn run_non_mutation_table(out: &Path) -> (u64, u64) {
     );
     t.assert_true(
         "G.mainnet-refused-mainnet",
-        modeled_consume_sink_mainnet_peer_driven_apply_refused_first(
-            TrustBundleEnvironment::Mainnet,
-        ),
+        modeled_consume_sink_mainnet_peer_driven_apply_refused_first(TrustBundleEnvironment::Mainnet),
     );
     t.assert_true(
         "G.mainnet-refused-not-devnet",
-        !modeled_consume_sink_mainnet_peer_driven_apply_refused_first(
-            TrustBundleEnvironment::Devnet,
-        ),
+        !modeled_consume_sink_mainnet_peer_driven_apply_refused_first(TrustBundleEnvironment::Devnet),
     );
     t.assert_true(
         "G.production-mainnet-unavailable",

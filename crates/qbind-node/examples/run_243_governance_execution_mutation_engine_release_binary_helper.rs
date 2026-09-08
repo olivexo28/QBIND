@@ -65,11 +65,11 @@ use qbind_node::pqc_governance_execution_mutation_engine::{
     validator_set_rotation_unsupported_by_mutation_engine,
     wire_governance_mutation_engine_callsite, AuthorizedMutationRequest, FixtureMutationExecutor,
     GovernanceMutationAction, GovernanceMutationCandidate, GovernanceMutationEngineExpectations,
-    GovernanceMutationEngineInput, GovernanceMutationEngineKind,
-    GovernanceMutationEnvironmentBinding, GovernanceMutationExecutor, GovernanceMutationOutcome,
-    GovernanceMutationPolicy, GovernanceMutationRuntimeBinding, GovernanceMutationSurface,
-    MainNetMutationExecutor, MutationEngineDurableProjection, MutationExecutionResult,
-    MutationWindow, MutationWindowObservation, ProductionMutationExecutor,
+    GovernanceMutationEngineInput, GovernanceMutationEngineKind, GovernanceMutationEnvironmentBinding,
+    GovernanceMutationExecutor, GovernanceMutationOutcome, GovernanceMutationPolicy,
+    GovernanceMutationRuntimeBinding, GovernanceMutationSurface, MainNetMutationExecutor,
+    MutationEngineDurableProjection, MutationExecutionResult, MutationWindow,
+    MutationWindowObservation, ProductionMutationExecutor,
 };
 use qbind_node::pqc_governance_execution_runtime_arming::GovernanceExecutionRuntimeSurface;
 use qbind_node::pqc_trust_bundle::TrustBundleEnvironment;
@@ -507,7 +507,10 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
         );
         t.check_outcome("A13.outcome", "mainnet-peer-driven-apply-refused", &o);
         t.assert_true("A13.no-executor", exec.attempts() == 0);
-        t.assert_true("A13.is-refusal", o.is_mainnet_peer_driven_apply_refused());
+        t.assert_true(
+            "A13.is-refusal",
+            o.is_mainnet_peer_driven_apply_refused(),
+        );
     }
 
     // A14 — MainNet peer-driven refusal precedes binding validation: even with a
@@ -654,7 +657,9 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
         );
         match r5 {
             Ok(_) => t.assert_true("A19.refusal-err", false),
-            Err(e) => t.assert_true("A19.refusal-err", e.is_mainnet_peer_driven_apply_refused()),
+            Err(e) => {
+                t.assert_true("A19.refusal-err", e.is_mainnet_peer_driven_apply_refused())
+            }
         }
     }
 
@@ -684,24 +689,15 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
             &c.expectations,
             &mut exec,
         );
-        t.check_outcome(
-            &format!("{id}.outcome"),
-            "mutation-rejected-before-apply",
-            &o,
-        );
+        t.check_outcome(&format!("{id}.outcome"), "mutation-rejected-before-apply", &o);
         t.assert_true(&format!("{id}.no-executor"), exec.attempts() == 0);
         t.assert_true(&format!("{id}.no-consume"), o.no_consume());
         t.assert_true(&format!("{id}.fail-closed"), o.is_fail_closed());
-        t.assert_true(
-            &format!("{id}.executor-must-not-run"),
-            o.executor_must_not_run(),
-        );
+        t.assert_true(&format!("{id}.executor-must-not-run"), o.executor_must_not_run());
     };
 
     // R1 — wrong environment.
-    rejection_case("R1", &|c| {
-        c.env.environment = TrustBundleEnvironment::Testnet
-    });
+    rejection_case("R1", &|c| c.env.environment = TrustBundleEnvironment::Testnet);
     // R2 — wrong chain.
     rejection_case("R2", &|c| c.env.chain_id = "wrong-chain".to_string());
     // R3 — wrong genesis.
@@ -716,27 +712,17 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
             GovernanceExecutionRuntimeSurface::StartupP2pTrustBundle
     });
     // R6 — wrong candidate digest.
-    rejection_case("R6", &|c| {
-        c.candidate.candidate_digest = "wrong-candidate".to_string()
-    });
+    rejection_case("R6", &|c| c.candidate.candidate_digest = "wrong-candidate".to_string());
     // R7 — wrong decision digest.
-    rejection_case("R7", &|c| {
-        c.candidate.decision_digest = "wrong-decision".to_string()
-    });
+    rejection_case("R7", &|c| c.candidate.decision_digest = "wrong-decision".to_string());
     // R8 — wrong proposal id.
-    rejection_case("R8", &|c| {
-        c.candidate.proposal_id = "wrong-proposal".to_string()
-    });
+    rejection_case("R8", &|c| c.candidate.proposal_id = "wrong-proposal".to_string());
     // R9 — wrong decision id.
-    rejection_case("R9", &|c| {
-        c.candidate.decision_id = "wrong-decision-id".to_string()
-    });
+    rejection_case("R9", &|c| c.candidate.decision_id = "wrong-decision-id".to_string());
     // R10 — wrong authority-domain sequence.
     rejection_case("R10", &|c| c.candidate.authority_domain_sequence = 99);
     // R11 — wrong lifecycle action.
-    rejection_case("R11", &|c| {
-        c.candidate.lifecycle_action = LocalLifecycleAction::Revoke
-    });
+    rejection_case("R11", &|c| c.candidate.lifecycle_action = LocalLifecycleAction::Revoke);
     // R12 — malformed candidate (empty mandatory field).
     rejection_case("R12", &|c| c.candidate.candidate_digest = String::new());
 
@@ -1007,7 +993,10 @@ fn run_recovery_table(out: &Path) -> (u64, u64) {
             &exec,
         );
         t.check_outcome("V8.outcome", "mainnet-peer-driven-apply-refused", &o);
-        t.assert_true("V8.is-refusal", o.is_mainnet_peer_driven_apply_refused());
+        t.assert_true(
+            "V8.is-refusal",
+            o.is_mainnet_peer_driven_apply_refused(),
+        );
     }
 
     t.finish(out)
@@ -1053,11 +1042,7 @@ fn run_projection_table(out: &Path) -> (u64, u64) {
         "durable-completion:apply-failed",
     );
     // J4 — MutationRolledBack does not consume.
-    no_consume(
-        "J4",
-        O::MutationRolledBack,
-        "durable-completion:rolled-back",
-    );
+    no_consume("J4", O::MutationRolledBack, "durable-completion:rolled-back");
     // J5 — MutationAmbiguousFailClosed does not consume.
     no_consume(
         "J5",
@@ -1141,16 +1126,8 @@ fn run_reachability_table(out: &Path) -> (u64, u64) {
                 reason: "x".to_string(),
             },
         ),
-        (
-            "T.apply-failed",
-            "mutation-apply-failed",
-            O::MutationApplyFailed,
-        ),
-        (
-            "T.rolled-back",
-            "mutation-rolled-back",
-            O::MutationRolledBack,
-        ),
+        ("T.apply-failed", "mutation-apply-failed", O::MutationApplyFailed),
+        ("T.rolled-back", "mutation-rolled-back", O::MutationRolledBack),
         (
             "T.ambiguous",
             "mutation-ambiguous-fail-closed",
@@ -1187,11 +1164,7 @@ fn run_reachability_table(out: &Path) -> (u64, u64) {
 
     // Engine kind tags.
     for (id, expected, k) in [
-        (
-            "K.disabled",
-            "disabled",
-            GovernanceMutationEngineKind::Disabled,
-        ),
+        ("K.disabled", "disabled", GovernanceMutationEngineKind::Disabled),
         (
             "K.fixture-devnet",
             "fixture-devnet",
@@ -1242,20 +1215,14 @@ fn run_reachability_table(out: &Path) -> (u64, u64) {
         t.assert_true("PR.applied-success", applied.is_applied_successfully());
         t.assert_true("PR.applied-not-no-consume", !applied.no_consume());
         let authorized = O::MutationAuthorized;
-        t.assert_true(
-            "PR.authorized-not-applied",
-            authorized.is_authorized_not_applied(),
-        );
+        t.assert_true("PR.authorized-not-applied", authorized.is_authorized_not_applied());
         t.assert_true("PR.authorized-no-consume", authorized.no_consume());
         let bypass = O::ProceedLegacyBypassNoMutation;
         t.assert_true("PR.bypass-is-bypass", bypass.is_legacy_bypass());
         t.assert_true("PR.bypass-not-fail-closed", !bypass.is_fail_closed());
         let refused = O::MainNetPeerDrivenApplyRefused;
         t.assert_true("PR.refused", refused.is_mainnet_peer_driven_apply_refused());
-        t.assert_true(
-            "PR.refused-executor-must-not-run",
-            refused.executor_must_not_run(),
-        );
+        t.assert_true("PR.refused-executor-must-not-run", refused.executor_must_not_run());
     }
 
     // Grep-verifiable invariant / fail-closed helper invariants.

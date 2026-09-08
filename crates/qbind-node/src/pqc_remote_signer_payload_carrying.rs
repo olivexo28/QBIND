@@ -125,8 +125,7 @@ use crate::pqc_authority_custody::{
     AuthorityCustodyAttestation, AuthorityCustodyClass, AuthorityCustodyPolicy,
 };
 use crate::pqc_authority_custody_payload_carrying::{
-    parse_optional_authority_custody_attestation_sibling_from_json_value,
-    AuthorityCustodyLoadStatus,
+    parse_optional_authority_custody_attestation_sibling_from_json_value, AuthorityCustodyLoadStatus,
 };
 use crate::pqc_authority_lifecycle::{AuthorityTrustDomain, LocalLifecycleAction};
 use crate::pqc_authority_state::{
@@ -443,12 +442,10 @@ impl RemoteSignerAttestationWire {
         &self,
     ) -> Result<RemoteSignerAttestationParts, RemoteSignerAttestationWireParseError> {
         if self.schema_version != REMOTE_SIGNER_ATTESTATION_WIRE_SCHEMA_VERSION {
-            return Err(
-                RemoteSignerAttestationWireParseError::UnknownSchemaVersion {
-                    got: self.schema_version,
-                    expected: REMOTE_SIGNER_ATTESTATION_WIRE_SCHEMA_VERSION,
-                },
-            );
+            return Err(RemoteSignerAttestationWireParseError::UnknownSchemaVersion {
+                got: self.schema_version,
+                expected: REMOTE_SIGNER_ATTESTATION_WIRE_SCHEMA_VERSION,
+            });
         }
         let identity = self.identity.to_identity()?;
         let request = self.request.to_request()?;
@@ -666,11 +663,11 @@ pub fn parse_optional_remote_signer_attestation_sibling_from_json_value(
                     RemoteSignerAttestationPayloadParseError::Wire(e),
                 ),
             },
-            Err(e) => {
-                RemoteSignerLoadStatus::Malformed(RemoteSignerAttestationPayloadParseError::Json {
+            Err(e) => RemoteSignerLoadStatus::Malformed(
+                RemoteSignerAttestationPayloadParseError::Json {
                     error: e.to_string(),
-                })
-            }
+                },
+            ),
         },
     }
 }
@@ -710,8 +707,10 @@ pub struct LoadedV2RatificationSidecarWithRemoteSignerAttestation {
 /// swap, no session eviction, no Run 070 call.
 pub fn load_v2_ratification_sidecar_with_remote_signer_attestation_from_path(
     path: &Path,
-) -> Result<LoadedV2RatificationSidecarWithRemoteSignerAttestation, VersionedRatificationInputError>
-{
+) -> Result<
+    LoadedV2RatificationSidecarWithRemoteSignerAttestation,
+    VersionedRatificationInputError,
+> {
     let bytes = std::fs::read(path).map_err(|error| VersionedRatificationInputError::Io {
         path: path.to_path_buf(),
         error,
@@ -729,8 +728,10 @@ pub fn load_v2_ratification_sidecar_with_remote_signer_attestation_from_path(
 pub fn load_v2_ratification_sidecar_with_remote_signer_attestation_from_bytes(
     bytes: &[u8],
     path_for_diagnostics: &Path,
-) -> Result<LoadedV2RatificationSidecarWithRemoteSignerAttestation, VersionedRatificationInputError>
-{
+) -> Result<
+    LoadedV2RatificationSidecarWithRemoteSignerAttestation,
+    VersionedRatificationInputError,
+> {
     let value: serde_json::Value =
         serde_json::from_slice(bytes).map_err(|e| VersionedRatificationInputError::JsonParse {
             path: path_for_diagnostics.to_path_buf(),
@@ -800,8 +801,9 @@ pub struct V2RatificationSidecarWithRemoteSignerAttestationWire {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub remote_signer_attestation: Option<RemoteSignerAttestationWire>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub authority_custody_attestation:
-        Option<crate::pqc_authority_custody_payload_carrying::AuthorityCustodyAttestationWire>,
+    pub authority_custody_attestation: Option<
+        crate::pqc_authority_custody_payload_carrying::AuthorityCustodyAttestationWire,
+    >,
 }
 
 // ===========================================================================

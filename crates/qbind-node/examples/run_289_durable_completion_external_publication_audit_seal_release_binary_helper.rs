@@ -85,13 +85,103 @@ use qbind_node::pqc_governance_durable_completion_consumer_settlement_projection
     DurableCompletionConsumerSettlementProjectionRequest,
     FixtureDurableCompletionConsumerSettlementProjectionSink,
 };
+use qbind_node::pqc_governance_durable_completion_settlement_commitment::{
+    settlement_commitment_identity_digest,
+    evaluate_durable_completion_settlement_commitment,
+    DurableCompletionSettlementCommitmentExpectations,
+    DurableCompletionSettlementCommitmentIdentity,
+    DurableCompletionSettlementCommitmentInput,
+    DurableCompletionSettlementCommitmentKind,
+    DurableCompletionSettlementCommitmentLedger,
+    DurableCompletionSettlementCommitmentOutcome,
+    DurableCompletionSettlementCommitmentPolicy,
+    DurableCompletionSettlementCommitmentRequest,
+    FixtureDurableCompletionSettlementCommitmentSink,
+};
+use qbind_node::pqc_governance_durable_completion_settlement_finalization::{
+    settlement_finalization_identity_digest,
+    evaluate_durable_completion_settlement_finalization,
+    DurableCompletionSettlementFinalizationExpectations,
+    DurableCompletionSettlementFinalizationIdentity,
+    DurableCompletionSettlementFinalizationInput,
+    DurableCompletionSettlementFinalizationKind,
+    DurableCompletionSettlementFinalizationLedger,
+    DurableCompletionSettlementFinalizationOutcome,
+    DurableCompletionSettlementFinalizationPolicy,
+    DurableCompletionSettlementFinalizationRequest,
+    FixtureDurableCompletionSettlementFinalizationSink,
+};
+use qbind_node::pqc_governance_durable_completion_settlement_receipt_acknowledgement::{
+    evaluate_durable_completion_settlement_receipt_acknowledgement,
+    settlement_receipt_acknowledgement_identity_digest,
+    DurableCompletionSettlementReceiptAcknowledgementExpectations,
+    DurableCompletionSettlementReceiptAcknowledgementIdentity,
+    DurableCompletionSettlementReceiptAcknowledgementInput,
+    DurableCompletionSettlementReceiptAcknowledgementKind,
+    DurableCompletionSettlementReceiptAcknowledgementLedger,
+    DurableCompletionSettlementReceiptAcknowledgementOutcome,
+    DurableCompletionSettlementReceiptAcknowledgementPolicy,
+    DurableCompletionSettlementReceiptAcknowledgementRequest,
+    FixtureDurableCompletionSettlementReceiptAcknowledgementSink,
+};
+use qbind_node::pqc_governance_durable_completion_settlement_outcome_report::{
+    evaluate_durable_completion_settlement_outcome_report,
+    settlement_outcome_report_identity_digest,
+    DurableCompletionSettlementOutcomeReportExpectations,
+    DurableCompletionSettlementOutcomeReportIdentity,
+    DurableCompletionSettlementOutcomeReportInput,
+    DurableCompletionSettlementOutcomeReportKind,
+    DurableCompletionSettlementOutcomeReportLedger,
+    DurableCompletionSettlementOutcomeReportOutcome,
+    DurableCompletionSettlementOutcomeReportPolicy,
+    DurableCompletionSettlementOutcomeReportRequest,
+    FixtureDurableCompletionSettlementOutcomeReportSink,
+};
+use qbind_node::pqc_governance_durable_completion_settlement_outcome_publication::{
+    evaluate_durable_completion_settlement_outcome_publication,
+    settlement_outcome_publication_identity_digest,
+    DurableCompletionSettlementOutcomePublicationExpectations,
+    DurableCompletionSettlementOutcomePublicationIdentity,
+    DurableCompletionSettlementOutcomePublicationInput,
+    DurableCompletionSettlementOutcomePublicationKind,
+    DurableCompletionSettlementOutcomePublicationLedger,
+    DurableCompletionSettlementOutcomePublicationOutcome,
+    DurableCompletionSettlementOutcomePublicationPolicy,
+    DurableCompletionSettlementOutcomePublicationRequest,
+    FixtureDurableCompletionSettlementOutcomePublicationSink,
+};
+use qbind_node::pqc_governance_durable_completion_external_publication_confirmation::{
+    external_publication_confirmation_identity_digest,
+    evaluate_durable_completion_external_publication_confirmation,
+    DurableCompletionExternalPublicationConfirmationExpectations,
+    DurableCompletionExternalPublicationConfirmationIdentity,
+    DurableCompletionExternalPublicationConfirmationInput,
+    DurableCompletionExternalPublicationConfirmationKind,
+    DurableCompletionExternalPublicationConfirmationLedger,
+    DurableCompletionExternalPublicationConfirmationOutcome,
+    DurableCompletionExternalPublicationConfirmationPolicy,
+    DurableCompletionExternalPublicationConfirmationRequest,
+    FixtureDurableCompletionExternalPublicationConfirmationSink,
+};
+use qbind_node::pqc_governance_durable_completion_external_publication_receipt::{
+    external_publication_receipt_identity_digest,
+    evaluate_durable_completion_external_publication_receipt,
+    DurableCompletionExternalPublicationReceiptExpectations,
+    DurableCompletionExternalPublicationReceiptIdentity,
+    DurableCompletionExternalPublicationReceiptInput,
+    DurableCompletionExternalPublicationReceiptKind,
+    DurableCompletionExternalPublicationReceiptLedger,
+    DurableCompletionExternalPublicationReceiptOutcome,
+    DurableCompletionExternalPublicationReceiptPolicy,
+    DurableCompletionExternalPublicationReceiptRequest,
+    FixtureDurableCompletionExternalPublicationReceiptSink,
+};
 use qbind_node::pqc_governance_durable_completion_external_publication_audit_seal::{
+    external_publication_audit_seal_identity_digest,
     durable_completion_external_publication_audit_seal_ambiguous_window_fails_closed,
     durable_completion_external_publication_audit_seal_attestation_required,
     durable_completion_external_publication_audit_seal_backend_submission_required,
     durable_completion_external_publication_audit_seal_completion_report_required,
-    durable_completion_external_publication_audit_seal_confirmation_required,
-    durable_completion_external_publication_audit_seal_consumer_required,
     durable_completion_external_publication_audit_seal_external_unavailable,
     durable_completion_external_publication_audit_seal_failed_record_never_records,
     durable_completion_external_publication_audit_seal_finalization_projection_required,
@@ -102,12 +192,6 @@ use qbind_node::pqc_governance_durable_completion_external_publication_audit_sea
     durable_completion_external_publication_audit_seal_never_writes_sequence_or_marker,
     durable_completion_external_publication_audit_seal_no_external_publication,
     durable_completion_external_publication_audit_seal_no_real_audit_ledger,
-    durable_completion_external_publication_audit_seal_no_real_external_publication_audit_archive,
-    durable_completion_external_publication_audit_seal_no_real_external_publication_audit_seal,
-    durable_completion_external_publication_audit_seal_no_real_settlement,
-    durable_completion_external_publication_audit_seal_no_real_settlement_finality,
-    durable_completion_external_publication_audit_seal_no_real_settlement_finality_projection,
-    durable_completion_external_publication_audit_seal_no_real_settlement_receipt,
     durable_completion_external_publication_audit_seal_no_rocksdb_file_schema_migration_change,
     durable_completion_external_publication_audit_seal_peer_majority_cannot_satisfy_mainnet_authority,
     durable_completion_external_publication_audit_seal_pipeline_success_required,
@@ -120,14 +204,22 @@ use qbind_node::pqc_governance_durable_completion_external_publication_audit_sea
     durable_completion_external_publication_audit_seal_sink_receipt_required,
     durable_completion_external_publication_audit_seal_validator_set_rotation_unsupported,
     evaluate_durable_completion_external_publication_audit_seal,
-    external_publication_audit_seal_identity_digest,
-    external_publication_audit_seal_outcome_authorizes_record,
-    external_publication_audit_seal_outcome_projects_to_recorded,
-    external_publication_audit_seal_record_digest, external_publication_audit_seal_request_digest,
-    external_publication_audit_seal_response_digest,
-    external_publication_audit_seal_transcript_digest,
     project_external_publication_audit_archive_outcome_to_external_publication_audit_seal_request,
     recover_durable_completion_external_publication_audit_seal_window,
+    external_publication_audit_seal_outcome_authorizes_record,
+    external_publication_audit_seal_outcome_projects_to_recorded,
+    external_publication_audit_seal_request_digest,
+    external_publication_audit_seal_response_digest,
+    external_publication_audit_seal_record_digest,
+    external_publication_audit_seal_transcript_digest,
+    durable_completion_external_publication_audit_seal_consumer_required,
+    durable_completion_external_publication_audit_seal_confirmation_required,
+    durable_completion_external_publication_audit_seal_no_real_settlement,
+    durable_completion_external_publication_audit_seal_no_real_settlement_finality,
+    durable_completion_external_publication_audit_seal_no_real_settlement_receipt,
+    durable_completion_external_publication_audit_seal_no_real_settlement_finality_projection,
+    durable_completion_external_publication_audit_seal_no_real_external_publication_audit_archive,
+    durable_completion_external_publication_audit_seal_no_real_external_publication_audit_seal,
     DurableCompletionExternalPublicationAuditSealBinding,
     DurableCompletionExternalPublicationAuditSealDigest,
     DurableCompletionExternalPublicationAuditSealEnvironment,
@@ -150,107 +242,13 @@ use qbind_node::pqc_governance_durable_completion_external_publication_audit_sea
     DurableCompletionExternalPublicationAuditSealTranscriptDigest,
     DurableCompletionExternalPublicationAuditSealWindow, ExternalExternalPublicationAuditSealSink,
     FixtureDurableCompletionExternalPublicationAuditSealSink,
-    GovernanceDurableCompletionExternalPublicationAuditSealSink,
-    MainNetExternalPublicationAuditSealSink, ProductionExternalPublicationAuditSealSink,
-};
-use qbind_node::pqc_governance_durable_completion_external_publication_confirmation::{
-    evaluate_durable_completion_external_publication_confirmation,
-    external_publication_confirmation_identity_digest,
-    DurableCompletionExternalPublicationConfirmationExpectations,
-    DurableCompletionExternalPublicationConfirmationIdentity,
-    DurableCompletionExternalPublicationConfirmationInput,
-    DurableCompletionExternalPublicationConfirmationKind,
-    DurableCompletionExternalPublicationConfirmationLedger,
-    DurableCompletionExternalPublicationConfirmationOutcome,
-    DurableCompletionExternalPublicationConfirmationPolicy,
-    DurableCompletionExternalPublicationConfirmationRequest,
-    FixtureDurableCompletionExternalPublicationConfirmationSink,
-};
-use qbind_node::pqc_governance_durable_completion_external_publication_receipt::{
-    evaluate_durable_completion_external_publication_receipt,
-    external_publication_receipt_identity_digest,
-    DurableCompletionExternalPublicationReceiptExpectations,
-    DurableCompletionExternalPublicationReceiptIdentity,
-    DurableCompletionExternalPublicationReceiptInput,
-    DurableCompletionExternalPublicationReceiptKind,
-    DurableCompletionExternalPublicationReceiptLedger,
-    DurableCompletionExternalPublicationReceiptOutcome,
-    DurableCompletionExternalPublicationReceiptPolicy,
-    DurableCompletionExternalPublicationReceiptRequest,
-    FixtureDurableCompletionExternalPublicationReceiptSink,
-};
-use qbind_node::pqc_governance_durable_completion_settlement_commitment::{
-    evaluate_durable_completion_settlement_commitment, settlement_commitment_identity_digest,
-    DurableCompletionSettlementCommitmentExpectations,
-    DurableCompletionSettlementCommitmentIdentity, DurableCompletionSettlementCommitmentInput,
-    DurableCompletionSettlementCommitmentKind, DurableCompletionSettlementCommitmentLedger,
-    DurableCompletionSettlementCommitmentOutcome, DurableCompletionSettlementCommitmentPolicy,
-    DurableCompletionSettlementCommitmentRequest, FixtureDurableCompletionSettlementCommitmentSink,
-};
-use qbind_node::pqc_governance_durable_completion_settlement_finalization::{
-    evaluate_durable_completion_settlement_finalization, settlement_finalization_identity_digest,
-    DurableCompletionSettlementFinalizationExpectations,
-    DurableCompletionSettlementFinalizationIdentity, DurableCompletionSettlementFinalizationInput,
-    DurableCompletionSettlementFinalizationKind, DurableCompletionSettlementFinalizationLedger,
-    DurableCompletionSettlementFinalizationOutcome, DurableCompletionSettlementFinalizationPolicy,
-    DurableCompletionSettlementFinalizationRequest,
-    FixtureDurableCompletionSettlementFinalizationSink,
-};
-use qbind_node::pqc_governance_durable_completion_settlement_outcome_publication::{
-    evaluate_durable_completion_settlement_outcome_publication,
-    settlement_outcome_publication_identity_digest,
-    DurableCompletionSettlementOutcomePublicationExpectations,
-    DurableCompletionSettlementOutcomePublicationIdentity,
-    DurableCompletionSettlementOutcomePublicationInput,
-    DurableCompletionSettlementOutcomePublicationKind,
-    DurableCompletionSettlementOutcomePublicationLedger,
-    DurableCompletionSettlementOutcomePublicationOutcome,
-    DurableCompletionSettlementOutcomePublicationPolicy,
-    DurableCompletionSettlementOutcomePublicationRequest,
-    FixtureDurableCompletionSettlementOutcomePublicationSink,
-};
-use qbind_node::pqc_governance_durable_completion_settlement_outcome_report::{
-    evaluate_durable_completion_settlement_outcome_report,
-    settlement_outcome_report_identity_digest,
-    DurableCompletionSettlementOutcomeReportExpectations,
-    DurableCompletionSettlementOutcomeReportIdentity,
-    DurableCompletionSettlementOutcomeReportInput, DurableCompletionSettlementOutcomeReportKind,
-    DurableCompletionSettlementOutcomeReportLedger,
-    DurableCompletionSettlementOutcomeReportOutcome,
-    DurableCompletionSettlementOutcomeReportPolicy,
-    DurableCompletionSettlementOutcomeReportRequest,
-    FixtureDurableCompletionSettlementOutcomeReportSink,
-};
-use qbind_node::pqc_governance_durable_completion_settlement_receipt_acknowledgement::{
-    evaluate_durable_completion_settlement_receipt_acknowledgement,
-    settlement_receipt_acknowledgement_identity_digest,
-    DurableCompletionSettlementReceiptAcknowledgementExpectations,
-    DurableCompletionSettlementReceiptAcknowledgementIdentity,
-    DurableCompletionSettlementReceiptAcknowledgementInput,
-    DurableCompletionSettlementReceiptAcknowledgementKind,
-    DurableCompletionSettlementReceiptAcknowledgementLedger,
-    DurableCompletionSettlementReceiptAcknowledgementOutcome,
-    DurableCompletionSettlementReceiptAcknowledgementPolicy,
-    DurableCompletionSettlementReceiptAcknowledgementRequest,
-    FixtureDurableCompletionSettlementReceiptAcknowledgementSink,
+    GovernanceDurableCompletionExternalPublicationAuditSealSink, MainNetExternalPublicationAuditSealSink,
+    ProductionExternalPublicationAuditSealSink,
 };
 
-use qbind_node::pqc_governance_durable_completion_external_publication_acknowledgement::{
-    evaluate_durable_completion_external_publication_acknowledgement,
-    external_publication_acknowledgement_identity_digest,
-    DurableCompletionExternalPublicationAcknowledgementExpectations,
-    DurableCompletionExternalPublicationAcknowledgementIdentity,
-    DurableCompletionExternalPublicationAcknowledgementInput,
-    DurableCompletionExternalPublicationAcknowledgementKind,
-    DurableCompletionExternalPublicationAcknowledgementLedger,
-    DurableCompletionExternalPublicationAcknowledgementOutcome,
-    DurableCompletionExternalPublicationAcknowledgementPolicy,
-    DurableCompletionExternalPublicationAcknowledgementRequest,
-    FixtureDurableCompletionExternalPublicationAcknowledgementSink,
-};
 use qbind_node::pqc_governance_durable_completion_external_publication_audit_archive::{
-    evaluate_durable_completion_external_publication_audit_archive,
     external_publication_audit_archive_identity_digest,
+    evaluate_durable_completion_external_publication_audit_archive,
     DurableCompletionExternalPublicationAuditArchiveExpectations,
     DurableCompletionExternalPublicationAuditArchiveIdentity,
     DurableCompletionExternalPublicationAuditArchiveInput,
@@ -261,9 +259,22 @@ use qbind_node::pqc_governance_durable_completion_external_publication_audit_arc
     DurableCompletionExternalPublicationAuditArchiveRequest,
     FixtureDurableCompletionExternalPublicationAuditArchiveSink,
 };
+use qbind_node::pqc_governance_durable_completion_external_publication_audit_finalization::{
+    external_publication_audit_finalization_identity_digest,
+    evaluate_durable_completion_external_publication_audit_finalization,
+    DurableCompletionExternalPublicationAuditFinalizationExpectations,
+    DurableCompletionExternalPublicationAuditFinalizationIdentity,
+    DurableCompletionExternalPublicationAuditFinalizationInput,
+    DurableCompletionExternalPublicationAuditFinalizationKind,
+    DurableCompletionExternalPublicationAuditFinalizationLedger,
+    DurableCompletionExternalPublicationAuditFinalizationOutcome,
+    DurableCompletionExternalPublicationAuditFinalizationPolicy,
+    DurableCompletionExternalPublicationAuditFinalizationRequest,
+    FixtureDurableCompletionExternalPublicationAuditFinalizationSink,
+};
 use qbind_node::pqc_governance_durable_completion_external_publication_audit_completion::{
-    evaluate_durable_completion_external_publication_audit_completion,
     external_publication_audit_completion_identity_digest,
+    evaluate_durable_completion_external_publication_audit_completion,
     DurableCompletionExternalPublicationAuditCompletionExpectations,
     DurableCompletionExternalPublicationAuditCompletionIdentity,
     DurableCompletionExternalPublicationAuditCompletionInput,
@@ -274,18 +285,18 @@ use qbind_node::pqc_governance_durable_completion_external_publication_audit_com
     DurableCompletionExternalPublicationAuditCompletionRequest,
     FixtureDurableCompletionExternalPublicationAuditCompletionSink,
 };
-use qbind_node::pqc_governance_durable_completion_external_publication_audit_finalization::{
-    evaluate_durable_completion_external_publication_audit_finalization,
-    external_publication_audit_finalization_identity_digest,
-    DurableCompletionExternalPublicationAuditFinalizationExpectations,
-    DurableCompletionExternalPublicationAuditFinalizationIdentity,
-    DurableCompletionExternalPublicationAuditFinalizationInput,
-    DurableCompletionExternalPublicationAuditFinalizationKind,
-    DurableCompletionExternalPublicationAuditFinalizationLedger,
-    DurableCompletionExternalPublicationAuditFinalizationOutcome,
-    DurableCompletionExternalPublicationAuditFinalizationPolicy,
-    DurableCompletionExternalPublicationAuditFinalizationRequest,
-    FixtureDurableCompletionExternalPublicationAuditFinalizationSink,
+use qbind_node::pqc_governance_durable_completion_external_publication_acknowledgement::{
+    external_publication_acknowledgement_identity_digest,
+    evaluate_durable_completion_external_publication_acknowledgement,
+    DurableCompletionExternalPublicationAcknowledgementExpectations,
+    DurableCompletionExternalPublicationAcknowledgementIdentity,
+    DurableCompletionExternalPublicationAcknowledgementInput,
+    DurableCompletionExternalPublicationAcknowledgementKind,
+    DurableCompletionExternalPublicationAcknowledgementLedger,
+    DurableCompletionExternalPublicationAcknowledgementOutcome,
+    DurableCompletionExternalPublicationAcknowledgementPolicy,
+    DurableCompletionExternalPublicationAcknowledgementRequest,
+    FixtureDurableCompletionExternalPublicationAcknowledgementSink,
 };
 use qbind_node::pqc_governance_execution_runtime_arming::GovernanceExecutionRuntimeSurface;
 use qbind_node::pqc_governance_modeled_durable_completion_attestation_projection::GovernanceModeledDurableCompletionAttestationOutcome;
@@ -341,20 +352,24 @@ const RECEIPT_ACKNOWLEDGEMENT_ID: &str = "fixture-settlement-receipt-acknowledge
 const RECEIPT_ACKNOWLEDGEMENT_DOMAIN_TAG: &str = "QBIND:run270:domain-separation:v1";
 const OUTCOME_REPORT_ID: &str = "fixture-settlement-outcome-report-0001";
 const OUTCOME_REPORT_DOMAIN_TAG: &str = "QBIND:run272:domain-separation:v1";
-const OUTCOME_REPORT_RECORD_ID: &str = "durable-completion-settlement-outcome-report-0001";
+const OUTCOME_REPORT_RECORD_ID: &str =
+    "durable-completion-settlement-outcome-report-0001";
 const OUTCOME_PUBLICATION_ID: &str = "fixture-settlement-outcome-publication-0001";
 const OUTCOME_PUBLICATION_DOMAIN_TAG: &str = "QBIND:run274:domain-separation:v1";
 const OUTCOME_PUBLICATION_RECORD_ID: &str =
     "durable-completion-settlement-outcome-publication-0001";
 const CONFIRMATION_ID: &str = "fixture-external-publication-confirmation-0001";
 const CONFIRMATION_DOMAIN_TAG: &str = "QBIND:run276:domain-separation:v1";
-const CONFIRMATION_RECORD_ID: &str = "durable-completion-external-publication-confirmation-0001";
+const CONFIRMATION_RECORD_ID: &str =
+    "durable-completion-external-publication-confirmation-0001";
 const RECEIPT_ID: &str = "fixture-external-publication-receipt-0001";
 const RECEIPT_DOMAIN_TAG: &str = "QBIND:run278:domain-separation:v1";
-const RECEIPT_RECORD_ID: &str = "durable-completion-external-publication-receipt-0001";
+const RECEIPT_RECORD_ID: &str =
+    "durable-completion-external-publication-receipt-0001";
 const EXT_PUB_ACK_ID: &str = "fixture-external-publication-acknowledgement-0001";
 const EXT_PUB_ACK_DOMAIN_TAG: &str = "QBIND:run280:domain-separation:v1";
-const EXT_PUB_ACK_RECORD_ID: &str = "durable-completion-external-publication-acknowledgement-0001";
+const EXT_PUB_ACK_RECORD_ID: &str =
+    "durable-completion-external-publication-acknowledgement-0001";
 const ACKNOWLEDGEMENT_ID: &str = "fixture-external-publication-audit-archive-0001";
 const ACKNOWLEDGEMENT_DOMAIN_TAG: &str = "QBIND:run284:domain-separation:v1";
 const ACKNOWLEDGEMENT_RECORD_ID: &str =
@@ -422,7 +437,9 @@ fn action_label(label: &str) -> ActionLabel {
         receipt_acknowledgement_record_id: format!(
             "durable-completion-settlement-receipt-acknowledgement-{label}"
         ),
-        outcome_report_record_id: format!("durable-completion-settlement-outcome-report-{label}"),
+        outcome_report_record_id: format!(
+            "durable-completion-settlement-outcome-report-{label}"
+        ),
         outcome_publication_record_id: format!(
             "durable-completion-settlement-outcome-publication-{label}"
         ),
@@ -468,10 +485,8 @@ fn default_action() -> ActionLabel {
         confirmation_record_id: CONFIRMATION_RECORD_ID.to_string(),
         external_publication_receipt_record_id: RECEIPT_RECORD_ID.to_string(),
         external_publication_acknowledgement_record_id: EXT_PUB_ACK_RECORD_ID.to_string(),
-        external_publication_audit_finalization_record_id: EXT_PUB_AUDIT_FINALIZATION2_RECORD_ID
-            .to_string(),
-        external_publication_audit_completion_record_id: EXT_PUB_AUDIT_FINALIZATION_RECORD_ID
-            .to_string(),
+        external_publication_audit_finalization_record_id: EXT_PUB_AUDIT_FINALIZATION2_RECORD_ID.to_string(),
+        external_publication_audit_completion_record_id: EXT_PUB_AUDIT_FINALIZATION_RECORD_ID.to_string(),
         external_publication_audit_archive_record_id: ACKNOWLEDGEMENT_RECORD_ID.to_string(),
         external_publication_audit_seal_record_id: AUDIT_FINALIZATION_RECORD_ID.to_string(),
         proposal_id: PROPOSAL.to_string(),
@@ -1168,6 +1183,7 @@ fn attach_run262_consumer(
     }
 }
 
+
 // ===========================================================================
 // Run 264 settlement-projection attachment (carried upstream input)
 // ===========================================================================
@@ -1310,8 +1326,7 @@ fn attach_run264_settlement_projection(
         expected_consumer_transcript_digest: consumer.transcript_digest.clone(),
         expected_consumer_record_id: consumer.consumer_record_id.clone(),
         expected_identity: id.clone(),
-        expected_projection_kind:
-            DurableCompletionConsumerSettlementProjectionKind::FixtureInMemory,
+        expected_projection_kind: DurableCompletionConsumerSettlementProjectionKind::FixtureInMemory,
         expected_projection_policy:
             DurableCompletionConsumerSettlementProjectionPolicy::FixtureAllowed,
         expected_domain_separation_tag: PROJECTION_DOMAIN_TAG.to_string(),
@@ -1411,7 +1426,8 @@ fn attach_run266_settlement_commitment(
     action: &ActionLabel,
     commitment_duplicate: bool,
 ) -> AttachedSettlementCommitment {
-    let settlement_projection = attach_run264_settlement_projection(environment, action, false);
+    let settlement_projection =
+        attach_run264_settlement_projection(environment, action, false);
     let consumer = settlement_projection.consumer.clone();
     let ack = &consumer.ack;
     let commitment_env = match environment {
@@ -1529,11 +1545,15 @@ fn attach_run266_settlement_commitment(
         expected_settlement_projection_identity_digest: settlement_projection
             .identity_digest
             .clone(),
-        expected_settlement_projection_request_digest: settlement_projection.request_digest.clone(),
+        expected_settlement_projection_request_digest: settlement_projection
+            .request_digest
+            .clone(),
         expected_settlement_projection_response_digest: settlement_projection
             .response_digest
             .clone(),
-        expected_settlement_projection_record_digest: settlement_projection.record_digest.clone(),
+        expected_settlement_projection_record_digest: settlement_projection
+            .record_digest
+            .clone(),
         expected_settlement_projection_transcript_digest: settlement_projection
             .transcript_digest
             .clone(),
@@ -1542,7 +1562,8 @@ fn attach_run266_settlement_commitment(
             .clone(),
         expected_identity: id.clone(),
         expected_commitment_kind: DurableCompletionSettlementCommitmentKind::FixtureInMemory,
-        expected_commitment_policy: DurableCompletionSettlementCommitmentPolicy::FixtureAllowed,
+        expected_commitment_policy:
+            DurableCompletionSettlementCommitmentPolicy::FixtureAllowed,
         expected_domain_separation_tag: COMMITMENT_DOMAIN_TAG.to_string(),
     };
     let input = DurableCompletionSettlementCommitmentInput {
@@ -1635,7 +1656,8 @@ fn attach_run268_settlement_finalization(
     action: &ActionLabel,
     finalization_duplicate: bool,
 ) -> AttachedSettlementFinalization {
-    let settlement_commitment = attach_run266_settlement_commitment(environment, action, false);
+    let settlement_commitment =
+        attach_run266_settlement_commitment(environment, action, false);
     let consumer = settlement_commitment.consumer.clone();
     let ack = &consumer.ack;
     let finalization_env = match environment {
@@ -1753,11 +1775,15 @@ fn attach_run268_settlement_finalization(
         expected_settlement_commitment_identity_digest: settlement_commitment
             .identity_digest
             .clone(),
-        expected_settlement_commitment_request_digest: settlement_commitment.request_digest.clone(),
+        expected_settlement_commitment_request_digest: settlement_commitment
+            .request_digest
+            .clone(),
         expected_settlement_commitment_response_digest: settlement_commitment
             .response_digest
             .clone(),
-        expected_settlement_commitment_record_digest: settlement_commitment.record_digest.clone(),
+        expected_settlement_commitment_record_digest: settlement_commitment
+            .record_digest
+            .clone(),
         expected_settlement_commitment_transcript_digest: settlement_commitment
             .transcript_digest
             .clone(),
@@ -1766,7 +1792,8 @@ fn attach_run268_settlement_finalization(
             .clone(),
         expected_identity: id.clone(),
         expected_finalization_kind: DurableCompletionSettlementFinalizationKind::FixtureInMemory,
-        expected_finalization_policy: DurableCompletionSettlementFinalizationPolicy::FixtureAllowed,
+        expected_finalization_policy:
+            DurableCompletionSettlementFinalizationPolicy::FixtureAllowed,
         expected_domain_separation_tag: FINALIZATION_DOMAIN_TAG.to_string(),
     };
     let input = DurableCompletionSettlementFinalizationInput {
@@ -1849,8 +1876,7 @@ struct AttachedSettlementReceiptAcknowledgement {
     settlement_finalization: AttachedSettlementFinalization,
 }
 
-fn run270_receipt_acknowledgement_identity(
-) -> DurableCompletionSettlementReceiptAcknowledgementIdentity {
+fn run270_receipt_acknowledgement_identity() -> DurableCompletionSettlementReceiptAcknowledgementIdentity {
     DurableCompletionSettlementReceiptAcknowledgementIdentity {
         finalization_id: RECEIPT_ACKNOWLEDGEMENT_ID.to_string(),
         kind: DurableCompletionSettlementReceiptAcknowledgementKind::FixtureInMemory,
@@ -1864,7 +1890,8 @@ fn attach_run270_settlement_receipt_acknowledgement(
     action: &ActionLabel,
     receipt_acknowledgement_duplicate: bool,
 ) -> AttachedSettlementReceiptAcknowledgement {
-    let settlement_finalization = attach_run268_settlement_finalization(environment, action, false);
+    let settlement_finalization =
+        attach_run268_settlement_finalization(environment, action, false);
     let consumer = settlement_finalization.consumer.clone();
     let ack = &consumer.ack;
     let receipt_acknowledgement_env = match environment {
@@ -1932,17 +1959,13 @@ fn attach_run270_settlement_receipt_acknowledgement(
         settlement_finalization_request_digest: settlement_finalization.request_digest.clone(),
         settlement_finalization_response_digest: settlement_finalization.response_digest.clone(),
         settlement_finalization_record_digest: settlement_finalization.record_digest.clone(),
-        settlement_finalization_transcript_digest: settlement_finalization
-            .transcript_digest
-            .clone(),
+        settlement_finalization_transcript_digest: settlement_finalization.transcript_digest.clone(),
         settlement_finalization_record_id: settlement_finalization.finalization_record_id.clone(),
         identity: id.clone(),
         domain_separation_tag: RECEIPT_ACKNOWLEDGEMENT_DOMAIN_TAG.to_string(),
     };
     let expectations = DurableCompletionSettlementReceiptAcknowledgementExpectations {
-        expected_receipt_acknowledgement_record_id: action
-            .receipt_acknowledgement_record_id
-            .clone(),
+        expected_receipt_acknowledgement_record_id: action.receipt_acknowledgement_record_id.clone(),
         expected_environment: receipt_acknowledgement_env,
         expected_chain_id: CHAIN.to_string(),
         expected_genesis_hash: GENESIS.to_string(),
@@ -1983,29 +2006,19 @@ fn attach_run270_settlement_receipt_acknowledgement(
         expected_consumer_record_digest: consumer.record_digest.clone(),
         expected_consumer_transcript_digest: consumer.transcript_digest.clone(),
         expected_consumer_record_id: consumer.consumer_record_id.clone(),
-        expected_settlement_finalization_identity_digest: settlement_finalization
-            .identity_digest
-            .clone(),
-        expected_settlement_finalization_request_digest: settlement_finalization
-            .request_digest
-            .clone(),
+        expected_settlement_finalization_identity_digest: settlement_finalization.identity_digest.clone(),
+        expected_settlement_finalization_request_digest: settlement_finalization.request_digest.clone(),
         expected_settlement_finalization_response_digest: settlement_finalization
             .response_digest
             .clone(),
-        expected_settlement_finalization_record_digest: settlement_finalization
-            .record_digest
-            .clone(),
+        expected_settlement_finalization_record_digest: settlement_finalization.record_digest.clone(),
         expected_settlement_finalization_transcript_digest: settlement_finalization
             .transcript_digest
             .clone(),
-        expected_settlement_finalization_record_id: settlement_finalization
-            .finalization_record_id
-            .clone(),
+        expected_settlement_finalization_record_id: settlement_finalization.finalization_record_id.clone(),
         expected_identity: id.clone(),
-        expected_receipt_acknowledgement_kind:
-            DurableCompletionSettlementReceiptAcknowledgementKind::FixtureInMemory,
-        expected_receipt_acknowledgement_policy:
-            DurableCompletionSettlementReceiptAcknowledgementPolicy::FixtureAllowed,
+        expected_receipt_acknowledgement_kind: DurableCompletionSettlementReceiptAcknowledgementKind::FixtureInMemory,
+        expected_receipt_acknowledgement_policy: DurableCompletionSettlementReceiptAcknowledgementPolicy::FixtureAllowed,
         expected_domain_separation_tag: RECEIPT_ACKNOWLEDGEMENT_DOMAIN_TAG.to_string(),
     };
     let input = DurableCompletionSettlementReceiptAcknowledgementInput {
@@ -2170,24 +2183,12 @@ fn attach_run272_settlement_outcome_report(
         consumer_record_digest: consumer.record_digest.clone(),
         consumer_transcript_digest: consumer.transcript_digest.clone(),
         consumer_record_id: consumer.consumer_record_id.clone(),
-        settlement_receipt_acknowledgement_identity_digest: settlement_receipt_acknowledgement
-            .identity_digest
-            .clone(),
-        settlement_receipt_acknowledgement_request_digest: settlement_receipt_acknowledgement
-            .request_digest
-            .clone(),
-        settlement_receipt_acknowledgement_response_digest: settlement_receipt_acknowledgement
-            .response_digest
-            .clone(),
-        settlement_receipt_acknowledgement_record_digest: settlement_receipt_acknowledgement
-            .record_digest
-            .clone(),
-        settlement_receipt_acknowledgement_transcript_digest: settlement_receipt_acknowledgement
-            .transcript_digest
-            .clone(),
-        settlement_receipt_acknowledgement_record_id: settlement_receipt_acknowledgement
-            .receipt_acknowledgement_record_id
-            .clone(),
+        settlement_receipt_acknowledgement_identity_digest: settlement_receipt_acknowledgement.identity_digest.clone(),
+        settlement_receipt_acknowledgement_request_digest: settlement_receipt_acknowledgement.request_digest.clone(),
+        settlement_receipt_acknowledgement_response_digest: settlement_receipt_acknowledgement.response_digest.clone(),
+        settlement_receipt_acknowledgement_record_digest: settlement_receipt_acknowledgement.record_digest.clone(),
+        settlement_receipt_acknowledgement_transcript_digest: settlement_receipt_acknowledgement.transcript_digest.clone(),
+        settlement_receipt_acknowledgement_record_id: settlement_receipt_acknowledgement.receipt_acknowledgement_record_id.clone(),
         identity: id.clone(),
         domain_separation_tag: OUTCOME_REPORT_DOMAIN_TAG.to_string(),
     };
@@ -2233,23 +2234,19 @@ fn attach_run272_settlement_outcome_report(
         expected_consumer_record_digest: consumer.record_digest.clone(),
         expected_consumer_transcript_digest: consumer.transcript_digest.clone(),
         expected_consumer_record_id: consumer.consumer_record_id.clone(),
-        expected_settlement_receipt_acknowledgement_identity_digest:
-            settlement_receipt_acknowledgement.identity_digest.clone(),
-        expected_settlement_receipt_acknowledgement_request_digest:
-            settlement_receipt_acknowledgement.request_digest.clone(),
-        expected_settlement_receipt_acknowledgement_response_digest:
-            settlement_receipt_acknowledgement.response_digest.clone(),
-        expected_settlement_receipt_acknowledgement_record_digest:
-            settlement_receipt_acknowledgement.record_digest.clone(),
-        expected_settlement_receipt_acknowledgement_transcript_digest:
-            settlement_receipt_acknowledgement.transcript_digest.clone(),
-        expected_settlement_receipt_acknowledgement_record_id: settlement_receipt_acknowledgement
-            .receipt_acknowledgement_record_id
+        expected_settlement_receipt_acknowledgement_identity_digest: settlement_receipt_acknowledgement.identity_digest.clone(),
+        expected_settlement_receipt_acknowledgement_request_digest: settlement_receipt_acknowledgement.request_digest.clone(),
+        expected_settlement_receipt_acknowledgement_response_digest: settlement_receipt_acknowledgement
+            .response_digest
             .clone(),
+        expected_settlement_receipt_acknowledgement_record_digest: settlement_receipt_acknowledgement.record_digest.clone(),
+        expected_settlement_receipt_acknowledgement_transcript_digest: settlement_receipt_acknowledgement
+            .transcript_digest
+            .clone(),
+        expected_settlement_receipt_acknowledgement_record_id: settlement_receipt_acknowledgement.receipt_acknowledgement_record_id.clone(),
         expected_identity: id.clone(),
         expected_outcome_report_kind: DurableCompletionSettlementOutcomeReportKind::FixtureInMemory,
-        expected_outcome_report_policy:
-            DurableCompletionSettlementOutcomeReportPolicy::FixtureAllowed,
+        expected_outcome_report_policy: DurableCompletionSettlementOutcomeReportPolicy::FixtureAllowed,
         expected_domain_separation_tag: OUTCOME_REPORT_DOMAIN_TAG.to_string(),
     };
     let input = DurableCompletionSettlementOutcomeReportInput {
@@ -2414,20 +2411,12 @@ fn attach_run274_settlement_outcome_publication(
         consumer_record_digest: consumer.record_digest.clone(),
         consumer_transcript_digest: consumer.transcript_digest.clone(),
         consumer_record_id: consumer.consumer_record_id.clone(),
-        settlement_outcome_report_identity_digest: settlement_outcome_report
-            .identity_digest
-            .clone(),
+        settlement_outcome_report_identity_digest: settlement_outcome_report.identity_digest.clone(),
         settlement_outcome_report_request_digest: settlement_outcome_report.request_digest.clone(),
-        settlement_outcome_report_response_digest: settlement_outcome_report
-            .response_digest
-            .clone(),
+        settlement_outcome_report_response_digest: settlement_outcome_report.response_digest.clone(),
         settlement_outcome_report_record_digest: settlement_outcome_report.record_digest.clone(),
-        settlement_outcome_report_transcript_digest: settlement_outcome_report
-            .transcript_digest
-            .clone(),
-        settlement_outcome_report_record_id: settlement_outcome_report
-            .outcome_report_record_id
-            .clone(),
+        settlement_outcome_report_transcript_digest: settlement_outcome_report.transcript_digest.clone(),
+        settlement_outcome_report_record_id: settlement_outcome_report.outcome_report_record_id.clone(),
         identity: id.clone(),
         domain_separation_tag: OUTCOME_PUBLICATION_DOMAIN_TAG.to_string(),
     };
@@ -2473,29 +2462,19 @@ fn attach_run274_settlement_outcome_publication(
         expected_consumer_record_digest: consumer.record_digest.clone(),
         expected_consumer_transcript_digest: consumer.transcript_digest.clone(),
         expected_consumer_record_id: consumer.consumer_record_id.clone(),
-        expected_settlement_outcome_report_identity_digest: settlement_outcome_report
-            .identity_digest
-            .clone(),
-        expected_settlement_outcome_report_request_digest: settlement_outcome_report
-            .request_digest
-            .clone(),
+        expected_settlement_outcome_report_identity_digest: settlement_outcome_report.identity_digest.clone(),
+        expected_settlement_outcome_report_request_digest: settlement_outcome_report.request_digest.clone(),
         expected_settlement_outcome_report_response_digest: settlement_outcome_report
             .response_digest
             .clone(),
-        expected_settlement_outcome_report_record_digest: settlement_outcome_report
-            .record_digest
-            .clone(),
+        expected_settlement_outcome_report_record_digest: settlement_outcome_report.record_digest.clone(),
         expected_settlement_outcome_report_transcript_digest: settlement_outcome_report
             .transcript_digest
             .clone(),
-        expected_settlement_outcome_report_record_id: settlement_outcome_report
-            .outcome_report_record_id
-            .clone(),
+        expected_settlement_outcome_report_record_id: settlement_outcome_report.outcome_report_record_id.clone(),
         expected_identity: id.clone(),
-        expected_outcome_publication_kind:
-            DurableCompletionSettlementOutcomePublicationKind::FixtureInMemory,
-        expected_outcome_publication_policy:
-            DurableCompletionSettlementOutcomePublicationPolicy::FixtureAllowed,
+        expected_outcome_publication_kind: DurableCompletionSettlementOutcomePublicationKind::FixtureInMemory,
+        expected_outcome_publication_policy: DurableCompletionSettlementOutcomePublicationPolicy::FixtureAllowed,
         expected_domain_separation_tag: OUTCOME_PUBLICATION_DOMAIN_TAG.to_string(),
     };
     let input = DurableCompletionSettlementOutcomePublicationInput {
@@ -2661,24 +2640,12 @@ fn attach_run276_external_publication_confirmation(
         consumer_record_digest: consumer.record_digest.clone(),
         consumer_transcript_digest: consumer.transcript_digest.clone(),
         consumer_record_id: consumer.consumer_record_id.clone(),
-        settlement_outcome_publication_identity_digest: settlement_outcome_publication
-            .identity_digest
-            .clone(),
-        settlement_outcome_publication_request_digest: settlement_outcome_publication
-            .request_digest
-            .clone(),
-        settlement_outcome_publication_response_digest: settlement_outcome_publication
-            .response_digest
-            .clone(),
-        settlement_outcome_publication_record_digest: settlement_outcome_publication
-            .record_digest
-            .clone(),
-        settlement_outcome_publication_transcript_digest: settlement_outcome_publication
-            .transcript_digest
-            .clone(),
-        settlement_outcome_publication_record_id: settlement_outcome_publication
-            .outcome_publication_record_id
-            .clone(),
+        settlement_outcome_publication_identity_digest: settlement_outcome_publication.identity_digest.clone(),
+        settlement_outcome_publication_request_digest: settlement_outcome_publication.request_digest.clone(),
+        settlement_outcome_publication_response_digest: settlement_outcome_publication.response_digest.clone(),
+        settlement_outcome_publication_record_digest: settlement_outcome_publication.record_digest.clone(),
+        settlement_outcome_publication_transcript_digest: settlement_outcome_publication.transcript_digest.clone(),
+        settlement_outcome_publication_record_id: settlement_outcome_publication.outcome_publication_record_id.clone(),
         identity: id.clone(),
         domain_separation_tag: CONFIRMATION_DOMAIN_TAG.to_string(),
     };
@@ -2724,29 +2691,19 @@ fn attach_run276_external_publication_confirmation(
         expected_consumer_record_digest: consumer.record_digest.clone(),
         expected_consumer_transcript_digest: consumer.transcript_digest.clone(),
         expected_consumer_record_id: consumer.consumer_record_id.clone(),
-        expected_settlement_outcome_publication_identity_digest: settlement_outcome_publication
-            .identity_digest
-            .clone(),
-        expected_settlement_outcome_publication_request_digest: settlement_outcome_publication
-            .request_digest
-            .clone(),
+        expected_settlement_outcome_publication_identity_digest: settlement_outcome_publication.identity_digest.clone(),
+        expected_settlement_outcome_publication_request_digest: settlement_outcome_publication.request_digest.clone(),
         expected_settlement_outcome_publication_response_digest: settlement_outcome_publication
             .response_digest
             .clone(),
-        expected_settlement_outcome_publication_record_digest: settlement_outcome_publication
-            .record_digest
-            .clone(),
+        expected_settlement_outcome_publication_record_digest: settlement_outcome_publication.record_digest.clone(),
         expected_settlement_outcome_publication_transcript_digest: settlement_outcome_publication
             .transcript_digest
             .clone(),
-        expected_settlement_outcome_publication_record_id: settlement_outcome_publication
-            .outcome_publication_record_id
-            .clone(),
+        expected_settlement_outcome_publication_record_id: settlement_outcome_publication.outcome_publication_record_id.clone(),
         expected_identity: id.clone(),
-        expected_confirmation_kind:
-            DurableCompletionExternalPublicationConfirmationKind::FixtureInMemory,
-        expected_confirmation_policy:
-            DurableCompletionExternalPublicationConfirmationPolicy::FixtureAllowed,
+        expected_confirmation_kind: DurableCompletionExternalPublicationConfirmationKind::FixtureInMemory,
+        expected_confirmation_policy: DurableCompletionExternalPublicationConfirmationPolicy::FixtureAllowed,
         expected_domain_separation_tag: CONFIRMATION_DOMAIN_TAG.to_string(),
     };
     let input = DurableCompletionExternalPublicationConfirmationInput {
@@ -2870,9 +2827,7 @@ fn attach_run278_external_publication_receipt(
     };
     let id = run278_confirmation_identity();
     let request = DurableCompletionExternalPublicationReceiptRequest {
-        external_publication_receipt_record_id: action
-            .external_publication_receipt_record_id
-            .clone(),
+        external_publication_receipt_record_id: action.external_publication_receipt_record_id.clone(),
         environment: confirmation_env,
         chain_id: CHAIN.to_string(),
         genesis_hash: GENESIS.to_string(),
@@ -2913,31 +2868,17 @@ fn attach_run278_external_publication_receipt(
         consumer_record_digest: consumer.record_digest.clone(),
         consumer_transcript_digest: consumer.transcript_digest.clone(),
         consumer_record_id: consumer.consumer_record_id.clone(),
-        external_publication_confirmation_identity_digest: external_publication_confirmation
-            .identity_digest
-            .clone(),
-        external_publication_confirmation_request_digest: external_publication_confirmation
-            .request_digest
-            .clone(),
-        external_publication_confirmation_response_digest: external_publication_confirmation
-            .response_digest
-            .clone(),
-        external_publication_confirmation_record_digest: external_publication_confirmation
-            .record_digest
-            .clone(),
-        external_publication_confirmation_transcript_digest: external_publication_confirmation
-            .transcript_digest
-            .clone(),
-        external_publication_confirmation_record_id: external_publication_confirmation
-            .confirmation_record_id
-            .clone(),
+        external_publication_confirmation_identity_digest: external_publication_confirmation.identity_digest.clone(),
+        external_publication_confirmation_request_digest: external_publication_confirmation.request_digest.clone(),
+        external_publication_confirmation_response_digest: external_publication_confirmation.response_digest.clone(),
+        external_publication_confirmation_record_digest: external_publication_confirmation.record_digest.clone(),
+        external_publication_confirmation_transcript_digest: external_publication_confirmation.transcript_digest.clone(),
+        external_publication_confirmation_record_id: external_publication_confirmation.confirmation_record_id.clone(),
         identity: id.clone(),
         domain_separation_tag: RECEIPT_DOMAIN_TAG.to_string(),
     };
     let expectations = DurableCompletionExternalPublicationReceiptExpectations {
-        expected_external_publication_receipt_record_id: action
-            .external_publication_receipt_record_id
-            .clone(),
+        expected_external_publication_receipt_record_id: action.external_publication_receipt_record_id.clone(),
         expected_environment: confirmation_env,
         expected_chain_id: CHAIN.to_string(),
         expected_genesis_hash: GENESIS.to_string(),
@@ -2978,25 +2919,19 @@ fn attach_run278_external_publication_receipt(
         expected_consumer_record_digest: consumer.record_digest.clone(),
         expected_consumer_transcript_digest: consumer.transcript_digest.clone(),
         expected_consumer_record_id: consumer.consumer_record_id.clone(),
-        expected_external_publication_confirmation_identity_digest:
-            external_publication_confirmation.identity_digest.clone(),
-        expected_external_publication_confirmation_request_digest:
-            external_publication_confirmation.request_digest.clone(),
-        expected_external_publication_confirmation_response_digest:
-            external_publication_confirmation.response_digest.clone(),
-        expected_external_publication_confirmation_record_digest: external_publication_confirmation
-            .record_digest
+        expected_external_publication_confirmation_identity_digest: external_publication_confirmation.identity_digest.clone(),
+        expected_external_publication_confirmation_request_digest: external_publication_confirmation.request_digest.clone(),
+        expected_external_publication_confirmation_response_digest: external_publication_confirmation
+            .response_digest
             .clone(),
-        expected_external_publication_confirmation_transcript_digest:
-            external_publication_confirmation.transcript_digest.clone(),
-        expected_external_publication_confirmation_record_id: external_publication_confirmation
-            .confirmation_record_id
+        expected_external_publication_confirmation_record_digest: external_publication_confirmation.record_digest.clone(),
+        expected_external_publication_confirmation_transcript_digest: external_publication_confirmation
+            .transcript_digest
             .clone(),
+        expected_external_publication_confirmation_record_id: external_publication_confirmation.confirmation_record_id.clone(),
         expected_identity: id.clone(),
-        expected_external_publication_receipt_kind:
-            DurableCompletionExternalPublicationReceiptKind::FixtureInMemory,
-        expected_external_publication_receipt_policy:
-            DurableCompletionExternalPublicationReceiptPolicy::FixtureAllowed,
+        expected_external_publication_receipt_kind: DurableCompletionExternalPublicationReceiptKind::FixtureInMemory,
+        expected_external_publication_receipt_policy: DurableCompletionExternalPublicationReceiptPolicy::FixtureAllowed,
         expected_domain_separation_tag: RECEIPT_DOMAIN_TAG.to_string(),
     };
     let input = DurableCompletionExternalPublicationReceiptInput {
@@ -3052,9 +2987,7 @@ fn attach_run278_external_publication_receipt(
         .expect("recorded Run 278 settlement outcome publication");
     AttachedExternalPublicationReceipt {
         outcome,
-        external_publication_receipt_record_id: action
-            .external_publication_receipt_record_id
-            .clone(),
+        external_publication_receipt_record_id: action.external_publication_receipt_record_id.clone(),
         identity_digest: external_publication_receipt_identity_digest(&id)
             .as_hex()
             .to_string(),
@@ -3123,9 +3056,7 @@ fn attach_run280_external_publication_acknowledgement(
     };
     let id = run280_confirmation_identity();
     let request = DurableCompletionExternalPublicationAcknowledgementRequest {
-        external_publication_acknowledgement_record_id: action
-            .external_publication_acknowledgement_record_id
-            .clone(),
+        external_publication_acknowledgement_record_id: action.external_publication_acknowledgement_record_id.clone(),
         environment: confirmation_env,
         chain_id: CHAIN.to_string(),
         genesis_hash: GENESIS.to_string(),
@@ -3166,31 +3097,17 @@ fn attach_run280_external_publication_acknowledgement(
         consumer_record_digest: consumer.record_digest.clone(),
         consumer_transcript_digest: consumer.transcript_digest.clone(),
         consumer_record_id: consumer.consumer_record_id.clone(),
-        external_publication_receipt_identity_digest: external_publication_receipt
-            .identity_digest
-            .clone(),
-        external_publication_receipt_request_digest: external_publication_receipt
-            .request_digest
-            .clone(),
-        external_publication_receipt_response_digest: external_publication_receipt
-            .response_digest
-            .clone(),
-        external_publication_receipt_record_digest: external_publication_receipt
-            .record_digest
-            .clone(),
-        external_publication_receipt_transcript_digest: external_publication_receipt
-            .transcript_digest
-            .clone(),
-        external_publication_receipt_record_id: external_publication_receipt
-            .external_publication_receipt_record_id
-            .clone(),
+        external_publication_receipt_identity_digest: external_publication_receipt.identity_digest.clone(),
+        external_publication_receipt_request_digest: external_publication_receipt.request_digest.clone(),
+        external_publication_receipt_response_digest: external_publication_receipt.response_digest.clone(),
+        external_publication_receipt_record_digest: external_publication_receipt.record_digest.clone(),
+        external_publication_receipt_transcript_digest: external_publication_receipt.transcript_digest.clone(),
+        external_publication_receipt_record_id: external_publication_receipt.external_publication_receipt_record_id.clone(),
         identity: id.clone(),
         domain_separation_tag: EXT_PUB_ACK_DOMAIN_TAG.to_string(),
     };
     let expectations = DurableCompletionExternalPublicationAcknowledgementExpectations {
-        expected_external_publication_acknowledgement_record_id: action
-            .external_publication_acknowledgement_record_id
-            .clone(),
+        expected_external_publication_acknowledgement_record_id: action.external_publication_acknowledgement_record_id.clone(),
         expected_environment: confirmation_env,
         expected_chain_id: CHAIN.to_string(),
         expected_genesis_hash: GENESIS.to_string(),
@@ -3231,29 +3148,19 @@ fn attach_run280_external_publication_acknowledgement(
         expected_consumer_record_digest: consumer.record_digest.clone(),
         expected_consumer_transcript_digest: consumer.transcript_digest.clone(),
         expected_consumer_record_id: consumer.consumer_record_id.clone(),
-        expected_external_publication_receipt_identity_digest: external_publication_receipt
-            .identity_digest
-            .clone(),
-        expected_external_publication_receipt_request_digest: external_publication_receipt
-            .request_digest
-            .clone(),
+        expected_external_publication_receipt_identity_digest: external_publication_receipt.identity_digest.clone(),
+        expected_external_publication_receipt_request_digest: external_publication_receipt.request_digest.clone(),
         expected_external_publication_receipt_response_digest: external_publication_receipt
             .response_digest
             .clone(),
-        expected_external_publication_receipt_record_digest: external_publication_receipt
-            .record_digest
-            .clone(),
+        expected_external_publication_receipt_record_digest: external_publication_receipt.record_digest.clone(),
         expected_external_publication_receipt_transcript_digest: external_publication_receipt
             .transcript_digest
             .clone(),
-        expected_external_publication_receipt_record_id: external_publication_receipt
-            .external_publication_receipt_record_id
-            .clone(),
+        expected_external_publication_receipt_record_id: external_publication_receipt.external_publication_receipt_record_id.clone(),
         expected_identity: id.clone(),
-        expected_external_publication_acknowledgement_kind:
-            DurableCompletionExternalPublicationAcknowledgementKind::FixtureInMemory,
-        expected_external_publication_acknowledgement_policy:
-            DurableCompletionExternalPublicationAcknowledgementPolicy::FixtureAllowed,
+        expected_external_publication_acknowledgement_kind: DurableCompletionExternalPublicationAcknowledgementKind::FixtureInMemory,
+        expected_external_publication_acknowledgement_policy: DurableCompletionExternalPublicationAcknowledgementPolicy::FixtureAllowed,
         expected_domain_separation_tag: EXT_PUB_ACK_DOMAIN_TAG.to_string(),
     };
     let input = DurableCompletionExternalPublicationAcknowledgementInput {
@@ -3309,9 +3216,7 @@ fn attach_run280_external_publication_acknowledgement(
         .expect("recorded Run 280 external-publication-acknowledgement");
     AttachedExternalPublicationAcknowledgement {
         outcome,
-        external_publication_acknowledgement_record_id: action
-            .external_publication_acknowledgement_record_id
-            .clone(),
+        external_publication_acknowledgement_record_id: action.external_publication_acknowledgement_record_id.clone(),
         identity_digest: external_publication_acknowledgement_identity_digest(&id)
             .as_hex()
             .to_string(),
@@ -3379,73 +3284,59 @@ fn attach_run282_external_publication_audit_finalization(
         authority_domain_sequence: SEQUENCE,
     };
     let id = run282_confirmation_identity();
-    let request =
-        DurableCompletionExternalPublicationAuditFinalizationRequest {
-            external_publication_audit_finalization_record_id: action
-                .external_publication_audit_finalization_record_id
-                .clone(),
-            environment: confirmation_env,
-            chain_id: CHAIN.to_string(),
-            genesis_hash: GENESIS.to_string(),
-            governance_surface: surface,
-            validation_surface: surface,
-            mutation_surface: surface,
-            proposal_id: action.proposal_id.clone(),
-            decision_id: action.decision_id.clone(),
-            candidate_digest: action.candidate_digest.clone(),
-            authority_domain_sequence: SEQUENCE,
-            pipeline_decision_digest: PIPELINE_DIGEST.to_string(),
-            sink_decision_digest: SINK_DIGEST.to_string(),
-            reporter_decision_digest: REPORTER_DIGEST.to_string(),
-            finalization_decision_digest: FINALIZATION_DECISION_DIGEST.to_string(),
-            attestation_digest: ATTESTATION_DIGEST.to_string(),
-            attestation_id: ATTESTATION_ID.to_string(),
-            backend_identity_digest: ack.receipt.backend.identity_digest.clone(),
-            backend_request_digest: ack.receipt.backend.request_digest.clone(),
-            backend_response_digest: ack.receipt.backend.response_digest.clone(),
-            backend_receipt_digest: ack.receipt.backend.receipt_digest.clone(),
-            backend_transcript_digest: ack.receipt.backend.transcript_digest.clone(),
-            backend_record_id: ack.receipt.backend.backend_record_id.clone(),
-            receipt_identity_digest: ack.receipt.identity_digest.clone(),
-            receipt_request_digest: ack.receipt.request_digest.clone(),
-            receipt_response_digest: ack.receipt.response_digest.clone(),
-            receipt_record_digest: ack.receipt.record_digest.clone(),
-            receipt_transcript_digest: ack.receipt.transcript_digest.clone(),
-            receipt_record_id: ack.receipt.receipt_record_id.clone(),
-            acknowledgement_identity_digest: ack.identity_digest.clone(),
-            acknowledgement_request_digest: ack.request_digest.clone(),
-            acknowledgement_response_digest: ack.response_digest.clone(),
-            acknowledgement_record_digest: ack.record_digest.clone(),
-            acknowledgement_transcript_digest: ack.transcript_digest.clone(),
-            acknowledgement_record_id: ack.ack_record_id.clone(),
-            consumer_identity_digest: consumer.identity_digest.clone(),
-            consumer_request_digest: consumer.request_digest.clone(),
-            consumer_response_digest: consumer.response_digest.clone(),
-            consumer_record_digest: consumer.record_digest.clone(),
-            consumer_transcript_digest: consumer.transcript_digest.clone(),
-            consumer_record_id: consumer.consumer_record_id.clone(),
-            external_publication_acknowledgement_identity_digest:
-                external_publication_acknowledgement.identity_digest.clone(),
-            external_publication_acknowledgement_request_digest:
-                external_publication_acknowledgement.request_digest.clone(),
-            external_publication_acknowledgement_response_digest:
-                external_publication_acknowledgement.response_digest.clone(),
-            external_publication_acknowledgement_record_digest:
-                external_publication_acknowledgement.record_digest.clone(),
-            external_publication_acknowledgement_transcript_digest:
-                external_publication_acknowledgement
-                    .transcript_digest
-                    .clone(),
-            external_publication_acknowledgement_record_id: external_publication_acknowledgement
-                .external_publication_acknowledgement_record_id
-                .clone(),
-            identity: id.clone(),
-            domain_separation_tag: EXT_PUB_AUDIT_FINALIZATION2_DOMAIN_TAG.to_string(),
-        };
+    let request = DurableCompletionExternalPublicationAuditFinalizationRequest {
+        external_publication_audit_finalization_record_id: action.external_publication_audit_finalization_record_id.clone(),
+        environment: confirmation_env,
+        chain_id: CHAIN.to_string(),
+        genesis_hash: GENESIS.to_string(),
+        governance_surface: surface,
+        validation_surface: surface,
+        mutation_surface: surface,
+        proposal_id: action.proposal_id.clone(),
+        decision_id: action.decision_id.clone(),
+        candidate_digest: action.candidate_digest.clone(),
+        authority_domain_sequence: SEQUENCE,
+        pipeline_decision_digest: PIPELINE_DIGEST.to_string(),
+        sink_decision_digest: SINK_DIGEST.to_string(),
+        reporter_decision_digest: REPORTER_DIGEST.to_string(),
+        finalization_decision_digest: FINALIZATION_DECISION_DIGEST.to_string(),
+        attestation_digest: ATTESTATION_DIGEST.to_string(),
+        attestation_id: ATTESTATION_ID.to_string(),
+        backend_identity_digest: ack.receipt.backend.identity_digest.clone(),
+        backend_request_digest: ack.receipt.backend.request_digest.clone(),
+        backend_response_digest: ack.receipt.backend.response_digest.clone(),
+        backend_receipt_digest: ack.receipt.backend.receipt_digest.clone(),
+        backend_transcript_digest: ack.receipt.backend.transcript_digest.clone(),
+        backend_record_id: ack.receipt.backend.backend_record_id.clone(),
+        receipt_identity_digest: ack.receipt.identity_digest.clone(),
+        receipt_request_digest: ack.receipt.request_digest.clone(),
+        receipt_response_digest: ack.receipt.response_digest.clone(),
+        receipt_record_digest: ack.receipt.record_digest.clone(),
+        receipt_transcript_digest: ack.receipt.transcript_digest.clone(),
+        receipt_record_id: ack.receipt.receipt_record_id.clone(),
+        acknowledgement_identity_digest: ack.identity_digest.clone(),
+        acknowledgement_request_digest: ack.request_digest.clone(),
+        acknowledgement_response_digest: ack.response_digest.clone(),
+        acknowledgement_record_digest: ack.record_digest.clone(),
+        acknowledgement_transcript_digest: ack.transcript_digest.clone(),
+        acknowledgement_record_id: ack.ack_record_id.clone(),
+        consumer_identity_digest: consumer.identity_digest.clone(),
+        consumer_request_digest: consumer.request_digest.clone(),
+        consumer_response_digest: consumer.response_digest.clone(),
+        consumer_record_digest: consumer.record_digest.clone(),
+        consumer_transcript_digest: consumer.transcript_digest.clone(),
+        consumer_record_id: consumer.consumer_record_id.clone(),
+        external_publication_acknowledgement_identity_digest: external_publication_acknowledgement.identity_digest.clone(),
+        external_publication_acknowledgement_request_digest: external_publication_acknowledgement.request_digest.clone(),
+        external_publication_acknowledgement_response_digest: external_publication_acknowledgement.response_digest.clone(),
+        external_publication_acknowledgement_record_digest: external_publication_acknowledgement.record_digest.clone(),
+        external_publication_acknowledgement_transcript_digest: external_publication_acknowledgement.transcript_digest.clone(),
+        external_publication_acknowledgement_record_id: external_publication_acknowledgement.external_publication_acknowledgement_record_id.clone(),
+        identity: id.clone(),
+        domain_separation_tag: EXT_PUB_AUDIT_FINALIZATION2_DOMAIN_TAG.to_string(),
+    };
     let expectations = DurableCompletionExternalPublicationAuditFinalizationExpectations {
-        expected_external_publication_audit_finalization_record_id: action
-            .external_publication_audit_finalization_record_id
-            .clone(),
+        expected_external_publication_audit_finalization_record_id: action.external_publication_audit_finalization_record_id.clone(),
         expected_environment: confirmation_env,
         expected_chain_id: CHAIN.to_string(),
         expected_genesis_hash: GENESIS.to_string(),
@@ -3486,27 +3377,19 @@ fn attach_run282_external_publication_audit_finalization(
         expected_consumer_record_digest: consumer.record_digest.clone(),
         expected_consumer_transcript_digest: consumer.transcript_digest.clone(),
         expected_consumer_record_id: consumer.consumer_record_id.clone(),
-        expected_external_publication_acknowledgement_identity_digest:
-            external_publication_acknowledgement.identity_digest.clone(),
-        expected_external_publication_acknowledgement_request_digest:
-            external_publication_acknowledgement.request_digest.clone(),
-        expected_external_publication_acknowledgement_response_digest:
-            external_publication_acknowledgement.response_digest.clone(),
-        expected_external_publication_acknowledgement_record_digest:
-            external_publication_acknowledgement.record_digest.clone(),
-        expected_external_publication_acknowledgement_transcript_digest:
-            external_publication_acknowledgement
-                .transcript_digest
-                .clone(),
-        expected_external_publication_acknowledgement_record_id:
-            external_publication_acknowledgement
-                .external_publication_acknowledgement_record_id
-                .clone(),
+        expected_external_publication_acknowledgement_identity_digest: external_publication_acknowledgement.identity_digest.clone(),
+        expected_external_publication_acknowledgement_request_digest: external_publication_acknowledgement.request_digest.clone(),
+        expected_external_publication_acknowledgement_response_digest: external_publication_acknowledgement
+            .response_digest
+            .clone(),
+        expected_external_publication_acknowledgement_record_digest: external_publication_acknowledgement.record_digest.clone(),
+        expected_external_publication_acknowledgement_transcript_digest: external_publication_acknowledgement
+            .transcript_digest
+            .clone(),
+        expected_external_publication_acknowledgement_record_id: external_publication_acknowledgement.external_publication_acknowledgement_record_id.clone(),
         expected_identity: id.clone(),
-        expected_external_publication_audit_finalization_kind:
-            DurableCompletionExternalPublicationAuditFinalizationKind::FixtureInMemory,
-        expected_external_publication_audit_finalization_policy:
-            DurableCompletionExternalPublicationAuditFinalizationPolicy::FixtureAllowed,
+        expected_external_publication_audit_finalization_kind: DurableCompletionExternalPublicationAuditFinalizationKind::FixtureInMemory,
+        expected_external_publication_audit_finalization_policy: DurableCompletionExternalPublicationAuditFinalizationPolicy::FixtureAllowed,
         expected_domain_separation_tag: EXT_PUB_AUDIT_FINALIZATION2_DOMAIN_TAG.to_string(),
     };
     let input = DurableCompletionExternalPublicationAuditFinalizationInput {
@@ -3562,9 +3445,7 @@ fn attach_run282_external_publication_audit_finalization(
         .expect("recorded Run 282 settlement outcome publication");
     AttachedExternalPublicationAuditFinalization {
         outcome,
-        external_publication_audit_finalization_record_id: action
-            .external_publication_audit_finalization_record_id
-            .clone(),
+        external_publication_audit_finalization_record_id: action.external_publication_audit_finalization_record_id.clone(),
         identity_digest: external_publication_audit_finalization_identity_digest(&id)
             .as_hex()
             .to_string(),
@@ -3573,8 +3454,7 @@ fn attach_run282_external_publication_audit_finalization(
         record_digest: record.record_digest.as_hex().to_string(),
         transcript_digest: record.transcript_digest.as_hex().to_string(),
         consumer,
-        external_publication_receipt: external_publication_acknowledgement
-            .external_publication_receipt,
+        external_publication_receipt: external_publication_acknowledgement.external_publication_receipt,
     }
 }
 
@@ -3628,9 +3508,7 @@ fn attach_run284_external_publication_audit_completion(
     };
     let id = run284_confirmation_identity();
     let request = DurableCompletionExternalPublicationAuditCompletionRequest {
-        external_publication_audit_completion_record_id: action
-            .external_publication_audit_completion_record_id
-            .clone(),
+        external_publication_audit_completion_record_id: action.external_publication_audit_completion_record_id.clone(),
         environment: confirmation_env,
         chain_id: CHAIN.to_string(),
         genesis_hash: GENESIS.to_string(),
@@ -3671,36 +3549,17 @@ fn attach_run284_external_publication_audit_completion(
         consumer_record_digest: consumer.record_digest.clone(),
         consumer_transcript_digest: consumer.transcript_digest.clone(),
         consumer_record_id: consumer.consumer_record_id.clone(),
-        external_publication_audit_finalization_identity_digest:
-            external_publication_audit_finalization
-                .identity_digest
-                .clone(),
-        external_publication_audit_finalization_request_digest:
-            external_publication_audit_finalization
-                .request_digest
-                .clone(),
-        external_publication_audit_finalization_response_digest:
-            external_publication_audit_finalization
-                .response_digest
-                .clone(),
-        external_publication_audit_finalization_record_digest:
-            external_publication_audit_finalization
-                .record_digest
-                .clone(),
-        external_publication_audit_finalization_transcript_digest:
-            external_publication_audit_finalization
-                .transcript_digest
-                .clone(),
-        external_publication_audit_finalization_record_id: external_publication_audit_finalization
-            .external_publication_audit_finalization_record_id
-            .clone(),
+        external_publication_audit_finalization_identity_digest: external_publication_audit_finalization.identity_digest.clone(),
+        external_publication_audit_finalization_request_digest: external_publication_audit_finalization.request_digest.clone(),
+        external_publication_audit_finalization_response_digest: external_publication_audit_finalization.response_digest.clone(),
+        external_publication_audit_finalization_record_digest: external_publication_audit_finalization.record_digest.clone(),
+        external_publication_audit_finalization_transcript_digest: external_publication_audit_finalization.transcript_digest.clone(),
+        external_publication_audit_finalization_record_id: external_publication_audit_finalization.external_publication_audit_finalization_record_id.clone(),
         identity: id.clone(),
         domain_separation_tag: EXT_PUB_AUDIT_FINALIZATION_DOMAIN_TAG.to_string(),
     };
     let expectations = DurableCompletionExternalPublicationAuditCompletionExpectations {
-        expected_external_publication_audit_completion_record_id: action
-            .external_publication_audit_completion_record_id
-            .clone(),
+        expected_external_publication_audit_completion_record_id: action.external_publication_audit_completion_record_id.clone(),
         expected_environment: confirmation_env,
         expected_chain_id: CHAIN.to_string(),
         expected_genesis_hash: GENESIS.to_string(),
@@ -3741,35 +3600,19 @@ fn attach_run284_external_publication_audit_completion(
         expected_consumer_record_digest: consumer.record_digest.clone(),
         expected_consumer_transcript_digest: consumer.transcript_digest.clone(),
         expected_consumer_record_id: consumer.consumer_record_id.clone(),
-        expected_external_publication_audit_finalization_identity_digest:
-            external_publication_audit_finalization
-                .identity_digest
-                .clone(),
-        expected_external_publication_audit_finalization_request_digest:
-            external_publication_audit_finalization
-                .request_digest
-                .clone(),
-        expected_external_publication_audit_finalization_response_digest:
-            external_publication_audit_finalization
-                .response_digest
-                .clone(),
-        expected_external_publication_audit_finalization_record_digest:
-            external_publication_audit_finalization
-                .record_digest
-                .clone(),
-        expected_external_publication_audit_finalization_transcript_digest:
-            external_publication_audit_finalization
-                .transcript_digest
-                .clone(),
-        expected_external_publication_audit_finalization_record_id:
-            external_publication_audit_finalization
-                .external_publication_audit_finalization_record_id
-                .clone(),
+        expected_external_publication_audit_finalization_identity_digest: external_publication_audit_finalization.identity_digest.clone(),
+        expected_external_publication_audit_finalization_request_digest: external_publication_audit_finalization.request_digest.clone(),
+        expected_external_publication_audit_finalization_response_digest: external_publication_audit_finalization
+            .response_digest
+            .clone(),
+        expected_external_publication_audit_finalization_record_digest: external_publication_audit_finalization.record_digest.clone(),
+        expected_external_publication_audit_finalization_transcript_digest: external_publication_audit_finalization
+            .transcript_digest
+            .clone(),
+        expected_external_publication_audit_finalization_record_id: external_publication_audit_finalization.external_publication_audit_finalization_record_id.clone(),
         expected_identity: id.clone(),
-        expected_external_publication_audit_completion_kind:
-            DurableCompletionExternalPublicationAuditCompletionKind::FixtureInMemory,
-        expected_external_publication_audit_completion_policy:
-            DurableCompletionExternalPublicationAuditCompletionPolicy::FixtureAllowed,
+        expected_external_publication_audit_completion_kind: DurableCompletionExternalPublicationAuditCompletionKind::FixtureInMemory,
+        expected_external_publication_audit_completion_policy: DurableCompletionExternalPublicationAuditCompletionPolicy::FixtureAllowed,
         expected_domain_separation_tag: EXT_PUB_AUDIT_FINALIZATION_DOMAIN_TAG.to_string(),
     };
     let input = DurableCompletionExternalPublicationAuditCompletionInput {
@@ -3825,9 +3668,7 @@ fn attach_run284_external_publication_audit_completion(
         .expect("recorded Run 284 settlement outcome publication");
     AttachedExternalPublicationAuditCompletion {
         outcome,
-        external_publication_audit_completion_record_id: action
-            .external_publication_audit_completion_record_id
-            .clone(),
+        external_publication_audit_completion_record_id: action.external_publication_audit_completion_record_id.clone(),
         identity_digest: external_publication_audit_completion_identity_digest(&id)
             .as_hex()
             .to_string(),
@@ -3836,8 +3677,7 @@ fn attach_run284_external_publication_audit_completion(
         record_digest: record.record_digest.as_hex().to_string(),
         transcript_digest: record.transcript_digest.as_hex().to_string(),
         consumer,
-        external_publication_receipt: external_publication_audit_finalization
-            .external_publication_receipt,
+        external_publication_receipt: external_publication_audit_finalization.external_publication_receipt,
     }
 }
 
@@ -3893,77 +3733,59 @@ fn attach_run286_external_publication_audit_archive(
         authority_domain_sequence: SEQUENCE,
     };
     let id = run286_confirmation_identity();
-    let request =
-        DurableCompletionExternalPublicationAuditArchiveRequest {
-            external_publication_audit_archive_record_id: action
-                .external_publication_audit_archive_record_id
-                .clone(),
-            environment: confirmation_env,
-            chain_id: CHAIN.to_string(),
-            genesis_hash: GENESIS.to_string(),
-            governance_surface: surface,
-            validation_surface: surface,
-            mutation_surface: surface,
-            proposal_id: action.proposal_id.clone(),
-            decision_id: action.decision_id.clone(),
-            candidate_digest: action.candidate_digest.clone(),
-            authority_domain_sequence: SEQUENCE,
-            pipeline_decision_digest: PIPELINE_DIGEST.to_string(),
-            sink_decision_digest: SINK_DIGEST.to_string(),
-            reporter_decision_digest: REPORTER_DIGEST.to_string(),
-            finalization_decision_digest: FINALIZATION_DECISION_DIGEST.to_string(),
-            attestation_digest: ATTESTATION_DIGEST.to_string(),
-            attestation_id: ATTESTATION_ID.to_string(),
-            backend_identity_digest: ack.receipt.backend.identity_digest.clone(),
-            backend_request_digest: ack.receipt.backend.request_digest.clone(),
-            backend_response_digest: ack.receipt.backend.response_digest.clone(),
-            backend_receipt_digest: ack.receipt.backend.receipt_digest.clone(),
-            backend_transcript_digest: ack.receipt.backend.transcript_digest.clone(),
-            backend_record_id: ack.receipt.backend.backend_record_id.clone(),
-            receipt_identity_digest: ack.receipt.identity_digest.clone(),
-            receipt_request_digest: ack.receipt.request_digest.clone(),
-            receipt_response_digest: ack.receipt.response_digest.clone(),
-            receipt_record_digest: ack.receipt.record_digest.clone(),
-            receipt_transcript_digest: ack.receipt.transcript_digest.clone(),
-            receipt_record_id: ack.receipt.receipt_record_id.clone(),
-            acknowledgement_identity_digest: ack.identity_digest.clone(),
-            acknowledgement_request_digest: ack.request_digest.clone(),
-            acknowledgement_response_digest: ack.response_digest.clone(),
-            acknowledgement_record_digest: ack.record_digest.clone(),
-            acknowledgement_transcript_digest: ack.transcript_digest.clone(),
-            acknowledgement_record_id: ack.ack_record_id.clone(),
-            consumer_identity_digest: consumer.identity_digest.clone(),
-            consumer_request_digest: consumer.request_digest.clone(),
-            consumer_response_digest: consumer.response_digest.clone(),
-            consumer_record_digest: consumer.record_digest.clone(),
-            consumer_transcript_digest: consumer.transcript_digest.clone(),
-            consumer_record_id: consumer.consumer_record_id.clone(),
-            external_publication_audit_completion_identity_digest:
-                external_publication_audit_completion
-                    .identity_digest
-                    .clone(),
-            external_publication_audit_completion_request_digest:
-                external_publication_audit_completion.request_digest.clone(),
-            external_publication_audit_completion_response_digest:
-                external_publication_audit_completion
-                    .response_digest
-                    .clone(),
-            external_publication_audit_completion_record_digest:
-                external_publication_audit_completion.record_digest.clone(),
-            external_publication_audit_completion_transcript_digest:
-                external_publication_audit_completion
-                    .transcript_digest
-                    .clone(),
-            external_publication_audit_completion_record_id: external_publication_audit_completion
-                .external_publication_audit_completion_record_id
-                .clone(),
-            identity: id.clone(),
-            domain_separation_tag: ACKNOWLEDGEMENT_DOMAIN_TAG.to_string(),
-        };
+    let request = DurableCompletionExternalPublicationAuditArchiveRequest {
+        external_publication_audit_archive_record_id: action.external_publication_audit_archive_record_id.clone(),
+        environment: confirmation_env,
+        chain_id: CHAIN.to_string(),
+        genesis_hash: GENESIS.to_string(),
+        governance_surface: surface,
+        validation_surface: surface,
+        mutation_surface: surface,
+        proposal_id: action.proposal_id.clone(),
+        decision_id: action.decision_id.clone(),
+        candidate_digest: action.candidate_digest.clone(),
+        authority_domain_sequence: SEQUENCE,
+        pipeline_decision_digest: PIPELINE_DIGEST.to_string(),
+        sink_decision_digest: SINK_DIGEST.to_string(),
+        reporter_decision_digest: REPORTER_DIGEST.to_string(),
+        finalization_decision_digest: FINALIZATION_DECISION_DIGEST.to_string(),
+        attestation_digest: ATTESTATION_DIGEST.to_string(),
+        attestation_id: ATTESTATION_ID.to_string(),
+        backend_identity_digest: ack.receipt.backend.identity_digest.clone(),
+        backend_request_digest: ack.receipt.backend.request_digest.clone(),
+        backend_response_digest: ack.receipt.backend.response_digest.clone(),
+        backend_receipt_digest: ack.receipt.backend.receipt_digest.clone(),
+        backend_transcript_digest: ack.receipt.backend.transcript_digest.clone(),
+        backend_record_id: ack.receipt.backend.backend_record_id.clone(),
+        receipt_identity_digest: ack.receipt.identity_digest.clone(),
+        receipt_request_digest: ack.receipt.request_digest.clone(),
+        receipt_response_digest: ack.receipt.response_digest.clone(),
+        receipt_record_digest: ack.receipt.record_digest.clone(),
+        receipt_transcript_digest: ack.receipt.transcript_digest.clone(),
+        receipt_record_id: ack.receipt.receipt_record_id.clone(),
+        acknowledgement_identity_digest: ack.identity_digest.clone(),
+        acknowledgement_request_digest: ack.request_digest.clone(),
+        acknowledgement_response_digest: ack.response_digest.clone(),
+        acknowledgement_record_digest: ack.record_digest.clone(),
+        acknowledgement_transcript_digest: ack.transcript_digest.clone(),
+        acknowledgement_record_id: ack.ack_record_id.clone(),
+        consumer_identity_digest: consumer.identity_digest.clone(),
+        consumer_request_digest: consumer.request_digest.clone(),
+        consumer_response_digest: consumer.response_digest.clone(),
+        consumer_record_digest: consumer.record_digest.clone(),
+        consumer_transcript_digest: consumer.transcript_digest.clone(),
+        consumer_record_id: consumer.consumer_record_id.clone(),
+        external_publication_audit_completion_identity_digest: external_publication_audit_completion.identity_digest.clone(),
+        external_publication_audit_completion_request_digest: external_publication_audit_completion.request_digest.clone(),
+        external_publication_audit_completion_response_digest: external_publication_audit_completion.response_digest.clone(),
+        external_publication_audit_completion_record_digest: external_publication_audit_completion.record_digest.clone(),
+        external_publication_audit_completion_transcript_digest: external_publication_audit_completion.transcript_digest.clone(),
+        external_publication_audit_completion_record_id: external_publication_audit_completion.external_publication_audit_completion_record_id.clone(),
+        identity: id.clone(),
+        domain_separation_tag: ACKNOWLEDGEMENT_DOMAIN_TAG.to_string(),
+    };
     let expectations = DurableCompletionExternalPublicationAuditArchiveExpectations {
-        expected_external_publication_audit_archive_record_id: action
-            .external_publication_audit_archive_record_id
-            .clone(),
+        expected_external_publication_audit_archive_record_id: action.external_publication_audit_archive_record_id.clone(),
         expected_environment: confirmation_env,
         expected_chain_id: CHAIN.to_string(),
         expected_genesis_hash: GENESIS.to_string(),
@@ -4004,31 +3826,19 @@ fn attach_run286_external_publication_audit_archive(
         expected_consumer_record_digest: consumer.record_digest.clone(),
         expected_consumer_transcript_digest: consumer.transcript_digest.clone(),
         expected_consumer_record_id: consumer.consumer_record_id.clone(),
-        expected_external_publication_audit_completion_identity_digest:
-            external_publication_audit_completion
-                .identity_digest
-                .clone(),
-        expected_external_publication_audit_completion_request_digest:
-            external_publication_audit_completion.request_digest.clone(),
-        expected_external_publication_audit_completion_response_digest:
-            external_publication_audit_completion
-                .response_digest
-                .clone(),
-        expected_external_publication_audit_completion_record_digest:
-            external_publication_audit_completion.record_digest.clone(),
-        expected_external_publication_audit_completion_transcript_digest:
-            external_publication_audit_completion
-                .transcript_digest
-                .clone(),
-        expected_external_publication_audit_completion_record_id:
-            external_publication_audit_completion
-                .external_publication_audit_completion_record_id
-                .clone(),
+        expected_external_publication_audit_completion_identity_digest: external_publication_audit_completion.identity_digest.clone(),
+        expected_external_publication_audit_completion_request_digest: external_publication_audit_completion.request_digest.clone(),
+        expected_external_publication_audit_completion_response_digest: external_publication_audit_completion
+            .response_digest
+            .clone(),
+        expected_external_publication_audit_completion_record_digest: external_publication_audit_completion.record_digest.clone(),
+        expected_external_publication_audit_completion_transcript_digest: external_publication_audit_completion
+            .transcript_digest
+            .clone(),
+        expected_external_publication_audit_completion_record_id: external_publication_audit_completion.external_publication_audit_completion_record_id.clone(),
         expected_identity: id.clone(),
-        expected_external_publication_audit_archive_kind:
-            DurableCompletionExternalPublicationAuditArchiveKind::FixtureInMemory,
-        expected_external_publication_audit_archive_policy:
-            DurableCompletionExternalPublicationAuditArchivePolicy::FixtureAllowed,
+        expected_external_publication_audit_archive_kind: DurableCompletionExternalPublicationAuditArchiveKind::FixtureInMemory,
+        expected_external_publication_audit_archive_policy: DurableCompletionExternalPublicationAuditArchivePolicy::FixtureAllowed,
         expected_domain_separation_tag: ACKNOWLEDGEMENT_DOMAIN_TAG.to_string(),
     };
     let input = DurableCompletionExternalPublicationAuditArchiveInput {
@@ -4084,9 +3894,7 @@ fn attach_run286_external_publication_audit_archive(
         .expect("recorded Run 286 settlement outcome publication");
     AttachedExternalPublicationAuditArchive {
         outcome,
-        external_publication_audit_archive_record_id: action
-            .external_publication_audit_archive_record_id
-            .clone(),
+        external_publication_audit_archive_record_id: action.external_publication_audit_archive_record_id.clone(),
         identity_digest: external_publication_audit_archive_identity_digest(&id)
             .as_hex()
             .to_string(),
@@ -4095,10 +3903,10 @@ fn attach_run286_external_publication_audit_archive(
         record_digest: record.record_digest.as_hex().to_string(),
         transcript_digest: record.transcript_digest.as_hex().to_string(),
         consumer,
-        external_publication_receipt: external_publication_audit_completion
-            .external_publication_receipt,
+        external_publication_receipt: external_publication_audit_completion.external_publication_receipt,
     }
 }
+
 
 // ===========================================================================
 // Run 288 owned-context builder
@@ -4154,9 +3962,7 @@ fn ctx_action(
     };
     let id = ack_identity(policy, kind);
     let request = DurableCompletionExternalPublicationAuditSealRequest {
-        external_publication_audit_seal_record_id: action
-            .external_publication_audit_seal_record_id
-            .clone(),
+        external_publication_audit_seal_record_id: action.external_publication_audit_seal_record_id.clone(),
         environment,
         chain_id: CHAIN.to_string(),
         genesis_hash: GENESIS.to_string(),
@@ -4197,31 +4003,17 @@ fn ctx_action(
         consumer_record_digest: consumer.record_digest.clone(),
         consumer_transcript_digest: consumer.transcript_digest.clone(),
         consumer_record_id: consumer.consumer_record_id.clone(),
-        external_publication_audit_archive_identity_digest: external_publication_audit_archive
-            .identity_digest
-            .clone(),
-        external_publication_audit_archive_request_digest: external_publication_audit_archive
-            .request_digest
-            .clone(),
-        external_publication_audit_archive_response_digest: external_publication_audit_archive
-            .response_digest
-            .clone(),
-        external_publication_audit_archive_record_digest: external_publication_audit_archive
-            .record_digest
-            .clone(),
-        external_publication_audit_archive_transcript_digest: external_publication_audit_archive
-            .transcript_digest
-            .clone(),
-        external_publication_audit_archive_record_id: external_publication_audit_archive
-            .external_publication_audit_archive_record_id
-            .clone(),
+        external_publication_audit_archive_identity_digest: external_publication_audit_archive.identity_digest.clone(),
+        external_publication_audit_archive_request_digest: external_publication_audit_archive.request_digest.clone(),
+        external_publication_audit_archive_response_digest: external_publication_audit_archive.response_digest.clone(),
+        external_publication_audit_archive_record_digest: external_publication_audit_archive.record_digest.clone(),
+        external_publication_audit_archive_transcript_digest: external_publication_audit_archive.transcript_digest.clone(),
+        external_publication_audit_archive_record_id: external_publication_audit_archive.external_publication_audit_archive_record_id.clone(),
         identity: id.clone(),
         domain_separation_tag: AUDIT_FINALIZATION_DOMAIN_TAG.to_string(),
     };
     let expectations = DurableCompletionExternalPublicationAuditSealExpectations {
-        expected_external_publication_audit_seal_record_id: action
-            .external_publication_audit_seal_record_id
-            .clone(),
+        expected_external_publication_audit_seal_record_id: action.external_publication_audit_seal_record_id.clone(),
         expected_environment: environment,
         expected_chain_id: CHAIN.to_string(),
         expected_genesis_hash: GENESIS.to_string(),
@@ -4262,19 +4054,16 @@ fn ctx_action(
         expected_consumer_record_digest: consumer.record_digest.clone(),
         expected_consumer_transcript_digest: consumer.transcript_digest.clone(),
         expected_consumer_record_id: consumer.consumer_record_id.clone(),
-        expected_external_publication_audit_archive_identity_digest:
-            external_publication_audit_archive.identity_digest.clone(),
-        expected_external_publication_audit_archive_request_digest:
-            external_publication_audit_archive.request_digest.clone(),
-        expected_external_publication_audit_archive_response_digest:
-            external_publication_audit_archive.response_digest.clone(),
-        expected_external_publication_audit_archive_record_digest:
-            external_publication_audit_archive.record_digest.clone(),
-        expected_external_publication_audit_archive_transcript_digest:
-            external_publication_audit_archive.transcript_digest.clone(),
-        expected_external_publication_audit_archive_record_id: external_publication_audit_archive
-            .external_publication_audit_archive_record_id
+        expected_external_publication_audit_archive_identity_digest: external_publication_audit_archive.identity_digest.clone(),
+        expected_external_publication_audit_archive_request_digest: external_publication_audit_archive.request_digest.clone(),
+        expected_external_publication_audit_archive_response_digest: external_publication_audit_archive
+            .response_digest
             .clone(),
+        expected_external_publication_audit_archive_record_digest: external_publication_audit_archive.record_digest.clone(),
+        expected_external_publication_audit_archive_transcript_digest: external_publication_audit_archive
+            .transcript_digest
+            .clone(),
+        expected_external_publication_audit_archive_record_id: external_publication_audit_archive.external_publication_audit_archive_record_id.clone(),
         expected_identity: id,
         expected_external_publication_audit_seal_kind: kind,
         expected_external_publication_audit_seal_policy: policy,
@@ -4486,9 +4275,7 @@ fn devnet_fixture_chain_records_exactly_one_receipt_only_after_backend_submissio
         outcome,
         DurableCompletionExternalPublicationAuditSealOutcome::ExternalPublicationAuditSealRecorded
     );
-    assert!(external_publication_audit_seal_outcome_authorizes_record(
-        &outcome
-    ));
+    assert!(external_publication_audit_seal_outcome_authorizes_record(&outcome));
     assert!(external_publication_audit_seal_outcome_projects_to_recorded(&outcome));
     assert_eq!(sink.invocations(), 1);
     assert_eq!(ledger.len(), 1);
@@ -4585,9 +4372,7 @@ fn duplicate_identical_receipt_is_idempotent() {
         second,
         DurableCompletionExternalPublicationAuditSealOutcome::ExternalPublicationAuditSealDuplicateIdempotent
     );
-    assert!(!external_publication_audit_seal_outcome_authorizes_record(
-        &second
-    ));
+    assert!(!external_publication_audit_seal_outcome_authorizes_record(&second));
     assert!(external_publication_audit_seal_outcome_projects_to_recorded(&second));
     assert_eq!(ledger.len(), 1);
 }
@@ -5412,8 +5197,7 @@ fn after_external_publication_audit_archive_request_before_record_rejects_before
     );
 }
 
-fn after_external_publication_audit_archive_record_before_success_requires_explicit_matching_record(
-) {
+fn after_external_publication_audit_archive_record_before_success_requires_explicit_matching_record() {
     use DurableCompletionExternalPublicationAuditSealOutcome as Finalization;
     use DurableCompletionExternalPublicationAuditSealWindow as Window;
     assert_window(
@@ -5597,14 +5381,9 @@ fn rollback_restores_receipt_ledger_snapshot() {
 fn invariant_helpers_assert_fail_closed_contract() {
     assert!(durable_completion_external_publication_audit_seal_rejection_is_non_mutating());
     assert!(durable_completion_external_publication_audit_seal_never_calls_run_070());
-    assert!(
-        durable_completion_external_publication_audit_seal_never_mutates_live_pqc_trust_state()
-    );
+    assert!(durable_completion_external_publication_audit_seal_never_mutates_live_pqc_trust_state());
     assert!(durable_completion_external_publication_audit_seal_never_writes_sequence_or_marker());
-    assert!(
-        durable_completion_external_publication_audit_seal_no_rocksdb_file_schema_migration_change(
-        )
-    );
+    assert!(durable_completion_external_publication_audit_seal_no_rocksdb_file_schema_migration_change());
     assert!(durable_completion_external_publication_audit_seal_no_external_publication());
     assert!(durable_completion_external_publication_audit_seal_no_real_audit_ledger());
     assert!(durable_completion_external_publication_audit_seal_pipeline_success_required());
@@ -5630,9 +5409,7 @@ fn invariant_helpers_assert_fail_closed_contract() {
     );
     assert!(durable_completion_external_publication_audit_seal_production_mainnet_unavailable());
     assert!(durable_completion_external_publication_audit_seal_external_unavailable());
-    assert!(
-        durable_completion_external_publication_audit_seal_validator_set_rotation_unsupported()
-    );
+    assert!(durable_completion_external_publication_audit_seal_validator_set_rotation_unsupported());
     assert!(durable_completion_external_publication_audit_seal_policy_change_unsupported());
     assert!(
         durable_completion_external_publication_audit_seal_local_operator_cannot_satisfy_mainnet_authority()
@@ -5641,6 +5418,7 @@ fn invariant_helpers_assert_fail_closed_contract() {
         durable_completion_external_publication_audit_seal_peer_majority_cannot_satisfy_mainnet_authority()
     );
 }
+
 
 fn release_symbol_reachability_probe() {
     let c = devnet_ctx();
@@ -5668,9 +5446,7 @@ fn release_symbol_reachability_probe() {
         outcome,
         DurableCompletionExternalPublicationAuditSealOutcome::ExternalPublicationAuditSealRecorded
     );
-    assert!(external_publication_audit_seal_outcome_authorizes_record(
-        &outcome
-    ));
+    assert!(external_publication_audit_seal_outcome_authorizes_record(&outcome));
     assert!(external_publication_audit_seal_outcome_projects_to_recorded(&outcome));
     assert!(outcome.authorizes_record());
     assert!(outcome.projects_to_recorded());
@@ -5764,14 +5540,9 @@ fn release_symbol_reachability_probe() {
     // Invariant helpers — fail-closed contract asserted by the release helper.
     assert!(durable_completion_external_publication_audit_seal_rejection_is_non_mutating());
     assert!(durable_completion_external_publication_audit_seal_never_calls_run_070());
-    assert!(
-        durable_completion_external_publication_audit_seal_never_mutates_live_pqc_trust_state()
-    );
+    assert!(durable_completion_external_publication_audit_seal_never_mutates_live_pqc_trust_state());
     assert!(durable_completion_external_publication_audit_seal_never_writes_sequence_or_marker());
-    assert!(
-        durable_completion_external_publication_audit_seal_no_rocksdb_file_schema_migration_change(
-        )
-    );
+    assert!(durable_completion_external_publication_audit_seal_no_rocksdb_file_schema_migration_change());
     assert!(durable_completion_external_publication_audit_seal_no_external_publication());
     assert!(durable_completion_external_publication_audit_seal_no_real_audit_ledger());
     assert!(durable_completion_external_publication_audit_seal_consumer_required());
@@ -5779,23 +5550,16 @@ fn release_symbol_reachability_probe() {
     assert!(durable_completion_external_publication_audit_seal_no_real_settlement());
     assert!(durable_completion_external_publication_audit_seal_no_real_settlement_finality());
     assert!(durable_completion_external_publication_audit_seal_no_real_settlement_receipt());
-    assert!(
-        durable_completion_external_publication_audit_seal_no_real_settlement_finality_projection()
-    );
+    assert!(durable_completion_external_publication_audit_seal_no_real_settlement_finality_projection());
     assert!(durable_completion_external_publication_audit_seal_no_real_external_publication_audit_archive());
-    assert!(
-        durable_completion_external_publication_audit_seal_no_real_external_publication_audit_seal(
-        )
-    );
+    assert!(durable_completion_external_publication_audit_seal_no_real_external_publication_audit_seal());
     assert!(durable_completion_external_publication_audit_seal_record_required_before_reported());
     assert!(durable_completion_external_publication_audit_seal_failed_record_never_records());
     assert!(durable_completion_external_publication_audit_seal_rollback_never_records());
     assert!(durable_completion_external_publication_audit_seal_ambiguous_window_fails_closed());
     assert!(durable_completion_external_publication_audit_seal_production_mainnet_unavailable());
     assert!(durable_completion_external_publication_audit_seal_external_unavailable());
-    assert!(
-        durable_completion_external_publication_audit_seal_validator_set_rotation_unsupported()
-    );
+    assert!(durable_completion_external_publication_audit_seal_validator_set_rotation_unsupported());
     assert!(durable_completion_external_publication_audit_seal_policy_change_unsupported());
 
     let mut prod = ProductionExternalPublicationAuditSealSink::default();
@@ -5938,7 +5702,9 @@ fn main() {
     let total_pass: usize = rows.iter().filter(|(_, _, ok)| *ok).count();
     let total_fail = rows.len() - total_pass;
     let mut summary = String::new();
-    summary.push_str("Run 289 durable-completion external-publication-audit-seal release helper\n");
+    summary.push_str(
+        "Run 289 durable-completion external-publication-audit-seal release helper\n",
+    );
     summary.push_str(&format!(
         "verdict: {}\n",
         if total_fail == 0 { "PASS" } else { "FAIL" }

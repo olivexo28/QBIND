@@ -78,8 +78,7 @@ use crate::pqc_trust_bundle::TrustBundleEnvironment;
 use std::collections::HashMap;
 
 /// Domain-separation tag for the Run 230 replay state key digest.
-pub const REPLAY_STATE_KEY_DOMAIN_TAG: &str =
-    "qbind.run230.governance.evaluator.replay.state.key.v1";
+pub const REPLAY_STATE_KEY_DOMAIN_TAG: &str = "qbind.run230.governance.evaluator.replay.state.key.v1";
 /// Domain-separation tag for the Run 230 replay observation digest.
 pub const REPLAY_OBSERVATION_DOMAIN_TAG: &str =
     "qbind.run230.governance.evaluator.replay.observation.v1";
@@ -844,11 +843,7 @@ pub fn replay_state_key_digest(input: &EvaluatorReplayFreshnessInput) -> String 
     use sha3::{Digest, Sha3_256};
     let mut h = Sha3_256::new();
     h.update(REPLAY_STATE_KEY_DOMAIN_TAG.as_bytes());
-    hash_field(
-        &mut h,
-        b"environment",
-        &input.environment.metric_code().to_le_bytes(),
-    );
+    hash_field(&mut h, b"environment", &input.environment.metric_code().to_le_bytes());
     hash_field(&mut h, b"chain_id", input.chain_id.as_bytes());
     hash_field(&mut h, b"genesis_hash", input.genesis_hash.as_bytes());
     hash_field(
@@ -868,16 +863,8 @@ pub fn replay_state_key_digest(input: &EvaluatorReplayFreshnessInput) -> String 
     );
     hash_field(&mut h, b"proposal_id", input.proposal_id.as_bytes());
     hash_field(&mut h, b"decision_id", input.decision_id.as_bytes());
-    hash_field(
-        &mut h,
-        b"lifecycle_action",
-        input.lifecycle_action.tag().as_bytes(),
-    );
-    hash_field(
-        &mut h,
-        b"candidate_digest",
-        input.candidate_digest.as_bytes(),
-    );
+    hash_field(&mut h, b"lifecycle_action", input.lifecycle_action.tag().as_bytes());
+    hash_field(&mut h, b"candidate_digest", input.candidate_digest.as_bytes());
     hash_field(
         &mut h,
         b"authority_domain_sequence",
@@ -900,21 +887,9 @@ pub fn replay_observation_digest(
     use sha3::{Digest, Sha3_256};
     let mut h = Sha3_256::new();
     h.update(REPLAY_OBSERVATION_DOMAIN_TAG.as_bytes());
-    hash_field(
-        &mut h,
-        b"state_key",
-        replay_state_key_digest(input).as_bytes(),
-    );
-    hash_field(
-        &mut h,
-        b"observation_count",
-        &observation_count.to_le_bytes(),
-    );
-    hash_field(
-        &mut h,
-        b"observation_epoch",
-        &observation_epoch.to_le_bytes(),
-    );
+    hash_field(&mut h, b"state_key", replay_state_key_digest(input).as_bytes());
+    hash_field(&mut h, b"observation_count", &observation_count.to_le_bytes());
+    hash_field(&mut h, b"observation_epoch", &observation_epoch.to_le_bytes());
     hex::encode(h.finalize())
 }
 
@@ -922,18 +897,11 @@ pub fn replay_observation_digest(
 ///
 /// Binds the replay state key digest and the epoch the decision was consumed
 /// at. Recorded only when a decision is explicitly consumed.
-pub fn consumed_decision_digest(
-    input: &EvaluatorReplayFreshnessInput,
-    consumed_epoch: u64,
-) -> String {
+pub fn consumed_decision_digest(input: &EvaluatorReplayFreshnessInput, consumed_epoch: u64) -> String {
     use sha3::{Digest, Sha3_256};
     let mut h = Sha3_256::new();
     h.update(CONSUMED_DECISION_DOMAIN_TAG.as_bytes());
-    hash_field(
-        &mut h,
-        b"state_key",
-        replay_state_key_digest(input).as_bytes(),
-    );
+    hash_field(&mut h, b"state_key", replay_state_key_digest(input).as_bytes());
     hash_field(&mut h, b"consumed_epoch", &consumed_epoch.to_le_bytes());
     hex::encode(h.finalize())
 }
@@ -951,16 +919,8 @@ pub fn freshness_transcript_digest(
     use sha3::{Digest, Sha3_256};
     let mut h = Sha3_256::new();
     h.update(FRESHNESS_TRANSCRIPT_DOMAIN_TAG.as_bytes());
-    hash_field(
-        &mut h,
-        b"state_key",
-        replay_state_key_digest(input).as_bytes(),
-    );
-    hash_field(
-        &mut h,
-        b"effective_epoch",
-        &input.effective_epoch.to_le_bytes(),
-    );
+    hash_field(&mut h, b"state_key", replay_state_key_digest(input).as_bytes());
+    hash_field(&mut h, b"effective_epoch", &input.effective_epoch.to_le_bytes());
     hash_field(&mut h, b"expiry_epoch", &input.expiry_epoch.to_le_bytes());
     hash_field(
         &mut h,
@@ -1032,7 +992,8 @@ impl FixtureReplayStateStore {
     /// `true` iff this fixture store may serve `environment` (DevNet/TestNet
     /// only; never MainNet).
     fn serves(&self, environment: TrustBundleEnvironment) -> bool {
-        environment != TrustBundleEnvironment::Mainnet && self.environment == Some(environment)
+        environment != TrustBundleEnvironment::Mainnet
+            && self.environment == Some(environment)
     }
 
     /// Number of recorded decisions (test helper).

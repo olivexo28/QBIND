@@ -53,7 +53,8 @@ fn make_validator_set_with_stakes(id_stakes: &[(u64, u64)]) -> ConsensusValidato
 fn m2_4_testnet_alpha_preset_stake_config() {
     let node_config = NodeConfig::testnet_alpha_preset();
     assert_eq!(
-        node_config.validator_stake.min_validator_stake, MIN_VALIDATOR_STAKE_TESTNET,
+        node_config.validator_stake.min_validator_stake,
+        MIN_VALIDATOR_STAKE_TESTNET,
         "TestNet Alpha should have 10 QBIND minimum stake"
     );
     assert!(!node_config.validator_stake.fail_fast_on_startup);
@@ -64,7 +65,8 @@ fn m2_4_testnet_alpha_preset_stake_config() {
 fn m2_4_testnet_beta_preset_stake_config() {
     let node_config = NodeConfig::testnet_beta_preset();
     assert_eq!(
-        node_config.validator_stake.min_validator_stake, MIN_VALIDATOR_STAKE_TESTNET,
+        node_config.validator_stake.min_validator_stake,
+        MIN_VALIDATOR_STAKE_TESTNET,
         "TestNet Beta should have 10 QBIND minimum stake"
     );
 }
@@ -74,7 +76,8 @@ fn m2_4_testnet_beta_preset_stake_config() {
 fn m2_4_mainnet_preset_stake_config() {
     let node_config = NodeConfig::mainnet_preset();
     assert_eq!(
-        node_config.validator_stake.min_validator_stake, MIN_VALIDATOR_STAKE_MAINNET,
+        node_config.validator_stake.min_validator_stake,
+        MIN_VALIDATOR_STAKE_MAINNET,
         "MainNet should have 100,000 QBIND minimum stake"
     );
     assert!(node_config.validator_stake.fail_fast_on_startup);
@@ -85,7 +88,8 @@ fn m2_4_mainnet_preset_stake_config() {
 fn m2_4_devnet_preset_stake_config() {
     let node_config = NodeConfig::devnet_v0_preset();
     assert_eq!(
-        node_config.validator_stake.min_validator_stake, MIN_VALIDATOR_STAKE_DEVNET,
+        node_config.validator_stake.min_validator_stake,
+        MIN_VALIDATOR_STAKE_DEVNET,
         "DevNet should have 1 QBIND minimum stake"
     );
     assert!(!node_config.validator_stake.fail_fast_on_startup);
@@ -120,10 +124,7 @@ fn m2_4_stake_filtering_testnet_threshold() {
     // Get the filtered epoch state
     use qbind_consensus::EpochStateProvider;
     let filtered_state = filtering_provider.get_epoch_state(EpochId::GENESIS);
-    assert!(
-        filtered_state.is_some(),
-        "should return filtered epoch state"
-    );
+    assert!(filtered_state.is_some(), "should return filtered epoch state");
 
     let state = filtered_state.unwrap();
 
@@ -302,9 +303,7 @@ fn m2_4_epoch_transition_uses_filtered_set() {
     use qbind_consensus::EpochStateProvider;
 
     // Genesis epoch: all 3 validators should be included (all above 10M)
-    let genesis_state = filtering_provider
-        .get_epoch_state(EpochId::GENESIS)
-        .unwrap();
+    let genesis_state = filtering_provider.get_epoch_state(EpochId::GENESIS).unwrap();
     assert_eq!(
         genesis_state.len(),
         3,

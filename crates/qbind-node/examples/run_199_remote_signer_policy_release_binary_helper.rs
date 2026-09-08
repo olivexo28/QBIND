@@ -142,13 +142,7 @@ const TAG_MAINNET: &str = "mainnet-production-remote-signer-required";
 // ---------------------------------------------------------------------------
 
 fn domain(env: TrustBundleEnvironment) -> AuthorityTrustDomain {
-    AuthorityTrustDomain::new(
-        env,
-        CHAIN_ID,
-        GENESIS_HASH,
-        ROOT_FP,
-        PQC_LIFECYCLE_SUITE_ML_DSA_44,
-    )
+    AuthorityTrustDomain::new(env, CHAIN_ID, GENESIS_HASH, ROOT_FP, PQC_LIFECYCLE_SUITE_ML_DSA_44)
 }
 
 fn rotate_candidate(env: TrustBundleEnvironment) -> PersistentAuthorityStateRecordV2 {
@@ -1070,12 +1064,7 @@ fn run_selector_resolution_table(out: &Path) -> (u64, u64) {
         } else {
             fail += 1;
         }
-        buf.push_str(&format!(
-            "{}\t{}\t{}\n",
-            name,
-            if ok { "PASS" } else { "FAIL" },
-            detail
-        ));
+        buf.push_str(&format!("{}\t{}\t{}\n", name, if ok { "PASS" } else { "FAIL" }, detail));
     };
 
     // S1 — default (no CLI, no env) resolves to Disabled.
@@ -1095,14 +1084,8 @@ fn run_selector_resolution_table(out: &Path) -> (u64, u64) {
         let cli_cases = [
             (TAG_DISABLED, RemoteSignerPolicy::Disabled),
             (TAG_FIXTURE, RemoteSignerPolicy::FixtureLoopbackAllowed),
-            (
-                TAG_PRODUCTION,
-                RemoteSignerPolicy::ProductionRemoteSignerRequired,
-            ),
-            (
-                TAG_MAINNET,
-                RemoteSignerPolicy::MainnetProductionRemoteSignerRequired,
-            ),
+            (TAG_PRODUCTION, RemoteSignerPolicy::ProductionRemoteSignerRequired),
+            (TAG_MAINNET, RemoteSignerPolicy::MainnetProductionRemoteSignerRequired),
         ];
         for (tag, expected) in cli_cases {
             let resolved = remote_signer_policy_from_cli_or_env(Some(tag));
@@ -1119,14 +1102,8 @@ fn run_selector_resolution_table(out: &Path) -> (u64, u64) {
         let env_cases = [
             (TAG_DISABLED, RemoteSignerPolicy::Disabled),
             (TAG_FIXTURE, RemoteSignerPolicy::FixtureLoopbackAllowed),
-            (
-                TAG_PRODUCTION,
-                RemoteSignerPolicy::ProductionRemoteSignerRequired,
-            ),
-            (
-                TAG_MAINNET,
-                RemoteSignerPolicy::MainnetProductionRemoteSignerRequired,
-            ),
+            (TAG_PRODUCTION, RemoteSignerPolicy::ProductionRemoteSignerRequired),
+            (TAG_MAINNET, RemoteSignerPolicy::MainnetProductionRemoteSignerRequired),
         ];
         for (tag, expected) in env_cases {
             let _g = EnvGuard::set(Some(tag));
@@ -1289,20 +1266,12 @@ fn run_seven_surface_reachability(out: &Path) -> (u64, u64) {
         } else {
             fail += 1;
         }
-        buf.push_str(&format!(
-            "{}\t{}\t{}\n",
-            name,
-            if ok { "PASS" } else { "FAIL" },
-            detail
-        ));
+        buf.push_str(&format!("{}\t{}\t{}\n", name, if ok { "PASS" } else { "FAIL" }, detail));
     };
 
     // FixtureLoopbackAllowed + valid DevNet carrier: accept at every
     // non-MainNet surface (peer-driven drain accepts a non-MainNet candidate).
-    let c = ctx_for(
-        TrustBundleEnvironment::Devnet,
-        AuthorityCustodyClass::FixtureLocalKey,
-    );
+    let c = ctx_for(TrustBundleEnvironment::Devnet, AuthorityCustodyClass::FixtureLocalKey);
     let loaded = available_via_wire(&parts(TrustBundleEnvironment::Devnet));
     for surface in ALL_SURFACES {
         let outcome = preflight(
@@ -1348,26 +1317,14 @@ fn run_seven_surface_reachability(out: &Path) -> (u64, u64) {
 
 fn run_custody_routing_table(out: &Path) -> (u64, u64) {
     let rows: &[(&str, AuthorityCustodyClass, &str)] = &[
-        (
-            "RemoteSigner",
-            AuthorityCustodyClass::RemoteSigner,
-            "FixtureLoopbackAccepted",
-        ),
+        ("RemoteSigner", AuthorityCustodyClass::RemoteSigner, "FixtureLoopbackAccepted"),
         (
             "R27-LocalOperatorKey",
             AuthorityCustodyClass::LocalOperatorKey,
             "LocalOperatorKeyCannotSatisfyRemoteSigner",
         ),
-        (
-            "Kms",
-            AuthorityCustodyClass::Kms,
-            "NotRemoteSignerCustodyClass",
-        ),
-        (
-            "Hsm",
-            AuthorityCustodyClass::Hsm,
-            "NotRemoteSignerCustodyClass",
-        ),
+        ("Kms", AuthorityCustodyClass::Kms, "NotRemoteSignerCustodyClass"),
+        ("Hsm", AuthorityCustodyClass::Hsm, "NotRemoteSignerCustodyClass"),
     ];
     let mut buf = String::new();
     let mut pass = 0u64;
@@ -1417,10 +1374,7 @@ fn run_governance_bypass_table(out: &Path) -> (u64, u64) {
         GovernanceAuthorityClass::EmergencyCouncil,
         GovernanceAuthorityClass::OnChainGovernance,
     ] {
-        let c = ctx_for(
-            TrustBundleEnvironment::Devnet,
-            AuthorityCustodyClass::FixtureLocalKey,
-        );
+        let c = ctx_for(TrustBundleEnvironment::Devnet, AuthorityCustodyClass::FixtureLocalKey);
         let outcome = preflight_v2_marker_remote_signer_for_reload_check(
             &c.custody,
             Some(&c.prior),
@@ -1529,10 +1483,10 @@ fn make_v2_sidecar_value(
     );
     let mut value = serde_json::to_value(&v2).expect("ratification serializes");
     if let Some(p) = remote_signer_sibling {
-        value.as_object_mut().unwrap().insert(
-            REMOTE_SIGNER_ATTESTATION_PAYLOAD_SIBLING_FIELD.to_string(),
-            p,
-        );
+        value
+            .as_object_mut()
+            .unwrap()
+            .insert(REMOTE_SIGNER_ATTESTATION_PAYLOAD_SIBLING_FIELD.to_string(), p);
     }
     value
 }
@@ -1547,12 +1501,7 @@ fn run_loader_table(out: &Path) -> (u64, u64) {
         } else {
             fail += 1;
         }
-        buf.push_str(&format!(
-            "{}\t{}\t{}\n",
-            name,
-            if ok { "PASS" } else { "FAIL" },
-            detail
-        ));
+        buf.push_str(&format!("{}\t{}\t{}\n", name, if ok { "PASS" } else { "FAIL" }, detail));
     };
 
     // Legacy v2 sidecar without the sibling yields Absent.
@@ -1611,12 +1560,7 @@ fn run_refusal_helpers_table(out: &Path) -> (u64, u64) {
         } else {
             fail += 1;
         }
-        buf.push_str(&format!(
-            "{}\t{}\t{}\n",
-            name,
-            if ok { "PASS" } else { "FAIL" },
-            detail
-        ));
+        buf.push_str(&format!("{}\t{}\t{}\n", name, if ok { "PASS" } else { "FAIL" }, detail));
     };
 
     // R28 — peer majority cannot satisfy the RemoteSigner boundary.
@@ -1639,10 +1583,7 @@ fn run_refusal_helpers_table(out: &Path) -> (u64, u64) {
 
     // validate_loaded_remote_signer reachability: Available -> Some(accept),
     // Absent -> None.
-    let c = ctx_for(
-        TrustBundleEnvironment::Devnet,
-        AuthorityCustodyClass::FixtureLocalKey,
-    );
+    let c = ctx_for(TrustBundleEnvironment::Devnet, AuthorityCustodyClass::FixtureLocalKey);
     let ctx = ctx_view(
         &c,
         AuthorityCustodyPolicy::DevnetLocalAllowed,
@@ -1652,10 +1593,7 @@ fn run_refusal_helpers_table(out: &Path) -> (u64, u64) {
     let routed = validate_loaded_remote_signer(&ctx, &available);
     record(
         "validate_loaded_remote_signer-available-accepts",
-        matches!(
-            routed,
-            Some(RemoteSignerOutcome::FixtureLoopbackAccepted { .. })
-        ),
+        matches!(routed, Some(RemoteSignerOutcome::FixtureLoopbackAccepted { .. })),
         &format!("routed={routed:?}"),
     );
     let routed_absent = validate_loaded_remote_signer(&ctx, &RemoteSignerLoadStatus::Absent);
@@ -1683,19 +1621,11 @@ fn run_no_mutation_evidence(out: &Path) -> (u64, u64) {
         } else {
             fail += 1;
         }
-        buf.push_str(&format!(
-            "{}\t{}\t{}\n",
-            name,
-            if ok { "PASS" } else { "FAIL" },
-            detail
-        ));
+        buf.push_str(&format!("{}\t{}\t{}\n", name, if ok { "PASS" } else { "FAIL" }, detail));
     };
 
     // R31 — validation-only preflight wrappers are pure and deterministic.
-    let c = ctx_for(
-        TrustBundleEnvironment::Devnet,
-        AuthorityCustodyClass::FixtureLocalKey,
-    );
+    let c = ctx_for(TrustBundleEnvironment::Devnet, AuthorityCustodyClass::FixtureLocalKey);
     let loaded = malformed_loaded(TrustBundleEnvironment::Devnet, |w| {
         w.response.signature_commitment = String::new()
     });

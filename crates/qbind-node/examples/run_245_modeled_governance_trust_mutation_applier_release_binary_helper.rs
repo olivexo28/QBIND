@@ -67,18 +67,20 @@ use qbind_node::pqc_governance_execution_runtime_arming::GovernanceExecutionRunt
 use qbind_node::pqc_governance_modeled_trust_mutation_applier::{
     evaluate_modeled_trust_mutation, local_operator_cannot_satisfy_modeled_trust_applier_authority,
     mainnet_peer_driven_apply_refused_by_modeled_trust_applier,
-    map_modeled_outcome_to_mutation_engine_outcome, modeled_outcome_authorizes_durable_consume,
+    map_modeled_outcome_to_mutation_engine_outcome,
+    modeled_outcome_authorizes_durable_consume,
     modeled_trust_applier_ambiguous_window_fails_closed,
-    modeled_trust_applier_failure_never_consumes, modeled_trust_applier_never_calls_run_070,
+    modeled_trust_applier_failure_never_consumes,
+    modeled_trust_applier_never_calls_run_070,
     modeled_trust_applier_never_mutates_live_pqc_trust_state,
     modeled_trust_applier_no_rocksdb_file_schema_migration_change,
-    modeled_trust_applier_rejection_is_non_mutating, modeled_trust_applier_rollback_never_consumes,
+    modeled_trust_applier_rejection_is_non_mutating,
+    modeled_trust_applier_rollback_never_consumes,
     modeled_trust_applier_success_required_before_durable_consume,
     peer_majority_cannot_satisfy_modeled_trust_applier_authority,
     policy_change_unsupported_by_modeled_trust_applier,
-    production_mainnet_modeled_trust_applier_unavailable,
-    project_modeled_outcome_to_durable_completion, recover_modeled_trust_mutation,
-    validator_set_rotation_unsupported_by_modeled_trust_applier,
+    production_mainnet_modeled_trust_applier_unavailable, project_modeled_outcome_to_durable_completion,
+    recover_modeled_trust_mutation, validator_set_rotation_unsupported_by_modeled_trust_applier,
     FixtureModeledTrustMutationApplier, MainNetModeledTrustMutationApplier, ModeledApplierFault,
     ModeledGovernanceTrustMutation, ModeledGovernanceTrustMutationApplier,
     ModeledGovernanceTrustMutationApplierKind, ModeledGovernanceTrustMutationEnvironmentBinding,
@@ -313,9 +315,7 @@ impl Table {
 
 /// Stable string tag for a modeled outcome's Run 242 mutation-engine mapping.
 fn engine_tag(o: &ModeledTrustMutationOutcome) -> String {
-    map_modeled_outcome_to_mutation_engine_outcome(o)
-        .tag()
-        .to_string()
+    map_modeled_outcome_to_mutation_engine_outcome(o).tag().to_string()
 }
 
 /// Stable string tag for a modeled outcome's Run 240 durable projection
@@ -499,11 +499,7 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
             &mut state,
             &mut applier,
         );
-        t.check(
-            "A10.engine-map",
-            "mutation-applied-successfully",
-            &engine_tag(&o),
-        );
+        t.check("A10.engine-map", "mutation-applied-successfully", &engine_tag(&o));
     }
 
     // A11 — modeled apply success projects to consume-eligible durable completion.
@@ -517,10 +513,7 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
             &mut state,
             &mut applier,
         );
-        t.assert_true(
-            "A11.authorizes-consume",
-            modeled_outcome_authorizes_durable_consume(&o),
-        );
+        t.assert_true("A11.authorizes-consume", modeled_outcome_authorizes_durable_consume(&o));
         t.assert_true("A11.projection-consume", projection_consume(&o));
     }
 
@@ -576,10 +569,7 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
 
     // A15 — validator-set rotation unsupported.
     {
-        let c = devnet_action(
-            ModeledTrustMutationAction::ValidatorSetRotationUnsupported,
-            ROOT_A,
-        );
+        let c = devnet_action(ModeledTrustMutationAction::ValidatorSetRotationUnsupported, ROOT_A);
         let mut state = ModeledGovernanceTrustState::new();
         let mut applier = devnet_applier();
         let o = evaluate_modeled_trust_mutation(
@@ -637,27 +627,17 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
         );
         t.assert_true(
             &format!("{id}.before-snapshot"),
-            matches!(
-                o,
-                ModeledTrustMutationOutcome::ModeledMutationRejectedBeforeSnapshot { .. }
-            ),
+            matches!(o, ModeledTrustMutationOutcome::ModeledMutationRejectedBeforeSnapshot { .. }),
         );
         t.assert_true(&format!("{id}.no-applier"), applier.attempts() == 0);
-        t.assert_true(
-            &format!("{id}.applier-must-not-run"),
-            o.applier_must_not_run(),
-        );
+        t.assert_true(&format!("{id}.applier-must-not-run"), o.applier_must_not_run());
         t.assert_true(&format!("{id}.state-empty"), state.is_empty());
         t.assert_true(&format!("{id}.no-consume"), o.no_consume());
     };
 
-    reject_before_snapshot("B-env", &|c| {
-        c.env.environment = TrustBundleEnvironment::Testnet
-    });
+    reject_before_snapshot("B-env", &|c| c.env.environment = TrustBundleEnvironment::Testnet);
     reject_before_snapshot("B-chain", &|c| c.env.chain_id = "wrong-chain".to_string());
-    reject_before_snapshot("B-genesis", &|c| {
-        c.env.genesis_hash = "wrong-genesis".to_string()
-    });
+    reject_before_snapshot("B-genesis", &|c| c.env.genesis_hash = "wrong-genesis".to_string());
     reject_before_snapshot("B-gov-surface", &|c| {
         c.runtime.governance_surface = GovernanceExecutionRuntimeSurface::PeerDrivenDrain
     });
@@ -665,18 +645,10 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
         c.runtime.mutation_surface.mutation_surface =
             GovernanceExecutionRuntimeSurface::PeerDrivenDrain
     });
-    reject_before_snapshot("B-cand-digest", &|c| {
-        c.mutation.candidate_digest = "wrong".to_string()
-    });
-    reject_before_snapshot("B-dec-digest", &|c| {
-        c.mutation.decision_digest = "wrong".to_string()
-    });
-    reject_before_snapshot("B-proposal", &|c| {
-        c.mutation.proposal_id = "wrong".to_string()
-    });
-    reject_before_snapshot("B-decision", &|c| {
-        c.mutation.decision_id = "wrong".to_string()
-    });
+    reject_before_snapshot("B-cand-digest", &|c| c.mutation.candidate_digest = "wrong".to_string());
+    reject_before_snapshot("B-dec-digest", &|c| c.mutation.decision_digest = "wrong".to_string());
+    reject_before_snapshot("B-proposal", &|c| c.mutation.proposal_id = "wrong".to_string());
+    reject_before_snapshot("B-decision", &|c| c.mutation.decision_id = "wrong".to_string());
     reject_before_snapshot("B-authseq", &|c| c.mutation.authority_domain_sequence = 99);
     reject_before_snapshot("B-lifecycle", &|c| {
         c.mutation.lifecycle_action = LocalLifecycleAction::Retire
@@ -696,10 +668,7 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
         );
         t.assert_true(
             "B-readonly.before-snapshot",
-            matches!(
-                o,
-                ModeledTrustMutationOutcome::ModeledMutationRejectedBeforeSnapshot { .. }
-            ),
+            matches!(o, ModeledTrustMutationOutcome::ModeledMutationRejectedBeforeSnapshot { .. }),
         );
         t.assert_true("B-readonly.no-applier", applier.attempts() == 0);
         t.assert_true("B-readonly.state-empty", state.is_empty());
@@ -720,16 +689,10 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
         );
         t.assert_true(
             "B-retire-missing.before-apply",
-            matches!(
-                o,
-                ModeledTrustMutationOutcome::ModeledMutationRejectedBeforeApply { .. }
-            ),
+            matches!(o, ModeledTrustMutationOutcome::ModeledMutationRejectedBeforeApply { .. }),
         );
         t.assert_true("B-retire-missing.applier-once", applier.attempts() == 1);
-        t.assert_true(
-            "B-retire-missing.state-unchanged",
-            state.snapshot() == before,
-        );
+        t.assert_true("B-retire-missing.state-unchanged", state.snapshot() == before);
         t.assert_true("B-retire-missing.no-consume", o.no_consume());
     }
 
@@ -747,15 +710,9 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
         );
         t.assert_true(
             "B-revoke-missing.before-apply",
-            matches!(
-                o,
-                ModeledTrustMutationOutcome::ModeledMutationRejectedBeforeApply { .. }
-            ),
+            matches!(o, ModeledTrustMutationOutcome::ModeledMutationRejectedBeforeApply { .. }),
         );
-        t.assert_true(
-            "B-revoke-missing.state-unchanged",
-            state.snapshot() == before,
-        );
+        t.assert_true("B-revoke-missing.state-unchanged", state.snapshot() == before);
         t.assert_true("B-revoke-missing.no-consume", o.no_consume());
     }
 
@@ -771,11 +728,7 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
             &mut state,
             &mut applier,
         );
-        t.check_outcome(
-            "B-apply-failed.outcome",
-            "modeled-mutation-apply-failed",
-            &o,
-        );
+        t.check_outcome("B-apply-failed.outcome", "modeled-mutation-apply-failed", &o);
         t.assert_true("B-apply-failed.state-unchanged", state.snapshot() == before);
         t.assert_true("B-apply-failed.no-consume", o.no_consume());
     }
@@ -846,11 +799,7 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
             &mut state,
             &mut applier,
         );
-        t.check_outcome(
-            "B-production.outcome",
-            "production-modeled-mutation-unavailable",
-            &o,
-        );
+        t.check_outcome("B-production.outcome", "production-modeled-mutation-unavailable", &o);
         t.assert_true("B-production.no-consume", o.no_consume());
     }
     {
@@ -863,20 +812,13 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
             &mut state,
             &mut applier,
         );
-        t.check_outcome(
-            "B-mainnet.outcome",
-            "mainnet-modeled-mutation-unavailable",
-            &o,
-        );
+        t.check_outcome("B-mainnet.outcome", "mainnet-modeled-mutation-unavailable", &o);
         t.assert_true("B-mainnet.no-consume", o.no_consume());
     }
 
     // B-validator-rotation / B-policy-change — unsupported actions never reach applier.
     {
-        let c = devnet_action(
-            ModeledTrustMutationAction::ValidatorSetRotationUnsupported,
-            ROOT_A,
-        );
+        let c = devnet_action(ModeledTrustMutationAction::ValidatorSetRotationUnsupported, ROOT_A);
         let mut state = ModeledGovernanceTrustState::new();
         let mut applier = devnet_applier();
         let o = evaluate_modeled_trust_mutation(
@@ -885,11 +827,7 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
             &mut state,
             &mut applier,
         );
-        t.check_outcome(
-            "B-validator-rotation.outcome",
-            "validator-set-rotation-unsupported",
-            &o,
-        );
+        t.check_outcome("B-validator-rotation.outcome", "validator-set-rotation-unsupported", &o);
         t.assert_true("B-validator-rotation.no-applier", applier.attempts() == 0);
         t.assert_true("B-validator-rotation.no-consume", o.no_consume());
     }
@@ -936,7 +874,11 @@ fn run_recovery_table(out: &Path) -> (u64, u64) {
     let recover = |obs: ModeledTrustMutationWindowObservation| -> ModeledTrustMutationOutcome {
         let c = devnet_add();
         let applier = devnet_applier();
-        recover_modeled_trust_mutation(&c.input(K::FixtureDevNet, P::FixtureDevNet), &obs, &applier)
+        recover_modeled_trust_mutation(
+            &c.input(K::FixtureDevNet, P::FixtureDevNet),
+            &obs,
+            &applier,
+        )
     };
 
     // C1 — before-snapshot window recovers as not-attempted / no consume.
@@ -1075,22 +1017,12 @@ fn run_projection_table(out: &Path) -> (u64, u64) {
 
     // D-applied — only ModeledMutationApplied consumes.
     let applied = ModeledTrustMutationOutcome::ModeledMutationApplied;
-    t.check(
-        "D-applied.engine",
-        "mutation-applied-successfully",
-        &engine_tag(&applied),
-    );
-    t.assert_true(
-        "D-applied.consume",
-        modeled_outcome_authorizes_durable_consume(&applied),
-    );
+    t.check("D-applied.engine", "mutation-applied-successfully", &engine_tag(&applied));
+    t.assert_true("D-applied.consume", modeled_outcome_authorizes_durable_consume(&applied));
 
     // Every non-applied outcome must not consume.
     let non_consuming: &[(&str, ModeledTrustMutationOutcome)] = &[
-        (
-            "not-attempted",
-            ModeledTrustMutationOutcome::ModeledMutationNotAttempted,
-        ),
+        ("not-attempted", ModeledTrustMutationOutcome::ModeledMutationNotAttempted),
         (
             "rejected-before-snapshot",
             ModeledTrustMutationOutcome::ModeledMutationRejectedBeforeSnapshot {
@@ -1103,14 +1035,8 @@ fn run_projection_table(out: &Path) -> (u64, u64) {
                 reason: "x".to_string(),
             },
         ),
-        (
-            "apply-failed",
-            ModeledTrustMutationOutcome::ModeledMutationApplyFailed,
-        ),
-        (
-            "rolled-back",
-            ModeledTrustMutationOutcome::ModeledMutationRolledBack,
-        ),
+        ("apply-failed", ModeledTrustMutationOutcome::ModeledMutationApplyFailed),
+        ("rolled-back", ModeledTrustMutationOutcome::ModeledMutationRolledBack),
         (
             "rollback-failed-fatal",
             ModeledTrustMutationOutcome::ModeledMutationRollbackFailedFatal,
@@ -1145,10 +1071,7 @@ fn run_projection_table(out: &Path) -> (u64, u64) {
             &format!("D-{label}.no-consume"),
             !modeled_outcome_authorizes_durable_consume(o),
         );
-        t.assert_true(
-            &format!("D-{label}.proj-no-consume"),
-            !projection_consume(o),
-        );
+        t.assert_true(&format!("D-{label}.proj-no-consume"), !projection_consume(o));
     }
 
     t.finish(out)
@@ -1184,11 +1107,7 @@ fn run_modeled_state_table(out: &Path) -> (u64, u64) {
         let mut applier = devnet_applier();
         let o = apply(&c, &mut state, &mut applier);
         t.assert_true("E1.applied", o.is_applied());
-        t.check(
-            "E1.status",
-            "active",
-            state.status_of(ROOT_A).map(|s| s.tag()).unwrap_or("absent"),
-        );
+        t.check("E1.status", "active", state.status_of(ROOT_A).map(|s| s.tag()).unwrap_or("absent"));
     }
 
     // E2 — retire-root changes only the modeled state.
@@ -1198,11 +1117,7 @@ fn run_modeled_state_table(out: &Path) -> (u64, u64) {
         let mut applier = devnet_applier();
         let o = apply(&c, &mut state, &mut applier);
         t.assert_true("E2.applied", o.is_applied());
-        t.check(
-            "E2.status",
-            "retired",
-            state.status_of(ROOT_A).map(|s| s.tag()).unwrap_or("absent"),
-        );
+        t.check("E2.status", "retired", state.status_of(ROOT_A).map(|s| s.tag()).unwrap_or("absent"));
     }
 
     // E3 — revoke-root changes only the modeled state.
@@ -1212,11 +1127,7 @@ fn run_modeled_state_table(out: &Path) -> (u64, u64) {
         let mut applier = devnet_applier();
         let o = apply(&c, &mut state, &mut applier);
         t.assert_true("E3.applied", o.is_applied());
-        t.check(
-            "E3.status",
-            "revoked",
-            state.status_of(ROOT_A).map(|s| s.tag()).unwrap_or("absent"),
-        );
+        t.check("E3.status", "revoked", state.status_of(ROOT_A).map(|s| s.tag()).unwrap_or("absent"));
     }
 
     // E4 — emergency-revoke-root changes only the modeled state.
@@ -1254,10 +1165,7 @@ fn run_modeled_state_table(out: &Path) -> (u64, u64) {
         let o = apply(&c, &mut state, &mut applier);
         t.assert_true(
             "E6.before-snapshot",
-            matches!(
-                o,
-                ModeledTrustMutationOutcome::ModeledMutationRejectedBeforeSnapshot { .. }
-            ),
+            matches!(o, ModeledTrustMutationOutcome::ModeledMutationRejectedBeforeSnapshot { .. }),
         );
         t.assert_true("E6.no-applier", applier.attempts() == 0);
         t.assert_true("E6.unchanged", state.snapshot() == before);
@@ -1272,10 +1180,7 @@ fn run_modeled_state_table(out: &Path) -> (u64, u64) {
         let o = apply(&c, &mut state, &mut applier);
         t.assert_true(
             "E7.before-apply",
-            matches!(
-                o,
-                ModeledTrustMutationOutcome::ModeledMutationRejectedBeforeApply { .. }
-            ),
+            matches!(o, ModeledTrustMutationOutcome::ModeledMutationRejectedBeforeApply { .. }),
         );
         t.assert_true("E7.applier-once", applier.attempts() == 1);
         t.assert_true("E7.unchanged", state.snapshot() == before);
@@ -1308,10 +1213,7 @@ fn run_modeled_state_table(out: &Path) -> (u64, u64) {
         "E10.never-mutates-live",
         modeled_trust_applier_never_mutates_live_pqc_trust_state(),
     );
-    t.assert_true(
-        "E10.never-run-070",
-        modeled_trust_applier_never_calls_run_070(),
-    );
+    t.assert_true("E10.never-run-070", modeled_trust_applier_never_calls_run_070());
     t.assert_true(
         "E10.rejection-non-mutating",
         modeled_trust_applier_rejection_is_non_mutating(),
@@ -1332,10 +1234,7 @@ fn run_reachability_table(out: &Path) -> (u64, u64) {
         "F.rejection-non-mutating",
         modeled_trust_applier_rejection_is_non_mutating(),
     );
-    t.assert_true(
-        "F.never-calls-run-070",
-        modeled_trust_applier_never_calls_run_070(),
-    );
+    t.assert_true("F.never-calls-run-070", modeled_trust_applier_never_calls_run_070());
     t.assert_true(
         "F.never-mutates-live",
         modeled_trust_applier_never_mutates_live_pqc_trust_state(),
@@ -1404,21 +1303,9 @@ fn run_reachability_table(out: &Path) -> (u64, u64) {
     }
 
     // Exercise the modeled root-status taxonomy tags in release mode.
-    t.check(
-        "F.status-active",
-        "active",
-        ModeledTrustRootStatus::Active.tag(),
-    );
-    t.check(
-        "F.status-retired",
-        "retired",
-        ModeledTrustRootStatus::Retired.tag(),
-    );
-    t.check(
-        "F.status-revoked",
-        "revoked",
-        ModeledTrustRootStatus::Revoked.tag(),
-    );
+    t.check("F.status-active", "active", ModeledTrustRootStatus::Active.tag());
+    t.check("F.status-retired", "retired", ModeledTrustRootStatus::Retired.tag());
+    t.check("F.status-revoked", "revoked", ModeledTrustRootStatus::Revoked.tag());
     t.check(
         "F.status-emergency",
         "emergency-revoked",
@@ -1508,10 +1395,7 @@ fn run_fixture_dump(out: &Path) {
     let applier_w = devnet_applier();
     let mut windows = String::new();
     for (label, obs) in [
-        (
-            "before-snapshot",
-            ModeledTrustMutationWindowObservation::default(),
-        ),
+        ("before-snapshot", ModeledTrustMutationWindowObservation::default()),
         (
             "after-snapshot-before-apply",
             ModeledTrustMutationWindowObservation {

@@ -47,7 +47,9 @@ use crate::pqc_authority_marker_acceptance::{
     decide_v2_marker_acceptance_with_lifecycle_and_governance, MarkerAcceptDecisionV2,
     MarkerAcceptanceV2Inputs, MutatingSurfaceMarkerV2Error,
 };
-use crate::pqc_governance_authority::{GovernanceIssuerSignatureVerifier, GovernanceProofPolicy};
+use crate::pqc_governance_authority::{
+    GovernanceIssuerSignatureVerifier, GovernanceProofPolicy,
+};
 use crate::pqc_governance_proof_wire::GovernanceProofLoadStatus;
 
 /// Run 169 — production-surface marker-decision preflight that
@@ -167,7 +169,9 @@ pub fn governance_proof_required_env_selector_enabled() -> bool {
 /// peer-majority authority claim.** Run 171 is source/test selector
 /// wiring only; release-binary Required-policy production-surface
 /// evidence is deferred to Run 172.
-pub fn governance_proof_policy_from_selector(selector_enabled: bool) -> GovernanceProofPolicy {
+pub fn governance_proof_policy_from_selector(
+    selector_enabled: bool,
+) -> GovernanceProofPolicy {
     if selector_enabled {
         GovernanceProofPolicy::RequiredForLifecycleSensitive
     } else {
@@ -183,7 +187,9 @@ pub fn governance_proof_policy_from_selector(selector_enabled: bool) -> Governan
 ///
 /// Either source is sufficient to enable the Required policy; both
 /// being absent / falsey preserves the `NotRequired` default.
-pub fn governance_proof_policy_from_cli_or_env(cli_flag_set: bool) -> GovernanceProofPolicy {
+pub fn governance_proof_policy_from_cli_or_env(
+    cli_flag_set: bool,
+) -> GovernanceProofPolicy {
     governance_proof_policy_from_selector(
         cli_flag_set || governance_proof_required_env_selector_enabled(),
     )
@@ -235,7 +241,9 @@ pub fn preflight_v2_validation_only_marker_check_with_governance_proof_load(
 ) -> Result<MarkerAcceptDecisionV2, MutatingSurfaceMarkerV2Error> {
     // Run 173 — single integration shim. Do not create a second
     // selector or gate path; reuse the Run 169 shim verbatim.
-    preflight_v2_marker_decision_with_governance_proof_load(inputs, policy, proof_load, verifier)
+    preflight_v2_marker_decision_with_governance_proof_load(
+        inputs, policy, proof_load, verifier,
+    )
 }
 
 /// Run 176 — live inbound `0x05` peer-candidate validation-only

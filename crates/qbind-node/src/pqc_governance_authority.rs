@@ -74,8 +74,9 @@
 //! no live trust state.
 
 use crate::pqc_authority_lifecycle::{
-    is_pqc_lifecycle_suite, validate_v2_lifecycle_transition, AuthorityLifecycleTransitionOutcome,
-    AuthorityTrustDomain, LocalLifecycleAction, PQC_LIFECYCLE_SUITE_ML_DSA_44,
+    is_pqc_lifecycle_suite, validate_v2_lifecycle_transition,
+    AuthorityLifecycleTransitionOutcome, AuthorityTrustDomain, LocalLifecycleAction,
+    PQC_LIFECYCLE_SUITE_ML_DSA_44,
 };
 use crate::pqc_authority_state::{
     PersistentAuthorityStateRecordV2, PersistentAuthorityStateRecordVersioned,
@@ -838,7 +839,9 @@ pub fn classify_candidate_lifecycle_action(
                 "v2 revoke marker requires revoked_key_metadata sub-class prefix".to_string()
             })?;
             if metadata.len() < 2 {
-                return Err("revoked_key_metadata too short to carry sub-class prefix".to_string());
+                return Err(
+                    "revoked_key_metadata too short to carry sub-class prefix".to_string()
+                );
             }
             match &metadata[..2] {
                 "01" => Ok(LocalLifecycleAction::Revoke),

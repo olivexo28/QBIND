@@ -278,10 +278,7 @@ fn a09_deterministic_decision_digest_stable() {
         production_onchain_governance_decision_digest(&c),
         c.decision_digest()
     );
-    assert_eq!(
-        c.decision_digest(),
-        commitment(TrustBundleEnvironment::Devnet).decision_digest()
-    );
+    assert_eq!(c.decision_digest(), commitment(TrustBundleEnvironment::Devnet).decision_digest());
 }
 
 #[test]
@@ -309,7 +306,9 @@ fn a11_run186_classifier_routes_production_suite_as_production() {
     // Composition: the Run 186 classifier must route the Run 299 production
     // suite as production-class, not fixture.
     assert_eq!(
-        classify_production_suite_through_run186(ProductionOnChainGovernanceProofSuite::merkle_v1()),
+        classify_production_suite_through_run186(
+            ProductionOnChainGovernanceProofSuite::merkle_v1()
+        ),
         OnChainGovernanceProofClass::Production
     );
 }
@@ -343,10 +342,10 @@ fn a15_supported_protocol_and_suite_helpers() {
     assert!(ProductionOnChainGovernanceProofProtocolVersion::supported().is_supported());
     assert!(ProductionOnChainGovernanceProofSuite::merkle_v1().is_supported());
     assert!(!ProductionOnChainGovernanceProofSuite::merkle_v1().is_fixture());
-    assert!(
-        ProductionOnChainGovernanceProofSuite(ONCHAIN_GOVERNANCE_PROOF_SUITE_FIXTURE_MOCK_V1)
-            .is_fixture()
-    );
+    assert!(ProductionOnChainGovernanceProofSuite(
+        ONCHAIN_GOVERNANCE_PROOF_SUITE_FIXTURE_MOCK_V1
+    )
+    .is_fixture());
 }
 
 #[test]
@@ -938,8 +937,9 @@ fn c01_mainnet_refused_under_source_test_policy() {
 
 #[test]
 fn c02_mainnet_policy_fails_closed_on_mainnet() {
-    let v =
-        merkle_verifier(ProductionOnChainGovernanceVerifierPolicy::MainnetProductionProofRequired);
+    let v = merkle_verifier(
+        ProductionOnChainGovernanceVerifierPolicy::MainnetProductionProofRequired,
+    );
     let (proof, _cp, inputs) = valid_bundle(TrustBundleEnvironment::Mainnet);
     assert_eq!(
         verify(&v, &proof, &inputs, TrustBundleEnvironment::Mainnet),
@@ -949,8 +949,9 @@ fn c02_mainnet_policy_fails_closed_on_mainnet() {
 
 #[test]
 fn c03_mainnet_policy_fails_closed_on_devnet() {
-    let v =
-        merkle_verifier(ProductionOnChainGovernanceVerifierPolicy::MainnetProductionProofRequired);
+    let v = merkle_verifier(
+        ProductionOnChainGovernanceVerifierPolicy::MainnetProductionProofRequired,
+    );
     let (proof, _cp, inputs) = valid_bundle(TrustBundleEnvironment::Devnet);
     assert_eq!(
         verify(&v, &proof, &inputs, TrustBundleEnvironment::Devnet),
@@ -1177,7 +1178,9 @@ fn e08_same_decision_id_conflicting_transcript_fails_closed() {
 
 #[test]
 fn f01_run299_is_source_test_not_release_binary() {
-    assert!(production_onchain_governance_verifier_is_source_test_not_release_binary_evidence());
+    assert!(
+        production_onchain_governance_verifier_is_source_test_not_release_binary_evidence()
+    );
 }
 
 #[test]

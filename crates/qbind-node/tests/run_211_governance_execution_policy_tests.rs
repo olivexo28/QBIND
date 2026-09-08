@@ -246,16 +246,13 @@ fn a6_transcript_digest_deterministic() {
     let env = TrustBundleEnvironment::Devnet;
     let input = rotate_input(env);
     let decision = rotate_decision();
-    let t1 =
-        governance_execution_transcript_digest(&input.input_digest(), &decision.decision_digest());
-    let t2 =
-        governance_execution_transcript_digest(&input.input_digest(), &decision.decision_digest());
+    let t1 = governance_execution_transcript_digest(&input.input_digest(), &decision.decision_digest());
+    let t2 = governance_execution_transcript_digest(&input.input_digest(), &decision.decision_digest());
     assert_eq!(t1, t2);
     // Different input changes transcript.
     let mut other = rotate_input(env);
     other.replay_nonce = "other-nonce".to_string();
-    let t3 =
-        governance_execution_transcript_digest(&other.input_digest(), &decision.decision_digest());
+    let t3 = governance_execution_transcript_digest(&other.input_digest(), &decision.decision_digest());
     assert_ne!(t1, t3);
     // Policy digest determinism (optional helper).
     assert_eq!(
@@ -440,10 +437,7 @@ fn a14_disabled_policy_is_inert_default() {
     // never inspects any binding — existing proof-carrier behavior is
     // unchanged.
     let env = TrustBundleEnvironment::Devnet;
-    assert_eq!(
-        GovernanceExecutionPolicy::default(),
-        GovernanceExecutionPolicy::Disabled
-    );
+    assert_eq!(GovernanceExecutionPolicy::default(), GovernanceExecutionPolicy::Disabled);
     let outcome = evaluate_governance_execution_policy(
         &rotate_input(env),
         &rotate_decision(),
@@ -451,10 +445,7 @@ fn a14_disabled_policy_is_inert_default() {
         &trust_domain(env),
         GovernanceExecutionPolicy::Disabled,
     );
-    assert_eq!(
-        outcome,
-        GovernanceExecutionOutcome::GovernanceExecutionDisabled
-    );
+    assert_eq!(outcome, GovernanceExecutionOutcome::GovernanceExecutionDisabled);
 }
 
 #[test]
@@ -472,10 +463,7 @@ fn a15_disabled_compatible_with_bound_custody_and_signer_digests() {
         &trust_domain(env),
         GovernanceExecutionPolicy::Disabled,
     );
-    assert_eq!(
-        outcome,
-        GovernanceExecutionOutcome::GovernanceExecutionDisabled
-    );
+    assert_eq!(outcome, GovernanceExecutionOutcome::GovernanceExecutionDisabled);
 }
 
 // ===========================================================================
@@ -1077,10 +1065,7 @@ fn r35_valid_lifecycle_governance_custody_but_production_unavailable_rejected() 
         GovernanceExecutionPolicy::ProductionGovernanceRequired,
     );
     assert!(outcome.is_reject());
-    assert_eq!(
-        outcome,
-        GovernanceExecutionOutcome::FixtureRejectedProductionRequired
-    );
+    assert_eq!(outcome, GovernanceExecutionOutcome::FixtureRejectedProductionRequired);
 }
 
 #[test]
@@ -1129,9 +1114,7 @@ fn r37_mutating_preflight_rejection_produces_no_mutation() {
     );
     assert!(matches!(
         composed,
-        GovernanceExecutionComposedOutcome::Rejected(
-            GovernanceExecutionOutcome::GovernanceDecisionRejected
-        )
+        GovernanceExecutionComposedOutcome::Rejected(GovernanceExecutionOutcome::GovernanceDecisionRejected)
     ));
 }
 
@@ -1152,11 +1135,9 @@ fn r38_mainnet_peer_driven_apply_refused_even_with_fixture_approval() {
         composed,
         GovernanceExecutionComposedOutcome::MainNetPeerDrivenApplyRefused
     );
-    assert!(
-        mainnet_peer_driven_apply_remains_refused_under_governance_execution(
-            TrustBundleEnvironment::Mainnet
-        )
-    );
+    assert!(mainnet_peer_driven_apply_remains_refused_under_governance_execution(
+        TrustBundleEnvironment::Mainnet
+    ));
     // A non-peer-driven fixture path on MainNet trust domain is still
     // refused as fixture-for-mainnet.
     assert_eq!(
@@ -1179,10 +1160,7 @@ fn r38_mainnet_peer_driven_apply_refused_even_with_fixture_approval() {
 fn fixture_evaluator_trait_accepts_devnet() {
     let env = TrustBundleEnvironment::Devnet;
     let evaluator = FixtureGovernanceExecutionEvaluator;
-    assert_eq!(
-        evaluator.class(),
-        GovernanceExecutionClass::FixtureGovernance
-    );
+    assert_eq!(evaluator.class(), GovernanceExecutionClass::FixtureGovernance);
     let outcome = evaluator.evaluate_governance_execution_policy(
         &rotate_input(env),
         &rotate_decision(),

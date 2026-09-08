@@ -63,8 +63,8 @@ use qbind_ledger::{
     bundle_signing_ratification::v2_test_helpers as ratification_v2_helpers,
     compute_canonical_genesis_hash, pqc_public_key_fingerprint, BundleSigningRatificationV2,
     BundleSigningRatificationV2Action, GenesisAllocation, GenesisAuthorityConfig,
-    GenesisAuthorityRoot, GenesisConfig, GenesisCouncilConfig, GenesisHash, GenesisMonetaryConfig,
-    GenesisValidator, NetworkEnvironmentPolicy, RatificationEnvironment,
+    GenesisAuthorityRoot, GenesisConfig, GenesisCouncilConfig, GenesisHash,
+    GenesisMonetaryConfig, GenesisValidator, NetworkEnvironmentPolicy, RatificationEnvironment,
     GENESIS_AUTHORITY_SUITE_ML_DSA_44,
 };
 use qbind_node::pqc_authority_lifecycle::LocalLifecycleAction;
@@ -166,10 +166,7 @@ fn devnet_harness() -> Harness {
     let mut genesis_cfg = GenesisConfig::new(
         &chain_id_str,
         1_738_000_000_000,
-        vec![GenesisAllocation::new(
-            format!("0x{}", "11".repeat(32)),
-            100,
-        )],
+        vec![GenesisAllocation::new(format!("0x{}", "11".repeat(32)), 100)],
         vec![GenesisValidator::new(
             format!("0x{}", "22".repeat(32)),
             "ab".repeat(32),
@@ -219,8 +216,8 @@ impl Harness {
             .as_ref()
             .unwrap()
             .authority_policy_version;
-        let previous_digest =
-            matches!(action, BundleSigningRatificationV2Action::Rotate).then(|| "ab".repeat(32));
+        let previous_digest = matches!(action, BundleSigningRatificationV2Action::Rotate)
+            .then(|| "ab".repeat(32));
         ratification_v2_helpers::build_signed_ratification_v2(
             &self.chain_id_str,
             RatificationEnvironment::Devnet,
@@ -392,12 +389,7 @@ fn assert_no_marker_on_disk(marker_path: &Path) {
 /// lifecycle/governance layers (instead of being short-circuited by
 /// the "Rotate at first-write" lifecycle refusal).
 fn seed_prior_v2_marker(h: &Harness, marker_path: &Path) -> Vec<u8> {
-    let r1 = h.build_v2(
-        &h.signing_pk_a,
-        1,
-        BundleSigningRatificationV2Action::Ratify,
-        None,
-    );
+    let r1 = h.build_v2(&h.signing_pk_a, 1, BundleSigningRatificationV2Action::Ratify, None);
     let ratified1 = h.verify_v2(&r1);
     let gh = h.genesis_hex();
     let d1 = qbind_node::pqc_authority_marker_acceptance::decide_v2_marker_acceptance_with_lifecycle_and_governance(
@@ -406,10 +398,8 @@ fn seed_prior_v2_marker(h: &Harness, marker_path: &Path) -> Vec<u8> {
         qbind_node::pqc_governance_authority::GovernanceProofContext::Unavailable,
     )
     .expect("seed activate-initial accepts");
-    qbind_node::pqc_authority_marker_acceptance::persist_accepted_v2_marker_after_commit_boundary(
-        &d1,
-    )
-    .expect("persist seed marker");
+    qbind_node::pqc_authority_marker_acceptance::persist_accepted_v2_marker_after_commit_boundary(&d1)
+        .expect("persist seed marker");
     std::fs::read(marker_path).expect("read seed marker bytes")
 }
 
@@ -548,12 +538,7 @@ fn a1_default_selector_is_not_required_old_sidecar_accepted() {
     let h = devnet_harness();
     let dir = tmpdir("a1");
     let marker_path = authority_state_file_path(&dir);
-    let r = h.build_v2(
-        &h.signing_pk_a,
-        1,
-        BundleSigningRatificationV2Action::Ratify,
-        None,
-    );
+    let r = h.build_v2(&h.signing_pk_a, 1, BundleSigningRatificationV2Action::Ratify, None);
     let ratified = h.verify_v2(&r);
     let gh = h.genesis_hex();
     let policy = governance_proof_policy_from_cli_or_env(false);
@@ -620,10 +605,7 @@ fn a3_reload_check_required_accepts_valid_rotate_proof() {
         .expect("A3 accepts valid Rotate proof under Required");
     // Reload-check is validation-only; the seeded marker on disk is
     // unchanged.
-    assert_eq!(
-        __seed_bytes,
-        std::fs::read(&marker_path).expect("re-read marker")
-    );
+    assert_eq!(__seed_bytes, std::fs::read(&marker_path).expect("re-read marker"));
 }
 
 /// A4 — reload-apply Required policy accepts valid proof-carrying
@@ -662,10 +644,7 @@ fn a4_reload_apply_required_accepts_valid_rotate_proof_no_premature_write() {
     let _decision = shim_run(inputs, policy, &GovernanceProofLoadStatus::Available(proof))
         .expect("A4 accepts valid Rotate proof under Required");
     // The shim itself never persists; the seeded marker is unchanged.
-    assert_eq!(
-        __seed_bytes,
-        std::fs::read(&marker_path).expect("re-read marker")
-    );
+    assert_eq!(__seed_bytes, std::fs::read(&marker_path).expect("re-read marker"));
 }
 
 /// A5 — startup `--p2p-trust-bundle` Required policy accepts valid
@@ -708,10 +687,7 @@ fn a5_startup_required_accepts_valid_rotate_proof() {
     );
     let _ = shim_run(inputs, policy, &GovernanceProofLoadStatus::Available(proof))
         .expect("A5 accepts valid Rotate proof under Required");
-    assert_eq!(
-        __seed_bytes,
-        std::fs::read(&marker_path).expect("re-read marker")
-    );
+    assert_eq!(__seed_bytes, std::fs::read(&marker_path).expect("re-read marker"));
 }
 
 /// A6 — SIGHUP Required policy accepts valid proof-carrying Rotate
@@ -753,10 +729,7 @@ fn a6_sighup_required_accepts_valid_rotate_proof() {
     );
     let _ = shim_run(inputs, policy, &GovernanceProofLoadStatus::Available(proof))
         .expect("A6 accepts valid Rotate proof under Required at SIGHUP");
-    assert_eq!(
-        __seed_bytes,
-        std::fs::read(&marker_path).expect("re-read marker")
-    );
+    assert_eq!(__seed_bytes, std::fs::read(&marker_path).expect("re-read marker"));
 }
 
 /// A7 — peer-driven `ProductionV2MarkerCoordinator` Required policy
@@ -803,10 +776,7 @@ fn a7_peer_driven_coordinator_required_accepts_valid_rotate_proof() {
     .with_governance_proof_carrier(GovernanceProofLoadStatus::Available(proof), policy);
     coord.decide_pre_apply().expect("A7 accepts at coordinator");
     assert!(coord.accepted_decision().is_some());
-    assert_eq!(
-        __seed_bytes,
-        std::fs::read(&marker_path).expect("re-read marker")
-    );
+    assert_eq!(__seed_bytes, std::fs::read(&marker_path).expect("re-read marker"));
 }
 
 /// A8 — old no-proof sidecar remains accepted under default
@@ -820,12 +790,7 @@ fn a8_no_proof_sidecar_remains_accepted_under_default_across_surfaces() {
     let h = devnet_harness();
     let dir = tmpdir("a8");
     let marker_path = authority_state_file_path(&dir);
-    let r = h.build_v2(
-        &h.signing_pk_a,
-        1,
-        BundleSigningRatificationV2Action::Ratify,
-        None,
-    );
+    let r = h.build_v2(&h.signing_pk_a, 1, BundleSigningRatificationV2Action::Ratify, None);
     let ratified = h.verify_v2(&r);
     let policy = governance_proof_policy_from_cli_or_env(false);
     assert_eq!(policy, GovernanceProofPolicy::NotRequired);
@@ -876,10 +841,7 @@ fn r1_required_no_proof_rejected_on_reload_check() {
         err,
         MutatingSurfaceMarkerV2Error::GovernanceAuthorityRequiredButMissing { .. }
     ));
-    assert_eq!(
-        __seed_bytes,
-        std::fs::read(&marker_path).expect("re-read marker")
-    );
+    assert_eq!(__seed_bytes, std::fs::read(&marker_path).expect("re-read marker"));
 }
 
 /// R2 — Required policy + no-proof sidecar rejected before Run 070 on
@@ -910,10 +872,7 @@ fn r2_required_no_proof_rejected_on_reload_apply_before_run070() {
         err,
         MutatingSurfaceMarkerV2Error::GovernanceAuthorityRequiredButMissing { .. }
     ));
-    assert_eq!(
-        __seed_bytes,
-        std::fs::read(&marker_path).expect("re-read marker")
-    );
+    assert_eq!(__seed_bytes, std::fs::read(&marker_path).expect("re-read marker"));
 }
 
 /// R3 — Required policy + malformed proof rejected before mutation.
@@ -936,8 +895,9 @@ fn r3_required_malformed_proof_rejected_before_mutation() {
         &ratified2,
         AuthorityStateUpdateSource::ReloadApply,
     );
-    let malformed =
-        GovernanceProofLoadStatus::Malformed(GovernanceProofWireParseError::EmptyIssuerSignature);
+    let malformed = GovernanceProofLoadStatus::Malformed(
+        GovernanceProofWireParseError::EmptyIssuerSignature,
+    );
     let err = shim_run(inputs, policy, &malformed)
         .err()
         .expect("R3 fails closed");
@@ -945,10 +905,7 @@ fn r3_required_malformed_proof_rejected_before_mutation() {
         err,
         MutatingSurfaceMarkerV2Error::GovernanceAuthorityRequiredButMissing { .. }
     ));
-    assert_eq!(
-        __seed_bytes,
-        std::fs::read(&marker_path).expect("re-read marker")
-    );
+    assert_eq!(__seed_bytes, std::fs::read(&marker_path).expect("re-read marker"));
 }
 
 /// R4 — Required policy + invalid issuer signature rejected.
@@ -992,10 +949,7 @@ fn r4_required_invalid_issuer_signature_rejected() {
             GovOutcome::InvalidIssuerSignature { .. }
         )
     ));
-    assert_eq!(
-        __seed_bytes,
-        std::fs::read(&marker_path).expect("re-read marker")
-    );
+    assert_eq!(__seed_bytes, std::fs::read(&marker_path).expect("re-read marker"));
 }
 
 /// R5 — Required policy + wrong environment proof rejected.
@@ -1037,10 +991,7 @@ fn r5_required_wrong_environment_rejected() {
         err,
         MutatingSurfaceMarkerV2Error::GovernanceAuthorityRejected(_)
     ));
-    assert_eq!(
-        __seed_bytes,
-        std::fs::read(&marker_path).expect("re-read marker")
-    );
+    assert_eq!(__seed_bytes, std::fs::read(&marker_path).expect("re-read marker"));
 }
 
 /// R6 — Required policy + wrong chain proof rejected.
@@ -1082,10 +1033,7 @@ fn r6_required_wrong_chain_rejected() {
         err,
         MutatingSurfaceMarkerV2Error::GovernanceAuthorityRejected(_)
     ));
-    assert_eq!(
-        __seed_bytes,
-        std::fs::read(&marker_path).expect("re-read marker")
-    );
+    assert_eq!(__seed_bytes, std::fs::read(&marker_path).expect("re-read marker"));
 }
 
 /// R7 — Required policy + wrong genesis proof rejected.
@@ -1127,10 +1075,7 @@ fn r7_required_wrong_genesis_rejected() {
         err,
         MutatingSurfaceMarkerV2Error::GovernanceAuthorityRejected(_)
     ));
-    assert_eq!(
-        __seed_bytes,
-        std::fs::read(&marker_path).expect("re-read marker")
-    );
+    assert_eq!(__seed_bytes, std::fs::read(&marker_path).expect("re-read marker"));
 }
 
 /// R8 — Required policy + wrong authority root proof rejected.
@@ -1172,10 +1117,7 @@ fn r8_required_wrong_authority_root_rejected() {
         err,
         MutatingSurfaceMarkerV2Error::GovernanceAuthorityRejected(_)
     ));
-    assert_eq!(
-        __seed_bytes,
-        std::fs::read(&marker_path).expect("re-read marker")
-    );
+    assert_eq!(__seed_bytes, std::fs::read(&marker_path).expect("re-read marker"));
 }
 
 /// R9 — Required policy + wrong lifecycle action proof rejected.
@@ -1217,10 +1159,7 @@ fn r9_required_wrong_lifecycle_action_rejected() {
         err,
         MutatingSurfaceMarkerV2Error::GovernanceAuthorityRejected(_)
     ));
-    assert_eq!(
-        __seed_bytes,
-        std::fs::read(&marker_path).expect("re-read marker")
-    );
+    assert_eq!(__seed_bytes, std::fs::read(&marker_path).expect("re-read marker"));
 }
 
 /// R10 — Required policy + wrong candidate digest proof rejected.
@@ -1262,10 +1201,7 @@ fn r10_required_wrong_candidate_digest_rejected() {
         err,
         MutatingSurfaceMarkerV2Error::GovernanceAuthorityRejected(_)
     ));
-    assert_eq!(
-        __seed_bytes,
-        std::fs::read(&marker_path).expect("re-read marker")
-    );
+    assert_eq!(__seed_bytes, std::fs::read(&marker_path).expect("re-read marker"));
 }
 
 /// R11 — Required policy + wrong authority-domain sequence proof
@@ -1308,10 +1244,7 @@ fn r11_required_wrong_authority_domain_sequence_rejected() {
         err,
         MutatingSurfaceMarkerV2Error::GovernanceAuthorityRejected(_)
     ));
-    assert_eq!(
-        __seed_bytes,
-        std::fs::read(&marker_path).expect("re-read marker")
-    );
+    assert_eq!(__seed_bytes, std::fs::read(&marker_path).expect("re-read marker"));
 }
 
 /// R12 — Required policy + OnChainGovernance proof rejected as
@@ -1355,10 +1288,7 @@ fn r12_required_on_chain_governance_unsupported() {
             GovOutcome::UnsupportedOnChainGovernance { .. }
         )
     ));
-    assert_eq!(
-        __seed_bytes,
-        std::fs::read(&marker_path).expect("re-read marker")
-    );
+    assert_eq!(__seed_bytes, std::fs::read(&marker_path).expect("re-read marker"));
 }
 
 /// R13 — Required policy + local operator config alone rejected as
@@ -1536,10 +1466,7 @@ fn r18_required_mutating_rejection_no_run070_no_swap_no_eviction_no_writes() {
     assert!(err.contains("governance") || err.contains("GovernanceAuthority"));
     assert!(coord.accepted_decision().is_none());
     // No marker mutation; seeded bytes intact.
-    assert_eq!(
-        __seed_bytes,
-        std::fs::read(&marker_path).expect("re-read marker")
-    );
+    assert_eq!(__seed_bytes, std::fs::read(&marker_path).expect("re-read marker"));
 }
 
 /// R19 — MainNet peer-driven apply remains refused even with Required
@@ -1554,12 +1481,7 @@ fn r19_mainnet_peer_driven_apply_remains_refused_even_with_required_and_valid_pr
     let h = devnet_harness();
     let dir = tmpdir("r19");
     let marker_path = authority_state_file_path(&dir);
-    let r = h.build_v2(
-        &h.signing_pk_a,
-        1,
-        BundleSigningRatificationV2Action::Ratify,
-        None,
-    );
+    let r = h.build_v2(&h.signing_pk_a, 1, BundleSigningRatificationV2Action::Ratify, None);
     let ratified = h.verify_v2(&r);
     let policy = governance_proof_policy_from_cli_or_env(true);
     let _coord = ProductionV2MarkerCoordinator::new(
@@ -1618,12 +1540,8 @@ fn source_reachability_selector_reaches_gate_with_observable_outcome() {
         &ratified2,
         AuthorityStateUpdateSource::ReloadApply,
     );
-    let _ok = shim_run(
-        inputs_default,
-        policy_default,
-        &GovernanceProofLoadStatus::Absent,
-    )
-    .expect("default selector accepts no-proof");
+    let _ok = shim_run(inputs_default, policy_default, &GovernanceProofLoadStatus::Absent)
+        .expect("default selector accepts no-proof");
     // Required -> Absent rejected RequiredButMissing.
     let policy_required = governance_proof_policy_from_cli_or_env(true);
     let inputs_required = make_inputs(
@@ -1633,21 +1551,14 @@ fn source_reachability_selector_reaches_gate_with_observable_outcome() {
         &ratified2,
         AuthorityStateUpdateSource::ReloadApply,
     );
-    let err = shim_run(
-        inputs_required,
-        policy_required,
-        &GovernanceProofLoadStatus::Absent,
-    )
-    .err()
-    .expect("Required selector rejects no-proof");
+    let err = shim_run(inputs_required, policy_required, &GovernanceProofLoadStatus::Absent)
+        .err()
+        .expect("Required selector rejects no-proof");
     assert!(matches!(
         err,
         MutatingSurfaceMarkerV2Error::GovernanceAuthorityRequiredButMissing { .. }
     ));
-    assert_eq!(
-        __seed_bytes,
-        std::fs::read(&marker_path).expect("re-read marker")
-    );
+    assert_eq!(__seed_bytes, std::fs::read(&marker_path).expect("re-read marker"));
 }
 
 /// Source-reachability B — Available proof under Required reaches the

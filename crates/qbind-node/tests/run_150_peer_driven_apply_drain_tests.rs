@@ -193,7 +193,10 @@ fn snapshot_seq_file(path: &Path) -> Option<(Vec<u8>, std::time::SystemTime)> {
     Some((bytes, mtime))
 }
 
-fn assert_seq_file_unchanged(path: &Path, snapshot: Option<(Vec<u8>, std::time::SystemTime)>) {
+fn assert_seq_file_unchanged(
+    path: &Path,
+    snapshot: Option<(Vec<u8>, std::time::SystemTime)>,
+) {
     match (snapshot, path.exists()) {
         (None, false) => {}
         (None, true) => panic!(
@@ -278,20 +281,12 @@ impl FakeLiveTrustApplyContext {
 
 impl LiveTrustApplyContext for FakeLiveTrustApplyContext {
     fn snapshot_active(&mut self) -> Result<Box<dyn std::any::Any + Send + Sync>, String> {
-        self.log
-            .lock()
-            .unwrap()
-            .events
-            .push("snapshot_active".into());
+        self.log.lock().unwrap().events.push("snapshot_active".into());
         let prev: String = self.active_fingerprint.lock().unwrap().clone();
         Ok(Box::new(prev))
     }
     fn swap_trust_state(&mut self, candidate: &LoadedTrustBundle) -> Result<(), String> {
-        self.log
-            .lock()
-            .unwrap()
-            .events
-            .push("swap_trust_state".into());
+        self.log.lock().unwrap().events.push("swap_trust_state".into());
         match &self.swap_action {
             ActionPlan::Err(m) => Err(m.clone()),
             ActionPlan::Ok => {
@@ -302,22 +297,14 @@ impl LiveTrustApplyContext for FakeLiveTrustApplyContext {
         }
     }
     fn evict_sessions(&mut self) -> Result<usize, String> {
-        self.log
-            .lock()
-            .unwrap()
-            .events
-            .push("evict_sessions".into());
+        self.log.lock().unwrap().events.push("evict_sessions".into());
         match &self.evict_action {
             ActionPlan::Err(m) => Err(m.clone()),
             ActionPlan::Ok => Ok(self.eviction_count),
         }
     }
     fn commit_sequence(&mut self, _candidate: &LoadedTrustBundle) -> Result<(), String> {
-        self.log
-            .lock()
-            .unwrap()
-            .events
-            .push("commit_sequence".into());
+        self.log.lock().unwrap().events.push("commit_sequence".into());
         match &self.commit_action {
             ActionPlan::Err(m) => Err(m.clone()),
             ActionPlan::Ok => Ok(()),
@@ -400,9 +387,13 @@ fn stage_candidate_from_bundle(
     staged_at: u64,
     authority_marker_digest: Option<String>,
 ) -> ValidatedCandidate {
-    let validated =
-        validate_candidate_bundle(devnet_inputs(candidate_path, signing_keys, seq_path, 0))
-            .expect("baseline validation must succeed for staging");
+    let validated = validate_candidate_bundle(devnet_inputs(
+        candidate_path,
+        signing_keys,
+        seq_path,
+        0,
+    ))
+    .expect("baseline validation must succeed for staging");
     let vpc = ValidatedPeerCandidate {
         validated: validated.clone(),
         peer_id: peer_id.map(|s| s.to_string()),
@@ -592,10 +583,7 @@ fn a1_explicit_drain_applies_one_valid_staged_devnet_v2_candidate() {
             assert_eq!(fingerprint_prefix, &validated.fingerprint_prefix);
             assert_eq!(*sequence, 5);
             assert_eq!(*session_evictions, 2);
-            assert!(
-                *marker_persisted,
-                "v2 marker persist required and succeeded"
-            );
+            assert!(*marker_persisted, "v2 marker persist required and succeeded");
         }
         other => panic!("expected Applied, got {:?}", other),
     }
@@ -1104,50 +1092,28 @@ fn r1_lower_sequence_candidate_cannot_drain_when_higher_exists() {
 
     let mut queue = PeerCandidateStagingQueue::new(PeerDrivenStagingPolicy::devnet_enabled());
     let v_low = stage_candidate_from_bundle(
-        &mut queue,
-        &path_low,
-        &h.signing_keys,
-        Some(&seq_path),
-        Some("peer-l"),
-        1_000,
-        Some("d-l".into()),
+        &mut queue, &path_low, &h.signing_keys, Some(&seq_path), Some("peer-l"),
+        1_000, Some("d-l".into()),
     );
     let _v_high = stage_candidate_from_bundle(
-        &mut queue,
-        &path_high,
-        &h.signing_keys,
-        Some(&seq_path),
-        Some("peer-h"),
-        1_000,
-        Some("d-h".into()),
+        &mut queue, &path_high, &h.signing_keys, Some(&seq_path), Some("peer-h"),
+        1_000, Some("d-h".into()),
     );
 
     let ctx = FakeLiveTrustApplyContext::new("aaaaaaaa");
     let mut builder = DrainBuilder::devnet(
-        path_high.clone(),
-        h.signing_keys.clone(),
-        seq_path.clone(),
-        ctx,
-    )
-    .with_previous("aaaaaaaa", Some(1));
+        path_high.clone(), h.signing_keys.clone(), seq_path.clone(), ctx,
+    ).with_previous("aaaaaaaa", Some(1));
     let active = builder.active();
     let mut marker = MockV2MarkerCoordinator::new();
     let drain = PeerDrivenApplyDrain::new();
     let drain_policy = PeerDrivenDrainPolicy::devnet_enabled();
     let apply_policy = PeerDrivenApplyPolicy::devnet_enabled();
     let outcome = drain.try_drain_once(
-        &mut queue,
-        &mut builder,
-        &mut marker,
-        &drain_policy,
-        &apply_policy,
-        &devnet_runtime_domain(),
-        1_001,
+        &mut queue, &mut builder, &mut marker, &drain_policy, &apply_policy,
+        &devnet_runtime_domain(), 1_001,
     );
-    assert!(matches!(
-        outcome,
-        PeerDrivenDrainOutcome::Applied { sequence: 9, .. }
-    ));
+    assert!(matches!(outcome, PeerDrivenDrainOutcome::Applied { sequence: 9, .. }));
     // Lower-sequence candidate remains; the live fingerprint is the
     // HIGH candidate's fp_prefix (not low).
     assert_ne!(*active.lock().unwrap(), v_low.fingerprint_prefix);
@@ -1170,22 +1136,14 @@ fn r2_same_sequence_different_digest_marker_conflict_refused() {
 
     let mut queue = PeerCandidateStagingQueue::new(PeerDrivenStagingPolicy::devnet_enabled());
     let _validated = stage_candidate_from_bundle(
-        &mut queue,
-        &candidate_path,
-        &h.signing_keys,
-        Some(&seq_path),
-        Some("peer-r2"),
-        1_000,
-        Some("digest-r2".into()),
+        &mut queue, &candidate_path, &h.signing_keys, Some(&seq_path),
+        Some("peer-r2"), 1_000, Some("digest-r2".into()),
     );
 
     let snap = snapshot_seq_file(&seq_path);
     let ctx = FakeLiveTrustApplyContext::new("aaaaaaaa");
     let mut builder = DrainBuilder::devnet(
-        candidate_path.clone(),
-        h.signing_keys.clone(),
-        seq_path.clone(),
-        ctx,
+        candidate_path.clone(), h.signing_keys.clone(), seq_path.clone(), ctx,
     );
     let ctx_log = builder.ctx_log();
     let mut marker = MockV2MarkerCoordinator::new()
@@ -1194,13 +1152,8 @@ fn r2_same_sequence_different_digest_marker_conflict_refused() {
     let drain_policy = PeerDrivenDrainPolicy::devnet_enabled();
     let apply_policy = PeerDrivenApplyPolicy::devnet_enabled();
     let outcome = drain.try_drain_once(
-        &mut queue,
-        &mut builder,
-        &mut marker,
-        &drain_policy,
-        &apply_policy,
-        &devnet_runtime_domain(),
-        1_001,
+        &mut queue, &mut builder, &mut marker, &drain_policy, &apply_policy,
+        &devnet_runtime_domain(), 1_001,
     );
     match &outcome {
         PeerDrivenDrainOutcome::CandidateMarkerConflict { reason, .. } => {
@@ -1208,10 +1161,7 @@ fn r2_same_sequence_different_digest_marker_conflict_refused() {
         }
         other => panic!("expected CandidateMarkerConflict, got {:?}", other),
     }
-    assert!(
-        ctx_log.lock().unwrap().events.is_empty(),
-        "no Run 070 apply"
-    );
+    assert!(ctx_log.lock().unwrap().events.is_empty(), "no Run 070 apply");
     assert_seq_file_unchanged(&seq_path, snap);
     // Pre-apply marker conflict leaves queue intact (operator may
     // reconcile and retry).
@@ -1246,22 +1196,14 @@ fn r4_wrong_domain_staged_candidate_cannot_drain() {
 
     let mut queue = PeerCandidateStagingQueue::new(PeerDrivenStagingPolicy::devnet_enabled());
     let _v = stage_candidate_from_bundle(
-        &mut queue,
-        &candidate_path,
-        &h.signing_keys,
-        Some(&seq_path),
-        Some("peer-r4"),
-        1_000,
-        Some("digest-r4".into()),
+        &mut queue, &candidate_path, &h.signing_keys, Some(&seq_path),
+        Some("peer-r4"), 1_000, Some("digest-r4".into()),
     );
 
     let snap = snapshot_seq_file(&seq_path);
     let ctx = FakeLiveTrustApplyContext::new("aaaaaaaa");
     let mut builder = DrainBuilder::devnet(
-        candidate_path.clone(),
-        h.signing_keys.clone(),
-        seq_path.clone(),
-        ctx,
+        candidate_path.clone(), h.signing_keys.clone(), seq_path.clone(), ctx,
     );
     let ctx_log = builder.ctx_log();
     let mut marker = MockV2MarkerCoordinator::new();
@@ -1272,13 +1214,8 @@ fn r4_wrong_domain_staged_candidate_cannot_drain() {
     let drain_policy = PeerDrivenDrainPolicy::testnet_enabled();
     let apply_policy = PeerDrivenApplyPolicy::testnet_enabled();
     let outcome = drain.try_drain_once(
-        &mut queue,
-        &mut builder,
-        &mut marker,
-        &drain_policy,
-        &apply_policy,
-        &testnet_runtime_domain(),
-        1_001,
+        &mut queue, &mut builder, &mut marker, &drain_policy, &apply_policy,
+        &testnet_runtime_domain(), 1_001,
     );
     assert!(matches!(outcome, PeerDrivenDrainOutcome::NoCandidate));
     assert!(ctx_log.lock().unwrap().events.is_empty());
@@ -1301,46 +1238,27 @@ fn r5_ambiguous_v1_v2_candidate_refused_at_marker_gate() {
 
     let mut queue = PeerCandidateStagingQueue::new(PeerDrivenStagingPolicy::devnet_enabled());
     let _v = stage_candidate_from_bundle(
-        &mut queue,
-        &candidate_path,
-        &h.signing_keys,
-        Some(&seq_path),
-        Some("peer-r5"),
-        1_000,
-        Some("digest-r5".into()),
+        &mut queue, &candidate_path, &h.signing_keys, Some(&seq_path),
+        Some("peer-r5"), 1_000, Some("digest-r5".into()),
     );
 
     let snap = snapshot_seq_file(&seq_path);
     let ctx = FakeLiveTrustApplyContext::new("aaaaaaaa");
     let mut builder = DrainBuilder::devnet(
-        candidate_path.clone(),
-        h.signing_keys.clone(),
-        seq_path.clone(),
-        ctx,
+        candidate_path.clone(), h.signing_keys.clone(), seq_path.clone(), ctx,
     );
     let ctx_log = builder.ctx_log();
-    let mut marker =
-        MockV2MarkerCoordinator::new().with_pre_apply_err("ambiguous-v1-and-v2-markers-present");
+    let mut marker = MockV2MarkerCoordinator::new()
+        .with_pre_apply_err("ambiguous-v1-and-v2-markers-present");
     let drain = PeerDrivenApplyDrain::new();
     let drain_policy = PeerDrivenDrainPolicy::devnet_enabled();
     let apply_policy = PeerDrivenApplyPolicy::devnet_enabled();
     let outcome = drain.try_drain_once(
-        &mut queue,
-        &mut builder,
-        &mut marker,
-        &drain_policy,
-        &apply_policy,
-        &devnet_runtime_domain(),
-        1_001,
+        &mut queue, &mut builder, &mut marker, &drain_policy, &apply_policy,
+        &devnet_runtime_domain(), 1_001,
     );
-    assert!(matches!(
-        outcome,
-        PeerDrivenDrainOutcome::CandidateMarkerConflict { .. }
-    ));
-    assert!(
-        ctx_log.lock().unwrap().events.is_empty(),
-        "no Run 070 apply"
-    );
+    assert!(matches!(outcome, PeerDrivenDrainOutcome::CandidateMarkerConflict { .. }));
+    assert!(ctx_log.lock().unwrap().events.is_empty(), "no Run 070 apply");
     assert_seq_file_unchanged(&seq_path, snap);
 }
 
@@ -1360,22 +1278,14 @@ fn r6_builder_refusal_before_apply_produces_no_mutation() {
 
     let mut queue = PeerCandidateStagingQueue::new(PeerDrivenStagingPolicy::devnet_enabled());
     let _v = stage_candidate_from_bundle(
-        &mut queue,
-        &candidate_path,
-        &h.signing_keys,
-        Some(&seq_path),
-        Some("peer-r6"),
-        1_000,
-        Some("digest-r6".into()),
+        &mut queue, &candidate_path, &h.signing_keys, Some(&seq_path),
+        Some("peer-r6"), 1_000, Some("digest-r6".into()),
     );
 
     let snap = snapshot_seq_file(&seq_path);
     let ctx = FakeLiveTrustApplyContext::new("aaaaaaaa");
     let mut builder = DrainBuilder::devnet(
-        candidate_path.clone(),
-        h.signing_keys.clone(),
-        seq_path.clone(),
-        ctx,
+        candidate_path.clone(), h.signing_keys.clone(), seq_path.clone(), ctx,
     )
     .with_refusal("simulated bundle path missing on disk");
     let ctx_log = builder.ctx_log();
@@ -1383,9 +1293,7 @@ fn r6_builder_refusal_before_apply_produces_no_mutation() {
     let marker_log = marker.log();
     let drain = PeerDrivenApplyDrain::new();
     let outcome = drain.try_drain_once(
-        &mut queue,
-        &mut builder,
-        &mut marker,
+        &mut queue, &mut builder, &mut marker,
         &PeerDrivenDrainPolicy::devnet_enabled(),
         &PeerDrivenApplyPolicy::devnet_enabled(),
         &devnet_runtime_domain(),
@@ -1420,22 +1328,14 @@ fn r7_eviction_failure_rollback_preserves_run070() {
 
     let mut queue = PeerCandidateStagingQueue::new(PeerDrivenStagingPolicy::devnet_enabled());
     let _v = stage_candidate_from_bundle(
-        &mut queue,
-        &candidate_path,
-        &h.signing_keys,
-        Some(&seq_path),
-        Some("peer-r7"),
-        1_000,
-        Some("digest-r7".into()),
+        &mut queue, &candidate_path, &h.signing_keys, Some(&seq_path),
+        Some("peer-r7"), 1_000, Some("digest-r7".into()),
     );
 
     let mut ctx = FakeLiveTrustApplyContext::new("aaaaaaaa");
     ctx.evict_action = ActionPlan::Err("session-eviction failed (sim)".into());
     let mut builder = DrainBuilder::devnet(
-        candidate_path.clone(),
-        h.signing_keys.clone(),
-        seq_path.clone(),
-        ctx,
+        candidate_path.clone(), h.signing_keys.clone(), seq_path.clone(), ctx,
     )
     .with_previous("aaaaaaaa", Some(2));
     let ctx_log = builder.ctx_log();
@@ -1443,9 +1343,7 @@ fn r7_eviction_failure_rollback_preserves_run070() {
     let mut marker = MockV2MarkerCoordinator::new();
     let drain = PeerDrivenApplyDrain::new();
     let outcome = drain.try_drain_once(
-        &mut queue,
-        &mut builder,
-        &mut marker,
+        &mut queue, &mut builder, &mut marker,
         &PeerDrivenDrainPolicy::devnet_enabled(),
         &PeerDrivenApplyPolicy::devnet_enabled(),
         &devnet_runtime_domain(),
@@ -1488,22 +1386,14 @@ fn r8_sequence_commit_failure_rollback_succeeds_no_marker() {
 
     let mut queue = PeerCandidateStagingQueue::new(PeerDrivenStagingPolicy::devnet_enabled());
     let _v = stage_candidate_from_bundle(
-        &mut queue,
-        &candidate_path,
-        &h.signing_keys,
-        Some(&seq_path),
-        Some("peer-r8"),
-        1_000,
-        Some("digest-r8".into()),
+        &mut queue, &candidate_path, &h.signing_keys, Some(&seq_path),
+        Some("peer-r8"), 1_000, Some("digest-r8".into()),
     );
 
     let mut ctx = FakeLiveTrustApplyContext::new("aaaaaaaa");
     ctx.commit_action = ActionPlan::Err("commit-sim".into());
     let mut builder = DrainBuilder::devnet(
-        candidate_path.clone(),
-        h.signing_keys.clone(),
-        seq_path.clone(),
-        ctx,
+        candidate_path.clone(), h.signing_keys.clone(), seq_path.clone(), ctx,
     )
     .with_previous("aaaaaaaa", Some(2));
     let active = builder.active();
@@ -1511,9 +1401,7 @@ fn r8_sequence_commit_failure_rollback_succeeds_no_marker() {
     let marker_log = marker.log();
     let drain = PeerDrivenApplyDrain::new();
     let outcome = drain.try_drain_once(
-        &mut queue,
-        &mut builder,
-        &mut marker,
+        &mut queue, &mut builder, &mut marker,
         &PeerDrivenDrainPolicy::devnet_enabled(),
         &PeerDrivenApplyPolicy::devnet_enabled(),
         &devnet_runtime_domain(),
@@ -1528,11 +1416,7 @@ fn r8_sequence_commit_failure_rollback_succeeds_no_marker() {
         }
         other => panic!("expected ApplyRejected (commit failure), got {:?}", other),
     }
-    assert_eq!(
-        *active.lock().unwrap(),
-        "aaaaaaaa",
-        "live state rolled back"
-    );
+    assert_eq!(*active.lock().unwrap(), "aaaaaaaa", "live state rolled back");
     // Marker pre-apply ran, persist did NOT.
     let mev = marker_log.lock().unwrap().clone();
     assert_eq!(mev, vec!["decide_pre_apply"], "no post-commit persist call");
@@ -1555,30 +1439,20 @@ fn r9_marker_persist_failure_after_commit_is_fatal() {
 
     let mut queue = PeerCandidateStagingQueue::new(PeerDrivenStagingPolicy::devnet_enabled());
     let _v = stage_candidate_from_bundle(
-        &mut queue,
-        &candidate_path,
-        &h.signing_keys,
-        Some(&seq_path),
-        Some("peer-r9"),
-        1_000,
-        Some("digest-r9".into()),
+        &mut queue, &candidate_path, &h.signing_keys, Some(&seq_path),
+        Some("peer-r9"), 1_000, Some("digest-r9".into()),
     );
 
     let ctx = FakeLiveTrustApplyContext::new("aaaaaaaa");
     let mut builder = DrainBuilder::devnet(
-        candidate_path.clone(),
-        h.signing_keys.clone(),
-        seq_path.clone(),
-        ctx,
+        candidate_path.clone(), h.signing_keys.clone(), seq_path.clone(), ctx,
     )
     .with_previous("aaaaaaaa", Some(2));
     let mut marker = MockV2MarkerCoordinator::new()
         .with_post_commit_err("marker-persist-failed-after-commit (sim)");
     let drain = PeerDrivenApplyDrain::new();
     let outcome = drain.try_drain_once(
-        &mut queue,
-        &mut builder,
-        &mut marker,
+        &mut queue, &mut builder, &mut marker,
         &PeerDrivenDrainPolicy::devnet_enabled(),
         &PeerDrivenApplyPolicy::devnet_enabled(),
         &devnet_runtime_domain(),
@@ -1613,22 +1487,14 @@ fn r10_concurrency_guard_prevents_double_drain() {
 
     let mut queue = PeerCandidateStagingQueue::new(PeerDrivenStagingPolicy::devnet_enabled());
     let _v = stage_candidate_from_bundle(
-        &mut queue,
-        &candidate_path,
-        &h.signing_keys,
-        Some(&seq_path),
-        Some("peer-r10"),
-        1_000,
-        Some("digest-r10".into()),
+        &mut queue, &candidate_path, &h.signing_keys, Some(&seq_path),
+        Some("peer-r10"), 1_000, Some("digest-r10".into()),
     );
 
     let snap = snapshot_seq_file(&seq_path);
     let ctx = FakeLiveTrustApplyContext::new("aaaaaaaa");
     let mut builder = DrainBuilder::devnet(
-        candidate_path.clone(),
-        h.signing_keys.clone(),
-        seq_path.clone(),
-        ctx,
+        candidate_path.clone(), h.signing_keys.clone(), seq_path.clone(), ctx,
     );
     let ctx_log = builder.ctx_log();
     let mut marker = MockV2MarkerCoordinator::new();
@@ -1639,9 +1505,7 @@ fn r10_concurrency_guard_prevents_double_drain() {
     flag.store(true, Ordering::Release);
 
     let outcome = drain.try_drain_once(
-        &mut queue,
-        &mut builder,
-        &mut marker,
+        &mut queue, &mut builder, &mut marker,
         &PeerDrivenDrainPolicy::devnet_enabled(),
         &PeerDrivenApplyPolicy::devnet_enabled(),
         &devnet_runtime_domain(),
@@ -1649,10 +1513,7 @@ fn r10_concurrency_guard_prevents_double_drain() {
     );
     assert!(matches!(outcome, PeerDrivenDrainOutcome::AlreadyInProgress));
     assert!(outcome.is_pre_controller_refusal());
-    assert!(
-        ctx_log.lock().unwrap().events.is_empty(),
-        "no Run 070 apply"
-    );
+    assert!(ctx_log.lock().unwrap().events.is_empty(), "no Run 070 apply");
     assert!(marker_log.lock().unwrap().is_empty(), "no marker call");
     assert_seq_file_unchanged(&seq_path, snap);
     assert_eq!(queue.len(), 1);
@@ -1661,9 +1522,7 @@ fn r10_concurrency_guard_prevents_double_drain() {
     // proceeds normally.
     flag.store(false, Ordering::Release);
     let outcome2 = drain.try_drain_once(
-        &mut queue,
-        &mut builder,
-        &mut marker,
+        &mut queue, &mut builder, &mut marker,
         &PeerDrivenDrainPolicy::devnet_enabled(),
         &PeerDrivenApplyPolicy::devnet_enabled(),
         &devnet_runtime_domain(),
@@ -1695,31 +1554,21 @@ fn r11_v1_only_staged_candidate_refused_when_v2_required() {
     // Stage WITHOUT an authority_marker_digest — modelling a v1/legacy
     // peer-staged candidate.
     let _v = stage_candidate_from_bundle(
-        &mut queue,
-        &candidate_path,
-        &h.signing_keys,
-        Some(&seq_path),
-        Some("peer-r11"),
-        1_000,
-        None,
+        &mut queue, &candidate_path, &h.signing_keys, Some(&seq_path),
+        Some("peer-r11"), 1_000, None,
     );
 
     let snap = snapshot_seq_file(&seq_path);
     let ctx = FakeLiveTrustApplyContext::new("aaaaaaaa");
     let mut builder = DrainBuilder::devnet(
-        candidate_path.clone(),
-        h.signing_keys.clone(),
-        seq_path.clone(),
-        ctx,
+        candidate_path.clone(), h.signing_keys.clone(), seq_path.clone(), ctx,
     );
     let ctx_log = builder.ctx_log();
     let mut marker = MockV2MarkerCoordinator::new()
         .with_pre_apply_err("v1-only-candidate-rejected-when-v2-required");
     let drain = PeerDrivenApplyDrain::new();
     let outcome = drain.try_drain_once(
-        &mut queue,
-        &mut builder,
-        &mut marker,
+        &mut queue, &mut builder, &mut marker,
         &PeerDrivenDrainPolicy::devnet_enabled(),
         &PeerDrivenApplyPolicy::devnet_enabled(),
         &devnet_runtime_domain(),
@@ -1729,10 +1578,7 @@ fn r11_v1_only_staged_candidate_refused_when_v2_required() {
         outcome,
         PeerDrivenDrainOutcome::CandidateMarkerConflict { .. }
     ));
-    assert!(
-        ctx_log.lock().unwrap().events.is_empty(),
-        "no Run 070 apply"
-    );
+    assert!(ctx_log.lock().unwrap().events.is_empty(), "no Run 070 apply");
     assert_seq_file_unchanged(&seq_path, snap);
     assert_eq!(queue.len(), 1, "v1-candidate left for operator review");
 }
@@ -1762,13 +1608,8 @@ fn r12_propagation_only_behaviour_unchanged_under_drain() {
 
     let mut queue = PeerCandidateStagingQueue::new(PeerDrivenStagingPolicy::devnet_enabled());
     let _v = stage_candidate_from_bundle(
-        &mut queue,
-        &candidate_path,
-        &h.signing_keys,
-        Some(&seq_path),
-        Some("peer-r12"),
-        1_000,
-        Some("digest-r12".into()),
+        &mut queue, &candidate_path, &h.signing_keys, Some(&seq_path),
+        Some("peer-r12"), 1_000, Some("digest-r12".into()),
     );
     let entries_before = queue.entries();
 
@@ -1776,30 +1617,21 @@ fn r12_propagation_only_behaviour_unchanged_under_drain() {
     // surfaces must not be touched.
     let ctx = FakeLiveTrustApplyContext::new("aaaaaaaa");
     let mut builder = DrainBuilder::devnet(
-        candidate_path.clone(),
-        h.signing_keys.clone(),
-        seq_path.clone(),
-        ctx,
+        candidate_path.clone(), h.signing_keys.clone(), seq_path.clone(), ctx,
     );
     let ctx_log = builder.ctx_log();
     let mut marker = MockV2MarkerCoordinator::new();
     let marker_log = marker.log();
     let drain = PeerDrivenApplyDrain::new();
     let outcome = drain.try_drain_once(
-        &mut queue,
-        &mut builder,
-        &mut marker,
+        &mut queue, &mut builder, &mut marker,
         &PeerDrivenDrainPolicy::default(),
         &PeerDrivenApplyPolicy::default(),
         &devnet_runtime_domain(),
         1_001,
     );
     assert!(matches!(outcome, PeerDrivenDrainOutcome::Disabled));
-    assert_eq!(
-        queue.entries(),
-        entries_before,
-        "queue unchanged on Disabled"
-    );
+    assert_eq!(queue.entries(), entries_before, "queue unchanged on Disabled");
     assert!(ctx_log.lock().unwrap().events.is_empty());
     assert!(marker_log.lock().unwrap().is_empty());
 }

@@ -44,7 +44,8 @@ use qbind_node::pqc_onchain_governance_payload_carrying::{
     route_loaded_onchain_governance_proof_to_sighup_callsite_decision,
     route_loaded_onchain_governance_proof_to_startup_p2p_trust_bundle_callsite_decision,
     OnChainGovernancePayloadCarryingDecisionOutcome, OnChainGovernanceProofLoadStatus,
-    OnChainGovernanceProofPayloadParseError, ONCHAIN_GOVERNANCE_PROOF_PAYLOAD_SIBLING_FIELD,
+    OnChainGovernanceProofPayloadParseError,
+    ONCHAIN_GOVERNANCE_PROOF_PAYLOAD_SIBLING_FIELD,
 };
 use qbind_node::pqc_onchain_governance_proof::{
     fixture_onchain_governance_proof_bytes, verify_onchain_governance_proof,
@@ -52,7 +53,8 @@ use qbind_node::pqc_onchain_governance_proof::{
     OnChainGovernanceProofPolicy, OnChainGovernanceProofVerificationOutcome,
     OnChainGovernanceProofWire, OnChainGovernanceProofWireParseError,
     OnChainGovernanceProposalOutcome, OnChainGovernanceQuorum, OnChainGovernanceReplaySet,
-    ONCHAIN_GOVERNANCE_PROOF_SUITE_FIXTURE_MOCK_V1, ONCHAIN_GOVERNANCE_PROOF_WIRE_SCHEMA_VERSION,
+    ONCHAIN_GOVERNANCE_PROOF_SUITE_FIXTURE_MOCK_V1,
+    ONCHAIN_GOVERNANCE_PROOF_WIRE_SCHEMA_VERSION,
 };
 use qbind_node::pqc_onchain_governance_proof_surface::OnChainGovernanceMarkerDecisionOutcome;
 use qbind_node::pqc_trust_bundle::TrustBundleEnvironment;
@@ -67,15 +69,18 @@ const KEY_B: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 const ROOT_FP: &str = "1111111111111111111111111111111111111111";
 const CHAIN_ID: &str = "0000000000000001";
 const OTHER_CHAIN: &str = "00000000000000ff";
-const GENESIS_HASH_A: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
-const GENESIS_HASH_B: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+const GENESIS_HASH_A: &str =
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+const GENESIS_HASH_B: &str =
+    "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 const DIGEST_2: &str = "2222222222222222222222222222222222222222222222222222222222222222";
 const DIGEST_OTHER: &str = "3333333333333333333333333333333333333333333333333333333333333333";
 
 const GOV_DOMAIN: &str = "qbind-onchain-gov-1";
 const GOV_EPOCH: u64 = 42;
 const PROPOSAL_ID: &str = "prop-001";
-const PROPOSAL_DIGEST: &str = "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef";
+const PROPOSAL_DIGEST: &str =
+    "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef";
 const UNIQUE_DECISION_ID: &str = "decision-184";
 const NOW: u64 = 1_700_000_000;
 
@@ -269,7 +274,9 @@ fn route_with<R: OnChainGovernanceReplaySet + ?Sized>(
                 &ctx, loaded,
             )
         }
-        "sighup" => route_loaded_onchain_governance_proof_to_sighup_callsite_decision(&ctx, loaded),
+        "sighup" => {
+            route_loaded_onchain_governance_proof_to_sighup_callsite_decision(&ctx, loaded)
+        }
         "local_peer_candidate_check" => {
             route_loaded_onchain_governance_proof_to_local_peer_candidate_check_callsite_decision(
                 &ctx, loaded,
@@ -351,10 +358,10 @@ fn make_v2_sidecar_value_with_proof_sibling(
     );
     let mut value = serde_json::to_value(&v2).expect("ratification serializes");
     if let Some(p) = proof_sibling {
-        value.as_object_mut().unwrap().insert(
-            ONCHAIN_GOVERNANCE_PROOF_PAYLOAD_SIBLING_FIELD.to_string(),
-            p,
-        );
+        value
+            .as_object_mut()
+            .unwrap()
+            .insert(ONCHAIN_GOVERNANCE_PROOF_PAYLOAD_SIBLING_FIELD.to_string(), p);
     }
     value
 }
@@ -1334,11 +1341,7 @@ fn r23_validation_only_rejection_is_pure_no_mutation() {
         PersistentAuthorityStateRecordVersioned::V1(_) => unreachable!(),
     };
     let original_candidate_digest = candidate.latest_ratification_v2_digest.clone();
-    for surface in [
-        "reload_check",
-        "local_peer_candidate_check",
-        "live_inbound_0x05",
-    ] {
+    for surface in ["reload_check", "local_peer_candidate_check", "live_inbound_0x05"] {
         let outcome = route_with(
             Some(&persisted),
             &candidate,
@@ -1356,10 +1359,7 @@ fn r23_validation_only_rejection_is_pure_no_mutation() {
         PersistentAuthorityStateRecordVersioned::V1(_) => unreachable!(),
     };
     assert_eq!(post_seq, original_persisted_seq);
-    assert_eq!(
-        candidate.latest_ratification_v2_digest,
-        original_candidate_digest
-    );
+    assert_eq!(candidate.latest_ratification_v2_digest, original_candidate_digest);
 }
 
 // ===========================================================================
@@ -1378,12 +1378,7 @@ fn r24_mutating_rejection_is_pure_no_mutation() {
     let domain = devnet_domain();
     let replay = EmptyOnChainGovernanceReplaySet;
     let loaded = OnChainGovernanceProofLoadStatus::Available(proof);
-    for surface in [
-        "reload_apply",
-        "startup_p2p_trust_bundle",
-        "sighup",
-        "peer_driven_drain",
-    ] {
+    for surface in ["reload_apply", "startup_p2p_trust_bundle", "sighup", "peer_driven_drain"] {
         let outcome = route_with(
             Some(&persisted),
             &candidate,
@@ -1536,10 +1531,7 @@ fn source_reachability_loaded_proof_reaches_run_182_call_site_context() {
             _ => unreachable!(),
         }
     ));
-    assert_eq!(
-        ctx.policy,
-        OnChainGovernanceProofPolicy::AllowFixtureSourceTest
-    );
+    assert_eq!(ctx.policy, OnChainGovernanceProofPolicy::AllowFixtureSourceTest);
 }
 
 #[test]

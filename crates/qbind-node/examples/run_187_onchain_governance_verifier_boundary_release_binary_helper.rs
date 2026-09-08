@@ -70,8 +70,8 @@ use qbind_node::pqc_governance_authority::GovernanceThreshold;
 use qbind_node::pqc_onchain_governance_proof::{
     fixture_onchain_governance_proof_bytes, EmptyOnChainGovernanceReplaySet,
     OnChainGovernanceFreshnessWindow, OnChainGovernanceProof, OnChainGovernanceProofPolicy,
-    OnChainGovernanceProposalOutcome, OnChainGovernanceQuorum,
-    ONCHAIN_GOVERNANCE_PROOF_SUITE_FIXTURE_MOCK_V1,
+    OnChainGovernanceProposalOutcome,
+    OnChainGovernanceQuorum, ONCHAIN_GOVERNANCE_PROOF_SUITE_FIXTURE_MOCK_V1,
     ONCHAIN_GOVERNANCE_PROOF_SUITE_RESERVED_PRODUCTION,
 };
 use qbind_node::pqc_onchain_governance_proof_surface::{
@@ -103,15 +103,18 @@ const KEY_B: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 const ROOT_FP: &str = "1111111111111111111111111111111111111111";
 const CHAIN_ID: &str = "0000000000000001";
 const OTHER_CHAIN: &str = "00000000000000ff";
-const GENESIS_HASH_A: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
-const GENESIS_HASH_B: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+const GENESIS_HASH_A: &str =
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+const GENESIS_HASH_B: &str =
+    "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 const DIGEST_2: &str = "2222222222222222222222222222222222222222222222222222222222222222";
 const DIGEST_OTHER: &str = "3333333333333333333333333333333333333333333333333333333333333333";
 
 const GOV_DOMAIN: &str = "qbind-onchain-gov-1";
 const GOV_EPOCH: u64 = 42;
 const PROPOSAL_ID: &str = "prop-001";
-const PROPOSAL_DIGEST: &str = "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef";
+const PROPOSAL_DIGEST: &str =
+    "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef";
 const UNIQUE_DECISION_ID: &str = "decision-187";
 const NOW: u64 = 1_700_000_000;
 
@@ -411,8 +414,7 @@ fn run_boundary_scenarios(
         let proof = good_fixture_proof(&cand, LocalLifecycleAction::Rotate);
         scenarios.push(BoundaryScenario {
             id: "A2_testnet_fixture_rotate_accepted_under_fixture_policy".into(),
-            note: "TestNet FixtureSourceTest + valid Rotate fixture proof -> AcceptedFixture"
-                .into(),
+            note: "TestNet FixtureSourceTest + valid Rotate fixture proof -> AcceptedFixture".into(),
             proof,
             candidate: cand.clone(),
             trust_domain: domain(TrustBundleEnvironment::Testnet),
@@ -457,8 +459,7 @@ fn run_boundary_scenarios(
         let proof = good_fixture_proof(&cand, LocalLifecycleAction::Rotate);
         scenarios.push(BoundaryScenario {
             id: "A8_disabled_default_fixture_class_fixture_disabled".into(),
-            note: "Default Disabled policy + fixture proof -> FixtureDisabled (no Run 178 invoked)"
-                .into(),
+            note: "Default Disabled policy + fixture proof -> FixtureDisabled (no Run 178 invoked)".into(),
             proof,
             candidate: cand.clone(),
             trust_domain: domain(TrustBundleEnvironment::Devnet),
@@ -473,9 +474,8 @@ fn run_boundary_scenarios(
         let proof = production_class_proof(&cand, LocalLifecycleAction::Rotate);
         scenarios.push(BoundaryScenario {
             id: "A8b_disabled_default_production_class_production_unavailable".into(),
-            note:
-                "Default Disabled policy + production-class proof -> ProductionVerifierUnavailable"
-                    .into(),
+            note: "Default Disabled policy + production-class proof -> ProductionVerifierUnavailable"
+                .into(),
             proof,
             candidate: cand.clone(),
             trust_domain: domain(TrustBundleEnvironment::Devnet),
@@ -537,8 +537,7 @@ fn run_boundary_scenarios(
         let proof = production_class_proof(&cand, LocalLifecycleAction::Rotate);
         scenarios.push(BoundaryScenario {
             id: "R4_production_class_rejected_on_devnet_under_fixture_kind_unsupported".into(),
-            note: "DevNet FixtureSourceTest + production-class proof -> ProductionProofUnsupported"
-                .into(),
+            note: "DevNet FixtureSourceTest + production-class proof -> ProductionProofUnsupported".into(),
             proof,
             candidate: cand.clone(),
             trust_domain: domain(TrustBundleEnvironment::Devnet),
@@ -570,9 +569,7 @@ fn run_boundary_scenarios(
         recommit(&mut proof);
         scenarios.push(BoundaryScenario {
             id: "R6_wrong_environment_rejected".into(),
-            note:
-                "DevNet candidate + TestNet-environment proof -> Run178Rejection(WrongEnvironment)"
-                    .into(),
+            note: "DevNet candidate + TestNet-environment proof -> Run178Rejection(WrongEnvironment)".into(),
             proof,
             candidate: cand.clone(),
             trust_domain: domain(TrustBundleEnvironment::Devnet),
@@ -623,9 +620,7 @@ fn run_boundary_scenarios(
         recommit(&mut proof);
         scenarios.push(BoundaryScenario {
             id: "R9_wrong_authority_root_rejected".into(),
-            note:
-                "DevNet + foreign authority_root_fingerprint -> Run178Rejection(WrongAuthorityRoot)"
-                    .into(),
+            note: "DevNet + foreign authority_root_fingerprint -> Run178Rejection(WrongAuthorityRoot)".into(),
             proof,
             candidate: cand.clone(),
             trust_domain: domain(TrustBundleEnvironment::Devnet),
@@ -642,8 +637,7 @@ fn run_boundary_scenarios(
         recommit(&mut proof);
         scenarios.push(BoundaryScenario {
             id: "R10_wrong_governance_domain_rejected".into(),
-            note: "DevNet + foreign governance_domain_id -> Run178Rejection(WrongGovernanceDomain)"
-                .into(),
+            note: "DevNet + foreign governance_domain_id -> Run178Rejection(WrongGovernanceDomain)".into(),
             proof,
             candidate: cand.clone(),
             trust_domain: domain(TrustBundleEnvironment::Devnet),
@@ -677,8 +671,7 @@ fn run_boundary_scenarios(
         proof.proposal_outcome = OnChainGovernanceProposalOutcome::Rejected;
         scenarios.push(BoundaryScenario {
             id: "R12_wrong_proposal_outcome_rejected".into(),
-            note: "DevNet + Rejected proposal_outcome -> Run178Rejection(WrongProposalOutcome)"
-                .into(),
+            note: "DevNet + Rejected proposal_outcome -> Run178Rejection(WrongProposalOutcome)".into(),
             proof,
             candidate: cand.clone(),
             trust_domain: domain(TrustBundleEnvironment::Devnet),
@@ -712,8 +705,7 @@ fn run_boundary_scenarios(
         recommit(&mut proof);
         scenarios.push(BoundaryScenario {
             id: "R14_wrong_candidate_digest_rejected".into(),
-            note: "DevNet + foreign candidate_v2_digest -> Run178Rejection(WrongCandidateDigest)"
-                .into(),
+            note: "DevNet + foreign candidate_v2_digest -> Run178Rejection(WrongCandidateDigest)".into(),
             proof,
             candidate: cand.clone(),
             trust_domain: domain(TrustBundleEnvironment::Devnet),
@@ -749,9 +741,7 @@ fn run_boundary_scenarios(
         };
         scenarios.push(BoundaryScenario {
             id: "R16_expired_proof_rejected".into(),
-            note:
-                "DevNet + freshness window in the past -> Run178Rejection(ExpiredGovernanceProof)"
-                    .into(),
+            note: "DevNet + freshness window in the past -> Run178Rejection(ExpiredGovernanceProof)".into(),
             proof,
             candidate: cand.clone(),
             trust_domain: domain(TrustBundleEnvironment::Devnet),
@@ -818,8 +808,7 @@ fn run_boundary_scenarios(
         proof.proof_bytes = b"not-canonical-bytes".to_vec();
         scenarios.push(BoundaryScenario {
             id: "R20_invalid_proof_bytes_rejected".into(),
-            note: "DevNet + non-canonical proof_bytes -> Run178Rejection(InvalidGovernanceProof)"
-                .into(),
+            note: "DevNet + non-canonical proof_bytes -> Run178Rejection(InvalidGovernanceProof)".into(),
             proof,
             candidate: cand.clone(),
             trust_domain: domain(TrustBundleEnvironment::Devnet),
@@ -1001,10 +990,7 @@ fn run_boundary_scenarios(
 
         fs::write(scenario_dir.join("note.txt"), format!("{}\n", s.note))?;
         fs::write(scenario_dir.join("policy.txt"), format!("{:?}\n", s.policy))?;
-        fs::write(
-            scenario_dir.join("expected.txt"),
-            format!("{}\n", s.expect.label()),
-        )?;
+        fs::write(scenario_dir.join("expected.txt"), format!("{}\n", s.expect.label()))?;
         let actual_dump = format!("{:?}\n", outcome);
         fs::write(scenario_dir.join("actual.txt"), &actual_dump)?;
 
@@ -1193,12 +1179,12 @@ fn run_surface_scenarios(
         fs::write(scenario_dir.join("note.txt"), format!("{}\n", s.note))?;
         fs::write(
             scenario_dir.join("policy.txt"),
-            format!("surface={} policy={:?}\n", s.surface, s.policy),
+            format!(
+                "surface={} policy={:?}\n",
+                s.surface, s.policy
+            ),
         )?;
-        fs::write(
-            scenario_dir.join("expected.txt"),
-            format!("{}\n", s.expect.label()),
-        )?;
+        fs::write(scenario_dir.join("expected.txt"), format!("{}\n", s.expect.label()))?;
         let actual_dump = format!("{:?}\n", outcome);
         fs::write(scenario_dir.join("actual.txt"), &actual_dump)?;
 
@@ -1711,10 +1697,7 @@ fn run_determinism_check(out_dir: &Path) -> std::io::Result<(usize, usize)> {
     buf.push_str(&format!("all_equal={}\n", all_eq));
     buf.push_str(&format!("sample_outcome_debug={:?}\n", first));
     fs::write(out_dir.join("determinism_evidence.txt"), buf)?;
-    Ok((
-        if all_eq && first_accept { 1 } else { 0 },
-        if all_eq && first_accept { 0 } else { 1 },
-    ))
+    Ok((if all_eq && first_accept { 1 } else { 0 }, if all_eq && first_accept { 0 } else { 1 }))
 }
 
 // ---------------------------------------------------------------------------
@@ -1757,20 +1740,15 @@ fn main() {
     let total_fail = b_fail + s_fail + k_fail + c_fail + n_fail + d_fail;
     let verdict = if total_fail == 0 { "PASS" } else { "FAIL" };
 
-    let mut summary =
-        fs::File::create(out_dir.join("helper_summary.txt")).expect("create helper_summary.txt");
+    let mut summary = fs::File::create(out_dir.join("helper_summary.txt"))
+        .expect("create helper_summary.txt");
     writeln!(
         summary,
         "Run 187 helper — release-mode OnChainGovernance production verifier-boundary corpus"
     )
     .unwrap();
     writeln!(summary, "verdict: {}", verdict).unwrap();
-    writeln!(
-        summary,
-        "total_pass: {}\ntotal_fail: {}",
-        total_pass, total_fail
-    )
-    .unwrap();
+    writeln!(summary, "total_pass: {}\ntotal_fail: {}", total_pass, total_fail).unwrap();
     writeln!(
         summary,
         "boundary_scenarios_pass: {}\nboundary_scenarios_fail: {}",

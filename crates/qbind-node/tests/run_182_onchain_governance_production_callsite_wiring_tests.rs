@@ -55,15 +55,18 @@ const KEY_B: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 const ROOT_FP: &str = "1111111111111111111111111111111111111111";
 const CHAIN_ID: &str = "0000000000000001";
 const OTHER_CHAIN: &str = "00000000000000ff";
-const GENESIS_HASH_A: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
-const GENESIS_HASH_B: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+const GENESIS_HASH_A: &str =
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+const GENESIS_HASH_B: &str =
+    "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 const DIGEST_2: &str = "2222222222222222222222222222222222222222222222222222222222222222";
 const DIGEST_OTHER: &str = "3333333333333333333333333333333333333333333333333333333333333333";
 
 const GOV_DOMAIN: &str = "qbind-onchain-gov-1";
 const GOV_EPOCH: u64 = 42;
 const PROPOSAL_ID: &str = "prop-001";
-const PROPOSAL_DIGEST: &str = "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef";
+const PROPOSAL_DIGEST: &str =
+    "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef";
 const UNIQUE_DECISION_ID: &str = "decision-182";
 const NOW: u64 = 1_700_000_000;
 
@@ -539,10 +542,7 @@ fn r1_disabled_policy_bypasses_valid_proof() {
         &replay,
     );
     let outcome = reload_apply_callsite_onchain_governance_marker_decision(&ctx);
-    assert_eq!(
-        outcome,
-        OnChainGovernanceMarkerDecisionOutcome::PolicyDisabled
-    );
+    assert_eq!(outcome, OnChainGovernanceMarkerDecisionOutcome::PolicyDisabled);
 }
 
 // ===========================================================================
@@ -572,10 +572,7 @@ fn r2_selector_unset_preserves_disabled_at_wiring_entry() {
         &replay,
     );
     let outcome = sighup_callsite_onchain_governance_marker_decision(&ctx);
-    assert_eq!(
-        outcome,
-        OnChainGovernanceMarkerDecisionOutcome::PolicyDisabled
-    );
+    assert_eq!(outcome, OnChainGovernanceMarkerDecisionOutcome::PolicyDisabled);
 }
 
 // ===========================================================================
@@ -598,10 +595,7 @@ fn r3_mainnet_peer_driven_drain_refuses_with_valid_proof() {
         &replay,
     );
     let outcome = peer_driven_drain_callsite_onchain_governance_marker_decision(&ctx);
-    assert_eq!(
-        outcome,
-        OnChainGovernanceMarkerDecisionOutcome::MainNetRefused
-    );
+    assert_eq!(outcome, OnChainGovernanceMarkerDecisionOutcome::MainNetRefused);
     assert!(!outcome.is_accept());
 }
 
@@ -620,10 +614,7 @@ fn r3b_mainnet_peer_driven_drain_refuses_with_no_proof() {
         &replay,
     );
     let outcome = peer_driven_drain_callsite_onchain_governance_marker_decision(&ctx);
-    assert_eq!(
-        outcome,
-        OnChainGovernanceMarkerDecisionOutcome::MainNetRefused
-    );
+    assert_eq!(outcome, OnChainGovernanceMarkerDecisionOutcome::MainNetRefused);
 }
 
 // ===========================================================================
@@ -909,8 +900,8 @@ fn r14_expired_governance_proof_rejected() {
 
 #[test]
 fn r15_replayed_decision_rejected() {
-    use qbind_node::pqc_onchain_governance_proof::OnChainGovernanceReplaySet;
     use std::collections::HashSet;
+    use qbind_node::pqc_onchain_governance_proof::OnChainGovernanceReplaySet;
 
     struct PreloadedReplaySet {
         seen: HashSet<String>,
@@ -1215,8 +1206,7 @@ fn r25_validation_only_rejection_is_non_mutating() {
     // Capture the candidate's pre-call state.
     let candidate_before = candidate.clone();
     let outcome_check = reload_check_callsite_onchain_governance_marker_decision(&ctx);
-    let outcome_local =
-        local_peer_candidate_check_callsite_onchain_governance_marker_decision(&ctx);
+    let outcome_local = local_peer_candidate_check_callsite_onchain_governance_marker_decision(&ctx);
     let outcome_wire = live_inbound_0x05_callsite_onchain_governance_marker_decision(&ctx);
     assert!(outcome_check.is_reject());
     assert!(outcome_local.is_reject());
@@ -1224,14 +1214,8 @@ fn r25_validation_only_rejection_is_non_mutating() {
     // The candidate is borrowed; it cannot have changed. This is a
     // structural property guaranteed by the borrow checker, but we
     // assert a value equality for documentation.
-    assert_eq!(
-        candidate.latest_ratification_v2_digest,
-        candidate_before.latest_ratification_v2_digest
-    );
-    assert_eq!(
-        candidate.latest_authority_domain_sequence,
-        candidate_before.latest_authority_domain_sequence
-    );
+    assert_eq!(candidate.latest_ratification_v2_digest, candidate_before.latest_ratification_v2_digest);
+    assert_eq!(candidate.latest_authority_domain_sequence, candidate_before.latest_authority_domain_sequence);
 }
 
 // ===========================================================================
@@ -1301,9 +1285,5 @@ fn r27_invalid_live_0x05_proof_does_not_accept() {
     );
     let outcome = live_inbound_0x05_callsite_onchain_governance_marker_decision(&ctx);
     assert!(!outcome.is_accept(), "got {:?}", outcome);
-    assert!(
-        outcome.is_reject() || outcome.is_bypassed(),
-        "got {:?}",
-        outcome
-    );
+    assert!(outcome.is_reject() || outcome.is_bypassed(), "got {:?}", outcome);
 }

@@ -38,9 +38,9 @@ use std::collections::VecDeque;
 
 use crate::pqc_authority_custody::AuthorityCustodyClass;
 use crate::pqc_authority_kms_hsm_backend::{
-    backend_transcript_digest, verify_authority_custody_backend_response, AuthorityCustodyBackend,
-    BackendExpectations, BackendIdentity, BackendKind, BackendOutcome, BackendPolicy,
-    BackendRequest, BackendResponse, FixtureHsmBackend, FixtureKmsBackend,
+    backend_transcript_digest, verify_authority_custody_backend_response, BackendExpectations,
+    BackendIdentity, BackendKind, BackendOutcome, BackendPolicy, BackendRequest, BackendResponse,
+    FixtureHsmBackend, FixtureKmsBackend, AuthorityCustodyBackend,
 };
 use crate::pqc_authority_lifecycle::{AuthorityTrustDomain, LocalLifecycleAction};
 use crate::pqc_trust_bundle::TrustBundleEnvironment;
@@ -456,11 +456,8 @@ impl ProductionCustodyRequestSpec {
     ) -> BackendExpectations {
         let request_digest = request.request_digest();
         let response_digest = response.response_digest();
-        let transcript_digest = backend_transcript_digest(
-            &identity.identity_digest(),
-            &request_digest,
-            &response_digest,
-        );
+        let transcript_digest =
+            backend_transcript_digest(&identity.identity_digest(), &request_digest, &response_digest);
         BackendExpectations {
             expected_custody_class: self.custody_class,
             expected_lifecycle_action: self.lifecycle_action,
@@ -493,11 +490,7 @@ pub fn production_kms_hsm_custody_request_id(spec: &ProductionCustodyRequestSpec
     let mut h = Sha3_256::new();
     h.update(PRODUCTION_KMS_HSM_CUSTODY_REQUEST_ID_DOMAIN_TAG.as_bytes());
     hash_field(&mut h, b"request_kind", spec.request_kind.tag().as_bytes());
-    hash_field(
-        &mut h,
-        b"provider_kind",
-        spec.provider_kind.tag().as_bytes(),
-    );
+    hash_field(&mut h, b"provider_kind", spec.provider_kind.tag().as_bytes());
     hash_field(
         &mut h,
         b"environment",
@@ -515,21 +508,13 @@ pub fn production_kms_hsm_custody_request_id(spec: &ProductionCustodyRequestSpec
         b"lifecycle_action",
         spec.lifecycle_action.tag().as_bytes(),
     );
-    hash_field(
-        &mut h,
-        b"candidate_digest",
-        spec.candidate_digest.as_bytes(),
-    );
+    hash_field(&mut h, b"candidate_digest", spec.candidate_digest.as_bytes());
     hash_field(
         &mut h,
         b"authority_domain_sequence",
         &spec.authority_domain_sequence.to_le_bytes(),
     );
-    hash_field(
-        &mut h,
-        b"custody_class",
-        spec.custody_class.tag().as_bytes(),
-    );
+    hash_field(&mut h, b"custody_class", spec.custody_class.tag().as_bytes());
     hash_field(&mut h, b"provider_id", spec.provider_id.as_bytes());
     hash_field(&mut h, b"key_id", spec.key_id.as_bytes());
     hash_field(
@@ -615,29 +600,13 @@ impl ProductionCustodyRequest {
         use sha3::{Digest, Sha3_256};
         let mut h = Sha3_256::new();
         h.update(PRODUCTION_KMS_HSM_CUSTODY_REQUEST_ENVELOPE_DOMAIN_TAG.as_bytes());
-        hash_field(
-            &mut h,
-            b"protocol_version",
-            &self.protocol_version.to_le_bytes(),
-        );
+        hash_field(&mut h, b"protocol_version", &self.protocol_version.to_le_bytes());
         hash_field(&mut h, b"request_id", self.request_id.as_bytes());
-        hash_field(
-            &mut h,
-            b"provider_kind",
-            self.provider_kind.tag().as_bytes(),
-        );
+        hash_field(&mut h, b"provider_kind", self.provider_kind.tag().as_bytes());
         hash_field(&mut h, b"provider_id", self.provider_id.as_bytes());
         hash_field(&mut h, b"key_id", self.key_id.as_bytes());
-        hash_field(
-            &mut h,
-            b"custody_class",
-            self.custody_class.tag().as_bytes(),
-        );
-        hash_field(
-            &mut h,
-            b"backend_request_digest",
-            self.backend_request.request_digest().as_bytes(),
-        );
+        hash_field(&mut h, b"custody_class", self.custody_class.tag().as_bytes());
+        hash_field(&mut h, b"backend_request_digest", self.backend_request.request_digest().as_bytes());
         hex::encode(h.finalize())
     }
 }
@@ -662,29 +631,13 @@ impl ProductionCustodyResponse {
         use sha3::{Digest, Sha3_256};
         let mut h = Sha3_256::new();
         h.update(PRODUCTION_KMS_HSM_CUSTODY_RESPONSE_ENVELOPE_DOMAIN_TAG.as_bytes());
-        hash_field(
-            &mut h,
-            b"protocol_version",
-            &self.protocol_version.to_le_bytes(),
-        );
+        hash_field(&mut h, b"protocol_version", &self.protocol_version.to_le_bytes());
         hash_field(&mut h, b"request_id_echo", self.request_id_echo.as_bytes());
-        hash_field(
-            &mut h,
-            b"provider_kind",
-            self.provider_kind.tag().as_bytes(),
-        );
+        hash_field(&mut h, b"provider_kind", self.provider_kind.tag().as_bytes());
         hash_field(&mut h, b"provider_id", self.provider_id.as_bytes());
         hash_field(&mut h, b"key_id", self.key_id.as_bytes());
-        hash_field(
-            &mut h,
-            b"transcript_digest",
-            self.transcript_digest.as_bytes(),
-        );
-        hash_field(
-            &mut h,
-            b"backend_response_digest",
-            self.backend_response.response_digest().as_bytes(),
-        );
+        hash_field(&mut h, b"transcript_digest", self.transcript_digest.as_bytes());
+        hash_field(&mut h, b"backend_response_digest", self.backend_response.response_digest().as_bytes());
         hex::encode(h.finalize())
     }
 
@@ -1439,7 +1392,9 @@ impl<T: KmsHsmCustodyProviderTransport> ProductionKmsHsmCustodyBackend<T> {
                 ProductionKmsHsmCustodyBackendPolicy::MainnetProductionCustodyRequired => {
                     ProductionCustodyOutcome::MainNetProductionCustodyUnavailable
                 }
-                p if p.is_fixture() => ProductionCustodyOutcome::FixtureMaterialRejectedForMainNet,
+                p if p.is_fixture() => {
+                    ProductionCustodyOutcome::FixtureMaterialRejectedForMainNet
+                }
                 _ => ProductionCustodyOutcome::MainNetRefused,
             });
         }
@@ -1489,7 +1444,8 @@ fn error_to_outcome(err: &ProductionCustodyError) -> ProductionCustodyOutcome {
         ProductionCustodyError::UnsupportedProtocolVersion { version } => {
             ProductionCustodyOutcome::ProductionCustodyUnsupportedProtocol { version: *version }
         }
-        ProductionCustodyError::SigningRefused | ProductionCustodyError::ProviderPolicyRejected => {
+        ProductionCustodyError::SigningRefused
+        | ProductionCustodyError::ProviderPolicyRejected => {
             ProductionCustodyOutcome::ProductionCustodyRejected {
                 reason: err.tag().to_string(),
             }
@@ -1512,7 +1468,8 @@ fn backend_reject_to_outcome(outcome: BackendOutcome) -> ProductionCustodyOutcom
     use BackendOutcome as O;
     match outcome {
         O::Disabled => ProductionCustodyOutcome::DisabledNoRequest,
-        O::FixtureRejectedProductionRequired | O::FixtureRejectedMainnetProductionRequired => {
+        O::FixtureRejectedProductionRequired
+        | O::FixtureRejectedMainnetProductionRequired => {
             ProductionCustodyOutcome::MainNetProductionCustodyUnavailable
         }
         O::ProductionKmsUnavailable
@@ -1522,7 +1479,9 @@ fn backend_reject_to_outcome(outcome: BackendOutcome) -> ProductionCustodyOutcom
         O::MainNetProductionCustodyUnavailable => {
             ProductionCustodyOutcome::MainNetProductionCustodyUnavailable
         }
-        O::FixtureRejectedForMainNet => ProductionCustodyOutcome::FixtureMaterialRejectedForMainNet,
+        O::FixtureRejectedForMainNet => {
+            ProductionCustodyOutcome::FixtureMaterialRejectedForMainNet
+        }
         O::BackendKindPolicyMismatch { .. } | O::UnknownBackendRejected { .. } => {
             ProductionCustodyOutcome::ProductionCustodyWrongProvider
         }
@@ -1572,14 +1531,17 @@ fn backend_reject_to_outcome(outcome: BackendOutcome) -> ProductionCustodyOutcom
                 ProductionCustodyOutcome::ProductionCustodyMalformedResponse
             }
         }
-        O::LocalOperatorCannotSatisfyBackendPolicy | O::PeerMajorityCannotSatisfyBackendPolicy => {
+        O::LocalOperatorCannotSatisfyBackendPolicy
+        | O::PeerMajorityCannotSatisfyBackendPolicy => {
             ProductionCustodyOutcome::ProductionCustodyRejected {
                 reason: "custody-material-cannot-satisfy-kms-hsm".to_string(),
             }
         }
-        O::NotKmsHsmCustodyClass { .. } => ProductionCustodyOutcome::ProductionCustodyRejected {
-            reason: "not-kms-hsm-custody-class".to_string(),
-        },
+        O::NotKmsHsmCustodyClass { .. } => {
+            ProductionCustodyOutcome::ProductionCustodyRejected {
+                reason: "not-kms-hsm-custody-class".to_string(),
+            }
+        }
         O::FixtureKmsAccepted { .. } | O::FixtureHsmAccepted { .. } => {
             ProductionCustodyOutcome::AmbiguousFailClosed {
                 reason: "accept classified as reject".to_string(),

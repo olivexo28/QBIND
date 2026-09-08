@@ -116,8 +116,9 @@ use crate::pqc_authority_state::{
     PersistentAuthorityStateRecordV2, PersistentAuthorityStateRecordVersioned,
 };
 use crate::pqc_onchain_governance_proof::{
-    validate_lifecycle_with_onchain_governance_proof, CombinedLifecycleOnChainGovernanceOutcome,
-    OnChainGovernanceProof, OnChainGovernanceProofPolicy, OnChainGovernanceReplaySet,
+    validate_lifecycle_with_onchain_governance_proof,
+    CombinedLifecycleOnChainGovernanceOutcome, OnChainGovernanceProof,
+    OnChainGovernanceProofPolicy, OnChainGovernanceReplaySet,
 };
 use crate::pqc_trust_bundle::TrustBundleEnvironment;
 
@@ -582,7 +583,9 @@ pub fn startup_p2p_trust_bundle_compose_onchain_governance_marker_decision<
 ///
 /// Same mutation contract as the reload-apply wrapper.
 #[allow(clippy::too_many_arguments)]
-pub fn sighup_compose_onchain_governance_marker_decision<R: OnChainGovernanceReplaySet + ?Sized>(
+pub fn sighup_compose_onchain_governance_marker_decision<
+    R: OnChainGovernanceReplaySet + ?Sized,
+>(
     persisted: Option<&PersistentAuthorityStateRecordVersioned>,
     candidate: &PersistentAuthorityStateRecordV2,
     proof: Option<&OnChainGovernanceProof>,
@@ -766,20 +769,14 @@ mod tests {
 
     #[test]
     fn mainnet_refusal_helper_is_environment_driven() {
-        assert!(
-            mainnet_peer_driven_apply_remains_refused_for_onchain_governance(
-                TrustBundleEnvironment::Mainnet
-            )
-        );
-        assert!(
-            !mainnet_peer_driven_apply_remains_refused_for_onchain_governance(
-                TrustBundleEnvironment::Testnet
-            )
-        );
-        assert!(
-            !mainnet_peer_driven_apply_remains_refused_for_onchain_governance(
-                TrustBundleEnvironment::Devnet
-            )
-        );
+        assert!(mainnet_peer_driven_apply_remains_refused_for_onchain_governance(
+            TrustBundleEnvironment::Mainnet
+        ));
+        assert!(!mainnet_peer_driven_apply_remains_refused_for_onchain_governance(
+            TrustBundleEnvironment::Testnet
+        ));
+        assert!(!mainnet_peer_driven_apply_remains_refused_for_onchain_governance(
+            TrustBundleEnvironment::Devnet
+        ));
     }
 }

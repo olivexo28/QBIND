@@ -414,11 +414,7 @@ pub fn receipt_response_digest(
     let mut w = CanonicalWriter::new(RECEIPT_RESPONSE_DOMAIN);
     w.str_field(&response.receipt_record_id)
         .str_field(response.request_digest.as_hex())
-        .str_field(if response.accepted {
-            "accepted"
-        } else {
-            "rejected"
-        })
+        .str_field(if response.accepted { "accepted" } else { "rejected" })
         .str_field(response.receipt_kind.tag());
     DurableCompletionAuditPublicationReceiptDigest(w.finish())
 }
@@ -1568,12 +1564,13 @@ where
     // Step 3: project the Run 256 backend outcome onto a receipt request. Every
     // non-submitting outcome returns a no-audit-receipt outcome without invoking the
     // receipt sink.
-    let idempotent_only =
-        match project_backend_submission_outcome_to_audit_receipt_request(&input.backend_binding) {
-            Intent::NoAuditReceipt(outcome) => return outcome,
-            Intent::CreateRequest => false,
-            Intent::IdempotentOnly => true,
-        };
+    let idempotent_only = match project_backend_submission_outcome_to_audit_receipt_request(
+        &input.backend_binding,
+    ) {
+        Intent::NoAuditReceipt(outcome) => return outcome,
+        Intent::CreateRequest => false,
+        Intent::IdempotentOnly => true,
+    };
 
     // Step 4: pre-receipt environment / surface binding validation. A mismatch fails
     // closed before the receipt sink is invoked, leaving the receipt invocation count
@@ -1697,7 +1694,8 @@ pub fn recover_durable_completion_audit_publication_receipt_window(
         |record: &DurableCompletionAuditPublicationReceiptLedgerRecord| -> bool {
             record.receipt_record_id == expectations.expected_receipt_record_id
                 && record.request_digest == input.request.digest()
-                && record.status == DurableCompletionAuditPublicationReceiptLedgerStatus::Recorded
+                && record.status
+                    == DurableCompletionAuditPublicationReceiptLedgerStatus::Recorded
         };
 
     match window {

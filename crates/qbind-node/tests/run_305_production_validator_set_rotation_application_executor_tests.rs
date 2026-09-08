@@ -38,9 +38,9 @@ use qbind_node::pqc_production_validator_set_rotation_application_executor::*;
 use qbind_node::pqc_production_validator_set_rotation_intent::{
     CanonicalValidatorIdentity, CanonicalValidatorRecord, CanonicalValidatorSetSnapshot,
     EmptyValidatorSetRotationReplaySet, ProductionValidatorSetRotationBoundary,
-    ProductionValidatorSetRotationDecision, ProductionValidatorSetRotationInputs,
-    ProductionValidatorSetRotationRequest, ValidatorSetChange, ValidatorSetDelta,
+    ProductionValidatorSetRotationDecision, ValidatorSetChange, ValidatorSetDelta,
     ValidatorSetRotationAction, ValidatorSetRotationAuthoritySource,
+    ProductionValidatorSetRotationRequest, ProductionValidatorSetRotationInputs,
 };
 use qbind_node::pqc_trust_bundle::TrustBundleEnvironment;
 
@@ -413,11 +413,7 @@ fn update_case(env: TrustBundleEnvironment) -> Case {
     let updated = validator(env, 2, 250, 1);
     let delta = ValidatorSetDelta::new(vec![ValidatorSetChange::update(updated.clone())]);
     let proposed = CanonicalValidatorSetSnapshot::new(
-        vec![
-            validator(env, 1, 100, 1),
-            updated,
-            validator(env, 3, 100, 1),
-        ],
+        vec![validator(env, 1, 100, 1), updated, validator(env, 3, 100, 1)],
         CUR_EPOCH + 1,
         CUR_VERSION + 1,
     );
@@ -450,11 +446,7 @@ fn identity_rotation_case(env: TrustBundleEnvironment) -> Case {
     rotated.identity.consensus_key_fingerprint = "cons-2-rotated".to_string();
     let delta = ValidatorSetDelta::new(vec![ValidatorSetChange::update(rotated.clone())]);
     let proposed = CanonicalValidatorSetSnapshot::new(
-        vec![
-            validator(env, 1, 100, 1),
-            rotated,
-            validator(env, 3, 100, 1),
-        ],
+        vec![validator(env, 1, 100, 1), rotated, validator(env, 3, 100, 1)],
         CUR_EPOCH + 1,
         CUR_VERSION + 1,
     );
@@ -516,14 +508,7 @@ fn bulk_case(env: TrustBundleEnvironment, action: ValidatorSetRotationAction) ->
         CUR_EPOCH + 1,
         CUR_VERSION + 1,
     );
-    make_case(
-        env,
-        LocalLifecycleAction::Rotate,
-        action,
-        current,
-        delta,
-        proposed,
-    )
+    make_case(env, LocalLifecycleAction::Rotate, action, current, delta, proposed)
 }
 
 use ProductionValidatorSetRotationApplicationOutcome as O;
@@ -541,8 +526,11 @@ fn a01_default_policy_is_disabled_and_inert() {
         ProductionValidatorSetRotationApplicationPolicy::default(),
     );
     let case = add_case(TrustBundleEnvironment::Devnet);
-    let d =
-        e.evaluate_validator_set_rotation_application(&case.request, &case.inputs, &empty_replay());
+    let d = e.evaluate_validator_set_rotation_application(
+        &case.request,
+        &case.inputs,
+        &empty_replay(),
+    );
     assert_eq!(d.outcome, O::Disabled);
     assert!(!d.is_accept());
     assert!(d.application_intent.is_none());
@@ -657,10 +645,7 @@ fn a13_application_binds_environment_chain_genesis_root() {
     assert_eq!(intent.chain_id, chain_for(env));
     assert_eq!(intent.genesis_hash, GENESIS_HASH);
     assert_eq!(intent.authority_root_fingerprint, ROOT_FP);
-    assert_eq!(
-        intent.authority_root_suite_id,
-        PQC_LIFECYCLE_SUITE_ML_DSA_44
-    );
+    assert_eq!(intent.authority_root_suite_id, PQC_LIFECYCLE_SUITE_ML_DSA_44);
 }
 
 #[test]
@@ -911,9 +896,9 @@ fn b03_unverified_rotation_plan_variant_rejected() {
         current_set(TrustBundleEnvironment::Devnet),
     );
     assert_reject(
-        &with_source(
-            ValidatorSetRotationApplicationAuthoritySource::UnverifiedRotationPlan { decision },
-        ),
+        &with_source(ValidatorSetRotationApplicationAuthoritySource::UnverifiedRotationPlan {
+            decision,
+        }),
         O::UnverifiedRotationPlanRejected,
     );
 }
@@ -930,9 +915,9 @@ fn b04_accepted_decision_without_plan_rejected() {
     );
     decision.plan = None;
     assert_reject(
-        &with_source(
-            ValidatorSetRotationApplicationAuthoritySource::VerifiedRotationPlan { decision },
-        ),
+        &with_source(ValidatorSetRotationApplicationAuthoritySource::VerifiedRotationPlan {
+            decision,
+        }),
         O::VerifiedRotationPlanRequired,
     );
 }
@@ -1424,10 +1409,7 @@ fn c03_production_policy_unavailable() {
     let mut case = add_case(TrustBundleEnvironment::Devnet);
     case.executor.policy =
         ProductionValidatorSetRotationApplicationPolicy::RequireProductionValidatorSetRotationApplication;
-    assert_reject(
-        &case,
-        O::ProductionValidatorSetRotationApplicationUnavailable,
-    );
+    assert_reject(&case, O::ProductionValidatorSetRotationApplicationUnavailable);
 }
 
 #[test]
@@ -1643,15 +1625,13 @@ fn e07_every_outcome_is_non_mutating() {
 
 #[test]
 fn e08_accept_is_only_mutation_authorizer() {
-    assert!(
-        O::AcceptedSourceTestValidatorSetRotationApplicationDecision {
-            decision_kind: K::ApplyValidatorAdd,
-            environment: TrustBundleEnvironment::Devnet,
-            epoch_transition_target: 11,
-            application_nonce: 1,
-        }
-        .authorizes_future_mutation_only()
-    );
+    assert!(O::AcceptedSourceTestValidatorSetRotationApplicationDecision {
+        decision_kind: K::ApplyValidatorAdd,
+        environment: TrustBundleEnvironment::Devnet,
+        epoch_transition_target: 11,
+        application_nonce: 1,
+    }
+    .authorizes_future_mutation_only());
     assert!(!O::Disabled.authorizes_future_mutation_only());
     assert!(!O::MainNetRefused.authorizes_future_mutation_only());
 }
@@ -1677,7 +1657,10 @@ fn e11_protocol_version_supported() {
 #[test]
 fn e12_decision_kind_from_plan_kind_roundtrip() {
     use qbind_node::pqc_production_validator_set_rotation_intent::ProductionValidatorSetRotationPlanKind as P;
-    assert_eq!(K::from_plan_kind(P::ValidatorAdd), K::ApplyValidatorAdd);
+    assert_eq!(
+        K::from_plan_kind(P::ValidatorAdd),
+        K::ApplyValidatorAdd
+    );
     assert_eq!(
         K::from_plan_kind(P::UnsupportedRotationRequest),
         K::UnsupportedApplication
@@ -1734,14 +1717,8 @@ fn f02_kind_tags_stable() {
 
 #[test]
 fn f03_decision_kind_tags_stable() {
-    assert_eq!(
-        K::ApplyNoOpAlreadySynchronized.tag(),
-        "apply-no-op-already-synchronized"
-    );
-    assert_eq!(
-        K::ApplyBulkValidatorSetRotation.tag(),
-        "apply-bulk-validator-set-rotation"
-    );
+    assert_eq!(K::ApplyNoOpAlreadySynchronized.tag(), "apply-no-op-already-synchronized");
+    assert_eq!(K::ApplyBulkValidatorSetRotation.tag(), "apply-bulk-validator-set-rotation");
     assert_eq!(K::UnsupportedApplication.tag(), "unsupported-application");
 }
 
@@ -1758,10 +1735,7 @@ fn f04_outcome_tags_unique_and_stable() {
         "accepted-source-test-validator-set-rotation-application-decision"
     );
     assert_eq!(O::MainNetRefused.tag(), "mainnet-refused");
-    assert_eq!(
-        O::WrongEpochTransitionTarget.tag(),
-        "wrong-epoch-transition-target"
-    );
+    assert_eq!(O::WrongEpochTransitionTarget.tag(), "wrong-epoch-transition-target");
 }
 
 #[test]
@@ -1831,14 +1805,6 @@ fn f10_accept_across_all_supported_actions() {
     assert!(eval(&identity_rotation_case(env)).is_accept());
     assert!(eval(&retirement_case(env)).is_accept());
     assert!(eval(&emergency_case(env)).is_accept());
-    assert!(eval(&bulk_case(
-        env,
-        ValidatorSetRotationAction::AuthoritySetSynchronization
-    ))
-    .is_accept());
-    assert!(eval(&bulk_case(
-        env,
-        ValidatorSetRotationAction::BulkValidatorSetRotation
-    ))
-    .is_accept());
+    assert!(eval(&bulk_case(env, ValidatorSetRotationAction::AuthoritySetSynchronization)).is_accept());
+    assert!(eval(&bulk_case(env, ValidatorSetRotationAction::BulkValidatorSetRotation)).is_accept());
 }

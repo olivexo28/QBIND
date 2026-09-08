@@ -487,12 +487,7 @@ impl Table {
             self.rows.push_str(&format!("\t# {id}: {detail}\n"));
         }
     }
-    fn check_outcome(
-        &mut self,
-        id: &str,
-        expected: &str,
-        o: &GovernanceEvaluatorReplayRuntimeOutcome,
-    ) {
+    fn check_outcome(&mut self, id: &str, expected: &str, o: &GovernanceEvaluatorReplayRuntimeOutcome) {
         self.check(id, expected, &otag(o));
     }
     /// Assert a composed outcome is a non-mutating fail-closed: the integration
@@ -565,19 +560,12 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
             );
             t.assert_true(
                 "A2.evaluator-authorized",
-                matches!(
-                    evaluator,
-                    EvaluatorOutcome::EvaluatorResponseAuthorized { .. }
-                ),
+                matches!(evaluator, EvaluatorOutcome::EvaluatorResponseAuthorized { .. }),
                 "",
             );
             t.check("A2.lifecycle", "Rotate", &format!("{:?}", lifecycle_action));
             t.check("A2.candidate", CAND_DIGEST, candidate_digest);
-            t.check(
-                "A2.sequence",
-                &SEQUENCE.to_string(),
-                &authority_domain_sequence.to_string(),
-            );
+            t.check("A2.sequence", &SEQUENCE.to_string(), &authority_domain_sequence.to_string());
         } else {
             t.assert_true("A2.is-proceed-fresh", false, "expected ProceedFresh");
         }
@@ -602,11 +590,7 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
             &fx.context(&FixtureGovernanceExecutionEvaluatorInterface)
                 .integration,
         );
-        t.assert_true(
-            "A4.run224-mutate-authorized",
-            integration.is_mutate_authorized(),
-            "",
-        );
+        t.assert_true("A4.run224-mutate-authorized", integration.is_mutate_authorized(), "");
         let o = fx.run();
         t.check_outcome("A4.deferred", "proceed-deferred", &o);
         t.assert_true("A4.is-deferred", o.is_deferred(), "");
@@ -635,11 +619,7 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
         // ONLY after a successful authorization does the caller explicitly
         // consume.
         store.record_for(&fx.replay_input);
-        t.assert_true(
-            "A6.explicit-consume",
-            store.consume_for(&fx.replay_input),
-            "",
-        );
+        t.assert_true("A6.explicit-consume", store.consume_for(&fx.replay_input), "");
         t.assert_true(
             "A6.consumed-after",
             store.is_consumed(&replay_state_key_digest(&fx.replay_input)),
@@ -732,11 +712,7 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
         fx.replay_exp.expected_validation_surface = S::PeerDrivenDrain;
         fx.replay_input.previously_seen = PreviouslySeenState::FirstSeen;
         let o = fx.run();
-        t.check_outcome(
-            "A10.mainnet-refused",
-            "mainnet-peer-driven-apply-refused",
-            &o,
-        );
+        t.check_outcome("A10.mainnet-refused", "mainnet-peer-driven-apply-refused", &o);
         t.assert_true(
             "A10.is-mainnet-refused",
             o.is_mainnet_peer_driven_apply_refused(),
@@ -750,24 +726,12 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
     // composed outcome stops authorizing a mutate.
     {
         let fresh = rotate_fixture(Env::Devnet);
-        t.assert_true(
-            "A11.fresh-authorizes",
-            fresh.run().is_mutate_authorized(),
-            "",
-        );
+        t.assert_true("A11.fresh-authorizes", fresh.run().is_mutate_authorized(), "");
         let mut expired = rotate_fixture(Env::Devnet);
         expired.replay_input.current_canonical_epoch = EXPIRY + 1;
-        t.assert_true(
-            "A11.expired-not-authorizes",
-            !expired.run().is_mutate_authorized(),
-            "",
-        );
+        t.assert_true("A11.expired-not-authorizes", !expired.run().is_mutate_authorized(), "");
         // Helper invariant.
-        t.assert_true(
-            "A11.fresh-required",
-            fresh_replay_state_required_before_mutation(),
-            "",
-        );
+        t.assert_true("A11.fresh-required", fresh_replay_state_required_before_mutation(), "");
     }
 
     // A12 — ProceedDeferred is release-evidenced as not approval (also via the
@@ -782,17 +746,9 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
         t.assert_true("A12.callsite-err", err.is_some(), "");
         if let Some(fc) = err {
             t.assert_true("A12.is-deferred", fc.outcome.is_deferred(), "");
-            t.assert_true(
-                "A12.not-mutate-authorized",
-                !fc.outcome.is_mutate_authorized(),
-                "",
-            );
+            t.assert_true("A12.not-mutate-authorized", !fc.outcome.is_mutate_authorized(), "");
         }
-        t.assert_true(
-            "A12.deferred-not-approval",
-            deferred_is_never_mutation_approval(),
-            "",
-        );
+        t.assert_true("A12.deferred-not-approval", deferred_is_never_mutation_approval(), "");
     }
 
     // A13 — Run 230 replay/freshness boundary release behavior remains
@@ -808,11 +764,7 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
                 _ => "other",
             },
         );
-        t.assert_true(
-            "A13.composed-authorizes",
-            fx.run().is_mutate_authorized(),
-            "",
-        );
+        t.assert_true("A13.composed-authorizes", fx.run().is_mutate_authorized(), "");
     }
 
     // A14 — Run 231 replay/freshness standalone release behavior remains
@@ -889,16 +841,8 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
             &fx.context(&FixtureGovernanceExecutionEvaluatorInterface)
                 .integration,
         );
-        t.assert_true(
-            "A17.run224-mutate-authorized",
-            integration.is_mutate_authorized(),
-            "",
-        );
-        t.assert_true(
-            "A17.composed-authorizes",
-            fx.run().is_mutate_authorized(),
-            "",
-        );
+        t.assert_true("A17.run224-mutate-authorized", integration.is_mutate_authorized(), "");
+        t.assert_true("A17.composed-authorizes", fx.run().is_mutate_authorized(), "");
     }
 
     t.finish(out)
@@ -921,11 +865,7 @@ fn assert_replay_fail_closed(
     let mut fx = rotate_fixture(TrustBundleEnvironment::Devnet);
     mutate(&mut fx);
     let o = fx.run();
-    t.check_outcome(
-        id,
-        &format!("replay-freshness-fail-closed:{expected_inner}"),
-        &o,
-    );
+    t.check_outcome(id, &format!("replay-freshness-fail-closed:{expected_inner}"), &o);
     t.assert_fail_closed(id, &o);
 }
 
@@ -1153,11 +1093,7 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
         t.assert_true("R27.callsite-err", err.is_some(), "");
         if let Some(fc) = err {
             t.assert_true("R27.is-fail-closed", fc.outcome.is_fail_closed(), "");
-            t.assert_true(
-                "R27.not-mutate-authorized",
-                !fc.outcome.is_mutate_authorized(),
-                "",
-            );
+            t.assert_true("R27.not-mutate-authorized", !fc.outcome.is_mutate_authorized(), "");
         }
         t.assert_true("R27.store-empty", store.is_empty(), "");
     }
@@ -1214,11 +1150,7 @@ fn run_reachability_table(out: &Path) -> (u64, u64) {
         let mut fx = rotate_fixture(Env::Devnet);
         fx.ev_policy = EvaluatorPolicy::ProductionDecisionSourceRequired;
         let o = fx.run_with(&ProductionDecisionSourceEvaluatorInterface);
-        t.check_outcome(
-            "RI.runtime-integration-fail-closed",
-            "runtime-integration-fail-closed",
-            &o,
-        );
+        t.check_outcome("RI.runtime-integration-fail-closed", "runtime-integration-fail-closed", &o);
         t.assert_fail_closed("RI", &o);
     }
 
@@ -1328,16 +1260,8 @@ fn run_reachability_table(out: &Path) -> (u64, u64) {
             !mainnet_peer_driven_apply_remains_refused_under_replay_runtime(Env::Devnet),
             "",
         );
-        t.assert_true(
-            "G.fresh-required",
-            fresh_replay_state_required_before_mutation(),
-            "",
-        );
-        t.assert_true(
-            "G.deferred-not-approval",
-            deferred_is_never_mutation_approval(),
-            "",
-        );
+        t.assert_true("G.fresh-required", fresh_replay_state_required_before_mutation(), "");
+        t.assert_true("G.deferred-not-approval", deferred_is_never_mutation_approval(), "");
         t.assert_true(
             "G.production-mainnet-unavailable",
             production_mainnet_replay_state_remains_unavailable(),
@@ -1377,24 +1301,14 @@ fn run_fixture_dump(out: &Path) {
     );
 
     // Composed outcome value (ProceedFresh).
-    write_file(
-        &dir.join("composed_outcome.txt"),
-        &format!("{:#?}\n", fx.run()),
-    );
-    write_file(
-        &dir.join("composed_outcome_tag.txt"),
-        &format!("{}\n", otag(&fx.run())),
-    );
+    write_file(&dir.join("composed_outcome.txt"), &format!("{:#?}\n", fx.run()));
+    write_file(&dir.join("composed_outcome_tag.txt"), &format!("{}\n", otag(&fx.run())));
 
     // Before/after fixture replay-store snapshots across an explicit consume
     // performed only after a successful fixture authorization.
     let mut store = FixtureReplayStateStore::new(Env::Devnet);
     let key = replay_state_key_digest(&fx.replay_input);
-    let snap_before = format!(
-        "len={} is_consumed={}\n",
-        store.len(),
-        store.is_consumed(&key)
-    );
+    let snap_before = format!("len={} is_consumed={}\n", store.len(), store.is_consumed(&key));
     let authorized = fx.run().is_mutate_authorized();
     let snap_after_auth = format!(
         "authorized={} len={} is_consumed={}\n",
@@ -1403,17 +1317,9 @@ fn run_fixture_dump(out: &Path) {
         store.is_consumed(&key)
     );
     store.record_for(&fx.replay_input);
-    let snap_observed = format!(
-        "len={} is_consumed={}\n",
-        store.len(),
-        store.is_consumed(&key)
-    );
+    let snap_observed = format!("len={} is_consumed={}\n", store.len(), store.is_consumed(&key));
     store.consume_for(&fx.replay_input);
-    let snap_consumed = format!(
-        "len={} is_consumed={}\n",
-        store.len(),
-        store.is_consumed(&key)
-    );
+    let snap_consumed = format!("len={} is_consumed={}\n", store.len(), store.is_consumed(&key));
     write_file(
         &dir.join("fixture_store_snapshots.txt"),
         &format!(
@@ -1425,17 +1331,11 @@ fn run_fixture_dump(out: &Path) {
     // Deferred / expired / MainNet-refused outcome dumps.
     let mut deferred = rotate_fixture(Env::Devnet);
     deferred.replay_input.current_canonical_epoch = 1;
-    write_file(
-        &dir.join("deferred_outcome.txt"),
-        &format!("{:#?}\n", deferred.run()),
-    );
+    write_file(&dir.join("deferred_outcome.txt"), &format!("{:#?}\n", deferred.run()));
 
     let mut expired = rotate_fixture(Env::Devnet);
     expired.replay_input.current_canonical_epoch = EXPIRY + 50;
-    write_file(
-        &dir.join("expired_outcome.txt"),
-        &format!("{:#?}\n", expired.run()),
-    );
+    write_file(&dir.join("expired_outcome.txt"), &format!("{:#?}\n", expired.run()));
 
     let mut mn = rotate_fixture(Env::Mainnet);
     mn.surface = S::PeerDrivenDrain;
@@ -1444,10 +1344,7 @@ fn run_fixture_dump(out: &Path) {
     mn.replay_exp.expected_environment = Env::Mainnet;
     mn.replay_input.validation_surface = S::PeerDrivenDrain;
     mn.replay_exp.expected_validation_surface = S::PeerDrivenDrain;
-    write_file(
-        &dir.join("mainnet_refused_outcome.txt"),
-        &format!("{:#?}\n", mn.run()),
-    );
+    write_file(&dir.join("mainnet_refused_outcome.txt"), &format!("{:#?}\n", mn.run()));
 
     // Symbol inventory.
     let mut inv = String::new();

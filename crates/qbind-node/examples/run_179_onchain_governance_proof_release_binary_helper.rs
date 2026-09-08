@@ -69,8 +69,8 @@ use qbind_node::pqc_authority_state::{
     PersistentAuthorityStateRecordVersioned,
 };
 use qbind_node::pqc_governance_authority::{
-    fixture_issuer_signature, fixture_issuer_signature_verifier, verify_governance_authority_proof,
-    GovernanceAuthorityClass, GovernanceAuthorityProof,
+    fixture_issuer_signature, fixture_issuer_signature_verifier,
+    verify_governance_authority_proof, GovernanceAuthorityClass, GovernanceAuthorityProof,
     GovernanceAuthorityVerificationOutcome as Run163GovOutcome, GovernanceThreshold,
     PQC_GOVERNANCE_ISSUER_SUITE_ML_DSA_44,
 };
@@ -104,14 +104,16 @@ const GENESIS_HASH_A: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 const GENESIS_HASH_B: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 const DIGEST_2: &str = "2222222222222222222222222222222222222222222222222222222222222222";
 const DIGEST_3: &str = "3333333333333333333333333333333333333333333333333333333333333333";
-const RATIFY_DIGEST_1: &str = "1111111111111111111111111111111111111111111111111111111111111111";
+const RATIFY_DIGEST_1: &str =
+    "1111111111111111111111111111111111111111111111111111111111111111";
 
 const GOV_DOMAIN: &str = "qbind-onchain-gov-1";
 const OTHER_GOV_DOMAIN: &str = "qbind-onchain-gov-other";
 const GOV_EPOCH: u64 = 42;
 const PROPOSAL_ID: &str = "prop-001";
 const OTHER_PROPOSAL_ID: &str = "prop-999";
-const PROPOSAL_DIGEST: &str = "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef";
+const PROPOSAL_DIGEST: &str =
+    "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef";
 const OTHER_PROPOSAL_DIGEST: &str =
     "feedfeedfeedfeedfeedfeedfeedfeedfeedfeedfeedfeedfeedfeedfeedfeed";
 const UNIQUE_DECISION_ID: &str = "decision-001";
@@ -396,13 +398,7 @@ fn record_outcome(
 fn run_a1(out: &Path) -> ScenarioRecord {
     let candidate = rotate_to(KEY_B, KEY_A, 2, DIGEST_2, TrustBundleEnvironment::Devnet);
     let proof = good_proof(&candidate, LocalLifecycleAction::Rotate);
-    let outcome = verify_with(
-        &proof,
-        &candidate,
-        &devnet_domain(),
-        allow_fixture(),
-        Some(1),
-    );
+    let outcome = verify_with(&proof, &candidate, &devnet_domain(), allow_fixture(), Some(1));
     let matched = matches!(outcome, Outcome::AcceptedOnChainGovernanceFixture { .. });
     record_outcome(
         out,
@@ -449,13 +445,7 @@ fn run_a3(out: &Path) -> ScenarioRecord {
         TrustBundleEnvironment::Devnet,
     );
     let proof = good_proof(&candidate, LocalLifecycleAction::Revoke);
-    let outcome = verify_with(
-        &proof,
-        &candidate,
-        &devnet_domain(),
-        allow_fixture(),
-        Some(2),
-    );
+    let outcome = verify_with(&proof, &candidate, &devnet_domain(), allow_fixture(), Some(2));
     let matched = matches!(
         outcome,
         Outcome::AcceptedOnChainGovernanceFixture {
@@ -537,10 +527,7 @@ fn run_a5(out: &Path) -> ScenarioRecord {
         NOW,
         &EmptyOnChainGovernanceReplaySet,
     );
-    let matched = matches!(
-        combined,
-        CombinedLifecycleOnChainGovernanceOutcome::Accepted { .. }
-    );
+    let matched = matches!(combined, CombinedLifecycleOnChainGovernanceOutcome::Accepted { .. });
     record_outcome(
         out,
         "A5_combined_lifecycle_with_onchain_governance_proof_accepted",
@@ -559,7 +546,8 @@ fn run_a6(out: &Path) -> ScenarioRecord {
     // Round-trip the proof through wire form, then verify.
     let wire = OnChainGovernanceProofWire::from_proof(&proof);
     let json = serde_json::to_vec(&wire).expect("encode wire");
-    let decoded: OnChainGovernanceProofWire = serde_json::from_slice(&json).expect("decode wire");
+    let decoded: OnChainGovernanceProofWire =
+        serde_json::from_slice(&json).expect("decode wire");
     let same_wire = wire == decoded;
     let decoded_proof = decoded.to_proof().expect("wire to proof");
     let same_proof = proof == decoded_proof;
@@ -643,10 +631,7 @@ fn run_a7(out: &Path) -> ScenarioRecord {
         Some(1),
         &fixture_issuer_signature_verifier(),
     );
-    let unsup_ok = matches!(
-        unsup_outcome,
-        Run163GovOutcome::UnsupportedOnChainGovernance
-    );
+    let unsup_ok = matches!(unsup_outcome, Run163GovOutcome::UnsupportedOnChainGovernance);
 
     let matched = gb_accepted && unsup_ok;
     record_outcome(
@@ -680,13 +665,7 @@ where
     let candidate = rotate_to(KEY_B, KEY_A, 2, DIGEST_2, TrustBundleEnvironment::Devnet);
     let mut proof = good_proof(&candidate, LocalLifecycleAction::Rotate);
     mutate(&mut proof);
-    let outcome = verify_with(
-        &proof,
-        &candidate,
-        &devnet_domain(),
-        allow_fixture(),
-        Some(1),
-    );
+    let outcome = verify_with(&proof, &candidate, &devnet_domain(), allow_fixture(), Some(1));
     let matched_dbg = format!("{:?}", outcome);
     let matched = matched_dbg.starts_with(expected_label);
     record_outcome(
@@ -702,167 +681,83 @@ where
 }
 
 fn run_r1(out: &Path) -> ScenarioRecord {
-    run_simple_reject(
-        out,
-        "R1_wrong_environment_rejected",
-        "WrongEnvironment",
-        "wrong environment rejected",
-        |p| {
-            p.environment = TrustBundleEnvironment::Testnet;
-        },
-    )
+    run_simple_reject(out, "R1_wrong_environment_rejected", "WrongEnvironment", "wrong environment rejected", |p| {
+        p.environment = TrustBundleEnvironment::Testnet;
+    })
 }
 fn run_r2(out: &Path) -> ScenarioRecord {
-    run_simple_reject(
-        out,
-        "R2_wrong_chain_rejected",
-        "WrongChain",
-        "wrong chain rejected",
-        |p| {
-            p.chain_id = OTHER_CHAIN.to_string();
-        },
-    )
+    run_simple_reject(out, "R2_wrong_chain_rejected", "WrongChain", "wrong chain rejected", |p| {
+        p.chain_id = OTHER_CHAIN.to_string();
+    })
 }
 fn run_r3(out: &Path) -> ScenarioRecord {
-    run_simple_reject(
-        out,
-        "R3_wrong_genesis_rejected",
-        "WrongGenesis",
-        "wrong genesis rejected",
-        |p| {
-            p.genesis_hash = GENESIS_HASH_B.to_string();
-        },
-    )
+    run_simple_reject(out, "R3_wrong_genesis_rejected", "WrongGenesis", "wrong genesis rejected", |p| {
+        p.genesis_hash = GENESIS_HASH_B.to_string();
+    })
 }
 fn run_r4(out: &Path) -> ScenarioRecord {
-    run_simple_reject(
-        out,
-        "R4_wrong_authority_root_rejected",
-        "WrongAuthorityRoot",
-        "wrong authority root rejected",
-        |p| {
-            p.authority_root_fingerprint = OTHER_ROOT_FP.to_string();
-        },
-    )
+    run_simple_reject(out, "R4_wrong_authority_root_rejected", "WrongAuthorityRoot", "wrong authority root rejected", |p| {
+        p.authority_root_fingerprint = OTHER_ROOT_FP.to_string();
+    })
 }
 fn run_r5(out: &Path) -> ScenarioRecord {
-    run_simple_reject(
-        out,
-        "R5_wrong_governance_domain_rejected",
-        "WrongGovernanceDomain",
-        "wrong governance domain rejected",
-        |p| {
-            p.governance_domain_id = OTHER_GOV_DOMAIN.to_string();
-        },
-    )
+    run_simple_reject(out, "R5_wrong_governance_domain_rejected", "WrongGovernanceDomain", "wrong governance domain rejected", |p| {
+        p.governance_domain_id = OTHER_GOV_DOMAIN.to_string();
+    })
 }
 fn run_r6(out: &Path) -> ScenarioRecord {
-    run_simple_reject(
-        out,
-        "R6_wrong_proposal_digest_rejected",
-        "WrongProposalDigest",
-        "wrong proposal digest rejected",
-        |p| {
-            p.proposal_digest = OTHER_PROPOSAL_DIGEST.to_string();
-        },
-    )
+    run_simple_reject(out, "R6_wrong_proposal_digest_rejected", "WrongProposalDigest", "wrong proposal digest rejected", |p| {
+        p.proposal_digest = OTHER_PROPOSAL_DIGEST.to_string();
+    })
 }
 fn run_r6b(out: &Path) -> ScenarioRecord {
-    run_simple_reject(
-        out,
-        "R6b_wrong_proposal_id_rejected",
-        "WrongProposalDigest",
-        "wrong proposal id rejected as proposal-digest mismatch",
-        |p| {
-            p.proposal_id = OTHER_PROPOSAL_ID.to_string();
-        },
-    )
+    run_simple_reject(out, "R6b_wrong_proposal_id_rejected", "WrongProposalDigest", "wrong proposal id rejected as proposal-digest mismatch", |p| {
+        p.proposal_id = OTHER_PROPOSAL_ID.to_string();
+    })
 }
 fn run_r7(out: &Path) -> ScenarioRecord {
-    run_simple_reject(
-        out,
-        "R7_wrong_proposal_outcome_rejected",
-        "WrongProposalOutcome",
-        "wrong proposal outcome rejected",
-        |p| {
-            p.proposal_outcome = OnChainGovernanceProposalOutcome::Rejected;
-        },
-    )
+    run_simple_reject(out, "R7_wrong_proposal_outcome_rejected", "WrongProposalOutcome", "wrong proposal outcome rejected", |p| {
+        p.proposal_outcome = OnChainGovernanceProposalOutcome::Rejected;
+    })
 }
 fn run_r8(out: &Path) -> ScenarioRecord {
-    run_simple_reject(
-        out,
-        "R8_wrong_lifecycle_action_rejected",
-        "WrongLifecycleAction",
-        "wrong lifecycle action rejected",
-        |p| {
-            p.lifecycle_action = LocalLifecycleAction::Retire;
-        },
-    )
+    run_simple_reject(out, "R8_wrong_lifecycle_action_rejected", "WrongLifecycleAction", "wrong lifecycle action rejected", |p| {
+        p.lifecycle_action = LocalLifecycleAction::Retire;
+    })
 }
 fn run_r9(out: &Path) -> ScenarioRecord {
-    run_simple_reject(
-        out,
-        "R9_wrong_candidate_digest_rejected",
-        "WrongCandidateDigest",
-        "wrong candidate digest rejected",
-        |p| {
-            p.candidate_v2_digest = DIGEST_3.to_string();
-        },
-    )
+    run_simple_reject(out, "R9_wrong_candidate_digest_rejected", "WrongCandidateDigest", "wrong candidate digest rejected", |p| {
+        p.candidate_v2_digest = DIGEST_3.to_string();
+    })
 }
 fn run_r10(out: &Path) -> ScenarioRecord {
-    run_simple_reject(
-        out,
-        "R10_wrong_authority_sequence_rejected",
-        "WrongAuthoritySequence",
-        "wrong authority-domain sequence rejected",
-        |p| {
-            p.authority_domain_sequence = 7;
-        },
-    )
+    run_simple_reject(out, "R10_wrong_authority_sequence_rejected", "WrongAuthoritySequence", "wrong authority-domain sequence rejected", |p| {
+        p.authority_domain_sequence = 7;
+    })
 }
 
 fn run_r11(out: &Path) -> ScenarioRecord {
-    run_simple_reject(
-        out,
-        "R11_expired_governance_proof_rejected",
-        "ExpiredGovernanceProof",
-        "expired governance proof rejected",
-        |p| {
-            p.freshness = OnChainGovernanceFreshnessWindow {
-                not_before_unix: NOW - 1000,
-                not_after_unix: NOW - 100,
-            };
-        },
-    )
+    run_simple_reject(out, "R11_expired_governance_proof_rejected", "ExpiredGovernanceProof", "expired governance proof rejected", |p| {
+        p.freshness = OnChainGovernanceFreshnessWindow {
+            not_before_unix: NOW - 1000,
+            not_after_unix: NOW - 100,
+        };
+    })
 }
 fn run_r11b(out: &Path) -> ScenarioRecord {
-    run_simple_reject(
-        out,
-        "R11b_too_early_governance_proof_rejected",
-        "ExpiredGovernanceProof",
-        "too-early proof rejected as expired window",
-        |p| {
-            p.freshness = OnChainGovernanceFreshnessWindow {
-                not_before_unix: NOW + 100,
-                not_after_unix: NOW + 1000,
-            };
-        },
-    )
+    run_simple_reject(out, "R11b_too_early_governance_proof_rejected", "ExpiredGovernanceProof", "too-early proof rejected as expired window", |p| {
+        p.freshness = OnChainGovernanceFreshnessWindow {
+            not_before_unix: NOW + 100,
+            not_after_unix: NOW + 1000,
+        };
+    })
 }
 
 fn run_r12(out: &Path) -> ScenarioRecord {
     let candidate = rotate_to(KEY_B, KEY_A, 2, DIGEST_2, TrustBundleEnvironment::Devnet);
     let proof = good_proof(&candidate, LocalLifecycleAction::Rotate);
     // Persisted higher than the proof's sequence => stale lower-sequence replay.
-    let outcome = verify_with(
-        &proof,
-        &candidate,
-        &devnet_domain(),
-        allow_fixture(),
-        Some(99),
-    );
+    let outcome = verify_with(&proof, &candidate, &devnet_domain(), allow_fixture(), Some(99));
     let dbg = format!("{:?}", outcome);
     let matched = dbg.starts_with("ReplayRejected");
     record_outcome(
@@ -908,111 +803,57 @@ fn run_r12b(out: &Path) -> ScenarioRecord {
 }
 
 fn run_r13(out: &Path) -> ScenarioRecord {
-    run_simple_reject(
-        out,
-        "R13_quorum_not_met_rejected",
-        "QuorumNotMet",
-        "quorum not met rejected",
-        |p| {
-            p.quorum = OnChainGovernanceQuorum {
-                voters_voted: 2,
-                total_voters: 5,
-                required_quorum: 3,
-            };
-        },
-    )
+    run_simple_reject(out, "R13_quorum_not_met_rejected", "QuorumNotMet", "quorum not met rejected", |p| {
+        p.quorum = OnChainGovernanceQuorum {
+            voters_voted: 2,
+            total_voters: 5,
+            required_quorum: 3,
+        };
+    })
 }
 fn run_r14(out: &Path) -> ScenarioRecord {
-    run_simple_reject(
-        out,
-        "R14_threshold_not_met_rejected",
-        "ThresholdNotMet",
-        "threshold not met rejected",
-        |p| {
-            p.threshold = GovernanceThreshold::new(1, 3, 5);
-        },
-    )
+    run_simple_reject(out, "R14_threshold_not_met_rejected", "ThresholdNotMet", "threshold not met rejected", |p| {
+        p.threshold = GovernanceThreshold::new(1, 3, 5);
+    })
 }
 fn run_r15(out: &Path) -> ScenarioRecord {
-    run_simple_reject(
-        out,
-        "R15_invalid_proof_bytes_rejected",
-        "InvalidGovernanceProof",
-        "invalid governance proof bytes rejected",
-        |p| {
-            p.proof_bytes = b"this-is-not-the-canonical-commitment".to_vec();
-        },
-    )
+    run_simple_reject(out, "R15_invalid_proof_bytes_rejected", "InvalidGovernanceProof", "invalid governance proof bytes rejected", |p| {
+        p.proof_bytes = b"this-is-not-the-canonical-commitment".to_vec();
+    })
 }
 fn run_r16(out: &Path) -> ScenarioRecord {
-    run_simple_reject(
-        out,
-        "R16_unsupported_proof_suite_rejected",
-        "UnsupportedGovernanceProofSuite",
-        "reserved production proof suite rejected",
-        |p| {
-            p.proof_suite_id = ONCHAIN_GOVERNANCE_PROOF_SUITE_RESERVED_PRODUCTION;
-        },
-    )
+    run_simple_reject(out, "R16_unsupported_proof_suite_rejected", "UnsupportedGovernanceProofSuite", "reserved production proof suite rejected", |p| {
+        p.proof_suite_id = ONCHAIN_GOVERNANCE_PROOF_SUITE_RESERVED_PRODUCTION;
+    })
 }
 fn run_r16b(out: &Path) -> ScenarioRecord {
-    run_simple_reject(
-        out,
-        "R16b_unknown_proof_suite_rejected",
-        "UnsupportedGovernanceProofSuite",
-        "unknown proof suite id rejected",
-        |p| {
-            p.proof_suite_id = 0xFF;
-        },
-    )
+    run_simple_reject(out, "R16b_unknown_proof_suite_rejected", "UnsupportedGovernanceProofSuite", "unknown proof suite id rejected", |p| {
+        p.proof_suite_id = 0xFF;
+    })
 }
 
 fn run_r17(out: &Path) -> ScenarioRecord {
-    run_simple_reject(
-        out,
-        "R17_malformed_empty_field_rejected",
-        "MalformedOnChainProof",
-        "malformed proof: empty governance_domain_id",
-        |p| {
-            p.governance_domain_id.clear();
-        },
-    )
+    run_simple_reject(out, "R17_malformed_empty_field_rejected", "MalformedOnChainProof", "malformed proof: empty governance_domain_id", |p| {
+        p.governance_domain_id.clear();
+    })
 }
 fn run_r17b(out: &Path) -> ScenarioRecord {
-    run_simple_reject(
-        out,
-        "R17b_malformed_empty_proof_bytes_rejected",
-        "MalformedOnChainProof",
-        "malformed proof: empty proof_bytes",
-        |p| {
-            p.proof_bytes.clear();
-        },
-    )
+    run_simple_reject(out, "R17b_malformed_empty_proof_bytes_rejected", "MalformedOnChainProof", "malformed proof: empty proof_bytes", |p| {
+        p.proof_bytes.clear();
+    })
 }
 fn run_r17c(out: &Path) -> ScenarioRecord {
-    run_simple_reject(
-        out,
-        "R17c_malformed_freshness_window_rejected",
-        "MalformedOnChainProof",
-        "malformed proof: inverted freshness window",
-        |p| {
-            p.freshness = OnChainGovernanceFreshnessWindow {
-                not_before_unix: NOW + 1000,
-                not_after_unix: NOW,
-            };
-        },
-    )
+    run_simple_reject(out, "R17c_malformed_freshness_window_rejected", "MalformedOnChainProof", "malformed proof: inverted freshness window", |p| {
+        p.freshness = OnChainGovernanceFreshnessWindow {
+            not_before_unix: NOW + 1000,
+            not_after_unix: NOW,
+        };
+    })
 }
 fn run_r17d(out: &Path) -> ScenarioRecord {
-    run_simple_reject(
-        out,
-        "R17d_non_pqc_authority_root_suite_rejected_as_malformed",
-        "MalformedOnChainProof",
-        "malformed proof: non-PQC authority_root_suite_id",
-        |p| {
-            p.authority_root_suite_id = 1;
-        },
-    )
+    run_simple_reject(out, "R17d_non_pqc_authority_root_suite_rejected_as_malformed", "MalformedOnChainProof", "malformed proof: non-PQC authority_root_suite_id", |p| {
+        p.authority_root_suite_id = 1;
+    })
 }
 
 fn run_r18(out: &Path) -> ScenarioRecord {
@@ -1072,15 +913,9 @@ fn run_r19(out: &Path) -> ScenarioRecord {
 }
 
 fn run_r20(out: &Path) -> ScenarioRecord {
-    run_simple_reject(
-        out,
-        "R20_peer_majority_gossip_rejected_via_invalid_proof_bytes",
-        "InvalidGovernanceProof",
-        "peer-majority / gossip count rejected as OnChainGovernance proof",
-        |p| {
-            p.proof_bytes = b"peer-gossip-majority:5-of-7".to_vec();
-        },
-    )
+    run_simple_reject(out, "R20_peer_majority_gossip_rejected_via_invalid_proof_bytes", "InvalidGovernanceProof", "peer-majority / gossip count rejected as OnChainGovernance proof", |p| {
+        p.proof_bytes = b"peer-gossip-majority:5-of-7".to_vec();
+    })
 }
 
 fn run_r21(out: &Path) -> ScenarioRecord {
@@ -1170,19 +1005,14 @@ fn run_r23(out: &Path) -> ScenarioRecord {
     // DevNet fixture proof verifies; that acceptance must NOT enable MainNet apply.
     let candidate = rotate_to(KEY_B, KEY_A, 2, DIGEST_2, TrustBundleEnvironment::Devnet);
     let proof = good_proof(&candidate, LocalLifecycleAction::Rotate);
-    let outcome = verify_with(
-        &proof,
-        &candidate,
-        &devnet_domain(),
-        allow_fixture(),
-        Some(1),
-    );
+    let outcome = verify_with(&proof, &candidate, &devnet_domain(), allow_fixture(), Some(1));
     let devnet_accepted = outcome.is_accept();
     let mainnet_refused =
         mainnet_peer_driven_apply_remains_refused(TrustBundleEnvironment::Mainnet, &outcome);
 
     // Fresh MainNet-side verification still returns MainNetProductionProofUnavailable.
-    let mainnet_candidate = rotate_to(KEY_B, KEY_A, 2, DIGEST_2, TrustBundleEnvironment::Mainnet);
+    let mainnet_candidate =
+        rotate_to(KEY_B, KEY_A, 2, DIGEST_2, TrustBundleEnvironment::Mainnet);
     let mainnet_proof = good_proof(&mainnet_candidate, LocalLifecycleAction::Rotate);
     let mainnet_outcome = verify_onchain_governance_proof(
         &mainnet_proof,
@@ -1197,7 +1027,10 @@ fn run_r23(out: &Path) -> ScenarioRecord {
         NOW,
         &EmptyOnChainGovernanceReplaySet,
     );
-    let mainnet_unavailable = matches!(mainnet_outcome, Outcome::MainNetProductionProofUnavailable);
+    let mainnet_unavailable = matches!(
+        mainnet_outcome,
+        Outcome::MainNetProductionProofUnavailable
+    );
 
     let matched = devnet_accepted && mainnet_refused && mainnet_unavailable;
     record_outcome(
@@ -1219,8 +1052,12 @@ fn run_r23(out: &Path) -> ScenarioRecord {
 
 fn run_r24(out: &Path) -> ScenarioRecord {
     // A pre-Run-178 carrier (Run 167-177) carries no Run 178 OnChainGovernance sibling.
-    let signature =
-        fixture_issuer_signature(GovernanceAuthorityClass::GenesisBound, ROOT_FP, DIGEST_2, 2);
+    let signature = fixture_issuer_signature(
+        GovernanceAuthorityClass::GenesisBound,
+        ROOT_FP,
+        DIGEST_2,
+        2,
+    );
     let r163_proof = GovernanceAuthorityProof {
         environment: TrustBundleEnvironment::Devnet,
         chain_id: CHAIN_ID.to_string(),
@@ -1261,7 +1098,10 @@ fn run_r24(out: &Path) -> ScenarioRecord {
         "Old proof-carrier sidecars (Runs 167–177) without the additive Run 178 \
          OnChainGovernance sibling remain parse-compatible",
         OnChainGovernanceProofPolicy::Disabled,
-        format!("{{ same_wire: {}, same_proof: {} }}", same_wire, same_proof),
+        format!(
+            "{{ same_wire: {}, same_proof: {} }}",
+            same_wire, same_proof
+        ),
         matched,
         None,
     )
@@ -1273,7 +1113,8 @@ fn run_r24b(out: &Path) -> ScenarioRecord {
     let wire = OnChainGovernanceProofWire::from_proof(&proof);
     let schema_ok = wire.schema_version == ONCHAIN_GOVERNANCE_PROOF_WIRE_SCHEMA_VERSION;
     let json = serde_json::to_string_pretty(&wire).expect("encode wire");
-    let decoded: OnChainGovernanceProofWire = serde_json::from_str(&json).expect("decode wire");
+    let decoded: OnChainGovernanceProofWire =
+        serde_json::from_str(&json).expect("decode wire");
     let p_back = decoded.to_proof().expect("wire to proof");
     let same_proof = proof == p_back;
 
@@ -1301,9 +1142,7 @@ fn run_r25(out: &Path) -> ScenarioRecord {
     let proof = good_proof(&candidate, LocalLifecycleAction::Rotate);
     let mut wire = OnChainGovernanceProofWire::from_proof(&proof);
     wire.schema_version = 99;
-    let err = wire
-        .to_proof()
-        .expect_err("future schema_version must fail closed");
+    let err = wire.to_proof().expect_err("future schema_version must fail closed");
     let matched = matches!(
         err,
         OnChainGovernanceProofWireParseError::UnknownSchemaVersion {
@@ -1328,10 +1167,7 @@ fn run_r25b(out: &Path) -> ScenarioRecord {
     let mut wire = OnChainGovernanceProofWire::from_proof(&proof);
     wire.governance_domain_id.clear();
     let err = wire.to_proof().expect_err("empty required field must fail");
-    let matched = matches!(
-        err,
-        OnChainGovernanceProofWireParseError::EmptyRequiredField
-    );
+    let matched = matches!(err, OnChainGovernanceProofWireParseError::EmptyRequiredField);
     record_outcome(
         out,
         "R25b_empty_required_field_in_wire_rejected_fail_closed",
@@ -1369,7 +1205,9 @@ fn run_r25c(out: &Path) -> ScenarioRecord {
 fn main() {
     let args: Vec<String> = env::args().collect();
     if args.len() != 2 {
-        eprintln!("usage: run_179_onchain_governance_proof_release_binary_helper <OUT_DIR>");
+        eprintln!(
+            "usage: run_179_onchain_governance_proof_release_binary_helper <OUT_DIR>"
+        );
         std::process::exit(2);
     }
     let out_dir = PathBuf::from(&args[1]);
@@ -1428,10 +1266,7 @@ fn main() {
     let mut counts = (0usize, 0usize);
     for r in &records {
         manifest.push_str(&format!("{}\t{}\n", r.id, r.expected_label));
-        expected.push_str(&format!(
-            "{}: {}\n  note: {}\n",
-            r.id, r.expected_label, r.note
-        ));
+        expected.push_str(&format!("{}: {}\n  note: {}\n", r.id, r.expected_label, r.note));
         actual.push_str(&format!(
             "{}: matched={} actual={}\n",
             r.id, r.matched, r.actual_dbg

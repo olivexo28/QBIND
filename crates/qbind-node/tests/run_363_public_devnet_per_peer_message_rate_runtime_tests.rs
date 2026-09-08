@@ -71,10 +71,7 @@ fn t01_default_config_uses_with_defaults() {
     let pm = AsyncPeerManagerImpl::new(AsyncPeerManagerConfig::default());
     let cfg = pm.peer_rate_limiter().config();
     let defaults = PeerRateLimiter::with_defaults();
-    assert_eq!(
-        cfg.max_messages_per_second,
-        defaults.config().max_messages_per_second
-    );
+    assert_eq!(cfg.max_messages_per_second, defaults.config().max_messages_per_second);
     assert_eq!(cfg.burst_allowance, defaults.config().burst_allowance);
 }
 
@@ -110,10 +107,7 @@ fn t03_custom_max_messages_accepted() {
     let rt = parsed.abuse_dos_runtime_config().unwrap().expect("config");
     assert_eq!(rt.peer_rate_limiter_config().max_messages_per_second, 500);
     // Burst defaults preserved when only the message rate is overridden.
-    assert_eq!(
-        rt.peer_rate_limiter_config().burst_allowance,
-        DEFAULT_BURST_ALLOWANCE
-    );
+    assert_eq!(rt.peer_rate_limiter_config().burst_allowance, DEFAULT_BURST_ALLOWANCE);
 }
 
 // 4. Explicit custom --p2p-burst-allowance accepted.
@@ -257,7 +251,7 @@ fn t11_connection_metric_untouched_by_message_drops() {
     let now = Instant::now();
     assert!(limiter.allow(&peer, now));
     assert!(!limiter.allow(&peer, now)); // message-rate drop
-                                         // The connection-rate drop counter is a *separate* metric and stays zero.
+    // The connection-rate drop counter is a *separate* metric and stays zero.
     assert_eq!(metrics.connection_rate_drop_total(), 0);
 }
 

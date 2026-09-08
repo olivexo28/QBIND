@@ -214,7 +214,10 @@ fn available_from(
 // Run 222 evaluator material (the next evaluation stage)
 // ===========================================================================
 
-fn ev_identity(env: TrustBundleEnvironment, kind: EvaluatorSourceKind) -> DecisionSourceIdentity {
+fn ev_identity(
+    env: TrustBundleEnvironment,
+    kind: EvaluatorSourceKind,
+) -> DecisionSourceIdentity {
     let (governance_class, issuer) = match kind {
         EvaluatorSourceKind::EmergencyCouncilFixtureSource => (
             GovernanceExecutionClass::EmergencyCouncilFixture,
@@ -741,17 +744,14 @@ fn r1_missing_material_required_rejected() {
 #[test]
 fn r2_malformed_material_rejected() {
     let mut fx = rotate_fixture(TrustBundleEnvironment::Devnet);
-    fx.load =
-        GovernanceExecutionLoadStatus::Malformed(GovernanceExecutionPayloadParseError::Json {
-            error: "broken".to_string(),
-        });
+    fx.load = GovernanceExecutionLoadStatus::Malformed(GovernanceExecutionPayloadParseError::Json {
+        error: "broken".to_string(),
+    });
     let outcome = fx.run();
     assert!(matches!(
         outcome,
         GovernanceEvaluatorRuntimeIntegrationOutcome::RuntimeConsumptionFailClosed(
-            GovernanceExecutionPayloadCarryingDecisionOutcome::MalformedGovernanceExecutionPayload(
-                _
-            )
+            GovernanceExecutionPayloadCarryingDecisionOutcome::MalformedGovernanceExecutionPayload(_)
         )
     ));
 }
@@ -809,9 +809,7 @@ fn r5_wrong_chain_rejected() {
     fx.request.decision_source_identity_digest = fx.identity.source_identity_digest();
     fx.response.request_digest = fx.request.request_digest();
     let outcome = fx.run();
-    assert_evaluator_rejected(&outcome, |o| {
-        matches!(o, EvaluatorOutcome::WrongChain { .. })
-    });
+    assert_evaluator_rejected(&outcome, |o| matches!(o, EvaluatorOutcome::WrongChain { .. }));
 }
 
 // R6. wrong genesis rejected.
@@ -1071,10 +1069,7 @@ fn r27_evaluator_valid_but_governance_decision_invalid_rejected() {
     fx.load = available_from(&rotate_input(env), &decision);
     let outcome = fx.run();
     assert_evaluator_rejected(&outcome, |o| {
-        matches!(
-            o,
-            EvaluatorOutcome::GovernanceExecutionDecisionInvalid { .. }
-        )
+        matches!(o, EvaluatorOutcome::GovernanceExecutionDecisionInvalid { .. })
     });
 }
 
@@ -1273,7 +1268,5 @@ fn compat_run222_disabled_evaluator_policy_fails_closed() {
     let mut fx = rotate_fixture(TrustBundleEnvironment::Devnet);
     fx.ev_policy = EvaluatorPolicy::Disabled;
     let outcome = fx.run();
-    assert_evaluator_rejected(&outcome, |o| {
-        matches!(o, EvaluatorOutcome::EvaluatorDisabled)
-    });
+    assert_evaluator_rejected(&outcome, |o| matches!(o, EvaluatorOutcome::EvaluatorDisabled));
 }

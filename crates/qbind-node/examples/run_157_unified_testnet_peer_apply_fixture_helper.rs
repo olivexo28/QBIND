@@ -86,11 +86,8 @@ fn vid_bytes(vid: u64) -> [u8; 32] {
 }
 
 fn write_json<T: Serialize>(path: &Path, value: &T) {
-    fs::write(
-        path,
-        serde_json::to_vec_pretty(value).expect("serialize json"),
-    )
-    .expect("write json");
+    fs::write(path, serde_json::to_vec_pretty(value).expect("serialize json"))
+        .expect("write json");
 }
 
 #[derive(Clone)]
@@ -110,12 +107,7 @@ fn mint_signing() -> Signing {
         PQC_TRANSPORT_SUITE_ML_DSA_44,
         hex_lower(&pk)
     );
-    Signing {
-        pk,
-        sk,
-        key_id,
-        spec,
-    }
+    Signing { pk, sk, key_id, spec }
 }
 
 struct Harness {
@@ -147,10 +139,7 @@ fn harness() -> Harness {
     let mut genesis = GenesisConfig::new(
         genesis_chain_id(env),
         1_738_000_000_000,
-        vec![GenesisAllocation::new(
-            format!("0x{}", "11".repeat(32)),
-            100,
-        )],
+        vec![GenesisAllocation::new(format!("0x{}", "11".repeat(32)), 100)],
         vec![GenesisValidator::new(
             format!("0x{}", "22".repeat(32)),
             "ab".repeat(32),
@@ -203,10 +192,7 @@ fn signed_bundle(h: &Harness, sequence: u64) -> TrustBundle {
     let roots = if sequence == 1 {
         vec![root_entry(&h.transport_root)]
     } else {
-        vec![
-            root_entry(&h.transport_root),
-            root_entry(&h.candidate_extra_root),
-        ]
+        vec![root_entry(&h.transport_root), root_entry(&h.candidate_extra_root)]
     };
     let mut bundle = TrustBundle {
         bundle_version: TrustBundle::SUPPORTED_SCHEMA_VERSION,
@@ -222,8 +208,8 @@ fn signed_bundle(h: &Harness, sequence: u64) -> TrustBundle {
         activation_epoch: None,
         activation_height: None,
     };
-    let sig =
-        sign_bundle_devnet_helper(&bundle, h.signing.key_id, &h.signing.sk).expect("sign bundle");
+    let sig = sign_bundle_devnet_helper(&bundle, h.signing.key_id, &h.signing.sk)
+        .expect("sign bundle");
     bundle.signature = Some(sig);
     bundle
 }
@@ -232,18 +218,13 @@ fn signed_bundle_with_generated_at(h: &Harness, sequence: u64, generated_at: u64
     let mut bundle = signed_bundle(h, sequence);
     bundle.signature = None;
     bundle.generated_at = generated_at;
-    let sig =
-        sign_bundle_devnet_helper(&bundle, h.signing.key_id, &h.signing.sk).expect("sign bundle");
+    let sig = sign_bundle_devnet_helper(&bundle, h.signing.key_id, &h.signing.sk)
+        .expect("sign bundle");
     bundle.signature = Some(sig);
     bundle
 }
 
-fn envelope_from_bundle(
-    h: &Harness,
-    bundle: &TrustBundle,
-    peer_id: &str,
-    sequence: u64,
-) -> PeerCandidateEnvelope {
+fn envelope_from_bundle(h: &Harness, bundle: &TrustBundle, peer_id: &str, sequence: u64) -> PeerCandidateEnvelope {
     let fp = hex_lower(&canonical_fingerprint(bundle));
     let bytes = serde_json::to_vec_pretty(bundle).expect("serialize bundle");
     PeerCandidateEnvelope {
@@ -285,13 +266,8 @@ fn v2_digest_hex(v: &qbind_ledger::BundleSigningRatificationV2) -> String {
 
 fn write_leaf_material(base: &Path, h: &Harness, validator_id: u64) -> NodeMaterialManifest {
     let (kem_pk, kem_sk) = MlKem768Backend::generate_keypair().expect("ML-KEM-768 keygen");
-    let spec = LeafCertSpec::currently_valid(
-        vid_bytes(validator_id),
-        h.transport_root.root_key_id,
-        kem_pk,
-    );
-    let cert =
-        issue_leaf_delegation_cert(&spec, &h.transport_root.root_sk).expect("issue leaf cert");
+    let spec = LeafCertSpec::currently_valid(vid_bytes(validator_id), h.transport_root.root_key_id, kem_pk);
+    let cert = issue_leaf_delegation_cert(&spec, &h.transport_root.root_sk).expect("issue leaf cert");
     let cert_path = base.join(format!("v{}.cert.bin", validator_id));
     let kem_sk_path = base.join(format!("v{}.kem.sk.bin", validator_id));
     fs::write(&cert_path, encode_cert(&cert)).expect("write cert");
@@ -352,25 +328,13 @@ struct UnifiedManifest {
     mainnet_fixture: Option<PathBuf>,
 }
 
-fn write_negative_peer_candidates(
-    base: &Path,
-    h: &Harness,
-    candidate: &TrustBundle,
-    v2_seq2: &qbind_ledger::BundleSigningRatificationV2,
-) -> NegativePeerCandidateManifest {
+fn write_negative_peer_candidates(base: &Path, h: &Harness, candidate: &TrustBundle, v2_seq2: &qbind_ledger::BundleSigningRatificationV2) -> NegativePeerCandidateManifest {
     let lower_sequence = base.join("peer-candidate.lower-sequence.json");
-    write_json(
-        &lower_sequence,
-        &envelope_from_bundle(h, &signed_bundle(h, 1), "run157-lower", 1),
-    );
+    write_json(&lower_sequence, &envelope_from_bundle(h, &signed_bundle(h, 1), "run157-lower", 1));
 
-    let same_sequence_different_digest =
-        base.join("peer-candidate.same-sequence-different-digest.json");
+    let same_sequence_different_digest = base.join("peer-candidate.same-sequence-different-digest.json");
     let diff_digest = signed_bundle_with_generated_at(h, 2, 99);
-    write_json(
-        &same_sequence_different_digest,
-        &envelope_from_bundle(h, &diff_digest, "run157-diff-digest", 2),
-    );
+    write_json(&same_sequence_different_digest, &envelope_from_bundle(h, &diff_digest, "run157-diff-digest", 2));
 
     let bad_signature = base.join("peer-candidate.bad-signature.json");
     let mut bad_sig = candidate.clone();
@@ -384,10 +348,7 @@ fn write_negative_peer_candidates(
         }
         sig.sig_bytes = hex_lower(&bytes);
     }
-    write_json(
-        &bad_signature,
-        &envelope_from_bundle(h, &bad_sig, "run157-bad-sig", 2),
-    );
+    write_json(&bad_signature, &envelope_from_bundle(h, &bad_sig, "run157-bad-sig", 2));
 
     let wrong_environment = base.join("peer-candidate.wrong-environment.json");
     let mut wrong_env = envelope_from_bundle(h, candidate, "run157-wrong-env", 2);
@@ -410,10 +371,7 @@ fn write_negative_peer_candidates(
     write_json(&ambiguous_v1_v2, &ambiguous);
 
     let duplicate_candidate = base.join("peer-candidate.duplicate.json");
-    write_json(
-        &duplicate_candidate,
-        &envelope_from_bundle(h, candidate, "run157-valid", 2),
-    );
+    write_json(&duplicate_candidate, &envelope_from_bundle(h, candidate, "run157-valid", 2));
 
     NegativePeerCandidateManifest {
         lower_sequence,
@@ -450,32 +408,15 @@ fn write_unified_testnet(base: &Path) -> UnifiedManifest {
     let candidate_extra_root_public_key = base.join("candidate-extra-root.pk.hex");
 
     write_json(&genesis, &h.genesis);
-    fs::write(
-        &expected_genesis_hash,
-        format!("{}\n", h.canonical_hash_hex),
-    )
-    .expect("write genesis hash");
+    fs::write(&expected_genesis_hash, format!("{}\n", h.canonical_hash_hex)).expect("write genesis hash");
     write_json(&baseline_trust_bundle, &baseline);
     write_json(&candidate_trust_bundle, &candidate);
     write_json(&baseline_v2_ratification_sidecar, &v2_seq1);
     write_json(&v2_ratification_sidecar, &v2_seq2);
-    fs::write(&bundle_signing_key_specs, format!("{}\n", h.signing.spec))
-        .expect("write signing spec");
-    fs::write(
-        &transport_root_id,
-        format!("{}\n", hex_lower(&h.transport_root.root_key_id)),
-    )
-    .expect("write root id");
-    fs::write(
-        &transport_root_public_key,
-        format!("{}\n", hex_lower(&h.transport_root.root_pk)),
-    )
-    .expect("write root pk");
-    fs::write(
-        &candidate_extra_root_public_key,
-        format!("{}\n", hex_lower(&h.candidate_extra_root.root_pk)),
-    )
-    .expect("write extra root pk");
+    fs::write(&bundle_signing_key_specs, format!("{}\n", h.signing.spec)).expect("write signing spec");
+    fs::write(&transport_root_id, format!("{}\n", hex_lower(&h.transport_root.root_key_id))).expect("write root id");
+    fs::write(&transport_root_public_key, format!("{}\n", hex_lower(&h.transport_root.root_pk))).expect("write root pk");
+    fs::write(&candidate_extra_root_public_key, format!("{}\n", hex_lower(&h.candidate_extra_root.root_pk))).expect("write extra root pk");
 
     let v0 = write_leaf_material(base, &h, 0);
     let v1 = write_leaf_material(base, &h, 1);
@@ -502,12 +443,8 @@ fn write_unified_testnet(base: &Path) -> UnifiedManifest {
     write_json(&seeded_authority_marker, &marker);
 
     let valid_peer_candidate_envelope = base.join("peer-candidate.valid.json");
-    write_json(
-        &valid_peer_candidate_envelope,
-        &envelope_from_bundle(&h, &candidate, "run157-valid", 2),
-    );
-    let negative_peer_candidate_envelopes =
-        write_negative_peer_candidates(base, &h, &candidate, &v2_seq2);
+    write_json(&valid_peer_candidate_envelope, &envelope_from_bundle(&h, &candidate, "run157-valid", 2));
+    let negative_peer_candidate_envelopes = write_negative_peer_candidates(base, &h, &candidate, &v2_seq2);
 
     UnifiedManifest {
         environment: "testnet",

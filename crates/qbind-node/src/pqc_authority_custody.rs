@@ -47,9 +47,7 @@ use crate::pqc_authority_lifecycle::{
     validate_v2_lifecycle_transition, AuthorityLifecycleTransitionOutcome, AuthorityTrustDomain,
     LocalLifecycleAction, PQC_LIFECYCLE_SUITE_ML_DSA_44,
 };
-use crate::pqc_authority_state::{
-    PersistentAuthorityStateRecordV2, PersistentAuthorityStateRecordVersioned,
-};
+use crate::pqc_authority_state::{PersistentAuthorityStateRecordV2, PersistentAuthorityStateRecordVersioned};
 use crate::pqc_governance_authority::GovernanceAuthorityClass;
 use crate::pqc_trust_bundle::TrustBundleEnvironment;
 
@@ -201,7 +199,10 @@ impl AuthorityCustodyPolicy {
     /// Returns `true` iff this policy allows local-operator custody
     /// for the environment indicated by the policy variant.
     pub const fn allows_local_operator(self) -> bool {
-        matches!(self, Self::DevnetLocalAllowed | Self::TestnetLocalAllowed)
+        matches!(
+            self,
+            Self::DevnetLocalAllowed | Self::TestnetLocalAllowed
+        )
     }
 }
 
@@ -297,7 +298,9 @@ pub enum AuthorityCustodyValidationOutcome {
     /// `MainnetProductionCustodyRequired`). Run 188 has no real
     /// production custody backend; every such request fails closed
     /// here.
-    ProductionCustodyUnavailable { policy: AuthorityCustodyPolicy },
+    ProductionCustodyUnavailable {
+        policy: AuthorityCustodyPolicy,
+    },
     /// `RemoteSigner` placeholder routed through the validator. Run
     /// 188 has no real remote-signer protocol; the placeholder fails
     /// closed.
@@ -316,19 +319,37 @@ pub enum AuthorityCustodyValidationOutcome {
         attested: TrustBundleEnvironment,
     },
     /// Trust-domain chain id does not match the attestation.
-    WrongChain { expected: String, attested: String },
+    WrongChain {
+        expected: String,
+        attested: String,
+    },
     /// Trust-domain genesis hash does not match the attestation.
-    WrongGenesis { expected: String, attested: String },
+    WrongGenesis {
+        expected: String,
+        attested: String,
+    },
     /// Trust-domain authority root fingerprint does not match the
     /// attestation.
-    WrongAuthorityRoot { expected: String, attested: String },
+    WrongAuthorityRoot {
+        expected: String,
+        attested: String,
+    },
     /// Bundle-signing key fingerprint does not match the candidate.
-    WrongSigningKeyFingerprint { expected: String, attested: String },
+    WrongSigningKeyFingerprint {
+        expected: String,
+        attested: String,
+    },
     /// Candidate digest does not match the attestation.
-    WrongCandidateDigest { expected: String, attested: String },
+    WrongCandidateDigest {
+        expected: String,
+        attested: String,
+    },
     /// Authority-domain sequence does not match the expected next
     /// sequence.
-    WrongAuthorityDomainSequence { expected: u64, attested: u64 },
+    WrongAuthorityDomainSequence {
+        expected: u64,
+        attested: u64,
+    },
     /// Lifecycle action does not match the attestation.
     WrongLifecycleAction {
         expected: LocalLifecycleAction,
@@ -343,7 +364,10 @@ pub enum AuthorityCustodyValidationOutcome {
     CustodyAttestationExpired { now_unix: u64 },
     /// Declared custody key id mismatched the persisted candidate
     /// expectation.
-    CustodyKeyIdMismatch { expected: String, attested: String },
+    CustodyKeyIdMismatch {
+        expected: String,
+        attested: String,
+    },
     /// Custody suite id is not the Run 159 PQC suite — or any other
     /// recognized custody suite.
     UnsupportedCustodySuite { suite_id: u8 },
@@ -488,8 +512,7 @@ pub fn validate_authority_custody_attestation(
     }
 
     // 5. Bundle-signing key fingerprint binding.
-    if attestation.bundle_signing_key_fingerprint != candidate.active_bundle_signing_key_fingerprint
-    {
+    if attestation.bundle_signing_key_fingerprint != candidate.active_bundle_signing_key_fingerprint {
         return AuthorityCustodyValidationOutcome::WrongSigningKeyFingerprint {
             expected: candidate.active_bundle_signing_key_fingerprint.clone(),
             attested: attestation.bundle_signing_key_fingerprint.clone(),
@@ -573,7 +596,8 @@ pub fn validate_authority_custody_attestation(
     {
         if expires_at_unix <= freshness_unix {
             return AuthorityCustodyValidationOutcome::CustodyAttestationMalformed {
-                reason: "expires_at_unix must be strictly greater than freshness_unix".to_string(),
+                reason: "expires_at_unix must be strictly greater than freshness_unix"
+                    .to_string(),
             };
         }
         if now_unix < freshness_unix || now_unix >= expires_at_unix {
@@ -638,9 +662,7 @@ pub fn validate_authority_custody_attestation(
             AuthorityCustodyPolicy::ProductionCustodyRequired => {
                 AuthorityCustodyValidationOutcome::ProductionCustodyUnavailable { policy }
             }
-            _ => {
-                unreachable!("requires_production_custody covers only the two production policies")
-            }
+            _ => unreachable!("requires_production_custody covers only the two production policies"),
         };
     }
 
@@ -681,9 +703,10 @@ pub fn validate_authority_custody_attestation(
             custody_key_id: attestation.custody_key_id.clone(),
             environment: trust_domain.environment,
         },
-        (policy, class, _) => {
-            AuthorityCustodyValidationOutcome::PolicyRefusesCustodyClass { policy, class }
-        }
+        (policy, class, _) => AuthorityCustodyValidationOutcome::PolicyRefusesCustodyClass {
+            policy,
+            class,
+        },
     }
 }
 

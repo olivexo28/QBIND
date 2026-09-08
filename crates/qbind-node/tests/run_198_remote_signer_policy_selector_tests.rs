@@ -59,8 +59,8 @@ use qbind_node::pqc_remote_authority_signer::{
     RemoteSignerPolicy, RemoteSignerRequest, RemoteSignerResponse,
 };
 use qbind_node::pqc_remote_signer_payload_carrying::{
-    parse_optional_remote_signer_attestation_sibling_from_json_value, RemoteSignerAttestationParts,
-    RemoteSignerAttestationWire, RemoteSignerLoadStatus,
+    parse_optional_remote_signer_attestation_sibling_from_json_value,
+    RemoteSignerAttestationParts, RemoteSignerAttestationWire, RemoteSignerLoadStatus,
     RemoteSignerPayloadCarryingDecisionOutcome, REMOTE_SIGNER_ATTESTATION_PAYLOAD_SIBLING_FIELD,
 };
 use qbind_node::pqc_remote_signer_policy_surface::{
@@ -121,9 +121,11 @@ const KEY_A: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const KEY_B: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 const ROOT_FP: &str = "1111111111111111111111111111111111111111";
 const CHAIN_ID: &str = "0000000000000001";
-const GENESIS_HASH: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+const GENESIS_HASH: &str =
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const DIGEST_2: &str = "2222222222222222222222222222222222222222222222222222222222222222";
-const PRIOR_DIGEST: &str = "1111111111111111111111111111111111111111111111111111111111111111";
+const PRIOR_DIGEST: &str =
+    "1111111111111111111111111111111111111111111111111111111111111111";
 const CUSTODY_ATTEST_DIGEST: &str = "custody-att-digest-198";
 const CUSTODY_KEY_ID: &str = "custody-key-id-198";
 const SIGNER_ID: &str = "remote-signer-198";
@@ -136,13 +138,7 @@ const FRESH: u64 = 1_699_999_900;
 const EXPIRES: u64 = 1_700_001_000;
 
 fn domain(env: TrustBundleEnvironment) -> AuthorityTrustDomain {
-    AuthorityTrustDomain::new(
-        env,
-        CHAIN_ID,
-        GENESIS_HASH,
-        ROOT_FP,
-        PQC_LIFECYCLE_SUITE_ML_DSA_44,
-    )
+    AuthorityTrustDomain::new(env, CHAIN_ID, GENESIS_HASH, ROOT_FP, PQC_LIFECYCLE_SUITE_ML_DSA_44)
 }
 
 fn rotate_candidate(env: TrustBundleEnvironment) -> PersistentAuthorityStateRecordV2 {
@@ -569,10 +565,7 @@ fn reachability_resolved_policy_reaches_all_seven_surfaces_accept() {
     // A valid DevNet fixture loopback carrier under FixtureLoopbackAllowed
     // is accepted at every non-peer-driven surface and at the
     // peer-driven drain surface (non-MainNet candidate).
-    let c = ctx_for(
-        TrustBundleEnvironment::Devnet,
-        AuthorityCustodyClass::FixtureLocalKey,
-    );
+    let c = ctx_for(TrustBundleEnvironment::Devnet, AuthorityCustodyClass::FixtureLocalKey);
     let loaded = available_via_wire(&parts(TrustBundleEnvironment::Devnet));
     for surface in ALL_SURFACES {
         let outcome = preflight(
@@ -582,10 +575,7 @@ fn reachability_resolved_policy_reaches_all_seven_surfaces_accept() {
             RemoteSignerPolicy::FixtureLoopbackAllowed,
             &loaded,
         );
-        assert!(
-            outcome.is_accept(),
-            "surface {surface:?} should accept, got {outcome:?}"
-        );
+        assert!(outcome.is_accept(), "surface {surface:?} should accept, got {outcome:?}");
     }
 }
 
@@ -593,10 +583,7 @@ fn reachability_resolved_policy_reaches_all_seven_surfaces_accept() {
 fn reachability_resolved_policy_reaches_all_seven_surfaces_required_but_absent() {
     // Absent carrier under an explicit non-Disabled policy fails closed
     // at every surface.
-    let c = ctx_for(
-        TrustBundleEnvironment::Devnet,
-        AuthorityCustodyClass::FixtureLocalKey,
-    );
+    let c = ctx_for(TrustBundleEnvironment::Devnet, AuthorityCustodyClass::FixtureLocalKey);
     let loaded = RemoteSignerLoadStatus::Absent;
     for surface in ALL_SURFACES {
         let outcome = preflight(
@@ -620,10 +607,7 @@ fn reachability_resolved_policy_reaches_all_seven_surfaces_required_but_absent()
 
 #[test]
 fn a1_no_remote_signer_payload_compatible_under_default_disabled() {
-    let c = ctx_for(
-        TrustBundleEnvironment::Devnet,
-        AuthorityCustodyClass::FixtureLocalKey,
-    );
+    let c = ctx_for(TrustBundleEnvironment::Devnet, AuthorityCustodyClass::FixtureLocalKey);
     let loaded = RemoteSignerLoadStatus::Absent;
     let outcome = preflight(
         Surface::ReloadCheck,
@@ -643,10 +627,7 @@ fn a1_no_remote_signer_payload_compatible_under_default_disabled() {
 
 #[test]
 fn a2_devnet_fixture_loopback_accepted_under_fixture_loopback_allowed() {
-    let c = ctx_for(
-        TrustBundleEnvironment::Devnet,
-        AuthorityCustodyClass::FixtureLocalKey,
-    );
+    let c = ctx_for(TrustBundleEnvironment::Devnet, AuthorityCustodyClass::FixtureLocalKey);
     let loaded = available_via_wire(&parts(TrustBundleEnvironment::Devnet));
     let outcome = preflight(
         Surface::ReloadCheck,
@@ -664,10 +645,7 @@ fn a2_devnet_fixture_loopback_accepted_under_fixture_loopback_allowed() {
 
 #[test]
 fn a3_testnet_fixture_loopback_accepted_under_fixture_loopback_allowed() {
-    let c = ctx_for(
-        TrustBundleEnvironment::Testnet,
-        AuthorityCustodyClass::FixtureLocalKey,
-    );
+    let c = ctx_for(TrustBundleEnvironment::Testnet, AuthorityCustodyClass::FixtureLocalKey);
     let loaded = available_via_wire(&parts(TrustBundleEnvironment::Testnet));
     let outcome = preflight(
         Surface::ReloadCheck,
@@ -681,10 +659,7 @@ fn a3_testnet_fixture_loopback_accepted_under_fixture_loopback_allowed() {
 
 #[test]
 fn a4_production_remote_signer_reaches_boundary_and_fails_closed() {
-    let c = ctx_for(
-        TrustBundleEnvironment::Devnet,
-        AuthorityCustodyClass::FixtureLocalKey,
-    );
+    let c = ctx_for(TrustBundleEnvironment::Devnet, AuthorityCustodyClass::FixtureLocalKey);
     let mut p = parts(TrustBundleEnvironment::Devnet);
     p.response = production_response(TrustBundleEnvironment::Devnet);
     let loaded = RemoteSignerLoadStatus::Available(p);
@@ -742,10 +717,7 @@ fn a8_governance_classes_unchanged_when_remote_signer_policy_disabled() {
         GovernanceAuthorityClass::EmergencyCouncil,
         GovernanceAuthorityClass::OnChainGovernance,
     ] {
-        let c = ctx_for(
-            TrustBundleEnvironment::Devnet,
-            AuthorityCustodyClass::FixtureLocalKey,
-        );
+        let c = ctx_for(TrustBundleEnvironment::Devnet, AuthorityCustodyClass::FixtureLocalKey);
         let outcome = preflight_v2_marker_remote_signer_for_reload_check(
             &c.custody,
             Some(&c.prior),
@@ -768,10 +740,7 @@ fn a8_governance_classes_unchanged_when_remote_signer_policy_disabled() {
 
 #[test]
 fn a10_mutating_devnet_fixture_loopback_accepted_under_fixture_loopback_allowed() {
-    let c = ctx_for(
-        TrustBundleEnvironment::Devnet,
-        AuthorityCustodyClass::FixtureLocalKey,
-    );
+    let c = ctx_for(TrustBundleEnvironment::Devnet, AuthorityCustodyClass::FixtureLocalKey);
     let loaded = available_via_wire(&parts(TrustBundleEnvironment::Devnet));
     for surface in [Surface::ReloadApply, Surface::Startup, Surface::Sighup] {
         let outcome = preflight(
@@ -781,10 +750,7 @@ fn a10_mutating_devnet_fixture_loopback_accepted_under_fixture_loopback_allowed(
             RemoteSignerPolicy::FixtureLoopbackAllowed,
             &loaded,
         );
-        assert!(
-            outcome.is_accept(),
-            "surface {surface:?} should accept, got {outcome:?}"
-        );
+        assert!(outcome.is_accept(), "surface {surface:?} should accept, got {outcome:?}");
     }
 }
 
@@ -792,10 +758,7 @@ fn a10_mutating_devnet_fixture_loopback_accepted_under_fixture_loopback_allowed(
 fn a11_live_inbound_0x05_receives_selected_policy() {
     // The live inbound 0x05 validation-only surface receives the resolved
     // policy and accepts valid DevNet fixture loopback material.
-    let c = ctx_for(
-        TrustBundleEnvironment::Devnet,
-        AuthorityCustodyClass::FixtureLocalKey,
-    );
+    let c = ctx_for(TrustBundleEnvironment::Devnet, AuthorityCustodyClass::FixtureLocalKey);
     let loaded = available_via_wire(&parts(TrustBundleEnvironment::Devnet));
     let outcome = preflight(
         Surface::LiveInbound0x05,
@@ -813,10 +776,7 @@ fn a11_live_inbound_0x05_receives_selected_policy() {
 
 #[test]
 fn r4_no_remote_signer_payload_rejected_under_fixture_loopback_allowed() {
-    let c = ctx_for(
-        TrustBundleEnvironment::Devnet,
-        AuthorityCustodyClass::FixtureLocalKey,
-    );
+    let c = ctx_for(TrustBundleEnvironment::Devnet, AuthorityCustodyClass::FixtureLocalKey);
     let outcome = preflight(
         Surface::ReloadCheck,
         &c,
@@ -830,10 +790,7 @@ fn r4_no_remote_signer_payload_rejected_under_fixture_loopback_allowed() {
 
 #[test]
 fn r5_no_remote_signer_payload_rejected_under_production_required() {
-    let c = ctx_for(
-        TrustBundleEnvironment::Devnet,
-        AuthorityCustodyClass::FixtureLocalKey,
-    );
+    let c = ctx_for(TrustBundleEnvironment::Devnet, AuthorityCustodyClass::FixtureLocalKey);
     let outcome = preflight(
         Surface::ReloadCheck,
         &c,
@@ -963,7 +920,8 @@ fn r12_wrong_genesis_rejected() {
 #[test]
 fn r13_wrong_authority_root_rejected() {
     let mut p = parts(TrustBundleEnvironment::Devnet);
-    p.request.authority_root_fingerprint = "9999999999999999999999999999999999999999".to_string();
+    p.request.authority_root_fingerprint =
+        "9999999999999999999999999999999999999999".to_string();
     let outcome = route_available(
         TrustBundleEnvironment::Devnet,
         AuthorityCustodyClass::FixtureLocalKey,
@@ -1188,10 +1146,7 @@ fn r25_invalid_signature_rejected() {
 
 #[test]
 fn r26_malformed_remote_signer_material_rejected() {
-    let c = ctx_for(
-        TrustBundleEnvironment::Devnet,
-        AuthorityCustodyClass::FixtureLocalKey,
-    );
+    let c = ctx_for(TrustBundleEnvironment::Devnet, AuthorityCustodyClass::FixtureLocalKey);
     let loaded = malformed_loaded(|w| w.identity.signer_public_identity = String::new());
     let outcome = preflight(
         Surface::ReloadCheck,
@@ -1210,10 +1165,7 @@ fn r27_local_operator_key_cannot_satisfy_remote_signer() {
     // A LocalOperatorKey custody candidate cannot satisfy RemoteSigner:
     // the Run 188 custody validation rejects the candidate before the
     // RemoteSigner is consulted under FixtureLoopbackAllowed.
-    let c = ctx_for(
-        TrustBundleEnvironment::Devnet,
-        AuthorityCustodyClass::LocalOperatorKey,
-    );
+    let c = ctx_for(TrustBundleEnvironment::Devnet, AuthorityCustodyClass::LocalOperatorKey);
     let loaded = available_via_wire(&parts(TrustBundleEnvironment::Devnet));
     let outcome = preflight(
         Surface::ReloadCheck,
@@ -1232,10 +1184,7 @@ fn r28_peer_majority_cannot_satisfy_remote_signer() {
 
 #[test]
 fn r29_remote_signer_valid_but_custody_metadata_invalid_rejected() {
-    let mut c = ctx_for(
-        TrustBundleEnvironment::Devnet,
-        AuthorityCustodyClass::FixtureLocalKey,
-    );
+    let mut c = ctx_for(TrustBundleEnvironment::Devnet, AuthorityCustodyClass::FixtureLocalKey);
     c.custody.candidate_digest =
         "3333333333333333333333333333333333333333333333333333333333333333".to_string();
     let loaded = available_via_wire(&parts(TrustBundleEnvironment::Devnet));
@@ -1274,10 +1223,7 @@ fn r30_custody_valid_but_remote_signer_response_invalid_rejected() {
 
 #[test]
 fn r31_validation_only_rejection_is_pure_no_mutation() {
-    let c = ctx_for(
-        TrustBundleEnvironment::Devnet,
-        AuthorityCustodyClass::FixtureLocalKey,
-    );
+    let c = ctx_for(TrustBundleEnvironment::Devnet, AuthorityCustodyClass::FixtureLocalKey);
     let loaded = malformed_loaded(|w| w.response.signature_commitment = String::new());
     let a = preflight(
         Surface::ReloadCheck,
@@ -1299,10 +1245,7 @@ fn r31_validation_only_rejection_is_pure_no_mutation() {
 
 #[test]
 fn r32_mutating_rejection_produces_no_mutation() {
-    let c = ctx_for(
-        TrustBundleEnvironment::Devnet,
-        AuthorityCustodyClass::FixtureLocalKey,
-    );
+    let c = ctx_for(TrustBundleEnvironment::Devnet, AuthorityCustodyClass::FixtureLocalKey);
     let loaded = malformed_loaded(|w| w.identity.attestation_digest = String::new());
     for surface in [Surface::ReloadApply, Surface::Startup, Surface::Sighup] {
         let outcome = preflight(
@@ -1320,10 +1263,7 @@ fn r32_mutating_rejection_produces_no_mutation() {
 
 #[test]
 fn r33_invalid_live_0x05_remote_signer_not_propagated() {
-    let c = ctx_for(
-        TrustBundleEnvironment::Devnet,
-        AuthorityCustodyClass::FixtureLocalKey,
-    );
+    let c = ctx_for(TrustBundleEnvironment::Devnet, AuthorityCustodyClass::FixtureLocalKey);
     let loaded = malformed_loaded(|w| w.response.response_nonce = String::new());
     let outcome = preflight(
         Surface::LiveInbound0x05,
@@ -1342,10 +1282,7 @@ fn r34_mainnet_peer_driven_apply_refused_even_with_fixture_loopback() {
     // Even with MainnetProductionRemoteSignerRequired *and* fully-valid
     // fixture loopback material, MainNet peer-driven apply is refused
     // unconditionally at the drain surface.
-    let c = ctx_for(
-        TrustBundleEnvironment::Mainnet,
-        AuthorityCustodyClass::FixtureLocalKey,
-    );
+    let c = ctx_for(TrustBundleEnvironment::Mainnet, AuthorityCustodyClass::FixtureLocalKey);
     let loaded = available_via_wire(&parts(TrustBundleEnvironment::Mainnet));
     for policy in [
         RemoteSignerPolicy::FixtureLoopbackAllowed,

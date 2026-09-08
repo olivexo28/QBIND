@@ -46,10 +46,9 @@ use qbind_node::pqc_governance_production_durable_replay_rocksdb::{
     durable_replay_rocksdb_never_falls_back_to_in_memory, durable_replay_rocksdb_record_key,
     DurableReplayEventInput, DurableReplayRecordStage, DurableReplayRocksDbConfig,
     DurableReplayRocksDbError, DurableReplayRocksDbIdentity, DurableReplayRocksDbOpenOutcome,
-    DurableReplayRocksDbPolicy, DurableReplayRocksDbReadOutcome,
-    DurableReplayRocksDbRecoveryOutcome, GovernanceProductionDurableReplayBackend,
-    MockDurableReplayBackend, ProductionDurableReplayRocksDbBackend,
-    DURABLE_REPLAY_ROCKSDB_SCHEMA_VERSION, KEY_DOMAIN, KEY_SCHEMA,
+    DurableReplayRocksDbPolicy, DurableReplayRocksDbReadOutcome, DurableReplayRocksDbRecoveryOutcome, GovernanceProductionDurableReplayBackend,
+    MockDurableReplayBackend, ProductionDurableReplayRocksDbBackend, KEY_DOMAIN, KEY_SCHEMA,
+    DURABLE_REPLAY_ROCKSDB_SCHEMA_VERSION,
 };
 use qbind_node::pqc_trust_bundle::TrustBundleEnvironment;
 use tempfile::TempDir;
@@ -165,13 +164,7 @@ fn decision_input(
 }
 
 fn devnet_input() -> DurableBackendDecisionInput {
-    decision_input(
-        TrustBundleEnvironment::Devnet,
-        CHAIN,
-        GENESIS,
-        SEQUENCE,
-        DECISION,
-    )
+    decision_input(TrustBundleEnvironment::Devnet, CHAIN, GENESIS, SEQUENCE, DECISION)
 }
 
 fn identity_devnet() -> DurableReplayRocksDbIdentity {
@@ -200,10 +193,7 @@ fn a01_opens_empty_temp_db_and_initializes_metadata() {
     let (backend, outcome) =
         ProductionDurableReplayRocksDbBackend::open_or_initialize(&cfg).expect("open");
     assert_eq!(outcome, DurableReplayRocksDbOpenOutcome::InitializedEmpty);
-    assert_eq!(
-        backend.open_outcome(),
-        DurableReplayRocksDbOpenOutcome::InitializedEmpty
-    );
+    assert_eq!(backend.open_outcome(), DurableReplayRocksDbOpenOutcome::InitializedEmpty);
     assert!(backend.scan_replay_records().unwrap().is_empty());
 }
 
@@ -233,12 +223,7 @@ fn a03_refuses_wrong_environment() {
     );
     let cfg = DurableReplayRocksDbConfig::source_test(dir.path(), id);
     let err = ProductionDurableReplayRocksDbBackend::open_or_initialize(&cfg).unwrap_err();
-    assert_eq!(
-        err,
-        DurableReplayRocksDbError::DomainMismatch {
-            field: "environment"
-        }
-    );
+    assert_eq!(err, DurableReplayRocksDbError::DomainMismatch { field: "environment" });
 }
 
 #[test]
@@ -247,18 +232,11 @@ fn a04_refuses_wrong_chain_id() {
     {
         let _ = open_devnet(&dir);
     }
-    let id = DurableReplayRocksDbIdentity::new(
-        TrustBundleEnvironment::Devnet,
-        "other-chain",
-        GENESIS,
-        SEQUENCE,
-    );
+    let id =
+        DurableReplayRocksDbIdentity::new(TrustBundleEnvironment::Devnet, "other-chain", GENESIS, SEQUENCE);
     let cfg = DurableReplayRocksDbConfig::source_test(dir.path(), id);
     let err = ProductionDurableReplayRocksDbBackend::open_or_initialize(&cfg).unwrap_err();
-    assert_eq!(
-        err,
-        DurableReplayRocksDbError::DomainMismatch { field: "chain_id" }
-    );
+    assert_eq!(err, DurableReplayRocksDbError::DomainMismatch { field: "chain_id" });
 }
 
 #[test]
@@ -275,12 +253,7 @@ fn a05_refuses_wrong_genesis() {
     );
     let cfg = DurableReplayRocksDbConfig::source_test(dir.path(), id);
     let err = ProductionDurableReplayRocksDbBackend::open_or_initialize(&cfg).unwrap_err();
-    assert_eq!(
-        err,
-        DurableReplayRocksDbError::DomainMismatch {
-            field: "genesis_hash"
-        }
-    );
+    assert_eq!(err, DurableReplayRocksDbError::DomainMismatch { field: "genesis_hash" });
 }
 
 #[test]
@@ -293,12 +266,7 @@ fn a06_refuses_wrong_namespace() {
     id.replay_namespace = "different.namespace".to_string();
     let cfg = DurableReplayRocksDbConfig::source_test(dir.path(), id);
     let err = ProductionDurableReplayRocksDbBackend::open_or_initialize(&cfg).unwrap_err();
-    assert_eq!(
-        err,
-        DurableReplayRocksDbError::DomainMismatch {
-            field: "replay_namespace"
-        }
-    );
+    assert_eq!(err, DurableReplayRocksDbError::DomainMismatch { field: "replay_namespace" });
 }
 
 #[test]
@@ -307,19 +275,13 @@ fn a07_refuses_wrong_authority_domain_sequence() {
     {
         let _ = open_devnet(&dir);
     }
-    let id = DurableReplayRocksDbIdentity::new(
-        TrustBundleEnvironment::Devnet,
-        CHAIN,
-        GENESIS,
-        SEQUENCE + 1,
-    );
+    let id =
+        DurableReplayRocksDbIdentity::new(TrustBundleEnvironment::Devnet, CHAIN, GENESIS, SEQUENCE + 1);
     let cfg = DurableReplayRocksDbConfig::source_test(dir.path(), id);
     let err = ProductionDurableReplayRocksDbBackend::open_or_initialize(&cfg).unwrap_err();
     assert_eq!(
         err,
-        DurableReplayRocksDbError::DomainMismatch {
-            field: "authority_domain_sequence"
-        }
+        DurableReplayRocksDbError::DomainMismatch { field: "authority_domain_sequence" }
     );
 }
 
@@ -332,11 +294,8 @@ fn a08_refuses_unsupported_future_schema() {
     // Overwrite the schema marker with an unsupported future version.
     {
         let db = rocksdb::DB::open_default(dir.path()).unwrap();
-        db.put(
-            KEY_SCHEMA,
-            (DURABLE_REPLAY_ROCKSDB_SCHEMA_VERSION + 9).to_le_bytes(),
-        )
-        .unwrap();
+        db.put(KEY_SCHEMA, (DURABLE_REPLAY_ROCKSDB_SCHEMA_VERSION + 9).to_le_bytes())
+            .unwrap();
     }
     let cfg = DurableReplayRocksDbConfig::source_test(dir.path(), identity_devnet());
     let err = ProductionDurableReplayRocksDbBackend::open_or_initialize(&cfg).unwrap_err();
@@ -435,10 +394,7 @@ fn a14_unwritable_path_fails_closed() {
     let result = ProductionDurableReplayRocksDbBackend::open_or_initialize(&cfg);
     // Restore permissions so the temp dir can be cleaned up.
     std::fs::set_permissions(&ro, std::fs::Permissions::from_mode(0o700)).ok();
-    assert!(matches!(
-        result,
-        Err(DurableReplayRocksDbError::RocksDbOpen(_))
-    ));
+    assert!(matches!(result, Err(DurableReplayRocksDbError::RocksDbOpen(_))));
 }
 
 #[test]
@@ -452,12 +408,8 @@ fn a15_disabled_policy_fails_closed() {
 #[test]
 fn a16_mainnet_identity_refused() {
     let dir = TempDir::new().unwrap();
-    let id = DurableReplayRocksDbIdentity::new(
-        TrustBundleEnvironment::Mainnet,
-        CHAIN,
-        GENESIS,
-        SEQUENCE,
-    );
+    let id =
+        DurableReplayRocksDbIdentity::new(TrustBundleEnvironment::Mainnet, CHAIN, GENESIS, SEQUENCE);
     let cfg = DurableReplayRocksDbConfig::source_test(dir.path(), id);
     let err = ProductionDurableReplayRocksDbBackend::open_or_initialize(&cfg).unwrap_err();
     assert_eq!(err, DurableReplayRocksDbError::MainNetRefused);
@@ -466,8 +418,7 @@ fn a16_mainnet_identity_refused() {
 #[test]
 fn a17_malformed_identity_refused() {
     let dir = TempDir::new().unwrap();
-    let id =
-        DurableReplayRocksDbIdentity::new(TrustBundleEnvironment::Devnet, "", GENESIS, SEQUENCE);
+    let id = DurableReplayRocksDbIdentity::new(TrustBundleEnvironment::Devnet, "", GENESIS, SEQUENCE);
     let cfg = DurableReplayRocksDbConfig::source_test(dir.path(), id);
     let err = ProductionDurableReplayRocksDbBackend::open_or_initialize(&cfg).unwrap_err();
     assert_eq!(err, DurableReplayRocksDbError::MalformedIdentity);
@@ -476,20 +427,13 @@ fn a17_malformed_identity_refused() {
 #[test]
 fn a18_testnet_domain_opens_and_binds() {
     let dir = TempDir::new().unwrap();
-    let id = DurableReplayRocksDbIdentity::new(
-        TrustBundleEnvironment::Testnet,
-        "qbind-testnet",
-        GENESIS,
-        SEQUENCE,
-    );
+    let id =
+        DurableReplayRocksDbIdentity::new(TrustBundleEnvironment::Testnet, "qbind-testnet", GENESIS, SEQUENCE);
     let cfg = DurableReplayRocksDbConfig::source_test(dir.path(), id.clone());
     let (backend, outcome) =
         ProductionDurableReplayRocksDbBackend::open_or_initialize(&cfg).expect("open testnet");
     assert_eq!(outcome, DurableReplayRocksDbOpenOutcome::InitializedEmpty);
-    assert_eq!(
-        backend.identity().environment,
-        TrustBundleEnvironment::Testnet
-    );
+    assert_eq!(backend.identity().environment, TrustBundleEnvironment::Testnet);
 }
 
 #[test]
@@ -517,10 +461,7 @@ fn b01_write_one_record_and_read_it_back() {
     let out = backend.record_replay_event(&ev).unwrap();
     assert_eq!(out.tag(), "written");
     let read = backend
-        .read_replay_record(
-            &durable_backend_key_digest(&input),
-            DurableReplayRecordStage::Observed,
-        )
+        .read_replay_record(&durable_backend_key_digest(&input), DurableReplayRecordStage::Observed)
         .unwrap();
     match read {
         DurableReplayRocksDbReadOutcome::Found(r) => {
@@ -538,9 +479,7 @@ fn b02_write_survives_close_reopen() {
     let key = durable_backend_key_digest(&input);
     {
         let mut backend = open_devnet(&dir);
-        backend
-            .record_replay_event(&observed_event(&input))
-            .unwrap();
+        backend.record_replay_event(&observed_event(&input)).unwrap();
         backend.close_or_flush().unwrap();
     }
     let cfg = DurableReplayRocksDbConfig::source_test(dir.path(), identity_devnet());
@@ -566,9 +505,7 @@ fn b03_multiple_records_survive_reopen_deterministic_order() {
                 SEQUENCE,
                 &format!("decision-{i:04}"),
             );
-            backend
-                .record_replay_event(&observed_event(&input))
-                .unwrap();
+            backend.record_replay_event(&observed_event(&input)).unwrap();
         }
     }
     let cfg = DurableReplayRocksDbConfig::source_test(dir.path(), identity_devnet());
@@ -614,9 +551,7 @@ fn b06_scan_populated_db_returns_all_records() {
             SEQUENCE,
             &format!("d-{i}"),
         );
-        backend
-            .record_replay_event(&observed_event(&input))
-            .unwrap();
+        backend.record_replay_event(&observed_event(&input)).unwrap();
     }
     assert_eq!(backend.scan_replay_records().unwrap().len(), 3);
 }
@@ -627,9 +562,7 @@ fn b07_flush_reopen_preserves_committed_data() {
     let input = devnet_input();
     {
         let mut backend = open_devnet(&dir);
-        backend
-            .record_replay_event(&observed_event(&input))
-            .unwrap();
+        backend.record_replay_event(&observed_event(&input)).unwrap();
         backend.close_or_flush().unwrap();
     }
     let cfg = DurableReplayRocksDbConfig::source_test(dir.path(), identity_devnet());
@@ -645,9 +578,7 @@ fn b08_observed_then_consumed_stage_persist_and_reopen() {
     let observed_digest;
     {
         let mut backend = open_devnet(&dir);
-        let out = backend
-            .record_replay_event(&observed_event(&input))
-            .unwrap();
+        let out = backend.record_replay_event(&observed_event(&input)).unwrap();
         observed_digest = out.record().digest.clone();
         let consume =
             DurableReplayEventInput::consumed_from_decision_input(&input, observed_digest.clone());
@@ -688,15 +619,11 @@ fn c02_duplicate_identical_record_after_reopen_is_idempotent() {
     let input = devnet_input();
     {
         let mut backend = open_devnet(&dir);
-        backend
-            .record_replay_event(&observed_event(&input))
-            .unwrap();
+        backend.record_replay_event(&observed_event(&input)).unwrap();
     }
     let cfg = DurableReplayRocksDbConfig::source_test(dir.path(), identity_devnet());
     let (mut backend, _) = ProductionDurableReplayRocksDbBackend::open_or_initialize(&cfg).unwrap();
-    let out = backend
-        .record_replay_event(&observed_event(&input))
-        .unwrap();
+    let out = backend.record_replay_event(&observed_event(&input)).unwrap();
     assert_eq!(out.tag(), "idempotent-duplicate");
     assert_eq!(backend.scan_replay_records().unwrap().len(), 1);
 }
@@ -713,9 +640,7 @@ fn c03_same_id_different_digest_fails_closed_equivocation() {
     let err = backend.record_replay_event(&ev).unwrap_err();
     assert_eq!(
         err,
-        DurableReplayRocksDbError::Equivocation {
-            record_id: ev.record_id.clone()
-        }
+        DurableReplayRocksDbError::Equivocation { record_id: ev.record_id.clone() }
     );
 }
 
@@ -728,10 +653,7 @@ fn c04_same_id_different_payload_fails_closed() {
     backend.record_replay_event(&ev).unwrap();
     ev.payload_digest = "tampered-payload-digest".to_string();
     let err = backend.record_replay_event(&ev).unwrap_err();
-    assert!(matches!(
-        err,
-        DurableReplayRocksDbError::Equivocation { .. }
-    ));
+    assert!(matches!(err, DurableReplayRocksDbError::Equivocation { .. }));
 }
 
 #[test]
@@ -782,13 +704,9 @@ fn c07_consume_without_prior_observed_fails_ordering() {
     let dir = TempDir::new().unwrap();
     let mut backend = open_devnet(&dir);
     let input = devnet_input();
-    let consume =
-        DurableReplayEventInput::consumed_from_decision_input(&input, "some-prior-digest");
+    let consume = DurableReplayEventInput::consumed_from_decision_input(&input, "some-prior-digest");
     let err = backend.record_replay_event(&consume).unwrap_err();
-    assert!(matches!(
-        err,
-        DurableReplayRocksDbError::OrderingViolation { .. }
-    ));
+    assert!(matches!(err, DurableReplayRocksDbError::OrderingViolation { .. }));
 }
 
 #[test]
@@ -796,16 +714,11 @@ fn c08_consume_with_wrong_prior_digest_fails_ordering() {
     let dir = TempDir::new().unwrap();
     let mut backend = open_devnet(&dir);
     let input = devnet_input();
-    backend
-        .record_replay_event(&observed_event(&input))
-        .unwrap();
+    backend.record_replay_event(&observed_event(&input)).unwrap();
     let consume =
         DurableReplayEventInput::consumed_from_decision_input(&input, "wrong-prior-stage-digest");
     let err = backend.record_replay_event(&consume).unwrap_err();
-    assert!(matches!(
-        err,
-        DurableReplayRocksDbError::OrderingViolation { .. }
-    ));
+    assert!(matches!(err, DurableReplayRocksDbError::OrderingViolation { .. }));
 }
 
 #[test]
@@ -868,10 +781,7 @@ fn d02_simulated_partial_stage_residue_fails_open_closed() {
     // Reopen must fail closed because partial residue is present.
     let cfg = DurableReplayRocksDbConfig::source_test(dir.path(), identity_devnet());
     let err = ProductionDurableReplayRocksDbBackend::open_or_initialize(&cfg).unwrap_err();
-    assert!(matches!(
-        err,
-        DurableReplayRocksDbError::PartialResidueDetected(_)
-    ));
+    assert!(matches!(err, DurableReplayRocksDbError::PartialResidueDetected(_)));
 }
 
 #[test]
@@ -903,10 +813,7 @@ fn d04_recover_on_clean_db_reports_nothing_to_recover() {
     let dir = TempDir::new().unwrap();
     let mut backend = open_devnet(&dir);
     let outcome = backend.recover_replay_window().unwrap();
-    assert_eq!(
-        outcome,
-        DurableReplayRocksDbRecoveryOutcome::NothingToRecover
-    );
+    assert_eq!(outcome, DurableReplayRocksDbRecoveryOutcome::NothingToRecover);
 }
 
 #[test]
@@ -916,9 +823,7 @@ fn d05_post_write_acknowledgement_survives_reopen() {
     let key = durable_backend_key_digest(&input);
     {
         let mut backend = open_devnet(&dir);
-        let out = backend
-            .record_replay_event(&observed_event(&input))
-            .unwrap();
+        let out = backend.record_replay_event(&observed_event(&input)).unwrap();
         assert_eq!(out.tag(), "written"); // acknowledged as written
     }
     let cfg = DurableReplayRocksDbConfig::source_test(dir.path(), identity_devnet());
@@ -936,9 +841,7 @@ fn d06_corrupted_record_payload_fails_closed_on_read() {
     let key = durable_backend_key_digest(&input);
     {
         let mut backend = open_devnet(&dir);
-        backend
-            .record_replay_event(&observed_event(&input))
-            .unwrap();
+        backend.record_replay_event(&observed_event(&input)).unwrap();
     }
     // Corrupt the record bytes directly.
     {
@@ -973,18 +876,14 @@ fn d07_corrupted_record_digest_fails_closed_on_read() {
     {
         let db = rocksdb::DB::open_default(dir.path()).unwrap();
         let rec_key = durable_replay_rocksdb_record_key(&key, DurableReplayRecordStage::Observed);
-        db.put(&rec_key, bincode::serialize(&record).unwrap())
-            .unwrap();
+        db.put(&rec_key, bincode::serialize(&record).unwrap()).unwrap();
     }
     let cfg = DurableReplayRocksDbConfig::source_test(dir.path(), identity_devnet());
     let (backend, _) = ProductionDurableReplayRocksDbBackend::open_or_initialize(&cfg).unwrap();
     let err = backend
         .read_replay_record(&key, DurableReplayRecordStage::Observed)
         .unwrap_err();
-    assert!(matches!(
-        err,
-        DurableReplayRocksDbError::CorruptDigest { .. }
-    ));
+    assert!(matches!(err, DurableReplayRocksDbError::CorruptDigest { .. }));
 }
 
 #[test]
@@ -994,9 +893,7 @@ fn d08_truncated_record_fails_closed_on_scan() {
     let key = durable_backend_key_digest(&input);
     {
         let mut backend = open_devnet(&dir);
-        backend
-            .record_replay_event(&observed_event(&input))
-            .unwrap();
+        backend.record_replay_event(&observed_event(&input)).unwrap();
     }
     {
         let db = rocksdb::DB::open_default(dir.path()).unwrap();
@@ -1012,20 +909,8 @@ fn d08_truncated_record_fails_closed_on_scan() {
 #[test]
 fn d09_corrupt_record_read_does_not_mutate_other_records() {
     let dir = TempDir::new().unwrap();
-    let good = decision_input(
-        TrustBundleEnvironment::Devnet,
-        CHAIN,
-        GENESIS,
-        SEQUENCE,
-        "good",
-    );
-    let bad = decision_input(
-        TrustBundleEnvironment::Devnet,
-        CHAIN,
-        GENESIS,
-        SEQUENCE,
-        "bad",
-    );
+    let good = decision_input(TrustBundleEnvironment::Devnet, CHAIN, GENESIS, SEQUENCE, "good");
+    let bad = decision_input(TrustBundleEnvironment::Devnet, CHAIN, GENESIS, SEQUENCE, "bad");
     let bad_key = durable_backend_key_digest(&bad);
     {
         let mut backend = open_devnet(&dir);
@@ -1070,9 +955,7 @@ fn e02_rocksdb_backend_accepts_same_shape_as_fixture() {
     let dir = TempDir::new().unwrap();
     let mut backend = open_devnet(&dir);
     let input = devnet_input();
-    let out = backend
-        .record_replay_event(&observed_event(&input))
-        .unwrap();
+    let out = backend.record_replay_event(&observed_event(&input)).unwrap();
     assert_eq!(out.record().record_id, durable_backend_key_digest(&input));
 }
 
@@ -1131,24 +1014,9 @@ fn e06_production_source_test_policy_is_selectable() {
 fn e07_distinct_decisions_produce_distinct_records() {
     let dir = TempDir::new().unwrap();
     let mut backend = open_devnet(&dir);
-    let a = decision_input(
-        TrustBundleEnvironment::Devnet,
-        CHAIN,
-        GENESIS,
-        SEQUENCE,
-        "a",
-    );
-    let b = decision_input(
-        TrustBundleEnvironment::Devnet,
-        CHAIN,
-        GENESIS,
-        SEQUENCE,
-        "b",
-    );
-    assert_ne!(
-        durable_backend_key_digest(&a),
-        durable_backend_key_digest(&b)
-    );
+    let a = decision_input(TrustBundleEnvironment::Devnet, CHAIN, GENESIS, SEQUENCE, "a");
+    let b = decision_input(TrustBundleEnvironment::Devnet, CHAIN, GENESIS, SEQUENCE, "b");
+    assert_ne!(durable_backend_key_digest(&a), durable_backend_key_digest(&b));
     backend.record_replay_event(&observed_event(&a)).unwrap();
     backend.record_replay_event(&observed_event(&b)).unwrap();
     assert_eq!(backend.scan_replay_records().unwrap().len(), 2);
@@ -1165,12 +1033,7 @@ fn f01_event_domain_mismatch_environment_fails_closed() {
     let mut ev = observed_event(&devnet_input());
     ev.identity.environment = TrustBundleEnvironment::Testnet;
     let err = backend.record_replay_event(&ev).unwrap_err();
-    assert_eq!(
-        err,
-        DurableReplayRocksDbError::EventDomainMismatch {
-            field: "environment"
-        }
-    );
+    assert_eq!(err, DurableReplayRocksDbError::EventDomainMismatch { field: "environment" });
     assert!(backend.scan_replay_records().unwrap().is_empty());
 }
 
@@ -1181,10 +1044,7 @@ fn f02_event_domain_mismatch_chain_fails_closed() {
     let mut ev = observed_event(&devnet_input());
     ev.identity.chain_id = "other".to_string();
     let err = backend.record_replay_event(&ev).unwrap_err();
-    assert_eq!(
-        err,
-        DurableReplayRocksDbError::EventDomainMismatch { field: "chain_id" }
-    );
+    assert_eq!(err, DurableReplayRocksDbError::EventDomainMismatch { field: "chain_id" });
 }
 
 #[test]
@@ -1206,21 +1066,11 @@ fn f04_mainnet_never_enabled_by_this_run() {
     for policy_cfg in [
         DurableReplayRocksDbConfig::source_test(
             dir.path(),
-            DurableReplayRocksDbIdentity::new(
-                TrustBundleEnvironment::Mainnet,
-                CHAIN,
-                GENESIS,
-                SEQUENCE,
-            ),
+            DurableReplayRocksDbIdentity::new(TrustBundleEnvironment::Mainnet, CHAIN, GENESIS, SEQUENCE),
         ),
         DurableReplayRocksDbConfig::disabled(
             dir.path(),
-            DurableReplayRocksDbIdentity::new(
-                TrustBundleEnvironment::Mainnet,
-                CHAIN,
-                GENESIS,
-                SEQUENCE,
-            ),
+            DurableReplayRocksDbIdentity::new(TrustBundleEnvironment::Mainnet, CHAIN, GENESIS, SEQUENCE),
         ),
     ] {
         assert!(ProductionDurableReplayRocksDbBackend::open_or_initialize(&policy_cfg).is_err());
@@ -1243,10 +1093,7 @@ fn f05_no_hidden_fallback_to_in_memory() {
 
 #[test]
 fn f06_default_policy_is_disabled() {
-    assert_eq!(
-        DurableReplayRocksDbPolicy::default(),
-        DurableReplayRocksDbPolicy::Disabled
-    );
+    assert_eq!(DurableReplayRocksDbPolicy::default(), DurableReplayRocksDbPolicy::Disabled);
     assert!(!DurableReplayRocksDbPolicy::default().permits_open());
     assert!(durable_replay_rocksdb_default_is_disabled());
 }
@@ -1254,10 +1101,7 @@ fn f06_default_policy_is_disabled() {
 #[test]
 fn f07_schema_version_is_stable() {
     assert_eq!(DURABLE_REPLAY_ROCKSDB_SCHEMA_VERSION, 1);
-    assert_eq!(
-        identity_devnet().schema_version,
-        DURABLE_REPLAY_ROCKSDB_SCHEMA_VERSION
-    );
+    assert_eq!(identity_devnet().schema_version, DURABLE_REPLAY_ROCKSDB_SCHEMA_VERSION);
 }
 
 // ===========================================================================

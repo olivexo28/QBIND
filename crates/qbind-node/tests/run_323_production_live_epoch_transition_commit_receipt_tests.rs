@@ -33,6 +33,7 @@
 
 #![allow(dead_code)]
 
+
 use qbind_node::pqc_authority_custody::AuthorityCustodyClass;
 use qbind_node::pqc_authority_lifecycle::{
     AuthorityTrustDomain, LocalLifecycleAction, PQC_LIFECYCLE_SUITE_ML_DSA_44,
@@ -57,12 +58,9 @@ use qbind_node::pqc_production_live_validator_set_application_authorization::{
 };
 use qbind_node::pqc_production_staged_live_validator_set_epoch_transition_application_executor::*;
 use qbind_node::pqc_production_validator_set_rotation_application_executor::{
-    EmptyValidatorSetRotationApplicationReplaySet,
-    ProductionValidatorSetRotationApplicationDecision,
-    ProductionValidatorSetRotationApplicationExecutor,
-    ProductionValidatorSetRotationApplicationInputs,
-    ProductionValidatorSetRotationApplicationRequest,
-    ValidatorSetRotationApplicationAuthoritySource,
+    EmptyValidatorSetRotationApplicationReplaySet, ProductionValidatorSetRotationApplicationDecision,
+    ProductionValidatorSetRotationApplicationExecutor, ProductionValidatorSetRotationApplicationInputs,
+    ProductionValidatorSetRotationApplicationRequest, ValidatorSetRotationApplicationAuthoritySource,
 };
 use qbind_node::pqc_production_validator_set_rotation_intent::{
     CanonicalValidatorIdentity, CanonicalValidatorRecord, CanonicalValidatorSetSnapshot,
@@ -110,33 +108,18 @@ fn chain_for(env: TrustBundleEnvironment) -> &'static str {
 }
 
 fn trust_domain(env: TrustBundleEnvironment) -> AuthorityTrustDomain {
-    AuthorityTrustDomain::new(
-        env,
-        chain_for(env),
-        GENESIS_HASH,
-        ROOT_FP,
-        PQC_LIFECYCLE_SUITE_ML_DSA_44,
-    )
+    AuthorityTrustDomain::new(env, chain_for(env), GENESIS_HASH, ROOT_FP, PQC_LIFECYCLE_SUITE_ML_DSA_44)
 }
 
 fn quorum() -> OnChainGovernanceQuorum {
-    OnChainGovernanceQuorum {
-        voters_voted: 8,
-        total_voters: 10,
-        required_quorum: 6,
-    }
+    OnChainGovernanceQuorum { voters_voted: 8, total_voters: 10, required_quorum: 6 }
 }
 
 fn threshold() -> GovernanceThreshold {
     GovernanceThreshold::new(8, 6, 10)
 }
 
-fn validator(
-    env: TrustBundleEnvironment,
-    idx: u64,
-    power: u64,
-    act: u64,
-) -> CanonicalValidatorRecord {
+fn validator(env: TrustBundleEnvironment, idx: u64, power: u64, act: u64) -> CanonicalValidatorRecord {
     CanonicalValidatorRecord {
         identity: CanonicalValidatorIdentity {
             validator_index: idx,
@@ -155,11 +138,7 @@ fn validator(
 
 fn current_set(env: TrustBundleEnvironment) -> CanonicalValidatorSetSnapshot {
     CanonicalValidatorSetSnapshot::new(
-        vec![
-            validator(env, 1, 100, 1),
-            validator(env, 2, 100, 1),
-            validator(env, 3, 100, 1),
-        ],
+        vec![validator(env, 1, 100, 1), validator(env, 2, 100, 1), validator(env, 3, 100, 1)],
         CUR_EPOCH,
         CUR_VERSION,
     )
@@ -188,10 +167,7 @@ fn durable() -> GovernanceExecutionDurableReplayBinding {
     }
 }
 
-fn gov_intent(
-    env: TrustBundleEnvironment,
-    lifecycle: LocalLifecycleAction,
-) -> ProductionGovernanceExecutionIntent {
+fn gov_intent(env: TrustBundleEnvironment, lifecycle: LocalLifecycleAction) -> ProductionGovernanceExecutionIntent {
     ProductionGovernanceExecutionIntent {
         intent_kind: ProductionGovernanceExecutionIntentKind::AuthorityLifecycleRotationIntent,
         protocol_version: 1,
@@ -223,17 +199,14 @@ fn gov_intent(
     }
 }
 
-fn gov_decision(
-    intent: ProductionGovernanceExecutionIntent,
-) -> ProductionGovernanceExecutionDecision {
+fn gov_decision(intent: ProductionGovernanceExecutionIntent) -> ProductionGovernanceExecutionDecision {
     let idig = intent.intent_digest();
     ProductionGovernanceExecutionDecision {
-        outcome:
-            ProductionGovernanceExecutionOutcome::AcceptedSourceTestGovernanceExecutionIntent {
-                intent_kind: intent.intent_kind,
-                environment: intent.environment,
-                decision_id: intent.decision_id.clone(),
-            },
+        outcome: ProductionGovernanceExecutionOutcome::AcceptedSourceTestGovernanceExecutionIntent {
+            intent_kind: intent.intent_kind,
+            environment: intent.environment,
+            decision_id: intent.decision_id.clone(),
+        },
         decision_id: GOV_DECISION_ID.to_string(),
         request_id: GOV_REQUEST_ID.to_string(),
         intent: Some(intent),
@@ -252,8 +225,7 @@ fn rotation_decision(
 ) -> ProductionValidatorSetRotationDecision {
     let decision = gov_decision(gov_intent(env, lifecycle));
     let idig = decision.intent_digest.clone();
-    let source =
-        ValidatorSetRotationAuthoritySource::VerifiedGovernanceExecutionIntent { decision };
+    let source = ValidatorSetRotationAuthoritySource::VerifiedGovernanceExecutionIntent { decision };
     let request = ProductionValidatorSetRotationRequest::new(
         source,
         current.clone(),
@@ -294,11 +266,7 @@ fn rotation_decision(
         expected_durable_replay: None,
     };
     let boundary = ProductionValidatorSetRotationBoundary::source_test();
-    let d = boundary.evaluate_validator_set_rotation(
-        &request,
-        &inputs,
-        &EmptyValidatorSetRotationReplaySet,
-    );
+    let d = boundary.evaluate_validator_set_rotation(&request, &inputs, &EmptyValidatorSetRotationReplaySet);
     assert!(d.is_accept(), "rotation decision must accept for fixture");
     d
 }
@@ -371,10 +339,7 @@ fn app_decision(
             &inputs,
             &EmptyValidatorSetRotationApplicationReplaySet,
         );
-    assert!(
-        d.is_accept(),
-        "run 305 application decision must accept for fixture"
-    );
+    assert!(d.is_accept(), "run 305 application decision must accept for fixture");
     d
 }
 
@@ -443,11 +408,7 @@ fn auth_decision(
     proposed: CanonicalValidatorSetSnapshot,
 ) -> ProductionLiveValidatorSetApplicationAuthorizationDecision {
     let app = app_decision(env, lifecycle, requested_action, current, delta, proposed);
-    let target = app
-        .application_intent
-        .as_ref()
-        .unwrap()
-        .epoch_transition_target;
+    let target = app.application_intent.as_ref().unwrap().epoch_transition_target;
     let inputs = auth_inputs307(env, lifecycle, requested_action, &app);
     let request = ProductionLiveValidatorSetApplicationAuthorizationRequest::new(
         LiveValidatorSetApplicationAuthorizationAuthoritySource::VerifiedApplicationDecision {
@@ -462,10 +423,7 @@ fn auth_decision(
             &inputs,
             &EmptyLiveValidatorSetApplicationAuthorizationReplaySet,
         );
-    assert!(
-        d.is_accept(),
-        "run 307 authorization decision must accept for fixture"
-    );
+    assert!(d.is_accept(), "run 307 authorization decision must accept for fixture");
     d
 }
 
@@ -576,22 +534,11 @@ fn scenario(
             let v4 = validator(env, 4, 100, 2);
             let delta = ValidatorSetDelta::new(vec![ValidatorSetChange::add(v4.clone())]);
             let proposed = CanonicalValidatorSetSnapshot::new(
-                vec![
-                    validator(env, 1, 100, 1),
-                    validator(env, 2, 100, 1),
-                    validator(env, 3, 100, 1),
-                    v4,
-                ],
+                vec![validator(env, 1, 100, 1), validator(env, 2, 100, 1), validator(env, 3, 100, 1), v4],
                 CUR_EPOCH + 1,
                 CUR_VERSION + 1,
             );
-            (
-                LocalLifecycleAction::Rotate,
-                ValidatorSetRotationAction::ValidatorAdd,
-                current,
-                delta,
-                proposed,
-            )
+            (LocalLifecycleAction::Rotate, ValidatorSetRotationAction::ValidatorAdd, current, delta, proposed)
         }
         Sc::Remove => {
             let delta = ValidatorSetDelta::new(vec![ValidatorSetChange::remove(3)]);
@@ -600,64 +547,32 @@ fn scenario(
                 CUR_EPOCH + 1,
                 CUR_VERSION + 1,
             );
-            (
-                LocalLifecycleAction::Rotate,
-                ValidatorSetRotationAction::ValidatorRemove,
-                current,
-                delta,
-                proposed,
-            )
+            (LocalLifecycleAction::Rotate, ValidatorSetRotationAction::ValidatorRemove, current, delta, proposed)
         }
         Sc::Update => {
             let updated = validator(env, 2, 250, 1);
             let delta = ValidatorSetDelta::new(vec![ValidatorSetChange::update(updated.clone())]);
             let proposed = CanonicalValidatorSetSnapshot::new(
-                vec![
-                    validator(env, 1, 100, 1),
-                    updated,
-                    validator(env, 3, 100, 1),
-                ],
+                vec![validator(env, 1, 100, 1), updated, validator(env, 3, 100, 1)],
                 CUR_EPOCH + 1,
                 CUR_VERSION + 1,
             );
-            (
-                LocalLifecycleAction::Rotate,
-                ValidatorSetRotationAction::ValidatorUpdate,
-                current,
-                delta,
-                proposed,
-            )
+            (LocalLifecycleAction::Rotate, ValidatorSetRotationAction::ValidatorUpdate, current, delta, proposed)
         }
         Sc::NoOp => {
             let proposed = current_set(env);
-            (
-                LocalLifecycleAction::Rotate,
-                ValidatorSetRotationAction::NoOpSynchronization,
-                current,
-                ValidatorSetDelta::empty(),
-                proposed,
-            )
+            (LocalLifecycleAction::Rotate, ValidatorSetRotationAction::NoOpSynchronization, current, ValidatorSetDelta::empty(), proposed)
         }
         Sc::Identity => {
             let mut rotated = validator(env, 2, 100, 1);
             rotated.identity.consensus_key_fingerprint = "cons-2-rotated".to_string();
             let delta = ValidatorSetDelta::new(vec![ValidatorSetChange::update(rotated.clone())]);
             let proposed = CanonicalValidatorSetSnapshot::new(
-                vec![
-                    validator(env, 1, 100, 1),
-                    rotated,
-                    validator(env, 3, 100, 1),
-                ],
+                vec![validator(env, 1, 100, 1), rotated, validator(env, 3, 100, 1)],
                 CUR_EPOCH + 1,
                 CUR_VERSION + 1,
             );
-            (
-                LocalLifecycleAction::Rotate,
-                ValidatorSetRotationAction::ValidatorIdentityRotation,
-                current,
-                delta,
-                proposed,
-            )
+            (LocalLifecycleAction::Rotate, ValidatorSetRotationAction::ValidatorIdentityRotation, current, delta, proposed)
         }
         Sc::Retire => {
             let delta = ValidatorSetDelta::new(vec![ValidatorSetChange::remove(3)]);
@@ -666,13 +581,7 @@ fn scenario(
                 CUR_EPOCH + 1,
                 CUR_VERSION + 1,
             );
-            (
-                LocalLifecycleAction::Retire,
-                ValidatorSetRotationAction::ValidatorRetirement,
-                current,
-                delta,
-                proposed,
-            )
+            (LocalLifecycleAction::Retire, ValidatorSetRotationAction::ValidatorRetirement, current, delta, proposed)
         }
         Sc::Emergency => {
             let delta = ValidatorSetDelta::new(vec![ValidatorSetChange::remove(3)]);
@@ -681,51 +590,27 @@ fn scenario(
                 CUR_EPOCH + 1,
                 CUR_VERSION + 1,
             );
-            (
-                LocalLifecycleAction::EmergencyRevoke,
-                ValidatorSetRotationAction::EmergencyValidatorRemoval,
-                current,
-                delta,
-                proposed,
-            )
+            (LocalLifecycleAction::EmergencyRevoke, ValidatorSetRotationAction::EmergencyValidatorRemoval, current, delta, proposed)
         }
         Sc::AuthSync => {
             let v4 = validator(env, 4, 100, 2);
-            let delta = ValidatorSetDelta::new(vec![
-                ValidatorSetChange::add(v4.clone()),
-                ValidatorSetChange::remove(3),
-            ]);
+            let delta = ValidatorSetDelta::new(vec![ValidatorSetChange::add(v4.clone()), ValidatorSetChange::remove(3)]);
             let proposed = CanonicalValidatorSetSnapshot::new(
                 vec![validator(env, 1, 100, 1), validator(env, 2, 100, 1), v4],
                 CUR_EPOCH + 1,
                 CUR_VERSION + 1,
             );
-            (
-                LocalLifecycleAction::Rotate,
-                ValidatorSetRotationAction::AuthoritySetSynchronization,
-                current,
-                delta,
-                proposed,
-            )
+            (LocalLifecycleAction::Rotate, ValidatorSetRotationAction::AuthoritySetSynchronization, current, delta, proposed)
         }
         Sc::Bulk => {
             let v4 = validator(env, 4, 100, 2);
-            let delta = ValidatorSetDelta::new(vec![
-                ValidatorSetChange::add(v4.clone()),
-                ValidatorSetChange::remove(3),
-            ]);
+            let delta = ValidatorSetDelta::new(vec![ValidatorSetChange::add(v4.clone()), ValidatorSetChange::remove(3)]);
             let proposed = CanonicalValidatorSetSnapshot::new(
                 vec![validator(env, 1, 100, 1), validator(env, 2, 100, 1), v4],
                 CUR_EPOCH + 1,
                 CUR_VERSION + 1,
             );
-            (
-                LocalLifecycleAction::Rotate,
-                ValidatorSetRotationAction::BulkValidatorSetRotation,
-                current,
-                delta,
-                proposed,
-            )
+            (LocalLifecycleAction::Rotate, ValidatorSetRotationAction::BulkValidatorSetRotation, current, delta, proposed)
         }
     }
 }
@@ -746,21 +631,14 @@ fn expected_staged_kind(sc: Sc) -> StagedLiveValidatorSetEpochTransitionApplicat
 }
 
 /// Build an accepted Run 307 authorization decision for a scenario.
-fn auth_decision_for(
-    env: TrustBundleEnvironment,
-    sc: Sc,
-) -> ProductionLiveValidatorSetApplicationAuthorizationDecision {
+fn auth_decision_for(env: TrustBundleEnvironment, sc: Sc) -> ProductionLiveValidatorSetApplicationAuthorizationDecision {
     let (lifecycle, action, current, delta, proposed) = scenario(env, sc);
     auth_decision(env, lifecycle, action, current, delta, proposed)
 }
 
 fn stg_case309(env: TrustBundleEnvironment, sc: Sc) -> Stg309 {
     let decision = auth_decision_for(env, sc);
-    let target = decision
-        .authorization_intent
-        .as_ref()
-        .unwrap()
-        .epoch_transition_target;
+    let target = decision.authorization_intent.as_ref().unwrap().epoch_transition_target;
     let inputs = stg_inputs(env, &decision);
     let request = ProductionStagedLiveValidatorSetEpochTransitionApplicationRequest::new(
         StagedLiveValidatorSetEpochTransitionApplicationAuthoritySource::VerifiedLiveApplicationAuthorization {
@@ -781,12 +659,11 @@ fn empty_replay309() -> EmptyStagedLiveValidatorSetEpochTransitionApplicationRep
 }
 
 fn eval309(case: &Stg309) -> ProductionStagedLiveValidatorSetEpochTransitionApplicationDecision {
-    case.executor
-        .evaluate_staged_live_validator_set_epoch_transition_application(
-            &case.request,
-            &case.inputs,
-            &empty_replay309(),
-        )
+    case.executor.evaluate_staged_live_validator_set_epoch_transition_application(
+        &case.request,
+        &case.inputs,
+        &empty_replay309(),
+    )
 }
 
 // ===========================================================================
@@ -807,10 +684,7 @@ fn stg_decision(
     sc: Sc,
 ) -> ProductionStagedLiveValidatorSetEpochTransitionApplicationDecision {
     let d = eval309(&stg_case309(env, sc));
-    assert!(
-        d.is_accept(),
-        "run 309 staged decision must accept for fixture"
-    );
+    assert!(d.is_accept(), "run 309 staged decision must accept for fixture");
     d
 }
 
@@ -942,10 +816,7 @@ fn gem_eval(case: &Gem) -> ProductionGuardedEpochTransitionMutationDecision {
     )
 }
 
-fn gem_eval_replay(
-    case: &Gem,
-    replay: &[String],
-) -> ProductionGuardedEpochTransitionMutationDecision {
+fn gem_eval_replay(case: &Gem, replay: &[String]) -> ProductionGuardedEpochTransitionMutationDecision {
     case.executor
         .evaluate_guarded_epoch_transition_mutation(&case.request, &case.inputs, &replay)
 }
@@ -978,10 +849,7 @@ fn guarded_decision(
     sc: Sc,
 ) -> ProductionGuardedEpochTransitionMutationDecision {
     let d = gem_eval(&gem_case(env, sc));
-    assert!(
-        d.is_accept(),
-        "run 311 guarded decision must accept for fixture"
-    );
+    assert!(d.is_accept(), "run 311 guarded decision must accept for fixture");
     d
 }
 
@@ -1123,10 +991,7 @@ fn h_eval(case: &H313) -> ProductionEpochTransitionRuntimeHandoffDecision {
     )
 }
 
-fn h_eval_replay(
-    case: &H313,
-    replay: &[String],
-) -> ProductionEpochTransitionRuntimeHandoffDecision {
+fn h_eval_replay(case: &H313, replay: &[String]) -> ProductionEpochTransitionRuntimeHandoffDecision {
     case.executor
         .evaluate_epoch_transition_runtime_handoff(&case.request, &case.inputs, &replay)
 }
@@ -1140,8 +1005,8 @@ use qbind_node::pqc_production_live_epoch_transition_execution_preparation::*;
 const PREP_POLICY_ID: &str = "execution-preparation-policy-1";
 const PREP_NONCE: u64 = 43;
 
-use LiveEpochTransitionExecutionPreparationKind as PK;
 use ProductionLiveEpochTransitionExecutionPreparationOutcome as PO;
+use LiveEpochTransitionExecutionPreparationKind as PK;
 
 /// Build an accepted Run 313 epoch-transition runtime handoff decision — the
 /// sole accepted Run 315 authority source.
@@ -1150,10 +1015,7 @@ fn handoff_decision(
     sc: Sc,
 ) -> ProductionEpochTransitionRuntimeHandoffDecision {
     let d = h_eval(&h_case(env, sc));
-    assert!(
-        d.is_accept(),
-        "run 313 handoff decision must accept for fixture"
-    );
+    assert!(d.is_accept(), "run 313 handoff decision must accept for fixture");
     d
 }
 
@@ -1254,7 +1116,9 @@ fn p_inputs(
         expected_guarded_mutation_decision_id: pkg.guarded_mutation_decision_id.clone(),
         expected_guarded_mutation_request_id: pkg.guarded_mutation_request_id.clone(),
         expected_guarded_mutation_intent_digest: pkg.guarded_mutation_intent_digest.clone(),
-        expected_guarded_mutation_transcript_digest: pkg.guarded_mutation_transcript_digest.clone(),
+        expected_guarded_mutation_transcript_digest: pkg
+            .guarded_mutation_transcript_digest
+            .clone(),
         expected_guarded_mutation_nonce: pkg.guarded_mutation_nonce,
         expected_runtime_handoff_decision_id: dec.handoff_id.clone(),
         expected_runtime_handoff_request_id: dec.request_id.clone(),
@@ -1279,11 +1143,7 @@ fn p_inputs(
 
 fn p_case(env: TrustBundleEnvironment, sc: Sc) -> P315 {
     let dec = handoff_decision(env, sc);
-    let target = dec
-        .handoff_package
-        .as_ref()
-        .unwrap()
-        .epoch_transition_target;
+    let target = dec.handoff_package.as_ref().unwrap().epoch_transition_target;
     let inputs = p_inputs(env, &dec);
     let request = ProductionLiveEpochTransitionExecutionPreparationRequest::new(
         LiveEpochTransitionExecutionPreparationAuthoritySource::VerifiedRuntimeHandoffDecision {
@@ -1304,12 +1164,11 @@ fn empty_replay315() -> EmptyLiveEpochTransitionExecutionPreparationReplaySet {
 }
 
 fn p_eval(case: &P315) -> ProductionLiveEpochTransitionExecutionPreparationDecision {
-    case.executor
-        .evaluate_live_epoch_transition_execution_preparation(
-            &case.request,
-            &case.inputs,
-            &empty_replay315(),
-        )
+    case.executor.evaluate_live_epoch_transition_execution_preparation(
+        &case.request,
+        &case.inputs,
+        &empty_replay315(),
+    )
 }
 
 fn p_eval_replay(
@@ -1346,7 +1205,10 @@ fn p_reject_inputs(
 
 /// Common helper: build a Devnet/Add case, replace its authority source, and
 /// assert the resulting outcome.
-fn p_reject_source(source: LiveEpochTransitionExecutionPreparationAuthoritySource, expected: PO) {
+fn p_reject_source(
+    source: LiveEpochTransitionExecutionPreparationAuthoritySource,
+    expected: PO,
+) {
     let mut c = p_case(TrustBundleEnvironment::Devnet, Sc::Add);
     c.request.authority_source = source;
     let d = p_eval(&c);
@@ -1359,8 +1221,8 @@ use qbind_node::pqc_production_live_epoch_transition_mutation_execution::*;
 const MUT_POLICY_ID: &str = "mutation-execution-policy-1";
 const MUT_NONCE: u64 = 45;
 
-use LiveEpochTransitionMutationExecutionKind as MK;
 use ProductionLiveEpochTransitionMutationExecutionOutcome as MO;
+use LiveEpochTransitionMutationExecutionKind as MK;
 
 /// Build an accepted Run 315 epoch-transition runtime handoff decision — the
 /// sole accepted Run 317 authority source.
@@ -1469,7 +1331,9 @@ fn m_inputs(
         expected_guarded_mutation_decision_id: pkg.guarded_mutation_decision_id.clone(),
         expected_guarded_mutation_request_id: pkg.guarded_mutation_request_id.clone(),
         expected_guarded_mutation_intent_digest: pkg.guarded_mutation_intent_digest.clone(),
-        expected_guarded_mutation_transcript_digest: pkg.guarded_mutation_transcript_digest.clone(),
+        expected_guarded_mutation_transcript_digest: pkg
+            .guarded_mutation_transcript_digest
+            .clone(),
         expected_guarded_mutation_nonce: pkg.guarded_mutation_nonce,
         expected_execution_preparation_decision_id: dec.preparation_id.clone(),
         expected_execution_preparation_request_id: dec.request_id.clone(),
@@ -1479,7 +1343,9 @@ fn m_inputs(
         expected_runtime_handoff_decision_id: pkg.runtime_handoff_decision_id.clone(),
         expected_runtime_handoff_request_id: pkg.runtime_handoff_request_id.clone(),
         expected_runtime_handoff_intent_digest: pkg.runtime_handoff_intent_digest.clone(),
-        expected_runtime_handoff_transcript_digest: pkg.runtime_handoff_transcript_digest.clone(),
+        expected_runtime_handoff_transcript_digest: pkg
+            .runtime_handoff_transcript_digest
+            .clone(),
         expected_runtime_handoff_nonce: pkg.runtime_handoff_nonce,
         expected_current_validator_set_epoch: CUR_EPOCH,
         expected_current_validator_set_version: CUR_VERSION,
@@ -1499,11 +1365,7 @@ fn m_inputs(
 
 fn m_case(env: TrustBundleEnvironment, sc: Sc) -> M317 {
     let dec = prep_decision(env, sc);
-    let target = dec
-        .preparation_artifact
-        .as_ref()
-        .unwrap()
-        .epoch_transition_target;
+    let target = dec.preparation_artifact.as_ref().unwrap().epoch_transition_target;
     let inputs = m_inputs(env, &dec);
     let request = ProductionLiveEpochTransitionMutationExecutionRequest::new(
         LiveEpochTransitionMutationExecutionAuthoritySource::VerifiedExecutionPreparationDecision {
@@ -1524,12 +1386,11 @@ fn empty_replay317() -> EmptyLiveEpochTransitionMutationExecutionReplaySet {
 }
 
 fn m_eval(case: &M317) -> ProductionLiveEpochTransitionMutationExecutionDecision {
-    case.executor
-        .evaluate_live_epoch_transition_mutation_execution(
-            &case.request,
-            &case.inputs,
-            &empty_replay317(),
-        )
+    case.executor.evaluate_live_epoch_transition_mutation_execution(
+        &case.request,
+        &case.inputs,
+        &empty_replay317(),
+    )
 }
 
 fn m_eval_replay(
@@ -1566,7 +1427,10 @@ fn m_reject_inputs(
 
 /// Common helper: build a Devnet/Add case, replace its authority source, and
 /// assert the resulting outcome.
-fn m_reject_source(source: LiveEpochTransitionMutationExecutionAuthoritySource, expected: MO) {
+fn m_reject_source(
+    source: LiveEpochTransitionMutationExecutionAuthoritySource,
+    expected: MO,
+) {
     let mut c = m_case(TrustBundleEnvironment::Devnet, Sc::Add);
     c.request.authority_source = source;
     let d = m_eval(&c);
@@ -1578,6 +1442,7 @@ fn m_reject_source(source: LiveEpochTransitionMutationExecutionAuthoritySource, 
 // A. Accepted / compatible source-test mutation-execution artifacts
 // ===========================================================================
 
+
 // ===========================================================================
 // Run 319 — commit-authorization self layer (consumes verified Run 317/318
 // mutation-execution decisions produced by the m_ harness above).
@@ -1585,8 +1450,8 @@ fn m_reject_source(source: LiveEpochTransitionMutationExecutionAuthoritySource, 
 
 use qbind_node::pqc_production_live_epoch_transition_commit_authorization::*;
 
-use LiveEpochTransitionCommitAuthorizationKind as CK;
 use ProductionLiveEpochTransitionCommitAuthorizationOutcome as CO;
+use LiveEpochTransitionCommitAuthorizationKind as CK;
 
 const CMT_POLICY_ID: &str = "commit-authorization-policy-1";
 const CMT_NONCE: u64 = 47;
@@ -1698,7 +1563,9 @@ fn c_inputs(
         expected_guarded_mutation_decision_id: pkg.guarded_mutation_decision_id.clone(),
         expected_guarded_mutation_request_id: pkg.guarded_mutation_request_id.clone(),
         expected_guarded_mutation_intent_digest: pkg.guarded_mutation_intent_digest.clone(),
-        expected_guarded_mutation_transcript_digest: pkg.guarded_mutation_transcript_digest.clone(),
+        expected_guarded_mutation_transcript_digest: pkg
+            .guarded_mutation_transcript_digest
+            .clone(),
         expected_guarded_mutation_nonce: pkg.guarded_mutation_nonce,
         expected_mutation_execution_decision_id: dec.execution_id.clone(),
         expected_mutation_execution_request_id: dec.request_id.clone(),
@@ -1707,9 +1574,7 @@ fn c_inputs(
         expected_mutation_execution_nonce: pkg.mutation_execution_nonce,
         expected_execution_preparation_decision_id: pkg.execution_preparation_decision_id.clone(),
         expected_execution_preparation_request_id: pkg.execution_preparation_request_id.clone(),
-        expected_execution_preparation_intent_digest: pkg
-            .execution_preparation_intent_digest
-            .clone(),
+        expected_execution_preparation_intent_digest: pkg.execution_preparation_intent_digest.clone(),
         expected_execution_preparation_transcript_digest: pkg
             .execution_preparation_transcript_digest
             .clone(),
@@ -1717,7 +1582,9 @@ fn c_inputs(
         expected_runtime_handoff_decision_id: pkg.runtime_handoff_decision_id.clone(),
         expected_runtime_handoff_request_id: pkg.runtime_handoff_request_id.clone(),
         expected_runtime_handoff_intent_digest: pkg.runtime_handoff_intent_digest.clone(),
-        expected_runtime_handoff_transcript_digest: pkg.runtime_handoff_transcript_digest.clone(),
+        expected_runtime_handoff_transcript_digest: pkg
+            .runtime_handoff_transcript_digest
+            .clone(),
         expected_runtime_handoff_nonce: pkg.runtime_handoff_nonce,
         expected_current_validator_set_epoch: CUR_EPOCH,
         expected_current_validator_set_version: CUR_VERSION,
@@ -1737,11 +1604,7 @@ fn c_inputs(
 
 fn c_case(env: TrustBundleEnvironment, sc: Sc) -> C319 {
     let dec = mut_decision(env, sc);
-    let target = dec
-        .execution_artifact
-        .as_ref()
-        .unwrap()
-        .epoch_transition_target;
+    let target = dec.execution_artifact.as_ref().unwrap().epoch_transition_target;
     let inputs = c_inputs(env, &dec);
     let request = ProductionLiveEpochTransitionCommitAuthorizationRequest::new(
         LiveEpochTransitionCommitAuthorizationAuthoritySource::VerifiedMutationExecutionDecision {
@@ -1762,12 +1625,11 @@ fn empty_replay319() -> EmptyLiveEpochTransitionCommitAuthorizationReplaySet {
 }
 
 fn c_eval(case: &C319) -> ProductionLiveEpochTransitionCommitAuthorizationDecision {
-    case.executor
-        .evaluate_live_epoch_transition_commit_authorization(
-            &case.request,
-            &case.inputs,
-            &empty_replay319(),
-        )
+    case.executor.evaluate_live_epoch_transition_commit_authorization(
+        &case.request,
+        &case.inputs,
+        &empty_replay319(),
+    )
 }
 
 fn c_eval_replay(
@@ -1804,7 +1666,10 @@ fn c_reject_inputs(
 
 /// Common helper: build a Devnet/Add case, replace its authority source, and
 /// assert the resulting outcome.
-fn c_reject_source(source: LiveEpochTransitionCommitAuthorizationAuthoritySource, expected: CO) {
+fn c_reject_source(
+    source: LiveEpochTransitionCommitAuthorizationAuthoritySource,
+    expected: CO,
+) {
     let mut c = c_case(TrustBundleEnvironment::Devnet, Sc::Add);
     c.request.authority_source = source;
     let d = c_eval(&c);
@@ -1816,10 +1681,11 @@ fn c_reject_source(source: LiveEpochTransitionCommitAuthorizationAuthoritySource
 // A. Accepted / compatible source-test mutation-execution artifacts
 // ===========================================================================
 
+
 use qbind_node::pqc_production_live_epoch_transition_commit_execution::*;
 
-use LiveEpochTransitionCommitExecutionKind as XK;
 use ProductionLiveEpochTransitionCommitExecutionOutcome as XO;
+use LiveEpochTransitionCommitExecutionKind as XK;
 
 const CXE_POLICY_ID: &str = "commit-execution-policy-1";
 const CXE_NONCE: u64 = 49;
@@ -1931,7 +1797,9 @@ fn x_inputs(
         expected_guarded_mutation_decision_id: pkg.guarded_mutation_decision_id.clone(),
         expected_guarded_mutation_request_id: pkg.guarded_mutation_request_id.clone(),
         expected_guarded_mutation_intent_digest: pkg.guarded_mutation_intent_digest.clone(),
-        expected_guarded_mutation_transcript_digest: pkg.guarded_mutation_transcript_digest.clone(),
+        expected_guarded_mutation_transcript_digest: pkg
+            .guarded_mutation_transcript_digest
+            .clone(),
         expected_guarded_mutation_nonce: pkg.guarded_mutation_nonce,
         expected_commit_authorization_decision_id: dec.commit_authorization_id.clone(),
         expected_commit_authorization_request_id: dec.request_id.clone(),
@@ -1947,9 +1815,7 @@ fn x_inputs(
         expected_mutation_execution_nonce: pkg.mutation_execution_nonce,
         expected_execution_preparation_decision_id: pkg.execution_preparation_decision_id.clone(),
         expected_execution_preparation_request_id: pkg.execution_preparation_request_id.clone(),
-        expected_execution_preparation_intent_digest: pkg
-            .execution_preparation_intent_digest
-            .clone(),
+        expected_execution_preparation_intent_digest: pkg.execution_preparation_intent_digest.clone(),
         expected_execution_preparation_transcript_digest: pkg
             .execution_preparation_transcript_digest
             .clone(),
@@ -1957,7 +1823,9 @@ fn x_inputs(
         expected_runtime_handoff_decision_id: pkg.runtime_handoff_decision_id.clone(),
         expected_runtime_handoff_request_id: pkg.runtime_handoff_request_id.clone(),
         expected_runtime_handoff_intent_digest: pkg.runtime_handoff_intent_digest.clone(),
-        expected_runtime_handoff_transcript_digest: pkg.runtime_handoff_transcript_digest.clone(),
+        expected_runtime_handoff_transcript_digest: pkg
+            .runtime_handoff_transcript_digest
+            .clone(),
         expected_runtime_handoff_nonce: pkg.runtime_handoff_nonce,
         expected_current_validator_set_epoch: CUR_EPOCH,
         expected_current_validator_set_version: CUR_VERSION,
@@ -1977,11 +1845,7 @@ fn x_inputs(
 
 fn x_case(env: TrustBundleEnvironment, sc: Sc) -> X321 {
     let dec = ca_decision(env, sc);
-    let target = dec
-        .commit_authorization_artifact
-        .as_ref()
-        .unwrap()
-        .epoch_transition_target;
+    let target = dec.commit_authorization_artifact.as_ref().unwrap().epoch_transition_target;
     let inputs = x_inputs(env, &dec);
     let request = ProductionLiveEpochTransitionCommitExecutionRequest::new(
         LiveEpochTransitionCommitExecutionAuthoritySource::VerifiedCommitAuthorizationDecision {
@@ -2002,12 +1866,11 @@ fn empty_replay321() -> EmptyLiveEpochTransitionCommitExecutionReplaySet {
 }
 
 fn x_eval(case: &X321) -> ProductionLiveEpochTransitionCommitExecutionDecision {
-    case.executor
-        .evaluate_live_epoch_transition_commit_execution(
-            &case.request,
-            &case.inputs,
-            &empty_replay321(),
-        )
+    case.executor.evaluate_live_epoch_transition_commit_execution(
+        &case.request,
+        &case.inputs,
+        &empty_replay321(),
+    )
 }
 
 fn x_eval_replay(
@@ -2044,7 +1907,10 @@ fn x_reject_inputs(
 
 /// Common helper: build a Devnet/Add case, replace its authority source, and
 /// assert the resulting outcome.
-fn x_reject_source(source: LiveEpochTransitionCommitExecutionAuthoritySource, expected: XO) {
+fn x_reject_source(
+    source: LiveEpochTransitionCommitExecutionAuthoritySource,
+    expected: XO,
+) {
     let mut c = x_case(TrustBundleEnvironment::Devnet, Sc::Add);
     c.request.authority_source = source;
     let d = x_eval(&c);
@@ -2058,8 +1924,8 @@ fn x_reject_source(source: LiveEpochTransitionCommitExecutionAuthoritySource, ex
 
 use qbind_node::pqc_production_live_epoch_transition_commit_receipt::*;
 
-use LiveEpochTransitionCommitReceiptKind as RK;
 use ProductionLiveEpochTransitionCommitReceiptOutcome as RO;
+use LiveEpochTransitionCommitReceiptKind as RK;
 
 const CRC_POLICY_ID: &str = "commit-receipt-policy-1";
 const CRC_NONCE: u64 = 49;
@@ -2171,7 +2037,9 @@ fn r_inputs(
         expected_guarded_mutation_decision_id: pkg.guarded_mutation_decision_id.clone(),
         expected_guarded_mutation_request_id: pkg.guarded_mutation_request_id.clone(),
         expected_guarded_mutation_intent_digest: pkg.guarded_mutation_intent_digest.clone(),
-        expected_guarded_mutation_transcript_digest: pkg.guarded_mutation_transcript_digest.clone(),
+        expected_guarded_mutation_transcript_digest: pkg
+            .guarded_mutation_transcript_digest
+            .clone(),
         expected_guarded_mutation_nonce: pkg.guarded_mutation_nonce,
         expected_commit_execution_decision_id: dec.commit_execution_id.clone(),
         expected_commit_execution_request_id: dec.request_id.clone(),
@@ -2180,7 +2048,9 @@ fn r_inputs(
         expected_commit_execution_nonce: pkg.commit_execution_nonce,
         expected_commit_authorization_decision_id: pkg.commit_authorization_decision_id.clone(),
         expected_commit_authorization_request_id: pkg.commit_authorization_request_id.clone(),
-        expected_commit_authorization_intent_digest: pkg.commit_authorization_intent_digest.clone(),
+        expected_commit_authorization_intent_digest: pkg
+            .commit_authorization_intent_digest
+            .clone(),
         expected_commit_authorization_transcript_digest: pkg
             .commit_authorization_transcript_digest
             .clone(),
@@ -2194,9 +2064,7 @@ fn r_inputs(
         expected_mutation_execution_nonce: pkg.mutation_execution_nonce,
         expected_execution_preparation_decision_id: pkg.execution_preparation_decision_id.clone(),
         expected_execution_preparation_request_id: pkg.execution_preparation_request_id.clone(),
-        expected_execution_preparation_intent_digest: pkg
-            .execution_preparation_intent_digest
-            .clone(),
+        expected_execution_preparation_intent_digest: pkg.execution_preparation_intent_digest.clone(),
         expected_execution_preparation_transcript_digest: pkg
             .execution_preparation_transcript_digest
             .clone(),
@@ -2204,7 +2072,9 @@ fn r_inputs(
         expected_runtime_handoff_decision_id: pkg.runtime_handoff_decision_id.clone(),
         expected_runtime_handoff_request_id: pkg.runtime_handoff_request_id.clone(),
         expected_runtime_handoff_intent_digest: pkg.runtime_handoff_intent_digest.clone(),
-        expected_runtime_handoff_transcript_digest: pkg.runtime_handoff_transcript_digest.clone(),
+        expected_runtime_handoff_transcript_digest: pkg
+            .runtime_handoff_transcript_digest
+            .clone(),
         expected_runtime_handoff_nonce: pkg.runtime_handoff_nonce,
         expected_current_validator_set_epoch: CUR_EPOCH,
         expected_current_validator_set_version: CUR_VERSION,
@@ -2224,11 +2094,7 @@ fn r_inputs(
 
 fn r_case(env: TrustBundleEnvironment, sc: Sc) -> R323 {
     let dec = cx_decision(env, sc);
-    let target = dec
-        .commit_execution_artifact
-        .as_ref()
-        .unwrap()
-        .epoch_transition_target;
+    let target = dec.commit_execution_artifact.as_ref().unwrap().epoch_transition_target;
     let inputs = r_inputs(env, &dec);
     let request = ProductionLiveEpochTransitionCommitReceiptRequest::new(
         LiveEpochTransitionCommitReceiptAuthoritySource::VerifiedCommitExecutionDecision {
@@ -2260,11 +2126,8 @@ fn r_eval_replay(
     case: &R323,
     replay: &[String],
 ) -> ProductionLiveEpochTransitionCommitReceiptDecision {
-    case.executor.evaluate_live_epoch_transition_commit_receipt(
-        &case.request,
-        &case.inputs,
-        &replay,
-    )
+    case.executor
+        .evaluate_live_epoch_transition_commit_receipt(&case.request, &case.inputs, &replay)
 }
 
 fn r_exec_with_policy(
@@ -2293,7 +2156,10 @@ fn r_reject_inputs(
 
 /// Common helper: build a Devnet/Add case, replace its authority source, and
 /// assert the resulting outcome.
-fn r_reject_source(source: LiveEpochTransitionCommitReceiptAuthoritySource, expected: RO) {
+fn r_reject_source(
+    source: LiveEpochTransitionCommitReceiptAuthoritySource,
+    expected: RO,
+) {
     let mut c = r_case(TrustBundleEnvironment::Devnet, Sc::Add);
     c.request.authority_source = source;
     let d = r_eval(&c);
@@ -2346,10 +2212,7 @@ fn accept_outcome_carries_kind_env_target_nonce() {
         } => {
             assert_eq!(execution_kind, RK::StageApplyValidatorAdd);
             assert_eq!(environment, TrustBundleEnvironment::Devnet);
-            assert_eq!(
-                epoch_transition_target,
-                c.request.proposed_epoch_transition_target
-            );
+            assert_eq!(epoch_transition_target, c.request.proposed_epoch_transition_target);
             assert_eq!(commit_receipt_nonce, CRC_NONCE);
         }
         other => panic!("unexpected outcome: {other:?}"),
@@ -2359,11 +2222,7 @@ fn accept_outcome_carries_kind_env_target_nonce() {
 #[test]
 fn accept_artifact_reexposes_consumed_commit_execution_transcript() {
     let dec = cx_decision(TrustBundleEnvironment::Devnet, Sc::Add);
-    let target = dec
-        .commit_execution_artifact
-        .as_ref()
-        .unwrap()
-        .epoch_transition_target;
+    let target = dec.commit_execution_artifact.as_ref().unwrap().epoch_transition_target;
     let inputs = r_inputs(TrustBundleEnvironment::Devnet, &dec);
     let handoff_id = dec.commit_execution_id.clone();
     let handoff_req = dec.request_id.clone();
@@ -2377,8 +2236,11 @@ fn accept_artifact_reexposes_consumed_commit_execution_transcript() {
         CRC_NONCE,
     );
     let exec = ProductionLiveEpochTransitionCommitReceiptExecutor::source_test();
-    let d =
-        exec.evaluate_live_epoch_transition_commit_receipt(&request, &inputs, &empty_replay323());
+    let d = exec.evaluate_live_epoch_transition_commit_receipt(
+        &request,
+        &inputs,
+        &empty_replay323(),
+    );
     let art = d.commit_receipt_artifact.as_ref().unwrap();
     assert_eq!(art.commit_execution_decision_id, handoff_id);
     assert_eq!(art.commit_execution_request_id, handoff_req);
@@ -2391,33 +2253,15 @@ fn accept_artifact_encodes_future_executor_preconditions() {
     let c = r_case(TrustBundleEnvironment::Devnet, Sc::Add);
     let d = r_eval(&c);
     let art = d.commit_receipt_artifact.as_ref().unwrap();
-    assert_eq!(
-        art.precondition_current_validator_set_epoch,
-        art.validator_set_epoch
-    );
-    assert_eq!(
-        art.precondition_current_validator_set_version,
-        art.validator_set_version
-    );
+    assert_eq!(art.precondition_current_validator_set_epoch, art.validator_set_epoch);
+    assert_eq!(art.precondition_current_validator_set_version, art.validator_set_version);
     assert_eq!(art.precondition_target_epoch, art.epoch_transition_target);
-    assert_eq!(
-        art.precondition_required_governance_epoch,
-        art.governance_epoch
-    );
-    assert_eq!(
-        art.precondition_required_authority_sequence,
-        art.authority_domain_sequence
-    );
+    assert_eq!(art.precondition_required_governance_epoch, art.governance_epoch);
+    assert_eq!(art.precondition_required_authority_sequence, art.authority_domain_sequence);
     assert_eq!(art.precondition_required_replay_window, REPLAY_WINDOW);
-    assert_eq!(
-        art.precondition_proposed_validator_set_digest,
-        art.proposed_set_digest
-    );
+    assert_eq!(art.precondition_proposed_validator_set_digest, art.proposed_set_digest);
     assert_eq!(art.precondition_delta_digest, art.delta_digest);
-    assert_eq!(
-        art.precondition_current_validator_set_digest,
-        art.current_set_digest
-    );
+    assert_eq!(art.precondition_current_validator_set_digest, art.current_set_digest);
 }
 
 #[test]
@@ -2510,16 +2354,9 @@ fn tampered_commit_execution_package_integrity_mismatch() {
     // Mutate the consumed package so its content digest no longer matches the
     // bound handoff decision digest.
     let mut dec = cx_decision(TrustBundleEnvironment::Devnet, Sc::Add);
-    let target = dec
-        .commit_execution_artifact
-        .as_ref()
-        .unwrap()
-        .epoch_transition_target;
+    let target = dec.commit_execution_artifact.as_ref().unwrap().epoch_transition_target;
     let inputs = r_inputs(TrustBundleEnvironment::Devnet, &dec);
-    dec.commit_execution_artifact
-        .as_mut()
-        .unwrap()
-        .proposal_digest = "tampered".to_string();
+    dec.commit_execution_artifact.as_mut().unwrap().proposal_digest = "tampered".to_string();
     let request = ProductionLiveEpochTransitionCommitReceiptRequest::new(
         LiveEpochTransitionCommitReceiptAuthoritySource::VerifiedCommitExecutionDecision {
             decision: dec,
@@ -2528,8 +2365,11 @@ fn tampered_commit_execution_package_integrity_mismatch() {
         CRC_NONCE,
     );
     let exec = ProductionLiveEpochTransitionCommitReceiptExecutor::source_test();
-    let d =
-        exec.evaluate_live_epoch_transition_commit_receipt(&request, &inputs, &empty_replay323());
+    let d = exec.evaluate_live_epoch_transition_commit_receipt(
+        &request,
+        &inputs,
+        &empty_replay323(),
+    );
     assert_eq!(d.outcome, RO::CommitExecutionDecisionIntegrityMismatch);
     assert!(d.commit_receipt_artifact.is_none());
 }
@@ -2713,14 +2553,7 @@ fn wrong_authorization_policy_id() {
 #[test]
 fn wrong_environment() {
     r_reject_inputs(
-        |i| {
-            i.trust_domain = custom_domain(
-                TrustBundleEnvironment::Testnet,
-                "qbind-devnet",
-                GENESIS_HASH,
-                ROOT_FP,
-            )
-        },
+        |i| i.trust_domain = custom_domain(TrustBundleEnvironment::Testnet, "qbind-devnet", GENESIS_HASH, ROOT_FP),
         RO::WrongEnvironment,
     );
 }
@@ -2728,14 +2561,7 @@ fn wrong_environment() {
 #[test]
 fn wrong_chain() {
     r_reject_inputs(
-        |i| {
-            i.trust_domain = custom_domain(
-                TrustBundleEnvironment::Devnet,
-                "wrong-chain",
-                GENESIS_HASH,
-                ROOT_FP,
-            )
-        },
+        |i| i.trust_domain = custom_domain(TrustBundleEnvironment::Devnet, "wrong-chain", GENESIS_HASH, ROOT_FP),
         RO::WrongChain,
     );
 }
@@ -2743,14 +2569,7 @@ fn wrong_chain() {
 #[test]
 fn wrong_genesis() {
     r_reject_inputs(
-        |i| {
-            i.trust_domain = custom_domain(
-                TrustBundleEnvironment::Devnet,
-                "qbind-devnet",
-                "wrong-genesis",
-                ROOT_FP,
-            )
-        },
+        |i| i.trust_domain = custom_domain(TrustBundleEnvironment::Devnet, "qbind-devnet", "wrong-genesis", ROOT_FP),
         RO::WrongGenesis,
     );
 }
@@ -2758,14 +2577,7 @@ fn wrong_genesis() {
 #[test]
 fn wrong_authority_root() {
     r_reject_inputs(
-        |i| {
-            i.trust_domain = custom_domain(
-                TrustBundleEnvironment::Devnet,
-                "qbind-devnet",
-                GENESIS_HASH,
-                "wrong-root",
-            )
-        },
+        |i| i.trust_domain = custom_domain(TrustBundleEnvironment::Devnet, "qbind-devnet", GENESIS_HASH, "wrong-root"),
         RO::WrongAuthorityRoot,
     );
 }
@@ -2780,18 +2592,12 @@ fn wrong_governance_domain() {
 
 #[test]
 fn wrong_governance_epoch() {
-    r_reject_inputs(
-        |i| i.expected_governance_epoch = 999,
-        RO::WrongGovernanceEpoch,
-    );
+    r_reject_inputs(|i| i.expected_governance_epoch = 999, RO::WrongGovernanceEpoch);
 }
 
 #[test]
 fn wrong_proposal_id() {
-    r_reject_inputs(
-        |i| i.expected_proposal_id = "bad".to_string(),
-        RO::WrongProposalId,
-    );
+    r_reject_inputs(|i| i.expected_proposal_id = "bad".to_string(), RO::WrongProposalId);
 }
 
 #[test]
@@ -2852,10 +2658,7 @@ fn wrong_rotation_action() {
 
 #[test]
 fn wrong_authority_sequence() {
-    r_reject_inputs(
-        |i| i.expected_authority_domain_sequence = 999,
-        RO::WrongAuthoritySequence,
-    );
+    r_reject_inputs(|i| i.expected_authority_domain_sequence = 999, RO::WrongAuthoritySequence);
 }
 
 // ===========================================================================
@@ -2888,18 +2691,12 @@ fn wrong_validator_set_delta_digest() {
 
 #[test]
 fn wrong_validator_set_epoch() {
-    r_reject_inputs(
-        |i| i.expected_validator_set_epoch = 999,
-        RO::WrongValidatorSetEpoch,
-    );
+    r_reject_inputs(|i| i.expected_validator_set_epoch = 999, RO::WrongValidatorSetEpoch);
 }
 
 #[test]
 fn wrong_validator_set_version() {
-    r_reject_inputs(
-        |i| i.expected_validator_set_version = 999,
-        RO::WrongValidatorSetVersion,
-    );
+    r_reject_inputs(|i| i.expected_validator_set_version = 999, RO::WrongValidatorSetVersion);
 }
 
 #[test]
@@ -2920,10 +2717,7 @@ fn wrong_current_validator_set_version() {
 
 #[test]
 fn wrong_proposed_validator_count() {
-    r_reject_inputs(
-        |i| i.expected_proposed_validator_count = 999,
-        RO::WrongProposedValidatorCount,
-    );
+    r_reject_inputs(|i| i.expected_proposed_validator_count = 999, RO::WrongProposedValidatorCount);
 }
 
 #[test]
@@ -2937,10 +2731,7 @@ fn wrong_rotation_nonce() {
 
 #[test]
 fn wrong_epoch_transition_target_inputs() {
-    r_reject_inputs(
-        |i| i.expected_epoch_transition_target = 999,
-        RO::WrongEpochTransitionTarget,
-    );
+    r_reject_inputs(|i| i.expected_epoch_transition_target = 999, RO::WrongEpochTransitionTarget);
 }
 
 #[test]
@@ -2954,18 +2745,12 @@ fn wrong_epoch_transition_target_request() {
 
 #[test]
 fn wrong_application_nonce() {
-    r_reject_inputs(
-        |i| i.expected_application_nonce = 999,
-        RO::WrongApplicationNonce,
-    );
+    r_reject_inputs(|i| i.expected_application_nonce = 999, RO::WrongApplicationNonce);
 }
 
 #[test]
 fn wrong_live_application_nonce() {
-    r_reject_inputs(
-        |i| i.expected_live_application_nonce = 999,
-        RO::WrongLiveApplicationNonce,
-    );
+    r_reject_inputs(|i| i.expected_live_application_nonce = 999, RO::WrongLiveApplicationNonce);
 }
 
 // ===========================================================================
@@ -3188,8 +2973,9 @@ fn production_policy_unavailable() {
 #[test]
 fn disabled_policy_fails_closed() {
     let c = r_case(TrustBundleEnvironment::Devnet, Sc::Add);
-    let exec =
-        r_exec_with_policy(ProductionLiveEpochTransitionCommitReceiptExecutorPolicy::Disabled);
+    let exec = r_exec_with_policy(
+        ProductionLiveEpochTransitionCommitReceiptExecutorPolicy::Disabled,
+    );
     let d = exec.evaluate_live_epoch_transition_commit_receipt(
         &c.request,
         &c.inputs,
@@ -3228,12 +3014,7 @@ fn reserved_production_kind_fails_closed() {
 fn replay_rejected_when_id_present() {
     let c = r_case(TrustBundleEnvironment::Devnet, Sc::Add);
     let d = r_eval(&c);
-    let id = d
-        .commit_receipt_artifact
-        .as_ref()
-        .unwrap()
-        .request_id
-        .clone();
+    let id = d.commit_receipt_artifact.as_ref().unwrap().request_id.clone();
     let replay = vec![id];
     let d2 = r_eval_replay(&c, &replay);
     match d2.outcome {
@@ -3253,34 +3034,22 @@ fn no_replay_when_id_absent() {
 
 #[test]
 fn stale_governance_epoch() {
-    r_reject_inputs(
-        |i| i.min_governance_epoch = u64::MAX,
-        RO::StaleGovernanceEpoch,
-    );
+    r_reject_inputs(|i| i.min_governance_epoch = u64::MAX, RO::StaleGovernanceEpoch);
 }
 
 #[test]
 fn stale_authority_sequence() {
-    r_reject_inputs(
-        |i| i.persisted_sequence = Some(u64::MAX),
-        RO::StaleAuthoritySequence,
-    );
+    r_reject_inputs(|i| i.persisted_sequence = Some(u64::MAX), RO::StaleAuthoritySequence);
 }
 
 #[test]
 fn stale_validator_set_epoch() {
-    r_reject_inputs(
-        |i| i.min_validator_set_epoch = u64::MAX,
-        RO::StaleValidatorSetEpoch,
-    );
+    r_reject_inputs(|i| i.min_validator_set_epoch = u64::MAX, RO::StaleValidatorSetEpoch);
 }
 
 #[test]
 fn stale_validator_set_version() {
-    r_reject_inputs(
-        |i| i.min_validator_set_version = u64::MAX,
-        RO::StaleValidatorSetVersion,
-    );
+    r_reject_inputs(|i| i.min_validator_set_version = u64::MAX, RO::StaleValidatorSetVersion);
 }
 
 // ===========================================================================
@@ -3292,8 +3061,7 @@ fn fixture_state_apply_is_idempotent() {
     let c = r_case(TrustBundleEnvironment::Devnet, Sc::Add);
     let d = r_eval(&c);
     let art = d.commit_receipt_artifact.as_ref().unwrap();
-    let mut state =
-        LiveEpochTransitionCommitReceiptFixtureState::new(CUR_EPOCH, CUR_VERSION, "start");
+    let mut state = LiveEpochTransitionCommitReceiptFixtureState::new(CUR_EPOCH, CUR_VERSION, "start");
     assert!(state.apply_prepared_execution(art, &d.commit_receipt_id));
     assert_eq!(state.current_epoch, art.epoch_transition_target);
     assert_eq!(state.validator_set_version, art.validator_set_version);
@@ -3309,8 +3077,7 @@ fn fixture_state_apply_all_scenarios() {
         let c = r_case(TrustBundleEnvironment::Devnet, sc);
         let d = r_eval(&c);
         let art = d.commit_receipt_artifact.as_ref().unwrap();
-        let mut state =
-            LiveEpochTransitionCommitReceiptFixtureState::new(CUR_EPOCH, CUR_VERSION, "start");
+        let mut state = LiveEpochTransitionCommitReceiptFixtureState::new(CUR_EPOCH, CUR_VERSION, "start");
         assert!(state.apply_prepared_execution(art, &d.commit_receipt_id));
         assert_eq!(state.current_epoch, art.epoch_transition_target);
     }
@@ -3336,12 +3103,7 @@ fn accept_authorizes_future_mutation_only() {
     let d = r_eval(&c);
     assert!(d.outcome.authorizes_future_mutation_only());
     assert!(d.authorizes_future_mutation_only());
-    assert!(d
-        .commit_receipt_artifact
-        .as_ref()
-        .unwrap()
-        .staged_kind
-        .is_non_mutating());
+    assert!(d.commit_receipt_artifact.as_ref().unwrap().staged_kind.is_non_mutating());
 }
 
 #[test]
@@ -3394,9 +3156,7 @@ fn execution_kind_mapping_matches_handoff_kind() {
 
 #[test]
 fn unsupported_staged_application_kind_is_unsupported() {
-    let pk = RK::from_staged_application_kind(
-        LiveEpochTransitionCommitExecutionKind::UnsupportedStagedApplication,
-    );
+    let pk = RK::from_staged_application_kind(LiveEpochTransitionCommitExecutionKind::UnsupportedStagedApplication);
     assert!(pk.is_unsupported());
 }
 
@@ -3435,8 +3195,11 @@ macro_rules! per_scenario_accept {
             let d2 = r_eval(&c);
             assert_eq!(d.commit_receipt_digest, d2.commit_receipt_digest);
             assert_eq!(d.transcript_digest, d2.transcript_digest);
-            let mut state =
-                LiveEpochTransitionCommitReceiptFixtureState::new(CUR_EPOCH, CUR_VERSION, "start");
+            let mut state = LiveEpochTransitionCommitReceiptFixtureState::new(
+                CUR_EPOCH,
+                CUR_VERSION,
+                "start",
+            );
             assert!(state.apply_prepared_execution(art, &d.commit_receipt_id));
             assert_eq!(state.current_epoch, art.epoch_transition_target);
         }
@@ -3537,18 +3300,9 @@ fn accept_reexposes_runtime_handoff_tuple_from_parent() {
     let d = r_eval(&c);
     assert!(d.is_accept());
     let art = d.commit_receipt_artifact.as_ref().unwrap();
-    assert_eq!(
-        art.runtime_handoff_decision_id,
-        ppkg.runtime_handoff_decision_id
-    );
-    assert_eq!(
-        art.runtime_handoff_request_id,
-        ppkg.runtime_handoff_request_id
-    );
-    assert_eq!(
-        art.runtime_handoff_intent_digest,
-        ppkg.runtime_handoff_intent_digest
-    );
+    assert_eq!(art.runtime_handoff_decision_id, ppkg.runtime_handoff_decision_id);
+    assert_eq!(art.runtime_handoff_request_id, ppkg.runtime_handoff_request_id);
+    assert_eq!(art.runtime_handoff_intent_digest, ppkg.runtime_handoff_intent_digest);
     assert_eq!(
         art.runtime_handoff_transcript_digest,
         ppkg.runtime_handoff_transcript_digest
@@ -3728,7 +3482,10 @@ fn reject_commit_authorization_request_id_mismatch() {
 #[test]
 fn reject_commit_authorization_intent_digest_mismatch() {
     r_reject_inputs(
-        |i| i.expected_commit_authorization_intent_digest = "wrong-commit-auth-digest".to_string(),
+        |i| {
+            i.expected_commit_authorization_intent_digest =
+                "wrong-commit-auth-digest".to_string()
+        },
         RO::CommitAuthorizationDecisionIntentDigestMismatch,
     );
 }

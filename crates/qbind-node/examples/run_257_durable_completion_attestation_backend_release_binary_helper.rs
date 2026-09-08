@@ -45,15 +45,14 @@ use qbind_node::pqc_governance_durable_completion_attestation_backend::{
     project_attestation_outcome_to_backend_request,
     recover_durable_completion_attestation_backend_window,
     DurableCompletionAttestationBackendBinding, DurableCompletionAttestationBackendDigest,
-    DurableCompletionAttestationBackendEnvironment,
-    DurableCompletionAttestationBackendExpectations, DurableCompletionAttestationBackendFault,
-    DurableCompletionAttestationBackendIdentity, DurableCompletionAttestationBackendInput,
-    DurableCompletionAttestationBackendKind, DurableCompletionAttestationBackendLedger,
-    DurableCompletionAttestationBackendLedgerStatus, DurableCompletionAttestationBackendOutcome,
-    DurableCompletionAttestationBackendPolicy, DurableCompletionAttestationBackendReceipt,
-    DurableCompletionAttestationBackendRecord, DurableCompletionAttestationBackendRequest,
-    DurableCompletionAttestationBackendRequestIntent, DurableCompletionAttestationBackendResponse,
-    DurableCompletionAttestationBackendSurface,
+    DurableCompletionAttestationBackendEnvironment, DurableCompletionAttestationBackendExpectations,
+    DurableCompletionAttestationBackendFault, DurableCompletionAttestationBackendIdentity,
+    DurableCompletionAttestationBackendInput, DurableCompletionAttestationBackendKind,
+    DurableCompletionAttestationBackendLedger, DurableCompletionAttestationBackendLedgerStatus,
+    DurableCompletionAttestationBackendOutcome, DurableCompletionAttestationBackendPolicy,
+    DurableCompletionAttestationBackendReceipt, DurableCompletionAttestationBackendRecord,
+    DurableCompletionAttestationBackendRequest, DurableCompletionAttestationBackendRequestIntent,
+    DurableCompletionAttestationBackendResponse, DurableCompletionAttestationBackendSurface,
     DurableCompletionAttestationBackendTranscriptDigest, DurableCompletionAttestationBackendWindow,
     ExternalPublicationDurableCompletionAttestationBackend,
     FixtureDurableCompletionAttestationBackend, GovernanceDurableCompletionAttestationBackend,
@@ -366,11 +365,7 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
         let mut ledger = DurableCompletionAttestationBackendLedger::new();
         let mut backend = fixture_backend();
         let o = drive(&input, &c.expectations, &mut backend, &mut ledger);
-        t.check_outcome(
-            "A1.backend-policy-disabled",
-            "legacy-bypass-no-backend-submission",
-            &o,
-        );
+        t.check_outcome("A1.backend-policy-disabled", "legacy-bypass-no-backend-submission", &o);
         t.assert_true("A1.no-invocation", backend.invocations() == 0);
         t.assert_true("A1.ledger-empty", ledger.is_empty());
     }
@@ -390,11 +385,7 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
         let mut ledger = DurableCompletionAttestationBackendLedger::new();
         let mut backend = fixture_backend();
         let o = drive(&input, &c.expectations, &mut backend, &mut ledger);
-        t.check_outcome(
-            &format!("{id}.outcome"),
-            "legacy-bypass-no-backend-submission",
-            &o,
-        );
+        t.check_outcome(&format!("{id}.outcome"), "legacy-bypass-no-backend-submission", &o);
         t.assert_true(&format!("{id}.no-invocation"), backend.invocations() == 0);
         t.assert_true(&format!("{id}.ledger-empty"), ledger.is_empty());
     }
@@ -413,29 +404,16 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
             backend_outcome_projects_to_backend_submission_recorded(&o),
         );
         t.assert_true(&format!("{id}.ledger-one"), ledger.len() == 1);
-        t.assert_true(
-            &format!("{id}.contains"),
-            ledger.contains(BACKEND_RECORD_ID),
-        );
+        t.assert_true(&format!("{id}.contains"), ledger.contains(BACKEND_RECORD_ID));
         t.assert_true(&format!("{id}.invoked-once"), backend.invocations() == 1);
     }
     // A10 all modeled action types submit only after a recorded attestation.
-    for action in [
-        "add-root",
-        "retire-root",
-        "revoke-root",
-        "emergency-revoke-root",
-        "noop",
-    ] {
+    for action in ["add-root", "retire-root", "revoke-root", "emergency-revoke-root", "noop"] {
         let c = devnet_ctx();
         let mut ledger = DurableCompletionAttestationBackendLedger::new();
         let mut backend = fixture_backend();
         let o = drive(&c.attested(), &c.expectations, &mut backend, &mut ledger);
-        t.check_outcome(
-            &format!("A10.{action}.outcome"),
-            "backend-submission-recorded",
-            &o,
-        );
+        t.check_outcome(&format!("A10.{action}.outcome"), "backend-submission-recorded", &o);
         t.assert_true(&format!("A10.{action}.ledger-one"), ledger.len() == 1);
     }
     // A11 duplicate identical backend submission is idempotent (no second submission).
@@ -446,16 +424,9 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
         let first = drive(&c.attested(), &c.expectations, &mut backend, &mut ledger);
         let second = drive(&c.attested(), &c.expectations, &mut backend, &mut ledger);
         t.check_outcome("A11.first", "backend-submission-recorded", &first);
-        t.check_outcome(
-            "A11.duplicate",
-            "backend-submission-duplicate-idempotent",
-            &second,
-        );
+        t.check_outcome("A11.duplicate", "backend-submission-duplicate-idempotent", &second);
         t.assert_true("A11.ledger-one", ledger.len() == 1);
-        t.assert_true(
-            "A11.duplicate-no-authorize",
-            !second.authorizes_backend_submission(),
-        );
+        t.assert_true("A11.duplicate-no-authorize", !second.authorizes_backend_submission());
         t.assert_true(
             "A11.duplicate-projects",
             second.projects_to_backend_submission_recorded(),
@@ -467,32 +438,14 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
         let c = devnet_ctx();
         let mut empty = DurableCompletionAttestationBackendLedger::new();
         let mut backend = fixture_backend();
-        let o = drive(
-            &c.attested_duplicate(),
-            &c.expectations,
-            &mut backend,
-            &mut empty,
-        );
-        t.check_outcome(
-            "A12.duplicate-empty",
-            "backend-submission-rejected-before-record",
-            &o,
-        );
+        let o = drive(&c.attested_duplicate(), &c.expectations, &mut backend, &mut empty);
+        t.check_outcome("A12.duplicate-empty", "backend-submission-rejected-before-record", &o);
         t.assert_true("A12.empty", empty.is_empty());
         let mut ledger = DurableCompletionAttestationBackendLedger::new();
         let mut b2 = fixture_backend();
         let _ = drive(&c.attested(), &c.expectations, &mut b2, &mut ledger);
-        let o2 = drive(
-            &c.attested_duplicate(),
-            &c.expectations,
-            &mut b2,
-            &mut ledger,
-        );
-        t.check_outcome(
-            "A12.duplicate-matches",
-            "backend-submission-duplicate-idempotent",
-            &o2,
-        );
+        let o2 = drive(&c.attested_duplicate(), &c.expectations, &mut b2, &mut ledger);
+        t.check_outcome("A12.duplicate-matches", "backend-submission-duplicate-idempotent", &o2);
         t.assert_true("A12.matches-ledger-one", ledger.len() == 1);
     }
     // A13 / A14 / A15 production / MainNet / external-publication backend paths are
@@ -507,11 +460,7 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
             &mut prod,
             &mut ledger,
         );
-        t.check_outcome(
-            "A13.production",
-            "production-backend-unavailable-no-submission",
-            &o,
-        );
+        t.check_outcome("A13.production", "production-backend-unavailable-no-submission", &o);
         t.assert_true("A13.no-record", ledger.is_empty());
         t.check("A13.kind", "production-unavailable", prod.kind().tag());
         let mut mn = MainNetDurableCompletionAttestationBackend::default();
@@ -521,11 +470,7 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
             &mut mn,
             &mut ledger,
         );
-        t.check_outcome(
-            "A14.mainnet",
-            "mainnet-backend-unavailable-no-submission",
-            &o2,
-        );
+        t.check_outcome("A14.mainnet", "mainnet-backend-unavailable-no-submission", &o2);
         t.assert_true("A14.no-record", ledger.is_empty());
         let mut ext = ExternalPublicationDurableCompletionAttestationBackend::default();
         let o3 = evaluate_durable_completion_attestation_backend(
@@ -534,11 +479,7 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
             &mut ext,
             &mut ledger,
         );
-        t.check_outcome(
-            "A15.external",
-            "external-publication-unavailable-no-submission",
-            &o3,
-        );
+        t.check_outcome("A15.external", "external-publication-unavailable-no-submission", &o3);
         t.assert_true("A15.no-record", ledger.is_empty());
     }
     // A16 MainNet peer-driven apply refused before any backend invocation.
@@ -547,11 +488,7 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
         let mut ledger = DurableCompletionAttestationBackendLedger::new();
         let mut backend = fixture_backend();
         let o = drive(&c.attested(), &c.expectations, &mut backend, &mut ledger);
-        t.check_outcome(
-            "A16.mainnet-peer",
-            "mainnet-peer-driven-apply-refused-no-submission",
-            &o,
-        );
+        t.check_outcome("A16.mainnet-peer", "mainnet-peer-driven-apply-refused-no-submission", &o);
         t.assert_true("A16.no-invocation", backend.invocations() == 0);
         t.assert_true("A16.no-record", ledger.is_empty());
     }
@@ -571,12 +508,7 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
         let c = devnet_ctx();
         let mut ledger = DurableCompletionAttestationBackendLedger::new();
         let mut backend = fixture_backend();
-        let o = drive(
-            &c.with_attestation(att),
-            &c.expectations,
-            &mut backend,
-            &mut ledger,
-        );
+        let o = drive(&c.with_attestation(att), &c.expectations, &mut backend, &mut ledger);
         t.check_outcome(id, tag, &o);
         t.assert_true(&format!("{id}.no-invocation"), backend.invocations() == 0);
         t.assert_true(&format!("{id}.no-record"), ledger.is_empty());
@@ -590,11 +522,7 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
     // Every non-attesting Run 254 attestation outcome maps to a no-backend-submission
     // outcome and never invokes the backend.
     let attestation_cases: [(&str, Att, &str); 13] = [
-        (
-            "legacy",
-            Att::LegacyBypassNoAttestation,
-            "legacy-bypass-no-backend-submission",
-        ),
+        ("legacy", Att::LegacyBypassNoAttestation, "legacy-bypass-no-backend-submission"),
         (
             "rejected-before-finalization",
             Att::RejectedBeforeFinalizationNoAttestation,
@@ -660,25 +588,11 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
         let c = devnet_ctx();
         let mut ledger = DurableCompletionAttestationBackendLedger::new();
         let mut backend = fixture_backend();
-        let o = drive(
-            &c.with_attestation(att),
-            &c.expectations,
-            &mut backend,
-            &mut ledger,
-        );
+        let o = drive(&c.with_attestation(att), &c.expectations, &mut backend, &mut ledger);
         t.check_outcome(&format!("B.attestation.{label}"), tag, &o);
-        t.assert_true(
-            &format!("B.attestation.{label}.no-invocation"),
-            backend.invocations() == 0,
-        );
-        t.assert_true(
-            &format!("B.attestation.{label}.no-record"),
-            ledger.is_empty(),
-        );
-        t.assert_true(
-            &format!("B.attestation.{label}.no-submission"),
-            o.no_backend_submission(),
-        );
+        t.assert_true(&format!("B.attestation.{label}.no-invocation"), backend.invocations() == 0);
+        t.assert_true(&format!("B.attestation.{label}.no-record"), ledger.is_empty());
+        t.assert_true(&format!("B.attestation.{label}.no-submission"), o.no_backend_submission());
     }
     // MainNet peer-driven refusal is also reachable through every prior-stage binding.
     for (label, input) in [
@@ -738,10 +652,7 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
         let mut backend = FixtureDurableCompletionAttestationBackend::with_fault(fault);
         let o = drive(&c.attested(), &c.expectations, &mut backend, &mut ledger);
         t.check_outcome(&format!("B.fault.{label}"), tag, &o);
-        t.assert_true(
-            &format!("B.fault.{label}.invoked"),
-            backend.invocations() == 1,
-        );
+        t.assert_true(&format!("B.fault.{label}.invoked"), backend.invocations() == 1);
         t.assert_true(&format!("B.fault.{label}.empty"), ledger.is_empty());
     }
     // Pre-backend environment / surface binding mismatch: backend never invoked.
@@ -789,109 +700,32 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
             "rejected-before-attestation-no-backend-submission",
             &o,
         );
-        t.assert_true(
-            &format!("B.binding.{label}.no-invocation"),
-            backend.invocations() == 0,
-        );
+        t.assert_true(&format!("B.binding.{label}.no-invocation"), backend.invocations() == 0);
         t.assert_true(&format!("B.binding.{label}.empty"), ledger.is_empty());
     }
     // Backend-request-identity mismatch / malformed: backend invoked once, no record.
     let request_cases: [(&str, fn(&mut Ctx)); 21] = [
-        (
-            "wrong-backend-record-id",
-            (|c: &mut Ctx| c.request.backend_record_id = "other".to_string()) as fn(&mut Ctx),
-        ),
-        (
-            "wrong-environment",
-            (|c: &mut Ctx| c.request.environment = TrustBundleEnvironment::Testnet) as fn(&mut Ctx),
-        ),
-        (
-            "wrong-chain",
-            (|c: &mut Ctx| c.request.chain_id = "wrong".to_string()) as fn(&mut Ctx),
-        ),
-        (
-            "wrong-genesis",
-            (|c: &mut Ctx| c.request.genesis_hash = "wrong".to_string()) as fn(&mut Ctx),
-        ),
-        (
-            "wrong-governance-surface",
-            (|c: &mut Ctx| c.request.governance_surface = GovernanceExecutionRuntimeSurface::Sighup)
-                as fn(&mut Ctx),
-        ),
-        (
-            "wrong-mutation-surface",
-            (|c: &mut Ctx| c.request.mutation_surface = GovernanceExecutionRuntimeSurface::Sighup)
-                as fn(&mut Ctx),
-        ),
-        (
-            "wrong-proposal",
-            (|c: &mut Ctx| c.request.proposal_id = "wrong".to_string()) as fn(&mut Ctx),
-        ),
-        (
-            "wrong-decision",
-            (|c: &mut Ctx| c.request.decision_id = "wrong".to_string()) as fn(&mut Ctx),
-        ),
-        (
-            "wrong-candidate",
-            (|c: &mut Ctx| c.request.candidate_digest = "wrong".to_string()) as fn(&mut Ctx),
-        ),
-        (
-            "wrong-sequence",
-            (|c: &mut Ctx| c.request.authority_domain_sequence = 99) as fn(&mut Ctx),
-        ),
-        (
-            "wrong-pipeline-digest",
-            (|c: &mut Ctx| c.request.pipeline_decision_digest = "wrong".to_string())
-                as fn(&mut Ctx),
-        ),
-        (
-            "wrong-sink-digest",
-            (|c: &mut Ctx| c.request.sink_decision_digest = "wrong".to_string()) as fn(&mut Ctx),
-        ),
-        (
-            "wrong-reporter-digest",
-            (|c: &mut Ctx| c.request.reporter_decision_digest = "wrong".to_string())
-                as fn(&mut Ctx),
-        ),
-        (
-            "wrong-finalization-digest",
-            (|c: &mut Ctx| c.request.finalization_decision_digest = "wrong".to_string())
-                as fn(&mut Ctx),
-        ),
-        (
-            "wrong-attestation-digest",
-            (|c: &mut Ctx| c.request.attestation_digest = "wrong".to_string()) as fn(&mut Ctx),
-        ),
-        (
-            "wrong-attestation-id",
-            (|c: &mut Ctx| c.request.attestation_id = "wrong".to_string()) as fn(&mut Ctx),
-        ),
-        (
-            "wrong-domain-tag",
-            (|c: &mut Ctx| c.request.domain_separation_tag = "wrong".to_string()) as fn(&mut Ctx),
-        ),
-        (
-            "wrong-identity",
-            (|c: &mut Ctx| c.request.identity.backend_id = "wrong".to_string()) as fn(&mut Ctx),
-        ),
-        (
-            "wrong-kind",
-            (|c: &mut Ctx| {
-                c.request.identity.kind =
-                    DurableCompletionAttestationBackendKind::ProductionUnavailable
-            }) as fn(&mut Ctx),
-        ),
-        (
-            "wrong-policy",
-            (|c: &mut Ctx| {
-                c.request.identity.policy =
-                    DurableCompletionAttestationBackendPolicy::ProductionBackendRequired
-            }) as fn(&mut Ctx),
-        ),
-        (
-            "malformed",
-            (|c: &mut Ctx| c.request.backend_record_id = String::new()) as fn(&mut Ctx),
-        ),
+        ("wrong-backend-record-id", (|c: &mut Ctx| c.request.backend_record_id = "other".to_string()) as fn(&mut Ctx)),
+        ("wrong-environment", (|c: &mut Ctx| c.request.environment = TrustBundleEnvironment::Testnet) as fn(&mut Ctx)),
+        ("wrong-chain", (|c: &mut Ctx| c.request.chain_id = "wrong".to_string()) as fn(&mut Ctx)),
+        ("wrong-genesis", (|c: &mut Ctx| c.request.genesis_hash = "wrong".to_string()) as fn(&mut Ctx)),
+        ("wrong-governance-surface", (|c: &mut Ctx| c.request.governance_surface = GovernanceExecutionRuntimeSurface::Sighup) as fn(&mut Ctx)),
+        ("wrong-mutation-surface", (|c: &mut Ctx| c.request.mutation_surface = GovernanceExecutionRuntimeSurface::Sighup) as fn(&mut Ctx)),
+        ("wrong-proposal", (|c: &mut Ctx| c.request.proposal_id = "wrong".to_string()) as fn(&mut Ctx)),
+        ("wrong-decision", (|c: &mut Ctx| c.request.decision_id = "wrong".to_string()) as fn(&mut Ctx)),
+        ("wrong-candidate", (|c: &mut Ctx| c.request.candidate_digest = "wrong".to_string()) as fn(&mut Ctx)),
+        ("wrong-sequence", (|c: &mut Ctx| c.request.authority_domain_sequence = 99) as fn(&mut Ctx)),
+        ("wrong-pipeline-digest", (|c: &mut Ctx| c.request.pipeline_decision_digest = "wrong".to_string()) as fn(&mut Ctx)),
+        ("wrong-sink-digest", (|c: &mut Ctx| c.request.sink_decision_digest = "wrong".to_string()) as fn(&mut Ctx)),
+        ("wrong-reporter-digest", (|c: &mut Ctx| c.request.reporter_decision_digest = "wrong".to_string()) as fn(&mut Ctx)),
+        ("wrong-finalization-digest", (|c: &mut Ctx| c.request.finalization_decision_digest = "wrong".to_string()) as fn(&mut Ctx)),
+        ("wrong-attestation-digest", (|c: &mut Ctx| c.request.attestation_digest = "wrong".to_string()) as fn(&mut Ctx)),
+        ("wrong-attestation-id", (|c: &mut Ctx| c.request.attestation_id = "wrong".to_string()) as fn(&mut Ctx)),
+        ("wrong-domain-tag", (|c: &mut Ctx| c.request.domain_separation_tag = "wrong".to_string()) as fn(&mut Ctx)),
+        ("wrong-identity", (|c: &mut Ctx| c.request.identity.backend_id = "wrong".to_string()) as fn(&mut Ctx)),
+        ("wrong-kind", (|c: &mut Ctx| c.request.identity.kind = DurableCompletionAttestationBackendKind::ProductionUnavailable) as fn(&mut Ctx)),
+        ("wrong-policy", (|c: &mut Ctx| c.request.identity.policy = DurableCompletionAttestationBackendPolicy::ProductionBackendRequired) as fn(&mut Ctx)),
+        ("malformed", (|c: &mut Ctx| c.request.backend_record_id = String::new()) as fn(&mut Ctx)),
     ];
     for (label, mutate) in request_cases {
         let mut c = devnet_ctx();
@@ -904,10 +738,7 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
             "backend-submission-rejected-before-record",
             &o,
         );
-        t.assert_true(
-            &format!("B.request.{label}.invoked"),
-            backend.invocations() == 1,
-        );
+        t.assert_true(&format!("B.request.{label}.invoked"), backend.invocations() == 1);
         t.assert_true(&format!("B.request.{label}.empty"), ledger.is_empty());
     }
     // Same backend record id with a different digest is equivocation (no second
@@ -924,11 +755,7 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
         c2.request.candidate_digest = "different-candidate-digest".to_string();
         c2.expectations.expected_candidate_digest = "different-candidate-digest".to_string();
         let o = drive(&c2.attested(), &c2.expectations, &mut backend, &mut ledger);
-        t.check_outcome(
-            "B.equivocation",
-            "backend-submission-rejected-before-record",
-            &o,
-        );
+        t.check_outcome("B.equivocation", "backend-submission-rejected-before-record", &o);
         t.assert_true("B.equivocation-ledger-one", ledger.len() == 1);
     }
     // Local operator / peer majority cannot satisfy MainNet authority.
@@ -974,11 +801,7 @@ fn run_recovery_table(out: &Path) -> (u64, u64) {
     // recover_devnet to replay a real submission and pass the recovered record.
     let sentinel = devnet_ctx().request.to_record();
     for (id, w, tag) in [
-        (
-            "C.before-pipeline",
-            W::BeforePipeline,
-            "attestation-did-not-attest-no-backend-submission",
-        ),
+        ("C.before-pipeline", W::BeforePipeline, "attestation-did-not-attest-no-backend-submission"),
         (
             "C.after-pipeline-before-sink-intent",
             W::AfterPipelineSuccessBeforeSinkIntent,
@@ -1093,11 +916,7 @@ fn run_recovery_table(out: &Path) -> (u64, u64) {
         None,
         &c.expectations,
     );
-    t.check_outcome(
-        "C.production",
-        "production-backend-unavailable-no-submission",
-        &prod,
-    );
+    t.check_outcome("C.production", "production-backend-unavailable-no-submission", &prod);
     let mn = recover_durable_completion_attestation_backend_window(
         &c.attested(),
         W::AfterBackendSuccess,
@@ -1105,11 +924,7 @@ fn run_recovery_table(out: &Path) -> (u64, u64) {
         None,
         &c.expectations,
     );
-    t.check_outcome(
-        "C.mainnet",
-        "mainnet-backend-unavailable-no-submission",
-        &mn,
-    );
+    t.check_outcome("C.mainnet", "mainnet-backend-unavailable-no-submission", &mn);
     let ext = recover_durable_completion_attestation_backend_window(
         &c.attested(),
         W::AfterBackendSuccess,
@@ -1117,11 +932,7 @@ fn run_recovery_table(out: &Path) -> (u64, u64) {
         None,
         &c.expectations,
     );
-    t.check_outcome(
-        "C.external",
-        "external-publication-unavailable-no-submission",
-        &ext,
-    );
+    t.check_outcome("C.external", "external-publication-unavailable-no-submission", &ext);
     // MainNet peer-driven refusal precedes recovery classification.
     let cp = mainnet_peer_ctx();
     let peer = recover_durable_completion_attestation_backend_window(
@@ -1131,11 +942,7 @@ fn run_recovery_table(out: &Path) -> (u64, u64) {
         None,
         &cp.expectations,
     );
-    t.check_outcome(
-        "C.mainnet-peer-precedes",
-        "mainnet-peer-driven-apply-refused-no-submission",
-        &peer,
-    );
+    t.check_outcome("C.mainnet-peer-precedes", "mainnet-peer-driven-apply-refused-no-submission", &peer);
     t.finish(out)
 }
 
@@ -1146,8 +953,7 @@ fn run_projection_table(out: &Path) -> (u64, u64) {
     // Only DurableCompletionAttested creates a backend request.
     t.assert_true(
         "D.only-attested-creates-request",
-        project_attestation_outcome_to_backend_request(&Att::DurableCompletionAttested)
-            .creates_request(),
+        project_attestation_outcome_to_backend_request(&Att::DurableCompletionAttested).creates_request(),
     );
     // A duplicate-idempotent attestation is idempotent-only (no create).
     t.assert_true(
@@ -1159,11 +965,7 @@ fn run_projection_table(out: &Path) -> (u64, u64) {
     // Every non-attesting outcome creates no request and carries the expected
     // no-backend-submission outcome.
     let projections: [(&str, Att, DurableCompletionAttestationBackendOutcome); 13] = [
-        (
-            "legacy-bypass",
-            Att::LegacyBypassNoAttestation,
-            Backend::LegacyBypassNoBackendSubmission,
-        ),
+        ("legacy-bypass", Att::LegacyBypassNoAttestation, Backend::LegacyBypassNoBackendSubmission),
         (
             "rejected-before-finalization",
             Att::RejectedBeforeFinalizationNoAttestation,
@@ -1232,24 +1034,16 @@ fn run_projection_table(out: &Path) -> (u64, u64) {
             &intent,
             DurableCompletionAttestationBackendRequestIntent::NoBackendSubmission(o) if *o == expected
         );
-        t.check(
-            &format!("D.{label}.outcome"),
-            expected.tag(),
-            if ok { expected.tag() } else { "MISMATCH" },
-        );
+        t.check(&format!("D.{label}.outcome"), expected.tag(), if ok { expected.tag() } else { "MISMATCH" });
     }
     // Only BackendSubmissionRecorded authorizes a new modeled backend-submitted state.
     t.assert_true(
         "D.recorded-authorizes",
-        backend_outcome_authorizes_durable_attestation_submission(
-            &Backend::BackendSubmissionRecorded,
-        ),
+        backend_outcome_authorizes_durable_attestation_submission(&Backend::BackendSubmissionRecorded),
     );
     t.assert_true(
         "D.recorded-projects",
-        backend_outcome_projects_to_backend_submission_recorded(
-            &Backend::BackendSubmissionRecorded,
-        ),
+        backend_outcome_projects_to_backend_submission_recorded(&Backend::BackendSubmissionRecorded),
     );
     // A duplicate-idempotent submission projects but does not authorize a new one.
     t.assert_true(
@@ -1267,51 +1061,18 @@ fn run_projection_table(out: &Path) -> (u64, u64) {
     // Every other backend outcome neither authorizes nor projects to a submission.
     for (label, outcome) in [
         ("legacy-bypass", Backend::LegacyBypassNoBackendSubmission),
-        (
-            "rejected-before-attestation",
-            Backend::RejectedBeforeAttestationNoBackendSubmission,
-        ),
-        (
-            "attestation-did-not-attest",
-            Backend::AttestationDidNotAttestNoBackendSubmission,
-        ),
-        (
-            "rejected-before-record",
-            Backend::BackendSubmissionRejectedBeforeRecord,
-        ),
-        (
-            "record-failed",
-            Backend::BackendSubmissionRecordFailedNoSubmission,
-        ),
-        (
-            "rolled-back",
-            Backend::BackendSubmissionRolledBackNoSubmission,
-        ),
-        (
-            "rollback-failed",
-            Backend::BackendSubmissionRollbackFailedFatalNoSubmission,
-        ),
-        (
-            "ambiguous",
-            Backend::BackendSubmissionAmbiguousFailClosedNoSubmission,
-        ),
-        (
-            "production",
-            Backend::ProductionBackendUnavailableNoSubmission,
-        ),
+        ("rejected-before-attestation", Backend::RejectedBeforeAttestationNoBackendSubmission),
+        ("attestation-did-not-attest", Backend::AttestationDidNotAttestNoBackendSubmission),
+        ("rejected-before-record", Backend::BackendSubmissionRejectedBeforeRecord),
+        ("record-failed", Backend::BackendSubmissionRecordFailedNoSubmission),
+        ("rolled-back", Backend::BackendSubmissionRolledBackNoSubmission),
+        ("rollback-failed", Backend::BackendSubmissionRollbackFailedFatalNoSubmission),
+        ("ambiguous", Backend::BackendSubmissionAmbiguousFailClosedNoSubmission),
+        ("production", Backend::ProductionBackendUnavailableNoSubmission),
         ("mainnet", Backend::MainNetBackendUnavailableNoSubmission),
-        (
-            "external",
-            Backend::ExternalPublicationUnavailableNoSubmission,
-        ),
-        (
-            "mainnet-peer",
-            Backend::MainNetPeerDrivenApplyRefusedNoSubmission,
-        ),
-        (
-            "validator",
-            Backend::ValidatorSetRotationUnsupportedNoSubmission,
-        ),
+        ("external", Backend::ExternalPublicationUnavailableNoSubmission),
+        ("mainnet-peer", Backend::MainNetPeerDrivenApplyRefusedNoSubmission),
+        ("validator", Backend::ValidatorSetRotationUnsupportedNoSubmission),
         ("policy", Backend::PolicyChangeUnsupportedNoSubmission),
     ] {
         t.assert_true(
@@ -1322,10 +1083,7 @@ fn run_projection_table(out: &Path) -> (u64, u64) {
             &format!("D.{label}.no-project"),
             !backend_outcome_projects_to_backend_submission_recorded(&outcome),
         );
-        t.assert_true(
-            &format!("D.{label}.no-submission"),
-            outcome.no_backend_submission(),
-        );
+        t.assert_true(&format!("D.{label}.no-submission"), outcome.no_backend_submission());
     }
     t.finish(out)
 }
@@ -1346,12 +1104,7 @@ fn run_stage_ordering_table(out: &Path) -> (u64, u64) {
     c2.env.genesis_hash = "wrong".to_string();
     let mut ledger2 = DurableCompletionAttestationBackendLedger::new();
     let mut backend2 = fixture_backend();
-    let _ = drive(
-        &c2.attested(),
-        &c2.expectations,
-        &mut backend2,
-        &mut ledger2,
-    );
+    let _ = drive(&c2.attested(), &c2.expectations, &mut backend2, &mut ledger2);
     t.assert_true("E.binding-before-backend", backend2.invocations() == 0);
     // A record failure does not retroactively submit but invokes the backend once.
     let c3 = devnet_ctx();
@@ -1359,12 +1112,7 @@ fn run_stage_ordering_table(out: &Path) -> (u64, u64) {
     let mut backend3 = FixtureDurableCompletionAttestationBackend::with_fault(
         DurableCompletionAttestationBackendFault::RecordFailedNoSubmission,
     );
-    let o3 = drive(
-        &c3.attested(),
-        &c3.expectations,
-        &mut backend3,
-        &mut ledger3,
-    );
+    let o3 = drive(&c3.attested(), &c3.expectations, &mut backend3, &mut ledger3);
     t.assert_true(
         "E.record-failure-no-submission",
         o3.no_backend_submission() && backend3.invocations() == 1 && ledger3.is_empty(),
@@ -1374,12 +1122,7 @@ fn run_stage_ordering_table(out: &Path) -> (u64, u64) {
         DurableCompletionAttestationBackendFault::RollbackFailedFatal,
     );
     let mut ledger4 = DurableCompletionAttestationBackendLedger::new();
-    let o4 = drive(
-        &c3.attested(),
-        &c3.expectations,
-        &mut backend4,
-        &mut ledger4,
-    );
+    let o4 = drive(&c3.attested(), &c3.expectations, &mut backend4, &mut ledger4);
     t.check_outcome(
         "E.rollback-failed-fatal",
         "backend-submission-rollback-failed-fatal-no-submission",
@@ -1426,18 +1169,12 @@ fn run_backend_ledger_table(out: &Path) -> (u64, u64) {
     t.assert_true("F.snapshot", snap.len() == 1 && !snap.is_empty());
     let mut restored = DurableCompletionAttestationBackendLedger::new();
     restored.restore(&snap);
-    t.assert_true(
-        "F.restore",
-        restored.len() == 1 && restored.contains(BACKEND_RECORD_ID),
-    );
+    t.assert_true("F.restore", restored.len() == 1 && restored.contains(BACKEND_RECORD_ID));
     // The canonical record / response / receipt / digest types are well-formed.
     let record: DurableCompletionAttestationBackendRecord = c.request.to_record();
     let request_digest: DurableCompletionAttestationBackendDigest = c.request.digest();
     t.assert_true("F.record-id", record.backend_record_id == BACKEND_RECORD_ID);
-    t.assert_true(
-        "F.record-request-digest",
-        record.request_digest == request_digest,
-    );
+    t.assert_true("F.record-request-digest", record.request_digest == request_digest);
     t.assert_true("F.request-digest-hex", !request_digest.as_hex().is_empty());
     t.assert_true(
         "F.identity-digest-hex",
@@ -1450,82 +1187,45 @@ fn run_backend_ledger_table(out: &Path) -> (u64, u64) {
         backend_kind: DurableCompletionAttestationBackendKind::FixtureInMemory,
     };
     let response_digest = response.digest();
-    t.assert_true(
-        "F.response-digest-hex",
-        !response_digest.as_hex().is_empty(),
-    );
+    t.assert_true("F.response-digest-hex", !response_digest.as_hex().is_empty());
     let receipt = DurableCompletionAttestationBackendReceipt {
         backend_record_id: BACKEND_RECORD_ID.to_string(),
         request_digest: request_digest.clone(),
         response_digest: response_digest.clone(),
     };
-    t.assert_true(
-        "F.receipt-digest-hex",
-        !receipt.digest().as_hex().is_empty(),
-    );
-    let transcript: DurableCompletionAttestationBackendTranscriptDigest = ledger
-        .find(BACKEND_RECORD_ID)
-        .map(|r| r.transcript_digest.clone())
-        .unwrap();
+    t.assert_true("F.receipt-digest-hex", !receipt.digest().as_hex().is_empty());
+    let transcript: DurableCompletionAttestationBackendTranscriptDigest =
+        ledger.find(BACKEND_RECORD_ID).map(|r| r.transcript_digest.clone()).unwrap();
     t.assert_true("F.transcript-digest-hex", !transcript.as_hex().is_empty());
     // Duplicate identical submission does not increase record count.
     let second = drive(&c.attested(), &c.expectations, &mut backend, &mut ledger);
-    t.check_outcome(
-        "F.duplicate",
-        "backend-submission-duplicate-idempotent",
-        &second,
-    );
+    t.check_outcome("F.duplicate", "backend-submission-duplicate-idempotent", &second);
     t.assert_true("F.duplicate-len-one", ledger.len() == 1);
     // Same id with a different digest is equivocation and does not record.
     let mut c2 = devnet_ctx();
     c2.request.candidate_digest = "different-candidate-digest".to_string();
     c2.expectations.expected_candidate_digest = "different-candidate-digest".to_string();
     let o2 = drive(&c2.attested(), &c2.expectations, &mut backend, &mut ledger);
-    t.check_outcome(
-        "F.equivocation",
-        "backend-submission-rejected-before-record",
-        &o2,
-    );
+    t.check_outcome("F.equivocation", "backend-submission-rejected-before-record", &o2);
     t.assert_true("F.equivocation-len-one", ledger.len() == 1);
     // Each request-mismatch field does not record (representative subset).
     let mut record_ledger = DurableCompletionAttestationBackendLedger::new();
     let mut b3 = fixture_backend();
     for (label, mutate) in [
-        (
-            "wrong-attestation-digest",
-            (|c: &mut Ctx| c.request.attestation_digest = "x".to_string()) as fn(&mut Ctx),
-        ),
-        (
-            "wrong-finalization-digest",
-            (|c: &mut Ctx| c.request.finalization_decision_digest = "x".to_string())
-                as fn(&mut Ctx),
-        ),
-        (
-            "wrong-sequence",
-            (|c: &mut Ctx| c.request.authority_domain_sequence = 11) as fn(&mut Ctx),
-        ),
-        (
-            "malformed",
-            (|c: &mut Ctx| c.request.backend_record_id = String::new()) as fn(&mut Ctx),
-        ),
+        ("wrong-attestation-digest", (|c: &mut Ctx| c.request.attestation_digest = "x".to_string()) as fn(&mut Ctx)),
+        ("wrong-finalization-digest", (|c: &mut Ctx| c.request.finalization_decision_digest = "x".to_string()) as fn(&mut Ctx)),
+        ("wrong-sequence", (|c: &mut Ctx| c.request.authority_domain_sequence = 11) as fn(&mut Ctx)),
+        ("malformed", (|c: &mut Ctx| c.request.backend_record_id = String::new()) as fn(&mut Ctx)),
     ] {
         let mut cc = devnet_ctx();
         mutate(&mut cc);
-        let o = drive(
-            &cc.attested(),
-            &cc.expectations,
-            &mut b3,
-            &mut record_ledger,
-        );
+        let o = drive(&cc.attested(), &cc.expectations, &mut b3, &mut record_ledger);
         t.check_outcome(
             &format!("F.no-record.{label}"),
             "backend-submission-rejected-before-record",
             &o,
         );
-        t.assert_true(
-            &format!("F.no-record.{label}.empty"),
-            record_ledger.is_empty(),
-        );
+        t.assert_true(&format!("F.no-record.{label}.empty"), record_ledger.is_empty());
     }
     t.finish(out)
 }
@@ -1645,10 +1345,7 @@ fn run_reachability_table(out: &Path) -> (u64, u64) {
     use DurableCompletionAttestationBackendOutcome as Backend;
     let mut t = Table::new("reachability");
     let tags = [
-        (
-            Backend::LegacyBypassNoBackendSubmission,
-            "legacy-bypass-no-backend-submission",
-        ),
+        (Backend::LegacyBypassNoBackendSubmission, "legacy-bypass-no-backend-submission"),
         (
             Backend::RejectedBeforeAttestationNoBackendSubmission,
             "rejected-before-attestation-no-backend-submission",
@@ -1657,10 +1354,7 @@ fn run_reachability_table(out: &Path) -> (u64, u64) {
             Backend::AttestationDidNotAttestNoBackendSubmission,
             "attestation-did-not-attest-no-backend-submission",
         ),
-        (
-            Backend::BackendSubmissionRecorded,
-            "backend-submission-recorded",
-        ),
+        (Backend::BackendSubmissionRecorded, "backend-submission-recorded"),
         (
             Backend::BackendSubmissionDuplicateIdempotent,
             "backend-submission-duplicate-idempotent",
@@ -1714,100 +1408,26 @@ fn run_reachability_table(out: &Path) -> (u64, u64) {
         t.check(&format!("H.tag.{tag}"), tag, o.tag());
     }
     // Kind tags.
-    t.check(
-        "H.kind-disabled",
-        "disabled",
-        DurableCompletionAttestationBackendKind::Disabled.tag(),
-    );
-    t.check(
-        "H.kind-fixture",
-        "fixture-in-memory",
-        DurableCompletionAttestationBackendKind::FixtureInMemory.tag(),
-    );
-    t.check(
-        "H.kind-production",
-        "production-unavailable",
-        DurableCompletionAttestationBackendKind::ProductionUnavailable.tag(),
-    );
-    t.check(
-        "H.kind-mainnet",
-        "mainnet-unavailable",
-        DurableCompletionAttestationBackendKind::MainNetUnavailable.tag(),
-    );
-    t.check(
-        "H.kind-external",
-        "external-publication-unavailable",
-        DurableCompletionAttestationBackendKind::ExternalPublicationUnavailable.tag(),
-    );
-    t.check(
-        "H.kind-unknown",
-        "unknown",
-        DurableCompletionAttestationBackendKind::Unknown.tag(),
-    );
-    t.assert_true(
-        "H.kind-is-fixture",
-        DurableCompletionAttestationBackendKind::FixtureInMemory.is_fixture(),
-    );
-    t.assert_true(
-        "H.kind-is-unavailable",
-        DurableCompletionAttestationBackendKind::ProductionUnavailable.is_unavailable(),
-    );
+    t.check("H.kind-disabled", "disabled", DurableCompletionAttestationBackendKind::Disabled.tag());
+    t.check("H.kind-fixture", "fixture-in-memory", DurableCompletionAttestationBackendKind::FixtureInMemory.tag());
+    t.check("H.kind-production", "production-unavailable", DurableCompletionAttestationBackendKind::ProductionUnavailable.tag());
+    t.check("H.kind-mainnet", "mainnet-unavailable", DurableCompletionAttestationBackendKind::MainNetUnavailable.tag());
+    t.check("H.kind-external", "external-publication-unavailable", DurableCompletionAttestationBackendKind::ExternalPublicationUnavailable.tag());
+    t.check("H.kind-unknown", "unknown", DurableCompletionAttestationBackendKind::Unknown.tag());
+    t.assert_true("H.kind-is-fixture", DurableCompletionAttestationBackendKind::FixtureInMemory.is_fixture());
+    t.assert_true("H.kind-is-unavailable", DurableCompletionAttestationBackendKind::ProductionUnavailable.is_unavailable());
     // Policy tags.
-    t.check(
-        "H.policy-disabled",
-        "disabled",
-        DurableCompletionAttestationBackendPolicy::Disabled.tag(),
-    );
-    t.check(
-        "H.policy-fixture",
-        "fixture-allowed",
-        DurableCompletionAttestationBackendPolicy::FixtureAllowed.tag(),
-    );
-    t.check(
-        "H.policy-production",
-        "production-backend-required",
-        DurableCompletionAttestationBackendPolicy::ProductionBackendRequired.tag(),
-    );
-    t.check(
-        "H.policy-mainnet",
-        "mainnet-production-backend-required",
-        DurableCompletionAttestationBackendPolicy::MainNetProductionBackendRequired.tag(),
-    );
-    t.assert_true(
-        "H.policy-is-disabled",
-        DurableCompletionAttestationBackendPolicy::Disabled.is_disabled(),
-    );
-    t.assert_true(
-        "H.policy-allows-fixture",
-        DurableCompletionAttestationBackendPolicy::FixtureAllowed.allows_fixture(),
-    );
+    t.check("H.policy-disabled", "disabled", DurableCompletionAttestationBackendPolicy::Disabled.tag());
+    t.check("H.policy-fixture", "fixture-allowed", DurableCompletionAttestationBackendPolicy::FixtureAllowed.tag());
+    t.check("H.policy-production", "production-backend-required", DurableCompletionAttestationBackendPolicy::ProductionBackendRequired.tag());
+    t.check("H.policy-mainnet", "mainnet-production-backend-required", DurableCompletionAttestationBackendPolicy::MainNetProductionBackendRequired.tag());
+    t.assert_true("H.policy-is-disabled", DurableCompletionAttestationBackendPolicy::Disabled.is_disabled());
+    t.assert_true("H.policy-allows-fixture", DurableCompletionAttestationBackendPolicy::FixtureAllowed.allows_fixture());
     // Backend trait kind() reachable through every backend implementation.
-    t.check(
-        "H.trait-fixture-kind",
-        "fixture-in-memory",
-        fixture_backend().kind().tag(),
-    );
-    t.check(
-        "H.trait-production-kind",
-        "production-unavailable",
-        ProductionDurableCompletionAttestationBackend::default()
-            .kind()
-            .tag(),
-    );
-    t.check(
-        "H.trait-mainnet-kind",
-        "mainnet-unavailable",
-        MainNetDurableCompletionAttestationBackend::default()
-            .kind()
-            .tag(),
-    );
-    t.check(
-        "H.trait-external-kind",
-        "external-publication-unavailable",
-        ExternalPublicationDurableCompletionAttestationBackend::default()
-            .kind()
-            .tag(),
-    );
+    t.check("H.trait-fixture-kind", "fixture-in-memory", fixture_backend().kind().tag());
+    t.check("H.trait-production-kind", "production-unavailable", ProductionDurableCompletionAttestationBackend::default().kind().tag());
+    t.check("H.trait-mainnet-kind", "mainnet-unavailable", MainNetDurableCompletionAttestationBackend::default().kind().tag());
+    t.check("H.trait-external-kind", "external-publication-unavailable", ExternalPublicationDurableCompletionAttestationBackend::default().kind().tag());
     // Touch every Run 256 type alias the task enumerates so the helper links them.
     let _aliases = std::any::type_name::<(
         DurableCompletionAttestationBackendSurface,
@@ -1840,12 +1460,7 @@ fn run_fixture_dump(out: &Path) {
     c2.env.genesis_hash = "wrong-genesis".to_string();
     let mut ledger2 = DurableCompletionAttestationBackendLedger::new();
     let mut backend2 = fixture_backend();
-    let o2 = drive(
-        &c2.attested(),
-        &c2.expectations,
-        &mut backend2,
-        &mut ledger2,
-    );
+    let o2 = drive(&c2.attested(), &c2.expectations, &mut backend2, &mut ledger2);
     write_file(
         &dir.join("rejected_lifecycle.txt"),
         &format!(
@@ -1859,12 +1474,7 @@ fn run_fixture_dump(out: &Path) {
     let cp = mainnet_peer_ctx();
     let mut ledger3 = DurableCompletionAttestationBackendLedger::new();
     let mut backend3 = fixture_backend();
-    let o3 = drive(
-        &cp.attested(),
-        &cp.expectations,
-        &mut backend3,
-        &mut ledger3,
-    );
+    let o3 = drive(&cp.attested(), &cp.expectations, &mut backend3, &mut ledger3);
     write_file(
         &dir.join("mainnet_peer_driven_refusal.txt"),
         &format!(
@@ -1878,11 +1488,7 @@ fn run_fixture_dump(out: &Path) {
     let sentinel = c.request.to_record();
     let mut windows = String::new();
     for (label, w, with_record) in [
-        (
-            "before-pipeline",
-            DurableCompletionAttestationBackendWindow::BeforePipeline,
-            false,
-        ),
+        ("before-pipeline", DurableCompletionAttestationBackendWindow::BeforePipeline, false),
         (
             "after-attestation-record-before-backend-request",
             DurableCompletionAttestationBackendWindow::AfterAttestationRecordBeforeBackendRequest,
@@ -1903,16 +1509,8 @@ fn run_fixture_dump(out: &Path) {
             DurableCompletionAttestationBackendWindow::AfterBackendAmbiguous,
             false,
         ),
-        (
-            "backend-rollback-failed",
-            DurableCompletionAttestationBackendWindow::BackendRollbackFailed,
-            false,
-        ),
-        (
-            "unknown",
-            DurableCompletionAttestationBackendWindow::Unknown,
-            false,
-        ),
+        ("backend-rollback-failed", DurableCompletionAttestationBackendWindow::BackendRollbackFailed, false),
+        ("unknown", DurableCompletionAttestationBackendWindow::Unknown, false),
     ] {
         let rec = if with_record { Some(&sentinel) } else { None };
         windows.push_str(&format!("{label}={}\n", recover_devnet(w, rec).tag()));
@@ -1922,9 +1520,7 @@ fn run_fixture_dump(out: &Path) {
 
 fn main() {
     let out_dir = env::args().nth(1).map(PathBuf::from).unwrap_or_else(|| {
-        eprintln!(
-            "usage: run_257_durable_completion_attestation_backend_release_binary_helper <OUT_DIR>"
-        );
+        eprintln!("usage: run_257_durable_completion_attestation_backend_release_binary_helper <OUT_DIR>");
         std::process::exit(2);
     });
     fs::create_dir_all(&out_dir).unwrap();

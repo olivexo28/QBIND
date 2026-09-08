@@ -98,9 +98,11 @@ const KEY_A: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const KEY_B: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 const ROOT_FP: &str = "1111111111111111111111111111111111111111";
 const CHAIN_ID: &str = "0000000000000001";
-const GENESIS_HASH: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+const GENESIS_HASH: &str =
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const DIGEST_2: &str = "2222222222222222222222222222222222222222222222222222222222222222";
-const PRIOR_DIGEST: &str = "1111111111111111111111111111111111111111111111111111111111111111";
+const PRIOR_DIGEST: &str =
+    "1111111111111111111111111111111111111111111111111111111111111111";
 const CUSTODY_ATTEST_DIGEST: &str = "custody-att-digest-191";
 const CUSTODY_KEY_ID: &str = "custody-key-id-191";
 const NOW: u64 = 1_700_000_000;
@@ -112,13 +114,7 @@ const EXPIRES: u64 = 1_700_001_000;
 // ---------------------------------------------------------------------------
 
 fn domain_for(env: TrustBundleEnvironment) -> AuthorityTrustDomain {
-    AuthorityTrustDomain::new(
-        env,
-        CHAIN_ID,
-        GENESIS_HASH,
-        ROOT_FP,
-        PQC_LIFECYCLE_SUITE_ML_DSA_44,
-    )
+    AuthorityTrustDomain::new(env, CHAIN_ID, GENESIS_HASH, ROOT_FP, PQC_LIFECYCLE_SUITE_ML_DSA_44)
 }
 
 fn build_v2(
@@ -293,10 +289,7 @@ enum Expect {
     CallsiteCustodyRejectedUnknownClass,
 }
 
-fn matches_expect(
-    actual: &AuthorityCustodyPayloadCarryingDecisionOutcome,
-    expected: &Expect,
-) -> bool {
+fn matches_expect(actual: &AuthorityCustodyPayloadCarryingDecisionOutcome, expected: &Expect) -> bool {
     match (actual, expected) {
         (
             AuthorityCustodyPayloadCarryingDecisionOutcome::NoCustodyAttestationSupplied,
@@ -823,10 +816,7 @@ fn build_loaded(scn: &Scenario) -> AuthorityCustodyLoadStatus {
             let att = good_attestation(scn.env, &cand, *class);
             loaded_for(&att)
         }
-        Carrier::PresentWithEnv {
-            class,
-            attestation_env,
-        } => {
+        Carrier::PresentWithEnv { class, attestation_env } => {
             let cand = rotate_candidate(scn.env);
             let mut att = good_attestation(scn.env, &cand, *class);
             att.environment = *attestation_env;
@@ -864,17 +854,13 @@ fn run_routing_corpus(
         let scn_dir = scenarios_dir.join(scn.id);
         fs::create_dir_all(&scn_dir)?;
         fs::write(scn_dir.join("policy.txt"), format!("{:?}\n", scn.policy))?;
-        fs::write(
-            scn_dir.join("expected.txt"),
-            format!("{:?}\n", scn.expected),
-        )?;
+        fs::write(scn_dir.join("expected.txt"), format!("{:?}\n", scn.expected))?;
         fs::write(scn_dir.join("note.txt"), format!("{}\n", scn.note))?;
         let mut actual_lines = String::new();
 
         for surface in surfaces {
             let outcome = surface.route(&ctx, &loaded);
-            let expected = if matches!(surface, Surface::PeerDrivenDrain) && scn.peer_drain_mainnet
-            {
+            let expected = if matches!(surface, Surface::PeerDrivenDrain) && scn.peer_drain_mainnet {
                 Expect::MainNetPeerDrivenApplyRefused
             } else {
                 scn.expected.clone()
@@ -915,7 +901,12 @@ fn run_routing_corpus(
                 surface.label(),
                 expected
             ));
-            actual_buf.push_str(&format!("{}\t{}\t{:?}\n", scn.id, surface.label(), outcome));
+            actual_buf.push_str(&format!(
+                "{}\t{}\t{:?}\n",
+                scn.id,
+                surface.label(),
+                outcome
+            ));
         }
         fs::write(scn_dir.join("actual.txt"), actual_lines)?;
     }
@@ -969,7 +960,10 @@ fn run_wire_round_trip(out_dir: &Path) -> std::io::Result<(usize, usize)> {
         AuthorityCustodyClass::Unknown,
     ] {
         let wire = AuthorityCustodyClassWire::from_class(c);
-        record(&format!("class_round_trip_{:?}", c), wire.to_class() == c);
+        record(
+            &format!("class_round_trip_{:?}", c),
+            wire.to_class() == c,
+        );
     }
     for g in [
         GovernanceAuthorityClass::GenesisBound,
@@ -984,10 +978,7 @@ fn run_wire_round_trip(out_dir: &Path) -> std::io::Result<(usize, usize)> {
     }
 
     // Full attestation wire round-trip across DevNet/TestNet.
-    for env in [
-        TrustBundleEnvironment::Devnet,
-        TrustBundleEnvironment::Testnet,
-    ] {
+    for env in [TrustBundleEnvironment::Devnet, TrustBundleEnvironment::Testnet] {
         let cand = rotate_candidate(env);
         let att = good_attestation(env, &cand, AuthorityCustodyClass::FixtureLocalKey);
         let wire = AuthorityCustodyAttestationWire::from_attestation(&att);
@@ -1084,12 +1075,7 @@ fn run_routing_helpers_table(out_dir: &Path) -> std::io::Result<(usize, usize)> 
     let cand = rotate_candidate(env);
     let prior = prior_versioned(env);
     let dom = domain_for(env);
-    let ctx = ctx_for(
-        Some(&prior),
-        &cand,
-        &dom,
-        AuthorityCustodyPolicy::FixtureOnly,
-    );
+    let ctx = ctx_for(Some(&prior), &cand, &dom, AuthorityCustodyPolicy::FixtureOnly);
     let att = good_attestation(env, &cand, AuthorityCustodyClass::FixtureLocalKey);
     let loaded = loaded_for(&att);
 
@@ -1250,10 +1236,7 @@ fn run_no_mutation_evidence(out_dir: &Path) -> std::io::Result<(usize, usize)> {
     };
 
     let all_reject = outcomes.iter().all(|(_, o)| o.is_reject());
-    record(
-        "all_surfaces_reject_kms_under_production_required",
-        all_reject,
-    );
+    record("all_surfaces_reject_kms_under_production_required", all_reject);
     record("candidate_unchanged", cand == cand_before);
     record("prior_unchanged", prior == prior_before);
     record("trust_domain_unchanged", dom == dom_before);
@@ -1277,12 +1260,7 @@ fn run_determinism_check(out_dir: &Path) -> std::io::Result<(usize, usize)> {
     let cand = rotate_candidate(env);
     let prior = prior_versioned(env);
     let dom = domain_for(env);
-    let ctx = ctx_for(
-        Some(&prior),
-        &cand,
-        &dom,
-        AuthorityCustodyPolicy::FixtureOnly,
-    );
+    let ctx = ctx_for(Some(&prior), &cand, &dom, AuthorityCustodyPolicy::FixtureOnly);
     let att = good_attestation(env, &cand, AuthorityCustodyClass::FixtureLocalKey);
     let loaded = loaded_for(&att);
 
@@ -1332,7 +1310,9 @@ fn main() {
     let out_dir: PathBuf = match args.next() {
         Some(p) => PathBuf::from(p),
         None => {
-            eprintln!("usage: run_191_authority_custody_payload_release_binary_helper <OUT_DIR>");
+            eprintln!(
+                "usage: run_191_authority_custody_payload_release_binary_helper <OUT_DIR>"
+            );
             std::process::exit(2);
         }
     };
@@ -1342,9 +1322,13 @@ fn main() {
     let mut expected_buf = String::new();
     let mut actual_buf = String::new();
 
-    let (s_pass, s_fail) =
-        run_routing_corpus(&out_dir, &mut manifest, &mut expected_buf, &mut actual_buf)
-            .expect("routing corpus");
+    let (s_pass, s_fail) = run_routing_corpus(
+        &out_dir,
+        &mut manifest,
+        &mut expected_buf,
+        &mut actual_buf,
+    )
+    .expect("routing corpus");
     let (w_pass, w_fail) = run_wire_round_trip(&out_dir).expect("wire round trip");
     let (p_pass, p_fail) = run_sibling_parse_table(&out_dir).expect("sibling parse table");
     let (r_pass, r_fail) = run_routing_helpers_table(&out_dir).expect("routing helpers table");
@@ -1360,8 +1344,8 @@ fn main() {
     let total_fail = s_fail + w_fail + p_fail + r_fail + h_fail + n_fail + d_fail;
     let verdict = if total_fail == 0 { "PASS" } else { "FAIL" };
 
-    let mut summary =
-        fs::File::create(out_dir.join("helper_summary.txt")).expect("create helper_summary.txt");
+    let mut summary = fs::File::create(out_dir.join("helper_summary.txt"))
+        .expect("create helper_summary.txt");
     writeln!(
         summary,
         "Run 191 helper - release-mode authority-custody payload-carrying corpus"
@@ -1374,25 +1358,10 @@ fn main() {
         total_pass, total_fail
     )
     .unwrap();
-    writeln!(
-        summary,
-        "scenarios_pass: {}\nscenarios_fail: {}",
-        s_pass, s_fail
-    )
-    .unwrap();
+    writeln!(summary, "scenarios_pass: {}\nscenarios_fail: {}", s_pass, s_fail).unwrap();
     writeln!(summary, "wire_pass: {}\nwire_fail: {}", w_pass, w_fail).unwrap();
-    writeln!(
-        summary,
-        "sibling_pass: {}\nsibling_fail: {}",
-        p_pass, p_fail
-    )
-    .unwrap();
-    writeln!(
-        summary,
-        "routing_pass: {}\nrouting_fail: {}",
-        r_pass, r_fail
-    )
-    .unwrap();
+    writeln!(summary, "sibling_pass: {}\nsibling_fail: {}", p_pass, p_fail).unwrap();
+    writeln!(summary, "routing_pass: {}\nrouting_fail: {}", r_pass, r_fail).unwrap();
     writeln!(
         summary,
         "named_helpers_pass: {}\nnamed_helpers_fail: {}",

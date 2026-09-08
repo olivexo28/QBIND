@@ -87,11 +87,7 @@ fn build_v2_record(
     )
 }
 
-fn ratify_initial(
-    active_fp: &str,
-    sequence: u64,
-    digest: &str,
-) -> PersistentAuthorityStateRecordV2 {
+fn ratify_initial(active_fp: &str, sequence: u64, digest: &str) -> PersistentAuthorityStateRecordV2 {
     build_v2_record(
         TrustBundleEnvironment::Devnet,
         CHAIN_ID,
@@ -285,7 +281,13 @@ fn a5_revocation_accepted_under_higher_sequence() {
 #[test]
 fn a6_emergency_revocation_accepted_under_higher_sequence() {
     let prev = rotate_to(KEY_B, KEY_A, 2, DIGEST_2);
-    let candidate = revoke_record(KEY_B, 3, DIGEST_3, REVOKED_METADATA_PREFIX_EMERGENCY, KEY_A);
+    let candidate = revoke_record(
+        KEY_B,
+        3,
+        DIGEST_3,
+        REVOKED_METADATA_PREFIX_EMERGENCY,
+        KEY_A,
+    );
     let outcome = validate_v2_lifecycle_transition(
         Some(&PersistentAuthorityStateRecordVersioned::V2(prev)),
         &candidate,
@@ -350,10 +352,7 @@ fn r2_same_sequence_different_digest_rejected() {
             assert_eq!(persisted_digest, DIGEST_2);
             assert_eq!(candidate_digest, DIGEST_3);
         }
-        other => panic!(
-            "expected SameSequenceConflictingDigestRejected, got {:?}",
-            other
-        ),
+        other => panic!("expected SameSequenceConflictingDigestRejected, got {:?}", other),
     }
 }
 
@@ -472,10 +471,7 @@ fn r6_wrong_authority_root_rejected() {
         None,
     );
     let outcome = validate_v2_lifecycle_transition(None, &candidate, &devnet_domain());
-    assert!(matches!(
-        outcome,
-        Outcome::WrongAuthorityRootRejected { .. }
-    ));
+    assert!(matches!(outcome, Outcome::WrongAuthorityRootRejected { .. }));
 }
 
 // ===========================================================================
@@ -713,7 +709,10 @@ fn r14_candidate_active_key_already_revoked_rejected() {
         &candidate,
         &devnet_domain(),
     );
-    assert!(matches!(outcome, Outcome::RevokedKeyReuseRejected { .. }));
+    assert!(matches!(
+        outcome,
+        Outcome::RevokedKeyReuseRejected { .. }
+    ));
 }
 
 // ===========================================================================
@@ -818,10 +817,7 @@ fn r17_mainnet_lifecycle_validation_does_not_enable_mainnet_apply() {
     // Cross-domain refusal still fires for MainNet-tagged candidates against
     // a non-MainNet trust domain.
     let outcome_cross = validate_v2_lifecycle_transition(None, &candidate, &devnet_domain());
-    assert!(matches!(
-        outcome_cross,
-        Outcome::WrongEnvironmentRejected { .. }
-    ));
+    assert!(matches!(outcome_cross, Outcome::WrongEnvironmentRejected { .. }));
 }
 
 // ===========================================================================

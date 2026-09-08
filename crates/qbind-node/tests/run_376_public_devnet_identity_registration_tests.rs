@@ -96,8 +96,9 @@ fn register_check(identity_json: &Path, extra: &[&str]) -> Output {
 }
 
 fn verdict(out: &Output) -> serde_json::Value {
-    serde_json::from_str(&out.stdout)
-        .unwrap_or_else(|e| panic!("register-check stdout not JSON ({}): {}", e, out.stdout))
+    serde_json::from_str(&out.stdout).unwrap_or_else(|e| {
+        panic!("register-check stdout not JSON ({}): {}", e, out.stdout)
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -120,11 +121,7 @@ fn generated_identities_pass_register_check_as_planned() {
         let out = register_check(&dir.join("public-identity.json"), &["--role", role]);
         assert_eq!(out.code, 0, "register-check {role} failed: {}", out.stderr);
         let v = verdict(&out);
-        assert_eq!(
-            v["admissible"],
-            serde_json::json!(true),
-            "{role} not admissible"
-        );
+        assert_eq!(v["admissible"], serde_json::json!(true), "{role} not admissible");
         assert_eq!(v["candidate_status"], serde_json::json!("planned"));
         assert_eq!(v["role"], serde_json::json!(role));
         // 16. no socket opened; 12. no state mutated; no live/M4/C4/C5 claim.
@@ -157,7 +154,8 @@ fn identity_maps_into_seed_list_candidate() {
     assert_eq!(cand["status"], serde_json::json!("planned"));
     assert!(cand["last_reachability_evidence"].is_null());
     // expected_genesis_hash pulled from the seed-list document.
-    let seed_doc: serde_json::Value = serde_json::from_str(&read(&seed_list_path())).unwrap();
+    let seed_doc: serde_json::Value =
+        serde_json::from_str(&read(&seed_list_path())).unwrap();
     assert_eq!(cand["expected_genesis_hash"], seed_doc["genesis_hash"]);
     for f in [
         "node_id",
@@ -189,11 +187,7 @@ fn live_without_reachability_is_rejected() {
     let g = generate("full-node", &dir, None);
     assert_eq!(g.code, 0, "{}", g.stderr);
     let out = register_check(&dir.join("public-identity.json"), &["--status", "live"]);
-    assert_eq!(
-        out.code, 3,
-        "live without evidence must be refused: {}",
-        out.stdout
-    );
+    assert_eq!(out.code, 3, "live without evidence must be refused: {}", out.stdout);
     let v = verdict(&out);
     assert_eq!(v["admissible"], serde_json::json!(false));
     assert_eq!(v["live_reachability_claim"], serde_json::json!(false));
@@ -210,18 +204,9 @@ fn planned_with_reachability_is_rejected() {
     assert_eq!(g.code, 0, "{}", g.stderr);
     let out = register_check(
         &dir.join("public-identity.json"),
-        &[
-            "--status",
-            "planned",
-            "--reachability-evidence",
-            "docs/evidence.md",
-        ],
+        &["--status", "planned", "--reachability-evidence", "docs/evidence.md"],
     );
-    assert_eq!(
-        out.code, 3,
-        "planned+reachability must be refused: {}",
-        out.stdout
-    );
+    assert_eq!(out.code, 3, "planned+reachability must be refused: {}", out.stdout);
     assert_eq!(verdict(&out)["admissible"], serde_json::json!(false));
 }
 
@@ -236,18 +221,13 @@ fn embedded_private_material_is_rejected() {
     assert_eq!(g.code, 0, "{}", g.stderr);
     let mut json: serde_json::Value =
         serde_json::from_str(&read(&dir.join("public-identity.json"))).unwrap();
-    json.as_object_mut().unwrap().insert(
-        "leaf_kem_secret_key".into(),
-        serde_json::json!("deadbeefdeadbeef"),
-    );
+    json.as_object_mut()
+        .unwrap()
+        .insert("leaf_kem_secret_key".into(), serde_json::json!("deadbeefdeadbeef"));
     let tampered = dir.join("tampered.json");
     std::fs::write(&tampered, serde_json::to_string_pretty(&json).unwrap()).unwrap();
     let out = register_check(&tampered, &[]);
-    assert_eq!(
-        out.code, 3,
-        "embedded secret must be refused: {}",
-        out.stdout
-    );
+    assert_eq!(out.code, 3, "embedded secret must be refused: {}", out.stdout);
     assert_eq!(verdict(&out)["admissible"], serde_json::json!(false));
 }
 
@@ -270,11 +250,7 @@ fn malformed_node_id_is_rejected() {
     assert_eq!(generate("full-node", &dir, None).code, 0);
     let p = tamper_field(&dir, "node_id", serde_json::json!("XYZ-not-hex"));
     let out = register_check(&p, &[]);
-    assert_eq!(
-        out.code, 3,
-        "malformed node_id must be refused: {}",
-        out.stdout
-    );
+    assert_eq!(out.code, 3, "malformed node_id must be refused: {}", out.stdout);
 }
 
 #[test]
@@ -283,11 +259,7 @@ fn malformed_peer_id_is_rejected() {
     assert_eq!(generate("full-node", &dir, None).code, 0);
     let p = tamper_field(&dir, "peer_id", serde_json::json!("00"));
     let out = register_check(&p, &[]);
-    assert_eq!(
-        out.code, 3,
-        "malformed peer_id must be refused: {}",
-        out.stdout
-    );
+    assert_eq!(out.code, 3, "malformed peer_id must be refused: {}", out.stdout);
 }
 
 #[test]
@@ -296,11 +268,7 @@ fn malformed_trusted_root_spec_is_rejected() {
     assert_eq!(generate("full-node", &dir, None).code, 0);
     let p = tamper_field(&dir, "trusted_root_spec", serde_json::json!("not:a:spec"));
     let out = register_check(&p, &[]);
-    assert_eq!(
-        out.code, 3,
-        "malformed trusted_root_spec must be refused: {}",
-        out.stdout
-    );
+    assert_eq!(out.code, 3, "malformed trusted_root_spec must be refused: {}", out.stdout);
 }
 
 // ---------------------------------------------------------------------------
@@ -335,11 +303,7 @@ fn mismatched_cert_is_rejected() {
         &a.join("public-identity.json"),
         &["--cert", b.join("leaf.cert.bin").to_str().unwrap()],
     );
-    assert_eq!(
-        out.code, 3,
-        "mismatched cert must be refused: {}",
-        out.stdout
-    );
+    assert_eq!(out.code, 3, "mismatched cert must be refused: {}", out.stdout);
     assert_eq!(verdict(&out)["admissible"], serde_json::json!(false));
 
     // Sanity: identity A with its own cert A is admissible and cert-verified.
@@ -371,11 +335,7 @@ fn mismatched_validator_index_is_rejected() {
         &vc3.join("public-identity.json"),
         &["--cert", vc0.join("leaf.cert.bin").to_str().unwrap()],
     );
-    assert_eq!(
-        out.code, 3,
-        "mismatched validator material must be refused: {}",
-        out.stdout
-    );
+    assert_eq!(out.code, 3, "mismatched validator material must be refused: {}", out.stdout);
     assert_eq!(verdict(&out)["admissible"], serde_json::json!(false));
 }
 
@@ -388,19 +348,11 @@ fn unknown_role_flag_is_rejected() {
     let dir = tmpdir("unknownrole").join("full-node");
     assert_eq!(generate("full-node", &dir, None).code, 0);
     let out = register_check(&dir.join("public-identity.json"), &["--role", "super-node"]);
-    assert_eq!(
-        out.code, 3,
-        "unknown --role must be refused: {}",
-        out.stdout
-    );
+    assert_eq!(out.code, 3, "unknown --role must be refused: {}", out.stdout);
 
     // A correct-but-mismatched role is also refused.
     let out2 = register_check(&dir.join("public-identity.json"), &["--role", "seed"]);
-    assert_eq!(
-        out2.code, 3,
-        "mismatched --role must be refused: {}",
-        out2.stdout
-    );
+    assert_eq!(out2.code, 3, "mismatched --role must be refused: {}", out2.stdout);
 }
 
 // ---------------------------------------------------------------------------
@@ -431,14 +383,7 @@ fn register_check_opens_no_socket_and_mutates_nothing() {
 fn missing_seed_list_is_usage_error() {
     let dir = tmpdir("noseedlist").join("full-node");
     assert_eq!(generate("full-node", &dir, None).code, 0);
-    let out = run_identity(&[
-        "register-check",
-        dir.join("public-identity.json").to_str().unwrap(),
-    ]);
-    assert_eq!(
-        out.code, 2,
-        "missing --seed-list must be usage error: {}",
-        out.stdout
-    );
+    let out = run_identity(&["register-check", dir.join("public-identity.json").to_str().unwrap()]);
+    assert_eq!(out.code, 2, "missing --seed-list must be usage error: {}", out.stdout);
     assert_ne!(out.code, 101, "must not panic");
 }

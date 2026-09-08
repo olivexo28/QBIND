@@ -42,16 +42,16 @@ use qbind_node::pqc_governance_modeled_durable_consume_completion_reporter::{
     modeled_completion_reporter_validator_set_rotation_unsupported,
     project_sink_outcome_to_completion_report_intent,
     recover_modeled_durable_consume_completion_reporter_window, CompletionReportIntent,
-    FixtureModeledDurableConsumeCompletionReporter,
-    GovernanceModeledDurableConsumeCompletionReport,
+    FixtureModeledDurableConsumeCompletionReporter, GovernanceModeledDurableConsumeCompletionReport,
     GovernanceModeledDurableConsumeCompletionReporter,
     GovernanceModeledDurableConsumeCompletionReporterExpectations,
     GovernanceModeledDurableConsumeCompletionReporterInput,
     GovernanceModeledDurableConsumeCompletionReporterOutcome,
     GovernanceModeledDurableConsumeCompletionReporterPolicy,
     MainNetModeledDurableConsumeCompletionReporter, ModeledCompletionReportFault,
-    ModeledDurableConsumeCompletionReportLedger, ModeledDurableConsumeCompletionReportWindow,
-    ModeledDurableConsumeCompletionReporterKind, ProductionModeledDurableConsumeCompletionReporter,
+    ModeledDurableConsumeCompletionReportLedger, ModeledDurableConsumeCompletionReporterKind,
+    ModeledDurableConsumeCompletionReportWindow,
+    ProductionModeledDurableConsumeCompletionReporter,
 };
 use qbind_node::pqc_governance_modeled_durable_consume_projection_sink::GovernanceModeledDurableConsumeSinkOutcome;
 use qbind_node::pqc_governance_modeled_end_to_end_pipeline::{
@@ -813,10 +813,7 @@ fn assert_record_fault(
     assert_eq!(outcome, expected);
     assert!(outcome.no_completion());
     assert_eq!(reporter.invocations(), 1, "reporter was invoked");
-    assert!(
-        ledger.is_empty(),
-        "no completion report recorded on a fault"
-    );
+    assert!(ledger.is_empty(), "no completion report recorded on a fault");
 }
 
 #[test]
@@ -914,10 +911,7 @@ fn duplicate_sink_receipt_without_prior_report_does_not_create_new_completion() 
         GovernanceModeledDurableConsumeCompletionReporterOutcome::CompletionReportRejectedBeforeRecord
     );
     assert!(outcome.no_completion());
-    assert!(
-        ledger.is_empty(),
-        "no completion report created from a duplicate"
-    );
+    assert!(ledger.is_empty(), "no completion report created from a duplicate");
 }
 
 #[test]
@@ -1153,10 +1147,7 @@ fn recover(
 
 #[test]
 fn recovery_before_pipeline_window_fails_closed_no_report() {
-    let outcome = recover(
-        ModeledDurableConsumeCompletionReportWindow::BeforePipeline,
-        None,
-    );
+    let outcome = recover(ModeledDurableConsumeCompletionReportWindow::BeforePipeline, None);
     assert_eq!(
         outcome,
         GovernanceModeledDurableConsumeCompletionReporterOutcome::SinkDidNotRecordReceiptNoCompletionReport
@@ -1595,16 +1586,12 @@ fn invariant_helpers_hold() {
     assert!(modeled_completion_reporter_failed_record_never_completes());
     assert!(modeled_completion_reporter_rollback_never_completes());
     assert!(modeled_completion_reporter_ambiguous_window_fails_closed());
-    assert!(
-        modeled_completion_reporter_mainnet_peer_driven_apply_refused_first(
-            TrustBundleEnvironment::Mainnet
-        )
-    );
-    assert!(
-        !modeled_completion_reporter_mainnet_peer_driven_apply_refused_first(
-            TrustBundleEnvironment::Devnet
-        )
-    );
+    assert!(modeled_completion_reporter_mainnet_peer_driven_apply_refused_first(
+        TrustBundleEnvironment::Mainnet
+    ));
+    assert!(!modeled_completion_reporter_mainnet_peer_driven_apply_refused_first(
+        TrustBundleEnvironment::Devnet
+    ));
     assert!(modeled_completion_reporter_production_mainnet_unavailable());
     assert!(modeled_completion_reporter_validator_set_rotation_unsupported());
     assert!(modeled_completion_reporter_policy_change_unsupported());

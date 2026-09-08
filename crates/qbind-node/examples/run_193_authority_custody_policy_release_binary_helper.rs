@@ -81,7 +81,8 @@ use qbind_node::pqc_authority_custody_policy_surface::{
     preflight_v2_marker_authority_custody_for_reload_check,
     preflight_v2_marker_authority_custody_for_sighup,
     preflight_v2_marker_authority_custody_for_startup_p2p_trust_bundle,
-    AuthorityCustodyPolicySelectorParseError, QBIND_P2P_TRUST_BUNDLE_AUTHORITY_CUSTODY_POLICY_ENV,
+    AuthorityCustodyPolicySelectorParseError,
+    QBIND_P2P_TRUST_BUNDLE_AUTHORITY_CUSTODY_POLICY_ENV,
 };
 use qbind_node::pqc_authority_lifecycle::{
     AuthorityTrustDomain, LocalLifecycleAction, PQC_LIFECYCLE_SUITE_ML_DSA_44,
@@ -103,9 +104,11 @@ const KEY_A: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const KEY_B: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 const ROOT_FP: &str = "1111111111111111111111111111111111111111";
 const CHAIN_ID: &str = "0000000000000001";
-const GENESIS_HASH: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+const GENESIS_HASH: &str =
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const DIGEST_2: &str = "2222222222222222222222222222222222222222222222222222222222222222";
-const PRIOR_DIGEST: &str = "1111111111111111111111111111111111111111111111111111111111111111";
+const PRIOR_DIGEST: &str =
+    "1111111111111111111111111111111111111111111111111111111111111111";
 const CUSTODY_ATTEST_DIGEST: &str = "custody-att-digest-193";
 const CUSTODY_KEY_ID: &str = "custody-key-id-193";
 const NOW: u64 = 1_700_000_000;
@@ -117,13 +120,7 @@ const EXPIRES: u64 = 1_700_001_000;
 // ---------------------------------------------------------------------------
 
 fn domain_for(env: TrustBundleEnvironment) -> AuthorityTrustDomain {
-    AuthorityTrustDomain::new(
-        env,
-        CHAIN_ID,
-        GENESIS_HASH,
-        ROOT_FP,
-        PQC_LIFECYCLE_SUITE_ML_DSA_44,
-    )
+    AuthorityTrustDomain::new(env, CHAIN_ID, GENESIS_HASH, ROOT_FP, PQC_LIFECYCLE_SUITE_ML_DSA_44)
 }
 
 fn build_v2(
@@ -352,21 +349,19 @@ impl Surface {
                     loaded,
                 )
             }
-            Surface::PeerDrivenDrain => {
-                preflight_v2_marker_authority_custody_for_peer_driven_drain(
-                    persisted,
-                    candidate,
-                    domain,
-                    policy,
-                    GovernanceAuthorityClass::GenesisBound,
-                    LocalLifecycleAction::Rotate,
-                    DIGEST_2,
-                    2,
-                    Some(CUSTODY_KEY_ID),
-                    NOW,
-                    loaded,
-                )
-            }
+            Surface::PeerDrivenDrain => preflight_v2_marker_authority_custody_for_peer_driven_drain(
+                persisted,
+                candidate,
+                domain,
+                policy,
+                GovernanceAuthorityClass::GenesisBound,
+                LocalLifecycleAction::Rotate,
+                DIGEST_2,
+                2,
+                Some(CUSTODY_KEY_ID),
+                NOW,
+                loaded,
+            ),
         }
     }
 }
@@ -411,90 +406,64 @@ fn matches_expect(
         (O::MainNetPeerDrivenApplyRefused, Expect::MainNetPeerDrivenApplyRefused) => true,
         (O::Callsite(c), e) => match (c, e) {
             (
-                LifecycleGovernanceCustodyOutcome::Accepted {
-                    custody_outcome, ..
-                },
+                LifecycleGovernanceCustodyOutcome::Accepted { custody_outcome, .. },
                 Expect::CallsiteAcceptedFixture,
             ) => matches!(
                 custody_outcome,
                 AuthorityCustodyValidationOutcome::AcceptedFixtureCustody { .. }
             ),
             (
-                LifecycleGovernanceCustodyOutcome::Accepted {
-                    custody_outcome, ..
-                },
+                LifecycleGovernanceCustodyOutcome::Accepted { custody_outcome, .. },
                 Expect::CallsiteAcceptedLocalOperator,
             ) => matches!(
                 custody_outcome,
                 AuthorityCustodyValidationOutcome::AcceptedLocalOperatorCustody { .. }
             ),
             (
-                LifecycleGovernanceCustodyOutcome::CustodyRejected {
-                    custody_outcome, ..
-                },
+                LifecycleGovernanceCustodyOutcome::CustodyRejected { custody_outcome, .. },
                 Expect::CallsiteCustodyRejectedKmsUnavailable,
-            ) => matches!(
-                custody_outcome,
-                AuthorityCustodyValidationOutcome::KmsUnavailable
-            ),
+            ) => matches!(custody_outcome, AuthorityCustodyValidationOutcome::KmsUnavailable),
             (
-                LifecycleGovernanceCustodyOutcome::CustodyRejected {
-                    custody_outcome, ..
-                },
+                LifecycleGovernanceCustodyOutcome::CustodyRejected { custody_outcome, .. },
                 Expect::CallsiteCustodyRejectedHsmUnavailable,
-            ) => matches!(
-                custody_outcome,
-                AuthorityCustodyValidationOutcome::HsmUnavailable
-            ),
+            ) => matches!(custody_outcome, AuthorityCustodyValidationOutcome::HsmUnavailable),
             (
-                LifecycleGovernanceCustodyOutcome::CustodyRejected {
-                    custody_outcome, ..
-                },
+                LifecycleGovernanceCustodyOutcome::CustodyRejected { custody_outcome, .. },
                 Expect::CallsiteCustodyRejectedRemoteSignerUnavailable,
             ) => matches!(
                 custody_outcome,
                 AuthorityCustodyValidationOutcome::RemoteSignerUnavailable
             ),
             (
-                LifecycleGovernanceCustodyOutcome::CustodyRejected {
-                    custody_outcome, ..
-                },
+                LifecycleGovernanceCustodyOutcome::CustodyRejected { custody_outcome, .. },
                 Expect::CallsiteCustodyRejectedFixtureOnMainNet,
             ) => matches!(
                 custody_outcome,
                 AuthorityCustodyValidationOutcome::FixtureCustodyRejectedForMainNet
             ),
             (
-                LifecycleGovernanceCustodyOutcome::CustodyRejected {
-                    custody_outcome, ..
-                },
+                LifecycleGovernanceCustodyOutcome::CustodyRejected { custody_outcome, .. },
                 Expect::CallsiteCustodyRejectedLocalOnMainNet,
             ) => matches!(
                 custody_outcome,
                 AuthorityCustodyValidationOutcome::LocalCustodyRejectedForMainNet
             ),
             (
-                LifecycleGovernanceCustodyOutcome::CustodyRejected {
-                    custody_outcome, ..
-                },
+                LifecycleGovernanceCustodyOutcome::CustodyRejected { custody_outcome, .. },
                 Expect::CallsiteCustodyRejectedPolicyRefusesClass,
             ) => matches!(
                 custody_outcome,
                 AuthorityCustodyValidationOutcome::PolicyRefusesCustodyClass { .. }
             ),
             (
-                LifecycleGovernanceCustodyOutcome::CustodyRejected {
-                    custody_outcome, ..
-                },
+                LifecycleGovernanceCustodyOutcome::CustodyRejected { custody_outcome, .. },
                 Expect::CallsiteCustodyRejectedProductionUnavailable,
             ) => matches!(
                 custody_outcome,
                 AuthorityCustodyValidationOutcome::ProductionCustodyUnavailable { .. }
             ),
             (
-                LifecycleGovernanceCustodyOutcome::CustodyRejected {
-                    custody_outcome, ..
-                },
+                LifecycleGovernanceCustodyOutcome::CustodyRejected { custody_outcome, .. },
                 Expect::CallsiteCustodyRejectedMainNetProductionUnavailable,
             ) => matches!(
                 custody_outcome,
@@ -1068,11 +1037,7 @@ fn run_scenarios(
         // Step 1: resolve selector via Run 192 production library symbols.
         let selector_outcome = resolve_selector(&scn.selector);
         let sel_actual: String;
-        let selector_match = match (
-            &selector_outcome,
-            &scn.expected_policy,
-            scn.expected_parse_error,
-        ) {
+        let selector_match = match (&selector_outcome, &scn.expected_policy, scn.expected_parse_error) {
             (SelectorOutcome::Resolved(p), Some(want), false) => {
                 sel_actual = format!("Resolved({:?})", p);
                 p == want
@@ -1090,17 +1055,11 @@ fn run_scenarios(
                 false
             }
             (SelectorOutcome::Resolved(p), None, false) => {
-                sel_actual = format!(
-                    "Resolved({:?}) (UNEXPECTED — no expected policy and no parse error)",
-                    p
-                );
+                sel_actual = format!("Resolved({:?}) (UNEXPECTED — no expected policy and no parse error)", p);
                 false
             }
             (SelectorOutcome::ParseError(e), Some(_), true) => {
-                sel_actual = format!(
-                    "ParseError({:?}) (UNEXPECTED — expected both resolved and parse error)",
-                    e
-                );
+                sel_actual = format!("ParseError({:?}) (UNEXPECTED — expected both resolved and parse error)", e);
                 false
             }
         };
@@ -1184,7 +1143,12 @@ fn run_scenarios(
                     surface.label(),
                     expected
                 ));
-                actual_buf.push_str(&format!("{}\t{}\t{:?}\n", scn.id, surface.label(), outcome));
+                actual_buf.push_str(&format!(
+                    "{}\t{}\t{:?}\n",
+                    scn.id,
+                    surface.label(),
+                    outcome
+                ));
             }
         }
         fs::write(scn_dir.join("actual.txt"), actual_lines)?;
@@ -1206,14 +1170,8 @@ fn run_selector_parser_table(out_dir: &Path) -> std::io::Result<(usize, usize)> 
         ("Disabled", Ok(AuthorityCustodyPolicy::Disabled)),
         ("  fixture-only ", Ok(AuthorityCustodyPolicy::FixtureOnly)),
         ("FIXTURE-ONLY", Ok(AuthorityCustodyPolicy::FixtureOnly)),
-        (
-            "devnet-local-allowed",
-            Ok(AuthorityCustodyPolicy::DevnetLocalAllowed),
-        ),
-        (
-            "testnet-local-allowed",
-            Ok(AuthorityCustodyPolicy::TestnetLocalAllowed),
-        ),
+        ("devnet-local-allowed", Ok(AuthorityCustodyPolicy::DevnetLocalAllowed)),
+        ("testnet-local-allowed", Ok(AuthorityCustodyPolicy::TestnetLocalAllowed)),
         (
             "production-custody-required",
             Ok(AuthorityCustodyPolicy::ProductionCustodyRequired),
@@ -1233,10 +1191,9 @@ fn run_selector_parser_table(out_dir: &Path) -> std::io::Result<(usize, usize)> 
         let ok = match (expected, &actual) {
             (Ok(want), Ok(got)) => &want == got,
             (Err("empty"), Err(AuthorityCustodyPolicySelectorParseError::Empty)) => true,
-            (
-                Err("unknown-value"),
-                Err(AuthorityCustodyPolicySelectorParseError::UnknownValue { .. }),
-            ) => true,
+            (Err("unknown-value"), Err(AuthorityCustodyPolicySelectorParseError::UnknownValue { .. })) => {
+                true
+            }
             _ => false,
         };
         if ok {
@@ -1271,11 +1228,7 @@ fn run_precedence_table(out_dir: &Path) -> std::io::Result<(usize, usize)> {
     // Always clear env up-front to avoid cross-test contamination.
     std::env::remove_var(key);
 
-    let cases: Vec<(
-        Option<&str>,
-        Option<&str>,
-        Result<AuthorityCustodyPolicy, &'static str>,
-    )> = vec![
+    let cases: Vec<(Option<&str>, Option<&str>, Result<AuthorityCustodyPolicy, &'static str>)> = vec![
         // Both unset => Disabled.
         (None, None, Ok(AuthorityCustodyPolicy::Disabled)),
         // CLI only.
@@ -1316,10 +1269,7 @@ fn run_precedence_table(out_dir: &Path) -> std::io::Result<(usize, usize)> {
         std::env::remove_var(key);
         let ok = match (expected, &actual) {
             (Ok(want), Ok(got)) => &want == got,
-            (
-                Err("unknown-value"),
-                Err(AuthorityCustodyPolicySelectorParseError::UnknownValue { .. }),
-            ) => true,
+            (Err("unknown-value"), Err(AuthorityCustodyPolicySelectorParseError::UnknownValue { .. })) => true,
             (Err("empty"), Err(AuthorityCustodyPolicySelectorParseError::Empty)) => true,
             _ => false,
         };
@@ -1342,11 +1292,7 @@ fn run_precedence_table(out_dir: &Path) -> std::io::Result<(usize, usize)> {
     std::env::remove_var(key);
     let env_unset = authority_custody_policy_env_selector();
     let unset_ok = matches!(env_unset, Ok(None));
-    if unset_ok {
-        pass += 1;
-    } else {
-        fail += 1;
-    }
+    if unset_ok { pass += 1; } else { fail += 1; }
     buf.push_str(&format!(
         "env_unset_returns_none\tactual={:?}\tok={}\n",
         env_unset, unset_ok
@@ -1354,11 +1300,7 @@ fn run_precedence_table(out_dir: &Path) -> std::io::Result<(usize, usize)> {
     std::env::set_var(key, "fixture-only");
     let env_set = authority_custody_policy_env_selector();
     let set_ok = matches!(env_set, Ok(Some(AuthorityCustodyPolicy::FixtureOnly)));
-    if set_ok {
-        pass += 1;
-    } else {
-        fail += 1;
-    }
+    if set_ok { pass += 1; } else { fail += 1; }
     buf.push_str(&format!(
         "env_set_fixture_only_returns_some\tactual={:?}\tok={}\n",
         env_set, set_ok
@@ -1432,57 +1374,32 @@ fn run_preflight_wrappers_table(out_dir: &Path) -> std::io::Result<(usize, usize
         &loaded,
     );
     let refused = mn_outcome.is_mainnet_peer_driven_apply_refused();
-    if refused {
-        pass += 1;
-    } else {
-        fail += 1;
-    }
+    if refused { pass += 1; } else { fail += 1; }
     buf.push_str(&format!(
         "preflight_v2_marker_authority_custody_for_peer_driven_drain_mainnet_refused\trefused={}\toutcome={:?}\n",
         refused, mn_outcome
     ));
 
     // Named helpers — explicit grep-verifiable refusal helpers.
-    let mn_helper = mainnet_peer_driven_apply_remains_refused_under_custody_boundary(
-        TrustBundleEnvironment::Mainnet,
-    );
-    if mn_helper {
-        pass += 1;
-    } else {
-        fail += 1;
-    }
+    let mn_helper =
+        mainnet_peer_driven_apply_remains_refused_under_custody_boundary(TrustBundleEnvironment::Mainnet);
+    if mn_helper { pass += 1; } else { fail += 1; }
     buf.push_str(&format!(
         "mainnet_peer_driven_apply_remains_refused_under_custody_boundary_mainnet\tok={}\n",
         mn_helper
     ));
-    let dn_helper = !mainnet_peer_driven_apply_remains_refused_under_custody_boundary(
-        TrustBundleEnvironment::Devnet,
-    );
-    if dn_helper {
-        pass += 1;
-    } else {
-        fail += 1;
-    }
+    let dn_helper =
+        !mainnet_peer_driven_apply_remains_refused_under_custody_boundary(TrustBundleEnvironment::Devnet);
+    if dn_helper { pass += 1; } else { fail += 1; }
     buf.push_str(&format!(
         "mainnet_peer_driven_apply_remains_refused_under_custody_boundary_devnet_false\tok={}\n",
         dn_helper
     ));
     let pmaj = peer_majority_cannot_satisfy_custody();
-    if pmaj {
-        pass += 1;
-    } else {
-        fail += 1;
-    }
-    buf.push_str(&format!(
-        "peer_majority_cannot_satisfy_custody\tok={}\n",
-        pmaj
-    ));
+    if pmaj { pass += 1; } else { fail += 1; }
+    buf.push_str(&format!("peer_majority_cannot_satisfy_custody\tok={}\n", pmaj));
     let local_alone = local_operator_config_alone_cannot_satisfy_mainnet_production_custody();
-    if local_alone {
-        pass += 1;
-    } else {
-        fail += 1;
-    }
+    if local_alone { pass += 1; } else { fail += 1; }
     buf.push_str(&format!(
         "local_operator_config_alone_cannot_satisfy_mainnet_production_custody\tok={}\n",
         local_alone
@@ -1544,10 +1461,7 @@ fn run_binding_mismatch_table(out_dir: &Path) -> std::io::Result<(usize, usize)>
         let o = validate(&a);
         record(
             "R16_wrong_environment",
-            matches!(
-                o,
-                AuthorityCustodyValidationOutcome::WrongEnvironment { .. }
-            ),
+            matches!(o, AuthorityCustodyValidationOutcome::WrongEnvironment { .. }),
             &o,
         );
     }
@@ -1581,10 +1495,7 @@ fn run_binding_mismatch_table(out_dir: &Path) -> std::io::Result<(usize, usize)>
         let o = validate(&a);
         record(
             "R19_wrong_authority_root",
-            matches!(
-                o,
-                AuthorityCustodyValidationOutcome::WrongAuthorityRoot { .. }
-            ),
+            matches!(o, AuthorityCustodyValidationOutcome::WrongAuthorityRoot { .. }),
             &o,
         );
     }
@@ -1595,10 +1506,7 @@ fn run_binding_mismatch_table(out_dir: &Path) -> std::io::Result<(usize, usize)>
         let o = validate(&a);
         record(
             "R20_wrong_signing_key_fingerprint",
-            matches!(
-                o,
-                AuthorityCustodyValidationOutcome::WrongSigningKeyFingerprint { .. }
-            ),
+            matches!(o, AuthorityCustodyValidationOutcome::WrongSigningKeyFingerprint { .. }),
             &o,
         );
     }
@@ -1609,10 +1517,7 @@ fn run_binding_mismatch_table(out_dir: &Path) -> std::io::Result<(usize, usize)>
         let o = validate(&a);
         record(
             "R21_wrong_candidate_digest",
-            matches!(
-                o,
-                AuthorityCustodyValidationOutcome::WrongCandidateDigest { .. }
-            ),
+            matches!(o, AuthorityCustodyValidationOutcome::WrongCandidateDigest { .. }),
             &o,
         );
     }
@@ -1623,10 +1528,7 @@ fn run_binding_mismatch_table(out_dir: &Path) -> std::io::Result<(usize, usize)>
         let o = validate(&a);
         record(
             "R22_wrong_authority_domain_sequence",
-            matches!(
-                o,
-                AuthorityCustodyValidationOutcome::WrongAuthorityDomainSequence { .. }
-            ),
+            matches!(o, AuthorityCustodyValidationOutcome::WrongAuthorityDomainSequence { .. }),
             &o,
         );
     }
@@ -1637,10 +1539,7 @@ fn run_binding_mismatch_table(out_dir: &Path) -> std::io::Result<(usize, usize)>
         let o = validate(&a);
         record(
             "R23_expired_attestation",
-            matches!(
-                o,
-                AuthorityCustodyValidationOutcome::CustodyAttestationExpired { .. }
-            ),
+            matches!(o, AuthorityCustodyValidationOutcome::CustodyAttestationExpired { .. }),
             &o,
         );
     }
@@ -1651,10 +1550,7 @@ fn run_binding_mismatch_table(out_dir: &Path) -> std::io::Result<(usize, usize)>
         let o = validate(&a);
         record(
             "R24_custody_key_id_mismatch",
-            matches!(
-                o,
-                AuthorityCustodyValidationOutcome::CustodyKeyIdMismatch { .. }
-            ),
+            matches!(o, AuthorityCustodyValidationOutcome::CustodyKeyIdMismatch { .. }),
             &o,
         );
     }
@@ -1665,10 +1561,7 @@ fn run_binding_mismatch_table(out_dir: &Path) -> std::io::Result<(usize, usize)>
         let o = validate(&a);
         record(
             "R25_unsupported_custody_suite",
-            matches!(
-                o,
-                AuthorityCustodyValidationOutcome::UnsupportedCustodySuite { .. }
-            ),
+            matches!(o, AuthorityCustodyValidationOutcome::UnsupportedCustodySuite { .. }),
             &o,
         );
     }
@@ -1733,10 +1626,7 @@ fn run_no_mutation_evidence(out_dir: &Path) -> std::io::Result<(usize, usize)> {
     record("prior_unchanged_after_rejection", prior == prior_before);
     record("trust_domain_unchanged_after_rejection", dom == dom_before);
     record("attestation_unchanged_after_rejection", att == att_before);
-    record(
-        "loaded_status_unchanged_after_rejection",
-        loaded == loaded_before,
-    );
+    record("loaded_status_unchanged_after_rejection", loaded == loaded_before);
 
     for (label, outcome) in &outcomes {
         buf.push_str(&format!("surface_outcome\t{}\t{:?}\n", label, outcome));
@@ -1777,11 +1667,7 @@ fn run_determinism_check(out_dir: &Path) -> std::io::Result<(usize, usize)> {
         let all_eq = samples.iter().all(|o| *o == first);
         let first_accept = first.is_accept();
         let ok = all_eq && first_accept;
-        if ok {
-            pass += 1;
-        } else {
-            fail += 1;
-        }
+        if ok { pass += 1; } else { fail += 1; }
         buf.push_str(&format!(
             "surface\t{}\tsamples=32\tall_equal={}\tfirst_accept={}\tsample={:?}\n",
             surface.label(),
@@ -1804,7 +1690,9 @@ fn main() {
     let out_dir: PathBuf = match args.next() {
         Some(p) => PathBuf::from(p),
         None => {
-            eprintln!("usage: run_193_authority_custody_policy_release_binary_helper <OUT_DIR>");
+            eprintln!(
+                "usage: run_193_authority_custody_policy_release_binary_helper <OUT_DIR>"
+            );
             std::process::exit(2);
         }
     };
@@ -1819,10 +1707,15 @@ fn main() {
     let mut expected_buf = String::new();
     let mut actual_buf = String::new();
 
-    let (s_pass, s_fail) =
-        run_scenarios(&out_dir, &mut manifest, &mut expected_buf, &mut actual_buf)
-            .expect("scenario corpus");
-    let (p_pass, p_fail) = run_selector_parser_table(&out_dir).expect("selector parser table");
+    let (s_pass, s_fail) = run_scenarios(
+        &out_dir,
+        &mut manifest,
+        &mut expected_buf,
+        &mut actual_buf,
+    )
+    .expect("scenario corpus");
+    let (p_pass, p_fail) =
+        run_selector_parser_table(&out_dir).expect("selector parser table");
     let (c_pass, c_fail) = run_precedence_table(&out_dir).expect("precedence table");
     let (w_pass, w_fail) =
         run_preflight_wrappers_table(&out_dir).expect("preflight wrappers table");
@@ -1838,39 +1731,19 @@ fn main() {
     let total_fail = s_fail + p_fail + c_fail + w_fail + b_fail + n_fail + d_fail;
     let verdict = if total_fail == 0 { "PASS" } else { "FAIL" };
 
-    let mut summary =
-        fs::File::create(out_dir.join("helper_summary.txt")).expect("create helper_summary.txt");
+    let mut summary = fs::File::create(out_dir.join("helper_summary.txt"))
+        .expect("create helper_summary.txt");
     writeln!(
         summary,
         "Run 193 helper - release-mode authority-custody policy selector corpus"
     )
     .unwrap();
     writeln!(summary, "verdict: {}", verdict).unwrap();
-    writeln!(
-        summary,
-        "total_pass: {}\ntotal_fail: {}",
-        total_pass, total_fail
-    )
-    .unwrap();
-    writeln!(
-        summary,
-        "scenarios_pass: {}\nscenarios_fail: {}",
-        s_pass, s_fail
-    )
-    .unwrap();
+    writeln!(summary, "total_pass: {}\ntotal_fail: {}", total_pass, total_fail).unwrap();
+    writeln!(summary, "scenarios_pass: {}\nscenarios_fail: {}", s_pass, s_fail).unwrap();
     writeln!(summary, "parser_pass: {}\nparser_fail: {}", p_pass, p_fail).unwrap();
-    writeln!(
-        summary,
-        "precedence_pass: {}\nprecedence_fail: {}",
-        c_pass, c_fail
-    )
-    .unwrap();
-    writeln!(
-        summary,
-        "wrappers_pass: {}\nwrappers_fail: {}",
-        w_pass, w_fail
-    )
-    .unwrap();
+    writeln!(summary, "precedence_pass: {}\nprecedence_fail: {}", c_pass, c_fail).unwrap();
+    writeln!(summary, "wrappers_pass: {}\nwrappers_fail: {}", w_pass, w_fail).unwrap();
     writeln!(
         summary,
         "binding_mismatch_pass: {}\nbinding_mismatch_fail: {}",

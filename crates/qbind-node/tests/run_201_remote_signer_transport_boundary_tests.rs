@@ -46,7 +46,8 @@ use qbind_node::pqc_remote_signer_transport::{
     RemoteSignerTransport, RemoteSignerTransportConfig, RemoteSignerTransportExpectations,
     RemoteSignerTransportOutcome, RemoteSignerTransportRequestEnvelope,
     RemoteSignerTransportResponseEnvelope, SimulatedTransportFault, TransportTimeoutRetryPolicy,
-    REMOTE_SIGNER_TRANSPORT_INVALID_ATTESTATION_SENTINEL, REMOTE_SIGNER_TRANSPORT_PROTOCOL_VERSION,
+    REMOTE_SIGNER_TRANSPORT_INVALID_ATTESTATION_SENTINEL,
+    REMOTE_SIGNER_TRANSPORT_PROTOCOL_VERSION,
     REMOTE_SIGNER_TRANSPORT_REQUEST_ENVELOPE_DOMAIN_TAG,
 };
 use qbind_node::pqc_trust_bundle::TrustBundleEnvironment;
@@ -83,13 +84,7 @@ const FRESH: u64 = 1_699_999_900;
 const EXPIRES: u64 = 1_700_001_000;
 
 fn domain(env: TrustBundleEnvironment) -> AuthorityTrustDomain {
-    AuthorityTrustDomain::new(
-        env,
-        CHAIN_ID,
-        GENESIS_HASH,
-        ROOT_FP,
-        PQC_LIFECYCLE_SUITE_ML_DSA_44,
-    )
+    AuthorityTrustDomain::new(env, CHAIN_ID, GENESIS_HASH, ROOT_FP, PQC_LIFECYCLE_SUITE_ML_DSA_44)
 }
 
 fn build_v2(
@@ -119,14 +114,7 @@ fn build_v2(
 }
 
 fn rotate_candidate(env: TrustBundleEnvironment) -> PersistentAuthorityStateRecordV2 {
-    build_v2(
-        env,
-        KEY_B,
-        2,
-        BundleSigningRatificationV2Action::Rotate,
-        Some(KEY_A),
-        DIGEST_2,
-    )
+    build_v2(env, KEY_B, 2, BundleSigningRatificationV2Action::Rotate, Some(KEY_A), DIGEST_2)
 }
 
 fn prior_versioned(env: TrustBundleEnvironment) -> PersistentAuthorityStateRecordVersioned {
@@ -304,7 +292,9 @@ fn validate_fixture(s: &Scenario) -> RemoteSignerTransportOutcome {
 // Build a production-mode response envelope (signer_mode = Production)
 // by replacing the inner response. Used for the production-unavailable
 // vectors.
-fn production_mode_response(s: &Scenario) -> RemoteSignerTransportResponseEnvelope {
+fn production_mode_response(
+    s: &Scenario,
+) -> RemoteSignerTransportResponseEnvelope {
     let mut env = s.response_env.clone();
     env.inner_response.signer_mode = RemoteSignerMode::Production;
     env
@@ -404,7 +394,10 @@ fn a4_response_envelope_digest_deterministic() {
     // Mutating a bound field changes the digest.
     let mut other = s1.response_env.clone();
     other.signer_id = "other-signer".to_string();
-    assert_ne!(s1.response_env.envelope_digest(), other.envelope_digest());
+    assert_ne!(
+        s1.response_env.envelope_digest(),
+        other.envelope_digest()
+    );
 }
 
 #[test]
@@ -431,17 +424,11 @@ fn a6_transport_request_binds_full_authority_tuple() {
     assert_eq!(r.authority_root_fingerprint, ROOT_FP);
     assert_eq!(r.expected_signer_id, SIGNER_ID);
     assert_eq!(r.custody_key_id, CUSTODY_KEY_ID);
-    assert_eq!(
-        r.inner_request.lifecycle_action,
-        LocalLifecycleAction::Rotate
-    );
+    assert_eq!(r.inner_request.lifecycle_action, LocalLifecycleAction::Rotate);
     assert_eq!(r.inner_request.candidate_digest, DIGEST_2);
     assert_eq!(r.inner_request.authority_domain_sequence, 2);
     // The canonical request digest binds all of the above.
-    assert_eq!(
-        r.canonical_request_digest,
-        r.inner_request.canonical_digest()
-    );
+    assert_eq!(r.canonical_request_digest, r.inner_request.canonical_digest());
 }
 
 #[test]
@@ -459,8 +446,10 @@ fn a7_transport_response_binds_request_and_transcript() {
         resp.canonical_response_digest,
         remote_signer_response_canonical_digest(&resp.inner_response)
     );
-    let expected_transcript =
-        transport_transcript_digest(&s.request_env.envelope_digest(), &resp.envelope_digest());
+    let expected_transcript = transport_transcript_digest(
+        &s.request_env.envelope_digest(),
+        &resp.envelope_digest(),
+    );
     assert_eq!(resp.transcript_digest, expected_transcript);
 }
 
@@ -551,10 +540,7 @@ fn r2_fixture_rejected_production_required() {
 fn r3_fixture_rejected_mainnet_production_required() {
     let s = scenario(TrustBundleEnvironment::Devnet);
     assert_eq!(
-        validate(
-            &s,
-            RemoteSignerPolicy::MainnetProductionRemoteSignerRequired
-        ),
+        validate(&s, RemoteSignerPolicy::MainnetProductionRemoteSignerRequired),
         RemoteSignerTransportOutcome::FixtureTransportRejectedMainnetProductionRequired
     );
 }
@@ -596,10 +582,7 @@ fn r5_mainnet_production_transport_unavailable() {
     let mut s2 = scenario(TrustBundleEnvironment::Devnet);
     s2.response_env = production_mode_response(&s);
     assert_eq!(
-        validate(
-            &s2,
-            RemoteSignerPolicy::MainnetProductionRemoteSignerRequired
-        ),
+        validate(&s2, RemoteSignerPolicy::MainnetProductionRemoteSignerRequired),
         RemoteSignerTransportOutcome::MainNetProductionTransportUnavailable
     );
 }
@@ -608,10 +591,7 @@ fn r5_mainnet_production_transport_unavailable() {
 fn r6_endpoint_missing_rejected() {
     let mut s = scenario(TrustBundleEnvironment::Devnet);
     s.config.endpoint = String::new();
-    assert_eq!(
-        validate_fixture(&s),
-        RemoteSignerTransportOutcome::EndpointMissing
-    );
+    assert_eq!(validate_fixture(&s), RemoteSignerTransportOutcome::EndpointMissing);
 }
 
 #[test]

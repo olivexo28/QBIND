@@ -61,6 +61,7 @@ use qbind_node::pqc_governance_durable_completion_consumer_settlement_projection
     FixtureDurableCompletionConsumerSettlementProjectionSink,
 };
 use qbind_node::pqc_governance_durable_completion_settlement_commitment::{
+    settlement_commitment_identity_digest,
     durable_completion_settlement_commitment_ambiguous_window_fails_closed,
     durable_completion_settlement_commitment_attestation_required,
     durable_completion_settlement_commitment_backend_submission_required,
@@ -88,13 +89,17 @@ use qbind_node::pqc_governance_durable_completion_settlement_commitment::{
     durable_completion_settlement_commitment_validator_set_rotation_unsupported,
     evaluate_durable_completion_settlement_commitment,
     project_settlement_projection_outcome_to_commitment_request,
-    recover_durable_completion_settlement_commitment_window, settlement_commitment_identity_digest,
+    recover_durable_completion_settlement_commitment_window,
     settlement_commitment_outcome_authorizes_record,
     settlement_commitment_outcome_projects_to_recorded,
-    DurableCompletionSettlementCommitmentExpectations, DurableCompletionSettlementCommitmentFault,
-    DurableCompletionSettlementCommitmentIdentity, DurableCompletionSettlementCommitmentInput,
-    DurableCompletionSettlementCommitmentKind, DurableCompletionSettlementCommitmentLedger,
-    DurableCompletionSettlementCommitmentOutcome, DurableCompletionSettlementCommitmentPolicy,
+    DurableCompletionSettlementCommitmentExpectations,
+    DurableCompletionSettlementCommitmentFault,
+    DurableCompletionSettlementCommitmentIdentity,
+    DurableCompletionSettlementCommitmentInput,
+    DurableCompletionSettlementCommitmentKind,
+    DurableCompletionSettlementCommitmentLedger,
+    DurableCompletionSettlementCommitmentOutcome,
+    DurableCompletionSettlementCommitmentPolicy,
     DurableCompletionSettlementCommitmentRequest,
     DurableCompletionSettlementCommitmentRequestIntent,
     DurableCompletionSettlementCommitmentWindow, ExternalSettlementCommitmentSink,
@@ -1032,8 +1037,7 @@ fn attach_run264_settlement_projection(
         expected_consumer_transcript_digest: consumer.transcript_digest.clone(),
         expected_consumer_record_id: consumer.consumer_record_id.clone(),
         expected_identity: id.clone(),
-        expected_projection_kind:
-            DurableCompletionConsumerSettlementProjectionKind::FixtureInMemory,
+        expected_projection_kind: DurableCompletionConsumerSettlementProjectionKind::FixtureInMemory,
         expected_projection_policy:
             DurableCompletionConsumerSettlementProjectionPolicy::FixtureAllowed,
         expected_domain_separation_tag: PROJECTION_DOMAIN_TAG.to_string(),
@@ -1244,9 +1248,7 @@ fn ctx_action(
         expected_consumer_record_digest: consumer.record_digest.clone(),
         expected_consumer_transcript_digest: consumer.transcript_digest.clone(),
         expected_consumer_record_id: consumer.consumer_record_id.clone(),
-        expected_settlement_projection_identity_digest: settlement_projection
-            .identity_digest
-            .clone(),
+        expected_settlement_projection_identity_digest: settlement_projection.identity_digest.clone(),
         expected_settlement_projection_request_digest: settlement_projection.request_digest.clone(),
         expected_settlement_projection_response_digest: settlement_projection
             .response_digest
@@ -1255,9 +1257,7 @@ fn ctx_action(
         expected_settlement_projection_transcript_digest: settlement_projection
             .transcript_digest
             .clone(),
-        expected_settlement_projection_record_id: settlement_projection
-            .projection_record_id
-            .clone(),
+        expected_settlement_projection_record_id: settlement_projection.projection_record_id.clone(),
         expected_identity: id,
         expected_commitment_kind: kind,
         expected_commitment_policy: policy,
@@ -2332,12 +2332,10 @@ fn only_recorded_projection_outcome_creates_settlement_commitment_request_intent
         ),
         Intent::IdempotentOnly
     );
-    assert!(
-        !project_settlement_projection_outcome_to_commitment_request(
-            &Projection::LegacyBypassNoSettlementProjection
-        )
-        .creates_request()
-    );
+    assert!(!project_settlement_projection_outcome_to_commitment_request(
+        &Projection::LegacyBypassNoSettlementProjection
+    )
+    .creates_request());
 }
 
 #[test]

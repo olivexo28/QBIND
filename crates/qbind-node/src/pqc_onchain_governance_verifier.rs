@@ -937,12 +937,11 @@ mod tests {
         );
         // Also for the made-up "future accept" case — refusal still
         // holds on MainNet.
-        let dummy_inner =
-            OnChainGovernanceProofVerificationOutcome::AcceptedOnChainGovernanceFixture {
-                action: crate::pqc_authority_lifecycle::LocalLifecycleAction::Rotate,
-                authority_domain_sequence: 2,
-                governance_epoch: 42,
-            };
+        let dummy_inner = OnChainGovernanceProofVerificationOutcome::AcceptedOnChainGovernanceFixture {
+            action: crate::pqc_authority_lifecycle::LocalLifecycleAction::Rotate,
+            authority_domain_sequence: 2,
+            governance_epoch: 42,
+        };
         assert!(
             mainnet_peer_driven_apply_remains_refused_under_verifier_boundary(
                 TrustBundleEnvironment::Mainnet,

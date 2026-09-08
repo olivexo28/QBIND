@@ -74,7 +74,8 @@ use qbind_node::pqc_governance_proof_wire::{
     GOVERNANCE_AUTHORITY_PROOF_WIRE_SCHEMA_VERSION,
 };
 use qbind_node::pqc_ratification_input::{
-    load_v2_ratification_sidecar_with_governance_proof_from_path, VersionedRatificationInputError,
+    load_v2_ratification_sidecar_with_governance_proof_from_path,
+    VersionedRatificationInputError,
 };
 use qbind_node::pqc_trust_bundle::TrustBundleEnvironment;
 
@@ -88,11 +89,16 @@ const ROOT_FP: &str = "1111111111111111111111111111111111111111";
 const OTHER_ROOT_FP: &str = "9999999999999999999999999999999999999999";
 const CHAIN_ID: &str = "0000000000000001";
 const OTHER_CHAIN: &str = "00000000000000ff";
-const GENESIS_HASH_A: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
-const GENESIS_HASH_B: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
-const DIGEST_2: &str = "2222222222222222222222222222222222222222222222222222222222222222";
-const DIGEST_3: &str = "3333333333333333333333333333333333333333333333333333333333333333";
-const OTHER_DIGEST: &str = "4444444444444444444444444444444444444444444444444444444444444444";
+const GENESIS_HASH_A: &str =
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+const GENESIS_HASH_B: &str =
+    "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+const DIGEST_2: &str =
+    "2222222222222222222222222222222222222222222222222222222222222222";
+const DIGEST_3: &str =
+    "3333333333333333333333333333333333333333333333333333333333333333";
+const OTHER_DIGEST: &str =
+    "4444444444444444444444444444444444444444444444444444444444444444";
 
 fn devnet_domain() -> AuthorityTrustDomain {
     AuthorityTrustDomain::new(
@@ -177,11 +183,7 @@ fn revoke_record(
     )
 }
 
-fn activate_initial(
-    active_fp: &str,
-    sequence: u64,
-    digest: &str,
-) -> PersistentAuthorityStateRecordV2 {
+fn activate_initial(active_fp: &str, sequence: u64, digest: &str) -> PersistentAuthorityStateRecordV2 {
     build_v2(
         active_fp,
         sequence,
@@ -300,7 +302,8 @@ fn minimal_v2_sidecar_json() -> serde_json::Value {
     use qbind_ledger::bundle_signing_ratification::v2_test_helpers;
     use qbind_ledger::RatificationEnvironment;
 
-    let (auth_pk, auth_sk) = MlDsa44Backend::generate_keypair().expect("authority keypair");
+    let (auth_pk, auth_sk) =
+        MlDsa44Backend::generate_keypair().expect("authority keypair");
     let (target_pk, _) = MlDsa44Backend::generate_keypair().expect("target keypair");
     let auth_pk_hex = hex_lower(&auth_pk);
     // genesis_hash is `[u8; 32]`. Use a fixed deterministic value so
@@ -353,13 +356,9 @@ fn wire_roundtrips_through_json_value() {
     );
     let wire = GovernanceAuthorityProofWire::from_governance_authority_proof(&proof);
     assert_eq!(
-        wire.schema_version,
-        GOVERNANCE_AUTHORITY_PROOF_WIRE_SCHEMA_VERSION
+        wire.schema_version, GOVERNANCE_AUTHORITY_PROOF_WIRE_SCHEMA_VERSION
     );
-    assert_eq!(
-        wire.issuer_authority_class,
-        GovernanceAuthorityClassWire::GenesisBound
-    );
+    assert_eq!(wire.issuer_authority_class, GovernanceAuthorityClassWire::GenesisBound);
 
     let json_bytes = serde_json::to_vec(&wire).unwrap();
     let decoded: GovernanceAuthorityProofWire = serde_json::from_slice(&json_bytes).unwrap();
@@ -391,14 +390,9 @@ fn wire_threshold_is_optional() {
     // Round-trip preserves both shapes.
     let r1: GovernanceAuthorityProofWire = serde_json::from_str(&s).unwrap();
     let r2: GovernanceAuthorityProofWire = serde_json::from_str(&s2).unwrap();
-    assert_eq!(
-        r1.threshold,
-        Some(GovernanceThresholdWire {
-            approvals: 2,
-            required: 2,
-            total: 3,
-        })
-    );
+    assert_eq!(r1.threshold, Some(GovernanceThresholdWire {
+        approvals: 2, required: 2, total: 3,
+    }));
     assert_eq!(r2.threshold, None);
 }
 
@@ -415,10 +409,7 @@ fn wire_unknown_schema_version_rejected() {
     let err = wire.to_governance_authority_proof().unwrap_err();
     assert!(matches!(
         err,
-        GovernanceProofWireParseError::UnknownSchemaVersion {
-            got: 99,
-            expected: 1
-        }
+        GovernanceProofWireParseError::UnknownSchemaVersion { got: 99, expected: 1 }
     ));
 }
 
@@ -426,8 +417,8 @@ fn wire_unknown_schema_version_rejected() {
 fn loader_v2_sidecar_without_governance_proof_yields_absent() {
     let path = tmpfile("absent");
     write_json(&path, &minimal_v2_sidecar_json());
-    let loaded =
-        load_v2_ratification_sidecar_with_governance_proof_from_path(&path).expect("v2 parse ok");
+    let loaded = load_v2_ratification_sidecar_with_governance_proof_from_path(&path)
+        .expect("v2 parse ok");
     assert!(loaded.governance_proof.is_absent());
     assert_eq!(loaded.ratification.schema_version, 2);
     let _ = std::fs::remove_file(&path);
@@ -439,8 +430,8 @@ fn loader_v2_sidecar_with_explicit_null_governance_proof_yields_absent() {
     v["governance_authority_proof"] = serde_json::Value::Null;
     let path = tmpfile("null");
     write_json(&path, &v);
-    let loaded =
-        load_v2_ratification_sidecar_with_governance_proof_from_path(&path).expect("parse ok");
+    let loaded = load_v2_ratification_sidecar_with_governance_proof_from_path(&path)
+        .expect("parse ok");
     assert!(loaded.governance_proof.is_absent());
     let _ = std::fs::remove_file(&path);
 }
@@ -460,8 +451,8 @@ fn loader_v2_sidecar_with_well_formed_governance_proof_yields_available() {
 
     let path = tmpfile("available");
     write_json(&path, &v);
-    let loaded =
-        load_v2_ratification_sidecar_with_governance_proof_from_path(&path).expect("parse ok");
+    let loaded = load_v2_ratification_sidecar_with_governance_proof_from_path(&path)
+        .expect("parse ok");
     match loaded.governance_proof {
         GovernanceProofLoadStatus::Available(p) => {
             assert_eq!(p, proof);
@@ -497,10 +488,9 @@ fn loader_v2_sidecar_with_malformed_governance_proof_yields_malformed() {
         .expect("v2 still parses; sibling carrier reports Malformed");
     assert!(matches!(
         loaded.governance_proof,
-        GovernanceProofLoadStatus::Malformed(GovernanceProofWireParseError::UnknownSchemaVersion {
-            got: 99,
-            expected: 1
-        })
+        GovernanceProofLoadStatus::Malformed(
+            GovernanceProofWireParseError::UnknownSchemaVersion { got: 99, expected: 1 }
+        )
     ));
     let _ = std::fs::remove_file(&path);
 }
@@ -527,10 +517,7 @@ fn loader_v1_sidecar_rejected_for_governance_carrier() {
     let err = load_v2_ratification_sidecar_with_governance_proof_from_path(&path).unwrap_err();
     assert!(matches!(
         err,
-        VersionedRatificationInputError::MalformedSidecar {
-            schema_version: 1,
-            ..
-        }
+        VersionedRatificationInputError::MalformedSidecar { schema_version: 1, .. }
     ));
     let _ = std::fs::remove_file(&path);
 }
@@ -549,7 +536,10 @@ fn loader_unknown_schema_version_fails_closed() {
 
 #[test]
 fn loader_missing_file_is_typed_io_error() {
-    let dir = std::env::temp_dir().join(format!("qbind-run167-noexist-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!(
+        "qbind-run167-noexist-{}",
+        std::process::id()
+    ));
     let _ = std::fs::create_dir_all(&dir);
     let path = dir.join("does-not-exist.json");
     let err = load_v2_ratification_sidecar_with_governance_proof_from_path(&path).unwrap_err();
@@ -832,7 +822,10 @@ fn r1_malformed_proof_rejected() {
         GovernanceProofPolicy::RequiredForLifecycleSensitive,
         loaded.governance_proof.governance_proof_context(&verifier),
     );
-    assert!(matches!(g, GovernanceMarkerGate::RequiredButMissing { .. }));
+    assert!(matches!(
+        g,
+        GovernanceMarkerGate::RequiredButMissing { .. }
+    ));
     let _ = std::fs::remove_file(&path);
 }
 
@@ -1432,8 +1425,9 @@ fn surface_activate_initial_governance_optional_under_required_policy() {
 fn proof_context_unavailable_for_malformed_status() {
     // Confirm that `Malformed` maps to `Unavailable` for the gate so a
     // fail-closed Required policy refuses the transition.
-    let status =
-        GovernanceProofLoadStatus::Malformed(GovernanceProofWireParseError::EmptyRequiredField);
+    let status = GovernanceProofLoadStatus::Malformed(
+        GovernanceProofWireParseError::EmptyRequiredField,
+    );
     let verifier = fixture_issuer_signature_verifier();
     match status.governance_proof_context(&verifier) {
         GovernanceProofContext::Unavailable => {}

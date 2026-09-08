@@ -154,16 +154,16 @@ impl ConsensusNetworkFacade for RecordingFacade {
     }
 
     fn broadcast_vote(&self, vote: &Vote) -> Result<(), NetworkError> {
-        self.inner
-            .lock()
-            .unwrap()
-            .broadcast_votes
-            .push(vote.clone());
+        self.inner.lock().unwrap().broadcast_votes.push(vote.clone());
         Ok(())
     }
 
     fn broadcast_proposal(&self, proposal: &BlockProposal) -> Result<(), NetworkError> {
-        self.inner.lock().unwrap().proposals.push(proposal.clone());
+        self.inner
+            .lock()
+            .unwrap()
+            .proposals
+            .push(proposal.clone());
         Ok(())
     }
 
@@ -290,17 +290,21 @@ async fn b6_inbound_proposal_reaches_engine_and_emits_vote() {
     // `recv()` succeeds without racing the ticker.
     let proposal = make_genesis_proposal(leader);
     inbound_tx
-        .send(InboundConsensusEnvelope::from(ConsensusNetMsg::Proposal(
-            encode(&proposal),
-        )))
+        .send(InboundConsensusEnvelope::from(ConsensusNetMsg::Proposal(encode(&proposal))))
         .await
         .expect("inbound channel must accept proposal");
 
     let loop_metrics = metrics.clone();
     let loop_progress = progress.clone();
     let handle = tokio::spawn(async move {
-        run_binary_consensus_loop_with_io(cfg, shutdown_rx, loop_progress, loop_metrics, Some(io))
-            .await
+        run_binary_consensus_loop_with_io(
+            cfg,
+            shutdown_rx,
+            loop_progress,
+            loop_metrics,
+            Some(io),
+        )
+        .await
     });
 
     // Wait until the loop has either delivered the proposal or run its
@@ -613,9 +617,7 @@ async fn b6_inbound_non_leader_proposal_does_not_silently_drop() {
     // Proposal from a non-leader (validator 1).
     let bad_proposal = make_genesis_proposal(ValidatorId::new(1));
     inbound_tx
-        .send(InboundConsensusEnvelope::from(ConsensusNetMsg::Proposal(
-            encode(&bad_proposal),
-        )))
+        .send(InboundConsensusEnvelope::from(ConsensusNetMsg::Proposal(encode(&bad_proposal))))
         .await
         .unwrap();
 

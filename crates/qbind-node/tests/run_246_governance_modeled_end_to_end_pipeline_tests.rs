@@ -175,7 +175,9 @@ fn state_with_active_root() -> ModeledGovernanceTrustState {
 }
 
 /// The canonical "everything agrees" success input parameters.
-fn happy_devnet(c: &Ctx) -> GovernanceModeledEndToEndPipelineInput<'_> {
+fn happy_devnet(
+    c: &Ctx,
+) -> GovernanceModeledEndToEndPipelineInput<'_> {
     c.pipeline_input(
         GovernanceModeledEndToEndPipelinePolicy::wired(),
         EvaluatorCallsiteAuthorization::Authorized,
@@ -201,8 +203,7 @@ fn disabled_pipeline_policy_preserves_legacy_bypass_no_mutation_no_consume() {
     );
     let mut state = ModeledGovernanceTrustState::new();
     let mut applier = FixtureModeledTrustMutationApplier::new(TrustBundleEnvironment::Devnet);
-    let decision =
-        run_modeled_end_to_end_pipeline(&input, &c.expectations, &mut state, &mut applier);
+    let decision = run_modeled_end_to_end_pipeline(&input, &c.expectations, &mut state, &mut applier);
     assert_eq!(
         decision.outcome,
         GovernanceModeledEndToEndPipelineOutcome::ProceedLegacyBypassNoMutation
@@ -226,8 +227,7 @@ fn disabled_evaluator_callsite_preserves_legacy_bypass_no_mutation_no_consume() 
     );
     let mut state = ModeledGovernanceTrustState::new();
     let mut applier = FixtureModeledTrustMutationApplier::new(TrustBundleEnvironment::Devnet);
-    let decision =
-        run_modeled_end_to_end_pipeline(&input, &c.expectations, &mut state, &mut applier);
+    let decision = run_modeled_end_to_end_pipeline(&input, &c.expectations, &mut state, &mut applier);
     assert_eq!(
         decision.outcome,
         GovernanceModeledEndToEndPipelineOutcome::ProceedLegacyBypassNoMutation
@@ -243,8 +243,7 @@ fn devnet_fixture_add_root_success_authorizes_durable_consume() {
     let input = happy_devnet(&c);
     let mut state = ModeledGovernanceTrustState::new();
     let mut applier = FixtureModeledTrustMutationApplier::new(TrustBundleEnvironment::Devnet);
-    let decision =
-        run_modeled_end_to_end_pipeline(&input, &c.expectations, &mut state, &mut applier);
+    let decision = run_modeled_end_to_end_pipeline(&input, &c.expectations, &mut state, &mut applier);
     assert_eq!(
         decision.outcome,
         GovernanceModeledEndToEndPipelineOutcome::ModeledApplierAppliedAndDurableConsumeAuthorized
@@ -279,8 +278,7 @@ fn testnet_fixture_add_root_success_authorizes_durable_consume() {
     );
     let mut state = ModeledGovernanceTrustState::new();
     let mut applier = FixtureModeledTrustMutationApplier::new(TrustBundleEnvironment::Testnet);
-    let decision =
-        run_modeled_end_to_end_pipeline(&input, &c.expectations, &mut state, &mut applier);
+    let decision = run_modeled_end_to_end_pipeline(&input, &c.expectations, &mut state, &mut applier);
     assert_eq!(
         decision.outcome,
         GovernanceModeledEndToEndPipelineOutcome::ModeledApplierAppliedAndDurableConsumeAuthorized
@@ -295,8 +293,7 @@ fn modeled_retire_root_success_authorizes_consume_only_after_success() {
     let input = happy_devnet(&c);
     let mut state = state_with_active_root();
     let mut applier = FixtureModeledTrustMutationApplier::new(TrustBundleEnvironment::Devnet);
-    let decision =
-        run_modeled_end_to_end_pipeline(&input, &c.expectations, &mut state, &mut applier);
+    let decision = run_modeled_end_to_end_pipeline(&input, &c.expectations, &mut state, &mut applier);
     assert_eq!(
         decision.outcome,
         GovernanceModeledEndToEndPipelineOutcome::ModeledApplierAppliedAndDurableConsumeAuthorized
@@ -310,8 +307,7 @@ fn modeled_revoke_root_success_authorizes_consume_only_after_success() {
     let input = happy_devnet(&c);
     let mut state = state_with_active_root();
     let mut applier = FixtureModeledTrustMutationApplier::new(TrustBundleEnvironment::Devnet);
-    let decision =
-        run_modeled_end_to_end_pipeline(&input, &c.expectations, &mut state, &mut applier);
+    let decision = run_modeled_end_to_end_pipeline(&input, &c.expectations, &mut state, &mut applier);
     assert!(decision.authorizes_durable_consume());
 }
 
@@ -321,8 +317,7 @@ fn modeled_emergency_revoke_root_success_authorizes_consume_only_after_success()
     let input = happy_devnet(&c);
     let mut state = state_with_active_root();
     let mut applier = FixtureModeledTrustMutationApplier::new(TrustBundleEnvironment::Devnet);
-    let decision =
-        run_modeled_end_to_end_pipeline(&input, &c.expectations, &mut state, &mut applier);
+    let decision = run_modeled_end_to_end_pipeline(&input, &c.expectations, &mut state, &mut applier);
     assert!(decision.authorizes_durable_consume());
 }
 
@@ -336,8 +331,7 @@ fn modeled_noop_success_authorizes_consume_with_no_state_drift() {
     let mut state = state_with_active_root();
     let before = state.len();
     let mut applier = FixtureModeledTrustMutationApplier::new(TrustBundleEnvironment::Devnet);
-    let decision =
-        run_modeled_end_to_end_pipeline(&input, &c.expectations, &mut state, &mut applier);
+    let decision = run_modeled_end_to_end_pipeline(&input, &c.expectations, &mut state, &mut applier);
     assert_eq!(
         decision.outcome,
         GovernanceModeledEndToEndPipelineOutcome::ModeledApplierAppliedAndDurableConsumeAuthorized
@@ -358,8 +352,7 @@ fn production_pipeline_path_reachable_but_unavailable_no_consume() {
     );
     let mut state = ModeledGovernanceTrustState::new();
     let mut applier = ProductionModeledTrustMutationApplier::default();
-    let decision =
-        run_modeled_end_to_end_pipeline(&input, &c.expectations, &mut state, &mut applier);
+    let decision = run_modeled_end_to_end_pipeline(&input, &c.expectations, &mut state, &mut applier);
     assert_eq!(
         decision.outcome,
         GovernanceModeledEndToEndPipelineOutcome::ProductionUnavailableNoConsume
@@ -388,8 +381,7 @@ fn mainnet_pipeline_path_reachable_but_unavailable_no_consume() {
     );
     let mut state = ModeledGovernanceTrustState::new();
     let mut applier = MainNetModeledTrustMutationApplier::default();
-    let decision =
-        run_modeled_end_to_end_pipeline(&input, &c.expectations, &mut state, &mut applier);
+    let decision = run_modeled_end_to_end_pipeline(&input, &c.expectations, &mut state, &mut applier);
     assert_eq!(
         decision.outcome,
         GovernanceModeledEndToEndPipelineOutcome::MainNetUnavailableNoConsume
@@ -417,8 +409,7 @@ fn mainnet_peer_driven_apply_refused_before_replay_snapshot_and_applier() {
     );
     let mut state = ModeledGovernanceTrustState::new();
     let mut applier = FixtureModeledTrustMutationApplier::new(TrustBundleEnvironment::Devnet);
-    let decision =
-        run_modeled_end_to_end_pipeline(&input, &c.expectations, &mut state, &mut applier);
+    let decision = run_modeled_end_to_end_pipeline(&input, &c.expectations, &mut state, &mut applier);
     assert_eq!(
         decision.outcome,
         GovernanceModeledEndToEndPipelineOutcome::MainNetPeerDrivenApplyRefusedNoConsume
@@ -426,10 +417,7 @@ fn mainnet_peer_driven_apply_refused_before_replay_snapshot_and_applier() {
     assert!(decision.outcome.is_mainnet_peer_driven_apply_refused());
     assert!(!decision.applier_invoked());
     assert_eq!(applier.attempts(), 0, "no applier invocation, no snapshot");
-    assert!(
-        decision.mutation_engine.is_none(),
-        "stopped before mutation engine"
-    );
+    assert!(decision.mutation_engine.is_none(), "stopped before mutation engine");
     assert!(state.is_empty());
 }
 
@@ -439,8 +427,7 @@ fn validator_set_rotation_unsupported_no_consume() {
     let input = happy_devnet(&c);
     let mut state = ModeledGovernanceTrustState::new();
     let mut applier = FixtureModeledTrustMutationApplier::new(TrustBundleEnvironment::Devnet);
-    let decision =
-        run_modeled_end_to_end_pipeline(&input, &c.expectations, &mut state, &mut applier);
+    let decision = run_modeled_end_to_end_pipeline(&input, &c.expectations, &mut state, &mut applier);
     assert_eq!(
         decision.outcome,
         GovernanceModeledEndToEndPipelineOutcome::ValidatorSetRotationUnsupportedNoConsume
@@ -455,8 +442,7 @@ fn policy_change_unsupported_no_consume() {
     let input = happy_devnet(&c);
     let mut state = ModeledGovernanceTrustState::new();
     let mut applier = FixtureModeledTrustMutationApplier::new(TrustBundleEnvironment::Devnet);
-    let decision =
-        run_modeled_end_to_end_pipeline(&input, &c.expectations, &mut state, &mut applier);
+    let decision = run_modeled_end_to_end_pipeline(&input, &c.expectations, &mut state, &mut applier);
     assert_eq!(
         decision.outcome,
         GovernanceModeledEndToEndPipelineOutcome::PolicyChangeUnsupportedNoConsume
@@ -482,8 +468,7 @@ fn evaluator_rejection_before_replay_no_mutation_no_consume() {
     );
     let mut state = ModeledGovernanceTrustState::new();
     let mut applier = FixtureModeledTrustMutationApplier::new(TrustBundleEnvironment::Devnet);
-    let decision =
-        run_modeled_end_to_end_pipeline(&input, &c.expectations, &mut state, &mut applier);
+    let decision = run_modeled_end_to_end_pipeline(&input, &c.expectations, &mut state, &mut applier);
     assert!(matches!(
         decision.outcome,
         GovernanceModeledEndToEndPipelineOutcome::EvaluatorRejectedBeforeReplay { .. }
@@ -502,8 +487,7 @@ fn assert_mutation_engine_rejected(mut c: Ctx, mutate: impl FnOnce(&mut Ctx)) {
     let mut state = state_with_active_root();
     let before = state.len();
     let mut applier = FixtureModeledTrustMutationApplier::new(TrustBundleEnvironment::Devnet);
-    let decision =
-        run_modeled_end_to_end_pipeline(&input, &c.expectations, &mut state, &mut applier);
+    let decision = run_modeled_end_to_end_pipeline(&input, &c.expectations, &mut state, &mut applier);
     assert!(
         matches!(
             decision.outcome,
@@ -629,8 +613,7 @@ fn read_only_validation_surface_rejected_before_snapshot_no_consume() {
     let input = happy_devnet(&c);
     let mut state = ModeledGovernanceTrustState::new();
     let mut applier = FixtureModeledTrustMutationApplier::new(TrustBundleEnvironment::Devnet);
-    let decision =
-        run_modeled_end_to_end_pipeline(&input, &c.expectations, &mut state, &mut applier);
+    let decision = run_modeled_end_to_end_pipeline(&input, &c.expectations, &mut state, &mut applier);
     assert!(matches!(
         decision.outcome,
         GovernanceModeledEndToEndPipelineOutcome::ModeledApplierRejectedBeforeSnapshot { .. }
@@ -697,14 +680,10 @@ fn assert_replay_rejection(
     );
     let mut state = ModeledGovernanceTrustState::new();
     let mut applier = FixtureModeledTrustMutationApplier::new(TrustBundleEnvironment::Devnet);
-    let decision =
-        run_modeled_end_to_end_pipeline(&input, &c.expectations, &mut state, &mut applier);
+    let decision = run_modeled_end_to_end_pipeline(&input, &c.expectations, &mut state, &mut applier);
     assert_eq!(decision.outcome, expected);
     assert!(decision.outcome.no_consume());
-    assert!(
-        decision.mutation_engine.is_none(),
-        "stopped before mutation engine"
-    );
+    assert!(decision.mutation_engine.is_none(), "stopped before mutation engine");
     assert_eq!(applier.attempts(), 0);
     assert!(state.is_empty());
 }
@@ -718,18 +697,14 @@ fn consume_before_modeled_applier_success_is_rejected_apply_failed() {
         TrustBundleEnvironment::Devnet,
         ModeledApplierFault::ApplyFailedBeforeMutation,
     );
-    let decision =
-        run_modeled_end_to_end_pipeline(&input, &c.expectations, &mut state, &mut applier);
+    let decision = run_modeled_end_to_end_pipeline(&input, &c.expectations, &mut state, &mut applier);
     assert_eq!(
         decision.outcome,
         GovernanceModeledEndToEndPipelineOutcome::ModeledApplierApplyFailedNoConsume
     );
     assert!(decision.outcome.no_consume());
     assert!(decision.applier_invoked());
-    assert!(
-        state.is_empty(),
-        "apply-failed-before-mutation is non-mutating"
-    );
+    assert!(state.is_empty(), "apply-failed-before-mutation is non-mutating");
 }
 
 #[test]
@@ -741,8 +716,7 @@ fn consume_after_modeled_rollback_is_rejected() {
         TrustBundleEnvironment::Devnet,
         ModeledApplierFault::ApplyFailedRolledBack,
     );
-    let decision =
-        run_modeled_end_to_end_pipeline(&input, &c.expectations, &mut state, &mut applier);
+    let decision = run_modeled_end_to_end_pipeline(&input, &c.expectations, &mut state, &mut applier);
     assert_eq!(
         decision.outcome,
         GovernanceModeledEndToEndPipelineOutcome::ModeledApplierRolledBackNoConsume
@@ -760,8 +734,7 @@ fn consume_after_rollback_failed_is_rejected_fatal() {
         TrustBundleEnvironment::Devnet,
         ModeledApplierFault::RollbackFailedFatal,
     );
-    let decision =
-        run_modeled_end_to_end_pipeline(&input, &c.expectations, &mut state, &mut applier);
+    let decision = run_modeled_end_to_end_pipeline(&input, &c.expectations, &mut state, &mut applier);
     assert_eq!(
         decision.outcome,
         GovernanceModeledEndToEndPipelineOutcome::ModeledApplierRollbackFailedFatalNoConsume
@@ -778,8 +751,7 @@ fn consume_after_ambiguous_window_is_rejected() {
         TrustBundleEnvironment::Devnet,
         ModeledApplierFault::AmbiguousAfterApply,
     );
-    let decision =
-        run_modeled_end_to_end_pipeline(&input, &c.expectations, &mut state, &mut applier);
+    let decision = run_modeled_end_to_end_pipeline(&input, &c.expectations, &mut state, &mut applier);
     assert_eq!(
         decision.outcome,
         GovernanceModeledEndToEndPipelineOutcome::ModeledApplierAmbiguousFailClosedNoConsume
@@ -794,17 +766,13 @@ fn retiring_missing_root_rejects_before_apply_no_consume() {
     // Empty modeled state — the target root is absent.
     let mut state = ModeledGovernanceTrustState::new();
     let mut applier = FixtureModeledTrustMutationApplier::new(TrustBundleEnvironment::Devnet);
-    let decision =
-        run_modeled_end_to_end_pipeline(&input, &c.expectations, &mut state, &mut applier);
+    let decision = run_modeled_end_to_end_pipeline(&input, &c.expectations, &mut state, &mut applier);
     assert!(matches!(
         decision.outcome,
         GovernanceModeledEndToEndPipelineOutcome::ModeledApplierRejectedBeforeApply { .. }
     ));
     assert!(decision.outcome.no_consume());
-    assert!(
-        decision.applier_invoked(),
-        "applier snapshotted before rejecting"
-    );
+    assert!(decision.applier_invoked(), "applier snapshotted before rejecting");
     assert!(state.is_empty(), "rejected-before-apply is non-mutating");
 }
 
@@ -814,8 +782,7 @@ fn revoking_missing_root_rejects_before_apply_no_consume() {
     let input = happy_devnet(&c);
     let mut state = ModeledGovernanceTrustState::new();
     let mut applier = FixtureModeledTrustMutationApplier::new(TrustBundleEnvironment::Devnet);
-    let decision =
-        run_modeled_end_to_end_pipeline(&input, &c.expectations, &mut state, &mut applier);
+    let decision = run_modeled_end_to_end_pipeline(&input, &c.expectations, &mut state, &mut applier);
     assert!(matches!(
         decision.outcome,
         GovernanceModeledEndToEndPipelineOutcome::ModeledApplierRejectedBeforeApply { .. }
@@ -922,8 +889,7 @@ fn only_modeled_applier_applied_success_reaches_consume_authorized() {
         TrustBundleEnvironment::Devnet,
         ModeledApplierFault::ApplyFailedBeforeMutation,
     );
-    let decision =
-        run_modeled_end_to_end_pipeline(&input, &c.expectations, &mut state, &mut applier);
+    let decision = run_modeled_end_to_end_pipeline(&input, &c.expectations, &mut state, &mut applier);
     assert!(!decision.authorizes_durable_consume());
     // The durable projection stage reflects the non-consuming completion.
     assert!(!decision
@@ -949,8 +915,7 @@ fn executor_trait_matches_free_function() {
     let mut state = ModeledGovernanceTrustState::new();
     let mut applier = FixtureModeledTrustMutationApplier::new(TrustBundleEnvironment::Devnet);
     let exec = DefaultGovernanceModeledEndToEndPipelineExecutor;
-    let decision =
-        exec.run_modeled_end_to_end_pipeline(&input, &c.expectations, &mut state, &mut applier);
+    let decision = exec.run_modeled_end_to_end_pipeline(&input, &c.expectations, &mut state, &mut applier);
     assert_eq!(
         decision.outcome,
         GovernanceModeledEndToEndPipelineOutcome::ModeledApplierAppliedAndDurableConsumeAuthorized
@@ -971,16 +936,12 @@ fn invariant_helpers_hold() {
     assert!(modeled_end_to_end_pipeline_failed_apply_never_consumes());
     assert!(modeled_end_to_end_pipeline_rollback_never_consumes());
     assert!(modeled_end_to_end_pipeline_ambiguous_window_fails_closed());
-    assert!(
-        modeled_end_to_end_pipeline_mainnet_peer_driven_apply_refused_first(
-            TrustBundleEnvironment::Mainnet
-        )
-    );
-    assert!(
-        !modeled_end_to_end_pipeline_mainnet_peer_driven_apply_refused_first(
-            TrustBundleEnvironment::Devnet
-        )
-    );
+    assert!(modeled_end_to_end_pipeline_mainnet_peer_driven_apply_refused_first(
+        TrustBundleEnvironment::Mainnet
+    ));
+    assert!(!modeled_end_to_end_pipeline_mainnet_peer_driven_apply_refused_first(
+        TrustBundleEnvironment::Devnet
+    ));
     assert!(modeled_end_to_end_pipeline_production_mainnet_unavailable());
     assert!(modeled_end_to_end_pipeline_validator_set_rotation_unsupported());
     assert!(modeled_end_to_end_pipeline_policy_change_unsupported());

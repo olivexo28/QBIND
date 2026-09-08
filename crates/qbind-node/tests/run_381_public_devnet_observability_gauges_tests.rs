@@ -43,13 +43,7 @@ fn build_info_present_with_default_unknown_context() {
     );
 
     // All required labels present.
-    for label in [
-        "version=\"",
-        "build_id=\"",
-        "git_commit=\"",
-        "env=\"",
-        "chain_id=\"",
-    ] {
+    for label in ["version=\"", "build_id=\"", "git_commit=\"", "env=\"", "chain_id=\""] {
         assert!(
             line.contains(label),
             "build_info missing required label {label:?}: {line}"
@@ -78,7 +72,10 @@ fn build_info_labels_are_low_cardinality_and_secret_free() {
     let metrics = NodeMetrics::new();
     // Feed deliberately hostile context: a path, a host:port, quotes, spaces,
     // and a newline. The sanitizer must strip these to `[A-Za-z0-9._-]`.
-    metrics.set_build_context("/var/lib/qbind secret\"env\n", "10.0.0.5:9100/chain\\id");
+    metrics.set_build_context(
+        "/var/lib/qbind secret\"env\n",
+        "10.0.0.5:9100/chain\\id",
+    );
     let output = metrics.format_metrics();
     let line = build_info_line(&output).expect("build_info must be emitted");
 
@@ -108,10 +105,7 @@ fn build_info_labels_are_low_cardinality_and_secret_free() {
         .split("} ")
         .next()
         .unwrap();
-    assert!(
-        !labels.contains(':'),
-        "no host:port colon in labels: {labels}"
-    );
+    assert!(!labels.contains(':'), "no host:port colon in labels: {labels}");
 }
 
 #[test]

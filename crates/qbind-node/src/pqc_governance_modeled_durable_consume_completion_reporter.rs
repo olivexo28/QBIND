@@ -67,7 +67,6 @@
 //! never creates a new completion report by itself — it can only match an
 //! already-recorded completion report.
 
-use crate::pqc_governance_execution_runtime_arming::GovernanceExecutionRuntimeSurface;
 use crate::pqc_governance_modeled_durable_consume_projection_sink::GovernanceModeledDurableConsumeSinkOutcome;
 use crate::pqc_governance_modeled_end_to_end_pipeline::{
     DurableReplayObservation, GovernanceModeledEndToEndPipelineOutcome,
@@ -76,6 +75,7 @@ use crate::pqc_governance_modeled_trust_mutation_applier::{
     ModeledGovernanceTrustMutationEnvironmentBinding, ModeledGovernanceTrustMutationRuntimeBinding,
     ModeledGovernanceTrustMutationSurface,
 };
+use crate::pqc_governance_execution_runtime_arming::GovernanceExecutionRuntimeSurface;
 use crate::pqc_trust_bundle::TrustBundleEnvironment;
 
 // ===========================================================================
@@ -554,7 +554,10 @@ impl GovernanceModeledDurableConsumeCompletionReporterExpectations {
     }
 
     /// `true` iff the report identity matches and the report is well-formed.
-    pub fn report_matches(&self, report: &GovernanceModeledDurableConsumeCompletionReport) -> bool {
+    pub fn report_matches(
+        &self,
+        report: &GovernanceModeledDurableConsumeCompletionReport,
+    ) -> bool {
         self.report_mismatch_reason(report).is_none()
     }
 }
@@ -714,17 +717,13 @@ impl GovernanceModeledDurableConsumeCompletionReporterOutcome {
     pub fn tag(&self) -> &'static str {
         match self {
             Self::LegacyBypassNoCompletionReport => "legacy-bypass-no-completion-report",
-            Self::RejectedBeforeSinkNoCompletionReport => {
-                "rejected-before-sink-no-completion-report"
-            }
+            Self::RejectedBeforeSinkNoCompletionReport => "rejected-before-sink-no-completion-report",
             Self::SinkDidNotRecordReceiptNoCompletionReport => {
                 "sink-did-not-record-receipt-no-completion-report"
             }
             Self::CompletionReportRecorded => "completion-report-recorded",
             Self::CompletionReportDuplicateIdempotent => "completion-report-duplicate-idempotent",
-            Self::CompletionReportRejectedBeforeRecord => {
-                "completion-report-rejected-before-record"
-            }
+            Self::CompletionReportRejectedBeforeRecord => "completion-report-rejected-before-record",
             Self::CompletionReportRecordFailedNoCompletion => {
                 "completion-report-record-failed-no-completion"
             }
@@ -810,20 +809,18 @@ pub fn project_sink_outcome_to_completion_report_intent(
         Sink::MainNetPeerDrivenApplyRefusedNoConsume => CompletionReportIntent::NoCompletionReport(
             Report::MainNetPeerDrivenApplyRefusedNoCompletion,
         ),
-        Sink::ValidatorSetRotationUnsupportedNoConsume => {
-            CompletionReportIntent::NoCompletionReport(
-                Report::ValidatorSetRotationUnsupportedNoCompletion,
-            )
-        }
+        Sink::ValidatorSetRotationUnsupportedNoConsume => CompletionReportIntent::NoCompletionReport(
+            Report::ValidatorSetRotationUnsupportedNoCompletion,
+        ),
         Sink::PolicyChangeUnsupportedNoConsume => {
             CompletionReportIntent::NoCompletionReport(Report::PolicyChangeUnsupportedNoCompletion)
         }
         Sink::ProductionSinkUnavailableNoConsume => CompletionReportIntent::NoCompletionReport(
             Report::ProductionReporterUnavailableNoCompletion,
         ),
-        Sink::MainNetSinkUnavailableNoConsume => CompletionReportIntent::NoCompletionReport(
-            Report::MainNetReporterUnavailableNoCompletion,
-        ),
+        Sink::MainNetSinkUnavailableNoConsume => {
+            CompletionReportIntent::NoCompletionReport(Report::MainNetReporterUnavailableNoCompletion)
+        }
         // Every remaining sink outcome is a non-recording rejection / failure /
         // rollback / ambiguous window: the sink did not record a receipt, so no
         // completion report may exist.
@@ -947,9 +944,7 @@ impl FixtureModeledDurableConsumeCompletionReporter {
         }
     }
 
-    fn kind_for(
-        environment: TrustBundleEnvironment,
-    ) -> ModeledDurableConsumeCompletionReporterKind {
+    fn kind_for(environment: TrustBundleEnvironment) -> ModeledDurableConsumeCompletionReporterKind {
         match environment {
             TrustBundleEnvironment::Testnet => {
                 ModeledDurableConsumeCompletionReporterKind::FixtureTestNet
@@ -1155,12 +1150,12 @@ where
     // Step 3: project the Run 248 sink outcome onto a completion-report intent.
     // Every non-recording outcome returns a no-completion outcome without invoking
     // the reporter.
-    let idempotent_only =
-        match project_sink_outcome_to_completion_report_intent(&input.sink_binding) {
-            CompletionReportIntent::NoCompletionReport(outcome) => return outcome,
-            CompletionReportIntent::CreateIntent => false,
-            CompletionReportIntent::IdempotentOnly => true,
-        };
+    let idempotent_only = match project_sink_outcome_to_completion_report_intent(&input.sink_binding)
+    {
+        CompletionReportIntent::NoCompletionReport(outcome) => return outcome,
+        CompletionReportIntent::CreateIntent => false,
+        CompletionReportIntent::IdempotentOnly => true,
+    };
 
     // Step 4: pre-reporter environment / surface binding validation. A mismatch
     // fails closed before the report is recorded.

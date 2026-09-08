@@ -545,10 +545,7 @@ pub struct CliArgs {
     /// the release `qbind-node` binary. See
     /// `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_077.md` and
     /// `docs/whitepaper/contradiction.md` C4.
-    #[arg(
-        long = "p2p-trust-bundle-peer-candidate-validation-enabled",
-        hide = true
-    )]
+    #[arg(long = "p2p-trust-bundle-peer-candidate-validation-enabled", hide = true)]
     pub p2p_trust_bundle_peer_candidate_validation_enabled: bool,
 
     /// Run 077 — operator-supplied local file path of a
@@ -703,6 +700,7 @@ pub struct CliArgs {
     // closed at config validation. MainNet use is refused. See
     // `docs/release/public-devnet/p2p/ABUSE_DOS_POSTURE.md`.
     // ------------------------------------------------------------------
+
     /// Run 362 (DevNet/public-DevNet abuse/DoS posture; NOT MainNet
     /// readiness): enable the runtime-owned inbound connection-rate
     /// limiter. Disabled by default; when unset the accept loop is
@@ -785,7 +783,10 @@ pub struct CliArgs {
     /// See `task/RUN_147_TASK.txt`,
     /// `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_147.md`, and
     /// `docs/protocol/QBIND_PEER_DRIVEN_TRUST_BUNDLE_APPLY_SAFETY.md`.
-    #[arg(long = "p2p-trust-bundle-peer-candidate-staging-enabled", hide = true)]
+    #[arg(
+        long = "p2p-trust-bundle-peer-candidate-staging-enabled",
+        hide = true
+    )]
     pub p2p_trust_bundle_peer_candidate_staging_enabled: bool,
 
     /// Run 149 — hidden, **disabled-by-default** DevNet/TestNet-only
@@ -842,7 +843,10 @@ pub struct CliArgs {
     /// See `task/RUN_149_TASK.txt`,
     /// `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_149.md`, and
     /// `docs/protocol/QBIND_PEER_DRIVEN_TRUST_BUNDLE_APPLY_SAFETY.md`.
-    #[arg(long = "p2p-trust-bundle-peer-candidate-apply-enabled", hide = true)]
+    #[arg(
+        long = "p2p-trust-bundle-peer-candidate-apply-enabled",
+        hide = true
+    )]
     pub p2p_trust_bundle_peer_candidate_apply_enabled: bool,
 
     /// Run 171 — hidden, **disabled-by-default** DevNet/TestNet-safe
@@ -892,7 +896,10 @@ pub struct CliArgs {
     /// Required-policy production-surface evidence is deferred to
     /// Run 172. See `task/RUN_171_TASK.txt` and
     /// `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_171.md`.
-    #[arg(long = "p2p-trust-bundle-governance-proof-required", hide = true)]
+    #[arg(
+        long = "p2p-trust-bundle-governance-proof-required",
+        hide = true
+    )]
     pub p2p_trust_bundle_governance_proof_required: bool,
 
     /// Run 180 — hidden, **disabled-by-default** DevNet/TestNet-safe
@@ -1237,7 +1244,10 @@ pub struct CliArgs {
     /// See `task/RUN_151_TASK.txt`,
     /// `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_151.md`, and
     /// `docs/protocol/QBIND_PEER_DRIVEN_TRUST_BUNDLE_APPLY_SAFETY.md`.
-    #[arg(long = "p2p-trust-bundle-peer-candidate-drain-once", hide = true)]
+    #[arg(
+        long = "p2p-trust-bundle-peer-candidate-drain-once",
+        hide = true
+    )]
     pub p2p_trust_bundle_peer_candidate_drain_once: bool,
 
     /// Run 105 — disabled-by-default operator opt-in flag for the
@@ -1302,7 +1312,10 @@ pub struct CliArgs {
     /// `RatificationEnforcementOutcome::LegacyUnratifiedAccepted`
     /// rather than failing — the verdict is logged loudly and is
     /// explicitly NOT a "passed" outcome.
-    #[arg(long = "p2p-trust-bundle-allow-unratified-testnet-devnet", hide = true)]
+    #[arg(
+        long = "p2p-trust-bundle-allow-unratified-testnet-devnet",
+        hide = true
+    )]
     pub p2p_trust_bundle_allow_unratified_testnet_devnet: bool,
 
     // ========================================================================

@@ -37,21 +37,22 @@ use qbind_node::pqc_governance_modeled_durable_completion_finalization_projectio
     modeled_finalization_policy_change_unsupported,
     modeled_finalization_production_mainnet_unavailable,
     modeled_finalization_record_required_before_durable_completion,
-    modeled_finalization_rejection_is_non_mutating, modeled_finalization_rollback_never_finalizes,
+    modeled_finalization_rejection_is_non_mutating,
+    modeled_finalization_rollback_never_finalizes,
     modeled_finalization_sink_receipt_required_before_finalization,
     modeled_finalization_validator_set_rotation_unsupported,
     project_completion_reporter_outcome_to_finalization_intent,
-    recover_modeled_durable_completion_finalization_window, DurableCompletionFinalizationIntent,
-    FixtureModeledDurableCompletionFinalizer,
+    recover_modeled_durable_completion_finalization_window,
+    DurableCompletionFinalizationIntent, FixtureModeledDurableCompletionFinalizer,
     GovernanceModeledDurableCompletionFinalizationExpectations,
     GovernanceModeledDurableCompletionFinalizationInput,
     GovernanceModeledDurableCompletionFinalizationOutcome,
     GovernanceModeledDurableCompletionFinalizationPolicy,
     GovernanceModeledDurableCompletionFinalizationRecord,
-    GovernanceModeledDurableCompletionFinalizer, MainNetModeledDurableCompletionFinalizer,
-    ModeledDurableCompletionFinalizationFault, ModeledDurableCompletionFinalizationLedger,
-    ModeledDurableCompletionFinalizationWindow, ModeledDurableCompletionFinalizerKind,
-    ProductionModeledDurableCompletionFinalizer,
+    GovernanceModeledDurableCompletionFinalizer,
+    MainNetModeledDurableCompletionFinalizer, ModeledDurableCompletionFinalizationFault,
+    ModeledDurableCompletionFinalizationLedger, ModeledDurableCompletionFinalizationWindow,
+    ModeledDurableCompletionFinalizerKind, ProductionModeledDurableCompletionFinalizer,
 };
 use qbind_node::pqc_governance_modeled_durable_consume_completion_reporter::GovernanceModeledDurableConsumeCompletionReporterOutcome;
 use qbind_node::pqc_governance_modeled_durable_consume_projection_sink::GovernanceModeledDurableConsumeSinkOutcome;
@@ -911,8 +912,10 @@ fn assert_record_fault(
     let c = devnet_ctx();
     let input = c.recorded();
     let mut ledger = ModeledDurableCompletionFinalizationLedger::new();
-    let mut finalizer =
-        FixtureModeledDurableCompletionFinalizer::with_fault(TrustBundleEnvironment::Devnet, fault);
+    let mut finalizer = FixtureModeledDurableCompletionFinalizer::with_fault(
+        TrustBundleEnvironment::Devnet,
+        fault,
+    );
     let outcome = evaluate_modeled_durable_completion_finalization_projection(
         &input,
         &c.expectations,
@@ -1276,10 +1279,7 @@ fn recover(
 
 #[test]
 fn recovery_before_pipeline_window_fails_closed_no_finalization() {
-    let outcome = recover(
-        ModeledDurableCompletionFinalizationWindow::BeforePipeline,
-        None,
-    );
+    let outcome = recover(ModeledDurableCompletionFinalizationWindow::BeforePipeline, None);
     assert_eq!(
         outcome,
         GovernanceModeledDurableCompletionFinalizationOutcome::ReporterDidNotRecordCompletionNoFinalization
@@ -1348,8 +1348,8 @@ fn recovery_after_report_record_before_finalization_intent_fails_closed_no_final
 }
 
 #[test]
-fn recovery_after_finalization_intent_before_finalization_record_fails_closed_no_durable_completion(
-) {
+fn recovery_after_finalization_intent_before_finalization_record_fails_closed_no_durable_completion()
+{
     let outcome = recover(
         ModeledDurableCompletionFinalizationWindow::AfterFinalizationIntentBeforeFinalizationRecord,
         None,
@@ -1744,16 +1744,12 @@ fn invariant_helpers_hold() {
     assert!(modeled_finalization_failed_record_never_finalizes());
     assert!(modeled_finalization_rollback_never_finalizes());
     assert!(modeled_finalization_ambiguous_window_fails_closed());
-    assert!(
-        modeled_finalization_mainnet_peer_driven_apply_refused_first(
-            TrustBundleEnvironment::Mainnet
-        )
-    );
-    assert!(
-        !modeled_finalization_mainnet_peer_driven_apply_refused_first(
-            TrustBundleEnvironment::Devnet
-        )
-    );
+    assert!(modeled_finalization_mainnet_peer_driven_apply_refused_first(
+        TrustBundleEnvironment::Mainnet
+    ));
+    assert!(!modeled_finalization_mainnet_peer_driven_apply_refused_first(
+        TrustBundleEnvironment::Devnet
+    ));
     assert!(modeled_finalization_production_mainnet_unavailable());
     assert!(modeled_finalization_validator_set_rotation_unsupported());
     assert!(modeled_finalization_policy_change_unsupported());

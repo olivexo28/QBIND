@@ -60,7 +60,8 @@ use qbind_node::pqc_authority_custody_policy_surface::{
     preflight_v2_marker_authority_custody_for_reload_check,
     preflight_v2_marker_authority_custody_for_sighup,
     preflight_v2_marker_authority_custody_for_startup_p2p_trust_bundle,
-    AuthorityCustodyPolicySelectorParseError, QBIND_P2P_TRUST_BUNDLE_AUTHORITY_CUSTODY_POLICY_ENV,
+    AuthorityCustodyPolicySelectorParseError,
+    QBIND_P2P_TRUST_BUNDLE_AUTHORITY_CUSTODY_POLICY_ENV,
 };
 use qbind_node::pqc_authority_lifecycle::{
     AuthorityTrustDomain, LocalLifecycleAction, PQC_LIFECYCLE_SUITE_ML_DSA_44,
@@ -89,9 +90,13 @@ struct EnvGuard {
 impl EnvGuard {
     fn set(value: Option<&str>) -> Self {
         let lock = env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let prior = std::env::var(QBIND_P2P_TRUST_BUNDLE_AUTHORITY_CUSTODY_POLICY_ENV).ok();
+        let prior =
+            std::env::var(QBIND_P2P_TRUST_BUNDLE_AUTHORITY_CUSTODY_POLICY_ENV).ok();
         match value {
-            Some(v) => std::env::set_var(QBIND_P2P_TRUST_BUNDLE_AUTHORITY_CUSTODY_POLICY_ENV, v),
+            Some(v) => std::env::set_var(
+                QBIND_P2P_TRUST_BUNDLE_AUTHORITY_CUSTODY_POLICY_ENV,
+                v,
+            ),
             None => std::env::remove_var(QBIND_P2P_TRUST_BUNDLE_AUTHORITY_CUSTODY_POLICY_ENV),
         }
         EnvGuard { prior, _lock: lock }
@@ -101,7 +106,10 @@ impl EnvGuard {
 impl Drop for EnvGuard {
     fn drop(&mut self) {
         match self.prior.take() {
-            Some(v) => std::env::set_var(QBIND_P2P_TRUST_BUNDLE_AUTHORITY_CUSTODY_POLICY_ENV, v),
+            Some(v) => std::env::set_var(
+                QBIND_P2P_TRUST_BUNDLE_AUTHORITY_CUSTODY_POLICY_ENV,
+                v,
+            ),
             None => std::env::remove_var(QBIND_P2P_TRUST_BUNDLE_AUTHORITY_CUSTODY_POLICY_ENV),
         }
     }
@@ -118,11 +126,15 @@ const ROOT_FP: &str = "1111111111111111111111111111111111111111";
 const OTHER_ROOT_FP: &str = "9999999999999999999999999999999999999999";
 const CHAIN_ID: &str = "0000000000000001";
 const OTHER_CHAIN: &str = "00000000000000ff";
-const GENESIS_HASH: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
-const OTHER_GENESIS: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+const GENESIS_HASH: &str =
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+const OTHER_GENESIS: &str =
+    "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 const DIGEST_2: &str = "2222222222222222222222222222222222222222222222222222222222222222";
-const DIGEST_OTHER: &str = "3333333333333333333333333333333333333333333333333333333333333333";
-const PRIOR_DIGEST: &str = "1111111111111111111111111111111111111111111111111111111111111111";
+const DIGEST_OTHER: &str =
+    "3333333333333333333333333333333333333333333333333333333333333333";
+const PRIOR_DIGEST: &str =
+    "1111111111111111111111111111111111111111111111111111111111111111";
 const CUSTODY_ATTEST_DIGEST: &str = "custody-att-digest-192";
 const CUSTODY_KEY_ID: &str = "custody-key-id-192";
 const OTHER_CUSTODY_KEY_ID: &str = "custody-key-id-OTHER";
@@ -225,7 +237,9 @@ fn good_attestation(
         chain_id: CHAIN_ID.to_string(),
         genesis_hash: GENESIS_HASH.to_string(),
         authority_root_fingerprint: ROOT_FP.to_string(),
-        bundle_signing_key_fingerprint: candidate.active_bundle_signing_key_fingerprint.clone(),
+        bundle_signing_key_fingerprint: candidate
+            .active_bundle_signing_key_fingerprint
+            .clone(),
         governance_authority_class: GovernanceAuthorityClass::GenesisBound,
         lifecycle_action: LocalLifecycleAction::Rotate,
         candidate_digest: DIGEST_2.to_string(),
@@ -276,14 +290,8 @@ fn selector_parser_all_canonical_tags_round_trip() {
     for (tag, policy) in [
         ("disabled", AuthorityCustodyPolicy::Disabled),
         ("fixture-only", AuthorityCustodyPolicy::FixtureOnly),
-        (
-            "devnet-local-allowed",
-            AuthorityCustodyPolicy::DevnetLocalAllowed,
-        ),
-        (
-            "testnet-local-allowed",
-            AuthorityCustodyPolicy::TestnetLocalAllowed,
-        ),
+        ("devnet-local-allowed", AuthorityCustodyPolicy::DevnetLocalAllowed),
+        ("testnet-local-allowed", AuthorityCustodyPolicy::TestnetLocalAllowed),
         (
             "production-custody-required",
             AuthorityCustodyPolicy::ProductionCustodyRequired,
@@ -437,26 +445,22 @@ fn a1_default_disabled_legacy_no_custody_payload_bypassed() {
 #[test]
 fn a2_cli_fixture_only_devnet_fixture_attestation_accepted() {
     let _g = EnvGuard::set(None);
-    let policy = authority_custody_policy_from_cli_or_env(Some("fixture-only")).unwrap();
+    let policy =
+        authority_custody_policy_from_cli_or_env(Some("fixture-only")).unwrap();
     assert_eq!(policy, AuthorityCustodyPolicy::FixtureOnly);
 
     let candidate = rotate_candidate(TrustBundleEnvironment::Devnet);
     let domain = devnet_domain();
     let persisted = prior_versioned(TrustBundleEnvironment::Devnet);
-    let att = good_attestation(
-        TrustBundleEnvironment::Devnet,
-        &candidate,
-        AuthorityCustodyClass::FixtureLocalKey,
-    );
+    let att =
+        good_attestation(TrustBundleEnvironment::Devnet, &candidate, AuthorityCustodyClass::FixtureLocalKey);
     let loaded = AuthorityCustodyLoadStatus::Available(att);
 
     let outcome = rc(Some(&persisted), &candidate, &domain, policy, &loaded);
     assert!(outcome.is_accept(), "expected accept, got {:?}", outcome);
     match outcome {
         AuthorityCustodyPayloadCarryingDecisionOutcome::Callsite(
-            LifecycleGovernanceCustodyOutcome::Accepted {
-                custody_outcome, ..
-            },
+            LifecycleGovernanceCustodyOutcome::Accepted { custody_outcome, .. },
         ) => assert!(matches!(
             custody_outcome,
             AuthorityCustodyValidationOutcome::AcceptedFixtureCustody { .. }
@@ -495,7 +499,8 @@ fn a3_env_fixture_only_testnet_fixture_attestation_accepted() {
 #[test]
 fn a4_cli_devnet_local_allowed_local_operator_attestation_accepted() {
     let _g = EnvGuard::set(None);
-    let policy = authority_custody_policy_from_cli_or_env(Some("devnet-local-allowed")).unwrap();
+    let policy =
+        authority_custody_policy_from_cli_or_env(Some("devnet-local-allowed")).unwrap();
     assert_eq!(policy, AuthorityCustodyPolicy::DevnetLocalAllowed);
 
     let candidate = rotate_candidate(TrustBundleEnvironment::Devnet);
@@ -511,9 +516,7 @@ fn a4_cli_devnet_local_allowed_local_operator_attestation_accepted() {
     assert!(outcome.is_accept(), "got {:?}", outcome);
     match outcome {
         AuthorityCustodyPayloadCarryingDecisionOutcome::Callsite(
-            LifecycleGovernanceCustodyOutcome::Accepted {
-                custody_outcome, ..
-            },
+            LifecycleGovernanceCustodyOutcome::Accepted { custody_outcome, .. },
         ) => assert!(matches!(
             custody_outcome,
             AuthorityCustodyValidationOutcome::AcceptedLocalOperatorCustody { .. }
@@ -552,7 +555,8 @@ fn a5_env_testnet_local_allowed_local_operator_accepted() {
 fn a6_production_custody_required_fixture_fails_closed_unavailable() {
     let _g = EnvGuard::set(None);
     let policy =
-        authority_custody_policy_from_cli_or_env(Some("production-custody-required")).unwrap();
+        authority_custody_policy_from_cli_or_env(Some("production-custody-required"))
+            .unwrap();
     assert_eq!(policy, AuthorityCustodyPolicy::ProductionCustodyRequired);
 
     let candidate = rotate_candidate(TrustBundleEnvironment::Devnet);
@@ -570,9 +574,7 @@ fn a6_production_custody_required_fixture_fails_closed_unavailable() {
     // both are typed fail-closed outcomes.
     match outcome {
         AuthorityCustodyPayloadCarryingDecisionOutcome::Callsite(
-            LifecycleGovernanceCustodyOutcome::CustodyRejected {
-                custody_outcome, ..
-            },
+            LifecycleGovernanceCustodyOutcome::CustodyRejected { custody_outcome, .. },
         ) => assert!(
             matches!(
                 custody_outcome,
@@ -594,9 +596,10 @@ fn a6_production_custody_required_fixture_fails_closed_unavailable() {
 #[test]
 fn a7_mainnet_production_custody_required_fails_closed_and_drain_refuses_mainnet() {
     let _g = EnvGuard::set(None);
-    let policy =
-        authority_custody_policy_from_cli_or_env(Some("mainnet-production-custody-required"))
-            .unwrap();
+    let policy = authority_custody_policy_from_cli_or_env(Some(
+        "mainnet-production-custody-required",
+    ))
+    .unwrap();
     assert_eq!(
         policy,
         AuthorityCustodyPolicy::MainnetProductionCustodyRequired
@@ -606,11 +609,8 @@ fn a7_mainnet_production_custody_required_fails_closed_and_drain_refuses_mainnet
     let domain = mainnet_domain();
     let persisted = prior_versioned(TrustBundleEnvironment::Mainnet);
     // Even with metadata claiming KMS — fail closed.
-    let mut att = good_attestation(
-        TrustBundleEnvironment::Mainnet,
-        &candidate,
-        AuthorityCustodyClass::Kms,
-    );
+    let mut att =
+        good_attestation(TrustBundleEnvironment::Mainnet, &candidate, AuthorityCustodyClass::Kms);
     att.governance_authority_class = GovernanceAuthorityClass::GenesisBound;
     let loaded = AuthorityCustodyLoadStatus::Available(att);
 
@@ -794,9 +794,10 @@ fn selected_policy_reaches_all_seven_production_context_helpers() {
     assert!(call!(preflight_v2_marker_authority_custody_for_reload_apply).is_accept());
     assert!(call!(preflight_v2_marker_authority_custody_for_startup_p2p_trust_bundle).is_accept());
     assert!(call!(preflight_v2_marker_authority_custody_for_sighup).is_accept());
-    assert!(
-        call!(preflight_v2_marker_authority_custody_for_local_peer_candidate_check).is_accept()
-    );
+    assert!(call!(
+        preflight_v2_marker_authority_custody_for_local_peer_candidate_check
+    )
+    .is_accept());
     assert!(call!(preflight_v2_marker_authority_custody_for_live_inbound_0x05).is_accept());
     // Devnet candidate -> peer-driven drain runs the validator path.
     assert!(call!(preflight_v2_marker_authority_custody_for_peer_driven_drain).is_accept());
@@ -1023,10 +1024,11 @@ fn r15_malformed_custody_metadata_rejected_short_circuits_validator() {
     let candidate = rotate_candidate(TrustBundleEnvironment::Devnet);
     let domain = devnet_domain();
     let persisted = prior_versioned(TrustBundleEnvironment::Devnet);
-    let loaded =
-        AuthorityCustodyLoadStatus::Malformed(AuthorityCustodyAttestationPayloadParseError::Json {
+    let loaded = AuthorityCustodyLoadStatus::Malformed(
+        AuthorityCustodyAttestationPayloadParseError::Json {
             error: "synthetic".to_string(),
-        });
+        },
+    );
     let outcome = rc(
         Some(&persisted),
         &candidate,
@@ -1268,10 +1270,11 @@ fn r27_mutating_rejection_is_pure_no_mutation_observable() {
     let candidate = rotate_candidate(TrustBundleEnvironment::Devnet);
     let domain = devnet_domain();
     let persisted = prior_versioned(TrustBundleEnvironment::Devnet);
-    let loaded =
-        AuthorityCustodyLoadStatus::Malformed(AuthorityCustodyAttestationPayloadParseError::Json {
+    let loaded = AuthorityCustodyLoadStatus::Malformed(
+        AuthorityCustodyAttestationPayloadParseError::Json {
             error: "synthetic".to_string(),
-        });
+        },
+    );
     let outcome = preflight_v2_marker_authority_custody_for_reload_apply(
         Some(&persisted),
         &candidate,
@@ -1301,10 +1304,11 @@ fn r28_live_inbound_0x05_invalid_custody_not_propagated() {
     let persisted = prior_versioned(TrustBundleEnvironment::Devnet);
 
     // Malformed payload — fail closed before validator.
-    let malformed =
-        AuthorityCustodyLoadStatus::Malformed(AuthorityCustodyAttestationPayloadParseError::Json {
+    let malformed = AuthorityCustodyLoadStatus::Malformed(
+        AuthorityCustodyAttestationPayloadParseError::Json {
             error: "synthetic".to_string(),
-        });
+        },
+    );
     let outcome_malformed = preflight_v2_marker_authority_custody_for_live_inbound_0x05(
         Some(&persisted),
         &candidate,
@@ -1345,9 +1349,10 @@ fn r28_live_inbound_0x05_invalid_custody_not_propagated() {
 #[test]
 fn r29_mainnet_peer_driven_apply_refused_under_mainnet_production_required_kms_hsm_metadata() {
     let _g = EnvGuard::set(None);
-    let policy =
-        authority_custody_policy_from_cli_or_env(Some("mainnet-production-custody-required"))
-            .unwrap();
+    let policy = authority_custody_policy_from_cli_or_env(Some(
+        "mainnet-production-custody-required",
+    ))
+    .unwrap();
 
     let candidate = rotate_candidate(TrustBundleEnvironment::Mainnet);
     let domain = mainnet_domain();

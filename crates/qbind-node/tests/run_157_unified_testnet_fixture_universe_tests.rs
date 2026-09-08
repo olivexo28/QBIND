@@ -122,10 +122,7 @@ fn helper_exe_path() -> PathBuf {
 fn run_helper(out: &Path) {
     let exe = helper_exe_path();
     let status = if exe.exists() {
-        Command::new(&exe)
-            .arg(out)
-            .status()
-            .expect("run helper exe")
+        Command::new(&exe).arg(out).status().expect("run helper exe")
     } else {
         Command::new(std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into()))
             .current_dir(workspace_root())
@@ -175,8 +172,7 @@ fn signing_keys(m: &UnifiedManifest) -> BundleSigningKeySet {
 }
 
 fn genesis(m: &UnifiedManifest) -> GenesisConfig {
-    serde_json::from_slice(&std::fs::read(&m.genesis).expect("read genesis"))
-        .expect("parse genesis")
+    serde_json::from_slice(&std::fs::read(&m.genesis).expect("read genesis")).expect("parse genesis")
 }
 
 fn expected_genesis_hash(m: &UnifiedManifest) -> qbind_ledger::GenesisHash {
@@ -184,10 +180,7 @@ fn expected_genesis_hash(m: &UnifiedManifest) -> qbind_ledger::GenesisHash {
     compute_canonical_genesis_hash(&cfg, NetworkEnvironmentPolicy::Testnet)
 }
 
-fn validate_path(
-    path: &Path,
-    keys: &BundleSigningKeySet,
-) -> qbind_node::pqc_trust_reload::ValidatedCandidate {
+fn validate_path(path: &Path, keys: &BundleSigningKeySet) -> qbind_node::pqc_trust_reload::ValidatedCandidate {
     validate_candidate_bundle(ReloadCheckInputs {
         candidate_path: path,
         environment: NetworkEnvironment::Testnet,
@@ -208,10 +201,7 @@ fn enabled_config() -> PeerCandidateConfig {
     }
 }
 
-fn peer_ctx<'a>(
-    scratch: &'a Path,
-    keys: &'a BundleSigningKeySet,
-) -> PeerCandidateRuntimeContext<'a> {
+fn peer_ctx<'a>(scratch: &'a Path, keys: &'a BundleSigningKeySet) -> PeerCandidateRuntimeContext<'a> {
     PeerCandidateRuntimeContext {
         expected_environment: NetworkEnvironment::Testnet,
         expected_chain_id: NetworkEnvironment::Testnet.chain_id(),
@@ -249,10 +239,7 @@ fn a1_unified_helper_produces_manifest_and_required_files() {
     assert_eq!(m.chain_id, "qbind-testnet-v0");
     assert_eq!(m.chain_id_hex, "51424e4454535400");
     assert_eq!(m.expected_authority_domain_sequence, 2);
-    assert!(
-        m.mainnet_fixture.is_none(),
-        "Run 157 must not mint MainNet production material"
-    );
+    assert!(m.mainnet_fixture.is_none(), "Run 157 must not mint MainNet production material");
 
     let mut paths = vec![
         &m.genesis,
@@ -274,24 +261,18 @@ fn a1_unified_helper_produces_manifest_and_required_files() {
         &m.seeded_authority_marker,
         &m.valid_peer_candidate_envelope,
         &m.negative_peer_candidate_envelopes.lower_sequence,
-        &m.negative_peer_candidate_envelopes
-            .same_sequence_different_digest,
+        &m.negative_peer_candidate_envelopes.same_sequence_different_digest,
         &m.negative_peer_candidate_envelopes.bad_signature,
         &m.negative_peer_candidate_envelopes.wrong_environment,
         &m.negative_peer_candidate_envelopes.wrong_chain,
-        &m.negative_peer_candidate_envelopes
-            .wrong_genesis_ratification,
+        &m.negative_peer_candidate_envelopes.wrong_genesis_ratification,
         &m.negative_peer_candidate_envelopes.ambiguous_v1_v2,
         &m.negative_peer_candidate_envelopes.duplicate_candidate,
     ];
     paths.sort();
     paths.dedup();
     for path in paths {
-        assert!(
-            path.exists(),
-            "manifest-listed file must exist: {}",
-            path.display()
-        );
+        assert!(path.exists(), "manifest-listed file must exist: {}", path.display());
     }
 }
 
@@ -306,10 +287,7 @@ fn a2_baseline_testnet_bundle_validates_under_testnet_domain() {
     let validated = validate_path(&m.baseline_trust_bundle, &keys);
     assert_eq!(validated.sequence, 1);
     assert_eq!(validated.fingerprint_hex, m.baseline_fingerprint);
-    assert_eq!(
-        hex_lower(&expected_genesis_hash(m)),
-        m.expected_genesis_hash_hex.trim_start_matches("0x")
-    );
+    assert_eq!(hex_lower(&expected_genesis_hash(m)), m.expected_genesis_hash_hex.trim_start_matches("0x"));
 }
 
 #[test]
@@ -324,10 +302,7 @@ fn a3_candidate_is_valid_successor_of_baseline_in_same_universe() {
     assert_eq!(baseline.chain_id, candidate.chain_id);
     assert_eq!(baseline.roots[0].root_id, candidate.roots[0].root_id);
     assert_eq!(baseline.roots[0].root_pk, candidate.roots[0].root_pk);
-    assert!(
-        candidate.roots.len() > baseline.roots.len(),
-        "candidate adds material while retaining live transport root"
-    );
+    assert!(candidate.roots.len() > baseline.roots.len(), "candidate adds material while retaining live transport root");
 
     let seq_path = tmpdir("seq").join("pqc_trust_bundle_sequence.json");
     let record = PersistentTrustBundleSequenceRecord::new(
@@ -347,14 +322,7 @@ fn a3_candidate_is_valid_successor_of_baseline_in_same_universe() {
         &candidate_fp,
     )
     .expect("peek accepts higher sequence");
-    assert!(matches!(
-        peek,
-        SequencePeekOutcome::WouldUpgrade {
-            previous_sequence: 1,
-            candidate_sequence: 2,
-            ..
-        }
-    ));
+    assert!(matches!(peek, SequencePeekOutcome::WouldUpgrade { previous_sequence: 1, candidate_sequence: 2, .. }));
 
     let validated = validate_path(&m.candidate_trust_bundle, &keys);
     assert_eq!(validated.sequence, 2);
@@ -368,22 +336,20 @@ fn a4_candidate_v2_ratification_verifies_under_testnet_domain() {
     let rat = load_ratification(&m.v2_ratification_sidecar);
     let cfg = genesis(m);
     let hash = expected_genesis_hash(m);
-    let verified =
-        qbind_ledger::verify_bundle_signing_key_ratification_v2(RatificationV2VerifierInputs {
+    let verified = qbind_ledger::verify_bundle_signing_key_ratification_v2(
+        RatificationV2VerifierInputs {
             ratification: &rat,
             authority: cfg.authority.as_ref().expect("authority"),
             expected_chain_id: &m.chain_id_hex,
             expected_environment: NetworkEnvironmentPolicy::Testnet,
             expected_genesis_hash: &hash,
-        })
-        .expect("v2 ratification verifies");
+        },
+    )
+    .expect("v2 ratification verifies");
     assert_eq!(rat.authority_domain_sequence, 2);
     assert_eq!(verified.authority_domain_sequence, 2);
     let candidate = load_bundle(&m.candidate_trust_bundle);
-    assert_eq!(
-        hex_lower(&canonical_fingerprint(&candidate)),
-        m.expected_candidate_digest
-    );
+    assert_eq!(hex_lower(&canonical_fingerprint(&candidate)), m.expected_candidate_digest);
 }
 
 #[test]
@@ -392,15 +358,16 @@ fn a5_seeded_v2_marker_accepts_candidate_as_higher_sequence() {
     let rat = load_ratification(&m.v2_ratification_sidecar);
     let cfg = genesis(m);
     let hash = expected_genesis_hash(m);
-    let ratified =
-        qbind_ledger::verify_bundle_signing_key_ratification_v2(RatificationV2VerifierInputs {
+    let ratified = qbind_ledger::verify_bundle_signing_key_ratification_v2(
+        RatificationV2VerifierInputs {
             ratification: &rat,
             authority: cfg.authority.as_ref().expect("authority"),
             expected_chain_id: &m.chain_id_hex,
             expected_environment: NetworkEnvironmentPolicy::Testnet,
             expected_genesis_hash: &hash,
-        })
-        .expect("v2 ratification verifies");
+        },
+    )
+    .expect("v2 ratification verifies");
     let hash_hex = hex_lower(&hash);
     let decision = verify_marker_for_validation_only_v2(ValidationOnlyMarkerV2Inputs {
         marker_path: &m.seeded_authority_marker,
@@ -427,10 +394,7 @@ fn a6_valid_peer_candidate_envelope_validates_without_mutation() {
     let scratch = tmpdir("peer-scratch");
     let before_marker = std::fs::read(&m.seeded_authority_marker).expect("read marker");
     let mut validator = PeerCandidateValidator::new(enabled_config());
-    let out = validator.try_accept(
-        load_envelope(&m.valid_peer_candidate_envelope),
-        &peer_ctx(&scratch, &keys),
-    );
+    let out = validator.try_accept(load_envelope(&m.valid_peer_candidate_envelope), &peer_ctx(&scratch, &keys));
     match out {
         PeerCandidateOutcome::Validated(vc) => {
             assert_eq!(vc.validated.sequence, 2);
@@ -438,10 +402,7 @@ fn a6_valid_peer_candidate_envelope_validates_without_mutation() {
         }
         other => panic!("expected validation-only acceptance, got {:?}", other),
     }
-    assert_eq!(
-        std::fs::read(&m.seeded_authority_marker).expect("read marker"),
-        before_marker
-    );
+    assert_eq!(std::fs::read(&m.seeded_authority_marker).expect("read marker"), before_marker);
 }
 
 #[test]
@@ -483,41 +444,22 @@ fn a8_dry_run_command_builder_references_existing_fixture_paths() {
             "--p2p-trust-bundle".to_string(),
             m.baseline_trust_bundle.display().to_string(),
             "--p2p-trust-bundle-signing-key".to_string(),
-            std::fs::read_to_string(&m.bundle_signing_key_specs)
-                .unwrap()
-                .trim()
-                .to_string(),
+            std::fs::read_to_string(&m.bundle_signing_key_specs).unwrap().trim().to_string(),
             "--p2p-trusted-root".to_string(),
             format!(
                 "{}:{}:{}",
-                std::fs::read_to_string(&m.transport_root_id)
-                    .unwrap()
-                    .trim(),
+                std::fs::read_to_string(&m.transport_root_id).unwrap().trim(),
                 PQC_TRANSPORT_SUITE_ML_DSA_44,
-                std::fs::read_to_string(&m.transport_root_public_key)
-                    .unwrap()
-                    .trim()
+                std::fs::read_to_string(&m.transport_root_public_key).unwrap().trim()
             ),
             "--p2p-leaf-cert".to_string(),
             node.leaf_cert.display().to_string(),
             "--p2p-leaf-cert-key".to_string(),
             node.kem_secret_key.display().to_string(),
         ];
-        assert!(
-            args.iter().any(|a| a == "testnet"),
-            "node {idx} uses TestNet args"
-        );
-        for p in [
-            &m.genesis,
-            &m.baseline_trust_bundle,
-            &node.leaf_cert,
-            &node.kem_secret_key,
-        ] {
-            assert!(
-                p.exists(),
-                "node {idx} command path exists: {}",
-                p.display()
-            );
+        assert!(args.iter().any(|a| a == "testnet"), "node {idx} uses TestNet args");
+        for p in [&m.genesis, &m.baseline_trust_bundle, &node.leaf_cert, &node.kem_secret_key] {
+            assert!(p.exists(), "node {idx} command path exists: {}", p.display());
         }
     }
 }
@@ -560,35 +502,27 @@ fn r2_r3_wrong_environment_and_wrong_chain_peer_candidates_rejected() {
         &m.negative_peer_candidate_envelopes.wrong_chain,
     ] {
         let scratch = tmpdir("wrong-domain");
-        let out = PeerCandidateValidator::new(enabled_config())
-            .try_accept(load_envelope(path), &peer_ctx(&scratch, &keys));
-        assert!(
-            matches!(out, PeerCandidateOutcome::Rejected(_)),
-            "{:?}",
-            out
-        );
+        let out = PeerCandidateValidator::new(enabled_config()).try_accept(load_envelope(path), &peer_ctx(&scratch, &keys));
+        assert!(matches!(out, PeerCandidateOutcome::Rejected(_)), "{:?}", out);
     }
 }
 
 #[test]
 fn r4_wrong_genesis_ratification_rejected() {
     let m = manifest();
-    let rat = load_ratification(
-        &m.negative_peer_candidate_envelopes
-            .wrong_genesis_ratification,
-    );
+    let rat = load_ratification(&m.negative_peer_candidate_envelopes.wrong_genesis_ratification);
     let cfg = genesis(m);
     let hash = expected_genesis_hash(m);
-    assert!(qbind_ledger::verify_bundle_signing_key_ratification_v2(
-        RatificationV2VerifierInputs {
+    assert!(
+        qbind_ledger::verify_bundle_signing_key_ratification_v2(RatificationV2VerifierInputs {
             ratification: &rat,
             authority: cfg.authority.as_ref().expect("authority"),
             expected_chain_id: &m.chain_id_hex,
             expected_environment: NetworkEnvironmentPolicy::Testnet,
             expected_genesis_hash: &hash,
-        }
-    )
-    .is_err());
+        })
+        .is_err()
+    );
 }
 
 #[test]
@@ -600,11 +534,7 @@ fn r5_bad_signature_peer_candidate_rejected() {
         load_envelope(&m.negative_peer_candidate_envelopes.bad_signature),
         &peer_ctx(&scratch, &keys),
     );
-    assert!(
-        matches!(out, PeerCandidateOutcome::Rejected(_)),
-        "{:?}",
-        out
-    );
+    assert!(matches!(out, PeerCandidateOutcome::Rejected(_)), "{:?}", out);
 }
 
 #[test]
@@ -634,10 +564,7 @@ fn r6_lower_sequence_candidate_rejected_by_sequence_guard() {
 #[test]
 fn r7_same_sequence_different_digest_rejected_by_sequence_guard() {
     let m = manifest();
-    let env = load_envelope(
-        &m.negative_peer_candidate_envelopes
-            .same_sequence_different_digest,
-    );
+    let env = load_envelope(&m.negative_peer_candidate_envelopes.same_sequence_different_digest);
     let bundle: TrustBundle = serde_json::from_slice(&env.bundle_bytes).expect("parse bundle");
     let seq_path = tmpdir("same-seq-diff").join("pqc_trust_bundle_sequence.json");
     let record = PersistentTrustBundleSequenceRecord::new(
@@ -667,11 +594,7 @@ fn r8_ambiguous_v1_v2_material_rejected() {
         load_envelope(&m.negative_peer_candidate_envelopes.ambiguous_v1_v2),
         &peer_ctx(&scratch, &keys),
     );
-    assert!(
-        matches!(out, PeerCandidateOutcome::Rejected(_)),
-        "{:?}",
-        out
-    );
+    assert!(matches!(out, PeerCandidateOutcome::Rejected(_)), "{:?}", out);
 }
 
 #[test]
@@ -679,9 +602,6 @@ fn r9_mainnet_fixture_use_remains_refused_or_fixture_only() {
     let m = manifest();
     assert!(m.mainnet_fixture.is_none());
     assert_eq!(m.environment, "testnet");
-    assert_ne!(
-        chain_id_hex(NetworkEnvironment::Mainnet.chain_id()),
-        m.chain_id_hex
-    );
+    assert_ne!(chain_id_hex(NetworkEnvironment::Mainnet.chain_id()), m.chain_id_hex);
     assert!(!m.authority_root_fingerprint.is_empty());
 }

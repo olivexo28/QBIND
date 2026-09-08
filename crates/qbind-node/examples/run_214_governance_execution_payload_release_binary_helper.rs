@@ -86,16 +86,16 @@ use qbind_node::pqc_governance_execution_payload_carrying::{
     route_loaded_governance_execution_to_startup_p2p_trust_bundle_callsite_decision,
     GovernanceExecutionActionWire, GovernanceExecutionCallsiteContext,
     GovernanceExecutionClassWire, GovernanceExecutionDecisionWire, GovernanceExecutionInputWire,
-    GovernanceExecutionLoadStatus, GovernanceExecutionParts,
-    GovernanceExecutionPayloadCarryingDecisionOutcome, GovernanceExecutionPayloadWire,
-    GovernanceExecutionWireParseError, GOVERNANCE_EXECUTION_PAYLOAD_SIBLING_FIELD,
-    GOVERNANCE_EXECUTION_PAYLOAD_WIRE_SCHEMA_VERSION,
+    GovernanceExecutionLoadStatus, GovernanceExecutionPayloadCarryingDecisionOutcome,
+    GovernanceExecutionPayloadWire, GovernanceExecutionParts, GovernanceExecutionWireParseError,
+    GOVERNANCE_EXECUTION_PAYLOAD_SIBLING_FIELD, GOVERNANCE_EXECUTION_PAYLOAD_WIRE_SCHEMA_VERSION,
 };
 use qbind_node::pqc_governance_execution_policy::{
     governance_execution_policy_digest, governance_execution_transcript_digest, GovernanceAction,
     GovernanceExecutionClass, GovernanceExecutionComposedOutcome, GovernanceExecutionDecision,
     GovernanceExecutionExpectations, GovernanceExecutionInput, GovernanceExecutionOutcome,
-    GovernanceExecutionPolicy, GovernanceQuorumThreshold, GOVERNANCE_EXECUTION_SUPPORTED_VERSION,
+    GovernanceExecutionPolicy, GovernanceQuorumThreshold,
+    GOVERNANCE_EXECUTION_SUPPORTED_VERSION,
 };
 use qbind_node::pqc_trust_bundle::TrustBundleEnvironment;
 
@@ -417,10 +417,7 @@ fn route_apply_fixture(
         exp,
         GovernanceExecutionPolicy::FixtureGovernanceAllowed,
     );
-    route_loaded_governance_execution_to_reload_apply_callsite_decision(
-        &ctx,
-        &available_from(input, decision),
-    )
+    route_loaded_governance_execution_to_reload_apply_callsite_decision(&ctx, &available_from(input, decision))
 }
 
 /// Route carried material into the Run 211 evaluator (via the grep-verifiable
@@ -531,16 +528,8 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
             &ctx,
             &GovernanceExecutionLoadStatus::Absent,
         );
-        t.check(
-            "A1.absent-disabled-bypass",
-            "bypass:NoGovernanceExecutionSupplied",
-            &decision_tag(&outcome),
-        );
-        t.assert_true(
-            "A1.is-bypassed",
-            outcome.is_bypassed() && !outcome.is_reject(),
-            "",
-        );
+        t.check("A1.absent-disabled-bypass", "bypass:NoGovernanceExecutionSupplied", &decision_tag(&outcome));
+        t.assert_true("A1.is-bypassed", outcome.is_bypassed() && !outcome.is_reject(), "");
     }
 
     // A2 — DevNet fixture carried through reload-check accepted.
@@ -557,11 +546,7 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
             &ctx,
             &available_from(&rotate_input(env), &rotate_decision()),
         );
-        t.check(
-            "A2.devnet-reload-check",
-            "callsite:accept:FixtureGovernanceAccepted",
-            &decision_tag(&outcome),
-        );
+        t.check("A2.devnet-reload-check", "callsite:accept:FixtureGovernanceAccepted", &decision_tag(&outcome));
     }
 
     // A3 — TestNet fixture carried through reload-check accepted.
@@ -578,27 +563,14 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
             &ctx,
             &available_from(&rotate_input(env), &rotate_decision()),
         );
-        t.check(
-            "A3.testnet-reload-check",
-            "callsite:accept:FixtureGovernanceAccepted",
-            &decision_tag(&outcome),
-        );
+        t.check("A3.testnet-reload-check", "callsite:accept:FixtureGovernanceAccepted", &decision_tag(&outcome));
     }
 
     // A4 — DevNet fixture carried through reload-apply accepted.
     {
         let env = Env::Devnet;
-        let outcome = route_apply_fixture(
-            &rotate_input(env),
-            &rotate_decision(),
-            &rotate_expectations(env),
-            env,
-        );
-        t.check(
-            "A4.devnet-reload-apply",
-            "callsite:accept:FixtureGovernanceAccepted",
-            &decision_tag(&outcome),
-        );
+        let outcome = route_apply_fixture(&rotate_input(env), &rotate_decision(), &rotate_expectations(env), env);
+        t.check("A4.devnet-reload-apply", "callsite:accept:FixtureGovernanceAccepted", &decision_tag(&outcome));
     }
 
     // A5 — input digest preserved through wire conversion.
@@ -607,11 +579,7 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
         let back = GovernanceExecutionInputWire::from_input(&input)
             .to_input()
             .expect("wire converts");
-        t.assert_true(
-            "A5.input-digest-preserved",
-            input.input_digest() == back.input_digest(),
-            "",
-        );
+        t.assert_true("A5.input-digest-preserved", input.input_digest() == back.input_digest(), "");
     }
 
     // A6 — decision digest preserved through wire conversion.
@@ -620,11 +588,7 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
         let back = GovernanceExecutionDecisionWire::from_decision(&decision)
             .to_decision()
             .expect("wire converts");
-        t.assert_true(
-            "A6.decision-digest-preserved",
-            decision.decision_digest() == back.decision_digest(),
-            "",
-        );
+        t.assert_true("A6.decision-digest-preserved", decision.decision_digest() == back.decision_digest(), "");
     }
 
     // A7 — transcript digest preserved through wire conversion.
@@ -634,12 +598,8 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
         let parts = GovernanceExecutionPayloadWire::from_parts(&input, &decision)
             .to_parts()
             .expect("wire converts");
-        let before = governance_execution_transcript_digest(
-            &input.input_digest(),
-            &decision.decision_digest(),
-        );
-        let after =
-            governance_execution_transcript_digest(&parts.input_digest(), &parts.decision_digest());
+        let before = governance_execution_transcript_digest(&input.input_digest(), &decision.decision_digest());
+        let after = governance_execution_transcript_digest(&parts.input_digest(), &parts.decision_digest());
         t.assert_true("A7.transcript-digest-preserved", before == after, "");
     }
 
@@ -650,12 +610,9 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
             GovernanceExecutionPolicy::FixtureGovernanceAllowed,
             GovernanceExecutionClass::FixtureGovernance,
         );
-        let parts = GovernanceExecutionPayloadWire::from_parts(
-            &rotate_input(Env::Devnet),
-            &rotate_decision(),
-        )
-        .to_parts()
-        .unwrap();
+        let parts = GovernanceExecutionPayloadWire::from_parts(&rotate_input(Env::Devnet), &rotate_decision())
+            .to_parts()
+            .unwrap();
         let after = governance_execution_policy_digest(
             GovernanceExecutionPolicy::FixtureGovernanceAllowed,
             parts.input.governance_class,
@@ -673,23 +630,14 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
             env,
             GovernanceExecutionPolicy::FixtureGovernanceAllowed,
         );
-        t.check(
-            "A9.routes-to-run211",
-            "accept:FixtureGovernanceAccepted",
-            outcome_tag(&outcome),
-        );
+        t.check("A9.routes-to-run211", "accept:FixtureGovernanceAccepted", outcome_tag(&outcome));
     }
 
     // A10 — rotate authorized only when carried decision authorizes rotate
     // with matching candidate digest and sequence.
     {
         let env = Env::Devnet;
-        let ok = route_apply_fixture(
-            &rotate_input(env),
-            &rotate_decision(),
-            &rotate_expectations(env),
-            env,
-        );
+        let ok = route_apply_fixture(&rotate_input(env), &rotate_decision(), &rotate_expectations(env), env);
         t.assert_true("A10.rotate-matching-accepted", ok.is_accept(), "");
         let mut bad = rotate_decision();
         bad.authorized_candidate_digest = "wrong-candidate".to_string();
@@ -760,11 +708,7 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
             &ctx,
             &GovernanceExecutionLoadStatus::Absent,
         );
-        t.assert_true(
-            "A14.disabled-bypass-both",
-            a.is_bypassed() && b.is_bypassed(),
-            "",
-        );
+        t.assert_true("A14.disabled-bypass-both", a.is_bypassed() && b.is_bypassed(), "");
     }
 
     // A15 — custody / RemoteSigner / KMS-HSM / attestation paths remain
@@ -800,11 +744,7 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
             env,
             GovernanceExecutionPolicy::ProductionGovernanceRequired,
         );
-        t.check(
-            "A16.production-unavailable",
-            "reject:ProductionGovernanceUnavailable",
-            outcome_tag(&outcome),
-        );
+        t.check("A16.production-unavailable", "reject:ProductionGovernanceUnavailable", outcome_tag(&outcome));
     }
 
     t.finish(out)
@@ -832,16 +772,8 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
             &ctx,
             &GovernanceExecutionLoadStatus::Absent,
         );
-        t.check(
-            "R1.absent-required",
-            "reject:GovernanceExecutionRequiredButAbsent",
-            &decision_tag(&outcome),
-        );
-        t.assert_true(
-            "R1.is-required-but-absent",
-            outcome.is_required_but_absent() && outcome.is_reject(),
-            "",
-        );
+        t.check("R1.absent-required", "reject:GovernanceExecutionRequiredButAbsent", &decision_tag(&outcome));
+        t.assert_true("R1.is-required-but-absent", outcome.is_required_but_absent() && outcome.is_reject(), "");
     }
 
     // R2 — malformed governance execution input wire rejected.
@@ -870,8 +802,7 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
 
     // R4 — malformed combined payload rejected (and routes fail closed).
     {
-        let value =
-            serde_json::json!({ GOVERNANCE_EXECUTION_PAYLOAD_SIBLING_FIELD: "not-an-object" });
+        let value = serde_json::json!({ GOVERNANCE_EXECUTION_PAYLOAD_SIBLING_FIELD: "not-an-object" });
         let loaded = parse_optional_governance_execution_sibling_from_json_value(&value);
         let td = trust_domain(env);
         let exp = rotate_expectations(env);
@@ -880,32 +811,21 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
             &exp,
             GovernanceExecutionPolicy::FixtureGovernanceAllowed,
         );
-        let outcome =
-            route_loaded_governance_execution_to_reload_apply_callsite_decision(&ctx, &loaded);
-        t.check(
-            "R4.malformed-combined",
-            "reject:MalformedGovernanceExecutionPayload",
-            &decision_tag(&outcome),
-        );
-        t.assert_true(
-            "R4.is-malformed",
-            loaded.is_malformed() && outcome.is_malformed_payload(),
-            "",
-        );
+        let outcome = route_loaded_governance_execution_to_reload_apply_callsite_decision(&ctx, &loaded);
+        t.check("R4.malformed-combined", "reject:MalformedGovernanceExecutionPayload", &decision_tag(&outcome));
+        t.assert_true("R4.is-malformed", loaded.is_malformed() && outcome.is_malformed_payload(), "");
     }
 
     // R5 — unsupported future schema version rejected.
     {
-        let mut wire =
-            GovernanceExecutionPayloadWire::from_parts(&rotate_input(env), &rotate_decision());
+        let mut wire = GovernanceExecutionPayloadWire::from_parts(&rotate_input(env), &rotate_decision());
         wire.schema_version = 9_999;
         let wire_err = matches!(
             wire.to_parts().unwrap_err(),
             GovernanceExecutionWireParseError::UnknownSchemaVersion { .. }
         );
         let value = serde_json::json!({ GOVERNANCE_EXECUTION_PAYLOAD_SIBLING_FIELD: serde_json::to_value(&wire).unwrap() });
-        let malformed =
-            parse_optional_governance_execution_sibling_from_json_value(&value).is_malformed();
+        let malformed = parse_optional_governance_execution_sibling_from_json_value(&value).is_malformed();
         t.assert_true("R5.unsupported-schema-version", wire_err && malformed, "");
     }
 
@@ -918,11 +838,7 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
             env,
             GovernanceExecutionPolicy::ProductionGovernanceRequired,
         );
-        t.check(
-            "R6.fixture-production-required",
-            "reject:FixtureRejectedProductionRequired",
-            outcome_tag(&outcome),
-        );
+        t.check("R6.fixture-production-required", "reject:FixtureRejectedProductionRequired", outcome_tag(&outcome));
     }
 
     // R7 — emergency fixture rejected under ProductionGovernanceRequired.
@@ -950,11 +866,7 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
             env,
             GovernanceExecutionPolicy::MainnetGovernanceRequired,
         );
-        t.check(
-            "R8.fixture-mainnet-required",
-            "reject:FixtureRejectedMainnetRequired",
-            outcome_tag(&outcome),
-        );
+        t.check("R8.fixture-mainnet-required", "reject:FixtureRejectedMainnetRequired", outcome_tag(&outcome));
     }
 
     // R9/R10/R11 — production / on-chain / MainNet governance unavailable.
@@ -1000,106 +912,54 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
             env,
             GovernanceExecutionPolicy::FixtureGovernanceAllowed,
         );
-        t.check(
-            "R12.unknown-class",
-            "reject:UnknownGovernanceClassRejected",
-            outcome_tag(&outcome),
-        );
+        t.check("R12.unknown-class", "reject:UnknownGovernanceClassRejected", outcome_tag(&outcome));
     }
 
     // R13..R25 — wrong-binding rejections, each carried through the wire layer
     // and routed into the Run 211 evaluator. Each mutates one bound field of
     // the input (and its expectation where the binding is optional).
-    let wrong_cases: &[(
-        &str,
-        &str,
-        fn(&mut GovernanceExecutionInput, &mut GovernanceExecutionExpectations),
-    )] = &[
-        (
-            "R13.wrong-environment",
-            "reject:WrongEnvironment",
-            |i, _e| {
-                i.environment = TrustBundleEnvironment::Testnet;
-            },
-        ),
+    let wrong_cases: &[(&str, &str, fn(&mut GovernanceExecutionInput, &mut GovernanceExecutionExpectations))] = &[
+        ("R13.wrong-environment", "reject:WrongEnvironment", |i, _e| {
+            i.environment = TrustBundleEnvironment::Testnet;
+        }),
         ("R14.wrong-chain", "reject:WrongChain", |i, _e| {
             i.chain_id = "wrong-chain".to_string();
         }),
         ("R15.wrong-genesis", "reject:WrongGenesis", |i, _e| {
             i.genesis_hash = "wrong-genesis".to_string();
         }),
-        (
-            "R16.wrong-authority-root",
-            "reject:WrongAuthorityRoot",
-            |i, _e| {
-                i.authority_root_fingerprint = "wrong-root".to_string();
-            },
-        ),
-        (
-            "R17.wrong-lifecycle-action",
-            "reject:WrongLifecycleAction",
-            |i, _e| {
-                i.lifecycle_action = LocalLifecycleAction::Retire;
-            },
-        ),
-        (
-            "R18.wrong-candidate-digest",
-            "reject:WrongCandidateDigest",
-            |i, _e| {
-                i.candidate_digest = "wrong-candidate".to_string();
-            },
-        ),
-        (
-            "R19.wrong-sequence",
-            "reject:WrongAuthorityDomainSequence",
-            |i, _e| {
-                i.authority_domain_sequence = 99;
-            },
-        ),
-        (
-            "R20.wrong-governance-proof",
-            "reject:WrongGovernanceProofDigest",
-            |i, _e| {
-                i.governance_proof_digest = "wrong-proof".to_string();
-            },
-        ),
-        (
-            "R21.wrong-onchain-proof",
-            "reject:WrongOnChainProofDigest",
-            |i, e| {
-                i.on_chain_proof_digest = Some("wrong-onchain".to_string());
-                e.expected_on_chain_proof_digest = Some("expected-onchain".to_string());
-            },
-        ),
-        (
-            "R22.wrong-custody-attestation",
-            "reject:WrongCustodyAttestationDigest",
-            |i, e| {
-                i.custody_attestation_digest = Some("wrong-custody".to_string());
-                e.expected_custody_attestation_digest = Some("expected-custody".to_string());
-            },
-        ),
-        (
-            "R23.wrong-proposal-id",
-            "reject:WrongProposalId",
-            |i, _e| {
-                i.proposal_id = "wrong-proposal".to_string();
-            },
-        ),
-        (
-            "R24.wrong-decision-id",
-            "reject:WrongDecisionId",
-            |i, _e| {
-                i.decision_id = "wrong-decision".to_string();
-            },
-        ),
-        (
-            "R25.wrong-effective-epoch",
-            "reject:WrongEffectiveEpoch",
-            |i, _e| {
-                i.effective_epoch = 101;
-            },
-        ),
+        ("R16.wrong-authority-root", "reject:WrongAuthorityRoot", |i, _e| {
+            i.authority_root_fingerprint = "wrong-root".to_string();
+        }),
+        ("R17.wrong-lifecycle-action", "reject:WrongLifecycleAction", |i, _e| {
+            i.lifecycle_action = LocalLifecycleAction::Retire;
+        }),
+        ("R18.wrong-candidate-digest", "reject:WrongCandidateDigest", |i, _e| {
+            i.candidate_digest = "wrong-candidate".to_string();
+        }),
+        ("R19.wrong-sequence", "reject:WrongAuthorityDomainSequence", |i, _e| {
+            i.authority_domain_sequence = 99;
+        }),
+        ("R20.wrong-governance-proof", "reject:WrongGovernanceProofDigest", |i, _e| {
+            i.governance_proof_digest = "wrong-proof".to_string();
+        }),
+        ("R21.wrong-onchain-proof", "reject:WrongOnChainProofDigest", |i, e| {
+            i.on_chain_proof_digest = Some("wrong-onchain".to_string());
+            e.expected_on_chain_proof_digest = Some("expected-onchain".to_string());
+        }),
+        ("R22.wrong-custody-attestation", "reject:WrongCustodyAttestationDigest", |i, e| {
+            i.custody_attestation_digest = Some("wrong-custody".to_string());
+            e.expected_custody_attestation_digest = Some("expected-custody".to_string());
+        }),
+        ("R23.wrong-proposal-id", "reject:WrongProposalId", |i, _e| {
+            i.proposal_id = "wrong-proposal".to_string();
+        }),
+        ("R24.wrong-decision-id", "reject:WrongDecisionId", |i, _e| {
+            i.decision_id = "wrong-decision".to_string();
+        }),
+        ("R25.wrong-effective-epoch", "reject:WrongEffectiveEpoch", |i, _e| {
+            i.effective_epoch = 101;
+        }),
     ];
     for (id, expected, mutate) in wrong_cases {
         let mut input = rotate_input(env);
@@ -1126,11 +986,7 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
             env,
             GovernanceExecutionPolicy::FixtureGovernanceAllowed,
         );
-        t.check(
-            "R26.expired-decision",
-            "reject:ExpiredDecision",
-            outcome_tag(&outcome),
-        );
+        t.check("R26.expired-decision", "reject:ExpiredDecision", outcome_tag(&outcome));
     }
 
     // R27 — stale / replayed decision rejected.
@@ -1144,11 +1000,7 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
             env,
             GovernanceExecutionPolicy::FixtureGovernanceAllowed,
         );
-        t.check(
-            "R27.stale-replayed",
-            "reject:StaleOrReplayedDecision",
-            outcome_tag(&outcome),
-        );
+        t.check("R27.stale-replayed", "reject:StaleOrReplayedDecision", outcome_tag(&outcome));
     }
 
     // R28 — quorum threshold insufficient rejected.
@@ -1162,11 +1014,7 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
             env,
             GovernanceExecutionPolicy::FixtureGovernanceAllowed,
         );
-        t.check(
-            "R28.quorum-insufficient",
-            "reject:QuorumThresholdInsufficient",
-            outcome_tag(&outcome),
-        );
+        t.check("R28.quorum-insufficient", "reject:QuorumThresholdInsufficient", outcome_tag(&outcome));
     }
 
     // R29 — emergency action not authorized (emergency action carried under
@@ -1183,11 +1031,7 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
             env,
             GovernanceExecutionPolicy::FixtureGovernanceAllowed,
         );
-        t.check(
-            "R29.emergency-not-authorized",
-            "reject:EmergencyActionNotAuthorized",
-            outcome_tag(&outcome),
-        );
+        t.check("R29.emergency-not-authorized", "reject:EmergencyActionNotAuthorized", outcome_tag(&outcome));
     }
 
     // R30 — validator-set rotation unsupported rejected.
@@ -1201,11 +1045,7 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
             env,
             GovernanceExecutionPolicy::FixtureGovernanceAllowed,
         );
-        t.check(
-            "R30.validator-set-rotation",
-            "reject:ValidatorSetRotationUnsupported",
-            outcome_tag(&outcome),
-        );
+        t.check("R30.validator-set-rotation", "reject:ValidatorSetRotationUnsupported", outcome_tag(&outcome));
     }
 
     // R31 — policy-change action unsupported rejected.
@@ -1219,11 +1059,7 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
             env,
             GovernanceExecutionPolicy::FixtureGovernanceAllowed,
         );
-        t.check(
-            "R31.policy-change-action",
-            "reject:PolicyChangeActionUnsupported",
-            outcome_tag(&outcome),
-        );
+        t.check("R31.policy-change-action", "reject:PolicyChangeActionUnsupported", outcome_tag(&outcome));
     }
 
     // R32/R33 — local operator / peer majority cannot satisfy production
@@ -1237,11 +1073,7 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
             env,
             GovernanceExecutionPolicy::ProductionGovernanceRequired,
         );
-        t.check(
-            "R32_R33.production-required",
-            "reject:FixtureRejectedProductionRequired",
-            outcome_tag(&outcome),
-        );
+        t.check("R32_R33.production-required", "reject:FixtureRejectedProductionRequired", outcome_tag(&outcome));
     }
 
     // R34 — governance valid but lifecycle action mismatch rejected (decision
@@ -1257,11 +1089,7 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
             env,
             GovernanceExecutionPolicy::FixtureGovernanceAllowed,
         );
-        t.check(
-            "R34.lifecycle-action-mismatch",
-            "reject:WrongLifecycleAction",
-            outcome_tag(&outcome),
-        );
+        t.check("R34.lifecycle-action-mismatch", "reject:WrongLifecycleAction", outcome_tag(&outcome));
     }
 
     // R35 — lifecycle valid but governance decision invalid (approved=false).
@@ -1275,11 +1103,7 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
             env,
             GovernanceExecutionPolicy::FixtureGovernanceAllowed,
         );
-        t.check(
-            "R35.governance-decision-rejected",
-            "reject:GovernanceDecisionRejected",
-            outcome_tag(&outcome),
-        );
+        t.check("R35.governance-decision-rejected", "reject:GovernanceDecisionRejected", outcome_tag(&outcome));
     }
 
     // R36 — lifecycle + governance proof + custody valid but production
@@ -1294,11 +1118,7 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
             env,
             GovernanceExecutionPolicy::ProductionGovernanceRequired,
         );
-        t.check(
-            "R36.production-unavailable",
-            "reject:ProductionGovernanceUnavailable",
-            outcome_tag(&outcome),
-        );
+        t.check("R36.production-unavailable", "reject:ProductionGovernanceUnavailable", outcome_tag(&outcome));
     }
 
     // R37 — validation-only rejection is pure: two validation-only surfaces
@@ -1315,9 +1135,7 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
         decision.approved = false;
         let loaded = available_from(&rotate_input(env), &decision);
         let a = route_loaded_governance_execution_to_reload_check_callsite_decision(&ctx, &loaded);
-        let b = route_loaded_governance_execution_to_local_peer_candidate_check_callsite_decision(
-            &ctx, &loaded,
-        );
+        let b = route_loaded_governance_execution_to_local_peer_candidate_check_callsite_decision(&ctx, &loaded);
         t.assert_true("R37.validation-only-pure", a.is_reject() && a == b, "");
     }
 
@@ -1333,13 +1151,8 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
         );
         let value = serde_json::json!({ GOVERNANCE_EXECUTION_PAYLOAD_SIBLING_FIELD: 42 });
         let loaded = parse_optional_governance_execution_sibling_from_json_value(&value);
-        let outcome =
-            route_loaded_governance_execution_to_reload_apply_callsite_decision(&ctx, &loaded);
-        t.assert_true(
-            "R38.mutating-rejection-pure",
-            outcome.is_malformed_payload() && outcome.is_reject(),
-            "",
-        );
+        let outcome = route_loaded_governance_execution_to_reload_apply_callsite_decision(&ctx, &loaded);
+        t.assert_true("R38.mutating-rejection-pure", outcome.is_malformed_payload() && outcome.is_reject(), "");
     }
 
     // R39 — invalid live 0x05 governance-execution candidate is not
@@ -1354,13 +1167,8 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
         );
         let value = serde_json::json!({ GOVERNANCE_EXECUTION_PAYLOAD_SIBLING_FIELD: "garbage" });
         let loaded = parse_optional_governance_execution_sibling_from_json_value(&value);
-        let outcome =
-            route_loaded_governance_execution_to_live_inbound_0x05_callsite_decision(&ctx, &loaded);
-        t.assert_true(
-            "R39.live-0x05-not-propagated",
-            outcome.is_reject() && outcome.is_malformed_payload(),
-            "",
-        );
+        let outcome = route_loaded_governance_execution_to_live_inbound_0x05_callsite_decision(&ctx, &loaded);
+        t.assert_true("R39.live-0x05-not-propagated", outcome.is_reject() && outcome.is_malformed_payload(), "");
     }
 
     // R40 — MainNet peer-driven apply remains refused even with a fully-valid
@@ -1378,11 +1186,7 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
             &ctx,
             &available_from(&rotate_input(menv), &rotate_decision()),
         );
-        t.check(
-            "R40.mainnet-peer-driven-refused",
-            "reject:MainNetPeerDrivenApplyRefused",
-            &decision_tag(&outcome),
-        );
+        t.check("R40.mainnet-peer-driven-refused", "reject:MainNetPeerDrivenApplyRefused", &decision_tag(&outcome));
         t.assert_true(
             "R40.refusal-helper",
             outcome.is_mainnet_peer_driven_apply_refused()
@@ -1430,9 +1234,8 @@ fn run_reachability_table(out: &Path) -> (u64, u64) {
             all_accept &= surface(&ctx, &loaded).is_accept();
         }
         // 7th surface: peer-driven drain accepts on non-MainNet.
-        all_accept &=
-            route_loaded_governance_execution_to_peer_driven_drain_callsite_decision(&ctx, &loaded)
-                .is_accept();
+        all_accept &= route_loaded_governance_execution_to_peer_driven_drain_callsite_decision(&ctx, &loaded)
+            .is_accept();
         t.assert_true("T1.seven-surfaces-reach-evaluator", all_accept, "");
     }
 
@@ -1452,11 +1255,7 @@ fn run_reachability_table(out: &Path) -> (u64, u64) {
             true,
         )
         .expect("Available carrier composes");
-        t.check(
-            "T2.guard-accept-devnet",
-            "accepted:accept:FixtureGovernanceAccepted",
-            &composed_tag(&accepted),
-        );
+        t.check("T2.guard-accept-devnet", "accepted:accept:FixtureGovernanceAccepted", &composed_tag(&accepted));
 
         let menv = Env::Mainnet;
         let mtd = trust_domain(menv);
@@ -1472,11 +1271,7 @@ fn run_reachability_table(out: &Path) -> (u64, u64) {
             true,
         )
         .expect("Available carrier composes");
-        t.check(
-            "T2.guard-refuse-mainnet",
-            "MainNetPeerDrivenApplyRefused",
-            &composed_tag(&refused),
-        );
+        t.check("T2.guard-refuse-mainnet", "MainNetPeerDrivenApplyRefused", &composed_tag(&refused));
     }
 
     // T3 — v2 sidecar loader: legacy (absent) / carrying (available) /
@@ -1490,11 +1285,7 @@ fn run_reachability_table(out: &Path) -> (u64, u64) {
         let loaded_legacy =
             load_v2_ratification_sidecar_with_governance_execution_from_bytes(&legacy_bytes, &path)
                 .expect("legacy v2 sidecar parses");
-        t.assert_true(
-            "T3.loader-legacy-absent",
-            loaded_legacy.governance_execution.is_absent(),
-            "",
-        );
+        t.assert_true("T3.loader-legacy-absent", loaded_legacy.governance_execution.is_absent(), "");
 
         let input = rotate_input(env);
         let decision = rotate_decision();
@@ -1519,25 +1310,13 @@ fn run_reachability_table(out: &Path) -> (u64, u64) {
         let loaded_bad =
             load_v2_ratification_sidecar_with_governance_execution_from_bytes(&bad_bytes, &bpath)
                 .expect("v2 ratification still parses");
-        t.assert_true(
-            "T3.loader-malformed",
-            loaded_bad.governance_execution.is_malformed(),
-            "",
-        );
+        t.assert_true("T3.loader-malformed", loaded_bad.governance_execution.is_malformed(), "");
     }
 
     // T4 — canonical sibling field + schema version + absent semantics.
     {
-        t.check(
-            "T4.field",
-            "governance_execution",
-            GOVERNANCE_EXECUTION_PAYLOAD_SIBLING_FIELD,
-        );
-        t.check(
-            "T4.version",
-            "1",
-            &GOVERNANCE_EXECUTION_PAYLOAD_WIRE_SCHEMA_VERSION.to_string(),
-        );
+        t.check("T4.field", "governance_execution", GOVERNANCE_EXECUTION_PAYLOAD_SIBLING_FIELD);
+        t.check("T4.version", "1", &GOVERNANCE_EXECUTION_PAYLOAD_WIRE_SCHEMA_VERSION.to_string());
         let missing = serde_json::json!({ "schema_version": 2 });
         let null = serde_json::json!({ GOVERNANCE_EXECUTION_PAYLOAD_SIBLING_FIELD: null });
         t.assert_true(
@@ -1572,10 +1351,7 @@ fn run_reachability_table(out: &Path) -> (u64, u64) {
         let det = pa.input_digest() == pb.input_digest()
             && pa.decision_digest() == pb.decision_digest()
             && governance_execution_transcript_digest(&pa.input_digest(), &pa.decision_digest())
-                == governance_execution_transcript_digest(
-                    &pb.input_digest(),
-                    &pb.decision_digest(),
-                );
+                == governance_execution_transcript_digest(&pb.input_digest(), &pb.decision_digest());
         // Domain-bound: mutating a bound field changes the digest.
         let mut other = rotate_input(env);
         other.replay_nonce = "other-nonce".to_string();
@@ -1643,49 +1419,28 @@ fn run_fixture_dump(out: &Path) {
 
     let wire = GovernanceExecutionPayloadWire::from_parts(&input, &decision);
     let wire_json = serde_json::to_string_pretty(&wire).expect("wire serializes");
-    write_file(
-        &dir.join("governance_execution_payload_wire.json"),
-        &format!("{wire_json}\n"),
-    );
+    write_file(&dir.join("governance_execution_payload_wire.json"), &format!("{wire_json}\n"));
 
     // Canonical v2 sidecar carrying the governance_execution sibling.
     let sidecar = make_v2_sidecar_value(env, Some(serde_json::to_value(&wire).unwrap()));
     let sidecar_json = serde_json::to_string_pretty(&sidecar).expect("sidecar serializes");
-    write_file(
-        &dir.join("v2_sidecar_with_governance_execution.json"),
-        &format!("{sidecar_json}\n"),
-    );
+    write_file(&dir.join("v2_sidecar_with_governance_execution.json"), &format!("{sidecar_json}\n"));
 
     // Legacy v2 sidecar (no sibling).
     let legacy = make_v2_sidecar_value(env, None);
     let legacy_json = serde_json::to_string_pretty(&legacy).expect("legacy sidecar serializes");
-    write_file(
-        &dir.join("v2_sidecar_legacy_no_sibling.json"),
-        &format!("{legacy_json}\n"),
-    );
+    write_file(&dir.join("v2_sidecar_legacy_no_sibling.json"), &format!("{legacy_json}\n"));
 
     // Debug rendering of the in-process parts + digests preserved through wire.
     let parts = wire.to_parts().expect("wire converts");
-    write_file(
-        &dir.join("governance_execution_input.txt"),
-        &format!("{input:#?}\n"),
-    );
-    write_file(
-        &dir.join("governance_execution_decision.txt"),
-        &format!("{decision:#?}\n"),
-    );
+    write_file(&dir.join("governance_execution_input.txt"), &format!("{input:#?}\n"));
+    write_file(&dir.join("governance_execution_decision.txt"), &format!("{decision:#?}\n"));
     write_file(
         &dir.join("governance_execution_expectations.txt"),
         &format!("{:#?}\n", rotate_expectations(env)),
     );
-    write_file(
-        &dir.join("input_digest.txt"),
-        &format!("{}\n", parts.input_digest()),
-    );
-    write_file(
-        &dir.join("decision_digest.txt"),
-        &format!("{}\n", parts.decision_digest()),
-    );
+    write_file(&dir.join("input_digest.txt"), &format!("{}\n", parts.input_digest()));
+    write_file(&dir.join("decision_digest.txt"), &format!("{}\n", parts.decision_digest()));
     write_file(
         &dir.join("transcript_digest.txt"),
         &format!(
@@ -1713,10 +1468,7 @@ fn run_fixture_dump(out: &Path) {
             GovernanceExecutionPolicy::MainnetGovernanceRequired,
             GovernanceExecutionClass::MainnetGovernanceUnavailable,
         ),
-        (
-            GovernanceExecutionPolicy::Disabled,
-            GovernanceExecutionClass::Disabled,
-        ),
+        (GovernanceExecutionPolicy::Disabled, GovernanceExecutionClass::Disabled),
     ] {
         policy.push_str(&format!(
             "policy\t{}\tclass\t{}\tpolicy_digest\t{}\n",

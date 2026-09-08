@@ -136,13 +136,7 @@ const EXPIRES: u64 = 1_700_001_000;
 // ---------------------------------------------------------------------------
 
 fn domain(env: TrustBundleEnvironment) -> AuthorityTrustDomain {
-    AuthorityTrustDomain::new(
-        env,
-        CHAIN_ID,
-        GENESIS_HASH,
-        ROOT_FP,
-        PQC_LIFECYCLE_SUITE_ML_DSA_44,
-    )
+    AuthorityTrustDomain::new(env, CHAIN_ID, GENESIS_HASH, ROOT_FP, PQC_LIFECYCLE_SUITE_ML_DSA_44)
 }
 
 fn rotate_candidate(env: TrustBundleEnvironment) -> PersistentAuthorityStateRecordV2 {
@@ -561,8 +555,7 @@ fn scenarios() -> Vec<ScenarioCase> {
         },
         ScenarioCase {
             id: "A7",
-            note:
-                "combined lifecycle/governance/custody fixture remote-signer accepted (startup p2p)",
+            note: "combined lifecycle/governance/custody fixture remote-signer accepted (startup p2p)",
             env: Env::Devnet,
             custody_class: Cls::FixtureLocalKey,
             custody_policy: CPol::DevnetLocalAllowed,
@@ -818,9 +811,7 @@ fn scenarios() -> Vec<ScenarioCase> {
             remote_signer_policy: RSPol::FixtureLoopbackAllowed,
             helper: H::ReloadCheck,
             mutate_ctx: noop_ctx,
-            carrier: Carrier::Available(|_e, p| {
-                p.request.candidate_digest = DIGEST_OTHER.to_string()
-            }),
+            carrier: Carrier::Available(|_e, p| p.request.candidate_digest = DIGEST_OTHER.to_string()),
             expected: "reject:WrongCandidateDigest",
         },
         ScenarioCase {
@@ -1057,11 +1048,7 @@ fn run_scenarios(out: &Path) -> (u64, u64) {
 
 fn run_custody_routing_table(out: &Path) -> (u64, u64) {
     let rows: &[(&str, AuthorityCustodyClass, &str)] = &[
-        (
-            "A6",
-            AuthorityCustodyClass::RemoteSigner,
-            "FixtureLoopbackAccepted",
-        ),
+        ("A6", AuthorityCustodyClass::RemoteSigner, "FixtureLoopbackAccepted"),
         (
             "R26",
             AuthorityCustodyClass::LocalOperatorKey,
@@ -1170,10 +1157,7 @@ fn run_governance_bypass_table(out: &Path) -> (u64, u64) {
         GovernanceAuthorityClass::EmergencyCouncil,
         GovernanceAuthorityClass::OnChainGovernance,
     ] {
-        let c = ctx_for(
-            TrustBundleEnvironment::Devnet,
-            AuthorityCustodyClass::FixtureLocalKey,
-        );
+        let c = ctx_for(TrustBundleEnvironment::Devnet, AuthorityCustodyClass::FixtureLocalKey);
         let ctx = callsite_context_for_remote_signer(
             &c.custody,
             Some(&c.prior),
@@ -1215,11 +1199,7 @@ fn run_governance_bypass_table(out: &Path) -> (u64, u64) {
         AuthorityCustodyClass::Hsm,
     ] {
         let c = ctx_for(TrustBundleEnvironment::Devnet, class);
-        let ctx = ctx_view(
-            &c,
-            AuthorityCustodyPolicy::Disabled,
-            RemoteSignerPolicy::Disabled,
-        );
+        let ctx = ctx_view(&c, AuthorityCustodyPolicy::Disabled, RemoteSignerPolicy::Disabled);
         let outcome = route_loaded_remote_signer_attestation_to_reload_check_callsite_decision(
             &ctx,
             &RemoteSignerLoadStatus::Absent,
@@ -1287,10 +1267,10 @@ fn make_v2_sidecar_value(
     );
     let mut value = serde_json::to_value(&v2).expect("ratification serializes");
     if let Some(p) = remote_signer_sibling {
-        value.as_object_mut().unwrap().insert(
-            REMOTE_SIGNER_ATTESTATION_PAYLOAD_SIBLING_FIELD.to_string(),
-            p,
-        );
+        value
+            .as_object_mut()
+            .unwrap()
+            .insert(REMOTE_SIGNER_ATTESTATION_PAYLOAD_SIBLING_FIELD.to_string(), p);
     }
     value
 }
@@ -1397,10 +1377,7 @@ fn run_refusal_helpers_table(out: &Path) -> (u64, u64) {
 
     // validate_loaded_remote_signer reachability: Available -> Some(accept),
     // Absent -> None.
-    let c = ctx_for(
-        TrustBundleEnvironment::Devnet,
-        AuthorityCustodyClass::FixtureLocalKey,
-    );
+    let c = ctx_for(TrustBundleEnvironment::Devnet, AuthorityCustodyClass::FixtureLocalKey);
     let ctx = ctx_view(
         &c,
         AuthorityCustodyPolicy::DevnetLocalAllowed,
@@ -1410,10 +1387,7 @@ fn run_refusal_helpers_table(out: &Path) -> (u64, u64) {
     let routed = validate_loaded_remote_signer(&ctx, &available);
     record(
         "validate_loaded_remote_signer-available-accepts",
-        matches!(
-            routed,
-            Some(RemoteSignerOutcome::FixtureLoopbackAccepted { .. })
-        ),
+        matches!(routed, Some(RemoteSignerOutcome::FixtureLoopbackAccepted { .. })),
         &format!("routed={routed:?}"),
     );
     let routed_absent = validate_loaded_remote_signer(&ctx, &RemoteSignerLoadStatus::Absent);
@@ -1450,10 +1424,7 @@ fn run_no_mutation_evidence(out: &Path) -> (u64, u64) {
     };
 
     // R31 — validation-only routing helpers are pure and deterministic.
-    let c = ctx_for(
-        TrustBundleEnvironment::Devnet,
-        AuthorityCustodyClass::FixtureLocalKey,
-    );
+    let c = ctx_for(TrustBundleEnvironment::Devnet, AuthorityCustodyClass::FixtureLocalKey);
     let ctx = ctx_view(
         &c,
         AuthorityCustodyPolicy::DevnetLocalAllowed,
@@ -1479,22 +1450,9 @@ fn run_no_mutation_evidence(out: &Path) -> (u64, u64) {
         w.identity.attestation_digest = String::new()
     });
     let mutating = [
-        (
-            "reload-apply",
-            route_loaded_remote_signer_attestation_to_reload_apply_callsite_decision(
-                &ctx, &loaded2,
-            ),
-        ),
-        (
-            "startup-p2p",
-            route_loaded_remote_signer_attestation_to_startup_p2p_trust_bundle_callsite_decision(
-                &ctx, &loaded2,
-            ),
-        ),
-        (
-            "sighup",
-            route_loaded_remote_signer_attestation_to_sighup_callsite_decision(&ctx, &loaded2),
-        ),
+        ("reload-apply", route_loaded_remote_signer_attestation_to_reload_apply_callsite_decision(&ctx, &loaded2)),
+        ("startup-p2p", route_loaded_remote_signer_attestation_to_startup_p2p_trust_bundle_callsite_decision(&ctx, &loaded2)),
+        ("sighup", route_loaded_remote_signer_attestation_to_sighup_callsite_decision(&ctx, &loaded2)),
     ];
     for (name, outcome) in &mutating {
         record(
@@ -1567,11 +1525,14 @@ fn main() {
     let out_dir = match args.next() {
         Some(a) => PathBuf::from(a),
         None => {
-            eprintln!("usage: run_197_remote_signer_payload_release_binary_helper <OUT_DIR>");
+            eprintln!(
+                "usage: run_197_remote_signer_payload_release_binary_helper <OUT_DIR>"
+            );
             std::process::exit(2);
         }
     };
-    fs::create_dir_all(&out_dir).unwrap_or_else(|e| panic!("create out dir {out_dir:?}: {e}"));
+    fs::create_dir_all(&out_dir)
+        .unwrap_or_else(|e| panic!("create out dir {out_dir:?}: {e}"));
 
     let tables: &[(&str, fn(&Path) -> (u64, u64))] = &[
         ("scenarios", run_scenarios),

@@ -355,10 +355,14 @@ pub enum StagingOutcome {
     RefusedNotValidated,
     /// The global staging cap has been reached. Eviction policy is
     /// **reject-new** in Run 145.
-    RefusedGlobalCapacity { cap: usize },
+    RefusedGlobalCapacity {
+        cap: usize,
+    },
     /// The per-peer staging cap has been reached for the originating
     /// peer. Eviction policy is **reject-new**.
-    RefusedPerPeerCapacity { cap: usize },
+    RefusedPerPeerCapacity {
+        cap: usize,
+    },
 }
 
 impl StagingOutcome {
@@ -462,10 +466,9 @@ impl PeerCandidateStagingQueue {
         fingerprint_prefix: &str,
         sequence: u64,
     ) -> Option<StagedPeerCandidate> {
-        let pos = self
-            .entries
-            .iter()
-            .position(|e| e.fingerprint_prefix == fingerprint_prefix && e.sequence == sequence)?;
+        let pos = self.entries.iter().position(|e| {
+            e.fingerprint_prefix == fingerprint_prefix && e.sequence == sequence
+        })?;
         self.entries.remove(pos)
     }
 
@@ -569,7 +572,8 @@ impl PeerCandidateStagingQueue {
             };
         }
 
-        if self.count_for_peer(validated.peer_id.as_deref()) >= self.policy.max_candidates_per_peer
+        if self.count_for_peer(validated.peer_id.as_deref())
+            >= self.policy.max_candidates_per_peer
         {
             return StagingOutcome::RefusedPerPeerCapacity {
                 cap: self.policy.max_candidates_per_peer,

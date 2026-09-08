@@ -341,7 +341,8 @@ fn a2_devnet_fixture_attestation_carried_through_reload_check() {
     let loaded = loaded_via_json(&s.parts());
     assert!(loaded.is_available());
     let ctx = s.fixture_ctx();
-    let outcome = route_loaded_custody_attestation_to_reload_check_callsite_decision(&ctx, &loaded);
+    let outcome =
+        route_loaded_custody_attestation_to_reload_check_callsite_decision(&ctx, &loaded);
     assert!(outcome.is_accept(), "got {outcome:?}");
 }
 
@@ -350,7 +351,8 @@ fn a3_testnet_fixture_attestation_carried_through_reload_check() {
     let s = accepted_scenario(TrustBundleEnvironment::Testnet);
     let loaded = loaded_via_json(&s.parts());
     let ctx = s.fixture_ctx();
-    let outcome = route_loaded_custody_attestation_to_reload_check_callsite_decision(&ctx, &loaded);
+    let outcome =
+        route_loaded_custody_attestation_to_reload_check_callsite_decision(&ctx, &loaded);
     assert!(outcome.is_accept(), "got {outcome:?}");
 }
 
@@ -363,7 +365,8 @@ fn a4_devnet_fixture_attestation_carried_through_reload_apply() {
     let s = accepted_scenario(TrustBundleEnvironment::Devnet);
     let loaded = s.loaded();
     let ctx = s.fixture_ctx();
-    let outcome = route_loaded_custody_attestation_to_reload_apply_callsite_decision(&ctx, &loaded);
+    let outcome =
+        route_loaded_custody_attestation_to_reload_apply_callsite_decision(&ctx, &loaded);
     assert!(outcome.is_accept(), "got {outcome:?}");
     // Accepted path wraps the Run 205 combined outcome.
     assert!(matches!(
@@ -381,10 +384,7 @@ fn a5_evidence_digest_preserved_through_wire_conversion() {
     let s = accepted_scenario(TrustBundleEnvironment::Devnet);
     let loaded = loaded_via_json(&s.parts());
     let parts = loaded.as_parts().unwrap();
-    assert_eq!(
-        parts.evidence.evidence_digest(),
-        s.evidence.evidence_digest()
-    );
+    assert_eq!(parts.evidence.evidence_digest(), s.evidence.evidence_digest());
 }
 
 #[test]
@@ -400,8 +400,10 @@ fn a7_transcript_digest_preserved_through_wire_conversion() {
     let s = accepted_scenario(TrustBundleEnvironment::Devnet);
     let loaded = loaded_via_json(&s.parts());
     let parts = loaded.as_parts().unwrap();
-    let before =
-        attestation_transcript_digest(&s.evidence.evidence_digest(), &s.input.input_digest());
+    let before = attestation_transcript_digest(
+        &s.evidence.evidence_digest(),
+        &s.input.input_digest(),
+    );
     let after = attestation_transcript_digest(
         &parts.evidence.evidence_digest(),
         &parts.input.input_digest(),
@@ -466,7 +468,8 @@ fn a11_composes_with_run203_fixture_kms_backend_context() {
     s.input.expected_custody_class = AuthorityCustodyClass::Kms;
     let loaded = loaded_via_json(&s.parts());
     let ctx = s.fixture_ctx();
-    let outcome = route_loaded_custody_attestation_to_reload_check_callsite_decision(&ctx, &loaded);
+    let outcome =
+        route_loaded_custody_attestation_to_reload_check_callsite_decision(&ctx, &loaded);
     assert!(outcome.is_accept(), "got {outcome:?}");
 }
 
@@ -479,7 +482,8 @@ fn a12_composes_with_run203_fixture_hsm_backend_context() {
     s.input.expected_custody_class = AuthorityCustodyClass::Hsm;
     let loaded = loaded_via_json(&s.parts());
     let ctx = s.fixture_ctx();
-    let outcome = route_loaded_custody_attestation_to_reload_check_callsite_decision(&ctx, &loaded);
+    let outcome =
+        route_loaded_custody_attestation_to_reload_check_callsite_decision(&ctx, &loaded);
     assert!(outcome.is_accept(), "got {outcome:?}");
 }
 
@@ -492,7 +496,8 @@ fn a13_composes_with_run201_fixture_remote_signer_transport_context() {
     s.input.expected_custody_class = AuthorityCustodyClass::RemoteSigner;
     let loaded = loaded_via_json(&s.parts());
     let ctx = s.fixture_ctx();
-    let outcome = route_loaded_custody_attestation_to_reload_check_callsite_decision(&ctx, &loaded);
+    let outcome =
+        route_loaded_custody_attestation_to_reload_check_callsite_decision(&ctx, &loaded);
     assert!(outcome.is_accept(), "got {outcome:?}");
 }
 
@@ -547,16 +552,14 @@ fn a15_production_attestation_reaches_verifier_returns_unavailable() {
         AuthorityCustodyPolicy::FixtureOnly,
         CustodyAttestationPolicy::ProductionAttestationRequired,
     );
-    let outcome = route_loaded_custody_attestation_to_reload_check_callsite_decision(&ctx, &loaded);
+    let outcome =
+        route_loaded_custody_attestation_to_reload_check_callsite_decision(&ctx, &loaded);
     assert!(!outcome.is_accept());
     match outcome.callsite_outcome() {
         Some(CustodyMetadataAttestationOutcome::AttestationRejected {
             attestation_outcome,
             ..
-        }) => assert!(
-            attestation_outcome.is_unavailable(),
-            "got {attestation_outcome:?}"
-        ),
+        }) => assert!(attestation_outcome.is_unavailable(), "got {attestation_outcome:?}"),
         other => panic!("expected AttestationRejected, got {other:?}"),
     }
 }
@@ -599,7 +602,8 @@ fn r2_malformed_evidence_rejected() {
     let loaded = parse_optional_custody_attestation_sibling_from_json_value(&value);
     assert!(loaded.is_malformed());
     let ctx = s.fixture_ctx();
-    let outcome = route_loaded_custody_attestation_to_reload_check_callsite_decision(&ctx, &loaded);
+    let outcome =
+        route_loaded_custody_attestation_to_reload_check_callsite_decision(&ctx, &loaded);
     assert!(outcome.is_malformed_payload());
     assert!(outcome.is_reject());
 }
@@ -653,7 +657,8 @@ fn r6_fixture_rejected_under_production_attestation_required() {
         AuthorityCustodyPolicy::FixtureOnly,
         CustodyAttestationPolicy::ProductionAttestationRequired,
     );
-    let outcome = route_loaded_custody_attestation_to_reload_check_callsite_decision(&ctx, &loaded);
+    let outcome =
+        route_loaded_custody_attestation_to_reload_check_callsite_decision(&ctx, &loaded);
     assert!(!outcome.is_accept());
     match outcome.callsite_outcome() {
         Some(CustodyMetadataAttestationOutcome::AttestationRejected {
@@ -675,7 +680,8 @@ fn r7_fixture_rejected_under_mainnet_production_attestation_required() {
         AuthorityCustodyPolicy::FixtureOnly,
         CustodyAttestationPolicy::MainnetProductionAttestationRequired,
     );
-    let outcome = route_loaded_custody_attestation_to_reload_check_callsite_decision(&ctx, &loaded);
+    let outcome =
+        route_loaded_custody_attestation_to_reload_check_callsite_decision(&ctx, &loaded);
     match outcome.callsite_outcome() {
         Some(CustodyMetadataAttestationOutcome::AttestationRejected {
             attestation_outcome,
@@ -698,16 +704,14 @@ fn assert_unavailable(class: CustodyAttestationClass, policy: CustodyAttestation
     s.evidence.attestation_class = class;
     let loaded = s.loaded();
     let ctx = s.ctx(AuthorityCustodyPolicy::FixtureOnly, policy);
-    let outcome = route_loaded_custody_attestation_to_reload_check_callsite_decision(&ctx, &loaded);
+    let outcome =
+        route_loaded_custody_attestation_to_reload_check_callsite_decision(&ctx, &loaded);
     assert!(!outcome.is_accept());
     match outcome.callsite_outcome() {
         Some(CustodyMetadataAttestationOutcome::AttestationRejected {
             attestation_outcome,
             ..
-        }) => assert!(
-            attestation_outcome.is_unavailable(),
-            "class={class:?} got {attestation_outcome:?}"
-        ),
+        }) => assert!(attestation_outcome.is_unavailable(), "class={class:?} got {attestation_outcome:?}"),
         other => panic!("class={class:?} got {other:?}"),
     }
 }
@@ -770,7 +774,8 @@ fn r14_mainnet_production_attestation_unavailable() {
         AuthorityCustodyPolicy::FixtureOnly,
         CustodyAttestationPolicy::MainnetProductionAttestationRequired,
     );
-    let outcome = route_loaded_custody_attestation_to_reload_check_callsite_decision(&ctx, &loaded);
+    let outcome =
+        route_loaded_custody_attestation_to_reload_check_callsite_decision(&ctx, &loaded);
     match outcome.callsite_outcome() {
         Some(CustodyMetadataAttestationOutcome::AttestationRejected {
             attestation_outcome,
@@ -794,7 +799,8 @@ fn r15_unknown_attestation_class_rejected() {
     s.evidence.attestation_class = CustodyAttestationClass::Unknown;
     let loaded = loaded_via_json(&s.parts());
     let ctx = s.fixture_ctx();
-    let outcome = route_loaded_custody_attestation_to_reload_check_callsite_decision(&ctx, &loaded);
+    let outcome =
+        route_loaded_custody_attestation_to_reload_check_callsite_decision(&ctx, &loaded);
     match outcome.callsite_outcome() {
         Some(CustodyMetadataAttestationOutcome::AttestationRejected {
             attestation_outcome,
@@ -820,7 +826,8 @@ fn assert_attestation_rejected(mutate: impl FnOnce(&mut Scenario)) -> CustodyAtt
     mutate(&mut s);
     let loaded = s.loaded();
     let ctx = s.fixture_ctx();
-    let outcome = route_loaded_custody_attestation_to_reload_check_callsite_decision(&ctx, &loaded);
+    let outcome =
+        route_loaded_custody_attestation_to_reload_check_callsite_decision(&ctx, &loaded);
     assert!(!outcome.is_accept(), "expected reject");
     match outcome.callsite_outcome().cloned() {
         Some(CustodyMetadataAttestationOutcome::AttestationRejected {
@@ -836,10 +843,7 @@ fn r16_wrong_environment_rejected() {
     let o = assert_attestation_rejected(|s| {
         s.evidence.environment = TrustBundleEnvironment::Testnet;
     });
-    assert!(matches!(
-        o,
-        CustodyAttestationOutcome::WrongEnvironment { .. }
-    ));
+    assert!(matches!(o, CustodyAttestationOutcome::WrongEnvironment { .. }));
 }
 
 #[test]
@@ -866,10 +870,7 @@ fn r19_wrong_authority_root_rejected() {
         s.evidence.authority_root_fingerprint = "9".repeat(40);
         s.input.expected_authority_root_fingerprint = "9".repeat(40);
     });
-    assert!(matches!(
-        o,
-        CustodyAttestationOutcome::WrongAuthorityRoot { .. }
-    ));
+    assert!(matches!(o, CustodyAttestationOutcome::WrongAuthorityRoot { .. }));
 }
 
 #[test]
@@ -888,10 +889,7 @@ fn r21_wrong_custody_class_rejected() {
     let o = assert_attestation_rejected(|s| {
         s.evidence.custody_class = AuthorityCustodyClass::Hsm;
     });
-    assert!(matches!(
-        o,
-        CustodyAttestationOutcome::WrongCustodyClass { .. }
-    ));
+    assert!(matches!(o, CustodyAttestationOutcome::WrongCustodyClass { .. }));
 }
 
 #[test]
@@ -970,10 +968,7 @@ fn r29_wrong_request_digest_rejected() {
     let o = assert_attestation_rejected(|s| {
         s.evidence.request_digest = Some("other-request".to_string());
     });
-    assert!(matches!(
-        o,
-        CustodyAttestationOutcome::WrongRequestDigest { .. }
-    ));
+    assert!(matches!(o, CustodyAttestationOutcome::WrongRequestDigest { .. }));
 }
 
 #[test]
@@ -1016,10 +1011,7 @@ fn r33_expired_attestation_rejected() {
         s.evidence.freshness_unix = Some(1);
         s.evidence.expires_at_unix = Some(2);
     });
-    assert!(matches!(
-        o,
-        CustodyAttestationOutcome::ExpiredAttestation { .. }
-    ));
+    assert!(matches!(o, CustodyAttestationOutcome::ExpiredAttestation { .. }));
 }
 
 #[test]
@@ -1049,7 +1041,8 @@ fn r35_local_operator_cannot_satisfy_production_attestation() {
         AuthorityCustodyPolicy::FixtureOnly,
         CustodyAttestationPolicy::ProductionAttestationRequired,
     );
-    let outcome = route_loaded_custody_attestation_to_reload_check_callsite_decision(&ctx, &loaded);
+    let outcome =
+        route_loaded_custody_attestation_to_reload_check_callsite_decision(&ctx, &loaded);
     assert!(!outcome.is_accept());
 }
 
@@ -1063,8 +1056,9 @@ fn r36_peer_majority_cannot_satisfy_production_attestation() {
         AuthorityCustodyPolicy::FixtureOnly,
         CustodyAttestationPolicy::ProductionAttestationRequired,
     );
-    let outcome =
-        route_loaded_custody_attestation_to_peer_driven_drain_callsite_decision(&ctx, &loaded);
+    let outcome = route_loaded_custody_attestation_to_peer_driven_drain_callsite_decision(
+        &ctx, &loaded,
+    );
     assert!(!outcome.is_accept());
 }
 
@@ -1080,7 +1074,8 @@ fn r37_attestation_valid_but_custody_invalid_rejected() {
     s.custody.candidate_digest = "bad-digest".to_string();
     let loaded = s.loaded();
     let ctx = s.fixture_ctx();
-    let outcome = route_loaded_custody_attestation_to_reload_check_callsite_decision(&ctx, &loaded);
+    let outcome =
+        route_loaded_custody_attestation_to_reload_check_callsite_decision(&ctx, &loaded);
     assert!(!outcome.is_accept());
     assert!(matches!(
         outcome.callsite_outcome(),
@@ -1114,7 +1109,8 @@ fn r39_production_attestation_unavailable_rejected_overall() {
         AuthorityCustodyPolicy::FixtureOnly,
         CustodyAttestationPolicy::KmsAttestationRequired,
     );
-    let outcome = route_loaded_custody_attestation_to_reload_apply_callsite_decision(&ctx, &loaded);
+    let outcome =
+        route_loaded_custody_attestation_to_reload_apply_callsite_decision(&ctx, &loaded);
     assert!(!outcome.is_accept());
     match outcome.callsite_outcome() {
         Some(CustodyMetadataAttestationOutcome::AttestationRejected {
@@ -1191,18 +1187,17 @@ fn r43_mainnet_peer_driven_apply_refused_even_with_fixture() {
     let s = accepted_scenario(env);
     let loaded = s.loaded();
     let ctx = s.fixture_ctx();
-    let outcome =
-        route_loaded_custody_attestation_to_peer_driven_drain_callsite_decision(&ctx, &loaded);
+    let outcome = route_loaded_custody_attestation_to_peer_driven_drain_callsite_decision(
+        &ctx, &loaded,
+    );
     assert!(matches!(
         outcome,
         CustodyAttestationPayloadCarryingDecisionOutcome::MainNetPeerDrivenApplyRefused
     ));
     assert!(outcome.is_mainnet_peer_driven_apply_refused());
-    assert!(
-        mainnet_peer_driven_apply_remains_refused_under_custody_attestation_payload_carrying(
-            TrustBundleEnvironment::Mainnet
-        )
-    );
+    assert!(mainnet_peer_driven_apply_remains_refused_under_custody_attestation_payload_carrying(
+        TrustBundleEnvironment::Mainnet
+    ));
 }
 
 // ===========================================================================
@@ -1263,8 +1258,9 @@ fn loader_legacy_v2_sidecar_without_sibling_yields_absent() {
     let value = make_v2_sidecar_value(TrustBundleEnvironment::Devnet, None);
     let bytes = serde_json::to_vec(&value).unwrap();
     let path = std::path::PathBuf::from("/dev/null/run-207-legacy.json");
-    let loaded = load_v2_ratification_sidecar_with_custody_attestation_from_bytes(&bytes, &path)
-        .expect("legacy v2 sidecar parses");
+    let loaded =
+        load_v2_ratification_sidecar_with_custody_attestation_from_bytes(&bytes, &path)
+            .expect("legacy v2 sidecar parses");
     assert!(loaded.custody_attestation.is_absent());
 }
 
@@ -1278,8 +1274,9 @@ fn loader_v2_sidecar_with_custody_sibling_yields_available() {
     );
     let bytes = serde_json::to_vec(&value).unwrap();
     let path = std::path::PathBuf::from("/dev/null/run-207-carry.json");
-    let loaded = load_v2_ratification_sidecar_with_custody_attestation_from_bytes(&bytes, &path)
-        .expect("v2 sidecar with sibling parses");
+    let loaded =
+        load_v2_ratification_sidecar_with_custody_attestation_from_bytes(&bytes, &path)
+            .expect("v2 sidecar with sibling parses");
     assert!(loaded.custody_attestation.is_available());
     assert_eq!(loaded.custody_attestation.as_parts().unwrap(), &s.parts());
 }
@@ -1292,17 +1289,15 @@ fn loader_v2_sidecar_with_malformed_sibling_yields_malformed() {
     );
     let bytes = serde_json::to_vec(&value).unwrap();
     let path = std::path::PathBuf::from("/dev/null/run-207-malformed.json");
-    let loaded = load_v2_ratification_sidecar_with_custody_attestation_from_bytes(&bytes, &path)
-        .expect("v2 ratification still parses");
+    let loaded =
+        load_v2_ratification_sidecar_with_custody_attestation_from_bytes(&bytes, &path)
+            .expect("v2 ratification still parses");
     assert!(loaded.custody_attestation.is_malformed());
 }
 
 #[test]
 fn sibling_field_and_schema_version_are_canonical() {
-    assert_eq!(
-        CUSTODY_ATTESTATION_PAYLOAD_SIBLING_FIELD,
-        "custody_attestation"
-    );
+    assert_eq!(CUSTODY_ATTESTATION_PAYLOAD_SIBLING_FIELD, "custody_attestation");
     assert_eq!(CUSTODY_ATTESTATION_PAYLOAD_WIRE_SCHEMA_VERSION, 1);
 }
 
@@ -1323,14 +1318,10 @@ fn all_seven_surfaces_reach_run205_verifier_on_accept() {
     let s = accepted_scenario(TrustBundleEnvironment::Devnet);
     let loaded = s.loaded();
     let ctx = s.fixture_ctx();
-    assert!(
-        route_loaded_custody_attestation_to_reload_check_callsite_decision(&ctx, &loaded)
-            .is_accept()
-    );
-    assert!(
-        route_loaded_custody_attestation_to_reload_apply_callsite_decision(&ctx, &loaded)
-            .is_accept()
-    );
+    assert!(route_loaded_custody_attestation_to_reload_check_callsite_decision(&ctx, &loaded)
+        .is_accept());
+    assert!(route_loaded_custody_attestation_to_reload_apply_callsite_decision(&ctx, &loaded)
+        .is_accept());
     assert!(
         route_loaded_custody_attestation_to_startup_p2p_trust_bundle_callsite_decision(
             &ctx, &loaded

@@ -461,10 +461,7 @@ fn a4_not_yet_effective_defers_not_mutate() {
     );
     assert!(integration.is_mutate_authorized());
     let outcome = fx.run();
-    assert_eq!(
-        outcome,
-        GovernanceEvaluatorReplayRuntimeOutcome::ProceedDeferred
-    );
+    assert_eq!(outcome, GovernanceEvaluatorReplayRuntimeOutcome::ProceedDeferred);
     assert!(outcome.is_deferred());
     assert!(!outcome.is_mutate_authorized());
     assert!(outcome.is_fail_closed());
@@ -496,11 +493,7 @@ fn a6_explicit_consume_only_after_successful_authorization() {
     // ONLY after a successful authorization does the caller explicitly consume.
     store.record_for(&fx.replay_input);
     assert!(store.consume_for(&fx.replay_input));
-    assert!(store.is_consumed(
-        &qbind_node::pqc_governance_evaluator_replay_state::replay_state_key_digest(
-            &fx.replay_input
-        )
-    ));
+    assert!(store.is_consumed(&qbind_node::pqc_governance_evaluator_replay_state::replay_state_key_digest(&fx.replay_input)));
 
     // A re-evaluation now classifies the decision already-consumed.
     let mut replayed = fx.replay_input.clone();
@@ -529,9 +522,7 @@ fn a7_read_only_validation_does_not_consume() {
     // The store recorded nothing: read-only validation never consumes.
     assert!(store.is_empty());
     assert!(!store.is_consumed(
-        &qbind_node::pqc_governance_evaluator_replay_state::replay_state_key_digest(
-            &fx.replay_input
-        )
+        &qbind_node::pqc_governance_evaluator_replay_state::replay_state_key_digest(&fx.replay_input)
     ));
 }
 
@@ -1115,11 +1106,9 @@ fn compat_run_228_mainnet_peer_driven_refused() {
 // The grep-verifiable refusal helpers are all fail-closed.
 #[test]
 fn refusal_helpers_are_fail_closed() {
-    assert!(
-        mainnet_peer_driven_apply_remains_refused_under_replay_runtime(
-            TrustBundleEnvironment::Mainnet
-        )
-    );
+    assert!(mainnet_peer_driven_apply_remains_refused_under_replay_runtime(
+        TrustBundleEnvironment::Mainnet
+    ));
     assert!(fresh_replay_state_required_before_mutation());
     assert!(deferred_is_never_mutation_approval());
     assert!(production_mainnet_replay_state_remains_unavailable());

@@ -514,7 +514,9 @@ fn consume_binding_mismatch(
     expectations: &PostMutationConsumeExpectations,
 ) -> Option<String> {
     if !input.is_well_formed() {
-        return Some("consume input is structurally malformed (empty mandatory field)".to_string());
+        return Some(
+            "consume input is structurally malformed (empty mandatory field)".to_string(),
+        );
     }
     if input.replay_state_key_digest != expectations.expected_replay_state_key_digest {
         return Some("replay state key digest does not match expected binding".to_string());
@@ -522,9 +524,7 @@ fn consume_binding_mismatch(
     if input.evaluator_source_identity_digest
         != expectations.expected_evaluator_source_identity_digest
     {
-        return Some(
-            "evaluator source identity digest does not match expected binding".to_string(),
-        );
+        return Some("evaluator source identity digest does not match expected binding".to_string());
     }
     if input.evaluator_request_digest != expectations.expected_evaluator_request_digest {
         return Some("evaluator request digest does not match expected binding".to_string());
@@ -731,31 +731,15 @@ fn hash_field(h: &mut sha3::Sha3_256, label: &[u8], value: &[u8]) {
 
 /// Internal: bind the A15 consume-binding field set into `h`.
 fn hash_consume_binding(h: &mut sha3::Sha3_256, input: &PostMutationConsumeInput) {
-    hash_field(
-        h,
-        b"replay_state_key_digest",
-        input.replay_state_key_digest.as_bytes(),
-    );
-    hash_field(
-        h,
-        b"evaluator_request_digest",
-        input.evaluator_request_digest.as_bytes(),
-    );
-    hash_field(
-        h,
-        b"evaluator_response_digest",
-        input.evaluator_response_digest.as_bytes(),
-    );
+    hash_field(h, b"replay_state_key_digest", input.replay_state_key_digest.as_bytes());
+    hash_field(h, b"evaluator_request_digest", input.evaluator_request_digest.as_bytes());
+    hash_field(h, b"evaluator_response_digest", input.evaluator_response_digest.as_bytes());
     hash_field(
         h,
         b"governance_execution_decision_digest",
         input.governance_execution_decision_digest.as_bytes(),
     );
-    hash_field(
-        h,
-        b"lifecycle_action",
-        input.lifecycle_action.tag().as_bytes(),
-    );
+    hash_field(h, b"lifecycle_action", input.lifecycle_action.tag().as_bytes());
     hash_field(h, b"candidate_digest", input.candidate_digest.as_bytes());
     hash_field(
         h,
@@ -763,23 +747,11 @@ fn hash_consume_binding(h: &mut sha3::Sha3_256, input: &PostMutationConsumeInput
         &input.authority_domain_sequence.to_le_bytes(),
     );
     hash_field(h, b"replay_nonce", input.replay_nonce.as_bytes());
-    hash_field(
-        h,
-        b"environment",
-        &input.environment.metric_code().to_le_bytes(),
-    );
+    hash_field(h, b"environment", &input.environment.metric_code().to_le_bytes());
     hash_field(h, b"chain_id", input.chain_id.as_bytes());
     hash_field(h, b"genesis_hash", input.genesis_hash.as_bytes());
-    hash_field(
-        h,
-        b"validation_surface",
-        input.validation_surface.tag().as_bytes(),
-    );
-    hash_field(
-        h,
-        b"mutation_surface",
-        input.mutation_surface.tag().as_bytes(),
-    );
+    hash_field(h, b"validation_surface", input.validation_surface.tag().as_bytes());
+    hash_field(h, b"mutation_surface", input.mutation_surface.tag().as_bytes());
     hash_field(
         h,
         b"mutation_completion_status",

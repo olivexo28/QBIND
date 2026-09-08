@@ -73,7 +73,8 @@ use crate::pqc_trust_bundle::TrustBundleEnvironment;
 pub const PRODUCTION_VALIDATOR_SET_ROTATION_PROTOCOL_VERSION: u16 = 1;
 
 /// Run 303 — validator identity digest domain tag.
-pub const PRODUCTION_VALIDATOR_IDENTITY_DOMAIN_TAG: &str = "QBIND:run303-validator-identity:v1";
+pub const PRODUCTION_VALIDATOR_IDENTITY_DOMAIN_TAG: &str =
+    "QBIND:run303-validator-identity:v1";
 
 /// Run 303 — validator record digest domain tag.
 pub const PRODUCTION_VALIDATOR_RECORD_DOMAIN_TAG: &str = "QBIND:run303-validator-record:v1";
@@ -83,7 +84,8 @@ pub const PRODUCTION_VALIDATOR_SET_SNAPSHOT_DOMAIN_TAG: &str =
     "QBIND:run303-validator-set-snapshot:v1";
 
 /// Run 303 — validator-set delta digest domain tag.
-pub const PRODUCTION_VALIDATOR_SET_DELTA_DOMAIN_TAG: &str = "QBIND:run303-validator-set-delta:v1";
+pub const PRODUCTION_VALIDATOR_SET_DELTA_DOMAIN_TAG: &str =
+    "QBIND:run303-validator-set-delta:v1";
 
 /// Run 303 — validator-set rotation plan digest domain tag.
 pub const PRODUCTION_VALIDATOR_SET_ROTATION_PLAN_DOMAIN_TAG: &str =
@@ -455,7 +457,9 @@ pub struct CanonicalValidatorRecord {
 
 impl CanonicalValidatorRecord {
     pub fn is_well_formed(&self) -> bool {
-        self.identity.is_well_formed() && !self.chain_id.is_empty() && !self.genesis_hash.is_empty()
+        self.identity.is_well_formed()
+            && !self.chain_id.is_empty()
+            && !self.genesis_hash.is_empty()
     }
 
     /// The canonical sort key: `(validator_index, consensus_key_fingerprint)`.
@@ -477,11 +481,7 @@ impl CanonicalValidatorRecord {
             }
             None => hash_field(h, b"retirement_present", &[0u8]),
         }
-        hash_field(
-            h,
-            b"environment",
-            &self.environment.metric_code().to_le_bytes(),
-        );
+        hash_field(h, b"environment", &self.environment.metric_code().to_le_bytes());
         hash_field(h, b"chain_id", self.chain_id.as_bytes());
         hash_field(h, b"genesis_hash", self.genesis_hash.as_bytes());
     }
@@ -542,11 +542,7 @@ impl CanonicalValidatorSetSnapshot {
 
     /// Returns `true` iff two records share the same validator index.
     pub fn has_duplicate_validator_id(&self) -> bool {
-        let mut ids: Vec<u64> = self
-            .records
-            .iter()
-            .map(|r| r.identity.validator_index)
-            .collect();
+        let mut ids: Vec<u64> = self.records.iter().map(|r| r.identity.validator_index).collect();
         ids.sort_unstable();
         ids.windows(2).any(|w| w[0] == w[1])
     }
@@ -602,21 +598,9 @@ impl CanonicalValidatorSetSnapshot {
         use sha3::{Digest, Sha3_256};
         let mut h = Sha3_256::new();
         h.update(PRODUCTION_VALIDATOR_SET_SNAPSHOT_DOMAIN_TAG.as_bytes());
-        hash_field(
-            &mut h,
-            b"validator_set_epoch",
-            &self.validator_set_epoch.to_le_bytes(),
-        );
-        hash_field(
-            &mut h,
-            b"validator_set_version",
-            &self.validator_set_version.to_le_bytes(),
-        );
-        hash_field(
-            &mut h,
-            b"record_count",
-            &(self.records.len() as u64).to_le_bytes(),
-        );
+        hash_field(&mut h, b"validator_set_epoch", &self.validator_set_epoch.to_le_bytes());
+        hash_field(&mut h, b"validator_set_version", &self.validator_set_version.to_le_bytes());
+        hash_field(&mut h, b"record_count", &(self.records.len() as u64).to_le_bytes());
         for record in self.canonical_sorted() {
             hash_field(&mut h, b"record_digest", record.record_digest().as_bytes());
         }
@@ -685,7 +669,9 @@ impl ValidatorSetChange {
     pub fn is_well_formed(&self) -> bool {
         match self.kind {
             ValidatorSetChangeKind::Add | ValidatorSetChangeKind::Update => match &self.record {
-                Some(r) => r.is_well_formed() && r.identity.validator_index == self.validator_index,
+                Some(r) => {
+                    r.is_well_formed() && r.identity.validator_index == self.validator_index
+                }
                 None => false,
             },
             ValidatorSetChangeKind::Remove => self.record.is_none(),
@@ -718,9 +704,7 @@ impl ValidatorSetDelta {
     }
 
     pub fn empty() -> Self {
-        Self {
-            changes: Vec::new(),
-        }
+        Self { changes: Vec::new() }
     }
 
     pub fn is_empty(&self) -> bool {
@@ -802,11 +786,7 @@ impl ValidatorSetDelta {
         use sha3::{Digest, Sha3_256};
         let mut h = Sha3_256::new();
         h.update(PRODUCTION_VALIDATOR_SET_DELTA_DOMAIN_TAG.as_bytes());
-        hash_field(
-            &mut h,
-            b"change_count",
-            &(self.changes.len() as u64).to_le_bytes(),
-        );
+        hash_field(&mut h, b"change_count", &(self.changes.len() as u64).to_le_bytes());
         for change in &self.changes {
             change.hash_into(&mut h);
         }
@@ -1092,21 +1072,9 @@ impl ProductionValidatorSetRotationPlan {
         let mut h = Sha3_256::new();
         h.update(PRODUCTION_VALIDATOR_SET_ROTATION_PLAN_DOMAIN_TAG.as_bytes());
         hash_field(&mut h, b"plan_kind", self.plan_kind.tag().as_bytes());
-        hash_field(
-            &mut h,
-            b"protocol_version",
-            &self.protocol_version.to_le_bytes(),
-        );
-        hash_field(
-            &mut h,
-            b"rotation_policy_id",
-            self.rotation_policy_id.as_bytes(),
-        );
-        hash_field(
-            &mut h,
-            b"environment",
-            &self.environment.metric_code().to_le_bytes(),
-        );
+        hash_field(&mut h, b"protocol_version", &self.protocol_version.to_le_bytes());
+        hash_field(&mut h, b"rotation_policy_id", self.rotation_policy_id.as_bytes());
+        hash_field(&mut h, b"environment", &self.environment.metric_code().to_le_bytes());
         hash_field(&mut h, b"chain_id", self.chain_id.as_bytes());
         hash_field(&mut h, b"genesis_hash", self.genesis_hash.as_bytes());
         hash_field(
@@ -1114,119 +1082,39 @@ impl ProductionValidatorSetRotationPlan {
             b"authority_root_fingerprint",
             self.authority_root_fingerprint.as_bytes(),
         );
-        hash_field(
-            &mut h,
-            b"authority_root_suite_id",
-            &[self.authority_root_suite_id],
-        );
-        hash_field(
-            &mut h,
-            b"governance_domain_id",
-            self.governance_domain_id.as_bytes(),
-        );
-        hash_field(
-            &mut h,
-            b"governance_epoch",
-            &self.governance_epoch.to_le_bytes(),
-        );
-        hash_field(
-            &mut h,
-            b"governance_height",
-            &self.governance_height.to_le_bytes(),
-        );
+        hash_field(&mut h, b"authority_root_suite_id", &[self.authority_root_suite_id]);
+        hash_field(&mut h, b"governance_domain_id", self.governance_domain_id.as_bytes());
+        hash_field(&mut h, b"governance_epoch", &self.governance_epoch.to_le_bytes());
+        hash_field(&mut h, b"governance_height", &self.governance_height.to_le_bytes());
         hash_field(&mut h, b"proposal_id", self.proposal_id.as_bytes());
         hash_field(&mut h, b"proposal_digest", self.proposal_digest.as_bytes());
-        hash_field(
-            &mut h,
-            b"quorum_voted",
-            &self.quorum.voters_voted.to_le_bytes(),
-        );
-        hash_field(
-            &mut h,
-            b"quorum_total",
-            &self.quorum.total_voters.to_le_bytes(),
-        );
-        hash_field(
-            &mut h,
-            b"quorum_required",
-            &self.quorum.required_quorum.to_le_bytes(),
-        );
-        hash_field(
-            &mut h,
-            b"threshold_approvals",
-            &self.threshold.approvals.to_le_bytes(),
-        );
-        hash_field(
-            &mut h,
-            b"threshold_required",
-            &self.threshold.required.to_le_bytes(),
-        );
-        hash_field(
-            &mut h,
-            b"threshold_total",
-            &self.threshold.total.to_le_bytes(),
-        );
-        hash_field(
-            &mut h,
-            b"lifecycle_action",
-            self.lifecycle_action.tag().as_bytes(),
-        );
-        hash_field(
-            &mut h,
-            b"rotation_action",
-            self.rotation_action.tag().as_bytes(),
-        );
+        hash_field(&mut h, b"quorum_voted", &self.quorum.voters_voted.to_le_bytes());
+        hash_field(&mut h, b"quorum_total", &self.quorum.total_voters.to_le_bytes());
+        hash_field(&mut h, b"quorum_required", &self.quorum.required_quorum.to_le_bytes());
+        hash_field(&mut h, b"threshold_approvals", &self.threshold.approvals.to_le_bytes());
+        hash_field(&mut h, b"threshold_required", &self.threshold.required.to_le_bytes());
+        hash_field(&mut h, b"threshold_total", &self.threshold.total.to_le_bytes());
+        hash_field(&mut h, b"lifecycle_action", self.lifecycle_action.tag().as_bytes());
+        hash_field(&mut h, b"rotation_action", self.rotation_action.tag().as_bytes());
         hash_field(
             &mut h,
             b"authority_domain_sequence",
             &self.authority_domain_sequence.to_le_bytes(),
         );
-        hash_field(
-            &mut h,
-            b"governance_decision_id",
-            self.governance_decision_id.as_bytes(),
-        );
-        hash_field(
-            &mut h,
-            b"governance_request_id",
-            self.governance_request_id.as_bytes(),
-        );
-        hash_field(
-            &mut h,
-            b"governance_intent_digest",
-            self.governance_intent_digest.as_bytes(),
-        );
-        hash_field(
-            &mut h,
-            b"current_set_digest",
-            self.current_set_digest.as_bytes(),
-        );
-        hash_field(
-            &mut h,
-            b"proposed_set_digest",
-            self.proposed_set_digest.as_bytes(),
-        );
+        hash_field(&mut h, b"governance_decision_id", self.governance_decision_id.as_bytes());
+        hash_field(&mut h, b"governance_request_id", self.governance_request_id.as_bytes());
+        hash_field(&mut h, b"governance_intent_digest", self.governance_intent_digest.as_bytes());
+        hash_field(&mut h, b"current_set_digest", self.current_set_digest.as_bytes());
+        hash_field(&mut h, b"proposed_set_digest", self.proposed_set_digest.as_bytes());
         hash_field(&mut h, b"delta_digest", self.delta_digest.as_bytes());
-        hash_field(
-            &mut h,
-            b"validator_set_epoch",
-            &self.validator_set_epoch.to_le_bytes(),
-        );
-        hash_field(
-            &mut h,
-            b"validator_set_version",
-            &self.validator_set_version.to_le_bytes(),
-        );
+        hash_field(&mut h, b"validator_set_epoch", &self.validator_set_epoch.to_le_bytes());
+        hash_field(&mut h, b"validator_set_version", &self.validator_set_version.to_le_bytes());
         hash_field(
             &mut h,
             b"proposed_validator_count",
             &self.proposed_validator_count.to_le_bytes(),
         );
-        hash_field(
-            &mut h,
-            b"rotation_nonce",
-            &self.rotation_nonce.to_le_bytes(),
-        );
+        hash_field(&mut h, b"rotation_nonce", &self.rotation_nonce.to_le_bytes());
         match &self.custody_binding {
             Some(c) => {
                 hash_field(&mut h, b"custody_present", &[1u8]);
@@ -1260,17 +1148,9 @@ impl ProductionValidatorSetRotationPlan {
 /// Custody binding canonical hashing (module-local; mirrors Run 301 field
 /// order for cross-run digest stability).
 fn custody_hash_into(c: &GovernanceExecutionCustodyBinding, h: &mut sha3::Sha3_256) {
-    hash_field(
-        h,
-        b"custody_provider_class",
-        c.provider_class.tag().as_bytes(),
-    );
+    hash_field(h, b"custody_provider_class", c.provider_class.tag().as_bytes());
     hash_field(h, b"custody_key_handle", c.key_handle.as_bytes());
-    hash_field(
-        h,
-        b"custody_signer_fingerprint",
-        c.signer_fingerprint.as_bytes(),
-    );
+    hash_field(h, b"custody_signer_fingerprint", c.signer_fingerprint.as_bytes());
     hash_field(
         h,
         b"custody_transcript_digest",
@@ -1289,11 +1169,7 @@ fn attestation_hash_into(a: &GovernanceExecutionAttestationBinding, h: &mut sha3
 
 fn durable_hash_into(d: &GovernanceExecutionDurableReplayBinding, h: &mut sha3::Sha3_256) {
     hash_field(h, b"durable_record_id", d.durable_record_id.as_bytes());
-    hash_field(
-        h,
-        b"durable_record_digest",
-        d.durable_record_digest.as_bytes(),
-    );
+    hash_field(h, b"durable_record_digest", d.durable_record_digest.as_bytes());
 }
 
 /// Run 303 — deterministic rotation plan digest wrapper exposed as a named
@@ -1318,16 +1194,8 @@ pub fn production_validator_set_rotation_request_id(
     let mut h = Sha3_256::new();
     h.update(PRODUCTION_VALIDATOR_SET_ROTATION_REQUEST_DOMAIN_TAG.as_bytes());
     hash_field(&mut h, b"protocol_version", &protocol_version.to_le_bytes());
-    hash_field(
-        &mut h,
-        b"governance_decision_id",
-        governance_decision_id.as_bytes(),
-    );
-    hash_field(
-        &mut h,
-        b"governance_intent_digest",
-        governance_intent_digest.as_bytes(),
-    );
+    hash_field(&mut h, b"governance_decision_id", governance_decision_id.as_bytes());
+    hash_field(&mut h, b"governance_intent_digest", governance_intent_digest.as_bytes());
     hash_field(&mut h, b"rotation_policy_id", rotation_policy_id.as_bytes());
     hash_field(&mut h, b"rotation_nonce", &rotation_nonce.to_le_bytes());
     hex::encode(h.finalize())
@@ -1441,17 +1309,13 @@ pub enum ProductionValidatorSetRotationOutcome {
     DurableReplayUnavailable,
 
     // ---- Replay / freshness -------------------------------------------
-    RotationReplayRejected {
-        rotation_id: String,
-    },
+    RotationReplayRejected { rotation_id: String },
     StaleGovernanceEpoch,
     StaleAuthoritySequence,
     StaleValidatorSetEpoch,
     StaleValidatorSetVersion,
     ConflictingPlanForSameRotation,
-    ValidatorSetRotationAmbiguous {
-        reason: String,
-    },
+    ValidatorSetRotationAmbiguous { reason: String },
     MainNetRefused,
 }
 
@@ -1523,9 +1387,7 @@ impl ProductionValidatorSetRotationOutcome {
             Self::WrongGovernanceEpoch => "wrong-governance-epoch",
             Self::WrongGovernanceExecutionDecisionId => "wrong-governance-execution-decision-id",
             Self::WrongGovernanceExecutionRequestId => "wrong-governance-execution-request-id",
-            Self::WrongGovernanceExecutionIntentDigest => {
-                "wrong-governance-execution-intent-digest"
-            }
+            Self::WrongGovernanceExecutionIntentDigest => "wrong-governance-execution-intent-digest",
             Self::WrongLifecycleAction => "wrong-lifecycle-action",
             Self::WrongCandidateDigest => "wrong-candidate-digest",
             Self::WrongAuthoritySequence => "wrong-authority-sequence",
@@ -2369,16 +2231,15 @@ impl ProductionValidatorSetRotationBoundary {
 
 /// Run 303 — the boundary default policy is Disabled / fail-closed.
 pub fn production_validator_set_rotation_boundary_default_is_disabled() -> bool {
-    ProductionValidatorSetRotationPolicy::default()
-        == ProductionValidatorSetRotationPolicy::Disabled
+    ProductionValidatorSetRotationPolicy::default() == ProductionValidatorSetRotationPolicy::Disabled
         && ProductionValidatorSetRotationConfig::default().kind
             == ProductionValidatorSetRotationKind::Disabled
 }
 
 /// Run 303 — the boundary is a source/test implementation, not
 /// release-binary evidence (deferred to Run 304).
-pub fn production_validator_set_rotation_boundary_is_source_test_not_release_binary_evidence(
-) -> bool {
+pub fn production_validator_set_rotation_boundary_is_source_test_not_release_binary_evidence() -> bool
+{
     true
 }
 

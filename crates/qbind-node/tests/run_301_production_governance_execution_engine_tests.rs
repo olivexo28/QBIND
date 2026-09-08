@@ -108,14 +108,13 @@ fn binding(env: TrustBundleEnvironment) -> GovernanceExecutionProofBinding {
 /// A Run 299 accept decision consistent with `b`.
 fn decision_for(b: &GovernanceExecutionProofBinding) -> ProductionOnChainGovernanceProofDecision {
     ProductionOnChainGovernanceProofDecision {
-        outcome:
-            ProductionOnChainGovernanceProofOutcome::AcceptedProductionOnChainGovernanceProof {
-                environment: b.environment,
-                governance_epoch: b.governance_epoch,
-                authority_domain_sequence: b.authority_domain_sequence,
-                lifecycle_action: b.lifecycle_action,
-                decision_id: b.decision_id.clone(),
-            },
+        outcome: ProductionOnChainGovernanceProofOutcome::AcceptedProductionOnChainGovernanceProof {
+            environment: b.environment,
+            governance_epoch: b.governance_epoch,
+            authority_domain_sequence: b.authority_domain_sequence,
+            lifecycle_action: b.lifecycle_action,
+            decision_id: b.decision_id.clone(),
+        },
         decision_id: b.decision_id.clone(),
         proof_digest: b.proof_digest.clone(),
         transcript_digest: b.proof_transcript_digest.clone(),
@@ -235,10 +234,7 @@ fn a03_valid_testnet_decision_produces_intent() {
 fn a04_accepted_intent_binds_environment() {
     let b = binding(TrustBundleEnvironment::Devnet);
     let d = eval_verified(&engine(), &b, &inputs(TrustBundleEnvironment::Devnet));
-    assert_eq!(
-        d.intent.unwrap().environment,
-        TrustBundleEnvironment::Devnet
-    );
+    assert_eq!(d.intent.unwrap().environment, TrustBundleEnvironment::Devnet);
 }
 
 #[test]
@@ -306,10 +302,7 @@ fn a12_accepted_intent_binds_proposal_outcome() {
 fn a13_accepted_intent_binds_lifecycle_action() {
     let b = binding(TrustBundleEnvironment::Devnet);
     let d = eval_verified(&engine(), &b, &inputs(TrustBundleEnvironment::Devnet));
-    assert_eq!(
-        d.intent.unwrap().lifecycle_action,
-        LocalLifecycleAction::Rotate
-    );
+    assert_eq!(d.intent.unwrap().lifecycle_action, LocalLifecycleAction::Rotate);
 }
 
 #[test]
@@ -353,10 +346,7 @@ fn a18_accepted_intent_binds_proof_transcript_digest() {
 fn a19_accepted_intent_binds_checkpoint_digest() {
     let b = binding(TrustBundleEnvironment::Devnet);
     let d = eval_verified(&engine(), &b, &inputs(TrustBundleEnvironment::Devnet));
-    assert_eq!(
-        d.intent.unwrap().trusted_checkpoint_digest,
-        CHECKPOINT_DIGEST
-    );
+    assert_eq!(d.intent.unwrap().trusted_checkpoint_digest, CHECKPOINT_DIGEST);
 }
 
 #[test]
@@ -473,7 +463,8 @@ fn a29_emergency_revocation_is_prepared_intent_only() {
     b.requested_operation = GovernanceExecutionRequestedOperation::EmergencyRevocation;
     let mut ins = inputs(TrustBundleEnvironment::Devnet);
     ins.expected_lifecycle_action = LocalLifecycleAction::EmergencyRevoke;
-    ins.expected_requested_operation = GovernanceExecutionRequestedOperation::EmergencyRevocation;
+    ins.expected_requested_operation =
+        GovernanceExecutionRequestedOperation::EmergencyRevocation;
     let d = eval_verified(&engine(), &b, &ins);
     assert!(d.is_accept());
     let i = d.intent.unwrap();
@@ -679,9 +670,8 @@ fn b01_disabled_rejects_before_evaluation() {
 
 #[test]
 fn b02_missing_proof_rejected() {
-    let req = ProductionGovernanceExecutionRequest::from_proof(
-        GovernanceExecutionProofSource::MissingProof,
-    );
+    let req =
+        ProductionGovernanceExecutionRequest::from_proof(GovernanceExecutionProofSource::MissingProof);
     let d = engine().evaluate_production_governance_execution(
         &req,
         &inputs(TrustBundleEnvironment::Devnet),
@@ -1332,10 +1322,7 @@ fn c02_mainnet_cannot_be_satisfied_by_local_operator() {
 fn c03_mainnet_domain_refused_under_source_test_policy() {
     let b = binding(TrustBundleEnvironment::Mainnet);
     let d = eval_verified(&engine(), &b, &inputs(TrustBundleEnvironment::Mainnet));
-    assert_eq!(
-        d.outcome,
-        ProductionGovernanceExecutionOutcome::MainNetRefused
-    );
+    assert_eq!(d.outcome, ProductionGovernanceExecutionOutcome::MainNetRefused);
 }
 
 #[test]
@@ -1343,10 +1330,7 @@ fn c04_mainnet_decision_env_refused_even_on_devnet_domain() {
     // Binding claims MainNet while the trust domain is DevNet.
     let b = binding(TrustBundleEnvironment::Mainnet);
     let d = eval_verified(&engine(), &b, &inputs(TrustBundleEnvironment::Devnet));
-    assert_eq!(
-        d.outcome,
-        ProductionGovernanceExecutionOutcome::MainNetRefused
-    );
+    assert_eq!(d.outcome, ProductionGovernanceExecutionOutcome::MainNetRefused);
 }
 
 #[test]
@@ -1383,10 +1367,7 @@ fn c07_mainnet_validator_set_rotation_still_refused() {
     ins.expected_requested_operation = GovernanceExecutionRequestedOperation::ValidatorSetRotation;
     // MainNet gate precedes the validator-set-rotation gate.
     let d = eval_verified(&engine(), &b, &ins);
-    assert_eq!(
-        d.outcome,
-        ProductionGovernanceExecutionOutcome::MainNetRefused
-    );
+    assert_eq!(d.outcome, ProductionGovernanceExecutionOutcome::MainNetRefused);
 }
 
 #[test]
@@ -1418,7 +1399,8 @@ fn d01_no_prior_window_is_clean_no_op() {
 fn d02_byte_identical_intent_is_idempotent() {
     let cur = accepted_intent(TrustBundleEnvironment::Devnet);
     let prior = cur.clone();
-    let out = engine().recover_production_governance_execution_window(Some(&prior), &cur, 0, None);
+    let out =
+        engine().recover_production_governance_execution_window(Some(&prior), &cur, 0, None);
     assert_eq!(
         out,
         ProductionGovernanceExecutionRecoveryOutcome::IdempotentReplayOfSameIntent
@@ -1431,7 +1413,8 @@ fn d03_conflicting_proposal_digest_fails_closed() {
     let mut prior = accepted_intent(TrustBundleEnvironment::Devnet);
     let cur = accepted_intent(TrustBundleEnvironment::Devnet);
     prior.proposal_digest = "other".to_string();
-    let out = engine().recover_production_governance_execution_window(Some(&prior), &cur, 0, None);
+    let out =
+        engine().recover_production_governance_execution_window(Some(&prior), &cur, 0, None);
     assert_eq!(
         out,
         ProductionGovernanceExecutionRecoveryOutcome::ConflictingProposalDigestForSameDecisionId
@@ -1443,7 +1426,8 @@ fn d04_conflicting_candidate_digest_fails_closed() {
     let mut prior = accepted_intent(TrustBundleEnvironment::Devnet);
     let cur = accepted_intent(TrustBundleEnvironment::Devnet);
     prior.candidate_v2_digest = "other".to_string();
-    let out = engine().recover_production_governance_execution_window(Some(&prior), &cur, 0, None);
+    let out =
+        engine().recover_production_governance_execution_window(Some(&prior), &cur, 0, None);
     assert_eq!(
         out,
         ProductionGovernanceExecutionRecoveryOutcome::ConflictingCandidateDigestForSameDecisionId
@@ -1455,7 +1439,8 @@ fn d05_conflicting_lifecycle_action_fails_closed() {
     let mut prior = accepted_intent(TrustBundleEnvironment::Devnet);
     let cur = accepted_intent(TrustBundleEnvironment::Devnet);
     prior.lifecycle_action = LocalLifecycleAction::Revoke;
-    let out = engine().recover_production_governance_execution_window(Some(&prior), &cur, 0, None);
+    let out =
+        engine().recover_production_governance_execution_window(Some(&prior), &cur, 0, None);
     assert_eq!(
         out,
         ProductionGovernanceExecutionRecoveryOutcome::ConflictingLifecycleActionForSameDecisionId
@@ -1467,7 +1452,8 @@ fn d06_conflicting_proof_transcript_fails_closed() {
     let mut prior = accepted_intent(TrustBundleEnvironment::Devnet);
     let cur = accepted_intent(TrustBundleEnvironment::Devnet);
     prior.proof_transcript_digest = "other".to_string();
-    let out = engine().recover_production_governance_execution_window(Some(&prior), &cur, 0, None);
+    let out =
+        engine().recover_production_governance_execution_window(Some(&prior), &cur, 0, None);
     assert_eq!(
         out,
         ProductionGovernanceExecutionRecoveryOutcome::ConflictingProofTranscriptForSameDecisionId
@@ -1479,7 +1465,8 @@ fn d07_conflicting_custody_evidence_fails_closed() {
     let mut prior = accepted_intent(TrustBundleEnvironment::Devnet);
     let cur = accepted_intent(TrustBundleEnvironment::Devnet);
     prior.custody_binding = Some(custody());
-    let out = engine().recover_production_governance_execution_window(Some(&prior), &cur, 0, None);
+    let out =
+        engine().recover_production_governance_execution_window(Some(&prior), &cur, 0, None);
     assert_eq!(
         out,
         ProductionGovernanceExecutionRecoveryOutcome::ConflictingCustodyEvidenceForSameDecisionId
@@ -1491,7 +1478,8 @@ fn d08_conflicting_attestation_evidence_fails_closed() {
     let mut prior = accepted_intent(TrustBundleEnvironment::Devnet);
     let cur = accepted_intent(TrustBundleEnvironment::Devnet);
     prior.attestation_binding = Some(attestation());
-    let out = engine().recover_production_governance_execution_window(Some(&prior), &cur, 0, None);
+    let out =
+        engine().recover_production_governance_execution_window(Some(&prior), &cur, 0, None);
     assert_eq!(
         out,
         ProductionGovernanceExecutionRecoveryOutcome::ConflictingAttestationEvidenceForSameDecisionId
@@ -1535,7 +1523,8 @@ fn d11_unrelated_decision_id_is_independent_window() {
     let mut prior = accepted_intent(TrustBundleEnvironment::Devnet);
     let cur = accepted_intent(TrustBundleEnvironment::Devnet);
     prior.decision_id = "unrelated".to_string();
-    let out = engine().recover_production_governance_execution_window(Some(&prior), &cur, 0, None);
+    let out =
+        engine().recover_production_governance_execution_window(Some(&prior), &cur, 0, None);
     assert_eq!(
         out,
         ProductionGovernanceExecutionRecoveryOutcome::NoPriorExecutionWindow
@@ -1549,7 +1538,8 @@ fn d12_ambiguous_recovery_fails_closed() {
     let mut prior = accepted_intent(TrustBundleEnvironment::Devnet);
     let cur = accepted_intent(TrustBundleEnvironment::Devnet);
     prior.governance_height = GOV_HEIGHT + 1;
-    let out = engine().recover_production_governance_execution_window(Some(&prior), &cur, 0, None);
+    let out =
+        engine().recover_production_governance_execution_window(Some(&prior), &cur, 0, None);
     assert!(matches!(
         out,
         ProductionGovernanceExecutionRecoveryOutcome::AmbiguousRecoveryFailClosed { .. }
@@ -1675,7 +1665,9 @@ fn e10_evaluation_is_pure_repeatable() {
 
 #[test]
 fn f01_run301_is_source_test_not_release_binary_evidence() {
-    assert!(production_governance_execution_engine_is_source_test_not_release_binary_evidence());
+    assert!(
+        production_governance_execution_engine_is_source_test_not_release_binary_evidence()
+    );
 }
 
 #[test]

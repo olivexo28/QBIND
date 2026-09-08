@@ -30,11 +30,11 @@ use qbind_node::pqc_authority_state::{
 };
 use qbind_node::pqc_governance_authority::GovernanceAuthorityClass;
 use qbind_node::pqc_remote_authority_signer::{
-    custody_class_routes_to_remote_signer, local_operator_key_cannot_satisfy_remote_signer,
+    custody_class_routes_to_remote_signer,
+    local_operator_key_cannot_satisfy_remote_signer,
     mainnet_peer_driven_apply_remains_refused_under_remote_signer_boundary,
-    peer_majority_cannot_satisfy_remote_signer,
-    validate_lifecycle_governance_custody_and_remote_signer, validate_remote_signer,
-    validate_remote_signer_for_custody_class, FixtureLoopbackRemoteSigner,
+    peer_majority_cannot_satisfy_remote_signer, validate_lifecycle_governance_custody_and_remote_signer,
+    validate_remote_signer, validate_remote_signer_for_custody_class, FixtureLoopbackRemoteSigner,
     LifecycleCustodyRemoteSignerOutcome, ProductionRemoteSigner, RemoteAuthoritySigner,
     RemoteSignerExpectations, RemoteSignerIdentity, RemoteSignerMode, RemoteSignerOutcome,
     RemoteSignerPolicy, RemoteSignerRequest, RemoteSignerResponse,
@@ -52,11 +52,15 @@ const ROOT_FP: &str = "1111111111111111111111111111111111111111";
 const OTHER_ROOT_FP: &str = "9999999999999999999999999999999999999999";
 const CHAIN_ID: &str = "0000000000000001";
 const OTHER_CHAIN: &str = "00000000000000ff";
-const GENESIS_HASH: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
-const OTHER_GENESIS: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+const GENESIS_HASH: &str =
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+const OTHER_GENESIS: &str =
+    "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 const DIGEST_2: &str = "2222222222222222222222222222222222222222222222222222222222222222";
-const DIGEST_OTHER: &str = "3333333333333333333333333333333333333333333333333333333333333333";
-const PRIOR_DIGEST: &str = "1111111111111111111111111111111111111111111111111111111111111111";
+const DIGEST_OTHER: &str =
+    "3333333333333333333333333333333333333333333333333333333333333333";
+const PRIOR_DIGEST: &str =
+    "1111111111111111111111111111111111111111111111111111111111111111";
 const CUSTODY_ATTEST_DIGEST: &str = "custody-att-digest-194";
 const CUSTODY_KEY_ID: &str = "custody-key-id-194";
 const SIGNER_ID: &str = "remote-signer-194";
@@ -146,16 +150,15 @@ fn prior_versioned(env: TrustBundleEnvironment) -> PersistentAuthorityStateRecor
     ))
 }
 
-fn identity(
-    env: TrustBundleEnvironment,
-    candidate: &PersistentAuthorityStateRecordV2,
-) -> RemoteSignerIdentity {
+fn identity(env: TrustBundleEnvironment, candidate: &PersistentAuthorityStateRecordV2) -> RemoteSignerIdentity {
     RemoteSignerIdentity {
         signer_id: SIGNER_ID.to_string(),
         signer_public_identity: SIGNER_PUBID.to_string(),
         custody_key_id: CUSTODY_KEY_ID.to_string(),
         authority_root_fingerprint: ROOT_FP.to_string(),
-        bundle_signing_key_fingerprint: candidate.active_bundle_signing_key_fingerprint.clone(),
+        bundle_signing_key_fingerprint: candidate
+            .active_bundle_signing_key_fingerprint
+            .clone(),
         environment: env,
         chain_id: CHAIN_ID.to_string(),
         genesis_hash: GENESIS_HASH.to_string(),
@@ -170,10 +173,7 @@ fn identity(
     }
 }
 
-fn request(
-    env: TrustBundleEnvironment,
-    candidate: &PersistentAuthorityStateRecordV2,
-) -> RemoteSignerRequest {
+fn request(env: TrustBundleEnvironment, candidate: &PersistentAuthorityStateRecordV2) -> RemoteSignerRequest {
     RemoteSignerRequest {
         environment: env,
         chain_id: CHAIN_ID.to_string(),
@@ -192,10 +192,7 @@ fn request(
     }
 }
 
-fn fixture_signer(
-    env: TrustBundleEnvironment,
-    candidate: &PersistentAuthorityStateRecordV2,
-) -> FixtureLoopbackRemoteSigner {
+fn fixture_signer(env: TrustBundleEnvironment, candidate: &PersistentAuthorityStateRecordV2) -> FixtureLoopbackRemoteSigner {
     FixtureLoopbackRemoteSigner {
         identity: identity(env, candidate),
         response_nonce: RESP_NONCE.to_string(),
@@ -234,7 +231,9 @@ fn good_custody_attestation(
         chain_id: CHAIN_ID.to_string(),
         genesis_hash: GENESIS_HASH.to_string(),
         authority_root_fingerprint: ROOT_FP.to_string(),
-        bundle_signing_key_fingerprint: candidate.active_bundle_signing_key_fingerprint.clone(),
+        bundle_signing_key_fingerprint: candidate
+            .active_bundle_signing_key_fingerprint
+            .clone(),
         governance_authority_class: GovernanceAuthorityClass::GenesisBound,
         lifecycle_action: LocalLifecycleAction::Rotate,
         candidate_digest: DIGEST_2.to_string(),
@@ -314,8 +313,9 @@ fn policy_tags_are_stable() {
         "mainnet-production-remote-signer-required"
     );
     assert!(RemoteSignerPolicy::ProductionRemoteSignerRequired.requires_production_remote_signer());
-    assert!(RemoteSignerPolicy::MainnetProductionRemoteSignerRequired
-        .requires_production_remote_signer());
+    assert!(
+        RemoteSignerPolicy::MainnetProductionRemoteSignerRequired.requires_production_remote_signer()
+    );
     assert!(!RemoteSignerPolicy::FixtureLoopbackAllowed.requires_production_remote_signer());
     assert_eq!(RemoteSignerMode::FixtureLoopback.tag(), "fixture-loopback");
     assert_eq!(RemoteSignerMode::Production.tag(), "production");
@@ -456,10 +456,7 @@ fn a6_disabled_policy_does_not_disturb_governance_classes() {
     // closed as Disabled regardless of the governance authority class
     // bound elsewhere — the boundary never elevates or alters
     // GenesisBound / EmergencyCouncil / OnChainGovernance behavior.
-    for env in [
-        TrustBundleEnvironment::Devnet,
-        TrustBundleEnvironment::Testnet,
-    ] {
+    for env in [TrustBundleEnvironment::Devnet, TrustBundleEnvironment::Testnet] {
         let s = scenario(env);
         assert_eq!(
             validate(&s, RemoteSignerPolicy::Disabled),
@@ -512,10 +509,7 @@ fn r2_fixture_rejected_under_production_required() {
 fn r3_fixture_rejected_under_mainnet_production_required() {
     let s = scenario(TrustBundleEnvironment::Devnet);
     assert_eq!(
-        validate(
-            &s,
-            RemoteSignerPolicy::MainnetProductionRemoteSignerRequired
-        ),
+        validate(&s, RemoteSignerPolicy::MainnetProductionRemoteSignerRequired),
         RemoteSignerOutcome::FixtureRejectedMainnetProductionRequired
     );
 }
@@ -541,10 +535,7 @@ fn r5_mainnet_production_rejected_as_unavailable() {
     let mut s = scenario(TrustBundleEnvironment::Devnet);
     s.response.signer_mode = RemoteSignerMode::Production;
     assert_eq!(
-        validate(
-            &s,
-            RemoteSignerPolicy::MainnetProductionRemoteSignerRequired
-        ),
+        validate(&s, RemoteSignerPolicy::MainnetProductionRemoteSignerRequired),
         RemoteSignerOutcome::MainNetProductionRemoteSignerUnavailable
     );
 }
@@ -619,8 +610,7 @@ fn r10_wrong_custody_key_id_rejected() {
 #[test]
 fn r11_wrong_signing_key_fingerprint_rejected() {
     let mut s = scenario(TrustBundleEnvironment::Devnet);
-    s.request.new_signing_key_fingerprint =
-        Some("ffffffffffffffffffffffffffffffffffffffff".to_string());
+    s.request.new_signing_key_fingerprint = Some("ffffffffffffffffffffffffffffffffffffffff".to_string());
     s.response.request_digest = s.request.canonical_digest();
     assert!(matches!(
         validate(&s, RemoteSignerPolicy::FixtureLoopbackAllowed),
@@ -906,16 +896,12 @@ fn r28_lifecycle_governance_custody_valid_production_remote_signer_unavailable_r
 #[test]
 fn r29_mainnet_peer_driven_apply_refused_even_with_fixture_loopback() {
     // The helper refuses MainNet regardless of fixture loopback success.
-    assert!(
-        mainnet_peer_driven_apply_remains_refused_under_remote_signer_boundary(
-            TrustBundleEnvironment::Mainnet
-        )
-    );
-    assert!(
-        !mainnet_peer_driven_apply_remains_refused_under_remote_signer_boundary(
-            TrustBundleEnvironment::Devnet
-        )
-    );
+    assert!(mainnet_peer_driven_apply_remains_refused_under_remote_signer_boundary(
+        TrustBundleEnvironment::Mainnet
+    ));
+    assert!(!mainnet_peer_driven_apply_remains_refused_under_remote_signer_boundary(
+        TrustBundleEnvironment::Devnet
+    ));
 
     // A MainNet fixture loopback round-trip is refused at the verifier.
     let s = scenario(TrustBundleEnvironment::Mainnet);

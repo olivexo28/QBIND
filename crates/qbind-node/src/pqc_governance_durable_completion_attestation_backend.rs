@@ -117,8 +117,7 @@ pub type DurableCompletionAttestationBackendPipelineBinding =
 
 /// Run 256 — the Run 248 sink outcome the backend carries as the receipt-record
 /// context.
-pub type DurableCompletionAttestationBackendSinkBinding =
-    GovernanceModeledDurableConsumeSinkOutcome;
+pub type DurableCompletionAttestationBackendSinkBinding = GovernanceModeledDurableConsumeSinkOutcome;
 
 /// Run 256 — the Run 250 reporter outcome the backend carries as the
 /// completion-report context.
@@ -271,20 +270,15 @@ impl DurableCompletionAttestationBackendIdentity {
 // ===========================================================================
 
 /// Run 256 — domain separator for the backend identity digest.
-const BACKEND_IDENTITY_DOMAIN: &[u8] =
-    b"QBIND:run256:durable-completion-attestation-backend-identity:v1";
+const BACKEND_IDENTITY_DOMAIN: &[u8] = b"QBIND:run256:durable-completion-attestation-backend-identity:v1";
 /// Run 256 — domain separator for the backend request digest.
-const BACKEND_REQUEST_DOMAIN: &[u8] =
-    b"QBIND:run256:durable-completion-attestation-backend-request:v1";
+const BACKEND_REQUEST_DOMAIN: &[u8] = b"QBIND:run256:durable-completion-attestation-backend-request:v1";
 /// Run 256 — domain separator for the backend response digest.
-const BACKEND_RESPONSE_DOMAIN: &[u8] =
-    b"QBIND:run256:durable-completion-attestation-backend-response:v1";
+const BACKEND_RESPONSE_DOMAIN: &[u8] = b"QBIND:run256:durable-completion-attestation-backend-response:v1";
 /// Run 256 — domain separator for the backend receipt digest.
-const BACKEND_RECEIPT_DOMAIN: &[u8] =
-    b"QBIND:run256:durable-completion-attestation-backend-receipt:v1";
+const BACKEND_RECEIPT_DOMAIN: &[u8] = b"QBIND:run256:durable-completion-attestation-backend-receipt:v1";
 /// Run 256 — domain separator for the backend transcript digest.
-const BACKEND_TRANSCRIPT_DOMAIN: &[u8] =
-    b"QBIND:run256:durable-completion-attestation-backend-transcript:v1";
+const BACKEND_TRANSCRIPT_DOMAIN: &[u8] = b"QBIND:run256:durable-completion-attestation-backend-transcript:v1";
 
 /// Run 256 — a deterministic, domain-separated backend digest (lowercase hex of a
 /// SHA3-256 over length-prefixed, field-bound canonical material). It contains no
@@ -408,11 +402,7 @@ pub fn backend_response_digest(
     let mut w = CanonicalWriter::new(BACKEND_RESPONSE_DOMAIN);
     w.str_field(&response.backend_record_id)
         .str_field(response.request_digest.as_hex())
-        .str_field(if response.accepted {
-            "accepted"
-        } else {
-            "rejected"
-        })
+        .str_field(if response.accepted { "accepted" } else { "rejected" })
         .str_field(response.backend_kind.tag());
     DurableCompletionAttestationBackendDigest(w.finish())
 }
@@ -1077,7 +1067,9 @@ impl DurableCompletionAttestationBackendOutcome {
             Self::ValidatorSetRotationUnsupportedNoSubmission => {
                 "validator-set-rotation-unsupported-no-submission"
             }
-            Self::PolicyChangeUnsupportedNoSubmission => "policy-change-unsupported-no-submission",
+            Self::PolicyChangeUnsupportedNoSubmission => {
+                "policy-change-unsupported-no-submission"
+            }
         }
     }
 }
@@ -1669,10 +1661,14 @@ pub fn recover_durable_completion_attestation_backend_window(
             Some(record) if recovered_matches(record) => Backend::BackendSubmissionRecorded,
             _ => Backend::BackendSubmissionRejectedBeforeRecord,
         },
-        Window::AfterBackendAmbiguous => Backend::BackendSubmissionAmbiguousFailClosedNoSubmission,
+        Window::AfterBackendAmbiguous => {
+            Backend::BackendSubmissionAmbiguousFailClosedNoSubmission
+        }
         Window::BackendRecordFailed => Backend::BackendSubmissionRecordFailedNoSubmission,
         Window::BackendRollbackCompleted => Backend::BackendSubmissionRolledBackNoSubmission,
-        Window::BackendRollbackFailed => Backend::BackendSubmissionRollbackFailedFatalNoSubmission,
+        Window::BackendRollbackFailed => {
+            Backend::BackendSubmissionRollbackFailedFatalNoSubmission
+        }
         // Any unknown window fails closed.
         Window::Unknown => Backend::BackendSubmissionAmbiguousFailClosedNoSubmission,
     }
@@ -1867,8 +1863,8 @@ pub fn durable_completion_attestation_backend_policy_change_unsupported() -> boo
 ///
 /// Returns `true` iff a local operator key *cannot* satisfy a MainNet backend
 /// authority. Run 256 always returns `true`.
-pub fn durable_completion_attestation_backend_local_operator_cannot_satisfy_mainnet_authority(
-) -> bool {
+pub fn durable_completion_attestation_backend_local_operator_cannot_satisfy_mainnet_authority() -> bool
+{
     true
 }
 
@@ -1876,7 +1872,7 @@ pub fn durable_completion_attestation_backend_local_operator_cannot_satisfy_main
 ///
 /// Returns `true` iff peer-majority / gossip count *cannot* satisfy a MainNet
 /// backend authority. Run 256 always returns `true`.
-pub fn durable_completion_attestation_backend_peer_majority_cannot_satisfy_mainnet_authority(
-) -> bool {
+pub fn durable_completion_attestation_backend_peer_majority_cannot_satisfy_mainnet_authority() -> bool
+{
     true
 }

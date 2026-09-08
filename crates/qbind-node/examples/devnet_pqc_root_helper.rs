@@ -60,7 +60,9 @@ fn leaf_spec_for_mode(
     leaf_kem_pk: Vec<u8>,
 ) -> LeafCertSpec {
     match mode {
-        "currently-valid" => LeafCertSpec::currently_valid(validator_id, root_key_id, leaf_kem_pk),
+        "currently-valid" => {
+            LeafCertSpec::currently_valid(validator_id, root_key_id, leaf_kem_pk)
+        }
         "expired" => LeafCertSpec::expired_for_test(validator_id, root_key_id, leaf_kem_pk),
         "not-yet-valid" => {
             LeafCertSpec::not_yet_valid_for_test(validator_id, root_key_id, leaf_kem_pk)

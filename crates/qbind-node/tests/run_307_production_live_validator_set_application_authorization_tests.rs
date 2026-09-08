@@ -38,12 +38,10 @@ use qbind_node::pqc_production_governance_execution_engine::{
 };
 use qbind_node::pqc_production_live_validator_set_application_authorization::*;
 use qbind_node::pqc_production_validator_set_rotation_application_executor::{
-    EmptyValidatorSetRotationApplicationReplaySet,
-    ProductionValidatorSetRotationApplicationDecision,
-    ProductionValidatorSetRotationApplicationExecutor,
-    ProductionValidatorSetRotationApplicationInputs,
-    ProductionValidatorSetRotationApplicationRequest,
-    ValidatorSetRotationApplicationAuthoritySource, ValidatorSetRotationApplicationDecisionKind,
+    EmptyValidatorSetRotationApplicationReplaySet, ProductionValidatorSetRotationApplicationDecision,
+    ProductionValidatorSetRotationApplicationExecutor, ProductionValidatorSetRotationApplicationInputs,
+    ProductionValidatorSetRotationApplicationRequest, ValidatorSetRotationApplicationAuthoritySource,
+    ValidatorSetRotationApplicationDecisionKind,
 };
 use qbind_node::pqc_production_validator_set_rotation_intent::{
     CanonicalValidatorIdentity, CanonicalValidatorRecord, CanonicalValidatorSetSnapshot,
@@ -89,33 +87,18 @@ fn chain_for(env: TrustBundleEnvironment) -> &'static str {
 }
 
 fn trust_domain(env: TrustBundleEnvironment) -> AuthorityTrustDomain {
-    AuthorityTrustDomain::new(
-        env,
-        chain_for(env),
-        GENESIS_HASH,
-        ROOT_FP,
-        PQC_LIFECYCLE_SUITE_ML_DSA_44,
-    )
+    AuthorityTrustDomain::new(env, chain_for(env), GENESIS_HASH, ROOT_FP, PQC_LIFECYCLE_SUITE_ML_DSA_44)
 }
 
 fn quorum() -> OnChainGovernanceQuorum {
-    OnChainGovernanceQuorum {
-        voters_voted: 8,
-        total_voters: 10,
-        required_quorum: 6,
-    }
+    OnChainGovernanceQuorum { voters_voted: 8, total_voters: 10, required_quorum: 6 }
 }
 
 fn threshold() -> GovernanceThreshold {
     GovernanceThreshold::new(8, 6, 10)
 }
 
-fn validator(
-    env: TrustBundleEnvironment,
-    idx: u64,
-    power: u64,
-    act: u64,
-) -> CanonicalValidatorRecord {
+fn validator(env: TrustBundleEnvironment, idx: u64, power: u64, act: u64) -> CanonicalValidatorRecord {
     CanonicalValidatorRecord {
         identity: CanonicalValidatorIdentity {
             validator_index: idx,
@@ -134,11 +117,7 @@ fn validator(
 
 fn current_set(env: TrustBundleEnvironment) -> CanonicalValidatorSetSnapshot {
     CanonicalValidatorSetSnapshot::new(
-        vec![
-            validator(env, 1, 100, 1),
-            validator(env, 2, 100, 1),
-            validator(env, 3, 100, 1),
-        ],
+        vec![validator(env, 1, 100, 1), validator(env, 2, 100, 1), validator(env, 3, 100, 1)],
         CUR_EPOCH,
         CUR_VERSION,
     )
@@ -167,10 +146,7 @@ fn durable() -> GovernanceExecutionDurableReplayBinding {
     }
 }
 
-fn gov_intent(
-    env: TrustBundleEnvironment,
-    lifecycle: LocalLifecycleAction,
-) -> ProductionGovernanceExecutionIntent {
+fn gov_intent(env: TrustBundleEnvironment, lifecycle: LocalLifecycleAction) -> ProductionGovernanceExecutionIntent {
     ProductionGovernanceExecutionIntent {
         intent_kind: ProductionGovernanceExecutionIntentKind::AuthorityLifecycleRotationIntent,
         protocol_version: 1,
@@ -202,17 +178,14 @@ fn gov_intent(
     }
 }
 
-fn gov_decision(
-    intent: ProductionGovernanceExecutionIntent,
-) -> ProductionGovernanceExecutionDecision {
+fn gov_decision(intent: ProductionGovernanceExecutionIntent) -> ProductionGovernanceExecutionDecision {
     let idig = intent.intent_digest();
     ProductionGovernanceExecutionDecision {
-        outcome:
-            ProductionGovernanceExecutionOutcome::AcceptedSourceTestGovernanceExecutionIntent {
-                intent_kind: intent.intent_kind,
-                environment: intent.environment,
-                decision_id: intent.decision_id.clone(),
-            },
+        outcome: ProductionGovernanceExecutionOutcome::AcceptedSourceTestGovernanceExecutionIntent {
+            intent_kind: intent.intent_kind,
+            environment: intent.environment,
+            decision_id: intent.decision_id.clone(),
+        },
         decision_id: GOV_DECISION_ID.to_string(),
         request_id: GOV_REQUEST_ID.to_string(),
         intent: Some(intent),
@@ -231,8 +204,7 @@ fn rotation_decision(
 ) -> ProductionValidatorSetRotationDecision {
     let decision = gov_decision(gov_intent(env, lifecycle));
     let idig = decision.intent_digest.clone();
-    let source =
-        ValidatorSetRotationAuthoritySource::VerifiedGovernanceExecutionIntent { decision };
+    let source = ValidatorSetRotationAuthoritySource::VerifiedGovernanceExecutionIntent { decision };
     let request = ProductionValidatorSetRotationRequest::new(
         source,
         current.clone(),
@@ -273,11 +245,7 @@ fn rotation_decision(
         expected_durable_replay: None,
     };
     let boundary = ProductionValidatorSetRotationBoundary::source_test();
-    let d = boundary.evaluate_validator_set_rotation(
-        &request,
-        &inputs,
-        &EmptyValidatorSetRotationReplaySet,
-    );
+    let d = boundary.evaluate_validator_set_rotation(&request, &inputs, &EmptyValidatorSetRotationReplaySet);
     assert!(d.is_accept(), "rotation decision must accept for fixture");
     d
 }
@@ -360,10 +328,7 @@ fn app_decision_ev(
             &inputs,
             &EmptyValidatorSetRotationApplicationReplaySet,
         );
-    assert!(
-        d.is_accept(),
-        "run 305 application decision must accept for fixture"
-    );
+    assert!(d.is_accept(), "run 305 application decision must accept for fixture");
     d
 }
 
@@ -375,17 +340,7 @@ fn app_decision(
     delta: ValidatorSetDelta,
     proposed: CanonicalValidatorSetSnapshot,
 ) -> ProductionValidatorSetRotationApplicationDecision {
-    app_decision_ev(
-        env,
-        lifecycle,
-        requested_action,
-        current,
-        delta,
-        proposed,
-        None,
-        None,
-        None,
-    )
+    app_decision_ev(env, lifecycle, requested_action, current, delta, proposed, None, None, None)
 }
 
 // ---- Run 307 authorization case -------------------------------------------
@@ -457,11 +412,7 @@ fn make_case(
     proposed: CanonicalValidatorSetSnapshot,
 ) -> Case {
     let decision = app_decision(env, lifecycle, requested_action, current, delta, proposed);
-    let target = decision
-        .application_intent
-        .as_ref()
-        .unwrap()
-        .epoch_transition_target;
+    let target = decision.application_intent.as_ref().unwrap().epoch_transition_target;
     let inputs = auth_inputs(env, lifecycle, requested_action, &decision);
     let request = ProductionLiveValidatorSetApplicationAuthorizationRequest::new(
         LiveValidatorSetApplicationAuthorizationAuthoritySource::VerifiedApplicationDecision {
@@ -482,12 +433,11 @@ fn empty_replay() -> EmptyLiveValidatorSetApplicationAuthorizationReplaySet {
 }
 
 fn eval(case: &Case) -> ProductionLiveValidatorSetApplicationAuthorizationDecision {
-    case.executor
-        .evaluate_live_validator_set_application_authorization(
-            &case.request,
-            &case.inputs,
-            &empty_replay(),
-        )
+    case.executor.evaluate_live_validator_set_application_authorization(
+        &case.request,
+        &case.inputs,
+        &empty_replay(),
+    )
 }
 
 // ---- Scenario builders ----------------------------------------------------
@@ -497,23 +447,11 @@ fn add_case(env: TrustBundleEnvironment) -> Case {
     let v4 = validator(env, 4, 100, 2);
     let delta = ValidatorSetDelta::new(vec![ValidatorSetChange::add(v4.clone())]);
     let proposed = CanonicalValidatorSetSnapshot::new(
-        vec![
-            validator(env, 1, 100, 1),
-            validator(env, 2, 100, 1),
-            validator(env, 3, 100, 1),
-            v4,
-        ],
+        vec![validator(env, 1, 100, 1), validator(env, 2, 100, 1), validator(env, 3, 100, 1), v4],
         CUR_EPOCH + 1,
         CUR_VERSION + 1,
     );
-    make_case(
-        env,
-        LocalLifecycleAction::Rotate,
-        ValidatorSetRotationAction::ValidatorAdd,
-        current,
-        delta,
-        proposed,
-    )
+    make_case(env, LocalLifecycleAction::Rotate, ValidatorSetRotationAction::ValidatorAdd, current, delta, proposed)
 }
 
 fn remove_case(env: TrustBundleEnvironment) -> Case {
@@ -524,14 +462,7 @@ fn remove_case(env: TrustBundleEnvironment) -> Case {
         CUR_EPOCH + 1,
         CUR_VERSION + 1,
     );
-    make_case(
-        env,
-        LocalLifecycleAction::Rotate,
-        ValidatorSetRotationAction::ValidatorRemove,
-        current,
-        delta,
-        proposed,
-    )
+    make_case(env, LocalLifecycleAction::Rotate, ValidatorSetRotationAction::ValidatorRemove, current, delta, proposed)
 }
 
 fn update_case(env: TrustBundleEnvironment) -> Case {
@@ -539,35 +470,17 @@ fn update_case(env: TrustBundleEnvironment) -> Case {
     let updated = validator(env, 2, 250, 1);
     let delta = ValidatorSetDelta::new(vec![ValidatorSetChange::update(updated.clone())]);
     let proposed = CanonicalValidatorSetSnapshot::new(
-        vec![
-            validator(env, 1, 100, 1),
-            updated,
-            validator(env, 3, 100, 1),
-        ],
+        vec![validator(env, 1, 100, 1), updated, validator(env, 3, 100, 1)],
         CUR_EPOCH + 1,
         CUR_VERSION + 1,
     );
-    make_case(
-        env,
-        LocalLifecycleAction::Rotate,
-        ValidatorSetRotationAction::ValidatorUpdate,
-        current,
-        delta,
-        proposed,
-    )
+    make_case(env, LocalLifecycleAction::Rotate, ValidatorSetRotationAction::ValidatorUpdate, current, delta, proposed)
 }
 
 fn noop_case(env: TrustBundleEnvironment) -> Case {
     let current = current_set(env);
     let proposed = current_set(env);
-    make_case(
-        env,
-        LocalLifecycleAction::Rotate,
-        ValidatorSetRotationAction::NoOpSynchronization,
-        current,
-        ValidatorSetDelta::empty(),
-        proposed,
-    )
+    make_case(env, LocalLifecycleAction::Rotate, ValidatorSetRotationAction::NoOpSynchronization, current, ValidatorSetDelta::empty(), proposed)
 }
 
 fn identity_rotation_case(env: TrustBundleEnvironment) -> Case {
@@ -576,22 +489,11 @@ fn identity_rotation_case(env: TrustBundleEnvironment) -> Case {
     rotated.identity.consensus_key_fingerprint = "cons-2-rotated".to_string();
     let delta = ValidatorSetDelta::new(vec![ValidatorSetChange::update(rotated.clone())]);
     let proposed = CanonicalValidatorSetSnapshot::new(
-        vec![
-            validator(env, 1, 100, 1),
-            rotated,
-            validator(env, 3, 100, 1),
-        ],
+        vec![validator(env, 1, 100, 1), rotated, validator(env, 3, 100, 1)],
         CUR_EPOCH + 1,
         CUR_VERSION + 1,
     );
-    make_case(
-        env,
-        LocalLifecycleAction::Rotate,
-        ValidatorSetRotationAction::ValidatorIdentityRotation,
-        current,
-        delta,
-        proposed,
-    )
+    make_case(env, LocalLifecycleAction::Rotate, ValidatorSetRotationAction::ValidatorIdentityRotation, current, delta, proposed)
 }
 
 fn retirement_case(env: TrustBundleEnvironment) -> Case {
@@ -602,14 +504,7 @@ fn retirement_case(env: TrustBundleEnvironment) -> Case {
         CUR_EPOCH + 1,
         CUR_VERSION + 1,
     );
-    make_case(
-        env,
-        LocalLifecycleAction::Retire,
-        ValidatorSetRotationAction::ValidatorRetirement,
-        current,
-        delta,
-        proposed,
-    )
+    make_case(env, LocalLifecycleAction::Retire, ValidatorSetRotationAction::ValidatorRetirement, current, delta, proposed)
 }
 
 fn emergency_case(env: TrustBundleEnvironment) -> Case {
@@ -620,36 +515,19 @@ fn emergency_case(env: TrustBundleEnvironment) -> Case {
         CUR_EPOCH + 1,
         CUR_VERSION + 1,
     );
-    make_case(
-        env,
-        LocalLifecycleAction::EmergencyRevoke,
-        ValidatorSetRotationAction::EmergencyValidatorRemoval,
-        current,
-        delta,
-        proposed,
-    )
+    make_case(env, LocalLifecycleAction::EmergencyRevoke, ValidatorSetRotationAction::EmergencyValidatorRemoval, current, delta, proposed)
 }
 
 fn bulk_case(env: TrustBundleEnvironment, action: ValidatorSetRotationAction) -> Case {
     let current = current_set(env);
     let v4 = validator(env, 4, 100, 2);
-    let delta = ValidatorSetDelta::new(vec![
-        ValidatorSetChange::add(v4.clone()),
-        ValidatorSetChange::remove(3),
-    ]);
+    let delta = ValidatorSetDelta::new(vec![ValidatorSetChange::add(v4.clone()), ValidatorSetChange::remove(3)]);
     let proposed = CanonicalValidatorSetSnapshot::new(
         vec![validator(env, 1, 100, 1), validator(env, 2, 100, 1), v4],
         CUR_EPOCH + 1,
         CUR_VERSION + 1,
     );
-    make_case(
-        env,
-        LocalLifecycleAction::Rotate,
-        action,
-        current,
-        delta,
-        proposed,
-    )
+    make_case(env, LocalLifecycleAction::Rotate, action, current, delta, proposed)
 }
 
 use LiveValidatorSetApplicationAuthorizationKind as AK;
@@ -667,11 +545,7 @@ fn a01_default_policy_is_disabled_and_inert() {
         ProductionLiveValidatorSetApplicationAuthorizationPolicy::default(),
     );
     let case = add_case(TrustBundleEnvironment::Devnet);
-    let d = e.evaluate_live_validator_set_application_authorization(
-        &case.request,
-        &case.inputs,
-        &empty_replay(),
-    );
+    let d = e.evaluate_live_validator_set_application_authorization(&case.request, &case.inputs, &empty_replay());
     assert_eq!(d.outcome, O::Disabled);
     assert!(!d.is_accept());
     assert!(d.authorization_intent.is_none());
@@ -696,100 +570,59 @@ fn a04_noop_authorization_accepted_non_mutating() {
     let d = eval(&noop_case(TrustBundleEnvironment::Devnet));
     assert!(d.is_accept());
     let intent = d.authorization_intent.unwrap();
-    assert_eq!(
-        intent.authorization_kind,
-        AK::AuthorizeApplyNoOpAlreadySynchronized
-    );
+    assert_eq!(intent.authorization_kind, AK::AuthorizeApplyNoOpAlreadySynchronized);
     assert!(intent.is_non_mutating());
 }
 
 #[test]
 fn a05_validator_add_authorization_non_mutating() {
-    let intent = eval(&add_case(TrustBundleEnvironment::Devnet))
-        .authorization_intent
-        .unwrap();
+    let intent = eval(&add_case(TrustBundleEnvironment::Devnet)).authorization_intent.unwrap();
     assert_eq!(intent.authorization_kind, AK::AuthorizeApplyValidatorAdd);
     assert!(intent.is_non_mutating());
 }
 
 #[test]
 fn a06_validator_remove_authorization_non_mutating() {
-    let intent = eval(&remove_case(TrustBundleEnvironment::Devnet))
-        .authorization_intent
-        .unwrap();
+    let intent = eval(&remove_case(TrustBundleEnvironment::Devnet)).authorization_intent.unwrap();
     assert_eq!(intent.authorization_kind, AK::AuthorizeApplyValidatorRemove);
 }
 
 #[test]
 fn a07_validator_update_authorization_non_mutating() {
-    let intent = eval(&update_case(TrustBundleEnvironment::Devnet))
-        .authorization_intent
-        .unwrap();
-    assert_eq!(
-        intent.authorization_kind,
-        AK::AuthorizeApplyValidatorMetadataUpdate
-    );
+    let intent = eval(&update_case(TrustBundleEnvironment::Devnet)).authorization_intent.unwrap();
+    assert_eq!(intent.authorization_kind, AK::AuthorizeApplyValidatorMetadataUpdate);
 }
 
 #[test]
 fn a08_validator_identity_rotation_authorization_non_mutating() {
-    let intent = eval(&identity_rotation_case(TrustBundleEnvironment::Devnet))
-        .authorization_intent
-        .unwrap();
-    assert_eq!(
-        intent.authorization_kind,
-        AK::AuthorizeApplyValidatorIdentityRotation
-    );
+    let intent = eval(&identity_rotation_case(TrustBundleEnvironment::Devnet)).authorization_intent.unwrap();
+    assert_eq!(intent.authorization_kind, AK::AuthorizeApplyValidatorIdentityRotation);
 }
 
 #[test]
 fn a09_validator_retirement_authorization_non_mutating() {
-    let intent = eval(&retirement_case(TrustBundleEnvironment::Devnet))
-        .authorization_intent
-        .unwrap();
-    assert_eq!(
-        intent.authorization_kind,
-        AK::AuthorizeApplyValidatorRetirement
-    );
+    let intent = eval(&retirement_case(TrustBundleEnvironment::Devnet)).authorization_intent.unwrap();
+    assert_eq!(intent.authorization_kind, AK::AuthorizeApplyValidatorRetirement);
 }
 
 #[test]
 fn a10_emergency_validator_removal_authorization_non_mutating() {
-    let intent = eval(&emergency_case(TrustBundleEnvironment::Devnet))
-        .authorization_intent
-        .unwrap();
-    assert_eq!(
-        intent.authorization_kind,
-        AK::AuthorizeApplyEmergencyValidatorRemoval
-    );
+    let intent = eval(&emergency_case(TrustBundleEnvironment::Devnet)).authorization_intent.unwrap();
+    assert_eq!(intent.authorization_kind, AK::AuthorizeApplyEmergencyValidatorRemoval);
 }
 
 #[test]
 fn a11_authority_set_synchronization_authorization_non_mutating() {
-    let intent = eval(&bulk_case(
-        TrustBundleEnvironment::Devnet,
-        ValidatorSetRotationAction::AuthoritySetSynchronization,
-    ))
-    .authorization_intent
-    .unwrap();
-    assert_eq!(
-        intent.authorization_kind,
-        AK::AuthorizeApplyAuthoritySetSynchronization
-    );
+    let intent = eval(&bulk_case(TrustBundleEnvironment::Devnet, ValidatorSetRotationAction::AuthoritySetSynchronization))
+        .authorization_intent.unwrap();
+    assert_eq!(intent.authorization_kind, AK::AuthorizeApplyAuthoritySetSynchronization);
 }
 
 #[test]
 fn a12_bulk_validator_set_rotation_authorization_non_mutating() {
-    let intent = eval(&bulk_case(
-        TrustBundleEnvironment::Devnet,
-        ValidatorSetRotationAction::BulkValidatorSetRotation,
-    ))
-    .authorization_intent
-    .unwrap();
-    assert_eq!(
-        intent.authorization_kind,
-        AK::AuthorizeApplyBulkValidatorSetRotation
-    );
+    let intent = eval(&bulk_case(TrustBundleEnvironment::Devnet, ValidatorSetRotationAction::BulkValidatorSetRotation))
+        .authorization_intent.unwrap();
+    assert_eq!(intent.authorization_kind, AK::AuthorizeApplyBulkValidatorSetRotation);
 }
 
 #[test]
@@ -800,17 +633,12 @@ fn a13_authorization_binds_environment_chain_genesis_root() {
     assert_eq!(intent.chain_id, chain_for(env));
     assert_eq!(intent.genesis_hash, GENESIS_HASH);
     assert_eq!(intent.authority_root_fingerprint, ROOT_FP);
-    assert_eq!(
-        intent.authority_root_suite_id,
-        PQC_LIFECYCLE_SUITE_ML_DSA_44
-    );
+    assert_eq!(intent.authority_root_suite_id, PQC_LIFECYCLE_SUITE_ML_DSA_44);
 }
 
 #[test]
 fn a14_authorization_binds_governance_tuple() {
-    let intent = eval(&add_case(TrustBundleEnvironment::Devnet))
-        .authorization_intent
-        .unwrap();
+    let intent = eval(&add_case(TrustBundleEnvironment::Devnet)).authorization_intent.unwrap();
     assert_eq!(intent.governance_domain_id, GOV_DOMAIN);
     assert_eq!(intent.governance_epoch, GOV_EPOCH);
     assert_eq!(intent.proposal_id, PROPOSAL_ID);
@@ -820,9 +648,7 @@ fn a14_authorization_binds_governance_tuple() {
 
 #[test]
 fn a15_authorization_binds_governance_execution_ids_and_digests() {
-    let intent = eval(&add_case(TrustBundleEnvironment::Devnet))
-        .authorization_intent
-        .unwrap();
+    let intent = eval(&add_case(TrustBundleEnvironment::Devnet)).authorization_intent.unwrap();
     assert_eq!(intent.governance_decision_id, GOV_DECISION_ID);
     assert_eq!(intent.governance_request_id, GOV_REQUEST_ID);
     assert!(!intent.governance_intent_digest.is_empty());
@@ -871,9 +697,7 @@ fn a18_authorization_binds_validator_set_digests_and_versions() {
 
 #[test]
 fn a19_authorization_binds_epoch_transition_target_and_nonces() {
-    let intent = eval(&add_case(TrustBundleEnvironment::Devnet))
-        .authorization_intent
-        .unwrap();
+    let intent = eval(&add_case(TrustBundleEnvironment::Devnet)).authorization_intent.unwrap();
     assert_eq!(intent.epoch_transition_target, CUR_EPOCH + 1);
     assert_eq!(intent.epoch_transition_target, intent.validator_set_epoch);
     assert_eq!(intent.application_nonce, APP_NONCE);
@@ -883,9 +707,7 @@ fn a19_authorization_binds_epoch_transition_target_and_nonces() {
 
 #[test]
 fn a20_authorization_binds_quorum_threshold_policies() {
-    let intent = eval(&add_case(TrustBundleEnvironment::Devnet))
-        .authorization_intent
-        .unwrap();
+    let intent = eval(&add_case(TrustBundleEnvironment::Devnet)).authorization_intent.unwrap();
     assert_eq!(intent.quorum, quorum());
     assert_eq!(intent.threshold, threshold());
     assert_eq!(intent.application_policy_id, APP_POLICY_ID);
@@ -899,52 +721,24 @@ fn a21_authorization_binds_custody_attestation_durable_where_represented() {
     let v4 = validator(env, 4, 100, 2);
     let delta = ValidatorSetDelta::new(vec![ValidatorSetChange::add(v4.clone())]);
     let proposed = CanonicalValidatorSetSnapshot::new(
-        vec![
-            validator(env, 1, 100, 1),
-            validator(env, 2, 100, 1),
-            validator(env, 3, 100, 1),
-            v4,
-        ],
+        vec![validator(env, 1, 100, 1), validator(env, 2, 100, 1), validator(env, 3, 100, 1), v4],
         CUR_EPOCH + 1,
         CUR_VERSION + 1,
     );
     let decision = app_decision_ev(
-        env,
-        LocalLifecycleAction::Rotate,
-        ValidatorSetRotationAction::ValidatorAdd,
-        current,
-        delta,
-        proposed,
-        Some(custody()),
-        Some(attestation()),
-        Some(durable()),
+        env, LocalLifecycleAction::Rotate, ValidatorSetRotationAction::ValidatorAdd,
+        current, delta, proposed, Some(custody()), Some(attestation()), Some(durable()),
     );
-    let target = decision
-        .application_intent
-        .as_ref()
-        .unwrap()
-        .epoch_transition_target;
-    let inputs = auth_inputs(
-        env,
-        LocalLifecycleAction::Rotate,
-        ValidatorSetRotationAction::ValidatorAdd,
-        &decision,
-    );
+    let target = decision.application_intent.as_ref().unwrap().epoch_transition_target;
+    let inputs = auth_inputs(env, LocalLifecycleAction::Rotate, ValidatorSetRotationAction::ValidatorAdd, &decision);
     let mut request = ProductionLiveValidatorSetApplicationAuthorizationRequest::new(
-        LiveValidatorSetApplicationAuthorizationAuthoritySource::VerifiedApplicationDecision {
-            decision,
-        },
-        target,
-        LIVE_APP_NONCE,
+        LiveValidatorSetApplicationAuthorizationAuthoritySource::VerifiedApplicationDecision { decision },
+        target, LIVE_APP_NONCE,
     );
     request.custody_binding = Some(custody());
     request.attestation_binding = Some(attestation());
     request.durable_replay_binding = Some(durable());
-    let case = Case {
-        executor: ProductionLiveValidatorSetApplicationAuthorizationExecutor::source_test(),
-        request,
-        inputs,
-    };
+    let case = Case { executor: ProductionLiveValidatorSetApplicationAuthorizationExecutor::source_test(), request, inputs };
     let intent = eval(&case).authorization_intent.unwrap();
     assert_eq!(intent.custody_binding, Some(custody()));
     assert_eq!(intent.attestation_binding, Some(attestation()));
@@ -953,24 +747,17 @@ fn a21_authorization_binds_custody_attestation_durable_where_represented() {
 
 #[test]
 fn a22_request_id_deterministic() {
-    let a =
-        production_live_validator_set_application_authorization_request_id(1, "idig", "ap", 11, 23);
-    let b =
-        production_live_validator_set_application_authorization_request_id(1, "idig", "ap", 11, 23);
+    let a = production_live_validator_set_application_authorization_request_id(1, "idig", "ap", 11, 23);
+    let b = production_live_validator_set_application_authorization_request_id(1, "idig", "ap", 11, 23);
     assert_eq!(a, b);
-    let c =
-        production_live_validator_set_application_authorization_request_id(1, "idig", "ap", 11, 24);
+    let c = production_live_validator_set_application_authorization_request_id(1, "idig", "ap", 11, 24);
     assert_ne!(a, c);
 }
 
 #[test]
 fn a23_intent_digest_deterministic() {
-    let i1 = eval(&add_case(TrustBundleEnvironment::Devnet))
-        .authorization_intent
-        .unwrap();
-    let i2 = eval(&add_case(TrustBundleEnvironment::Devnet))
-        .authorization_intent
-        .unwrap();
+    let i1 = eval(&add_case(TrustBundleEnvironment::Devnet)).authorization_intent.unwrap();
+    let i2 = eval(&add_case(TrustBundleEnvironment::Devnet)).authorization_intent.unwrap();
     assert_eq!(i1.intent_digest(), i2.intent_digest());
     assert_eq!(
         production_live_validator_set_application_authorization_intent_digest(&i1),
@@ -988,12 +775,8 @@ fn a24_transcript_digest_deterministic() {
 
 #[test]
 fn a25_different_action_changes_intent_digest() {
-    let add = eval(&add_case(TrustBundleEnvironment::Devnet))
-        .authorization_intent
-        .unwrap();
-    let rem = eval(&remove_case(TrustBundleEnvironment::Devnet))
-        .authorization_intent
-        .unwrap();
+    let add = eval(&add_case(TrustBundleEnvironment::Devnet)).authorization_intent.unwrap();
+    let rem = eval(&remove_case(TrustBundleEnvironment::Devnet)).authorization_intent.unwrap();
     assert_ne!(add.intent_digest(), rem.intent_digest());
 }
 
@@ -1019,10 +802,7 @@ fn a28_accept_outcome_carries_kind_env_target_nonce() {
     let d = eval(&add_case(TrustBundleEnvironment::Devnet));
     match d.outcome {
         O::AcceptedSourceTestLiveValidatorSetApplicationAuthorization {
-            authorization_kind,
-            environment,
-            epoch_transition_target,
-            live_application_nonce,
+            authorization_kind, environment, epoch_transition_target, live_application_nonce,
         } => {
             assert_eq!(authorization_kind, AK::AuthorizeApplyValidatorAdd);
             assert_eq!(environment, TrustBundleEnvironment::Devnet);
@@ -1049,9 +829,7 @@ fn a30_persisted_sequence_equal_accepts() {
 
 #[test]
 fn a31_application_nonce_bound_into_intent() {
-    let intent = eval(&add_case(TrustBundleEnvironment::Devnet))
-        .authorization_intent
-        .unwrap();
+    let intent = eval(&add_case(TrustBundleEnvironment::Devnet)).authorization_intent.unwrap();
     assert_eq!(intent.application_nonce, APP_NONCE);
 }
 
@@ -1078,10 +856,7 @@ fn with_source(src: Src) -> Case {
 
 #[test]
 fn b01_missing_application_decision_rejected() {
-    assert_reject(
-        &with_source(Src::MissingApplicationDecision),
-        O::VerifiedApplicationDecisionRequired,
-    );
+    assert_reject(&with_source(Src::MissingApplicationDecision), O::VerifiedApplicationDecisionRequired);
 }
 
 #[test]
@@ -1103,11 +878,9 @@ fn b02_unverified_application_decision_rejected() {
 #[test]
 fn b03_unverified_application_decision_variant_rejected() {
     let decision = app_decision(
-        TrustBundleEnvironment::Devnet,
-        LocalLifecycleAction::Rotate,
+        TrustBundleEnvironment::Devnet, LocalLifecycleAction::Rotate,
         ValidatorSetRotationAction::NoOpSynchronization,
-        current_set(TrustBundleEnvironment::Devnet),
-        ValidatorSetDelta::empty(),
+        current_set(TrustBundleEnvironment::Devnet), ValidatorSetDelta::empty(),
         current_set(TrustBundleEnvironment::Devnet),
     );
     assert_reject(
@@ -1119,11 +892,9 @@ fn b03_unverified_application_decision_variant_rejected() {
 #[test]
 fn b04_accepted_decision_without_intent_rejected() {
     let mut decision = app_decision(
-        TrustBundleEnvironment::Devnet,
-        LocalLifecycleAction::Rotate,
+        TrustBundleEnvironment::Devnet, LocalLifecycleAction::Rotate,
         ValidatorSetRotationAction::NoOpSynchronization,
-        current_set(TrustBundleEnvironment::Devnet),
-        ValidatorSetDelta::empty(),
+        current_set(TrustBundleEnvironment::Devnet), ValidatorSetDelta::empty(),
         current_set(TrustBundleEnvironment::Devnet),
     );
     decision.application_intent = None;
@@ -1136,11 +907,9 @@ fn b04_accepted_decision_without_intent_rejected() {
 #[test]
 fn b05_accepted_decision_without_intent_source_rejected() {
     let decision = app_decision(
-        TrustBundleEnvironment::Devnet,
-        LocalLifecycleAction::Rotate,
+        TrustBundleEnvironment::Devnet, LocalLifecycleAction::Rotate,
         ValidatorSetRotationAction::NoOpSynchronization,
-        current_set(TrustBundleEnvironment::Devnet),
-        ValidatorSetDelta::empty(),
+        current_set(TrustBundleEnvironment::Devnet), ValidatorSetDelta::empty(),
         current_set(TrustBundleEnvironment::Devnet),
     );
     assert_reject(
@@ -1151,10 +920,7 @@ fn b05_accepted_decision_without_intent_source_rejected() {
 
 #[test]
 fn b06_rotation_plan_alone_rejected() {
-    assert_reject(
-        &with_source(Src::RotationPlanWithoutApplicationDecision),
-        O::RotationPlanAloneRejected,
-    );
+    assert_reject(&with_source(Src::RotationPlanWithoutApplicationDecision), O::RotationPlanAloneRejected);
 }
 
 #[test]
@@ -1167,50 +933,32 @@ fn b07_governance_execution_intent_alone_rejected() {
 
 #[test]
 fn b08_governance_proof_alone_rejected() {
-    assert_reject(
-        &with_source(Src::GovernanceProofWithoutApplicationDecision),
-        O::GovernanceProofAloneRejected,
-    );
+    assert_reject(&with_source(Src::GovernanceProofWithoutApplicationDecision), O::GovernanceProofAloneRejected);
 }
 
 #[test]
 fn b09_local_operator_rejected() {
-    assert_reject(
-        &with_source(Src::LocalOperatorAssertion),
-        O::LocalOperatorProofRejected,
-    );
+    assert_reject(&with_source(Src::LocalOperatorAssertion), O::LocalOperatorProofRejected);
 }
 
 #[test]
 fn b10_peer_majority_rejected() {
-    assert_reject(
-        &with_source(Src::PeerMajorityAssertion),
-        O::PeerMajorityProofRejected,
-    );
+    assert_reject(&with_source(Src::PeerMajorityAssertion), O::PeerMajorityProofRejected);
 }
 
 #[test]
 fn b11_custody_only_rejected() {
-    assert_reject(
-        &with_source(Src::CustodyOnlyEvidence),
-        O::CustodyOnlyProofRejected,
-    );
+    assert_reject(&with_source(Src::CustodyOnlyEvidence), O::CustodyOnlyProofRejected);
 }
 
 #[test]
 fn b12_remote_signer_only_rejected() {
-    assert_reject(
-        &with_source(Src::RemoteSignerOnlyEvidence),
-        O::RemoteSignerOnlyProofRejected,
-    );
+    assert_reject(&with_source(Src::RemoteSignerOnlyEvidence), O::RemoteSignerOnlyProofRejected);
 }
 
 #[test]
 fn b13_custody_attestation_only_rejected() {
-    assert_reject(
-        &with_source(Src::CustodyAttestationOnlyEvidence),
-        O::CustodyAttestationOnlyProofRejected,
-    );
+    assert_reject(&with_source(Src::CustodyAttestationOnlyEvidence), O::CustodyAttestationOnlyProofRejected);
 }
 
 #[test]
@@ -1223,10 +971,7 @@ fn b14_fixture_only_application_decision_rejected() {
 
 #[test]
 fn b15_arbitrary_validator_set_bytes_rejected() {
-    assert_reject(
-        &with_source(Src::ArbitraryValidatorSetBytes),
-        O::ArbitraryValidatorSetBytesRejected,
-    );
+    assert_reject(&with_source(Src::ArbitraryValidatorSetBytes), O::ArbitraryValidatorSetBytesRejected);
 }
 
 #[test]
@@ -1279,11 +1024,8 @@ fn b21_wrong_application_policy_id_rejected() {
 fn b22_wrong_environment_rejected() {
     let mut case = add_case(TrustBundleEnvironment::Devnet);
     case.inputs.trust_domain = AuthorityTrustDomain::new(
-        TrustBundleEnvironment::Testnet,
-        chain_for(TrustBundleEnvironment::Devnet),
-        GENESIS_HASH,
-        ROOT_FP,
-        PQC_LIFECYCLE_SUITE_ML_DSA_44,
+        TrustBundleEnvironment::Testnet, chain_for(TrustBundleEnvironment::Devnet),
+        GENESIS_HASH, ROOT_FP, PQC_LIFECYCLE_SUITE_ML_DSA_44,
     );
     assert_reject(&case, O::WrongEnvironment);
 }
@@ -1292,11 +1034,7 @@ fn b22_wrong_environment_rejected() {
 fn b23_wrong_chain_rejected() {
     let mut case = add_case(TrustBundleEnvironment::Devnet);
     case.inputs.trust_domain = AuthorityTrustDomain::new(
-        TrustBundleEnvironment::Devnet,
-        "other-chain",
-        GENESIS_HASH,
-        ROOT_FP,
-        PQC_LIFECYCLE_SUITE_ML_DSA_44,
+        TrustBundleEnvironment::Devnet, "other-chain", GENESIS_HASH, ROOT_FP, PQC_LIFECYCLE_SUITE_ML_DSA_44,
     );
     assert_reject(&case, O::WrongChain);
 }
@@ -1305,11 +1043,8 @@ fn b23_wrong_chain_rejected() {
 fn b24_wrong_genesis_rejected() {
     let mut case = add_case(TrustBundleEnvironment::Devnet);
     case.inputs.trust_domain = AuthorityTrustDomain::new(
-        TrustBundleEnvironment::Devnet,
-        chain_for(TrustBundleEnvironment::Devnet),
-        "other-genesis",
-        ROOT_FP,
-        PQC_LIFECYCLE_SUITE_ML_DSA_44,
+        TrustBundleEnvironment::Devnet, chain_for(TrustBundleEnvironment::Devnet),
+        "other-genesis", ROOT_FP, PQC_LIFECYCLE_SUITE_ML_DSA_44,
     );
     assert_reject(&case, O::WrongGenesis);
 }
@@ -1318,11 +1053,8 @@ fn b24_wrong_genesis_rejected() {
 fn b25_wrong_authority_root_rejected() {
     let mut case = add_case(TrustBundleEnvironment::Devnet);
     case.inputs.trust_domain = AuthorityTrustDomain::new(
-        TrustBundleEnvironment::Devnet,
-        chain_for(TrustBundleEnvironment::Devnet),
-        GENESIS_HASH,
-        "other-root",
-        PQC_LIFECYCLE_SUITE_ML_DSA_44,
+        TrustBundleEnvironment::Devnet, chain_for(TrustBundleEnvironment::Devnet),
+        GENESIS_HASH, "other-root", PQC_LIFECYCLE_SUITE_ML_DSA_44,
     );
     assert_reject(&case, O::WrongAuthorityRoot);
 }
@@ -1421,11 +1153,7 @@ fn b38_wrong_authority_sequence_rejected() {
 #[test]
 fn b39_wrong_quorum_rejected() {
     let mut case = add_case(TrustBundleEnvironment::Devnet);
-    case.inputs.expected_quorum = OnChainGovernanceQuorum {
-        voters_voted: 9,
-        total_voters: 10,
-        required_quorum: 6,
-    };
+    case.inputs.expected_quorum = OnChainGovernanceQuorum { voters_voted: 9, total_voters: 10, required_quorum: 6 };
     assert_reject(&case, O::WrongQuorum);
 }
 
@@ -1596,10 +1324,7 @@ fn b60_stale_validator_set_version_rejected() {
 fn b61_ill_formed_inputs_rejected() {
     let mut case = add_case(TrustBundleEnvironment::Devnet);
     case.inputs.authorization_policy_id = String::new();
-    assert_reject(
-        &case,
-        O::LiveValidatorSetApplicationAuthorizationBoundaryUnavailable,
-    );
+    assert_reject(&case, O::LiveValidatorSetApplicationAuthorizationBoundaryUnavailable);
 }
 
 #[test]
@@ -1611,52 +1336,24 @@ fn b62_application_carried_custody_disagreement_rejected() {
     let v4 = validator(env, 4, 100, 2);
     let delta = ValidatorSetDelta::new(vec![ValidatorSetChange::add(v4.clone())]);
     let proposed = CanonicalValidatorSetSnapshot::new(
-        vec![
-            validator(env, 1, 100, 1),
-            validator(env, 2, 100, 1),
-            validator(env, 3, 100, 1),
-            v4,
-        ],
-        CUR_EPOCH + 1,
-        CUR_VERSION + 1,
+        vec![validator(env, 1, 100, 1), validator(env, 2, 100, 1), validator(env, 3, 100, 1), v4],
+        CUR_EPOCH + 1, CUR_VERSION + 1,
     );
     let mut intent_custody = custody();
     intent_custody.key_handle = "intent-carried-key".to_string();
     let decision = app_decision_ev(
-        env,
-        LocalLifecycleAction::Rotate,
-        ValidatorSetRotationAction::ValidatorAdd,
-        current,
-        delta,
-        proposed,
-        Some(intent_custody),
-        None,
-        None,
+        env, LocalLifecycleAction::Rotate, ValidatorSetRotationAction::ValidatorAdd,
+        current, delta, proposed, Some(intent_custody), None, None,
     );
-    let target = decision
-        .application_intent
-        .as_ref()
-        .unwrap()
-        .epoch_transition_target;
-    let mut inputs = auth_inputs(
-        env,
-        LocalLifecycleAction::Rotate,
-        ValidatorSetRotationAction::ValidatorAdd,
-        &decision,
-    );
+    let target = decision.application_intent.as_ref().unwrap().epoch_transition_target;
+    let mut inputs = auth_inputs(env, LocalLifecycleAction::Rotate, ValidatorSetRotationAction::ValidatorAdd, &decision);
     inputs.require_custody_evidence = true;
     inputs.expected_custody = Some(custody());
     let mut request = ProductionLiveValidatorSetApplicationAuthorizationRequest::new(
-        Src::VerifiedApplicationDecision { decision },
-        target,
-        LIVE_APP_NONCE,
+        Src::VerifiedApplicationDecision { decision }, target, LIVE_APP_NONCE,
     );
     request.custody_binding = Some(custody());
-    let case = Case {
-        executor: ProductionLiveValidatorSetApplicationAuthorizationExecutor::source_test(),
-        request,
-        inputs,
-    };
+    let case = Case { executor: ProductionLiveValidatorSetApplicationAuthorizationExecutor::source_test(), request, inputs };
     assert_reject(&case, O::CustodyBackendMismatch);
 }
 
@@ -1685,10 +1382,7 @@ fn c03_production_policy_unavailable() {
     let mut case = add_case(TrustBundleEnvironment::Devnet);
     case.executor.policy =
         ProductionLiveValidatorSetApplicationAuthorizationPolicy::RequireProductionLiveValidatorSetApplicationAuthorization;
-    assert_reject(
-        &case,
-        O::ProductionLiveValidatorSetApplicationAuthorizationUnavailable,
-    );
+    assert_reject(&case, O::ProductionLiveValidatorSetApplicationAuthorizationUnavailable);
 }
 
 #[test]
@@ -1696,10 +1390,7 @@ fn c04_mainnet_policy_unavailable_on_non_mainnet() {
     let mut case = add_case(TrustBundleEnvironment::Devnet);
     case.executor.policy =
         ProductionLiveValidatorSetApplicationAuthorizationPolicy::MainnetProductionLiveValidatorSetApplicationAuthorizationRequired;
-    assert_reject(
-        &case,
-        O::MainNetProductionLiveValidatorSetApplicationAuthorizationUnavailable,
-    );
+    assert_reject(&case, O::MainNetProductionLiveValidatorSetApplicationAuthorizationUnavailable);
 }
 
 #[test]
@@ -1708,10 +1399,7 @@ fn c05_mainnet_policy_on_mainnet_domain_unavailable() {
     case.executor.policy =
         ProductionLiveValidatorSetApplicationAuthorizationPolicy::MainnetProductionLiveValidatorSetApplicationAuthorizationRequired;
     case.inputs.trust_domain = trust_domain(TrustBundleEnvironment::Mainnet);
-    assert_reject(
-        &case,
-        O::MainNetProductionLiveValidatorSetApplicationAuthorizationUnavailable,
-    );
+    assert_reject(&case, O::MainNetProductionLiveValidatorSetApplicationAuthorizationUnavailable);
 }
 
 #[test]
@@ -1721,10 +1409,7 @@ fn c06_reserved_production_kind_unavailable() {
         ProductionLiveValidatorSetApplicationAuthorizationKind::ProductionLiveValidatorSetApplicationAuthorization;
     case.executor.policy =
         ProductionLiveValidatorSetApplicationAuthorizationPolicy::AllowSourceTestLiveValidatorSetApplicationAuthorization;
-    assert_reject(
-        &case,
-        O::LiveValidatorSetApplicationAuthorizationBoundaryUnavailable,
-    );
+    assert_reject(&case, O::LiveValidatorSetApplicationAuthorizationBoundaryUnavailable);
 }
 
 #[test]
@@ -1755,13 +1440,7 @@ fn d01_replayed_authorization_id_rejected() {
     let case = add_case(TrustBundleEnvironment::Devnet);
     let accepted = eval(&case);
     let replay = vec![accepted.request_id.clone()];
-    let d = case
-        .executor
-        .evaluate_live_validator_set_application_authorization(
-            &case.request,
-            &case.inputs,
-            &replay,
-        );
+    let d = case.executor.evaluate_live_validator_set_application_authorization(&case.request, &case.inputs, &replay);
     match d.outcome {
         O::LiveApplicationReplayRejected { .. } => {}
         other => panic!("expected replay reject, got {:?}", other),
@@ -1773,13 +1452,7 @@ fn d01_replayed_authorization_id_rejected() {
 fn d02_non_replayed_id_accepts() {
     let case = add_case(TrustBundleEnvironment::Devnet);
     let replay = vec!["unrelated-id".to_string()];
-    let d = case
-        .executor
-        .evaluate_live_validator_set_application_authorization(
-            &case.request,
-            &case.inputs,
-            &replay,
-        );
+    let d = case.executor.evaluate_live_validator_set_application_authorization(&case.request, &case.inputs, &replay);
     assert!(d.is_accept());
 }
 
@@ -1787,9 +1460,7 @@ fn d02_non_replayed_id_accepts() {
 fn d03_recovery_no_prior_window_clean() {
     let case = add_case(TrustBundleEnvironment::Devnet);
     let intent = eval(&case).authorization_intent.unwrap();
-    let r = case
-        .executor
-        .recover_live_validator_set_application_authorization_window(None, &intent);
+    let r = case.executor.recover_live_validator_set_application_authorization_window(None, &intent);
     assert!(r.is_clean());
     assert!(r.is_non_mutating());
 }
@@ -1798,9 +1469,7 @@ fn d03_recovery_no_prior_window_clean() {
 fn d04_recovery_idempotent_replay_observed() {
     let case = add_case(TrustBundleEnvironment::Devnet);
     let intent = eval(&case).authorization_intent.unwrap();
-    let r = case
-        .executor
-        .recover_live_validator_set_application_authorization_window(Some(&intent), &intent);
+    let r = case.executor.recover_live_validator_set_application_authorization_window(Some(&intent), &intent);
     match r {
         ProductionLiveValidatorSetApplicationAuthorizationRecoveryOutcome::IdempotentReplayObserved { .. } => {}
         other => panic!("expected idempotent replay, got {:?}", other),
@@ -1813,9 +1482,7 @@ fn d05_recovery_unrelated_window_clean() {
     let case_b = remove_case(TrustBundleEnvironment::Devnet);
     let ia = eval(&case_a).authorization_intent.unwrap();
     let ib = eval(&case_b).authorization_intent.unwrap();
-    let r = case_a
-        .executor
-        .recover_live_validator_set_application_authorization_window(Some(&ib), &ia);
+    let r = case_a.executor.recover_live_validator_set_application_authorization_window(Some(&ib), &ia);
     assert!(r.is_clean());
 }
 
@@ -1827,12 +1494,8 @@ fn d06_recovery_disabled_policy() {
         ProductionLiveValidatorSetApplicationAuthorizationConfig::default(),
         ProductionLiveValidatorSetApplicationAuthorizationPolicy::default(),
     );
-    let r = disabled
-        .recover_live_validator_set_application_authorization_window(Some(&intent), &intent);
-    assert_eq!(
-        r,
-        ProductionLiveValidatorSetApplicationAuthorizationRecoveryOutcome::RecoveryDisabled
-    );
+    let r = disabled.recover_live_validator_set_application_authorization_window(Some(&intent), &intent);
+    assert_eq!(r, ProductionLiveValidatorSetApplicationAuthorizationRecoveryOutcome::RecoveryDisabled);
 }
 
 #[test]
@@ -1841,9 +1504,7 @@ fn d07_recovery_same_window_divergent_intent_clean() {
     let intent = eval(&case).authorization_intent.unwrap();
     let mut divergent = intent.clone();
     divergent.proposed_validator_count += 1;
-    let r = case
-        .executor
-        .recover_live_validator_set_application_authorization_window(Some(&intent), &divergent);
+    let r = case.executor.recover_live_validator_set_application_authorization_window(Some(&intent), &divergent);
     assert!(r.is_clean());
 }
 
@@ -1881,10 +1542,7 @@ fn e04_named_helper_never_falls_back() {
 
 #[test]
 fn e05_named_helper_no_default_runtime_wiring() {
-    assert!(
-        production_live_validator_set_application_authorization_executor_no_default_runtime_wiring(
-        )
-    );
+    assert!(production_live_validator_set_application_authorization_executor_no_default_runtime_wiring());
 }
 
 #[test]
@@ -1909,15 +1567,13 @@ fn e07_every_outcome_is_non_mutating() {
 
 #[test]
 fn e08_accept_is_only_mutation_authorizer() {
-    assert!(
-        O::AcceptedSourceTestLiveValidatorSetApplicationAuthorization {
-            authorization_kind: AK::AuthorizeApplyValidatorAdd,
-            environment: TrustBundleEnvironment::Devnet,
-            epoch_transition_target: 11,
-            live_application_nonce: 1,
-        }
-        .authorizes_future_mutation_only()
-    );
+    assert!(O::AcceptedSourceTestLiveValidatorSetApplicationAuthorization {
+        authorization_kind: AK::AuthorizeApplyValidatorAdd,
+        environment: TrustBundleEnvironment::Devnet,
+        epoch_transition_target: 11,
+        live_application_nonce: 1,
+    }
+    .authorizes_future_mutation_only());
     assert!(!O::Disabled.authorizes_future_mutation_only());
     assert!(!O::MainNetRefused.authorizes_future_mutation_only());
 }
@@ -1930,33 +1586,24 @@ fn e09_disabled_is_not_reject() {
 
 #[test]
 fn e10_config_source_test_well_formed() {
-    assert!(
-        ProductionLiveValidatorSetApplicationAuthorizationConfig::source_test().is_well_formed()
-    );
+    assert!(ProductionLiveValidatorSetApplicationAuthorizationConfig::source_test().is_well_formed());
     assert!(ProductionLiveValidatorSetApplicationAuthorizationConfig::default().is_well_formed());
 }
 
 #[test]
 fn e11_protocol_version_supported() {
-    assert!(
-        ProductionLiveValidatorSetApplicationAuthorizationProtocolVersion::supported()
-            .is_supported()
-    );
+    assert!(ProductionLiveValidatorSetApplicationAuthorizationProtocolVersion::supported().is_supported());
     assert!(!ProductionLiveValidatorSetApplicationAuthorizationProtocolVersion(2).is_supported());
 }
 
 #[test]
 fn e12_authorization_kind_from_application_decision_kind_roundtrip() {
     assert_eq!(
-        AK::from_application_decision_kind(
-            ValidatorSetRotationApplicationDecisionKind::ApplyValidatorAdd
-        ),
+        AK::from_application_decision_kind(ValidatorSetRotationApplicationDecisionKind::ApplyValidatorAdd),
         AK::AuthorizeApplyValidatorAdd
     );
     assert_eq!(
-        AK::from_application_decision_kind(
-            ValidatorSetRotationApplicationDecisionKind::UnsupportedApplication
-        ),
+        AK::from_application_decision_kind(ValidatorSetRotationApplicationDecisionKind::UnsupportedApplication),
         AK::UnsupportedAuthorization
     );
     assert!(AK::UnsupportedAuthorization.is_unsupported());
@@ -1965,9 +1612,7 @@ fn e12_authorization_kind_from_application_decision_kind_roundtrip() {
 
 #[test]
 fn e13_intent_marked_non_mutating() {
-    let intent = eval(&add_case(TrustBundleEnvironment::Devnet))
-        .authorization_intent
-        .unwrap();
+    let intent = eval(&add_case(TrustBundleEnvironment::Devnet)).authorization_intent.unwrap();
     assert!(intent.is_non_mutating());
 }
 
@@ -2005,10 +1650,7 @@ fn e15_all_authorization_kinds_non_mutating() {
 
 #[test]
 fn f01_policy_tags_stable() {
-    assert_eq!(
-        ProductionLiveValidatorSetApplicationAuthorizationPolicy::Disabled.tag(),
-        "disabled"
-    );
+    assert_eq!(ProductionLiveValidatorSetApplicationAuthorizationPolicy::Disabled.tag(), "disabled");
     assert_eq!(
         ProductionLiveValidatorSetApplicationAuthorizationPolicy::AllowSourceTestLiveValidatorSetApplicationAuthorization.tag(),
         "allow-source-test-live-validator-set-application-authorization"
@@ -2028,18 +1670,9 @@ fn f02_kind_tags_stable() {
 
 #[test]
 fn f03_authorization_kind_tags_stable() {
-    assert_eq!(
-        AK::AuthorizeApplyNoOpAlreadySynchronized.tag(),
-        "authorize-apply-no-op-already-synchronized"
-    );
-    assert_eq!(
-        AK::AuthorizeApplyBulkValidatorSetRotation.tag(),
-        "authorize-apply-bulk-validator-set-rotation"
-    );
-    assert_eq!(
-        AK::UnsupportedAuthorization.tag(),
-        "unsupported-authorization"
-    );
+    assert_eq!(AK::AuthorizeApplyNoOpAlreadySynchronized.tag(), "authorize-apply-no-op-already-synchronized");
+    assert_eq!(AK::AuthorizeApplyBulkValidatorSetRotation.tag(), "authorize-apply-bulk-validator-set-rotation");
+    assert_eq!(AK::UnsupportedAuthorization.tag(), "unsupported-authorization");
 }
 
 #[test]
@@ -2055,10 +1688,7 @@ fn f04_outcome_tags_stable() {
         "accepted-source-test-live-validator-set-application-authorization"
     );
     assert_eq!(O::MainNetRefused.tag(), "mainnet-refused");
-    assert_eq!(
-        O::WrongEpochTransitionTarget.tag(),
-        "wrong-epoch-transition-target"
-    );
+    assert_eq!(O::WrongEpochTransitionTarget.tag(), "wrong-epoch-transition-target");
     assert_eq!(O::WrongApplicationNonce.tag(), "wrong-application-nonce");
 }
 
@@ -2091,12 +1721,8 @@ fn f07_request_new_has_no_evidence_bindings() {
 
 #[test]
 fn f08_testnet_and_devnet_have_distinct_intent_digests() {
-    let d = eval(&add_case(TrustBundleEnvironment::Devnet))
-        .authorization_intent
-        .unwrap();
-    let t = eval(&add_case(TrustBundleEnvironment::Testnet))
-        .authorization_intent
-        .unwrap();
+    let d = eval(&add_case(TrustBundleEnvironment::Devnet)).authorization_intent.unwrap();
+    let t = eval(&add_case(TrustBundleEnvironment::Testnet)).authorization_intent.unwrap();
     assert_ne!(d.intent_digest(), t.intent_digest());
 }
 
@@ -2110,16 +1736,8 @@ fn f09_accept_across_all_supported_actions() {
     assert!(eval(&identity_rotation_case(env)).is_accept());
     assert!(eval(&retirement_case(env)).is_accept());
     assert!(eval(&emergency_case(env)).is_accept());
-    assert!(eval(&bulk_case(
-        env,
-        ValidatorSetRotationAction::AuthoritySetSynchronization
-    ))
-    .is_accept());
-    assert!(eval(&bulk_case(
-        env,
-        ValidatorSetRotationAction::BulkValidatorSetRotation
-    ))
-    .is_accept());
+    assert!(eval(&bulk_case(env, ValidatorSetRotationAction::AuthoritySetSynchronization)).is_accept());
+    assert!(eval(&bulk_case(env, ValidatorSetRotationAction::BulkValidatorSetRotation)).is_accept());
 }
 
 #[test]
@@ -2127,8 +1745,5 @@ fn f10_recovery_outcome_non_mutating() {
     use ProductionLiveValidatorSetApplicationAuthorizationRecoveryOutcome as R;
     assert!(R::NoPriorAuthorizationWindow.is_non_mutating());
     assert!(R::RecoveryDisabled.is_non_mutating());
-    assert!(R::IdempotentReplayObserved {
-        authorization_id: "x".to_string()
-    }
-    .is_non_mutating());
+    assert!(R::IdempotentReplayObserved { authorization_id: "x".to_string() }.is_non_mutating());
 }

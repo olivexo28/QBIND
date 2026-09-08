@@ -49,10 +49,10 @@ use qbind_node::pqc_governance_evaluator_replay_state::{
     policy_change_action_remains_unsupported_under_replay_state, replay_observation_digest,
     replay_state_key_digest, validator_set_rotation_remains_unsupported_under_replay_state,
     EvaluatorReplayFreshnessExpectations, EvaluatorReplayFreshnessInput,
-    EvaluatorReplayFreshnessOutcome, FixtureReplayStateStore, GovernanceEvaluatorReplayStateReader,
-    GovernanceEvaluatorReplayStateWriter, MainnetReplayStateReader, PreviouslySeenState,
-    ProductionReplayStateReader, ReplayFreshnessState, ReplayStateGateOutcome, ReplayStatePolicy,
-    SeenDecisionRecord,
+    EvaluatorReplayFreshnessOutcome, FixtureReplayStateStore,
+    GovernanceEvaluatorReplayStateReader, GovernanceEvaluatorReplayStateWriter,
+    MainnetReplayStateReader, PreviouslySeenState, ProductionReplayStateReader,
+    ReplayFreshnessState, ReplayStateGateOutcome, ReplayStatePolicy, SeenDecisionRecord,
 };
 use qbind_node::pqc_governance_execution_evaluator::{
     DecisionSourceIdentity, EvaluatorRequest, EvaluatorResponse, EvaluatorSourceKind,
@@ -352,12 +352,7 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
     {
         let store = FixtureReplayStateStore::new(Env::Testnet);
         let exp = expectations(Env::Testnet, S::ReloadApply);
-        let mut input = input_with(
-            Env::Testnet,
-            S::ReloadApply,
-            150,
-            PreviouslySeenState::FirstSeen,
-        );
+        let mut input = input_with(Env::Testnet, S::ReloadApply, 150, PreviouslySeenState::FirstSeen);
         input.previously_seen = store.read_for(&input);
         t.check(
             "A2.testnet-first-seen",
@@ -376,12 +371,7 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
 
     // A3 — fresh but not-yet-effective returns ProceedDeferred (NOT approval).
     {
-        let input = input_with(
-            Env::Devnet,
-            S::ReloadApply,
-            50,
-            PreviouslySeenState::FirstSeen,
-        );
+        let input = input_with(Env::Devnet, S::ReloadApply, 50, PreviouslySeenState::FirstSeen);
         let o = evaluate_evaluator_replay_freshness(&input, &devnet_exp());
         t.check_outcome("A3.deferred", "proceed-deferred", &o);
         t.assert_true("A3.not-authorizes-mutation", !o.authorizes_mutation(), "");
@@ -395,12 +385,7 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
 
     // A4 — decision at the effective epoch returns ProceedFresh.
     {
-        let input = input_with(
-            Env::Devnet,
-            S::ReloadApply,
-            EFFECTIVE,
-            PreviouslySeenState::FirstSeen,
-        );
+        let input = input_with(Env::Devnet, S::ReloadApply, EFFECTIVE, PreviouslySeenState::FirstSeen);
         let o = evaluate_evaluator_replay_freshness(&input, &devnet_exp());
         t.check_outcome("A4.at-effective-fresh", "proceed-fresh", &o);
         t.assert_true("A4.authorizes-mutation", o.authorizes_mutation(), "");
@@ -408,12 +393,8 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
 
     // A5 — decision before expiry returns ProceedFresh.
     {
-        let input = input_with(
-            Env::Devnet,
-            S::ReloadApply,
-            EXPIRY - 1,
-            PreviouslySeenState::FirstSeen,
-        );
+        let input =
+            input_with(Env::Devnet, S::ReloadApply, EXPIRY - 1, PreviouslySeenState::FirstSeen);
         t.check_outcome(
             "A5.before-expiry-fresh",
             "proceed-fresh",
@@ -566,11 +547,7 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
             },
         );
         let o = evaluate_evaluator_replay_freshness(&input, &devnet_exp());
-        t.check_outcome(
-            "A13.prod-fail-closed",
-            "fail-closed-production-unavailable",
-            &o,
-        );
+        t.check_outcome("A13.prod-fail-closed", "fail-closed-production-unavailable", &o);
         t.assert_fail_closed("A13", &o);
     }
 
@@ -578,12 +555,7 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
     {
         let reader = MainnetReplayStateReader;
         let exp = expectations(Env::Mainnet, S::ReloadApply);
-        let mut input = input_with(
-            Env::Mainnet,
-            S::ReloadApply,
-            150,
-            PreviouslySeenState::FirstSeen,
-        );
+        let mut input = input_with(Env::Mainnet, S::ReloadApply, 150, PreviouslySeenState::FirstSeen);
         input.previously_seen = reader.read_previous_state(&replay_state_key_digest(&input));
         t.check(
             "A14.mainnet-unavailable-state",
@@ -594,33 +566,21 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
             },
         );
         let o = evaluate_evaluator_replay_freshness(&input, &exp);
-        t.check_outcome(
-            "A14.mainnet-fail-closed",
-            "fail-closed-mainnet-unavailable",
-            &o,
-        );
+        t.check_outcome("A14.mainnet-fail-closed", "fail-closed-mainnet-unavailable", &o);
         t.assert_fail_closed("A14", &o);
     }
 
     // A15 — Run 224 integration compatible when policy Disabled / not wired.
     {
         let input = devnet_fresh_input();
-        let gate =
-            gate_evaluator_replay_freshness(ReplayStatePolicy::Disabled, &input, &devnet_exp());
+        let gate = gate_evaluator_replay_freshness(ReplayStatePolicy::Disabled, &input, &devnet_exp());
         t.check(
             "A15.disabled-not-wired",
             "not-wired",
-            if gate.is_not_wired() {
-                "not-wired"
-            } else {
-                "wired"
-            },
+            if gate.is_not_wired() { "not-wired" } else { "wired" },
         );
-        let wired = gate_evaluator_replay_freshness(
-            ReplayStatePolicy::FixtureDevNet,
-            &input,
-            &devnet_exp(),
-        );
+        let wired =
+            gate_evaluator_replay_freshness(ReplayStatePolicy::FixtureDevNet, &input, &devnet_exp());
         t.check(
             "A15.fixture-evaluated",
             "evaluated:proceed-fresh",
@@ -644,22 +604,13 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
             peer.context_digest() == peer.context_digest(),
             "",
         );
-        let input = input_with(
-            Env::Devnet,
-            S::LiveInbound0x05,
-            150,
-            PreviouslySeenState::FirstSeen,
-        );
+        let input = input_with(Env::Devnet, S::LiveInbound0x05, 150, PreviouslySeenState::FirstSeen);
         let exp = expectations(Env::Devnet, S::LiveInbound0x05);
         let gate = gate_evaluator_replay_freshness(ReplayStatePolicy::Disabled, &input, &exp);
         t.check(
             "A16.disabled-not-wired",
             "not-wired",
-            if gate.is_not_wired() {
-                "not-wired"
-            } else {
-                "wired"
-            },
+            if gate.is_not_wired() { "not-wired" } else { "wired" },
         );
     }
 
@@ -706,23 +657,14 @@ fn run_accepted_table(out: &Path) -> (u64, u64) {
         let mut input = base.clone();
         input.previously_seen = store.read_for(&input);
         let o = evaluate_evaluator_replay_freshness(&input, &devnet_exp());
-        t.check_outcome(
-            "A18.future-already-consumed",
-            "fail-closed-already-consumed",
-            &o,
-        );
+        t.check_outcome("A18.future-already-consumed", "fail-closed-already-consumed", &o);
         t.assert_fail_closed("A18", &o);
     }
 
     // A19 — MainNet peer-driven apply remains refused even when state is fresh.
     {
         let exp = expectations(Env::Mainnet, S::PeerDrivenDrain);
-        let input = input_with(
-            Env::Mainnet,
-            S::PeerDrivenDrain,
-            150,
-            PreviouslySeenState::FirstSeen,
-        );
+        let input = input_with(Env::Mainnet, S::PeerDrivenDrain, 150, PreviouslySeenState::FirstSeen);
         let o = evaluate_evaluator_replay_freshness(&input, &exp);
         t.check_outcome("A19.mainnet-refused", "fail-closed-mainnet-unavailable", &o);
         t.assert_true("A19.not-authorizes-mutation", !o.authorizes_mutation(), "");
@@ -764,12 +706,7 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
 
     // R1 — expired decision rejected.
     {
-        let input = input_with(
-            Env::Devnet,
-            S::ReloadApply,
-            EXPIRY,
-            PreviouslySeenState::FirstSeen,
-        );
+        let input = input_with(Env::Devnet, S::ReloadApply, EXPIRY, PreviouslySeenState::FirstSeen);
         let o = evaluate_evaluator_replay_freshness(&input, &devnet_exp());
         t.check_outcome("R1.expired", "fail-closed-expired:expired", &o);
         t.assert_fail_closed("R1", &o);
@@ -783,11 +720,7 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
         let mut exp = devnet_exp();
         exp.expected_effective_epoch = 200;
         exp.expected_expiry_epoch = 100;
-        t.check(
-            "R2.classify",
-            "stale",
-            &ctag(classify_evaluator_replay_freshness(&input, &exp)),
-        );
+        t.check("R2.classify", "stale", &ctag(classify_evaluator_replay_freshness(&input, &exp)));
         let o = evaluate_evaluator_replay_freshness(&input, &exp);
         t.check_outcome("R2.stale", "fail-closed-expired:stale", &o);
         t.assert_fail_closed("R2", &o);
@@ -812,12 +745,8 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
         let key = replay_state_key_digest(&devnet_fresh_input());
         let mut record = seen_record(&key);
         record.consumed = true;
-        let input = input_with(
-            Env::Devnet,
-            S::ReloadApply,
-            150,
-            PreviouslySeenState::Seen(record),
-        );
+        let input =
+            input_with(Env::Devnet, S::ReloadApply, 150, PreviouslySeenState::Seen(record));
         let o = evaluate_evaluator_replay_freshness(&input, &devnet_exp());
         t.check_outcome("R4.already-consumed", "fail-closed-already-consumed", &o);
         t.assert_fail_closed("R4", &o);
@@ -828,46 +757,24 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
         let key = replay_state_key_digest(&devnet_fresh_input());
         let mut record = seen_record(&key);
         record.superseded = true;
-        let input = input_with(
-            Env::Devnet,
-            S::ReloadApply,
-            150,
-            PreviouslySeenState::Seen(record),
-        );
+        let input =
+            input_with(Env::Devnet, S::ReloadApply, 150, PreviouslySeenState::Seen(record));
         let o = evaluate_evaluator_replay_freshness(&input, &devnet_exp());
         t.check_outcome("R5.superseded", "fail-closed-superseded", &o);
         t.assert_fail_closed("R5", &o);
 
         let mut record = seen_record(&key);
         record.recorded_sequence = SEQUENCE + 1;
-        let input = input_with(
-            Env::Devnet,
-            S::ReloadApply,
-            150,
-            PreviouslySeenState::Seen(record),
-        );
+        let input =
+            input_with(Env::Devnet, S::ReloadApply, 150, PreviouslySeenState::Seen(record));
         let o = evaluate_evaluator_replay_freshness(&input, &devnet_exp());
-        t.check_outcome(
-            "R5.higher-sequence-superseded",
-            "fail-closed-superseded",
-            &o,
-        );
+        t.check_outcome("R5.higher-sequence-superseded", "fail-closed-superseded", &o);
     }
 
     // R6 — wrong effective epoch rejected.
-    assert_wrong_binding(
-        &mut t,
-        "R6.wrong-effective",
-        |i| i.effective_epoch = 101,
-        ReplayFreshnessState::WrongEpoch,
-    );
+    assert_wrong_binding(&mut t, "R6.wrong-effective", |i| i.effective_epoch = 101, ReplayFreshnessState::WrongEpoch);
     // R7 — wrong expiry epoch rejected.
-    assert_wrong_binding(
-        &mut t,
-        "R7.wrong-expiry",
-        |i| i.expiry_epoch = 201,
-        ReplayFreshnessState::WrongEpoch,
-    );
+    assert_wrong_binding(&mut t, "R7.wrong-expiry", |i| i.expiry_epoch = 201, ReplayFreshnessState::WrongEpoch);
     // R8 — wrong environment rejected.
     assert_wrong_binding(
         &mut t,
@@ -976,12 +883,7 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
 
     // R23 — state unavailable rejected.
     {
-        let input = input_with(
-            Env::Devnet,
-            S::ReloadApply,
-            150,
-            PreviouslySeenState::Unavailable,
-        );
+        let input = input_with(Env::Devnet, S::ReloadApply, 150, PreviouslySeenState::Unavailable);
         let o = evaluate_evaluator_replay_freshness(&input, &devnet_exp());
         t.check_outcome("R23.state-unavailable", "fail-closed-state-unavailable", &o);
         t.assert_fail_closed("R23", &o);
@@ -989,51 +891,27 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
 
     // R24 — production state unavailable rejected.
     {
-        let input = input_with(
-            Env::Devnet,
-            S::ReloadApply,
-            150,
-            PreviouslySeenState::ProductionUnavailable,
-        );
+        let input =
+            input_with(Env::Devnet, S::ReloadApply, 150, PreviouslySeenState::ProductionUnavailable);
         let o = evaluate_evaluator_replay_freshness(&input, &devnet_exp());
-        t.check_outcome(
-            "R24.production-unavailable",
-            "fail-closed-production-unavailable",
-            &o,
-        );
+        t.check_outcome("R24.production-unavailable", "fail-closed-production-unavailable", &o);
         t.assert_fail_closed("R24", &o);
     }
 
     // R25 — MainNet state unavailable rejected.
     {
         let exp = expectations(Env::Mainnet, S::ReloadApply);
-        let input = input_with(
-            Env::Mainnet,
-            S::ReloadApply,
-            150,
-            PreviouslySeenState::MainNetUnavailable,
-        );
+        let input =
+            input_with(Env::Mainnet, S::ReloadApply, 150, PreviouslySeenState::MainNetUnavailable);
         let o = evaluate_evaluator_replay_freshness(&input, &exp);
-        t.check_outcome(
-            "R25.mainnet-unavailable",
-            "fail-closed-mainnet-unavailable",
-            &o,
-        );
+        t.check_outcome("R25.mainnet-unavailable", "fail-closed-mainnet-unavailable", &o);
         t.assert_fail_closed("R25", &o);
     }
 
     // R26 — local operator cannot satisfy replay state policy.
-    t.assert_true(
-        "R26.local-operator",
-        local_operator_cannot_satisfy_replay_state_policy(),
-        "",
-    );
+    t.assert_true("R26.local-operator", local_operator_cannot_satisfy_replay_state_policy(), "");
     // R27 — peer majority cannot satisfy replay state policy.
-    t.assert_true(
-        "R27.peer-majority",
-        peer_majority_cannot_satisfy_replay_state_policy(),
-        "",
-    );
+    t.assert_true("R27.peer-majority", peer_majority_cannot_satisfy_replay_state_policy(), "");
     // R28 — validator-set rotation unsupported.
     t.assert_true(
         "R28.validator-rotation",
@@ -1063,21 +941,11 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
     {
         let cases = [
             evaluate_evaluator_replay_freshness(
-                &input_with(
-                    Env::Devnet,
-                    S::ReloadApply,
-                    EXPIRY,
-                    PreviouslySeenState::FirstSeen,
-                ),
+                &input_with(Env::Devnet, S::ReloadApply, EXPIRY, PreviouslySeenState::FirstSeen),
                 &devnet_exp(),
             ),
             evaluate_evaluator_replay_freshness(
-                &input_with(
-                    Env::Devnet,
-                    S::ReloadApply,
-                    150,
-                    PreviouslySeenState::Unavailable,
-                ),
+                &input_with(Env::Devnet, S::ReloadApply, 150, PreviouslySeenState::Unavailable),
                 &devnet_exp(),
             ),
         ];
@@ -1089,12 +957,7 @@ fn run_rejection_table(out: &Path) -> (u64, u64) {
     // R32 — MainNet peer-driven apply remains refused even when fresh.
     {
         let exp = expectations(Env::Mainnet, S::PeerDrivenDrain);
-        let input = input_with(
-            Env::Mainnet,
-            S::PeerDrivenDrain,
-            150,
-            PreviouslySeenState::FirstSeen,
-        );
+        let input = input_with(Env::Mainnet, S::PeerDrivenDrain, 150, PreviouslySeenState::FirstSeen);
         let o = evaluate_evaluator_replay_freshness(&input, &exp);
         t.check_outcome("R32.mainnet-refused", "fail-closed-mainnet-unavailable", &o);
         t.assert_true("R32.not-authorizes-mutation", !o.authorizes_mutation(), "");
@@ -1125,22 +988,13 @@ fn run_reachability_table(out: &Path) -> (u64, u64) {
         t.assert_true("W.prod-mark-consumed-false", !prod.mark_consumed(&key), "");
         let mut main = MainnetReplayStateReader;
         main.record_observation(&key, NONCE, SEQUENCE);
-        t.assert_true(
-            "W.mainnet-mark-consumed-false",
-            !main.mark_consumed(&key),
-            "",
-        );
+        t.assert_true("W.mainnet-mark-consumed-false", !main.mark_consumed(&key), "");
     }
 
     // Fixture store rejects a MainNet environment.
     {
         let mut store = FixtureReplayStateStore::new(Env::Devnet);
-        let input = input_with(
-            Env::Mainnet,
-            S::ReloadApply,
-            150,
-            PreviouslySeenState::FirstSeen,
-        );
+        let input = input_with(Env::Mainnet, S::ReloadApply, 150, PreviouslySeenState::FirstSeen);
         t.check(
             "F.mainnet-unavailable",
             "unavailable",
@@ -1155,56 +1009,21 @@ fn run_reachability_table(out: &Path) -> (u64, u64) {
 
     // Policy tags reachable / stable.
     {
-        t.check(
-            "P.disabled-tag",
-            "disabled",
-            ReplayStatePolicy::Disabled.tag(),
-        );
-        t.check(
-            "P.fixture-devnet-tag",
-            "fixture-devnet",
-            ReplayStatePolicy::FixtureDevNet.tag(),
-        );
-        t.check(
-            "P.fixture-testnet-tag",
-            "fixture-testnet",
-            ReplayStatePolicy::FixtureTestNet.tag(),
-        );
-        t.check(
-            "P.production-tag",
-            "production",
-            ReplayStatePolicy::Production.tag(),
-        );
+        t.check("P.disabled-tag", "disabled", ReplayStatePolicy::Disabled.tag());
+        t.check("P.fixture-devnet-tag", "fixture-devnet", ReplayStatePolicy::FixtureDevNet.tag());
+        t.check("P.fixture-testnet-tag", "fixture-testnet", ReplayStatePolicy::FixtureTestNet.tag());
+        t.check("P.production-tag", "production", ReplayStatePolicy::Production.tag());
         t.check("P.mainnet-tag", "mainnet", ReplayStatePolicy::MainNet.tag());
-        t.assert_true(
-            "P.disabled-not-wired",
-            !ReplayStatePolicy::Disabled.is_wired(),
-            "",
-        );
-        t.assert_true(
-            "P.fixture-devnet-wired",
-            ReplayStatePolicy::FixtureDevNet.is_wired(),
-            "",
-        );
-        t.assert_true(
-            "P.fixture-is-fixture",
-            ReplayStatePolicy::FixtureDevNet.is_fixture(),
-            "",
-        );
-        t.assert_true(
-            "P.production-not-fixture",
-            !ReplayStatePolicy::Production.is_fixture(),
-            "",
-        );
+        t.assert_true("P.disabled-not-wired", !ReplayStatePolicy::Disabled.is_wired(), "");
+        t.assert_true("P.fixture-devnet-wired", ReplayStatePolicy::FixtureDevNet.is_wired(), "");
+        t.assert_true("P.fixture-is-fixture", ReplayStatePolicy::FixtureDevNet.is_fixture(), "");
+        t.assert_true("P.production-not-fixture", !ReplayStatePolicy::Production.is_fixture(), "");
     }
 
     // State tags reachable.
     for (state, tag) in [
         (ReplayFreshnessState::Fresh, "fresh"),
-        (
-            ReplayFreshnessState::FreshButNotYetEffective,
-            "fresh-but-not-yet-effective",
-        ),
+        (ReplayFreshnessState::FreshButNotYetEffective, "fresh-but-not-yet-effective"),
         (ReplayFreshnessState::Expired, "expired"),
         (ReplayFreshnessState::Stale, "stale"),
         (ReplayFreshnessState::ReplayDetected, "replay-detected"),
@@ -1217,14 +1036,8 @@ fn run_reachability_table(out: &Path) -> (u64, u64) {
         (ReplayFreshnessState::WrongSurface, "wrong-surface"),
         (ReplayFreshnessState::MalformedState, "malformed-state"),
         (ReplayFreshnessState::StateUnavailable, "state-unavailable"),
-        (
-            ReplayFreshnessState::ProductionStateUnavailable,
-            "production-state-unavailable",
-        ),
-        (
-            ReplayFreshnessState::MainNetStateUnavailable,
-            "mainnet-state-unavailable",
-        ),
+        (ReplayFreshnessState::ProductionStateUnavailable, "production-state-unavailable"),
+        (ReplayFreshnessState::MainNetStateUnavailable, "mainnet-state-unavailable"),
     ] {
         t.check(&format!("ST.{tag}"), tag, &ctag(state));
     }
@@ -1253,10 +1066,7 @@ fn run_fixture_dump(out: &Path) {
     let exp = devnet_exp();
 
     // Deterministic digests.
-    write_file(
-        &dir.join("replay_state_key_digest.txt"),
-        &format!("{}\n", replay_state_key_digest(&input)),
-    );
+    write_file(&dir.join("replay_state_key_digest.txt"), &format!("{}\n", replay_state_key_digest(&input)));
     write_file(
         &dir.join("replay_observation_digest.txt"),
         &format!("{}\n", replay_observation_digest(&input, 1, 150)),
@@ -1276,39 +1086,21 @@ fn run_fixture_dump(out: &Path) {
     // Classification + outcome values.
     write_file(
         &dir.join("classification.txt"),
-        &format!(
-            "{}\n",
-            ctag(classify_evaluator_replay_freshness(&input, &exp))
-        ),
+        &format!("{}\n", ctag(classify_evaluator_replay_freshness(&input, &exp))),
     );
     write_file(
         &dir.join("outcome.txt"),
-        &format!(
-            "{}\n",
-            otag(&evaluate_evaluator_replay_freshness(&input, &exp))
-        ),
+        &format!("{}\n", otag(&evaluate_evaluator_replay_freshness(&input, &exp))),
     );
 
     // Before/after fixture replay-store snapshots across the lifecycle.
     let mut store = FixtureReplayStateStore::new(Env::Devnet);
     let key = replay_state_key_digest(&input);
-    let snap_before = format!(
-        "len={} is_consumed={}\n",
-        store.len(),
-        store.is_consumed(&key)
-    );
+    let snap_before = format!("len={} is_consumed={}\n", store.len(), store.is_consumed(&key));
     store.record_for(&input);
-    let snap_observed = format!(
-        "len={} is_consumed={}\n",
-        store.len(),
-        store.is_consumed(&key)
-    );
+    let snap_observed = format!("len={} is_consumed={}\n", store.len(), store.is_consumed(&key));
     store.consume_for(&input);
-    let snap_consumed = format!(
-        "len={} is_consumed={}\n",
-        store.len(),
-        store.is_consumed(&key)
-    );
+    let snap_consumed = format!("len={} is_consumed={}\n", store.len(), store.is_consumed(&key));
     write_file(
         &dir.join("fixture_store_snapshots.txt"),
         &format!(
@@ -1319,18 +1111,10 @@ fn run_fixture_dump(out: &Path) {
 
     // MainNet peer-driven refusal outcome dump.
     let mn_exp = expectations(Env::Mainnet, S::PeerDrivenDrain);
-    let mn_input = input_with(
-        Env::Mainnet,
-        S::PeerDrivenDrain,
-        150,
-        PreviouslySeenState::FirstSeen,
-    );
+    let mn_input = input_with(Env::Mainnet, S::PeerDrivenDrain, 150, PreviouslySeenState::FirstSeen);
     write_file(
         &dir.join("mainnet_refused_outcome.txt"),
-        &format!(
-            "{:#?}\n",
-            evaluate_evaluator_replay_freshness(&mn_input, &mn_exp)
-        ),
+        &format!("{:#?}\n", evaluate_evaluator_replay_freshness(&mn_input, &mn_exp)),
     );
 
     // Symbol inventory.

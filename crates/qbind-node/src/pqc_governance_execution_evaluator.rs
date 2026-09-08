@@ -320,10 +320,7 @@ impl DecisionSourceIdentity {
             b"issuer_authority_class",
             self.issuer_authority_class.tag().as_bytes(),
         );
-        field(
-            b"environment",
-            &self.environment.metric_code().to_le_bytes(),
-        );
+        field(b"environment", &self.environment.metric_code().to_le_bytes());
         field(b"chain_id", self.chain_id.as_bytes());
         field(b"genesis_hash", self.genesis_hash.as_bytes());
         field(
@@ -336,10 +333,7 @@ impl DecisionSourceIdentity {
         );
         field(
             b"on_chain_proof_digest",
-            self.on_chain_proof_digest
-                .as_deref()
-                .unwrap_or("")
-                .as_bytes(),
+            self.on_chain_proof_digest.as_deref().unwrap_or("").as_bytes(),
         );
         field(
             b"on_chain_present",
@@ -436,10 +430,7 @@ impl EvaluatorRequest {
         );
         field(b"proposal_id", self.proposal_id.as_bytes());
         field(b"decision_id", self.decision_id.as_bytes());
-        field(
-            b"governance_action",
-            self.governance_action.tag().as_bytes(),
-        );
+        field(b"governance_action", self.governance_action.tag().as_bytes());
         field(b"lifecycle_action", self.lifecycle_action.tag().as_bytes());
         field(b"candidate_digest", self.candidate_digest.as_bytes());
         field(
@@ -450,10 +441,7 @@ impl EvaluatorRequest {
         field(b"expiry_epoch", &self.expiry_epoch.to_le_bytes());
         field(b"replay_nonce", self.replay_nonce.as_bytes());
         field(b"quorum_approvals", &self.quorum.approvals.to_le_bytes());
-        field(
-            b"quorum_participants",
-            &self.quorum.participants.to_le_bytes(),
-        );
+        field(b"quorum_participants", &self.quorum.participants.to_le_bytes());
         field(
             b"quorum_required_threshold",
             &self.quorum.required_threshold.to_le_bytes(),

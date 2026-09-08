@@ -243,9 +243,7 @@ pub fn classify_local_lifecycle_action(
     match candidate.latest_lifecycle_action {
         BundleSigningRatificationV2Action::Ratify => {
             if persisted_v2.is_some() {
-                return Err(
-                    AuthorityLifecycleTransitionOutcome::InitialActivationAfterPersistedRejected,
-                );
+                return Err(AuthorityLifecycleTransitionOutcome::InitialActivationAfterPersistedRejected);
             }
             Ok(LocalLifecycleAction::ActivateInitial)
         }
