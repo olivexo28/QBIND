@@ -199,6 +199,71 @@ sed 's#RS1 remaining OPEN forces NO-GO#RS1 is optional#' "${WORK}/launch.md" > "
 if rs1_guard "${WORK}/blocker.md" "${WORK}/launch_no_rs1_gate.md"; then
   fail "negative self-test failed: RS1 guard passed after removing the RS1 NO-GO clause from the GO rule"
 fi
+# 12) Run 417 consistency micro-guards (final corrective pass). These fail CLOSED if the reconciled
+#     model regresses. Each file is flattened to a single stream (CR stripped, newlines -> spaces) so
+#     sentence-bounded ([^.]) checks are terminator- and wrap-agnostic. The tracked files are never
+#     modified.
+LEDGER="${REPO_ROOT}/docs/whitepaper/contradiction.md"
+RUN417_TEXTS=("${EVIDENCE}" "${RECON}" "${SUMMARY}" "${READINESS}" "${LEDGER}")
+for f in "${RUN417_TEXTS[@]}"; do
+  [ -f "${f}" ] || fail "missing Run 417 text for consistency guard: ${f}"
+  flat="$(sed 's/\r$//' "${f}" | tr '\n' ' ')"
+  # (a) No text may claim F6 (peer/session binding) is a prerequisite for making cryptographic
+  #     proposal/vote/QC signatures or their verification meaningful. F6 is transport-level
+  #     accountability only; message-level signatures remain independently necessary.
+  if printf '%s' "${flat}" | grep -Eioq 'prerequisite for (meaningful|making)[^.]{0,120}(signature|verification|proposal|vote|qc)'; then
+    fail "stale F6 framing: '${f}' says F6 is a prerequisite for making cryptographic signatures/verification meaningful"
+  fi
+  # (b) No text may claim F1-F8 (or "these deployed-path gaps") are already fully tracked/reflected/
+  #     represented by C4 and M4/M6. RS1 is the independent launch-blocking control; C4 OPEN did not
+  #     independently prevent launch.
+  if printf '%s' "${flat}" | grep -Eioq '(F1.{0,4}F8|F1-F8|these ([a-z -]*)?gaps|deployed-path[^.]*gaps)[^.]*already (tracked|reflected|represented|covered)[^.]*(C4|M4/M6)'; then
+    fail "stale coverage framing: '${f}' says F1-F8 are already tracked/reflected/represented by C4 and M4/M6"
+  fi
+  if printf '%s' "${flat}" | grep -Eioq 'already (tracked|reflected|represented|covered)[^.]*C4[^.]*M4/M6'; then
+    fail "stale coverage framing: '${f}' says gaps are already tracked/reflected by C4 and M4/M6"
+  fi
+done
+ok "no stale F6-prerequisite / F1-F8-already-covered-by-C4/M4-M6 framing in Run 417 texts"
+
+# (c/d) Findings severities must not be downgraded and the deployed findings must remain reachable.
+#       F3/F4/F6/F7 = Critical + reachable; F5/F8 = High + reachable. Reachability is read from the
+#       matrix and fails closed on any unreachability/mitigation marker.
+reach_line() { awk -v want="FINDING $1" '$0==want{f=1} f&&/^current_reachability: /{sub(/^current_reachability: /,"");print;exit}' "${WORK}/matrix.txt"; }
+is_reachable() {
+  local rl; rl="$(reach_line "$1")"
+  [ -n "${rl}" ] || return 1
+  printf '%s' "${rl}" | grep -Eiq 'MITIGATED-BY-CURRENT-UNREACHABILITY|not reachable|unreachab|not exploitable' && return 1
+  printf '%s' "${rl}" | grep -Eiq 'reachable|deployed consensus[^.]*suite 0|inbound accepts any suite' || return 1
+  return 0
+}
+for fnd in F3 F4 F6 F7; do
+  [ "$(severity_of "${fnd}")" = "Critical" ] || fail "${fnd} must remain Critical"
+  is_reachable "${fnd}" || fail "${fnd} must remain reachable on the deployed path"
+done
+for fnd in F5 F8; do
+  [ "$(severity_of "${fnd}")" = "High" ] || fail "${fnd} must remain High"
+  is_reachable "${fnd}" || fail "${fnd} must remain reachable on the deployed path"
+done
+ok "F3/F4/F6/F7 Critical+reachable and F5/F8 High+reachable"
+
+# (e) The FORMAL go/no-go rule section (§9) of LAUNCH_GO_NO_GO.md must still require RS1 closure and
+#     keep RS1-OPEN => NO-GO. Checked against the §9 section only, not merely anywhere in the doc.
+awk '/^## 9\./{f=1;print;next} f&&/^## /{f=0} f{print}' "${WORK}/launch.md" > "${WORK}/launch_sec9.md"
+[ -s "${WORK}/launch_sec9.md" ] || fail "LAUNCH_GO_NO_GO.md formal go/no-go rule section (§9) not found"
+sec9_guard() {
+  grep -Eiq 'RS1 (is|must be) closed' "$1" || return 1
+  grep -Eiq 'RS1 (remaining )?OPEN forces NO-GO' "$1" || return 1
+  return 0
+}
+sec9_guard "${WORK}/launch_sec9.md" || fail "formal §9 GO rule must require RS1 closure and force NO-GO while RS1 is OPEN"
+# Negative self-test: dropping the RS1 closure requirement from a §9 copy must trip the guard.
+sed 's#RS1 is closed#every M1-M20 is Green#' "${WORK}/launch_sec9.md" > "${WORK}/launch_sec9_no_rs1.md"
+if sec9_guard "${WORK}/launch_sec9_no_rs1.md"; then
+  fail "negative self-test failed: §9 guard passed after removing the RS1-closure requirement"
+fi
+ok "formal §9 GO rule requires RS1 closure (section-scoped, with negative self-test)"
+
 rm -rf "${WORK}"; trap - EXIT
 ok "RS1 guard negative self-tests fail closed (deleted row / closed / ungated GO rule)"
 

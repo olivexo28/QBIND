@@ -31,7 +31,7 @@ F7_qc_import_verification=VERIFIED-FAIL-OPEN; Critical
 F8_consensus_suite_enforcement=VERIFIED-FAIL-OPEN; High
 
 # --- First fix (smallest security-first sequence) ---
-fix_1=Propagate authenticated KEMTLS peer NodeId with each consensus message and bind it to the signing/claimed validator identity (F6) — prerequisite for meaningful proposal/vote/QC verification.
+fix_1=Propagate authenticated KEMTLS peer NodeId with each consensus message and bind it to the signing/claimed validator identity (F6). F6 provides authenticated transport-session-to-consensus-sender binding and accountability; it does NOT make cryptographic signatures meaningful. Message-level proposal, vote, timeout, new-view, and QC signatures remain independently necessary. Closing F6 alone does not close F3/F4/F5/F7/F8/RS1/C4/C5.
 fix_2=Sign + verify proposals and votes over domain-separated preimages with a production suite; reject suite 0/unknown (F3,F4,F8).
 fix_3=Cryptographically verify imported QCs and make timeout/new-view verification mandatory (F7,F5).
 fix_4=Only after authored consensus lands, wire tx execution and require >=1 auth + threshold/weight/dedup with explicit genesis exemption (F1,F2).

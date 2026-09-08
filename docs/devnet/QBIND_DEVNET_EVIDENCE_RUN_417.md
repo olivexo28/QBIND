@@ -172,15 +172,16 @@ commands and exit codes. Summary:
 
 ## 9. Documentation reconciliation
 
-No **downgrade** was required: the deployed-path consensus gaps are already reflected by
-**C4 OPEN** and **M4/M6 Yellow**, and no current document asserts that deployed consensus
-messages or transactions are authenticated. Run 417 therefore makes only **additive** entries
-and moves **no** item. Updated:
+**No existing M/S status is downgraded**, because those M/S item definitions do **not** directly
+encode deployed consensus authentication. **C4 OPEN is compatible with the findings but did not
+independently prevent launch.** The audit instead exposed a **launch-governance coverage gap**;
+the corrective pass added **RS1** as the independent launch-blocking control. **No F1–F8 finding is
+resolved.** Updated:
 
 - `docs/release/QBIND_PUBLIC_DEVNET_READINESS_CRITERIA.md` — added an "Updated Run 417" narrative
   row (audit-only; statuses unchanged).
-- `docs/whitepaper/contradiction.md` — added the Run 417 no-new-contradiction entry recording the
-  audited deployed-path authentication boundary.
+- `docs/whitepaper/contradiction.md` — added the Run 417 contradiction-ledger entry recording the
+  audited deployed-path authentication boundary and the launch-governance coverage gap RS1 corrects.
 - `docs/protocol/QBIND_C4_C5_CLOSURE_CRITERIA.md` — added a Run 417 note reaffirming C4/C5 OPEN and
   recording the reconciled deployed-path authentication scope.
 
