@@ -70,6 +70,9 @@ use crate::p2p_inbound::{
     NullControlHandler, NullDagHandler, P2pInboundDemuxer,
 };
 use crate::p2p_tcp::{P2pTransportError, TcpKemTlsP2pService};
+use crate::peer_consensus_binding::{
+    AuthenticatedConsensusOrigin, PeerConsensusBindingGate, PeerConsensusBindingMap,
+};
 
 use qbind_consensus::ids::ValidatorId;
 use qbind_crypto::{
@@ -181,6 +184,20 @@ pub struct P2pNodeContext {
     /// [`P2pNodeBuilder::build_deployed_peer_manager`] installs on the live
     /// [`AsyncPeerManagerImpl`].
     pub peer_rate_limiter_config: Option<PeerRateLimiterConfig>,
+    /// Run 418: the fail-closed authenticated peer → consensus sender binding
+    /// gate. `main.rs` threads this into the binary consensus loop's ingress so
+    /// every immediate-sender consensus frame (Proposal / Vote / Timeout /
+    /// RestoreCatchup{Request,Response}) is authorized against the
+    /// authenticated KEMTLS transport origin before any consensus side effect.
+    ///
+    /// The production binary always installs a `Some(gate)`: under
+    /// `MutualAuthMode::Required | Optional` + `pqc-static-root` the gate holds
+    /// the validated one-to-one `cert-bound NodeId ↔ ValidatorId` map; under any
+    /// other mode the map is empty and, because the transport surfaces no
+    /// authenticated origin, the gate fails closed (unauthenticated remote
+    /// consensus never enters the production path). A `None` gate is a
+    /// TEST-ONLY convenience for the legacy payload-derived-sender unit paths.
+    pub binding_gate: Option<Arc<PeerConsensusBindingGate>>,
 }
 
 impl std::fmt::Debug for P2pNodeContext {
@@ -622,6 +639,16 @@ fn certified_peer_kem_pk_for_validator(
         ));
     }
     Ok(cert.leaf_kem_pk)
+}
+
+/// Run 418: derive the canonical cert-bound `NodeId` from an encoded
+/// `NetworkDelegationCert`, matching exactly the `verified_client_node_id`
+/// the KEMTLS handshake surfaces (`derive_node_id_from_cert`). Used to build
+/// the authenticated peer→validator consensus binding map so the map key is
+/// byte-identical to the origin the transport resolves at session time.
+fn cert_bound_node_id(cert_bytes: &[u8]) -> Result<NodeId, String> {
+    let cert = decode_network_delegation_cert(cert_bytes)?;
+    Ok(NodeId::new(qbind_hash::net::derive_node_id_from_cert(&cert)))
 }
 
 // ============================================================================
@@ -1240,6 +1267,10 @@ impl P2pNodeBuilder {
         let mut peer_vid_overrides: HashMap<String, [u8; 32]> = HashMap::new();
         let mut peer_node_id_by_vid: HashMap<u64, NodeId> = HashMap::new();
         let mut peer_validator_map = PeerValidatorMap::new();
+        // Run 418: (addr, validator_index) pairs for every configured static
+        // peer, used to build the outbound authenticated consensus origins keyed
+        // by dial address.
+        let mut peer_addr_vid: Vec<(String, u64)> = Vec::new();
         let mut had_unspec_peer = false;
         for spec in &config.network.static_peers {
             let (peer_vid_opt, addr) =
@@ -1278,6 +1309,7 @@ impl P2pNodeBuilder {
                     u64::from_le_bytes(peer_node_id.as_bytes()[..8].try_into().unwrap_or([0u8; 8]));
                 peer_validator_map
                     .insert(crate::peer::PeerId(peer_id_u64), ValidatorId::new(peer_vid));
+                peer_addr_vid.push((addr.clone(), peer_vid));
             } else {
                 had_unspec_peer = true;
             }
@@ -1421,6 +1453,106 @@ impl P2pNodeBuilder {
                 }
             },
         ));
+
+        // ================================================================
+        // Run 418 — authenticated KEMTLS peer → consensus sender binding.
+        //
+        // Build the validated one-to-one authenticated map
+        // (`cert-bound NodeId ↔ ValidatorId`) from the configured leaf
+        // certificates, install the inbound authenticated-origin resolver and
+        // the outbound authenticated origins on the transport, and construct
+        // the fail-closed `PeerConsensusBindingGate` that `main.rs` threads into
+        // the binary consensus loop's ingress.
+        //
+        // The map key is the exact cert-bound `NodeId`
+        // (`derive_node_id_from_cert`) — the same value the KEMTLS handshake
+        // surfaces as `verified_client_node_id` — NOT the pubkey-derived /
+        // first-eight-byte `PeerId` truncation used elsewhere. Under
+        // `MutualAuthMode::Required | Optional` + `pqc-static-root` the map is
+        // built from the local leaf cert plus every configured peer leaf cert;
+        // any duplicate/conflicting/malformed entry fails startup. Under any
+        // other mode the map is empty and the transport surfaces no origin, so
+        // the gate fails closed (unauthenticated remote consensus cannot enter
+        // the production path).
+        let binding_gate: Option<Arc<PeerConsensusBindingGate>> = {
+            let mut entries: Vec<(NodeId, ValidatorId)> = Vec::new();
+            let mut outbound_origins: HashMap<String, AuthenticatedConsensusOrigin> =
+                HashMap::new();
+            let hardened = matches!(
+                self.mutual_auth_mode,
+                MutualAuthMode::Required | MutualAuthMode::Optional
+            );
+            if hardened && pqc_active {
+                let cfg = self.pqc_root_config.as_ref().ok_or_else(|| {
+                    P2pNodeError::Config("missing pqc-static-root config".to_string())
+                })?;
+                // Local (self) identity.
+                if let Some(leaf) = cfg.leaf_credentials.as_ref() {
+                    let self_node_id =
+                        cert_bound_node_id(&leaf.cert_bytes).map_err(P2pNodeError::Config)?;
+                    entries.push((self_node_id, validator_id));
+                }
+                // Every configured peer leaf cert.
+                let mut node_id_by_vid: HashMap<u64, NodeId> = HashMap::new();
+                for peer in &cfg.peer_leaf_certs {
+                    let peer_node_id =
+                        cert_bound_node_id(&peer.cert_bytes).map_err(P2pNodeError::Config)?;
+                    entries.push((peer_node_id, ValidatorId::new(peer.validator_index)));
+                    node_id_by_vid.insert(peer.validator_index, peer_node_id);
+                }
+                // Outbound origins keyed by dial address (bound to handshake
+                // success by the transport dial path).
+                for (addr, vid) in &peer_addr_vid {
+                    if let Some(node_id) = node_id_by_vid.get(vid) {
+                        outbound_origins.insert(
+                            addr.clone(),
+                            AuthenticatedConsensusOrigin::new(*node_id, ValidatorId::new(*vid)),
+                        );
+                    }
+                }
+            }
+
+            let map = PeerConsensusBindingMap::build(entries)
+                .map_err(|e| P2pNodeError::Config(format!("Run 418 binding map: {}", e)))?;
+            let metrics = self
+                .node_metrics
+                .as_ref()
+                .map(|m| m.consensus_binding())
+                .unwrap_or_else(|| {
+                    Arc::new(crate::peer_consensus_binding::ConsensusBindingMetrics::new())
+                });
+            let gate = Arc::new(PeerConsensusBindingGate::with_metrics(map, metrics));
+
+            // Install the inbound authenticated-origin resolver: only produce
+            // an origin from cert-verified fields, and only when the map
+            // recognizes the (NodeId, ValidatorId) pair.
+            let gate_for_resolver = Arc::clone(&gate);
+            p2p_service.set_inbound_consensus_origin_resolver(Arc::new(
+                move |peer_init: &crate::secure_channel::AcceptedPeerInit|
+                      -> Option<AuthenticatedConsensusOrigin> {
+                    if !peer_init.mutual_auth_complete {
+                        return None;
+                    }
+                    let node_id_bytes = peer_init.verified_client_node_id?;
+                    let vid_bytes = peer_init.verified_peer_validator_id?;
+                    let vid = parse_test_validator_id_from_cert_validator_id(&vid_bytes)?;
+                    let node_id = NodeId::new(node_id_bytes);
+                    let validator = ValidatorId::new(vid);
+                    // Only surface an origin the authoritative map recognizes as
+                    // a one-to-one pair; otherwise leave it None so the ingress
+                    // gate fails closed with the precise reason.
+                    match gate_for_resolver.validate_pair(&node_id, validator) {
+                        true => Some(AuthenticatedConsensusOrigin::new(node_id, validator)),
+                        false => None,
+                    }
+                },
+            ));
+            if !outbound_origins.is_empty() {
+                p2p_service.set_outbound_consensus_origins(outbound_origins);
+            }
+
+            Some(gate)
+        };
 
         // Run 365: derive the validated per-peer PeerRateLimiterConfig threaded
         // from the installed abuse/DoS runtime config BEFORE any field of
@@ -1582,6 +1714,7 @@ impl P2pNodeBuilder {
             validator_id,
             peer_validator_map: Arc::new(RwLock::new(peer_validator_map)),
             peer_rate_limiter_config: deployed_peer_rate_limiter_config,
+            binding_gate,
         })
     }
 

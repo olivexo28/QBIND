@@ -744,12 +744,18 @@ mod tests {
         });
 
         // Send some messages
-        tx.send(P2pMessage::Consensus(ConsensusNetMsg::Vote(vec![])))
-            .await
-            .unwrap();
-        tx.send(P2pMessage::Dag(DagNetMsg::Batch { data: vec![] }))
-            .await
-            .unwrap();
+        tx.send(InboundP2pEnvelope::new(
+            None,
+            P2pMessage::Consensus(ConsensusNetMsg::Vote(vec![])),
+        ))
+        .await
+        .unwrap();
+        tx.send(InboundP2pEnvelope::new(
+            None,
+            P2pMessage::Dag(DagNetMsg::Batch { data: vec![] }),
+        ))
+        .await
+        .unwrap();
 
         // Give time for processing
         tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;

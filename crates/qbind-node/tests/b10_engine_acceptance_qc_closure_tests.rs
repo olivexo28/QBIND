@@ -92,6 +92,7 @@ use qbind_node::binary_consensus_loop::{
 use qbind_node::consensus_network_facade::ConsensusNetworkFacade;
 use qbind_node::metrics::NodeMetrics;
 use qbind_node::p2p::{ConsensusNetMsg, NodeId};
+use qbind_node::p2p_inbound::InboundConsensusEnvelope;
 use qbind_node::peer::PeerId;
 use qbind_wire::consensus::{BlockProposal, Vote};
 use qbind_wire::io::WireEncode;
@@ -162,14 +163,14 @@ struct LateConnectFacadeStats {
 /// timing-of-late-connect window that Run 008 hit, without standing
 /// up real KEMTLS / network sockets.
 struct LateConnectFacade {
-    peer_inbound: mpsc::Sender<ConsensusNetMsg>,
+    peer_inbound: mpsc::Sender<InboundConsensusEnvelope>,
     connected: Arc<std::sync::atomic::AtomicBool>,
     stats: Arc<PlMutex<LateConnectFacadeStats>>,
 }
 
 impl LateConnectFacade {
     fn new(
-        peer_inbound: mpsc::Sender<ConsensusNetMsg>,
+        peer_inbound: mpsc::Sender<InboundConsensusEnvelope>,
         connected: Arc<std::sync::atomic::AtomicBool>,
     ) -> Self {
         Self {
@@ -193,7 +194,7 @@ impl ConsensusNetworkFacade for LateConnectFacade {
         s.votes_attempted = s.votes_attempted.saturating_add(1);
         if self.connected.load(std::sync::atomic::Ordering::Relaxed) {
             let msg = ConsensusNetMsg::Vote(encode(vote));
-            let _ = self.peer_inbound.try_send(msg);
+            let _ = self.peer_inbound.try_send(msg.into());
             s.votes_forwarded = s.votes_forwarded.saturating_add(1);
         } else {
             s.votes_dropped = s.votes_dropped.saturating_add(1);
@@ -206,7 +207,7 @@ impl ConsensusNetworkFacade for LateConnectFacade {
         s.votes_attempted = s.votes_attempted.saturating_add(1);
         if self.connected.load(std::sync::atomic::Ordering::Relaxed) {
             let msg = ConsensusNetMsg::Vote(encode(vote));
-            let _ = self.peer_inbound.try_send(msg);
+            let _ = self.peer_inbound.try_send(msg.into());
             s.votes_forwarded = s.votes_forwarded.saturating_add(1);
         } else {
             s.votes_dropped = s.votes_dropped.saturating_add(1);
@@ -219,7 +220,7 @@ impl ConsensusNetworkFacade for LateConnectFacade {
         s.proposals_attempted = s.proposals_attempted.saturating_add(1);
         if self.connected.load(std::sync::atomic::Ordering::Relaxed) {
             let msg = ConsensusNetMsg::Proposal(encode(proposal));
-            let _ = self.peer_inbound.try_send(msg);
+            let _ = self.peer_inbound.try_send(msg.into());
             s.proposals_forwarded = s.proposals_forwarded.saturating_add(1);
         } else {
             s.proposals_dropped = s.proposals_dropped.saturating_add(1);
@@ -236,12 +237,12 @@ impl ConsensusNetworkFacade for LateConnectFacade {
 /// outbound vote always reaches the leader; only the leader's
 /// outbound is gated by `LateConnectFacade`.
 struct AlwaysForwardFacade {
-    peer_inbound: mpsc::Sender<ConsensusNetMsg>,
+    peer_inbound: mpsc::Sender<InboundConsensusEnvelope>,
     votes_forwarded: Arc<PlMutex<u64>>,
 }
 
 impl AlwaysForwardFacade {
-    fn new(peer_inbound: mpsc::Sender<ConsensusNetMsg>) -> Self {
+    fn new(peer_inbound: mpsc::Sender<InboundConsensusEnvelope>) -> Self {
         Self {
             peer_inbound,
             votes_forwarded: Arc::new(PlMutex::new(0)),
@@ -253,20 +254,20 @@ impl ConsensusNetworkFacade for AlwaysForwardFacade {
     fn send_vote_to(&self, _target: ValidatorId, vote: &Vote) -> Result<(), NetworkError> {
         *self.votes_forwarded.lock() += 1;
         let msg = ConsensusNetMsg::Vote(encode(vote));
-        let _ = self.peer_inbound.try_send(msg);
+        let _ = self.peer_inbound.try_send(msg.into());
         Ok(())
     }
 
     fn broadcast_vote(&self, vote: &Vote) -> Result<(), NetworkError> {
         *self.votes_forwarded.lock() += 1;
         let msg = ConsensusNetMsg::Vote(encode(vote));
-        let _ = self.peer_inbound.try_send(msg);
+        let _ = self.peer_inbound.try_send(msg.into());
         Ok(())
     }
 
     fn broadcast_proposal(&self, proposal: &BlockProposal) -> Result<(), NetworkError> {
         let msg = ConsensusNetMsg::Proposal(encode(proposal));
-        let _ = self.peer_inbound.try_send(msg);
+        let _ = self.peer_inbound.try_send(msg.into());
         Ok(())
     }
 
@@ -331,7 +332,7 @@ async fn b10_a_pre_fix_run_008_shape_reproduces_in_tree() {
     /// receives the proposal), but V1 still never sees the
     /// leader's view-0 vote.
     struct SelectiveConnectFacade {
-        peer_inbound: mpsc::Sender<ConsensusNetMsg>,
+        peer_inbound: mpsc::Sender<InboundConsensusEnvelope>,
         proposals_connected: Arc<std::sync::atomic::AtomicBool>,
         votes_connected: Arc<std::sync::atomic::AtomicBool>,
     }
@@ -340,7 +341,7 @@ async fn b10_a_pre_fix_run_008_shape_reproduces_in_tree() {
             if self.votes_connected.load(std::sync::atomic::Ordering::Relaxed) {
                 let _ = self
                     .peer_inbound
-                    .try_send(ConsensusNetMsg::Vote(encode(vote)));
+                    .try_send(InboundConsensusEnvelope::from(ConsensusNetMsg::Vote(encode(vote))));
             }
             Ok(())
         }
@@ -348,7 +349,7 @@ async fn b10_a_pre_fix_run_008_shape_reproduces_in_tree() {
             if self.votes_connected.load(std::sync::atomic::Ordering::Relaxed) {
                 let _ = self
                     .peer_inbound
-                    .try_send(ConsensusNetMsg::Vote(encode(vote)));
+                    .try_send(InboundConsensusEnvelope::from(ConsensusNetMsg::Vote(encode(vote))));
             }
             Ok(())
         }
@@ -356,7 +357,7 @@ async fn b10_a_pre_fix_run_008_shape_reproduces_in_tree() {
             if self.proposals_connected.load(std::sync::atomic::Ordering::Relaxed) {
                 let _ = self
                     .peer_inbound
-                    .try_send(ConsensusNetMsg::Proposal(encode(proposal)));
+                    .try_send(InboundConsensusEnvelope::from(ConsensusNetMsg::Proposal(encode(proposal))));
             }
             Ok(())
         }
@@ -378,8 +379,8 @@ async fn b10_a_pre_fix_run_008_shape_reproduces_in_tree() {
         .with_tick_interval(Duration::from_millis(5))
         .with_max_ticks(160);
 
-    let (inbound_v0_tx, inbound_v0_rx) = mpsc::channel::<ConsensusNetMsg>(64);
-    let (inbound_v1_tx, inbound_v1_rx) = mpsc::channel::<ConsensusNetMsg>(64);
+    let (inbound_v0_tx, inbound_v0_rx) = mpsc::channel::<InboundConsensusEnvelope>(64);
+    let (inbound_v1_tx, inbound_v1_rx) = mpsc::channel::<InboundConsensusEnvelope>(64);
 
     let proposals_connected = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let votes_connected = Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -401,12 +402,14 @@ async fn b10_a_pre_fix_run_008_shape_reproduces_in_tree() {
         outbound: facade_v0,
         peer_connectivity: Some(conn_v0_dyn),
         verification_ctx: None,
+        binding_gate: None,
     };
     let io_v1 = BinaryConsensusLoopIo {
         inbound_rx: inbound_v1_rx,
         outbound: facade_v1,
         peer_connectivity: Some(conn_v1_dyn),
         verification_ctx: None,
+        binding_gate: None,
     };
 
     let (_shutdown_tx_v0, shutdown_rx_v0) = watch::channel(());
@@ -556,8 +559,8 @@ async fn b10_b_post_fix_engine_acceptance_qc_closure() {
         .with_tick_interval(Duration::from_millis(5))
         .with_max_ticks(160);
 
-    let (inbound_v0_tx, inbound_v0_rx) = mpsc::channel::<ConsensusNetMsg>(64);
-    let (inbound_v1_tx, inbound_v1_rx) = mpsc::channel::<ConsensusNetMsg>(64);
+    let (inbound_v0_tx, inbound_v0_rx) = mpsc::channel::<InboundConsensusEnvelope>(64);
+    let (inbound_v1_tx, inbound_v1_rx) = mpsc::channel::<InboundConsensusEnvelope>(64);
 
     // V0's facade gates outbound on a "connected" flag, modelling the
     // real-wire post-handshake / inbound-dial timing.
@@ -582,12 +585,14 @@ async fn b10_b_post_fix_engine_acceptance_qc_closure() {
         outbound: facade_v0,
         peer_connectivity: Some(conn_v0_dyn),
         verification_ctx: None,
+        binding_gate: None,
     };
     let io_v1 = BinaryConsensusLoopIo {
         inbound_rx: inbound_v1_rx,
         outbound: facade_v1,
         peer_connectivity: Some(conn_v1_dyn),
         verification_ctx: None,
+        binding_gate: None,
     };
 
     let (_shutdown_tx_v0, shutdown_rx_v0) = watch::channel(());
@@ -746,7 +751,7 @@ async fn b10_b_post_fix_engine_acceptance_qc_closure() {
 /// `CrossWireFacade` from the B6 test suite. Re-defined here to keep
 /// this test self-contained; behaviour is identical.
 struct CrossWireFacade {
-    peer_inbound: mpsc::Sender<ConsensusNetMsg>,
+    peer_inbound: mpsc::Sender<InboundConsensusEnvelope>,
     sent: Arc<PlMutex<CrossWireSent>>,
 }
 #[derive(Default, Clone, Copy, Debug)]
@@ -755,7 +760,7 @@ struct CrossWireSent {
     broadcast_votes: u64,
 }
 impl CrossWireFacade {
-    fn new(peer_inbound: mpsc::Sender<ConsensusNetMsg>) -> Self {
+    fn new(peer_inbound: mpsc::Sender<InboundConsensusEnvelope>) -> Self {
         Self {
             peer_inbound,
             sent: Arc::new(PlMutex::new(CrossWireSent::default())),
@@ -765,19 +770,19 @@ impl CrossWireFacade {
 impl ConsensusNetworkFacade for CrossWireFacade {
     fn send_vote_to(&self, _t: ValidatorId, vote: &Vote) -> Result<(), NetworkError> {
         let msg = ConsensusNetMsg::Vote(encode(vote));
-        let _ = self.peer_inbound.try_send(msg);
+        let _ = self.peer_inbound.try_send(msg.into());
         Ok(())
     }
     fn broadcast_vote(&self, vote: &Vote) -> Result<(), NetworkError> {
         self.sent.lock().broadcast_votes += 1;
         let msg = ConsensusNetMsg::Vote(encode(vote));
-        let _ = self.peer_inbound.try_send(msg);
+        let _ = self.peer_inbound.try_send(msg.into());
         Ok(())
     }
     fn broadcast_proposal(&self, proposal: &BlockProposal) -> Result<(), NetworkError> {
         self.sent.lock().proposals += 1;
         let msg = ConsensusNetMsg::Proposal(encode(proposal));
-        let _ = self.peer_inbound.try_send(msg);
+        let _ = self.peer_inbound.try_send(msg.into());
         Ok(())
     }
     fn send_timeout_msg(&self, _t: PeerId, _b: Vec<u8>) -> Result<(), NetworkError> {
@@ -794,8 +799,8 @@ async fn b10_c_b6_cross_wired_path_still_progresses() {
         .with_tick_interval(Duration::from_millis(2))
         .with_max_ticks(120);
 
-    let (inbound_a_tx, inbound_a_rx) = mpsc::channel::<ConsensusNetMsg>(64);
-    let (inbound_b_tx, inbound_b_rx) = mpsc::channel::<ConsensusNetMsg>(64);
+    let (inbound_a_tx, inbound_a_rx) = mpsc::channel::<InboundConsensusEnvelope>(64);
+    let (inbound_b_tx, inbound_b_rx) = mpsc::channel::<InboundConsensusEnvelope>(64);
 
     let facade_a = Arc::new(CrossWireFacade::new(inbound_b_tx));
     let facade_b = Arc::new(CrossWireFacade::new(inbound_a_tx));
@@ -805,12 +810,14 @@ async fn b10_c_b6_cross_wired_path_still_progresses() {
         outbound: facade_a as Arc<dyn ConsensusNetworkFacade>,
         peer_connectivity: None,
         verification_ctx: None,
+        binding_gate: None,
     };
     let io_b = BinaryConsensusLoopIo {
         inbound_rx: inbound_b_rx,
         outbound: facade_b as Arc<dyn ConsensusNetworkFacade>,
         peer_connectivity: None,
         verification_ctx: None,
+        binding_gate: None,
     };
 
     let (_shutdown_tx_a, shutdown_rx_a) = watch::channel(());
@@ -879,8 +886,8 @@ async fn b10_c_b6_cross_wired_path_still_progresses() {
 async fn b10_d_late_peer_reconnect_churn_stays_single_shot() {
     let cfg = BinaryConsensusLoopConfig::new(ValidatorId::new(0), 2)
         .with_tick_interval(Duration::from_millis(5));
-    let (_inbound_tx, inbound_rx) = mpsc::channel::<ConsensusNetMsg>(8);
-    let (peer_inbound_tx, _peer_inbound_rx) = mpsc::channel::<ConsensusNetMsg>(64);
+    let (_inbound_tx, inbound_rx) = mpsc::channel::<InboundConsensusEnvelope>(8);
+    let (peer_inbound_tx, _peer_inbound_rx) = mpsc::channel::<InboundConsensusEnvelope>(64);
     let v0_connected = Arc::new(std::sync::atomic::AtomicBool::new(true));
     let facade = Arc::new(LateConnectFacade::new(
         peer_inbound_tx,
@@ -893,6 +900,7 @@ async fn b10_d_late_peer_reconnect_churn_stays_single_shot() {
         outbound: facade as Arc<dyn ConsensusNetworkFacade>,
         peer_connectivity: Some(conn_dyn),
         verification_ctx: None,
+        binding_gate: None,
     };
     let (shutdown_tx, shutdown_rx) = watch::channel(());
     let metrics = Arc::new(NodeMetrics::new());

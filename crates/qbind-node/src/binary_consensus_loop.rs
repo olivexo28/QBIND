@@ -6031,6 +6031,8 @@ mod tests {
             &mut restore_mode,
             None,
             &mut BinaryReconfigDetector::default(),
+            None,
+            None,
         );
         assert_eq!(engine.current_view(), view_before);
         assert_eq!(stats.inbound_timeouts_delivered, 0);
@@ -6054,6 +6056,8 @@ mod tests {
             &mut restore_mode,
             None,
             &mut BinaryReconfigDetector::default(),
+            None,
+            None,
         );
         assert_eq!(engine.current_view(), view_before);
         assert_eq!(stats.inbound_new_views_delivered, 0);
@@ -6098,6 +6102,8 @@ mod tests {
             &mut restore_mode,
             None,
             &mut BinaryReconfigDetector::default(),
+            None,
+            None,
         );
         assert_eq!(stats.inbound_new_views_delivered, 1);
         assert_eq!(stats.inbound_new_views_engine_accepted, 1);
@@ -6140,6 +6146,8 @@ mod tests {
             &mut restore_mode,
             None,
             &mut BinaryReconfigDetector::default(),
+            None,
+            None,
         );
         assert_eq!(stats.inbound_new_views_delivered, 1);
         assert_eq!(stats.inbound_new_views_engine_accepted, 0);
@@ -6214,6 +6222,8 @@ mod tests {
             &mut restore_mode,
             None,
             &mut BinaryReconfigDetector::default(),
+            None,
+            None,
         );
         // 2/4 timeouts ⇒ still no TC, view still 15.
         assert_eq!(stats.inbound_timeouts_delivered, 1);
@@ -6237,6 +6247,8 @@ mod tests {
             &mut restore_mode,
             None,
             &mut BinaryReconfigDetector::default(),
+            None,
+            None,
         );
         assert_eq!(stats.inbound_timeouts_delivered, 2);
         assert_eq!(stats.inbound_timeouts_engine_accepted, 2);
@@ -6278,6 +6290,8 @@ mod tests {
             &mut restore_mode,
             None,
             &mut BinaryReconfigDetector::default(),
+            None,
+            None,
         );
         assert_eq!(engine.current_view(), view_before);
         assert_eq!(stats.inbound_timeouts_delivered, 0);
@@ -6296,6 +6310,8 @@ mod tests {
             &mut restore_mode,
             None,
             &mut BinaryReconfigDetector::default(),
+            None,
+            None,
         );
         assert_eq!(engine.current_view(), view_before);
         assert_eq!(stats.inbound_new_views_delivered, 0);
@@ -7016,6 +7032,8 @@ mod tests {
                 &mut restore_mode,
                 ctx,
                 &mut BinaryReconfigDetector::default(),
+                None,
+                None,
             );
         }
 
@@ -7144,6 +7162,8 @@ mod tests {
                 &mut restore_mode,
                 Some(&ctx),
                 &mut BinaryReconfigDetector::default(),
+                None,
+                None,
             );
             assert!(stats.view_timeout_decode_failures >= 1);
             assert_eq!(stats.inbound_timeout_verify_accepted, 0);
@@ -7174,6 +7194,8 @@ mod tests {
                 &mut restore_mode,
                 ctx,
                 &mut BinaryReconfigDetector::default(),
+                None,
+                None,
             );
         }
 
@@ -7423,6 +7445,8 @@ mod tests {
                 &mut restore_mode,
                 Some(&ctx),
                 &mut BinaryReconfigDetector::default(),
+                None,
+                None,
             );
 
             assert!(stats.view_timeout_decode_failures >= 1);

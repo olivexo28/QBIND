@@ -234,6 +234,14 @@ impl ConsensusBindingReject {
     }
 }
 
+impl std::fmt::Display for ConsensusBindingReject {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.metric_label())
+    }
+}
+
+impl std::error::Error for ConsensusBindingReject {}
+
 /// Bounded metrics for the consensus binding gate. All counters use fixed
 /// labels only; no IP address, full `NodeId`, validator string, certificate
 /// byte, or other high-cardinality/private value is ever used as a label.
@@ -350,6 +358,18 @@ impl PeerConsensusBindingGate {
     /// The authoritative one-to-one mapping.
     pub fn map(&self) -> &PeerConsensusBindingMap {
         &self.map
+    }
+
+    /// Whether `(node_id, validator_id)` is a configured one-to-one binding.
+    ///
+    /// Used by the inbound transport origin resolver to only surface an
+    /// authenticated origin the authoritative map recognizes; a verified but
+    /// unconfigured leaf NodeId (e.g. an alternate root-valid certificate for
+    /// the same validator) is not a member and yields `false`, so the ingress
+    /// gate later fails closed with a precise reason.
+    pub fn validate_pair(&self, node_id: &NodeId, validator_id: ValidatorId) -> bool {
+        self.map.validator_for_node(node_id) == Some(validator_id)
+            && self.map.node_for_validator(&validator_id) == Some(*node_id)
     }
 
     /// Authorize a consensus message.

@@ -58,6 +58,7 @@ use qbind_node::binary_consensus_loop::{
 use qbind_node::consensus_network_facade::ConsensusNetworkFacade;
 use qbind_node::metrics::NodeMetrics;
 use qbind_node::p2p::ConsensusNetMsg;
+use qbind_node::p2p_inbound::InboundConsensusEnvelope;
 use qbind_node::peer::PeerId;
 use qbind_wire::consensus::{BlockHeader, BlockProposal, Vote};
 use qbind_wire::io::WireEncode;
@@ -182,7 +183,7 @@ impl ConsensusNetworkFacade for RecordingFacade {
 /// two-engine cross-wired test to prove the binary path actually moves
 /// peer engines forward.
 struct CrossWireFacade {
-    peer_inbound: mpsc::Sender<ConsensusNetMsg>,
+    peer_inbound: mpsc::Sender<InboundConsensusEnvelope>,
     /// Mirror counter for assertions independent of the receiving loop.
     sent: Arc<PlMutex<CrossWireSent>>,
 }
@@ -195,7 +196,7 @@ struct CrossWireSent {
 }
 
 impl CrossWireFacade {
-    fn new(peer_inbound: mpsc::Sender<ConsensusNetMsg>) -> Self {
+    fn new(peer_inbound: mpsc::Sender<InboundConsensusEnvelope>) -> Self {
         Self {
             peer_inbound,
             sent: Arc::new(PlMutex::new(CrossWireSent::default())),
@@ -210,7 +211,7 @@ impl ConsensusNetworkFacade for CrossWireFacade {
             s.direct_votes = s.direct_votes.saturating_add(1);
         }
         let msg = ConsensusNetMsg::Vote(encode(vote));
-        let _ = self.peer_inbound.try_send(msg);
+        let _ = self.peer_inbound.try_send(msg.into());
         Ok(())
     }
 
@@ -220,7 +221,7 @@ impl ConsensusNetworkFacade for CrossWireFacade {
             s.broadcast_votes = s.broadcast_votes.saturating_add(1);
         }
         let msg = ConsensusNetMsg::Vote(encode(vote));
-        let _ = self.peer_inbound.try_send(msg);
+        let _ = self.peer_inbound.try_send(msg.into());
         Ok(())
     }
 
@@ -230,7 +231,7 @@ impl ConsensusNetworkFacade for CrossWireFacade {
             s.proposals = s.proposals.saturating_add(1);
         }
         let msg = ConsensusNetMsg::Proposal(encode(proposal));
-        let _ = self.peer_inbound.try_send(msg);
+        let _ = self.peer_inbound.try_send(msg.into());
         Ok(())
     }
 
@@ -273,7 +274,7 @@ async fn b6_inbound_proposal_reaches_engine_and_emits_vote() {
     let metrics = Arc::new(NodeMetrics::new());
     let progress = Arc::new(PlMutex::new(BinaryConsensusLoopProgress::default()));
 
-    let (inbound_tx, inbound_rx) = mpsc::channel::<ConsensusNetMsg>(16);
+    let (inbound_tx, inbound_rx) = mpsc::channel::<InboundConsensusEnvelope>(16);
     let outbound = Arc::new(RecordingFacade::default());
     let outbound_dyn: Arc<dyn ConsensusNetworkFacade> = outbound.clone();
 
@@ -282,13 +283,14 @@ async fn b6_inbound_proposal_reaches_engine_and_emits_vote() {
         outbound: outbound_dyn,
         peer_connectivity: None,
         verification_ctx: None,
+        binding_gate: None,
     };
 
     // Pre-feed the inbound channel before the loop starts so the very first
     // `recv()` succeeds without racing the ticker.
     let proposal = make_genesis_proposal(leader);
     inbound_tx
-        .send(ConsensusNetMsg::Proposal(encode(&proposal)))
+        .send(InboundConsensusEnvelope::from(ConsensusNetMsg::Proposal(encode(&proposal))))
         .await
         .expect("inbound channel must accept proposal");
 
@@ -395,8 +397,8 @@ async fn b6_two_engine_cross_wired_binary_path_progression() {
         .with_max_ticks(80);
 
     // Inbound channels for each engine.
-    let (inbound_a_tx, inbound_a_rx) = mpsc::channel::<ConsensusNetMsg>(64);
-    let (inbound_b_tx, inbound_b_rx) = mpsc::channel::<ConsensusNetMsg>(64);
+    let (inbound_a_tx, inbound_a_rx) = mpsc::channel::<InboundConsensusEnvelope>(64);
+    let (inbound_b_tx, inbound_b_rx) = mpsc::channel::<InboundConsensusEnvelope>(64);
 
     // Cross-wired facades: A's outbound goes to B's inbound and vice versa.
     let facade_a = Arc::new(CrossWireFacade::new(inbound_b_tx));
@@ -409,12 +411,14 @@ async fn b6_two_engine_cross_wired_binary_path_progression() {
         outbound: facade_a as Arc<dyn ConsensusNetworkFacade>,
         peer_connectivity: None,
         verification_ctx: None,
+        binding_gate: None,
     };
     let io_b = BinaryConsensusLoopIo {
         inbound_rx: inbound_b_rx,
         outbound: facade_b as Arc<dyn ConsensusNetworkFacade>,
         peer_connectivity: None,
         verification_ctx: None,
+        binding_gate: None,
     };
 
     let (_shutdown_tx_a, shutdown_rx_a) = watch::channel(());
@@ -546,7 +550,7 @@ async fn b6_loop_survives_inbound_close() {
 
     // Build an inbound channel and immediately drop the sender so the
     // loop sees the channel close on its very first poll.
-    let (inbound_tx, inbound_rx) = mpsc::channel::<ConsensusNetMsg>(8);
+    let (inbound_tx, inbound_rx) = mpsc::channel::<InboundConsensusEnvelope>(8);
     drop(inbound_tx);
     let outbound: Arc<dyn ConsensusNetworkFacade> = Arc::new(RecordingFacade::default());
     let io = BinaryConsensusLoopIo {
@@ -554,6 +558,7 @@ async fn b6_loop_survives_inbound_close() {
         outbound,
         peer_connectivity: None,
         verification_ctx: None,
+        binding_gate: None,
     };
 
     let final_progress = timeout(
@@ -598,7 +603,7 @@ async fn b6_inbound_non_leader_proposal_does_not_silently_drop() {
     let metrics = Arc::new(NodeMetrics::new());
     let progress = Arc::new(PlMutex::new(BinaryConsensusLoopProgress::default()));
 
-    let (inbound_tx, inbound_rx) = mpsc::channel::<ConsensusNetMsg>(8);
+    let (inbound_tx, inbound_rx) = mpsc::channel::<InboundConsensusEnvelope>(8);
     let outbound = Arc::new(RecordingFacade::default());
     let outbound_dyn: Arc<dyn ConsensusNetworkFacade> = outbound.clone();
     let io = BinaryConsensusLoopIo {
@@ -606,12 +611,13 @@ async fn b6_inbound_non_leader_proposal_does_not_silently_drop() {
         outbound: outbound_dyn,
         peer_connectivity: None,
         verification_ctx: None,
+        binding_gate: None,
     };
 
     // Proposal from a non-leader (validator 1).
     let bad_proposal = make_genesis_proposal(ValidatorId::new(1));
     inbound_tx
-        .send(ConsensusNetMsg::Proposal(encode(&bad_proposal)))
+        .send(InboundConsensusEnvelope::from(ConsensusNetMsg::Proposal(encode(&bad_proposal))))
         .await
         .unwrap();
 

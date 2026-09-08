@@ -9294,6 +9294,13 @@ pub struct NodeMetrics {
     /// `qbind_node_data_dir_free_bytes` gauge. The path itself is NEVER
     /// emitted as a label — only the free-bytes value is exported.
     data_dir: std::sync::RwLock<Option<std::path::PathBuf>>,
+    /// Run 418: authenticated peer→validator consensus binding-gate counters.
+    /// Shared (`Arc`) with the installed
+    /// [`crate::peer_consensus_binding::PeerConsensusBindingGate`] so the
+    /// `/metrics` export reflects live gate decisions. Fixed low-cardinality
+    /// `result="..."` labels only; never NodeIds, validator strings, IPs, or
+    /// certificate bytes.
+    consensus_binding: Arc<crate::peer_consensus_binding::ConsensusBindingMetrics>,
 }
 
 impl Default for NodeMetrics {
@@ -9343,12 +9350,23 @@ impl NodeMetrics {
             timeout_verification_validator_count: std::sync::atomic::AtomicU64::new(0),
             build_context: std::sync::RwLock::new(None),
             data_dir: std::sync::RwLock::new(None),
+            consensus_binding: Arc::new(
+                crate::peer_consensus_binding::ConsensusBindingMetrics::new(),
+            ),
         }
     }
 
     /// Get network metrics.
     pub fn network(&self) -> &NetworkMetrics {
         &self.network
+    }
+
+    /// Run 418: get the shared authenticated peer→validator consensus
+    /// binding-gate metrics handle, for installation into the gate.
+    pub fn consensus_binding(
+        &self,
+    ) -> Arc<crate::peer_consensus_binding::ConsensusBindingMetrics> {
+        Arc::clone(&self.consensus_binding)
     }
 
     /// Run 381: set the runtime build/chain context for `qbind_node_build_info`.
@@ -10064,6 +10082,9 @@ impl NodeMetrics {
 
         // State snapshot metrics (T215)
         output.push_str(&self.snapshot.format_metrics());
+
+        // Run 418: authenticated peer→validator consensus binding-gate metrics.
+        output.push_str(&self.consensus_binding.format_metrics());
 
         output
     }
