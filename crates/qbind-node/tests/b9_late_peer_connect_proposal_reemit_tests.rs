@@ -68,6 +68,7 @@ use qbind_node::binary_consensus_loop::{
 use qbind_node::consensus_network_facade::ConsensusNetworkFacade;
 use qbind_node::metrics::NodeMetrics;
 use qbind_node::p2p::{ConsensusNetMsg, NodeId};
+use qbind_node::p2p_inbound::InboundConsensusEnvelope;
 use qbind_node::peer::PeerId;
 use qbind_wire::consensus::{BlockProposal, Vote};
 
@@ -152,10 +153,10 @@ fn spawn_loop_for_test(
     watch::Sender<()>,
     Arc<RecordingProposalFacade>,
     Arc<FakePeerConnectivity>,
-    mpsc::Sender<ConsensusNetMsg>,
+    mpsc::Sender<InboundConsensusEnvelope>,
     Arc<parking_lot::Mutex<BinaryConsensusLoopProgress>>,
 ) {
-    let (inbound_tx, inbound_rx) = mpsc::channel::<ConsensusNetMsg>(8);
+    let (inbound_tx, inbound_rx) = mpsc::channel::<InboundConsensusEnvelope>(8);
     let outbound = Arc::new(RecordingProposalFacade::default());
     let outbound_dyn: Arc<dyn ConsensusNetworkFacade> = outbound.clone();
     let connectivity = Arc::new(FakePeerConnectivity::new());
@@ -178,6 +179,7 @@ fn spawn_loop_for_test(
         outbound: outbound_dyn,
         peer_connectivity: Some(connectivity_dyn),
         verification_ctx: None,
+        binding_gate: None,
     };
     let (shutdown_tx, shutdown_rx) = watch::channel(());
     let progress = Arc::new(parking_lot::Mutex::new(BinaryConsensusLoopProgress::default()));
@@ -347,7 +349,7 @@ async fn b9_c_view_change_does_not_replay_stale_proposal_for_old_view() {
     // therefore zero re-emits: the gate-3 path drops the cache and
     // returns without broadcasting.
     let tick = Duration::from_millis(15);
-    let (inbound_tx, inbound_rx) = mpsc::channel::<ConsensusNetMsg>(8);
+    let (inbound_tx, inbound_rx) = mpsc::channel::<InboundConsensusEnvelope>(8);
     let outbound = Arc::new(RecordingProposalFacade::default());
     let outbound_dyn: Arc<dyn ConsensusNetworkFacade> = outbound.clone();
     let connectivity = Arc::new(FakePeerConnectivity::new());
@@ -361,6 +363,7 @@ async fn b9_c_view_change_does_not_replay_stale_proposal_for_old_view() {
         outbound: outbound_dyn,
         peer_connectivity: Some(connectivity_dyn),
         verification_ctx: None,
+        binding_gate: None,
     };
     let (shutdown_tx, shutdown_rx) = watch::channel(());
     let progress = Arc::new(parking_lot::Mutex::new(BinaryConsensusLoopProgress::default()));
@@ -431,7 +434,7 @@ async fn b9_d_peer_connected_before_first_proposal_is_bounded() {
     // exactly 0 OR exactly 1 *up to the first view advance*, by
     // checking it is bounded relative to ticks.
     let tick = Duration::from_millis(15);
-    let (inbound_tx, inbound_rx) = mpsc::channel::<ConsensusNetMsg>(8);
+    let (inbound_tx, inbound_rx) = mpsc::channel::<InboundConsensusEnvelope>(8);
     let outbound = Arc::new(RecordingProposalFacade::default());
     let outbound_dyn: Arc<dyn ConsensusNetworkFacade> = outbound.clone();
     let connectivity = Arc::new(FakePeerConnectivity::new());
@@ -448,6 +451,7 @@ async fn b9_d_peer_connected_before_first_proposal_is_bounded() {
         outbound: outbound_dyn,
         peer_connectivity: Some(connectivity_dyn),
         verification_ctx: None,
+        binding_gate: None,
     };
     let (_shutdown_tx, shutdown_rx) = watch::channel(());
     let progress = Arc::new(parking_lot::Mutex::new(BinaryConsensusLoopProgress::default()));
@@ -496,7 +500,7 @@ async fn b9_e_no_peer_connectivity_means_no_reemit_path_at_all() {
     // remain at zero, proving B1/B2/B6 single-validator path is
     // bit-equivalent to pre-B9 behaviour.
     let tick = Duration::from_millis(10);
-    let (inbound_tx, inbound_rx) = mpsc::channel::<ConsensusNetMsg>(8);
+    let (inbound_tx, inbound_rx) = mpsc::channel::<InboundConsensusEnvelope>(8);
     let outbound: Arc<dyn ConsensusNetworkFacade> = Arc::new(RecordingProposalFacade::default());
 
     let cfg = BinaryConsensusLoopConfig::new(ValidatorId::new(0), 1)
@@ -508,6 +512,7 @@ async fn b9_e_no_peer_connectivity_means_no_reemit_path_at_all() {
         outbound,
         peer_connectivity: None,
         verification_ctx: None,
+        binding_gate: None,
     };
     let (_shutdown_tx, shutdown_rx) = watch::channel(());
     let progress = Arc::new(parking_lot::Mutex::new(BinaryConsensusLoopProgress::default()));

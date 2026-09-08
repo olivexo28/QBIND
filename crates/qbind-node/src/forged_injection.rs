@@ -101,6 +101,7 @@ use qbind_types::NetworkEnvironment;
 use tokio::sync::mpsc;
 
 use crate::p2p::ConsensusNetMsg;
+use crate::p2p_inbound::InboundConsensusEnvelope;
 
 /// Environment variable that must be set to `"1"` for the forged-injection
 /// harness to activate. Anything else (unset, empty, `"0"`, anything other
@@ -522,16 +523,23 @@ pub enum ForgedInjectError {
     Full,
 }
 
-/// Push a single forged frame into the inbound `ConsensusNetMsg` channel.
+/// Push a single forged frame into the inbound consensus channel.
 /// This is the only outbound surface the harness exposes; the binary loop
 /// drains the receiver on its tokio runtime and then routes through the
 /// same `handle_inbound_consensus_msg` path used for real inbound frames.
+///
+/// Run 418: injected frames carry **no** authenticated transport origin
+/// (`origin = None`) because they do not originate from a real KEMTLS peer
+/// session. When the binary loop has an authenticated peer→validator binding
+/// gate installed, gated frame kinds (e.g. `Timeout`) are therefore rejected at
+/// the binding layer; `NewView` (multi-signer, no immediate sender) is not
+/// gated and still reaches the timeout-certificate verification path.
 pub fn inject_frame(
-    sender: &mpsc::Sender<ConsensusNetMsg>,
+    sender: &mpsc::Sender<InboundConsensusEnvelope>,
     msg: ConsensusNetMsg,
 ) -> Result<(), ForgedInjectError> {
     use mpsc::error::TrySendError;
-    match sender.try_send(msg) {
+    match sender.try_send(InboundConsensusEnvelope::new(None, msg)) {
         Ok(()) => Ok(()),
         Err(TrySendError::Closed(_)) => Err(ForgedInjectError::Closed),
         Err(TrySendError::Full(_)) => Err(ForgedInjectError::Full),
@@ -564,7 +572,7 @@ pub fn log_injection(case: ForgedInjectionCase, msg: &ConsensusNetMsg) {
 /// blocks the loop.
 pub fn spawn_runtime_injection_task(
     harness: ForgedInjectionHarness,
-    sender: mpsc::Sender<ConsensusNetMsg>,
+    sender: mpsc::Sender<InboundConsensusEnvelope>,
     fixture: Arc<RuntimeFixture>,
     startup_delay: std::time::Duration,
 ) -> tokio::task::JoinHandle<()> {
@@ -1078,7 +1086,7 @@ mod tests {
 
     #[tokio::test]
     async fn run035_channel_round_trip_delivers_into_inbound_path() {
-        let (tx, mut rx) = mpsc::channel::<ConsensusNetMsg>(16);
+        let (tx, mut rx) = mpsc::channel::<InboundConsensusEnvelope>(16);
         let f = make_fixture(4);
         let b = builder(&f, 0, 4);
         let msg = b.build(ForgedInjectionCase::BadSignatureTimeout);
@@ -1089,7 +1097,8 @@ mod tests {
         let received = rx.recv().await.expect("rx");
         let f2 = make_fixture(4); // independent fixture for ctx
         // (we just care that the message kind matches what we sent)
-        assert!(matches!(received, ConsensusNetMsg::Timeout(_)));
+        assert!(received.origin.is_none());
+        assert!(matches!(received.msg, ConsensusNetMsg::Timeout(_)));
         let ctx = make_ctx(&f2);
         let mut engine = make_engine(ValidatorId(0), 4);
         let mut stats = BinaryConsensusLoopInboundStats::default();

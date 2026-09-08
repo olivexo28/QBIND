@@ -106,6 +106,10 @@ use crate::p2p::{
     ConsensusNetMsg, NodeId, P2pService, RestoreCatchupBlock, RestoreCatchupRequest,
     RestoreCatchupResponse,
 };
+use crate::p2p_inbound::InboundConsensusEnvelope;
+use crate::peer_consensus_binding::{
+    AuthenticatedConsensusOrigin, ConsensusBindingReject, PeerConsensusBindingGate,
+};
 use crate::storage::{ConsensusStorage, EpochTransitionBatch, StorageError};
 use crate::validator_signer::ValidatorSigner;
 use crate::vm_v0_runtime::{SnapshotAnchor, VmV0RuntimeError, VmV0RuntimeState};
@@ -712,13 +716,17 @@ fn build_uniform_validator_set(num_validators: u64) -> ConsensusValidatorSet {
 /// exactly as before. This keeps the LocalMesh / single-node DevNet path
 /// unchanged.
 pub struct BinaryConsensusLoopIo {
-    /// Inbound consensus messages received from the P2P transport.
+    /// Inbound consensus messages received from the P2P transport, paired
+    /// with the authenticated transport origin resolved at the secure
+    /// session (Run 418).
     ///
     /// The node binary builds this end via
     /// [`crate::p2p_inbound::ChannelConsensusHandler`], which is registered
     /// with `P2pNodeBuilder.with_consensus_handler(...)`. The demuxer
-    /// forwards every `P2pMessage::Consensus(_)` frame into this channel.
-    pub inbound_rx: mpsc::Receiver<ConsensusNetMsg>,
+    /// forwards every `P2pMessage::Consensus(_)` frame into this channel
+    /// wrapped in an [`InboundConsensusEnvelope`] carrying the frame's
+    /// authenticated origin (or `None` for unauthenticated sessions).
+    pub inbound_rx: mpsc::Receiver<InboundConsensusEnvelope>,
 
     /// Outbound consensus network surface used to send the engine's
     /// `ConsensusEngineAction`s back over the wire.
@@ -786,6 +794,25 @@ pub struct BinaryConsensusLoopIo {
     /// `docs/whitepaper/contradiction.md` C4 (production PQC root-key
     /// distribution remains out of scope until that pass).
     pub verification_ctx: Option<Arc<TimeoutVerificationContext>>,
+
+    /// Run 418: optional authenticated peer→validator consensus binding gate.
+    ///
+    /// When `Some`, every inbound consensus message that carries an immediate
+    /// self-declared sender (Proposal, Vote, Timeout, RestoreCatchupRequest,
+    /// RestoreCatchupResponse) is gated at ingress: the claimed sender index is
+    /// bound to the authenticated transport origin's validator identity via
+    /// [`PeerConsensusBindingGate::authorize`]. A message whose authenticated
+    /// origin does not map one-to-one to the claimed sender is rejected
+    /// fail-closed BEFORE it is delivered to the engine, before any
+    /// delivered/accepted counter is incremented, and before any reconfig
+    /// observation is recorded. The authenticated validator id (never the
+    /// payload-declared index) is used as the `from` handed to the engine.
+    ///
+    /// When `None`, the loop preserves the legacy payload-derived-sender
+    /// behavior. This `None` path is **test-only**: the production binary
+    /// always installs `Some(gate)` so unauthenticated or mismatched senders
+    /// cannot enter the consensus engine.
+    pub binding_gate: Option<Arc<PeerConsensusBindingGate>>,
 }
 
 /// Run 030: aggregate verification + signing context for the
@@ -864,7 +891,7 @@ impl std::fmt::Debug for TimeoutVerificationContext {
 impl std::fmt::Debug for BinaryConsensusLoopIo {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("BinaryConsensusLoopIo")
-            .field("inbound_rx", &"<mpsc::Receiver<ConsensusNetMsg>>")
+            .field("inbound_rx", &"<mpsc::Receiver<InboundConsensusEnvelope>>")
             .field("outbound", &"<Arc<dyn ConsensusNetworkFacade>>")
             .field(
                 "peer_connectivity",
@@ -893,6 +920,13 @@ impl std::fmt::Debug for BinaryConsensusLoopIo {
 pub struct BinaryConsensusLoopInboundStats {
     /// `ConsensusNetMsg` frames received from the inbound channel.
     pub inbound_msgs_received: u64,
+    /// Run 418: inbound consensus frames rejected fail-closed by the
+    /// authenticated peer→validator binding gate BEFORE reaching the engine
+    /// (missing origin, unknown peer/validator, claimed-sender mismatch, or
+    /// ambiguous mapping). Per-reason totals are exported by the gate's own
+    /// [`crate::peer_consensus_binding::ConsensusBindingMetrics`]; this counter
+    /// is the loop-level aggregate.
+    pub inbound_sender_binding_rejected_total: u64,
     /// Inbound `Proposal` frames that decoded successfully and were
     /// delivered to `engine.on_proposal_event`.
     pub inbound_proposals_delivered: u64,
@@ -1701,19 +1735,21 @@ pub async fn run_binary_consensus_loop_with_io(
         }
     }
 
-    let (mut inbound_rx, outbound_facade, peer_connectivity, verification_ctx): (
-        Option<mpsc::Receiver<ConsensusNetMsg>>,
+    let (mut inbound_rx, outbound_facade, peer_connectivity, verification_ctx, binding_gate): (
+        Option<mpsc::Receiver<InboundConsensusEnvelope>>,
         Option<Arc<dyn ConsensusNetworkFacade>>,
         Option<Arc<dyn PeerConnectivitySource>>,
         Option<Arc<TimeoutVerificationContext>>,
+        Option<Arc<PeerConsensusBindingGate>>,
     ) = match io {
         Some(io) => (
             Some(io.inbound_rx),
             Some(io.outbound),
             io.peer_connectivity,
             io.verification_ctx,
+            io.binding_gate,
         ),
-        None => (None, None, None, None),
+        None => (None, None, None, None, None),
     };
 
     eprintln!(
@@ -1910,7 +1946,8 @@ pub async fn run_binary_consensus_loop_with_io(
                 }
                 maybe_msg = rx.recv() => {
                     match maybe_msg {
-                        Some(msg) => {
+                        Some(envelope) => {
+                            let InboundConsensusEnvelope { origin, msg } = envelope;
                             handle_inbound_consensus_msg(
                                 &mut engine,
                                 msg,
@@ -1921,6 +1958,8 @@ pub async fn run_binary_consensus_loop_with_io(
                                 &mut restore_mode,
                                 verification_ctx.as_deref(),
                                 &mut reconfig_detector,
+                                origin.as_ref(),
+                                binding_gate.as_deref(),
                             );
                             // Reflect engine state changes (view / commits)
                             // immediately so /metrics never stalls behind
@@ -2608,14 +2647,33 @@ fn forward_actions_to_facade(
 /// HotStuff harnesses already exercise. Resulting engine actions are
 /// forwarded through `outbound` so the upstream node sees the response.
 ///
-/// The wire-encoded `BlockProposal::header.proposer_index` and
-/// `Vote::validator_index` carry the sender's `ValidatorId`. We do not
-/// invent any peer-identity layer here: it is the same convention the
-/// `qbind-wire` consensus types expose to the rest of the codebase.
+/// # Run 418: authenticated peer→validator sender binding
+///
+/// The wire-encoded `BlockProposal::header.proposer_index`,
+/// `Vote::validator_index`, `TimeoutMsg::validator_id`, and the restore-catchup
+/// requester/responder indices are **self-declared** by the sending peer. When
+/// a [`PeerConsensusBindingGate`] is installed (`binding_gate = Some`), every
+/// message that carries such an immediate sender is gated at ingress: the
+/// authenticated transport origin (`origin`, resolved from the KEMTLS session,
+/// never from the payload) is bound one-to-one to the claimed sender via
+/// [`PeerConsensusBindingGate::authorize`]. A message whose authenticated
+/// origin is missing, unknown, or does not match the claimed sender is rejected
+/// fail-closed BEFORE it is delivered to the engine, before any
+/// delivered/accepted counter is incremented, and before any reconfig
+/// observation is recorded. On success the **authenticated** validator id is
+/// used as the `from` handed to the engine.
+///
+/// `NewView` (a `TimeoutCertificate`) has no single immediate sender — it is a
+/// multi-signer aggregate whose signers are already cryptographically verified
+/// by `verify_timeout_certificate_with_evidence` — so it is not gated here.
+///
+/// When `binding_gate` is `None` (test-only), the legacy payload-derived-sender
+/// behavior is preserved.
 ///
 /// Decode failures and engine-level rejections (e.g. wrong epoch) are
 /// counted in `stats` but never panic — they are exactly the kinds of
 /// peer-induced failures the binary path must tolerate.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn handle_inbound_consensus_msg(
     engine: &mut BasicHotStuffEngine<[u8; 32]>,
     msg: ConsensusNetMsg,
@@ -2626,9 +2684,22 @@ pub(crate) fn handle_inbound_consensus_msg(
     restore_mode: &mut RestoreCatchupModeState,
     verification_ctx: Option<&TimeoutVerificationContext>,
     reconfig_detector: &mut BinaryReconfigDetector,
+    origin: Option<&AuthenticatedConsensusOrigin>,
+    binding_gate: Option<&PeerConsensusBindingGate>,
 ) {
     use qbind_wire::consensus::{BlockProposal, Vote};
     use qbind_wire::io::WireDecode;
+
+    // Run 418: bind a self-declared consensus sender to the authenticated
+    // transport origin. Returns the authenticated `ValidatorId` to use as
+    // `from`, or `Err` if the message must be rejected fail-closed. When no
+    // gate is installed (test-only), the claimed sender is returned unchanged.
+    let bind_sender = |claimed: ValidatorId| -> Result<ValidatorId, ConsensusBindingReject> {
+        match binding_gate {
+            Some(gate) => gate.authorize(origin, claimed),
+            None => Ok(claimed),
+        }
+    };
 
     stats.inbound_msgs_received = stats.inbound_msgs_received.saturating_add(1);
 
@@ -2667,6 +2738,25 @@ pub(crate) fn handle_inbound_consensus_msg(
             let mut slice: &[u8] = &bytes;
             match BlockProposal::decode(&mut slice) {
                 Ok(proposal) => {
+                    // Run 418: bind the self-declared proposer to the
+                    // authenticated transport origin BEFORE any restore-catchup
+                    // deferral, delivery counting, reconfig observation, or
+                    // engine ingestion.
+                    let claimed = ValidatorId::new(proposal.header.proposer_index as u64);
+                    let from = match bind_sender(claimed) {
+                        Ok(auth) => auth,
+                        Err(reject) => {
+                            stats.inbound_sender_binding_rejected_total = stats
+                                .inbound_sender_binding_rejected_total
+                                .saturating_add(1);
+                            eprintln!(
+                                "[binary-consensus] Run 418: inbound proposal REJECTED \
+                                 (sender binding) claimed_proposer={:?} reason={}",
+                                claimed, reject
+                            );
+                            return;
+                        }
+                    };
                     if restore_mode.is_active()
                         && should_defer_restore_proposal_for_catchup(engine, &proposal)
                     {
@@ -2679,7 +2769,6 @@ pub(crate) fn handle_inbound_consensus_msg(
                         );
                         return;
                     }
-                    let from = ValidatorId::new(proposal.header.proposer_index as u64);
                     stats.inbound_proposals_delivered =
                         stats.inbound_proposals_delivered.saturating_add(1);
                     // Run 095: record the canonical reconfig header
@@ -2727,7 +2816,24 @@ pub(crate) fn handle_inbound_consensus_msg(
             let mut slice: &[u8] = &bytes;
             match Vote::decode(&mut slice) {
                 Ok(vote) => {
-                    let from = ValidatorId::new(vote.validator_index as u64);
+                    // Run 418: bind the self-declared voter to the authenticated
+                    // transport origin BEFORE delivery/acceptance counting and
+                    // engine ingestion.
+                    let claimed = ValidatorId::new(vote.validator_index as u64);
+                    let from = match bind_sender(claimed) {
+                        Ok(auth) => auth,
+                        Err(reject) => {
+                            stats.inbound_sender_binding_rejected_total = stats
+                                .inbound_sender_binding_rejected_total
+                                .saturating_add(1);
+                            eprintln!(
+                                "[binary-consensus] Run 418: inbound vote REJECTED \
+                                 (sender binding) claimed_voter={:?} reason={}",
+                                claimed, reject
+                            );
+                            return;
+                        }
+                    };
                     match engine.on_vote_event(from, &vote) {
                         Ok(_) => {
                             stats.inbound_votes_delivered =
@@ -2812,9 +2918,27 @@ pub(crate) fn handle_inbound_consensus_msg(
                 .deserialize::<TimeoutMsg<[u8; 32]>>(&bytes)
             {
                 Ok(timeout) => {
+                    // Run 418: bind the self-declared timeout sender to the
+                    // authenticated transport origin BEFORE delivery counting,
+                    // crypto verification, or engine ingestion.
+                    let claimed = timeout.validator_id;
+                    let from = match bind_sender(claimed) {
+                        Ok(auth) => auth,
+                        Err(reject) => {
+                            stats.inbound_sender_binding_rejected_total = stats
+                                .inbound_sender_binding_rejected_total
+                                .saturating_add(1);
+                            eprintln!(
+                                "[binary-consensus] Run 418: inbound timeout REJECTED \
+                                 (sender binding) claimed_sender={:?} reason={}",
+                                claimed, reject
+                            );
+                            update_binary_view_timeout_metrics(metrics, stats);
+                            return;
+                        }
+                    };
                     stats.inbound_timeouts_delivered =
                         stats.inbound_timeouts_delivered.saturating_add(1);
-                    let from = timeout.validator_id;
                     let timeout_view = timeout.view;
                     let timeout_suite = timeout.suite_id;
 
@@ -3080,11 +3204,39 @@ pub(crate) fn handle_inbound_consensus_msg(
             update_binary_view_timeout_metrics(metrics, stats);
         }
         ConsensusNetMsg::RestoreCatchupRequest(req) => {
+            // Run 418: bind the self-declared requester to the authenticated
+            // transport origin BEFORE the request is counted or serviced.
+            let claimed = ValidatorId::new(req.requester_validator_index as u64);
+            if let Err(reject) = bind_sender(claimed) {
+                stats.inbound_sender_binding_rejected_total = stats
+                    .inbound_sender_binding_rejected_total
+                    .saturating_add(1);
+                eprintln!(
+                    "[binary-consensus] Run 418: inbound restore-catchup request REJECTED \
+                     (sender binding) claimed_requester={:?} reason={}",
+                    claimed, reject
+                );
+                return;
+            }
             stats.restore_catchup_requests_received =
                 stats.restore_catchup_requests_received.saturating_add(1);
             handle_restore_catchup_request(engine, req, stats, outbound, local_validator_id);
         }
         ConsensusNetMsg::RestoreCatchupResponse(resp) => {
+            // Run 418: bind the self-declared responder to the authenticated
+            // transport origin BEFORE the response is counted or applied.
+            let claimed = ValidatorId::new(resp.responder_validator_index as u64);
+            if let Err(reject) = bind_sender(claimed) {
+                stats.inbound_sender_binding_rejected_total = stats
+                    .inbound_sender_binding_rejected_total
+                    .saturating_add(1);
+                eprintln!(
+                    "[binary-consensus] Run 418: inbound restore-catchup response REJECTED \
+                     (sender binding) claimed_responder={:?} reason={}",
+                    claimed, reject
+                );
+                return;
+            }
             stats.restore_catchup_responses_received =
                 stats.restore_catchup_responses_received.saturating_add(1);
             handle_restore_catchup_response(engine, resp, stats, local_validator_id, restore_mode);
@@ -3124,6 +3276,8 @@ pub(crate) fn deliver_inbound_for_run035(
         &mut restore_mode,
         verification_ctx,
         &mut detector,
+        None,
+        None,
     );
 }
 
@@ -5877,6 +6031,8 @@ mod tests {
             &mut restore_mode,
             None,
             &mut BinaryReconfigDetector::default(),
+            None,
+            None,
         );
         assert_eq!(engine.current_view(), view_before);
         assert_eq!(stats.inbound_timeouts_delivered, 0);
@@ -5900,6 +6056,8 @@ mod tests {
             &mut restore_mode,
             None,
             &mut BinaryReconfigDetector::default(),
+            None,
+            None,
         );
         assert_eq!(engine.current_view(), view_before);
         assert_eq!(stats.inbound_new_views_delivered, 0);
@@ -5944,6 +6102,8 @@ mod tests {
             &mut restore_mode,
             None,
             &mut BinaryReconfigDetector::default(),
+            None,
+            None,
         );
         assert_eq!(stats.inbound_new_views_delivered, 1);
         assert_eq!(stats.inbound_new_views_engine_accepted, 1);
@@ -5986,6 +6146,8 @@ mod tests {
             &mut restore_mode,
             None,
             &mut BinaryReconfigDetector::default(),
+            None,
+            None,
         );
         assert_eq!(stats.inbound_new_views_delivered, 1);
         assert_eq!(stats.inbound_new_views_engine_accepted, 0);
@@ -6060,6 +6222,8 @@ mod tests {
             &mut restore_mode,
             None,
             &mut BinaryReconfigDetector::default(),
+            None,
+            None,
         );
         // 2/4 timeouts ⇒ still no TC, view still 15.
         assert_eq!(stats.inbound_timeouts_delivered, 1);
@@ -6083,6 +6247,8 @@ mod tests {
             &mut restore_mode,
             None,
             &mut BinaryReconfigDetector::default(),
+            None,
+            None,
         );
         assert_eq!(stats.inbound_timeouts_delivered, 2);
         assert_eq!(stats.inbound_timeouts_engine_accepted, 2);
@@ -6124,6 +6290,8 @@ mod tests {
             &mut restore_mode,
             None,
             &mut BinaryReconfigDetector::default(),
+            None,
+            None,
         );
         assert_eq!(engine.current_view(), view_before);
         assert_eq!(stats.inbound_timeouts_delivered, 0);
@@ -6142,6 +6310,8 @@ mod tests {
             &mut restore_mode,
             None,
             &mut BinaryReconfigDetector::default(),
+            None,
+            None,
         );
         assert_eq!(engine.current_view(), view_before);
         assert_eq!(stats.inbound_new_views_delivered, 0);
@@ -6862,6 +7032,8 @@ mod tests {
                 &mut restore_mode,
                 ctx,
                 &mut BinaryReconfigDetector::default(),
+                None,
+                None,
             );
         }
 
@@ -6990,6 +7162,8 @@ mod tests {
                 &mut restore_mode,
                 Some(&ctx),
                 &mut BinaryReconfigDetector::default(),
+                None,
+                None,
             );
             assert!(stats.view_timeout_decode_failures >= 1);
             assert_eq!(stats.inbound_timeout_verify_accepted, 0);
@@ -7020,6 +7194,8 @@ mod tests {
                 &mut restore_mode,
                 ctx,
                 &mut BinaryReconfigDetector::default(),
+                None,
+                None,
             );
         }
 
@@ -7269,6 +7445,8 @@ mod tests {
                 &mut restore_mode,
                 Some(&ctx),
                 &mut BinaryReconfigDetector::default(),
+                None,
+                None,
             );
 
             assert!(stats.view_timeout_decode_failures >= 1);

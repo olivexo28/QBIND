@@ -7784,6 +7784,7 @@ async fn run_p2p_node(
         outbound: outbound_facade,
         peer_connectivity: Some(peer_connectivity),
         verification_ctx,
+        binding_gate: node_context.binding_gate.clone(),
     };
     let (consensus_handle, _progress) =
         spawn_binary_consensus_loop_with_io(consensus_cfg, shutdown_rx, node_metrics, io);
@@ -7836,7 +7837,7 @@ async fn run_p2p_node(
 fn maybe_spawn_run035_forged_injection_harness(
     args: &CliArgs,
     config: &qbind_node::node_config::NodeConfig,
-    sender: tokio::sync::mpsc::Sender<qbind_node::p2p::ConsensusNetMsg>,
+    sender: tokio::sync::mpsc::Sender<qbind_node::p2p_inbound::InboundConsensusEnvelope>,
     num_validators: u64,
 ) -> Option<tokio::task::JoinHandle<()>> {
     use qbind_node::forged_injection::{

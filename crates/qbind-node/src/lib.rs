@@ -105,6 +105,7 @@ pub mod net_service;
 pub mod node_config;
 pub mod p2p;
 pub mod p2p_inbound;
+pub mod peer_consensus_binding;
 pub mod p2p_node_builder;
 /// Run 072 — production-honest internal P2P session-eviction hook.
 pub mod p2p_session_eviction;

@@ -98,6 +98,7 @@ use qbind_node::consensus_net_p2p::P2pConsensusNetwork;
 use qbind_node::consensus_network_facade::ConsensusNetworkFacade;
 use qbind_node::metrics::NodeMetrics;
 use qbind_node::p2p::{ConsensusNetMsg, NodeId, NullP2pService};
+use qbind_node::p2p_inbound::InboundConsensusEnvelope;
 use qbind_node::peer::PeerId;
 use qbind_wire::consensus::{BlockHeader, BlockProposal, Vote};
 use qbind_wire::io::WireEncode;
@@ -311,7 +312,7 @@ async fn b11_c_inbound_metrics_increment_on_every_inbound_frame() {
         .with_tick_interval(Duration::from_millis(5))
         .with_max_ticks(120);
 
-    let (inbound_tx, inbound_rx) = mpsc::channel::<ConsensusNetMsg>(64);
+    let (inbound_tx, inbound_rx) = mpsc::channel::<InboundConsensusEnvelope>(64);
     let facade: Arc<dyn ConsensusNetworkFacade> = Arc::new(CountingFacade::default());
 
     // Pre-load 4 proposal frames, 3 vote frames, and 2 timeout frames
@@ -321,20 +322,20 @@ async fn b11_c_inbound_metrics_increment_on_every_inbound_frame() {
     for h in 1..=4 {
         let p = make_proposal(0, h);
         inbound_tx
-            .send(ConsensusNetMsg::Proposal(encode(&p)))
+            .send(InboundConsensusEnvelope::from(ConsensusNetMsg::Proposal(encode(&p))))
             .await
             .unwrap();
     }
     for h in 1..=3 {
         let v = make_vote(0, h);
         inbound_tx
-            .send(ConsensusNetMsg::Vote(encode(&v)))
+            .send(InboundConsensusEnvelope::from(ConsensusNetMsg::Vote(encode(&v))))
             .await
             .unwrap();
     }
     for _ in 0..2 {
         inbound_tx
-            .send(ConsensusNetMsg::Timeout(vec![1, 2, 3]))
+            .send(InboundConsensusEnvelope::from(ConsensusNetMsg::Timeout(vec![1, 2, 3])))
             .await
             .unwrap();
     }
@@ -345,6 +346,7 @@ async fn b11_c_inbound_metrics_increment_on_every_inbound_frame() {
         outbound: facade,
         peer_connectivity: None,
         verification_ctx: None,
+        binding_gate: None,
     };
 
     let (_shutdown_tx, shutdown_rx) = watch::channel(());
@@ -405,7 +407,7 @@ async fn b11_c_inbound_metrics_increment_on_every_inbound_frame() {
 /// of facade calls", which is exactly what `with_metrics` enforces in
 /// production code.
 struct MetricsForwardingFacade {
-    inbound: mpsc::Sender<ConsensusNetMsg>,
+    inbound: mpsc::Sender<InboundConsensusEnvelope>,
     metrics: Arc<NodeMetrics>,
 }
 
@@ -413,21 +415,21 @@ impl ConsensusNetworkFacade for MetricsForwardingFacade {
     fn send_vote_to(&self, _t: ValidatorId, vote: &Vote) -> Result<(), NetworkError> {
         let _ = self
             .inbound
-            .try_send(ConsensusNetMsg::Vote(encode(vote)));
+            .try_send(InboundConsensusEnvelope::from(ConsensusNetMsg::Vote(encode(vote))));
         self.metrics.network().inc_outbound_vote_send_to();
         Ok(())
     }
     fn broadcast_vote(&self, vote: &Vote) -> Result<(), NetworkError> {
         let _ = self
             .inbound
-            .try_send(ConsensusNetMsg::Vote(encode(vote)));
+            .try_send(InboundConsensusEnvelope::from(ConsensusNetMsg::Vote(encode(vote))));
         self.metrics.network().inc_outbound_vote_broadcast();
         Ok(())
     }
     fn broadcast_proposal(&self, proposal: &BlockProposal) -> Result<(), NetworkError> {
         let _ = self
             .inbound
-            .try_send(ConsensusNetMsg::Proposal(encode(proposal)));
+            .try_send(InboundConsensusEnvelope::from(ConsensusNetMsg::Proposal(encode(proposal))));
         self.metrics.network().inc_outbound_proposal_broadcast();
         Ok(())
     }
@@ -445,11 +447,11 @@ async fn b11_d_b9_late_peer_reemit_does_not_double_count() {
 
     // Throw-away inbound for V0 (no peer feeding it in this test —
     // we only care about V0's outbound counter behaviour).
-    let (_dead_tx, inbound_v0_rx) = mpsc::channel::<ConsensusNetMsg>(64);
+    let (_dead_tx, inbound_v0_rx) = mpsc::channel::<InboundConsensusEnvelope>(64);
     // V1 inbound — V0's outbound facade forwards into here, but we
     // don't actually consume it in this test (the goal is to count
     // outbound, not run V1's engine).
-    let (inbound_v1_tx, _inbound_v1_rx) = mpsc::channel::<ConsensusNetMsg>(64);
+    let (inbound_v1_tx, _inbound_v1_rx) = mpsc::channel::<InboundConsensusEnvelope>(64);
 
     let metrics_v0 = Arc::new(NodeMetrics::new());
     let facade_v0: Arc<dyn ConsensusNetworkFacade> = Arc::new(MetricsForwardingFacade {
@@ -465,6 +467,7 @@ async fn b11_d_b9_late_peer_reemit_does_not_double_count() {
         outbound: facade_v0,
         peer_connectivity: Some(conn_v0_dyn),
         verification_ctx: None,
+        binding_gate: None,
     };
 
     let (_shutdown_tx, shutdown_rx) = watch::channel(());
