@@ -638,9 +638,12 @@ in code but is **not reachable** from the deployed binary today (no tx ingress, 
 (`RESULT=POSITIVE-FOR-AUDIT-COMPLETENESS`, `SECURITY_VERDICT=NEGATIVE-FOR-RUNTIME-SECURITY`), with
 `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_417.md`,
 `docs/protocol/QBIND_FOUNDATIONAL_RUNTIME_SECURITY_RECONCILIATION.md`, and archive
-`docs/devnet/run_417_foundational_runtime_security_reconciliation/`. **No downgrade is required** — these
-gaps are already reflected by **C4 OPEN** and **M4/M6 Yellow**, and no current document claims deployed
-consensus/transaction authentication. It adds **no** CLI flag, opens **no** port, deploys **no**
+`docs/devnet/run_417_foundational_runtime_security_reconciliation/`. **No existing M/S status is
+downgraded**, because those M/S item definitions do **not** directly encode deployed consensus
+authentication; **C4 OPEN is compatible with these findings but did not independently prevent launch.**
+The audit exposed a **launch-governance coverage gap**, corrected by the separate corrective pass below
+by adding the independent launch-blocking control **RS1**; **no F1–F8 finding is resolved** and no
+current document claims deployed consensus/transaction authentication. It adds **no** CLI flag, opens **no** port, deploys **no**
 seed/bootnode/faucet/RPC/explorer/status service, publishes **no** `devnet-seeds.live.json`, and mutates
 **no** validator/epoch/sequence/marker/`LivePqcTrustState` state. **No readiness item moves Green. M4 stays
 Yellow/launch-blocking; M6 stays Yellow/Partial; S5/S7 stay Yellow; M1–M3/M5/M7–M20 remain Green; public
