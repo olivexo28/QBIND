@@ -2,8 +2,8 @@
 
 > **Safety label:** DevNet · experimental · resettable · no value · no uptime SLA ·
 > NOT public-DevNet launch-ready · no M4 Green · no M6 fully-Green · no S5 Green ·
-> no S7 Green · no TestNet readiness · no MainNet readiness · **C4/C5 OPEN** ·
-> no C4/C5 closure claim.
+> no S7 Green · **RS1 OPEN / launch-blocking** · no TestNet readiness · no MainNet readiness ·
+> **C4/C5 OPEN** · no C4/C5 closure claim.
 
 This is the operator/reviewer **verification map** for the QBIND public DevNet
 release package. It gives a recommended **read order** for three audiences, an
@@ -55,8 +55,17 @@ decision is **NO-GO / NOT launch-ready** (`LAUNCH_GO_NO_GO.md`).
 6. `docs/release/public-devnet/binary/RELEASE_PROVENANCE.md` +
    `binary/REPRODUCIBILITY.md` — provenance + reproducibility.
 7. `docs/protocol/QBIND_C4_C5_CLOSURE_CRITERIA.md` — C4/C5 closure criteria (**OPEN**).
-8. `docs/whitepaper/contradiction.md` — contradiction ledger.
-9. `docs/release/public-devnet/BLOCKER_REGISTER.md` — open blockers.
+8. `docs/protocol/QBIND_FOUNDATIONAL_RUNTIME_SECURITY_RECONCILIATION.md` — the
+   **RS1** deployed-path consensus-authentication reconciliation (findings
+   **F1–F8**; `OPEN / launch-blocking`), with the Run 417 audit evidence
+   `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_417.md`, archive
+   `docs/devnet/run_417_foundational_runtime_security_reconciliation/`, and the
+   fail-closed harness
+   `scripts/devnet/run_417_foundational_runtime_security_reconciliation_audit.sh`
+   (audit/evidence only — **not** launch evidence, runtime remediation, or binary
+   provenance).
+9. `docs/whitepaper/contradiction.md` — contradiction ledger.
+10. `docs/release/public-devnet/BLOCKER_REGISTER.md` — open blockers (incl. **RS1**).
 
 ## 3. Recommended read order — release manager
 
@@ -102,9 +111,14 @@ refers to `scripts/devnet/run_NNN_*.sh`.)
 
 Read and obey these stops before doing anything network-facing:
 
-1. **Do not attempt launch while M4 / M6 are Yellow.** The launch decision is
-   **NO-GO** (`LAUNCH_GO_NO_GO.md`). GO requires **every** must-have (M1–M20) Green
-   **and** launch explicitly in scope. Neither holds today.
+1. **Do not attempt launch while M4 / M6 are Yellow or RS1 is OPEN.** The launch
+   decision is **NO-GO** (`LAUNCH_GO_NO_GO.md`). GO requires **every** must-have
+   (M1–M20) Green, the foundational runtime-security blocker **RS1** closed with
+   executable fail-closed evidence on the deployed consensus path, **and** launch
+   explicitly in scope. None of these hold today; **RS1 OPEN forces NO-GO even if
+   every M1–M20 item were Green** (see
+   `docs/protocol/QBIND_FOUNDATIONAL_RUNTIME_SECURITY_RECONCILIATION.md`,
+   `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_417.md`).
 2. **Do not create `devnet-seeds.live.json` without real M4 evidence.** Only a
    `devnet-seeds.placeholder.json` and a `devnet-seeds.live-candidate.json` exist.
    A live seed-list requires a timestamped external TCP dial **and** external

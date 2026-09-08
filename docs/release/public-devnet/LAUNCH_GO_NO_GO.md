@@ -2,8 +2,8 @@
 
 > **Safety label:** DevNet · experimental · resettable · no value · no uptime SLA ·
 > NOT public-DevNet launch-ready · no M4 Green · no M6 fully-Green · no S5 Green ·
-> no S7 Green · no TestNet readiness · no MainNet readiness · **C4/C5 OPEN** ·
-> no C4/C5 closure claim.
+> no S7 Green · **RS1 OPEN / launch-blocking** · no TestNet readiness · no MainNet readiness ·
+> **C4/C5 OPEN** · no C4/C5 closure claim.
 
 This document is the single operator-facing **launch decision gate** for the QBIND
 public DevNet. It exists so the current non-launch posture is **impossible to
@@ -35,16 +35,22 @@ Companion documents:
 - `docs/release/public-devnet/status/STATUS_PAGE_DECISION.md` — the status-page
   decision (S5).
 - `docs/protocol/QBIND_C4_C5_CLOSURE_CRITERIA.md` — the C4/C5 closure criteria.
+- `docs/protocol/QBIND_FOUNDATIONAL_RUNTIME_SECURITY_RECONCILIATION.md` — the RS1
+  foundational runtime-security reconciliation (deployed-path consensus auth).
+- `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_417.md` — Run 417 audit evidence (RS1 F1–F8).
 - `docs/whitepaper/contradiction.md` — the contradiction ledger.
 
 ## 1. Current decision
 
 **NO-GO. Public DevNet is NOT launch-ready.**
 
-At least one launch-blocking must-have (**M4**) is Yellow, and a second must-have
-(**M6**) is Yellow / Partial. Per the go/no-go rule in §9, launch requires **every**
-must-have Green **and** launch explicitly in scope. Neither condition holds today,
-so the decision is **NO-GO**.
+At least one launch-blocking must-have (**M4**) is Yellow, a second must-have
+(**M6**) is Yellow / Partial, and the foundational runtime-security blocker
+(**RS1**) is **OPEN / launch-blocking**. Per the go/no-go rule in §9, launch
+requires **every** must-have Green, **RS1 closed** with executable fail-closed
+evidence on the deployed consensus path, **and** launch explicitly in scope. None
+of these conditions holds today, so the decision is **NO-GO**. RS1 remaining OPEN
+forces NO-GO **even if every M1–M20 item were Green**.
 
 ## 2. Green items summary
 
@@ -65,9 +71,24 @@ blocking items below still gate.
 
 ## 3. Blocking items summary
 
-- **M4 — seed/bootnode reachability — Yellow / launch-blocking.** No real,
-  externally reachable public DevNet seed with independent off-host reachability
-  evidence exists. This is the primary launch blocker.
+- **RS1 — foundational runtime authentication and authorization — OPEN /
+  launch-blocking.** The Run 417 audit (`AUDIT-COMPLETE /
+  NEGATIVE-FOR-RUNTIME-SECURITY`) found the deployed `qbind-node` consensus path
+  (`crates/qbind-node/src/binary_consensus_loop.rs`) is **fail-open**: proposals
+  and votes are emitted **unsigned** with toy suite id `0`; inbound proposals and
+  votes are accepted **without** signature, membership, or suite verification; the
+  consensus sender is a **self-declared** index rather than the authenticated
+  KEMTLS peer; and quorum certificates are imported with **empty signer evidence**.
+  RS1 tracks findings **F1–F8** and closes only with executable evidence that the
+  deployed consensus path is fail-closed (§9, and
+  `docs/protocol/QBIND_FOUNDATIONAL_RUNTIME_SECURITY_RECONCILIATION.md`).
+- **M4 — seed/bootnode reachability — Yellow / launch-blocking.** External TCP and
+  KEMTLS mutual-auth static-root reachability was **proven once** by Run 416
+  (operator-attested Route A evidence) against a **temporary seed identity that was
+  discarded**; that run did **not** establish a durable operator-controlled seed
+  identity, genesis pinning was not evidenced, and `devnet-seeds.live.json` remains
+  **absent**. No durable, published, externally reachable public DevNet seed exists.
+  This is the primary reachability launch blocker.
 - **M6 — validator identity — Yellow / Partial.** The generation + verification
   and non-mutating registration-check halves are Green-for-scope, but the
   **live-registration** half is M4-gated, and operator-supplied durable-root
@@ -114,7 +135,11 @@ run**, with publish-safe evidence, per
    data dir / private endpoint / absolute build path committed; no other readiness
    item silently flipped Green.
 
-Until real off-host external reachability evidence lands, **M4 stays Yellow**.
+Run 416 already produced operator-attested external TCP + KEMTLS mutual-auth
+static-root reachability evidence against a **temporary, discarded** seed identity;
+until a **durable** operator-controlled seed identity is provisioned, genesis
+pinning is evidenced, and a schema-valid `devnet-seeds.live.json` is published,
+**M4 stays Yellow**.
 
 ## 5. Exact M6 Green prerequisites
 
@@ -161,6 +186,39 @@ and revocation are documented as **deferred**, not delivered
 (`ROTATION_REVOCATION_DEFERRAL.md`, `QBIND_C4_C5_CLOSURE_CRITERIA.md`). No C4/C5
 closure is claimed.
 
+## 7a. RS1 statement — foundational runtime authentication and authorization
+
+**RS1 remains OPEN / launch-blocking.** The Run 417 audit verdict
+(`AUDIT-COMPLETE / NEGATIVE-FOR-RUNTIME-SECURITY`) established that the deployed
+`qbind-node` consensus path is fail-open (see §3). RS1 is an **independent**
+launch gate: it is not covered by the M1–M20 must-have set and is **not** the same
+as C4/C5. RS1 closes **only** with executable evidence, captured on the deployed
+`binary_consensus_loop` path (not a test harness), showing that unsigned,
+mismatched-identity, wrong/unknown-suite, and forged-QC inputs are **rejected with
+counters**. RS1 tracks:
+
+- **F6** — bind the authenticated KEMTLS peer/session to an authorized consensus
+  sender (transport-level accountability). Deriving the remote `NodeId` from the
+  authenticated KEMTLS session and resolving it through an authoritative,
+  unambiguous `NodeId → ValidatorId` mapping (unknown, duplicate, ambiguous, or
+  mismatched identities fail closed) is required. **F6 alone does not close F3, F4,
+  F5, F7, F8, RS1, C4, or C5.**
+- **F3 / F4** — proposal/vote emission and inbound acceptance must be signed and
+  verified over domain-separated preimages; proposal, vote, timeout, new-view, and
+  QC signatures remain **independently necessary** for message-level cryptographic
+  authorship.
+- **F5** — timeout / new-view verification must be mandatory (High, reachable).
+- **F7** — imported quorum certificates must carry verified signer evidence
+  (Critical, reachable).
+- **F8** — the toy/default consensus suite `0` must be rejected on the deployed
+  path (High, reachable).
+- **F1 / F2** — transaction-authentication gaps remain tracked and **must be
+  resolved before transaction ingress is enabled**; their current lack of ingress
+  is a **reachability mitigation, not cryptographic closure**.
+
+This corrective pass adds RS1 to the launch governance record; it does **not**
+resolve F1–F8 and does **not** change the runtime-security verdict.
+
 ## 8. TestNet / MainNet non-claim statement
 
 TestNet and MainNet remain **untouched**. TestNet/MainNet readiness items
@@ -171,12 +229,16 @@ in this gate.
 
 ## 9. Final go / no-go rule
 
-> **GO only if** every must-have (**M1–M20**) is **Green** **and** a public DevNet
-> launch is **explicitly in scope** for the run making the decision.
+> **GO only if** every must-have (**M1–M20**) is **Green**, the foundational
+> runtime-security blocker **RS1 is closed** with executable evidence that the
+> deployed consensus path is fail-closed, **and** a public DevNet launch is
+> **explicitly in scope** for the run making the decision.
 >
-> **Otherwise: NO-GO.**
+> **Otherwise: NO-GO.** In particular, RS1 remaining OPEN forces NO-GO **even if
+> every M1–M20 item is Green.**
 
-Because **M4** is Yellow and **M6** is Yellow / Partial, and because launch is
-**not** in scope for Run 402 (docs + verification harness only), the current
-decision is **NO-GO — public DevNet is NOT launch-ready.** This run adds clarity
-only; it moves no item Green and it does not launch anything.
+Because **M4** is Yellow, **M6** is Yellow / Partial, **RS1** is OPEN /
+launch-blocking, and because launch is **not** in scope for this run (docs +
+verification harness only), the current decision is **NO-GO — public DevNet is NOT
+launch-ready.** This run adds clarity only; it moves no item Green and it does not
+launch anything.

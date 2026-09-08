@@ -7,8 +7,9 @@ binary. **This document reconciles source, runtime, and readiness claims; it doe
 fixes and asserts no launch readiness.**
 
 **Safety envelope:** DevNet · experimental · audit/evidence only · **no production behavior
-changed** · NOT launch-ready · M4 Yellow · M6 Yellow/Partial · S5/S7 Yellow · **C4/C5 OPEN** ·
-public DevNet **NO-GO**. No TestNet/MainNet readiness claim. No private key material committed.
+changed** · NOT launch-ready · M4 Yellow · M6 Yellow/Partial · S5/S7 Yellow · **RS1 OPEN /
+launch-blocking** · **C4/C5 OPEN** · public DevNet **NO-GO**. No TestNet/MainNet readiness claim.
+No private key material committed.
 
 ## 1. Purpose
 
@@ -72,20 +73,46 @@ Three separate suite namespaces must not be conflated:
 Run 416's `sig_suite_id=100` is a **transport** value and is **not** evidence that consensus
 messages or transactions use ML-DSA-44.
 
-## 4. Relationship to C4/C5 and readiness
+## 4. Relationship to C4/C5, RS1, and readiness
 
 These findings are consistent with, and further specify, **C4 OPEN** (the deployed binary does
 not boot a fully operating, authenticated node) and **M4/M6 Yellow**. Run 417 requires **no
 downgrade** because no current document claims deployed consensus/transaction authentication.
 Run 417 moves **no** item Green.
 
+The Run 417 corrective pass adds an **independent, launch-blocking** governance blocker,
+**`RS1 — Foundational runtime authentication and authorization` (`OPEN / launch-blocking`)**, to
+carry findings **F1–F8** in the launch decision. RS1 is recorded in
+`docs/release/public-devnet/BLOCKER_REGISTER.md`,
+`docs/release/public-devnet/LAUNCH_GO_NO_GO.md`,
+`docs/release/QBIND_PUBLIC_DEVNET_READINESS_CRITERIA.md`,
+`docs/release/public-devnet/ARTIFACT_INDEX.md`,
+`docs/release/public-devnet/OPERATOR_VERIFICATION_MAP.md`,
+`docs/protocol/QBIND_C4_C5_CLOSURE_CRITERIA.md`, and `docs/whitepaper/contradiction.md`. **Public
+DevNet GO requires both** every required must-have (M1–M20) Green **and** RS1 closed with
+executable evidence that the deployed consensus path is fail-closed; RS1 OPEN forces **NO-GO even
+if every M1–M20 item is Green**. RS1 is **distinct from C4/C5**: adding it closes a launch-governance
+coverage gap, not any F1–F8 finding, and it changes no runtime-security verdict.
+
 ## 5. Smallest security-first follow-up sequence
 
-1. Bind authenticated KEMTLS peer NodeId to the consensus sender (**F6**) — prerequisite.
+**F6 is a suitable first, narrow implementation target, but it is not what makes cryptographic
+signature verification meaningful.** F6 is required for **binding an authenticated KEMTLS
+peer/session to an authorized consensus sender** and for **transport-level accountability**;
+proposal, vote, timeout, new-view, and QC signatures remain **independently necessary** for
+**message-level cryptographic authorship**. **Closing F6 alone will not close F3, F4, F5, F7, F8,
+RS1, C4, or C5.**
+
+1. Bind the authenticated KEMTLS peer/session to an authorized consensus sender (**F6**). The
+   future Run 418 design must derive the remote `NodeId` from the authenticated KEMTLS session and
+   resolve it through an authoritative, unambiguous `NodeId → ValidatorId` mapping; unknown,
+   duplicate, ambiguous, or mismatched identities must **fail closed**. (Design only — not
+   implemented in this corrective pass.)
 2. Sign + verify proposals/votes with a production suite; reject suite `0`/unknown (**F3/F4/F8**).
 3. Cryptographically verify imported QCs; make timeout/new-view verification mandatory (**F7/F5**).
 4. Only then gate transaction execution behind `>=1` auth + threshold/weight/dedup with an explicit
-   genesis exemption (**F1/F2**).
+   genesis exemption (**F1/F2**). F1/F2 must be resolved **before** transaction ingress is enabled;
+   their current lack of ingress is a **reachability mitigation, not cryptographic closure**.
 
 Fix evidence must be captured on the deployed `binary_consensus_loop` path (not a harness), showing
 rejection of mismatched-identity, unsigned, wrong-suite, and forged-QC inputs with counters.

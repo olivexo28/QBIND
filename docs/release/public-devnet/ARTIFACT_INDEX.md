@@ -2,8 +2,8 @@
 
 > **Safety label:** DevNet · experimental · resettable · no value · no uptime SLA ·
 > NOT public-DevNet launch-ready · no M4 Green · no M6 fully-Green · no S5 Green ·
-> no S7 Green · no TestNet readiness · no MainNet readiness · **C4/C5 OPEN** ·
-> no C4/C5 closure claim.
+> no S7 Green · **RS1 OPEN / launch-blocking** · no TestNet readiness · no MainNet readiness ·
+> **C4/C5 OPEN** · no C4/C5 closure claim.
 
 This is the single **navigation index** for the QBIND public DevNet release
 package. It exists so an external operator or reviewer can find **every** current
@@ -37,6 +37,20 @@ Companion documents:
   (M4 / M6 / S5 / S7).
 - `docs/release/QBIND_PUBLIC_DEVNET_READINESS_CRITERIA.md` — the canonical
   readiness matrix (source of truth for item status).
+- `docs/protocol/QBIND_FOUNDATIONAL_RUNTIME_SECURITY_RECONCILIATION.md` — the
+  **RS1** foundational runtime-security reconciliation (deployed-path consensus
+  authentication; findings **F1–F8**). RS1 is `OPEN / launch-blocking`.
+- `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_417.md` — the Run 417 runtime-security
+  **audit** evidence record (`AUDIT-COMPLETE / NEGATIVE-FOR-RUNTIME-SECURITY`).
+  Audit/evidence only — **not** launch evidence, **not** runtime remediation,
+  **not** binary provenance.
+- `docs/devnet/run_417_foundational_runtime_security_reconciliation/` — the Run 417
+  audit evidence archive (README/summary/source_trace/findings_matrix/commands +
+  `SHA256SUMS.txt`).
+- `scripts/devnet/run_417_foundational_runtime_security_reconciliation_audit.sh` —
+  the fail-closed Run 417 audit-completeness harness
+  (`RESULT=POSITIVE-FOR-AUDIT-COMPLETENESS` /
+  `SECURITY_VERDICT=NEGATIVE-FOR-RUNTIME-SECURITY`).
 
 Everything below reflects the recorded status **after Run 402**. This index adds
 navigation and clarity only; it does not re-prove or change any item's status.

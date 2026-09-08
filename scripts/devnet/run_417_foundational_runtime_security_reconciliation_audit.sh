@@ -134,6 +134,74 @@ for f in "${AUTHORED[@]}" "${ARCHIVE}/.gitignore"; do
 done
 ok "no secret/private-material tokens in authored files"
 
+# 10) RS1 launch-governance blocker must exist, be OPEN / launch-blocking, gate the GO rule,
+#     and carry findings F1-F8 with their audited severities. This makes the harness fail closed
+#     if a future edit deletes RS1, marks it closed prematurely, or lets the GO rule pass with
+#     RS1 open. It NEVER moves anything Green; RS1 OPEN is the required current state.
+BLOCKER="${REPO_ROOT}/docs/release/public-devnet/BLOCKER_REGISTER.md"
+LAUNCH="${REPO_ROOT}/docs/release/public-devnet/LAUNCH_GO_NO_GO.md"
+[ -f "${BLOCKER}" ] || fail "missing BLOCKER_REGISTER.md"
+[ -f "${LAUNCH}" ]  || fail "missing LAUNCH_GO_NO_GO.md"
+
+# These governance docs and the matrix are tracked with CRLF line endings; normalize to LF copies
+# OUTSIDE the repo tree so the guard's line-anchored checks are terminator-agnostic. The tracked
+# files are never modified.
+WORK="$(mktemp -d "${TMPDIR:-/tmp}/run417_rs1.XXXXXX")"
+trap 'rm -rf "${WORK}"' EXIT
+sed 's/\r$//' "${BLOCKER}" > "${WORK}/blocker.md"
+sed 's/\r$//' "${LAUNCH}"  > "${WORK}/launch.md"
+sed 's/\r$//' "${MATRIX}"  > "${WORK}/matrix.txt"
+
+# rs1_guard: returns 0 only when RS1 is present, OPEN / launch-blocking, and forces NO-GO in both
+# the blocker register and the launch gate. Any relaxation (RS1 removed, marked closed, or the GO
+# rule no longer requiring RS1) makes it return non-zero.
+rs1_guard() {
+  local blocker="$1" launch="$2"
+  grep -Eq '^\| \*\*RS1\*\* \|.*\*\*OPEN / launch-blocking\*\* \|$' "${blocker}" || return 1
+  grep -q 'RS1 closed' "${blocker}"                                              || return 1
+  grep -Eiq 'including RS1, even if every' "${blocker}"                          || return 1
+  grep -Eiq 'RS1 is closed' "${launch}"                                         || return 1
+  grep -Eiq 'RS1 remaining OPEN forces NO-GO' "${launch}"                       || return 1
+  return 0
+}
+rs1_guard "${WORK}/blocker.md" "${WORK}/launch.md" || fail "RS1 must be present, OPEN / launch-blocking, and gate the GO rule in BLOCKER_REGISTER.md + LAUNCH_GO_NO_GO.md"
+ok "RS1 present, OPEN / launch-blocking, and gating the GO rule (both docs)"
+
+# F1-F8 must all be recorded, with their audited severities, and must not be suppressed/reclassified.
+for fnd in F1 F2 F3 F4 F5 F6 F7 F8; do
+  grep -qx "FINDING ${fnd}" "${WORK}/matrix.txt" || fail "findings matrix missing ${fnd}"
+done
+severity_of() { awk -v want="FINDING $1" '$0==want{f=1} f&&/^severity: /{print $2; exit}' "${WORK}/matrix.txt"; }
+for fnd in F3 F4 F6 F7; do
+  [ "$(severity_of "${fnd}")" = "Critical" ] || fail "${fnd} must be recorded Critical"
+done
+for fnd in F5 F8; do
+  [ "$(severity_of "${fnd}")" = "High" ] || fail "${fnd} must be recorded High"
+done
+grep -Eiq 'Do not suppress, weaken, or reclassify F1' "${WORK}/blocker.md" || fail "BLOCKER must forbid suppressing/reclassifying F1-F8"
+ok "F1-F8 recorded with audited severities and non-suppression clause"
+
+# 11) Negative self-tests: prove the RS1 guard actually fails closed. Each mutation is applied to a
+#     TEMP COPY OUTSIDE the repository tree; the real tracked files are never modified. A guard that
+#     still passes on a relaxed copy would be worthless, so a passing mutation aborts the harness.
+# (a) RS1 blocker row deleted -> guard must fail.
+grep -v '^| \*\*RS1\*\* |' "${WORK}/blocker.md" > "${WORK}/blocker_no_rs1.md"
+if rs1_guard "${WORK}/blocker_no_rs1.md" "${WORK}/launch.md"; then
+  fail "negative self-test failed: RS1 guard passed after deleting the RS1 blocker row"
+fi
+# (b) RS1 marked closed in the blocker row -> guard must fail.
+sed 's#\*\*OPEN / launch-blocking\*\*#**CLOSED**#' "${WORK}/blocker.md" > "${WORK}/blocker_rs1_closed.md"
+if rs1_guard "${WORK}/blocker_rs1_closed.md" "${WORK}/launch.md"; then
+  fail "negative self-test failed: RS1 guard passed after marking RS1 closed"
+fi
+# (c) Launch GO rule no longer forces NO-GO on RS1 -> guard must fail.
+sed 's#RS1 remaining OPEN forces NO-GO#RS1 is optional#' "${WORK}/launch.md" > "${WORK}/launch_no_rs1_gate.md"
+if rs1_guard "${WORK}/blocker.md" "${WORK}/launch_no_rs1_gate.md"; then
+  fail "negative self-test failed: RS1 guard passed after removing the RS1 NO-GO clause from the GO rule"
+fi
+rm -rf "${WORK}"; trap - EXIT
+ok "RS1 guard negative self-tests fail closed (deleted row / closed / ungated GO rule)"
+
 echo
 echo "RESULT=POSITIVE-FOR-AUDIT-COMPLETENESS"
 echo "SECURITY_VERDICT=NEGATIVE-FOR-RUNTIME-SECURITY"
