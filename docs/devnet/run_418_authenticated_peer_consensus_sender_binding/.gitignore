@@ -1,0 +1,11 @@
+# Backstop: never commit raw or private material into this evidence archive.
+# Only the curated publish-safe artifacts (README.md, summary.txt, source_trace.txt,
+# commands.txt, test_results.txt, SHA256SUMS.txt) belong here.
+*.key
+*.pem
+*.p12
+*.pfx
+*_sk
+*_secret*
+*.raw
+id_*

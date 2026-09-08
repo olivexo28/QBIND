@@ -747,7 +747,9 @@ fn validated_cert_bound_node_id(
         }
     }
     // Full 32-byte cert-derived NodeId (never a truncation).
-    Ok(NodeId::new(qbind_hash::net::derive_node_id_from_cert(&cert)))
+    Ok(NodeId::new(qbind_hash::net::derive_node_id_from_cert(
+        &cert,
+    )))
 }
 
 // ============================================================================

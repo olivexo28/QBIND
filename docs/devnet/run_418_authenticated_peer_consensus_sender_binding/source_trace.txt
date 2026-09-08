@@ -1,0 +1,93 @@
+Run 418 — F6 source trace (authenticated KEMTLS peer -> consensus sender binding)
+Base for comparison: 82c4b6d (Run 418 preliminary implementation). Line numbers are HEAD.
+
+============================================================================
+A. Authoritative binding decision point (pre-existing in 82c4b6d; unchanged)
+============================================================================
+crates/qbind-node/src/peer_consensus_binding.rs
+  :43   AuthenticatedConsensusOrigin  -- in-process only; #[derive] has NO serde; never serialized
+  :58     ::new(node_id: NodeId, validator_id: ValidatorId)  -- built ONLY from a verified session
+  :133  PeerConsensusBindingMap        -- one-to-one NodeId<->ValidatorId; build/insert fail closed
+  :249  ConsensusBindingMetrics        -- fixed low-cardinality counters
+  :297    ::format_metrics()           -- qbind_consensus_binding_total{result="..."} live surface
+  :328  PeerConsensusBindingGate
+  :388    ::authorize(origin, claimed) -> Result<ValidatorId, ConsensusBindingReject>
+          MissingOrigin / UnknownPeer / AmbiguousMapping / UnknownValidator / ClaimedSenderMismatch
+
+============================================================================
+B. Consensus ingress wiring (binary_consensus_loop) -- F5/NewView wording
+============================================================================
+crates/qbind-node/src/binary_consensus_loop.rs
+  :815  BinaryConsensusLoopIo.binding_gate: Option<Arc<PeerConsensusBindingGate>>
+  :929  BinaryConsensusLoopInboundStats.inbound_sender_binding_rejected_total
+  :2703 handle_inbound_consensus_msg :: bind_sender closure
+          Some(gate) => gate.authorize(origin, claimed)   -- production path
+          None       => Ok(claimed)                       -- test-only (no gate installed)
+        Proposal: claimed = ValidatorId::new(proposal.header.proposer_index)
+        Vote:     claimed = ValidatorId::new(vote.validator_index)
+        On reject: increment inbound_sender_binding_rejected_total and RETURN before any
+        engine call / restore-catchup deferral / delivery counting / reconfig observation.
+  NewView doc (~:2666): F5/NewView wording corrected. NewView has no single immediate
+  transport-sender field, so the F6 claimed-sender comparison does not apply to NewView.
+  Timeout/NewView cryptographic verification remains the independently unresolved F5 boundary
+  and may be optional/off in the audited deployed path. F5 is NOT claimed fixed or enforced.
+
+============================================================================
+C. Certificate-map construction + strict validator parsing (p2p_node_builder)
+============================================================================
+crates/qbind-node/src/p2p_node_builder.rs
+  :554  parse_test_validator_id_from_cert_validator_id(&[u8;32]) -> Option<u64>
+          strict: canonical decimal + canonical zero padding ONLY; rejects leading zeros,
+          trailing nonzero/arbitrary bytes, overflow (>20 digits), via definitive round-trip
+          against validator_id_bytes_for_index.
+  :622  validator_id_bytes_for_index(u64) -> [u8;32]  -- canonical encoder (round-trip oracle)
+  :678  cert_bound_node_id(...)  -- now #[cfg(test)] DECODE-ONLY; NOT used for map admission
+  :702  validated_cert_bound_node_id(crypto, cfg, revoked_leaf_fingerprints, num_validators,
+          expected_validator_index, cert_bytes) -> full validation before admission:
+          decode -> structural/suite -> verify vs configured PQC root -> canonical validator-id
+          match -> index < num_validators -> revocation/env checks -> full 32-byte NodeId.
+        Map-building path calls validated_cert_bound_node_id for local + peer certs; decode
+        success alone never admits a binding; duplicate/ambiguous entries fail startup.
+
+============================================================================
+D. Outbound (client-side) verified server identity provenance
+============================================================================
+crates/qbind-node/src/secure_channel.rs
+  :162  VerifiedServerIdentity { node_id:[u8;32], validator_id:[u8;32], authenticated:bool }
+  :435  SecureChannel::verified_server_identity() -> Option<VerifiedServerIdentity>
+  :979  connect_kemtls_async_with_server_identity(addr, cfg)
+          -> (SecureChannelAsync, Option<VerifiedServerIdentity>)  -- reads identity from the
+             established client-side Connection, NOT from the dial address.
+crates/qbind-node/src/p2p_tcp.rs
+  :1277 dial path uses connect_kemtls_async_with_server_identity; compares the verified server
+        identity (full 32-byte NodeId + validator id + authenticated) against the configured
+        expected pair in outbound_consensus_origins; rejects the session on mismatch; builds the
+        origin from the VERIFIED identity. Config + vid@addr identify the EXPECTED peer only.
+  :569  outbound_consensus_origins: Arc<RwLock<HashMap<String, AuthenticatedConsensusOrigin>>>
+        (expected pairs; never the source of the authenticated origin)
+
+============================================================================
+E. Inbound (server-side) verified client identity surfacing (qbind-net)
+============================================================================
+crates/qbind-net/src/handshake.rs
+  :125  HandshakeResult.server_node_id: Option<[u8;32]>
+  :548  server_node_id = derive_node_id_from_cert(&delegation_cert)  (client-side accept)
+  :556  server_node_id: Some(server_node_id)   ;  :1059 server_node_id: None (server-side)
+crates/qbind-net/src/connection.rs
+  :351  client-side: self.peer_node_id = result.server_node_id  -- surfaces the verified server id
+
+============================================================================
+F. Mandatory origin-carrying handler; fail-closed bare surface (p2p_inbound)
+============================================================================
+crates/qbind-node/src/p2p_inbound.rs
+  :155  ConsensusInboundHandler::handle_consensus_msg_from(origin, msg)  -- REQUIRED (no default)
+  :170  handle_consensus_msg(msg) default -> forwards origin=None (fail-closed under any gate)
+  :238,:506,:585  the three impls (Null/Channel/test) implement the required method.
+
+============================================================================
+G. Dedicated Run 418 acceptance tests (real production types)
+============================================================================
+crates/qbind-node/tests/run_418_authenticated_peer_consensus_sender_binding_tests.rs
+  12 tests, all PASS. Uses run_binary_consensus_loop_with_io + BinaryConsensusLoopIo{binding_gate:
+  Some(..)} + InboundConsensusEnvelope + PeerConsensusBindingGate/Map + VerifiedServerIdentity +
+  parse_test_validator_id_from_cert_validator_id. See test_results.txt.

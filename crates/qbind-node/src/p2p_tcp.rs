@@ -1298,8 +1298,11 @@ impl TcpKemTlsP2pService {
         // exactly (full 32-byte NodeId AND validator id AND authenticated
         // state), or the session is rejected. The dial address alone never
         // mints the authenticated origin.
-        let expected_origin: Option<AuthenticatedConsensusOrigin> =
-            self.outbound_consensus_origins.read().get(&peer_addr).cloned();
+        let expected_origin: Option<AuthenticatedConsensusOrigin> = self
+            .outbound_consensus_origins
+            .read()
+            .get(&peer_addr)
+            .cloned();
         let consensus_origin: Option<AuthenticatedConsensusOrigin> = match expected_origin {
             Some(expected) => {
                 let verified = verified_server_identity.ok_or_else(|| {
@@ -1309,9 +1312,10 @@ impl TcpKemTlsP2pService {
                         peer_addr
                     ))
                 })?;
-                let verified_vid = crate::p2p_node_builder::parse_test_validator_id_from_cert_validator_id(
-                    &verified.validator_id,
-                );
+                let verified_vid =
+                    crate::p2p_node_builder::parse_test_validator_id_from_cert_validator_id(
+                        &verified.validator_id,
+                    );
                 let node_matches = verified.node_id == *expected.node_id().as_bytes();
                 let vid_matches = verified_vid == Some(expected.validator_id().as_u64());
                 if !verified.authenticated || !node_matches || !vid_matches {
@@ -1509,8 +1513,7 @@ impl TcpKemTlsP2pService {
                             // (may be `None` for unauthenticated sessions). The
                             // origin is bound to the KEMTLS session, never
                             // derived from the frame payload.
-                            let envelope =
-                                InboundP2pEnvelope::new(consensus_origin.clone(), msg);
+                            let envelope = InboundP2pEnvelope::new(consensus_origin.clone(), msg);
                             if inbound_tx.send(envelope).await.is_err() {
                                 break; // Receiver dropped
                             }
@@ -1993,8 +1996,11 @@ impl DialerHandle {
         // the ACTUAL verified server certificate identity, matched against the
         // configured authoritative mapping. Never mint the origin from the dial
         // address. (Mirrors `TcpKemTlsP2pService::dial_peer`.)
-        let expected_origin: Option<AuthenticatedConsensusOrigin> =
-            self.outbound_consensus_origins.read().get(&peer_addr).cloned();
+        let expected_origin: Option<AuthenticatedConsensusOrigin> = self
+            .outbound_consensus_origins
+            .read()
+            .get(&peer_addr)
+            .cloned();
         let consensus_origin: Option<AuthenticatedConsensusOrigin> = match expected_origin {
             Some(expected) => {
                 let verified = verified_server_identity.ok_or_else(|| {
@@ -2004,9 +2010,10 @@ impl DialerHandle {
                         peer_addr
                     ))
                 })?;
-                let verified_vid = crate::p2p_node_builder::parse_test_validator_id_from_cert_validator_id(
-                    &verified.validator_id,
-                );
+                let verified_vid =
+                    crate::p2p_node_builder::parse_test_validator_id_from_cert_validator_id(
+                        &verified.validator_id,
+                    );
                 let node_matches = verified.node_id == *expected.node_id().as_bytes();
                 let vid_matches = verified_vid == Some(expected.validator_id().as_u64());
                 if !verified.authenticated || !node_matches || !vid_matches {

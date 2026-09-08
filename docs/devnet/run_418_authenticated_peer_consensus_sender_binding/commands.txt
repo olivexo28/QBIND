@@ -1,0 +1,28 @@
+Run 418 — F6 authenticated KEMTLS peer -> consensus sender binding
+Commands executed and exact exit codes (sandbox, 2026-09-08).
+
+# Build / typecheck
+cargo check -p qbind-node                                              -> 0
+cargo build --release -p qbind-node                                   -> 0
+
+# Dedicated Run 418 tests
+cargo test -p qbind-node --lib peer_consensus_binding                 -> 0   (12 passed)
+cargo test -p qbind-node --test run_418_authenticated_peer_consensus_sender_binding_tests -> 0 (12 passed)
+
+# Regression tests (line-ending-restored consensus files + net)
+cargo test -p qbind-net                                               -> 0
+cargo test -p qbind-node --test c4_b6_p2p_binary_path_interconnect_tests      -> 0 (5 passed)
+cargo test -p qbind-node --test b9_late_peer_connect_proposal_reemit_tests    -> 0 (6 passed)
+cargo test -p qbind-node --test b10_engine_acceptance_qc_closure_tests        -> 0 (5 passed)
+cargo test -p qbind-node --test b11_consensus_net_prometheus_coverage_tests   -> 0 (5 passed)
+
+# Formatting / whitespace
+rustfmt --edition 2021 --check <modified LF files>   -> new test file & p2p_liveness clean;
+    CRLF files (binary_consensus_loop.rs, lib.rs) report diff due to pre-existing CRLF convention.
+cargo fmt --all -- --check                            -> 1  (KNOWN PRE-EXISTING repo-wide drift; not introduced by Run 418)
+git diff --check 82c4b6d..HEAD                        -> flags CR-at-eol on binary_consensus_loop.rs
+    added comment lines only (the file's pre-existing CRLF convention; no genuine trailing spaces)
+
+# Provenance / secrets
+git diff --numstat 82c4b6d..HEAD                      -> 10 files (see source_trace.txt)
+secret/private-material scan of changed files         -> 0 findings

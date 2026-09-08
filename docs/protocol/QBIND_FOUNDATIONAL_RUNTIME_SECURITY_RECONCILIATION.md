@@ -104,10 +104,20 @@ proposal, vote, timeout, new-view, and QC signatures remain **independently nece
 RS1, C4, or C5.**
 
 1. Bind the authenticated KEMTLS peer/session to an authorized consensus sender (**F6**). The
-   future Run 418 design must derive the remote `NodeId` from the authenticated KEMTLS session and
-   resolve it through an authoritative, unambiguous `NodeId → ValidatorId` mapping; unknown,
-   duplicate, ambiguous, or mismatched identities must **fail closed**. (Design only — not
-   implemented in this corrective pass.)
+   remote `NodeId` is derived from the authenticated KEMTLS session and resolved through an
+   authoritative, unambiguous `NodeId → ValidatorId` mapping; unknown, duplicate, ambiguous, or
+   mismatched identities **fail closed**. **Run 418 implements and proves this binding in code and
+   test** (`crates/qbind-node/src/peer_consensus_binding.rs`,
+   `binary_consensus_loop::handle_inbound_consensus_msg` under an installed
+   `PeerConsensusBindingGate`, `p2p_node_builder::validated_cert_bound_node_id`,
+   `secure_channel::VerifiedServerIdentity`), with dedicated unit + integration acceptance tests.
+   **This is a code/test remediation of F6 only; it does not, by itself, close RS1**, which
+   additionally requires executable evidence captured on the **deployed release binary** on a live
+   multi-node network. **No such release-binary evidence exists yet**, so RS1 remains OPEN and
+   F6 is not represented as fixing F3, F4, F5, F7, F8, C4, or C5. **F5 in particular is not fixed
+   or always enforced:** `NewView` carries no single immediate transport-sender field, so F6's
+   claimed-sender comparison does not apply to it, and Timeout/NewView cryptographic verification
+   remains the independently unresolved F5 boundary (optional/off in the audited deployed path).
 2. Sign + verify proposals/votes with a production suite; reject suite `0`/unknown (**F3/F4/F8**).
 3. Cryptographically verify imported QCs; make timeout/new-view verification mandatory (**F7/F5**).
 4. Only then gate transaction execution behind `>=1` auth + threshold/weight/dedup with an explicit
@@ -125,3 +135,7 @@ rejection of mismatched-identity, unsigned, wrong-suite, and forged-QC inputs wi
 - Audit harness: `scripts/devnet/run_417_foundational_runtime_security_reconciliation_audit.sh`.
 - Audited base commit `cb4c4dc94eaaa46689be15358ba48921e98a7797` (working tree `32b6561`,
   task-file-only delta).
+- **Run 418 (F6 code/test remediation):** `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_418.md`,
+  `docs/devnet/run_418_authenticated_peer_consensus_sender_binding/`,
+  `scripts/devnet/run_418_authenticated_peer_consensus_sender_binding.sh`. Run 418 remediates F6
+  in code and test only; RS1 remains **OPEN** pending deployed release-binary evidence.
