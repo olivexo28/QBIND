@@ -197,7 +197,10 @@ capture_socket_and_logs() {
   {
     echo "# ${scen}: KEMTLS / static-root / mutual-auth log lines"
     grep -Ei 'kemtls|static.root|mutual.auth|handshake|verified|leaf|binding|origin' "${logf}" 2>/dev/null \
-      | grep -Eiv 'secret|private|0x[0-9a-f]{32,}' | head -12
+      | grep -Eiv 'secret|private|0x[0-9a-f]{32,}' \
+      | sed -E -e "s#${WORKDIR}#<TMP>#g" -e 's#/tmp/run419\.[A-Za-z0-9]+#<TMP>#g' \
+               -e 's#/(home|root|tmp)/[^ ]*#<PATH>#g' \
+      | head -12
     echo
   } >> "${HANDSHAKE_LOG}"
 }
