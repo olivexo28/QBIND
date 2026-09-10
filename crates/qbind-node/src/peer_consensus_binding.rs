@@ -437,6 +437,77 @@ impl PeerConsensusBindingGate {
         self.metrics.record_accepted();
         Ok(origin.validator_id())
     }
+
+    /// Origin-only admission for consensus frames that carry **no** single
+    /// immediate self-declared sender (currently `NewView`, a multi-signer
+    /// `TimeoutCertificate`).
+    ///
+    /// Unlike [`PeerConsensusBindingGate::authorize`], this operation performs
+    /// no claimed-sender comparison — `NewView` has no single claimed sender to
+    /// compare against, so inventing one would be dishonest. Instead it proves
+    /// only that the transport session that submitted the frame is an
+    /// authenticated, authorized member of the configured one-to-one mapping
+    /// before the frame may enter consensus processing.
+    ///
+    /// This is **transport-origin admission**, not `NewView` *signer*
+    /// verification: it neither closes nor claims to close F5. The independent
+    /// `TimeoutCertificate` cryptographic-signer gate (F5) remains unresolved
+    /// and, where wired, still runs after admission.
+    ///
+    /// Fail-closed rules (identical identity discipline to
+    /// [`PeerConsensusBindingGate::authorize`], minus the claimed-sender step):
+    /// * `origin = None` → [`ConsensusBindingReject::MissingOrigin`];
+    /// * the full 32-byte authenticated `NodeId` is not in the authoritative
+    ///   map → [`ConsensusBindingReject::UnknownPeer`];
+    /// * the origin `ValidatorId` does not match the map in **both** the
+    ///   forward (`NodeId → ValidatorId`) and reverse
+    ///   (`ValidatorId → NodeId`) directions →
+    ///   [`ConsensusBindingReject::AmbiguousMapping`].
+    ///
+    /// Identity is taken exclusively from the authenticated
+    /// [`AuthenticatedConsensusOrigin`]; never from any payload field, address
+    /// text, `client_random`, or `ClientInit.validator_id`. Exactly one bounded
+    /// fixed-label metric is recorded per call. On success returns the
+    /// authenticated `ValidatorId`.
+    pub fn authorize_origin(
+        &self,
+        origin: Option<&AuthenticatedConsensusOrigin>,
+    ) -> Result<ValidatorId, ConsensusBindingReject> {
+        // Fail-closed: an absent authenticated origin can never be admitted.
+        let origin = match origin {
+            Some(o) => o,
+            None => {
+                self.metrics
+                    .record_reject(ConsensusBindingReject::MissingOrigin);
+                return Err(ConsensusBindingReject::MissingOrigin);
+            }
+        };
+
+        // The authenticated peer's full 32-byte NodeId must be authorized.
+        let mapped_validator = match self.map.validator_for_node(&origin.node_id()) {
+            Some(v) => v,
+            None => {
+                self.metrics
+                    .record_reject(ConsensusBindingReject::UnknownPeer);
+                return Err(ConsensusBindingReject::UnknownPeer);
+            }
+        };
+
+        // Require the origin ValidatorId to match both the forward
+        // (NodeId → ValidatorId) and reverse (ValidatorId → NodeId) mappings.
+        // Any disagreement (unknown, malformed, ambiguous, or conflicting
+        // pair) fails closed.
+        if mapped_validator != origin.validator_id()
+            || self.map.node_for_validator(&origin.validator_id()) != Some(origin.node_id())
+        {
+            self.metrics
+                .record_reject(ConsensusBindingReject::AmbiguousMapping);
+            return Err(ConsensusBindingReject::AmbiguousMapping);
+        }
+
+        self.metrics.record_accepted();
+        Ok(origin.validator_id())
+    }
 }
 
 #[cfg(test)]

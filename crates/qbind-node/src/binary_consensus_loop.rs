@@ -2663,15 +2663,23 @@ fn forward_actions_to_facade(
 /// observation is recorded. On success the **authenticated** validator id is
 /// used as the `from` handed to the engine.
 ///
-/// `NewView` (a `TimeoutCertificate`) and `Timeout` do not expose a single
-/// immediate transport-sender field the way `Proposal`/`Vote` do, so F6's
-/// claimed-sender comparison cannot be applied to `NewView` (it carries no
-/// single self-declared sender to bind). This does NOT mean their signatures
-/// are verified: Timeout/NewView cryptographic signer verification remains the
-/// independently unresolved **F5** boundary, and it may be optional or entirely
-/// off in the audited deployed path. Run 418 neither closes nor claims to close
-/// F5; it only binds the immediate self-declared sender of `Proposal`, `Vote`,
-/// and the restore-catchup request/response variants.
+/// `NewView` (a `TimeoutCertificate`) carries no single immediate
+/// transport-sender field the way `Proposal`/`Vote` do, so F6's claimed-sender
+/// comparison cannot be applied to it (there is no single self-declared sender
+/// to bind and we do not invent one). Run 418's corrective pass nonetheless
+/// requires that the transport session which submitted a `NewView` is an
+/// authenticated, authorized member of the binding map before the frame may
+/// enter consensus processing: the `NewView` arm calls
+/// [`PeerConsensusBindingGate::authorize_origin`] (origin-only admission, no
+/// claimed sender) BEFORE its delivered counter, F5 verification,
+/// `engine.on_timeout_certificate`, or any view/state mutation. This is
+/// transport-origin admission, NOT signer verification: `NewView`/`Timeout`
+/// cryptographic signer verification remains the independently unresolved
+/// **F5** boundary, and may be optional or entirely off in the audited deployed
+/// path. Run 418 neither closes nor claims to close F5; it binds the immediate
+/// self-declared sender of `Proposal`, `Vote`, `Timeout`, and the
+/// restore-catchup request/response variants, and admits `NewView` only from an
+/// authenticated authorized transport origin.
 ///
 /// When `binding_gate` is `None` (test-only), the legacy payload-derived-sender
 /// behavior is preserved.
@@ -3040,6 +3048,34 @@ pub(crate) fn handle_inbound_consensus_msg(
             update_binary_view_timeout_metrics(metrics, stats);
         }
         ConsensusNetMsg::NewView(bytes) => {
+            // Run 418 corrective pass: authenticated transport-origin admission
+            // for `NewView`. `NewView` is a multi-signer `TimeoutCertificate`
+            // and carries NO single immediate self-declared sender, so the
+            // claimed-sender comparison used for Proposal/Vote/Timeout cannot
+            // apply and we do NOT invent one. Instead we require that the
+            // transport session that submitted this frame is an authenticated,
+            // authorized member of the one-to-one binding map via
+            // `PeerConsensusBindingGate::authorize_origin`. This runs BEFORE the
+            // delivered counter, BEFORE optional F5 cryptographic verification,
+            // BEFORE `engine.on_timeout_certificate`, and before any view/state
+            // mutation or outbound/rebroadcast action. Missing/unknown/ambiguous
+            // authenticated origin fails closed. When no gate is installed
+            // (test-only / local compatibility) the legacy behavior is
+            // preserved. This is transport-origin admission, NOT NewView signer
+            // verification: F5 remains independently unresolved.
+            if let Some(gate) = binding_gate {
+                if let Err(reject) = gate.authorize_origin(origin) {
+                    stats.inbound_sender_binding_rejected_total = stats
+                        .inbound_sender_binding_rejected_total
+                        .saturating_add(1);
+                    eprintln!(
+                        "[binary-consensus] Run 418: inbound NewView REJECTED \
+                         (origin admission) reason={}",
+                        reject
+                    );
+                    return;
+                }
+            }
             // B14: typed binary-path ingestion of `TimeoutCertificate`.
             //
             // The wire payload is a bincode-encoded

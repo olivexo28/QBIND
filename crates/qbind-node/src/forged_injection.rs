@@ -531,9 +531,16 @@ pub enum ForgedInjectError {
 /// Run 418: injected frames carry **no** authenticated transport origin
 /// (`origin = None`) because they do not originate from a real KEMTLS peer
 /// session. When the binary loop has an authenticated peer→validator binding
-/// gate installed, gated frame kinds (e.g. `Timeout`) are therefore rejected at
-/// the binding layer; `NewView` (multi-signer, no immediate sender) is not
-/// gated and still reaches the timeout-certificate verification path.
+/// gate installed, gated frame kinds are therefore rejected at the binding
+/// layer. As of the Run 418 corrective pass this includes `NewView`: it now
+/// requires authenticated transport-origin admission
+/// ([`crate::peer_consensus_binding::PeerConsensusBindingGate::authorize_origin`])
+/// and so an `origin = None` `NewView` is rejected fail-closed BEFORE the
+/// delivered counter, before F5 timeout-certificate verification, and before
+/// `engine.on_timeout_certificate`. (Origin admission is not `NewView` signer
+/// verification; F5 remains unresolved.) When no gate is installed (test-only /
+/// local compatibility) the legacy path is preserved and forged `NewView`
+/// frames still reach the certificate-verification path.
 pub fn inject_frame(
     sender: &mpsc::Sender<InboundConsensusEnvelope>,
     msg: ConsensusNetMsg,

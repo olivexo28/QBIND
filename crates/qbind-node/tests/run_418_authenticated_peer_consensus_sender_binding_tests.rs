@@ -45,6 +45,7 @@ use tokio::time::timeout;
 
 use qbind_consensus::ids::ValidatorId;
 use qbind_consensus::network::NetworkError;
+use qbind_consensus::timeout::TimeoutCertificate;
 use qbind_node::binary_consensus_loop::{
     run_binary_consensus_loop_with_io, BinaryConsensusLoopConfig, BinaryConsensusLoopIo,
     BinaryConsensusLoopProgress,
@@ -702,6 +703,208 @@ fn run418_origin_absent_from_serialized_wire_bytes() {
     );
     // And the origin is still present in-process on the envelope.
     assert!(env.origin.is_some());
+}
+
+// ============================================================================
+// Run 418 corrective pass — NewView authenticated transport-origin admission.
+//
+// `NewView` (a multi-signer `TimeoutCertificate`) has NO single immediate
+// self-declared sender, so the claimed-sender comparison used for Proposal/Vote
+// cannot apply and is not invented. Instead the NewView arm requires that the
+// transport session which submitted the frame is an authenticated, authorized
+// member of the binding map (origin-only admission,
+// `PeerConsensusBindingGate::authorize_origin`) BEFORE the delivered counter,
+// F5 verification, `engine.on_timeout_certificate`, or any view/state mutation.
+// This is transport-origin admission, NOT NewView signer verification (F5 stays
+// unresolved).
+// ============================================================================
+
+/// Build a structurally valid `NewView` frame (bincode `TimeoutCertificate`)
+/// with the given signers, exactly as the binary path decodes it.
+fn make_new_view(timeout_view: u64, signers: Vec<ValidatorId>) -> Vec<u8> {
+    let tc: TimeoutCertificate<[u8; 32]> = TimeoutCertificate::new(timeout_view, None, signers);
+    bincode::serialize(&tc).expect("serialize TC")
+}
+
+// Test 1, 2, 3: NewView with missing origin is rejected BEFORE the delivered
+// counter, with no engine call / view advance / state mutation / outbound
+// action / accepted counter.
+#[tokio::test]
+async fn run418_newview_missing_origin_rejected_before_delivered() {
+    let gate = two_validator_gate();
+    // Unauthenticated Optional/Disabled remote session: no verified origin.
+    let bytes = make_new_view(0, vec![ValidatorId::new(0), ValidatorId::new(1)]);
+    let env = InboundConsensusEnvelope::new(None, ConsensusNetMsg::NewView(bytes));
+
+    let out = drive_one(ValidatorId::new(1), 2, gate.clone(), env).await;
+
+    assert_eq!(
+        out.progress.inbound.inbound_sender_binding_rejected_total, 1,
+        "missing-origin NewView must be rejected fail-closed"
+    );
+    assert_eq!(
+        out.progress.inbound.inbound_new_views_delivered, 0,
+        "rejection must happen BEFORE inbound_new_views_delivered increments"
+    );
+    assert_eq!(
+        out.progress.inbound.inbound_new_views_engine_accepted, 0,
+        "rejected NewView must NOT reach the engine"
+    );
+    assert_eq!(
+        out.progress.inbound.view_timeout_advances, 0,
+        "rejected NewView must NOT advance the view"
+    );
+    assert_eq!(out.progress.current_view, 0, "view must not mutate");
+    assert_eq!(
+        out.outbound.total_actions(),
+        0,
+        "rejected NewView must produce NO outbound action"
+    );
+    assert_eq!(
+        gate.metrics().accepted(),
+        0,
+        "missing-origin NewView must NOT increment the accepted counter"
+    );
+    assert_eq!(
+        gate.metrics()
+            .reject_count(ConsensusBindingReject::MissingOrigin),
+        1,
+        "reject must be classified as a missing origin, recorded exactly once"
+    );
+}
+
+// Test 4: NewView from an unknown/unconfigured NodeId is rejected.
+#[tokio::test]
+async fn run418_newview_unknown_nodeid_rejected() {
+    let gate = two_validator_gate();
+    // Authenticated but unconfigured NodeId (not in the map at all).
+    let origin = AuthenticatedConsensusOrigin::new(nid(0xEE, 0xEE), ValidatorId::new(0));
+    let bytes = make_new_view(0, vec![ValidatorId::new(0), ValidatorId::new(1)]);
+    let env = InboundConsensusEnvelope::new(Some(origin), ConsensusNetMsg::NewView(bytes));
+
+    let out = drive_one(ValidatorId::new(1), 2, gate.clone(), env).await;
+
+    assert_eq!(out.progress.inbound.inbound_sender_binding_rejected_total, 1);
+    assert_eq!(out.progress.inbound.inbound_new_views_delivered, 0);
+    assert_eq!(out.outbound.total_actions(), 0);
+    assert_eq!(gate.metrics().accepted(), 0);
+    assert_eq!(
+        gate.metrics().reject_count(ConsensusBindingReject::UnknownPeer),
+        1,
+        "unknown authenticated NodeId must be classified as unknown_peer"
+    );
+}
+
+// Test 5: A conflicting NodeId/ValidatorId origin pair is rejected.
+#[tokio::test]
+async fn run418_newview_conflicting_pair_rejected() {
+    let gate = two_validator_gate();
+    // NodeId A is configured for validator 0, but the authenticated origin
+    // claims validator 1 — a conflicting/ambiguous pair.
+    let origin = AuthenticatedConsensusOrigin::new(node_a(), ValidatorId::new(1));
+    let bytes = make_new_view(0, vec![ValidatorId::new(0), ValidatorId::new(1)]);
+    let env = InboundConsensusEnvelope::new(Some(origin), ConsensusNetMsg::NewView(bytes));
+
+    let out = drive_one(ValidatorId::new(1), 2, gate.clone(), env).await;
+
+    assert_eq!(out.progress.inbound.inbound_sender_binding_rejected_total, 1);
+    assert_eq!(out.progress.inbound.inbound_new_views_delivered, 0);
+    assert_eq!(out.outbound.total_actions(), 0);
+    assert_eq!(gate.metrics().accepted(), 0);
+    assert_eq!(
+        gate.metrics()
+            .reject_count(ConsensusBindingReject::AmbiguousMapping),
+        1,
+        "conflicting NodeId/ValidatorId pair must be classified as ambiguous_mapping"
+    );
+}
+
+// Test 6: A correctly mapped authenticated origin passes transport-origin
+// admission and then remains subject to the existing F5/engine rules.
+#[tokio::test]
+async fn run418_newview_authenticated_origin_admitted_then_engine_rules_apply() {
+    let gate = two_validator_gate();
+    // Authenticated peer B (validator 1), correctly mapped. Local is validator
+    // 0. verification_ctx is None in `drive_one`, so F5 does not run here; the
+    // frame passes origin admission and then reaches the engine, which applies
+    // its own (unchanged) quorum/view rules.
+    let origin = AuthenticatedConsensusOrigin::new(node_b(), ValidatorId::new(1));
+    let bytes = make_new_view(0, vec![ValidatorId::new(0), ValidatorId::new(1)]);
+    let env = InboundConsensusEnvelope::new(Some(origin), ConsensusNetMsg::NewView(bytes));
+
+    let out = drive_one(ValidatorId::new(0), 2, gate.clone(), env).await;
+
+    assert_eq!(
+        out.progress.inbound.inbound_sender_binding_rejected_total, 0,
+        "correctly mapped authenticated origin must pass transport-origin admission"
+    );
+    assert_eq!(
+        out.progress.inbound.inbound_new_views_delivered, 1,
+        "admitted NewView must reach the delivered counter and remain subject to \
+         the existing F5/engine rules"
+    );
+    // Exactly one accepted binding decision for the admitted NewView.
+    assert_eq!(
+        gate.metrics().accepted(),
+        1,
+        "admitted NewView must increment the accepted binding metric exactly once"
+    );
+}
+
+// Test 8 (metrics, NewView path): binding metrics increment exactly once with
+// fixed labels for an admitted NewView, and exactly once for a rejected one.
+#[tokio::test]
+async fn run418_newview_binding_metric_increments_exactly_once() {
+    // Accepted path: one admitted NewView → accepted == 1, no rejects.
+    let gate = two_validator_gate();
+    let origin = AuthenticatedConsensusOrigin::new(node_b(), ValidatorId::new(1));
+    let bytes = make_new_view(0, vec![ValidatorId::new(0), ValidatorId::new(1)]);
+    let env = InboundConsensusEnvelope::new(Some(origin), ConsensusNetMsg::NewView(bytes));
+    let _ = drive_one(ValidatorId::new(0), 2, gate.clone(), env).await;
+    assert_eq!(gate.metrics().accepted(), 1);
+    let surface = gate.metrics().format_metrics();
+    assert!(surface.contains("qbind_consensus_binding_total{result=\"accepted\"} 1"));
+
+    // Rejected path: one missing-origin NewView → missing_origin == 1, no accept.
+    let gate2 = two_validator_gate();
+    let bytes2 = make_new_view(0, vec![ValidatorId::new(0), ValidatorId::new(1)]);
+    let env2 = InboundConsensusEnvelope::new(None, ConsensusNetMsg::NewView(bytes2));
+    let _ = drive_one(ValidatorId::new(0), 2, gate2.clone(), env2).await;
+    assert_eq!(gate2.metrics().accepted(), 0);
+    assert_eq!(
+        gate2
+            .metrics()
+            .reject_count(ConsensusBindingReject::MissingOrigin),
+        1,
+        "exactly one missing-origin reject recorded for the rejected NewView"
+    );
+}
+
+// Direct proof at the authoritative decision point that origin-only admission
+// fails closed on an absent origin and classifies unknown/ambiguous pairs.
+#[test]
+fn run418_authorize_origin_fails_closed_and_classifies() {
+    let gate = two_validator_gate();
+    // Missing origin.
+    assert_eq!(
+        gate.authorize_origin(None),
+        Err(ConsensusBindingReject::MissingOrigin)
+    );
+    // Unknown NodeId.
+    let unknown = AuthenticatedConsensusOrigin::new(nid(0xEE, 0xEE), ValidatorId::new(0));
+    assert_eq!(
+        gate.authorize_origin(Some(&unknown)),
+        Err(ConsensusBindingReject::UnknownPeer)
+    );
+    // Conflicting pair (NodeId A configured for validator 0, claims validator 1).
+    let conflicting = AuthenticatedConsensusOrigin::new(node_a(), ValidatorId::new(1));
+    assert_eq!(
+        gate.authorize_origin(Some(&conflicting)),
+        Err(ConsensusBindingReject::AmbiguousMapping)
+    );
+    // Correctly mapped origin returns the authenticated validator id.
+    let good = AuthenticatedConsensusOrigin::new(node_a(), ValidatorId::new(0));
+    assert_eq!(gate.authorize_origin(Some(&good)), Ok(ValidatorId::new(0)));
 }
 
 fn contains_subsequence(haystack: &[u8], needle: &[u8]) -> bool {
