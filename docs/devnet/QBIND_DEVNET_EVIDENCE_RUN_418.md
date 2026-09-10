@@ -42,9 +42,17 @@ to the claimed sender.
 - Task-file swap commit (`RUN_417_TASK.txt` → `RUN_418_TASK.txt`):
   `51deb6d543ce5cfc4884d373e49925d0aafefb04` (pre-implementation baseline).
 - Run 418 preliminary implementation commit: `82c4b6d` ("update").
-- Run 418 continuation (this run) builds on `82c4b6d`. The semantic footprint vs `82c4b6d` is
-  the ten files listed in §6. All other pre-existing files were restored to their original
-  line-ending style after an accidental package-wide formatting pass was reverted (see §5).
+- Current main / import base: `5fd8c9b7e8a85f92b80304c69c8d4d097099a777`.
+- Corrective final before this evidence pass: `3bc15066d292a87e11152cf54783fcb5a43ecc9e`.
+- **Corrective comparison** `5fd8c9b7e8a85f92b80304c69c8d4d097099a777..3bc15066d292a87e11152cf54783fcb5a43ecc9e`
+  contains **13 modified paths plus the removal of `task/RUN_418_TASK.txt`, 14 paths total**.
+- The **full Run 418 comparison from `82c4b6d`** is a different, larger scope (the broader
+  source/test footprint tabulated in §6) and must **not** be described as "ten files".
+- Ancestry note: `9eaa8aa` is **not** the direct parent of the corrective final. The history
+  diverged at `82c4b6d` because of the shallow/squashed branch workflow; `5fd8c9b7…` is the
+  immutable import base used for the corrective comparison above.
+- All other pre-existing files were restored to their original line-ending style after an
+  accidental package-wide formatting pass was reverted (see §5).
 
 ## 3. What F6 binding enforces
 
@@ -117,15 +125,22 @@ bytes.
 The preliminary continuation accidentally ran a package-wide `cargo fmt` that both converted
 CRLF→LF and rustfmt-reformatted ~516 pre-existing files unrelated to F6. That churn was reverted:
 every pre-existing file was restored to its original line-ending style and formatting, so the
-tree vs the preliminary base `82c4b6d` shows **only** the ten intended files in §6. New
+tree vs the preliminary base `82c4b6d` shows **only** the thirteen intended source/test/evidence
+files in §6. New
 shell/text evidence files are LF. No repository-wide formatting that rewrites unrelated files
 remains.
 
-## 6. Changed files (vs `82c4b6d`)
+## 6. Changed files (full Run 418 footprint vs `82c4b6d`)
+
+This table is the **broader** Run 418 source/test footprint relative to the preliminary base
+`82c4b6d`; it is a different, larger scope than the corrective comparison in §2 and must not be
+described as "ten files". The corrective comparison
+`5fd8c9b7…..3bc15066…` is 13 modified paths plus the removal of `task/RUN_418_TASK.txt`
+(14 paths total).
 
 | File | Purpose |
 | --- | --- |
-| `crates/qbind-node/src/peer_consensus_binding.rs` | F6 gate/map/origin/metrics (pre-existing in `82c4b6d`; unchanged here) |
+| `crates/qbind-node/src/peer_consensus_binding.rs` | F6 gate/map/metrics; the claimed-sender `authorize` gate pre-existed, but `PeerConsensusBindingGate::authorize_origin` and its unit tests were **added by this corrective pass** (so this file is **not** unchanged) |
 | `crates/qbind-node/src/binary_consensus_loop.rs` | ingress gate wiring; **NewView `authorize_origin` transport-origin admission**; F5/NewView wording |
 | `crates/qbind-node/src/forged_injection.rs` | doc corrected: origin=None NewView now rejected at admission (forged frames carry no real KEMTLS origin) |
 | `crates/qbind-node/src/p2p_node_builder.rs` | validated cert-map admission + strict validator parsing |

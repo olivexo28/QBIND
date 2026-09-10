@@ -66,6 +66,29 @@ binary_consensus_loop lib tests (B14 NewView)   ... ok
 cargo check -p qbind-node                        ... Finished (exit 0)
 cargo build --release -p qbind-node              ... Finished (exit 0)
 
+== cross-run re-validation (readiness/integrity lint + audit harnesses) ==
+# All are LF scripts and were run in place; exit codes and verdicts:
+run_404_public_devnet_package_integrity_manifest.sh              ... exit 0  RESULT=POSITIVE
+run_405_public_devnet_full_tree_package_integrity.sh            ... exit 0  RESULT=POSITIVE
+run_410_public_devnet_package_integrity_stale_prose_lint.sh     ... exit 0  RESULT=POSITIVE
+run_411_public_devnet_readiness_contradiction_ledger_lint.sh    ... exit 0  RESULT=POSITIVE
+run_412_public_devnet_readiness_status_blocker_lint.sh          ... exit 0  RESULT=POSITIVE
+run_413_public_devnet_readiness_recommendation_gap_matrix_lint.sh ... exit 0  RESULT=POSITIVE
+run_414_public_devnet_readiness_cross_section_coverage_lint.sh  ... exit 0  RESULT=POSITIVE
+run_415_public_devnet_readiness_artifact_path_reference_lint.sh ... exit 0  RESULT=POSITIVE
+run_417_foundational_runtime_security_reconciliation_audit.sh   ... exit 0  RESULT=POSITIVE-FOR-AUDIT-COMPLETENESS / SECURITY_VERDICT=NEGATIVE-FOR-RUNTIME-SECURITY
+# The Run 418 harness itself is CRLF; it was run from an LF temporary copy created inside
+# scripts/devnet/ and then removed (the tracked CRLF script was never modified) ... exit 0
+#   RESULT=POSITIVE-FOR-F6-CODE-TEST-REMEDIATION / SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO
+
+== whitespace / static analysis / privacy ==
+git diff --check (this documentation-only corrective commit)    ... exit 0
+git -c core.whitespace=cr-at-eol diff --check 51deb6d..HEAD      ... exit 0
+CodeQL checker invoked                                          ... 0 alerts reported; Rust
+    analysis SKIPPED because the CodeQL database was too large to build. This is NOT a
+    successful, completed Rust analysis and is not described as one.
+secret scanning (SEPARATE tool from CodeQL)                     ... 0 findings
+
 Evidence classification: POSITIVE-FOR-F6-CODE-TEST-REMEDIATION (code/test only).
 No real release-binary runtime evidence exists and no real socket/KEMTLS
 two-process transport capture exists; F6 (incl. NewView transport-origin

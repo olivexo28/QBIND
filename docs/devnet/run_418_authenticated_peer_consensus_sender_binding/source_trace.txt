@@ -1,8 +1,15 @@
 Run 418 — F6 source trace (authenticated KEMTLS peer -> consensus sender binding)
 Base for comparison: 82c4b6d (Run 418 preliminary implementation). Line numbers are HEAD.
+Immutable comparisons: import base (current main) 5fd8c9b7e8a85f92b80304c69c8d4d097099a777;
+corrective final before this evidence pass 3bc15066d292a87e11152cf54783fcb5a43ecc9e. The
+corrective comparison 5fd8c9b7..3bc15066 is 13 modified paths + removal of task/RUN_418_TASK.txt
+(14 paths total). 9eaa8aa is NOT the direct parent; history diverged at 82c4b6d because of the
+shallow/squashed branch workflow.
 
 ============================================================================
-A. Authoritative binding decision point (pre-existing in 82c4b6d; unchanged)
+A. Authoritative binding decision point
+   (claimed-sender gate `authorize` existed previously; `authorize_origin` and its unit tests
+    were ADDED by this corrective pass, so peer_consensus_binding.rs is NOT unchanged)
 ============================================================================
 crates/qbind-node/src/peer_consensus_binding.rs
   :43   AuthenticatedConsensusOrigin  -- in-process only; #[derive] has NO serde; never serialized
@@ -12,8 +19,11 @@ crates/qbind-node/src/peer_consensus_binding.rs
   :297    ::format_metrics()           -- qbind_consensus_binding_total{result="..."} live surface
   :328  PeerConsensusBindingGate
   :388    ::authorize(origin, claimed) -> Result<ValidatorId, ConsensusBindingReject>
+          (claimed-sender gate; PRE-EXISTING before this corrective pass)
           MissingOrigin / UnknownPeer / AmbiguousMapping / UnknownValidator / ClaimedSenderMismatch
-  :~441   ::authorize_origin(origin) -> Result<ValidatorId, ConsensusBindingReject>  (corrective pass)
+  :~441   ::authorize_origin(origin) -> Result<ValidatorId, ConsensusBindingReject>
+          ADDED BY THIS CORRECTIVE PASS (with its dedicated unit tests): therefore
+          peer_consensus_binding.rs is NOT unchanged in this corrective pass.
           origin-only admission for NewView (no claimed sender to compare / none invented):
           MissingOrigin (origin=None) / UnknownPeer (NodeId not in map) /
           AmbiguousMapping (forward NodeId->ValidatorId AND reverse ValidatorId->NodeId must both

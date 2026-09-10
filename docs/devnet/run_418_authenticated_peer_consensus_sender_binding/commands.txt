@@ -20,9 +20,29 @@ cargo test -p qbind-node --test b10_engine_acceptance_qc_closure_tests        ->
 cargo test -p qbind-node --test b11_consensus_net_prometheus_coverage_tests   -> 0 (5 passed)
 
 # Run 418 harness (fail-closed evidence + NewView-admission guards + negative self-tests)
-scripts/devnet/run_418_authenticated_peer_consensus_sender_binding.sh -> 0
+# The tracked harness script is CRLF, so it was executed from an LF temporary copy created
+# inside scripts/devnet/ (BASH_SOURCE-relative REPO_ROOT is preserved) and then removed; the
+# tracked CRLF script was never modified.
+sed 's/\r$//' scripts/devnet/run_418_authenticated_peer_consensus_sender_binding.sh \
+    > scripts/devnet/.run418_lf_tmp.sh
+bash scripts/devnet/.run418_lf_tmp.sh                                -> 0
     RESULT=POSITIVE-FOR-F6-CODE-TEST-REMEDIATION
     SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO
+rm -f scripts/devnet/.run418_lf_tmp.sh   # LF temporary copy removed
+
+# Cross-run readiness/integrity lint + audit harnesses re-validated (all LF scripts, run in place).
+# Exact commands, verdicts and exit codes:
+scripts/devnet/run_404_public_devnet_package_integrity_manifest.sh        -> 0  RESULT=POSITIVE
+scripts/devnet/run_405_public_devnet_full_tree_package_integrity.sh       -> 0  RESULT=POSITIVE
+scripts/devnet/run_410_public_devnet_package_integrity_stale_prose_lint.sh -> 0  RESULT=POSITIVE
+scripts/devnet/run_411_public_devnet_readiness_contradiction_ledger_lint.sh -> 0  RESULT=POSITIVE
+scripts/devnet/run_412_public_devnet_readiness_status_blocker_lint.sh      -> 0  RESULT=POSITIVE
+scripts/devnet/run_413_public_devnet_readiness_recommendation_gap_matrix_lint.sh -> 0  RESULT=POSITIVE
+scripts/devnet/run_414_public_devnet_readiness_cross_section_coverage_lint.sh -> 0  RESULT=POSITIVE
+scripts/devnet/run_415_public_devnet_readiness_artifact_path_reference_lint.sh -> 0  RESULT=POSITIVE
+scripts/devnet/run_417_foundational_runtime_security_reconciliation_audit.sh -> 0
+    RESULT=POSITIVE-FOR-AUDIT-COMPLETENESS
+    SECURITY_VERDICT=NEGATIVE-FOR-RUNTIME-SECURITY
 
 # Formatting / whitespace
 rustfmt --edition 2021 --check <LF Rust files changed by Run 418>  -> clean
@@ -31,9 +51,16 @@ rustfmt --edition 2021 --check <LF Rust files changed by Run 418>  -> clean
     CRLF source files (peer_consensus_binding.rs, binary_consensus_loop.rs,
     forged_injection.rs) report only their PRE-EXISTING CRLF/rustfmt drift; the
     NewView-admission additions are rustfmt-clean when line endings are ignored.
-cargo fmt --all -- --check                            -> 1  (KNOWN PRE-EXISTING repo-wide drift; not introduced by Run 418)
-git diff --check                                      -> CR-at-eol on pre-existing CRLF Rust files only
-git -c core.whitespace=cr-at-eol diff --check 51deb6d543ce5cfc4884d373e49925d0aafefb04..HEAD -> 0 (no genuine whitespace errors)
+# Whitespace / line endings (this documentation-only corrective commit)
+# Every file modified by this evidence pass was written with LF endings.
+git diff --check                                      -> 0  (documentation-only LF changes; no CR-at-eol / trailing-whitespace errors on the changed lines)
+git -c core.whitespace=cr-at-eol diff --check 51deb6d543ce5cfc4884d373e49925d0aafefb04..HEAD -> 0  (no genuine whitespace errors across the Run 418 range)
 
-# Provenance / secrets
-secret/private-material scan of changed files         -> 0 findings
+# Static analysis / privacy (separate axes)
+# CodeQL checker was invoked on the change set.
+#   exact result: 0 alerts reported, BUT the Rust analysis was SKIPPED because the CodeQL
+#   database was too large to build; this is therefore NOT a successful, completed Rust
+#   analysis and must not be described as one.
+codeql checker (invoked)                              -> 0 alerts reported; Rust analysis SKIPPED (database too large; not a completed Rust analysis)
+# Secret scanning is a SEPARATE tool from CodeQL and was run independently.
+secret / private-material scan of changed files       -> 0 findings

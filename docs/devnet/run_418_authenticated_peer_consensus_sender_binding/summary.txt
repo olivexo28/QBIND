@@ -3,6 +3,9 @@ title=Authenticated KEMTLS peer -> consensus sender binding (F6)
 type=production-code security remediation (Rust code + tests) + evidence
 finding=F6 (transport-session-to-consensus-sender binding / accountability)
 preliminary_base_commit=82c4b6d
+import_base_current_main=5fd8c9b7e8a85f92b80304c69c8d4d097099a777
+corrective_final_before_this_pass=3bc15066d292a87e11152cf54783fcb5a43ecc9e
+ancestry_note=9eaa8aa is NOT the direct parent of the corrective final; history diverged at 82c4b6d due to the shallow/squashed branch workflow
 pre_implementation_baseline=51deb6d543ce5cfc4884d373e49925d0aafefb04
 run_417_finalization_base=2974f203251a57ded30c9486abf59adfd08419cc
 corrective_pass=Run 418 corrective (NewView authenticated transport-origin admission); NOT Run 419
@@ -65,7 +68,8 @@ strict_parse=parse_test_validator_id_from_cert_validator_id: qbind-val-<N> canon
 
 # --- Line-ending reconciliation (Task item 1) ---
 churn_removed=reverted an accidental package-wide cargo fmt that flipped CRLF->LF and rustfmt-reformatted ~516 unrelated pre-existing files; restored each to original line-ending style + formatting
-tree_footprint_vs_82c4b6d=only the 10 intended F6 files (see source_trace.txt)
+tree_footprint_vs_82c4b6d=the broader Run 418 source/test footprint is the 13 intended files in source_trace.txt (a larger, different scope than the corrective comparison; NOT "ten files")
+corrective_comparison=5fd8c9b7e8a85f92b80304c69c8d4d097099a777..3bc15066d292a87e11152cf54783fcb5a43ecc9e = 13 modified paths + removal of task/RUN_418_TASK.txt = 14 paths total
 new_evidence_files=LF
 
 # --- Preserved posture (unchanged) ---
