@@ -701,7 +701,10 @@ mod tests {
         let map = PeerConsensusBindingMap::build([(nid(1), ValidatorId::new(1))]).unwrap();
         let gate = PeerConsensusBindingGate::new(map);
         let origin = AuthenticatedConsensusOrigin::new(nid(1), ValidatorId::new(1));
-        assert_eq!(gate.authorize_origin(Some(&origin)), Ok(ValidatorId::new(1)));
+        assert_eq!(
+            gate.authorize_origin(Some(&origin)),
+            Ok(ValidatorId::new(1))
+        );
         assert_eq!(gate.metrics().accepted(), 1);
     }
 
