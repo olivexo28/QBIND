@@ -1,0 +1,72 @@
+run=Run 418
+title=Authenticated KEMTLS peer -> consensus sender binding (F6)
+type=production-code security remediation (Rust code + tests) + evidence
+finding=F6 (transport-session-to-consensus-sender binding / accountability)
+preliminary_base_commit=82c4b6d
+pre_implementation_baseline=51deb6d543ce5cfc4884d373e49925d0aafefb04
+run_417_finalization_base=2974f203251a57ded30c9486abf59adfd08419cc
+
+# --- Overall result ---
+overall_result=F6-REMEDIATED-IN-CODE-AND-TEST / NO-RELEASE-BINARY-EVIDENCE
+harness_result=POSITIVE-FOR-F6-CODE-TEST-REMEDIATION
+security_posture=RS1-OPEN / PUBLIC-DEVNET-NO-GO
+release_binary_evidence=ABSENT (no live multi-node release-binary capture exists)
+
+# --- Scope guard (what F6 does and does NOT do) ---
+f6_scope=transport-session-to-consensus-sender binding + accountability ONLY
+f6_does_not_close=F3 F4 F5 F7 F8 RS1 C4 C5
+still_true_after_f6=proposals/votes emitted unsigned with toy suite 0; inbound accepted without signature/membership/suite verification; QCs imported with empty signer evidence
+f5_status=Timeout/NewView cryptographic verification remains the independently unresolved F5 boundary; may be optional/off in the audited deployed path. NewView carries no single immediate transport-sender field, so the F6 claimed-sender comparison does not apply to NewView. F5 is NOT claimed fixed or always enforced.
+
+# --- Authoritative decision point ---
+gate=crates/qbind-node/src/peer_consensus_binding.rs :: PeerConsensusBindingGate::authorize
+reject_reasons=MissingOrigin UnknownPeer UnknownValidator ClaimedSenderMismatch AmbiguousMapping
+metric=qbind_consensus_binding_total{result="..."} (fixed low-cardinality labels)
+loop_counter=BinaryConsensusLoopInboundStats::inbound_sender_binding_rejected_total
+
+# --- Acceptance coverage (dedicated Run 418 integration tests, all PASS) ---
+a01_matching_proposal_accepted=PASS (run418_matching_proposal_accepted_and_client_identity_propagates)
+a02_matching_vote_accepted=PASS (run418_matching_vote_accepted_by_gate)
+a03_peerB_claims_validatorA_proposal_rejected=PASS (run418_proposal_impersonation_rejected_no_side_effects)
+a04_peerB_claims_validatorA_vote_rejected=PASS (run418_vote_impersonation_rejected_no_side_effects)
+a05_mismatch_no_engine_call_or_mutation_or_outbound_or_counter=PASS (asserts total_actions==0, delivered==0, engine_accepted==0)
+a06_missing_origin_rejected=PASS (run418_missing_origin_rejected + run418_gate_fails_closed_on_absent_origin)
+a07_unauthenticated_optional_disabled_rejected=PASS (missing-origin path fails closed under installed gate)
+a08_inbound_verified_client_identity_end_to_end=PASS (matching proposal drives engine, emits real outbound vote)
+a09_outbound_verified_server_identity_end_to_end=PASS (run418_outbound_unexpected_server_identity_cannot_inherit_configured_origin)
+a10_unconfigured_alternate_cert_rejected=PASS (run418_unconfigured_and_colliding_nodeids_rejected)
+a11_malformed_noncanonical_out_of_range_validator_rejected=PASS (run418_strict_validator_id_parsing)
+a12_duplicate_ambiguous_map_fails_startup=PASS (run418_duplicate_or_ambiguous_map_fails_startup)
+a13_full_32_byte_nodeid_comparison_first_eight_collide=PASS (run418_unconfigured_and_colliding_nodeids_rejected)
+a14_fixed_label_metrics_increment_and_live_surface=PASS (run418_metrics_fixed_labels_and_live_surface)
+a15_origin_absent_from_serialized_wire_bytes=PASS (run418_origin_absent_from_serialized_wire_bytes)
+real_production_types=run_binary_consensus_loop_with_io + BinaryConsensusLoopIo{binding_gate:Some} + InboundConsensusEnvelope + PeerConsensusBindingGate/Map + VerifiedServerIdentity + parse_test_validator_id_from_cert_validator_id (no mock ingress / no mock gate)
+
+# --- Identity provenance (both connection directions) ---
+inbound_server_side=verified client identity surfaced from the established session, carried on InboundConsensusEnvelope.origin, drives the engine end-to-end
+outbound_client_side=verified server identity surfaced from the client-side Connection via VerifiedServerIdentity (full cert-derived NodeId + validator identity + authentication-complete), compared against the configured expected pair; an unexpected server cert/identity cannot inherit the configured address origin; mismatch rejects the session
+config_and_vid_at_addr=identify the EXPECTED peer only; never mint the authenticated origin
+origin_type=AuthenticatedConsensusOrigin is in-process only (no serde); absent from serialized wire bytes
+
+# --- Certificate-map construction ---
+admission=crates/qbind-node/src/p2p_node_builder.rs :: validated_cert_bound_node_id (structural+suite validation, verify vs configured PQC root, canonical validator-id match, index<num_validators, revocation/env checks where policy provides, full 32-byte NodeId, one-to-one uniqueness)
+decode_only_not_admitted=cert_bound_node_id is now #[cfg(test)] decode-only and is NOT used for map admission
+strict_parse=parse_test_validator_id_from_cert_validator_id: qbind-val-<N> canonical decimal + canonical zero padding only; rejects leading zeros, trailing nonzero/arbitrary bytes, overflow, out-of-range via definitive canonical round-trip
+
+# --- Line-ending reconciliation (Task item 1) ---
+churn_removed=reverted an accidental package-wide cargo fmt that flipped CRLF->LF and rustfmt-reformatted ~516 unrelated pre-existing files; restored each to original line-ending style + formatting
+tree_footprint_vs_82c4b6d=only the 10 intended F6 files (see source_trace.txt)
+new_evidence_files=LF
+
+# --- Preserved posture (unchanged) ---
+f1_f8=F1-F5 and F7-F8 remain unresolved
+rs1=OPEN / launch-blocking
+m4=Yellow / launch-blocking
+m6=Yellow / Partial
+s5=Yellow
+s7=Yellow
+c4_c5=OPEN
+public_devnet=NO-GO / not launch-ready
+live_seed=devnet-seeds.live.json absent; candidate planned; last_reachability_evidence null
+testnet_mainnet=untouched
+private_key_material=none committed

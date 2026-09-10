@@ -113,6 +113,16 @@ pub struct HandshakeResult<'a> {
     ///   verified successfully. None if server-auth only mode or no client cert.
     /// - Client side: Always None (client doesn't have its own NodeId from server).
     pub client_node_id: Option<[u8; 32]>,
+    /// Server's NodeId derived from the verified server delegation certificate
+    /// (Run 418, F6).
+    ///
+    /// - Client side: Set to the full 32-byte `derive_node_id_from_cert` of the
+    ///   server's delegation cert AFTER it has been parsed, suite/structure
+    ///   checked, verified against the configured root, validator-id-matched,
+    ///   and revocation-checked. This is the actual verified server identity —
+    ///   never derived from the dial address or any self-asserted field.
+    /// - Server side: Always None.
+    pub server_node_id: Option<[u8; 32]>,
     /// Whether mutual authentication was performed.
     ///
     /// True if client certificate was verified successfully.
@@ -528,12 +538,22 @@ impl ClientHandshake {
         let mutual_auth_complete = client_init.version >= PROTOCOL_VERSION_2 
             && !client_init.client_cert.is_empty();
 
+        // Run 418 (F6): surface the ACTUAL verified server identity. The
+        // server's `delegation_cert` has, at this point, been parsed, suite/
+        // structure checked, verified against the configured root, matched
+        // against the expected `validator_id`, and revocation-checked above.
+        // Bind the full 32-byte cert-derived NodeId so the outbound consensus
+        // origin comes from the verified server certificate, never from the
+        // dial address.
+        let server_node_id = derive_node_id_from_cert(&delegation_cert);
+
         Ok(HandshakeResult {
             session,
             peer_validator_id: delegation_cert.validator_id,
             kem_suite_id: client_init.kem_suite_id,
             aead_suite_id: client_init.aead_suite_id,
             client_node_id: None, // Client side doesn't see its own NodeId
+            server_node_id: Some(server_node_id),
             mutual_auth_complete,
         })
     }
@@ -1034,6 +1054,9 @@ impl ServerHandshake {
             kem_suite_id: init.kem_suite_id,
             aead_suite_id: init.aead_suite_id,
             client_node_id,
+            // Server side never derives its own peer's *server* NodeId — this is
+            // the client-side (Run 418) surface only.
+            server_node_id: None,
             mutual_auth_complete,
         };
 

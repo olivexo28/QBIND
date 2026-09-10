@@ -149,6 +149,26 @@ pub struct AcceptedPeerInit {
 /// Default timeout for socket read/write operations (in seconds).
 const DEFAULT_SOCKET_TIMEOUT_SECS: u64 = 10;
 
+/// Run 418 (F6): the actual verified server identity surfaced from a
+/// successful client-side KEMTLS `Connection`.
+///
+/// Both `node_id` and `validator_id` are established by the client's
+/// verification of the server's delegation certificate during the handshake
+/// (parse → root-verify → validator-id-match → revocation-check). Neither is
+/// derived from the dial address or any self-asserted field. The dial address
+/// and `vid@addr` identify the *expected* peer, but MUST NOT themselves mint
+/// the authenticated origin.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct VerifiedServerIdentity {
+    /// Full 32-byte cert-derived NodeId of the verified server certificate.
+    pub node_id: [u8; 32],
+    /// `validator_id` field of the verified server certificate.
+    pub validator_id: [u8; 32],
+    /// Whether mutual authentication completed for this session (client cert
+    /// presented and the server's `MutualAuthMode` was not `Disabled`).
+    pub authenticated: bool,
+}
+
 /// Error type for SecureChannel operations.
 ///
 /// Separates I/O errors from protocol/crypto errors.
@@ -401,6 +421,25 @@ impl SecureChannel {
     /// Check if the connection is established and ready for app data.
     pub fn is_established(&self) -> bool {
         self.conn.is_established()
+    }
+
+    /// Run 418 (F6): the verified server identity established by a successful
+    /// client-side KEMTLS handshake, or `None` if called before the handshake
+    /// completed on a server-side channel.
+    ///
+    /// `node_id` is the full 32-byte cert-derived NodeId of the verified server
+    /// delegation certificate; `validator_id` is that certificate's
+    /// `validator_id` field. Both come exclusively from the verified server
+    /// certificate the client parsed, root-verified, validator-id-matched and
+    /// revocation-checked during the handshake — never from the dial address.
+    pub fn verified_server_identity(&self) -> Option<VerifiedServerIdentity> {
+        let node_id = self.conn.peer_node_id()?;
+        let validator_id = self.conn.peer_validator_id()?;
+        Some(VerifiedServerIdentity {
+            node_id,
+            validator_id,
+            authenticated: self.conn.mutual_auth_complete(),
+        })
     }
 
     /// Set the socket to non-blocking mode for recv operations.
@@ -924,6 +963,46 @@ pub async fn connect_kemtls_async(
     tokio::time::sleep(Duration::from_millis(100)).await;
 
     Ok(async_channel)
+}
+
+/// Like [`connect_kemtls_async`], but additionally surfaces the actual verified
+/// server identity established by the successful client-side KEMTLS handshake
+/// (Run 418, F6).
+///
+/// The returned [`VerifiedServerIdentity`] is read from the established
+/// `Connection` (verified server cert-derived NodeId + validator id +
+/// authentication state). It is `None` only if the underlying connection did
+/// not surface a server cert identity. Callers on the production
+/// `MutualAuthMode::Required` + `pqc-static-root` path MUST compare this actual
+/// identity against the configured authoritative map and reject the session on
+/// any mismatch, rather than minting an origin from the dial address.
+pub async fn connect_kemtls_async_with_server_identity(
+    addr: String,
+    cfg: ClientConnectionConfig,
+) -> Result<(SecureChannelAsync, Option<VerifiedServerIdentity>), AsyncChannelError> {
+    // Perform the blocking connect in spawn_blocking, capturing the verified
+    // server identity from the established `Connection` before the channel is
+    // wrapped for async I/O.
+    let (channel, server_identity) =
+        tokio::task::spawn_blocking(move || match SecureChannel::connect(&addr, cfg) {
+            Ok(ch) => {
+                let id = ch.verified_server_identity();
+                Ok((ch, id))
+            }
+            Err(e) => Err(e),
+        })
+        .await
+        .map_err(|e| AsyncChannelError::TaskJoin(e.to_string()))?
+        .map_err(AsyncChannelError::Channel)?;
+
+    // Create the async wrapper outside the blocking context
+    // This spawns the reader/writer workers
+    let async_channel = SecureChannelAsync::try_new(channel)?;
+
+    // Give workers a moment to start
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    Ok((async_channel, server_identity))
 }
 
 /// Perform a blocking server-side KEMTLS handshake in a spawn_blocking task.

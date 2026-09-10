@@ -1,0 +1,45 @@
+Run 418 — test results (sandbox, 2026-09-08)
+
+== peer_consensus_binding lib unit tests (12/12 pass) ==
+duplicate_nodeid_different_validator_fails ... ok
+exact_duplicate_entry_fails ... ok
+duplicate_validator_fails ... ok
+full_32_byte_nodeids_compared_first_eight_collide ... ok
+gate_accepts_matching_origin_and_claim ... ok
+gate_fails_closed_on_missing_origin ... ok
+gate_rejects_ambiguous_mapping ... ok
+gate_rejects_claimed_sender_mismatch ... ok
+gate_rejects_unknown_validator_claim ... ok
+map_builds_one_to_one ... ok
+gate_rejects_unknown_peer ... ok
+metrics_labels_are_fixed_and_bounded ... ok
+test result: ok. 12 passed; 0 failed.
+
+== run_418 integration tests (12/12 pass) ==
+run418_matching_proposal_accepted_and_client_identity_propagates ... ok
+run418_matching_vote_accepted_by_gate ... ok
+run418_proposal_impersonation_rejected_no_side_effects ... ok
+run418_vote_impersonation_rejected_no_side_effects ... ok
+run418_missing_origin_rejected ... ok
+run418_gate_fails_closed_on_absent_origin ... ok
+run418_outbound_unexpected_server_identity_cannot_inherit_configured_origin ... ok
+run418_unconfigured_and_colliding_nodeids_rejected ... ok
+run418_strict_validator_id_parsing ... ok
+run418_duplicate_or_ambiguous_map_fails_startup ... ok
+run418_metrics_fixed_labels_and_live_surface ... ok
+run418_origin_absent_from_serialized_wire_bytes ... ok
+test result: ok. 12 passed; 0 failed.
+
+== regression (no breakage from line-ending restore) ==
+qbind-net                                       ... ok (0 failed)
+c4_b6_p2p_binary_path_interconnect_tests        ... ok (5 passed)
+b9_late_peer_connect_proposal_reemit_tests      ... ok (6 passed)
+b10_engine_acceptance_qc_closure_tests          ... ok (5 passed)
+b11_consensus_net_prometheus_coverage_tests     ... ok (5 passed)
+
+== build ==
+cargo check -p qbind-node                        ... Finished (exit 0)
+cargo build --release -p qbind-node              ... Finished in 6m45s (exit 0)
+
+Evidence classification: POSITIVE-FOR-F6-CODE-TEST-REMEDIATION.
+No real release-binary runtime evidence exists; F6 is remediated in code/test only.
