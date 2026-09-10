@@ -1,0 +1,35 @@
+Run 420 — performance record
+============================
+
+Run 420 changes the consensus-loop control flow only along the previously
+fail-open branch (context-absent Proposal/Vote). It adds no per-message
+cryptographic work to any path that did not already perform it, and no
+allocation on the hot accepted path.
+
+Cost model
+----------
+* Required + verification_ctx == None (inbound):  one enum `matches!` check
+  (`requires_context()`), one atomic counter increment, one eprintln on
+  rejection, then early return. O(1); strictly cheaper than the former
+  fall-through which continued into delivery/engine/aggregation.
+* Required + verification_ctx == Some:  identical to pre-Run-420 — the same
+  `verify_proposal_msg` / `verify_vote_msg` call. No added overhead.
+* LocalFixtureUnsigned + None (test-only):  legacy passthrough, unchanged.
+* Outbound:  one enum check before the existing signing branch; suppression is
+  an early `None` return (no broadcast, no allocation).
+
+The four new counters are process-wide `AtomicU64`s updated with `store`
+during snapshot population and rendered as fixed-name Prometheus series (no
+per-message label cardinality, no attacker-controlled labels).
+
+Measured test wall-clock (indicative, debug build, warm)
+--------------------------------------------------------
+  binary_consensus_loop lib suite (94 tests) .......... ~1.2 s
+  run420 subset (31 tests) ............................ ~0.5 s
+  run030 subset (20 tests) ............................ ~0.4 s
+  proposal_vote_verify lib (20 tests) ................. ~0.4 s
+  reachability guard (3 tests) ........................ ~0.01 s
+
+No throughput/latency benchmark harness is claimed for the release binary in
+this run (RELEASE_BINARY_EVIDENCE=NOT-CAPTURED). The change is control-flow
+only and does not alter the accepted-message code path's complexity.

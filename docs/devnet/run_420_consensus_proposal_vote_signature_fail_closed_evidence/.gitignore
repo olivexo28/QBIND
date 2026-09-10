@@ -1,0 +1,14 @@
+# Curated, publish-safe. Never commit private keys, certificates, raw logs,
+# raw metric dumps, data directories, or generated integrity manifests.
+*.key
+*.pem
+*.crt
+*.p12
+*.log
+*.raw
+*_raw_*
+data/
+tmp/
+*.tmp
+# transient generated manifests (never committed)
+*_MANIFEST.generated.json

@@ -1,0 +1,50 @@
+Run 420 — adversarial / scenario matrix
+=======================================
+
+Each row is proven by a production-path loop test in
+crates/qbind-node/src/binary_consensus_loop.rs (mod tests::run420) or the
+source-level guard in
+crates/qbind-node/tests/run_420_production_policy_reachability_tests.rs.
+
+INBOUND
+-------
+# | Policy   | Context     | Message              | Expected outcome                                                            | Test
+--+----------+-------------+----------------------+-----------------------------------------------------------------------------+---------------------------------------------------------
+1 | Required | None        | valid-encoded Proposal| REJECT; inbound_proposal_ctx_unavailable +1; delivered unchanged; reconfig  | run420_required_none_inbound_proposal_rejected_fail_closed
+  |          |             |                      | detector empty; engine unchanged; no vote/outbound                          |
+2 | Required | None        | valid-encoded Vote    | REJECT; inbound_vote_ctx_unavailable +1; delivered unchanged; aggregation   | run420_required_none_inbound_vote_rejected_fail_closed
+  |          |             |                      | unchanged; QC/view/commit unchanged; no outbound                            |
+3 | Required | present     | valid Proposal        | PASS verification; reach normal downstream boundary                         | run420_required_ctx_present_valid_proposal_passes
+4 | Required | present     | valid Vote            | PASS verification; reach normal downstream boundary                         | run420_required_ctx_present_valid_vote_passes
+5 | Required | present     | invalid signature     | REJECT before mutation (bitflip/changed-payload/wrong-validator/wrong-suite)| run420_required_ctx_present_invalid_signature_still_rejected
+  |          |             |                      |                                                                             | + run420_inbound_bitflipped_* / _changed_payload_* / _wrong_suite_* / _unknown_validator_*
+6 | Required | present     | F6 sender mismatch    | F6 counter +1; proposal/vote verify counters NOT incremented; no crypto     | (Run 418 F6 gate precedes Run 420 gate; see verification_order.txt)
+7 | Required | present     | F6 ok + wrong sig     | F6 accepts; signature verification REJECTS; no delivery/mutation            | run420_inbound_wrong_validator_signature_rejected
+8 | Required | present     | good sig + F6 mismatch| F6 REJECTS first; signature verification not reached                        | (order guaranteed structurally; see verification_order.txt)
+9 | Required | None        | Proposal (restore/deferred path) | restore/deferral cannot occur before required verification (rejected first) | run420_required_none_inbound_proposal_rejected_fail_closed
+10| Required | None        | Proposal (reconfig)   | reconfiguration observation cannot occur before required verification       | run420_required_none_inbound_proposal_rejected_fail_closed (detector.header_cache empty assertion)
+- | Fixture  | None        | Proposal/Vote         | legacy unsigned passthrough (test-only; not reachable in production)        | run420_inbound_no_ctx_does_not_run_verify_gate / run420_outbound_no_ctx_returns_unchanged
+
+OUTBOUND (Proposal AND Vote)
+----------------------------
+# | Policy   | Context             | Expected outcome                                        | Test
+--+----------+---------------------+---------------------------------------------------------+-----------------------------------------------------
+O1| Required | None                | NO broadcast, NO self-injection; outbound_ctx_unavail +1| run420_required_none_outbound_proposal_suppressed / run420_required_none_outbound_vote_suppressed
+O2| Required | present, signer=None| NO broadcast, NO self-injection; signing_failure        | run420_required_ctx_signer_none_outbound_suppressed / run420_outbound_fail_closed_when_signer_missing
+O3| Required | present, valid signer| correctly signed message produced                      | run420_outbound_signs_proposal_and_vote_when_signer_present / run420_required_valid_signer_signs_and_roundtrip_verifies
+O4| Required | present, valid signer| signed message verifies through inbound verifier        | run420_required_valid_signer_signs_and_roundtrip_verifies
+- | (all)    | (all)               | no dummy/unsigned fallback; failed signing never queues | (structural: sign helpers return Option; None => not enqueued)
+
+METRICS
+-------
+All four context-unavailable series render on /metrics and are distinct from
+the verify-rejected families:
+  run420_context_unavailable_metrics_render
+  run420_metrics_exposition_renders_all_counters
+
+SOURCE-LEVEL REACHABILITY (fixture bypass unreachable from production)
+----------------------------------------------------------------------
+  main_rs_selects_required_and_never_fixture_policy
+  p2p_node_builder_never_selects_fixture_policy
+  fixture_policy_only_selected_from_test_module
+  default_policy_is_required (ConsensusVerificationPolicy::default() == Required)

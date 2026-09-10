@@ -729,8 +729,9 @@ fn build_uniform_validator_set(num_validators: u64) -> ConsensusValidatorSet {
 ///   NOT be selectable from the production `qbind-node` CLI, TestNet, MainNet,
 ///   authenticated P2P mode, restore/replay paths, or public DevNet
 ///   configuration. Only isolated local fixture/test construction may select
-///   it. It is never chosen by any production constructor (proven by
-///   `production_binary_never_selects_fixture_policy`).
+///   it. It is never chosen by any production constructor (proven at the
+///   source level by the guard tests in
+///   `tests/run_420_production_policy_reachability_tests.rs`).
 ///
 /// When a verification context IS wired (`Some`), both policies behave
 /// identically: the message is verified/signed exactly as before. The policy
