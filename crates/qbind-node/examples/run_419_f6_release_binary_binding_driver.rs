@@ -533,8 +533,10 @@ async fn send_frames(ctx: &P2pNodeContext, frames: &[P2pMessage]) {
         ctx.p2p_service.broadcast(frame.clone());
         tokio::time::sleep(Duration::from_millis(150)).await;
     }
-    // Drain time for the receiver's loop.
-    tokio::time::sleep(Duration::from_millis(800)).await;
+    // Drain time for the receiver's loop (kept generous so the receiver's
+    // inbound session is fully established and each frame is demuxed through the
+    // binary-consensus binding gate before this driver tears the session down).
+    tokio::time::sleep(Duration::from_millis(2000)).await;
 }
 
 struct DriveOutcome {
