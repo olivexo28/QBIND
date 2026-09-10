@@ -1877,6 +1877,7 @@ pub async fn run_binary_consensus_loop_with_io(
         }
     }
 
+    #[allow(clippy::type_complexity)]
     let (mut inbound_rx, outbound_facade, peer_connectivity, verification_ctx, binding_gate, verification_policy): (
         Option<mpsc::Receiver<InboundConsensusEnvelope>>,
         Option<Arc<dyn ConsensusNetworkFacade>>,
@@ -3812,6 +3813,7 @@ pub(crate) fn handle_inbound_consensus_msg(
 /// so Run 035 cannot drift from the live inbound path the binary loop
 /// drives.
 #[cfg_attr(not(test), allow(dead_code))]
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn deliver_inbound_for_run035(
     engine: &mut BasicHotStuffEngine<[u8; 32]>,
     msg: ConsensusNetMsg,

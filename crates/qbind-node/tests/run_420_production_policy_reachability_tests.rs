@@ -17,8 +17,7 @@ fn crate_src() -> PathBuf {
 
 fn read(name: &str) -> String {
     let path = crate_src().join(name);
-    std::fs::read_to_string(&path)
-        .unwrap_or_else(|e| panic!("read {}: {e}", path.display()))
+    std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()))
 }
 
 /// Returns true if a trimmed source line is a comment (line- or block-style)
@@ -33,8 +32,7 @@ fn is_comment_line(line: &str) -> bool {
 /// false positives on doc-comment intra-doc links and prose mentions.
 const FIXTURE_FIELD_ASSIGN: &str =
     "verification_policy: ConsensusVerificationPolicy::LocalFixtureUnsigned";
-const REQUIRED_FIELD_ASSIGN: &str =
-    "verification_policy: ConsensusVerificationPolicy::Required";
+const REQUIRED_FIELD_ASSIGN: &str = "verification_policy: ConsensusVerificationPolicy::Required";
 
 /// The production binary entrypoint (`main.rs`) must select the `Required`
 /// policy for its live consensus loop and must never assign the test-only
@@ -70,8 +68,7 @@ fn p2p_node_builder_never_selects_fixture_policy() {
         .lines()
         .enumerate()
         .filter(|(_, l)| {
-            !is_comment_line(l)
-                && l.contains("ConsensusVerificationPolicy::LocalFixtureUnsigned")
+            !is_comment_line(l) && l.contains("ConsensusVerificationPolicy::LocalFixtureUnsigned")
         })
         .map(|(i, _)| i + 1)
         .collect();
