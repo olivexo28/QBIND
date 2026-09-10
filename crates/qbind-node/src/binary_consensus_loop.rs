@@ -1893,10 +1893,13 @@ pub async fn run_binary_consensus_loop_with_io(
             io.binding_gate,
             io.verification_policy,
         ),
-        // No `io` at all is the single-validator/LocalMesh in-process path
-        // which never receives P2P Proposal/Vote frames; the fixture policy
-        // preserves its historical behavior.
-        None => (None, None, None, None, None, ConsensusVerificationPolicy::LocalFixtureUnsigned),
+        // No `io` at all is the degenerate in-process path with no inbound
+        // receiver and no outbound facade: it can neither ingest a P2P
+        // Proposal/Vote frame nor emit one anywhere. We still default to the
+        // fail-closed `Required` policy here — permission to bypass
+        // verification is never inferred from a `None`, even on a path that
+        // has no message surface.
+        None => (None, None, None, None, None, ConsensusVerificationPolicy::Required),
     };
 
     eprintln!(
