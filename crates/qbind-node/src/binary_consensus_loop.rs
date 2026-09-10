@@ -91,6 +91,9 @@ use qbind_consensus::crypto_verifier::ConsensusSigBackendRegistry;
 use qbind_consensus::driver::ConsensusEngineAction;
 use qbind_consensus::ids::ValidatorId;
 use qbind_consensus::key_registry::SuiteAwareValidatorKeyProvider;
+use qbind_consensus::proposal_vote_verify::{
+    verify_proposal_msg, verify_vote_msg, ProposalVoteVerifyError,
+};
 use qbind_consensus::timeout::{TimeoutCertificate, TimeoutMsg};
 use qbind_consensus::timeout_verify::{
     verify_timeout_certificate_with_evidence, verify_timeout_msg, TimeoutVerifyError,
@@ -100,7 +103,9 @@ use qbind_types::ChainId;
 use qbind_wire::consensus::{BlockProposal, Vote};
 
 use crate::consensus_network_facade::ConsensusNetworkFacade;
-use crate::metrics::{BinaryViewTimeoutRun030Snapshot, NodeMetrics};
+use crate::metrics::{
+    BinaryViewTimeoutRun030Snapshot, BinaryViewTimeoutRun420Snapshot, NodeMetrics,
+};
 use crate::node_config::SnapshotConfig;
 use crate::p2p::{
     ConsensusNetMsg, NodeId, P2pService, RestoreCatchupBlock, RestoreCatchupRequest,
@@ -1131,6 +1136,49 @@ pub struct BinaryConsensusLoopInboundStats {
     pub view_advances_due_to_verified_tc: u64,
     pub timeout_crypto_verify_latency_ns_total: u64,
     pub timeout_crypto_verify_latency_observations_total: u64,
+    // ----------------------------------------------------------------------
+    // Run 420 (F3/F4/F8): per-message Proposal/Vote signature + suite
+    // verification outcomes. These are DISTINCT from the Run 418 F6
+    // transport sender-binding counter (`inbound_sender_binding_rejected_total`)
+    // and from the engine-acceptance counters (`inbound_*_engine_accepted`):
+    //   * `*_verify_accepted` : the signature/suite verifier accepted the
+    //     message (valid signature over the canonical preimage under the
+    //     governed suite/key). This is "accepted by signature verifier",
+    //     NOT "accepted by consensus engine" and NOT "committed".
+    //   * `*_verify_rejected_total` : the verifier rejected the message
+    //     fail-closed BEFORE any engine ingestion. The per-reason counters
+    //     below decompose the total into a bounded taxonomy.
+    //   * `*_crypto_verify_latency_ns_total` / `..._observations_total` :
+    //     cumulative wall time and observation count of the
+    //     `verify_proposal_msg` / `verify_vote_msg` calls.
+    // When no verification context is wired (test-only paths), these remain
+    // zero and the message is NOT admitted to the engine on the P2P path.
+    pub inbound_proposal_verify_accepted: u64,
+    pub inbound_proposal_verify_rejected_total: u64,
+    pub inbound_proposal_rejected_signer_mismatch: u64,
+    pub inbound_proposal_rejected_unknown_validator: u64,
+    pub inbound_proposal_rejected_missing_signature: u64,
+    pub inbound_proposal_rejected_missing_key: u64,
+    pub inbound_proposal_rejected_unsupported_suite: u64,
+    pub inbound_proposal_rejected_wrong_suite: u64,
+    pub inbound_proposal_rejected_bad_signature: u64,
+    pub inbound_proposal_rejected_internal_error: u64,
+    pub inbound_vote_verify_accepted: u64,
+    pub inbound_vote_verify_rejected_total: u64,
+    pub inbound_vote_rejected_signer_mismatch: u64,
+    pub inbound_vote_rejected_unknown_validator: u64,
+    pub inbound_vote_rejected_missing_signature: u64,
+    pub inbound_vote_rejected_missing_key: u64,
+    pub inbound_vote_rejected_unsupported_suite: u64,
+    pub inbound_vote_rejected_wrong_suite: u64,
+    pub inbound_vote_rejected_bad_signature: u64,
+    pub inbound_vote_rejected_internal_error: u64,
+    pub proposal_vote_crypto_verify_latency_ns_total: u64,
+    pub proposal_vote_crypto_verify_latency_observations_total: u64,
+    pub outbound_proposal_signing_success: u64,
+    pub outbound_proposal_signing_failure: u64,
+    pub outbound_vote_signing_success: u64,
+    pub outbound_vote_signing_failure: u64,
 }
 
 /// Transition state for the bounded "restore-catchup mode → normal
@@ -2046,6 +2094,7 @@ pub async fn run_binary_consensus_loop_with_io(
                         &mut last_leader_proposal,
                         &mut last_leader_vote,
                         &mut reconfig_detector,
+                        verification_ctx.as_deref(),
                     );
                     // B9 + B10: poll for a late-peer-connect transition
                     // and, if armed, re-emit the cached current-view
@@ -2063,6 +2112,7 @@ pub async fn run_binary_consensus_loop_with_io(
                             pc,
                             outbound_facade.as_deref(),
                             &mut inbound_stats,
+                            verification_ctx.as_deref(),
                         );
                     }
                     maybe_broadcast_restore_catchup_request(
@@ -2183,6 +2233,7 @@ pub async fn run_binary_consensus_loop_with_io(
                         &mut last_leader_proposal,
                         &mut last_leader_vote,
                         &mut reconfig_detector,
+                        verification_ctx.as_deref(),
                     );
                     if let Some(pc) = peer_connectivity.as_deref() {
                         maybe_reemit_on_late_peer_connect(
@@ -2194,6 +2245,7 @@ pub async fn run_binary_consensus_loop_with_io(
                             pc,
                             outbound_facade.as_deref(),
                             &mut inbound_stats,
+                            verification_ctx.as_deref(),
                         );
                     }
                     maybe_broadcast_restore_catchup_request(
@@ -2361,6 +2413,7 @@ fn do_leader_tick(
     last_leader_proposal: &mut Option<(u64, BlockProposal)>,
     last_leader_vote: &mut Option<(u64, Vote)>,
     reconfig_detector: &mut BinaryReconfigDetector,
+    signer_ctx: Option<&TimeoutVerificationContext>,
 ) {
     let view_at_step = engine.current_view();
     let actions = engine.try_propose();
@@ -2427,7 +2480,7 @@ fn do_leader_tick(
         metrics.consensus_t154().inc_proposal_accepted();
     }
     if let Some(facade) = outbound {
-        forward_actions_to_facade(actions, facade, inbound_stats);
+        forward_actions_to_facade(actions, facade, inbound_stats, signer_ctx);
     }
 }
 
@@ -2492,6 +2545,7 @@ fn maybe_reemit_on_late_peer_connect(
     peer_connectivity: &dyn PeerConnectivitySource,
     facade: Option<&dyn ConsensusNetworkFacade>,
     stats: &mut BinaryConsensusLoopInboundStats,
+    signer_ctx: Option<&TimeoutVerificationContext>,
 ) {
     // Always refresh the connected snapshot so reconnect churn within
     // the same view does not reset our notion of "newly connected" on
@@ -2546,11 +2600,19 @@ fn maybe_reemit_on_late_peer_connect(
 
     // Re-borrow the cached proposal for sending. Safe by gate 2.
     let proposal = match last_leader_proposal {
-        Some((_, p)) => p,
+        Some((_, p)) => p.clone(),
         None => return,
     };
 
-    if let Err(e) = facade.broadcast_proposal(proposal) {
+    // Run 420: the re-emitted proposal must be signed fail-closed just like
+    // any other locally-originated outbound proposal, so a late-peer re-emit
+    // cannot become a bypass that broadcasts unsigned consensus material.
+    let proposal = match sign_proposal_for_broadcast(proposal, signer_ctx, stats) {
+        Some(p) => p,
+        None => return,
+    };
+
+    if let Err(e) = facade.broadcast_proposal(&proposal) {
         eprintln!(
             "[binary-consensus] B9: late-peer reemit broadcast_proposal failed (view={}): {:?}",
             cached_view, e,
@@ -2569,15 +2631,20 @@ fn maybe_reemit_on_late_peer_connect(
     let mut vote_reemitted = false;
     if let Some((vote_view, vote)) = last_leader_vote.as_ref() {
         if *vote_view == cached_view {
-            if let Err(e) = facade.broadcast_vote(vote) {
-                eprintln!(
-                    "[binary-consensus] B10: late-peer reemit broadcast_vote failed (view={}): {:?}",
-                    cached_view, e,
-                );
-            } else {
-                stats.outbound_vote_late_peer_reemits =
-                    stats.outbound_vote_late_peer_reemits.saturating_add(1);
-                vote_reemitted = true;
+            // Run 420: sign the re-emitted vote fail-closed as well.
+            if let Some(signed_vote) =
+                sign_vote_for_broadcast(vote.clone(), signer_ctx, stats)
+            {
+                if let Err(e) = facade.broadcast_vote(&signed_vote) {
+                    eprintln!(
+                        "[binary-consensus] B10: late-peer reemit broadcast_vote failed (view={}): {:?}",
+                        cached_view, e,
+                    );
+                } else {
+                    stats.outbound_vote_late_peer_reemits =
+                        stats.outbound_vote_late_peer_reemits.saturating_add(1);
+                    vote_reemitted = true;
+                }
             }
         }
     }
@@ -2597,14 +2664,134 @@ fn maybe_reemit_on_late_peer_connect(
 /// [`ConsensusNetworkFacade`]. Errors are logged but do not stop the loop;
 /// per-action delivery is best-effort and the engine itself remains the
 /// source of truth for protocol progress.
+/// Run 420 (F3/F8): sign a locally-originated outbound `BlockProposal` before
+/// broadcast, fail-closed.
+///
+/// Semantics:
+/// - `ctx == None` (single-validator / legacy / test path where no production
+///   verification context is wired): the proposal is returned unchanged. The
+///   symmetric inbound verification gate is also disabled in this mode, so no
+///   unsigned message is admitted at a verifying peer.
+/// - `ctx == Some` but `ctx.signer == None`: fail closed — the proposal is NOT
+///   broadcast (returns `None`) and `outbound_proposal_signing_failure` is
+///   incremented. A verifying node without a configured signer must not emit
+///   unsigned proposals.
+/// - `ctx == Some(signer)`: the wire `suite_id` is set to the signer's suite,
+///   the canonical chain-aware preimage is signed, and the signature is
+///   attached. A signing error fails closed (returns `None`).
+fn sign_proposal_for_broadcast(
+    mut proposal: BlockProposal,
+    ctx: Option<&TimeoutVerificationContext>,
+    inbound_stats: &mut BinaryConsensusLoopInboundStats,
+) -> Option<BlockProposal> {
+    let ctx = match ctx {
+        None => return Some(proposal),
+        Some(c) => c,
+    };
+    let signer = match ctx.signer.as_ref() {
+        Some(s) => s,
+        None => {
+            inbound_stats.outbound_proposal_signing_failure = inbound_stats
+                .outbound_proposal_signing_failure
+                .saturating_add(1);
+            eprintln!(
+                "[binary-consensus] Run 420: outbound proposal NOT broadcast \
+                 (no local consensus signer configured) — fail-closed"
+            );
+            return None;
+        }
+    };
+    // Bind the local validator's authorized suite into the signed content.
+    proposal.header.suite_id = signer.suite_id();
+    let preimage = proposal.signing_preimage_with_chain_id(ctx.chain_id);
+    match signer.sign_proposal(&preimage) {
+        Ok(sig) => {
+            proposal.signature = sig;
+            inbound_stats.outbound_proposal_signing_success = inbound_stats
+                .outbound_proposal_signing_success
+                .saturating_add(1);
+            Some(proposal)
+        }
+        Err(e) => {
+            inbound_stats.outbound_proposal_signing_failure = inbound_stats
+                .outbound_proposal_signing_failure
+                .saturating_add(1);
+            eprintln!(
+                "[binary-consensus] Run 420: outbound proposal signing FAILED \
+                 (fail-closed, not broadcast): {:?}",
+                e
+            );
+            None
+        }
+    }
+}
+
+/// Run 420 (F4/F8): sign a locally-originated outbound `Vote` before
+/// transmission, fail-closed. See [`sign_proposal_for_broadcast`] for the
+/// `None` / no-signer / signer semantics.
+fn sign_vote_for_broadcast(
+    mut vote: Vote,
+    ctx: Option<&TimeoutVerificationContext>,
+    inbound_stats: &mut BinaryConsensusLoopInboundStats,
+) -> Option<Vote> {
+    let ctx = match ctx {
+        None => return Some(vote),
+        Some(c) => c,
+    };
+    let signer = match ctx.signer.as_ref() {
+        Some(s) => s,
+        None => {
+            inbound_stats.outbound_vote_signing_failure = inbound_stats
+                .outbound_vote_signing_failure
+                .saturating_add(1);
+            eprintln!(
+                "[binary-consensus] Run 420: outbound vote NOT transmitted \
+                 (no local consensus signer configured) — fail-closed"
+            );
+            return None;
+        }
+    };
+    vote.suite_id = signer.suite_id();
+    let preimage = vote.signing_preimage_with_chain_id(ctx.chain_id);
+    match signer.sign_vote(&preimage) {
+        Ok(sig) => {
+            vote.signature = sig;
+            inbound_stats.outbound_vote_signing_success = inbound_stats
+                .outbound_vote_signing_success
+                .saturating_add(1);
+            Some(vote)
+        }
+        Err(e) => {
+            inbound_stats.outbound_vote_signing_failure = inbound_stats
+                .outbound_vote_signing_failure
+                .saturating_add(1);
+            eprintln!(
+                "[binary-consensus] Run 420: outbound vote signing FAILED \
+                 (fail-closed, not transmitted): {:?}",
+                e
+            );
+            None
+        }
+    }
+}
+
 fn forward_actions_to_facade(
     actions: Vec<ConsensusEngineAction<ValidatorId>>,
     facade: &dyn ConsensusNetworkFacade,
     inbound_stats: &mut BinaryConsensusLoopInboundStats,
+    signer_ctx: Option<&TimeoutVerificationContext>,
 ) {
     for action in actions {
         match action {
             ConsensusEngineAction::BroadcastProposal(proposal) => {
+                let proposal = match sign_proposal_for_broadcast(
+                    *proposal,
+                    signer_ctx,
+                    inbound_stats,
+                ) {
+                    Some(p) => p,
+                    None => continue,
+                };
                 if let Err(e) = facade.broadcast_proposal(&proposal) {
                     eprintln!(
                         "[binary-consensus] outbound broadcast_proposal failed: {:?}",
@@ -2616,6 +2803,10 @@ fn forward_actions_to_facade(
                 }
             }
             ConsensusEngineAction::BroadcastVote(vote) => {
+                let vote = match sign_vote_for_broadcast(vote, signer_ctx, inbound_stats) {
+                    Some(v) => v,
+                    None => continue,
+                };
                 if let Err(e) = facade.broadcast_vote(&vote) {
                     eprintln!(
                         "[binary-consensus] outbound broadcast_vote failed: {:?}",
@@ -2627,6 +2818,10 @@ fn forward_actions_to_facade(
                 }
             }
             ConsensusEngineAction::SendVoteTo { to, vote } => {
+                let vote = match sign_vote_for_broadcast(vote, signer_ctx, inbound_stats) {
+                    Some(v) => v,
+                    None => continue,
+                };
                 if let Err(e) = facade.send_vote_to(to, &vote) {
                     eprintln!(
                         "[binary-consensus] outbound send_vote_to({:?}) failed: {:?}",
@@ -2771,6 +2966,60 @@ pub(crate) fn handle_inbound_consensus_msg(
                             return;
                         }
                     };
+                    // Run 420 (F3/F4/F8): inbound `BlockProposal` cryptographic
+                    // signature + suite verification gate. Runs ONLY when a
+                    // verification context is wired (production-like
+                    // multi-validator path). Fail-closed and placed AFTER Run
+                    // 418 F6 sender binding but BEFORE restore-catchup
+                    // deferral, delivery counting, reconfig observation, and
+                    // engine ingestion: an unsigned, invalidly signed,
+                    // wrong-key, wrong-suite, unsupported-suite,
+                    // unknown-validator, or signer/claimed-validator-mismatched
+                    // proposal never reaches `engine.on_proposal_event` and so
+                    // cannot mutate view/lock/high-QC/proposal-storage/outbound
+                    // state OR the `inbound_proposals_delivered` observability
+                    // counter. Both transport identity (F6) and a valid
+                    // consensus signature (F3) are required.
+                    if let Some(ctx) = verification_ctx {
+                        let t_start = std::time::Instant::now();
+                        let res = verify_proposal_msg(
+                            &proposal,
+                            from,
+                            ctx.validators.as_ref(),
+                            ctx.key_provider.as_ref(),
+                            ctx.backend_registry.as_ref(),
+                            ctx.chain_id,
+                        );
+                        let elapsed = t_start.elapsed().as_nanos() as u64;
+                        stats.proposal_vote_crypto_verify_latency_ns_total = stats
+                            .proposal_vote_crypto_verify_latency_ns_total
+                            .saturating_add(elapsed);
+                        stats.proposal_vote_crypto_verify_latency_observations_total = stats
+                            .proposal_vote_crypto_verify_latency_observations_total
+                            .saturating_add(1);
+                        match res {
+                            Ok(()) => {
+                                stats.inbound_proposal_verify_accepted = stats
+                                    .inbound_proposal_verify_accepted
+                                    .saturating_add(1);
+                            }
+                            Err(e) => {
+                                stats.inbound_proposal_verify_rejected_total = stats
+                                    .inbound_proposal_verify_rejected_total
+                                    .saturating_add(1);
+                                inc_proposal_reject_reason(stats, &e);
+                                eprintln!(
+                                    "[binary-consensus] Run 420: inbound proposal REJECTED \
+                                     (verify) height={} proposer={:?} suite_id={} reason={}",
+                                    proposal.header.height,
+                                    from,
+                                    proposal.header.suite_id,
+                                    e
+                                );
+                                return;
+                            }
+                        }
+                    }
                     if restore_mode.is_active()
                         && should_defer_restore_proposal_for_catchup(engine, &proposal)
                     {
@@ -2812,7 +3061,7 @@ pub(crate) fn handle_inbound_consensus_msg(
                             stats.inbound_proposals_engine_accepted.saturating_add(1);
                         metrics.consensus_t154().inc_proposal_accepted();
                         if let Some(facade) = outbound {
-                            forward_actions_to_facade(vec![action], facade, stats);
+                            forward_actions_to_facade(vec![action], facade, stats, verification_ctx);
                         }
                     }
                 }
@@ -2848,6 +3097,54 @@ pub(crate) fn handle_inbound_consensus_msg(
                             return;
                         }
                     };
+                    // Run 420 (F3/F4/F8): inbound `Vote` cryptographic
+                    // signature + suite verification gate. Runs ONLY when a
+                    // verification context is wired. Fail-closed and placed
+                    // AFTER Run 418 F6 sender binding but BEFORE any
+                    // delivery/acceptance counting or engine ingestion: an
+                    // unsigned, invalidly signed, wrong-key, wrong-suite,
+                    // unsupported-suite, unknown-validator, or
+                    // signer/claimed-validator-mismatched vote never reaches
+                    // `engine.on_vote_event` and so cannot contribute to vote
+                    // aggregation / QC formation / view advancement. Both
+                    // transport identity (F6) and a valid consensus signature
+                    // (F4) are required.
+                    if let Some(ctx) = verification_ctx {
+                        let t_start = std::time::Instant::now();
+                        let res = verify_vote_msg(
+                            &vote,
+                            from,
+                            ctx.validators.as_ref(),
+                            ctx.key_provider.as_ref(),
+                            ctx.backend_registry.as_ref(),
+                            ctx.chain_id,
+                        );
+                        let elapsed = t_start.elapsed().as_nanos() as u64;
+                        stats.proposal_vote_crypto_verify_latency_ns_total = stats
+                            .proposal_vote_crypto_verify_latency_ns_total
+                            .saturating_add(elapsed);
+                        stats.proposal_vote_crypto_verify_latency_observations_total = stats
+                            .proposal_vote_crypto_verify_latency_observations_total
+                            .saturating_add(1);
+                        match res {
+                            Ok(()) => {
+                                stats.inbound_vote_verify_accepted =
+                                    stats.inbound_vote_verify_accepted.saturating_add(1);
+                            }
+                            Err(e) => {
+                                stats.inbound_vote_verify_rejected_total = stats
+                                    .inbound_vote_verify_rejected_total
+                                    .saturating_add(1);
+                                inc_vote_reject_reason(stats, &e);
+                                eprintln!(
+                                    "[binary-consensus] Run 420: inbound vote REJECTED \
+                                     (verify) height={} voter={:?} suite_id={} reason={}",
+                                    vote.height, from, vote.suite_id, e
+                                );
+                                return;
+                            }
+                        }
+                    }
                     match engine.on_vote_event(from, &vote) {
                         Ok(_) => {
                             stats.inbound_votes_delivered =
@@ -3693,6 +3990,106 @@ fn apply_local_tc_and_broadcast_new_view(
 /// `BackendError(_, _)` / `MalformedSignature(_)` outcomes are folded
 /// into the `bad_signature` bucket — they are real cryptographic
 /// rejections and never reach the engine.
+/// Run 420: dispatch a `ProposalVoteVerifyError` from `verify_proposal_msg`
+/// into the matching per-reason inbound-proposal rejection counter. The
+/// taxonomy is bounded (no attacker-controlled labels).
+fn inc_proposal_reject_reason(
+    stats: &mut BinaryConsensusLoopInboundStats,
+    err: &ProposalVoteVerifyError,
+) {
+    match err {
+        ProposalVoteVerifyError::SignerMismatch { .. } => {
+            stats.inbound_proposal_rejected_signer_mismatch = stats
+                .inbound_proposal_rejected_signer_mismatch
+                .saturating_add(1);
+        }
+        ProposalVoteVerifyError::UnknownValidator(_) => {
+            stats.inbound_proposal_rejected_unknown_validator = stats
+                .inbound_proposal_rejected_unknown_validator
+                .saturating_add(1);
+        }
+        ProposalVoteVerifyError::MissingSignature(_) => {
+            stats.inbound_proposal_rejected_missing_signature = stats
+                .inbound_proposal_rejected_missing_signature
+                .saturating_add(1);
+        }
+        ProposalVoteVerifyError::MissingKey(_) => {
+            stats.inbound_proposal_rejected_missing_key = stats
+                .inbound_proposal_rejected_missing_key
+                .saturating_add(1);
+        }
+        ProposalVoteVerifyError::UnsupportedSuite { .. } => {
+            stats.inbound_proposal_rejected_unsupported_suite = stats
+                .inbound_proposal_rejected_unsupported_suite
+                .saturating_add(1);
+        }
+        ProposalVoteVerifyError::SuiteMismatch { .. } => {
+            stats.inbound_proposal_rejected_wrong_suite = stats
+                .inbound_proposal_rejected_wrong_suite
+                .saturating_add(1);
+        }
+        ProposalVoteVerifyError::InvalidSignature(_)
+        | ProposalVoteVerifyError::MalformedSignature(_) => {
+            stats.inbound_proposal_rejected_bad_signature = stats
+                .inbound_proposal_rejected_bad_signature
+                .saturating_add(1);
+        }
+        ProposalVoteVerifyError::BackendError(_, _) => {
+            stats.inbound_proposal_rejected_internal_error = stats
+                .inbound_proposal_rejected_internal_error
+                .saturating_add(1);
+        }
+    }
+}
+
+/// Run 420: dispatch a `ProposalVoteVerifyError` from `verify_vote_msg`
+/// into the matching per-reason inbound-vote rejection counter.
+fn inc_vote_reject_reason(
+    stats: &mut BinaryConsensusLoopInboundStats,
+    err: &ProposalVoteVerifyError,
+) {
+    match err {
+        ProposalVoteVerifyError::SignerMismatch { .. } => {
+            stats.inbound_vote_rejected_signer_mismatch = stats
+                .inbound_vote_rejected_signer_mismatch
+                .saturating_add(1);
+        }
+        ProposalVoteVerifyError::UnknownValidator(_) => {
+            stats.inbound_vote_rejected_unknown_validator = stats
+                .inbound_vote_rejected_unknown_validator
+                .saturating_add(1);
+        }
+        ProposalVoteVerifyError::MissingSignature(_) => {
+            stats.inbound_vote_rejected_missing_signature = stats
+                .inbound_vote_rejected_missing_signature
+                .saturating_add(1);
+        }
+        ProposalVoteVerifyError::MissingKey(_) => {
+            stats.inbound_vote_rejected_missing_key =
+                stats.inbound_vote_rejected_missing_key.saturating_add(1);
+        }
+        ProposalVoteVerifyError::UnsupportedSuite { .. } => {
+            stats.inbound_vote_rejected_unsupported_suite = stats
+                .inbound_vote_rejected_unsupported_suite
+                .saturating_add(1);
+        }
+        ProposalVoteVerifyError::SuiteMismatch { .. } => {
+            stats.inbound_vote_rejected_wrong_suite =
+                stats.inbound_vote_rejected_wrong_suite.saturating_add(1);
+        }
+        ProposalVoteVerifyError::InvalidSignature(_)
+        | ProposalVoteVerifyError::MalformedSignature(_) => {
+            stats.inbound_vote_rejected_bad_signature =
+                stats.inbound_vote_rejected_bad_signature.saturating_add(1);
+        }
+        ProposalVoteVerifyError::BackendError(_, _) => {
+            stats.inbound_vote_rejected_internal_error = stats
+                .inbound_vote_rejected_internal_error
+                .saturating_add(1);
+        }
+    }
+}
+
 fn inc_timeout_reject_reason(
     stats: &mut BinaryConsensusLoopInboundStats,
     err: &TimeoutVerifyError,
@@ -4800,6 +5197,43 @@ fn update_binary_view_timeout_metrics(
             timeout_crypto_verify_latency_ns_total: stats.timeout_crypto_verify_latency_ns_total,
             timeout_crypto_verify_latency_observations_total: stats
                 .timeout_crypto_verify_latency_observations_total,
+        });
+    metrics
+        .binary_view_timeout()
+        .set_run420(&BinaryViewTimeoutRun420Snapshot {
+            inbound_proposal_verify_accepted: stats.inbound_proposal_verify_accepted,
+            inbound_proposal_verify_rejected_total: stats.inbound_proposal_verify_rejected_total,
+            inbound_proposal_rejected_signer_mismatch: stats
+                .inbound_proposal_rejected_signer_mismatch,
+            inbound_proposal_rejected_unknown_validator: stats
+                .inbound_proposal_rejected_unknown_validator,
+            inbound_proposal_rejected_missing_signature: stats
+                .inbound_proposal_rejected_missing_signature,
+            inbound_proposal_rejected_missing_key: stats.inbound_proposal_rejected_missing_key,
+            inbound_proposal_rejected_unsupported_suite: stats
+                .inbound_proposal_rejected_unsupported_suite,
+            inbound_proposal_rejected_wrong_suite: stats.inbound_proposal_rejected_wrong_suite,
+            inbound_proposal_rejected_bad_signature: stats.inbound_proposal_rejected_bad_signature,
+            inbound_proposal_rejected_internal_error: stats
+                .inbound_proposal_rejected_internal_error,
+            inbound_vote_verify_accepted: stats.inbound_vote_verify_accepted,
+            inbound_vote_verify_rejected_total: stats.inbound_vote_verify_rejected_total,
+            inbound_vote_rejected_signer_mismatch: stats.inbound_vote_rejected_signer_mismatch,
+            inbound_vote_rejected_unknown_validator: stats.inbound_vote_rejected_unknown_validator,
+            inbound_vote_rejected_missing_signature: stats.inbound_vote_rejected_missing_signature,
+            inbound_vote_rejected_missing_key: stats.inbound_vote_rejected_missing_key,
+            inbound_vote_rejected_unsupported_suite: stats.inbound_vote_rejected_unsupported_suite,
+            inbound_vote_rejected_wrong_suite: stats.inbound_vote_rejected_wrong_suite,
+            inbound_vote_rejected_bad_signature: stats.inbound_vote_rejected_bad_signature,
+            inbound_vote_rejected_internal_error: stats.inbound_vote_rejected_internal_error,
+            proposal_vote_crypto_verify_latency_ns_total: stats
+                .proposal_vote_crypto_verify_latency_ns_total,
+            proposal_vote_crypto_verify_latency_observations_total: stats
+                .proposal_vote_crypto_verify_latency_observations_total,
+            outbound_proposal_signing_success: stats.outbound_proposal_signing_success,
+            outbound_proposal_signing_failure: stats.outbound_proposal_signing_failure,
+            outbound_vote_signing_success: stats.outbound_vote_signing_success,
+            outbound_vote_signing_failure: stats.outbound_vote_signing_failure,
         });
 }
 
@@ -7572,6 +8006,682 @@ mod tests {
                 "qbind_consensus_view_advances_due_to_verified_tc_total",
                 "qbind_consensus_timeout_crypto_verify_latency_ns_total",
                 "qbind_consensus_timeout_crypto_verify_latency_observations_total",
+            ] {
+                assert!(body.contains(needle), "missing {} in /metrics body", needle);
+            }
+        }
+    }
+
+    /// Run 420 (F3/F4/F8): loop-level adversarial, non-mutation and bypass
+    /// tests for the inbound Proposal/Vote signature + suite verification gate
+    /// and the outbound Proposal/Vote signing boundary.
+    mod run420 {
+        use super::*;
+        use crate::metrics::NodeMetrics;
+        use crate::validator_signer::{LocalKeySigner, ValidatorSigner};
+        use qbind_consensus::crypto_verifier::{ConsensusSigBackendRegistry, SimpleBackendRegistry};
+        use qbind_consensus::ids::ValidatorId;
+        use qbind_consensus::key_registry::SuiteAwareValidatorKeyProvider;
+        use qbind_consensus::validator_set::{ConsensusValidatorSet, ValidatorSetEntry};
+        use qbind_crypto::ml_dsa44::MlDsa44Backend;
+        use qbind_crypto::{ConsensusSigSuiteId, ValidatorSigningKey, SUITE_PQ_RESERVED_1};
+        use qbind_types::QBIND_DEVNET_CHAIN_ID;
+        use qbind_wire::consensus::{BlockHeader, BlockProposal, Vote};
+        use std::collections::HashMap;
+
+        const TEST_SUITE: ConsensusSigSuiteId = SUITE_PQ_RESERVED_1; // 100 = ML-DSA-44
+        const TEST_SUITE_U16: u16 = 100;
+
+        #[derive(Debug, Clone)]
+        struct TestKeyProvider {
+            keys: HashMap<ValidatorId, (ConsensusSigSuiteId, Vec<u8>)>,
+        }
+        impl SuiteAwareValidatorKeyProvider for TestKeyProvider {
+            fn get_suite_and_key(
+                &self,
+                id: ValidatorId,
+            ) -> Option<(ConsensusSigSuiteId, Vec<u8>)> {
+                self.keys.get(&id).cloned()
+            }
+        }
+
+        fn make_validators(n: u64) -> ConsensusValidatorSet {
+            let entries: Vec<ValidatorSetEntry> = (0..n)
+                .map(|i| ValidatorSetEntry {
+                    id: ValidatorId(i),
+                    voting_power: 1,
+                })
+                .collect();
+            ConsensusValidatorSet::new(entries).expect("valid set")
+        }
+
+        struct Fixture {
+            validators: Arc<ConsensusValidatorSet>,
+            kp: Arc<TestKeyProvider>,
+            br: Arc<dyn ConsensusSigBackendRegistry>,
+            sks: HashMap<ValidatorId, Vec<u8>>,
+            sk_objs: HashMap<ValidatorId, Arc<ValidatorSigningKey>>,
+        }
+
+        fn make_fixture(n: u64) -> Fixture {
+            let mut keys: HashMap<ValidatorId, (ConsensusSigSuiteId, Vec<u8>)> = HashMap::new();
+            let mut sks: HashMap<ValidatorId, Vec<u8>> = HashMap::new();
+            let mut sk_objs: HashMap<ValidatorId, Arc<ValidatorSigningKey>> = HashMap::new();
+            for i in 0..n {
+                let (pk, sk) = MlDsa44Backend::generate_keypair().expect("keygen");
+                keys.insert(ValidatorId(i), (TEST_SUITE, pk.clone()));
+                sks.insert(ValidatorId(i), sk.clone());
+                sk_objs.insert(ValidatorId(i), Arc::new(ValidatorSigningKey::new(sk)));
+            }
+            Fixture {
+                validators: Arc::new(make_validators(n)),
+                kp: Arc::new(TestKeyProvider { keys }),
+                br: Arc::new(SimpleBackendRegistry::with_backend(
+                    TEST_SUITE,
+                    Arc::new(MlDsa44Backend),
+                )),
+                sks,
+                sk_objs,
+            }
+        }
+
+        fn make_ctx(
+            fixture: &Fixture,
+            local_signer_for: Option<ValidatorId>,
+        ) -> TimeoutVerificationContext {
+            let signer: Option<Arc<dyn ValidatorSigner>> = local_signer_for.map(|id| {
+                let sk = fixture.sk_objs.get(&id).expect("signer key present").clone();
+                Arc::new(LocalKeySigner::new(id, TEST_SUITE_U16, sk)) as Arc<dyn ValidatorSigner>
+            });
+            TimeoutVerificationContext {
+                validators: fixture.validators.clone(),
+                key_provider: fixture.kp.clone(),
+                backend_registry: fixture.br.clone(),
+                chain_id: QBIND_DEVNET_CHAIN_ID,
+                signer,
+            }
+        }
+
+        fn base_header(proposer: u16) -> BlockHeader {
+            BlockHeader {
+                version: 1,
+                chain_id: 0,
+                epoch: 0,
+                height: 1,
+                round: 1,
+                parent_block_id: [0u8; 32],
+                payload_hash: [9u8; 32],
+                proposer_index: proposer,
+                suite_id: TEST_SUITE_U16,
+                tx_count: 0,
+                timestamp: 0,
+                payload_kind: 0,
+                next_epoch: 0,
+                batch_commitment: [0u8; 32],
+            }
+        }
+
+        /// Build a proposal signed by `proposer`'s consensus key over the
+        /// canonical chain-aware preimage.
+        fn signed_proposal(proposer: u16, fixture: &Fixture) -> BlockProposal {
+            let mut p = BlockProposal {
+                header: base_header(proposer),
+                qc: None,
+                txs: vec![],
+                signature: vec![],
+            };
+            let preimage = p.signing_preimage_with_chain_id(QBIND_DEVNET_CHAIN_ID);
+            let sk = fixture.sks.get(&ValidatorId(proposer as u64)).expect("sk");
+            p.signature = MlDsa44Backend::sign(sk, &preimage).expect("sign");
+            p
+        }
+
+        fn base_vote(voter: u16) -> Vote {
+            Vote {
+                version: 1,
+                chain_id: 0,
+                epoch: 0,
+                height: 1,
+                round: 1,
+                step: 1,
+                block_id: [9u8; 32],
+                validator_index: voter,
+                suite_id: TEST_SUITE_U16,
+                signature: vec![],
+            }
+        }
+
+        /// Build a vote signed by `voter`'s consensus key over the canonical
+        /// chain-aware preimage.
+        fn signed_vote(voter: u16, fixture: &Fixture) -> Vote {
+            let mut v = base_vote(voter);
+            let preimage = v.signing_preimage_with_chain_id(QBIND_DEVNET_CHAIN_ID);
+            let sk = fixture.sks.get(&ValidatorId(voter as u64)).expect("sk");
+            v.signature = MlDsa44Backend::sign(sk, &preimage).expect("sign");
+            v
+        }
+
+        fn make_engine(local: ValidatorId, n: u64) -> BasicHotStuffEngine<[u8; 32]> {
+            BasicHotStuffEngine::new(local, make_validators(n))
+        }
+
+        fn make_metrics() -> Arc<NodeMetrics> {
+            Arc::new(NodeMetrics::new())
+        }
+
+        fn deliver_proposal(
+            engine: &mut BasicHotStuffEngine<[u8; 32]>,
+            stats: &mut BinaryConsensusLoopInboundStats,
+            ctx: Option<&TimeoutVerificationContext>,
+            proposal: &BlockProposal,
+            metrics: &Arc<NodeMetrics>,
+        ) {
+            use qbind_wire::io::WireEncode;
+            let mut bytes = Vec::new();
+            proposal.encode(&mut bytes);
+            let mut restore_mode = RestoreCatchupModeState::from_config(None);
+            handle_inbound_consensus_msg(
+                engine,
+                ConsensusNetMsg::Proposal(bytes),
+                stats,
+                None,
+                metrics,
+                ValidatorId(0),
+                &mut restore_mode,
+                ctx,
+                &mut BinaryReconfigDetector::default(),
+                None,
+                None,
+            );
+        }
+
+        fn deliver_vote(
+            engine: &mut BasicHotStuffEngine<[u8; 32]>,
+            stats: &mut BinaryConsensusLoopInboundStats,
+            ctx: Option<&TimeoutVerificationContext>,
+            vote: &Vote,
+            metrics: &Arc<NodeMetrics>,
+        ) {
+            use qbind_wire::io::WireEncode;
+            let mut bytes = Vec::new();
+            vote.encode(&mut bytes);
+            let mut restore_mode = RestoreCatchupModeState::from_config(None);
+            handle_inbound_consensus_msg(
+                engine,
+                ConsensusNetMsg::Vote(bytes),
+                stats,
+                None,
+                metrics,
+                ValidatorId(0),
+                &mut restore_mode,
+                ctx,
+                &mut BinaryReconfigDetector::default(),
+                None,
+                None,
+            );
+        }
+
+        // =================================================================
+        // POSITIVE CONTROLS
+        // =================================================================
+
+        #[test]
+        fn run420_inbound_valid_signed_proposal_verify_accepted() {
+            let fixture = make_fixture(4);
+            let ctx = make_ctx(&fixture, None);
+            let mut engine = make_engine(ValidatorId(0), 4);
+            let mut stats = BinaryConsensusLoopInboundStats::default();
+            let metrics = make_metrics();
+
+            let p = signed_proposal(1, &fixture);
+            deliver_proposal(&mut engine, &mut stats, Some(&ctx), &p, &metrics);
+
+            assert_eq!(stats.inbound_proposal_verify_accepted, 1);
+            assert_eq!(stats.inbound_proposal_verify_rejected_total, 0);
+            assert!(stats.proposal_vote_crypto_verify_latency_observations_total >= 1);
+        }
+
+        #[test]
+        fn run420_inbound_valid_signed_vote_verify_accepted() {
+            let fixture = make_fixture(4);
+            let ctx = make_ctx(&fixture, None);
+            let mut engine = make_engine(ValidatorId(0), 4);
+            let mut stats = BinaryConsensusLoopInboundStats::default();
+            let metrics = make_metrics();
+
+            let v = signed_vote(1, &fixture);
+            deliver_vote(&mut engine, &mut stats, Some(&ctx), &v, &metrics);
+
+            assert_eq!(stats.inbound_vote_verify_accepted, 1);
+            assert_eq!(stats.inbound_vote_verify_rejected_total, 0);
+        }
+
+        #[test]
+        fn run420_valid_messages_survive_encode_decode_and_verify_identically() {
+            use qbind_wire::io::{WireDecode, WireEncode};
+            let fixture = make_fixture(4);
+            let p = signed_proposal(2, &fixture);
+            let mut pb = Vec::new();
+            p.encode(&mut pb);
+            let mut ps: &[u8] = &pb;
+            let p2 = BlockProposal::decode(&mut ps).expect("decode");
+            assert_eq!(p, p2);
+            assert!(qbind_consensus::verify_proposal_msg(
+                &p2,
+                ValidatorId(2),
+                fixture.validators.as_ref(),
+                fixture.kp.as_ref(),
+                fixture.br.as_ref(),
+                QBIND_DEVNET_CHAIN_ID,
+            )
+            .is_ok());
+        }
+
+        // =================================================================
+        // SIGNATURE / SUITE / AUTHORITY FAILURES (inbound gate)
+        // =================================================================
+
+        #[test]
+        fn run420_inbound_unsigned_proposal_rejected_before_engine() {
+            let fixture = make_fixture(4);
+            let ctx = make_ctx(&fixture, None);
+            let mut engine = make_engine(ValidatorId(0), 4);
+            let mut stats = BinaryConsensusLoopInboundStats::default();
+            let metrics = make_metrics();
+
+            let mut p = signed_proposal(1, &fixture);
+            p.signature.clear(); // unsigned
+            deliver_proposal(&mut engine, &mut stats, Some(&ctx), &p, &metrics);
+
+            assert_eq!(stats.inbound_proposal_verify_accepted, 0);
+            assert_eq!(stats.inbound_proposal_verify_rejected_total, 1);
+            assert_eq!(stats.inbound_proposal_rejected_missing_signature, 1);
+            // Non-mutation: never delivered, never engine-accepted.
+            assert_eq!(stats.inbound_proposals_delivered, 0);
+            assert_eq!(stats.inbound_proposals_engine_accepted, 0);
+        }
+
+        #[test]
+        fn run420_inbound_unsigned_vote_rejected_before_engine() {
+            let fixture = make_fixture(4);
+            let ctx = make_ctx(&fixture, None);
+            let mut engine = make_engine(ValidatorId(0), 4);
+            let mut stats = BinaryConsensusLoopInboundStats::default();
+            let metrics = make_metrics();
+
+            let mut v = signed_vote(1, &fixture);
+            v.signature.clear();
+            deliver_vote(&mut engine, &mut stats, Some(&ctx), &v, &metrics);
+
+            assert_eq!(stats.inbound_vote_verify_accepted, 0);
+            assert_eq!(stats.inbound_vote_verify_rejected_total, 1);
+            assert_eq!(stats.inbound_vote_rejected_missing_signature, 1);
+            assert_eq!(stats.inbound_votes_delivered, 0);
+            assert_eq!(stats.inbound_votes_engine_accepted, 0);
+        }
+
+        #[test]
+        fn run420_inbound_bitflipped_proposal_signature_rejected() {
+            let fixture = make_fixture(4);
+            let ctx = make_ctx(&fixture, None);
+            let mut engine = make_engine(ValidatorId(0), 4);
+            let mut stats = BinaryConsensusLoopInboundStats::default();
+            let metrics = make_metrics();
+
+            let mut p = signed_proposal(1, &fixture);
+            p.signature[0] ^= 0xff;
+            deliver_proposal(&mut engine, &mut stats, Some(&ctx), &p, &metrics);
+
+            assert_eq!(stats.inbound_proposal_verify_rejected_total, 1);
+            assert_eq!(stats.inbound_proposal_rejected_bad_signature, 1);
+            assert_eq!(stats.inbound_proposals_delivered, 0);
+        }
+
+        #[test]
+        fn run420_inbound_bitflipped_vote_signature_rejected() {
+            let fixture = make_fixture(4);
+            let ctx = make_ctx(&fixture, None);
+            let mut engine = make_engine(ValidatorId(0), 4);
+            let mut stats = BinaryConsensusLoopInboundStats::default();
+            let metrics = make_metrics();
+
+            let mut v = signed_vote(1, &fixture);
+            v.signature[0] ^= 0xff;
+            deliver_vote(&mut engine, &mut stats, Some(&ctx), &v, &metrics);
+
+            assert_eq!(stats.inbound_vote_verify_rejected_total, 1);
+            assert_eq!(stats.inbound_vote_rejected_bad_signature, 1);
+            assert_eq!(stats.inbound_votes_delivered, 0);
+        }
+
+        #[test]
+        fn run420_inbound_wrong_validator_signature_rejected() {
+            // Valid signature, but signed by V2 while the message claims V1.
+            let fixture = make_fixture(4);
+            let ctx = make_ctx(&fixture, None);
+            let mut engine = make_engine(ValidatorId(0), 4);
+            let mut stats = BinaryConsensusLoopInboundStats::default();
+            let metrics = make_metrics();
+
+            let mut proposal = BlockProposal {
+                header: base_header(1),
+                qc: None,
+                txs: vec![],
+                signature: vec![],
+            };
+            // sign with V2's key but keep proposer_index = 1.
+            let preimage = proposal.signing_preimage_with_chain_id(QBIND_DEVNET_CHAIN_ID);
+            let sk2 = fixture.sks.get(&ValidatorId(2)).unwrap();
+            proposal.signature = MlDsa44Backend::sign(sk2, &preimage).expect("sign");
+            deliver_proposal(&mut engine, &mut stats, Some(&ctx), &proposal, &metrics);
+
+            assert_eq!(stats.inbound_proposal_verify_rejected_total, 1);
+            assert_eq!(stats.inbound_proposal_rejected_bad_signature, 1);
+            assert_eq!(stats.inbound_proposals_delivered, 0);
+        }
+
+        #[test]
+        fn run420_inbound_unknown_validator_proposal_rejected() {
+            let fixture = make_fixture(4);
+            let ctx = make_ctx(&fixture, None);
+            let mut engine = make_engine(ValidatorId(0), 4);
+            let mut stats = BinaryConsensusLoopInboundStats::default();
+            let metrics = make_metrics();
+
+            // proposer_index = 9 (not in the 4-validator set). Signature bytes
+            // are irrelevant: membership is checked before crypto.
+            let mut proposal = BlockProposal {
+                header: base_header(9),
+                qc: None,
+                txs: vec![],
+                signature: vec![1u8; 8],
+            };
+            proposal.header.proposer_index = 9;
+            deliver_proposal(&mut engine, &mut stats, Some(&ctx), &proposal, &metrics);
+
+            assert_eq!(stats.inbound_proposal_verify_rejected_total, 1);
+            assert_eq!(stats.inbound_proposal_rejected_unknown_validator, 1);
+            assert_eq!(stats.inbound_proposals_delivered, 0);
+        }
+
+        #[test]
+        fn run420_inbound_wrong_suite_proposal_rejected() {
+            let fixture = make_fixture(4);
+            let ctx = make_ctx(&fixture, None);
+            let mut engine = make_engine(ValidatorId(0), 4);
+            let mut stats = BinaryConsensusLoopInboundStats::default();
+            let metrics = make_metrics();
+
+            // Sign correctly, then alter the wire suite_id after signing.
+            let mut p = signed_proposal(1, &fixture);
+            p.header.suite_id = TEST_SUITE_U16 + 7;
+            deliver_proposal(&mut engine, &mut stats, Some(&ctx), &p, &metrics);
+
+            assert_eq!(stats.inbound_proposal_verify_rejected_total, 1);
+            assert_eq!(stats.inbound_proposal_rejected_wrong_suite, 1);
+            assert_eq!(stats.inbound_proposals_delivered, 0);
+        }
+
+        #[test]
+        fn run420_inbound_wrong_suite_vote_rejected() {
+            let fixture = make_fixture(4);
+            let ctx = make_ctx(&fixture, None);
+            let mut engine = make_engine(ValidatorId(0), 4);
+            let mut stats = BinaryConsensusLoopInboundStats::default();
+            let metrics = make_metrics();
+
+            let mut v = signed_vote(1, &fixture);
+            v.suite_id = TEST_SUITE_U16 + 7;
+            deliver_vote(&mut engine, &mut stats, Some(&ctx), &v, &metrics);
+
+            assert_eq!(stats.inbound_vote_verify_rejected_total, 1);
+            assert_eq!(stats.inbound_vote_rejected_wrong_suite, 1);
+            assert_eq!(stats.inbound_votes_delivered, 0);
+        }
+
+        #[test]
+        fn run420_inbound_proposal_relabeled_as_vote_rejected() {
+            // A valid proposal signature applied to a vote preimage must not
+            // verify (domain separation): sign the proposal preimage, then
+            // attach it to a vote with the same fields.
+            let fixture = make_fixture(4);
+            let ctx = make_ctx(&fixture, None);
+            let mut engine = make_engine(ValidatorId(0), 4);
+            let mut stats = BinaryConsensusLoopInboundStats::default();
+            let metrics = make_metrics();
+
+            let p = signed_proposal(1, &fixture);
+            let mut v = base_vote(1);
+            v.signature = p.signature.clone(); // proposal signature on a vote
+            deliver_vote(&mut engine, &mut stats, Some(&ctx), &v, &metrics);
+
+            assert_eq!(stats.inbound_vote_verify_rejected_total, 1);
+            assert_eq!(stats.inbound_vote_rejected_bad_signature, 1);
+            assert_eq!(stats.inbound_votes_delivered, 0);
+        }
+
+        #[test]
+        fn run420_inbound_changed_payload_proposal_rejected() {
+            let fixture = make_fixture(4);
+            let ctx = make_ctx(&fixture, None);
+            let mut engine = make_engine(ValidatorId(0), 4);
+            let mut stats = BinaryConsensusLoopInboundStats::default();
+            let metrics = make_metrics();
+
+            let mut p = signed_proposal(1, &fixture);
+            p.header.payload_hash = [0xAAu8; 32]; // mutate signed field post-sign
+            deliver_proposal(&mut engine, &mut stats, Some(&ctx), &p, &metrics);
+
+            assert_eq!(stats.inbound_proposal_verify_rejected_total, 1);
+            assert_eq!(stats.inbound_proposal_rejected_bad_signature, 1);
+            assert_eq!(stats.inbound_proposals_delivered, 0);
+        }
+
+        // =================================================================
+        // ORDERING / NON-MUTATION
+        // =================================================================
+
+        #[test]
+        fn run420_rejected_proposal_does_not_advance_view() {
+            let fixture = make_fixture(4);
+            let ctx = make_ctx(&fixture, None);
+            let mut engine = make_engine(ValidatorId(0), 4);
+            let mut stats = BinaryConsensusLoopInboundStats::default();
+            let metrics = make_metrics();
+            let view_before = engine.current_view();
+
+            let mut p = signed_proposal(1, &fixture);
+            p.signature[0] ^= 0xff;
+            deliver_proposal(&mut engine, &mut stats, Some(&ctx), &p, &metrics);
+
+            assert_eq!(engine.current_view(), view_before);
+            assert_eq!(stats.inbound_proposals_delivered, 0);
+            assert_eq!(stats.inbound_proposals_engine_accepted, 0);
+        }
+
+        #[test]
+        fn run420_malformed_proposal_bytes_do_not_panic_or_advance() {
+            let fixture = make_fixture(4);
+            let ctx = make_ctx(&fixture, None);
+            let mut engine = make_engine(ValidatorId(0), 4);
+            let mut stats = BinaryConsensusLoopInboundStats::default();
+            let metrics = make_metrics();
+            let mut restore_mode = RestoreCatchupModeState::from_config(None);
+            let view_before = engine.current_view();
+
+            handle_inbound_consensus_msg(
+                &mut engine,
+                ConsensusNetMsg::Proposal(vec![0xffu8; 12]),
+                &mut stats,
+                None,
+                &metrics,
+                ValidatorId(0),
+                &mut restore_mode,
+                Some(&ctx),
+                &mut BinaryReconfigDetector::default(),
+                None,
+                None,
+            );
+            assert_eq!(stats.inbound_proposal_verify_accepted, 0);
+            assert_eq!(stats.inbound_proposals_delivered, 0);
+            assert_eq!(engine.current_view(), view_before);
+        }
+
+        // =================================================================
+        // OUTBOUND SIGNING BOUNDARY
+        // =================================================================
+
+        #[test]
+        fn run420_outbound_signs_proposal_and_vote_when_signer_present() {
+            let fixture = make_fixture(4);
+            let ctx = make_ctx(&fixture, Some(ValidatorId(0)));
+            let mut stats = BinaryConsensusLoopInboundStats::default();
+
+            let unsigned_p = BlockProposal {
+                header: base_header(0),
+                qc: None,
+                txs: vec![],
+                signature: vec![],
+            };
+            let signed_p =
+                sign_proposal_for_broadcast(unsigned_p, Some(&ctx), &mut stats).expect("signed");
+            assert!(!signed_p.signature.is_empty());
+            assert_eq!(signed_p.header.suite_id, TEST_SUITE_U16);
+            assert_eq!(stats.outbound_proposal_signing_success, 1);
+            // The signed proposal self-verifies against the same context.
+            assert!(qbind_consensus::verify_proposal_msg(
+                &signed_p,
+                ValidatorId(0),
+                ctx.validators.as_ref(),
+                ctx.key_provider.as_ref(),
+                ctx.backend_registry.as_ref(),
+                QBIND_DEVNET_CHAIN_ID,
+            )
+            .is_ok());
+
+            let unsigned_v = base_vote(0);
+            let signed_v =
+                sign_vote_for_broadcast(unsigned_v, Some(&ctx), &mut stats).expect("signed");
+            assert!(!signed_v.signature.is_empty());
+            assert_eq!(stats.outbound_vote_signing_success, 1);
+            assert!(qbind_consensus::verify_vote_msg(
+                &signed_v,
+                ValidatorId(0),
+                ctx.validators.as_ref(),
+                ctx.key_provider.as_ref(),
+                ctx.backend_registry.as_ref(),
+                QBIND_DEVNET_CHAIN_ID,
+            )
+            .is_ok());
+        }
+
+        #[test]
+        fn run420_outbound_fail_closed_when_signer_missing() {
+            let fixture = make_fixture(4);
+            // ctx with NO signer: a verifying node without a configured signer
+            // must NOT emit unsigned proposals/votes.
+            let ctx = make_ctx(&fixture, None);
+            let mut stats = BinaryConsensusLoopInboundStats::default();
+
+            let unsigned_p = BlockProposal {
+                header: base_header(0),
+                qc: None,
+                txs: vec![],
+                signature: vec![],
+            };
+            assert!(sign_proposal_for_broadcast(unsigned_p, Some(&ctx), &mut stats).is_none());
+            assert_eq!(stats.outbound_proposal_signing_success, 0);
+            assert_eq!(stats.outbound_proposal_signing_failure, 1);
+
+            let unsigned_v = base_vote(0);
+            assert!(sign_vote_for_broadcast(unsigned_v, Some(&ctx), &mut stats).is_none());
+            assert_eq!(stats.outbound_vote_signing_success, 0);
+            assert_eq!(stats.outbound_vote_signing_failure, 1);
+        }
+
+        #[test]
+        fn run420_outbound_no_ctx_returns_unchanged() {
+            // Legacy / single-validator path (ctx == None): no signing gate;
+            // the message is returned unchanged and the inbound gate is also
+            // disabled, so no unsigned message is admitted at a verifying peer.
+            let mut stats = BinaryConsensusLoopInboundStats::default();
+            let unsigned_p = BlockProposal {
+                header: base_header(0),
+                qc: None,
+                txs: vec![],
+                signature: vec![],
+            };
+            let out = sign_proposal_for_broadcast(unsigned_p, None, &mut stats).expect("passthru");
+            assert!(out.signature.is_empty());
+            assert_eq!(stats.outbound_proposal_signing_success, 0);
+            assert_eq!(stats.outbound_proposal_signing_failure, 0);
+        }
+
+        // =================================================================
+        // BYPASS: no-ctx inbound path does not run the gate (documents that
+        // production activation is gated on a wired verification context).
+        // =================================================================
+
+        #[test]
+        fn run420_inbound_no_ctx_does_not_run_verify_gate() {
+            let fixture = make_fixture(4);
+            let mut engine = make_engine(ValidatorId(0), 4);
+            let mut stats = BinaryConsensusLoopInboundStats::default();
+            let metrics = make_metrics();
+
+            let mut p = signed_proposal(1, &fixture);
+            p.signature.clear();
+            // ctx = None → gate disabled (legacy path). The verify counters
+            // stay at zero (the message is handled by the pre-Run-420 path).
+            deliver_proposal(&mut engine, &mut stats, None, &p, &metrics);
+            assert_eq!(stats.inbound_proposal_verify_accepted, 0);
+            assert_eq!(stats.inbound_proposal_verify_rejected_total, 0);
+        }
+
+        // =================================================================
+        // METRICS EXPOSITION
+        // =================================================================
+
+        #[test]
+        fn run420_metrics_exposition_renders_all_counters() {
+            let fixture = make_fixture(4);
+            let ctx = make_ctx(&fixture, None);
+            let mut engine = make_engine(ValidatorId(0), 4);
+            let mut stats = BinaryConsensusLoopInboundStats::default();
+            let metrics = make_metrics();
+
+            let p = signed_proposal(1, &fixture);
+            deliver_proposal(&mut engine, &mut stats, Some(&ctx), &p, &metrics);
+            update_binary_view_timeout_metrics(&metrics, &stats);
+
+            let body = metrics.format_metrics();
+            for needle in [
+                "qbind_consensus_inbound_proposal_verify_accepted_total",
+                "qbind_consensus_inbound_proposal_verify_rejected_total",
+                "qbind_consensus_inbound_proposal_rejected_signer_mismatch_total",
+                "qbind_consensus_inbound_proposal_rejected_unknown_validator_total",
+                "qbind_consensus_inbound_proposal_rejected_missing_signature_total",
+                "qbind_consensus_inbound_proposal_rejected_missing_key_total",
+                "qbind_consensus_inbound_proposal_rejected_unsupported_suite_total",
+                "qbind_consensus_inbound_proposal_rejected_wrong_suite_total",
+                "qbind_consensus_inbound_proposal_rejected_bad_signature_total",
+                "qbind_consensus_inbound_proposal_rejected_internal_error_total",
+                "qbind_consensus_inbound_vote_verify_accepted_total",
+                "qbind_consensus_inbound_vote_verify_rejected_total",
+                "qbind_consensus_inbound_vote_rejected_signer_mismatch_total",
+                "qbind_consensus_inbound_vote_rejected_unknown_validator_total",
+                "qbind_consensus_inbound_vote_rejected_missing_signature_total",
+                "qbind_consensus_inbound_vote_rejected_missing_key_total",
+                "qbind_consensus_inbound_vote_rejected_unsupported_suite_total",
+                "qbind_consensus_inbound_vote_rejected_wrong_suite_total",
+                "qbind_consensus_inbound_vote_rejected_bad_signature_total",
+                "qbind_consensus_inbound_vote_rejected_internal_error_total",
+                "qbind_consensus_proposal_vote_crypto_verify_latency_ns_total",
+                "qbind_consensus_proposal_vote_crypto_verify_latency_observations_total",
+                "qbind_consensus_outbound_proposal_signing_success_total",
+                "qbind_consensus_outbound_proposal_signing_failure_total",
+                "qbind_consensus_outbound_vote_signing_success_total",
+                "qbind_consensus_outbound_vote_signing_failure_total",
             ] {
                 assert!(body.contains(needle), "missing {} in /metrics body", needle);
             }

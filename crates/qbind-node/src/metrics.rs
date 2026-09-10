@@ -2107,6 +2107,42 @@ pub struct BinaryViewTimeoutMetrics {
     timeout_crypto_verify_latency_observations_total: AtomicU64,
 
     // -------------------------------------------------------------------
+    // Run 420 (F3/F4/F8): inbound Proposal/Vote signature + suite
+    // verification outcomes and outbound Proposal/Vote signing outcomes.
+    // These are DISTINCT from the Run 418 F6 transport sender-binding
+    // counter and from the engine-acceptance counters: a `*_verify_accepted`
+    // is "accepted by the signature verifier", NOT "accepted by the
+    // consensus engine" and NOT "committed". Rejection labels are a bounded
+    // enum taxonomy, never attacker-controlled strings.
+    // -------------------------------------------------------------------
+    inbound_proposal_verify_accepted: AtomicU64,
+    inbound_proposal_verify_rejected_total: AtomicU64,
+    inbound_proposal_rejected_signer_mismatch: AtomicU64,
+    inbound_proposal_rejected_unknown_validator: AtomicU64,
+    inbound_proposal_rejected_missing_signature: AtomicU64,
+    inbound_proposal_rejected_missing_key: AtomicU64,
+    inbound_proposal_rejected_unsupported_suite: AtomicU64,
+    inbound_proposal_rejected_wrong_suite: AtomicU64,
+    inbound_proposal_rejected_bad_signature: AtomicU64,
+    inbound_proposal_rejected_internal_error: AtomicU64,
+    inbound_vote_verify_accepted: AtomicU64,
+    inbound_vote_verify_rejected_total: AtomicU64,
+    inbound_vote_rejected_signer_mismatch: AtomicU64,
+    inbound_vote_rejected_unknown_validator: AtomicU64,
+    inbound_vote_rejected_missing_signature: AtomicU64,
+    inbound_vote_rejected_missing_key: AtomicU64,
+    inbound_vote_rejected_unsupported_suite: AtomicU64,
+    inbound_vote_rejected_wrong_suite: AtomicU64,
+    inbound_vote_rejected_bad_signature: AtomicU64,
+    inbound_vote_rejected_internal_error: AtomicU64,
+    proposal_vote_crypto_verify_latency_ns_total: AtomicU64,
+    proposal_vote_crypto_verify_latency_observations_total: AtomicU64,
+    outbound_proposal_signing_success: AtomicU64,
+    outbound_proposal_signing_failure: AtomicU64,
+    outbound_vote_signing_success: AtomicU64,
+    outbound_vote_signing_failure: AtomicU64,
+
+    // -------------------------------------------------------------------
     // Run 046: bounded exponential-backoff view-timeout pacing.
     //
     // These observe the binary-loop `ViewTimeoutBackoffState` pacer:
@@ -2286,6 +2322,98 @@ impl BinaryViewTimeoutMetrics {
             stats.timeout_crypto_verify_latency_observations_total,
             Ordering::Relaxed,
         );
+    }
+
+    /// Run 420: store the per-message Proposal/Vote signature + suite
+    /// verification counters and the outbound Proposal/Vote signing counters.
+    /// Kept as a separate setter for the same additive reasons as
+    /// [`set_run030`](Self::set_run030).
+    pub fn set_run420(&self, stats: &BinaryViewTimeoutRun420Snapshot) {
+        self.inbound_proposal_verify_accepted
+            .store(stats.inbound_proposal_verify_accepted, Ordering::Relaxed);
+        self.inbound_proposal_verify_rejected_total.store(
+            stats.inbound_proposal_verify_rejected_total,
+            Ordering::Relaxed,
+        );
+        self.inbound_proposal_rejected_signer_mismatch.store(
+            stats.inbound_proposal_rejected_signer_mismatch,
+            Ordering::Relaxed,
+        );
+        self.inbound_proposal_rejected_unknown_validator.store(
+            stats.inbound_proposal_rejected_unknown_validator,
+            Ordering::Relaxed,
+        );
+        self.inbound_proposal_rejected_missing_signature.store(
+            stats.inbound_proposal_rejected_missing_signature,
+            Ordering::Relaxed,
+        );
+        self.inbound_proposal_rejected_missing_key.store(
+            stats.inbound_proposal_rejected_missing_key,
+            Ordering::Relaxed,
+        );
+        self.inbound_proposal_rejected_unsupported_suite.store(
+            stats.inbound_proposal_rejected_unsupported_suite,
+            Ordering::Relaxed,
+        );
+        self.inbound_proposal_rejected_wrong_suite.store(
+            stats.inbound_proposal_rejected_wrong_suite,
+            Ordering::Relaxed,
+        );
+        self.inbound_proposal_rejected_bad_signature.store(
+            stats.inbound_proposal_rejected_bad_signature,
+            Ordering::Relaxed,
+        );
+        self.inbound_proposal_rejected_internal_error.store(
+            stats.inbound_proposal_rejected_internal_error,
+            Ordering::Relaxed,
+        );
+        self.inbound_vote_verify_accepted
+            .store(stats.inbound_vote_verify_accepted, Ordering::Relaxed);
+        self.inbound_vote_verify_rejected_total
+            .store(stats.inbound_vote_verify_rejected_total, Ordering::Relaxed);
+        self.inbound_vote_rejected_signer_mismatch.store(
+            stats.inbound_vote_rejected_signer_mismatch,
+            Ordering::Relaxed,
+        );
+        self.inbound_vote_rejected_unknown_validator.store(
+            stats.inbound_vote_rejected_unknown_validator,
+            Ordering::Relaxed,
+        );
+        self.inbound_vote_rejected_missing_signature.store(
+            stats.inbound_vote_rejected_missing_signature,
+            Ordering::Relaxed,
+        );
+        self.inbound_vote_rejected_missing_key
+            .store(stats.inbound_vote_rejected_missing_key, Ordering::Relaxed);
+        self.inbound_vote_rejected_unsupported_suite.store(
+            stats.inbound_vote_rejected_unsupported_suite,
+            Ordering::Relaxed,
+        );
+        self.inbound_vote_rejected_wrong_suite
+            .store(stats.inbound_vote_rejected_wrong_suite, Ordering::Relaxed);
+        self.inbound_vote_rejected_bad_signature
+            .store(stats.inbound_vote_rejected_bad_signature, Ordering::Relaxed);
+        self.inbound_vote_rejected_internal_error.store(
+            stats.inbound_vote_rejected_internal_error,
+            Ordering::Relaxed,
+        );
+        self.proposal_vote_crypto_verify_latency_ns_total.store(
+            stats.proposal_vote_crypto_verify_latency_ns_total,
+            Ordering::Relaxed,
+        );
+        self.proposal_vote_crypto_verify_latency_observations_total
+            .store(
+                stats.proposal_vote_crypto_verify_latency_observations_total,
+                Ordering::Relaxed,
+            );
+        self.outbound_proposal_signing_success
+            .store(stats.outbound_proposal_signing_success, Ordering::Relaxed);
+        self.outbound_proposal_signing_failure
+            .store(stats.outbound_proposal_signing_failure, Ordering::Relaxed);
+        self.outbound_vote_signing_success
+            .store(stats.outbound_vote_signing_success, Ordering::Relaxed);
+        self.outbound_vote_signing_failure
+            .store(stats.outbound_vote_signing_failure, Ordering::Relaxed);
     }
 
     /// Run 046: store the exponential-backoff pacer state. Called
@@ -2500,6 +2628,136 @@ impl BinaryViewTimeoutMetrics {
             self.timeout_crypto_verify_latency_observations_total
                 .load(Ordering::Relaxed)
         ));
+        // Run 420: per-message Proposal/Vote signature + suite verification
+        // and outbound Proposal/Vote signing exposition (F3/F4/F8).
+        output.push_str("\n# Binary proposal/vote crypto verification (Run 420)\n");
+        output.push_str(&format!(
+            "qbind_consensus_inbound_proposal_verify_accepted_total {}\n",
+            self.inbound_proposal_verify_accepted
+                .load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "qbind_consensus_inbound_proposal_verify_rejected_total {}\n",
+            self.inbound_proposal_verify_rejected_total
+                .load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "qbind_consensus_inbound_proposal_rejected_signer_mismatch_total {}\n",
+            self.inbound_proposal_rejected_signer_mismatch
+                .load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "qbind_consensus_inbound_proposal_rejected_unknown_validator_total {}\n",
+            self.inbound_proposal_rejected_unknown_validator
+                .load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "qbind_consensus_inbound_proposal_rejected_missing_signature_total {}\n",
+            self.inbound_proposal_rejected_missing_signature
+                .load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "qbind_consensus_inbound_proposal_rejected_missing_key_total {}\n",
+            self.inbound_proposal_rejected_missing_key
+                .load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "qbind_consensus_inbound_proposal_rejected_unsupported_suite_total {}\n",
+            self.inbound_proposal_rejected_unsupported_suite
+                .load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "qbind_consensus_inbound_proposal_rejected_wrong_suite_total {}\n",
+            self.inbound_proposal_rejected_wrong_suite
+                .load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "qbind_consensus_inbound_proposal_rejected_bad_signature_total {}\n",
+            self.inbound_proposal_rejected_bad_signature
+                .load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "qbind_consensus_inbound_proposal_rejected_internal_error_total {}\n",
+            self.inbound_proposal_rejected_internal_error
+                .load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "qbind_consensus_inbound_vote_verify_accepted_total {}\n",
+            self.inbound_vote_verify_accepted.load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "qbind_consensus_inbound_vote_verify_rejected_total {}\n",
+            self.inbound_vote_verify_rejected_total
+                .load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "qbind_consensus_inbound_vote_rejected_signer_mismatch_total {}\n",
+            self.inbound_vote_rejected_signer_mismatch
+                .load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "qbind_consensus_inbound_vote_rejected_unknown_validator_total {}\n",
+            self.inbound_vote_rejected_unknown_validator
+                .load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "qbind_consensus_inbound_vote_rejected_missing_signature_total {}\n",
+            self.inbound_vote_rejected_missing_signature
+                .load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "qbind_consensus_inbound_vote_rejected_missing_key_total {}\n",
+            self.inbound_vote_rejected_missing_key
+                .load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "qbind_consensus_inbound_vote_rejected_unsupported_suite_total {}\n",
+            self.inbound_vote_rejected_unsupported_suite
+                .load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "qbind_consensus_inbound_vote_rejected_wrong_suite_total {}\n",
+            self.inbound_vote_rejected_wrong_suite
+                .load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "qbind_consensus_inbound_vote_rejected_bad_signature_total {}\n",
+            self.inbound_vote_rejected_bad_signature
+                .load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "qbind_consensus_inbound_vote_rejected_internal_error_total {}\n",
+            self.inbound_vote_rejected_internal_error
+                .load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "qbind_consensus_proposal_vote_crypto_verify_latency_ns_total {}\n",
+            self.proposal_vote_crypto_verify_latency_ns_total
+                .load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "qbind_consensus_proposal_vote_crypto_verify_latency_observations_total {}\n",
+            self.proposal_vote_crypto_verify_latency_observations_total
+                .load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "qbind_consensus_outbound_proposal_signing_success_total {}\n",
+            self.outbound_proposal_signing_success
+                .load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "qbind_consensus_outbound_proposal_signing_failure_total {}\n",
+            self.outbound_proposal_signing_failure
+                .load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "qbind_consensus_outbound_vote_signing_success_total {}\n",
+            self.outbound_vote_signing_success.load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "qbind_consensus_outbound_vote_signing_failure_total {}\n",
+            self.outbound_vote_signing_failure.load(Ordering::Relaxed)
+        ));
         // Run 046: bounded exponential-backoff view-timeout pacing.
         output.push_str("\n# Binary view-timeout exponential-backoff pacing (Run 046)\n");
         output.push_str(&format!(
@@ -2568,6 +2826,41 @@ pub struct BinaryViewTimeoutRun030Snapshot {
     pub view_advances_due_to_verified_tc: u64,
     pub timeout_crypto_verify_latency_ns_total: u64,
     pub timeout_crypto_verify_latency_observations_total: u64,
+}
+
+/// Snapshot bag for [`BinaryViewTimeoutMetrics::set_run420`] (F3/F4/F8).
+///
+/// Mirrors the Run 420 Proposal/Vote signature + suite verification and
+/// outbound Proposal/Vote signing counters maintained in
+/// `BinaryConsensusLoopInboundStats`. Additive by design.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct BinaryViewTimeoutRun420Snapshot {
+    pub inbound_proposal_verify_accepted: u64,
+    pub inbound_proposal_verify_rejected_total: u64,
+    pub inbound_proposal_rejected_signer_mismatch: u64,
+    pub inbound_proposal_rejected_unknown_validator: u64,
+    pub inbound_proposal_rejected_missing_signature: u64,
+    pub inbound_proposal_rejected_missing_key: u64,
+    pub inbound_proposal_rejected_unsupported_suite: u64,
+    pub inbound_proposal_rejected_wrong_suite: u64,
+    pub inbound_proposal_rejected_bad_signature: u64,
+    pub inbound_proposal_rejected_internal_error: u64,
+    pub inbound_vote_verify_accepted: u64,
+    pub inbound_vote_verify_rejected_total: u64,
+    pub inbound_vote_rejected_signer_mismatch: u64,
+    pub inbound_vote_rejected_unknown_validator: u64,
+    pub inbound_vote_rejected_missing_signature: u64,
+    pub inbound_vote_rejected_missing_key: u64,
+    pub inbound_vote_rejected_unsupported_suite: u64,
+    pub inbound_vote_rejected_wrong_suite: u64,
+    pub inbound_vote_rejected_bad_signature: u64,
+    pub inbound_vote_rejected_internal_error: u64,
+    pub proposal_vote_crypto_verify_latency_ns_total: u64,
+    pub proposal_vote_crypto_verify_latency_observations_total: u64,
+    pub outbound_proposal_signing_success: u64,
+    pub outbound_proposal_signing_failure: u64,
+    pub outbound_vote_signing_success: u64,
+    pub outbound_vote_signing_failure: u64,
 }
 
 impl RestoreCatchupMetrics {
