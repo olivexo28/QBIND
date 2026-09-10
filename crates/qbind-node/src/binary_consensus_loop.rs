@@ -847,15 +847,23 @@ pub struct BinaryConsensusLoopIo {
     ///   NOT emitted (fail-closed) — no broadcast, no local ingest, no
     ///   TC formation.
     ///
-    /// When `None`, all of the above behaviours are skipped. This
-    /// preserves bit-equivalent pre-Run-030 semantics for the
-    /// single-validator / LocalMesh path which has no governance-backed
-    /// key provider, no per-suite backend registry, and no signer wired
-    /// into `main.rs`. The `--p2p-mutual-auth required` multi-validator
-    /// production path is intended to wire this in a follow-up; the
-    /// boundary is documented in
+    /// When `None`, the timeout/new-view verification and signing behaviours
+    /// above are skipped, preserving bit-equivalent pre-Run-030 semantics for
+    /// the single-validator / LocalMesh path which has no governance-backed key
+    /// provider, no per-suite backend registry, and no signer wired into
+    /// `main.rs`.
+    ///
+    /// Run 420 correction: for inbound/outbound **`Proposal` and `Vote`**
+    /// traffic, a `None` here does NOT imply permission to process
+    /// unsigned/unverified messages. That decision is made by the explicit
+    /// [`BinaryConsensusLoopIo::verification_policy`]: under `Required`
+    /// (production default) a `None` context causes Proposal/Vote to be
+    /// rejected (inbound) / suppressed (outbound) fail-closed; only the
+    /// test-only `LocalFixtureUnsigned` policy preserves the legacy unsigned
+    /// passthrough. The boundary is documented in
     /// `docs/whitepaper/contradiction.md` C4 (production PQC root-key
-    /// distribution remains out of scope until that pass).
+    /// distribution / consensus authority activation remains out of scope
+    /// until that pass).
     pub verification_ctx: Option<Arc<TimeoutVerificationContext>>,
 
     /// Run 418: optional authenticated peer→validator consensus binding gate.
@@ -2766,10 +2774,15 @@ fn maybe_reemit_on_late_peer_connect(
 /// broadcast, fail-closed.
 ///
 /// Semantics:
-/// - `ctx == None` (single-validator / legacy / test path where no production
-///   verification context is wired): the proposal is returned unchanged. The
-///   symmetric inbound verification gate is also disabled in this mode, so no
-///   unsigned message is admitted at a verifying peer.
+/// - `ctx == None`: the outcome is governed by `verification_policy`, never
+///   inferred from the `None`. Under
+///   [`ConsensusVerificationPolicy::Required`] (production default) the
+///   proposal is NOT emitted (returns `None`) and
+///   `outbound_proposal_verification_context_unavailable_total` is
+///   incremented — no broadcast, no self-injection. Under the test-only
+///   [`ConsensusVerificationPolicy::LocalFixtureUnsigned`] policy the proposal
+///   is returned unchanged (legacy LocalMesh passthrough; the symmetric
+///   inbound gate is likewise permissive only under that fixture policy).
 /// - `ctx == Some` but `ctx.signer == None`: fail closed — the proposal is NOT
 ///   broadcast (returns `None`) and `outbound_proposal_signing_failure` is
 ///   incremented. A verifying node without a configured signer must not emit
@@ -3275,17 +3288,21 @@ pub(crate) fn handle_inbound_consensus_msg(
                         }
                     };
                     // Run 420 (F3/F4/F8): inbound `Vote` cryptographic
-                    // signature + suite verification gate. Runs ONLY when a
-                    // verification context is wired. Fail-closed and placed
-                    // AFTER Run 418 F6 sender binding but BEFORE any
-                    // delivery/acceptance counting or engine ingestion: an
-                    // unsigned, invalidly signed, wrong-key, wrong-suite,
-                    // unsupported-suite, unknown-validator, or
-                    // signer/claimed-validator-mismatched vote never reaches
-                    // `engine.on_vote_event` and so cannot contribute to vote
-                    // aggregation / QC formation / view advancement. Both
-                    // transport identity (F6) and a valid consensus signature
-                    // (F4) are required.
+                    // signature + suite verification gate. Placed AFTER Run 418
+                    // F6 sender binding but BEFORE any delivery/acceptance
+                    // counting or engine ingestion: an unsigned, invalidly
+                    // signed, wrong-key, wrong-suite, unsupported-suite,
+                    // unknown-validator, or signer/claimed-validator-mismatched
+                    // vote never reaches `engine.on_vote_event` and so cannot
+                    // contribute to vote aggregation / QC formation / view
+                    // advancement. When a context IS wired, both transport
+                    // identity (F6) and a valid consensus signature (F4) are
+                    // required. When NO context is wired, the explicit
+                    // `ConsensusVerificationPolicy` decides: under `Required`
+                    // (production default) the vote is rejected fail-closed as
+                    // `VerificationContextUnavailable`; only the test-only
+                    // `LocalFixtureUnsigned` policy permits the historical
+                    // unsigned passthrough.
                     match verification_ctx {
                         Some(ctx) => {
                             let t_start = std::time::Instant::now();
