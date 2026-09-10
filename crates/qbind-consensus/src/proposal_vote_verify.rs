@@ -11,10 +11,9 @@
 //! # Scope (Run 420)
 //!
 //! - [`verify_proposal_msg`]: per-message verification of a received
-//!   `BlockProposal` (claimed-sender binding + membership + missing-signature
-//!   + suite presence/policy/registration + governed key lookup + signature)
-//!   against the active validator set, the governance-configured suite/key,
-//!   and the chain-ID-aware signing preimage emitted by
+//!   `BlockProposal`. Checks claimed-sender binding, membership,
+//!   missing-signature, suite presence/policy/registration, governed key
+//!   lookup, and the signature over the chain-ID-aware preimage emitted by
 //!   [`qbind_wire::consensus::BlockProposal::signing_preimage_with_chain_id`].
 //! - [`verify_vote_msg`]: the analogous per-message verification for a
 //!   received `Vote`, over
@@ -240,7 +239,13 @@ fn verify_core<K, B, Vfn>(
 where
     K: SuiteAwareValidatorKeyProvider + ?Sized,
     B: ConsensusSigBackendRegistry + ?Sized,
-    Vfn: Fn(&Arc<dyn ConsensusSigVerifier>, u64, &[u8], &[u8], &[u8]) -> Result<(), ConsensusSigError>,
+    Vfn: Fn(
+        &Arc<dyn ConsensusSigVerifier>,
+        u64,
+        &[u8],
+        &[u8],
+        &[u8],
+    ) -> Result<(), ConsensusSigError>,
 {
     // Step 1: bind the authenticated transport sender (F6) to the message's
     // self-declared signer index. Both F6 identity and a valid signature are
@@ -494,11 +499,29 @@ mod tests {
         v
     }
 
-    fn vp(f: &Fixture, p: &BlockProposal, claimed: ValidatorId) -> Result<(), ProposalVoteVerifyError> {
-        verify_proposal_msg(p, claimed, &f.validators, &f.kp, &f.br, QBIND_DEVNET_CHAIN_ID)
+    fn vp(
+        f: &Fixture,
+        p: &BlockProposal,
+        claimed: ValidatorId,
+    ) -> Result<(), ProposalVoteVerifyError> {
+        verify_proposal_msg(
+            p,
+            claimed,
+            &f.validators,
+            &f.kp,
+            &f.br,
+            QBIND_DEVNET_CHAIN_ID,
+        )
     }
     fn vv(f: &Fixture, v: &Vote, claimed: ValidatorId) -> Result<(), ProposalVoteVerifyError> {
-        verify_vote_msg(v, claimed, &f.validators, &f.kp, &f.br, QBIND_DEVNET_CHAIN_ID)
+        verify_vote_msg(
+            v,
+            claimed,
+            &f.validators,
+            &f.kp,
+            &f.br,
+            QBIND_DEVNET_CHAIN_ID,
+        )
     }
 
     // ---- positive controls ----
@@ -666,9 +689,10 @@ mod tests {
     fn vote_unsupported_suite_no_backend() {
         // Governance says validator uses suite 200, but no backend registered.
         let mut f = make_fixture(4);
-        f.kp
-            .keys
-            .insert(ValidatorId(1), (ConsensusSigSuiteId::new(200), vec![0u8; 4]));
+        f.kp.keys.insert(
+            ValidatorId(1),
+            (ConsensusSigSuiteId::new(200), vec![0u8; 4]),
+        );
         let mut v = signed_vote(&f, 1, [3u8; 32]);
         v.suite_id = 200;
         assert!(matches!(
