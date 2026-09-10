@@ -13,24 +13,41 @@ crates/qbind-node/src/peer_consensus_binding.rs
   :328  PeerConsensusBindingGate
   :388    ::authorize(origin, claimed) -> Result<ValidatorId, ConsensusBindingReject>
           MissingOrigin / UnknownPeer / AmbiguousMapping / UnknownValidator / ClaimedSenderMismatch
+  :~441   ::authorize_origin(origin) -> Result<ValidatorId, ConsensusBindingReject>  (corrective pass)
+          origin-only admission for NewView (no claimed sender to compare / none invented):
+          MissingOrigin (origin=None) / UnknownPeer (NodeId not in map) /
+          AmbiguousMapping (forward NodeId->ValidatorId AND reverse ValidatorId->NodeId must both
+          agree). Exactly one bounded fixed-label metric recorded per call. Identity comes only
+          from AuthenticatedConsensusOrigin; never from payload/address/client_random/ClientInit.
 
 ============================================================================
-B. Consensus ingress wiring (binary_consensus_loop) -- F5/NewView wording
+B. Consensus ingress wiring (binary_consensus_loop) -- claimed-sender + NewView
 ============================================================================
 crates/qbind-node/src/binary_consensus_loop.rs
   :815  BinaryConsensusLoopIo.binding_gate: Option<Arc<PeerConsensusBindingGate>>
   :929  BinaryConsensusLoopInboundStats.inbound_sender_binding_rejected_total
-  :2703 handle_inbound_consensus_msg :: bind_sender closure
+  :~2703 handle_inbound_consensus_msg :: bind_sender closure
           Some(gate) => gate.authorize(origin, claimed)   -- production path
           None       => Ok(claimed)                       -- test-only (no gate installed)
         Proposal: claimed = ValidatorId::new(proposal.header.proposer_index)
         Vote:     claimed = ValidatorId::new(vote.validator_index)
+        Timeout / RestoreCatchupRequest / RestoreCatchupResponse: claimed = their self-declared idx
         On reject: increment inbound_sender_binding_rejected_total and RETURN before any
         engine call / restore-catchup deferral / delivery counting / reconfig observation.
-  NewView doc (~:2666): F5/NewView wording corrected. NewView has no single immediate
-  transport-sender field, so the F6 claimed-sender comparison does not apply to NewView.
-  Timeout/NewView cryptographic verification remains the independently unresolved F5 boundary
-  and may be optional/off in the audited deployed path. F5 is NOT claimed fixed or enforced.
+  :~3042 ConsensusNetMsg::NewView arm (corrective pass): calls
+          gate.authorize_origin(origin) at the TOP of the arm, BEFORE the size cap, BEFORE
+          inbound_new_views_delivered, BEFORE optional F5 verify_timeout_certificate_with_evidence,
+          BEFORE engine.on_timeout_certificate, and before any view/state mutation or outbound.
+          Missing/unknown/ambiguous origin -> inbound_sender_binding_rejected_total += 1 and RETURN.
+          NewView has NO single immediate transport-sender field, so the F6 claimed-sender
+          comparison does not apply and no sender is invented. This is transport-origin admission,
+          NOT NewView signer verification. Timeout/NewView cryptographic signer verification remains
+          the independently unresolved F5 boundary and may be optional/off in the deployed path.
+          F5 is NOT claimed fixed or enforced.
+crates/qbind-node/src/forged_injection.rs
+  :~531 inject_frame doc corrected: with a gate installed, an origin=None NewView is now rejected
+        at origin admission before the delivered counter / F5 / engine (forged frames carry no
+        real KEMTLS origin). Origin admission is not NewView signer verification; F5 unresolved.
 
 ============================================================================
 C. Certificate-map construction + strict validator parsing (p2p_node_builder)
@@ -88,6 +105,15 @@ crates/qbind-node/src/p2p_inbound.rs
 G. Dedicated Run 418 acceptance tests (real production types)
 ============================================================================
 crates/qbind-node/tests/run_418_authenticated_peer_consensus_sender_binding_tests.rs
-  12 tests, all PASS. Uses run_binary_consensus_loop_with_io + BinaryConsensusLoopIo{binding_gate:
+  18 tests, all PASS. Uses run_binary_consensus_loop_with_io + BinaryConsensusLoopIo{binding_gate:
   Some(..)} + InboundConsensusEnvelope + PeerConsensusBindingGate/Map + VerifiedServerIdentity +
-  parse_test_validator_id_from_cert_validator_id. See test_results.txt.
+  parse_test_validator_id_from_cert_validator_id. Corrective-pass additions cover NewView
+  authenticated transport-origin admission (missing/unknown/conflicting rejected before the
+  delivered counter; correctly-mapped admitted then subject to F5/engine rules; metric once).
+crates/qbind-node/tests/run_418_newview_demux_chain_integration_tests.rs
+  3 tests, all PASS. Drives the real P2pInboundDemuxer -> ChannelConsensusHandler ->
+  InboundConsensusEnvelope -> BinaryConsensusLoopIo{binding_gate:Some} -> PeerConsensusBindingGate
+  chain for NewView (missing-origin rejected; authenticated origin admitted) and Proposal
+  (missing-origin rejected), proving Optional/Disabled unauthenticated ingress rejection for BOTH
+  kinds. SCOPE: in-process demux chain; NOT a real socket/KEMTLS transport capture. See
+  test_results.txt.

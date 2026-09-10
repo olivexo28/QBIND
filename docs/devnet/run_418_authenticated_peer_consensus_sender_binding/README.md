@@ -19,6 +19,23 @@ transport-session-to-consensus-sender binding and accountability **only**: it do
 cryptographic proposal/vote/timeout/new-view/QC signatures meaningful and does not close
 F3/F4/F5/F7/F8, RS1, C4, or C5.
 
+## Corrective pass — `NewView` authenticated transport-origin admission
+
+The Run 418 corrective pass (this update; **not** Run 419) closes a gap in the original Run 418
+implementation: the `ConsensusNetMsg::NewView` arm of the deployed consensus loop did **not**
+authenticate or authorize the transport origin, so a `NewView` arriving with `origin=None` (an
+unauthenticated Optional/Disabled session, or a forged-injection frame) could increment the
+delivered counter, enter optional F5 verification, and reach `engine.on_timeout_certificate`.
+
+`NewView` is a multi-signer `TimeoutCertificate` and carries **no single immediate self-declared
+sender**, so the F6 claimed-sender comparison cannot apply and **no sender is invented**. Instead
+the gate now exposes an origin-only admission operation
+(`PeerConsensusBindingGate::authorize_origin`), and the `NewView` arm requires an authenticated,
+authorized transport origin **before** the delivered counter, F5 verification,
+`engine.on_timeout_certificate`, or any view/state mutation or outbound action. Missing, unknown,
+or ambiguous origins fail closed. This is transport-origin admission, **not** `NewView` signer
+verification — **F5 remains independently unresolved**.
+
 ## Overall result
 
 - **Result:** `POSITIVE-FOR-F6-CODE-TEST-REMEDIATION`.

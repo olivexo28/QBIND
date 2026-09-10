@@ -437,6 +437,77 @@ impl PeerConsensusBindingGate {
         self.metrics.record_accepted();
         Ok(origin.validator_id())
     }
+
+    /// Origin-only admission for consensus frames that carry **no** single
+    /// immediate self-declared sender (currently `NewView`, a multi-signer
+    /// `TimeoutCertificate`).
+    ///
+    /// Unlike [`PeerConsensusBindingGate::authorize`], this operation performs
+    /// no claimed-sender comparison — `NewView` has no single claimed sender to
+    /// compare against, so inventing one would be dishonest. Instead it proves
+    /// only that the transport session that submitted the frame is an
+    /// authenticated, authorized member of the configured one-to-one mapping
+    /// before the frame may enter consensus processing.
+    ///
+    /// This is **transport-origin admission**, not `NewView` *signer*
+    /// verification: it neither closes nor claims to close F5. The independent
+    /// `TimeoutCertificate` cryptographic-signer gate (F5) remains unresolved
+    /// and, where wired, still runs after admission.
+    ///
+    /// Fail-closed rules (identical identity discipline to
+    /// [`PeerConsensusBindingGate::authorize`], minus the claimed-sender step):
+    /// * `origin = None` → [`ConsensusBindingReject::MissingOrigin`];
+    /// * the full 32-byte authenticated `NodeId` is not in the authoritative
+    ///   map → [`ConsensusBindingReject::UnknownPeer`];
+    /// * the origin `ValidatorId` does not match the map in **both** the
+    ///   forward (`NodeId → ValidatorId`) and reverse
+    ///   (`ValidatorId → NodeId`) directions →
+    ///   [`ConsensusBindingReject::AmbiguousMapping`].
+    ///
+    /// Identity is taken exclusively from the authenticated
+    /// [`AuthenticatedConsensusOrigin`]; never from any payload field, address
+    /// text, `client_random`, or `ClientInit.validator_id`. Exactly one bounded
+    /// fixed-label metric is recorded per call. On success returns the
+    /// authenticated `ValidatorId`.
+    pub fn authorize_origin(
+        &self,
+        origin: Option<&AuthenticatedConsensusOrigin>,
+    ) -> Result<ValidatorId, ConsensusBindingReject> {
+        // Fail-closed: an absent authenticated origin can never be admitted.
+        let origin = match origin {
+            Some(o) => o,
+            None => {
+                self.metrics
+                    .record_reject(ConsensusBindingReject::MissingOrigin);
+                return Err(ConsensusBindingReject::MissingOrigin);
+            }
+        };
+
+        // The authenticated peer's full 32-byte NodeId must be authorized.
+        let mapped_validator = match self.map.validator_for_node(&origin.node_id()) {
+            Some(v) => v,
+            None => {
+                self.metrics
+                    .record_reject(ConsensusBindingReject::UnknownPeer);
+                return Err(ConsensusBindingReject::UnknownPeer);
+            }
+        };
+
+        // Require the origin ValidatorId to match both the forward
+        // (NodeId → ValidatorId) and reverse (ValidatorId → NodeId) mappings.
+        // Any disagreement (unknown, malformed, ambiguous, or conflicting
+        // pair) fails closed.
+        if mapped_validator != origin.validator_id()
+            || self.map.node_for_validator(&origin.validator_id()) != Some(origin.node_id())
+        {
+            self.metrics
+                .record_reject(ConsensusBindingReject::AmbiguousMapping);
+            return Err(ConsensusBindingReject::AmbiguousMapping);
+        }
+
+        self.metrics.record_accepted();
+        Ok(origin.validator_id())
+    }
 }
 
 #[cfg(test)]
@@ -619,5 +690,92 @@ mod tests {
         assert!(!rendered.contains("node_id"));
         assert!(!rendered.contains("addr"));
         assert!(!rendered.contains("validator=\""));
+    }
+
+    // ------------------------------------------------------------------
+    // Corrective pass: origin-only admission (authorize_origin) for NewView.
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn authorize_origin_accepts_configured_origin() {
+        let map = PeerConsensusBindingMap::build([(nid(1), ValidatorId::new(1))]).unwrap();
+        let gate = PeerConsensusBindingGate::new(map);
+        let origin = AuthenticatedConsensusOrigin::new(nid(1), ValidatorId::new(1));
+        assert_eq!(
+            gate.authorize_origin(Some(&origin)),
+            Ok(ValidatorId::new(1))
+        );
+        assert_eq!(gate.metrics().accepted(), 1);
+    }
+
+    #[test]
+    fn authorize_origin_fails_closed_on_missing_origin() {
+        let map = PeerConsensusBindingMap::build([(nid(1), ValidatorId::new(1))]).unwrap();
+        let gate = PeerConsensusBindingGate::new(map);
+        assert_eq!(
+            gate.authorize_origin(None),
+            Err(ConsensusBindingReject::MissingOrigin)
+        );
+        assert_eq!(
+            gate.metrics()
+                .reject_count(ConsensusBindingReject::MissingOrigin),
+            1
+        );
+        assert_eq!(gate.metrics().accepted(), 0);
+    }
+
+    #[test]
+    fn authorize_origin_rejects_unknown_peer() {
+        let map = PeerConsensusBindingMap::build([(nid(1), ValidatorId::new(1))]).unwrap();
+        let gate = PeerConsensusBindingGate::new(map);
+        let origin = AuthenticatedConsensusOrigin::new(nid(9), ValidatorId::new(9));
+        assert_eq!(
+            gate.authorize_origin(Some(&origin)),
+            Err(ConsensusBindingReject::UnknownPeer)
+        );
+    }
+
+    #[test]
+    fn authorize_origin_rejects_conflicting_pair_both_directions() {
+        // NodeId 1 is configured for validator 1, but the authenticated origin
+        // claims validator 2: forward/reverse mapping disagree -> ambiguous.
+        let map = PeerConsensusBindingMap::build([
+            (nid(1), ValidatorId::new(1)),
+            (nid(2), ValidatorId::new(2)),
+        ])
+        .unwrap();
+        let gate = PeerConsensusBindingGate::new(map);
+        let origin = AuthenticatedConsensusOrigin::new(nid(1), ValidatorId::new(2));
+        assert_eq!(
+            gate.authorize_origin(Some(&origin)),
+            Err(ConsensusBindingReject::AmbiguousMapping)
+        );
+        assert_eq!(gate.metrics().accepted(), 0);
+    }
+
+    #[test]
+    fn authorize_origin_records_exactly_one_metric_per_call() {
+        let map = PeerConsensusBindingMap::build([(nid(1), ValidatorId::new(1))]).unwrap();
+        let gate = PeerConsensusBindingGate::new(map);
+        let good = AuthenticatedConsensusOrigin::new(nid(1), ValidatorId::new(1));
+        assert!(gate.authorize_origin(Some(&good)).is_ok());
+        assert!(gate.authorize_origin(None).is_err());
+        // Exactly one accepted + one missing_origin; nothing else moved.
+        assert_eq!(gate.metrics().accepted(), 1);
+        assert_eq!(
+            gate.metrics()
+                .reject_count(ConsensusBindingReject::MissingOrigin),
+            1
+        );
+        assert_eq!(
+            gate.metrics()
+                .reject_count(ConsensusBindingReject::UnknownPeer),
+            0
+        );
+        assert_eq!(
+            gate.metrics()
+                .reject_count(ConsensusBindingReject::AmbiguousMapping),
+            0
+        );
     }
 }

@@ -62,9 +62,22 @@ reaches the binary consensus loop with a gate installed:
 3. The authenticated peer's `NodeId` and `ValidatorId` must agree with the configured one-to-one
    mapping, else `AmbiguousMapping` (this rejects an alternate root-valid certificate for the
    same validator that carries an unconfigured leaf `NodeId`).
-4. The **claimed sender** (`proposer_index` for proposals, `validator_index` for votes) must be a
+4. The **claimed sender** (`proposer_index` for proposals, `validator_index` for votes, and the
+   self-declared index for `Timeout` and the restore-catchup request/response) must be a
    known validator (`UnknownValidator`) and must equal the authenticated peer's validator
    (`ClaimedSenderMismatch`).
+
+For `NewView` (a multi-signer `TimeoutCertificate`) there is **no single immediate self-declared
+sender**, so the claimed-sender comparison in step 4 cannot apply and **no sender is invented**.
+The Run 418 corrective pass adds an origin-only admission operation
+(`PeerConsensusBindingGate::authorize_origin`) and the `NewView` arm requires an authenticated,
+authorized transport origin (steps 1–3 above: `MissingOrigin` / `UnknownPeer` / `AmbiguousMapping`,
+with the map checked in both the forward `NodeId → ValidatorId` and reverse `ValidatorId → NodeId`
+directions) **before** the `inbound_new_views_delivered` counter, before optional F5
+`TimeoutCertificate` verification, before `engine.on_timeout_certificate`, and before any
+view/state mutation or outbound/rebroadcast action. This is transport-origin admission, **not**
+`NewView` signer verification: F5 remains independently unresolved and, where wired, still runs
+*after* admission.
 
 Only when all checks pass is the authenticated `ValidatorId` returned and used as the engine
 sender. Every rejection increments a **fixed, low-cardinality** metric label
@@ -85,8 +98,9 @@ observation, mutation, outbound action, or accepted/delivered increment.
   trailing nonzero/arbitrary bytes, overflow, and out-of-range indices are rejected via a
   definitive canonical round-trip.
 - **Inbound (server-side) verified client identity**: surfaced from the established session and
-  carried on `InboundConsensusEnvelope.origin`; it drives the engine end-to-end (a matching
-  authenticated proposal produces a real outbound vote).
+  carried on `InboundConsensusEnvelope.origin`; it drives the real consensus loop (a matching
+  authenticated proposal produces a real outbound vote). This is loop-level ingress evidence, not a
+  real socket/KEMTLS transport capture, and is not described as transport end-to-end.
 - **Outbound (client-side) verified server identity**: surfaced from the established client-side
   connection via `VerifiedServerIdentity` (full cert-derived `NodeId`, validator identity,
   authentication-complete state) and compared against the configured expected pair. Configuration
@@ -112,7 +126,8 @@ remains.
 | File | Purpose |
 | --- | --- |
 | `crates/qbind-node/src/peer_consensus_binding.rs` | F6 gate/map/origin/metrics (pre-existing in `82c4b6d`; unchanged here) |
-| `crates/qbind-node/src/binary_consensus_loop.rs` | ingress gate wiring; F5/NewView wording |
+| `crates/qbind-node/src/binary_consensus_loop.rs` | ingress gate wiring; **NewView `authorize_origin` transport-origin admission**; F5/NewView wording |
+| `crates/qbind-node/src/forged_injection.rs` | doc corrected: origin=None NewView now rejected at admission (forged frames carry no real KEMTLS origin) |
 | `crates/qbind-node/src/p2p_node_builder.rs` | validated cert-map admission + strict validator parsing |
 | `crates/qbind-node/src/p2p_tcp.rs` | outbound verified-server-identity comparison on both dial paths |
 | `crates/qbind-node/src/secure_channel.rs` | `VerifiedServerIdentity` + identity-surfacing connect |
@@ -121,7 +136,8 @@ remains.
 | `crates/qbind-net/src/handshake.rs` | surface verified server `NodeId` in `HandshakeResult` |
 | `crates/qbind-net/src/connection.rs` | client-side `peer_node_id` = verified server identity |
 | `crates/qbind-node/src/p2p_liveness.rs` | restored (undo accidental clobber) |
-| `crates/qbind-node/tests/run_418_authenticated_peer_consensus_sender_binding_tests.rs` | new: 12 acceptance tests |
+| `crates/qbind-node/tests/run_418_authenticated_peer_consensus_sender_binding_tests.rs` | 18 acceptance tests (adds NewView origin-admission cases) |
+| `crates/qbind-node/tests/run_418_newview_demux_chain_integration_tests.rs` | new: 3 demux→handler→loop→gate NewView/Proposal admission tests (in-process; not a socket/KEMTLS capture) |
 
 ## 7. Evidence classification
 

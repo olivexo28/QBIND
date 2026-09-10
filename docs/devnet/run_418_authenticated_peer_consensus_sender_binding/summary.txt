@@ -5,6 +5,7 @@ finding=F6 (transport-session-to-consensus-sender binding / accountability)
 preliminary_base_commit=82c4b6d
 pre_implementation_baseline=51deb6d543ce5cfc4884d373e49925d0aafefb04
 run_417_finalization_base=2974f203251a57ded30c9486abf59adfd08419cc
+corrective_pass=Run 418 corrective (NewView authenticated transport-origin admission); NOT Run 419
 
 # --- Overall result ---
 overall_result=F6-REMEDIATED-IN-CODE-AND-TEST / NO-RELEASE-BINARY-EVIDENCE
@@ -16,31 +17,40 @@ release_binary_evidence=ABSENT (no live multi-node release-binary capture exists
 f6_scope=transport-session-to-consensus-sender binding + accountability ONLY
 f6_does_not_close=F3 F4 F5 F7 F8 RS1 C4 C5
 still_true_after_f6=proposals/votes emitted unsigned with toy suite 0; inbound accepted without signature/membership/suite verification; QCs imported with empty signer evidence
-f5_status=Timeout/NewView cryptographic verification remains the independently unresolved F5 boundary; may be optional/off in the audited deployed path. NewView carries no single immediate transport-sender field, so the F6 claimed-sender comparison does not apply to NewView. F5 is NOT claimed fixed or always enforced.
+f5_status=Timeout/NewView cryptographic signer verification remains the independently unresolved F5 boundary; may be optional/off in the audited deployed path. NewView carries no single immediate transport-sender field, so the F6 claimed-sender comparison does not apply to NewView and no sender is invented. The corrective pass adds NewView authenticated TRANSPORT-ORIGIN admission (authorize_origin), which is NOT NewView signer verification. F5 is NOT claimed fixed or always enforced.
 
 # --- Authoritative decision point ---
-gate=crates/qbind-node/src/peer_consensus_binding.rs :: PeerConsensusBindingGate::authorize
+gate=crates/qbind-node/src/peer_consensus_binding.rs :: PeerConsensusBindingGate::authorize (claimed-sender bind) + ::authorize_origin (origin-only admission for NewView)
+newview_origin_admission=crates/qbind-node/src/binary_consensus_loop.rs :: ConsensusNetMsg::NewView arm calls gate.authorize_origin(origin) BEFORE inbound_new_views_delivered, before optional F5 verification, before engine.on_timeout_certificate, and before any view/state mutation or outbound/rebroadcast. Missing/unknown/ambiguous origin fails closed. binding_gate=None remains a bounded test/local-only path.
 reject_reasons=MissingOrigin UnknownPeer UnknownValidator ClaimedSenderMismatch AmbiguousMapping
-metric=qbind_consensus_binding_total{result="..."} (fixed low-cardinality labels)
+metric=qbind_consensus_binding_total{result="..."} (fixed low-cardinality labels; exactly one per admitted/rejected message)
 loop_counter=BinaryConsensusLoopInboundStats::inbound_sender_binding_rejected_total
 
-# --- Acceptance coverage (dedicated Run 418 integration tests, all PASS) ---
+# --- Acceptance coverage (dedicated Run 418 tests, all PASS) ---
 a01_matching_proposal_accepted=PASS (run418_matching_proposal_accepted_and_client_identity_propagates)
 a02_matching_vote_accepted=PASS (run418_matching_vote_accepted_by_gate)
 a03_peerB_claims_validatorA_proposal_rejected=PASS (run418_proposal_impersonation_rejected_no_side_effects)
 a04_peerB_claims_validatorA_vote_rejected=PASS (run418_vote_impersonation_rejected_no_side_effects)
 a05_mismatch_no_engine_call_or_mutation_or_outbound_or_counter=PASS (asserts total_actions==0, delivered==0, engine_accepted==0)
 a06_missing_origin_rejected=PASS (run418_missing_origin_rejected + run418_gate_fails_closed_on_absent_origin)
-a07_unauthenticated_optional_disabled_rejected=PASS (missing-origin path fails closed under installed gate)
-a08_inbound_verified_client_identity_end_to_end=PASS (matching proposal drives engine, emits real outbound vote)
-a09_outbound_verified_server_identity_end_to_end=PASS (run418_outbound_unexpected_server_identity_cannot_inherit_configured_origin)
+a07_unauthenticated_optional_disabled_rejected=PASS for BOTH Proposal AND NewView, NOT inferred from a single Proposal test: run418_missing_origin_rejected (Proposal, loop) + run418_newview_missing_origin_rejected_before_delivered (NewView, loop) + run418_demux_proposal_missing_origin_rejected + run418_demux_newview_missing_origin_rejected (both through the real P2pInboundDemuxer->ChannelConsensusHandler->loop->gate chain)
+a08_inbound_verified_client_identity_drives_engine=PASS (run418_matching_proposal_accepted_and_client_identity_propagates: the in-process verified client origin on InboundConsensusEnvelope drives the real consensus loop and emits a real outbound vote). SCOPE: this is loop-level ingress evidence; it is NOT a real socket/KEMTLS transport capture and is not described as transport end-to-end.
+a09_outbound_unexpected_server_identity_cannot_inherit_configured_origin=PASS (run418_outbound_unexpected_server_identity_cannot_inherit_configured_origin). SCOPE: exercises VerifiedServerIdentity resolution logic via direct construction; this is unit coverage of the identity-inheritance rule, NOT a real KEMTLS/transport capture.
 a10_unconfigured_alternate_cert_rejected=PASS (run418_unconfigured_and_colliding_nodeids_rejected)
 a11_malformed_noncanonical_out_of_range_validator_rejected=PASS (run418_strict_validator_id_parsing)
 a12_duplicate_ambiguous_map_fails_startup=PASS (run418_duplicate_or_ambiguous_map_fails_startup)
 a13_full_32_byte_nodeid_comparison_first_eight_collide=PASS (run418_unconfigured_and_colliding_nodeids_rejected)
-a14_fixed_label_metrics_increment_and_live_surface=PASS (run418_metrics_fixed_labels_and_live_surface)
+a14_fixed_label_metrics_increment_and_live_surface=PASS (run418_metrics_fixed_labels_and_live_surface + run418_newview_binding_metric_increments_exactly_once)
 a15_origin_absent_from_serialized_wire_bytes=PASS (run418_origin_absent_from_serialized_wire_bytes)
-real_production_types=run_binary_consensus_loop_with_io + BinaryConsensusLoopIo{binding_gate:Some} + InboundConsensusEnvelope + PeerConsensusBindingGate/Map + VerifiedServerIdentity + parse_test_validator_id_from_cert_validator_id (no mock ingress / no mock gate)
+# NewView authenticated transport-origin admission (corrective pass)
+a16_newview_missing_origin_rejected_before_delivered=PASS (run418_newview_missing_origin_rejected_before_delivered: asserts inbound_new_views_delivered==0, no engine call, no view advance, no outbound, accepted==0)
+a17_newview_unknown_nodeid_rejected=PASS (run418_newview_unknown_nodeid_rejected -> unknown_peer)
+a18_newview_conflicting_pair_rejected=PASS (run418_newview_conflicting_pair_rejected -> ambiguous_mapping)
+a19_newview_authenticated_origin_admitted_then_engine_rules=PASS (run418_newview_authenticated_origin_admitted_then_engine_rules_apply: admitted, delivered==1, accepted==1, then subject to unchanged F5/engine rules)
+a20_newview_binding_metric_increments_exactly_once=PASS (run418_newview_binding_metric_increments_exactly_once + run418_authorize_origin_fails_closed_and_classifies)
+a21_demux_chain_newview_admission=PASS (run418_demux_newview_missing_origin_rejected + run418_demux_newview_authenticated_origin_admitted, through P2pInboundDemuxer->ChannelConsensusHandler->InboundConsensusEnvelope->BinaryConsensusLoopIo->gate; NOT a socket/KEMTLS capture)
+real_production_types=run_binary_consensus_loop_with_io + BinaryConsensusLoopIo{binding_gate:Some} + P2pInboundDemuxer + ChannelConsensusHandler + InboundConsensusEnvelope + PeerConsensusBindingGate/Map + VerifiedServerIdentity + parse_test_validator_id_from_cert_validator_id (no mock ingress / no mock gate)
+transport_kemtls_capture=ABSENT (no real socket/KEMTLS two-process transport capture; demux-chain coverage is in-process and is NOT described as transport end-to-end)
 
 # --- Identity provenance (both connection directions) ---
 inbound_server_side=verified client identity surfaced from the established session, carried on InboundConsensusEnvelope.origin, drives the engine end-to-end

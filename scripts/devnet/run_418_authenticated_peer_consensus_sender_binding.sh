@@ -39,7 +39,9 @@ BLOCKER="${REPO_ROOT}/docs/release/public-devnet/BLOCKER_REGISTER.md"
 LAUNCH="${REPO_ROOT}/docs/release/public-devnet/LAUNCH_GO_NO_GO.md"
 LEDGER="${REPO_ROOT}/docs/whitepaper/contradiction.md"
 SRC="${REPO_ROOT}/crates/qbind-node/src/peer_consensus_binding.rs"
+LOOP="${REPO_ROOT}/crates/qbind-node/src/binary_consensus_loop.rs"
 TESTS="${REPO_ROOT}/crates/qbind-node/tests/run_418_authenticated_peer_consensus_sender_binding_tests.rs"
+DEMUX_TESTS="${REPO_ROOT}/crates/qbind-node/tests/run_418_newview_demux_chain_integration_tests.rs"
 
 fail() { echo "FAIL: $*" >&2; echo "RESULT=NEGATIVE-FOR-F6-CODE-TEST-REMEDIATION"; exit 1; }
 ok()   { echo "  ok: $*"; }
@@ -56,7 +58,9 @@ ok "archive artifacts present"
 [ -f "${EVIDENCE}" ] || fail "missing canonical evidence record QBIND_DEVNET_EVIDENCE_RUN_418.md"
 [ -f "${RECON}" ]    || fail "missing reconciliation record"
 [ -f "${SRC}" ]      || fail "missing peer_consensus_binding.rs (F6 gate)"
+[ -f "${LOOP}" ]     || fail "missing binary_consensus_loop.rs (consensus ingress)"
 [ -f "${TESTS}" ]    || fail "missing Run 418 acceptance test file"
+[ -f "${DEMUX_TESTS}" ] || fail "missing Run 418 NewView demux-chain integration test file"
 ok "canonical records + F6 source + acceptance tests present"
 
 SUMMARY="${ARCHIVE}/summary.txt"
@@ -141,6 +145,51 @@ grep -q 'run_binary_consensus_loop_with_io' "${TESTS}" || fail "acceptance tests
 grep -q 'VerifiedServerIdentity' "${TESTS}" || fail "acceptance tests must exercise the verified server identity"
 ok "F6 gate reasons + real-ingress/verified-identity test surface present"
 
+# 9b) Run 418 corrective pass: NewView authenticated transport-origin admission.
+#     NewView carries no single immediate self-declared sender, so it uses the
+#     origin-only admission op (authorize_origin) — not an invented claimed
+#     sender — before the delivered counter / F5 verification / engine call.
+grep -q 'fn authorize_origin' "${SRC}" || fail "gate must define origin-only admission authorize_origin (NewView corrective)"
+ok "gate defines authorize_origin (origin-only admission)"
+
+newview_admission_present() {
+  # Robust, arm-agnostic check: the NewView arm must invoke origin-only
+  # admission via authorize_origin(origin). Removing that call (see negative
+  # self-test below) makes this guard fail closed.
+  grep -q 'authorize_origin(origin)' "$1"
+}
+newview_admission_present "${LOOP}" || \
+  fail "NewView arm must call authorize_origin(origin) before delivered counter / F5 / engine.on_timeout_certificate"
+ok "NewView authenticated transport-origin admission wired in the consensus loop"
+
+# The dedicated no-origin NewView acceptance test must exist and assert
+# rejection BEFORE the delivered counter.
+grep -q 'run418_newview_missing_origin_rejected_before_delivered' "${TESTS}" || \
+  fail "no-origin NewView acceptance test is absent"
+grep -q 'inbound_new_views_delivered, 0' "${TESTS}" || \
+  fail "no-origin NewView test must assert rejection BEFORE inbound_new_views_delivered increments"
+ok "no-origin NewView acceptance test present and asserts pre-delivered rejection"
+
+# Optional/Disabled unauthenticated ingress rejection must be demonstrated for
+# BOTH Proposal and NewView (not inferred from a single Proposal test).
+grep -q 'run418_demux_newview_missing_origin_rejected' "${DEMUX_TESTS}" || \
+  fail "demux-chain NewView missing-origin rejection test is absent"
+grep -q 'run418_demux_proposal_missing_origin_rejected' "${DEMUX_TESTS}" || \
+  fail "demux-chain Proposal missing-origin rejection test is absent"
+ok "Optional/Disabled unauthenticated ingress rejection demonstrated for both Proposal and NewView"
+
+# 9c) Honesty guard: authored docs must NOT claim transport/KEMTLS/demux
+#     end-to-end coverage based only on manually constructed identities.
+E2E_OVERCLAIM='(end[- ]to[- ]end|e2e) (transport|kemtls|demux|socket|handshake)|(transport|kemtls|demux|socket|handshake) end[- ]to[- ]end|verified identity end[- ]to[- ]end|two[- ]process (release[- ]binary )?capture'
+for f in "${AUTHORED[@]}"; do
+  hits="$(grep -Ein "${E2E_OVERCLAIM}" "${f}" | grep -Eiv "${NEGATION}" || true)"
+  if [ -n "${hits}" ]; then
+    echo "${hits}" >&2
+    fail "authored doc claims transport/KEMTLS/demux end-to-end coverage (not backed by a real transport test): ${f}"
+  fi
+done
+ok "no manufactured transport/KEMTLS end-to-end claims in authored docs"
+
 # 10) Negative self-tests: prove the guards actually fail closed. Mutations are applied to TEMP
 #     COPIES OUTSIDE the repository tree; the real tracked files are never modified.
 # (a) RS1 blocker row deleted -> guard must fail.
@@ -163,8 +212,21 @@ sed '1a harness_injected_overclaim: RS1 is now closed and F6 fixes F5' "${SUMMAR
 if ! grep -Ein "${OVERCLAIM}" "${WORK}/summary_overclaim.txt" | grep -Eiv "${NEGATION}" >/dev/null; then
   fail "negative self-test failed: overclaim guard did not trip on an injected fix-claim"
 fi
+# (e) NewView origin-admission removed from the consensus loop -> guard must
+#     fail. Prove the corrective-pass guard detects a regression that drops
+#     `authorize_origin(origin)` from the NewView arm (temp copy only).
+sed 's/authorize_origin(origin)/authorize_DISABLED(origin)/g' "${LOOP}" > "${WORK}/loop_no_newview_admission.rs"
+if newview_admission_present "${WORK}/loop_no_newview_admission.rs"; then
+  fail "negative self-test failed: NewView admission guard passed after removing authorize_origin(origin)"
+fi
+# (f) Manufactured transport end-to-end claim injected into a summary copy ->
+#     honesty guard must trip.
+sed '1a harness_injected: verified identity end-to-end transport KEMTLS capture collected' "${SUMMARY}" > "${WORK}/summary_e2e.txt"
+if ! grep -Ein "${E2E_OVERCLAIM}" "${WORK}/summary_e2e.txt" | grep -Eiv "${NEGATION}" >/dev/null; then
+  fail "negative self-test failed: transport-e2e honesty guard did not trip on an injected claim"
+fi
 rm -rf "${WORK}"; trap - EXIT
-ok "negative self-tests fail closed (RS1 deleted/closed/ungated + overclaim injection)"
+ok "negative self-tests fail closed (RS1 deleted/closed/ungated + overclaim injection + NewView admission removal + transport-e2e injection)"
 
 echo
 echo "RESULT=POSITIVE-FOR-F6-CODE-TEST-REMEDIATION"
