@@ -784,12 +784,16 @@ async fn run418_newview_unknown_nodeid_rejected() {
 
     let out = drive_one(ValidatorId::new(1), 2, gate.clone(), env).await;
 
-    assert_eq!(out.progress.inbound.inbound_sender_binding_rejected_total, 1);
+    assert_eq!(
+        out.progress.inbound.inbound_sender_binding_rejected_total,
+        1
+    );
     assert_eq!(out.progress.inbound.inbound_new_views_delivered, 0);
     assert_eq!(out.outbound.total_actions(), 0);
     assert_eq!(gate.metrics().accepted(), 0);
     assert_eq!(
-        gate.metrics().reject_count(ConsensusBindingReject::UnknownPeer),
+        gate.metrics()
+            .reject_count(ConsensusBindingReject::UnknownPeer),
         1,
         "unknown authenticated NodeId must be classified as unknown_peer"
     );
@@ -807,7 +811,10 @@ async fn run418_newview_conflicting_pair_rejected() {
 
     let out = drive_one(ValidatorId::new(1), 2, gate.clone(), env).await;
 
-    assert_eq!(out.progress.inbound.inbound_sender_binding_rejected_total, 1);
+    assert_eq!(
+        out.progress.inbound.inbound_sender_binding_rejected_total,
+        1
+    );
     assert_eq!(out.progress.inbound.inbound_new_views_delivered, 0);
     assert_eq!(out.outbound.total_actions(), 0);
     assert_eq!(gate.metrics().accepted(), 0);
