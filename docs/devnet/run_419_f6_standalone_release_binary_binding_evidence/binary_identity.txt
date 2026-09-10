@@ -1,0 +1,21 @@
+Run 419 — binary identity (curated, publish-safe)
+
+runtime_commit:      1ec128379f3ce215706959d50901bbd6e56abd6b
+capture_end_utc:     2026-09-10T13:16:42Z
+
+rustc:               rustc 1.98.0 (88d9e12ae 2026-08-18)
+cargo:               cargo 1.98.0 (797e8a9bc 2026-08-05)
+
+target/release/qbind-node
+  sha256:            33f65da3c92321a0d7b90ab0d082d758d96b880081a14a8041449a3a38de87f5
+  elf_build_id:      927406ae15db976f3b075c8de7979d36b064be05
+
+Run 419 driver helper (target/release/examples/run_419_f6_release_binary_binding_driver)
+  sha256:            6936cfc480cc4c870d067b2cfb7fea2e4a4c6a2765af82d10e637346eb8a35c3
+  elf_build_id:      1b29f1b00ed9a88088576303dce1dbfec0c811cc
+
+PQC material helper: minted in-memory by the Run 419 helper 'gen-material'
+                     subcommand (no separate committed PQC helper binary).
+
+Note: SHA256SUMS protects committed curated evidence after capture; it does not
+independently authenticate the original machine observations.

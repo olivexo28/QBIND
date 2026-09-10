@@ -1,0 +1,26 @@
+Run 419 — representative commands (temporary paths normalized to placeholders)
+
+# build
+cargo build --release -p qbind-node --bin qbind-node
+cargo build --release -p qbind-node --example run_419_f6_release_binary_binding_driver
+
+# mint temporary PQC material (root/leaf certs + KEM secrets; NEVER committed)
+target/release/examples/run_419_f6_release_binary_binding_driver gen-material <MATERIAL_DIR>
+
+# launch a standalone release receiver (validator 2, system-under-test)
+QBIND_METRICS_HTTP_ADDR=127.0.0.1:<MPORT> target/release/qbind-node \
+  --env devnet --network-mode p2p --enable-p2p \
+  --p2p-listen-addr 127.0.0.1:<RPORT> --validator-id 2 --data-dir <DATA_DIR> \
+  --p2p-mutual-auth <required|optional|disabled> --p2p-pqc-root-mode pqc-static-root \
+  --p2p-trusted-root <TRUSTED_ROOT_SPEC> \
+  --p2p-leaf-cert <MATERIAL_DIR>/v2.cert.bin --p2p-leaf-cert-key <MATERIAL_DIR>/v2.kem.sk.bin \
+  --p2p-peer 0@127.0.0.1:<DEAD0> --p2p-peer-leaf-cert 0:<MATERIAL_DIR>/v0.cert.bin \
+  --p2p-peer 1@127.0.0.1:<DLISTEN> --p2p-peer-leaf-cert 1:<MATERIAL_DIR>/v1.cert.bin
+
+# drive one scenario (real KEMTLS client -> receiver, crafted claimed-senders)
+target/release/examples/run_419_f6_release_binary_binding_driver drive <SCENARIO> <MATERIAL_DIR> 127.0.0.1:<RPORT> 127.0.0.1:<DLISTEN> <OUT_FILE>
+#   SCENARIO in: s1-honest s2-impersonation s3-newview s6-alt-leaf
+#                s4-optional-unauth s5-disabled-unauth
+
+# observe live binding counters
+curl -fsS http://127.0.0.1:<MPORT>/metrics | grep qbind_consensus_binding_total

@@ -113,7 +113,13 @@ RS1, C4, or C5.**
    `secure_channel::VerifiedServerIdentity`), with dedicated unit + integration acceptance tests.
    **This is a code/test remediation of F6 only; it does not, by itself, close RS1**, which
    additionally requires executable evidence captured on the **deployed release binary** on a live
-   multi-node network. **No such release-binary evidence exists yet**, so RS1 remains OPEN and
+   multi-node network. **Run 419** subsequently captured **partial** release-binary evidence: on the
+   standalone `target/release/qbind-node` binary over real loopback KEMTLS/static-root sessions it
+   recorded live `qbind_consensus_binding_total{result="…"}` deltas for the core Required/static-root
+   path (honest admit, five-class impersonation reject, NewView origin admission, and
+   root-valid-unconfigured-leaf suppression), but the unauthenticated-ingress and dedicated
+   outbound-identity vectors remained partial, so the run is a defined **PARTIAL** and does **not**
+   constitute full release-binary coverage. RS1 therefore remains OPEN and
    F6 is not represented as fixing F3, F4, F5, F7, F8, C4, or C5. **F5 in particular is not fixed
    or always enforced:** `NewView` carries no single immediate transport-sender field, so F6's
    claimed-sender comparison does not apply to it, and Timeout/NewView cryptographic verification
@@ -139,3 +145,10 @@ rejection of mismatched-identity, unsigned, wrong-suite, and forged-QC inputs wi
   `docs/devnet/run_418_authenticated_peer_consensus_sender_binding/`,
   `scripts/devnet/run_418_authenticated_peer_consensus_sender_binding.sh`. Run 418 remediates F6
   in code and test only; RS1 remains **OPEN** pending deployed release-binary evidence.
+- **Run 419 (F6 partial release-binary evidence):**
+  `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_419.md`,
+  `docs/devnet/run_419_f6_standalone_release_binary_binding_evidence/`,
+  `scripts/devnet/run_419_f6_standalone_release_binary_binding_evidence.sh`. Route A (evidence-only,
+  no production source change): standalone-release-binary loopback KEMTLS evidence of the Run 418
+  binding gate for the core Required/static-root path; overall **PARTIAL** (unauthenticated-ingress
+  and outbound-identity vectors partial). RS1 remains **OPEN**; public DevNet **NO-GO**.

@@ -1,0 +1,28 @@
+Run 419 — F6 standalone release-binary consensus-binding runtime evidence
+
+RESULT=PARTIAL-FOR-F6-STANDALONE-RELEASE-BINARY-EVIDENCE
+F6_STATUS=CODE-TEST-PLUS-PARTIAL-RUNTIME-EVIDENCE
+SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO
+
+Qualifiers: local loopback; multi-process; Required/static-root plus tested
+Optional/Disabled paths; tested message classes only; NOT off-host; NOT durable
+public deployment; NOT signature/QC/suite enforcement.
+
+Topology: 3 validators on 127.0.0.1: v0=victim(impersonated) v1=driver(authenticated client) v2=standalone release receiver(server, system-under-test)
+
+Scenario results (delta = live qbind_consensus_binding_total{result=...} change):
+  S1 honest authenticated proposal      => PASS (accepted +1)
+  S2 impersonation (5 message classes)  => PASS (claimed_sender_mismatch +5)
+  S3 NewView origin admission           => PASS (accepted +1)
+  S6 root-valid unconfigured alt leaf   => PASS (missing_origin +1)
+  S4 unauthenticated ingress (Optional) => PARTIAL
+  S5 unauthenticated ingress (Disabled) => PARTIAL
+  S7 outbound actual-server identity    => PARTIAL (outbound check observed incidentally in S6; dedicated vector not run)
+
+Toolchain: rustc 1.98.0 (88d9e12ae 2026-08-18) / cargo 1.98.0 (797e8a9bc 2026-08-05)
+Runtime commit: 1ec128379f3ce215706959d50901bbd6e56abd6b
+qbind-node --help clean: yes (no Run 419 / forged-message flag)
+
+Trust model: automated LOCAL cross-process operational evidence; NOT independent
+off-host attestation; does NOT prove external reachability. RS1 remains OPEN;
+C4/C5 remain OPEN; no M/S item moves Green; public DevNet remains NO-GO.

@@ -51,6 +51,14 @@ Companion documents:
   the fail-closed Run 417 audit-completeness harness
   (`RESULT=POSITIVE-FOR-AUDIT-COMPLETENESS` /
   `SECURITY_VERDICT=NEGATIVE-FOR-RUNTIME-SECURITY`).
+- `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_419.md` — Run 419 **partial
+  standalone-release-binary** evidence for RS1 finding **F6** (the Run 418
+  authenticated-peer → consensus-sender binding gate), captured over real
+  loopback KEMTLS/static-root sessions with live `qbind_consensus_binding_total`
+  deltas (`RESULT=PARTIAL-FOR-F6-STANDALONE-RELEASE-BINARY-EVIDENCE`). Evidence
+  only, no production source change; **RS1 stays OPEN / launch-blocking**.
+  Archive: `docs/devnet/run_419_f6_standalone_release_binary_binding_evidence/`;
+  harness: `scripts/devnet/run_419_f6_standalone_release_binary_binding_evidence.sh`.
 
 Everything below reflects the recorded status **after Run 402**. This index adds
 navigation and clarity only; it does not re-prove or change any item's status.

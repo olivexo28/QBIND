@@ -1,0 +1,7 @@
+s1-honest            mode=required label=accepted                 expect_delta=1       observed=1    connected=true   rc=0   => PASS
+s2-impersonation     mode=required label=claimed_sender_mismatch  expect_delta=5       observed=5    connected=true   rc=0   => PASS
+s3-newview           mode=required label=accepted                 expect_delta=1       observed=1    connected=true   rc=0   => PASS
+s6-alt-leaf          mode=required label=missing_origin           expect_delta=1       observed=1    connected=true   rc=0   => PASS
+s4-optional-unauth   mode=optional label=accepted                 expect_delta=PARTIAL observed=0    connected=false  rc=0   => PARTIAL
+s5-disabled-unauth   mode=disabled label=accepted                 expect_delta=PARTIAL observed=0    connected=false  rc=0   => PARTIAL
+s7-outbound          mode=outbound label=verified_server_identity expect_delta=n/a     observed=n/a  connected=n/a    rc=n/a => PARTIAL (outbound check observed incidentally in S6; dedicated vector not run)

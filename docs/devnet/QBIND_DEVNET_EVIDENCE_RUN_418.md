@@ -176,3 +176,20 @@ described as "ten files". The corrective comparison
 - Evidence archive: `docs/devnet/run_418_authenticated_peer_consensus_sender_binding/`.
 - Standing reconciliation: `docs/protocol/QBIND_FOUNDATIONAL_RUNTIME_SECURITY_RECONCILIATION.md`.
 - Fail-closed harness: `scripts/devnet/run_418_authenticated_peer_consensus_sender_binding.sh`.
+
+## 10. Successor evidence (Run 419)
+
+Run 418's own verdict is unchanged and historical: **F6 remediated in code and
+test, with no release-binary evidence.** The outstanding release-binary evidence
+identified in §1/§7 was subsequently addressed by **Run 419**
+(`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_419.md`), a Route A (evidence-only) run
+that exercised this same Run 418 binding gate on the standalone
+`target/release/qbind-node` binary over real loopback KEMTLS/static-root
+sessions. Run 419 recorded live `qbind_consensus_binding_total{result="…"}`
+deltas for the core Required/static-root path (honest-admit, five-class
+impersonation reject, NewView origin admission, and root-valid-unconfigured-leaf
+suppression) and a clearly defined **PARTIAL** overall result because the
+unauthenticated-ingress (S4/S5) and dedicated outbound-identity (S7) vectors
+could not be driven as decisive real-socket evidence. Run 419 made **no**
+production source change and moved **no** posture item: **RS1 stays OPEN**, C4/C5
+stay OPEN, and public DevNet stays **NO-GO**.

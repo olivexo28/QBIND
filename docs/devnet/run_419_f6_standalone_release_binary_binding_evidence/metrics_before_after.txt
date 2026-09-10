@@ -1,0 +1,174 @@
+===== s1-honest (mode=required) =====
+-- before (binding gate) --
+qbind_consensus_binding_total{result="accepted"} 0
+qbind_consensus_binding_total{result="missing_origin"} 0
+qbind_consensus_binding_total{result="unknown_peer"} 0
+qbind_consensus_binding_total{result="unknown_validator"} 0
+qbind_consensus_binding_total{result="claimed_sender_mismatch"} 0
+qbind_consensus_binding_total{result="ambiguous_mapping"} 0
+-- before (downstream delivered/accepted/commit) --
+qbind_consensus_inbound_new_views_delivered_total 0
+qbind_consensus_inbound_new_views_engine_accepted_total 0
+qbind_consensus_inbound_timeouts_delivered_total 0
+qbind_consensus_proposals_total 0
+qbind_consensus_committed_height 0
+-- after (binding gate) --
+qbind_consensus_binding_total{result="accepted"} 1
+qbind_consensus_binding_total{result="missing_origin"} 0
+qbind_consensus_binding_total{result="unknown_peer"} 0
+qbind_consensus_binding_total{result="unknown_validator"} 0
+qbind_consensus_binding_total{result="claimed_sender_mismatch"} 0
+qbind_consensus_binding_total{result="ambiguous_mapping"} 0
+-- after (downstream delivered/accepted/commit) --
+qbind_consensus_inbound_new_views_delivered_total 0
+qbind_consensus_inbound_new_views_engine_accepted_total 0
+qbind_consensus_inbound_timeouts_delivered_total 0
+qbind_consensus_proposals_total 0
+qbind_consensus_committed_height 0
+delta(accepted) = 1  driver_rc=0  window=2026-09-10T13:14:23Z..2026-09-10T13:14:25Z
+
+===== s2-impersonation (mode=required) =====
+-- before (binding gate) --
+qbind_consensus_binding_total{result="accepted"} 0
+qbind_consensus_binding_total{result="missing_origin"} 0
+qbind_consensus_binding_total{result="unknown_peer"} 0
+qbind_consensus_binding_total{result="unknown_validator"} 0
+qbind_consensus_binding_total{result="claimed_sender_mismatch"} 0
+qbind_consensus_binding_total{result="ambiguous_mapping"} 0
+-- before (downstream delivered/accepted/commit) --
+qbind_consensus_inbound_new_views_delivered_total 0
+qbind_consensus_inbound_new_views_engine_accepted_total 0
+qbind_consensus_inbound_timeouts_delivered_total 0
+qbind_consensus_proposals_total 0
+qbind_consensus_committed_height 0
+-- after (binding gate) --
+qbind_consensus_binding_total{result="accepted"} 0
+qbind_consensus_binding_total{result="missing_origin"} 0
+qbind_consensus_binding_total{result="unknown_peer"} 0
+qbind_consensus_binding_total{result="unknown_validator"} 0
+qbind_consensus_binding_total{result="claimed_sender_mismatch"} 5
+qbind_consensus_binding_total{result="ambiguous_mapping"} 0
+-- after (downstream delivered/accepted/commit) --
+qbind_consensus_inbound_new_views_delivered_total 0
+qbind_consensus_inbound_new_views_engine_accepted_total 0
+qbind_consensus_inbound_timeouts_delivered_total 0
+qbind_consensus_proposals_total 0
+qbind_consensus_committed_height 0
+delta(claimed_sender_mismatch) = 5  driver_rc=0  window=2026-09-10T13:14:41Z..2026-09-10T13:14:44Z
+
+===== s3-newview (mode=required) =====
+-- before (binding gate) --
+qbind_consensus_binding_total{result="accepted"} 0
+qbind_consensus_binding_total{result="missing_origin"} 0
+qbind_consensus_binding_total{result="unknown_peer"} 0
+qbind_consensus_binding_total{result="unknown_validator"} 0
+qbind_consensus_binding_total{result="claimed_sender_mismatch"} 0
+qbind_consensus_binding_total{result="ambiguous_mapping"} 0
+-- before (downstream delivered/accepted/commit) --
+qbind_consensus_inbound_new_views_delivered_total 0
+qbind_consensus_inbound_new_views_engine_accepted_total 0
+qbind_consensus_inbound_timeouts_delivered_total 0
+qbind_consensus_proposals_total 0
+qbind_consensus_committed_height 0
+-- after (binding gate) --
+qbind_consensus_binding_total{result="accepted"} 1
+qbind_consensus_binding_total{result="missing_origin"} 0
+qbind_consensus_binding_total{result="unknown_peer"} 0
+qbind_consensus_binding_total{result="unknown_validator"} 0
+qbind_consensus_binding_total{result="claimed_sender_mismatch"} 0
+qbind_consensus_binding_total{result="ambiguous_mapping"} 0
+-- after (downstream delivered/accepted/commit) --
+qbind_consensus_inbound_new_views_delivered_total 1
+qbind_consensus_inbound_new_views_engine_accepted_total 0
+qbind_consensus_inbound_timeouts_delivered_total 0
+qbind_consensus_proposals_total 0
+qbind_consensus_committed_height 0
+delta(accepted) = 1  driver_rc=0  window=2026-09-10T13:14:59Z..2026-09-10T13:15:01Z
+
+===== s6-alt-leaf (mode=required) =====
+-- before (binding gate) --
+qbind_consensus_binding_total{result="accepted"} 0
+qbind_consensus_binding_total{result="missing_origin"} 0
+qbind_consensus_binding_total{result="unknown_peer"} 0
+qbind_consensus_binding_total{result="unknown_validator"} 0
+qbind_consensus_binding_total{result="claimed_sender_mismatch"} 0
+qbind_consensus_binding_total{result="ambiguous_mapping"} 0
+-- before (downstream delivered/accepted/commit) --
+qbind_consensus_inbound_new_views_delivered_total 0
+qbind_consensus_inbound_new_views_engine_accepted_total 0
+qbind_consensus_inbound_timeouts_delivered_total 0
+qbind_consensus_proposals_total 0
+qbind_consensus_committed_height 0
+-- after (binding gate) --
+qbind_consensus_binding_total{result="accepted"} 0
+qbind_consensus_binding_total{result="missing_origin"} 1
+qbind_consensus_binding_total{result="unknown_peer"} 0
+qbind_consensus_binding_total{result="unknown_validator"} 0
+qbind_consensus_binding_total{result="claimed_sender_mismatch"} 0
+qbind_consensus_binding_total{result="ambiguous_mapping"} 0
+-- after (downstream delivered/accepted/commit) --
+qbind_consensus_inbound_new_views_delivered_total 0
+qbind_consensus_inbound_new_views_engine_accepted_total 0
+qbind_consensus_inbound_timeouts_delivered_total 0
+qbind_consensus_proposals_total 0
+qbind_consensus_committed_height 0
+delta(missing_origin) = 1  driver_rc=0  window=2026-09-10T13:15:17Z..2026-09-10T13:15:19Z
+
+===== s4-optional-unauth (mode=optional) =====
+-- before (binding gate) --
+qbind_consensus_binding_total{result="accepted"} 0
+qbind_consensus_binding_total{result="missing_origin"} 0
+qbind_consensus_binding_total{result="unknown_peer"} 0
+qbind_consensus_binding_total{result="unknown_validator"} 0
+qbind_consensus_binding_total{result="claimed_sender_mismatch"} 0
+qbind_consensus_binding_total{result="ambiguous_mapping"} 0
+-- before (downstream delivered/accepted/commit) --
+qbind_consensus_inbound_new_views_delivered_total 0
+qbind_consensus_inbound_new_views_engine_accepted_total 0
+qbind_consensus_inbound_timeouts_delivered_total 0
+qbind_consensus_proposals_total 0
+qbind_consensus_committed_height 0
+-- after (binding gate) --
+qbind_consensus_binding_total{result="accepted"} 0
+qbind_consensus_binding_total{result="missing_origin"} 0
+qbind_consensus_binding_total{result="unknown_peer"} 0
+qbind_consensus_binding_total{result="unknown_validator"} 0
+qbind_consensus_binding_total{result="claimed_sender_mismatch"} 0
+qbind_consensus_binding_total{result="ambiguous_mapping"} 0
+-- after (downstream delivered/accepted/commit) --
+qbind_consensus_inbound_new_views_delivered_total 0
+qbind_consensus_inbound_new_views_engine_accepted_total 0
+qbind_consensus_inbound_timeouts_delivered_total 0
+qbind_consensus_proposals_total 0
+qbind_consensus_committed_height 0
+delta(accepted) = 0  driver_rc=0  window=2026-09-10T13:15:34Z..2026-09-10T13:15:54Z
+
+===== s5-disabled-unauth (mode=disabled) =====
+-- before (binding gate) --
+qbind_consensus_binding_total{result="accepted"} 0
+qbind_consensus_binding_total{result="missing_origin"} 0
+qbind_consensus_binding_total{result="unknown_peer"} 0
+qbind_consensus_binding_total{result="unknown_validator"} 0
+qbind_consensus_binding_total{result="claimed_sender_mismatch"} 0
+qbind_consensus_binding_total{result="ambiguous_mapping"} 0
+-- before (downstream delivered/accepted/commit) --
+qbind_consensus_inbound_new_views_delivered_total 0
+qbind_consensus_inbound_new_views_engine_accepted_total 0
+qbind_consensus_inbound_timeouts_delivered_total 0
+qbind_consensus_proposals_total 0
+qbind_consensus_committed_height 0
+-- after (binding gate) --
+qbind_consensus_binding_total{result="accepted"} 0
+qbind_consensus_binding_total{result="missing_origin"} 0
+qbind_consensus_binding_total{result="unknown_peer"} 0
+qbind_consensus_binding_total{result="unknown_validator"} 0
+qbind_consensus_binding_total{result="claimed_sender_mismatch"} 0
+qbind_consensus_binding_total{result="ambiguous_mapping"} 0
+-- after (downstream delivered/accepted/commit) --
+qbind_consensus_inbound_new_views_delivered_total 0
+qbind_consensus_inbound_new_views_engine_accepted_total 0
+qbind_consensus_inbound_timeouts_delivered_total 0
+qbind_consensus_proposals_total 0
+qbind_consensus_committed_height 0
+delta(accepted) = 0  driver_rc=0  window=2026-09-10T13:16:10Z..2026-09-10T13:16:30Z
+

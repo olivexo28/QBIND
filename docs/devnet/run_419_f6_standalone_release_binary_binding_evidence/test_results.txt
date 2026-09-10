@@ -1,0 +1,34 @@
+Run 419 — validation exit codes
+
+Doc/lint + package-integrity + audit suite (all completed):
+  run_410 public-devnet stale-prose lint ................... rc=0
+  run_411 readiness/contradiction-ledger lint ............. rc=0
+  run_412 readiness status/blocker lint ................... rc=0
+  run_413 readiness recommendation-gap matrix lint ........ rc=0
+  run_414 readiness cross-section coverage lint ........... rc=0
+  run_415 readiness artifact-path reference lint .......... rc=0
+  run_404 package-integrity anchor manifest ............... rc=0
+  run_405 full-tree package integrity ..................... rc=0  (confirms refreshed anchor hashes)
+  run_417 foundational runtime-security audit ............. rc=0
+
+Run 419 harness (authoritative capture at implementation commit 1ec1283):
+  run_419 f6 standalone-release-binary binding evidence ... rc=0  (RESULT=PARTIAL)
+
+Runtime scenario results (live qbind_consensus_binding_total deltas):
+  S1 honest authenticated proposal ........ accepted +1 .............. PASS
+  S2 impersonation (5 message classes) .... claimed_sender_mismatch +5  PASS
+  S3 NewView origin admission ............. accepted +1 .............. PASS
+  S6 root-valid unconfigured alt leaf ..... missing_origin +1 ........ PASS
+  S4 unauthenticated ingress (Optional) ... not establishable ........ PARTIAL
+  S5 unauthenticated ingress (Disabled) ... not establishable ........ PARTIAL
+  S7 outbound actual-server identity ...... incidental in S6 ......... PARTIAL
+
+Static checks:
+  qbind-node --help contains no Run 419 / forged-message flag ........ confirmed
+  archive sha256sum -c SHA256SUMS.txt ................................ OK
+  JSON validation (PACKAGE_INTEGRITY_MANIFEST.example.json) .......... valid
+
+Build/test suite (cargo check/build -p qbind-node, run_418 tests +
+harness): launched; not all recorded before the reporting deadline. The
+release binary and Run 419 helper were already built and exercised for the
+authoritative capture above (SHA-256 / Build IDs in binary_identity.txt).

@@ -50,6 +50,14 @@ alone does not close F3, F4, F5, F7, F8, RS1, C4, or C5. RS1 remaining OPEN forc
 **NO-GO** even if every M1–M20 item is Green. See
 `docs/protocol/QBIND_FOUNDATIONAL_RUNTIME_SECURITY_RECONCILIATION.md`.
 
+**F6 remediation status.** F6 (one of RS1's eight findings) is remediated in code
+and test (Run 418) and has **partial** standalone-release-binary evidence (Run
+419: core Required/static-root loopback KEMTLS path proven via live
+`qbind_consensus_binding_total` deltas; unauthenticated-ingress and
+outbound-identity vectors partial). This narrows one finding only; **RS1 stays
+OPEN / launch-blocking** because F1–F5 and F7–F8 remain unresolved. See
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_419.md`.
+
 ## TestNet / MainNet
 
 TestNet and MainNet remain **untouched**; readiness items N1–N7 remain **Red**.
@@ -71,4 +79,5 @@ MainNet readiness is claimed.**
 - `docs/protocol/QBIND_C4_C5_CLOSURE_CRITERIA.md` — C4/C5 closure criteria.
 - `docs/protocol/QBIND_FOUNDATIONAL_RUNTIME_SECURITY_RECONCILIATION.md` — RS1 foundational runtime-security reconciliation.
 - `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_417.md` — Run 417 audit evidence (RS1 findings F1–F8).
+- `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_419.md` — Run 419 partial release-binary evidence for finding F6.
 - `docs/whitepaper/contradiction.md` — contradiction ledger.

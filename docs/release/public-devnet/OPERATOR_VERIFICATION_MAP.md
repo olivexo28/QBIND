@@ -63,7 +63,12 @@ decision is **NO-GO / NOT launch-ready** (`LAUNCH_GO_NO_GO.md`).
    fail-closed harness
    `scripts/devnet/run_417_foundational_runtime_security_reconciliation_audit.sh`
    (audit/evidence only — **not** launch evidence, runtime remediation, or binary
-   provenance).
+   provenance). Finding **F6** additionally has Run 418 code/test remediation and
+   Run 419 **partial** standalone-release-binary evidence
+   (`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_419.md`, archive
+   `docs/devnet/run_419_f6_standalone_release_binary_binding_evidence/`, harness
+   `scripts/devnet/run_419_f6_standalone_release_binary_binding_evidence.sh`);
+   this narrows one finding only and **RS1 stays OPEN / launch-blocking**.
 9. `docs/whitepaper/contradiction.md` — contradiction ledger.
 10. `docs/release/public-devnet/BLOCKER_REGISTER.md` — open blockers (incl. **RS1**).
 
