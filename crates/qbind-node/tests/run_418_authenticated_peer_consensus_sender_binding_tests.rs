@@ -47,6 +47,7 @@ use qbind_consensus::ids::ValidatorId;
 use qbind_consensus::network::NetworkError;
 use qbind_consensus::timeout::TimeoutCertificate;
 use qbind_node::binary_consensus_loop::{
+    ConsensusVerificationPolicy,
     run_binary_consensus_loop_with_io, BinaryConsensusLoopConfig, BinaryConsensusLoopIo,
     BinaryConsensusLoopProgress,
 };
@@ -240,6 +241,7 @@ async fn drive_one(
         peer_connectivity: None,
         verification_ctx: None,
         binding_gate: Some(gate),
+        verification_policy: ConsensusVerificationPolicy::LocalFixtureUnsigned,
     };
 
     inbound_tx

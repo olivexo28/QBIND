@@ -85,6 +85,7 @@ use tokio::time::timeout;
 use qbind_consensus::ids::ValidatorId;
 use qbind_consensus::network::NetworkError;
 use qbind_node::binary_consensus_loop::{
+    ConsensusVerificationPolicy,
     run_binary_consensus_loop_with_io, spawn_binary_consensus_loop_with_io,
     BinaryConsensusLoopConfig, BinaryConsensusLoopIo, BinaryConsensusLoopProgress,
     PeerConnectivitySource,
@@ -403,6 +404,7 @@ async fn b10_a_pre_fix_run_008_shape_reproduces_in_tree() {
         peer_connectivity: Some(conn_v0_dyn),
         verification_ctx: None,
         binding_gate: None,
+        verification_policy: ConsensusVerificationPolicy::LocalFixtureUnsigned,
     };
     let io_v1 = BinaryConsensusLoopIo {
         inbound_rx: inbound_v1_rx,
@@ -410,6 +412,7 @@ async fn b10_a_pre_fix_run_008_shape_reproduces_in_tree() {
         peer_connectivity: Some(conn_v1_dyn),
         verification_ctx: None,
         binding_gate: None,
+        verification_policy: ConsensusVerificationPolicy::LocalFixtureUnsigned,
     };
 
     let (_shutdown_tx_v0, shutdown_rx_v0) = watch::channel(());
@@ -586,6 +589,7 @@ async fn b10_b_post_fix_engine_acceptance_qc_closure() {
         peer_connectivity: Some(conn_v0_dyn),
         verification_ctx: None,
         binding_gate: None,
+        verification_policy: ConsensusVerificationPolicy::LocalFixtureUnsigned,
     };
     let io_v1 = BinaryConsensusLoopIo {
         inbound_rx: inbound_v1_rx,
@@ -593,6 +597,7 @@ async fn b10_b_post_fix_engine_acceptance_qc_closure() {
         peer_connectivity: Some(conn_v1_dyn),
         verification_ctx: None,
         binding_gate: None,
+        verification_policy: ConsensusVerificationPolicy::LocalFixtureUnsigned,
     };
 
     let (_shutdown_tx_v0, shutdown_rx_v0) = watch::channel(());
@@ -811,6 +816,7 @@ async fn b10_c_b6_cross_wired_path_still_progresses() {
         peer_connectivity: None,
         verification_ctx: None,
         binding_gate: None,
+        verification_policy: ConsensusVerificationPolicy::LocalFixtureUnsigned,
     };
     let io_b = BinaryConsensusLoopIo {
         inbound_rx: inbound_b_rx,
@@ -818,6 +824,7 @@ async fn b10_c_b6_cross_wired_path_still_progresses() {
         peer_connectivity: None,
         verification_ctx: None,
         binding_gate: None,
+        verification_policy: ConsensusVerificationPolicy::LocalFixtureUnsigned,
     };
 
     let (_shutdown_tx_a, shutdown_rx_a) = watch::channel(());
@@ -901,6 +908,7 @@ async fn b10_d_late_peer_reconnect_churn_stays_single_shot() {
         peer_connectivity: Some(conn_dyn),
         verification_ctx: None,
         binding_gate: None,
+        verification_policy: ConsensusVerificationPolicy::LocalFixtureUnsigned,
     };
     let (shutdown_tx, shutdown_rx) = watch::channel(());
     let metrics = Arc::new(NodeMetrics::new());

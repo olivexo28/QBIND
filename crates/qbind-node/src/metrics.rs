@@ -2141,7 +2141,20 @@ pub struct BinaryViewTimeoutMetrics {
     outbound_proposal_signing_failure: AtomicU64,
     outbound_vote_signing_success: AtomicU64,
     outbound_vote_signing_failure: AtomicU64,
-
+    // Run 420 correction: typed `VerificationContextUnavailable` outcome
+    // counters. Incremented when Proposal/Vote traffic is rejected (inbound)
+    // or suppressed (outbound) fail-closed under
+    // `ConsensusVerificationPolicy::Required` because no verification context
+    // (signer / key provider / backend registry / authoritative key / chain
+    // identity / suite policy) was available. These are DISTINCT from the
+    // `*_verify_rejected_total` invalid/missing-signature/unsupported-suite
+    // families: a missing local configuration is never mislabeled as an
+    // invalid signature. Proposal vs Vote and inbound vs outbound are kept
+    // distinct. Labels are bounded and carry no attacker-controlled content.
+    inbound_proposal_verification_context_unavailable_total: AtomicU64,
+    inbound_vote_verification_context_unavailable_total: AtomicU64,
+    outbound_proposal_verification_context_unavailable_total: AtomicU64,
+    outbound_vote_verification_context_unavailable_total: AtomicU64,
     // -------------------------------------------------------------------
     // Run 046: bounded exponential-backoff view-timeout pacing.
     //
@@ -2414,6 +2427,22 @@ impl BinaryViewTimeoutMetrics {
             .store(stats.outbound_vote_signing_success, Ordering::Relaxed);
         self.outbound_vote_signing_failure
             .store(stats.outbound_vote_signing_failure, Ordering::Relaxed);
+        self.inbound_proposal_verification_context_unavailable_total.store(
+            stats.inbound_proposal_verification_context_unavailable_total,
+            Ordering::Relaxed,
+        );
+        self.inbound_vote_verification_context_unavailable_total.store(
+            stats.inbound_vote_verification_context_unavailable_total,
+            Ordering::Relaxed,
+        );
+        self.outbound_proposal_verification_context_unavailable_total.store(
+            stats.outbound_proposal_verification_context_unavailable_total,
+            Ordering::Relaxed,
+        );
+        self.outbound_vote_verification_context_unavailable_total.store(
+            stats.outbound_vote_verification_context_unavailable_total,
+            Ordering::Relaxed,
+        );
     }
 
     /// Run 046: store the exponential-backoff pacer state. Called
@@ -2758,6 +2787,27 @@ impl BinaryViewTimeoutMetrics {
             "qbind_consensus_outbound_vote_signing_failure_total {}\n",
             self.outbound_vote_signing_failure.load(Ordering::Relaxed)
         ));
+        // Run 420 correction: typed VerificationContextUnavailable outcome.
+        output.push_str(&format!(
+            "qbind_consensus_inbound_proposal_verification_context_unavailable_total {}\n",
+            self.inbound_proposal_verification_context_unavailable_total
+                .load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "qbind_consensus_inbound_vote_verification_context_unavailable_total {}\n",
+            self.inbound_vote_verification_context_unavailable_total
+                .load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "qbind_consensus_outbound_proposal_verification_context_unavailable_total {}\n",
+            self.outbound_proposal_verification_context_unavailable_total
+                .load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "qbind_consensus_outbound_vote_verification_context_unavailable_total {}\n",
+            self.outbound_vote_verification_context_unavailable_total
+                .load(Ordering::Relaxed)
+        ));
         // Run 046: bounded exponential-backoff view-timeout pacing.
         output.push_str("\n# Binary view-timeout exponential-backoff pacing (Run 046)\n");
         output.push_str(&format!(
@@ -2861,6 +2911,10 @@ pub struct BinaryViewTimeoutRun420Snapshot {
     pub outbound_proposal_signing_failure: u64,
     pub outbound_vote_signing_success: u64,
     pub outbound_vote_signing_failure: u64,
+    pub inbound_proposal_verification_context_unavailable_total: u64,
+    pub inbound_vote_verification_context_unavailable_total: u64,
+    pub outbound_proposal_verification_context_unavailable_total: u64,
+    pub outbound_vote_verification_context_unavailable_total: u64,
 }
 
 impl RestoreCatchupMetrics {
