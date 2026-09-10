@@ -46,6 +46,7 @@ pub mod key_rotation;
 pub mod multi_sim;
 pub mod network;
 pub mod pacemaker;
+pub mod proposal_vote_verify;
 pub mod qc;
 pub mod sim;
 pub mod slashing;
@@ -91,6 +92,9 @@ pub use pacemaker::{
     TimeoutPacemakerConfig,
 };
 pub use qc::{QcValidationError, QuorumCertificate};
+pub use proposal_vote_verify::{
+    verify_proposal_msg, verify_vote_msg, ProposalVoteVerifyError, ProposalVoteVerifyOutcome,
+};
 pub use sim::SingleNodeSim;
 pub use timeout::{
     select_max_high_qc, timeout_signing_bytes, TimeoutAccumulator, TimeoutCertificate, TimeoutMsg,
