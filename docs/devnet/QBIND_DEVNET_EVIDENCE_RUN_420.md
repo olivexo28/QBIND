@@ -208,20 +208,26 @@ consensus security logic).
 
 ## 12. Branch, commits, worktree, and PR status
 
-- **Actual branch:** `copilot/copilotrun-420-consensus-proposal-vote-signature`
-  (the corrective-continuation branch; all work here). The original Run 420
-  branch was `copilot/run-420-consensus-proposal-vote-signature`.
-- **Workflow deviation (recorded, not hidden):** the corrective continuation was
-  performed on a *different* branch than the original. It is a strict five-commit
-  fast-forward from `main` `1c22f7dc` (`main…corrective` = 0 left / 5 right) but
-  it is **not** a direct continuation of the original branch
-  (`original…corrective` = 2 left / 6 right). This deviation did **not** rewrite
-  `main` and does **not** prevent a clean fast-forward import of the corrective
-  branch. Earlier statements that "no new branch was created" were inaccurate and
-  are withdrawn.
-- **Commits:** five-commit fast-forward from `1c22f7dc` (previous tip
-  `203427b7`) plus this evidence-correction commit as the new tip.
-- **Worktree:** clean after each `report_progress`.
+- **Actual final-validation branch:**
+  `copilot/copilotcopilotrun-420-consensus-proposal-vote-sign`.
+- **Earlier branches:** the original Run 420 branch was
+  `copilot/run-420-consensus-proposal-vote-signature`; the first corrective
+  implementation branch was
+  `copilot/copilotrun-420-consensus-proposal-vote-signature`.
+- **Workflow deviations (recorded, not hidden):** the first corrective branch
+  was a strict five-commit fast-forward from `main` `1c22f7dc`
+  (`main…corrective` = 0 left / 5 right), but was not a direct continuation of
+  the original branch (`original…corrective` = 2 left / 6 right). The final
+  validation/evidence pass was then performed on a third branch. At import,
+  that final branch was a strict one-commit fast-forward from `main`
+  `0bfaf08f` (`main…final-validation` = 0 left / 1 right), and was not a direct
+  continuation of the first corrective branch
+  (`corrective…final-validation` = 5 left / 2 right). These deviations did not
+  rewrite `main` and did not prevent clean fast-forward import. Earlier
+  statements that no new branch was created are withdrawn.
+- **Final evidence-correction commit:** `6be22dc2bb8615fdb182ae8fdce284a6201afb08`,
+  applied above `main` `0bfaf08f`.
+- **Worktree:** clean after the committed validation pass.
 - **Pull request:** **none opened.** Run 421 is not started.
 
 ## 13. Reconciliation
