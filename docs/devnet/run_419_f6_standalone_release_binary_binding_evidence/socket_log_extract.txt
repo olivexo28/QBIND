@@ -1,38 +1,38 @@
-# s1-honest: ss --tcp (loopback, receiver listen :49401)
+# s1-honest: ss --tcp (loopback, receiver listen :51805)
 State      Recv-Q Send-Q      Local Address:Port            Peer Address:Port Process
 
-# s2-impersonation: ss --tcp (loopback, receiver listen :49465)
+# s2-impersonation: ss --tcp (loopback, receiver listen :45115)
 State      Recv-Q Send-Q      Local Address:Port            Peer Address:Port Process
 
-# s3-newview: ss --tcp (loopback, receiver listen :40091)
+# s3-newview: ss --tcp (loopback, receiver listen :38725)
 State      Recv-Q Send-Q      Local Address:Port            Peer Address:Port Process
 
-# s6-alt-leaf: ss --tcp (loopback, receiver listen :49077)
+# s6-alt-leaf: ss --tcp (loopback, receiver listen :48239)
 State      Recv-Q Send-Q      Local Address:Port            Peer Address:Port Process
-FIN-WAIT-2 0      0               127.0.0.1:43614              127.0.0.1:49077       
-CLOSE-WAIT 0      0               127.0.0.1:49077              127.0.0.1:43614       
+FIN-WAIT-2 0      0               127.0.0.1:38418              127.0.0.1:48239       
+CLOSE-WAIT 0      0               127.0.0.1:48239              127.0.0.1:38418       
 
-# s4-optional-unauth: ss --tcp (loopback, receiver listen :50981)
+# s4-optional-unauth: ss --tcp (loopback, receiver listen :58513)
 State      Recv-Q Send-Q      Local Address:Port            Peer Address:Port Process
 
-# s5-disabled-unauth: ss --tcp (loopback, receiver listen :55247)
-State      Recv-Q Send-Q      Local Address:Port            Peer Address:Port Process
+# s5-disabled-unauth: ss --tcp (loopback, receiver listen :58355)
+State Recv-Q Send-Q      Local Address:Port            Peer Address:Port Process
 
 
 ================= KEMTLS / static-root / mutual-auth log lines =================
 # s1-honest: KEMTLS / static-root / mutual-auth log lines
 [binary] B12: mutual_auth_mode=Required (source: --p2p-mutual-auth)
-[binary] Run 039: pqc_root_mode=pqc-static-root transport_kem_suite=ml-kem-768 configured_roots=1 leaf_credentials_present=true peer_leaf_certs=2 (root fingerprints: [id=17b71ecc.. suite=100 fp=99c8ac19])
+[binary] Run 039: pqc_root_mode=pqc-static-root transport_kem_suite=ml-kem-768 configured_roots=1 leaf_credentials_present=true peer_leaf_certs=2 (root fingerprints: [id=170674e6.. suite=100 fp=66e21ec9])
 [Run040] P2pNodeBuilder: pqc_root_mode=pqc-static-root sig_suite_id=100 transport_kem_suite_id=100 transport_kem_suite_name=ml-kem-768 dummy_kem_registered=false transport_aead_suite_id=101 transport_aead_suite_name=chacha20-poly1305 dummy_aead_registered=false configured_roots=1 leaf_credentials_present=true
-[T175] P2P node builder: validator=ValidatorId(2) node_id=NodeId(82c0dd37fdefe32c) num_validators=3 peer_kem_overrides=2 mutual_auth=Required
-[binary] Run 033: timeout-verification probe: active=false reason=production pieces unavailable in current qbind-node binary path: qbind-node main.rs does not yet load validator keystore (signer_keystore_path unread on startup), NodeConfig.network.static_peers carries no per-peer (suite_id, pk_bytes), and --p2p-mutual-auth runs on test-grade TrustedClientRoots/DummySig — see docs/whitepaper/contradiction.md C4/C5 policy=OptionalActivate validators=3 chain_id=chain_51424e4444455600 supported_suite_ids=[100] local_signer=absent(keystore_path_not_configured) peer_key_provider=absent(no_configured_keys)
+[T175] P2P node builder: validator=ValidatorId(2) node_id=NodeId(909a4dcb3906975e) num_validators=3 peer_kem_overrides=2 mutual_auth=Required
+[binary] Run 033: timeout-verification probe: active=false reason=production pieces unavailable in current qbind-node binary path: qbind-node main.rs does not yet load validator keystore (signer_keystore_path unread on startup), NodeConfig.network.static_peers carries no per-peer (suite_id, pk_bytes), and --p2p-mutual-auth runs on test-grade TrustedClientRoots/DummySig — see docs/whitepaper/contradiction.md C4/C5 policy=OptionalActivate validators=3 chain_id=chain_51424e4444455600 supported_suite_ids=[100] local_signer=absent(keystore_path_not_configured) peer_key_provider=absent(no_configured_keys)[P2P] dial 127.0.0.1:53879 attempt 1/8 failed (transient: I/O error: Connection refused (os error 111)); retrying in 100ms (B8 initial-dial retry)
 [P2P] Inbound connection error: Handshake error: channel error: Io(Error { kind: UnexpectedEof, message: "failed to fill whole buffer" })
 
 # s2-impersonation: KEMTLS / static-root / mutual-auth log lines
 [binary] B12: mutual_auth_mode=Required (source: --p2p-mutual-auth)
-[binary] Run 039: pqc_root_mode=pqc-static-root transport_kem_suite=ml-kem-768 configured_roots=1 leaf_credentials_present=true peer_leaf_certs=2 (root fingerprints: [id=17b71ecc.. suite=100 fp=99c8ac19])
+[binary] Run 039: pqc_root_mode=pqc-static-root transport_kem_suite=ml-kem-768 configured_roots=1 leaf_credentials_present=true peer_leaf_certs=2 (root fingerprints: [id=170674e6.. suite=100 fp=66e21ec9])
 [Run040] P2pNodeBuilder: pqc_root_mode=pqc-static-root sig_suite_id=100 transport_kem_suite_id=100 transport_kem_suite_name=ml-kem-768 dummy_kem_registered=false transport_aead_suite_id=101 transport_aead_suite_name=chacha20-poly1305 dummy_aead_registered=false configured_roots=1 leaf_credentials_present=true
-[T175] P2P node builder: validator=ValidatorId(2) node_id=NodeId(82c0dd37fdefe32c) num_validators=3 peer_kem_overrides=2 mutual_auth=Required
+[T175] P2P node builder: validator=ValidatorId(2) node_id=NodeId(909a4dcb3906975e) num_validators=3 peer_kem_overrides=2 mutual_auth=Required
 [binary] Run 033: timeout-verification probe: active=false reason=production pieces unavailable in current qbind-node binary path: qbind-node main.rs does not yet load validator keystore (signer_keystore_path unread on startup), NodeConfig.network.static_peers carries no per-peer (suite_id, pk_bytes), and --p2p-mutual-auth runs on test-grade TrustedClientRoots/DummySig — see docs/whitepaper/contradiction.md C4/C5 policy=OptionalActivate validators=3 chain_id=chain_51424e4444455600 supported_suite_ids=[100] local_signer=absent(keystore_path_not_configured) peer_key_provider=absent(no_configured_keys)
 [P2P] Inbound connection error: Handshake error: channel error: Io(Error { kind: UnexpectedEof, message: "failed to fill whole buffer" })
 [binary-consensus] Run 418: inbound proposal REJECTED (sender binding) claimed_proposer=ValidatorId(0) reason=claimed_sender_mismatch
@@ -43,40 +43,40 @@ State      Recv-Q Send-Q      Local Address:Port            Peer Address:Port Pr
 
 # s3-newview: KEMTLS / static-root / mutual-auth log lines
 [binary] B12: mutual_auth_mode=Required (source: --p2p-mutual-auth)
-[binary] Run 039: pqc_root_mode=pqc-static-root transport_kem_suite=ml-kem-768 configured_roots=1 leaf_credentials_present=true peer_leaf_certs=2 (root fingerprints: [id=17b71ecc.. suite=100 fp=99c8ac19])
+[binary] Run 039: pqc_root_mode=pqc-static-root transport_kem_suite=ml-kem-768 configured_roots=1 leaf_credentials_present=true peer_leaf_certs=2 (root fingerprints: [id=170674e6.. suite=100 fp=66e21ec9])
 [Run040] P2pNodeBuilder: pqc_root_mode=pqc-static-root sig_suite_id=100 transport_kem_suite_id=100 transport_kem_suite_name=ml-kem-768 dummy_kem_registered=false transport_aead_suite_id=101 transport_aead_suite_name=chacha20-poly1305 dummy_aead_registered=false configured_roots=1 leaf_credentials_present=true
-[T175] P2P node builder: validator=ValidatorId(2) node_id=NodeId(82c0dd37fdefe32c) num_validators=3 peer_kem_overrides=2 mutual_auth=Required
+[T175] P2P node builder: validator=ValidatorId(2) node_id=NodeId(909a4dcb3906975e) num_validators=3 peer_kem_overrides=2 mutual_auth=Required
 [binary] Run 033: timeout-verification probe: active=false reason=production pieces unavailable in current qbind-node binary path: qbind-node main.rs does not yet load validator keystore (signer_keystore_path unread on startup), NodeConfig.network.static_peers carries no per-peer (suite_id, pk_bytes), and --p2p-mutual-auth runs on test-grade TrustedClientRoots/DummySig — see docs/whitepaper/contradiction.md C4/C5 policy=OptionalActivate validators=3 chain_id=chain_51424e4444455600 supported_suite_ids=[100] local_signer=absent(keystore_path_not_configured) peer_key_provider=absent(no_configured_keys)
 [P2P] Inbound connection error: Handshake error: channel error: Io(Error { kind: UnexpectedEof, message: "failed to fill whole buffer" })
 
 # s6-alt-leaf: KEMTLS / static-root / mutual-auth log lines
 [binary] Run 093 consensus storage: state=present-no-committed-epoch path=<TMP>/recv_s6-alt-leaf/consensus
 [binary] B12: mutual_auth_mode=Required (source: --p2p-mutual-auth)
-[binary] Run 039: pqc_root_mode=pqc-static-root transport_kem_suite=ml-kem-768 configured_roots=1 leaf_credentials_present=true peer_leaf_certs=2 (root fingerprints: [id=17b71ecc.. suite=100 fp=99c8ac19])
+[binary] Run 039: pqc_root_mode=pqc-static-root transport_kem_suite=ml-kem-768 configured_roots=1 leaf_credentials_present=true peer_leaf_certs=2 (root fingerprints: [id=170674e6.. suite=100 fp=66e21ec9])
 [Run040] P2pNodeBuilder: pqc_root_mode=pqc-static-root sig_suite_id=100 transport_kem_suite_id=100 transport_kem_suite_name=ml-kem-768 dummy_kem_registered=false transport_aead_suite_id=101 transport_aead_suite_name=chacha20-poly1305 dummy_aead_registered=false configured_roots=1 leaf_credentials_present=true
-[T175] P2P node builder: validator=ValidatorId(2) node_id=NodeId(82c0dd37fdefe32c) num_validators=3 peer_kem_overrides=2 mutual_auth=Required
+[T175] P2P node builder: validator=ValidatorId(2) node_id=NodeId(909a4dcb3906975e) num_validators=3 peer_kem_overrides=2 mutual_auth=Required
 [binary] Run 033: timeout-verification probe: active=false reason=production pieces unavailable in current qbind-node binary path: qbind-node main.rs does not yet load validator keystore (signer_keystore_path unread on startup), NodeConfig.network.static_peers carries no per-peer (suite_id, pk_bytes), and --p2p-mutual-auth runs on test-grade TrustedClientRoots/DummySig — see docs/whitepaper/contradiction.md C4/C5 policy=OptionalActivate validators=3 chain_id=chain_51424e4444455600 supported_suite_ids=[100] local_signer=absent(keystore_path_not_configured) peer_key_provider=absent(no_configured_keys)
 [P2P] Inbound connection error: Handshake error: channel error: Io(Error { kind: UnexpectedEof, message: "failed to fill whole buffer" })
 [binary-consensus] Run 418: inbound proposal REJECTED (sender binding) claimed_proposer=ValidatorId(1) reason=missing_origin
-[P2P] dial 127.0.0.1:48593 giving up after 7 attempt(s): Handshake error: Run 418: verified server identity for 127.0.0.1:48593 does not match the configured authoritative mapping (authenticated=true, node_match=false, vid_match=true); rejecting session (transient=false, max_attempts=8)
+[P2P] dial 127.0.0.1:55463 giving up after 7 attempt(s): Handshake error: Run 418: verified server identity for 127.0.0.1:55463 does not match the configured authoritative mapping (authenticated=true, node_match=false, vid_match=true); rejecting session (transient=false, max_attempts=8)
 
 # s4-optional-unauth: KEMTLS / static-root / mutual-auth log lines
 [binary] B12: mutual_auth_mode=Optional (source: --p2p-mutual-auth)
-[binary] Run 039: pqc_root_mode=pqc-static-root transport_kem_suite=ml-kem-768 configured_roots=1 leaf_credentials_present=true peer_leaf_certs=2 (root fingerprints: [id=17b71ecc.. suite=100 fp=99c8ac19])
+[binary] Run 039: pqc_root_mode=pqc-static-root transport_kem_suite=ml-kem-768 configured_roots=1 leaf_credentials_present=true peer_leaf_certs=2 (root fingerprints: [id=170674e6.. suite=100 fp=66e21ec9])
 [Run040] P2pNodeBuilder: pqc_root_mode=pqc-static-root sig_suite_id=100 transport_kem_suite_id=100 transport_kem_suite_name=ml-kem-768 dummy_kem_registered=false transport_aead_suite_id=101 transport_aead_suite_name=chacha20-poly1305 dummy_aead_registered=false configured_roots=1 leaf_credentials_present=true
-[T175] P2P node builder: validator=ValidatorId(2) node_id=NodeId(82c0dd37fdefe32c) num_validators=3 peer_kem_overrides=2 mutual_auth=Optional
-[binary] Run 033: timeout-verification probe: active=false reason=production pieces unavailable in current qbind-node binary path: qbind-node main.rs does not yet load validator keystore (signer_keystore_path unread on startup), NodeConfig.network.static_peers carries no per-peer (suite_id, pk_bytes), and --p2p-mutual-auth runs on test-grade TrustedClientRoots/DummySig — see docs/whitepaper/contradiction.md C4/C5 policy=OptionalActivate validators=3 chain_id=chain_51424e4444455600 supported_suite_ids=[100] local_signer=absent(keystore_path_not_configured) peer_key_provider=absent(no_configured_keys)
+[T175] P2P node builder: validator=ValidatorId(2) node_id=NodeId(909a4dcb3906975e) num_validators=3 peer_kem_overrides=2 mutual_auth=Optional
+[binary] Run 033: timeout-verification probe: active=false reason=production pieces unavailable in current qbind-node binary path: qbind-node main.rs does not yet load validator keystore (signer_keystore_path unread on startup), NodeConfig.network.static_peers carries no per-peer (suite_id, pk_bytes), and --p2p-mutual-auth runs on test-grade TrustedClientRoots/DummySig — see docs/whitepaper/contradiction.md C4/C5 policy=OptionalActivate validators=3 chain_id=chain_51424e4444455600 supported_suite_ids=[100] local_signer=absent(keystore_path_not_configured)[P2P] dial 127.0.0.1:54921 attempt 1/8 failed (transient: I/O error: Connection refused (os error 111)); retrying in 100ms (B8 initial-dial retry)
 [P2P] Inbound connection error: Handshake error: channel error: Net(Protocol("server handle_client_init failed"))
 [P2P] Inbound connection error: Handshake error: channel error: Io(Error { kind: UnexpectedEof, message: "failed to fill whole buffer" })
-[P2P] dial 127.0.0.1:50321 giving up after 7 attempt(s): Handshake error: channel error: Io(Error { kind: UnexpectedEof, message: "failed to fill whole buffer" }) (transient=false, max_attempts=8)
+[P2P] dial 127.0.0.1:54921 giving up after 7 attempt(s): Handshake error: channel error: Io(Error { kind: UnexpectedEof, message: "failed to fill whole buffer" }) (transient=false, max_attempts=8)
 
 # s5-disabled-unauth: KEMTLS / static-root / mutual-auth log lines
 [binary] B12: mutual_auth_mode=Disabled (source: --p2p-mutual-auth)
-[binary] Run 039: pqc_root_mode=pqc-static-root transport_kem_suite=ml-kem-768 configured_roots=1 leaf_credentials_present=true peer_leaf_certs=2 (root fingerprints: [id=17b71ecc.. suite=100 fp=99c8ac19])
+[binary] Run 039: pqc_root_mode=pqc-static-root transport_kem_suite=ml-kem-768 configured_roots=1 leaf_credentials_present=true peer_leaf_certs=2 (root fingerprints: [id=170674e6.. suite=100 fp=66e21ec9])
 [Run040] P2pNodeBuilder: pqc_root_mode=pqc-static-root sig_suite_id=100 transport_kem_suite_id=100 transport_kem_suite_name=ml-kem-768 dummy_kem_registered=false transport_aead_suite_id=101 transport_aead_suite_name=chacha20-poly1305 dummy_aead_registered=false configured_roots=1 leaf_credentials_present=true
-[T175] P2P node builder: validator=ValidatorId(2) node_id=NodeId(82c0dd37fdefe32c) num_validators=3 peer_kem_overrides=2 mutual_auth=Disabled
+[T175] P2P node builder: validator=ValidatorId(2) node_id=NodeId(909a4dcb3906975e) num_validators=3 peer_kem_overrides=2 mutual_auth=Disabled
 [binary] Run 033: timeout-verification probe: active=false reason=production pieces unavailable in current qbind-node binary path: qbind-node main.rs does not yet load validator keystore (signer_keystore_path unread on startup), NodeConfig.network.static_peers carries no per-peer (suite_id, pk_bytes), and --p2p-mutual-auth runs on test-grade TrustedClientRoots/DummySig — see docs/whitepaper/contradiction.md C4/C5 policy=OptionalActivate validators=3 chain_id=chain_51424e4444455600 supported_suite_ids=[100] local_signer=absent(keystore_path_not_configured) peer_key_provider=absent(no_configured_keys)
 [P2P] Inbound connection error: Handshake error: channel error: Net(Protocol("server handle_client_init failed"))
 [P2P] Inbound connection error: Handshake error: channel error: Io(Error { kind: UnexpectedEof, message: "failed to fill whole buffer" })
-[P2P] dial 127.0.0.1:55735 giving up after 7 attempt(s): Handshake error: channel error: Io(Error { kind: UnexpectedEof, message: "failed to fill whole buffer" }) (transient=false, max_attempts=8)
+[P2P] dial 127.0.0.1:35025 giving up after 7 attempt(s): Handshake error: channel error: Io(Error { kind: UnexpectedEof, message: "failed to fill whole buffer" }) (transient=false, max_attempts=8)
 

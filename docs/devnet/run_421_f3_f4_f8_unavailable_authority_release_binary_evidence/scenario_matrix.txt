@@ -1,0 +1,12 @@
+Run 421 — scenario matrix (live /metrics deltas on the standalone release binary)
+delta convention: ctx[...] = change in the named verification_context_unavailable counter;
+F6[label] = change in qbind_consensus_binding_total{result="label"}.
+
+s1-baseline    all-ctx=0 F6=0 mutual_auth=Required verification_ctx=None => PASS
+s2-proposal    ctx[]=1  (want 1) F6[accepted]=1  (want 1) connected=true   rc=0   => PASS
+s3-vote        ctx[]=1  (want 1) F6[accepted]=1  (want 1) connected=true   rc=0   => PASS
+s4-mismatch    ctx[]=0  (want 0) F6[claimed_sender_mismatch]=2  (want 2) connected=true   rc=0   => PASS
+s5-badsig      ctx[]=1  (want 1) F6[accepted]=2  (want 2) connected=true   rc=0   => PASS
+s6-badsuite    ctx[]=1  (want 1) F6[accepted]=2  (want 2) connected=true   rc=0   => PASS
+s7-outbound-p  outbound_proposal_ctx_unavail=0 signing_success=0 leader_changes=0 => PARTIAL/UNREACHABLE (no natural leader-proposal opportunity)
+s8-outbound-v  outbound_vote_ctx_unavail=0 => PARTIAL/UNREACHABLE (inbound Proposal fail-closed before engine ingestion; no vote generated)

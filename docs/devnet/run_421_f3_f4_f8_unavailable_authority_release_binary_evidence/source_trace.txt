@@ -1,0 +1,35 @@
+Run 421 — production wiring source trace (UNCHANGED by Run 421)
+
+Run 421 adds NO production source change. The gates below are the Run 418 (F6)
+and Run 420 (ConsensusVerificationPolicy) paths, exercised here on the
+standalone release binary. Production default policy is Required; the standalone
+binary has verification_ctx=None; no production constructor selects the
+test-only LocalFixtureUnsigned policy.
+
+binary_consensus_loop.rs — ConsensusVerificationPolicy + inbound gate ordering
+  740:pub enum ConsensusVerificationPolicy {
+  761:    pub fn requires_context(self) -> bool {
+  3203:                                stats.inbound_proposal_verification_context_unavailable_total =
+  3354:                                stats.inbound_vote_verification_context_unavailable_total = stats
+
+binary_consensus_loop.rs — F6 bind_sender precedes the Run 420 context gate
+  2814:            if verification_policy.requires_context() {
+  2881:            if verification_policy.requires_context() {
+  3122:                    let from = match bind_sender(claimed) {
+  3160:                    match verification_ctx {
+  3202:                            if verification_policy.requires_context() {
+  3281:                    let from = match bind_sender(claimed) {
+
+main.rs — production binary ALWAYS selects Required (fixture never selectable)
+  7796:        verification_policy: ConsensusVerificationPolicy::Required,
+
+metrics.rs — the four context-unavailable counter families exposed on /metrics
+  2792:            "qbind_consensus_inbound_proposal_verification_context_unavailable_total {}\n",
+  2797:            "qbind_consensus_inbound_vote_verification_context_unavailable_total {}\n",
+  2802:            "qbind_consensus_outbound_proposal_verification_context_unavailable_total {}\n",
+  2807:            "qbind_consensus_outbound_vote_verification_context_unavailable_total {}\n",
+
+peer_consensus_binding.rs — F6 binding metric labels (accepted / mismatch)
+  231:            ConsensusBindingReject::ClaimedSenderMismatch => "claimed_sender_mismatch",
+  273:            ConsensusBindingReject::ClaimedSenderMismatch => &self.claimed_sender_mismatch,
+  290:            ConsensusBindingReject::ClaimedSenderMismatch => &self.claimed_sender_mismatch,

@@ -1,0 +1,79 @@
+Run 421 — Required validation suite (Section 13) exact exit codes
+=================================================================
+Authoritative runtime/capture commit: 85bb3a73e6fe2686c074cee5c0f15ff3cf1d2103
+Toolchain: rustc 1.98.1, cargo 1.98.1
+
+BUILDS / CHECKS
+  cargo check -p qbind-node .......................................... exit=0
+  cargo check -p qbind-consensus ..................................... exit=0
+  cargo check -p qbind-net ........................................... exit=0
+  cargo check -p qbind-wire .......................................... exit=0
+  cargo check -p qbind-crypto ........................................ exit=0
+  cargo build --release -p qbind-node --bin qbind-node ............... exit=0
+  cargo build --release -p qbind-node --example run_421_..._driver ... exit=0
+
+FOCUSED TESTS
+  cargo test -p qbind-node --test run_420_production_policy_reachability_tests
+      3 passed; 0 failed ............................................. exit=0
+  cargo test -p qbind-node --test run_418_authenticated_peer_consensus_sender_binding_tests
+      18 passed; 0 failed ............................................ exit=0
+  cargo test -p qbind-consensus --lib proposal_vote_verify::
+      20 passed; 0 failed ............................................ exit=0
+  cargo test -p qbind-node --lib binary_consensus_loop
+      94 passed; 0 failed ............................................ exit=0
+  cargo test -p qbind-consensus --test consensus_verify_tests
+      12 passed; 0 failed ............................................ exit=0
+
+HARNESSES
+  scripts/devnet/run_421_..._release_binary_evidence.sh (authoritative)
+      RESULT=PARTIAL-POSITIVE-FOR-F3-F4-F8-UNAVAILABLE-AUTHORITY-FAIL-CLOSED-RELEASE-BINARY-EVIDENCE
+      S1-S6,S9 PASS; S7/S8 PARTIAL/UNREACHABLE ...................... exit=0
+  scripts/devnet/run_404_public_devnet_package_integrity_manifest.sh
+      RESULT=POSITIVE (16 anchors sha256/byte_size match after refresh) exit=0
+  scripts/devnet/run_405_public_devnet_full_tree_package_integrity.sh
+      RESULT=POSITIVE (full-tree + Run 404 anchor manifest validate) .. exit=0
+  scripts/devnet/run_410_..._package_integrity_stale_prose_lint.sh .... exit=0
+  scripts/devnet/run_411_..._contradiction_ledger_lint.sh ............. exit=0
+  scripts/devnet/run_412_..._readiness_status_blocker_lint.sh ......... exit=0
+  scripts/devnet/run_413_..._recommendation_gap_matrix_lint.sh ........ exit=0
+  scripts/devnet/run_414_..._cross_section_coverage_lint.sh ........... exit=0
+  scripts/devnet/run_415_..._artifact_path_reference_lint.sh .......... exit=0
+  scripts/devnet/run_417_..._reconciliation_audit.sh
+      RESULT=POSITIVE-FOR-AUDIT-COMPLETENESS
+      SECURITY_VERDICT=NEGATIVE-FOR-RUNTIME-SECURITY (posture preserved) exit=0
+  scripts/devnet/run_418_..._binding.sh (via in-tree temporary LF copy; source is CRLF)
+      RESULT=POSITIVE-FOR-F6-CODE-TEST-REMEDIATION .................... exit=0
+      NOTE: LF copy MUST resolve BASH_SOURCE in-tree; a /tmp LF copy
+      spuriously exits 1 ("missing archive artifact") due to REPO_ROOT
+      path resolution, not a regression.
+  scripts/devnet/run_419_..._binding_evidence.sh (preserve PARTIAL)
+      F6_STATUS=CODE-TEST-PLUS-PARTIAL-RUNTIME-EVIDENCE .............. exit=0
+
+FORMATTING / LINT / LINE ENDINGS
+  cargo fmt --all -- --check ......................................... exit=1
+      PRE-EXISTING drift ONLY, confined to crates/qbind-consensus/*.rs
+      (basic_hotstuff_engine, driver, hotstuff_state_engine, lib,
+      proposal_vote_verify, qc, slashing/mod, timeout, timeout_verify,
+      validator_set, tests). NOT introduced by Run 421.
+  rustfmt --edition 2021 --check run_421_..._driver.rs (our example) .. exit=0
+  cargo clippy -p qbind-node --example run_421_..._driver ............ exit=0
+      (only pre-existing lib warnings; none from the example)
+  git diff --check (ordinary) ........................................ 90 "trailing whitespace"
+      ALL are CRLF line terminators on files whose EXISTING convention
+      is CRLF (RUN_420.md, FOUNDATIONAL, READINESS, ARTIFACT_INDEX,
+      BLOCKER_REGISTER, OPERATOR_VERIFICATION_MAP, MANIFEST.json).
+      Genuine space/tab-before-CR introduced by Run 421 edits = 0.
+      contradiction.md and the new RUN_421.md + archive are LF (0 flags).
+
+INTEGRITY / SECURITY
+  (cd archive && sha256sum -c SHA256SUMS.txt) ........................ exit=0 (all OK)
+  JSON validate PACKAGE_INTEGRITY_MANIFEST.example.json .............. exit=0 (valid; 16 anchors match)
+  production `qbind-node --help` denylist
+      LocalFixtureUnsigned / local-fixture / verification-policy /
+      forge / inject / fixture ....................................... 0 matches
+  invented `--consensus-verification-policy local-fixture-unsigned` .. exit=2 (rejected)
+  invented `--inject-proposal` ....................................... exit=2 (rejected)
+  secret/private-material scan (changed + archive) ................... clean
+      (only .gitignore exclusion patterns and <MATERIAL_DIR> placeholders)
+
+CodeQL: see parallel_validation status recorded in the final report.

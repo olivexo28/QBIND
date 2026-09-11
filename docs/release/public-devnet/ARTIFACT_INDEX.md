@@ -59,6 +59,24 @@ Companion documents:
   only, no production source change; **RS1 stays OPEN / launch-blocking**.
   Archive: `docs/devnet/run_419_f6_standalone_release_binary_binding_evidence/`;
   harness: `scripts/devnet/run_419_f6_standalone_release_binary_binding_evidence.sh`.
+- `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_420.md` — Run 420 **code/test**
+  fail-closed Proposal/Vote verification boundary for RS1 findings **F3/F4/F8**:
+  the typed `ConsensusVerificationPolicy` (`Required` production default) that
+  rejects inbound and suppresses outbound Proposal/Vote when verification
+  authority is unavailable (`RESULT=PARTIAL-POSITIVE-FOR-F3-F4-F8-CODE-TEST-FAIL-CLOSED-BOUNDARY`,
+  `RELEASE_BINARY_EVIDENCE=NOT-CAPTURED`). Code + test remediation of the
+  configured boundary only; **RS1 stays OPEN / launch-blocking**.
+- `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_421.md` — Run 421 **unavailable-authority
+  standalone-release-binary** evidence for RS1 findings **F3/F4/F8**, captured
+  over real loopback KEMTLS/static-root sessions with live
+  `qbind_consensus_{inbound,outbound}_{proposal,vote}_verification_context_unavailable_total`
+  deltas proving the deployed binary fails closed on inbound Proposal/Vote when
+  `verification_ctx == None`
+  (`RESULT=PARTIAL-POSITIVE-FOR-F3-F4-F8-UNAVAILABLE-AUTHORITY-FAIL-CLOSED-RELEASE-BINARY-EVIDENCE`;
+  outbound S7/S8 UNREACHABLE; `CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-CAPTURED`).
+  Evidence only, no production source change; **RS1 stays OPEN / launch-blocking**.
+  Archive: `docs/devnet/run_421_f3_f4_f8_unavailable_authority_release_binary_evidence/`;
+  harness: `scripts/devnet/run_421_f3_f4_f8_unavailable_authority_release_binary_evidence.sh`.
 
 Everything below reflects the recorded status **after Run 402**. This index adds
 navigation and clarity only; it does not re-prove or change any item's status.

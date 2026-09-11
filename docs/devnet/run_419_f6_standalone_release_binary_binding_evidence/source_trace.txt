@@ -10,13 +10,13 @@ peer_consensus_binding.rs
   300:            "# HELP qbind_consensus_binding_total Authenticated peer→consensus sender binding decisions (Run 418, F6).\n",
 
 binary_consensus_loop.rs (claimed-sender extraction / origin admission)
-  2673:/// [`PeerConsensusBindingGate::authorize_origin`] (origin-only admission, no
-  2691:pub(crate) fn handle_inbound_consensus_msg(
-  3058:            // `PeerConsensusBindingGate::authorize_origin`. This runs BEFORE the
-  3067:                if let Err(reject) = gate.authorize_origin(origin) {
+  3034:/// [`PeerConsensusBindingGate::authorize_origin`] (origin-only admission, no
+  3052:pub(crate) fn handle_inbound_consensus_msg(
+  3575:            // `PeerConsensusBindingGate::authorize_origin`. This runs BEFORE the
+  3584:                if let Err(reject) = gate.authorize_origin(origin) {
 
 p2p_node_builder.rs (gate construction) / main.rs (loop + shared node_metrics)
   73:use crate::peer_consensus_binding::{
   701:/// enforced separately by [`crate::peer_consensus_binding::PeerConsensusBindingMap`].
   829:    /// this via `with_node_metrics(node_metrics.clone())`, sharing exactly the
-  5122:        .with_node_metrics(Arc::clone(&node_metrics));
+  5123:        .with_node_metrics(Arc::clone(&node_metrics));

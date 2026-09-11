@@ -1,5 +1,19 @@
 # QBIND DevNet Evidence — Run 420
 
+> **Successor note (Run 421).** The `RELEASE_BINARY_EVIDENCE=NOT-CAPTURED`
+> limitation recorded below was subsequently addressed **for the
+> unavailable-authority fail-closed boundary only** by Run 421, which captured
+> standalone `target/release/qbind-node` runtime evidence over real loopback
+> KEMTLS traffic and live `/metrics` (inbound Proposal/Vote rejected
+> fail-closed; F6 mismatch precedes the Run 420 context gate; malformed
+> signatures / wrong suites cannot bypass the unavailable-authority gate; no
+> rejected frame reaches delivery/engine/aggregation/QC/commit/outbound). Run
+> 421 does **not** capture configured-authority signing/verification success
+> (`CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-CAPTURED`) and its outbound
+> scenarios (S7/S8) are UNREACHABLE on the standalone binary. **This Run 420
+> verdict, findings, and posture are unchanged.** See
+> `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_421.md`.
+
 **Fail-closed consensus verification-policy boundary for inbound and outbound
 Proposal/Vote.** Run 420 replaces the fail-open `verification_ctx == None`
 behavior in the binary consensus loop with an **explicit typed

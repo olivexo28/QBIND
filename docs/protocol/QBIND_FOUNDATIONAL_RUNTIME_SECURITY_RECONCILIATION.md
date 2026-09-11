@@ -152,3 +152,23 @@ rejection of mismatched-identity, unsigned, wrong-suite, and forged-QC inputs wi
   no production source change): standalone-release-binary loopback KEMTLS evidence of the Run 418
   binding gate for the core Required/static-root path; overall **PARTIAL** (unauthenticated-ingress
   and outbound-identity vectors partial). RS1 remains **OPEN**; public DevNet **NO-GO**.
+- **Run 420 (F3/F4/F8 configured-path code/test fail-closed boundary):**
+  `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_420.md`. Replaces the fail-open
+  `verification_ctx == None` Proposal/Vote behavior with a typed
+  `ConsensusVerificationPolicy` (`Required` default; test-only `LocalFixtureUnsigned`);
+  code + test only; standalone binary still has no authoritative consensus keys
+  (`RELEASE_BINARY_EVIDENCE=NOT-CAPTURED`). RS1 remains **OPEN**.
+- **Run 421 (F3/F4/F8 unavailable-authority fail-closed release-binary evidence):**
+  `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_421.md`,
+  `docs/devnet/run_421_f3_f4_f8_unavailable_authority_release_binary_evidence/`,
+  `scripts/devnet/run_421_f3_f4_f8_unavailable_authority_release_binary_evidence.sh`. Route A
+  (evidence-only, no production source change): standalone `target/release/qbind-node` loopback
+  KEMTLS + live `/metrics` evidence that under `Required` with `verification_ctx == None`, inbound
+  Proposal/Vote are rejected fail-closed (context-unavailable counters `+1`), F6 sender-mismatch
+  rejects **before** the Run 420 gate (`claimed_sender_mismatch +2`, context counters unchanged),
+  and malformed signatures / wrong suites cannot bypass the unavailable-authority gate — with all
+  captured downstream delivered/engine/aggregation/QC/view/commit/outbound counters unchanged.
+  Outbound suppression (S7/S8) is **UNREACHABLE** on the standalone binary (no natural
+  leader-proposal opportunity; inbound fail-closed before engine ingestion), so the verdict is
+  **PARTIAL-POSITIVE** and `CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-CAPTURED`. RS1 remains
+  **OPEN**; F1/F2/F5/F7 unresolved; F6 partial; public DevNet **NO-GO**.

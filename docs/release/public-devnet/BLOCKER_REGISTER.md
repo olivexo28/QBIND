@@ -58,6 +58,22 @@ outbound-identity vectors partial). This narrows one finding only; **RS1 stays
 OPEN / launch-blocking** because F1–F5 and F7–F8 remain unresolved. See
 `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_419.md`.
 
+**F3/F4/F8 remediation status.** F3/F4/F8 (three of RS1's eight findings — the
+fail-open Proposal/Vote verification-context bypass) are remediated in code and
+test (Run 420: typed `ConsensusVerificationPolicy` with `Required` production
+default, fail-closed inbound rejection and outbound suppression under unavailable
+authority) and have **unavailable-authority** standalone-release-binary evidence
+(Run 421: live loopback KEMTLS + `/metrics` proof that the deployed binary rejects
+inbound Proposal/Vote fail-closed when `verification_ctx == None`, F6 mismatch
+precedes the Run 420 gate, and malformed signatures / wrong suites cannot bypass
+the boundary; outbound suppression S7/S8 UNREACHABLE on the standalone binary;
+`CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-CAPTURED`). This narrows the
+**configured/unavailable-authority path** of three findings only; the standalone
+binary still has **no** authoritative consensus signer, so configured-authority
+release-binary evidence is absent and **RS1 stays OPEN / launch-blocking** because
+F1/F2/F5/F7 remain unresolved and F6 remains partial. See
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_421.md`.
+
 ## TestNet / MainNet
 
 TestNet and MainNet remain **untouched**; readiness items N1–N7 remain **Red**.
@@ -80,4 +96,6 @@ MainNet readiness is claimed.**
 - `docs/protocol/QBIND_FOUNDATIONAL_RUNTIME_SECURITY_RECONCILIATION.md` — RS1 foundational runtime-security reconciliation.
 - `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_417.md` — Run 417 audit evidence (RS1 findings F1–F8).
 - `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_419.md` — Run 419 partial release-binary evidence for finding F6.
+- `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_420.md` — Run 420 code/test fail-closed Proposal/Vote verification boundary (findings F3/F4/F8).
+- `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_421.md` — Run 421 unavailable-authority fail-closed release-binary evidence for findings F3/F4/F8.
 - `docs/whitepaper/contradiction.md` — contradiction ledger.

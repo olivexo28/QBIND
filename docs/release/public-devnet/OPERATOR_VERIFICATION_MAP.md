@@ -69,6 +69,18 @@ decision is **NO-GO / NOT launch-ready** (`LAUNCH_GO_NO_GO.md`).
    `docs/devnet/run_419_f6_standalone_release_binary_binding_evidence/`, harness
    `scripts/devnet/run_419_f6_standalone_release_binary_binding_evidence.sh`);
    this narrows one finding only and **RS1 stays OPEN / launch-blocking**.
+   Findings **F3/F4/F8** additionally have Run 420 code/test remediation (typed
+   `ConsensusVerificationPolicy`, `Required` production default) and Run 421
+   **unavailable-authority** standalone-release-binary evidence
+   (`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_421.md`, archive
+   `docs/devnet/run_421_f3_f4_f8_unavailable_authority_release_binary_evidence/`,
+   harness
+   `scripts/devnet/run_421_f3_f4_f8_unavailable_authority_release_binary_evidence.sh`)
+   proving the deployed binary fails closed on inbound Proposal/Vote when
+   verification authority is unavailable; outbound suppression S7/S8 UNREACHABLE and
+   `CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-CAPTURED`; this narrows the
+   configured/unavailable-authority path of three findings only and **RS1 stays
+   OPEN / launch-blocking**.
 9. `docs/whitepaper/contradiction.md` — contradiction ledger.
 10. `docs/release/public-devnet/BLOCKER_REGISTER.md` — open blockers (incl. **RS1**).
 

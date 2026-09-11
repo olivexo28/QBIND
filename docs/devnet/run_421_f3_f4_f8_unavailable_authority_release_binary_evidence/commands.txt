@@ -1,0 +1,27 @@
+Run 421 — representative commands (temporary paths normalized to placeholders)
+
+# build
+cargo build --release -p qbind-node --bin qbind-node
+cargo build --release -p qbind-node --example run_421_f3_f4_f8_release_binary_driver
+
+# mint temporary PQC material (root/leaf certs + KEM secrets; NEVER committed)
+target/release/examples/run_421_f3_f4_f8_release_binary_driver gen-material <MATERIAL_DIR>
+
+# launch a standalone release receiver (validator 2, system-under-test);
+# NO consensus verification authority is configured, so verification_ctx==None
+# and the production-default ConsensusVerificationPolicy::Required is active.
+QBIND_METRICS_HTTP_ADDR=127.0.0.1:<MPORT> target/release/qbind-node \
+  --env devnet --network-mode p2p --enable-p2p \
+  --p2p-listen-addr 127.0.0.1:<RPORT> --validator-id 2 --data-dir <DATA_DIR> \
+  --p2p-mutual-auth required --p2p-pqc-root-mode pqc-static-root \
+  --p2p-trusted-root <TRUSTED_ROOT_SPEC> \
+  --p2p-leaf-cert <MATERIAL_DIR>/v2.cert.bin --p2p-leaf-cert-key <MATERIAL_DIR>/v2.kem.sk.bin \
+  --p2p-peer 0@127.0.0.1:<DEAD0> --p2p-peer-leaf-cert 0:<MATERIAL_DIR>/v0.cert.bin \
+  --p2p-peer 1@127.0.0.1:<DLISTEN> --p2p-peer-leaf-cert 1:<MATERIAL_DIR>/v1.cert.bin
+
+# drive one scenario (real KEMTLS client -> receiver, fixed enumerated frames)
+target/release/examples/run_421_f3_f4_f8_release_binary_driver drive <SCENARIO> <MATERIAL_DIR> 127.0.0.1:<RPORT> 127.0.0.1:<DLISTEN> <OUT_FILE>
+#   SCENARIO in: s2-proposal s3-vote s4-mismatch s5-badsig s6-badsuite
+
+# observe live context-unavailable + F6 binding counters
+curl -fsS http://127.0.0.1:<MPORT>/metrics | grep -E 'verification_context_unavailable_total|qbind_consensus_binding_total'

@@ -1,0 +1,21 @@
+# Run 421: never commit private material, raw logs, raw metrics, or data dirs.
+material/
+*material*/
+*.key
+*.sk.bin
+*.kem.sk.bin
+*.cert.bin
+*.id.hex
+trusted-root.spec
+recv_*/
+data/
+*data-dir*/
+*.rawlog
+*raw*.log
+logs/
+*.pcap
+*.bundle
+*.tar
+*.tar.gz
+*.tgz
+*.zip

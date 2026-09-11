@@ -1,0 +1,54 @@
+Run 421 — F3/F4/F8 unavailable-authority fail-closed release-binary evidence
+
+RESULT=PARTIAL-POSITIVE-FOR-F3-F4-F8-UNAVAILABLE-AUTHORITY-FAIL-CLOSED-RELEASE-BINARY-EVIDENCE
+F3_STATUS=CONFIGURED-PATH-CODE-TEST-REMEDIATED / UNAVAILABLE-AUTHORITY-RELEASE-BINARY-FAIL-CLOSED
+F4_STATUS=CONFIGURED-PATH-CODE-TEST-REMEDIATED / UNAVAILABLE-AUTHORITY-RELEASE-BINARY-FAIL-CLOSED
+F8_STATUS=CONFIGURED-PATH-CODE-TEST-REMEDIATED / UNAVAILABLE-AUTHORITY-RELEASE-BINARY-FAIL-CLOSED
+CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-CAPTURED
+SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO
+
+Qualifiers: positive ONLY for fail-closed behavior with consensus authority
+UNAVAILABLE; local loopback; standalone release binary; tested message classes
+and paths only; NOT configured-authority signing/verification; NOT public
+deployment; NOT off-host attestation; NOT liveness-positive.
+
+Topology: 3 validators on 127.0.0.1: v0=leader/victim identity v1=authenticated driver(client) v2=standalone release receiver(server, system-under-test)
+
+Trust model:
+  * KEMTLS authenticates the transport session.
+  * Run 418 F6 binds the authenticated peer to the claimed immediate consensus
+    sender. A transport-authenticated frame is NOT cryptographically
+    authenticated at the consensus-message level.
+  * Run 420 would verify Proposal/Vote signatures/suites IF authoritative
+    consensus context were available. On this standalone binary it is not, so
+    the correct behavior is rejection/suppression, not signature acceptance.
+  * Live metrics/logs are LOCAL observations, not independent off-host
+    attestation.
+
+Scenario results:
+  S1 production-policy + unavailable-authority baseline ......... PASS
+  S2 authenticated honest Proposal rejected fail-closed ........ PASS
+  S3 authenticated honest Vote rejected fail-closed ............ PASS
+  S4 F6 mismatch precedes Run 420 context rejection ............ PASS
+  S5 missing/malformed signature cannot bypass unavailable auth  PASS
+  S6 unsupported/wrong suite cannot bypass unavailable auth ..... PASS
+  S7 outbound Proposal suppression ............................. PARTIAL (UNREACHABLE: no natural leader-proposal opportunity; leader_changes=0)
+  S8 outbound Vote suppression ................................. PARTIAL (UNREACHABLE: inbound Proposal fail-closed before engine ingestion)
+  S9 fixture / CLI denial ...................................... PASS
+
+Outbound observations (baseline node lifetime):
+  outbound_proposal_verification_context_unavailable_total = 0
+  outbound_vote_verification_context_unavailable_total     = 0
+  outbound_proposal_signing_success_total                  = 0
+  leader_changes_total                                     = 0
+
+Toolchain: rustc 1.98.1 (48a229cea 2026-09-01) / cargo 1.98.1 (797e8a9bc 2026-08-05)
+Runtime commit: 85bb3a73e6fe2686c074cee5c0f15ff3cf1d2103
+qbind-node --help clean: yes (no LocalFixtureUnsigned / verification-policy / forged-message / arbitrary-control flag; invented flag rc=2)
+
+This run proves fail-closed DEPLOYED behavior under UNAVAILABLE authority. It
+does NOT prove configured-authority success. Regardless of result: F3/F4/F8 are
+NOT fully remediated in production; configured-authority release-binary evidence
+remains absent; F1/F2/F5/F7 remain unresolved; F6 remains partial (Run 419);
+RS1 remains OPEN; C4/C5 remain OPEN; M4/M6/S5/S7 stay Yellow; no readiness item
+moves Green; public DevNet remains NO-GO.
