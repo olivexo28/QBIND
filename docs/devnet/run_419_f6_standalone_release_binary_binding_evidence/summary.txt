@@ -19,8 +19,8 @@ Scenario results (delta = live qbind_consensus_binding_total{result=...} change)
   S5 unauthenticated ingress (Disabled) => PARTIAL
   S7 outbound actual-server identity    => PARTIAL (outbound check observed incidentally in S6; dedicated vector not run)
 
-Toolchain: rustc 1.98.1 (48a229cea 2026-09-01) / cargo 1.98.1 (797e8a9bc 2026-08-05)
-Runtime commit: 85bb3a73e6fe2686c074cee5c0f15ff3cf1d2103
+Toolchain: rustc 1.98.0 (88d9e12ae 2026-08-18) / cargo 1.98.0 (797e8a9bc 2026-08-05)
+Runtime commit: 1ec128379f3ce215706959d50901bbd6e56abd6b
 qbind-node --help clean: yes (no Run 419 / forged-message flag)
 
 Trust model: automated LOCAL cross-process operational evidence; NOT independent

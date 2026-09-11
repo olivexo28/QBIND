@@ -25,7 +25,7 @@ qbind_consensus_inbound_new_views_engine_accepted_total 0
 qbind_consensus_inbound_timeouts_delivered_total 0
 qbind_consensus_proposals_total 0
 qbind_consensus_committed_height 0
-delta(accepted) = 1  driver_rc=0  window=2026-09-11T16:17:55Z..2026-09-11T16:17:57Z
+delta(accepted) = 1  driver_rc=0  window=2026-09-10T13:14:23Z..2026-09-10T13:14:25Z
 
 ===== s2-impersonation (mode=required) =====
 -- before (binding gate) --
@@ -54,7 +54,7 @@ qbind_consensus_inbound_new_views_engine_accepted_total 0
 qbind_consensus_inbound_timeouts_delivered_total 0
 qbind_consensus_proposals_total 0
 qbind_consensus_committed_height 0
-delta(claimed_sender_mismatch) = 5  driver_rc=0  window=2026-09-11T16:18:13Z..2026-09-11T16:18:16Z
+delta(claimed_sender_mismatch) = 5  driver_rc=0  window=2026-09-10T13:14:41Z..2026-09-10T13:14:44Z
 
 ===== s3-newview (mode=required) =====
 -- before (binding gate) --
@@ -83,7 +83,7 @@ qbind_consensus_inbound_new_views_engine_accepted_total 0
 qbind_consensus_inbound_timeouts_delivered_total 0
 qbind_consensus_proposals_total 0
 qbind_consensus_committed_height 0
-delta(accepted) = 1  driver_rc=0  window=2026-09-11T16:18:31Z..2026-09-11T16:18:33Z
+delta(accepted) = 1  driver_rc=0  window=2026-09-10T13:14:59Z..2026-09-10T13:15:01Z
 
 ===== s6-alt-leaf (mode=required) =====
 -- before (binding gate) --
@@ -112,7 +112,7 @@ qbind_consensus_inbound_new_views_engine_accepted_total 0
 qbind_consensus_inbound_timeouts_delivered_total 0
 qbind_consensus_proposals_total 0
 qbind_consensus_committed_height 0
-delta(missing_origin) = 1  driver_rc=0  window=2026-09-11T16:18:49Z..2026-09-11T16:18:51Z
+delta(missing_origin) = 1  driver_rc=0  window=2026-09-10T13:15:17Z..2026-09-10T13:15:19Z
 
 ===== s4-optional-unauth (mode=optional) =====
 -- before (binding gate) --
@@ -141,7 +141,7 @@ qbind_consensus_inbound_new_views_engine_accepted_total 0
 qbind_consensus_inbound_timeouts_delivered_total 0
 qbind_consensus_proposals_total 0
 qbind_consensus_committed_height 0
-delta(accepted) = 0  driver_rc=0  window=2026-09-11T16:19:07Z..2026-09-11T16:19:27Z
+delta(accepted) = 0  driver_rc=0  window=2026-09-10T13:15:34Z..2026-09-10T13:15:54Z
 
 ===== s5-disabled-unauth (mode=disabled) =====
 -- before (binding gate) --
@@ -170,5 +170,5 @@ qbind_consensus_inbound_new_views_engine_accepted_total 0
 qbind_consensus_inbound_timeouts_delivered_total 0
 qbind_consensus_proposals_total 0
 qbind_consensus_committed_height 0
-delta(accepted) = 0  driver_rc=0  window=2026-09-11T16:19:42Z..2026-09-11T16:20:02Z
+delta(accepted) = 0  driver_rc=0  window=2026-09-10T13:16:10Z..2026-09-10T13:16:30Z
 
