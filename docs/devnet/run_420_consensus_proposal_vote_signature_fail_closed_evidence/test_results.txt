@@ -60,25 +60,49 @@ scripts/devnet/run_413_public_devnet_readiness_recommendation_gap_matrix_lint.sh
 scripts/devnet/run_414_public_devnet_readiness_cross_section_coverage_lint.sh     -> POSITIVE  exit 0
 scripts/devnet/run_415_public_devnet_readiness_artifact_path_reference_lint.sh    -> POSITIVE  exit 0
 
-BLOCKED / NOT CAPTURED (reported honestly, NOT passes)
-------------------------------------------------------
+DEVNET HARNESSES — Run 418 / Run 419 (executed via established method)
+---------------------------------------------------------------------
 scripts/devnet/run_418_authenticated_peer_consensus_sender_binding.sh
-    -> exit 2: aborts in place with `$'\r': command not found` /
-       `set: pipefail: invalid option name`. PRE-EXISTING CRLF line endings in
-       the committed harness (documented repo condition), NOT caused by
-       Run 420. Not normalized here (out of scope; unrelated file).
+    -> EXECUTED via a temporary LF copy (established repo pattern): the tracked
+       CRLF harness was NOT modified or normalized. A temporary copy was made
+       under scripts/devnet/, CRLF->LF converted with `sed 's/\r$//'`, the copy
+       was run, and the temporary file was removed (no generated file remains;
+       `git status` clean afterwards).
+       RESULT=POSITIVE-FOR-F6-CODE-TEST-REMEDIATION
+       SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO             exit 0
+    HISTORICAL (superseded, recorded for completeness, NOT the final verdict):
+       a direct invocation of the tracked CRLF harness aborts in place with
+       `$'\r': command not found` / `set: pipefail: invalid option name` and
+       exits 2. That is a PRE-EXISTING CRLF condition of the committed harness,
+       NOT caused by Run 420. The LF-copy execution above is the final Run 418
+       validation because the established LF method is available.
 scripts/devnet/run_419_f6_standalone_release_binary_binding_evidence.sh
-    -> NOT CAPTURED. Requires `cargo build --release -p qbind-node` plus a
-       Cargo-example driver and loopback multi-process KEMTLS sessions. Its
-       verdict is PARTIAL by construction (RELEASE_BINARY_EVIDENCE) and is
-       preserved unchanged; Run 420 makes no claim on it.
+    -> EXECUTED against the release binary built in this pass.
+       VERDICT=PARTIAL-FOR-F6-STANDALONE-RELEASE-BINARY-EVIDENCE
+       (F6_STATUS=CODE-TEST-PLUS-PARTIAL-RUNTIME-EVIDENCE)          exit 0
+       Scenarios: s1-honest PASS; s2-impersonation PASS (delta 5); s3-newview
+       PASS; s6-alt-leaf PASS; s4-optional-unauth PARTIAL; s5-disabled-unauth
+       PARTIAL; s7-outbound PARTIAL (observed incidentally in S6; dedicated
+       vector not run). F6 is NOT promoted.
+       Release SUT identity observed by the harness:
+         target/release/qbind-node   sha256 71fe6d1e… build-id 3ae571f8…
+         run_419 driver helper        sha256 3e4e0d5d… build-id 213102f0…
+       The harness DID regenerate its own tracked run_419 evidence files
+       (SHA256SUMS/binary_identity/metrics_before_after/socket_log_extract/
+       source_trace/summary — runtime-varying values). Those Run 419 files are
+       out of scope for this Run 420 evidence commit and were reverted to their
+       committed state; Run 419 remains PARTIAL. Its temporary WORKDIR is
+       always removed by the harness (no data dir / material retained).
 
 WORKSPACE / RELEASE / CODEQL
 ----------------------------
 cargo check -p qbind-node (lib + bin)  -> compiles              exit 0
 cargo build --release -p qbind-node --bin qbind-node
-    -> attempted; long cold build. See README "Reproduce". Release-binary
-       consensus-authority activation remains unavailable regardless.
-Full `cargo test` workspace + CodeQL: run via the repository's
-parallel_validation / CI path; see the canonical evidence report for the
-declared triviality classification (non-trivial: consensus security logic).
+    -> completed (cold build ~13m); target/release/qbind-node produced  exit 0
+       Release-binary consensus-authority activation remains unavailable
+       regardless (RELEASE_BINARY_EVIDENCE=NOT-CAPTURED).
+CodeQL Rust analysis: SKIPPED/INCOMPLETE because the database was too large.
+    A skipped analysis yields NO zero-alert security conclusion; this run does
+    NOT claim "CodeQL 0 alerts". Change triviality for CodeQL is non-trivial
+    (production consensus security logic). Full `cargo test` workspace runs via
+    the repository CI / parallel_validation path.

@@ -3,8 +3,9 @@ Run 420 — performance record
 
 Run 420 changes the consensus-loop control flow only along the previously
 fail-open branch (context-absent Proposal/Vote). It adds no per-message
-cryptographic work to any path that did not already perform it, and no
-allocation on the hot accepted path.
+cryptographic work to any path that did not already perform it. No new
+allocation was intentionally introduced by the policy check; allocation
+behavior was not independently profiled.
 
 Cost model
 ----------
@@ -16,7 +17,8 @@ Cost model
   `verify_proposal_msg` / `verify_vote_msg` call. No added overhead.
 * LocalFixtureUnsigned + None (test-only):  legacy passthrough, unchanged.
 * Outbound:  one enum check before the existing signing branch; suppression is
-  an early `None` return (no broadcast, no allocation).
+  an early `None` return (no broadcast; no new allocation intentionally
+  introduced, not independently profiled).
 
 The four new counters are process-wide `AtomicU64`s updated with `store`
 during snapshot population and rendered as fixed-name Prometheus series (no

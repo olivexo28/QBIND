@@ -38,6 +38,18 @@ scripts/devnet/run_413_public_devnet_readiness_recommendation_gap_matrix_lint.sh
 scripts/devnet/run_414_public_devnet_readiness_cross_section_coverage_lint.sh
 scripts/devnet/run_415_public_devnet_readiness_artifact_path_reference_lint.sh
 
+Run 418 harness via temporary LF copy (tracked CRLF harness NOT modified)
+-------------------------------------------------------------------------
+cp scripts/devnet/run_418_authenticated_peer_consensus_sender_binding.sh \
+   scripts/devnet/_tmp_run_418_lf.sh
+sed -i 's/\r$//' scripts/devnet/_tmp_run_418_lf.sh
+bash scripts/devnet/_tmp_run_418_lf.sh          # -> POSITIVE-FOR-F6-... exit 0
+rm scripts/devnet/_tmp_run_418_lf.sh            # remove temp copy; git status clean
+
+Run 419 standalone release-binary evidence harness (PARTIAL)
+------------------------------------------------------------
+scripts/devnet/run_419_f6_standalone_release_binary_binding_evidence.sh
+
 Archive integrity
 -----------------
 ( cd docs/devnet/run_420_consensus_proposal_vote_signature_fail_closed_evidence \

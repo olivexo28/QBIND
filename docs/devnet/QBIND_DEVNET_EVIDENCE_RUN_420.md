@@ -178,21 +178,49 @@ Exit codes are recorded verbatim in
 Highlights (all exit 0 unless noted): `proposal_vote_verify` (20),
 `binary_consensus_loop` (94), `run420` (31), `run030` (20), reachability guard
 (3), six edited integration targets (5/5/3/6/18/5), clippy (warnings only, no
-net-new), `git diff --check` clean, Run 417 audit
+net-new), `git diff --check` clean on the code/test changes, Run 417 audit
 (`POSITIVE-FOR-AUDIT-COMPLETENESS`, security verdict `NEGATIVE` preserved), Runs
-404/405/410–415 (`POSITIVE`). Blocked/not-captured (reported, not passes): Run
-418 harness (pre-existing CRLF, exit 2), Run 419 harness (release-binary /
-loopback KEMTLS, PARTIAL preserved, not executed here).
+404/405/410–415 (`POSITIVE`). `cargo check -p qbind-node` exit 0;
+`cargo build --release -p qbind-node --bin qbind-node` **completed** (cold build
+~13m, exit 0; `RELEASE_BINARY_EVIDENCE` still `NOT-CAPTURED`). The curated
+evidence files in this directory are intentionally CRLF-encoded (repo
+convention), so a naive `git diff --check` reports CR-at-EOL on their added
+lines; a CRLF-aware check confirms no genuine trailing whitespace (no
+space/tab before CR) and no mixed line endings were introduced.
+
+Run 418 harness: **executed via a temporary LF copy** (the tracked CRLF harness
+was not modified or normalized; temp copy under `scripts/devnet/`, `sed`
+CRLF→LF, run, temp file removed, worktree clean). Result
+`POSITIVE-FOR-F6-CODE-TEST-REMEDIATION` / `RS1-OPEN / PUBLIC-DEVNET-NO-GO`,
+exit 0. The former direct-invocation exit-2 (pre-existing CRLF) is recorded as a
+superseded historical attempt, not the final Run 418 verdict.
+
+Run 419 harness: **executed** against the release binary,
+`PARTIAL-FOR-F6-STANDALONE-RELEASE-BINARY-EVIDENCE`, exit 0 (s1/s2/s3/s6 PASS;
+s4/s5/s7 PARTIAL). F6 is **not** promoted. The harness regenerated its own
+tracked run_419 evidence files (runtime-varying); those are out of scope for
+this Run 420 commit and were reverted, so Run 419 remains PARTIAL.
+
+**CodeQL Rust analysis: SKIPPED/INCOMPLETE because the database was too large.**
+A skipped analysis yields no zero-alert security conclusion; this run does not
+claim "CodeQL 0 alerts". The change is non-trivial for CodeQL (production
+consensus security logic).
 
 ## 12. Branch, commits, worktree, and PR status
 
-- **Branch:** `copilot/copilotrun-420-consensus-proposal-vote-signature`
-  (existing task branch; no new branch, no `main` change, no force-push, no
-  history rewrite).
-- **Corrective commits (this continuation):**
-  `e07f1e1` fail-closed policy · `f894c59` comment corrections ·
-  `bfbfb75` io=None→Required + reachability guard · `b204ed4` clippy suppression
-  · plus this evidence commit.
+- **Actual branch:** `copilot/copilotrun-420-consensus-proposal-vote-signature`
+  (the corrective-continuation branch; all work here). The original Run 420
+  branch was `copilot/run-420-consensus-proposal-vote-signature`.
+- **Workflow deviation (recorded, not hidden):** the corrective continuation was
+  performed on a *different* branch than the original. It is a strict five-commit
+  fast-forward from `main` `1c22f7dc` (`main…corrective` = 0 left / 5 right) but
+  it is **not** a direct continuation of the original branch
+  (`original…corrective` = 2 left / 6 right). This deviation did **not** rewrite
+  `main` and does **not** prevent a clean fast-forward import of the corrective
+  branch. Earlier statements that "no new branch was created" were inaccurate and
+  are withdrawn.
+- **Commits:** five-commit fast-forward from `1c22f7dc` (previous tip
+  `203427b7`) plus this evidence-correction commit as the new tip.
 - **Worktree:** clean after each `report_progress`.
 - **Pull request:** **none opened.** Run 421 is not started.
 
