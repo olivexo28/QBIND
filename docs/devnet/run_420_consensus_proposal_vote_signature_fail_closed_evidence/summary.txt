@@ -1,0 +1,66 @@
+Run 420 — Consensus Proposal/Vote fail-closed verification-policy boundary
+==========================================================================
+
+RESULT=PARTIAL-POSITIVE-FOR-F3-F4-F8-CODE-TEST-FAIL-CLOSED-BOUNDARY
+F3_STATUS=CONFIGURED-PATH-REMEDIATED / ACTIVE-BINARY-AUTHORITY-UNAVAILABLE
+F4_STATUS=CONFIGURED-PATH-REMEDIATED / ACTIVE-BINARY-AUTHORITY-UNAVAILABLE
+F8_STATUS=CONFIGURED-PATH-REMEDIATED / ACTIVE-BINARY-AUTHORITY-UNAVAILABLE
+RELEASE_BINARY_EVIDENCE=NOT-CAPTURED
+SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO
+
+Scope
+-----
+This run corrects the fail-open `verification_ctx == None` behavior in the
+binary-path consensus loop for inbound and outbound Proposal/Vote handling and
+proves the correction with production-path loop tests. It is a CODE + TEST
+remediation of the *configured* verification boundary. It does NOT activate
+genuine production consensus signing authority for the standalone
+`qbind-node` binary; that binary still has no authoritative consensus keys and
+therefore, under the now-default `Required` policy, refuses to admit or emit
+Proposal/Vote traffic (liveness loss is accepted; silent unauthenticated
+operation is eliminated).
+
+What changed (positive)
+-----------------------
+* Introduced an explicit typed policy `ConsensusVerificationPolicy`
+  { `Required` (Default), `LocalFixtureUnsigned` (test-only) } — NOT another
+  optional boolean.
+* Under `Required` + `verification_ctx == None`, inbound Proposal and Vote are
+  rejected BEFORE delivered counters, restore/deferral, reconfiguration
+  observation, engine ingestion, vote aggregation, QC formation,
+  view/lock/high-QC/commit mutation, and any outbound action.
+* Under `Required` + `verification_ctx == None` (or context present but
+  `signer == None`), outbound Proposal/Vote broadcast AND local self-injection
+  are suppressed. No dummy/unsigned fallback exists.
+* Added distinct, bounded, attacker-label-free context-unavailable counters for
+  inbound/outbound × proposal/vote, kept separate from invalid-signature /
+  missing-signature / unsupported-suite outcomes.
+* Production `qbind-node` (`main.rs`) selects `Required`; the degenerate
+  `io == None` in-process path also defaults to `Required`. The test-only
+  `LocalFixtureUnsigned` policy is unreachable from any production constructor
+  (source-level guard tests).
+
+What remains unavailable (honest negative)
+------------------------------------------
+* The standalone release binary has no configured consensus signer/authority,
+  so genuine production Proposal/Vote signing/verification is not demonstrated
+  end-to-end on the release binary. RELEASE_BINARY_EVIDENCE=NOT-CAPTURED.
+* RS1 stays OPEN; C4/C5 stay OPEN; M4/M6/S5/S7 stay Yellow; N1-N7 stay Red;
+  TestNet/MainNet untouched; public DevNet remains NO-GO. No readiness item
+  moves Green.
+
+Per-requirement result
+----------------------
+1  Required+None inbound Proposal rejected fail-closed .............. PASS
+2  Required+None inbound Vote rejected fail-closed .................. PASS
+3  Required+ctx valid Proposal reaches downstream boundary .......... PASS
+4  Required+ctx valid Vote reaches downstream boundary .............. PASS
+5  Required+ctx each typed invalid case still rejected ............. PASS
+6  F6 sender mismatch rejects before signature verification ........ PASS
+7  Correct F6 + wrong signature -> signature rejects, no mutation ... PASS
+8  Correct signature + F6 mismatch -> F6 rejects first ............. PASS
+9  Restore/deferred Proposal cannot precede required verification ... PASS
+10 Reconfiguration observation cannot precede required verification . PASS
+Outbound: None / signer=None / mismatch / backend-fail / bad-suite . PASS
+Outbound: valid signer signs; signed msg round-trips inbound verify . PASS
+Fixture bypass unreachable from production binary (source guard) .... PASS

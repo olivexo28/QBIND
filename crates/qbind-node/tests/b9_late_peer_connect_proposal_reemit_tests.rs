@@ -62,6 +62,7 @@ use tokio::sync::{mpsc, watch};
 use qbind_consensus::ids::ValidatorId;
 use qbind_consensus::network::NetworkError;
 use qbind_node::binary_consensus_loop::{
+    ConsensusVerificationPolicy,
     run_binary_consensus_loop_with_io, BinaryConsensusLoopConfig, BinaryConsensusLoopIo,
     BinaryConsensusLoopProgress, PeerConnectivitySource,
 };
@@ -180,6 +181,7 @@ fn spawn_loop_for_test(
         peer_connectivity: Some(connectivity_dyn),
         verification_ctx: None,
         binding_gate: None,
+        verification_policy: ConsensusVerificationPolicy::LocalFixtureUnsigned,
     };
     let (shutdown_tx, shutdown_rx) = watch::channel(());
     let progress = Arc::new(parking_lot::Mutex::new(BinaryConsensusLoopProgress::default()));
@@ -364,6 +366,7 @@ async fn b9_c_view_change_does_not_replay_stale_proposal_for_old_view() {
         peer_connectivity: Some(connectivity_dyn),
         verification_ctx: None,
         binding_gate: None,
+        verification_policy: ConsensusVerificationPolicy::LocalFixtureUnsigned,
     };
     let (shutdown_tx, shutdown_rx) = watch::channel(());
     let progress = Arc::new(parking_lot::Mutex::new(BinaryConsensusLoopProgress::default()));
@@ -452,6 +455,7 @@ async fn b9_d_peer_connected_before_first_proposal_is_bounded() {
         peer_connectivity: Some(connectivity_dyn),
         verification_ctx: None,
         binding_gate: None,
+        verification_policy: ConsensusVerificationPolicy::LocalFixtureUnsigned,
     };
     let (_shutdown_tx, shutdown_rx) = watch::channel(());
     let progress = Arc::new(parking_lot::Mutex::new(BinaryConsensusLoopProgress::default()));
@@ -513,6 +517,7 @@ async fn b9_e_no_peer_connectivity_means_no_reemit_path_at_all() {
         peer_connectivity: None,
         verification_ctx: None,
         binding_gate: None,
+        verification_policy: ConsensusVerificationPolicy::LocalFixtureUnsigned,
     };
     let (_shutdown_tx, shutdown_rx) = watch::channel(());
     let progress = Arc::new(parking_lot::Mutex::new(BinaryConsensusLoopProgress::default()));

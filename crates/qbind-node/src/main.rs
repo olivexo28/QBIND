@@ -64,7 +64,8 @@ use tokio::sync::watch;
 use qbind_consensus::ids::ValidatorId;
 use qbind_node::binary_consensus_loop::{
     spawn_binary_consensus_loop, spawn_binary_consensus_loop_with_io, BinaryConsensusLoopConfig,
-    BinaryConsensusLoopIo, BinaryPeriodicSnapshotConfig, RestoreBaseline,
+    BinaryConsensusLoopIo, BinaryPeriodicSnapshotConfig, ConsensusVerificationPolicy,
+    RestoreBaseline,
 };
 use qbind_node::cli::CliArgs;
 use qbind_node::consensus_net_p2p::P2pConsensusNetwork;
@@ -7785,6 +7786,14 @@ async fn run_p2p_node(
         peer_connectivity: Some(peer_connectivity),
         verification_ctx,
         binding_gate: node_context.binding_gate.clone(),
+        // Run 420: the production `qbind-node` binary ALWAYS selects the
+        // fail-closed `Required` policy. When `verification_ctx` is `None`
+        // (consensus signing authority not yet configured), inbound
+        // Proposal/Vote are rejected and outbound Proposal/Vote emission is
+        // suppressed — the binary refuses to operate on unsigned/unverified
+        // consensus traffic. The test-only `LocalFixtureUnsigned` policy is
+        // never selectable here. See `binary_consensus_loop::ConsensusVerificationPolicy`.
+        verification_policy: ConsensusVerificationPolicy::Required,
     };
     let (consensus_handle, _progress) =
         spawn_binary_consensus_loop_with_io(consensus_cfg, shutdown_rx, node_metrics, io);

@@ -704,6 +704,65 @@ fn build_uniform_validator_set(num_validators: u64) -> ConsensusValidatorSet {
         .expect("uniform validator set with unique ids is always valid")
 }
 
+/// Run 420: explicit policy governing whether inbound/outbound consensus
+/// `Proposal` and `Vote` processing MUST be cryptographically verified/signed.
+///
+/// This type exists to remove the pre-Run-420 fail-open ambiguity where a
+/// `verification_ctx == None` was silently treated as permission to process
+/// unsigned/unverified Proposal and Vote traffic. Permission to bypass
+/// verification is NEVER inferred from an `Option` being `None`; it must be
+/// selected as an explicit, typed policy.
+///
+/// # Invariants
+///
+/// * [`ConsensusVerificationPolicy::Required`] is the production default and
+///   the only policy any production constructor may select. Under `Required`,
+///   a missing verification context (no signer / key-provider / backend
+///   registry / authoritative key / chain identity / suite policy) causes
+///   inbound Proposal/Vote to be **rejected fail-closed** and outbound
+///   Proposal/Vote emission (broadcast AND local self-injection) to be
+///   **suppressed**. Loss of liveness is acceptable until authority is
+///   configured; silent unauthenticated operation is not.
+/// * [`ConsensusVerificationPolicy::LocalFixtureUnsigned`] is a **test-only**
+///   local fixture compatibility policy that preserves the historical
+///   LocalMesh unsigned passthrough when `verification_ctx == None`. It MUST
+///   NOT be selectable from the production `qbind-node` CLI, TestNet, MainNet,
+///   authenticated P2P mode, restore/replay paths, or public DevNet
+///   configuration. Only isolated local fixture/test construction may select
+///   it. It is never chosen by any production constructor (proven at the
+///   source level by the guard tests in
+///   `tests/run_420_production_policy_reachability_tests.rs`).
+///
+/// When a verification context IS wired (`Some`), both policies behave
+/// identically: the message is verified/signed exactly as before. The policy
+/// only decides what happens when the context is absent.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConsensusVerificationPolicy {
+    /// Production/authenticated P2P Proposal/Vote processing. Fail-closed when
+    /// verification authority is unavailable. This is the default.
+    Required,
+    /// Test-only local fixture/compatibility policy permitting unsigned
+    /// LocalMesh Proposal/Vote passthrough when no verification context is
+    /// wired. Never reachable from production construction.
+    LocalFixtureUnsigned,
+}
+
+impl Default for ConsensusVerificationPolicy {
+    /// Production-safe default: verification is `Required`.
+    fn default() -> Self {
+        ConsensusVerificationPolicy::Required
+    }
+}
+
+impl ConsensusVerificationPolicy {
+    /// Returns `true` when a missing (`None`) verification context must cause
+    /// inbound Proposal/Vote rejection and outbound Proposal/Vote suppression.
+    #[inline]
+    pub fn requires_context(self) -> bool {
+        matches!(self, ConsensusVerificationPolicy::Required)
+    }
+}
+
 /// I/O surface for the multi-validator binary-path consensus loop (C4/B6).
 ///
 /// When supplied, the loop:
@@ -789,15 +848,23 @@ pub struct BinaryConsensusLoopIo {
     ///   NOT emitted (fail-closed) — no broadcast, no local ingest, no
     ///   TC formation.
     ///
-    /// When `None`, all of the above behaviours are skipped. This
-    /// preserves bit-equivalent pre-Run-030 semantics for the
-    /// single-validator / LocalMesh path which has no governance-backed
-    /// key provider, no per-suite backend registry, and no signer wired
-    /// into `main.rs`. The `--p2p-mutual-auth required` multi-validator
-    /// production path is intended to wire this in a follow-up; the
-    /// boundary is documented in
+    /// When `None`, the timeout/new-view verification and signing behaviours
+    /// above are skipped, preserving bit-equivalent pre-Run-030 semantics for
+    /// the single-validator / LocalMesh path which has no governance-backed key
+    /// provider, no per-suite backend registry, and no signer wired into
+    /// `main.rs`.
+    ///
+    /// Run 420 correction: for inbound/outbound **`Proposal` and `Vote`**
+    /// traffic, a `None` here does NOT imply permission to process
+    /// unsigned/unverified messages. That decision is made by the explicit
+    /// [`BinaryConsensusLoopIo::verification_policy`]: under `Required`
+    /// (production default) a `None` context causes Proposal/Vote to be
+    /// rejected (inbound) / suppressed (outbound) fail-closed; only the
+    /// test-only `LocalFixtureUnsigned` policy preserves the legacy unsigned
+    /// passthrough. The boundary is documented in
     /// `docs/whitepaper/contradiction.md` C4 (production PQC root-key
-    /// distribution remains out of scope until that pass).
+    /// distribution / consensus authority activation remains out of scope
+    /// until that pass).
     pub verification_ctx: Option<Arc<TimeoutVerificationContext>>,
 
     /// Run 418: optional authenticated peer→validator consensus binding gate.
@@ -818,6 +885,19 @@ pub struct BinaryConsensusLoopIo {
     /// always installs `Some(gate)` so unauthenticated or mismatched senders
     /// cannot enter the consensus engine.
     pub binding_gate: Option<Arc<PeerConsensusBindingGate>>,
+
+    /// Run 420: explicit Proposal/Vote verification policy.
+    ///
+    /// Decides what happens when `verification_ctx` is `None`:
+    /// - [`ConsensusVerificationPolicy::Required`] (production default): inbound
+    ///   Proposal/Vote are rejected fail-closed and outbound Proposal/Vote
+    ///   emission is suppressed.
+    /// - [`ConsensusVerificationPolicy::LocalFixtureUnsigned`] (test-only):
+    ///   the historical unsigned LocalMesh passthrough is preserved.
+    ///
+    /// When `verification_ctx` is `Some`, this field has no effect — the
+    /// message is verified/signed regardless.
+    pub verification_policy: ConsensusVerificationPolicy,
 }
 
 /// Run 030: aggregate verification + signing context for the
@@ -1179,6 +1259,21 @@ pub struct BinaryConsensusLoopInboundStats {
     pub outbound_proposal_signing_failure: u64,
     pub outbound_vote_signing_success: u64,
     pub outbound_vote_signing_failure: u64,
+    // Run 420 (F3/F4/F8): typed `VerificationContextUnavailable` rejection
+    // outcome. Distinct from `*_verify_rejected_total` (which decomposes
+    // signature/suite verifier failures on a WIRED context) and from the F6
+    // sender-binding and engine-rejection counters. These count messages
+    // rejected/suppressed fail-closed BECAUSE the verification context (signer /
+    // key provider / backend registry / authoritative key / chain identity /
+    // suite policy) was unavailable under `ConsensusVerificationPolicy::Required`.
+    // Proposal and Vote are kept strictly distinct; inbound and outbound are
+    // kept distinct. Missing local configuration is NEVER mislabeled as an
+    // invalid/missing signature. Labels are bounded and carry no
+    // attacker-controlled content.
+    pub inbound_proposal_verification_context_unavailable_total: u64,
+    pub inbound_vote_verification_context_unavailable_total: u64,
+    pub outbound_proposal_verification_context_unavailable_total: u64,
+    pub outbound_vote_verification_context_unavailable_total: u64,
 }
 
 /// Transition state for the bounded "restore-catchup mode → normal
@@ -1783,12 +1878,14 @@ pub async fn run_binary_consensus_loop_with_io(
         }
     }
 
-    let (mut inbound_rx, outbound_facade, peer_connectivity, verification_ctx, binding_gate): (
+    #[allow(clippy::type_complexity)]
+    let (mut inbound_rx, outbound_facade, peer_connectivity, verification_ctx, binding_gate, verification_policy): (
         Option<mpsc::Receiver<InboundConsensusEnvelope>>,
         Option<Arc<dyn ConsensusNetworkFacade>>,
         Option<Arc<dyn PeerConnectivitySource>>,
         Option<Arc<TimeoutVerificationContext>>,
         Option<Arc<PeerConsensusBindingGate>>,
+        ConsensusVerificationPolicy,
     ) = match io {
         Some(io) => (
             Some(io.inbound_rx),
@@ -1796,8 +1893,15 @@ pub async fn run_binary_consensus_loop_with_io(
             io.peer_connectivity,
             io.verification_ctx,
             io.binding_gate,
+            io.verification_policy,
         ),
-        None => (None, None, None, None, None),
+        // No `io` at all is the degenerate in-process path with no inbound
+        // receiver and no outbound facade: it can neither ingest a P2P
+        // Proposal/Vote frame nor emit one anywhere. We still default to the
+        // fail-closed `Required` policy here — permission to bypass
+        // verification is never inferred from a `None`, even on a path that
+        // has no message surface.
+        None => (None, None, None, None, None, ConsensusVerificationPolicy::Required),
     };
 
     eprintln!(
@@ -2008,6 +2112,7 @@ pub async fn run_binary_consensus_loop_with_io(
                                 &mut reconfig_detector,
                                 origin.as_ref(),
                                 binding_gate.as_deref(),
+                                verification_policy,
                             );
                             // Reflect engine state changes (view / commits)
                             // immediately so /metrics never stalls behind
@@ -2095,6 +2200,7 @@ pub async fn run_binary_consensus_loop_with_io(
                         &mut last_leader_vote,
                         &mut reconfig_detector,
                         verification_ctx.as_deref(),
+                        verification_policy,
                     );
                     // B9 + B10: poll for a late-peer-connect transition
                     // and, if armed, re-emit the cached current-view
@@ -2113,6 +2219,7 @@ pub async fn run_binary_consensus_loop_with_io(
                             outbound_facade.as_deref(),
                             &mut inbound_stats,
                             verification_ctx.as_deref(),
+                            verification_policy,
                         );
                     }
                     maybe_broadcast_restore_catchup_request(
@@ -2234,6 +2341,7 @@ pub async fn run_binary_consensus_loop_with_io(
                         &mut last_leader_vote,
                         &mut reconfig_detector,
                         verification_ctx.as_deref(),
+                        verification_policy,
                     );
                     if let Some(pc) = peer_connectivity.as_deref() {
                         maybe_reemit_on_late_peer_connect(
@@ -2246,6 +2354,7 @@ pub async fn run_binary_consensus_loop_with_io(
                             outbound_facade.as_deref(),
                             &mut inbound_stats,
                             verification_ctx.as_deref(),
+                            verification_policy,
                         );
                     }
                     maybe_broadcast_restore_catchup_request(
@@ -2414,6 +2523,7 @@ fn do_leader_tick(
     last_leader_vote: &mut Option<(u64, Vote)>,
     reconfig_detector: &mut BinaryReconfigDetector,
     signer_ctx: Option<&TimeoutVerificationContext>,
+    verification_policy: ConsensusVerificationPolicy,
 ) {
     let view_at_step = engine.current_view();
     let actions = engine.try_propose();
@@ -2480,7 +2590,7 @@ fn do_leader_tick(
         metrics.consensus_t154().inc_proposal_accepted();
     }
     if let Some(facade) = outbound {
-        forward_actions_to_facade(actions, facade, inbound_stats, signer_ctx);
+        forward_actions_to_facade(actions, facade, inbound_stats, signer_ctx, verification_policy);
     }
 }
 
@@ -2546,6 +2656,7 @@ fn maybe_reemit_on_late_peer_connect(
     facade: Option<&dyn ConsensusNetworkFacade>,
     stats: &mut BinaryConsensusLoopInboundStats,
     signer_ctx: Option<&TimeoutVerificationContext>,
+    verification_policy: ConsensusVerificationPolicy,
 ) {
     // Always refresh the connected snapshot so reconnect churn within
     // the same view does not reset our notion of "newly connected" on
@@ -2607,7 +2718,7 @@ fn maybe_reemit_on_late_peer_connect(
     // Run 420: the re-emitted proposal must be signed fail-closed just like
     // any other locally-originated outbound proposal, so a late-peer re-emit
     // cannot become a bypass that broadcasts unsigned consensus material.
-    let proposal = match sign_proposal_for_broadcast(proposal, signer_ctx, stats) {
+    let proposal = match sign_proposal_for_broadcast(proposal, signer_ctx, verification_policy, stats) {
         Some(p) => p,
         None => return,
     };
@@ -2633,7 +2744,7 @@ fn maybe_reemit_on_late_peer_connect(
         if *vote_view == cached_view {
             // Run 420: sign the re-emitted vote fail-closed as well.
             if let Some(signed_vote) =
-                sign_vote_for_broadcast(vote.clone(), signer_ctx, stats)
+                sign_vote_for_broadcast(vote.clone(), signer_ctx, verification_policy, stats)
             {
                 if let Err(e) = facade.broadcast_vote(&signed_vote) {
                     eprintln!(
@@ -2668,10 +2779,15 @@ fn maybe_reemit_on_late_peer_connect(
 /// broadcast, fail-closed.
 ///
 /// Semantics:
-/// - `ctx == None` (single-validator / legacy / test path where no production
-///   verification context is wired): the proposal is returned unchanged. The
-///   symmetric inbound verification gate is also disabled in this mode, so no
-///   unsigned message is admitted at a verifying peer.
+/// - `ctx == None`: the outcome is governed by `verification_policy`, never
+///   inferred from the `None`. Under
+///   [`ConsensusVerificationPolicy::Required`] (production default) the
+///   proposal is NOT emitted (returns `None`) and
+///   `outbound_proposal_verification_context_unavailable_total` is
+///   incremented — no broadcast, no self-injection. Under the test-only
+///   [`ConsensusVerificationPolicy::LocalFixtureUnsigned`] policy the proposal
+///   is returned unchanged (legacy LocalMesh passthrough; the symmetric
+///   inbound gate is likewise permissive only under that fixture policy).
 /// - `ctx == Some` but `ctx.signer == None`: fail closed — the proposal is NOT
 ///   broadcast (returns `None`) and `outbound_proposal_signing_failure` is
 ///   incremented. A verifying node without a configured signer must not emit
@@ -2682,10 +2798,32 @@ fn maybe_reemit_on_late_peer_connect(
 fn sign_proposal_for_broadcast(
     mut proposal: BlockProposal,
     ctx: Option<&TimeoutVerificationContext>,
+    verification_policy: ConsensusVerificationPolicy,
     inbound_stats: &mut BinaryConsensusLoopInboundStats,
 ) -> Option<BlockProposal> {
     let ctx = match ctx {
-        None => return Some(proposal),
+        None => {
+            // Run 420 correction: with no verification context wired, whether an
+            // unsigned proposal may be emitted is governed by the explicit
+            // policy — never inferred from the `None`. Under `Required`
+            // (production default) emission is suppressed fail-closed and a
+            // typed `VerificationContextUnavailable` outbound counter is
+            // incremented; the message cannot be broadcast or self-injected.
+            // Under the test-only `LocalFixtureUnsigned` policy the historical
+            // unsigned passthrough is preserved.
+            if verification_policy.requires_context() {
+                inbound_stats.outbound_proposal_verification_context_unavailable_total =
+                    inbound_stats
+                        .outbound_proposal_verification_context_unavailable_total
+                        .saturating_add(1);
+                eprintln!(
+                    "[binary-consensus] Run 420: outbound proposal NOT emitted \
+                     (verification context unavailable, policy=Required) — fail-closed"
+                );
+                return None;
+            }
+            return Some(proposal);
+        }
         Some(c) => c,
     };
     let signer = match ctx.signer.as_ref() {
@@ -2732,10 +2870,26 @@ fn sign_proposal_for_broadcast(
 fn sign_vote_for_broadcast(
     mut vote: Vote,
     ctx: Option<&TimeoutVerificationContext>,
+    verification_policy: ConsensusVerificationPolicy,
     inbound_stats: &mut BinaryConsensusLoopInboundStats,
 ) -> Option<Vote> {
     let ctx = match ctx {
-        None => return Some(vote),
+        None => {
+            // Run 420 correction: see `sign_proposal_for_broadcast`. Under
+            // `Required` the unsigned vote is suppressed fail-closed; under the
+            // test-only `LocalFixtureUnsigned` policy it passes through.
+            if verification_policy.requires_context() {
+                inbound_stats.outbound_vote_verification_context_unavailable_total = inbound_stats
+                    .outbound_vote_verification_context_unavailable_total
+                    .saturating_add(1);
+                eprintln!(
+                    "[binary-consensus] Run 420: outbound vote NOT emitted \
+                     (verification context unavailable, policy=Required) — fail-closed"
+                );
+                return None;
+            }
+            return Some(vote);
+        }
         Some(c) => c,
     };
     let signer = match ctx.signer.as_ref() {
@@ -2780,6 +2934,7 @@ fn forward_actions_to_facade(
     facade: &dyn ConsensusNetworkFacade,
     inbound_stats: &mut BinaryConsensusLoopInboundStats,
     signer_ctx: Option<&TimeoutVerificationContext>,
+    verification_policy: ConsensusVerificationPolicy,
 ) {
     for action in actions {
         match action {
@@ -2787,6 +2942,7 @@ fn forward_actions_to_facade(
                 let proposal = match sign_proposal_for_broadcast(
                     *proposal,
                     signer_ctx,
+                    verification_policy,
                     inbound_stats,
                 ) {
                     Some(p) => p,
@@ -2803,7 +2959,12 @@ fn forward_actions_to_facade(
                 }
             }
             ConsensusEngineAction::BroadcastVote(vote) => {
-                let vote = match sign_vote_for_broadcast(vote, signer_ctx, inbound_stats) {
+                let vote = match sign_vote_for_broadcast(
+                    vote,
+                    signer_ctx,
+                    verification_policy,
+                    inbound_stats,
+                ) {
                     Some(v) => v,
                     None => continue,
                 };
@@ -2818,7 +2979,12 @@ fn forward_actions_to_facade(
                 }
             }
             ConsensusEngineAction::SendVoteTo { to, vote } => {
-                let vote = match sign_vote_for_broadcast(vote, signer_ctx, inbound_stats) {
+                let vote = match sign_vote_for_broadcast(
+                    vote,
+                    signer_ctx,
+                    verification_policy,
+                    inbound_stats,
+                ) {
                     Some(v) => v,
                     None => continue,
                 };
@@ -2895,6 +3061,7 @@ pub(crate) fn handle_inbound_consensus_msg(
     reconfig_detector: &mut BinaryReconfigDetector,
     origin: Option<&AuthenticatedConsensusOrigin>,
     binding_gate: Option<&PeerConsensusBindingGate>,
+    verification_policy: ConsensusVerificationPolicy,
 ) {
     use qbind_wire::consensus::{BlockProposal, Vote};
     use qbind_wire::io::WireDecode;
@@ -2967,57 +3134,85 @@ pub(crate) fn handle_inbound_consensus_msg(
                         }
                     };
                     // Run 420 (F3/F4/F8): inbound `BlockProposal` cryptographic
-                    // signature + suite verification gate. Runs ONLY when a
-                    // verification context is wired (production-like
-                    // multi-validator path). Fail-closed and placed AFTER Run
-                    // 418 F6 sender binding but BEFORE restore-catchup
-                    // deferral, delivery counting, reconfig observation, and
-                    // engine ingestion: an unsigned, invalidly signed,
-                    // wrong-key, wrong-suite, unsupported-suite,
-                    // unknown-validator, or signer/claimed-validator-mismatched
-                    // proposal never reaches `engine.on_proposal_event` and so
-                    // cannot mutate view/lock/high-QC/proposal-storage/outbound
-                    // state OR the `inbound_proposals_delivered` observability
-                    // counter. Both transport identity (F6) and a valid
-                    // consensus signature (F3) are required.
-                    if let Some(ctx) = verification_ctx {
-                        let t_start = std::time::Instant::now();
-                        let res = verify_proposal_msg(
-                            &proposal,
-                            from,
-                            ctx.validators.as_ref(),
-                            ctx.key_provider.as_ref(),
-                            ctx.backend_registry.as_ref(),
-                            ctx.chain_id,
-                        );
-                        let elapsed = t_start.elapsed().as_nanos() as u64;
-                        stats.proposal_vote_crypto_verify_latency_ns_total = stats
-                            .proposal_vote_crypto_verify_latency_ns_total
-                            .saturating_add(elapsed);
-                        stats.proposal_vote_crypto_verify_latency_observations_total = stats
-                            .proposal_vote_crypto_verify_latency_observations_total
-                            .saturating_add(1);
-                        match res {
-                            Ok(()) => {
-                                stats.inbound_proposal_verify_accepted = stats
-                                    .inbound_proposal_verify_accepted
-                                    .saturating_add(1);
+                    // signature + suite verification gate. Placed AFTER Run 418
+                    // F6 sender binding but BEFORE restore-catchup deferral,
+                    // delivery counting, reconfig observation, and engine
+                    // ingestion: an unsigned, invalidly signed, wrong-key,
+                    // wrong-suite, unsupported-suite, unknown-validator, or
+                    // signer/claimed-validator-mismatched proposal never reaches
+                    // `engine.on_proposal_event` and so cannot mutate
+                    // view/lock/high-QC/proposal-storage/outbound state OR the
+                    // `inbound_proposals_delivered` observability counter. Both
+                    // transport identity (F6) and a valid consensus signature
+                    // (F3) are required.
+                    //
+                    // Run 420 correction: when NO verification context is wired,
+                    // the outcome is governed by the explicit
+                    // `ConsensusVerificationPolicy`, NOT by silently allowing the
+                    // message through. Under `Required` (production default) a
+                    // missing context is a typed `VerificationContextUnavailable`
+                    // rejection: the proposal is dropped fail-closed here, before
+                    // any restore deferral, delivery counter, reconfig
+                    // observation, engine call, vote aggregation, QC formation, or
+                    // outbound action. Under the test-only
+                    // `LocalFixtureUnsigned` policy the historical unsigned
+                    // LocalMesh passthrough is preserved.
+                    match verification_ctx {
+                        Some(ctx) => {
+                            let t_start = std::time::Instant::now();
+                            let res = verify_proposal_msg(
+                                &proposal,
+                                from,
+                                ctx.validators.as_ref(),
+                                ctx.key_provider.as_ref(),
+                                ctx.backend_registry.as_ref(),
+                                ctx.chain_id,
+                            );
+                            let elapsed = t_start.elapsed().as_nanos() as u64;
+                            stats.proposal_vote_crypto_verify_latency_ns_total = stats
+                                .proposal_vote_crypto_verify_latency_ns_total
+                                .saturating_add(elapsed);
+                            stats.proposal_vote_crypto_verify_latency_observations_total = stats
+                                .proposal_vote_crypto_verify_latency_observations_total
+                                .saturating_add(1);
+                            match res {
+                                Ok(()) => {
+                                    stats.inbound_proposal_verify_accepted = stats
+                                        .inbound_proposal_verify_accepted
+                                        .saturating_add(1);
+                                }
+                                Err(e) => {
+                                    stats.inbound_proposal_verify_rejected_total = stats
+                                        .inbound_proposal_verify_rejected_total
+                                        .saturating_add(1);
+                                    inc_proposal_reject_reason(stats, &e);
+                                    eprintln!(
+                                        "[binary-consensus] Run 420: inbound proposal REJECTED \
+                                         (verify) height={} proposer={:?} suite_id={} reason={}",
+                                        proposal.header.height,
+                                        from,
+                                        proposal.header.suite_id,
+                                        e
+                                    );
+                                    return;
+                                }
                             }
-                            Err(e) => {
-                                stats.inbound_proposal_verify_rejected_total = stats
-                                    .inbound_proposal_verify_rejected_total
-                                    .saturating_add(1);
-                                inc_proposal_reject_reason(stats, &e);
+                        }
+                        None => {
+                            if verification_policy.requires_context() {
+                                stats.inbound_proposal_verification_context_unavailable_total =
+                                    stats
+                                        .inbound_proposal_verification_context_unavailable_total
+                                        .saturating_add(1);
                                 eprintln!(
                                     "[binary-consensus] Run 420: inbound proposal REJECTED \
-                                     (verify) height={} proposer={:?} suite_id={} reason={}",
-                                    proposal.header.height,
-                                    from,
-                                    proposal.header.suite_id,
-                                    e
+                                     (verification context unavailable) height={} proposer={:?} \
+                                     policy=Required — fail-closed, not delivered",
+                                    proposal.header.height, from,
                                 );
                                 return;
                             }
+                            // LocalFixtureUnsigned: historical passthrough.
                         }
                     }
                     if restore_mode.is_active()
@@ -3061,7 +3256,7 @@ pub(crate) fn handle_inbound_consensus_msg(
                             stats.inbound_proposals_engine_accepted.saturating_add(1);
                         metrics.consensus_t154().inc_proposal_accepted();
                         if let Some(facade) = outbound {
-                            forward_actions_to_facade(vec![action], facade, stats, verification_ctx);
+                            forward_actions_to_facade(vec![action], facade, stats, verification_ctx, verification_policy);
                         }
                     }
                 }
@@ -3098,51 +3293,76 @@ pub(crate) fn handle_inbound_consensus_msg(
                         }
                     };
                     // Run 420 (F3/F4/F8): inbound `Vote` cryptographic
-                    // signature + suite verification gate. Runs ONLY when a
-                    // verification context is wired. Fail-closed and placed
-                    // AFTER Run 418 F6 sender binding but BEFORE any
-                    // delivery/acceptance counting or engine ingestion: an
-                    // unsigned, invalidly signed, wrong-key, wrong-suite,
-                    // unsupported-suite, unknown-validator, or
-                    // signer/claimed-validator-mismatched vote never reaches
-                    // `engine.on_vote_event` and so cannot contribute to vote
-                    // aggregation / QC formation / view advancement. Both
-                    // transport identity (F6) and a valid consensus signature
-                    // (F4) are required.
-                    if let Some(ctx) = verification_ctx {
-                        let t_start = std::time::Instant::now();
-                        let res = verify_vote_msg(
-                            &vote,
-                            from,
-                            ctx.validators.as_ref(),
-                            ctx.key_provider.as_ref(),
-                            ctx.backend_registry.as_ref(),
-                            ctx.chain_id,
-                        );
-                        let elapsed = t_start.elapsed().as_nanos() as u64;
-                        stats.proposal_vote_crypto_verify_latency_ns_total = stats
-                            .proposal_vote_crypto_verify_latency_ns_total
-                            .saturating_add(elapsed);
-                        stats.proposal_vote_crypto_verify_latency_observations_total = stats
-                            .proposal_vote_crypto_verify_latency_observations_total
-                            .saturating_add(1);
-                        match res {
-                            Ok(()) => {
-                                stats.inbound_vote_verify_accepted =
-                                    stats.inbound_vote_verify_accepted.saturating_add(1);
+                    // signature + suite verification gate. Placed AFTER Run 418
+                    // F6 sender binding but BEFORE any delivery/acceptance
+                    // counting or engine ingestion: an unsigned, invalidly
+                    // signed, wrong-key, wrong-suite, unsupported-suite,
+                    // unknown-validator, or signer/claimed-validator-mismatched
+                    // vote never reaches `engine.on_vote_event` and so cannot
+                    // contribute to vote aggregation / QC formation / view
+                    // advancement. When a context IS wired, both transport
+                    // identity (F6) and a valid consensus signature (F4) are
+                    // required. When NO context is wired, the explicit
+                    // `ConsensusVerificationPolicy` decides: under `Required`
+                    // (production default) the vote is rejected fail-closed as
+                    // `VerificationContextUnavailable`; only the test-only
+                    // `LocalFixtureUnsigned` policy permits the historical
+                    // unsigned passthrough.
+                    match verification_ctx {
+                        Some(ctx) => {
+                            let t_start = std::time::Instant::now();
+                            let res = verify_vote_msg(
+                                &vote,
+                                from,
+                                ctx.validators.as_ref(),
+                                ctx.key_provider.as_ref(),
+                                ctx.backend_registry.as_ref(),
+                                ctx.chain_id,
+                            );
+                            let elapsed = t_start.elapsed().as_nanos() as u64;
+                            stats.proposal_vote_crypto_verify_latency_ns_total = stats
+                                .proposal_vote_crypto_verify_latency_ns_total
+                                .saturating_add(elapsed);
+                            stats.proposal_vote_crypto_verify_latency_observations_total = stats
+                                .proposal_vote_crypto_verify_latency_observations_total
+                                .saturating_add(1);
+                            match res {
+                                Ok(()) => {
+                                    stats.inbound_vote_verify_accepted =
+                                        stats.inbound_vote_verify_accepted.saturating_add(1);
+                                }
+                                Err(e) => {
+                                    stats.inbound_vote_verify_rejected_total = stats
+                                        .inbound_vote_verify_rejected_total
+                                        .saturating_add(1);
+                                    inc_vote_reject_reason(stats, &e);
+                                    eprintln!(
+                                        "[binary-consensus] Run 420: inbound vote REJECTED \
+                                         (verify) height={} voter={:?} suite_id={} reason={}",
+                                        vote.height, from, vote.suite_id, e
+                                    );
+                                    return;
+                                }
                             }
-                            Err(e) => {
-                                stats.inbound_vote_verify_rejected_total = stats
-                                    .inbound_vote_verify_rejected_total
+                        }
+                        None => {
+                            // Run 420 correction: missing context under Required
+                            // is a typed `VerificationContextUnavailable`
+                            // rejection BEFORE engine ingestion, vote
+                            // aggregation, QC formation, or view/commit mutation.
+                            if verification_policy.requires_context() {
+                                stats.inbound_vote_verification_context_unavailable_total = stats
+                                    .inbound_vote_verification_context_unavailable_total
                                     .saturating_add(1);
-                                inc_vote_reject_reason(stats, &e);
                                 eprintln!(
                                     "[binary-consensus] Run 420: inbound vote REJECTED \
-                                     (verify) height={} voter={:?} suite_id={} reason={}",
-                                    vote.height, from, vote.suite_id, e
+                                     (verification context unavailable) height={} voter={:?} \
+                                     policy=Required — fail-closed, not delivered",
+                                    vote.height, from,
                                 );
                                 return;
                             }
+                            // LocalFixtureUnsigned: historical passthrough.
                         }
                     }
                     match engine.on_vote_event(from, &vote) {
@@ -3594,6 +3814,7 @@ pub(crate) fn handle_inbound_consensus_msg(
 /// so Run 035 cannot drift from the live inbound path the binary loop
 /// drives.
 #[cfg_attr(not(test), allow(dead_code))]
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn deliver_inbound_for_run035(
     engine: &mut BasicHotStuffEngine<[u8; 32]>,
     msg: ConsensusNetMsg,
@@ -3602,6 +3823,7 @@ pub(crate) fn deliver_inbound_for_run035(
     metrics: &Arc<NodeMetrics>,
     local_validator_id: ValidatorId,
     verification_ctx: Option<&TimeoutVerificationContext>,
+    verification_policy: ConsensusVerificationPolicy,
 ) {
     let mut restore_mode = RestoreCatchupModeState::from_config(None);
     let mut detector = BinaryReconfigDetector::default();
@@ -3617,6 +3839,7 @@ pub(crate) fn deliver_inbound_for_run035(
         &mut detector,
         None,
         None,
+        verification_policy,
     );
 }
 
@@ -5234,6 +5457,14 @@ fn update_binary_view_timeout_metrics(
             outbound_proposal_signing_failure: stats.outbound_proposal_signing_failure,
             outbound_vote_signing_success: stats.outbound_vote_signing_success,
             outbound_vote_signing_failure: stats.outbound_vote_signing_failure,
+            inbound_proposal_verification_context_unavailable_total: stats
+                .inbound_proposal_verification_context_unavailable_total,
+            inbound_vote_verification_context_unavailable_total: stats
+                .inbound_vote_verification_context_unavailable_total,
+            outbound_proposal_verification_context_unavailable_total: stats
+                .outbound_proposal_verification_context_unavailable_total,
+            outbound_vote_verification_context_unavailable_total: stats
+                .outbound_vote_verification_context_unavailable_total,
         });
 }
 
@@ -6509,6 +6740,7 @@ mod tests {
             &mut BinaryReconfigDetector::default(),
             None,
             None,
+            ConsensusVerificationPolicy::LocalFixtureUnsigned,
         );
         assert_eq!(engine.current_view(), view_before);
         assert_eq!(stats.inbound_timeouts_delivered, 0);
@@ -6534,6 +6766,7 @@ mod tests {
             &mut BinaryReconfigDetector::default(),
             None,
             None,
+            ConsensusVerificationPolicy::LocalFixtureUnsigned,
         );
         assert_eq!(engine.current_view(), view_before);
         assert_eq!(stats.inbound_new_views_delivered, 0);
@@ -6580,6 +6813,7 @@ mod tests {
             &mut BinaryReconfigDetector::default(),
             None,
             None,
+            ConsensusVerificationPolicy::LocalFixtureUnsigned,
         );
         assert_eq!(stats.inbound_new_views_delivered, 1);
         assert_eq!(stats.inbound_new_views_engine_accepted, 1);
@@ -6624,6 +6858,7 @@ mod tests {
             &mut BinaryReconfigDetector::default(),
             None,
             None,
+            ConsensusVerificationPolicy::LocalFixtureUnsigned,
         );
         assert_eq!(stats.inbound_new_views_delivered, 1);
         assert_eq!(stats.inbound_new_views_engine_accepted, 0);
@@ -6700,6 +6935,7 @@ mod tests {
             &mut BinaryReconfigDetector::default(),
             None,
             None,
+            ConsensusVerificationPolicy::LocalFixtureUnsigned,
         );
         // 2/4 timeouts ⇒ still no TC, view still 15.
         assert_eq!(stats.inbound_timeouts_delivered, 1);
@@ -6725,6 +6961,7 @@ mod tests {
             &mut BinaryReconfigDetector::default(),
             None,
             None,
+            ConsensusVerificationPolicy::LocalFixtureUnsigned,
         );
         assert_eq!(stats.inbound_timeouts_delivered, 2);
         assert_eq!(stats.inbound_timeouts_engine_accepted, 2);
@@ -6768,6 +7005,7 @@ mod tests {
             &mut BinaryReconfigDetector::default(),
             None,
             None,
+            ConsensusVerificationPolicy::LocalFixtureUnsigned,
         );
         assert_eq!(engine.current_view(), view_before);
         assert_eq!(stats.inbound_timeouts_delivered, 0);
@@ -6788,6 +7026,7 @@ mod tests {
             &mut BinaryReconfigDetector::default(),
             None,
             None,
+            ConsensusVerificationPolicy::LocalFixtureUnsigned,
         );
         assert_eq!(engine.current_view(), view_before);
         assert_eq!(stats.inbound_new_views_delivered, 0);
@@ -7510,6 +7749,7 @@ mod tests {
                 &mut BinaryReconfigDetector::default(),
                 None,
                 None,
+                ConsensusVerificationPolicy::LocalFixtureUnsigned,
             );
         }
 
@@ -7640,6 +7880,7 @@ mod tests {
                 &mut BinaryReconfigDetector::default(),
                 None,
                 None,
+                ConsensusVerificationPolicy::LocalFixtureUnsigned,
             );
             assert!(stats.view_timeout_decode_failures >= 1);
             assert_eq!(stats.inbound_timeout_verify_accepted, 0);
@@ -7672,6 +7913,7 @@ mod tests {
                 &mut BinaryReconfigDetector::default(),
                 None,
                 None,
+                ConsensusVerificationPolicy::LocalFixtureUnsigned,
             );
         }
 
@@ -7923,6 +8165,7 @@ mod tests {
                 &mut BinaryReconfigDetector::default(),
                 None,
                 None,
+                ConsensusVerificationPolicy::LocalFixtureUnsigned,
             );
 
             assert!(stats.view_timeout_decode_failures >= 1);
@@ -8192,6 +8435,7 @@ mod tests {
                 &mut BinaryReconfigDetector::default(),
                 None,
                 None,
+                ConsensusVerificationPolicy::LocalFixtureUnsigned,
             );
         }
 
@@ -8218,6 +8462,7 @@ mod tests {
                 &mut BinaryReconfigDetector::default(),
                 None,
                 None,
+                ConsensusVerificationPolicy::LocalFixtureUnsigned,
             );
         }
 
@@ -8521,6 +8766,7 @@ mod tests {
                 &mut BinaryReconfigDetector::default(),
                 None,
                 None,
+                ConsensusVerificationPolicy::LocalFixtureUnsigned,
             );
             assert_eq!(stats.inbound_proposal_verify_accepted, 0);
             assert_eq!(stats.inbound_proposals_delivered, 0);
@@ -8544,7 +8790,7 @@ mod tests {
                 signature: vec![],
             };
             let signed_p =
-                sign_proposal_for_broadcast(unsigned_p, Some(&ctx), &mut stats).expect("signed");
+                sign_proposal_for_broadcast(unsigned_p, Some(&ctx), ConsensusVerificationPolicy::LocalFixtureUnsigned, &mut stats).expect("signed");
             assert!(!signed_p.signature.is_empty());
             assert_eq!(signed_p.header.suite_id, TEST_SUITE_U16);
             assert_eq!(stats.outbound_proposal_signing_success, 1);
@@ -8561,7 +8807,7 @@ mod tests {
 
             let unsigned_v = base_vote(0);
             let signed_v =
-                sign_vote_for_broadcast(unsigned_v, Some(&ctx), &mut stats).expect("signed");
+                sign_vote_for_broadcast(unsigned_v, Some(&ctx), ConsensusVerificationPolicy::LocalFixtureUnsigned, &mut stats).expect("signed");
             assert!(!signed_v.signature.is_empty());
             assert_eq!(stats.outbound_vote_signing_success, 1);
             assert!(qbind_consensus::verify_vote_msg(
@@ -8589,12 +8835,12 @@ mod tests {
                 txs: vec![],
                 signature: vec![],
             };
-            assert!(sign_proposal_for_broadcast(unsigned_p, Some(&ctx), &mut stats).is_none());
+            assert!(sign_proposal_for_broadcast(unsigned_p, Some(&ctx), ConsensusVerificationPolicy::LocalFixtureUnsigned, &mut stats).is_none());
             assert_eq!(stats.outbound_proposal_signing_success, 0);
             assert_eq!(stats.outbound_proposal_signing_failure, 1);
 
             let unsigned_v = base_vote(0);
-            assert!(sign_vote_for_broadcast(unsigned_v, Some(&ctx), &mut stats).is_none());
+            assert!(sign_vote_for_broadcast(unsigned_v, Some(&ctx), ConsensusVerificationPolicy::LocalFixtureUnsigned, &mut stats).is_none());
             assert_eq!(stats.outbound_vote_signing_success, 0);
             assert_eq!(stats.outbound_vote_signing_failure, 1);
         }
@@ -8611,7 +8857,7 @@ mod tests {
                 txs: vec![],
                 signature: vec![],
             };
-            let out = sign_proposal_for_broadcast(unsigned_p, None, &mut stats).expect("passthru");
+            let out = sign_proposal_for_broadcast(unsigned_p, None, ConsensusVerificationPolicy::LocalFixtureUnsigned, &mut stats).expect("passthru");
             assert!(out.signature.is_empty());
             assert_eq!(stats.outbound_proposal_signing_success, 0);
             assert_eq!(stats.outbound_proposal_signing_failure, 0);
@@ -8685,6 +8931,380 @@ mod tests {
             ] {
                 assert!(body.contains(needle), "missing {} in /metrics body", needle);
             }
+        }
+
+        // =================================================================
+        // Run 420 CORRECTION: explicit `Required` fail-closed policy when the
+        // verification context is unavailable (`verification_ctx == None`).
+        // These prove the former `if let Some(ctx) = verification_ctx { .. }`
+        // fail-open bypass is corrected: under `Required` a missing context is
+        // a typed `VerificationContextUnavailable` rejection BEFORE any
+        // delivery counter, reconfig observation, engine call, vote
+        // aggregation, QC formation, or outbound action.
+        // =================================================================
+
+        /// Deliver a proposal through the real inbound path under an explicit
+        /// policy, returning the reconfig detector so tests can assert it was
+        /// not mutated.
+        fn deliver_proposal_pol(
+            engine: &mut BasicHotStuffEngine<[u8; 32]>,
+            stats: &mut BinaryConsensusLoopInboundStats,
+            ctx: Option<&TimeoutVerificationContext>,
+            proposal: &BlockProposal,
+            metrics: &Arc<NodeMetrics>,
+            policy: ConsensusVerificationPolicy,
+        ) -> BinaryReconfigDetector {
+            use qbind_wire::io::WireEncode;
+            let mut bytes = Vec::new();
+            proposal.encode(&mut bytes);
+            let mut restore_mode = RestoreCatchupModeState::from_config(None);
+            let mut detector = BinaryReconfigDetector::default();
+            handle_inbound_consensus_msg(
+                engine,
+                ConsensusNetMsg::Proposal(bytes),
+                stats,
+                None,
+                metrics,
+                ValidatorId(0),
+                &mut restore_mode,
+                ctx,
+                &mut detector,
+                None,
+                None,
+                policy,
+            );
+            detector
+        }
+
+        fn deliver_vote_pol(
+            engine: &mut BasicHotStuffEngine<[u8; 32]>,
+            stats: &mut BinaryConsensusLoopInboundStats,
+            ctx: Option<&TimeoutVerificationContext>,
+            vote: &Vote,
+            metrics: &Arc<NodeMetrics>,
+            policy: ConsensusVerificationPolicy,
+        ) {
+            use qbind_wire::io::WireEncode;
+            let mut bytes = Vec::new();
+            vote.encode(&mut bytes);
+            let mut restore_mode = RestoreCatchupModeState::from_config(None);
+            handle_inbound_consensus_msg(
+                engine,
+                ConsensusNetMsg::Vote(bytes),
+                stats,
+                None,
+                metrics,
+                ValidatorId(0),
+                &mut restore_mode,
+                ctx,
+                &mut BinaryReconfigDetector::default(),
+                None,
+                None,
+                policy,
+            );
+        }
+
+        #[test]
+        fn default_policy_is_required() {
+            assert_eq!(
+                ConsensusVerificationPolicy::default(),
+                ConsensusVerificationPolicy::Required
+            );
+            assert!(ConsensusVerificationPolicy::Required.requires_context());
+            assert!(!ConsensusVerificationPolicy::LocalFixtureUnsigned.requires_context());
+        }
+
+        // Test 1: Required + verification_ctx=None + valid Proposal -> rejected,
+        // context-unavailable +1, delivered unchanged, reconfig unchanged,
+        // engine state unchanged, no vote/outbound action.
+        #[test]
+        fn run420_required_none_inbound_proposal_rejected_fail_closed() {
+            let fixture = make_fixture(4);
+            let mut engine = make_engine(ValidatorId(0), 4);
+            let view_before = engine.current_view();
+            let committed_before = engine.committed_height();
+            let mut stats = BinaryConsensusLoopInboundStats::default();
+            let metrics = make_metrics();
+
+            // A *validly encoded and validly signed* proposal — the ONLY reason
+            // it is rejected is the absent verification context under Required.
+            let p = signed_proposal(1, &fixture);
+            let detector = deliver_proposal_pol(
+                &mut engine,
+                &mut stats,
+                None,
+                &p,
+                &metrics,
+                ConsensusVerificationPolicy::Required,
+            );
+
+            assert_eq!(stats.inbound_proposal_verification_context_unavailable_total, 1);
+            // Distinct from invalid/missing-signature taxonomy.
+            assert_eq!(stats.inbound_proposal_verify_rejected_total, 0);
+            assert_eq!(stats.inbound_proposal_verify_accepted, 0);
+            assert_eq!(stats.inbound_proposal_rejected_missing_signature, 0);
+            assert_eq!(stats.inbound_proposal_rejected_bad_signature, 0);
+            // No delivery, no engine acceptance, no outbound.
+            assert_eq!(stats.inbound_proposals_delivered, 0);
+            assert_eq!(stats.inbound_proposals_engine_accepted, 0);
+            assert_eq!(stats.outbound_votes_sent, 0);
+            assert_eq!(stats.outbound_proposals_sent, 0);
+            // Reconfig detector never observed the rejected proposal
+            // (`record_observed_proposal` is only reached after the gate).
+            assert!(detector.header_cache.is_empty());
+            // Engine state untouched.
+            assert_eq!(engine.current_view(), view_before);
+            assert_eq!(engine.committed_height(), committed_before);
+        }
+
+        // Test 2: Required + verification_ctx=None + valid Vote -> rejected,
+        // context-unavailable +1, delivered/aggregation/QC/view unchanged, no
+        // outbound.
+        #[test]
+        fn run420_required_none_inbound_vote_rejected_fail_closed() {
+            let fixture = make_fixture(4);
+            let mut engine = make_engine(ValidatorId(0), 4);
+            let view_before = engine.current_view();
+            let committed_before = engine.committed_height();
+            let mut stats = BinaryConsensusLoopInboundStats::default();
+            let metrics = make_metrics();
+
+            let v = signed_vote(1, &fixture);
+            deliver_vote_pol(
+                &mut engine,
+                &mut stats,
+                None,
+                &v,
+                &metrics,
+                ConsensusVerificationPolicy::Required,
+            );
+
+            assert_eq!(stats.inbound_vote_verification_context_unavailable_total, 1);
+            assert_eq!(stats.inbound_vote_verify_rejected_total, 0);
+            assert_eq!(stats.inbound_vote_verify_accepted, 0);
+            assert_eq!(stats.inbound_vote_rejected_missing_signature, 0);
+            assert_eq!(stats.inbound_votes_delivered, 0);
+            assert_eq!(stats.inbound_votes_engine_accepted, 0);
+            assert_eq!(stats.outbound_votes_sent, 0);
+            assert_eq!(engine.current_view(), view_before);
+            assert_eq!(engine.committed_height(), committed_before);
+        }
+
+        // Test 3: Required + context present + valid Proposal passes verification
+        // and reaches the normal downstream boundary (verify_accepted +1).
+        #[test]
+        fn run420_required_ctx_present_valid_proposal_passes() {
+            let fixture = make_fixture(4);
+            let ctx = make_ctx(&fixture, None);
+            let mut engine = make_engine(ValidatorId(0), 4);
+            let mut stats = BinaryConsensusLoopInboundStats::default();
+            let metrics = make_metrics();
+
+            let p = signed_proposal(1, &fixture);
+            deliver_proposal_pol(
+                &mut engine,
+                &mut stats,
+                Some(&ctx),
+                &p,
+                &metrics,
+                ConsensusVerificationPolicy::Required,
+            );
+
+            assert_eq!(stats.inbound_proposal_verify_accepted, 1);
+            assert_eq!(stats.inbound_proposal_verify_rejected_total, 0);
+            assert_eq!(stats.inbound_proposal_verification_context_unavailable_total, 0);
+        }
+
+        // Test 4: Required + context present + valid Vote passes verification.
+        #[test]
+        fn run420_required_ctx_present_valid_vote_passes() {
+            let fixture = make_fixture(4);
+            let ctx = make_ctx(&fixture, None);
+            let mut engine = make_engine(ValidatorId(0), 4);
+            let mut stats = BinaryConsensusLoopInboundStats::default();
+            let metrics = make_metrics();
+
+            let v = signed_vote(1, &fixture);
+            deliver_vote_pol(
+                &mut engine,
+                &mut stats,
+                Some(&ctx),
+                &v,
+                &metrics,
+                ConsensusVerificationPolicy::Required,
+            );
+
+            assert_eq!(stats.inbound_vote_verify_accepted, 1);
+            assert_eq!(stats.inbound_vote_verify_rejected_total, 0);
+            assert_eq!(stats.inbound_vote_verification_context_unavailable_total, 0);
+        }
+
+        // Test 5: Required + context present + a typed invalid case (bad
+        // signature) is still rejected before mutation, and is labeled as an
+        // invalid signature — NOT as context-unavailable.
+        #[test]
+        fn run420_required_ctx_present_invalid_signature_still_rejected() {
+            let fixture = make_fixture(4);
+            let ctx = make_ctx(&fixture, None);
+            let mut engine = make_engine(ValidatorId(0), 4);
+            let mut stats = BinaryConsensusLoopInboundStats::default();
+            let metrics = make_metrics();
+
+            let mut p = signed_proposal(1, &fixture);
+            // Corrupt the signature: valid encoding, present-but-wrong signature.
+            if let Some(b) = p.signature.first_mut() {
+                *b ^= 0xff;
+            }
+            deliver_proposal_pol(
+                &mut engine,
+                &mut stats,
+                Some(&ctx),
+                &p,
+                &metrics,
+                ConsensusVerificationPolicy::Required,
+            );
+
+            assert_eq!(stats.inbound_proposal_verify_rejected_total, 1);
+            assert_eq!(stats.inbound_proposal_verify_accepted, 0);
+            // Not mislabeled as context-unavailable.
+            assert_eq!(stats.inbound_proposal_verification_context_unavailable_total, 0);
+            assert_eq!(stats.inbound_proposals_delivered, 0);
+        }
+
+        // Outbound test: Required + verification_ctx=None -> no signed message,
+        // suppressed with a context-unavailable outbound counter.
+        #[test]
+        fn run420_required_none_outbound_proposal_suppressed() {
+            let mut stats = BinaryConsensusLoopInboundStats::default();
+            let unsigned_p = BlockProposal {
+                header: base_header(0),
+                qc: None,
+                txs: vec![],
+                signature: vec![],
+            };
+            let out = sign_proposal_for_broadcast(
+                unsigned_p,
+                None,
+                ConsensusVerificationPolicy::Required,
+                &mut stats,
+            );
+            assert!(out.is_none(), "Required+None must not emit a proposal");
+            assert_eq!(stats.outbound_proposal_verification_context_unavailable_total, 1);
+            assert_eq!(stats.outbound_proposal_signing_success, 0);
+        }
+
+        #[test]
+        fn run420_required_none_outbound_vote_suppressed() {
+            let mut stats = BinaryConsensusLoopInboundStats::default();
+            let unsigned_v = base_vote(0);
+            let out = sign_vote_for_broadcast(
+                unsigned_v,
+                None,
+                ConsensusVerificationPolicy::Required,
+                &mut stats,
+            );
+            assert!(out.is_none(), "Required+None must not emit a vote");
+            assert_eq!(stats.outbound_vote_verification_context_unavailable_total, 1);
+            assert_eq!(stats.outbound_vote_signing_success, 0);
+        }
+
+        // Outbound: Required + context present but signer=None -> suppressed
+        // (existing signing-failure semantics), no broadcast, no self-injection.
+        #[test]
+        fn run420_required_ctx_signer_none_outbound_suppressed() {
+            let fixture = make_fixture(4);
+            let ctx = make_ctx(&fixture, None); // no signer wired
+            let mut stats = BinaryConsensusLoopInboundStats::default();
+            let unsigned_p = BlockProposal {
+                header: base_header(0),
+                qc: None,
+                txs: vec![],
+                signature: vec![],
+            };
+            let out = sign_proposal_for_broadcast(
+                unsigned_p,
+                Some(&ctx),
+                ConsensusVerificationPolicy::Required,
+                &mut stats,
+            );
+            assert!(out.is_none());
+            assert_eq!(stats.outbound_proposal_signing_failure, 1);
+            assert_eq!(stats.outbound_proposal_signing_success, 0);
+        }
+
+        // Outbound: valid configured signer -> correctly signed message that
+        // verifies through the inbound verifier. No dummy/unsigned fallback.
+        #[test]
+        fn run420_required_valid_signer_signs_and_roundtrip_verifies() {
+            let fixture = make_fixture(4);
+            let ctx = make_ctx(&fixture, Some(ValidatorId(0)));
+            let mut stats = BinaryConsensusLoopInboundStats::default();
+
+            // Sign an outbound proposal for validator 0.
+            let unsigned_p = BlockProposal {
+                header: base_header(0),
+                qc: None,
+                txs: vec![],
+                signature: vec![],
+            };
+            let signed = sign_proposal_for_broadcast(
+                unsigned_p,
+                Some(&ctx),
+                ConsensusVerificationPolicy::Required,
+                &mut stats,
+            )
+            .expect("valid signer must produce a signed proposal");
+            assert!(!signed.signature.is_empty());
+            assert_eq!(stats.outbound_proposal_signing_success, 1);
+            assert_eq!(stats.outbound_proposal_signing_failure, 0);
+            assert_eq!(stats.outbound_proposal_verification_context_unavailable_total, 0);
+
+            // The signed message verifies through the SAME inbound verifier,
+            // under Required, and reaches the accepted boundary.
+            let mut engine = make_engine(ValidatorId(0), 4);
+            let mut in_stats = BinaryConsensusLoopInboundStats::default();
+            let metrics = make_metrics();
+            deliver_proposal_pol(
+                &mut engine,
+                &mut in_stats,
+                Some(&ctx),
+                &signed,
+                &metrics,
+                ConsensusVerificationPolicy::Required,
+            );
+            assert_eq!(in_stats.inbound_proposal_verify_accepted, 1);
+            assert_eq!(in_stats.inbound_proposal_verify_rejected_total, 0);
+        }
+
+        // Context-unavailable metric family renders on /metrics.
+        #[test]
+        fn run420_context_unavailable_metrics_render() {
+            let mut engine = make_engine(ValidatorId(0), 4);
+            let mut stats = BinaryConsensusLoopInboundStats::default();
+            let metrics = make_metrics();
+            let fixture = make_fixture(4);
+            let p = signed_proposal(1, &fixture);
+            deliver_proposal_pol(
+                &mut engine,
+                &mut stats,
+                None,
+                &p,
+                &metrics,
+                ConsensusVerificationPolicy::Required,
+            );
+            update_binary_view_timeout_metrics(&metrics, &stats);
+            let body = metrics.format_metrics();
+            for needle in [
+                "qbind_consensus_inbound_proposal_verification_context_unavailable_total",
+                "qbind_consensus_inbound_vote_verification_context_unavailable_total",
+                "qbind_consensus_outbound_proposal_verification_context_unavailable_total",
+                "qbind_consensus_outbound_vote_verification_context_unavailable_total",
+            ] {
+                assert!(body.contains(needle), "missing {} in /metrics body", needle);
+            }
+            assert!(body.contains(
+                "qbind_consensus_inbound_proposal_verification_context_unavailable_total 1"
+            ));
         }
     }
 }

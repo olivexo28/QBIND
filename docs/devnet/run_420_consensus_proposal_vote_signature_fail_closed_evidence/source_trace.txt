@@ -1,0 +1,105 @@
+Run 420 — source trace (exact bypass → typed policy boundary)
+=============================================================
+
+All paths are repository-relative. Line numbers reflect the corrected tree at
+the Run 420 branch tip and may shift by a few lines with later edits; the
+symbols are stable anchors.
+
+1. EXACT FORMER `None` BYPASS (removed)
+---------------------------------------
+Before Run 420, inbound Proposal and Vote verification ran only when a context
+was present; a `None` context silently fell through to delivery/engine/
+aggregation. Verbatim (from commit 1c22f7d):
+
+    // inbound Proposal
+    if let Some(ctx) = verification_ctx {
+        let t_start = std::time::Instant::now();
+        let res = verify_proposal_msg(
+            &proposal, from,
+            ctx.validators.as_ref(),
+            ctx.key_provider.as_ref(),
+            ctx.backend_registry.as_ref(),
+            ...
+        );
+        ...
+    }
+    // (falls through to delivered counters / reconfig / engine when None)
+
+    // inbound Vote
+    if let Some(ctx) = verification_ctx {
+        let res = verify_vote_msg(&vote, from, ...);
+        ...
+    }
+    // (falls through to aggregation / QC / view when None)
+
+Outbound signing had the symmetric fail-open shape: with `ctx == None` the
+sign helpers returned the message unchanged (unsigned) for broadcast.
+
+2. NEW TYPED POLICY + DEFAULT
+-----------------------------
+crates/qbind-node/src/binary_consensus_loop.rs
+  pub enum ConsensusVerificationPolicy { Required, LocalFixtureUnsigned }   (~739)
+  impl Default -> ConsensusVerificationPolicy::Required                     (~749)
+  fn requires_context(self) -> bool { matches!(self, Required) }            (~760)
+  struct field: BinaryConsensusLoopIo.verification_policy                   (~899)
+
+`Required` is the Default and the only policy any production constructor
+selects. When `verification_ctx` is `Some`, the policy has NO effect —
+verification/signing run identically regardless of policy.
+
+3. CORRECTED INBOUND GATES (fail-closed under Required+None)
+-----------------------------------------------------------
+  inbound Proposal gate: `match verification_ctx { Some(ctx) => verify..., None => { if requires_context() { count + reject } else { legacy passthrough } } }`   (~3159)
+  inbound Vote gate:     same shape                                                                                                                              (~3310)
+  requires_context() decision sites (inbound + outbound):  ~2813, ~2880, ~3201, ~3352
+
+Under `Required + None` the inbound message is dropped BEFORE:
+delivered counters, restore/deferral, reconfiguration observation
+(`BinaryReconfigDetector::record_observed_proposal`), `engine.on_proposal_event`
+/ `engine.on_vote_event`, vote aggregation, QC formation, view/lock/high-QC/
+commit mutation, and `forward_actions_to_facade`.
+
+4. CORRECTED OUTBOUND SIGNING (suppress under Required+None / signer=None)
+-------------------------------------------------------------------------
+  fn sign_proposal_for_broadcast(proposal, ctx, verification_policy, stats)   (~2796)
+  fn sign_vote_for_broadcast(vote, ctx, verification_policy, stats)           (~2868)
+    ctx == None + Required        -> increment outbound context-unavailable, return None (no broadcast, no self-injection)
+    ctx == None + Fixture         -> legacy unsigned passthrough (test-only)
+    ctx == Some, signer == None   -> outbound_proposal/vote_signing_failure, return None
+    ctx == Some(signer)           -> set suite_id, sign canonical chain-aware preimage, attach signature; signing error -> None
+
+5. PRODUCTION CONSTRUCTORS AND SELECTED POLICY
+----------------------------------------------
+  crates/qbind-node/src/main.rs:~7796
+      verification_policy: ConsensusVerificationPolicy::Required,
+  crates/qbind-node/src/binary_consensus_loop.rs:~1903 (io == None fallback)
+      None => (None, None, None, None, None, ConsensusVerificationPolicy::Required),
+  No other production constructor selects a policy; p2p_node_builder.rs never
+  references LocalFixtureUnsigned.
+  Every LocalFixtureUnsigned selection lives inside the #[cfg(test)] module
+  (binary_consensus_loop.rs mod tests) or under integration-test
+  `BinaryConsensusLoopIo` literals.
+
+6. TYPED MISSING-CONTEXT OUTCOME / METRICS
+------------------------------------------
+crates/qbind-node/src/metrics.rs prometheus series (bounded, no attacker labels):
+  qbind_consensus_inbound_proposal_verification_context_unavailable_total   (~2792)
+  qbind_consensus_inbound_vote_verification_context_unavailable_total       (~2797)
+  qbind_consensus_outbound_proposal_verification_context_unavailable_total  (~2802)
+  qbind_consensus_outbound_vote_verification_context_unavailable_total      (~2807)
+These are DISTINCT from the *_verify_rejected_total families (invalid
+signature / missing signature / unsupported suite). Missing local
+configuration is never mislabeled as InvalidSignature. Exactly one terminal
+rejection outcome is emitted per rejected message.
+
+7. VERIFICATION PRIMITIVES (unchanged)
+--------------------------------------
+crates/qbind-consensus/src/proposal_vote_verify.rs
+  verify_proposal_msg / verify_vote_msg / ProposalVoteVerifyError
+
+8. RUN 420 SOURCE-LEVEL REACHABILITY GUARD
+------------------------------------------
+crates/qbind-node/tests/run_420_production_policy_reachability_tests.rs
+  main_rs_selects_required_and_never_fixture_policy
+  p2p_node_builder_never_selects_fixture_policy
+  fixture_policy_only_selected_from_test_module

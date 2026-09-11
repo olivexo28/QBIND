@@ -1,0 +1,74 @@
+Run 420 — verification-order record
+===================================
+
+Canonical inbound ordering for a decoded P2P consensus frame in the binary
+consensus loop. Each stage strictly precedes the next; a rejection at any
+stage returns before any later stage runs (no counter, no engine call, no
+mutation, no outbound action for the rejected message).
+
+INBOUND Proposal / Vote
+-----------------------
+  (a) decode / structural validation
+  (b) Run 418 F6 authenticated-peer -> consensus-sender BINDING gate
+        - sender/claimed-validator mismatch increments the F6 binding counter
+        - on F6 reject: RETURN. The Run 420 signature gate is NEVER reached,
+          so proposal/vote verify counters do NOT increment and NO crypto is
+          attempted. (matrix rows 6, 8)
+  (c) Run 420 verification-policy gate (this run):
+        match verification_ctx {
+          Some(ctx) => verify_proposal_msg / verify_vote_msg
+                        - invalid/missing signature, wrong key, wrong/unsupported
+                          suite, unknown validator, signer/claimed mismatch
+                          -> typed rejection, RETURN (matrix rows 5,7)
+          None      => if policy.requires_context()   // Required (production)
+                          -> context-unavailable counter +1, RETURN (rows 1,2,9,10)
+                       else                            // LocalFixtureUnsigned (test-only)
+                          -> legacy unsigned passthrough
+        }
+  (d) delivered / acceptance counters
+  (e) restore-catchup deferral (Proposal)
+  (f) reconfiguration observation (BinaryReconfigDetector::record_observed_proposal)
+  (g) engine.on_proposal_event / engine.on_vote_event
+  (h) vote aggregation -> QC formation -> view/lock/high-QC/commit mutation
+  (i) outbound consensus actions (forward_actions_to_facade)
+
+Key invariants proven
+----------------------
+* F6 (stage b) precedes the Run 420 signature gate (stage c). A message that
+  fails F6 never reaches signature verification (rows 6, 8).
+* The Run 420 gate (stage c) precedes ALL of stages d-i. Under Required+None,
+  none of d-i execute for the rejected message. This is asserted directly:
+    - delivered counter unchanged
+    - detector.header_cache stays empty (stage f never ran)  [non-mutation]
+    - engine view/height/QC state unchanged (stages g,h never ran)
+    - no facade action emitted (stage i never ran)
+* Restore/deferred handling (stage e) and reconfiguration observation
+  (stage f) therefore cannot occur before required signature verification
+  (rows 9, 10).
+
+OUTBOUND Proposal / Vote
+------------------------
+  (1) engine produces an outbound action (leader tick, late-peer re-emit, or an
+      action generated in response to an inbound message)
+  (2) sign_proposal_for_broadcast / sign_vote_for_broadcast:
+        None + Required        -> suppress (return None): no broadcast, no self-injection
+        None + Fixture         -> unsigned passthrough (test-only)
+        Some, signer == None   -> signing_failure, suppress
+        Some(signer)           -> sign; signing error -> suppress
+  (3) only a Some(signed) result is enqueued to the facade / self-injected.
+      A None result is never enqueued and produces no engine-acceptance or
+      emitted-success metric.
+
+Non-mutation assertions (exact)
+-------------------------------
+For Required+None inbound Proposal (run420_required_none_inbound_proposal_rejected_fail_closed):
+  - inbound_proposal_verification_context_unavailable_total increments by 1
+  - inbound_proposals_delivered unchanged
+  - BinaryReconfigDetector.header_cache.is_empty() == true
+  - engine current view / locked / high-QC / committed height unchanged
+  - no outbound facade action recorded
+For Required+None inbound Vote (run420_required_none_inbound_vote_rejected_fail_closed):
+  - inbound_vote_verification_context_unavailable_total increments by 1
+  - inbound_votes_delivered unchanged
+  - vote aggregation tally unchanged; no QC formed; view/commit unchanged
+  - no outbound facade action recorded

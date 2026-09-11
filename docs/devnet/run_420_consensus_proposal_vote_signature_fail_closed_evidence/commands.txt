@@ -1,0 +1,49 @@
+Run 420 — representative commands
+=================================
+
+Build / check
+-------------
+cargo check -p qbind-node
+cargo build --release -p qbind-node --bin qbind-node
+
+Unit / integration tests
+------------------------
+cargo test -p qbind-consensus --lib proposal_vote_verify
+cargo test -p qbind-node --lib binary_consensus_loop
+cargo test -p qbind-node --lib run420
+cargo test -p qbind-node --lib run030
+cargo test -p qbind-node --test run_420_production_policy_reachability_tests
+cargo test -p qbind-node --test b10_engine_acceptance_qc_closure_tests
+cargo test -p qbind-node --test c4_b6_p2p_binary_path_interconnect_tests
+cargo test -p qbind-node --test run_418_newview_demux_chain_integration_tests
+cargo test -p qbind-node --test b9_late_peer_connect_proposal_reemit_tests
+cargo test -p qbind-node --test run_418_authenticated_peer_consensus_sender_binding_tests
+cargo test -p qbind-node --test b11_consensus_net_prometheus_coverage_tests
+
+Static analysis / style
+-----------------------
+cargo clippy -p qbind-node --lib
+rustfmt --edition 2021 --check crates/qbind-node/tests/run_420_production_policy_reachability_tests.rs
+git diff --check
+
+Devnet audit / lint harnesses (read-only)
+-----------------------------------------
+scripts/devnet/run_417_foundational_runtime_security_reconciliation_audit.sh
+scripts/devnet/run_404_public_devnet_package_integrity_manifest.sh
+scripts/devnet/run_405_public_devnet_full_tree_package_integrity.sh
+scripts/devnet/run_410_public_devnet_package_integrity_stale_prose_lint.sh
+scripts/devnet/run_411_public_devnet_readiness_contradiction_ledger_lint.sh
+scripts/devnet/run_412_public_devnet_readiness_status_blocker_lint.sh
+scripts/devnet/run_413_public_devnet_readiness_recommendation_gap_matrix_lint.sh
+scripts/devnet/run_414_public_devnet_readiness_cross_section_coverage_lint.sh
+scripts/devnet/run_415_public_devnet_readiness_artifact_path_reference_lint.sh
+
+Archive integrity
+-----------------
+( cd docs/devnet/run_420_consensus_proposal_vote_signature_fail_closed_evidence \
+  && sha256sum -c SHA256SUMS.txt )
+
+Secret / private-material scan
+------------------------------
+git grep -nED 'BEGIN (RSA|EC|OPENSSH|PRIVATE) KEY' -- ':!*.md' || true
+# plus the runtime secret_scanning tool over changed files

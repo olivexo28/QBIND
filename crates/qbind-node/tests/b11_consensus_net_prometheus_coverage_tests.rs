@@ -90,6 +90,7 @@ use tokio::time::timeout;
 use qbind_consensus::ids::ValidatorId;
 use qbind_consensus::network::NetworkError;
 use qbind_node::binary_consensus_loop::{
+    ConsensusVerificationPolicy,
     run_binary_consensus_loop_with_io, spawn_binary_consensus_loop_with_io,
     BinaryConsensusLoopConfig, BinaryConsensusLoopIo, BinaryConsensusLoopProgress,
     PeerConnectivitySource,
@@ -347,6 +348,7 @@ async fn b11_c_inbound_metrics_increment_on_every_inbound_frame() {
         peer_connectivity: None,
         verification_ctx: None,
         binding_gate: None,
+        verification_policy: ConsensusVerificationPolicy::LocalFixtureUnsigned,
     };
 
     let (_shutdown_tx, shutdown_rx) = watch::channel(());
@@ -468,6 +470,7 @@ async fn b11_d_b9_late_peer_reemit_does_not_double_count() {
         peer_connectivity: Some(conn_v0_dyn),
         verification_ctx: None,
         binding_gate: None,
+        verification_policy: ConsensusVerificationPolicy::LocalFixtureUnsigned,
     };
 
     let (_shutdown_tx, shutdown_rx) = watch::channel(());

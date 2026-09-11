@@ -52,6 +52,7 @@ use tokio::time::timeout;
 use qbind_consensus::ids::ValidatorId;
 use qbind_consensus::network::NetworkError;
 use qbind_node::binary_consensus_loop::{
+    ConsensusVerificationPolicy,
     run_binary_consensus_loop_with_io, spawn_binary_consensus_loop_with_io,
     BinaryConsensusLoopConfig, BinaryConsensusLoopIo, BinaryConsensusLoopProgress,
 };
@@ -284,6 +285,7 @@ async fn b6_inbound_proposal_reaches_engine_and_emits_vote() {
         peer_connectivity: None,
         verification_ctx: None,
         binding_gate: None,
+        verification_policy: ConsensusVerificationPolicy::LocalFixtureUnsigned,
     };
 
     // Pre-feed the inbound channel before the loop starts so the very first
@@ -412,6 +414,7 @@ async fn b6_two_engine_cross_wired_binary_path_progression() {
         peer_connectivity: None,
         verification_ctx: None,
         binding_gate: None,
+        verification_policy: ConsensusVerificationPolicy::LocalFixtureUnsigned,
     };
     let io_b = BinaryConsensusLoopIo {
         inbound_rx: inbound_b_rx,
@@ -419,6 +422,7 @@ async fn b6_two_engine_cross_wired_binary_path_progression() {
         peer_connectivity: None,
         verification_ctx: None,
         binding_gate: None,
+        verification_policy: ConsensusVerificationPolicy::LocalFixtureUnsigned,
     };
 
     let (_shutdown_tx_a, shutdown_rx_a) = watch::channel(());
@@ -559,6 +563,7 @@ async fn b6_loop_survives_inbound_close() {
         peer_connectivity: None,
         verification_ctx: None,
         binding_gate: None,
+        verification_policy: ConsensusVerificationPolicy::LocalFixtureUnsigned,
     };
 
     let final_progress = timeout(
@@ -612,6 +617,7 @@ async fn b6_inbound_non_leader_proposal_does_not_silently_drop() {
         peer_connectivity: None,
         verification_ctx: None,
         binding_gate: None,
+        verification_policy: ConsensusVerificationPolicy::LocalFixtureUnsigned,
     };
 
     // Proposal from a non-leader (validator 1).

@@ -647,7 +647,8 @@ pub struct RuntimeFixture {
 mod tests {
     use super::*;
     use crate::binary_consensus_loop::{
-        deliver_inbound_for_run035, BinaryConsensusLoopInboundStats, TimeoutVerificationContext,
+        deliver_inbound_for_run035, BinaryConsensusLoopInboundStats, ConsensusVerificationPolicy,
+        TimeoutVerificationContext,
     };
     use crate::metrics::NodeMetrics;
     use qbind_consensus::basic_hotstuff_engine::BasicHotStuffEngine;
@@ -769,6 +770,7 @@ mod tests {
             &metrics,
             ValidatorId(0),
             Some(&ctx),
+            ConsensusVerificationPolicy::LocalFixtureUnsigned,
         );
         (stats, view_before, engine.current_view())
     }
@@ -1056,6 +1058,7 @@ mod tests {
             &metrics,
             ValidatorId(0),
             Some(&ctx),
+            ConsensusVerificationPolicy::LocalFixtureUnsigned,
         );
         assert_eq!(stats.inbound_timeout_rejected_bad_signature, 1);
         assert_eq!(stats.inbound_timeout_engine_accepted, 0);
@@ -1077,6 +1080,7 @@ mod tests {
             &metrics,
             ValidatorId(0),
             Some(&ctx),
+            ConsensusVerificationPolicy::LocalFixtureUnsigned,
         );
         assert_eq!(stats.inbound_timeout_verify_accepted, 1);
         assert_eq!(stats.inbound_timeout_engine_accepted, 1);
@@ -1122,6 +1126,7 @@ mod tests {
             &metrics,
             ValidatorId(0),
             Some(&ctx),
+            ConsensusVerificationPolicy::LocalFixtureUnsigned,
         );
         assert_eq!(stats.inbound_timeout_rejected_bad_signature, 1);
         assert_eq!(stats.inbound_timeout_engine_accepted, 0);
