@@ -1,5 +1,16 @@
 RUN 422 — CONFIGURATION / ACTIVATION MATRIX
 
+*** CORRECTIVE CONTINUATION NOTE ***
+Added rows/behavior this continuation:
+  - LocalMesh + flag set                -> REJECT non-zero (precise diagnostic);
+  - P2P + genesis validators == peers+1 -> proceed to signer match;
+  - P2P + genesis validators != peers+1 -> REJECT (MembershipCountMismatch);
+  - P2P + reread genesis identity != boot-accepted -> REJECT
+    (IdentityChangedSinceBoot);
+  - P2P + wrong --expect-genesis-hash    -> REJECT (GenesisRevalidationFailed).
+Consensus membership is defined by GenesisConfig.validators, never by the
+connected-peer count; a disagreement is rejected, not silently resized.
+
 Flag: --consensus-authority-from-genesis (default: OFF)
 Local signer: --signer-keystore-path (existing)
 External genesis: --genesis-path (existing, boot-verified by Run 102)

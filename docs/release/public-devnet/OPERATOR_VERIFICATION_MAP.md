@@ -92,7 +92,15 @@ decision is **NO-GO / NOT launch-ready** (`LAUNCH_GO_NO_GO.md`).
    `RESULT=POSITIVE-FOR-DEVNET-CONSENSUS-AUTHORITY-ACTIVATION-CODE-TEST`,
    `CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED` (release-binary
    adversarial evidence is Run 423); source/test activation only and **RS1 stays
-   OPEN / launch-blocking**.
+   OPEN / launch-blocking**. **Run 422 CORRECTIVE CONTINUATION (supersedes the
+   above):** source review rejected the initial POSITIVE; corrective verdict
+   `RESULT=PARTIAL-FOR-DEVNET-CONSENSUS-AUTHORITY-ACTIVATION-CODE-TEST` /
+   `PRODUCTION_ACTIVATION=UNAVAILABLE-FOR-UNRESOLVED-BOUNDARIES`. Fixed +
+   behaviorally tested: single-snapshot genesis provenance, engine/verifier
+   membership consistency, and LocalMesh flag reject. UNRESOLVED blockers:
+   startup ordering, shared-context separation, signed-domain replay isolation,
+   genesis-static lifetime. **F3/F4/F8 are PARTIAL; RS1/C4/C5 stay OPEN.** Run
+   423 not started.
 9. `docs/whitepaper/contradiction.md` — contradiction ledger.
 10. `docs/release/public-devnet/BLOCKER_REGISTER.md` — open blockers (incl. **RS1**).
 

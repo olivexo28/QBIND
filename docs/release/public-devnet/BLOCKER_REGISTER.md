@@ -82,7 +82,18 @@ constructor `main` uses), closing the Runs 031–033 uncommitted-CLI-override ga
 This is **source/test activation only**
 (`CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED`; adversarial
 release-binary evidence is Run 423) and **RS1 stays OPEN / launch-blocking**. See
-`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422.md`.
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422.md`. **Run 422 CORRECTIVE
+CONTINUATION (supersedes the above):** source review rejected the initial
+POSITIVE; corrective verdict
+`RESULT=PARTIAL-FOR-DEVNET-CONSENSUS-AUTHORITY-ACTIVATION-CODE-TEST` /
+`PRODUCTION_ACTIVATION=UNAVAILABLE-FOR-UNRESOLVED-BOUNDARIES`. Fixed +
+behaviorally tested: single-snapshot genesis provenance, engine/verifier
+membership consistency (peer-count mismatch rejected, no silent resize), and
+LocalMesh flag reject. UNRESOLVED blockers (activation kept fail-closed):
+startup ordering vs `P2pNodeBuilder::build`, Proposal/Vote-vs-Timeout/NewView
+shared-context separation, signed-domain replay isolation, genesis-static
+lifetime. **F3/F4/F8 are PARTIAL, not code/test-positive; RS1/C4/C5 stay OPEN.**
+Run 423 not started.
 
 ## TestNet / MainNet
 

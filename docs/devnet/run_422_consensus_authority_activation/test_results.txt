@@ -1,5 +1,37 @@
 RUN 422 — TEST RESULTS (names + counts, no double-counting)
 
+*** CORRECTIVE CONTINUATION RESULTS (this environment) ***
+cargo test -p qbind-node --test run_422_genesis_consensus_authority_tests
+  => ok. 15 passed; 0 failed. New/updated behavioral + guard tests:
+     - shared_activation_valid_genesis_matching_count_succeeds
+     - shared_activation_membership_count_mismatch_rejects
+     - shared_activation_replaced_input_rejected
+     - shared_activation_matching_boot_identity_succeeds
+     - shared_activation_out_of_range_local_id_rejects
+     - shared_activation_expected_hash_mismatch_rejects
+     - shared_activation_malformed_genesis_file_rejects
+     - main_rs_rejects_genesis_activation_under_local_mesh
+     - main_rs_uses_shared_single_snapshot_activation
+     - (retained) genesis_authority_plus_matching_signer_activates,
+       signer_genesis_key_correspondence_is_detectable,
+       signer_validator_id_mismatch_is_disabled, malformed_committed_key_rejected,
+       main_rs_wires_genesis_authority_into_validated_constructor (updated to
+       assert the shared boundary), cli_exposes_consensus_authority_from_genesis_flag
+cargo test -p qbind-node --lib genesis_consensus_authority
+  => ok. 14 passed; 0 failed (1442 filtered out).
+cargo test -p qbind-node --test run_420_production_policy_reachability_tests
+  => ok. 3 passed; 0 failed.
+cargo test -p qbind-node --test run_418_authenticated_peer_consensus_sender_binding_tests
+  => ok. 18 passed; 0 failed.
+cargo test -p qbind-node --test run_418_newview_demux_chain_integration_tests
+  => ok. 3 passed; 0 failed.
+NOTE: main_rs source-guard tests are reachability guards, NOT behavioral proof
+of startup ordering (D4 remains unresolved). Behavioral proof of the corrected
+boundaries is via the shared_activation_* tests, which drive the real production
+function load_verify_and_build_genesis_authority.
+
+--- INITIAL (HISTORICAL) TEST RESULTS ---
+
 Tested implementation SHA: a62624acc1ca6be7656e8219e0235f8cc3f44e22
 
 ============================================================================

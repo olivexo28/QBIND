@@ -1,5 +1,18 @@
 RUN 422 — VERIFICATION-CONTEXT CONSTRUCTION TRACE (main -> validated ctx)
 
+*** CORRECTIVE CONTINUATION NOTE ***
+UNRESOLVED / WITHDRAWN claim: "invalid activation always fails before P2P
+startup." The authority/signer/membership validation still runs AFTER
+builder.build(...) (which constructs the transport) and after the engine
+num_validators config is assembled. Inbound consensus frames are buffered on the
+bounded ChannelConsensusHandler channel and only drained by the consensus loop
+spawned after the verification context is enforced, but a full reorder placing
+ALL authority validation before transport construction is NOT performed here.
+The single-snapshot provenance and membership-count reject ARE now enforced by
+the shared load_verify_and_build_genesis_authority boundary before the context
+is built. Signed-domain round-trip is NOT demonstrated (D6, see
+adversarial_matrix.txt).
+
 The critical Run 422 requirement: `main` must invoke the SAME validated
 constructor the tests exercise, and obtain `Some(ctx)` only from fully validated
 genesis-bound material. This trace shows the exact call path.

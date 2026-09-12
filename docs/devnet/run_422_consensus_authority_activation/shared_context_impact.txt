@@ -1,5 +1,15 @@
 RUN 422 — SHARED CONTEXT IMPACT (Timeout / NewView consumers)
 
+*** CORRECTIVE CONTINUATION NOTE (UNRESOLVED — D5) ***
+WITHDRAWN claim: "flag absence universally implies None" and "shared-context
+activation has no additional message-family effect." The legacy CLI-key path can
+still construct the shared context with the flag off, and the shared context
+spans Proposal/Vote, Timeout, NewView, and TC handling. This continuation does
+NOT introduce a separate Proposal/Vote canonical-authority activation boundary;
+immutable crypto components remain shared. Proposal/Vote canonical-authority
+separation from Timeout/NewView policy is UNRESOLVED and reported as a blocker.
+Existing Timeout/NewView verification is unchanged and NOT weakened.
+
 Task §5 requires enumerating the shared consumers affected when
 `verification_ctx` becomes `Some`, and proving prior checks are NOT weakened and
 no undocumented out-of-scope activation occurs.

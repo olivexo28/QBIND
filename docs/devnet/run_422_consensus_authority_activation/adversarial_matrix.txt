@@ -1,5 +1,27 @@
 RUN 422 — ADVERSARIAL / NEGATIVE MATRIX
 
+*** CORRECTIVE CONTINUATION NOTE ***
+NEW behaviorally-tested cases (shared load_verify_and_build_genesis_authority):
+  - replaced genesis input after boot -> IdentityChangedSinceBoot reject
+    (shared_activation_replaced_input_rejected);
+  - engine/verifier membership-count mismatch -> MembershipCountMismatch reject
+    (shared_activation_membership_count_mismatch_rejects);
+  - wrong pinned --expect-genesis-hash -> GenesisRevalidationFailed reject
+    (shared_activation_expected_hash_mismatch_rejects);
+  - out-of-range local validator id -> Authority(LocalValidatorOutOfRange)
+    (shared_activation_out_of_range_local_id_rejects);
+  - malformed genesis file -> GenesisReloadFailed reject
+    (shared_activation_malformed_genesis_file_rejects);
+  - --consensus-authority-from-genesis under LocalMesh -> startup reject
+    (main_rs_rejects_genesis_activation_under_local_mesh).
+WITHDRAWN claim: "digest sensitivity proves wrong-genesis signature rejection."
+Signed-domain replay isolation (wrong chain identity, different accepted genesis
+with overlapping/identical validator keys, altered signed content) is NOT
+demonstrated with the real backend here. This is UNRESOLVED (D6): the accepted
+signed format may permit replay across accepted identities and closing it
+requires a versioned protocol change out of this task's scope. Changing a
+commitment digest is NOT evidence that an old signature is rejected.
+
 Each case lists the attack and WHERE it is enforced (module builder, main.rs
 wiring, or the reused Run 420 verifier/bridge). "unit" = tested in
 genesis_consensus_authority.rs #[cfg(test)]; "integ" = run_422 integration test;
