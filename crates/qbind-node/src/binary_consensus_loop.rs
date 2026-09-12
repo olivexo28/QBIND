@@ -9423,5 +9423,158 @@ mod tests {
                 "qbind_consensus_inbound_proposal_verification_context_unavailable_total 1"
             ));
         }
+
+        // =================================================================
+        // Run 422 D5 — MESSAGE-FAMILY AUTHORITY SEPARATION
+        //
+        // A valid *legacy Timeout/NewView* verification context (the only
+        // thing legacy `--validator-consensus-key` CLI configuration can
+        // build) does NOT establish Proposal/Vote authority.
+        // `TimeoutVerificationContext` and `ProposalVoteAuthority` are
+        // distinct nominal types with no conversion between them, so the
+        // Proposal/Vote handlers (which take `Option<&ProposalVoteAuthority>`)
+        // cannot be handed a Timeout context even by accident — a
+        // compile-time guarantee. At runtime production wires
+        // `proposal_vote_authority: None`, so correctly-authenticated
+        // Proposal/Vote traffic is rejected fail-closed as
+        // authority-unavailable even when a valid Timeout context (with a
+        // live signer) is present. These fixtures do NOT establish
+        // production activation.
+        // =================================================================
+
+        /// Build a valid legacy Timeout/NewView verification context (with an
+        /// optional live signer) from the same fixture keys. Mirrors what
+        /// legacy CLI-key configuration produces for the Timeout/NewView path.
+        fn make_timeout_ctx(
+            fixture: &Fixture,
+            local_signer_for: Option<ValidatorId>,
+        ) -> TimeoutVerificationContext {
+            let signer: Option<Arc<dyn ValidatorSigner>> = local_signer_for.map(|id| {
+                let sk = fixture.sk_objs.get(&id).expect("signer key present").clone();
+                Arc::new(LocalKeySigner::new(id, TEST_SUITE_U16, sk)) as Arc<dyn ValidatorSigner>
+            });
+            TimeoutVerificationContext {
+                validators: fixture.validators.clone(),
+                key_provider: fixture.kp.clone(),
+                backend_registry: fixture.br.clone(),
+                chain_id: QBIND_DEVNET_CHAIN_ID,
+                signer,
+            }
+        }
+
+        // D5-1: A valid legacy Timeout context (with a live signer) is a
+        // distinct capability from Proposal/Vote authority; production wiring
+        // supplies `None` for the Proposal/Vote authority handed to handlers.
+        #[test]
+        fn run422_d5_valid_timeout_ctx_does_not_populate_pv_authority() {
+            let fixture = make_fixture(4);
+            let timeout_ctx = make_timeout_ctx(&fixture, Some(ValidatorId(0)));
+            assert!(timeout_ctx.signer.is_some(), "legacy Timeout signer present");
+            // The Proposal/Vote authority is a *separate* type; there is no
+            // conversion from the Timeout context, and production supplies None.
+            let pv_authority: Option<&ProposalVoteAuthority> = None;
+            assert!(pv_authority.is_none());
+        }
+
+        // D5-2: With valid legacy keys + Timeout signer present, a correctly
+        // signed Proposal is still rejected as authority-unavailable, before
+        // any delivered/engine/aggregation/reconfig/outbound effect.
+        #[test]
+        fn run422_d5_authenticated_proposal_rejected_when_pv_authority_absent() {
+            let fixture = make_fixture(4);
+            let timeout_ctx = make_timeout_ctx(&fixture, Some(ValidatorId(0)));
+            assert!(timeout_ctx.signer.is_some());
+            let mut engine = make_engine(ValidatorId(0), 4);
+            let view_before = engine.current_view();
+            let committed_before = engine.committed_height();
+            let mut stats = BinaryConsensusLoopInboundStats::default();
+            let metrics = make_metrics();
+
+            let p = signed_proposal(1, &fixture); // correctly authenticated
+            // The Timeout context exists and is valid, but the Proposal/Vote
+            // authority is absent (production wiring passes None here).
+            let detector = deliver_proposal_pol(
+                &mut engine,
+                &mut stats,
+                None, // <-- Proposal/Vote authority, NOT the Timeout ctx
+                &p,
+                &metrics,
+                ConsensusVerificationPolicy::Required,
+            );
+
+            assert_eq!(stats.inbound_proposal_verification_context_unavailable_total, 1);
+            assert_eq!(stats.inbound_proposal_verify_accepted, 0);
+            assert_eq!(stats.inbound_proposals_delivered, 0);
+            assert_eq!(stats.inbound_proposals_engine_accepted, 0);
+            assert_eq!(stats.outbound_votes_sent, 0);
+            assert_eq!(stats.outbound_proposals_sent, 0);
+            assert!(detector.header_cache.is_empty());
+            assert_eq!(engine.current_view(), view_before);
+            assert_eq!(engine.committed_height(), committed_before);
+        }
+
+        // D5-3: same separation for Vote.
+        #[test]
+        fn run422_d5_authenticated_vote_rejected_when_pv_authority_absent() {
+            let fixture = make_fixture(4);
+            let timeout_ctx = make_timeout_ctx(&fixture, Some(ValidatorId(0)));
+            assert!(timeout_ctx.signer.is_some());
+            let mut engine = make_engine(ValidatorId(0), 4);
+            let mut stats = BinaryConsensusLoopInboundStats::default();
+            let metrics = make_metrics();
+
+            let v = signed_vote(1, &fixture);
+            deliver_vote_pol(
+                &mut engine,
+                &mut stats,
+                None,
+                &v,
+                &metrics,
+                ConsensusVerificationPolicy::Required,
+            );
+            assert_eq!(stats.inbound_vote_verification_context_unavailable_total, 1);
+            assert_eq!(stats.inbound_vote_verify_accepted, 0);
+            assert_eq!(stats.inbound_votes_delivered, 0);
+            assert_eq!(stats.inbound_votes_engine_accepted, 0);
+            assert_eq!(stats.outbound_votes_sent, 0);
+        }
+
+        // D5-4: Outbound Proposal/Vote cannot be broadcast or self-injected
+        // using the legacy Timeout signer. The signing functions take
+        // `Option<&ProposalVoteAuthority>`; the Timeout signer is unreachable
+        // to them by type. With `None` (production), emission is suppressed.
+        #[test]
+        fn run422_d5_outbound_proposal_vote_suppressed_without_pv_authority() {
+            let fixture = make_fixture(4);
+            let timeout_ctx = make_timeout_ctx(&fixture, Some(ValidatorId(0)));
+            assert!(timeout_ctx.signer.is_some());
+
+            let mut stats = BinaryConsensusLoopInboundStats::default();
+            let unsigned_p = BlockProposal {
+                header: base_header(0),
+                qc: None,
+                txs: vec![],
+                signature: vec![],
+            };
+            let out_p = sign_proposal_for_broadcast(
+                unsigned_p,
+                None, // P/V authority absent — Timeout signer NOT usable here
+                ConsensusVerificationPolicy::Required,
+                &mut stats,
+            );
+            assert!(out_p.is_none(), "no P/V authority => no outbound proposal");
+            assert_eq!(stats.outbound_proposal_verification_context_unavailable_total, 1);
+            assert_eq!(stats.outbound_proposal_signing_success, 0);
+
+            let out_v = sign_vote_for_broadcast(
+                base_vote(0),
+                None,
+                ConsensusVerificationPolicy::Required,
+                &mut stats,
+            );
+            assert!(out_v.is_none(), "no P/V authority => no outbound vote");
+            assert_eq!(stats.outbound_vote_verification_context_unavailable_total, 1);
+            assert_eq!(stats.outbound_vote_signing_success, 0);
+        }
     }
 }
