@@ -1,0 +1,70 @@
+RUN 422 — TEST RESULTS (names + counts, no double-counting)
+
+Tested implementation SHA: a62624acc1ca6be7656e8219e0235f8cc3f44e22
+
+============================================================================
+UNIT TESTS (crates/qbind-node/src/genesis_consensus_authority.rs)  14/14 PASS
+============================================================================
+  builds_from_valid_genesis_and_maps_index_to_id
+  empty_validator_set_rejected
+  too_many_validators_rejected
+  malformed_key_rejected
+  wrong_length_key_rejected
+  duplicate_signing_key_rejected
+  duplicate_address_rejected
+  local_out_of_range_rejected
+  commitment_is_deterministic
+  commitment_changes_with_chain_id
+  commitment_changes_with_genesis_hash
+  commitment_changes_with_a_validator_key
+  commitment_changes_with_membership_count
+  bundle_and_transport_roots_are_never_consensus_keys
+
+============================================================================
+INTEGRATION TESTS (tests/run_422_genesis_consensus_authority_tests.rs)  6/6 PASS
+============================================================================
+  genesis_authority_plus_matching_signer_activates
+      - builds authority from 3 real ML-DSA-44 genesis validators, feeds the
+        SAME try_build_timeout_verification_context main uses, asserts
+        outcome.as_option()==Some, ctx.validators.len()==3, provider resolves
+        validator 0 to a 1312-byte suite-100 key.
+  signer_genesis_key_correspondence_is_detectable
+      - genesis-committed key for the local validator equals the signer's
+        derived key on the matching path; differs on the mismatched path.
+  signer_validator_id_mismatch_is_disabled
+      - signer.validator_id != local => DISABLED (not active) outcome.
+  malformed_committed_key_rejected
+      - non-hex / wrong-length committed key => builder Err (no context).
+  cli_exposes_consensus_authority_from_genesis_flag  (source guard)
+      - cli.rs declares --consensus-authority-from-genesis /
+        consensus_authority_from_genesis: bool.
+  main_rs_wires_genesis_authority_into_validated_constructor  (source guard)
+      - main.rs contains the genesis-authority branch that calls
+        try_build_timeout_verification_context (not a fixture/None shortcut) and
+        the fail-closed signer<->genesis key equality check.
+
+============================================================================
+REGRESSIONS  24/24 PASS (no overlap with the above)
+============================================================================
+  run_420_production_policy_reachability_tests            3/3 PASS
+    main_rs_selects_required_and_never_fixture_policy
+    p2p_node_builder_never_selects_fixture_policy
+    fixture_policy_only_selected_from_test_module
+  run_418_authenticated_peer_consensus_sender_binding_tests  18/18 PASS
+  run_418_newview_demux_chain_integration_tests            3/3 PASS
+
+============================================================================
+RELEASE-BINARY EVIDENCE-PRESERVATION HARNESSES (verdicts retained)
+============================================================================
+  run_421 unavailable-authority harness  => exit 0,
+    PARTIAL-POSITIVE-FOR-F3-F4-F8-UNAVAILABLE-AUTHORITY-FAIL-CLOSED (retained)
+  run_419 F6 binding harness             => exit 0,
+    PARTIAL-FOR-F6-STANDALONE-RELEASE-BINARY-EVIDENCE (retained)
+
+============================================================================
+COUNT SUMMARY (distinct filters, no double-count)
+============================================================================
+  Run 422 NEW tests:            14 unit + 6 integration = 20 PASS
+  Run 418/420 regressions:      24 PASS
+  Release-binary harnesses:     2 harnesses, verdicts retained (exit 0)
+  FAILURES: 0    SKIPPED (workspace-wide): see commands.txt limits

@@ -1,0 +1,93 @@
+RUN 422 — SOURCE TRACE
+
+Baseline: main @ 5c2f9381 (full: 5c2f93816a3ff67cec11605878bfb6705d637a47)
+Task branch: copilot/run-422-task-update
+  c2be13d  update (adds task/RUN_422_TASK.txt atop 5c2f938)
+Tested implementation SHA: a62624acc1ca6be7656e8219e0235f8cc3f44e22
+  (final documentation SHA recorded in the final report, not embedded here to
+   avoid self-referential provenance.)
+
+============================================================================
+THE GAP (pre-Run-422)
+============================================================================
+
+Runs 031–033 activated a consensus verification/signing context on the
+standalone binary, but sourced the validator consensus keys from the
+UNCOMMITTED CLI surface:
+
+  crates/qbind-node/src/main.rs
+    build_validator_set_and_key_provider(config, local_validator_id, ...)
+      -> reads config.network.static_peer_consensus_keys
+         (populated ONLY by `--validator-consensus-key VID:SUITE:HEXPK`)
+  crates/qbind-node/src/peer_key_provider.rs
+    LoadedValidatorKeyProvider / build from static_peer_consensus_keys
+
+Problem: an uncommitted local override cannot define network authority. Two
+operators can each pass a different `--validator-consensus-key` set and both
+"activate" against unrelated key material, with no cryptographic tie to the
+network they claim to join. (Recorded in repo memory as the "abuse/DoS wiring"
+and Run 031–033 context.)
+
+Meanwhile, the canonical authority ALREADY EXISTS in genesis and is ALREADY
+boot-verified but was never wired into the runtime key provider:
+
+  crates/qbind-ledger/src/genesis.rs
+    GenesisValidator.pqc_public_key   (ML-DSA-44, "the validator's signing key
+                                        for consensus operations")
+    GenesisConfig.validators : Vec<GenesisValidator>
+    compute_canonical_genesis_hash(...)
+  crates/qbind-node/src/pqc_boot_genesis.rs
+    run_boot_time_genesis_verification(...)  (loads external genesis, computes
+      canonical hash, enforces --expect-genesis-hash pin)
+  crates/qbind-node/src/pqc_authority_state.rs
+    data-dir authority marker pins the accepted genesis/network identity.
+
+So the genesis-committed per-validator consensus key was verified at boot and
+pinned to the data dir, yet the runtime consensus key provider ignored it.
+
+============================================================================
+THE FIX (Run 422, Route A)
+============================================================================
+
+New module crates/qbind-node/src/genesis_consensus_authority.rs:
+  build_genesis_consensus_authority(&GenesisConfig, &GenesisHash, ValidatorId)
+    -> GenesisConsensusAuthority { validators: ConsensusValidatorSet,
+                                   key_provider: Arc<dyn
+                                     SuiteAwareValidatorKeyProvider>,
+                                   genesis_hash, chain_id, commitment:[u8;32],
+                                   validator_count, fingerprints }
+  * maps genesis validator vec index i -> ValidatorId::new(i);
+  * decodes each pqc_public_key with the strict hex decoder reused from
+    peer_key_provider::decode_strict_hex_pk;
+  * enforces suite == SUPPORTED_TIMEOUT_SUITE_ID (ConsensusSigSuiteId(100),
+    ML-DSA-44) and key length == ML_DSA_44_PUBLIC_KEY_SIZE (1312);
+  * rejects empty set, count > MAX_GENESIS_CONSENSUS_VALIDATORS (4096),
+    malformed/oversized/short keys, duplicate keys, duplicate addresses,
+    local-validator index out of range, ConsensusValidatorSet::new failure;
+  * computes a domain-tagged commitment:
+    sha3_256_tagged("qbind.run422.genesis-consensus-authority.v1", body)
+    where body length-prefixes chain_id, appends genesis_hash (32B), the
+    validator count, then per-validator (index, suite, pk_len, pk).
+  * reads ONLY GenesisConfig.validators[].pqc_public_key — never transport
+    roots or bundle-signing roots (authority separation).
+
+Wiring, crates/qbind-node/src/main.rs (Run 422 block ~L7585-7708, bridge
+branch ~L7800-7853): behind `--consensus-authority-from-genesis`, resolves the
+authority fail-closed (external genesis required, re-load, re-hash, build,
+signer required, signer<->genesis key match), then feeds the SAME
+try_build_timeout_verification_context that the CLI path uses. The CLI
+`--validator-consensus-key` override path is bypassed on the genesis path.
+
+CLI, crates/qbind-node/src/cli.rs (~L250): adds
+`pub consensus_authority_from_genesis: bool` / `--consensus-authority-from-
+genesis` (long flag only; no private-key argument added).
+
+lib.rs: `pub mod genesis_consensus_authority;`
+
+Changed-file diff stat (crates/, baseline..a62624ac):
+  cli.rs                            |  24 +
+  genesis_consensus_authority.rs    | 666 +++ (new)
+  lib.rs                            |   4 +
+  main.rs                           | 181 ++-
+  tests/run_422_..._tests.rs        | 229 +++ (new)
+  5 files changed, 1096 insertions(+), 8 deletions(-)

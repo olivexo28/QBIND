@@ -1,0 +1,11 @@
+# Run 422 evidence archive — never commit private/generated material.
+# Consensus signing keys, keystores, and any operator custody material are
+# generated fresh during tests and must never be committed here.
+*.key
+*.sk
+*-secret*
+*keystore*
+*.pem
+*.log
+tmp/
+workdir/

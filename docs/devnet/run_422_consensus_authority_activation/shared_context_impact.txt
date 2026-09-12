@@ -1,0 +1,74 @@
+RUN 422 — SHARED CONTEXT IMPACT (Timeout / NewView consumers)
+
+Task §5 requires enumerating the shared consumers affected when
+`verification_ctx` becomes `Some`, and proving prior checks are NOT weakened and
+no undocumented out-of-scope activation occurs.
+
+============================================================================
+THE SHARED OBJECT
+============================================================================
+
+Run 422 threads exactly ONE `Arc<TimeoutVerificationContext>` into the
+BinaryConsensusLoopIo, via the SAME field
+(`BinaryConsensusLoopIo.verification_ctx`) and the SAME constructor
+(`try_build_timeout_verification_context`) already used by the Run 031–033 CLI
+path. Route A changes only the SOURCE of the membership/keys (genesis instead of
+uncommitted CLI), not the shape of the context or its consumers.
+
+Reference: crates/qbind-node/src/binary_consensus_loop.rs
+  L868  pub verification_ctx: Option<Arc<TimeoutVerificationContext>>,
+  L831-846  doc: the context (a) verifies inbound TimeoutMsg via
+            verify_timeout_msg, (b) verifies inbound NewView
+            (TimeoutCertificate) via verify_timeout_certificate_with_evidence,
+            (c) signs locally-emitted TimeoutMsgs, (d) attaches signatures to
+            locally-formed TimeoutCertificate.signed_timeouts.
+
+============================================================================
+CONSUMERS AFFECTED WHEN verification_ctx BECOMES Some
+============================================================================
+
+When Run 422 supplies a Some context (valid genesis-bound DevNet activation),
+the following consumers gain cryptographic verification/signing — IDENTICALLY to
+the pre-existing CLI activation path:
+
+  1. Inbound Proposal   -> signature + suite + F6 sender-binding verification
+  2. Inbound Vote       -> signature + suite + F6 sender-binding verification
+  3. Inbound TimeoutMsg -> verify_timeout_msg (view/block-id/sender binding)
+  4. Inbound NewView / TimeoutCertificate ->
+       verify_timeout_certificate_with_evidence (per-signed-timeout membership +
+       signature checks)
+  5. Outbound TimeoutMsg -> signed by the configured local signer before emit
+  6. Locally-formed TimeoutCertificate -> signed_timeouts attached
+
+This is the DOCUMENTED, intended scope of the shared context. It is NOT a new or
+out-of-scope activation: the same widening already occurred whenever the Run
+031–033 CLI path produced a Some context. Run 422 only re-sources the authority.
+
+============================================================================
+PRIOR CHECKS ARE NOT WEAKENED
+============================================================================
+
+* Policy selection unchanged: ConsensusVerificationPolicy::Required remains the
+  production default; a None context under Required still fails closed
+  (verified: run_420_production_policy_reachability_tests — main.rs selects
+  Required and never the fixture policy; 3/3 pass this session).
+* F6 sender-binding unchanged: Run 418 harness (18 unit + 3 demux) pass; the
+  Run 419 F6 release-binary harness re-run this session retained its original
+  expectations (s2-impersonation claimed_sender_mismatch=5 rejected).
+* Unavailable-authority default unchanged: Run 421 release-binary harness re-run
+  this session (out-of-tree) retained PARTIAL-POSITIVE (s1 baseline None +
+  Required; s4-mismatch rejected). Zero drift to historical archives.
+* Suite policy unchanged: only ConsensusSigSuiteId(100)/ML-DSA-44 is registered;
+  any other suite reaching the bridge fails closed there.
+
+============================================================================
+NO UNDOCUMENTED OUT-OF-SCOPE ACTIVATION
+============================================================================
+
+* Absent `--consensus-authority-from-genesis`, behavior is byte-identical to
+  Run 421 (None + Required). The genesis path is strictly opt-in and fail-closed.
+* The genesis path does NOT touch governance, trust-bundle, transport-root, QC,
+  pacemaker, leader, snapshot, or fast-sync logic. It only supplies consensus
+  membership + one authorized (suite, key) per validator + a matching signer.
+* Voting-power/quorum weights are unchanged (power=1 per validator, matching the
+  pre-existing peer_key_provider); Run 422 does not rebind quorum semantics.

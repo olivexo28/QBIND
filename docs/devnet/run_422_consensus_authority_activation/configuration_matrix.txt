@@ -1,0 +1,58 @@
+RUN 422 — CONFIGURATION / ACTIVATION MATRIX
+
+Flag: --consensus-authority-from-genesis (default: OFF)
+Local signer: --signer-keystore-path (existing)
+External genesis: --genesis-path (existing, boot-verified by Run 102)
+
+Legend:
+  ACTIVE  = immutable validated context built via
+            try_build_timeout_verification_context => Some(ctx)
+  NONE    = verification_ctx == None + ConsensusVerificationPolicy::Required
+            (Run 421 unavailable-authority fail-closed default)
+  EXIT!=0 = std::process::exit(1) before P2P/consensus service start
+
+============================================================================
+ENV=DevNet
+============================================================================
+
+flag  ext-genesis  signer  signer==genesis-key  => outcome
+----  -----------  ------  -------------------   ----------------------------
+off   any          any     n/a                   NONE  (Run 421 default; CLI
+                                                        --validator-consensus-key
+                                                        path preserved for
+                                                        Run 031-033 behavior)
+on    absent       any     n/a                   EXIT!=0 (external genesis req.)
+on    present      absent  n/a                   EXIT!=0 (local signer required)
+on    present      present NO                    EXIT!=0 (signer<->genesis key
+                                                        mismatch; no downgrade)
+on    present      present local not in genesis  EXIT!=0 (local validator absent
+                                                        from committed authority)
+on    present(bad) any     n/a                   EXIT!=0 (re-load/re-hash fail)
+on    present(malformed committed key)           EXIT!=0 (build rejects: hex/
+                                                        length/suite/dup/overflow)
+on    present      present YES                    ACTIVE (genesis-bound context;
+                                                        Proposal/Vote sign+verify)
+
+============================================================================
+ENV=TestNet / ENV=MainNet (STRICT)
+============================================================================
+
+* This task supplies NO real TestNet/MainNet custody material and authorizes NO
+  external deployment.
+* The flag never downgrades a strict environment: mandatory authority that is
+  missing or invalid still rejects (EXIT!=0). map_environment(config.environment)
+  is applied when re-hashing, so a wrong-environment genesis fails the canonical
+  hash/env policy check.
+* LocalFixtureUnsigned remains unreachable through the production CLI (Run 420
+  guarantee, re-verified by run_420_production_policy_reachability_tests).
+
+============================================================================
+INVARIANTS
+============================================================================
+
+* No partially initialized context escapes: the authority is built fully and
+  validated BEFORE the bridge constructor runs; any failure exits before P2P.
+* No CLI --validator-consensus-key override escapes on the genesis path: it is
+  explicitly bypassed (peer_kp_result forced to NoConfiguredKeys).
+* Absent activation is byte-identical to Run 421 (NONE + Required).
+* Every explicit invalid/partial activation fails nonzero before network start.

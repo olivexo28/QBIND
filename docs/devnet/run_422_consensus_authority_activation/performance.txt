@@ -1,0 +1,70 @@
+RUN 422 — PERFORMANCE AND OPERATIONS
+
+All figures are coarse, debug/release wall-time observations on a shared sandbox
+CI runner — NOT microbenchmarks or release throughput measurements. Stated with
+explicit scope and limits; do NOT read O(1) or "negligible overhead" claims into
+them.
+
+============================================================================
+MEASUREMENT CONTEXT
+============================================================================
+  validator count in tests : 3 (integration), 1-4096 bound (builder)
+  key size                 : ML-DSA-44 public key = 1312 bytes
+  suite                    : ConsensusSigSuiteId(100) only
+  concurrency              : single-threaded startup validation
+  build profiles           : debug (tests), release (harnesses)
+  measurement tool         : cargo wall-clock + harness rc; no criterion runs
+
+============================================================================
+STARTUP REGISTRY VALIDATION (build_genesis_consensus_authority)
+============================================================================
+Work is O(N) in validator count N (single pass): per-validator strict hex
+decode + length check + suite check + duplicate-key/address hash-set insert,
+then one ConsensusValidatorSet::new, then one SHA3-256 over the length-prefixed
+commitment body. The N<=4096 bound is enforced BEFORE per-validator hex decode
+to cap work on hostile input. No async runtime blocking is introduced (this runs
+synchronously during startup, before P2P/consensus service start).
+Observed: the 14-unit + 6-integration suite (including many full builds of the
+authority) completes in <0.05s of test-body time each; construction cost is
+dominated by the one-time SHA3 over ~N*1.3KB.
+
+============================================================================
+SIGNER LOAD / SELF-TEST
+============================================================================
+Signer loading + fingerprinting reuse the existing signer_loader /
+validator_signer path (unchanged by Run 422). Run 422 adds one extra equality
+check: loaded signer public key vs the genesis-committed key for the local
+validator (a 1312-byte slice compare). Negligible relative to ML-DSA-44 keygen/
+sign, but not separately microbenchmarked.
+
+============================================================================
+PROPOSAL / VOTE VERIFICATION
+============================================================================
+Verification cost is unchanged from Run 420: one ML-DSA-44 verify per inbound
+consensus message via the registered MlDsa44Backend. Run 422 does not add or
+remove a crypto operation on the hot path; it only changes where the authorized
+key set comes from. No release-throughput number is claimed here (that is Run
+423 scope).
+
+============================================================================
+DoS / BACKPRESSURE ANALYSIS (qualitative)
+============================================================================
+  * synchronous file/crypto work : genesis re-load + re-hash + one SHA3 happen
+    ONCE at startup, not per message; no per-connection amplification added.
+  * invalid-signature floods      : handled by the pre-existing Run 420 verify
+    path + Required policy; Run 422 adds no new unbounded log per rejection.
+  * rejection-log amplification   : startup failures print a single FATAL line
+    then exit(1); no loop.
+  * signer locks                  : none added; the signer Arc is cloned into
+    the bridge inputs, not held under a hot lock by this module.
+  * queue backpressure            : bounded queues remain bounded; Run 422 does
+    not alter queue sizing.
+
+============================================================================
+LIMITS (explicitly unmeasured)
+============================================================================
+  * No release-profile throughput or latency benchmark.
+  * No large-N (thousands of validators) startup timing captured.
+  * No concurrent-verification microbenchmark.
+  * No public load test or deployment (not authorized).
+Correctness/fail-closed behavior was prioritized over throughput optimization.

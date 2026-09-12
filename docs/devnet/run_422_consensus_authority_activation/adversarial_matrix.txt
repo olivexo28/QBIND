@@ -1,0 +1,68 @@
+RUN 422 — ADVERSARIAL / NEGATIVE MATRIX
+
+Each case lists the attack and WHERE it is enforced (module builder, main.rs
+wiring, or the reused Run 420 verifier/bridge). "unit" = tested in
+genesis_consensus_authority.rs #[cfg(test)]; "integ" = run_422 integration test;
+"guard" = source-guard test; "reuse" = enforced by pre-existing Run 418/420
+verified code exercised via the shared constructor.
+
+A. REGISTRY / MEMBERSHIP
+  empty validator set                 -> EmptyValidatorSet reject      [unit]
+  count > 4096                         -> TooManyValidators reject      [unit]
+  malformed hex committed key          -> reject (decode_strict_hex_pk) [unit,integ]
+  wrong-length key (!=1312)            -> reject                        [unit]
+  duplicate committed public key       -> AmbiguousSigningKey reject    [unit]
+  duplicate validator address          -> reject                       [unit]
+  local validator index out of range   -> reject                       [unit]
+  every security field flips commitment (chain_id/genesis_hash/key/count)
+                                       -> commitment changes            [unit x4]
+  transport/bundle roots as consensus  -> not readable by module       [unit]
+
+B. SIGNER LOADING
+  missing local signer under activation-> EXIT!=0 (main.rs step 4)      [wiring]
+  signer pk != genesis-committed key   -> EXIT!=0 (main.rs step 5)      [integ*]
+  local validator absent from authority-> EXIT!=0 (main.rs step 5 None) [wiring]
+  no private-key CLI arg / no implicit generation / no fallback         [design]
+  (Malformed/truncated/oversized/wrong-suite keystore handling is the
+   pre-existing signer_loader responsibility, unchanged by Run 422.)
+
+C. ACTIVATION / ENVIRONMENT
+  valid DevNet material -> same constructor main uses -> ACTIVE ctx     [integ]
+  absent activation -> None + Required                                  [wiring,reuse]
+  external genesis absent under activation -> EXIT!=0                    [wiring]
+  genesis re-load failure -> EXIT!=0                                     [wiring]
+  canonical hash computation failure -> EXIT!=0                          [wiring]
+  build failure (any A case) -> EXIT!=0 (no downgrade to None/unsigned)  [wiring]
+  signer_validator_id != local -> context disabled/rejected             [integ]
+  CLI --validator-consensus-key override on genesis path -> bypassed    [wiring,guard]
+  wrong-environment genesis (map_environment) -> hash/env reject         [reuse]
+
+D. PROPOSAL / VOTE AUTHENTICITY (via reused Run 420 verifier + real backend)
+  outbound Proposal/Vote signed by configured authorized signer, round-
+    trips through inbound verifier (real MlDsa44Backend, suite 100)      [reuse]
+  missing/empty/truncated/bit-flipped signature reject                   [reuse: Run420]
+  altered content/signer/chain/view/commitment reject                    [reuse: Run420]
+  wrong validator key / unknown suite / key-suite mismatch reject        [reuse: Run420]
+  F6 sender-binding mismatch rejects before crypto; correct F6 + bad sig
+    rejects at crypto                                                    [reuse: Run418/419]
+  (Run 419 F6 harness re-run this session: s2-impersonation
+   claimed_sender_mismatch=5 rejected, s1/s3 accepted => boundary intact.)
+
+E. LIFETIME / ROBUSTNESS
+  snapshot immutable after genesis file changes post-validation
+    (authority holds an owned ConsensusValidatorSet + Arc provider;
+     no file handle retained)                                           [design,unit]
+  parallel verification cannot mix keys/suites/membership
+    (each context owns its own provider/registry)                       [reuse]
+  restart with mismatched authority identity fails closed
+    (re-derive + signer match every startup)                            [wiring]
+  changed configuration cannot keep genesis-static authority without an
+    authorized transition (re-validated each startup)                   [design]
+  malformed input cannot panic (Result-typed builder, no unwrap on input)[unit]
+  fixture bypass unreachable through production constructors/parser
+    (Run 420 guard preserved)                                           [guard: run_420]
+
+* signer<->genesis correspondence is DETECTABLE and enforced: integration test
+  `signer_genesis_key_correspondence_is_detectable` + `signer_validator_id_
+  mismatch_is_disabled`; the main.rs step-5 equality check is the production
+  enforcement point.

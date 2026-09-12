@@ -72,7 +72,17 @@ the boundary; outbound suppression S7/S8 UNREACHABLE on the standalone binary;
 binary still has **no** authoritative consensus signer, so configured-authority
 release-binary evidence is absent and **RS1 stays OPEN / launch-blocking** because
 F1/F2/F5/F7 remain unresolved and F6 remains partial. See
-`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_421.md`.
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_421.md`. Run 422 additionally activates
+**genesis-bound** consensus authority in code and test (opt-in fail-closed flag
+`--consensus-authority-from-genesis` + module
+`crates/qbind-node/src/genesis_consensus_authority.rs`, deriving the validator
+set + per-validator authorized ML-DSA-44 `(suite, public_key)` provider directly
+from the boot-verified canonical genesis and feeding the same validated
+constructor `main` uses), closing the Runs 031–033 uncommitted-CLI-override gap.
+This is **source/test activation only**
+(`CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED`; adversarial
+release-binary evidence is Run 423) and **RS1 stays OPEN / launch-blocking**. See
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422.md`.
 
 ## TestNet / MainNet
 
@@ -98,4 +108,5 @@ MainNet readiness is claimed.**
 - `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_419.md` — Run 419 partial release-binary evidence for finding F6.
 - `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_420.md` — Run 420 code/test fail-closed Proposal/Vote verification boundary (findings F3/F4/F8).
 - `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_421.md` — Run 421 unavailable-authority fail-closed release-binary evidence for findings F3/F4/F8.
+- `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422.md` — Run 422 genesis-bound consensus authority activation (code/test) for findings F3/F4/F8.
 - `docs/whitepaper/contradiction.md` — contradiction ledger.
