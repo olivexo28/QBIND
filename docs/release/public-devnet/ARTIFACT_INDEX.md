@@ -91,6 +91,15 @@ Companion documents:
   activation only (release-binary adversarial evidence is Run 423); **RS1 stays
   OPEN / launch-blocking**. Archive:
   `docs/devnet/run_422_consensus_authority_activation/`.
+  **CORRECTIVE CONTINUATION (supersedes the above):** source review rejected the
+  initial POSITIVE; the corrective verdict is
+  `RESULT=PARTIAL-FOR-DEVNET-CONSENSUS-AUTHORITY-ACTIVATION-CODE-TEST` /
+  `PRODUCTION_ACTIVATION=UNAVAILABLE-FOR-UNRESOLVED-BOUNDARIES`. Fixed +
+  behaviorally tested: single-snapshot genesis provenance, engine/verifier
+  membership consistency, and LocalMesh flag reject. UNRESOLVED blockers:
+  startup ordering, Proposal/Vote-vs-Timeout/NewView shared-context separation,
+  signed-domain replay isolation, genesis-static lifetime. **F3/F4/F8 are
+  PARTIAL** (not code/test-positive). Run 423 not started.
 
 Everything below reflects the recorded status **after Run 402**. This index adds
 navigation and clarity only; it does not re-prove or change any item's status.

@@ -5,6 +5,27 @@ Evidence archive README
 VERDICT (see summary.txt for the exact label block)
 ============================================================================
 
+*** CORRECTIVE CONTINUATION — supersedes the initial positive below ***
+
+RESULT=PARTIAL-FOR-DEVNET-CONSENSUS-AUTHORITY-ACTIVATION-CODE-TEST
+PRODUCTION_ACTIVATION=UNAVAILABLE-FOR-UNRESOLVED-BOUNDARIES
+F3_STATUS=CONFIGURED-AUTHORITY-PRODUCTION-PATH-PARTIAL
+F4_STATUS=CONFIGURED-AUTHORITY-PRODUCTION-PATH-PARTIAL
+F8_STATUS=CONFIGURED-AUTHORITY-PRODUCTION-PATH-PARTIAL
+CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED
+AUTHORITY_SCOPE=GENESIS-BOUND-DEVNET
+SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO
+
+Corrected this continuation: single-snapshot genesis provenance (D1),
+engine/verifier membership consistency (D2), and every-mode flag handling /
+LocalMesh reject (D3). Still UNRESOLVED and reported as blockers: startup
+ordering (D4), Proposal/Vote vs Timeout/NewView shared-context separation (D5),
+signed-domain / replay isolation (D6), genesis-static lifetime (D7). Because
+D4-D7 remain, production activation is UNAVAILABLE. See
+../QBIND_DEVNET_EVIDENCE_RUN_422.md for the full defect table.
+
+--- INITIAL CONCLUSION (HISTORICAL, SUPERSEDED) ---
+
 RESULT=POSITIVE-FOR-DEVNET-CONSENSUS-AUTHORITY-ACTIVATION-CODE-TEST
 F3_STATUS=CONFIGURED-AUTHORITY-PRODUCTION-PATH-CODE-TEST-POSITIVE
 F4_STATUS=CONFIGURED-AUTHORITY-PRODUCTION-PATH-CODE-TEST-POSITIVE

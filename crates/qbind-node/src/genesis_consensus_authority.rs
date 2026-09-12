@@ -55,6 +55,7 @@
 //! in the tests).
 
 use std::collections::HashMap;
+use std::path::Path;
 use std::sync::Arc;
 
 use qbind_consensus::ids::ValidatorId;
@@ -62,9 +63,12 @@ use qbind_consensus::key_registry::SuiteAwareValidatorKeyProvider;
 use qbind_consensus::validator_set::{ConsensusValidatorSet, ValidatorSetEntry};
 use qbind_crypto::ml_dsa44::ML_DSA_44_PUBLIC_KEY_SIZE;
 use qbind_crypto::ConsensusSigSuiteId;
-use qbind_ledger::{GenesisConfig, GenesisHash};
+use qbind_ledger::{
+    verify_boot_time_genesis, GenesisConfig, GenesisHash, NetworkEnvironmentPolicy,
+};
 
 use crate::peer_key_provider::decode_strict_hex_pk;
+use crate::pqc_boot_genesis::load_external_genesis;
 use crate::signer_loader::public_key_fingerprint;
 use crate::timeout_verification_bridge::SUPPORTED_TIMEOUT_SUITE_ID;
 
@@ -372,6 +376,155 @@ pub fn build_genesis_consensus_authority(
         validator_count: count,
         fingerprints,
     })
+}
+
+/// Fail-closed reasons the shared production activation function
+/// [`load_verify_and_build_genesis_authority`] refused to publish a
+/// genesis-bound consensus authority. Never carries key bytes.
+#[derive(Debug)]
+pub enum GenesisAuthorityActivationError {
+    /// The external genesis file could not be re-loaded/parsed for the
+    /// single owned snapshot. Carries the boot-genesis loader's message.
+    GenesisReloadFailed { detail: String },
+    /// Full Run 101 re-validation (structural + authority + chain_id +
+    /// expected-hash) of the exact reread contents failed. Carries the
+    /// verifier's message verbatim.
+    GenesisRevalidationFailed { detail: String },
+    /// The canonical identity of the reread snapshot does not equal the
+    /// identity accepted by boot-time verification. The genesis input was
+    /// replaced between the boot stage and this activation stage; the
+    /// replacement bytes must never silently become the signing authority.
+    IdentityChangedSinceBoot {
+        boot_fingerprint: String,
+        reread_fingerprint: String,
+    },
+    /// The genesis-committed authority itself was rejected (empty/oversized
+    /// set, malformed/duplicate key, out-of-range local id, ...).
+    Authority(GenesisConsensusAuthorityError),
+    /// The engine's peer-derived validator count disagrees with the
+    /// canonical genesis-committed membership. Consensus membership and
+    /// quorum must be defined by the committed authority, never by the
+    /// connected-peer count; a mismatch is rejected rather than silently
+    /// resized.
+    MembershipCountMismatch {
+        peer_derived_count: u64,
+        genesis_authority_count: usize,
+    },
+}
+
+impl std::fmt::Display for GenesisAuthorityActivationError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::GenesisReloadFailed { detail } => {
+                write!(f, "could not re-load the external genesis snapshot: {detail}")
+            }
+            Self::GenesisRevalidationFailed { detail } => write!(
+                f,
+                "re-validation of the reread genesis snapshot failed: {detail}"
+            ),
+            Self::IdentityChangedSinceBoot {
+                boot_fingerprint,
+                reread_fingerprint,
+            } => write!(
+                f,
+                "reread genesis canonical identity (fp={reread_fingerprint}) does not equal the \
+                 boot-accepted identity (fp={boot_fingerprint}); genesis input was replaced after \
+                 boot verification"
+            ),
+            Self::Authority(e) => write!(f, "{e}"),
+            Self::MembershipCountMismatch {
+                peer_derived_count,
+                genesis_authority_count,
+            } => write!(
+                f,
+                "engine peer-derived validator count ({peer_derived_count}) disagrees with the \
+                 genesis-committed consensus membership ({genesis_authority_count}); consensus \
+                 membership must be defined by the committed authority, not the connected-peer count"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for GenesisAuthorityActivationError {}
+
+/// Shared production activation boundary for the Run 422
+/// `--consensus-authority-from-genesis` path.
+///
+/// This is the single function both the release binary (`main.rs`) and the
+/// behavioral tests exercise, so the provenance, re-validation,
+/// replaced-input, and engine/verifier membership checks are proven by the
+/// same code path that publishes the live authority.
+///
+/// Provenance guarantee (Run 422 corrective, task section 4): the genesis
+/// file is read exactly **once** into an owned [`GenesisConfig`]. The
+/// canonical identity is derived from that same owned snapshot via
+/// [`verify_boot_time_genesis`] (full structural + authority + chain_id +
+/// expected-hash validation) and the authority key material is decoded from
+/// the *same* parse. Keys from one file read are never paired with a hash
+/// from a different read, and `compute_print_genesis_hash` (which reopens
+/// the file without authority validation) is not used here.
+///
+/// Replaced-input guarantee (task section 4): when `boot_accepted_hash` is
+/// supplied, the reread canonical identity must equal it or activation is
+/// rejected. Replacement bytes can never silently become the signing
+/// authority.
+///
+/// Membership guarantee (task section 5): the engine's `peer_derived_count`
+/// (peers + self) must equal the canonical genesis-committed membership, or
+/// activation is rejected. The connected-peer count never resizes or
+/// redefines the consensus authority.
+#[allow(clippy::too_many_arguments)]
+pub fn load_verify_and_build_genesis_authority(
+    genesis_path: &Path,
+    env_policy: NetworkEnvironmentPolicy,
+    expected_genesis_hash: Option<&GenesisHash>,
+    boot_accepted_hash: Option<&GenesisHash>,
+    local_validator_id: ValidatorId,
+    peer_derived_count: u64,
+) -> Result<GenesisConsensusAuthority, GenesisAuthorityActivationError> {
+    // 1. Single owned read of the external genesis snapshot.
+    let genesis = load_external_genesis(genesis_path).map_err(|e| {
+        GenesisAuthorityActivationError::GenesisReloadFailed {
+            detail: e.to_string(),
+        }
+    })?;
+
+    // 2. Fully re-validate the EXACT reread contents and derive the
+    //    canonical identity from this same owned snapshot.
+    let canonical_hash = verify_boot_time_genesis(env_policy, &genesis, expected_genesis_hash)
+        .map_err(
+            |e| GenesisAuthorityActivationError::GenesisRevalidationFailed {
+                detail: e.to_string(),
+            },
+        )?
+        .canonical_hash;
+
+    // 3. Require equality with the boot-accepted identity (reject a file
+    //    swapped between boot verification and this activation stage).
+    if let Some(boot_hash) = boot_accepted_hash {
+        if boot_hash != &canonical_hash {
+            return Err(GenesisAuthorityActivationError::IdentityChangedSinceBoot {
+                boot_fingerprint: public_key_fingerprint(boot_hash),
+                reread_fingerprint: public_key_fingerprint(&canonical_hash),
+            });
+        }
+    }
+
+    // 4. Build the immutable, validated authority from the SAME snapshot.
+    let authority =
+        build_genesis_consensus_authority(&genesis, &canonical_hash, local_validator_id)
+            .map_err(GenesisAuthorityActivationError::Authority)?;
+
+    // 5. Engine/verifier membership consistency: the peer-derived count the
+    //    engine was configured with must equal the committed authority.
+    if peer_derived_count != authority.validator_count as u64 {
+        return Err(GenesisAuthorityActivationError::MembershipCountMismatch {
+            peer_derived_count,
+            genesis_authority_count: authority.validator_count,
+        });
+    }
+
+    Ok(authority)
 }
 
 /// Deterministic, domain-separated commitment over the security-relevant

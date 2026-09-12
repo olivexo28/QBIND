@@ -1,5 +1,12 @@
 RUN 422 — PERFORMANCE AND OPERATIONS
 
+*** CORRECTIVE CONTINUATION NOTE ***
+No performance/throughput/latency or allocation-free claim is made for this
+continuation. The only performance-relevant change is that the genesis file is
+now read ONCE (not twice) during activation and re-validated in place; this is a
+correctness/security change, not a measured optimization. No benchmarks were
+run. Figures below are historical coarse observations retained for context.
+
 All figures are coarse, debug/release wall-time observations on a shared sandbox
 CI runner — NOT microbenchmarks or release throughput measurements. Stated with
 explicit scope and limits; do NOT read O(1) or "negligible overhead" claims into

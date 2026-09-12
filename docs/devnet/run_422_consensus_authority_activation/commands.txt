@@ -1,5 +1,36 @@
 RUN 422 — VALIDATION COMMANDS AND EXIT STATUS
 
+*** CORRECTIVE CONTINUATION — commands run in this environment ***
+(rustc/cargo as reported by the toolchain in this sandbox)
+
+  cargo test -p qbind-node --test run_422_genesis_consensus_authority_tests
+      -> exit 0 (15 passed; 0 failed)
+  cargo test -p qbind-node --lib genesis_consensus_authority
+      -> exit 0 (14 passed; 0 failed; 1442 filtered out)
+  cargo test -p qbind-node --test run_420_production_policy_reachability_tests
+      -> exit 0 (3 passed)
+  cargo test -p qbind-node --test run_418_authenticated_peer_consensus_sender_binding_tests
+      -> exit 0 (18 passed)
+  cargo test -p qbind-node --test run_418_newview_demux_chain_integration_tests
+      -> exit 0 (3 passed)
+  cargo build -p qbind-node --release --bin qbind-node
+      -> exit 0 (Finished `release` profile [optimized])
+  cargo fmt -p qbind-node -- --check (changed files)   -> see below
+  cargo clippy                                          -> pre-existing warnings
+      only (e.g. p2p_node_builder.rs cert_bound_node_id dead_code); NOT run to
+      completion repo-wide in this continuation and NOT claimed clean.
+  CodeQL: NOT run in this environment (no CodeQL Rust database analysis was
+      executed here). A skipped Rust database analysis provides NO zero-alert
+      conclusion; recorded honestly as INCOMPLETE, not as a pass.
+  Secret/privacy scan: run on changed files (see report); no secrets introduced.
+
+Older evidence-preservation harnesses (run_417/418/419/421, run_404/405,
+run_410-415) were NOT re-executed in this continuation; the historical archives
+are preserved byte-for-byte (only Run 422 evidence and the four package-integrity
+anchors were edited). Any harness re-run is deferred to a validation pass.
+
+--- INITIAL (HISTORICAL) COMMANDS ---
+
 Environment: rustc 1.98.1 (48a229cea 2026-09-01), cargo 1.98.1, Linux sandbox.
 Build profiles as noted. Exit statuses are the ACTUAL command exit codes (not a
 downstream tee/grep). Tested implementation SHA: a62624acc1ca6be7656e8219e0235f8cc3f44e22.

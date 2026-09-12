@@ -1,5 +1,18 @@
 RUN 422 — AUTHORITY MODEL
 
+*** CORRECTIVE CONTINUATION NOTE ***
+Provenance is now single-snapshot: the authority key material AND the canonical
+genesis identity are derived from ONE owned parse of the external genesis
+(load_verify_and_build_genesis_authority), re-validated in place and required to
+equal the boot-accepted identity. Keys are never paired with a hash from a
+different file read. Engine membership == verifier membership == committed
+genesis membership is enforced (count mismatch rejected). Voting-power semantics
+are UNCHANGED (equal weight, matching the Run 033 provider) and this run does
+NOT reinterpret canonical weights. UNRESOLVED: signed-domain binding (D6) and
+genesis-static lifetime across epoch/restore transitions (D7) — an immutable
+provider does not by itself prove continued authorization; only per-startup
+re-validation is enforced.
+
 ============================================================================
 AUTHORITY SOURCE
 ============================================================================

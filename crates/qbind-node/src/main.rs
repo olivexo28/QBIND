@@ -2377,6 +2377,7 @@ async fn main() {
     // `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_102.md`, and
     // `docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md`.
     // ------------------------------------------------------------------
+    let mut boot_accepted_canonical_hash: Option<qbind_ledger::GenesisHash> = None;
     let canonical_genesis_hash_hex_for_restore: Option<String> =
         match qbind_node::pqc_boot_genesis::run_boot_time_genesis_verification(&config) {
             Ok(qbind_node::pqc_boot_genesis::BootGenesisOutcome::Verified {
@@ -2391,6 +2392,10 @@ async fn main() {
                     genesis_path.display(),
                     qbind_node::pqc_boot_genesis::format_for_operator(&canonical_hash),
                 );
+                // Run 422: retain the boot-accepted canonical identity (raw
+                // bytes) so a later genesis-authority activation can require
+                // equality against it (reject a file swapped after boot).
+                boot_accepted_canonical_hash = Some(canonical_hash);
                 // Run 124: surface the 64-char lowercase-hex (no `0x` prefix)
                 // form for the snapshot/restore authority-marker check, which
                 // matches PersistentAuthorityStateRecord.genesis_hash.
@@ -4750,6 +4755,22 @@ async fn main() {
     // Branch based on network mode for transport / wiring.
     match config.network_mode {
         NetworkMode::LocalMesh => {
+            // Run 422 corrective (task section 6): the explicit
+            // genesis-authority activation flag is only implemented for the
+            // P2P production startup mode. Under LocalMesh it would be
+            // silently ignored, which is a covert downgrade of an explicit
+            // security request. Reject it non-zero with a precise diagnostic
+            // rather than starting without the requested authority.
+            if args.consensus_authority_from_genesis {
+                eprintln!(
+                    "[binary] FATAL: --consensus-authority-from-genesis was requested but \
+                     --network-mode local-mesh does not implement genesis-bound consensus \
+                     authority activation. qbind-node refuses to start rather than silently \
+                     ignore the request. Use --network-mode p2p. See \
+                     docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422.md."
+                );
+                std::process::exit(1);
+            }
             run_local_mesh_node(
                 &config,
                 &args,
@@ -4769,6 +4790,7 @@ async fn main() {
                     restore_baseline,
                     vm_v0_runtime.clone(),
                     consensus_storage_lifecycle.handle.clone(),
+                    boot_accepted_canonical_hash,
                 )
                 .await;
             } else {
@@ -4953,6 +4975,7 @@ async fn run_p2p_node(
     restore_baseline: Option<RestoreBaseline>,
     vm_v0_runtime: Option<Arc<VmV0RuntimeState>>,
     consensus_storage: Option<Arc<qbind_node::storage::RocksDbConsensusStorage>>,
+    boot_accepted_canonical_hash: Option<qbind_ledger::GenesisHash>,
 ) {
     eprintln!(
         "[binary] P2P mode: starting transport + consensus loop. environment={} profile={}",
@@ -7608,39 +7631,25 @@ async fn run_p2p_node(
                 .as_ref()
                 .expect("checked above");
             let env_policy = qbind_node::pqc_boot_genesis::map_environment(config.environment);
-            // 2. Re-load + re-hash the genesis (boot verification already
-            //    proved it parses and matches any pinned expected hash).
-            let genesis = match qbind_node::pqc_boot_genesis::load_external_genesis(genesis_path) {
-                Ok(g) => g,
-                Err(e) => {
-                    eprintln!(
-                        "[binary] FATAL: --consensus-authority-from-genesis could not re-load the \
-                         external genesis: {}. qbind-node refuses to start.",
-                        e
-                    );
-                    std::process::exit(1);
-                }
-            };
-            let canonical_hash = match qbind_node::pqc_boot_genesis::compute_print_genesis_hash(
-                genesis_path,
-                env_policy,
-            ) {
-                Ok(h) => h,
-                Err(e) => {
-                    eprintln!(
-                        "[binary] FATAL: --consensus-authority-from-genesis could not compute the \
-                         canonical genesis hash: {}. qbind-node refuses to start.",
-                        e
-                    );
-                    std::process::exit(1);
-                }
-            };
-            // 3. Build the immutable, validated genesis-bound authority.
+            // Run 422 corrective (task sections 4 & 5): use the single shared
+            // production activation boundary. It reads the genesis EXACTLY
+            // once into an owned snapshot, fully re-validates those same
+            // bytes (structural + authority + chain_id + expected-hash),
+            // derives the canonical identity from that same parse, requires
+            // equality with the boot-accepted identity (reject a file swapped
+            // after boot), builds the immutable authority from that snapshot,
+            // and rejects any engine/verifier membership-count disagreement.
+            // Keys and hash are never paired across two file reads, and
+            // `compute_print_genesis_hash` (no authority validation) is not
+            // used to establish signing authority.
             let authority =
-                match qbind_node::genesis_consensus_authority::build_genesis_consensus_authority(
-                    &genesis,
-                    &canonical_hash,
+                match qbind_node::genesis_consensus_authority::load_verify_and_build_genesis_authority(
+                    genesis_path,
+                    env_policy,
+                    config.expected_genesis_hash.as_ref(),
+                    boot_accepted_canonical_hash.as_ref(),
                     local_validator_id,
+                    num_validators,
                 ) {
                     Ok(a) => a,
                     Err(e) => {

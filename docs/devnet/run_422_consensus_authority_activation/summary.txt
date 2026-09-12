@@ -1,5 +1,40 @@
 RUN 422 — SUMMARY
 
+============================================================================
+CORRECTIVE CONTINUATION (supersedes the initial positive below)
+============================================================================
+RESULT=PARTIAL-FOR-DEVNET-CONSENSUS-AUTHORITY-ACTIVATION-CODE-TEST
+PRODUCTION_ACTIVATION=UNAVAILABLE-FOR-UNRESOLVED-BOUNDARIES
+F3_STATUS=CONFIGURED-AUTHORITY-PRODUCTION-PATH-PARTIAL (ordering/shared-context/signed-domain/lifetime unresolved)
+F4_STATUS=CONFIGURED-AUTHORITY-PRODUCTION-PATH-PARTIAL (ordering/shared-context/signed-domain/lifetime unresolved)
+F8_STATUS=CONFIGURED-AUTHORITY-PRODUCTION-PATH-PARTIAL (signed-domain round-trip not demonstrated)
+CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED
+AUTHORITY_SCOPE=GENESIS-BOUND-DEVNET
+SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO
+
+Source review rejected the initial positive verdict. This continuation corrected
+the tractable defects and keeps activation fail-closed:
+  D1 genesis multiple-read/TOCTOU  ....... FIXED (single owned snapshot; hash and
+       keys from the SAME parse; boot-identity equality gate; behavioral tests)
+  D2 engine/verifier membership divergence  FIXED (fail-closed reject of
+       peer_derived_count != genesis_authority_count; no silent resize)
+  D3 flag ignored under LocalMesh  ....... FIXED (reject non-zero, precise reason)
+  D4 P2P service starts before authority validation  UNRESOLVED (deep reorder of
+       run_p2p_node not performed; transport built before authority proven)
+  D5 shared Proposal/Vote vs Timeout/NewView context  UNRESOLVED (documented)
+  D6 signed-domain / replay isolation  ... UNRESOLVED (needs versioned protocol
+       change; round-trip/wrong-genesis rejection NOT demonstrated here)
+  D7 genesis-static lifetime across epoch/restore transitions  UNRESOLVED
+Because D4-D7 remain, production activation is reported UNAVAILABLE and the
+verdict is PARTIAL. See ../QBIND_DEVNET_EVIDENCE_RUN_422.md for the defect table.
+
+Behavioral tests (this continuation): run_422 activation suite 15/15, module
+unit 14/14, regressions run_420 3/3 + run_418 sender-binding 18/18 + run_418
+newview demux 3/3. See test_results.txt / commands.txt.
+============================================================================
+
+--- INITIAL CONCLUSION (HISTORICAL, SUPERSEDED) --------------------------------
+
 RESULT=POSITIVE-FOR-DEVNET-CONSENSUS-AUTHORITY-ACTIVATION-CODE-TEST
 F3_STATUS=CONFIGURED-AUTHORITY-PRODUCTION-PATH-CODE-TEST-POSITIVE
 F4_STATUS=CONFIGURED-AUTHORITY-PRODUCTION-PATH-CODE-TEST-POSITIVE

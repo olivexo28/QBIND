@@ -1,5 +1,23 @@
 RUN 422 — SOURCE TRACE
 
+*** CORRECTIVE CONTINUATION NOTE (supersedes the initial positive) ***
+The reviewed provenance path in main.rs (load_external_genesis + a SEPARATE
+compute_print_genesis_hash reopening the file) is REMOVED. Production activation
+now flows through the single shared boundary
+`genesis_consensus_authority::load_verify_and_build_genesis_authority`:
+  - reads the external genesis EXACTLY ONCE into an owned GenesisConfig;
+  - re-validates those same bytes via qbind_ledger::verify_boot_time_genesis
+    (structural + authority + chain_id + expected-hash) and derives the
+    canonical identity from the SAME parse;
+  - requires equality with the boot-accepted canonical hash (threaded from
+    main() run_boot_time_genesis_verification) when available;
+  - builds the immutable authority from that same snapshot;
+  - rejects peer_derived_count != genesis_authority_count (membership).
+main.rs also rejects --consensus-authority-from-genesis under --network-mode
+local-mesh. Boot-accepted hash is carried via a new run_p2p_node parameter.
+UNRESOLVED (blockers): startup ordering vs P2pNodeBuilder::build (D4),
+shared-context separation (D5), signed-domain binding (D6), lifetime (D7).
+
 Baseline: main @ 5c2f9381 (full: 5c2f93816a3ff67cec11605878bfb6705d637a47)
 Task branch: copilot/run-422-task-update
   c2be13d  update (adds task/RUN_422_TASK.txt atop 5c2f938)
