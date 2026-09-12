@@ -1,37 +1,54 @@
 RUN 422 — SUMMARY
 
 ============================================================================
-CORRECTIVE CONTINUATION (supersedes the initial positive below)
+CONTAINMENT CORRECTION (supersedes the reachable-activation state below)
 ============================================================================
 RESULT=PARTIAL-FOR-DEVNET-CONSENSUS-AUTHORITY-ACTIVATION-CODE-TEST
-PRODUCTION_ACTIVATION=UNAVAILABLE-FOR-UNRESOLVED-BOUNDARIES
-F3_STATUS=CONFIGURED-AUTHORITY-PRODUCTION-PATH-PARTIAL (ordering/shared-context/signed-domain/lifetime unresolved)
-F4_STATUS=CONFIGURED-AUTHORITY-PRODUCTION-PATH-PARTIAL (ordering/shared-context/signed-domain/lifetime unresolved)
-F8_STATUS=CONFIGURED-AUTHORITY-PRODUCTION-PATH-PARTIAL (signed-domain round-trip not demonstrated)
+GENESIS_AUTHORITY_ACTIVATION=DISABLED-PENDING-D4-D7
+LEGACY_CLI_CONTEXT_ACTIVATION=UNCHANGED-AND-STILL-REACHABLE
 CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED
-AUTHORITY_SCOPE=GENESIS-BOUND-DEVNET
 SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO
 
-Source review rejected the initial positive verdict. This continuation corrected
-the tractable defects and keeps activation fail-closed:
-  D1 genesis multiple-read/TOCTOU  ....... FIXED (single owned snapshot; hash and
-       keys from the SAME parse; boot-identity equality gate; behavioral tests)
-  D2 engine/verifier membership divergence  FIXED (fail-closed reject of
-       peer_derived_count != genesis_authority_count; no silent resize)
-  D3 flag ignored under LocalMesh  ....... FIXED (reject non-zero, precise reason)
-  D4 P2P service starts before authority validation  UNRESOLVED (deep reorder of
-       run_p2p_node not performed; transport built before authority proven)
-  D5 shared Proposal/Vote vs Timeout/NewView context  UNRESOLVED (documented)
-  D6 signed-domain / replay isolation  ... UNRESOLVED (needs versioned protocol
-       change; round-trip/wrong-genesis rejection NOT demonstrated here)
-  D7 genesis-static lifetime across epoch/restore transitions  UNRESOLVED
-Because D4-D7 remain, production activation is reported UNAVAILABLE and the
-verdict is PARTIAL. See ../QBIND_DEVNET_EVIDENCE_RUN_422.md for the defect table.
+The prior corrective continuation left the genesis-authority route reachable:
+valid genesis + matching signer + `--consensus-authority-from-genesis` still
+built an active context and reached the consensus loop. This containment pass
+disables the NEW genesis-authority route entirely. A single early startup guard
+in `main` (immediately before `match config.network_mode`) refuses the flag with
+exit code 1 and the diagnostic "genesis-authority activation is disabled pending
+D4-D7", AFTER Run 102 boot verification but BEFORE any P2P service construction
+and BEFORE any consensus task, uniformly across every network mode and
+environment, with no override/hidden-flag/environment-bypass/unsigned-fallback
+and no silent continuation with None.
 
-Behavioral tests (this continuation): run_422 activation suite 15/15, module
-unit 14/14, regressions run_420 3/3 + run_418 sender-binding 18/18 + run_418
-newview demux 3/3. See test_results.txt / commands.txt.
+  D4 P2P service starts before authority validation  CONTAINED (route disabled;
+       guard exits before run_p2p_node; reorder NOT attempted) — UNRESOLVED
+  D5 shared Proposal/Vote vs Timeout/NewView context  UNRESOLVED (legacy CLI
+       route still builds the shared context; no blanket "flag off => None")
+  D6 signed-domain / replay isolation  ... UNRESOLVED
+  D7 genesis-static lifetime  ............ UNRESOLVED
+
+The corrected authority loader (D1 single-snapshot provenance, D2
+membership-count reject) is retained and still tested, but no longer reachable
+in a normally built binary. The legacy `--validator-consensus-key` CLI route is
+UNCHANGED and still reachable, so no blanket "all production activation is
+unavailable" claim is made. See ../QBIND_DEVNET_EVIDENCE_RUN_422.md.
+
+Behavioral tests (this containment): process-level run_422_startup_refusal 4/4
+(valid genesis+signer+flag refused before P2P service start; LocalMesh cannot
+bypass; flag-absent preserves behavior + reaches LocalMesh service-start;
+--help preserved); run_422 provider/loader suite 15/15; regressions run_420 3/3
++ run_418 sender-binding 18/18 + run_418 newview demux 3/3. See
+test_results.txt / commands.txt.
 ============================================================================
+
+--- CORRECTIVE CONTINUATION (HISTORICAL, SUPERSEDED BY CONTAINMENT) ------------
+RESULT=PARTIAL-FOR-DEVNET-CONSENSUS-AUTHORITY-ACTIVATION-CODE-TEST
+PRODUCTION_ACTIVATION=UNAVAILABLE-FOR-UNRESOLVED-BOUNDARIES (path reachable — corrected)
+The continuation corrected D1 (single owned snapshot; hash and keys from the
+SAME parse; boot-identity equality gate) and D2 (fail-closed reject of
+peer_derived_count != genesis_authority_count) and added a LocalMesh-only flag
+reject for D3, but the P2P route still constructed and activated the context.
+That state is superseded by the containment correction above.
 
 --- INITIAL CONCLUSION (HISTORICAL, SUPERSEDED) --------------------------------
 

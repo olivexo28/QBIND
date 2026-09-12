@@ -1,5 +1,17 @@
 RUN 422 — SHARED CONTEXT IMPACT (Timeout / NewView consumers)
 
+*** CONTAINMENT CORRECTION NOTE (READ FIRST) ***
+The genesis-authority route is DISABLED: --consensus-authority-from-genesis is
+refused at a single early startup guard before P2P service construction / any
+consensus task. So the "when verification_ctx becomes Some (valid genesis-bound
+DevNet activation)" scenario below is NO LONGER reachable via the genesis route.
+The shared-context consumer widening described here now applies ONLY to the
+LEGACY --validator-consensus-key CLI route, which is unchanged and still
+reachable. The prior WITHDRAWN "flag off => None" claim already stood because of
+that legacy route; it remains withdrawn. D5 (Proposal/Vote vs Timeout/NewView
+shared-context separation) is UNRESOLVED and is one of the D4-D7 blockers behind
+disabling the genesis route.
+
 *** CORRECTIVE CONTINUATION NOTE (UNRESOLVED — D5) ***
 WITHDRAWN claim: "flag absence universally implies None" and "shared-context
 activation has no additional message-family effect." The legacy CLI-key path can

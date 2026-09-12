@@ -1,34 +1,48 @@
 RUN 422 — TEST RESULTS (names + counts, no double-counting)
 
-*** CORRECTIVE CONTINUATION RESULTS (this environment) ***
+*** CONTAINMENT CORRECTION RESULTS (this environment) ***
+cargo test -p qbind-node --test run_422_startup_refusal_tests -- --test-threads=1
+  => ok. 4 passed; 0 failed. Process-level proof driving the REAL qbind-node
+     binary (CARGO_BIN_EXE_qbind-node) with a VALID DevNet genesis (correct
+     --expect-genesis-hash) + a matching local signer keystore:
+     - valid_genesis_and_signer_plus_flag_refused_before_p2p_service_start
+         (exit != 0; stderr carries "genesis-authority activation is disabled
+          pending D4-D7"; the P2P "starting transport + consensus loop" marker
+          never appears => refusal precedes the service-start boundary)
+     - local_mesh_mode_cannot_bypass_the_refusal
+         (--network-mode local-mesh: same refusal; LocalMesh "starting consensus
+          loop" marker never appears)
+     - flag_absent_is_not_refused_by_the_guard
+         (SAME valid inputs WITHOUT the flag: refusal diagnostic absent; startup
+          proceeds to the LocalMesh service-start marker => existing behavior
+          preserved, guard scoped to the explicit request)
+     - help_behavior_is_preserved (--help exits 0, no refusal)
 cargo test -p qbind-node --test run_422_genesis_consensus_authority_tests
-  => ok. 15 passed; 0 failed. New/updated behavioral + guard tests:
-     - shared_activation_valid_genesis_matching_count_succeeds
-     - shared_activation_membership_count_mismatch_rejects
-     - shared_activation_replaced_input_rejected
-     - shared_activation_matching_boot_identity_succeeds
-     - shared_activation_out_of_range_local_id_rejects
-     - shared_activation_expected_hash_mismatch_rejects
-     - shared_activation_malformed_genesis_file_rejects
-     - main_rs_rejects_genesis_activation_under_local_mesh
-     - main_rs_uses_shared_single_snapshot_activation
-     - (retained) genesis_authority_plus_matching_signer_activates,
-       signer_genesis_key_correspondence_is_detectable,
-       signer_validator_id_mismatch_is_disabled, malformed_committed_key_rejected,
-       main_rs_wires_genesis_authority_into_validated_constructor (updated to
-       assert the shared boundary), cli_exposes_consensus_authority_from_genesis_flag
-cargo test -p qbind-node --lib genesis_consensus_authority
-  => ok. 14 passed; 0 failed (1442 filtered out).
+  => ok. 15 passed; 0 failed. Retained provider/loader tests; the LocalMesh-only
+     source guard was replaced by:
+     - main_rs_refuses_genesis_activation_before_service_dispatch
+         (asserts the unified refusal diagnostic exists and the guard's
+          `if args.consensus_authority_from_genesis {` precedes
+          `match config.network_mode {`)
+     shared_activation_* boundary tests and the module unit tests are unchanged.
 cargo test -p qbind-node --test run_420_production_policy_reachability_tests
   => ok. 3 passed; 0 failed.
 cargo test -p qbind-node --test run_418_authenticated_peer_consensus_sender_binding_tests
   => ok. 18 passed; 0 failed.
 cargo test -p qbind-node --test run_418_newview_demux_chain_integration_tests
   => ok. 3 passed; 0 failed.
-NOTE: main_rs source-guard tests are reachability guards, NOT behavioral proof
-of startup ordering (D4 remains unresolved). Behavioral proof of the corrected
-boundaries is via the shared_activation_* tests, which drive the real production
-function load_verify_and_build_genesis_authority.
+NOTE: the run_422_startup_refusal_tests are PROCESS-LEVEL behavioral proof using
+the actual production startup guard — not source-string assertions, and not a
+parser/invalid-fixture/missing-file artifact (the genesis is valid and
+boot-verified). D4 (startup ordering) remains UNRESOLVED; the route is contained
+by disabling it, not by reordering.
+
+--- CORRECTIVE CONTINUATION (HISTORICAL) TEST RESULTS ---
+cargo test -p qbind-node --test run_422_genesis_consensus_authority_tests
+  => ok. 15 passed (then included main_rs_rejects_genesis_activation_under_local_mesh,
+     since replaced by main_rs_refuses_genesis_activation_before_service_dispatch).
+cargo test -p qbind-node --lib genesis_consensus_authority
+  => ok. 14 passed; 0 failed (1442 filtered out).
 
 --- INITIAL (HISTORICAL) TEST RESULTS ---
 

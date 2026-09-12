@@ -1,29 +1,41 @@
 RUN 422 — SOURCE TRACE
 
-*** CORRECTIVE CONTINUATION NOTE (supersedes the initial positive) ***
-The reviewed provenance path in main.rs (load_external_genesis + a SEPARATE
-compute_print_genesis_hash reopening the file) is REMOVED. Production activation
-now flows through the single shared boundary
-`genesis_consensus_authority::load_verify_and_build_genesis_authority`:
-  - reads the external genesis EXACTLY ONCE into an owned GenesisConfig;
-  - re-validates those same bytes via qbind_ledger::verify_boot_time_genesis
-    (structural + authority + chain_id + expected-hash) and derives the
-    canonical identity from the SAME parse;
-  - requires equality with the boot-accepted canonical hash (threaded from
-    main() run_boot_time_genesis_verification) when available;
-  - builds the immutable authority from that same snapshot;
-  - rejects peer_derived_count != genesis_authority_count (membership).
-main.rs also rejects --consensus-authority-from-genesis under --network-mode
-local-mesh. Boot-accepted hash is carried via a new run_p2p_node parameter.
+*** CONTAINMENT CORRECTION NOTE (supersedes the reachable-activation trace) ***
+The prior corrective replaced the two-read provenance (load_external_genesis + a
+SEPARATE compute_print_genesis_hash reopening the file) with the single-snapshot
+boundary `genesis_consensus_authority::load_verify_and_build_genesis_authority`.
+That loader is RETAINED and still tested, but the genesis-authority route is now
+DISABLED: production no longer flows through it. A single early startup guard in
+main() refuses --consensus-authority-from-genesis before the per-mode dispatch:
+
+  crates/qbind-node/src/main.rs  (immediately before `match config.network_mode`)
+    if args.consensus_authority_from_genesis {
+        eprintln!("[binary] FATAL: --consensus-authority-from-genesis is refused:
+                   genesis-authority activation is disabled pending D4-D7. ...");
+        std::process::exit(1);
+    }
+
+The guard runs AFTER Run 102 run_boot_time_genesis_verification (so a valid
+genesis is fully boot-verified first) but BEFORE run_p2p_node / run_local_mesh_node
+(P2P service construction + consensus tasks live inside those), uniform across
+every network mode and environment. The downstream run_p2p_node genesis-authority
+block (which calls load_verify_and_build_genesis_authority and
+try_build_timeout_verification_context) is retained but is now UNREACHABLE:
+`args.consensus_authority_from_genesis` is always false there. The earlier
+LocalMesh-only string reject is REMOVED (subsumed by the unified guard).
+
+The legacy --validator-consensus-key CLI route is UNCHANGED and still reachable.
 UNRESOLVED (blockers): startup ordering vs P2pNodeBuilder::build (D4),
 shared-context separation (D5), signed-domain binding (D6), lifetime (D7).
 
+Baseline: this containment pass is applied atop local tip 514e433 ("update"),
+which contains the reviewed Run 422 implementation file-for-file. The reviewed
+commit recorded in the containment task, 9dbdbe4a, is not an object in this
+shallow single-branch clone.
+
+--- HISTORICAL (superseded) baseline/branch identifiers from the continuation ---
 Baseline: main @ 5c2f9381 (full: 5c2f93816a3ff67cec11605878bfb6705d637a47)
-Task branch: copilot/run-422-task-update
-  c2be13d  update (adds task/RUN_422_TASK.txt atop 5c2f938)
-Tested implementation SHA: a62624acc1ca6be7656e8219e0235f8cc3f44e22
-  (final documentation SHA recorded in the final report, not embedded here to
-   avoid self-referential provenance.)
+Task branch (as recorded then): copilot/run-422-task-update
 
 ============================================================================
 THE GAP (pre-Run-422)
@@ -89,12 +101,15 @@ New module crates/qbind-node/src/genesis_consensus_authority.rs:
   * reads ONLY GenesisConfig.validators[].pqc_public_key — never transport
     roots or bundle-signing roots (authority separation).
 
-Wiring, crates/qbind-node/src/main.rs (Run 422 block ~L7585-7708, bridge
-branch ~L7800-7853): behind `--consensus-authority-from-genesis`, resolves the
-authority fail-closed (external genesis required, re-load, re-hash, build,
-signer required, signer<->genesis key match), then feeds the SAME
-try_build_timeout_verification_context that the CLI path uses. The CLI
-`--validator-consensus-key` override path is bypassed on the genesis path.
+Wiring, crates/qbind-node/src/main.rs: the SINGLE early startup guard (before
+`match config.network_mode`) refuses --consensus-authority-from-genesis with
+exit code 1 across all modes/environments. The downstream Run 422 block (behind
+`if args.consensus_authority_from_genesis` inside run_p2p_node) still contains
+the fail-closed resolution (external genesis required, single-snapshot
+load/verify/build, signer required, signer<->genesis key match) feeding the SAME
+try_build_timeout_verification_context, but that block is UNREACHABLE now because
+the guard exits first. It is retained so the corrected loader stays covered by
+tests; it never activates in production.
 
 CLI, crates/qbind-node/src/cli.rs (~L250): adds
 `pub consensus_authority_from_genesis: bool` / `--consensus-authority-from-

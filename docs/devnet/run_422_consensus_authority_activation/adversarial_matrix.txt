@@ -1,6 +1,23 @@
 RUN 422 — ADVERSARIAL / NEGATIVE MATRIX
 
-*** CORRECTIVE CONTINUATION NOTE ***
+*** CONTAINMENT CORRECTION NOTE ***
+The genesis-authority route is DISABLED by a single early startup guard in
+main() (before `match config.network_mode`), so --consensus-authority-from-genesis
+now exits nonzero ("genesis-authority activation is disabled pending D4-D7")
+before any P2P service or consensus task, across all modes/environments. The
+per-case rows below describe the RETAINED loader (`load_verify_and_build_genesis_
+authority`) and its unit/integration tests, which still run — but they are no
+longer reachable via the production startup path. In particular:
+  - the C-section "valid DevNet material -> ACTIVE ctx" outcome is NO LONGER a
+    production outcome: with the flag set, valid DevNet genesis + matching signer
+    are REFUSED by the guard (process test
+    valid_genesis_and_signer_plus_flag_refused_before_p2p_service_start);
+  - the LocalMesh case is now the unified guard (source test renamed to
+    main_rs_refuses_genesis_activation_before_service_dispatch; process test
+    local_mesh_mode_cannot_bypass_the_refusal).
+The legacy --validator-consensus-key CLI route is UNCHANGED and still reachable.
+
+--- historical corrective note (loader-level negative cases, still tested) ---
 NEW behaviorally-tested cases (shared load_verify_and_build_genesis_authority):
   - replaced genesis input after boot -> IdentityChangedSinceBoot reject
     (shared_activation_replaced_input_rejected);
@@ -11,9 +28,7 @@ NEW behaviorally-tested cases (shared load_verify_and_build_genesis_authority):
   - out-of-range local validator id -> Authority(LocalValidatorOutOfRange)
     (shared_activation_out_of_range_local_id_rejects);
   - malformed genesis file -> GenesisReloadFailed reject
-    (shared_activation_malformed_genesis_file_rejects);
-  - --consensus-authority-from-genesis under LocalMesh -> startup reject
-    (main_rs_rejects_genesis_activation_under_local_mesh).
+    (shared_activation_malformed_genesis_file_rejects).
 WITHDRAWN claim: "digest sensitivity proves wrong-genesis signature rejection."
 Signed-domain replay isolation (wrong chain identity, different accepted genesis
 with overlapping/identical validator keys, altered signed content) is NOT
@@ -49,15 +64,19 @@ B. SIGNER LOADING
    pre-existing signer_loader responsibility, unchanged by Run 422.)
 
 C. ACTIVATION / ENVIRONMENT
-  valid DevNet material -> same constructor main uses -> ACTIVE ctx     [integ]
+  flag set (any material, any mode/env) -> EXIT!=0 at startup guard
+    ("genesis-authority activation is disabled pending D4-D7";
+     before P2P service construction / consensus tasks)              [integ:process]
+  valid DevNet genesis + matching signer + flag -> REFUSED (NOT active)[integ:process]
   absent activation -> None + Required                                  [wiring,reuse]
-  external genesis absent under activation -> EXIT!=0                    [wiring]
-  genesis re-load failure -> EXIT!=0                                     [wiring]
-  canonical hash computation failure -> EXIT!=0                          [wiring]
-  build failure (any A case) -> EXIT!=0 (no downgrade to None/unsigned)  [wiring]
-  signer_validator_id != local -> context disabled/rejected             [integ]
-  CLI --validator-consensus-key override on genesis path -> bypassed    [wiring,guard]
-  wrong-environment genesis (map_environment) -> hash/env reject         [reuse]
+  legacy --validator-consensus-key CLI route -> UNCHANGED, still reachable [design]
+  (The loader-level rows below are RETAINED tests of
+   load_verify_and_build_genesis_authority, not production outcomes:)
+  external genesis absent -> Err (loader)                               [integ]
+  genesis re-load failure -> GenesisReloadFailed (loader)              [integ]
+  build failure (any A case) -> Err (loader; no downgrade)             [unit,integ]
+  signer_validator_id != local -> context disabled/rejected            [integ]
+  wrong-environment genesis (map_environment) -> hash/env reject        [reuse]
 
 D. PROPOSAL / VOTE AUTHENTICITY (via reused Run 420 verifier + real backend)
   outbound Proposal/Vote signed by configured authorized signer, round-

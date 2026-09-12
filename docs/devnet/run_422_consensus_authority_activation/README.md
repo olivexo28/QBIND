@@ -5,24 +5,33 @@ Evidence archive README
 VERDICT (see summary.txt for the exact label block)
 ============================================================================
 
-*** CORRECTIVE CONTINUATION — supersedes the initial positive below ***
+*** CONTAINMENT CORRECTION — supersedes the reachable-activation state below ***
 
 RESULT=PARTIAL-FOR-DEVNET-CONSENSUS-AUTHORITY-ACTIVATION-CODE-TEST
-PRODUCTION_ACTIVATION=UNAVAILABLE-FOR-UNRESOLVED-BOUNDARIES
-F3_STATUS=CONFIGURED-AUTHORITY-PRODUCTION-PATH-PARTIAL
-F4_STATUS=CONFIGURED-AUTHORITY-PRODUCTION-PATH-PARTIAL
-F8_STATUS=CONFIGURED-AUTHORITY-PRODUCTION-PATH-PARTIAL
+GENESIS_AUTHORITY_ACTIVATION=DISABLED-PENDING-D4-D7
+LEGACY_CLI_CONTEXT_ACTIVATION=UNCHANGED-AND-STILL-REACHABLE
+CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED
+SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO
+
+The prior corrective continuation left the genesis-authority route reachable:
+valid genesis + matching signer + `--consensus-authority-from-genesis` still
+built an active context and reached the consensus loop. This containment pass
+disables that NEW route entirely via a single early startup refusal (exit
+nonzero, "genesis-authority activation is disabled pending D4-D7") enforced
+before P2P service construction and before any consensus task, across every
+network mode and environment, with no override/bypass/fallback. D4-D7 remain
+UNRESOLVED and are the precondition for any future re-enablement. The legacy
+`--validator-consensus-key` CLI-key route is UNCHANGED and still reachable, so
+no blanket "all production activation is unavailable" claim is made. See
+../QBIND_DEVNET_EVIDENCE_RUN_422.md for the full defect table.
+
+--- CORRECTIVE CONTINUATION (HISTORICAL, SUPERSEDED BY CONTAINMENT) ---
+
+RESULT=PARTIAL-FOR-DEVNET-CONSENSUS-AUTHORITY-ACTIVATION-CODE-TEST
+PRODUCTION_ACTIVATION=UNAVAILABLE-FOR-UNRESOLVED-BOUNDARIES (reachable path — corrected)
 CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED
 AUTHORITY_SCOPE=GENESIS-BOUND-DEVNET
 SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO
-
-Corrected this continuation: single-snapshot genesis provenance (D1),
-engine/verifier membership consistency (D2), and every-mode flag handling /
-LocalMesh reject (D3). Still UNRESOLVED and reported as blockers: startup
-ordering (D4), Proposal/Vote vs Timeout/NewView shared-context separation (D5),
-signed-domain / replay isolation (D6), genesis-static lifetime (D7). Because
-D4-D7 remain, production activation is UNAVAILABLE. See
-../QBIND_DEVNET_EVIDENCE_RUN_422.md for the full defect table.
 
 --- INITIAL CONCLUSION (HISTORICAL, SUPERSEDED) ---
 
@@ -46,35 +55,34 @@ unchanged.
 WHAT RUN 422 DOES
 ============================================================================
 
-Route A (genesis-bound). Enables the normal standalone `qbind-node` production
-code path to construct an immutable, validated consensus verification/signing
-context whose validator membership and per-validator authorized `(suite,
-public_key)` are derived DIRECTLY from the already boot-verified canonical
-genesis (`qbind_ledger::GenesisConfig.validators[].pqc_public_key`, ML-DSA-44),
-rather than from the uncommitted `--validator-consensus-key` CLI overrides used
-by Runs 031–033.
+Route A (genesis-bound) is DISABLED in production by this containment pass. The
+opt-in flag `--consensus-authority-from-genesis` remains defined, but supplying
+it during normal startup now triggers a single early startup refusal rather than
+building any consensus context.
 
-New opt-in production flag: `--consensus-authority-from-genesis` (default off).
-When set, the node:
+New/retained opt-in production flag: `--consensus-authority-from-genesis`
+(default off). When set during normal startup, the node:
 
-  1. REQUIRES an external `--genesis-path` (already boot-verified by Run 102);
-  2. re-loads + re-hashes that genesis to obtain the canonical genesis hash;
-  3. builds an immutable, validated `GenesisConsensusAuthority` (membership +
-     one authorized ML-DSA-44 key/suite per validator + a domain-tagged
-     authority commitment bound to chain_id and genesis hash);
-  4. REQUIRES a loaded local signer (`--signer-keystore-path`);
-  5. enforces that the loaded signer public key EQUALS the genesis-committed
-     key for the local validator;
-  6. feeds the SAME validated constructor `main` already uses
-     (`try_build_timeout_verification_context`) to obtain an active context.
+  1. exits NONZERO at the single startup guard in `main` (immediately before the
+     `match config.network_mode` service dispatch), with the diagnostic
+     "genesis-authority activation is disabled pending D4-D7";
+  2. does so AFTER Run 102 boot-time genesis verification but BEFORE any P2P
+     service is constructed and BEFORE any consensus task is spawned;
+  3. applies uniformly across every network mode (LocalMesh and P2P) and every
+     environment, with no override, hidden flag, environment bypass, or unsigned
+     fallback, and never silently continues with `None` after the explicit
+     activation request.
 
-Any failure in 1–5 exits startup NONZERO before P2P/consensus start. There is
-no silent downgrade to `None`/unsigned operation, and the CLI
-`--validator-consensus-key` override path is NOT consulted on the genesis path.
+The corrected authority loader (`load_verify_and_build_genesis_authority`:
+single-snapshot provenance, boot-identity equality, membership-count reject) is
+RETAINED and still exercised by the provider tests, but is no longer reachable
+from a normally built binary because the flag is contained upstream.
 
 When the flag is absent, behavior is byte-for-byte the Run 421 default:
 `verification_ctx == None` + `ConsensusVerificationPolicy::Required`
-(unavailable-authority fail-closed).
+(unavailable-authority fail-closed). The legacy `--validator-consensus-key` CLI
+route is UNCHANGED and still reachable — this pass blocks only the new
+genesis-authority route.
 
 ============================================================================
 ARCHIVE CONTENTS

@@ -1,21 +1,34 @@
 RUN 422 — VERIFICATION-CONTEXT CONSTRUCTION TRACE (main -> validated ctx)
 
-*** CORRECTIVE CONTINUATION NOTE ***
-UNRESOLVED / WITHDRAWN claim: "invalid activation always fails before P2P
-startup." The authority/signer/membership validation still runs AFTER
-builder.build(...) (which constructs the transport) and after the engine
-num_validators config is assembled. Inbound consensus frames are buffered on the
-bounded ChannelConsensusHandler channel and only drained by the consensus loop
-spawned after the verification context is enforced, but a full reorder placing
-ALL authority validation before transport construction is NOT performed here.
-The single-snapshot provenance and membership-count reject ARE now enforced by
-the shared load_verify_and_build_genesis_authority boundary before the context
-is built. Signed-domain round-trip is NOT demonstrated (D6, see
-adversarial_matrix.txt).
+*** CONTAINMENT CORRECTION NOTE (READ FIRST) ***
+The genesis-authority activation trace shown below is NO LONGER a production
+path. A single early startup guard in main() (immediately before
+`match config.network_mode`) refuses --consensus-authority-from-genesis with
+exit code 1 ("genesis-authority activation is disabled pending D4-D7") AFTER
+Run 102 boot verification but BEFORE run_p2p_node / run_local_mesh_node (where
+P2P service construction and consensus tasks live). Therefore
+`args.consensus_authority_from_genesis` is always false inside run_p2p_node and
+the `Some(authority)` / try_build_timeout_verification_context branch below is
+UNREACHABLE in a normally built binary. The block and the shared constructor are
+retained only so the corrected loader stays under test; they never activate in
+production. The "~Lxxxx" line numbers below are HISTORICAL (pre-containment) and
+are not reliable anchors after this pass.
 
-The critical Run 422 requirement: `main` must invoke the SAME validated
-constructor the tests exercise, and obtain `Some(ctx)` only from fully validated
-genesis-bound material. This trace shows the exact call path.
+The prior WITHDRAWN claim ("invalid activation always fails before P2P startup")
+is now moot for the genesis route: the entire route is refused before P2P
+startup by the guard. The startup-ordering restructuring (D4) that would be
+required to ever RE-ENABLE the route remains UNRESOLVED. Signed-domain round-trip
+is NOT demonstrated (D6, see adversarial_matrix.txt).
+
+The behavioral proof of the refusal is the process-level
+run_422_startup_refusal_tests (valid DevNet genesis + matching signer + flag are
+refused before the P2P/LocalMesh service-start log markers appear).
+
+--- HISTORICAL activation call trace (UNREACHABLE after containment) -----------
+
+The (historical) Run 422 requirement: `main` invoked the SAME validated
+constructor the tests exercise, obtaining `Some(ctx)` only from fully validated
+genesis-bound material. This trace shows the exact (now-unreachable) call path.
 
 crates/qbind-node/src/main.rs (real_main / node startup path)
   ~L7585  // Run 422 block begins

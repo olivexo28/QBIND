@@ -1,48 +1,53 @@
 RUN 422 — CONFIGURATION / ACTIVATION MATRIX
 
-*** CORRECTIVE CONTINUATION NOTE ***
-Added rows/behavior this continuation:
-  - LocalMesh + flag set                -> REJECT non-zero (precise diagnostic);
-  - P2P + genesis validators == peers+1 -> proceed to signer match;
-  - P2P + genesis validators != peers+1 -> REJECT (MembershipCountMismatch);
-  - P2P + reread genesis identity != boot-accepted -> REJECT
-    (IdentityChangedSinceBoot);
-  - P2P + wrong --expect-genesis-hash    -> REJECT (GenesisRevalidationFailed).
-Consensus membership is defined by GenesisConfig.validators, never by the
-connected-peer count; a disagreement is rejected, not silently resized.
+*** CONTAINMENT CORRECTION NOTE ***
+The genesis-authority route is DISABLED. A single early startup guard in `main`
+(immediately before `match config.network_mode`, after Run 102 boot verification,
+before P2P service construction and any consensus task) refuses
+--consensus-authority-from-genesis with EXIT!=0 for EVERY network mode and
+environment. There is therefore NO flag-ON row that reaches ACTIVE — the prior
+"on / present / present / YES -> ACTIVE" outcome is REMOVED. The downstream
+per-mode validation rows (membership count, boot-identity equality, expected-hash)
+are now unreachable in production; they survive only as retained provider-loader
+tests. The legacy --validator-consensus-key CLI route is UNCHANGED and still
+reachable (it is NOT the genesis route and can still build a context).
 
 Flag: --consensus-authority-from-genesis (default: OFF)
 Local signer: --signer-keystore-path (existing)
 External genesis: --genesis-path (existing, boot-verified by Run 102)
 
 Legend:
-  ACTIVE  = immutable validated context built via
-            try_build_timeout_verification_context => Some(ctx)
   NONE    = verification_ctx == None + ConsensusVerificationPolicy::Required
             (Run 421 unavailable-authority fail-closed default)
   EXIT!=0 = std::process::exit(1) before P2P/consensus service start
+  ACTIVE  = (genesis route) NOT REACHABLE — disabled pending D4-D7
 
 ============================================================================
-ENV=DevNet
+ENV=DevNet (and every other environment — the guard is environment-uniform)
 ============================================================================
 
 flag  ext-genesis  signer  signer==genesis-key  => outcome
 ----  -----------  ------  -------------------   ----------------------------
-off   any          any     n/a                   NONE  (Run 421 default; CLI
+off   any          any     n/a                   NONE  (Run 421 default; legacy
                                                         --validator-consensus-key
-                                                        path preserved for
+                                                        CLI route preserved and
+                                                        still reachable for
                                                         Run 031-033 behavior)
-on    absent       any     n/a                   EXIT!=0 (external genesis req.)
-on    present      absent  n/a                   EXIT!=0 (local signer required)
-on    present      present NO                    EXIT!=0 (signer<->genesis key
-                                                        mismatch; no downgrade)
-on    present      present local not in genesis  EXIT!=0 (local validator absent
-                                                        from committed authority)
-on    present(bad) any     n/a                   EXIT!=0 (re-load/re-hash fail)
-on    present(malformed committed key)           EXIT!=0 (build rejects: hex/
-                                                        length/suite/dup/overflow)
-on    present      present YES                    ACTIVE (genesis-bound context;
-                                                        Proposal/Vote sign+verify)
+on    any          any     any                   EXIT!=0 (startup guard: refused,
+                                                        "genesis-authority
+                                                        activation is disabled
+                                                        pending D4-D7"; refusal
+                                                        precedes the network-mode
+                                                        dispatch, so genesis is
+                                                        never paired into a
+                                                        context and no consensus
+                                                        task starts)
+
+Note: because the guard fires before per-mode dispatch, the on-row outcome does
+not depend on ext-genesis/signer validity. Even fully valid DevNet genesis + a
+matching signer are refused (proven by run_422_startup_refusal_tests), so the
+refusal is attributable to the guard and not to a parser/fixture/missing-file
+error.
 
 ============================================================================
 ENV=TestNet / ENV=MainNet (STRICT)
@@ -61,9 +66,10 @@ ENV=TestNet / ENV=MainNet (STRICT)
 INVARIANTS
 ============================================================================
 
-* No partially initialized context escapes: the authority is built fully and
-  validated BEFORE the bridge constructor runs; any failure exits before P2P.
-* No CLI --validator-consensus-key override escapes on the genesis path: it is
-  explicitly bypassed (peer_kp_result forced to NoConfiguredKeys).
+* No partially initialized context escapes: the genesis route is refused at the
+  single startup guard before the bridge constructor could run; the guard exits
+  before P2P service construction and any consensus task.
+* The genesis route never consults --validator-consensus-key; the legacy CLI
+  route remains a SEPARATE, unchanged, still-reachable path (not blocked here).
 * Absent activation is byte-identical to Run 421 (NONE + Required).
-* Every explicit invalid/partial activation fails nonzero before network start.
+* Every genesis-route activation request fails nonzero before network start.

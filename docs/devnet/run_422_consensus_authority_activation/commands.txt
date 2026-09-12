@@ -1,12 +1,17 @@
 RUN 422 — VALIDATION COMMANDS AND EXIT STATUS
 
-*** CORRECTIVE CONTINUATION — commands run in this environment ***
+*** CONTAINMENT CORRECTION — commands run in this environment ***
 (rustc/cargo as reported by the toolchain in this sandbox)
 
+  cargo build -p qbind-node --bin qbind-node
+      -> exit 0 (Finished dev profile; guard compiles)
+  cargo test -p qbind-node --test run_422_startup_refusal_tests -- --test-threads=1
+      -> exit 0 (4 passed; 0 failed)
+         valid_genesis_and_signer_plus_flag_refused_before_p2p_service_start,
+         local_mesh_mode_cannot_bypass_the_refusal,
+         flag_absent_is_not_refused_by_the_guard, help_behavior_is_preserved
   cargo test -p qbind-node --test run_422_genesis_consensus_authority_tests
       -> exit 0 (15 passed; 0 failed)
-  cargo test -p qbind-node --lib genesis_consensus_authority
-      -> exit 0 (14 passed; 0 failed; 1442 filtered out)
   cargo test -p qbind-node --test run_420_production_policy_reachability_tests
       -> exit 0 (3 passed)
   cargo test -p qbind-node --test run_418_authenticated_peer_consensus_sender_binding_tests
@@ -14,20 +19,48 @@ RUN 422 — VALIDATION COMMANDS AND EXIT STATUS
   cargo test -p qbind-node --test run_418_newview_demux_chain_integration_tests
       -> exit 0 (3 passed)
   cargo build -p qbind-node --release --bin qbind-node
-      -> exit 0 (Finished `release` profile [optimized])
-  cargo fmt -p qbind-node -- --check (changed files)   -> see below
-  cargo clippy                                          -> pre-existing warnings
-      only (e.g. p2p_node_builder.rs cert_bound_node_id dead_code); NOT run to
-      completion repo-wide in this continuation and NOT claimed clean.
-  CodeQL: NOT run in this environment (no CodeQL Rust database analysis was
-      executed here). A skipped Rust database analysis provides NO zero-alert
-      conclusion; recorded honestly as INCOMPLETE, not as a pass.
-  Secret/privacy scan: run on changed files (see report); no secrets introduced.
+      -> exit 0 (Finished `release` profile [optimized] in ~5m42s)
+  cargo fmt -p qbind-node -- --check (changed files)   -> see FORMAT/LINT below
+  CodeQL: run via parallel_validation before finalizing; a skipped Rust database
+      analysis provides NO zero-alert conclusion and is recorded as such.
+  Secret/privacy scan: runtime secret_scanning on changed files; no secrets.
 
-Older evidence-preservation harnesses (run_417/418/419/421, run_404/405,
-run_410-415) were NOT re-executed in this continuation; the historical archives
-are preserved byte-for-byte (only Run 422 evidence and the four package-integrity
-anchors were edited). Any harness re-run is deferred to a validation pass.
+  ---- Run 404 / Run 405 reconciliation (task section 4 & 5) ----
+  No curated anchor file (the 16 entries in
+  PACKAGE_INTEGRITY_MANIFEST.example.json under docs/release/public-devnet) was
+  modified by this pass — only docs/devnet/ Run 422 evidence + this archive were
+  edited — so no anchor sha256/byte_size refresh was required. The Run 404/405
+  harnesses were nevertheless EXECUTED in this environment to record an actual
+  result at the tested revision:
+    bash scripts/devnet/run_404_public_devnet_package_integrity_manifest.sh
+        -> exit 0  RESULT=POSITIVE (16 files verified; every sha256+byte_size
+           matches on-disk; M4/M6/S5/S7 Yellow; C4/C5 OPEN; DevNet NOT launch-ready)
+    bash scripts/devnet/run_405_public_devnet_full_tree_package_integrity.sh
+        -> exit 0  RESULT=POSITIVE (transient full-tree manifest; all hashes/sizes
+           match; Run 404 anchor manifest still validates; nothing committed)
+  Reconciliation of the historical discrepancy: an earlier Run 422 final report
+  stated Run 404 "passed" while that continuation's commands.txt stated Run 404
+  was "NOT re-executed". The ACTUAL state for THIS containment pass is recorded
+  above: Run 404 AND Run 405 were re-executed and both exited 0 at the tested
+  revision (local tip after the containment commits). This supersedes the
+  not-rerun claim for this pass; no anchor bytes changed.
+
+  ---- Historical harness preservation ----
+  Older release-binary evidence-preservation harnesses (run_417/418/419/421,
+  run_410-415) were NOT re-executed in this pass; their archives are preserved
+  byte-for-byte. Only Run 422 evidence + this archive were edited.
+
+--- CORRECTIVE CONTINUATION (HISTORICAL) COMMANDS ---
+(rustc/cargo as reported by the toolchain in that sandbox)
+
+  cargo test -p qbind-node --test run_422_genesis_consensus_authority_tests
+      -> exit 0 (15 passed; 0 failed)
+  cargo test -p qbind-node --lib genesis_consensus_authority
+      -> exit 0 (14 passed; 0 failed; 1442 filtered out)
+  cargo build -p qbind-node --release --bin qbind-node
+      -> exit 0 (Finished `release` profile [optimized])
+  Run 404/405/417/418/419/421 harnesses were NOT re-executed in that
+  continuation (superseded by the re-execution recorded above).
 
 --- INITIAL (HISTORICAL) COMMANDS ---
 
