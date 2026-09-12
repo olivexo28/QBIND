@@ -4752,25 +4752,51 @@ async fn main() {
             }
         }
     }
+    // ------------------------------------------------------------------
+    // Run 422 containment correction — genesis-authority activation is
+    // DISABLED pending D4-D7.
+    //
+    // The earlier Run 422 wiring still allowed valid genesis + matching
+    // signer inputs, together with `--consensus-authority-from-genesis`, to
+    // construct an active consensus context and reach the consensus loop.
+    // Merely documenting the verdict as PARTIAL did not disable that path.
+    //
+    // This is the single production startup guard: when the flag is present
+    // during normal startup, qbind-node exits non-zero here — after the
+    // Run 102 boot-time genesis verification above, but strictly BEFORE the
+    // per-mode transport/wiring dispatch below. That means the refusal
+    // happens before any P2P service is constructed or started and before
+    // any consensus task is spawned (both live inside `run_p2p_node` /
+    // `run_local_mesh_node`), and it applies uniformly across every
+    // production network mode and environment.
+    //
+    // There is deliberately no override, hidden flag, environment bypass, or
+    // unsigned fallback, and the flag is never silently ignored nor allowed
+    // to continue with `None` after an explicit activation request. Ordinary
+    // `--help` is handled by `CliArgs::parse_args` above and is unaffected.
+    // The legacy `--validator-consensus-key` CLI-key activation route is a
+    // separate path and is intentionally left unchanged.
+    //
+    // See docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422.md.
+    // ------------------------------------------------------------------
+    if args.consensus_authority_from_genesis {
+        eprintln!(
+            "[binary] FATAL: --consensus-authority-from-genesis is refused: \
+             genesis-authority activation is disabled pending D4-D7. \
+             Genesis-bound consensus authority activation is unavailable in \
+             production, so qbind-node refuses to start rather than activate \
+             the unresolved genesis-authority route. This refusal is enforced \
+             before P2P service construction and before any consensus task \
+             starts, across every network mode and environment, with no \
+             override, hidden flag, environment bypass, or unsigned fallback. \
+             See docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422.md."
+        );
+        std::process::exit(1);
+    }
+
     // Branch based on network mode for transport / wiring.
     match config.network_mode {
         NetworkMode::LocalMesh => {
-            // Run 422 corrective (task section 6): the explicit
-            // genesis-authority activation flag is only implemented for the
-            // P2P production startup mode. Under LocalMesh it would be
-            // silently ignored, which is a covert downgrade of an explicit
-            // security request. Reject it non-zero with a precise diagnostic
-            // rather than starting without the requested authority.
-            if args.consensus_authority_from_genesis {
-                eprintln!(
-                    "[binary] FATAL: --consensus-authority-from-genesis was requested but \
-                     --network-mode local-mesh does not implement genesis-bound consensus \
-                     authority activation. qbind-node refuses to start rather than silently \
-                     ignore the request. Use --network-mode p2p. See \
-                     docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422.md."
-                );
-                std::process::exit(1);
-            }
             run_local_mesh_node(
                 &config,
                 &args,
@@ -7614,6 +7640,16 @@ async fn run_p2p_node(
     // ------------------------------------------------------------------
     let genesis_authority: Option<qbind_node::genesis_consensus_authority::GenesisConsensusAuthority> =
         if args.consensus_authority_from_genesis {
+            // Run 422 containment correction — this branch is unreachable in a
+            // normally built binary: the single production startup guard in
+            // `main` exits non-zero when `--consensus-authority-from-genesis`
+            // is present, before this per-mode code (and any P2P service or
+            // consensus task) is reached, so `args.consensus_authority_from_genesis`
+            // is always `false` here. The corrected authority loader below is
+            // retained (and exercised by tests) but never activates in
+            // production. Genesis-authority activation stays disabled pending
+            // D4-D7. See docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422.md.
+            //
             // 1. External genesis is mandatory — there is nothing to bind
             //    to on the embedded-genesis path.
             if !config.genesis_source.use_external || config.genesis_source.genesis_path.is_none() {
