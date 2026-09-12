@@ -347,6 +347,7 @@ async fn b11_c_inbound_metrics_increment_on_every_inbound_frame() {
         outbound: facade,
         peer_connectivity: None,
         verification_ctx: None,
+        proposal_vote_authority: None,
         binding_gate: None,
         verification_policy: ConsensusVerificationPolicy::LocalFixtureUnsigned,
     };
@@ -469,6 +470,7 @@ async fn b11_d_b9_late_peer_reemit_does_not_double_count() {
         outbound: facade_v0,
         peer_connectivity: Some(conn_v0_dyn),
         verification_ctx: None,
+        proposal_vote_authority: None,
         binding_gate: None,
         verification_policy: ConsensusVerificationPolicy::LocalFixtureUnsigned,
     };
@@ -570,4 +572,4 @@ async fn b11_e_localmesh_io_none_path_does_not_touch_consensus_net_counters() {
     assert_eq!(metrics.network().inbound_proposal_total(), 0);
     assert_eq!(metrics.network().inbound_vote_total(), 0);
     assert_eq!(metrics.network().inbound_other_total(), 0);
-}
+}

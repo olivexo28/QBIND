@@ -770,6 +770,7 @@ mod tests {
             &metrics,
             ValidatorId(0),
             Some(&ctx),
+            None,
             ConsensusVerificationPolicy::LocalFixtureUnsigned,
         );
         (stats, view_before, engine.current_view())
@@ -1058,6 +1059,7 @@ mod tests {
             &metrics,
             ValidatorId(0),
             Some(&ctx),
+            None,
             ConsensusVerificationPolicy::LocalFixtureUnsigned,
         );
         assert_eq!(stats.inbound_timeout_rejected_bad_signature, 1);
@@ -1080,6 +1082,7 @@ mod tests {
             &metrics,
             ValidatorId(0),
             Some(&ctx),
+            None,
             ConsensusVerificationPolicy::LocalFixtureUnsigned,
         );
         assert_eq!(stats.inbound_timeout_verify_accepted, 1);
@@ -1126,9 +1129,10 @@ mod tests {
             &metrics,
             ValidatorId(0),
             Some(&ctx),
+            None,
             ConsensusVerificationPolicy::LocalFixtureUnsigned,
         );
         assert_eq!(stats.inbound_timeout_rejected_bad_signature, 1);
         assert_eq!(stats.inbound_timeout_engine_accepted, 0);
     }
-}
+}

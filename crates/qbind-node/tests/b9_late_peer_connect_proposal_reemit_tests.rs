@@ -180,6 +180,7 @@ fn spawn_loop_for_test(
         outbound: outbound_dyn,
         peer_connectivity: Some(connectivity_dyn),
         verification_ctx: None,
+        proposal_vote_authority: None,
         binding_gate: None,
         verification_policy: ConsensusVerificationPolicy::LocalFixtureUnsigned,
     };
@@ -365,6 +366,7 @@ async fn b9_c_view_change_does_not_replay_stale_proposal_for_old_view() {
         outbound: outbound_dyn,
         peer_connectivity: Some(connectivity_dyn),
         verification_ctx: None,
+        proposal_vote_authority: None,
         binding_gate: None,
         verification_policy: ConsensusVerificationPolicy::LocalFixtureUnsigned,
     };
@@ -454,6 +456,7 @@ async fn b9_d_peer_connected_before_first_proposal_is_bounded() {
         outbound: outbound_dyn,
         peer_connectivity: Some(connectivity_dyn),
         verification_ctx: None,
+        proposal_vote_authority: None,
         binding_gate: None,
         verification_policy: ConsensusVerificationPolicy::LocalFixtureUnsigned,
     };
@@ -516,6 +519,7 @@ async fn b9_e_no_peer_connectivity_means_no_reemit_path_at_all() {
         outbound,
         peer_connectivity: None,
         verification_ctx: None,
+        proposal_vote_authority: None,
         binding_gate: None,
         verification_policy: ConsensusVerificationPolicy::LocalFixtureUnsigned,
     };
@@ -583,4 +587,4 @@ async fn b9_f_io_none_loop_unaffected_by_b9() {
         "io=None path must still emit proposals; got {}",
         final_progress.proposals_emitted
     );
-}
+}

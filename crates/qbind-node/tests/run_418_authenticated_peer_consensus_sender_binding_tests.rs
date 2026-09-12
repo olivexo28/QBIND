@@ -240,6 +240,7 @@ async fn drive_one(
         outbound: outbound_dyn,
         peer_connectivity: None,
         verification_ctx: None,
+        proposal_vote_authority: None,
         binding_gate: Some(gate),
         verification_policy: ConsensusVerificationPolicy::LocalFixtureUnsigned,
     };
@@ -921,4 +922,4 @@ fn contains_subsequence(haystack: &[u8], needle: &[u8]) -> bool {
         return false;
     }
     haystack.windows(needle.len()).any(|w| w == needle)
-}
+}
