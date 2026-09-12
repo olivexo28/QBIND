@@ -7581,15 +7581,151 @@ async fn run_p2p_node(
     // `static_peer_consensus_keys` configured), we preserve Run 032
     // disabled behaviour bit-for-bit.
     // ------------------------------------------------------------------
-    let peer_kp_result = build_validator_set_and_key_provider(
-        config,
-        local_validator_id,
-        local_signer_pk.as_deref(),
-    );
+    //
+    // Run 422: genesis-bound consensus authority (Route A). When the
+    // operator sets `--consensus-authority-from-genesis`, the authority
+    // is sourced from the boot-verified canonical genesis rather than the
+    // uncommitted `--validator-consensus-key` CLI overrides. This is the
+    // explicit, fail-closed activation path that ties consensus signing
+    // authority to the accepted network/genesis identity.
+    // ------------------------------------------------------------------
+    let genesis_authority: Option<qbind_node::genesis_consensus_authority::GenesisConsensusAuthority> =
+        if args.consensus_authority_from_genesis {
+            // 1. External genesis is mandatory — there is nothing to bind
+            //    to on the embedded-genesis path.
+            if !config.genesis_source.use_external || config.genesis_source.genesis_path.is_none() {
+                eprintln!(
+                    "[binary] FATAL: --consensus-authority-from-genesis requires an external \
+                     --genesis-path (already boot-verified by Run 102); none is configured. \
+                     qbind-node refuses to start. See \
+                     docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422.md."
+                );
+                std::process::exit(1);
+            }
+            let genesis_path = config
+                .genesis_source
+                .genesis_path
+                .as_ref()
+                .expect("checked above");
+            let env_policy = qbind_node::pqc_boot_genesis::map_environment(config.environment);
+            // 2. Re-load + re-hash the genesis (boot verification already
+            //    proved it parses and matches any pinned expected hash).
+            let genesis = match qbind_node::pqc_boot_genesis::load_external_genesis(genesis_path) {
+                Ok(g) => g,
+                Err(e) => {
+                    eprintln!(
+                        "[binary] FATAL: --consensus-authority-from-genesis could not re-load the \
+                         external genesis: {}. qbind-node refuses to start.",
+                        e
+                    );
+                    std::process::exit(1);
+                }
+            };
+            let canonical_hash = match qbind_node::pqc_boot_genesis::compute_print_genesis_hash(
+                genesis_path,
+                env_policy,
+            ) {
+                Ok(h) => h,
+                Err(e) => {
+                    eprintln!(
+                        "[binary] FATAL: --consensus-authority-from-genesis could not compute the \
+                         canonical genesis hash: {}. qbind-node refuses to start.",
+                        e
+                    );
+                    std::process::exit(1);
+                }
+            };
+            // 3. Build the immutable, validated genesis-bound authority.
+            let authority =
+                match qbind_node::genesis_consensus_authority::build_genesis_consensus_authority(
+                    &genesis,
+                    &canonical_hash,
+                    local_validator_id,
+                ) {
+                    Ok(a) => a,
+                    Err(e) => {
+                        eprintln!(
+                            "[binary] FATAL: --consensus-authority-from-genesis rejected the \
+                             genesis-committed authority: {}. qbind-node refuses to start (no \
+                             silent downgrade to unsigned operation). See \
+                             docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422.md.",
+                            e
+                        );
+                        std::process::exit(1);
+                    }
+                };
+            // 4. A matching local signer is mandatory under explicit
+            //    activation: verify-only activation when a signer was
+            //    the whole point would be a silent downgrade.
+            let local_pk = match local_signer_pk.as_deref() {
+                Some(pk) => pk,
+                None => {
+                    eprintln!(
+                        "[binary] FATAL: --consensus-authority-from-genesis requires a loaded \
+                         local validator signer (--signer-keystore-path); none was loaded. \
+                         qbind-node refuses to start."
+                    );
+                    std::process::exit(1);
+                }
+            };
+            // 5. The loaded signer's public key MUST equal the
+            //    genesis-committed key for the local validator. This is
+            //    the genesis-authority ⇄ local-custody binding.
+            match authority.key_provider.get_suite_and_key(local_validator_id) {
+                Some((_suite, genesis_pk)) if genesis_pk.as_slice() == local_pk => {}
+                Some((_suite, genesis_pk)) => {
+                    eprintln!(
+                        "[binary] FATAL: --consensus-authority-from-genesis: loaded signer public \
+                         key (fp={}) does not match the genesis-committed key (fp={}) for local \
+                         validator {:?}. qbind-node refuses to start.",
+                        qbind_node::signer_loader::public_key_fingerprint(local_pk),
+                        qbind_node::signer_loader::public_key_fingerprint(&genesis_pk),
+                        local_validator_id,
+                    );
+                    std::process::exit(1);
+                }
+                None => {
+                    eprintln!(
+                        "[binary] FATAL: --consensus-authority-from-genesis: local validator {:?} \
+                         is not present in the genesis-committed authority. qbind-node refuses to \
+                         start.",
+                        local_validator_id,
+                    );
+                    std::process::exit(1);
+                }
+            }
+            eprintln!(
+                "[binary] Run 422: genesis-bound consensus authority built — validators={} \
+                 chain_id={} commitment_fp={} local_validator={:?}",
+                authority.validator_count,
+                authority.chain_id,
+                qbind_node::signer_loader::public_key_fingerprint(&authority.commitment),
+                local_validator_id,
+            );
+            Some(authority)
+        } else {
+            None
+        };
+
+    // ------------------------------------------------------------------
+    let peer_kp_result = if genesis_authority.is_some() {
+        // Genesis path owns the authority; do not consult the CLI
+        // `--validator-consensus-key` overrides.
+        Err(PeerKeyProviderError::NoConfiguredKeys)
+    } else {
+        build_validator_set_and_key_provider(
+            config,
+            local_validator_id,
+            local_signer_pk.as_deref(),
+        )
+    };
     let (loaded_kp, peer_kp_log_summary): (
         Option<qbind_node::peer_key_provider::LoadedValidatorKeyProvider>,
         String,
-    ) = match peer_kp_result {
+    ) = if genesis_authority.is_some() {
+        (None, "genesis-sourced(run422)".to_string())
+    } else {
+        match peer_kp_result {
         Ok(loaded) => {
             let log = format!(
                 "loaded(validators={},peer_ids={:?},suite_ids={:?},fingerprints={:?})",
@@ -7650,16 +7786,41 @@ async fn run_p2p_node(
             }
             (None, format!("load_failed({})", e))
         }
+        }
     };
 
-    node_metrics.set_timeout_verification_key_provider_loaded(loaded_kp.is_some());
+    node_metrics.set_timeout_verification_key_provider_loaded(
+        loaded_kp.is_some() || genesis_authority.is_some(),
+    );
 
     // Build the activation outcome. If both halves are present, run
     // the real `try_build_timeout_verification_context`; otherwise
     // preserve the Run 032 signer-only probe.
     let supported_suite_ids: &[u16] = &[100]; // ML-DSA-44 (SUITE_PQ_RESERVED_1)
     let timeout_verification_outcome: TimeoutVerificationActivation =
-        match (signer_for_bridge.clone(), loaded_kp.as_ref()) {
+        if let Some(authority) = genesis_authority.as_ref() {
+            // Run 422: genesis-bound authority path. The signer and the
+            // signer⇄genesis key match were already enforced fail-closed
+            // above, so the same validated constructor `main` uses
+            // everywhere is fed genesis-committed material.
+            use qbind_consensus::crypto_verifier::SimpleBackendRegistry;
+            use qbind_crypto::{ml_dsa44::MlDsa44Backend, ConsensusSigSuiteId};
+            let mut registry = SimpleBackendRegistry::new();
+            registry.register(
+                ConsensusSigSuiteId::new(100),
+                std::sync::Arc::new(MlDsa44Backend::new()),
+            );
+            let inputs = TimeoutVerificationBridgeInputs {
+                validators: authority.validators.clone(),
+                key_provider: authority.key_provider.clone(),
+                backend_registry: std::sync::Arc::new(registry),
+                chain_id: config.chain_id(),
+                signer: signer_for_bridge.clone(),
+                local_validator_id,
+            };
+            try_build_timeout_verification_context(inputs)
+        } else {
+            match (signer_for_bridge.clone(), loaded_kp.as_ref()) {
             (Some(signer), Some(kp)) => {
                 // Real bridge inputs — reuse existing
                 // `SimpleBackendRegistry` + `MlDsa44Backend` constructors,
@@ -7688,6 +7849,7 @@ async fn run_p2p_node(
                 // Run 032 disabled-with-precise-reason path.
                 run_032_probe_with_signer(signer_for_bridge.clone(), local_validator_id)
             }
+        }
         };
 
     eprintln!(
@@ -7703,6 +7865,7 @@ async fn run_p2p_node(
         loaded_kp
             .as_ref()
             .map(|kp| kp.validator_count as u64)
+            .or_else(|| genesis_authority.as_ref().map(|a| a.validator_count as u64))
             .unwrap_or(num_validators),
         config.chain_id(),
         supported_suite_ids,
@@ -7734,6 +7897,7 @@ async fn run_p2p_node(
         loaded_kp
             .as_ref()
             .map(|kp| kp.validator_count as u64)
+            .or_else(|| genesis_authority.as_ref().map(|a| a.validator_count as u64))
             .unwrap_or(0)
     } else {
         0
@@ -7748,6 +7912,7 @@ async fn run_p2p_node(
             loaded_kp
                 .as_ref()
                 .map(|kp| kp.validator_count as u64)
+                .or_else(|| genesis_authority.as_ref().map(|a| a.validator_count as u64))
                 .unwrap_or(0)
         );
     } else if loaded_kp.is_some() && signer_for_bridge.is_some() {

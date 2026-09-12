@@ -248,6 +248,30 @@ pub struct CliArgs {
     #[arg(long = "require-timeout-verification", default_value_t = false)]
     pub require_timeout_verification: bool,
 
+    /// Run 422: source the consensus verification/signing authority
+    /// (validator set + per-validator public key/suite) from the
+    /// boot-verified **canonical genesis** instead of the uncommitted
+    /// `--validator-consensus-key` CLI overrides.
+    ///
+    /// When set, the binary derives the `TimeoutVerificationContext`
+    /// authority from `GenesisConfig.validators[].pqc_public_key`, bound
+    /// to the accepted genesis hash. This requires:
+    /// - an external genesis configured (`--genesis-path`), already
+    ///   verified at boot by Run 102;
+    /// - a loaded local validator signer whose public key matches the
+    ///   genesis-committed key for `--validator-id`.
+    ///
+    /// Any invalid/partial activation (missing external genesis, missing
+    /// signer, signer/genesis key mismatch, malformed committed key)
+    /// fails startup non-zero; it never silently downgrades to unsigned
+    /// operation. When unset, behaviour is unchanged (Run 033/421 CLI
+    /// path or fail-closed unavailable authority).
+    ///
+    /// See `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422.md` and
+    /// `docs/whitepaper/contradiction.md` C5.
+    #[arg(long = "consensus-authority-from-genesis", default_value_t = false)]
+    pub consensus_authority_from_genesis: bool,
+
     /// Run 033: explicit per-validator consensus public key for
     /// timeout-verification activation.
     ///
