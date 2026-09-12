@@ -440,15 +440,32 @@ fn shared_activation_malformed_genesis_file_rejects() {
     }
 }
 
-/// Source-level guard: LocalMesh startup rejects the explicit activation flag
-/// rather than silently ignoring it (task section 6, every-mode handling).
+/// Source-level guard: production `main.rs` contains a SINGLE early startup
+/// refusal for `--consensus-authority-from-genesis` that fires before the
+/// per-mode transport/wiring dispatch (so before any P2P service or consensus
+/// task) and is not scoped to one network mode. The authoritative behavioral
+/// proof — including that other startup modes cannot bypass it — lives in the
+/// process-level `run_422_startup_refusal_tests`.
 #[test]
-fn main_rs_rejects_genesis_activation_under_local_mesh() {
+fn main_rs_refuses_genesis_activation_before_service_dispatch() {
     let src = read("main.rs");
+    // The unified refusal diagnostic (disabled pending D4-D7) is present.
     assert!(
-        src.contains("does not implement genesis-bound consensus")
-            && src.contains("--network-mode local-mesh"),
-        "main.rs must reject --consensus-authority-from-genesis under LocalMesh"
+        src.contains("genesis-authority activation is disabled pending D4-D7"),
+        "main.rs must carry the unified disabled-pending-D4-D7 refusal"
+    );
+    // The refusal is enforced before the network-mode dispatch: the guard's
+    // `std::process::exit(1)` on the flag appears before the
+    // `match config.network_mode` transport branch.
+    let guard_pos = src
+        .find("if args.consensus_authority_from_genesis {")
+        .expect("startup guard present");
+    let dispatch_pos = src
+        .find("match config.network_mode {")
+        .expect("network-mode dispatch present");
+    assert!(
+        guard_pos < dispatch_pos,
+        "the activation refusal must precede the per-mode service dispatch"
     );
 }
 
