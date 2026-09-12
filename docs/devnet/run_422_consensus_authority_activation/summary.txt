@@ -1,0 +1,61 @@
+RUN 422 — SUMMARY
+
+RESULT=POSITIVE-FOR-DEVNET-CONSENSUS-AUTHORITY-ACTIVATION-CODE-TEST
+F3_STATUS=CONFIGURED-AUTHORITY-PRODUCTION-PATH-CODE-TEST-POSITIVE
+F4_STATUS=CONFIGURED-AUTHORITY-PRODUCTION-PATH-CODE-TEST-POSITIVE
+F8_STATUS=CONFIGURED-AUTHORITY-PRODUCTION-PATH-CODE-TEST-POSITIVE
+CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED
+AUTHORITY_SCOPE=GENESIS-BOUND-DEVNET
+SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO
+
+Axes (kept separate, per task §19.1):
+  COMPLETION_AXIS       = code + source/integration tests complete and passing
+  VALIDATION_AXIS       = focused + affected-crate cargo tests pass; fmt/clippy
+                          clean on changed files; release-binary evidence-
+                          preservation harnesses recorded honestly in
+                          commands.txt / test_results.txt
+  RUNTIME_EVIDENCE_AXIS = configured-authority ADVERSARIAL release-binary
+                          evidence = NOT CAPTURED (Run 423 scope)
+
+One-paragraph result:
+Run 422 binds the standalone `qbind-node` consensus verification/signing context
+to the boot-verified canonical genesis. A new fail-closed opt-in flag
+`--consensus-authority-from-genesis` derives the validator set and per-validator
+ML-DSA-44 `(suite, public_key)` provider from
+`GenesisConfig.validators[].pqc_public_key`, computes a domain-tagged authority
+commitment bound to chain_id + genesis hash, requires a matching local signer,
+and feeds the SAME `try_build_timeout_verification_context` that `main` uses on
+the existing CLI path. Valid explicit DevNet material activates the real
+constructor and yields an active immutable context; every invalid/partial
+activation exits nonzero before network/consensus start; absent activation keeps
+the Run 421 `None + Required` unavailable-authority default. All F3/F4/F8 labels
+are SOURCE/TEST-positive only. This run captures NO configured-authority
+adversarial release-binary evidence and moves NO readiness item Green; RS1/C4/C5
+stay OPEN and public DevNet stays NO-GO.
+
+Why POSITIVE (source/test) and not PARTIAL — all §17 positive criteria met:
+  * accepted genesis genuinely commits the canonical authority
+    (GenesisValidator.pqc_public_key) under the stated bootstrap trust model;
+  * exact membership + suite policy enforced (index->ValidatorId, suite==100,
+    key length 1312, duplicate/overflow/malformed reject);
+  * local signer matching enforced (signer pk == genesis-committed pk);
+  * `main` invokes the validated constructor and obtains `Some` from explicit
+    valid DevNet material (integration test drives the real constructor;
+    source-guard test asserts main.rs feeds it);
+  * invalid activation fails closed before network/consensus activity
+    (std::process::exit(1) paths);
+  * Proposal/Vote crypto path uses the real MlDsa44Backend (registered suite
+    100), reusing the Run 420 verified verifier;
+  * TestNet/MainNet strict-negative preserved: the flag never downgrades a
+    strict environment; absent/invalid mandatory authority still rejects;
+  * shared Timeout/NewView context scope is documented and unchanged
+    (shared_context_impact.txt);
+  * stale/incompatible authority cannot continue (genesis re-hash + signer
+    match are re-enforced every startup; a changed genesis yields a different
+    commitment and a mismatched signer fails closed).
+
+Not claimed (kept honest):
+  * configured-authority ADVERSARIAL release-binary evidence (Run 423);
+  * closure of RS1/C4/C5; any Green readiness movement; TestNet/MainNet
+    provisioning; rotation/revocation/replay/double-signing/full consensus
+    safety.

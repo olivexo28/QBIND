@@ -1,0 +1,105 @@
+RUN 422 — AUTHORITY MODEL
+
+============================================================================
+AUTHORITY SOURCE
+============================================================================
+
+Consensus authority is sourced from the boot-verified canonical genesis:
+  qbind_ledger::GenesisConfig.validators[i].pqc_public_key  (ML-DSA-44, 1312B)
+mapped as: genesis validator vec index i -> ValidatorId::new(i).
+
+The genesis is NOT trusted merely because it hashes; it is trusted because the
+operator accepted it through the existing bootstrap procedure:
+  * external --genesis-path file, AND
+  * run_boot_time_genesis_verification (Run 102) computes the canonical hash and
+    enforces the --expect-genesis-hash pin, AND
+  * the data-dir authority marker (pqc_authority_state) pins the accepted
+    network/genesis identity.
+Run 422 binds to that already-accepted GenesisHash; it does not independently
+decide a supplied genesis is "the real network".
+
+============================================================================
+TRUST ASSUMPTIONS (stated explicitly, per task §3)
+============================================================================
+
+1. The operator accepts a specific network/genesis identity through the trusted
+   bootstrap (external genesis + expected-hash pin). Hashing an arbitrary
+   supplied genesis does NOT by itself establish it is the intended network's
+   genesis.
+2. All validators accept the same authority commitment.
+3. The OS + signer custody boundary protect private keys. This module never
+   sees/derives/generates/logs any private key; keys live only in
+   signer_loader / validator_signer.
+
+============================================================================
+AUTHORITY SEPARATION (three distinct roles, never conflated)
+============================================================================
+
+  * KEMTLS roots/leaves            -> authorize TRANSPORT sessions only.
+  * Trust-bundle ratification roots -> authorize governance/trust operations.
+  * Consensus validator keys        -> authorize consensus Proposal/Vote only.
+
+Run 422 reads ONLY GenesisConfig.validators[].pqc_public_key. It never reads
+GenesisAuthorityConfig transport roots or bundle-signing roots. A transport
+certificate, NodeId, peer address, validator index, shared suite number, or
+successful KEMTLS session can NEVER establish consensus signing authority. The
+test `bundle_and_transport_roots_are_never_consensus_keys` asserts the module
+input surface is genesis consensus keys only.
+
+============================================================================
+MEMBERSHIP / SUITE / KEY POLICY
+============================================================================
+
+  * Membership   : exactly the genesis validator set, index->ValidatorId(i).
+  * Suite policy : ConsensusSigSuiteId(100) = ML-DSA-44 = SUPPORTED_TIMEOUT_
+                   SUITE_ID. No other suite is accepted.
+  * Key length   : exactly ML_DSA_44_PUBLIC_KEY_SIZE (1312 bytes) after strict
+                   hex decode; wrong length rejects.
+  * Uniqueness   : duplicate public keys reject (AmbiguousSigningKey);
+                   duplicate validator addresses reject.
+  * Bounds       : empty set rejects; count > 4096 rejects (checked before hex
+                   decode to bound work).
+  * Voting power : kept at 1 per validator (matches existing peer_key_provider);
+                   Run 422 does NOT rebind quorum weights (documented non-goal).
+
+============================================================================
+AUTHORITY COMMITMENT
+============================================================================
+
+commitment = sha3_256_tagged(
+    "qbind.run422.genesis-consensus-authority.v1",
+    body)
+  body = LP(chain_id) || genesis_hash(32B) || LP(validator_count)
+         || for each validator in index order:
+              LP(index) || LP(suite_id) || LP(pk_len) || pk_bytes
+  (LP = length-prefixed canonical encoding; domain tag prevents cross-protocol
+   reuse.)
+
+Commitment sensitivity (unit-tested):
+  * changes if chain_id changes         (commitment_changes_with_chain_id)
+  * changes if genesis_hash changes     (commitment_changes_with_genesis_hash)
+  * changes if any validator key changes(commitment_changes_with_a_validator_key)
+  * changes if membership count changes (commitment_changes_with_membership_count)
+  * deterministic for identical input   (commitment_is_deterministic)
+
+============================================================================
+KEY CUSTODY / SIGNER SELF-TEST
+============================================================================
+
+The local signer is loaded by the existing signer_loader/validator_signer path
+(--signer-keystore-path). Run 422 requires it under explicit activation and
+enforces signer_public_key == genesis_committed_key for the local validator.
+No private key is ever passed on the CLI, generated implicitly, or logged; only
+public-key fingerprints appear in logs.
+
+============================================================================
+CONFIGURATION LIFETIME / STALE-AUTHORITY REJECTION
+============================================================================
+
+The authority is genesis-static: it is re-derived and re-validated on every
+startup from the accepted genesis + data-dir identity. A changed genesis yields
+a different commitment; a signer that no longer matches the genesis-committed
+key fails closed at startup. There is no in-process mutation path that lets a
+stale/incompatible authority continue across an unsupported configuration
+change without an authorized (future) transition. Rotation/revocation/replay/
+double-signing protection is explicitly NOT implemented here.

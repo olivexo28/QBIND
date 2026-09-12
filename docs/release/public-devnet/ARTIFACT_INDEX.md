@@ -77,6 +77,20 @@ Companion documents:
   Evidence only, no production source change; **RS1 stays OPEN / launch-blocking**.
   Archive: `docs/devnet/run_421_f3_f4_f8_unavailable_authority_release_binary_evidence/`;
   harness: `scripts/devnet/run_421_f3_f4_f8_unavailable_authority_release_binary_evidence.sh`.
+- `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422.md` — Run 422 **genesis-bound
+  consensus authority activation (code/test)** for RS1 findings **F3/F4/F8**: the
+  opt-in fail-closed flag `--consensus-authority-from-genesis` and module
+  `crates/qbind-node/src/genesis_consensus_authority.rs` derive the consensus
+  validator set + per-validator authorized ML-DSA-44 `(suite, public_key)`
+  provider **directly from the boot-verified canonical genesis**
+  (`GenesisConfig.validators[].pqc_public_key`) and feed the same validated
+  constructor `main` uses, closing the Runs 031–033 uncommitted-CLI-override gap
+  (`RESULT=POSITIVE-FOR-DEVNET-CONSENSUS-AUTHORITY-ACTIVATION-CODE-TEST`,
+  `AUTHORITY_SCOPE=GENESIS-BOUND-DEVNET`,
+  `CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED`). Source/test
+  activation only (release-binary adversarial evidence is Run 423); **RS1 stays
+  OPEN / launch-blocking**. Archive:
+  `docs/devnet/run_422_consensus_authority_activation/`.
 
 Everything below reflects the recorded status **after Run 402**. This index adds
 navigation and clarity only; it does not re-prove or change any item's status.

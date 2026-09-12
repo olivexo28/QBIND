@@ -80,6 +80,18 @@ decision is **NO-GO / NOT launch-ready** (`LAUNCH_GO_NO_GO.md`).
    verification authority is unavailable; outbound suppression S7/S8 UNREACHABLE and
    `CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-CAPTURED`; this narrows the
    configured/unavailable-authority path of three findings only and **RS1 stays
+   OPEN / launch-blocking**. Run 422 adds genesis-bound consensus authority
+   **activation** (code/test) via the opt-in fail-closed flag
+   `--consensus-authority-from-genesis` and module
+   `crates/qbind-node/src/genesis_consensus_authority.rs`, deriving the validator
+   set + per-validator authorized ML-DSA-44 `(suite, public_key)` provider
+   directly from the boot-verified canonical genesis and feeding the same
+   validated constructor `main` uses
+   (`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422.md`, archive
+   `docs/devnet/run_422_consensus_authority_activation/`);
+   `RESULT=POSITIVE-FOR-DEVNET-CONSENSUS-AUTHORITY-ACTIVATION-CODE-TEST`,
+   `CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED` (release-binary
+   adversarial evidence is Run 423); source/test activation only and **RS1 stays
    OPEN / launch-blocking**.
 9. `docs/whitepaper/contradiction.md` — contradiction ledger.
 10. `docs/release/public-devnet/BLOCKER_REGISTER.md` — open blockers (incl. **RS1**).

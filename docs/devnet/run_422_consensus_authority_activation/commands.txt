@@ -1,0 +1,100 @@
+RUN 422 — VALIDATION COMMANDS AND EXIT STATUS
+
+Environment: rustc 1.98.1 (48a229cea 2026-09-01), cargo 1.98.1, Linux sandbox.
+Build profiles as noted. Exit statuses are the ACTUAL command exit codes (not a
+downstream tee/grep). Tested implementation SHA: a62624acc1ca6be7656e8219e0235f8cc3f44e22.
+
+============================================================================
+BUILD
+============================================================================
+cargo build -p qbind-node                         => 0 (debug; ~14-23s incr.)
+cargo build --release -p qbind-node               => 0 (release; 5m33s clean)
+
+============================================================================
+FOCUSED TESTS (this run)
+============================================================================
+cargo test -p qbind-node --lib genesis_consensus_authority
+    => 0  (14 passed; 0 failed; 1442 filtered out)
+cargo test -p qbind-node --test run_422_genesis_consensus_authority_tests
+    => 0  (6 passed; 0 failed)
+
+============================================================================
+REGRESSIONS (Run 418 / 420 source + integration)
+============================================================================
+cargo test -p qbind-node --test run_420_production_policy_reachability_tests
+    => 0  (3 passed: main_rs_selects_required_and_never_fixture_policy,
+           p2p_node_builder_never_selects_fixture_policy,
+           fixture_policy_only_selected_from_test_module)
+cargo test -p qbind-node --test run_418_authenticated_peer_consensus_sender_binding_tests
+    => 0  (18 passed)
+cargo test -p qbind-node --test run_418_newview_demux_chain_integration_tests
+    => 0  (3 passed)
+
+============================================================================
+RELEASE-BINARY EVIDENCE-PRESERVATION HARNESSES (no-regression proof)
+============================================================================
+Run out-of-tree (EVIDENCE_DIR + WORKDIR under /tmp) so historical committed
+archives are NOT touched; both removed after run. Historical Run 417/419/421
+archive aggregate sha256 identical before and after
+(4d9621226aad3a207d6398868acac8db4da465795a68524d9e77064feebb2863).
+
+bash scripts/devnet/run_421_f3_f4_f8_unavailable_authority_release_binary_evidence.sh \
+     /tmp/run422_run421_regress/evidence /tmp/run422_run421_regress/work
+    => 0  VERDICT retained:
+          PARTIAL-POSITIVE-FOR-F3-F4-F8-UNAVAILABLE-AUTHORITY-FAIL-CLOSED-
+          RELEASE-BINARY-EVIDENCE
+          (s1 baseline None+Required; s2/s3 accepted; s4-mismatch rejected;
+           s7/s8 PARTIAL/UNREACHABLE as before)
+
+bash scripts/devnet/run_419_f6_standalone_release_binary_binding_evidence.sh \
+     /tmp/run422_run419_regress/evidence /tmp/run422_run419_regress/work
+    => 0  VERDICT retained:
+          PARTIAL-FOR-F6-STANDALONE-RELEASE-BINARY-EVIDENCE
+          (s1 accepted; s2-impersonation claimed_sender_mismatch=5 rejected;
+           s3 newview accepted; s6 missing_origin rejected)
+
+Interpretation: the Run 421 unavailable-authority default and the Run 418/419 F6
+sender-binding boundary are INTACT after Run 422 (the flag is default-off and
+Route A only re-sources authority when explicitly enabled).
+
+============================================================================
+FORMAT / LINT
+============================================================================
+rustfmt --edition 2021 --check crates/qbind-node/src/genesis_consensus_authority.rs \
+        crates/qbind-node/tests/run_422_genesis_consensus_authority_tests.rs
+    => 0 (CLEAN after formatting my two new files)
+cargo fmt -p qbind-node -- --check
+    => repo-wide drift EXISTS in PRE-EXISTING files only (build.rs, examples/*);
+       NOT introduced by Run 422. Scope recorded separately; not auto-fixed to
+       avoid unrelated churn (task §15 no unrelated refactor).
+cargo clippy -p qbind-node --lib --tests
+    => 0; NO new warnings in genesis_consensus_authority.rs, run_422 tests, or
+       the changed main.rs regions. Pre-existing warnings elsewhere remain and
+       are NOT claimed clean.
+
+============================================================================
+PRIVACY / SECRET SCAN
+============================================================================
+grep -rnE '-----BEGIN|api[_-]?key|secret[_-]?key' <changed files + archive>
+    => only a DOC COMMENT ("secret_key_bytes") describing a test helper that
+       GENERATES fresh ML-DSA-44 keypairs at runtime; NO embedded private-key
+       bytes, credentials, or custody material committed.
+runtime secret_scanning tool (changed files) => see final report.
+Archive .gitignore excludes *.key/*.sk/*keystore*/*secret*/*.pem/logs.
+
+============================================================================
+HISTORICAL ARCHIVE DIFF
+============================================================================
+git status --short docs/devnet/ (excluding run_422) => no changes.
+aggregate sha256 of run_417*/run_419*/run_421*/RUN_419* identical pre/post.
+
+============================================================================
+NOT RUN / LIMITS (kept honest)
+============================================================================
+* Full `cargo test --workspace` not completed in this session (build/time
+  budget); focused + affected-crate node tests were run instead.
+* CodeQL: run via parallel_validation before finalizing; status recorded in the
+  final report (not asserted here as zero-alert without execution).
+* Configured-authority ADVERSARIAL release-binary evidence NOT captured =>
+  Run 423 (successor). Release compilation + parser/startup smoke are not that
+  evidence.

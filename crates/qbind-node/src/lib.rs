@@ -111,6 +111,10 @@ pub mod p2p_node_builder;
 pub mod p2p_session_eviction;
 pub mod p2p_tcp;
 pub mod peer_key_provider;// Run 037 — production-honest PQC KEMTLS root-key distribution config.
+// Run 422 — genesis-bound consensus authority (Route A): derives the
+// validator set + `SuiteAwareValidatorKeyProvider` from the boot-verified
+// canonical genesis instead of uncommitted CLI overrides.
+pub mod genesis_consensus_authority;
 pub mod pqc_root_config;
 // Run 037 — DevNet-only helper to mint real ML-DSA-44-signed delegation certs.
 pub mod pqc_devnet_helper;
