@@ -78,11 +78,10 @@ single-snapshot provenance, boot-identity equality, membership-count reject) is
 RETAINED and still exercised by the provider tests, but is no longer reachable
 from a normally built binary because the flag is contained upstream.
 
-When the flag is absent, behavior is byte-for-byte the Run 421 default:
-`verification_ctx == None` + `ConsensusVerificationPolicy::Required`
-(unavailable-authority fail-closed). The legacy `--validator-consensus-key` CLI
-route is UNCHANGED and still reachable — this pass blocks only the new
-genesis-authority route.
+When the flag is absent, existing configuration determines context availability.
+The unavailable-authority default remains None plus Required. Valid legacy
+--validator-consensus-key configuration can still build Some(ctx). Both cases
+are unchanged; this pass blocks only the new genesis-authority route.
 
 ============================================================================
 ARCHIVE CONTENTS

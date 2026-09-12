@@ -1,7 +1,8 @@
 //! Run 422 containment correction — process-level startup-refusal proof.
 //!
-//! These tests drive the REAL `qbind-node` release binary (via
-//! `CARGO_BIN_EXE_qbind-node`) and prove the single production startup guard:
+//! These tests drive the real `qbind-node` binary via `CARGO_BIN_EXE_qbind-node`.
+//! Its profile follows Cargo: the recorded tests ran without `--release`.
+//! They prove the single production startup guard:
 //! when `--consensus-authority-from-genesis` is supplied during normal
 //! startup, the binary exits non-zero with the precise "disabled pending
 //! D4-D7" diagnostic, and it does so BEFORE the per-mode service-start

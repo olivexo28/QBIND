@@ -28,11 +28,10 @@ ENV=DevNet (and every other environment — the guard is environment-uniform)
 
 flag  ext-genesis  signer  signer==genesis-key  => outcome
 ----  -----------  ------  -------------------   ----------------------------
-off   any          any     n/a                   NONE  (Run 421 default; legacy
-                                                        --validator-consensus-key
-                                                        CLI route preserved and
-                                                        still reachable for
-                                                        Run 031-033 behavior)
+off   any          any     n/a                   EXISTING POLICY (unchanged):
+                                                        unavailable context -> NONE;
+                                                        valid legacy CLI inputs
+                                                        can build Some(ctx).
 on    any          any     any                   EXIT!=0 (startup guard: refused,
                                                         "genesis-authority
                                                         activation is disabled
@@ -71,5 +70,6 @@ INVARIANTS
   before P2P service construction and any consensus task.
 * The genesis route never consults --validator-consensus-key; the legacy CLI
   route remains a SEPARATE, unchanged, still-reachable path (not blocked here).
-* Absent activation is byte-identical to Run 421 (NONE + Required).
+* Flag absent preserves existing policy: NONE by default; valid legacy
+  CLI configuration can still produce Some(ctx).
 * Every genesis-route activation request fails nonzero before network start.

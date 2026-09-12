@@ -1,6 +1,11 @@
 RUN 422 — TEST RESULTS (names + counts, no double-counting)
 
 *** CONTAINMENT CORRECTION RESULTS (this environment) ***
+
+Profile clarification: the recorded startup-refusal tests ran without
+--release and used Cargo's default test build of qbind-node. The separate
+release build succeeded; these tests are not release-profile runtime evidence.
+
 cargo test -p qbind-node --test run_422_startup_refusal_tests -- --test-threads=1
   => ok. 4 passed; 0 failed. Process-level proof driving the REAL qbind-node
      binary (CARGO_BIN_EXE_qbind-node) with a VALID DevNet genesis (correct

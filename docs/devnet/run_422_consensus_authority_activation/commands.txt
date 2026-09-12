@@ -3,6 +3,10 @@ RUN 422 — VALIDATION COMMANDS AND EXIT STATUS
 *** CONTAINMENT CORRECTION — commands run in this environment ***
 (rustc/cargo as reported by the toolchain in this sandbox)
 
+Profile clarification: the recorded startup-refusal tests ran without
+--release and used Cargo's default test build of qbind-node. The separate
+release build succeeded; these tests are not release-profile runtime evidence.
+
   cargo build -p qbind-node --bin qbind-node
       -> exit 0 (Finished dev profile; guard compiles)
   cargo test -p qbind-node --test run_422_startup_refusal_tests -- --test-threads=1

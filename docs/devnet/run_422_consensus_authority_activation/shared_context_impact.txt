@@ -87,8 +87,9 @@ PRIOR CHECKS ARE NOT WEAKENED
 NO UNDOCUMENTED OUT-OF-SCOPE ACTIVATION
 ============================================================================
 
-* Absent `--consensus-authority-from-genesis`, behavior is byte-identical to
-  Run 421 (None + Required). The genesis path is strictly opt-in and fail-closed.
+* Absent `--consensus-authority-from-genesis`, existing policy is unchanged:
+  the unavailable-authority default is None + Required, while valid legacy
+  CLI configuration can produce Some(ctx). The genesis route is disabled.
 * The genesis path does NOT touch governance, trust-bundle, transport-root, QC,
   pacemaker, leader, snapshot, or fast-sync logic. It only supplies consensus
   membership + one authorized (suite, key) per validator + a matching signer.

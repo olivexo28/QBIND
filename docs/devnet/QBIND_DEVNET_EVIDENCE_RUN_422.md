@@ -113,15 +113,16 @@ verification, before `run_p2p_node` / `run_local_mesh_node`). Because the guard
 precedes the per-mode dispatch, no genesis is paired into an active context and
 the consensus loop is never reached for this route.
 
-When the flag is **absent**, behavior is byte-identical to the Run 421 default
-(`None` + `ConsensusVerificationPolicy::Required`); `LocalFixtureUnsigned`
-remains unreachable from production and the legacy Timeout/NewView (F6) checks
-are unchanged. `--help` is handled by the argument parser and is unaffected by
-the guard.
+When the flag is **absent**, existing configuration determines context
+availability: the unavailable-authority default remains `None` plus
+`ConsensusVerificationPolicy::Required`; valid legacy CLI-key configuration can
+still produce `Some(ctx)`. This containment leaves both cases unchanged.
+`LocalFixtureUnsigned` remains unavailable in production. F6 and existing
+Timeout/NewView checks are preserved. Ordinary `--help` is unchanged.
 
 ## Validation summary (this containment correction)
 
-- **Process-level startup-refusal (new):** `run_422_startup_refusal_tests` — 4/4
+- **Process-level startup-refusal (new, default Cargo test profile):** `run_422_startup_refusal_tests` — 4/4
   (`valid_genesis_and_signer_plus_flag_refused_before_p2p_service_start`,
   `local_mesh_mode_cannot_bypass_the_refusal`,
   `flag_absent_is_not_refused_by_the_guard`, `help_behavior_is_preserved`).
