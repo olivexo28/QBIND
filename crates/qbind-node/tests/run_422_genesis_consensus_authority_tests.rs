@@ -25,10 +25,10 @@ use qbind_ledger::{
 use qbind_node::genesis_consensus_authority::{
     build_genesis_consensus_authority, GenesisConsensusAuthorityError,
 };
-use qbind_node::validator_signer::{LocalKeySigner, ValidatorSigner};
 use qbind_node::timeout_verification_bridge::{
     try_build_timeout_verification_context, TimeoutVerificationBridgeInputs,
 };
+use qbind_node::validator_signer::{LocalKeySigner, ValidatorSigner};
 use qbind_types::ChainId;
 
 /// Fresh ML-DSA-44 keypair: returns `(public_key_hex, secret_key_bytes)`.
@@ -64,7 +64,10 @@ fn genesis_with(validators: Vec<GenesisValidator>) -> GenesisConfig {
 
 fn backend_registry() -> Arc<SimpleBackendRegistry> {
     let mut r = SimpleBackendRegistry::new();
-    r.register(ConsensusSigSuiteId::new(100), Arc::new(MlDsa44Backend::new()));
+    r.register(
+        ConsensusSigSuiteId::new(100),
+        Arc::new(MlDsa44Backend::new()),
+    );
     Arc::new(r)
 }
 
@@ -125,8 +128,7 @@ fn signer_genesis_key_correspondence_is_detectable() {
     let (pk0, sk0) = fresh_keypair();
     let g = genesis_with(vec![validator(1, pk0)]);
     let ghash = [0xAAu8; 32];
-    let authority =
-        build_genesis_consensus_authority(&g, &ghash, ValidatorId::new(0)).unwrap();
+    let authority = build_genesis_consensus_authority(&g, &ghash, ValidatorId::new(0)).unwrap();
 
     let signing_key = ValidatorSigningKey::new(sk0);
     let signer_pk = signing_key.derive_public_key().unwrap();
@@ -139,7 +141,9 @@ fn signer_genesis_key_correspondence_is_detectable() {
 
     // A different signer's key does NOT match validator 0's committed key.
     let (_pk_other, sk_other) = fresh_keypair();
-    let other_pk = ValidatorSigningKey::new(sk_other).derive_public_key().unwrap();
+    let other_pk = ValidatorSigningKey::new(sk_other)
+        .derive_public_key()
+        .unwrap();
     assert_ne!(other_pk, genesis_pk);
 }
 

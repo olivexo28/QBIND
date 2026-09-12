@@ -190,7 +190,10 @@ impl std::fmt::Display for GenesisConsensusAuthorityError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::EmptyValidatorSet => {
-                write!(f, "genesis commits no validators; cannot build consensus authority")
+                write!(
+                    f,
+                    "genesis commits no validators; cannot build consensus authority"
+                )
             }
             Self::TooManyValidators { count, max } => write!(
                 f,
@@ -348,11 +351,8 @@ pub fn build_genesis_consensus_authority(
     let validators = ConsensusValidatorSet::new(entries)
         .map_err(|detail| GenesisConsensusAuthorityError::ValidatorSetBuildFailed { detail })?;
 
-    let commitment = compute_authority_commitment(
-        &genesis.chain_id,
-        canonical_genesis_hash,
-        &ordered,
-    );
+    let commitment =
+        compute_authority_commitment(&genesis.chain_id, canonical_genesis_hash, &ordered);
 
     let mut fingerprints: Vec<(ValidatorId, ConsensusSigSuiteId, String)> = ordered
         .iter()
@@ -569,10 +569,7 @@ mod tests {
     #[test]
     fn duplicate_signing_key_rejected() {
         let pk = fresh_pk_hex();
-        let g = genesis_with(vec![
-            validator(1, pk.clone(), 100),
-            validator(2, pk, 100),
-        ]);
+        let g = genesis_with(vec![validator(1, pk.clone(), 100), validator(2, pk, 100)]);
         match build_genesis_consensus_authority(&g, &hash_a(), ValidatorId::new(0)) {
             Err(GenesisConsensusAuthorityError::AmbiguousSigningKey {
                 first_index,
@@ -648,8 +645,7 @@ mod tests {
     fn bundle_and_transport_roots_are_never_consensus_keys() {
         let vpk = fresh_pk_hex();
         let g = genesis_with(vec![validator(1, vpk.clone(), 100)]);
-        let auth =
-            build_genesis_consensus_authority(&g, &hash_a(), ValidatorId::new(0)).unwrap();
+        let auth = build_genesis_consensus_authority(&g, &hash_a(), ValidatorId::new(0)).unwrap();
         // Only validator 0 resolves; there is no phantom validator that
         // could correspond to an authority-root fingerprint.
         let (_, pk0) = auth
