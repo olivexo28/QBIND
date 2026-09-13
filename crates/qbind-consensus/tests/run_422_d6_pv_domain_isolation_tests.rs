@@ -474,6 +474,39 @@ fn case_i_unsupported_suite_no_backend_rejected() {
     );
 }
 
+#[test]
+fn case_i_unsupported_suite_no_backend_rejected_vote() {
+    // Vote counterpart to `case_i_unsupported_suite_no_backend_rejected`.
+    // With NO backend registered for the governed suite, the Vote path through
+    // `verify_vote_msg_with_domain` returns `UnsupportedSuite` — the same typed
+    // no-backend outcome as the Proposal path, and DISTINCT from the
+    // registered-but-faulting backend case
+    // (`cc_backend_error_distinct_from_unsupported_suite`), which returns
+    // `BackendError`. `UnsupportedSuite` is therefore evidence of a MISSING
+    // backend, never of a backend fault.
+    let mut keys = HashMap::new();
+    let (pk, sk) = MlDsa44Backend::generate_keypair().expect("keygen");
+    keys.insert(ValidatorId(0), (TEST_SUITE, pk));
+    let kp = TestKeyProvider { keys };
+    let br = SimpleBackendRegistry::new(); // empty
+    let validators = ConsensusValidatorSet::new(vec![ValidatorSetEntry {
+        id: ValidatorId(0),
+        voting_power: 1,
+    }])
+    .unwrap();
+    let d = domain(1, 5, genesis_id(1), commitment(1));
+    let mut v = unsigned_vote(0);
+    let pre = d.vote_preimage(&v);
+    v.signature = MlDsa44Backend::sign(&sk, &pre).expect("sign");
+    assert_eq!(
+        verify_vote_msg_with_domain(&v, ValidatorId(0), &validators, &kp, &br, &d),
+        Err(ProposalVoteVerifyError::UnsupportedSuite {
+            validator_id: ValidatorId(0),
+            governance_suite: TEST_SUITE,
+        })
+    );
+}
+
 // ---------------------------------------------------------------------------
 // J. Missing or invalid trusted domain metadata fails construction closed.
 // ---------------------------------------------------------------------------

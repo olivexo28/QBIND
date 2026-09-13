@@ -44,24 +44,34 @@ CALL-SITE INVENTORY
     emitted bytes are byte-identical to the pre-D6 encoding (regression golden
     vectors green).
   verify_proposal_msg / verify_vote_msg           (qbind-consensus)
-    Now delegate to *_with_preimage using the legacy preimage; behavior
-    unchanged.
+    Legacy chain-aware public entrypoints. Internally delegate to the PRIVATE
+    verify_*_with_preimage helper using the legacy v1 preimage; behavior
+    unchanged. Retained for explicit legacy-consumer regression only.
 
 [Binary Proposal/Vote boundary — v2 domain wired here, FIXTURE/TEST ONLY]
-  ProposalVoteAuthority.signing_domain: Option<ProposalVoteSigningDomainV2>
+  ProposalVoteAuthority.signing_domain: ProposalVoteSigningDomainV2 (MANDATORY —
+    a plain field, NOT Option; there is no missing-domain -> legacy-v1 selection)
   ProposalVoteAuthority::proposal_preimage / vote_preimage / wire_chain_id_ok
-  inbound Proposal verify  (binary_consensus_loop.rs ~3338)
-  inbound Vote verify      (binary_consensus_loop.rs ~3510)
-  outbound sign_proposal_for_broadcast (~2945)
-  outbound sign_vote_for_broadcast     (~3010, incl. directed transmission)
-    When signing_domain is Some: wire chain_id checked vs expected_wire_chain_id
-    (reject-before-crypto), then verify/sign uses the domain preimage via
-    verify_*_with_preimage. When None: legacy v1 path unchanged.
+  inbound Proposal verify  (binary_consensus_loop.rs)
+  inbound Vote verify      (binary_consensus_loop.rs)
+  outbound sign_proposal_for_broadcast
+  outbound sign_vote_for_broadcast     (incl. directed SendVoteTo transmission)
+    The message wire chain_id is checked vs the domain's validated
+    expected_wire_chain_id (typed WireChainMismatch inbound / refusal before
+    signing outbound — reject-before-crypto), then verify/sign uses the domain
+    preimage. There is no v1 fallback: the domain is always present on a
+    ProposalVoteAuthority, and when NO authority is wired the Required policy
+    fails closed (never legacy passthrough).
 
-[New verifier entrypoints]
-  verify_proposal_msg_with_preimage / verify_vote_msg_with_preimage
-    (qbind-consensus/proposal_vote_verify.rs; re-exported from lib.rs)
-    Same fail-closed core as v1; differ only in preimage bytes. No retry/fallback.
+[Public message-bound verifier entrypoints]
+  verify_proposal_msg_with_domain / verify_vote_msg_with_domain
+    (qbind-consensus/proposal_vote_verify.rs; re-exported from lib.rs). These
+    recompute the canonical v2 preimage INTERNALLY from the actual message +
+    trusted domain, enforce wire-chain consistency BEFORE crypto, and share the
+    same fail-closed core as v1 (differ only in preimage bytes). No
+    retry/fallback. The raw-preimage helpers verify_*_with_preimage are PRIVATE
+    (not a caller entrypoint), so a stale/foreign preimage cannot be substituted
+    through the public interface.
 
 [Other engine / vote-aggregation / QC / cache / restore consumers — UNCHANGED]
   Engine and QC verification still reconstruct the LEGACY preimage. They are not

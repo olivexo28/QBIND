@@ -11441,5 +11441,276 @@ mod tests {
             // Peer transition was genuinely observed.
             assert!(last_known_peers.contains(&peer));
         }
+
+        // D6-10 (Vote gap A): Independent outbound Vote wire-chain refusal
+        // through the ACTUAL `forward_actions_to_facade` engine→facade boundary.
+        //
+        // The existing inconsistent-wire cached test
+        // (`run422_d6_late_peer_reemit_refused_on_inconsistent_wire`) refuses
+        // the Proposal FIRST and returns, so its
+        // `outbound_vote_wire_chain_mismatch` counter correctly stays zero and
+        // Vote refusal is never exercised. This test drives ONLY Vote actions
+        // (`BroadcastVote` + `SendVoteTo`) with:
+        //   * `Required` policy,
+        //   * a valid local signer bound to the mandatory v2 domain,
+        //   * a recording facade capturing broadcast/directed votes, and
+        //   * a signer that DIRECTLY records invocation counts (so "the signer
+        //     was not invoked" is observed, not inferred from a success
+        //     counter).
+        #[test]
+        fn run422_d6_outbound_vote_wire_chain_refusal_through_forward_actions() {
+            use std::sync::atomic::{AtomicU64, Ordering::SeqCst};
+            use std::sync::Mutex;
+
+            // Signer wrapper: records each signing invocation, then delegates.
+            struct RecordingSigner {
+                inner: LocalKeySigner,
+                vote_calls: Arc<AtomicU64>,
+                proposal_calls: Arc<AtomicU64>,
+            }
+            impl ValidatorSigner for RecordingSigner {
+                fn validator_id(&self) -> &ValidatorId {
+                    self.inner.validator_id()
+                }
+                fn suite_id(&self) -> u16 {
+                    self.inner.suite_id()
+                }
+                fn sign_proposal(
+                    &self,
+                    p: &[u8],
+                ) -> Result<Vec<u8>, crate::validator_signer::SignError> {
+                    self.proposal_calls.fetch_add(1, SeqCst);
+                    self.inner.sign_proposal(p)
+                }
+                fn sign_vote(
+                    &self,
+                    p: &[u8],
+                ) -> Result<Vec<u8>, crate::validator_signer::SignError> {
+                    self.vote_calls.fetch_add(1, SeqCst);
+                    self.inner.sign_vote(p)
+                }
+                fn sign_timeout(
+                    &self,
+                    view: u64,
+                    high_qc: Option<&qbind_consensus::qc::QuorumCertificate<[u8; 32]>>,
+                ) -> Result<Vec<u8>, crate::validator_signer::SignError> {
+                    self.inner.sign_timeout(view, high_qc)
+                }
+                fn sign_timeout_with_chain_id(
+                    &self,
+                    chain_id: ChainId,
+                    view: u64,
+                    high_qc: Option<&qbind_consensus::qc::QuorumCertificate<[u8; 32]>>,
+                ) -> Result<Vec<u8>, crate::validator_signer::SignError> {
+                    self.inner.sign_timeout_with_chain_id(chain_id, view, high_qc)
+                }
+            }
+
+            // Facade: records emitted votes for both the broadcast and directed
+            // paths, and counts any proposal / other traffic (which must not
+            // occur for Vote-only actions).
+            #[derive(Default)]
+            struct VoteRecordingFacade {
+                broadcast_votes: Mutex<Vec<Vote>>,
+                directed_votes: Mutex<Vec<(ValidatorId, Vote)>>,
+                proposal_calls: AtomicU64,
+                other_calls: AtomicU64,
+            }
+            impl ConsensusNetworkFacade for VoteRecordingFacade {
+                fn send_vote_to(&self, t: ValidatorId, v: &Vote) -> Result<(), NetworkError> {
+                    self.directed_votes.lock().unwrap().push((t, v.clone()));
+                    Ok(())
+                }
+                fn broadcast_vote(&self, v: &Vote) -> Result<(), NetworkError> {
+                    self.broadcast_votes.lock().unwrap().push(v.clone());
+                    Ok(())
+                }
+                fn broadcast_proposal(&self, _p: &BlockProposal) -> Result<(), NetworkError> {
+                    self.proposal_calls.fetch_add(1, SeqCst);
+                    Ok(())
+                }
+                fn broadcast_consensus_msg(
+                    &self,
+                    _m: &ConsensusNetMsg,
+                ) -> Result<(), NetworkError> {
+                    self.other_calls.fetch_add(1, SeqCst);
+                    Ok(())
+                }
+            }
+
+            let fixture = make_fixture(4);
+
+            // Build a v2 Proposal/Vote authority whose local signer for
+            // validator 0 is a `RecordingSigner` over `domain`.
+            let build_authority = |domain: ProposalVoteSigningDomainV2,
+                                   vote_calls: Arc<AtomicU64>,
+                                   proposal_calls: Arc<AtomicU64>|
+             -> ProposalVoteAuthority {
+                let sk = fixture.sk_objs.get(&ValidatorId(0)).expect("sk").clone();
+                let inner = LocalKeySigner::new(ValidatorId(0), TEST_SUITE_U16, sk);
+                let signer: Arc<dyn ValidatorSigner> = Arc::new(RecordingSigner {
+                    inner,
+                    vote_calls,
+                    proposal_calls,
+                });
+                ProposalVoteAuthority {
+                    validators: fixture.validators.clone(),
+                    key_provider: fixture.kp.clone(),
+                    backend_registry: fixture.br.clone(),
+                    chain_id: QBIND_DEVNET_CHAIN_ID,
+                    signer: Some(signer),
+                    signing_domain: domain,
+                }
+            };
+
+            // ---- Inconsistent-wire Vote case: the authority domain expects
+            // wire chain id 7, but the engine-produced votes carry wire chain
+            // id 0. Both the broadcast and directed Vote actions are refused
+            // fail-closed BEFORE signing: no signature is computed, no vote is
+            // broadcast or directed, and no unsigned / legacy-domain /
+            // authority-unavailable fallback occurs.
+            {
+                let vote_calls = Arc::new(AtomicU64::new(0));
+                let proposal_calls = Arc::new(AtomicU64::new(0));
+                let mismatch_domain = d6_domain(
+                    0xD6D6_0000_0000_0007,
+                    7, // expected wire chain id != base_vote's wire 0
+                    d6_genesis_identity(0x11),
+                    d6_authority_commitment(0x22),
+                );
+                let pv =
+                    build_authority(mismatch_domain, vote_calls.clone(), proposal_calls.clone());
+                let facade = VoteRecordingFacade::default();
+                let mut stats = BinaryConsensusLoopInboundStats::default();
+
+                let actions: Vec<ConsensusEngineAction<ValidatorId>> = vec![
+                    ConsensusEngineAction::BroadcastVote(base_vote(0)),
+                    ConsensusEngineAction::SendVoteTo {
+                        to: ValidatorId(1),
+                        vote: base_vote(0),
+                    },
+                ];
+                forward_actions_to_facade(
+                    actions,
+                    &facade,
+                    &mut stats,
+                    Some(&pv),
+                    ConsensusVerificationPolicy::Required,
+                );
+
+                // Both Vote actions incremented the wire-mismatch counter; none
+                // signed or transmitted.
+                assert_eq!(stats.outbound_vote_wire_chain_mismatch, 2);
+                assert_eq!(stats.outbound_vote_signing_success, 0);
+                assert_eq!(stats.outbound_votes_sent, 0);
+                assert_eq!(stats.outbound_send_vote_to, 0);
+                // No fallback of any kind: not unsigned emission, not a
+                // legacy-domain re-sign, not an authority-unavailable path, not
+                // a signing failure.
+                assert_eq!(stats.outbound_vote_verification_context_unavailable_total, 0);
+                assert_eq!(stats.outbound_vote_signing_failure, 0);
+                // The signer was DIRECTLY observed to be un-invoked (no
+                // Timeout-signer fallback either — the Timeout signer is not in
+                // scope for this Proposal/Vote path).
+                assert_eq!(vote_calls.load(SeqCst), 0);
+                assert_eq!(proposal_calls.load(SeqCst), 0);
+                // No vote of any shape reached the facade; no proposal/other
+                // traffic.
+                assert!(facade.broadcast_votes.lock().unwrap().is_empty());
+                assert!(facade.directed_votes.lock().unwrap().is_empty());
+                assert_eq!(facade.proposal_calls.load(SeqCst), 0);
+                assert_eq!(facade.other_calls.load(SeqCst), 0);
+            }
+
+            // ---- Correct-wire control: the authority domain expects wire chain
+            // id 0, matching the engine-produced votes. Both actions are signed
+            // under the selected domain and reach the INTENDED
+            // broadcast/directed method; each captured vote verifies under that
+            // domain and is rejected under a foreign v2 domain and the legacy v1
+            // boundary (no fallback path admits it).
+            {
+                let vote_calls = Arc::new(AtomicU64::new(0));
+                let proposal_calls = Arc::new(AtomicU64::new(0));
+                let domain = d6_control_domain(); // expected wire chain id 0
+                let pv =
+                    build_authority(domain.clone(), vote_calls.clone(), proposal_calls.clone());
+                let facade = VoteRecordingFacade::default();
+                let mut stats = BinaryConsensusLoopInboundStats::default();
+
+                let actions: Vec<ConsensusEngineAction<ValidatorId>> = vec![
+                    ConsensusEngineAction::BroadcastVote(base_vote(0)),
+                    ConsensusEngineAction::SendVoteTo {
+                        to: ValidatorId(1),
+                        vote: base_vote(0),
+                    },
+                ];
+                forward_actions_to_facade(
+                    actions,
+                    &facade,
+                    &mut stats,
+                    Some(&pv),
+                    ConsensusVerificationPolicy::Required,
+                );
+
+                // No wire refusal; both votes signed and transmitted via the
+                // intended methods exactly once each.
+                assert_eq!(stats.outbound_vote_wire_chain_mismatch, 0);
+                assert_eq!(stats.outbound_vote_signing_success, 2);
+                assert_eq!(stats.outbound_votes_sent, 1);
+                assert_eq!(stats.outbound_send_vote_to, 1);
+                // The signer was DIRECTLY invoked exactly twice as a vote signer
+                // (never as a proposal signer).
+                assert_eq!(vote_calls.load(SeqCst), 2);
+                assert_eq!(proposal_calls.load(SeqCst), 0);
+
+                let bv = facade.broadcast_votes.lock().unwrap();
+                let dv = facade.directed_votes.lock().unwrap();
+                assert_eq!(bv.len(), 1, "broadcast_vote reached once");
+                assert_eq!(dv.len(), 1, "send_vote_to reached once");
+                assert_eq!(dv[0].0, ValidatorId(1), "directed to the intended target");
+                assert_eq!(facade.proposal_calls.load(SeqCst), 0);
+                assert_eq!(facade.other_calls.load(SeqCst), 0);
+
+                let foreign = d6_domain(
+                    0xEEEE_0000_0000_0009,
+                    0,
+                    d6_genesis_identity(0x33),
+                    d6_authority_commitment(0x44),
+                );
+                for emitted in [&bv[0], &dv[0].1] {
+                    // Verifies under the SELECTED v2 domain ...
+                    assert!(qbind_consensus::verify_vote_msg_with_domain(
+                        emitted,
+                        ValidatorId(0),
+                        fixture.validators.as_ref(),
+                        fixture.kp.as_ref(),
+                        fixture.br.as_ref(),
+                        &domain,
+                    )
+                    .is_ok());
+                    // ... rejected under a FOREIGN v2 domain ...
+                    assert!(qbind_consensus::verify_vote_msg_with_domain(
+                        emitted,
+                        ValidatorId(0),
+                        fixture.validators.as_ref(),
+                        fixture.kp.as_ref(),
+                        fixture.br.as_ref(),
+                        &foreign,
+                    )
+                    .is_err());
+                    // ... and rejected under the legacy v1 boundary (no
+                    // fallback).
+                    assert!(qbind_consensus::verify_vote_msg(
+                        emitted,
+                        ValidatorId(0),
+                        fixture.validators.as_ref(),
+                        fixture.kp.as_ref(),
+                        fixture.br.as_ref(),
+                        QBIND_DEVNET_CHAIN_ID,
+                    )
+                    .is_err());
+                }
+            }
+        }
     }
 }

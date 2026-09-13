@@ -112,6 +112,17 @@ authority_commitment)`, which:
   (`runtime_chain_id()`, `expected_wire_chain_id()`, `genesis_identity()`,
   `authority_commitment()`, `format()`).
 
+The constructor validates only its stated **structural** conditions
+(non-zero genesis identity and authority commitment, plus explicit version
+handling). A non-zero genesis identity or authority commitment — including any
+arbitrary non-zero fixture hash used by tests — is **not** evidence of
+provenance, current authorization, or freshness. It does not prove the hash
+corresponds to an accepted genesis, a currently-authorized membership/key
+snapshot, or a non-superseded activation. Establishing that binding is the
+unresolved D7 authority-freshness/lifetime work plus the unresolved runtime
+ChainId → wire chain_id mapping; until then production construction is
+unavailable and the release binary constructs no `ProposalVoteAuthority`.
+
 Format vs suite: `ProposalVoteSigningFormat` (currently only `V2`) is
 **separate** from the cryptographic suite id. Selecting a suite never changes
 the format and selecting a format never changes the suite.
@@ -132,35 +143,46 @@ there is no fallback to another version.
 
 ## 6. Verification entrypoints
 
-`crates/qbind-consensus/src/proposal_vote_verify.rs` adds fail-closed
-entrypoints:
+`crates/qbind-consensus/src/proposal_vote_verify.rs` provides fail-closed
+**public, message-bound** entrypoints:
 
-* `verify_proposal_msg_with_preimage(...)`
-* `verify_vote_msg_with_preimage(...)`
+* `verify_proposal_msg_with_domain(...)`
+* `verify_vote_msg_with_domain(...)`
 
-These take the caller-selected preimage bytes and run the **same** fail-closed
-verification core used by the v1 `verify_proposal_msg` / `verify_vote_msg`
-(missing signature → reject, unknown validator → reject, wrong/unsupported suite
-→ reject, backend error → reject, signature mismatch → reject). The v1 and v2
-entrypoints differ only in which preimage bytes they authenticate; they share
-one crypto backend and one hash primitive.
+These take the message and the **trusted domain** and recompute the canonical v2
+preimage **internally from the actual message** (a caller can never substitute a
+stale or foreign preimage through the public interface). They enforce wire-chain
+consistency **before** crypto and then run the **same** fail-closed verification
+core used by the v1 `verify_proposal_msg` / `verify_vote_msg` (missing signature
+→ reject, unknown validator → reject, wrong/unsupported suite → reject, backend
+error → reject, signature mismatch → reject). The v1 and v2 entrypoints differ
+only in which preimage bytes they authenticate; they share one crypto backend
+and one hash primitive.
+
+The raw-preimage helpers `verify_proposal_msg_with_preimage` /
+`verify_vote_msg_with_preimage` are **private** (`fn`, not `pub fn`, and not
+re-exported); they are an implementation detail of the public entrypoints above
+and are not a caller-facing interface.
 
 ## 7. Node integration (fixture/test only)
 
 `ProposalVoteAuthority` (in
-`crates/qbind-node/src/binary_consensus_loop.rs`) gains an optional
-`signing_domain: Option<ProposalVoteSigningDomainV2>` field:
+`crates/qbind-node/src/binary_consensus_loop.rs`) carries a **mandatory**
+`signing_domain: ProposalVoteSigningDomainV2` field (a plain field, **not**
+`Option`):
 
-* Inbound Proposal/Vote verification: when a domain is present the handler
-  first checks the message wire `chain_id` against the domain's
-  `expected_wire_chain_id` (rejecting a mismatch **before** crypto, via a new
-  typed counter, without rewriting the message), then authenticates using the
-  domain's preimage through `verify_*_with_preimage`.
+* Inbound Proposal/Vote verification: the handler first checks the message wire
+  `chain_id` against the domain's `expected_wire_chain_id` (rejecting a mismatch
+  **before** crypto, via a typed counter, without rewriting the message), then
+  authenticates using the domain's preimage.
 * Outbound Proposal/Vote signing: signs the preimage produced by the **selected
-  authority's** domain. Outbound code never derives a domain from the message
-  it is about to sign.
-* When `signing_domain` is `None` the legacy v1 preimage path is used
-  unchanged.
+  authority's** domain, and refuses (fail-closed, before signing) any message
+  whose wire `chain_id` disagrees with the domain. Outbound code never derives a
+  domain from the message it is about to sign.
+* There is **no** missing-domain → legacy-v1 selection: the domain is always
+  present on a `ProposalVoteAuthority`. When **no** authority is wired at all,
+  the `Required` policy fails closed (it is never treated as legacy
+  passthrough).
 
 Admission order is preserved:
 
