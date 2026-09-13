@@ -92,7 +92,7 @@ use qbind_consensus::driver::ConsensusEngineAction;
 use qbind_consensus::ids::ValidatorId;
 use qbind_consensus::key_registry::SuiteAwareValidatorKeyProvider;
 use qbind_consensus::proposal_vote_verify::{
-    verify_proposal_msg_with_preimage, verify_vote_msg_with_preimage, ProposalVoteVerifyError,
+    verify_proposal_msg_with_domain, verify_vote_msg_with_domain, ProposalVoteVerifyError,
 };
 use qbind_consensus::timeout::{TimeoutCertificate, TimeoutMsg};
 use qbind_consensus::timeout_verify::{
@@ -1052,29 +1052,27 @@ pub struct ProposalVoteAuthority {
     /// Local validator signer for outbound Proposal/Vote signing.
     /// When `None`, locally-emitted Proposal/Vote fail closed (not broadcast).
     pub signer: Option<Arc<dyn ValidatorSigner>>,
-    /// Run 422 D6: optional versioned Proposal/Vote signing domain.
+    /// Run 422 D6: **mandatory** versioned Proposal/Vote signing domain.
     ///
     /// Selects the signing-preimage FORMAT used by the Proposal/Vote boundary,
     /// from *trusted authority* — never from peer-negotiated or
-    /// attacker-controlled wire data:
-    ///
-    /// * `Some(domain)` — the boundary signs and verifies exclusively with the
-    ///   versioned v2 domain
-    ///   ([`qbind_wire::pv_signing_domain::ProposalVoteSigningDomainV2`]),
-    ///   binding the full runtime chain id, accepted genesis identity, and
-    ///   accepted authority commitment. There is NO v2→v1 fallback: a message
-    ///   that does not verify under this exact domain is rejected. Inbound
-    ///   messages whose wire `chain_id` disagrees with the domain's validated
-    ///   `expected_wire_chain_id` are rejected before acceptance.
-    /// * `None` — the boundary uses the legacy v1 chain-aware preimage
-    ///   (`signing_preimage_with_chain_id(chain_id)`), preserving existing
-    ///   Run 420/D5 behavior.
+    /// attacker-controlled wire data. A `ProposalVoteAuthority` cannot exist
+    /// without a validated v2 domain, so a present authority on the fail-closed
+    /// [`ConsensusVerificationPolicy::Required`] node path can NEVER fall back
+    /// to legacy v1 verification: there is no v2→v1 fallback and no way to
+    /// construct an authority that "has no domain metadata". The boundary signs
+    /// and verifies exclusively with this versioned v2 domain
+    /// ([`qbind_wire::pv_signing_domain::ProposalVoteSigningDomainV2`]), binding
+    /// the full runtime chain id, accepted genesis identity, and accepted
+    /// authority commitment. Inbound and outbound messages whose wire
+    /// `chain_id` disagrees with the domain's validated `expected_wire_chain_id`
+    /// are rejected/suppressed before crypto or transmission.
     ///
     /// Production `main` never constructs a `ProposalVoteAuthority` at all
     /// (`proposal_vote_authority == None`), so this field does not create any
     /// production activation route. It is populated only by explicit test
     /// fixtures that exercise the versioned boundary.
-    pub signing_domain: Option<ProposalVoteSigningDomainV2>,
+    pub signing_domain: ProposalVoteSigningDomainV2,
 }
 
 impl std::fmt::Debug for ProposalVoteAuthority {
@@ -1083,46 +1081,35 @@ impl std::fmt::Debug for ProposalVoteAuthority {
             .field("validators_size", &self.validators.len())
             .field("chain_id", &self.chain_id)
             .field("signer", &self.signer.is_some())
-            .field("signing_domain_v2", &self.signing_domain.is_some())
+            .field(
+                "expected_wire_chain_id",
+                &self.signing_domain.expected_wire_chain_id(),
+            )
             .finish()
     }
 }
 
 impl ProposalVoteAuthority {
-    /// Build the inbound/outbound signing preimage for a proposal, honoring the
-    /// selected signing format. With a v2 domain the preimage is built from
-    /// *trusted authority* (the domain), never from the message beyond its
-    /// canonical body. Without a domain the legacy v1 chain-aware preimage is
-    /// used.
+    /// Build the outbound signing preimage for a proposal under the mandatory
+    /// v2 domain. The preimage is built from *trusted authority* (the domain),
+    /// never from the message beyond its canonical body.
     fn proposal_preimage(&self, proposal: &BlockProposal) -> Vec<u8> {
-        match &self.signing_domain {
-            Some(domain) => domain.proposal_preimage(proposal),
-            None => proposal.signing_preimage_with_chain_id(self.chain_id),
-        }
+        self.signing_domain.proposal_preimage(proposal)
     }
 
-    /// Build the inbound/outbound signing preimage for a vote. See
-    /// [`ProposalVoteAuthority::proposal_preimage`].
+    /// Build the outbound signing preimage for a vote under the mandatory v2
+    /// domain. See [`ProposalVoteAuthority::proposal_preimage`].
     fn vote_preimage(&self, vote: &Vote) -> Vec<u8> {
-        match &self.signing_domain {
-            Some(domain) => domain.vote_preimage(vote),
-            None => vote.signing_preimage_with_chain_id(self.chain_id),
-        }
+        self.signing_domain.vote_preimage(vote)
     }
 
-    /// When a v2 domain is selected, verify that an inbound message's wire
-    /// `chain_id` matches the domain's *validated* expected wire-chain id.
-    /// Returns `false` (reject) on mismatch. Without a v2 domain there is no
-    /// additional wire-chain constraint here (the legacy v1 preimage already
-    /// binds the wire `chain_id` in the signed body).
-    ///
-    /// This never rewrites the message and never derives the expected identity
-    /// from the message: the expected value comes only from trusted config.
+    /// Whether an outbound/inbound message's wire `chain_id` matches the
+    /// domain's *validated* expected wire-chain id. Returns `false` (reject)
+    /// on mismatch. This never rewrites the message and never derives the
+    /// expected identity from the message: the expected value comes only from
+    /// trusted config.
     fn wire_chain_id_ok(&self, wire_chain_id: u32) -> bool {
-        match &self.signing_domain {
-            Some(domain) => domain.expected_wire_chain_id() == wire_chain_id,
-            None => true,
-        }
+        self.signing_domain.expected_wire_chain_id() == wire_chain_id
     }
 }
 
@@ -1427,6 +1414,14 @@ pub struct BinaryConsensusLoopInboundStats {
     pub outbound_proposal_signing_failure: u64,
     pub outbound_vote_signing_success: u64,
     pub outbound_vote_signing_failure: u64,
+    /// Run 422 D6: outbound Proposal frames suppressed BEFORE signing/transmission
+    /// because the message's wire `chain_id` disagreed with the selected v2
+    /// signing domain's validated `expected_wire_chain_id`. The message is never
+    /// silently rewritten to make it pass; it is refused fail-closed.
+    pub outbound_proposal_wire_chain_mismatch: u64,
+    /// Run 422 D6: outbound Vote frames suppressed for wire-chain mismatch. See
+    /// [`Self::outbound_proposal_wire_chain_mismatch`].
+    pub outbound_vote_wire_chain_mismatch: u64,
     // Run 420 (F3/F4/F8): typed `VerificationContextUnavailable` rejection
     // outcome. Distinct from `*_verify_rejected_total` (which decomposes
     // signature/suite verifier failures on a WIRED context) and from the F6
@@ -3010,6 +3005,21 @@ fn sign_proposal_for_broadcast(
             return None;
         }
     };
+    // Run 422 D6: refuse to sign/transmit a proposal whose wire chain_id
+    // disagrees with the selected v2 domain's validated expected wire-chain id.
+    // The message is never rewritten to make it pass — it is suppressed
+    // fail-closed BEFORE the signature is computed or attached.
+    if !ctx.wire_chain_id_ok(proposal.header.chain_id) {
+        inbound_stats.outbound_proposal_wire_chain_mismatch = inbound_stats
+            .outbound_proposal_wire_chain_mismatch
+            .saturating_add(1);
+        eprintln!(
+            "[binary-consensus] Run 422 D6: outbound proposal NOT signed/broadcast \
+             (wire chain_id {} != expected) — fail-closed",
+            proposal.header.chain_id
+        );
+        return None;
+    }
     // Bind the local validator's authorized suite into the signed content.
     proposal.header.suite_id = signer.suite_id();
     let preimage = ctx.proposal_preimage(&proposal);
@@ -3076,6 +3086,20 @@ fn sign_vote_for_broadcast(
             return None;
         }
     };
+    // Run 422 D6: refuse to sign/transmit a vote whose wire chain_id disagrees
+    // with the selected v2 domain's validated expected wire-chain id. Suppressed
+    // fail-closed BEFORE signing; never rewritten.
+    if !ctx.wire_chain_id_ok(vote.chain_id) {
+        inbound_stats.outbound_vote_wire_chain_mismatch = inbound_stats
+            .outbound_vote_wire_chain_mismatch
+            .saturating_add(1);
+        eprintln!(
+            "[binary-consensus] Run 422 D6: outbound vote NOT signed/transmitted \
+             (wire chain_id {} != expected) — fail-closed",
+            vote.chain_id
+        );
+        return None;
+    }
     vote.suite_id = signer.suite_id();
     let preimage = ctx.vote_preimage(&vote);
     match signer.sign_vote(&preimage) {
@@ -3337,12 +3361,34 @@ pub(crate) fn handle_inbound_consensus_msg(
                     // LocalMesh passthrough is preserved.
                     match pv_authority {
                         Some(ctx) => {
-                            // Run 422 D6: when a versioned v2 signing domain is
-                            // selected, reject a message whose wire chain_id
-                            // disagrees with the domain's validated expected
-                            // wire-chain id BEFORE any crypto work — fail-closed,
-                            // never rewriting the inbound message.
-                            if !ctx.wire_chain_id_ok(proposal.header.chain_id) {
+                            // Run 422 D6: verify the inbound proposal through the
+                            // message-bound versioned-domain interface. The
+                            // verifier recomputes the canonical v2 preimage from
+                            // THIS message and the trusted domain (a caller can
+                            // never substitute a stale/foreign preimage), and it
+                            // enforces expected wire-chain consistency BEFORE any
+                            // crypto — a wire chain_id disagreeing with the
+                            // domain's validated `expected_wire_chain_id` is a
+                            // typed `WireChainMismatch`, fail-closed, without ever
+                            // rewriting the inbound message.
+                            let t_start = std::time::Instant::now();
+                            let res = verify_proposal_msg_with_domain(
+                                &proposal,
+                                from,
+                                ctx.validators.as_ref(),
+                                ctx.key_provider.as_ref(),
+                                ctx.backend_registry.as_ref(),
+                                &ctx.signing_domain,
+                            );
+                            // Wire-chain consistency is enforced BEFORE any
+                            // crypto inside `_with_domain`; a mismatch is a typed
+                            // rejection that never runs the signature backend, so
+                            // it must NOT be recorded as a crypto-verify latency
+                            // observation.
+                            if let Err(
+                                e @ ProposalVoteVerifyError::WireChainMismatch { .. },
+                            ) = &res
+                            {
                                 stats.inbound_proposal_verify_rejected_total = stats
                                     .inbound_proposal_verify_rejected_total
                                     .saturating_add(1);
@@ -3352,21 +3398,14 @@ pub(crate) fn handle_inbound_consensus_msg(
                                 eprintln!(
                                     "[binary-consensus] Run 422 D6: inbound proposal REJECTED \
                                      (wire chain_id mismatch) height={} proposer={:?} \
-                                     wire_chain_id={} — fail-closed, not delivered",
-                                    proposal.header.height, from, proposal.header.chain_id,
+                                     wire_chain_id={} reason={} — fail-closed, not delivered",
+                                    proposal.header.height,
+                                    from,
+                                    proposal.header.chain_id,
+                                    e,
                                 );
                                 return;
                             }
-                            let t_start = std::time::Instant::now();
-                            let preimage = ctx.proposal_preimage(&proposal);
-                            let res = verify_proposal_msg_with_preimage(
-                                &proposal,
-                                from,
-                                ctx.validators.as_ref(),
-                                ctx.key_provider.as_ref(),
-                                ctx.backend_registry.as_ref(),
-                                &preimage,
-                            );
                             let elapsed = t_start.elapsed().as_nanos() as u64;
                             stats.proposal_vote_crypto_verify_latency_ns_total = stats
                                 .proposal_vote_crypto_verify_latency_ns_total
@@ -3379,6 +3418,11 @@ pub(crate) fn handle_inbound_consensus_msg(
                                     stats.inbound_proposal_verify_accepted = stats
                                         .inbound_proposal_verify_accepted
                                         .saturating_add(1);
+                                }
+                                Err(ProposalVoteVerifyError::WireChainMismatch { .. }) => {
+                                    // Handled above (before crypto latency
+                                    // recording); unreachable here.
+                                    return;
                                 }
                                 Err(e) => {
                                     stats.inbound_proposal_verify_rejected_total = stats
@@ -3509,9 +3553,25 @@ pub(crate) fn handle_inbound_consensus_msg(
                     // unsigned passthrough.
                     match pv_authority {
                         Some(ctx) => {
-                            // Run 422 D6: wire chain_id must match the selected
-                            // v2 domain's validated expected wire-chain id.
-                            if !ctx.wire_chain_id_ok(vote.chain_id) {
+                            // Run 422 D6: verify the inbound vote through the
+                            // message-bound versioned-domain interface (recomputes
+                            // the v2 preimage from THIS vote; enforces wire-chain
+                            // consistency before crypto).
+                            let t_start = std::time::Instant::now();
+                            let res = verify_vote_msg_with_domain(
+                                &vote,
+                                from,
+                                ctx.validators.as_ref(),
+                                ctx.key_provider.as_ref(),
+                                ctx.backend_registry.as_ref(),
+                                &ctx.signing_domain,
+                            );
+                            // Wire-chain mismatch is a typed rejection enforced
+                            // before any crypto; do NOT record it as a
+                            // crypto-verify latency observation.
+                            if let Err(e @ ProposalVoteVerifyError::WireChainMismatch { .. }) =
+                                &res
+                            {
                                 stats.inbound_vote_verify_rejected_total = stats
                                     .inbound_vote_verify_rejected_total
                                     .saturating_add(1);
@@ -3521,21 +3581,11 @@ pub(crate) fn handle_inbound_consensus_msg(
                                 eprintln!(
                                     "[binary-consensus] Run 422 D6: inbound vote REJECTED \
                                      (wire chain_id mismatch) height={} voter={:?} \
-                                     wire_chain_id={} — fail-closed, not delivered",
-                                    vote.height, from, vote.chain_id,
+                                     wire_chain_id={} reason={} — fail-closed, not delivered",
+                                    vote.height, from, vote.chain_id, e,
                                 );
                                 return;
                             }
-                            let t_start = std::time::Instant::now();
-                            let preimage = ctx.vote_preimage(&vote);
-                            let res = verify_vote_msg_with_preimage(
-                                &vote,
-                                from,
-                                ctx.validators.as_ref(),
-                                ctx.key_provider.as_ref(),
-                                ctx.backend_registry.as_ref(),
-                                &preimage,
-                            );
                             let elapsed = t_start.elapsed().as_nanos() as u64;
                             stats.proposal_vote_crypto_verify_latency_ns_total = stats
                                 .proposal_vote_crypto_verify_latency_ns_total
@@ -3547,6 +3597,10 @@ pub(crate) fn handle_inbound_consensus_msg(
                                 Ok(()) => {
                                     stats.inbound_vote_verify_accepted =
                                         stats.inbound_vote_verify_accepted.saturating_add(1);
+                                }
+                                Err(ProposalVoteVerifyError::WireChainMismatch { .. }) => {
+                                    // Handled above; unreachable here.
+                                    return;
                                 }
                                 Err(e) => {
                                     stats.inbound_vote_verify_rejected_total = stats
@@ -4481,6 +4535,11 @@ fn inc_proposal_reject_reason(
                 .inbound_proposal_rejected_internal_error
                 .saturating_add(1);
         }
+        ProposalVoteVerifyError::WireChainMismatch { .. } => {
+            stats.inbound_proposal_rejected_wire_chain_mismatch = stats
+                .inbound_proposal_rejected_wire_chain_mismatch
+                .saturating_add(1);
+        }
     }
 }
 
@@ -4527,6 +4586,11 @@ fn inc_vote_reject_reason(
         ProposalVoteVerifyError::BackendError(_, _) => {
             stats.inbound_vote_rejected_internal_error = stats
                 .inbound_vote_rejected_internal_error
+                .saturating_add(1);
+        }
+        ProposalVoteVerifyError::WireChainMismatch { .. } => {
+            stats.inbound_vote_rejected_wire_chain_mismatch = stats
+                .inbound_vote_rejected_wire_chain_mismatch
                 .saturating_add(1);
         }
     }
@@ -8559,6 +8623,22 @@ mod tests {
             }
         }
 
+        /// The canonical Run 420/D5 control v2 signing domain used by the main
+        /// module's `make_ctx` and signing helpers. Run 422 D6 makes the v2
+        /// domain mandatory for any `ProposalVoteAuthority`, so these fixtures
+        /// sign and verify under this exact domain (there is no v1-authority
+        /// path any more). `expected_wire_chain_id = 0` matches `base_header`
+        /// and `base_vote`, whose wire `chain_id` is 0.
+        fn d5_control_domain() -> ProposalVoteSigningDomainV2 {
+            ProposalVoteSigningDomainV2::try_new(
+                ChainId(0xD5D5_0000_0000_0001),
+                0,
+                [0x5Du8; 32],
+                [0xA5u8; 32],
+            )
+            .expect("valid d5 control domain")
+        }
+
         fn make_ctx(
             fixture: &Fixture,
             local_signer_for: Option<ValidatorId>,
@@ -8567,18 +8647,19 @@ mod tests {
                 let sk = fixture.sk_objs.get(&id).expect("signer key present").clone();
                 Arc::new(LocalKeySigner::new(id, TEST_SUITE_U16, sk)) as Arc<dyn ValidatorSigner>
             });
-            // Run 422 D5: this Proposal/Vote verifier test module constructs the
-            // *Proposal/Vote* authority explicitly (a distinct type from the
-            // Timeout/NewView `TimeoutVerificationContext`). Building this in a
-            // test proves verifier coverage only; it is not a production
-            // activation route.
+            // Run 422 D5/D6: this Proposal/Vote verifier test module constructs
+            // the *Proposal/Vote* authority explicitly (a distinct type from the
+            // Timeout/NewView `TimeoutVerificationContext`). D6 makes the v2
+            // signing domain mandatory, so no authority can select legacy v1
+            // verification. Building this in a test proves verifier coverage
+            // only; it is not a production activation route.
             ProposalVoteAuthority {
                 validators: fixture.validators.clone(),
                 key_provider: fixture.kp.clone(),
                 backend_registry: fixture.br.clone(),
                 chain_id: QBIND_DEVNET_CHAIN_ID,
                 signer,
-                signing_domain: None,
+                signing_domain: d5_control_domain(),
             }
         }
 
@@ -8602,8 +8683,25 @@ mod tests {
         }
 
         /// Build a proposal signed by `proposer`'s consensus key over the
-        /// canonical chain-aware preimage.
+        /// mandatory v2 control-domain preimage (Run 422 D6).
         fn signed_proposal(proposer: u16, fixture: &Fixture) -> BlockProposal {
+            let mut p = BlockProposal {
+                header: base_header(proposer),
+                qc: None,
+                txs: vec![],
+                signature: vec![],
+            };
+            let preimage = d5_control_domain().proposal_preimage(&p);
+            let sk = fixture.sks.get(&ValidatorId(proposer as u64)).expect("sk");
+            p.signature = MlDsa44Backend::sign(sk, &preimage).expect("sign");
+            p
+        }
+
+        /// Build a proposal signed by `proposer` over the LEGACY v1 chain-aware
+        /// preimage. Retained only for explicit legacy-consumer regression
+        /// tests (e.g. cross-format v1→v2 rejection); the v2 authority path
+        /// never accepts these.
+        fn signed_proposal_v1_legacy(proposer: u16, fixture: &Fixture) -> BlockProposal {
             let mut p = BlockProposal {
                 header: base_header(proposer),
                 qc: None,
@@ -8617,9 +8715,9 @@ mod tests {
         }
 
         /// Build a proposal at an explicit `height`/`parent`, signed by
-        /// `proposer`'s consensus key. Used by the active-restore-mode case so
-        /// the frame is shaped (height above committed+1) to reach restore
-        /// deferral if admitted.
+        /// `proposer`'s consensus key over the mandatory v2 control-domain
+        /// preimage. Used by the active-restore-mode case so the frame is shaped
+        /// (height above committed+1) to reach restore deferral if admitted.
         fn signed_proposal_at_height(
             proposer: u16,
             height: u64,
@@ -8635,7 +8733,7 @@ mod tests {
                 txs: vec![],
                 signature: vec![],
             };
-            let preimage = p.signing_preimage_with_chain_id(QBIND_DEVNET_CHAIN_ID);
+            let preimage = d5_control_domain().proposal_preimage(&p);
             let sk = fixture.sks.get(&ValidatorId(proposer as u64)).expect("sk");
             p.signature = MlDsa44Backend::sign(sk, &preimage).expect("sign");
             p
@@ -8656,9 +8754,20 @@ mod tests {
             }
         }
 
-        /// Build a vote signed by `voter`'s consensus key over the canonical
-        /// chain-aware preimage.
+        /// Build a vote signed by `voter`'s consensus key over the mandatory v2
+        /// control-domain preimage (Run 422 D6).
         fn signed_vote(voter: u16, fixture: &Fixture) -> Vote {
+            let mut v = base_vote(voter);
+            let preimage = d5_control_domain().vote_preimage(&v);
+            let sk = fixture.sks.get(&ValidatorId(voter as u64)).expect("sk");
+            v.signature = MlDsa44Backend::sign(sk, &preimage).expect("sign");
+            v
+        }
+
+        /// Build a vote signed by `voter` over the LEGACY v1 chain-aware
+        /// preimage. Retained only for explicit legacy-consumer regression
+        /// tests; the v2 authority path never accepts these.
+        fn signed_vote_v1_legacy(voter: u16, fixture: &Fixture) -> Vote {
             let mut v = base_vote(voter);
             let preimage = v.signing_preimage_with_chain_id(QBIND_DEVNET_CHAIN_ID);
             let sk = fixture.sks.get(&ValidatorId(voter as u64)).expect("sk");
@@ -8775,13 +8884,13 @@ mod tests {
             let mut ps: &[u8] = &pb;
             let p2 = BlockProposal::decode(&mut ps).expect("decode");
             assert_eq!(p, p2);
-            assert!(qbind_consensus::verify_proposal_msg(
+            assert!(qbind_consensus::verify_proposal_msg_with_domain(
                 &p2,
                 ValidatorId(2),
                 fixture.validators.as_ref(),
                 fixture.kp.as_ref(),
                 fixture.br.as_ref(),
-                QBIND_DEVNET_CHAIN_ID,
+                &d5_control_domain(),
             )
             .is_ok());
         }
@@ -8878,8 +8987,9 @@ mod tests {
                 txs: vec![],
                 signature: vec![],
             };
-            // sign with V2's key but keep proposer_index = 1.
-            let preimage = proposal.signing_preimage_with_chain_id(QBIND_DEVNET_CHAIN_ID);
+            // sign with V2's key over the v2 control-domain preimage but keep
+            // proposer_index = 1 (wrong-signer isolation under the v2 boundary).
+            let preimage = d5_control_domain().proposal_preimage(&proposal);
             let sk2 = fixture.sks.get(&ValidatorId(2)).unwrap();
             proposal.signature = MlDsa44Backend::sign(sk2, &preimage).expect("sign");
             deliver_proposal(&mut engine, &mut stats, Some(&ctx), &proposal, &metrics);
@@ -9059,14 +9169,14 @@ mod tests {
             assert!(!signed_p.signature.is_empty());
             assert_eq!(signed_p.header.suite_id, TEST_SUITE_U16);
             assert_eq!(stats.outbound_proposal_signing_success, 1);
-            // The signed proposal self-verifies against the same context.
-            assert!(qbind_consensus::verify_proposal_msg(
+            // The signed proposal self-verifies against the same context's domain.
+            assert!(qbind_consensus::verify_proposal_msg_with_domain(
                 &signed_p,
                 ValidatorId(0),
                 ctx.validators.as_ref(),
                 ctx.key_provider.as_ref(),
                 ctx.backend_registry.as_ref(),
-                QBIND_DEVNET_CHAIN_ID,
+                &d5_control_domain(),
             )
             .is_ok());
 
@@ -9075,13 +9185,13 @@ mod tests {
                 sign_vote_for_broadcast(unsigned_v, Some(&ctx), ConsensusVerificationPolicy::LocalFixtureUnsigned, &mut stats).expect("signed");
             assert!(!signed_v.signature.is_empty());
             assert_eq!(stats.outbound_vote_signing_success, 1);
-            assert!(qbind_consensus::verify_vote_msg(
+            assert!(qbind_consensus::verify_vote_msg_with_domain(
                 &signed_v,
                 ValidatorId(0),
                 ctx.validators.as_ref(),
                 ctx.key_provider.as_ref(),
                 ctx.backend_registry.as_ref(),
-                QBIND_DEVNET_CHAIN_ID,
+                &d5_control_domain(),
             )
             .is_ok());
         }
@@ -10532,7 +10642,7 @@ mod tests {
                 backend_registry: fixture.br.clone(),
                 chain_id: QBIND_DEVNET_CHAIN_ID,
                 signer,
-                signing_domain: Some(domain),
+                signing_domain: domain,
             }
         }
 
@@ -10565,6 +10675,32 @@ mod tests {
             let sk = fixture.sks.get(&ValidatorId(voter as u64)).expect("sk");
             v.signature = MlDsa44Backend::sign(sk, &preimage).expect("sign");
             v
+        }
+
+        /// A proposal at explicit `height`/`parent`, signed by `proposer` over
+        /// `domain`'s v2 preimage. Used to shape a frame (height above
+        /// committed+1) that reaches restore deferral IF admitted, while still
+        /// being bound to a specific v2 domain.
+        fn signed_proposal_v2_at_height(
+            proposer: u16,
+            height: u64,
+            parent: [u8; 32],
+            fixture: &Fixture,
+            domain: &ProposalVoteSigningDomainV2,
+        ) -> BlockProposal {
+            let mut header = base_header(proposer);
+            header.height = height;
+            header.parent_block_id = parent;
+            let mut p = BlockProposal {
+                header,
+                qc: None,
+                txs: vec![],
+                signature: vec![],
+            };
+            let preimage = domain.proposal_preimage(&p);
+            let sk = fixture.sks.get(&ValidatorId(proposer as u64)).expect("sk");
+            p.signature = MlDsa44Backend::sign(sk, &preimage).expect("sign");
+            p
         }
 
         // D6-1: Correct-domain signed Proposal passes the intended v2
@@ -10832,40 +10968,41 @@ mod tests {
             )
             .expect("signed under v2 domain");
             assert_eq!(stats.outbound_proposal_signing_success, 1);
-            // Verifies under the SELECTED v2 domain preimage.
-            assert!(verify_proposal_msg_with_preimage(
+            // Verifies under the SELECTED v2 domain (message-bound verifier
+            // recomputes the preimage internally).
+            assert!(qbind_consensus::verify_proposal_msg_with_domain(
                 &signed_p,
                 ValidatorId(0),
                 ctx.validators.as_ref(),
                 ctx.key_provider.as_ref(),
                 ctx.backend_registry.as_ref(),
-                &domain.proposal_preimage(&signed_p),
+                &domain,
             )
             .is_ok());
-            // FAILS under a foreign domain preimage (different commitment).
+            // FAILS under a foreign domain (different commitment, same wire).
             let foreign = d6_domain(
                 0xD6D6_0000_0000_0001,
                 0,
                 d6_genesis_identity(0x11),
                 d6_authority_commitment(0x77),
             );
-            assert!(verify_proposal_msg_with_preimage(
+            assert!(qbind_consensus::verify_proposal_msg_with_domain(
                 &signed_p,
                 ValidatorId(0),
                 ctx.validators.as_ref(),
                 ctx.key_provider.as_ref(),
                 ctx.backend_registry.as_ref(),
-                &foreign.proposal_preimage(&signed_p),
+                &foreign,
             )
             .is_err());
-            // FAILS under the legacy v1 preimage: no fallback path exists.
-            assert!(verify_proposal_msg_with_preimage(
+            // FAILS under the legacy v1 boundary: no fallback path exists.
+            assert!(qbind_consensus::verify_proposal_msg(
                 &signed_p,
                 ValidatorId(0),
                 ctx.validators.as_ref(),
                 ctx.key_provider.as_ref(),
                 ctx.backend_registry.as_ref(),
-                &signed_p.signing_preimage_with_chain_id(QBIND_DEVNET_CHAIN_ID),
+                QBIND_DEVNET_CHAIN_ID,
             )
             .is_err());
 
@@ -10878,22 +11015,22 @@ mod tests {
             )
             .expect("signed under v2 domain");
             assert_eq!(stats.outbound_vote_signing_success, 1);
-            assert!(verify_vote_msg_with_preimage(
+            assert!(qbind_consensus::verify_vote_msg_with_domain(
                 &signed_v,
                 ValidatorId(0),
                 ctx.validators.as_ref(),
                 ctx.key_provider.as_ref(),
                 ctx.backend_registry.as_ref(),
-                &domain.vote_preimage(&signed_v),
+                &domain,
             )
             .is_ok());
-            assert!(verify_vote_msg_with_preimage(
+            assert!(qbind_consensus::verify_vote_msg_with_domain(
                 &signed_v,
                 ValidatorId(0),
                 ctx.validators.as_ref(),
                 ctx.key_provider.as_ref(),
                 ctx.backend_registry.as_ref(),
-                &foreign.vote_preimage(&signed_v),
+                &foreign,
             )
             .is_err());
         }
@@ -10907,14 +11044,14 @@ mod tests {
             let domain = d6_control_domain();
 
             // Legacy v1-signed proposal presented to the v2 boundary.
-            let p_v1 = signed_proposal(0, &fixture); // signs v1 chain-aware preimage
-            assert!(verify_proposal_msg_with_preimage(
+            let p_v1 = signed_proposal_v1_legacy(0, &fixture); // signs v1 chain-aware preimage
+            assert!(qbind_consensus::verify_proposal_msg_with_domain(
                 &p_v1,
                 ValidatorId(0),
                 fixture.validators.as_ref(),
                 fixture.kp.as_ref(),
                 fixture.br.as_ref(),
-                &domain.proposal_preimage(&p_v1),
+                &domain,
             )
             .is_err());
 
@@ -10929,6 +11066,380 @@ mod tests {
                 QBIND_DEVNET_CHAIN_ID,
             )
             .is_err());
+        }
+
+        // D6-7 (Finding C-E): Active restore-mode v2 rejection observed through
+        // the caller-supplied restore helper AND a recording facade.
+        //
+        // The reviewed `deliver_*_combined` helpers create INACTIVE restore
+        // state and pass no outbound facade, so they cannot prove v2 rejection
+        // under ACTIVE restore or the observed absence of facade actions. This
+        // test:
+        //   * demonstrably ACTIVATES restore mode (snapshot baseline height 5),
+        //   * establishes a correctly-signed v2 positive control that reaches
+        //     the restore-deferral boundary (deferred == 1),
+        //   * sends a SAME-KEY FOREIGN-domain Proposal that would reach that
+        //     boundary if admitted (same wire chain, height 7 > committed+1),
+        //   * asserts F6 admission, v2 rejection, and NO deferral/delivery/
+        //     reconfiguration effect, NO facade call, and unchanged engine/
+        //     restore state.
+        #[test]
+        fn run422_d6_active_restore_foreign_domain_proposal_rejected_no_effects() {
+            use std::sync::atomic::Ordering::SeqCst;
+
+            let fixture = make_fixture(4);
+            let domain = d6_control_domain();
+            // Authority bound to the trusted domain (no signer needed inbound).
+            let pv = make_ctx_v2(&fixture, None, domain.clone());
+            let timeout_ctx = make_timeout_ctx(&fixture, Some(ValidatorId(0)));
+            let gate = pv_binding_gate(4);
+            let origin = AuthenticatedConsensusOrigin::new(pv_node_for(0), ValidatorId(0));
+            let metrics = make_metrics();
+            let baseline = RestoreBaseline {
+                snapshot_height: 5,
+                snapshot_block_id: [0x01; 32],
+            };
+
+            // ---- Positive control: correctly-signed v2 proposal (same domain
+            // as the authority) reaches the active-restore deferral boundary.
+            {
+                let p_ok = signed_proposal_v2_at_height(0, 7, [0xAB; 32], &fixture, &domain);
+                let mut engine = make_engine(ValidatorId(0), 4);
+                engine.initialize_from_snapshot_baseline([0x01; 32], 5);
+                assert_eq!(engine.committed_height(), Some(5));
+                let mut restore = RestoreCatchupModeState::from_config(Some(baseline.clone()));
+                assert!(restore.is_active(), "restore mode must be active (control)");
+                let mut stats = BinaryConsensusLoopInboundStats::default();
+                let facade = CountingFacade::default();
+                let detector = deliver_proposal_combined_restore(
+                    &mut engine,
+                    &mut stats,
+                    &mut restore,
+                    Some(&timeout_ctx),
+                    Some(&pv),
+                    &p_ok,
+                    &metrics,
+                    Some(&facade),
+                    Some(&origin),
+                    Some(&gate),
+                    ConsensusVerificationPolicy::Required,
+                );
+                assert_eq!(gate.metrics().accepted(), 1, "control: F6 admitted");
+                assert_eq!(stats.inbound_proposal_verify_accepted, 1, "control: v2 verified");
+                assert_eq!(
+                    stats.restore_catchup_proposals_deferred, 1,
+                    "control: v2 proposal deferred by active restore mode"
+                );
+                assert_eq!(stats.inbound_proposals_delivered, 0);
+                assert!(detector.header_cache.is_empty());
+                assert_eq!(facade.calls.load(SeqCst), 0);
+                assert!(restore.is_active());
+            }
+
+            // ---- Main case: SAME key, SAME message shape and wire chain, but
+            // signed under a FOREIGN v2 domain (different runtime chain id and
+            // authority commitment). It is rejected at the v2 boundary BEFORE
+            // the restore-deferral branch.
+            let foreign = d6_domain(
+                0xEEEE_0000_0000_0009,
+                0, // same wire chain ⇒ passes the wire check, reaches crypto
+                d6_genesis_identity(0x33),
+                d6_authority_commitment(0x44),
+            );
+            let p_foreign = signed_proposal_v2_at_height(0, 7, [0xAB; 32], &fixture, &foreign);
+
+            let mut engine = make_engine(ValidatorId(0), 4);
+            engine.initialize_from_snapshot_baseline([0x01; 32], 5);
+            let view_before = engine.current_view();
+            let committed_before = engine.committed_height();
+            let mut restore = RestoreCatchupModeState::from_config(Some(baseline));
+            assert!(restore.is_active(), "restore mode must be active");
+            let mut stats = BinaryConsensusLoopInboundStats::default();
+            let facade = CountingFacade::default();
+
+            let detector = deliver_proposal_combined_restore(
+                &mut engine,
+                &mut stats,
+                &mut restore,
+                Some(&timeout_ctx),
+                Some(&pv),
+                &p_foreign,
+                &metrics,
+                Some(&facade),
+                Some(&origin),
+                Some(&gate),
+                ConsensusVerificationPolicy::Required,
+            );
+
+            // F6 admitted (real gate + matching origin) — rejection is at the v2
+            // crypto boundary, not sender-binding. Gate is shared with the
+            // control block, so cumulative accepted() == 2.
+            assert_eq!(gate.metrics().accepted(), 2);
+            assert_eq!(stats.inbound_sender_binding_rejected_total, 0);
+            // v2 rejection fired: crypto ran (wire matched) and failed signature.
+            assert_eq!(stats.inbound_proposal_verify_rejected_total, 1);
+            assert_eq!(stats.inbound_proposal_rejected_bad_signature, 1);
+            assert_eq!(stats.inbound_proposal_verify_accepted, 0);
+            // No restore deferral, delivery, engine acceptance, reconfig, or
+            // outbound facade action attributable to the rejected frame.
+            assert_eq!(stats.restore_catchup_proposals_deferred, 0);
+            assert_eq!(stats.inbound_proposals_delivered, 0);
+            assert!(detector.header_cache.is_empty());
+            assert_eq!(facade.calls.load(SeqCst), 0);
+            // Engine + restore state unchanged.
+            assert_eq!(engine.current_view(), view_before);
+            assert_eq!(engine.committed_height(), committed_before);
+            assert!(restore.is_active());
+        }
+
+        // D6-8 (Finding C-F): Cache re-emission through the ACTUAL
+        // `maybe_reemit_on_late_peer_connect` path with a v2 authority present.
+        //
+        // The reviewed D5 cached test supplies no PV authority, so it never
+        // exercises v2 signing. Here a v2 authority (with a local signer) is
+        // wired, the cached current-view proposal AND vote are re-emitted on a
+        // genuine new-peer transition, the emitted messages are RECORDED, and
+        // each emitted signature is verified under the SELECTED v2 domain
+        // (accepted) and under FOREIGN / legacy-v1 boundaries (rejected).
+        #[test]
+        fn run422_d6_late_peer_reemit_signs_under_selected_v2_domain() {
+            use std::sync::atomic::Ordering::SeqCst;
+
+            struct OnePeer(NodeId);
+            impl PeerConnectivitySource for OnePeer {
+                fn connected_peers(&self) -> Vec<NodeId> {
+                    vec![self.0]
+                }
+            }
+
+            #[derive(Default)]
+            struct CapturingFacade {
+                proposals: std::sync::Mutex<Vec<BlockProposal>>,
+                votes: std::sync::Mutex<Vec<Vote>>,
+                other_calls: std::sync::atomic::AtomicU64,
+            }
+            impl ConsensusNetworkFacade for CapturingFacade {
+                fn send_vote_to(&self, _t: ValidatorId, _v: &Vote) -> Result<(), NetworkError> {
+                    self.other_calls.fetch_add(1, SeqCst);
+                    Ok(())
+                }
+                fn broadcast_vote(&self, v: &Vote) -> Result<(), NetworkError> {
+                    self.votes.lock().unwrap().push(v.clone());
+                    Ok(())
+                }
+                fn broadcast_proposal(&self, p: &BlockProposal) -> Result<(), NetworkError> {
+                    self.proposals.lock().unwrap().push(p.clone());
+                    Ok(())
+                }
+                fn broadcast_consensus_msg(
+                    &self,
+                    _m: &ConsensusNetMsg,
+                ) -> Result<(), NetworkError> {
+                    self.other_calls.fetch_add(1, SeqCst);
+                    Ok(())
+                }
+            }
+
+            let fixture = make_fixture(4);
+            let domain = d6_control_domain();
+            // v2 authority WITH a local signer for validator 0.
+            let pv = make_ctx_v2(&fixture, Some(ValidatorId(0)), domain.clone());
+
+            let engine = make_engine(ValidatorId(0), 4);
+            assert!(engine.is_leader_for_current_view());
+            let cur_view = engine.current_view();
+
+            // Cached current-view proposal + vote (unsigned bodies; the re-emit
+            // path signs them under the v2 authority before broadcast).
+            let mut last_leader_proposal = Some((
+                cur_view,
+                BlockProposal {
+                    header: base_header(0),
+                    qc: None,
+                    txs: vec![],
+                    signature: vec![],
+                },
+            ));
+            let mut last_leader_vote = Some((cur_view, base_vote(0)));
+            let mut reemitted_for_view: Option<u64> = None;
+            let mut last_known_peers: HashSet<NodeId> = HashSet::new();
+
+            let peer = pv_node_for(1);
+            let connectivity = OnePeer(peer);
+            let facade = CapturingFacade::default();
+            let mut stats = BinaryConsensusLoopInboundStats::default();
+
+            maybe_reemit_on_late_peer_connect(
+                &engine,
+                &mut last_leader_proposal,
+                &mut last_leader_vote,
+                &mut reemitted_for_view,
+                &mut last_known_peers,
+                &connectivity,
+                Some(&facade),
+                &mut stats,
+                Some(&pv),
+                ConsensusVerificationPolicy::Required,
+            );
+
+            // Both families re-emitted exactly once; the peer transition was
+            // genuinely observed.
+            assert_eq!(stats.outbound_proposal_late_peer_reemits, 1);
+            assert_eq!(stats.outbound_vote_late_peer_reemits, 1);
+            assert_eq!(stats.outbound_proposal_signing_success, 1);
+            assert_eq!(stats.outbound_vote_signing_success, 1);
+            assert_eq!(reemitted_for_view, Some(cur_view));
+            assert!(last_known_peers.contains(&peer));
+            assert_eq!(facade.other_calls.load(SeqCst), 0);
+
+            let emitted_p = facade.proposals.lock().unwrap();
+            let emitted_v = facade.votes.lock().unwrap();
+            assert_eq!(emitted_p.len(), 1);
+            assert_eq!(emitted_v.len(), 1);
+            let ep = &emitted_p[0];
+            let ev = &emitted_v[0];
+
+            // Emitted Proposal verifies under the SELECTED v2 domain ...
+            assert!(qbind_consensus::verify_proposal_msg_with_domain(
+                ep,
+                ValidatorId(0),
+                fixture.validators.as_ref(),
+                fixture.kp.as_ref(),
+                fixture.br.as_ref(),
+                &domain,
+            )
+            .is_ok());
+            // ... and is REJECTED under a foreign v2 domain ...
+            let foreign = d6_domain(
+                0xEEEE_0000_0000_0009,
+                0,
+                d6_genesis_identity(0x33),
+                d6_authority_commitment(0x44),
+            );
+            assert!(qbind_consensus::verify_proposal_msg_with_domain(
+                ep,
+                ValidatorId(0),
+                fixture.validators.as_ref(),
+                fixture.kp.as_ref(),
+                fixture.br.as_ref(),
+                &foreign,
+            )
+            .is_err());
+            // ... and REJECTED under the legacy v1 boundary (no fallback).
+            assert!(qbind_consensus::verify_proposal_msg(
+                ep,
+                ValidatorId(0),
+                fixture.validators.as_ref(),
+                fixture.kp.as_ref(),
+                fixture.br.as_ref(),
+                QBIND_DEVNET_CHAIN_ID,
+            )
+            .is_err());
+
+            // Emitted Vote: same three properties.
+            assert!(qbind_consensus::verify_vote_msg_with_domain(
+                ev,
+                ValidatorId(0),
+                fixture.validators.as_ref(),
+                fixture.kp.as_ref(),
+                fixture.br.as_ref(),
+                &domain,
+            )
+            .is_ok());
+            assert!(qbind_consensus::verify_vote_msg_with_domain(
+                ev,
+                ValidatorId(0),
+                fixture.validators.as_ref(),
+                fixture.kp.as_ref(),
+                fixture.br.as_ref(),
+                &foreign,
+            )
+            .is_err());
+            assert!(qbind_consensus::verify_vote_msg(
+                ev,
+                ValidatorId(0),
+                fixture.validators.as_ref(),
+                fixture.kp.as_ref(),
+                fixture.br.as_ref(),
+                QBIND_DEVNET_CHAIN_ID,
+            )
+            .is_err());
+        }
+
+        // D6-9 (Finding C-F negative): inconsistent-wire cached Proposal cannot
+        // be re-emitted. The authority's domain expects wire chain id 7, but the
+        // cached current-view proposal carries wire chain id 0. Outbound signing
+        // refuses fail-closed (wire mismatch) BEFORE signing, so no proposal is
+        // broadcast, the single-shot marker is not set, and the paired cached
+        // vote branch is never reached.
+        #[test]
+        fn run422_d6_late_peer_reemit_refused_on_inconsistent_wire() {
+            use std::sync::atomic::Ordering::SeqCst;
+
+            struct OnePeer(NodeId);
+            impl PeerConnectivitySource for OnePeer {
+                fn connected_peers(&self) -> Vec<NodeId> {
+                    vec![self.0]
+                }
+            }
+
+            let fixture = make_fixture(4);
+            // Domain expects wire chain id 7; cached bodies carry wire 0.
+            let domain = d6_domain(
+                0xD6D6_0000_0000_0007,
+                7,
+                d6_genesis_identity(0x11),
+                d6_authority_commitment(0x22),
+            );
+            let pv = make_ctx_v2(&fixture, Some(ValidatorId(0)), domain);
+
+            let engine = make_engine(ValidatorId(0), 4);
+            assert!(engine.is_leader_for_current_view());
+            let cur_view = engine.current_view();
+
+            let mut last_leader_proposal = Some((
+                cur_view,
+                BlockProposal {
+                    header: base_header(0), // wire chain id 0 != expected 7
+                    qc: None,
+                    txs: vec![],
+                    signature: vec![],
+                },
+            ));
+            let mut last_leader_vote = Some((cur_view, base_vote(0)));
+            let mut reemitted_for_view: Option<u64> = None;
+            let mut last_known_peers: HashSet<NodeId> = HashSet::new();
+
+            let peer = pv_node_for(1);
+            let connectivity = OnePeer(peer);
+            let facade = CountingFacade::default();
+            let mut stats = BinaryConsensusLoopInboundStats::default();
+
+            maybe_reemit_on_late_peer_connect(
+                &engine,
+                &mut last_leader_proposal,
+                &mut last_leader_vote,
+                &mut reemitted_for_view,
+                &mut last_known_peers,
+                &connectivity,
+                Some(&facade),
+                &mut stats,
+                Some(&pv),
+                ConsensusVerificationPolicy::Required,
+            );
+
+            // Outbound signing refused for wire-chain mismatch before signing.
+            assert_eq!(stats.outbound_proposal_wire_chain_mismatch, 1);
+            assert_eq!(stats.outbound_proposal_signing_success, 0);
+            assert_eq!(stats.outbound_proposal_late_peer_reemits, 0);
+            // No facade traffic; single-shot marker not set.
+            assert_eq!(facade.calls.load(SeqCst), 0);
+            assert_eq!(reemitted_for_view, None);
+            // Proposal-first refusal returned before the cached-vote branch.
+            assert_eq!(stats.outbound_vote_wire_chain_mismatch, 0);
+            assert_eq!(stats.outbound_vote_late_peer_reemits, 0);
+            // Peer transition was genuinely observed.
+            assert!(last_known_peers.contains(&peer));
         }
     }
 }

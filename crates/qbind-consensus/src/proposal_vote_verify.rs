@@ -46,6 +46,7 @@ use qbind_crypto::consensus_sig::{ConsensusSigError, ConsensusSigVerifier};
 use qbind_crypto::ConsensusSigSuiteId;
 use qbind_types::ChainId;
 use qbind_wire::consensus::{BlockProposal, Vote};
+use qbind_wire::pv_signing_domain::ProposalVoteSigningDomainV2;
 
 use crate::crypto_verifier::ConsensusSigBackendRegistry;
 use crate::ids::ValidatorId;
@@ -99,6 +100,18 @@ pub enum ProposalVoteVerifyError {
     /// The signature did not verify against the governed public key + the
     /// chain-aware signing preimage.
     InvalidSignature(ValidatorId),
+    /// The message's wire `chain_id` does not match the trusted signing
+    /// domain's validated `expected_wire_chain_id`. This is a domain-level
+    /// gate enforced before any cryptographic work: the expected value comes
+    /// only from trusted configuration and the message is never rewritten.
+    WireChainMismatch {
+        /// The signer.
+        validator_id: ValidatorId,
+        /// The wire `chain_id` the domain requires authentic messages to carry.
+        expected_wire_chain_id: u32,
+        /// The wire `chain_id` actually carried by the message.
+        actual_wire_chain_id: u32,
+    },
     /// The signature bytes were structurally malformed (wrong length, etc.)
     /// before any cryptographic check could complete.
     MalformedSignature(ValidatorId),
@@ -143,6 +156,15 @@ impl std::fmt::Display for ProposalVoteVerifyError {
             ProposalVoteVerifyError::InvalidSignature(id) => {
                 write!(f, "invalid signature from validator: {:?}", id)
             }
+            ProposalVoteVerifyError::WireChainMismatch {
+                validator_id,
+                expected_wire_chain_id,
+                actual_wire_chain_id,
+            } => write!(
+                f,
+                "wire chain_id mismatch for validator {:?}: expected={}, actual={}",
+                validator_id, expected_wire_chain_id, actual_wire_chain_id
+            ),
             ProposalVoteVerifyError::MalformedSignature(id) => {
                 write!(f, "malformed signature from validator: {:?}", id)
             }
@@ -177,6 +199,9 @@ pub enum ProposalVoteVerifyOutcome {
     WrongSuite,
     /// Signature bytes did not verify (cryptographic failure).
     BadSignature,
+    /// Message wire `chain_id` disagreed with the trusted domain's expected
+    /// wire-chain id (domain-level gate, before crypto).
+    WireChainMismatch,
     /// Signature bytes were malformed for the selected suite.
     MalformedSignature,
     /// Internal verifier/backend error.
@@ -201,6 +226,9 @@ impl From<&ProposalVoteVerifyError> for ProposalVoteVerifyOutcome {
             }
             ProposalVoteVerifyError::SuiteMismatch { .. } => ProposalVoteVerifyOutcome::WrongSuite,
             ProposalVoteVerifyError::InvalidSignature(_) => ProposalVoteVerifyOutcome::BadSignature,
+            ProposalVoteVerifyError::WireChainMismatch { .. } => {
+                ProposalVoteVerifyOutcome::WireChainMismatch
+            }
             ProposalVoteVerifyError::MalformedSignature(_) => {
                 ProposalVoteVerifyOutcome::MalformedSignature
             }
@@ -354,19 +382,72 @@ where
     )
 }
 
+/// Verify a single received `BlockProposal` fail-closed under a trusted
+/// versioned signing domain (Run 422 D6 message-bound interface).
+///
+/// This is the node-facing Proposal verification entrypoint. Unlike a raw
+/// preimage API it computes the canonical v2 preimage **internally** from the
+/// actual message being verified and the explicitly selected trusted
+/// [`ProposalVoteSigningDomainV2`], so a caller cannot retain a valid original
+/// preimage, mutate the message height/payload, and still obtain success: the
+/// signature is always checked against the recomputed preimage of the exact
+/// message.
+///
+/// It additionally enforces expected wire-chain consistency at this typed
+/// boundary: a message whose wire `chain_id` disagrees with the domain's
+/// validated `expected_wire_chain_id` is rejected with
+/// [`ProposalVoteVerifyError::WireChainMismatch`] before any cryptographic
+/// work, and the message is never rewritten.
+///
+/// `claimed` is the Run 418 F6-authenticated consensus sender; the message's
+/// `header.proposer_index` must equal it. There is deliberately **no** retry
+/// with a different domain, version, suite, or key.
+pub fn verify_proposal_msg_with_domain<K, B>(
+    proposal: &BlockProposal,
+    claimed: ValidatorId,
+    validators: &ConsensusValidatorSet,
+    key_provider: &K,
+    backend_registry: &B,
+    domain: &ProposalVoteSigningDomainV2,
+) -> Result<(), ProposalVoteVerifyError>
+where
+    K: SuiteAwareValidatorKeyProvider + ?Sized,
+    B: ConsensusSigBackendRegistry + ?Sized,
+{
+    let message_signer = ValidatorId::new(proposal.header.proposer_index as u64);
+    if domain.expected_wire_chain_id() != proposal.header.chain_id {
+        return Err(ProposalVoteVerifyError::WireChainMismatch {
+            validator_id: message_signer,
+            expected_wire_chain_id: domain.expected_wire_chain_id(),
+            actual_wire_chain_id: proposal.header.chain_id,
+        });
+    }
+    let preimage = domain.proposal_preimage(proposal);
+    verify_proposal_msg_with_preimage(
+        proposal,
+        claimed,
+        validators,
+        key_provider,
+        backend_registry,
+        &preimage,
+    )
+}
+
 /// Verify a single received `BlockProposal` fail-closed against a
 /// caller-supplied signing preimage.
 ///
-/// Identical fail-closed steps and typed errors as [`verify_proposal_msg`],
-/// but the caller controls the exact preimage bytes. This is the entrypoint
-/// used by the Run 422 D6 versioned Proposal/Vote signing domain
-/// (`qbind_wire::pv_signing_domain::ProposalVoteSigningDomainV2`): the caller
-/// builds the v2 preimage from *trusted authority*, never from the message.
+/// This is a **crate-private** low-level helper: it operates on raw bytes and
+/// is NOT a complete message verifier (it does not recompute the preimage from
+/// the message, nor enforce wire-chain consistency). Node-facing callers must
+/// use [`verify_proposal_msg_with_domain`] (message-bound) or the legacy
+/// [`verify_proposal_msg`]. Exposing an arbitrary-preimage message-verification
+/// interface would let a caller substitute a stale/foreign preimage for the
+/// actual message's preimage, so it is deliberately not public.
 ///
 /// There is deliberately **no** internal retry with a different preimage,
 /// version, suite, or key: if verification fails for the supplied preimage the
 /// call returns the typed error and the caller must reject.
-pub fn verify_proposal_msg_with_preimage<K, B>(
+fn verify_proposal_msg_with_preimage<K, B>(
     proposal: &BlockProposal,
     claimed: ValidatorId,
     validators: &ConsensusValidatorSet,
@@ -423,10 +504,45 @@ where
     )
 }
 
+/// Verify a single received `Vote` fail-closed under a trusted versioned
+/// signing domain (Run 422 D6 message-bound interface). See
+/// [`verify_proposal_msg_with_domain`] for the message-bound / wire-chain /
+/// no-retry contract; this is the analogous entrypoint for `Vote`.
+pub fn verify_vote_msg_with_domain<K, B>(
+    vote: &Vote,
+    claimed: ValidatorId,
+    validators: &ConsensusValidatorSet,
+    key_provider: &K,
+    backend_registry: &B,
+    domain: &ProposalVoteSigningDomainV2,
+) -> Result<(), ProposalVoteVerifyError>
+where
+    K: SuiteAwareValidatorKeyProvider + ?Sized,
+    B: ConsensusSigBackendRegistry + ?Sized,
+{
+    let message_signer = ValidatorId::new(vote.validator_index as u64);
+    if domain.expected_wire_chain_id() != vote.chain_id {
+        return Err(ProposalVoteVerifyError::WireChainMismatch {
+            validator_id: message_signer,
+            expected_wire_chain_id: domain.expected_wire_chain_id(),
+            actual_wire_chain_id: vote.chain_id,
+        });
+    }
+    let preimage = domain.vote_preimage(vote);
+    verify_vote_msg_with_preimage(
+        vote,
+        claimed,
+        validators,
+        key_provider,
+        backend_registry,
+        &preimage,
+    )
+}
+
 /// Verify a single received `Vote` fail-closed against a caller-supplied
-/// signing preimage. See [`verify_proposal_msg_with_preimage`] for the
-/// versioned-domain rationale and the no-retry contract.
-pub fn verify_vote_msg_with_preimage<K, B>(
+/// signing preimage. **Crate-private** low-level helper; see
+/// [`verify_proposal_msg_with_preimage`] for why this is not public.
+fn verify_vote_msg_with_preimage<K, B>(
     vote: &Vote,
     claimed: ValidatorId,
     validators: &ConsensusValidatorSet,
