@@ -119,6 +119,24 @@ Companion documents:
   **NOT** run to a zero-alert conclusion (separate validation axis);
   `CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED`; **RS1 stays
   OPEN / launch-blocking**. Run 423 not started.
+- `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D6.md` — Run 422 **D6 successor
+  (code/test)**, archive
+  `docs/devnet/run_422_d6_proposal_vote_domain_isolation/` and spec
+  `docs/protocol/QBIND_PROPOSAL_VOTE_SIGNING_DOMAIN_V2.md`. Closes **D6**
+  signed-domain replay isolation on the code+test axis
+  (`RESULT=POSITIVE-FOR-PROPOSAL-VOTE-DOMAIN-ISOLATION-CODE-TEST`): an explicitly
+  versioned Proposal/Vote signing domain (`QBIND:PVDOMAIN:v2`) binds the full
+  64-bit runtime ChainId, accepted genesis identity, and consensus authority
+  commitment into the signed preimage, so a signature for one domain does not
+  authenticate the same message under another domain (real ML-DSA-44 matrix A–K
+  + golden vectors; real-handler accept/reject with the F6 gate + `Required`).
+  Wire bytes unchanged; v1 preimage bytes byte-identical; v1↔v2 mutually
+  rejected. Activation stays **DISABLED**: production `proposal_vote_authority`
+  remains `None`, no CLI/env/override added, and the runtime-ChainId→wire-chain_id
+  mapping is **UNRESOLVED**. Downstream engine/QC still reconstruct the legacy
+  preimage (v2 boundary success is not QC/engine validation). **D7 remains
+  unresolved**; CodeQL **NOT** run to a zero-alert conclusion; **RS1 stays OPEN /
+  launch-blocking**. Run 423 not started.
 
 Everything below reflects the recorded status **after Run 402**. This index adds
 navigation and clarity only; it does not re-prove or change any item's status.

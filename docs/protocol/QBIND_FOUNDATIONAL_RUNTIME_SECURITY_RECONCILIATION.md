@@ -195,3 +195,25 @@ rejection of mismatched-identity, unsigned, wrong-suite, and forged-QC inputs wi
   authority lifetime; `CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED`.
   RS1 remains **OPEN**; F1/F2/F5/F7 unresolved; F6 partial; public DevNet
   **NO-GO**. Run 423 not started.
+- **Run 422 D6 successor (versioned Proposal/Vote signing-domain isolation,
+  code/test):** `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D6.md`,
+  `docs/devnet/run_422_d6_proposal_vote_domain_isolation/`, spec
+  `docs/protocol/QBIND_PROPOSAL_VOTE_SIGNING_DOMAIN_V2.md`. Closes **D6** on the
+  code+test axis
+  (`RESULT=POSITIVE-FOR-PROPOSAL-VOTE-DOMAIN-ISOLATION-CODE-TEST`): a versioned
+  Proposal/Vote signing domain (`QBIND:PVDOMAIN:v2`) binds the full 64-bit
+  runtime ChainId, the accepted genesis identity, and the consensus authority
+  commitment into the signed preimage (reusing the unchanged v1 `canonical_body()`
+  bytes), so a signature for one domain does not authenticate the same message
+  under another domain even with an unchanged key/index/payload/wire `chain_id`
+  (real ML-DSA-44 matrix A–K + independently specified golden vectors;
+  real-handler accept/reject with the F6 gate under `Required`). Wire bytes are
+  unchanged; v1 preimage bytes are byte-identical; v1↔v2 verification is mutually
+  rejected. Activation stays **DISABLED**: production `proposal_vote_authority`
+  remains `None`, no CLI/env/override was added, and the runtime-ChainId(u64)→
+  wire-chain_id(u32) mapping is **UNRESOLVED** (`expected_wire_chain_id` from
+  trusted fixtures/config only). Downstream engine/QC still reconstruct the
+  legacy preimage, so a v2 boundary pass is not QC/engine validation. **D7**
+  remains unresolved; CodeQL not run to a zero-alert conclusion (separate axis).
+  RS1 remains **OPEN**; F1/F2/F5/F7 unresolved; F6 partial; public DevNet
+  **NO-GO**. Run 423 not started.

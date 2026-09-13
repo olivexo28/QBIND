@@ -343,8 +343,42 @@ where
     K: SuiteAwareValidatorKeyProvider + ?Sized,
     B: ConsensusSigBackendRegistry + ?Sized,
 {
-    let message_signer = ValidatorId::new(proposal.header.proposer_index as u64);
     let preimage = proposal.signing_preimage_with_chain_id(chain_id);
+    verify_proposal_msg_with_preimage(
+        proposal,
+        claimed,
+        validators,
+        key_provider,
+        backend_registry,
+        &preimage,
+    )
+}
+
+/// Verify a single received `BlockProposal` fail-closed against a
+/// caller-supplied signing preimage.
+///
+/// Identical fail-closed steps and typed errors as [`verify_proposal_msg`],
+/// but the caller controls the exact preimage bytes. This is the entrypoint
+/// used by the Run 422 D6 versioned Proposal/Vote signing domain
+/// (`qbind_wire::pv_signing_domain::ProposalVoteSigningDomainV2`): the caller
+/// builds the v2 preimage from *trusted authority*, never from the message.
+///
+/// There is deliberately **no** internal retry with a different preimage,
+/// version, suite, or key: if verification fails for the supplied preimage the
+/// call returns the typed error and the caller must reject.
+pub fn verify_proposal_msg_with_preimage<K, B>(
+    proposal: &BlockProposal,
+    claimed: ValidatorId,
+    validators: &ConsensusValidatorSet,
+    key_provider: &K,
+    backend_registry: &B,
+    preimage: &[u8],
+) -> Result<(), ProposalVoteVerifyError>
+where
+    K: SuiteAwareValidatorKeyProvider + ?Sized,
+    B: ConsensusSigBackendRegistry + ?Sized,
+{
+    let message_signer = ValidatorId::new(proposal.header.proposer_index as u64);
     verify_core(
         claimed,
         message_signer,
@@ -353,7 +387,7 @@ where
         validators,
         key_provider,
         backend_registry,
-        &preimage,
+        preimage,
         |backend, id, pk, msg, sig| backend.verify_proposal(id, pk, msg, sig),
     )
 }
@@ -378,8 +412,33 @@ where
     K: SuiteAwareValidatorKeyProvider + ?Sized,
     B: ConsensusSigBackendRegistry + ?Sized,
 {
-    let message_signer = ValidatorId::new(vote.validator_index as u64);
     let preimage = vote.signing_preimage_with_chain_id(chain_id);
+    verify_vote_msg_with_preimage(
+        vote,
+        claimed,
+        validators,
+        key_provider,
+        backend_registry,
+        &preimage,
+    )
+}
+
+/// Verify a single received `Vote` fail-closed against a caller-supplied
+/// signing preimage. See [`verify_proposal_msg_with_preimage`] for the
+/// versioned-domain rationale and the no-retry contract.
+pub fn verify_vote_msg_with_preimage<K, B>(
+    vote: &Vote,
+    claimed: ValidatorId,
+    validators: &ConsensusValidatorSet,
+    key_provider: &K,
+    backend_registry: &B,
+    preimage: &[u8],
+) -> Result<(), ProposalVoteVerifyError>
+where
+    K: SuiteAwareValidatorKeyProvider + ?Sized,
+    B: ConsensusSigBackendRegistry + ?Sized,
+{
+    let message_signer = ValidatorId::new(vote.validator_index as u64);
     verify_core(
         claimed,
         message_signer,
@@ -388,7 +447,7 @@ where
         validators,
         key_provider,
         backend_registry,
-        &preimage,
+        preimage,
         |backend, id, pk, msg, sig| backend.verify_vote(id, pk, msg, sig),
     )
 }

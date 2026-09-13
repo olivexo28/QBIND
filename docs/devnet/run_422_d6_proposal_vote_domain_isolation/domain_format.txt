@@ -1,0 +1,95 @@
+RUN 422 D6 — V2 SIGNING-DOMAIN BYTE LAYOUT AND GOLDEN VECTORS
+============================================================================
+
+Implemented by ProposalVoteSigningDomainV2::{proposal_preimage, vote_preimage}
+in crates/qbind-wire/src/pv_signing_domain.rs.
+
+----------------------------------------------------------------------------
+PREIMAGE LAYOUT (v2)
+----------------------------------------------------------------------------
+
+offset  field                     width  encoding
+------  ------------------------  -----  -------------------------------
+0       domain_tag                17     ASCII "QBIND:PVDOMAIN:v2"
+17      signing_format_version    1      u8, MUST be 2
+18      message_family            1      u8, 1 = Proposal, 2 = Vote
+19      runtime_chain_id          8      u64, big-endian (full ChainId)
+27      expected_wire_chain_id    4      u32, big-endian
+31      genesis_identity          32     raw bytes (accepted genesis hash)
+63      authority_commitment      32     raw bytes (authority snapshot)
+95      body_len                  8      u64, big-endian
+103     body                      N      canonical_body() of the message
+
+Rules:
+  * All fixed fields have fixed width; the single variable field (body) is
+    length-prefixed => unambiguous concatenation.
+  * Domain-header integers are big-endian.
+  * body == canonical_body(): the UNCHANGED little-endian v1 field encoding.
+    Because v1 preimage == domain_prefix || canonical_body(), reusing the same
+    body keeps every v1 golden vector byte-identical AND binds the same
+    security-relevant fields.
+
+What is bound and why cross-domain replay fails:
+  * signing_format_version : rejects any non-2 byte (from_u8, no fallback).
+  * message_family         : Proposal sig cannot authenticate a Vote & v.v.
+  * runtime_chain_id (u64) : full value, never truncated, never from a message.
+  * genesis_identity (32)  : accepted genesis hash, bound directly.
+  * authority_commitment(32): intended membership/key/suite snapshot. The
+    genesis loader's commitment also folds in the genesis chain_id STRING +
+    genesis hash + validators, so the genesis string identity is bound
+    cryptographically through the commitment in addition to the explicit
+    genesis_identity field.
+
+Construction guards (try_new):
+  * rejects all-zero genesis_identity.
+  * rejects all-zero authority_commitment.
+  * never defaults missing identity to zeros or DevNet.
+  * fields immutable; accessors read-only.
+  * format selection (ProposalVoteSigningFormat::V2) is SEPARATE from suite id.
+
+----------------------------------------------------------------------------
+GOLDEN VECTORS (independently specified; not encoder-vs-itself)
+----------------------------------------------------------------------------
+
+Location: crates/qbind-consensus/tests/run_422_d6_pv_domain_isolation_tests.rs
+Tests:    golden_vote_preimage_bytes, golden_proposal_preimage_prefix_bytes
+
+golden_domain() parameters:
+  runtime_chain_id       = 0x0102030405060708
+  expected_wire_chain_id = 0x0A0B0C0D
+  genesis_identity       = bytes 0x00..0x1f
+  authority_commitment   = bytes 0x80..0x9f
+
+Fixed Vote (chain_id=0x11223344, epoch=0x0102030405060708,
+height=0x1112131415161718, round=0x2122232425262728, step=3,
+block_id=0xAB*32, validator_index=0x0405, suite_id=100):
+
+Header bytes (hex, 103 bytes) then a 56-byte little-endian v1 vote body:
+  "QBIND:PVDOMAIN:v2"                              (17 bytes ASCII)
+  02                                              version
+  02                                              family = Vote
+  01 02 03 04 05 06 07 08                         runtime_chain_id BE
+  0A 0B 0C 0D                                     expected_wire_chain_id BE
+  00 01 02 ... 1F                                 genesis_identity (32)
+  80 81 82 ... 9F                                 authority_commitment (32)
+  00 00 00 00 00 00 00 38                         body_len = 56 BE
+  <56-byte v1 vote body, little-endian fields>
+
+  Vote body (56 bytes) field order/width:
+    version               1   = 01
+    chain_id (u32 LE)     4   = 44 33 22 11
+    epoch    (u64 LE)     8   = 08 07 06 05 04 03 02 01
+    height   (u64 LE)     8   = 18 17 16 15 14 13 12 11
+    round    (u64 LE)     8   = 28 27 26 25 24 23 22 21
+    step                  1   = 03
+    block_id             32   = AB * 32
+    validator_index(u16LE)2   = 05 04
+    suite_id (u16 LE)     2   = 64 00
+    (total = 1+4+8+8+8+1+32+2+2 = 56)
+
+Proposal golden: golden_proposal_preimage_prefix_bytes asserts the fixed 103-byte
+header prefix (family = 1) and that the tail is exactly body_len(BE) ||
+canonical_body(); total length == prefix + framed body.
+
+Signature bytes are NOT required to be deterministic; only the preimage bytes are
+golden.

@@ -116,8 +116,8 @@
     },
     {
       "relative_path": "ARTIFACT_INDEX.md",
-      "sha256": "410634667cabb1e5b06e9bcd9c28a503a9b6e56d3bb78eeca2554b39543b048e",
-      "byte_size": 27597,
+      "sha256": "a4f6d1cb9c1c0e884147e0a72bce5f38af81b2c74b7f8bb3f72b0c67b62a74bb",
+      "byte_size": 28910,
       "artifact_group": "top-level",
       "readiness_item": "package-index",
       "status": "no-go",
@@ -125,8 +125,8 @@
     },
     {
       "relative_path": "OPERATOR_VERIFICATION_MAP.md",
-      "sha256": "26d9e383810f43c2e1c567c2fc48a18a8dc42adb523102d4f1671294e98dcab7",
-      "byte_size": 25764,
+      "sha256": "606ff5d3e6cca890fde9d4fbd4126347465cf256bc5498328734e335115d2670",
+      "byte_size": 26888,
       "artifact_group": "top-level",
       "readiness_item": "verification-map",
       "status": "no-go",
@@ -143,8 +143,8 @@
     },
     {
       "relative_path": "BLOCKER_REGISTER.md",
-      "sha256": "2903393978e9945bd553c937c9cc94c95d7a45759d89672b61dbe28beb6180cd",
-      "byte_size": 14062,
+      "sha256": "a2b36077bcb651795102acae6d698b9b8854a04af26c8f2608521b3e5922a5ba",
+      "byte_size": 15424,
       "artifact_group": "top-level",
       "readiness_item": "M4/M6/S5/S7",
       "status": "no-go",

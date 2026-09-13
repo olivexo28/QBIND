@@ -1,0 +1,79 @@
+RUN 422 D6 — CRYPTOGRAPHIC REPLAY-ISOLATION MATRIX
+============================================================================
+
+Backend: real ML-DSA-44 (MlDsa44Backend / SUITE_PQ_RESERVED_1 = suite 100).
+NO always-succeeds verifier is used for any replay-isolation claim
+(guarded by real_backend_rejects_random_signature).
+
+Test target:
+  crates/qbind-consensus/tests/run_422_d6_pv_domain_isolation_tests.rs
+  (19 tests, all passing)
+
+Method: for both Proposal and Vote, establish a valid SAME-DOMAIN control, then
+vary ONLY the boundary under test, reusing the same keys wherever possible.
+Negative "replay rejection" is never obtained merely by changing keys.
+
+----------------------------------------------------------------------------
+CASE  DESCRIPTION                                              RESULT
+----------------------------------------------------------------------------
+CTRL  control_same_domain_proposal_and_vote_verify            ACCEPT (control)
+        Same domain used to sign and verify => valid.
+
+A     case_a_different_full_runtime_chain_id_same_legacy_unk   REJECT
+        Same key + identical message, two DISTINCT custom runtime chain ids
+        that BOTH map to legacy "UNK" scope. v2 binds the full u64 chain id, so
+        the cross-chain signature does not authenticate.
+
+B     case_b_different_genesis_identity_rejected               REJECT
+        Same runtime ChainId, same keys, same message, DIFFERENT accepted
+        genesis identity.
+
+C     case_c_different_authority_commitment_rejected           REJECT
+        Same chain/genesis values at the encoding boundary, DIFFERENT authority
+        commitment. Snapshots are internally consistent (no inconsistent
+        fixture claimed valid).
+
+D     case_d_legacy_v1_signature_rejected_by_v2_verifier       REJECT
+        A valid legacy v1 signature presented to the v2-format verifier.
+
+E     case_e_v2_signature_rejected_by_legacy_v1_verifier       REJECT
+        A valid v2 signature presented to the legacy v1 verifier.
+
+F     case_f_wrong_message_family_rejected                     REJECT
+        Proposal-family domain used to verify a Vote (and vice versa).
+
+G     case_g_unsupported_version_rejected_no_fallback          REJECT
+        Unsupported signing-format version byte; from_u8 rejects, no fallback
+        to any other version/suite/key.
+
+H     case_h_signature_and_payload_tampering_rejected          REJECT
+        Flipped signature bytes and flipped signed-payload bytes.
+
+I     Existing fail-closed taxonomy under the v2 entrypoint:      all REJECT
+        case_i_missing_signature_rejected
+        case_i_wrong_signer_key_rejected
+        case_i_unknown_validator_rejected
+        case_i_wrong_suite_rejected
+        case_i_unsupported_suite_no_backend_rejected
+        (backend-error behavior exercised via unsupported suite / no backend)
+
+J     case_j_invalid_domain_metadata_fails_construction        REJECT (closed)
+        All-zero genesis identity / all-zero authority commitment => try_new
+        fails; admission cannot proceed with absent/invalid domain metadata.
+
+K     case_k_expected_wire_chain_id_is_bound                   REJECT
+        Inconsistent expected wire-chain identity at the domain is bound into
+        the preimage and rejected.
+
+GOLDEN golden_vote_preimage_bytes / golden_proposal_preimage_prefix_bytes  PASS
+        Deterministic preimage bytes vs INDEPENDENTLY specified expected bytes.
+
+SMOKE real_backend_rejects_random_signature                    REJECT
+        Confirms the backend is the real verifier (random sig fails).
+
+----------------------------------------------------------------------------
+NOTE
+----------------------------------------------------------------------------
+A valid v2 verification result does NOT imply engine acceptance, aggregation,
+QC formation, or a committed block. Those boundaries are reported separately and
+are not asserted here.

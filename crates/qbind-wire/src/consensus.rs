@@ -167,12 +167,46 @@ impl Vote {
     /// new domain tag (e.g., "QBIND:VOTE:v2").
     pub fn signing_preimage_with_chain_id(&self, qbind_chain_id: ChainId) -> Vec<u8> {
         let domain_tag = domain_prefix(qbind_chain_id, DomainKind::Vote);
-        // Capacity hint: domain_tag + version(1) + chain_id(4) + epoch(8) + height(8) + round(8) +
-        //               step(1) + block_id(32) + validator_index(2) + suite_id(2)
-        let mut out = Vec::with_capacity(domain_tag.len() + 1 + 4 + 8 + 8 + 8 + 1 + 32 + 2 + 2);
+        let body = self.canonical_body();
+        // Capacity hint: domain_tag + canonical body.
+        let mut out = Vec::with_capacity(domain_tag.len() + body.len());
         // Domain separator (chain-aware)
         put_bytes(&mut out, &domain_tag);
         // Vote fields (excluding signature)
+        out.extend_from_slice(&body);
+        out
+    }
+
+    /// Return the canonical, domain-agnostic body bytes of this vote
+    /// (all currently signed, security-relevant fields, **excluding** any
+    /// domain tag and the signature itself).
+    ///
+    /// This is the exact byte sequence that follows the domain tag in
+    /// [`Vote::signing_preimage_with_chain_id`]. It is factored out so that
+    /// both the legacy v1 chain-aware preimage and the Run 422 D6 versioned
+    /// Proposal/Vote signing domain (see
+    /// [`crate::pv_signing_domain::ProposalVoteSigningDomainV2`]) can bind
+    /// exactly the same signed fields without duplicating (or diverging on)
+    /// the field encoding. The bytes are identical to the historical v1
+    /// field encoding, so v1 golden vectors are preserved.
+    ///
+    /// Layout (all integers little-endian, matching the v1 wire encoding):
+    ///
+    /// ```text
+    /// version:         u8
+    /// chain_id:        u32
+    /// epoch:           u64
+    /// height:          u64
+    /// round:           u64
+    /// step:            u8
+    /// block_id:        [u8; 32]
+    /// validator_index: u16
+    /// suite_id:        u16
+    /// ```
+    pub fn canonical_body(&self) -> Vec<u8> {
+        // version(1) + chain_id(4) + epoch(8) + height(8) + round(8) +
+        // step(1) + block_id(32) + validator_index(2) + suite_id(2)
+        let mut out = Vec::with_capacity(1 + 4 + 8 + 8 + 8 + 1 + 32 + 2 + 2);
         put_u8(&mut out, self.version);
         put_u32(&mut out, self.chain_id);
         put_u64(&mut out, self.epoch);
@@ -831,6 +865,31 @@ impl BlockProposal {
     /// (hence "v1" in the domain tag). Any future layout changes should use a
     /// new domain tag (e.g., "QBIND:PROPOSAL:v2").
     pub fn signing_preimage_with_chain_id(&self, qbind_chain_id: ChainId) -> Vec<u8> {
+        let domain_tag = domain_prefix(qbind_chain_id, DomainKind::Proposal);
+        let body = self.canonical_body();
+        let mut out = Vec::with_capacity(domain_tag.len() + body.len());
+
+        // Domain separator (chain-aware)
+        put_bytes(&mut out, &domain_tag);
+        // Proposal fields (excluding signature)
+        out.extend_from_slice(&body);
+
+        // NOTE: signature is NOT included
+        out
+    }
+
+    /// Return the canonical, domain-agnostic body bytes of this proposal
+    /// (all currently signed, security-relevant fields, **excluding** any
+    /// domain tag and the signature itself).
+    ///
+    /// This is the exact byte sequence that follows the domain tag in
+    /// [`BlockProposal::signing_preimage_with_chain_id`]. It is factored out
+    /// so the legacy v1 chain-aware preimage and the Run 422 D6 versioned
+    /// Proposal/Vote signing domain (see
+    /// [`crate::pv_signing_domain::ProposalVoteSigningDomainV2`]) bind exactly
+    /// the same signed fields. Byte-identical to the historical v1 field
+    /// encoding, so v1 golden vectors are preserved.
+    pub fn canonical_body(&self) -> Vec<u8> {
         // Encode QC into a temp buffer to get its length
         let qc_bytes = if let Some(ref qc) = self.qc {
             let mut qc_buf = Vec::new();
@@ -841,11 +900,7 @@ impl BlockProposal {
         };
         let qc_len = len_to_u32(qc_bytes.len());
 
-        let domain_tag = domain_prefix(qbind_chain_id, DomainKind::Proposal);
         let mut out = Vec::new();
-
-        // Domain separator (chain-aware)
-        put_bytes(&mut out, &domain_tag);
 
         // Header fields
         put_u8(&mut out, self.header.version);
@@ -876,7 +931,6 @@ impl BlockProposal {
             put_bytes(&mut out, tx);
         }
 
-        // NOTE: signature is NOT included
         out
     }
 

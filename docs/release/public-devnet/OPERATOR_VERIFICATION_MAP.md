@@ -117,7 +117,22 @@ decision is **NO-GO / NOT launch-ready** (`LAUNCH_GO_NO_GO.md`).
    authority; genesis activation stays DISABLED. **D6/D7 remain unresolved**;
    CodeQL NOT run to a zero-alert conclusion (separate axis);
    `CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED`; **RS1/C4/C5
-   stay OPEN**. Run 423 not started.
+   stay OPEN**. Run 423 not started. **Run 422 D6 SUCCESSOR (code/test):** the
+   signed-domain replay-isolation blocker is now closed on the code+test axis
+   (`RESULT=POSITIVE-FOR-PROPOSAL-VOTE-DOMAIN-ISOLATION-CODE-TEST`;
+   `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D6.md`, archive
+   `docs/devnet/run_422_d6_proposal_vote_domain_isolation/`, spec
+   `docs/protocol/QBIND_PROPOSAL_VOTE_SIGNING_DOMAIN_V2.md`): a versioned
+   Proposal/Vote signing domain (`QBIND:PVDOMAIN:v2`) binds the full 64-bit
+   runtime ChainId, accepted genesis identity, and authority commitment so a
+   signature for one domain does not authenticate the same message under another
+   (real ML-DSA-44 matrix A–K + golden vectors; real-handler accept/reject with
+   the F6 gate + `Required`). Wire bytes unchanged; v1 bytes byte-identical;
+   v1↔v2 mutually rejected. Activation stays DISABLED (production
+   `proposal_vote_authority` remains `None`; no CLI/env/override; runtime-ChainId→
+   wire-chain_id mapping UNRESOLVED). Downstream engine/QC still reconstruct the
+   legacy preimage. **D7 remains unresolved; RS1/C4/C5 stay OPEN.** Run 423 not
+   started.
 9. `docs/whitepaper/contradiction.md` — contradiction ledger.
 10. `docs/release/public-devnet/BLOCKER_REGISTER.md` — open blockers (incl. **RS1**).
 
