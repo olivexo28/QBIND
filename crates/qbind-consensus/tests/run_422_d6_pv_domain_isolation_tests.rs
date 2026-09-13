@@ -996,3 +996,100 @@ fn cd_golden_proposal_full_independent_vector_with_qc_and_txs() {
     assert_eq!(expected[PV_SIGNING_DOMAIN_V2_TAG.len()], 2u8);
     assert_eq!(expected[FAMILY_BYTE_INDEX], 1u8);
 }
+
+// ---------------------------------------------------------------------------
+// C-A (both-family completion): the base matrix covered "different genesis
+// identity" for Proposal only and "different authority commitment" for Vote
+// only. Mirror each to the OTHER family so both replay dimensions are proven
+// for both message families. Replay rejection is obtained WITHOUT changing
+// keys (same signer, same message bytes, different domain).
+// ---------------------------------------------------------------------------
+
+#[test]
+fn ca_vote_different_genesis_identity_rejected() {
+    let f = make_fixture(4);
+    let c = commitment(1);
+    let d1 = domain(0xCAFE_0000_0000_0001, 5, genesis_id(1), c);
+    let d2 = domain(0xCAFE_0000_0000_0001, 5, genesis_id(2), c);
+    let v = sign_vote(&f, 0, &d1);
+    assert!(vv(&f, &v, &d1).is_ok());
+    assert_eq!(
+        vv(&f, &v, &d2),
+        Err(ProposalVoteVerifyError::InvalidSignature(ValidatorId(0)))
+    );
+}
+
+#[test]
+fn ca_proposal_different_authority_commitment_rejected() {
+    let f = make_fixture(4);
+    let g = genesis_id(1);
+    let d1 = domain(0xCAFE_0000_0000_0001, 5, g, commitment(1));
+    let d2 = domain(0xCAFE_0000_0000_0001, 5, g, commitment(2));
+    let p = sign_proposal(&f, 0, &d1);
+    assert!(vp(&f, &p, &d1).is_ok());
+    assert_eq!(
+        vp(&f, &p, &d2),
+        Err(ProposalVoteVerifyError::InvalidSignature(ValidatorId(0)))
+    );
+}
+
+// ---------------------------------------------------------------------------
+// C-A (both-family completion): Vote signature/signer/key/suite failure
+// taxonomy. The base `case_i_*` tests exercise this taxonomy for Proposal
+// only; here the same distinctions are proven for the Vote family through the
+// message-bound verifier. Positive controls use the same key + same message.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn ca_vote_missing_signature_rejected() {
+    let f = make_fixture(4);
+    let d = domain(1, 5, genesis_id(1), commitment(1));
+    let v = unsigned_vote(0); // empty signature
+    assert_eq!(
+        vv(&f, &v, &d),
+        Err(ProposalVoteVerifyError::MissingSignature(ValidatorId(0)))
+    );
+}
+
+#[test]
+fn ca_vote_wrong_signer_key_rejected() {
+    let f = make_fixture(4);
+    let d = domain(1, 5, genesis_id(1), commitment(1));
+    // Vote claims validator 0 but is signed with validator 1's key.
+    let mut v = unsigned_vote(0);
+    let pre = d.vote_preimage(&v);
+    let sk1 = f.sks.get(&ValidatorId(1)).unwrap();
+    v.signature = MlDsa44Backend::sign(sk1, &pre).expect("sign");
+    assert_eq!(
+        vv(&f, &v, &d),
+        Err(ProposalVoteVerifyError::InvalidSignature(ValidatorId(0)))
+    );
+}
+
+#[test]
+fn ca_vote_unknown_validator_rejected() {
+    let f = make_fixture(4);
+    let d = domain(1, 5, genesis_id(1), commitment(1));
+    // validator_index 9 is not a member.
+    let mut v = unsigned_vote(9);
+    let pre = d.vote_preimage(&v);
+    let sk0 = f.sks.get(&ValidatorId(0)).unwrap();
+    v.signature = MlDsa44Backend::sign(sk0, &pre).expect("sign");
+    assert_eq!(
+        verify_vote_msg_with_domain(&v, ValidatorId(9), &f.validators, &f.kp, &f.br, &d),
+        Err(ProposalVoteVerifyError::UnknownValidator(ValidatorId(9)))
+    );
+}
+
+#[test]
+fn ca_vote_wrong_suite_rejected() {
+    let f = make_fixture(4);
+    let d = domain(1, 5, genesis_id(1), commitment(1));
+    let mut v = sign_vote(&f, 0, &d);
+    // Wire suite altered away from the governed suite after signing.
+    v.suite_id = TEST_SUITE_U16 + 1;
+    match vv(&f, &v, &d) {
+        Err(ProposalVoteVerifyError::SuiteMismatch { .. }) => {}
+        other => panic!("expected SuiteMismatch, got {:?}", other),
+    }
+}
