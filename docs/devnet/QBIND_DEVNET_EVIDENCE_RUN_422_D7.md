@@ -3,9 +3,10 @@
 Genesis-static consensus-authority freshness / lifetime (code + test).
 
 ```
-RESULT=POSITIVE-FOR-GENESIS-STATIC-AUTHORITY-LIFETIME-CODE-TEST
-D7_STATUS=GENESIS-STATIC-LIFETIME-STALE-KEY-GUARD-CODE-TEST-POSITIVE
+RESULT=PARTIAL-GENESIS-STATIC-AUTHORITY-LIFETIME-CODE-TEST
+D7_STATUS=PARTIAL-CODE-TEST / PRODUCTION-LIFECYCLE-UNAVAILABLE
 D6_STATUS=VERSIONED-PROPOSAL-VOTE-BOUNDARY-CODE-TEST-POSITIVE
+DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED
 GENESIS_AUTHORITY_ACTIVATION=DISABLED
 PROPOSAL_VOTE_AUTHORITY_FROM_LEGACY_CLI=DISALLOWED
 LEGACY_TIMEOUT_CONTEXT=EXISTING-POLICY-PRESERVED
@@ -17,6 +18,45 @@ This is a **CODE + TEST** evidence record. It contains no public deployment,
 external-network, or standalone release-binary adversarial evidence. Security
 (CodeQL) analysis status is reported separately and is not converted into a
 zero-alert conclusion.
+
+## Run 422 D7 corrective (this pass) — scope and withdrawn claims
+
+An earlier revision of this record labelled D7 as a POSITIVE genesis-static
+lifetime closure. That claim is **withdrawn**. The originally committed tests
+are limited **configuration / snapshot** tests: they exercise identity
+equality of an immutable authority snapshot against a caller-supplied
+`ObservedConsensusConfiguration`, plus non-mixing of two unchanged snapshots.
+They do **not** demonstrate a production lifecycle, live Proposal/Vote
+freshness enforcement, deterministic concurrent invalidation reaching an
+external effect, or durable anti-rollback. D7 therefore remains **PARTIAL**.
+
+This pass tightens the trust boundary (task section 2) only:
+
+* `GenesisConsensusAuthority.authorized_epoch` is now a **private**,
+  construction-enforced field (no public field / setter), so the "always
+  founding epoch 0" invariant is enforced by encapsulation rather than a
+  comment or source-string test.
+* A new `LocalAuthorizationState` (`MissingStorage` /
+  `StorageWithoutCommittedEpoch` / `Established`) makes the node's
+  **independently held** current state explicit, and
+  `authorize_current_state` rejects the two unavailable cases fail-closed —
+  the founding epoch 0 is **never** inferred from missing storage, an
+  uncommitted epoch, or an engine default.
+* `config_identity()` is documented as a self-description that is **not**
+  independent freshness evidence: an authority comparing itself to its own
+  `config_identity()` proves nothing.
+
+Still **NOT** delivered in this pass (explicit gaps, tracked as remaining D7
+work): live inbound/outbound Proposal & Vote / BroadcastVote / SendVoteTo /
+cached re-emission / deferred-work freshness enforcement in
+`binary_consensus_loop.rs`; deterministic concurrent-invalidation tests that
+prevent a stale authorization from reaching an external effect; storage /
+recovery readers over temporary databases with matching/missing/corrupt/
+stale/future/inconsistent state; real-PQC behavioral proofs for both message
+families; and full anchor-document reconciliation. Production
+`proposal_vote_authority` stays `None` and genesis activation stays DISABLED.
+`DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED` is retained: no durable independent
+trust anchor is introduced, so whole-database rollback remains undetectable.
 
 ## Continuation context (recorded honestly)
 
@@ -71,8 +111,8 @@ production wiring, CLI surface, or runtime behavior changed.
 
 | File | Change |
 | --- | --- |
-| `crates/qbind-node/src/genesis_consensus_authority.rs` | **additive** (CRLF line endings preserved): `const GENESIS_STATIC_AUTHORITY_EPOCH = 0`; new immutable field `GenesisConsensusAuthority.authorized_epoch`; new `ObservedConsensusConfiguration` (+`::new`); new `AuthorityLifetimeError` (+`Display`/`Error`); methods `authorized_epoch()`, `config_identity()`, and the fail-closed `authorize_configuration(&observed)`. |
-| `crates/qbind-node/tests/run_422_d7_authority_lifetime_tests.rs` | **new** (LF, rustfmt-clean): 12 tests covering task section 12.E, using the real ML-DSA-44 backend and real genesis parsing through the shared production activation boundary. |
+| `crates/qbind-node/src/genesis_consensus_authority.rs` | **additive** (CRLF line endings preserved): `const GENESIS_STATIC_AUTHORITY_EPOCH = 0`; **private** construction-enforced field `GenesisConsensusAuthority.authorized_epoch`; `ObservedConsensusConfiguration` (+`::new`); `AuthorityLifetimeError` (+`Display`/`Error`); section-2 corrective `LocalAuthorizationState` / `CurrentStateUnavailableReason` / `FreshnessError` (+`Display`/`Error`); methods `authorized_epoch()`, `config_identity()` (documented as self-description, not freshness), the fail-closed `authorize_configuration(&observed)`, and the independent-current-state `authorize_current_state(&current)`. |
+| `crates/qbind-node/tests/run_422_d7_authority_lifetime_tests.rs` | **additive** (CRLF preserved): now **14** tests — the original 12 limited configuration/snapshot tests (task section 12.E) plus 2 section-2 corrective tests (`unavailable_current_state_is_rejected_and_epoch_zero_never_inferred`, `established_current_state_fresh_authorizes_superseded_rejected`), using the real ML-DSA-44 backend and real genesis parsing through the shared production activation boundary. |
 
 ### The guard
 

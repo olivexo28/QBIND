@@ -34,7 +34,8 @@ use qbind_ledger::{
 };
 use qbind_node::genesis_consensus_authority::{
     build_genesis_consensus_authority, load_verify_and_build_genesis_authority,
-    AuthorityLifetimeError, GenesisConsensusAuthority, ObservedConsensusConfiguration,
+    AuthorityLifetimeError, CurrentStateUnavailableReason, FreshnessError,
+    GenesisConsensusAuthority, LocalAuthorizationState, ObservedConsensusConfiguration,
     GENESIS_STATIC_AUTHORITY_EPOCH,
 };
 
@@ -107,7 +108,11 @@ fn founding_configuration_authorizes() {
     assert_eq!(auth.authorized_epoch(), GENESIS_STATIC_AUTHORITY_EPOCH);
     assert_eq!(auth.authorized_epoch(), 0);
 
-    // The authority's own advertised identity must round-trip to Ok.
+    // Identity equality is reflexive: `authorize_configuration` is a pure
+    // equality check, so an authority equals its own advertised identity.
+    // NOTE: this is NOT freshness evidence — a self-comparison proves nothing
+    // about the node's current state. Freshness is exercised separately via
+    // `authorize_current_state` (see the section-2 corrective tests below).
     assert_eq!(
         auth.authorize_configuration(&auth.config_identity()),
         Ok(())
@@ -304,7 +309,9 @@ fn snapshot_immutable_when_source_file_changes_after_validation() {
         Some(key0_before)
     );
 
-    // And the guard still authorizes only the ORIGINAL founding identity.
+    // And the guard still authorizes only the ORIGINAL founding identity
+    // (equality check, not freshness — see the `authorize_current_state`
+    // corrective tests).
     assert_eq!(
         auth.authorize_configuration(&auth.config_identity()),
         Ok(())
@@ -491,4 +498,90 @@ fn fixture_bypass_unreachable_through_production_constructors_and_parser() {
         !module.contains("LocalFixtureUnsigned"),
         "the genesis authority module must not reference the fixture-unsigned policy"
     );
+}
+
+// ---------------------------------------------------------------------------
+// Run 422 D7 (corrective — section 2): freshness is decided against an
+// INDEPENDENTLY held current state, never by an authority comparing itself to
+// its own `config_identity()`. Unavailable current state is rejected and the
+// founding epoch 0 is never inferred from missing / uncommitted state.
+// ---------------------------------------------------------------------------
+
+/// An authority's own `config_identity()` is a self-description, not
+/// independent freshness evidence. The freshness gate rejects the unavailable
+/// current-state cases outright, so a self-comparison can never stand in for a
+/// genuinely established current state, and epoch 0 is never inferred from an
+/// absent or uncommitted epoch.
+#[test]
+fn unavailable_current_state_is_rejected_and_epoch_zero_never_inferred() {
+    let g = three_validator_genesis();
+    let auth = build_auth(&g, [0xAAu8; 32]);
+
+    // Missing storage: nothing establishes a current epoch. Rejected — the
+    // founding epoch 0 is NEVER inferred from absent state.
+    match auth.authorize_current_state(&LocalAuthorizationState::MissingStorage) {
+        Err(FreshnessError::CurrentStateUnavailable {
+            reason: CurrentStateUnavailableReason::MissingStorage,
+        }) => {}
+        other => panic!("expected MissingStorage unavailable, got {other:?}"),
+    }
+
+    // Storage without a committed epoch: an engine default of 0 is NOT an
+    // established epoch. Rejected.
+    match auth.authorize_current_state(&LocalAuthorizationState::StorageWithoutCommittedEpoch) {
+        Err(FreshnessError::CurrentStateUnavailable {
+            reason: CurrentStateUnavailableReason::StorageWithoutCommittedEpoch,
+        }) => {}
+        other => panic!("expected StorageWithoutCommittedEpoch unavailable, got {other:?}"),
+    }
+}
+
+/// An independently-established current state that matches the founding
+/// configuration authorizes; a superseded one (epoch advanced, or membership
+/// replaced at the same epoch) is rejected as `Superseded`.
+#[test]
+fn established_current_state_fresh_authorizes_superseded_rejected() {
+    let g = three_validator_genesis();
+    let auth = build_auth(&g, [0xAAu8; 32]);
+
+    // Independently reconstructed (equality, not object identity) founding
+    // state authorizes.
+    let fresh = ObservedConsensusConfiguration::new(
+        auth.chain_id.clone(),
+        auth.genesis_hash,
+        auth.commitment,
+        auth.validator_count,
+        GENESIS_STATIC_AUTHORITY_EPOCH,
+    );
+    assert_eq!(
+        auth.authorize_current_state(&LocalAuthorizationState::Established(fresh)),
+        Ok(())
+    );
+
+    // Epoch advanced past the founding epoch — superseded, no authorized
+    // transition.
+    let advanced = ObservedConsensusConfiguration::new(
+        auth.chain_id.clone(),
+        auth.genesis_hash,
+        auth.commitment,
+        auth.validator_count,
+        1,
+    );
+    match auth.authorize_current_state(&LocalAuthorizationState::Established(advanced)) {
+        Err(FreshnessError::Superseded(AuthorityLifetimeError::EpochTransitionUnauthorized {
+            authorized_epoch: 0,
+            observed_epoch: 1,
+        })) => {}
+        other => panic!("expected Superseded/EpochTransitionUnauthorized, got {other:?}"),
+    }
+
+    // Same epoch but replaced membership commitment — superseded.
+    let mut replaced = auth.config_identity();
+    replaced.authority_commitment[0] ^= 0xFF;
+    match auth.authorize_current_state(&LocalAuthorizationState::Established(replaced)) {
+        Err(FreshnessError::Superseded(AuthorityLifetimeError::AuthorityCommitmentChanged {
+            ..
+        })) => {}
+        other => panic!("expected Superseded/AuthorityCommitmentChanged, got {other:?}"),
+    }
 }
