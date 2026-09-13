@@ -93,7 +93,8 @@ pub use pacemaker::{
 };
 pub use qc::{QcValidationError, QuorumCertificate};
 pub use proposal_vote_verify::{
-    verify_proposal_msg, verify_vote_msg, ProposalVoteVerifyError, ProposalVoteVerifyOutcome,
+    verify_proposal_msg, verify_proposal_msg_with_preimage, verify_vote_msg,
+    verify_vote_msg_with_preimage, ProposalVoteVerifyError, ProposalVoteVerifyOutcome,
 };
 pub use sim::SingleNodeSim;
 pub use timeout::{

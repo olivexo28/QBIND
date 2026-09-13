@@ -4,6 +4,7 @@ pub mod gov; // governance call_data structs
 pub mod io;
 pub mod keyset;
 pub mod net; // KEMTLS handshake messages
+pub mod pv_signing_domain; // Run 422 D6: versioned Proposal/Vote signing domain
 pub mod tx;
 pub mod validator; // slashing proof call_data and related wire types // keyset program call_data structs
 
