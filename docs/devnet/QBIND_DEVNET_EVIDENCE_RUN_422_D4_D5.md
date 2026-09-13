@@ -223,14 +223,19 @@ The `m16_epoch_transition_hardening_tests` target needs `--features test-utils`
 
 ## Security analysis / CodeQL status (Finding C-D)
 
-CodeQL / a dedicated security scan was **not executed to completion** in this
-environment for these changes. **No** execution, result, timestamp, or
-zero-alert conclusion is asserted or invented; `test_results.txt` records this
-as `NOT-RUN`. A code review (or any review tool that itself returned an error)
-is **not** a substitute for completed CodeQL analysis and is not described as an
-unqualified successful review. Incomplete security analysis is tracked on a
-separate validation axis from the scoped POSITIVE code/test result. Secret /
-privacy scan of changed files is clean.
+CodeQL analysis was **attempted** via this environment's scan tool and was
+**skipped / did not complete because the database size is too large** (the tool
+reported "Analysis was skipped because the database size is too large"). The
+accompanying "0 alerts" figure is a consequence of that **skip**, **not** a
+completed clean/zero-alert result, and is not represented as one. No execution
+timestamp or zero-alert conclusion is asserted or invented. The parallel Code
+Review invocation returned a **model-registry error** (`model claude-sonnet-4.6
+not found in registry`); it is therefore **not** described as an unqualified
+successful review, and a code review is in any case **not** a substitute for
+completed CodeQL analysis. `test_results.txt` records this CodeQL status as
+`ATTEMPTED-SKIPPED (database too large)`. Incomplete security analysis is
+tracked on a separate validation axis from the scoped POSITIVE code/test result.
+Secret / privacy scan of changed files is clean.
 
 ## Preserved limitations and readiness (unchanged)
 

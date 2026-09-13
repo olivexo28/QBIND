@@ -83,10 +83,15 @@ tip; no production code or build configuration changed in this continuation)
   cargo check -p qbind-node (default features) ............. exit 0 (prior)
   cargo build --release -p qbind-node --bin qbind-node .... exit 0 (prior)
 
-NOT RUN TO COMPLETION
-  CodeQL / dedicated security scan for these changes — status NOT-RUN; no
-  zero-alert claim; no invented execution/result/timestamp. A code review is
-  NOT a substitute for CodeQL. (See summary.txt / commands.txt.)
+ATTEMPTED BUT INCOMPLETE / NOT RUN TO COMPLETION
+  CodeQL security scan for these changes — status ATTEMPTED-SKIPPED (database
+  too large): the environment's scan tool reported "Analysis was skipped
+  because the database size is too large". The accompanying "0 alerts" is a
+  consequence of the skip, NOT a completed zero-alert conclusion; no invented
+  execution/result/timestamp. The parallel code-review invocation returned a
+  model-registry error (claude-sonnet-4.6 not in registry) and is NOT counted
+  as an unqualified successful review; a code review is not a substitute for
+  CodeQL. (See summary.txt / commands.txt.)
   m16_epoch_transition_hardening_tests — requires --features test-utils
   (pre-existing, unrelated); recorded separately, not part of the production
   check / release build.

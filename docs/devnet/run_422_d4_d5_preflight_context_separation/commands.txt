@@ -75,7 +75,12 @@ TEST-UTILS-ONLY TARGET (recorded separately)
 
 SECURITY ANALYSIS
 ----------------------------------------------------------------------------
-  CodeQL / dedicated security scan: NOT executed to completion in this
-  environment for these changes. No zero-alert conclusion is claimed; no
-  execution/result/timestamp is invented. A code review is NOT a substitute for
-  CodeQL. See summary.txt. Secret/privacy scan of changed files: clean.
+  CodeQL security scan: ATTEMPTED in this environment and SKIPPED / incomplete
+  because the database size is too large (tool reported "Analysis was skipped
+  because the database size is too large"). The accompanying "0 alerts" is a
+  consequence of the skip, NOT a completed zero-alert conclusion; no
+  execution/result/timestamp/zero-alert conclusion is invented. The parallel
+  code-review invocation returned a model-registry error (claude-sonnet-4.6 not
+  in registry) and is NOT counted as an unqualified successful review; a code
+  review is not a substitute for CodeQL. See summary.txt. Secret/privacy scan of
+  changed files: clean.

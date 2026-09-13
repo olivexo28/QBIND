@@ -152,13 +152,18 @@ metrics/storage startup was NOT moved to strengthen the wording.
 SECURITY (CodeQL) ANALYSIS STATUS
 ----------------------------------------------------------------------------
 
-CodeQL / dedicated security-scan tooling was NOT executed to completion in
-this environment for these changes. No zero-alert conclusion is asserted. A
-successful code review is NOT a substitute for security analysis. This gap is
-reported here separately from the positive scoped behavioral result. Standard
-per-target clippy was run: the changed code introduced no new warnings (see
-commands.txt); the pre-existing m16_epoch_transition_hardening_tests target
-requires --features test-utils to compile and is unrelated to this change.
+CodeQL security-scan tooling was ATTEMPTED in this environment and was SKIPPED
+/ did not complete because the database size is too large (the tool reported
+"Analysis was skipped because the database size is too large"). The "0 alerts"
+figure that accompanies a skipped run is NOT a completed zero-alert conclusion
+and is not asserted as one. The parallel code-review invocation returned a
+model-registry error (model claude-sonnet-4.6 not found in registry), so it is
+NOT described as an unqualified successful review, and a code review is not a
+substitute for security analysis in any case. This gap is reported here
+separately from the positive scoped behavioral result. Standard per-target
+clippy was run: the changed code introduced no new warnings (see commands.txt);
+the pre-existing m16_epoch_transition_hardening_tests target requires
+--features test-utils to compile and is unrelated to this change.
 
 ----------------------------------------------------------------------------
 PRESERVED LIMITATIONS / READINESS (UNCHANGED)
