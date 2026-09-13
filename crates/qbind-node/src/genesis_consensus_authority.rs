@@ -85,6 +85,26 @@ pub const GENESIS_CONSENSUS_AUTHORITY_COMMITMENT_TAG: &str =
 /// unbounded allocation / hashing during startup.
 pub const MAX_GENESIS_CONSENSUS_VALIDATORS: usize = 4096;
 
+/// Run 422 D7 — the single epoch a genesis-static consensus authority is
+/// valid for.
+///
+/// The QBIND genesis validator set is the founding (epoch 0) membership
+/// (`qbind_consensus::validator_set` documents "the genesis epoch (epoch
+/// 0)"; the HotStuff engine and the binary path both start at
+/// `current_epoch = 0`, and an absent persisted epoch key is treated as
+/// epoch 0). A genesis-static authority derived from
+/// `GenesisConfig.validators` therefore authorizes **only** epoch 0 with
+/// exactly the committed membership and keys.
+///
+/// This run implements **no** key rotation, revocation, or membership
+/// transition (task section 10). Because no safe transition is supported,
+/// any observed epoch other than [`GENESIS_STATIC_AUTHORITY_EPOCH`] — i.e.
+/// any epoch advance / reconfiguration — has **no authorized transition**
+/// and is rejected fail-closed by [`GenesisConsensusAuthority::authorize_configuration`]
+/// rather than allowing the stale genesis keys to keep signing. This is a
+/// real stale-key guard, not an operational note.
+pub const GENESIS_STATIC_AUTHORITY_EPOCH: u64 = 0;
+
 /// Static, in-memory `SuiteAwareValidatorKeyProvider` whose entries are
 /// derived exclusively from the genesis-committed validator set. There
 /// is deliberately **no** public constructor other than
@@ -130,6 +150,15 @@ pub struct GenesisConsensusAuthority {
     /// `(validator_id, suite, public-key fingerprint)` triples for safe
     /// startup logging. Never carries full key bytes.
     pub fingerprints: Vec<(ValidatorId, ConsensusSigSuiteId, String)>,
+    /// Run 422 D7 — the single epoch this genesis-static authority is
+    /// valid for. Always [`GENESIS_STATIC_AUTHORITY_EPOCH`] (the founding
+    /// epoch 0); recorded explicitly so the lifetime guard
+    /// ([`Self::authorize_configuration`]) can fail closed against any
+    /// observed epoch other than the founding one. It is **not** derived
+    /// from any live/synthetic epoch source and never participates in the
+    /// authority commitment (the commitment already fixes chain / genesis
+    /// / membership; the epoch fixes the lifetime).
+    pub authorized_epoch: u64,
 }
 
 impl std::fmt::Debug for GenesisConsensusAuthority {
@@ -137,6 +166,7 @@ impl std::fmt::Debug for GenesisConsensusAuthority {
         f.debug_struct("GenesisConsensusAuthority")
             .field("validator_count", &self.validator_count)
             .field("chain_id", &self.chain_id)
+            .field("authorized_epoch", &self.authorized_epoch)
             .field("commitment_fp", &fp_hex(&self.commitment))
             .field("fingerprints", &self.fingerprints)
             .finish()
@@ -375,6 +405,7 @@ pub fn build_genesis_consensus_authority(
         commitment,
         validator_count: count,
         fingerprints,
+        authorized_epoch: GENESIS_STATIC_AUTHORITY_EPOCH,
     })
 }
 
@@ -447,8 +478,237 @@ impl std::fmt::Display for GenesisAuthorityActivationError {
 
 impl std::error::Error for GenesisAuthorityActivationError {}
 
-/// Shared production activation boundary for the Run 422
-/// `--consensus-authority-from-genesis` path.
+/// Run 422 D7 — an observed live consensus configuration presented to the
+/// genesis-static authority's fail-closed lifetime guard
+/// ([`GenesisConsensusAuthority::authorize_configuration`]).
+///
+/// The caller assembles this from **already-validated** sources — the
+/// network identity persisted / re-verified for the running node (chain
+/// id, canonical genesis hash), the membership it is actually operating
+/// (validator count + the authority commitment that fixes chain / genesis
+/// / per-validator index / suite / key), and the epoch it is about to act
+/// at. The epoch MUST come from a validated epoch source (e.g. the
+/// engine's committed `current_epoch` / persisted epoch key); this type
+/// never invents a synthetic epoch and is never used to activate a trust
+/// bundle (the fail-closed `CurrentEpochUnavailable` boundary is
+/// unchanged — task section 10).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ObservedConsensusConfiguration {
+    /// Chain identity the node is currently operating under.
+    pub chain_id: String,
+    /// Canonical genesis hash currently bound to the node's storage /
+    /// data-dir identity.
+    pub genesis_hash: GenesisHash,
+    /// Deterministic authority commitment of the membership the node is
+    /// actually operating (same encoding as
+    /// [`GenesisConsensusAuthority::commitment`]).
+    pub authority_commitment: [u8; 32],
+    /// Number of validators in the operating membership.
+    pub validator_count: usize,
+    /// Epoch the node is about to sign / verify at. Supplied from a
+    /// validated epoch source; never synthesized here.
+    pub epoch: u64,
+}
+
+impl ObservedConsensusConfiguration {
+    /// Assemble an observed configuration from its already-validated
+    /// components. Kept explicit (no defaulting) so a caller cannot
+    /// accidentally omit the epoch or membership commitment.
+    pub fn new(
+        chain_id: impl Into<String>,
+        genesis_hash: GenesisHash,
+        authority_commitment: [u8; 32],
+        validator_count: usize,
+        epoch: u64,
+    ) -> Self {
+        Self {
+            chain_id: chain_id.into(),
+            genesis_hash,
+            authority_commitment,
+            validator_count,
+            epoch,
+        }
+    }
+}
+
+/// Run 422 D7 — fail-closed reasons a genesis-static consensus authority
+/// refuses to authorize an observed configuration. Each variant carries
+/// only bounded, non-secret diagnostics (fingerprints, counts, epochs);
+/// never key bytes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AuthorityLifetimeError {
+    /// The observed chain identity differs from the one this authority was
+    /// committed to. The genesis-static keys are bound to a single chain.
+    ChainIdChanged {
+        authorized: String,
+        observed: String,
+    },
+    /// The observed canonical genesis hash differs from the one this
+    /// authority was bound to at build time. A restart / restore / replay
+    /// onto a different network identity must never reuse these keys.
+    GenesisHashChanged {
+        authorized_fingerprint: String,
+        observed_fingerprint: String,
+    },
+    /// The observed authority commitment differs. Any change to the
+    /// committed membership, per-validator index, suite, or public key
+    /// changes the commitment; the genesis-static authority cannot
+    /// authorize a changed validator set.
+    AuthorityCommitmentChanged {
+        authorized_fingerprint: String,
+        observed_fingerprint: String,
+    },
+    /// The observed membership count differs from the committed one. A
+    /// resized validator set is a different authority, not this one.
+    MembershipCountChanged {
+        authorized: usize,
+        observed: usize,
+    },
+    /// The observed epoch differs from the single founding epoch this
+    /// genesis-static authority is valid for. No key rotation / membership
+    /// transition is implemented in this run, so there is **no authorized
+    /// transition** to a later epoch: the stale genesis keys must not keep
+    /// signing across an epoch/membership change. Fail closed.
+    EpochTransitionUnauthorized {
+        authorized_epoch: u64,
+        observed_epoch: u64,
+    },
+}
+
+impl std::fmt::Display for AuthorityLifetimeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::ChainIdChanged {
+                authorized,
+                observed,
+            } => write!(
+                f,
+                "observed chain id ({observed}) does not equal the genesis-static authority chain \
+                 id ({authorized}); the genesis-committed keys are bound to a single chain"
+            ),
+            Self::GenesisHashChanged {
+                authorized_fingerprint,
+                observed_fingerprint,
+            } => write!(
+                f,
+                "observed genesis identity (fp={observed_fingerprint}) does not equal the \
+                 genesis-static authority identity (fp={authorized_fingerprint}); the genesis-bound \
+                 keys must not authorize a different network identity"
+            ),
+            Self::AuthorityCommitmentChanged {
+                authorized_fingerprint,
+                observed_fingerprint,
+            } => write!(
+                f,
+                "observed authority commitment (fp={observed_fingerprint}) does not equal the \
+                 genesis-static commitment (fp={authorized_fingerprint}); the genesis-static \
+                 authority cannot authorize a changed validator set / suite / key"
+            ),
+            Self::MembershipCountChanged {
+                authorized,
+                observed,
+            } => write!(
+                f,
+                "observed membership count ({observed}) does not equal the genesis-committed \
+                 membership ({authorized}); a resized validator set is a different authority"
+            ),
+            Self::EpochTransitionUnauthorized {
+                authorized_epoch,
+                observed_epoch,
+            } => write!(
+                f,
+                "observed epoch ({observed_epoch}) differs from the genesis-static founding epoch \
+                 ({authorized_epoch}); no key-rotation / membership transition is implemented, so \
+                 the genesis-static authority has no authorized transition and refuses to sign with \
+                 stale keys"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for AuthorityLifetimeError {}
+
+impl GenesisConsensusAuthority {
+    /// The single epoch this genesis-static authority is valid for
+    /// (always [`GENESIS_STATIC_AUTHORITY_EPOCH`]).
+    pub fn authorized_epoch(&self) -> u64 {
+        self.authorized_epoch
+    }
+
+    /// The authority's own immutable configuration identity, expressed as
+    /// an [`ObservedConsensusConfiguration`] at its founding epoch. Useful
+    /// for callers that want to compare a persisted/observed identity
+    /// against the authority without re-deriving each field.
+    pub fn config_identity(&self) -> ObservedConsensusConfiguration {
+        ObservedConsensusConfiguration {
+            chain_id: self.chain_id.clone(),
+            genesis_hash: self.genesis_hash,
+            authority_commitment: self.commitment,
+            validator_count: self.validator_count,
+            epoch: self.authorized_epoch,
+        }
+    }
+
+    /// Run 422 D7 — fail-closed genesis-static authority lifetime /
+    /// freshness guard.
+    ///
+    /// Returns `Ok(())` **only** when `observed` is byte-for-byte the exact
+    /// founding configuration this authority was built from, at the single
+    /// founding epoch. Any of the following is rejected without ever
+    /// falling back to the stale genesis keys:
+    ///
+    /// * a different chain id, canonical genesis hash, authority
+    ///   commitment, or membership count — this covers a restart / restore
+    ///   / replay onto a mismatched network identity or a changed
+    ///   validator set (the keys are bound to one immutable configuration);
+    /// * any epoch other than the founding [`GENESIS_STATIC_AUTHORITY_EPOCH`]
+    ///   — because this run implements no key-rotation / membership
+    ///   transition, an epoch advance has **no authorized transition** and
+    ///   the genesis-static keys must not keep signing across it.
+    ///
+    /// Checks are ordered coarse-to-fine (chain → genesis → membership
+    /// count → commitment → epoch) so the returned diagnostic names the
+    /// first, most fundamental divergence. Every path is total and
+    /// non-panicking.
+    pub fn authorize_configuration(
+        &self,
+        observed: &ObservedConsensusConfiguration,
+    ) -> Result<(), AuthorityLifetimeError> {
+        if observed.chain_id != self.chain_id {
+            return Err(AuthorityLifetimeError::ChainIdChanged {
+                authorized: self.chain_id.clone(),
+                observed: observed.chain_id.clone(),
+            });
+        }
+        if observed.genesis_hash != self.genesis_hash {
+            return Err(AuthorityLifetimeError::GenesisHashChanged {
+                authorized_fingerprint: public_key_fingerprint(&self.genesis_hash),
+                observed_fingerprint: public_key_fingerprint(&observed.genesis_hash),
+            });
+        }
+        if observed.validator_count != self.validator_count {
+            return Err(AuthorityLifetimeError::MembershipCountChanged {
+                authorized: self.validator_count,
+                observed: observed.validator_count,
+            });
+        }
+        if observed.authority_commitment != self.commitment {
+            return Err(AuthorityLifetimeError::AuthorityCommitmentChanged {
+                authorized_fingerprint: fp_hex(&self.commitment),
+                observed_fingerprint: fp_hex(&observed.authority_commitment),
+            });
+        }
+        if observed.epoch != self.authorized_epoch {
+            return Err(AuthorityLifetimeError::EpochTransitionUnauthorized {
+                authorized_epoch: self.authorized_epoch,
+                observed_epoch: observed.epoch,
+            });
+        }
+        Ok(())
+    }
+}
+
+
 ///
 /// This is the single function both the release binary (`main.rs`) and the
 /// behavioral tests exercise, so the provenance, re-validation,

@@ -1,0 +1,64 @@
+RUN 422 D7 — LIFETIME / FRESHNESS REJECTION MATRIX
+============================================================================
+Maps `GenesisConsensusAuthority::authorize_configuration` behavior to the
+task section 12.E ("Lifetime and robustness") requirements and to the tests
+in crates/qbind-node/tests/run_422_d7_authority_lifetime_tests.rs.
+
+All observed configurations are compared against an immutable authority
+built from a boot-verified genesis. "Ok" means the exact founding
+configuration at epoch 0; every other row fails closed.
+
+----------------------------------------------------------------------------
+A. AUTHORIZATION DECISION MATRIX
+----------------------------------------------------------------------------
+observed vs authority          | result / error variant           | test
+-------------------------------+-----------------------------------+---------------------------
+exact founding config, epoch 0 | Ok(())                            | founding_configuration_authorizes
+different chain_id             | Err ChainIdChanged                | changed_chain_id_rejected
+different canonical genesis     | Err GenesisHashChanged            | restart_restore_mismatched_genesis_identity_fails_closed
+  hash (restart/restore)       |                                   |
+different membership count      | Err MembershipCountChanged        | changed_membership_count_rejected
+same count, different keys      | Err AuthorityCommitmentChanged    | changed_validator_set_commitment_rejected
+  (changed validator set)      |                                   |
+same net, tampered commitment   | Err AuthorityCommitmentChanged    | restore_same_network_tampered_membership_fails_closed
+epoch advance (1,2,7,u64::MAX)  | Err EpochTransitionUnauthorized   | epoch_advance_has_no_authorized_transition
+multiple divergences at once    | Err ChainIdChanged (coarsest)     | divergence_reporting_is_coarse_to_fine
+
+----------------------------------------------------------------------------
+B. SECTION 12.E REQUIREMENT COVERAGE
+----------------------------------------------------------------------------
+12.E requirement                                   | test
+---------------------------------------------------+------------------------------------------------
+Context snapshot does not change if source files   | snapshot_immutable_when_source_file_changes_after_validation
+changed after validation                           |   (activate from temp file; overwrite file with a
+                                                   |    different genesis; in-memory hash/commitment/keys
+                                                   |    unchanged; guard still authorizes only the original;
+                                                   |    a freshly reloaded authority differs and is refused)
+Parallel verification cannot mix keys, suites,     | parallel_verification_does_not_mix_keys_suites_membership_or_results
+membership, or results                             |   (8 threads x 500 iters over two distinct authorities;
+                                                   |    each authorizes only its own identity, never the
+                                                   |    other's; providers never serve the other's keys)
+Restart/restore with mismatched authority identity | restart_restore_mismatched_genesis_identity_fails_closed;
+fails closed                                       | restore_same_network_tampered_membership_fails_closed
+Changed configuration cannot keep using            | changed_validator_set_commitment_rejected;
+genesis-static authority without an authorized     | changed_membership_count_rejected;
+transition                                         | epoch_advance_has_no_authorized_transition
+Malformed input cannot panic                       | malformed_or_extreme_observed_input_cannot_panic
+                                                   |   (empty chain id, all-0x00/0xFF hashes, usize::MAX
+                                                   |    count, u64::MAX epoch, control chars => Err, no panic)
+Fixture bypass unreachable through all current     | fixture_bypass_unreachable_through_production_constructors_and_parser
+production constructors and parser routes          |   (exactly one struct-literal builder; no bypass
+                                                   |    constructor; main.rs refuses the activation route)
+
+----------------------------------------------------------------------------
+C. EXPLICIT NON-CLAIMS
+----------------------------------------------------------------------------
+* No key rotation, revocation, or membership transition is implemented; a
+  changed validator set / epoch is REFUSED, not migrated.
+* This guard is code + test; it is not wired to any production activation
+  (production authority stays unavailable; genesis-authority route refused).
+* No protection is claimed against double-signing across clones/restarts
+  beyond the per-startup identity re-validation and this configuration
+  guard; no consensus-safety, QC, or equivocation claim is made here.
+* The observed epoch is caller-supplied from a validated source; D7 invents
+  no synthetic epoch and does not touch trust-bundle CurrentEpochUnavailable.

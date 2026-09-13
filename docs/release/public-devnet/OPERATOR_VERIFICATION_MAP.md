@@ -133,6 +133,22 @@ decision is **NO-GO / NOT launch-ready** (`LAUNCH_GO_NO_GO.md`).
    wire-chain_id mapping UNRESOLVED). Downstream engine/QC still reconstruct the
    legacy preimage. **D7 remains unresolved; RS1/C4/C5 stay OPEN.** Run 423 not
    started.
+   **Run 422 D7 SUCCESSOR (code/test):** the genesis-static / epoch-restore
+   authority-lifetime blocker is now closed on the code+test axis
+   (`RESULT=POSITIVE-FOR-GENESIS-STATIC-AUTHORITY-LIFETIME-CODE-TEST`;
+   `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md`, archive
+   `docs/devnet/run_422_d7_authority_lifetime/`): an additive, fail-closed
+   `GenesisConsensusAuthority::authorize_configuration` guard authorizes **only**
+   the founding epoch-0 configuration and rejects any changed chain / genesis /
+   membership / commitment or any non-founding epoch with a bounded
+   `AuthorityLifetimeError` (no rotation/revocation/membership transition exists
+   this run). Proven with the real ML-DSA-44 backend across 12 section-12.E tests
+   (snapshot immutability vs source-file change, parallel non-mixing,
+   restart/restore identity mismatch, epoch-advance rejection, no-panic on
+   extreme input, fixture-bypass unreachable). Activation stays DISABLED
+   (production `proposal_vote_authority` remains `None`; the release binary still
+   refuses `--consensus-authority-from-genesis` with exit 1; no CLI/env/override).
+   **D7 closed code/test; RS1/C4/C5 stay OPEN.** Run 423 not started.
 9. `docs/whitepaper/contradiction.md` — contradiction ledger.
 10. `docs/release/public-devnet/BLOCKER_REGISTER.md` — open blockers (incl. **RS1**).
 

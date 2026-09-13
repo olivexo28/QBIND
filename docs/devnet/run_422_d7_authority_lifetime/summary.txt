@@ -1,0 +1,103 @@
+RUN 422 D7 — SUMMARY AND VERDICT
+============================================================================
+
+EXACT VERDICT LABEL BLOCK
+----------------------------------------------------------------------------
+RESULT=POSITIVE-FOR-GENESIS-STATIC-AUTHORITY-LIFETIME-CODE-TEST
+D7_STATUS=GENESIS-STATIC-LIFETIME-STALE-KEY-GUARD-CODE-TEST-POSITIVE
+GENESIS_AUTHORITY_ACTIVATION=DISABLED
+PROPOSAL_VOTE_AUTHORITY_FROM_LEGACY_CLI=DISALLOWED
+LEGACY_TIMEOUT_CONTEXT=EXISTING-POLICY-PRESERVED
+CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED
+SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO
+
+This is a CODE + TEST verdict. It is NOT a configured-authority
+release-binary adversarial verdict (that remains Run 423) and closes no
+readiness item.
+
+----------------------------------------------------------------------------
+WHAT D7 ADDS
+----------------------------------------------------------------------------
+An additive, fail-closed genesis-static authority lifetime / freshness
+guard, entirely inside `crates/qbind-node/src/genesis_consensus_authority.rs`
+plus a new integration test file. No production wiring, CLI, or behavior
+change.
+
+New public surface (all additive):
+  * const GENESIS_STATIC_AUTHORITY_EPOCH: u64 = 0
+  * struct GenesisConsensusAuthority { .., pub authorized_epoch: u64 }
+  * struct ObservedConsensusConfiguration { chain_id, genesis_hash,
+        authority_commitment, validator_count, epoch } + ::new()
+  * enum AuthorityLifetimeError { ChainIdChanged, GenesisHashChanged,
+        AuthorityCommitmentChanged, MembershipCountChanged,
+        EpochTransitionUnauthorized } (+ Display + Error)
+  * GenesisConsensusAuthority::authorized_epoch()
+  * GenesisConsensusAuthority::config_identity()
+  * GenesisConsensusAuthority::authorize_configuration(&observed)
+        -> Result<(), AuthorityLifetimeError>
+
+`authorize_configuration` returns Ok ONLY for the exact founding
+configuration at the founding epoch. Checks are coarse-to-fine
+(chain -> genesis -> membership count -> commitment -> epoch); every path
+is total and non-panicking.
+
+----------------------------------------------------------------------------
+WHY THIS IS THE CORRECT, HONEST D7 BOUNDARY
+----------------------------------------------------------------------------
+Task section 10 forbids implementing key rotation, revocation, or
+membership redesign in this run, and requires: "If no safe transition is
+supported, fail closed before activating the changed configuration and
+report the limitation; an operational note alone is not a stale-key guard."
+
+The QBIND genesis validator set is the founding epoch-0 membership
+(qbind-consensus validator_set: "the genesis epoch (epoch 0)"; the HotStuff
+engine and the binary path start at current_epoch = 0; an absent persisted
+epoch key is treated as epoch 0). A genesis-static authority is therefore
+valid for exactly epoch 0 with exactly the committed membership/keys. Since
+no safe transition is implemented, ANY observed epoch != 0, or ANY changed
+chain / genesis / commitment / membership, is rejected fail-closed. The
+guard is executable code exercised by tests, not a prose note.
+
+The observed epoch is supplied by the caller from a validated source. D7
+introduces NO synthetic epoch and does NOT consume current_epoch for
+trust-bundle activation: the fail-closed CurrentEpochUnavailable boundary is
+untouched (task section 10). C4/C5 remain OPEN; no peer-driven trust apply,
+session eviction, or governance mutation is enabled.
+
+----------------------------------------------------------------------------
+TEST EVIDENCE (see test_results.txt / lifetime_matrix.txt)
+----------------------------------------------------------------------------
+New integration file
+`crates/qbind-node/tests/run_422_d7_authority_lifetime_tests.rs` — 12 tests,
+real ML-DSA-44 backend and real genesis parsing, all passing. Maps directly
+to task section 12.E: snapshot immutability under source-file change;
+parallel non-mixing of keys/suites/membership/results; restart/restore
+identity mismatch fail-closed; changed-configuration/epoch fail-closed;
+malformed/extreme input cannot panic; fixture bypass unreachable.
+
+Regressions green (this environment): qbind-node module unit tests (14),
+run_422 genesis/startup-refusal/D4 integration (15 + 4 + 5), D6 in-module
+handler tests (10), full qbind-node --lib (1478). Affected release build
+compiled; the release binary still refuses
+`--consensus-authority-from-genesis` (exit code 1) before any P2P/consensus
+service. rustfmt: the new LF test file is rustfmt-clean; the pre-existing
+module uses CRLF line endings (repo convention) and was edited narrowly
+without converting line endings — repo-wide rustfmt drift is pre-existing
+and out of scope. clippy (qbind-node --lib): zero findings attributable to
+the changed file; other crate warnings are pre-existing and unrelated.
+
+CodeQL / security analysis: run via the environment's parallel validation
+tool; its status is recorded in commands.txt and is NOT converted into a
+zero-alert conclusion.
+
+----------------------------------------------------------------------------
+PRESERVED BLOCKERS / POSTURE
+----------------------------------------------------------------------------
+Production genesis-authority activation DISABLED; standalone binary refusal
+preserved verbatim (message wording unchanged, still exit 1). Production
+proposal_vote_authority = None. Legacy `--validator-consensus-key` route
+unchanged. F3/F4/F8 not fully activated in production; F1/F2/F5/F7
+unresolved; F6 partial; RS1 and C4/C5 OPEN; M4/M6/S5/S7 Yellow; Public
+DevNet NO-GO. No live seed file; no TestNet/MainNet readiness claim; no
+readiness item moved Green. Configured-authority release-binary adversarial
+evidence remains NOT-YET-CAPTURED (Run 423).

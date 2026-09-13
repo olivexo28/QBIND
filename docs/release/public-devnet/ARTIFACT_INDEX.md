@@ -137,6 +137,23 @@ Companion documents:
   preimage (v2 boundary success is not QC/engine validation). **D7 remains
   unresolved**; CodeQL **NOT** run to a zero-alert conclusion; **RS1 stays OPEN /
   launch-blocking**. Run 423 not started.
+- `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md` — Run 422 **D7 successor
+  (code/test)**, archive `docs/devnet/run_422_d7_authority_lifetime/`. Closes
+  **D7** genesis-static / epoch-restore authority lifetime on the code+test axis
+  (`RESULT=POSITIVE-FOR-GENESIS-STATIC-AUTHORITY-LIFETIME-CODE-TEST`): an additive,
+  fail-closed `GenesisConsensusAuthority::authorize_configuration` guard
+  authorizes **only** the founding epoch-0 configuration and rejects any changed
+  chain / genesis / membership / commitment or any non-founding epoch with a
+  bounded `AuthorityLifetimeError` (no key rotation/revocation/membership
+  transition exists this run, so no authorized transition). Proven with the real
+  ML-DSA-44 backend across 12 section-12.E tests (snapshot immutability vs
+  source-file change, parallel non-mixing, restart/restore identity mismatch,
+  epoch-advance rejection, no-panic on extreme input, fixture-bypass
+  unreachable). Activation stays **DISABLED**: production
+  `proposal_vote_authority` remains `None`, the release binary still refuses
+  `--consensus-authority-from-genesis` with exit 1, and no CLI/env/override was
+  added. CodeQL **NOT** run to a zero-alert conclusion; **RS1/C4/C5 stay OPEN**.
+  Run 423 not started.
 
 Everything below reflects the recorded status **after Run 402**. This index adds
 navigation and clarity only; it does not re-prove or change any item's status.
