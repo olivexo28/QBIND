@@ -20,28 +20,37 @@ zero-alert conclusion.
 
 ## Branch / ancestry (rechecked at the completion pass)
 
-Environment-supplied task branch and objects, verified with `git` in this
-clone:
+Recoverable facts verified with `git` in this shallow, single-branch clone
+(historical bases from earlier passes are **not** re-derived here):
 
-* Task branch (actual, environment-supplied):
-  `copilot/copilotrun-422-d6-corrective-continuation`.
-* Starting/tip SHA in this clone: `2a18b47bb12843597ca1bd783bdf92e07f48cb7e`,
-  whose parent is the corrective comparison base
-  `b585768de8ea79f22f16a6f3c028bfee3f9c6ed7` (present locally).
-* The reviewed tip `010788bcd00bb3725cebc0e8fe26f3502a2c00d4` and the historical
-  accepted baseline `5b7ea51a9b123e1952bd966b5e414531cd2ad898` are **NOT
-  present** in this shallow/single-branch clone (`git cat-file -t` → missing).
-  Their exact relationship therefore cannot be reproven here; matching diff
-  statistics alone would not prove identical source or ancestry.
-* Reported review-time relationship (from the prompt, not independently
-  reproducible here): task branch three commits ahead of `b585768`; current
-  GitHub main `2a18b47…`; main…task = 1 left / 3 right. In this squashed clone
-  the local tip is a single commit ahead of `b585768`.
-* No fast-forward importability from the historical baseline alone is claimed.
+* Task branch (actual name in this clone):
+  `copilot/copilotcopilotrun-422-d6-corrective-continuation`. The prompt's
+  *expected* name was `copilot/copilotrun-422-d6-corrective-continuation`; the
+  actual branch carries a **doubled `copilot`** segment. Recorded, not renamed.
+* Available ancestry: the completion tip of this branch is the commit produced by
+  this documentation pass (its own SHA cannot be embedded in its own committed
+  text; it is the branch tip after commit). Its parent documentation commit is
+  `7d87849892f25f3e84403b5a11f635e38f5a1127`, whose parent is
+  `2a18b47bb12843597ca1bd783bdf92e07f48cb7e` — the **earliest commit present**
+  in this clone (`git rev-list --parents -n 1` shows it with no parent object
+  here).
+* Tested implementation/worktree identity vs the documentation commit: the D6
+  implementation and the 34 consensus + 10 node tests are the source tree at
+  `7d87849…`. This completion pass changes only documentation plus a **single
+  test comment** on top of it; the two identities are kept distinct and the doc
+  commit is not presented as the tested implementation revision.
+* **NOT present** locally (`git cat-file -t` → missing): the prompt's reviewed
+  tip `a071c53caa4700b9a00b0d1fb8fe17071a267887`, the earlier reviewed tip
+  `010788bcd00bb3725cebc0e8fe26f3502a2c00d4`, and the historical bases
+  `b585768de8ea79f22f16a6f3c028bfee3f9c6ed7` and
+  `5b7ea51a9b123e1952bd966b5e414531cd2ad898`. Their exact relationships cannot
+  be reproven here; matching diff statistics alone would not prove identical
+  source or ancestry, and no merge-base against a missing object is re-executed.
+* No fast-forward importability from any historical baseline is claimed.
   Integration with `main` is left for a separate reviewed step. This completion
-  pass adds only tests + documentation and does not modify `main`, rebase,
-  amend, or open a PR.
-* Clone is shallow/single-branch; full history before `b585768` is not present.
+  pass adds only documentation (plus the one test comment) and does not modify
+  `main`, rebase, amend, or open a PR.
+* Clone is shallow/single-branch; full history before `2a18b47` is not present.
 
 ## Prerequisites confirmed on the starting tree
 

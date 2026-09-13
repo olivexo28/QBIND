@@ -1,9 +1,20 @@
 RUN 422 D6 — SOURCE TRACE AND CALL-SITE INVENTORY
 ============================================================================
 
-Baseline: 5b7ea51a9b123e1952bd966b5e414531cd2ad898 (direct ancestor of HEAD;
-git merge-base HEAD <baseline> == <baseline>). Shallow single-branch clone;
-history before the baseline is absent but does not affect this comparison.
+Original D6 baseline (HISTORICAL record from the earlier corrective pass):
+5b7ea51a9b123e1952bd966b5e414531cd2ad898. That pass reported it as a direct
+ancestor (git merge-base HEAD <baseline> == <baseline>); that is a historical
+result and is NOT re-executed in this completion pass.
+
+Current completion checkout (this pass): task branch
+copilot/copilotcopilotrun-422-d6-corrective-continuation (actual branch name in
+this clone; note the doubled "copilot" segment), completion tip recorded in
+docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D6.md, whose parent is
+2a18b47bb12843597ca1bd783bdf92e07f48cb7e — the earliest commit present in this
+shallow single-branch clone. The historical baseline 5b7ea51... is NOT present
+locally (git cat-file -t => missing), so the merge-base relationship above
+cannot be reproven here; history before 2a18b47 is absent. Matching diff
+statistics alone would not prove identical source or ancestry.
 
 ----------------------------------------------------------------------------
 FILES READ / TRACED
@@ -78,7 +89,12 @@ CALL-SITE INVENTORY
   migrated to v2 in this task (documented downstream dependency). v2 boundary
   success is NOT QC/engine validation.
   Cached/re-emission and active-restore paths route through the same inbound/
-  outbound sites above; covered by D5-pattern tests.
+  outbound sites above; covered by the D6 in-module run422_d6 handler tests
+  (binary_consensus_loop.rs): run422_d6_late_peer_reemit_signs_under_selected_
+  v2_domain and run422_d6_late_peer_reemit_refused_on_inconsistent_wire (cached
+  re-emission), and run422_d6_active_restore_foreign_domain_proposal_rejected_
+  no_effects (active restore). These wire an ACTUAL v2 authority; the D5 tests
+  wire no PV authority and are not sufficient proof of v2 cache/restore.
 
 [Timeout/NewView consumers — MUST REMAIN UNCHANGED — UNCHANGED]
   TimeoutVerificationContext and its Timeout/NewView preimage/verify path are

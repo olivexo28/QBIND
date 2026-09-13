@@ -7,73 +7,125 @@ NO always-succeeds verifier is used for any replay-isolation claim
 
 Test target:
   crates/qbind-consensus/tests/run_422_d6_pv_domain_isolation_tests.rs
-  (19 tests, all passing)
+  (34 tests, all passing)
 
 Method: for both Proposal and Vote, establish a valid SAME-DOMAIN control, then
 vary ONLY the boundary under test, reusing the same keys wherever possible.
-Negative "replay rejection" is never obtained merely by changing keys.
+Negative "replay rejection" is never obtained merely by changing keys. Each row
+below cites the ACTUAL test name(s) and the message family each exercises.
 
 ----------------------------------------------------------------------------
-CASE  DESCRIPTION                                              RESULT
+CASE  DESCRIPTION / TEST NAME(S)                                    RESULT
 ----------------------------------------------------------------------------
-CTRL  control_same_domain_proposal_and_vote_verify            ACCEPT (control)
-        Same domain used to sign and verify => valid.
+CTRL  control_same_domain_proposal_and_vote_verify (Proposal+Vote) ACCEPT
+        Same domain used to sign and verify => valid (both families).
 
-A     case_a_different_full_runtime_chain_id_same_legacy_unk   REJECT
+A     case_a_different_full_runtime_chain_id_same_legacy_unk_scope  REJECT
         Same key + identical message, two DISTINCT custom runtime chain ids
         that BOTH map to legacy "UNK" scope. v2 binds the full u64 chain id, so
         the cross-chain signature does not authenticate.
 
-B     case_b_different_genesis_identity_rejected               REJECT
+B     case_b_different_genesis_identity_rejected            (Proposal) REJECT
+      ca_vote_different_genesis_identity_rejected           (Vote)     REJECT
         Same runtime ChainId, same keys, same message, DIFFERENT accepted
-        genesis identity.
+        genesis identity. Base test covered Proposal; ca_vote_* mirrors Vote.
 
-C     case_c_different_authority_commitment_rejected           REJECT
+C     case_c_different_authority_commitment_rejected        (Vote)     REJECT
+      ca_proposal_different_authority_commitment_rejected   (Proposal) REJECT
         Same chain/genesis values at the encoding boundary, DIFFERENT authority
-        commitment. Snapshots are internally consistent (no inconsistent
-        fixture claimed valid).
+        commitment. Snapshots are internally consistent. Base test covered Vote;
+        ca_proposal_* mirrors Proposal.
 
-D     case_d_legacy_v1_signature_rejected_by_v2_verifier       REJECT
+D     case_d_legacy_v1_signature_rejected_by_v2_verifier    (Proposal) REJECT
+      ca_vote_legacy_v1_signature_rejected_by_v2_verifier   (Vote)     REJECT
         A valid legacy v1 signature presented to the v2-format verifier.
 
-E     case_e_v2_signature_rejected_by_legacy_v1_verifier       REJECT
+E     case_e_v2_signature_rejected_by_legacy_v1_verifier    (Proposal) REJECT
+      ca_vote_v2_signature_rejected_by_legacy_v1_verifier   (Vote)     REJECT
         A valid v2 signature presented to the legacy v1 verifier.
 
-F     case_f_wrong_message_family_rejected                     REJECT
+F     case_f_wrong_message_family_rejected                             REJECT
         Proposal-family domain used to verify a Vote (and vice versa).
+      cb_family_byte_isolation_proposal_signed_as_vote_rejected        REJECT
+      cb_family_byte_isolation_vote_signed_as_proposal_rejected        REJECT
+        Flip ONLY the family discriminator byte in an otherwise-correct signed
+        preimage; the message-bound verifier recomputes the correct-family
+        preimage and rejects. Both directions.
 
-G     case_g_unsupported_version_rejected_no_fallback          REJECT
+G     case_g_unsupported_version_rejected_no_fallback                  REJECT
         Unsupported signing-format version byte; from_u8 rejects, no fallback
         to any other version/suite/key.
 
-H     case_h_signature_and_payload_tampering_rejected          REJECT
+H     case_h_signature_and_payload_tampering_rejected       (Proposal) REJECT
+      ca_vote_payload_and_signature_tampering_rejected      (Vote)     REJECT
         Flipped signature bytes and flipped signed-payload bytes.
 
-I     Existing fail-closed taxonomy under the v2 entrypoint:      all REJECT
-        case_i_missing_signature_rejected
-        case_i_wrong_signer_key_rejected
-        case_i_unknown_validator_rejected
-        case_i_wrong_suite_rejected
-        case_i_unsupported_suite_no_backend_rejected
-        (backend-error behavior exercised via unsupported suite / no backend)
+I     Fail-closed taxonomy through the v2 message-bound entrypoints:   REJECT
+      Proposal: case_i_missing_signature_rejected
+                case_i_wrong_signer_key_rejected
+                case_i_unknown_validator_rejected
+                case_i_wrong_suite_rejected
+      Vote:     ca_vote_missing_signature_rejected
+                ca_vote_wrong_signer_key_rejected
+                ca_vote_unknown_validator_rejected
+                ca_vote_wrong_suite_rejected
+        Missing signature / wrong signer key / unknown validator / wrong suite
+        each map to their own typed error for BOTH families.
 
-J     case_j_invalid_domain_metadata_fails_construction        REJECT (closed)
+I-NB  Empty backend registry => UnsupportedSuite (NOT a backend fault): REJECT
+      case_i_unsupported_suite_no_backend_rejected          (Proposal)
+      case_i_unsupported_suite_no_backend_rejected_vote     (Vote, NEW)
+        NO backend is registered for the governed suite (empty registry). The
+        typed result is UnsupportedSuite for both families. This is evidence of
+        a MISSING backend, never of a backend fault.
+
+I-BE  Registered-but-faulting backend => BackendError (distinct):      REJECT
+      cc_backend_error_distinct_from_unsupported_suite      (Proposal+Vote)
+        A backend IS registered for the governed suite but always returns a
+        backend error. The result is BackendError (never UnsupportedSuite,
+        InvalidSignature, or acceptance) for both families. This is the explicit
+        distinction between an empty registry (UnsupportedSuite) and a
+        deliberately faulting registered backend (BackendError).
+
+J     case_j_invalid_domain_metadata_fails_construction                REJECT
         All-zero genesis identity / all-zero authority commitment => try_new
         fails; admission cannot proceed with absent/invalid domain metadata.
 
-K     case_k_expected_wire_chain_id_is_bound                   REJECT
-        Inconsistent expected wire-chain identity at the domain is bound into
-        the preimage and rejected.
+K     case_k_expected_wire_chain_id_is_bound                           REJECT
+        The message-bound verifier enforces wire-chain consistency at the typed
+        boundary BEFORE any crypto: a domain whose expected_wire_chain_id
+        disagrees with the message's wire chain_id yields a typed
+        WireChainMismatch (never a silent rewrite), for BOTH Proposal and Vote.
+        A matching domain verifies; the golden vectors additionally prove the
+        expected wire id is bound into the signed preimage bytes.
 
-GOLDEN golden_vote_preimage_bytes / golden_proposal_preimage_prefix_bytes  PASS
-        Deterministic preimage bytes vs INDEPENDENTLY specified expected bytes.
+STALE stale_preimage_cannot_substitute_through_message_verifier        REJECT
+        A retained valid ORIGINAL preimage cannot authenticate a mutated
+        message: the public verifier always recomputes from the message under
+        test, and there is no public entrypoint to supply a foreign preimage.
 
-SMOKE real_backend_rejects_random_signature                    REJECT
+GOLDEN Deterministic preimage bytes vs INDEPENDENTLY specified bytes:  PASS
+      golden_vote_preimage_bytes
+        Complete fixed Vote preimage (body_len = 66; complete preimage 169 B).
+      golden_proposal_preimage_prefix_bytes
+        Asserts the 95-byte fixed prefix + length-framed canonical_body(); it
+        does NOT by itself independently specify the complete Proposal body.
+      cd_golden_proposal_full_independent_vector_with_qc_and_txs
+        Complete independent Proposal vector (full second-encoder preimage with
+        a QC and two transactions) specifying the entire Proposal body.
+
+SMOKE real_backend_rejects_random_signature                           REJECT
         Confirms the backend is the real verifier (random sig fails).
 
 ----------------------------------------------------------------------------
-NOTE
+NOTES
 ----------------------------------------------------------------------------
+The domain metadata bytes used above (genesis_identity, authority_commitment)
+are FIXTURE values chosen to isolate each boundary. A non-zero fixture hash is
+NOT a validated genesis snapshot or an authorized authority snapshot; it proves
+only that the field is bound into the preimage, not provenance or freshness
+(see compatibility_matrix.txt / D7).
+
 A valid v2 verification result does NOT imply engine acceptance, aggregation,
 QC formation, or a committed block. Those boundaries are reported separately and
 are not asserted here.

@@ -82,6 +82,10 @@ offset  field                     width  encoding
   encoding of the message. Reusing the identical body bytes means (a) the same
   security-relevant fields are bound and (b) the historical v1 golden vectors
   remain byte-identical (v1 = `domain_prefix || canonical_body()`).
+* The fixed prefix before `body_len` (`domain_tag`..`authority_commitment`) is
+  **95 bytes**; adding the 8-byte `body_len` gives the complete **103-byte** v2
+  header. The 95-byte fixed prefix and the 103-byte header are distinct: only
+  the header includes `body_len`.
 
 ### Golden vectors
 
@@ -92,9 +96,17 @@ bytes are in
 * `golden_vote_preimage_bytes` — full expected preimage for a fully fixed Vote
   (`runtime_chain_id = 0x0102030405060708`, `expected_wire_chain_id =
   0x0A0B0C0D`, `genesis_identity = 0x00..0x1f`, `authority_commitment =
-  0x80..0x9f`). The vote body is the fixed 56-byte v1 vote body.
-* `golden_proposal_preimage_prefix_bytes` — expected fixed-length header prefix
-  plus the length-framed `canonical_body()` suffix for a Proposal.
+  0x80..0x9f`). The vote body is the fixed **66-byte** v1 vote body
+  (`1+4+8+8+8+1+32+2+2`), so `body_len = 66` (`00 00 00 00 00 00 00 42` as a
+  big-endian u64) and the complete Vote preimage is `103 + 66 = 169` bytes.
+* `golden_proposal_preimage_prefix_bytes` — asserts the **95-byte** fixed
+  prefix (`domain_tag`..`authority_commitment`, i.e. the header without
+  `body_len`) followed by the length-framed `canonical_body()` suffix for a
+  Proposal. This prefix test alone does **not** independently specify the
+  complete Proposal body.
+* `cd_golden_proposal_full_independent_vector_with_qc_and_txs` — the complete
+  independent Proposal-vector: a full second-encoder preimage (including a QC
+  and two transactions) that specifies the entire Proposal body byte-for-byte.
 
 These vectors are specified independently of the encoder (they do not compare
 the encoder against itself).
@@ -195,7 +207,11 @@ F6 authenticated sender binding
 
 **Production remains disabled.** `crates/qbind-node/src/main.rs` never
 constructs a `ProposalVoteAuthority` (production `proposal_vote_authority`
-stays `None`); only test fixtures set `signing_domain` to `Some(...)`. The
+stays `None`); only test fixtures construct a `ProposalVoteAuthority`. The
+optional wrapper is the authority itself (`proposal_vote_authority:
+Option<ProposalVoteAuthority>`), which production leaves `None`; the
+`signing_domain` field inside an authority is mandatory and has no `Option`
+wrapper, so a constructed authority always carries a domain. The
 Timeout/NewView context is unchanged and cannot establish Proposal/Vote
 authority (D5 policy preserved).
 

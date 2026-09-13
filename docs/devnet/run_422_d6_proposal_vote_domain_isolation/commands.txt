@@ -1,12 +1,20 @@
 RUN 422 D6 — VALIDATION COMMANDS AND RESULTS
 ============================================================================
 
-Environment: Linux sandbox; cargo/rustc workspace build. This completion pass
-adds only tests + documentation; production/build sources under crates/*/src
-(other than the appended in-module tests) are unchanged. Commands run from repo
-root. Numeric exit codes recorded as observed. Each command is marked NEWLY
-EXECUTED (run at the final documentation SHA in this pass) or PRESERVED
-(historical evidence carried forward with unchanged production/build sources).
+Environment: Linux sandbox; cargo/rustc workspace build. Provenance is split
+between two identities: (a) the TESTED implementation worktree, whose recoverable
+commit is 7d87849 (the corrective-continuation revision that added the two Vote
+tests and the D6 implementation), and (b) this final DOCUMENTATION commit, which
+changes only documentation plus a single test comment and touches no
+production/build source under crates/*/src. Commands run from repo root. Numeric
+exit codes recorded as observed. Each command is marked NEWLY EXECUTED (executed
+on the tested worktree at implementation revision 7d87849; the documentation
+commit does not alter that tree's build/test behaviour) or PRESERVED (historical
+evidence carried forward with unchanged production/build sources). The tested
+implementation revision is deliberately NOT relabelled as the documentation
+commit SHA. In addition, this documentation pass re-executed the focused 34-test
+D6 consensus target itself (see below) to confirm the single test-comment edit
+still compiles and passes; no large suite was rerun merely for provenance.
 
 Numeric exit codes recorded as observed. Where a command emits pre-existing
 warnings unrelated to this change, that is noted; those warnings existed at the
@@ -17,12 +25,16 @@ FOCUSED NEW DOMAIN / PREIMAGE / VERIFIER TESTS
 ----------------------------------------------------------------------------
 
 $ cargo test -p qbind-consensus --test run_422_d6_pv_domain_isolation_tests
-  => test result: ok. 34 passed; 0 failed; 0 ignored   exit 0   [NEWLY EXECUTED]
+  => test result: ok. 34 passed; 0 failed; 0 ignored   exit 0
+     [NEWLY EXECUTED — re-run in THIS documentation pass on the completion
+     worktree; confirms the single test-comment edit compiles and all 34 pass.]
      (subset note: these 34 are the full crypto matrix; NOT added to the node
      handler count below.)
 
 $ cargo test -p qbind-node --lib run422_d6
-  => test result: ok. 10 passed; 0 failed; 1468 filtered out   exit 0   [NEWLY EXECUTED]
+  => test result: ok. 10 passed; 0 failed; 1468 filtered out   exit 0
+     [NEWLY EXECUTED on implementation revision 7d87849; carried forward — this
+     documentation pass did not re-run it (no node/build source changed).]
      (subset note: these 10 are a filtered subset of the 1478 qbind-node --lib
      tests below, NOT additive to it.)
 
@@ -125,7 +137,7 @@ No keys/certs/credentials/raw logs/data dirs committed.
 STATIC / SECURITY ANALYSIS
 ----------------------------------------------------------------------------
 
-parallel_validation (Code Review + CodeQL) — executed at the final SHA:
+parallel_validation (Code Review + CodeQL) — executed on impl revision 7d87849:
   * Code Review     : COMPLETED, 9 files reviewed, no findings   [exit n/a — tool verdict]
   * CodeQL Scan     : SKIPPED (trivial: test-only + docs)        [no zero-alert claim]
 Full disposition recorded in test_results.txt. A CodeQL trivial-skip / DB-size

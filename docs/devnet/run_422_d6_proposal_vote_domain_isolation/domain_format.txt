@@ -23,6 +23,11 @@ offset  field                     width  encoding
 Rules:
   * All fixed fields have fixed width; the single variable field (body) is
     length-prefixed => unambiguous concatenation.
+  * The fixed prefix before body_len (domain_tag..authority_commitment) is 95
+    bytes. Adding the 8-byte body_len gives the complete 103-byte v2 header;
+    do not conflate the 95-byte fixed prefix with the 103-byte header. For the
+    fixed Vote below (body_len = 66) the complete preimage is 103 + 66 = 169
+    bytes.
   * Domain-header integers are big-endian.
   * body == canonical_body(): the UNCHANGED little-endian v1 field encoding.
     Because v1 preimage == domain_prefix || canonical_body(), reusing the same
@@ -52,7 +57,9 @@ GOLDEN VECTORS (independently specified; not encoder-vs-itself)
 ----------------------------------------------------------------------------
 
 Location: crates/qbind-consensus/tests/run_422_d6_pv_domain_isolation_tests.rs
-Tests:    golden_vote_preimage_bytes, golden_proposal_preimage_prefix_bytes
+Tests:    golden_vote_preimage_bytes,
+          golden_proposal_preimage_prefix_bytes,
+          cd_golden_proposal_full_independent_vector_with_qc_and_txs
 
 golden_domain() parameters:
   runtime_chain_id       = 0x0102030405060708
@@ -64,7 +71,10 @@ Fixed Vote (chain_id=0x11223344, epoch=0x0102030405060708,
 height=0x1112131415161718, round=0x2122232425262728, step=3,
 block_id=0xAB*32, validator_index=0x0405, suite_id=100):
 
-Header bytes (hex, 103 bytes) then a 56-byte little-endian v1 vote body:
+Header bytes (hex): the complete v2 header is 103 bytes (the 95-byte fixed
+prefix domain_tag..authority_commitment, then the 8-byte body_len). It is
+followed by a 66-byte little-endian v1 vote body, so the complete Vote preimage
+is 103 + 66 = 169 bytes:
   "QBIND:PVDOMAIN:v2"                              (17 bytes ASCII)
   02                                              version
   02                                              family = Vote
@@ -72,10 +82,10 @@ Header bytes (hex, 103 bytes) then a 56-byte little-endian v1 vote body:
   0A 0B 0C 0D                                     expected_wire_chain_id BE
   00 01 02 ... 1F                                 genesis_identity (32)
   80 81 82 ... 9F                                 authority_commitment (32)
-  00 00 00 00 00 00 00 38                         body_len = 56 BE
-  <56-byte v1 vote body, little-endian fields>
+  00 00 00 00 00 00 00 42                         body_len = 66 BE
+  <66-byte v1 vote body, little-endian fields>
 
-  Vote body (56 bytes) field order/width:
+  Vote body (66 bytes) field order/width:
     version               1   = 01
     chain_id (u32 LE)     4   = 44 33 22 11
     epoch    (u64 LE)     8   = 08 07 06 05 04 03 02 01
@@ -85,11 +95,15 @@ Header bytes (hex, 103 bytes) then a 56-byte little-endian v1 vote body:
     block_id             32   = AB * 32
     validator_index(u16LE)2   = 05 04
     suite_id (u16 LE)     2   = 64 00
-    (total = 1+4+8+8+8+1+32+2+2 = 56)
+    (total = 1+4+8+8+8+1+32+2+2 = 66)
 
-Proposal golden: golden_proposal_preimage_prefix_bytes asserts the fixed 103-byte
-header prefix (family = 1) and that the tail is exactly body_len(BE) ||
-canonical_body(); total length == prefix + framed body.
+Proposal golden: golden_proposal_preimage_prefix_bytes asserts the 95-byte fixed
+prefix (family = 1, domain_tag..authority_commitment, i.e. the header WITHOUT
+body_len) and that the tail is exactly body_len(BE) || canonical_body(); total
+length == prefix + framed body. That prefix test alone does NOT independently
+specify the complete Proposal body. Complete independent Proposal-vector
+coverage — a full second-encoder preimage including a QC and two transactions —
+is provided by cd_golden_proposal_full_independent_vector_with_qc_and_txs.
 
 Signature bytes are NOT required to be deterministic; only the preimage bytes are
 golden.

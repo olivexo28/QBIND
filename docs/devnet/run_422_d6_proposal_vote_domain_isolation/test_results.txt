@@ -3,11 +3,19 @@ RUN 422 D6 — TEST TARGET NAMES AND RESULTS
 
 All commands exit 0. Counts recorded as observed.
 
+Provenance: "newly executed"/"NEWLY EXECUTED" below means executed on the TESTED
+worktree at implementation revision 7d87849 (the corrective-continuation
+revision). This final documentation commit changes only documentation plus a
+single test comment and is kept distinct from that tested revision; it does not
+re-attribute those runs to the documentation commit SHA. The focused 34-test D6
+consensus target was additionally re-executed in THIS documentation pass to
+confirm the test-comment edit compiles and passes (see below).
+
 ----------------------------------------------------------------------------
 NEW D6 CRYPTO MATRIX (real ML-DSA-44 backend)
 ----------------------------------------------------------------------------
 Target: crates/qbind-consensus/tests/run_422_d6_pv_domain_isolation_tests.rs
-Result: 34 passed; 0 failed; 0 ignored     (newly executed at the final SHA)
+Result: 34 passed; 0 failed; 0 ignored     (re-executed in this documentation pass)
 
 Note on counts: the earlier D6 capture recorded 19 tests. The corrective
 continuation grew this target to 33, and this completion pass adds one more
@@ -63,7 +71,7 @@ IS registered but faults and must map to `BackendError` (both Proposal and Vote)
 NEW D6 NODE HANDLER TESTS (in-module run422_d6, real F6 gate + Required policy)
 ----------------------------------------------------------------------------
 Selector: cargo test -p qbind-node --lib run422_d6
-Result: 10 passed; 0 failed; 1468 filtered out     (newly executed at the final SHA)
+Result: 10 passed; 0 failed; 1468 filtered out     (executed on impl revision 7d87849; carried forward)
 
   run422_d6_correct_domain_proposal_accepted_foreign_rejected
   run422_d6_correct_domain_vote_accepted_foreign_rejected
@@ -134,11 +142,11 @@ cargo build --release -p qbind-node --bin qbind-node
   Finished release profile                                    exit 0
   PRESERVED HISTORICAL EVIDENCE (same basis as cargo check above).
 cargo clippy -p qbind-consensus --tests
-  Finished; exit 0; NEWLY EXECUTED at the final SHA. No warnings in the D6
+  Finished; exit 0; NEWLY EXECUTED on impl revision 7d87849. No warnings in the D6
   crypto test file (verified by filtering clippy output for run_422_d6 —
   no matches).
 cargo clippy -p qbind-node --lib
-  Finished; exit 0; NEWLY EXECUTED at the final SHA. 87 pre-existing crate-wide
+  Finished; exit 0; NEWLY EXECUTED on impl revision 7d87849. 87 pre-existing crate-wide
   warnings; NONE attributable to the D6 additions in binary_consensus_loop.rs
   (verified by filtering for run422_d6_outbound_vote / RecordingSigner /
   VoteRecordingFacade / build_authority — no matches).
@@ -164,7 +172,7 @@ Changed source + docs scanned: No secrets detected.
 ----------------------------------------------------------------------------
 STATIC / SECURITY ANALYSIS
 ----------------------------------------------------------------------------
-parallel_validation (Code Review + CodeQL) — actual result at the final SHA:
+parallel_validation (Code Review + CodeQL) — actual result on impl revision 7d87849:
   * Code Review: COMPLETED. Reviewed 9 changed files; no review comments /
     findings. (A secondary review helper reported a model-registry error for
     an unrelated model id; the primary code review itself completed with no

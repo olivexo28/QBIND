@@ -646,7 +646,7 @@ fn golden_vote_preimage_bytes() {
     expected.extend_from_slice(&body);
 
     assert_eq!(d.vote_preimage(&v), expected);
-    // Body length is the fixed v1 vote body length (56 bytes).
+    // Body length is the fixed v1 vote body length (66 bytes).
     assert_eq!(body.len(), 1 + 4 + 8 + 8 + 8 + 1 + 32 + 2 + 2);
 }
 
