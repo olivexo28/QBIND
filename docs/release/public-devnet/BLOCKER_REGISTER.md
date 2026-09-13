@@ -105,12 +105,28 @@ tests + combined-context, late-peer re-emission, and active-restore-mode unit
 tests). Legacy Timeout/NewView policy is PRESERVED (existing run030 crypto
 coverage); the legacy `--validator-consensus-key` CLI route no longer
 establishes Proposal/Vote authority; genesis activation stays DISABLED.
-Still UNRESOLVED (activation kept fail-closed): **D6** signed-domain replay
-isolation and **D7** genesis-static/epoch-restore authority lifetime;
-configured-authority release-binary adversarial evidence remains **NOT
-captured**
+**Run 422 D6 SUCCESSOR (code/test):** **D6** signed-domain replay isolation is
+now closed on the code+test axis —
+`RESULT=POSITIVE-FOR-PROPOSAL-VOTE-DOMAIN-ISOLATION-CODE-TEST`. An explicitly
+versioned Proposal/Vote signing domain (`QBIND:PVDOMAIN:v2`) binds the full
+64-bit runtime ChainId, the accepted genesis identity, and the consensus
+authority commitment into the signed preimage, so a signature for one domain
+does not authenticate the same message under another domain even with an
+unchanged key/index/payload/wire chain_id (real ML-DSA-44 matrix A–K + golden
+vectors; real-handler accept/reject with the F6 gate + `Required` policy). Wire
+bytes are unchanged and v1 preimage bytes are byte-identical; v1↔v2 cross-format
+verification is mutually rejected. Activation stays DISABLED: production
+`proposal_vote_authority` remains `None`, no CLI/env/override was added, and the
+runtime-ChainId→wire-chain_id mapping is UNRESOLVED (the explicit
+`expected_wire_chain_id` is supplied only from trusted fixtures/config).
+Still UNRESOLVED (activation kept fail-closed): **D7**
+genesis-static/epoch-restore authority lifetime, and downstream engine/QC still
+reconstruct the legacy preimage (v2 boundary success is not QC/engine
+validation); configured-authority release-binary adversarial evidence remains
+**NOT captured**
 (`CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED`). See
-`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D4_D5.md`. **F3/F4/F8 are PARTIAL,
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D4_D5.md` and
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D6.md`. **F3/F4/F8 are PARTIAL,
 not code/test-positive; RS1/C4/C5 stay OPEN.** Run 423 not started.
 
 ## TestNet / MainNet
@@ -139,4 +155,5 @@ MainNet readiness is claimed.**
 - `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_421.md` — Run 421 unavailable-authority fail-closed release-binary evidence for findings F3/F4/F8.
 - `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422.md` — Run 422 genesis-bound consensus authority activation (code/test) for findings F3/F4/F8.
 - `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D4_D5.md` — Run 422 D4/D5 successor: pre-P2P/consensus preflight (D4) and message-family authority separation (D5) code/test-positive; D6/D7 unresolved.
+- `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D6.md` — Run 422 D6 successor: versioned Proposal/Vote signing-domain isolation (v2) code/test-positive; activation DISABLED; D7 unresolved.
 - `docs/whitepaper/contradiction.md` — contradiction ledger.

@@ -388,7 +388,10 @@ mod tests {
         let d = dummy_domain(1, 7, [1u8; 32], [2u8; 32]);
         let pre = d.proposal_preimage(&proposal());
         assert!(pre.starts_with(PV_SIGNING_DOMAIN_V2_TAG));
-        assert_eq!(pre[PV_SIGNING_DOMAIN_V2_TAG.len()], PV_SIGNING_FORMAT_VERSION_V2);
+        assert_eq!(
+            pre[PV_SIGNING_DOMAIN_V2_TAG.len()],
+            PV_SIGNING_FORMAT_VERSION_V2
+        );
         // family byte follows the version byte.
         assert_eq!(pre[PV_SIGNING_DOMAIN_V2_TAG.len() + 1], 1); // Proposal
         let pre_v = d.vote_preimage(&vote());

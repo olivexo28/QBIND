@@ -1,0 +1,69 @@
+RUN 422 D6 — COMPATIBILITY MATRIX AND DOWNSTREAM DEPENDENCIES
+============================================================================
+
+----------------------------------------------------------------------------
+WIRE / FORMAT COMPATIBILITY
+----------------------------------------------------------------------------
+
+Wire bytes change?                        NO.
+  The v2 domain changes only the SIGNED PREIMAGE (the bytes handed to the
+  existing signer/verifier). No wire struct, no wire version field, no
+  transport / transaction / DAG / Timeout-NewView signature format changes.
+
+v1 preimage bytes preserved?              YES (byte-identical).
+  signing_preimage_with_chain_id still emits domain_prefix || canonical_body().
+  Existing v1 regression golden vectors remain green.
+
+Version field repurposed?                 NO.
+  A NEW tag "QBIND:PVDOMAIN:v2" + explicit version byte (2) is introduced. No
+  existing version field's semantics are redefined.
+
+Format selection source?                  Trusted config / validated authority.
+  Never peer-negotiated, never from attacker-controlled message fields. Absent
+  domain metadata is NOT treated as permission to use legacy verification.
+
+Fallback / downgrade?                      NONE.
+  The v2 boundary never tries v2 then falls back to v1; never selects a weaker
+  format from message fields; never retries with another domain/version/suite/
+  key after a failure.
+
+----------------------------------------------------------------------------
+CROSS-FORMAT BEHAVIOR (tested)
+----------------------------------------------------------------------------
+
+  v1 signature -> v2 verifier            REJECT (case D)
+  v2 signature -> v1 verifier            REJECT (case E)
+  v2 signature -> v2 verifier (same dom) ACCEPT (control)
+  v1 signature -> v1 verifier            ACCEPT (unchanged; existing regressions)
+
+----------------------------------------------------------------------------
+DOWNSTREAM COMPATIBILITY DEPENDENCIES (recorded, NOT solved here)
+----------------------------------------------------------------------------
+
+1. Engine / QC verification still reconstruct the LEGACY preimage. They are not
+   migrated to v2. Successful v2 boundary verification is NOT QC or engine
+   validation. Broad v2 adoption downstream is a separate protocol change
+   (F7-adjacent) and is intentionally out of scope.
+
+2. Runtime ChainId (u64) -> wire chain_id (u32) mapping is UNRESOLVED. v2 uses
+   an explicit expected_wire_chain_id from trusted config (fixtures/tests only).
+   A validated production mapping does not exist in the repository, so a
+   production v2 authority cannot be constructed safely. This is a hard blocker
+   for activation and is left open.
+
+3. Authority freshness / lifetime (D7). The authority commitment identifies the
+   INTENDED snapshot only; it does not prove currency/authorization for a later
+   epoch. Epoch activation, key rotation, restart freshness, durable
+   anti-rollback, and peer/cache authority replacement remain open (D7).
+
+----------------------------------------------------------------------------
+ACTIVATION STATUS
+----------------------------------------------------------------------------
+
+Production proposal_vote_authority          = None (unchanged).
+Genesis-authority startup refusal           = in force (unchanged).
+Activation CLI flag / env / override        = NONE added.
+TimeoutVerificationContext -> PV authority   = NOT possible (D5 preserved).
+main.rs constructs ProposalVoteAuthority?    = NO (only test fixtures do).
+
+Because of dependencies (2) and (3), activation remains BLOCKED and DISABLED.

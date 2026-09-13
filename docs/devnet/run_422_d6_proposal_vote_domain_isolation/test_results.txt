@@ -1,0 +1,93 @@
+RUN 422 D6 — TEST TARGET NAMES AND RESULTS
+============================================================================
+
+All commands exit 0. Counts recorded as observed.
+
+----------------------------------------------------------------------------
+NEW D6 CRYPTO MATRIX (real ML-DSA-44 backend)
+----------------------------------------------------------------------------
+Target: crates/qbind-consensus/tests/run_422_d6_pv_domain_isolation_tests.rs
+Result: 19 passed; 0 failed; 0 ignored
+
+  control_same_domain_proposal_and_vote_verify
+  case_a_different_full_runtime_chain_id_same_legacy_unk_scope
+  case_b_different_genesis_identity_rejected
+  case_c_different_authority_commitment_rejected
+  case_d_legacy_v1_signature_rejected_by_v2_verifier
+  case_e_v2_signature_rejected_by_legacy_v1_verifier
+  case_f_wrong_message_family_rejected
+  case_g_unsupported_version_rejected_no_fallback
+  case_h_signature_and_payload_tampering_rejected
+  case_i_missing_signature_rejected
+  case_i_wrong_signer_key_rejected
+  case_i_unknown_validator_rejected
+  case_i_wrong_suite_rejected
+  case_i_unsupported_suite_no_backend_rejected
+  case_j_invalid_domain_metadata_fails_construction
+  case_k_expected_wire_chain_id_is_bound
+  golden_vote_preimage_bytes
+  golden_proposal_preimage_prefix_bytes
+  real_backend_rejects_random_signature
+
+----------------------------------------------------------------------------
+NEW D6 NODE HANDLER TESTS (in-module run422_d6, real F6 gate + Required policy)
+----------------------------------------------------------------------------
+Selector: cargo test -p qbind-node --lib run422_d6
+Result: 6 passed; 0 failed; 1468 filtered out
+
+  run422_d6_correct_domain_proposal_accepted_foreign_rejected
+  run422_d6_correct_domain_vote_accepted_foreign_rejected
+  run422_d6_cross_format_rejection_both_directions
+  run422_d6_wire_chain_mismatch_rejected_before_crypto
+  run422_d6_f6_mismatch_precedes_domain_and_missing_authority_rejects
+  run422_d6_outbound_signs_under_selected_domain_only
+
+----------------------------------------------------------------------------
+WIRE UNIT TESTS (v2 domain module)
+----------------------------------------------------------------------------
+crates/qbind-wire/src/pv_signing_domain.rs unit tests: pass (in qbind-wire lib
+182 passed; 0 failed).
+
+----------------------------------------------------------------------------
+REGRESSION SUITES
+----------------------------------------------------------------------------
+cargo test -p qbind-wire -p qbind-consensus
+  qbind-wire lib: 182 passed; 0 failed
+  qbind-consensus lib + integration + doctests: all pass; 0 failed
+
+cargo test -p qbind-node --lib
+  1474 passed; 0 failed; 0 ignored
+
+run_420_production_policy_reachability_tests   : 3 passed; 0 failed
+run_422_genesis_consensus_authority_tests      : 15 passed; 0 failed
+run_422_startup_refusal_tests                  : 4 passed; 0 failed
+run_422_d4_startup_ordering_tests              : 5 passed; 0 failed
+run_418_authenticated_peer_consensus_sender_binding_tests : 18 passed; 0 failed
+run_418_newview_demux_chain_integration_tests  : 3 passed; 0 failed
+
+----------------------------------------------------------------------------
+BUILD / CHECK / CLIPPY / FMT
+----------------------------------------------------------------------------
+cargo check -p qbind-wire -p qbind-consensus -p qbind-node (default features)
+  Finished dev profile in 5m 35s                              exit 0
+cargo build --release -p qbind-node --bin qbind-node
+  Finished release profile in 7m 31s                          exit 0
+cargo clippy -p qbind-wire -p qbind-consensus --tests
+  Finished; exit 0; no warnings in D6 files
+cargo clippy -p qbind-node --lib
+  Finished in 36.15s; exit 0; no D6-attributable warnings
+rustfmt --check (new LF files)                                clean
+CRLF files preserved as CRLF (proposal_vote_verify.rs, binary_consensus_loop.rs)
+
+----------------------------------------------------------------------------
+SECRET / PRIVACY SCAN
+----------------------------------------------------------------------------
+Changed source + docs scanned: No secrets detected.
+
+----------------------------------------------------------------------------
+STATIC / SECURITY ANALYSIS
+----------------------------------------------------------------------------
+parallel_validation (Code Review + CodeQL): see the final report. CodeQL
+DB-too-large skips or review-tool errors are NOT recorded as zero-alert /
+successful-review conclusions. Historical D4/D5 broad-Clippy FAILED/INCOMPLETE
+(exact exit code not captured then) and CodeQL DB-too-large skip preserved.

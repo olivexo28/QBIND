@@ -174,7 +174,11 @@ fn vp(
     )
 }
 
-fn vv(f: &Fixture, v: &Vote, d: &ProposalVoteSigningDomainV2) -> Result<(), ProposalVoteVerifyError> {
+fn vv(
+    f: &Fixture,
+    v: &Vote,
+    d: &ProposalVoteSigningDomainV2,
+) -> Result<(), ProposalVoteVerifyError> {
     verify_vote_msg_with_preimage(
         v,
         ValidatorId(v.validator_index as u64),
@@ -212,8 +216,14 @@ fn case_a_different_full_runtime_chain_id_same_legacy_unk_scope() {
     // Both custom runtime chain ids map to legacy "UNK".
     let d1 = domain(0xAAAA_0000_0000_0001, 5, g, c);
     let d2 = domain(0xBBBB_0000_0000_0002, 5, g, c);
-    assert_eq!(qbind_types::domain::chain_scope(d1.runtime_chain_id()), "UNK");
-    assert_eq!(qbind_types::domain::chain_scope(d2.runtime_chain_id()), "UNK");
+    assert_eq!(
+        qbind_types::domain::chain_scope(d1.runtime_chain_id()),
+        "UNK"
+    );
+    assert_eq!(
+        qbind_types::domain::chain_scope(d2.runtime_chain_id()),
+        "UNK"
+    );
 
     // Positive control under d1.
     let p = sign_proposal(&f, 0, &d1);
@@ -417,14 +427,7 @@ fn case_i_unknown_validator_rejected() {
     let sk0 = f.sks.get(&ValidatorId(0)).unwrap();
     p.signature = MlDsa44Backend::sign(sk0, &pre).expect("sign");
     assert_eq!(
-        verify_proposal_msg_with_preimage(
-            &p,
-            ValidatorId(9),
-            &f.validators,
-            &f.kp,
-            &f.br,
-            &pre
-        ),
+        verify_proposal_msg_with_preimage(&p, ValidatorId(9), &f.validators, &f.kp, &f.br, &pre),
         Err(ProposalVoteVerifyError::UnknownValidator(ValidatorId(9)))
     );
 }
@@ -450,9 +453,11 @@ fn case_i_unsupported_suite_no_backend_rejected() {
     keys.insert(ValidatorId(0), (TEST_SUITE, pk));
     let kp = TestKeyProvider { keys };
     let br = SimpleBackendRegistry::new(); // empty
-    let validators =
-        ConsensusValidatorSet::new(vec![ValidatorSetEntry { id: ValidatorId(0), voting_power: 1 }])
-            .unwrap();
+    let validators = ConsensusValidatorSet::new(vec![ValidatorSetEntry {
+        id: ValidatorId(0),
+        voting_power: 1,
+    }])
+    .unwrap();
     let d = domain(1, 5, genesis_id(1), commitment(1));
     let mut p = unsigned_proposal(0);
     let pre = d.proposal_preimage(&p);
@@ -528,8 +533,13 @@ fn golden_domain() -> ProposalVoteSigningDomainV2 {
         }
         c
     };
-    ProposalVoteSigningDomainV2::try_new(ChainId(0x0102_0304_0506_0708), 0x0A0B_0C0D, genesis, commit)
-        .expect("golden domain")
+    ProposalVoteSigningDomainV2::try_new(
+        ChainId(0x0102_0304_0506_0708),
+        0x0A0B_0C0D,
+        genesis,
+        commit,
+    )
+    .expect("golden domain")
 }
 
 #[test]
@@ -556,10 +566,14 @@ fn golden_vote_preimage_bytes() {
     expected.push(2); // family = Vote
     expected.extend_from_slice(&0x0102_0304_0506_0708u64.to_be_bytes()); // runtime chain id
     expected.extend_from_slice(&0x0A0B_0C0Du32.to_be_bytes()); // expected wire chain id
-    // genesis identity 0x00..0x1f
+                                                               // genesis identity 0x00..0x1f
     expected.extend_from_slice(&(0u8..32).collect::<Vec<u8>>());
     // authority commitment 0x80..0x9f
-    expected.extend_from_slice(&(0u8..32).map(|i| 0x80u8.wrapping_add(i)).collect::<Vec<u8>>());
+    expected.extend_from_slice(
+        &(0u8..32)
+            .map(|i| 0x80u8.wrapping_add(i))
+            .collect::<Vec<u8>>(),
+    );
     // body (little-endian v1 field encoding), length-framed.
     let mut body = Vec::new();
     body.push(1u8); // version
@@ -592,7 +606,11 @@ fn golden_proposal_preimage_prefix_bytes() {
     prefix.extend_from_slice(&0x0102_0304_0506_0708u64.to_be_bytes());
     prefix.extend_from_slice(&0x0A0B_0C0Du32.to_be_bytes());
     prefix.extend_from_slice(&(0u8..32).collect::<Vec<u8>>());
-    prefix.extend_from_slice(&(0u8..32).map(|i| 0x80u8.wrapping_add(i)).collect::<Vec<u8>>());
+    prefix.extend_from_slice(
+        &(0u8..32)
+            .map(|i| 0x80u8.wrapping_add(i))
+            .collect::<Vec<u8>>(),
+    );
     assert!(pre.starts_with(&prefix));
     // The body that follows is exactly canonical_body(), length-framed.
     let body = p.canonical_body();

@@ -1,0 +1,106 @@
+RUN 422 D6 — SOURCE TRACE AND CALL-SITE INVENTORY
+============================================================================
+
+Baseline: 5b7ea51a9b123e1952bd966b5e414531cd2ad898 (direct ancestor of HEAD;
+git merge-base HEAD <baseline> == <baseline>). Shallow single-branch clone;
+history before the baseline is absent but does not affect this comparison.
+
+----------------------------------------------------------------------------
+FILES READ / TRACED
+----------------------------------------------------------------------------
+
+crates/qbind-types/src/domain.rs
+    Legacy v1 domain tags "QBIND:<SCOPE>:PROPOSAL:v1" / ":VOTE:v1"; chain_scope()
+    maps runtime ChainId -> {DEV,TST,MAIN,UNK}. Every custom chain id -> "UNK".
+crates/qbind-types/src/primitives.rs
+    ChainId is a u64 newtype.
+crates/qbind-wire/src/consensus.rs
+    Vote (~line 47) and BlockProposal (~line 633); signing_preimage_with_chain_id
+    for each = domain_prefix(chain_id, kind) || <field encoding>.
+crates/qbind-consensus/src/proposal_vote_verify.rs
+    verify_core (private, fail-closed); verify_proposal_msg / verify_vote_msg.
+crates/qbind-consensus/src/crypto_verifier.rs
+    SimpleBackendRegistry / ConsensusSigBackendRegistry; suite-aware dispatch.
+crates/qbind-node/src/genesis_consensus_authority.rs
+    compute_authority_commitment (~line 535): sha3-256 over genesis chain_id
+    STRING + genesis hash + each validator (index, suite, pk). 32-byte commitment.
+crates/qbind-node/src/binary_consensus_loop.rs
+    ProposalVoteAuthority (~line 1042); inbound proposal (~3338) / vote (~3510)
+    verify; outbound sign_proposal_for_broadcast (~2945) / sign_vote_for_broadcast
+    (~3010); ConsensusVerificationPolicy (Required default).
+crates/qbind-node/src/main.rs
+    Production proposal_vote_authority = None; unconditional genesis-authority
+    startup refusal; D4 preflight before P2P construction. NEVER constructs a
+    ProposalVoteAuthority.
+
+----------------------------------------------------------------------------
+CALL-SITE INVENTORY
+----------------------------------------------------------------------------
+
+[Legacy signing-preimage APIs — UNCHANGED SEMANTICS, bytes preserved]
+  Vote::signing_preimage_with_chain_id            (qbind-wire/consensus.rs)
+  BlockProposal::signing_preimage_with_chain_id   (qbind-wire/consensus.rs)
+    Now internally = domain_prefix(chain_id, kind) || canonical_body(); the
+    emitted bytes are byte-identical to the pre-D6 encoding (regression golden
+    vectors green).
+  verify_proposal_msg / verify_vote_msg           (qbind-consensus)
+    Now delegate to *_with_preimage using the legacy preimage; behavior
+    unchanged.
+
+[Binary Proposal/Vote boundary — v2 domain wired here, FIXTURE/TEST ONLY]
+  ProposalVoteAuthority.signing_domain: Option<ProposalVoteSigningDomainV2>
+  ProposalVoteAuthority::proposal_preimage / vote_preimage / wire_chain_id_ok
+  inbound Proposal verify  (binary_consensus_loop.rs ~3338)
+  inbound Vote verify      (binary_consensus_loop.rs ~3510)
+  outbound sign_proposal_for_broadcast (~2945)
+  outbound sign_vote_for_broadcast     (~3010, incl. directed transmission)
+    When signing_domain is Some: wire chain_id checked vs expected_wire_chain_id
+    (reject-before-crypto), then verify/sign uses the domain preimage via
+    verify_*_with_preimage. When None: legacy v1 path unchanged.
+
+[New verifier entrypoints]
+  verify_proposal_msg_with_preimage / verify_vote_msg_with_preimage
+    (qbind-consensus/proposal_vote_verify.rs; re-exported from lib.rs)
+    Same fail-closed core as v1; differ only in preimage bytes. No retry/fallback.
+
+[Other engine / vote-aggregation / QC / cache / restore consumers — UNCHANGED]
+  Engine and QC verification still reconstruct the LEGACY preimage. They are not
+  migrated to v2 in this task (documented downstream dependency). v2 boundary
+  success is NOT QC/engine validation.
+  Cached/re-emission and active-restore paths route through the same inbound/
+  outbound sites above; covered by D5-pattern tests.
+
+[Timeout/NewView consumers — MUST REMAIN UNCHANGED — UNCHANGED]
+  TimeoutVerificationContext and its Timeout/NewView preimage/verify path are
+  untouched. Legacy --validator-consensus-key still configures ONLY the Timeout/
+  NewView context and cannot establish Proposal/Vote authority (D5 preserved).
+
+----------------------------------------------------------------------------
+CHAIN-IDENTITY REPRESENTATIONS (characterized, not assumed interchangeable)
+----------------------------------------------------------------------------
+
+  GenesisConfig.chain_id        String   (genesis file)
+  runtime ChainId               u64      (qbind-types primitive)
+  Proposal/Vote wire chain_id   u32      (qbind-wire consensus messages)
+
+No validated u64->u32 mapping exists in the repository. v2 carries
+expected_wire_chain_id as an EXPLICIT field from trusted config (fixtures/tests
+only); it is never derived by truncation and never taken from a message. Absence
+of a validated production mapping is a recorded blocker for production
+construction (see compatibility_matrix.txt).
+
+Existing v1 behavior characterized before replacement: two custom chain ids both
+map to legacy "UNK" so v1 gives them the same domain prefix; the v1 signed body
+still embeds the u32 wire chain_id, so a shared prefix alone is not a proof of
+successful cross-chain replay. v1 nonetheless provides NO binding to the accepted
+genesis identity or authority snapshot — the gap v2 closes.
+
+----------------------------------------------------------------------------
+D7 LIFECYCLE INTERFACES DISCOVERED (left unresolved)
+----------------------------------------------------------------------------
+
+  * Authority commitment identifies an INTENDED snapshot only; no freshness /
+    epoch-authorization check exists at the signing boundary.
+  * Epoch-transition activation / key rotation, restore/restart authority
+    freshness, durable anti-rollback, and authority replacement via peers/caches
+    are all out of scope and remain open (D7).

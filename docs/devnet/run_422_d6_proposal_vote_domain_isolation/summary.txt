@@ -1,0 +1,84 @@
+RUN 422 D6 — SUMMARY AND VERDICT
+============================================================================
+
+RESULT=POSITIVE-FOR-PROPOSAL-VOTE-DOMAIN-ISOLATION-CODE-TEST
+D6_STATUS=VERSIONED-PROPOSAL-VOTE-BOUNDARY-CODE-TEST-POSITIVE
+D7_STATUS=UNRESOLVED
+GENESIS_AUTHORITY_ACTIVATION=DISABLED
+PROPOSAL_VOTE_AUTHORITY_FROM_LEGACY_CLI=DISALLOWED
+LEGACY_TIMEOUT_CONTEXT=EXISTING-POLICY-PRESERVED
+CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED
+SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO
+
+============================================================================
+WHAT WAS DELIVERED
+============================================================================
+
+An explicitly versioned Proposal/Vote signing domain (v2) that cryptographically
+binds a consensus signature to:
+  * an explicit signing-format version,
+  * the message family (Proposal / Vote),
+  * the full 64-bit runtime ChainId,
+  * the accepted canonical genesis identity,
+  * the consensus authority commitment (intended membership/key/suite snapshot),
+  * all currently signed, security-relevant message fields (exact v1 body).
+
+Implementation:
+  * crates/qbind-wire/src/pv_signing_domain.rs — ProposalVoteSigningDomainV2
+    (validated, immutable), format/family enums, typed error, preimage builders.
+  * crates/qbind-wire/src/consensus.rs — canonical_body() for Vote/BlockProposal;
+    v1 signing_preimage_with_chain_id refactored to reuse it (bytes identical).
+  * crates/qbind-consensus/src/proposal_vote_verify.rs — fail-closed
+    verify_proposal_msg_with_preimage / verify_vote_msg_with_preimage.
+  * crates/qbind-node/src/binary_consensus_loop.rs — optional signing_domain on
+    ProposalVoteAuthority; wire-chain mismatch counters; inbound/outbound
+    integration; in-module run422_d6 handler tests. Production stays None.
+
+============================================================================
+EVIDENCE
+============================================================================
+
+Crypto matrix (real ML-DSA-44): 19/19 pass — see replay_matrix.txt.
+Node handler tests (real F6 gate + Required policy): 6/6 pass.
+Regressions green: qbind-wire + qbind-consensus suites, qbind-node --lib (1474),
+run_420 (3), run_422 genesis (15) / startup-refusal (4) / D4 ordering (5),
+run_418 sender-binding (18) / newview (3). See test_results.txt.
+cargo check default features (qbind-wire/consensus/node): exit 0.
+cargo build --release -p qbind-node --bin qbind-node: see commands.txt.
+Focused clippy on changed targets: see commands.txt.
+New files rustfmt-clean (LF); CRLF files preserved as CRLF.
+
+============================================================================
+BOUNDARIES / BLOCKERS (NOT overclaimed)
+============================================================================
+
+  * Production proposal_vote_authority remains None; genesis-authority startup
+    refusal preserved; no activation flag/env/override added.
+  * Legacy Timeout/NewView context unchanged; cannot establish PV authority.
+  * runtime ChainId (u64) -> wire chain_id (u32) mapping UNRESOLVED;
+    expected_wire_chain_id supplied from trusted config only (fixtures/tests),
+    never from messages. Blocks safe production construction.
+  * Downstream engine/QC still reconstruct the legacy preimage; v2 boundary
+    success is NOT QC/engine validation.
+  * D7 (authority freshness/lifetime) UNRESOLVED.
+  * CodeQL: reported separately; not converted into a zero-alert conclusion.
+    The previously recorded broad-Clippy failure and CodeQL DB-too-large skip
+    from D4/D5 are preserved as historical records.
+
+============================================================================
+PRESERVED POSTURE
+============================================================================
+
+F3/F4/F8 not fully activated; D7 unresolved; F1/F2/F5/F7 unresolved; F6 partial;
+RS1 and C4/C5 OPEN; M4/M6/S5/S7 Yellow; Public DevNet NO-GO. No live seed file
+or TestNet/MainNet readiness claim.
+
+============================================================================
+SMALLEST D7 FOLLOW-UP (NOT implemented here)
+============================================================================
+
+Bind an authority-freshness proof (accepted epoch / activation authorization)
+to the signing domain so that a commitment for a superseded snapshot is rejected
+at admission — plus a validated runtime-ChainId -> wire-chain_id mapping from
+trusted genesis, without which production construction stays unavailable.
+Do not start Run 423.
