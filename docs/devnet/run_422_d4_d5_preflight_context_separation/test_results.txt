@@ -4,7 +4,8 @@ Tested revision: this continuation's worktree tip (A/B code/test commit
 e1b95948c6ce604aa97f317e88f8c8b2e41a6b2b is ABSENT from this shallow/squashed
 checkout, so counts below were produced against the current worktree, not that
 object.
-Profile: default test profile unless noted. All targets exit 0 (pass).
+Profile: default test profile unless noted. Passing tests are listed below;
+incomplete validation is recorded separately and is not counted as passing.
 ============================================================================
 
 D5 COMBINED-CONTEXT INBOUND (valid Timeout ctx + gate + matching origin +
@@ -84,6 +85,12 @@ tip; no production code or build configuration changed in this continuation)
   cargo build --release -p qbind-node --bin qbind-node .... exit 0 (prior)
 
 ATTEMPTED BUT INCOMPLETE / NOT RUN TO COMPLETION
+  cargo clippy -p qbind-node --lib --tests: FAILED/INCOMPLETE.
+  The agent final report records a compile error in the pre-existing
+  m16_epoch_transition_hardening_tests target, which requires test-utils.
+  Nonzero exit reported; exact numeric exit code NOT RECORDED. No pass
+  claimed, and no Clippy rerun performed by this documentation correction.
+
   CodeQL security scan for these changes — status ATTEMPTED-SKIPPED (database
   too large): the environment's scan tool reported "Analysis was skipped
   because the database size is too large". The accompanying "0 alerts" is a

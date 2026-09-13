@@ -210,8 +210,13 @@ continuation's worktree (default test profile, default features):
   `run_422_genesis_consensus_authority_tests` — 15 passed (unchanged);
   `b9_late_peer_connect_proposal_reemit_tests` — 6 passed.
 
-Clippy (`cargo clippy -p qbind-node --lib --tests`) introduced no new warnings
-from the changed regions. rustfmt was applied to the changed test file only; no
+Clippy (`cargo clippy -p qbind-node --lib --tests`) **failed / remained incomplete**:
+the agent final report records a compile error in the pre-existing
+`m16_epoch_transition_hardening_tests` target, which requires
+`--features test-utils`. A nonzero exit was reported; the exact numeric
+exit code is not recorded in the available evidence. No successful Clippy
+pass is claimed, and this documentation correction does not rerun Clippy.
+rustfmt was applied to the changed test file only; no
 mass-formatting. Because these are **tests-only + documentation** corrections,
 the previously-recorded production check (`cargo check -p qbind-node`) and
 release build (`cargo build --release -p qbind-node --bin qbind-node`) are

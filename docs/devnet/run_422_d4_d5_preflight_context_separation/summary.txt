@@ -160,10 +160,12 @@ and is not asserted as one. The parallel code-review invocation returned a
 model-registry error (model claude-sonnet-4.6 not found in registry), so it is
 NOT described as an unqualified successful review, and a code review is not a
 substitute for security analysis in any case. This gap is reported here
-separately from the positive scoped behavioral result. Standard per-target
-clippy was run: the changed code introduced no new warnings (see commands.txt);
-the pre-existing m16_epoch_transition_hardening_tests target requires
---features test-utils to compile and is unrelated to this change.
+separately from the positive scoped behavioral result. The broad Clippy command
+(cargo clippy -p qbind-node --lib --tests) is FAILED/INCOMPLETE: the agent
+final report records a compile error in the pre-existing
+m16_epoch_transition_hardening_tests target, which requires test-utils.
+Nonzero exit reported; exact numeric exit code NOT RECORDED. This is not a
+successful Clippy pass and was not rerun by this documentation correction.
 
 ----------------------------------------------------------------------------
 PRESERVED LIMITATIONS / READINESS (UNCHANGED)

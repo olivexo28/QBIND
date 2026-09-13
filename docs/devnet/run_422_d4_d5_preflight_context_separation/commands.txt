@@ -3,7 +3,7 @@ Tested revision: this continuation's worktree tip (A/B commit 43dedea…; docs
 commits follow). The task-named prior revision e1b95948… is ABSENT from this
 shallow/squashed checkout; re-run targets executed against the current worktree.
 Toolchain: repository-pinned stable Rust (cargo/rustc as vendored in CI image).
-Profiles/features are noted per command. Exit codes: 0 unless stated.
+Profiles/features are noted per command. Only explicit exit codes are asserted.
 ============================================================================
 
 PRODUCTION CHECK AND RELEASE BUILD (PRESERVED — original tested SHA)
@@ -58,8 +58,12 @@ FOCUSED TEST TARGETS (default test profile, default features) — this tip
 LINT / FORMAT (changed code only; no mass-format)
 ----------------------------------------------------------------------------
   cargo clippy -p qbind-node --lib --tests
-      No NEW warnings introduced by the changed regions. (Pre-existing lib
-      warnings, e.g. dead_code cert_bound_node_id, remain; unrelated.)
+      status: FAILED/INCOMPLETE (reported compile error; nonzero exit)
+      exact numeric exit code: NOT RECORDED in the available evidence.
+      blocker: m16_epoch_transition_hardening_tests requires test-utils;
+      the broad invocation did not complete successfully.
+      source: agent final report; not rerun by this documentation correction.
+      No successful Clippy pass is claimed.
   rustfmt applied to the changed test file only
   (crates/qbind-node/tests/run_422_d4_startup_ordering_tests.rs).
       binary_consensus_loop.rs is pervasively non-rustfmt-clean at baseline;
