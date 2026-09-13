@@ -1,0 +1,108 @@
+RUN 422 D7 — VALIDATION COMMANDS AND RESULTS
+============================================================================
+Environment: continuation runner (fresh clone). Task branch
+`copilot/run-422-proposal-vote-authority-freshness-lifetime`. Accepted
+baseline b94dcf8102961802c55f25e33b4b515d03e8a091 (working tree clean at
+start; no uncommitted prior work survived to preserve).
+Disk at start: 145G volume, ~85G free, 6% inode use. All builds run
+sequentially (single target dir; no simultaneous debug/release compiles);
+disk re-measured between stages (never below ~75G free).
+
+All commands run from the repository root. Exit codes captured directly
+(not the exit code of a trailing tee/grep).
+
+----------------------------------------------------------------------------
+1. ENVIRONMENT INSPECTION
+----------------------------------------------------------------------------
+$ git branch --show-current
+  copilot/run-422-proposal-vote-authority-freshness-lifetime
+$ git rev-parse HEAD           -> b94dcf8... (baseline) at start
+$ git status                   -> clean
+$ df -h .   -> /dev/root 145G, ~85G free   (re-checked between stages)
+$ df -i .   -> ~6% inodes used
+
+----------------------------------------------------------------------------
+2. BUILD / CHECK (affected crate; sequential)
+----------------------------------------------------------------------------
+$ cargo check -p qbind-node --lib
+  -> Finished dev [unoptimized + debuginfo] in 5m29s ; exit 0 ; no warnings
+$ cargo build -p qbind-node --lib
+  -> Finished ; exit 0 ; no warnings attributable to the changed file
+
+----------------------------------------------------------------------------
+3. FOCUSED D7 TESTS (real ML-DSA-44 backend)
+----------------------------------------------------------------------------
+$ cargo test -p qbind-node --test run_422_d7_authority_lifetime_tests
+  -> test result: ok. 12 passed; 0 failed; 0 ignored ; exit 0
+
+----------------------------------------------------------------------------
+4. AFFECTED REGRESSIONS (existing Run 422 + D6 + module + full lib)
+----------------------------------------------------------------------------
+$ cargo test -p qbind-node --lib genesis_consensus_authority
+  -> 14 passed; 0 failed ; exit 0
+$ cargo test -p qbind-node --test run_422_genesis_consensus_authority_tests
+  -> 15 passed; 0 failed ; exit 0
+$ cargo test -p qbind-node --test run_422_startup_refusal_tests
+  -> 4 passed; 0 failed ; exit 0
+$ cargo test -p qbind-node --test run_422_d4_startup_ordering_tests
+  -> 5 passed; 0 failed ; exit 0
+$ cargo test -p qbind-node --lib run422_d6
+  -> 10 passed; 0 failed ; exit 0
+$ cargo test -p qbind-node --lib
+  -> test result: ok. 1478 passed; 0 failed; 0 ignored ; exit 0 ; 76.39s
+
+----------------------------------------------------------------------------
+5. FORMAT / LINT
+----------------------------------------------------------------------------
+$ rustfmt --edition 2021 --check \
+    crates/qbind-node/tests/run_422_d7_authority_lifetime_tests.rs
+  -> clean (new artifact is LF, rustfmt-clean) ; exit 0
+  NOTE: crates/qbind-node/src/genesis_consensus_authority.rs uses CRLF line
+  endings (pre-existing repo convention). Edits were narrow/additive and did
+  NOT convert line endings. Running `rustfmt` over the whole file would
+  rewrite every line (CRLF->LF) — that is pre-existing repo-wide drift and
+  is intentionally NOT applied here (task section 13: preserve existing
+  line-ending conventions; do not change historical bytes).
+$ cargo clippy -p qbind-node --lib
+  -> exit 0. Zero findings attributable to genesis_consensus_authority.rs.
+     Other qbind-node warnings are pre-existing and unrelated to D7.
+
+----------------------------------------------------------------------------
+6. AFFECTED RELEASE BUILD + BINARY IDENTITY + REFUSAL SMOKE
+----------------------------------------------------------------------------
+$ cargo build -p qbind-node --release
+  -> Finished release [optimized] in 6m47s ; exit 0
+$ target/release/qbind-node --version              -> qbind-node 0.1.0
+$ sha256sum target/release/qbind-node
+  -> 97fefd2ec072d8493c0bacb936ba299b003cefdc6808526bd023386afce43fcc
+     (binary identity of THIS build; the binary is generated and is NOT
+      committed to the archive)
+$ target/release/qbind-node --consensus-authority-from-genesis ; echo $?
+  -> stderr: "[binary] FATAL: --consensus-authority-from-genesis is refused:
+     genesis-authority activation is disabled pending D4-D7. ... no override,
+     hidden flag, environment bypass, or unsigned fallback."
+  -> binary exit code = 1   (fail-closed; refusal preserved verbatim)
+
+----------------------------------------------------------------------------
+7. SECRET / PRIVATE-MATERIAL SCAN
+----------------------------------------------------------------------------
+$ (runtime secret_scanning tool) on the changed source + test files
+  -> No secrets detected. Test key material is generated fresh from the
+     ML-DSA-44 backend in the OS temp dir and never embedded/committed.
+
+----------------------------------------------------------------------------
+8. PRODUCTION CLI DENYLIST (unchanged; re-confirmed)
+----------------------------------------------------------------------------
+No arbitrary-signing, forged-message, fixture-authority, authority-override,
+or verification-disable control is added. `--consensus-authority-from-genesis`
+remains refused (exit 1). LocalFixtureUnsigned stays test-only and is not
+referenced by the genesis-authority module (asserted by
+fixture_bypass_unreachable_through_production_constructors_and_parser).
+
+----------------------------------------------------------------------------
+9. CODEQL / SECURITY ANALYSIS
+----------------------------------------------------------------------------
+Run via the environment's parallel validation tool (Code Review + CodeQL)
+after the code was committed. Status recorded in the D7 evidence doc /
+final report. A database-too-large, timeout, or unexecuted analysis is NOT
+converted into a zero-alert conclusion.

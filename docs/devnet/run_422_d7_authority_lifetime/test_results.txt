@@ -1,0 +1,67 @@
+RUN 422 D7 — TEST RESULTS
+============================================================================
+Real ML-DSA-44 backend where crypto material is involved. Counts are actual
+runs in the continuation environment (exit 0 unless noted).
+
+============================================================================
+NEW: crates/qbind-node/tests/run_422_d7_authority_lifetime_tests.rs
+  cargo test -p qbind-node --test run_422_d7_authority_lifetime_tests
+  -> 12 passed; 0 failed; 0 ignored
+============================================================================
+  founding_configuration_authorizes
+  changed_chain_id_rejected
+  changed_membership_count_rejected
+  changed_validator_set_commitment_rejected
+  divergence_reporting_is_coarse_to_fine
+  epoch_advance_has_no_authorized_transition
+  restart_restore_mismatched_genesis_identity_fails_closed
+  restore_same_network_tampered_membership_fails_closed
+  snapshot_immutable_when_source_file_changes_after_validation
+  parallel_verification_does_not_mix_keys_suites_membership_or_results
+  malformed_or_extreme_observed_input_cannot_panic
+  fixture_bypass_unreachable_through_production_constructors_and_parser
+
+============================================================================
+REGRESSIONS (unchanged expectations; green after the D7 additions)
+============================================================================
+cargo test -p qbind-node --lib genesis_consensus_authority
+  -> 14 passed; 0 failed   (authority commitment / parsing / adversarial
+     rejection unit tests, including commitment_changes_with_* and
+     bundle_and_transport_roots_are_never_consensus_keys)
+
+cargo test -p qbind-node --test run_422_genesis_consensus_authority_tests
+  -> 15 passed; 0 failed   (shared_activation_* provenance / replaced-input /
+     membership-count / expected-hash; main_rs_* wiring + refusal guards)
+
+cargo test -p qbind-node --test run_422_startup_refusal_tests
+  -> 4 passed; 0 failed    (valid genesis + signer + flag refused before P2P
+     service start; LocalMesh cannot bypass; flag-absent preserved; --help
+     preserved)
+
+cargo test -p qbind-node --test run_422_d4_startup_ordering_tests
+  -> 5 passed; 0 failed    (require-or-fail preflight ordering before P2P)
+
+cargo test -p qbind-node --lib run422_d6
+  -> 10 passed; 0 failed   (D6 signing-domain handler tests incl.
+     active-restore foreign-domain rejection and v2 cached re-emit)
+
+cargo test -p qbind-node --lib
+  -> 1478 passed; 0 failed; 0 ignored   (full qbind-node library suite)
+
+============================================================================
+BUILD / TOOLING
+============================================================================
+cargo check -p qbind-node --lib     -> exit 0 (5m29s), no warnings
+cargo build -p qbind-node --release -> exit 0 (6m47s)
+release binary refusal smoke        -> exit code 1 (fail-closed)
+rustfmt --check (new LF test file)  -> clean
+clippy (qbind-node --lib)           -> zero findings from the changed file
+
+============================================================================
+NOTES
+============================================================================
+* Two initial D7-test assertions were over-strict (a struct-literal count
+  and a coarse-vs-fine error-variant expectation) and were corrected in the
+  TEST only; no production logic changed to make a test pass.
+* No harness expectation was edited to hide a regression. The genesis-
+  authority route remains refused in the release binary.

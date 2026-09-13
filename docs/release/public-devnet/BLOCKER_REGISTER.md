@@ -119,8 +119,12 @@ verification is mutually rejected. Activation stays DISABLED: production
 `proposal_vote_authority` remains `None`, no CLI/env/override was added, and the
 runtime-ChainId→wire-chain_id mapping is UNRESOLVED (the explicit
 `expected_wire_chain_id` is supplied only from trusted fixtures/config).
-Still UNRESOLVED (activation kept fail-closed): **D7**
-genesis-static/epoch-restore authority lifetime, and downstream engine/QC still
+**D7** genesis-static/epoch-restore authority lifetime is now closed on the CODE +
+TEST axis (`RESULT=POSITIVE-FOR-GENESIS-STATIC-AUTHORITY-LIFETIME-CODE-TEST`; an
+additive fail-closed `authorize_configuration` guard authorizing only the founding
+epoch-0 configuration, 12 real-ML-DSA-44 section-12.E tests; activation stays
+DISABLED and the release binary still refuses `--consensus-authority-from-genesis`
+with exit 1). Downstream engine/QC still
 reconstruct the legacy preimage (v2 boundary success is not QC/engine
 validation); configured-authority release-binary adversarial evidence remains
 **NOT captured**
@@ -156,4 +160,5 @@ MainNet readiness is claimed.**
 - `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422.md` — Run 422 genesis-bound consensus authority activation (code/test) for findings F3/F4/F8.
 - `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D4_D5.md` — Run 422 D4/D5 successor: pre-P2P/consensus preflight (D4) and message-family authority separation (D5) code/test-positive; D6/D7 unresolved.
 - `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D6.md` — Run 422 D6 successor: versioned Proposal/Vote signing-domain isolation (v2) code/test-positive; activation DISABLED; D7 unresolved.
+- `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md` — Run 422 D7 successor: genesis-static / epoch-restore authority-lifetime guard code/test-positive; activation DISABLED; RS1/C4/C5 stay OPEN.
 - `docs/whitepaper/contradiction.md` — contradiction ledger.
