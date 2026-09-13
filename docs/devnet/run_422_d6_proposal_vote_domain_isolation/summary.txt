@@ -28,25 +28,40 @@ Implementation:
     (validated, immutable), format/family enums, typed error, preimage builders.
   * crates/qbind-wire/src/consensus.rs — canonical_body() for Vote/BlockProposal;
     v1 signing_preimage_with_chain_id refactored to reuse it (bytes identical).
-  * crates/qbind-consensus/src/proposal_vote_verify.rs — fail-closed
-    verify_proposal_msg_with_preimage / verify_vote_msg_with_preimage.
-  * crates/qbind-node/src/binary_consensus_loop.rs — optional signing_domain on
-    ProposalVoteAuthority; wire-chain mismatch counters; inbound/outbound
-    integration; in-module run422_d6 handler tests. Production stays None.
+  * crates/qbind-consensus/src/proposal_vote_verify.rs — fail-closed public
+    message-bound entrypoints verify_proposal_msg_with_domain /
+    verify_vote_msg_with_domain (they recompute the canonical preimage from the
+    actual message + trusted domain). The raw-preimage helpers
+    verify_proposal_msg_with_preimage / verify_vote_msg_with_preimage are
+    PRIVATE and are not a caller entrypoint.
+  * crates/qbind-node/src/binary_consensus_loop.rs — MANDATORY signing_domain on
+    ProposalVoteAuthority (a plain ProposalVoteSigningDomainV2, not Option; there
+    is no missing-domain -> legacy-v1 selection); typed inbound WireChainMismatch
+    before crypto and outbound wire-chain refusal before signing; F6 before
+    domain/crypto; in-module run422_d6 handler tests. Production stays None.
 
 ============================================================================
 EVIDENCE
 ============================================================================
 
-Crypto matrix (real ML-DSA-44): 19/19 pass — see replay_matrix.txt.
-Node handler tests (real F6 gate + Required policy): 6/6 pass.
-Regressions green: qbind-wire + qbind-consensus suites, qbind-node --lib (1474),
-run_420 (3), run_422 genesis (15) / startup-refusal (4) / D4 ordering (5),
-run_418 sender-binding (18) / newview (3). See test_results.txt.
-cargo check default features (qbind-wire/consensus/node): exit 0.
-cargo build --release -p qbind-node --bin qbind-node: see commands.txt.
-Focused clippy on changed targets: see commands.txt.
-New files rustfmt-clean (LF); CRLF files preserved as CRLF.
+Crypto matrix (real ML-DSA-44): 34/34 pass — see replay_matrix.txt and
+test_results.txt. Includes the Vote no-backend UnsupportedSuite counterpart
+(case_i_unsupported_suite_no_backend_rejected_vote), distinct from the
+registered-but-faulting BackendError case.
+Node handler tests (real F6 gate + Required policy): 10/10 pass. Includes the
+independent outbound Vote wire-chain refusal test through forward_actions_to_facade
+(run422_d6_outbound_vote_wire_chain_refusal_through_forward_actions).
+Regressions green: qbind-wire lib (9, all pv_signing_domain) + qbind-consensus
+lib (182) + integration/doctests, qbind-node --lib (1478), run_420 (3). Run_422
+genesis (15) / startup-refusal (4) / D4 ordering (5) and run_418 sender-binding
+(18) / newview (3) preserved from the corrective revision (sources unchanged).
+See test_results.txt.
+cargo check default features and cargo build --release: PRESERVED historical
+evidence (exit 0), production/build sources unchanged this pass — see commands.txt.
+Focused clippy on changed targets: newly executed, exit 0 — see commands.txt.
+Added test blocks rustfmt-clean; the crypto test file is CRLF (LF->CRLF
+normalized by the corrective continuation, not unchanged from the original LF D6
+file); CRLF source files preserved as CRLF.
 
 ============================================================================
 BOUNDARIES / BLOCKERS (NOT overclaimed)
@@ -81,4 +96,4 @@ Bind an authority-freshness proof (accepted epoch / activation authorization)
 to the signing domain so that a commitment for a superseded snapshot is rejected
 at admission — plus a validated runtime-ChainId -> wire-chain_id mapping from
 trusted genesis, without which production construction stays unavailable.
-Do not start Run 423.
+Do not start Run 423.

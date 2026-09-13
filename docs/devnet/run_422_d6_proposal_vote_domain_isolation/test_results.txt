@@ -7,7 +7,14 @@ All commands exit 0. Counts recorded as observed.
 NEW D6 CRYPTO MATRIX (real ML-DSA-44 backend)
 ----------------------------------------------------------------------------
 Target: crates/qbind-consensus/tests/run_422_d6_pv_domain_isolation_tests.rs
-Result: 19 passed; 0 failed; 0 ignored
+Result: 34 passed; 0 failed; 0 ignored     (newly executed at the final SHA)
+
+Note on counts: the earlier D6 capture recorded 19 tests. The corrective
+continuation grew this target to 33, and this completion pass adds one more
+(`case_i_unsupported_suite_no_backend_rejected_vote`, Vote gap B) for 34. The
+public message-bound entrypoints exercised are
+`verify_proposal_msg_with_domain` / `verify_vote_msg_with_domain`; the
+raw-preimage helpers are private and are NOT test entrypoints.
 
   control_same_domain_proposal_and_vote_verify
   case_a_different_full_runtime_chain_id_same_legacy_unk_scope
@@ -22,41 +29,90 @@ Result: 19 passed; 0 failed; 0 ignored
   case_i_wrong_signer_key_rejected
   case_i_unknown_validator_rejected
   case_i_wrong_suite_rejected
-  case_i_unsupported_suite_no_backend_rejected
+  case_i_unsupported_suite_no_backend_rejected           (Proposal, UnsupportedSuite)
+  case_i_unsupported_suite_no_backend_rejected_vote      (NEW — Vote gap B, UnsupportedSuite)
   case_j_invalid_domain_metadata_fails_construction
   case_k_expected_wire_chain_id_is_bound
   golden_vote_preimage_bytes
   golden_proposal_preimage_prefix_bytes
   real_backend_rejects_random_signature
+  cb_family_byte_isolation_proposal_signed_as_vote_rejected
+  cb_family_byte_isolation_vote_signed_as_proposal_rejected
+  stale_preimage_cannot_substitute_through_message_verifier
+  ca_vote_legacy_v1_signature_rejected_by_v2_verifier
+  ca_vote_v2_signature_rejected_by_legacy_v1_verifier
+  ca_vote_payload_and_signature_tampering_rejected
+  cc_backend_error_distinct_from_unsupported_suite       (registered-but-faulting => BackendError)
+  cd_golden_proposal_full_independent_vector_with_qc_and_txs
+  ca_vote_different_genesis_identity_rejected
+  ca_proposal_different_authority_commitment_rejected
+  ca_vote_missing_signature_rejected
+  ca_vote_wrong_signer_key_rejected
+  ca_vote_unknown_validator_rejected
+  ca_vote_wrong_suite_rejected
+
+UnsupportedSuite vs BackendError: `case_i_unsupported_suite_no_backend_rejected`
+(Proposal) and `case_i_unsupported_suite_no_backend_rejected_vote` (Vote) prove
+that a MISSING backend for the governed suite yields `UnsupportedSuite` through
+`verify_proposal_msg_with_domain` / `verify_vote_msg_with_domain`. This is
+DISTINCT from `cc_backend_error_distinct_from_unsupported_suite`, where a backend
+IS registered but faults and must map to `BackendError` (both Proposal and Vote).
+`UnsupportedSuite` is therefore NOT evidence of a backend fault.
 
 ----------------------------------------------------------------------------
 NEW D6 NODE HANDLER TESTS (in-module run422_d6, real F6 gate + Required policy)
 ----------------------------------------------------------------------------
 Selector: cargo test -p qbind-node --lib run422_d6
-Result: 6 passed; 0 failed; 1468 filtered out
+Result: 10 passed; 0 failed; 1468 filtered out     (newly executed at the final SHA)
 
   run422_d6_correct_domain_proposal_accepted_foreign_rejected
   run422_d6_correct_domain_vote_accepted_foreign_rejected
-  run422_d6_cross_format_rejection_both_directions
   run422_d6_wire_chain_mismatch_rejected_before_crypto
   run422_d6_f6_mismatch_precedes_domain_and_missing_authority_rejects
   run422_d6_outbound_signs_under_selected_domain_only
+  run422_d6_cross_format_rejection_both_directions
+  run422_d6_active_restore_foreign_domain_proposal_rejected_no_effects
+  run422_d6_late_peer_reemit_signs_under_selected_v2_domain
+  run422_d6_late_peer_reemit_refused_on_inconsistent_wire
+  run422_d6_outbound_vote_wire_chain_refusal_through_forward_actions   (NEW — Vote gap A)
+
+Vote gap A (`run422_d6_outbound_vote_wire_chain_refusal_through_forward_actions`)
+drives ONLY Vote actions (`BroadcastVote` + `SendVoteTo`) through the real
+`forward_actions_to_facade` engine->facade boundary with Required policy, a valid
+local signer bound to the mandatory v2 domain, a recording facade, and a signer
+that DIRECTLY records invocation counts:
+  * inconsistent-wire Vote: `outbound_vote_wire_chain_mismatch == 2`,
+    `outbound_vote_signing_success == 0`, signer sign_vote calls == 0 (observed
+    directly, not inferred), no broadcast_vote / send_vote_to reached the facade,
+    no unsigned / legacy-domain / authority-unavailable / Timeout-signer fallback.
+  * correct-wire control: both votes signed and reach broadcast_vote /
+    send_vote_to exactly once each (signer sign_vote calls == 2); each emitted
+    vote verifies under the selected v2 domain and is rejected under a foreign v2
+    domain and the legacy v1 boundary.
+The pre-existing `run422_d6_late_peer_reemit_refused_on_inconsistent_wire`
+refuses the Proposal FIRST (its `outbound_vote_wire_chain_mismatch` stays 0), so
+it does NOT exercise Vote refusal; gap A is the independent Vote coverage.
 
 ----------------------------------------------------------------------------
 WIRE UNIT TESTS (v2 domain module)
 ----------------------------------------------------------------------------
-crates/qbind-wire/src/pv_signing_domain.rs unit tests: pass (in qbind-wire lib
-182 passed; 0 failed).
+crates/qbind-wire/src/pv_signing_domain.rs unit tests: 9 passed; 0 failed.
+These 9 are the entire qbind-wire lib unit-test set
+(`cargo test -p qbind-wire --lib` => 9 passed) and all live in the
+pv_signing_domain module. (The "182" figure is the qbind-consensus lib set,
+below — earlier captures mis-attributed it to qbind-wire.)
 
 ----------------------------------------------------------------------------
 REGRESSION SUITES
 ----------------------------------------------------------------------------
 cargo test -p qbind-wire -p qbind-consensus
-  qbind-wire lib: 182 passed; 0 failed
-  qbind-consensus lib + integration + doctests: all pass; 0 failed
+  qbind-wire lib: 9 passed; 0 failed
+  qbind-consensus lib: 182 passed; 0 failed
+  qbind-consensus integration + doctests: all pass; 0 failed
 
 cargo test -p qbind-node --lib
-  1474 passed; 0 failed; 0 ignored
+  1478 passed; 0 failed; 0 ignored     (was 1474; +4 corrective/completion,
+                                        includes the new Vote gap A handler test)
 
 run_420_production_policy_reachability_tests   : 3 passed; 0 failed
 run_422_genesis_consensus_authority_tests      : 15 passed; 0 failed
@@ -69,15 +125,36 @@ run_418_newview_demux_chain_integration_tests  : 3 passed; 0 failed
 BUILD / CHECK / CLIPPY / FMT
 ----------------------------------------------------------------------------
 cargo check -p qbind-wire -p qbind-consensus -p qbind-node (default features)
-  Finished dev profile in 5m 35s                              exit 0
+  Finished dev profile                                        exit 0
+  PRESERVED HISTORICAL EVIDENCE (originally captured on the corrective revision;
+  production/build sources under crates/*/src are unchanged in this completion
+  pass, which only adds tests + docs). Not relabeled as executed at the final
+  documentation SHA. Rerun if production/build sources change.
 cargo build --release -p qbind-node --bin qbind-node
-  Finished release profile in 7m 31s                          exit 0
-cargo clippy -p qbind-wire -p qbind-consensus --tests
-  Finished; exit 0; no warnings in D6 files
+  Finished release profile                                    exit 0
+  PRESERVED HISTORICAL EVIDENCE (same basis as cargo check above).
+cargo clippy -p qbind-consensus --tests
+  Finished; exit 0; NEWLY EXECUTED at the final SHA. No warnings in the D6
+  crypto test file (verified by filtering clippy output for run_422_d6 —
+  no matches).
 cargo clippy -p qbind-node --lib
-  Finished in 36.15s; exit 0; no D6-attributable warnings
-rustfmt --check (new LF files)                                clean
-CRLF files preserved as CRLF (proposal_vote_verify.rs, binary_consensus_loop.rs)
+  Finished; exit 0; NEWLY EXECUTED at the final SHA. 87 pre-existing crate-wide
+  warnings; NONE attributable to the D6 additions in binary_consensus_loop.rs
+  (verified by filtering for run422_d6_outbound_vote / RecordingSigner /
+  VoteRecordingFacade / build_authority — no matches).
+rustfmt --check (changed targets)                             NEWLY EXECUTED
+  The added test blocks are rustfmt-clean. Pre-existing rustfmt drift in
+  untouched regions of the D6 files (e.g. FaultInjectionBackend at lines
+  867/876 of the crypto test) is preserved unchanged; this pass does not
+  mass-reformat unrelated code.
+Line endings:
+  crates/qbind-consensus/tests/run_422_d6_pv_domain_isolation_tests.rs is CRLF.
+  It was NORMALIZED LF->CRLF by the corrective continuation and is NOT identical
+  in line-ending convention to the original LF D6 test file; the new Vote gap B
+  test was appended in CRLF to preserve that convention.
+  crates/qbind-consensus/src/proposal_vote_verify.rs (959/959 lines CRLF) and
+  crates/qbind-node/src/binary_consensus_loop.rs (all lines CRLF; the new Vote
+  gap A test appended in CRLF) preserved as CRLF.
 
 ----------------------------------------------------------------------------
 SECRET / PRIVACY SCAN
@@ -87,7 +164,17 @@ Changed source + docs scanned: No secrets detected.
 ----------------------------------------------------------------------------
 STATIC / SECURITY ANALYSIS
 ----------------------------------------------------------------------------
-parallel_validation (Code Review + CodeQL): see the final report. CodeQL
-DB-too-large skips or review-tool errors are NOT recorded as zero-alert /
-successful-review conclusions. Historical D4/D5 broad-Clippy FAILED/INCOMPLETE
-(exact exit code not captured then) and CodeQL DB-too-large skip preserved.
+parallel_validation (Code Review + CodeQL) — actual result at the final SHA:
+  * Code Review: COMPLETED. Reviewed 9 changed files; no review comments /
+    findings. (A secondary review helper reported a model-registry error for
+    an unrelated model id; the primary code review itself completed with no
+    findings — the error is not treated as a successful-review substitute, and
+    the completed no-findings result is reported on its own merits.)
+  * CodeQL Security Scan: SKIPPED as trivial — all code changes are test-only
+    additions (two new #[test] functions inside existing test modules); the
+    remaining changes are documentation/evidence text and a regenerated
+    checksum file. A trivial-skip is NOT a zero-alert conclusion; it records
+    that CodeQL analysis was not executed for this test-only/docs change.
+Analysis completion is kept separate from the scoped code/test verdict. The
+historical D4/D5 broad-Clippy FAILED/INCOMPLETE record (exact numeric exit code
+not captured then) and CodeQL DB-too-large skip are preserved unchanged.

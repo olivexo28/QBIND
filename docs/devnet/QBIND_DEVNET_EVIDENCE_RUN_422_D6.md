@@ -18,15 +18,30 @@ external-network, or standalone release-binary adversarial evidence. Security
 (CodeQL) analysis status is reported separately and is not converted into a
 zero-alert conclusion.
 
-## Branch / ancestry
+## Branch / ancestry (rechecked at the completion pass)
 
-* Branch: `copilot/run-422-d6-versioned-proposal-vote-signing-domain`
-* Accepted baseline: `5b7ea51a9b123e1952bd966b5e414531cd2ad898`
-* The baseline object is available locally; `git merge-base HEAD <baseline>`
-  returns the baseline, i.e. the baseline is a direct ancestor of this work
-  (no invented ancestry, no squash reliance).
-* Clone is shallow/single-branch; full history before the baseline is not
-  present, which does not affect the baseline-relative comparison above.
+Environment-supplied task branch and objects, verified with `git` in this
+clone:
+
+* Task branch (actual, environment-supplied):
+  `copilot/copilotrun-422-d6-corrective-continuation`.
+* Starting/tip SHA in this clone: `2a18b47bb12843597ca1bd783bdf92e07f48cb7e`,
+  whose parent is the corrective comparison base
+  `b585768de8ea79f22f16a6f3c028bfee3f9c6ed7` (present locally).
+* The reviewed tip `010788bcd00bb3725cebc0e8fe26f3502a2c00d4` and the historical
+  accepted baseline `5b7ea51a9b123e1952bd966b5e414531cd2ad898` are **NOT
+  present** in this shallow/single-branch clone (`git cat-file -t` → missing).
+  Their exact relationship therefore cannot be reproven here; matching diff
+  statistics alone would not prove identical source or ancestry.
+* Reported review-time relationship (from the prompt, not independently
+  reproducible here): task branch three commits ahead of `b585768`; current
+  GitHub main `2a18b47…`; main…task = 1 left / 3 right. In this squashed clone
+  the local tip is a single commit ahead of `b585768`.
+* No fast-forward importability from the historical baseline alone is claimed.
+  Integration with `main` is left for a separate reviewed step. This completion
+  pass adds only tests + documentation and does not modify `main`, rebase,
+  amend, or open a PR.
+* Clone is shallow/single-branch; full history before `b585768` is not present.
 
 ## Prerequisites confirmed on the starting tree
 
@@ -49,13 +64,27 @@ specification. Summary:
 * `crates/qbind-wire/src/consensus.rs`: added `Vote::canonical_body()` and
   `BlockProposal::canonical_body()`; refactored the v1
   `signing_preimage_with_chain_id` to reuse them (v1 bytes byte-identical).
-* `crates/qbind-consensus/src/proposal_vote_verify.rs`: fail-closed
-  `verify_proposal_msg_with_preimage` / `verify_vote_msg_with_preimage`;
-  the v1 functions delegate to the same core.
-* `crates/qbind-node/src/binary_consensus_loop.rs`: optional
-  `signing_domain` on `ProposalVoteAuthority`, wire-chain mismatch counters,
-  inbound/outbound integration, and in-module `run422_d6` handler tests.
-  Production stays `None`.
+* `crates/qbind-consensus/src/proposal_vote_verify.rs`: fail-closed **public,
+  message-bound** entrypoints `verify_proposal_msg_with_domain` /
+  `verify_vote_msg_with_domain` (they recompute the canonical preimage from the
+  actual message + trusted domain and enforce wire-chain consistency before
+  crypto). The raw-preimage helpers `verify_*_with_preimage` are **private**
+  (not a caller entrypoint); the v1 functions delegate to the same core.
+* `crates/qbind-node/src/binary_consensus_loop.rs`: **mandatory**
+  `signing_domain: ProposalVoteSigningDomainV2` on `ProposalVoteAuthority` (not
+  `Option`; there is no missing-domain → legacy-v1 selection), typed inbound
+  `WireChainMismatch` before crypto, outbound wire-chain refusal before signing,
+  and in-module `run422_d6` handler tests. Production stays `None`.
+
+> **Reconciliation note (completion pass).** Earlier D6 records described an
+> `Option<ProposalVoteSigningDomainV2>` field and public
+> `verify_*_with_preimage` entrypoints. Those implementation descriptions are
+> **superseded**: the domain is mandatory and the public entrypoints are the
+> message-bound `verify_*_with_domain` (raw-preimage helpers are private). The
+> diff-stat block below is the **original corrective** diff vs the historical
+> baseline and is retained as a historical record; this completion pass adds
+> only the two Vote coverage tests (gap A in `binary_consensus_loop.rs`, gap B
+> in the crypto test) plus this documentation reconciliation.
 
 Diff vs baseline (7 files):
 
@@ -72,22 +101,41 @@ Diff vs baseline (7 files):
 ## Test evidence
 
 * `qbind-consensus` replay-isolation matrix
-  (`run_422_d6_pv_domain_isolation_tests`, 19 tests, real ML-DSA-44 backend):
-  same-key controls plus cross-chain (A, incl. two custom ids both mapping to
-  legacy `UNK`), different genesis (B), different authority commitment (C),
-  v1→v2 (D) and v2→v1 (E) cross-format rejection, wrong family (F), unsupported
-  version with no fallback (G), tamper (H), the existing missing-sig / wrong
-  key / unknown validator / wrong suite / unsupported suite taxonomy (I),
-  invalid domain metadata fails construction (J), expected-wire-chain binding
-  (K), plus deterministic golden vectors and a real-backend smoke check.
-* `qbind-node` in-module `run422_d6` handler tests: correct-domain accept /
-  foreign-domain reject for Proposal and Vote via the real handler + real F6
-  gate + Required policy; wire `chain_id` mismatch rejected before crypto; F6
-  mismatch precedes domain/crypto; missing PV authority rejects even with a
-  valid Timeout context; outbound signs only under the selected domain.
-* Regressions green: `qbind-wire` + `qbind-consensus` full suites,
-  `qbind-node --lib` (1474), run_420 policy/reachability, run_422
-  genesis/startup-refusal/D4, run_418 sender-binding/NewView.
+  (`run_422_d6_pv_domain_isolation_tests`, **34** tests, real ML-DSA-44
+  backend): same-key controls plus cross-chain (A), different genesis (B),
+  different authority commitment (C), v1→v2 (D) and v2→v1 (E) cross-format
+  rejection, wrong family (F), unsupported version with no fallback (G), tamper
+  (H), the missing-sig / wrong key / unknown validator / wrong suite /
+  unsupported-suite taxonomy (I), invalid domain metadata fails construction
+  (J), expected-wire-chain binding (K), the Vote replay family (`ca_vote_*`),
+  family-byte isolation (`cb_*`), the stale-preimage substitution guard, the
+  full independent Proposal vector, deterministic golden vectors, and a
+  real-backend smoke check.
+* **UnsupportedSuite vs BackendError** (gap B): a **missing** backend for the
+  governed suite yields `UnsupportedSuite` through the public
+  `verify_proposal_msg_with_domain` / `verify_vote_msg_with_domain`
+  (`case_i_unsupported_suite_no_backend_rejected` for Proposal and
+  `case_i_unsupported_suite_no_backend_rejected_vote` for Vote). This is
+  **distinct** from a registered-but-faulting backend, which maps to
+  `BackendError` (`cc_backend_error_distinct_from_unsupported_suite`, both
+  families). `UnsupportedSuite` is not evidence of a backend fault.
+* `qbind-node` in-module `run422_d6` handler tests (**10**): correct-domain
+  accept / foreign-domain reject for Proposal and Vote via the real handler +
+  real F6 gate + Required policy; wire `chain_id` mismatch rejected before
+  crypto; F6 mismatch precedes domain/crypto; missing PV authority rejects even
+  with a valid Timeout context; outbound signs only under the selected domain;
+  **active-restore foreign-domain rejection with no effects** and **v2 cached
+  re-emission on late-peer connect** (so v2 cache/restore behavior is proven by
+  actual v2-authority tests — D5 coverage, which wires no PV authority, is NOT
+  sufficient proof of v2 cache/restore); and the independent **outbound Vote
+  wire-chain refusal** through `forward_actions_to_facade`
+  (`run422_d6_outbound_vote_wire_chain_refusal_through_forward_actions`, gap A),
+  which directly observes that the signer is not invoked on refusal.
+* Regressions green: `qbind-wire` lib (9, all `pv_signing_domain`) +
+  `qbind-consensus` lib (182) + integration/doctests, `qbind-node --lib`
+  (**1478**), run_420 policy/reachability (3); run_422
+  genesis/startup-refusal/D4 and run_418 sender-binding/NewView preserved from
+  the corrective revision.
 
 Exact commands and counts are in
 `run_422_d6_proposal_vote_domain_isolation/commands.txt` and
@@ -111,4 +159,4 @@ Exact commands and counts are in
 
 F3/F4/F8 not fully activated; D7 unresolved; F1/F2/F5/F7 unresolved; F6 partial;
 RS1 and C4/C5 OPEN; M4/M6/S5/S7 Yellow; Public DevNet **NO-GO**. No live seed
-file or TestNet/MainNet readiness claim.
+file or TestNet/MainNet readiness claim.

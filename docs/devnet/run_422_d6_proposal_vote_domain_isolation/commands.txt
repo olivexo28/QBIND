@@ -1,8 +1,12 @@
 RUN 422 D6 — VALIDATION COMMANDS AND RESULTS
 ============================================================================
 
-Environment: Linux sandbox; cargo/rustc workspace build. Baseline
-5b7ea51a9b123e1952bd966b5e414531cd2ad898. Commands run from repo root.
+Environment: Linux sandbox; cargo/rustc workspace build. This completion pass
+adds only tests + documentation; production/build sources under crates/*/src
+(other than the appended in-module tests) are unchanged. Commands run from repo
+root. Numeric exit codes recorded as observed. Each command is marked NEWLY
+EXECUTED (run at the final documentation SHA in this pass) or PRESERVED
+(historical evidence carried forward with unchanged production/build sources).
 
 Numeric exit codes recorded as observed. Where a command emits pre-existing
 warnings unrelated to this change, that is noted; those warnings existed at the
@@ -13,49 +17,54 @@ FOCUSED NEW DOMAIN / PREIMAGE / VERIFIER TESTS
 ----------------------------------------------------------------------------
 
 $ cargo test -p qbind-consensus --test run_422_d6_pv_domain_isolation_tests
-  => test result: ok. 19 passed; 0 failed; 0 ignored          exit 0
+  => test result: ok. 34 passed; 0 failed; 0 ignored   exit 0   [NEWLY EXECUTED]
+     (subset note: these 34 are the full crypto matrix; NOT added to the node
+     handler count below.)
 
 $ cargo test -p qbind-node --lib run422_d6
-  => test result: ok. 6 passed; 0 failed; 1468 filtered out   exit 0
+  => test result: ok. 10 passed; 0 failed; 1468 filtered out   exit 0   [NEWLY EXECUTED]
+     (subset note: these 10 are a filtered subset of the 1478 qbind-node --lib
+     tests below, NOT additive to it.)
 
 ----------------------------------------------------------------------------
 RELEVANT qbind-wire / qbind-consensus REGRESSIONS
 ----------------------------------------------------------------------------
 
 $ cargo test -p qbind-wire -p qbind-consensus
-  => qbind-wire lib: 182 passed; 0 failed
-  => qbind-consensus lib + integration targets: all pass (0 failed)
-  => doctests: pass                                            exit 0
+  => qbind-wire lib: 9 passed; 0 failed        (all in pv_signing_domain)
+  => qbind-consensus lib: 182 passed; 0 failed
+  => qbind-consensus integration targets + doctests: all pass (0 failed)
+  exit 0   [NEWLY EXECUTED]
 
 ----------------------------------------------------------------------------
 qbind-node BINARY CONSENSUS LOOP + REQUIRED INTEGRATION SUITES
 ----------------------------------------------------------------------------
 
 $ cargo test -p qbind-node --lib
-  => test result: ok. 1474 passed; 0 failed; 0 ignored        exit 0
+  => test result: ok. 1478 passed; 0 failed; 0 ignored   exit 0   [NEWLY EXECUTED]
+     (includes the run422_d6 handler subset above.)
 
 $ cargo test -p qbind-node \
-    --test run_420_production_policy_reachability_tests \
-    --test run_422_genesis_consensus_authority_tests \
-    --test run_422_startup_refusal_tests \
-    --test run_422_d4_startup_ordering_tests \
-    --test run_418_authenticated_peer_consensus_sender_binding_tests \
-    --test run_418_newview_demux_chain_integration_tests
-  => run_418 sender-binding : 18 passed
-  => run_418 newview        :  3 passed
-  => run_420 policy         :  3 passed
-  => run_422 d4 ordering    :  5 passed
-  => run_422 genesis        : 15 passed
-  => run_422 startup-refusal:  4 passed
-  => 0 failed                                                  exit 0
+    --test run_420_production_policy_reachability_tests
+  => run_420 policy         :  3 passed; 0 failed         exit 0   [NEWLY EXECUTED]
+
+  Preservation suites (run_422 genesis/startup/D4, run_418 sender-binding/newview)
+  reported 15 / 4 / 5 / 18 / 3 passed respectively on the corrective revision
+  and are unchanged by this tests+docs-only pass. [PRESERVED — revision-attributed
+  to the corrective continuation; rerun if their sources change.]
 
 ----------------------------------------------------------------------------
 PRODUCTION cargo check (DEFAULT FEATURES)
 ----------------------------------------------------------------------------
 
 $ cargo check -p qbind-wire -p qbind-consensus -p qbind-node
-  => Finished dev profile in 5m 35s                            exit 0
+  => Finished dev profile                                      exit 0
   (default features; NOT a feature-enabled check)
+  [PRESERVED HISTORICAL EVIDENCE — originally captured on the corrective
+  revision. Production/build sources (crates/*/src, excluding the appended
+  in-module tests) are unchanged in this tests+docs pass, so the result is
+  carried forward and NOT relabeled as executed at the final documentation SHA.
+  Rerun if production/build sources change.]
 
 ----------------------------------------------------------------------------
 RELEASE BUILD
@@ -63,7 +72,10 @@ RELEASE BUILD
 
 $ cargo build --release -p qbind-node --bin qbind-node
   => Finished release profile                                 exit 0
-  (see test_results.txt for the recorded completion line)
+  [PRESERVED HISTORICAL EVIDENCE — same basis as cargo check above. The
+  release binary still constructs NO ProposalVoteAuthority; this is not
+  configured-authority release-binary evidence
+  (CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED).]
 
 ----------------------------------------------------------------------------
 FOCUSED CLIPPY (EXPLICIT CHANGED TARGETS)
@@ -72,29 +84,32 @@ FOCUSED CLIPPY (EXPLICIT CHANGED TARGETS)
 Explicit -p targets are used to avoid the known broad-Clippy failure caused by
 feature-gated integration targets. Default features (no --all-features).
 
-$ cargo clippy -p qbind-wire -p qbind-consensus --tests
-  => Finished; exit 0. Pre-existing warnings only; NONE in the D6 files
-     (pv_signing_domain.rs, proposal_vote_verify.rs, run_422_d6 test) — verified
-     by filtering clippy output for those paths (no matches).
+$ cargo clippy -p qbind-consensus --tests
+  => Finished; exit 0. [NEWLY EXECUTED] No warnings in the D6 crypto test file
+     (run_422_d6_pv_domain_isolation_tests.rs) — verified by filtering clippy
+     output for that path (no matches).
 
 $ cargo clippy -p qbind-node --lib
-  => exit 0. No warnings attributable to the D6 additions in
-     binary_consensus_loop.rs.
+  => Finished; exit 0. [NEWLY EXECUTED] 87 pre-existing crate-wide warnings; NONE
+     attributable to the D6 additions in binary_consensus_loop.rs (verified by
+     filtering for run422_d6_outbound_vote / RecordingSigner / VoteRecordingFacade
+     / build_authority — no matches).
 
 ----------------------------------------------------------------------------
 FORMATTING / WHITESPACE
 ----------------------------------------------------------------------------
 
-New files (LF): rustfmt --check clean
-  crates/qbind-wire/src/pv_signing_domain.rs
-  crates/qbind-consensus/tests/run_422_d6_pv_domain_isolation_tests.rs
+Added test blocks are rustfmt-clean. Pre-existing rustfmt drift in untouched
+regions of the D6 files is preserved (not mass-reformatted).
 
-CRLF files preserved as CRLF (not reformatted; matches baseline convention):
-  crates/qbind-consensus/src/proposal_vote_verify.rs   (843/843 lines CRLF)
-  crates/qbind-node/src/binary_consensus_loop.rs       (10933/10933 lines CRLF)
-LF files edited stay LF and rustfmt-clean:
-  crates/qbind-wire/src/consensus.rs, crates/qbind-wire/src/lib.rs,
-  crates/qbind-consensus/src/lib.rs
+Line-ending convention (preserved):
+  crates/qbind-consensus/tests/run_422_d6_pv_domain_isolation_tests.rs is CRLF.
+    It was NORMALIZED LF->CRLF by the corrective continuation — it is NOT
+    unchanged in convention from the original LF D6 test file. The new Vote gap
+    B test was appended in CRLF.
+  crates/qbind-consensus/src/proposal_vote_verify.rs   (959/959 lines CRLF)
+  crates/qbind-node/src/binary_consensus_loop.rs       (all lines CRLF; Vote gap
+    A test appended in CRLF)
 A repo-wide `cargo fmt --check` reports pre-existing drift in files NOT touched
 by D6 (e.g. basic_hotstuff_engine.rs); this change does not mass-format
 unrelated code.
@@ -110,8 +125,12 @@ No keys/certs/credentials/raw logs/data dirs committed.
 STATIC / SECURITY ANALYSIS
 ----------------------------------------------------------------------------
 
-parallel_validation (Code Review + CodeQL): status recorded in test_results.txt.
-CodeQL DB-too-large skips and any review-tool errors are NOT converted into
-zero-alert / successful-review conclusions. The historical D4/D5 broad-Clippy
+parallel_validation (Code Review + CodeQL) — executed at the final SHA:
+  * Code Review     : COMPLETED, 9 files reviewed, no findings   [exit n/a — tool verdict]
+  * CodeQL Scan     : SKIPPED (trivial: test-only + docs)        [no zero-alert claim]
+Full disposition recorded in test_results.txt. A CodeQL trivial-skip / DB-size
+skip and any review-tool/model-registry error are NOT converted into
+zero-alert / successful-review conclusions; analysis completion is kept
+separate from the scoped code/test verdict. The historical D4/D5 broad-Clippy
 FAILED/INCOMPLETE record (exact numeric exit code not captured then) and the
-CodeQL DB-too-large skip are preserved unchanged.
+CodeQL DB-too-large skip are preserved unchanged.
