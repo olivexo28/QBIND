@@ -6,15 +6,24 @@ Original D6 baseline (HISTORICAL record from the earlier corrective pass):
 ancestor (git merge-base HEAD <baseline> == <baseline>); that is a historical
 result and is NOT re-executed in this completion pass.
 
-Current completion checkout (this pass): task branch
-copilot/copilotcopilotrun-422-d6-corrective-continuation (actual branch name in
-this clone; note the doubled "copilot" segment), completion tip recorded in
-docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D6.md, whose parent is
-2a18b47bb12843597ca1bd783bdf92e07f48cb7e — the earliest commit present in this
-shallow single-branch clone. The historical baseline 5b7ea51... is NOT present
-locally (git cat-file -t => missing), so the merge-base relationship above
-cannot be reproven here; history before 2a18b47 is absent. Matching diff
-statistics alone would not prove identical source or ancestry.
+Completion-agent checkout (historical): task branch
+copilot/copilotcopilotrun-422-d6-corrective-continuation. The agent reported
+2a18b47 as its earliest available commit and 5b7ea51 as unavailable in that
+shallow checkout. Those observations do not describe the later Ubuntu clone.
+
+Verified Ubuntu import ancestry, oldest to newest:
+  2a18b47bb12843597ca1bd783bdf92e07f48cb7e
+  7d87849892f25f3e84403b5a11f635e38f5a1127
+  76246eb2fffc354085a892a4eca4a300104a752d
+  4b9dae3e5489e3491bd27af7fa2dc8bc8b5662e4
+
+76246eb2 contains documentation and one test-comment correction.
+4b9dae3e updates SHA256SUMS; its direct parent is 76246eb2.
+Ubuntu main was fast-forwarded from 7d878498 to 4b9dae3e (two commits).
+Earlier direct-parent descriptions are superseded. This ancestry/hash
+verification does not rerun Cargo or independently establish historical
+test-execution SHAs. Matching diff statistics alone prove neither source
+identity nor ancestry.
 
 ----------------------------------------------------------------------------
 FILES READ / TRACED

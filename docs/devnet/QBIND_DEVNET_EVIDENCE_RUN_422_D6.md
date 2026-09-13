@@ -18,39 +18,37 @@ external-network, or standalone release-binary adversarial evidence. Security
 (CodeQL) analysis status is reported separately and is not converted into a
 zero-alert conclusion.
 
-## Branch / ancestry (rechecked at the completion pass)
+## Branch / ancestry (completion checkout and Ubuntu import)
 
-Recoverable facts verified with `git` in this shallow, single-branch clone
-(historical bases from earlier passes are **not** re-derived here):
-
-* Task branch (actual name in this clone):
-  `copilot/copilotcopilotrun-422-d6-corrective-continuation`. The prompt's
-  *expected* name was `copilot/copilotrun-422-d6-corrective-continuation`; the
-  actual branch carries a **doubled `copilot`** segment. Recorded, not renamed.
-* Available ancestry: the completion tip of this branch is the commit produced by
-  this documentation pass (its own SHA cannot be embedded in its own committed
-  text; it is the branch tip after commit). Its parent documentation commit is
-  `7d87849892f25f3e84403b5a11f635e38f5a1127`, whose parent is
-  `2a18b47bb12843597ca1bd783bdf92e07f48cb7e` — the **earliest commit present**
-  in this clone (`git rev-list --parents -n 1` shows it with no parent object
-  here).
-* Tested implementation/worktree identity vs the documentation commit: the D6
-  implementation and the 34 consensus + 10 node tests are the source tree at
-  `7d87849…`. This completion pass changes only documentation plus a **single
-  test comment** on top of it; the two identities are kept distinct and the doc
-  commit is not presented as the tested implementation revision.
-* **NOT present** locally (`git cat-file -t` → missing): the prompt's reviewed
-  tip `a071c53caa4700b9a00b0d1fb8fe17071a267887`, the earlier reviewed tip
-  `010788bcd00bb3725cebc0e8fe26f3502a2c00d4`, and the historical bases
-  `b585768de8ea79f22f16a6f3c028bfee3f9c6ed7` and
-  `5b7ea51a9b123e1952bd966b5e414531cd2ad898`. Their exact relationships cannot
-  be reproven here; matching diff statistics alone would not prove identical
-  source or ancestry, and no merge-base against a missing object is re-executed.
-* No fast-forward importability from any historical baseline is claimed.
-  Integration with `main` is left for a separate reviewed step. This completion
-  pass adds only documentation (plus the one test comment) and does not modify
-  `main`, rebase, amend, or open a PR.
-* Clone is shallow/single-branch; full history before `2a18b47` is not present.
+* Completion task branch:
+  `copilot/copilotcopilotrun-422-d6-corrective-continuation`.
+  The supplied name differed from the expected
+  `copilot/copilotrun-422-d6-corrective-continuation`; it was recorded,
+  not renamed.
+* Verified Git ancestry, oldest to newest:
+  `2a18b47bb12843597ca1bd783bdf92e07f48cb7e` ->
+  `7d87849892f25f3e84403b5a11f635e38f5a1127` ->
+  `76246eb2fffc354085a892a4eca4a300104a752d` ->
+  `4b9dae3e5489e3491bd27af7fa2dc8bc8b5662e4`.
+* `76246eb2` contains the documentation corrections and one test-comment
+  correction. `4b9dae3e` regenerates the archive checksum manifest.
+  The final task tip's direct parent is `76246eb2`, not `7d87849`
+  or `2a18b47`; earlier direct-parent descriptions are superseded.
+* Ubuntu `main` was fast-forwarded from `7d878498` to `4b9dae3e`
+  after fetching the task branch: two commits ahead, zero behind.
+  This records the completed local import; a subsequent push is separate.
+* The completion agent reported a shallow checkout with `2a18b47` as
+  its earliest available commit. The reviewed tips `a071c53` and
+  `010788b`, and historical bases `b585768` and `5b7ea51`, were
+  unavailable in that checkout. Those missing-object observations describe
+  the agent's checkout, not the later Ubuntu repository.
+* `7d87849` already contains the implementation and both added Vote tests.
+  The two imported commits change documentation and one comment only.
+  Historical validation results retain their reported attribution.
+  This import verifies ancestry and archive integrity; it does not rerun
+  Cargo or independently establish historical test-execution SHAs.
+* The task branch did not modify `main`; the operator performed the later
+  fast-forward. No rebase, amend, force-push, or PR was used for this import.
 
 ## Prerequisites confirmed on the starting tree
 
@@ -91,9 +89,10 @@ specification. Summary:
 > **superseded**: the domain is mandatory and the public entrypoints are the
 > message-bound `verify_*_with_domain` (raw-preimage helpers are private). The
 > diff-stat block below is the **original corrective** diff vs the historical
-> baseline and is retained as a historical record; this completion pass adds
-> only the two Vote coverage tests (gap A in `binary_consensus_loop.rs`, gap B
-> in the crypto test) plus this documentation reconciliation.
+> baseline and is retained as a historical record. The earlier Vote-test
+> completion added the two coverage tests; they are already present at
+> `7d87849`. The subsequent two imported commits correct documentation,
+> one test comment, and archive checksums only.
 
 Diff vs baseline (7 files):
 
