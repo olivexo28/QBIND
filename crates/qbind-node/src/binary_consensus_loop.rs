@@ -8506,6 +8506,31 @@ mod tests {
             p
         }
 
+        /// Build a proposal at an explicit `height`/`parent`, signed by
+        /// `proposer`'s consensus key. Used by the active-restore-mode case so
+        /// the frame is shaped (height above committed+1) to reach restore
+        /// deferral if admitted.
+        fn signed_proposal_at_height(
+            proposer: u16,
+            height: u64,
+            parent: [u8; 32],
+            fixture: &Fixture,
+        ) -> BlockProposal {
+            let mut header = base_header(proposer);
+            header.height = height;
+            header.parent_block_id = parent;
+            let mut p = BlockProposal {
+                header,
+                qc: None,
+                txs: vec![],
+                signature: vec![],
+            };
+            let preimage = p.signing_preimage_with_chain_id(QBIND_DEVNET_CHAIN_ID);
+            let sk = fixture.sks.get(&ValidatorId(proposer as u64)).expect("sk");
+            p.signature = MlDsa44Backend::sign(sk, &preimage).expect("sign");
+            p
+        }
+
         fn base_vote(voter: u16) -> Vote {
             Vote {
                 version: 1,
@@ -10026,6 +10051,302 @@ mod tests {
             );
             assert_eq!(pv_stats.inbound_proposal_verification_context_unavailable_total, 1);
             assert_eq!(pv_stats.inbound_proposal_verify_accepted, 0);
+        }
+
+        // =================================================================
+        // Run 422 D5 — Finding B: Required-policy path coverage the earlier
+        // D5 tests did not reach.
+        // =================================================================
+
+        /// Deliver a Proposal through the REAL inbound handler with a caller-
+        /// supplied (possibly ACTIVE) restore mode and a recording outbound
+        /// facade, so the actual absence of any outbound frame — and the
+        /// restore-deferral decision — are observed directly rather than
+        /// inferred while `outbound` is `None`.
+        #[allow(clippy::too_many_arguments)]
+        fn deliver_proposal_combined_restore(
+            engine: &mut BasicHotStuffEngine<[u8; 32]>,
+            stats: &mut BinaryConsensusLoopInboundStats,
+            restore_mode: &mut RestoreCatchupModeState,
+            timeout_ctx: Option<&TimeoutVerificationContext>,
+            pv: Option<&ProposalVoteAuthority>,
+            proposal: &BlockProposal,
+            metrics: &Arc<NodeMetrics>,
+            outbound: Option<&dyn ConsensusNetworkFacade>,
+            origin: Option<&AuthenticatedConsensusOrigin>,
+            gate: Option<&PeerConsensusBindingGate>,
+            policy: ConsensusVerificationPolicy,
+        ) -> BinaryReconfigDetector {
+            use qbind_wire::io::WireEncode;
+            let mut bytes = Vec::new();
+            proposal.encode(&mut bytes);
+            let mut detector = BinaryReconfigDetector::default();
+            handle_inbound_consensus_msg(
+                engine,
+                ConsensusNetMsg::Proposal(bytes),
+                stats,
+                outbound,
+                metrics,
+                ValidatorId(0),
+                restore_mode,
+                timeout_ctx,
+                pv,
+                &mut detector,
+                origin,
+                gate,
+                policy,
+            );
+            detector
+        }
+
+        /// A recording facade that counts every outbound method call, so an
+        /// asserted absence of outbound traffic is backed by an actual facade
+        /// observation (not merely `outbound == None`).
+        #[derive(Default)]
+        struct CountingFacade {
+            calls: std::sync::atomic::AtomicU64,
+        }
+        impl ConsensusNetworkFacade for CountingFacade {
+            fn send_vote_to(&self, _t: ValidatorId, _v: &Vote) -> Result<(), NetworkError> {
+                self.calls
+                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                Ok(())
+            }
+            fn broadcast_vote(&self, _v: &Vote) -> Result<(), NetworkError> {
+                self.calls
+                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                Ok(())
+            }
+            fn broadcast_proposal(&self, _p: &BlockProposal) -> Result<(), NetworkError> {
+                self.calls
+                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                Ok(())
+            }
+            fn broadcast_consensus_msg(&self, _m: &ConsensusNetMsg) -> Result<(), NetworkError> {
+                self.calls
+                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                Ok(())
+            }
+        }
+
+        // D5-G (Finding B-A): Required-policy late-peer re-emission suppression.
+        //
+        // The existing B9/B10 tests drive the late-peer re-emit path only under
+        // `LocalFixtureUnsigned`, which cannot prove Required-policy
+        // suppression. This test drives the ACTUAL
+        // `maybe_reemit_on_late_peer_connect` function with:
+        //   * `ConsensusVerificationPolicy::Required`,
+        //   * an ABSENT Proposal/Vote authority (`None`),
+        //   * a cached current-view proposal AND a cached current-view vote,
+        //   * a leader/current-view engine,
+        //   * a genuine newly-connected-peer transition, and
+        //   * a recording facade.
+        // All re-emission preconditions (gates 1..7) are satisfied so control
+        // reaches the authority/signing boundary — proven by the outbound
+        // authority-unavailable counter — and the fail-closed signer refusal
+        // there suppresses the broadcast.
+        //
+        // Control-flow honesty: the proposal is signed FIRST. Under Required +
+        // absent authority, `sign_proposal_for_broadcast` returns `None` and
+        // `maybe_reemit_on_late_peer_connect` returns BEFORE the paired cached-
+        // vote branch. We therefore do NOT claim the vote-signing branch was
+        // independently exercised; the outbound *vote* authority-unavailable
+        // counter stays 0.
+        #[test]
+        fn run422_d5g_late_peer_reemit_suppressed_under_required_without_pv_authority() {
+            use std::sync::atomic::Ordering::SeqCst;
+
+            struct OnePeer(NodeId);
+            impl PeerConnectivitySource for OnePeer {
+                fn connected_peers(&self) -> Vec<NodeId> {
+                    vec![self.0]
+                }
+            }
+
+            // Leader/current-view engine: validator 0 leads view 0 in a 4-node
+            // set; a fresh engine is at view 0 with no committed height.
+            let engine = make_engine(ValidatorId(0), 4);
+            assert!(
+                engine.is_leader_for_current_view(),
+                "validator 0 must lead the current view for the re-emit path"
+            );
+            let cur_view = engine.current_view();
+
+            // Cached current-view proposal AND vote (both keyed to the current
+            // view) so gates 2..6 pass and the cached-vote branch is reachable
+            // in principle.
+            let mut last_leader_proposal = Some((
+                cur_view,
+                BlockProposal {
+                    header: base_header(0),
+                    qc: None,
+                    txs: vec![],
+                    signature: vec![],
+                },
+            ));
+            let mut last_leader_vote = Some((cur_view, base_vote(0)));
+            let mut reemitted_for_view: Option<u64> = None;
+            // Empty prior snapshot ⇒ the connected peer is genuinely newly
+            // connected on this tick (gate 1 transition).
+            let mut last_known_peers: HashSet<NodeId> = HashSet::new();
+
+            let peer = pv_node_for(1);
+            let connectivity = OnePeer(peer);
+            let facade = CountingFacade::default();
+            let mut stats = BinaryConsensusLoopInboundStats::default();
+
+            maybe_reemit_on_late_peer_connect(
+                &engine,
+                &mut last_leader_proposal,
+                &mut last_leader_vote,
+                &mut reemitted_for_view,
+                &mut last_known_peers,
+                &connectivity,
+                Some(&facade),
+                &mut stats,
+                None, // ABSENT Proposal/Vote authority (production wiring)
+                ConsensusVerificationPolicy::Required,
+            );
+
+            // Reached the authority/signing boundary and refused there.
+            assert_eq!(
+                stats.outbound_proposal_verification_context_unavailable_total, 1,
+                "must reach the outbound authority/signing boundary and refuse"
+            );
+            // No Proposal broadcast, no Vote broadcast, no directed vote, no
+            // self-injection through any facade method.
+            assert_eq!(facade.calls.load(SeqCst), 0);
+            // No successful re-emission counters.
+            assert_eq!(stats.outbound_proposal_late_peer_reemits, 0);
+            assert_eq!(stats.outbound_vote_late_peer_reemits, 0);
+            assert_eq!(stats.outbound_proposal_signing_success, 0);
+            assert_eq!(stats.outbound_vote_signing_success, 0);
+            // Single-shot marker NOT set: nothing was re-emitted for the view.
+            assert_eq!(reemitted_for_view, None);
+            // The peer transition WAS observed (so we did not pass merely
+            // because no peer connected): the snapshot now contains the peer.
+            assert!(last_known_peers.contains(&peer));
+            // Control returned before the cached-vote signing branch: the
+            // outbound *vote* authority-unavailable counter stays 0.
+            assert_eq!(stats.outbound_vote_verification_context_unavailable_total, 0);
+        }
+
+        // D5-H (Finding B-B): Active restore-mode Proposal authority-unavailable
+        // rejection.
+        //
+        // The `deliver_proposal_combined` helper above builds restore mode with
+        // no baseline (inactive). This case makes restore catchup mode
+        // demonstrably ACTIVE (snapshot baseline at height 5), and supplies a
+        // valid `TimeoutVerificationContext`, an absent Proposal/Vote authority,
+        // Required policy, a real binding gate + matching authenticated origin,
+        // and an encoded Proposal shaped (height 7 > committed+1) to reach
+        // restore deferral IF admitted. A positive control proves the same-
+        // shaped proposal IS deferred once a Proposal/Vote authority is present,
+        // so the rejection case is meaningful.
+        #[test]
+        fn run422_d5h_active_restore_mode_proposal_rejected_authority_unavailable() {
+            use std::sync::atomic::Ordering::SeqCst;
+
+            let fixture = make_fixture(4);
+            let timeout_ctx = make_timeout_ctx(&fixture, Some(ValidatorId(0)));
+            assert!(timeout_ctx.signer.is_some());
+            let gate = pv_binding_gate(4);
+            let origin = AuthenticatedConsensusOrigin::new(pv_node_for(0), ValidatorId(0));
+            let metrics = make_metrics();
+
+            let baseline = RestoreBaseline {
+                snapshot_height: 5,
+                snapshot_block_id: [0x01; 32],
+            };
+
+            // Shape: height 7 > committed (5) + 1 ⇒ defers if admitted.
+            let proposal = signed_proposal_at_height(0, 7, [0xAB; 32], &fixture);
+
+            // ---- Positive control: WITH a Proposal/Vote authority present, the
+            // frame passes verification and IS deferred by active restore mode.
+            {
+                let pv = make_ctx(&fixture, Some(ValidatorId(0)));
+                let mut engine = make_engine(ValidatorId(0), 4);
+                engine.initialize_from_snapshot_baseline([0x01; 32], 5);
+                assert_eq!(engine.committed_height(), Some(5));
+                let mut restore =
+                    RestoreCatchupModeState::from_config(Some(baseline.clone()));
+                assert!(restore.is_active(), "restore mode must be active (control)");
+                let mut stats = BinaryConsensusLoopInboundStats::default();
+                let facade = CountingFacade::default();
+                let detector = deliver_proposal_combined_restore(
+                    &mut engine,
+                    &mut stats,
+                    &mut restore,
+                    Some(&timeout_ctx),
+                    Some(&pv),
+                    &proposal,
+                    &metrics,
+                    Some(&facade),
+                    Some(&origin),
+                    Some(&gate),
+                    ConsensusVerificationPolicy::Required,
+                );
+                assert_eq!(gate.metrics().accepted(), 1, "control: F6 admitted");
+                assert_eq!(
+                    stats.inbound_proposal_verify_accepted, 1,
+                    "control: signature verified"
+                );
+                assert_eq!(
+                    stats.restore_catchup_proposals_deferred, 1,
+                    "control: proposal deferred by active restore mode"
+                );
+                assert_eq!(stats.inbound_proposals_delivered, 0);
+                assert!(detector.header_cache.is_empty());
+                assert_eq!(facade.calls.load(SeqCst), 0);
+                assert!(restore.is_active());
+            }
+
+            // ---- Main case: WITHOUT a Proposal/Vote authority, the frame is
+            // rejected authority-unavailable BEFORE the restore-deferral branch.
+            let mut engine = make_engine(ValidatorId(0), 4);
+            engine.initialize_from_snapshot_baseline([0x01; 32], 5);
+            let view_before = engine.current_view();
+            let committed_before = engine.committed_height();
+            let mut restore = RestoreCatchupModeState::from_config(Some(baseline));
+            assert!(restore.is_active(), "restore mode must be active");
+            let mut stats = BinaryConsensusLoopInboundStats::default();
+            let facade = CountingFacade::default();
+
+            let detector = deliver_proposal_combined_restore(
+                &mut engine,
+                &mut stats,
+                &mut restore,
+                Some(&timeout_ctx),
+                None, // absent ProposalVoteAuthority (production)
+                &proposal,
+                &metrics,
+                Some(&facade),
+                Some(&origin),
+                Some(&gate),
+                ConsensusVerificationPolicy::Required,
+            );
+
+            // F6 admission succeeded again (real gate + matching origin);
+            // cumulative accepted() over control + main == 2.
+            assert_eq!(gate.metrics().accepted(), 2);
+            assert_eq!(stats.inbound_sender_binding_rejected_total, 0);
+            // Authority-unavailable rejection fired exactly once.
+            assert_eq!(stats.inbound_proposal_verification_context_unavailable_total, 1);
+            // Verification never ran (no PV authority).
+            assert_eq!(stats.inbound_proposal_verify_accepted, 0);
+            assert_eq!(stats.proposal_vote_crypto_verify_latency_observations_total, 0);
+            // No restore deferral, delivery, engine acceptance, reconfig
+            // observation, or outbound frame attributable to the rejected frame.
+            assert_eq!(stats.restore_catchup_proposals_deferred, 0);
+            assert_eq!(stats.inbound_proposals_delivered, 0);
+            assert_eq!(stats.inbound_proposals_engine_accepted, 0);
+            assert!(detector.header_cache.is_empty());
+            assert_eq!(facade.calls.load(SeqCst), 0);
+            // Restore + engine state unchanged.
+            assert!(restore.is_active(), "restore mode stays active");
+            assert_eq!(engine.current_view(), view_before);
+            assert_eq!(engine.committed_height(), committed_before);
         }
     }
 }

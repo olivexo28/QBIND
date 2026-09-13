@@ -20,17 +20,36 @@
 //! (`[binary] Run 032:` / `[binary] Run 033:`) IS present, proving the input
 //! reached the preflight rather than failing only in CLI parsing or an
 //! unrelated earlier check. Absence of the P2P-transport marker alone is
-//! never treated as sufficient.
+//! never treated as sufficient — it is interpreted together with the inspected
+//! source ordering (the marker is printed only AFTER `builder.build()` opens
+//! the listener). We do NOT claim that the absence of a single log line, on its
+//! own, proves that no listener was ever opened.
 //!
-//! Resource discipline: negative cases exit deterministically (the preflight
-//! calls `std::process::exit(1)`), so no child needs reaping. The single
-//! positive case that reaches P2P startup binds a loopback ephemeral port
-//! (`127.0.0.1:0`), is bounded by a short sleep, and its child is killed and
-//! reaped even on assertion failure via `ChildGuard`. Temporary keystores use
-//! `0o700`/`0o600` permissions and are removed on drop.
+//! Resource discipline (corrected): every child is driven by a shared,
+//! deadline-based [`DrainedChild`] runner. It uses an explicit finite deadline
+//! measured with a monotonic clock ([`std::time::Instant`]), and it drains BOTH
+//! stdout and stderr on dedicated threads WHILE the child runs so a full OS
+//! pipe buffer can never block the child at startup. Negative cases wait for
+//! the child to terminate naturally within the deadline; a timeout is a TEST
+//! FAILURE, never an acceptable nonzero refusal. The positive case waits for
+//! the intended readiness markers within the deadline. In all paths — deadline
+//! expiry, successful positive observation, and assertion-driven unwinding —
+//! the child is killed and reaped and the drain threads are joined via
+//! [`DrainedChild::kill_and_reap`] / its `Drop` impl; an exited child still
+//! requires an explicit `wait()` to reap the zombie, which is why reaping is
+//! never skipped. Captured output is size-capped for bounded memory while
+//! retaining a useful diagnostic prefix. The positive case binds a loopback
+//! ephemeral port (`127.0.0.1:0`); metrics/other inherited environment
+//! settings that could bind non-loopback endpoints or redirect fixtures are
+//! cleared so each child is isolated. Temporary keystores use `0o700`/`0o600`
+//! permissions and are removed on drop.
 
+use std::io::Read;
 use std::path::PathBuf;
-use std::process::{Child, Command};
+use std::process::{Child, Command, Stdio};
+use std::sync::{Arc, Mutex};
+use std::thread::{self, JoinHandle};
+use std::time::{Duration, Instant};
 
 use qbind_crypto::ml_dsa44::MlDsa44Backend;
 use qbind_ledger::{
@@ -191,21 +210,231 @@ fn valid_inputs(tag: &str) -> ValidInputs {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Shared, deadline-based process runner (Finding A).
+//
+// A single small runner is used by both the negative and positive cases. It
+// deliberately does NOT pull in an async runtime or a subprocess-management
+// crate: it is two blocking drain threads plus a monotonic-deadline poll loop
+// over `try_wait`, which is all these process tests need.
+// ---------------------------------------------------------------------------
+
+/// Finite deadline for a negative case to refuse and terminate on its own. The
+/// preflight refusal is near-instant; this bound exists only to convert a
+/// regression that hangs startup into a hard FAILURE instead of an infinite
+/// wait.
+const NEGATIVE_DEADLINE: Duration = Duration::from_secs(30);
+
+/// Finite deadline for the positive case to reach the P2P-transport readiness
+/// markers.
+const POSITIVE_DEADLINE: Duration = Duration::from_secs(30);
+
+/// Upper bound on retained captured output per stream. Bytes past the cap are
+/// counted but dropped so a chatty or wedged child cannot exhaust memory; the
+/// drain thread keeps reading the pipe regardless so the child never blocks.
+const CAPTURE_CAP_BYTES: usize = 512 * 1024;
+
+/// Size-capped captured stream. Retains a bounded prefix for diagnostics.
+#[derive(Default)]
+struct CapturedStream {
+    buf: String,
+    dropped_bytes: usize,
+}
+
+/// Continuously drain `reader` into `sink` until EOF, appending up to
+/// `CAPTURE_CAP_BYTES` and counting the remainder. Running this on its own
+/// thread guarantees the child's stdout/stderr pipe never fills and blocks the
+/// child at startup.
+fn drain_into(mut reader: impl Read, sink: Arc<Mutex<CapturedStream>>) {
+    let mut chunk = [0u8; 8192];
+    loop {
+        match reader.read(&mut chunk) {
+            Ok(0) => break,
+            Ok(n) => {
+                let text = String::from_utf8_lossy(&chunk[..n]);
+                let mut guard = sink.lock().expect("capture lock");
+                let remaining = CAPTURE_CAP_BYTES.saturating_sub(guard.buf.len());
+                if remaining == 0 {
+                    guard.dropped_bytes += text.len();
+                } else if text.len() <= remaining {
+                    guard.buf.push_str(&text);
+                } else {
+                    let mut end = remaining;
+                    while end > 0 && !text.is_char_boundary(end) {
+                        end -= 1;
+                    }
+                    guard.buf.push_str(&text[..end]);
+                    guard.dropped_bytes += text.len() - end;
+                }
+            }
+            Err(ref e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(_) => break,
+        }
+    }
+}
+
+/// A spawned child whose stdout/stderr are drained on dedicated threads and
+/// whose lifecycle (kill + reap + thread join) is always finalized, including
+/// on assertion-driven unwinding via `Drop`.
+struct DrainedChild {
+    child: Child,
+    stdout: Arc<Mutex<CapturedStream>>,
+    stderr: Arc<Mutex<CapturedStream>>,
+    stdout_thread: Option<JoinHandle<()>>,
+    stderr_thread: Option<JoinHandle<()>>,
+    reaped: bool,
+}
+
+impl DrainedChild {
+    fn spawn(args: &[String]) -> Self {
+        let mut child = Command::new(qbind_node_bin())
+            .args(args)
+            // Isolate inherited environment: no metrics/other listener may bind
+            // a non-loopback endpoint, and no external env may redirect the
+            // fixture. The positive case explicitly binds `127.0.0.1:0`.
+            .env_remove("QBIND_METRICS_HTTP_ADDR")
+            .env_remove("QBIND_MUTUAL_AUTH")
+            .env_remove("QBIND_DRAIN_ONCE_DELAY_SECS")
+            .env_remove("QBIND_DEVNET_FORGED_INJECTION")
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("spawn qbind-node");
+
+        let stdout = Arc::new(Mutex::new(CapturedStream::default()));
+        let stderr = Arc::new(Mutex::new(CapturedStream::default()));
+        let out = child.stdout.take().expect("piped stdout");
+        let err = child.stderr.take().expect("piped stderr");
+        let so = stdout.clone();
+        let se = stderr.clone();
+        let stdout_thread = Some(thread::spawn(move || drain_into(out, so)));
+        let stderr_thread = Some(thread::spawn(move || drain_into(err, se)));
+
+        DrainedChild {
+            child,
+            stdout,
+            stderr,
+            stdout_thread,
+            stderr_thread,
+            reaped: false,
+        }
+    }
+
+    fn stdout_snapshot(&self) -> String {
+        self.stdout.lock().expect("capture lock").buf.clone()
+    }
+    fn stderr_snapshot(&self) -> String {
+        self.stderr.lock().expect("capture lock").buf.clone()
+    }
+
+    fn join_drain_threads(&mut self) {
+        if let Some(h) = self.stdout_thread.take() {
+            let _ = h.join();
+        }
+        if let Some(h) = self.stderr_thread.take() {
+            let _ = h.join();
+        }
+    }
+
+    /// Kill the child if it is still running, then reap it. An already-exited
+    /// child is still a zombie until `wait()` reaps it, so `wait()` is always
+    /// called. Drain threads are joined so the pipes are fully consumed.
+    fn kill_and_reap(&mut self) {
+        if !self.reaped {
+            let _ = self.child.kill();
+            let _ = self.child.wait();
+            self.reaped = true;
+        }
+        self.join_drain_threads();
+    }
+
+    /// Wait for the child to terminate on its own within `deadline`, returning
+    /// its exit code. A timeout is a HARD test failure (never an acceptable
+    /// nonzero refusal): the child is killed/reaped and the function panics.
+    fn wait_natural_exit(&mut self, deadline: Duration) -> i32 {
+        let start = Instant::now();
+        loop {
+            match self.child.try_wait().expect("try_wait") {
+                Some(status) => {
+                    self.reaped = true;
+                    self.join_drain_threads();
+                    return status.code().unwrap_or(-1);
+                }
+                None => {
+                    if start.elapsed() >= deadline {
+                        let err = self.stderr_snapshot();
+                        self.kill_and_reap();
+                        panic!(
+                            "TEST FAILURE: child did not terminate within {:?}; a timeout is \
+                             never an acceptable refusal. Startup may no longer be refusing \
+                             fail-closed. stderr so far=\n{}",
+                            deadline, err
+                        );
+                    }
+                    thread::sleep(Duration::from_millis(25));
+                }
+            }
+        }
+    }
+
+    /// Wait until every marker in `markers` is present in captured stderr
+    /// within `deadline`. If the child exits first, or the deadline expires,
+    /// the case FAILS. On success the child is killed and reaped.
+    fn wait_for_markers(&mut self, markers: &[&str], deadline: Duration) -> String {
+        let start = Instant::now();
+        loop {
+            let err = self.stderr_snapshot();
+            if markers.iter().all(|m| err.contains(m)) {
+                self.kill_and_reap();
+                return err;
+            }
+            if let Some(status) = self.child.try_wait().expect("try_wait") {
+                self.reaped = true;
+                let err = self.stderr_snapshot();
+                self.kill_and_reap();
+                panic!(
+                    "TEST FAILURE: positive child exited ({:?}) before emitting readiness \
+                     markers {:?}; stderr=\n{}",
+                    status.code(),
+                    markers,
+                    err
+                );
+            }
+            if start.elapsed() >= deadline {
+                let err = self.stderr_snapshot();
+                self.kill_and_reap();
+                panic!(
+                    "TEST FAILURE: readiness markers {:?} not observed within {:?}; stderr=\n{}",
+                    markers, deadline, err
+                );
+            }
+            thread::sleep(Duration::from_millis(25));
+        }
+    }
+}
+
+impl Drop for DrainedChild {
+    fn drop(&mut self) {
+        self.kill_and_reap();
+    }
+}
+
 struct Run {
     code: i32,
     stderr: String,
     stdout: String,
 }
 
+/// Run a NEGATIVE case: spawn, drain, and require a natural (non-timeout) exit
+/// within the deadline.
 fn run(args: &[String]) -> Run {
-    let out = Command::new(qbind_node_bin())
-        .args(args)
-        .output()
-        .expect("spawn qbind-node");
+    let mut child = DrainedChild::spawn(args);
+    let code = child.wait_natural_exit(NEGATIVE_DEADLINE);
     Run {
-        code: out.status.code().unwrap_or(-1),
-        stderr: String::from_utf8_lossy(&out.stderr).into_owned(),
-        stdout: String::from_utf8_lossy(&out.stdout).into_owned(),
+        code,
+        stderr: child.stderr_snapshot(),
+        stdout: child.stdout_snapshot(),
     }
 }
 
@@ -359,22 +588,18 @@ fn require_or_fail_local_key_mismatches_signer_refused_before_p2p() {
 // authority remains absent (the D5 in-process tests prove the latter).
 // ---------------------------------------------------------------------------
 
-/// Kills and reaps the child on drop so a failed assertion never leaks a
-/// bound listener or zombie process.
-struct ChildGuard(Child);
-impl Drop for ChildGuard {
-    fn drop(&mut self) {
-        let _ = self.0.kill();
-        let _ = self.0.wait();
-    }
-}
-
 /// Valid legacy config: matching signer + a complete `--validator-consensus-key`
 /// for the local validator (no static peers ⇒ single active validator). The
 /// preflight activates the Timeout/NewView context and startup proceeds past
 /// `builder.build()` to the P2P-transport boundary. This proves the prepared
 /// preflight result is consumed by production wiring and that a valid legacy
 /// Timeout configuration coexists with an absent Proposal/Vote authority.
+///
+/// The child is driven by the shared deadline-based [`DrainedChild`] runner:
+/// stderr is drained on a dedicated thread while the child runs, the readiness
+/// markers are awaited within [`POSITIVE_DEADLINE`], and the child is killed
+/// and reaped on success, on deadline expiry, and on any assertion unwinding
+/// (via `Drop`).
 #[test]
 fn valid_legacy_config_passes_preflight_and_reaches_p2p_startup() {
     let inp = valid_inputs("valid-legacy");
@@ -386,26 +611,13 @@ fn valid_legacy_config_passes_preflight_and_reaches_p2p_startup() {
         format!("0:100:{}", inp.v0_pk_hex),
     ]);
 
-    let child = Command::new(qbind_node_bin())
-        .args(&args)
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .spawn()
-        .expect("spawn qbind-node");
-    let mut guard = ChildGuard(child);
-
-    // Bounded observation window, then terminate and collect piped stderr.
-    std::thread::sleep(std::time::Duration::from_secs(6));
-    let _ = guard.0.kill();
-    let _ = guard.0.wait();
-    let stderr = {
-        use std::io::Read;
-        let mut buf = String::new();
-        if let Some(mut err) = guard.0.stderr.take() {
-            let _ = err.read_to_string(&mut buf);
-        }
-        buf
-    };
+    let mut child = DrainedChild::spawn(&args);
+    // Await both readiness markers within the deadline. The child keeps
+    // running until observed, then is killed and reaped.
+    let stderr = child.wait_for_markers(
+        &[TIMEOUT_ACTIVE_MARKER, P2P_TRANSPORT_UP_MARKER],
+        POSITIVE_DEADLINE,
+    );
 
     assert!(
         stderr.contains(TIMEOUT_ACTIVE_MARKER),
