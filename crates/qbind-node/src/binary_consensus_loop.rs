@@ -9576,5 +9576,442 @@ mod tests {
             assert_eq!(stats.outbound_vote_verification_context_unavailable_total, 1);
             assert_eq!(stats.outbound_vote_signing_success, 0);
         }
+
+        // =================================================================
+        // Run 422 D4/D5 — COMBINED-CONTEXT WIRING PROOF
+        //
+        // The tests above (D5-1 .. D5-4) establish missing-authority handler
+        // coverage, but each passes `None` for BOTH the Timeout context AND
+        // the authenticated transport origin/binding gate. That proves the
+        // handler rejects when the Proposal/Vote authority is absent, but it
+        // does NOT drive a valid Timeout context and an authenticated F6
+        // ingress through the SAME handler invocation alongside an absent
+        // Proposal/Vote authority. The tests below close that gap: they build
+        // a valid `TimeoutVerificationContext` (with a live signer), a real
+        // `PeerConsensusBindingGate` + matching `AuthenticatedConsensusOrigin`,
+        // and pass all of them into the real inbound handler while the
+        // Proposal/Vote authority is `None` and the policy is `Required` —
+        // exactly the production message-family separation.
+        //
+        // These remain FIXTURE tests (default test profile), not release-binary
+        // or production-configuration proof. They demonstrate that a valid
+        // legacy Timeout route + authenticated ingress still leaves Proposal/
+        // Vote fail-closed.
+        // =================================================================
+
+        use crate::peer_consensus_binding::PeerConsensusBindingMap;
+        use qbind_consensus::network::NetworkError;
+
+        /// A deterministic 32-byte `NodeId` for validator `v` (never all-zero,
+        /// and distinct per validator so the one-to-one map is well formed).
+        fn pv_node_for(v: u64) -> NodeId {
+            let mut b = [0u8; 32];
+            b[0] = 0xA0u8.wrapping_add(v as u8);
+            b[31] = (v as u8).wrapping_add(1);
+            NodeId::new(b)
+        }
+
+        /// A validated one-to-one `(NodeId, ValidatorId)` binding gate covering
+        /// validators `0..n`, matching what production peer configuration
+        /// installs for F6 sender binding.
+        fn pv_binding_gate(n: u64) -> PeerConsensusBindingGate {
+            let map = PeerConsensusBindingMap::build(
+                (0..n).map(|v| (pv_node_for(v), ValidatorId(v))),
+            )
+            .expect("valid one-to-one binding map");
+            PeerConsensusBindingGate::new(map)
+        }
+
+        /// Deliver a Proposal through the REAL inbound handler with a valid
+        /// Timeout context, a real binding gate + authenticated origin, and an
+        /// explicit (absent) Proposal/Vote authority. Returns the reconfig
+        /// detector so callers can assert non-mutation.
+        #[allow(clippy::too_many_arguments)]
+        fn deliver_proposal_combined(
+            engine: &mut BasicHotStuffEngine<[u8; 32]>,
+            stats: &mut BinaryConsensusLoopInboundStats,
+            timeout_ctx: Option<&TimeoutVerificationContext>,
+            pv: Option<&ProposalVoteAuthority>,
+            proposal: &BlockProposal,
+            metrics: &Arc<NodeMetrics>,
+            origin: Option<&AuthenticatedConsensusOrigin>,
+            gate: Option<&PeerConsensusBindingGate>,
+            policy: ConsensusVerificationPolicy,
+        ) -> BinaryReconfigDetector {
+            use qbind_wire::io::WireEncode;
+            let mut bytes = Vec::new();
+            proposal.encode(&mut bytes);
+            let mut restore_mode = RestoreCatchupModeState::from_config(None);
+            let mut detector = BinaryReconfigDetector::default();
+            handle_inbound_consensus_msg(
+                engine,
+                ConsensusNetMsg::Proposal(bytes),
+                stats,
+                None,
+                metrics,
+                ValidatorId(0),
+                &mut restore_mode,
+                timeout_ctx,
+                pv,
+                &mut detector,
+                origin,
+                gate,
+                policy,
+            );
+            detector
+        }
+
+        #[allow(clippy::too_many_arguments)]
+        fn deliver_vote_combined(
+            engine: &mut BasicHotStuffEngine<[u8; 32]>,
+            stats: &mut BinaryConsensusLoopInboundStats,
+            timeout_ctx: Option<&TimeoutVerificationContext>,
+            pv: Option<&ProposalVoteAuthority>,
+            vote: &Vote,
+            metrics: &Arc<NodeMetrics>,
+            origin: Option<&AuthenticatedConsensusOrigin>,
+            gate: Option<&PeerConsensusBindingGate>,
+            policy: ConsensusVerificationPolicy,
+        ) {
+            use qbind_wire::io::WireEncode;
+            let mut bytes = Vec::new();
+            vote.encode(&mut bytes);
+            let mut restore_mode = RestoreCatchupModeState::from_config(None);
+            handle_inbound_consensus_msg(
+                engine,
+                ConsensusNetMsg::Vote(bytes),
+                stats,
+                None,
+                metrics,
+                ValidatorId(0),
+                &mut restore_mode,
+                timeout_ctx,
+                pv,
+                &mut BinaryReconfigDetector::default(),
+                origin,
+                gate,
+                policy,
+            );
+        }
+
+        // D5-A: Authenticated Proposal + valid Timeout authority only.
+        //
+        // F6 admission succeeds exactly once; the Proposal/Vote authority is
+        // absent, so the frame is rejected authority-unavailable exactly once,
+        // BEFORE any cryptographic-verification observation, delivery, engine
+        // acceptance, reconfig observation, or outbound effect.
+        #[test]
+        fn run422_d5a_authenticated_proposal_timeout_only_rejects_before_crypto() {
+            let fixture = make_fixture(4);
+            let timeout_ctx = make_timeout_ctx(&fixture, Some(ValidatorId(0)));
+            assert!(timeout_ctx.signer.is_some(), "valid legacy Timeout signer");
+            let gate = pv_binding_gate(4);
+            let origin = AuthenticatedConsensusOrigin::new(pv_node_for(0), ValidatorId(0));
+            let mut engine = make_engine(ValidatorId(0), 4);
+            let view_before = engine.current_view();
+            let committed_before = engine.committed_height();
+            let mut stats = BinaryConsensusLoopInboundStats::default();
+            let metrics = make_metrics();
+
+            // Correctly signed proposal from validator 0, authenticated as
+            // validator 0. The Timeout context is valid and present; the
+            // Proposal/Vote authority is `None` (production wiring).
+            let p = signed_proposal(0, &fixture);
+            let detector = deliver_proposal_combined(
+                &mut engine,
+                &mut stats,
+                Some(&timeout_ctx),
+                None, // Proposal/Vote authority absent
+                &p,
+                &metrics,
+                Some(&origin),
+                Some(&gate),
+                ConsensusVerificationPolicy::Required,
+            );
+
+            // F6 admission succeeded exactly once (real gate, real origin).
+            assert_eq!(gate.metrics().accepted(), 1);
+            assert_eq!(stats.inbound_sender_binding_rejected_total, 0);
+            // Proposal/Vote authority-unavailable rejection incremented once.
+            assert_eq!(stats.inbound_proposal_verification_context_unavailable_total, 1);
+            // Cryptographic verification was NOT invoked (no PV authority to
+            // verify against): both acceptance and the latency-observation
+            // counter stay at zero.
+            assert_eq!(stats.inbound_proposal_verify_accepted, 0);
+            assert_eq!(stats.inbound_proposal_verify_rejected_total, 0);
+            assert_eq!(stats.proposal_vote_crypto_verify_latency_observations_total, 0);
+            // No delivery, engine acceptance, restore deferral, reconfig
+            // observation, vote aggregation, or outbound effect.
+            assert_eq!(stats.inbound_proposals_delivered, 0);
+            assert_eq!(stats.inbound_proposals_engine_accepted, 0);
+            assert_eq!(stats.restore_catchup_proposals_deferred, 0);
+            assert_eq!(stats.outbound_votes_sent, 0);
+            assert_eq!(stats.outbound_proposals_sent, 0);
+            assert!(detector.header_cache.is_empty());
+            // Engine state unchanged.
+            assert_eq!(engine.current_view(), view_before);
+            assert_eq!(engine.committed_height(), committed_before);
+        }
+
+        // D5-B: Authenticated Vote + valid Timeout authority only. Equivalent
+        // boundary, including no contribution to aggregation or QC formation.
+        #[test]
+        fn run422_d5b_authenticated_vote_timeout_only_rejects_before_crypto() {
+            let fixture = make_fixture(4);
+            let timeout_ctx = make_timeout_ctx(&fixture, Some(ValidatorId(0)));
+            assert!(timeout_ctx.signer.is_some());
+            let gate = pv_binding_gate(4);
+            let origin = AuthenticatedConsensusOrigin::new(pv_node_for(0), ValidatorId(0));
+            let mut engine = make_engine(ValidatorId(0), 4);
+            let view_before = engine.current_view();
+            let committed_before = engine.committed_height();
+            let mut stats = BinaryConsensusLoopInboundStats::default();
+            let metrics = make_metrics();
+
+            let v = signed_vote(0, &fixture);
+            deliver_vote_combined(
+                &mut engine,
+                &mut stats,
+                Some(&timeout_ctx),
+                None,
+                &v,
+                &metrics,
+                Some(&origin),
+                Some(&gate),
+                ConsensusVerificationPolicy::Required,
+            );
+
+            assert_eq!(gate.metrics().accepted(), 1);
+            assert_eq!(stats.inbound_sender_binding_rejected_total, 0);
+            assert_eq!(stats.inbound_vote_verification_context_unavailable_total, 1);
+            assert_eq!(stats.inbound_vote_verify_accepted, 0);
+            assert_eq!(stats.inbound_vote_verify_rejected_total, 0);
+            assert_eq!(stats.proposal_vote_crypto_verify_latency_observations_total, 0);
+            assert_eq!(stats.inbound_votes_delivered, 0);
+            assert_eq!(stats.inbound_votes_engine_accepted, 0);
+            assert_eq!(stats.outbound_votes_sent, 0);
+            // No aggregation / QC formation attributable to this frame.
+            assert_eq!(engine.current_view(), view_before);
+            assert_eq!(engine.committed_height(), committed_before);
+        }
+
+        // D5-C(proposal): F6 rejection precedes Proposal/Vote authority lookup.
+        // A mismatched authenticated sender is rejected as
+        // `claimed_sender_mismatch` exactly once, and the authority-unavailable
+        // and cryptographic-verification counters remain unchanged.
+        #[test]
+        fn run422_d5c_proposal_f6_mismatch_precedes_pv_authority_lookup() {
+            let fixture = make_fixture(4);
+            let timeout_ctx = make_timeout_ctx(&fixture, Some(ValidatorId(0)));
+            let gate = pv_binding_gate(4);
+            // Authenticated as validator 1, but the proposal claims proposer 0.
+            let origin = AuthenticatedConsensusOrigin::new(pv_node_for(1), ValidatorId(1));
+            let mut engine = make_engine(ValidatorId(0), 4);
+            let view_before = engine.current_view();
+            let mut stats = BinaryConsensusLoopInboundStats::default();
+            let metrics = make_metrics();
+
+            let p = signed_proposal(0, &fixture); // claimed proposer = 0
+            let detector = deliver_proposal_combined(
+                &mut engine,
+                &mut stats,
+                Some(&timeout_ctx),
+                None,
+                &p,
+                &metrics,
+                Some(&origin),
+                Some(&gate),
+                ConsensusVerificationPolicy::Required,
+            );
+
+            assert_eq!(stats.inbound_sender_binding_rejected_total, 1);
+            assert_eq!(
+                gate.metrics()
+                    .reject_count(ConsensusBindingReject::ClaimedSenderMismatch),
+                1
+            );
+            assert_eq!(gate.metrics().accepted(), 0);
+            // The Proposal/Vote authority lookup was never reached.
+            assert_eq!(stats.inbound_proposal_verification_context_unavailable_total, 0);
+            assert_eq!(stats.proposal_vote_crypto_verify_latency_observations_total, 0);
+            assert_eq!(stats.inbound_proposal_verify_accepted, 0);
+            assert_eq!(stats.inbound_proposals_delivered, 0);
+            assert_eq!(stats.inbound_proposals_engine_accepted, 0);
+            assert_eq!(stats.outbound_proposals_sent, 0);
+            assert!(detector.header_cache.is_empty());
+            assert_eq!(engine.current_view(), view_before);
+        }
+
+        // D5-C(vote): equivalent F6-precedes-authority ordering for Vote.
+        #[test]
+        fn run422_d5c_vote_f6_mismatch_precedes_pv_authority_lookup() {
+            let fixture = make_fixture(4);
+            let timeout_ctx = make_timeout_ctx(&fixture, Some(ValidatorId(0)));
+            let gate = pv_binding_gate(4);
+            let origin = AuthenticatedConsensusOrigin::new(pv_node_for(1), ValidatorId(1));
+            let mut engine = make_engine(ValidatorId(0), 4);
+            let mut stats = BinaryConsensusLoopInboundStats::default();
+            let metrics = make_metrics();
+
+            let v = signed_vote(0, &fixture); // validator_index = 0
+            deliver_vote_combined(
+                &mut engine,
+                &mut stats,
+                Some(&timeout_ctx),
+                None,
+                &v,
+                &metrics,
+                Some(&origin),
+                Some(&gate),
+                ConsensusVerificationPolicy::Required,
+            );
+
+            assert_eq!(stats.inbound_sender_binding_rejected_total, 1);
+            assert_eq!(
+                gate.metrics()
+                    .reject_count(ConsensusBindingReject::ClaimedSenderMismatch),
+                1
+            );
+            assert_eq!(gate.metrics().accepted(), 0);
+            assert_eq!(stats.inbound_vote_verification_context_unavailable_total, 0);
+            assert_eq!(stats.proposal_vote_crypto_verify_latency_observations_total, 0);
+            assert_eq!(stats.inbound_vote_verify_accepted, 0);
+            assert_eq!(stats.inbound_votes_delivered, 0);
+            assert_eq!(stats.outbound_votes_sent, 0);
+        }
+
+        // D5-D: Outbound suppression through the ACTUAL action-forwarding path.
+        //
+        // Rather than only asserting a signing helper returns `None`, this
+        // drives `forward_actions_to_facade` — the real engine→facade
+        // boundary — with engine-produced Broadcast actions and an absent
+        // Proposal/Vote authority, then asserts the recording facade observed
+        // NO Proposal/Vote broadcast or self-injection at all. There is no
+        // fallback to the Timeout signer (which is not even in scope for these
+        // `Option<&ProposalVoteAuthority>` calls).
+        #[test]
+        fn run422_d5d_outbound_forwarding_suppressed_without_pv_authority() {
+            #[derive(Default)]
+            struct PvRecordingFacade {
+                broadcast_proposals: std::sync::atomic::AtomicU64,
+                broadcast_votes: std::sync::atomic::AtomicU64,
+                direct_votes: std::sync::atomic::AtomicU64,
+                broadcast_msgs: std::sync::atomic::AtomicU64,
+            }
+            impl ConsensusNetworkFacade for PvRecordingFacade {
+                fn send_vote_to(&self, _to: ValidatorId, _v: &Vote) -> Result<(), NetworkError> {
+                    self.direct_votes
+                        .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    Ok(())
+                }
+                fn broadcast_vote(&self, _v: &Vote) -> Result<(), NetworkError> {
+                    self.broadcast_votes
+                        .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    Ok(())
+                }
+                fn broadcast_proposal(&self, _p: &BlockProposal) -> Result<(), NetworkError> {
+                    self.broadcast_proposals
+                        .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    Ok(())
+                }
+                fn broadcast_consensus_msg(
+                    &self,
+                    _msg: &ConsensusNetMsg,
+                ) -> Result<(), NetworkError> {
+                    self.broadcast_msgs
+                        .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    Ok(())
+                }
+            }
+
+            let facade = PvRecordingFacade::default();
+            let mut stats = BinaryConsensusLoopInboundStats::default();
+
+            // Engine-produced actions: a leader would emit a proposal and its
+            // paired self-vote and a directed vote. With the Proposal/Vote
+            // authority absent under `Required`, NONE may reach the wire.
+            let actions: Vec<ConsensusEngineAction<ValidatorId>> = vec![
+                ConsensusEngineAction::BroadcastProposal(Box::new(BlockProposal {
+                    header: base_header(0),
+                    qc: None,
+                    txs: vec![],
+                    signature: vec![],
+                })),
+                ConsensusEngineAction::BroadcastVote(base_vote(0)),
+                ConsensusEngineAction::SendVoteTo {
+                    to: ValidatorId(1),
+                    vote: base_vote(0),
+                },
+            ];
+
+            forward_actions_to_facade(
+                actions,
+                &facade,
+                &mut stats,
+                None, // Proposal/Vote authority absent (production)
+                ConsensusVerificationPolicy::Required,
+            );
+
+            use std::sync::atomic::Ordering::SeqCst;
+            // The facade was never asked to broadcast or self-inject anything.
+            assert_eq!(facade.broadcast_proposals.load(SeqCst), 0);
+            assert_eq!(facade.broadcast_votes.load(SeqCst), 0);
+            assert_eq!(facade.direct_votes.load(SeqCst), 0);
+            assert_eq!(facade.broadcast_msgs.load(SeqCst), 0);
+            // Outbound counters confirm suppression (not signing success).
+            assert_eq!(stats.outbound_proposals_sent, 0);
+            assert_eq!(stats.outbound_votes_sent, 0);
+            assert_eq!(stats.outbound_proposal_signing_success, 0);
+            assert_eq!(stats.outbound_vote_signing_success, 0);
+            assert_eq!(stats.outbound_proposal_verification_context_unavailable_total, 1);
+            // Two vote actions (broadcast + directed) each suppressed.
+            assert_eq!(stats.outbound_vote_verification_context_unavailable_total, 2);
+        }
+
+        // D5-F: Type/production reachability. A valid Timeout context can be
+        // used for its OWN message family, but there is no conversion, adapter,
+        // or implicit promotion from `TimeoutVerificationContext` into
+        // `ProposalVoteAuthority`. The Proposal/Vote handler/signers accept
+        // ONLY `Option<&ProposalVoteAuthority>`; the Timeout context is
+        // unreachable to them by type. (Distinct nominal types; publicly
+        // constructible fields are NOT themselves an unforgeable capability —
+        // the guarantee is type separation plus verified production wiring
+        // supplying `None`.)
+        #[test]
+        fn run422_d5f_timeout_context_usable_only_for_its_own_family() {
+            let fixture = make_fixture(4);
+            let timeout_ctx = make_timeout_ctx(&fixture, Some(ValidatorId(0)));
+            // A valid Timeout context carries a live signer + validator set for
+            // ITS OWN family (Timeout/NewView). Timeout-family signing and
+            // verification through this context is exercised by the run030
+            // Timeout/NewView tests; here we only assert the context is valid.
+            assert!(timeout_ctx.signer.is_some());
+            assert!(!timeout_ctx.validators.is_empty());
+            let metrics = make_metrics();
+
+            // But the SAME context cannot be handed to the Proposal/Vote
+            // handler: it takes `Option<&ProposalVoteAuthority>`. Production
+            // supplies `None`, and there is no `From`/adapter that would let a
+            // Timeout context stand in. A correctly signed, authenticated
+            // proposal is therefore still rejected authority-unavailable.
+            let gate = pv_binding_gate(4);
+            let origin = AuthenticatedConsensusOrigin::new(pv_node_for(0), ValidatorId(0));
+            let mut pv_stats = BinaryConsensusLoopInboundStats::default();
+            let mut pv_engine = make_engine(ValidatorId(0), 4);
+            let p = signed_proposal(0, &fixture);
+            deliver_proposal_combined(
+                &mut pv_engine,
+                &mut pv_stats,
+                Some(&timeout_ctx),
+                None, // no ProposalVoteAuthority exists from the Timeout ctx
+                &p,
+                &metrics,
+                Some(&origin),
+                Some(&gate),
+                ConsensusVerificationPolicy::Required,
+            );
+            assert_eq!(pv_stats.inbound_proposal_verification_context_unavailable_total, 1);
+            assert_eq!(pv_stats.inbound_proposal_verify_accepted, 0);
+        }
     }
 }
