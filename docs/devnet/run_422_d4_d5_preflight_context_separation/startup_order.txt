@@ -1,0 +1,76 @@
+RUN 422 D4 — STARTUP ORDER AND THE METRICS EXCEPTION
+Tested revision: e1b95948c6ce604aa97f317e88f8c8b2e41a6b2b
+File: crates/qbind-node/src/main.rs
+============================================================================
+
+CHRONOLOGICAL STARTUP ORDER (P2P mode)
+----------------------------------------------------------------------------
+
+  [main()]
+    ...CLI parse, hidden operator ceremonies, genesis boot/verify...
+    Run 422 genesis-authority containment guard refuses
+        --consensus-authority-from-genesis BEFORE reaching P2P.
+    (4604) B2 metrics HTTP endpoint block.
+    (4643) spawn_metrics_http_server_with_crypto(...)
+             *** OPTIONAL METRICS HTTP TASK STARTS HERE ***
+             This is EARLIER than the per-mode P2P function and its preflight.
+
+  [run_p2p_node()]  (5553)
+    (5563) eprintln "[binary] P2P mode: starting transport + consensus loop"
+             (printed at function START; NOT a preflight boundary)
+    ...
+    (7502) run_p2p_consensus_security_preflight(...)
+             +----------------------------------------------------------+
+             | fn body 5019-5551 — NO network service started here.      |
+             |  * loads local validator signer                           |
+             |  * builds peer SuiteAwareValidatorKeyProvider             |
+             |  * enforces timeout policy                                |
+             |  FATAL exits (fail closed) at:                            |
+             |    5150-5156  RequireOrFail + local signer not loaded     |
+             |    5372-5377  RequireOrFail + peer key-provider not built |
+             |    5472-5484  RequireOrFail + timeout verify unavailable  |
+             |  positive controls: "[binary] Run 032:" / "Run 033:"      |
+             +----------------------------------------------------------+
+    (7511) builder.build(config, validator_id).await
+             *** P2P SERVICE CONSTRUCTION *** (only if preflight didn't exit)
+    (7526) eprintln "[binary] P2P transport up. ..."   <- post-build boundary
+    ...peer dialing / consensus task startup follow...
+    (8051-8059) prepared preflight result destructured + consumed by wiring
+                (signer/provider reused; not reloaded).
+
+BOUNDARY DEFINITION USED BY THE D4 TESTS
+----------------------------------------------------------------------------
+  "Fatal consensus-security preflight failures occur before P2P SERVICE
+   CONSTRUCTION (builder.build at 7511), peer dialing, and consensus-task
+   startup."
+
+  A negative D4 case is accepted only when ALL hold:
+    (1) nonzero exit;
+    (2) the expected preflight diagnostic/positive-control marker
+        ("[binary] Run 032:" or "[binary] Run 033:") IS present — proving the
+        input reached the preflight, not a CLI-parse or unrelated earlier
+        failure;
+    (3) the post-build marker "[binary] P2P transport up." is ABSENT.
+  Absence of (3) alone is never treated as sufficient.
+
+  The positive D4 case additionally requires "[binary] P2P transport up." AND
+  "timeout verification ACTIVE" to be present with NO refusal — proving the
+  valid legacy configuration passes preflight and reaches P2P startup with a
+  live Timeout context while PV authority stays absent.
+
+THE METRICS EXCEPTION (EXPLICIT)
+----------------------------------------------------------------------------
+  Because the optional metrics HTTP server is spawned at main.rs:4643 —
+  earlier than run_p2p_node and its preflight — the D4 result MUST NOT be
+  described as "before any networking", "before all listeners", or "before
+  every service".
+
+  * The metrics HTTP task is loopback/opt-in (QBIND_METRICS_HTTP_ADDR) and is
+    unrelated to consensus admission or signing.
+  * It was NOT moved in this run; no unrelated metrics/storage startup was
+    relocated to strengthen wording.
+  * The preflight function itself (5019-5551) starts NO network service.
+
+  D4 scope label: PRE-P2P-AND-CONSENSUS-PREFLIGHT (preflight before P2P
+  service construction, peer dialing, and consensus-task startup), WITH the
+  optional metrics HTTP task acknowledged as started earlier.

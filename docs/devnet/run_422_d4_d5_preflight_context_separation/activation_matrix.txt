@@ -1,0 +1,49 @@
+RUN 422 D4/D5 — ACTIVATION MATRIX
+Which configuration enables which message-family authority.
+Tested revision: e1b95948c6ce604aa97f317e88f8c8b2e41a6b2b
+============================================================================
+
+Legend:
+  TIMEOUT   = TimeoutVerificationContext (Timeout / NewView / TC family).
+  PV        = ProposalVoteAuthority (Proposal / Vote family).
+  Required  = ConsensusVerificationPolicy::Required (production default).
+
+----------------------------------------------------------------------------
+Configuration                                  | TIMEOUT auth | PV auth
+----------------------------------------------------------------------------
+Production main.rs P2P wiring                   | as configured| ABSENT (None)
+  (run_p2p_consensus_security_preflight result) |  (per policy)| always None
+----------------------------------------------------------------------------
+Legacy --validator-consensus-key only           | PRESENT      | ABSENT
+  (matching signer, complete key spec)          | (active)     | (None)
+  => The intentional behavior change: legacy    |              |
+     Timeout configuration NO LONGER enables     |              |
+     Proposal/Vote verification or signing.      |              |
+----------------------------------------------------------------------------
+--require-timeout-verification + missing signer | FATAL exit   | n/a
+  (RequireOrFail)                                | (fail closed)|
+----------------------------------------------------------------------------
+--require-timeout-verification + invalid peer    | FATAL exit   | n/a
+  key-provider (bad hex / unsupported suite /     | (fail closed)|
+  local-key mismatch)                            |              |
+----------------------------------------------------------------------------
+--consensus-authority-from-genesis (any)         | REFUSED early| REFUSED
+  (Run 422 containment guard, still present)     | (fail closed)| (disabled)
+----------------------------------------------------------------------------
+Test-only ProposalVoteAuthority fixture          | independent  | PRESENT
+  (make_ctx in mod run420; NOT reachable through | of PV        | (test only)
+   production configuration)                     |              |
+----------------------------------------------------------------------------
+
+KEY PROPERTIES
+  * No configuration path promotes a TIMEOUT context into PV authority. The
+    two are nominally distinct types with no conversion or production adapter.
+  * PV authority is ABSENT on every production path in this run. It is present
+    only via explicit test fixtures.
+  * Under Required + PV absent, inbound Proposal/Vote are rejected
+    authority-unavailable and outbound Proposal/Vote are suppressed
+    (fail closed), independently of whether a valid TIMEOUT context exists.
+  * The Timeout/NewView policy (OptionalActivate vs RequireOrFail) is
+    preserved exactly; only its former ability to also enable Proposal/Vote
+    was removed.
+  * Genesis-authority activation remains DISABLED.

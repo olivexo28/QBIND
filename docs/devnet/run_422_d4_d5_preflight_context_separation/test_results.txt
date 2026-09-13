@@ -1,0 +1,60 @@
+RUN 422 D4/D5 — TEST RESULTS
+Tested revision: e1b95948c6ce604aa97f317e88f8c8b2e41a6b2b
+Profile: default test profile unless noted. All targets exit 0 (pass).
+============================================================================
+
+D5 COMBINED-CONTEXT (NEW) — crates/qbind-node/src/binary_consensus_loop.rs
+  run422_d5a_authenticated_proposal_timeout_only_rejects_before_crypto ...... ok
+  run422_d5b_authenticated_vote_timeout_only_rejects_before_crypto .......... ok
+  run422_d5c_proposal_f6_mismatch_precedes_pv_authority_lookup .............. ok
+  run422_d5c_vote_f6_mismatch_precedes_pv_authority_lookup .................. ok
+  run422_d5d_outbound_forwarding_suppressed_without_pv_authority ............ ok
+  run422_d5f_timeout_context_usable_only_for_its_own_family ................. ok
+
+D5 PRE-EXISTING MISSING-AUTHORITY (retained)
+  run422_d5_valid_timeout_ctx_does_not_populate_pv_authority ................ ok
+  run422_d5_authenticated_proposal_rejected_when_pv_authority_absent ........ ok
+  run422_d5_authenticated_vote_rejected_when_pv_authority_absent ............ ok
+  run422_d5_outbound_proposal_vote_suppressed_without_pv_authority .......... ok
+  -> cargo test --lib run420::run422_d5 : 10 passed; 0 failed
+
+  binary_consensus_loop full lib module : 104 passed; 0 failed
+
+D4 STARTUP-ORDERING (NEW) — tests/run_422_d4_startup_ordering_tests.rs
+  require_or_fail_missing_local_signer_refused_before_p2p .................... ok
+  require_or_fail_invalid_peer_key_provider_refused_before_p2p .............. ok
+  require_or_fail_unsupported_suite_refused_before_p2p ...................... ok
+  require_or_fail_local_key_mismatches_signer_refused_before_p2p ............ ok
+  valid_legacy_config_passes_preflight_and_reaches_p2p_startup .............. ok
+  -> 5 passed; 0 failed
+  (Each negative case: nonzero exit + "[binary] Run 032/033:" positive
+   control PRESENT + "[binary] P2P transport up." ABSENT. Positive case:
+   "timeout verification ACTIVE" + "P2P transport up." PRESENT, no refusal.)
+
+REGRESSION / GUARD SUITES (existing, re-run)
+  run_422_startup_refusal_tests ............................. 4 passed; 0 failed
+  run_422_genesis_consensus_authority_tests ................ 15 passed; 0 failed
+  run_420_production_policy_reachability_tests .............. 3 passed; 0 failed
+  run_418_authenticated_peer_consensus_sender_binding_tests  18 passed; 0 failed
+  run_418_newview_demux_chain_integration_tests ............ 3 passed; 0 failed
+  c4_b6_p2p_binary_path_interconnect_tests ................. 5 passed; 0 failed
+  b9_late_peer_connect_proposal_reemit_tests ............... 6 passed; 0 failed
+  b10_engine_acceptance_qc_closure_tests ................... 5 passed; 0 failed
+  b11_consensus_net_prometheus_coverage_tests .............. 5 passed; 0 failed
+
+BUILD / CHECK
+  cargo check -p qbind-node (default features) ............. exit 0
+  cargo build --release -p qbind-node --bin qbind-node .... exit 0
+
+NOT RUN TO COMPLETION
+  CodeQL / dedicated security scan for these changes — status NOT-RUN; no
+  zero-alert claim. (See summary.txt / commands.txt.)
+  m16_epoch_transition_hardening_tests — requires --features test-utils
+  (pre-existing, unrelated); recorded separately, not part of the production
+  check / release build.
+
+INTERPRETATION NOTE
+  These are default-test-profile results (including CARGO_BIN_EXE_qbind-node
+  PROCESS tests) plus a release build. They are CODE + TEST evidence. They are
+  NOT standalone release-binary adversarial evidence and NOT public-network
+  runtime evidence.

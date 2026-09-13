@@ -1,0 +1,128 @@
+RUN 422 D4/D5 — SUMMARY AND VERDICT
+============================================================================
+
+RESULT=POSITIVE-FOR-CONSENSUS-SECURITY-PREFLIGHT-AND-CONTEXT-SEPARATION-CODE-TEST
+D4_STATUS=PRE-P2P-AND-CONSENSUS-PREFLIGHT-CODE-TEST-POSITIVE
+D5_STATUS=MESSAGE-FAMILY-AUTHORITY-SEPARATION-CODE-TEST-POSITIVE
+GENESIS_AUTHORITY_ACTIVATION=DISABLED-PENDING-REMAINING-BOUNDARIES
+LEGACY_TIMEOUT_CONTEXT=EXISTING-POLICY-PRESERVED
+PROPOSAL_VOTE_AUTHORITY_FROM_LEGACY_CLI=DISALLOWED
+CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED
+SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO
+
+The implementation, validation, and runtime-evidence axes are kept separate:
+the POSITIVE label above is a CODE + TEST result. It is not a runtime,
+release-binary, or public-deployment claim.
+
+----------------------------------------------------------------------------
+WHAT WAS PROVED (D5 — message-family authority separation)
+----------------------------------------------------------------------------
+
+The reviewed D5 tests constructed a valid TimeoutVerificationContext but never
+passed it through the Proposal/Vote path under test (the helpers passed None
+for the Timeout context, the authenticated origin, and the binding gate). This
+continuation adds COMBINED-CONTEXT tests that drive, through the real inbound
+handler `handle_inbound_consensus_msg` in a single invocation:
+
+  * a valid TimeoutVerificationContext (with a live signer + key provider);
+  * proposal_vote_authority = None;
+  * ConsensusVerificationPolicy::Required;
+  * a real PeerConsensusBindingGate + a matching AuthenticatedConsensusOrigin;
+  * encoded Proposal and Vote messages.
+
+Results (see test_results.txt / message_family_matrix.txt):
+
+  A  Authenticated Proposal, Timeout authority only:
+       F6 admission succeeds exactly once (gate.accepted()==1),
+       Proposal/Vote authority-unavailable increments exactly once,
+       cryptographic-verification latency observations stay 0,
+       no delivery/engine/reconfig/restore-deferral/outbound effect,
+       engine view + committed height unchanged.
+  B  Authenticated Vote, Timeout authority only: the equivalent Vote
+       boundary, with no contribution to aggregation or QC formation.
+  C  F6 rejection precedes Proposal/Vote authority lookup: a mismatched
+       authenticated sender increments claimed_sender_mismatch exactly once,
+       while authority-unavailable and crypto-verify counters stay 0 (proposal
+       AND vote variants). A recording binding-gate metric proves the crypto
+       verifier was never reached.
+  D  Outbound suppression through the ACTUAL forward_actions_to_facade
+       boundary (not merely a helper returning None): a recording facade
+       observes NO Proposal/Vote broadcast, NO self-injection, NO directed
+       vote; there is no fallback to the Timeout signer; the outbound
+       authority-unavailable counters increment instead.
+  F  Type / production reachability: a valid Timeout context is usable only
+       for its own family; there is no conversion or adapter promoting it into
+       ProposalVoteAuthority (a compile-time property of the distinct nominal
+       types), and a correctly-signed authenticated Proposal is still rejected
+       authority-unavailable.
+
+Distinction preserved throughout: a correctly SIGNED message is separate from
+an AUTHENTICATED transport origin; one does not establish the other. Publicly
+constructible struct fields are NOT themselves an unforgeable capability — the
+guarantee is distinct types PLUS verified production construction/wiring that
+supplies proposal_vote_authority = None.
+
+----------------------------------------------------------------------------
+WHAT WAS PROVED (D4 — startup ordering)
+----------------------------------------------------------------------------
+
+Bounded process tests drive the real qbind-node binary via
+CARGO_BIN_EXE_qbind-node with valid temporary DevNet configuration:
+
+  * RequireOrFail + missing local signer -> preflight FATAL, exit nonzero,
+    BEFORE the P2P-transport boundary.
+  * RequireOrFail + invalid peer key-provider (malformed hex) -> FATAL before
+    P2P.
+  * RequireOrFail + unsupported consensus suite id -> FATAL before P2P.
+  * RequireOrFail + local key mismatches the loaded signer -> FATAL before P2P.
+  * VALID legacy configuration (matching signer + complete
+    --validator-consensus-key, single active validator) -> passes preflight,
+    activates the Timeout/NewView context ("timeout verification ACTIVE"), and
+    reaches the P2P-transport boundary ("[binary] P2P transport up.").
+
+Each negative case asserts a positive control (the "[binary] Run 032:" /
+"[binary] Run 033:" preflight marker IS present) so the refusal is attributed
+to the preflight, not to CLI parsing or an unrelated earlier check. Absence of
+the P2P-transport marker alone is never treated as sufficient. Source ordering
+is recorded in source_trace.txt / startup_order.txt.
+
+Positive-case wiring: the prepared ConsensusSecurityPreflight result is
+consumed by production wiring (main.rs) WITHOUT reloading signer/provider
+material — see source_trace.txt for the single-preparation source trace. This
+is a source trace combined with the behavioral "reaches P2P startup" proof; it
+is NOT a claim manufactured from an unrelated fixture counter.
+
+----------------------------------------------------------------------------
+METRICS EXCEPTION (see startup_order.txt)
+----------------------------------------------------------------------------
+
+main() may start the optional metrics HTTP server BEFORE entering the per-mode
+P2P function and its consensus-security preflight. Therefore the D4 boundary is
+"preflight before P2P service construction, peer dialing, and consensus-task
+startup" — NOT before "any networking", "all listeners", or "every service".
+The preflight function itself starts no network service. Unrelated
+metrics/storage startup was NOT moved to strengthen the wording.
+
+----------------------------------------------------------------------------
+SECURITY (CodeQL) ANALYSIS STATUS
+----------------------------------------------------------------------------
+
+CodeQL / dedicated security-scan tooling was NOT executed to completion in
+this environment for these changes. No zero-alert conclusion is asserted. A
+successful code review is NOT a substitute for security analysis. This gap is
+reported here separately from the positive scoped behavioral result. Standard
+per-target clippy was run: the changed code introduced no new warnings (see
+commands.txt); the pre-existing m16_epoch_transition_hardening_tests target
+requires --features test-utils to compile and is unrelated to this change.
+
+----------------------------------------------------------------------------
+PRESERVED LIMITATIONS / READINESS (UNCHANGED)
+----------------------------------------------------------------------------
+
+Genesis activation DISABLED. D6/D7 UNRESOLVED. F3/F4/F8 not fully
+remediated/activated; F6 partial; F1/F2/F5/F7 unresolved (F5 not closed).
+RS1 + C4/C5 OPEN. M4/M6/S5/S7 Yellow. Public DevNet NO-GO. No live-seed /
+TestNet / MainNet readiness claim. Run 423 NOT started. Configured-authority
+release-binary adversarial evidence NOT captured. Intentional liveness
+limitation: fail-closed Proposal/Vote until a separately validated authority
+is activated.

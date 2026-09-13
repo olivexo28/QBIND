@@ -1,0 +1,110 @@
+RUN 422 D4/D5 — SOURCE TRACE
+Tested revision: e1b95948c6ce604aa97f317e88f8c8b2e41a6b2b
+All line numbers are for that revision.
+============================================================================
+
+D4 — CONSENSUS-SECURITY PREFLIGHT BEFORE P2P SERVICE CONSTRUCTION
+----------------------------------------------------------------------------
+File: crates/qbind-node/src/main.rs
+
+  4604       B2 metrics HTTP endpoint block (gated by QBIND_METRICS_HTTP_ADDR).
+  4643       spawn_metrics_http_server_with_crypto(...)
+             --> OPTIONAL METRICS HTTP TASK STARTS HERE, in main(), BEFORE the
+                 per-mode P2P function. This is the documented "metrics
+                 exception": the D4 boundary is NOT "before any networking".
+
+  5553  async fn run_p2p_node(...)                 <-- per-mode P2P entry.
+  5563       eprintln!("[binary] P2P mode: starting transport + consensus loop ...")
+             --> printed at the START of run_p2p_node, BEFORE the preflight.
+                 Therefore this marker is NOT the preflight boundary and is
+                 deliberately not used as the D4 boundary in tests.
+
+  5019  fn run_p2p_consensus_security_preflight(...) -> ConsensusSecurityPreflight
+             Loads the local validator signer, builds the peer-side
+             SuiteAwareValidatorKeyProvider, and enforces the timeout policy.
+             This function starts NO network service.
+    5075       RequireOrFail selected when args.require_timeout_verification.
+    5092/5115/5128  "[binary] Run 032:" signer-load positive-control markers.
+    5150-5156  FATAL exit: RequireOrFail + local signer not loaded.
+    5342/5349/5359  "[binary] Run 033:" key-provider positive-control markers.
+    5372-5377  FATAL exit: RequireOrFail + peer key-provider not built
+               (covers unsupported suite / invalid hex / mismatch surfaced by
+                build_validator_set_and_key_provider).
+    5472-5484  FATAL exit: RequireOrFail + timeout verification unavailable.
+    5499       "[binary] Run 033: timeout verification ACTIVE ..." (positive).
+    5541       returns { timeout_verification_ctx, proposal_vote_authority:None }.
+
+  7502  let consensus_security_preflight = run_p2p_consensus_security_preflight(...)
+             --> PREFLIGHT CALL SITE. All the FATAL exits above fire here,
+                 BEFORE builder.build() below.
+  7511  let node_context = match builder.build(config, validator_id).await {...}
+             --> P2P SERVICE CONSTRUCTION. Only reached if preflight did not
+                 exit.
+  7526  eprintln!("[binary] P2P transport up. ...")
+             --> POST-BUILD boundary marker. Its ABSENCE (together with a
+                 present "Run 032/033" positive control and a nonzero exit)
+                 demonstrates refusal before P2P service construction.
+
+  8051-8059  The prepared ConsensusSecurityPreflight is DESTRUCTURED here and
+             consumed by production wiring:
+                 ConsensusSecurityPreflight {
+                     timeout_verification_ctx: verification_ctx,   // 8057
+                     ..
+                 } = consensus_security_preflight;                 // 8059
+             --> The signer/provider material prepared at 7502 is REUSED; it is
+                 NOT reloaded after preparation (no second
+                 load_validator_signer_from_config / key-provider build occurs
+                 on this path between 7502 and consumption). Single-preparation
+                 is a source property here, corroborated by the positive
+                 process test reaching "P2P transport up.".
+  8068       proposal_vote_authority stays None on the production path
+             (comment: "run_p2p_consensus_security_preflight never builds it").
+
+Ordering conclusion:
+  metrics HTTP (4643, main)  <  run_p2p_node start (5563)  <  preflight call +
+  all FATAL exits (7502 / 5150.. 5372.. 5472..)  <  builder.build() (7511)  <
+  "P2P transport up." (7526)  <  preflight result consumed (8051-8059).
+
+D5 — MESSAGE-FAMILY AUTHORITY SEPARATION
+----------------------------------------------------------------------------
+File: crates/qbind-node/src/binary_consensus_loop.rs
+
+  Types (nominally distinct; no conversion/adapter between them):
+    TimeoutVerificationContext   -- Timeout / NewView / TimeoutCertificate.
+    ProposalVoteAuthority        -- Proposal / Vote only.
+  BinaryConsensusLoopIo fields:
+    verification_ctx        : Option<Arc<TimeoutVerificationContext>>
+                              (Timeout/NewView family only).
+    proposal_vote_authority : Option<Arc<ProposalVoteAuthority>>
+                              (Proposal/Vote family only; production = None).
+    verification_policy     : ConsensusVerificationPolicy (production=Required).
+
+  Inbound handler `handle_inbound_consensus_msg`:
+    1. F6 sender binding runs FIRST via binding_gate.authorize(origin, claimed);
+       a claimed/authenticated mismatch yields ClaimedSenderMismatch and the
+       frame is dropped BEFORE any Proposal/Vote authority lookup.
+    2. Proposal/Vote branch consults `proposal_vote_authority`. Under Required a
+       None authority is authority-unavailable -> reject (fail closed) WITHOUT
+       reaching cryptographic verification.
+    Timeout/NewView branch consults `verification_ctx` independently; a valid
+    Timeout context here does NOT populate or stand in for
+    proposal_vote_authority.
+
+  Outbound `forward_actions_to_facade`:
+    BroadcastProposal / BroadcastVote / SendVoteTo are gated by
+    sign_proposal_for_broadcast / sign_vote_for_broadcast, which return None
+    (suppress the emission) when proposal_vote_authority is absent under
+    Required, incrementing outbound_*_verification_context_unavailable_total.
+    There is no fallback to the Timeout signer.
+
+  Comment corrections in this run (present-tense claims fixed to name the
+  proposal_vote_authority dependency rather than verification_ctx for the
+  Proposal/Vote family): the ConsensusVerificationPolicy doc block, the
+  verification_ctx and verification_policy field docs, and the inbound-handler
+  comment. Historical Run 420-422 framing is retained and separated from the
+  current successor behavior.
+
+Production reachability guard (unchanged, exercised):
+  crates/qbind-node/tests/run_420_production_policy_reachability_tests.rs
+  asserts production selects Required and LocalFixtureUnsigned is test-only /
+  not reachable through production configuration.
