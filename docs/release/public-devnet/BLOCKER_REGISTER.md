@@ -119,10 +119,16 @@ verification is mutually rejected. Activation stays DISABLED: production
 `proposal_vote_authority` remains `None`, no CLI/env/override was added, and the
 runtime-ChainId→wire-chain_id mapping is UNRESOLVED (the explicit
 `expected_wire_chain_id` is supplied only from trusted fixtures/config).
-**D7** genesis-static/epoch-restore authority lifetime is now closed on the CODE +
-TEST axis (`RESULT=POSITIVE-FOR-GENESIS-STATIC-AUTHORITY-LIFETIME-CODE-TEST`; an
-additive fail-closed `authorize_configuration` guard authorizing only the founding
-epoch-0 configuration, 12 real-ML-DSA-44 section-12.E tests; activation stays
+**D7** genesis-static/epoch-restore authority lifetime is **PARTIAL** on the CODE +
+TEST axis (`D7_STATUS=PARTIAL-CODE-TEST / PRODUCTION-LIFECYCLE-UNAVAILABLE`; the
+earlier POSITIVE/closed label is WITHDRAWN and `DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED`).
+This pass tightens only the section-2 trust boundary — a private,
+construction-enforced `authorized_epoch` and an explicit `LocalAuthorizationState`
+whose unavailable cases `authorize_current_state` rejects (epoch 0 never inferred
+from missing/uncommitted state); the 14 tests remain limited configuration/snapshot
+tests and `authorize_configuration` is an identity-equality guard. Live
+Proposal/Vote freshness enforcement, concurrent invalidation, recovery matrices and
+durable anti-rollback are NOT delivered. Activation stays
 DISABLED and the release binary still refuses `--consensus-authority-from-genesis`
 with exit 1). Downstream engine/QC still
 reconstruct the legacy preimage (v2 boundary success is not QC/engine
@@ -160,5 +166,5 @@ MainNet readiness is claimed.**
 - `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422.md` — Run 422 genesis-bound consensus authority activation (code/test) for findings F3/F4/F8.
 - `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D4_D5.md` — Run 422 D4/D5 successor: pre-P2P/consensus preflight (D4) and message-family authority separation (D5) code/test-positive; D6/D7 unresolved.
 - `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D6.md` — Run 422 D6 successor: versioned Proposal/Vote signing-domain isolation (v2) code/test-positive; activation DISABLED; D7 unresolved.
-- `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md` — Run 422 D7 successor: genesis-static / epoch-restore authority-lifetime guard code/test-positive; activation DISABLED; RS1/C4/C5 stay OPEN.
+- `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md` — Run 422 D7 successor: genesis-static / epoch-restore authority-lifetime guard code/test **PARTIAL** (POSITIVE closure withdrawn; DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED); activation DISABLED; RS1/C4/C5 stay OPEN.
 - `docs/whitepaper/contradiction.md` — contradiction ledger.

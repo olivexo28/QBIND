@@ -138,9 +138,10 @@ Companion documents:
   unresolved**; CodeQL **NOT** run to a zero-alert conclusion; **RS1 stays OPEN /
   launch-blocking**. Run 423 not started.
 - `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md` — Run 422 **D7 successor
-  (code/test)**, archive `docs/devnet/run_422_d7_authority_lifetime/`. Closes
-  **D7** genesis-static / epoch-restore authority lifetime on the code+test axis
-  (`RESULT=POSITIVE-FOR-GENESIS-STATIC-AUTHORITY-LIFETIME-CODE-TEST`): an additive,
+  (code/test)**, archive `docs/devnet/run_422_d7_authority_lifetime/`. Records
+  **D7** genesis-static / epoch-restore authority lifetime as **PARTIAL** on the
+  code+test axis (`D7_STATUS=PARTIAL-CODE-TEST / PRODUCTION-LIFECYCLE-UNAVAILABLE`;
+  earlier POSITIVE closure WITHDRAWN; `DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED`): an additive,
   fail-closed `GenesisConsensusAuthority::authorize_configuration` guard
   authorizes **only** the founding epoch-0 configuration and rejects any changed
   chain / genesis / membership / commitment or any non-founding epoch with a

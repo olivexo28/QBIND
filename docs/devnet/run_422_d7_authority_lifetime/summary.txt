@@ -3,8 +3,9 @@ RUN 422 D7 — SUMMARY AND VERDICT
 
 EXACT VERDICT LABEL BLOCK
 ----------------------------------------------------------------------------
-RESULT=POSITIVE-FOR-GENESIS-STATIC-AUTHORITY-LIFETIME-CODE-TEST
-D7_STATUS=GENESIS-STATIC-LIFETIME-STALE-KEY-GUARD-CODE-TEST-POSITIVE
+RESULT=PARTIAL-GENESIS-STATIC-AUTHORITY-LIFETIME-CODE-TEST
+D7_STATUS=PARTIAL-CODE-TEST / PRODUCTION-LIFECYCLE-UNAVAILABLE
+DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED
 GENESIS_AUTHORITY_ACTIVATION=DISABLED
 PROPOSAL_VOTE_AUTHORITY_FROM_LEGACY_CLI=DISALLOWED
 LEGACY_TIMEOUT_CONTEXT=EXISTING-POLICY-PRESERVED
@@ -68,9 +69,10 @@ session eviction, or governance mutation is enabled.
 TEST EVIDENCE (see test_results.txt / lifetime_matrix.txt)
 ----------------------------------------------------------------------------
 New integration file
-`crates/qbind-node/tests/run_422_d7_authority_lifetime_tests.rs` — 12 tests,
-real ML-DSA-44 backend and real genesis parsing, all passing. Maps directly
-to task section 12.E: snapshot immutability under source-file change;
+`crates/qbind-node/tests/run_422_d7_authority_lifetime_tests.rs` — 14 tests
+(the original 12 limited configuration/snapshot tests plus 2 section-2
+corrective freshness tests), real ML-DSA-44 backend and real genesis parsing,
+all passing. The original 12 map to task section 12.E: snapshot immutability under source-file change;
 parallel non-mixing of keys/suites/membership/results; restart/restore
 identity mismatch fail-closed; changed-configuration/epoch fail-closed;
 malformed/extreme input cannot panic; fixture bypass unreachable.

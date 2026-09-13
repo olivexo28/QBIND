@@ -134,8 +134,9 @@ decision is **NO-GO / NOT launch-ready** (`LAUNCH_GO_NO_GO.md`).
    legacy preimage. **D7 remains unresolved; RS1/C4/C5 stay OPEN.** Run 423 not
    started.
    **Run 422 D7 SUCCESSOR (code/test):** the genesis-static / epoch-restore
-   authority-lifetime blocker is now closed on the code+test axis
-   (`RESULT=POSITIVE-FOR-GENESIS-STATIC-AUTHORITY-LIFETIME-CODE-TEST`;
+   authority-lifetime blocker is **PARTIAL** on the code+test axis
+   (`D7_STATUS=PARTIAL-CODE-TEST / PRODUCTION-LIFECYCLE-UNAVAILABLE`; earlier POSITIVE closure WITHDRAWN;
+   `DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED`;
    `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md`, archive
    `docs/devnet/run_422_d7_authority_lifetime/`): an additive, fail-closed
    `GenesisConsensusAuthority::authorize_configuration` guard authorizes **only**
@@ -148,7 +149,7 @@ decision is **NO-GO / NOT launch-ready** (`LAUNCH_GO_NO_GO.md`).
    extreme input, fixture-bypass unreachable). Activation stays DISABLED
    (production `proposal_vote_authority` remains `None`; the release binary still
    refuses `--consensus-authority-from-genesis` with exit 1; no CLI/env/override).
-   **D7 closed code/test; RS1/C4/C5 stay OPEN.** Run 423 not started.
+   **D7 PARTIAL code/test (POSITIVE closure withdrawn); RS1/C4/C5 stay OPEN.** Run 423 not started.
 9. `docs/whitepaper/contradiction.md` — contradiction ledger.
 10. `docs/release/public-devnet/BLOCKER_REGISTER.md` — open blockers (incl. **RS1**).
 

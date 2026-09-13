@@ -5,8 +5,9 @@ Evidence archive README
 VERDICT (see summary.txt for the exact label block)
 ============================================================================
 
-RESULT=POSITIVE-FOR-GENESIS-STATIC-AUTHORITY-LIFETIME-CODE-TEST
-D7_STATUS=GENESIS-STATIC-LIFETIME-STALE-KEY-GUARD-CODE-TEST-POSITIVE
+RESULT=PARTIAL-GENESIS-STATIC-AUTHORITY-LIFETIME-CODE-TEST
+D7_STATUS=PARTIAL-CODE-TEST / PRODUCTION-LIFECYCLE-UNAVAILABLE
+DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED
 GENESIS_AUTHORITY_ACTIVATION=DISABLED
 PROPOSAL_VOTE_AUTHORITY_FROM_LEGACY_CLI=DISALLOWED
 LEGACY_TIMEOUT_CONTEXT=EXISTING-POLICY-PRESERVED
@@ -17,6 +18,16 @@ This archive is a CODE + TEST evidence archive. It contains no public
 deployment, external-network, or standalone release-binary adversarial
 evidence. Security (CodeQL) analysis status is reported separately in
 summary.txt and is NOT converted into a zero-alert conclusion.
+
+CORRECTIVE (this pass): the earlier POSITIVE D7-closure label is WITHDRAWN.
+The tests in this archive are limited configuration / snapshot tests; they do
+not demonstrate a production lifecycle, live Proposal/Vote freshness
+enforcement, concurrent invalidation reaching an external effect, or durable
+anti-rollback. D7 remains PARTIAL. This pass tightens only the section-2 trust
+boundary (private construction-enforced authorized_epoch; an explicit,
+independently-held current-state type whose unavailable cases are rejected so
+epoch 0 is never inferred from missing/uncommitted state). See
+docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md for the full corrective.
 
 ============================================================================
 SCOPE
