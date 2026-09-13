@@ -104,6 +104,9 @@ use qbind_wire::consensus::{BlockProposal, Vote};
 use qbind_wire::pv_signing_domain::ProposalVoteSigningDomainV2;
 
 use crate::consensus_network_facade::ConsensusNetworkFacade;
+use crate::genesis_consensus_authority::{
+    AuthorizationTicket, CurrentAuthorizationOwner, FreshnessError,
+};
 use crate::metrics::{
     BinaryViewTimeoutRun030Snapshot, BinaryViewTimeoutRun420Snapshot, NodeMetrics,
 };
@@ -1437,6 +1440,32 @@ pub struct BinaryConsensusLoopInboundStats {
     pub inbound_vote_verification_context_unavailable_total: u64,
     pub outbound_proposal_verification_context_unavailable_total: u64,
     pub outbound_vote_verification_context_unavailable_total: u64,
+    // Run 422 D7-A: independent current-authorization freshness enforcement on
+    // the inbound Proposal/Vote paths. These count messages rejected
+    // fail-closed BECAUSE the node's independently-maintained current
+    // authorization state (obtained through the current-authorization owner,
+    // never a caller-declared snapshot) refused admission — kept strictly
+    // distinct from F6 sender-binding, crypto-verify, and
+    // authority-unavailable outcomes. All stay zero unless a current-
+    // authorization owner is wired (production leaves it unwired). Labels are
+    // bounded and carry no attacker-controlled content.
+    //
+    //   * `*_current_state_unavailable_total`: current state was missing
+    //     storage / no committed epoch (present authority, but no established
+    //     current authorization) — fail-closed, epoch never inferred.
+    //   * `*_authority_superseded_total`: current state is established but
+    //     diverged from the candidate authority (different chain / genesis /
+    //     membership / commitment / epoch, including a same-epoch membership
+    //     or key replacement) — the candidate authority is stale.
+    //   * `*_authority_stale_before_effect_total`: the admitting freshness
+    //     check succeeded but the owner's current state was replaced before the
+    //     effect (generation advanced), so the check was refused re-use.
+    pub inbound_proposal_current_state_unavailable_total: u64,
+    pub inbound_proposal_authority_superseded_total: u64,
+    pub inbound_proposal_authority_stale_before_effect_total: u64,
+    pub inbound_vote_current_state_unavailable_total: u64,
+    pub inbound_vote_authority_superseded_total: u64,
+    pub inbound_vote_authority_stale_before_effect_total: u64,
 }
 
 /// Transition state for the bounded "restore-catchup mode → normal
@@ -2275,6 +2304,7 @@ pub async fn run_binary_consensus_loop_with_io(
                                 &mut restore_mode,
                                 verification_ctx.as_deref(),
                                 proposal_vote_authority.as_deref(),
+                                None, // Run 422 D7-A: current-authorization owner (unwired)
                                 &mut reconfig_detector,
                                 origin.as_ref(),
                                 binding_gate.as_deref(),
@@ -3257,6 +3287,16 @@ pub(crate) fn handle_inbound_consensus_msg(
     // verification and the outbound signing of engine-produced actions consult
     // ONLY this argument, never `verification_ctx` (Timeout/NewView family).
     pv_authority: Option<&ProposalVoteAuthority>,
+    // Run 422 D7-A: the node's independently-maintained current Proposal/Vote
+    // authorization owner. When wired (Some) alongside a present
+    // `pv_authority`, the inbound Proposal/Vote paths obtain current
+    // authorization THROUGH this owner (never a caller-declared snapshot) and
+    // reject fail-closed — before domain/crypto admission, delivery, restore
+    // deferral, reconfig observation, engine/aggregation/QC mutation, and any
+    // outbound action — when the current state is unavailable or superseded.
+    // Production leaves this `None` (as it leaves `pv_authority` `None`),
+    // preserving the existing fail-closed missing-authority behavior.
+    current_auth: Option<&CurrentAuthorizationOwner>,
     reconfig_detector: &mut BinaryReconfigDetector,
     origin: Option<&AuthenticatedConsensusOrigin>,
     binding_gate: Option<&PeerConsensusBindingGate>,
@@ -3359,8 +3399,40 @@ pub(crate) fn handle_inbound_consensus_msg(
                     // outbound action. Under the test-only
                     // `LocalFixtureUnsigned` policy the historical unsigned
                     // LocalMesh passthrough is preserved.
+                    //
+                    // Run 422 D7-A: when a current-authorization owner is wired
+                    // alongside a present authority, the freshness admission
+                    // below (inside the `Some(ctx)` arm) runs BEFORE crypto and
+                    // yields a generation-bound ticket that is re-confirmed just
+                    // before delivery/engine mutation.
+                    let mut proposal_freshness_ticket: Option<AuthorizationTicket> = None;
                     match pv_authority {
                         Some(ctx) => {
+                            // Run 422 D7-A: obtain current authorization through
+                            // the independently-maintained owner BEFORE any
+                            // domain/crypto work, delivery, restore deferral,
+                            // reconfig observation, engine mutation, or outbound
+                            // action. A present authority with an unavailable or
+                            // superseded current authorization is rejected
+                            // fail-closed here. When no owner is wired the
+                            // existing behavior is preserved unchanged.
+                            if let Some(owner) = current_auth {
+                                match owner.admit() {
+                                    Ok(ticket) => {
+                                        proposal_freshness_ticket = Some(ticket);
+                                    }
+                                    Err(e) => {
+                                        record_proposal_current_auth_reject(stats, &e);
+                                        eprintln!(
+                                            "[binary-consensus] Run 422 D7-A: inbound proposal \
+                                             REJECTED (current authorization) height={} \
+                                             proposer={:?} reason={} — fail-closed, not delivered",
+                                            proposal.header.height, from, e,
+                                        );
+                                        return;
+                                    }
+                                }
+                            }
                             // Run 422 D6: verify the inbound proposal through the
                             // message-bound versioned-domain interface. The
                             // verifier recomputes the canonical v2 preimage from
@@ -3458,6 +3530,30 @@ pub(crate) fn handle_inbound_consensus_msg(
                             // LocalFixtureUnsigned: historical passthrough.
                         }
                     }
+                    // Run 422 D7-A: re-confirm the freshness admission
+                    // immediately before ANY effect (restore deferral counting,
+                    // delivery, reconfig observation, engine mutation, outbound).
+                    // If the owner's current authorization state was replaced
+                    // since admission (generation advanced), the earlier check
+                    // must not be reused: reject fail-closed. This runs even for
+                    // the restore-deferral path so a superseded authority can
+                    // never drive a deferral either.
+                    if let (Some(owner), Some(ticket)) =
+                        (current_auth, proposal_freshness_ticket)
+                    {
+                        if let Err(e) = owner.confirm(&ticket) {
+                            stats.inbound_proposal_authority_stale_before_effect_total = stats
+                                .inbound_proposal_authority_stale_before_effect_total
+                                .saturating_add(1);
+                            eprintln!(
+                                "[binary-consensus] Run 422 D7-A: inbound proposal REJECTED \
+                                 (current authorization replaced before effect) height={} \
+                                 proposer={:?} reason={} — fail-closed, not delivered",
+                                proposal.header.height, from, e,
+                            );
+                            return;
+                        }
+                    }
                     if restore_mode.is_active()
                         && should_defer_restore_proposal_for_catchup(engine, &proposal)
                     {
@@ -3551,8 +3647,32 @@ pub(crate) fn handle_inbound_consensus_msg(
                     // `VerificationContextUnavailable`; only the test-only
                     // `LocalFixtureUnsigned` policy permits the historical
                     // unsigned passthrough.
+                    let mut vote_freshness_ticket: Option<AuthorizationTicket> = None;
                     match pv_authority {
                         Some(ctx) => {
+                            // Run 422 D7-A: obtain current authorization through
+                            // the independently-maintained owner BEFORE any
+                            // crypto, delivery, aggregation, QC formation, or
+                            // view/commit mutation. A present authority with an
+                            // unavailable or superseded current authorization is
+                            // rejected fail-closed here.
+                            if let Some(owner) = current_auth {
+                                match owner.admit() {
+                                    Ok(ticket) => {
+                                        vote_freshness_ticket = Some(ticket);
+                                    }
+                                    Err(e) => {
+                                        record_vote_current_auth_reject(stats, &e);
+                                        eprintln!(
+                                            "[binary-consensus] Run 422 D7-A: inbound vote \
+                                             REJECTED (current authorization) height={} \
+                                             voter={:?} reason={} — fail-closed, not delivered",
+                                            vote.height, from, e,
+                                        );
+                                        return;
+                                    }
+                                }
+                            }
                             // Run 422 D6: verify the inbound vote through the
                             // message-bound versioned-domain interface (recomputes
                             // the v2 preimage from THIS vote; enforces wire-chain
@@ -3634,6 +3754,24 @@ pub(crate) fn handle_inbound_consensus_msg(
                                 return;
                             }
                             // LocalFixtureUnsigned: historical passthrough.
+                        }
+                    }
+                    // Run 422 D7-A: re-confirm the freshness admission
+                    // immediately before the engine effect (aggregation / QC
+                    // formation / view mutation). A replacement since admission
+                    // (generation advanced) rejects fail-closed.
+                    if let (Some(owner), Some(ticket)) = (current_auth, vote_freshness_ticket) {
+                        if let Err(e) = owner.confirm(&ticket) {
+                            stats.inbound_vote_authority_stale_before_effect_total = stats
+                                .inbound_vote_authority_stale_before_effect_total
+                                .saturating_add(1);
+                            eprintln!(
+                                "[binary-consensus] Run 422 D7-A: inbound vote REJECTED \
+                                 (current authorization replaced before effect) height={} \
+                                 voter={:?} reason={} — fail-closed, not delivered",
+                                vote.height, from, e,
+                            );
+                            return;
                         }
                     }
                     match engine.on_vote_event(from, &vote) {
@@ -4109,6 +4247,7 @@ pub(crate) fn deliver_inbound_for_run035(
         &mut restore_mode,
         verification_ctx,
         pv_authority,
+        None, // Run 422 D7-A: current-authorization owner (unwired)
         &mut detector,
         None,
         None,
@@ -4486,6 +4625,47 @@ fn apply_local_tc_and_broadcast_new_view(
 /// `BackendError(_, _)` / `MalformedSignature(_)` outcomes are folded
 /// into the `bad_signature` bucket — they are real cryptographic
 /// rejections and never reach the engine.
+/// Run 422 D7-A: dispatch a current-authorization [`FreshnessError`] on the
+/// inbound Proposal path into the matching bounded rejection counter
+/// (current-state-unavailable vs superseded). No attacker-controlled labels.
+fn record_proposal_current_auth_reject(
+    stats: &mut BinaryConsensusLoopInboundStats,
+    err: &FreshnessError,
+) {
+    match err {
+        FreshnessError::CurrentStateUnavailable { .. } => {
+            stats.inbound_proposal_current_state_unavailable_total = stats
+                .inbound_proposal_current_state_unavailable_total
+                .saturating_add(1);
+        }
+        FreshnessError::Superseded(_) => {
+            stats.inbound_proposal_authority_superseded_total = stats
+                .inbound_proposal_authority_superseded_total
+                .saturating_add(1);
+        }
+    }
+}
+
+/// Run 422 D7-A: inbound Vote equivalent of
+/// [`record_proposal_current_auth_reject`].
+fn record_vote_current_auth_reject(
+    stats: &mut BinaryConsensusLoopInboundStats,
+    err: &FreshnessError,
+) {
+    match err {
+        FreshnessError::CurrentStateUnavailable { .. } => {
+            stats.inbound_vote_current_state_unavailable_total = stats
+                .inbound_vote_current_state_unavailable_total
+                .saturating_add(1);
+        }
+        FreshnessError::Superseded(_) => {
+            stats.inbound_vote_authority_superseded_total = stats
+                .inbound_vote_authority_superseded_total
+                .saturating_add(1);
+        }
+    }
+}
+
 /// Run 420: dispatch a `ProposalVoteVerifyError` from `verify_proposal_msg`
 /// into the matching per-reason inbound-proposal rejection counter. The
 /// taxonomy is bounded (no attacker-controlled labels).
@@ -7021,6 +7201,7 @@ mod tests {
             &mut restore_mode,
             None,
             None,
+            None, // Run 422 D7-A: current-authorization owner (unwired)
             &mut BinaryReconfigDetector::default(),
             None,
             None,
@@ -7048,6 +7229,7 @@ mod tests {
             &mut restore_mode,
             None,
             None,
+            None, // Run 422 D7-A: current-authorization owner (unwired)
             &mut BinaryReconfigDetector::default(),
             None,
             None,
@@ -7096,6 +7278,7 @@ mod tests {
             &mut restore_mode,
             None,
             None,
+            None, // Run 422 D7-A: current-authorization owner (unwired)
             &mut BinaryReconfigDetector::default(),
             None,
             None,
@@ -7142,6 +7325,7 @@ mod tests {
             &mut restore_mode,
             None,
             None,
+            None, // Run 422 D7-A: current-authorization owner (unwired)
             &mut BinaryReconfigDetector::default(),
             None,
             None,
@@ -7220,6 +7404,7 @@ mod tests {
             &mut restore_mode,
             None,
             None,
+            None, // Run 422 D7-A: current-authorization owner (unwired)
             &mut BinaryReconfigDetector::default(),
             None,
             None,
@@ -7247,6 +7432,7 @@ mod tests {
             &mut restore_mode,
             None,
             None,
+            None, // Run 422 D7-A: current-authorization owner (unwired)
             &mut BinaryReconfigDetector::default(),
             None,
             None,
@@ -7292,6 +7478,7 @@ mod tests {
             &mut restore_mode,
             None,
             None,
+            None, // Run 422 D7-A: current-authorization owner (unwired)
             &mut BinaryReconfigDetector::default(),
             None,
             None,
@@ -7314,6 +7501,7 @@ mod tests {
             &mut restore_mode,
             None,
             None,
+            None, // Run 422 D7-A: current-authorization owner (unwired)
             &mut BinaryReconfigDetector::default(),
             None,
             None,
@@ -8038,6 +8226,7 @@ mod tests {
                 &mut restore_mode,
                 ctx,
                 None,
+                None, // Run 422 D7-A: current-authorization owner (unwired)
                 &mut BinaryReconfigDetector::default(),
                 None,
                 None,
@@ -8170,6 +8359,7 @@ mod tests {
                 &mut restore_mode,
                 Some(&ctx),
                 None,
+                None, // Run 422 D7-A: current-authorization owner (unwired)
                 &mut BinaryReconfigDetector::default(),
                 None,
                 None,
@@ -8204,6 +8394,7 @@ mod tests {
                 &mut restore_mode,
                 ctx,
                 None,
+                None, // Run 422 D7-A: current-authorization owner (unwired)
                 &mut BinaryReconfigDetector::default(),
                 None,
                 None,
@@ -8457,6 +8648,7 @@ mod tests {
                 &mut restore_mode,
                 Some(&ctx),
                 None,
+                None, // Run 422 D7-A: current-authorization owner (unwired)
                 &mut BinaryReconfigDetector::default(),
                 None,
                 None,
@@ -8804,6 +8996,7 @@ mod tests {
                 &mut restore_mode,
                 None,
                 pv,
+                None, // Run 422 D7-A: current-authorization owner (unwired)
                 &mut BinaryReconfigDetector::default(),
                 None,
                 None,
@@ -8832,6 +9025,7 @@ mod tests {
                 &mut restore_mode,
                 None,
                 pv,
+                None, // Run 422 D7-A: current-authorization owner (unwired)
                 &mut BinaryReconfigDetector::default(),
                 None,
                 None,
@@ -9138,6 +9332,7 @@ mod tests {
                 &mut restore_mode,
                 None,
                 Some(&ctx),
+                None, // Run 422 D7-A: current-authorization owner (unwired)
                 &mut BinaryReconfigDetector::default(),
                 None,
                 None,
@@ -9344,6 +9539,7 @@ mod tests {
                 &mut restore_mode,
                 None,
                 pv,
+                None, // Run 422 D7-A: current-authorization owner (unwired)
                 &mut detector,
                 None,
                 None,
@@ -9374,6 +9570,7 @@ mod tests {
                 &mut restore_mode,
                 None,
                 pv,
+                None, // Run 422 D7-A: current-authorization owner (unwired)
                 &mut BinaryReconfigDetector::default(),
                 None,
                 None,
@@ -9912,6 +10109,7 @@ mod tests {
                 &mut restore_mode,
                 timeout_ctx,
                 pv,
+                None, // Run 422 D7-A: current-authorization owner (unwired)
                 &mut detector,
                 origin,
                 gate,
@@ -9946,6 +10144,7 @@ mod tests {
                 &mut restore_mode,
                 timeout_ctx,
                 pv,
+                None, // Run 422 D7-A: current-authorization owner (unwired)
                 &mut BinaryReconfigDetector::default(),
                 origin,
                 gate,
@@ -10311,6 +10510,7 @@ mod tests {
                 restore_mode,
                 timeout_ctx,
                 pv,
+                None, // Run 422 D7-A: current-authorization owner (unwired)
                 &mut detector,
                 origin,
                 gate,
@@ -11709,6 +11909,723 @@ mod tests {
                         QBIND_DEVNET_CHAIN_ID,
                     )
                     .is_err());
+                }
+            }
+        }
+
+        // =================================================================
+        // Run 422 D7-A — independent CURRENT AUTHORIZATION enforcement at the
+        // REAL inbound Proposal/Vote boundary.
+        //
+        // These drive the actual `handle_inbound_consensus_msg` handler with a
+        // real F6 binding gate + matching authenticated origin, real ML-DSA-44
+        // signatures, and recording facades. The node's current authorization
+        // is obtained through the independently-maintained
+        // `CurrentAuthorizationOwner` (never a caller-declared `Established`
+        // wrapper); a present `ProposalVoteAuthority` with an unavailable or
+        // superseded current authorization is rejected fail-closed, BEFORE
+        // domain/crypto admission, delivery, restore deferral, reconfig
+        // observation, engine/aggregation/QC mutation, and outbound actions.
+        //
+        // Production `main` wires neither a `ProposalVoteAuthority` nor a
+        // current-authorization owner, and the only way to establish a concrete
+        // current state is the `cfg(test)`-gated fixture interface, so none of
+        // this is a production activation route.
+        // =================================================================
+        mod run422_d7a {
+            use super::*;
+            use crate::genesis_consensus_authority::{
+                CurrentAuthorizationOwner, CurrentStateUnavailableReason, FreshnessError,
+                GenesisConsensusAuthority, LocalAuthorizationState, ObservedConsensusConfiguration,
+            };
+            use qbind_ledger::GenesisHash;
+            use std::sync::atomic::Ordering::SeqCst;
+
+            const D7A_CHAIN: &str = "qbind-d7a-fixture";
+            fn d7a_genesis_hash() -> GenesisHash {
+                [0x11u8; 32]
+            }
+            const COMMIT_A: [u8; 32] = [0xAAu8; 32];
+            const COMMIT_B: [u8; 32] = [0xBBu8; 32];
+
+            /// Candidate authority A, coherent with the 4-validator PV crypto
+            /// fixture (same membership count). Built through the explicitly
+            /// test-identified fixture interface.
+            fn candidate_a() -> Arc<GenesisConsensusAuthority> {
+                Arc::new(GenesisConsensusAuthority::for_current_authorization_fixture(
+                    D7A_CHAIN,
+                    d7a_genesis_hash(),
+                    4,
+                    COMMIT_A,
+                ))
+            }
+
+            /// An owner whose independently-held current state matches A exactly
+            /// (A's own founding identity, sourced independently — not a
+            /// self-declared caller wrapper).
+            fn owner_matching_a() -> CurrentAuthorizationOwner {
+                let a = candidate_a();
+                let observed = a.config_identity();
+                CurrentAuthorizationOwner::establish_for_fixture(a, observed)
+            }
+
+            /// An owner for candidate A whose current state is an established
+            /// but *different* authority B (different commitment). `bump_epoch`
+            /// additionally advances the epoch so the divergence is not
+            /// epoch-only.
+            fn owner_superseded_by_b(bump_epoch: bool) -> CurrentAuthorizationOwner {
+                let a = candidate_a();
+                let observed = ObservedConsensusConfiguration::new(
+                    D7A_CHAIN,
+                    d7a_genesis_hash(),
+                    COMMIT_B,
+                    4,
+                    if bump_epoch { 1 } else { 0 },
+                );
+                CurrentAuthorizationOwner::establish_for_fixture(a, observed)
+            }
+
+            #[allow(clippy::too_many_arguments)]
+            fn deliver_proposal_fresh(
+                engine: &mut BasicHotStuffEngine<[u8; 32]>,
+                stats: &mut BinaryConsensusLoopInboundStats,
+                restore_mode: &mut RestoreCatchupModeState,
+                timeout_ctx: Option<&TimeoutVerificationContext>,
+                pv: Option<&ProposalVoteAuthority>,
+                current_auth: Option<&CurrentAuthorizationOwner>,
+                proposal: &BlockProposal,
+                metrics: &Arc<NodeMetrics>,
+                outbound: Option<&dyn ConsensusNetworkFacade>,
+                origin: Option<&AuthenticatedConsensusOrigin>,
+                gate: Option<&PeerConsensusBindingGate>,
+                policy: ConsensusVerificationPolicy,
+            ) -> BinaryReconfigDetector {
+                use qbind_wire::io::WireEncode;
+                let mut bytes = Vec::new();
+                proposal.encode(&mut bytes);
+                let mut detector = BinaryReconfigDetector::default();
+                handle_inbound_consensus_msg(
+                    engine,
+                    ConsensusNetMsg::Proposal(bytes),
+                    stats,
+                    outbound,
+                    metrics,
+                    ValidatorId(0),
+                    restore_mode,
+                    timeout_ctx,
+                    pv,
+                    current_auth,
+                    &mut detector,
+                    origin,
+                    gate,
+                    policy,
+                );
+                detector
+            }
+
+            #[allow(clippy::too_many_arguments)]
+            fn deliver_vote_fresh(
+                engine: &mut BasicHotStuffEngine<[u8; 32]>,
+                stats: &mut BinaryConsensusLoopInboundStats,
+                timeout_ctx: Option<&TimeoutVerificationContext>,
+                pv: Option<&ProposalVoteAuthority>,
+                current_auth: Option<&CurrentAuthorizationOwner>,
+                vote: &Vote,
+                metrics: &Arc<NodeMetrics>,
+                origin: Option<&AuthenticatedConsensusOrigin>,
+                gate: Option<&PeerConsensusBindingGate>,
+                policy: ConsensusVerificationPolicy,
+            ) {
+                use qbind_wire::io::WireEncode;
+                let mut bytes = Vec::new();
+                vote.encode(&mut bytes);
+                let mut restore_mode = RestoreCatchupModeState::from_config(None);
+                handle_inbound_consensus_msg(
+                    engine,
+                    ConsensusNetMsg::Vote(bytes),
+                    stats,
+                    None,
+                    metrics,
+                    ValidatorId(0),
+                    &mut restore_mode,
+                    timeout_ctx,
+                    pv,
+                    current_auth,
+                    &mut BinaryReconfigDetector::default(),
+                    origin,
+                    gate,
+                    policy,
+                );
+            }
+
+            // -------- Proposal: matching current state ⇒ verify accepted -----
+            //
+            // Distinguishes VERIFICATION acceptance (signature verified) from
+            // downstream ENGINE acceptance (which may legitimately be 0 here).
+            #[test]
+            fn d7a_proposal_matching_current_state_verify_accepted() {
+                let fixture = make_fixture(4);
+                let pv = make_ctx(&fixture, None);
+                let owner = owner_matching_a();
+                let gate = pv_binding_gate(4);
+                let origin = AuthenticatedConsensusOrigin::new(pv_node_for(1), ValidatorId(1));
+                let mut engine = make_engine(ValidatorId(0), 4);
+                let mut stats = BinaryConsensusLoopInboundStats::default();
+                let metrics = make_metrics();
+                let mut restore = RestoreCatchupModeState::from_config(None);
+
+                let p = signed_proposal(1, &fixture);
+                deliver_proposal_fresh(
+                    &mut engine,
+                    &mut stats,
+                    &mut restore,
+                    None,
+                    Some(&pv),
+                    Some(&owner),
+                    &p,
+                    &metrics,
+                    None,
+                    Some(&origin),
+                    Some(&gate),
+                    ConsensusVerificationPolicy::Required,
+                );
+
+                assert_eq!(gate.metrics().accepted(), 1, "F6 admitted");
+                // Current authorization admitted (no freshness rejection).
+                assert_eq!(stats.inbound_proposal_current_state_unavailable_total, 0);
+                assert_eq!(stats.inbound_proposal_authority_superseded_total, 0);
+                assert_eq!(stats.inbound_proposal_authority_stale_before_effect_total, 0);
+                // Signature verification succeeded (distinct from engine accept).
+                assert_eq!(stats.inbound_proposal_verify_accepted, 1);
+                assert_eq!(stats.inbound_proposal_verify_rejected_total, 0);
+                assert!(stats.proposal_vote_crypto_verify_latency_observations_total >= 1);
+            }
+
+            // -------- Proposal: unavailable current state ⇒ fail-closed -------
+            #[test]
+            fn d7a_proposal_unavailable_current_state_rejects_before_crypto() {
+                for reason in [
+                    CurrentStateUnavailableReason::MissingStorage,
+                    CurrentStateUnavailableReason::StorageWithoutCommittedEpoch,
+                ] {
+                    let fixture = make_fixture(4);
+                    let pv = make_ctx(&fixture, None);
+                    let owner = CurrentAuthorizationOwner::unavailable(candidate_a(), reason);
+                    let gate = pv_binding_gate(4);
+                    let origin =
+                        AuthenticatedConsensusOrigin::new(pv_node_for(1), ValidatorId(1));
+                    let mut engine = make_engine(ValidatorId(0), 4);
+                    let view_before = engine.current_view();
+                    let mut stats = BinaryConsensusLoopInboundStats::default();
+                    let metrics = make_metrics();
+                    let mut restore = RestoreCatchupModeState::from_config(None);
+
+                    let p = signed_proposal(1, &fixture);
+                    let detector = deliver_proposal_fresh(
+                        &mut engine,
+                        &mut stats,
+                        &mut restore,
+                        None,
+                        Some(&pv), // authority IS present
+                        Some(&owner),
+                        &p,
+                        &metrics,
+                        None,
+                        Some(&origin),
+                        Some(&gate),
+                        ConsensusVerificationPolicy::Required,
+                    );
+
+                    assert_eq!(gate.metrics().accepted(), 1, "F6 admitted first");
+                    // Fail-closed on unavailable current authorization, BEFORE
+                    // crypto (no latency observation) and before delivery.
+                    assert_eq!(stats.inbound_proposal_current_state_unavailable_total, 1);
+                    assert_eq!(stats.inbound_proposal_authority_superseded_total, 0);
+                    assert_eq!(stats.proposal_vote_crypto_verify_latency_observations_total, 0);
+                    assert_eq!(stats.inbound_proposal_verify_accepted, 0);
+                    assert_eq!(stats.inbound_proposals_delivered, 0);
+                    assert_eq!(stats.inbound_proposals_engine_accepted, 0);
+                    assert!(detector.header_cache.is_empty());
+                    assert_eq!(engine.current_view(), view_before);
+                }
+            }
+
+            // -------- Proposal: A superseded by state B ⇒ A rejects,
+            // including a retained/cloned candidate handle. ------------------
+            #[test]
+            fn d7a_proposal_superseded_by_b_rejects_including_cloned_handle() {
+                let fixture = make_fixture(4);
+                let pv = make_ctx(&fixture, None);
+                // Build the owner around a CLONED handle of candidate A; the
+                // independently-held current state is authority B.
+                let a = candidate_a();
+                let a_cloned = Arc::clone(&a);
+                let observed_b = ObservedConsensusConfiguration::new(
+                    D7A_CHAIN,
+                    d7a_genesis_hash(),
+                    COMMIT_B,
+                    4,
+                    1,
+                );
+                let owner =
+                    CurrentAuthorizationOwner::establish_for_fixture(a_cloned, observed_b);
+                let gate = pv_binding_gate(4);
+                let origin = AuthenticatedConsensusOrigin::new(pv_node_for(1), ValidatorId(1));
+                let mut engine = make_engine(ValidatorId(0), 4);
+                let mut stats = BinaryConsensusLoopInboundStats::default();
+                let metrics = make_metrics();
+                let mut restore = RestoreCatchupModeState::from_config(None);
+
+                let p = signed_proposal(1, &fixture);
+                deliver_proposal_fresh(
+                    &mut engine,
+                    &mut stats,
+                    &mut restore,
+                    None,
+                    Some(&pv),
+                    Some(&owner),
+                    &p,
+                    &metrics,
+                    None,
+                    Some(&origin),
+                    Some(&gate),
+                    ConsensusVerificationPolicy::Required,
+                );
+
+                assert_eq!(stats.inbound_proposal_authority_superseded_total, 1);
+                assert_eq!(stats.inbound_proposal_current_state_unavailable_total, 0);
+                assert_eq!(stats.proposal_vote_crypto_verify_latency_observations_total, 0);
+                assert_eq!(stats.inbound_proposals_delivered, 0);
+                // The cloned handle is the same authority A; still stale.
+                assert!(Arc::ptr_eq(&a, owner.candidate()));
+            }
+
+            // -------- Proposal: same-epoch authority replacement ⇒ stale A
+            // rejects (equal epoch is NOT sufficient authorization). ---------
+            #[test]
+            fn d7a_proposal_same_epoch_replacement_rejects() {
+                let fixture = make_fixture(4);
+                let pv = make_ctx(&fixture, None);
+                // Current state has the SAME epoch (0) as A but a different
+                // membership/key commitment.
+                let owner = owner_superseded_by_b(false);
+                let gate = pv_binding_gate(4);
+                let origin = AuthenticatedConsensusOrigin::new(pv_node_for(1), ValidatorId(1));
+                let mut engine = make_engine(ValidatorId(0), 4);
+                let mut stats = BinaryConsensusLoopInboundStats::default();
+                let metrics = make_metrics();
+                let mut restore = RestoreCatchupModeState::from_config(None);
+
+                let p = signed_proposal(1, &fixture);
+                deliver_proposal_fresh(
+                    &mut engine,
+                    &mut stats,
+                    &mut restore,
+                    None,
+                    Some(&pv),
+                    Some(&owner),
+                    &p,
+                    &metrics,
+                    None,
+                    Some(&origin),
+                    Some(&gate),
+                    ConsensusVerificationPolicy::Required,
+                );
+
+                assert_eq!(stats.inbound_proposal_authority_superseded_total, 1);
+                assert_eq!(stats.proposal_vote_crypto_verify_latency_observations_total, 0);
+                assert_eq!(stats.inbound_proposals_delivered, 0);
+            }
+
+            // -------- Proposal: F6 mismatch precedes freshness + crypto ------
+            #[test]
+            fn d7a_proposal_f6_mismatch_precedes_freshness() {
+                let fixture = make_fixture(4);
+                let pv = make_ctx(&fixture, None);
+                // Owner would reject at freshness (unavailable) IF reached.
+                let owner = CurrentAuthorizationOwner::unavailable(
+                    candidate_a(),
+                    CurrentStateUnavailableReason::MissingStorage,
+                );
+                let gate = pv_binding_gate(4);
+                // Authenticated as validator 1, but proposal claims proposer 0.
+                let origin = AuthenticatedConsensusOrigin::new(pv_node_for(1), ValidatorId(1));
+                let mut engine = make_engine(ValidatorId(0), 4);
+                let mut stats = BinaryConsensusLoopInboundStats::default();
+                let metrics = make_metrics();
+                let mut restore = RestoreCatchupModeState::from_config(None);
+
+                let p = signed_proposal(0, &fixture); // claimed proposer 0
+                deliver_proposal_fresh(
+                    &mut engine,
+                    &mut stats,
+                    &mut restore,
+                    None,
+                    Some(&pv),
+                    Some(&owner),
+                    &p,
+                    &metrics,
+                    None,
+                    Some(&origin),
+                    Some(&gate),
+                    ConsensusVerificationPolicy::Required,
+                );
+
+                assert_eq!(stats.inbound_sender_binding_rejected_total, 1);
+                assert_eq!(gate.metrics().accepted(), 0);
+                // Freshness lookup was never reached (F6 rejected first).
+                assert_eq!(stats.inbound_proposal_current_state_unavailable_total, 0);
+                assert_eq!(stats.inbound_proposal_authority_superseded_total, 0);
+                assert_eq!(stats.proposal_vote_crypto_verify_latency_observations_total, 0);
+            }
+
+            // -------- Vote: matching current state ⇒ verify accepted ---------
+            #[test]
+            fn d7a_vote_matching_current_state_verify_accepted() {
+                let fixture = make_fixture(4);
+                let pv = make_ctx(&fixture, None);
+                let owner = owner_matching_a();
+                let gate = pv_binding_gate(4);
+                let origin = AuthenticatedConsensusOrigin::new(pv_node_for(1), ValidatorId(1));
+                let mut engine = make_engine(ValidatorId(0), 4);
+                let mut stats = BinaryConsensusLoopInboundStats::default();
+                let metrics = make_metrics();
+
+                let v = signed_vote(1, &fixture);
+                deliver_vote_fresh(
+                    &mut engine,
+                    &mut stats,
+                    None,
+                    Some(&pv),
+                    Some(&owner),
+                    &v,
+                    &metrics,
+                    Some(&origin),
+                    Some(&gate),
+                    ConsensusVerificationPolicy::Required,
+                );
+
+                assert_eq!(gate.metrics().accepted(), 1);
+                assert_eq!(stats.inbound_vote_current_state_unavailable_total, 0);
+                assert_eq!(stats.inbound_vote_authority_superseded_total, 0);
+                assert_eq!(stats.inbound_vote_verify_accepted, 1);
+                assert_eq!(stats.inbound_vote_verify_rejected_total, 0);
+            }
+
+            // -------- Vote: unavailable current state ⇒ fail-closed ----------
+            #[test]
+            fn d7a_vote_unavailable_current_state_rejects_before_crypto() {
+                let fixture = make_fixture(4);
+                let pv = make_ctx(&fixture, None);
+                let owner = CurrentAuthorizationOwner::unavailable(
+                    candidate_a(),
+                    CurrentStateUnavailableReason::StorageWithoutCommittedEpoch,
+                );
+                let gate = pv_binding_gate(4);
+                let origin = AuthenticatedConsensusOrigin::new(pv_node_for(1), ValidatorId(1));
+                let mut engine = make_engine(ValidatorId(0), 4);
+                let view_before = engine.current_view();
+                let mut stats = BinaryConsensusLoopInboundStats::default();
+                let metrics = make_metrics();
+
+                let v = signed_vote(1, &fixture);
+                deliver_vote_fresh(
+                    &mut engine,
+                    &mut stats,
+                    None,
+                    Some(&pv),
+                    Some(&owner),
+                    &v,
+                    &metrics,
+                    Some(&origin),
+                    Some(&gate),
+                    ConsensusVerificationPolicy::Required,
+                );
+
+                assert_eq!(gate.metrics().accepted(), 1);
+                assert_eq!(stats.inbound_vote_current_state_unavailable_total, 1);
+                assert_eq!(stats.proposal_vote_crypto_verify_latency_observations_total, 0);
+                assert_eq!(stats.inbound_vote_verify_accepted, 0);
+                assert_eq!(stats.inbound_votes_delivered, 0);
+                assert_eq!(stats.inbound_votes_engine_accepted, 0);
+                assert_eq!(engine.current_view(), view_before);
+            }
+
+            // -------- Vote: A superseded by state B ⇒ A rejects --------------
+            #[test]
+            fn d7a_vote_superseded_by_b_rejects() {
+                let fixture = make_fixture(4);
+                let pv = make_ctx(&fixture, None);
+                let owner = owner_superseded_by_b(true);
+                let gate = pv_binding_gate(4);
+                let origin = AuthenticatedConsensusOrigin::new(pv_node_for(1), ValidatorId(1));
+                let mut engine = make_engine(ValidatorId(0), 4);
+                let mut stats = BinaryConsensusLoopInboundStats::default();
+                let metrics = make_metrics();
+
+                let v = signed_vote(1, &fixture);
+                deliver_vote_fresh(
+                    &mut engine,
+                    &mut stats,
+                    None,
+                    Some(&pv),
+                    Some(&owner),
+                    &v,
+                    &metrics,
+                    Some(&origin),
+                    Some(&gate),
+                    ConsensusVerificationPolicy::Required,
+                );
+
+                assert_eq!(stats.inbound_vote_authority_superseded_total, 1);
+                assert_eq!(stats.inbound_vote_current_state_unavailable_total, 0);
+                assert_eq!(stats.proposal_vote_crypto_verify_latency_observations_total, 0);
+                assert_eq!(stats.inbound_votes_delivered, 0);
+            }
+
+            // -------- Vote: same-epoch replacement ⇒ stale A rejects ---------
+            #[test]
+            fn d7a_vote_same_epoch_replacement_rejects() {
+                let fixture = make_fixture(4);
+                let pv = make_ctx(&fixture, None);
+                let owner = owner_superseded_by_b(false);
+                let gate = pv_binding_gate(4);
+                let origin = AuthenticatedConsensusOrigin::new(pv_node_for(1), ValidatorId(1));
+                let mut engine = make_engine(ValidatorId(0), 4);
+                let mut stats = BinaryConsensusLoopInboundStats::default();
+                let metrics = make_metrics();
+
+                let v = signed_vote(1, &fixture);
+                deliver_vote_fresh(
+                    &mut engine,
+                    &mut stats,
+                    None,
+                    Some(&pv),
+                    Some(&owner),
+                    &v,
+                    &metrics,
+                    Some(&origin),
+                    Some(&gate),
+                    ConsensusVerificationPolicy::Required,
+                );
+
+                assert_eq!(stats.inbound_vote_authority_superseded_total, 1);
+                assert_eq!(stats.inbound_votes_delivered, 0);
+            }
+
+            // -------- Vote: F6 mismatch precedes freshness + crypto ----------
+            #[test]
+            fn d7a_vote_f6_mismatch_precedes_freshness() {
+                let fixture = make_fixture(4);
+                let pv = make_ctx(&fixture, None);
+                let owner = CurrentAuthorizationOwner::unavailable(
+                    candidate_a(),
+                    CurrentStateUnavailableReason::MissingStorage,
+                );
+                let gate = pv_binding_gate(4);
+                let origin = AuthenticatedConsensusOrigin::new(pv_node_for(1), ValidatorId(1));
+                let mut engine = make_engine(ValidatorId(0), 4);
+                let mut stats = BinaryConsensusLoopInboundStats::default();
+                let metrics = make_metrics();
+
+                let v = signed_vote(0, &fixture); // validator_index 0 vs origin 1
+                deliver_vote_fresh(
+                    &mut engine,
+                    &mut stats,
+                    None,
+                    Some(&pv),
+                    Some(&owner),
+                    &v,
+                    &metrics,
+                    Some(&origin),
+                    Some(&gate),
+                    ConsensusVerificationPolicy::Required,
+                );
+
+                assert_eq!(stats.inbound_sender_binding_rejected_total, 1);
+                assert_eq!(stats.inbound_vote_current_state_unavailable_total, 0);
+                assert_eq!(stats.inbound_vote_authority_superseded_total, 0);
+                assert_eq!(stats.proposal_vote_crypto_verify_latency_observations_total, 0);
+            }
+
+            // -------- A valid Timeout context cannot supply Proposal/Vote
+            // authorization; neither can a present current-authorization owner
+            // on its own. With `pv_authority == None` the frame is rejected
+            // authority-unavailable regardless of an established current state.
+            #[test]
+            fn d7a_timeout_context_cannot_supply_pv_authorization() {
+                let fixture = make_fixture(4);
+                let timeout_ctx = make_timeout_ctx(&fixture, Some(ValidatorId(0)));
+                assert!(timeout_ctx.signer.is_some(), "valid legacy Timeout signer");
+                let owner = owner_matching_a(); // established, would admit IF PV present
+                let gate = pv_binding_gate(4);
+                let origin = AuthenticatedConsensusOrigin::new(pv_node_for(0), ValidatorId(0));
+                let mut engine = make_engine(ValidatorId(0), 4);
+                let mut stats = BinaryConsensusLoopInboundStats::default();
+                let metrics = make_metrics();
+                let mut restore = RestoreCatchupModeState::from_config(None);
+
+                let p = signed_proposal(0, &fixture);
+                deliver_proposal_fresh(
+                    &mut engine,
+                    &mut stats,
+                    &mut restore,
+                    Some(&timeout_ctx),
+                    None, // NO Proposal/Vote authority
+                    Some(&owner),
+                    &p,
+                    &metrics,
+                    None,
+                    Some(&origin),
+                    Some(&gate),
+                    ConsensusVerificationPolicy::Required,
+                );
+
+                // Rejected authority-unavailable: the Timeout context and the
+                // established current-authorization owner do NOT substitute for
+                // a Proposal/Vote authority. Freshness counters stay zero (the
+                // freshness gate lives inside the present-authority arm).
+                assert_eq!(stats.inbound_proposal_verification_context_unavailable_total, 1);
+                assert_eq!(stats.inbound_proposal_current_state_unavailable_total, 0);
+                assert_eq!(stats.inbound_proposal_authority_superseded_total, 0);
+                assert_eq!(stats.inbound_proposals_delivered, 0);
+            }
+
+            // -------- Deterministic replacement interleaving: a successful
+            // check cannot be reused across an in-process invalidation before
+            // its effect. Uses explicit state-machine scheduling (admit →
+            // replace → confirm), no sleeps. -------------------------------
+            #[test]
+            fn d7a_ticket_confirm_fails_after_replacement() {
+                let mut owner = owner_matching_a();
+                assert_eq!(owner.generation(), 0);
+
+                // Admit: freshness passes against the matching current state.
+                let ticket = owner.admit().expect("admit succeeds against matching state");
+                assert_eq!(ticket.generation(), 0);
+                // Confirm before any replacement: still valid.
+                assert!(owner.confirm(&ticket).is_ok());
+
+                // Deterministic in-flight replacement: current state moves to B.
+                owner.replace_for_fixture(LocalAuthorizationState::Established(
+                    ObservedConsensusConfiguration::new(
+                        D7A_CHAIN,
+                        d7a_genesis_hash(),
+                        COMMIT_B,
+                        4,
+                        1,
+                    ),
+                ));
+                assert_eq!(owner.generation(), 1);
+
+                // The earlier admitted ticket must NOT be reusable across the
+                // invalidation: confirm fails closed (generation advanced).
+                let err = owner.confirm(&ticket).expect_err("stale ticket rejected");
+                assert_eq!(err.admitted_generation, 0);
+                assert_eq!(err.current_generation, 1);
+
+                // A fresh admit now fails Superseded (candidate A is stale vs B).
+                match owner.admit() {
+                    Err(FreshnessError::Superseded(_)) => {}
+                    other => panic!("expected Superseded after replacement, got {other:?}"),
+                }
+            }
+
+            // -------- ACTIVE restore-mode: negative (unavailable current state
+            // rejects BEFORE restore deferral) + admitted positive control
+            // (matching state admits, then the valid op is deferred). --------
+            #[test]
+            fn d7a_active_restore_mode_negative_and_positive_control() {
+                let fixture = make_fixture(4);
+                let gate = pv_binding_gate(4);
+                let origin = AuthenticatedConsensusOrigin::new(pv_node_for(0), ValidatorId(0));
+                let metrics = make_metrics();
+                // Height 7 > committed(5)+1 ⇒ defers if admitted.
+                let proposal = signed_proposal_at_height(0, 7, [0xAB; 32], &fixture);
+
+                // Positive control: matching current state admits freshness AND
+                // crypto, then active restore mode defers the valid proposal.
+                {
+                    let pv = make_ctx(&fixture, None);
+                    let owner = owner_matching_a();
+                    let mut engine = make_engine(ValidatorId(0), 4);
+                    engine.initialize_from_snapshot_baseline([0x01; 32], 5);
+                    let mut restore = RestoreCatchupModeState::from_config(Some(RestoreBaseline {
+                        snapshot_height: 5,
+                        snapshot_block_id: [0x01; 32],
+                    }));
+                    assert!(restore.is_active());
+                    let mut stats = BinaryConsensusLoopInboundStats::default();
+                    let facade = CountingFacade::default();
+
+                    deliver_proposal_fresh(
+                        &mut engine,
+                        &mut stats,
+                        &mut restore,
+                        None,
+                        Some(&pv),
+                        Some(&owner),
+                        &proposal,
+                        &metrics,
+                        Some(&facade),
+                        Some(&origin),
+                        Some(&gate),
+                        ConsensusVerificationPolicy::Required,
+                    );
+
+                    assert_eq!(stats.inbound_proposal_verify_accepted, 1, "control verified");
+                    assert_eq!(
+                        stats.restore_catchup_proposals_deferred, 1,
+                        "control: valid proposal deferred by active restore mode"
+                    );
+                    assert_eq!(stats.inbound_proposal_current_state_unavailable_total, 0);
+                    assert_eq!(stats.inbound_proposals_delivered, 0);
+                    assert_eq!(facade.calls.load(SeqCst), 0);
+                    assert!(restore.is_active());
+                }
+
+                // Negative: unavailable current state rejects BEFORE the
+                // restore-deferral branch (no deferral recorded).
+                {
+                    let pv = make_ctx(&fixture, None);
+                    let owner = CurrentAuthorizationOwner::unavailable(
+                        candidate_a(),
+                        CurrentStateUnavailableReason::MissingStorage,
+                    );
+                    let mut engine = make_engine(ValidatorId(0), 4);
+                    engine.initialize_from_snapshot_baseline([0x01; 32], 5);
+                    let mut restore = RestoreCatchupModeState::from_config(Some(RestoreBaseline {
+                        snapshot_height: 5,
+                        snapshot_block_id: [0x01; 32],
+                    }));
+                    assert!(restore.is_active());
+                    let mut stats = BinaryConsensusLoopInboundStats::default();
+                    let facade = CountingFacade::default();
+
+                    deliver_proposal_fresh(
+                        &mut engine,
+                        &mut stats,
+                        &mut restore,
+                        None,
+                        Some(&pv),
+                        Some(&owner),
+                        &proposal,
+                        &metrics,
+                        Some(&facade),
+                        Some(&origin),
+                        Some(&gate),
+                        ConsensusVerificationPolicy::Required,
+                    );
+
+                    assert_eq!(stats.inbound_proposal_current_state_unavailable_total, 1);
+                    assert_eq!(
+                        stats.restore_catchup_proposals_deferred, 0,
+                        "negative: no deferral — rejected before restore branch"
+                    );
+                    assert_eq!(stats.proposal_vote_crypto_verify_latency_observations_total, 0);
+                    assert_eq!(stats.inbound_proposals_delivered, 0);
+                    assert_eq!(facade.calls.load(SeqCst), 0);
+                    assert!(restore.is_active());
                 }
             }
         }
