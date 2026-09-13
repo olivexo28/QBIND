@@ -1,19 +1,22 @@
 RUN 422 D5 — MESSAGE-FAMILY MATRIX
-Both message-family contexts recorded for every tested configuration.
-Tested revision: e1b95948c6ce604aa97f317e88f8c8b2e41a6b2b
+Tested revision: current worktree tip (prior revision e1b95948… ABSENT from
+this shallow checkout; re-verified against the checked-out source).
 ============================================================================
 
-Every combined-context test below constructs, in a single handler/loop
-invocation:
-  * a VALID TimeoutVerificationContext (live signer + key provider),
-  * proposal_vote_authority = None,
-  * ConsensusVerificationPolicy::Required,
-  * a real PeerConsensusBindingGate + AuthenticatedConsensusOrigin,
-  * encoded Proposal and/or Vote messages,
-and (for outbound) a recording facade whose effects are asserted.
-
-Contexts present in each configuration:  TIMEOUT = present/valid,
-                                          PV      = None (absent).
+NOT every test below supplies both contexts + an authenticated origin + a
+binding gate + a recording facade. The setups differ by category and are
+labelled per test. "TIMEOUT present" = a valid TimeoutVerificationContext;
+"PV None" = proposal_vote_authority absent; policy is Required unless noted.
+  * Combined-context inbound tests (d5a/d5b) use gate + matching origin.
+  * F6-mismatch tests (d5c) use gate + MISMATCHED origin.
+  * Action-forwarding test (d5d) uses a recording facade, no gate/origin.
+  * Type/source-wiring test (d5f) inspects types (no gate/origin/facade).
+  * NEW cached/re-emission test (d5g) uses a recording facade + a peer-source
+    transition, no gate/origin.
+  * NEW active restore-mode test (d5h) uses gate + matching origin + recording
+    facade + an ACTIVE restore baseline.
+  * Pre-existing missing-authority tests pass None for BOTH the Timeout ctx and
+    the origin/gate (compatibility only).
 
 ----------------------------------------------------------------------------
 NEW COMBINED-CONTEXT TESTS (binary_consensus_loop.rs, mod run420)
@@ -54,12 +57,46 @@ run422_d5d_outbound_forwarding_suppressed_without_pv_authority
           authority-unavailable counters increment instead.
 
 run422_d5f_timeout_context_usable_only_for_its_own_family
-  Config: TIMEOUT present (valid), PV None, Required.
+  Config: TIMEOUT present (valid), PV None, Required. (Type inspection — no
+          gate/origin/facade.)
   Assert: the Timeout context is a valid Arc<TimeoutVerificationContext>
           usable for its own family, while a correctly-signed authenticated
           Proposal is still rejected authority-unavailable. No conversion or
           adapter promotes the Timeout context into PV authority (distinct
-          nominal types — compile-time property).
+          nominal types — compile-time property). NOTE: this test does NOT
+          itself sign or verify a Timeout — real Timeout/NewView crypto
+          coverage is the existing run030 tests in the same lib module.
+
+----------------------------------------------------------------------------
+NEW REQUIRED-POLICY PATH TESTS (Findings B-A / B-B)
+----------------------------------------------------------------------------
+
+run422_d5g_late_peer_reemit_suppressed_under_required_without_pv_authority
+  Setup:  recording facade + peer-source transition (NO gate/origin).
+  Config: PV None, Required; cached current-view Proposal AND Vote; leader/
+          current-view engine; genuine newly-connected-peer transition.
+  Path:   the ACTUAL maybe_reemit_on_late_peer_connect (not forward_actions).
+  Assert: reaches the outbound authority/signing boundary
+          (outbound_proposal_verification_context_unavailable_total == 1); NO
+          Proposal broadcast, NO Vote broadcast/directed vote, NO
+          self-injection, NO successful re-emit counters; reemitted_for_view
+          stays None; no fallback to Timeout credentials. HONESTY: the proposal
+          signs first and returns None, so the function returns BEFORE the
+          cached-vote branch — the vote-signing branch is NOT claimed to be
+          independently exercised (outbound vote unavailable counter stays 0).
+
+run422_d5h_active_restore_mode_proposal_rejected_authority_unavailable
+  Setup:  gate + matching origin + recording facade + ACTIVE restore baseline.
+  Config: restore catchup mode ACTIVE (snapshot baseline height 5); valid
+          TIMEOUT present; PV None; Required; Proposal shaped (height 7 >
+          committed+1) to reach restore deferral IF admitted.
+  Control:a positive control with PV authority PRESENT proves the same-shaped
+          proposal IS deferred (deferred +1, verify_accepted +1).
+  Assert: F6 admission succeeds; PV authority-unavailable rejection fires
+          BEFORE the restore-deferral branch; NO deferral, NO engine delivery,
+          NO reconfig observation, NO outbound frame (recording facade count
+          == 0); restore mode stays active; engine view/committed height
+          unchanged.
 
 ----------------------------------------------------------------------------
 PRE-EXISTING MISSING-AUTHORITY HANDLER TESTS (retained, complementary)

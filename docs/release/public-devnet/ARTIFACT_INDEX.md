@@ -100,6 +100,25 @@ Companion documents:
   startup ordering, Proposal/Vote-vs-Timeout/NewView shared-context separation,
   signed-domain replay isolation, genesis-static lifetime. **F3/F4/F8 are
   PARTIAL** (not code/test-positive). Run 423 not started.
+- `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D4_D5.md` — Run 422 **D4/D5
+  successor (code/test)**, archive
+  `docs/devnet/run_422_d4_d5_preflight_context_separation/`. Closes two of the
+  four corrective blockers on the code+test axis
+  (`RESULT=POSITIVE-FOR-CONSENSUS-SECURITY-PREFLIGHT-AND-CONTEXT-SEPARATION-CODE-TEST`):
+  **D4** — the fatal consensus-security preflight runs before
+  `P2pNodeBuilder::build`, peer dialing, and consensus-task startup (bounded
+  process tests; explicit metrics exception — the optional loopback `/metrics`
+  task starts earlier in `main`, and the genesis-refusal guard sits after that
+  spawn but before per-mode dispatch); **D5** — a valid Timeout context never
+  establishes Proposal/Vote authority, and under `Required` with absent
+  Proposal/Vote authority inbound Proposal/Vote are rejected fail-closed and
+  outbound Proposal/Vote suppressed (no Timeout-credential fallback). Legacy
+  Timeout/NewView policy **preserved** (run030 crypto coverage); legacy
+  `--validator-consensus-key` **no longer** establishes Proposal/Vote authority;
+  genesis activation stays **DISABLED**. **D6/D7 remain unresolved**; CodeQL
+  **NOT** run to a zero-alert conclusion (separate validation axis);
+  `CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED`; **RS1 stays
+  OPEN / launch-blocking**. Run 423 not started.
 
 Everything below reflects the recorded status **after Run 402**. This index adds
 navigation and clarity only; it does not re-prove or change any item's status.

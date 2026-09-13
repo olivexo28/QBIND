@@ -100,7 +100,24 @@ decision is **NO-GO / NOT launch-ready** (`LAUNCH_GO_NO_GO.md`).
    membership consistency, and LocalMesh flag reject. UNRESOLVED blockers:
    startup ordering, shared-context separation, signed-domain replay isolation,
    genesis-static lifetime. **F3/F4/F8 are PARTIAL; RS1/C4/C5 stay OPEN.** Run
-   423 not started.
+   423 not started. **Run 422 D4/D5 SUCCESSOR (code/test):** the startup-ordering
+   and shared-context-separation blockers are now closed on the code+test axis
+   (`RESULT=POSITIVE-FOR-CONSENSUS-SECURITY-PREFLIGHT-AND-CONTEXT-SEPARATION-CODE-TEST`;
+   `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D4_D5.md`, archive
+   `docs/devnet/run_422_d4_d5_preflight_context_separation/`): **D4** — fatal
+   consensus-security preflight before `P2pNodeBuilder::build`/peer dialing/
+   consensus-task startup (bounded process tests; explicit metrics exception —
+   optional loopback `/metrics` task starts earlier in `main`, genesis-refusal
+   guard sits after it but before per-mode dispatch); **D5** — a valid Timeout
+   context never establishes Proposal/Vote authority; under `Required` with
+   absent Proposal/Vote authority inbound Proposal/Vote reject fail-closed and
+   outbound Proposal/Vote suppress (no Timeout-credential fallback; run030 carries
+   the Timeout/NewView crypto coverage). Legacy Timeout/NewView policy preserved;
+   legacy `--validator-consensus-key` no longer establishes Proposal/Vote
+   authority; genesis activation stays DISABLED. **D6/D7 remain unresolved**;
+   CodeQL NOT run to a zero-alert conclusion (separate axis);
+   `CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED`; **RS1/C4/C5
+   stay OPEN**. Run 423 not started.
 9. `docs/whitepaper/contradiction.md` — contradiction ledger.
 10. `docs/release/public-devnet/BLOCKER_REGISTER.md` — open blockers (incl. **RS1**).
 

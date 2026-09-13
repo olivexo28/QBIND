@@ -1,64 +1,66 @@
 RUN 422 D4/D5 — VALIDATION COMMANDS
-Tested revision: e1b95948c6ce604aa97f317e88f8c8b2e41a6b2b
+Tested revision: this continuation's worktree tip (A/B commit 43dedea…; docs
+commits follow). The task-named prior revision e1b95948… is ABSENT from this
+shallow/squashed checkout; re-run targets executed against the current worktree.
 Toolchain: repository-pinned stable Rust (cargo/rustc as vendored in CI image).
 Profiles/features are noted per command. Exit codes: 0 unless stated.
 ============================================================================
 
-PRODUCTION CHECK AND RELEASE BUILD (no test-utils)
+PRODUCTION CHECK AND RELEASE BUILD (PRESERVED — original tested SHA)
 ----------------------------------------------------------------------------
+  These are NOT re-run against this tip and are NOT relabeled as freshly
+  executed: this continuation changed only tests + documentation, so no new
+  release-binary evidence campaign is required.
+
   cargo check -p qbind-node
-      profile: dev (check) | features: default (NO test-utils) | exit 0
+      profile: dev (check) | features: default (NO test-utils) | exit 0 (prior)
 
   cargo build --release -p qbind-node --bin qbind-node
-      profile: release | features: default (NO test-utils) | exit 0
+      profile: release | features: default (NO test-utils) | exit 0 (prior)
       (Release build is a build artifact, NOT runtime evidence.)
 
-FOCUSED TEST TARGETS (default test profile)
+FOCUSED TEST TARGETS (default test profile, default features) — this tip
 ----------------------------------------------------------------------------
-  # D5 combined-context + existing binary_consensus_loop unit tests
+  # Full binary_consensus_loop lib module (includes run030 Timeout crypto,
+  # all D5 combined-context tests, and the two NEW D5 tests).
   cargo test -p qbind-node --lib binary_consensus_loop
-      features: default | exit 0 | 104 passed
-  cargo test -p qbind-node --lib run420::run422_d5
-      features: default | exit 0 | 10 passed (6 new *a/*b/*c/*c/*d/*f + 4 pre-existing)
+      features: default | exit 0 | 106 passed (was 104; +run422_d5g, +run422_d5h)
 
-  # D4 startup-ordering process tests (spawn CARGO_BIN_EXE_qbind-node)
+  # D5 locator filter — SUBSET of the 106 above (same lib binary); NOT additive,
+  # do not double-count.
+  cargo test -p qbind-node --lib run420::run422_d5
+      features: default | exit 0 | 12 passed (subset of the 106)
+
+  # D4 startup-ordering PROCESS tests (spawn CARGO_BIN_EXE_qbind-node; bounded
+  # DrainedChild runner with a monotonic deadline).
   cargo test -p qbind-node --test run_422_d4_startup_ordering_tests
       features: default | exit 0 | 5 passed
-      NOTE: these use CARGO_BIN_EXE_qbind-node in the default test profile;
-      they are PROCESS tests, not standalone release-binary evidence.
+      NOTE: PROCESS tests, not standalone release-binary evidence.
 
-  # Existing Run 422 startup-refusal and genesis-authority loader tests
+  # Existing Run 422 startup-refusal and genesis-authority loader tests.
   cargo test -p qbind-node --test run_422_startup_refusal_tests
       features: default | exit 0 | 4 passed
   cargo test -p qbind-node --test run_422_genesis_consensus_authority_tests
       features: default | exit 0 | 15 passed
 
-  # Run 420 Proposal/Vote behavior + production-policy reachability guard
+  # Run 420 production-policy reachability guard.
   cargo test -p qbind-node --test run_420_production_policy_reachability_tests
       features: default | exit 0 | 3 passed
 
-  # Run 418 sender-binding + NewView demux
+  # Run 418 sender-binding.
   cargo test -p qbind-node --test run_418_authenticated_peer_consensus_sender_binding_tests
       features: default | exit 0 | 18 passed
-  cargo test -p qbind-node --test run_418_newview_demux_chain_integration_tests
-      features: default | exit 0 | 3 passed
 
-  # Affected B6/B9/B10/B11 integration targets
-  cargo test -p qbind-node --test c4_b6_p2p_binary_path_interconnect_tests
-      features: default | exit 0 | 5 passed
+  # Affected B9 late-peer re-emit integration target.
   cargo test -p qbind-node --test b9_late_peer_connect_proposal_reemit_tests
       features: default | exit 0 | 6 passed
-  cargo test -p qbind-node --test b10_engine_acceptance_qc_closure_tests
-      features: default | exit 0 | 5 passed
-  cargo test -p qbind-node --test b11_consensus_net_prometheus_coverage_tests
-      features: default | exit 0 | 5 passed
 
 LINT / FORMAT (changed code only; no mass-format)
 ----------------------------------------------------------------------------
-  cargo clippy -p qbind-node --lib
+  cargo clippy -p qbind-node --lib --tests
       No NEW warnings introduced by the changed regions. (Pre-existing lib
-      warnings remain; they are unrelated to this change.)
-  rustfmt applied to the NEW file only
+      warnings, e.g. dead_code cert_bound_node_id, remain; unrelated.)
+  rustfmt applied to the changed test file only
   (crates/qbind-node/tests/run_422_d4_startup_ordering_tests.rs).
       binary_consensus_loop.rs is pervasively non-rustfmt-clean at baseline;
       new test code follows the file's existing local style — NOT mass
@@ -74,5 +76,6 @@ TEST-UTILS-ONLY TARGET (recorded separately)
 SECURITY ANALYSIS
 ----------------------------------------------------------------------------
   CodeQL / dedicated security scan: NOT executed to completion in this
-  environment for these changes. No zero-alert conclusion is claimed. See
-  summary.txt. Secret/privacy scan of changed files: clean.
+  environment for these changes. No zero-alert conclusion is claimed; no
+  execution/result/timestamp is invented. A code review is NOT a substitute for
+  CodeQL. See summary.txt. Secret/privacy scan of changed files: clean.

@@ -89,11 +89,29 @@ POSITIVE; corrective verdict
 `PRODUCTION_ACTIVATION=UNAVAILABLE-FOR-UNRESOLVED-BOUNDARIES`. Fixed +
 behaviorally tested: single-snapshot genesis provenance, engine/verifier
 membership consistency (peer-count mismatch rejected, no silent resize), and
-LocalMesh flag reject. UNRESOLVED blockers (activation kept fail-closed):
-startup ordering vs `P2pNodeBuilder::build`, Proposal/Vote-vs-Timeout/NewView
-shared-context separation, signed-domain replay isolation, genesis-static
-lifetime. **F3/F4/F8 are PARTIAL, not code/test-positive; RS1/C4/C5 stay OPEN.**
-Run 423 not started.
+LocalMesh flag reject. **Run 422 D4/D5 SUCCESSOR (code/test):** two of the four
+UNRESOLVED blockers are now closed on the code+test axis —
+`RESULT=POSITIVE-FOR-CONSENSUS-SECURITY-PREFLIGHT-AND-CONTEXT-SEPARATION-CODE-TEST`.
+**D4** proves the fatal consensus-security preflight
+(`run_p2p_consensus_security_preflight`) runs BEFORE `P2pNodeBuilder::build`,
+peer dialing, and consensus-task startup, with the explicit metrics exception
+(the optional loopback `/metrics` HTTP task is spawned earlier in `main` and is
+out of scope; the genesis-refusal guard sits after that spawn but before the
+per-mode dispatch). **D5** proves message-family authority separation: a valid
+`TimeoutVerificationContext` never establishes `ProposalVoteAuthority`; under
+`Required` with absent Proposal/Vote authority, inbound Proposal/Vote are
+rejected fail-closed and outbound Proposal/Vote are suppressed (bounded process
+tests + combined-context, late-peer re-emission, and active-restore-mode unit
+tests). Legacy Timeout/NewView policy is PRESERVED (existing run030 crypto
+coverage); the legacy `--validator-consensus-key` CLI route no longer
+establishes Proposal/Vote authority; genesis activation stays DISABLED.
+Still UNRESOLVED (activation kept fail-closed): **D6** signed-domain replay
+isolation and **D7** genesis-static/epoch-restore authority lifetime;
+configured-authority release-binary adversarial evidence remains **NOT
+captured**
+(`CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED`). See
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D4_D5.md`. **F3/F4/F8 are PARTIAL,
+not code/test-positive; RS1/C4/C5 stay OPEN.** Run 423 not started.
 
 ## TestNet / MainNet
 
@@ -120,4 +138,5 @@ MainNet readiness is claimed.**
 - `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_420.md` — Run 420 code/test fail-closed Proposal/Vote verification boundary (findings F3/F4/F8).
 - `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_421.md` — Run 421 unavailable-authority fail-closed release-binary evidence for findings F3/F4/F8.
 - `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422.md` — Run 422 genesis-bound consensus authority activation (code/test) for findings F3/F4/F8.
+- `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D4_D5.md` — Run 422 D4/D5 successor: pre-P2P/consensus preflight (D4) and message-family authority separation (D5) code/test-positive; D6/D7 unresolved.
 - `docs/whitepaper/contradiction.md` — contradiction ledger.

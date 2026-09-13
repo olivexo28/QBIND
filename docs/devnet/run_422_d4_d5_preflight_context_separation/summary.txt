@@ -54,7 +54,52 @@ Results (see test_results.txt / message_family_matrix.txt):
        for its own family; there is no conversion or adapter promoting it into
        ProposalVoteAuthority (a compile-time property of the distinct nominal
        types), and a correctly-signed authenticated Proposal is still rejected
-       authority-unavailable.
+       authority-unavailable. NOTE: run422_d5f does NOT itself sign/verify a
+       Timeout — see the Timeout-attribution note below.
+  G  NEW (Finding B-A) — Required-policy late-peer re-emission suppression:
+       drives the ACTUAL maybe_reemit_on_late_peer_connect (the B9/B10 tests
+       exercise it only under LocalFixtureUnsigned) with Required, absent
+       Proposal/Vote authority, a cached current-view proposal AND vote, a
+       leader/current-view engine, a genuine newly-connected-peer transition,
+       and a RECORDING facade. All gates 1..7 pass so control reaches the
+       outbound authority/signing boundary (proven by
+       outbound_proposal_verification_context_unavailable_total == 1) and the
+       fail-closed refusal suppresses the broadcast: no proposal broadcast, no
+       vote broadcast, no directed vote, no self-injection, no successful
+       re-emit counters, reemitted_for_view stays None. Control-flow honesty:
+       the proposal signs FIRST and returns None, so the function returns before
+       the paired cached-vote branch; the vote-signing branch is NOT
+       independently exercised (outbound vote authority-unavailable stays 0) and
+       no such claim is made. No fallback to Timeout credentials (the signing
+       fns take Option<&ProposalVoteAuthority> only).
+  H  NEW (Finding B-B) — Active restore-mode Proposal authority-unavailable
+       rejection: restore catchup mode is demonstrably ACTIVE (snapshot baseline
+       at height 5), with a valid Timeout ctx, a real gate + matching origin,
+       absent Proposal/Vote authority, Required policy, a RECORDING facade, and
+       a Proposal shaped (height 7 > committed+1) to reach restore deferral IF
+       admitted. A POSITIVE CONTROL proves the same-shaped proposal IS deferred
+       once a Proposal/Vote authority is present. Main case: F6 admission
+       succeeds, then the Proposal/Vote authority-unavailable rejection fires
+       BEFORE the restore-deferral branch — no deferral, no delivery, no engine
+       acceptance, no reconfig observation, no outbound frame (recording facade
+       count == 0); restore mode stays active and engine view/committed height
+       are unchanged.
+
+Timeout-attribution note (Finding C-B): actual Timeout/NewView cryptographic
+coverage is provided by the existing run030 tests in the SAME
+binary_consensus_loop lib module (run030_outbound_signs_locally_emitted_timeout
+signs + round-trips through verify_timeout_msg;
+run030_outbound_fail_closed_when_signer_missing proves no broadcast without a
+signer; plus inbound TimeoutMsg verification-gate cases). Fixture: ML-DSA-44
+(suite 100) over QBIND_DEVNET_CHAIN_ID; outbound under the context's own signer
+policy. No new production Timeout implementation was added for documentation.
+
+Test-setup honesty: NOT every D5 test supplies both contexts + an authenticated
+origin + a binding gate + a recording facade. Combined-context inbound tests
+(A/B) and F6-mismatch tests (C) use the gate+origin; the action-forwarding test
+(D) and the late-peer test (G) use a recording facade with no gate/origin; the
+type/source-wiring test (F) inspects types; the pre-existing missing-authority
+tests pass None for BOTH the Timeout ctx and origin/gate (compatibility only).
 
 Distinction preserved throughout: a correctly SIGNED message is separate from
 an AUTHENTICATED transport origin; one does not establish the other. Publicly

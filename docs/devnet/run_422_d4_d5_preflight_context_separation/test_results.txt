@@ -1,60 +1,98 @@
 RUN 422 D4/D5 — TEST RESULTS
-Tested revision: e1b95948c6ce604aa97f317e88f8c8b2e41a6b2b
+Tested revision: this continuation's worktree tip (A/B code/test commit
+43dedea…; documentation commits follow). The task-named prior revision
+e1b95948c6ce604aa97f317e88f8c8b2e41a6b2b is ABSENT from this shallow/squashed
+checkout, so counts below were produced against the current worktree, not that
+object.
 Profile: default test profile unless noted. All targets exit 0 (pass).
 ============================================================================
 
-D5 COMBINED-CONTEXT (NEW) — crates/qbind-node/src/binary_consensus_loop.rs
+D5 COMBINED-CONTEXT INBOUND (valid Timeout ctx + gate + matching origin +
+None PV authority + Required + encoded Proposal/Vote)
   run422_d5a_authenticated_proposal_timeout_only_rejects_before_crypto ...... ok
   run422_d5b_authenticated_vote_timeout_only_rejects_before_crypto .......... ok
+
+D5 F6-MISMATCH (combined context, mismatched authenticated origin)
   run422_d5c_proposal_f6_mismatch_precedes_pv_authority_lookup .............. ok
   run422_d5c_vote_f6_mismatch_precedes_pv_authority_lookup .................. ok
+
+D5 ACTION-FORWARDING (recording facade + None PV authority; no ctx/gate/origin)
   run422_d5d_outbound_forwarding_suppressed_without_pv_authority ............ ok
+
+D5 TYPE/SOURCE-WIRING INSPECTION (does NOT itself sign/verify a Timeout)
   run422_d5f_timeout_context_usable_only_for_its_own_family ................. ok
 
-D5 PRE-EXISTING MISSING-AUTHORITY (retained)
+D5 NEW — CACHED / LATE-PEER RE-EMISSION (Finding B-A; drives the actual
+maybe_reemit_on_late_peer_connect under Required with None PV authority,
+recording facade; reaches the outbound authority/signing boundary)
+  run422_d5g_late_peer_reemit_suppressed_under_required_without_pv_authority  ok
+
+D5 NEW — ACTIVE RESTORE-MODE PROPOSAL REJECTION (Finding B-B; restore mode
+demonstrably active, valid Timeout ctx, gate+origin, None PV authority,
+recording facade, proposal shaped to defer if admitted; positive control
+proves deferral with a PV authority present)
+  run422_d5h_active_restore_mode_proposal_rejected_authority_unavailable .... ok
+
+D5 PRE-EXISTING MISSING-AUTHORITY (retained; each passes None for BOTH the
+Timeout ctx AND origin/gate — compatibility only, NOT Required-policy
+combined-context proof)
   run422_d5_valid_timeout_ctx_does_not_populate_pv_authority ................ ok
   run422_d5_authenticated_proposal_rejected_when_pv_authority_absent ........ ok
   run422_d5_authenticated_vote_rejected_when_pv_authority_absent ............ ok
   run422_d5_outbound_proposal_vote_suppressed_without_pv_authority .......... ok
-  -> cargo test --lib run420::run422_d5 : 10 passed; 0 failed
+  -> cargo test --lib run420::run422_d5 : 12 passed; 0 failed
+     (SUBSET of the binary_consensus_loop lib module below — NOT additive.)
 
-  binary_consensus_loop full lib module : 104 passed; 0 failed
+TIMEOUT/NEWVIEW CRYPTO COVERAGE (existing run030 tests in the SAME lib module;
+these — not run422_d5f — sign and verify Timeout material)
+  run030_outbound_signs_locally_emitted_timeout ............................. ok
+  run030_outbound_fail_closed_when_signer_missing ........................... ok
+  (+ inbound TimeoutMsg verification-gate run030 cases)
+  Fixture: ML-DSA-44 (suite 100) keys over QBIND_DEVNET_CHAIN_ID; outbound
+  exercised under the context's own signer policy (present ⇒ signs; absent ⇒
+  fail-closed).
 
-D4 STARTUP-ORDERING (NEW) — tests/run_422_d4_startup_ordering_tests.rs
+  binary_consensus_loop full lib module : 106 passed; 0 failed
+     (was 104; +2 new: run422_d5g, run422_d5h)
+
+D4 STARTUP-ORDERING (Finding A; bounded DrainedChild runner) —
+tests/run_422_d4_startup_ordering_tests.rs
   require_or_fail_missing_local_signer_refused_before_p2p .................... ok
   require_or_fail_invalid_peer_key_provider_refused_before_p2p .............. ok
   require_or_fail_unsupported_suite_refused_before_p2p ...................... ok
   require_or_fail_local_key_mismatches_signer_refused_before_p2p ............ ok
   valid_legacy_config_passes_preflight_and_reaches_p2p_startup .............. ok
   -> 5 passed; 0 failed
-  (Each negative case: nonzero exit + "[binary] Run 032/033:" positive
-   control PRESENT + "[binary] P2P transport up." ABSENT. Positive case:
-   "timeout verification ACTIVE" + "P2P transport up." PRESENT, no refusal.)
+  (Each negative case: NATURAL nonzero exit within the deadline — a timeout is
+   a TEST FAILURE, never a refusal — plus "[binary] Run 032/033:" positive
+   control PRESENT and "[binary] P2P transport up." ABSENT, interpreted with
+   the inspected source ordering. Positive case: "timeout verification ACTIVE"
+   + "P2P transport up." observed within the deadline, no refusal. Both stdout
+   and stderr are drained on threads while the child runs; the child is killed
+   and reaped on timeout, on success, and on assertion unwinding.)
 
-REGRESSION / GUARD SUITES (existing, re-run)
+REGRESSION / GUARD SUITES (existing, re-run this continuation)
   run_422_startup_refusal_tests ............................. 4 passed; 0 failed
   run_422_genesis_consensus_authority_tests ................ 15 passed; 0 failed
   run_420_production_policy_reachability_tests .............. 3 passed; 0 failed
   run_418_authenticated_peer_consensus_sender_binding_tests  18 passed; 0 failed
-  run_418_newview_demux_chain_integration_tests ............ 3 passed; 0 failed
-  c4_b6_p2p_binary_path_interconnect_tests ................. 5 passed; 0 failed
   b9_late_peer_connect_proposal_reemit_tests ............... 6 passed; 0 failed
-  b10_engine_acceptance_qc_closure_tests ................... 5 passed; 0 failed
-  b11_consensus_net_prometheus_coverage_tests .............. 5 passed; 0 failed
 
-BUILD / CHECK
-  cargo check -p qbind-node (default features) ............. exit 0
-  cargo build --release -p qbind-node --bin qbind-node .... exit 0
+BUILD / CHECK (PRESERVED at the original tested SHA — NOT re-run against this
+tip; no production code or build configuration changed in this continuation)
+  cargo check -p qbind-node (default features) ............. exit 0 (prior)
+  cargo build --release -p qbind-node --bin qbind-node .... exit 0 (prior)
 
 NOT RUN TO COMPLETION
   CodeQL / dedicated security scan for these changes — status NOT-RUN; no
-  zero-alert claim. (See summary.txt / commands.txt.)
+  zero-alert claim; no invented execution/result/timestamp. A code review is
+  NOT a substitute for CodeQL. (See summary.txt / commands.txt.)
   m16_epoch_transition_hardening_tests — requires --features test-utils
   (pre-existing, unrelated); recorded separately, not part of the production
   check / release build.
 
 INTERPRETATION NOTE
   These are default-test-profile results (including CARGO_BIN_EXE_qbind-node
-  PROCESS tests) plus a release build. They are CODE + TEST evidence. They are
-  NOT standalone release-binary adversarial evidence and NOT public-network
-  runtime evidence.
+  PROCESS tests) plus a PRESERVED prior release build. They are CODE + TEST
+  evidence. They are NOT standalone release-binary adversarial evidence and NOT
+  public-network runtime evidence.

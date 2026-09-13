@@ -63,15 +63,37 @@ Reviewed D4/D5 implementation tip (named in the task):
   than claiming direct ancestry to an object not in the checkout.
 
 Tested revision (all counts in test_results.txt were produced at):
-  e1b95948c6ce604aa97f317e88f8c8b2e41a6b2b
+  the current worktree tip of the supplied task branch. The task-named prior
+  revision e1b95948c6ce604aa97f317e88f8c8b2e41a6b2b and the reviewed tip
+  6ecec71439afec6c007d628ab6d31d5190b7be51 are BOTH ABSENT from this
+  shallow/squashed single-branch checkout (git cat-file -t fails on each);
+  the reviewed D4/D5 implementation is nonetheless demonstrably present in the
+  worktree, so validation was executed against the current tip and the
+  deviation is recorded here rather than claiming unverifiable ancestry.
+
+This continuation additionally lands the follow-up review findings:
+  A  Deadline-bounded, output-draining process runner for the D4 startup tests
+     (crates/qbind-node/tests/run_422_d4_startup_ordering_tests.rs) — no
+     unbounded wait; timeout is a TEST FAILURE; child killed+reaped on every
+     path; corrected resource-discipline comments.
+  B  Two new Required-policy library tests in binary_consensus_loop.rs:
+     run422_d5g (late-peer re-emission suppression through the ACTUAL
+     maybe_reemit_on_late_peer_connect) and run422_d5h (active restore-mode
+     Proposal authority-unavailable rejection with a recording facade).
+  C  Evidence-claim corrections throughout this archive (test-setup
+     categories, Timeout attribution to run030, precise production-wiring and
+     CodeQL status).
 
 Final revision:
-  The commit that adds this archive (HEAD of
-  copilot/copilotrun-422-follow-up-d4-d5-startup after this commit). Its full
-  SHA is recorded in the task's final report; it changes only documentation
-  relative to the tested revision above.
+  The commit(s) that add/adjust this archive on the supplied task branch. The
+  full SHA is recorded in the task's final report; this continuation changes
+  only tests and documentation relative to the reviewed implementation.
 
-Actual working branch: copilot/copilotrun-422-follow-up-d4-d5-startup
+Actual working branch (as supplied to this environment):
+  copilot/copilotcopilotrun-422-follow-up-d4-d5-startup
+  (NOTE the doubled "copilot" prefix vs. the task-named
+  copilot/copilotrun-422-follow-up-d4-d5-startup; the environment supplied the
+  former and it is reported verbatim rather than assumed.)
 
 ============================================================================
 FILE INDEX
@@ -85,8 +107,13 @@ FILE INDEX
                              Proposal/Vote authority, per message family.
   startup_order.txt          Exact P2P/consensus startup boundary and the
                              metrics HTTP exception.
-  message_family_matrix.txt  Per-test message-family context table (both
-                             contexts in every tested configuration).
+  message_family_matrix.txt  Per-test message-family context table. It
+                             distinguishes the setups: combined-context inbound
+                             tests, F6-mismatch tests, action-forwarding tests,
+                             the new cached/re-emission test (d5g), the new
+                             active restore-mode test (d5h), and the
+                             type/source-wiring inspection — NOT every test
+                             supplies both contexts + origin + gate + facade.
   commands.txt               Exact commands, profiles, and features.
   test_results.txt           Test names, counts, and exit codes.
   SHA256SUMS.txt             SHA-256 of every publish-safe file here except

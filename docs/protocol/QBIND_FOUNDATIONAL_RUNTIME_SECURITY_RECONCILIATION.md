@@ -172,3 +172,26 @@ rejection of mismatched-identity, unsigned, wrong-suite, and forged-QC inputs wi
   leader-proposal opportunity; inbound fail-closed before engine ingestion), so the verdict is
   **PARTIAL-POSITIVE** and `CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-CAPTURED`. RS1 remains
   **OPEN**; F1/F2/F5/F7 unresolved; F6 partial; public DevNet **NO-GO**.
+- **Run 422 (genesis-bound authority activation, code/test) + D4/D5 successor:**
+  `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422.md`,
+  `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D4_D5.md`,
+  `docs/devnet/run_422_d4_d5_preflight_context_separation/`. Run 422 activated a
+  genesis-bound consensus authority in code/test only; source review then kept
+  activation fail-closed pending four boundaries. The **D4/D5 successor**
+  (`RESULT=POSITIVE-FOR-CONSENSUS-SECURITY-PREFLIGHT-AND-CONTEXT-SEPARATION-CODE-TEST`)
+  closes two of them on the code+test axis: **D4** — the fatal consensus-security
+  preflight runs BEFORE P2P service construction (`P2pNodeBuilder::build`), peer
+  dialing, and consensus-task startup, with an explicit metrics exception (the
+  optional loopback `/metrics` HTTP task starts earlier in `main`; the
+  genesis-refusal guard sits after that spawn but before the per-mode dispatch);
+  **D5** — a valid `TimeoutVerificationContext` never establishes
+  `ProposalVoteAuthority`, and under `Required` with absent Proposal/Vote
+  authority inbound Proposal/Vote are rejected fail-closed and outbound
+  Proposal/Vote are suppressed (no fallback to Timeout credentials). Legacy
+  Timeout/NewView policy is **preserved** (existing run030 crypto coverage); the
+  legacy `--validator-consensus-key` CLI route **no longer** establishes
+  Proposal/Vote authority; genesis activation stays **DISABLED**. Still open:
+  **D6** signed-domain replay isolation and **D7** genesis-static/epoch-restore
+  authority lifetime; `CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED`.
+  RS1 remains **OPEN**; F1/F2/F5/F7 unresolved; F6 partial; public DevNet
+  **NO-GO**. Run 423 not started.

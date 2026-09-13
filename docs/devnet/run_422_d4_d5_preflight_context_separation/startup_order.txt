@@ -1,21 +1,34 @@
 RUN 422 D4 — STARTUP ORDER AND THE METRICS EXCEPTION
-Tested revision: e1b95948c6ce604aa97f317e88f8c8b2e41a6b2b
+Tested revision: current worktree tip of
+  copilot/copilotcopilotrun-422-follow-up-d4-d5-startup (shallow/squashed
+  checkout; the task-named prior revision e1b95948… is ABSENT locally). Line
+  anchors below were re-verified against the checked-out main.rs source.
 File: crates/qbind-node/src/main.rs
 ============================================================================
 
 CHRONOLOGICAL STARTUP ORDER (P2P mode)
 ----------------------------------------------------------------------------
 
-  [main()]
-    ...CLI parse, hidden operator ceremonies, genesis boot/verify...
-    Run 422 genesis-authority containment guard refuses
-        --consensus-authority-from-genesis BEFORE reaching P2P.
-    (4604) B2 metrics HTTP endpoint block.
+  [main() -> common startup, before per-mode dispatch]
+    ...CLI parse, hidden operator ceremonies, Run 102 genesis boot/verify,
+       storage open...
+    (4612) node_metrics constructed; (4626) build/chain context set.
     (4643) spawn_metrics_http_server_with_crypto(...)
              *** OPTIONAL METRICS HTTP TASK STARTS HERE ***
-             This is EARLIER than the per-mode P2P function and its preflight.
+             This is EARLIER than the genesis guard and the per-mode P2P
+             function + its preflight.
+    (4782) Run 422 genesis-authority containment guard: if
+             `args.consensus_authority_from_genesis` is set, print
+             "[binary] FATAL: --consensus-authority-from-genesis is refused…"
+             and exit non-zero. This is AFTER the metrics spawn (4643) and
+             AFTER Run 102 genesis verification, but strictly BEFORE the
+             per-mode transport dispatch (4798) — so before any P2P service
+             construction or consensus task, uniformly across modes. It is a
+             DIFFERENT guard from the D4 signer/provider/timeout preflight.
+    (4798) match config.network_mode { LocalMesh => run_local_mesh_node,
+             ... => run_p2p_node }
 
-  [run_p2p_node()]  (5553)
+  [run_p2p_node()]
     (5563) eprintln "[binary] P2P mode: starting transport + consensus loop"
              (printed at function START; NOT a preflight boundary)
     ...
@@ -25,18 +38,17 @@ CHRONOLOGICAL STARTUP ORDER (P2P mode)
              |  * loads local validator signer                           |
              |  * builds peer SuiteAwareValidatorKeyProvider             |
              |  * enforces timeout policy                                |
-             |  FATAL exits (fail closed) at:                            |
-             |    5150-5156  RequireOrFail + local signer not loaded     |
-             |    5372-5377  RequireOrFail + peer key-provider not built |
-             |    5472-5484  RequireOrFail + timeout verify unavailable  |
+             |  FATAL exits (fail closed) on: missing local signer,      |
+             |    peer key-provider not built, timeout verify unavailable|
              |  positive controls: "[binary] Run 032:" / "Run 033:"      |
              +----------------------------------------------------------+
     (7511) builder.build(config, validator_id).await
              *** P2P SERVICE CONSTRUCTION *** (only if preflight didn't exit)
     (7526) eprintln "[binary] P2P transport up. ..."   <- post-build boundary
     ...peer dialing / consensus task startup follow...
-    (8051-8059) prepared preflight result destructured + consumed by wiring
-                (signer/provider reused; not reloaded).
+    (8051-8068) prepared preflight result destructured + consumed by wiring
+                (signer/provider reused; Proposal/Vote authority never built
+                here — set to None; not reloaded).
 
 BOUNDARY DEFINITION USED BY THE D4 TESTS
 ----------------------------------------------------------------------------
