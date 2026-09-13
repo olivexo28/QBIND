@@ -1,0 +1,84 @@
+RUN 422 D5 — MESSAGE-FAMILY MATRIX
+Both message-family contexts recorded for every tested configuration.
+Tested revision: e1b95948c6ce604aa97f317e88f8c8b2e41a6b2b
+============================================================================
+
+Every combined-context test below constructs, in a single handler/loop
+invocation:
+  * a VALID TimeoutVerificationContext (live signer + key provider),
+  * proposal_vote_authority = None,
+  * ConsensusVerificationPolicy::Required,
+  * a real PeerConsensusBindingGate + AuthenticatedConsensusOrigin,
+  * encoded Proposal and/or Vote messages,
+and (for outbound) a recording facade whose effects are asserted.
+
+Contexts present in each configuration:  TIMEOUT = present/valid,
+                                          PV      = None (absent).
+
+----------------------------------------------------------------------------
+NEW COMBINED-CONTEXT TESTS (binary_consensus_loop.rs, mod run420)
+----------------------------------------------------------------------------
+
+run422_d5a_authenticated_proposal_timeout_only_rejects_before_crypto
+  Config: TIMEOUT present, PV None, Required, matching origin.
+  Input:  authenticated Proposal (F6 sender matches).
+  Assert: F6 admission +1 (exactly once); PV authority-unavailable +1
+          (exactly once); crypto-verify observations unchanged (0); no
+          delivery/engine/reconfig/restore-deferral/outbound effect; engine
+          view + committed height unchanged.
+
+run422_d5b_authenticated_vote_timeout_only_rejects_before_crypto
+  Config: TIMEOUT present, PV None, Required, matching origin.
+  Input:  authenticated Vote.
+  Assert: equivalent Vote boundary; no contribution to aggregation or QC
+          formation; PV authority-unavailable +1; crypto-verify unchanged.
+
+run422_d5c_proposal_f6_mismatch_precedes_pv_authority_lookup
+  Config: TIMEOUT present, PV None, Required, MISMATCHED origin.
+  Input:  Proposal with claimed sender != authenticated origin.
+  Assert: claimed_sender_mismatch +1 (exactly once); PV authority-unavailable
+          and crypto-verify counters UNCHANGED (0); no delivery/engine/
+          aggregation/reconfig/outbound effect. Proves F6 precedes PV lookup.
+
+run422_d5c_vote_f6_mismatch_precedes_pv_authority_lookup
+  Config: TIMEOUT present, PV None, Required, MISMATCHED origin.
+  Input:  Vote with claimed sender != authenticated origin.
+  Assert: as above for the Vote path.
+
+run422_d5d_outbound_forwarding_suppressed_without_pv_authority
+  Config: TIMEOUT present, PV None, Required.
+  Path:   ACTUAL forward_actions_to_facade with BroadcastProposal,
+          BroadcastVote, SendVoteTo actions + a recording facade.
+  Assert: NO Proposal/Vote broadcast, NO self-injection, NO directed vote
+          emitted; NO fallback to the Timeout signer; outbound
+          authority-unavailable counters increment instead.
+
+run422_d5f_timeout_context_usable_only_for_its_own_family
+  Config: TIMEOUT present (valid), PV None, Required.
+  Assert: the Timeout context is a valid Arc<TimeoutVerificationContext>
+          usable for its own family, while a correctly-signed authenticated
+          Proposal is still rejected authority-unavailable. No conversion or
+          adapter promotes the Timeout context into PV authority (distinct
+          nominal types — compile-time property).
+
+----------------------------------------------------------------------------
+PRE-EXISTING MISSING-AUTHORITY HANDLER TESTS (retained, complementary)
+----------------------------------------------------------------------------
+run422_d5_valid_timeout_ctx_does_not_populate_pv_authority
+run422_d5_authenticated_proposal_rejected_when_pv_authority_absent
+run422_d5_authenticated_vote_rejected_when_pv_authority_absent
+run422_d5_outbound_proposal_vote_suppressed_without_pv_authority
+  These provide missing-authority handler coverage. They are retained but are
+  NOT, by themselves, described as combined production-wiring proof; the *a/*b
+  /*c/*d/*f tests above supply the combined-context and outbound-effect proof.
+
+----------------------------------------------------------------------------
+SIGNED vs AUTHENTICATED (kept distinct throughout)
+----------------------------------------------------------------------------
+  A correctly SIGNED message (valid cryptographic signature) is separate from
+  an AUTHENTICATED transport ORIGIN (peer identity bound by the gate). D5c
+  uses a valid transport origin whose claimed sender is wrong -> F6 rejects
+  before any signature/authority check. D5f uses a correctly signed Proposal
+  from a matching origin -> still rejected because PV authority is absent.
+  Neither an authenticated origin nor a valid Timeout context establishes PV
+  authority.

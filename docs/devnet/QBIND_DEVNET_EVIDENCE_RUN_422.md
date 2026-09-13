@@ -168,3 +168,19 @@ The initial Run 422 review reported
 F3/F4/F8 `CONFIGURED-AUTHORITY-PRODUCTION-PATH-CODE-TEST-POSITIVE`. That
 conclusion is **superseded** by the corrective PARTIAL result above following
 source review. It is retained here only as historical record.
+---
+
+## Successor note — Run 422 D4/D5 continuation
+
+The D4/D5 boundaries referenced above are advanced (code + test) in a separate
+continuation on branch `copilot/copilotrun-422-follow-up-d4-d5-startup`. It adds
+combined-context D5 tests (valid Timeout context + absent Proposal/Vote
+authority driven through the real inbound/outbound paths) and D4
+startup-ordering process tests proving fatal consensus-security preflight
+refusal before P2P service construction, with the optional metrics HTTP task
+explicitly acknowledged as started earlier. See
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D4_D5.md` and
+`docs/devnet/run_422_d4_d5_preflight_context_separation/`. Genesis-authority
+activation remains DISABLED, D6/D7 remain unresolved, and Run 423 is not
+started. The historical Run 417-422 evidence archives are preserved
+byte-for-byte.

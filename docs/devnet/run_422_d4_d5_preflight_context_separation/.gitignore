@@ -1,0 +1,12 @@
+# Run 422 D4/D5 evidence archive — never commit private/generated material.
+# Consensus signing keys, keystores, and any operator custody material are
+# generated fresh during tests (in the OS temp dir) and must never appear here.
+*.key
+*.sk
+*-secret*
+*keystore*
+*.pem
+*.log
+raw_*.txt
+tmp/
+workdir/
