@@ -65,7 +65,7 @@ use qbind_consensus::ids::ValidatorId;
 use qbind_node::binary_consensus_loop::{
     spawn_binary_consensus_loop, spawn_binary_consensus_loop_with_io, BinaryConsensusLoopConfig,
     BinaryConsensusLoopIo, BinaryPeriodicSnapshotConfig, ConsensusVerificationPolicy,
-    RestoreBaseline,
+    ProposalVoteAuthority, RestoreBaseline, TimeoutVerificationContext,
 };
 use qbind_node::cli::CliArgs;
 use qbind_node::consensus_net_p2p::P2pConsensusNetwork;
@@ -4994,6 +4994,562 @@ async fn run_local_mesh_node(
 /// scaffolding. Caveats and remaining gaps (validator/node-id mapping,
 /// real PQC handshake, multi-validator restore catchup) are tracked in
 /// `docs/whitepaper/contradiction.md` C4.
+/// Run 422 D4: consensus security preflight.
+///
+/// Runs the signer load, peer-key provider construction, the Run 422
+/// genesis-authority containment path, the timeout-verification bridge, and
+/// policy enforcement, returning a typed result that carries the two
+/// **separated** message-family authorities. It performs no network I/O: it
+/// opens no listeners, dials no peers, and spawns no consensus task. It is
+/// invoked BEFORE `builder.build()` so every fatal signer/provider/
+/// membership/suite/policy check terminates startup before the P2P service
+/// starts. The later service-construction stage consumes this result; it does
+/// not reload keys or rebuild a different context.
+struct ConsensusSecurityPreflight {
+    /// Timeout/NewView verification + signing context (family B). Built from
+    /// the legacy `--validator-consensus-key` configuration where present.
+    timeout_verification_ctx: Option<Arc<TimeoutVerificationContext>>,
+    /// Proposal/Vote authority (family A). Deliberately separate from the
+    /// Timeout/NewView context so legacy Timeout configuration can never
+    /// establish Proposal/Vote authority. `None` in production pending a
+    /// separately validated canonical activation.
+    proposal_vote_authority: Option<Arc<ProposalVoteAuthority>>,
+}
+
+fn run_p2p_consensus_security_preflight(
+    config: &qbind_node::node_config::NodeConfig,
+    args: &CliArgs,
+    local_validator_id: ValidatorId,
+    num_validators: u64,
+    node_metrics: &Arc<NodeMetrics>,
+    boot_accepted_canonical_hash: Option<&qbind_ledger::GenesisHash>,
+) -> ConsensusSecurityPreflight {
+    // ------------------------------------------------------------------
+    // Run 031 + Run 032: TimeoutVerificationContext activation bridge.
+    //
+    // The Run 030 binary loop honours an `Arc<TimeoutVerificationContext>`
+    // end-to-end. Production activation requires a real
+    // `SuiteAwareValidatorKeyProvider` covering every active validator,
+    // a `ConsensusSigBackendRegistry` with a backend for every governed
+    // suite (today: ML-DSA-44 / suite_id 100), and an
+    // `Arc<dyn ValidatorSigner>` over the local signing key.
+    //
+    // Run 032 lands the **signer half** honestly:
+    //  * `signer_loader::load_validator_signer_from_config` reads
+    //    `config.signer_keystore_path` and constructs an
+    //    `Arc<dyn ValidatorSigner>` via the existing keystore
+    //    primitives (no new key format, no fake keys, no key
+    //    material in logs).
+    //
+    // The peer-side blockers remain:
+    //  * `NodeConfig.network.static_peers` carries no per-peer
+    //    `(suite_id, pk_bytes)`, so no `SuiteAwareValidatorKeyProvider`
+    //    can be honestly constructed for the active validator set;
+    //  * `--p2p-mutual-auth` itself runs on B12's test-grade
+    //    `TrustedClientRoots`/`DummySig` stack (see lines 427-472).
+    //
+    // The Run 032 probe below therefore returns `Disabled` with the
+    // narrowed reason `SignerPresentKeyProviderUnavailable` whenever
+    // the signer load succeeded, and the original Run 031
+    // `ProductionPiecesUnavailable` whenever it did not. Activation
+    // never happens in this run — `try_build_timeout_verification_context`
+    // is **not** called with empty / fake key-provider input.
+    //
+    // Policy:
+    //  * `--require-timeout-verification` ⇒ `RequireOrFail` (refuse
+    //    to start under any `Disabled` outcome — including
+    //    "signer loaded but key-provider missing");
+    //  * otherwise ⇒ `OptionalActivate` (log the precise reason,
+    //    fall back to `verification_ctx: None`).
+    // ------------------------------------------------------------------
+    use qbind_node::peer_key_provider::{
+        build_validator_set_and_key_provider, PeerKeyProviderError,
+    };
+    use qbind_node::signer_loader::{load_validator_signer_from_config, SignerLoadError};
+    use qbind_node::timeout_verification_bridge::{
+        enforce_policy, run_032_probe_with_signer, try_build_timeout_verification_context,
+        TimeoutVerificationActivation, TimeoutVerificationBridgeInputs,
+        TimeoutVerificationDisabledReason, TimeoutVerificationPolicy,
+    };
+
+    let timeout_verification_policy = if args.require_timeout_verification {
+        TimeoutVerificationPolicy::RequireOrFail
+    } else {
+        TimeoutVerificationPolicy::OptionalActivate
+    };
+
+    // Attempt signer load. Honest "no" is reportable but does NOT
+    // by itself fail closed — the `RequireOrFail` policy only
+    // triggers below when the bridge outcome stays `Disabled`.
+    let signer_load_result = load_validator_signer_from_config(config, local_validator_id);
+    let (signer_for_bridge, local_signer_pk, signer_log_summary): (
+        Option<std::sync::Arc<dyn qbind_node::validator_signer::ValidatorSigner>>,
+        Option<Vec<u8>>,
+        String,
+    ) = match &signer_load_result {
+        Ok(loaded) => {
+            eprintln!(
+                "[binary] Run 032: validator signer loaded — backend={} validator_id={:?} \
+                 suite_id={} pk_fingerprint={} keystore_path={}",
+                loaded.backend,
+                loaded.validator_id,
+                loaded.suite_id,
+                loaded.public_key_fingerprint,
+                config
+                    .signer_keystore_path
+                    .as_deref()
+                    .map(qbind_node::signer_loader::safe_keystore_path_log)
+                    .unwrap_or_else(|| "<unset>".to_string()),
+            );
+            (
+                Some(loaded.signer.clone()),
+                Some(loaded.public_key_bytes.clone()),
+                format!(
+                    "loaded(backend={},validator={:?},suite={})",
+                    loaded.backend, loaded.validator_id, loaded.suite_id
+                ),
+            )
+        }
+        Err(SignerLoadError::KeystorePathNotConfigured) => {
+            eprintln!(
+                "[binary] Run 032: validator signer not loaded — \
+                 config.signer_keystore_path is not set; Run 030 bit-equivalent path \
+                 (no outbound timeout signing). See \
+                 docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_032.md."
+            );
+            (
+                None,
+                None,
+                "absent(keystore_path_not_configured)".to_string(),
+            )
+        }
+        Err(e) => {
+            eprintln!(
+                "[binary] Run 032: validator signer load FAILED — {} (no key material in this \
+                 message). See docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_032.md.",
+                e
+            );
+            (None, None, format!("load_failed({})", e))
+        }
+    };
+
+    node_metrics.set_timeout_verification_signer_loaded(signer_for_bridge.is_some());
+
+    // If the operator declared `--require-timeout-verification` and
+    // the signer half was not even loaded, fail closed *before* we
+    // ask the bridge anything: the operator's intent is unambiguous,
+    // and the bridge's `SignerPresentKeyProviderUnavailable` /
+    // `ProductionPiecesUnavailable` narrowing is informational. We
+    // surface a precise, signer-specific error here.
+    if matches!(
+        timeout_verification_policy,
+        TimeoutVerificationPolicy::RequireOrFail
+    ) {
+        if let Err(err) = &signer_load_result {
+            eprintln!(
+                "[binary] FATAL: --require-timeout-verification was set but the local validator \
+                 signer could not be loaded: {}. qbind-node refuses to start. See \
+                 docs/whitepaper/contradiction.md C5 and \
+                 docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_032.md.",
+                err
+            );
+            std::process::exit(1);
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Run 033: peer-side `SuiteAwareValidatorKeyProvider` half of the
+    // activation bridge.
+    //
+    // Build the provider + validator set from the explicit
+    // `network.static_peer_consensus_keys` config (CLI:
+    // `--validator-consensus-key VID:SUITE:HEXPK`). Fail-closed on
+    // bad hex, unsupported suite, duplicate vid, missing peer key,
+    // bare peer addr, missing local key, or signer mismatch.
+    //
+    // When the provider builds successfully AND the signer is
+    // present, we feed the real
+    // `try_build_timeout_verification_context` instead of the Run 032
+    // signer-only probe — this is the activation path the rest of C5
+    // has been waiting for.
+    //
+    // When the provider cannot be built (typically: no
+    // `static_peer_consensus_keys` configured), we preserve Run 032
+    // disabled behaviour bit-for-bit.
+    // ------------------------------------------------------------------
+    //
+    // Run 422: genesis-bound consensus authority (Route A). When the
+    // operator sets `--consensus-authority-from-genesis`, the authority
+    // is sourced from the boot-verified canonical genesis rather than the
+    // uncommitted `--validator-consensus-key` CLI overrides. This is the
+    // explicit, fail-closed activation path that ties consensus signing
+    // authority to the accepted network/genesis identity.
+    // ------------------------------------------------------------------
+    let genesis_authority: Option<qbind_node::genesis_consensus_authority::GenesisConsensusAuthority> =
+        if args.consensus_authority_from_genesis {
+            // Run 422 containment correction — this branch is unreachable in a
+            // normally built binary: the single production startup guard in
+            // `main` exits non-zero when `--consensus-authority-from-genesis`
+            // is present, before this per-mode code (and any P2P service or
+            // consensus task) is reached, so `args.consensus_authority_from_genesis`
+            // is always `false` here. The corrected authority loader below is
+            // retained (and exercised by tests) but never activates in
+            // production. Genesis-authority activation stays disabled pending
+            // D4-D7. See docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422.md.
+            //
+            // 1. External genesis is mandatory — there is nothing to bind
+            //    to on the embedded-genesis path.
+            if !config.genesis_source.use_external || config.genesis_source.genesis_path.is_none() {
+                eprintln!(
+                    "[binary] FATAL: --consensus-authority-from-genesis requires an external \
+                     --genesis-path (already boot-verified by Run 102); none is configured. \
+                     qbind-node refuses to start. See \
+                     docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422.md."
+                );
+                std::process::exit(1);
+            }
+            let genesis_path = config
+                .genesis_source
+                .genesis_path
+                .as_ref()
+                .expect("checked above");
+            let env_policy = qbind_node::pqc_boot_genesis::map_environment(config.environment);
+            // Run 422 corrective (task sections 4 & 5): use the single shared
+            // production activation boundary. It reads the genesis EXACTLY
+            // once into an owned snapshot, fully re-validates those same
+            // bytes (structural + authority + chain_id + expected-hash),
+            // derives the canonical identity from that same parse, requires
+            // equality with the boot-accepted identity (reject a file swapped
+            // after boot), builds the immutable authority from that snapshot,
+            // and rejects any engine/verifier membership-count disagreement.
+            // Keys and hash are never paired across two file reads, and
+            // `compute_print_genesis_hash` (no authority validation) is not
+            // used to establish signing authority.
+            let authority =
+                match qbind_node::genesis_consensus_authority::load_verify_and_build_genesis_authority(
+                    genesis_path,
+                    env_policy,
+                    config.expected_genesis_hash.as_ref(),
+                    boot_accepted_canonical_hash,
+                    local_validator_id,
+                    num_validators,
+                ) {
+                    Ok(a) => a,
+                    Err(e) => {
+                        eprintln!(
+                            "[binary] FATAL: --consensus-authority-from-genesis rejected the \
+                             genesis-committed authority: {}. qbind-node refuses to start (no \
+                             silent downgrade to unsigned operation). See \
+                             docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422.md.",
+                            e
+                        );
+                        std::process::exit(1);
+                    }
+                };
+            // 4. A matching local signer is mandatory under explicit
+            //    activation: verify-only activation when a signer was
+            //    the whole point would be a silent downgrade.
+            let local_pk = match local_signer_pk.as_deref() {
+                Some(pk) => pk,
+                None => {
+                    eprintln!(
+                        "[binary] FATAL: --consensus-authority-from-genesis requires a loaded \
+                         local validator signer (--signer-keystore-path); none was loaded. \
+                         qbind-node refuses to start."
+                    );
+                    std::process::exit(1);
+                }
+            };
+            // 5. The loaded signer's public key MUST equal the
+            //    genesis-committed key for the local validator. This is
+            //    the genesis-authority ⇄ local-custody binding.
+            match authority.key_provider.get_suite_and_key(local_validator_id) {
+                Some((_suite, genesis_pk)) if genesis_pk.as_slice() == local_pk => {}
+                Some((_suite, genesis_pk)) => {
+                    eprintln!(
+                        "[binary] FATAL: --consensus-authority-from-genesis: loaded signer public \
+                         key (fp={}) does not match the genesis-committed key (fp={}) for local \
+                         validator {:?}. qbind-node refuses to start.",
+                        qbind_node::signer_loader::public_key_fingerprint(local_pk),
+                        qbind_node::signer_loader::public_key_fingerprint(&genesis_pk),
+                        local_validator_id,
+                    );
+                    std::process::exit(1);
+                }
+                None => {
+                    eprintln!(
+                        "[binary] FATAL: --consensus-authority-from-genesis: local validator {:?} \
+                         is not present in the genesis-committed authority. qbind-node refuses to \
+                         start.",
+                        local_validator_id,
+                    );
+                    std::process::exit(1);
+                }
+            }
+            eprintln!(
+                "[binary] Run 422: genesis-bound consensus authority built — validators={} \
+                 chain_id={} commitment_fp={} local_validator={:?}",
+                authority.validator_count,
+                authority.chain_id,
+                qbind_node::signer_loader::public_key_fingerprint(&authority.commitment),
+                local_validator_id,
+            );
+            Some(authority)
+        } else {
+            None
+        };
+
+    // ------------------------------------------------------------------
+    let peer_kp_result = if genesis_authority.is_some() {
+        // Genesis path owns the authority; do not consult the CLI
+        // `--validator-consensus-key` overrides.
+        Err(PeerKeyProviderError::NoConfiguredKeys)
+    } else {
+        build_validator_set_and_key_provider(
+            config,
+            local_validator_id,
+            local_signer_pk.as_deref(),
+        )
+    };
+    let (loaded_kp, peer_kp_log_summary): (
+        Option<qbind_node::peer_key_provider::LoadedValidatorKeyProvider>,
+        String,
+    ) = if genesis_authority.is_some() {
+        (None, "genesis-sourced(run422)".to_string())
+    } else {
+        match peer_kp_result {
+        Ok(loaded) => {
+            let log = format!(
+                "loaded(validators={},peer_ids={:?},suite_ids={:?},fingerprints={:?})",
+                loaded.validator_count,
+                loaded
+                    .peer_validator_ids
+                    .iter()
+                    .map(|v| v.as_u64())
+                    .collect::<Vec<_>>(),
+                loaded
+                    .suite_ids
+                    .iter()
+                    .map(|s| s.as_u16())
+                    .collect::<Vec<_>>(),
+                loaded
+                    .fingerprints
+                    .iter()
+                    .map(|(v, s, fp)| format!("v{}:s{}:{}", v.as_u64(), s.as_u16(), fp))
+                    .collect::<Vec<_>>(),
+            );
+            eprintln!(
+                "[binary] Run 033: SuiteAwareValidatorKeyProvider built honestly — {}",
+                log
+            );
+            (Some(loaded), log)
+        }
+        Err(PeerKeyProviderError::NoConfiguredKeys) => {
+            eprintln!(
+                "[binary] Run 033: SuiteAwareValidatorKeyProvider NOT built — \
+                 network.static_peer_consensus_keys is empty (no \
+                 --validator-consensus-key entries). Preserving Run 032 \
+                 SignerPresentKeyProviderUnavailable disabled behaviour. See \
+                 docs/whitepaper/contradiction.md C5."
+            );
+            (None, "absent(no_configured_keys)".to_string())
+        }
+        Err(e) => {
+            eprintln!(
+                "[binary] Run 033: SuiteAwareValidatorKeyProvider build FAILED — {}. \
+                 See docs/whitepaper/contradiction.md C5 and \
+                 docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_033.md.",
+                e
+            );
+            // Under RequireOrFail, this is fatal — fail closed now
+            // with a precise reason, rather than letting the bridge
+            // silently fall back to disabled.
+            if matches!(
+                timeout_verification_policy,
+                TimeoutVerificationPolicy::RequireOrFail
+            ) {
+                eprintln!(
+                    "[binary] FATAL: --require-timeout-verification was set but the \
+                     peer-side SuiteAwareValidatorKeyProvider could not be built \
+                     honestly: {}. qbind-node refuses to start.",
+                    e
+                );
+                std::process::exit(1);
+            }
+            (None, format!("load_failed({})", e))
+        }
+        }
+    };
+
+    node_metrics.set_timeout_verification_key_provider_loaded(
+        loaded_kp.is_some() || genesis_authority.is_some(),
+    );
+
+    // Build the activation outcome. If both halves are present, run
+    // the real `try_build_timeout_verification_context`; otherwise
+    // preserve the Run 032 signer-only probe.
+    let supported_suite_ids: &[u16] = &[100]; // ML-DSA-44 (SUITE_PQ_RESERVED_1)
+    let timeout_verification_outcome: TimeoutVerificationActivation =
+        if let Some(authority) = genesis_authority.as_ref() {
+            // Run 422: genesis-bound authority path. The signer and the
+            // signer⇄genesis key match were already enforced fail-closed
+            // above, so the same validated constructor `main` uses
+            // everywhere is fed genesis-committed material.
+            use qbind_consensus::crypto_verifier::SimpleBackendRegistry;
+            use qbind_crypto::{ml_dsa44::MlDsa44Backend, ConsensusSigSuiteId};
+            let mut registry = SimpleBackendRegistry::new();
+            registry.register(
+                ConsensusSigSuiteId::new(100),
+                std::sync::Arc::new(MlDsa44Backend::new()),
+            );
+            let inputs = TimeoutVerificationBridgeInputs {
+                validators: authority.validators.clone(),
+                key_provider: authority.key_provider.clone(),
+                backend_registry: std::sync::Arc::new(registry),
+                chain_id: config.chain_id(),
+                signer: signer_for_bridge.clone(),
+                local_validator_id,
+            };
+            try_build_timeout_verification_context(inputs)
+        } else {
+            match (signer_for_bridge.clone(), loaded_kp.as_ref()) {
+            (Some(signer), Some(kp)) => {
+                // Real bridge inputs — reuse existing
+                // `SimpleBackendRegistry` + `MlDsa44Backend` constructors,
+                // explicitly registering the supported suite. Any
+                // unsupported suite reaching the bridge will fail closed
+                // there.
+                use qbind_consensus::crypto_verifier::SimpleBackendRegistry;
+                use qbind_crypto::{ml_dsa44::MlDsa44Backend, ConsensusSigSuiteId};
+                let mut registry = SimpleBackendRegistry::new();
+                registry.register(
+                    ConsensusSigSuiteId::new(100),
+                    std::sync::Arc::new(MlDsa44Backend::new()),
+                );
+                let inputs = TimeoutVerificationBridgeInputs {
+                    validators: kp.validators.clone(),
+                    key_provider: kp.key_provider.clone(),
+                    backend_registry: std::sync::Arc::new(registry),
+                    chain_id: config.chain_id(),
+                    signer: Some(signer),
+                    local_validator_id,
+                };
+                try_build_timeout_verification_context(inputs)
+            }
+            _ => {
+                // No production peer keys (or no signer) — fall back to
+                // Run 032 disabled-with-precise-reason path.
+                run_032_probe_with_signer(signer_for_bridge.clone(), local_validator_id)
+            }
+        }
+        };
+
+    eprintln!(
+        "[binary] Run 033: timeout-verification probe: active={} reason={} \
+         policy={:?} validators={} chain_id={} supported_suite_ids={:?} \
+         local_signer={} peer_key_provider={}",
+        timeout_verification_outcome.is_active(),
+        match timeout_verification_outcome.disabled_reason() {
+            Some(r) => format!("{}", r),
+            None => "n/a".to_string(),
+        },
+        timeout_verification_policy,
+        loaded_kp
+            .as_ref()
+            .map(|kp| kp.validator_count as u64)
+            .or_else(|| genesis_authority.as_ref().map(|a| a.validator_count as u64))
+            .unwrap_or(num_validators),
+        config.chain_id(),
+        supported_suite_ids,
+        signer_log_summary,
+        peer_kp_log_summary,
+    );
+    let verification_ctx =
+        match enforce_policy(timeout_verification_policy, timeout_verification_outcome) {
+            Ok(opt) => opt,
+            Err(e) => {
+                eprintln!(
+                    "[binary] FATAL: --require-timeout-verification was set but timeout \
+                 verification cannot be activated honestly: {}",
+                    e
+                );
+                eprintln!(
+                    "[binary] qbind-node refuses to start under RequireOrFail policy with no \
+                 production-safe context. See \
+                 docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_031.md, \
+                 docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_032.md, \
+                 docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_033.md, \
+                 and docs/whitepaper/contradiction.md C5/C4."
+                );
+                std::process::exit(1);
+            }
+        };
+    node_metrics.set_timeout_verification_active(verification_ctx.is_some());
+    node_metrics.set_timeout_verification_validator_count(if verification_ctx.is_some() {
+        loaded_kp
+            .as_ref()
+            .map(|kp| kp.validator_count as u64)
+            .or_else(|| genesis_authority.as_ref().map(|a| a.validator_count as u64))
+            .unwrap_or(0)
+    } else {
+        0
+    });
+    if verification_ctx.is_some() {
+        eprintln!(
+            "[binary] Run 033: timeout verification ACTIVE — Arc<TimeoutVerificationContext> \
+             threaded into BinaryConsensusLoopIo::verification_ctx. Inbound TimeoutMsg / \
+             NewView / TC traffic will be verified before engine ingestion; locally-emitted \
+             timeouts will be signed before broadcast. signer_loaded=1 \
+             key_provider_loaded=1 validator_count={}",
+            loaded_kp
+                .as_ref()
+                .map(|kp| kp.validator_count as u64)
+                .or_else(|| genesis_authority.as_ref().map(|a| a.validator_count as u64))
+                .unwrap_or(0)
+        );
+    } else if loaded_kp.is_some() && signer_for_bridge.is_some() {
+        // Both halves present but bridge still refused — surface
+        // the precise reason. (Should not normally happen under
+        // OptionalActivate without a deeper invariant violation;
+        // RequireOrFail would have already exited above.)
+        eprintln!(
+            "[binary] Run 033: timeout verification DISABLED — both halves present but \
+             bridge refused. See probe-line above for reason."
+        );
+    } else if signer_for_bridge.is_some() {
+        eprintln!(
+            "[binary] Run 033: timeout verification DISABLED — signer half wired honestly \
+             but peer-side SuiteAwareValidatorKeyProvider not configured (set \
+             --validator-consensus-key for every active validator). \
+             BinaryConsensusLoopIo::verification_ctx=None. See \
+             docs/whitepaper/contradiction.md C5."
+        );
+    } else {
+        eprintln!(
+            "[binary] Run 033: timeout verification DISABLED — \
+             BinaryConsensusLoopIo::verification_ctx=None (Run 030 bit-equivalent path). \
+             Inbound timeout/new-view crypto verification and outbound timeout signing \
+             remain off until production pieces land. See \
+             docs/whitepaper/contradiction.md C5."
+        );
+    }
+    // Suppress unused-variant lint when the bridge currently can't
+    // produce certain disabled reasons in this binary path.
+    let _ = TimeoutVerificationDisabledReason::IntentionallyDisabled;
+
+    ConsensusSecurityPreflight {
+        timeout_verification_ctx: verification_ctx,
+        // Run 422 D5: no validated canonical Proposal/Vote authority is
+        // activated. The legacy `--validator-consensus-key` path above builds
+        // ONLY the Timeout/NewView context; it never establishes Proposal/Vote
+        // authority. Under the fail-closed `Required` policy this leaves inbound
+        // Proposal/Vote rejected and outbound Proposal/Vote suppressed until a
+        // separately validated canonical authority is activated (still disabled
+        // pending the remaining D4-D7 boundaries).
+        proposal_vote_authority: None,
+    }
+}
+
 async fn run_p2p_node(
     config: &qbind_node::node_config::NodeConfig,
     args: &CliArgs,
@@ -6938,6 +7494,20 @@ async fn run_p2p_node(
         }
     };
 
+    // Run 422 D4: run the consensus security preflight BEFORE constructing the
+    // P2P service. Fatal signer/provider/membership/suite/policy errors exit
+    // here, before any network listener opens, any peer is dialed, or any
+    // consensus task starts. The Run 422 genesis-authority containment guard in
+    // `main` has already refused the genesis route before this point.
+    let consensus_security_preflight = run_p2p_consensus_security_preflight(
+        config,
+        args,
+        local_validator_id,
+        num_validators,
+        &node_metrics,
+        boot_accepted_canonical_hash.as_ref(),
+    );
+
     let node_context = match builder.build(config, validator_id).await {
         Ok(ctx) => ctx,
         Err(e) => {
@@ -7477,524 +8047,31 @@ async fn run_p2p_node(
                 node_context.p2p_service.clone(),
             ),
         );
-    // ------------------------------------------------------------------
-    // Run 031 + Run 032: TimeoutVerificationContext activation bridge.
-    //
-    // The Run 030 binary loop honours an `Arc<TimeoutVerificationContext>`
-    // end-to-end. Production activation requires a real
-    // `SuiteAwareValidatorKeyProvider` covering every active validator,
-    // a `ConsensusSigBackendRegistry` with a backend for every governed
-    // suite (today: ML-DSA-44 / suite_id 100), and an
-    // `Arc<dyn ValidatorSigner>` over the local signing key.
-    //
-    // Run 032 lands the **signer half** honestly:
-    //  * `signer_loader::load_validator_signer_from_config` reads
-    //    `config.signer_keystore_path` and constructs an
-    //    `Arc<dyn ValidatorSigner>` via the existing keystore
-    //    primitives (no new key format, no fake keys, no key
-    //    material in logs).
-    //
-    // The peer-side blockers remain:
-    //  * `NodeConfig.network.static_peers` carries no per-peer
-    //    `(suite_id, pk_bytes)`, so no `SuiteAwareValidatorKeyProvider`
-    //    can be honestly constructed for the active validator set;
-    //  * `--p2p-mutual-auth` itself runs on B12's test-grade
-    //    `TrustedClientRoots`/`DummySig` stack (see lines 427-472).
-    //
-    // The Run 032 probe below therefore returns `Disabled` with the
-    // narrowed reason `SignerPresentKeyProviderUnavailable` whenever
-    // the signer load succeeded, and the original Run 031
-    // `ProductionPiecesUnavailable` whenever it did not. Activation
-    // never happens in this run — `try_build_timeout_verification_context`
-    // is **not** called with empty / fake key-provider input.
-    //
-    // Policy:
-    //  * `--require-timeout-verification` ⇒ `RequireOrFail` (refuse
-    //    to start under any `Disabled` outcome — including
-    //    "signer loaded but key-provider missing");
-    //  * otherwise ⇒ `OptionalActivate` (log the precise reason,
-    //    fall back to `verification_ctx: None`).
-    // ------------------------------------------------------------------
-    use qbind_node::peer_key_provider::{
-        build_validator_set_and_key_provider, PeerKeyProviderError,
-    };
-    use qbind_node::signer_loader::{load_validator_signer_from_config, SignerLoadError};
-    use qbind_node::timeout_verification_bridge::{
-        enforce_policy, run_032_probe_with_signer, try_build_timeout_verification_context,
-        TimeoutVerificationActivation, TimeoutVerificationBridgeInputs,
-        TimeoutVerificationDisabledReason, TimeoutVerificationPolicy,
-    };
-
-    let timeout_verification_policy = if args.require_timeout_verification {
-        TimeoutVerificationPolicy::RequireOrFail
-    } else {
-        TimeoutVerificationPolicy::OptionalActivate
-    };
-
-    // Attempt signer load. Honest "no" is reportable but does NOT
-    // by itself fail closed — the `RequireOrFail` policy only
-    // triggers below when the bridge outcome stays `Disabled`.
-    let signer_load_result = load_validator_signer_from_config(config, local_validator_id);
-    let (signer_for_bridge, local_signer_pk, signer_log_summary): (
-        Option<std::sync::Arc<dyn qbind_node::validator_signer::ValidatorSigner>>,
-        Option<Vec<u8>>,
-        String,
-    ) = match &signer_load_result {
-        Ok(loaded) => {
-            eprintln!(
-                "[binary] Run 032: validator signer loaded — backend={} validator_id={:?} \
-                 suite_id={} pk_fingerprint={} keystore_path={}",
-                loaded.backend,
-                loaded.validator_id,
-                loaded.suite_id,
-                loaded.public_key_fingerprint,
-                config
-                    .signer_keystore_path
-                    .as_deref()
-                    .map(qbind_node::signer_loader::safe_keystore_path_log)
-                    .unwrap_or_else(|| "<unset>".to_string()),
-            );
-            (
-                Some(loaded.signer.clone()),
-                Some(loaded.public_key_bytes.clone()),
-                format!(
-                    "loaded(backend={},validator={:?},suite={})",
-                    loaded.backend, loaded.validator_id, loaded.suite_id
-                ),
-            )
-        }
-        Err(SignerLoadError::KeystorePathNotConfigured) => {
-            eprintln!(
-                "[binary] Run 032: validator signer not loaded — \
-                 config.signer_keystore_path is not set; Run 030 bit-equivalent path \
-                 (no outbound timeout signing). See \
-                 docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_032.md."
-            );
-            (
-                None,
-                None,
-                "absent(keystore_path_not_configured)".to_string(),
-            )
-        }
-        Err(e) => {
-            eprintln!(
-                "[binary] Run 032: validator signer load FAILED — {} (no key material in this \
-                 message). See docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_032.md.",
-                e
-            );
-            (None, None, format!("load_failed({})", e))
-        }
-    };
-
-    node_metrics.set_timeout_verification_signer_loaded(signer_for_bridge.is_some());
-
-    // If the operator declared `--require-timeout-verification` and
-    // the signer half was not even loaded, fail closed *before* we
-    // ask the bridge anything: the operator's intent is unambiguous,
-    // and the bridge's `SignerPresentKeyProviderUnavailable` /
-    // `ProductionPiecesUnavailable` narrowing is informational. We
-    // surface a precise, signer-specific error here.
-    if matches!(
-        timeout_verification_policy,
-        TimeoutVerificationPolicy::RequireOrFail
-    ) {
-        if let Err(err) = &signer_load_result {
-            eprintln!(
-                "[binary] FATAL: --require-timeout-verification was set but the local validator \
-                 signer could not be loaded: {}. qbind-node refuses to start. See \
-                 docs/whitepaper/contradiction.md C5 and \
-                 docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_032.md.",
-                err
-            );
-            std::process::exit(1);
-        }
-    }
-
-    // ------------------------------------------------------------------
-    // Run 033: peer-side `SuiteAwareValidatorKeyProvider` half of the
-    // activation bridge.
-    //
-    // Build the provider + validator set from the explicit
-    // `network.static_peer_consensus_keys` config (CLI:
-    // `--validator-consensus-key VID:SUITE:HEXPK`). Fail-closed on
-    // bad hex, unsupported suite, duplicate vid, missing peer key,
-    // bare peer addr, missing local key, or signer mismatch.
-    //
-    // When the provider builds successfully AND the signer is
-    // present, we feed the real
-    // `try_build_timeout_verification_context` instead of the Run 032
-    // signer-only probe — this is the activation path the rest of C5
-    // has been waiting for.
-    //
-    // When the provider cannot be built (typically: no
-    // `static_peer_consensus_keys` configured), we preserve Run 032
-    // disabled behaviour bit-for-bit.
-    // ------------------------------------------------------------------
-    //
-    // Run 422: genesis-bound consensus authority (Route A). When the
-    // operator sets `--consensus-authority-from-genesis`, the authority
-    // is sourced from the boot-verified canonical genesis rather than the
-    // uncommitted `--validator-consensus-key` CLI overrides. This is the
-    // explicit, fail-closed activation path that ties consensus signing
-    // authority to the accepted network/genesis identity.
-    // ------------------------------------------------------------------
-    let genesis_authority: Option<qbind_node::genesis_consensus_authority::GenesisConsensusAuthority> =
-        if args.consensus_authority_from_genesis {
-            // Run 422 containment correction — this branch is unreachable in a
-            // normally built binary: the single production startup guard in
-            // `main` exits non-zero when `--consensus-authority-from-genesis`
-            // is present, before this per-mode code (and any P2P service or
-            // consensus task) is reached, so `args.consensus_authority_from_genesis`
-            // is always `false` here. The corrected authority loader below is
-            // retained (and exercised by tests) but never activates in
-            // production. Genesis-authority activation stays disabled pending
-            // D4-D7. See docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422.md.
-            //
-            // 1. External genesis is mandatory — there is nothing to bind
-            //    to on the embedded-genesis path.
-            if !config.genesis_source.use_external || config.genesis_source.genesis_path.is_none() {
-                eprintln!(
-                    "[binary] FATAL: --consensus-authority-from-genesis requires an external \
-                     --genesis-path (already boot-verified by Run 102); none is configured. \
-                     qbind-node refuses to start. See \
-                     docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422.md."
-                );
-                std::process::exit(1);
-            }
-            let genesis_path = config
-                .genesis_source
-                .genesis_path
-                .as_ref()
-                .expect("checked above");
-            let env_policy = qbind_node::pqc_boot_genesis::map_environment(config.environment);
-            // Run 422 corrective (task sections 4 & 5): use the single shared
-            // production activation boundary. It reads the genesis EXACTLY
-            // once into an owned snapshot, fully re-validates those same
-            // bytes (structural + authority + chain_id + expected-hash),
-            // derives the canonical identity from that same parse, requires
-            // equality with the boot-accepted identity (reject a file swapped
-            // after boot), builds the immutable authority from that snapshot,
-            // and rejects any engine/verifier membership-count disagreement.
-            // Keys and hash are never paired across two file reads, and
-            // `compute_print_genesis_hash` (no authority validation) is not
-            // used to establish signing authority.
-            let authority =
-                match qbind_node::genesis_consensus_authority::load_verify_and_build_genesis_authority(
-                    genesis_path,
-                    env_policy,
-                    config.expected_genesis_hash.as_ref(),
-                    boot_accepted_canonical_hash.as_ref(),
-                    local_validator_id,
-                    num_validators,
-                ) {
-                    Ok(a) => a,
-                    Err(e) => {
-                        eprintln!(
-                            "[binary] FATAL: --consensus-authority-from-genesis rejected the \
-                             genesis-committed authority: {}. qbind-node refuses to start (no \
-                             silent downgrade to unsigned operation). See \
-                             docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422.md.",
-                            e
-                        );
-                        std::process::exit(1);
-                    }
-                };
-            // 4. A matching local signer is mandatory under explicit
-            //    activation: verify-only activation when a signer was
-            //    the whole point would be a silent downgrade.
-            let local_pk = match local_signer_pk.as_deref() {
-                Some(pk) => pk,
-                None => {
-                    eprintln!(
-                        "[binary] FATAL: --consensus-authority-from-genesis requires a loaded \
-                         local validator signer (--signer-keystore-path); none was loaded. \
-                         qbind-node refuses to start."
-                    );
-                    std::process::exit(1);
-                }
-            };
-            // 5. The loaded signer's public key MUST equal the
-            //    genesis-committed key for the local validator. This is
-            //    the genesis-authority ⇄ local-custody binding.
-            match authority.key_provider.get_suite_and_key(local_validator_id) {
-                Some((_suite, genesis_pk)) if genesis_pk.as_slice() == local_pk => {}
-                Some((_suite, genesis_pk)) => {
-                    eprintln!(
-                        "[binary] FATAL: --consensus-authority-from-genesis: loaded signer public \
-                         key (fp={}) does not match the genesis-committed key (fp={}) for local \
-                         validator {:?}. qbind-node refuses to start.",
-                        qbind_node::signer_loader::public_key_fingerprint(local_pk),
-                        qbind_node::signer_loader::public_key_fingerprint(&genesis_pk),
-                        local_validator_id,
-                    );
-                    std::process::exit(1);
-                }
-                None => {
-                    eprintln!(
-                        "[binary] FATAL: --consensus-authority-from-genesis: local validator {:?} \
-                         is not present in the genesis-committed authority. qbind-node refuses to \
-                         start.",
-                        local_validator_id,
-                    );
-                    std::process::exit(1);
-                }
-            }
-            eprintln!(
-                "[binary] Run 422: genesis-bound consensus authority built — validators={} \
-                 chain_id={} commitment_fp={} local_validator={:?}",
-                authority.validator_count,
-                authority.chain_id,
-                qbind_node::signer_loader::public_key_fingerprint(&authority.commitment),
-                local_validator_id,
-            );
-            Some(authority)
-        } else {
-            None
-        };
-
-    // ------------------------------------------------------------------
-    let peer_kp_result = if genesis_authority.is_some() {
-        // Genesis path owns the authority; do not consult the CLI
-        // `--validator-consensus-key` overrides.
-        Err(PeerKeyProviderError::NoConfiguredKeys)
-    } else {
-        build_validator_set_and_key_provider(
-            config,
-            local_validator_id,
-            local_signer_pk.as_deref(),
-        )
-    };
-    let (loaded_kp, peer_kp_log_summary): (
-        Option<qbind_node::peer_key_provider::LoadedValidatorKeyProvider>,
-        String,
-    ) = if genesis_authority.is_some() {
-        (None, "genesis-sourced(run422)".to_string())
-    } else {
-        match peer_kp_result {
-        Ok(loaded) => {
-            let log = format!(
-                "loaded(validators={},peer_ids={:?},suite_ids={:?},fingerprints={:?})",
-                loaded.validator_count,
-                loaded
-                    .peer_validator_ids
-                    .iter()
-                    .map(|v| v.as_u64())
-                    .collect::<Vec<_>>(),
-                loaded
-                    .suite_ids
-                    .iter()
-                    .map(|s| s.as_u16())
-                    .collect::<Vec<_>>(),
-                loaded
-                    .fingerprints
-                    .iter()
-                    .map(|(v, s, fp)| format!("v{}:s{}:{}", v.as_u64(), s.as_u16(), fp))
-                    .collect::<Vec<_>>(),
-            );
-            eprintln!(
-                "[binary] Run 033: SuiteAwareValidatorKeyProvider built honestly — {}",
-                log
-            );
-            (Some(loaded), log)
-        }
-        Err(PeerKeyProviderError::NoConfiguredKeys) => {
-            eprintln!(
-                "[binary] Run 033: SuiteAwareValidatorKeyProvider NOT built — \
-                 network.static_peer_consensus_keys is empty (no \
-                 --validator-consensus-key entries). Preserving Run 032 \
-                 SignerPresentKeyProviderUnavailable disabled behaviour. See \
-                 docs/whitepaper/contradiction.md C5."
-            );
-            (None, "absent(no_configured_keys)".to_string())
-        }
-        Err(e) => {
-            eprintln!(
-                "[binary] Run 033: SuiteAwareValidatorKeyProvider build FAILED — {}. \
-                 See docs/whitepaper/contradiction.md C5 and \
-                 docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_033.md.",
-                e
-            );
-            // Under RequireOrFail, this is fatal — fail closed now
-            // with a precise reason, rather than letting the bridge
-            // silently fall back to disabled.
-            if matches!(
-                timeout_verification_policy,
-                TimeoutVerificationPolicy::RequireOrFail
-            ) {
-                eprintln!(
-                    "[binary] FATAL: --require-timeout-verification was set but the \
-                     peer-side SuiteAwareValidatorKeyProvider could not be built \
-                     honestly: {}. qbind-node refuses to start.",
-                    e
-                );
-                std::process::exit(1);
-            }
-            (None, format!("load_failed({})", e))
-        }
-        }
-    };
-
-    node_metrics.set_timeout_verification_key_provider_loaded(
-        loaded_kp.is_some() || genesis_authority.is_some(),
-    );
-
-    // Build the activation outcome. If both halves are present, run
-    // the real `try_build_timeout_verification_context`; otherwise
-    // preserve the Run 032 signer-only probe.
-    let supported_suite_ids: &[u16] = &[100]; // ML-DSA-44 (SUITE_PQ_RESERVED_1)
-    let timeout_verification_outcome: TimeoutVerificationActivation =
-        if let Some(authority) = genesis_authority.as_ref() {
-            // Run 422: genesis-bound authority path. The signer and the
-            // signer⇄genesis key match were already enforced fail-closed
-            // above, so the same validated constructor `main` uses
-            // everywhere is fed genesis-committed material.
-            use qbind_consensus::crypto_verifier::SimpleBackendRegistry;
-            use qbind_crypto::{ml_dsa44::MlDsa44Backend, ConsensusSigSuiteId};
-            let mut registry = SimpleBackendRegistry::new();
-            registry.register(
-                ConsensusSigSuiteId::new(100),
-                std::sync::Arc::new(MlDsa44Backend::new()),
-            );
-            let inputs = TimeoutVerificationBridgeInputs {
-                validators: authority.validators.clone(),
-                key_provider: authority.key_provider.clone(),
-                backend_registry: std::sync::Arc::new(registry),
-                chain_id: config.chain_id(),
-                signer: signer_for_bridge.clone(),
-                local_validator_id,
-            };
-            try_build_timeout_verification_context(inputs)
-        } else {
-            match (signer_for_bridge.clone(), loaded_kp.as_ref()) {
-            (Some(signer), Some(kp)) => {
-                // Real bridge inputs — reuse existing
-                // `SimpleBackendRegistry` + `MlDsa44Backend` constructors,
-                // explicitly registering the supported suite. Any
-                // unsupported suite reaching the bridge will fail closed
-                // there.
-                use qbind_consensus::crypto_verifier::SimpleBackendRegistry;
-                use qbind_crypto::{ml_dsa44::MlDsa44Backend, ConsensusSigSuiteId};
-                let mut registry = SimpleBackendRegistry::new();
-                registry.register(
-                    ConsensusSigSuiteId::new(100),
-                    std::sync::Arc::new(MlDsa44Backend::new()),
-                );
-                let inputs = TimeoutVerificationBridgeInputs {
-                    validators: kp.validators.clone(),
-                    key_provider: kp.key_provider.clone(),
-                    backend_registry: std::sync::Arc::new(registry),
-                    chain_id: config.chain_id(),
-                    signer: Some(signer),
-                    local_validator_id,
-                };
-                try_build_timeout_verification_context(inputs)
-            }
-            _ => {
-                // No production peer keys (or no signer) — fall back to
-                // Run 032 disabled-with-precise-reason path.
-                run_032_probe_with_signer(signer_for_bridge.clone(), local_validator_id)
-            }
-        }
-        };
-
-    eprintln!(
-        "[binary] Run 033: timeout-verification probe: active={} reason={} \
-         policy={:?} validators={} chain_id={} supported_suite_ids={:?} \
-         local_signer={} peer_key_provider={}",
-        timeout_verification_outcome.is_active(),
-        match timeout_verification_outcome.disabled_reason() {
-            Some(r) => format!("{}", r),
-            None => "n/a".to_string(),
-        },
-        timeout_verification_policy,
-        loaded_kp
-            .as_ref()
-            .map(|kp| kp.validator_count as u64)
-            .or_else(|| genesis_authority.as_ref().map(|a| a.validator_count as u64))
-            .unwrap_or(num_validators),
-        config.chain_id(),
-        supported_suite_ids,
-        signer_log_summary,
-        peer_kp_log_summary,
-    );
-    let verification_ctx =
-        match enforce_policy(timeout_verification_policy, timeout_verification_outcome) {
-            Ok(opt) => opt,
-            Err(e) => {
-                eprintln!(
-                    "[binary] FATAL: --require-timeout-verification was set but timeout \
-                 verification cannot be activated honestly: {}",
-                    e
-                );
-                eprintln!(
-                    "[binary] qbind-node refuses to start under RequireOrFail policy with no \
-                 production-safe context. See \
-                 docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_031.md, \
-                 docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_032.md, \
-                 docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_033.md, \
-                 and docs/whitepaper/contradiction.md C5/C4."
-                );
-                std::process::exit(1);
-            }
-        };
-    node_metrics.set_timeout_verification_active(verification_ctx.is_some());
-    node_metrics.set_timeout_verification_validator_count(if verification_ctx.is_some() {
-        loaded_kp
-            .as_ref()
-            .map(|kp| kp.validator_count as u64)
-            .or_else(|| genesis_authority.as_ref().map(|a| a.validator_count as u64))
-            .unwrap_or(0)
-    } else {
-        0
-    });
-    if verification_ctx.is_some() {
-        eprintln!(
-            "[binary] Run 033: timeout verification ACTIVE — Arc<TimeoutVerificationContext> \
-             threaded into BinaryConsensusLoopIo::verification_ctx. Inbound TimeoutMsg / \
-             NewView / TC traffic will be verified before engine ingestion; locally-emitted \
-             timeouts will be signed before broadcast. signer_loaded=1 \
-             key_provider_loaded=1 validator_count={}",
-            loaded_kp
-                .as_ref()
-                .map(|kp| kp.validator_count as u64)
-                .or_else(|| genesis_authority.as_ref().map(|a| a.validator_count as u64))
-                .unwrap_or(0)
-        );
-    } else if loaded_kp.is_some() && signer_for_bridge.is_some() {
-        // Both halves present but bridge still refused — surface
-        // the precise reason. (Should not normally happen under
-        // OptionalActivate without a deeper invariant violation;
-        // RequireOrFail would have already exited above.)
-        eprintln!(
-            "[binary] Run 033: timeout verification DISABLED — both halves present but \
-             bridge refused. See probe-line above for reason."
-        );
-    } else if signer_for_bridge.is_some() {
-        eprintln!(
-            "[binary] Run 033: timeout verification DISABLED — signer half wired honestly \
-             but peer-side SuiteAwareValidatorKeyProvider not configured (set \
-             --validator-consensus-key for every active validator). \
-             BinaryConsensusLoopIo::verification_ctx=None. See \
-             docs/whitepaper/contradiction.md C5."
-        );
-    } else {
-        eprintln!(
-            "[binary] Run 033: timeout verification DISABLED — \
-             BinaryConsensusLoopIo::verification_ctx=None (Run 030 bit-equivalent path). \
-             Inbound timeout/new-view crypto verification and outbound timeout signing \
-             remain off until production pieces land. See \
-             docs/whitepaper/contradiction.md C5."
-        );
-    }
-    // Suppress unused-variant lint when the bridge currently can't
-    // produce certain disabled reasons in this binary path.
-    let _ = TimeoutVerificationDisabledReason::IntentionallyDisabled;
+    // Run 422 D4: consensus security preparation now runs in
+    // `run_p2p_consensus_security_preflight` BEFORE `builder.build()` above, so
+    // every fatal signer/provider/membership/suite/policy check terminates
+    // startup before any network listener, peer dial, or consensus task. The
+    // prepared, message-family-separated result is consumed here without
+    // reloading keys or rebuilding a different context.
+    let ConsensusSecurityPreflight {
+        timeout_verification_ctx: verification_ctx,
+        proposal_vote_authority,
+    } = consensus_security_preflight;
 
     let io = BinaryConsensusLoopIo {
         inbound_rx: consensus_inbound_rx,
         outbound: outbound_facade,
         peer_connectivity: Some(peer_connectivity),
         verification_ctx,
+        // Run 422 D5: Proposal/Vote authority is a SEPARATE message-family
+        // capability from `verification_ctx` (Timeout/NewView). Production sets
+        // it to `None` (`run_p2p_consensus_security_preflight` never builds it),
+        // so legacy `--validator-consensus-key` configuration cannot enable
+        // Proposal/Vote signing or verification. Under the `Required` policy
+        // below, inbound Proposal/Vote are rejected and outbound Proposal/Vote
+        // suppressed until a separately validated canonical authority is
+        // activated.
+        proposal_vote_authority,
         binding_gate: node_context.binding_gate.clone(),
         // Run 420: the production `qbind-node` binary ALWAYS selects the
         // fail-closed `Required` policy. When `verification_ctx` is `None`

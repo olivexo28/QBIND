@@ -149,6 +149,7 @@ async fn drive_through_demux(
         outbound: outbound_dyn,
         peer_connectivity: None,
         verification_ctx: None,
+        proposal_vote_authority: None,
         binding_gate: Some(gate),
         verification_policy: ConsensusVerificationPolicy::LocalFixtureUnsigned,
     };

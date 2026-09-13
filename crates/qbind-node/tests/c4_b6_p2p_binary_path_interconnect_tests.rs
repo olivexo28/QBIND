@@ -284,6 +284,7 @@ async fn b6_inbound_proposal_reaches_engine_and_emits_vote() {
         outbound: outbound_dyn,
         peer_connectivity: None,
         verification_ctx: None,
+        proposal_vote_authority: None,
         binding_gate: None,
         verification_policy: ConsensusVerificationPolicy::LocalFixtureUnsigned,
     };
@@ -413,6 +414,7 @@ async fn b6_two_engine_cross_wired_binary_path_progression() {
         outbound: facade_a as Arc<dyn ConsensusNetworkFacade>,
         peer_connectivity: None,
         verification_ctx: None,
+        proposal_vote_authority: None,
         binding_gate: None,
         verification_policy: ConsensusVerificationPolicy::LocalFixtureUnsigned,
     };
@@ -421,6 +423,7 @@ async fn b6_two_engine_cross_wired_binary_path_progression() {
         outbound: facade_b as Arc<dyn ConsensusNetworkFacade>,
         peer_connectivity: None,
         verification_ctx: None,
+        proposal_vote_authority: None,
         binding_gate: None,
         verification_policy: ConsensusVerificationPolicy::LocalFixtureUnsigned,
     };
@@ -562,6 +565,7 @@ async fn b6_loop_survives_inbound_close() {
         outbound,
         peer_connectivity: None,
         verification_ctx: None,
+        proposal_vote_authority: None,
         binding_gate: None,
         verification_policy: ConsensusVerificationPolicy::LocalFixtureUnsigned,
     };
@@ -616,6 +620,7 @@ async fn b6_inbound_non_leader_proposal_does_not_silently_drop() {
         outbound: outbound_dyn,
         peer_connectivity: None,
         verification_ctx: None,
+        proposal_vote_authority: None,
         binding_gate: None,
         verification_policy: ConsensusVerificationPolicy::LocalFixtureUnsigned,
     };

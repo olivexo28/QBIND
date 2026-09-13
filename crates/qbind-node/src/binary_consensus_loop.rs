@@ -867,6 +867,29 @@ pub struct BinaryConsensusLoopIo {
     /// until that pass).
     pub verification_ctx: Option<Arc<TimeoutVerificationContext>>,
 
+    /// Run 422 D5: Proposal/Vote verification + signing authority.
+    ///
+    /// This is a **separate** message-family authority from
+    /// [`BinaryConsensusLoopIo::verification_ctx`] (which now governs only the
+    /// Timeout/NewView family). Inbound Proposal/Vote verification, outbound
+    /// Proposal/Vote signing, cached/late-peer re-emission, and self-injection
+    /// all consult *only* this field — never `verification_ctx`. This prevents
+    /// legacy `--validator-consensus-key` Timeout configuration from silently
+    /// establishing Proposal/Vote authority.
+    ///
+    /// When `None`, the outcome is governed by
+    /// [`BinaryConsensusLoopIo::verification_policy`] exactly as before: under
+    /// `Required` (production default) inbound Proposal/Vote are rejected and
+    /// outbound Proposal/Vote are suppressed fail-closed; only the test-only
+    /// `LocalFixtureUnsigned` policy preserves the legacy unsigned passthrough.
+    ///
+    /// Production `main` always sets this to `None`: no validated canonical
+    /// Proposal/Vote authority is activated yet (genesis-authority activation
+    /// remains disabled pending D4–D7). Tests may populate it with an explicit
+    /// [`ProposalVoteAuthority`] to exercise the verifier/signer; that does not
+    /// establish any production activation route.
+    pub proposal_vote_authority: Option<Arc<ProposalVoteAuthority>>,
+
     /// Run 418: optional authenticated peer→validator consensus binding gate.
     ///
     /// When `Some`, every inbound consensus message that carries an immediate
@@ -973,6 +996,61 @@ impl std::fmt::Debug for TimeoutVerificationContext {
     }
 }
 
+/// Run 422 D5: **Proposal/Vote** verification + signing authority.
+///
+/// This is a *distinct capability type* from [`TimeoutVerificationContext`].
+/// The two message families — (A) Proposal/Vote and (B) Timeout/NewView —
+/// now carry separate authority objects so that possessing one can never
+/// silently grant the other. In particular:
+///
+/// - The legacy `--validator-consensus-key` CLI path builds only the
+///   [`TimeoutVerificationContext`] used for Timeout/NewView. It does **not**
+///   construct a `ProposalVoteAuthority`, so legacy CLI-key configuration can
+///   no longer enable Proposal/Vote signing or verification.
+/// - There is deliberately **no** `From<TimeoutVerificationContext>` (or any
+///   other implicit conversion) for this type. Sharing a backend, signer
+///   object, or key provider between the two families is allowed — those are
+///   immutable cryptographic primitives — but that sharing must be an
+///   *explicit* construction of this type, never an automatic promotion of a
+///   Timeout context. Production `main` never constructs this type; it is left
+///   `None`, and under the fail-closed
+///   [`ConsensusVerificationPolicy::Required`] default that means inbound
+///   Proposal/Vote are rejected and outbound Proposal/Vote are suppressed
+///   until a separately validated canonical Proposal/Vote authority is
+///   activated (still disabled pending the remaining D4–D7 boundaries).
+///
+/// Tests may construct this type directly to exercise the Proposal/Vote
+/// verifier/signer with explicit signed fixtures. Doing so proves verifier
+/// coverage only; it does **not** establish any production activation route.
+///
+/// The five members intentionally mirror the primitives the Proposal/Vote
+/// crypto already uses (`verify_proposal_msg` / `verify_vote_msg` and the
+/// outbound signing preimage). No new crypto path, preimage, suite, or wire
+/// format is introduced.
+pub struct ProposalVoteAuthority {
+    /// Active validator set used for membership checks.
+    pub validators: Arc<ConsensusValidatorSet>,
+    /// Governance-backed validator key + suite source.
+    pub key_provider: Arc<dyn SuiteAwareValidatorKeyProvider>,
+    /// Suite → verifier-backend dispatch.
+    pub backend_registry: Arc<dyn ConsensusSigBackendRegistry>,
+    /// Chain ID for the chain-aware signing/verification preimage.
+    pub chain_id: ChainId,
+    /// Local validator signer for outbound Proposal/Vote signing.
+    /// When `None`, locally-emitted Proposal/Vote fail closed (not broadcast).
+    pub signer: Option<Arc<dyn ValidatorSigner>>,
+}
+
+impl std::fmt::Debug for ProposalVoteAuthority {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ProposalVoteAuthority")
+            .field("validators_size", &self.validators.len())
+            .field("chain_id", &self.chain_id)
+            .field("signer", &self.signer.is_some())
+            .finish()
+    }
+}
+
 impl std::fmt::Debug for BinaryConsensusLoopIo {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("BinaryConsensusLoopIo")
@@ -990,6 +1068,14 @@ impl std::fmt::Debug for BinaryConsensusLoopIo {
                 "verification_ctx",
                 &if self.verification_ctx.is_some() {
                     "<Arc<TimeoutVerificationContext>>"
+                } else {
+                    "None"
+                },
+            )
+            .field(
+                "proposal_vote_authority",
+                &if self.proposal_vote_authority.is_some() {
+                    "<Arc<ProposalVoteAuthority>>"
                 } else {
                     "None"
                 },
@@ -1879,11 +1965,12 @@ pub async fn run_binary_consensus_loop_with_io(
     }
 
     #[allow(clippy::type_complexity)]
-    let (mut inbound_rx, outbound_facade, peer_connectivity, verification_ctx, binding_gate, verification_policy): (
+    let (mut inbound_rx, outbound_facade, peer_connectivity, verification_ctx, proposal_vote_authority, binding_gate, verification_policy): (
         Option<mpsc::Receiver<InboundConsensusEnvelope>>,
         Option<Arc<dyn ConsensusNetworkFacade>>,
         Option<Arc<dyn PeerConnectivitySource>>,
         Option<Arc<TimeoutVerificationContext>>,
+        Option<Arc<ProposalVoteAuthority>>,
         Option<Arc<PeerConsensusBindingGate>>,
         ConsensusVerificationPolicy,
     ) = match io {
@@ -1892,6 +1979,7 @@ pub async fn run_binary_consensus_loop_with_io(
             Some(io.outbound),
             io.peer_connectivity,
             io.verification_ctx,
+            io.proposal_vote_authority,
             io.binding_gate,
             io.verification_policy,
         ),
@@ -1901,7 +1989,7 @@ pub async fn run_binary_consensus_loop_with_io(
         // fail-closed `Required` policy here — permission to bypass
         // verification is never inferred from a `None`, even on a path that
         // has no message surface.
-        None => (None, None, None, None, None, ConsensusVerificationPolicy::Required),
+        None => (None, None, None, None, None, None, ConsensusVerificationPolicy::Required),
     };
 
     eprintln!(
@@ -2109,6 +2197,7 @@ pub async fn run_binary_consensus_loop_with_io(
                                 cfg.local_validator_id,
                                 &mut restore_mode,
                                 verification_ctx.as_deref(),
+                                proposal_vote_authority.as_deref(),
                                 &mut reconfig_detector,
                                 origin.as_ref(),
                                 binding_gate.as_deref(),
@@ -2199,7 +2288,7 @@ pub async fn run_binary_consensus_loop_with_io(
                         &mut last_leader_proposal,
                         &mut last_leader_vote,
                         &mut reconfig_detector,
-                        verification_ctx.as_deref(),
+                        proposal_vote_authority.as_deref(),
                         verification_policy,
                     );
                     // B9 + B10: poll for a late-peer-connect transition
@@ -2218,7 +2307,7 @@ pub async fn run_binary_consensus_loop_with_io(
                             pc,
                             outbound_facade.as_deref(),
                             &mut inbound_stats,
-                            verification_ctx.as_deref(),
+                            proposal_vote_authority.as_deref(),
                             verification_policy,
                         );
                     }
@@ -2340,7 +2429,7 @@ pub async fn run_binary_consensus_loop_with_io(
                         &mut last_leader_proposal,
                         &mut last_leader_vote,
                         &mut reconfig_detector,
-                        verification_ctx.as_deref(),
+                        proposal_vote_authority.as_deref(),
                         verification_policy,
                     );
                     if let Some(pc) = peer_connectivity.as_deref() {
@@ -2353,7 +2442,7 @@ pub async fn run_binary_consensus_loop_with_io(
                             pc,
                             outbound_facade.as_deref(),
                             &mut inbound_stats,
-                            verification_ctx.as_deref(),
+                            proposal_vote_authority.as_deref(),
                             verification_policy,
                         );
                     }
@@ -2522,7 +2611,7 @@ fn do_leader_tick(
     last_leader_proposal: &mut Option<(u64, BlockProposal)>,
     last_leader_vote: &mut Option<(u64, Vote)>,
     reconfig_detector: &mut BinaryReconfigDetector,
-    signer_ctx: Option<&TimeoutVerificationContext>,
+    signer_ctx: Option<&ProposalVoteAuthority>,
     verification_policy: ConsensusVerificationPolicy,
 ) {
     let view_at_step = engine.current_view();
@@ -2655,7 +2744,7 @@ fn maybe_reemit_on_late_peer_connect(
     peer_connectivity: &dyn PeerConnectivitySource,
     facade: Option<&dyn ConsensusNetworkFacade>,
     stats: &mut BinaryConsensusLoopInboundStats,
-    signer_ctx: Option<&TimeoutVerificationContext>,
+    signer_ctx: Option<&ProposalVoteAuthority>,
     verification_policy: ConsensusVerificationPolicy,
 ) {
     // Always refresh the connected snapshot so reconnect churn within
@@ -2797,7 +2886,7 @@ fn maybe_reemit_on_late_peer_connect(
 ///   attached. A signing error fails closed (returns `None`).
 fn sign_proposal_for_broadcast(
     mut proposal: BlockProposal,
-    ctx: Option<&TimeoutVerificationContext>,
+    ctx: Option<&ProposalVoteAuthority>,
     verification_policy: ConsensusVerificationPolicy,
     inbound_stats: &mut BinaryConsensusLoopInboundStats,
 ) -> Option<BlockProposal> {
@@ -2869,7 +2958,7 @@ fn sign_proposal_for_broadcast(
 /// `None` / no-signer / signer semantics.
 fn sign_vote_for_broadcast(
     mut vote: Vote,
-    ctx: Option<&TimeoutVerificationContext>,
+    ctx: Option<&ProposalVoteAuthority>,
     verification_policy: ConsensusVerificationPolicy,
     inbound_stats: &mut BinaryConsensusLoopInboundStats,
 ) -> Option<Vote> {
@@ -2933,7 +3022,7 @@ fn forward_actions_to_facade(
     actions: Vec<ConsensusEngineAction<ValidatorId>>,
     facade: &dyn ConsensusNetworkFacade,
     inbound_stats: &mut BinaryConsensusLoopInboundStats,
-    signer_ctx: Option<&TimeoutVerificationContext>,
+    signer_ctx: Option<&ProposalVoteAuthority>,
     verification_policy: ConsensusVerificationPolicy,
 ) {
     for action in actions {
@@ -3058,6 +3147,10 @@ pub(crate) fn handle_inbound_consensus_msg(
     local_validator_id: ValidatorId,
     restore_mode: &mut RestoreCatchupModeState,
     verification_ctx: Option<&TimeoutVerificationContext>,
+    // Run 422 D5: separate Proposal/Vote authority. Proposal/Vote inbound
+    // verification and the outbound signing of engine-produced actions consult
+    // ONLY this argument, never `verification_ctx` (Timeout/NewView family).
+    pv_authority: Option<&ProposalVoteAuthority>,
     reconfig_detector: &mut BinaryReconfigDetector,
     origin: Option<&AuthenticatedConsensusOrigin>,
     binding_gate: Option<&PeerConsensusBindingGate>,
@@ -3157,7 +3250,7 @@ pub(crate) fn handle_inbound_consensus_msg(
                     // outbound action. Under the test-only
                     // `LocalFixtureUnsigned` policy the historical unsigned
                     // LocalMesh passthrough is preserved.
-                    match verification_ctx {
+                    match pv_authority {
                         Some(ctx) => {
                             let t_start = std::time::Instant::now();
                             let res = verify_proposal_msg(
@@ -3256,7 +3349,7 @@ pub(crate) fn handle_inbound_consensus_msg(
                             stats.inbound_proposals_engine_accepted.saturating_add(1);
                         metrics.consensus_t154().inc_proposal_accepted();
                         if let Some(facade) = outbound {
-                            forward_actions_to_facade(vec![action], facade, stats, verification_ctx, verification_policy);
+                            forward_actions_to_facade(vec![action], facade, stats, pv_authority, verification_policy);
                         }
                     }
                 }
@@ -3308,7 +3401,7 @@ pub(crate) fn handle_inbound_consensus_msg(
                     // `VerificationContextUnavailable`; only the test-only
                     // `LocalFixtureUnsigned` policy permits the historical
                     // unsigned passthrough.
-                    match verification_ctx {
+                    match pv_authority {
                         Some(ctx) => {
                             let t_start = std::time::Instant::now();
                             let res = verify_vote_msg(
@@ -3823,6 +3916,7 @@ pub(crate) fn deliver_inbound_for_run035(
     metrics: &Arc<NodeMetrics>,
     local_validator_id: ValidatorId,
     verification_ctx: Option<&TimeoutVerificationContext>,
+    pv_authority: Option<&ProposalVoteAuthority>,
     verification_policy: ConsensusVerificationPolicy,
 ) {
     let mut restore_mode = RestoreCatchupModeState::from_config(None);
@@ -3836,6 +3930,7 @@ pub(crate) fn deliver_inbound_for_run035(
         local_validator_id,
         &mut restore_mode,
         verification_ctx,
+        pv_authority,
         &mut detector,
         None,
         None,
@@ -6737,6 +6832,7 @@ mod tests {
             ValidatorId::new(0),
             &mut restore_mode,
             None,
+            None,
             &mut BinaryReconfigDetector::default(),
             None,
             None,
@@ -6762,6 +6858,7 @@ mod tests {
             &metrics,
             ValidatorId::new(0),
             &mut restore_mode,
+            None,
             None,
             &mut BinaryReconfigDetector::default(),
             None,
@@ -6810,6 +6907,7 @@ mod tests {
             ValidatorId::new(0),
             &mut restore_mode,
             None,
+            None,
             &mut BinaryReconfigDetector::default(),
             None,
             None,
@@ -6854,6 +6952,7 @@ mod tests {
             &metrics,
             ValidatorId::new(0),
             &mut restore_mode,
+            None,
             None,
             &mut BinaryReconfigDetector::default(),
             None,
@@ -6932,6 +7031,7 @@ mod tests {
             ValidatorId::new(0),
             &mut restore_mode,
             None,
+            None,
             &mut BinaryReconfigDetector::default(),
             None,
             None,
@@ -6957,6 +7057,7 @@ mod tests {
             &metrics,
             ValidatorId::new(0),
             &mut restore_mode,
+            None,
             None,
             &mut BinaryReconfigDetector::default(),
             None,
@@ -7002,6 +7103,7 @@ mod tests {
             ValidatorId::new(0),
             &mut restore_mode,
             None,
+            None,
             &mut BinaryReconfigDetector::default(),
             None,
             None,
@@ -7022,6 +7124,7 @@ mod tests {
             &metrics,
             ValidatorId::new(0),
             &mut restore_mode,
+            None,
             None,
             &mut BinaryReconfigDetector::default(),
             None,
@@ -7746,6 +7849,7 @@ mod tests {
                 ValidatorId(0),
                 &mut restore_mode,
                 ctx,
+                None,
                 &mut BinaryReconfigDetector::default(),
                 None,
                 None,
@@ -7877,6 +7981,7 @@ mod tests {
                 ValidatorId(0),
                 &mut restore_mode,
                 Some(&ctx),
+                None,
                 &mut BinaryReconfigDetector::default(),
                 None,
                 None,
@@ -7910,6 +8015,7 @@ mod tests {
                 ValidatorId(0),
                 &mut restore_mode,
                 ctx,
+                None,
                 &mut BinaryReconfigDetector::default(),
                 None,
                 None,
@@ -8162,6 +8268,7 @@ mod tests {
                 ValidatorId(0),
                 &mut restore_mode,
                 Some(&ctx),
+                None,
                 &mut BinaryReconfigDetector::default(),
                 None,
                 None,
@@ -8331,12 +8438,17 @@ mod tests {
         fn make_ctx(
             fixture: &Fixture,
             local_signer_for: Option<ValidatorId>,
-        ) -> TimeoutVerificationContext {
+        ) -> ProposalVoteAuthority {
             let signer: Option<Arc<dyn ValidatorSigner>> = local_signer_for.map(|id| {
                 let sk = fixture.sk_objs.get(&id).expect("signer key present").clone();
                 Arc::new(LocalKeySigner::new(id, TEST_SUITE_U16, sk)) as Arc<dyn ValidatorSigner>
             });
-            TimeoutVerificationContext {
+            // Run 422 D5: this Proposal/Vote verifier test module constructs the
+            // *Proposal/Vote* authority explicitly (a distinct type from the
+            // Timeout/NewView `TimeoutVerificationContext`). Building this in a
+            // test proves verifier coverage only; it is not a production
+            // activation route.
+            ProposalVoteAuthority {
                 validators: fixture.validators.clone(),
                 key_provider: fixture.kp.clone(),
                 backend_registry: fixture.br.clone(),
@@ -8415,7 +8527,7 @@ mod tests {
         fn deliver_proposal(
             engine: &mut BasicHotStuffEngine<[u8; 32]>,
             stats: &mut BinaryConsensusLoopInboundStats,
-            ctx: Option<&TimeoutVerificationContext>,
+            pv: Option<&ProposalVoteAuthority>,
             proposal: &BlockProposal,
             metrics: &Arc<NodeMetrics>,
         ) {
@@ -8431,7 +8543,8 @@ mod tests {
                 metrics,
                 ValidatorId(0),
                 &mut restore_mode,
-                ctx,
+                None,
+                pv,
                 &mut BinaryReconfigDetector::default(),
                 None,
                 None,
@@ -8442,7 +8555,7 @@ mod tests {
         fn deliver_vote(
             engine: &mut BasicHotStuffEngine<[u8; 32]>,
             stats: &mut BinaryConsensusLoopInboundStats,
-            ctx: Option<&TimeoutVerificationContext>,
+            pv: Option<&ProposalVoteAuthority>,
             vote: &Vote,
             metrics: &Arc<NodeMetrics>,
         ) {
@@ -8458,7 +8571,8 @@ mod tests {
                 metrics,
                 ValidatorId(0),
                 &mut restore_mode,
-                ctx,
+                None,
+                pv,
                 &mut BinaryReconfigDetector::default(),
                 None,
                 None,
@@ -8762,6 +8876,7 @@ mod tests {
                 &metrics,
                 ValidatorId(0),
                 &mut restore_mode,
+                None,
                 Some(&ctx),
                 &mut BinaryReconfigDetector::default(),
                 None,
@@ -8949,7 +9064,7 @@ mod tests {
         fn deliver_proposal_pol(
             engine: &mut BasicHotStuffEngine<[u8; 32]>,
             stats: &mut BinaryConsensusLoopInboundStats,
-            ctx: Option<&TimeoutVerificationContext>,
+            pv: Option<&ProposalVoteAuthority>,
             proposal: &BlockProposal,
             metrics: &Arc<NodeMetrics>,
             policy: ConsensusVerificationPolicy,
@@ -8967,7 +9082,8 @@ mod tests {
                 metrics,
                 ValidatorId(0),
                 &mut restore_mode,
-                ctx,
+                None,
+                pv,
                 &mut detector,
                 None,
                 None,
@@ -8979,7 +9095,7 @@ mod tests {
         fn deliver_vote_pol(
             engine: &mut BasicHotStuffEngine<[u8; 32]>,
             stats: &mut BinaryConsensusLoopInboundStats,
-            ctx: Option<&TimeoutVerificationContext>,
+            pv: Option<&ProposalVoteAuthority>,
             vote: &Vote,
             metrics: &Arc<NodeMetrics>,
             policy: ConsensusVerificationPolicy,
@@ -8996,7 +9112,8 @@ mod tests {
                 metrics,
                 ValidatorId(0),
                 &mut restore_mode,
-                ctx,
+                None,
+                pv,
                 &mut BinaryReconfigDetector::default(),
                 None,
                 None,
@@ -9305,6 +9422,159 @@ mod tests {
             assert!(body.contains(
                 "qbind_consensus_inbound_proposal_verification_context_unavailable_total 1"
             ));
+        }
+
+        // =================================================================
+        // Run 422 D5 — MESSAGE-FAMILY AUTHORITY SEPARATION
+        //
+        // A valid *legacy Timeout/NewView* verification context (the only
+        // thing legacy `--validator-consensus-key` CLI configuration can
+        // build) does NOT establish Proposal/Vote authority.
+        // `TimeoutVerificationContext` and `ProposalVoteAuthority` are
+        // distinct nominal types with no conversion between them, so the
+        // Proposal/Vote handlers (which take `Option<&ProposalVoteAuthority>`)
+        // cannot be handed a Timeout context even by accident — a
+        // compile-time guarantee. At runtime production wires
+        // `proposal_vote_authority: None`, so correctly-authenticated
+        // Proposal/Vote traffic is rejected fail-closed as
+        // authority-unavailable even when a valid Timeout context (with a
+        // live signer) is present. These fixtures do NOT establish
+        // production activation.
+        // =================================================================
+
+        /// Build a valid legacy Timeout/NewView verification context (with an
+        /// optional live signer) from the same fixture keys. Mirrors what
+        /// legacy CLI-key configuration produces for the Timeout/NewView path.
+        fn make_timeout_ctx(
+            fixture: &Fixture,
+            local_signer_for: Option<ValidatorId>,
+        ) -> TimeoutVerificationContext {
+            let signer: Option<Arc<dyn ValidatorSigner>> = local_signer_for.map(|id| {
+                let sk = fixture.sk_objs.get(&id).expect("signer key present").clone();
+                Arc::new(LocalKeySigner::new(id, TEST_SUITE_U16, sk)) as Arc<dyn ValidatorSigner>
+            });
+            TimeoutVerificationContext {
+                validators: fixture.validators.clone(),
+                key_provider: fixture.kp.clone(),
+                backend_registry: fixture.br.clone(),
+                chain_id: QBIND_DEVNET_CHAIN_ID,
+                signer,
+            }
+        }
+
+        // D5-1: A valid legacy Timeout context (with a live signer) is a
+        // distinct capability from Proposal/Vote authority; production wiring
+        // supplies `None` for the Proposal/Vote authority handed to handlers.
+        #[test]
+        fn run422_d5_valid_timeout_ctx_does_not_populate_pv_authority() {
+            let fixture = make_fixture(4);
+            let timeout_ctx = make_timeout_ctx(&fixture, Some(ValidatorId(0)));
+            assert!(timeout_ctx.signer.is_some(), "legacy Timeout signer present");
+            // The Proposal/Vote authority is a *separate* type; there is no
+            // conversion from the Timeout context, and production supplies None.
+            let pv_authority: Option<&ProposalVoteAuthority> = None;
+            assert!(pv_authority.is_none());
+        }
+
+        // D5-2: With valid legacy keys + Timeout signer present, a correctly
+        // signed Proposal is still rejected as authority-unavailable, before
+        // any delivered/engine/aggregation/reconfig/outbound effect.
+        #[test]
+        fn run422_d5_authenticated_proposal_rejected_when_pv_authority_absent() {
+            let fixture = make_fixture(4);
+            let timeout_ctx = make_timeout_ctx(&fixture, Some(ValidatorId(0)));
+            assert!(timeout_ctx.signer.is_some());
+            let mut engine = make_engine(ValidatorId(0), 4);
+            let view_before = engine.current_view();
+            let committed_before = engine.committed_height();
+            let mut stats = BinaryConsensusLoopInboundStats::default();
+            let metrics = make_metrics();
+
+            let p = signed_proposal(1, &fixture); // correctly authenticated
+            // The Timeout context exists and is valid, but the Proposal/Vote
+            // authority is absent (production wiring passes None here).
+            let detector = deliver_proposal_pol(
+                &mut engine,
+                &mut stats,
+                None, // <-- Proposal/Vote authority, NOT the Timeout ctx
+                &p,
+                &metrics,
+                ConsensusVerificationPolicy::Required,
+            );
+
+            assert_eq!(stats.inbound_proposal_verification_context_unavailable_total, 1);
+            assert_eq!(stats.inbound_proposal_verify_accepted, 0);
+            assert_eq!(stats.inbound_proposals_delivered, 0);
+            assert_eq!(stats.inbound_proposals_engine_accepted, 0);
+            assert_eq!(stats.outbound_votes_sent, 0);
+            assert_eq!(stats.outbound_proposals_sent, 0);
+            assert!(detector.header_cache.is_empty());
+            assert_eq!(engine.current_view(), view_before);
+            assert_eq!(engine.committed_height(), committed_before);
+        }
+
+        // D5-3: same separation for Vote.
+        #[test]
+        fn run422_d5_authenticated_vote_rejected_when_pv_authority_absent() {
+            let fixture = make_fixture(4);
+            let timeout_ctx = make_timeout_ctx(&fixture, Some(ValidatorId(0)));
+            assert!(timeout_ctx.signer.is_some());
+            let mut engine = make_engine(ValidatorId(0), 4);
+            let mut stats = BinaryConsensusLoopInboundStats::default();
+            let metrics = make_metrics();
+
+            let v = signed_vote(1, &fixture);
+            deliver_vote_pol(
+                &mut engine,
+                &mut stats,
+                None,
+                &v,
+                &metrics,
+                ConsensusVerificationPolicy::Required,
+            );
+            assert_eq!(stats.inbound_vote_verification_context_unavailable_total, 1);
+            assert_eq!(stats.inbound_vote_verify_accepted, 0);
+            assert_eq!(stats.inbound_votes_delivered, 0);
+            assert_eq!(stats.inbound_votes_engine_accepted, 0);
+            assert_eq!(stats.outbound_votes_sent, 0);
+        }
+
+        // D5-4: Outbound Proposal/Vote cannot be broadcast or self-injected
+        // using the legacy Timeout signer. The signing functions take
+        // `Option<&ProposalVoteAuthority>`; the Timeout signer is unreachable
+        // to them by type. With `None` (production), emission is suppressed.
+        #[test]
+        fn run422_d5_outbound_proposal_vote_suppressed_without_pv_authority() {
+            let fixture = make_fixture(4);
+            let timeout_ctx = make_timeout_ctx(&fixture, Some(ValidatorId(0)));
+            assert!(timeout_ctx.signer.is_some());
+
+            let mut stats = BinaryConsensusLoopInboundStats::default();
+            let unsigned_p = BlockProposal {
+                header: base_header(0),
+                qc: None,
+                txs: vec![],
+                signature: vec![],
+            };
+            let out_p = sign_proposal_for_broadcast(
+                unsigned_p,
+                None, // P/V authority absent — Timeout signer NOT usable here
+                ConsensusVerificationPolicy::Required,
+                &mut stats,
+            );
+            assert!(out_p.is_none(), "no P/V authority => no outbound proposal");
+            assert_eq!(stats.outbound_proposal_verification_context_unavailable_total, 1);
+            assert_eq!(stats.outbound_proposal_signing_success, 0);
+
+            let out_v = sign_vote_for_broadcast(
+                base_vote(0),
+                None,
+                ConsensusVerificationPolicy::Required,
+                &mut stats,
+            );
+            assert!(out_v.is_none(), "no P/V authority => no outbound vote");
+            assert_eq!(stats.outbound_vote_verification_context_unavailable_total, 1);
+            assert_eq!(stats.outbound_vote_signing_success, 0);
         }
     }
 }

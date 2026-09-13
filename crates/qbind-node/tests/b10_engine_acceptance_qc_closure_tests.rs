@@ -403,6 +403,7 @@ async fn b10_a_pre_fix_run_008_shape_reproduces_in_tree() {
         outbound: facade_v0,
         peer_connectivity: Some(conn_v0_dyn),
         verification_ctx: None,
+        proposal_vote_authority: None,
         binding_gate: None,
         verification_policy: ConsensusVerificationPolicy::LocalFixtureUnsigned,
     };
@@ -411,6 +412,7 @@ async fn b10_a_pre_fix_run_008_shape_reproduces_in_tree() {
         outbound: facade_v1,
         peer_connectivity: Some(conn_v1_dyn),
         verification_ctx: None,
+        proposal_vote_authority: None,
         binding_gate: None,
         verification_policy: ConsensusVerificationPolicy::LocalFixtureUnsigned,
     };
@@ -588,6 +590,7 @@ async fn b10_b_post_fix_engine_acceptance_qc_closure() {
         outbound: facade_v0,
         peer_connectivity: Some(conn_v0_dyn),
         verification_ctx: None,
+        proposal_vote_authority: None,
         binding_gate: None,
         verification_policy: ConsensusVerificationPolicy::LocalFixtureUnsigned,
     };
@@ -596,6 +599,7 @@ async fn b10_b_post_fix_engine_acceptance_qc_closure() {
         outbound: facade_v1,
         peer_connectivity: Some(conn_v1_dyn),
         verification_ctx: None,
+        proposal_vote_authority: None,
         binding_gate: None,
         verification_policy: ConsensusVerificationPolicy::LocalFixtureUnsigned,
     };
@@ -815,6 +819,7 @@ async fn b10_c_b6_cross_wired_path_still_progresses() {
         outbound: facade_a as Arc<dyn ConsensusNetworkFacade>,
         peer_connectivity: None,
         verification_ctx: None,
+        proposal_vote_authority: None,
         binding_gate: None,
         verification_policy: ConsensusVerificationPolicy::LocalFixtureUnsigned,
     };
@@ -823,6 +828,7 @@ async fn b10_c_b6_cross_wired_path_still_progresses() {
         outbound: facade_b as Arc<dyn ConsensusNetworkFacade>,
         peer_connectivity: None,
         verification_ctx: None,
+        proposal_vote_authority: None,
         binding_gate: None,
         verification_policy: ConsensusVerificationPolicy::LocalFixtureUnsigned,
     };
@@ -907,6 +913,7 @@ async fn b10_d_late_peer_reconnect_churn_stays_single_shot() {
         outbound: facade as Arc<dyn ConsensusNetworkFacade>,
         peer_connectivity: Some(conn_dyn),
         verification_ctx: None,
+        proposal_vote_authority: None,
         binding_gate: None,
         verification_policy: ConsensusVerificationPolicy::LocalFixtureUnsigned,
     };
