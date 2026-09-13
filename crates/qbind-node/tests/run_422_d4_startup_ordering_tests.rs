@@ -161,8 +161,7 @@ fn valid_inputs(tag: &str) -> ValidInputs {
     )
     .expect("write genesis");
 
-    let expect_hash =
-        compute_canonical_genesis_hash(&genesis, NetworkEnvironmentPolicy::Devnet);
+    let expect_hash = compute_canonical_genesis_hash(&genesis, NetworkEnvironmentPolicy::Devnet);
     let expect_hash_hex = format!("0x{}", hex_lower(&expect_hash));
 
     let data_dir = dir.join("data");
@@ -243,15 +242,13 @@ fn p2p_base_args(inp: &ValidInputs, with_signer: bool) -> Vec<String> {
 fn assert_refused_before_p2p(r: &Run) {
     assert_ne!(r.code, 0, "must exit non-zero; stderr=\n{}", r.stderr);
     assert!(
-        r.stderr.contains(PREFLIGHT_SIGNER_MARKER)
-            || r.stderr.contains(PREFLIGHT_PROBE_MARKER),
+        r.stderr.contains(PREFLIGHT_SIGNER_MARKER) || r.stderr.contains(PREFLIGHT_PROBE_MARKER),
         "positive control: the input must reach the preflight (Run 032/033 \
          marker); stderr=\n{}",
         r.stderr
     );
     assert!(
-        !r.stderr.contains(P2P_TRANSPORT_UP_MARKER)
-            && !r.stdout.contains(P2P_TRANSPORT_UP_MARKER),
+        !r.stderr.contains(P2P_TRANSPORT_UP_MARKER) && !r.stdout.contains(P2P_TRANSPORT_UP_MARKER),
         "P2P service must NOT be constructed before the preflight refusal; \
          stderr=\n{}",
         r.stderr
@@ -275,7 +272,8 @@ fn require_or_fail_missing_local_signer_refused_before_p2p() {
 
     assert_refused_before_p2p(&r);
     assert!(
-        r.stderr.contains("--require-timeout-verification was set but the local validator")
+        r.stderr
+            .contains("--require-timeout-verification was set but the local validator")
             && r.stderr.contains("signer could not be loaded"),
         "expected signer-load FATAL diagnostic; stderr=\n{}",
         r.stderr
@@ -299,7 +297,8 @@ fn require_or_fail_invalid_peer_key_provider_refused_before_p2p() {
 
     assert_refused_before_p2p(&r);
     assert!(
-        r.stderr.contains("peer-side SuiteAwareValidatorKeyProvider could not be built"),
+        r.stderr
+            .contains("peer-side SuiteAwareValidatorKeyProvider could not be built"),
         "expected peer-key-provider FATAL diagnostic; stderr=\n{}",
         r.stderr
     );
@@ -322,7 +321,8 @@ fn require_or_fail_unsupported_suite_refused_before_p2p() {
 
     assert_refused_before_p2p(&r);
     assert!(
-        r.stderr.contains("peer-side SuiteAwareValidatorKeyProvider could not be built"),
+        r.stderr
+            .contains("peer-side SuiteAwareValidatorKeyProvider could not be built"),
         "expected suite-rejection FATAL diagnostic; stderr=\n{}",
         r.stderr
     );
@@ -346,7 +346,8 @@ fn require_or_fail_local_key_mismatches_signer_refused_before_p2p() {
 
     assert_refused_before_p2p(&r);
     assert!(
-        r.stderr.contains("peer-side SuiteAwareValidatorKeyProvider could not be built"),
+        r.stderr
+            .contains("peer-side SuiteAwareValidatorKeyProvider could not be built"),
         "expected local-key-mismatch FATAL diagnostic; stderr=\n{}",
         r.stderr
     );

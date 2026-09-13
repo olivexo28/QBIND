@@ -708,34 +708,41 @@ fn build_uniform_validator_set(num_validators: u64) -> ConsensusValidatorSet {
 /// `Proposal` and `Vote` processing MUST be cryptographically verified/signed.
 ///
 /// This type exists to remove the pre-Run-420 fail-open ambiguity where a
-/// `verification_ctx == None` was silently treated as permission to process
+/// `None` verification input was silently treated as permission to process
 /// unsigned/unverified Proposal and Vote traffic. Permission to bypass
 /// verification is NEVER inferred from an `Option` being `None`; it must be
 /// selected as an explicit, typed policy.
+///
+/// Historical note (Run 420): the Proposal/Vote outcome was originally keyed
+/// off the shared `verification_ctx` (Timeout/NewView) field. Run 422 D5 split
+/// the two message families: Proposal/Vote inbound verification and outbound
+/// signing now consult ONLY [`BinaryConsensusLoopIo::proposal_vote_authority`],
+/// never `verification_ctx`. The policy below therefore governs what happens
+/// when the *Proposal/Vote authority* is absent.
 ///
 /// # Invariants
 ///
 /// * [`ConsensusVerificationPolicy::Required`] is the production default and
 ///   the only policy any production constructor may select. Under `Required`,
-///   a missing verification context (no signer / key-provider / backend
-///   registry / authoritative key / chain identity / suite policy) causes
-///   inbound Proposal/Vote to be **rejected fail-closed** and outbound
-///   Proposal/Vote emission (broadcast AND local self-injection) to be
-///   **suppressed**. Loss of liveness is acceptable until authority is
-///   configured; silent unauthenticated operation is not.
+///   a missing Proposal/Vote authority (`proposal_vote_authority == None`: no
+///   signer / key-provider / backend registry / authoritative key / chain
+///   identity / suite policy) causes inbound Proposal/Vote to be **rejected
+///   fail-closed** and outbound Proposal/Vote emission (broadcast AND local
+///   self-injection) to be **suppressed**. Loss of liveness is acceptable
+///   until authority is configured; silent unauthenticated operation is not.
 /// * [`ConsensusVerificationPolicy::LocalFixtureUnsigned`] is a **test-only**
 ///   local fixture compatibility policy that preserves the historical
-///   LocalMesh unsigned passthrough when `verification_ctx == None`. It MUST
-///   NOT be selectable from the production `qbind-node` CLI, TestNet, MainNet,
-///   authenticated P2P mode, restore/replay paths, or public DevNet
+///   LocalMesh unsigned passthrough when `proposal_vote_authority == None`. It
+///   MUST NOT be selectable from the production `qbind-node` CLI, TestNet,
+///   MainNet, authenticated P2P mode, restore/replay paths, or public DevNet
 ///   configuration. Only isolated local fixture/test construction may select
 ///   it. It is never chosen by any production constructor (proven at the
 ///   source level by the guard tests in
 ///   `tests/run_420_production_policy_reachability_tests.rs`).
 ///
-/// When a verification context IS wired (`Some`), both policies behave
+/// When the Proposal/Vote authority IS wired (`Some`), both policies behave
 /// identically: the message is verified/signed exactly as before. The policy
-/// only decides what happens when the context is absent.
+/// only decides what happens when that authority is absent.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConsensusVerificationPolicy {
     /// Production/authenticated P2P Proposal/Vote processing. Fail-closed when
@@ -854,14 +861,17 @@ pub struct BinaryConsensusLoopIo {
     /// provider, no per-suite backend registry, and no signer wired into
     /// `main.rs`.
     ///
-    /// Run 420 correction: for inbound/outbound **`Proposal` and `Vote`**
-    /// traffic, a `None` here does NOT imply permission to process
-    /// unsigned/unverified messages. That decision is made by the explicit
-    /// [`BinaryConsensusLoopIo::verification_policy`]: under `Required`
-    /// (production default) a `None` context causes Proposal/Vote to be
-    /// rejected (inbound) / suppressed (outbound) fail-closed; only the
-    /// test-only `LocalFixtureUnsigned` policy preserves the legacy unsigned
-    /// passthrough. The boundary is documented in
+    /// Run 420 / Run 422 D5: this field governs ONLY the Timeout/NewView
+    /// family. Inbound/outbound **`Proposal` and `Vote`** traffic no longer
+    /// consults `verification_ctx` at all — it consults the separate
+    /// [`BinaryConsensusLoopIo::proposal_vote_authority`]. A `None` there does
+    /// NOT imply permission to process unsigned/unverified Proposal/Vote
+    /// messages: that decision is made by the explicit
+    /// [`BinaryConsensusLoopIo::verification_policy`]; under `Required`
+    /// (production default) an absent Proposal/Vote authority causes
+    /// Proposal/Vote to be rejected (inbound) / suppressed (outbound)
+    /// fail-closed; only the test-only `LocalFixtureUnsigned` policy preserves
+    /// the legacy unsigned passthrough. The boundary is documented in
     /// `docs/whitepaper/contradiction.md` C4 (production PQC root-key
     /// distribution / consensus authority activation remains out of scope
     /// until that pass).
@@ -911,14 +921,16 @@ pub struct BinaryConsensusLoopIo {
 
     /// Run 420: explicit Proposal/Vote verification policy.
     ///
-    /// Decides what happens when `verification_ctx` is `None`:
+    /// Decides what happens when `proposal_vote_authority` is `None` (Run 422
+    /// D5 split: this policy governs the Proposal/Vote family via
+    /// `proposal_vote_authority`, NOT the Timeout/NewView `verification_ctx`):
     /// - [`ConsensusVerificationPolicy::Required`] (production default): inbound
     ///   Proposal/Vote are rejected fail-closed and outbound Proposal/Vote
     ///   emission is suppressed.
     /// - [`ConsensusVerificationPolicy::LocalFixtureUnsigned`] (test-only):
     ///   the historical unsigned LocalMesh passthrough is preserved.
     ///
-    /// When `verification_ctx` is `Some`, this field has no effect — the
+    /// When `proposal_vote_authority` is `Some`, this field has no effect — the
     /// message is verified/signed regardless.
     pub verification_policy: ConsensusVerificationPolicy,
 }
@@ -3239,12 +3251,15 @@ pub(crate) fn handle_inbound_consensus_msg(
                     // transport identity (F6) and a valid consensus signature
                     // (F3) are required.
                     //
-                    // Run 420 correction: when NO verification context is wired,
-                    // the outcome is governed by the explicit
-                    // `ConsensusVerificationPolicy`, NOT by silently allowing the
-                    // message through. Under `Required` (production default) a
-                    // missing context is a typed `VerificationContextUnavailable`
-                    // rejection: the proposal is dropped fail-closed here, before
+                    // Run 420 correction (Run 422 D5 message-family split):
+                    // when NO Proposal/Vote authority is wired
+                    // (`pv_authority == None`), the outcome is governed by the
+                    // explicit `ConsensusVerificationPolicy`, NOT by silently
+                    // allowing the message through, and NOT by the separate
+                    // Timeout/NewView `verification_ctx`. Under `Required`
+                    // (production default) an absent Proposal/Vote authority is
+                    // a typed authority-unavailable rejection: the proposal is
+                    // dropped fail-closed here, before
                     // any restore deferral, delivery counter, reconfig
                     // observation, engine call, vote aggregation, QC formation, or
                     // outbound action. Under the test-only
@@ -9615,10 +9630,9 @@ mod tests {
         /// validators `0..n`, matching what production peer configuration
         /// installs for F6 sender binding.
         fn pv_binding_gate(n: u64) -> PeerConsensusBindingGate {
-            let map = PeerConsensusBindingMap::build(
-                (0..n).map(|v| (pv_node_for(v), ValidatorId(v))),
-            )
-            .expect("valid one-to-one binding map");
+            let map =
+                PeerConsensusBindingMap::build((0..n).map(|v| (pv_node_for(v), ValidatorId(v))))
+                    .expect("valid one-to-one binding map");
             PeerConsensusBindingGate::new(map)
         }
 
