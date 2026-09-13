@@ -6,7 +6,7 @@ runs in the continuation environment (exit 0 unless noted).
 ============================================================================
 NEW: crates/qbind-node/tests/run_422_d7_authority_lifetime_tests.rs
   cargo test -p qbind-node --test run_422_d7_authority_lifetime_tests
-  -> 12 passed; 0 failed; 0 ignored
+  -> 14 passed; 0 failed; 0 ignored
 ============================================================================
   founding_configuration_authorizes
   changed_chain_id_rejected
@@ -20,6 +20,8 @@ NEW: crates/qbind-node/tests/run_422_d7_authority_lifetime_tests.rs
   parallel_verification_does_not_mix_keys_suites_membership_or_results
   malformed_or_extreme_observed_input_cannot_panic
   fixture_bypass_unreachable_through_production_constructors_and_parser
+  unavailable_current_state_is_rejected_and_epoch_zero_never_inferred
+  established_current_state_fresh_authorizes_superseded_rejected
 
 ============================================================================
 REGRESSIONS (unchanged expectations; green after the D7 additions)

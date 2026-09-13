@@ -158,7 +158,14 @@ pub struct GenesisConsensusAuthority {
     /// from any live/synthetic epoch source and never participates in the
     /// authority commitment (the commitment already fixes chain / genesis
     /// / membership; the epoch fixes the lifetime).
-    pub authorized_epoch: u64,
+    ///
+    /// Private and immutable, enforced through construction (Run 422 D7
+    /// corrective — section 2). The only constructor
+    /// ([`build_genesis_consensus_authority`]) always sets it to
+    /// [`GENESIS_STATIC_AUTHORITY_EPOCH`]; there is no public field and no
+    /// setter, so the "always founding epoch 0" invariant cannot be broken by
+    /// a caller mutating the field. Read it via [`Self::authorized_epoch`].
+    authorized_epoch: u64,
 }
 
 impl std::fmt::Debug for GenesisConsensusAuthority {
@@ -628,6 +635,89 @@ impl std::fmt::Display for AuthorityLifetimeError {
 
 impl std::error::Error for AuthorityLifetimeError {}
 
+/// Run 422 D7 (corrective — section 2) — the node's *independently held*
+/// current local authorization state, kept explicitly separate from the
+/// candidate [`GenesisConsensusAuthority`] snapshot and from any
+/// operation-scoped capability.
+///
+/// Freshness cannot be proven by an authority comparing itself to its own
+/// [`GenesisConsensusAuthority::config_identity`]; it must be decided against
+/// this independently-sourced value. The three cases are distinguished so a
+/// missing or not-yet-established current state can **never** be silently
+/// read as "the founding epoch 0":
+///
+/// * [`Self::MissingStorage`] — no consensus/authority storage exists yet
+///   (fresh data dir, wiped state); nothing establishes a current epoch.
+/// * [`Self::StorageWithoutCommittedEpoch`] — storage exists but carries no
+///   committed epoch key. An engine default of `0` is **not** an established
+///   epoch and must not be treated as one.
+/// * [`Self::Established`] — a concrete configuration (including epoch) read
+///   from a validated source.
+///
+/// Only [`Self::Established`] can authorize; the other two are unavailable
+/// and are rejected fail-closed by
+/// [`GenesisConsensusAuthority::authorize_current_state`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LocalAuthorizationState {
+    /// No consensus/authority storage present at all.
+    MissingStorage,
+    /// Storage present, but no epoch has been committed to it.
+    StorageWithoutCommittedEpoch,
+    /// An explicitly established current configuration from a validated
+    /// source.
+    Established(ObservedConsensusConfiguration),
+}
+
+/// Bounded, non-secret discriminator for an unavailable current state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CurrentStateUnavailableReason {
+    /// No consensus/authority storage present.
+    MissingStorage,
+    /// Storage present but no committed epoch.
+    StorageWithoutCommittedEpoch,
+}
+
+/// Run 422 D7 (corrective — section 2) — fail-closed reasons the
+/// genesis-static authority refuses to prove freshness against the node's
+/// independently held current state.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FreshnessError {
+    /// The current local authorization state is unavailable, so freshness
+    /// cannot be established and authorization is refused. The stale genesis
+    /// keys must not be used on the strength of an absent / uncommitted
+    /// current epoch, which is never inferred as the founding epoch 0.
+    CurrentStateUnavailable {
+        /// Which unavailable case was observed (bounded, non-secret).
+        reason: CurrentStateUnavailableReason,
+    },
+    /// The current local authorization state exists but does not match this
+    /// authority's single founding configuration/epoch — a superseded
+    /// snapshot after epoch advance / membership change / same-epoch
+    /// replacement. Carries the underlying lifetime divergence.
+    Superseded(AuthorityLifetimeError),
+}
+
+impl std::fmt::Display for FreshnessError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::CurrentStateUnavailable { reason } => write!(
+                f,
+                "current local authorization state is unavailable ({reason:?}); freshness cannot \
+                 be established and the genesis-static authority refuses to sign (an absent or \
+                 uncommitted current epoch is never inferred as the founding epoch)"
+            ),
+            Self::Superseded(inner) => {
+                write!(
+                    f,
+                    "current local authorization state is superseded: {inner}"
+                )
+            }
+        }
+    }
+}
+
+impl std::error::Error for FreshnessError {}
+
 impl GenesisConsensusAuthority {
     /// The single epoch this genesis-static authority is valid for
     /// (always [`GENESIS_STATIC_AUTHORITY_EPOCH`]).
@@ -635,10 +725,16 @@ impl GenesisConsensusAuthority {
         self.authorized_epoch
     }
 
-    /// The authority's own immutable configuration identity, expressed as
-    /// an [`ObservedConsensusConfiguration`] at its founding epoch. Useful
-    /// for callers that want to compare a persisted/observed identity
-    /// against the authority without re-deriving each field.
+    /// The authority's **own** immutable configuration identity, expressed as
+    /// an [`ObservedConsensusConfiguration`] at its founding epoch.
+    ///
+    /// This is a self-description, **not** independent freshness evidence
+    /// (Run 422 D7 corrective — section 2): feeding it back into
+    /// [`Self::authorize_configuration`] is a tautology — an authority always
+    /// equals itself — and proves nothing about whether the node's *current*
+    /// state is still the founding one. Freshness must be decided against an
+    /// independently-held current state via [`Self::authorize_current_state`],
+    /// never against this value.
     pub fn config_identity(&self) -> ObservedConsensusConfiguration {
         ObservedConsensusConfiguration {
             chain_id: self.chain_id.clone(),
@@ -705,6 +801,47 @@ impl GenesisConsensusAuthority {
             });
         }
         Ok(())
+    }
+
+    /// Run 422 D7 (corrective — section 2) — fail-closed freshness gate
+    /// against the node's **independently held** current authorization state.
+    ///
+    /// Unlike [`Self::authorize_configuration`] (a pure identity equality
+    /// check a caller could trivially satisfy with the authority's own
+    /// [`Self::config_identity`]), this method takes a
+    /// [`LocalAuthorizationState`] sourced independently of this snapshot and:
+    ///
+    /// * rejects [`LocalAuthorizationState::MissingStorage`] and
+    ///   [`LocalAuthorizationState::StorageWithoutCommittedEpoch`] as
+    ///   unavailable — the genesis-static keys are never authorized on the
+    ///   strength of an absent / uncommitted current epoch, and epoch 0 is
+    ///   never inferred from missing state or an engine default;
+    /// * for [`LocalAuthorizationState::Established`], delegates to the
+    ///   coarse-to-fine lifetime guard, mapping any divergence to
+    ///   [`FreshnessError::Superseded`].
+    ///
+    /// Returns `Ok(())` only when the independently established current state
+    /// is byte-for-byte this authority's founding configuration at the
+    /// founding epoch.
+    pub fn authorize_current_state(
+        &self,
+        current: &LocalAuthorizationState,
+    ) -> Result<(), FreshnessError> {
+        let observed = match current {
+            LocalAuthorizationState::MissingStorage => {
+                return Err(FreshnessError::CurrentStateUnavailable {
+                    reason: CurrentStateUnavailableReason::MissingStorage,
+                });
+            }
+            LocalAuthorizationState::StorageWithoutCommittedEpoch => {
+                return Err(FreshnessError::CurrentStateUnavailable {
+                    reason: CurrentStateUnavailableReason::StorageWithoutCommittedEpoch,
+                });
+            }
+            LocalAuthorizationState::Established(observed) => observed,
+        };
+        self.authorize_configuration(observed)
+            .map_err(FreshnessError::Superseded)
     }
 }
 

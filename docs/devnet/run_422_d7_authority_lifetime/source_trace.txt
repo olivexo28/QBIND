@@ -54,7 +54,8 @@ current tree; re-derive with `grep -n` if the tree moves.
 2. NEW TEST SOURCE (LF, rustfmt-clean)
    crates/qbind-node/tests/run_422_d7_authority_lifetime_tests.rs
 ============================================================================
-12 tests, real ML-DSA-44 backend, real genesis parse + temp-file activation
+14 tests (12 limited config/snapshot + 2 section-2 corrective freshness),
+real ML-DSA-44 backend, real genesis parse + temp-file activation
 through the shared production boundary `load_verify_and_build_genesis_authority`.
 See test_results.txt for the full list and lifetime_matrix.txt for the
 section-12.E mapping.
