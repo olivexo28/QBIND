@@ -29,8 +29,8 @@ use std::sync::Arc;
 use qbind_consensus::ids::ValidatorId;
 use qbind_crypto::ml_dsa44::{MlDsa44Backend, ML_DSA_44_PUBLIC_KEY_SIZE};
 use qbind_ledger::{
-    GenesisAllocation, GenesisConfig, GenesisCouncilConfig, GenesisMonetaryConfig, GenesisValidator,
-    GenesisHash, NetworkEnvironmentPolicy,
+    GenesisAllocation, GenesisConfig, GenesisCouncilConfig, GenesisHash, GenesisMonetaryConfig,
+    GenesisValidator, NetworkEnvironmentPolicy,
 };
 use qbind_node::genesis_consensus_authority::{
     build_genesis_consensus_authority, load_verify_and_build_genesis_authority,
@@ -108,7 +108,10 @@ fn founding_configuration_authorizes() {
     assert_eq!(auth.authorized_epoch(), 0);
 
     // The authority's own advertised identity must round-trip to Ok.
-    assert_eq!(auth.authorize_configuration(&auth.config_identity()), Ok(()));
+    assert_eq!(
+        auth.authorize_configuration(&auth.config_identity()),
+        Ok(())
+    );
 
     // An independently reconstructed identity with identical fields also
     // authorizes (equality, not object identity).
@@ -209,13 +212,8 @@ fn epoch_advance_has_no_authorized_transition() {
 fn divergence_reporting_is_coarse_to_fine() {
     let g = three_validator_genesis();
     let auth = build_auth(&g, [0xAAu8; 32]);
-    let observed = ObservedConsensusConfiguration::new(
-        "different-chain",
-        [0x00u8; 32],
-        [0x00u8; 32],
-        99,
-        42,
-    );
+    let observed =
+        ObservedConsensusConfiguration::new("different-chain", [0x00u8; 32], [0x00u8; 32], 99, 42);
     match auth.authorize_configuration(&observed) {
         Err(AuthorityLifetimeError::ChainIdChanged { .. }) => {}
         other => panic!("expected ChainIdChanged first, got {other:?}"),
@@ -307,7 +305,10 @@ fn snapshot_immutable_when_source_file_changes_after_validation() {
     );
 
     // And the guard still authorizes only the ORIGINAL founding identity.
-    assert_eq!(auth.authorize_configuration(&auth.config_identity()), Ok(()));
+    assert_eq!(
+        auth.authorize_configuration(&auth.config_identity()),
+        Ok(())
+    );
 
     // A freshly re-loaded authority reflects B and has a different
     // commitment; presenting B's identity to the ORIGINAL A is refused.
@@ -325,7 +326,8 @@ fn snapshot_immutable_when_source_file_changes_after_validation() {
     // A refuses B's (different) identity. B differs in both genesis hash and
     // commitment, so the coarse-to-fine guard reports the genesis mismatch.
     assert!(
-        auth.authorize_configuration(&auth_b.config_identity()).is_err(),
+        auth.authorize_configuration(&auth_b.config_identity())
+            .is_err(),
         "the original authority must refuse the reloaded (changed) identity"
     );
 }
