@@ -1104,6 +1104,42 @@ impl GenesisConsensusAuthority {
             authorized_epoch: GENESIS_STATIC_AUTHORITY_EPOCH,
         }
     }
+
+    /// Run 422 D7-A2 (finding #2) — explicitly test-identified interface:
+    /// assemble a candidate authority that describes the **actual verifier** by
+    /// sharing the verifier's real validator membership and suite-aware key
+    /// provider (not a synthesized empty-key placeholder). Compiled only under
+    /// `cfg(test)`.
+    ///
+    /// Unlike [`Self::for_current_authorization_fixture`] (which synthesizes an
+    /// empty key provider sufficient only for the freshness boundary), this
+    /// takes the same `Arc<ConsensusValidatorSet>` and
+    /// `Arc<dyn SuiteAwareValidatorKeyProvider>` the Proposal/Vote verifier
+    /// uses. A [`crate::binary_consensus_loop::AuthorizedProposalVoteSnapshot`]
+    /// built from this authority therefore coheres with the verifier by shared
+    /// membership + shared key provider, so admission authorizes the exact
+    /// snapshot the handler consumes. This never constructs a production
+    /// authority (there is no production route to an `Established` current
+    /// state, and `main` builds no `ProposalVoteAuthority`).
+    pub fn for_verification_snapshot_fixture(
+        chain_id: impl Into<String>,
+        genesis_hash: GenesisHash,
+        commitment: [u8; 32],
+        validators: Arc<ConsensusValidatorSet>,
+        key_provider: Arc<dyn SuiteAwareValidatorKeyProvider>,
+    ) -> Self {
+        let validator_count = validators.len();
+        Self {
+            validators,
+            key_provider,
+            genesis_hash,
+            chain_id: chain_id.into(),
+            commitment,
+            validator_count,
+            fingerprints: Vec::new(),
+            authorized_epoch: GENESIS_STATIC_AUTHORITY_EPOCH,
+        }
+    }
 }
 
 ///
