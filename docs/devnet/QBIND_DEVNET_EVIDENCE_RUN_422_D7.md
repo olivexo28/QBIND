@@ -439,3 +439,128 @@ partial; RS1 and C4/C5 **OPEN**; M4/M6/S5/S7 Yellow; Public DevNet
 **NO-GO**. No live seed file; no TestNet/MainNet readiness claim; no
 readiness item moved Green. Configured-authority standalone release-binary
 adversarial evidence remains **NOT-YET-CAPTURED** and is deferred to Run 423.
+
+## Run 422 D7-A1 — Required-policy MISSING-OWNER rejection implemented (code + test)
+
+This sub-phase closes review finding **#1** (missing-current-owner bypass)
+only. It does **not** close D7, D7-A, or findings #2–#4, which remain
+**OPEN** (see the sections above). Tested at branch
+`copilot/run-422-d7-a1-implement-required-policy-missing-ow`.
+
+### Exact missing-owner behavior implemented
+
+In `handle_inbound_consensus_msg` (`crates/qbind-node/src/binary_consensus_loop.rs`),
+both the inbound Proposal and Vote arms previously gated the current-
+authorization admission behind `if let Some(owner) = current_auth`, so a
+present `ProposalVoteAuthority` with `current_auth == None` silently skipped
+the freshness admission and proceeded to crypto. That `if let` is now a full
+`match current_auth { Some(owner) => admit…, None => … }`: under a policy that
+`requires_context()` (i.e. `Required`) the `None` arm records the family's
+current-state-unavailable counter
+(`inbound_proposal_current_state_unavailable_total` /
+`inbound_vote_current_state_unavailable_total`) exactly once and returns
+fail-closed — **before** the D6 domain/crypto verification, delivery, restore
+deferral, reconfig observation, engine/aggregation/QC mutation, and any
+outbound action. F6 sender-binding still runs first; the pre-existing
+missing-PV-authority rejection (the `pv_authority == None` arm) and the
+`Some(owner)` unavailable/superseded handling are unchanged. No owner is
+synthesized from the candidate authority; no flag, env switch, default owner,
+or fallback was introduced. The test-only `LocalFixtureUnsigned` passthrough
+is preserved (its `requires_context()` is `false`, so the `None` arm does not
+reject). Production is unaffected: `main` wires both `proposal_vote_authority`
+and the current-authorization owner as `None`, so the pre-existing
+`pv_authority == None` fail-closed default still applies.
+
+### Both-family tests (through the real handler)
+
+Added to `mod run422_d7a`, driving the real `handle_inbound_consensus_msg`
+with a real F6 binding gate, matching authenticated origin, real ML-DSA-44
+signatures, and `Required` policy:
+
+* `d7a1_proposal_missing_owner_rejects_before_crypto` and
+  `d7a1_vote_missing_owner_rejects_before_crypto`: present PV authority +
+  `current_auth == None`. Observations: F6 admitted once
+  (`gate.metrics().accepted() == 1`); the family current-state-unavailable
+  counter increments exactly once; superseded and stale-before-effect stay 0;
+  signature verification is not invoked
+  (`proposal_vote_crypto_verify_latency_observations_total == 0`, equivalent
+  direct instrumentation) with no verify acceptance/rejection; no delivery,
+  engine acceptance, restore deferral, reconfig observation (empty detector
+  header cache), or view mutation. Each test **separately** verifies the same
+  signed message with `verify_{proposal,vote}_msg_with_domain` under the exact
+  D6 domain and asserts it is `Ok`, so the handler rejection is attributable
+  solely to the missing current authorization.
+* `d7a1_proposal_f6_mismatch_precedes_missing_owner` and
+  `d7a1_vote_f6_mismatch_precedes_missing_owner`: same present-authority /
+  `current_auth == None` setup but with a claimed-proposer/voter that
+  disagrees with the authenticated origin. Observations: F6 rejects first
+  (`inbound_sender_binding_rejected_total == 1`, `accepted() == 0`); the
+  missing-owner decision is never reached (current-state-unavailable == 0, no
+  crypto observation).
+
+The existing distinctions are retained: missing PV authority
+(`d7a_timeout_context_cannot_supply_pv_authorization`), missing owner (the new
+`d7a1_*` tests), and present-but-unavailable owner
+(`d7a_{proposal,vote}_unavailable_current_state_rejects_before_crypto`).
+
+### Fixture migration (only)
+
+Some Required-positive D5/D6 handler wrappers
+(`deliver_proposal_pol`, `deliver_vote_pol`, `deliver_proposal_combined`,
+`deliver_vote_combined`, `deliver_proposal_combined_restore`) intentionally
+passed `current_auth == None` with a present PV authority; the strengthened
+contract now rejects that input. Each wrapper was migrated to provide an
+explicit established test owner (`migration_established_current_auth`, built
+through the existing `cfg(test)` `for_current_authorization_fixture` +
+`establish_for_fixture` interfaces) whenever `pv.is_some() &&
+policy.requires_context()`. The owner is behaviorally transparent — `admit()`
+returns a ticket and the pre-effect `confirm()` succeeds — so every original
+cryptographic and behavioral assertion is preserved unchanged. This is fixture
+migration only: no test was switched to `LocalFixtureUnsigned`, no assertion
+was weakened, and no production bypass was added. It does **not** prove the
+still-open owner/verifier-binding (#2) or ticket-identity (#3) findings.
+
+### Validation results (tested SHA `175839819abc54e5500f31d907ce457cf2827b8a`)
+
+* `cargo test -p qbind-node --lib d7a` ⇒ 17 passed, 0 failed (incl. the 4 new
+  `d7a1_*` tests).
+* `cargo test -p qbind-node --lib binary_consensus_loop` ⇒ 133 passed, 0 failed.
+* `cargo test -p qbind-node --lib` ⇒ 1495 passed, 0 failed.
+* `cargo test -p qbind-node --test run_422_d7_authority_lifetime_tests --test
+  run_422_genesis_consensus_authority_tests --test run_422_startup_refusal_tests
+  --test run_422_d4_startup_ordering_tests --test
+  run_420_production_policy_reachability_tests --test
+  run_418_authenticated_peer_consensus_sender_binding_tests` ⇒ 18/3/5/14/15/4
+  passed, 0 failed.
+* `cargo check -p qbind-node` (dev profile, default features) ⇒ clean, exit 0.
+* `cargo clippy -p qbind-node --lib` ⇒ exit 0 (87 pre-existing warnings, none
+  in the changed lines).
+* `cargo build -p qbind-node --release --bin qbind-node` ⇒ Finished, exit 0.
+* `cargo clippy -p qbind-node --tests` ⇒ exit 101 due to a **known unrelated**
+  pre-existing failure in the `m16_epoch_transition_hardening_tests` binary
+  (missing `RocksDbConsensusStorage::set_inject_write_failure` /
+  `clear_epoch_transition_marker`); this is not touched by this change and
+  compiles/fails identically on the base tree.
+* **Security tools (`parallel_validation` at SHA above):** Code Review
+  completed, reviewed 2 files, **no review comments**. CodeQL (`rust`)
+  reported **0 alerts** but **analysis was skipped because the database size
+  is too large** — recorded exactly; this skipped scan is NOT converted into
+  a zero-alert / clean conclusion.
+
+### Remaining inbound findings still OPEN
+
+Findings #2 (owner→verifier binding / incoherent positive fixtures), #3
+(ticket identity + generation exhaustion via `saturating_add`), and #4
+(handler-ordering / bound positive coverage) are **unchanged and OPEN**. This
+sub-phase rejects an absent owner; it does not bind the admitted snapshot to
+the verification snapshot, does not give the ticket an issuer identity, and
+establishes no durable anti-rollback.
+
+```
+D7A_INBOUND_VERDICT=PARTIAL (finding #1 missing-owner CLOSED; #2–#4 OPEN)
+D7_STATUS=PARTIAL-CODE-TEST / PRODUCTION-LIFECYCLE-UNAVAILABLE
+DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED
+GENESIS_AUTHORITY_ACTIVATION=DISABLED
+CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED
+SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO
+```
