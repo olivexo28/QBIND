@@ -3007,6 +3007,7 @@ pub async fn run_binary_consensus_loop_with_io(
 /// cache, the B9 late-peer-connect re-emit would replay only the proposal
 /// — the late-connecting peer would still be missing the leader's vote
 /// for that view and would never reach the 2/3 quorum threshold.
+#[allow(clippy::too_many_arguments)]
 fn do_leader_tick(
     engine: &mut BasicHotStuffEngine<[u8; 32]>,
     proposals_emitted: &mut u64,
@@ -3500,6 +3501,7 @@ enum OutboundAuthAdmission<'a> {
 /// On success the returned `ticket` (present iff a snapshot is wired) MUST be
 /// re-confirmed by the caller against the same owner immediately before the
 /// facade call; a replacement between admission and effect suppresses it.
+#[allow(clippy::too_many_arguments)]
 fn admit_outbound_action<'a>(
     current_auth: Option<&'a AuthorizedProposalVoteSnapshot>,
     pv_authority: Option<&'a ProposalVoteAuthority>,
