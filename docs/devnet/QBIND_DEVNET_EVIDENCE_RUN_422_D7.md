@@ -1327,3 +1327,202 @@ GENESIS_AUTHORITY_ACTIVATION=DISABLED
 CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED
 SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO
 ```
+
+## Run 422 D7-B2 — authorize cached Proposal/Vote late-peer re-emission (code + test)
+
+### B1 revision separation (task §1)
+The reviewed D7-B1 branch `copilot/run-422-d7-b1` was verified in the actual
+source. Two SHAs are kept **distinct**, not described as one revision:
+
+* **B1 tested SHA** `eba8e0d827a3bd16c53fd08ad635bdfde7c9363f` — the revision at
+  which the D7-B1 outbound-forwarding tests were run.
+* **B1 final CRLF/documentation SHA** `9b8acf7` — a trailing-newline-only
+  change over `eba8e0d` touching exactly two files
+  (`crates/qbind-node/src/binary_consensus_loop.rs` and this evidence doc); no
+  logic difference from the tested SHA.
+
+`eba8e0d` was absent from the shallow task checkout and was fetched on demand
+(`git fetch --depth=50 origin <sha>`); no ancestry was fabricated and no older
+implementation was substituted. HEAD at the start of D7-B2 = `9b8acf7`.
+
+### Exact cache trust boundary (task §2–§4)
+The strengthened boundary is the **cached** late-peer re-emission path
+`maybe_reemit_on_late_peer_connect` (`crates/qbind-node/src/binary_consensus_loop.rs`),
+which the B1 pass had explicitly left **OPEN**
+(`D7B1_CACHED_REEMISSION_FRESHNESS=OPEN`). It now enforces current
+authorization **before** the cached bodies are signed or forwarded, for both the
+**B9 cached Proposal** and the **B10 paired cached Vote**. B1's immediate
+`forward_actions_to_facade` boundary and the A1–A4 guarantees are unchanged.
+
+Cache-provenance binding (the core of §3):
+
+* `CachedReemissionProvenance` (`:3067`) binds each eligible cached message to
+  its **originating** authorized snapshot via an `AuthorizationTicket` minted by
+  the originating owner's `CurrentAuthorizationOwner::admit()` at the trusted
+  cache-creation boundary (`CachedReemissionProvenance::capture`, `:3086`),
+  reusing the existing opaque issuer-identity + generation ticket mechanism. It
+  also records the snapshot's `authorized_epoch` at capture for a defence-in-depth
+  cross-check.
+* Provenance is captured **only** at cache creation inside `do_leader_tick` —
+  the caches are now typed `CachedLeaderProposal` / `CachedLeaderVote`
+  (`:3101`, `:3111`) carrying the immutable message, its view, and the
+  provenance together, so a cache entry can never be separated from the
+  authorization that created it. The re-emission path **never** mints fresh
+  provenance for an already-cached entry.
+* At re-emission, `admit_cached_reemission` (`:3934`) takes a **fresh**
+  `admit()` from the snapshot's owner (proves current authorization is available
+  now) **and** re-validates the cached ticket via the same owner's `confirm()`.
+  A different owner (foreign issuer — a new owner with identical configuration),
+  an advanced generation (same-owner replacement, including replacement back to
+  an identical configuration), or a terminally exhausted owner is refused. Fresh
+  authorization is therefore necessary but **not** sufficient: cached work
+  created under owner A can never acquire authorization merely because owner B is
+  current at replay. Missing provenance fails closed under `Required`.
+* This binding is explicitly **in-process** (issuer allocation + generation live
+  for the life of the owner value); no persistent or restart anti-rollback is
+  claimed (`DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED` retained).
+
+Enforcement order per eligible cached message (§4), before the facade call:
+require a coherent `AuthorizedProposalVoteSnapshot` → fresh `admit()` from its
+owner → validate the cache's originating provenance against that owner/snapshot
+→ enforce the message's authorized epoch → sign **only** through the snapshot's
+bound `verifier()` (preserving the D6 wire-chain checks, canonical v2 bytes, and
+existing signer/error checks) → `confirm_outbound_before_effect` immediately
+before the facade call. Any rejection suppresses that message's effect. A
+separately-supplied `pv_authority` is consulted **only** under the test-only
+`LocalFixtureUnsigned` policy when no snapshot is wired; it can never substitute
+for a wired snapshot, and message epoch/chain/domain are never rewritten to
+pass. Production wires `None` (fail-closed under `Required`); no
+established-owner factory, new flag, environment override, or unsigned fallback
+was added. The synchronous immutable-borrow model is unchanged (no unsafe,
+interior mutability, sleeps, or test-only aliasing to manufacture mid-call
+mutation).
+
+### Counter semantics (task §5)
+Fresh-admission failures at re-emission (unavailable / superseded / exhausted /
+epoch) reuse the existing B1 `outbound_proposal_*` / `outbound_vote_*` reject
+counters. Two cache-specific counter families were added (`:1759`–):
+`outbound_{proposal,vote}_reemit_missing_provenance_total` and
+`outbound_{proposal,vote}_reemit_provenance_rejected_total`. Authorization
+failures and facade failures are documented separately (the facade-error paths
+`eprintln!` and return without incrementing a re-emit counter).
+
+**Partial-outcome accounting is preserved and accurate:** the Proposal and Vote
+run **independent** admission/sign/confirm cycles. If the Proposal was
+successfully handed to the facade but the paired Vote is subsequently rejected,
+`outbound_proposal_late_peer_reemits` stays `1`, `outbound_vote_late_peer_reemits`
+stays `0`, the Vote's per-reason rejection counter is `1`, and the completed
+Proposal handoff is **not** undone. The per-view single-shot latch (set when the
+Proposal is sent) is **not** weakened to retry a denied Vote through repeated
+Proposal broadcasts. Genuine new-peer detection, current-view / local-leader
+requirements, committed/obsolete-cache rejection, Proposal/Vote pairing, and the
+reconnect-churn bound are all preserved.
+
+### Behavioral tests (task §6) — `mod run422_d7b2`, 15 in-crate tests, all passing
+Located inside `mod run420` (reusing `coherent_snapshot_for` / `make_ctx_v2` /
+`d6_control_domain` / the 4-validator ML-DSA-44 crypto fixture). Every test
+drives the **actual** `maybe_reemit_on_late_peer_connect` across a genuine
+new-peer transition and eligible leader/current-view engine state, with a
+`RecordingFacade` distinguishing broadcast Proposal / broadcast Vote / directed
+(`send_vote_to`) Vote calls, and cached bodies signed on the positive path
+through the snapshot's bound verifier delegating to the **real ML-DSA-44**
+backend (signing invocations recorded via the `outbound_*_signing_success`
+counters and corroborated by verifying emitted signatures).
+
+* Positive both-families: `d7b2_valid_cache_current_auth_emits_both_families`
+  — correct Proposal + Vote emitted; signatures **valid** under the selected v2
+  domain and **rejected** under a foreign v2 domain and the legacy v1 boundary.
+* Proposal-first negatives (nothing forwarded): missing snapshot under Required,
+  unavailable state, superseded state, terminal exhaustion, missing cache
+  provenance, cache from owner A offered to owner B (identical configuration /
+  shared candidate, distinct issuer identity), same-owner generation replacement
+  (including replacement back to the original configuration), unauthorized
+  Proposal epoch, and a separately-supplied authority that cannot substitute.
+* Cached **Vote branch exercised independently** with an **admissible Proposal
+  control** so the Proposal is emitted and the Vote branch is genuinely reached,
+  then only the Vote fails — missing Vote provenance, Vote cache from owner A
+  offered to owner B, and unauthorized Vote epoch — each asserting the actual
+  partial outcome (`assert_proposal_only_partial`).
+* Guards retained: no-peer-transition suppression despite valid auth, and the
+  single-shot latch not weakened to retry a denied Vote across churn ticks.
+
+Inconsistent-wire-metadata coverage is retained by the pre-existing
+`run422_d6_late_peer_reemit_refused_on_inconsistent_wire` (updated to the new
+cache structs; now also asserts authorization **passed** and the refusal is the
+wire-chain check). Selected-domain acceptance and foreign-domain/legacy
+rejection controls are retained; no Required-positive test selects
+`LocalFixtureUnsigned`. Three pre-existing reemit tests were migrated to the new
+cache structs + signature (D5-G suppression, D6-8 selected-domain signing, D6-9
+inconsistent-wire) and pass.
+
+### Validation results (task §7) — tested SHA `475e4114dc52acd52c6c0322f00d01105913943c`
+Profile: `test`/`dev` (unoptimized + debuginfo) for tests/check/clippy;
+`release` (optimized) for the node build. Default features. Sequential builds;
+substantive work checkpointed before the expensive release build; disk monitored
+(`df` ≈ 48–52% used throughout). Overlapping subsets identified inline.
+
+* `cargo test -p qbind-node --lib run422_d7b2` → ok, **15 passed**, 0 failed,
+  1548 filtered out (exit 0). *(strict subset of the run422 run below.)*
+* `cargo test -p qbind-node --lib run422` → ok, **97 passed**, 0 failed, 1466
+  filtered out (exit 0) — the retained D7-A/A3/A4/B1/D5/D6 in-crate tests plus
+  the 15 new D7-B2 tests. *(superset of the run422_d7b2 run.)*
+* `cargo test -p qbind-node --lib binary_consensus_loop` → ok, **191 passed**,
+  0 failed, 1372 filtered out (exit 0) — full module incl. B9/B10 reemit
+  regressions and the migrated D5-G/D6-8/D6-9 tests, no regressions.
+  *(superset of the two runs above.)*
+* `cargo test -p qbind-consensus --lib` → ok, **182 passed** (exit 0).
+* `cargo test -p qbind-consensus --test run_422_d6_pv_domain_isolation_tests`
+  → ok, **34 passed** (exit 0) — D6 domain-isolation matrix.
+* `cargo test -p qbind-node --test run_420_production_policy_reachability_tests`
+  → ok, **3 passed** (exit 0).
+* `cargo test -p qbind-node --test run_422_startup_refusal_tests` → ok,
+  **4 passed** (exit 0).
+* `cargo test -p qbind-node --test run_422_d4_startup_ordering_tests` → ok,
+  **5 passed** (exit 0).
+* `cargo test -p qbind-node --test run_422_d7_authority_lifetime_tests` → ok,
+  **14 passed** (exit 0).
+* `cargo test -p qbind-node --test run_422_genesis_consensus_authority_tests`
+  → ok, **15 passed** (exit 0).
+* `cargo check -p qbind-node` → Finished, exit 0.
+* `cargo clippy -p qbind-node --lib` → 0 errors; **no new warnings in the
+  changed regions** (the two new multi-arg fns carry
+  `#[allow(clippy::too_many_arguments)]` per the file's existing convention);
+  only pre-existing baseline warnings remain, exit 0.
+* Release `qbind-node` build: `cargo build -p qbind-node --release` → Finished
+  in 7m 18s, exit 0. `CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED`
+  retained: the release build proves compilation, **not** adversarial
+  release-binary current-authorization activation (production still wires no
+  snapshot).
+
+### Security-tool disposition (accurate, no incomplete-analysis-as-pass)
+This pass touches production consensus source, so CodeQL is **not** a scope skip
+and is run via `parallel_validation` with `codeql.isTrivial=false`. Any
+database-size skip observed is recorded as **SKIPPED/INCOMPLETE**, not a passing
+scan. A reviewer-backend error is not treated as a successful review. Outcomes
+are recorded exactly as returned.
+
+### Scoped verdict and preserved posture
+The only new positive verdict names the **cached late-peer re-emission
+boundary** (`maybe_reemit_on_late_peer_connect`) and nothing downstream.
+Explicitly retained as **unproved by this phase**: deferred-work re-admission,
+later socket delivery, upstream engine / leader-step / reconfiguration effects,
+production lifecycle, and persistent (restart) freshness. No production
+activation, trusted-epoch fabrication, storage/recovery lifecycle, durable
+anti-rollback, production chain-ID mapping, QC migration, authority activation,
+or Run 423 work was implemented.
+
+```
+D7B2_CACHED_REEMISSION_BOUNDARY=CLOSED-CODE-TEST (scoped positive; maybe_reemit_on_late_peer_connect only)
+D7B2_CACHE_PROVENANCE_BINDING=IN-PROCESS-ONLY
+D7B1_OUTBOUND_FORWARDING_BOUNDARY=CLOSED-CODE-TEST (scoped positive; immediate forward_actions_to_facade only)
+D7B1_DEFERRED_WORK_READMISSION_FRESHNESS=OPEN
+D7B1_LATER_SOCKET_DELIVERY=NOT-CLAIMED
+D7B2_UPSTREAM_ENGINE_LEADER_RECONFIG_EFFECTS=NOT-CLAIMED
+D7B2_PERSISTENT_FRESHNESS=NOT-ESTABLISHED
+D7A_INBOUND_VERDICT=PARTIAL
+D7_STATUS=PARTIAL-CODE-TEST / PRODUCTION-LIFECYCLE-UNAVAILABLE
+DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED
+GENESIS_AUTHORITY_ACTIVATION=DISABLED
+CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED
+SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO
+```

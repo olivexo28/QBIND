@@ -1756,6 +1756,45 @@ pub struct BinaryConsensusLoopInboundStats {
     pub outbound_vote_epoch_unauthorized_total: u64,
     pub outbound_vote_authorization_exhausted_total: u64,
     pub outbound_vote_authority_stale_before_effect_total: u64,
+    // Run 422 D7-B2: current-authorization enforcement at the cached
+    // late-peer-connect RE-EMISSION boundary
+    // (`maybe_reemit_on_late_peer_connect`). Cached B9 Proposal / B10 Vote
+    // messages carry a `CachedReemissionProvenance` captured at the trusted
+    // cache-creation boundary (`do_leader_tick`) binding them to the
+    // current-authorization owner/generation/issuer that authorized their
+    // creation. At re-emission the boundary obtains a FRESH admission from the
+    // wired snapshot's owner, validates the cache's originating provenance
+    // against that SAME owner (a cache minted by a different owner or an
+    // advanced generation is refused — fresh authorization never launders an
+    // old cache entry), enforces the message's authorized epoch, signs through
+    // the snapshot's bound verifier (preserving the D6 wire-chain checks) and
+    // re-confirms the fresh ticket immediately before the facade call. These
+    // two counter families are distinct from both the B1
+    // `forward_actions_to_facade` outbound counters above and the facade error
+    // logging so authorization failures and facade failures stay separate.
+    //
+    //   * `*_reemit_missing_provenance_total`: a snapshot was wired (so
+    //     authorization is Required) but the cached message carried NO
+    //     originating provenance (created without a snapshot / under
+    //     `LocalFixtureUnsigned`). Fails closed before signing.
+    //   * `*_reemit_provenance_rejected_total`: the cache's originating
+    //     provenance ticket did not validate against the owner presented at
+    //     re-emission — a different owner (foreign issuer; e.g. cache from
+    //     owner A offered to owner B, even with identical configuration) or an
+    //     advanced generation (same-owner replacement, including replacement
+    //     back to an identical configuration) or a terminally exhausted owner.
+    //     Fails closed before signing.
+    //
+    // The fresh-admission failures at re-emission (missing snapshot under
+    // `Required`, unavailable / superseded / exhausted current state, and an
+    // unauthorized message epoch) and the pre-facade fresh-ticket stale
+    // suppression reuse the B1 `outbound_*` counters above, since the cached
+    // re-emission is itself an outbound Proposal/Vote effect. A rejected or
+    // suppressed re-emission is NEVER counted as re-emitted.
+    pub outbound_proposal_reemit_missing_provenance_total: u64,
+    pub outbound_proposal_reemit_provenance_rejected_total: u64,
+    pub outbound_vote_reemit_missing_provenance_total: u64,
+    pub outbound_vote_reemit_provenance_rejected_total: u64,
 }
 
 /// Transition state for the bounded "restore-catchup mode → normal
@@ -2510,8 +2549,8 @@ pub async fn run_binary_consensus_loop_with_io(
     // `outbound_proposal_late_peer_reemits` and
     // `outbound_vote_late_peer_reemits` in `BinaryConsensusLoopInboundStats`.
     // ----------------------------------------------------------------------
-    let mut last_leader_proposal: Option<(u64, BlockProposal)> = None;
-    let mut last_leader_vote: Option<(u64, Vote)> = None;
+    let mut last_leader_proposal: Option<CachedLeaderProposal> = None;
+    let mut last_leader_vote: Option<CachedLeaderVote> = None;
     let mut reemitted_for_view: Option<u64> = None;
     let mut last_known_peers: HashSet<NodeId> = HashSet::new();
 
@@ -2708,6 +2747,10 @@ pub async fn run_binary_consensus_loop_with_io(
                             pc,
                             outbound_facade.as_deref(),
                             &mut inbound_stats,
+                            // Run 422 D7-B2: current-authorization snapshot
+                            // unwired in production; cached late-peer
+                            // re-emission rejects fail-closed under `Required`.
+                            None,
                             proposal_vote_authority.as_deref(),
                             verification_policy,
                         );
@@ -2847,6 +2890,10 @@ pub async fn run_binary_consensus_loop_with_io(
                             pc,
                             outbound_facade.as_deref(),
                             &mut inbound_stats,
+                            // Run 422 D7-B2: current-authorization snapshot
+                            // unwired in production; cached late-peer
+                            // re-emission rejects fail-closed under `Required`.
+                            None,
                             proposal_vote_authority.as_deref(),
                             verification_policy,
                         );
@@ -2987,6 +3034,87 @@ pub async fn run_binary_consensus_loop_with_io(
     final_progress
 }
 
+/// Run 422 D7-B2 — the current-authorization provenance captured at the trusted
+/// cache-creation boundary ([`do_leader_tick`]) for a B9 cached Proposal or B10
+/// cached Vote eligible for late-peer-connect re-emission.
+///
+/// This is the encapsulated representation that binds each eligible cached
+/// message to its **originating** authorized snapshot and the in-process
+/// authorization generation/issuer that authorized its creation:
+///
+/// * `ticket` is an [`AuthorizationTicket`] minted by the originating owner's
+///   [`CurrentAuthorizationOwner::admit`] at cache-creation. It carries the
+///   owner's opaque allocation-backed issuer identity and the owner generation
+///   at that instant. At re-emission it is re-validated with the owner
+///   presented THEN via [`CurrentAuthorizationOwner::confirm`]: a *different*
+///   owner (foreign issuer — e.g. a new owner with identical configuration) or
+///   an *advanced generation* (same-owner replacement, including replacement
+///   back to an identical configuration) or a *terminally exhausted* owner is
+///   refused. Fresh authorization at re-emission is therefore necessary but not
+///   sufficient — cached work created under owner A can never acquire
+///   authorization merely because owner B is current when it is replayed.
+/// * `authorized_epoch` records the epoch the originating snapshot authorized
+///   when the cache was created, for diagnostics; the enforced epoch check at
+///   re-emission compares the cached message's own epoch against the *current*
+///   snapshot's `authorized_epoch()` (which the generation binding proves is the
+///   same snapshot).
+///
+/// This binding is explicitly **in-process** only: both the issuer allocation
+/// and the generation live for the life of the issuing owner value. It is NOT a
+/// durable or restart anti-rollback mechanism, and a retained token is never a
+/// substitute for the fresh admission taken at re-emission.
+#[derive(Debug, Clone)]
+struct CachedReemissionProvenance {
+    /// Admission ticket minted by the originating owner at cache-creation.
+    /// Bound to that owner's issuer identity + generation; re-confirmed at
+    /// re-emission against the owner presented then.
+    ticket: AuthorizationTicket,
+    /// The epoch the originating snapshot authorized at cache-creation
+    /// (diagnostics / defence-in-depth; the enforced check is against the
+    /// current snapshot's authorized epoch).
+    authorized_epoch: u64,
+}
+
+impl CachedReemissionProvenance {
+    /// Capture provenance for a message being cached, at the trusted
+    /// cache-creation boundary, from the currently-wired authorization
+    /// snapshot. Returns `None` when no snapshot is wired or the snapshot's
+    /// owner cannot currently admit — a `None` provenance fails closed at
+    /// re-emission under `Required` (missing provenance). Provenance is only
+    /// ever minted here; the re-emission boundary never attaches fresh
+    /// provenance to an already-cached entry.
+    fn capture(current_auth: Option<&AuthorizedProposalVoteSnapshot>) -> Option<Self> {
+        let snap = current_auth?;
+        let ticket = snap.owner().admit().ok()?;
+        Some(Self {
+            ticket,
+            authorized_epoch: snap.authorized_epoch(),
+        })
+    }
+}
+
+/// Run 422 D7-B2 — a B9 cached leader Proposal eligible for late-peer-connect
+/// re-emission, bound to the [`CachedReemissionProvenance`] captured when the
+/// leader-step tick emitted it. The immutable `proposal` bytes and their `view`
+/// travel together with the provenance so the cache entry cannot be separated
+/// from the authorization that created it.
+#[derive(Debug, Clone)]
+struct CachedLeaderProposal {
+    view: u64,
+    proposal: BlockProposal,
+    provenance: Option<CachedReemissionProvenance>,
+}
+
+/// Run 422 D7-B2 — a B10 cached leader Vote (the leader's own same-view
+/// self-vote) eligible for paired re-emission, bound to its originating
+/// provenance exactly like [`CachedLeaderProposal`].
+#[derive(Debug, Clone)]
+struct CachedLeaderVote {
+    view: u64,
+    vote: Vote,
+    provenance: Option<CachedReemissionProvenance>,
+}
+
 /// Drive a single leader-step tick of the engine and forward any resulting
 /// network actions through the (optional) outbound facade.
 ///
@@ -3014,8 +3142,8 @@ fn do_leader_tick(
     metrics: &Arc<NodeMetrics>,
     inbound_stats: &mut BinaryConsensusLoopInboundStats,
     outbound: Option<&dyn ConsensusNetworkFacade>,
-    last_leader_proposal: &mut Option<(u64, BlockProposal)>,
-    last_leader_vote: &mut Option<(u64, Vote)>,
+    last_leader_proposal: &mut Option<CachedLeaderProposal>,
+    last_leader_vote: &mut Option<CachedLeaderVote>,
     reconfig_detector: &mut BinaryReconfigDetector,
     // Run 422 D7-B1: the coherently-bound, currently-authorized snapshot the
     // outbound forwarding boundary enforces. Production leaves this `None`
@@ -3051,7 +3179,18 @@ fn do_leader_tick(
                 // engine only ever produces one proposal per view, and view
                 // change naturally invalidates the previous cache entry via
                 // the `cur_view != proposal_view` gate in the re-emit check.
-                *last_leader_proposal = Some((view_at_step, (**p).clone()));
+                //
+                // Run 422 D7-B2: capture the current-authorization provenance
+                // at this trusted cache-creation boundary and bind it to the
+                // immutable cached bytes. Production wires no snapshot, so
+                // provenance is `None` and the eventual re-emission fails
+                // closed under `Required`. The provenance is minted here (via
+                // the originating owner's `admit`), never at replay time.
+                *last_leader_proposal = Some(CachedLeaderProposal {
+                    view: view_at_step,
+                    proposal: (**p).clone(),
+                    provenance: CachedReemissionProvenance::capture(current_auth),
+                });
                 emitted_proposal_in_this_tick = true;
                 // B9 + B10: a fresh leader-step proposal supersedes any
                 // previous cache. Drop the prior cached vote so we never
@@ -3080,7 +3219,13 @@ fn do_leader_tick(
                 // would not be valid for late-peer re-emission
                 // anyway) is never cached.
                 if emitted_proposal_in_this_tick && v.height == view_at_step {
-                    *last_leader_vote = Some((view_at_step, v.clone()));
+                    // Run 422 D7-B2: bind the paired vote's own provenance,
+                    // captured at this same trusted cache-creation boundary.
+                    *last_leader_vote = Some(CachedLeaderVote {
+                        view: view_at_step,
+                        vote: v.clone(),
+                        provenance: CachedReemissionProvenance::capture(current_auth),
+                    });
                 }
             }
             ConsensusEngineAction::SendVoteTo { .. } | ConsensusEngineAction::Noop => {}
@@ -3141,22 +3286,58 @@ fn do_leader_tick(
 /// proposal without a leader self-vote), only the proposal is re-emitted
 /// and the vote-reemit counter stays at 0.
 ///
-/// On a successful re-emit, the loop increments
-/// `inbound_stats.outbound_proposal_late_peer_reemits` (and, if a vote
-/// was re-emitted too, `inbound_stats.outbound_vote_late_peer_reemits`)
-/// and logs the event. On any failure (facade error, gates not met) the
-/// loop is silent in the failure case but logs the facade error for ops
-/// visibility.
+/// On a successful proposal re-emit, the loop increments
+/// `inbound_stats.outbound_proposal_late_peer_reemits` (and, if the paired
+/// vote is also re-emitted, `inbound_stats.outbound_vote_late_peer_reemits`)
+/// and logs the event.
+///
+/// **Run 422 D7-B2 — authorization of the cached re-emission.** Before the
+/// cached proposal (and, independently, the paired cached vote) is signed and
+/// forwarded, this boundary enforces current authorization exactly like the B1
+/// `forward_actions_to_facade` outbound boundary, plus a cache-provenance
+/// binding unique to re-emission. For each eligible cached message under a wired
+/// snapshot it: (1) obtains a FRESH admission from the snapshot's owner
+/// (rejecting missing/unavailable/superseded/exhausted current authorization);
+/// (2) requires the cache's originating [`CachedReemissionProvenance`] and
+/// validates it against that SAME owner (a cache minted by a different owner or
+/// an advanced generation is refused — fresh authorization never launders an
+/// old cache entry, and a missing provenance fails closed); (3) enforces the
+/// message's authorized epoch; (4) signs ONLY through the snapshot's bound
+/// verifier, preserving the existing D6 wire-chain / canonical v2 / signer
+/// checks in `sign_proposal_for_broadcast` / `sign_vote_for_broadcast`; and
+/// (5) re-confirms the fresh ticket immediately before the facade call. A
+/// separately-supplied `pv_authority` (or a Timeout context) can never
+/// substitute for the bound snapshot; it is consulted only on the test-only
+/// `LocalFixtureUnsigned` passthrough, where no snapshot is wired. Any rejection
+/// suppresses that message's effect and it is never counted as re-emitted.
+///
+/// The proposal is admitted, signed and forwarded FIRST; the paired vote is a
+/// second, independent admission/sign/confirm cycle. If the proposal was
+/// successfully handed to the facade but the paired vote is subsequently
+/// rejected, that partial outcome is recorded accurately (the proposal reemit
+/// counter stays at 1, the vote reemit counter stays at 0, and the vote's
+/// per-reason rejection counter is incremented); the already-completed proposal
+/// handoff is never undone and the single-shot latch (set once the proposal is
+/// sent) is never weakened to retry a denied vote through repeated proposal
+/// broadcasts.
+#[allow(clippy::too_many_arguments)]
 fn maybe_reemit_on_late_peer_connect(
     engine: &BasicHotStuffEngine<[u8; 32]>,
-    last_leader_proposal: &mut Option<(u64, BlockProposal)>,
-    last_leader_vote: &mut Option<(u64, Vote)>,
+    last_leader_proposal: &mut Option<CachedLeaderProposal>,
+    last_leader_vote: &mut Option<CachedLeaderVote>,
     reemitted_for_view: &mut Option<u64>,
     last_known_peers: &mut HashSet<NodeId>,
     peer_connectivity: &dyn PeerConnectivitySource,
     facade: Option<&dyn ConsensusNetworkFacade>,
     stats: &mut BinaryConsensusLoopInboundStats,
-    signer_ctx: Option<&ProposalVoteAuthority>,
+    // Run 422 D7-B2: the coherently-bound, currently-authorized snapshot this
+    // cached re-emission boundary enforces. Production wires `None` (under
+    // `Required` every cached re-emission then rejects fail-closed). Never a
+    // separately-supplied authority.
+    current_auth: Option<&AuthorizedProposalVoteSnapshot>,
+    // Test-only `LocalFixtureUnsigned` passthrough authority, consulted ONLY
+    // when no snapshot is wired. Never substitutes for a wired snapshot.
+    pv_authority: Option<&ProposalVoteAuthority>,
     verification_policy: ConsensusVerificationPolicy,
 ) {
     // Always refresh the connected snapshot so reconnect churn within
@@ -3173,8 +3354,8 @@ fn maybe_reemit_on_late_peer_connect(
     }
 
     // Gate 2: cached proposal required.
-    let cached_view = match last_leader_proposal {
-        Some((v, _)) => *v,
+    let cached_view = match last_leader_proposal.as_ref() {
+        Some(c) => c.view,
         None => return,
     };
 
@@ -3210,19 +3391,73 @@ fn maybe_reemit_on_late_peer_connect(
         None => return,
     };
 
-    // Re-borrow the cached proposal for sending. Safe by gate 2.
-    let proposal = match last_leader_proposal {
-        Some((_, p)) => p.clone(),
+    // Re-borrow the cached proposal (bytes + originating provenance) for
+    // sending. Safe by gate 2.
+    let (proposal, proposal_provenance) = match last_leader_proposal.as_ref() {
+        Some(c) => (c.proposal.clone(), c.provenance.clone()),
         None => return,
     };
 
-    // Run 420: the re-emitted proposal must be signed fail-closed just like
-    // any other locally-originated outbound proposal, so a late-peer re-emit
-    // cannot become a bypass that broadcasts unsigned consensus material.
-    let proposal = match sign_proposal_for_broadcast(proposal, signer_ctx, verification_policy, stats) {
+    // Run 422 D7-B2: authorize the cached proposal at this immediate boundary
+    // BEFORE signing — fresh admission from its owner + validation of the
+    // cache's originating provenance against that same owner + authorized-epoch
+    // enforcement. A separately-supplied `pv_authority` cannot substitute for a
+    // wired snapshot.
+    let (proposal_signer, proposal_ticket) = match admit_cached_reemission(
+        current_auth,
+        proposal_provenance.as_ref(),
+        pv_authority,
+        verification_policy,
+        proposal.header.epoch,
+        record_outbound_proposal_current_auth_reject,
+        |s| {
+            s.outbound_proposal_epoch_unauthorized_total =
+                s.outbound_proposal_epoch_unauthorized_total.saturating_add(1)
+        },
+        |s| {
+            s.outbound_proposal_current_state_unavailable_total = s
+                .outbound_proposal_current_state_unavailable_total
+                .saturating_add(1)
+        },
+        |s| {
+            s.outbound_proposal_reemit_missing_provenance_total = s
+                .outbound_proposal_reemit_missing_provenance_total
+                .saturating_add(1)
+        },
+        |s| {
+            s.outbound_proposal_reemit_provenance_rejected_total = s
+                .outbound_proposal_reemit_provenance_rejected_total
+                .saturating_add(1)
+        },
+        stats,
+    ) {
+        CachedReemitAdmission::Admitted { signer_ctx, fresh_ticket } => (signer_ctx, fresh_ticket),
+        CachedReemitAdmission::Rejected => return,
+    };
+
+    // Run 420 / D6: the re-emitted proposal is signed fail-closed through the
+    // snapshot's bound verifier, so a late-peer re-emit cannot become a bypass
+    // that broadcasts unsigned or wrong-domain consensus material.
+    let proposal = match sign_proposal_for_broadcast(proposal, proposal_signer, verification_policy, stats) {
         Some(p) => p,
         None => return,
     };
+
+    // Confirm the fresh admission immediately before the facade effect; a
+    // current-authorization replacement between admission and effect suppresses
+    // the re-emission fail-closed.
+    if !confirm_outbound_before_effect(
+        current_auth,
+        proposal_ticket.as_ref(),
+        |s| {
+            s.outbound_proposal_authority_stale_before_effect_total = s
+                .outbound_proposal_authority_stale_before_effect_total
+                .saturating_add(1)
+        },
+        stats,
+    ) {
+        return;
+    }
 
     if let Err(e) = facade.broadcast_proposal(&proposal) {
         eprintln!(
@@ -3236,27 +3471,84 @@ fn maybe_reemit_on_late_peer_connect(
     stats.outbound_proposal_late_peer_reemits =
         stats.outbound_proposal_late_peer_reemits.saturating_add(1);
 
-    // B10: paired vote re-emit. Only re-emit the leader vote if its
-    // cached view matches the cached proposal's view. If no cached vote
-    // exists, leave the vote-reemit counter alone — this is the
-    // strictest "no fabricated metrics" semantics.
+    // B10: paired vote re-emit — an INDEPENDENT admission/sign/confirm cycle so
+    // a Proposal that was admitted and sent does not authorize the Vote by
+    // association. Only re-emit the leader vote if its cached view matches the
+    // cached proposal's view. If no cached vote exists, leave the vote-reemit
+    // counter alone — the strictest "no fabricated metrics" semantics.
     let mut vote_reemitted = false;
-    if let Some((vote_view, vote)) = last_leader_vote.as_ref() {
-        if *vote_view == cached_view {
-            // Run 420: sign the re-emitted vote fail-closed as well.
-            if let Some(signed_vote) =
-                sign_vote_for_broadcast(vote.clone(), signer_ctx, verification_policy, stats)
-            {
-                if let Err(e) = facade.broadcast_vote(&signed_vote) {
-                    eprintln!(
-                        "[binary-consensus] B10: late-peer reemit broadcast_vote failed (view={}): {:?}",
-                        cached_view, e,
-                    );
-                } else {
-                    stats.outbound_vote_late_peer_reemits =
-                        stats.outbound_vote_late_peer_reemits.saturating_add(1);
-                    vote_reemitted = true;
+    let cached_vote = last_leader_vote.as_ref().and_then(|c| {
+        if c.view == cached_view {
+            Some((c.vote.clone(), c.provenance.clone()))
+        } else {
+            None
+        }
+    });
+    if let Some((vote, vote_provenance)) = cached_vote {
+        match admit_cached_reemission(
+            current_auth,
+            vote_provenance.as_ref(),
+            pv_authority,
+            verification_policy,
+            vote.epoch,
+            record_outbound_vote_current_auth_reject,
+            |s| {
+                s.outbound_vote_epoch_unauthorized_total =
+                    s.outbound_vote_epoch_unauthorized_total.saturating_add(1)
+            },
+            |s| {
+                s.outbound_vote_current_state_unavailable_total = s
+                    .outbound_vote_current_state_unavailable_total
+                    .saturating_add(1)
+            },
+            |s| {
+                s.outbound_vote_reemit_missing_provenance_total = s
+                    .outbound_vote_reemit_missing_provenance_total
+                    .saturating_add(1)
+            },
+            |s| {
+                s.outbound_vote_reemit_provenance_rejected_total = s
+                    .outbound_vote_reemit_provenance_rejected_total
+                    .saturating_add(1)
+            },
+            stats,
+        ) {
+            CachedReemitAdmission::Admitted { signer_ctx, fresh_ticket } => {
+                // Run 420 / D6: sign the re-emitted vote fail-closed as well.
+                if let Some(signed_vote) =
+                    sign_vote_for_broadcast(vote, signer_ctx, verification_policy, stats)
+                {
+                    if confirm_outbound_before_effect(
+                        current_auth,
+                        fresh_ticket.as_ref(),
+                        |s| {
+                            s.outbound_vote_authority_stale_before_effect_total = s
+                                .outbound_vote_authority_stale_before_effect_total
+                                .saturating_add(1)
+                        },
+                        stats,
+                    ) {
+                        if let Err(e) = facade.broadcast_vote(&signed_vote) {
+                            eprintln!(
+                                "[binary-consensus] B10: late-peer reemit broadcast_vote failed (view={}): {:?}",
+                                cached_view, e,
+                            );
+                        } else {
+                            stats.outbound_vote_late_peer_reemits =
+                                stats.outbound_vote_late_peer_reemits.saturating_add(1);
+                            vote_reemitted = true;
+                        }
+                    }
                 }
+            }
+            CachedReemitAdmission::Rejected => {
+                // Run 422 D7-B2: partial outcome. The Proposal was already
+                // handed to the facade and counted; the paired Vote is
+                // suppressed fail-closed and its per-reason rejection counter is
+                // already recorded. We do NOT undo the completed Proposal
+                // handoff, do NOT claim a zero total effect, and do NOT retry
+                // the denied Vote through a repeated Proposal broadcast (the
+                // single-shot latch is already set).
             }
         }
     }
@@ -3582,6 +3874,147 @@ fn confirm_outbound_before_effect(
         }
     }
     true
+}
+
+/// Run 422 D7-B2 — outcome of the cached late-peer re-emission admission for a
+/// single cached Proposal / Vote at the `maybe_reemit_on_late_peer_connect`
+/// boundary.
+enum CachedReemitAdmission<'a> {
+    /// The cached message is admitted for signing. `signer_ctx` is the exact
+    /// context signing MUST use (the coherently-bound snapshot verifier when a
+    /// snapshot is wired; the test-only `LocalFixtureUnsigned` passthrough
+    /// authority otherwise). `fresh_ticket` (when `Some`) MUST be re-confirmed
+    /// against the same snapshot owner immediately before the facade call.
+    Admitted {
+        signer_ctx: Option<&'a ProposalVoteAuthority>,
+        fresh_ticket: Option<AuthorizationTicket>,
+    },
+    /// The cached message is rejected fail-closed before any signing. The
+    /// matching per-reason counter has already been recorded; the caller must
+    /// not sign, must not forward, and must not count the message as re-emitted.
+    Rejected,
+}
+
+/// Run 422 D7-B2 — admit a cached late-peer re-emission message against the
+/// coherently-bound, currently-authorized snapshot the re-emission boundary was
+/// handed, BEFORE any signing or facade forwarding.
+///
+/// This extends the B1 outbound admission ([`admit_outbound_action`]) with the
+/// cache-provenance binding that distinguishes replayed cached work from a
+/// freshly-produced engine action: fresh authorization at re-emission is
+/// necessary but NOT sufficient, so a cache created under one owner/generation
+/// can never acquire authorization merely because a different owner is current
+/// at replay. Under a wired snapshot the steps, in order, are:
+///
+/// * obtain a FRESH admission from the snapshot's owner (`admit()`); an
+///   unavailable / superseded / exhausted current state is rejected here;
+/// * require the cache's originating provenance (`provenance`); a `None`
+///   provenance (message cached without a snapshot / under
+///   `LocalFixtureUnsigned`) fails closed — recorded via `record_missing_provenance`;
+/// * validate that provenance against the SAME owner via `confirm()`: a
+///   different owner (foreign issuer — e.g. cache from owner A offered to owner
+///   B, even with identical configuration), an advanced generation (same-owner
+///   replacement, including replacement back to an identical configuration), or
+///   a terminally exhausted owner is refused — recorded via
+///   `record_provenance_rejected`. This is the check that binds the cache to
+///   its ORIGINATING authorization; the retained token is never a substitute
+///   for the fresh admission above;
+/// * enforce the cached message's own epoch against the admitted snapshot's
+///   authorized epoch.
+///
+/// When NO snapshot is wired under `Required`, current authorization is
+/// unavailable and the message is rejected here, before signing. The test-only
+/// `LocalFixtureUnsigned` passthrough (no snapshot) falls back to the supplied
+/// `pv_authority` exactly as the pre-D7-B2 re-emission did.
+///
+/// On success the returned `fresh_ticket` (present iff a snapshot is wired) MUST
+/// be re-confirmed by the caller against the same owner immediately before the
+/// facade call.
+#[allow(clippy::too_many_arguments)]
+fn admit_cached_reemission<'a>(
+    current_auth: Option<&'a AuthorizedProposalVoteSnapshot>,
+    provenance: Option<&CachedReemissionProvenance>,
+    pv_authority: Option<&'a ProposalVoteAuthority>,
+    verification_policy: ConsensusVerificationPolicy,
+    message_epoch: u64,
+    record_reject: fn(&mut BinaryConsensusLoopInboundStats, &FreshnessError),
+    record_epoch_unauthorized: fn(&mut BinaryConsensusLoopInboundStats),
+    record_no_snapshot_unavailable: fn(&mut BinaryConsensusLoopInboundStats),
+    record_missing_provenance: fn(&mut BinaryConsensusLoopInboundStats),
+    record_provenance_rejected: fn(&mut BinaryConsensusLoopInboundStats),
+    inbound_stats: &mut BinaryConsensusLoopInboundStats,
+) -> CachedReemitAdmission<'a> {
+    match current_auth {
+        Some(snap) => {
+            // (1) Fresh admission — proves current authorization is available
+            // NOW, independent of the retained cache token.
+            let fresh_ticket = match snap.owner().admit() {
+                Ok(ticket) => ticket,
+                Err(e) => {
+                    record_reject(inbound_stats, &e);
+                    return CachedReemitAdmission::Rejected;
+                }
+            };
+            // (2) The cache's originating provenance is required; missing
+            // provenance fails closed under a wired (Required) snapshot.
+            let provenance = match provenance {
+                Some(p) => p,
+                None => {
+                    record_missing_provenance(inbound_stats);
+                    return CachedReemitAdmission::Rejected;
+                }
+            };
+            // (3) Validate the cache's originating authorization against THIS
+            // owner. A cache minted by a different owner (foreign issuer) or an
+            // advanced generation (same-owner replacement) or a terminally
+            // exhausted owner is refused — fresh authorization does not launder
+            // an old cache entry.
+            if snap.owner().confirm(&provenance.ticket).is_err() {
+                record_provenance_rejected(inbound_stats);
+                return CachedReemitAdmission::Rejected;
+            }
+            // Defence in depth: the epoch the originating snapshot authorized at
+            // cache-creation must still equal the current snapshot's authorized
+            // epoch. The generation binding already proves this is the same
+            // snapshot, so this is a redundant cross-check that also refuses any
+            // provenance whose recorded authorized epoch drifted from the owner
+            // it is confirmed against.
+            if provenance.authorized_epoch != snap.authorized_epoch() {
+                record_provenance_rejected(inbound_stats);
+                return CachedReemitAdmission::Rejected;
+            }
+            // (4) The cached message's own epoch must equal the epoch the
+            // admitted snapshot authorizes; the message is never rewritten.
+            if message_epoch != snap.authorized_epoch() {
+                record_epoch_unauthorized(inbound_stats);
+                return CachedReemitAdmission::Rejected;
+            }
+            CachedReemitAdmission::Admitted {
+                // Signing uses the EXACT bound verifier — never a
+                // separately-supplied authority or Timeout context.
+                signer_ctx: Some(snap.verifier()),
+                fresh_ticket: Some(fresh_ticket),
+            }
+        }
+        None => {
+            if verification_policy.requires_context() {
+                // Required + no snapshot wired: current authorization is
+                // unavailable. Reject before signing; never infer the founding
+                // epoch from an absent snapshot, and never let a supplied
+                // `pv_authority` substitute.
+                record_no_snapshot_unavailable(inbound_stats);
+                CachedReemitAdmission::Rejected
+            } else {
+                // Test-only LocalFixtureUnsigned passthrough: behaviour is
+                // exactly as before D7-B2 — sign (or pass through unsigned) with
+                // the supplied authority, with no current-authorization ticket.
+                CachedReemitAdmission::Admitted {
+                    signer_ctx: pv_authority,
+                    fresh_ticket: None,
+                }
+            }
+        }
+    }
 }
 
 /// Run 422 D7-B1 — forward engine-produced outbound actions to the network
@@ -9689,6 +10122,817 @@ mod tests {
                 .expect("coherent snapshot binds to its own verifier")
         }
 
+        /// Run 422 D7-B2 — behavioral coverage of the cached Proposal/Vote
+        /// late-peer re-emission authorization boundary
+        /// (`maybe_reemit_on_late_peer_connect` + `admit_cached_reemission`).
+        ///
+        /// Every test drives the REAL re-emission function with a genuine
+        /// new-peer transition, an eligible leader/current-view engine state, a
+        /// recording facade that distinguishes broadcast Proposal / broadcast
+        /// Vote / directed (`send_vote_to`) Vote calls, and cached bodies signed
+        /// (on the positive path) through the snapshot's bound verifier which
+        /// delegates to the REAL ML-DSA-44 backend. Signing invocations are
+        /// recorded through the `outbound_*_signing_success` counters (the sign
+        /// path increments them only when the bound verifier actually signs) and
+        /// corroborated by verifying the emitted signatures; on every negative
+        /// the signing-success counter staying 0 proves the real signer was
+        /// never invoked for the rejected message.
+        mod run422_d7b2 {
+            use super::*;
+            use crate::genesis_consensus_authority::{
+                CurrentAuthorizationOwner, CurrentStateUnavailableReason,
+                LocalAuthorizationState, ObservedConsensusConfiguration,
+            };
+            use std::sync::atomic::{AtomicU64, Ordering::SeqCst};
+
+            /// A distinct commitment used to build a *superseded* current state.
+            const COMMIT_B: [u8; 32] = [0xBBu8; 32];
+
+            struct OnePeer(NodeId);
+            impl PeerConnectivitySource for OnePeer {
+                fn connected_peers(&self) -> Vec<NodeId> {
+                    vec![self.0]
+                }
+            }
+
+            /// A recording facade that distinguishes broadcast Proposal,
+            /// broadcast Vote, and directed (`send_vote_to`) Vote calls, so a
+            /// test can assert precisely which family was actually forwarded.
+            #[derive(Default)]
+            struct RecordingFacade {
+                proposals: std::sync::Mutex<Vec<BlockProposal>>,
+                broadcast_votes: std::sync::Mutex<Vec<Vote>>,
+                directed_votes: std::sync::Mutex<Vec<(u64, Vote)>>,
+                other_calls: AtomicU64,
+            }
+            impl ConsensusNetworkFacade for RecordingFacade {
+                fn send_vote_to(&self, t: ValidatorId, v: &Vote) -> Result<(), NetworkError> {
+                    self.directed_votes.lock().unwrap().push((t.0, v.clone()));
+                    Ok(())
+                }
+                fn broadcast_vote(&self, v: &Vote) -> Result<(), NetworkError> {
+                    self.broadcast_votes.lock().unwrap().push(v.clone());
+                    Ok(())
+                }
+                fn broadcast_proposal(&self, p: &BlockProposal) -> Result<(), NetworkError> {
+                    self.proposals.lock().unwrap().push(p.clone());
+                    Ok(())
+                }
+                fn broadcast_consensus_msg(
+                    &self,
+                    _m: &ConsensusNetMsg,
+                ) -> Result<(), NetworkError> {
+                    self.other_calls.fetch_add(1, SeqCst);
+                    Ok(())
+                }
+            }
+            impl RecordingFacade {
+                fn nproposals(&self) -> usize {
+                    self.proposals.lock().unwrap().len()
+                }
+                fn nbroadcast_votes(&self) -> usize {
+                    self.broadcast_votes.lock().unwrap().len()
+                }
+                fn ndirected_votes(&self) -> usize {
+                    self.directed_votes.lock().unwrap().len()
+                }
+                /// Assert the facade received no traffic at all.
+                fn assert_silent(&self) {
+                    assert_eq!(self.nproposals(), 0, "no proposal must be forwarded");
+                    assert_eq!(self.nbroadcast_votes(), 0, "no vote must be broadcast");
+                    assert_eq!(self.ndirected_votes(), 0, "no directed vote must be sent");
+                    assert_eq!(self.other_calls.load(SeqCst), 0);
+                }
+            }
+
+            // ---- snapshot builders (mirror the D7-A2 current-state fixtures) --
+
+            fn snap_matching(pv: &ProposalVoteAuthority) -> AuthorizedProposalVoteSnapshot {
+                coherent_snapshot_for(pv)
+            }
+
+            /// Coherently bound, but current state explicitly unavailable:
+            /// `admit()` rejects current-state-unavailable before crypto.
+            fn snap_unavailable(
+                pv: &ProposalVoteAuthority,
+                reason: CurrentStateUnavailableReason,
+            ) -> AuthorizedProposalVoteSnapshot {
+                let candidate = coherent_authority_for(pv);
+                let owner = CurrentAuthorizationOwner::unavailable(candidate, reason);
+                AuthorizedProposalVoteSnapshot::try_bind(owner, Arc::new(pv.clone()))
+                    .expect("unavailability is a current-state property; binding is coherent")
+            }
+
+            /// Coherently bound, but current state is a *different* established
+            /// authority (different commitment + advanced epoch): `admit()`
+            /// rejects Superseded before crypto.
+            fn snap_superseded(pv: &ProposalVoteAuthority) -> AuthorizedProposalVoteSnapshot {
+                let candidate = coherent_authority_for(pv);
+                let coherent = candidate.config_identity();
+                let observed = ObservedConsensusConfiguration::new(
+                    coherent.chain_id,
+                    coherent.genesis_hash,
+                    COMMIT_B,
+                    coherent.validator_count,
+                    coherent.epoch + 1,
+                );
+                let owner =
+                    CurrentAuthorizationOwner::establish_for_fixture(candidate, observed);
+                AuthorizedProposalVoteSnapshot::try_bind(owner, Arc::new(pv.clone()))
+                    .expect("supersession is a current-state property; binding is coherent")
+            }
+
+            /// Coherently bound, but the owner is terminally exhausted:
+            /// `admit()` rejects AuthorizationExhausted before crypto.
+            fn snap_exhausted(pv: &ProposalVoteAuthority) -> AuthorizedProposalVoteSnapshot {
+                let mut s = snap_matching(pv);
+                let coherent = s.owner().candidate().config_identity();
+                s.owner_mut().set_generation_for_exhaustion_fixture(u64::MAX);
+                s.owner_mut()
+                    .replace_for_fixture(LocalAuthorizationState::Established(coherent));
+                s
+            }
+
+            fn prov(snap: &AuthorizedProposalVoteSnapshot) -> Option<CachedReemissionProvenance> {
+                CachedReemissionProvenance::capture(Some(snap))
+            }
+
+            // ---- cache builders ----------------------------------------------
+
+            fn cached_proposal(
+                epoch: u64,
+                view: u64,
+                provenance: Option<CachedReemissionProvenance>,
+            ) -> CachedLeaderProposal {
+                let mut header = base_header(0);
+                header.epoch = epoch;
+                CachedLeaderProposal {
+                    view,
+                    proposal: BlockProposal {
+                        header,
+                        qc: None,
+                        txs: vec![],
+                        signature: vec![],
+                    },
+                    provenance,
+                }
+            }
+
+            fn cached_vote(
+                epoch: u64,
+                view: u64,
+                provenance: Option<CachedReemissionProvenance>,
+            ) -> CachedLeaderVote {
+                let mut v = base_vote(0);
+                v.epoch = epoch;
+                CachedLeaderVote { view, vote: v, provenance }
+            }
+
+            // ---- the real re-emission driver ---------------------------------
+
+            struct ReemitOutcome {
+                stats: BinaryConsensusLoopInboundStats,
+                facade: RecordingFacade,
+                reemitted_for_view: Option<u64>,
+                observed_peer: bool,
+            }
+
+            /// Build an eligible leader/current-view engine, cache the
+            /// caller-supplied Proposal/Vote at the engine's current view, and
+            /// drive the REAL `maybe_reemit_on_late_peer_connect` across a
+            /// genuine new-peer transition.
+            fn run_reemit(
+                current_auth: Option<&AuthorizedProposalVoteSnapshot>,
+                pv_passthrough: Option<&ProposalVoteAuthority>,
+                policy: ConsensusVerificationPolicy,
+                make_caches: impl FnOnce(
+                    u64,
+                ) -> (
+                    Option<CachedLeaderProposal>,
+                    Option<CachedLeaderVote>,
+                ),
+            ) -> ReemitOutcome {
+                let engine = make_engine(ValidatorId(0), 4);
+                assert!(engine.is_leader_for_current_view());
+                let cur_view = engine.current_view();
+                let (mut proposal_cache, mut vote_cache) = make_caches(cur_view);
+                let mut reemitted_for_view: Option<u64> = None;
+                let mut last_known_peers: HashSet<NodeId> = HashSet::new();
+                let peer = pv_node_for(1);
+                let connectivity = OnePeer(peer);
+                let facade = RecordingFacade::default();
+                let mut stats = BinaryConsensusLoopInboundStats::default();
+                maybe_reemit_on_late_peer_connect(
+                    &engine,
+                    &mut proposal_cache,
+                    &mut vote_cache,
+                    &mut reemitted_for_view,
+                    &mut last_known_peers,
+                    &connectivity,
+                    Some(&facade),
+                    &mut stats,
+                    current_auth,
+                    pv_passthrough,
+                    policy,
+                );
+                ReemitOutcome {
+                    stats,
+                    facade,
+                    reemitted_for_view,
+                    observed_peer: last_known_peers.contains(&peer),
+                }
+            }
+
+            // ================= POSITIVE: both families ========================
+
+            #[test]
+            fn d7b2_valid_cache_current_auth_emits_both_families() {
+                let fixture = make_fixture(4);
+                let domain = d6_control_domain();
+                let pv = make_ctx_v2(&fixture, Some(ValidatorId(0)), domain.clone());
+                let snap = coherent_snapshot_for(&pv);
+
+                let out = run_reemit(
+                    Some(&snap),
+                    None,
+                    ConsensusVerificationPolicy::Required,
+                    |view| {
+                        (
+                            Some(cached_proposal(0, view, prov(&snap))),
+                            Some(cached_vote(0, view, prov(&snap))),
+                        )
+                    },
+                );
+
+                // Both families re-emitted exactly once; the real signer ran for
+                // each (signing_success counters), and only the broadcast facade
+                // entry points were used (no directed vote, no other traffic).
+                assert_eq!(out.stats.outbound_proposal_late_peer_reemits, 1);
+                assert_eq!(out.stats.outbound_vote_late_peer_reemits, 1);
+                assert_eq!(out.stats.outbound_proposal_signing_success, 1);
+                assert_eq!(out.stats.outbound_vote_signing_success, 1);
+                assert!(out.reemitted_for_view.is_some());
+                assert!(out.observed_peer);
+                assert_eq!(out.facade.nproposals(), 1);
+                assert_eq!(out.facade.nbroadcast_votes(), 1);
+                assert_eq!(out.facade.ndirected_votes(), 0);
+                assert_eq!(out.facade.other_calls.load(SeqCst), 0);
+
+                let emitted_p = out.facade.proposals.lock().unwrap();
+                let emitted_v = out.facade.broadcast_votes.lock().unwrap();
+                let ep = &emitted_p[0];
+                let ev = &emitted_v[0];
+
+                // Emitted Proposal + Vote verify under the SELECTED v2 domain ...
+                assert!(qbind_consensus::verify_proposal_msg_with_domain(
+                    ep,
+                    ValidatorId(0),
+                    fixture.validators.as_ref(),
+                    fixture.kp.as_ref(),
+                    fixture.br.as_ref(),
+                    &domain,
+                )
+                .is_ok());
+                assert!(qbind_consensus::verify_vote_msg_with_domain(
+                    ev,
+                    ValidatorId(0),
+                    fixture.validators.as_ref(),
+                    fixture.kp.as_ref(),
+                    fixture.br.as_ref(),
+                    &domain,
+                )
+                .is_ok());
+                // ... and are REJECTED under a foreign v2 domain ...
+                let foreign = d6_domain(
+                    0xEEEE_0000_0000_0009,
+                    0,
+                    d6_genesis_identity(0x33),
+                    d6_authority_commitment(0x44),
+                );
+                assert!(qbind_consensus::verify_proposal_msg_with_domain(
+                    ep,
+                    ValidatorId(0),
+                    fixture.validators.as_ref(),
+                    fixture.kp.as_ref(),
+                    fixture.br.as_ref(),
+                    &foreign,
+                )
+                .is_err());
+                assert!(qbind_consensus::verify_vote_msg_with_domain(
+                    ev,
+                    ValidatorId(0),
+                    fixture.validators.as_ref(),
+                    fixture.kp.as_ref(),
+                    fixture.br.as_ref(),
+                    &foreign,
+                )
+                .is_err());
+                // ... and REJECTED under the legacy v1 boundary (no fallback).
+                assert!(qbind_consensus::verify_proposal_msg(
+                    ep,
+                    ValidatorId(0),
+                    fixture.validators.as_ref(),
+                    fixture.kp.as_ref(),
+                    fixture.br.as_ref(),
+                    QBIND_DEVNET_CHAIN_ID,
+                )
+                .is_err());
+                assert!(qbind_consensus::verify_vote_msg(
+                    ev,
+                    ValidatorId(0),
+                    fixture.validators.as_ref(),
+                    fixture.kp.as_ref(),
+                    fixture.br.as_ref(),
+                    QBIND_DEVNET_CHAIN_ID,
+                )
+                .is_err());
+            }
+
+            // ================= NEGATIVE: proposal-first rejections ============
+            //
+            // These reject the Proposal before the paired Vote branch is
+            // reached (owner-level current-state failures + proposal-specific
+            // provenance/epoch failures), so NOTHING is forwarded.
+
+            #[test]
+            fn d7b2_missing_snapshot_under_required_rejects() {
+                // No snapshot wired + Required: current authorization is
+                // unavailable. A supplied passthrough authority must NOT
+                // substitute even though one is available.
+                let fixture = make_fixture(4);
+                let pv = make_ctx_v2(&fixture, Some(ValidatorId(0)), d6_control_domain());
+                let out = run_reemit(
+                    None,
+                    Some(&pv),
+                    ConsensusVerificationPolicy::Required,
+                    |view| {
+                        (
+                            Some(cached_proposal(0, view, None)),
+                            Some(cached_vote(0, view, None)),
+                        )
+                    },
+                );
+                assert_eq!(out.stats.outbound_proposal_current_state_unavailable_total, 1);
+                assert_eq!(out.stats.outbound_proposal_signing_success, 0);
+                assert_eq!(out.stats.outbound_proposal_late_peer_reemits, 0);
+                assert_eq!(out.stats.outbound_vote_late_peer_reemits, 0);
+                assert_eq!(out.reemitted_for_view, None);
+                out.facade.assert_silent();
+            }
+
+            #[test]
+            fn d7b2_unavailable_state_rejects() {
+                let fixture = make_fixture(4);
+                let pv = make_ctx_v2(&fixture, Some(ValidatorId(0)), d6_control_domain());
+                let snap = snap_unavailable(&pv, CurrentStateUnavailableReason::MissingStorage);
+                let out = run_reemit(
+                    Some(&snap),
+                    None,
+                    ConsensusVerificationPolicy::Required,
+                    |view| {
+                        (
+                            Some(cached_proposal(0, view, None)),
+                            Some(cached_vote(0, view, None)),
+                        )
+                    },
+                );
+                assert_eq!(out.stats.outbound_proposal_current_state_unavailable_total, 1);
+                assert_eq!(out.stats.outbound_proposal_signing_success, 0);
+                assert_eq!(out.stats.outbound_proposal_late_peer_reemits, 0);
+                assert_eq!(out.reemitted_for_view, None);
+                out.facade.assert_silent();
+            }
+
+            #[test]
+            fn d7b2_superseded_state_rejects() {
+                let fixture = make_fixture(4);
+                let pv = make_ctx_v2(&fixture, Some(ValidatorId(0)), d6_control_domain());
+                let snap = snap_superseded(&pv);
+                let out = run_reemit(
+                    Some(&snap),
+                    None,
+                    ConsensusVerificationPolicy::Required,
+                    |view| {
+                        (
+                            Some(cached_proposal(0, view, None)),
+                            Some(cached_vote(0, view, None)),
+                        )
+                    },
+                );
+                assert_eq!(out.stats.outbound_proposal_authority_superseded_total, 1);
+                assert_eq!(out.stats.outbound_proposal_signing_success, 0);
+                assert_eq!(out.stats.outbound_proposal_late_peer_reemits, 0);
+                assert_eq!(out.reemitted_for_view, None);
+                out.facade.assert_silent();
+            }
+
+            #[test]
+            fn d7b2_exhausted_state_rejects() {
+                let fixture = make_fixture(4);
+                let pv = make_ctx_v2(&fixture, Some(ValidatorId(0)), d6_control_domain());
+                let snap = snap_exhausted(&pv);
+                let out = run_reemit(
+                    Some(&snap),
+                    None,
+                    ConsensusVerificationPolicy::Required,
+                    |view| {
+                        (
+                            Some(cached_proposal(0, view, None)),
+                            Some(cached_vote(0, view, None)),
+                        )
+                    },
+                );
+                assert_eq!(out.stats.outbound_proposal_authorization_exhausted_total, 1);
+                assert_eq!(out.stats.outbound_proposal_signing_success, 0);
+                assert_eq!(out.stats.outbound_proposal_late_peer_reemits, 0);
+                assert_eq!(out.reemitted_for_view, None);
+                out.facade.assert_silent();
+            }
+
+            #[test]
+            fn d7b2_missing_provenance_rejects() {
+                // Snapshot present and admits, but the cache carries NO
+                // originating provenance: fails closed (a fresh admission is not
+                // a substitute for the cache's originating authorization).
+                let fixture = make_fixture(4);
+                let pv = make_ctx_v2(&fixture, Some(ValidatorId(0)), d6_control_domain());
+                let snap = snap_matching(&pv);
+                let out = run_reemit(
+                    Some(&snap),
+                    None,
+                    ConsensusVerificationPolicy::Required,
+                    |view| {
+                        (
+                            Some(cached_proposal(0, view, None)),
+                            Some(cached_vote(0, view, None)),
+                        )
+                    },
+                );
+                assert_eq!(
+                    out.stats.outbound_proposal_reemit_missing_provenance_total,
+                    1
+                );
+                assert_eq!(out.stats.outbound_proposal_signing_success, 0);
+                assert_eq!(out.stats.outbound_proposal_late_peer_reemits, 0);
+                assert_eq!(out.reemitted_for_view, None);
+                out.facade.assert_silent();
+            }
+
+            #[test]
+            fn d7b2_cache_from_owner_a_offered_to_owner_b_rejects() {
+                // Cache minted under owner A (provenance captured from snap A),
+                // re-emitted while owner B is current. A and B share IDENTICAL
+                // configuration / candidate but have DISTINCT issuer identities,
+                // so B's fresh admission succeeds yet the cache's A-issued
+                // provenance is refused (foreign issuer). A new owner never
+                // inherits another owner's cached authorization.
+                let fixture = make_fixture(4);
+                let pv = make_ctx_v2(&fixture, Some(ValidatorId(0)), d6_control_domain());
+                let snap_a = coherent_snapshot_for(&pv);
+                let snap_b = coherent_snapshot_for(&pv);
+                let prov_a = prov(&snap_a);
+                let out = run_reemit(
+                    Some(&snap_b),
+                    None,
+                    ConsensusVerificationPolicy::Required,
+                    move |view| {
+                        (
+                            Some(cached_proposal(0, view, prov_a.clone())),
+                            Some(cached_vote(0, view, None)),
+                        )
+                    },
+                );
+                assert_eq!(
+                    out.stats.outbound_proposal_reemit_provenance_rejected_total,
+                    1
+                );
+                assert_eq!(out.stats.outbound_proposal_signing_success, 0);
+                assert_eq!(out.stats.outbound_proposal_late_peer_reemits, 0);
+                assert_eq!(out.reemitted_for_view, None);
+                out.facade.assert_silent();
+            }
+
+            #[test]
+            fn d7b2_same_owner_generation_replacement_rejects() {
+                // Provenance captured under the owner's founding generation, then
+                // the SAME owner is replaced (generation advances) — including
+                // replacement back to an IDENTICAL configuration. The fresh
+                // admission still succeeds but the prior-generation provenance is
+                // now stale and refused.
+                let fixture = make_fixture(4);
+                let pv = make_ctx_v2(&fixture, Some(ValidatorId(0)), d6_control_domain());
+                let mut snap = coherent_snapshot_for(&pv);
+                let prov0 = prov(&snap);
+                let coherent = snap.owner().candidate().config_identity();
+                // Replacement back to the identical configuration still advances
+                // the in-process generation, invalidating gen-0 cached auth.
+                snap.owner_mut()
+                    .replace_for_fixture(LocalAuthorizationState::Established(coherent));
+                let out = run_reemit(
+                    Some(&snap),
+                    None,
+                    ConsensusVerificationPolicy::Required,
+                    move |view| {
+                        (
+                            Some(cached_proposal(0, view, prov0.clone())),
+                            Some(cached_vote(0, view, None)),
+                        )
+                    },
+                );
+                assert_eq!(
+                    out.stats.outbound_proposal_reemit_provenance_rejected_total,
+                    1
+                );
+                assert_eq!(out.stats.outbound_proposal_signing_success, 0);
+                assert_eq!(out.stats.outbound_proposal_late_peer_reemits, 0);
+                assert_eq!(out.reemitted_for_view, None);
+                out.facade.assert_silent();
+            }
+
+            #[test]
+            fn d7b2_unauthorized_proposal_epoch_rejects() {
+                // Cache admits and provenance confirms, but the cached Proposal's
+                // own epoch (7) differs from the authorized epoch (0). The
+                // message is never rewritten to pass.
+                let fixture = make_fixture(4);
+                let pv = make_ctx_v2(&fixture, Some(ValidatorId(0)), d6_control_domain());
+                let snap = snap_matching(&pv);
+                let out = run_reemit(
+                    Some(&snap),
+                    None,
+                    ConsensusVerificationPolicy::Required,
+                    |view| {
+                        (
+                            Some(cached_proposal(7, view, prov(&snap))),
+                            Some(cached_vote(0, view, prov(&snap))),
+                        )
+                    },
+                );
+                assert_eq!(out.stats.outbound_proposal_epoch_unauthorized_total, 1);
+                assert_eq!(out.stats.outbound_proposal_signing_success, 0);
+                assert_eq!(out.stats.outbound_proposal_late_peer_reemits, 0);
+                assert_eq!(out.reemitted_for_view, None);
+                out.facade.assert_silent();
+            }
+
+            #[test]
+            fn d7b2_separately_supplied_authority_cannot_substitute() {
+                // A separately-supplied ProposalVoteAuthority (passthrough) never
+                // substitutes for a wired snapshot: with no snapshot under
+                // Required the cached Proposal is rejected even though a valid
+                // authority is supplied as passthrough.
+                let fixture = make_fixture(4);
+                let pv = make_ctx_v2(&fixture, Some(ValidatorId(0)), d6_control_domain());
+                let out = run_reemit(
+                    None,
+                    Some(&pv),
+                    ConsensusVerificationPolicy::Required,
+                    |view| {
+                        (
+                            Some(cached_proposal(0, view, None)),
+                            Some(cached_vote(0, view, None)),
+                        )
+                    },
+                );
+                assert_eq!(out.stats.outbound_proposal_current_state_unavailable_total, 1);
+                assert_eq!(out.stats.outbound_proposal_signing_success, 0);
+                assert_eq!(out.stats.outbound_proposal_late_peer_reemits, 0);
+                out.facade.assert_silent();
+            }
+
+            // ================= NEGATIVE: Vote branch, INDEPENDENTLY ============
+            //
+            // Each of these uses an ADMISSIBLE Proposal control (valid snapshot +
+            // matching provenance + authorized epoch) so the Proposal IS emitted
+            // and the cached-Vote branch is genuinely reached; only the Vote is
+            // made to fail. The asserted partial outcome is: proposal reemit == 1
+            // (handoff completed and NOT undone), vote reemit == 0, and the
+            // Vote's per-reason counter == 1.
+
+            fn assert_proposal_only_partial(out: &ReemitOutcome) {
+                assert_eq!(
+                    out.stats.outbound_proposal_late_peer_reemits, 1,
+                    "the admissible Proposal was handed to the facade"
+                );
+                assert_eq!(out.stats.outbound_proposal_signing_success, 1);
+                assert_eq!(
+                    out.stats.outbound_vote_late_peer_reemits, 0,
+                    "the rejected Vote is not counted as re-emitted"
+                );
+                assert_eq!(
+                    out.stats.outbound_vote_signing_success, 0,
+                    "the real signer is never invoked for the rejected Vote"
+                );
+                assert!(out.reemitted_for_view.is_some(), "single-shot latch set by the Proposal");
+                assert_eq!(out.facade.nproposals(), 1);
+                assert_eq!(
+                    out.facade.nbroadcast_votes(),
+                    0,
+                    "no Vote is forwarded on rejection"
+                );
+                assert_eq!(out.facade.ndirected_votes(), 0);
+            }
+
+            #[test]
+            fn d7b2_vote_missing_provenance_partial_outcome() {
+                let fixture = make_fixture(4);
+                let pv = make_ctx_v2(&fixture, Some(ValidatorId(0)), d6_control_domain());
+                let snap = snap_matching(&pv);
+                let out = run_reemit(
+                    Some(&snap),
+                    None,
+                    ConsensusVerificationPolicy::Required,
+                    |view| {
+                        (
+                            Some(cached_proposal(0, view, prov(&snap))),
+                            Some(cached_vote(0, view, None)),
+                        )
+                    },
+                );
+                assert_eq!(out.stats.outbound_vote_reemit_missing_provenance_total, 1);
+                assert_proposal_only_partial(&out);
+            }
+
+            #[test]
+            fn d7b2_vote_cache_from_owner_a_offered_to_owner_b_partial_outcome() {
+                let fixture = make_fixture(4);
+                let pv = make_ctx_v2(&fixture, Some(ValidatorId(0)), d6_control_domain());
+                let snap_a = coherent_snapshot_for(&pv);
+                let snap_b = coherent_snapshot_for(&pv);
+                // Proposal provenance from current owner B (admissible control);
+                // Vote provenance from foreign owner A (rejected).
+                let prov_b = prov(&snap_b);
+                let prov_a = prov(&snap_a);
+                let out = run_reemit(
+                    Some(&snap_b),
+                    None,
+                    ConsensusVerificationPolicy::Required,
+                    move |view| {
+                        (
+                            Some(cached_proposal(0, view, prov_b.clone())),
+                            Some(cached_vote(0, view, prov_a.clone())),
+                        )
+                    },
+                );
+                assert_eq!(
+                    out.stats.outbound_vote_reemit_provenance_rejected_total,
+                    1
+                );
+                assert_proposal_only_partial(&out);
+            }
+
+            #[test]
+            fn d7b2_vote_unauthorized_epoch_partial_outcome() {
+                let fixture = make_fixture(4);
+                let pv = make_ctx_v2(&fixture, Some(ValidatorId(0)), d6_control_domain());
+                let snap = snap_matching(&pv);
+                let out = run_reemit(
+                    Some(&snap),
+                    None,
+                    ConsensusVerificationPolicy::Required,
+                    |view| {
+                        (
+                            Some(cached_proposal(0, view, prov(&snap))),
+                            Some(cached_vote(9, view, prov(&snap))),
+                        )
+                    },
+                );
+                assert_eq!(out.stats.outbound_vote_epoch_unauthorized_total, 1);
+                assert_proposal_only_partial(&out);
+            }
+
+            // ================= existing guards remain effective ===============
+
+            #[test]
+            fn d7b2_no_peer_transition_suppresses_even_with_valid_auth() {
+                // Genuine-new-peer detection still gates everything: with the peer
+                // already known (no transition) nothing is emitted despite a
+                // fully valid snapshot + provenance.
+                struct NoPeers;
+                impl PeerConnectivitySource for NoPeers {
+                    fn connected_peers(&self) -> Vec<NodeId> {
+                        vec![]
+                    }
+                }
+                let fixture = make_fixture(4);
+                let pv = make_ctx_v2(&fixture, Some(ValidatorId(0)), d6_control_domain());
+                let snap = coherent_snapshot_for(&pv);
+                let engine = make_engine(ValidatorId(0), 4);
+                let cur_view = engine.current_view();
+                let mut proposal_cache = Some(cached_proposal(0, cur_view, prov(&snap)));
+                let mut vote_cache = Some(cached_vote(0, cur_view, prov(&snap)));
+                let mut reemitted_for_view: Option<u64> = None;
+                let mut last_known_peers: HashSet<NodeId> = HashSet::new();
+                let connectivity = NoPeers;
+                let facade = RecordingFacade::default();
+                let mut stats = BinaryConsensusLoopInboundStats::default();
+                maybe_reemit_on_late_peer_connect(
+                    &engine,
+                    &mut proposal_cache,
+                    &mut vote_cache,
+                    &mut reemitted_for_view,
+                    &mut last_known_peers,
+                    &connectivity,
+                    Some(&facade),
+                    &mut stats,
+                    Some(&snap),
+                    None,
+                    ConsensusVerificationPolicy::Required,
+                );
+                assert_eq!(stats.outbound_proposal_late_peer_reemits, 0);
+                assert_eq!(stats.outbound_vote_late_peer_reemits, 0);
+                assert_eq!(reemitted_for_view, None);
+                facade.assert_silent();
+            }
+
+            #[test]
+            fn d7b2_single_shot_not_weakened_to_retry_denied_vote() {
+                // A second tick in the SAME view (peer churns away and returns)
+                // must not rebroadcast the Proposal to retry the previously denied
+                // Vote: the single-shot latch holds.
+                let fixture = make_fixture(4);
+                let pv = make_ctx_v2(&fixture, Some(ValidatorId(0)), d6_control_domain());
+                let snap = snap_matching(&pv);
+                let engine = make_engine(ValidatorId(0), 4);
+                let cur_view = engine.current_view();
+                // Admissible Proposal + Vote whose provenance is missing (denied).
+                let mut proposal_cache = Some(cached_proposal(0, cur_view, prov(&snap)));
+                let mut vote_cache = Some(cached_vote(0, cur_view, None));
+                let mut reemitted_for_view: Option<u64> = None;
+                let mut last_known_peers: HashSet<NodeId> = HashSet::new();
+                let peer = pv_node_for(1);
+                let facade = RecordingFacade::default();
+                let mut stats = BinaryConsensusLoopInboundStats::default();
+
+                struct Toggle(std::sync::atomic::AtomicBool, NodeId);
+                impl PeerConnectivitySource for Toggle {
+                    fn connected_peers(&self) -> Vec<NodeId> {
+                        if self.0.load(SeqCst) {
+                            vec![self.1]
+                        } else {
+                            vec![]
+                        }
+                    }
+                }
+                let connectivity = Toggle(std::sync::atomic::AtomicBool::new(true), peer);
+
+                // First tick: Proposal emitted, Vote denied (missing provenance).
+                maybe_reemit_on_late_peer_connect(
+                    &engine,
+                    &mut proposal_cache,
+                    &mut vote_cache,
+                    &mut reemitted_for_view,
+                    &mut last_known_peers,
+                    &connectivity,
+                    Some(&facade),
+                    &mut stats,
+                    Some(&snap),
+                    None,
+                    ConsensusVerificationPolicy::Required,
+                );
+                assert_eq!(stats.outbound_proposal_late_peer_reemits, 1);
+                assert_eq!(stats.outbound_vote_late_peer_reemits, 0);
+                assert_eq!(stats.outbound_vote_reemit_missing_provenance_total, 1);
+                assert_eq!(facade.nproposals(), 1);
+
+                // Peer churns away, then returns: a fresh transition on the SAME
+                // view. The single-shot latch must suppress a Proposal re-send.
+                connectivity.0.store(false, SeqCst);
+                maybe_reemit_on_late_peer_connect(
+                    &engine,
+                    &mut proposal_cache,
+                    &mut vote_cache,
+                    &mut reemitted_for_view,
+                    &mut last_known_peers,
+                    &connectivity,
+                    Some(&facade),
+                    &mut stats,
+                    Some(&snap),
+                    None,
+                    ConsensusVerificationPolicy::Required,
+                );
+                connectivity.0.store(true, SeqCst);
+                maybe_reemit_on_late_peer_connect(
+                    &engine,
+                    &mut proposal_cache,
+                    &mut vote_cache,
+                    &mut reemitted_for_view,
+                    &mut last_known_peers,
+                    &connectivity,
+                    Some(&facade),
+                    &mut stats,
+                    Some(&snap),
+                    None,
+                    ConsensusVerificationPolicy::Required,
+                );
+                // Still exactly one Proposal, no Vote: single-shot preserved.
+                assert_eq!(stats.outbound_proposal_late_peer_reemits, 1);
+                assert_eq!(stats.outbound_vote_late_peer_reemits, 0);
+                assert_eq!(facade.nproposals(), 1);
+                assert_eq!(facade.nbroadcast_votes(), 0);
+            }
+        }
+
         fn base_header(proposer: u16) -> BlockHeader {
             BlockHeader {
                 version: 1,
@@ -11460,17 +12704,24 @@ mod tests {
 
             // Cached current-view proposal AND vote (both keyed to the current
             // view) so gates 2..6 pass and the cached-vote branch is reachable
-            // in principle.
-            let mut last_leader_proposal = Some((
-                cur_view,
-                BlockProposal {
+            // in principle. Run 422 D7-B2: cached with no provenance (no
+            // snapshot was wired at creation) — under `Required` this is the
+            // production shape and the re-emission rejects fail-closed.
+            let mut last_leader_proposal = Some(CachedLeaderProposal {
+                view: cur_view,
+                proposal: BlockProposal {
                     header: base_header(0),
                     qc: None,
                     txs: vec![],
                     signature: vec![],
                 },
-            ));
-            let mut last_leader_vote = Some((cur_view, base_vote(0)));
+                provenance: None,
+            });
+            let mut last_leader_vote = Some(CachedLeaderVote {
+                view: cur_view,
+                vote: base_vote(0),
+                provenance: None,
+            });
             let mut reemitted_for_view: Option<u64> = None;
             // Empty prior snapshot ⇒ the connected peer is genuinely newly
             // connected on this tick (gate 1 transition).
@@ -11490,15 +12741,22 @@ mod tests {
                 &connectivity,
                 Some(&facade),
                 &mut stats,
+                None, // Run 422 D7-B2: no current-authorization snapshot wired
                 None, // ABSENT Proposal/Vote authority (production wiring)
                 ConsensusVerificationPolicy::Required,
             );
 
-            // Reached the authority/signing boundary and refused there.
+            // Run 422 D7-B2: reached the current-authorization boundary and
+            // refused there — no snapshot wired under `Required` is treated as
+            // current authorization unavailable (never inferred from a supplied
+            // authority), BEFORE any signing.
             assert_eq!(
-                stats.outbound_proposal_verification_context_unavailable_total, 1,
-                "must reach the outbound authority/signing boundary and refuse"
+                stats.outbound_proposal_current_state_unavailable_total, 1,
+                "must reach the current-authorization boundary and refuse"
             );
+            // The legacy signing-boundary unavailable counter is NOT the one
+            // that fires: admission rejects first.
+            assert_eq!(stats.outbound_proposal_verification_context_unavailable_total, 0);
             // No Proposal broadcast, no Vote broadcast, no directed vote, no
             // self-injection through any facade method.
             assert_eq!(facade.calls.load(SeqCst), 0);
@@ -12310,23 +13568,35 @@ mod tests {
             let domain = d6_control_domain();
             // v2 authority WITH a local signer for validator 0.
             let pv = make_ctx_v2(&fixture, Some(ValidatorId(0)), domain.clone());
+            // Run 422 D7-B2: a coherently-bound, currently-authorized snapshot
+            // whose bound verifier IS `pv`. Signing goes through the snapshot's
+            // verifier; the raw `pv` authority is NOT supplied as a substitute.
+            let snap = coherent_snapshot_for(&pv);
 
             let engine = make_engine(ValidatorId(0), 4);
             assert!(engine.is_leader_for_current_view());
             let cur_view = engine.current_view();
 
             // Cached current-view proposal + vote (unsigned bodies; the re-emit
-            // path signs them under the v2 authority before broadcast).
-            let mut last_leader_proposal = Some((
-                cur_view,
-                BlockProposal {
+            // path signs them under the snapshot's bound verifier before
+            // broadcast). Run 422 D7-B2: each cache entry carries provenance
+            // captured from the SAME originating snapshot, so the re-emission's
+            // provenance validation confirms against the current owner.
+            let mut last_leader_proposal = Some(CachedLeaderProposal {
+                view: cur_view,
+                proposal: BlockProposal {
                     header: base_header(0),
                     qc: None,
                     txs: vec![],
                     signature: vec![],
                 },
-            ));
-            let mut last_leader_vote = Some((cur_view, base_vote(0)));
+                provenance: CachedReemissionProvenance::capture(Some(&snap)),
+            });
+            let mut last_leader_vote = Some(CachedLeaderVote {
+                view: cur_view,
+                vote: base_vote(0),
+                provenance: CachedReemissionProvenance::capture(Some(&snap)),
+            });
             let mut reemitted_for_view: Option<u64> = None;
             let mut last_known_peers: HashSet<NodeId> = HashSet::new();
 
@@ -12344,7 +13614,8 @@ mod tests {
                 &connectivity,
                 Some(&facade),
                 &mut stats,
-                Some(&pv),
+                Some(&snap),
+                None,
                 ConsensusVerificationPolicy::Required,
             );
 
@@ -12458,21 +13729,29 @@ mod tests {
                 d6_authority_commitment(0x22),
             );
             let pv = make_ctx_v2(&fixture, Some(ValidatorId(0)), domain);
+            // Run 422 D7-B2: coherent snapshot bound to `pv` (wire-7 domain);
+            // admission succeeds so control reaches the wire-chain refusal.
+            let snap = coherent_snapshot_for(&pv);
 
             let engine = make_engine(ValidatorId(0), 4);
             assert!(engine.is_leader_for_current_view());
             let cur_view = engine.current_view();
 
-            let mut last_leader_proposal = Some((
-                cur_view,
-                BlockProposal {
+            let mut last_leader_proposal = Some(CachedLeaderProposal {
+                view: cur_view,
+                proposal: BlockProposal {
                     header: base_header(0), // wire chain id 0 != expected 7
                     qc: None,
                     txs: vec![],
                     signature: vec![],
                 },
-            ));
-            let mut last_leader_vote = Some((cur_view, base_vote(0)));
+                provenance: CachedReemissionProvenance::capture(Some(&snap)),
+            });
+            let mut last_leader_vote = Some(CachedLeaderVote {
+                view: cur_view,
+                vote: base_vote(0),
+                provenance: CachedReemissionProvenance::capture(Some(&snap)),
+            });
             let mut reemitted_for_view: Option<u64> = None;
             let mut last_known_peers: HashSet<NodeId> = HashSet::new();
 
@@ -12490,7 +13769,8 @@ mod tests {
                 &connectivity,
                 Some(&facade),
                 &mut stats,
-                Some(&pv),
+                Some(&snap),
+                None,
                 ConsensusVerificationPolicy::Required,
             );
 
@@ -12498,6 +13778,11 @@ mod tests {
             assert_eq!(stats.outbound_proposal_wire_chain_mismatch, 1);
             assert_eq!(stats.outbound_proposal_signing_success, 0);
             assert_eq!(stats.outbound_proposal_late_peer_reemits, 0);
+            // Admission (current-authorization) passed: the refusal is the
+            // wire-chain check, not an authorization rejection.
+            assert_eq!(stats.outbound_proposal_current_state_unavailable_total, 0);
+            assert_eq!(stats.outbound_proposal_reemit_missing_provenance_total, 0);
+            assert_eq!(stats.outbound_proposal_reemit_provenance_rejected_total, 0);
             // No facade traffic; single-shot marker not set.
             assert_eq!(facade.calls.load(SeqCst), 0);
             assert_eq!(reemitted_for_view, None);
