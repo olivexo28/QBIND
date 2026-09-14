@@ -886,3 +886,84 @@ GENESIS_AUTHORITY_ACTIVATION=DISABLED
 CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED
 SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO
 ```
+
+## Run 422 D7-A3 — issuer-bound authorization tickets + fail-closed generation exhaustion (code + test)
+
+This bounded phase closes the **ticket-issuer identity** and **generation-exhaustion**
+halves of finding **#3**. It is source + `cfg(test)` only and does **not** reopen
+D7-A1/A2. Real-handler replacement-ordering (finding #4) stays explicitly **OPEN**.
+
+### Issuer binding (section 3)
+
+`AuthorizationTicket` is now opaque and bound to its issuing owner via an
+opaque **allocation-backed identity** (`Arc<OwnerIdentity>`, a zero-sized marker):
+
+- Each `CurrentAuthorizationOwner` constructor (`unavailable`,
+  `establish_for_fixture`) allocates one fresh `Arc<OwnerIdentity>`; `admit`
+  clones it into the ticket and `confirm` compares allocations with
+  `Arc::ptr_eq` (never a raw address, reusable numeric id, or wrapping global
+  counter).
+- A **different** owner rejects the ticket (`ConfirmError::ForeignIssuer`) even
+  with byte-for-byte identical configuration and equal generation; an
+  **unavailable** owner also rejects a foreign ticket.
+- The identity is **stable across moves** of the owner value (the heap
+  allocation is unchanged), so moving the owner does not invalidate its
+  legitimate ticket.
+- **Snapshot binding invariant (documented):** an owner's `candidate` authority
+  is immutable and its private `current` state changes only via a replacement
+  that advances `generation`; therefore *(issuer allocation, generation)*
+  uniquely pins the admitted snapshot — issuer binding plus the ticket
+  generation is sufficient to bind the snapshot, and complete D6 domain binding
+  (incl. authorized wire-chain id) is preserved by `try_bind`.
+- **Clone semantics:** `CurrentAuthorizationOwner` intentionally does not derive
+  `Clone`, so a second handle to the same logical owner cannot be forged; every
+  constructed owner is a separately maintained owner with a distinct identity.
+
+### Generation exhaustion (section 4)
+
+`replace_for_fixture` uses a **checked** advance instead of `saturating_add`. If
+generation+1 cannot be represented, the owner latches a terminal exhausted state
+(generation left at `u64::MAX`, no wraparound / reset / panic / silent reuse):
+
+- `admit` fails closed with `FreshnessError::AuthorizationExhausted`;
+- `confirm` rejects **every** outstanding ticket with `ConfirmError::Exhausted`,
+  including a ticket issued at the maximum generation (whose generation still
+  equals the owner's);
+- later replacement attempts cannot restore authorization.
+
+The exhaustion-injection helper (`set_generation_for_exhaustion_fixture`) is
+`cfg(test)`-only; production retains **unavailable-only** current-authorization
+construction. `confirm` returns a bounded, non-secret `ConfirmError`
+(`ForeignIssuer` / `Stale` / `Exhausted`); inbound handlers dispatch the new
+exhaustion case into `inbound_{proposal,vote}_authorization_exhausted_total`
+without weakening any existing rejection.
+
+### Tests (section 5)
+
+New deterministic unit tests in
+`genesis_consensus_authority::tests::d7a3_ticket_issuer_and_exhaustion` (9,
+passing): same-owner admit+confirm; foreign owner with identical config +
+generation; foreign unavailable owner; owner move preserves ticket; identical-
+config replacement invalidates earlier ticket; near-maximum advance;
+exhaustion permanently rejects admit+confirm incl. the last max-generation
+ticket; repeated post-exhaustion attempts; distinct per-owner identities. The
+retained `mod run422_d7a` (30) and D7 lifetime (14) controls still pass
+unchanged.
+
+### Finding dispositions
+
+Finding **#3** (ticket issuer identity + generation exhaustion) is now
+**closed at the owner/ticket boundary (code + test)**. Finding **#4**
+(real-handler replacement-ordering under the current single-threaded borrowing
+model) remains explicitly **OPEN** — these tests establish owner/ticket
+behavior and are **not** a proof of concurrent invalidation inside the real
+handler. No shared mutable concurrency was introduced. Run 423 remains deferred.
+
+```
+D7A3_TICKET_ISSUER_BINDING=CLOSED-CODE-TEST
+D7A3_GENERATION_EXHAUSTION=CLOSED-CODE-TEST
+D7A_REPLACEMENT_ORDERING_REAL_HANDLER=OPEN
+DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED
+GENESIS_AUTHORITY_ACTIVATION=DISABLED
+SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO
+```
