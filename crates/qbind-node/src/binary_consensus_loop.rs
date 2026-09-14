@@ -1151,7 +1151,13 @@ impl ProposalVoteAuthority {
 ///   authority;
 /// * the owner's chain identity label corresponds to the verifier domain's
 ///   runtime chain id (a trusted, test-identified fixture mapping — no
-///   production runtime→wire chain-id mapping is introduced).
+///   production runtime→wire chain-id mapping is introduced);
+/// * the owner's independently-authorized expected wire `chain_id` (the
+///   remaining field of the complete selected v2 domain) equals the verifier
+///   domain's `expected_wire_chain_id` — so an owner authorized for domain A
+///   cannot admit a verifier B that differs ONLY in `expected_wire_chain_id`.
+///   The authorized wire chain id is fixed when the owner is constructed and is
+///   never copied from the inbound verifier during binding.
 ///
 /// Provenance and local binding remain **separate** guarantees: this
 /// coherence check proves the *local objects* match, while
@@ -1197,6 +1203,14 @@ pub enum SnapshotCoherenceError {
     /// The owner's chain identity label does not correspond to the verifier's
     /// runtime chain id.
     ChainIdentityMismatch,
+    /// Run 422 D7-A2 (finding #2, corrective): the verifier's v2 signing
+    /// domain does not carry the owner's independently-authorized expected
+    /// wire `chain_id`. The owner is authorized for the *complete* selected v2
+    /// domain; a verifier whose domain differs only in `expected_wire_chain_id`
+    /// (runtime chain, genesis and commitment otherwise identical) is refused,
+    /// and an owner that covers no wire chain id at all (production) can never
+    /// bind a verifier.
+    WireChainIdMismatch,
 }
 
 impl std::fmt::Display for SnapshotCoherenceError {
@@ -1207,6 +1221,7 @@ impl std::fmt::Display for SnapshotCoherenceError {
             SnapshotCoherenceError::GenesisIdentityMismatch => "genesis identity mismatch",
             SnapshotCoherenceError::AuthorityCommitmentMismatch => "authority commitment mismatch",
             SnapshotCoherenceError::ChainIdentityMismatch => "chain identity mismatch",
+            SnapshotCoherenceError::WireChainIdMismatch => "expected wire chain id mismatch",
         };
         f.write_str(s)
     }
@@ -1265,6 +1280,21 @@ impl AuthorizedProposalVoteSnapshot {
         // verifier domain's runtime chain id via the trusted fixture label.
         if candidate.chain_id != snapshot_chain_identity_label(domain.runtime_chain_id()) {
             return Err(SnapshotCoherenceError::ChainIdentityMismatch);
+        }
+
+        // Run 422 D7-A2 (finding #2, corrective): the owner is authorized for
+        // the COMPLETE selected v2 domain, which includes the expected wire
+        // `chain_id`. Require the verifier's domain to carry the owner's
+        // independently-held authorized wire chain id. The authorized value is
+        // read from the owner's candidate (fixed when the owner was
+        // constructed) and compared against the verifier's domain — it is never
+        // copied from the verifier during binding, so an owner authorized for
+        // domain A cannot admit a verifier B that differs only in
+        // `expected_wire_chain_id`. An owner that covers no wire chain id
+        // (`None`, e.g. any production-built authority) can never bind.
+        match candidate.authorized_wire_chain_id() {
+            Some(authorized) if authorized == domain.expected_wire_chain_id() => {}
+            _ => return Err(SnapshotCoherenceError::WireChainIdMismatch),
         }
 
         Ok(Self { owner, verifier })
@@ -3880,7 +3910,22 @@ pub(crate) fn handle_inbound_consensus_msg(
                             stats.inbound_proposals_engine_accepted.saturating_add(1);
                         metrics.consensus_t154().inc_proposal_accepted();
                         if let Some(facade) = outbound {
-                            forward_actions_to_facade(vec![action], facade, stats, pv_authority, verification_policy);
+                            // Run 422 D7-A2 (finding #2, corrective — section 3):
+                            // forward the engine-produced action using the SAME
+                            // authority the handler admitted and verified under
+                            // (`effective_pv`), never the separately-supplied
+                            // `pv_authority`. When a current-authorization
+                            // snapshot is bound, `effective_pv` is the bound
+                            // verifier (the admitted A); a separately-supplied B
+                            // (or the Timeout/NewView signer) can therefore never
+                            // sign or drive this immediate outbound effect. When
+                            // no snapshot is wired (test-only
+                            // `LocalFixtureUnsigned` passthrough), `effective_pv`
+                            // is exactly the same `pv_authority` as before, so
+                            // behaviour is unchanged there; under `Required` an
+                            // absent snapshot has already rejected the message
+                            // before reaching this point.
+                            forward_actions_to_facade(vec![action], facade, stats, effective_pv, verification_policy);
                         }
                     }
                 }
@@ -9228,6 +9273,7 @@ mod tests {
                 snapshot_chain_identity_label(pv.signing_domain.runtime_chain_id()),
                 *pv.signing_domain.genesis_identity(),
                 *pv.signing_domain.authority_commitment(),
+                pv.signing_domain.expected_wire_chain_id(),
                 pv.validators.clone(),
                 pv.key_provider.clone(),
             ))
@@ -13619,6 +13665,7 @@ mod tests {
                         snapshot_chain_identity_label(pv_b.signing_domain.runtime_chain_id()),
                         *pv_b.signing_domain.genesis_identity(),
                         *pv_b.signing_domain.authority_commitment(),
+                        pv_b.signing_domain.expected_wire_chain_id(),
                         pv_b.validators.clone(),   // SHARE B's membership (ptr_eq holds)
                         pv_a.key_provider.clone(), // but A's key provider (ptr_eq fails)
                     ),
@@ -13647,6 +13694,7 @@ mod tests {
                             chain,
                             genesis,
                             commitment,
+                            dom.expected_wire_chain_id(),
                             pv.validators.clone(),
                             pv.key_provider.clone(),
                         ),
@@ -13693,6 +13741,633 @@ mod tests {
                     AuthorizedProposalVoteSnapshot::try_bind(owner, Arc::new(pv.clone()))
                         .expect_err("chain mismatch"),
                     SnapshotCoherenceError::ChainIdentityMismatch
+                );
+            }
+
+            // ================================================================
+            // Run 422 D7-A2 (finding #2, corrective) — bind the COMPLETE
+            // selected v2 domain: `expected_wire_chain_id`.
+            //
+            // Before this correction `try_bind` checked genesis, commitment,
+            // membership, key provider and the runtime-chain label, but NOT the
+            // domain's `expected_wire_chain_id`. An owner authorized for domain
+            // A could therefore admit a verifier B whose domain differed ONLY in
+            // `expected_wire_chain_id` (runtime chain, genesis and commitment
+            // unchanged; membership and key provider objects shared). These
+            // tests demonstrate the closed gap plus real ML-DSA-44 acceptance
+            // controls.
+            // ================================================================
+
+            /// A v2 domain identical to [`d5_control_domain`] in runtime chain
+            /// id, genesis identity and authority commitment, differing ONLY in
+            /// `expected_wire_chain_id`. Trusted, test-identified fixture data.
+            fn wire_variant_domain(expected_wire_chain_id: u32) -> ProposalVoteSigningDomainV2 {
+                let base = d5_control_domain();
+                ProposalVoteSigningDomainV2::try_new(
+                    base.runtime_chain_id(),
+                    expected_wire_chain_id,
+                    *base.genesis_identity(),
+                    *base.authority_commitment(),
+                )
+                .expect("valid wire-variant domain")
+            }
+
+            /// A `BlockProposal` at height 1 carrying wire `chain_id = wire`,
+            /// signed by `proposer` over `domain`'s v2 preimage.
+            fn signed_proposal_v2_wire(
+                proposer: u16,
+                wire: u32,
+                fixture: &Fixture,
+                domain: &ProposalVoteSigningDomainV2,
+            ) -> BlockProposal {
+                let mut header = base_header(proposer);
+                header.chain_id = wire;
+                let mut p = BlockProposal {
+                    header,
+                    qc: None,
+                    txs: vec![],
+                    signature: vec![],
+                };
+                let preimage = domain.proposal_preimage(&p);
+                let sk = fixture.sks.get(&ValidatorId(proposer as u64)).expect("sk");
+                p.signature = MlDsa44Backend::sign(sk, &preimage).expect("sign");
+                p
+            }
+
+            /// A `Vote` at height 1 carrying wire `chain_id = wire`, signed by
+            /// `voter` over `domain`'s v2 preimage.
+            fn signed_vote_v2_wire(
+                voter: u16,
+                wire: u32,
+                fixture: &Fixture,
+                domain: &ProposalVoteSigningDomainV2,
+            ) -> Vote {
+                let mut v = base_vote(voter);
+                v.chain_id = wire;
+                let preimage = domain.vote_preimage(&v);
+                let sk = fixture.sks.get(&ValidatorId(voter as u64)).expect("sk");
+                v.signature = MlDsa44Backend::sign(sk, &preimage).expect("sign");
+                v
+            }
+
+            // -------- Owner A paired with verifier B that differs ONLY in
+            // `expected_wire_chain_id` ⇒ cannot bind (WireChainIdMismatch);
+            // coherent A and coherent B each bind to their own verifier. ------
+            #[test]
+            fn d7a2_bind_rejects_owner_a_verifier_b_differ_only_in_wire_chain_id() {
+                let f = make_fixture(4);
+                let domain_a = d5_control_domain(); // expected wire 0
+                let domain_b = wire_variant_domain(1); // ONLY wire differs (→ 1)
+
+                // Precondition: the two domains are identical EXCEPT the wire id.
+                assert_eq!(domain_a.runtime_chain_id(), domain_b.runtime_chain_id());
+                assert_eq!(domain_a.genesis_identity(), domain_b.genesis_identity());
+                assert_eq!(
+                    domain_a.authority_commitment(),
+                    domain_b.authority_commitment()
+                );
+                assert_ne!(
+                    domain_a.expected_wire_chain_id(),
+                    domain_b.expected_wire_chain_id()
+                );
+
+                // Verifier B shares the SAME fixture membership + key provider as
+                // A (make_ctx_v2 clones the shared `Arc`s from `f`).
+                let pv_b = make_ctx_v2(&f, None, domain_b.clone());
+
+                // Owner authorized for the COMPLETE domain A: it shares B's
+                // actual membership and key-provider objects and the same
+                // genesis / commitment / runtime-chain identity (all unchanged
+                // between A and B), but independently holds domain A's expected
+                // wire chain id (0) — read from A, NOT copied from verifier B.
+                let candidate = Arc::new(
+                    GenesisConsensusAuthority::for_verification_snapshot_fixture(
+                        snapshot_chain_identity_label(domain_b.runtime_chain_id()),
+                        *domain_b.genesis_identity(),
+                        *domain_b.authority_commitment(),
+                        domain_a.expected_wire_chain_id(), // owner's own authorized wire id (A = 0)
+                        pv_b.validators.clone(),           // share B's membership (ptr_eq holds)
+                        pv_b.key_provider.clone(),         // share B's key provider (ptr_eq holds)
+                    ),
+                );
+                let observed = candidate.config_identity();
+                let owner = CurrentAuthorizationOwner::establish_for_fixture(candidate, observed);
+
+                // Every OTHER coherence field matches; ONLY the expected wire
+                // chain id differs ⇒ the sole failure is WireChainIdMismatch.
+                let err = AuthorizedProposalVoteSnapshot::try_bind(owner, Arc::new(pv_b.clone()))
+                    .expect_err(
+                        "owner authorized for domain A must not admit verifier B differing only \
+                         in expected_wire_chain_id",
+                    );
+                assert_eq!(err, SnapshotCoherenceError::WireChainIdMismatch);
+
+                // Controls: a coherently-authorized owner DOES bind to its own
+                // verifier for BOTH A and B — so the rejection above is
+                // attributable to the wire-chain binding, not to B (or A) being
+                // an unbindable verifier.
+                let pv_a = make_ctx_v2(&f, None, domain_a.clone());
+                let _ = coherent_snapshot_for(&pv_a); // owner-A ⇔ verifier-A binds
+                let _ = coherent_snapshot_for(&pv_b); // owner-B ⇔ verifier-B binds
+            }
+
+            // -------- Proposal: real ML-DSA-44 controls. A B-domain proposal is
+            // valid under coherently-authorized B, while A cannot authorize it;
+            // the matching-A positive control is retained. -------------------
+            #[test]
+            fn d7a2_wire_domain_proposal_ml_dsa_controls() {
+                let f = make_fixture(4);
+                let domain_a = d5_control_domain(); // wire 0
+                let domain_b = wire_variant_domain(1); // wire 1, else identical
+                let pv_a = make_ctx_v2(&f, None, domain_a.clone());
+                let pv_b = make_ctx_v2(&f, None, domain_b.clone());
+
+                // A B-domain proposal carries B's wire id (1) and is signed over
+                // B's preimage by validator 1 (leader for view 1).
+                let p_b = signed_proposal_v2_wire(1, 1, &f, &domain_b);
+
+                // Direct ML-DSA-44 control: valid under domain B, rejected under
+                // domain A (same keys/membership — so the divergence is purely
+                // the domain, including its expected wire chain id).
+                assert!(
+                    qbind_consensus::verify_proposal_msg_with_domain(
+                        &p_b,
+                        ValidatorId(1),
+                        f.validators.as_ref(),
+                        f.kp.as_ref(),
+                        f.br.as_ref(),
+                        &domain_b,
+                    )
+                    .is_ok(),
+                    "B-domain proposal is valid under B"
+                );
+                assert!(
+                    qbind_consensus::verify_proposal_msg_with_domain(
+                        &p_b,
+                        ValidatorId(1),
+                        f.validators.as_ref(),
+                        f.kp.as_ref(),
+                        f.br.as_ref(),
+                        &domain_a,
+                    )
+                    .is_err(),
+                    "A cannot authorize the B-domain proposal"
+                );
+
+                // Real handler: valid under coherently-authorized B (accepted).
+                {
+                    let current_b = coherent_snapshot_for(&pv_b);
+                    let gate = pv_binding_gate(4);
+                    let origin = AuthenticatedConsensusOrigin::new(pv_node_for(1), ValidatorId(1));
+                    let mut engine = make_engine(ValidatorId(0), 4);
+                    let mut stats = BinaryConsensusLoopInboundStats::default();
+                    let metrics = make_metrics();
+                    let mut restore = RestoreCatchupModeState::from_config(None);
+                    deliver_proposal_fresh(
+                        &mut engine,
+                        &mut stats,
+                        &mut restore,
+                        None,
+                        Some(&pv_b),
+                        Some(&current_b),
+                        &p_b,
+                        &metrics,
+                        None,
+                        Some(&origin),
+                        Some(&gate),
+                        ConsensusVerificationPolicy::Required,
+                    );
+                    assert_eq!(
+                        stats.inbound_proposal_verify_accepted, 1,
+                        "B-domain proposal accepted under coherently-authorized B"
+                    );
+                    assert_eq!(stats.inbound_proposal_verify_rejected_total, 0);
+                }
+
+                // Real handler: A cannot authorize the B-domain proposal — the
+                // admitted-A verifier rejects it (wire chain mismatch) before
+                // any delivery/effect.
+                {
+                    let current_a = coherent_snapshot_for(&pv_a);
+                    let gate = pv_binding_gate(4);
+                    let origin = AuthenticatedConsensusOrigin::new(pv_node_for(1), ValidatorId(1));
+                    let mut engine = make_engine(ValidatorId(0), 4);
+                    let mut stats = BinaryConsensusLoopInboundStats::default();
+                    let metrics = make_metrics();
+                    let mut restore = RestoreCatchupModeState::from_config(None);
+                    let facade = D7ActionRecorder::default();
+                    deliver_proposal_fresh(
+                        &mut engine,
+                        &mut stats,
+                        &mut restore,
+                        None,
+                        Some(&pv_a),
+                        Some(&current_a),
+                        &p_b,
+                        &metrics,
+                        Some(&facade),
+                        Some(&origin),
+                        Some(&gate),
+                        ConsensusVerificationPolicy::Required,
+                    );
+                    assert_eq!(stats.inbound_proposal_verify_accepted, 0);
+                    assert_eq!(stats.inbound_proposal_verify_rejected_total, 1);
+                    assert_eq!(stats.inbound_proposal_rejected_wire_chain_mismatch, 1);
+                    assert_eq!(stats.inbound_proposals_delivered, 0);
+                    assert_eq!(facade.total(), 0);
+                }
+
+                // Retained matching-A positive control: an A-domain proposal
+                // (wire 0) is accepted under coherently-authorized A.
+                {
+                    let current_a = coherent_snapshot_for(&pv_a);
+                    let p_a = signed_proposal_v2_wire(1, 0, &f, &domain_a);
+                    let gate = pv_binding_gate(4);
+                    let origin = AuthenticatedConsensusOrigin::new(pv_node_for(1), ValidatorId(1));
+                    let mut engine = make_engine(ValidatorId(0), 4);
+                    let mut stats = BinaryConsensusLoopInboundStats::default();
+                    let metrics = make_metrics();
+                    let mut restore = RestoreCatchupModeState::from_config(None);
+                    deliver_proposal_fresh(
+                        &mut engine,
+                        &mut stats,
+                        &mut restore,
+                        None,
+                        Some(&pv_a),
+                        Some(&current_a),
+                        &p_a,
+                        &metrics,
+                        None,
+                        Some(&origin),
+                        Some(&gate),
+                        ConsensusVerificationPolicy::Required,
+                    );
+                    assert_eq!(
+                        stats.inbound_proposal_verify_accepted, 1,
+                        "matching-A proposal accepted under coherently-authorized A"
+                    );
+                    assert_eq!(stats.inbound_proposal_verify_rejected_total, 0);
+                }
+            }
+
+            // -------- Vote: real ML-DSA-44 controls. A B-domain vote is valid
+            // under coherently-authorized B, while A cannot authorize it; the
+            // matching-A positive control is retained. -----------------------
+            #[test]
+            fn d7a2_wire_domain_vote_ml_dsa_controls() {
+                let f = make_fixture(4);
+                let domain_a = d5_control_domain(); // wire 0
+                let domain_b = wire_variant_domain(1); // wire 1, else identical
+                let pv_a = make_ctx_v2(&f, None, domain_a.clone());
+                let pv_b = make_ctx_v2(&f, None, domain_b.clone());
+
+                let v_b = signed_vote_v2_wire(1, 1, &f, &domain_b);
+
+                // Direct ML-DSA-44 control: valid under B, rejected under A.
+                assert!(
+                    qbind_consensus::verify_vote_msg_with_domain(
+                        &v_b,
+                        ValidatorId(1),
+                        f.validators.as_ref(),
+                        f.kp.as_ref(),
+                        f.br.as_ref(),
+                        &domain_b,
+                    )
+                    .is_ok(),
+                    "B-domain vote is valid under B"
+                );
+                assert!(
+                    qbind_consensus::verify_vote_msg_with_domain(
+                        &v_b,
+                        ValidatorId(1),
+                        f.validators.as_ref(),
+                        f.kp.as_ref(),
+                        f.br.as_ref(),
+                        &domain_a,
+                    )
+                    .is_err(),
+                    "A cannot authorize the B-domain vote"
+                );
+
+                // Real handler: accepted under coherently-authorized B.
+                {
+                    let current_b = coherent_snapshot_for(&pv_b);
+                    let gate = pv_binding_gate(4);
+                    let origin = AuthenticatedConsensusOrigin::new(pv_node_for(1), ValidatorId(1));
+                    let mut engine = make_engine(ValidatorId(0), 4);
+                    let mut stats = BinaryConsensusLoopInboundStats::default();
+                    let metrics = make_metrics();
+                    deliver_vote_fresh(
+                        &mut engine,
+                        &mut stats,
+                        None,
+                        Some(&pv_b),
+                        Some(&current_b),
+                        &v_b,
+                        &metrics,
+                        Some(&origin),
+                        Some(&gate),
+                        ConsensusVerificationPolicy::Required,
+                    );
+                    assert_eq!(
+                        stats.inbound_vote_verify_accepted, 1,
+                        "B-domain vote accepted under coherently-authorized B"
+                    );
+                    assert_eq!(stats.inbound_vote_verify_rejected_total, 0);
+                }
+
+                // Real handler: A cannot authorize the B-domain vote.
+                {
+                    let current_a = coherent_snapshot_for(&pv_a);
+                    let gate = pv_binding_gate(4);
+                    let origin = AuthenticatedConsensusOrigin::new(pv_node_for(1), ValidatorId(1));
+                    let mut engine = make_engine(ValidatorId(0), 4);
+                    let mut stats = BinaryConsensusLoopInboundStats::default();
+                    let metrics = make_metrics();
+                    deliver_vote_fresh(
+                        &mut engine,
+                        &mut stats,
+                        None,
+                        Some(&pv_a),
+                        Some(&current_a),
+                        &v_b,
+                        &metrics,
+                        Some(&origin),
+                        Some(&gate),
+                        ConsensusVerificationPolicy::Required,
+                    );
+                    assert_eq!(stats.inbound_vote_verify_accepted, 0);
+                    assert_eq!(stats.inbound_vote_verify_rejected_total, 1);
+                    assert_eq!(stats.inbound_vote_rejected_wire_chain_mismatch, 1);
+                    assert_eq!(stats.inbound_votes_delivered, 0);
+                }
+
+                // Retained matching-A positive control.
+                {
+                    let current_a = coherent_snapshot_for(&pv_a);
+                    let v_a = signed_vote_v2_wire(1, 0, &f, &domain_a);
+                    let gate = pv_binding_gate(4);
+                    let origin = AuthenticatedConsensusOrigin::new(pv_node_for(1), ValidatorId(1));
+                    let mut engine = make_engine(ValidatorId(0), 4);
+                    let mut stats = BinaryConsensusLoopInboundStats::default();
+                    let metrics = make_metrics();
+                    deliver_vote_fresh(
+                        &mut engine,
+                        &mut stats,
+                        None,
+                        Some(&pv_a),
+                        Some(&current_a),
+                        &v_a,
+                        &metrics,
+                        Some(&origin),
+                        Some(&gate),
+                        ConsensusVerificationPolicy::Required,
+                    );
+                    assert_eq!(
+                        stats.inbound_vote_verify_accepted, 1,
+                        "matching-A vote accepted under coherently-authorized A"
+                    );
+                    assert_eq!(stats.inbound_vote_verify_rejected_total, 0);
+                }
+            }
+
+            // ================================================================
+            // Run 422 D7-A2 (finding #2, corrective — section 3): the IMMEDIATE
+            // inbound Proposal → engine → outbound handoff signs the
+            // engine-produced action with the BOUND authority (the admitted A),
+            // never the separately-supplied `pv_authority` (B) or the
+            // Timeout/NewView signer.
+            //
+            // This drives the REAL `handle_inbound_consensus_msg` handler with a
+            // coherent snapshot A (whose bound verifier carries A's local
+            // signer), a separately-supplied authority B (with its OWN
+            // instrumented local signer), a recording facade, and directly
+            // instrumented signers. The inbound A-proposal from the view leader
+            // makes the local engine emit a `BroadcastVote`, so the handoff at
+            // `forward_actions_to_facade` is actually reached (positive
+            // control). B's signer must never be invoked, and the emitted vote
+            // must be signed by A and verify under A's domain.
+            // ================================================================
+            #[test]
+            fn d7a2_immediate_handoff_uses_bound_authority_not_supplied_b() {
+                use std::sync::atomic::{AtomicU64, Ordering::SeqCst};
+                use std::sync::Mutex;
+
+                // Instrumented signer: records each invocation, then delegates.
+                struct InstrumentedSigner {
+                    inner: LocalKeySigner,
+                    vote_calls: Arc<AtomicU64>,
+                    proposal_calls: Arc<AtomicU64>,
+                    timeout_calls: Arc<AtomicU64>,
+                }
+                impl ValidatorSigner for InstrumentedSigner {
+                    fn validator_id(&self) -> &ValidatorId {
+                        self.inner.validator_id()
+                    }
+                    fn suite_id(&self) -> u16 {
+                        self.inner.suite_id()
+                    }
+                    fn sign_proposal(
+                        &self,
+                        p: &[u8],
+                    ) -> Result<Vec<u8>, crate::validator_signer::SignError> {
+                        self.proposal_calls.fetch_add(1, SeqCst);
+                        self.inner.sign_proposal(p)
+                    }
+                    fn sign_vote(
+                        &self,
+                        p: &[u8],
+                    ) -> Result<Vec<u8>, crate::validator_signer::SignError> {
+                        self.vote_calls.fetch_add(1, SeqCst);
+                        self.inner.sign_vote(p)
+                    }
+                    fn sign_timeout(
+                        &self,
+                        view: u64,
+                        high_qc: Option<&qbind_consensus::qc::QuorumCertificate<[u8; 32]>>,
+                    ) -> Result<Vec<u8>, crate::validator_signer::SignError> {
+                        self.timeout_calls.fetch_add(1, SeqCst);
+                        self.inner.sign_timeout(view, high_qc)
+                    }
+                    fn sign_timeout_with_chain_id(
+                        &self,
+                        chain_id: ChainId,
+                        view: u64,
+                        high_qc: Option<&qbind_consensus::qc::QuorumCertificate<[u8; 32]>>,
+                    ) -> Result<Vec<u8>, crate::validator_signer::SignError> {
+                        self.timeout_calls.fetch_add(1, SeqCst);
+                        self.inner.sign_timeout_with_chain_id(chain_id, view, high_qc)
+                    }
+                }
+
+                // Facade recording every emitted vote.
+                #[derive(Default)]
+                struct HandoffFacade {
+                    broadcast_votes: Mutex<Vec<Vote>>,
+                    other: AtomicU64,
+                }
+                impl ConsensusNetworkFacade for HandoffFacade {
+                    fn send_vote_to(
+                        &self,
+                        _to: ValidatorId,
+                        v: &Vote,
+                    ) -> Result<(), qbind_consensus::network::NetworkError> {
+                        self.broadcast_votes.lock().unwrap().push(v.clone());
+                        Ok(())
+                    }
+                    fn broadcast_vote(
+                        &self,
+                        v: &Vote,
+                    ) -> Result<(), qbind_consensus::network::NetworkError> {
+                        self.broadcast_votes.lock().unwrap().push(v.clone());
+                        Ok(())
+                    }
+                    fn broadcast_proposal(
+                        &self,
+                        _p: &BlockProposal,
+                    ) -> Result<(), qbind_consensus::network::NetworkError> {
+                        self.other.fetch_add(1, SeqCst);
+                        Ok(())
+                    }
+                    fn broadcast_consensus_msg(
+                        &self,
+                        _m: &ConsensusNetMsg,
+                    ) -> Result<(), qbind_consensus::network::NetworkError> {
+                        self.other.fetch_add(1, SeqCst);
+                        Ok(())
+                    }
+                }
+
+                let f = make_fixture(4);
+                // Domain A expects wire chain id 1, matching the wire chain id
+                // the engine stamps on the self-vote it produces from an
+                // inbound proposal (so the outbound vote is actually signed and
+                // emitted rather than suppressed for a wire mismatch).
+                let domain_a = wire_variant_domain(1);
+                let domain_b = alt_domain_b();
+
+                let a_votes = Arc::new(AtomicU64::new(0));
+                let a_proposals = Arc::new(AtomicU64::new(0));
+                let a_timeouts = Arc::new(AtomicU64::new(0));
+                let b_votes = Arc::new(AtomicU64::new(0));
+                let b_proposals = Arc::new(AtomicU64::new(0));
+                let b_timeouts = Arc::new(AtomicU64::new(0));
+
+                let build_pv = |domain: ProposalVoteSigningDomainV2,
+                                vote_calls: Arc<AtomicU64>,
+                                proposal_calls: Arc<AtomicU64>,
+                                timeout_calls: Arc<AtomicU64>|
+                 -> ProposalVoteAuthority {
+                    let sk = f.sk_objs.get(&ValidatorId(0)).expect("sk").clone();
+                    let inner = LocalKeySigner::new(ValidatorId(0), TEST_SUITE_U16, sk);
+                    let signer: Arc<dyn ValidatorSigner> = Arc::new(InstrumentedSigner {
+                        inner,
+                        vote_calls,
+                        proposal_calls,
+                        timeout_calls,
+                    });
+                    ProposalVoteAuthority {
+                        validators: f.validators.clone(),
+                        key_provider: f.kp.clone(),
+                        backend_registry: f.br.clone(),
+                        chain_id: QBIND_DEVNET_CHAIN_ID,
+                        signer: Some(signer),
+                        signing_domain: domain,
+                    }
+                };
+
+                // Bound verifier A (its local signer is the ONLY one that may
+                // sign the outbound vote) and separately-supplied authority B.
+                let pv_a = build_pv(
+                    domain_a.clone(),
+                    a_votes.clone(),
+                    a_proposals.clone(),
+                    a_timeouts.clone(),
+                );
+                let pv_b = build_pv(
+                    domain_b.clone(),
+                    b_votes.clone(),
+                    b_proposals.clone(),
+                    b_timeouts.clone(),
+                );
+                let current_a = coherent_snapshot_for(&pv_a);
+
+                // Inbound A-proposal from the view-1 leader (validator 1), wire
+                // chain id 1 so it verifies under domain A. The local engine
+                // (validator 0) accepts it and emits a self-vote → the immediate
+                // handoff is reached.
+                let p_a = signed_proposal_v2_wire(1, 1, &f, &domain_a);
+                let gate = pv_binding_gate(4);
+                let origin = AuthenticatedConsensusOrigin::new(pv_node_for(1), ValidatorId(1));
+                let mut engine = make_engine(ValidatorId(0), 4);
+                let mut stats = BinaryConsensusLoopInboundStats::default();
+                let metrics = make_metrics();
+                let mut restore = RestoreCatchupModeState::from_config(None);
+                let facade = HandoffFacade::default();
+
+                deliver_proposal_fresh(
+                    &mut engine,
+                    &mut stats,
+                    &mut restore,
+                    None,
+                    Some(&pv_b), // separately-supplied authority is B ...
+                    Some(&current_a), // ... but the admitted snapshot is A
+                    &p_a,
+                    &metrics,
+                    Some(&facade),
+                    Some(&origin),
+                    Some(&gate),
+                    ConsensusVerificationPolicy::Required,
+                );
+
+                // Positive control: the action path was actually reached — the
+                // proposal verified under A, the engine accepted it and emitted
+                // an outbound vote.
+                assert_eq!(stats.inbound_proposal_verify_accepted, 1, "verified under A");
+                assert_eq!(
+                    stats.inbound_proposals_engine_accepted, 1,
+                    "engine accepted and produced an action (handoff reached)"
+                );
+                assert_eq!(stats.outbound_votes_sent, 1, "outbound vote emitted");
+
+                // The bound authority A signed the outbound vote; B's signer and
+                // the Timeout signer were NEVER invoked.
+                assert_eq!(a_votes.load(SeqCst), 1, "A signed the emitted vote");
+                assert_eq!(b_votes.load(SeqCst), 0, "B's signer never invoked");
+                assert_eq!(b_proposals.load(SeqCst), 0);
+                assert_eq!(b_timeouts.load(SeqCst), 0);
+                assert_eq!(a_timeouts.load(SeqCst), 0, "no Timeout-signer fallback");
+
+                // Exactly one vote reached the facade, and it verifies under A's
+                // selected domain (the domain emission is supported for).
+                let emitted = facade.broadcast_votes.lock().unwrap();
+                assert_eq!(emitted.len(), 1, "one vote emitted to the facade");
+                assert_eq!(facade.other.load(SeqCst), 0);
+                assert!(
+                    qbind_consensus::verify_vote_msg_with_domain(
+                        &emitted[0],
+                        ValidatorId(0),
+                        f.validators.as_ref(),
+                        f.kp.as_ref(),
+                        f.br.as_ref(),
+                        &domain_a,
+                    )
+                    .is_ok(),
+                    "emitted vote verifies under the bound A domain"
+                );
+                // It must NOT verify under B's foreign domain (attributes the
+                // emission to A, not B).
+                assert!(
+                    qbind_consensus::verify_vote_msg_with_domain(
+                        &emitted[0],
+                        ValidatorId(0),
+                        f.validators.as_ref(),
+                        f.kp.as_ref(),
+                        f.br.as_ref(),
+                        &domain_b,
+                    )
+                    .is_err(),
+                    "emitted vote does NOT verify under supplied B"
                 );
             }
 
