@@ -482,14 +482,23 @@ signatures, and `Required` policy:
   `current_auth == None`. Observations: F6 admitted once
   (`gate.metrics().accepted() == 1`); the family current-state-unavailable
   counter increments exactly once; superseded and stale-before-effect stay 0;
-  signature verification is not invoked
-  (`proposal_vote_crypto_verify_latency_observations_total == 0`, equivalent
-  direct instrumentation) with no verify acceptance/rejection; no delivery,
+  signature verification is not invoked — asserted by a **direct backend-call
+  counter** (`CountingSigVerifier` wrapping the real ML-DSA-44 backend,
+  incremented inside `verify_vote`/`verify_proposal`), reset before the handler
+  call and asserted to be **zero**; the latency-observation counter
+  (`proposal_vote_crypto_verify_latency_observations_total == 0`) is retained
+  only as supplementary evidence — with no verify acceptance/rejection; a
+  recording outbound facade asserts **zero** outbound actions; no delivery,
   engine acceptance, restore deferral, reconfig observation (empty detector
   header cache), or view mutation. Each test **separately** verifies the same
   signed message with `verify_{proposal,vote}_msg_with_domain` under the exact
   D6 domain and asserts it is `Ok`, so the handler rejection is attributable
-  solely to the missing current authorization.
+  solely to the missing current authorization. Paired positive controls
+  (`d7a1_{proposal,vote}_backend_call_counter_positive_control`) drive a
+  coherently bound snapshot and assert the same backend-call counter is `>= 1`,
+  proving the counter is wired to the real verify path (this corrects the
+  earlier D7-A1 claim that the latency observation was "equivalent direct
+  instrumentation").
 * `d7a1_proposal_f6_mismatch_precedes_missing_owner` and
   `d7a1_vote_f6_mismatch_precedes_missing_owner`: same present-authority /
   `current_auth == None` setup but with a claimed-proposer/voter that
@@ -558,6 +567,212 @@ establishes no durable anti-rollback.
 
 ```
 D7A_INBOUND_VERDICT=PARTIAL (finding #1 missing-owner CLOSED; #2–#4 OPEN)
+D7_STATUS=PARTIAL-CODE-TEST / PRODUCTION-LIFECYCLE-UNAVAILABLE
+DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED
+GENESIS_AUTHORITY_ACTIVATION=DISABLED
+CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED
+SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO
+```
+## Run 422 D7-A2 — Current authorization BOUND to the actual verification snapshot (code + test)
+
+This sub-phase resolves review finding **#2** (owner authorizes its own stored
+authority while cryptographic verification consumes a separately-supplied
+`ProposalVoteAuthority`, so an owner for identity A could admit verification
+performed under an unrelated authority B) for the tested **inbound** boundary
+only. It preserves the D7-A1 missing-owner rejection and does **not** reopen the
+`None` bypass. Findings **#3** (ticket issuer identity / generation exhaustion)
+and **#4** (handler-ordering / replacement) remain **OPEN** and are not claimed
+closed. Tested at branch
+`copilot/copilotrun-422-d7-a2-bind-current-authorization`.
+
+### Provenance / deviations (no invented ancestry)
+
+* The task preamble names an expected branch
+  `copilot/run-422-d7-a1-implement-required-policy-missing-ow` and a reviewed
+  tip `fd8b349f989ce41d23cf02f06a58ae436a81aef0`. Neither is present in this
+  environment: the actual working branch is
+  `copilot/copilotrun-422-d7-a2-bind-current-authorization`, and the clone is a
+  shallow 2-commit history (`e4cb391` squashed import + `e8bef80` "update",
+  which already contains the committed D7-A1 missing-owner work). `fd8b349` is
+  not an ancestor of the local HEAD and cannot be inspected here. The existing
+  D7-A1 work in the worktree was preserved and extended, not rewritten.
+
+### Binding design (section 2)
+
+A new fail-closed, coherence-validated type
+`AuthorizedProposalVoteSnapshot` (`crates/qbind-node/src/binary_consensus_loop.rs`)
+bundles the current-authorization owner with the **exact** verifier the handler
+consumes (`verifier: Arc<ProposalVoteAuthority>`). Its constructor
+`try_bind(owner, verifier)` validates, fail-closed, that the owner's genesis
+authority identity actually corresponds to the verifier:
+
+* genesis identity == the verifier's mandatory D6 signing-domain
+  `genesis_identity()`;
+* authority commitment == the domain's `authority_commitment()`;
+* the **actual** validator membership is shared — both `Arc::ptr_eq` on the
+  `ConsensusValidatorSet` **and** structural equality of ids + voting weights
+  (a shared pointer alone is not accepted as proof — task section 2);
+* the **actual** suite-aware key provider is the same shared `Arc` instance
+  (matching a count or an independently-asserted label is insufficient);
+* the owner's chain-identity label corresponds to the domain's
+  `runtime_chain_id()` via a trusted, test-identified fixture label
+  (`snapshot_chain_identity_label`; **no** production runtime→wire chain-id
+  mapping is introduced).
+
+Coherence is validated at construction. Provenance and local binding stay
+separate guarantees: `try_bind` proves the local objects match, while
+`CurrentAuthorizationOwner::admit()` independently proves the node's current
+authorization state still equals that founding identity — both must pass. The
+epoch the snapshot authorizes is the genesis-static founding epoch
+(`authorized_epoch()` = `GENESIS_STATIC_AUTHORITY_EPOCH` = 0).
+
+The handler `handle_inbound_consensus_msg` now takes
+`current_auth: Option<&AuthorizedProposalVoteSnapshot>`. In both the Proposal
+and Vote arms, when a snapshot is present the handler derives
+`effective_pv = snapshot.verifier()` and performs D6 crypto through **that**
+verifier, **ignoring** any separately-supplied `pv_authority` — a substituted
+context can no longer change the verification inputs after admission. When no
+snapshot is present it falls back to the supplied `pv_authority` (so the
+`Required` + `None` D7-A1 rejection and the test-only `LocalFixtureUnsigned`
+passthrough are unchanged). No production route constructs a
+`ProposalVoteAuthority` or an `Established` owner, so production current
+authorization stays unavailable and no arbitrary-fields production authorization
+factory was added (the new snapshot-building constructor
+`GenesisConsensusAuthority::for_verification_snapshot_fixture` is `#[cfg(test)]`).
+
+### Epoch / handler behavior (section 3)
+
+For both families the ordering is: F6 sender-binding → present-authority gate →
+current-authorization admission (`admit()`) → **signed-epoch check** → D6
+wire-chain + signature verification → pre-effect `confirm()` → delivery. The
+epoch check compares the message's signed epoch (`BlockHeader.epoch` /
+`Vote.epoch`) against `snapshot.authorized_epoch()` **before** any crypto or
+downstream effect; a mismatch increments
+`inbound_{proposal,vote}_epoch_unauthorized_total` and returns fail-closed. The
+missing-authority, missing-owner, and unavailable/superseded rejections are all
+preserved and continue to reject before delivery, restore deferral, reconfig
+observation, engine/aggregation/QC mutation, and outbound actions. D6 signing
+bytes, the domain version, and QC verification are unchanged; no production
+chain-ID mapping was added.
+
+### Incoherent positive fixtures replaced (section 4)
+
+The D7-A1 migration owner (`for_current_authorization_fixture` with independent
+constants and an empty key provider) was accepted only as a temporary fixture
+while finding #2 stayed open. It is replaced by coherent fixtures
+(`coherent_authority_for` / `coherent_snapshot_for` / `migration_bound_snapshot`
+and the `snapshot_{matching,superseded,unavailable}` helpers) whose owner
+authorization, membership, keys, suite and signing domain **describe the actual
+verifier**: the owner's candidate authority shares the verifier's real
+`ConsensusValidatorSet` and `SuiteAwareValidatorKeyProvider` and re-derives its
+genesis / commitment / chain identity from the verifier's D6 domain. Existing
+`Required` policies and the original cryptographic assertions are retained; no
+test was downgraded to `LocalFixtureUnsigned` and no assertion was weakened.
+
+### Behavioral tests (section 5) — both families, through the real handler
+
+Added to `mod run422_d7a`, all passing:
+
+* Coherently bound current authority ⇒ valid signature verifies:
+  `d7a_{proposal,vote}_matching_current_state_verify_accepted` (retained,
+  now driven by a coherent snapshot).
+* Owner A paired with verifier B ⇒ rejection:
+  `d7a2_bind_rejects_owner_a_verifier_b_while_b_is_valid` asserts `try_bind`
+  fails closed for the incoherent (A-owner, B-verifier) pair, and
+  **independently** shows B is a valid verifier when coherently bound (a
+  B-signed proposal verifies through the handler under a B snapshot) — so the
+  negative is attributable to binding, not to B being invalid.
+* Same validator count but different keys ⇒ rejection:
+  `d7a2_bind_rejects_same_count_different_keys` (identical ids/weights but a
+  different membership instance ⇒ `MembershipMismatch`; and, isolating the key
+  provider by sharing B's exact membership while pairing A's key provider ⇒
+  `KeyProviderNotShared`).
+* Different genesis / commitment / chain ⇒ rejection:
+  `d7a2_bind_rejects_isolated_genesis_commitment_chain` (each field varied
+  alone rejects with its specific reason).
+* Substitution prevention through the handler:
+  `d7a2_{proposal,vote}_admitted_verifier_ignores_supplied_pv` — with the
+  admitted snapshot bound to A and a **separately-supplied** `pv_authority` = B,
+  an A-signed message is accepted (proving A was used and B ignored; the A-signed
+  message is independently shown **invalid under B**), and a B-signed message
+  (independently shown **valid under B**) is rejected.
+* Correctly re-signed message carrying an unauthorized epoch ⇒ rejection before
+  effects: `d7a2_{proposal,vote}_unauthorized_epoch_rejected_before_effects`
+  (epoch-1 message, signature independently asserted valid under the D6 domain;
+  `inbound_*_epoch_unauthorized_total == 1`; direct backend-call counter `0`;
+  zero latency observation, delivery, engine acceptance, outbound action, and
+  view mutation).
+* Missing owner and explicitly unavailable owner remain rejected: the retained
+  `d7a1_*` missing-owner tests and
+  `d7a_{proposal,vote}_unavailable_current_state_rejects_before_crypto`.
+* F6 mismatch precedes authorization lookup:
+  `d7a1_{proposal,vote}_f6_mismatch_precedes_missing_owner` and
+  `d7a_{proposal,vote}_f6_mismatch_precedes_freshness`.
+
+For every mismatch case the message's signature validity under B (or under the
+D6 domain) is independently established with `verify_{proposal,vote}_msg_with_domain`,
+so the negative is attributable to authorization binding. ACTIVE restore-mode
+negative + admitted positive controls and the verification-vs-engine/QC
+acceptance distinction are retained.
+
+### Direct backend-call instrumentation (section 6)
+
+`CountingSigVerifier` wraps the real ML-DSA-44 backend, increments a shared
+`AtomicU64` **inside** `verify_vote` / `verify_proposal`, and delegates to the
+real backend (`counting_pv` builds a `ProposalVoteAuthority` using it). The
+positive controls
+(`d7a1_{proposal,vote}_backend_call_counter_positive_control`) demonstrate the
+counter increments on a real verification; the missing-owner and
+unauthorized-epoch negatives reset the counter before the handler call and
+assert **zero** backend calls, and pass a recording outbound facade
+(`D7ActionRecorder`) asserting **zero** outbound actions. The earlier D7-A1
+comment/evidence describing the latency counter as "equivalent direct
+instrumentation" is corrected (here and in the D7-A1 section above): the latency
+observation is supplementary, and a direct backend-call counter is now the
+primary evidence.
+
+### Validation results (tested SHA `2aefdee5575677e312abffcad98b9ca536f0664e`)
+
+* `cargo test -p qbind-node --lib run422_d7a` ⇒ 26 passed, 0 failed (19 retained
+  + 7 new `d7a2_*` plus the 2 backend-counter positive controls).
+* `cargo test -p qbind-node --lib binary_consensus_loop` ⇒ 142 passed, 0 failed.
+* `cargo test -p qbind-node --lib genesis_consensus_authority` ⇒ 14 passed, 0 failed.
+* `cargo test -p qbind-node --test run_422_genesis_consensus_authority_tests
+  --test run_422_d7_authority_lifetime_tests --test run_422_startup_refusal_tests
+  --test run_420_production_policy_reachability_tests
+  --test run_418_authenticated_peer_consensus_sender_binding_tests
+  --test run_418_newview_demux_chain_integration_tests` ⇒ 15/…/4/3/18/3 passed,
+  0 failed.
+* `cargo test -p qbind-consensus` ⇒ all passed, 0 failed (D6 proposal/vote
+  verify matrix included).
+* `cargo check -p qbind-node` (dev profile, default features) ⇒ clean, exit 0.
+* `cargo clippy -p qbind-node --lib` ⇒ exit 0 (pre-existing warnings only, none
+  in the changed lines).
+* `cargo build -p qbind-node --release` ⇒ Finished, exit 0 (`release` profile,
+  optimized target(s) in 5m 25s).
+* **Security tools (`parallel_validation`):** Code Review ⇒ completed, reviewed 3
+  files, no review comments (the underlying model-backed reviewer reported an
+  environment/model-registry error, so this is not a substitute for manual
+  review). CodeQL (`rust`) ⇒ **Analysis SKIPPED because the database size is too
+  large** — 0 alerts reported, but this is an INCOMPLETE analysis and is NOT
+  converted into a clean/passing conclusion. CodeQL coverage for this change
+  remains outstanding.
+* Known unrelated broad-Clippy/`--tests` failures (e.g.
+  `m16_epoch_transition_hardening_tests` missing storage helpers) are kept
+  separate and are not touched by this change.
+
+### Finding dispositions and remaining obligations
+
+Finding **#2** may be marked **closed for the tested inbound boundary only**:
+admission now authorizes the exact snapshot the handler cryptographically
+consumes, and a separately-supplied context cannot substitute different inputs.
+Findings **#3** (ticket issuer identity + generation exhaustion via
+`saturating_add`) and **#4** (handler-ordering / replacement) remain
+**OPEN**. This phase establishes no durable anti-rollback and no production
+lifecycle.
+
+```
+D7A_INBOUND_VERDICT=PARTIAL (findings #1 missing-owner + #2 snapshot-binding CLOSED for tested inbound boundary; #3–#4 OPEN)
 D7_STATUS=PARTIAL-CODE-TEST / PRODUCTION-LIFECYCLE-UNAVAILABLE
 DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED
 GENESIS_AUTHORITY_ACTIVATION=DISABLED
