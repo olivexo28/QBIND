@@ -1089,7 +1089,12 @@ otherwise-impossible interleaving.
 * Consequence (the serialization argument): within **one** handler call,
   admission (`owner().admit()`), signature verification, confirmation
   (`owner().confirm(&ticket)`, `:3854` / `:4150`) and the synchronous effect
-  all observe the **same** authorization generation. Replacing the current
+  all observe the **same** authorization generation. Refined (Run 422 D7-B1):
+  the admission→verify→confirmation→effect **ordering** is **source-backed**
+  (borrow model + statement order) rather than directly instrumented in A4;
+  the A4 tests observe the boundary outcomes (reject-before-crypto / reach
+  verification+confirmation), not an injected probe between confirm and effect.
+  Replacing the current
   state requires **exclusive `&mut` access** to the owner, which is only
   reachable at a call site **outside** the handler (`owner_mut()` at `:1325`
   driving `replace_for_fixture` at `genesis_consensus_authority.rs:1255`,
@@ -1109,7 +1114,12 @@ counter, and any **immediate outbound handoff** to the in-process
 include later network delivery over a real socket, nor cancellation of work
 already queued before entry. A facade call or queue insertion inside the call
 is the boundary; it is **not** proof of downstream transmission. `engine
-.current_view()` before/after is used as the source-backed no-effect witness.
+.current_view()` before/after is used as a **partial** source-backed no-effect
+witness — refined (Run 422 D7-B1): unchanged `current_view` alone is **not** a
+complete engine-state non-mutation witness (a mutation could leave the view
+scalar unchanged), so the non-mutation claim rests on the source-backed
+single-borrow / no-suspension serialization argument, with `current_view`
+as corroborating rather than dispositive evidence.
 
 ### New behavioral evidence (section 5) — 6 A4 tests in `mod run422_d7a`, all passing
 Coherent bound snapshots, `Required` policy, real F6 admission
@@ -1205,6 +1215,107 @@ checkpoints, production chain-ID mapping, QC migration, general outbound
 freshness lifecycle, or governance activation was implemented.
 
 ```
+D7A4_SERIALIZED_HANDLER_ORDERING=CLOSED-CODE-TEST (scoped positive)
+D7A4_CONCURRENT_INVALIDATION=NOT-CLAIMED
+D7A4_QUEUED_WORK_CANCELLATION=NOT-CLAIMED
+D7A4_PERSISTENT_FRESHNESS=NOT-ESTABLISHED
+D7A_INBOUND_VERDICT=PARTIAL
+D7_STATUS=PARTIAL-CODE-TEST / PRODUCTION-LIFECYCLE-UNAVAILABLE
+DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED
+GENESIS_AUTHORITY_ACTIVATION=DISABLED
+CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED
+SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO
+```
+
+## Run 422 D7-B1 — current authorization at the immediate OUTBOUND action-forwarding boundary (code + test)
+
+Tested implementation + final documentation SHA: `ab69af25a70341cb2bf2fe3f2c0cc7c93e669b1d` (branch `copilot/run-422-d7-b1`; prior D7-A4 tested SHA `eab2a838a12be96d8e7de242bad7ed3da3e3370e`, reviewed A4 final `3627f1b36d8149a5d80c48d6bf9b8609791d3e55` — both are pre-clone ancestry, not present as local objects in this shallow single-branch checkout; no ancestry was invented).
+
+### Exact forwarding scope and call-site changes (section 3)
+The single guarded boundary is `forward_actions_to_facade` (`crates/qbind-node/src/binary_consensus_loop.rs:3613`). Its signature now threads an explicit, coherently-bound current-authorization snapshot **before** the test-only passthrough authority:
+
+* new parameter `current_auth: Option<&AuthorizedProposalVoteSnapshot>` (the enforced snapshot) precedes the retained `pv_authority: Option<&ProposalVoteAuthority>` (consulted **only** on the `LocalFixtureUnsigned` no-snapshot passthrough) and `verification_policy`.
+* two helpers were added: `admit_outbound_action` (`:3505`) returning `OutboundAuthAdmission::{Admitted{signer_ctx,ticket}, Rejected}`, and `confirm_outbound_before_effect` (`:3566`).
+* outbound reject→counter mapping helpers `record_outbound_proposal_current_auth_reject` (`:5404`) and `record_outbound_vote_current_auth_reject` (`:5430`) map each `FreshnessError` to the correct per-action counter.
+
+Call sites updated:
+
+* `do_leader_tick` (`:3011`) gained a `current_auth` parameter (placed before `signer_ctx`) and forwards it; both production run-loop call sites (`:2679`, `:2824`) pass `None` — production wires **no** snapshot, so under `Required` leader-emitted actions reject fail-closed exactly as before (no behavioral regression, no new production capability).
+* the real inbound Proposal handler’s immediate action handoff (`:4255`) now passes its **already-bound** `current_auth` (plus `pv_authority`) through the strengthened interface instead of the previously-computed `effective_pv`, so the inbound-admitted snapshot is the same object that guards the outbound handoff.
+
+New per-action counters on `BinaryConsensusLoopInboundStats` (`:1749`–`:1757`), with documented semantics (a rejected action is **never** counted as sent): `outbound_{proposal,vote}_current_state_unavailable_total`, `_authority_superseded_total`, `_epoch_unauthorized_total`, `_authorization_exhausted_total`, `_authority_stale_before_effect_total`.
+
+### Per-action authorization / signing / confirmation / effect sequence (section 3)
+For each of `BroadcastProposal`, `BroadcastVote` and `SendVoteTo`, under `Required`:
+
+1. **Admit** through `current_auth.owner().admit()` **before any signing**. Missing snapshot (`None` under `Required`) → `*_current_state_unavailable_total`; `Unavailable` → `*_current_state_unavailable_total`; `Superseded` → `*_authority_superseded_total`; `Exhausted` → `*_authorization_exhausted_total`. All reject before crypto.
+2. **Epoch check**: the action message’s own `epoch` must equal `current_auth.authorized_epoch()` (founding epoch 0). A mismatch → `*_epoch_unauthorized_total`, rejected **before signing**; the message is **never** rewritten to pass.
+3. **Sign** through the snapshot’s **bound verifier** (`snap.verifier()`) — never a separately-supplied authority or Timeout context. The retained D6 wire-chain checks, v2 signing-domain bytes, signer checks and fail-closed signing errors inside `sign_{proposal,vote}_for_broadcast` run here (`*_wire_chain_mismatch` / `*_signing_failure` preserved).
+4. **Confirm** the issuer/generation-bound ticket via `owner().confirm(&ticket)` **immediately before** the facade call. Confirmation failure (owner replaced / generation advanced / foreign / exhausted between admit and effect) → `*_authority_stale_before_effect_total`, effect **suppressed**, signed message discarded and not counted as sent.
+5. **Effect**: only on confirmation success does the facade method fire (`broadcast_proposal` / `broadcast_vote` / `send_vote_to`) and the sent counter increment.
+
+### Behavioral tests (section 5) — `mod run422_d7b`, 24 tests, all passing
+Located inside `mod run422_d7a` at `:15541` (reusing the D7-A coherent snapshot / exhaustion / replacement fixtures and the 4-validator ML-DSA-44 crypto fixture). Each drives the **actual** `forward_actions_to_facade` with a recording facade (`OutboundRecorder`, capturing proposals / broadcast-votes / directed-votes **separately**) and a directly-instrumented `RecordingSigner` that counts `sign_proposal` / `sign_vote` and **delegates to the real ML-DSA-44 `LocalKeySigner`**. All three variants are exercised **independently** — a rejected Proposal never stands in for the Vote or SendVoteTo branches.
+
+Test-to-claim matrix (each row present for **all three** variants: Proposal / BroadcastVote / SendVoteTo):
+
+| Scenario | Test (per variant) | Asserted |
+| --- | --- | --- |
+| matching current authorization signs + reaches the correct facade method | `d7b_{proposal,vote,send_vote_to}_matching_*` | signer invoked exactly once; correct sent counter = 1; **positive control** — emitted message verifies under the SELECTED domain and FAILS under a FOREIGN domain (proves the real signing path is connected) |
+| missing current snapshot | `d7b_*_missing_snapshot_rejects_before_signing` | `*_current_state_unavailable_total=1`; zero signer calls; zero facade calls; legacy `*_verification_context_unavailable_total=0` (rejection now occurs at the stronger D7-B1 layer) |
+| unavailable authorization | `d7b_*_unavailable_rejects_before_signing` | `*_current_state_unavailable_total=1`; no signing/effect |
+| superseded authorization | `d7b_*_superseded_rejects_before_signing` | `*_authority_superseded_total=1`; no signing/effect |
+| exhausted authorization | `d7b_*_exhausted_rejects_before_signing` | `*_authorization_exhausted_total=1`; no signing/effect |
+| unauthorized message epoch (epoch=1) | `d7b_*_unauthorized_epoch_rejects_before_signing` | `*_epoch_unauthorized_total=1`; no signing/effect |
+| separately supplied authority B cannot replace admitted A | `d7b_*_supplied_authority_b_cannot_replace_admitted_a` | A signs (its counter=1); B never invoked (B counter=0); emitted message verifies under A’s domain, not B’s |
+| replacement after a completed authorized call | `d7b_*_replacement_after_completed_call_rejects_next` | call 1 sends; after `replace_current_with_b` the next call rejects with `*_authority_superseded_total=1` before signing; signer count unchanged; no further effect |
+
+Directed-Vote specificity: the `send_vote_to` tests assert the `directed_votes` capture (recipient `ValidatorId(3)`) and that `broadcast_votes` stays empty (and vice-versa for the broadcast tests), so the wrong method can never satisfy the assertion. Every rejection asserts sent counters are unchanged. A4’s synchronous borrowing model is preserved: replacement is a deterministic between-call `&mut` operation (`replace_current_with_b`), with no unsafe code or test-only mutable aliasing manufacturing concurrent mutation.
+
+### Migrated Required-positive tests (section 4)
+* `run422_d5d_outbound_forwarding_suppressed_without_pv_authority`: now drives the strengthened interface with `None, None`; asserts the D7-B1 unavailable counters (`outbound_proposal_current_state_unavailable_total=1`, `outbound_vote_current_state_unavailable_total=2`) and that the older D5 `*_verification_context_unavailable_total` counters are `0` (rejection moved earlier — a strengthening, not a weakening). No assertion was weakened; no switch to `LocalFixtureUnsigned`.
+* `run422_d6_outbound_vote_wire_chain_refusal_through_forward_actions` (both sub-cases): now build a coherently-bound `coherent_snapshot_for(&pv)` and pass `Some(&snap), None`, so the D6 wire-chain refusal and correct-wire control are exercised **through** the bound snapshot (admission + founding-epoch check pass; base messages carry epoch 0). Selected/foreign/legacy-domain signature controls and the wire-chain-mismatch / signing-error coverage are retained.
+
+The explicit test-only unsigned policy (`LocalFixtureUnsigned`) remains reachable **only** without a wired snapshot and is **not** exposed through any production configuration route.
+
+### Upstream engine / cache effects OUTSIDE this guard (documented, not silently expanded)
+This phase enforces authorization only on actions **already supplied** to `forward_actions_to_facade`. It does **not** establish authorization before upstream engine action generation (`engine.on_proposal_event` / leader-tick action production), leader-cache updates (the `reemit_*` single-shot caches), or reconfiguration/peer-transition observation. Those earlier effects (engine state advance, action enqueue, last-known-peer set updates) occur before this boundary and are **not** guarded by it.
+
+### Remaining cached / deferred / later-delivery freshness gaps (retained OPEN)
+* **Cached re-emission** (B9/B10 `maybe_reemit_on_late_peer_connect`, which calls `sign_*_for_broadcast` directly): **OPEN** — not threaded through the D7-B1 snapshot in this phase.
+* **Deferred-work re-admission**: **OPEN**.
+* **Later network delivery** over a real socket: **OPEN** — a facade call is the boundary, not proof of transmission (no socket delivery is claimed from facade observations).
+* Every other `sign_*_for_broadcast` helper caller beyond the two guarded production call sites: inventoried and kept explicitly **OPEN** (this task was not expanded to all signing-helper callers).
+
+### A4 wording refinement (section 8)
+The A4 report text is refined in place: (a) the admission→verify→confirmation→effect **ordering** is **source-backed** (borrow model + statement order) and is **not** claimed as directly instrumented in A4; (b) unchanged `engine.current_view()` alone is **not** a complete engine-state non-mutation witness — it is corroborating, not dispositive, with the non-mutation claim resting on the single-borrow / no-suspension serialization argument. The valid scoped serialized-handler result (`D7A4_SERIALIZED_HANDLER_ORDERING=CLOSED-CODE-TEST`) is preserved. No claim of cancellation of previously-queued work or actual socket delivery is made.
+
+### Validation results (tested SHA `ab69af25a70341cb2bf2fe3f2c0cc7c93e669b1d`)
+Profile: `test`/`dev` (unoptimized + debuginfo) for tests/check/clippy; `release` (optimized) for the node build. Default features. Sequential builds; normal task-branch commits checkpointed before the expensive release build. Overlapping subsets identified inline.
+
+* `cargo test -p qbind-node --lib run422_d7b` → ok, **24 passed**, 0 failed, 1524 filtered out (exit 0). *(strict subset of the run422 run below.)*
+* `cargo test -p qbind-node --lib run422` → ok, **82 passed**, 0 failed, 1466 filtered out (exit 0) — the 58 retained D7-A/A3/D5/D6 in-crate tests plus the 24 new D7-B1 tests.
+* `cargo test -p qbind-node --lib binary_consensus_loop` → ok, **176 passed**, 0 failed, 1372 filtered out (exit 0) — full module, no regressions. *(superset of the two runs above.)*
+* `cargo test -p qbind-node --test run_420_production_policy_reachability_tests` → ok, **3 passed** (exit 0).
+* `cargo test -p qbind-node --test run_422_d7_authority_lifetime_tests` → ok, **14 passed** (exit 0).
+* `cargo test -p qbind-node --test run_422_genesis_consensus_authority_tests` → ok, **15 passed** (exit 0).
+* `cargo test -p qbind-node --test run_422_startup_refusal_tests` → ok, **4 passed** (exit 0).
+* `cargo test -p qbind-node --test run_422_d4_startup_ordering_tests` → ok, **5 passed** (exit 0).
+* `cargo check -p qbind-node --lib` → Finished, exit 0.
+* `cargo clippy -p qbind-node --lib` → 0 errors; the two new multi-arg fns carry `#[allow(clippy::too_many_arguments)]` per the file’s existing convention (7 prior uses); only pre-existing warnings remain, exit 0.
+* Release `qbind-node` build: `cargo build -p qbind-node --release` → Finished in 5m 28s, exit 0 — this run **does** cover production-source changes (the forwarding boundary), so the release build was re-run and passed. `CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED` is retained: the release build proves compilation, **not** adversarial release-binary current-authorization activation (production still wires no snapshot).
+
+### Security-tool disposition (accurate, no incomplete-analysis-as-pass)
+CodeQL: this pass **does** touch production consensus source, so CodeQL is **not** a scope skip; it is run via `parallel_validation` with `codeql.isTrivial=false`. Any database-size skip or reviewer-backend error is recorded as **incomplete analysis**, not a passing scan. Historical production-analysis CodeQL database-size skips from earlier D7 passes remain as recorded and are not overwritten.
+
+### Scoped verdict and preserved posture
+The only new positive verdict names the **immediate outbound forwarding boundary** (`forward_actions_to_facade`) and nothing downstream. Preserved (task §6): production Proposal/Vote authority unavailable; unavailable-only production current authorization; genesis startup refusal; `Required` default; F6-before-inbound-authorization ordering; complete D6 domain binding and unchanged signing bytes; Timeout/NewView separation; issuer-bound tickets and terminal exhaustion; all completed D7-A1–A4 guarantees. No production activation, trusted-epoch fabrication, storage/recovery lifecycle, persistent checkpoints, durable anti-rollback, production chain-ID mapping, QC migration, concurrency redesign, or Run 423 work was implemented.
+
+```
+D7B1_OUTBOUND_FORWARDING_BOUNDARY=CLOSED-CODE-TEST (scoped positive; immediate forward_actions_to_facade only)
+D7B1_CACHED_REEMISSION_FRESHNESS=OPEN
+D7B1_DEFERRED_WORK_READMISSION_FRESHNESS=OPEN
+D7B1_LATER_SOCKET_DELIVERY=NOT-CLAIMED
 D7A4_SERIALIZED_HANDLER_ORDERING=CLOSED-CODE-TEST (scoped positive)
 D7A4_CONCURRENT_INVALIDATION=NOT-CLAIMED
 D7A4_QUEUED_WORK_CANCELLATION=NOT-CLAIMED
