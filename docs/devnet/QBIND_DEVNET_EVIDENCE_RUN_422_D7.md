@@ -1049,3 +1049,170 @@ DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED
 GENESIS_AUTHORITY_ACTIVATION=DISABLED
 SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO
 ```
+
+## Run 422 D7-A4 — real-handler authorization-to-effect ordering under the existing ownership model (test + docs)
+
+This bounded phase addresses finding **#4** for the existing **synchronous**
+inbound Proposal/Vote handler. It is **test + documentation only**: no
+production behavior or build source changed (`crates/qbind-node/src/
+binary_consensus_loop.rs` production paths and `genesis_consensus_authority.rs`
+production paths are untouched; the only edit is additive `#[cfg(test)]`
+coverage inside `mod run422_d7a`). The completed D7-A1/A2/A3 boundaries are
+preserved and not reopened. No concurrency was introduced to manufacture an
+otherwise-impossible interleaving.
+
+### Provenance / deviations (no invented ancestry)
+* Branch: `copilot/run-422-d7-a4`.
+* This clone is a shallow single-branch clone (`.git/shallow` present); the
+  reviewed branch `copilot/run-422-d7-a3-complete-validation` and the SHAs
+  `f08079856a9214a6108436a01b8f5d8bf14e0c82` (reviewed final) and
+  `56416d64717f2e7d19f4656fbcbe77b3a72b7407` (prior tested) are **not present**
+  as local objects (`git cat-file -t` fails). No ancestry was invented; A4 work
+  was performed on the supplied task branch. Disk: ~85 GB free.
+* Implementation (tests) SHA: `eab2a838a12be96d8e7de242bad7ed3da3e3370e`.
+* Final documentation SHA: recorded by the commit that lands this section
+  (branch tip; see the PR commit list).
+
+### Ownership / serialization model and its assumptions (source-backed)
+* The handler borrows the current authorization **immutably**:
+  `current_auth: Option<&AuthorizedProposalVoteSnapshot>`
+  (`binary_consensus_loop.rs:3552`). The snapshot holds its
+  `CurrentAuthorizationOwner` by value with **no interior mutability** (no
+  `Cell`/`RefCell`/`Mutex`/`Arc<Mutex>` around the owner or its `current`
+  state; `AuthorizedProposalVoteSnapshot` at `:1176`).
+* The handler is **fully synchronous** — no `async`/`await` and no other
+  suspension point exists between admission and effect. The backend crypto
+  callbacks (`verify_proposal_msg_with_domain` / `verify_vote_msg_with_domain`)
+  receive only immutable borrows of the snapshot-bound verifier
+  (`effective_pv`, `:3669` / `:3992`) and cannot re-enter to replace
+  `current_auth`.
+* Consequence (the serialization argument): within **one** handler call,
+  admission (`owner().admit()`), signature verification, confirmation
+  (`owner().confirm(&ticket)`, `:3854` / `:4150`) and the synchronous effect
+  all observe the **same** authorization generation. Replacing the current
+  state requires **exclusive `&mut` access** to the owner, which is only
+  reachable at a call site **outside** the handler (`owner_mut()` at `:1325`
+  driving `replace_for_fixture` at `genesis_consensus_authority.rs:1255`,
+  both `#[cfg(test)]`).
+* Assumption/limitation: this is a **SERIALIZED-HANDLER** argument for the
+  existing single-threaded borrowing model. It does **not** establish
+  concurrent invalidation, and it does not assume a concurrency redesign. A
+  redesign is neither a prerequisite nor an authorized deliverable here.
+
+### Exact synchronous effect boundary (defined precisely)
+The "synchronous effect" asserted by these tests is, within the handler call:
+the **engine mutation** (`engine.on_proposal_event` / `engine.on_vote_event`),
+the **delivery counters** (`inbound_proposals_delivered` /
+`inbound_votes_delivered`, `*_engine_accepted`), the **restore deferral**
+counter, and any **immediate outbound handoff** to the in-process
+`ConsensusNetworkFacade` reached during the call. It explicitly does **NOT**
+include later network delivery over a real socket, nor cancellation of work
+already queued before entry. A facade call or queue insertion inside the call
+is the boundary; it is **not** proof of downstream transmission. `engine
+.current_view()` before/after is used as the source-backed no-effect witness.
+
+### New behavioral evidence (section 5) — 6 A4 tests in `mod run422_d7a`, all passing
+Coherent bound snapshots, `Required` policy, real F6 admission
+(`pv_binding_gate`) and real ML-DSA-44 verification (`counting_pv` wrapping the
+real `MlDsa44Backend`) are used throughout. `CountingSigVerifier` provides a
+direct backend-call counter; `D7ActionRecorder` records emitted outbound
+actions. Replacement between/before calls uses the real `owner_mut()
+.replace_for_fixture` (exclusive `&mut` at a call site outside the handler),
+never a mid-call hook and never shared mutable authorization; no sleeps.
+
+| Test (`run422_d7a::…`) | Claim | Kind |
+| --- | --- | --- |
+| `d7a4_proposal_replacement_between_completed_calls_obtains_fresh_authorization` | Call 1 (matching) reaches verification + confirmation and the real backend; after an exclusive `&mut` replacement between calls, call 2 obtains **fresh** authorization and rejects the superseded candidate before crypto (backend counter unchanged, latency observations 0, no engine effect). | observed + source-backed |
+| `d7a4_vote_replacement_between_completed_calls_obtains_fresh_authorization` | Same serialized-ordering claim on the Vote arm. | observed + source-backed |
+| `d7a4_proposal_replacement_before_entry_rejects_before_crypto` | Replacement to a superseding configuration **before** entry ⇒ reject before crypto and before any downstream effect (backend 0, facade 0, view unchanged). | observed + source-backed |
+| `d7a4_vote_replacement_before_entry_rejects_before_crypto` | Same, Vote arm. | observed + source-backed |
+| `d7a4_proposal_exhausted_authorization_rejects_before_crypto` | Terminally **exhausted** authorization rejects with the exhausted admission reason (`inbound_proposal_authorization_exhausted_total==1`), distinct from unavailable/superseded, before crypto and effect. | observed + source-backed |
+| `d7a4_vote_exhausted_authorization_rejects_before_crypto` | Same, Vote arm. | observed + source-backed |
+
+Retained (unchanged) controls that A4 relies on and preserves: matching-state
+verify-accepted, unavailable/superseded/missing-owner (finding #1) rejections,
+`d7a_ticket_confirm_fails_after_replacement` (admit→replace→confirm state
+machine), `d7a_active_restore_mode_negative_and_positive_control` (valid control
+reaches actual deferral; invalid cannot change deferral/delivery/reconfig), and
+`d7a2_immediate_handoff_uses_bound_authority_not_supplied_b` (engine-produced
+action invokes only the bound signer and records the emitted Vote).
+
+### Observed vs source-backed vs still-unproven
+* **Observed** (through the real handler + real ML-DSA-44): fresh authorization
+  is re-derived on each entry; a superseded/exhausted current state rejects
+  **before** the real signature backend is invoked and before any engine/facade
+  effect; matching state reaches verification and confirmation.
+* **Source-backed**: the immutable-borrow + no-interior-mutability +
+  no-suspension-point argument that serializes admission→verify→confirm→effect
+  within one call and forces replacement to an exclusive external `&mut` site.
+* **Still unproven / out of scope (retained OPEN)**: concurrent invalidation
+  inside a single call; queued-work cancellation; persistent/durable freshness
+  across restart; production current-authorization lifecycle (production
+  `current_auth` remains **unavailable-only**). No claim is made that every
+  downstream stage was reached merely because a message verified.
+
+### This-phase validation (exact commands, counts, exit codes)
+Profile: `test`/`dev` (unoptimized + debuginfo), default features. Tested
+implementation SHA `eab2a838a12be96d8e7de242bad7ed3da3e3370e`.
+* `cargo test -p qbind-node --lib run422_d7a::d7a4` → ok, **6 passed**, 0 failed
+  (exit 0).
+* `cargo test -p qbind-node --lib run422_d7a` → ok, **36 passed**, 0 failed
+  (exit 0) — the 30 retained D7-A1/A2/A3 in-crate tests plus the 6 new A4 tests
+  (overlapping subset: the 6 `d7a4_*` are a strict subset of the 36).
+* `cargo test -p qbind-node --lib d7a3_ticket_issuer_and_exhaustion` → ok,
+  **10 passed**, 0 failed (exit 0).
+* `cargo test -p qbind-node --test run_422_d7_authority_lifetime_tests` → ok,
+  **14 passed**, 0 failed (exit 0).
+* `cargo test -p qbind-node --test run_422_genesis_consensus_authority_tests`
+  → ok, **15 passed**; `--test run_422_startup_refusal_tests` → ok,
+  **4 passed** (exit 0).
+* `cargo check -p qbind-node --lib` → Finished, exit 0.
+* `cargo clippy -p qbind-node --lib` → 0 errors (pre-existing warnings only),
+  exit 0. `cargo clippy -p qbind-node --lib --tests` surfaces **5 pre-existing
+  E0599 errors in the unrelated integration test
+  `crates/qbind-node/tests/m16_epoch_transition_hardening_tests.rs`**
+  (`set_inject_write_failure` / `clear_epoch_transition_marker`, a
+  feature-gated fault-injection API); these are **not** introduced by this pass
+  and do not touch the A4 change (lib-only).
+* Release `qbind-node` build: **not re-run** this pass. This is a test/docs-only
+  change with no production behavior/build source delta, so the previous
+  release-build result is **preserved at its actual prior tested SHA** rather
+  than relabeled. `CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED`
+  is retained.
+
+### CodeQL reconciliation (kept separate, no history overwrite)
+Two distinct reasons must not be conflated: (a) the **historical** production-
+analysis CodeQL **database-size** skips recorded in earlier D7 passes remain as
+they were — not overwritten and not claimed as a successful scan; and (b) this
+completion pass is **test/docs scope** (no production source delta), so its
+CodeQL security-scan disposition is a **scope skip**, which is **incomplete
+analysis**, not a passing scan. Neither is reported as success.
+
+### Finding dispositions and remaining obligations
+Finding **#4** is established **only** as a scoped **SERIALIZED-HANDLER**
+positive: under the existing single-threaded immutable-borrow model, the real
+handler re-derives fresh authorization on each entry and rejects a
+superseded/exhausted current state before crypto and before any synchronous
+effect. No claim of concurrent invalidation, queued-work cancellation,
+persistent freshness, or production-lifecycle completion is made. Preserved
+boundaries (task §6): production Proposal/Vote authority unavailable;
+unavailable-only production current authorization; genesis startup refusal;
+`Required` default; F6-before-authorization ordering; complete D6 domain
+binding and unchanged signing bytes; Timeout/NewView separation; issuer-bound
+tickets and terminal exhaustion; bound authority at the immediate handoff. Run
+423 remains deferred; no storage/recovery, durable anti-rollback, persistent
+checkpoints, production chain-ID mapping, QC migration, general outbound
+freshness lifecycle, or governance activation was implemented.
+
+```
+D7A4_SERIALIZED_HANDLER_ORDERING=CLOSED-CODE-TEST (scoped positive)
+D7A4_CONCURRENT_INVALIDATION=NOT-CLAIMED
+D7A4_QUEUED_WORK_CANCELLATION=NOT-CLAIMED
+D7A4_PERSISTENT_FRESHNESS=NOT-ESTABLISHED
+D7A_INBOUND_VERDICT=PARTIAL
+D7_STATUS=PARTIAL-CODE-TEST / PRODUCTION-LIFECYCLE-UNAVAILABLE
+DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED
+GENESIS_AUTHORITY_ACTIVATION=DISABLED
+CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED
+SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO
+```
