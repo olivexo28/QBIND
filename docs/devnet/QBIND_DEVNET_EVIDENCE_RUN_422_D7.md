@@ -786,8 +786,10 @@ This continuation of D7-A2 closes the remaining half of finding **#2** and
 corrects the immediate inbound action handoff. It is code + test only, stays
 fixture-only for established authorization, and does **not** add production
 chain-ID mapping, new activation routes, or any change to D6 signing bytes.
-Tested at branch `copilot/copilotcopilotrun-422-d7-a2-bind-current-authoriza`,
-final SHA `d7387dcecb55ba6d7050158c5d70492301f6334e`.
+Implemented at branch `copilot/copilotcopilotrun-422-d7-a2-bind-current-authoriza`,
+**implementation SHA** `d7387dcecb55ba6d7050158c5d70492301f6334e`; the **final
+documentation SHA** for that pass was `a7af8db` (the later evidence commit — the
+release build recorded there does not attest this changed A3 production source).
 
 ### Gap identified (section 2)
 
@@ -844,7 +846,7 @@ of scope).
   (one forwarded action). Assertions: B's signer is **never invoked**, and the
   emitted vote verifies under the selected domain A.
 
-### Validation results (tested + final SHA `d7387dcecb55ba6d7050158c5d70492301f6334e`)
+### Validation results (implementation SHA `d7387dcecb55ba6d7050158c5d70492301f6334e`; final doc SHA `a7af8db`)
 
 * `cargo test -p qbind-node --lib run422_d7a` ⇒ 30 passed, 0 failed, exit 0.
 * `cargo test -p qbind-node --lib binary_consensus_loop` ⇒ 146 passed, 0 failed,
@@ -852,7 +854,11 @@ of scope).
 * `cargo test -p qbind-consensus --test run_422_d6_pv_domain_isolation_tests` ⇒
   34 passed, 0 failed, exit 0 (D6 crypto matrix).
 * `cargo test -p qbind-node --test run_422_d7_authority_lifetime_tests
-  --test run_422_genesis_consensus_authority_tests` ⇒ 15 passed, 0 failed, exit 0.
+  --test run_422_genesis_consensus_authority_tests` ⇒ the two source targets carry
+  **14** and **15** tests respectively (combined 14 + 15 = 29), 0 failed, exit 0.
+  (The earlier "15 passed" figure recorded only the second target and undercounted
+  the 14-test lifetime target; the count is reconciled from actual per-target
+  execution records, not inferred from source line counts.)
 * `cargo check -p qbind-node --lib` ⇒ clean, exit 0.
 * `cargo clippy -p qbind-node --lib` ⇒ exit 0 (pre-existing warnings only; none in
   the changed lines).
@@ -934,25 +940,101 @@ generation+1 cannot be represented, the owner latches a terminal exhausted state
 The exhaustion-injection helper (`set_generation_for_exhaustion_fixture`) is
 `cfg(test)`-only; production retains **unavailable-only** current-authorization
 construction. `confirm` returns a bounded, non-secret `ConfirmError`
-(`ForeignIssuer` / `Stale` / `Exhausted`); inbound handlers dispatch the new
-exhaustion case into `inbound_{proposal,vote}_authorization_exhausted_total`
-without weakening any existing rejection.
+(`ForeignIssuer` / `Stale` / `Exhausted`).
+
+**Exhaustion counters (accurate scope).** The new
+`inbound_{proposal,vote}_authorization_exhausted_total` counters are incremented
+by **admission-error handling** only: `record_{proposal,vote}_current_auth_reject`
+maps `FreshnessError::AuthorizationExhausted` (returned by `admit` on an
+exhausted owner) into them. The real inbound handler's **confirmation**
+(`confirm`) failure path still routes through the existing
+stale-before-effect counter; a `ConfirmError::Exhausted` returned by `confirm`
+is **not** separately dispatched through the real handler in this phase and is
+**not** claimed as demonstrated there. No existing rejection is weakened.
 
 ### Tests (section 5)
 
 New deterministic unit tests in
-`genesis_consensus_authority::tests::d7a3_ticket_issuer_and_exhaustion` (9,
+`genesis_consensus_authority::tests::d7a3_ticket_issuer_and_exhaustion` (10,
 passing): same-owner admit+confirm; foreign owner with identical config +
 generation; foreign unavailable owner; owner move preserves ticket; identical-
 config replacement invalidates earlier ticket; near-maximum advance;
 exhaustion permanently rejects admit+confirm incl. the last max-generation
-ticket; repeated post-exhaustion attempts; distinct per-owner identities. The
-retained `mod run422_d7a` (30) and D7 lifetime (14) controls still pass
-unchanged.
+ticket; repeated post-exhaustion attempts; distinct per-owner identities; and
+the shared-candidate regression below. The retained separate-candidate, move,
+stale-ticket and exhaustion tests are unchanged, as are the retained
+`mod run422_d7a` (30) and D7 lifetime (14) controls.
+
+**Shared-candidate regression — `shared_candidate_owners_have_distinct_issuer_identities`.**
+The pre-existing foreign-owner tests call `owner_matching()` separately, which
+allocates a *different* candidate `Arc` per owner, so they cannot by themselves
+distinguish issuer identity from candidate identity. This added test isolates
+the two: it creates **exactly one** candidate `Arc`, constructs two independent
+owners from `Arc::clone`s of that same candidate with byte-for-byte identical
+observed configuration and equal generations, and explicitly asserts
+`Arc::ptr_eq(owner_a.candidate(), owner_b.candidate())` (both owners share the
+single candidate allocation). It then obtains a ticket from each owner, proves
+each owner confirms **its own** ticket, and proves each **rejects the other's**
+ticket with `ConfirmError::ForeignIssuer`. Exact claim: *issuer identity is the
+per-owner opaque allocation, independent of a shared candidate allocation and of
+equal generation numbers.*
+
+### Provenance / SHAs (no invented ancestry)
+
+This A3 completion runs in a shallow single-branch clone of
+`copilot/run-422-d7-a3-complete-validation`; the earlier reviewed tip
+`db69457b687f8ca9d9edb9b1f671ae041e592d82` cited in the task is not present in
+this branch's local ancestry (only two commits are reachable). The recorded
+SHAs are therefore taken from this branch:
+
+* **A3 starting / implementation SHA** (issuer binding + exhaustion source and
+  `d7a3_ticket_issuer_and_exhaustion` module as reviewed):
+  `06dbfb68970f7f0e7a08c4841cb1ee576c8c4087`.
+* **Tested implementation SHA** (adds the shared-candidate regression test; all
+  validation below executed against this source):
+  `56416d64717f2e7d19f4656fbcbe77b3a72b7407`.
+* **Final documentation SHA**: recorded in the final report of this pass (the
+  commit that lands this evidence update), not back-dated here.
+
+### Validation results (tested SHA `56416d64717f2e7d19f4656fbcbe77b3a72b7407`)
+
+All commands were run in this environment against the tested SHA above, dev
+profile with default features unless noted. Sequential builds; normal commits
+were checkpointed before the expensive release build. Subset relationships are
+identified rather than summed.
+
+| # | Command | Profile / features | Target(s) & count | Result | Exit |
+|---|---------|--------------------|-------------------|--------|------|
+| 1 | `cargo test -p qbind-node --lib genesis_consensus_authority::tests::d7a3_ticket_issuer_and_exhaustion` | dev / default | 10 tests (incl. new shared-candidate) | 10 passed, 0 failed | 0 |
+| 2 | `cargo test -p qbind-node --lib genesis_consensus_authority` | dev / default | 24 tests (⊇ the 10 in #1) | 24 passed, 0 failed | 0 |
+| 3 | `cargo test -p qbind-node --lib run422_d7a` | dev / default | 30 tests (⊂ #4) | 30 passed, 0 failed | 0 |
+| 4 | `cargo test -p qbind-node --lib binary_consensus_loop` | dev / default | 146 tests (⊇ the 30 in #3) | 146 passed, 0 failed | 0 |
+| 5 | `cargo test -p qbind-node --test run_422_d7_authority_lifetime_tests` | dev / default | 14 tests | 14 passed, 0 failed | 0 |
+| 6 | `cargo test -p qbind-node --test run_422_genesis_consensus_authority_tests` | dev / default | 15 tests | 15 passed, 0 failed | 0 |
+| 7 | `cargo test -p qbind-consensus` (D6 crypto matrix) | dev / default | full crate suite, D6 proposal/vote verify matrix included | all passed, 0 failed | 0 |
+| 8 | `cargo check -p qbind-node` | dev / default | — | Finished (4m 11s) | 0 |
+| 9 | `cargo clippy -p qbind-node --lib` | dev / default | — | Finished; 87 pre-existing lib warnings, **none in the changed lines** | 0 |
+| 10 | `cargo build -p qbind-node --release` | release / default | — | Finished (5m 22s) | 0 |
+
+Subset notes: #1 ⊂ #2 (the d7a3 module is part of the `genesis_consensus_authority`
+lib tests); #3 ⊂ #4 (`run422_d7a` is a submodule of `binary_consensus_loop`).
+Counts from a superset are therefore **not** added to its subset. Targets #5 and
+#6 are distinct source files carrying **14** and **15** tests respectively; they
+are reported separately (combined 14 + 15 = 29), never inferred from source line
+counts.
+
+Known unrelated broad-`--tests` compilation failures (e.g.
+`m16_epoch_transition_hardening_tests` missing storage helpers) are pre-existing,
+untouched by this change, and kept separate from the targeted runs above.
+
+**Security tools.** CodeQL (`rust`): recorded **SKIPPED / INCOMPLETE** — the
+database size prevents analysis in this environment; this is **not** a passed
+scan and **not** a zero-alert security conclusion, and CodeQL coverage for this
+change remains outstanding. Code review tool: any model-backed reviewer
+backend/registry error is recorded separately and is **not** treated as a
+successful review result or a substitute for manual review.
 
 ### Finding dispositions
-
-Finding **#3** (ticket issuer identity + generation exhaustion) is now
 **closed at the owner/ticket boundary (code + test)**. Finding **#4**
 (real-handler replacement-ordering under the current single-threaded borrowing
 model) remains explicitly **OPEN** — these tests establish owner/ticket
