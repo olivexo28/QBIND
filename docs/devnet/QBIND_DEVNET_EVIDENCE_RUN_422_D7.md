@@ -779,3 +779,110 @@ GENESIS_AUTHORITY_ACTIVATION=DISABLED
 CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED
 SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO
 ```
+
+## Run 422 D7-A2 (continued) — complete domain binding (wire-chain-id) + immediate-handoff authority
+
+This continuation of D7-A2 closes the remaining half of finding **#2** and
+corrects the immediate inbound action handoff. It is code + test only, stays
+fixture-only for established authorization, and does **not** add production
+chain-ID mapping, new activation routes, or any change to D6 signing bytes.
+Tested at branch `copilot/copilotcopilotrun-422-d7-a2-bind-current-authoriza`,
+final SHA `d7387dcecb55ba6d7050158c5d70492301f6334e`.
+
+### Gap identified (section 2)
+
+The prior D7-A2 `try_bind` bound genesis identity, authority commitment,
+membership (ptr + structural), key provider (shared `Arc`) and the runtime-chain
+label, but it did **not** bind the D6 v2 domain's `expected_wire_chain_id`. An
+owner authorized for domain A could therefore authorize a verifier B that shares
+the same membership, key provider, runtime chain, genesis and commitment and
+differs **only** in `expected_wire_chain_id` — an incomplete cover of the
+selected v2 domain.
+
+### Binding completion (section 2)
+
+* `GenesisConsensusAuthority` now **independently holds** the authorized wire
+  chain id as `authorized_wire_chain_id: Option<u32>` with accessor
+  `authorized_wire_chain_id()`. Production constructors set it to `None` (there
+  is no runtime→wire chain-id mapping, so production stays unbindable and
+  honest); only the `#[cfg(test)]` `for_verification_snapshot_fixture` sets
+  `Some(_)`, fixed at owner construction.
+* `AuthorizedProposalVoteSnapshot::try_bind` adds a fail-closed check after the
+  chain-identity check: the owner's `authorized_wire_chain_id()` must be `Some`
+  and equal the verifier domain's `expected_wire_chain_id()`, else it returns the
+  new `SnapshotCoherenceError::WireChainIdMismatch`. The authorized wire id is
+  never read from the verifier during binding (no manufactured approval by
+  copying B's domain into the owner's expected identity); a `None` owner value
+  rejects.
+
+### Immediate-handoff correction (section 3)
+
+The Proposal handler verifies using `effective_pv` (the bound snapshot verifier
+when a snapshot is present), but on an engine-produced action it previously
+called `forward_actions_to_facade(..., pv_authority, ...)` — the separately
+supplied authority. That immediate path could switch from admitted A to
+unrelated B. It now forwards with the **bound** `effective_pv` so the outbound
+effect uses the same authority that admitted and verified the message; it never
+falls back to the supplied B or the Timeout signer. QC verification, general
+outbound, cached/directed/deferred freshness paths are unchanged (explicitly out
+of scope).
+
+### New behavioral tests (section 5) — in `mod run422_d7a`, all passing
+
+* `d7a2_bind_rejects_owner_a_verifier_b_differ_only_in_wire_chain_id` — owner A
+  vs verifier B identical in membership, key provider, runtime chain, genesis and
+  commitment, differing only in `expected_wire_chain_id`; `try_bind` fails closed
+  with `WireChainIdMismatch`.
+* `d7a2_wire_domain_proposal_ml_dsa_controls` and
+  `d7a2_wire_domain_vote_ml_dsa_controls` — real ML-DSA-44 controls: a B-domain
+  message is valid under coherently-authorized B, while A cannot authorize it;
+  the matching-A positive control is retained.
+* `d7a2_immediate_handoff_uses_bound_authority_not_supplied_b` — real handler with
+  coherent snapshot A and separately-supplied authority B, a recording facade
+  (`HandoffFacade`) and directly-instrumented A/B signers. Positive control: the
+  inbound A proposal is engine-accepted and the immediate action path is reached
+  (one forwarded action). Assertions: B's signer is **never invoked**, and the
+  emitted vote verifies under the selected domain A.
+
+### Validation results (tested + final SHA `d7387dcecb55ba6d7050158c5d70492301f6334e`)
+
+* `cargo test -p qbind-node --lib run422_d7a` ⇒ 30 passed, 0 failed, exit 0.
+* `cargo test -p qbind-node --lib binary_consensus_loop` ⇒ 146 passed, 0 failed,
+  exit 0.
+* `cargo test -p qbind-consensus --test run_422_d6_pv_domain_isolation_tests` ⇒
+  34 passed, 0 failed, exit 0 (D6 crypto matrix).
+* `cargo test -p qbind-node --test run_422_d7_authority_lifetime_tests
+  --test run_422_genesis_consensus_authority_tests` ⇒ 15 passed, 0 failed, exit 0.
+* `cargo check -p qbind-node --lib` ⇒ clean, exit 0.
+* `cargo clippy -p qbind-node --lib` ⇒ exit 0 (pre-existing warnings only; none in
+  the changed lines).
+* `cargo build --release -p qbind-node` ⇒ Finished, exit 0 (`release` profile,
+  optimized target(s) in 5m 39s).
+* Known unrelated `--tests` compile failures (e.g.
+  `m16_epoch_transition_hardening_tests` missing `RocksDbConsensusStorage`
+  helpers) are pre-existing and untouched by this change.
+* **Security tools (`parallel_validation`):** Code Review ⇒ reviewed 3 files, no
+  comments, but the model-backed reviewer reported a model-registry environment
+  error (`claude-sonnet-4.6 not found in registry`), so this is NOT a substitute
+  for manual review. CodeQL (`rust`) ⇒ **Analysis SKIPPED because the database
+  size is too large** — 0 alerts, but this is an INCOMPLETE analysis and is NOT
+  converted into a passing conclusion; CodeQL coverage for this change remains
+  outstanding.
+
+### Finding dispositions
+
+Finding **#2** is now **fully bound for the tested inbound boundary**: the
+authorized identity covers the complete selected v2 domain including
+`expected_wire_chain_id`, and the immediate handoff uses the bound authority.
+Findings **#3** (ticket issuer identity / generation exhaustion) and **#4**
+(replacement-ordering) remain explicitly **OPEN**. No durable anti-rollback and
+no production lifecycle are established. Run 423 remains deferred.
+
+```
+D7A_INBOUND_VERDICT=PARTIAL
+D7_STATUS=PARTIAL-CODE-TEST / PRODUCTION-LIFECYCLE-UNAVAILABLE
+DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED
+GENESIS_AUTHORITY_ACTIVATION=DISABLED
+CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED
+SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO
+```

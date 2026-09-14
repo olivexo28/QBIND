@@ -166,6 +166,26 @@ pub struct GenesisConsensusAuthority {
     /// setter, so the "always founding epoch 0" invariant cannot be broken by
     /// a caller mutating the field. Read it via [`Self::authorized_epoch`].
     authorized_epoch: u64,
+    /// Run 422 D7-A2 (finding #2, corrective) — the expected wire `chain_id`
+    /// of the **complete** selected v2 Proposal/Vote signing domain this
+    /// authority is authorized for.
+    ///
+    /// Held independently of any verifier so
+    /// [`crate::binary_consensus_loop::AuthorizedProposalVoteSnapshot::try_bind`]
+    /// can require the bound verifier's domain to carry this exact
+    /// `expected_wire_chain_id` — closing the gap where an owner authorized for
+    /// domain A could otherwise admit a verifier B whose domain differed ONLY
+    /// in `expected_wire_chain_id` (runtime chain, genesis and commitment
+    /// unchanged).
+    ///
+    /// `None` in production: the release binary never resolves a runtime→wire
+    /// chain-id mapping (no such validated mapping exists in this repository),
+    /// so a production-built authority does not cover a wire chain id and can
+    /// therefore never bind a verifier — production current-authorization
+    /// activation stays unavailable. Only the explicitly `cfg(test)` fixture
+    /// constructors set it to `Some`, and even then never by copying an inbound
+    /// verifier's domain.
+    authorized_wire_chain_id: Option<u32>,
 }
 
 impl std::fmt::Debug for GenesisConsensusAuthority {
@@ -413,6 +433,10 @@ pub fn build_genesis_consensus_authority(
         validator_count: count,
         fingerprints,
         authorized_epoch: GENESIS_STATIC_AUTHORITY_EPOCH,
+        // Production resolves no runtime→wire chain-id mapping, so a
+        // production authority covers no wire chain id and can never bind a
+        // verifier (Run 422 D7-A2).
+        authorized_wire_chain_id: None,
     })
 }
 
@@ -723,6 +747,16 @@ impl GenesisConsensusAuthority {
     /// (always [`GENESIS_STATIC_AUTHORITY_EPOCH`]).
     pub fn authorized_epoch(&self) -> u64 {
         self.authorized_epoch
+    }
+
+    /// Run 422 D7-A2 — the expected wire `chain_id` of the complete selected
+    /// v2 signing domain this authority is authorized for, if it covers one.
+    ///
+    /// `None` for a production-built authority (no runtime→wire chain-id
+    /// mapping exists), which is why a production authority can never bind a
+    /// verifier. Only the `cfg(test)` fixture constructors set `Some`.
+    pub fn authorized_wire_chain_id(&self) -> Option<u32> {
+        self.authorized_wire_chain_id
     }
 
     /// The authority's **own** immutable configuration identity, expressed as
@@ -1102,6 +1136,9 @@ impl GenesisConsensusAuthority {
             validator_count,
             fingerprints: Vec::new(),
             authorized_epoch: GENESIS_STATIC_AUTHORITY_EPOCH,
+            // Freshness-only fixture: never bound to a real verifier, so it
+            // covers no wire chain id (Run 422 D7-A2).
+            authorized_wire_chain_id: None,
         }
     }
 
@@ -1121,10 +1158,19 @@ impl GenesisConsensusAuthority {
     /// snapshot the handler consumes. This never constructs a production
     /// authority (there is no production route to an `Established` current
     /// state, and `main` builds no `ProposalVoteAuthority`).
+    ///
+    /// `authorized_wire_chain_id` is the expected wire `chain_id` of the
+    /// **complete** v2 signing domain this fixture authority is authorized for.
+    /// It is supplied by the owner side independently of any inbound verifier
+    /// (Run 422 D7-A2, finding #2): a coherent fixture passes the wire chain id
+    /// of the domain it genuinely authorizes, while a regression can pass a
+    /// DIFFERENT wire chain id than the paired verifier's domain to prove the
+    /// binding rejects an owner-A + verifier-B pair that differs only there.
     pub fn for_verification_snapshot_fixture(
         chain_id: impl Into<String>,
         genesis_hash: GenesisHash,
         commitment: [u8; 32],
+        authorized_wire_chain_id: u32,
         validators: Arc<ConsensusValidatorSet>,
         key_provider: Arc<dyn SuiteAwareValidatorKeyProvider>,
     ) -> Self {
@@ -1138,6 +1184,7 @@ impl GenesisConsensusAuthority {
             validator_count,
             fingerprints: Vec::new(),
             authorized_epoch: GENESIS_STATIC_AUTHORITY_EPOCH,
+            authorized_wire_chain_id: Some(authorized_wire_chain_id),
         }
     }
 }
