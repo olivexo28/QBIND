@@ -1959,5 +1959,56 @@ mod tests {
             assert!(!ticket_a.issued_by(&owner_b));
             assert!(!ticket_b.issued_by(&owner_a));
         }
+
+        // ---- Shared candidate, distinct issuers: two independent owners built
+        // from clones of *the same* candidate `Arc` still hold distinct opaque
+        // issuer identities. This isolates issuer identity from candidate
+        // identity: the owners share one candidate allocation
+        // (`Arc::ptr_eq`) and carry identical observed configuration and equal
+        // generations, yet each confirms only its own ticket and rejects the
+        // other's with `ConfirmError::ForeignIssuer`.
+        #[test]
+        fn shared_candidate_owners_have_distinct_issuer_identities() {
+            // Exactly one candidate allocation.
+            let shared = candidate();
+            let observed = shared.config_identity();
+
+            // Two independent owners from clones of the *same* candidate Arc,
+            // with byte-for-byte identical observed configuration.
+            let owner_a =
+                CurrentAuthorizationOwner::establish_for_fixture(Arc::clone(&shared), observed.clone());
+            let owner_b =
+                CurrentAuthorizationOwner::establish_for_fixture(Arc::clone(&shared), observed);
+
+            // Equal generations...
+            assert_eq!(owner_a.generation(), owner_b.generation());
+            // ...and the *same* candidate allocation behind both owners.
+            assert!(
+                Arc::ptr_eq(owner_a.candidate(), owner_b.candidate()),
+                "both owners must share the single candidate allocation",
+            );
+            assert!(Arc::ptr_eq(owner_a.candidate(), &shared));
+
+            // A ticket from each owner.
+            let ticket_a = owner_a.admit().expect("A admits against shared candidate");
+            let ticket_b = owner_b.admit().expect("B admits against shared candidate");
+
+            // Each owner confirms its own ticket.
+            owner_a.confirm(&ticket_a).expect("A confirms its own ticket");
+            owner_b.confirm(&ticket_b).expect("B confirms its own ticket");
+
+            // Each owner rejects the other's ticket with ForeignIssuer, even
+            // though they share a candidate allocation and equal generations.
+            assert_eq!(
+                owner_b.confirm(&ticket_a),
+                Err(ConfirmError::ForeignIssuer),
+                "B must reject A's ticket despite the shared candidate allocation",
+            );
+            assert_eq!(
+                owner_a.confirm(&ticket_b),
+                Err(ConfirmError::ForeignIssuer),
+                "A must reject B's ticket despite the shared candidate allocation",
+            );
+        }
     }
 }
