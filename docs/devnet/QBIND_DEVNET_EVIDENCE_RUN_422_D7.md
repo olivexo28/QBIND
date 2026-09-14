@@ -1229,7 +1229,7 @@ SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO
 
 ## Run 422 D7-B1 — current authorization at the immediate OUTBOUND action-forwarding boundary (code + test)
 
-Tested implementation + final documentation SHA: `ab69af25a70341cb2bf2fe3f2c0cc7c93e669b1d` (branch `copilot/run-422-d7-b1`; prior D7-A4 tested SHA `eab2a838a12be96d8e7de242bad7ed3da3e3370e`, reviewed A4 final `3627f1b36d8149a5d80c48d6bf9b8609791d3e55` — both are pre-clone ancestry, not present as local objects in this shallow single-branch checkout; no ancestry was invented).
+Tested implementation SHA: `ab69af25a70341cb2bf2fe3f2c0cc7c93e669b1d`; reviewed B1 final CRLF/documentation tip: `eba8e0d827a3bd16c53fd08ad635bdfde7c9363f` (branch `copilot/run-422-d7-b1`; prior D7-A4 tested SHA `eab2a838a12be96d8e7de242bad7ed3da3e3370e`, reviewed A4 final `3627f1b36d8149a5d80c48d6bf9b8609791d3e55`). `9b8acf7` is the D7-B2 starting/import revision and is **not** B1's final revision; no claim is made that B1 tests ran at `9b8acf7`. All of `ab69af2`, `eba8e0d`, `eab2a83`, `3627f1b` are pre-clone ancestry, **not present as local objects** in this shallow single-branch checkout, so their recorded results are preserved as reported and not re-verified here; no ancestry was invented.
 
 ### Exact forwarding scope and call-site changes (section 3)
 The single guarded boundary is `forward_actions_to_facade` (`crates/qbind-node/src/binary_consensus_loop.rs:3613`). Its signature now threads an explicit, coherently-bound current-authorization snapshot **before** the test-only passthrough authority:
@@ -1330,20 +1330,31 @@ SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO
 
 ## Run 422 D7-B2 — authorize cached Proposal/Vote late-peer re-emission (code + test)
 
-### B1 revision separation (task §1)
-The reviewed D7-B1 branch `copilot/run-422-d7-b1` was verified in the actual
-source. Two SHAs are kept **distinct**, not described as one revision:
+### B1 revision separation (task §1, §6 — corrected)
+Three D7-B1 / D7-B2 revisions are kept **distinct** and are no longer conflated.
+The earlier draft of this section mislabelled `eba8e0d…` as the "B1 tested SHA"
+and `9b8acf7` as the "B1 final CRLF/documentation SHA"; that is corrected here:
 
-* **B1 tested SHA** `eba8e0d827a3bd16c53fd08ad635bdfde7c9363f` — the revision at
-  which the D7-B1 outbound-forwarding tests were run.
-* **B1 final CRLF/documentation SHA** `9b8acf7` — a trailing-newline-only
-  change over `eba8e0d` touching exactly two files
-  (`crates/qbind-node/src/binary_consensus_loop.rs` and this evidence doc); no
-  logic difference from the tested SHA.
+* **B1 tested implementation SHA** `ab69af25a70341cb2bf2fe3f2c0cc7c93e669b1d` —
+  the revision reported as the one at which the D7-B1 outbound-forwarding tests
+  were run (see the D7-B1 section, which records the same SHA).
+* **Reviewed B1 final CRLF/documentation tip** `eba8e0d827a3bd16c53fd08ad635bdfde7c9363f`
+  — the trailing-newline / documentation tip of the reviewed B1 branch.
+* **B2 starting / import revision** `9b8acf7` — this is B2's starting (import)
+  revision. It is **not** B1's final revision, and no claim is made that the B1
+  tests were executed at `9b8acf7`.
 
-`eba8e0d` was absent from the shallow task checkout and was fetched on demand
-(`git fetch --depth=50 origin <sha>`); no ancestry was fabricated and no older
-implementation was substituted. HEAD at the start of D7-B2 = `9b8acf7`.
+Shallow-checkout limitation (task §1, §6): this task's working tree is a
+**shallow single-branch clone** of `copilot/copilotrun-422-d7-b2` (`git
+rev-parse --is-shallow-repository` ⇒ `true`; `git rev-list --count HEAD` ⇒ `2`).
+Only `a3d64fe` (HEAD) and `9b8acf7` are present as local objects. The revisions
+`ab69af2`, `eba8e0d`, `475e411…` (reported B2 tested SHA) and `36c5249…`
+(reported B2 final documentation SHA) are **absent** from this checkout
+(`git cat-file -t` ⇒ "could not get object info") and could not be fetched in
+this environment. Their SHAs are recorded **as reported**, not re-verified
+against local objects; no ancestry was invented or substituted. HEAD at the
+start of this corrective continuation = `a3d64fe`; B2's import revision =
+`9b8acf7`.
 
 ### Exact cache trust boundary (task §2–§4)
 The strengthened boundary is the **cached** late-peer re-emission path
@@ -1418,7 +1429,10 @@ Proposal broadcasts. Genuine new-peer detection, current-view / local-leader
 requirements, committed/obsolete-cache rejection, Proposal/Vote pairing, and the
 reconnect-churn bound are all preserved.
 
-### Behavioral tests (task §6) — `mod run422_d7b2`, 15 in-crate tests, all passing
+### Behavioral tests (task §6) — `mod run422_d7b2`, **24** in-crate tests, all passing
+(15 tests from the prior pass, described immediately below; **9 added by the
+corrective continuation**, described in the following subsection. All 24 pass —
+see the corrective-continuation validation results.)
 Located inside `mod run420` (reusing `coherent_snapshot_for` / `make_ctx_v2` /
 `d6_control_domain` / the 4-validator ML-DSA-44 crypto fixture). Every test
 drives the **actual** `maybe_reemit_on_late_peer_connect` across a genuine
@@ -1426,8 +1440,10 @@ new-peer transition and eligible leader/current-view engine state, with a
 `RecordingFacade` distinguishing broadcast Proposal / broadcast Vote / directed
 (`send_vote_to`) Vote calls, and cached bodies signed on the positive path
 through the snapshot's bound verifier delegating to the **real ML-DSA-44**
-backend (signing invocations recorded via the `outbound_*_signing_success`
-counters and corroborated by verifying emitted signatures).
+backend (successful signing corroborated by the `outbound_*_signing_success`
+counters **and** by verifying emitted signatures; direct signer-entry invocation
+counting — including zero-invocation on rejection — is added by the corrective
+continuation described below).
 
 * Positive both-families: `d7b2_valid_cache_current_auth_emits_both_families`
   — correct Proposal + Vote emitted; signatures **valid** under the selected v2
@@ -1455,7 +1471,92 @@ rejection controls are retained; no Required-positive test selects
 cache structs + signature (D5-G suppression, D6-8 selected-domain signing, D6-9
 inconsistent-wire) and pass.
 
-### Validation results (task §7) — tested SHA `475e4114dc52acd52c6c0322f00d01105913943c`
+### Direct signer-invocation observation and reachable cases (corrective continuation, task §2–§4)
+The prior 15 tests corroborated signing via the `outbound_*_signing_success`
+counters and signature verification. That is **necessary but not sufficient**:
+`outbound_*_signing_success == 0` does **not** by itself prove the signer was
+never invoked (a signer call returning an error would also leave that counter at
+0). The corrective continuation adds a `ValidatorSigner` wrapper
+(`RecordingSigner`) that **counts `sign_proposal` / `sign_vote` at method entry**
+and delegates normal signing to the real ML-DSA-44 backend, with **separate
+per-authority counters** (`SignerCounters`). Misleading comments that treated
+`signing_success == 0` as proof of non-invocation were removed from the module
+doc and from `assert_proposal_only_partial`. The 9 added tests:
+
+* `d7b2_recording_signer_positive_control_directly_counts_both_invocations` —
+  **positive control** proving the entry-counters are wired to the actual cached
+  re-emission path: a successful both-families re-emission drives the recording
+  signer and the proposal/vote entry counts are each `1`.
+* `d7b2_recording_signer_rejected_proposal_directly_shows_zero_invocations` and
+  `d7b2_recording_signer_rejected_vote_directly_shows_zero_vote_invocations` —
+  **negative** tests that directly assert **zero** entry invocations for the
+  rejected message (not merely `signing_success == 0`). Signing-success,
+  rejection, and facade counters are kept as separate observations.
+* `d7b2_do_leader_tick_creates_caches_then_real_reemission_uses_them` (task §3) —
+  a **Required-policy** positive test driving `do_leader_tick` → the resulting
+  typed `CachedLeaderProposal`/`CachedLeaderVote` caches → the actual
+  `maybe_reemit_on_late_peer_connect`. It asserts the real cache writer created
+  both entries with originating authorization, the cached bodies correspond to
+  the leader-generated actions, re-emission reuses those entries **without**
+  replacing/refreshing provenance, emitted signatures verify under the selected
+  domain, and **initial forwarding vs later re-emission are distinguished** via
+  separate facade captures / explicit deltas.
+* `d7b2_do_leader_tick_without_current_auth_then_replay_stays_rejected` (task §3)
+  — cache creation **without** current authorization (captured provenance is
+  `None`) followed by replay under otherwise-valid authorization; the unproven
+  entry remains rejected and replay does **not** manufacture provenance.
+* `d7b2_case_a_cached_vote_generation_invalidation_across_a_b_a` (task §4.A) — a
+  Vote from generation *g* is retained, the same owner's generation is advanced,
+  and an admissible **current-generation Proposal** drives execution into the
+  cached Vote: Proposal handoff succeeds, stale Vote provenance is rejected, the
+  Vote signer is **not** invoked (direct zero-count), and no Vote is emitted. A
+  real **A→B→A** configuration sequence is exercised between completed calls;
+  fresh admission after returning to A succeeds while the old cache stays invalid.
+* `d7b2_case_b_cached_vote_wire_chain_rejection_partial_outcome` (task §4.B) — an
+  admissible Proposal plus a Vote with **inconsistent wire-chain metadata**
+  reaches the Vote branch under valid current authorization/provenance; asserts
+  the Vote **wire-mismatch** reason, **zero** Vote signer invocations (the wire
+  check precedes `sign_vote`), and an accurate Proposal-only partial outcome.
+  This is distinct from the pre-existing Proposal-first wire test.
+* `d7b2_case_c_bound_a_signs_supplied_b_never_invoked` (task §4.C) — a valid
+  **bound** snapshot A and a distinct **separately-supplied** authority B are
+  present simultaneously with separately-instrumented signers; cached Proposal
+  and Vote emit successfully, **A signs**, **B is never invoked**, and emitted
+  signatures **verify under A's domain** and **fail under B's foreign domain and
+  legacy v1**.
+* `d7b2_case_d_shared_candidate_arc_still_isolates_by_issuer` (task §4.D) — the
+  claimed shared-candidate case is constructed from **clones of the exact same
+  candidate `Arc`** (asserted via `Arc::ptr_eq` on the candidate handles), and
+  foreign cached authorization still fails. Separately-allocated,
+  structurally-equal candidates are **not** described as a shared candidate.
+
+The independent Vote missing-provenance, foreign-issuer, and unauthorized-epoch
+tests are preserved. Shared-owner admission may reject at the Proposal before
+Vote processing under the immutable synchronous model; that coverage is
+attributed accurately and no mid-call mutation is manufactured to force an
+unreachable Vote case.
+
+**Coverage mapping (direct measurement vs source-supported ordering vs
+untested).** *Directly measured* this pass: signer entry-invocation counts
+(present and zero), real cache creation via `do_leader_tick`, provenance
+preservation across re-emission, selected-domain signature acceptance and
+foreign-domain / legacy-v1 rejection, wire-chain Vote rejection, A-signs /
+B-never-invoked authority selection, and `Arc::ptr_eq` shared-candidate
+isolation. *Source-supported ordering* (asserted by outcome, not by intra-call
+tracing): the admit→provenance→epoch→sign→confirm→facade sequence within a
+single synchronous call. *Untested / outside this phase:* deferred-work
+re-admission, later socket delivery, upstream engine / leader-step effects,
+production lifecycle activation, and persistent (restart) freshness. Counts of
+overlapping test subsets are **not** summed.
+
+### Validation results — prior D7-B2 pass (reported tested SHA `475e4114dc52acd52c6c0322f00d01105913943c`)
+**Shallow-checkout caveat (task §1, §6):** `475e411…` is **absent** from this
+shallow single-branch checkout and could not be re-verified. The counts in this
+subsection are **preserved as recorded by the prior pass** at that reported SHA;
+they predate the 9 tests added by the corrective continuation (see the next
+subsection for the re-executed results at the actual working HEAD). They are
+**not** relabelled as newly executed.
+
 Profile: `test`/`dev` (unoptimized + debuginfo) for tests/check/clippy;
 `release` (optimized) for the node build. Default features. Sequential builds;
 substantive work checkpointed before the expensive release build; disk monitored
@@ -1494,12 +1595,69 @@ substantive work checkpointed before the expensive release build; disk monitored
   release-binary current-authorization activation (production still wires no
   snapshot).
 
-### Security-tool disposition (accurate, no incomplete-analysis-as-pass)
-This pass touches production consensus source, so CodeQL is **not** a scope skip
-and is run via `parallel_validation` with `codeql.isTrivial=false`. Any
-database-size skip observed is recorded as **SKIPPED/INCOMPLETE**, not a passing
-scan. A reviewer-backend error is not treated as a successful review. Outcomes
-are recorded exactly as returned.
+### Validation results — corrective continuation (this pass)
+Branch `copilot/copilotrun-422-d7-b2` (note: the task specification names the
+branch `copilot/run-422-d7-b2`; the actual checked-out branch name carries the
+extra `copilot` segment — reported, not renamed). Working HEAD before this pass
+= `a3d64fe`; only `a3d64fe` and the B2 import revision `9b8acf7` are present as
+local objects (shallow clone). This is a **test-and-evidence-only** change to
+`crates/qbind-node/src/binary_consensus_loop.rs` (added the `RecordingSigner`
+invocation-recording wrapper, per-authority `SignerCounters`, a
+`do_leader_tick`→cache→re-emission positive test, a no-authorization-then-replay
+test, and Cases A/B/C/D) plus this evidence doc; **no production logic changed**,
+so no new defect was exposed and the prior pass's release build is preserved at
+its recorded SHA rather than re-executed.
+
+Profile: `test`/`dev` (unoptimized + debuginfo). Default features. Disk
+monitored (`df /` ≈ 47% used throughout, 78 G free). Overlapping subsets marked
+inline; counts are **not** summed across overlapping runs.
+
+* `cargo test -p qbind-node --lib run422_d7b2` → ok, **24 passed**, 0 failed,
+  1548 filtered out (exit 0) — 15 retained + 9 new D7-B2 tests. *(strict subset
+  of the run422 run below.)*
+* `cargo test -p qbind-node --lib run422` → ok, **106 passed**, 0 failed, 1466
+  filtered out (exit 0). *(superset of the run422_d7b2 run.)*
+* `cargo test -p qbind-node --lib run422_d7b::` → ok, **24 passed**, 0 failed,
+  1548 filtered out (exit 0) — D7-B1 in-crate module. *(subset of run422.)*
+* `cargo test -p qbind-node --lib binary_consensus_loop` → ok, **200 passed**,
+  0 failed, 1372 filtered out (exit 0) — full module incl. B9/B10 reemit
+  regressions and binary-consensus-loop tests; no regressions. *(superset of the
+  runs above.)*
+* `cargo test -p qbind-consensus --lib` → ok, **182 passed** (exit 0).
+* `cargo test -p qbind-consensus --test run_422_d6_pv_domain_isolation_tests`
+  → ok, **34 passed** (exit 0) — D6 domain-isolation matrix.
+* `cargo test -p qbind-node --test run_422_startup_refusal_tests` → ok,
+  **4 passed** (exit 0) — Run 422 startup-refusal.
+* `cargo test -p qbind-node --test run_422_d7_authority_lifetime_tests` → ok,
+  **14 passed** (exit 0).
+* `cargo test -p qbind-node --test run_422_genesis_consensus_authority_tests`
+  → ok, **15 passed** (exit 0).
+* `cargo check -p qbind-node` → Finished (dev), exit 0.
+* `cargo clippy -p qbind-node --lib` → Finished (dev), **exit 0**; **85
+  pre-existing baseline warnings**, no errors and **no new warnings introduced in
+  the changed test regions**.
+* Release `qbind-node` build: **not re-executed this pass** (test/docs-only
+  change). The prior pass's `cargo build -p qbind-node --release` result is
+  preserved at its recorded SHA; `CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE
+  =NOT-YET-CAPTURED` is retained.
+
+### Security-tool disposition — corrective continuation
+Recorded exactly as observed this pass; neither a CodeQL skip nor a reviewer
+backend error is treated as a successful scan/review:
+
+* CodeQL (`rust`, via `parallel_validation`, `codeql.isTrivial=false` because the
+  touched file `binary_consensus_loop.rs` contains production consensus source
+  even though the diff is test/comment-only): **observed outcome — "Analysis was
+  skipped because the database size is too large" (0 alerts reported)**. This is
+  recorded as **SKIPPED / INCOMPLETE, NOT a passing scan**; CodeQL coverage for
+  this change remains **outstanding**.
+* Code Review (via `parallel_validation`): the run returned a nominal
+  "completed, reviewed 2 files, no review comments" **together with an explicit
+  environment note that the code-review tool is NOT available in this
+  environment** (`autofind` binary not found). It is therefore recorded as
+  **UNAVAILABLE / UNVERIFIED**, not an independent clean review.
+
+### Prior-pass security-tool disposition (retained, reported as returned)
 
 ### Scoped verdict and preserved posture
 The only new positive verdict names the **cached late-peer re-emission
