@@ -1043,6 +1043,7 @@ impl std::fmt::Debug for TimeoutVerificationContext {
 /// crypto already uses (`verify_proposal_msg` / `verify_vote_msg` and the
 /// outbound signing preimage). No new crypto path, preimage, suite, or wire
 /// format is introduced.
+#[derive(Clone)]
 pub struct ProposalVoteAuthority {
     /// Active validator set used for membership checks.
     pub validators: Arc<ConsensusValidatorSet>,
@@ -1113,6 +1114,206 @@ impl ProposalVoteAuthority {
     /// trusted config.
     fn wire_chain_id_ok(&self, wire_chain_id: u32) -> bool {
         self.signing_domain.expected_wire_chain_id() == wire_chain_id
+    }
+}
+
+/// Run 422 D7-A2 (corrective — finding #2) — a **coherence-validated,
+/// immutable verification snapshot** binding the node's current-authorization
+/// owner to the *exact* [`ProposalVoteAuthority`] the inbound handler consumes
+/// for cryptographic verification.
+///
+/// # Why this exists
+///
+/// Before D7-A2, [`CurrentAuthorizationOwner::admit`] authorized the owner's
+/// stored [`GenesisConsensusAuthority`](crate::genesis_consensus_authority::GenesisConsensusAuthority)
+/// while cryptographic verification separately consumed a caller-supplied
+/// `ProposalVoteAuthority`. Nothing tied the two together, so an owner
+/// authorizing identity **A** could admit verification actually performed under
+/// an unrelated authority **B** (finding #2). This snapshot removes that gap:
+/// the handler obtains the verifier **through the admitted snapshot**, so a
+/// separately-supplied context can never substitute different membership, keys,
+/// suite policy, signing domain, genesis identity, authority commitment or
+/// authorized epoch after admission.
+///
+/// # Coherence guarantee (validated at construction — [`Self::try_bind`])
+///
+/// The bound `verifier` must actually describe the owner's admitted authority
+/// identity. Construction fails closed unless ALL of the following hold, so an
+/// incoherent (owner-A + verifier-B) snapshot cannot even be built:
+///
+/// * the **actual** validator membership (ids + voting weights) shared by the
+///   owner's genesis authority is the same set the verifier uses — verified by
+///   both shared-`Arc` identity *and* structural equality (a shared pointer
+///   alone is not accepted as proof — see the module note below);
+/// * the **actual** suite-aware key provider is the same shared instance;
+/// * the verifier's mandatory D6 signing domain binds the same genesis
+///   identity and the same authority commitment as the owner's genesis
+///   authority;
+/// * the owner's chain identity label corresponds to the verifier domain's
+///   runtime chain id (a trusted, test-identified fixture mapping — no
+///   production runtime→wire chain-id mapping is introduced).
+///
+/// Provenance and local binding remain **separate** guarantees: this
+/// coherence check proves the *local objects* match, while
+/// [`CurrentAuthorizationOwner::admit`] independently proves the *node's
+/// current authorization state* still equals that founding identity. Both must
+/// pass for a message to be verified.
+///
+/// # Production posture
+///
+/// `try_bind` is fail-closed production code, but the only way to obtain an
+/// owner whose current state is `Established` (and can therefore admit) is the
+/// explicitly `cfg(test)` fixture interface, and production `main` constructs
+/// neither a `ProposalVoteAuthority` nor a current-authorization owner. So this
+/// type introduces no production activation route: production current
+/// authorization stays unavailable.
+pub struct AuthorizedProposalVoteSnapshot {
+    /// The independently-maintained current-authorization owner (admission
+    /// gate over the genesis-bound authority identity).
+    owner: CurrentAuthorizationOwner,
+    /// The exact verifier the handler consumes for cryptographic verification,
+    /// validated at construction to correspond to `owner`'s admitted identity.
+    verifier: Arc<ProposalVoteAuthority>,
+}
+
+/// Run 422 D7-A2 — fail-closed reasons a candidate verifier does not cohere
+/// with the current-authorization owner's admitted identity. Diagnostics are
+/// bounded and non-secret (never key bytes).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SnapshotCoherenceError {
+    /// The verifier's validator membership (count, ids, or voting weights)
+    /// does not match the owner's genesis-committed membership.
+    MembershipMismatch,
+    /// The verifier does not share the owner's actual suite-aware key provider
+    /// instance. Matching a count or an independently-asserted label is
+    /// insufficient — the actual key provider must correspond.
+    KeyProviderNotShared,
+    /// The verifier's signing-domain genesis identity differs from the owner's
+    /// genesis hash.
+    GenesisIdentityMismatch,
+    /// The verifier's signing-domain authority commitment differs from the
+    /// owner's authority commitment.
+    AuthorityCommitmentMismatch,
+    /// The owner's chain identity label does not correspond to the verifier's
+    /// runtime chain id.
+    ChainIdentityMismatch,
+}
+
+impl std::fmt::Display for SnapshotCoherenceError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match self {
+            SnapshotCoherenceError::MembershipMismatch => "validator membership mismatch",
+            SnapshotCoherenceError::KeyProviderNotShared => "key provider not shared",
+            SnapshotCoherenceError::GenesisIdentityMismatch => "genesis identity mismatch",
+            SnapshotCoherenceError::AuthorityCommitmentMismatch => "authority commitment mismatch",
+            SnapshotCoherenceError::ChainIdentityMismatch => "chain identity mismatch",
+        };
+        f.write_str(s)
+    }
+}
+
+impl std::error::Error for SnapshotCoherenceError {}
+
+/// Run 422 D7-A2 — the trusted, test-identified chain-identity label a
+/// coherent snapshot uses to relate a genesis authority's textual `chain_id`
+/// to the verifier domain's numeric runtime chain id. This is deliberately a
+/// fixture mapping only: it is NOT a production runtime→wire chain-id mapping
+/// (that remains unavailable — task section 3), and it never derives identity
+/// from any inbound message.
+pub fn snapshot_chain_identity_label(runtime_chain_id: ChainId) -> String {
+    format!("qbind-runtime-chain-{:#018x}", runtime_chain_id.0)
+}
+
+impl AuthorizedProposalVoteSnapshot {
+    /// Bind a current-authorization `owner` to the exact `verifier` the handler
+    /// will consume, validating coherence fail-closed (see the type docs).
+    pub fn try_bind(
+        owner: CurrentAuthorizationOwner,
+        verifier: Arc<ProposalVoteAuthority>,
+    ) -> Result<Self, SnapshotCoherenceError> {
+        let candidate = owner.candidate();
+        let domain = &verifier.signing_domain;
+
+        // Genesis identity + authority commitment must match the verifier's
+        // mandatory D6 signing domain (these two also fix the domain preimage).
+        if &candidate.genesis_hash != domain.genesis_identity() {
+            return Err(SnapshotCoherenceError::GenesisIdentityMismatch);
+        }
+        if &candidate.commitment != domain.authority_commitment() {
+            return Err(SnapshotCoherenceError::AuthorityCommitmentMismatch);
+        }
+
+        // The actual validator membership must correspond: require BOTH a
+        // shared-`Arc` (shared immutable ownership) AND structural equality of
+        // ids + voting weights. A shared pointer alone is not accepted as proof
+        // of genesis approval — the structural check makes the correspondence
+        // explicit and survives any future non-shared construction.
+        if !Arc::ptr_eq(&candidate.validators, &verifier.validators) {
+            return Err(SnapshotCoherenceError::MembershipMismatch);
+        }
+        if !validator_membership_matches(&candidate.validators, &verifier.validators) {
+            return Err(SnapshotCoherenceError::MembershipMismatch);
+        }
+
+        // The actual key provider must be the same shared instance: matching a
+        // count or an independently-asserted label is insufficient.
+        if !Arc::ptr_eq(&candidate.key_provider, &verifier.key_provider) {
+            return Err(SnapshotCoherenceError::KeyProviderNotShared);
+        }
+
+        // Chain identity: the owner's textual chain id must correspond to the
+        // verifier domain's runtime chain id via the trusted fixture label.
+        if candidate.chain_id != snapshot_chain_identity_label(domain.runtime_chain_id()) {
+            return Err(SnapshotCoherenceError::ChainIdentityMismatch);
+        }
+
+        Ok(Self { owner, verifier })
+    }
+
+    /// The admission gate (independently-maintained current-authorization
+    /// owner) for this snapshot.
+    pub fn owner(&self) -> &CurrentAuthorizationOwner {
+        &self.owner
+    }
+
+    /// The exact, coherence-validated verifier the handler consumes for
+    /// cryptographic verification. Never a separately-supplied context.
+    pub fn verifier(&self) -> &ProposalVoteAuthority {
+        &self.verifier
+    }
+
+    /// The single epoch this admitted snapshot authorizes (the genesis-static
+    /// founding epoch). The handler checks each message's signed epoch against
+    /// this before any downstream effect.
+    pub fn authorized_epoch(&self) -> u64 {
+        self.owner.candidate().authorized_epoch()
+    }
+
+    /// Test-only mutable access to the owner, for modelling in-flight current
+    /// authorization replacement (generation advance) deterministically.
+    #[cfg(test)]
+    pub fn owner_mut(&mut self) -> &mut CurrentAuthorizationOwner {
+        &mut self.owner
+    }
+}
+
+/// Run 422 D7-A2 — structural membership equality (count, ids, and voting
+/// weights, in order). Complements the shared-`Arc` identity check so a
+/// coherent snapshot proves the verifier operates the owner's exact membership,
+/// not merely a set of the same size.
+fn validator_membership_matches(
+    a: &ConsensusValidatorSet,
+    b: &ConsensusValidatorSet,
+) -> bool {
+    a.len() == b.len() && a.iter().zip(b.iter()).all(|(x, y)| x == y)
+}
+
+impl std::fmt::Debug for AuthorizedProposalVoteSnapshot {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AuthorizedProposalVoteSnapshot")
+            .field("owner", &self.owner)
+            .field("verifier", &self.verifier)
+            .finish()
     }
 }
 
@@ -1460,12 +1661,18 @@ pub struct BinaryConsensusLoopInboundStats {
     //   * `*_authority_stale_before_effect_total`: the admitting freshness
     //     check succeeded but the owner's current state was replaced before the
     //     effect (generation advanced), so the check was refused re-use.
+    //   * `*_epoch_unauthorized_total` (Run 422 D7-A2, section 3): admission
+    //     succeeded but the message's signed epoch differed from the epoch the
+    //     admitted snapshot authorizes — rejected before crypto and any
+    //     downstream effect.
     pub inbound_proposal_current_state_unavailable_total: u64,
     pub inbound_proposal_authority_superseded_total: u64,
     pub inbound_proposal_authority_stale_before_effect_total: u64,
+    pub inbound_proposal_epoch_unauthorized_total: u64,
     pub inbound_vote_current_state_unavailable_total: u64,
     pub inbound_vote_authority_superseded_total: u64,
     pub inbound_vote_authority_stale_before_effect_total: u64,
+    pub inbound_vote_epoch_unauthorized_total: u64,
 }
 
 /// Transition state for the bounded "restore-catchup mode → normal
@@ -3296,7 +3503,17 @@ pub(crate) fn handle_inbound_consensus_msg(
     // outbound action — when the current state is unavailable or superseded.
     // Production leaves this `None` (as it leaves `pv_authority` `None`),
     // preserving the existing fail-closed missing-authority behavior.
-    current_auth: Option<&CurrentAuthorizationOwner>,
+    //
+    // Run 422 D7-A2 (finding #2): when wired (Some), this is a
+    // coherence-validated [`AuthorizedProposalVoteSnapshot`] binding the owner
+    // to the EXACT verifier the handler consumes for cryptographic
+    // verification. Under `Required` the handler admits this snapshot and then
+    // verifies through `snapshot.verifier()`, IGNORING any separately-supplied
+    // `pv_authority` — so a caller can never substitute different membership,
+    // keys, suite, signing domain, genesis identity, commitment or epoch after
+    // admission. `pv_authority` is consulted only on the test-only
+    // `LocalFixtureUnsigned` passthrough (when `current_auth == None`).
+    current_auth: Option<&AuthorizedProposalVoteSnapshot>,
     reconfig_detector: &mut BinaryReconfigDetector,
     origin: Option<&AuthenticatedConsensusOrigin>,
     binding_gate: Option<&PeerConsensusBindingGate>,
@@ -3406,7 +3623,18 @@ pub(crate) fn handle_inbound_consensus_msg(
                     // yields a generation-bound ticket that is re-confirmed just
                     // before delivery/engine mutation.
                     let mut proposal_freshness_ticket: Option<AuthorizationTicket> = None;
-                    match pv_authority {
+                    // Run 422 D7-A2 (finding #2): the verifier the handler
+                    // consumes is the one BOUND TO (and admitted through) the
+                    // current-authorization snapshot when wired. A
+                    // separately-supplied `pv_authority` can never substitute
+                    // different membership/keys/suite/domain/epoch after
+                    // admission — only the test-only `LocalFixtureUnsigned`
+                    // passthrough (no snapshot) falls back to `pv_authority`.
+                    let effective_pv: Option<&ProposalVoteAuthority> = match current_auth {
+                        Some(snap) => Some(snap.verifier()),
+                        None => pv_authority,
+                    };
+                    match effective_pv {
                         Some(ctx) => {
                             // Run 422 D7-A: obtain current authorization through
                             // the independently-maintained owner BEFORE any
@@ -3431,9 +3659,34 @@ pub(crate) fn handle_inbound_consensus_msg(
                             // `LocalFixtureUnsigned` policy preserves the prior
                             // passthrough (its `requires_context()` is `false`).
                             match current_auth {
-                                Some(owner) => match owner.admit() {
+                                Some(snap) => match snap.owner().admit() {
                                     Ok(ticket) => {
                                         proposal_freshness_ticket = Some(ticket);
+                                        // Run 422 D7-A2 (section 3): check the
+                                        // message's signed epoch against the
+                                        // admitted authorized epoch BEFORE any
+                                        // crypto or downstream effect. A
+                                        // correctly re-signed message carrying
+                                        // an epoch other than the one this
+                                        // admitted snapshot authorizes is
+                                        // rejected here, fail-closed.
+                                        if proposal.header.epoch != snap.authorized_epoch() {
+                                            stats.inbound_proposal_epoch_unauthorized_total =
+                                                stats
+                                                    .inbound_proposal_epoch_unauthorized_total
+                                                    .saturating_add(1);
+                                            eprintln!(
+                                                "[binary-consensus] Run 422 D7-A2: inbound \
+                                                 proposal REJECTED (unauthorized epoch \
+                                                 message_epoch={} authorized_epoch={}) height={} \
+                                                 proposer={:?} — fail-closed, not delivered",
+                                                proposal.header.epoch,
+                                                snap.authorized_epoch(),
+                                                proposal.header.height,
+                                                from,
+                                            );
+                                            return;
+                                        }
                                     }
                                     Err(e) => {
                                         record_proposal_current_auth_reject(stats, &e);
@@ -3570,10 +3823,10 @@ pub(crate) fn handle_inbound_consensus_msg(
                     // must not be reused: reject fail-closed. This runs even for
                     // the restore-deferral path so a superseded authority can
                     // never drive a deferral either.
-                    if let (Some(owner), Some(ticket)) =
+                    if let (Some(snap), Some(ticket)) =
                         (current_auth, proposal_freshness_ticket)
                     {
-                        if let Err(e) = owner.confirm(&ticket) {
+                        if let Err(e) = snap.owner().confirm(&ticket) {
                             stats.inbound_proposal_authority_stale_before_effect_total = stats
                                 .inbound_proposal_authority_stale_before_effect_total
                                 .saturating_add(1);
@@ -3680,7 +3933,16 @@ pub(crate) fn handle_inbound_consensus_msg(
                     // `LocalFixtureUnsigned` policy permits the historical
                     // unsigned passthrough.
                     let mut vote_freshness_ticket: Option<AuthorizationTicket> = None;
-                    match pv_authority {
+                    // Run 422 D7-A2 (finding #2): consume the verifier BOUND TO
+                    // the admitted snapshot when wired; a separately-supplied
+                    // `pv_authority` cannot substitute different inputs after
+                    // admission. Only the test-only `LocalFixtureUnsigned`
+                    // passthrough (no snapshot) falls back to `pv_authority`.
+                    let effective_pv: Option<&ProposalVoteAuthority> = match current_auth {
+                        Some(snap) => Some(snap.verifier()),
+                        None => pv_authority,
+                    };
+                    match effective_pv {
                         Some(ctx) => {
                             // Run 422 D7-A: obtain current authorization through
                             // the independently-maintained owner BEFORE any
@@ -3698,9 +3960,29 @@ pub(crate) fn handle_inbound_consensus_msg(
                             // test-only `LocalFixtureUnsigned` policy preserves the
                             // prior passthrough.
                             match current_auth {
-                                Some(owner) => match owner.admit() {
+                                Some(snap) => match snap.owner().admit() {
                                     Ok(ticket) => {
                                         vote_freshness_ticket = Some(ticket);
+                                        // Run 422 D7-A2 (section 3): check the
+                                        // vote's signed epoch against the admitted
+                                        // authorized epoch BEFORE any crypto or
+                                        // downstream effect.
+                                        if vote.epoch != snap.authorized_epoch() {
+                                            stats.inbound_vote_epoch_unauthorized_total = stats
+                                                .inbound_vote_epoch_unauthorized_total
+                                                .saturating_add(1);
+                                            eprintln!(
+                                                "[binary-consensus] Run 422 D7-A2: inbound vote \
+                                                 REJECTED (unauthorized epoch message_epoch={} \
+                                                 authorized_epoch={}) height={} voter={:?} — \
+                                                 fail-closed, not delivered",
+                                                vote.epoch,
+                                                snap.authorized_epoch(),
+                                                vote.height,
+                                                from,
+                                            );
+                                            return;
+                                        }
                                     }
                                     Err(e) => {
                                         record_vote_current_auth_reject(stats, &e);
@@ -3818,8 +4100,8 @@ pub(crate) fn handle_inbound_consensus_msg(
                     // immediately before the engine effect (aggregation / QC
                     // formation / view mutation). A replacement since admission
                     // (generation advanced) rejects fail-closed.
-                    if let (Some(owner), Some(ticket)) = (current_auth, vote_freshness_ticket) {
-                        if let Err(e) = owner.confirm(&ticket) {
+                    if let (Some(snap), Some(ticket)) = (current_auth, vote_freshness_ticket) {
+                        if let Err(e) = snap.owner().confirm(&ticket) {
                             stats.inbound_vote_authority_stale_before_effect_total = stats
                                 .inbound_vote_authority_stale_before_effect_total
                                 .saturating_add(1);
@@ -8913,30 +9195,53 @@ mod tests {
             }
         }
 
-        /// Run 422 D7-A1 fixture migration: a behaviorally-transparent
-        /// established current-authorization owner used by the D5/D6 crypto and
-        /// policy wrappers below. These wrappers predate the D7-A1 rejection and
-        /// intentionally drove the handler with `current_auth == None`; under
-        /// the strengthened Required contract that input is now itself a
-        /// current-state-unavailable rejection. Providing an *established*
-        /// self-consistent owner through the existing `cfg(test)` fixture
-        /// interfaces (`for_current_authorization_fixture` +
-        /// `establish_for_fixture`) restores their original behavior exactly:
-        /// `admit()` returns a ticket and the pre-effect `confirm()` succeeds,
-        /// so every original cryptographic, delivery and counter assertion is
-        /// preserved. It is NOT a production bypass (no release build can
-        /// construct an `Established` owner) and does NOT prove the still-OPEN
-        /// owner/verifier-binding or ticket-identity findings.
-        fn migration_established_current_auth() -> CurrentAuthorizationOwner {
+        /// Run 422 D7-A2 fixture migration (finding #2): build a
+        /// **coherence-validated** [`AuthorizedProposalVoteSnapshot`] whose
+        /// current-authorization owner describes the *actual verifier* `pv` —
+        /// sharing `pv`'s real validator membership and suite-aware key
+        /// provider, and binding the same genesis identity, authority
+        /// commitment, runtime chain identity and founding epoch carried by
+        /// `pv`'s mandatory D6 signing domain. The bound `verifier` is `pv`
+        /// itself, so the handler admits and then verifies through the SAME
+        /// snapshot.
+        ///
+        /// This replaces the earlier D7-A1 migration fixture, which used
+        /// independent constants and an empty key provider and was accepted
+        /// only as a temporary migration while finding #2 stayed open. Because
+        /// `admit()` returns a ticket, the epoch matches the founding epoch,
+        /// and the pre-effect `confirm()` succeeds, every original
+        /// cryptographic, delivery and counter assertion of the D5/D6 wrappers
+        /// is preserved. It is NOT a production route (no release build can
+        /// construct an `Established` owner or a `ProposalVoteAuthority`).
+        fn migration_bound_snapshot(pv: &ProposalVoteAuthority) -> AuthorizedProposalVoteSnapshot {
+            coherent_snapshot_for(pv)
+        }
+
+        /// Run 422 D7-A2: assemble a candidate genesis authority that describes
+        /// the actual verifier `pv` (shared membership + key provider; same
+        /// genesis/commitment/chain/epoch from `pv`'s D6 domain).
+        fn coherent_authority_for(
+            pv: &ProposalVoteAuthority,
+        ) -> Arc<crate::genesis_consensus_authority::GenesisConsensusAuthority> {
             use crate::genesis_consensus_authority::GenesisConsensusAuthority;
-            let candidate = Arc::new(GenesisConsensusAuthority::for_current_authorization_fixture(
-                "qbind-d5d6-fixture-owner",
-                [0x22u8; 32],
-                4,
-                [0xCCu8; 32],
-            ));
+            Arc::new(GenesisConsensusAuthority::for_verification_snapshot_fixture(
+                snapshot_chain_identity_label(pv.signing_domain.runtime_chain_id()),
+                *pv.signing_domain.genesis_identity(),
+                *pv.signing_domain.authority_commitment(),
+                pv.validators.clone(),
+                pv.key_provider.clone(),
+            ))
+        }
+
+        /// Run 422 D7-A2: a coherent snapshot whose independently-held current
+        /// state matches the verifier's founding identity (admits), bound to
+        /// `pv` as the verifier the handler consumes.
+        fn coherent_snapshot_for(pv: &ProposalVoteAuthority) -> AuthorizedProposalVoteSnapshot {
+            let candidate = coherent_authority_for(pv);
             let observed = candidate.config_identity();
-            CurrentAuthorizationOwner::establish_for_fixture(candidate, observed)
+            let owner = CurrentAuthorizationOwner::establish_for_fixture(candidate, observed);
+            AuthorizedProposalVoteSnapshot::try_bind(owner, Arc::new(pv.clone()))
+                .expect("coherent snapshot binds to its own verifier")
         }
 
         fn base_header(proposer: u16) -> BlockHeader {
@@ -9613,15 +9918,14 @@ mod tests {
             proposal.encode(&mut bytes);
             let mut restore_mode = RestoreCatchupModeState::from_config(None);
             let mut detector = BinaryReconfigDetector::default();
-            // Run 422 D7-A1 fixture migration: under Required with a present PV
-            // authority the strengthened contract requires a current owner;
-            // supply a transparent established one so this wrapper's original
-            // assertions are preserved (see `migration_established_current_auth`).
-            let migrated_owner = if pv.is_some() && policy.requires_context() {
-                Some(migration_established_current_auth())
-            } else {
-                None
-            };
+            // Run 422 D7-A2 fixture migration (finding #2): under Required with a
+            // present PV authority the strengthened contract requires an
+            // admitted snapshot; bind a COHERENT one describing the actual
+            // verifier so this wrapper's original assertions are preserved
+            // (see `migration_bound_snapshot`).
+            let migrated_owner = pv
+                .filter(|_| policy.requires_context())
+                .map(migration_bound_snapshot);
             handle_inbound_consensus_msg(
                 engine,
                 ConsensusNetMsg::Proposal(bytes),
@@ -9653,12 +9957,10 @@ mod tests {
             let mut bytes = Vec::new();
             vote.encode(&mut bytes);
             let mut restore_mode = RestoreCatchupModeState::from_config(None);
-            // Run 422 D7-A1 fixture migration (see deliver_proposal_pol).
-            let migrated_owner = if pv.is_some() && policy.requires_context() {
-                Some(migration_established_current_auth())
-            } else {
-                None
-            };
+            // Run 422 D7-A2 fixture migration (see deliver_proposal_pol).
+            let migrated_owner = pv
+                .filter(|_| policy.requires_context())
+                .map(migration_bound_snapshot);
             handle_inbound_consensus_msg(
                 engine,
                 ConsensusNetMsg::Vote(bytes),
@@ -10198,12 +10500,10 @@ mod tests {
             proposal.encode(&mut bytes);
             let mut restore_mode = RestoreCatchupModeState::from_config(None);
             let mut detector = BinaryReconfigDetector::default();
-            // Run 422 D7-A1 fixture migration (see deliver_proposal_pol).
-            let migrated_owner = if pv.is_some() && policy.requires_context() {
-                Some(migration_established_current_auth())
-            } else {
-                None
-            };
+            // Run 422 D7-A2 fixture migration (see deliver_proposal_pol).
+            let migrated_owner = pv
+                .filter(|_| policy.requires_context())
+                .map(migration_bound_snapshot);
             handle_inbound_consensus_msg(
                 engine,
                 ConsensusNetMsg::Proposal(bytes),
@@ -10239,12 +10539,10 @@ mod tests {
             let mut bytes = Vec::new();
             vote.encode(&mut bytes);
             let mut restore_mode = RestoreCatchupModeState::from_config(None);
-            // Run 422 D7-A1 fixture migration (see deliver_proposal_pol).
-            let migrated_owner = if pv.is_some() && policy.requires_context() {
-                Some(migration_established_current_auth())
-            } else {
-                None
-            };
+            // Run 422 D7-A2 fixture migration (see deliver_proposal_pol).
+            let migrated_owner = pv
+                .filter(|_| policy.requires_context())
+                .map(migration_bound_snapshot);
             handle_inbound_consensus_msg(
                 engine,
                 ConsensusNetMsg::Vote(bytes),
@@ -10611,12 +10909,10 @@ mod tests {
             let mut bytes = Vec::new();
             proposal.encode(&mut bytes);
             let mut detector = BinaryReconfigDetector::default();
-            // Run 422 D7-A1 fixture migration (see deliver_proposal_pol).
-            let migrated_owner = if pv.is_some() && policy.requires_context() {
-                Some(migration_established_current_auth())
-            } else {
-                None
-            };
+            // Run 422 D7-A2 fixture migration (see deliver_proposal_pol).
+            let migrated_owner = pv
+                .filter(|_| policy.requires_context())
+                .map(migration_bound_snapshot);
             handle_inbound_consensus_msg(
                 engine,
                 ConsensusNetMsg::Proposal(bytes),
@@ -12086,20 +12382,166 @@ mod tests {
                 CurrentAuthorizationOwner::establish_for_fixture(a, observed)
             }
 
-            /// An owner for candidate A whose current state is an established
-            /// but *different* authority B (different commitment). `bump_epoch`
-            /// additionally advances the epoch so the divergence is not
-            /// epoch-only.
-            fn owner_superseded_by_b(bump_epoch: bool) -> CurrentAuthorizationOwner {
-                let a = candidate_a();
+            /// Run 422 D7-A2: a **coherently bound** snapshot whose owner's
+            /// candidate describes the actual verifier `pv` (shared membership
+            /// + key provider, same genesis / commitment / chain / epoch), so
+            /// `try_bind` succeeds and the handler consumes `pv` as the verifier
+            /// — and whose independently-held current state matches the
+            /// verifier's founding identity, so `admit()` succeeds.
+            fn snapshot_matching(pv: &ProposalVoteAuthority) -> AuthorizedProposalVoteSnapshot {
+                coherent_snapshot_for(pv)
+            }
+
+            /// Run 422 D7-A2: a coherently bound snapshot (candidate == the
+            /// actual verifier `pv`, so `try_bind` succeeds) whose
+            /// independently-held current state is an established but *different*
+            /// authority B (different commitment). `bump_epoch` additionally
+            /// advances the epoch so the divergence is not epoch-only. `admit()`
+            /// rejects Superseded before crypto — a shared/cloned candidate
+            /// handle is not proof of current approval.
+            fn snapshot_superseded(
+                pv: &ProposalVoteAuthority,
+                bump_epoch: bool,
+            ) -> AuthorizedProposalVoteSnapshot {
+                let candidate = coherent_authority_for(pv);
+                let coherent = candidate.config_identity();
                 let observed = ObservedConsensusConfiguration::new(
-                    D7A_CHAIN,
-                    d7a_genesis_hash(),
+                    coherent.chain_id,
+                    coherent.genesis_hash,
                     COMMIT_B,
-                    4,
-                    if bump_epoch { 1 } else { 0 },
+                    coherent.validator_count,
+                    if bump_epoch { coherent.epoch + 1 } else { coherent.epoch },
                 );
-                CurrentAuthorizationOwner::establish_for_fixture(a, observed)
+                let owner =
+                    CurrentAuthorizationOwner::establish_for_fixture(candidate, observed);
+                AuthorizedProposalVoteSnapshot::try_bind(owner, Arc::new(pv.clone()))
+                    .expect("candidate coherent with its verifier binds; supersession is a current-state property")
+            }
+
+            /// Run 422 D7-A2: a coherently bound snapshot (candidate == the
+            /// actual verifier `pv`) whose current state is explicitly
+            /// unavailable. `try_bind` succeeds (local binding coherence), but
+            /// `admit()` rejects current-state-unavailable before crypto.
+            fn snapshot_unavailable(
+                pv: &ProposalVoteAuthority,
+                reason: CurrentStateUnavailableReason,
+            ) -> AuthorizedProposalVoteSnapshot {
+                let candidate = coherent_authority_for(pv);
+                let owner = CurrentAuthorizationOwner::unavailable(candidate, reason);
+                AuthorizedProposalVoteSnapshot::try_bind(owner, Arc::new(pv.clone()))
+                    .expect("candidate coherent with its verifier binds; unavailability is a current-state property")
+            }
+
+            // ----- Run 422 D7-A1/A2 direct backend-call instrumentation ------
+            //
+            // A latency-observation counter records only that the handler
+            // *reached* its crypto stage; it is supplementary evidence, not a
+            // direct backend-call counter. `CountingSigVerifier` wraps the REAL
+            // ML-DSA-44 backend, increments a shared atomic INSIDE the
+            // verify_* methods, and delegates to the real backend. A
+            // present-owner positive control proves the counter increments on a
+            // real verification; the missing-owner negatives assert ZERO
+            // backend calls, i.e. the real signature backend is never invoked.
+            use qbind_consensus::crypto_verifier::SimpleBackendRegistry as CountingRegistry;
+            use qbind_crypto::consensus_sig::{ConsensusSigError, ConsensusSigVerifier};
+            use qbind_crypto::ml_dsa44::MlDsa44Backend;
+            use std::sync::atomic::AtomicU64;
+
+            struct CountingSigVerifier {
+                calls: Arc<AtomicU64>,
+                inner: Arc<dyn ConsensusSigVerifier>,
+            }
+
+            impl ConsensusSigVerifier for CountingSigVerifier {
+                fn verify_vote(
+                    &self,
+                    validator_id: u64,
+                    pk: &[u8],
+                    preimage: &[u8],
+                    signature: &[u8],
+                ) -> Result<(), ConsensusSigError> {
+                    self.calls.fetch_add(1, SeqCst);
+                    self.inner.verify_vote(validator_id, pk, preimage, signature)
+                }
+
+                fn verify_proposal(
+                    &self,
+                    validator_id: u64,
+                    pk: &[u8],
+                    preimage: &[u8],
+                    signature: &[u8],
+                ) -> Result<(), ConsensusSigError> {
+                    self.calls.fetch_add(1, SeqCst);
+                    self.inner
+                        .verify_proposal(validator_id, pk, preimage, signature)
+                }
+            }
+
+            /// Build a `ProposalVoteAuthority` identical to `make_ctx`, except
+            /// its backend registry wraps the real ML-DSA-44 backend in a
+            /// `CountingSigVerifier` sharing `calls`. Every real signature
+            /// verification therefore increments `calls`.
+            fn counting_pv(
+                fixture: &Fixture,
+                calls: &Arc<AtomicU64>,
+            ) -> ProposalVoteAuthority {
+                let backend: Arc<dyn ConsensusSigVerifier> = Arc::new(CountingSigVerifier {
+                    calls: Arc::clone(calls),
+                    inner: Arc::new(MlDsa44Backend),
+                });
+                let registry = CountingRegistry::with_backend(TEST_SUITE, backend);
+                ProposalVoteAuthority {
+                    validators: fixture.validators.clone(),
+                    key_provider: fixture.kp.clone(),
+                    backend_registry: Arc::new(registry),
+                    chain_id: QBIND_DEVNET_CHAIN_ID,
+                    signer: None,
+                    signing_domain: d5_control_domain(),
+                }
+            }
+
+            /// A recording outbound facade that counts EVERY outbound action.
+            /// Used by the missing-owner negatives to assert that a fail-closed
+            /// rejection produces zero outbound actions.
+            #[derive(Default)]
+            struct D7ActionRecorder {
+                actions: AtomicU64,
+            }
+            impl D7ActionRecorder {
+                fn total(&self) -> u64 {
+                    self.actions.load(SeqCst)
+                }
+            }
+            impl ConsensusNetworkFacade for D7ActionRecorder {
+                fn send_vote_to(
+                    &self,
+                    _to: ValidatorId,
+                    _v: &Vote,
+                ) -> Result<(), qbind_consensus::network::NetworkError> {
+                    self.actions.fetch_add(1, SeqCst);
+                    Ok(())
+                }
+                fn broadcast_vote(
+                    &self,
+                    _v: &Vote,
+                ) -> Result<(), qbind_consensus::network::NetworkError> {
+                    self.actions.fetch_add(1, SeqCst);
+                    Ok(())
+                }
+                fn broadcast_proposal(
+                    &self,
+                    _p: &BlockProposal,
+                ) -> Result<(), qbind_consensus::network::NetworkError> {
+                    self.actions.fetch_add(1, SeqCst);
+                    Ok(())
+                }
+                fn broadcast_consensus_msg(
+                    &self,
+                    _msg: &ConsensusNetMsg,
+                ) -> Result<(), qbind_consensus::network::NetworkError> {
+                    self.actions.fetch_add(1, SeqCst);
+                    Ok(())
+                }
             }
 
             #[allow(clippy::too_many_arguments)]
@@ -12109,7 +12551,7 @@ mod tests {
                 restore_mode: &mut RestoreCatchupModeState,
                 timeout_ctx: Option<&TimeoutVerificationContext>,
                 pv: Option<&ProposalVoteAuthority>,
-                current_auth: Option<&CurrentAuthorizationOwner>,
+                current_auth: Option<&AuthorizedProposalVoteSnapshot>,
                 proposal: &BlockProposal,
                 metrics: &Arc<NodeMetrics>,
                 outbound: Option<&dyn ConsensusNetworkFacade>,
@@ -12146,7 +12588,7 @@ mod tests {
                 stats: &mut BinaryConsensusLoopInboundStats,
                 timeout_ctx: Option<&TimeoutVerificationContext>,
                 pv: Option<&ProposalVoteAuthority>,
-                current_auth: Option<&CurrentAuthorizationOwner>,
+                current_auth: Option<&AuthorizedProposalVoteSnapshot>,
                 vote: &Vote,
                 metrics: &Arc<NodeMetrics>,
                 origin: Option<&AuthenticatedConsensusOrigin>,
@@ -12183,7 +12625,7 @@ mod tests {
             fn d7a_proposal_matching_current_state_verify_accepted() {
                 let fixture = make_fixture(4);
                 let pv = make_ctx(&fixture, None);
-                let owner = owner_matching_a();
+                let current = snapshot_matching(&pv);
                 let gate = pv_binding_gate(4);
                 let origin = AuthenticatedConsensusOrigin::new(pv_node_for(1), ValidatorId(1));
                 let mut engine = make_engine(ValidatorId(0), 4);
@@ -12198,7 +12640,7 @@ mod tests {
                     &mut restore,
                     None,
                     Some(&pv),
-                    Some(&owner),
+                    Some(&current),
                     &p,
                     &metrics,
                     None,
@@ -12227,7 +12669,7 @@ mod tests {
                 ] {
                     let fixture = make_fixture(4);
                     let pv = make_ctx(&fixture, None);
-                    let owner = CurrentAuthorizationOwner::unavailable(candidate_a(), reason);
+                    let current = snapshot_unavailable(&pv, reason);
                     let gate = pv_binding_gate(4);
                     let origin =
                         AuthenticatedConsensusOrigin::new(pv_node_for(1), ValidatorId(1));
@@ -12244,7 +12686,7 @@ mod tests {
                         &mut restore,
                         None,
                         Some(&pv), // authority IS present
-                        Some(&owner),
+                        Some(&current),
                         &p,
                         &metrics,
                         None,
@@ -12273,19 +12715,13 @@ mod tests {
             fn d7a_proposal_superseded_by_b_rejects_including_cloned_handle() {
                 let fixture = make_fixture(4);
                 let pv = make_ctx(&fixture, None);
-                // Build the owner around a CLONED handle of candidate A; the
-                // independently-held current state is authority B.
-                let a = candidate_a();
-                let a_cloned = Arc::clone(&a);
-                let observed_b = ObservedConsensusConfiguration::new(
-                    D7A_CHAIN,
-                    d7a_genesis_hash(),
-                    COMMIT_B,
-                    4,
-                    1,
-                );
-                let owner =
-                    CurrentAuthorizationOwner::establish_for_fixture(a_cloned, observed_b);
+                // The snapshot's owner shares the verifier's actual membership
+                // and key provider (cloned `Arc` handles of the exact verifier
+                // objects), yet its independently-held current state is a
+                // different established authority B. A shared/cloned candidate
+                // handle is therefore NOT proof of current approval: admission
+                // still rejects Superseded before crypto.
+                let current = snapshot_superseded(&pv, true);
                 let gate = pv_binding_gate(4);
                 let origin = AuthenticatedConsensusOrigin::new(pv_node_for(1), ValidatorId(1));
                 let mut engine = make_engine(ValidatorId(0), 4);
@@ -12300,7 +12736,7 @@ mod tests {
                     &mut restore,
                     None,
                     Some(&pv),
-                    Some(&owner),
+                    Some(&current),
                     &p,
                     &metrics,
                     None,
@@ -12313,8 +12749,13 @@ mod tests {
                 assert_eq!(stats.inbound_proposal_current_state_unavailable_total, 0);
                 assert_eq!(stats.proposal_vote_crypto_verify_latency_observations_total, 0);
                 assert_eq!(stats.inbound_proposals_delivered, 0);
-                // The cloned handle is the same authority A; still stale.
-                assert!(Arc::ptr_eq(&a, owner.candidate()));
+                // The snapshot's owner shares the verifier's exact membership
+                // (a cloned `Arc` handle) — yet a shared/cloned handle is still
+                // not proof of current approval: admission rejected it stale.
+                assert!(Arc::ptr_eq(
+                    &current.owner().candidate().validators,
+                    &pv.validators
+                ));
             }
 
             // -------- Proposal: same-epoch authority replacement ⇒ stale A
@@ -12325,7 +12766,7 @@ mod tests {
                 let pv = make_ctx(&fixture, None);
                 // Current state has the SAME epoch (0) as A but a different
                 // membership/key commitment.
-                let owner = owner_superseded_by_b(false);
+                let current = snapshot_superseded(&pv, false);
                 let gate = pv_binding_gate(4);
                 let origin = AuthenticatedConsensusOrigin::new(pv_node_for(1), ValidatorId(1));
                 let mut engine = make_engine(ValidatorId(0), 4);
@@ -12340,7 +12781,7 @@ mod tests {
                     &mut restore,
                     None,
                     Some(&pv),
-                    Some(&owner),
+                    Some(&current),
                     &p,
                     &metrics,
                     None,
@@ -12360,10 +12801,7 @@ mod tests {
                 let fixture = make_fixture(4);
                 let pv = make_ctx(&fixture, None);
                 // Owner would reject at freshness (unavailable) IF reached.
-                let owner = CurrentAuthorizationOwner::unavailable(
-                    candidate_a(),
-                    CurrentStateUnavailableReason::MissingStorage,
-                );
+                let current = snapshot_unavailable(&pv, CurrentStateUnavailableReason::MissingStorage);
                 let gate = pv_binding_gate(4);
                 // Authenticated as validator 1, but proposal claims proposer 0.
                 let origin = AuthenticatedConsensusOrigin::new(pv_node_for(1), ValidatorId(1));
@@ -12379,7 +12817,7 @@ mod tests {
                     &mut restore,
                     None,
                     Some(&pv),
-                    Some(&owner),
+                    Some(&current),
                     &p,
                     &metrics,
                     None,
@@ -12401,7 +12839,7 @@ mod tests {
             fn d7a_vote_matching_current_state_verify_accepted() {
                 let fixture = make_fixture(4);
                 let pv = make_ctx(&fixture, None);
-                let owner = owner_matching_a();
+                let current = snapshot_matching(&pv);
                 let gate = pv_binding_gate(4);
                 let origin = AuthenticatedConsensusOrigin::new(pv_node_for(1), ValidatorId(1));
                 let mut engine = make_engine(ValidatorId(0), 4);
@@ -12414,7 +12852,7 @@ mod tests {
                     &mut stats,
                     None,
                     Some(&pv),
-                    Some(&owner),
+                    Some(&current),
                     &v,
                     &metrics,
                     Some(&origin),
@@ -12434,10 +12872,7 @@ mod tests {
             fn d7a_vote_unavailable_current_state_rejects_before_crypto() {
                 let fixture = make_fixture(4);
                 let pv = make_ctx(&fixture, None);
-                let owner = CurrentAuthorizationOwner::unavailable(
-                    candidate_a(),
-                    CurrentStateUnavailableReason::StorageWithoutCommittedEpoch,
-                );
+                let current = snapshot_unavailable(&pv, CurrentStateUnavailableReason::StorageWithoutCommittedEpoch);
                 let gate = pv_binding_gate(4);
                 let origin = AuthenticatedConsensusOrigin::new(pv_node_for(1), ValidatorId(1));
                 let mut engine = make_engine(ValidatorId(0), 4);
@@ -12451,7 +12886,7 @@ mod tests {
                     &mut stats,
                     None,
                     Some(&pv),
-                    Some(&owner),
+                    Some(&current),
                     &v,
                     &metrics,
                     Some(&origin),
@@ -12473,7 +12908,7 @@ mod tests {
             fn d7a_vote_superseded_by_b_rejects() {
                 let fixture = make_fixture(4);
                 let pv = make_ctx(&fixture, None);
-                let owner = owner_superseded_by_b(true);
+                let current = snapshot_superseded(&pv, true);
                 let gate = pv_binding_gate(4);
                 let origin = AuthenticatedConsensusOrigin::new(pv_node_for(1), ValidatorId(1));
                 let mut engine = make_engine(ValidatorId(0), 4);
@@ -12486,7 +12921,7 @@ mod tests {
                     &mut stats,
                     None,
                     Some(&pv),
-                    Some(&owner),
+                    Some(&current),
                     &v,
                     &metrics,
                     Some(&origin),
@@ -12505,7 +12940,7 @@ mod tests {
             fn d7a_vote_same_epoch_replacement_rejects() {
                 let fixture = make_fixture(4);
                 let pv = make_ctx(&fixture, None);
-                let owner = owner_superseded_by_b(false);
+                let current = snapshot_superseded(&pv, false);
                 let gate = pv_binding_gate(4);
                 let origin = AuthenticatedConsensusOrigin::new(pv_node_for(1), ValidatorId(1));
                 let mut engine = make_engine(ValidatorId(0), 4);
@@ -12518,7 +12953,7 @@ mod tests {
                     &mut stats,
                     None,
                     Some(&pv),
-                    Some(&owner),
+                    Some(&current),
                     &v,
                     &metrics,
                     Some(&origin),
@@ -12535,10 +12970,7 @@ mod tests {
             fn d7a_vote_f6_mismatch_precedes_freshness() {
                 let fixture = make_fixture(4);
                 let pv = make_ctx(&fixture, None);
-                let owner = CurrentAuthorizationOwner::unavailable(
-                    candidate_a(),
-                    CurrentStateUnavailableReason::MissingStorage,
-                );
+                let current = snapshot_unavailable(&pv, CurrentStateUnavailableReason::MissingStorage);
                 let gate = pv_binding_gate(4);
                 let origin = AuthenticatedConsensusOrigin::new(pv_node_for(1), ValidatorId(1));
                 let mut engine = make_engine(ValidatorId(0), 4);
@@ -12551,7 +12983,7 @@ mod tests {
                     &mut stats,
                     None,
                     Some(&pv),
-                    Some(&owner),
+                    Some(&current),
                     &v,
                     &metrics,
                     Some(&origin),
@@ -12579,7 +13011,10 @@ mod tests {
             #[test]
             fn d7a1_proposal_missing_owner_rejects_before_crypto() {
                 let fixture = make_fixture(4);
-                let pv = make_ctx(&fixture, None);
+                // Wrap the REAL backend so we can DIRECTLY count signature
+                // verifications (not merely infer from the latency counter).
+                let backend_calls = Arc::new(AtomicU64::new(0));
+                let pv = counting_pv(&fixture, &backend_calls);
                 let gate = pv_binding_gate(4);
                 let origin = AuthenticatedConsensusOrigin::new(pv_node_for(1), ValidatorId(1));
                 let mut engine = make_engine(ValidatorId(0), 4);
@@ -12587,6 +13022,8 @@ mod tests {
                 let mut stats = BinaryConsensusLoopInboundStats::default();
                 let metrics = make_metrics();
                 let mut restore = RestoreCatchupModeState::from_config(None);
+                // Recording outbound facade: assert zero outbound actions.
+                let facade = D7ActionRecorder::default();
 
                 let p = signed_proposal(1, &fixture);
                 // Establish SEPARATELY that this signature is valid under the
@@ -12606,6 +13043,12 @@ mod tests {
                     "control: the test proposal signature is valid"
                 );
 
+                // Isolate the direct backend-call counter: the standalone
+                // control verification above went through the fixture's own
+                // registry (not `pv`'s counting registry), so reset to zero
+                // before the handler call and assert the handler makes zero.
+                backend_calls.store(0, SeqCst);
+
                 let detector = deliver_proposal_fresh(
                     &mut engine,
                     &mut stats,
@@ -12615,7 +13058,7 @@ mod tests {
                     None,       // but NO current-authorization owner is wired
                     &p,
                     &metrics,
-                    None,
+                    Some(&facade),
                     Some(&origin),
                     Some(&gate),
                     ConsensusVerificationPolicy::Required,
@@ -12630,20 +13073,70 @@ mod tests {
                 assert_eq!(stats.inbound_proposal_current_state_unavailable_total, 1);
                 assert_eq!(stats.inbound_proposal_authority_superseded_total, 0);
                 assert_eq!(stats.inbound_proposal_authority_stale_before_effect_total, 0);
-                // Signature verification was NOT invoked (no crypto latency
-                // observation — equivalent direct instrumentation) and no
-                // verification acceptance was recorded.
+                // The REAL signature backend was NEVER invoked: a direct
+                // backend-call counter of zero (the latency-observation counter
+                // is only supplementary evidence, not a backend-call counter).
+                assert_eq!(
+                    backend_calls.load(SeqCst),
+                    0,
+                    "missing owner: real signature backend must not be called"
+                );
                 assert_eq!(stats.proposal_vote_crypto_verify_latency_observations_total, 0);
                 assert_eq!(stats.inbound_proposal_verify_accepted, 0);
                 assert_eq!(stats.inbound_proposal_verify_rejected_total, 0);
                 // No delivery, engine ingestion, reconfig observation, view
-                // mutation, or restore deferral.
+                // mutation, restore deferral, or outbound action.
                 assert_eq!(stats.inbound_proposals_delivered, 0);
                 assert_eq!(stats.inbound_proposals_engine_accepted, 0);
                 assert_eq!(stats.restore_catchup_proposals_deferred, 0);
+                assert_eq!(facade.total(), 0, "no outbound actions on rejection");
                 assert!(detector.header_cache.is_empty());
                 assert_eq!(engine.current_view(), view_before);
             }
+
+            // -------- Proposal POSITIVE control: a coherently bound snapshot
+            // DOES invoke the real signature backend (direct instrumentation
+            // proof). ---------------------------------------------------------
+            #[test]
+            fn d7a1_proposal_backend_call_counter_positive_control() {
+                let fixture = make_fixture(4);
+                let backend_calls = Arc::new(AtomicU64::new(0));
+                let pv = counting_pv(&fixture, &backend_calls);
+                let current = snapshot_matching(&pv);
+                let gate = pv_binding_gate(4);
+                let origin = AuthenticatedConsensusOrigin::new(pv_node_for(1), ValidatorId(1));
+                let mut engine = make_engine(ValidatorId(0), 4);
+                let mut stats = BinaryConsensusLoopInboundStats::default();
+                let metrics = make_metrics();
+                let mut restore = RestoreCatchupModeState::from_config(None);
+
+                let p = signed_proposal(1, &fixture);
+                deliver_proposal_fresh(
+                    &mut engine,
+                    &mut stats,
+                    &mut restore,
+                    None,
+                    Some(&pv),
+                    Some(&current),
+                    &p,
+                    &metrics,
+                    None,
+                    Some(&origin),
+                    Some(&gate),
+                    ConsensusVerificationPolicy::Required,
+                );
+
+                // The real backend WAS invoked (proves the counter is wired to
+                // the actual verify path), and verification succeeded.
+                assert!(
+                    backend_calls.load(SeqCst) >= 1,
+                    "positive control: real signature backend must be called"
+                );
+                assert_eq!(stats.inbound_proposal_verify_accepted, 1);
+                assert!(stats.proposal_vote_crypto_verify_latency_observations_total >= 1);
+            }
+
+
 
             // -------- Proposal: F6 mismatch STILL precedes the missing-owner
             // decision (sender binding rejects first). -----------------------
@@ -12687,14 +13180,17 @@ mod tests {
             // fail-closed BEFORE crypto, distinct from unavailable owner. -----
             #[test]
             fn d7a1_vote_missing_owner_rejects_before_crypto() {
+                use qbind_wire::io::WireEncode;
                 let fixture = make_fixture(4);
-                let pv = make_ctx(&fixture, None);
+                let backend_calls = Arc::new(AtomicU64::new(0));
+                let pv = counting_pv(&fixture, &backend_calls);
                 let gate = pv_binding_gate(4);
                 let origin = AuthenticatedConsensusOrigin::new(pv_node_for(1), ValidatorId(1));
                 let mut engine = make_engine(ValidatorId(0), 4);
                 let view_before = engine.current_view();
                 let mut stats = BinaryConsensusLoopInboundStats::default();
                 let metrics = make_metrics();
+                let facade = D7ActionRecorder::default();
 
                 let v = signed_vote(1, &fixture);
                 // Establish SEPARATELY that this signature is valid under the
@@ -12713,14 +13209,26 @@ mod tests {
                     "control: the test vote signature is valid"
                 );
 
-                deliver_vote_fresh(
+                // Isolate the direct backend-call counter before the handler
+                // call (the control verification above used the fixture's own
+                // registry, not `pv`'s counting registry).
+                backend_calls.store(0, SeqCst);
+
+                let mut bytes = Vec::new();
+                v.encode(&mut bytes);
+                let mut restore = RestoreCatchupModeState::from_config(None);
+                handle_inbound_consensus_msg(
                     &mut engine,
+                    ConsensusNetMsg::Vote(bytes),
                     &mut stats,
+                    Some(&facade), // recording outbound facade
+                    &metrics,
+                    ValidatorId(0),
+                    &mut restore,
                     None,
                     Some(&pv), // authority IS present
                     None,      // but NO current-authorization owner is wired
-                    &v,
-                    &metrics,
+                    &mut BinaryReconfigDetector::default(),
                     Some(&origin),
                     Some(&gate),
                     ConsensusVerificationPolicy::Required,
@@ -12730,12 +13238,55 @@ mod tests {
                 assert_eq!(stats.inbound_vote_current_state_unavailable_total, 1);
                 assert_eq!(stats.inbound_vote_authority_superseded_total, 0);
                 assert_eq!(stats.inbound_vote_authority_stale_before_effect_total, 0);
+                // The REAL signature backend was NEVER invoked.
+                assert_eq!(
+                    backend_calls.load(SeqCst),
+                    0,
+                    "missing owner: real signature backend must not be called"
+                );
                 assert_eq!(stats.proposal_vote_crypto_verify_latency_observations_total, 0);
                 assert_eq!(stats.inbound_vote_verify_accepted, 0);
                 assert_eq!(stats.inbound_vote_verify_rejected_total, 0);
                 assert_eq!(stats.inbound_votes_delivered, 0);
                 assert_eq!(stats.inbound_votes_engine_accepted, 0);
+                assert_eq!(facade.total(), 0, "no outbound actions on rejection");
                 assert_eq!(engine.current_view(), view_before);
+            }
+
+            // -------- Vote POSITIVE control: a coherently bound snapshot DOES
+            // invoke the real signature backend. -----------------------------
+            #[test]
+            fn d7a1_vote_backend_call_counter_positive_control() {
+                let fixture = make_fixture(4);
+                let backend_calls = Arc::new(AtomicU64::new(0));
+                let pv = counting_pv(&fixture, &backend_calls);
+                let current = snapshot_matching(&pv);
+                let gate = pv_binding_gate(4);
+                let origin = AuthenticatedConsensusOrigin::new(pv_node_for(1), ValidatorId(1));
+                let mut engine = make_engine(ValidatorId(0), 4);
+                let mut stats = BinaryConsensusLoopInboundStats::default();
+                let metrics = make_metrics();
+
+                let v = signed_vote(1, &fixture);
+                deliver_vote_fresh(
+                    &mut engine,
+                    &mut stats,
+                    None,
+                    Some(&pv),
+                    Some(&current),
+                    &v,
+                    &metrics,
+                    Some(&origin),
+                    Some(&gate),
+                    ConsensusVerificationPolicy::Required,
+                );
+
+                assert!(
+                    backend_calls.load(SeqCst) >= 1,
+                    "positive control: real signature backend must be called"
+                );
+                assert_eq!(stats.inbound_vote_verify_accepted, 1);
+                assert!(stats.proposal_vote_crypto_verify_latency_observations_total >= 1);
             }
 
             // -------- Vote: F6 mismatch STILL precedes the missing-owner
@@ -12778,7 +13329,6 @@ mod tests {
                 let fixture = make_fixture(4);
                 let timeout_ctx = make_timeout_ctx(&fixture, Some(ValidatorId(0)));
                 assert!(timeout_ctx.signer.is_some(), "valid legacy Timeout signer");
-                let owner = owner_matching_a(); // established, would admit IF PV present
                 let gate = pv_binding_gate(4);
                 let origin = AuthenticatedConsensusOrigin::new(pv_node_for(0), ValidatorId(0));
                 let mut engine = make_engine(ValidatorId(0), 4);
@@ -12793,7 +13343,7 @@ mod tests {
                     &mut restore,
                     Some(&timeout_ctx),
                     None, // NO Proposal/Vote authority
-                    Some(&owner),
+                    None, // and NO current-authorization snapshot
                     &p,
                     &metrics,
                     None,
@@ -12802,10 +13352,11 @@ mod tests {
                     ConsensusVerificationPolicy::Required,
                 );
 
-                // Rejected authority-unavailable: the Timeout context and the
-                // established current-authorization owner do NOT substitute for
-                // a Proposal/Vote authority. Freshness counters stay zero (the
-                // freshness gate lives inside the present-authority arm).
+                // Rejected authority-unavailable: the Timeout context does NOT
+                // substitute for a Proposal/Vote authorization snapshot. A
+                // current-authorization snapshot is inseparable from its bound
+                // verifier (Run 422 D7-A2), so a Timeout context can never leak
+                // into the Proposal/Vote crypto path.
                 assert_eq!(stats.inbound_proposal_verification_context_unavailable_total, 1);
                 assert_eq!(stats.inbound_proposal_current_state_unavailable_total, 0);
                 assert_eq!(stats.inbound_proposal_authority_superseded_total, 0);
@@ -12868,7 +13419,7 @@ mod tests {
                 // crypto, then active restore mode defers the valid proposal.
                 {
                     let pv = make_ctx(&fixture, None);
-                    let owner = owner_matching_a();
+                    let current = snapshot_matching(&pv);
                     let mut engine = make_engine(ValidatorId(0), 4);
                     engine.initialize_from_snapshot_baseline([0x01; 32], 5);
                     let mut restore = RestoreCatchupModeState::from_config(Some(RestoreBaseline {
@@ -12885,7 +13436,7 @@ mod tests {
                         &mut restore,
                         None,
                         Some(&pv),
-                        Some(&owner),
+                        Some(&current),
                         &proposal,
                         &metrics,
                         Some(&facade),
@@ -12909,10 +13460,7 @@ mod tests {
                 // restore-deferral branch (no deferral recorded).
                 {
                     let pv = make_ctx(&fixture, None);
-                    let owner = CurrentAuthorizationOwner::unavailable(
-                        candidate_a(),
-                        CurrentStateUnavailableReason::MissingStorage,
-                    );
+                    let current = snapshot_unavailable(&pv, CurrentStateUnavailableReason::MissingStorage);
                     let mut engine = make_engine(ValidatorId(0), 4);
                     engine.initialize_from_snapshot_baseline([0x01; 32], 5);
                     let mut restore = RestoreCatchupModeState::from_config(Some(RestoreBaseline {
@@ -12929,7 +13477,7 @@ mod tests {
                         &mut restore,
                         None,
                         Some(&pv),
-                        Some(&owner),
+                        Some(&current),
                         &proposal,
                         &metrics,
                         Some(&facade),
@@ -12948,6 +13496,544 @@ mod tests {
                     assert_eq!(facade.calls.load(SeqCst), 0);
                     assert!(restore.is_active());
                 }
+            }
+
+            // ================================================================
+            // Run 422 D7-A2 (finding #2) — SNAPSHOT-BINDING behavioral proof.
+            //
+            // An owner authorizing identity A must not admit verification
+            // performed under an unrelated verifier B. The snapshot binds the
+            // admitted owner to the exact verifier the handler consumes, so a
+            // separately-supplied context cannot substitute different inputs.
+            // ================================================================
+
+            /// Alternate signing domain B: different genesis identity, authority
+            /// commitment, and runtime chain identity from the `d5_control_domain`.
+            /// A trusted, test-identified fixture domain (not production data).
+            fn alt_domain_b() -> ProposalVoteSigningDomainV2 {
+                ProposalVoteSigningDomainV2::try_new(
+                    ChainId(0xB0B0_0000_0000_0002),
+                    0, // expected wire chain id (matches base_header chain_id 0)
+                    [0x7Bu8; 32],
+                    [0x8Bu8; 32],
+                )
+                .expect("valid alt domain B")
+            }
+
+            /// Owner authorizing the identity of verifier `pv` (coherent).
+            fn owner_authorizing(pv: &ProposalVoteAuthority) -> CurrentAuthorizationOwner {
+                let cand = coherent_authority_for(pv);
+                let observed = cand.config_identity();
+                CurrentAuthorizationOwner::establish_for_fixture(cand, observed)
+            }
+
+            // -------- Owner A paired with verifier B ⇒ cannot bind; and B is
+            // independently a VALID verifier when coherently bound. -----------
+            #[test]
+            fn d7a2_bind_rejects_owner_a_verifier_b_while_b_is_valid() {
+                let fa = make_fixture(4);
+                let fb = make_fixture(4);
+                let domain_b = alt_domain_b();
+                let pv_a = make_ctx(&fa, None); // d5 control domain
+                let pv_b = make_ctx_v2(&fb, None, domain_b.clone());
+
+                // Owner authorizes identity A; binding it to verifier B fails
+                // closed (B's genesis / commitment / chain identity differ).
+                let err = AuthorizedProposalVoteSnapshot::try_bind(
+                    owner_authorizing(&pv_a),
+                    Arc::new(pv_b.clone()),
+                )
+                .expect_err("owner for A must not admit verification under B");
+                assert!(matches!(
+                    err,
+                    SnapshotCoherenceError::GenesisIdentityMismatch
+                        | SnapshotCoherenceError::AuthorityCommitmentMismatch
+                        | SnapshotCoherenceError::ChainIdentityMismatch
+                ));
+
+                // Control: B IS a valid verifier when coherently bound — a
+                // B-signed proposal verifies through the actual handler. This
+                // makes the rejection above attributable to BINDING, not to B
+                // being an invalid verifier.
+                let current_b = coherent_snapshot_for(&pv_b);
+                let p_b = signed_proposal_v2(1, &fb, &domain_b);
+                assert!(
+                    qbind_consensus::verify_proposal_msg_with_domain(
+                        &p_b,
+                        ValidatorId(1),
+                        fb.validators.as_ref(),
+                        fb.kp.as_ref(),
+                        fb.br.as_ref(),
+                        &domain_b,
+                    )
+                    .is_ok(),
+                    "control: the B-signed proposal is valid under B"
+                );
+                let gate = pv_binding_gate(4);
+                let origin = AuthenticatedConsensusOrigin::new(pv_node_for(1), ValidatorId(1));
+                let mut engine = make_engine(ValidatorId(0), 4);
+                let mut stats = BinaryConsensusLoopInboundStats::default();
+                let metrics = make_metrics();
+                let mut restore = RestoreCatchupModeState::from_config(None);
+                deliver_proposal_fresh(
+                    &mut engine,
+                    &mut stats,
+                    &mut restore,
+                    None,
+                    Some(&pv_b),
+                    Some(&current_b),
+                    &p_b,
+                    &metrics,
+                    None,
+                    Some(&origin),
+                    Some(&gate),
+                    ConsensusVerificationPolicy::Required,
+                );
+                assert_eq!(stats.inbound_proposal_verify_accepted, 1, "B verifies when bound to B");
+            }
+
+            // -------- Same validator COUNT but different keys ⇒ cannot bind.
+            // A count match (or shared membership alone) is insufficient: the
+            // ACTUAL key provider must correspond. --------------------------
+            #[test]
+            fn d7a2_bind_rejects_same_count_different_keys() {
+                let fa = make_fixture(4);
+                let fb = make_fixture(4); // same count, DIFFERENT keys
+                let pv_a = make_ctx(&fa, None);
+                let pv_b = make_ctx(&fb, None); // same d5 domain (genesis/commitment/chain equal)
+
+                // (a) Different membership instance: owner over A bound to B.
+                // Structural membership (ids + weights) is identical, yet the
+                // ACTUAL shared membership differs ⇒ MembershipMismatch.
+                let err_membership = AuthorizedProposalVoteSnapshot::try_bind(
+                    owner_authorizing(&pv_a),
+                    Arc::new(pv_b.clone()),
+                )
+                .expect_err("same count is not sufficient");
+                assert_eq!(err_membership, SnapshotCoherenceError::MembershipMismatch);
+
+                // (b) Isolate the key provider: SHARE B's exact membership but
+                // pair A's key provider ⇒ membership passes, KeyProviderNotShared.
+                let candidate = Arc::new(
+                    crate::genesis_consensus_authority::GenesisConsensusAuthority::for_verification_snapshot_fixture(
+                        snapshot_chain_identity_label(pv_b.signing_domain.runtime_chain_id()),
+                        *pv_b.signing_domain.genesis_identity(),
+                        *pv_b.signing_domain.authority_commitment(),
+                        pv_b.validators.clone(),   // SHARE B's membership (ptr_eq holds)
+                        pv_a.key_provider.clone(), // but A's key provider (ptr_eq fails)
+                    ),
+                );
+                let observed = candidate.config_identity();
+                let owner = CurrentAuthorizationOwner::establish_for_fixture(candidate, observed);
+                let err_keys =
+                    AuthorizedProposalVoteSnapshot::try_bind(owner, Arc::new(pv_b.clone()))
+                        .expect_err("shared membership alone is not proof; keys must correspond");
+                assert_eq!(err_keys, SnapshotCoherenceError::KeyProviderNotShared);
+            }
+
+            // -------- Different genesis / commitment / chain identity ⇒ cannot
+            // bind (each isolated field rejects with its specific reason). ----
+            #[test]
+            fn d7a2_bind_rejects_isolated_genesis_commitment_chain() {
+                let f = make_fixture(4);
+                let pv = make_ctx(&f, None);
+                let dom = &pv.signing_domain;
+
+                // Helper: candidate sharing pv's real membership + key provider,
+                // differing in exactly one identity field.
+                let build = |chain: String, genesis: [u8; 32], commitment: [u8; 32]| {
+                    Arc::new(
+                        crate::genesis_consensus_authority::GenesisConsensusAuthority::for_verification_snapshot_fixture(
+                            chain,
+                            genesis,
+                            commitment,
+                            pv.validators.clone(),
+                            pv.key_provider.clone(),
+                        ),
+                    )
+                };
+                let good_chain = snapshot_chain_identity_label(dom.runtime_chain_id());
+                let good_genesis = *dom.genesis_identity();
+                let good_commit = *dom.authority_commitment();
+
+                // Wrong genesis only.
+                let owner = CurrentAuthorizationOwner::establish_for_fixture(
+                    build(good_chain.clone(), [0x00u8; 32], good_commit),
+                    ObservedConsensusConfiguration::new(good_chain.clone(), [0x00u8; 32], good_commit, 4, 0),
+                );
+                assert_eq!(
+                    AuthorizedProposalVoteSnapshot::try_bind(owner, Arc::new(pv.clone()))
+                        .expect_err("genesis mismatch"),
+                    SnapshotCoherenceError::GenesisIdentityMismatch
+                );
+
+                // Wrong commitment only.
+                let owner = CurrentAuthorizationOwner::establish_for_fixture(
+                    build(good_chain.clone(), good_genesis, [0x01u8; 32]),
+                    ObservedConsensusConfiguration::new(good_chain.clone(), good_genesis, [0x01u8; 32], 4, 0),
+                );
+                assert_eq!(
+                    AuthorizedProposalVoteSnapshot::try_bind(owner, Arc::new(pv.clone()))
+                        .expect_err("commitment mismatch"),
+                    SnapshotCoherenceError::AuthorityCommitmentMismatch
+                );
+
+                // Wrong chain identity only.
+                let owner = CurrentAuthorizationOwner::establish_for_fixture(
+                    build("qbind-runtime-chain-0xdeadbeefdeadbeef".to_string(), good_genesis, good_commit),
+                    ObservedConsensusConfiguration::new(
+                        "qbind-runtime-chain-0xdeadbeefdeadbeef".to_string(),
+                        good_genesis,
+                        good_commit,
+                        4,
+                        0,
+                    ),
+                );
+                assert_eq!(
+                    AuthorizedProposalVoteSnapshot::try_bind(owner, Arc::new(pv.clone()))
+                        .expect_err("chain mismatch"),
+                    SnapshotCoherenceError::ChainIdentityMismatch
+                );
+            }
+
+            // -------- Proposal: the handler consumes the ADMITTED snapshot's
+            // verifier and IGNORES a separately-supplied `pv_authority`. ------
+            #[test]
+            fn d7a2_proposal_admitted_verifier_ignores_supplied_pv() {
+                let fa = make_fixture(4);
+                let fb = make_fixture(4); // same count/domain, DIFFERENT keys
+                let pv_a = make_ctx(&fa, None);
+                let pv_b = make_ctx(&fb, None);
+                let current = snapshot_matching(&pv_a); // admitted snapshot bound to A
+
+                // (i) An A-signed proposal is ACCEPTED even though the supplied
+                // context is B — proving the admitted A verifier was used and B
+                // was ignored. Independently, the A-signed message is INVALID
+                // under B (different keys), so acceptance is attributable to the
+                // admitted binding, not to B.
+                let p_a = signed_proposal(1, &fa);
+                assert!(
+                    qbind_consensus::verify_proposal_msg_with_domain(
+                        &p_a,
+                        ValidatorId(1),
+                        fb.validators.as_ref(),
+                        fb.kp.as_ref(),
+                        fb.br.as_ref(),
+                        &d5_control_domain(),
+                    )
+                    .is_err(),
+                    "the A-signed proposal must NOT verify under B"
+                );
+                {
+                    let gate = pv_binding_gate(4);
+                    let origin =
+                        AuthenticatedConsensusOrigin::new(pv_node_for(1), ValidatorId(1));
+                    let mut engine = make_engine(ValidatorId(0), 4);
+                    let mut stats = BinaryConsensusLoopInboundStats::default();
+                    let metrics = make_metrics();
+                    let mut restore = RestoreCatchupModeState::from_config(None);
+                    deliver_proposal_fresh(
+                        &mut engine,
+                        &mut stats,
+                        &mut restore,
+                        None,
+                        Some(&pv_b), // supplied context is B ...
+                        Some(&current), // ... but the admitted snapshot is A
+                        &p_a,
+                        &metrics,
+                        None,
+                        Some(&origin),
+                        Some(&gate),
+                        ConsensusVerificationPolicy::Required,
+                    );
+                    assert_eq!(
+                        stats.inbound_proposal_verify_accepted, 1,
+                        "handler used the admitted A verifier, ignoring supplied B"
+                    );
+                    assert_eq!(stats.inbound_proposal_verify_rejected_total, 0);
+                }
+
+                // (ii) A B-signed proposal (valid under B) is REJECTED, because
+                // the handler verifies under the admitted A — even though B was
+                // supplied. The negative is attributable to the binding.
+                let p_b = signed_proposal(1, &fb);
+                assert!(
+                    qbind_consensus::verify_proposal_msg_with_domain(
+                        &p_b,
+                        ValidatorId(1),
+                        fb.validators.as_ref(),
+                        fb.kp.as_ref(),
+                        fb.br.as_ref(),
+                        &d5_control_domain(),
+                    )
+                    .is_ok(),
+                    "control: the B-signed proposal is valid under B"
+                );
+                {
+                    let gate = pv_binding_gate(4);
+                    let origin =
+                        AuthenticatedConsensusOrigin::new(pv_node_for(1), ValidatorId(1));
+                    let mut engine = make_engine(ValidatorId(0), 4);
+                    let mut stats = BinaryConsensusLoopInboundStats::default();
+                    let metrics = make_metrics();
+                    let mut restore = RestoreCatchupModeState::from_config(None);
+                    let facade = D7ActionRecorder::default();
+                    deliver_proposal_fresh(
+                        &mut engine,
+                        &mut stats,
+                        &mut restore,
+                        None,
+                        Some(&pv_b),
+                        Some(&current),
+                        &p_b,
+                        &metrics,
+                        Some(&facade),
+                        Some(&origin),
+                        Some(&gate),
+                        ConsensusVerificationPolicy::Required,
+                    );
+                    assert_eq!(stats.inbound_proposal_verify_accepted, 0);
+                    assert_eq!(stats.inbound_proposal_verify_rejected_total, 1);
+                    assert_eq!(stats.inbound_proposals_delivered, 0);
+                    assert_eq!(facade.total(), 0, "no outbound actions on rejection");
+                }
+            }
+
+            // -------- Vote: the handler consumes the ADMITTED snapshot's
+            // verifier and IGNORES a separately-supplied `pv_authority`. ------
+            #[test]
+            fn d7a2_vote_admitted_verifier_ignores_supplied_pv() {
+                let fa = make_fixture(4);
+                let fb = make_fixture(4);
+                let pv_a = make_ctx(&fa, None);
+                let pv_b = make_ctx(&fb, None);
+                let current = snapshot_matching(&pv_a);
+
+                // (i) A-signed vote accepted (admitted A used, supplied B ignored).
+                let v_a = signed_vote(1, &fa);
+                assert!(
+                    qbind_consensus::verify_vote_msg_with_domain(
+                        &v_a,
+                        ValidatorId(1),
+                        fb.validators.as_ref(),
+                        fb.kp.as_ref(),
+                        fb.br.as_ref(),
+                        &d5_control_domain(),
+                    )
+                    .is_err(),
+                    "the A-signed vote must NOT verify under B"
+                );
+                {
+                    let gate = pv_binding_gate(4);
+                    let origin =
+                        AuthenticatedConsensusOrigin::new(pv_node_for(1), ValidatorId(1));
+                    let mut engine = make_engine(ValidatorId(0), 4);
+                    let mut stats = BinaryConsensusLoopInboundStats::default();
+                    let metrics = make_metrics();
+                    deliver_vote_fresh(
+                        &mut engine,
+                        &mut stats,
+                        None,
+                        Some(&pv_b),
+                        Some(&current),
+                        &v_a,
+                        &metrics,
+                        Some(&origin),
+                        Some(&gate),
+                        ConsensusVerificationPolicy::Required,
+                    );
+                    assert_eq!(
+                        stats.inbound_vote_verify_accepted, 1,
+                        "handler used the admitted A verifier, ignoring supplied B"
+                    );
+                    assert_eq!(stats.inbound_vote_verify_rejected_total, 0);
+                }
+
+                // (ii) B-signed vote (valid under B) rejected under admitted A.
+                let v_b = signed_vote(1, &fb);
+                assert!(
+                    qbind_consensus::verify_vote_msg_with_domain(
+                        &v_b,
+                        ValidatorId(1),
+                        fb.validators.as_ref(),
+                        fb.kp.as_ref(),
+                        fb.br.as_ref(),
+                        &d5_control_domain(),
+                    )
+                    .is_ok(),
+                    "control: the B-signed vote is valid under B"
+                );
+                {
+                    let gate = pv_binding_gate(4);
+                    let origin =
+                        AuthenticatedConsensusOrigin::new(pv_node_for(1), ValidatorId(1));
+                    let mut engine = make_engine(ValidatorId(0), 4);
+                    let mut stats = BinaryConsensusLoopInboundStats::default();
+                    let metrics = make_metrics();
+                    deliver_vote_fresh(
+                        &mut engine,
+                        &mut stats,
+                        None,
+                        Some(&pv_b),
+                        Some(&current),
+                        &v_b,
+                        &metrics,
+                        Some(&origin),
+                        Some(&gate),
+                        ConsensusVerificationPolicy::Required,
+                    );
+                    assert_eq!(stats.inbound_vote_verify_accepted, 0);
+                    assert_eq!(stats.inbound_vote_verify_rejected_total, 1);
+                    assert_eq!(stats.inbound_votes_delivered, 0);
+                }
+            }
+
+            // -------- Proposal: a correctly re-signed message carrying an
+            // UNAUTHORIZED epoch is rejected BEFORE crypto and any effect. ----
+            #[test]
+            fn d7a2_proposal_unauthorized_epoch_rejected_before_effects() {
+                let fixture = make_fixture(4);
+                let backend_calls = Arc::new(AtomicU64::new(0));
+                let pv = counting_pv(&fixture, &backend_calls);
+                let current = snapshot_matching(&pv); // authorizes founding epoch 0
+                let gate = pv_binding_gate(4);
+                let origin = AuthenticatedConsensusOrigin::new(pv_node_for(1), ValidatorId(1));
+                let mut engine = make_engine(ValidatorId(0), 4);
+                let view_before = engine.current_view();
+                let mut stats = BinaryConsensusLoopInboundStats::default();
+                let metrics = make_metrics();
+                let mut restore = RestoreCatchupModeState::from_config(None);
+                let facade = D7ActionRecorder::default();
+
+                // Build a proposal at epoch 1, correctly signed under the same
+                // D6 domain (so the SIGNATURE is valid; only the epoch is
+                // unauthorized).
+                let mut header = base_header(1);
+                header.epoch = 1;
+                let mut p = BlockProposal {
+                    header,
+                    qc: None,
+                    txs: vec![],
+                    signature: vec![],
+                };
+                let preimage = d5_control_domain().proposal_preimage(&p);
+                let sk = fixture.sks.get(&ValidatorId(1)).expect("sk");
+                p.signature = MlDsa44Backend::sign(sk, &preimage).expect("sign");
+                assert!(
+                    qbind_consensus::verify_proposal_msg_with_domain(
+                        &p,
+                        ValidatorId(1),
+                        fixture.validators.as_ref(),
+                        fixture.kp.as_ref(),
+                        fixture.br.as_ref(),
+                        &d5_control_domain(),
+                    )
+                    .is_ok(),
+                    "control: the epoch-1 proposal signature is valid"
+                );
+                backend_calls.store(0, SeqCst);
+
+                let detector = deliver_proposal_fresh(
+                    &mut engine,
+                    &mut stats,
+                    &mut restore,
+                    None,
+                    Some(&pv),
+                    Some(&current),
+                    &p,
+                    &metrics,
+                    Some(&facade),
+                    Some(&origin),
+                    Some(&gate),
+                    ConsensusVerificationPolicy::Required,
+                );
+
+                assert_eq!(gate.metrics().accepted(), 1, "F6 admitted first");
+                // Rejected for unauthorized epoch, BEFORE crypto and any effect.
+                assert_eq!(stats.inbound_proposal_epoch_unauthorized_total, 1);
+                assert_eq!(
+                    backend_calls.load(SeqCst),
+                    0,
+                    "epoch check precedes crypto: backend not called"
+                );
+                assert_eq!(stats.proposal_vote_crypto_verify_latency_observations_total, 0);
+                assert_eq!(stats.inbound_proposal_verify_accepted, 0);
+                assert_eq!(stats.inbound_proposals_delivered, 0);
+                assert_eq!(stats.inbound_proposals_engine_accepted, 0);
+                assert_eq!(facade.total(), 0, "no outbound actions on rejection");
+                assert!(detector.header_cache.is_empty());
+                assert_eq!(engine.current_view(), view_before);
+            }
+
+            // -------- Vote: a correctly re-signed message carrying an
+            // UNAUTHORIZED epoch is rejected BEFORE crypto and any effect. ----
+            #[test]
+            fn d7a2_vote_unauthorized_epoch_rejected_before_effects() {
+                use qbind_wire::io::WireEncode;
+                let fixture = make_fixture(4);
+                let backend_calls = Arc::new(AtomicU64::new(0));
+                let pv = counting_pv(&fixture, &backend_calls);
+                let current = snapshot_matching(&pv);
+                let gate = pv_binding_gate(4);
+                let origin = AuthenticatedConsensusOrigin::new(pv_node_for(1), ValidatorId(1));
+                let mut engine = make_engine(ValidatorId(0), 4);
+                let view_before = engine.current_view();
+                let mut stats = BinaryConsensusLoopInboundStats::default();
+                let metrics = make_metrics();
+                let facade = D7ActionRecorder::default();
+
+                let mut v = base_vote(1);
+                v.epoch = 1;
+                let preimage = d5_control_domain().vote_preimage(&v);
+                let sk = fixture.sks.get(&ValidatorId(1)).expect("sk");
+                v.signature = MlDsa44Backend::sign(sk, &preimage).expect("sign");
+                assert!(
+                    qbind_consensus::verify_vote_msg_with_domain(
+                        &v,
+                        ValidatorId(1),
+                        fixture.validators.as_ref(),
+                        fixture.kp.as_ref(),
+                        fixture.br.as_ref(),
+                        &d5_control_domain(),
+                    )
+                    .is_ok(),
+                    "control: the epoch-1 vote signature is valid"
+                );
+                backend_calls.store(0, SeqCst);
+
+                let mut bytes = Vec::new();
+                v.encode(&mut bytes);
+                let mut restore = RestoreCatchupModeState::from_config(None);
+                handle_inbound_consensus_msg(
+                    &mut engine,
+                    ConsensusNetMsg::Vote(bytes),
+                    &mut stats,
+                    Some(&facade),
+                    &metrics,
+                    ValidatorId(0),
+                    &mut restore,
+                    None,
+                    Some(&pv),
+                    Some(&current),
+                    &mut BinaryReconfigDetector::default(),
+                    Some(&origin),
+                    Some(&gate),
+                    ConsensusVerificationPolicy::Required,
+                );
+
+                assert_eq!(gate.metrics().accepted(), 1, "F6 admitted first");
+                assert_eq!(stats.inbound_vote_epoch_unauthorized_total, 1);
+                assert_eq!(
+                    backend_calls.load(SeqCst),
+                    0,
+                    "epoch check precedes crypto: backend not called"
+                );
+                assert_eq!(stats.proposal_vote_crypto_verify_latency_observations_total, 0);
+                assert_eq!(stats.inbound_vote_verify_accepted, 0);
+                assert_eq!(stats.inbound_votes_delivered, 0);
+                assert_eq!(stats.inbound_votes_engine_accepted, 0);
+                assert_eq!(facade.total(), 0, "no outbound actions on rejection");
+                assert_eq!(engine.current_view(), view_before);
             }
         }
     }
