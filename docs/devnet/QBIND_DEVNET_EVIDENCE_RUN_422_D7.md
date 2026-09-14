@@ -861,6 +861,13 @@ of scope).
 * Known unrelated `--tests` compile failures (e.g.
   `m16_epoch_transition_hardening_tests` missing `RocksDbConsensusStorage`
   helpers) are pre-existing and untouched by this change.
+* **Security tools (`parallel_validation`):** Code Review ⇒ reviewed 3 files, no
+  comments, but the model-backed reviewer reported a model-registry environment
+  error (`claude-sonnet-4.6 not found in registry`), so this is NOT a substitute
+  for manual review. CodeQL (`rust`) ⇒ **Analysis SKIPPED because the database
+  size is too large** — 0 alerts, but this is an INCOMPLETE analysis and is NOT
+  converted into a passing conclusion; CodeQL coverage for this change remains
+  outstanding.
 
 ### Finding dispositions
 
