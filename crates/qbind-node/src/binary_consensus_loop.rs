@@ -3414,10 +3414,24 @@ pub(crate) fn handle_inbound_consensus_msg(
                             // reconfig observation, engine mutation, or outbound
                             // action. A present authority with an unavailable or
                             // superseded current authorization is rejected
-                            // fail-closed here. When no owner is wired the
-                            // existing behavior is preserved unchanged.
-                            if let Some(owner) = current_auth {
-                                match owner.admit() {
+                            // fail-closed here.
+                            //
+                            // Run 422 D7-A1: when a Proposal/Vote authority is
+                            // present but NO current-authorization owner is wired
+                            // (`current_auth == None`) under the `Required`
+                            // policy, the current authorization state is
+                            // unavailable, so the message is rejected fail-closed
+                            // here — before crypto verification, delivery,
+                            // restore deferral, reconfig observation, engine
+                            // mutation, or outbound action — using the same
+                            // current-state-unavailable counter as an
+                            // unavailable-only owner. No owner is synthesized from
+                            // the candidate authority; the absent current state is
+                            // never inferred as the founding epoch. The test-only
+                            // `LocalFixtureUnsigned` policy preserves the prior
+                            // passthrough (its `requires_context()` is `false`).
+                            match current_auth {
+                                Some(owner) => match owner.admit() {
                                     Ok(ticket) => {
                                         proposal_freshness_ticket = Some(ticket);
                                     }
@@ -3431,6 +3445,24 @@ pub(crate) fn handle_inbound_consensus_msg(
                                         );
                                         return;
                                     }
+                                },
+                                None => {
+                                    if verification_policy.requires_context() {
+                                        stats.inbound_proposal_current_state_unavailable_total =
+                                            stats
+                                                .inbound_proposal_current_state_unavailable_total
+                                                .saturating_add(1);
+                                        eprintln!(
+                                            "[binary-consensus] Run 422 D7-A1: inbound proposal \
+                                             REJECTED (current authorization unavailable — no \
+                                             current-authorization owner wired) height={} \
+                                             proposer={:?} policy=Required — fail-closed, not \
+                                             delivered",
+                                            proposal.header.height, from,
+                                        );
+                                        return;
+                                    }
+                                    // LocalFixtureUnsigned: preserved passthrough.
                                 }
                             }
                             // Run 422 D6: verify the inbound proposal through the
@@ -3656,8 +3688,17 @@ pub(crate) fn handle_inbound_consensus_msg(
                             // view/commit mutation. A present authority with an
                             // unavailable or superseded current authorization is
                             // rejected fail-closed here.
-                            if let Some(owner) = current_auth {
-                                match owner.admit() {
+                            //
+                            // Run 422 D7-A1: a present authority with NO
+                            // current-authorization owner (`current_auth == None`)
+                            // under `Required` is a current-state-unavailable
+                            // rejection here, before crypto/aggregation/QC/view
+                            // mutation, using the same counter as an
+                            // unavailable-only owner. No owner is synthesized; the
+                            // test-only `LocalFixtureUnsigned` policy preserves the
+                            // prior passthrough.
+                            match current_auth {
+                                Some(owner) => match owner.admit() {
                                     Ok(ticket) => {
                                         vote_freshness_ticket = Some(ticket);
                                     }
@@ -3671,6 +3712,23 @@ pub(crate) fn handle_inbound_consensus_msg(
                                         );
                                         return;
                                     }
+                                },
+                                None => {
+                                    if verification_policy.requires_context() {
+                                        stats.inbound_vote_current_state_unavailable_total = stats
+                                            .inbound_vote_current_state_unavailable_total
+                                            .saturating_add(1);
+                                        eprintln!(
+                                            "[binary-consensus] Run 422 D7-A1: inbound vote \
+                                             REJECTED (current authorization unavailable — no \
+                                             current-authorization owner wired) height={} \
+                                             voter={:?} policy=Required — fail-closed, not \
+                                             delivered",
+                                            vote.height, from,
+                                        );
+                                        return;
+                                    }
+                                    // LocalFixtureUnsigned: preserved passthrough.
                                 }
                             }
                             // Run 422 D6: verify the inbound vote through the
@@ -8855,6 +8913,32 @@ mod tests {
             }
         }
 
+        /// Run 422 D7-A1 fixture migration: a behaviorally-transparent
+        /// established current-authorization owner used by the D5/D6 crypto and
+        /// policy wrappers below. These wrappers predate the D7-A1 rejection and
+        /// intentionally drove the handler with `current_auth == None`; under
+        /// the strengthened Required contract that input is now itself a
+        /// current-state-unavailable rejection. Providing an *established*
+        /// self-consistent owner through the existing `cfg(test)` fixture
+        /// interfaces (`for_current_authorization_fixture` +
+        /// `establish_for_fixture`) restores their original behavior exactly:
+        /// `admit()` returns a ticket and the pre-effect `confirm()` succeeds,
+        /// so every original cryptographic, delivery and counter assertion is
+        /// preserved. It is NOT a production bypass (no release build can
+        /// construct an `Established` owner) and does NOT prove the still-OPEN
+        /// owner/verifier-binding or ticket-identity findings.
+        fn migration_established_current_auth() -> CurrentAuthorizationOwner {
+            use crate::genesis_consensus_authority::GenesisConsensusAuthority;
+            let candidate = Arc::new(GenesisConsensusAuthority::for_current_authorization_fixture(
+                "qbind-d5d6-fixture-owner",
+                [0x22u8; 32],
+                4,
+                [0xCCu8; 32],
+            ));
+            let observed = candidate.config_identity();
+            CurrentAuthorizationOwner::establish_for_fixture(candidate, observed)
+        }
+
         fn base_header(proposer: u16) -> BlockHeader {
             BlockHeader {
                 version: 1,
@@ -9529,6 +9613,15 @@ mod tests {
             proposal.encode(&mut bytes);
             let mut restore_mode = RestoreCatchupModeState::from_config(None);
             let mut detector = BinaryReconfigDetector::default();
+            // Run 422 D7-A1 fixture migration: under Required with a present PV
+            // authority the strengthened contract requires a current owner;
+            // supply a transparent established one so this wrapper's original
+            // assertions are preserved (see `migration_established_current_auth`).
+            let migrated_owner = if pv.is_some() && policy.requires_context() {
+                Some(migration_established_current_auth())
+            } else {
+                None
+            };
             handle_inbound_consensus_msg(
                 engine,
                 ConsensusNetMsg::Proposal(bytes),
@@ -9539,7 +9632,7 @@ mod tests {
                 &mut restore_mode,
                 None,
                 pv,
-                None, // Run 422 D7-A: current-authorization owner (unwired)
+                migrated_owner.as_ref(),
                 &mut detector,
                 None,
                 None,
@@ -9560,6 +9653,12 @@ mod tests {
             let mut bytes = Vec::new();
             vote.encode(&mut bytes);
             let mut restore_mode = RestoreCatchupModeState::from_config(None);
+            // Run 422 D7-A1 fixture migration (see deliver_proposal_pol).
+            let migrated_owner = if pv.is_some() && policy.requires_context() {
+                Some(migration_established_current_auth())
+            } else {
+                None
+            };
             handle_inbound_consensus_msg(
                 engine,
                 ConsensusNetMsg::Vote(bytes),
@@ -9570,7 +9669,7 @@ mod tests {
                 &mut restore_mode,
                 None,
                 pv,
-                None, // Run 422 D7-A: current-authorization owner (unwired)
+                migrated_owner.as_ref(),
                 &mut BinaryReconfigDetector::default(),
                 None,
                 None,
@@ -10099,6 +10198,12 @@ mod tests {
             proposal.encode(&mut bytes);
             let mut restore_mode = RestoreCatchupModeState::from_config(None);
             let mut detector = BinaryReconfigDetector::default();
+            // Run 422 D7-A1 fixture migration (see deliver_proposal_pol).
+            let migrated_owner = if pv.is_some() && policy.requires_context() {
+                Some(migration_established_current_auth())
+            } else {
+                None
+            };
             handle_inbound_consensus_msg(
                 engine,
                 ConsensusNetMsg::Proposal(bytes),
@@ -10109,7 +10214,7 @@ mod tests {
                 &mut restore_mode,
                 timeout_ctx,
                 pv,
-                None, // Run 422 D7-A: current-authorization owner (unwired)
+                migrated_owner.as_ref(),
                 &mut detector,
                 origin,
                 gate,
@@ -10134,6 +10239,12 @@ mod tests {
             let mut bytes = Vec::new();
             vote.encode(&mut bytes);
             let mut restore_mode = RestoreCatchupModeState::from_config(None);
+            // Run 422 D7-A1 fixture migration (see deliver_proposal_pol).
+            let migrated_owner = if pv.is_some() && policy.requires_context() {
+                Some(migration_established_current_auth())
+            } else {
+                None
+            };
             handle_inbound_consensus_msg(
                 engine,
                 ConsensusNetMsg::Vote(bytes),
@@ -10144,7 +10255,7 @@ mod tests {
                 &mut restore_mode,
                 timeout_ctx,
                 pv,
-                None, // Run 422 D7-A: current-authorization owner (unwired)
+                migrated_owner.as_ref(),
                 &mut BinaryReconfigDetector::default(),
                 origin,
                 gate,
@@ -10500,6 +10611,12 @@ mod tests {
             let mut bytes = Vec::new();
             proposal.encode(&mut bytes);
             let mut detector = BinaryReconfigDetector::default();
+            // Run 422 D7-A1 fixture migration (see deliver_proposal_pol).
+            let migrated_owner = if pv.is_some() && policy.requires_context() {
+                Some(migration_established_current_auth())
+            } else {
+                None
+            };
             handle_inbound_consensus_msg(
                 engine,
                 ConsensusNetMsg::Proposal(bytes),
@@ -10510,7 +10627,7 @@ mod tests {
                 restore_mode,
                 timeout_ctx,
                 pv,
-                None, // Run 422 D7-A: current-authorization owner (unwired)
+                migrated_owner.as_ref(),
                 &mut detector,
                 origin,
                 gate,
@@ -12448,7 +12565,211 @@ mod tests {
                 assert_eq!(stats.proposal_vote_crypto_verify_latency_observations_total, 0);
             }
 
-            // -------- A valid Timeout context cannot supply Proposal/Vote
+            // =============================================================
+            // Run 422 D7-A1 — MISSING-OWNER rejection: a present
+            // `ProposalVoteAuthority` with NO current-authorization owner
+            // (`current_auth == None`) under `Required` is a
+            // current-state-unavailable rejection, distinct from an owner
+            // whose current state is present-but-unavailable. It must reject
+            // BEFORE cryptographic verification and any downstream effect.
+            // =============================================================
+
+            // -------- Proposal: present authority + current_auth=None ⇒
+            // fail-closed BEFORE crypto, distinct from unavailable owner. -----
+            #[test]
+            fn d7a1_proposal_missing_owner_rejects_before_crypto() {
+                let fixture = make_fixture(4);
+                let pv = make_ctx(&fixture, None);
+                let gate = pv_binding_gate(4);
+                let origin = AuthenticatedConsensusOrigin::new(pv_node_for(1), ValidatorId(1));
+                let mut engine = make_engine(ValidatorId(0), 4);
+                let view_before = engine.current_view();
+                let mut stats = BinaryConsensusLoopInboundStats::default();
+                let metrics = make_metrics();
+                let mut restore = RestoreCatchupModeState::from_config(None);
+
+                let p = signed_proposal(1, &fixture);
+                // Establish SEPARATELY that this signature is valid under the
+                // exact D6 domain the handler uses, so the handler rejection is
+                // attributable ONLY to the missing current authorization and not
+                // to an invalid signature.
+                assert!(
+                    qbind_consensus::verify_proposal_msg_with_domain(
+                        &p,
+                        ValidatorId(1),
+                        fixture.validators.as_ref(),
+                        fixture.kp.as_ref(),
+                        fixture.br.as_ref(),
+                        &d5_control_domain(),
+                    )
+                    .is_ok(),
+                    "control: the test proposal signature is valid"
+                );
+
+                let detector = deliver_proposal_fresh(
+                    &mut engine,
+                    &mut stats,
+                    &mut restore,
+                    None,
+                    Some(&pv),  // authority IS present
+                    None,       // but NO current-authorization owner is wired
+                    &p,
+                    &metrics,
+                    None,
+                    Some(&origin),
+                    Some(&gate),
+                    ConsensusVerificationPolicy::Required,
+                );
+
+                // F6 admission occurred (the missing-owner decision is reached
+                // only AFTER sender binding).
+                assert_eq!(gate.metrics().accepted(), 1, "F6 admitted first");
+                // The current-state-unavailable counter increases exactly once
+                // (same counter as an unavailable owner; missing owner is not a
+                // superseded case).
+                assert_eq!(stats.inbound_proposal_current_state_unavailable_total, 1);
+                assert_eq!(stats.inbound_proposal_authority_superseded_total, 0);
+                assert_eq!(stats.inbound_proposal_authority_stale_before_effect_total, 0);
+                // Signature verification was NOT invoked (no crypto latency
+                // observation — equivalent direct instrumentation) and no
+                // verification acceptance was recorded.
+                assert_eq!(stats.proposal_vote_crypto_verify_latency_observations_total, 0);
+                assert_eq!(stats.inbound_proposal_verify_accepted, 0);
+                assert_eq!(stats.inbound_proposal_verify_rejected_total, 0);
+                // No delivery, engine ingestion, reconfig observation, view
+                // mutation, or restore deferral.
+                assert_eq!(stats.inbound_proposals_delivered, 0);
+                assert_eq!(stats.inbound_proposals_engine_accepted, 0);
+                assert_eq!(stats.restore_catchup_proposals_deferred, 0);
+                assert!(detector.header_cache.is_empty());
+                assert_eq!(engine.current_view(), view_before);
+            }
+
+            // -------- Proposal: F6 mismatch STILL precedes the missing-owner
+            // decision (sender binding rejects first). -----------------------
+            #[test]
+            fn d7a1_proposal_f6_mismatch_precedes_missing_owner() {
+                let fixture = make_fixture(4);
+                let pv = make_ctx(&fixture, None);
+                let gate = pv_binding_gate(4);
+                // Authenticated as validator 1 but the proposal claims proposer 0.
+                let origin = AuthenticatedConsensusOrigin::new(pv_node_for(1), ValidatorId(1));
+                let mut engine = make_engine(ValidatorId(0), 4);
+                let mut stats = BinaryConsensusLoopInboundStats::default();
+                let metrics = make_metrics();
+                let mut restore = RestoreCatchupModeState::from_config(None);
+
+                let p = signed_proposal(0, &fixture); // claimed proposer 0
+                deliver_proposal_fresh(
+                    &mut engine,
+                    &mut stats,
+                    &mut restore,
+                    None,
+                    Some(&pv),
+                    None, // missing owner would reject IF reached
+                    &p,
+                    &metrics,
+                    None,
+                    Some(&origin),
+                    Some(&gate),
+                    ConsensusVerificationPolicy::Required,
+                );
+
+                assert_eq!(stats.inbound_sender_binding_rejected_total, 1);
+                assert_eq!(gate.metrics().accepted(), 0);
+                // The missing-owner decision was never reached (F6 rejected
+                // first): no current-state-unavailable count, no crypto.
+                assert_eq!(stats.inbound_proposal_current_state_unavailable_total, 0);
+                assert_eq!(stats.proposal_vote_crypto_verify_latency_observations_total, 0);
+            }
+
+            // -------- Vote: present authority + current_auth=None ⇒
+            // fail-closed BEFORE crypto, distinct from unavailable owner. -----
+            #[test]
+            fn d7a1_vote_missing_owner_rejects_before_crypto() {
+                let fixture = make_fixture(4);
+                let pv = make_ctx(&fixture, None);
+                let gate = pv_binding_gate(4);
+                let origin = AuthenticatedConsensusOrigin::new(pv_node_for(1), ValidatorId(1));
+                let mut engine = make_engine(ValidatorId(0), 4);
+                let view_before = engine.current_view();
+                let mut stats = BinaryConsensusLoopInboundStats::default();
+                let metrics = make_metrics();
+
+                let v = signed_vote(1, &fixture);
+                // Establish SEPARATELY that this signature is valid under the
+                // exact D6 domain, so the rejection is attributable only to the
+                // missing current authorization.
+                assert!(
+                    qbind_consensus::verify_vote_msg_with_domain(
+                        &v,
+                        ValidatorId(1),
+                        fixture.validators.as_ref(),
+                        fixture.kp.as_ref(),
+                        fixture.br.as_ref(),
+                        &d5_control_domain(),
+                    )
+                    .is_ok(),
+                    "control: the test vote signature is valid"
+                );
+
+                deliver_vote_fresh(
+                    &mut engine,
+                    &mut stats,
+                    None,
+                    Some(&pv), // authority IS present
+                    None,      // but NO current-authorization owner is wired
+                    &v,
+                    &metrics,
+                    Some(&origin),
+                    Some(&gate),
+                    ConsensusVerificationPolicy::Required,
+                );
+
+                assert_eq!(gate.metrics().accepted(), 1, "F6 admitted first");
+                assert_eq!(stats.inbound_vote_current_state_unavailable_total, 1);
+                assert_eq!(stats.inbound_vote_authority_superseded_total, 0);
+                assert_eq!(stats.inbound_vote_authority_stale_before_effect_total, 0);
+                assert_eq!(stats.proposal_vote_crypto_verify_latency_observations_total, 0);
+                assert_eq!(stats.inbound_vote_verify_accepted, 0);
+                assert_eq!(stats.inbound_vote_verify_rejected_total, 0);
+                assert_eq!(stats.inbound_votes_delivered, 0);
+                assert_eq!(stats.inbound_votes_engine_accepted, 0);
+                assert_eq!(engine.current_view(), view_before);
+            }
+
+            // -------- Vote: F6 mismatch STILL precedes the missing-owner
+            // decision (sender binding rejects first). -----------------------
+            #[test]
+            fn d7a1_vote_f6_mismatch_precedes_missing_owner() {
+                let fixture = make_fixture(4);
+                let pv = make_ctx(&fixture, None);
+                let gate = pv_binding_gate(4);
+                let origin = AuthenticatedConsensusOrigin::new(pv_node_for(1), ValidatorId(1));
+                let mut engine = make_engine(ValidatorId(0), 4);
+                let mut stats = BinaryConsensusLoopInboundStats::default();
+                let metrics = make_metrics();
+
+                let v = signed_vote(0, &fixture); // validator_index 0 vs origin 1
+                deliver_vote_fresh(
+                    &mut engine,
+                    &mut stats,
+                    None,
+                    Some(&pv),
+                    None, // missing owner would reject IF reached
+                    &v,
+                    &metrics,
+                    Some(&origin),
+                    Some(&gate),
+                    ConsensusVerificationPolicy::Required,
+                );
+
+                assert_eq!(stats.inbound_sender_binding_rejected_total, 1);
+                assert_eq!(gate.metrics().accepted(), 0);
+                assert_eq!(stats.inbound_vote_current_state_unavailable_total, 0);
+                assert_eq!(stats.proposal_vote_crypto_verify_latency_observations_total, 0);
+            }
+
             // authorization; neither can a present current-authorization owner
             // on its own. With `pv_authority == None` the frame is rejected
             // authority-unavailable regardless of an established current state.
