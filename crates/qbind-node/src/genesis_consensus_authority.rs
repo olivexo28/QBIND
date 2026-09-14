@@ -845,6 +845,266 @@ impl GenesisConsensusAuthority {
     }
 }
 
+/// Run 422 D7-A — a short-lived, **in-process** admission ticket issued by
+/// [`CurrentAuthorizationOwner::admit`] after a freshness check succeeds.
+///
+/// It carries the owner's [`CurrentAuthorizationOwner::generation`] at the
+/// instant the check passed. Before an admitted operation applies its effect
+/// (engine mutation / outbound), the caller re-confirms the ticket with
+/// [`CurrentAuthorizationOwner::confirm`]; if the owner's current state was
+/// replaced in between (generation advanced), the confirm fails and the
+/// operation is refused. This prevents a successful check from being reused
+/// across an in-process invalidation before its effect.
+///
+/// This is an **in-memory ordering** guarantee only. It is explicitly **not**
+/// a durable anti-rollback mechanism and does not prevent an A→B→A signature
+/// replay across process restarts: the generation lives only for the life of
+/// this owner value.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AuthorizationTicket {
+    generation: u64,
+}
+
+impl AuthorizationTicket {
+    /// The owner generation this ticket was minted against.
+    pub fn generation(&self) -> u64 {
+        self.generation
+    }
+}
+
+/// Run 422 D7-A — fail-closed error returned by
+/// [`CurrentAuthorizationOwner::confirm`] when the owner's current
+/// authorization state was replaced (its generation advanced) between the
+/// admitting freshness check and the effect. Bounded, non-secret.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StaleAuthorizationError {
+    /// The generation the admitting check was issued against.
+    pub admitted_generation: u64,
+    /// The owner's generation at confirm time (strictly greater).
+    pub current_generation: u64,
+}
+
+impl std::fmt::Display for StaleAuthorizationError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "current authorization was replaced between admission (generation {}) and effect \
+             (generation {}); the earlier check must not be reused across the in-process \
+             invalidation and the operation is refused",
+            self.admitted_generation, self.current_generation
+        )
+    }
+}
+
+impl std::error::Error for StaleAuthorizationError {}
+
+/// Run 422 D7-A (corrective — section 3) — the **independently maintained
+/// owner** of the node's current Proposal/Vote authorization state.
+///
+/// This type is deliberately distinct from any candidate authority snapshot.
+/// The prior public construction
+/// `LocalAuthorizationState::Established(auth.config_identity())` let an
+/// authority present its **own** stale self-description as "current state",
+/// which [`GenesisConsensusAuthority::authorize_current_state`] would then
+/// compare against itself (a tautology). Here the current state is held
+/// **privately** inside this owner and is obtained only through
+/// [`Self::admit`]; a caller can never hand in a self-declared `Established`
+/// wrapper as proof, and the authorization-relevant identity fields cannot be
+/// swapped after a check without advancing the [`Self::generation`] (which
+/// invalidates any outstanding [`AuthorizationTicket`]).
+///
+/// # Ownership / construction
+///
+/// * The owner bundles the `candidate` authority (the snapshot presenting
+///   itself for admission) with the independently-sourced `current`
+///   [`LocalAuthorizationState`]. Keeping both here — with `current` private —
+///   is what enforces "obtain current authorization through the owner".
+/// * The only **production-reachable** constructor is [`Self::unavailable`],
+///   which yields an owner whose current state is explicitly unavailable and
+///   therefore can never authorize. There is deliberately **no** production
+///   constructor that accepts an arbitrary `Established` current
+///   configuration: establishing a concrete current state is available only
+///   through the explicitly test-identified [`Self::establish_for_fixture`]
+///   (compiled only under `cfg(test)`), so a real trusted current-state
+///   lifecycle remains unavailable in release builds.
+pub struct CurrentAuthorizationOwner {
+    /// The authority snapshot presenting itself for admission. A clone of
+    /// this handle still fails admission when the independently-held current
+    /// state has moved on — the candidate is not the source of truth for
+    /// "current".
+    candidate: Arc<GenesisConsensusAuthority>,
+    /// The node's independently-sourced current authorization state. Private:
+    /// callers cannot read it out and feed it back as a caller-declared proof,
+    /// and cannot mutate its identity fields after a check.
+    current: LocalAuthorizationState,
+    /// Monotonic in-process generation, advanced on every replacement so an
+    /// admitted check can detect an intervening invalidation before its
+    /// effect. Not durable (see [`AuthorizationTicket`]).
+    generation: u64,
+}
+
+impl std::fmt::Debug for CurrentAuthorizationOwner {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Never print the full current configuration (avoid leaking the exact
+        // committed identity into logs); the availability discriminator and
+        // generation are enough for diagnostics.
+        let availability = match &self.current {
+            LocalAuthorizationState::MissingStorage => "unavailable(MissingStorage)",
+            LocalAuthorizationState::StorageWithoutCommittedEpoch => {
+                "unavailable(StorageWithoutCommittedEpoch)"
+            }
+            LocalAuthorizationState::Established(_) => "established",
+        };
+        f.debug_struct("CurrentAuthorizationOwner")
+            .field("candidate_chain_id", &self.candidate.chain_id)
+            .field("candidate_commitment_fp", &fp_hex(&self.candidate.commitment))
+            .field("current", &availability)
+            .field("generation", &self.generation)
+            .finish()
+    }
+}
+
+impl CurrentAuthorizationOwner {
+    /// Production-reachable constructor: an owner whose current authorization
+    /// state is explicitly **unavailable**. Such an owner can never admit an
+    /// operation — [`Self::admit`] returns
+    /// [`FreshnessError::CurrentStateUnavailable`]. This is the only owner a
+    /// release build can construct, so a present `ProposalVoteAuthority` with
+    /// an unavailable current authorization always rejects fail-closed.
+    pub fn unavailable(
+        candidate: Arc<GenesisConsensusAuthority>,
+        reason: CurrentStateUnavailableReason,
+    ) -> Self {
+        let current = match reason {
+            CurrentStateUnavailableReason::MissingStorage => {
+                LocalAuthorizationState::MissingStorage
+            }
+            CurrentStateUnavailableReason::StorageWithoutCommittedEpoch => {
+                LocalAuthorizationState::StorageWithoutCommittedEpoch
+            }
+        };
+        Self {
+            candidate,
+            current,
+            generation: 0,
+        }
+    }
+
+    /// The current owner generation (advances on every replacement).
+    pub fn generation(&self) -> u64 {
+        self.generation
+    }
+
+    /// The candidate authority snapshot presenting itself for admission.
+    pub fn candidate(&self) -> &Arc<GenesisConsensusAuthority> {
+        &self.candidate
+    }
+
+    /// Run 422 D7-A — admit an inbound operation against the independently
+    /// held current authorization state.
+    ///
+    /// The current state is read privately here and checked with the candidate
+    /// authority's [`GenesisConsensusAuthority::authorize_current_state`]:
+    ///
+    /// * an unavailable current state (missing storage / no committed epoch)
+    ///   is rejected as [`FreshnessError::CurrentStateUnavailable`] — the
+    ///   founding epoch is never inferred from absent/uncommitted state;
+    /// * an established-but-diverged current state (different chain, genesis,
+    ///   membership count, commitment, or epoch — including a same-epoch
+    ///   membership/key replacement) is rejected as
+    ///   [`FreshnessError::Superseded`].
+    ///
+    /// On success a generation-bound [`AuthorizationTicket`] is returned; the
+    /// caller MUST [`Self::confirm`] it immediately before applying any effect.
+    pub fn admit(&self) -> Result<AuthorizationTicket, FreshnessError> {
+        self.candidate.authorize_current_state(&self.current)?;
+        Ok(AuthorizationTicket {
+            generation: self.generation,
+        })
+    }
+
+    /// Run 422 D7-A — re-confirm an admitted ticket immediately before the
+    /// operation's effect. Fails closed if the owner's current state was
+    /// replaced (generation advanced) since admission, preventing a
+    /// successful check from being reused across an in-process invalidation.
+    pub fn confirm(&self, ticket: &AuthorizationTicket) -> Result<(), StaleAuthorizationError> {
+        if ticket.generation == self.generation {
+            Ok(())
+        } else {
+            Err(StaleAuthorizationError {
+                admitted_generation: ticket.generation,
+                current_generation: self.generation,
+            })
+        }
+    }
+
+    /// Explicitly test-identified interface (section 3): establish a concrete
+    /// current authorization state from an independently-sourced observed
+    /// configuration. Compiled **only** under `cfg(test)` so no release build
+    /// can construct an `Established` current authority — production must wait
+    /// for a real trusted current-state lifecycle.
+    #[cfg(test)]
+    pub fn establish_for_fixture(
+        candidate: Arc<GenesisConsensusAuthority>,
+        observed: ObservedConsensusConfiguration,
+    ) -> Self {
+        Self {
+            candidate,
+            current: LocalAuthorizationState::Established(observed),
+            generation: 0,
+        }
+    }
+
+    /// Explicitly test-identified interface (section 4): replace the current
+    /// authorization state, advancing the generation so any outstanding
+    /// [`AuthorizationTicket`] is invalidated. Compiled only under `cfg(test)`;
+    /// models the in-flight replacement ordering deterministically without
+    /// sleeps.
+    #[cfg(test)]
+    pub fn replace_for_fixture(&mut self, new_state: LocalAuthorizationState) {
+        self.current = new_state;
+        self.generation = self.generation.saturating_add(1);
+    }
+}
+
+#[cfg(test)]
+impl GenesisConsensusAuthority {
+    /// Explicitly test-identified interface (section 3): assemble a candidate
+    /// authority directly from already-chosen identity fields, without going
+    /// through genesis parsing. Compiled only under `cfg(test)`. The
+    /// membership set is synthesized with equal voting power and an empty key
+    /// provider — sufficient for the current-authorization freshness boundary,
+    /// which consults only chain id, genesis hash, membership count,
+    /// commitment, and epoch. This never constructs a production authority.
+    pub fn for_current_authorization_fixture(
+        chain_id: impl Into<String>,
+        genesis_hash: GenesisHash,
+        validator_count: usize,
+        commitment: [u8; 32],
+    ) -> Self {
+        let entries: Vec<ValidatorSetEntry> = (0..validator_count as u64)
+            .map(|i| ValidatorSetEntry {
+                id: ValidatorId(i),
+                voting_power: 1,
+            })
+            .collect();
+        let validators = ConsensusValidatorSet::new(entries).expect("valid fixture set");
+        let key_provider: Arc<dyn SuiteAwareValidatorKeyProvider> =
+            Arc::new(GenesisConsensusKeyProvider {
+                keys: HashMap::new(),
+            });
+        Self {
+            validators: Arc::new(validators),
+            key_provider,
+            genesis_hash,
+            chain_id: chain_id.into(),
+            commitment,
+            validator_count,
+            fingerprints: Vec::new(),
+            authorized_epoch: GENESIS_STATIC_AUTHORITY_EPOCH,
+        }
+    }
+}
 
 ///
 /// This is the single function both the release binary (`main.rs`) and the

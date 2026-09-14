@@ -58,6 +58,136 @@ families; and full anchor-document reconciliation. Production
 `DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED` is retained: no durable independent
 trust anchor is introduced, so whole-database rollback remains undetectable.
 
+## Run 422 D7-A — Independent current authorization + inbound enforcement (this phase)
+
+This phase (branch
+`copilot/copilotcopilotrun-422-proposal-vote-authority-fres`, tested at
+`90af004cee80e39833b8592a8b384c8227e22c16`, on a fresh shallow clone whose
+shallow boundary is `819ef7b`; the continuation SHA
+`fd3aec143343189b778eb69c49b0c2ab04bbadd7` is not materialized in the shallow
+clone) implements the section-2/3/4/5 boundary the previous corrective pass
+left open. It does **not** close D7. Production activation stays DISABLED.
+
+### Authority-model correction (section 3)
+
+The prior public path `LocalAuthorizationState::Established(auth.config_identity())`
+let an authority present its **own** stale self-description as "current state",
+which `authorize_current_state` then compared for equality — a self-proof. This
+phase separates the candidate snapshot from the **owner** of current
+authorization:
+
+* New `CurrentAuthorizationOwner` privately holds the current
+  `LocalAuthorizationState` and a monotonic in-process `generation: u64`
+  alongside the candidate `Arc<GenesisConsensusAuthority>`. The current state
+  is **not** a public field and cannot be replaced by a caller after
+  validation. The only production-reachable constructor is
+  `CurrentAuthorizationOwner::unavailable(candidate, reason)` — production can
+  therefore never present an `Established` current authorization.
+* `admit()` obtains authorization by calling
+  `candidate.authorize_current_state(&self.current)` on the **independently
+  held** state and returns a generation-bound `AuthorizationTicket`; it is not
+  a caller-declared `Established` wrapper.
+* `confirm(&ticket)` re-checks the ticket generation against the owner's
+  current generation and returns `StaleAuthorizationError` if the owner was
+  replaced between admit and the effect.
+* Establishing a concrete current state is `#[cfg(test)]`-only
+  (`establish_for_fixture` / `replace_for_fixture` /
+  `GenesisConsensusAuthority::for_current_authorization_fixture`). No public
+  production constructor treats caller-supplied fields as validated current
+  authority.
+* `GenesisConsensusAuthority.authorized_epoch` remains a **private**
+  construction-enforced field with an `authorized_epoch()` accessor (the
+  section-7 "private authorized_epoch" discrepancy is correct as stated).
+
+### Inbound enforcement (section 4)
+
+`handle_inbound_consensus_msg` takes a new
+`current_auth: Option<&CurrentAuthorizationOwner>`. In the real Proposal and
+Vote handler arms, when both `pv_authority` and `current_auth` are present:
+
+1. Existing **F6 sender-binding** runs first (unchanged).
+2. **Freshness admit** (`owner.admit()`) runs inside the verification arm
+   **before** domain/crypto admission; an unavailable/superseded current state
+   rejects fail-closed and increments the family's
+   `*_current_state_unavailable_total` / `*_authority_superseded_total`
+   counter, before any signature work.
+3. Existing D6 domain + wire-chain + crypto verification runs (unchanged).
+4. **Ticket confirm** runs after verification and **before** restore deferral,
+   reconfiguration observation, engine/aggregation/QC mutation, or any
+   resulting outbound action; a generation mismatch increments
+   `*_authority_stale_before_effect_total` and drops the operation.
+
+Ordering guarantee: a replacement that occurs after admit but before the
+effect is caught by `confirm()`; the check is not reused across invalidation.
+This is an **in-process** generation guard only — it is **not** durable
+anti-rollback and **not** A→B→A signature-replay prevention across restarts
+(`DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED` retained). When `current_auth` is
+`None` (production and all pre-existing tests) behavior is byte-for-byte
+unchanged, so the Required default, D6 wire/preimage bytes, genesis refusal,
+and legacy Timeout/NewView policy are all preserved. Timeout/NewView authority
+remains separate: a valid Timeout context cannot supply Proposal/Vote
+authorization (proven below).
+
+### Behavioral tests (section 5) — 13 in-crate tests, all passing
+
+In `binary_consensus_loop.rs` module `tests::run420::run422_d7a`, using the
+real F6 gate, matching authenticated origin, real ML-DSA PQC signatures, and
+recording facades. For **both** Proposal and Vote:
+
+* `d7a_{proposal,vote}_matching_current_state_verify_accepted` — verification
+  succeeds; verification acceptance is distinguished from downstream engine
+  acceptance.
+* `d7a_{proposal,vote}_unavailable_current_state_rejects_before_crypto` —
+  fail-closed despite a present authority; rejection precedes crypto.
+* `d7a_proposal_superseded_by_b_rejects_including_cloned_handle` /
+  `d7a_vote_superseded_by_b_rejects` — authority A superseded by state B;
+  A rejects, including a retained/cloned candidate handle (`Arc::ptr_eq`).
+* `d7a_{proposal,vote}_same_epoch_replacement_rejects` — stale A rejects after
+  same-epoch replacement.
+* `d7a_{proposal,vote}_f6_mismatch_precedes_freshness` — F6 mismatch rejects
+  before freshness lookup and crypto.
+* `d7a_timeout_context_cannot_supply_pv_authorization` — a valid Timeout
+  context cannot authorize Proposal/Vote.
+* `d7a_ticket_confirm_fails_after_replacement` — deterministic admit→replace→
+  confirm interleaving (explicit state ordering, no sleeps) demonstrates the
+  stale-before-effect guard.
+* `d7a_active_restore_mode_negative_and_positive_control` — ACTIVE restore-mode
+  Proposal negative plus an admitted positive control.
+
+### This-phase validation (correcting section-7 discrepancies)
+
+Executed in this environment at the tested SHA (not historical):
+
+* New behavioral tests: `cargo test -p qbind-node --lib run422_d7a` ⇒ **13
+  passed**.
+* `binary_consensus_loop::tests::run420` (D5/D6 + D7-A) ⇒ **66 passed**;
+  `genesis_consensus_authority::tests` ⇒ **14 passed**.
+* Integration: `run_422_d7_authority_lifetime_tests` ⇒ **14 passed** (the
+  corrective count is 14, superseding the original 12);
+  `run_422_genesis_consensus_authority_tests` ⇒ **15**;
+  `run_418_authenticated_peer_consensus_sender_binding_tests` ⇒ **18**;
+  `run_418_newview_demux_chain_integration_tests` ⇒ **3**;
+  `run_420_production_policy_reachability_tests` ⇒ **3**;
+  `run_422_d4_startup_ordering_tests` ⇒ **5**;
+  `run_422_startup_refusal_tests` ⇒ **4**.
+* Production `cargo check -p qbind-node` ⇒ clean; release
+  `cargo build -p qbind-node --release --bin qbind-node` ⇒ built.
+* Focused `cargo clippy -p qbind-node --lib` ⇒ no new lints attributable to the
+  D7-A additions (pre-existing crate-wide warnings only).
+* Security review-tool / CodeQL: **not run in this environment for this phase**
+  (no CodeQL runner invoked here); this is recorded as skipped/incomplete
+  rather than converted into a zero-alert conclusion.
+* The known unrelated broad-test compilation failure is **not** treated as a
+  successful check.
+
+### Remaining D7 obligations after this phase (still open)
+
+Independent outbound Proposal/Vote signing, directed-Vote (`SendVoteTo`),
+cached re-emission, deferred-work re-admission, storage/recovery matrices,
+durable anti-rollback / persistent authority checkpoints, production
+chain-ID mapping, downstream QC migration, governance transitions, genesis
+activation, and any Run 423 work. Inbound enforcement does **not** close these.
+
 ## Continuation context (recorded honestly)
 
 The original Run 422 D7 pass stopped because the previous Copilot runner ran
