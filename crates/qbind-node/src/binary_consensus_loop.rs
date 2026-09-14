@@ -1709,6 +1709,53 @@ pub struct BinaryConsensusLoopInboundStats {
     /// Run 422 D7-A3: inbound votes rejected because the current-authorization
     /// owner has terminally exhausted its generation space (fail-closed).
     pub inbound_vote_authorization_exhausted_total: u64,
+    // Run 422 D7-B1: current-authorization enforcement at the immediate
+    // OUTBOUND action-forwarding boundary (`forward_actions_to_facade`). These
+    // count engine-produced Proposal/Vote/SendVoteTo actions rejected
+    // fail-closed BEFORE any signing or facade forwarding because the
+    // coherently-bound, currently-authorized snapshot the boundary was handed
+    // did not authorize the immediate effect. They are kept strictly distinct
+    // from the D6 wire-chain (`outbound_*_wire_chain_mismatch`), the D5
+    // authority-unavailable (`outbound_*_verification_context_unavailable_total`)
+    // and the signing (`outbound_*_signing_{success,failure}`) counters. A
+    // rejected action is NEVER counted as sent. All stay zero unless a
+    // current-authorization snapshot is wired (production forwards `None`, which
+    // under `Required` rejects via `*_current_state_unavailable_total`). Labels
+    // are bounded and carry no attacker-controlled content. Per-action
+    // semantics:
+    //
+    //   * `*_current_state_unavailable_total`: no snapshot was wired at the
+    //     boundary under `Required` (current authorization unavailable — never
+    //     inferred as the founding epoch), OR a wired owner's current state was
+    //     missing storage / had no committed epoch. Rejected before signing.
+    //   * `*_authority_superseded_total`: the wired owner's established current
+    //     state diverged from the candidate authority (chain / genesis /
+    //     membership / commitment / epoch, including a same-epoch membership or
+    //     key replacement). Rejected before signing. This is also the counter
+    //     that fires when, after a completed authorized forwarding call, the
+    //     owner's current state is replaced so the next action's admission
+    //     fails.
+    //   * `*_epoch_unauthorized_total`: admission succeeded but the outbound
+    //     action's own epoch differed from the epoch the admitted snapshot
+    //     authorizes. Rejected before signing.
+    //   * `*_authorization_exhausted_total`: the wired owner terminally
+    //     exhausted its generation space. Rejected before signing.
+    //   * `*_authority_stale_before_effect_total`: admission and signing
+    //     succeeded, but the ticket's pre-facade re-confirmation failed (the
+    //     owner's current state was replaced — generation advanced — between
+    //     admission and the facade call, the ticket was foreign, or the owner
+    //     became exhausted). The signed message is suppressed before the facade
+    //     call and never counted as sent.
+    pub outbound_proposal_current_state_unavailable_total: u64,
+    pub outbound_proposal_authority_superseded_total: u64,
+    pub outbound_proposal_epoch_unauthorized_total: u64,
+    pub outbound_proposal_authorization_exhausted_total: u64,
+    pub outbound_proposal_authority_stale_before_effect_total: u64,
+    pub outbound_vote_current_state_unavailable_total: u64,
+    pub outbound_vote_authority_superseded_total: u64,
+    pub outbound_vote_epoch_unauthorized_total: u64,
+    pub outbound_vote_authorization_exhausted_total: u64,
+    pub outbound_vote_authority_stale_before_effect_total: u64,
 }
 
 /// Transition state for the bounded "restore-catchup mode → normal
@@ -2638,6 +2685,10 @@ pub async fn run_binary_consensus_loop_with_io(
                         &mut last_leader_proposal,
                         &mut last_leader_vote,
                         &mut reconfig_detector,
+                        // Run 422 D7-B1: current-authorization snapshot unwired in
+                        // production; leader-emitted outbound actions reject
+                        // fail-closed under `Required`.
+                        None,
                         proposal_vote_authority.as_deref(),
                         verification_policy,
                     );
@@ -2779,6 +2830,10 @@ pub async fn run_binary_consensus_loop_with_io(
                         &mut last_leader_proposal,
                         &mut last_leader_vote,
                         &mut reconfig_detector,
+                        // Run 422 D7-B1: current-authorization snapshot unwired in
+                        // production; leader-emitted outbound actions reject
+                        // fail-closed under `Required`.
+                        None,
                         proposal_vote_authority.as_deref(),
                         verification_policy,
                     );
@@ -2961,6 +3016,12 @@ fn do_leader_tick(
     last_leader_proposal: &mut Option<(u64, BlockProposal)>,
     last_leader_vote: &mut Option<(u64, Vote)>,
     reconfig_detector: &mut BinaryReconfigDetector,
+    // Run 422 D7-B1: the coherently-bound, currently-authorized snapshot the
+    // outbound forwarding boundary enforces. Production leaves this `None`
+    // (leader-self-emitted actions then reject fail-closed under `Required`,
+    // preserving the existing suppressed posture); `signer_ctx` is consulted
+    // only on the test-only `LocalFixtureUnsigned` passthrough.
+    current_auth: Option<&AuthorizedProposalVoteSnapshot>,
     signer_ctx: Option<&ProposalVoteAuthority>,
     verification_policy: ConsensusVerificationPolicy,
 ) {
@@ -3029,7 +3090,7 @@ fn do_leader_tick(
         metrics.consensus_t154().inc_proposal_accepted();
     }
     if let Some(facade) = outbound {
-        forward_actions_to_facade(actions, facade, inbound_stats, signer_ctx, verification_policy);
+        forward_actions_to_facade(actions, facade, inbound_stats, current_auth, signer_ctx, verification_policy);
     }
 }
 
@@ -3397,16 +3458,194 @@ fn sign_vote_for_broadcast(
     }
 }
 
+/// Run 422 D7-B1 — outcome of the pre-signing current-authorization admission
+/// for a single outbound action at the `forward_actions_to_facade` boundary.
+enum OutboundAuthAdmission<'a> {
+    /// The action is admitted for signing. `signer_ctx` is the exact context
+    /// signing MUST use (the coherently-bound snapshot verifier when a snapshot
+    /// is wired; the test-only `LocalFixtureUnsigned` passthrough authority
+    /// otherwise). `ticket` (when `Some`) MUST be re-confirmed against the same
+    /// snapshot owner immediately before the facade call.
+    Admitted {
+        signer_ctx: Option<&'a ProposalVoteAuthority>,
+        ticket: Option<AuthorizationTicket>,
+    },
+    /// The action is rejected fail-closed before any signing. The matching
+    /// per-action outbound counter has already been recorded; the caller must
+    /// not sign, must not forward, and must not count the action as sent.
+    Rejected,
+}
+
+/// Run 422 D7-B1 — admit an engine-produced outbound action against the
+/// coherently-bound, currently-authorized snapshot the forwarding boundary was
+/// handed, BEFORE any signing or facade forwarding.
+///
+/// The enforcement mirrors the inbound Proposal/Vote current-authorization gate
+/// (Run 422 D7-A) but is applied independently at the immediate outbound
+/// boundary so that, under `Required`, the *same* coherently-bound snapshot
+/// admits, epoch-checks, signs (through its bound verifier) and confirms the
+/// effect. A separately-supplied `ProposalVoteAuthority` or Timeout context can
+/// never substitute for it:
+///
+/// * a wired snapshot with missing / superseded / exhausted current
+///   authorization is rejected here, before signing (`admit()`);
+/// * the outbound action's own `epoch` must equal the admitted snapshot's
+///   authorized epoch, else it is rejected here, before signing;
+/// * when NO snapshot is wired under `Required`, current authorization is
+///   unavailable and the action is rejected here, before signing — the founding
+///   epoch is never inferred from an absent snapshot;
+/// * the test-only `LocalFixtureUnsigned` passthrough (no snapshot) falls back
+///   to the supplied `pv_authority` exactly as before this run.
+///
+/// On success the returned `ticket` (present iff a snapshot is wired) MUST be
+/// re-confirmed by the caller against the same owner immediately before the
+/// facade call; a replacement between admission and effect suppresses it.
+fn admit_outbound_action<'a>(
+    current_auth: Option<&'a AuthorizedProposalVoteSnapshot>,
+    pv_authority: Option<&'a ProposalVoteAuthority>,
+    verification_policy: ConsensusVerificationPolicy,
+    action_epoch: u64,
+    record_reject: fn(&mut BinaryConsensusLoopInboundStats, &FreshnessError),
+    record_epoch_unauthorized: fn(&mut BinaryConsensusLoopInboundStats),
+    record_no_snapshot_unavailable: fn(&mut BinaryConsensusLoopInboundStats),
+    inbound_stats: &mut BinaryConsensusLoopInboundStats,
+) -> OutboundAuthAdmission<'a> {
+    match current_auth {
+        Some(snap) => {
+            // Obtain current authorization through the independently-maintained
+            // owner BEFORE any signing. Unavailable / superseded / exhausted are
+            // rejected here.
+            let ticket = match snap.owner().admit() {
+                Ok(ticket) => ticket,
+                Err(e) => {
+                    record_reject(inbound_stats, &e);
+                    return OutboundAuthAdmission::Rejected;
+                }
+            };
+            // The action's own epoch must equal the epoch the admitted snapshot
+            // authorizes, BEFORE signing. A correctly-formed action carrying a
+            // different epoch is rejected; the message is never rewritten.
+            if action_epoch != snap.authorized_epoch() {
+                record_epoch_unauthorized(inbound_stats);
+                return OutboundAuthAdmission::Rejected;
+            }
+            OutboundAuthAdmission::Admitted {
+                // Signing uses the EXACT bound verifier — never a
+                // separately-supplied authority or Timeout context.
+                signer_ctx: Some(snap.verifier()),
+                ticket: Some(ticket),
+            }
+        }
+        None => {
+            if verification_policy.requires_context() {
+                // Required + no snapshot wired: current authorization is
+                // unavailable. Reject before signing; never infer the founding
+                // epoch from an absent snapshot.
+                record_no_snapshot_unavailable(inbound_stats);
+                OutboundAuthAdmission::Rejected
+            } else {
+                // Test-only LocalFixtureUnsigned passthrough: behaviour is
+                // exactly as before — sign (or pass through unsigned) with the
+                // supplied authority, with no current-authorization ticket.
+                OutboundAuthAdmission::Admitted {
+                    signer_ctx: pv_authority,
+                    ticket: None,
+                }
+            }
+        }
+    }
+}
+
+/// Run 422 D7-B1 — re-confirm an outbound admission ticket immediately before
+/// the facade call. Returns `true` when the effect may proceed. A confirmation
+/// failure (owner replaced / generation advanced / foreign / exhausted)
+/// suppresses the effect fail-closed and records the stale-before-effect
+/// counter; the signed message is discarded and never counted as sent.
+fn confirm_outbound_before_effect(
+    current_auth: Option<&AuthorizedProposalVoteSnapshot>,
+    ticket: Option<&AuthorizationTicket>,
+    record_stale: fn(&mut BinaryConsensusLoopInboundStats),
+    inbound_stats: &mut BinaryConsensusLoopInboundStats,
+) -> bool {
+    if let (Some(snap), Some(ticket)) = (current_auth, ticket) {
+        if let Err(e) = snap.owner().confirm(ticket) {
+            record_stale(inbound_stats);
+            eprintln!(
+                "[binary-consensus] Run 422 D7-B1: outbound action SUPPRESSED \
+                 (current authorization replaced before facade effect) reason={} \
+                 — fail-closed, not sent",
+                e
+            );
+            return false;
+        }
+    }
+    true
+}
+
+/// Run 422 D7-B1 — forward engine-produced outbound actions to the network
+/// facade, enforcing current authorization at this immediate boundary.
+///
+/// Under `Required`, signing and facade forwarding use the SAME coherently
+/// bound, currently authorized [`AuthorizedProposalVoteSnapshot`]: for each of
+/// `BroadcastProposal`, `BroadcastVote` and `SendVoteTo` the boundary admits
+/// through the snapshot's owner (rejecting missing / unavailable / superseded /
+/// exhausted authorization and an unauthorized action epoch before signing),
+/// signs through the snapshot's bound verifier, and re-confirms the
+/// issuer/generation-bound ticket immediately before the facade call
+/// (confirmation failure suppresses the effect). A separately-supplied
+/// `pv_authority` (or a Timeout context) can never substitute for the bound
+/// snapshot; it is consulted only on the test-only `LocalFixtureUnsigned`
+/// passthrough, where no snapshot is wired.
+///
+/// The existing D6 wire-chain checks, signing-domain bytes, signer checks and
+/// fail-closed signing errors inside `sign_proposal_for_broadcast` /
+/// `sign_vote_for_broadcast` are preserved and continue to run AFTER admission
+/// and BEFORE the confirm/facade step. A rejected or suppressed action is never
+/// counted as sent.
+///
+/// This boundary covers only the actions already supplied here. It does not
+/// establish authorization before upstream engine action generation, leader
+/// cache updates or reconfiguration observation, and it does not cover cached
+/// re-emission (B9/B10 `maybe_reemit_on_late_peer_connect`) or later network
+/// delivery — those remain separate obligations.
 fn forward_actions_to_facade(
     actions: Vec<ConsensusEngineAction<ValidatorId>>,
     facade: &dyn ConsensusNetworkFacade,
     inbound_stats: &mut BinaryConsensusLoopInboundStats,
-    signer_ctx: Option<&ProposalVoteAuthority>,
+    // Run 422 D7-B1: the coherently-bound, currently-authorized snapshot this
+    // boundary enforces. Production forwards `None`; under `Required` that
+    // rejects every action fail-closed (current authorization unavailable).
+    current_auth: Option<&AuthorizedProposalVoteSnapshot>,
+    // Test-only `LocalFixtureUnsigned` passthrough authority, consulted ONLY
+    // when no snapshot is wired. Never substitutes for a wired snapshot.
+    pv_authority: Option<&ProposalVoteAuthority>,
     verification_policy: ConsensusVerificationPolicy,
 ) {
     for action in actions {
         match action {
             ConsensusEngineAction::BroadcastProposal(proposal) => {
+                let (signer_ctx, ticket) = match admit_outbound_action(
+                    current_auth,
+                    pv_authority,
+                    verification_policy,
+                    proposal.header.epoch,
+                    record_outbound_proposal_current_auth_reject,
+                    |s| {
+                        s.outbound_proposal_epoch_unauthorized_total =
+                            s.outbound_proposal_epoch_unauthorized_total.saturating_add(1)
+                    },
+                    |s| {
+                        s.outbound_proposal_current_state_unavailable_total = s
+                            .outbound_proposal_current_state_unavailable_total
+                            .saturating_add(1)
+                    },
+                    inbound_stats,
+                ) {
+                    OutboundAuthAdmission::Admitted { signer_ctx, ticket } => {
+                        (signer_ctx, ticket)
+                    }
+                    OutboundAuthAdmission::Rejected => continue,
+                };
                 let proposal = match sign_proposal_for_broadcast(
                     *proposal,
                     signer_ctx,
@@ -3416,6 +3655,18 @@ fn forward_actions_to_facade(
                     Some(p) => p,
                     None => continue,
                 };
+                if !confirm_outbound_before_effect(
+                    current_auth,
+                    ticket.as_ref(),
+                    |s| {
+                        s.outbound_proposal_authority_stale_before_effect_total = s
+                            .outbound_proposal_authority_stale_before_effect_total
+                            .saturating_add(1)
+                    },
+                    inbound_stats,
+                ) {
+                    continue;
+                }
                 if let Err(e) = facade.broadcast_proposal(&proposal) {
                     eprintln!(
                         "[binary-consensus] outbound broadcast_proposal failed: {:?}",
@@ -3427,6 +3678,28 @@ fn forward_actions_to_facade(
                 }
             }
             ConsensusEngineAction::BroadcastVote(vote) => {
+                let (signer_ctx, ticket) = match admit_outbound_action(
+                    current_auth,
+                    pv_authority,
+                    verification_policy,
+                    vote.epoch,
+                    record_outbound_vote_current_auth_reject,
+                    |s| {
+                        s.outbound_vote_epoch_unauthorized_total =
+                            s.outbound_vote_epoch_unauthorized_total.saturating_add(1)
+                    },
+                    |s| {
+                        s.outbound_vote_current_state_unavailable_total = s
+                            .outbound_vote_current_state_unavailable_total
+                            .saturating_add(1)
+                    },
+                    inbound_stats,
+                ) {
+                    OutboundAuthAdmission::Admitted { signer_ctx, ticket } => {
+                        (signer_ctx, ticket)
+                    }
+                    OutboundAuthAdmission::Rejected => continue,
+                };
                 let vote = match sign_vote_for_broadcast(
                     vote,
                     signer_ctx,
@@ -3436,6 +3709,18 @@ fn forward_actions_to_facade(
                     Some(v) => v,
                     None => continue,
                 };
+                if !confirm_outbound_before_effect(
+                    current_auth,
+                    ticket.as_ref(),
+                    |s| {
+                        s.outbound_vote_authority_stale_before_effect_total = s
+                            .outbound_vote_authority_stale_before_effect_total
+                            .saturating_add(1)
+                    },
+                    inbound_stats,
+                ) {
+                    continue;
+                }
                 if let Err(e) = facade.broadcast_vote(&vote) {
                     eprintln!(
                         "[binary-consensus] outbound broadcast_vote failed: {:?}",
@@ -3447,6 +3732,28 @@ fn forward_actions_to_facade(
                 }
             }
             ConsensusEngineAction::SendVoteTo { to, vote } => {
+                let (signer_ctx, ticket) = match admit_outbound_action(
+                    current_auth,
+                    pv_authority,
+                    verification_policy,
+                    vote.epoch,
+                    record_outbound_vote_current_auth_reject,
+                    |s| {
+                        s.outbound_vote_epoch_unauthorized_total =
+                            s.outbound_vote_epoch_unauthorized_total.saturating_add(1)
+                    },
+                    |s| {
+                        s.outbound_vote_current_state_unavailable_total = s
+                            .outbound_vote_current_state_unavailable_total
+                            .saturating_add(1)
+                    },
+                    inbound_stats,
+                ) {
+                    OutboundAuthAdmission::Admitted { signer_ctx, ticket } => {
+                        (signer_ctx, ticket)
+                    }
+                    OutboundAuthAdmission::Rejected => continue,
+                };
                 let vote = match sign_vote_for_broadcast(
                     vote,
                     signer_ctx,
@@ -3456,6 +3763,18 @@ fn forward_actions_to_facade(
                     Some(v) => v,
                     None => continue,
                 };
+                if !confirm_outbound_before_effect(
+                    current_auth,
+                    ticket.as_ref(),
+                    |s| {
+                        s.outbound_vote_authority_stale_before_effect_total = s
+                            .outbound_vote_authority_stale_before_effect_total
+                            .saturating_add(1)
+                    },
+                    inbound_stats,
+                ) {
+                    continue;
+                }
                 if let Err(e) = facade.send_vote_to(to, &vote) {
                     eprintln!(
                         "[binary-consensus] outbound send_vote_to({:?}) failed: {:?}",
@@ -3916,22 +4235,29 @@ pub(crate) fn handle_inbound_consensus_msg(
                             stats.inbound_proposals_engine_accepted.saturating_add(1);
                         metrics.consensus_t154().inc_proposal_accepted();
                         if let Some(facade) = outbound {
-                            // Run 422 D7-A2 (finding #2, corrective — section 3):
-                            // forward the engine-produced action using the SAME
-                            // authority the handler admitted and verified under
-                            // (`effective_pv`), never the separately-supplied
-                            // `pv_authority`. When a current-authorization
-                            // snapshot is bound, `effective_pv` is the bound
-                            // verifier (the admitted A); a separately-supplied B
-                            // (or the Timeout/NewView signer) can therefore never
-                            // sign or drive this immediate outbound effect. When
-                            // no snapshot is wired (test-only
-                            // `LocalFixtureUnsigned` passthrough), `effective_pv`
-                            // is exactly the same `pv_authority` as before, so
-                            // behaviour is unchanged there; under `Required` an
-                            // absent snapshot has already rejected the message
-                            // before reaching this point.
-                            forward_actions_to_facade(vec![action], facade, stats, effective_pv, verification_policy);
+                            // Run 422 D7-B1 (section 4): hand the engine-produced
+                            // action to the STRENGTHENED forwarding interface with
+                            // the SAME already-bound snapshot the inbound handler
+                            // admitted and verified under (`current_auth`), plus
+                            // the raw `pv_authority` for the test-only
+                            // `LocalFixtureUnsigned` passthrough only. The
+                            // boundary independently admits through the bound
+                            // snapshot's owner, epoch-checks, signs through the
+                            // bound verifier and re-confirms before the facade
+                            // call — a separately-supplied authority B (or the
+                            // Timeout/NewView signer) can never sign or drive this
+                            // immediate outbound effect. Under `Required` an absent
+                            // snapshot has already rejected the inbound message
+                            // before reaching this point, and would independently
+                            // reject the outbound action here too.
+                            forward_actions_to_facade(
+                                vec![action],
+                                facade,
+                                stats,
+                                current_auth,
+                                pv_authority,
+                                verification_policy,
+                            );
                         }
                     }
                 }
@@ -5062,6 +5388,61 @@ fn record_vote_current_auth_reject(
         FreshnessError::AuthorizationExhausted => {
             stats.inbound_vote_authorization_exhausted_total = stats
                 .inbound_vote_authorization_exhausted_total
+                .saturating_add(1);
+        }
+    }
+}
+
+/// Run 422 D7-B1: dispatch a `FreshnessError` from a current-authorization
+/// admission at the OUTBOUND forwarding boundary into the matching per-reason
+/// outbound-proposal rejection counter. Mirrors
+/// [`record_proposal_current_auth_reject`] but on the outbound side, so an
+/// outbound rejection is never conflated with an inbound one. A rejected action
+/// is never counted as sent.
+fn record_outbound_proposal_current_auth_reject(
+    stats: &mut BinaryConsensusLoopInboundStats,
+    err: &FreshnessError,
+) {
+    match err {
+        FreshnessError::CurrentStateUnavailable { .. } => {
+            stats.outbound_proposal_current_state_unavailable_total = stats
+                .outbound_proposal_current_state_unavailable_total
+                .saturating_add(1);
+        }
+        FreshnessError::Superseded(_) => {
+            stats.outbound_proposal_authority_superseded_total = stats
+                .outbound_proposal_authority_superseded_total
+                .saturating_add(1);
+        }
+        FreshnessError::AuthorizationExhausted => {
+            stats.outbound_proposal_authorization_exhausted_total = stats
+                .outbound_proposal_authorization_exhausted_total
+                .saturating_add(1);
+        }
+    }
+}
+
+/// Run 422 D7-B1: outbound Vote equivalent of
+/// [`record_outbound_proposal_current_auth_reject`]. Used for both
+/// `BroadcastVote` and directed `SendVoteTo` actions (both are Vote messages).
+fn record_outbound_vote_current_auth_reject(
+    stats: &mut BinaryConsensusLoopInboundStats,
+    err: &FreshnessError,
+) {
+    match err {
+        FreshnessError::CurrentStateUnavailable { .. } => {
+            stats.outbound_vote_current_state_unavailable_total = stats
+                .outbound_vote_current_state_unavailable_total
+                .saturating_add(1);
+        }
+        FreshnessError::Superseded(_) => {
+            stats.outbound_vote_authority_superseded_total = stats
+                .outbound_vote_authority_superseded_total
+                .saturating_add(1);
+        }
+        FreshnessError::AuthorizationExhausted => {
+            stats.outbound_vote_authorization_exhausted_total = stats
+                .outbound_vote_authorization_exhausted_total
                 .saturating_add(1);
         }
     }
@@ -10877,7 +11258,8 @@ mod tests {
                 actions,
                 &facade,
                 &mut stats,
-                None, // Proposal/Vote authority absent (production)
+                None, // Run 422 D7-B1: no current-authorization snapshot wired
+                None, // Proposal/Vote passthrough authority absent (production)
                 ConsensusVerificationPolicy::Required,
             );
 
@@ -10892,9 +11274,16 @@ mod tests {
             assert_eq!(stats.outbound_votes_sent, 0);
             assert_eq!(stats.outbound_proposal_signing_success, 0);
             assert_eq!(stats.outbound_vote_signing_success, 0);
-            assert_eq!(stats.outbound_proposal_verification_context_unavailable_total, 1);
-            // Two vote actions (broadcast + directed) each suppressed.
-            assert_eq!(stats.outbound_vote_verification_context_unavailable_total, 2);
+            // Run 422 D7-B1: with no current-authorization snapshot wired under
+            // `Required`, the STRENGTHENED boundary rejects each action at the
+            // current-authorization layer BEFORE signing, so the D5
+            // verification-context-unavailable counters are never reached — the
+            // earlier, stronger current-state-unavailable rejection fires first.
+            assert_eq!(stats.outbound_proposal_current_state_unavailable_total, 1);
+            // Two vote actions (broadcast + directed) each rejected.
+            assert_eq!(stats.outbound_vote_current_state_unavailable_total, 2);
+            assert_eq!(stats.outbound_proposal_verification_context_unavailable_total, 0);
+            assert_eq!(stats.outbound_vote_verification_context_unavailable_total, 0);
         }
 
         // D5-F: Type/production reachability. A valid Timeout context can be
@@ -12255,6 +12644,13 @@ mod tests {
                 );
                 let pv =
                     build_authority(mismatch_domain, vote_calls.clone(), proposal_calls.clone());
+                // Run 422 D7-B1: drive the STRENGTHENED forwarding boundary with
+                // a coherently-bound, currently-authorized snapshot whose bound
+                // verifier IS `pv`. Admission and the founding-epoch check both
+                // pass (base_vote carries epoch 0), so the D6 wire-chain refusal
+                // is exercised through the same bound snapshot — never a
+                // separately-supplied authority.
+                let snap = coherent_snapshot_for(&pv);
                 let facade = VoteRecordingFacade::default();
                 let mut stats = BinaryConsensusLoopInboundStats::default();
 
@@ -12269,7 +12665,8 @@ mod tests {
                     actions,
                     &facade,
                     &mut stats,
-                    Some(&pv),
+                    Some(&snap),
+                    None,
                     ConsensusVerificationPolicy::Required,
                 );
 
@@ -12309,6 +12706,11 @@ mod tests {
                 let domain = d6_control_domain(); // expected wire chain id 0
                 let pv =
                     build_authority(domain.clone(), vote_calls.clone(), proposal_calls.clone());
+                // Run 422 D7-B1: coherently-bound, currently-authorized snapshot
+                // whose bound verifier IS `pv`; admission + founding-epoch check
+                // pass, so both votes are signed through the SAME bound snapshot
+                // and reach the intended facade methods.
+                let snap = coherent_snapshot_for(&pv);
                 let facade = VoteRecordingFacade::default();
                 let mut stats = BinaryConsensusLoopInboundStats::default();
 
@@ -12323,7 +12725,8 @@ mod tests {
                     actions,
                     &facade,
                     &mut stats,
-                    Some(&pv),
+                    Some(&snap),
+                    None,
                     ConsensusVerificationPolicy::Required,
                 );
 
@@ -15115,6 +15518,710 @@ mod tests {
                 assert_eq!(backend_calls.load(SeqCst), 0, "backend never invoked");
                 assert_eq!(stats.inbound_votes_delivered, 0);
                 assert_eq!(engine.current_view(), view_before);
+            }
+
+            // =============================================================
+            // Run 422 D7-B1 — CURRENT AUTHORIZATION enforced at the immediate
+            // OUTBOUND action-forwarding boundary (`forward_actions_to_facade`).
+            //
+            // These drive the ACTUAL forwarding function with recording facades
+            // and a signer that DIRECTLY records each invocation and delegates
+            // to the REAL ML-DSA-44 `LocalKeySigner`. Each of the three action
+            // variants (BroadcastProposal, BroadcastVote, SendVoteTo) is
+            // exercised INDEPENDENTLY — a rejected Proposal never stands in for
+            // the Vote / SendVoteTo branches. Positive controls prove the
+            // instrumented signer is connected to the real signing path; every
+            // rejection asserts the signer was un-invoked and sent counters stay
+            // unchanged. A4's synchronous borrowing model is preserved (no
+            // unsafe / test-only mutable aliasing to manufacture concurrent
+            // mutation — replacement is a deterministic between-call operation).
+            // =============================================================
+            mod run422_d7b {
+                use super::*;
+                use crate::genesis_consensus_authority::LocalAuthorizationState;
+                use std::sync::atomic::{AtomicU64, Ordering::SeqCst};
+                use std::sync::Mutex;
+
+                /// A signer that records each `sign_proposal` / `sign_vote`
+                /// invocation, then delegates to the REAL ML-DSA-44
+                /// `LocalKeySigner` for validator 0.
+                struct RecordingSigner {
+                    inner: LocalKeySigner,
+                    vote_calls: Arc<AtomicU64>,
+                    proposal_calls: Arc<AtomicU64>,
+                }
+                impl ValidatorSigner for RecordingSigner {
+                    fn validator_id(&self) -> &ValidatorId {
+                        self.inner.validator_id()
+                    }
+                    fn suite_id(&self) -> u16 {
+                        self.inner.suite_id()
+                    }
+                    fn sign_proposal(
+                        &self,
+                        p: &[u8],
+                    ) -> Result<Vec<u8>, crate::validator_signer::SignError> {
+                        self.proposal_calls.fetch_add(1, SeqCst);
+                        self.inner.sign_proposal(p)
+                    }
+                    fn sign_vote(
+                        &self,
+                        p: &[u8],
+                    ) -> Result<Vec<u8>, crate::validator_signer::SignError> {
+                        self.vote_calls.fetch_add(1, SeqCst);
+                        self.inner.sign_vote(p)
+                    }
+                    fn sign_timeout(
+                        &self,
+                        view: u64,
+                        high_qc: Option<&qbind_consensus::qc::QuorumCertificate<[u8; 32]>>,
+                    ) -> Result<Vec<u8>, crate::validator_signer::SignError> {
+                        self.inner.sign_timeout(view, high_qc)
+                    }
+                    fn sign_timeout_with_chain_id(
+                        &self,
+                        chain_id: ChainId,
+                        view: u64,
+                        high_qc: Option<&qbind_consensus::qc::QuorumCertificate<[u8; 32]>>,
+                    ) -> Result<Vec<u8>, crate::validator_signer::SignError> {
+                        self.inner.sign_timeout_with_chain_id(chain_id, view, high_qc)
+                    }
+                }
+
+                /// Recording facade: captures every emitted proposal / broadcast
+                /// vote / directed vote separately so the WRONG method can never
+                /// satisfy a per-variant assertion.
+                #[derive(Default)]
+                struct OutboundRecorder {
+                    proposals: Mutex<Vec<BlockProposal>>,
+                    broadcast_votes: Mutex<Vec<Vote>>,
+                    directed_votes: Mutex<Vec<(ValidatorId, Vote)>>,
+                    other: AtomicU64,
+                }
+                impl ConsensusNetworkFacade for OutboundRecorder {
+                    fn send_vote_to(&self, t: ValidatorId, v: &Vote) -> Result<(), NetworkError> {
+                        self.directed_votes.lock().unwrap().push((t, v.clone()));
+                        Ok(())
+                    }
+                    fn broadcast_vote(&self, v: &Vote) -> Result<(), NetworkError> {
+                        self.broadcast_votes.lock().unwrap().push(v.clone());
+                        Ok(())
+                    }
+                    fn broadcast_proposal(&self, p: &BlockProposal) -> Result<(), NetworkError> {
+                        self.proposals.lock().unwrap().push(p.clone());
+                        Ok(())
+                    }
+                    fn broadcast_consensus_msg(
+                        &self,
+                        _m: &ConsensusNetMsg,
+                    ) -> Result<(), NetworkError> {
+                        self.other.fetch_add(1, SeqCst);
+                        Ok(())
+                    }
+                }
+
+                struct SignerCounters {
+                    vote_calls: Arc<AtomicU64>,
+                    proposal_calls: Arc<AtomicU64>,
+                }
+
+                /// A `ProposalVoteAuthority` over the D6 control domain whose
+                /// validator-0 signer is the instrumented `RecordingSigner`.
+                fn recording_pv(fixture: &Fixture) -> (ProposalVoteAuthority, SignerCounters) {
+                    let vote_calls = Arc::new(AtomicU64::new(0));
+                    let proposal_calls = Arc::new(AtomicU64::new(0));
+                    let sk = fixture.sk_objs.get(&ValidatorId(0)).expect("sk").clone();
+                    let inner = LocalKeySigner::new(ValidatorId(0), TEST_SUITE_U16, sk);
+                    let signer: Arc<dyn ValidatorSigner> = Arc::new(RecordingSigner {
+                        inner,
+                        vote_calls: vote_calls.clone(),
+                        proposal_calls: proposal_calls.clone(),
+                    });
+                    let pv = ProposalVoteAuthority {
+                        validators: fixture.validators.clone(),
+                        key_provider: fixture.kp.clone(),
+                        backend_registry: fixture.br.clone(),
+                        chain_id: QBIND_DEVNET_CHAIN_ID,
+                        signer: Some(signer),
+                        signing_domain: d6_control_domain(),
+                    };
+                    (
+                        pv,
+                        SignerCounters {
+                            vote_calls,
+                            proposal_calls,
+                        },
+                    )
+                }
+
+                /// A terminally exhausted, otherwise-coherent snapshot: admission
+                /// fails `AuthorizationExhausted` before signing.
+                fn snapshot_exhausted(pv: &ProposalVoteAuthority) -> AuthorizedProposalVoteSnapshot {
+                    let mut s = snapshot_matching(pv);
+                    let coherent = s.owner().candidate().config_identity();
+                    s.owner_mut().set_generation_for_exhaustion_fixture(u64::MAX);
+                    s.owner_mut()
+                        .replace_for_fixture(LocalAuthorizationState::Established(coherent));
+                    assert!(matches!(
+                        s.owner().admit(),
+                        Err(FreshnessError::AuthorizationExhausted)
+                    ));
+                    s
+                }
+
+                fn proposal_action(epoch: u64) -> ConsensusEngineAction<ValidatorId> {
+                    let mut header = base_header(0);
+                    header.epoch = epoch;
+                    ConsensusEngineAction::BroadcastProposal(Box::new(BlockProposal {
+                        header,
+                        qc: None,
+                        txs: vec![],
+                        signature: vec![],
+                    }))
+                }
+                fn broadcast_vote_action(epoch: u64) -> ConsensusEngineAction<ValidatorId> {
+                    let mut v = base_vote(0);
+                    v.epoch = epoch;
+                    ConsensusEngineAction::BroadcastVote(v)
+                }
+                fn send_vote_to_action(
+                    to: ValidatorId,
+                    epoch: u64,
+                ) -> ConsensusEngineAction<ValidatorId> {
+                    let mut v = base_vote(0);
+                    v.epoch = epoch;
+                    ConsensusEngineAction::SendVoteTo { to, vote: v }
+                }
+
+                fn drive(
+                    current_auth: Option<&AuthorizedProposalVoteSnapshot>,
+                    pv_passthrough: Option<&ProposalVoteAuthority>,
+                    action: ConsensusEngineAction<ValidatorId>,
+                ) -> (BinaryConsensusLoopInboundStats, OutboundRecorder) {
+                    let facade = OutboundRecorder::default();
+                    let mut stats = BinaryConsensusLoopInboundStats::default();
+                    forward_actions_to_facade(
+                        vec![action],
+                        &facade,
+                        &mut stats,
+                        current_auth,
+                        pv_passthrough,
+                        ConsensusVerificationPolicy::Required,
+                    );
+                    (stats, facade)
+                }
+
+                fn assert_no_effect(facade: &OutboundRecorder, c: &SignerCounters) {
+                    assert!(facade.proposals.lock().unwrap().is_empty());
+                    assert!(facade.broadcast_votes.lock().unwrap().is_empty());
+                    assert!(facade.directed_votes.lock().unwrap().is_empty());
+                    assert_eq!(facade.other.load(SeqCst), 0);
+                    assert_eq!(c.vote_calls.load(SeqCst), 0, "vote signer un-invoked");
+                    assert_eq!(c.proposal_calls.load(SeqCst), 0, "proposal signer un-invoked");
+                }
+
+                // ---------------- BroadcastProposal variant ----------------
+
+                #[test]
+                fn d7b_proposal_matching_signs_and_broadcasts() {
+                    let fixture = make_fixture(4);
+                    let (pv, c) = recording_pv(&fixture);
+                    let snap = snapshot_matching(&pv);
+                    let (stats, facade) = drive(Some(&snap), None, proposal_action(0));
+
+                    // Signed through the bound verifier and reached broadcast.
+                    assert_eq!(c.proposal_calls.load(SeqCst), 1);
+                    assert_eq!(c.vote_calls.load(SeqCst), 0);
+                    assert_eq!(stats.outbound_proposal_signing_success, 1);
+                    assert_eq!(stats.outbound_proposals_sent, 1);
+                    assert_eq!(stats.outbound_votes_sent, 0);
+                    assert_eq!(stats.outbound_send_vote_to, 0);
+                    let proposals = facade.proposals.lock().unwrap();
+                    assert_eq!(proposals.len(), 1);
+                    assert!(facade.broadcast_votes.lock().unwrap().is_empty());
+                    assert!(facade.directed_votes.lock().unwrap().is_empty());
+
+                    // Positive control: the emitted proposal verifies under the
+                    // SELECTED domain and fails under a FOREIGN domain — the
+                    // instrumented signer really produced a valid ML-DSA-44
+                    // signature over the selected v2 preimage.
+                    let foreign = d6_domain(
+                        0xEEEE_0000_0000_0009,
+                        0,
+                        d6_genesis_identity(0x33),
+                        d6_authority_commitment(0x44),
+                    );
+                    assert!(qbind_consensus::verify_proposal_msg_with_domain(
+                        &proposals[0],
+                        ValidatorId(0),
+                        fixture.validators.as_ref(),
+                        fixture.kp.as_ref(),
+                        fixture.br.as_ref(),
+                        &d6_control_domain(),
+                    )
+                    .is_ok());
+                    assert!(qbind_consensus::verify_proposal_msg_with_domain(
+                        &proposals[0],
+                        ValidatorId(0),
+                        fixture.validators.as_ref(),
+                        fixture.kp.as_ref(),
+                        fixture.br.as_ref(),
+                        &foreign,
+                    )
+                    .is_err());
+                }
+
+                #[test]
+                fn d7b_proposal_missing_snapshot_rejects_before_signing() {
+                    let fixture = make_fixture(4);
+                    let (pv, c) = recording_pv(&fixture);
+                    // No snapshot wired; the raw pv is offered as passthrough but
+                    // under Required it must NOT be used as a substitute.
+                    let (stats, facade) = drive(None, Some(&pv), proposal_action(0));
+                    assert_eq!(stats.outbound_proposal_current_state_unavailable_total, 1);
+                    assert_eq!(stats.outbound_proposals_sent, 0);
+                    assert_eq!(stats.outbound_proposal_signing_success, 0);
+                    assert_eq!(stats.outbound_proposal_verification_context_unavailable_total, 0);
+                    assert_no_effect(&facade, &c);
+                }
+
+                #[test]
+                fn d7b_proposal_unavailable_rejects_before_signing() {
+                    let fixture = make_fixture(4);
+                    let (pv, c) = recording_pv(&fixture);
+                    let snap =
+                        snapshot_unavailable(&pv, CurrentStateUnavailableReason::MissingStorage);
+                    let (stats, facade) = drive(Some(&snap), None, proposal_action(0));
+                    assert_eq!(stats.outbound_proposal_current_state_unavailable_total, 1);
+                    assert_eq!(stats.outbound_proposals_sent, 0);
+                    assert_no_effect(&facade, &c);
+                }
+
+                #[test]
+                fn d7b_proposal_superseded_rejects_before_signing() {
+                    let fixture = make_fixture(4);
+                    let (pv, c) = recording_pv(&fixture);
+                    let snap = snapshot_superseded(&pv, true);
+                    let (stats, facade) = drive(Some(&snap), None, proposal_action(0));
+                    assert_eq!(stats.outbound_proposal_authority_superseded_total, 1);
+                    assert_eq!(stats.outbound_proposals_sent, 0);
+                    assert_no_effect(&facade, &c);
+                }
+
+                #[test]
+                fn d7b_proposal_exhausted_rejects_before_signing() {
+                    let fixture = make_fixture(4);
+                    let (pv, c) = recording_pv(&fixture);
+                    let snap = snapshot_exhausted(&pv);
+                    let (stats, facade) = drive(Some(&snap), None, proposal_action(0));
+                    assert_eq!(stats.outbound_proposal_authorization_exhausted_total, 1);
+                    assert_eq!(stats.outbound_proposals_sent, 0);
+                    assert_no_effect(&facade, &c);
+                }
+
+                #[test]
+                fn d7b_proposal_unauthorized_epoch_rejects_before_signing() {
+                    let fixture = make_fixture(4);
+                    let (pv, c) = recording_pv(&fixture);
+                    let snap = snapshot_matching(&pv);
+                    // Admission succeeds but the action's epoch (1) differs from
+                    // the authorized founding epoch (0): rejected before signing.
+                    let (stats, facade) = drive(Some(&snap), None, proposal_action(1));
+                    assert_eq!(stats.outbound_proposal_epoch_unauthorized_total, 1);
+                    assert_eq!(stats.outbound_proposals_sent, 0);
+                    assert_no_effect(&facade, &c);
+                }
+
+                #[test]
+                fn d7b_proposal_supplied_authority_b_cannot_replace_admitted_a() {
+                    let fixture = make_fixture(4);
+                    let (pv_a, c_a) = recording_pv(&fixture);
+                    let snap_a = snapshot_matching(&pv_a);
+                    // A separately-supplied authority B (foreign domain, its own
+                    // instrumented signer) is offered as the passthrough. Because
+                    // a snapshot is wired, B must never sign or drive the effect.
+                    let (pv_b, c_b) = recording_pv(&fixture);
+                    let pv_b = ProposalVoteAuthority {
+                        signing_domain: d6_domain(
+                            0xBBBB_0000_0000_0002,
+                            0,
+                            d6_genesis_identity(0x55),
+                            d6_authority_commitment(0x66),
+                        ),
+                        ..pv_b
+                    };
+                    let (stats, facade) = drive(Some(&snap_a), Some(&pv_b), proposal_action(0));
+                    // A signed; B never invoked.
+                    assert_eq!(c_a.proposal_calls.load(SeqCst), 1);
+                    assert_eq!(c_b.proposal_calls.load(SeqCst), 0);
+                    assert_eq!(c_b.vote_calls.load(SeqCst), 0);
+                    assert_eq!(stats.outbound_proposals_sent, 1);
+                    let proposals = facade.proposals.lock().unwrap();
+                    assert_eq!(proposals.len(), 1);
+                    // Emitted proposal verifies under A's domain, not B's.
+                    assert!(qbind_consensus::verify_proposal_msg_with_domain(
+                        &proposals[0],
+                        ValidatorId(0),
+                        fixture.validators.as_ref(),
+                        fixture.kp.as_ref(),
+                        fixture.br.as_ref(),
+                        &d6_control_domain(),
+                    )
+                    .is_ok());
+                    assert!(qbind_consensus::verify_proposal_msg_with_domain(
+                        &proposals[0],
+                        ValidatorId(0),
+                        fixture.validators.as_ref(),
+                        fixture.kp.as_ref(),
+                        fixture.br.as_ref(),
+                        &pv_b.signing_domain,
+                    )
+                    .is_err());
+                }
+
+                #[test]
+                fn d7b_proposal_replacement_after_completed_call_rejects_next() {
+                    let fixture = make_fixture(4);
+                    let (pv, c) = recording_pv(&fixture);
+                    let mut snap = snapshot_matching(&pv);
+                    // Call 1: authorized forwarding completes.
+                    let (stats1, facade1) = {
+                        let facade = OutboundRecorder::default();
+                        let mut stats = BinaryConsensusLoopInboundStats::default();
+                        forward_actions_to_facade(
+                            vec![proposal_action(0)],
+                            &facade,
+                            &mut stats,
+                            Some(&snap),
+                            None,
+                            ConsensusVerificationPolicy::Required,
+                        );
+                        (stats, facade)
+                    };
+                    assert_eq!(stats1.outbound_proposals_sent, 1);
+                    assert_eq!(facade1.proposals.lock().unwrap().len(), 1);
+                    assert_eq!(c.proposal_calls.load(SeqCst), 1);
+
+                    // Replace current state (generation advances); the NEXT call
+                    // obtains fresh authorization and rejects before signing.
+                    replace_current_with_b(&mut snap);
+                    let (stats2, facade2) = drive(Some(&snap), None, proposal_action(0));
+                    assert_eq!(stats2.outbound_proposal_authority_superseded_total, 1);
+                    assert_eq!(stats2.outbound_proposals_sent, 0);
+                    // Signer not invoked a second time; no further effect.
+                    assert_eq!(c.proposal_calls.load(SeqCst), 1);
+                    assert!(facade2.proposals.lock().unwrap().is_empty());
+                }
+
+                // ---------------- BroadcastVote variant ----------------
+
+                #[test]
+                fn d7b_vote_matching_signs_and_broadcasts() {
+                    let fixture = make_fixture(4);
+                    let (pv, c) = recording_pv(&fixture);
+                    let snap = snapshot_matching(&pv);
+                    let (stats, facade) = drive(Some(&snap), None, broadcast_vote_action(0));
+                    assert_eq!(c.vote_calls.load(SeqCst), 1);
+                    assert_eq!(c.proposal_calls.load(SeqCst), 0);
+                    assert_eq!(stats.outbound_vote_signing_success, 1);
+                    assert_eq!(stats.outbound_votes_sent, 1);
+                    assert_eq!(stats.outbound_send_vote_to, 0);
+                    let bv = facade.broadcast_votes.lock().unwrap();
+                    assert_eq!(bv.len(), 1);
+                    assert!(facade.directed_votes.lock().unwrap().is_empty());
+                    assert!(facade.proposals.lock().unwrap().is_empty());
+                    let foreign = d6_domain(
+                        0xEEEE_0000_0000_0009,
+                        0,
+                        d6_genesis_identity(0x33),
+                        d6_authority_commitment(0x44),
+                    );
+                    assert!(qbind_consensus::verify_vote_msg_with_domain(
+                        &bv[0],
+                        ValidatorId(0),
+                        fixture.validators.as_ref(),
+                        fixture.kp.as_ref(),
+                        fixture.br.as_ref(),
+                        &d6_control_domain(),
+                    )
+                    .is_ok());
+                    assert!(qbind_consensus::verify_vote_msg_with_domain(
+                        &bv[0],
+                        ValidatorId(0),
+                        fixture.validators.as_ref(),
+                        fixture.kp.as_ref(),
+                        fixture.br.as_ref(),
+                        &foreign,
+                    )
+                    .is_err());
+                }
+
+                #[test]
+                fn d7b_vote_missing_snapshot_rejects_before_signing() {
+                    let fixture = make_fixture(4);
+                    let (pv, c) = recording_pv(&fixture);
+                    let (stats, facade) = drive(None, Some(&pv), broadcast_vote_action(0));
+                    assert_eq!(stats.outbound_vote_current_state_unavailable_total, 1);
+                    assert_eq!(stats.outbound_votes_sent, 0);
+                    assert_eq!(stats.outbound_vote_verification_context_unavailable_total, 0);
+                    assert_no_effect(&facade, &c);
+                }
+
+                #[test]
+                fn d7b_vote_unavailable_rejects_before_signing() {
+                    let fixture = make_fixture(4);
+                    let (pv, c) = recording_pv(&fixture);
+                    let snap = snapshot_unavailable(
+                        &pv,
+                        CurrentStateUnavailableReason::StorageWithoutCommittedEpoch,
+                    );
+                    let (stats, facade) = drive(Some(&snap), None, broadcast_vote_action(0));
+                    assert_eq!(stats.outbound_vote_current_state_unavailable_total, 1);
+                    assert_eq!(stats.outbound_votes_sent, 0);
+                    assert_no_effect(&facade, &c);
+                }
+
+                #[test]
+                fn d7b_vote_superseded_rejects_before_signing() {
+                    let fixture = make_fixture(4);
+                    let (pv, c) = recording_pv(&fixture);
+                    let snap = snapshot_superseded(&pv, true);
+                    let (stats, facade) = drive(Some(&snap), None, broadcast_vote_action(0));
+                    assert_eq!(stats.outbound_vote_authority_superseded_total, 1);
+                    assert_eq!(stats.outbound_votes_sent, 0);
+                    assert_no_effect(&facade, &c);
+                }
+
+                #[test]
+                fn d7b_vote_exhausted_rejects_before_signing() {
+                    let fixture = make_fixture(4);
+                    let (pv, c) = recording_pv(&fixture);
+                    let snap = snapshot_exhausted(&pv);
+                    let (stats, facade) = drive(Some(&snap), None, broadcast_vote_action(0));
+                    assert_eq!(stats.outbound_vote_authorization_exhausted_total, 1);
+                    assert_eq!(stats.outbound_votes_sent, 0);
+                    assert_no_effect(&facade, &c);
+                }
+
+                #[test]
+                fn d7b_vote_unauthorized_epoch_rejects_before_signing() {
+                    let fixture = make_fixture(4);
+                    let (pv, c) = recording_pv(&fixture);
+                    let snap = snapshot_matching(&pv);
+                    let (stats, facade) = drive(Some(&snap), None, broadcast_vote_action(1));
+                    assert_eq!(stats.outbound_vote_epoch_unauthorized_total, 1);
+                    assert_eq!(stats.outbound_votes_sent, 0);
+                    assert_no_effect(&facade, &c);
+                }
+
+                #[test]
+                fn d7b_vote_supplied_authority_b_cannot_replace_admitted_a() {
+                    let fixture = make_fixture(4);
+                    let (pv_a, c_a) = recording_pv(&fixture);
+                    let snap_a = snapshot_matching(&pv_a);
+                    let (pv_b, c_b) = recording_pv(&fixture);
+                    let pv_b = ProposalVoteAuthority {
+                        signing_domain: d6_domain(
+                            0xBBBB_0000_0000_0003,
+                            0,
+                            d6_genesis_identity(0x77),
+                            d6_authority_commitment(0x18),
+                        ),
+                        ..pv_b
+                    };
+                    let (stats, facade) = drive(Some(&snap_a), Some(&pv_b), broadcast_vote_action(0));
+                    assert_eq!(c_a.vote_calls.load(SeqCst), 1);
+                    assert_eq!(c_b.vote_calls.load(SeqCst), 0);
+                    assert_eq!(stats.outbound_votes_sent, 1);
+                    let bv = facade.broadcast_votes.lock().unwrap();
+                    assert_eq!(bv.len(), 1);
+                    assert!(qbind_consensus::verify_vote_msg_with_domain(
+                        &bv[0],
+                        ValidatorId(0),
+                        fixture.validators.as_ref(),
+                        fixture.kp.as_ref(),
+                        fixture.br.as_ref(),
+                        &d6_control_domain(),
+                    )
+                    .is_ok());
+                    assert!(qbind_consensus::verify_vote_msg_with_domain(
+                        &bv[0],
+                        ValidatorId(0),
+                        fixture.validators.as_ref(),
+                        fixture.kp.as_ref(),
+                        fixture.br.as_ref(),
+                        &pv_b.signing_domain,
+                    )
+                    .is_err());
+                }
+
+                #[test]
+                fn d7b_vote_replacement_after_completed_call_rejects_next() {
+                    let fixture = make_fixture(4);
+                    let (pv, c) = recording_pv(&fixture);
+                    let mut snap = snapshot_matching(&pv);
+                    let (stats1, _f1) = drive(Some(&snap), None, broadcast_vote_action(0));
+                    assert_eq!(stats1.outbound_votes_sent, 1);
+                    assert_eq!(c.vote_calls.load(SeqCst), 1);
+                    replace_current_with_b(&mut snap);
+                    let (stats2, facade2) = drive(Some(&snap), None, broadcast_vote_action(0));
+                    assert_eq!(stats2.outbound_vote_authority_superseded_total, 1);
+                    assert_eq!(stats2.outbound_votes_sent, 0);
+                    assert_eq!(c.vote_calls.load(SeqCst), 1);
+                    assert!(facade2.broadcast_votes.lock().unwrap().is_empty());
+                }
+
+                // ---------------- SendVoteTo (directed) variant ----------------
+
+                #[test]
+                fn d7b_send_vote_to_matching_signs_and_directs_to_recipient() {
+                    let fixture = make_fixture(4);
+                    let (pv, c) = recording_pv(&fixture);
+                    let snap = snapshot_matching(&pv);
+                    let (stats, facade) =
+                        drive(Some(&snap), None, send_vote_to_action(ValidatorId(3), 0));
+                    assert_eq!(c.vote_calls.load(SeqCst), 1);
+                    assert_eq!(c.proposal_calls.load(SeqCst), 0);
+                    assert_eq!(stats.outbound_vote_signing_success, 1);
+                    assert_eq!(stats.outbound_send_vote_to, 1);
+                    // Directed path only — never the broadcast path.
+                    assert_eq!(stats.outbound_votes_sent, 0);
+                    assert!(facade.broadcast_votes.lock().unwrap().is_empty());
+                    assert!(facade.proposals.lock().unwrap().is_empty());
+                    let dv = facade.directed_votes.lock().unwrap();
+                    assert_eq!(dv.len(), 1, "send_vote_to reached once");
+                    assert_eq!(dv[0].0, ValidatorId(3), "directed to the intended recipient");
+                    assert!(qbind_consensus::verify_vote_msg_with_domain(
+                        &dv[0].1,
+                        ValidatorId(0),
+                        fixture.validators.as_ref(),
+                        fixture.kp.as_ref(),
+                        fixture.br.as_ref(),
+                        &d6_control_domain(),
+                    )
+                    .is_ok());
+                }
+
+                #[test]
+                fn d7b_send_vote_to_missing_snapshot_rejects_before_signing() {
+                    let fixture = make_fixture(4);
+                    let (pv, c) = recording_pv(&fixture);
+                    let (stats, facade) =
+                        drive(None, Some(&pv), send_vote_to_action(ValidatorId(3), 0));
+                    assert_eq!(stats.outbound_vote_current_state_unavailable_total, 1);
+                    assert_eq!(stats.outbound_send_vote_to, 0);
+                    assert_no_effect(&facade, &c);
+                }
+
+                #[test]
+                fn d7b_send_vote_to_unavailable_rejects_before_signing() {
+                    let fixture = make_fixture(4);
+                    let (pv, c) = recording_pv(&fixture);
+                    let snap =
+                        snapshot_unavailable(&pv, CurrentStateUnavailableReason::MissingStorage);
+                    let (stats, facade) =
+                        drive(Some(&snap), None, send_vote_to_action(ValidatorId(3), 0));
+                    assert_eq!(stats.outbound_vote_current_state_unavailable_total, 1);
+                    assert_eq!(stats.outbound_send_vote_to, 0);
+                    assert_no_effect(&facade, &c);
+                }
+
+                #[test]
+                fn d7b_send_vote_to_superseded_rejects_before_signing() {
+                    let fixture = make_fixture(4);
+                    let (pv, c) = recording_pv(&fixture);
+                    let snap = snapshot_superseded(&pv, true);
+                    let (stats, facade) =
+                        drive(Some(&snap), None, send_vote_to_action(ValidatorId(3), 0));
+                    assert_eq!(stats.outbound_vote_authority_superseded_total, 1);
+                    assert_eq!(stats.outbound_send_vote_to, 0);
+                    assert_no_effect(&facade, &c);
+                }
+
+                #[test]
+                fn d7b_send_vote_to_exhausted_rejects_before_signing() {
+                    let fixture = make_fixture(4);
+                    let (pv, c) = recording_pv(&fixture);
+                    let snap = snapshot_exhausted(&pv);
+                    let (stats, facade) =
+                        drive(Some(&snap), None, send_vote_to_action(ValidatorId(3), 0));
+                    assert_eq!(stats.outbound_vote_authorization_exhausted_total, 1);
+                    assert_eq!(stats.outbound_send_vote_to, 0);
+                    assert_no_effect(&facade, &c);
+                }
+
+                #[test]
+                fn d7b_send_vote_to_unauthorized_epoch_rejects_before_signing() {
+                    let fixture = make_fixture(4);
+                    let (pv, c) = recording_pv(&fixture);
+                    let snap = snapshot_matching(&pv);
+                    let (stats, facade) =
+                        drive(Some(&snap), None, send_vote_to_action(ValidatorId(3), 1));
+                    assert_eq!(stats.outbound_vote_epoch_unauthorized_total, 1);
+                    assert_eq!(stats.outbound_send_vote_to, 0);
+                    assert_no_effect(&facade, &c);
+                }
+
+                #[test]
+                fn d7b_send_vote_to_supplied_authority_b_cannot_replace_admitted_a() {
+                    let fixture = make_fixture(4);
+                    let (pv_a, c_a) = recording_pv(&fixture);
+                    let snap_a = snapshot_matching(&pv_a);
+                    let (pv_b, c_b) = recording_pv(&fixture);
+                    let pv_b = ProposalVoteAuthority {
+                        signing_domain: d6_domain(
+                            0xBBBB_0000_0000_0004,
+                            0,
+                            d6_genesis_identity(0x29),
+                            d6_authority_commitment(0x31),
+                        ),
+                        ..pv_b
+                    };
+                    let (stats, facade) =
+                        drive(Some(&snap_a), Some(&pv_b), send_vote_to_action(ValidatorId(3), 0));
+                    assert_eq!(c_a.vote_calls.load(SeqCst), 1);
+                    assert_eq!(c_b.vote_calls.load(SeqCst), 0);
+                    assert_eq!(stats.outbound_send_vote_to, 1);
+                    let dv = facade.directed_votes.lock().unwrap();
+                    assert_eq!(dv.len(), 1);
+                    assert_eq!(dv[0].0, ValidatorId(3));
+                    assert!(qbind_consensus::verify_vote_msg_with_domain(
+                        &dv[0].1,
+                        ValidatorId(0),
+                        fixture.validators.as_ref(),
+                        fixture.kp.as_ref(),
+                        fixture.br.as_ref(),
+                        &d6_control_domain(),
+                    )
+                    .is_ok());
+                    assert!(qbind_consensus::verify_vote_msg_with_domain(
+                        &dv[0].1,
+                        ValidatorId(0),
+                        fixture.validators.as_ref(),
+                        fixture.kp.as_ref(),
+                        fixture.br.as_ref(),
+                        &pv_b.signing_domain,
+                    )
+                    .is_err());
+                }
+
+                #[test]
+                fn d7b_send_vote_to_replacement_after_completed_call_rejects_next() {
+                    let fixture = make_fixture(4);
+                    let (pv, c) = recording_pv(&fixture);
+                    let mut snap = snapshot_matching(&pv);
+                    let (stats1, _f1) =
+                        drive(Some(&snap), None, send_vote_to_action(ValidatorId(3), 0));
+                    assert_eq!(stats1.outbound_send_vote_to, 1);
+                    assert_eq!(c.vote_calls.load(SeqCst), 1);
+                    replace_current_with_b(&mut snap);
+                    let (stats2, facade2) =
+                        drive(Some(&snap), None, send_vote_to_action(ValidatorId(3), 0));
+                    assert_eq!(stats2.outbound_vote_authority_superseded_total, 1);
+                    assert_eq!(stats2.outbound_send_vote_to, 0);
+                    assert_eq!(c.vote_calls.load(SeqCst), 1);
+                    assert!(facade2.directed_votes.lock().unwrap().is_empty());
+                }
             }
         }
     }
