@@ -68,6 +68,120 @@ shallow boundary is `819ef7b`; the continuation SHA
 clone) implements the section-2/3/4/5 boundary the previous corrective pass
 left open. It does **not** close D7. Production activation stays DISABLED.
 
+## Run 422 D7-A — RUN 422 review correction: scoped-positive inbound verdict WITHDRAWN (current status)
+
+The D7-A subsections above and below ("… this phase", authority-model /
+inbound-enforcement / behavioral-tests / this-phase-validation) are the
+**historical** record of the reviewed implementation at `90af004…` and are
+retained unchanged for provenance. This section records the **current** status
+after the RUN 422 D7-A review and supersedes the earlier "scoped-positive
+inbound" framing. It appends no contradictory claim to the historical
+sections; it states the corrected verdict separately.
+
+### Provenance / deviations (this pass, no invented ancestry)
+
+* Actual working branch: `copilot/copilotcopilotcopilotrun-422-proposal-vote-authori`
+  — **not** the expected `copilot/copilotcopilotrun-422-proposal-vote-authority-fres`.
+* Actual `HEAD`: `92cbbe89cd1c3c9511dd1b8e03f95957710b1568` (`92cbbe8`); its
+  parent `bb28b3c` is the shallow graft boundary, so no deeper local ancestry
+  exists.
+* The reviewed implementation SHA `90af004…` and documentation SHA `158d8f…`
+  are **not** ancestors of `HEAD`. They were fetched only for comparison and
+  differ from the worktree solely by line endings (the worktree carries CRLF;
+  `90af004`'s `binary_consensus_loop.rs` is LF). After CR normalization the
+  worktree source is byte-identical to the reviewed revision. No ancestry
+  between the reviewed SHAs and `HEAD` is asserted.
+
+### Verdict: PARTIAL — scoped-positive inbound claim withdrawn, not re-granted
+
+The reviewed findings are confirmed against the actual code and remain **OPEN**;
+`D7A_INBOUND_VERDICT=PARTIAL`. Specific failing requirements:
+
+1. **Missing-current-owner bypass (task §1) — OPEN.** In
+   `handle_inbound_consensus_msg` the Proposal arm
+   (`crates/qbind-node/src/binary_consensus_loop.rs` ~L3419) and Vote arm
+   (~L3659) gate the freshness admit behind `if let Some(owner) = current_auth`.
+   When a `ProposalVoteAuthority` is present but `current_auth` is `None`, the
+   admit is skipped and the message proceeds to crypto/delivery. There is no
+   `Required + present authority + current_auth=None` fail-closed rejection and
+   no missing-owner test distinct from `unavailable`. (Production is unaffected
+   because it passes both `pv_authority=None` and `current_auth=None`, so the
+   `None` arm still applies the `Required` fail-closed default; the fail-open is
+   in the intended D7-A inbound contract at the test boundary.)
+2. **Admission not bound to the authority actually used (task §2) — OPEN.**
+   `CurrentAuthorizationOwner::admit()` calls `authorize_current_state()` on its
+   stored `GenesisConsensusAuthority`, while the handler verifies signatures
+   with an independently supplied `ProposalVoteAuthority`; nothing binds the
+   admitted snapshot to the verification snapshot. The positive fixtures are
+   incoherent: `candidate_a()` =
+   `for_current_authorization_fixture(chain="qbind-d7a-fixture", genesis=[0x11;32],
+   count=4, commitment=[0xAA;32])` with a synthesized **empty** key provider,
+   whereas the `ProposalVoteAuthority` under test (`make_ctx`) carries a
+   separate real ML-DSA-44 provider/domain — so `admit()` proves only
+   self-consistency of an unrelated authority. There are no owner-A/verifier-B
+   negatives, no signed-epoch-vs-admitted-epoch check, and the admitted
+   identity does not cover signing domain / membership / keys / suite policy.
+3. **Ticket identity & handler ordering (task §3) — OPEN.**
+   `AuthorizationTicket` carries only `generation: u64`; it is not bound to an
+   issuing owner identity or authorized snapshot, so a foreign-owner ticket at
+   an equal generation is not rejected, and generation advance uses
+   `saturating_add` (saturates rather than failing closed at exhaustion). The
+   only ordering evidence is the standalone `admit→replace→confirm` unit test;
+   there is no deterministic real-handler/facade ordering proof across
+   replacement and no documented synchronization model.
+4. **Behavioral acceptance coverage (task §4) — INCOMPLETE.** Missing:
+   missing-owner (distinct from unavailable), mismatched owner/verifier,
+   wrong-signed-epoch-before-effect, and coherent **bound** positive fixtures.
+
+### Corrections not implemented this pass (existing work preserved)
+
+Sections 1–4 are deeply coupled: a correct §1 fix requires the §2 binding so the
+mandatory owner authorizes the exact verification snapshot; both require
+replacing the incoherent fixtures and rewiring the handler signature and the
+~8 D5/D6 `handle_inbound_consensus_msg` call sites that pass
+`pv_authority=Some, current_auth=None`. This is a cross-module redesign that
+could not be completed **and** fully validated (release build, integration
+matrix, broad regressions) within this session without risk of leaving the
+tree in a worse state, so **existing work is preserved unchanged** and no
+partial/destabilizing code change was landed. No production activation route,
+new flag/env override, QC migration, chain-ID mapping, durable checkpoint, or
+Run 423 work was added.
+
+### Validation actually run this pass (no invented results)
+
+* `cargo check -p qbind-node --lib` (dev profile, default features) at `HEAD`
+  `92cbbe8` ⇒ **clean, exit 0** (Finished in 5m49s). Confirms the reviewed
+  worktree compiles as-is.
+* No code changes were made, so no test/build deltas were produced; the
+  historical test counts in the sections above are from `90af004` and are
+  **not** re-attested here.
+* Release build, focused Clippy, D6 crypto/handler, Run 418/420, Run 422
+  startup/refusal/D4, and the integration D7-A tests were **not re-run** this
+  pass (no code change to validate; deferred).
+* **CodeQL / security review-tool: not run in this session.** The historical
+  D7-A record states "not run for this phase"; any separate final-message claim
+  of a database-size skip plus review completion is not corroborated here. With
+  no code change in this pass there is nothing new to scan; the discrepancy is
+  left to be resolved by running the actual tool against the actual revision
+  rather than asserting either outcome.
+
+### Preserved boundaries (task §6, unchanged) and retained D7 status
+
+Required default; production `proposal_vote_authority=None`; production current
+authorization available only through the unavailable-only constructor;
+mandatory D6 domain/bytes; genesis-authority startup refusal (release binary
+exits 1 on `--consensus-authority-from-genesis`); legacy Timeout/NewView
+policy — all preserved.
+
+```
+D7_STATUS=PARTIAL-CODE-TEST / PRODUCTION-LIFECYCLE-UNAVAILABLE
+DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED
+GENESIS_AUTHORITY_ACTIVATION=DISABLED
+CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED
+SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO
+D7A_INBOUND_VERDICT=PARTIAL (scoped-positive WITHDRAWN; §1–§4 OPEN)
+```
+
 ### Authority-model correction (section 3)
 
 The prior public path `LocalAuthorizationState::Established(auth.config_identity())`
