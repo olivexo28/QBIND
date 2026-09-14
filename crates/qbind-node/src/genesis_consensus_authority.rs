@@ -719,6 +719,12 @@ pub enum FreshnessError {
     /// snapshot after epoch advance / membership change / same-epoch
     /// replacement. Carries the underlying lifetime divergence.
     Superseded(AuthorityLifetimeError),
+    /// Run 422 D7-A3 — the current-authorization owner has exhausted its
+    /// generation space (a replacement could not be represented) and entered a
+    /// terminal non-authorizing state. No new admission can succeed; the
+    /// genesis-static keys are never used on an exhausted owner. Bounded and
+    /// non-secret.
+    AuthorizationExhausted,
 }
 
 impl std::fmt::Display for FreshnessError {
@@ -736,6 +742,11 @@ impl std::fmt::Display for FreshnessError {
                     "current local authorization state is superseded: {inner}"
                 )
             }
+            Self::AuthorizationExhausted => write!(
+                f,
+                "current-authorization owner has exhausted its generation space and is in a \
+                 terminal non-authorizing state; no new admission can succeed"
+            ),
         }
     }
 }
@@ -879,23 +890,62 @@ impl GenesisConsensusAuthority {
     }
 }
 
+/// Run 422 D7-A3 — an opaque, allocation-backed **issuer identity** for a
+/// single [`CurrentAuthorizationOwner`].
+///
+/// Each owner constructor allocates exactly one of these behind an `Arc`. The
+/// identity is the *allocation itself*, not any value it carries (it is a
+/// zero-sized marker), so:
+///
+/// * it is **unique** per owner — two owners built from byte-for-byte
+///   identical configurations still hold distinct allocations;
+/// * it is **stable across moves** — moving the owner value moves the `Arc`
+///   handle, not the heap allocation it points at, so a ticket bound to the
+///   allocation stays valid even though the owner's stack address changed;
+/// * it is **not forgeable and not reusable** — it is never a raw pointer a
+///   caller can fabricate, never a numeric id that could recur, and never a
+///   wrapping global counter.
+///
+/// A ticket retains a clone of its issuer's `Arc<OwnerIdentity>`; confirmation
+/// compares allocations with [`Arc::ptr_eq`]. Because the marker is
+/// zero-sized and held **separately** from the owner's (large) state, a ticket
+/// retaining it keeps only the identity marker alive, never the owner or its
+/// snapshot.
+#[derive(Debug)]
+pub struct OwnerIdentity;
+
 /// Run 422 D7-A — a short-lived, **in-process** admission ticket issued by
 /// [`CurrentAuthorizationOwner::admit`] after a freshness check succeeds.
 ///
-/// It carries the owner's [`CurrentAuthorizationOwner::generation`] at the
-/// instant the check passed. Before an admitted operation applies its effect
-/// (engine mutation / outbound), the caller re-confirms the ticket with
-/// [`CurrentAuthorizationOwner::confirm`]; if the owner's current state was
-/// replaced in between (generation advanced), the confirm fails and the
-/// operation is refused. This prevents a successful check from being reused
-/// across an in-process invalidation before its effect.
+/// Run 422 D7-A3 — the ticket is **opaque** and bound to three things fixed at
+/// admission:
+///
+/// * the **issuing owner**, via a clone of that owner's opaque allocation-backed
+///   [`OwnerIdentity`] (`issuer`). A *different* owner rejects the ticket in
+///   [`CurrentAuthorizationOwner::confirm`] even when both owners have
+///   byte-for-byte identical configurations and equal generation numbers, and
+///   an unavailable owner never accepts another owner's ticket;
+/// * that owner's **immutable authorized snapshot**. The owner's `candidate`
+///   authority is fixed for the life of the owner and its private `current`
+///   state changes only through a replacement that advances `generation` (or
+///   exhausts it). Therefore the pair *(issuer allocation, generation)*
+///   uniquely pins the exact snapshot that was admitted: issuer binding plus
+///   the generation below is *sufficient* to bind the snapshot, with no need to
+///   copy or hash the snapshot into the ticket;
+/// * the owner's **generation** at admission. Before an admitted operation
+///   applies its effect (engine mutation / outbound), the caller re-confirms
+///   the ticket; if the owner's current state was replaced in between
+///   (generation advanced) the confirm fails and the operation is refused.
 ///
 /// This is an **in-memory ordering** guarantee only. It is explicitly **not**
 /// a durable anti-rollback mechanism and does not prevent an A→B→A signature
-/// replay across process restarts: the generation lives only for the life of
-/// this owner value.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// replay across process restarts: both the issuer allocation and the
+/// generation live only for the life of the issuing owner value.
+#[derive(Debug, Clone)]
 pub struct AuthorizationTicket {
+    /// A clone of the issuing owner's opaque allocation-backed identity. Bound
+    /// by [`Arc::ptr_eq`] in `confirm`; never compared by value.
+    issuer: Arc<OwnerIdentity>,
     generation: u64,
 }
 
@@ -903,6 +953,12 @@ impl AuthorizationTicket {
     /// The owner generation this ticket was minted against.
     pub fn generation(&self) -> u64 {
         self.generation
+    }
+
+    /// Whether this ticket was issued by `owner` (identity binding), regardless
+    /// of generation. Compares the opaque issuer allocations by pointer.
+    pub fn issued_by(&self, owner: &CurrentAuthorizationOwner) -> bool {
+        Arc::ptr_eq(&self.issuer, &owner.identity)
     }
 }
 
@@ -931,6 +987,45 @@ impl std::fmt::Display for StaleAuthorizationError {
 }
 
 impl std::error::Error for StaleAuthorizationError {}
+
+/// Run 422 D7-A3 — bounded, non-secret reasons
+/// [`CurrentAuthorizationOwner::confirm`] refuses a ticket. Every variant is a
+/// fail-closed rejection; none leaks configuration or key material.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConfirmError {
+    /// The ticket was not issued by this owner (its opaque issuer identity does
+    /// not match). Rejected even if both owners carry identical configurations
+    /// and equal generation numbers, and even if this owner is unavailable.
+    ForeignIssuer,
+    /// The ticket was issued by this owner, but the owner's current
+    /// authorization state was replaced (generation advanced) between the
+    /// admitting freshness check and the effect. Carries the generation detail.
+    Stale(StaleAuthorizationError),
+    /// The owner has permanently exhausted its generation space and entered a
+    /// terminal non-authorizing state; no ticket — including one issued at the
+    /// maximum generation — can be confirmed, and no replacement can restore
+    /// authorization.
+    Exhausted,
+}
+
+impl std::fmt::Display for ConfirmError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::ForeignIssuer => f.write_str(
+                "authorization ticket was issued by a different current-authorization owner; \
+                 it is bound to its issuer and is refused here (the operation is refused)",
+            ),
+            Self::Stale(inner) => write!(f, "{inner}"),
+            Self::Exhausted => f.write_str(
+                "current-authorization owner has exhausted its generation space and is in a \
+                 terminal non-authorizing state; every outstanding ticket is refused and the \
+                 operation is refused",
+            ),
+        }
+    }
+}
+
+impl std::error::Error for ConfirmError {}
 
 /// Run 422 D7-A (corrective — section 3) — the **independently maintained
 /// owner** of the node's current Proposal/Vote authorization state.
@@ -961,7 +1056,21 @@ impl std::error::Error for StaleAuthorizationError {}
 ///   through the explicitly test-identified [`Self::establish_for_fixture`]
 ///   (compiled only under `cfg(test)`), so a real trusted current-state
 ///   lifecycle remains unavailable in release builds.
+///
+/// # Clone semantics
+///
+/// This type deliberately does **not** implement [`Clone`]. Each constructor
+/// allocates a fresh opaque [`OwnerIdentity`], so there is no way to obtain a
+/// second *handle to the same logical owner* — every owner value is a
+/// separately maintained owner with its own identity, and a ticket is only
+/// ever confirmable by the exact owner that issued it. (No clone is introduced
+/// merely to simplify tests; tests move the owner by value to prove
+/// move-stability of the allocation-backed identity.)
 pub struct CurrentAuthorizationOwner {
+    /// Run 422 D7-A3 — this owner's opaque, allocation-backed issuer identity.
+    /// A fresh `Arc<OwnerIdentity>` is allocated per constructor; tickets bind
+    /// to it by [`Arc::ptr_eq`]. Stable across moves of the owner value.
+    identity: Arc<OwnerIdentity>,
     /// The authority snapshot presenting itself for admission. A clone of
     /// this handle still fails admission when the independently-held current
     /// state has moved on — the candidate is not the source of truth for
@@ -975,6 +1084,13 @@ pub struct CurrentAuthorizationOwner {
     /// admitted check can detect an intervening invalidation before its
     /// effect. Not durable (see [`AuthorizationTicket`]).
     generation: u64,
+    /// Run 422 D7-A3 — terminal exhaustion latch. Set once a generation
+    /// advance cannot be represented ([`u64::MAX`] reached). While set, no
+    /// admission succeeds, every outstanding ticket (including one issued at
+    /// the maximum generation) fails confirmation, and no later replacement can
+    /// clear it — there is no wraparound, reset, or silent reuse of the
+    /// previous generation.
+    exhausted: bool,
 }
 
 impl std::fmt::Debug for CurrentAuthorizationOwner {
@@ -994,6 +1110,7 @@ impl std::fmt::Debug for CurrentAuthorizationOwner {
             .field("candidate_commitment_fp", &fp_hex(&self.candidate.commitment))
             .field("current", &availability)
             .field("generation", &self.generation)
+            .field("exhausted", &self.exhausted)
             .finish()
     }
 }
@@ -1018,15 +1135,23 @@ impl CurrentAuthorizationOwner {
             }
         };
         Self {
+            identity: Arc::new(OwnerIdentity),
             candidate,
             current,
             generation: 0,
+            exhausted: false,
         }
     }
 
     /// The current owner generation (advances on every replacement).
     pub fn generation(&self) -> u64 {
         self.generation
+    }
+
+    /// Run 422 D7-A3 — whether this owner has entered the terminal exhausted
+    /// (non-authorizing) state after a generation advance overflowed.
+    pub fn is_exhausted(&self) -> bool {
+        self.exhausted
     }
 
     /// The candidate authority snapshot presenting itself for admission.
@@ -1040,6 +1165,9 @@ impl CurrentAuthorizationOwner {
     /// The current state is read privately here and checked with the candidate
     /// authority's [`GenesisConsensusAuthority::authorize_current_state`]:
     ///
+    /// * a terminally **exhausted** owner (Run 422 D7-A3) is rejected as
+    ///   [`FreshnessError::AuthorizationExhausted`] before any freshness check —
+    ///   no admission can ever succeed again;
     /// * an unavailable current state (missing storage / no committed epoch)
     ///   is rejected as [`FreshnessError::CurrentStateUnavailable`] — the
     ///   founding epoch is never inferred from absent/uncommitted state;
@@ -1048,27 +1176,46 @@ impl CurrentAuthorizationOwner {
     ///   membership/key replacement) is rejected as
     ///   [`FreshnessError::Superseded`].
     ///
-    /// On success a generation-bound [`AuthorizationTicket`] is returned; the
-    /// caller MUST [`Self::confirm`] it immediately before applying any effect.
+    /// On success a ticket bound to this owner's opaque identity and the
+    /// current generation is returned; the caller MUST [`Self::confirm`] it
+    /// immediately before applying any effect.
     pub fn admit(&self) -> Result<AuthorizationTicket, FreshnessError> {
+        if self.exhausted {
+            return Err(FreshnessError::AuthorizationExhausted);
+        }
         self.candidate.authorize_current_state(&self.current)?;
         Ok(AuthorizationTicket {
+            issuer: Arc::clone(&self.identity),
             generation: self.generation,
         })
     }
 
     /// Run 422 D7-A — re-confirm an admitted ticket immediately before the
-    /// operation's effect. Fails closed if the owner's current state was
-    /// replaced (generation advanced) since admission, preventing a
-    /// successful check from being reused across an in-process invalidation.
-    pub fn confirm(&self, ticket: &AuthorizationTicket) -> Result<(), StaleAuthorizationError> {
+    /// operation's effect. Fails closed, in order, if:
+    ///
+    /// * the ticket was issued by a *different* owner (Run 422 D7-A3 issuer
+    ///   binding) — [`ConfirmError::ForeignIssuer`], rejected even for identical
+    ///   configuration/generation and even on an unavailable owner;
+    /// * this owner is terminally **exhausted** — [`ConfirmError::Exhausted`],
+    ///   rejecting every outstanding ticket including one issued at the maximum
+    ///   generation;
+    /// * the owner's current state was replaced (generation advanced) since
+    ///   admission — [`ConfirmError::Stale`], preventing a successful check from
+    ///   being reused across an in-process invalidation.
+    pub fn confirm(&self, ticket: &AuthorizationTicket) -> Result<(), ConfirmError> {
+        if !ticket.issued_by(self) {
+            return Err(ConfirmError::ForeignIssuer);
+        }
+        if self.exhausted {
+            return Err(ConfirmError::Exhausted);
+        }
         if ticket.generation == self.generation {
             Ok(())
         } else {
-            Err(StaleAuthorizationError {
+            Err(ConfirmError::Stale(StaleAuthorizationError {
                 admitted_generation: ticket.generation,
                 current_generation: self.generation,
-            })
+            }))
         }
     }
 
@@ -1083,9 +1230,11 @@ impl CurrentAuthorizationOwner {
         observed: ObservedConsensusConfiguration,
     ) -> Self {
         Self {
+            identity: Arc::new(OwnerIdentity),
             candidate,
             current: LocalAuthorizationState::Established(observed),
             generation: 0,
+            exhausted: false,
         }
     }
 
@@ -1094,10 +1243,48 @@ impl CurrentAuthorizationOwner {
     /// [`AuthorizationTicket`] is invalidated. Compiled only under `cfg(test)`;
     /// models the in-flight replacement ordering deterministically without
     /// sleeps.
+    ///
+    /// Run 422 D7-A3 — the advance is **checked**, not saturating: if the next
+    /// generation cannot be represented the owner enters the terminal exhausted
+    /// state (`exhausted = true`) with the generation left at [`u64::MAX`] — no
+    /// wraparound, no reset to zero, no silent reuse of the previous
+    /// generation, and no panic. Once exhausted, the state never changes: a
+    /// later replacement leaves the owner exhausted and cannot restore
+    /// authorization.
     #[cfg(test)]
     pub fn replace_for_fixture(&mut self, new_state: LocalAuthorizationState) {
-        self.current = new_state;
-        self.generation = self.generation.saturating_add(1);
+        if self.exhausted {
+            // Terminal: record the intended state but never restore
+            // authorization or move the generation.
+            self.current = new_state;
+            return;
+        }
+        match self.generation.checked_add(1) {
+            Some(next) => {
+                self.current = new_state;
+                self.generation = next;
+            }
+            None => {
+                // Generation space exhausted: latch the terminal
+                // non-authorizing state. Leave `generation` at u64::MAX (no
+                // wraparound / reset) so any ticket — including one issued at
+                // the maximum generation — is refused by `confirm` via the
+                // `exhausted` gate, and `admit` refuses fail-closed.
+                self.current = new_state;
+                self.exhausted = true;
+            }
+        }
+    }
+
+    /// Explicitly test-identified interface (Run 422 D7-A3, section 4):
+    /// position the owner one advance below the exhaustion boundary so a single
+    /// [`Self::replace_for_fixture`] drives it into the terminal exhausted
+    /// state deterministically. Compiled **only** under `cfg(test)`; there is
+    /// no production path that positions the counter, so production retains
+    /// unavailable-only current-authorization construction.
+    #[cfg(test)]
+    pub fn set_generation_for_exhaustion_fixture(&mut self, generation: u64) {
+        self.generation = generation;
     }
 }
 
@@ -1551,5 +1738,226 @@ mod tests {
             .get_suite_and_key(ValidatorId::new(1))
             .is_none());
         assert_eq!(auth.validator_count, 1);
+    }
+
+    // =====================================================================
+    // Run 422 D7-A3 — issuer-bound authorization tickets and fail-closed
+    // generation exhaustion. Deterministic, no sleeps / no shared mutable
+    // concurrency: replacement and exhaustion are modelled via the explicitly
+    // `cfg(test)`-gated fixture interface.
+    // =====================================================================
+    mod d7a3_ticket_issuer_and_exhaustion {
+        use super::*;
+
+        const D7A3_CHAIN: &str = "qbind-d7a3-fixture";
+        fn gh() -> GenesisHash {
+            [0x33u8; 32]
+        }
+        const COMMIT: [u8; 32] = [0xA3u8; 32];
+
+        /// A candidate authority with a fixed identity (chain / genesis /
+        /// membership count / commitment / founding epoch).
+        fn candidate() -> Arc<GenesisConsensusAuthority> {
+            Arc::new(GenesisConsensusAuthority::for_current_authorization_fixture(
+                D7A3_CHAIN, gh(), 4, COMMIT,
+            ))
+        }
+
+        /// An owner whose independently-held current state matches its
+        /// candidate's founding identity exactly, so `admit` succeeds.
+        fn owner_matching() -> CurrentAuthorizationOwner {
+            let c = candidate();
+            let observed = c.config_identity();
+            CurrentAuthorizationOwner::establish_for_fixture(c, observed)
+        }
+
+        // ---- Same owner, unchanged snapshot and generation: admit+confirm ok.
+        #[test]
+        fn same_owner_admit_and_confirm_succeed() {
+            let owner = owner_matching();
+            let ticket = owner.admit().expect("admit succeeds against matching state");
+            assert_eq!(ticket.generation(), 0);
+            assert!(ticket.issued_by(&owner));
+            owner.confirm(&ticket).expect("confirm succeeds for own fresh ticket");
+        }
+
+        // ---- Foreign owner, identical configuration and generation: reject.
+        #[test]
+        fn foreign_owner_identical_config_and_generation_rejects() {
+            let owner_a = owner_matching();
+            let owner_b = owner_matching(); // byte-for-byte identical config
+            assert_eq!(owner_a.generation(), owner_b.generation());
+
+            let ticket_a = owner_a.admit().expect("A admits");
+            // B has an identical configuration and the same generation number,
+            // yet the ticket is bound to A's opaque issuer identity.
+            assert!(!ticket_a.issued_by(&owner_b));
+            assert_eq!(
+                owner_b.confirm(&ticket_a),
+                Err(ConfirmError::ForeignIssuer),
+                "a foreign owner must reject another owner's ticket even with identical \
+                 configuration and matching generation",
+            );
+            // A still confirms its own ticket.
+            owner_a.confirm(&ticket_a).expect("A confirms its own ticket");
+        }
+
+        // ---- Foreign UNAVAILABLE owner at the same generation: reject.
+        #[test]
+        fn foreign_unavailable_owner_same_generation_rejects() {
+            let owner_a = owner_matching();
+            let owner_unavailable = CurrentAuthorizationOwner::unavailable(
+                candidate(),
+                CurrentStateUnavailableReason::MissingStorage,
+            );
+            assert_eq!(owner_a.generation(), owner_unavailable.generation());
+
+            let ticket_a = owner_a.admit().expect("A admits");
+            // An unavailable owner can never itself admit...
+            assert!(matches!(
+                owner_unavailable.admit(),
+                Err(FreshnessError::CurrentStateUnavailable { .. })
+            ));
+            // ...and must never accept another owner's ticket.
+            assert_eq!(
+                owner_unavailable.confirm(&ticket_a),
+                Err(ConfirmError::ForeignIssuer),
+                "an unavailable owner must never accept another owner's ticket",
+            );
+        }
+
+        // ---- Moving the owner does not invalidate its legitimate ticket.
+        #[test]
+        fn moving_owner_preserves_ticket() {
+            let owner = owner_matching();
+            let ticket = owner.admit().expect("admit");
+
+            // Force the owner value to a new stack address by moving it into a
+            // helper and back. The opaque allocation-backed identity is stable
+            // across the move, so the ticket remains valid.
+            fn move_through(o: CurrentAuthorizationOwner) -> CurrentAuthorizationOwner {
+                let boxed = Box::new(o);
+                *boxed
+            }
+            let moved = move_through(owner);
+            assert!(ticket.issued_by(&moved));
+            moved
+                .confirm(&ticket)
+                .expect("a moved owner still confirms its own legitimate ticket");
+        }
+
+        // ---- Ordinary replacement invalidates earlier tickets, including a
+        // replacement with an identical configuration.
+        #[test]
+        fn replacement_invalidates_earlier_ticket_even_identical_config() {
+            let mut owner = owner_matching();
+            let observed = owner.candidate().config_identity();
+            let ticket = owner.admit().expect("admit at gen 0");
+
+            // Replace with the *identical* configuration: still a replacement,
+            // still advances the generation, still invalidates the ticket.
+            owner.replace_for_fixture(LocalAuthorizationState::Established(observed.clone()));
+            assert_eq!(owner.generation(), 1);
+            match owner.confirm(&ticket) {
+                Err(ConfirmError::Stale(inner)) => {
+                    assert_eq!(inner.admitted_generation, 0);
+                    assert_eq!(inner.current_generation, 1);
+                }
+                other => panic!("expected Stale after identical-config replacement, got {other:?}"),
+            }
+            // A fresh admit against the (identical) established state binds the
+            // new generation and confirms.
+            let fresh = owner.admit().expect("re-admit after replacement");
+            assert_eq!(fresh.generation(), 1);
+            owner.confirm(&fresh).expect("fresh ticket confirms");
+        }
+
+        // ---- Near-maximum generation advancement behaves correctly.
+        #[test]
+        fn near_maximum_generation_advances_without_exhaustion() {
+            let mut owner = owner_matching();
+            let observed = owner.candidate().config_identity();
+            // Position one advance below the boundary.
+            owner.set_generation_for_exhaustion_fixture(u64::MAX - 1);
+            let ticket_penultimate = owner.admit().expect("admit near max");
+            assert_eq!(ticket_penultimate.generation(), u64::MAX - 1);
+
+            // One advance reaches exactly u64::MAX and does NOT exhaust.
+            owner.replace_for_fixture(LocalAuthorizationState::Established(observed));
+            assert_eq!(owner.generation(), u64::MAX);
+            assert!(!owner.is_exhausted());
+            // The earlier ticket is stale; a new admit at MAX succeeds.
+            assert!(matches!(
+                owner.confirm(&ticket_penultimate),
+                Err(ConfirmError::Stale(_))
+            ));
+            let ticket_max = owner.admit().expect("admit at max generation");
+            assert_eq!(ticket_max.generation(), u64::MAX);
+            owner.confirm(&ticket_max).expect("max-generation ticket confirms while not exhausted");
+        }
+
+        // ---- Exhaustion permanently rejects admission and confirmation,
+        // including the last ticket issued at the maximum generation.
+        #[test]
+        fn exhaustion_permanently_rejects_admit_and_confirm() {
+            let mut owner = owner_matching();
+            let observed = owner.candidate().config_identity();
+            owner.set_generation_for_exhaustion_fixture(u64::MAX);
+
+            // A ticket legitimately issued at the maximum generation.
+            let ticket_max = owner.admit().expect("admit at max before exhaustion");
+            assert_eq!(ticket_max.generation(), u64::MAX);
+            owner.confirm(&ticket_max).expect("confirms before exhaustion");
+
+            // The next replacement cannot represent generation+1: the owner
+            // enters the terminal exhausted state — no wraparound / reset.
+            owner.replace_for_fixture(LocalAuthorizationState::Established(observed));
+            assert!(owner.is_exhausted());
+            assert_eq!(owner.generation(), u64::MAX, "no wraparound / reset to zero");
+
+            // No new admission succeeds.
+            assert_eq!(owner.admit().unwrap_err(), FreshnessError::AuthorizationExhausted);
+            // Every outstanding ticket fails confirmation, including the one
+            // issued at the maximum generation (its generation still equals the
+            // owner's, but the exhausted gate rejects it).
+            assert_eq!(ticket_max.generation(), owner.generation());
+            assert_eq!(owner.confirm(&ticket_max), Err(ConfirmError::Exhausted));
+        }
+
+        // ---- Repeated attempts after exhaustion remain rejected; a later
+        // replacement cannot restore authorization.
+        #[test]
+        fn repeated_attempts_after_exhaustion_remain_rejected() {
+            let mut owner = owner_matching();
+            let observed = owner.candidate().config_identity();
+            owner.set_generation_for_exhaustion_fixture(u64::MAX);
+            let ticket_max = owner.admit().expect("admit at max");
+            owner.replace_for_fixture(LocalAuthorizationState::Established(observed.clone()));
+            assert!(owner.is_exhausted());
+
+            for _ in 0..3 {
+                // Later replacement attempts cannot restore authorization.
+                owner.replace_for_fixture(LocalAuthorizationState::Established(observed.clone()));
+                assert!(owner.is_exhausted());
+                assert_eq!(owner.generation(), u64::MAX);
+                assert_eq!(owner.admit().unwrap_err(), FreshnessError::AuthorizationExhausted);
+                assert_eq!(owner.confirm(&ticket_max), Err(ConfirmError::Exhausted));
+            }
+        }
+
+        // ---- Clone semantics: the owner is intentionally not `Clone`, so a
+        // second handle to the same logical owner cannot be forged; a
+        // separately constructed owner always has a distinct issuer identity.
+        #[test]
+        fn separately_constructed_owners_have_distinct_identities() {
+            let owner_a = owner_matching();
+            let owner_b = owner_matching();
+            let ticket_a = owner_a.admit().expect("A admits");
+            let ticket_b = owner_b.admit().expect("B admits");
+            assert!(ticket_a.issued_by(&owner_a));
+            assert!(ticket_b.issued_by(&owner_b));
+            assert!(!ticket_a.issued_by(&owner_b));
+            assert!(!ticket_b.issued_by(&owner_a));
+        }
     }
 }

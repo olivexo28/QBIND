@@ -1699,10 +1699,16 @@ pub struct BinaryConsensusLoopInboundStats {
     pub inbound_proposal_authority_superseded_total: u64,
     pub inbound_proposal_authority_stale_before_effect_total: u64,
     pub inbound_proposal_epoch_unauthorized_total: u64,
+    /// Run 422 D7-A3: inbound proposals rejected because the current-authorization
+    /// owner has terminally exhausted its generation space (fail-closed).
+    pub inbound_proposal_authorization_exhausted_total: u64,
     pub inbound_vote_current_state_unavailable_total: u64,
     pub inbound_vote_authority_superseded_total: u64,
     pub inbound_vote_authority_stale_before_effect_total: u64,
     pub inbound_vote_epoch_unauthorized_total: u64,
+    /// Run 422 D7-A3: inbound votes rejected because the current-authorization
+    /// owner has terminally exhausted its generation space (fail-closed).
+    pub inbound_vote_authorization_exhausted_total: u64,
 }
 
 /// Transition state for the bounded "restore-catchup mode → normal
@@ -5028,6 +5034,11 @@ fn record_proposal_current_auth_reject(
                 .inbound_proposal_authority_superseded_total
                 .saturating_add(1);
         }
+        FreshnessError::AuthorizationExhausted => {
+            stats.inbound_proposal_authorization_exhausted_total = stats
+                .inbound_proposal_authorization_exhausted_total
+                .saturating_add(1);
+        }
     }
 }
 
@@ -5046,6 +5057,11 @@ fn record_vote_current_auth_reject(
         FreshnessError::Superseded(_) => {
             stats.inbound_vote_authority_superseded_total = stats
                 .inbound_vote_authority_superseded_total
+                .saturating_add(1);
+        }
+        FreshnessError::AuthorizationExhausted => {
+            stats.inbound_vote_authorization_exhausted_total = stats
+                .inbound_vote_authorization_exhausted_total
                 .saturating_add(1);
         }
     }
@@ -12394,8 +12410,9 @@ mod tests {
         mod run422_d7a {
             use super::*;
             use crate::genesis_consensus_authority::{
-                CurrentAuthorizationOwner, CurrentStateUnavailableReason, FreshnessError,
-                GenesisConsensusAuthority, LocalAuthorizationState, ObservedConsensusConfiguration,
+                ConfirmError, CurrentAuthorizationOwner, CurrentStateUnavailableReason,
+                FreshnessError, GenesisConsensusAuthority, LocalAuthorizationState,
+                ObservedConsensusConfiguration,
             };
             use qbind_ledger::GenesisHash;
             use std::sync::atomic::Ordering::SeqCst;
@@ -13439,8 +13456,13 @@ mod tests {
                 // The earlier admitted ticket must NOT be reusable across the
                 // invalidation: confirm fails closed (generation advanced).
                 let err = owner.confirm(&ticket).expect_err("stale ticket rejected");
-                assert_eq!(err.admitted_generation, 0);
-                assert_eq!(err.current_generation, 1);
+                match err {
+                    ConfirmError::Stale(inner) => {
+                        assert_eq!(inner.admitted_generation, 0);
+                        assert_eq!(inner.current_generation, 1);
+                    }
+                    other => panic!("expected Stale confirm rejection, got {other:?}"),
+                }
 
                 // A fresh admit now fails Superseded (candidate A is stale vs B).
                 match owner.admit() {
