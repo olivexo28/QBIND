@@ -14732,6 +14732,390 @@ mod tests {
                 assert_eq!(facade.total(), 0, "no outbound actions on rejection");
                 assert_eq!(engine.current_view(), view_before);
             }
+
+            // ================================================================
+            // Run 422 D7-A4 (finding #4) — SERIALIZED-HANDLER
+            // authorization-to-effect ordering.
+            //
+            // The handler borrows `current_auth: Option<&AuthorizedProposal
+            // VoteSnapshot>` immutably (binary_consensus_loop.rs:3552); the
+            // snapshot has no interior mutability and the handler has no async
+            // suspension point, so within one synchronous call admission,
+            // signature verification, confirmation and the synchronous effect
+            // observe the SAME authorization generation. Replacement of the
+            // current state therefore requires EXCLUSIVE `&mut` access at a call
+            // site OUTSIDE the handler (`owner_mut().replace_for_fixture`,
+            // genesis_consensus_authority.rs:1325/1255). These tests exercise
+            // the two legal ordering points against the real handler and real
+            // ML-DSA-44 verifier: replacement BEFORE handler entry, and
+            // replacement BETWEEN two completed handler calls. No concurrency,
+            // no shared mutable authorization, no test hook mutates authority
+            // mid-call, no sleeps.
+            //
+            // The synchronous effect boundary asserted here is the engine
+            // mutation / delivery counter and the recording outbound facade
+            // reached inside this call — NOT later network delivery or
+            // cancellation of already-queued work, which these tests make no
+            // claim about.
+            // ================================================================
+
+            /// Replace the snapshot owner's independently-held current state with
+            /// an established-but-different authority B (different commitment and
+            /// a bumped epoch), advancing the generation. Models an exclusive
+            /// `&mut` replacement at a call site outside the handler.
+            fn replace_current_with_b(current: &mut AuthorizedProposalVoteSnapshot) {
+                let coherent = current.owner().candidate().config_identity();
+                current
+                    .owner_mut()
+                    .replace_for_fixture(LocalAuthorizationState::Established(
+                        ObservedConsensusConfiguration::new(
+                            coherent.chain_id,
+                            coherent.genesis_hash,
+                            COMMIT_B,
+                            coherent.validator_count,
+                            coherent.epoch + 1,
+                        ),
+                    ));
+            }
+
+            // -------- Proposal: after one completed authorized call, replacing
+            // the current state makes the next call obtain FRESH authorization
+            // and reject the now-superseded candidate before crypto. ----------
+            #[test]
+            fn d7a4_proposal_replacement_between_completed_calls_obtains_fresh_authorization() {
+                let fixture = make_fixture(4);
+                let backend_calls = Arc::new(AtomicU64::new(0));
+                let pv = counting_pv(&fixture, &backend_calls);
+                let mut current = snapshot_matching(&pv);
+                assert_eq!(current.owner().generation(), 0);
+                let gate = pv_binding_gate(4);
+                let origin = AuthenticatedConsensusOrigin::new(pv_node_for(1), ValidatorId(1));
+                let mut engine = make_engine(ValidatorId(0), 4);
+                let metrics = make_metrics();
+                let p = signed_proposal(1, &fixture);
+
+                // Call 1: matching authorization reaches signature verification.
+                let mut restore1 = RestoreCatchupModeState::from_config(None);
+                let mut stats1 = BinaryConsensusLoopInboundStats::default();
+                deliver_proposal_fresh(
+                    &mut engine,
+                    &mut stats1,
+                    &mut restore1,
+                    None,
+                    Some(&pv),
+                    Some(&current),
+                    &p,
+                    &metrics,
+                    None,
+                    Some(&origin),
+                    Some(&gate),
+                    ConsensusVerificationPolicy::Required,
+                );
+                assert_eq!(stats1.inbound_proposal_verify_accepted, 1, "call 1 verified");
+                assert_eq!(stats1.inbound_proposal_authority_superseded_total, 0);
+                assert!(stats1.proposal_vote_crypto_verify_latency_observations_total >= 1);
+                let backend_after_call1 = backend_calls.load(SeqCst);
+                assert!(backend_after_call1 >= 1, "call 1 invoked the real backend");
+                let view_after_call1 = engine.current_view();
+
+                // Exclusive &mut replacement BETWEEN completed calls.
+                replace_current_with_b(&mut current);
+                assert_eq!(current.owner().generation(), 1, "generation advanced");
+
+                // Call 2: fresh authorization obtained; the superseded candidate
+                // is rejected before crypto and before any effect.
+                let mut restore2 = RestoreCatchupModeState::from_config(None);
+                let mut stats2 = BinaryConsensusLoopInboundStats::default();
+                deliver_proposal_fresh(
+                    &mut engine,
+                    &mut stats2,
+                    &mut restore2,
+                    None,
+                    Some(&pv),
+                    Some(&current),
+                    &p,
+                    &metrics,
+                    None,
+                    Some(&origin),
+                    Some(&gate),
+                    ConsensusVerificationPolicy::Required,
+                );
+                assert_eq!(stats2.inbound_proposal_authority_superseded_total, 1);
+                assert_eq!(stats2.inbound_proposal_verify_accepted, 0);
+                assert_eq!(stats2.proposal_vote_crypto_verify_latency_observations_total, 0);
+                assert_eq!(stats2.inbound_proposals_delivered, 0);
+                assert_eq!(stats2.inbound_proposals_engine_accepted, 0);
+                assert_eq!(
+                    backend_calls.load(SeqCst),
+                    backend_after_call1,
+                    "call 2 obtained fresh authorization: real backend NOT invoked again"
+                );
+                assert_eq!(
+                    engine.current_view(),
+                    view_after_call1,
+                    "no engine effect from the superseded call 2"
+                );
+            }
+
+            // -------- Vote: same serialized-ordering claim on the Vote arm. ---
+            #[test]
+            fn d7a4_vote_replacement_between_completed_calls_obtains_fresh_authorization() {
+                let fixture = make_fixture(4);
+                let backend_calls = Arc::new(AtomicU64::new(0));
+                let pv = counting_pv(&fixture, &backend_calls);
+                let mut current = snapshot_matching(&pv);
+                assert_eq!(current.owner().generation(), 0);
+                let gate = pv_binding_gate(4);
+                let origin = AuthenticatedConsensusOrigin::new(pv_node_for(1), ValidatorId(1));
+                let mut engine = make_engine(ValidatorId(0), 4);
+                let metrics = make_metrics();
+                let v = signed_vote(1, &fixture);
+
+                // Call 1: matching authorization reaches signature verification.
+                let mut stats1 = BinaryConsensusLoopInboundStats::default();
+                deliver_vote_fresh(
+                    &mut engine,
+                    &mut stats1,
+                    None,
+                    Some(&pv),
+                    Some(&current),
+                    &v,
+                    &metrics,
+                    Some(&origin),
+                    Some(&gate),
+                    ConsensusVerificationPolicy::Required,
+                );
+                assert_eq!(stats1.inbound_vote_verify_accepted, 1, "call 1 verified");
+                assert_eq!(stats1.inbound_vote_authority_superseded_total, 0);
+                let backend_after_call1 = backend_calls.load(SeqCst);
+                assert!(backend_after_call1 >= 1, "call 1 invoked the real backend");
+                let view_after_call1 = engine.current_view();
+
+                // Exclusive &mut replacement BETWEEN completed calls.
+                replace_current_with_b(&mut current);
+                assert_eq!(current.owner().generation(), 1, "generation advanced");
+
+                // Call 2: fresh authorization obtained; superseded ⇒ reject
+                // before crypto and before any effect.
+                let mut stats2 = BinaryConsensusLoopInboundStats::default();
+                deliver_vote_fresh(
+                    &mut engine,
+                    &mut stats2,
+                    None,
+                    Some(&pv),
+                    Some(&current),
+                    &v,
+                    &metrics,
+                    Some(&origin),
+                    Some(&gate),
+                    ConsensusVerificationPolicy::Required,
+                );
+                assert_eq!(stats2.inbound_vote_authority_superseded_total, 1);
+                assert_eq!(stats2.inbound_vote_verify_accepted, 0);
+                assert_eq!(stats2.proposal_vote_crypto_verify_latency_observations_total, 0);
+                assert_eq!(stats2.inbound_votes_delivered, 0);
+                assert_eq!(stats2.inbound_votes_engine_accepted, 0);
+                assert_eq!(
+                    backend_calls.load(SeqCst),
+                    backend_after_call1,
+                    "call 2 obtained fresh authorization: real backend NOT invoked again"
+                );
+                assert_eq!(
+                    engine.current_view(),
+                    view_after_call1,
+                    "no engine effect from the superseded call 2"
+                );
+            }
+
+            // -------- Proposal: replacement to a superseding configuration
+            // BEFORE handler entry rejects before crypto and downstream
+            // effects (handler reads fresh authorization on entry). -----------
+            #[test]
+            fn d7a4_proposal_replacement_before_entry_rejects_before_crypto() {
+                let fixture = make_fixture(4);
+                let backend_calls = Arc::new(AtomicU64::new(0));
+                let pv = counting_pv(&fixture, &backend_calls);
+                let mut current = snapshot_matching(&pv);
+                // Replace to superseding B BEFORE the only handler call.
+                replace_current_with_b(&mut current);
+                assert_eq!(current.owner().generation(), 1);
+                let gate = pv_binding_gate(4);
+                let origin = AuthenticatedConsensusOrigin::new(pv_node_for(1), ValidatorId(1));
+                let mut engine = make_engine(ValidatorId(0), 4);
+                let view_before = engine.current_view();
+                let mut stats = BinaryConsensusLoopInboundStats::default();
+                let metrics = make_metrics();
+                let mut restore = RestoreCatchupModeState::from_config(None);
+                let facade = D7ActionRecorder::default();
+
+                let p = signed_proposal(1, &fixture);
+                deliver_proposal_fresh(
+                    &mut engine,
+                    &mut stats,
+                    &mut restore,
+                    None,
+                    Some(&pv),
+                    Some(&current),
+                    &p,
+                    &metrics,
+                    Some(&facade),
+                    Some(&origin),
+                    Some(&gate),
+                    ConsensusVerificationPolicy::Required,
+                );
+
+                assert_eq!(stats.inbound_proposal_authority_superseded_total, 1);
+                assert_eq!(stats.proposal_vote_crypto_verify_latency_observations_total, 0);
+                assert_eq!(backend_calls.load(SeqCst), 0, "backend never invoked");
+                assert_eq!(stats.inbound_proposals_delivered, 0);
+                assert_eq!(facade.total(), 0, "no outbound effect");
+                assert_eq!(engine.current_view(), view_before);
+            }
+
+            // -------- Vote: replacement before entry rejects before crypto. --
+            #[test]
+            fn d7a4_vote_replacement_before_entry_rejects_before_crypto() {
+                let fixture = make_fixture(4);
+                let backend_calls = Arc::new(AtomicU64::new(0));
+                let pv = counting_pv(&fixture, &backend_calls);
+                let mut current = snapshot_matching(&pv);
+                replace_current_with_b(&mut current);
+                assert_eq!(current.owner().generation(), 1);
+                let gate = pv_binding_gate(4);
+                let origin = AuthenticatedConsensusOrigin::new(pv_node_for(1), ValidatorId(1));
+                let mut engine = make_engine(ValidatorId(0), 4);
+                let view_before = engine.current_view();
+                let mut stats = BinaryConsensusLoopInboundStats::default();
+                let metrics = make_metrics();
+
+                let v = signed_vote(1, &fixture);
+                deliver_vote_fresh(
+                    &mut engine,
+                    &mut stats,
+                    None,
+                    Some(&pv),
+                    Some(&current),
+                    &v,
+                    &metrics,
+                    Some(&origin),
+                    Some(&gate),
+                    ConsensusVerificationPolicy::Required,
+                );
+
+                assert_eq!(stats.inbound_vote_authority_superseded_total, 1);
+                assert_eq!(stats.proposal_vote_crypto_verify_latency_observations_total, 0);
+                assert_eq!(backend_calls.load(SeqCst), 0, "backend never invoked");
+                assert_eq!(stats.inbound_votes_delivered, 0);
+                assert_eq!(engine.current_view(), view_before);
+            }
+
+            // -------- Proposal: terminally EXHAUSTED authorization rejects with
+            // the exhausted admission reason, before crypto and effect. -------
+            #[test]
+            fn d7a4_proposal_exhausted_authorization_rejects_before_crypto() {
+                let fixture = make_fixture(4);
+                let backend_calls = Arc::new(AtomicU64::new(0));
+                let pv = counting_pv(&fixture, &backend_calls);
+                let mut current = snapshot_matching(&pv);
+                // Position at the exhaustion boundary, then a single replacement
+                // latches the terminal exhausted state (no wraparound, no
+                // authorization). The retained current state stays coherent, so
+                // exhaustion — not supersession — is the sole rejection cause.
+                let coherent = current.owner().candidate().config_identity();
+                current
+                    .owner_mut()
+                    .set_generation_for_exhaustion_fixture(u64::MAX);
+                current
+                    .owner_mut()
+                    .replace_for_fixture(LocalAuthorizationState::Established(coherent));
+                // Confirm the admission reason at the type boundary is exhausted.
+                assert!(matches!(
+                    current.owner().admit(),
+                    Err(FreshnessError::AuthorizationExhausted)
+                ));
+                let gate = pv_binding_gate(4);
+                let origin = AuthenticatedConsensusOrigin::new(pv_node_for(1), ValidatorId(1));
+                let mut engine = make_engine(ValidatorId(0), 4);
+                let view_before = engine.current_view();
+                let mut stats = BinaryConsensusLoopInboundStats::default();
+                let metrics = make_metrics();
+                let mut restore = RestoreCatchupModeState::from_config(None);
+                let facade = D7ActionRecorder::default();
+
+                let p = signed_proposal(1, &fixture);
+                deliver_proposal_fresh(
+                    &mut engine,
+                    &mut stats,
+                    &mut restore,
+                    None,
+                    Some(&pv),
+                    Some(&current),
+                    &p,
+                    &metrics,
+                    Some(&facade),
+                    Some(&origin),
+                    Some(&gate),
+                    ConsensusVerificationPolicy::Required,
+                );
+
+                assert_eq!(stats.inbound_proposal_authorization_exhausted_total, 1);
+                assert_eq!(stats.inbound_proposal_current_state_unavailable_total, 0);
+                assert_eq!(stats.inbound_proposal_authority_superseded_total, 0);
+                assert_eq!(stats.proposal_vote_crypto_verify_latency_observations_total, 0);
+                assert_eq!(backend_calls.load(SeqCst), 0, "backend never invoked");
+                assert_eq!(stats.inbound_proposals_delivered, 0);
+                assert_eq!(facade.total(), 0, "no outbound effect");
+                assert_eq!(engine.current_view(), view_before);
+            }
+
+            // -------- Vote: terminally exhausted authorization rejects with the
+            // exhausted admission reason, before crypto and effect. -----------
+            #[test]
+            fn d7a4_vote_exhausted_authorization_rejects_before_crypto() {
+                let fixture = make_fixture(4);
+                let backend_calls = Arc::new(AtomicU64::new(0));
+                let pv = counting_pv(&fixture, &backend_calls);
+                let mut current = snapshot_matching(&pv);
+                let coherent = current.owner().candidate().config_identity();
+                current
+                    .owner_mut()
+                    .set_generation_for_exhaustion_fixture(u64::MAX);
+                current
+                    .owner_mut()
+                    .replace_for_fixture(LocalAuthorizationState::Established(coherent));
+                assert!(matches!(
+                    current.owner().admit(),
+                    Err(FreshnessError::AuthorizationExhausted)
+                ));
+                let gate = pv_binding_gate(4);
+                let origin = AuthenticatedConsensusOrigin::new(pv_node_for(1), ValidatorId(1));
+                let mut engine = make_engine(ValidatorId(0), 4);
+                let view_before = engine.current_view();
+                let mut stats = BinaryConsensusLoopInboundStats::default();
+                let metrics = make_metrics();
+
+                let v = signed_vote(1, &fixture);
+                deliver_vote_fresh(
+                    &mut engine,
+                    &mut stats,
+                    None,
+                    Some(&pv),
+                    Some(&current),
+                    &v,
+                    &metrics,
+                    Some(&origin),
+                    Some(&gate),
+                    ConsensusVerificationPolicy::Required,
+                );
+
+                assert_eq!(stats.inbound_vote_authorization_exhausted_total, 1);
+                assert_eq!(stats.inbound_vote_current_state_unavailable_total, 0);
+                assert_eq!(stats.inbound_vote_authority_superseded_total, 0);
+                assert_eq!(stats.proposal_vote_crypto_verify_latency_observations_total, 0);
+                assert_eq!(backend_calls.load(SeqCst), 0, "backend never invoked");
+                assert_eq!(stats.inbound_votes_delivered, 0);
+                assert_eq!(engine.current_view(), view_before);
+            }
         }
     }
 }
