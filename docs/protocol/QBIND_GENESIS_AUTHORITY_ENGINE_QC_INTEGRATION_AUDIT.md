@@ -133,30 +133,45 @@ which `main.rs` does not reach.
 **Key structural fact:** the same verifier and the same admission owner are held
 together in `AuthorizedProposalVoteSnapshot` (`binary_consensus_loop.rs:1176`),
 but **no production code constructs that snapshot** — `main.rs:5549` supplies
-`proposal_vote_authority: None`. Distinguish two different closed doors that the
-task requires be kept separate:
+`proposal_vote_authority: None`. The rejection paths that the task requires be
+kept separate follow directly from the handler's own two match arms (inbound
+Proposal arm, `binary_consensus_loop.rs` ≈`:4359`–`:4697`; inbound Vote arm
+≈`:4833`–`:4929`).
 
-* **Missing Proposal/Vote authority (the production state today).** With
-  `proposal_vote_authority: None`, the inbound/outbound gates run in fail-closed
-  `Required` mode with **no authority object at all**; there is no owner, no
-  verifier, no key provider. Inbound Proposal/Vote are rejected before any crypto
-  as *current-state-unavailable* (D7-A1,
-  `inbound_proposal_current_state_unavailable_total`), and outbound emission is
-  suppressed.
-* **Present authority with a missing current owner (a different, future state).**
-  If an authority were constructed, admission would still fail-close whenever the
-  owner cannot confirm a fresh ticket (`Stale` /
-  `inbound_proposal_authority_stale_before_effect_total`, or an `unavailable`
-  owner — production can only build `unavailable` owners,
-  `genesis_consensus_authority.rs:1125`). This is a **later** rejection path
-  (crypto may already have run) and must not be conflated with the
-  authority-absent path above.
+Under `Required`, after successful F6 sender binding, the handler first selects
+its **effective verifier**. A supplied authorization snapshot (`current_auth`)
+selects its **bound** verifier (`snap.verifier()`, `:4423`); otherwise the
+separately supplied Proposal/Vote authority (`pv_authority`) is considered.
 
-Additionally, **compiled ≠ reachable**: many verification branches (the legacy
-embedded-QC verifier at boundary 15, the D6 verifier's authority-bound path) are
-compiled into the binary but are **not reachable under the current startup
-arguments** because no authority/snapshot is wired. Do not describe a compiled
-verification branch as cryptographic verification that actually runs.
+| Condition | Result | Timing |
+|---|---|---|
+| No effective Proposal/Vote authority | Increment `inbound_proposal_verification_context_unavailable_total` or `inbound_vote_verification_context_unavailable_total`; reject | Before crypto |
+| Effective verifier present, `current_auth` absent | Increment `inbound_proposal_current_state_unavailable_total` or `inbound_vote_current_state_unavailable_total`; reject | Before crypto |
+| Bound snapshot present, `owner.admit()` rejects | Record the applicable admission failure; reject | Before crypto |
+| Admission and verification succeed, `owner.confirm(ticket)` rejects | Increment the applicable `authority_stale_before_effect` counter; reject | After verification, before downstream effects |
+
+A missing owner cannot confirm a ticket and **never reaches the confirmation
+check**. A missing-owner admission failure must **not** be described as a
+post-crypto `Stale` rejection: with `current_auth == None` the handler stops at
+the current-state-unavailable arm (`:4492`), before any crypto and long before
+`owner.confirm(ticket)`.
+
+Current production supplies **no** Proposal/Vote authority and **no**
+authorization snapshot (`main.rs:5549` = `None`); it matches the first row. Its
+authority-absent path therefore rejects **before** cryptographic verification
+(via `inbound_proposal_verification_context_unavailable_total` /
+`inbound_vote_verification_context_unavailable_total`, `:4593`), and outbound
+emission is suppressed.
+
+Additionally, **compiled ≠ reachable**: several verification branches (the legacy
+embedded-QC verifier at boundary 15, the D6 authority-bound Proposal/Vote
+verifier) are compiled into the binary. **D6 signature verification is an
+implemented conditional path** — it runs `verify_proposal_msg_with_domain` /
+`verify_vote_msg_with_domain` (`:4522`) only inside the effective-verifier arm,
+after admission succeeds. Because current production wires no authority/snapshot,
+that arm is never entered, so D6 verification is **not exercised by current
+production**; describe it as implemented-and-conditional, never as cryptographic
+acceptance that current production actually performs.
 
 ---
 
@@ -170,7 +185,7 @@ verification branch as cryptographic verification that actually runs.
 | `genesis_authority_record_correspondence.rs` `check_network_correspondence` | retained `validation_policy`, selected env, supplied runtime `ChainId` | — | env policy vs runtime alias (via C3A) | immutable-borrow `GenesisNetworkCorrespondence` | No |
 | `genesis_consensus_authority.rs` `build_genesis_consensus_authority` (→ `:439`) | boot-verified `GenesisConfig.validators[]` (suite, pk) | — | `Arc<ConsensusValidatorSet>`, key provider, genesis_hash, commitment, `authorized_epoch=0`, `authorized_wire_chain_id: None` | full authority | Boot-validation only; not fed to Proposal/Vote authority |
 | `binary_consensus_loop.rs:1245` `try_bind` | owner candidate + verifier (shared `Arc`) | — | genesis hash, commitment, membership, key provider, chain label, wire chain id | `AuthorizedProposalVoteSnapshot` | No (test-only) |
-| `binary_consensus_loop.rs` inbound Proposal verify → `proposal_vote_verify.rs:405` `verify_proposal_msg_with_domain` | bound domain, validator set, key provider | wire Proposal bytes | proposer index, wire chain id, v2 domain (runtime+wire+genesis+commitment+epoch) | pass/fail only | Yes |
+| `binary_consensus_loop.rs` inbound Proposal verify → `proposal_vote_verify.rs:405` `verify_proposal_msg_with_domain` | bound domain, validator set, key provider | wire Proposal bytes | proposer index, wire chain id, v2 domain (runtime+wire+genesis+commitment+epoch) | pass/fail only | **Implemented conditional path** — runs only inside the effective-verifier arm after admission (`:4522`); **not exercised by current production** (no authority/snapshot wired, `main.rs:5549`) |
 | `basic_hotstuff_engine.rs:1567` `on_vote_event` → `hotstuff_state_engine.rs` `on_vote` → `vote_accumulator.rs` / `qc.rs:` `validate` | validator set membership + voting power | logical vote (id, view, block) | ValidatorIds, view, voting power | logical QC (ids only) | Yes |
 
 ### 3.2 Wire-QC → logical-QC information preservation (`basic_hotstuff_engine.rs:1490`)
@@ -512,14 +527,23 @@ Ordering on the binary path (inbound Proposal arm, `binary_consensus_loop.rs`
 ≈`:4359`–`:4697`), each step fail-closed:
 
 1. sender binding (`bind_sender`);
-2. verifier selection — when a snapshot is wired, the verifier is
-   `snap.verifier()`; `pv_authority` cannot substitute;
-3. fresh admission `snap.owner().admit()` → ticket; epoch check
-   `header.epoch == snap.authorized_epoch()`; no-snapshot + `Required` →
-   `inbound_proposal_current_state_unavailable_total` (D7-A1);
+2. effective-verifier selection — when a snapshot is wired, the verifier is the
+   snapshot's **bound** `snap.verifier()`; otherwise `pv_authority` is considered
+   but cannot substitute snapshot-bound membership/keys/suite/domain/epoch. With
+   **no** effective verifier at all under `Required` →
+   `inbound_proposal_verification_context_unavailable_total` /
+   `inbound_vote_verification_context_unavailable_total` (before crypto);
+3. current-state gate: with an effective verifier but `current_auth == None`
+   under `Required` → `inbound_proposal_current_state_unavailable_total` /
+   `inbound_vote_current_state_unavailable_total` (D7-A1, before crypto); with a
+   bound snapshot, fresh admission `snap.owner().admit()` → ticket (an admission
+   failure here is recorded before crypto); epoch check
+   `header.epoch == snap.authorized_epoch()`;
 4. wire-chain + crypto verify (D6/Run 420);
 5. **re-confirm** ticket `snap.owner().confirm(&ticket)` immediately before
-   effect (`inbound_proposal_authority_stale_before_effect_total` on failure);
+   effect (`inbound_proposal_authority_stale_before_effect_total` on failure — a
+   `Stale` outcome reachable only after admission and verification already
+   succeeded, never for a missing owner);
 6. restore-catchup deferral — the decoded proposal/ticket is **discarded** via
    early return (counter `restore_catchup_proposals_deferred`); **no queue is
    retained**; re-delivery re-runs the full pipeline;
@@ -539,13 +563,11 @@ generation) + epoch check before signing and a final `confirm` before the facade
 **Credit for completed work (A1–A4, B1–B3):** sender binding, signature/suite
 verification, D5 message-family split, D6 wire-chain consistency, engine
 integration, and restore deferral are proven for their scoped behavior and are
-**not reopened here**. The distinction between synchronous admission/immediate
-handoff, queued/later socket delivery, serialized replacement, concurrent
-invalidation (generation counter + `Arc::ptr_eq` issuer identity), and restart
-freshness is preserved. **These are in-process checks.** They do **not** by
-themselves establish (a) concurrent invalidation across processes or (b)
-persistent freshness across restarts: A1–A4/B1–B3 bound behavior within one live
-process' authority object. **Unresolved:** persistent/durable
+**not reopened here**. A4 demonstrates serialized synchronous handler ordering
+under the existing immutable-borrow model. Issuer identity and generation checks
+do not, by themselves, establish concurrent invalidation within a process,
+cross-process invalidation, queued-work cancellation, restart freshness, or
+durable anti-rollback. **Unresolved:** persistent/durable
 current-authorization state and **anti-rollback** — production can only construct
 `unavailable` owners (`genesis_consensus_authority.rs:1125`); the `Established`
 local state exists only under `cfg(test)` (`establish_for_fixture`). Persisting an
@@ -561,10 +583,11 @@ older-but-valid persisted state would still be accepted on open).
 | Outer Proposal/Vote verification | `verify_proposal_msg_with_domain` / `verify_vote_msg_with_domain` (`proposal_vote_verify.rs`) | **Reusable unchanged** |
 | D6 message-bound Vote verification machinery (for a QC verifier) | `verify_vote_msg_with_domain` + `ProposalVoteSigningDomainV2::vote_preimage` + `ConsensusSigBackendRegistry` | **Reusable as the signature primitive** for a new D6-compatible QC boundary (§6) |
 | Timeout/NewView verification | `timeout_verification_bridge.rs` + `verify_timeout_*` | **Reusable unchanged (separate boundary)** |
-| Current-state freshness gate | `GenesisConsensusAuthority::authorize_current_state` / `authorize_configuration` | **Reusable with narrow extension** (persist an immutable observed snapshot; never mutate) |
+| Current-state freshness gate | `GenesisConsensusAuthority::authorize_current_state` / `authorize_configuration` | **Reusable only as a synchronous in-process gate.** Persisting an immutable observed snapshot is **not** sufficient to extend it: persisted observation alone establishes no current authorization and no rollback resistance, so it does not close the durable-freshness / anti-rollback gap |
 | Bind owner↔verifier | `AuthorizedProposalVoteSnapshot::try_bind` (`binary_consensus_loop.rs:1245`) | **Reusable with narrow extension** (real chain label + authorized wire id) |
-| QC **structural** checks (bitmap↔sig count, index decode, power sum) | `verify_quorum_certificate` (`lib.rs:705`) | **Reusable structural logic** |
+| QC **structural** checks (bitmap↔sig count, index decode, power sum) | `verify_quorum_certificate` (`lib.rs:705`) | **Structural ideas requiring checked adaptation** — the shapes (bitmap↔sig correspondence, bit→index decode, power accumulation) are a template only; indices must be bounded and computed with checked arithmetic, and the power sum must be overflow-guarded before reuse (§6) |
 | QC **signature** verification for D6-signed Votes | `verify_quorum_certificate`'s `vote_digest` path (`lib.rs`) | **NOT reusable for D6 Votes** — incompatible signed input (§4.C.1); must use the D6 domain-bound preimage instead |
+| Quorum threshold arithmetic | `ConsensusValidatorSet::two_thirds_vp()` (saturating accumulation; `2 * total` in u64) | **Structural idea requiring checked adaptation** — reuse only within proven arithmetic bounds (positive, consistent, representable total; no overflow in accumulation or `2 * total`), or use an explicitly checked equivalent preserving `ceil(2W/3)` (§6); do not reuse blindly for arbitrary inputs |
 | Embedded-QC verification wired into `Node<S>::apply_block` | `verify_block_proposal` (`lib.rs:807`) | **Not connected to this binary path** (legacy `apply_block` abstraction only) |
 | Genesis-provenance-fed Proposal/Vote authority in production | — | **Missing** (`main.rs:5549` = `None`) |
 | Runtime→wire chain-id mapping for a production authority | — | **Missing** (`authorized_wire_chain_id: None`) |
@@ -588,8 +611,9 @@ established APIs; caller evidence shows they serve distinct boundaries.
 **implemented** (C3B, `check_network_correspondence`); production authority
 consumption remains **unimplemented** (`main.rs:5549` = `None`). The alias
 assignments are accepted as-is; this audit does **not** reopen them and does
-**not** introduce a separately ratified mapping absent a concrete, documented
-requirement (§5.1 records the one open decision, without inventing a value).
+**not** introduce another registry or a synthetic mapping (§5.1 records the
+existing mapping policy and the later production-consumption requirements without
+inventing a value).
 
 All steps below can be implemented **while activation remains disabled**
 (`main.rs:5549` stays `None`) and while `PRODUCTION_WIRE_CHAIN_ID_BEHAVIOR` stays
@@ -604,14 +628,19 @@ activation may not be sequenced ahead of it.
 
 1. **A dormant, pure D6-compatible QC verification boundary** (the single next
    task, §6) — reuse the D6 message-bound Vote verification machinery to verify a
-   QC's constituent signatures against trusted inputs, with no engine/binary
-   wiring and no authority activation. Independent of steps 2–5.
+   QC's constituent signatures against explicit trusted inputs, with no
+   engine/binary wiring and no authority activation. Independent of steps 2–5;
+   **not** blocked by the production runtime→wire mapping or provenance work
+   below, which gate integration/activation only (§5.1).
 2. **Resolve a real chain-identity label + authorized wire chain id from
    validated provenance** on the authority (owner of data:
    `GenesisConsensusAuthority`; consumers: `try_bind` `:1281`/`:1295`,
    `snapshot_chain_identity_label`). Trusted inputs: boot-verified genesis
-   runtime `ChainId` + C3A wire alias. Fail-closed: mismatch/none → no bind.
-   Prerequisite: the protocol decision in §5.1.
+   runtime `ChainId` + C3A wire alias. Fail-closed: mismatch/none → no bind. The
+   runtime `ChainId` must come from validated provenance and preserve its
+   association with the same authority snapshot — never from parsing the genesis
+   string label or substituting another synthetic label (§5.1). This gates
+   production integration, **not** the step-1 dormant verifier.
 3. **Construct `AuthorizedProposalVoteSnapshot` by cloning the same `Arc`s** out
    of one boot-validated authority (owner: authority; consumer: `try_bind`).
    Fail-closed: any `Arc::ptr_eq` / membership / commitment mismatch → reject.
@@ -654,13 +683,26 @@ must never be conflated):
 
 ### 5.1 Existing mapping policy and later production-consumption requirements
 
-**Decision required:** what is the canonical **wire chain id** (and its binding
-to the 64-bit runtime `ChainId`) that a genesis-validated production authority
-must carry, and how is it derived — directly from the C3A wire alias, or from a
-separately ratified value? Until this is fixed, `authorized_wire_chain_id`
-cannot leave `None` without inventing a default, which this audit refuses to do.
-The mapping must be defined so that `try_bind`’s wire-chain check (`:1295`) and
-the v2 preimage’s `expected_wire_chain_id` agree by construction.
+C3A defines the dormant standard-network wire aliases. C3B checks correspondence
+between a pinned genesis identity, its retained validation policy, the selected
+environment, and the supplied full runtime `ChainId`. These decisions remain
+accepted; this task does not reopen their alias assignments or introduce another
+registry.
+
+The next pure, dormant D6-compatible QC verifier can be implemented and tested
+with explicit trusted domain, membership, key-provider, backend, and
+authorized-epoch inputs. It does not require production authority construction or
+activation.
+
+Later production integration must obtain those inputs through validated
+provenance and preserve their association with the same authority snapshot. It
+must also satisfy the outstanding engine/QC compatibility, lifecycle, restart,
+anti-rollback, and adversarial-validation requirements. These requirements block
+production integration and activation, not implementation of the dormant
+verifier.
+
+The runtime `ChainId` must not be obtained by parsing the genesis string label or
+substituting another synthetic label.
 
 ---
 
@@ -696,51 +738,86 @@ from the untrusted QC):
   **key provider** (`SuiteAwareValidatorKeyProvider`), **backend registry**
   (`ConsensusSigBackendRegistry`), and **authorized epoch**. No domain,
   membership, epoch, or authority may be inferred from the untrusted QC itself.
-* **Bitmap/index/signature correspondence and bounds.** Enforce
-  `popcount(signer_bitmap) == signatures.len()`; decode each set bit to a signer
-  index; bound every index within the trusted membership; reject duplicate
-  indices and out-of-range bits.
+* **Bound the bitmap before decoding.** Establish the bitmap length against the
+  trusted membership size first; compute every signer index with **checked
+  arithmetic** and establish representability **before any narrowing conversion**.
+  Enforce `popcount(signer_bitmap) == signatures.len()`; reject out-of-range bits.
+* **Bitmap-position / wire `validator_index` / `ValidatorId` correspondence.**
+  Define the correspondence among bitmap position, the wire `validator_index`, and
+  the membership `ValidatorId` **consistently with existing D6 verification**. Do
+  **not** assume membership position and `ValidatorId` are interchangeable; derive
+  each explicitly and check it against the trusted set.
+* **No duplicate-bit fiction.** A set-based bitmap **cannot repeat the same bit**,
+  so "duplicate bit" is not an encoding to defend against. Instead test **index
+  aliasing** (distinct bits/positions resolving to the same signer, or a wire
+  `validator_index` aliasing a different membership position) and **incorrect
+  signature association**, rather than claiming an impossible duplicate-bit
+  encoding.
 * **Reconstruct the exact Vote fields originally signed.** For each signer,
   rebuild the `Vote` (`version, chain_id, epoch, height, round, step, block_id,
   validator_index, suite_id`) consistent with the QC and the trusted epoch, then
   verify over `domain.vote_preimage(vote)` — the exact D6 signed input — not over
-  `vote_digest`.
-* **Suite consistency and quorum calculation.** Require a consistent suite per
-  the trusted membership/provider; compute the quorum threshold from the trusted
-  set's actual voting power (`two_thirds_vp()`), not a caller scalar or an
-  assumed `2f+1` (§4.C.2).
+  `vote_digest`. **Preserve the QC's actual signed fields**; never rewrite an
+  inconsistent epoch or chain id to make verification pass.
+* **Reject epoch / wire-chain inconsistencies before crypto.** Reject QC epoch and
+  wire-chain inconsistencies **before** cryptographic verification, using the
+  trusted authorized epoch and the domain's `expected_wire_chain_id`.
+* **Arithmetic notes on the reused primitives.** Record that
+  `ConsensusValidatorSet` construction uses **saturating accumulation** and
+  `two_thirds_vp()` computes `2 * total` in `u64`; these operations **cannot be
+  reused blindly** for arbitrary inputs (a saturated total or an overflowing
+  `2 * total` silently misstates the threshold).
+* **Validate the voting-power total.** Require a **positive, consistent,
+  representable** voting-power total. Prevent overflow in the **total
+  accumulation**, the **signer-power accumulation**, and the **threshold
+  calculation**. Reuse the existing threshold **only within proven arithmetic
+  bounds**, or use an **explicitly checked equivalent preserving `ceil(2W/3)`**.
+* **Do not silently change quorum policy.** Compute the quorum threshold from the
+  trusted set's actual voting power (`two_thirds_vp()` or the checked equivalent),
+  not a caller scalar or an assumed `2f+1` (§4.C.2). Do **not** silently change
+  the quorum policy or claim that this formula establishes safety under arbitrary
+  weighted fault assumptions.
+* **Suite consistency.** Require a consistent suite per the trusted
+  membership/provider.
 * **Malformed-certificate rejection.** Typed, fail-closed rejection for bad
   bitmap/index/signature shapes, suite mismatch, unknown signer, wire-chain
   mismatch, and insufficient quorum.
-* **Evidence retained by the result.** The result carries the verified signer set
-  (and the evidence needed to attribute the certificate) as its **own** return
-  type — **without** mutating the shared logical `qc.rs` `QuorumCertificate`
-  (whose serde/`TimeoutMsg` users make field additions non-neutral, §3.5).
+* **Evidence retained by the result.** Return evidence in a **separate,
+  non-authorizing result type** that associates the verified certificate and
+  signers with the trusted verification context — **without** mutating the shared
+  logical `qc.rs` `QuorumCertificate` (whose serde/`TimeoutMsg` users make field
+  additions non-neutral, §3.5).
 * **Behavior on missing or inconsistent trusted inputs.** If any trusted input is
   absent or inconsistent (e.g. no domain, no membership, epoch mismatch), the
   boundary **fails closed** and performs no verification — it never defaults.
 * **Compatibility with existing legacy callers.** The existing
   `verify_quorum_certificate` and `Node<S>::apply_block` legacy callers remain
   **unchanged and untouched**; the new boundary is additive. **No legacy
-  retry/fallback may rescue a failed D6 verification.**
+  signature retry/fallback may rescue a failed D6 verification.**
 
 **Required future tests.**
 
-* genuinely D6-signed QC accepted;
+* genuinely D6-signed QC accepted (real D6-signed positive controls, including a
+  positive-and-representable voting-power total);
+* index / representability limits (out-of-range bit, index at/over the narrowing
+  boundary, bitmap length vs membership size);
+* arithmetic limits (saturating total, overflowing `2 * total`, signer-power
+  accumulation overflow at the threshold boundary);
+* zero or otherwise invalid total voting power → reject;
+* malformed signature associations (index aliasing, signature bound to the wrong
+  signer, popcount mismatch, truncated signature);
 * same-key **wrong-domain** and **wrong-epoch** negatives (correct signer key,
   wrong `ProposalVoteSigningDomainV2` / authorized epoch → reject);
-* legacy vs D6 signature incompatibility (a `vote_digest`-signed QC → reject
-  under the D6 boundary, and vice versa);
-* malformed bitmap/index/signature combinations (popcount mismatch, out-of-range
-  index, duplicate signer, truncated signature);
+* legacy vs D6 signature incompatibility (a `vote_digest`-signed QC → reject under
+  the D6 boundary, and vice versa);
 * insufficient quorum and membership/suite mismatch.
 
 **Explicitly later, separate work (not this task):** binary/engine insertion,
 certificate propagation, storage migration, and activation (§5 steps 2–5). If a
-required input contract remains unresolved (e.g. how a production authority
-obtains its trusted domain — the §5.1 wire-id decision), that prerequisite is
-stated and the boundary simply remains dormant until callers can supply trusted
-inputs.
+required production input remains unresolved (e.g. how a production authority
+obtains its trusted domain and authorized wire chain id through validated
+provenance — §5.1), that prerequisite gates **integration/activation only**; the
+step-1 boundary simply remains dormant until callers can supply trusted inputs.
 
 **Why it is safe to proceed now.** It adds a pure, dormant verification function
 with trusted inputs and typed fail-closed outputs. It constructs no
@@ -814,9 +891,10 @@ This document supersedes the first C3C audit draft. The following were corrected
   **by value** to `BasicHotStuffEngine::new` (`ConsensusValidatorSet`, not
   `Arc`). `build_validator_set_and_key_provider` feeds the **Timeout bridge
   only** and is no longer described as the engine's input. Boot verification may
-  return `SkippedNoExternalGenesis` (not "every startup"). Missing authority vs
-  present-authority-with-missing-owner are distinguished, as are compiled vs
-  reachable verification branches.
+  return `SkippedNoExternalGenesis` (not "every startup"). The §2 rejection-path
+  block is now a condition/result/timing table taken directly from the handler's
+  two match arms; compiled-vs-reachable branches are distinguished and D6
+  verification is described as an implemented conditional path.
 * **`chain_id: 1` (§4.B).** Reclassified from "fixture-scoped" to
   **production-reachable message construction**, with the guard located at
   signing/transmission (fail-closed, no authority), not at construction.
@@ -847,3 +925,25 @@ This document supersedes the first C3C audit draft. The following were corrected
   genesis **file** (`--genesis-path`) from the independent **expected-hash pin**
   (`--expect-genesis-hash` / `expected_genesis_hash`), which DevNet/TestNet may
   omit (hash compare skipped) and only MainNet forces.
+* **Outstanding corrections applied in this pass (D7-C3C follow-up).** (1) The §2
+  rejection-path bullets were replaced by the four-row condition/result/timing
+  table (verification-context-unavailable vs current-state-unavailable vs
+  admission failure vs post-verification `Stale`) for both Proposal and Vote, and
+  the same distinction was applied to §3.1, §4.D, and the C3C evidence summary; a
+  missing owner is no longer described as a post-crypto `Stale` rejection. (2)
+  §5.1 was rewritten to "Existing mapping policy and later production-consumption
+  requirements", dropping the "blocks step 1" heading and the "separately ratified
+  value" alternative; §5's dependency list and §6's prerequisites now state that
+  the production runtime→wire mapping/provenance gates integration/activation
+  only, never the dormant verifier, and that the runtime `ChainId` must not be
+  parsed from the genesis label. (3) §6 added explicit bitmap-bounding/checked-
+  arithmetic/representability, position↔`validator_index`↔`ValidatorId`
+  correspondence, index-aliasing (no duplicate-bit fiction), saturating/`2*total`
+  arithmetic notes, positive-representable-total validation, quorum-policy
+  preservation, epoch/wire-chain pre-crypto rejection with signed-field
+  preservation, a separate non-authorizing evidence result, and no legacy
+  fallback, plus the matching future tests; the reuse table and evidence summary
+  now say "structural ideas requiring checked adaptation". (4) §4.D's
+  concurrent-invalidation wording was replaced with the serialized-ordering scope
+  statement, and the reuse-table row no longer suggests that persisting an
+  immutable observed snapshot suffices to extend the current-state freshness gate.
