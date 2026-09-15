@@ -86,7 +86,8 @@ use crate::timeout_verification_bridge::SUPPORTED_TIMEOUT_SUITE_ID;
 /// 1. requires an independently supplied expected genesis hash (the *pin*);
 /// 2. reads the genesis file exactly **once** into an owned snapshot;
 /// 3. uses the existing boot-time validation + canonical hashing against that
-///    required pin (via [`load_verify_and_build_genesis_authority`]);
+///    required pin (via [`verify_boot_time_genesis`], after a single
+///    [`load_external_genesis`] read);
 /// 4. derives membership and consensus key material from that **same** validated
 ///    snapshot;
 /// 5. copies the necessary immutable values into this object.
@@ -94,8 +95,8 @@ use crate::timeout_verification_bridge::SUPPORTED_TIMEOUT_SUITE_ID;
 /// The pin must be supplied by the caller from an independent source (e.g. an
 /// original fixture / operator-pinned `--expect-genesis-hash`). It is **never**
 /// taken from the untrusted record and **never** silently calculated from the
-/// file being accepted: [`load_verify_and_build_genesis_authority`] passes the
-/// pin as the required `expected_genesis_hash`, so a file whose canonical hash
+/// file being accepted: [`verify_boot_time_genesis`] receives the pin as the
+/// required `expected_genesis_hash`, so a file whose canonical hash
 /// disagrees is rejected rather than accepted.
 pub struct ExpectedGenesisIdentity {
     /// The validated, immutable genesis-bound authority snapshot. Built once
@@ -353,8 +354,15 @@ pub enum RecordCorrespondenceError {
     /// No authority record was supplied. Missing information stays explicit and
     /// is never filled with a default.
     MissingRecord,
-    /// The claimed chain identity label differs from the expected one.
-    ChainIdMismatch { expected: String, claimed: String },
+    /// The claimed chain identity label differs from the expected one. Only the
+    /// bounded byte lengths of the expected and claimed labels are retained: the
+    /// untrusted claimed label is **never** cloned, formatted, hashed, or
+    /// otherwise copied into the error, so neither `Display` nor derived `Debug`
+    /// can reproduce an unbounded label. A length-incompatible claimed label is
+    /// rejected before any per-byte comparison; only equal-length labels are
+    /// compared byte-for-byte, and an ordinary same-length mismatch is still
+    /// rejected here (with `expected_len == claimed_len`).
+    ChainIdMismatch { expected_len: usize, claimed_len: usize },
     /// The claimed canonical genesis hash differs from the pinned expected one.
     GenesisHashMismatch {
         expected_fingerprint: String,
@@ -450,10 +458,10 @@ impl std::fmt::Display for RecordCorrespondenceError {
                 f,
                 "no authority record supplied; correspondence cannot be established"
             ),
-            Self::ChainIdMismatch { expected, claimed } => write!(
+            Self::ChainIdMismatch { expected_len, claimed_len } => write!(
                 f,
-                "claimed chain id ({claimed}) does not equal the pinned expected chain id \
-                 ({expected})"
+                "claimed chain id (byte length {claimed_len}) does not equal the pinned expected \
+                 chain id (byte length {expected_len})"
             ),
             Self::GenesisHashMismatch {
                 expected_fingerprint,
@@ -622,11 +630,22 @@ pub fn check_genesis_record_correspondence(
     // 1. record presence — missing information stays explicit.
     let record = record.ok_or(RecordCorrespondenceError::MissingRecord)?;
 
-    // 2. chain identity label.
-    if record.chain_id != expected.chain_id() {
+    // 2. chain identity label. Reject an oversized or length-incompatible
+    //    claimed label BEFORE cloning, formatting, hashing, or otherwise copying
+    //    the complete untrusted label. The expected label was independently
+    //    established by pinned genesis validation, so its byte length is the
+    //    applicable bound: a claimed label of a different byte length cannot
+    //    match and is rejected immediately (short-circuiting before any per-byte
+    //    comparison of the untrusted bytes). Only an equal-length label is then
+    //    compared byte-for-byte; an ordinary same-length mismatch is still
+    //    rejected. Either way, no full copy/fingerprint of the claimed label is
+    //    taken — only the two byte lengths are retained as bounded metadata.
+    if record.chain_id.len() != expected.chain_id().len()
+        || record.chain_id != expected.chain_id()
+    {
         return Err(RecordCorrespondenceError::ChainIdMismatch {
-            expected: expected.chain_id().to_string(),
-            claimed: record.chain_id.clone(),
+            expected_len: expected.chain_id().len(),
+            claimed_len: record.chain_id.len(),
         });
     }
 
@@ -805,17 +824,14 @@ mod tests {
     use crate::genesis_consensus_authority::GENESIS_STATIC_AUTHORITY_EPOCH;
 
     #[test]
-    fn missing_record_is_explicit() {
-        // A minimal expected identity is not required to reach the None branch,
-        // but we still need one; build via the fixture constructor path is not
-        // available here, so this narrow unit test only checks that a `None`
-        // record short-circuits before touching the expected identity. We use a
-        // dangling reference through a helper that is never dereferenced.
-        //
-        // Since `ExpectedGenesisIdentity` has no cheap constructor, the full
-        // matrix (including this case with a real expected identity) is proven
-        // in the integration target. Here we only assert the error's Display is
-        // stable and self-describing.
+    fn missing_record_diagnostic_is_bounded_and_self_describing() {
+        // This narrow unit test checks only the `MissingRecord` diagnostic
+        // itself: its `Display` is stable and self-describing. It does not
+        // construct an `ExpectedGenesisIdentity` (which has no cheap
+        // constructor). Missing-record behavior *through the real checker* —
+        // that a `None` record short-circuits before the expected identity is
+        // touched — is exercised against a real pinned expected identity in the
+        // integration target (`d7c2_f_missing_record_is_explicit`).
         let e = RecordCorrespondenceError::MissingRecord;
         assert!(e.to_string().contains("no authority record supplied"));
     }

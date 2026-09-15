@@ -2324,10 +2324,14 @@ records read from RocksDB.**
 | H. Record from unrelated genesis B cannot redefine expectations pinned to A (A frozen) | `d7c2_h_unrelated_genesis_b_cannot_redefine_pinned_a` |
 | I. Separate / reopened db reporting the same epoch supplies no provenance | `d7c2_i_separate_database_same_epoch_supplies_no_provenance` |
 
-Module units (`#[cfg(test)] mod tests`): `missing_record_is_explicit`,
-`correspondence_reports_non_authorizing_invariants`. The A/I tests assert no
-writes and no activation effect; I asserts a successful database reopen with the
-same epoch is not treated as authentication or anti-rollback evidence.
+Module units (`#[cfg(test)] mod tests`):
+`missing_record_diagnostic_is_bounded_and_self_describing`,
+`correspondence_reports_non_authorizing_invariants`. The former checks only the
+`MissingRecord` diagnostic's bounded `Display`; missing-record behavior *through
+the real checker* is exercised in the integration target
+(`d7c2_f_missing_record_is_explicit`). The A/I tests assert no writes and no
+activation effect; I asserts a successful database reopen with the same epoch is
+not treated as authentication or anti-rollback evidence.
 
 ### Validation (task §8) — sequential
 
@@ -2360,7 +2364,11 @@ the release build: 77 GiB free on `/`.
 
 Overlapping subsets distinguished: the two lib subsets
 (`genesis_authority_record_correspondence` = 2, `consensus_storage_observation` = 5)
-are filtered slices of the full `qbind-node` lib test set (1588 total); the D7-C2
+are filtered slices of the full `qbind-node` lib **test inventory** (1590 total —
+the prior filtered results `2 passed + 1588 filtered` and `5 passed + 1585
+filtered` each imply 1590; the earlier "1588 total" sentence was stale). Test
+inventory is distinct from execution: the two subset commands above were run, but
+the **full** 1590-test library suite was **not** rerun in C2. The D7-C2
 integration target (23) is distinct from the D7-C1 integration target (23).
 
 * **CRLF-aware whitespace:** the new module and test file were authored with **CRLF**
@@ -2413,3 +2421,85 @@ GENESIS_AUTHORITY_ACTIVATION=DISABLED
 CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED
 SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO
 ```
+
+### D7-C2 correction — bounded chain-label mismatch error (RUN 422 D7-C2 error-handling fix)
+
+This correction is additive and strictly scoped to the chain-label error path of
+`check_genesis_record_correspondence`. It preserves all historical evidence above
+and every other comparison (pin, membership/key/suite/weight, epoch, C1-error
+propagation, separate-database) unchanged. It changes production-source error
+handling and is therefore **not** docs-only.
+
+* **Defect.** `RecordCorrespondenceError::ChainIdMismatch` previously stored the
+  complete claimed chain label as a `String`; the checker cloned `record.chain_id`
+  into it and `Display` printed it. An oversized untrusted label thus caused an
+  extra allocation and an unbounded diagnostic (via `Display` and derived
+  `Debug`), contradicting the bounded-error claim. The identity comparison itself
+  was already correct and is unchanged in outcome.
+* **Bounded representation.** The variant now carries only two `usize` byte
+  lengths (`expected_len`, `claimed_len`); the untrusted label is never cloned,
+  formatted, hashed, or otherwise copied into the error. The checker rejects a
+  length-incompatible claimed label **before** any per-byte comparison (byte
+  lengths are compared first, short-circuiting), using the independently
+  validated expected label's byte length as the applicable bound; only an
+  equal-length label is then compared byte-for-byte, and an ordinary same-length
+  mismatch is still rejected (`expected_len == claimed_len`). No full-input
+  fingerprint of the claimed label is computed before the length rejection, and
+  no truncation/normalization can turn a mismatch into a match. Neither `Display`
+  nor derived `Debug` can reproduce an unbounded label. Raw label contents are
+  omitted from the error entirely (no excerpt is retained).
+* **Tests.** The D7-C2 integration target now has **24** tests (was 23):
+  * `d7c2_c_oversized_claimed_label_rejects_with_bounded_diagnostics` — a 1 MiB
+    claimed label built before the checker is invoked; asserts rejection, bounded
+    `ChainIdMismatch { expected_len, claimed_len = 1 MiB }` metadata, and bounded
+    `Display`/`Debug` under explicit ≤ 256-byte limits that never contain the
+    label run. (The fixture's own allocation is separate from checker behavior;
+    zero allocation is not claimed merely from a short diagnostic — boundedness is
+    established from the error representation and the length-first rejection.)
+  * `d7c2_c_wrong_chain_label_rejects` — retained as the same-length positive
+    mismatch (16-byte claimed vs 16-byte expected), now also asserting the equal
+    bounded byte lengths, proving ordinary mismatches still reject.
+  * `d7c2_a_matching_record_explicit_epoch_zero_corresponds_without_authorization`
+    — retained matching-label positive control (full correspondence checks,
+    non-authorizing result, no writes).
+  The module unit test was renamed
+  `missing_record_diagnostic_is_bounded_and_self_describing`.
+* **Tested SHA.** `708d2c30cb0845843cb99d99f5e29175a4355004`.
+* **Validation (sequential, package `qbind-node`, default features).**
+  * `cargo test -p qbind-node --lib genesis_authority_record_correspondence`
+    ⇒ **2 passed**, 0 failed, 1588 filtered out (exit 0). *(Inventory: 1590 total
+    library tests; the full suite was not rerun.)*
+  * `cargo test -p qbind-node --test run_422_d7c2_genesis_record_correspondence_tests -- --test-threads=1`
+    ⇒ **24 passed**, 0 failed (exit 0).
+  * `cargo test -p qbind-node --test run_422_d7c1_storage_observation_tests -- --test-threads=1`
+    ⇒ **23 passed**, 0 failed (exit 0).
+  * `cargo test -p qbind-node --test run_422_startup_refusal_tests`
+    ⇒ **4 passed**, 0 failed (exit 0).
+  * `cargo check -p qbind-node` ⇒ Finished, exit 0.
+  * `cargo clippy -p qbind-node --lib --test run_422_d7c2_genesis_record_correspondence_tests`
+    ⇒ Finished, exit 0; no warnings attributed to the corrected module or test.
+  * `cargo build --release -p qbind-node --bin qbind-node` ⇒ Finished (release
+    profile), exit 0 — compilation evidence only.
+  * Genuine trailing whitespace check + secret scan of the changed files ⇒ clean;
+    CRLF line endings preserved on the two code files and this document.
+* **Documentation corrections in this pass.** (A) The stale "1588 total" library
+  inventory sentence was corrected to **1590 total**, distinguishing inventory
+  from execution. (B) The `ExpectedGenesisIdentity::load_pinned` doc comments that
+  attributed construction to `load_verify_and_build_genesis_authority` were
+  corrected to the actual single-read trace `load_external_genesis` →
+  `verify_boot_time_genesis(_, _, Some(pin))` → `build_genesis_consensus_authority`
+  (the module docs already described this trio; only the source comments were
+  stale). (C) The missing-record unit test's nonexistent
+  dangling-reference/helper explanation was removed and the test renamed; the unit
+  test checks only the `MissingRecord` diagnostic, while missing-record behavior
+  through the checker is exercised by `d7c2_f_missing_record_is_explicit`.
+  (D) Release-binary evidence is **not** the only outstanding dependency: storage/
+  record provenance, activation authorization, production wire-domain mapping,
+  durable anti-rollback, and running-consensus freshness all remain unresolved
+  (see "Trust limits and remaining dependencies" above).
+* **Security-tool outcomes.** Attempted via the parallel-validation path.
+  Recorded honestly: a CodeQL database-size skip is **SKIPPED/INCOMPLETE**, not a
+  clean pass; an unavailable code-review backend is **UNAVAILABLE/UNVERIFIED**.
+* **Scope claim.** This is limited to the corrected chain-label path. It does
+  **not** claim a complete allocation/DoS audit of all genesis loaders and error
+  types. All retained verdict markers above are unchanged.
