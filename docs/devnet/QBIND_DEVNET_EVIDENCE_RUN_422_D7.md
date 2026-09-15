@@ -2945,3 +2945,73 @@ review records for earlier D7 passes remain as recorded and are not relabelled a
 successful scans. D7 remains **partial**; production authority **unavailable**;
 genesis activation **DISABLED**; durable anti-rollback **NOT established**; public
 DevNet **NO-GO**.
+## Run 422 D7-C3C — Authority / Engine / QC integration audit (documentation only)
+
+This entry records a **bounded source audit and integration-design** pass. It
+performed **no production integration, no activation, and no wire/QC/storage
+change**. The full analysis lives in
+`docs/protocol/QBIND_GENESIS_AUTHORITY_ENGINE_QC_INTEGRATION_AUDIT.md`; it is not
+duplicated here.
+
+```
+D7C3C_AUTHORITY_ENGINE_QC_INTEGRATION_AUDIT=COMPLETE-FOR-INSPECTED-SCOPE
+PRODUCTION_INTEGRATION=NOT-PERFORMED
+PRODUCTION_WIRE_CHAIN_ID_BEHAVIOR=UNCHANGED
+D7_STATUS=PARTIAL-CODE-TEST / PRODUCTION-LIFECYCLE-UNAVAILABLE
+DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED
+GENESIS_AUTHORITY_ACTIVATION=DISABLED
+CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED
+SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO
+```
+
+**Inspected revision.** HEAD `0b3eb4a19530f8ecf21b25212f92aa944473e154` on branch
+`copilot/copilotcopilot-run-422-d7-c3b-again`. The clone is shallow (depth 2;
+`.git/shallow` pins parent `02f7f1d`). The task's named reviewed revision
+`734a9425a15f8a5845b8bf0bdb4932b700d9cc22` is **absent** from this clone, so
+ancestry could not be confirmed; content correspondence to the C2/C3A/C3B source
+is not claimed as ancestry.
+
+**Principal findings (source-anchored, HEAD `0b3eb4a`).**
+
+* Production wires no Proposal/Vote authority: `main.rs:5549`
+  `proposal_vote_authority: None`; inbound/outbound Proposal/Vote run fail-closed
+  under `Required`. C3B correspondence (`genesis_authority_record_correspondence.rs`
+  `load_pinned` / `check_network_correspondence`) has **test-only callers** and
+  never becomes authorization.
+* A boot-validated `GenesisConsensusAuthority` exists but is not fed to the
+  Proposal/Vote snapshot; it carries `authorized_wire_chain_id: None`
+  (`genesis_consensus_authority.rs:439`), and `try_bind`
+  (`binary_consensus_loop.rs:1245`) compares a synthetic
+  `snapshot_chain_identity_label` (`:1281`) and rejects any verifier lacking an
+  authorized wire id (`:1295`) — a deliberate closed door.
+* Outer Proposal/Vote signatures are verified on the binary path
+  (`proposal_vote_verify.rs:405`), but the **embedded QC's constituent signatures
+  are not verified** on that path: `verify_quorum_certificate` (`lib.rs:705`) is
+  reached only via the separate `Node<S>::apply_block` library abstraction that
+  `main.rs` does not construct. The wire→logical conversion discards signers /
+  signatures / epoch (`basic_hotstuff_engine.rs:1493`, `vec![]` signers).
+* `chain_id: 1` is fixture-scoped (`basic_hotstuff_engine.rs:1351/1370/1405/1531`);
+  production domain separation uses the 64-bit runtime `ChainId` + wire alias in
+  the v2 signing preimage (`qbind-wire/src/pv_signing_domain.rs`). Changing the
+  engine wire id changes the signed preimage and thus every signature.
+
+**Reused implementations (no duplication introduced):** `ConsensusValidatorSet`
+and `SuiteAwareValidatorKeyProvider` (shared `Arc`), `verify_proposal_msg_with_domain`
+/ `verify_vote_msg_with_domain`, the timeout verification bridge, `try_bind`
+coherence, and the existing `verify_quorum_certificate`.
+
+**Recommended next code task (exactly one):** verify a Proposal's embedded QC on
+the binary path and retain its signer/signature evidence instead of discarding it
+(`basic_hotstuff_engine.rs` QC ingest; reuse `verify_quorum_certificate`). It
+enables no production authority, does not touch `main.rs:5549` or wire-id
+behavior, and strictly narrows attacker capability. Its prerequisite protocol
+decision (canonical production wire chain id vs the 64-bit runtime id) is stated
+in the audit §5.1 and is required only for the later snapshot-wiring steps, not
+for this task.
+
+**Checks executed / tool limitations.** Git and `rg`/`grep` source inspection
+only (recorded in the audit §7); no build, test, or release rebuild was run for
+this documentation-only pass. Historical `cargo test` results above are not
+relabelled as newly executed. Prior CodeQL SKIPPED/INCOMPLETE and qualified
+reviewer outcomes remain as recorded and are not converted into successful
+analyses.
