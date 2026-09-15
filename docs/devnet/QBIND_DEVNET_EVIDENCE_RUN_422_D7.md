@@ -2758,7 +2758,7 @@ double-counted.
 | B | `d7c3b_b_env_provenance_mismatch_rejects_all_six_pairs` | Full 3×3 matrix; all six mismatched pairs reject with typed `ValidationPolicyMismatch` metadata even when the supplied runtime ID is correct for the newly selected environment. |
 | C | `d7c3b_c_full_width_runtime_mismatch_rejects_via_c3a` | Matching policy/env; other standard runtime IDs and invalid values (including a different high word with the correct low 32 bits, plus `0` and `u64::MAX`) reject via C3A `RuntimeMismatch` — no truncation/fallback. |
 | D | `d7c3b_d_wrong_pin_rejects_construction`, `d7c3b_d_replacement_genesis_rejects_against_frozen_pin`, `d7c3b_d_loaded_identity_survives_source_removal_and_correspondence_needs_no_reread` | Wrong pin rejects construction; replacing A with B while retaining pin A rejects; a loaded identity survives removal of its source file and correspondence succeeds from the retained identity with no reread. |
-| E | `d7c3b_e_pin_scoped_to_one_policy_cannot_load_under_another` | A DevNet-scoped canonical pin fails closed when used to load under TestNet (scope `"TST"` yields a different canonical hash). |
+| E | `d7c3b_e_canonical_hash_pin_is_environment_isolated` | One fixture that validates under **both** DevNet and TestNet (required `"testnet"` chain-id token + full authority block, production validators unrelaxed): its frozen DevNet and TestNet canonical pins differ; each pin loads only under its own environment; and supplying the frozen DevNet pin under TestNet is rejected by the **canonical-hash comparison itself** — the typed `BootGenesisVerificationError::CanonicalHashMismatch { env: Testnet, expected: devnet_pin, actual: testnet_pin }` from `verify_boot_time_genesis`, and the same mismatch through `ExpectedGenesisIdentity::load_pinned`'s existing `GenesisRevalidationFailed` interface. This is a canonical-hash pin isolation, **not** a label-policy rejection. |
 | F | `d7c3b_f_two_distinct_genesis_files_each_correspond_under_same_env` | Two distinct genesis files, separately pinned, each correspond under DevNet with the same alias but distinct genesis hashes — the helper chooses no official genesis and asserts no cross-fork uniqueness. |
 | G | `d7c3b_g_bounded_diagnostics_for_both_mismatch_variants` | Exact metadata and bounded (≤256-byte) `Display`/`Debug` for both mismatch variants, including a `u64::MAX` runtime ID; no genesis label leaks. |
 
@@ -2793,9 +2793,24 @@ All commands from repo root, default profile unless noted; recorded exit code 0:
   only (see marker below); it is **not** configured-authority release-binary
   evidence.
 
-**D6 `run_422_d6_pv_domain_isolation_tests` target:** not present in this
-shallow clone (no `run_422_d6*` file exists under `crates/qbind-node/tests/`).
-It could not be executed here; reported accurately rather than asserted.
+**D6 `run_422_d6_pv_domain_isolation_tests` target — correction (task §1).** The
+earlier C3B evidence above stated this target was *"not present in this shallow
+clone"* and that it *"could not be executed here."* **That statement was wrong:
+the earlier search examined the wrong crate** (it looked under
+`crates/qbind-node/tests/`). The regression target actually lives under
+**`crates/qbind-consensus/tests/run_422_d6_pv_domain_isolation_tests.rs`** and is
+present in this checkout. Distinguishing the two facts:
+
+* *Previous omission:* the earlier C3B pass never executed the D6 target (it
+  searched the wrong crate and reported absence). That earlier claim is corrected
+  here; it is not re-asserted.
+* *Newly performed validation (this correction):* executed from the repository
+  root against the actual working tree —
+  * Command: `cargo test -p qbind-consensus --test run_422_d6_pv_domain_isolation_tests`
+  * Revision: `02f7f1d` (this task's working HEAD; see the correction subsection
+    below for branch/SHA context).
+  * Exit code: **0**.
+  * Result: **`34 passed; 0 failed; 0 ignored`** (34 test functions).
 
 ### Boundaries preserved (task §6)
 
@@ -2840,3 +2855,93 @@ a numeric network-ID registry; correspondence does not establish official-pin
 authenticity, live authority, or rollback resistance; and engine/QC and
 production authority integration remain unresolved. No readiness item moves
 Green.
+
+### Run 422 D7-C3B correction — D6 execution + canonical-hash case E (test/doc only)
+
+This subsection records a limited, test-and-documentation-only correction to the
+C3B evidence above. It does **not** redesign C3B or change any production
+behaviour. Earlier C3B results remain recorded above at their original tested
+revision; only the two items below are corrected.
+
+**Actual branch / SHA context (task §1, §4).**
+
+* **Actual working branch:** `copilot/copilot-run-422-d7-c3b-again` (single-branch
+  shallow clone). The task text names the *reviewed* branch
+  `copilot/copilot-run-422-d7-c3b`; the correction was performed on the
+  `-again` working branch noted here.
+* **Local commits available:** `02f7f1d` (working HEAD) and `c37f059` only.
+  Ancestry beyond these two is unavailable in the shallow clone.
+* **Starting revision (before this correction's edits):** `02f7f1d`.
+* **`continue-from` reference `d8956c6075dcae51152411c29219223ee43b21b8` and the
+  previous tested checkpoint `2c882e869dfb86175e982f9010e0ad2587626235`** named in
+  the task are **absent** from this shallow clone (`git cat-file` reports them
+  missing) and are not reachable ancestors here. Their absence does not imply the
+  source files are missing — the C3B test target, the D6 target, and this evidence
+  doc are all present in the working tree.
+* **Final revision:** recorded on the completed correction commit for this branch
+  (the commit that carries the two changed paths below).
+
+**Correction 1 — D6 regression target executed.** The earlier C3B claim that
+`run_422_d6_pv_domain_isolation_tests` was *absent* was wrong because the search
+examined the wrong crate (`qbind-node` instead of `qbind-consensus`). The target
+exists at `crates/qbind-consensus/tests/run_422_d6_pv_domain_isolation_tests.rs`.
+Newly executed here:
+
+* Command: `cargo test -p qbind-consensus --test run_422_d6_pv_domain_isolation_tests`
+* Revision: `02f7f1d`; exit code **0**; **34 passed; 0 failed; 0 ignored**.
+
+The distinction between the *previously omitted execution* and this *newly
+performed validation* is preserved; no replacement test was created and no
+historical execution is asserted.
+
+**Correction 2 — case E now demonstrates canonical-hash pin isolation.** The C3B
+integration test `d7c3b_e_*` was rewritten (test file + its comments only) as
+`d7c3b_e_canonical_hash_pin_is_environment_isolated`. It uses **one** genesis
+fixture that satisfies the existing validators under **both** DevNet and TestNet
+(required lowercase `"testnet"` chain-id token + full authority block; production
+validators unrelaxed). For that same unchanged fixture it:
+
+* computes and freezes the DevNet and TestNet canonical pins and asserts they
+  differ;
+* loads it successfully under DevNet with the DevNet pin and under TestNet with
+  the TestNet pin via `ExpectedGenesisIdentity::load_pinned`;
+* calls `verify_boot_time_genesis(Testnet, cfg, Some(devnet_pin))` and asserts the
+  typed `BootGenesisVerificationError::CanonicalHashMismatch { env: Testnet,
+  expected: devnet_pin, actual: testnet_pin }` (environment + expected/actual
+  hashes checked exactly);
+* asserts `ExpectedGenesisIdentity::load_pinned(path, Testnet, devnet_pin)` also
+  rejects the mismatched pin through its existing `GenesisRevalidationFailed`
+  interface (detail carries the canonical-hash mismatch).
+
+The earlier case-E claim (that a scope-differing canonical hash *or* a stricter
+validator rejects the cross-policy pin) is superseded: the corrected case proves
+the rejection comes from the **canonical-hash comparison itself**, not from a
+label-policy rejection. No public error type was changed to make the test
+convenient; the other C3B assertions and fail-closed behaviour are retained.
+
+**Focused verification (task §3).** From repo root, exit code 0 unless noted:
+
+* `cargo test -p qbind-node --test run_422_d7c3b_genesis_network_correspondence_tests`
+  → **9 passed; 0 failed** (includes the corrected case E).
+* `cargo test -p qbind-consensus --test run_422_d6_pv_domain_isolation_tests`
+  → **34 passed; 0 failed**.
+* `cargo clippy -p qbind-node --test run_422_d7c3b_genesis_network_correspondence_tests`
+  → finished with **no warnings attributable to the changed test**; all emitted
+  warnings originate from pre-existing, unrelated library files and are inherited,
+  not introduced.
+* Formatting/whitespace checked on the changed test file only (no package-wide
+  `cargo fmt` and no line-ending changes): the file retains its existing CRLF line
+  endings, and the correction adds no trailing whitespace, tabs, or lines beyond
+  the file's established width.
+
+**Changed paths (this correction).**
+
+* `crates/qbind-node/tests/run_422_d7c3b_genesis_network_correspondence_tests.rs`
+* `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md`
+
+**Unchanged posture (task §4).** No production integration, activation, wire, QC,
+storage, or historical-archive change. CodeQL SKIPPED/INCOMPLETE and the qualified
+review records for earlier D7 passes remain as recorded and are not relabelled as
+successful scans. D7 remains **partial**; production authority **unavailable**;
+genesis activation **DISABLED**; durable anti-rollback **NOT established**; public
+DevNet **NO-GO**.
