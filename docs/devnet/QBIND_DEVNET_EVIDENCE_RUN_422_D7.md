@@ -2662,3 +2662,181 @@ coverage is therefore reported separately from the function count.
   configured-authority release-binary evidence remains **absent**; RS1/C4/C5
   remain **open**; public DevNet remains **NO-GO**. No production integration and
   no Run 423 work performed.
+
+---
+
+## Run 422 D7-C3B — pinned genesis validation bound to the standard network mapping (test + evidence)
+
+### Actual branch / SHAs (task §1, §7)
+
+* **Actual working branch:** `copilot/copilot-run-422-d7-c3b` (single-branch
+  shallow clone).
+* **Starting revision (this task's HEAD before edits):**
+  `c37f059` — already carrying the D7-C1/C2/C3A dormant modules and the retained
+  authority snapshot in `ExpectedGenesisIdentity`.
+* **Reference checkpoints named in the task** (`fcdc7ca2…` tested checkpoint,
+  `f1c3dc4f…` final reference for the reviewed C3A branch
+  `copilot/copilotrun-422-d7-c3a`) are **not present** in this shallow clone
+  (`git cat-file` reports them missing) and are not ancestors reachable here.
+  Ancestry beyond the two local commits (`c37f059`, `b1643fe`) is unavailable;
+  content correspondence was used to verify the C2/C3A implementations are
+  present, **not** commit ancestry.
+* **Changed paths vs the starting revision `c37f059`:**
+  * `crates/qbind-node/src/genesis_authority_record_correspondence.rs`
+    (retained validation policy + `check_network_correspondence` +
+    `GenesisNetworkCorrespondence` + `GenesisNetworkCorrespondenceError`);
+  * `crates/qbind-node/tests/run_422_d7c3b_genesis_network_correspondence_tests.rs`
+    (new C3B integration target);
+  * this evidence doc and
+    `docs/protocol/QBIND_PROPOSAL_VOTE_SIGNING_DOMAIN_V2.md` §9.2.
+
+### Trust model (stated explicitly, task §2)
+
+The trust source is the caller's independently accepted genesis pin and selected
+environment. The code enforces consistency with those inputs; it cannot prove
+the operator obtained the correct official pin. A successful correspondence is
+**static correspondence only** — not current authority, activation permission,
+freshness, storage provenance, rollback resistance, or a signing capability.
+
+### Source investigation / reuse findings (task §3)
+
+Scoped reuse check (not a whole-repository duplication audit) confirmed the
+existing interfaces are sufficient; the only gap was that
+`ExpectedGenesisIdentity` retained the validated authority snapshot but **not**
+the environment policy used to validate it, and there was no operation binding
+that identity to the C3A resolver.
+
+* Reused unchanged: `ExpectedGenesisIdentity::load_pinned` (C2 path:
+  `load_external_genesis` → `verify_boot_time_genesis(Some(pin))` →
+  `build_genesis_consensus_authority`, one owned read),
+  `pqc_boot_genesis::map_environment`, `resolve_network_wire_alias` (C3A),
+  `NetworkEnvironment::chain_id`.
+* **No** new genesis loader, parser, hash implementation, environment conversion
+  table, numeric-ID registry, or authority builder was introduced.
+
+### Implementation (task §4)
+
+* **A — retained provenance.** `ExpectedGenesisIdentity` gains a private,
+  immutable `validation_policy: NetworkEnvironmentPolicy`, set only by the
+  successful `load_pinned` from its `env_policy` argument. `load_pinned`'s
+  signature and validation behaviour are unchanged; the single owned genesis
+  read is preserved (no reload/reparse). No public unchecked constructor,
+  setter, deserialization route, or default exists.
+* **B — correspondence operation.**
+  `ExpectedGenesisIdentity::check_network_correspondence(selected_environment, supplied_runtime)`
+  (1) compares the retained policy to `map_environment(selected_environment)`,
+  (2) rejects a mismatch explicitly, (3) calls
+  `resolve_network_wire_alias(selected_environment, supplied_runtime)`, and
+  (4) returns a private-field, immutable `GenesisNetworkCorrespondence<'_>` that
+  **immutably borrows** the same identity only when both checks pass. The alias
+  is obtained solely through C3A; no raw wire alias is accepted. Read-only
+  accessors expose the environment, runtime ID, alias, retained policy, and the
+  underlying validated genesis hash / authority commitment.
+* **C — fail-closed errors.** `GenesisNetworkCorrespondenceError` distinguishes
+  `ValidationPolicyMismatch { validated_policy, selected_environment,
+  selected_policy }` from `RuntimeMismatch(NetworkWireAliasMismatch)` (the reused
+  C3A error). `Display`/`Debug` carry only bounded enum + numeric-ID metadata;
+  no genesis labels, file contents, paths, or key material are copied or printed.
+* **D — trust boundary preserved.** No conversion into
+  `LocalAuthorizationState::Established`, `CurrentAuthorizationOwner`,
+  `AuthorizedProposalVoteSnapshot`, `AuthorizationTicket`,
+  `ProposalVoteSigningDomainV2`, or any signer / verification context.
+  `GenesisConsensusAuthority.authorized_wire_chain_id`, snapshot binding, and the
+  fixture-label comparison are untouched.
+
+### Behavioral tests (task §5) — `run_422_d7c3b_genesis_network_correspondence_tests` (9 functions)
+
+Uses the real loader, boot validation, canonical hashing, and valid ML-DSA-44
+consensus-key fixtures; TestNet/MainNet fixtures carry a full authority block and
+environment-token chain labels so their strict validators pass unrelaxed.
+Parameterized cases are grouped inside single `#[test]` functions and are not
+double-counted.
+
+| Case | Function | Coverage |
+| ---- | -------- | -------- |
+| A | `d7c3b_a_matching_controls_resolve_exact_alias_attached_to_identity` | DevNet/TestNet/MainNet load pinned, resolve with matching env + full runtime ID, assert exact C3A alias, and verify the result refers to the original validated genesis hash + authority commitment. |
+| B | `d7c3b_b_env_provenance_mismatch_rejects_all_six_pairs` | Full 3×3 matrix; all six mismatched pairs reject with typed `ValidationPolicyMismatch` metadata even when the supplied runtime ID is correct for the newly selected environment. |
+| C | `d7c3b_c_full_width_runtime_mismatch_rejects_via_c3a` | Matching policy/env; other standard runtime IDs and invalid values (including a different high word with the correct low 32 bits, plus `0` and `u64::MAX`) reject via C3A `RuntimeMismatch` — no truncation/fallback. |
+| D | `d7c3b_d_wrong_pin_rejects_construction`, `d7c3b_d_replacement_genesis_rejects_against_frozen_pin`, `d7c3b_d_loaded_identity_survives_source_removal_and_correspondence_needs_no_reread` | Wrong pin rejects construction; replacing A with B while retaining pin A rejects; a loaded identity survives removal of its source file and correspondence succeeds from the retained identity with no reread. |
+| E | `d7c3b_e_pin_scoped_to_one_policy_cannot_load_under_another` | A DevNet-scoped canonical pin fails closed when used to load under TestNet (scope `"TST"` yields a different canonical hash). |
+| F | `d7c3b_f_two_distinct_genesis_files_each_correspond_under_same_env` | Two distinct genesis files, separately pinned, each correspond under DevNet with the same alias but distinct genesis hashes — the helper chooses no official genesis and asserts no cross-fork uniqueness. |
+| G | `d7c3b_g_bounded_diagnostics_for_both_mismatch_variants` | Exact metadata and bounded (≤256-byte) `Display`/`Debug` for both mismatch variants, including a `u64::MAX` runtime ID; no genesis label leaks. |
+
+### Source-inspection vs behavioural measurement (task §5.D)
+
+Case D's behavioural tests measure that the retained identity is *used* after its
+source file is replaced or removed — they cannot, by themselves, prove only one
+read ever occurred. The single-owned-read guarantee is a **source** property of
+`load_pinned` (one `load_external_genesis`, then validation and authority
+derivation from that same owned snapshot), which the correspondence operation
+never re-enters.
+
+### Validation (task §6) — sequential, tested SHA `2c882e8` (+ uncommitted docs)
+
+All commands from repo root, default profile unless noted; recorded exit code 0:
+
+* `cargo test -p qbind-node --test run_422_d7c3b_genesis_network_correspondence_tests` → `9 passed; 0 failed`.
+* `cargo test -p qbind-node --test run_422_d7c2_genesis_record_correspondence_tests` → `24 passed; 0 failed` (C2 unchanged).
+* `cargo test -p qbind-node --lib genesis_authority_record_correspondence` → `2 passed; 0 failed`.
+* `cargo test -p qbind-types --test run_422_d7c3a_network_wire_alias_tests` → `13 passed; 0 failed`.
+* `cargo test -p qbind-node --test run_422_genesis_consensus_authority_tests` → `15 passed; 0 failed`.
+* `cargo test -p qbind-node --test run_422_startup_refusal_tests` → `4 passed; 0 failed`.
+* `cargo check -p qbind-node` → `Finished` (exit 0).
+* Focused Clippy: `cargo clippy -p qbind-node --lib` and
+  `cargo clippy -p qbind-node --test run_422_d7c3b_genesis_network_correspondence_tests`
+  produce **no new warnings** attributable to the changed library or the new
+  test; the changed file `genesis_authority_record_correspondence.rs` yields zero
+  Clippy diagnostics. All emitted warnings originate from pre-existing, unrelated
+  files (`pqc_governance_*`, `snapshot_restore.rs`, `three_node_chaos_net_tests.rs`)
+  and are inherited, not introduced. A broad `--tests` gate was avoided.
+* `cargo build --release -p qbind-node --bin qbind-node` → compilation evidence
+  only (see marker below); it is **not** configured-authority release-binary
+  evidence.
+
+**D6 `run_422_d6_pv_domain_isolation_tests` target:** not present in this
+shallow clone (no `run_422_d6*` file exists under `crates/qbind-node/tests/`).
+It could not be executed here; reported accurately rather than asserted.
+
+### Boundaries preserved (task §6)
+
+Diff and caller inspection confirm no startup, engine, handler, cache, signing,
+verification, CLI, or storage behaviour was integrated; Required and genesis
+startup refusal remain intact (`run_422_startup_refusal_tests` green); engine
+wire values, D6 preimages/encodings/golden vectors, and existing authority
+boundaries are unchanged. The C3A resolver now has exactly **one** caller — this
+dormant library operation — which is not a startup or active-consensus
+integration.
+
+### Security-tool outcomes (task §7)
+
+Attempted against the actual revision via `parallel_validation`; outcomes
+recorded on their own axis (no readiness item moves Green):
+
+* **Code review:** completed, reviewed 4 files, **no review comments**. The
+  environment additionally reported a reviewer model-availability error
+  (`claude-sonnet-4.6 not found in registry`), so this is treated as
+  *completed-with-tool-degradation*, not an unconditional pass.
+* **CodeQL security scan (rust):** **skipped — database size too large.** The
+  accompanying "0 alerts" is a **skip, not a passing scan**; no CodeQL coverage
+  of this change was obtained here.
+
+### Verdict (task §8) — scoped strictly to the pinned-genesis network-correspondence boundary
+
+```
+D7C3B_PINNED_GENESIS_NETWORK_CORRESPONDENCE=CODE-TEST-POSITIVE
+GENESIS_NETWORK_CORRESPONDENCE_IS_CURRENT_AUTHORIZATION=FALSE
+STANDARD_WIRE_ALIAS_POLICY=DEFINED-NOT-ACTIVATED
+PRODUCTION_WIRE_CHAIN_ID_BEHAVIOR=UNCHANGED
+D7_STATUS=PARTIAL-CODE-TEST / PRODUCTION-LIFECYCLE-UNAVAILABLE
+DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED
+GENESIS_AUTHORITY_ACTIVATION=DISABLED
+CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED
+SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO
+```
+
+The canonical genesis hash already includes the environment scope; C3B retains
+and checks the policy used to validate that hash; the genesis string label is not
+a numeric network-ID registry; correspondence does not establish official-pin
+authenticity, live authority, or rollback resistance; and engine/QC and
+production authority integration remain unresolved. No readiness item moves
+Green.

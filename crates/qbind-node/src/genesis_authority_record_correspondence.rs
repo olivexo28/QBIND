@@ -62,6 +62,10 @@ use qbind_consensus::ids::ValidatorId;
 use qbind_crypto::ml_dsa44::ML_DSA_44_PUBLIC_KEY_SIZE;
 use qbind_crypto::ConsensusSigSuiteId;
 use qbind_ledger::{verify_boot_time_genesis, GenesisHash, NetworkEnvironmentPolicy};
+use qbind_types::{
+    resolve_network_wire_alias, ChainId, NetworkEnvironment, NetworkWireAlias,
+    NetworkWireAliasMismatch,
+};
 
 use crate::consensus_storage_observation::{
     ConsensusStorageObservation, ConsensusStorageObservationError,
@@ -70,7 +74,7 @@ use crate::genesis_consensus_authority::{
     build_genesis_consensus_authority, GenesisConsensusAuthority, GenesisConsensusAuthorityError,
     MAX_GENESIS_CONSENSUS_VALIDATORS,
 };
-use crate::pqc_boot_genesis::load_external_genesis;
+use crate::pqc_boot_genesis::{load_external_genesis, map_environment};
 use crate::signer_loader::public_key_fingerprint;
 use crate::timeout_verification_bridge::SUPPORTED_TIMEOUT_SUITE_ID;
 
@@ -104,6 +108,18 @@ pub struct ExpectedGenesisIdentity {
     /// expected field. Held privately so the expected identity cannot be
     /// mutated or reconstructed from untrusted claims.
     authority: GenesisConsensusAuthority,
+    /// Run 422 D7-C3B — the exact [`NetworkEnvironmentPolicy`] that was used to
+    /// boot-validate this identity (and, crucially, that scoped the canonical
+    /// genesis hash the pin was compared against).
+    ///
+    /// Private and immutable: it is recorded only by the successful
+    /// [`Self::load_pinned`] construction and never altered afterwards. There is
+    /// no public constructor, setter, or default that can fabricate a validation
+    /// policy, so a stored policy always reflects the policy under which this
+    /// identity actually passed pinned validation. It is the trust anchor for
+    /// [`Self::check_network_correspondence`], which refuses to relabel an
+    /// already-validated identity under a different environment policy.
+    validation_policy: NetworkEnvironmentPolicy,
 }
 
 impl std::fmt::Debug for ExpectedGenesisIdentity {
@@ -113,6 +129,7 @@ impl std::fmt::Debug for ExpectedGenesisIdentity {
             .field("genesis_fp", &public_key_fingerprint(&self.authority.genesis_hash))
             .field("validator_count", &self.authority.validator_count)
             .field("founding_epoch", &self.authority.authorized_epoch())
+            .field("validation_policy", &self.validation_policy)
             .finish()
     }
 }
@@ -163,7 +180,14 @@ impl ExpectedGenesisIdentity {
             build_genesis_consensus_authority(&genesis, &canonical_hash, ValidatorId::new(0))
                 .map_err(ExpectedGenesisIdentityError::Authority)?;
 
-        Ok(Self { authority })
+        // 4. Retain the exact policy that scoped this successful validation. The
+        //    canonical hash the pin was compared against already binds
+        //    `env_policy.scope()`, so recording the policy here keeps the
+        //    environment provenance attached to the validated identity.
+        Ok(Self {
+            authority,
+            validation_policy: env_policy,
+        })
     }
 
     /// The chain identity label established by pinned genesis validation.
@@ -189,6 +213,243 @@ impl ExpectedGenesisIdentity {
     /// The single founding epoch this genesis-static identity is valid for.
     pub fn founding_epoch(&self) -> u64 {
         self.authority.authorized_epoch()
+    }
+
+    /// The exact [`NetworkEnvironmentPolicy`] under which this identity was
+    /// pin-validated. This is the retained provenance checked by
+    /// [`Self::check_network_correspondence`].
+    pub fn validation_policy(&self) -> NetworkEnvironmentPolicy {
+        self.validation_policy
+    }
+
+    /// Run 422 D7-C3B — establish a **dormant, non-authorizing** static
+    /// correspondence between this pin-validated genesis identity, the selected
+    /// standard [`NetworkEnvironment`], the supplied full-width runtime
+    /// [`ChainId`], and the C3A wire alias.
+    ///
+    /// The operation, in order:
+    ///
+    /// 1. maps `selected_environment` to a [`NetworkEnvironmentPolicy`] via the
+    ///    existing [`map_environment`] and compares it against the policy this
+    ///    identity was *actually* validated under. A mismatch is rejected
+    ///    ([`GenesisNetworkCorrespondenceError::ValidationPolicyMismatch`]) —
+    ///    changing the environment/runtime pair can never relabel an
+    ///    already-validated identity;
+    /// 2. resolves the wire alias through the existing
+    ///    [`resolve_network_wire_alias`] (C3A), which independently re-checks the
+    ///    supplied full-width runtime ID against
+    ///    [`NetworkEnvironment::chain_id`]; a runtime mismatch is surfaced as
+    ///    [`GenesisNetworkCorrespondenceError::RuntimeMismatch`] (the reused C3A
+    ///    error) with no truncation or fallback;
+    /// 3. only when both checks pass, returns a [`GenesisNetworkCorrespondence`]
+    ///    that *borrows* this validated identity immutably, so the alias stays
+    ///    attached to the same validated genesis hash and authority commitment.
+    ///
+    /// The runtime ID is never inferred from the genesis `chain_id` label; it is
+    /// checked exclusively through C3A against the environment's authoritative
+    /// runtime constant. The result establishes **static correspondence only**:
+    /// it is not current authority, activation permission, freshness, storage
+    /// provenance, rollback resistance, or a signing capability, and there is no
+    /// conversion from it into any authorization type.
+    pub fn check_network_correspondence(
+        &self,
+        selected_environment: NetworkEnvironment,
+        supplied_runtime: ChainId,
+    ) -> Result<GenesisNetworkCorrespondence<'_>, GenesisNetworkCorrespondenceError> {
+        // 1. Retained validation policy vs the selected environment's policy.
+        let selected_policy = map_environment(selected_environment);
+        if selected_policy != self.validation_policy {
+            return Err(GenesisNetworkCorrespondenceError::ValidationPolicyMismatch {
+                validated_policy: self.validation_policy,
+                selected_environment,
+                selected_policy,
+            });
+        }
+
+        // 2. Wire alias obtained through the existing C3A resolver, which also
+        //    re-checks the full-width runtime ID. We never accept an
+        //    independently supplied raw alias.
+        let wire_alias = resolve_network_wire_alias(selected_environment, supplied_runtime)
+            .map_err(GenesisNetworkCorrespondenceError::RuntimeMismatch)?;
+
+        // 3. Attach the alias to the same validated identity via an immutable
+        //    borrow. No identity field is taken from a separately supplied
+        //    caller value.
+        Ok(GenesisNetworkCorrespondence {
+            identity: self,
+            environment: selected_environment,
+            runtime: supplied_runtime,
+            wire_alias,
+        })
+    }
+}
+
+// ============================================================================
+// Run 422 D7-C3B — pinned genesis ⇄ standard network correspondence
+// ============================================================================
+
+/// A dormant, **non-authorizing** static correspondence between a pin-validated
+/// [`ExpectedGenesisIdentity`] and a standard network mapping.
+///
+/// It is produced **only** by [`ExpectedGenesisIdentity::check_network_correspondence`]
+/// after both the retained-validation-policy check and the C3A runtime/wire
+/// resolution succeed. All fields are **private** and the value borrows the
+/// validated identity immutably, so it can never be constructed from
+/// independently supplied identity fields and never outlives the identity it
+/// refers to.
+///
+/// # What it establishes
+///
+/// That the selected [`NetworkEnvironment`] matches the environment policy this
+/// genesis was validated under, that the supplied full-width runtime
+/// [`ChainId`] is the authoritative runtime for that environment (checked by
+/// C3A), and the resulting dormant [`NetworkWireAlias`] — all attached to the
+/// original validated genesis hash and authority commitment.
+///
+/// # What it does NOT establish (stated explicitly)
+///
+/// It is **not** current authority, activation permission, freshness, storage
+/// provenance, rollback resistance, or a signing capability. It exposes only
+/// read-only inspection accessors and offers **no** conversion into
+/// `LocalAuthorizationState::Established`, a `CurrentAuthorizationOwner`, an
+/// `AuthorizedProposalVoteSnapshot`, an `AuthorizationTicket`, a
+/// `ProposalVoteSigningDomainV2`, or any signer / activated verification
+/// context. It also does not prove the operator obtained the correct official
+/// genesis pin, and it never chooses an official genesis or asserts uniqueness
+/// across forks.
+#[derive(Clone, Copy)]
+pub struct GenesisNetworkCorrespondence<'a> {
+    /// The pin-validated identity this correspondence refers to. Borrowed
+    /// immutably; the alias therefore stays attached to the exact validated
+    /// genesis hash / authority commitment.
+    identity: &'a ExpectedGenesisIdentity,
+    /// The selected standard environment (already confirmed to equal the
+    /// identity's retained validation policy scope).
+    environment: NetworkEnvironment,
+    /// The supplied full-width runtime ID (already confirmed by C3A to equal
+    /// `environment.chain_id()`).
+    runtime: ChainId,
+    /// The dormant C3A wire alias for that environment.
+    wire_alias: NetworkWireAlias,
+}
+
+impl std::fmt::Debug for GenesisNetworkCorrespondence<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("GenesisNetworkCorrespondence")
+            .field("environment", &self.environment)
+            .field("runtime", &self.runtime)
+            .field("wire_alias", &self.wire_alias)
+            .field("genesis_fp", &public_key_fingerprint(self.identity.genesis_hash()))
+            .field("validation_policy", &self.identity.validation_policy())
+            .finish()
+    }
+}
+
+impl<'a> GenesisNetworkCorrespondence<'a> {
+    /// The selected standard environment for this correspondence.
+    pub fn environment(&self) -> NetworkEnvironment {
+        self.environment
+    }
+
+    /// The full-width runtime [`ChainId`] confirmed for this environment.
+    pub fn runtime_chain_id(&self) -> ChainId {
+        self.runtime
+    }
+
+    /// The dormant C3A wire alias resolved for this environment.
+    pub fn wire_alias(&self) -> NetworkWireAlias {
+        self.wire_alias
+    }
+
+    /// The environment policy under which the underlying identity was
+    /// pin-validated (always the policy scope of [`Self::environment`]).
+    pub fn validation_policy(&self) -> NetworkEnvironmentPolicy {
+        self.identity.validation_policy()
+    }
+
+    /// The original validated canonical genesis hash the alias is attached to.
+    pub fn genesis_hash(&self) -> &GenesisHash {
+        self.identity.genesis_hash()
+    }
+
+    /// The original validated authority commitment the alias is attached to.
+    pub fn authority_commitment(&self) -> &[u8; 32] {
+        self.identity.authority_commitment()
+    }
+
+    /// The chain identity label of the underlying validated genesis.
+    pub fn chain_id(&self) -> &str {
+        self.identity.chain_id()
+    }
+
+    /// The committed validator count of the underlying validated identity.
+    pub fn validator_count(&self) -> usize {
+        self.identity.validator_count()
+    }
+
+    /// The founding epoch of the underlying validated identity.
+    pub fn founding_epoch(&self) -> u64 {
+        self.identity.founding_epoch()
+    }
+
+    /// An immutable borrow of the underlying validated identity.
+    pub fn identity(&self) -> &'a ExpectedGenesisIdentity {
+        self.identity
+    }
+}
+
+/// Fail-closed reasons a pinned genesis identity does not correspond to a
+/// selected standard network mapping.
+///
+/// Both variants carry only **bounded, non-secret** metadata (environment /
+/// policy enums and numeric runtime IDs). Neither `Display` nor `Debug` copies
+/// or prints genesis labels, file contents, paths, or key material.
+#[derive(Debug)]
+pub enum GenesisNetworkCorrespondenceError {
+    /// The selected environment's policy differs from the policy the identity
+    /// was pin-validated under. Rejecting this prevents relabelling an
+    /// already-validated identity under a different environment.
+    ValidationPolicyMismatch {
+        /// The policy the identity was actually validated under.
+        validated_policy: NetworkEnvironmentPolicy,
+        /// The environment selected by the caller.
+        selected_environment: NetworkEnvironment,
+        /// The policy the selected environment maps to.
+        selected_policy: NetworkEnvironmentPolicy,
+    },
+    /// The supplied full-width runtime ID did not match the selected
+    /// environment's authoritative runtime. This reuses the C3A mismatch error
+    /// verbatim (bounded: environment enum + two numeric [`ChainId`] values).
+    RuntimeMismatch(NetworkWireAliasMismatch),
+}
+
+impl std::fmt::Display for GenesisNetworkCorrespondenceError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::ValidationPolicyMismatch {
+                validated_policy,
+                selected_environment,
+                selected_policy,
+            } => write!(
+                f,
+                "genesis network correspondence: validation-policy mismatch \
+                 (validated under {validated_policy:?}, selected {selected_environment} \
+                 mapping to {selected_policy:?})"
+            ),
+            Self::RuntimeMismatch(e) => write!(
+                f,
+                "genesis network correspondence: runtime-id mismatch ({e})"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for GenesisNetworkCorrespondenceError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::ValidationPolicyMismatch { .. } => None,
+            Self::RuntimeMismatch(e) => Some(e),
+        }
     }
 }
 
