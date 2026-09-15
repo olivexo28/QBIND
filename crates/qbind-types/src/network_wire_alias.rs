@@ -32,6 +32,19 @@ use crate::primitives::{ChainId, NetworkEnvironment};
 ///
 /// This is a compact tag distinct from the full 64-bit runtime [`ChainId`]. It
 /// carries no protocol meaning yet; see the module documentation for scope.
+///
+/// # Raw tag, not a validation certificate
+///
+/// `NetworkWireAlias` is a *raw, publicly constructible* tag: any caller can
+/// build one directly (the field is `pub`) with an arbitrary `u32`. Possessing
+/// or observing a `NetworkWireAlias` value therefore proves nothing on its own
+/// -- in particular it does **not** prove that [`resolve_network_wire_alias`]
+/// was ever called, that any environment/runtime correspondence was checked, or
+/// that the value is authorized for any purpose. Only a successful return from
+/// [`resolve_network_wire_alias`] establishes the standard
+/// environment/runtime/wire correspondence, and even that is not an
+/// authorization capability. This type intentionally exposes no authority,
+/// signing, genesis or activation semantics.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct NetworkWireAlias(pub u32);
 
