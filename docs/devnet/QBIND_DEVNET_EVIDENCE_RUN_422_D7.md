@@ -3008,10 +3008,21 @@ the audit's §9 records the corrections. Key fixes:
 
 * Production wires no Proposal/Vote authority: `main.rs:5549`
   `proposal_vote_authority: None`; inbound/outbound Proposal/Vote run fail-closed
-  under `Required`. Distinguish **missing authority** (today: no owner/verifier,
-  rejected as current-state-unavailable) from **present authority with a missing
-  current owner** (a later `Stale`/`unavailable` rejection). C3B correspondence
-  (`genesis_authority_record_correspondence.rs` `load_pinned` /
+  under `Required`. The handler's two match arms give a precise rejection ladder:
+  **no effective verifier** (no snapshot and no `pv_authority`) →
+  `inbound_proposal_verification_context_unavailable_total` /
+  `inbound_vote_verification_context_unavailable_total` before crypto; **effective
+  verifier present but `current_auth` absent** →
+  `inbound_proposal_current_state_unavailable_total` /
+  `inbound_vote_current_state_unavailable_total` before crypto; **bound snapshot,
+  `owner.admit()` rejects** → the applicable admission failure before crypto; and
+  only **after** admission and verification succeed can `owner.confirm(ticket)`
+  fail with the `authority_stale_before_effect` counter. A missing owner never
+  reaches the confirmation check, so it must **not** be described as a post-crypto
+  `Stale` rejection. Current production (no authority, no snapshot) rejects on the
+  first rung, before cryptographic verification; D6 signature verification is an
+  implemented conditional path, not acceptance exercised by current production.
+  C3B correspondence (`genesis_authority_record_correspondence.rs` `load_pinned` /
   `check_network_correspondence`) has **test-only callers** and never becomes
   authorization.
 * A boot-validated `GenesisConsensusAuthority` exists but is not fed to the
@@ -3031,14 +3042,21 @@ the audit's §9 records the corrections. Key fixes:
   `version`/`epoch` and the entire D6 domain; it is **not reusable unchanged for
   D6-signed Votes** (whose signed input is `ProposalVoteSigningDomainV2::
   vote_preimage`). Its structural checks (bitmap↔sig count, index decode, power
-  sum) are reusable; its signature verification is not. Quorum rules
-  (`qc_threshold` scalar vs `two_thirds_vp()` vs `2f+1`) are not equated.
+  sum) are **structural ideas requiring checked adaptation**, not drop-in reuse:
+  indices must be bounded and computed with checked arithmetic before any
+  narrowing, and the power sum must be overflow-guarded; its signature
+  verification is not reusable. Quorum rules (`qc_threshold` scalar vs
+  `two_thirds_vp()` vs `2f+1`) are not equated, and `ConsensusValidatorSet`'s
+  saturating accumulation / `two_thirds_vp()`'s `2 * total` in `u64` cannot be
+  reused blindly for arbitrary inputs.
 
 **Reused implementations (no duplication introduced):** `ConsensusValidatorSet`
 + `SuiteAwareValidatorKeyProvider`, `verify_proposal_msg_with_domain` /
 `verify_vote_msg_with_domain` (the D6 machinery), the timeout verification
-bridge, and `try_bind` coherence. The legacy `verify_quorum_certificate` is
-reused **only** for its structural checks, **not** its signature path.
+bridge, and `try_bind` coherence. The legacy `verify_quorum_certificate` and the
+`two_thirds_vp()` threshold arithmetic are **structural ideas requiring checked
+adaptation** — reusable as templates for a checked implementation, **not** their
+signature path and **not** blind reuse of the saturating/`2 * total` arithmetic.
 
 **Recommended next code task (exactly one, revised).** The prior "invoke the
 existing QC verifier; prerequisites none" recommendation is **withdrawn** as
@@ -3046,13 +3064,25 @@ unsafe (it would verify the legacy `vote_digest` input, incompatible with
 D6-signed Votes). Instead: add a **dormant, pure D6-compatible QC verification
 boundary** that verifies a QC's constituent Votes via the existing D6
 message-bound Vote machinery and the established membership/key/backend
-interfaces, with trusted domain/membership/key-provider/backend/epoch inputs,
-bitmap/index/signature bounds, exact-Vote-field reconstruction, `two_thirds_vp()`
-quorum, typed malformed-certificate rejection, evidence in its own result type
-(no mutation of the shared serde logical QC), fail-closed on missing/inconsistent
-trusted inputs, and no legacy fallback. Full contract and required negative tests
-in the audit §6. Not wired into engine/binary/main; activation stays last and
-gated behind durable freshness / anti-rollback.
+interfaces, with trusted domain/membership/key-provider/backend/epoch inputs. It
+must bound the bitmap before decoding and compute indices with checked arithmetic
+(representability before any narrowing); define bitmap-position / wire
+`validator_index` / `ValidatorId` correspondence consistently with D6 (position
+and `ValidatorId` not interchangeable); test index aliasing and incorrect
+signature association instead of an impossible duplicate-bit encoding; validate a
+positive, consistent, representable voting-power total with overflow prevention in
+total, signer-power, and threshold arithmetic (reuse `two_thirds_vp()` only within
+proven bounds or a checked `ceil(2W/3)` equivalent, without silently changing
+quorum policy); reject epoch/wire-chain inconsistencies before crypto while
+preserving the QC's actual signed fields; return evidence in a separate,
+non-authorizing result type; keep legacy callers unchanged with no
+legacy-signature fallback; and fail closed on missing/inconsistent trusted
+inputs. Full contract and required negative tests (index/representability limits,
+arithmetic limits, zero/invalid total power, malformed signature associations,
+wrong domain/epoch, insufficient quorum, and real D6-signed positive controls) in
+the audit §6. Not wired into engine/binary/main; activation stays last and gated
+behind durable freshness / anti-rollback. The production runtime→wire mapping and
+provenance work gates integration/activation only, **not** this dormant verifier.
 
 **Checks executed / tool limitations.** Git and `rg`/`grep` source inspection
 only (recorded in the audit §7); no build, test, or release rebuild was run for
