@@ -1785,9 +1785,19 @@ supplied branch; the message's reviewed branch
 revisions `a1852788a4e4171a3185832aa7444f9346482d49` /
 `9f8d2bacb2bafaae74db24ccc09554412a39ef20` are **absent** from this shallow
 single-branch checkout — `git cat-file -t` ⇒ "could not get object info" — and
-could not be fetched; recorded as supplied, no ancestry fabricated). Starting
-HEAD this phase: `bb767166a705e3f217bfb6d8791feb3fce05fd76` (the shallow
-boundary). Commands re-executed in this environment (profile: `test`/`dev`,
+could not be fetched; recorded as supplied, no ancestry fabricated).
+
+**B3 provenance correction (task §7).** `bb767166a705e3f217bfb6d8791feb3fce05fd76`
+is the *earlier baseline*, **not** the shallow boundary. The immediate
+pre-implementation import that precedes the B3 tests
+(`e79e267c2d1a74afdfcf14cb98a72f3cddc5a6bd`) is
+`4c7e86d107e7c0677d18c6c6f13eb1b70a29d818`; in the reviewed ancestry the order is
+`bb767166` (baseline) → `4c7e86d1` (import/update) → `e79e267` (tests) →
+`62407fe` (evidence) → `1a75d30` (tool outcomes). In *this* checkout the local
+shallow boundary is `4c7e86d1` (recorded in `.git/shallow`); the earlier `bb767166`
+and the later `e79e267`/`62407fe`/`1a75d30` are pre-clone ancestry and are **not
+present as local objects** here (historical local-object limitation preserved
+separately, unchanged). Commands re-executed in the D7-B3 phase environment (profile: `test`/`dev`,
 default features, qbind-node; disk `df` ≈ 44% used throughout):
 
 * `cargo test -p qbind-node --lib run422_d7b3` ⇒ **11 passed**, 0 failed, 1572
@@ -1860,3 +1870,208 @@ GENESIS_AUTHORITY_ACTIVATION=DISABLED
 CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED
 SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO
 ```
+## Run 422 D7-C1 — read-only consensus-storage observations and recovery evidence
+
+This section is additive. It records a **bounded, read-only observation
+boundary** over the existing consensus storage and the real-storage / recovery
+evidence for it. It introduces no production activation, no authorization owner,
+no genesis-authority activation, and no durable anti-rollback claim. A readable
+persisted epoch is **storage evidence only** and is explicitly **not** proof of
+current Proposal/Vote authority.
+
+### Actual branch / SHAs (task §1, §7)
+* **Actual working branch:** `copilot/copilotcopilotrestore-deferral-disposition-fresh-a`
+  (the environment's supplied branch). The task message's stated branch
+  `copilot/copilotrestore-deferral-disposition-fresh-authoriz` differs from this
+  checkout's actual branch name; reported here without renaming and without
+  manufacturing ancestry.
+* **Starting HEAD (this phase):** `909e245079bd93bc9212755fce79a6c7c5cd880a`.
+* **Tested SHA (implementation checkpoint):** `52a6b72f55b6583c3fcd156d6411293ffaf449e2`
+  (the commit that adds `crates/qbind-node/src/consensus_storage_observation.rs`
+  and `crates/qbind-node/tests/run_422_d7c1_storage_observation_tests.rs`).
+* **Final SHA:** the tip recorded by the commit carrying this evidence section.
+* **Shallow-checkout limitation:** `git rev-parse --is-shallow-repository` ⇒
+  `true`; `.git/shallow` boundary is `4c7e86d107e7c0677d18c6c6f13eb1b70a29d818`.
+  The task's stated final revision `1a75d30a35e02e99a31762afbe66444b546e290a`, the
+  reviewed B3 tested implementation `e79e267c2d1a74afdfcf14cb98a72f3cddc5a6bd`, the
+  earlier baseline `bb767166a705e3f217bfb6d8791feb3fce05fd76`, and the evidence
+  revision `62407fe53745647b9113cf28135d85ff4bf0ee35` are pre-clone ancestry and
+  are **not present as local objects** here (`git cat-file -t` ⇒ "could not get
+  object info"); recorded as supplied, no ancestry fabricated.
+
+### Source map (task §3)
+Interfaces inspected and reused (read-only helpers marked ✓ read-only):
+
+| Symbol | File | Role established from source |
+| --- | --- | --- |
+| `ConsensusStorage::get_current_epoch` | `crates/qbind-node/src/storage.rs:200,936` | ✓ read-only. Returns `Result<Option<u64>>`; `None` (no key) is distinct from `Some(0)`; decode uses `unwrap_checksummed_meta` (strict), so malformed/short/bad-checksum epoch → `Codec`/`Corruption`, **never** `None`. |
+| `ensure_compatible_schema` | `crates/qbind-node/src/storage.rs:1414` | ✓ read-only. Missing schema key ⇒ legacy-v0 compatible; `v ≤ 1` compatible; `v > 1` ⇒ `IncompatibleSchema`. No upgrade/rewrite. |
+| `ConsensusStorage::get_schema_version` | `crates/qbind-node/src/storage.rs:225,978` | ✓ read-only. Wrong length ⇒ `Codec`. |
+| `ConsensusStorage::check_for_incomplete_epoch_transition` | `crates/qbind-node/src/storage.rs:277,1087` | ✓ read-only (a `get`, no delete). Marker present ⇒ `Some(marker)`; undecodable marker ⇒ `Corruption`. |
+| `ConsensusStorage::verify_epoch_consistency_on_startup` | `crates/qbind-node/src/storage.rs:285,1117` | ✓ read-only. Composes the marker check into `IncompleteEpochTransition`. |
+| `RocksDbConsensusStorage::open` | `crates/qbind-node/src/storage.rs:682` | **Writes**: `create_if_missing(true)` — can create a database. Opening/initializing is **not** the reader's job; the reader never calls it. |
+| `put_*` / `apply_epoch_transition_atomic` / `write_epoch_transition_marker` / `clear_epoch_transition_marker` | `storage.rs:912,997,1065,1174` | **Write/mutation** paths; the reader calls **none** of them. |
+| `ConsensusStorageState`, `OpenedProductionConsensusStorage`, `open_production_consensus_storage`, `persist_restored_snapshot_epoch` | `crates/qbind-node/src/production_consensus_storage.rs:89,302,391,504` | `OpenedProductionConsensusStorage.state` is a **startup observation**, not a continuously refreshed value; `persist_restored_snapshot_epoch` is the restore-**write** API used only for test fixtures. |
+| `LocalAuthorizationState`, `CurrentAuthorizationOwner`, `authorize_current_state` | `crates/qbind-node/src/genesis_consensus_authority.rs:685,1069,871` | Authorization surface. The C1 observation is **deliberately not convertible** into any of these; production owner construction remains unavailable-only. |
+
+Storage binds an epoch value, a schema version, and an in-progress transition
+marker. It does **not** bind chain/genesis identity, validator membership, keys,
+suite, signing domain, authority commitment, or activation authorization. The
+several reads (schema, marker, epoch) have **no atomicity guarantee** across
+calls.
+
+### Implementation (task §4)
+New module `crates/qbind-node/src/consensus_storage_observation.rs` (exported from
+`lib.rs`), sole entry point:
+
+```
+observe_consensus_storage<S: ConsensusStorage + ?Sized>(handle: Option<&S>)
+    -> Result<ConsensusStorageObservation, ConsensusStorageObservationError>
+```
+
+* Consumes an **existing optional** storage reference; never opens or creates
+  storage.
+* Reads the actual storage on **every** invocation (no cached startup summary).
+* Reuses the existing decoders/validation (`ensure_compatible_schema`,
+  `check_for_incomplete_epoch_transition`, `get_current_epoch`) — **no parallel
+  epoch parser**, legacy compatibility unchanged.
+* Calls **no** `put`/`delete`/`clear`/apply-transition/restore-write method.
+* Returns the observed epoch only as `ConsensusStorageObservation` (evidence);
+  there is **no** conversion to `LocalAuthorizationState::Established`,
+  `CurrentAuthorizationOwner`, `AuthorizedProposalVoteSnapshot`, or any ticket.
+
+### Observation / error matrix
+| Input state | Result |
+| --- | --- |
+| `None` handle | `ConsensusStorageObservation::NoStorageHandle` (nothing opened/created) |
+| Storage present, no epoch key | `PresentNoCommittedEpoch` (never `Some(0)`) |
+| Explicit epoch `n` (incl. `0`) | `CommittedEpoch(n)` (evidence only) |
+| Schema `> 1` | `Err(IncompatibleSchema{stored,current})` |
+| Malformed schema / epoch / marker bytes | `Err(MalformedMetadata{surface,source})` — never "no epoch" |
+| Incomplete-transition marker present | `Err(IncompleteEpochTransition{target,previous})`; marker not cleared, epoch unchanged |
+| Injected I/O read failure | `Err(ReadFailed{surface,source})` — never "no epoch" |
+
+### Tests (task §5) — `run_422_d7c1_storage_observation_tests` (20) + module units (5)
+Real-storage vs injected attribution:
+
+| Case | Test(s) | Backing |
+| --- | --- | --- |
+| A No handle | `d7c1_a_*` | logic (asserts no dir/db created) |
+| B Present-no-epoch (+reopen) | `d7c1_b_*` | **real RocksDB** temp db |
+| C Explicit epoch 0 (+reopen) | `d7c1_c_*` | **real RocksDB** temp db |
+| D Later epoch vs stale startup summary (+reopen control) | `d7c1_d_*` | **real RocksDB** via `open_production_consensus_storage` |
+| E Schema supported/legacy/unsupported/malformed | `d7c1_e_*` (3) | **real RocksDB** (malformed via raw key overwrite of a closed db) |
+| F Malformed epoch encoding / corrupted checksum | `d7c1_f_*` (2) | **real RocksDB** (raw key overwrite) |
+| G Marker present / malformed marker | `d7c1_g_*` (2) | **real RocksDB** |
+| H Read failure | `d7c1_h_*` (2) | **INJECTED** `FaultInjectingStorage` (labelled; not a real disk failure) |
+| I Snapshot-epoch parity None/0/idempotent/conflict | `d7c1_i_*` (4) | **real RocksDB** via `persist_restored_snapshot_epoch` (restore writes separate from the read-only observation) |
+| Read-only guarantee | `d7c1_reader_performs_no_writes_*` (3) | `WriteCountingStorage` write-call instrumentation (0 writes across present/committed/marker cases) |
+
+Read-only assertions compare **logical** stored values / marker state and use
+write-call instrumentation; no reliance on physical RocksDB file timestamps or
+compaction output. All database fixtures are temporary (`tempfile::TempDir`);
+no live data directory is touched.
+
+### Read-only guarantees & synchronization assumption (task §4, §6)
+* **Read-only:** the reader invokes only `get_schema_version` (via
+  `ensure_compatible_schema`), `check_for_incomplete_epoch_transition`, and
+  `get_current_epoch`. Instrumentation confirms zero write/mutation calls.
+* **Synchronization assumption:** the multiple reads are **not** an atomic
+  snapshot. The observation is meaningful only while relevant writers are
+  serialized or quiescent (e.g. startup probe / exclusive-lock holder). No claim
+  of atomic snapshot, concurrent consistency, or freshness-through-later-effect
+  is made; no concurrency redesign is introduced. Case D is a **serialized**
+  test and is **not** described as concurrent-invalidation protection.
+
+### Trust limits — missing authority bindings (task §6)
+The evidence establishes only what the supplied local database reports under the
+stated read model. It does **not** establish that: the database belongs to the
+expected chain/genesis; its epoch is bound to the candidate's membership, keys,
+suite, signing domain, or activation authorization; an old-but-valid database was
+not restored; a whole-data-dir clone/rollback/replacement is detectable; a
+startup observation stays current while consensus runs; or that checksums
+authenticate storage against an adversary. Persisted epoch zero does **not** close
+D7. A current-authorization lifecycle still requires additional validated bindings
+and a defined rollback trust model, not manufactured here.
+
+### Validation (task §7)
+Environment: profile `test`/`dev` and `release`; package `qbind-node`; default
+features unless noted; run sequentially; disk `df` monitored (≈ 44%→52% used,
+never exhausted). Tested SHA `52a6b72f55b6583c3fcd156d6411293ffaf449e2`.
+
+* `cargo test -p qbind-node --lib consensus_storage_observation` ⇒ **5 passed**,
+  0 failed, 1583 filtered out (exit 0). *(strict subset of the full `--lib` run.)*
+* `cargo test -p qbind-node --test run_422_d7c1_storage_observation_tests -- --test-threads=1`
+  ⇒ **20 passed**, 0 failed (exit 0).
+* `cargo test -p qbind-node --test run_093_production_consensus_storage_lifecycle_tests` ⇒ **12 passed** (exit 0).
+* `cargo test -p qbind-node --test run_097_snapshot_epoch_parity_tests` ⇒ **7 passed** (exit 0).
+* `cargo test -p qbind-node --test epoch_persistence_tests` ⇒ **13 passed** (exit 0).
+* `cargo test -p qbind-node --test storage_corruption_tests` ⇒ **14 passed** (exit 0).
+* `cargo test -p qbind-node --features test-utils --test m16_epoch_transition_hardening_tests` ⇒ **14 passed** (exit 0).
+  **Feature selection recorded:** this target requires the `test-utils` feature
+  (it calls the cfg-gated `set_inject_write_failure` / `clear_epoch_transition_marker`);
+  this is a **pre-existing** requirement of the target, unrelated to D7-C1. The
+  normal production build was checked separately (below).
+* `cargo test -p qbind-node --test run_422_startup_refusal_tests` ⇒ **4 passed** (exit 0) — genesis startup refusal preserved.
+* `cargo test -p qbind-node --lib` ⇒ **1588 passed**, 0 failed, 0 ignored (exit 0)
+  — full binary_consensus_loop library tests incl. A/B1/B2/B3 modules preserved
+  (previously 1583; the +5 are the new observation unit tests). *(superset of the
+  `consensus_storage_observation` run.)*
+* `cargo check -p qbind-node` (default features, production build) ⇒ Finished, exit 0.
+* `cargo clippy -p qbind-node --lib --test run_422_d7c1_storage_observation_tests`
+  ⇒ Finished, exit 0; **no** warnings in the new module or test target (85
+  pre-existing lib warnings unrelated to D7-C1 remain).
+* `cargo build --release -p qbind-node --bin qbind-node` ⇒ Finished (release
+  profile), exit 0.
+* **CRLF-aware whitespace:** the two new files
+  (`consensus_storage_observation.rs`, `run_422_d7c1_storage_observation_tests.rs`)
+  and `lib.rs` are uniformly **LF** (0 CR bytes), matching the crate's existing
+  Rust-source convention; no trailing whitespace introduced. Each edited file's
+  existing line-ending convention preserved.
+* **Secret/privacy scan:** secret scan over the changed files ⇒ no secrets
+  detected. No credentials/tokens introduced.
+
+### Security-tool outcomes (task §7)
+Both tools were attempted for this phase and neither produced a completed
+scan/review:
+* **CodeQL** — attempted via the parallel validation path (per-tool triviality:
+  **non-trivial**, new production module). It returned **SKIPPED** with reason
+  "database size is too large" (0 alerts reported). A database-size skip is
+  **not** a passing/clean scan; status is **SKIPPED/INCOMPLETE**.
+* **Code review** — the reviewer backend was **UNAVAILABLE** in this environment
+  (the `autofind` binary was not found on any searched path), so it returned "no
+  comments" without executing. Recorded as **UNAVAILABLE/UNVERIFIED**; **not** a
+  completed clean review.
+
+### Verdict (task §8) — scoped strictly to the read-only storage-observation boundary
+The positive result names ONLY the demonstrated boundary: a read-only observation
+that distinguishes absent handle, present-no-committed-epoch, explicit epoch
+(including 0), incompatible schema, malformed metadata/corruption, incomplete
+epoch transition, and injected read failure — over real temporary RocksDB
+databases (plus one labelled injected I/O case) — while performing no writes and
+converting to no authorization. Chain/genesis binding, membership/key/suite/
+signing-domain binding, restore-of-old-db detection, whole-dir rollback
+detection, cross-run freshness, and adversarial authentication are **not**
+claimed.
+
+```
+D7C1_STORAGE_OBSERVATION=CODE-TEST-POSITIVE
+PERSISTED_EPOCH_IS_AUTHORIZATION=FALSE
+D7_STATUS=PARTIAL-CODE-TEST / PRODUCTION-LIFECYCLE-UNAVAILABLE
+DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED
+GENESIS_AUTHORITY_ACTIVATION=DISABLED
+CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED
+SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO
+```
+
+### Remaining steps before storage evidence could support current authorization
+1. Bind the observed epoch to the expected chain/genesis identity and to the
+   candidate's validator membership, keys, suite, and signing domain.
+2. Bind it to an activation-authorization commitment (not an engine default, CLI
+   value, or `config_identity()`).
+3. Define and implement a durable anti-rollback / restore-of-old-db trust model
+   (detecting whole-data-dir clone/rollback/replacement).
+4. Establish a freshness model that remains valid while consensus runs (the C1
+   observation is a serialized/quiescent snapshot only).
+5. Capture configured-authority release-binary adversarial evidence (Run 423+),
+   which remains `NOT-YET-CAPTURED`. No readiness item moves Green.
