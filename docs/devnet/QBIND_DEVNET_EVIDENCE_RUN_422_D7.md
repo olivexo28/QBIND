@@ -2809,9 +2809,16 @@ integration.
 
 ### Security-tool outcomes (task §7)
 
-* Code review / CodeQL security scan: run via `parallel_validation` before task
-  completion; outcomes recorded on their own axis (a database-size skip or an
-  unavailable reviewer is **not** a passing scan).
+Attempted against the actual revision via `parallel_validation`; outcomes
+recorded on their own axis (no readiness item moves Green):
+
+* **Code review:** completed, reviewed 4 files, **no review comments**. The
+  environment additionally reported a reviewer model-availability error
+  (`claude-sonnet-4.6 not found in registry`), so this is treated as
+  *completed-with-tool-degradation*, not an unconditional pass.
+* **CodeQL security scan (rust):** **skipped — database size too large.** The
+  accompanying "0 alerts" is a **skip, not a passing scan**; no CodeQL coverage
+  of this change was obtained here.
 
 ### Verdict (task §8) — scoped strictly to the pinned-genesis network-correspondence boundary
 
