@@ -48,6 +48,7 @@ pub mod network;
 pub mod pacemaker;
 pub mod proposal_vote_verify;
 pub mod qc;
+pub mod qc_verify_domain;
 pub mod sim;
 pub mod slashing;
 pub mod timeout;
@@ -92,6 +93,10 @@ pub use pacemaker::{
     TimeoutPacemakerConfig,
 };
 pub use qc::{QcValidationError, QuorumCertificate};
+pub use qc_verify_domain::{
+    verify_quorum_certificate_with_domain, QcDomainVerifyError, VerifiedQuorumCertificate,
+    MAX_BITMAP_LEN, MAX_SIGNATURE_LEN,
+};
 pub use proposal_vote_verify::{
     verify_proposal_msg, verify_proposal_msg_with_domain, verify_vote_msg,
     verify_vote_msg_with_domain, ProposalVoteVerifyError, ProposalVoteVerifyOutcome,

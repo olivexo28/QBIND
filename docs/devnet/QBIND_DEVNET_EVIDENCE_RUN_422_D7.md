@@ -3090,3 +3090,211 @@ this documentation-only pass. Historical `cargo test` results above are not
 relabelled as newly executed. Prior CodeQL SKIPPED/INCOMPLETE and qualified
 reviewer outcomes remain as recorded and are not converted into successful
 analyses.
+
+## Run 422 D7-C3D — pure, dormant D6-compatible QuorumCertificate verification (code + test)
+
+This entry records the **authorized code task** recommended by C3C: a pure,
+dormant, D6-compatible QC verification boundary, with focused tests and evidence.
+It performs **no** production integration, activation, or wire/QC/storage change.
+
+```
+D7C3D_D6_QC_VERIFICATION=CODE-TEST-POSITIVE
+D7C3D_BINARY_ENGINE_INTEGRATION=NOT-PERFORMED
+D7C3D_VERIFIED_QC_IS_CURRENT_AUTHORIZATION=FALSE
+D7A_INBOUND_VERDICT=PARTIAL
+D7_STATUS=PARTIAL-CODE-TEST / PRODUCTION-LIFECYCLE-UNAVAILABLE
+DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED
+GENESIS_AUTHORITY_ACTIVATION=DISABLED
+PRODUCTION_WIRE_CHAIN_ID_BEHAVIOR=UNCHANGED
+CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED
+SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO
+```
+
+### Actual branch / SHAs (task §1, §9)
+
+* Branch (actual): `copilot/copilotcopilotrun-422-d7-c3c-again`. The task names
+  the reviewed branch `copilot/copilotrun-422-d7-c3c-again`; the checkout carries
+  an extra doubled `copilot` segment. Reported, not corrected (no history
+  rewrite).
+* Starting HEAD: `9c616577c209864aeb866d0f6b6db6fc5285fa33` (`update`).
+* Tested implementation SHA (checkpoint before lengthy validation):
+  `2ec4437f8fb24e78d9082b8d3373194193f483d7`.
+* The accepted C3C audit revision `03ed9104663f9d17074fe5ddb3fe3fb96c387070` and
+  the task's named reviewed branch tip are **absent** from this shallow clone
+  (`.git/shallow` grafts at `f124ec10aac4167319c6244e333f6e04345d7eae`), so
+  ancestry to the named C3C revision could not be confirmed. The present source
+  (the D6 verifier, wire QC/Vote, validator set, key/backend registries, and the
+  C3C audit doc) was verified directly in the worktree; missing historical
+  objects do not imply missing implementation and no ancestry was manufactured.
+* Disk/inodes at start: root fs 42% used, 6% inodes — ample headroom for
+  sequential builds; no duplicate target directories were created.
+
+### Reused implementations and the distinct gap filled (task §3, §8)
+
+Reused unchanged: `verify_vote_msg_with_domain` (the D6 message-bound Vote
+verifier, so the signed input is exactly `ProposalVoteSigningDomainV2::
+vote_preimage`), `ProposalVoteSigningDomainV2`, `ConsensusValidatorSet`,
+`SuiteAwareValidatorKeyProvider`, `ConsensusSigBackendRegistry` /
+`SimpleBackendRegistry`, and the real ML-DSA-44 test infrastructure
+(`MlDsa44Backend`).
+
+No equivalent domain-aware QC verifier existed. The legacy
+`verify_quorum_certificate` (`lib.rs:705`) verifies the legacy `vote_digest`
+signed input (which omits `version`/`epoch` and the entire D6 domain) through a
+different `CryptoProvider` interface; it is **not reusable unchanged** for
+D6-signed Votes and is left untouched (no legacy fallback). Its structural ideas
+(bitmap↔sig count, index decode, power sum) were adapted with checked
+arithmetic, not blindly copied.
+
+### New behavior (task §4, §5)
+
+New module `crates/qbind-consensus/src/qc_verify_domain.rs` exposes
+`verify_quorum_certificate_with_domain(qc, domain, authorized_epoch, validators,
+key_provider, backend_registry) -> Result<VerifiedQuorumCertificate,
+QcDomainVerifyError>`. `lib.rs` adds the narrow `pub mod qc_verify_domain;` and
+re-exports the function, result type, error type, and the `MAX_BITMAP_LEN` /
+`MAX_SIGNATURE_LEN` bounds. Full contract (API, trusted-input assumptions, index
+semantics, size bounds, quorum arithmetic, failure ordering, result ownership,
+typed failures, dormancy) is documented in
+`docs/protocol/QBIND_PROPOSAL_VOTE_SIGNING_DOMAIN_V2.md` §9A and is not duplicated
+here.
+
+Mandatory borrowed inputs make absence unrepresentable: no optional default
+domain/epoch, no second authority registry, and no production authority
+constructor were added to represent missing-input tests.
+
+### Index mapping, bounds, arithmetic, ordering, ownership (task §5, §9.5)
+
+* **Index mapping:** bitmap bit `i` → wire `validator_index = i` →
+  `ValidatorId(i)`, matching D6's `ValidatorId::new(vote.validator_index as
+  u64)`. Vector position is never used. Signatures associate with set bits in
+  ascending-bit order.
+* **Bounds:** `signer_bitmap.len() <= MAX_BITMAP_LEN` (8192; `8192*8 == 65536`
+  bits so the top index is exactly `u16::MAX`); `popcount == signatures.len()`;
+  each signature `<= MAX_SIGNATURE_LEN` (`u16::MAX`). Sizes are validated before
+  the single per-signer signature clone and before crypto. A membership id
+  `> u16::MAX` is rejected (`MembershipIdNotRepresentable`).
+* **Arithmetic:** total `W` recomputed with `checked_add` (reject
+  `TotalVotingPowerOverflow`), required positive (reject `ZeroTotalVotingPower`);
+  threshold `ceil(2W/3)` computed in `u128` (checked equivalent of
+  `two_thirds_vp()`, no `2*W` u64 wrap); per-signer power accumulated once with
+  `checked_add`. The accumulation overflow is mathematically excluded by the
+  validated total precondition and is tested via that precondition rather than a
+  fabricated case.
+* **Failure ordering:** WireChainMismatch → EpochMismatch → membership
+  arithmetic → bitmap/structural → per-signer (membership/missing-sig/key/suite/
+  backend/malformed/invalid) → InsufficientVotingPower. The first two and the
+  epoch check occur before any crypto; verified by direct backend-call counts.
+* **Result ownership:** `VerifiedQuorumCertificate` owns a clone of the QC plus
+  signer ids, verified power, threshold, and trusted context (expected wire
+  chain, authorized epoch, domain). Private fields, read-only accessors, no
+  public constructor, no public mutable field, no `Deserialize`, bounded `Debug`.
+  It offers no conversion to any authorization owner/snapshot/ticket/signer/
+  activation state/production verification capability.
+
+### Behavioral tests (task §6) — `run_422_d7c3d_qc_domain_verification_tests` (35)
+
+Real ML-DSA-44 positives/negatives; a `CountingVerifier` adapter delegates to the
+real backend and asserts backend-invocation counts where "before crypto" is
+claimed. Each negative crypto case has a matching same-key positive control and
+changes only the boundary under test. Coverage maps to the task §6 matrix:
+
+1. Valid quorum returns associated signer ids, power, threshold, certificate,
+   and context (`c3d_1_*`, 2 tests).
+2. Nonuniform powers: accept at exact threshold, reject below
+   (`c3d_2_nonuniform_accept_at_threshold_reject_below`).
+3. Sparse/reordered membership proving lookup by `ValidatorId` not position
+   (`c3d_3_sparse_reordered_membership_lookup_by_validator_id`).
+4. Correct-key wrong-domain negatives varying runtime id, genesis identity, and
+   authority commitment independently, each with a same-key control
+   (`c3d_4_*`, 3 tests).
+5. Wire-chain mismatch and a genuinely-signed wrong-epoch QC rejected before
+   crypto (backend calls == 0), the epoch case with an authorized-epoch control
+   (`c3d_5_*`, 2 tests).
+6. Legacy `vote_digest` signatures rejected as `InvalidSignature` by the D6
+   boundary, with a D6 positive control — signed-input incompatibility without
+   attributing an unrelated suite/key failure
+   (`c3d_6_legacy_vote_digest_signatures_rejected_by_d6`).
+7. Empty / popcount-mismatched (both directions) / overlong bitmaps, max-length
+   all-zero bitmap accepted structurally, unknown ids, index representability,
+   signature reordering, incorrect association (`c3d_7_*`, 9 tests).
+8. Empty/truncated/overlong signatures, header-field tampering, and a valid
+   quorum plus an invalid extra signature (backend calls == 5, proving all
+   signatures verified past quorum) (`c3d_8_*`, 5 tests).
+9. Missing key, governed-suite mismatch, unsupported backend, and a
+   registered-but-faulting backend as distinct outcomes (`c3d_9_*`, 4 tests).
+10. Zero total power, overflowed total (excluding the later accumulation
+    overflow), and safe threshold near/above the u64 half-limit without
+    wraparound (`c3d_10_*`, 4 tests).
+11. No partial verified result on failure and bounded Display/Debug diagnostics
+    (`c3d_11_*`, 3 tests).
+
+### Validation (task §7) — sequential, tested SHA `2ec4437`
+
+Recorded commands, all exit 0; subset counts are not summed as independent
+totals:
+
+* `cargo test -p qbind-consensus --test run_422_d7c3d_qc_domain_verification_tests`
+  → 35 passed.
+* `cargo test -p qbind-consensus --test run_422_d6_pv_domain_isolation_tests`
+  → 34 passed (existing D6 isolation target, unchanged).
+* `cargo test -p qbind-consensus` (full) → all targets pass (e.g. lib 182;
+  D7-C3D 35; D6 34; plus every other target 0 failed).
+* `cargo test -p qbind-wire` → all pass, 0 failed.
+* `cargo check -p qbind-node` (default production features) → Finished, exit 0.
+* `cargo test -p qbind-node --test run_420_production_policy_reachability_tests
+  --test run_422_startup_refusal_tests` → 3 + 4 passed.
+* `cargo clippy -p qbind-consensus --lib --test
+  run_422_d7c3d_qc_domain_verification_tests` → zero warnings attributable to the
+  new files; the 8 pre-existing lib warnings (e.g. slashing `large size
+  difference`, map-keys iteration) are in unrelated modules and untouched.
+* `rustfmt --check --edition 2021` on the two new files and the lib.rs edit →
+  clean. Formatting/whitespace limited to changed files; original CRLF doc line
+  endings preserved; no package-wide `cargo fmt` was run (a pre-existing
+  `basic_hotstuff_engine.rs` fmt diff is left untouched).
+* `cargo build --release -p qbind-node --bin qbind-node` (once, after the
+  implementation was stable) → Finished `release` profile (exit 0, 7m06s). This is **compilation
+  evidence only**, not configured-authority adversarial runtime evidence.
+
+The known unrelated broad `qbind-node --tests` feature-gating failure was
+avoided (only the two named node targets were built); no storage tests or APIs
+were modified.
+
+### Security-tool outcomes (task §7)
+
+`parallel_validation` was run on the changed set. **Code Review:** reviewed 5
+files, **0 review comments** — but the review model was reported unavailable in
+this environment (`model claude-sonnet-4.6 not found in registry`), so the empty
+result is **not** a clean reviewer pass. **CodeQL (rust):** **0 alerts**, but the
+analysis was **skipped — database size too large**. Per task §7 a database-size
+skip and a "0 alerts" accompanying a skip are **not** a passed security analysis;
+`SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO` is retained. These are the
+actual tool limitations, not converted into successful analyses.
+
+### No production integration or activation (task §8)
+
+`verify_quorum_certificate_with_domain` has **no** non-test callers: it is not
+referenced by the engine, node startup, handlers, cache, storage, or activation
+paths (only the new test target uses it). Production
+`proposal_vote_authority=None`, the genesis startup refusal, D6 signing bytes,
+Timeout/NewView separation, and `CurrentEpochUnavailable` behavior are unchanged;
+existing wire encodings, D6 preimages, shared logical QC fields, legacy verifier
+behavior, validator-set semantics, engine membership, node configuration, and
+authority constructors are untouched.
+
+### Remaining limitations / retained verdicts (task §9)
+
+Verified signature-and-quorum validity relative to trusted inputs is **not**
+current authorization: it does not establish official-genesis provenance,
+authority currency/freshness, or activation permission, and does not solve
+concurrent provider mutation or persistent freshness. This is not a complete
+transport-level DoS audit. Engine insertion, certificate propagation,
+parent/justify safety, lock/commit behavior, lifecycle activation, durable
+anti-rollback, and Run 423 remain separate work. Retained verdicts:
+`D7_STATUS=PARTIAL-CODE-TEST / PRODUCTION-LIFECYCLE-UNAVAILABLE`,
+`DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED`,
+`GENESIS_AUTHORITY_ACTIVATION=DISABLED`,
+`PRODUCTION_WIRE_CHAIN_ID_BEHAVIOR=UNCHANGED`,
+`CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED`,
+`SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO`. Prior C3A/C3B/C3C decisions and
+historical evidence are preserved and not relabelled as newly executed.

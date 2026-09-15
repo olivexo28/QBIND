@@ -351,6 +351,121 @@ existing fixture-label comparison are unchanged; production wire values remain
 caller in this dormant library operation — that is not a startup or active
 consensus integration.
 
+## 9A. Dormant D6-compatible QuorumCertificate verification (Run 422 D7-C3D)
+
+This bounded contract covers the pure, **dormant** boundary
+`qbind_consensus::qc_verify_domain::verify_quorum_certificate_with_domain`,
+which verifies the constituent `Vote` signatures and aggregate voting power of a
+**wire** `QuorumCertificate` under an explicitly supplied v2 domain. It reuses
+the D6 machinery and does **not** introduce a second QC verifier, a raw-preimage
+public API, a duplicate D6 encoder, `vote_digest`, or a legacy retry.
+
+**Signature.**
+
+```text
+verify_quorum_certificate_with_domain(
+    qc: &qbind_wire::consensus::QuorumCertificate,   // fully untrusted
+    domain: &ProposalVoteSigningDomainV2,            // trusted
+    authorized_epoch: u64,                           // trusted
+    validators: &ConsensusValidatorSet,              // trusted membership
+    key_provider: &K: SuiteAwareValidatorKeyProvider,// trusted
+    backend_registry: &B: ConsensusSigBackendRegistry,// trusted
+) -> Result<VerifiedQuorumCertificate, QcDomainVerifyError>
+```
+
+**Trusted-input assumption.** The whole QC is untrusted (validated whether wire-
+decoded or directly constructed). The `domain`, `authorized_epoch`,
+`validators`, `key_provider`, and `backend_registry` are trusted and must
+describe a coherent, stable context for the duration of the call. This boundary
+does not solve concurrent provider mutation or persistent freshness. Success
+establishes signature-and-quorum validity **relative to those inputs only** — it
+does **not** establish official-genesis provenance, current authority, or
+activation permission.
+
+**Signer-index semantics.** Identical to D6: bitmap bit `i` reconstructs wire
+`validator_index = i` and identifies `ValidatorId(i)`, subject to checked
+representability and a trusted membership lookup. Membership-vector *position* is
+never substituted for `ValidatorId`; ids are never reordered, renumbered,
+truncated, or wrapped. A bitmap cannot repeat a bit, so signer ids are distinct
+(index aliasing / incorrect association are tested rather than an invented
+duplicate-bit encoding). For this bounded phase a membership containing an id the
+u16 wire index cannot represent (`> u16::MAX`) is rejected.
+
+**Size bounds (validated before any clone or crypto).**
+
+* `signer_bitmap.len() <= MAX_BITMAP_LEN` (8192 bytes). `8192 * 8 == 65536`
+  bits, so the highest representable bit index is exactly `u16::MAX`; the cap
+  bounds work and guarantees representable indices.
+* `popcount(signer_bitmap) == signatures.len()`; signatures are associated with
+  set bits in ascending-bit order.
+* Each signature length `<= MAX_SIGNATURE_LEN` (`u16::MAX`, the wire length
+  bound). The only per-signer allocation is one clone of that signer's signature
+  into the reconstructed `Vote`. This is **not** a complete transport-level DoS
+  audit.
+
+**Failure ordering (fail-closed at the first failure).**
+
+1. `qc.chain_id == domain.expected_wire_chain_id()` — else `WireChainMismatch`,
+   before crypto.
+2. `qc.epoch == authorized_epoch` — else `EpochMismatch`, before crypto.
+3. Checked, representable, **positive** total voting power `W`
+   (`ZeroTotalVotingPower` / `TotalVotingPowerOverflow` /
+   `MembershipIdNotRepresentable`). The set's cached (saturating) total and
+   `two_thirds_vp()`'s `2 * total` u64 arithmetic are **not** trusted blindly.
+4. Structural bounds (`BitmapTooLong`, `SignatureCountMismatch`,
+   `SignerIndexNotRepresentable`).
+5. Per set bit in ascending order: reconstruct the `Vote` from the QC's
+   **actual** `version, chain_id, epoch, height, round, step, block_id, suite_id`
+   plus the bit-derived index and its associated signature (no field is replaced
+   with a trusted value to force a pass); validate signature length; verify via
+   `verify_vote_msg_with_domain` (membership, missing signature, governed key,
+   QC-suite-vs-governed-suite match, backend dispatch, and the cryptographic
+   check over the recomputed v2 preimage). Accumulate the signer's voting power
+   **once**, by `ValidatorId` lookup and checked arithmetic.
+6. Quorum: `accumulated >= ceil(2W/3)`.
+
+**Every declared signature is verified.** The function never returns success
+upon merely reaching quorum with unchecked extra signatures; a valid quorum
+followed by an invalid extra signature rejects.
+
+**Quorum arithmetic.** The threshold is the existing mathematical `ceil(2W/3)`
+computed with wide (`u128`) arithmetic — the **checked equivalent** of
+`ConsensusValidatorSet::two_thirds_vp` that avoids its `2 * total` u64 overflow.
+Because `ceil(2W/3) <= W <= u64::MAX`, the result always fits `u64`. Preserving
+`ceil(2W/3)` is **compatibility behavior**, not a new proof of safety under
+arbitrary weighted fault assumptions; it is deliberately not replaced with
+`2f+1` or a different weighted threshold. Because `W` is validated positive and
+non-overflowing and signer ids are distinct, the per-signer accumulation can
+never exceed `W`; the later accumulation overflow (`VerifiedPowerOverflow`) is
+therefore mathematically unreachable and retained only as an explicit checked
+guard — the excluding precondition (total-power overflow rejection) is tested
+instead of a fabricated case.
+
+**Result ownership.** On success a `VerifiedQuorumCertificate` associates an
+**owned clone** of the certificate, the distinct signer ids, the verified voting
+power, the threshold, and the trusted verification context (expected wire chain,
+authorized epoch, domain). It cannot silently refer to a later-mutated
+certificate. All fields are private with read-only accessors; there is no public
+constructor, no public mutable field, and no `Deserialize`. It provides **no**
+conversion to a current-authorization owner, snapshot, ticket, signer,
+activation state, or production verification capability, and its `Debug` is a
+bounded summary that never dumps signature or key bytes.
+
+**Typed failures.** `QcDomainVerifyError` distinguishes structural failures,
+epoch/wire mismatch, invalid membership arithmetic, missing key, suite mismatch,
+unsupported backend, malformed signature, invalid signature, backend failure,
+and insufficient voting power. Outward diagnostics are bounded: no variant
+embeds a certificate, signature array, or key bytes, and `BackendError` carries
+only a truncated message produced by our own backends. There is no panic,
+unchecked narrowing, saturating acceptance, default domain/epoch, unsigned
+fallback, or cross-suite retry.
+
+**Dormancy.** The boundary is **uncalled** by the production engine, node
+startup, handlers, cache, storage, and activation paths; its only callers are
+the Run 422 D7-C3D tests. The legacy `verify_quorum_certificate` (which signs
+the `vote_digest` input) is unchanged and is **not** used as the D6 path or a
+fallback.
+
 ## 10. Non-goals (D7 and beyond)
 
 This task establishes a scoped cryptographic boundary only. It does **not**
