@@ -10131,12 +10131,20 @@ mod tests {
         /// recording facade that distinguishes broadcast Proposal / broadcast
         /// Vote / directed (`send_vote_to`) Vote calls, and cached bodies signed
         /// (on the positive path) through the snapshot's bound verifier which
-        /// delegates to the REAL ML-DSA-44 backend. Signing invocations are
-        /// recorded through the `outbound_*_signing_success` counters (the sign
-        /// path increments them only when the bound verifier actually signs) and
-        /// corroborated by verifying the emitted signatures; on every negative
-        /// the signing-success counter staying 0 proves the real signer was
-        /// never invoked for the rejected message.
+        /// delegates to the REAL ML-DSA-44 backend.
+        ///
+        /// Signer invocation is observed DIRECTLY. The
+        /// `outbound_*_signing_success` counters record only *successful
+        /// completion* of a signature, so a signer that is invoked and then
+        /// returns an error would leave them at `0` — i.e. `signing_success == 0`
+        /// is NOT by itself proof that the signer was never called. The
+        /// dedicated recording-signer tests below wrap the real ML-DSA-44 signer
+        /// in a [`RecordingSigner`] that increments a per-authority counter AT
+        /// METHOD ENTRY (before delegating). A positive control proves the
+        /// counter is connected to the actual cached re-emission path, and every
+        /// negative asserts a literal zero invocation for the rejected message.
+        /// Emitted signatures are additionally corroborated by verification
+        /// under the selected domain.
         mod run422_d7b2 {
             use super::*;
             use crate::genesis_consensus_authority::{
@@ -10721,7 +10729,9 @@ mod tests {
                 );
                 assert_eq!(
                     out.stats.outbound_vote_signing_success, 0,
-                    "the real signer is never invoked for the rejected Vote"
+                    "no successful Vote signature was produced for the rejected Vote \
+                     (direct zero-invocation of the real signer is asserted in the \
+                     recording-signer tests below)"
                 );
                 assert!(out.reemitted_for_view.is_some(), "single-shot latch set by the Proposal");
                 assert_eq!(out.facade.nproposals(), 1);
@@ -10930,6 +10940,709 @@ mod tests {
                 assert_eq!(stats.outbound_vote_late_peer_reemits, 0);
                 assert_eq!(facade.nproposals(), 1);
                 assert_eq!(facade.nbroadcast_votes(), 0);
+            }
+
+            // =============================================================
+            // Run 422 D7-B2 corrective continuation (task §2–§4) — DIRECT
+            // signer-invocation observation, REAL cache creation, and the
+            // reachable cached-Vote / authority-selection cases.
+            // =============================================================
+
+            /// An invocation-recording [`ValidatorSigner`] wrapper. It counts
+            /// every `sign_proposal` / `sign_vote` call AT METHOD ENTRY (before
+            /// delegating to the real ML-DSA-44 `LocalKeySigner`), so a signer
+            /// that is invoked and then returns an error is still recorded as
+            /// invoked. This is precisely what `outbound_*_signing_success == 0`
+            /// (a *successful-completion* count) does not establish.
+            struct RecordingSigner {
+                inner: LocalKeySigner,
+                proposal_calls: Arc<AtomicU64>,
+                vote_calls: Arc<AtomicU64>,
+            }
+            impl ValidatorSigner for RecordingSigner {
+                fn validator_id(&self) -> &ValidatorId {
+                    self.inner.validator_id()
+                }
+                fn suite_id(&self) -> u16 {
+                    self.inner.suite_id()
+                }
+                fn sign_proposal(
+                    &self,
+                    p: &[u8],
+                ) -> Result<Vec<u8>, crate::validator_signer::SignError> {
+                    self.proposal_calls.fetch_add(1, SeqCst);
+                    self.inner.sign_proposal(p)
+                }
+                fn sign_vote(
+                    &self,
+                    p: &[u8],
+                ) -> Result<Vec<u8>, crate::validator_signer::SignError> {
+                    self.vote_calls.fetch_add(1, SeqCst);
+                    self.inner.sign_vote(p)
+                }
+                fn sign_timeout(
+                    &self,
+                    view: u64,
+                    high_qc: Option<&qbind_consensus::qc::QuorumCertificate<[u8; 32]>>,
+                ) -> Result<Vec<u8>, crate::validator_signer::SignError> {
+                    self.inner.sign_timeout(view, high_qc)
+                }
+                fn sign_timeout_with_chain_id(
+                    &self,
+                    chain_id: ChainId,
+                    view: u64,
+                    high_qc: Option<&qbind_consensus::qc::QuorumCertificate<[u8; 32]>>,
+                ) -> Result<Vec<u8>, crate::validator_signer::SignError> {
+                    self.inner.sign_timeout_with_chain_id(chain_id, view, high_qc)
+                }
+            }
+
+            /// Dedicated call counters for one recording signer, so a test can
+            /// attribute invocations to a specific supplied/bound authority.
+            #[derive(Clone)]
+            struct SignerCounters {
+                proposal_calls: Arc<AtomicU64>,
+                vote_calls: Arc<AtomicU64>,
+            }
+            impl SignerCounters {
+                fn new() -> Self {
+                    Self {
+                        proposal_calls: Arc::new(AtomicU64::new(0)),
+                        vote_calls: Arc::new(AtomicU64::new(0)),
+                    }
+                }
+                fn proposals(&self) -> u64 {
+                    self.proposal_calls.load(SeqCst)
+                }
+                fn votes(&self) -> u64 {
+                    self.vote_calls.load(SeqCst)
+                }
+            }
+
+            /// Build a `ProposalVoteAuthority` whose validator-0 local signer is
+            /// an invocation-recording wrapper over the real ML-DSA-44 key,
+            /// returning the authority together with its OWN dedicated counters.
+            fn recording_ctx_v2(
+                fixture: &Fixture,
+                domain: ProposalVoteSigningDomainV2,
+            ) -> (ProposalVoteAuthority, SignerCounters) {
+                let counters = SignerCounters::new();
+                let sk = fixture.sk_objs.get(&ValidatorId(0)).expect("sk").clone();
+                let inner = LocalKeySigner::new(ValidatorId(0), TEST_SUITE_U16, sk);
+                let signer: Arc<dyn ValidatorSigner> = Arc::new(RecordingSigner {
+                    inner,
+                    proposal_calls: counters.proposal_calls.clone(),
+                    vote_calls: counters.vote_calls.clone(),
+                });
+                let pv = ProposalVoteAuthority {
+                    validators: fixture.validators.clone(),
+                    key_provider: fixture.kp.clone(),
+                    backend_registry: fixture.br.clone(),
+                    chain_id: QBIND_DEVNET_CHAIN_ID,
+                    signer: Some(signer),
+                    signing_domain: domain,
+                };
+                (pv, counters)
+            }
+
+            // ---- DIRECT signer-invocation observation (task §2) --------------
+
+            #[test]
+            fn d7b2_recording_signer_positive_control_directly_counts_both_invocations() {
+                // POSITIVE CONTROL: prove the recording counters are connected to
+                // the actual cached re-emission path — a valid cache under a
+                // wired, currently-authorized snapshot invokes the REAL signer
+                // exactly once for the Proposal and once for the Vote.
+                let fixture = make_fixture(4);
+                let domain = d6_control_domain();
+                let (pv, counters) = recording_ctx_v2(&fixture, domain.clone());
+                let snap = coherent_snapshot_for(&pv);
+
+                // No signer call before the re-emission path runs.
+                assert_eq!(counters.proposals(), 0);
+                assert_eq!(counters.votes(), 0);
+
+                let out = run_reemit(
+                    Some(&snap),
+                    None,
+                    ConsensusVerificationPolicy::Required,
+                    |view| {
+                        (
+                            Some(cached_proposal(0, view, prov(&snap))),
+                            Some(cached_vote(0, view, prov(&snap))),
+                        )
+                    },
+                );
+
+                // Directly observed invocation on the cached re-emission path.
+                assert_eq!(counters.proposals(), 1, "cached Proposal re-emission invoked the real signer once");
+                assert_eq!(counters.votes(), 1, "cached Vote re-emission invoked the real signer once");
+                // Corroborated by the success counters + actual facade emission +
+                // signature verification.
+                assert_eq!(out.stats.outbound_proposal_signing_success, 1);
+                assert_eq!(out.stats.outbound_vote_signing_success, 1);
+                assert_eq!(out.stats.outbound_proposal_late_peer_reemits, 1);
+                assert_eq!(out.stats.outbound_vote_late_peer_reemits, 1);
+                assert_eq!(out.facade.nproposals(), 1);
+                assert_eq!(out.facade.nbroadcast_votes(), 1);
+                let ep = &out.facade.proposals.lock().unwrap()[0];
+                let ev = &out.facade.broadcast_votes.lock().unwrap()[0];
+                assert!(qbind_consensus::verify_proposal_msg_with_domain(
+                    ep,
+                    ValidatorId(0),
+                    fixture.validators.as_ref(),
+                    fixture.kp.as_ref(),
+                    fixture.br.as_ref(),
+                    &domain,
+                )
+                .is_ok());
+                assert!(qbind_consensus::verify_vote_msg_with_domain(
+                    ev,
+                    ValidatorId(0),
+                    fixture.validators.as_ref(),
+                    fixture.kp.as_ref(),
+                    fixture.br.as_ref(),
+                    &domain,
+                )
+                .is_ok());
+            }
+
+            #[test]
+            fn d7b2_recording_signer_rejected_proposal_directly_shows_zero_invocations() {
+                // NEGATIVE: an owner-level current-state failure rejects the
+                // Proposal before signing. The real signer is DIRECTLY observed
+                // to be un-invoked for BOTH families (counter == 0, not merely
+                // "no signing success").
+                let fixture = make_fixture(4);
+                let (pv, counters) = recording_ctx_v2(&fixture, d6_control_domain());
+                let snap = snap_unavailable(&pv, CurrentStateUnavailableReason::MissingStorage);
+                let out = run_reemit(
+                    Some(&snap),
+                    None,
+                    ConsensusVerificationPolicy::Required,
+                    |view| {
+                        (
+                            Some(cached_proposal(0, view, None)),
+                            Some(cached_vote(0, view, None)),
+                        )
+                    },
+                );
+                assert_eq!(counters.proposals(), 0, "rejected Proposal never reached the signer");
+                assert_eq!(counters.votes(), 0, "no Vote signing attempted after Proposal rejection");
+                assert_eq!(out.stats.outbound_proposal_current_state_unavailable_total, 1);
+                out.facade.assert_silent();
+            }
+
+            #[test]
+            fn d7b2_recording_signer_rejected_vote_directly_shows_zero_vote_invocations() {
+                // NEGATIVE: an admissible Proposal control is emitted (Proposal
+                // signer invoked once) so the cached-Vote branch is genuinely
+                // reached, then the Vote fails (missing provenance). The Vote
+                // signer is DIRECTLY observed to be un-invoked — a signer that
+                // errored would still register here, so this rules out the
+                // "error mistaken for not-invoked" ambiguity.
+                let fixture = make_fixture(4);
+                let (pv, counters) = recording_ctx_v2(&fixture, d6_control_domain());
+                let snap = coherent_snapshot_for(&pv);
+                let out = run_reemit(
+                    Some(&snap),
+                    None,
+                    ConsensusVerificationPolicy::Required,
+                    |view| {
+                        (
+                            Some(cached_proposal(0, view, prov(&snap))),
+                            Some(cached_vote(0, view, None)),
+                        )
+                    },
+                );
+                assert_eq!(counters.proposals(), 1, "admissible Proposal invoked the signer once");
+                assert_eq!(counters.votes(), 0, "the rejected Vote never reached the signer");
+                assert_eq!(out.stats.outbound_vote_reemit_missing_provenance_total, 1);
+                assert_proposal_only_partial(&out);
+            }
+
+            // ---- REAL cache creation via do_leader_tick (task §3) ------------
+
+            #[test]
+            fn d7b2_do_leader_tick_creates_caches_then_real_reemission_uses_them() {
+                // Drive the ACTUAL cache writer (`do_leader_tick`) to produce the
+                // typed Proposal/Vote caches from a leader-generated tick, then
+                // drive the ACTUAL `maybe_reemit_on_late_peer_connect` over a
+                // genuine new-peer transition. Initial forwarding and later
+                // re-emission are distinguished by SEPARATE facades and EXPLICIT
+                // signer/stat deltas.
+                let fixture = make_fixture(4);
+                // The engine hard-codes wire chain_id = 1 and epoch 0 on its
+                // leader-emitted Proposal/Vote, so the bound authority's v2 domain
+                // must expect wire chain id 1 (founding epoch 0 is already the
+                // authorized epoch).
+                let domain = d6_domain(
+                    0xD6D6_0000_0000_00A1,
+                    1,
+                    d6_genesis_identity(0x51),
+                    d6_authority_commitment(0x61),
+                );
+                let (pv, counters) = recording_ctx_v2(&fixture, domain.clone());
+                let snap = coherent_snapshot_for(&pv);
+
+                let mut engine = make_engine(ValidatorId(0), 4);
+                assert!(engine.is_leader_for_current_view());
+                let view = engine.current_view();
+
+                let metrics = make_metrics();
+                let mut proposals_emitted: u64 = 0;
+                let mut last_leader_proposal: Option<CachedLeaderProposal> = None;
+                let mut last_leader_vote: Option<CachedLeaderVote> = None;
+                let mut reconfig_detector = BinaryReconfigDetector::default();
+                let mut stats = BinaryConsensusLoopInboundStats::default();
+
+                // ---- Initial forwarding (distinct facade) ----
+                let initial_facade = RecordingFacade::default();
+                do_leader_tick(
+                    &mut engine,
+                    &mut proposals_emitted,
+                    &metrics,
+                    &mut stats,
+                    Some(&initial_facade),
+                    &mut last_leader_proposal,
+                    &mut last_leader_vote,
+                    &mut reconfig_detector,
+                    Some(&snap),
+                    None,
+                    ConsensusVerificationPolicy::Required,
+                );
+
+                // The REAL cache writer created BOTH entries with originating
+                // authorization captured at cache-creation.
+                let cached_p = last_leader_proposal.clone().expect("proposal cached");
+                let cached_v = last_leader_vote.clone().expect("vote cached");
+                assert!(cached_p.provenance.is_some(), "Proposal cache carries originating provenance");
+                assert!(cached_v.provenance.is_some(), "Vote cache carries originating provenance");
+                assert_eq!(cached_p.view, view);
+                assert_eq!(cached_v.view, view);
+                // The cached messages correspond to the leader-generated actions
+                // (same view/epoch; cached bodies are the pre-sign engine output).
+                assert_eq!(cached_p.proposal.header.height, view);
+                assert_eq!(cached_p.proposal.header.epoch, 0);
+                assert_eq!(cached_v.vote.height, view);
+                assert_eq!(cached_v.vote.epoch, 0);
+
+                // Initial forwarding invoked the signer once per family.
+                assert_eq!(proposals_emitted, 1);
+                assert_eq!(counters.proposals(), 1, "initial forwarding signed the Proposal once");
+                assert_eq!(counters.votes(), 1, "initial forwarding signed the Vote once");
+                let initial_p_success = stats.outbound_proposal_signing_success;
+                let initial_v_success = stats.outbound_vote_signing_success;
+                assert_eq!(initial_p_success, 1);
+                assert_eq!(initial_v_success, 1);
+                assert_eq!(initial_facade.nproposals(), 1);
+                assert_eq!(initial_facade.nbroadcast_votes(), 1);
+
+                let prov_p_gen_before =
+                    cached_p.provenance.as_ref().unwrap().ticket.generation();
+                let prov_v_gen_before =
+                    cached_v.provenance.as_ref().unwrap().ticket.generation();
+
+                // ---- Later re-emission across a genuine new-peer transition ----
+                let mut reemitted_for_view: Option<u64> = None;
+                let mut last_known_peers: HashSet<NodeId> = HashSet::new();
+                let peer = pv_node_for(1);
+                let connectivity = OnePeer(peer);
+                let reemit_facade = RecordingFacade::default();
+
+                maybe_reemit_on_late_peer_connect(
+                    &engine,
+                    &mut last_leader_proposal,
+                    &mut last_leader_vote,
+                    &mut reemitted_for_view,
+                    &mut last_known_peers,
+                    &connectivity,
+                    Some(&reemit_facade),
+                    &mut stats,
+                    Some(&snap),
+                    None,
+                    ConsensusVerificationPolicy::Required,
+                );
+
+                // Re-emission used the SAME cached entries (single-shot latch set;
+                // both families re-emitted once, to the SEPARATE facade).
+                assert_eq!(reemitted_for_view, Some(view));
+                assert_eq!(stats.outbound_proposal_late_peer_reemits, 1);
+                assert_eq!(stats.outbound_vote_late_peer_reemits, 1);
+                assert_eq!(reemit_facade.nproposals(), 1);
+                assert_eq!(reemit_facade.nbroadcast_votes(), 1);
+
+                // EXPLICIT deltas distinguish initial forwarding from re-emission:
+                // the real signer ran a SECOND time per family.
+                assert_eq!(counters.proposals(), 2, "re-emission invoked the Proposal signer a second time");
+                assert_eq!(counters.votes(), 2, "re-emission invoked the Vote signer a second time");
+                assert_eq!(stats.outbound_proposal_signing_success - initial_p_success, 1);
+                assert_eq!(stats.outbound_vote_signing_success - initial_v_success, 1);
+
+                // Re-emission did not drop or refresh the originating provenance:
+                // it is minted ONLY at cache-creation in `do_leader_tick`, so the
+                // retained entries still carry the same-generation ticket.
+                let after_p = last_leader_proposal.as_ref().expect("proposal cache retained");
+                let after_v = last_leader_vote.as_ref().expect("vote cache retained");
+                assert_eq!(
+                    after_p.provenance.as_ref().unwrap().ticket.generation(),
+                    prov_p_gen_before,
+                    "Proposal provenance unchanged by re-emission",
+                );
+                assert_eq!(
+                    after_v.provenance.as_ref().unwrap().ticket.generation(),
+                    prov_v_gen_before,
+                    "Vote provenance unchanged by re-emission",
+                );
+
+                // Emitted (re-emitted) signatures verify under the SELECTED domain.
+                let ep = &reemit_facade.proposals.lock().unwrap()[0];
+                let ev = &reemit_facade.broadcast_votes.lock().unwrap()[0];
+                assert!(qbind_consensus::verify_proposal_msg_with_domain(
+                    ep,
+                    ValidatorId(0),
+                    fixture.validators.as_ref(),
+                    fixture.kp.as_ref(),
+                    fixture.br.as_ref(),
+                    &domain,
+                )
+                .is_ok());
+                assert!(qbind_consensus::verify_vote_msg_with_domain(
+                    ev,
+                    ValidatorId(0),
+                    fixture.validators.as_ref(),
+                    fixture.kp.as_ref(),
+                    fixture.br.as_ref(),
+                    &domain,
+                )
+                .is_ok());
+            }
+
+            #[test]
+            fn d7b2_do_leader_tick_without_current_auth_then_replay_stays_rejected() {
+                // Cache creation WITHOUT current authorization (production wiring:
+                // no snapshot) leaves the entries with NO provenance. A later
+                // replay under an otherwise-valid authorization must NOT
+                // manufacture provenance: the unproven entries stay rejected.
+                let fixture = make_fixture(4);
+                let domain = d6_domain(
+                    0xD6D6_0000_0000_00A2,
+                    1,
+                    d6_genesis_identity(0x52),
+                    d6_authority_commitment(0x62),
+                );
+                let (pv, counters) = recording_ctx_v2(&fixture, domain);
+
+                let mut engine = make_engine(ValidatorId(0), 4);
+                let metrics = make_metrics();
+                let mut proposals_emitted: u64 = 0;
+                let mut last_leader_proposal: Option<CachedLeaderProposal> = None;
+                let mut last_leader_vote: Option<CachedLeaderVote> = None;
+                let mut reconfig_detector = BinaryReconfigDetector::default();
+                let mut stats = BinaryConsensusLoopInboundStats::default();
+
+                // Cache-creation with NO snapshot (LocalFixtureUnsigned so the
+                // tick still emits + caches, exactly modelling a cache produced
+                // without established current authorization).
+                do_leader_tick(
+                    &mut engine,
+                    &mut proposals_emitted,
+                    &metrics,
+                    &mut stats,
+                    None,
+                    &mut last_leader_proposal,
+                    &mut last_leader_vote,
+                    &mut reconfig_detector,
+                    None,
+                    Some(&pv),
+                    ConsensusVerificationPolicy::LocalFixtureUnsigned,
+                );
+                let cached_p = last_leader_proposal.clone().expect("proposal cached");
+                assert!(
+                    cached_p.provenance.is_none(),
+                    "a cache created without current authorization carries NO provenance",
+                );
+
+                // Replay under an otherwise-valid current authorization.
+                let snap = coherent_snapshot_for(&pv);
+                let mut reemitted_for_view: Option<u64> = None;
+                let mut last_known_peers: HashSet<NodeId> = HashSet::new();
+                let peer = pv_node_for(1);
+                let connectivity = OnePeer(peer);
+                let reemit_facade = RecordingFacade::default();
+                let sign_before = counters.proposals();
+                maybe_reemit_on_late_peer_connect(
+                    &engine,
+                    &mut last_leader_proposal,
+                    &mut last_leader_vote,
+                    &mut reemitted_for_view,
+                    &mut last_known_peers,
+                    &connectivity,
+                    Some(&reemit_facade),
+                    &mut stats,
+                    Some(&snap),
+                    None,
+                    ConsensusVerificationPolicy::Required,
+                );
+                // The unproven entry stays rejected; replay never manufactures
+                // provenance and the signer is never invoked for it.
+                assert_eq!(stats.outbound_proposal_reemit_missing_provenance_total, 1);
+                assert_eq!(stats.outbound_proposal_late_peer_reemits, 0);
+                assert_eq!(reemitted_for_view, None);
+                assert_eq!(counters.proposals() - sign_before, 0, "no signer invocation on the unproven replay");
+                // Provenance is still None after the replay attempt.
+                assert!(last_leader_proposal.as_ref().unwrap().provenance.is_none());
+                reemit_facade.assert_silent();
+            }
+
+            // ---- Reachable cached-Vote / authority-selection cases (task §4) --
+
+            #[test]
+            fn d7b2_case_a_cached_vote_generation_invalidation_across_a_b_a() {
+                // CASE A — a retained Vote from generation g is invalidated once
+                // the SAME owner's generation advances. A real A→B→A configuration
+                // sequence runs between completed calls; a Proposal from the
+                // CURRENT generation is admissible so execution reaches the cached
+                // Vote; the stale-generation Vote provenance is rejected, its
+                // signer is never invoked, and no Vote is emitted. A fresh
+                // admission after returning to A still succeeds.
+                let fixture = make_fixture(4);
+                let (pv, counters) = recording_ctx_v2(&fixture, d6_control_domain());
+                let mut snap = coherent_snapshot_for(&pv);
+
+                // Config A (founding). Capture a Vote provenance at generation g.
+                let stale_vote_prov = prov(&snap);
+
+                // Real A→B→A: advance the SAME owner to config B, then back to A.
+                // Each replacement advances the in-process generation.
+                let ident_a = snap.owner().candidate().config_identity();
+                let cid = ident_a.chain_id.clone();
+                let gh = ident_a.genesis_hash;
+                let commit_a = ident_a.authority_commitment;
+                let vc = ident_a.validator_count;
+                let ep = ident_a.epoch;
+                let config_b = ObservedConsensusConfiguration::new(cid.clone(), gh, COMMIT_B, vc, ep);
+                let config_a_again =
+                    ObservedConsensusConfiguration::new(cid, gh, commit_a, vc, ep);
+                snap.owner_mut()
+                    .replace_for_fixture(LocalAuthorizationState::Established(config_b));
+                snap.owner_mut()
+                    .replace_for_fixture(LocalAuthorizationState::Established(config_a_again));
+
+                // Admissible Proposal provenance captured at the CURRENT (post
+                // A→B→A) generation.
+                let fresh_proposal_prov = prov(&snap);
+                let out = run_reemit(
+                    Some(&snap),
+                    None,
+                    ConsensusVerificationPolicy::Required,
+                    {
+                        let fresh_proposal_prov = fresh_proposal_prov.clone();
+                        let stale_vote_prov = stale_vote_prov.clone();
+                        move |view| {
+                            (
+                                Some(cached_proposal(0, view, fresh_proposal_prov)),
+                                Some(cached_vote(0, view, stale_vote_prov)),
+                            )
+                        }
+                    },
+                );
+                assert_eq!(
+                    out.stats.outbound_vote_reemit_provenance_rejected_total, 1,
+                    "stale-generation Vote provenance rejected",
+                );
+                assert_eq!(counters.proposals(), 1, "fresh-generation Proposal signed");
+                assert_eq!(counters.votes(), 0, "stale-generation Vote never reached the signer");
+                assert_proposal_only_partial(&out);
+
+                // Fresh admission after returning to A: a provenance captured NOW
+                // (current generation) is admissible for the Vote too, while the
+                // retained gen-g provenance stays invalid.
+                let fresh_now = prov(&snap);
+                let out_fresh = run_reemit(
+                    Some(&snap),
+                    None,
+                    ConsensusVerificationPolicy::Required,
+                    {
+                        let fresh_now = fresh_now.clone();
+                        move |view| {
+                            (
+                                Some(cached_proposal(0, view, fresh_now.clone())),
+                                Some(cached_vote(0, view, fresh_now)),
+                            )
+                        }
+                    },
+                );
+                assert_eq!(
+                    out_fresh.stats.outbound_vote_late_peer_reemits, 1,
+                    "fresh-generation Vote admitted after returning to A",
+                );
+                assert_eq!(counters.votes(), 1, "only the fresh Vote invoked the signer; the stale one never did");
+            }
+
+            #[test]
+            fn d7b2_case_b_cached_vote_wire_chain_rejection_partial_outcome() {
+                // CASE B — an admissible Proposal control is emitted, then the
+                // cached Vote reaches its branch with valid current authorization
+                // + provenance but carries inconsistent wire-chain metadata
+                // (wire chain_id 1 vs the domain's expected 0). The Vote is
+                // refused for the wire-mismatch reason BEFORE signing; the signer
+                // is never invoked; the Proposal-only partial outcome is exact.
+                // This is distinct from the Proposal-first inconsistent-wire test.
+                let fixture = make_fixture(4);
+                let (pv, counters) = recording_ctx_v2(&fixture, d6_control_domain());
+                let snap = snap_matching(&pv);
+                let out = run_reemit(
+                    Some(&snap),
+                    None,
+                    ConsensusVerificationPolicy::Required,
+                    |view| {
+                        let proposal = cached_proposal(0, view, prov(&snap));
+                        let mut v = base_vote(0);
+                        v.epoch = 0;
+                        v.chain_id = 1; // inconsistent wire chain id vs domain wire 0
+                        let vote = CachedLeaderVote {
+                            view,
+                            vote: v,
+                            provenance: prov(&snap),
+                        };
+                        (Some(proposal), Some(vote))
+                    },
+                );
+                assert_eq!(
+                    out.stats.outbound_vote_wire_chain_mismatch, 1,
+                    "cached Vote refused for wire-chain mismatch",
+                );
+                assert_eq!(counters.proposals(), 1);
+                assert_eq!(counters.votes(), 0, "wire-mismatched Vote refused BEFORE signing");
+                assert_proposal_only_partial(&out);
+            }
+
+            #[test]
+            fn d7b2_case_c_bound_a_signs_supplied_b_never_invoked() {
+                // CASE C — a valid bound snapshot A and a distinct, separately
+                // instrumented supplied authority B are provided simultaneously.
+                // Under Required, A signs both families; B is never invoked; the
+                // emitted signatures verify under A's domain and FAIL under B's
+                // foreign domain and the legacy v1 boundary.
+                let fixture = make_fixture(4);
+                let domain_a = d6_control_domain();
+                let (pv_a, counters_a) = recording_ctx_v2(&fixture, domain_a.clone());
+                let domain_b = d6_domain(
+                    0xB0B0_0000_0000_0002,
+                    0,
+                    d6_genesis_identity(0x77),
+                    d6_authority_commitment(0x88),
+                );
+                let (pv_b, counters_b) = recording_ctx_v2(&fixture, domain_b.clone());
+                let snap_a = coherent_snapshot_for(&pv_a);
+
+                let out = run_reemit(
+                    Some(&snap_a),
+                    Some(&pv_b),
+                    ConsensusVerificationPolicy::Required,
+                    |view| {
+                        (
+                            Some(cached_proposal(0, view, prov(&snap_a))),
+                            Some(cached_vote(0, view, prov(&snap_a))),
+                        )
+                    },
+                );
+
+                assert_eq!(counters_a.proposals(), 1, "bound A signed the Proposal");
+                assert_eq!(counters_a.votes(), 1, "bound A signed the Vote");
+                assert_eq!(counters_b.proposals(), 0, "supplied B never signed the Proposal");
+                assert_eq!(counters_b.votes(), 0, "supplied B never signed the Vote");
+                assert_eq!(out.stats.outbound_proposal_late_peer_reemits, 1);
+                assert_eq!(out.stats.outbound_vote_late_peer_reemits, 1);
+
+                let ep = &out.facade.proposals.lock().unwrap()[0];
+                let ev = &out.facade.broadcast_votes.lock().unwrap()[0];
+                // Verify under A's domain ...
+                assert!(qbind_consensus::verify_proposal_msg_with_domain(
+                    ep, ValidatorId(0), fixture.validators.as_ref(), fixture.kp.as_ref(),
+                    fixture.br.as_ref(), &domain_a,
+                )
+                .is_ok());
+                assert!(qbind_consensus::verify_vote_msg_with_domain(
+                    ev, ValidatorId(0), fixture.validators.as_ref(), fixture.kp.as_ref(),
+                    fixture.br.as_ref(), &domain_a,
+                )
+                .is_ok());
+                // ... FAIL under B's foreign domain ...
+                assert!(qbind_consensus::verify_proposal_msg_with_domain(
+                    ep, ValidatorId(0), fixture.validators.as_ref(), fixture.kp.as_ref(),
+                    fixture.br.as_ref(), &domain_b,
+                )
+                .is_err());
+                assert!(qbind_consensus::verify_vote_msg_with_domain(
+                    ev, ValidatorId(0), fixture.validators.as_ref(), fixture.kp.as_ref(),
+                    fixture.br.as_ref(), &domain_b,
+                )
+                .is_err());
+                // ... and FAIL under the legacy v1 boundary.
+                assert!(qbind_consensus::verify_proposal_msg(
+                    ep, ValidatorId(0), fixture.validators.as_ref(), fixture.kp.as_ref(),
+                    fixture.br.as_ref(), QBIND_DEVNET_CHAIN_ID,
+                )
+                .is_err());
+                assert!(qbind_consensus::verify_vote_msg(
+                    ev, ValidatorId(0), fixture.validators.as_ref(), fixture.kp.as_ref(),
+                    fixture.br.as_ref(), QBIND_DEVNET_CHAIN_ID,
+                )
+                .is_err());
+            }
+
+            #[test]
+            fn d7b2_case_d_shared_candidate_arc_still_isolates_by_issuer() {
+                // CASE D — two owners built from clones of the EXACT SAME
+                // candidate Arc (asserted via `Arc::ptr_eq`). Even with a shared
+                // candidate handle, a cache minted under owner A offered while
+                // owner B is current is refused (foreign issuer): shared candidate
+                // structure does not launder foreign cached authorization.
+                let fixture = make_fixture(4);
+                let (pv, counters) = recording_ctx_v2(&fixture, d6_control_domain());
+
+                let candidate = coherent_authority_for(&pv);
+                let owner_a = CurrentAuthorizationOwner::establish_for_fixture(
+                    candidate.clone(),
+                    candidate.config_identity(),
+                );
+                let owner_b = CurrentAuthorizationOwner::establish_for_fixture(
+                    candidate.clone(),
+                    candidate.config_identity(),
+                );
+                // The two owners share the SAME candidate allocation.
+                assert!(Arc::ptr_eq(owner_a.candidate(), owner_b.candidate()));
+                assert!(Arc::ptr_eq(owner_a.candidate(), &candidate));
+
+                let snap_a = AuthorizedProposalVoteSnapshot::try_bind(owner_a, Arc::new(pv.clone()))
+                    .expect("bind A");
+                let snap_b = AuthorizedProposalVoteSnapshot::try_bind(owner_b, Arc::new(pv.clone()))
+                    .expect("bind B");
+
+                let prov_a = prov(&snap_a);
+                let out = run_reemit(
+                    Some(&snap_b),
+                    None,
+                    ConsensusVerificationPolicy::Required,
+                    {
+                        let prov_a = prov_a.clone();
+                        move |view| {
+                            (
+                                Some(cached_proposal(0, view, prov_a)),
+                                Some(cached_vote(0, view, None)),
+                            )
+                        }
+                    },
+                );
+                assert_eq!(
+                    out.stats.outbound_proposal_reemit_provenance_rejected_total, 1,
+                    "foreign-issuer provenance refused despite shared candidate Arc",
+                );
+                assert_eq!(counters.proposals(), 0, "foreign-issuer cache never reached the signer");
+                assert_eq!(out.stats.outbound_proposal_late_peer_reemits, 0);
+                out.facade.assert_silent();
             }
         }
 
