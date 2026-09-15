@@ -17,7 +17,12 @@
 //!      (incl. a different high word with the correct low 32 bits) reject via
 //!      C3A, without truncation/fallback.
 //!   D. Pin and snapshot preservation.
-//!   E. Environment-scoped pin handling.
+//!   E. Canonical-hash pin isolation. One fixture that validates under **both**
+//!      DevNet and TestNet (required TestNet label + authority config): its
+//!      DevNet and TestNet canonical pins differ; each pin loads only under its
+//!      own environment; and supplying the frozen DevNet pin under TestNet fails
+//!      through the typed `CanonicalHashMismatch` (not a label-policy rejection),
+//!      both via `verify_boot_time_genesis` directly and via `load_pinned`.
 //!   F. No invented label registry (ordinary label; two distinct genesis files
 //!      each correspond under the same env when separately pinned).
 //!   G. Bounded diagnostics for both typed mismatch errors.
@@ -28,8 +33,9 @@ use tempfile::TempDir;
 
 use qbind_crypto::ml_dsa44::MlDsa44Backend;
 use qbind_ledger::{
-    compute_canonical_genesis_hash, GenesisAllocation, GenesisAuthorityConfig, GenesisAuthorityRoot,
-    GenesisConfig, GenesisCouncilConfig, GenesisHash, GenesisMonetaryConfig, GenesisValidator,
+    compute_canonical_genesis_hash, verify_boot_time_genesis, BootGenesisVerificationError,
+    GenesisAllocation, GenesisAuthorityConfig, GenesisAuthorityRoot, GenesisConfig,
+    GenesisCouncilConfig, GenesisHash, GenesisMonetaryConfig, GenesisValidator,
     NetworkEnvironmentPolicy, GENESIS_AUTHORITY_ML_DSA_44_PUBLIC_KEY_BYTES,
     GENESIS_AUTHORITY_SUITE_ML_DSA_44,
 };
@@ -330,17 +336,17 @@ fn d7c3b_d_loaded_identity_survives_source_removal_and_correspondence_needs_no_r
 }
 
 // ============================================================================
-// E. Environment-scoped pin handling
+// E. Canonical-hash pin isolation
 // ============================================================================
 
 #[test]
-fn d7c3b_e_pin_scoped_to_one_policy_cannot_load_under_another() {
-    // A DevNet-shaped genesis (no authority block, generic label). Its canonical
-    // pin under DevNet embeds scope "DEV". Selecting a different policy either
-    // computes a different canonical hash (scope differs) or is rejected earlier
-    // by that policy's stricter validation — in both cases loading fails.
+fn d7c3b_e_canonical_hash_pin_is_environment_isolated() {
+    // ONE fixture that satisfies the existing validation rules under BOTH DevNet
+    // and TestNet: it carries the required lowercase "testnet" chain-id token and
+    // a full authority block (TestNet requires an authority; DevNet accepts it).
+    // The production validators are used unchanged for every check below.
     let mut cfg = GenesisConfig::new(
-        "qbind-net-e",
+        "qbind-testnet-e",
         1_738_000_000_000,
         vec![GenesisAllocation::new(
             "0x1111111111111111111111111111111111111111",
@@ -357,30 +363,67 @@ fn d7c3b_e_pin_scoped_to_one_policy_cannot_load_under_another() {
         ),
         GenesisMonetaryConfig::mainnet_default(),
     );
-    // Give it an authority block so structural checks are not the only reason a
-    // stricter env could reject; this isolates the canonical-hash scope mismatch
-    // for TestNet.
     let mut auth = GenesisAuthorityConfig::new(vec![root(0xab, "signer-e")]);
     auth.pqc_transport_roots = vec![root(0xcd, "transport-e")];
     cfg.authority = Some(auth);
 
     let (_dir, path) = write_genesis(&cfg);
+
+    // Freeze the DevNet and TestNet canonical pins of this single unchanged
+    // fixture. They differ only because the canonical hash binds the environment
+    // scope ("DEV" vs "TST"); the fixture bytes are identical.
     let devnet_pin = compute_canonical_genesis_hash(&cfg, NetworkEnvironmentPolicy::Devnet);
+    let testnet_pin = compute_canonical_genesis_hash(&cfg, NetworkEnvironmentPolicy::Testnet);
+    assert_ne!(
+        devnet_pin.as_slice(),
+        testnet_pin.as_slice(),
+        "DevNet and TestNet canonical pins of the same fixture must differ"
+    );
 
-    // DevNet pin loads under DevNet.
-    load(&path, NetworkEnvironmentPolicy::Devnet, &devnet_pin);
+    // Each pin loads successfully only under its own environment.
+    let dev_identity = load(&path, NetworkEnvironmentPolicy::Devnet, &devnet_pin);
+    assert_eq!(dev_identity.genesis_hash().as_slice(), devnet_pin.as_slice());
+    let test_identity = load(&path, NetworkEnvironmentPolicy::Testnet, &testnet_pin);
+    assert_eq!(
+        test_identity.genesis_hash().as_slice(),
+        testnet_pin.as_slice()
+    );
 
-    // The same DevNet pin cannot authorize loading under TestNet: TestNet's
-    // canonical hash uses scope "TST", so the frozen DevNet pin mismatches. (The
-    // chain label "qbind-net-e" also lacks "testnet", but the canonical-hash
-    // scope difference alone already fails closed.)
+    // The frozen DevNet pin under TestNet is rejected by the canonical-hash
+    // comparison itself — the fixture passes TestNet's structural + label checks,
+    // so this is NOT a label-policy rejection. Assert the typed mismatch with its
+    // environment and the exact expected/actual hashes.
+    match verify_boot_time_genesis(
+        NetworkEnvironmentPolicy::Testnet,
+        &cfg,
+        Some(&devnet_pin),
+    ) {
+        Err(BootGenesisVerificationError::CanonicalHashMismatch {
+            env,
+            expected,
+            actual,
+        }) => {
+            assert_eq!(env, NetworkEnvironmentPolicy::Testnet);
+            assert_eq!(expected.as_slice(), devnet_pin.as_slice());
+            assert_eq!(actual.as_slice(), testnet_pin.as_slice());
+        }
+        other => panic!("expected CanonicalHashMismatch under TestNet, got {other:?}"),
+    }
+
+    // The same mismatched pin is also rejected through `load_pinned`'s existing
+    // error interface (which wraps `verify_boot_time_genesis`).
     match ExpectedGenesisIdentity::load_pinned(
         &path,
         NetworkEnvironmentPolicy::Testnet,
         &devnet_pin,
     ) {
-        Err(ExpectedGenesisIdentityError::GenesisRevalidationFailed { .. }) => {}
-        other => panic!("cross-policy pin must fail closed, got {other:?}"),
+        Err(ExpectedGenesisIdentityError::GenesisRevalidationFailed { detail }) => {
+            assert!(
+                detail.contains("canonical genesis hash mismatch"),
+                "load_pinned must reject via the canonical-hash mismatch, got: {detail}"
+            );
+        }
+        other => panic!("cross-env pin must fail closed via load_pinned, got {other:?}"),
     }
 }
 
