@@ -1744,13 +1744,17 @@ untrusted input and is re-checked in full: F6 sender binding →
 domain/wire/signature verification → pre-effect `confirm()` → the single
 permitted synchronous effect. No cached verdict is consulted.
 
-### Behavioral tests (task §4) — module `run422_d7b3` (9 tests)
+### Behavioral tests (task §4) — module `run422_d7b3` (11 tests)
 All drive the real `handle_inbound_consensus_msg` under `Required` policy with
 real encoded Proposals, coherent snapshots, real ML-DSA-44, a genuine F6
 gate/origin, an active restore baseline (`snapshot_height=5`, engine restored so
 `committed_height()==Some(5)`), the invocation-counting `CountingSigVerifier`
 backend, and the recording `D7ActionRecorder` facade. Deferring frames are shaped
-at height 7 (> committed+1) to reach the actual deferral branch.
+at height 7 (> committed+1) to reach the actual deferral branch. Cases H and I
+are **sequential** real-handler tests over a single engine and (for I) a single
+current-authorization owner: H advances the receiver's committed prefix between
+completed calls, and I terminally exhausts the same owner between completed
+calls, before re-delivering the identical encoded bytes.
 
 | Case | Test | Demonstrated |
 | --- | --- | --- |
@@ -1760,30 +1764,62 @@ at height 7 (> committed+1) to reach the actual deferral branch.
 | D. Foreign current domain | `d7b3_d_foreign_current_domain_rejects_original_signature` | the d5-domain-signed Proposal is verify-accepted under a d5-domain verifier and verify-**rejected** under a coherent d6-domain snapshot (same keys); rejection is a signature failure, **not** a wire-chain mismatch. |
 | E. Valid new owner | `d7b3_e_valid_new_owner_independently_admits_and_verifies` | a distinct current-authorization owner with the same valid configuration independently admits + verifies the re-delivery (backend delta +1, `deferred==2`); the earlier owner's ticket is not reused and a new owner is not itself grounds to reject. |
 | F. F6 ordering | `d7b3_f_f6_mismatch_precedes_authorization_on_redelivery` | on re-delivery a mismatched authenticated sender is rejected by F6 before any current-auth lookup or crypto (no backend call, no current-state counter, no deferral, facade 0). |
-| G. Restore progress control | `d7b3_g_progress_stops_deferral_and_delivers_without_claiming_engine_success` | when the deferral condition no longer holds (frame at committed+1 whose parent is the committed block), the frame is verify-accepted and `inbound_proposals_delivered==1`; engine acceptance is asserted only as a separate downstream outcome (`engine_accepted <= delivered`) — **no engine/QC success is claimed** from verifier success. |
+| G. Deferral branch control (distinct frames) | `d7b3_g_progress_stops_deferral_and_delivers_without_claiming_engine_success` | **Branch-control (predicate-outcome) test only:** two DIFFERENT signed frames on separate engines — a height-7 frame that DOES defer and a height-6 frame (committed+1, parent == committed block) that does NOT; the non-deferring frame is verify-accepted and `inbound_proposals_delivered==1`; engine acceptance is asserted only as a separate downstream outcome (`engine_accepted <= delivered`) — **no engine/QC success is claimed** from verifier success. This establishes distinct predicate outcomes; it is **not** progress-then-retransmission of the same deferred message (that is case H). |
+| H. Receiver progress between deliveries (sequential retransmission) | `d7b3_h_receiver_progress_between_deliveries_delivers_same_message` | **Newly demonstrated sequential behavior.** One coherent snapshot, one engine, one signed height-7 Proposal (parent `[0xAB;32]`). Delivery 1 ⇒ admitted, real-verified (backend calls==1), `deferred==1`, not delivered. Between calls the receiver committed prefix is advanced to height 6 anchored at `[0xAB;32]` via the established `initialize_from_snapshot_baseline` startup helper — **fixture-driven receiver progress, NOT authenticated catch-up transport / QC validation / durable recovery** — while restore mode stays ACTIVE and the engine is NOT replaced. Delivery 2 re-delivers the identical encoded bytes: F6 admits again (accepted==2), backend delta exactly +1 (calls==2, no reused verdict), `verify_accepted==2`, `deferred` unchanged (still 1), `inbound_proposals_delivered==1`; engine/QC checked separately (`engine_accepted <= delivered`), facade 0. |
+| I. Terminal exhaustion before retransmission | `d7b3_i_terminal_exhaustion_between_deliveries_rejects_retransmission` | A valid height-7 Proposal is admitted, verified, and deferred. Between calls the SAME current-authorization owner is driven into the terminal exhausted latch through the cfg(test) checked-overflow path (`set_generation_for_exhaustion_fixture(u64::MAX)` then a `replace_for_fixture` whose `generation+1` overflows — the latch is actually exercised, asserted via `is_exhausted`, not merely positioned). Candidate/verifier/bytes/sender unchanged. Re-delivery of the identical Proposal: F6 admits (accepted==2) but current admission fails as exhausted — dedicated admission-time counter `inbound_proposal_authorization_exhausted_total==1` (NOT the confirm-time `stale_before_effect` path), with the exhaustion reason independently established via the owner API. No further backend call (calls unchanged), no further verify-accept/deferral/delivery/engine-accept/facade action; owner remains terminally exhausted (`generation==u64::MAX`, no wraparound). |
 
 Backend/signer invocation claims are DIRECT observations of the shared atomic;
 multi-call claims use before/after deltas. No mid-call mutation, sleeps,
 concurrent aliases, or persistent epoch source were introduced.
 
 ### Validation (task §6)
-Commands run in this environment (profile: `test`/`dev`, default features,
-qbind-node):
-* `cargo test -p qbind-node --lib run422_d7b3` ⇒ **9 passed**, 0 failed, 1572
-  filtered out (exit 0).
-* `cargo test -p qbind-node --lib run422` ⇒ **115 passed**, 0 failed, 1466
-  filtered out (exit 0).
-* `cargo test -p qbind-node --lib binary_consensus_loop` ⇒ **209 passed**, 0
-  failed, 1372 filtered out (exit 0) — includes the restore-catchup, D6
-  domain-isolation, and D5/D7-A/B1/B2 in-crate regressions.
-* `cargo test -p qbind-node --test run_418_authenticated_peer_consensus_sender_binding_tests`
-  ⇒ **18 passed**; `--test run_420_production_policy_reachability_tests` ⇒ **3
-  passed**; `--test run_422_startup_refusal_tests` ⇒ **4 passed**; `--test
-  b3_snapshot_restore_tests` ⇒ **10 passed**; `--test
-  b5_restore_aware_consensus_start_tests` ⇒ **4 passed** (all exit 0).
+
+**Corrective continuation (cases H, I).** This phase adds the two sequential
+real-handler tests (H: receiver progress between deliveries; I: terminal
+exhaustion before retransmission), clarifies the case-G branch-control naming,
+and updates this evidence. It was validated at code checkpoint
+`e79e267c2d1a74afdfcf14cb98a72f3cddc5a6bd` on the actual working branch
+`copilot/copilotrestore-deferral-disposition-fresh-authoriz` (the environment's
+supplied branch; the message's reviewed branch
+`copilot/restore-deferral-disposition-fresh-authorization` and the reviewed B3
+revisions `a1852788a4e4171a3185832aa7444f9346482d49` /
+`9f8d2bacb2bafaae74db24ccc09554412a39ef20` are **absent** from this shallow
+single-branch checkout — `git cat-file -t` ⇒ "could not get object info" — and
+could not be fetched; recorded as supplied, no ancestry fabricated). Starting
+HEAD this phase: `bb767166a705e3f217bfb6d8791feb3fce05fd76` (the shallow
+boundary). Commands re-executed in this environment (profile: `test`/`dev`,
+default features, qbind-node; disk `df` ≈ 44% used throughout):
+
+* `cargo test -p qbind-node --lib run422_d7b3` ⇒ **11 passed**, 0 failed, 1572
+  filtered out (exit 0) — the 9 prior cases plus new H and I. *(strict subset of
+  the run422 and binary_consensus_loop runs below.)*
+* `cargo test -p qbind-node --lib run422` ⇒ **117 passed**, 0 failed, 1466
+  filtered out (exit 0) — retained D7-A/A3/B1/B2/D5/D6 in-crate tests plus the
+  now-11 D7-B3 tests. *(superset of the run422_d7b3 run.)*
+* `cargo test -p qbind-node --lib binary_consensus_loop` ⇒ **211 passed**, 0
+  failed, 1372 filtered out (exit 0) — full module incl. restore-catchup, D6
+  domain-isolation, and D5/D7-A/B1/B2 regressions, no regressions. *(superset of
+  the two runs above.)*
+* `cargo test -p qbind-node --lib d7a3_ticket_issuer_and_exhaustion` ⇒ **10
+  passed**, 0 failed, 1573 filtered out (exit 0) — the owner ticket-issuer /
+  exhaustion unit coverage that case I builds on, unchanged.
+* `cargo test -p qbind-node --test run_422_startup_refusal_tests` ⇒ **4 passed**,
+  0 failed (exit 0).
 * `cargo check -p qbind-node` ⇒ Finished, exit 0.
 * `cargo clippy -p qbind-node --lib` ⇒ Finished, exit 0 (85 pre-existing
   warnings, none in the new `run422_d7b3` code).
+* CRLF-aware whitespace check on the changed source file
+  (`crates/qbind-node/src/binary_consensus_loop.rs`): file remains uniformly
+  CRLF (19120/19120 lines CR-terminated, no lone CR, no mixed endings) and the
+  added test lines carry the same CRLF convention; no trailing-whitespace
+  introduced. Original line endings preserved.
+
+**Prior 9-test D7-B3 pass (preserved as recorded).** The earlier D7-B3 pass
+reported `cargo test -p qbind-node --lib run422_d7b3` ⇒ **9 passed** (and the
+associated run422 ⇒ 115, binary_consensus_loop ⇒ 209 counts). Those counts are
+retained as historical results at their originally reported revision and are
+**superseded** by the re-executed 11/117/211 counts above; they are not
+relabelled as newly executed.
 
 Because only tests + documentation changed, earlier release-build evidence is
 retained at its original recorded revision and NOT re-captured
@@ -1805,6 +1841,8 @@ engine/leader effects, and production lifecycle are **not** claimed.
 ```
 D7B3_RESTORE_DEFERRAL_DISPOSITION=DISCARD-AND-AWAIT-RETRANSMISSION
 D7B3_REDELIVERY_FRESH_AUTHORIZATION=CLOSED-CODE-TEST (scoped positive; inbound restore-deferral boundary only)
+D7B3_SEQUENTIAL_PROGRESS_RETRANSMISSION=CLOSED-CODE-TEST (case H; identical message re-delivered after fixture-driven receiver progress; delivery ≠ engine/QC success)
+D7B3_TERMINAL_EXHAUSTION_RETRANSMISSION=CLOSED-CODE-TEST (case I; cfg(test) checked-overflow exhausted latch; admission-time exhaustion counter)
 D7B3_VOTE_RESTORE_DEFERRAL=NONE (no analogous path; not invented)
 D7B3_DUPLICATE_PROCESSING_SAFETY=NOT-CLAIMED
 D7B3_LATER_SOCKET_DELIVERY=NOT-CLAIMED
