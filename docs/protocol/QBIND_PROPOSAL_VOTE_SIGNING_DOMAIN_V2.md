@@ -251,6 +251,48 @@ production mapping is absent, a production v2 authority cannot be constructed
 safely, which is one reason production activation stays unavailable. Resolving
 this mapping is a prerequisite dependency recorded for later work.
 
+### 9.1 Dormant standard-network wire alias mapping (Run 422 D7-C3A)
+
+Run 422 D7-C3A introduces a **pure, dormant** helper in `qbind-types`
+(`network_wire_alias.rs`) that assigns a compact 32-bit `NetworkWireAlias` to
+each of the three standard environments and validates the standard
+environment / runtime / wire correspondence. It does **not** resolve the
+unresolved production dependency described above: it covers only the three
+standard networks, is not wired into any preimage, message, authority or
+activation path, and general 32-bit narrowing of arbitrary runtime `ChainId`s
+can still collide.
+
+Assigned dormant aliases (defined, not activated):
+
+| Environment | Authoritative runtime source        | Wire alias   |
+| ----------- | ----------------------------------- | ------------ |
+| DevNet      | `NetworkEnvironment::chain_id()`    | `0x44455600` |
+| TestNet     | `NetworkEnvironment::chain_id()`    | `0x54535400` |
+| MainNet     | `NetworkEnvironment::chain_id()`    | `0x4D41494E` |
+
+Each assigned alias is the low 32 bits of that environment's authoritative
+64-bit runtime `ChainId`; the three standard low words are distinct, though
+general narrowing of arbitrary runtime IDs to 32 bits can collide.
+
+**Input contract of `resolve_network_wire_alias(environment, supplied_runtime)`:**
+
+* The authoritative expected runtime is obtained **only** from
+  `environment.chain_id()`; there is no parallel registry or fallback.
+* The caller-supplied full 64-bit runtime `ChainId` must equal that expected
+  runtime exactly (all 64 bits). A supplied ID sharing only the low 32 bits is
+  rejected.
+* On match it returns the alias for the environment; on any mismatch it returns
+  `NetworkWireAliasMismatch { environment, expected_runtime, supplied_runtime }`.
+* `NetworkWireAlias` is a raw, publicly constructible tag, **not** a validation
+  certificate: a bare alias value does not prove the helper was called or that
+  any correspondence was checked, and the helper grants no authorization.
+* The helper never reads an incoming message, never truncates the runtime
+  `ChainId` to derive the expected value, and performs no I/O.
+
+Status markers: `STANDARD_WIRE_ALIAS_POLICY=DEFINED-NOT-ACTIVATED`,
+`PRODUCTION_WIRE_CHAIN_ID_BEHAVIOR=UNCHANGED`. The unresolved production
+`ChainId` -> wire mapping in section 9 remains open.
+
 ## 10. Non-goals (D7 and beyond)
 
 This task establishes a scoped cryptographic boundary only. It does **not**
