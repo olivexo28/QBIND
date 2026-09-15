@@ -3262,10 +3262,14 @@ were modified.
 
 ### Security-tool outcomes (task §7)
 
-To be recorded from the run of the available review/CodeQL tooling
-(`parallel_validation`); a database-size skip, trivial skip, unavailable
-reviewer, or "0 alerts" accompanying a skip is not treated as a passed security
-analysis.
+`parallel_validation` was run on the changed set. **Code Review:** reviewed 5
+files, **0 review comments** — but the review model was reported unavailable in
+this environment (`model claude-sonnet-4.6 not found in registry`), so the empty
+result is **not** a clean reviewer pass. **CodeQL (rust):** **0 alerts**, but the
+analysis was **skipped — database size too large**. Per task §7 a database-size
+skip and a "0 alerts" accompanying a skip are **not** a passed security analysis;
+`SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO` is retained. These are the
+actual tool limitations, not converted into successful analyses.
 
 ### No production integration or activation (task §8)
 
