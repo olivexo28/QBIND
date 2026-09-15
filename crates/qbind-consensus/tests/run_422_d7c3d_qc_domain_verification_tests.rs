@@ -20,7 +20,8 @@ use qbind_consensus::crypto_verifier::SimpleBackendRegistry;
 use qbind_consensus::ids::ValidatorId;
 use qbind_consensus::key_registry::SuiteAwareValidatorKeyProvider;
 use qbind_consensus::qc_verify_domain::{
-    verify_quorum_certificate_with_domain, QcDomainVerifyError, MAX_BITMAP_LEN, MAX_SIGNATURE_LEN,
+    checked_aggregate_signature_bytes, verify_quorum_certificate_with_domain, QcDomainVerifyError,
+    MAX_AGGREGATE_SIGNATURE_BYTES, MAX_BITMAP_LEN, MAX_SIGNATURE_COUNT, MAX_SIGNATURE_LEN,
 };
 use qbind_consensus::validator_set::{ConsensusValidatorSet, ValidatorSetEntry};
 use qbind_crypto::consensus_sig::{ConsensusSigError, ConsensusSigVerifier};
@@ -644,19 +645,126 @@ fn c3d_7_overlong_bitmap_rejected() {
 }
 
 #[test]
-fn c3d_7_max_len_bitmap_all_zero_is_within_bounds() {
-    // A maximum-length all-zero bitmap is structurally accepted (0 signers ->
-    // insufficient power), demonstrating the boundary is inclusive of
-    // MAX_BITMAP_LEN and that representability is exactly u16::MAX.
-    let f = uniform_fixture(4);
+fn c3d_7_bitmap_exact_membership_span_all_zero_within_bounds() {
+    // With members 0..3 (max id 3), the membership identifier span is exactly 1
+    // byte. A 1-byte all-zero bitmap is structurally within bounds (0 signers ->
+    // insufficient power), NOT rejected as beyond-span. This replaces an earlier
+    // test that treated a full 8192-byte all-zero bitmap as "within bounds": a
+    // bitmap is now bounded by the membership identifier span, so a full-length
+    // all-zero bitmap only fits a membership that actually spans that far (see
+    // c3d_7_highest_index_real_signature_positive). An all-zero bitmap is
+    // therefore never used as proof of highest-index cryptographic acceptance.
+    let f = uniform_fixture(4); // total 4, threshold 3, span = 1 byte
     let d = base_domain();
     let br = real_registry();
     let mut qc = unsigned_qc();
-    qc.signer_bitmap = vec![0u8; MAX_BITMAP_LEN];
+    qc.signer_bitmap = vec![0u8; 1];
     match verify(&f, &qc, &d, &br) {
         Err(QcDomainVerifyError::InsufficientVotingPower { .. }) => {}
         other => panic!("expected InsufficientVotingPower, got {:?}", other),
     }
+}
+
+#[test]
+fn c3d_7_bitmap_zero_padding_beyond_membership_span_rejected() {
+    // Members 0..3 -> span 1 byte. A 2-byte bitmap whose extra byte is pure zero
+    // padding is rejected: bytes beyond the trusted identifier span (even zero
+    // padding) are not accepted.
+    let f = uniform_fixture(4); // span = 1 byte
+    let d = base_domain();
+    let br = real_registry();
+    let mut qc = unsigned_qc();
+    qc.signer_bitmap = vec![0u8, 0u8]; // 2 bytes, 1 byte beyond span
+    match verify(&f, &qc, &d, &br) {
+        Err(QcDomainVerifyError::BitmapBeyondMembershipSpan { len, allowed }) => {
+            assert_eq!(len, 2);
+            assert_eq!(allowed, 1);
+        }
+        other => panic!("expected BitmapBeyondMembershipSpan, got {:?}", other),
+    }
+}
+
+#[test]
+fn c3d_7_bitmap_set_bit_beyond_membership_span_rejected_before_crypto() {
+    // A set bit that lands in a byte beyond the membership span is rejected by
+    // the span bound (before any crypto), NOT by the per-signer membership
+    // lookup. Members 0..3 -> span 1 byte; setting bit 8 needs a 2nd byte.
+    let f = uniform_fixture(4); // span = 1 byte
+    let d = base_domain();
+    let counting = CountingVerifier::new(Arc::new(MlDsa44Backend));
+    let counter = counting.counter();
+    let br = SimpleBackendRegistry::with_backend(TEST_SUITE, Arc::new(counting));
+    let qc = build_signed_qc_unknown(&f, &d, &[8]); // bit 8 -> byte 1
+                                                    // Ensure a signature is present so any short-circuit would be visible.
+    assert_eq!(qc.signer_bitmap.len(), 2);
+    match verify(&f, &qc, &d, &br) {
+        Err(QcDomainVerifyError::BitmapBeyondMembershipSpan { len, allowed }) => {
+            assert_eq!(len, 2);
+            assert_eq!(allowed, 1);
+        }
+        other => panic!("expected BitmapBeyondMembershipSpan, got {:?}", other),
+    }
+    assert_eq!(
+        counter.load(Ordering::SeqCst),
+        0,
+        "no crypto before membership-span bound"
+    );
+}
+
+#[test]
+fn c3d_7_unknown_set_bit_within_membership_span_rejected() {
+    // A set bit WITHIN the membership span but for a non-member id still rejects
+    // at the per-signer membership check (UnknownSigner), distinct from the
+    // beyond-span structural rejection. Sparse members {0,2,5,9} -> max id 9 ->
+    // span 2 bytes (bits 0..15). Bit 1 is within span but ValidatorId(1) is not
+    // a member.
+    let f = make_fixture(&[0, 2, 5, 9], &[1, 1, 1, 1]);
+    let d = base_domain();
+    let br = real_registry();
+    let qc = build_signed_qc_unknown(&f, &d, &[1]); // within span, unknown member
+    match verify(&f, &qc, &d, &br) {
+        Err(QcDomainVerifyError::UnknownSigner(id)) => assert_eq!(id, ValidatorId(1)),
+        other => panic!("expected UnknownSigner(1), got {:?}", other),
+    }
+}
+
+#[test]
+fn c3d_7_sparse_membership_shorter_bitmap_positive_control() {
+    // Positive control: a sparse membership whose highest signer needs fewer
+    // bytes than the span still verifies (a shorter-than-span bitmap is
+    // allowed). Members {0,2,5,9} span 2 bytes; signers {0,2,5} only need 1
+    // byte. total 4, threshold 3, signers power 3.
+    let f = make_fixture(&[0, 2, 5, 9], &[1, 1, 1, 1]);
+    let d = base_domain();
+    let br = real_registry();
+    let qc = build_signed_qc(&f, &d, &[0, 2, 5]);
+    assert_eq!(qc.signer_bitmap.len(), 1); // shorter than the 2-byte span
+    let ev = verify(&f, &qc, &d, &br).expect("shorter-than-span bitmap verifies");
+    assert_eq!(
+        ev.signers(),
+        &[ValidatorId(0), ValidatorId(2), ValidatorId(5)]
+    );
+}
+
+#[test]
+fn c3d_7_highest_index_real_signature_positive() {
+    // A genuine real-ML-DSA positive QC with a single sparse member
+    // ValidatorId(65535): the highest representable u16 index. Its bitmap sets
+    // the highest bit (byte 8191, bit 7) with a full MAX_BITMAP_LEN-byte bitmap
+    // (== the membership span for max id 65535), and the reconstructed Vote uses
+    // validator_index 65535. This is a real cryptographic acceptance at the
+    // maximum index (not an all-zero-bitmap claim). total 1, threshold 1.
+    let f = make_fixture(&[65535], &[1]);
+    let d = base_domain();
+    let br = real_registry();
+    let qc = build_signed_qc(&f, &d, &[65535]);
+    assert_eq!(qc.signer_bitmap.len(), MAX_BITMAP_LEN);
+    let ev = verify(&f, &qc, &d, &br).expect("highest-index real signature verifies");
+    assert_eq!(ev.signers(), &[ValidatorId(65535)]);
+    assert_eq!(ev.verified_voting_power(), 1);
+    assert_eq!(ev.threshold(), 1);
+    // The reconstructed constituent Vote carried validator_index 65535.
+    assert_eq!(ev.certificate().signatures.len(), 1);
 }
 
 #[test]
@@ -1021,4 +1129,265 @@ fn c3d_11_debug_does_not_dump_signatures_on_success() {
     assert!(dbg.contains("signer_count"));
     // ML-DSA-44 signatures are ~2420 bytes each; a dump of three would be huge.
     assert!(dbg.len() < 400, "debug bounded: {}", dbg.len());
+}
+
+// ===========================================================================
+// 12. Signature-count representability: 65536 rejects before crypto (u16 count).
+// ===========================================================================
+
+#[test]
+fn c3d_12_signature_count_65536_rejected_before_crypto() {
+    // The wire `sig_count` is a u16, so at most 65535 signatures are encodable.
+    // A count of 65536 (one more than u16::MAX, and exactly the number of set
+    // bits a full 8192-byte bitmap would have) is rejected structurally, before
+    // any crypto or signer-result allocation. A modest fixture is used and NO
+    // keypairs/signatures are generated — trivial one-byte placeholders suffice.
+    let f = uniform_fixture(4);
+    let d = base_domain();
+    let counting = CountingVerifier::new(Arc::new(MlDsa44Backend));
+    let counter = counting.counter();
+    let br = SimpleBackendRegistry::with_backend(TEST_SUITE, Arc::new(counting));
+
+    let mut qc = unsigned_qc();
+    qc.signatures = vec![vec![1u8]; MAX_SIGNATURE_COUNT + 1]; // 65536 placeholders
+                                                              // Bitmap left empty; the count check precedes the popcount/structural work.
+    match verify(&f, &qc, &d, &br) {
+        Err(QcDomainVerifyError::SignatureCountNotRepresentable { count, max }) => {
+            assert_eq!(count, 65536);
+            assert_eq!(max, 65535);
+        }
+        other => panic!("expected SignatureCountNotRepresentable, got {:?}", other),
+    }
+    assert_eq!(
+        counter.load(Ordering::SeqCst),
+        0,
+        "no crypto before the signature-count bound"
+    );
+}
+
+// ===========================================================================
+// 13. Complete pre-crypto size preflight: valid signatures followed by an
+//     oversized signature reject before ANY backend call (with a same-backend
+//     control).
+// ===========================================================================
+
+#[test]
+fn c3d_13_valid_sigs_then_oversized_signature_zero_backend_calls() {
+    let f = uniform_fixture(5); // total 5, threshold ceil(10/3)=4
+    let d = base_domain();
+
+    // Control: five valid signatures with the same counting backend -> the loop
+    // reaches crypto for all five.
+    let counting_ctrl = CountingVerifier::new(Arc::new(MlDsa44Backend));
+    let ctrl_counter = counting_ctrl.counter();
+    let br_ctrl = SimpleBackendRegistry::with_backend(TEST_SUITE, Arc::new(counting_ctrl));
+    let qc_ctrl = build_signed_qc(&f, &d, &[0, 1, 2, 3, 4]);
+    verify(&f, &qc_ctrl, &d, &br_ctrl).expect("control verifies");
+    assert_eq!(ctrl_counter.load(Ordering::SeqCst), 5);
+
+    // Oversized LAST signature (a position after quorum would already be met):
+    // the complete pre-crypto size preflight rejects it before ANY backend call.
+    let counting = CountingVerifier::new(Arc::new(MlDsa44Backend));
+    let counter = counting.counter();
+    let br = SimpleBackendRegistry::with_backend(TEST_SUITE, Arc::new(counting));
+    let mut qc = build_signed_qc(&f, &d, &[0, 1, 2, 3, 4]);
+    let last = qc.signatures.len() - 1;
+    qc.signatures[last] = vec![0u8; MAX_SIGNATURE_LEN + 1];
+    match verify(&f, &qc, &d, &br) {
+        Err(QcDomainVerifyError::MalformedSignature(id)) => assert_eq!(id, ValidatorId(4)),
+        other => panic!("expected MalformedSignature(4), got {:?}", other),
+    }
+    assert_eq!(
+        counter.load(Ordering::SeqCst),
+        0,
+        "oversized signature rejects before any backend invocation"
+    );
+}
+
+// ===========================================================================
+// 14. Checked aggregate-size arithmetic and documented acceptance bound.
+// ===========================================================================
+
+#[test]
+fn c3d_14_aggregate_bound_constants() {
+    // The three distinct quantities are exactly as documented.
+    assert_eq!(MAX_SIGNATURE_COUNT, u16::MAX as usize);
+    assert_eq!(MAX_SIGNATURE_COUNT, 65535);
+    assert_eq!(MAX_SIGNATURE_LEN, u16::MAX as usize);
+    assert_eq!(
+        MAX_AGGREGATE_SIGNATURE_BYTES,
+        MAX_SIGNATURE_COUNT * MAX_SIGNATURE_LEN
+    );
+}
+
+#[test]
+fn c3d_14_checked_aggregate_signature_bytes_boundaries() {
+    // Pure allocation arithmetic — no multi-gigabyte byte allocations, only
+    // length values are summed.
+    assert_eq!(
+        checked_aggregate_signature_bytes(std::iter::empty::<usize>()),
+        Ok(0)
+    );
+    assert_eq!(
+        checked_aggregate_signature_bytes([MAX_SIGNATURE_LEN, MAX_SIGNATURE_LEN]),
+        Ok(2 * MAX_SIGNATURE_LEN)
+    );
+    // Exactly at the aggregate bound is accepted.
+    assert_eq!(
+        checked_aggregate_signature_bytes([MAX_AGGREGATE_SIGNATURE_BYTES]),
+        Ok(MAX_AGGREGATE_SIGNATURE_BYTES)
+    );
+    // One byte over the bound is rejected.
+    match checked_aggregate_signature_bytes([MAX_AGGREGATE_SIGNATURE_BYTES, 1]) {
+        Err(QcDomainVerifyError::AggregateSignatureBytesTooLarge { aggregate, max }) => {
+            assert_eq!(aggregate, MAX_AGGREGATE_SIGNATURE_BYTES + 1);
+            assert_eq!(max, MAX_AGGREGATE_SIGNATURE_BYTES);
+        }
+        other => panic!("expected AggregateSignatureBytesTooLarge, got {:?}", other),
+    }
+    // A checked-add overflow is reported saturated to usize::MAX.
+    match checked_aggregate_signature_bytes([usize::MAX, usize::MAX]) {
+        Err(QcDomainVerifyError::AggregateSignatureBytesTooLarge { aggregate, max }) => {
+            assert_eq!(aggregate, usize::MAX);
+            assert_eq!(max, MAX_AGGREGATE_SIGNATURE_BYTES);
+        }
+        other => panic!(
+            "expected saturated AggregateSignatureBytesTooLarge, got {:?}",
+            other
+        ),
+    }
+}
+
+// ===========================================================================
+// 15. Independently constructed ordinary D6 Vote-to-QC positive control.
+// ===========================================================================
+
+#[test]
+fn c3d_15_independent_d6_vote_to_qc_positive_control() {
+    // The control Votes are authored with EXPLICIT header fields (not produced
+    // by the verifier's reconstruction helper), then the QC header is assembled
+    // from the SAME explicit fields. Success proves the verifier reconstructs
+    // exactly the preimage the independent author signed over the real signed
+    // header fields (height/round/step/block_id), not merely a helper-mirrored
+    // shape.
+    let f = uniform_fixture(3); // total 3, threshold 2
+    let d = base_domain();
+    let br = real_registry();
+
+    // Explicit shared header fields chosen independently of `unsigned_qc()`.
+    let version = 1u8;
+    let chain_id = WIRE_CHAIN;
+    let epoch = EPOCH;
+    let height = 4242u64;
+    let round = 77u64;
+    let step = 2u8;
+    let block_id = [0x5Au8; 32];
+    let suite_id = TEST_SUITE_U16;
+
+    let mut sigs: Vec<Vec<u8>> = Vec::new();
+    for idx in [0u16, 1] {
+        let vote = Vote {
+            version,
+            chain_id,
+            epoch,
+            height,
+            round,
+            step,
+            block_id,
+            validator_index: idx,
+            suite_id,
+            signature: vec![],
+        };
+        let pre = d.vote_preimage(&vote);
+        let sk = f.sks.get(&ValidatorId(idx as u64)).expect("sk");
+        sigs.push(MlDsa44Backend::sign(sk, &pre).expect("sign"));
+    }
+
+    let mut bitmap = Vec::new();
+    set_bit(&mut bitmap, 0);
+    set_bit(&mut bitmap, 1);
+    let qc = QuorumCertificate {
+        version,
+        chain_id,
+        epoch,
+        height,
+        round,
+        step,
+        block_id,
+        suite_id,
+        signer_bitmap: bitmap,
+        signatures: sigs,
+    };
+
+    let ev = verify(&f, &qc, &d, &br).expect("independent D6 vote-to-QC control verifies");
+    assert_eq!(ev.signers(), &[ValidatorId(0), ValidatorId(1)]);
+    assert_eq!(ev.verified_voting_power(), 2);
+    assert_eq!(ev.certificate().height, 4242);
+    assert_eq!(ev.certificate().round, 77);
+    assert_eq!(ev.certificate().step, 2);
+    assert_eq!(ev.certificate().block_id, [0x5Au8; 32]);
+}
+
+// ===========================================================================
+// 16. Legacy/D6 signed-input incompatibility, three-way, naming each entrypoint.
+// ===========================================================================
+
+#[test]
+fn c3d_16_legacy_d6_signed_input_incompatibility_three_way() {
+    let f = uniform_fixture(1); // single validator 0; total 1, threshold 1
+    let d = base_domain();
+    let (_suite, pk) = f.kp.keys.get(&ValidatorId(0)).expect("key").clone();
+    let sk = f.sks.get(&ValidatorId(0)).expect("sk").clone();
+
+    // The constituent Vote (shared header fields) for signer 0.
+    let qc_skel = unsigned_qc();
+    let vote0 = constituent_vote(&qc_skel, 0);
+    let d6_preimage = d.vote_preimage(&vote0);
+    let legacy_input = vote_digest(&vote0); // the intended LEGACY signed input
+
+    let legacy_sig = MlDsa44Backend::sign(&sk, &legacy_input).expect("legacy sign");
+    let d6_sig = MlDsa44Backend::sign(&sk, &d6_preimage).expect("d6 sign");
+
+    // (a) Entrypoint: raw MlDsa44Backend::verify over the LEGACY vote_digest
+    //     input. The legacy signature verifies over its intended legacy input.
+    assert!(
+        MlDsa44Backend::verify(&pk, &legacy_input, &legacy_sig).is_ok(),
+        "legacy signature verifies over its intended legacy vote_digest input"
+    );
+
+    // (b) Entrypoint: raw MlDsa44Backend::verify over the LEGACY vote_digest
+    //     input. A D6 signature does NOT verify over the legacy input.
+    assert!(
+        MlDsa44Backend::verify(&pk, &legacy_input, &d6_sig).is_err(),
+        "D6 signature does not verify over the legacy vote_digest input"
+    );
+
+    // (c) Entrypoint: raw MlDsa44Backend::verify over the D6 v2 preimage. The D6
+    //     signature verifies over the D6 preimage (control), and the legacy
+    //     signature does NOT verify over the D6 preimage.
+    assert!(
+        MlDsa44Backend::verify(&pk, &d6_preimage, &d6_sig).is_ok(),
+        "D6 signature verifies over the D6 v2 preimage (control)"
+    );
+    assert!(
+        MlDsa44Backend::verify(&pk, &d6_preimage, &legacy_sig).is_err(),
+        "legacy signature does not verify over the D6 v2 preimage"
+    );
+
+    // (d) Entrypoint: verify_quorum_certificate_with_domain (the D6 QC boundary).
+    //     A legacy-signed QC fails under D6 as InvalidSignature; a D6-signed QC
+    //     verifies.
+    let mut qc_legacy = qc_skel.clone();
+    set_bit(&mut qc_legacy.signer_bitmap, 0);
+    qc_legacy.signatures = vec![legacy_sig.clone()];
+    match verify(&f, &qc_legacy, &d, &real_registry()) {
+        Err(QcDomainVerifyError::InvalidSignature(id)) => assert_eq!(id, ValidatorId(0)),
+        other => panic!("expected InvalidSignature(0) under D6, got {:?}", other),
+    }
+
+    let mut qc_d6 = qc_skel.clone();
+    set_bit(&mut qc_d6.signer_bitmap, 0);
+    qc_d6.signatures = vec![d6_sig.clone()];
+    let ev = verify(&f, &qc_d6, &d, &real_registry()).expect("D6-signed QC verifies under D6");
+    assert_eq!(ev.signers(), &[ValidatorId(0)]);
 }

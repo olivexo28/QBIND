@@ -3298,3 +3298,137 @@ anti-rollback, and Run 423 remain separate work. Retained verdicts:
 `CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED`,
 `SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO`. Prior C3A/C3B/C3C decisions and
 historical evidence are preserved and not relabelled as newly executed.
+
+## Run 422 D7-C3D — structural-preflight correction (this pass, code + test)
+
+This subsection records the corrective continuation to the dormant
+`verify_quorum_certificate_with_domain` boundary. It hardens the structural
+preflight only. No wire format, encoder, engine, handler, startup, cache,
+storage, authority-lifecycle, legacy-verifier, or production-integration change
+was made. D6 signing bytes and the existing validator-set / `ceil(2W/3)` quorum
+semantics are preserved. The boundary remains dormant (no non-test callers).
+
+### Actual branch / SHAs (correction pass)
+
+* Branch (actual): `copilot/copilotcopilotrun-422-d7-c3c-again-again`. Reported,
+  not corrected (no rename / history rewrite).
+* Starting HEAD at this pass: `95d863243e96cb189d9ae7dc28b05d1e155a93c8`.
+* The task-named reviewed revision `3d228cd41d345f3f79133001a2c5c93478c22373`
+  and reported tested revision `2ec4437f8fb24e78d9082b8d3373194193f483d7` are
+  **absent** from this shallow clone; recorded as missing historical objects,
+  not missing source. Present source was verified directly in the worktree; no
+  ancestry was invented.
+* Code checkpoint committed before lengthy validation:
+  `50aeba3fd6413ced471bd97950a95b1d1f595f0b`.
+* Disk at start: root fs 42% used — ample headroom.
+
+### The three structural-preflight corrections
+
+**A. Signature-count representability.** The wire QC encodes `signatures.len()`
+as `u16`, so the maximum *encodable* signature count is `65535`. The verifier now
+rejects `signatures.len() > MAX_SIGNATURE_COUNT` (`= u16::MAX as usize = 65535`)
+with typed `SignatureCountNotRepresentable { count, max }` **before** any crypto
+or signer-result allocation. Three quantities are kept distinct: maximum valid
+validator **index** `65535`; number of representable indices `65536`; maximum
+encodable QC signature **count** `65535`. The 8192-byte bitmap alone does not
+enforce the count limit (8192·8 = 65536 possible bits). The wire format and
+encoder are unchanged; oversized counts are rejected, not accommodated.
+
+**B. Complete structural size checks before cryptographic verification.** All
+structural size validation now precedes the crypto loop and any signature-buffer
+clone: signature count (A), global bitmap bound (`MAX_BITMAP_LEN`),
+membership-relative bitmap bound (C), bitmap/signature-count correspondence via
+popcount, **every** individual signature's size (`MAX_SIGNATURE_LEN`), and a
+checked aggregate-size bound. A late oversized signature therefore rejects with
+`MalformedSignature` **before ANY backend invocation** — proven by a
+zero-backend-call test paired with a same-backend positive control. The
+verifier's own aggregate acceptance bound is
+`MAX_AGGREGATE_SIGNATURE_BYTES = MAX_SIGNATURE_COUNT * MAX_SIGNATURE_LEN`,
+computed with `checked_add` folding (`checked_aggregate_signature_bytes`) and
+reported via `AggregateSignatureBytesTooLarge { aggregate, max }`. This bound is
+deliberately **distinct** from the transport `MAX_NET_MESSAGE_BYTES` (1 MiB) and
+is not a claim of a complete DoS audit or any transport-policy change. The
+existing rule that every structurally valid declared signature must verify —
+even after quorum is reached — is preserved.
+
+**C. Membership-relative bitmap bound.** Bitmap length is now bounded by both the
+global representable range and the trusted membership's maximum representable
+`ValidatorId` (the identifier *span*, `(max_id / 8) + 1` bytes; `0` for empty
+membership), never `validators.len()`, so sparse and reordered memberships stay
+valid. Bytes beyond the trusted span — **including zero padding** — reject with
+`BitmapBeyondMembershipSpan { len, allowed }`. Set bits for unknown members
+within the span continue to reject (`UnknownSigner`). The mapping
+`bit i → wire validator_index i → ValidatorId(i)` is unchanged; no validator is
+renumbered or truncated and vector position is never assumed to equal
+`ValidatorId`. Narrowing conversions are guarded by checked arithmetic / the
+established span bound.
+
+### Tests (correction pass) — `run_422_d7c3d_qc_domain_verification_tests` (46)
+
+Test function count rose from **35** (historical C3D entry above) to **46**
+newly executed here. Retained: valid-crypto, arithmetic, suite, domain, epoch,
+and invalid-extra-signature coverage. The former
+`c3d_7_max_len_bitmap_all_zero_is_within_bounds` assertion (which accepted a
+full-length all-zero bitmap regardless of membership) was **replaced** because
+its acceptance policy was incomplete under the new membership-relative bound.
+Added / strengthened:
+
+* Signature count `65536` rejects with `SignatureCountNotRepresentable` and
+  **zero** backend calls (modest fixture; no 65536 keypairs generated).
+* A genuine real-ML-DSA-44 positive QC whose sole signer is `ValidatorId(65535)`
+  with the highest bitmap bit set and the matching reconstructed `Vote` index,
+  over a sparse one-validator membership (not an all-zero bitmap).
+* Membership-relative bitmap length: exact valid span (all-zero within bounds),
+  zero padding beyond the span (rejected), unknown set bit within the span
+  (rejected), plus retained sparse / reordered positive controls.
+* Valid signatures followed by an oversized signature: **zero** backend calls
+  (via a counting backend), paired with a successful same-backend control.
+* Checked aggregate-size arithmetic and its acceptance/rejection boundaries via
+  the pure `checked_aggregate_signature_bytes` helper (no multi-gigabyte
+  allocations), plus real-entrypoint oversized-signature rejection.
+* An independently constructed ordinary D6 `Vote`→QC positive control over the
+  actual signed header fields (not derived through the verifier's reconstruction
+  helper).
+* Legacy/D6 three-way incompatibility: legacy signatures verify over legacy
+  input, fail under D6; D6 signatures fail over legacy input. Each test states
+  which entrypoint it exercises (`verify_vote_msg_with_domain` vs the legacy
+  path).
+
+Direct backend invocation counters back all pre-crypto zero-call claims; real
+ML-DSA-44 backs cryptographic acceptance/replay controls; structural/fault test
+doubles are clearly identified. No all-zero bitmap is described as proof of
+highest-index cryptographic acceptance.
+
+### Validation (correction pass) — sequential, checkpoint `50aeba3`
+
+* Focused C3D target: `46 passed; 0 failed`.
+* D6 isolation (`proposal_vote_verify` D6 tests) in `qbind-consensus`: `34 passed`.
+* Full `qbind-consensus` suite: `803 passed; 0 failed`. `qbind-wire`: `88 passed`.
+* Focused Clippy on changed targets: clean (pre-existing lib warnings in
+  unrelated modules `adversarial_multi_sim.rs`, `basic_hotstuff_engine.rs`,
+  `slashing/mod.rs` are untouched and not introduced here).
+* `rustfmt --check` on the two changed Rust files: clean; CRLF line endings
+  preserved (verified per-file); no repository-wide formatting performed.
+* Additional node-target and release-build validation results are recorded with
+  their literal outcomes in the final report accompanying this commit.
+
+### Docs reconciled
+
+Module doc "Size bounds", protocol §9A (Size bounds / Failure ordering / Typed
+failures), and this C3D evidence were reconciled with the implemented preflight
+order and exact limits (`MAX_SIGNATURE_COUNT = 65535`,
+`MAX_AGGREGATE_SIGNATURE_BYTES`, membership-relative bitmap span). Historical
+35-function count and prior execution are kept separate from the newly executed
+46-function count.
+
+### Retained posture (correction pass)
+
+A positive verdict covers only the corrected dormant QC-verification boundary.
+No readiness item moves Green; no engine adoption, activation, or Run 423 work.
+Retained verdicts are unchanged:
+`D7_STATUS=PARTIAL-CODE-TEST / PRODUCTION-LIFECYCLE-UNAVAILABLE`,
+`DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED`,
+`GENESIS_AUTHORITY_ACTIVATION=DISABLED`,
+`PRODUCTION_WIRE_CHAIN_ID_BEHAVIOR=UNCHANGED`,
+`CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED`,
+`SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO`.

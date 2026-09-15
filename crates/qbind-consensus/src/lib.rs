@@ -94,8 +94,9 @@ pub use pacemaker::{
 };
 pub use qc::{QcValidationError, QuorumCertificate};
 pub use qc_verify_domain::{
-    verify_quorum_certificate_with_domain, QcDomainVerifyError, VerifiedQuorumCertificate,
-    MAX_BITMAP_LEN, MAX_SIGNATURE_LEN,
+    checked_aggregate_signature_bytes, verify_quorum_certificate_with_domain, QcDomainVerifyError,
+    VerifiedQuorumCertificate, MAX_AGGREGATE_SIGNATURE_BYTES, MAX_BITMAP_LEN, MAX_SIGNATURE_COUNT,
+    MAX_SIGNATURE_LEN,
 };
 pub use proposal_vote_verify::{
     verify_proposal_msg, verify_proposal_msg_with_domain, verify_vote_msg,
