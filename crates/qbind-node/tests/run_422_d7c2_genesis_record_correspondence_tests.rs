@@ -258,18 +258,90 @@ fn d7c2_b_replacement_genesis_contents_reject_against_frozen_pin() {
 
 #[test]
 fn d7c2_c_wrong_chain_label_rejects() {
+    // Ordinary SAME-LENGTH mismatch: the claimed label has exactly the same
+    // byte length as the expected label ("0000000051424e44", 16 bytes) but
+    // different bytes. It must still reject, with bounded metadata reporting the
+    // equal byte lengths and no copy of the claimed label.
     let (g, pks) = genesis3();
     let (_dir, path) = write_genesis(&g);
     let expected = build_expected(&path, &pin(&g));
     let mut record = coherent_record(&expected, &pks, 0);
     record.chain_id = "deadbeefdeadbeef".to_string();
+    assert_eq!(record.chain_id.len(), expected.chain_id().len());
 
     let tmp = TempDir::new().unwrap();
     let (_s, obs) = observe_epoch(&tmp, "db-c1", 0);
     match check_genesis_record_correspondence(&expected, Some(&record), obs) {
-        Err(RecordCorrespondenceError::ChainIdMismatch { .. }) => {}
+        Err(RecordCorrespondenceError::ChainIdMismatch {
+            expected_len,
+            claimed_len,
+        }) => {
+            assert_eq!(expected_len, expected.chain_id().len());
+            assert_eq!(claimed_len, "deadbeefdeadbeef".len());
+            assert_eq!(expected_len, claimed_len);
+        }
         other => panic!("expected ChainIdMismatch, got {other:?}"),
     }
+}
+
+#[test]
+fn d7c2_c_oversized_claimed_label_rejects_with_bounded_diagnostics() {
+    // An oversized untrusted label (1 MiB) is constructed BEFORE invoking the
+    // checker (the fixture's own allocation is separate from checker behavior).
+    // The checker must reject it with bounded metadata (byte lengths only) and
+    // must NOT reproduce the label in either Display or derived Debug output.
+    // The length-incompatible label is rejected before any per-byte comparison
+    // or full-input fingerprint of the claimed label.
+    const OVERSIZED_LEN: usize = 1024 * 1024; // 1 MiB
+    let (g, pks) = genesis3();
+    let (_dir, path) = write_genesis(&g);
+    let expected = build_expected(&path, &pin(&g));
+    let mut record = coherent_record(&expected, &pks, 0);
+    record.chain_id = "A".repeat(OVERSIZED_LEN);
+    assert_eq!(record.chain_id.len(), OVERSIZED_LEN);
+    assert_ne!(record.chain_id.len(), expected.chain_id().len());
+
+    let tmp = TempDir::new().unwrap();
+    let (_s, obs) = observe_epoch(&tmp, "db-c-oversized", 0);
+    let err = match check_genesis_record_correspondence(&expected, Some(&record), obs) {
+        Err(e) => e,
+        Ok(_) => panic!("oversized claimed label must reject"),
+    };
+
+    // Bounded metadata: byte lengths only.
+    match &err {
+        RecordCorrespondenceError::ChainIdMismatch {
+            expected_len,
+            claimed_len,
+        } => {
+            assert_eq!(*expected_len, expected.chain_id().len());
+            assert_eq!(*claimed_len, OVERSIZED_LEN);
+        }
+        other => panic!("expected ChainIdMismatch, got {other:?}"),
+    }
+
+    // Bounded Display and Debug: both stay tiny and never reproduce the 1 MiB
+    // untrusted label. Explicit byte limits are asserted; a full copy of the
+    // label would blow past these bounds.
+    const MAX_DISPLAY_BYTES: usize = 256;
+    const MAX_DEBUG_BYTES: usize = 256;
+    let display = err.to_string();
+    let debug = format!("{err:?}");
+    assert!(
+        display.len() <= MAX_DISPLAY_BYTES,
+        "Display must be bounded, got {} bytes",
+        display.len()
+    );
+    assert!(
+        debug.len() <= MAX_DEBUG_BYTES,
+        "Debug must be bounded, got {} bytes",
+        debug.len()
+    );
+    // Neither rendering may contain the oversized label run.
+    assert!(!display.contains(&"A".repeat(64)));
+    assert!(!debug.contains(&"A".repeat(64)));
+    // The bounded lengths are still surfaced in Display for diagnostics.
+    assert!(display.contains(&OVERSIZED_LEN.to_string()));
 }
 
 #[test]
