@@ -2150,6 +2150,13 @@ pub mod production_consensus_storage;
 // malformed/corrupt metadata, and incomplete epoch transitions, as storage
 // evidence only (never authorization).
 pub mod consensus_storage_observation;
+// Run 422 D7-C2 — bounded, non-authorizing correspondence between an
+// independently pinned genesis-derived expected identity, an explicitly
+// untrusted in-memory authority-record description, and a D7-C1 storage
+// observation. Establishes correspondence of the compared fields only; never
+// authenticates a persisted record, proves storage/record co-origin, or
+// establishes activation / current authorization.
+pub mod genesis_authority_record_correspondence;
 // Run 098 — canonical activation epoch source helper. Wires the
 // Run 093 production `ConsensusStorage` `meta:current_epoch` value
 // into `ActivationContext.current_epoch` at all production trust-
