@@ -2964,15 +2964,20 @@ CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED
 SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO
 ```
 
-**Inspected revision (actual).** Branch `copilot/run-422-d7-c3c`, worktree HEAD
-`819f2b28ff05fc10f2b0b6c23af52808ac996cad`. The clone is shallow (depth 2;
-`.git/shallow` pins the parent `0b3eb4a19530f8ecf21b25212f92aa944473e154`, the
-task's named inspected source revision, which is present and source-identical to
-HEAD). The task's named "final audit revision"
-`3a5ac02c06eb4a62368f6c922a911946b48b01df` (and the older
-`734a9425a15f8a5845b8bf0bdb4932b700d9cc22`) are **absent**, so ancestry could not
-be confirmed; content correspondence to the C2/C3A/C3B source is not claimed as
-ancestry.
+**Inspected revision (actual).** Branch `copilot/copilotrun-422-d7-c3c` (the task
+names the reviewed branch `copilot/run-422-d7-c3c`; the checkout carries the
+doubled `copilot` segment), worktree HEAD
+`b7a38c6145d947499c0a4be8e2dbd6c87627f63a`, whose parent
+`819f2b28ff05fc10f2b0b6c23af52808ac996cad` first added this audit + C3C entry.
+The clone is shallow (depth 2); `.git/shallow` now pins the boundary
+`819f2b28ff05fc10f2b0b6c23af52808ac996cad`, so its parent —
+`0b3eb4a19530f8ecf21b25212f92aa944473e154`, the task's named inspected source
+revision — is beyond the graft and **absent**. The task's named reviewed final
+revision `9cc94ab7dfacb2824de7aad76abd5573532a9f47` (and the older
+`3a5ac02c06eb4a62368f6c922a911946b48b01df` /
+`734a9425a15f8a5845b8bf0bdb4932b700d9cc22`) are likewise **absent**, so ancestry
+could not be confirmed; content correspondence to the C2/C3A/C3B source is not
+claimed as ancestry.
 
 **Correction (this C3C revision).** The first C3C draft is superseded in place;
 the audit's §9 records the corrections. Key fixes:
@@ -2984,14 +2989,22 @@ the audit's §9 records the corrections. Key fixes:
   value** into `BasicHotStuffEngine::new` (`ConsensusValidatorSet`, not `Arc`).
   `build_validator_set_and_key_provider` feeds the **Timeout bridge only**, not
   the engine.
-* Boot verification can return `SkippedNoExternalGenesis`
-  (`pqc_boot_genesis.rs:229`) for permitted non-MainNet configs — pinned
-  external-genesis validation is **not** guaranteed on every startup.
-* `chain_id: 1` message construction (`basic_hotstuff_engine.rs:1351/1370/1405`)
-  **is production-reachable** (inside `do_leader_tick`); the guard is at
-  signing/transmission (fail-closed, no authority), not at construction.
+* Boot verification distinguishes the external genesis **file**
+  (`--genesis-path`) from the independent **expected-hash pin**
+  (`--expect-genesis-hash` / `config.expected_genesis_hash`,
+  `pqc_boot_genesis.rs:240`); it can return `SkippedNoExternalGenesis` (`:229`)
+  for permitted non-MainNet configs, and DevNet/TestNet may omit the pin
+  (canonical-hash compare skipped, `qbind-ledger/src/genesis.rs:1850`/`:1852`) —
+  a path alone does not establish independent pinning; only MainNet forces the
+  pin (`:1836`).
+* `chain_id: 1` message construction is **ordinary engine code, not a test
+  fixture**: `basic_hotstuff_engine.rs:1351/1370/1405` are in `on_leader_step`
+  and `:1531` is in `on_proposal_event` (both above the `#[cfg(test)]` boundary
+  `:1921`); the binary loop's `do_leader_tick` drives them in production. The
+  guard is at signing/transmission (fail-closed, no authority), not at
+  construction.
 
-**Principal findings (source-anchored, HEAD `819f2b2` ≡ `0b3eb4a`).**
+**Principal findings (source-anchored, HEAD `b7a38c6` ≡ boundary `819f2b2`).**
 
 * Production wires no Proposal/Vote authority: `main.rs:5549`
   `proposal_vote_authority: None`; inbound/outbound Proposal/Vote run fail-closed
