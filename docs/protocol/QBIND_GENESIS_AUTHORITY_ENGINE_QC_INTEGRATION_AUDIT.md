@@ -652,7 +652,7 @@ must never be conflated):
 * preserved certificate evidence vs information-losing conversion (signers /
   signatures / epoch retained, with the §3.5 serialization caveat in mind).
 
-### 5.1 Precise open protocol decision (blocks step 1)
+### 5.1 Existing mapping policy and later production-consumption requirements
 
 **Decision required:** what is the canonical **wire chain id** (and its binding
 to the 64-bit runtime `ChainId`) that a genesis-validated production authority
