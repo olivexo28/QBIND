@@ -44,44 +44,57 @@ network correspondence must never be presented as permission to activate.**
 Inspected against the **actual supplied worktree**, not the SHAs the task text
 recites:
 
-* **Working branch (actual):** `copilot/run-422-d7-c3c` (`git branch
-  --show-current`).
+* **Working branch (actual):** `copilot/copilotrun-422-d7-c3c`
+  (`git branch --show-current`). The task text names the reviewed branch
+  `copilot/run-422-d7-c3c`; the actual checkout carries the doubled `copilot`
+  path segment.
 * **Inspected worktree HEAD (actual):**
-  `819f2b28ff05fc10f2b0b6c23af52808ac996cad` (`update`) — this is the commit that
-  first added this audit document and the C3C evidence entry.
-* **HEAD parent / shallow boundary (actual):**
-  `0b3eb4a19530f8ecf21b25212f92aa944473e154` (`update`), recorded in
-  `.git/shallow`; this is the revision the task names as the **inspected source
-  revision**, and it is present.
-* **Reviewed branch named by the task:**
-  `copilot/copilotcopilot-run-422-d7-c3b-again` (the previously reviewed C3B
-  branch; note the doubled `copilot` prefix). It is not a local branch here.
-* **"Final audit revision" named by the task,
-  `3a5ac02c06eb4a62368f6c922a911946b48b01df`, is absent** from this clone
-  (`git cat-file -t 3a5ac02…` → *could not get object info*).
+  `b7a38c6145d947499c0a4be8e2dbd6c87627f63a` (`update`) — the C3C-correction
+  revision this session started from. Its parent
+  `819f2b28ff05fc10f2b0b6c23af52808ac996cad` (`update`) first added this audit
+  document and the C3C evidence entry; both are present locally.
+* **Shallow boundary (actual):** `.git/shallow` now pins
+  `819f2b28ff05fc10f2b0b6c23af52808ac996cad` (the parent of HEAD). The task's
+  named **inspected source revision**
+  `0b3eb4a19530f8ecf21b25212f92aa944473e154` is the parent of that boundary and
+  is therefore **beyond the graft and absent** (`git cat-file -t 0b3eb4a…` →
+  *could not get object info*); it is no longer a local object.
+* **Reviewed final revision named by the task,
+  `9cc94ab7dfacb2824de7aad76abd5573532a9f47`, is absent** from this clone
+  (`git cat-file -t 9cc94ab7…` → *could not get object info*).
+* The earlier-named `3a5ac02c06eb4a62368f6c922a911946b48b01df` and
+  `734a9425a15f8a5845b8bf0bdb4932b700d9cc22` are likewise **absent**. Ancestry to
+  any absent object is **not manufactured**.
 
 ### 1.2 Ancestry limitation (reported accurately)
 
 The clone is **shallow with depth 2** (`git rev-list --count HEAD` = 2;
-`.git/shallow` pins the parent `0b3eb4a`). Therefore:
+`.git/shallow` pins the boundary `819f2b2`, the parent of HEAD `b7a38c6`).
+Therefore:
 
-* The source tree is **unchanged between `0b3eb4a` and HEAD `819f2b2`** — the only
-  differences are the two documentation files this run may touch (`git diff
-  --stat 0b3eb4a 819f2b2` = this audit + the D7 evidence file). So every source
-  finding below is equally anchored to `0b3eb4a` (the named inspected source
-  revision) and to the worktree.
-* Ancestry to the task's **"final audit revision" `3a5ac02…` cannot be
-  established** from local history because that object is absent. The worktree
-  **content** corresponds to the completed D7-C2 / C3A / C3B work (module
+* The source tree is **unchanged between the shallow boundary `819f2b2` and HEAD
+  `b7a38c6`** — the only differences are the two documentation files this run may
+  touch (`git diff --stat 819f2b2 b7a38c6` = this audit + the D7 evidence file).
+  So every source finding below is anchored to the worktree at HEAD.
+* The task's named **inspected source revision `0b3eb4a`** is the parent of the
+  shallow boundary and is **absent**, so a `git diff` against it can no longer be
+  recomputed here. The prior C3C revision (at `819f2b2`, when `0b3eb4a` was still
+  the pinned boundary) recorded `git diff --stat 0b3eb4a 819f2b2` as docs-only;
+  that recorded fact is preserved but is **not** re-derived, and no ancestry to
+  the now-absent `0b3eb4a` is manufactured.
+* Ancestry to the task's **reviewed final revision `9cc94ab7…`** (and the
+  earlier `3a5ac02…` / `734a9425…`) **cannot be established** from local history
+  because those objects are absent. The worktree **content** corresponds to the
+  completed D7-C2 / C3A / C3B work (module
   `genesis_authority_record_correspondence.rs` present with `load_pinned`,
   retained `validation_policy`, and `check_network_correspondence` — see §4.A),
   but **content correspondence does not establish ancestry** and is not claimed
   to.
 
 All findings below are anchored to paths and symbols **as they exist in the
-worktree at HEAD `819f2b2` (source-identical to `0b3eb4a`)**. Every material
-finding cites `path:line`. Findings are **source evidence** unless explicitly
-marked as executed behavior (§7).
+worktree at HEAD `b7a38c6` (source-identical to the shallow boundary
+`819f2b2`)**. Every material finding cites `path:line`. Findings are **source
+evidence** unless explicitly marked as executed behavior (§7).
 
 ### 1.3 Deliverable posture
 
@@ -100,7 +113,7 @@ which `main.rs` does not reach.
 
 | # | Boundary | Path:symbol | Reached from `main.rs`? |
 |---|----------|-------------|-------------------------|
-| 1 | Boot genesis verification (pin compare) | `main.rs:2382` `pqc_boot_genesis::run_boot_time_genesis_verification(&config)` | Yes, but **conditional**: for permitted non-MainNet configs without an external genesis it returns `BootGenesisOutcome::SkippedNoExternalGenesis` (`pqc_boot_genesis.rs:229`); pinned external-genesis validation runs **only** when `--genesis-path` is supplied (MainNet requires it, else `GenesisPathMissing`, `:227`) |
+| 1 | Boot genesis verification (external file + optional pin) | `main.rs:2382` `pqc_boot_genesis::run_boot_time_genesis_verification(&config)` | Yes, but **conditional**: for permitted non-MainNet configs without an external genesis it returns `BootGenesisOutcome::SkippedNoExternalGenesis` (`pqc_boot_genesis.rs:229`). Supplying `--genesis-path` provides only the external genesis **file** (`:225`, `:238`); the independent **expected-hash pin** is a separate input `config.expected_genesis_hash` (`:240`, `--expect-genesis-hash`). Verification (`verify_boot_time_genesis`, `qbind-ledger/src/genesis.rs:1797`) applies the environment policy from `map_environment`: MainNet **requires** both the path (`GenesisPathMissing`, `:227`) and the pin (`ExpectedCanonicalHashMissing`, `genesis.rs:1836`); DevNet/TestNet **permit an absent pin**, in which case the canonical-hash compare is **skipped** (`genesis.rs:1850`/`:1852`) — a supplied path alone does **not** establish an independent pin |
 | 2 | Consensus security preflight | `crates/qbind-node/src/main.rs:5019` `run_p2p_consensus_security_preflight` (called `:7502`) | Yes |
 | 3 | Proposal/Vote authority slot | `crates/qbind-node/src/main.rs:5549` `proposal_vote_authority: None` (field `:5016`) | Yes — **wired to `None`** |
 | 4 | Timeout-bridge validator set + key provider | `crates/qbind-node/src/peer_key_provider.rs` `build_validator_set_and_key_provider` (from `config.network.static_peer_consensus_keys`) | Yes — feeds the **Timeout verification bridge only** (`try_build_timeout_verification_context`), **not** the engine's membership |
@@ -207,7 +220,7 @@ different retained information:
    the logical QC still carries **ids only, no signatures** — counting is not
    cryptographic certification.
 3. **Logical QC → emitted wire QC.**
-   `do_leader_tick` (`basic_hotstuff_engine.rs:1365`) maps the engine's logical
+   `on_leader_step` (`basic_hotstuff_engine.rs:1284`, ≈`:1365`) maps the engine's logical
    `justify_qc` into a wire `QuorumCertificate` with
    **`signer_bitmap: vec![]`, `signatures: vec![]`** (`:1370`–`:1381`). So even a
    locally-formed QC is emitted on the wire **carrying no signer set and no
@@ -323,16 +336,24 @@ rather than mutate the shared logical QC.
   requirement, not an existing guarantee, and is additionally constrained by the
   engine taking its set by value (it cannot today share an `Arc` instance with a
   verifier).
-* **`chain_id: 1` message constructors are production-reachable code.** The
-  literal `chain_id: 1` at `basic_hotstuff_engine.rs:1351` (proposal header),
-  `:1370` (embedded QC), and `:1405` (leader vote) is inside `do_leader_tick`,
-  which **is** reached in production when the local node is leader; `:1531` and
-  the fixtures in `proposal_vote_verify.rs`, `network.rs`, `driver.rs` are
-  test-scoped. So **message *construction* with `chain_id: 1` genuinely runs in
-  production**. What is guarded is **signing and transmission**, not
-  construction: the leader's constructed Proposal/Vote carry `signature: vec![]`
-  and are only signed/emitted through `forward_actions_to_facade`, which
-  fail-closes under `Required` with no authority (`main.rs:5549` = `None`), so no
+* **`chain_id: 1` message constructors are ordinary engine code, not test
+  fixtures.** The literal `chain_id: 1` at `basic_hotstuff_engine.rs:1351`
+  (proposal header), `:1370` (embedded QC), and `:1405` (leader vote) is inside
+  the ordinary engine method `on_leader_step` (`:1284`); the fourth occurrence,
+  `:1531` (the responding Vote), is inside the ordinary engine method
+  `on_proposal_event` (`:1446`) — **not** a test-only fixture. All four are
+  above the crate's `#[cfg(test)]` boundary (`:1921`). Only the `chain_id: 1`
+  literals in `proposal_vote_verify.rs` (`:629`/`:661`/`:830`), `network.rs`
+  (`:192`/`:210`), and `driver.rs` (`:752`/`:770`) are test-scoped (under
+  `#[cfg(test)]`). Distinguish three layers: (a) **ordinary engine
+  implementation** — `on_leader_step` / `on_proposal_event` construct these
+  messages whenever the engine ticks; (b) **conditional reachability through the
+  binary handler** — the binary loop's `do_leader_tick` and inbound arms drive
+  the engine, so the constructors run in production; (c) **current Required /
+  no-authority containment** — what is guarded is **signing and transmission**,
+  not construction: the constructed Proposal/Vote carry `signature: vec![]` and
+  are only signed/emitted through `forward_actions_to_facade`, which fail-closes
+  under `Required` with no authority (`main.rs:5549` = `None`), so no
   `chain_id: 1` message is ever authenticated or placed on the wire today.
   Distinguish *"the constructor runs"* (true) from *"a `chain_id: 1` message is
   signed/transmitted"* (false under current startup). Production domain
@@ -732,10 +753,12 @@ check available for later, safely-sequenced integration.
 ## 7. Checks actually executed and tool limitations
 
 * **Executed here:** repository inspection only — `git status`, `git branch
-  --show-current` (`copilot/run-422-d7-c3c`), `git rev-parse HEAD`
-  (`819f2b2`), `git rev-list --count HEAD` (=2), `cat .git/shallow` (pins
-  `0b3eb4a`), `git diff --stat 0b3eb4a 819f2b2` (docs-only), `git cat-file -t`
-  for `3a5ac02…` and `734a9425…` (both absent) and `0b3eb4a…` (present), plus
+  --show-current` (`copilot/copilotrun-422-d7-c3c`), `git rev-parse HEAD`
+  (`b7a38c6`) and its parent (`819f2b2`), `git rev-list --count HEAD` (=2),
+  `cat .git/shallow` (pins the boundary `819f2b2`), `git diff --stat 819f2b2
+  b7a38c6` (docs-only), `git cat-file -t` for the task-named `9cc94ab7…`
+  (reviewed final) and `0b3eb4a…` (inspected source) and the older `3a5ac02…` /
+  `734a9425…` (**all absent**), plus
   the `grep`/`rg`/`view` source searches cited inline (`main.rs`,
   `binary_consensus_loop.rs`, `basic_hotstuff_engine.rs`,
   `hotstuff_state_engine.rs`, `lib.rs`, `qc.rs`, `proposal_vote_verify.rs`,
@@ -769,11 +792,13 @@ SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO
 The audit is **COMPLETE-FOR-INSPECTED-SCOPE**: the corrected sections now cover
 the required call-graph, verifier-compatibility, QC-flow, dependency-order, and
 next-task paths and produce a coherent next-task contract (§6). The only material
-inspection limitation is the shallow clone (§1.2): the task's named "final audit
-revision" `3a5ac02…` (and the older `734a9425…`) are absent, so ancestry could
-not be confirmed; all findings are anchored to the worktree at HEAD `819f2b2`,
-source-identical to `0b3eb4a`, which carries the C2/C3A/C3B source. No readiness
-item moves Green. RS1/C4/C5 remain OPEN and public DevNet is NO-GO.
+inspection limitation is the shallow clone (§1.2): the task's named reviewed
+final revision `9cc94ab7…`, its named inspected source revision `0b3eb4a…`, and
+the older `3a5ac02…` / `734a9425…` are all absent, so ancestry could not be
+confirmed; all findings are anchored to the worktree at HEAD `b7a38c6`,
+source-identical to the shallow boundary `819f2b2`, which carries the C2/C3A/C3B
+source. No readiness item moves Green. RS1/C4/C5 remain OPEN and public DevNet is
+NO-GO.
 
 ---
 
@@ -810,3 +835,15 @@ This document supersedes the first C3C audit draft. The following were corrected
   input/evidence/failure contract and required negative tests. Activation remains
   last and gated behind lifecycle/restart (durable freshness / anti-rollback)
   protections; the accepted C3A/C3B alias contract is preserved and not reopened.
+* **Git-fact reconciliation and source-reference fixes (this revision).** The
+  branch / HEAD / shallow-boundary / object-availability report (§1.1–1.2, §7–8)
+  is updated to the actual state: branch `copilot/copilotrun-422-d7-c3c`, HEAD
+  `b7a38c6` on boundary `819f2b2`, with the task-named `9cc94ab7…` (reviewed
+  final) and `0b3eb4a…` (inspected source) now **absent** and no ancestry
+  manufactured. §4.B reclassifies `basic_hotstuff_engine.rs:1531` `chain_id: 1`
+  as the ordinary `on_proposal_event` responding Vote (not a test fixture) and
+  names the engine leader method `on_leader_step` (`:1284`), reserving
+  `do_leader_tick` for the binary loop. §2 boundary 1 separates the external
+  genesis **file** (`--genesis-path`) from the independent **expected-hash pin**
+  (`--expect-genesis-hash` / `expected_genesis_hash`), which DevNet/TestNet may
+  omit (hash compare skipped) and only MainNet forces.
