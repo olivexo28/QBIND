@@ -2075,3 +2075,120 @@ SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO
    observation is a serialized/quiescent snapshot only).
 5. Capture configured-authority release-binary adversarial evidence (Run 423+),
    which remains `NOT-YET-CAPTURED`. No readiness item moves Green.
+
+### D7-C1 correction — storage-reported incomplete transition (RUN 422 D7-C1 metadata fix)
+
+This subsection is additive and corrects one defect in `classify_read_error`
+introduced with the module above. Historical results at their original revisions
+are preserved unchanged; only the items below are updated.
+
+**Defect.** In `crates/qbind-node/src/consensus_storage_observation.rs`,
+`classify_read_error` mapped a direct
+`StorageError::IncompleteEpochTransition { epoch, .. }` to
+`ConsensusStorageObservationError::IncompleteEpochTransition { target_epoch: epoch,
+previous_epoch: epoch }`. The source error establishes only its own reported
+`epoch` and `details`; it does **not** establish a previous/target transition
+pair. Reporting both fields as the same value **fabricated** transition metadata.
+The `Ok(Some(marker))` path (which has genuine `previous_epoch` / `target_epoch`
+fields) was and remains correct.
+
+**Correction.** A distinct bounded variant
+`ConsensusStorageObservationError::StorageReportedIncompleteEpochTransition {
+surface: &'static str, source: StorageError }` was added. The direct-error
+fallback now maps to it, preserving the failing read surface and the original
+`StorageError` verbatim (its reported epoch and details). No previous epoch is
+inferred; the reported epoch is not treated as a proven target; the details
+string is not parsed into authority metadata; no replacement values are
+manufactured. `Display` renders the surface and the wrapped error and does **not**
+emit any `previous=` / `target=` claim. The marker-derived
+`IncompleteEpochTransition { target, previous }` variant, its `Display`, and its
+behavior are unchanged. Both paths remain errors and neither produces
+`NoStorageHandle`, `PresentNoCommittedEpoch`, `CommittedEpoch`, or any
+authorization capability.
+
+**Observation / error matrix (added row).**
+
+| Input state | Result |
+| --- | --- |
+| A consulted read returns `StorageError::IncompleteEpochTransition` directly | `Err(StorageReportedIncompleteEpochTransition{surface,source})` — original epoch/details preserved, **no** fabricated previous/target pair |
+
+**Regression coverage (case J, added to `run_422_d7c1_storage_observation_tests`).**
+An explicitly-labelled injected backend (`StorageReportedIncompleteBackend`)
+returns a direct `StorageError::IncompleteEpochTransition { epoch: 9, details:
+"backend reported incomplete transition; no previous epoch recorded" }` from each
+consulted read, with per-read call counters. The error supplies **no** previous
+epoch, so the original fabrication (`previous_epoch == target_epoch == 9`) would
+be detected. Injected-backend evidence is kept distinct from the real RocksDB
+evidence (case G).
+
+| Test | Failing read | Surface asserted | No-continuation assertion |
+| --- | --- | --- | --- |
+| `d7c1_j_storage_reported_incomplete_from_schema_read` | `get_schema_version` | `schema version` | marker/epoch reads = 0 |
+| `d7c1_j_storage_reported_incomplete_from_marker_read` | `check_for_incomplete_epoch_transition` | `epoch transition marker` | epoch reads = 0 |
+| `d7c1_j_storage_reported_incomplete_from_epoch_read` | `get_current_epoch` | `current epoch` | schema=1, marker=1, epoch=1 |
+
+Each case asserts: the distinct `StorageReportedIncompleteEpochTransition`
+category (and explicitly **not** the marker-derived `IncompleteEpochTransition`
+variant); the correct failing surface; preservation of the original epoch (`9`)
+and details; that neither the `Display` diagnostic nor the `Debug` metadata
+exposes a fabricated `previous=`/`target=` (or `previous_epoch`/`target_epoch`)
+pair; no continuation to subsequent reads after the failure; and no write /
+mutation call (the backend panics on any write). The real RocksDB marker test
+`d7c1_g_incomplete_transition_marker_rejected_without_mutation` is retained
+unchanged and still proves that a genuine `previous=6, target=7` marker reports
+those exact values, leaves the marker intact, and leaves the stored epoch (`6`)
+unchanged.
+
+**Validation (this correction).** Tested SHA
+`3b573bd945c44f8f615298076b73966d8fcea339`; package `qbind-node`; default
+features unless noted; `test`/`dev` and `release` profiles; run sequentially.
+
+* `cargo test -p qbind-node --lib consensus_storage_observation` ⇒ **5 passed**,
+  0 failed, 1583 filtered out (exit 0).
+* `cargo test -p qbind-node --test run_422_d7c1_storage_observation_tests --
+  --test-threads=1` ⇒ **23 passed**, 0 failed (exit 0) — previously 20; the +3
+  are case J.
+* `cargo test -p qbind-node --test run_422_startup_refusal_tests` ⇒ **4 passed**
+  (exit 0) — genesis startup refusal preserved.
+* `cargo check -p qbind-node` (default features, production build) ⇒ Finished,
+  exit 0.
+* `cargo clippy -p qbind-node --lib --test run_422_d7c1_storage_observation_tests`
+  ⇒ Finished, exit 0; **no** warnings in the changed module or test target
+  (pre-existing lib warnings unrelated to this correction remain).
+* `cargo build --release -p qbind-node --bin qbind-node` ⇒ Finished (release
+  profile), exit 0. A release build is compilation evidence only, **not**
+  configured-authority runtime evidence.
+* **CRLF-aware whitespace:** `consensus_storage_observation.rs` and
+  `run_422_d7c1_storage_observation_tests.rs` retain their existing **CRLF**
+  line endings; the added lines match that convention and introduce no genuine
+  trailing whitespace.
+* **Secret scan:** the two changed source files were scanned ⇒ no secrets
+  detected.
+
+**Security-tool outcomes (this correction).** This change edits production-source
+error handling and is **not** docs-only; it is therefore declared non-trivial for
+CodeQL. Both tools were attempted via the parallel-validation path:
+* **CodeQL** (rust) returned **SKIPPED** with reason "database size is too large"
+  (0 alerts). A database-size skip is **not** a clean/passing scan; status is
+  **SKIPPED/INCOMPLETE**.
+* **Code review** reported "no review comments" but the reviewer backend was
+  **UNAVAILABLE** in this environment (the `autofind` binary was not found on any
+  searched path). Recorded as **UNAVAILABLE/UNVERIFIED**, not a completed clean
+  review.
+
+**Trust limits.** Unchanged from the D7-C1 section above. This correction only
+removes a fabricated previous/target pair from one error path; it establishes no
+new authority binding, no durable anti-rollback, and no conversion of observation
+into authorization. Persisted epoch remains authorization-FALSE.
+
+Status flags retained (unchanged):
+
+```
+D7C1_STORAGE_OBSERVATION=CODE-TEST-POSITIVE
+PERSISTED_EPOCH_IS_AUTHORIZATION=FALSE
+D7_STATUS=PARTIAL-CODE-TEST / PRODUCTION-LIFECYCLE-UNAVAILABLE
+DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED
+GENESIS_AUTHORITY_ACTIVATION=DISABLED
+CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED
+SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO
+```

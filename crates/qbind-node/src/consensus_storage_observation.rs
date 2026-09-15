@@ -135,6 +135,20 @@ pub enum ConsensusStorageObservationError {
         /// Epoch the interrupted transition was moving away from.
         previous_epoch: u64,
     },
+    /// A consulted read returned [`StorageError::IncompleteEpochTransition`]
+    /// directly, rather than the observation surfacing a decoded marker.
+    ///
+    /// The source error establishes only its own reported epoch and details; it
+    /// does **not** establish a previous/target transition pair. This category
+    /// therefore preserves the original [`StorageError`] verbatim and does not
+    /// fabricate a previous/target metadata pair.
+    StorageReportedIncompleteEpochTransition {
+        /// Which logical read reported the incomplete transition.
+        surface: &'static str,
+        /// The underlying storage error, preserving its reported epoch and
+        /// details.
+        source: StorageError,
+    },
     /// Stored metadata failed to decode (checksum/codec/corruption).
     ///
     /// Never reported as "no epoch". Preserves the underlying
@@ -177,6 +191,15 @@ impl std::fmt::Display for ConsensusStorageObservationError {
                  (previous={}, target={}); refusing to report an epoch",
                 previous_epoch, target_epoch
             ),
+            ConsensusStorageObservationError::StorageReportedIncompleteEpochTransition {
+                surface,
+                source,
+            } => write!(
+                f,
+                "consensus storage observation: read of {} reported an incomplete epoch \
+                 transition: {}; refusing to report an epoch",
+                surface, source
+            ),
             ConsensusStorageObservationError::MalformedMetadata { surface, source } => write!(
                 f,
                 "consensus storage observation: malformed {} metadata: {}",
@@ -208,12 +231,15 @@ fn classify_read_error(
             stored_version,
             current_version,
         },
-        StorageError::IncompleteEpochTransition { epoch, .. } => {
-            // The marker path (below) provides the richer previous/target pair;
-            // this arm only fires if a helper surfaces the category directly.
-            ConsensusStorageObservationError::IncompleteEpochTransition {
-                target_epoch: epoch,
-                previous_epoch: epoch,
+        StorageError::IncompleteEpochTransition { .. } => {
+            // The source error reports only its own epoch and details; it does
+            // not establish a previous/target pair. Preserve it verbatim rather
+            // than fabricating transition metadata. The marker path (in
+            // `observe_consensus_storage`) is the only source of an actual
+            // previous/target pair.
+            ConsensusStorageObservationError::StorageReportedIncompleteEpochTransition {
+                surface,
+                source: err,
             }
         }
         StorageError::Codec(_) | StorageError::Corruption(_) => {

@@ -19,6 +19,7 @@
 //!   G. Incomplete transition (marker present / malformed marker)
 //!   H. Read failure (injected)
 //!   I. Snapshot-epoch parity (None / explicit zero / idempotent / conflict)
+//!   J. Storage-reported incomplete transition (direct StorageError, injected)
 //!
 //! The observed epoch is storage evidence only; none of these tests convert an
 //! observation into any authorization state, owner, snapshot, or ticket.
@@ -685,4 +686,219 @@ fn d7c1_reader_performs_no_writes_when_marker_present() {
         baseline,
         "rejecting an incomplete transition must not clear or write anything"
     );
+}
+// ============================================================================
+// J. Storage-reported incomplete transition (direct StorageError from a read).
+//
+//    An explicitly-labelled injected backend returns
+//    `StorageError::IncompleteEpochTransition` directly (rather than the
+//    observation decoding a marker) from each of the three consulted reads:
+//    schema version, epoch-transition-marker check, and current epoch. The
+//    injected error carries only a reported epoch and details and establishes
+//    NO previous/target pair, so the observation must not fabricate one. This
+//    injected-backend evidence is deliberately kept distinct from the real
+//    RocksDB marker evidence in case G.
+// ============================================================================
+
+/// Which consulted read the injected backend should fail from.
+#[derive(Clone, Copy)]
+enum FailAt {
+    Schema,
+    Marker,
+    Epoch,
+}
+
+/// The reported epoch carried by the injected direct storage error. It supplies
+/// NO previous epoch, so any fabricated previous/target pair is detectable.
+const INJECTED_INCOMPLETE_EPOCH: u64 = 9;
+const INJECTED_INCOMPLETE_DETAILS: &str =
+    "backend reported incomplete transition; no previous epoch recorded";
+
+/// A narrow, explicitly-labelled fault-injection `ConsensusStorage` that returns
+/// a direct `StorageError::IncompleteEpochTransition` from one chosen read and
+/// records which reads were consulted. It performs no persistence and panics on
+/// any write, so it doubles as a no-mutation / no-continuation probe. This is
+/// NOT a real database and its evidence is kept separate from the RocksDB tests.
+struct StorageReportedIncompleteBackend {
+    fail_at: FailAt,
+    schema_reads: AtomicUsize,
+    marker_reads: AtomicUsize,
+    epoch_reads: AtomicUsize,
+}
+
+impl StorageReportedIncompleteBackend {
+    fn new(fail_at: FailAt) -> Self {
+        Self {
+            fail_at,
+            schema_reads: AtomicUsize::new(0),
+            marker_reads: AtomicUsize::new(0),
+            epoch_reads: AtomicUsize::new(0),
+        }
+    }
+
+    fn incomplete() -> StorageError {
+        StorageError::IncompleteEpochTransition {
+            epoch: INJECTED_INCOMPLETE_EPOCH,
+            details: INJECTED_INCOMPLETE_DETAILS.to_string(),
+        }
+    }
+}
+
+impl ConsensusStorage for StorageReportedIncompleteBackend {
+    fn put_block(&self, _: &[u8; 32], _: &BlockProposal) -> Result<(), StorageError> {
+        panic!("read-only reader must not write");
+    }
+    fn get_block(&self, _: &[u8; 32]) -> Result<Option<BlockProposal>, StorageError> {
+        Ok(None)
+    }
+    fn put_qc(&self, _: &[u8; 32], _: &QuorumCertificate) -> Result<(), StorageError> {
+        panic!("read-only reader must not write");
+    }
+    fn get_qc(&self, _: &[u8; 32]) -> Result<Option<QuorumCertificate>, StorageError> {
+        Ok(None)
+    }
+    fn put_last_committed(&self, _: &[u8; 32]) -> Result<(), StorageError> {
+        panic!("read-only reader must not write");
+    }
+    fn get_last_committed(&self) -> Result<Option<[u8; 32]>, StorageError> {
+        Ok(None)
+    }
+    fn put_current_epoch(&self, _: u64) -> Result<(), StorageError> {
+        panic!("read-only reader must not write");
+    }
+    fn get_current_epoch(&self) -> Result<Option<u64>, StorageError> {
+        self.epoch_reads.fetch_add(1, Ordering::SeqCst);
+        match self.fail_at {
+            FailAt::Epoch => Err(Self::incomplete()),
+            _ => Ok(None),
+        }
+    }
+    fn put_schema_version(&self, _: u32) -> Result<(), StorageError> {
+        panic!("read-only reader must not write");
+    }
+    fn get_schema_version(&self) -> Result<Option<u32>, StorageError> {
+        self.schema_reads.fetch_add(1, Ordering::SeqCst);
+        match self.fail_at {
+            FailAt::Schema => Err(Self::incomplete()),
+            _ => Ok(None),
+        }
+    }
+    fn apply_epoch_transition_atomic(&self, _: EpochTransitionBatch) -> Result<(), StorageError> {
+        panic!("read-only reader must not apply transitions");
+    }
+    fn write_epoch_transition_marker(
+        &self,
+        _: &EpochTransitionMarker,
+    ) -> Result<(), StorageError> {
+        panic!("read-only reader must not write markers");
+    }
+    fn check_for_incomplete_epoch_transition(
+        &self,
+    ) -> Result<Option<EpochTransitionMarker>, StorageError> {
+        self.marker_reads.fetch_add(1, Ordering::SeqCst);
+        match self.fail_at {
+            FailAt::Marker => Err(Self::incomplete()),
+            _ => Ok(None),
+        }
+    }
+    fn verify_epoch_consistency_on_startup(&self) -> Result<(), StorageError> {
+        Ok(())
+    }
+}
+
+/// Shared assertions: the observation surfaces the distinct storage-reported
+/// category, preserves the original epoch/details, fabricates no previous/target
+/// pair, and continues to no further reads.
+fn assert_storage_reported(
+    backend: &StorageReportedIncompleteBackend,
+    expected_surface: &str,
+) {
+    let err = observe_consensus_storage(Some(backend)).unwrap_err();
+
+    // Must NOT be the marker-derived variant (which alone carries a real
+    // previous/target pair).
+    assert!(
+        !matches!(
+            err,
+            ConsensusStorageObservationError::IncompleteEpochTransition { .. }
+        ),
+        "direct storage error must not become the marker-derived variant: {err:?}"
+    );
+
+    match &err {
+        ConsensusStorageObservationError::StorageReportedIncompleteEpochTransition {
+            surface,
+            source,
+        } => {
+            assert_eq!(*surface, expected_surface, "failing surface");
+            match source {
+                StorageError::IncompleteEpochTransition { epoch, details } => {
+                    assert_eq!(*epoch, INJECTED_INCOMPLETE_EPOCH, "reported epoch preserved");
+                    assert_eq!(details, INJECTED_INCOMPLETE_DETAILS, "details preserved");
+                }
+                other => panic!("original StorageError must be preserved, got {other:?}"),
+            }
+        }
+        other => panic!("expected StorageReportedIncompleteEpochTransition, got {other:?}"),
+    }
+
+    // No fabricated previous/target pair may leak into the diagnostic. The
+    // injected error supplies no previous epoch, so a "previous=" claim would be
+    // manufactured.
+    let rendered = format!("{err}");
+    assert!(
+        !rendered.contains("previous="),
+        "diagnostic must not fabricate a previous epoch: {rendered}"
+    );
+    assert!(
+        !rendered.contains("target="),
+        "diagnostic must not fabricate a target epoch: {rendered}"
+    );
+    let debug = format!("{err:?}");
+    assert!(
+        !debug.contains("previous_epoch") && !debug.contains("target_epoch"),
+        "debug metadata must not expose a fabricated previous/target pair: {debug}"
+    );
+}
+
+#[test]
+fn d7c1_j_storage_reported_incomplete_from_schema_read() {
+    let backend = StorageReportedIncompleteBackend::new(FailAt::Schema);
+    assert_storage_reported(&backend, "schema version");
+    // Failure stops after the schema read: no marker or epoch read follows.
+    assert_eq!(backend.schema_reads.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        backend.marker_reads.load(Ordering::SeqCst),
+        0,
+        "must not continue to the marker read after a schema failure"
+    );
+    assert_eq!(
+        backend.epoch_reads.load(Ordering::SeqCst),
+        0,
+        "must not continue to the epoch read after a schema failure"
+    );
+}
+
+#[test]
+fn d7c1_j_storage_reported_incomplete_from_marker_read() {
+    let backend = StorageReportedIncompleteBackend::new(FailAt::Marker);
+    assert_storage_reported(&backend, "epoch transition marker");
+    // Schema read succeeded, marker read failed, epoch read never reached.
+    assert_eq!(backend.schema_reads.load(Ordering::SeqCst), 1);
+    assert_eq!(backend.marker_reads.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        backend.epoch_reads.load(Ordering::SeqCst),
+        0,
+        "must not continue to the epoch read after a marker failure"
+    );
+}
+
+#[test]
+fn d7c1_j_storage_reported_incomplete_from_epoch_read() {
+    let backend = StorageReportedIncompleteBackend::new(FailAt::Epoch);
+    assert_storage_reported(&backend, "current epoch");
+    // All three reads were consulted in order; the epoch read reported the error.
+    assert_eq!(backend.schema_reads.load(Ordering::SeqCst), 1);
+    assert_eq!(backend.marker_reads.load(Ordering::SeqCst), 1);
+    assert_eq!(backend.epoch_reads.load(Ordering::SeqCst), 1);
 }
