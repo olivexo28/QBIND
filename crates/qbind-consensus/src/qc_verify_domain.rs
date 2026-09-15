@@ -45,18 +45,58 @@
 //! for `ValidatorId`; ids are never reordered, renumbered, truncated, or
 //! wrapped. Because a bitmap cannot repeat a bit, every signer id is distinct.
 //!
-//! # Size bounds
+//! # Size bounds (all validated before any clone or cryptographic work)
 //!
-//! * Bitmap length ≤ [`MAX_BITMAP_LEN`] (8192 bytes). Any bit in a longer
-//!   bitmap could imply a `validator_index > u16::MAX` (unrepresentable by the
-//!   wire field), so the cap simultaneously bounds work and guarantees every
+//! The structural preflight is **complete before the cryptographic loop**: no
+//! signature buffer is cloned and **no backend is invoked** until every one of
+//! the following holds, so an oversized late signature (or an unrepresentable
+//! count) rejects before *any* backend call.
+//!
+//! * **Signature-count representability.** The wire QC encodes
+//!   `signatures.len()` as a `u16` (`sig_count`), so at most
+//!   [`MAX_SIGNATURE_COUNT`] (`u16::MAX == 65535`) signatures are encodable.
+//!   `signatures.len() > MAX_SIGNATURE_COUNT` is rejected with a bounded typed
+//!   error **before any crypto or signer-result allocation**. Note the three
+//!   distinct quantities: the maximum *validator index* is `65535` (still
+//!   valid); the number of *representable indices* is `65536` (`0..=65535`);
+//!   and the maximum *encodable signature count* is `65535`. An 8192-byte
+//!   bitmap alone does **not** enforce the count limit — a full 8192-byte
+//!   bitmap has `65536` set bits, one more than the encodable count — so the
+//!   count is bounded explicitly rather than inferred from the bitmap.
+//! * **Global bitmap length.** `signer_bitmap.len() <= `[`MAX_BITMAP_LEN`]
+//!   (8192 bytes). Any bit in a longer bitmap could imply a
+//!   `validator_index > u16::MAX`, so the cap bounds work and guarantees every
 //!   set bit maps to a representable u16 index.
+//! * **Membership-relative bitmap span.** `signer_bitmap.len()` must not exceed
+//!   the trusted membership's **identifier span** — the number of bytes needed
+//!   to represent bit indices `0..=max_id` where `max_id` is the largest
+//!   representable `ValidatorId` in the trusted set (`(max_id / 8) + 1` bytes;
+//!   `0` for an empty set). This uses the *identifier span*, never
+//!   `validators.len()`, so sparse and reordered memberships remain valid. Any
+//!   byte beyond that span — **including zero padding** — is rejected
+//!   ([`QcDomainVerifyError::BitmapBeyondMembershipSpan`]). Set bits for unknown
+//!   members that fall *within* the span continue to reject at the membership
+//!   check. Because every `max_id <= u16::MAX`, the span is always
+//!   `<= MAX_BITMAP_LEN`.
 //! * `popcount(bitmap) == signatures.len()` is required; signatures are
 //!   associated with set bits in ascending-bit order.
-//! * Each signature length ≤ [`MAX_SIGNATURE_LEN`] (the wire u16 length bound).
+//! * **Per-signature size.** Each signature length ≤ [`MAX_SIGNATURE_LEN`] (the
+//!   wire u16 length bound), validated for *every* signature before the crypto
+//!   loop.
+//! * **Checked aggregate size.** The sum of all constituent signature byte
+//!   lengths is accumulated with checked arithmetic
+//!   ([`checked_aggregate_signature_bytes`]) and must not exceed the documented
+//!   acceptance bound [`MAX_AGGREGATE_SIGNATURE_BYTES`]
+//!   (`MAX_SIGNATURE_COUNT * MAX_SIGNATURE_LEN`). This is the structural worst
+//!   case implied purely by the two wire field widths (a `u16` count of
+//!   `u16`-length signatures); it is the dormant verifier's own acceptance
+//!   bound and is **deliberately distinct** from transport limits such as
+//!   `qbind_wire::net::MAX_NET_MESSAGE_BYTES`. Establishing it does not change
+//!   transport policy.
 //! * The only per-signer allocation is a single clone of that signer's
 //!   signature into the reconstructed `Vote` (bounded by `MAX_SIGNATURE_LEN`);
-//!   sizes are validated *before* that clone and before any cryptographic work.
+//!   all sizes above are validated *before* that clone and before any
+//!   cryptographic work.
 //!
 //! This is **not** a complete transport-level DoS audit.
 //!
@@ -107,6 +147,34 @@ pub const MAX_BITMAP_LEN: usize = 8192;
 /// (non-wire) QC is held to the same bound.
 pub const MAX_SIGNATURE_LEN: usize = u16::MAX as usize;
 
+/// Maximum accepted number of constituent signatures in a QC.
+///
+/// The wire `QuorumCertificate` encodes `signatures.len()` as a `u16`
+/// (`sig_count`), so a QC carrying more than `u16::MAX == 65535` signatures is
+/// **not encodable** — the encoder would panic on the narrowing conversion.
+/// This dormant verifier therefore rejects `signatures.len() > 65535` with a
+/// bounded typed error *before* any cryptographic work or signer-result
+/// allocation, rather than relying on that downstream panic and without
+/// changing the wire format or encoder to accommodate an oversized count.
+///
+/// This is distinct from the number of *representable validator indices*
+/// (`65536`, i.e. `0..=65535`) and from the *maximum validator index* (`65535`,
+/// which remains valid): a full 8192-byte bitmap has `65536` set bits, one more
+/// than the maximum encodable signature count.
+pub const MAX_SIGNATURE_COUNT: usize = u16::MAX as usize;
+
+/// Documented aggregate acceptance bound for the combined byte length of all
+/// constituent signatures: [`MAX_SIGNATURE_COUNT`] × [`MAX_SIGNATURE_LEN`].
+///
+/// This is the structural worst case implied purely by the two wire field
+/// widths — at most `65535` signatures, each at most `65535` bytes. It is the
+/// dormant verifier's *own* acceptance bound, enforced with checked arithmetic
+/// before any cryptographic work, and is **deliberately distinct** from
+/// transport-layer limits such as `qbind_wire::net::MAX_NET_MESSAGE_BYTES`
+/// (1 MiB). Establishing it here does not change transport policy and is not a
+/// complete DoS audit.
+pub const MAX_AGGREGATE_SIGNATURE_BYTES: usize = MAX_SIGNATURE_COUNT * MAX_SIGNATURE_LEN;
+
 /// Maximum diagnostic length retained from a backend error string.
 const MAX_BACKEND_MSG_LEN: usize = 96;
 
@@ -150,6 +218,36 @@ pub enum QcDomainVerifyError {
         /// The actual bitmap length in bytes.
         len: usize,
         /// The maximum accepted bitmap length in bytes.
+        max: usize,
+    },
+    /// The `signer_bitmap` extends beyond the trusted membership's identifier
+    /// span — the byte span required to represent bit indices `0..=max_id` for
+    /// the largest representable `ValidatorId` in the trusted set. Any byte
+    /// past that span (including trailing zero padding) is rejected.
+    BitmapBeyondMembershipSpan {
+        /// The actual bitmap length in bytes.
+        len: usize,
+        /// The maximum bitmap length permitted by the membership span, in
+        /// bytes.
+        allowed: usize,
+    },
+    /// `signatures.len()` exceeds [`MAX_SIGNATURE_COUNT`] (`u16::MAX`), so the
+    /// wire `sig_count` field cannot represent it. Checked before any crypto or
+    /// signer-result allocation.
+    SignatureCountNotRepresentable {
+        /// The number of declared signatures.
+        count: usize,
+        /// The maximum encodable signature count.
+        max: usize,
+    },
+    /// The checked aggregate byte length of all constituent signatures exceeds
+    /// [`MAX_AGGREGATE_SIGNATURE_BYTES`], or the checked summation overflowed
+    /// `usize`. Checked before any cryptographic work.
+    AggregateSignatureBytesTooLarge {
+        /// The accumulated aggregate byte length at the point of rejection
+        /// (saturated to `usize::MAX` if the checked summation overflowed).
+        aggregate: usize,
+        /// The documented aggregate acceptance bound.
         max: usize,
     },
     /// A set bit implies a `validator_index` greater than `u16::MAX`.
@@ -241,6 +339,21 @@ impl std::fmt::Display for QcDomainVerifyError {
             QcDomainVerifyError::BitmapTooLong { len, max } => {
                 write!(f, "signer_bitmap too long: len={}, max={}", len, max)
             }
+            QcDomainVerifyError::BitmapBeyondMembershipSpan { len, allowed } => write!(
+                f,
+                "signer_bitmap extends beyond membership span: len={}, allowed={}",
+                len, allowed
+            ),
+            QcDomainVerifyError::SignatureCountNotRepresentable { count, max } => write!(
+                f,
+                "signature count not representable as u16: count={}, max={}",
+                count, max
+            ),
+            QcDomainVerifyError::AggregateSignatureBytesTooLarge { aggregate, max } => write!(
+                f,
+                "aggregate signature bytes too large: aggregate={}, max={}",
+                aggregate, max
+            ),
             QcDomainVerifyError::SignerIndexNotRepresentable { index } => {
                 write!(f, "signer index not representable as u16: {}", index)
             }
@@ -454,20 +567,39 @@ impl std::fmt::Debug for VerifiedQuorumCertificate {
     }
 }
 
+/// Checked membership bounds recomputed from the trusted validator set.
+struct MembershipBounds {
+    /// The positive, representable total voting power `W`.
+    total_voting_power: u64,
+    /// The maximum accepted `signer_bitmap` length, in bytes, implied by the
+    /// membership's identifier span: the byte span required to represent bit
+    /// indices `0..=max_id`. `0` for an empty set.
+    max_bitmap_bytes: usize,
+}
+
 /// Recompute the trusted membership's total voting power with checked
-/// arithmetic and validate every id is representable as a u16 wire index.
+/// arithmetic, validate every id is representable as a u16 wire index, and
+/// derive the membership identifier span (in bytes) for the bitmap bound.
 ///
-/// Returns the positive, representable total `W`. This deliberately does **not**
-/// trust the set's cached (saturating) total or `two_thirds_vp()`'s `2 * total`
-/// u64 arithmetic.
-fn validate_total_voting_power(
+/// Returns the positive, representable total `W` and the membership-relative
+/// bitmap byte span. This deliberately does **not** trust the set's cached
+/// (saturating) total or `two_thirds_vp()`'s `2 * total` u64 arithmetic, and
+/// uses the *identifier span* (largest `ValidatorId`), never `validators.len()`,
+/// so sparse and reordered memberships remain valid.
+fn validate_membership_bounds(
     validators: &ConsensusValidatorSet,
-) -> Result<u64, QcDomainVerifyError> {
+) -> Result<MembershipBounds, QcDomainVerifyError> {
     let mut total: u64 = 0;
+    let mut max_id: Option<u64> = None;
     for entry in validators.iter() {
-        if entry.id.as_u64() > u16::MAX as u64 {
+        let id = entry.id.as_u64();
+        if id > u16::MAX as u64 {
             return Err(QcDomainVerifyError::MembershipIdNotRepresentable(entry.id));
         }
+        max_id = Some(match max_id {
+            Some(m) => m.max(id),
+            None => id,
+        });
         total = total
             .checked_add(entry.voting_power)
             .ok_or(QcDomainVerifyError::TotalVotingPowerOverflow)?;
@@ -475,7 +607,72 @@ fn validate_total_voting_power(
     if total == 0 {
         return Err(QcDomainVerifyError::ZeroTotalVotingPower);
     }
-    Ok(total)
+    // Byte span needed to represent bit indices 0..=max_id. Since every id is
+    // <= u16::MAX (65535), this is <= 8192 == MAX_BITMAP_LEN. Empty set -> 0.
+    let max_bitmap_bytes = match max_id {
+        Some(m) => (m as usize / 8) + 1,
+        None => 0,
+    };
+    Ok(MembershipBounds {
+        total_voting_power: total,
+        max_bitmap_bytes,
+    })
+}
+
+/// Accumulate the aggregate byte length of all constituent signatures with
+/// checked arithmetic and validate it against [`MAX_AGGREGATE_SIGNATURE_BYTES`].
+///
+/// This is pure allocation arithmetic — it never allocates or clones signature
+/// buffers — so its acceptance/rejection boundary can be exercised directly
+/// without multi-gigabyte test allocations. A checked-add overflow is reported
+/// as [`QcDomainVerifyError::AggregateSignatureBytesTooLarge`] with the
+/// aggregate saturated to `usize::MAX`.
+pub fn checked_aggregate_signature_bytes<I>(sig_lens: I) -> Result<usize, QcDomainVerifyError>
+where
+    I: IntoIterator<Item = usize>,
+{
+    let mut aggregate: usize = 0;
+    for len in sig_lens {
+        aggregate = aggregate.checked_add(len).ok_or(
+            QcDomainVerifyError::AggregateSignatureBytesTooLarge {
+                aggregate: usize::MAX,
+                max: MAX_AGGREGATE_SIGNATURE_BYTES,
+            },
+        )?;
+        if aggregate > MAX_AGGREGATE_SIGNATURE_BYTES {
+            return Err(QcDomainVerifyError::AggregateSignatureBytesTooLarge {
+                aggregate,
+                max: MAX_AGGREGATE_SIGNATURE_BYTES,
+            });
+        }
+    }
+    Ok(aggregate)
+}
+
+/// Collect the signer identities implied by the set bits of a validated bitmap,
+/// in ascending-bit order. Bit `i` -> wire `validator_index = i` ->
+/// `ValidatorId(i)`, matching D6. Each index is checked representable as a u16
+/// (fail-closed), though the prior bitmap-length bounds already guarantee it.
+///
+/// The returned length equals `popcount(bitmap)`.
+fn collect_signers(bitmap: &[u8]) -> Result<Vec<ValidatorId>, QcDomainVerifyError> {
+    let mut signers: Vec<ValidatorId> = Vec::new();
+    for (byte_index, byte) in bitmap.iter().enumerate() {
+        if *byte == 0 {
+            continue;
+        }
+        for bit in 0..8u32 {
+            if (byte & (1u8 << bit)) == 0 {
+                continue;
+            }
+            let index_u32 = (byte_index as u32) * 8 + bit;
+            if index_u32 > u16::MAX as u32 {
+                return Err(QcDomainVerifyError::SignerIndexNotRepresentable { index: index_u32 });
+            }
+            signers.push(ValidatorId::new(index_u32 as u64));
+        }
+    }
+    Ok(signers)
 }
 
 /// Compute the `ceil(2W/3)` quorum threshold using wide (`u128`) arithmetic.
@@ -502,14 +699,22 @@ fn checked_two_thirds(total: u64) -> u64 {
 ///    [`QcDomainVerifyError::WireChainMismatch`], before crypto).
 /// 2. `qc.epoch == authorized_epoch` (else [`QcDomainVerifyError::EpochMismatch`],
 ///    before crypto).
-/// 3. Checked, representable, positive total voting power `W`.
-/// 4. Structural bounds: `bitmap.len() <= MAX_BITMAP_LEN`, every set bit
-///    representable as a u16 index, `popcount(bitmap) == signatures.len()`.
+/// 3. Checked, representable, positive total voting power `W`, and the
+///    membership identifier span used to bound the bitmap.
+/// 4. Complete structural preflight, **all before the cryptographic loop and any
+///    signature clone**: signature-count representability
+///    (`signatures.len() <= MAX_SIGNATURE_COUNT`), global bitmap length
+///    (`<= MAX_BITMAP_LEN`), membership-relative bitmap span, every set bit
+///    representable as a u16 index, `popcount(bitmap) == signatures.len()`,
+///    every individual signature length (`<= MAX_SIGNATURE_LEN`), and the
+///    checked aggregate signature-byte bound (`MAX_AGGREGATE_SIGNATURE_BYTES`).
+///    An oversized late signature (or an unrepresentable count) therefore
+///    rejects before *any* backend invocation.
 /// 5. For each set bit in ascending order (associating signatures in the same
 ///    order): reconstruct the `Vote` from the QC's *actual* fields plus the
-///    bit-derived index and its signature, validate the signature length, and
-///    verify via [`verify_vote_msg_with_domain`]. Accumulate the signer's
-///    voting power once (checked).
+///    bit-derived index and its signature and verify via
+///    [`verify_vote_msg_with_domain`]. Accumulate the signer's voting power once
+///    (checked).
 /// 6. Require `accumulated >= ceil(2W/3)`.
 ///
 /// Every declared signature is verified even after quorum is reached. On any
@@ -543,12 +748,25 @@ where
         });
     }
 
-    // Step 3: checked, representable, positive total voting power.
-    let total_voting_power = validate_total_voting_power(validators)?;
+    // Step 3: checked, representable, positive total voting power, plus the
+    // membership identifier span used to bound the bitmap.
+    let bounds = validate_membership_bounds(validators)?;
+    let total_voting_power = bounds.total_voting_power;
     let threshold = checked_two_thirds(total_voting_power);
 
-    // Step 4a: bitmap length bound (bounds work and guarantees representable
-    // indices).
+    // Step 4a: signature-count representability. The wire `sig_count` is a u16,
+    // so reject an unrepresentable count BEFORE any crypto or signer-result
+    // allocation. (An 8192-byte bitmap could imply 65536 set bits; the count
+    // bound is enforced explicitly rather than inferred from the bitmap.)
+    if qc.signatures.len() > MAX_SIGNATURE_COUNT {
+        return Err(QcDomainVerifyError::SignatureCountNotRepresentable {
+            count: qc.signatures.len(),
+            max: MAX_SIGNATURE_COUNT,
+        });
+    }
+
+    // Step 4b: global bitmap length bound (bounds work and guarantees
+    // representable indices).
     if qc.signer_bitmap.len() > MAX_BITMAP_LEN {
         return Err(QcDomainVerifyError::BitmapTooLong {
             len: qc.signer_bitmap.len(),
@@ -556,106 +774,100 @@ where
         });
     }
 
-    // Step 4b: popcount(bitmap) == signatures.len().
-    let popcount: usize = qc
-        .signer_bitmap
-        .iter()
-        .map(|b| b.count_ones() as usize)
-        .sum();
-    if popcount != qc.signatures.len() {
+    // Step 4c: membership-relative bitmap span. Reject any byte beyond the
+    // trusted identifier span, INCLUDING trailing zero padding. Uses the
+    // identifier span (largest ValidatorId), never validators.len(), so sparse
+    // and reordered memberships remain valid.
+    if qc.signer_bitmap.len() > bounds.max_bitmap_bytes {
+        return Err(QcDomainVerifyError::BitmapBeyondMembershipSpan {
+            len: qc.signer_bitmap.len(),
+            allowed: bounds.max_bitmap_bytes,
+        });
+    }
+
+    // Step 4d: popcount(bitmap) == signatures.len(). Collecting the signer ids
+    // also yields the ascending-bit-order signer list. Because the count is
+    // already representable and popcount must equal it, the signer vector is
+    // bounded by MAX_SIGNATURE_COUNT.
+    let signers = collect_signers(&qc.signer_bitmap)?;
+    if signers.len() != qc.signatures.len() {
         return Err(QcDomainVerifyError::SignatureCountMismatch {
-            popcount,
+            popcount: signers.len(),
             signatures: qc.signatures.len(),
         });
     }
 
+    // Step 4e: complete per-signature size validation BEFORE any clone or
+    // cryptographic work. Signatures associate with set bits in ascending-bit
+    // order, so signers[k] owns signatures[k]; an oversized signature at ANY
+    // position (including after quorum would be reached) rejects here — before
+    // any backend invocation. (Empty signatures are left to the reused D6
+    // MissingSignature check for a precise diagnostic.)
+    for (signer, signature) in signers.iter().zip(qc.signatures.iter()) {
+        if signature.len() > MAX_SIGNATURE_LEN {
+            return Err(QcDomainVerifyError::MalformedSignature(*signer));
+        }
+    }
+
+    // Step 4f: checked aggregate signature-byte bound (allocation arithmetic).
+    let _aggregate_bytes =
+        checked_aggregate_signature_bytes(qc.signatures.iter().map(|s| s.len()))?;
+
     // Step 5: verify each declared signature, associating signatures with set
     // bits in ascending-bit order. ALL signatures are verified — quorum is
     // checked only after the loop, so an invalid extra signature still rejects.
-    let mut signers: Vec<ValidatorId> = Vec::with_capacity(popcount);
     let mut accumulated: u64 = 0;
-    let mut sig_iter = qc.signatures.iter();
 
-    for (byte_index, byte) in qc.signer_bitmap.iter().enumerate() {
-        if *byte == 0 {
-            continue;
-        }
-        for bit in 0..8u32 {
-            if (byte & (1u8 << bit)) == 0 {
-                continue;
-            }
-            // Bit → wire validator_index, matching D6's
-            // ValidatorId::new(vote.validator_index as u64). The MAX_BITMAP_LEN
-            // cap guarantees this fits u16, but the check is explicit and
-            // fail-closed rather than a narrowing cast.
-            let index_u32 = (byte_index as u32) * 8 + bit;
-            if index_u32 > u16::MAX as u32 {
-                return Err(QcDomainVerifyError::SignerIndexNotRepresentable { index: index_u32 });
-            }
-            let validator_index = index_u32 as u16;
-            let signer = ValidatorId::new(index_u32 as u64);
+    for (signer, signature) in signers.iter().zip(qc.signatures.iter()) {
+        let signer = *signer;
+        // Bit → wire validator_index, matching D6's
+        // ValidatorId::new(vote.validator_index as u64). The bitmap bounds
+        // guarantee this fits u16.
+        let validator_index = signer.as_u64() as u16;
 
-            // Ascending-order signature association.
-            let signature = sig_iter
-                .next()
-                .ok_or(QcDomainVerifyError::SignatureCountMismatch {
-                    popcount,
-                    signatures: qc.signatures.len(),
-                })?;
+        // Reconstruct the Vote from the QC's ACTUAL fields — never
+        // substituting trusted values to make a signature pass — plus the
+        // bit-derived signer index and its associated signature.
+        let vote = Vote {
+            version: qc.version,
+            chain_id: qc.chain_id,
+            epoch: qc.epoch,
+            height: qc.height,
+            round: qc.round,
+            step: qc.step,
+            block_id: qc.block_id,
+            validator_index,
+            suite_id: qc.suite_id,
+            signature: signature.clone(),
+        };
 
-            // Validate signature size BEFORE cloning it into the Vote or doing
-            // cryptographic work. (Empty signatures are left to the reused D6
-            // MissingSignature check for a precise diagnostic.)
-            if signature.len() > MAX_SIGNATURE_LEN {
-                return Err(QcDomainVerifyError::MalformedSignature(signer));
-            }
+        // Reuse the D6 message-bound Vote verifier: membership, missing
+        // signature, governed key, suite match (QC suite vs governed
+        // suite), backend dispatch, and the cryptographic check over the
+        // recomputed v2 preimage. `claimed == signer` by construction.
+        verify_vote_msg_with_domain(
+            &vote,
+            signer,
+            validators,
+            key_provider,
+            backend_registry,
+            domain,
+        )
+        .map_err(|e| QcDomainVerifyError::from_pv(signer, e))?;
 
-            // Reconstruct the Vote from the QC's ACTUAL fields — never
-            // substituting trusted values to make a signature pass — plus the
-            // bit-derived signer index and its associated signature.
-            let vote = Vote {
-                version: qc.version,
-                chain_id: qc.chain_id,
-                epoch: qc.epoch,
-                height: qc.height,
-                round: qc.round,
-                step: qc.step,
-                block_id: qc.block_id,
-                validator_index,
-                suite_id: qc.suite_id,
-                signature: signature.clone(),
-            };
-
-            // Reuse the D6 message-bound Vote verifier: membership, missing
-            // signature, governed key, suite match (QC suite vs governed
-            // suite), backend dispatch, and the cryptographic check over the
-            // recomputed v2 preimage. `claimed == signer` by construction.
-            verify_vote_msg_with_domain(
-                &vote,
-                signer,
-                validators,
-                key_provider,
-                backend_registry,
-                domain,
-            )
-            .map_err(|e| QcDomainVerifyError::from_pv(signer, e))?;
-
-            // Accumulate this verified signer's voting power exactly once, by
-            // ValidatorId lookup and checked arithmetic. Membership was proven
-            // by the successful verify above; a present index is therefore
-            // expected, but the lookup stays fail-closed.
-            let idx = validators
-                .index_of(signer)
-                .ok_or(QcDomainVerifyError::UnknownSigner(signer))?;
-            let entry = validators
-                .get(idx)
-                .ok_or(QcDomainVerifyError::UnknownSigner(signer))?;
-            accumulated = accumulated
-                .checked_add(entry.voting_power)
-                .ok_or(QcDomainVerifyError::VerifiedPowerOverflow)?;
-
-            signers.push(signer);
-        }
+        // Accumulate this verified signer's voting power exactly once, by
+        // ValidatorId lookup and checked arithmetic. Membership was proven
+        // by the successful verify above; a present index is therefore
+        // expected, but the lookup stays fail-closed.
+        let idx = validators
+            .index_of(signer)
+            .ok_or(QcDomainVerifyError::UnknownSigner(signer))?;
+        let entry = validators
+            .get(idx)
+            .ok_or(QcDomainVerifyError::UnknownSigner(signer))?;
+        accumulated = accumulated
+            .checked_add(entry.voting_power)
+            .ok_or(QcDomainVerifyError::VerifiedPowerOverflow)?;
     }
 
     // Step 6: quorum. ceil(2W/3) preserved (compatibility behavior).
