@@ -2144,6 +2144,12 @@ pub mod snapshot_restore;
 pub mod startup_validation;
 pub mod storage;
 pub mod production_consensus_storage;
+// Run 422 D7-C1 — read-only, non-authorizing observation boundary over an
+// already-opened consensus storage handle. Distinguishes absent handle,
+// present-no-committed-epoch, explicit epoch (incl. 0), incompatible schema,
+// malformed/corrupt metadata, and incomplete epoch transitions, as storage
+// evidence only (never authorization).
+pub mod consensus_storage_observation;
 // Run 098 — canonical activation epoch source helper. Wires the
 // Run 093 production `ConsensusStorage` `meta:current_epoch` value
 // into `ActivationContext.current_epoch` at all production trust-
