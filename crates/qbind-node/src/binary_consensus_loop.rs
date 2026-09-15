@@ -18257,7 +18257,9 @@ mod tests {
             // no sleeps, no persistent epoch source.
             mod run422_d7b3 {
                 use super::*;
-                use crate::genesis_consensus_authority::CurrentStateUnavailableReason;
+                use crate::genesis_consensus_authority::{
+                    CurrentStateUnavailableReason, LocalAuthorizationState,
+                };
                 use std::sync::atomic::{AtomicU64, Ordering::SeqCst};
 
                 /// Restore baseline shared by these tests: snapshot height 5
@@ -18801,15 +18803,22 @@ mod tests {
                 }
 
                 // -------------------------------------------------------------
-                // G. Restore progress control.
+                // G. Deferral branch control (distinct frames).
                 //
-                // When the deferral condition no longer holds (a frame at
-                // committed+1 whose parent IS the committed block), the same
-                // valid frame is NOT deferred — it is verified and DELIVERED to
-                // the engine boundary. We distinguish verifier acceptance,
-                // delivery, engine acceptance, and outbound effects, and do NOT
-                // claim engine/QC success merely because the boundary verifier
-                // succeeded.
+                // A branch-control (predicate-outcome) test: it exercises the
+                // deferral predicate with two DIFFERENT frames on separate
+                // engines — a height-7 frame that DOES defer and a height-6
+                // frame (committed+1, parent == committed block) that does NOT.
+                // It establishes that a non-deferring frame is verified and
+                // DELIVERED to the engine boundary, distinguishing verifier
+                // acceptance, delivery, engine acceptance, and outbound effects,
+                // and does NOT claim engine/QC success from verifier success.
+                //
+                // This is NOT progress followed by retransmission of the
+                // originally deferred message: the two legs use different signed
+                // Proposals and different engines. The sequential
+                // defer-then-progress-then-redeliver-same-bytes behavior is
+                // covered by case H below.
                 // -------------------------------------------------------------
                 #[test]
                 fn d7b3_g_progress_stops_deferral_and_delivers_without_claiming_engine_success() {
@@ -18879,6 +18888,232 @@ mod tests {
                     );
                     // No outbound effect was forwarded through the facade.
                     assert_eq!(facade.total(), 0);
+                }
+
+                // -------------------------------------------------------------
+                // H. Receiver progress between deliveries (sequential
+                //    retransmission of the SAME deferred message).
+                //
+                // One coherent snapshot, one engine, one signed Proposal
+                // (height 7, parent [0xAB;32]). The FIRST delivery is admitted,
+                // verified through the real backend, and deferred. Between
+                // completed handler calls the receiver's committed prefix is
+                // advanced via the established startup baseline helper
+                // (`initialize_from_snapshot_baseline`) to height 6 anchored at
+                // [0xAB;32] — the Proposal's parent — so
+                // `should_defer_restore_proposal_for_catchup` no longer holds
+                // for this SAME Proposal. This is fixture-driven receiver
+                // progress: it seeds the committed floor deterministically and
+                // is NOT proof of authenticated catch-up transport, QC
+                // validation, or durable recovery. Restore mode is deliberately
+                // left ACTIVE (not disabled), and the engine is NOT replaced.
+                //
+                // The identical encoded bytes are then re-delivered through the
+                // SAME handler and engine: F6 admits again, current
+                // authorization admits again, the real backend verifies again
+                // (delta exactly +1 — no reused verdict), the deferral predicate
+                // is now false, and the frame is DELIVERED to the engine
+                // boundary. Engine acceptance / QC remain a SEPARATE downstream
+                // outcome and are NOT claimed from verifier/delivery success.
+                // -------------------------------------------------------------
+                #[test]
+                fn d7b3_h_receiver_progress_between_deliveries_delivers_same_message() {
+                    let fixture = make_fixture(4);
+                    let calls = Arc::new(AtomicU64::new(0));
+                    let pv = counting_pv(&fixture, &calls);
+                    let current = coherent_snapshot_for(&pv);
+                    let gate = pv_binding_gate(4);
+                    let origin = origin_v0();
+                    let timeout_ctx = make_timeout_ctx(&fixture, Some(ValidatorId(0)));
+                    let metrics = make_metrics();
+
+                    let mut engine = d7b3_active_engine();
+                    let mut restore =
+                        RestoreCatchupModeState::from_config(Some(d7b3_baseline()));
+                    assert!(restore.is_active(), "restore mode must start active");
+                    let mut stats = BinaryConsensusLoopInboundStats::default();
+                    let facade = D7ActionRecorder::default();
+
+                    // The SAME signed Proposal is re-encoded deterministically by
+                    // the harness on every call (identical bytes, same height /
+                    // parent / epoch / domain / signature — never re-signed).
+                    let proposal = d7b3_deferring_proposal(&fixture);
+
+                    // ---- Delivery 1: far-ahead ⇒ admitted, verified, deferred.
+                    deliver_proposal_fresh(
+                        &mut engine, &mut stats, &mut restore,
+                        Some(&timeout_ctx), Some(&pv), Some(&current), &proposal,
+                        &metrics, Some(&facade), Some(&origin), Some(&gate),
+                        ConsensusVerificationPolicy::Required,
+                    );
+                    assert_eq!(gate.metrics().accepted(), 1, "F6 admitted (1)");
+                    assert_eq!(calls.load(SeqCst), 1, "real verify ran once");
+                    assert_eq!(stats.inbound_proposal_verify_accepted, 1);
+                    assert_eq!(stats.restore_catchup_proposals_deferred, 1);
+                    assert_eq!(stats.inbound_proposals_delivered, 0);
+                    assert_eq!(stats.inbound_proposals_engine_accepted, 0);
+                    assert_eq!(facade.total(), 0);
+                    // Receiver committed prefix before progress.
+                    assert_eq!(engine.committed_height(), Some(5));
+                    assert_eq!(engine.committed_block(), Some(&[0x01u8; 32]));
+
+                    // ---- Fixture-driven receiver progress (NOT authenticated
+                    // catch-up transport): advance the committed prefix to
+                    // height 6 anchored at the Proposal's parent [0xAB;32] so the
+                    // deferral predicate no longer holds for this SAME Proposal.
+                    // Restore mode is intentionally NOT disabled.
+                    engine.initialize_from_snapshot_baseline([0xAB; 32], 6);
+                    assert_eq!(
+                        engine.committed_height(),
+                        Some(6),
+                        "receiver committed state advanced 5 -> 6"
+                    );
+                    assert_eq!(engine.committed_block(), Some(&[0xABu8; 32]));
+                    assert!(
+                        restore.is_active(),
+                        "restore mode unchanged (progress, not mode-disable)"
+                    );
+
+                    // ---- Delivery 2: EXACT same encoded Proposal, same engine
+                    // instance, same snapshot. The deferral predicate is now
+                    // false ⇒ the frame is delivered.
+                    deliver_proposal_fresh(
+                        &mut engine, &mut stats, &mut restore,
+                        Some(&timeout_ctx), Some(&pv), Some(&current), &proposal,
+                        &metrics, Some(&facade), Some(&origin), Some(&gate),
+                        ConsensusVerificationPolicy::Required,
+                    );
+
+                    // F6 admission increased again.
+                    assert_eq!(gate.metrics().accepted(), 2, "F6 admitted (2)");
+                    // Direct backend invocation delta is exactly one.
+                    assert_eq!(calls.load(SeqCst), 2, "re-delivery re-runs real verify");
+                    // Verification acceptance increased.
+                    assert_eq!(stats.inbound_proposal_verify_accepted, 2);
+                    // Deferral count did NOT increase.
+                    assert_eq!(stats.restore_catchup_proposals_deferred, 1);
+                    // Delivery count increased.
+                    assert_eq!(stats.inbound_proposals_delivered, 1);
+                    // Engine acceptance / QC is a SEPARATE downstream outcome:
+                    // verifier/delivery success is NOT engine/QC success.
+                    assert!(
+                        stats.inbound_proposals_engine_accepted
+                            <= stats.inbound_proposals_delivered
+                    );
+                    // No current-authorization rejection occurred on either leg.
+                    assert_eq!(stats.inbound_proposal_current_state_unavailable_total, 0);
+                    assert_eq!(stats.inbound_proposal_authority_superseded_total, 0);
+                    assert_eq!(stats.inbound_proposal_authority_stale_before_effect_total, 0);
+                    assert_eq!(stats.inbound_proposal_authorization_exhausted_total, 0);
+                    // No outbound effect forwarded through the facade.
+                    assert_eq!(facade.total(), 0);
+                }
+
+                // -------------------------------------------------------------
+                // I. Terminal authorization exhaustion before retransmission.
+                //
+                // A valid far-ahead Proposal is first admitted, verified, and
+                // deferred under a coherent snapshot. Between completed handler
+                // calls the SAME current-authorization owner is driven into the
+                // terminal exhausted latch through the cfg(test) checked-overflow
+                // path: the generation is positioned at `u64::MAX` and then a
+                // `replace_for_fixture` whose `generation + 1` cannot be
+                // represented latches `exhausted = true`. Merely positioning the
+                // counter at `u64::MAX` is NOT sufficient — the replacement
+                // actually exercises the latch (asserted via `is_exhausted`).
+                // The candidate, verifier, message bytes, and authenticated
+                // sender are all unchanged.
+                //
+                // The identical encoded Proposal is re-delivered: F6 admits the
+                // retransmission, but current-authorization admission fails
+                // because the owner is exhausted. Admission maps this to its own
+                // dedicated `inbound_proposal_authorization_exhausted_total`
+                // counter (NOT the confirm-time `..._stale_before_effect` path),
+                // and the exhaustion reason is independently established through
+                // the owner API (`is_exhausted`). No further backend
+                // verification, verification acceptance, deferral, delivery,
+                // reconfiguration, engine/QC effect, or facade action occurs, and
+                // the owner remains terminally exhausted.
+                // -------------------------------------------------------------
+                #[test]
+                fn d7b3_i_terminal_exhaustion_between_deliveries_rejects_retransmission() {
+                    let fixture = make_fixture(4);
+                    let calls = Arc::new(AtomicU64::new(0));
+                    let pv = counting_pv(&fixture, &calls);
+                    let mut current = coherent_snapshot_for(&pv);
+                    let gate = pv_binding_gate(4);
+                    let origin = origin_v0();
+                    let timeout_ctx = make_timeout_ctx(&fixture, Some(ValidatorId(0)));
+                    let metrics = make_metrics();
+                    let mut engine = d7b3_active_engine();
+                    let mut restore =
+                        RestoreCatchupModeState::from_config(Some(d7b3_baseline()));
+                    let mut stats = BinaryConsensusLoopInboundStats::default();
+                    let facade = D7ActionRecorder::default();
+                    let proposal = d7b3_deferring_proposal(&fixture);
+
+                    // ---- Delivery 1: admitted, verified, deferred (live owner).
+                    deliver_proposal_fresh(
+                        &mut engine, &mut stats, &mut restore,
+                        Some(&timeout_ctx), Some(&pv), Some(&current), &proposal,
+                        &metrics, Some(&facade), Some(&origin), Some(&gate),
+                        ConsensusVerificationPolicy::Required,
+                    );
+                    assert_eq!(calls.load(SeqCst), 1);
+                    assert_eq!(stats.inbound_proposal_verify_accepted, 1);
+                    assert_eq!(stats.restore_catchup_proposals_deferred, 1);
+                    assert!(!current.owner().is_exhausted(), "owner starts live");
+
+                    // ---- Terminally exhaust the SAME owner between calls. The
+                    // candidate/config identity is preserved across the
+                    // replacement; only the exhaustion latch changes.
+                    let observed = current.owner().candidate().config_identity();
+                    current.owner_mut().set_generation_for_exhaustion_fixture(u64::MAX);
+                    current
+                        .owner_mut()
+                        .replace_for_fixture(LocalAuthorizationState::Established(observed));
+                    assert!(
+                        current.owner().is_exhausted(),
+                        "checked-overflow latch actually exercised"
+                    );
+                    assert_eq!(
+                        current.owner().generation(),
+                        u64::MAX,
+                        "no wraparound / reset to zero"
+                    );
+
+                    // ---- Delivery 2: identical encoded Proposal; unchanged
+                    // candidate / verifier / bytes / authenticated sender.
+                    deliver_proposal_fresh(
+                        &mut engine, &mut stats, &mut restore,
+                        Some(&timeout_ctx), Some(&pv), Some(&current), &proposal,
+                        &metrics, Some(&facade), Some(&origin), Some(&gate),
+                        ConsensusVerificationPolicy::Required,
+                    );
+
+                    // F6 admitted the retransmission (ordering unchanged).
+                    assert_eq!(gate.metrics().accepted(), 2);
+                    assert_eq!(stats.inbound_sender_binding_rejected_total, 0);
+                    // Current admission fails specifically because authorization
+                    // is exhausted — the dedicated admission-time counter, NOT a
+                    // confirm-time / superseded / unavailable mapping.
+                    assert_eq!(stats.inbound_proposal_authorization_exhausted_total, 1);
+                    assert_eq!(stats.inbound_proposal_current_state_unavailable_total, 0);
+                    assert_eq!(stats.inbound_proposal_authority_superseded_total, 0);
+                    assert_eq!(stats.inbound_proposal_authority_stale_before_effect_total, 0);
+                    // No additional backend verification / acceptance.
+                    assert_eq!(calls.load(SeqCst), 1, "no further real verification");
+                    assert_eq!(stats.inbound_proposal_verify_accepted, 1);
+                    assert_eq!(stats.inbound_proposal_verify_rejected_total, 0);
+                    // No further deferral / delivery / engine acceptance / facade.
+                    assert_eq!(stats.restore_catchup_proposals_deferred, 1);
+                    assert_eq!(stats.inbound_proposals_delivered, 0);
+                    assert_eq!(stats.inbound_proposals_engine_accepted, 0);
+                    assert_eq!(facade.total(), 0);
+                    // The owner remains terminally exhausted after the rejected
+                    // retransmission (independently established via the owner API).
+                    assert!(current.owner().is_exhausted());
+                    assert_eq!(current.owner().generation(), u64::MAX);
                 }
             }
         }
