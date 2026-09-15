@@ -1348,13 +1348,26 @@ Shallow-checkout limitation (task §1, §6): this task's working tree is a
 **shallow single-branch clone** of `copilot/copilotrun-422-d7-b2` (`git
 rev-parse --is-shallow-repository` ⇒ `true`; `git rev-list --count HEAD` ⇒ `2`).
 Only `a3d64fe` (HEAD) and `9b8acf7` are present as local objects. The revisions
-`ab69af2`, `eba8e0d`, `475e411…` (reported B2 tested SHA) and `36c5249…`
+`ab69af2`, `eba8e0d`, `475e411…` (reported B2 tested SHA) and `36c49520e8bfeb22be75c7c5a20b6f5558361999` (corrected; see typo note below)
 (reported B2 final documentation SHA) are **absent** from this checkout
 (`git cat-file -t` ⇒ "could not get object info") and could not be fetched in
 this environment. Their SHAs are recorded **as reported**, not re-verified
 against local objects; no ancestry was invented or substituted. HEAD at the
 start of this corrective continuation = `a3d64fe`; B2's import revision =
 `9b8acf7`.
+
+Historical-identifier correction (task §6): an earlier revision of this
+record wrote the previously reviewed B2 documentation revision as the
+truncated, mistyped `36c5249…`. The correct object name is
+`36c49520e8bfeb22be75c7c5a20b6f5558361999`. **Object availability is reported
+separately from this supplied historical identifier:** like the other pre-clone
+B1/B2 revisions above, `36c49520e8bfeb22be75c7c5a20b6f5558361999` is **absent**
+from this shallow single-branch checkout (`git cat-file -t
+36c49520e8bfeb22be75c7c5a20b6f5558361999` ⇒ "could not get object info"), so
+its contents were not inspected and **no tested SHA is inferred from the
+commit’s contents**. The identifier is recorded as the reviewed B2
+documentation revision exactly as supplied; correcting the typo does not assert
+that any test was executed at that object in this environment.
 
 ### Exact cache trust boundary (task §2–§4)
 The strengthened boundary is the **cached** late-peer re-emission path
@@ -1677,6 +1690,125 @@ D7B1_DEFERRED_WORK_READMISSION_FRESHNESS=OPEN
 D7B1_LATER_SOCKET_DELIVERY=NOT-CLAIMED
 D7B2_UPSTREAM_ENGINE_LEADER_RECONFIG_EFFECTS=NOT-CLAIMED
 D7B2_PERSISTENT_FRESHNESS=NOT-ESTABLISHED
+D7A_INBOUND_VERDICT=PARTIAL
+D7_STATUS=PARTIAL-CODE-TEST / PRODUCTION-LIFECYCLE-UNAVAILABLE
+DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED
+GENESIS_AUTHORITY_ACTIVATION=DISABLED
+CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED
+SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO
+```
+
+## Run 422 D7-B3 — restore-catchup deferral disposition and fresh authorization on Proposal re-delivery (test + evidence)
+
+Additive continuation. **No production logic changed** in this phase: the
+inbound handler already re-runs the full admission/verification sequence on
+every received envelope, so D7-B3 adds behavioral tests and this evidence
+correction rather than a new mechanism.
+
+### Actual branch / SHAs (task §1, §7)
+* **Actual working branch:** `copilot/restore-deferral-disposition-fresh-authorization`
+  (the supplied task branch; the message's `copilot/copilotrun-422-d7-b2` name and
+  its revisions `8afb2915c0c4c463609098f1d1fcf1874513685e` /
+  `53a534077b962013e986cbca6dbda689dbb2023f` are the *reviewed* B2 branch, not
+  this checkout).
+* **Starting HEAD (this phase):** `bb767166a705e3f217bfb6d8791feb3fce05fd76`.
+* **Shallow-checkout limitation:** `git rev-parse --is-shallow-repository` ⇒
+  `true`; `git rev-list --count HEAD` ⇒ `2` (only `bb76716` and its parent
+  `a3d64fe` are present as local objects). The reviewed B2 revisions
+  `8afb2915c0c4c463609098f1d1fcf1874513685e`,
+  `53a534077b962013e986cbca6dbda689dbb2023f`, and the corrected historical
+  documentation revision `36c49520e8bfeb22be75c7c5a20b6f5558361999` are **absent**
+  from this checkout (`git cat-file -t` ⇒ "could not get object info") and could
+  not be fetched here. Their SHAs are recorded **as supplied**; no ancestry or
+  historical test execution is fabricated.
+* Final SHA for this phase is the tip recorded by the commit that adds these
+  tests and this section.
+
+### Deferred-input disposition map (task §2)
+Traced from `InboundConsensusEnvelope` reception through
+`handle_inbound_consensus_msg` (`crates/qbind-node/src/binary_consensus_loop.rs`),
+Proposal arm:
+
+| Question | Finding (source) |
+| --- | --- |
+| Is the decoded Proposal discarded on deferral? | **Yes.** The active-restore branch increments `restore_catchup_proposals_deferred` and `return`s; the local `proposal`, its decoded bytes, the `AuthorizationTicket`, and the "verified" result are owned by the handler frame and dropped at scope end. |
+| Do any Proposal bytes / ticket / snapshot / "already verified" result escape into retained work? | **No.** Nothing is stored, queued, or handed to another owner on the deferral path — no field, collection, or channel captures them. |
+| Does a later retry require a newly received envelope? | **Yes.** There is no replay source; the only way the frame is processed again is a fresh `InboundConsensusEnvelope` re-entering the same handler. |
+| Is there a nearby queue holding raw unverified input or previously authorized work? | **Not on this path.** The restore-catchup machinery (`RestoreCatchupModeState`, `handle_restore_catchup_response`) applies *authenticated response blocks*, not deferred inbound Proposals; it is a separate surface with its own obligations and is **not** expanded here. |
+| Does Vote have an analogous deferral path? | **No.** The single `should_defer_restore_proposal_for_catchup` call site is the Proposal arm; the Vote arm has admission but no restore deferral. No Vote deferral was invented. |
+
+**"Deferral" therefore means discard + await retransmission, not retained
+work.** Because the frame is discarded, a re-delivered network message is fresh
+untrusted input and is re-checked in full: F6 sender binding →
+`owner().admit()` (current bound-snapshot admission) → signed-epoch check →
+domain/wire/signature verification → pre-effect `confirm()` → the single
+permitted synchronous effect. No cached verdict is consulted.
+
+### Behavioral tests (task §4) — module `run422_d7b3` (9 tests)
+All drive the real `handle_inbound_consensus_msg` under `Required` policy with
+real encoded Proposals, coherent snapshots, real ML-DSA-44, a genuine F6
+gate/origin, an active restore baseline (`snapshot_height=5`, engine restored so
+`committed_height()==Some(5)`), the invocation-counting `CountingSigVerifier`
+backend, and the recording `D7ActionRecorder` facade. Deferring frames are shaped
+at height 7 (> committed+1) to reach the actual deferral branch.
+
+| Case | Test | Demonstrated |
+| --- | --- | --- |
+| A. Initial deferral | `d7b3_a_initial_deferral_reached_after_admit_and_verify` | admit+epoch pass, real verify (backend calls == 1), `restore_catchup_proposals_deferred==1` attributed as the sole effect; `inbound_proposals_delivered==0`, engine-accepted 0, empty reconfig detector, facade 0. |
+| B. Fresh verify on identical re-delivery | `d7b3_b_identical_redelivery_verifies_again` | same encoded Proposal + same valid snapshot delivered twice; backend-call delta is +1 each time (2 total), `deferred==2`; prior deferral supplies no reusable verdict. |
+| C. Changed authorization before re-delivery | `d7b3_c_unavailable_current_auth_on_redelivery_rejects_before_effect`, `d7b3_c_superseded_current_auth_on_redelivery_rejects_before_effect`, `d7b3_c_omitted_snapshot_on_redelivery_rejects_before_effect` | after a completed deferral, making current authorization unavailable / superseded / omitted rejects the re-delivery on current state (no further backend call, no further deferral, no delivery, facade 0). |
+| D. Foreign current domain | `d7b3_d_foreign_current_domain_rejects_original_signature` | the d5-domain-signed Proposal is verify-accepted under a d5-domain verifier and verify-**rejected** under a coherent d6-domain snapshot (same keys); rejection is a signature failure, **not** a wire-chain mismatch. |
+| E. Valid new owner | `d7b3_e_valid_new_owner_independently_admits_and_verifies` | a distinct current-authorization owner with the same valid configuration independently admits + verifies the re-delivery (backend delta +1, `deferred==2`); the earlier owner's ticket is not reused and a new owner is not itself grounds to reject. |
+| F. F6 ordering | `d7b3_f_f6_mismatch_precedes_authorization_on_redelivery` | on re-delivery a mismatched authenticated sender is rejected by F6 before any current-auth lookup or crypto (no backend call, no current-state counter, no deferral, facade 0). |
+| G. Restore progress control | `d7b3_g_progress_stops_deferral_and_delivers_without_claiming_engine_success` | when the deferral condition no longer holds (frame at committed+1 whose parent is the committed block), the frame is verify-accepted and `inbound_proposals_delivered==1`; engine acceptance is asserted only as a separate downstream outcome (`engine_accepted <= delivered`) — **no engine/QC success is claimed** from verifier success. |
+
+Backend/signer invocation claims are DIRECT observations of the shared atomic;
+multi-call claims use before/after deltas. No mid-call mutation, sleeps,
+concurrent aliases, or persistent epoch source were introduced.
+
+### Validation (task §6)
+Commands run in this environment (profile: `test`/`dev`, default features,
+qbind-node):
+* `cargo test -p qbind-node --lib run422_d7b3` ⇒ **9 passed**, 0 failed, 1572
+  filtered out (exit 0).
+* `cargo test -p qbind-node --lib run422` ⇒ **115 passed**, 0 failed, 1466
+  filtered out (exit 0).
+* `cargo test -p qbind-node --lib binary_consensus_loop` ⇒ **209 passed**, 0
+  failed, 1372 filtered out (exit 0) — includes the restore-catchup, D6
+  domain-isolation, and D5/D7-A/B1/B2 in-crate regressions.
+* `cargo test -p qbind-node --test run_418_authenticated_peer_consensus_sender_binding_tests`
+  ⇒ **18 passed**; `--test run_420_production_policy_reachability_tests` ⇒ **3
+  passed**; `--test run_422_startup_refusal_tests` ⇒ **4 passed**; `--test
+  b3_snapshot_restore_tests` ⇒ **10 passed**; `--test
+  b5_restore_aware_consensus_start_tests` ⇒ **4 passed** (all exit 0).
+* `cargo check -p qbind-node` ⇒ Finished, exit 0.
+* `cargo clippy -p qbind-node --lib` ⇒ Finished, exit 0 (85 pre-existing
+  warnings, none in the new `run422_d7b3` code).
+
+Because only tests + documentation changed, earlier release-build evidence is
+retained at its original recorded revision and NOT re-captured
+(`CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED`).
+
+### Security-tool outcomes (task §6)
+CodeQL status is unchanged and remains **SKIPPED/INCOMPLETE**; reviewer
+availability is **UNAVAILABLE/UNVERIFIED**. Neither is converted into a passing
+scan.
+
+### Verdict — scoped strictly to the restore-deferral / re-delivery boundary
+The positive result names ONLY the demonstrated boundary: at the inbound
+restore-catchup deferral path, deferral discards the decoded Proposal and a
+re-delivered Proposal receives fresh F6 + current-authorization admission +
+cryptographic verification (never a reused verdict). Duplicate-processing safety,
+persistent freshness, durable anti-rollback, later socket delivery, upstream
+engine/leader effects, and production lifecycle are **not** claimed.
+
+```
+D7B3_RESTORE_DEFERRAL_DISPOSITION=DISCARD-AND-AWAIT-RETRANSMISSION
+D7B3_REDELIVERY_FRESH_AUTHORIZATION=CLOSED-CODE-TEST (scoped positive; inbound restore-deferral boundary only)
+D7B3_VOTE_RESTORE_DEFERRAL=NONE (no analogous path; not invented)
+D7B3_DUPLICATE_PROCESSING_SAFETY=NOT-CLAIMED
+D7B3_LATER_SOCKET_DELIVERY=NOT-CLAIMED
+D7B3_UPSTREAM_ENGINE_LEADER_RECONFIG_EFFECTS=NOT-CLAIMED
 D7A_INBOUND_VERDICT=PARTIAL
 D7_STATUS=PARTIAL-CODE-TEST / PRODUCTION-LIFECYCLE-UNAVAILABLE
 DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED
