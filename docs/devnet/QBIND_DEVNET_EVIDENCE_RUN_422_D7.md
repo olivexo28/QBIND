@@ -2503,3 +2503,162 @@ handling and is therefore **not** docs-only.
 * **Scope claim.** This is limited to the corrected chain-label path. It does
   **not** claim a complete allocation/DoS audit of all genesis loaders and error
   types. All retained verdict markers above are unchanged.
+
+---
+
+## Run 422 D7-C3A — dormant standard-network runtime/wire alias mapping (coverage + evidence)
+
+### Actual state (task §1)
+
+* **Actual branch.** `copilot/copilotrun-422-d7-c3a` (the reference name in the
+  task, `copilot/run-422-d7-c3a`, differs by the `copilot` path segment; the
+  work is on the branch above).
+* **Starting HEAD.** `b1643fea29d2a66d929d49ed126e9c1a44f0bdc3` (parent
+  `6dd9b7a5d9cdb819427126929b2c10e7bdc9b3e3`, the task baseline).
+* **Worktree status at start.** Clean (`git status --porcelain` empty).
+* **Reference-object availability.** Baseline `6dd9b7a` is present (it is the
+  parent commit). The reviewed implementation SHA
+  `899099a3770f686f35b67280b82f68f59e0fde66` is **not available** in this shallow
+  single-branch clone (`git cat-file -t 899099a` ⇒ *not a valid object name*);
+  the current work is instead carried on `b1643fe` and preserved here.
+* **Preservation.** Normal task-branch commits only; no `main` change, no history
+  rewrite, no PR opened by this task.
+
+### Preserved implementation (task §2, §7)
+
+* `crates/qbind-types/src/network_wire_alias.rs` is retained. `resolve_network_wire_alias`
+  keeps its **full 64-bit** runtime-ID comparison (`supplied_runtime != environment.chain_id()`),
+  and the three assigned dormant aliases are unchanged: DevNet `0x44455600`,
+  TestNet `0x54535400`, MainNet `0x4D41494E`.
+* `NetworkEnvironment::chain_id()` remains the **sole** expected-runtime source;
+  no parallel registry or fallback was added.
+* No production logic redesign was made; the only source change is an added
+  doc-comment on `NetworkWireAlias` clarifying it is a **raw, publicly
+  constructible tag, not a validation certificate** (a bare alias does not prove
+  the helper was called and grants no authorization). No API was added or removed.
+* **No new production callers.** `grep` across `crates/**` finds the helper/alias
+  symbols only in the module itself, the `lib.rs` re-export, and the C3A test
+  target — confirming the mapping stays dormant.
+
+### Extended test matrix (task §3) — target `run_422_d7c3a_network_wire_alias_tests`
+
+Note: assigned aliases are the low 32 bits of each environment's authoritative
+64-bit runtime `ChainId` (high word `0x51424E44`, "QBND").
+
+* **A — full 3×3 environment/runtime matrix** (`matrix_a_full_3x3_environment_runtime_pairs`):
+  the three diagonal pairs resolve to the exact assigned alias; all six
+  off-diagonal standard pairs reject, each asserting `environment`,
+  `expected_runtime` (== `env.chain_id()`) and `supplied_runtime`. **9 cases.**
+* **B — boundary/extreme runtime IDs under every environment**
+  (`matrix_b_boundary_runtime_ids_reject_under_every_environment`): `ChainId(0)`,
+  `ChainId(u32::MAX as u64)`, `ChainId(u64::MAX)`, and the representative
+  `0x0000_0000_DEAD_BEEF` already covered elsewhere; each rejected under all three
+  environments with exact metadata. **12 cases.**
+* **C — high-bit-flip low-word-collision matrix**
+  (`matrix_c_high_bit_flips_share_low_word_but_reject`): per network, a zeroed
+  high word, an all-ones high word, and every single high-bit flip (bits 32..=63)
+  — 34 unsupported full IDs per network. Each asserts (1) the low word matches
+  the expected runtime's low word, (2) the full ID differs, (3) resolution
+  rejects. Deterministic; no randomness. **102 cases.**
+* **D — aliases pairwise distinct**
+  (`matrix_d_assigned_aliases_are_pairwise_distinct`): the three assigned aliases
+  (and their `as_u32()`) are pairwise unequal. **3 comparisons.**
+* **E — extreme supplied values, bounded rendering, exact metadata**
+  (`matrix_e_extreme_mismatch_errors_are_bounded_and_preserve_metadata`): under
+  each environment, `ChainId(0)`, `ChainId(u64::MAX)`, `ChainId(u32::MAX as u64)`,
+  `ChainId(0xFFFF_FFFF_0000_0000)` reject; the error equals the exact
+  `NetworkWireAliasMismatch { environment, expected_runtime, supplied_runtime }`;
+  `Display` and `Debug` each stay within an explicit **256-byte** bound while
+  still naming the environment. **12 cases.**
+* **Positive controls retained.** The eight pre-existing functions
+  (alias constants + `as_u32`, three matching resolves, the
+  `expected_runtime_is_network_environment_chain_id` loop, single mismatch,
+  arbitrary-runtime rejection per environment, and the Display-context check) are
+  kept unchanged.
+
+**Coverage vs function count (task §3).** The target has **13 test functions**
+(8 preserved + 5 new matrix functions). The five new functions exercise
+**≈ 138 parametrized cases** (A 9 + B 12 + C 102 + D 3 + E 12); test-case
+coverage is therefore reported separately from the function count.
+
+### Validation (task §4) — sequential, checkpoint SHA `fcdc7ca20f78ec9aa9389bcc354c5c8e9292e260`
+
+* `cargo test -p qbind-types` (default features, dev/test profile) ⇒ **all
+  passed**, exit 0. C3A target: **13 passed**, 0 failed; other qbind-types
+  targets (lib 7, primitives 6, governance 6+2, keyset 3, roles 3, suite 2,
+  validator 4) all pass; 2 doc-tests ignored.
+* `cargo clippy -p qbind-types --lib --test run_422_d7c3a_network_wire_alias_tests -- -D warnings`
+  ⇒ Finished, exit 0; no warnings on the qbind-types library or the C3A target.
+* `cargo check -p qbind-node` (**default production features**) ⇒ Finished, exit 0.
+* `cargo test -p qbind-consensus --test run_422_d6_pv_domain_isolation_tests`
+  ⇒ **34 passed**, 0 failed, exit 0 (D6 isolation preserved).
+* Line endings preserved: all four changed files remain **CRLF**; secret scan of
+  changed files clean.
+
+### Security-tool and CI reconciliation (task §6)
+
+* **Original "CodeQL 0 alerts" / successful-review claim.** The supporting output
+  for the reviewed commit `899099a` **cannot be recovered** in this sandbox: that
+  SHA is absent from the shallow clone and no SARIF/scan artifact is committed in
+  the tree. Recorded as **UNVERIFIED**; no successful scan or skip reason is
+  invented for it.
+* **Agent-local CodeQL (this task's changes).** Tool/language: **CodeQL, `rust`**.
+  Scope: the agent-local database for the changed revision `fcdc7ca`. Status:
+  **SKIPPED / INCOMPLETE** — "Analysis was skipped because the database size is
+  too large." The "0 alerts" figure is reported **only inside that skip context**
+  and is **not** whole-project coverage.
+* **Agent-local code review (this task's changes).** Completed over the 3 changed
+  files with **no review comments**; a backend note reported a model-registry
+  warning, so treat the review as best-effort rather than exhaustive.
+* **GitHub Actions (separate from agent-local tools).** On the pushed checkpoint
+  `fcdc7ca`, three release/package workflows show `conclusion=failure` with
+  **0 executed jobs** (startup/config-level failure):
+  `public-devnet-release-signing-attestation.yml`,
+  `public-devnet-package-integrity.yml`, and
+  `public-devnet-release-artifact-manifest.yml`. These release/package workflows
+  were already failing on the reviewed commit and baseline; this task edits no
+  workflow, production, or packaged file, so there is **no evidence** the
+  failures were caused by C3A. Recorded as observed pre-existing status.
+
+### Documentation (task §5)
+
+* Mapping + input contract documented in the existing protocol document
+  `docs/protocol/QBIND_PROPOSAL_VOTE_SIGNING_DOMAIN_V2.md`, new **§9.1**
+  ("Dormant standard-network wire alias mapping (Run 422 D7-C3A)"), reusing the
+  section-9 runtime-`ChainId` ↔ wire mapping discussion rather than adding a new
+  file. The unresolved production mapping in §9 is explicitly left open.
+* Source raw-tag distinction added to `network_wire_alias.rs`.
+* This C3A evidence section appended here.
+
+### Explicit statements (task §5)
+
+* The wire-alias **assignments are defined but dormant**
+  (`STANDARD_WIRE_ALIAS_POLICY=DEFINED-NOT-ACTIVATED`).
+* The helper validates **only** the standard environment/runtime/wire
+  correspondence; it is not authorization.
+* A raw `NetworkWireAlias` value **does not prove the helper was called**.
+* **Genesis acceptance, signing custody and current authorization remain
+  separate** and unaffected.
+* Standard **low words are distinct**, while **general 32-bit narrowing can
+  collide** (matrix C exercises the collision-shaped inputs and confirms full-ID
+  rejection).
+* Changing a wire field value **changes the signed bytes even when the encoding
+  layout is unchanged** (consistent with the D6/v2 preimage; C3A adds no
+  encoding).
+* **Genesis/runtime binding and downstream engine/QC compatibility remain
+  unresolved.**
+
+### Boundaries preserved (task §7) and verdict (task §8)
+
+* Unchanged: engine wire-ID construction, message encodings, D6 preimages, golden
+  vectors, genesis validation, snapshot binding, authority constructors,
+  CLI/configuration, activation guards. Changed files vs baseline: only
+  `network_wire_alias.rs` (doc-comment), its `lib.rs` re-export (from prior C3A
+  commit), the C3A test target, and the v2 protocol doc.
+* Retained markers: `STANDARD_WIRE_ALIAS_POLICY=DEFINED-NOT-ACTIVATED`,
+  `PRODUCTION_WIRE_CHAIN_ID_BEHAVIOR=UNCHANGED`,
+  `GENESIS_AUTHORITY_ACTIVATION=DISABLED`.
+* D7 remains **partial**; durable anti-rollback is **not** established;
+  configured-authority release-binary evidence remains **absent**; RS1/C4/C5
+  remain **open**; public DevNet remains **NO-GO**. No production integration and
+  no Run 423 work performed.
