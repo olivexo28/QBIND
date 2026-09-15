@@ -18223,6 +18223,664 @@ mod tests {
                     assert!(facade2.directed_votes.lock().unwrap().is_empty());
                 }
             }
+            // =============================================================
+            // Run 422 D7-B3 — restore-catchup deferral disposition and FRESH
+            // authorization on Proposal RE-DELIVERY, through the real
+            // `handle_inbound_consensus_msg` inbound boundary.
+            //
+            // Disposition (task §2), source-backed against the Proposal arm:
+            //   * The active restore-deferral branch increments
+            //     `restore_catchup_proposals_deferred` and `return`s. The
+            //     decoded `BlockProposal`, its wire bytes, the admission
+            //     `AuthorizationTicket`, and the "verified" result are all
+            //     DROPPED at end of scope — nothing is retained, queued, or
+            //     scheduled for replay. "Deferral" here means DISCARD + await
+            //     retransmission of a fresh network envelope, NOT retained work.
+            //   * A later retry therefore requires a newly received
+            //     `InboundConsensusEnvelope`, which re-enters the SAME handler
+            //     and re-runs the full sequence: F6 sender binding → current
+            //     bound-snapshot admission (`owner().admit()`) → signed-epoch →
+            //     domain / wire / signature verification → pre-effect
+            //     `confirm()` → the single permitted synchronous effect (here,
+            //     the deferral count). No cached verdict is consulted.
+            //   * Vote has NO analogous restore-deferral branch: the only
+            //     `should_defer_restore_proposal_for_catchup` call site is the
+            //     Proposal arm, so no Vote deferral is invented here (its
+            //     existing admission regressions are retained elsewhere).
+            //
+            // Every test uses Required policy, real encoded messages, coherent
+            // snapshots, real ML-DSA-44, a genuine F6 gate/origin, an active
+            // restore baseline, the invocation-counting `CountingSigVerifier`
+            // backend, and the recording `D7ActionRecorder` facade. Backend
+            // invocation claims are DIRECT observations of the shared atomic;
+            // multi-call claims use before/after deltas. No mid-call mutation,
+            // no sleeps, no persistent epoch source.
+            mod run422_d7b3 {
+                use super::*;
+                use crate::genesis_consensus_authority::CurrentStateUnavailableReason;
+                use std::sync::atomic::{AtomicU64, Ordering::SeqCst};
+
+                /// Restore baseline shared by these tests: snapshot height 5
+                /// anchored to block `[0x01; 32]`.
+                fn d7b3_baseline() -> RestoreBaseline {
+                    RestoreBaseline {
+                        snapshot_height: 5,
+                        snapshot_block_id: [0x01; 32],
+                    }
+                }
+
+                /// A 4-validator engine restored from the baseline so
+                /// `committed_height() == Some(5)` and `committed_block() ==
+                /// Some([0x01; 32])`.
+                fn d7b3_active_engine() -> BasicHotStuffEngine<[u8; 32]> {
+                    let mut engine = make_engine(ValidatorId(0), 4);
+                    engine.initialize_from_snapshot_baseline([0x01; 32], 5);
+                    assert_eq!(engine.committed_height(), Some(5));
+                    assert_eq!(engine.committed_block(), Some(&[0x01u8; 32]));
+                    engine
+                }
+
+                /// A valid Proposal shaped (height 7 > committed 5 + 1) so, once
+                /// admitted and verified, it reaches the active-restore deferral
+                /// branch. Signed by validator 0 over the mandatory v2 control
+                /// domain.
+                fn d7b3_deferring_proposal(fixture: &Fixture) -> BlockProposal {
+                    signed_proposal_at_height(0, 7, [0xAB; 32], fixture)
+                }
+
+                /// F6 origin authenticated as validator 0 (matching claimed
+                /// proposer 0).
+                fn origin_v0() -> AuthenticatedConsensusOrigin {
+                    AuthenticatedConsensusOrigin::new(pv_node_for(0), ValidatorId(0))
+                }
+
+                /// Build an invocation-counting Proposal/Vote authority bound to
+                /// an explicit v2 `domain`. The shared `counting_pv` helper is
+                /// fixed to the d5 control domain; case D needs a *foreign*
+                /// current domain, so this variant selects it while still
+                /// wrapping the REAL ML-DSA-44 backend in `CountingSigVerifier`.
+                fn counting_pv_domain(
+                    fixture: &Fixture,
+                    calls: &Arc<AtomicU64>,
+                    domain: ProposalVoteSigningDomainV2,
+                ) -> ProposalVoteAuthority {
+                    let backend: Arc<dyn ConsensusSigVerifier> = Arc::new(CountingSigVerifier {
+                        calls: Arc::clone(calls),
+                        inner: Arc::new(MlDsa44Backend),
+                    });
+                    let registry = CountingRegistry::with_backend(TEST_SUITE, backend);
+                    ProposalVoteAuthority {
+                        validators: fixture.validators.clone(),
+                        key_provider: fixture.kp.clone(),
+                        backend_registry: Arc::new(registry),
+                        chain_id: QBIND_DEVNET_CHAIN_ID,
+                        signer: None,
+                        signing_domain: domain,
+                    }
+                }
+
+                // -------------------------------------------------------------
+                // A. Initial deferral.
+                //
+                // A valid, sufficiently-ahead Proposal passes current
+                // authorization (`admit` + epoch) and real ML-DSA-44
+                // verification (counting backend increments), reaches the actual
+                // restore-deferral branch, and is NOT delivered to the engine or
+                // forwarded. The deferral counter is attributed as the single
+                // synchronous effect — we do NOT claim absolutely no mutation.
+                // -------------------------------------------------------------
+                #[test]
+                fn d7b3_a_initial_deferral_reached_after_admit_and_verify() {
+                    let fixture = make_fixture(4);
+                    let calls = Arc::new(AtomicU64::new(0));
+                    let pv = counting_pv(&fixture, &calls);
+                    let current = coherent_snapshot_for(&pv);
+                    let gate = pv_binding_gate(4);
+                    let origin = origin_v0();
+                    let timeout_ctx = make_timeout_ctx(&fixture, Some(ValidatorId(0)));
+                    let metrics = make_metrics();
+
+                    let mut engine = d7b3_active_engine();
+                    let mut restore =
+                        RestoreCatchupModeState::from_config(Some(d7b3_baseline()));
+                    assert!(restore.is_active(), "restore mode must be active");
+                    let mut stats = BinaryConsensusLoopInboundStats::default();
+                    let facade = D7ActionRecorder::default();
+
+                    let proposal = d7b3_deferring_proposal(&fixture);
+                    let detector = deliver_proposal_fresh(
+                        &mut engine,
+                        &mut stats,
+                        &mut restore,
+                        Some(&timeout_ctx),
+                        Some(&pv),
+                        Some(&current),
+                        &proposal,
+                        &metrics,
+                        Some(&facade),
+                        Some(&origin),
+                        Some(&gate),
+                        ConsensusVerificationPolicy::Required,
+                    );
+
+                    // F6 admitted, current authorization admitted, signature
+                    // verified through the REAL backend (direct count == 1).
+                    assert_eq!(gate.metrics().accepted(), 1);
+                    assert_eq!(stats.inbound_sender_binding_rejected_total, 0);
+                    assert_eq!(stats.inbound_proposal_current_state_unavailable_total, 0);
+                    assert_eq!(stats.inbound_proposal_authority_superseded_total, 0);
+                    assert_eq!(stats.inbound_proposal_authority_stale_before_effect_total, 0);
+                    assert_eq!(stats.inbound_proposal_verify_accepted, 1);
+                    assert_eq!(calls.load(SeqCst), 1, "real verification ran exactly once");
+                    // Reached the deferral branch: the ONLY synchronous effect.
+                    assert_eq!(stats.restore_catchup_proposals_deferred, 1);
+                    // Not delivered, not ingested by the engine, no reconfig
+                    // observation recorded, no outbound frame.
+                    assert_eq!(stats.inbound_proposals_delivered, 0);
+                    assert_eq!(stats.inbound_proposals_engine_accepted, 0);
+                    assert!(detector.header_cache.is_empty());
+                    assert_eq!(facade.total(), 0);
+                    // Restore mode unchanged (still awaiting catch-up).
+                    assert!(restore.is_active());
+                }
+
+                // -------------------------------------------------------------
+                // B. Fresh verification on identical re-delivery.
+                //
+                // Delivering the SAME encoded Proposal again, through the real
+                // handler, under the SAME valid current authorization, verifies
+                // again: the backend-call delta is +1 per delivery. Prior
+                // acceptance/deferral supplies NO reusable verdict.
+                // -------------------------------------------------------------
+                #[test]
+                fn d7b3_b_identical_redelivery_verifies_again() {
+                    let fixture = make_fixture(4);
+                    let calls = Arc::new(AtomicU64::new(0));
+                    let pv = counting_pv(&fixture, &calls);
+                    let current = coherent_snapshot_for(&pv);
+                    let gate = pv_binding_gate(4);
+                    let origin = origin_v0();
+                    let timeout_ctx = make_timeout_ctx(&fixture, Some(ValidatorId(0)));
+                    let metrics = make_metrics();
+
+                    let mut engine = d7b3_active_engine();
+                    let mut restore =
+                        RestoreCatchupModeState::from_config(Some(d7b3_baseline()));
+                    let mut stats = BinaryConsensusLoopInboundStats::default();
+                    let facade = D7ActionRecorder::default();
+                    let proposal = d7b3_deferring_proposal(&fixture);
+
+                    // ---- First delivery.
+                    deliver_proposal_fresh(
+                        &mut engine,
+                        &mut stats,
+                        &mut restore,
+                        Some(&timeout_ctx),
+                        Some(&pv),
+                        Some(&current),
+                        &proposal,
+                        &metrics,
+                        Some(&facade),
+                        Some(&origin),
+                        Some(&gate),
+                        ConsensusVerificationPolicy::Required,
+                    );
+                    let calls_after_first = calls.load(SeqCst);
+                    assert_eq!(calls_after_first, 1);
+                    assert_eq!(stats.restore_catchup_proposals_deferred, 1);
+
+                    // ---- Identical re-delivery of the same encoded Proposal
+                    // under the same valid current authorization snapshot.
+                    deliver_proposal_fresh(
+                        &mut engine,
+                        &mut stats,
+                        &mut restore,
+                        Some(&timeout_ctx),
+                        Some(&pv),
+                        Some(&current),
+                        &proposal,
+                        &metrics,
+                        Some(&facade),
+                        Some(&origin),
+                        Some(&gate),
+                        ConsensusVerificationPolicy::Required,
+                    );
+                    let calls_after_second = calls.load(SeqCst);
+
+                    // Verification happened AGAIN (delta == 1); no reusable
+                    // verdict was cached from the prior deferral.
+                    assert_eq!(
+                        calls_after_second - calls_after_first,
+                        1,
+                        "re-delivery re-runs real verification"
+                    );
+                    assert_eq!(stats.inbound_proposal_verify_accepted, 2);
+                    assert_eq!(stats.restore_catchup_proposals_deferred, 2);
+                    // Still no delivery / engine ingestion / outbound.
+                    assert_eq!(stats.inbound_proposals_delivered, 0);
+                    assert_eq!(stats.inbound_proposals_engine_accepted, 0);
+                    assert_eq!(facade.total(), 0);
+                    assert_eq!(gate.metrics().accepted(), 2);
+                }
+
+                // -------------------------------------------------------------
+                // C. Changed authorization before re-delivery.
+                //
+                // Between completed calls the current authorization is made
+                // unavailable / superseded / omitted. The re-delivered message
+                // is rejected on CURRENT state before any further crypto,
+                // deferral, delivery, reconfiguration, or outbound effect.
+                // -------------------------------------------------------------
+                #[test]
+                fn d7b3_c_unavailable_current_auth_on_redelivery_rejects_before_effect() {
+                    let fixture = make_fixture(4);
+                    let calls = Arc::new(AtomicU64::new(0));
+                    let pv = counting_pv(&fixture, &calls);
+                    let gate = pv_binding_gate(4);
+                    let origin = origin_v0();
+                    let timeout_ctx = make_timeout_ctx(&fixture, Some(ValidatorId(0)));
+                    let metrics = make_metrics();
+                    let mut engine = d7b3_active_engine();
+                    let mut restore =
+                        RestoreCatchupModeState::from_config(Some(d7b3_baseline()));
+                    let mut stats = BinaryConsensusLoopInboundStats::default();
+                    let facade = D7ActionRecorder::default();
+                    let proposal = d7b3_deferring_proposal(&fixture);
+
+                    // ---- Completed first delivery under valid authorization.
+                    let valid = coherent_snapshot_for(&pv);
+                    deliver_proposal_fresh(
+                        &mut engine, &mut stats, &mut restore,
+                        Some(&timeout_ctx), Some(&pv), Some(&valid), &proposal,
+                        &metrics, Some(&facade), Some(&origin), Some(&gate),
+                        ConsensusVerificationPolicy::Required,
+                    );
+                    assert_eq!(calls.load(SeqCst), 1);
+                    assert_eq!(stats.restore_catchup_proposals_deferred, 1);
+
+                    // ---- Authorization becomes UNAVAILABLE, then re-delivery.
+                    let unavailable = snapshot_unavailable(
+                        &pv,
+                        CurrentStateUnavailableReason::MissingStorage,
+                    );
+                    deliver_proposal_fresh(
+                        &mut engine, &mut stats, &mut restore,
+                        Some(&timeout_ctx), Some(&pv), Some(&unavailable), &proposal,
+                        &metrics, Some(&facade), Some(&origin), Some(&gate),
+                        ConsensusVerificationPolicy::Required,
+                    );
+
+                    // Rejected on current state BEFORE any further crypto,
+                    // deferral, delivery, or outbound effect.
+                    assert_eq!(stats.inbound_proposal_current_state_unavailable_total, 1);
+                    assert_eq!(calls.load(SeqCst), 1, "no further verification ran");
+                    assert_eq!(stats.inbound_proposal_verify_accepted, 1);
+                    assert_eq!(stats.restore_catchup_proposals_deferred, 1);
+                    assert_eq!(stats.inbound_proposals_delivered, 0);
+                    assert_eq!(facade.total(), 0);
+                    // F6 still admitted (ordering unchanged): the rejection is a
+                    // current-authorization one, not a sender-binding one.
+                    assert_eq!(gate.metrics().accepted(), 2);
+                    assert_eq!(stats.inbound_sender_binding_rejected_total, 0);
+                }
+
+                #[test]
+                fn d7b3_c_superseded_current_auth_on_redelivery_rejects_before_effect() {
+                    let fixture = make_fixture(4);
+                    let calls = Arc::new(AtomicU64::new(0));
+                    let pv = counting_pv(&fixture, &calls);
+                    let gate = pv_binding_gate(4);
+                    let origin = origin_v0();
+                    let timeout_ctx = make_timeout_ctx(&fixture, Some(ValidatorId(0)));
+                    let metrics = make_metrics();
+                    let mut engine = d7b3_active_engine();
+                    let mut restore =
+                        RestoreCatchupModeState::from_config(Some(d7b3_baseline()));
+                    let mut stats = BinaryConsensusLoopInboundStats::default();
+                    let facade = D7ActionRecorder::default();
+                    let proposal = d7b3_deferring_proposal(&fixture);
+
+                    let valid = coherent_snapshot_for(&pv);
+                    deliver_proposal_fresh(
+                        &mut engine, &mut stats, &mut restore,
+                        Some(&timeout_ctx), Some(&pv), Some(&valid), &proposal,
+                        &metrics, Some(&facade), Some(&origin), Some(&gate),
+                        ConsensusVerificationPolicy::Required,
+                    );
+                    assert_eq!(stats.restore_catchup_proposals_deferred, 1);
+                    let calls_after_first = calls.load(SeqCst);
+
+                    // Superseded by a different established authority B.
+                    let superseded = snapshot_superseded(&pv, true);
+                    deliver_proposal_fresh(
+                        &mut engine, &mut stats, &mut restore,
+                        Some(&timeout_ctx), Some(&pv), Some(&superseded), &proposal,
+                        &metrics, Some(&facade), Some(&origin), Some(&gate),
+                        ConsensusVerificationPolicy::Required,
+                    );
+
+                    assert_eq!(stats.inbound_proposal_authority_superseded_total, 1);
+                    assert_eq!(
+                        calls.load(SeqCst),
+                        calls_after_first,
+                        "superseded rejection precedes any further crypto"
+                    );
+                    assert_eq!(stats.restore_catchup_proposals_deferred, 1);
+                    assert_eq!(stats.inbound_proposals_delivered, 0);
+                    assert_eq!(facade.total(), 0);
+                }
+
+                #[test]
+                fn d7b3_c_omitted_snapshot_on_redelivery_rejects_before_effect() {
+                    let fixture = make_fixture(4);
+                    let calls = Arc::new(AtomicU64::new(0));
+                    let pv = counting_pv(&fixture, &calls);
+                    let gate = pv_binding_gate(4);
+                    let origin = origin_v0();
+                    let timeout_ctx = make_timeout_ctx(&fixture, Some(ValidatorId(0)));
+                    let metrics = make_metrics();
+                    let mut engine = d7b3_active_engine();
+                    let mut restore =
+                        RestoreCatchupModeState::from_config(Some(d7b3_baseline()));
+                    let mut stats = BinaryConsensusLoopInboundStats::default();
+                    let facade = D7ActionRecorder::default();
+                    let proposal = d7b3_deferring_proposal(&fixture);
+
+                    let valid = coherent_snapshot_for(&pv);
+                    deliver_proposal_fresh(
+                        &mut engine, &mut stats, &mut restore,
+                        Some(&timeout_ctx), Some(&pv), Some(&valid), &proposal,
+                        &metrics, Some(&facade), Some(&origin), Some(&gate),
+                        ConsensusVerificationPolicy::Required,
+                    );
+                    assert_eq!(stats.restore_catchup_proposals_deferred, 1);
+                    let calls_after_first = calls.load(SeqCst);
+
+                    // Required current snapshot OMITTED (None) with the authority
+                    // still present ⇒ current state unavailable, fail-closed.
+                    deliver_proposal_fresh(
+                        &mut engine, &mut stats, &mut restore,
+                        Some(&timeout_ctx), Some(&pv), None, &proposal,
+                        &metrics, Some(&facade), Some(&origin), Some(&gate),
+                        ConsensusVerificationPolicy::Required,
+                    );
+
+                    assert_eq!(stats.inbound_proposal_current_state_unavailable_total, 1);
+                    assert_eq!(calls.load(SeqCst), calls_after_first);
+                    assert_eq!(stats.restore_catchup_proposals_deferred, 1);
+                    assert_eq!(stats.inbound_proposals_delivered, 0);
+                    assert_eq!(facade.total(), 0);
+                }
+
+                // -------------------------------------------------------------
+                // D. Foreign current domain.
+                //
+                // The originally valid Proposal (signed under the d5 control
+                // domain) is verified-accepted under a snapshot whose verifier
+                // uses that SAME domain, then rejected under a coherent snapshot
+                // whose verifier uses a DIFFERENT authorized domain (d6),
+                // reusing the same signing keys. The original signature is valid
+                // only under its original domain.
+                // -------------------------------------------------------------
+                #[test]
+                fn d7b3_d_foreign_current_domain_rejects_original_signature() {
+                    let fixture = make_fixture(4);
+                    let gate = pv_binding_gate(4);
+                    let origin = origin_v0();
+                    let timeout_ctx = make_timeout_ctx(&fixture, Some(ValidatorId(0)));
+                    let metrics = make_metrics();
+                    // Signed under the d5 control domain (its original domain).
+                    let proposal = d7b3_deferring_proposal(&fixture);
+
+                    // ---- Leg 1: valid under the ORIGINAL domain ⇒ deferred.
+                    let calls_ok = Arc::new(AtomicU64::new(0));
+                    let pv_ok = counting_pv(&fixture, &calls_ok);
+                    let current_ok = coherent_snapshot_for(&pv_ok);
+                    let mut engine_ok = d7b3_active_engine();
+                    let mut restore_ok =
+                        RestoreCatchupModeState::from_config(Some(d7b3_baseline()));
+                    let mut stats_ok = BinaryConsensusLoopInboundStats::default();
+                    let facade_ok = D7ActionRecorder::default();
+                    deliver_proposal_fresh(
+                        &mut engine_ok, &mut stats_ok, &mut restore_ok,
+                        Some(&timeout_ctx), Some(&pv_ok), Some(&current_ok), &proposal,
+                        &metrics, Some(&facade_ok), Some(&origin), Some(&gate),
+                        ConsensusVerificationPolicy::Required,
+                    );
+                    assert_eq!(stats_ok.inbound_proposal_verify_accepted, 1);
+                    assert_eq!(stats_ok.restore_catchup_proposals_deferred, 1);
+
+                    // ---- Leg 2: coherent snapshot on a FOREIGN current domain
+                    // (d6), same keys ⇒ the original signature is rejected.
+                    let calls_foreign = Arc::new(AtomicU64::new(0));
+                    let pv_foreign =
+                        counting_pv_domain(&fixture, &calls_foreign, d6_control_domain());
+                    let current_foreign = coherent_snapshot_for(&pv_foreign);
+                    let mut engine_f = d7b3_active_engine();
+                    let mut restore_f =
+                        RestoreCatchupModeState::from_config(Some(d7b3_baseline()));
+                    let mut stats_f = BinaryConsensusLoopInboundStats::default();
+                    let facade_f = D7ActionRecorder::default();
+                    deliver_proposal_fresh(
+                        &mut engine_f, &mut stats_f, &mut restore_f,
+                        Some(&timeout_ctx), Some(&pv_foreign), Some(&current_foreign),
+                        &proposal, &metrics, Some(&facade_f), Some(&origin), Some(&gate),
+                        ConsensusVerificationPolicy::Required,
+                    );
+
+                    // Admission + epoch succeeded (coherent current domain), the
+                    // real backend was invoked, and the signature failed under
+                    // the foreign domain preimage — NOT a wire-chain mismatch.
+                    assert_eq!(calls_foreign.load(SeqCst), 1);
+                    assert_eq!(stats_f.inbound_proposal_verify_rejected_total, 1);
+                    assert_eq!(stats_f.inbound_proposal_rejected_wire_chain_mismatch, 0);
+                    assert_eq!(stats_f.inbound_proposal_verify_accepted, 0);
+                    // No deferral, delivery, engine ingestion, or outbound.
+                    assert_eq!(stats_f.restore_catchup_proposals_deferred, 0);
+                    assert_eq!(stats_f.inbound_proposals_delivered, 0);
+                    assert_eq!(facade_f.total(), 0);
+                }
+
+                // -------------------------------------------------------------
+                // E. Valid new owner.
+                //
+                // With the current configuration and domain still valid, a
+                // DISTINCT current-authorization owner (fresh identity, same
+                // authorized configuration) independently admits and verifies
+                // the re-delivered Proposal. The earlier owner's ticket is not
+                // reused; a new owner is not, by itself, grounds to reject.
+                // -------------------------------------------------------------
+                #[test]
+                fn d7b3_e_valid_new_owner_independently_admits_and_verifies() {
+                    let fixture = make_fixture(4);
+                    let calls = Arc::new(AtomicU64::new(0));
+                    let pv = counting_pv(&fixture, &calls);
+                    let gate = pv_binding_gate(4);
+                    let origin = origin_v0();
+                    let timeout_ctx = make_timeout_ctx(&fixture, Some(ValidatorId(0)));
+                    let metrics = make_metrics();
+                    let mut engine = d7b3_active_engine();
+                    let mut restore =
+                        RestoreCatchupModeState::from_config(Some(d7b3_baseline()));
+                    let mut stats = BinaryConsensusLoopInboundStats::default();
+                    let facade = D7ActionRecorder::default();
+                    let proposal = d7b3_deferring_proposal(&fixture);
+
+                    // ---- Owner #1.
+                    let owner1 = coherent_snapshot_for(&pv);
+                    deliver_proposal_fresh(
+                        &mut engine, &mut stats, &mut restore,
+                        Some(&timeout_ctx), Some(&pv), Some(&owner1), &proposal,
+                        &metrics, Some(&facade), Some(&origin), Some(&gate),
+                        ConsensusVerificationPolicy::Required,
+                    );
+                    assert_eq!(stats.restore_catchup_proposals_deferred, 1);
+                    let calls_after_owner1 = calls.load(SeqCst);
+                    assert_eq!(calls_after_owner1, 1);
+
+                    // ---- Owner #2: a DISTINCT owner (new `OwnerIdentity`) that
+                    // holds the same valid authorized configuration.
+                    let owner2 = coherent_snapshot_for(&pv);
+                    deliver_proposal_fresh(
+                        &mut engine, &mut stats, &mut restore,
+                        Some(&timeout_ctx), Some(&pv), Some(&owner2), &proposal,
+                        &metrics, Some(&facade), Some(&origin), Some(&gate),
+                        ConsensusVerificationPolicy::Required,
+                    );
+
+                    // Independently admitted and verified: fresh crypto, fresh
+                    // deferral — the new owner did not reuse #1's ticket, and was
+                    // not rejected merely for being a new owner.
+                    assert_eq!(calls.load(SeqCst) - calls_after_owner1, 1);
+                    assert_eq!(stats.inbound_proposal_verify_accepted, 2);
+                    assert_eq!(stats.restore_catchup_proposals_deferred, 2);
+                    assert_eq!(stats.inbound_proposal_current_state_unavailable_total, 0);
+                    assert_eq!(stats.inbound_proposal_authority_superseded_total, 0);
+                    assert_eq!(stats.inbound_proposal_authority_stale_before_effect_total, 0);
+                    assert_eq!(facade.total(), 0);
+                }
+
+                // -------------------------------------------------------------
+                // F. F6 ordering.
+                //
+                // On re-delivery a mismatched authenticated sender is rejected
+                // by F6 sender binding BEFORE current-authorization lookup and
+                // any cryptographic processing.
+                // -------------------------------------------------------------
+                #[test]
+                fn d7b3_f_f6_mismatch_precedes_authorization_on_redelivery() {
+                    let fixture = make_fixture(4);
+                    let calls = Arc::new(AtomicU64::new(0));
+                    let pv = counting_pv(&fixture, &calls);
+                    let gate = pv_binding_gate(4);
+                    let timeout_ctx = make_timeout_ctx(&fixture, Some(ValidatorId(0)));
+                    let metrics = make_metrics();
+                    let mut engine = d7b3_active_engine();
+                    let mut restore =
+                        RestoreCatchupModeState::from_config(Some(d7b3_baseline()));
+                    let mut stats = BinaryConsensusLoopInboundStats::default();
+                    let facade = D7ActionRecorder::default();
+                    let proposal = d7b3_deferring_proposal(&fixture);
+
+                    // ---- Completed first delivery (matched sender ⇒ deferred).
+                    let matched = origin_v0();
+                    let valid = coherent_snapshot_for(&pv);
+                    deliver_proposal_fresh(
+                        &mut engine, &mut stats, &mut restore,
+                        Some(&timeout_ctx), Some(&pv), Some(&valid), &proposal,
+                        &metrics, Some(&facade), Some(&matched), Some(&gate),
+                        ConsensusVerificationPolicy::Required,
+                    );
+                    assert_eq!(stats.restore_catchup_proposals_deferred, 1);
+                    let calls_after_first = calls.load(SeqCst);
+                    assert_eq!(calls_after_first, 1);
+
+                    // ---- Re-delivery authenticated as validator 1 while the
+                    // Proposal still claims proposer 0. Even under valid current
+                    // authorization, F6 rejects first.
+                    let mismatched =
+                        AuthenticatedConsensusOrigin::new(pv_node_for(1), ValidatorId(1));
+                    deliver_proposal_fresh(
+                        &mut engine, &mut stats, &mut restore,
+                        Some(&timeout_ctx), Some(&pv), Some(&valid), &proposal,
+                        &metrics, Some(&facade), Some(&mismatched), Some(&gate),
+                        ConsensusVerificationPolicy::Required,
+                    );
+
+                    assert_eq!(stats.inbound_sender_binding_rejected_total, 1);
+                    // No current-auth lookup, no further crypto, no further
+                    // deferral, no delivery, no outbound.
+                    assert_eq!(stats.inbound_proposal_current_state_unavailable_total, 0);
+                    assert_eq!(stats.inbound_proposal_authority_superseded_total, 0);
+                    assert_eq!(calls.load(SeqCst), calls_after_first);
+                    assert_eq!(stats.restore_catchup_proposals_deferred, 1);
+                    assert_eq!(stats.inbound_proposals_delivered, 0);
+                    assert_eq!(facade.total(), 0);
+                    // The mismatched re-delivery did not add a gate acceptance.
+                    assert_eq!(gate.metrics().accepted(), 1);
+                }
+
+                // -------------------------------------------------------------
+                // G. Restore progress control.
+                //
+                // When the deferral condition no longer holds (a frame at
+                // committed+1 whose parent IS the committed block), the same
+                // valid frame is NOT deferred — it is verified and DELIVERED to
+                // the engine boundary. We distinguish verifier acceptance,
+                // delivery, engine acceptance, and outbound effects, and do NOT
+                // claim engine/QC success merely because the boundary verifier
+                // succeeded.
+                // -------------------------------------------------------------
+                #[test]
+                fn d7b3_g_progress_stops_deferral_and_delivers_without_claiming_engine_success() {
+                    let fixture = make_fixture(4);
+                    let gate = pv_binding_gate(4);
+                    let origin = origin_v0();
+                    let timeout_ctx = make_timeout_ctx(&fixture, Some(ValidatorId(0)));
+                    let metrics = make_metrics();
+
+                    // ---- Control: deferral condition HOLDS (height 7).
+                    {
+                        let calls = Arc::new(AtomicU64::new(0));
+                        let pv = counting_pv(&fixture, &calls);
+                        let current = coherent_snapshot_for(&pv);
+                        let mut engine = d7b3_active_engine();
+                        let mut restore =
+                            RestoreCatchupModeState::from_config(Some(d7b3_baseline()));
+                        let mut stats = BinaryConsensusLoopInboundStats::default();
+                        let facade = D7ActionRecorder::default();
+                        let deferring = d7b3_deferring_proposal(&fixture);
+                        deliver_proposal_fresh(
+                            &mut engine, &mut stats, &mut restore,
+                            Some(&timeout_ctx), Some(&pv), Some(&current), &deferring,
+                            &metrics, Some(&facade), Some(&origin), Some(&gate),
+                            ConsensusVerificationPolicy::Required,
+                        );
+                        assert_eq!(stats.inbound_proposal_verify_accepted, 1);
+                        assert_eq!(stats.restore_catchup_proposals_deferred, 1);
+                        assert_eq!(stats.inbound_proposals_delivered, 0);
+                        assert_eq!(stats.inbound_proposals_engine_accepted, 0);
+                        assert_eq!(facade.total(), 0);
+                    }
+
+                    // ---- Progress: deferral condition NO LONGER holds
+                    // (height 6 == committed+1, parent == committed block).
+                    let calls = Arc::new(AtomicU64::new(0));
+                    let pv = counting_pv(&fixture, &calls);
+                    let current = coherent_snapshot_for(&pv);
+                    let mut engine = d7b3_active_engine();
+                    let mut restore =
+                        RestoreCatchupModeState::from_config(Some(d7b3_baseline()));
+                    assert!(restore.is_active());
+                    let mut stats = BinaryConsensusLoopInboundStats::default();
+                    let facade = D7ActionRecorder::default();
+                    // Signed by validator 0 at committed+1 with the committed
+                    // block as parent ⇒ `should_defer_..` is false.
+                    let progress = signed_proposal_at_height(0, 6, [0x01; 32], &fixture);
+                    deliver_proposal_fresh(
+                        &mut engine, &mut stats, &mut restore,
+                        Some(&timeout_ctx), Some(&pv), Some(&current), &progress,
+                        &metrics, Some(&facade), Some(&origin), Some(&gate),
+                        ConsensusVerificationPolicy::Required,
+                    );
+
+                    // Boundary verifier accepted, and the frame WAS delivered to
+                    // the engine boundary (no longer deferred).
+                    assert_eq!(calls.load(SeqCst), 1);
+                    assert_eq!(stats.inbound_proposal_verify_accepted, 1);
+                    assert_eq!(stats.restore_catchup_proposals_deferred, 0);
+                    assert_eq!(stats.inbound_proposals_delivered, 1);
+                    // Engine acceptance is a SEPARATE, downstream outcome: we do
+                    // NOT claim engine/QC success from verifier success. Record
+                    // that it never exceeds the number delivered.
+                    assert!(
+                        stats.inbound_proposals_engine_accepted
+                            <= stats.inbound_proposals_delivered
+                    );
+                    // No outbound effect was forwarded through the facade.
+                    assert_eq!(facade.total(), 0);
+                }
+            }
         }
     }
 }
