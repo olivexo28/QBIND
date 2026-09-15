@@ -695,7 +695,7 @@ fn c3d_7_bitmap_set_bit_beyond_membership_span_rejected_before_crypto() {
     let counter = counting.counter();
     let br = SimpleBackendRegistry::with_backend(TEST_SUITE, Arc::new(counting));
     let qc = build_signed_qc_unknown(&f, &d, &[8]); // bit 8 -> byte 1
-    // Ensure a signature is present so any short-circuit would be visible.
+                                                    // Ensure a signature is present so any short-circuit would be visible.
     assert_eq!(qc.signer_bitmap.len(), 2);
     match verify(&f, &qc, &d, &br) {
         Err(QcDomainVerifyError::BitmapBeyondMembershipSpan { len, allowed }) => {
@@ -1150,7 +1150,7 @@ fn c3d_12_signature_count_65536_rejected_before_crypto() {
 
     let mut qc = unsigned_qc();
     qc.signatures = vec![vec![1u8]; MAX_SIGNATURE_COUNT + 1]; // 65536 placeholders
-    // Bitmap left empty; the count check precedes the popcount/structural work.
+                                                              // Bitmap left empty; the count check precedes the popcount/structural work.
     match verify(&f, &qc, &d, &br) {
         Err(QcDomainVerifyError::SignatureCountNotRepresentable { count, max }) => {
             assert_eq!(count, 65536);
@@ -1251,7 +1251,10 @@ fn c3d_14_checked_aggregate_signature_bytes_boundaries() {
             assert_eq!(aggregate, usize::MAX);
             assert_eq!(max, MAX_AGGREGATE_SIGNATURE_BYTES);
         }
-        other => panic!("expected saturated AggregateSignatureBytesTooLarge, got {:?}", other),
+        other => panic!(
+            "expected saturated AggregateSignatureBytesTooLarge, got {:?}",
+            other
+        ),
     }
 }
 

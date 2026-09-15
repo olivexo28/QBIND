@@ -391,17 +391,53 @@ truncated, or wrapped. A bitmap cannot repeat a bit, so signer ids are distinct
 duplicate-bit encoding). For this bounded phase a membership containing an id the
 u16 wire index cannot represent (`> u16::MAX`) is rejected.
 
-**Size bounds (validated before any clone or crypto).**
+**Size bounds (a complete structural preflight, all validated before any clone,
+backend invocation, or signer-result allocation).**
 
-* `signer_bitmap.len() <= MAX_BITMAP_LEN` (8192 bytes). `8192 * 8 == 65536`
-  bits, so the highest representable bit index is exactly `u16::MAX`; the cap
-  bounds work and guarantees representable indices.
+* **Signature-count representability.** The wire QC encodes `signatures.len()`
+  as a `u16` (`sig_count`), so at most `MAX_SIGNATURE_COUNT` (`u16::MAX ==
+  65535`) signatures are encodable. `signatures.len() > MAX_SIGNATURE_COUNT` is
+  rejected (`SignatureCountNotRepresentable`) before any crypto or signer-result
+  allocation, without changing the wire format or encoder. Three distinct
+  quantities: the maximum *validator index* is `65535` (valid); the number of
+  *representable indices* is `65536` (`0..=65535`); the maximum *encodable
+  signature count* is `65535`. A full 8192-byte bitmap has `65536` set bits — one
+  more than the encodable count — so an 8192-byte bitmap alone does **not**
+  enforce the count limit; the count is bounded explicitly.
+* **Global bitmap length.** `signer_bitmap.len() <= MAX_BITMAP_LEN` (8192
+  bytes). `8192 * 8 == 65536` bits, so the highest representable bit index is
+  exactly `u16::MAX`; the cap bounds work and guarantees representable indices
+  (`BitmapTooLong`).
+* **Membership-relative bitmap span.** `signer_bitmap.len()` must not exceed the
+  trusted membership's **identifier span** — the byte span required to represent
+  bit indices `0..=max_id`, where `max_id` is the largest representable
+  `ValidatorId` in the trusted set (`(max_id / 8) + 1` bytes; `0` for an empty
+  set). This uses the *identifier span*, never `validators.len()`, so sparse and
+  reordered memberships remain valid, and a bitmap shorter than the span is
+  allowed. Any byte beyond that span — **including trailing zero padding** — is
+  rejected (`BitmapBeyondMembershipSpan`). A set bit for a non-member id that
+  falls *within* the span still rejects at the per-signer membership check
+  (`UnknownSigner`). Because every `max_id <= u16::MAX`, the span is always
+  `<= MAX_BITMAP_LEN`.
 * `popcount(signer_bitmap) == signatures.len()`; signatures are associated with
   set bits in ascending-bit order.
-* Each signature length `<= MAX_SIGNATURE_LEN` (`u16::MAX`, the wire length
-  bound). The only per-signer allocation is one clone of that signer's signature
-  into the reconstructed `Vote`. This is **not** a complete transport-level DoS
-  audit.
+* **Per-signature size.** Every signature length `<= MAX_SIGNATURE_LEN`
+  (`u16::MAX`, the wire length bound), validated for *all* signatures before the
+  crypto loop, so an oversized signature at any position (including after quorum
+  would be reached) rejects (`MalformedSignature`) before any backend
+  invocation.
+* **Checked aggregate size.** The sum of all constituent signature byte lengths
+  is accumulated with checked arithmetic (`checked_aggregate_signature_bytes`)
+  and must not exceed the documented acceptance bound
+  `MAX_AGGREGATE_SIGNATURE_BYTES` (`MAX_SIGNATURE_COUNT * MAX_SIGNATURE_LEN`).
+  This is the structural worst case implied purely by the two wire field widths;
+  it is the dormant verifier's own acceptance bound and is **deliberately
+  distinct** from transport limits such as `qbind_wire::net::MAX_NET_MESSAGE_BYTES`
+  (1 MiB). Establishing it does not change transport policy.
+
+The only per-signer allocation is one clone of that signer's signature into the
+reconstructed `Vote` (bounded by `MAX_SIGNATURE_LEN`), performed after the whole
+preflight above. This is **not** a complete transport-level DoS audit.
 
 **Failure ordering (fail-closed at the first failure).**
 
@@ -410,14 +446,18 @@ u16 wire index cannot represent (`> u16::MAX`) is rejected.
 2. `qc.epoch == authorized_epoch` — else `EpochMismatch`, before crypto.
 3. Checked, representable, **positive** total voting power `W`
    (`ZeroTotalVotingPower` / `TotalVotingPowerOverflow` /
-   `MembershipIdNotRepresentable`). The set's cached (saturating) total and
-   `two_thirds_vp()`'s `2 * total` u64 arithmetic are **not** trusted blindly.
-4. Structural bounds (`BitmapTooLong`, `SignatureCountMismatch`,
-   `SignerIndexNotRepresentable`).
+   `MembershipIdNotRepresentable`), and the membership identifier span used to
+   bound the bitmap. The set's cached (saturating) total and `two_thirds_vp()`'s
+   `2 * total` u64 arithmetic are **not** trusted blindly.
+4. Complete structural preflight (`SignatureCountNotRepresentable`, then
+   `BitmapTooLong`, `BitmapBeyondMembershipSpan`, `SignatureCountMismatch`,
+   `SignerIndexNotRepresentable`, every per-signature `MalformedSignature`, and
+   the checked `AggregateSignatureBytesTooLarge`) — all before the cryptographic
+   loop and any signature clone.
 5. Per set bit in ascending order: reconstruct the `Vote` from the QC's
    **actual** `version, chain_id, epoch, height, round, step, block_id, suite_id`
    plus the bit-derived index and its associated signature (no field is replaced
-   with a trusted value to force a pass); validate signature length; verify via
+   with a trusted value to force a pass); verify via
    `verify_vote_msg_with_domain` (membership, missing signature, governed key,
    QC-suite-vs-governed-suite match, backend dispatch, and the cryptographic
    check over the recomputed v2 preimage). Accumulate the signer's voting power
@@ -451,13 +491,15 @@ conversion to a current-authorization owner, snapshot, ticket, signer,
 activation state, or production verification capability, and its `Debug` is a
 bounded summary that never dumps signature or key bytes.
 
-**Typed failures.** `QcDomainVerifyError` distinguishes structural failures,
-epoch/wire mismatch, invalid membership arithmetic, missing key, suite mismatch,
-unsupported backend, malformed signature, invalid signature, backend failure,
-and insufficient voting power. Outward diagnostics are bounded: no variant
-embeds a certificate, signature array, or key bytes, and `BackendError` carries
-only a truncated message produced by our own backends. There is no panic,
-unchecked narrowing, saturating acceptance, default domain/epoch, unsigned
+**Typed failures.** `QcDomainVerifyError` distinguishes structural failures
+(signature-count representability, global and membership-relative bitmap bounds,
+bitmap/signature-count correspondence, per-signature and checked-aggregate
+size), epoch/wire mismatch, invalid membership arithmetic, missing key, suite
+mismatch, unsupported backend, malformed signature, invalid signature, backend
+failure, and insufficient voting power. Outward diagnostics are bounded: no
+variant embeds a certificate, signature array, or key bytes, and `BackendError`
+carries only a truncated message produced by our own backends. There is no
+panic, unchecked narrowing, saturating acceptance, default domain/epoch, unsigned
 fallback, or cross-suite retry.
 
 **Dormancy.** The boundary is **uncalled** by the production engine, node
