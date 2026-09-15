@@ -2192,3 +2192,224 @@ GENESIS_AUTHORITY_ACTIVATION=DISABLED
 CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED
 SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO
 ```
+
+## Run 422 D7-C2 — independently pinned genesis / authority-record correspondence (test + evidence)
+
+This section is additive and strictly scoped to a new, read-only, **non-authorizing**
+correspondence boundary. It preserves all historical evidence above unchanged and
+introduces no protocol migration, no replacement commitment, and no change to any
+production authority wiring, storage schema, startup refusal, or D6 signing bytes.
+
+### Actual branch / SHAs (task §1, §7)
+
+* **Actual branch (environment-supplied):** `copilot/olivexo28fix-incomplete-transition-error-metadata`.
+  The task message named the review branch `copilot/fix-incomplete-transition-error-metadata`;
+  the branch actually checked out in this environment is the one above and is
+  reported verbatim rather than renamed.
+* **Starting HEAD (this environment):** `78af0f21cdd893c7f41deb36be0adca8c2e5de1b`.
+* **Implementation checkpoint (tested SHA, recorded before validation):**
+  `0ddd2b5b90b54df4771164145c1bb776f612734c`.
+* **Availability of the reviewed SHAs:** the clone is a shallow, single-branch clone
+  with two reachable commits (`78af0f2`, `9f37fbd`). The reviewed final revision
+  `a12b33990ffb52196f1e89f87224dd962344cb0f` and the reviewed C1 checkpoint
+  `3b573bd945c44f8f615298076b73966d8fcea339` are **not present** as objects in this
+  clone (`git cat-file -t` fails for both). No ancestry to them is manufactured; the
+  work is layered on the actual environment HEAD above.
+* Normal task-branch commits only; no PR, amend, rebase, force-push, or history
+  rewrite. `task/warning.txt` and unrelated task files are untouched.
+
+### Trust model (stated explicitly)
+
+The new module implements a bounded comparison between (a) an **independently
+pinned, validated** genesis-derived expected identity, (b) a **separately
+supplied, explicitly untrusted** authority-record description, and (c) a D7-C1
+storage observation. A successful result establishes correspondence of the
+fields actually compared **only**. It does **not** authenticate a persisted
+authority record, prove the record and the epoch came from the same database,
+establish current authority, or prevent rollback. A matching record plus
+`CommittedEpoch(0)` never becomes `LocalAuthorizationState::Established`, a
+`CurrentAuthorizationOwner`, an `AuthorizedProposalVoteSnapshot`, an
+`AuthorizationTicket`, or a signing capability. The result type exposes no
+conversion into any of those.
+
+### Source investigation (task §3)
+
+| Source | Role in D7-C2 |
+| --- | --- |
+| `consensus_storage_observation.rs` (`observe_consensus_storage`, `ConsensusStorageObservation`, `ConsensusStorageObservationError`) | The C1 observation consumed as the third input. Its `NoStorageHandle` / `PresentNoCommittedEpoch` / `CommittedEpoch(e)` / error results are each mapped to a **distinct** outcome; never coerced to zero or to success. |
+| `genesis_consensus_authority.rs` (`build_genesis_consensus_authority`, `GenesisConsensusAuthority` public fields, `MAX_GENESIS_CONSENSUS_VALIDATORS`, `GENESIS_STATIC_AUTHORITY_EPOCH`, `compute_authority_commitment`) | Reused to derive the expected membership, per-validator `(suite, pk)` provider, chain id, canonical hash binding, authority commitment, and founding epoch from the validated snapshot. The public fields are read only *after* the checked build; the type name alone is never treated as evidence. |
+| `pqc_boot_genesis.rs` (`load_external_genesis`) + `qbind_ledger::verify_boot_time_genesis` | The single owned read + boot-time validation + canonical hashing used by the checked expected-identity constructor, run **against the required pin**. `compute_print_genesis_hash` (which reopens the file without authority validation) is deliberately not used. |
+| `production_consensus_storage.rs` / `storage.rs` (`RocksDbConsensusStorage`, `ConsensusStorage`, `put_current_epoch`, `EpochTransitionMarker`, `StorageError`) | Used only in tests to create **real temporary RocksDB** observations; no production reader/writer is added. |
+| existing D6 signing-domain (`ProposalVoteSigningDomainV2` in `binary_consensus_loop.rs`) | Preserved unchanged. D7-C2 introduces no replacement commitment and no signing-domain change. |
+
+### Field-by-field source attribution (task §2, §4, §5)
+
+| Field | Independently established by pinned genesis validation | Merely claimed by the untrusted record | Observed from storage (C1) | Unavailable in the current production path |
+| --- | :---: | :---: | :---: | :---: |
+| chain id label | ✔ (expected) | ✔ (claimed) | | |
+| canonical genesis hash | ✔ (against the required pin) | ✔ (claimed) | | |
+| authority commitment | ✔ (derived) | ✔ (claimed) | | |
+| validator membership / genesis index | ✔ (derived) | ✔ (claimed) | | |
+| per-validator suite / complete key bytes / voting power | ✔ (derived; equal power) | ✔ (claimed) | | |
+| founding epoch (0) | ✔ (constant) | ✔ (claimed epoch) | | |
+| committed epoch | | | ✔ (evidence only) | |
+| wire-domain (`authorized_wire_chain_id`) mapping | | | | ✔ (production `None`) |
+| activation authorization / current freshness | | | | ✔ |
+
+The record's own commitment is **never** trusted as a substitute for comparing
+the full membership contents: case D alters a validator while leaving the claimed
+commitment unchanged and is still rejected by the per-member comparison.
+
+### Implementation (task §4, §5, §7)
+
+New module `crates/qbind-node/src/genesis_authority_record_correspondence.rs`
+(exported from `lib.rs`); new focused test target
+`crates/qbind-node/tests/run_422_d7c2_genesis_record_correspondence_tests.rs`.
+No shared-helper extraction was required — the existing `load_external_genesis`
++ `verify_boot_time_genesis` + `build_genesis_consensus_authority` trio already
+provides a single-read, single-snapshot construction.
+
+* `ExpectedGenesisIdentity` — immutable, **private** field (`authority:
+  GenesisConsensusAuthority`), no unchecked public constructor or setter. The only
+  constructor `load_pinned(genesis_path, env_policy, expected_genesis_hash)`:
+  requires the pin; reads the genesis file **once** into an owned snapshot; runs
+  the existing boot-time validation + canonical hashing against the pin
+  (`verify_boot_time_genesis(_, _, Some(pin))`, fail-closed on mismatch); derives
+  membership + key material from that **same** snapshot; copies immutable values in.
+  The pin is never sourced from the record and never silently calculated-and-accepted
+  from the file. Accessors expose chain id, genesis hash, commitment, count, and
+  founding epoch only.
+* `ClaimedAuthorityRecord` / `ClaimedValidatorRecord` — an explicitly untrusted,
+  bounded, **in-memory** description. No new database key, storage schema, file
+  format, CLI argument, or production reader/writer.
+* `check_genesis_record_correspondence(expected, Option<&record>, storage_result)`
+  compares, in coarse-to-fine order: record presence → chain label → canonical
+  genesis identity → authority commitment → membership count + hard bound →
+  per-validator (canonical index / ML-DSA-44 key size / supported suite / duplicate
+  key / expected suite / complete key bytes / equal voting power) → claimed epoch vs
+  founding epoch → C1 observation (error / absent handle / absent epoch stay
+  explicit) → claimed epoch vs C1 observed committed epoch. Deterministic member
+  ordering is enforced by requiring each declared index to equal its canonical
+  position; malformed / duplicate / missing / extra entries and unsupported suites
+  are rejected without silent repair.
+* `GenesisRecordCorrespondence` — the correspondence-only success value. It is
+  structurally separate from every authorization API and always reports
+  `storage_record_coorigin_established() == false`,
+  `activation_authorization_established() == false`, and
+  `current_authorization_available() == false`.
+
+Missing record, absent storage handle, absent committed epoch, epoch mismatches,
+non-founding epoch, and every C1 observation error remain **distinct explicit**
+outcomes. A missing epoch is never turned into zero. C1 errors are propagated
+verbatim (preserving the corrected D7-C1 storage-reported / marker-derived
+distinction); no transition metadata is fabricated.
+
+### Behavioral tests (task §6) — `run_422_d7c2_genesis_record_correspondence_tests` (23) + module units (2)
+
+Real genesis loader/validator with temporary genesis files and valid ML-DSA-44
+public keys from `qbind_crypto::ml_dsa44::MlDsa44Backend`; C1 exercised against
+**real temporary RocksDB** databases wherever a database observation is claimed.
+**The authority records in these tests are supplied in-memory fixtures, NOT
+records read from RocksDB.**
+
+| Case | Tests |
+| --- | --- |
+| A. Matching pinned genesis + coherent record + explicit persisted epoch 0 → correspondence succeeds, no authorization capability, no writes | `d7c2_a_matching_record_explicit_epoch_zero_corresponds_without_authorization` |
+| B. Wrong pin / replacement genesis contents reject at checked construction | `d7c2_b_wrong_pin_rejects_expected_construction`, `d7c2_b_replacement_genesis_contents_reject_against_frozen_pin` |
+| C. Wrong chain label / genesis hash / authority commitment reject independently | `d7c2_c_wrong_chain_label_rejects`, `d7c2_c_wrong_genesis_hash_rejects`, `d7c2_c_wrong_authority_commitment_rejects` |
+| D. Same count but changed key / suite / weight reject (claimed commitment left unchanged) | `d7c2_d_changed_validator_key_rejects_despite_unchanged_commitment`, `d7c2_d_changed_validator_suite_rejects`, `d7c2_d_changed_validator_weight_rejects` |
+| E. Missing / extra / duplicate / noncanonical membership reject without repair | `d7c2_e_missing_entry_rejects_as_count_mismatch`, `d7c2_e_extra_entry_rejects_as_count_mismatch`, `d7c2_e_duplicate_key_rejects_without_repair`, `d7c2_e_noncanonical_index_rejects_without_repair` |
+| F. Missing record; absent handle; db without epoch (never 0); record/storage epoch mismatch; non-founding epoch | `d7c2_f_missing_record_is_explicit`, `d7c2_f_absent_storage_handle_is_explicit`, `d7c2_f_database_without_committed_epoch_never_becomes_zero`, `d7c2_f_record_storage_epoch_mismatch_rejects`, `d7c2_f_non_founding_claimed_epoch_rejects` |
+| G. C1 malformed metadata / incomplete transition / read failure stay errors | `d7c2_g_injected_malformed_metadata_stays_error` (injected, labelled), `d7c2_g_injected_read_failure_stays_error` (injected, labelled), `d7c2_g_real_incomplete_transition_marker_stays_error` (real RocksDB marker) |
+| H. Record from unrelated genesis B cannot redefine expectations pinned to A (A frozen) | `d7c2_h_unrelated_genesis_b_cannot_redefine_pinned_a` |
+| I. Separate / reopened db reporting the same epoch supplies no provenance | `d7c2_i_separate_database_same_epoch_supplies_no_provenance` |
+
+Module units (`#[cfg(test)] mod tests`): `missing_record_is_explicit`,
+`correspondence_reports_non_authorizing_invariants`. The A/I tests assert no
+writes and no activation effect; I asserts a successful database reopen with the
+same epoch is not treated as authentication or anti-rollback evidence.
+
+### Validation (task §8) — sequential
+
+Tested SHA `0ddd2b5b90b54df4771164145c1bb776f612734c`; package `qbind-node`;
+default features; `test`/`dev` profile unless noted; run sequentially. Disk before
+the release build: 77 GiB free on `/`.
+
+* `cargo test -p qbind-node --test run_422_d7c2_genesis_record_correspondence_tests -- --test-threads=1`
+  ⇒ **23 passed**, 0 failed (exit 0).
+* `cargo test -p qbind-node --lib genesis_authority_record_correspondence -- --test-threads=1`
+  ⇒ **2 passed**, 0 failed, 1588 filtered out (exit 0).
+* `cargo test -p qbind-node --lib consensus_storage_observation -- --test-threads=1`
+  ⇒ **5 passed**, 0 failed, 1585 filtered out (exit 0) — C1 unit tests.
+* `cargo test -p qbind-node --test run_422_d7c1_storage_observation_tests -- --test-threads=1`
+  ⇒ **23 passed**, 0 failed (exit 0) — full C1 integration target.
+* `cargo test -p qbind-node --test run_422_genesis_consensus_authority_tests -- --test-threads=1`
+  ⇒ **15 passed**, 0 failed (exit 0).
+* `cargo test -p qbind-node --test run_422_d7_authority_lifetime_tests -- --test-threads=1`
+  ⇒ **14 passed**, 0 failed (exit 0).
+* `cargo test -p qbind-node --test run_422_startup_refusal_tests -- --test-threads=1`
+  ⇒ **4 passed**, 0 failed (exit 0) — genesis startup refusal preserved.
+* `cargo check -p qbind-node` (default features, production build) ⇒ Finished, exit 0.
+* `cargo clippy -p qbind-node --lib --test run_422_d7c2_genesis_record_correspondence_tests`
+  ⇒ Finished, exit 0; **no** warnings attributed to the new module or the new test
+  target (85 pre-existing lib warnings unrelated to D7-C2 remain).
+* `cargo build --release -p qbind-node --bin qbind-node` ⇒ Finished (release
+  profile) in 6m 53s, exit 0. A release build is compilation evidence only, **not**
+  configured-authority runtime evidence (`CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE`
+  stays `NOT-YET-CAPTURED`).
+
+Overlapping subsets distinguished: the two lib subsets
+(`genesis_authority_record_correspondence` = 2, `consensus_storage_observation` = 5)
+are filtered slices of the full `qbind-node` lib test set (1588 total); the D7-C2
+integration target (23) is distinct from the D7-C1 integration target (23).
+
+* **CRLF-aware whitespace:** the new module and test file were authored with **CRLF**
+  line endings to match the neighboring D7 sources
+  (`consensus_storage_observation.rs`, `genesis_consensus_authority.rs`); `lib.rs`
+  retains its existing **LF** endings and only added CRLF-free lines. No genuine
+  trailing whitespace introduced.
+* **Secret scan:** the changed source files were scanned ⇒ no secrets detected.
+
+### Security-tool outcomes (task §8)
+
+This change introduces production-source validation logic and is **not** docs-only;
+it is declared non-trivial for CodeQL. Both tools were attempted via the parallel-validation path:
+* **CodeQL** (rust) returned **SKIPPED** with reason "Analysis was skipped because the
+  database size is too large" (0 alerts). A database-size skip is **not** a
+  clean/passing scan; status is **SKIPPED/INCOMPLETE**.
+* **Code review** reported "No review comments found" but the reviewer backend was
+  **UNAVAILABLE** in this environment (the `autofind` model `claude-sonnet-4.6` was
+  not found in the registry). Recorded as **UNAVAILABLE/UNVERIFIED**, not a
+  completed clean review.
+
+### Trust limits and remaining dependencies (task §5, §8)
+
+* Storage/record **co-origin is not established**: a matching hash/commitment and a
+  successful epoch read do not prove the record and the database share an origin;
+  case I demonstrates a separate/reopened database with the same epoch carries no
+  chain/genesis provenance by itself.
+* **Activation authorization is not established** and **current authorization is
+  unavailable**: the production runtime→wire chain-id mapping is `None`, no
+  `ProposalVoteAuthority` / `Established` current state is produced, and the result
+  is not convertible into any owner, snapshot, ticket, or signing capability.
+* No durable anti-rollback is established; a successful RocksDB reopen is not
+  authentication or anti-rollback evidence.
+* Unchanged: authority commitment, D6 signing bytes, storage schema, restore
+  behavior, `CurrentEpochUnavailable`, genesis startup refusal, production owner
+  availability. `GENESIS_AUTHORITY_ACTIVATION` stays `DISABLED`.
+
+### Verdict (task §9) — scoped strictly to the correspondence boundary
+
+```
+D7C2_GENESIS_RECORD_CORRESPONDENCE=CODE-TEST-POSITIVE
+D7C2_STORAGE_RECORD_COORIGIN=NOT-ESTABLISHED
+D7C2_ACTIVATION_AUTHORIZATION=NOT-ESTABLISHED
+D7C2_CURRENT_AUTHORIZATION=UNAVAILABLE
+D7C1_STORAGE_OBSERVATION=CODE-TEST-POSITIVE
+PERSISTED_EPOCH_IS_AUTHORIZATION=FALSE
+D7_STATUS=PARTIAL-CODE-TEST / PRODUCTION-LIFECYCLE-UNAVAILABLE
+DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED
+GENESIS_AUTHORITY_ACTIVATION=DISABLED
+CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED
+SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO
+```
