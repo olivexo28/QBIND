@@ -41,33 +41,47 @@ network correspondence must never be presented as permission to activate.**
 
 ### 1.1 Branch and revision actually inspected
 
-* **Working branch (actual):** `copilot/copilotcopilot-run-422-d7-c3b-again`
-  (note the doubled `copilot` prefix; the task text names
-  `copilot/copilot-run-422-d7-c3b-again`).
-* **Inspected worktree HEAD:** `0b3eb4a19530f8ecf21b25212f92aa944473e154`
-  (`update`).
-* **HEAD parent (shallow boundary):**
-  `02f7f1dce07b4df0dbcb0d1c1ecda7e6e453d8e3` (`update`), recorded in
-  `.git/shallow`.
+Inspected against the **actual supplied worktree**, not the SHAs the task text
+recites:
+
+* **Working branch (actual):** `copilot/run-422-d7-c3c` (`git branch
+  --show-current`).
+* **Inspected worktree HEAD (actual):**
+  `819f2b28ff05fc10f2b0b6c23af52808ac996cad` (`update`) — this is the commit that
+  first added this audit document and the C3C evidence entry.
+* **HEAD parent / shallow boundary (actual):**
+  `0b3eb4a19530f8ecf21b25212f92aa944473e154` (`update`), recorded in
+  `.git/shallow`; this is the revision the task names as the **inspected source
+  revision**, and it is present.
+* **Reviewed branch named by the task:**
+  `copilot/copilotcopilot-run-422-d7-c3b-again` (the previously reviewed C3B
+  branch; note the doubled `copilot` prefix). It is not a local branch here.
+* **"Final audit revision" named by the task,
+  `3a5ac02c06eb4a62368f6c922a911946b48b01df`, is absent** from this clone
+  (`git cat-file -t 3a5ac02…` → *could not get object info*).
 
 ### 1.2 Ancestry limitation (reported accurately)
 
 The clone is **shallow with depth 2** (`git rev-list --count HEAD` = 2;
-`.git/shallow` pins `02f7f1d`). The **reviewed final revision named in the task,
-`734a9425a15f8a5845b8bf0bdb4932b700d9cc22`, is not present** in this clone
-(`git cat-file -t 734a9425…` → *could not get object info*). Therefore:
+`.git/shallow` pins the parent `0b3eb4a`). Therefore:
 
-* Ancestry between HEAD and `734a9425…` **cannot be established** from local
-  history.
-* The worktree content corresponds to the completed D7-C2 / C3A / C3B work
-  (module `genesis_authority_record_correspondence.rs` present with
-  `load_pinned`, retained `validation_policy`, and `check_network_correspondence`
-  — see §4.A). **Content correspondence does not establish ancestry** and is not
-  claimed to.
+* The source tree is **unchanged between `0b3eb4a` and HEAD `819f2b2`** — the only
+  differences are the two documentation files this run may touch (`git diff
+  --stat 0b3eb4a 819f2b2` = this audit + the D7 evidence file). So every source
+  finding below is equally anchored to `0b3eb4a` (the named inspected source
+  revision) and to the worktree.
+* Ancestry to the task's **"final audit revision" `3a5ac02…` cannot be
+  established** from local history because that object is absent. The worktree
+  **content** corresponds to the completed D7-C2 / C3A / C3B work (module
+  `genesis_authority_record_correspondence.rs` present with `load_pinned`,
+  retained `validation_policy`, and `check_network_correspondence` — see §4.A),
+  but **content correspondence does not establish ancestry** and is not claimed
+  to.
 
-All findings below are anchored to paths and symbols **as they exist at HEAD
-`0b3eb4a`**. Every material finding cites `path:line`. Findings are **source
-evidence** unless explicitly marked as executed behavior (§6).
+All findings below are anchored to paths and symbols **as they exist in the
+worktree at HEAD `819f2b2` (source-identical to `0b3eb4a`)**. Every material
+finding cites `path:line`. Findings are **source evidence** unless explicitly
+marked as executed behavior (§7).
 
 ### 1.3 Deliverable posture
 
@@ -86,26 +100,50 @@ which `main.rs` does not reach.
 
 | # | Boundary | Path:symbol | Reached from `main.rs`? |
 |---|----------|-------------|-------------------------|
-| 1 | Boot genesis verification (pin compare) | `main.rs` startup → `verify_boot_time_genesis` (qbind-ledger) | Yes (every startup) |
-| 2 | Consensus security preflight | `crates/qbind-node/src/main.rs:5470` `build_consensus_security_preflight` | Yes |
-| 3 | Proposal/Vote authority slot | `crates/qbind-node/src/main.rs:5549` `proposal_vote_authority: None` | Yes — **wired to `None`** |
-| 4 | Validator set + key provider | `crates/qbind-node/src/peer_key_provider.rs` `build_validator_set_and_key_provider` (from `config.network.static_peer_consensus_keys`) | Yes |
-| 5 | Engine construction | `crates/qbind-consensus/src/basic_hotstuff_engine.rs:508` `BasicHotStuffEngine::new(local_id, validators)` | Yes |
-| 6 | Inbound Proposal admission + verify + ingest | `crates/qbind-node/src/binary_consensus_loop.rs` inbound Proposal arm (≈`:4359`–`:4697`) | Yes |
-| 7 | Inbound Vote admission + verify + ingest | `binary_consensus_loop.rs` inbound Vote arm (≈`:4833`–`:4929`) | Yes |
-| 8 | Outbound forwarding | `binary_consensus_loop.rs` `forward_actions_to_facade` (≈`:4046`) | Yes |
-| 9 | Leader step | `binary_consensus_loop.rs` `do_leader_tick` (≈`:3189`) | Yes |
-| 10 | Late-peer cached re-emission | `binary_consensus_loop.rs` `maybe_reemit_on_late_peer_connect` (≈`:3324`) | Yes |
-| 11 | Restore-catchup deferral | `binary_consensus_loop.rs` restore deferral (≈`:4632`) | Yes (restore mode) |
-| 12 | Engine QC ingest (wire→logical) | `basic_hotstuff_engine.rs:1490`–`1493` / `:1567` `on_vote_event` | Yes |
-| 13 | Embedded-QC crypto verify | `crates/qbind-consensus/src/lib.rs:705` `verify_quorum_certificate` / `:807` `verify_block_proposal` | **No** (dormant relative to binary path; §4.C) |
-| 14 | Genesis correspondence module | `crates/qbind-node/src/genesis_authority_record_correspondence.rs` | **No** (test-only callers; §4.A) |
+| 1 | Boot genesis verification (pin compare) | `main.rs:2382` `pqc_boot_genesis::run_boot_time_genesis_verification(&config)` | Yes, but **conditional**: for permitted non-MainNet configs without an external genesis it returns `BootGenesisOutcome::SkippedNoExternalGenesis` (`pqc_boot_genesis.rs:229`); pinned external-genesis validation runs **only** when `--genesis-path` is supplied (MainNet requires it, else `GenesisPathMissing`, `:227`) |
+| 2 | Consensus security preflight | `crates/qbind-node/src/main.rs:5019` `run_p2p_consensus_security_preflight` (called `:7502`) | Yes |
+| 3 | Proposal/Vote authority slot | `crates/qbind-node/src/main.rs:5549` `proposal_vote_authority: None` (field `:5016`) | Yes — **wired to `None`** |
+| 4 | Timeout-bridge validator set + key provider | `crates/qbind-node/src/peer_key_provider.rs` `build_validator_set_and_key_provider` (from `config.network.static_peer_consensus_keys`) | Yes — feeds the **Timeout verification bridge only** (`try_build_timeout_verification_context`), **not** the engine's membership |
+| 5 | Engine membership construction | `crates/qbind-node/src/binary_consensus_loop.rs:2308` `build_uniform_validator_set(cfg.num_validators)` (`:700`) → `BasicHotStuffEngine::new(cfg.local_validator_id, validators)` | Yes — engine set is a **uniform, power-1 set built from the validator count**, distinct from boundary 4 |
+| 6 | Engine construction | `crates/qbind-consensus/src/basic_hotstuff_engine.rs:508` `BasicHotStuffEngine::new(local_id, validators)` — takes `ConsensusValidatorSet` **by value** (not `Arc`) | Yes |
+| 7 | Inbound Proposal admission + verify + ingest | `crates/qbind-node/src/binary_consensus_loop.rs` inbound Proposal arm (≈`:4359`–`:4697`) | Yes |
+| 8 | Inbound Vote admission + verify + ingest | `binary_consensus_loop.rs` inbound Vote arm (≈`:4833`–`:4929`) | Yes |
+| 9 | Outbound forwarding | `binary_consensus_loop.rs` `forward_actions_to_facade` (≈`:4046`) | Yes |
+| 10 | Leader step | `binary_consensus_loop.rs` `do_leader_tick` (≈`:3189`) | Yes |
+| 11 | Late-peer cached re-emission | `binary_consensus_loop.rs` `maybe_reemit_on_late_peer_connect` (≈`:3324`) | Yes |
+| 12 | Restore-catchup deferral | `binary_consensus_loop.rs` restore deferral (≈`:4632`) | Yes (restore mode) |
+| 13 | Engine QC ingest (wire→logical, embedded justify QC) | `basic_hotstuff_engine.rs:1490`–`1506` → `hotstuff_state_engine.rs:422` `register_block` | Yes (via `on_proposal_event`; **stored as `BlockNode.justify_qc`, not routed to `on_qc`** — §3.3) |
+| 14 | Locally-formed QC → `on_qc` | `basic_hotstuff_engine.rs:1567` `on_vote_event` → `hotstuff_state_engine.rs:517` `on_vote` → `:560` `on_qc` | Yes (only for QCs formed from **received votes**, not embedded ones) |
+| 15 | Embedded-QC crypto verify (legacy) | `crates/qbind-consensus/src/lib.rs:705` `verify_quorum_certificate` / `:807` `verify_block_proposal` | **No** (compiled but unreached from the binary path; §4.C) |
+| 16 | Genesis correspondence module | `crates/qbind-node/src/genesis_authority_record_correspondence.rs` | **No** (test-only callers; §4.A) |
 
 **Key structural fact:** the same verifier and the same admission owner are held
 together in `AuthorizedProposalVoteSnapshot` (`binary_consensus_loop.rs:1176`),
 but **no production code constructs that snapshot** — `main.rs:5549` supplies
-`proposal_vote_authority: None`, so the inbound/outbound gates run in fail-closed
-`Required` mode with no wired authority.
+`proposal_vote_authority: None`. Distinguish two different closed doors that the
+task requires be kept separate:
+
+* **Missing Proposal/Vote authority (the production state today).** With
+  `proposal_vote_authority: None`, the inbound/outbound gates run in fail-closed
+  `Required` mode with **no authority object at all**; there is no owner, no
+  verifier, no key provider. Inbound Proposal/Vote are rejected before any crypto
+  as *current-state-unavailable* (D7-A1,
+  `inbound_proposal_current_state_unavailable_total`), and outbound emission is
+  suppressed.
+* **Present authority with a missing current owner (a different, future state).**
+  If an authority were constructed, admission would still fail-close whenever the
+  owner cannot confirm a fresh ticket (`Stale` /
+  `inbound_proposal_authority_stale_before_effect_total`, or an `unavailable`
+  owner — production can only build `unavailable` owners,
+  `genesis_consensus_authority.rs:1125`). This is a **later** rejection path
+  (crypto may already have run) and must not be conflated with the
+  authority-absent path above.
+
+Additionally, **compiled ≠ reachable**: many verification branches (the legacy
+embedded-QC verifier at boundary 15, the D6 verifier's authority-bound path) are
+compiled into the binary but are **not reachable under the current startup
+arguments** because no authority/snapshot is wired. Do not describe a compiled
+verification branch as cryptographic verification that actually runs.
 
 ---
 
@@ -122,7 +160,7 @@ but **no production code constructs that snapshot** — `main.rs:5549` supplies
 | `binary_consensus_loop.rs` inbound Proposal verify → `proposal_vote_verify.rs:405` `verify_proposal_msg_with_domain` | bound domain, validator set, key provider | wire Proposal bytes | proposer index, wire chain id, v2 domain (runtime+wire+genesis+commitment+epoch) | pass/fail only | Yes |
 | `basic_hotstuff_engine.rs:1567` `on_vote_event` → `hotstuff_state_engine.rs` `on_vote` → `vote_accumulator.rs` / `qc.rs:` `validate` | validator set membership + voting power | logical vote (id, view, block) | ValidatorIds, view, voting power | logical QC (ids only) | Yes |
 
-### 3.2 Wire-QC → logical-QC information preservation (`basic_hotstuff_engine.rs:1493`)
+### 3.2 Wire-QC → logical-QC information preservation (`basic_hotstuff_engine.rs:1490`)
 
 `proposal.qc.as_ref().map(|wire_qc| QuorumCertificate::new(wire_qc.block_id, wire_qc.height, vec![]))`
 
@@ -139,9 +177,80 @@ but **no production code constructs that snapshot** — `main.rs:5549` supplies
 | `round`, `step` | **No — discarded** |
 
 The embedded QC is passed with an **empty signer list** (`vec![]`); its
-cryptographic material is not carried and cannot be re-verified downstream
-(`hotstuff_state_engine.rs` `on_qc` stores the logical QC as-is for locking /
-commit).
+cryptographic material is not carried and cannot be re-verified downstream. It is
+stored on the block node as `BlockNode.justify_qc` by
+`hotstuff_state_engine.rs:422` `register_block` and is consulted only by the
+safety-to-vote rule (`is_safe_to_vote_on_block`, `hotstuff_state_engine.rs:877`,
+a `justify_qc.view >= locked_qc.view` comparison). **It is not routed through
+`on_qc`** (see §3.3), so no locking/commit decision is taken directly from an
+embedded justify QC on ingest.
+
+### 3.3 Three QC information flows, traced separately
+
+The task requires these be kept distinct; they are different code paths with
+different retained information:
+
+1. **Embedded wire QC → logical justify QC → `register_block`.**
+   `on_proposal_event` (`basic_hotstuff_engine.rs:1446`) converts
+   `proposal.qc` at `:1490` to `QuorumCertificate::new(block_id, height, vec![])`
+   and passes it to `state.register_block` (`:1506` →
+   `hotstuff_state_engine.rs:422`). It is stored as `BlockNode.justify_qc`. Only
+   `block_id` and `view` survive; **bitmap, signatures, suite, version, epoch,
+   chain_id, round, step are absent** (§3.2). This justify QC is **not** given to
+   `on_qc`; it only feeds the `justify_qc.view >= locked_qc.view` safety check.
+2. **Received Votes → accumulator → locally formed QC → `on_qc`.**
+   `on_vote_event` (`:1567`) → `state.on_vote` (`hotstuff_state_engine.rs:517`) →
+   `votes.on_vote` / `votes.maybe_qc_for` (`vote_accumulator.rs`) → when a quorum
+   forms, `on_qc` (`hotstuff_state_engine.rs:560`) updates `locked_qc`, attaches
+   `own_qc` to the block, and runs the 3-chain commit
+   (`try_commit_with_qc`). This QC is assembled from **locally counted vote ids**;
+   the logical QC still carries **ids only, no signatures** — counting is not
+   cryptographic certification.
+3. **Logical QC → emitted wire QC.**
+   `do_leader_tick` (`basic_hotstuff_engine.rs:1365`) maps the engine's logical
+   `justify_qc` into a wire `QuorumCertificate` with
+   **`signer_bitmap: vec![]`, `signatures: vec![]`** (`:1370`–`:1381`). So even a
+   locally-formed QC is emitted on the wire **carrying no signer set and no
+   signatures**; a downstream peer receiving it (flow 1) can never re-verify it.
+
+**Where certificate information is discarded or absent:** at flow 1's `:1490`
+conversion (all crypto fields dropped to `vec![]`), at flow 3's `:1370` emission
+(bitmap/signatures emitted empty), and structurally in the logical `qc.rs`
+`QuorumCertificate<BlockIdT>` type itself, whose only signer field is
+`signers: Vec<ValidatorId>` (no signatures, suite, epoch, or domain). No point in
+these three flows ever holds a re-verifiable embedded certificate.
+
+### 3.4 State changes before a would-be QC-verification insertion point
+
+Any future embedded-QC verification must be placed with awareness of state
+already mutated on ingest. In `on_proposal_event`, **before** the `:1506`
+`register_block` call:
+
+* `proposal.header.epoch != self.current_epoch` is rejected (`:1452`);
+* for a future view, **view is advanced** — `self.current_view = view` at
+  `:1461`, and `proposed_in_view` / `voted_in_view` are reset — *before* the
+  block or its justify QC is registered;
+* leader-for-view and no-double-vote checks (`:1471`, `:1478`) run.
+
+Consequently a future invalid-embedded-QC rejection inserted at or after
+`register_block` would **not** by itself undo the already-applied view
+advancement at `:1461`; a correct design must either reject before `:1461` or
+specify explicitly which effects (view advance, block registration, self-vote,
+lock/commit) it prevents. This audit does **not** assert that inserting a check
+later automatically neutralizes the earlier view advance.
+
+### 3.5 Serialization users of the logical QC type
+
+The logical `QuorumCertificate<BlockIdT>` (`qc.rs:28`) derives
+`serde::Serialize, serde::Deserialize` and is embedded as
+`TimeoutMsg.high_qc` (`timeout.rs:78`, itself serde-derived `:72`) and used by
+`driver.rs` and `remote_signer.rs` (`:414`). **Adding evidence fields (signer
+bitmap, signatures, suite, epoch) to this shared type is therefore not
+free**: it changes `TimeoutMsg` serialization and any snapshot/remote-signer
+payloads that carry it. Evidence retention consequently has wire/serialization
+compatibility implications and cannot be assumed layout-neutral; a future task
+that needs retained evidence must decide whether to carry it in a separate type
+rather than mutate the shared logical QC.
 
 ---
 
@@ -194,28 +303,45 @@ commit).
 
 ### 4.B Engine identity and membership
 
-* **Engine and verifier membership share a validated source *type*, and can
-  share an instance.** The engine gets `ConsensusValidatorSet` via
-  `build_validator_set_and_key_provider` (`peer_key_provider.rs`) →
-  `BasicHotStuffEngine::new` (`basic_hotstuff_engine.rs:508`). The timeout
-  verification bridge (`timeout_verification_bridge.rs`) takes
-  `Arc<ConsensusValidatorSet>` and `Arc<dyn SuiteAwareValidatorKeyProvider>` of
-  the same types and performs fail-closed membership/suite cross-checks
-  (local-in-set, key present, suite == ML-DSA-44 `SUPPORTED_TIMEOUT_SUITE_ID`).
-  Today the engine set is built from CLI/config static peer keys, **not** from
-  the genesis-validated authority; unifying them is an integration requirement,
-  not an existing guarantee.
-* **`chain_id: 1` is fixture-scoped, not a production wire constant.** The
-  literal `chain_id: 1` appears only in `basic_hotstuff_engine.rs:1351`
-  (proposal header), `:1370` (embedded QC), `:1405` (vote), and `:1531`
-  (fixture), plus test fixtures in `proposal_vote_verify.rs`, `network.rs`,
-  `driver.rs`. These are the engine’s own message constructors used by the
-  self-driving/simulation harness. Production domain separation is carried by the
-  64-bit runtime `ChainId` (`qbind-types/src/primitives.rs`) and the wire alias
-  (`qbind-types/src/network_wire_alias.rs`), consumed by the v2 signing domain.
-  **No global replacement of `chain_id: 1` is recommended**; the integration
-  requirement is that emitted/accepted messages carry the runtime id and wire
-  alias resolved from validated provenance and the authorized epoch.
+* **The engine set and the timeout-bridge set are different objects built from
+  different sources.** The production engine membership is
+  `build_uniform_validator_set(cfg.num_validators)`
+  (`binary_consensus_loop.rs:2308` → `:700`): a **uniform, voting-power-1** set
+  keyed only on the validator *count*, passed **by value** into
+  `BasicHotStuffEngine::new(local_id, validators)`
+  (`basic_hotstuff_engine.rs:508` — the parameter is `ConsensusValidatorSet`, not
+  `Arc<ConsensusValidatorSet>`). Separately,
+  `build_validator_set_and_key_provider` (`peer_key_provider.rs`, from
+  `config.network.static_peer_consensus_keys`) supplies an
+  `Arc<ConsensusValidatorSet>` + `Arc<dyn SuiteAwareValidatorKeyProvider>` **only
+  to the Timeout verification bridge** (`try_build_timeout_verification_context`
+  / `timeout_verification_bridge.rs`), which performs fail-closed
+  membership/suite cross-checks (local-in-set, key present, suite == ML-DSA-44
+  `SUPPORTED_TIMEOUT_SUITE_ID`). **Do not describe the timeout-bridge validator
+  set as the engine's actual input** — the engine never receives it. Neither set
+  is the genesis-validated authority set. Unifying all three is an integration
+  requirement, not an existing guarantee, and is additionally constrained by the
+  engine taking its set by value (it cannot today share an `Arc` instance with a
+  verifier).
+* **`chain_id: 1` message constructors are production-reachable code.** The
+  literal `chain_id: 1` at `basic_hotstuff_engine.rs:1351` (proposal header),
+  `:1370` (embedded QC), and `:1405` (leader vote) is inside `do_leader_tick`,
+  which **is** reached in production when the local node is leader; `:1531` and
+  the fixtures in `proposal_vote_verify.rs`, `network.rs`, `driver.rs` are
+  test-scoped. So **message *construction* with `chain_id: 1` genuinely runs in
+  production**. What is guarded is **signing and transmission**, not
+  construction: the leader's constructed Proposal/Vote carry `signature: vec![]`
+  and are only signed/emitted through `forward_actions_to_facade`, which
+  fail-closes under `Required` with no authority (`main.rs:5549` = `None`), so no
+  `chain_id: 1` message is ever authenticated or placed on the wire today.
+  Distinguish *"the constructor runs"* (true) from *"a `chain_id: 1` message is
+  signed/transmitted"* (false under current startup). Production domain
+  separation, when authority is eventually wired, is carried by the 64-bit
+  runtime `ChainId` (`qbind-types/src/primitives.rs`) and wire alias
+  (`qbind-types/src/network_wire_alias.rs`) in the v2 signing domain. **No global
+  replacement of `chain_id: 1` is recommended**; the requirement is that
+  signed/emitted messages carry the runtime id + wire alias resolved from
+  validated provenance and the authorized epoch.
 * **Which bytes/signatures change if engine wire ids change.** The v2 signing
   preimage (`crates/qbind-wire/src/pv_signing_domain.rs`) binds the 64-bit
   `runtime_chain_id`, the 32-bit `expected_wire_chain_id`, the 32-byte genesis
@@ -261,8 +387,9 @@ The five concerns are explicitly distinct:
    before ingest. The **embedded QC’s** constituent vote signatures are **not**
    verified (see #2) and are discarded on conversion (#5).
 5. **Wire↔logical QC conversion — PRESENT, information-losing.**
-   `basic_hotstuff_engine.rs:1493` builds the logical QC with `vec![]` signers,
-   discarding bitmap, signatures, suite, version, epoch, chain_id (see §3.2).
+   `basic_hotstuff_engine.rs:1490` builds the logical QC with `vec![]` signers,
+   discarding bitmap, signatures, suite, version, epoch, chain_id (see §3.2), and
+   stores it via `register_block` (not `on_qc`, §3.3).
 
 **Consequences, stated precisely.** A valid Proposal signature covering QC bytes
 does **not** establish that the QC’s constituent signatures or quorum are valid.
@@ -273,6 +400,90 @@ Proposal/Vote signatures are verified fail-closed under
 decisively — no production authority is wired (`main.rs:5549`), so Proposal/Vote
 admission is closed regardless. No live exploit is inferred from the dormant
 embedded-QC code.
+
+#### 4.C.1 Verifier compatibility: legacy QC verifier vs the D6 signed input
+
+The two verification paths bind **different signed inputs** and use **different
+interfaces**; they are not interchangeable for D6-signed material.
+
+**Legacy `verify_quorum_certificate` (`lib.rs:705`).** For each bitmap bit it
+reconstructs a `Vote` from the QC header fields and computes
+`vote_digest(&vote)` (`qbind-hash/src/consensus.rs:8`), then verifies it with
+`crypto.signature_suite(vinfo.suite_id).verify(&vinfo.consensus_pk, &digest,
+sig)`. Its interfaces are the legacy `ValidatorSet`/`ValidatorInfo`
+(`lib.rs:169`, `:178`) and a `CryptoProvider`. The **signed input is
+`vote_digest`** =
+`sha3_256_tagged("QBIND:VOTE", chain_id(u32) ‖ height ‖ round ‖ step ‖ block_id ‖
+validator_index ‖ suite_id)`. Note it **omits `version` and `epoch`** and
+carries **no domain**: no runtime chain id (u64), no genesis identity, no
+authority commitment, no signing-format version/family tag.
+
+**D6 `verify_vote_msg_with_domain` (`proposal_vote_verify.rs:511`).** It first
+rejects `domain.expected_wire_chain_id() != vote.chain_id`, then verifies the
+signature over `domain.vote_preimage(vote)` using `ConsensusValidatorSet`, a
+`SuiteAwareValidatorKeyProvider`, and a `ConsensusSigBackendRegistry`. The
+**signed input is the D6 preimage** (`pv_signing_domain.rs:267`,
+`build_preimage`) =
+`PV_SIGNING_DOMAIN_V2_TAG ‖ v2 ‖ family=Vote ‖ runtime_chain_id(u64 BE) ‖
+expected_wire_chain_id(u32 BE) ‖ genesis_identity(32) ‖ authority_commitment(32)
+‖ len(body) ‖ vote.canonical_body()`, where `canonical_body`
+(`consensus.rs:206`) = `version ‖ chain_id ‖ epoch ‖ height ‖ round ‖ step ‖
+block_id ‖ validator_index ‖ suite_id`. The message is passed **un-pre-hashed**
+to the suite backend (the backend hashes internally), unlike the legacy path
+which verifies over a precomputed sha3-256 digest.
+
+**Omitted fields / differing inputs / representation differences:**
+
+* The legacy digest omits `version`, `epoch`, and the **entire D6 domain**
+  (tag, format version, family, runtime chain id, genesis identity, authority
+  commitment). A signature produced over the D6 preimage therefore **cannot**
+  verify against the legacy digest, and vice versa — even for the same key and
+  the same logical vote fields.
+* Interfaces differ: legacy `ValidatorSet`/`ValidatorInfo` + `CryptoProvider`
+  (with a caller-set `qc_threshold`) vs D6 `ConsensusValidatorSet` +
+  `SuiteAwareValidatorKeyProvider` + `ConsensusSigBackendRegistry`.
+* Suite/index representation differs: legacy derives the signer `vindex` from the
+  **bitmap position** and reads `vinfo.suite_id`/`consensus_pk` from the legacy
+  set; D6 reads `vote.validator_index` and resolves the suite/key through the
+  key provider with explicit membership checks.
+
+**Classification.** The legacy `verify_quorum_certificate` is **not reusable
+unchanged for D6-signed Votes**: its structural checks are reusable, but its
+signature verification is incompatible with the D6 signed input. Specifically:
+
+* **Reusable structural checks** (independent of the signed bytes): the
+  bitmap↔signature-count correspondence (`popcount(bitmap) ==
+  signatures.len()`, else `BitmapLengthMismatch`), bit→index decoding, and
+  voting-power accumulation with an overflow guard.
+* **Incompatible signature verification**: the `vote_digest`-based per-signer
+  check must be replaced by D6 domain-bound verification
+  (`verify_vote_msg_with_domain`-style, over `domain.vote_preimage`) reusing the
+  established membership/key/backend interfaces. A D6-compatible QC verifier must
+  **reconstruct the exact Vote fields originally signed** and re-derive the D6
+  preimage; it must **not** fall back to the legacy digest.
+
+#### 4.C.2 Quorum rules and their sources (do not silently equate)
+
+Three different "2/3"-shaped quantities appear and must not be conflated:
+
+* **Legacy `qc_threshold`** — a caller-supplied `u64` field on the legacy
+  `ValidatorSet` (`lib.rs:182`); `verify_quorum_certificate` requires
+  `total_power >= vs.qc_threshold`. Its value is **whatever the caller set**; it
+  is not computed and not guaranteed to be 2/3 of anything.
+* **Engine `two_thirds_vp()`** — `ConsensusValidatorSet::two_thirds_vp()`
+  (`validator_set.rs:491`) = `ceil(2 * total_voting_power / 3)`, used by the
+  accumulator/`qc.rs:106` when forming a QC from received votes.
+* **"2f+1"** — a count-based BFT bound that coincides with `two_thirds_vp()`
+  **only** under equal voting power with `n = 3f+1`. For **arbitrary weighted
+  memberships** these three are not equal.
+
+The audit records these bounds and their sources without changing any protocol
+rule. A future D6-compatible QC verifier must state which rule it enforces (it
+should use the membership's actual voting-power threshold, `two_thirds_vp()`,
+computed from the trusted `ConsensusValidatorSet`, **not** a caller-supplied
+scalar or an assumed `2f+1`).
+
+
 
 ### 4.D Admission and effect ordering
 
@@ -310,22 +521,30 @@ integration, and restore deferral are proven for their scoped behavior and are
 **not reopened here**. The distinction between synchronous admission/immediate
 handoff, queued/later socket delivery, serialized replacement, concurrent
 invalidation (generation counter + `Arc::ptr_eq` issuer identity), and restart
-freshness is preserved. **Unresolved:** persistent/durable current-authorization
-state and **anti-rollback** — production can only construct `unavailable` owners
-(`genesis_consensus_authority.rs:1125`); the `Established` local state exists only
-under `cfg(test)` (`establish_for_fixture`).
+freshness is preserved. **These are in-process checks.** They do **not** by
+themselves establish (a) concurrent invalidation across processes or (b)
+persistent freshness across restarts: A1–A4/B1–B3 bound behavior within one live
+process' authority object. **Unresolved:** persistent/durable
+current-authorization state and **anti-rollback** — production can only construct
+`unavailable` owners (`genesis_consensus_authority.rs:1125`); the `Established`
+local state exists only under `cfg(test)` (`establish_for_fixture`). Persisting an
+observed snapshot alone does not establish durable anti-rollback (an
+older-but-valid persisted state would still be accepted on open).
 
 ### 4.E Existing mechanisms and duplication risk
 
 | Future behavior | Existing implementation | Classification |
 |---|---|---|
-| Validator membership for engine + verifier | `ConsensusValidatorSet` shared as `Arc` (`genesis_consensus_authority.rs`, snapshot coherence `binary_consensus_loop.rs:1266`) | **Reusable unchanged** |
+| Validator membership for verifier boundaries | `ConsensusValidatorSet` shared as `Arc` for the timeout bridge (`peer_key_provider.rs`, coherence `binary_consensus_loop.rs:1266`) | **Reusable structurally** — but the **engine** takes `ConsensusValidatorSet` **by value** (`basic_hotstuff_engine.rs:508`) and today from `build_uniform_validator_set` (§4.B), so unifying engine + verifier membership needs work, not merely reuse |
 | Suite-aware key lookup | `GenesisConsensusKeyProvider : SuiteAwareValidatorKeyProvider` (`genesis_consensus_authority.rs`) | **Reusable unchanged** |
 | Outer Proposal/Vote verification | `verify_proposal_msg_with_domain` / `verify_vote_msg_with_domain` (`proposal_vote_verify.rs`) | **Reusable unchanged** |
+| D6 message-bound Vote verification machinery (for a QC verifier) | `verify_vote_msg_with_domain` + `ProposalVoteSigningDomainV2::vote_preimage` + `ConsensusSigBackendRegistry` | **Reusable as the signature primitive** for a new D6-compatible QC boundary (§6) |
 | Timeout/NewView verification | `timeout_verification_bridge.rs` + `verify_timeout_*` | **Reusable unchanged (separate boundary)** |
 | Current-state freshness gate | `GenesisConsensusAuthority::authorize_current_state` / `authorize_configuration` | **Reusable with narrow extension** (persist an immutable observed snapshot; never mutate) |
 | Bind owner↔verifier | `AuthorizedProposalVoteSnapshot::try_bind` (`binary_consensus_loop.rs:1245`) | **Reusable with narrow extension** (real chain label + authorized wire id) |
-| Embedded-QC crypto verification on binary path | `verify_quorum_certificate` / `verify_block_proposal` (`lib.rs`) | **Not connected to this binary path** (wired only into `Node<S>::apply_block`) |
+| QC **structural** checks (bitmap↔sig count, index decode, power sum) | `verify_quorum_certificate` (`lib.rs:705`) | **Reusable structural logic** |
+| QC **signature** verification for D6-signed Votes | `verify_quorum_certificate`'s `vote_digest` path (`lib.rs`) | **NOT reusable for D6 Votes** — incompatible signed input (§4.C.1); must use the D6 domain-bound preimage instead |
+| Embedded-QC verification wired into `Node<S>::apply_block` | `verify_block_proposal` (`lib.rs:807`) | **Not connected to this binary path** (legacy `apply_block` abstraction only) |
 | Genesis-provenance-fed Proposal/Vote authority in production | — | **Missing** (`main.rs:5549` = `None`) |
 | Runtime→wire chain-id mapping for a production authority | — | **Missing** (`authorized_wire_chain_id: None`) |
 | Durable current-authorization state / anti-rollback | `Established` local state is `cfg(test)` only | **Fixture-only** (persistence missing) |
@@ -343,35 +562,50 @@ established APIs; caller evidence shows they serve distinct boundaries.
 
 ## 5. Integration contract and dependency order
 
+**Preserved C3A/C3B contract (do not reopen).** Standard runtime/wire aliases are
+**defined but not activated** (C3A); pinned genesis/network correspondence is
+**implemented** (C3B, `check_network_correspondence`); production authority
+consumption remains **unimplemented** (`main.rs:5549` = `None`). The alias
+assignments are accepted as-is; this audit does **not** reopen them and does
+**not** introduce a separately ratified mapping absent a concrete, documented
+requirement (§5.1 records the one open decision, without inventing a value).
+
 All steps below can be implemented **while activation remains disabled**
-(`main.rs:5549` stays `None` until the final, separately-authorized step) and
-while `PRODUCTION_WIRE_CHAIN_ID_BEHAVIOR` stays UNCHANGED.
+(`main.rs:5549` stays `None`) and while `PRODUCTION_WIRE_CHAIN_ID_BEHAVIOR` stays
+UNCHANGED. **Activation is intentionally last and gated.** It must remain gated by
+**all** of the unresolved requirements — authority, freshness, compatibility,
+engine/QC, and adversarial-evidence — and specifically must **not** precede the
+lifecycle/restart (durable freshness / anti-rollback) protections. Persisting an
+observed snapshot alone does **not** establish durable anti-rollback, so
+activation may not be sequenced ahead of it.
 
-**Dependency order (each independently testable):**
+**Dependency order (each independently testable; activation strictly last):**
 
-1. **Resolve a real chain-identity label + authorized wire chain id from
+1. **A dormant, pure D6-compatible QC verification boundary** (the single next
+   task, §6) — reuse the D6 message-bound Vote verification machinery to verify a
+   QC's constituent signatures against trusted inputs, with no engine/binary
+   wiring and no authority activation. Independent of steps 2–5.
+2. **Resolve a real chain-identity label + authorized wire chain id from
    validated provenance** on the authority (owner of data:
    `GenesisConsensusAuthority`; consumers: `try_bind` `:1281`/`:1295`,
    `snapshot_chain_identity_label`). Trusted inputs: boot-verified genesis
    runtime `ChainId` + C3A wire alias. Fail-closed: mismatch/none → no bind.
-   Wire/signature implication: none until a snapshot is actually wired.
    Prerequisite: the protocol decision in §5.1.
-2. **Construct `AuthorizedProposalVoteSnapshot` by cloning the same `Arc`s** out
+3. **Construct `AuthorizedProposalVoteSnapshot` by cloning the same `Arc`s** out
    of one boot-validated authority (owner: authority; consumer: `try_bind`).
    Fail-closed: any `Arc::ptr_eq` / membership / commitment mismatch → reject.
-   Still not wired into `main` (kept behind the disabled flag).
-3. **Unify engine membership with the authority membership** so
-   `BasicHotStuffEngine::new` receives the authority’s `Arc<ConsensusValidatorSet>`
-   (owner: authority; consumer: `basic_hotstuff_engine.rs:508`). Fail-closed:
-   engine set must equal verifier set by `Arc` identity.
-4. **Embedded-QC verification on the binary path** — invoke the existing
-   `verify_quorum_certificate` (or an equivalent that consumes the *retained*
-   wire QC) so a Proposal’s embedded QC has its constituent signatures and 2/3
-   power verified, and stop discarding signer/signature/epoch on conversion
-   (`basic_hotstuff_engine.rs:1493`). Owner: engine; consumer: state engine
-   locking/commit. Fail-closed: invalid embedded QC → reject proposal.
-5. **Wire the snapshot into `main`** (the only step that actually enables
-   authority) — explicitly out of scope here and gated behind the disabled flag.
+   Still not wired into `main`.
+4. **Unify engine membership with the authority membership** so the engine
+   consumes the authority's validated set rather than
+   `build_uniform_validator_set` (consumer: `basic_hotstuff_engine.rs:508`, which
+   currently takes the set **by value**). Fail-closed: engine set must match the
+   verifier set. Then insert QC verification on the binary path using the step-1
+   D6-compatible boundary (not the legacy `vote_digest` verifier), with the
+   effect-ordering constraints of §3.4 respected.
+5. **Durable current-authorization state + anti-rollback**, then finally **wire
+   the snapshot into `main`** (the only step that enables authority). Both are
+   out of scope here; activation may not occur until durable freshness /
+   anti-rollback exist. **Do not** place snapshot-wiring before this step.
 
 **Performance (concrete, no invented numbers):** membership, key provider,
 chain-identity label, and authorized wire id are **immutable-construction**
@@ -390,11 +624,12 @@ must never be conflated):
   (guards §4.C #1 vs #2);
 * actual verified quorum vs mere logical vote counting (a logical QC with 2/3
   ids but no valid signatures must not be treated as certified);
-* membership / key / suite mismatch → fail-closed (`Arc::ptr_eq`, suite id);
+* membership / key / suite mismatch → fail-closed (suite id, `Arc` identity
+  where applicable);
 * stale authorization vs current authorization (generation advanced between
   `admit` and `confirm` → `Stale`);
 * preserved certificate evidence vs information-losing conversion (signers /
-  signatures / epoch retained through wire→logical).
+  signatures / epoch retained, with the §3.5 serialization caveat in mind).
 
 ### 5.1 Precise open protocol decision (blocks step 1)
 
@@ -410,60 +645,104 @@ the v2 preimage’s `expected_wire_chain_id` agree by construction.
 
 ## 6. Single recommended next implementation task
 
-**Task: Verify a Proposal’s embedded QC on the binary consensus path and stop
-discarding its certificate evidence.**
+**Withdrawn recommendation.** The prior recommendation — *"invoke the existing QC
+verifier (`verify_quorum_certificate`) in the engine; prerequisites: none"* — is
+**withdrawn**. It is unsafe as stated: `verify_quorum_certificate` verifies the
+**legacy `vote_digest` signed input**, which is **incompatible with D6-signed
+Votes** (§4.C.1); wiring it into the engine would either verify against the wrong
+signed bytes or invite a legacy-fallback that a D6-signed certificate must never
+be allowed. It also assumed engine/verifier membership sharing that does not hold
+(engine set is by-value uniform, §4.B) and touched already-mutated ingest state
+(view advancement, §3.4). Prerequisites are **not** "none".
 
-* **Problem it solves.** Today the binary path verifies the outer Proposal
-  signature but neither verifies the embedded QC’s constituent vote signatures
-  nor retains them: `basic_hotstuff_engine.rs:1493` converts the wire QC to a
-  logical QC with `vec![]` signers, and `verify_quorum_certificate`
-  (`lib.rs:705`) is never reached from `BasicHotStuffEngine`. A syntactically
-  valid Proposal can therefore carry an unverified/forged embedded QC.
-* **Permitted files and functions.**
-  `crates/qbind-consensus/src/basic_hotstuff_engine.rs` (embedded-QC ingest at
-  `on_proposal_event` / the `:1490`–`:1506` conversion);
-  `crates/qbind-consensus/src/qc.rs` (only to carry retained evidence if needed);
-  read-only reuse of `crates/qbind-consensus/src/lib.rs`
-  `verify_quorum_certificate` / `verify_block_proposal`; new tests under
-  `crates/qbind-consensus/tests/`. **No** edits to `main.rs`,
-  `binary_consensus_loop.rs` authority wiring, or the C2/C3A/C3B module.
-* **Required behavior.** Before an embedded QC is accepted into engine state,
-  verify its constituent signatures and 2/3 voting power against the engine’s
-  validator set and key material, and preserve the signer set (and enough
-  evidence to re-verify) through the conversion instead of `vec![]`. Reject the
-  proposal fail-closed on any embedded-QC verification failure.
-* **Non-goals.** Not enabling production Proposal/Vote authority; not wiring the
-  snapshot; not changing wire `chain_id` behavior; not touching genesis
-  correspondence, storage, or anti-rollback; not a global `chain_id: 1` change;
-  not a whole-engine rewrite.
-* **Acceptance tests.** (a) Proposal with a valid outer signature but an embedded
-  QC whose signatures are invalid → rejected. (b) Proposal with a genuinely
-  verified embedded QC (2/3 valid signatures) → accepted and signer evidence
-  retained. (c) Embedded QC below 2/3 power → rejected. (d) Embedded QC referring
-  to a mismatched block/parent → rejected. (e) Regression: outer-signature-only
-  paths and existing engine sims unchanged.
-* **Why it can proceed without enabling production authority.** It operates on
-  the engine’s existing, already-reachable QC-ingest code and reuses an existing
-  verifier; it does not construct or wire `ProposalVoteAuthority`, does not flip
-  `main.rs:5549`, and leaves `authorized_wire_chain_id`, activation, and the §5.1
-  wire-id decision untouched. It strictly narrows attacker capability rather than
-  granting any new authority.
+**Replacement task: Add a dormant, pure D6-compatible QC verification boundary.**
 
-**Sequenced (not part of this next task):** §5 steps 1–3 (chain-identity + wire
-id resolution, snapshot-by-shared-`Arc`, engine/verifier membership unification),
-then the §5 step 5 activation wiring, then durable freshness / anti-rollback.
-None of these is completed by the single task above, and the task alone does not
-constitute activation.
+Implement a standalone verification function/type that verifies a wire
+`QuorumCertificate`'s constituent Votes using the **existing D6 message-bound
+Vote verification machinery** (`verify_vote_msg_with_domain` /
+`ProposalVoteSigningDomainV2::vote_preimage`) and the established
+membership/key/backend interfaces (`ConsensusValidatorSet`,
+`SuiteAwareValidatorKeyProvider`, `ConsensusSigBackendRegistry`). It is **dormant
+and pure**: not wired into the engine, `binary_consensus_loop.rs`, `main.rs`, the
+C2/C3A/C3B module, storage, or activation. **This audit defines the task; it must
+not be implemented now.**
+
+**Contract the future task must satisfy** (all inputs trusted, never inferred
+from the untrusted QC):
+
+* **Trusted inputs.** A caller-supplied trusted **domain**
+  (`ProposalVoteSigningDomainV2`), **membership** (`ConsensusValidatorSet`),
+  **key provider** (`SuiteAwareValidatorKeyProvider`), **backend registry**
+  (`ConsensusSigBackendRegistry`), and **authorized epoch**. No domain,
+  membership, epoch, or authority may be inferred from the untrusted QC itself.
+* **Bitmap/index/signature correspondence and bounds.** Enforce
+  `popcount(signer_bitmap) == signatures.len()`; decode each set bit to a signer
+  index; bound every index within the trusted membership; reject duplicate
+  indices and out-of-range bits.
+* **Reconstruct the exact Vote fields originally signed.** For each signer,
+  rebuild the `Vote` (`version, chain_id, epoch, height, round, step, block_id,
+  validator_index, suite_id`) consistent with the QC and the trusted epoch, then
+  verify over `domain.vote_preimage(vote)` — the exact D6 signed input — not over
+  `vote_digest`.
+* **Suite consistency and quorum calculation.** Require a consistent suite per
+  the trusted membership/provider; compute the quorum threshold from the trusted
+  set's actual voting power (`two_thirds_vp()`), not a caller scalar or an
+  assumed `2f+1` (§4.C.2).
+* **Malformed-certificate rejection.** Typed, fail-closed rejection for bad
+  bitmap/index/signature shapes, suite mismatch, unknown signer, wire-chain
+  mismatch, and insufficient quorum.
+* **Evidence retained by the result.** The result carries the verified signer set
+  (and the evidence needed to attribute the certificate) as its **own** return
+  type — **without** mutating the shared logical `qc.rs` `QuorumCertificate`
+  (whose serde/`TimeoutMsg` users make field additions non-neutral, §3.5).
+* **Behavior on missing or inconsistent trusted inputs.** If any trusted input is
+  absent or inconsistent (e.g. no domain, no membership, epoch mismatch), the
+  boundary **fails closed** and performs no verification — it never defaults.
+* **Compatibility with existing legacy callers.** The existing
+  `verify_quorum_certificate` and `Node<S>::apply_block` legacy callers remain
+  **unchanged and untouched**; the new boundary is additive. **No legacy
+  retry/fallback may rescue a failed D6 verification.**
+
+**Required future tests.**
+
+* genuinely D6-signed QC accepted;
+* same-key **wrong-domain** and **wrong-epoch** negatives (correct signer key,
+  wrong `ProposalVoteSigningDomainV2` / authorized epoch → reject);
+* legacy vs D6 signature incompatibility (a `vote_digest`-signed QC → reject
+  under the D6 boundary, and vice versa);
+* malformed bitmap/index/signature combinations (popcount mismatch, out-of-range
+  index, duplicate signer, truncated signature);
+* insufficient quorum and membership/suite mismatch.
+
+**Explicitly later, separate work (not this task):** binary/engine insertion,
+certificate propagation, storage migration, and activation (§5 steps 2–5). If a
+required input contract remains unresolved (e.g. how a production authority
+obtains its trusted domain — the §5.1 wire-id decision), that prerequisite is
+stated and the boundary simply remains dormant until callers can supply trusted
+inputs.
+
+**Why it is safe to proceed now.** It adds a pure, dormant verification function
+with trusted inputs and typed fail-closed outputs. It constructs no
+`ProposalVoteAuthority`, does not flip `main.rs:5549`, changes no wire/QC/storage
+behavior, and grants no authority — it only makes a correct D6-compatible QC
+check available for later, safely-sequenced integration.
 
 ---
 
 ## 7. Checks actually executed and tool limitations
 
-* **Executed here:** repository inspection only — `git status`, `git log`,
-  `git rev-parse HEAD`, `git rev-list --count HEAD` (=2), `cat .git/shallow`,
-  `git cat-file -t 734a9425…` (object absent), and `rg`/`grep` source searches
-  cited inline. No Rust build, test, or release rebuild was run (not required for
-  a documentation-only audit).
+* **Executed here:** repository inspection only — `git status`, `git branch
+  --show-current` (`copilot/run-422-d7-c3c`), `git rev-parse HEAD`
+  (`819f2b2`), `git rev-list --count HEAD` (=2), `cat .git/shallow` (pins
+  `0b3eb4a`), `git diff --stat 0b3eb4a 819f2b2` (docs-only), `git cat-file -t`
+  for `3a5ac02…` and `734a9425…` (both absent) and `0b3eb4a…` (present), plus
+  the `grep`/`rg`/`view` source searches cited inline (`main.rs`,
+  `binary_consensus_loop.rs`, `basic_hotstuff_engine.rs`,
+  `hotstuff_state_engine.rs`, `lib.rs`, `qc.rs`, `proposal_vote_verify.rs`,
+  `pv_signing_domain.rs`, `consensus.rs`, `validator_set.rs`, `vote_accumulator.rs`,
+  `pqc_boot_genesis.rs`, `timeout.rs`). No Rust build, test, or release rebuild
+  was run (not required for a documentation-only audit, and none of these two
+  files changes any build input).
 * **No historical result is relabelled as newly executed.** The focused
   `cargo test` results in the D7 evidence file remain attributed to their
   original passes.
@@ -487,8 +766,47 @@ CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED
 SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO
 ```
 
-The audit is **COMPLETE-FOR-INSPECTED-SCOPE**. The only material inspection
-limitation is the shallow clone (§1.2): the task’s named reviewed revision
-`734a9425…` is not present, so ancestry could not be confirmed; all findings are
-anchored to HEAD `0b3eb4a`, which carries the C2/C3A/C3B source. No readiness
-item moves Green.
+The audit is **COMPLETE-FOR-INSPECTED-SCOPE**: the corrected sections now cover
+the required call-graph, verifier-compatibility, QC-flow, dependency-order, and
+next-task paths and produce a coherent next-task contract (§6). The only material
+inspection limitation is the shallow clone (§1.2): the task's named "final audit
+revision" `3a5ac02…` (and the older `734a9425…`) are absent, so ancestry could
+not be confirmed; all findings are anchored to the worktree at HEAD `819f2b2`,
+source-identical to `0b3eb4a`, which carries the C2/C3A/C3B source. No readiness
+item moves Green. RS1/C4/C5 remain OPEN and public DevNet is NO-GO.
+
+---
+
+## 9. Correction note (C3C revision)
+
+This document supersedes the first C3C audit draft. The following were corrected
+**in place** (not merely disclaimed):
+
+* **Call graph (§2).** Preflight is `run_p2p_consensus_security_preflight`
+  (`main.rs:5019`), not `build_consensus_security_preflight`. Engine membership is
+  `build_uniform_validator_set(cfg.num_validators)` in
+  `run_binary_consensus_loop_with_io` (`binary_consensus_loop.rs:2308`), passed
+  **by value** to `BasicHotStuffEngine::new` (`ConsensusValidatorSet`, not
+  `Arc`). `build_validator_set_and_key_provider` feeds the **Timeout bridge
+  only** and is no longer described as the engine's input. Boot verification may
+  return `SkippedNoExternalGenesis` (not "every startup"). Missing authority vs
+  present-authority-with-missing-owner are distinguished, as are compiled vs
+  reachable verification branches.
+* **`chain_id: 1` (§4.B).** Reclassified from "fixture-scoped" to
+  **production-reachable message construction**, with the guard located at
+  signing/transmission (fail-closed, no authority), not at construction.
+* **Verifier compatibility (§4.C.1–2).** The legacy `verify_quorum_certificate` /
+  `vote_digest` signed input is documented and shown **incompatible with
+  D6-signed Votes**; reusable structural checks are separated from incompatible
+  signature verification; the three quorum quantities (`qc_threshold`,
+  `two_thirds_vp()`, `2f+1`) are no longer equated.
+* **QC flow (§3.3–3.5).** The embedded justify QC is stored via `register_block`
+  and is **not** routed through `on_qc`; the three flows are traced separately;
+  view advancement before the insertion point is noted; serde/`TimeoutMsg` users
+  of the logical QC are flagged before recommending field additions.
+* **Dependency order (§5) and next task (§6).** The unsafe "invoke the existing
+  QC verifier; prerequisites none" recommendation is **withdrawn** and replaced
+  by a single dormant, pure **D6-compatible** QC verification boundary with a full
+  input/evidence/failure contract and required negative tests. Activation remains
+  last and gated behind lifecycle/restart (durable freshness / anti-rollback)
+  protections; the accepted C3A/C3B alias contract is preserved and not reopened.
