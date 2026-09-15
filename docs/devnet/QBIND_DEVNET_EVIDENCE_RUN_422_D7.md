@@ -2032,13 +2032,16 @@ never exhausted). Tested SHA `52a6b72f55b6583c3fcd156d6411293ffaf449e2`.
   detected. No credentials/tokens introduced.
 
 ### Security-tool outcomes (task §7)
-* **CodeQL** — attempted via the parallel validation path; recorded exactly as
-  returned. A database-size skip or unavailable backend is **not** a clean scan.
-* **Code review** — attempted; recorded exactly as returned. An unavailable
-  reviewer is **not** a completed clean review.
-
-(See the run-completion record for the exact tool statuses captured for this
-phase.)
+Both tools were attempted for this phase and neither produced a completed
+scan/review:
+* **CodeQL** — attempted via the parallel validation path (per-tool triviality:
+  **non-trivial**, new production module). It returned **SKIPPED** with reason
+  "database size is too large" (0 alerts reported). A database-size skip is
+  **not** a passing/clean scan; status is **SKIPPED/INCOMPLETE**.
+* **Code review** — the reviewer backend was **UNAVAILABLE** in this environment
+  (the `autofind` binary was not found on any searched path), so it returned "no
+  comments" without executing. Recorded as **UNAVAILABLE/UNVERIFIED**; **not** a
+  completed clean review.
 
 ### Verdict (task §8) — scoped strictly to the read-only storage-observation boundary
 The positive result names ONLY the demonstrated boundary: a read-only observation
