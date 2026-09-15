@@ -293,6 +293,64 @@ Status markers: `STANDARD_WIRE_ALIAS_POLICY=DEFINED-NOT-ACTIVATED`,
 `PRODUCTION_WIRE_CHAIN_ID_BEHAVIOR=UNCHANGED`. The unresolved production
 `ChainId` -> wire mapping in section 9 remains open.
 
+### 9.2 Pinned genesis ⇄ standard network correspondence (Run 422 D7-C3B)
+
+Run 422 D7-C3B binds the pinned genesis validation of C2 to the standard
+network mapping of C3A, in the existing **non-authorizing** module
+`crates/qbind-node/src/genesis_authority_record_correspondence.rs`. It reuses
+the C2 construction path (`load_external_genesis` -> `verify_boot_time_genesis`
+with the required independent pin -> `build_genesis_consensus_authority`, one
+owned genesis read) and the C3A resolver; it introduces **no** new genesis
+loader, parser, hash, environment table, numeric-ID registry, or authority
+builder.
+
+**Retained validation provenance.** `ExpectedGenesisIdentity` now also retains,
+privately and immutably, the exact `NetworkEnvironmentPolicy` its successful
+`load_pinned` construction validated under. The `load_pinned` signature and
+validation behaviour are unchanged; there is no public unchecked constructor,
+setter, deserialization route, or default that can fabricate this provenance.
+The canonical genesis hash the pin is compared against already binds
+`policy.scope()` (`"DEV"`/`"TST"`/`"MAIN"`), so the retained policy simply keeps
+the environment scope attached to the already-validated identity.
+
+**Input contract of
+`ExpectedGenesisIdentity::check_network_correspondence(selected_environment, supplied_runtime)`:**
+
+* It compares the retained validation policy against
+  `pqc_boot_genesis::map_environment(selected_environment)` and rejects any
+  mismatch with `GenesisNetworkCorrespondenceError::ValidationPolicyMismatch`
+  (bounded enum metadata). This prevents relabelling an already-validated
+  identity by choosing a different environment/runtime pair.
+* It obtains the wire alias **only** through the existing
+  `resolve_network_wire_alias(selected_environment, supplied_runtime)` (C3A),
+  never from a caller-supplied raw alias. A full-width runtime mismatch is
+  surfaced as `GenesisNetworkCorrespondenceError::RuntimeMismatch`, reusing the
+  C3A `NetworkWireAliasMismatch` verbatim, without truncation or fallback.
+* On success it returns a `GenesisNetworkCorrespondence<'a>` with **private**
+  fields that **immutably borrows** the same validated identity, so the alias
+  stays attached to the original validated genesis hash and authority
+  commitment. It exposes only read-only inspection accessors.
+* The numeric runtime `ChainId` is never inferred by parsing the genesis
+  `chain_id` string, searching it for network names, truncating a number, or
+  comparing it with a synthetic fixture label. The genesis string label is not a
+  numeric network-ID registry.
+
+**Trust limits.** A `GenesisNetworkCorrespondence` establishes **static
+correspondence only**. It is not current authority, activation permission,
+freshness, storage provenance, rollback resistance, or a signing capability, and
+offers **no** conversion into `LocalAuthorizationState::Established`,
+`CurrentAuthorizationOwner`, `AuthorizedProposalVoteSnapshot`,
+`AuthorizationTicket`, `ProposalVoteSigningDomainV2`, or any signer / activated
+verification context. It does not prove the operator obtained the correct
+official genesis pin, and it never chooses an official genesis or asserts
+uniqueness across forks — two distinct genesis files may each correspond under
+the same standard environment when separately accepted under their own
+independent pins. `GenesisConsensusAuthority.authorized_wire_chain_id` and the
+existing fixture-label comparison are unchanged; production wire values remain
+`PRODUCTION_WIRE_CHAIN_ID_BEHAVIOR=UNCHANGED`. The C3A resolver now has one
+caller in this dormant library operation — that is not a startup or active
+consensus integration.
+
 ## 10. Non-goals (D7 and beyond)
 
 This task establishes a scoped cryptographic boundary only. It does **not**
