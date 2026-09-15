@@ -1826,9 +1826,15 @@ retained at its original recorded revision and NOT re-captured
 (`CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED`).
 
 ### Security-tool outcomes (task §6)
-CodeQL status is unchanged and remains **SKIPPED/INCOMPLETE**; reviewer
-availability is **UNAVAILABLE/UNVERIFIED**. Neither is converted into a passing
-scan.
+Both tools were attempted for this corrective continuation and neither produced a
+completed scan/review:
+* **CodeQL** — SKIPPED under the per-tool trivial-change declaration
+  (test-and-documentation-only change; no production code path altered). A skip
+  is **not** a passing scan; status remains **SKIPPED/INCOMPLETE**.
+* **Code review** — the reviewer backend was **UNAVAILABLE** in this environment
+  (the `autofind` binary was not found on any searched path), so it returned "no
+  comments" without executing. This is recorded as **UNAVAILABLE/UNVERIFIED** and
+  is **not** treated as a completed clean review.
 
 ### Verdict — scoped strictly to the restore-deferral / re-delivery boundary
 The positive result names ONLY the demonstrated boundary: at the inbound
