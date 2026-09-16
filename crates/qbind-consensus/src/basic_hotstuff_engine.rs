@@ -483,6 +483,23 @@ pub enum VerifiedProposalIngestError {
         /// The configured hard ceiling.
         max_bytes: u64,
     },
+    /// Block-slot pressure could not be relieved without evicting the candidate
+    /// block itself (the block tree is at its `max_pending_blocks` limit and no
+    /// other block is safe to evict). Rejected before any engine mutation — in
+    /// particular before view advancement, block-tree changes, self-voting or
+    /// any outbound effect — so the candidate is neither retained-then-evicted
+    /// nor voted for. No partial effect.
+    RetentionCapacityUnavailable {
+        /// Number of blocks currently in the tree.
+        block_count: usize,
+        /// The configured maximum number of pending blocks.
+        max_pending_blocks: usize,
+    },
+    /// The evidence's checked retained-byte charge (or the projected total) is
+    /// not representable, so the accounting invariant cannot be upheld.
+    /// Rejected explicitly before any engine mutation rather than saturated
+    /// into an admissible total. No partial effect.
+    RetentionChargeUnrepresentable,
 }
 
 impl std::fmt::Display for VerifiedProposalIngestError {
@@ -518,6 +535,19 @@ impl std::fmt::Display for VerifiedProposalIngestError {
                 f,
                 "retained-evidence budget exceeded: needed={needed_bytes} \
                  retained={retained_bytes} max={max_bytes}"
+            ),
+            VerifiedProposalIngestError::RetentionCapacityUnavailable {
+                block_count,
+                max_pending_blocks,
+            } => write!(
+                f,
+                "block-slot capacity unavailable: block_count={block_count} \
+                 max_pending_blocks={max_pending_blocks} (no non-candidate block \
+                 safe to evict)"
+            ),
+            VerifiedProposalIngestError::RetentionChargeUnrepresentable => write!(
+                f,
+                "retained-evidence charge or projected total is not representable"
             ),
         }
     }
@@ -1613,21 +1643,34 @@ impl BasicHotStuffEngine<[u8; 32]> {
             });
         }
 
-        // (4) Reject an over-budget retention BEFORE any engine mutation, so a
+        // (4) Reject an inadmissible retention BEFORE any engine mutation, so a
         // rejected request advances no view, registers no block, records no
         // vote and emits no action. Pre-check the exact block id the engine
-        // would register for this proposal.
+        // would register for this proposal, against BOTH byte pressure AND
+        // block-slot pressure, using a checked charge.
         let block_id = Self::derive_block_id_from_header(
             from,
             proposal.header.height,
             &proposal.header.parent_block_id,
         );
-        let needed = evidence.retained_byte_size();
+        let needed = evidence
+            .retained_byte_size()
+            .map_err(|_| VerifiedProposalIngestError::RetentionChargeUnrepresentable)?;
         if !self.state.can_retain_evidence(&block_id, needed) {
+            // Count this budget rejection exactly once on the preflight path
+            // (the direct state-registration path counts its own), then reject
+            // before mutation.
+            self.state.note_rejected_evidence_over_budget();
             return Err(VerifiedProposalIngestError::RetentionBudgetExceeded {
                 needed_bytes: needed,
                 retained_bytes: self.state.retained_evidence_bytes(),
                 max_bytes: self.state.max_retained_evidence_bytes(),
+            });
+        }
+        if !self.state.can_admit_block_slot(&block_id) {
+            return Err(VerifiedProposalIngestError::RetentionCapacityUnavailable {
+                block_count: self.state.block_count(),
+                max_pending_blocks: self.state.limits().max_pending_blocks,
             });
         }
 
@@ -1684,7 +1727,10 @@ impl BasicHotStuffEngine<[u8; 32]> {
             &proposal.header.parent_block_id,
         );
 
-        // Parse justify QC from proposal
+        // Parse the logical justify QC from the proposal for the LEGACY path.
+        // The verified path derives its logical justification from the verified
+        // evidence inside the state engine instead (never from this wire
+        // projection), so the two can never diverge.
         let justify_qc = proposal
             .qc
             .as_ref()
@@ -1700,17 +1746,26 @@ impl BasicHotStuffEngine<[u8; 32]> {
         } else {
             Some(proposal.header.parent_block_id)
         };
-        // Register the block, retaining verified evidence as its
-        // justification when supplied through the verified ingestion path. The
-        // caller (`on_verified_proposal_event`) has already pre-checked the
-        // retention budget before any mutation, so the retention here does not
-        // fail; a defensive failure is treated as "not registered" (no evidence
-        // retained) rather than panicking.
+        // Register the block, retaining verified evidence as its justification
+        // when supplied through the verified ingestion path. The caller
+        // (`on_verified_proposal_event`) has already pre-checked the checked
+        // charge, the byte budget AND the block-slot admissibility before any
+        // mutation, so this registration is structurally guaranteed to admit
+        // the candidate (block-slot room is made by evicting OTHER blocks, never
+        // this candidate). We still propagate any (unreachable) failure
+        // explicitly — never `let _ =`, a panic, or a post-effect rollback: on
+        // failure we abort WITHOUT self-voting or emitting any action.
         match verified_evidence {
             Some(evidence) => {
-                let _ = self.state.register_block_with_verified_justification(
-                    block_id, view, parent_id, justify_qc, evidence,
-                );
+                if self
+                    .state
+                    .register_block_with_verified_justification(
+                        block_id, view, parent_id, evidence,
+                    )
+                    .is_err()
+                {
+                    return None;
+                }
             }
             None => {
                 self.state

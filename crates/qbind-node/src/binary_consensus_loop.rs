@@ -19389,6 +19389,14 @@ mod tests {
                         se
                     }
 
+                    /// The **checked** retained-byte charge for `ev`. The charge
+                    /// is well within `u64` for every fixture certificate, so an
+                    /// unrepresentable result is a test-fixture bug.
+                    fn charge(ev: &VerifiedQuorumCertificate) -> u64 {
+                        ev.retained_byte_size()
+                            .expect("fixture evidence charge is representable")
+                    }
+
                     // ======================= A =======================
                     // Real-handler positive: a valid outer Proposal with a valid
                     // embedded QC reaches the new engine path; after the handler
@@ -19809,12 +19817,10 @@ mod tests {
                         // and reclaims the retained bytes.
                         let mut se = state_engine(&pv, DEFAULT_MAX_RETAINED_EVIDENCE_BYTES);
                         let ev = verify_qc_epoch(&pv, 0, &qc);
-                        let bytes = ev.retained_byte_size();
+                        let bytes = charge(&ev);
                         let id = [1u8; 32];
-                        se.register_block_with_verified_justification(
-                            id, 1, None, None, Arc::new(ev),
-                        )
-                        .expect("verified registration accepted");
+                        se.register_block_with_verified_justification(id, 1, None, Arc::new(ev))
+                            .expect("verified registration accepted");
                         assert!(se.verified_justification(&id).is_some());
                         assert_eq!(se.retained_evidence_bytes(), bytes);
 
@@ -19839,9 +19845,9 @@ mod tests {
                             limits,
                         );
                         let ev2 = verify_qc_epoch(&pv, 0, &qc);
-                        let bytes2 = ev2.retained_byte_size();
+                        let bytes2 = charge(&ev2);
                         se2.register_block_with_verified_justification(
-                            [1u8; 32], 1, None, None, Arc::new(ev2),
+                            [1u8; 32], 1, None, Arc::new(ev2),
                         )
                         .expect("accepted");
                         assert_eq!(se2.retained_evidence_bytes(), bytes2);
@@ -19873,14 +19879,13 @@ mod tests {
                         let (reg, _c) = counting_registry();
                         let pv = c3e_pv(&f, c3e_domain(), reg, None);
                         let qc = valid_quorum(&f);
-                        let size = verify_qc_epoch(&pv, 0, &qc).retained_byte_size();
+                        let size = charge(&verify_qc_epoch(&pv, 0, &qc));
 
                         // Exact capacity accepts; retained == max.
                         let mut se = state_engine(&pv, size);
                         se.register_block_with_verified_justification(
                             [1u8; 32],
                             1,
-                            None,
                             None,
                             Arc::new(verify_qc_epoch(&pv, 0, &qc)),
                         )
@@ -19894,7 +19899,6 @@ mod tests {
                             .register_block_with_verified_justification(
                                 [2u8; 32],
                                 1,
-                                None,
                                 None,
                                 Arc::new(verify_qc_epoch(&pv, 0, &qc)),
                             )
@@ -19925,13 +19929,12 @@ mod tests {
                         let qc_small = build_signed_qc(&f, &c3e_domain(), C3E_WIRE, 0, &[0, 1, 2]);
                         let qc_large =
                             build_signed_qc(&f, &c3e_domain(), C3E_WIRE, 0, &[0, 1, 2, 3]);
-                        let small = verify_qc_epoch(&pv, 0, &qc_small).retained_byte_size();
-                        let large = verify_qc_epoch(&pv, 0, &qc_large).retained_byte_size();
+                        let small = charge(&verify_qc_epoch(&pv, 0, &qc_small));
+                        let large = charge(&verify_qc_epoch(&pv, 0, &qc_large));
                         assert!(large > small, "four-signer cert is larger than three-signer");
                         se3.register_block_with_verified_justification(
                             [3u8; 32],
                             1,
-                            None,
                             None,
                             Arc::new(verify_qc_epoch(&pv, 0, &qc_small)),
                         )
@@ -19940,7 +19943,6 @@ mod tests {
                         se3.register_block_with_verified_justification(
                             [3u8; 32],
                             1,
-                            None,
                             None,
                             Arc::new(verify_qc_epoch(&pv, 0, &qc_large)),
                         )
@@ -19973,7 +19975,7 @@ mod tests {
                         );
                         let qc2 = valid_quorum(&f);
                         let need =
-                            verify_qc_epoch(&pv, snap.authorized_epoch(), &qc2).retained_byte_size();
+                            charge(&verify_qc_epoch(&pv, snap.authorized_epoch(), &qc2));
                         engine
                             .state_mut()
                             .set_max_retained_evidence_bytes(need - 1);

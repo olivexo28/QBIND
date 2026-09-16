@@ -571,40 +571,125 @@ impl VerifiedQuorumCertificate {
         &self.domain
     }
 
-    /// Run 422 D7-C3F: the number of bytes this evidence occupies when retained
-    /// by an engine's block tree, for **checked** retention-budget accounting.
+    /// Run 422 D7-C3F: the number of bytes this evidence conservatively
+    /// occupies when retained by an engine's block tree, for **checked**
+    /// retention-budget accounting.
     ///
     /// Existing block-count limits alone are **not** an adequate byte bound:
     /// each retained certificate carries variable-length constituent signature
-    /// buffers and a signer bitmap. This method sums those variable buffers
-    /// (all constituent signature bytes and the bitmap) plus the derived signer
-    /// identity list plus a fixed per-certificate overhead approximating the
-    /// scalar wire fields and metadata. It uses saturating arithmetic so a
-    /// pathological (already length-bounded) certificate can never wrap the
-    /// accumulator; the verifier's own [`crate::qc_verify_domain::MAX_AGGREGATE_SIGNATURE_BYTES`]
-    /// and bitmap bounds keep the realistic value far below `u64::MAX`.
+    /// buffers, a signer bitmap and a signer-identity vector, all heap
+    /// allocated. This method charges, with fully **checked** arithmetic (so an
+    /// unrepresentable total is rejected rather than silently saturated into an
+    /// admissible value):
     ///
-    /// This is the certificate's *own* retained footprint only; it deliberately
-    /// does not attempt a complete process-wide memory audit.
-    pub fn retained_byte_size(&self) -> u64 {
-        // Fixed overhead: an over-approximation of the retained scalar wire
-        // fields (version/chain_id/epoch/height/round/step/block_id/suite_id)
-        // plus this struct's own scalar metadata
-        // (verified_voting_power/threshold/expected_wire_chain_id/
-        // authorized_epoch) and the domain. Kept as a small constant; the
-        // dominant term is always the signature buffers.
-        const FIXED_OVERHEAD: u64 = 128;
-        let mut bytes: u64 = FIXED_OVERHEAD;
-        // Variable: every constituent signature buffer.
+    /// * the owned [`VerifiedQuorumCertificate`] value itself
+    ///   (`size_of::<VerifiedQuorumCertificate>()`). This already includes the
+    ///   *inline* `Vec` descriptors (pointer/len/capacity triples) for the
+    ///   bitmap, the outer signatures vector and the signer vector, plus every
+    ///   inline scalar field and the fully-inline
+    ///   [`ProposalVoteSigningDomainV2`] (which owns no heap allocation). Those
+    ///   inline descriptors are therefore **not** re-added below, avoiding
+    ///   double counting;
+    /// * the signer bitmap's allocated heap buffer (its `capacity()`);
+    /// * the outer signatures vector's allocated descriptor storage — the
+    ///   `capacity()` backing `Vec<u8>` handles, each `size_of::<Vec<u8>>()`
+    ///   bytes — which is the heap the outer vector points at, distinct from
+    ///   its inline descriptor counted in the struct size;
+    /// * each constituent signature buffer's allocated `capacity()`;
+    /// * the signer-identity vector's allocated heap buffer
+    ///   (`capacity() * size_of::<ValidatorId>()`).
+    ///
+    /// Deliberately **outside** this accounting model:
+    ///
+    /// * process-wide allocator bookkeeping and per-allocation bucket rounding
+    ///   (the real resident set is `>=` this charge; the charge is a
+    ///   conservative accounting bound, not an allocator audit);
+    /// * externally retained `Arc` clones of this evidence — the value is
+    ///   charged exactly once to the block that owns the canonical handle and is
+    ///   never multiplied by the number of outstanding `Arc` handles.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RetainedByteSizeError::Unrepresentable`] if any intermediate
+    /// or the final total overflows `u64`. The verifier's own
+    /// [`MAX_AGGREGATE_SIGNATURE_BYTES`] and bitmap bounds keep every realistic
+    /// certificate far below `u64::MAX`, so this is a defensive invariant, not
+    /// an expected outcome.
+    pub fn retained_byte_size(&self) -> Result<u64, RetainedByteSizeError> {
+        use std::mem::size_of;
+
+        // The owned struct value, including all inline scalars and the inline
+        // Vec descriptors for the bitmap, outer signatures vector and signer
+        // vector. Heap buffers reachable through those descriptors are added
+        // below; their inline descriptors are NOT re-added.
+        let mut bytes: u64 = size_of::<VerifiedQuorumCertificate>() as u64;
+
+        // Signer bitmap heap buffer (allocated capacity, not just length).
+        bytes = checked_add_u64(bytes, usize_to_u64(self.certificate.signer_bitmap.capacity())?)?;
+
+        // Outer signatures vector: allocated descriptor storage for `capacity`
+        // `Vec<u8>` handles.
+        let sig_descriptor_bytes = checked_mul_u64(
+            usize_to_u64(self.certificate.signatures.capacity())?,
+            size_of::<Vec<u8>>() as u64,
+        )?;
+        bytes = checked_add_u64(bytes, sig_descriptor_bytes)?;
+
+        // Each constituent signature buffer's allocated capacity.
         for sig in &self.certificate.signatures {
-            bytes = bytes.saturating_add(sig.len() as u64);
+            bytes = checked_add_u64(bytes, usize_to_u64(sig.capacity())?)?;
         }
-        // Variable: the signer bitmap.
-        bytes = bytes.saturating_add(self.certificate.signer_bitmap.len() as u64);
-        // Variable: the derived signer identity list (8 bytes per ValidatorId).
-        bytes = bytes.saturating_add((self.signers.len() as u64).saturating_mul(8));
-        bytes
+
+        // Signer-identity vector heap buffer (allocated capacity).
+        let signer_bytes = checked_mul_u64(
+            usize_to_u64(self.signers.capacity())?,
+            size_of::<ValidatorId>() as u64,
+        )?;
+        bytes = checked_add_u64(bytes, signer_bytes)?;
+
+        Ok(bytes)
     }
+}
+
+/// Run 422 D7-C3F: failure of a **checked** retained-byte charge computation.
+///
+/// Carries no certificate material — only the fact that the charge is not
+/// representable as a `u64` (and therefore the accounting invariant cannot be
+/// upheld). Callers must reject the retention explicitly rather than admit an
+/// unrepresentable total.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RetainedByteSizeError {
+    /// An intermediate or the final retained-byte total overflowed `u64`.
+    Unrepresentable,
+}
+
+impl std::fmt::Display for RetainedByteSizeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            RetainedByteSizeError::Unrepresentable => {
+                write!(f, "retained-evidence byte charge is not representable as u64")
+            }
+        }
+    }
+}
+
+impl std::error::Error for RetainedByteSizeError {}
+
+/// Checked `usize -> u64` conversion (infallible on 64-bit targets; kept
+/// checked so 128-bit or future targets cannot silently truncate).
+#[inline]
+fn usize_to_u64(v: usize) -> Result<u64, RetainedByteSizeError> {
+    u64::try_from(v).map_err(|_| RetainedByteSizeError::Unrepresentable)
+}
+
+#[inline]
+fn checked_add_u64(a: u64, b: u64) -> Result<u64, RetainedByteSizeError> {
+    a.checked_add(b).ok_or(RetainedByteSizeError::Unrepresentable)
+}
+
+#[inline]
+fn checked_mul_u64(a: u64, b: u64) -> Result<u64, RetainedByteSizeError> {
+    a.checked_mul(b).ok_or(RetainedByteSizeError::Unrepresentable)
 }
 
 impl std::fmt::Debug for VerifiedQuorumCertificate {
