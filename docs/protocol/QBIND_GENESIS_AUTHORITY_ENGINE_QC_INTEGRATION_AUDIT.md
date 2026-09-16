@@ -947,3 +947,19 @@ This document supersedes the first C3C audit draft. The following were corrected
   concurrent-invalidation wording was replaced with the serialized-ordering scope
   statement, and the reuse-table row no longer suggests that persisting an
   immutable observed snapshot suffices to extend the current-state freshness gate.
+
+## 10. Successor note (Run 422 D7-C3E)
+
+The single recommended next task in §6 (verify PRESENT embedded QCs in the real
+inbound Proposal handler, before downstream effects, using the existing C3D
+`verify_quorum_certificate_with_domain`) was implemented in Run 422 D7-C3E. The
+gate lives in `crates/qbind-node/src/binary_consensus_loop.rs`, before the
+engine call (so it precedes any `on_proposal_event` view advancement), and draws
+its trusted inputs (domain, membership, key provider, backend registry, and
+authorized epoch) from the same admitted snapshot used for outer verification.
+See `docs/protocol/QBIND_PROPOSAL_VOTE_SIGNING_DOMAIN_V2.md` §9B and the Run 422
+D7-C3E section of `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md`. This note is
+additive; all historical findings above are preserved. The remaining scope
+called out in §4 and §10-of-the-protocol-doc (absent-QC/bootstrap
+authorization, full engine/QC adoption and retention, production lifecycle, and
+durable anti-rollback) stays open.

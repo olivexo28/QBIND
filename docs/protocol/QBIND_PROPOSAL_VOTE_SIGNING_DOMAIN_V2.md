@@ -513,11 +513,78 @@ carries only a truncated message produced by our own backends. There is no
 panic, unchecked narrowing, saturating acceptance, default domain/epoch, unsigned
 fallback, or cross-suite retry.
 
-**Dormancy.** The boundary is **uncalled** by the production engine, node
-startup, handlers, cache, storage, and activation paths; its only callers are
-the Run 422 D7-C3D tests. The legacy `verify_quorum_certificate` (which signs
-the `vote_digest` input) is unchanged and is **not** used as the D6 path or a
-fallback.
+**Dormancy (updated by Run 422 D7-C3E).** The boundary is still **uncalled**
+by production node startup, the engine's own QC formation/adoption, cache,
+storage, and activation paths. Run 422 D7-C3E adds one conditional binary
+caller — the inbound `Proposal` arm of the node handler (see §9B) — which is
+only reachable under a bound current-authorization snapshot; genesis authority
+activation stays DISABLED, so no release binary constructs that snapshot and the
+caller is exercised by tests. The legacy `verify_quorum_certificate` (which
+signs the `vote_digest` input) is unchanged and is **not** used as the D6 path
+or a fallback.
+
+## 9B. Conditional inbound admission of PRESENT embedded QCs (Run 422 D7-C3E)
+
+Run 422 D7-C3E adds a **conditional inbound-admission gate** in the node's real
+`handle_inbound_consensus_msg` `Proposal` arm. Under the `Required` verification
+policy, when the admitted current-authorization snapshot is present **and** the
+Proposal carries `Some(qc)`, the handler verifies the PRESENT embedded wire QC
+with the §9A verifier (`verify_quorum_certificate_with_domain`) **before** any
+inbound Proposal effect.
+
+**Handler contract (ordering).** For a Required-policy Proposal carrying
+`Some(qc)`:
+
+1. Decode and existing F6 sender binding.
+2. Existing current-authorization admission and signed-Proposal epoch check.
+3. Existing outer Proposal verification under the admitted snapshot's verifier.
+4. **Engine-context correspondence** (new): the engine's actual validator IDs
+   and voting weights must match the bound verifier's membership (reusing the
+   existing structural predicate; matching counts alone are insufficient;
+   membership is compared by value, not by `Arc` pointer identity), and
+   `engine.current_epoch()` must equal the snapshot's authorized epoch.
+   Disagreement rejects before constituent-QC cryptography and downstream
+   effects.
+5. **Embedded-QC verification** (new): call the §9A verifier **once** for the
+   present QC, with `domain`, `validators`, `key_provider`, and
+   `backend_registry` drawn from the **same** admitted `snapshot.verifier()`
+   used for outer verification, and `authorized_epoch` from that same admitted
+   snapshot.
+6. Confirm the existing authorization ticket.
+7. Only then permit the existing downstream Proposal effects (restore-deferral
+   accounting, delivery, reconfiguration observation, engine mutation including
+   view advancement, and the immediate outbound handoff).
+
+Placement is **before** the engine call because the reviewed engine's
+`on_proposal_event` can advance `current_view` before later checks. A valid
+outer Proposal signature never makes an invalid embedded QC acceptable. The
+returned non-authorizing `VerifiedQuorumCertificate` stays associated with the
+immutable Proposal through confirmation and the immediate handoff; there is no
+"already verified" flag or certificate cache, and retention beyond the
+synchronous handler call is out of scope. Bounded rejection counters distinguish
+outer-signature acceptance, embedded-QC verified/rejected, and engine-context
+mismatch; an outer-signature acceptance counter may increase even when the QC
+subsequently rejects and is **not** relabelled as whole-Proposal acceptance.
+
+**Trusted-input isolation.** Authorization is never derived from the QC, the
+Proposal header, the engine's default epoch, a separately supplied
+`pv_authority`, or Timeout context: a supplied authority B must not substitute
+for admitted snapshot A. Signed fields are preserved exactly (no rewriting,
+normalization, legacy retry, or unsigned fallback).
+
+**Exact exclusions (unchanged by C3E).** This task verifies QCs that are
+PRESENT. It does **not** change: `proposal.qc == None` behavior (absent QCs are
+preserved, **not** counted as QC-verified and **not** a validated
+genesis/bootstrap exception); `Some(empty_or_invalid_qc)`, which **rejects** and
+is never converted to `None`; the test-only `LocalFixtureUnsigned` policy;
+`main.rs` production authority wiring or genesis startup refusal; C3A
+aliases / C3B provenance; C3D verification rules, D6 bytes, wire encodings, or
+legacy verification; engine message/membership construction, vote aggregation,
+or logical QC serialization; Timeout/NewView behavior; and storage / restore
+protocol / durable freshness / anti-rollback. QC-to-parent/view/step semantics,
+no-QC bootstrap authorization, persisted certificate evidence, locally formed QC
+emission, full engine/QC adoption + retention, and other engine entrypoints
+remain explicitly **unclosed**.
 
 ## 10. Non-goals (D7 and beyond)
 

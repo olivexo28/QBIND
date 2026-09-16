@@ -3557,3 +3557,255 @@ production authority remains **unavailable**; `GENESIS_AUTHORITY_ACTIVATION=DISA
 `CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED`;
 `SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO`. No engine adoption, activation,
 readiness promotion, or Run 423 work.
+
+## Run 422 D7-C3E — verify PRESENT embedded QCs before inbound Proposal effects (code + test)
+
+**Objective.** In the real `handle_inbound_consensus_msg` `Proposal` arm, under
+the `Required` policy, verify every PRESENT embedded wire QuorumCertificate using
+the existing C3D `verify_quorum_certificate_with_domain` **before** the Proposal
+reaches restore-deferral accounting, delivery accounting, reconfiguration
+observation, engine mutation (including view advancement), or the immediate
+outbound handoff. A valid outer Proposal signature must not make an invalid
+embedded QC acceptable. This is a conditional inbound-admission improvement using
+the existing authorized snapshot; it does **not** establish production authority
+construction, activation, complete engine/QC adoption, or public DevNet
+readiness.
+
+### Provenance correction (C3D)
+
+Recorded from git in this worktree, correcting prior evidence:
+
+* `d3087542ce6aa3d32a6eaad8a94497e4924c43d0` was the C3D **starting/import**
+  revision (present locally), **not** the final corrected revision.
+* `15557323248946e25fe71a8e4a1b931fbb9383d4` contains the C3D
+  test/comment/protocol correction (object **absent** in this shallow clone).
+* `bec1fbda9c350b8cf4b31e5358db2bef1f02ffd3` contains the final C3D evidence
+  update (object **absent** in this shallow clone); that continuation changed
+  four files.
+* Missing historical objects do not imply missing implementations, and no
+  executed-test SHA is inferred solely from source correspondence.
+
+**Actual supplied branch (inspected, not manufactured):**
+`copilot/copilotcopilotcopilotcopilotrun-422-d7-c3c-again-a` (the working branch
+differs from the problem statement's reported
+`copilot/copilotcopilotcopilotrun-422-d7-c3c-again-again`; reported as a
+deviation without fabricating ancestry). The C3D continuation is present locally
+as the pre-C3E HEAD (four changed files: `qc_verify_domain.rs`, the
+`run_422_d7c3d` tests, this evidence doc, and the signing-domain protocol doc);
+its parent is the starting revision `d3087542`.
+
+### What changed (from git, not an assumed count)
+
+Changed files in this C3E pass:
+
+* `crates/qbind-node/src/binary_consensus_loop.rs` — production gate + counters +
+  the `run422_d7c3e` real-handler test module (the only expected production
+  change).
+* `crates/qbind-consensus/src/qc_verify_domain.rs` — **dormancy comment only**
+  (it now has one conditional binary caller; no C3D production-logic change).
+* `docs/protocol/QBIND_PROPOSAL_VOTE_SIGNING_DOMAIN_V2.md` — new §9B conditional
+  handler contract + exact exclusions; §9A dormancy note updated.
+* `docs/protocol/QBIND_GENESIS_AUTHORITY_ENGINE_QC_INTEGRATION_AUDIT.md` — additive
+  §10 successor note (historical C3C findings preserved).
+* `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md` — this section.
+
+No `main.rs`, C3A/C3B, C3D-rule/D6-byte/wire-encoding, engine-construction,
+Timeout/NewView, or storage/restore changes. No package-integrity anchor artifact
+changed, so no manifest refresh is required.
+
+### Production gate (insertion order)
+
+Inserted in the `ConsensusNetMsg::Proposal` arm **after** the existing outer
+Proposal verification and **before** the D7-A freshness-ticket confirmation and
+all downstream effects. Preserved ordering for a Required Proposal carrying
+`Some(qc)`:
+
+a. Decode + existing F6 sender binding.
+b. Existing current-authorization admission + signed-Proposal epoch check.
+c. Existing outer Proposal verification under the admitted snapshot's verifier.
+d. **Engine-context correspondence** (new): reuse `validator_membership_matches`
+   to require the engine's actual validator IDs **and** voting weights to match
+   the bound verifier's membership (by value, not `Arc` identity; matching counts
+   alone insufficient) and require `engine.current_epoch() ==
+   snap.authorized_epoch()`. Mismatch increments
+   `inbound_proposal_engine_context_mismatch_total` and returns before QC crypto.
+e. **Embedded-QC verification** (new): call
+   `verify_quorum_certificate_with_domain` **once** for the present QC; success
+   increments `inbound_proposal_embedded_qc_verified_total` and retains the
+   non-authorizing `VerifiedQuorumCertificate` with the immutable Proposal;
+   failure increments `inbound_proposal_embedded_qc_rejected_total` and returns.
+f. Existing authorization-ticket confirmation.
+g. Only then the existing downstream Proposal effects.
+
+Engine membership is never resized, replaced, renumbered, or mutated to force a
+match. No new QC verifier, signing encoder, key registry, authority factory, or
+runtime/wire mapping was added; there is no "already verified" flag or
+certificate cache, and retention beyond the synchronous handler call is out of
+scope.
+
+### Trusted-input provenance
+
+`domain` (`verifier.signing_domain`), `validators`, `key_provider`, and
+`backend_registry` are all taken from the SAME admitted `snap.verifier()` used
+for the outer verification; `authorized_epoch` is taken from
+`snap.authorized_epoch()` (the `GENESIS_STATIC_AUTHORITY_EPOCH`). Authorization is
+never derived from the QC, the Proposal header, the engine's default epoch, a
+separately-supplied `pv_authority` B, or Timeout context.
+
+### Bounded counters
+
+Added to `BinaryConsensusLoopInboundStats`:
+`inbound_proposal_embedded_qc_verified_total`,
+`inbound_proposal_embedded_qc_rejected_total`,
+`inbound_proposal_engine_context_mismatch_total`. Existing counters keep their
+meanings: the pre-existing outer-signature acceptance counter may increase even
+when the embedded QC subsequently rejects; it is **not** relabelled as
+whole-Proposal acceptance. "Before QC crypto" is instrumented as zero constituent
+Vote backend calls via a dedicated counting verifier that separates Proposal vs.
+Vote backend calls.
+
+### Real-handler tests (`mod run422_d7c3e`, 22 tests, all passing)
+
+Nested inside `run422_d7a`, reusing the D7-A/run420 fixtures: the actual
+encoded-envelope handler under `Required` policy, a real F6 gate + authenticated
+origin, coherent snapshots, real ML-DSA-44, independently counted Proposal/Vote
+backend calls (`C3eCountingVerifier`), and a recording facade. Each invalid-QC
+case attaches the QC **before** signing the outer Proposal so rejection can never
+be attributed to a stale outer signature.
+
+* **A — positive control:** `c3e_a_valid_qc_delivers_distinct_from_engine_accept`
+  (valid outer + genuine D6-signed quorum passes the gate and reaches delivery)
+  and `c3e_a_valid_qc_reaches_engine_acceptance_and_outbound` (reaches genuine
+  engine acceptance with appropriate leader/epoch/state; delivery, engine
+  acceptance, and outbound distinguished).
+* **B — invalid constituent signature:**
+  `c3e_b_valid_quorum_plus_invalid_extra_signature_rejects` (valid quorum + an
+  invalid extra signature → QC rejection, no downstream effects).
+* **C — insufficient quorum / encodable malformed:**
+  `c3e_c_insufficient_quorum_rejects`, `c3e_c_some_empty_qc_rejects_not_routed_as_absent`
+  (`Some(empty_qc)` rejects and is not routed as absent),
+  `c3e_c_bitmap_signature_count_mismatch_rejects_before_crypto`. Pure-C3D tests
+  retain the limits that cannot be encoded into a handler input.
+* **D — domain and epoch isolation:**
+  `c3e_d_foreign_domain_qc_rejects_current_domain_succeeds`,
+  `c3e_d_qc_wire_chain_mismatch_rejects_before_vote_crypto`,
+  `c3e_d_qc_epoch_mismatch_rejects_before_vote_crypto` (mismatches reject before
+  constituent Vote verification; the outer Proposal remains valid).
+* **E — engine/verifier mismatch:**
+  `c3e_e_same_size_different_ids_rejects_before_qc_crypto`,
+  `c3e_e_same_ids_different_weights_rejects_before_qc_crypto`,
+  `c3e_e_engine_epoch_mismatch_rejects_before_qc_crypto`, and the positive control
+  `c3e_e_by_value_matching_membership_positive_control` (structurally matching
+  by-value membership passes).
+* **F — bound context:** `c3e_f_a_valid_qc_succeeds_supplied_b_never_used`
+  (admitted A + separately supplied authority B still uses A; B instrumented and
+  proven unused) and `c3e_f_b_only_valid_qc_fails_under_a`.
+* **G — ordering:** `c3e_g_f6_rejection_prevents_qc_verification`,
+  `c3e_g_unavailable_authorization_prevents_qc_verification`,
+  `c3e_g_invalid_outer_signature_prevents_qc_verification` (each prevents QC
+  verification; existing reason/counter semantics preserved).
+* **H — active restore:** `c3e_h_invalid_qc_rejects_before_deferral` (invalid QC
+  rejects before deferral) and `c3e_h_valid_qc_reaches_deferral_branch` (matching
+  valid-QC control reaches the existing deferral branch; discard-and-retransmission
+  preserved).
+* **I — state protection:** `c3e_i_future_view_invalid_qc_no_state_change`
+  asserts unchanged engine view / lock / high-QC / block / commit state via
+  existing APIs, no reconfiguration observation, no delivery or deferral, and zero
+  facade actions for a future-view Proposal with an invalid QC (the C3D verifier
+  short-circuits on the first invalid constituent signature, so the Vote-backend
+  count is `>= 1`, not the full quorum size).
+* **J — absent-QC compatibility:**
+  `c3e_j_absent_qc_behavior_preserved_and_uncounted` (preserved `None` behavior,
+  not counted as successful QC verification).
+
+Command / result:
+
+```
+cargo test -p qbind-node --lib run422_d7c3e
+test result: ok. 22 passed; 0 failed; 0 ignored; 0 measured; 1590 filtered out
+```
+
+### Validation
+
+See the "Validation (D7-C3E)" subsection below for exact commands, profiles,
+counts, and exit codes.
+
+#### Validation (D7-C3E) — exact commands, counts, exit codes (exit 0 unless noted)
+
+All commands run in this worktree; profiles as shown; disk monitored (peaked ~50%
+of 145G, ~73G free).
+
+* `cargo test -p qbind-node --lib` (dev) → **1612 passed; 0 failed** (includes
+  `run422_d7c3e` and retained D5/D6/D7 coverage).
+* `cargo test -p qbind-node --lib run422_d7c3e` (dev) → **22 passed; 0 failed**
+  (1590 filtered out).
+* `cargo test -p qbind-consensus --test run_422_d7c3d_qc_domain_verification_tests`
+  (dev) → **46 passed; 0 failed** (C3D target).
+* `cargo test -p qbind-consensus --test run_422_d6_pv_domain_isolation_tests`
+  (dev) → **34 passed; 0 failed** (D6 isolation target).
+* Run 418 regressions:
+  `run_418_authenticated_peer_consensus_sender_binding_tests` → **18 passed**;
+  `run_418_newview_demux_chain_integration_tests` → **3 passed**.
+* Run 420 production-policy reachability
+  (`run_420_production_policy_reachability_tests`) → **3 passed**.
+* Run 422: `run_422_startup_refusal_tests` → **4 passed**;
+  `run_422_d4_startup_ordering_tests` → **5 passed**;
+  `run_422_d7_authority_lifetime_tests` → **14 passed**;
+  `run_422_genesis_consensus_authority_tests` → **15 passed**.
+* Restore targets: `b3_snapshot_restore_tests` → **10 passed**;
+  `b5_restore_aware_consensus_start_tests` → **4 passed**;
+  `run_124_snapshot_restore_authority_marker_tests` → **7 passed**;
+  `run_140_snapshot_restore_v2_authority_marker_tests` → **13 passed**.
+* `cargo check -p qbind-node` (default production features, dev) → **Finished, exit
+  0**.
+* `cargo clippy -p qbind-consensus -p qbind-node --lib` → **Finished, no errors**;
+  all reported warnings are **pre-existing** and outside the C3E-edited line
+  ranges (verified by line-range filtering the C3E gate, counters, imports, test
+  module, and the `qc_verify_domain.rs` doc-comment block — zero warnings there).
+* `cargo fmt -p qbind-node -p qbind-consensus -- --check` → reports diffs, but this
+  is a **pre-existing, repo-wide** condition: unedited files such as
+  `crates/qbind-consensus/src/basic_hotstuff_engine.rs` (LF, not touched here) also
+  fail, and the diffs span the entire files rather than the C3E-edited regions. No
+  reformatting of unrelated code was performed.
+* `cargo build --release -p qbind-node --bin qbind-node` → **Finished release
+  profile, exit 0**; binary at `target/release/qbind-node` (compilation evidence
+  only — no production authority activation, and the release binary still refuses
+  `--consensus-authority-from-genesis`).
+
+Line endings preserved on every edited file (CRLF on the three docs and on
+`binary_consensus_loop.rs`/`qc_verify_domain.rs`; verified `LFonly=0`). No
+package-integrity anchor artifact changed, so no manifest refresh was required.
+
+**Security tooling (reported literally).** `parallel_validation` was run; both
+outcomes are recorded exactly as returned and are **incomplete / unverified**:
+
+* **CodeQL (rust):** surface read "Found 0 alerts", but "Analysis was skipped
+  because the database size is too large." A skipped analysis is **not** a passing
+  scan; 0 alerts here means **not analyzed**, not clean.
+* **Code review:** surface read "No review comments found" over 5 files, but the
+  tool also reported it "is not available in this environment" with a
+  model-registry error (`model claude-sonnet-4.6 not found in registry`). An
+  unavailable reviewer is **not** a passing review; "no comments" here means **not
+  reviewed**.
+
+Neither result establishes a clean security posture. A skip, unavailable reviewer,
+or model-registry error is recorded as incomplete/unverified regardless of any
+"0 alerts"/"no comments" surface. `SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO`
+is retained.
+
+### Verdict and retained posture
+
+`D7C3E_PRESENT_EMBEDDED_QC_ADMISSION=CODE-TEST-POSITIVE` — the real Required-policy
+handler rejects invalid PRESENT embedded QCs before restore-deferral, delivery,
+reconfiguration observation, engine mutation/view advancement, and outbound
+handoff.
+
+Explicitly **not** closed: absent-QC / no-QC bootstrap authorization, full
+engine/QC adoption and retention, production lifecycle, and durable anti-rollback.
+Retained markers unchanged: `D7_STATUS=PARTIAL-CODE-TEST /
+PRODUCTION-LIFECYCLE-UNAVAILABLE`; `DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED`;
+`GENESIS_AUTHORITY_ACTIVATION=DISABLED`;
+`PRODUCTION_WIRE_CHAIN_ID_BEHAVIOR=UNCHANGED`;
+`CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED`;
+`SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO`. No readiness promotion,
+production activation, PR, or Run 423 work.

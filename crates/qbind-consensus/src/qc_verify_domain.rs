@@ -126,8 +126,23 @@
 //!
 //! # Dormancy
 //!
-//! This module is **uncalled** by the production engine, node startup,
-//! handlers, cache, storage, and activation paths. Its only callers are tests.
+//! Run 422 D7-C3E added a single, conditional binary caller: the inbound
+//! `Proposal` arm of `qbind-node`'s `handle_inbound_consensus_msg`. Under the
+//! `Required` verification policy, with a bound current-authorization snapshot
+//! and a Proposal carrying `Some(qc)`, the handler invokes
+//! [`verify_quorum_certificate_with_domain`] to admit the PRESENT embedded wire
+//! QC BEFORE any inbound Proposal effect (restore-deferral accounting,
+//! delivery, reconfiguration observation, engine mutation/view advancement, or
+//! the immediate outbound handoff). The trusted inputs are drawn from that same
+//! admitted snapshot; the returned [`VerifiedQuorumCertificate`] remains
+//! **non-authorizing** and is not retained beyond the synchronous handler call.
+//!
+//! This module remains **uncalled** by production node startup, the engine's
+//! own QC formation/adoption, cache, storage, and activation paths. Genesis
+//! authority activation stays DISABLED, so no release binary constructs the
+//! bound snapshot that reaches this caller; the conditional caller is therefore
+//! exercised by tests. Aside from that C3E admission gate, the C3D rules,
+//! D6 bytes, wire encodings, and legacy verification are unchanged.
 
 use qbind_crypto::ConsensusSigSuiteId;
 use qbind_wire::consensus::{QuorumCertificate as WireQuorumCertificate, Vote};
