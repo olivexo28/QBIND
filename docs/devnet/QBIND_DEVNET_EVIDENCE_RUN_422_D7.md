@@ -4805,3 +4805,206 @@ no branch rename, force-push, rebase, or history rewrite.
 `CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED`;
 `SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO`. No readiness promotion or Run 423
 work.
+
+## Run 422 D7-D2 — signing-state continuity characterization across restart and snapshot restore (test + evidence)
+
+This phase is a **bounded characterization** of what the *existing* consensus
+recovery entrypoints preserve, reconstruct, or lose after an *uncommitted*
+signing decision. It adds source-backed observations and focused behavioral
+tests only. It implements no new protection, no production behavior change, no
+public getter, no persistence mechanism, and authorizes no production signing or
+authority activation. Isolated test-fixture signing with the existing real
+ML-DSA-44 backend is used for characterization only.
+
+### Provenance and object limitations
+
+* Actual branch: `copilot/copilotcopilot-run-422-d7-d2`.
+* Accepted D7-D1 baseline: `70d665277f987ee43013e41de55c409b21ae2331`. This object
+  is **not present** in the working clone (`git cat-file -t` fails; `.git/shallow`
+  present). The D7-D1 documentation content is present in-tree (the five accepted
+  corrections and the D7-D1 sections above are intact); content correspondence is
+  therefore reported separately from ancestry, which cannot be verified from this
+  shallow clone. No accepted C3F implementation or D1 documentation review was
+  reopened.
+* Tested implementation checkpoint (tests committed, all validation run at this
+  tree): `5aa2f9dd62e72e16a2c6d6e382a1b5683ba94f0d`.
+* Final pushed SHA: the commit that adds this documentation section (recorded by
+  the progress push that carries this file).
+* Supplied task branch used with normal commits + push only. No PR, no main
+  changes, no branch rename, no force-push, rebase, or history rewrite.
+  `task/warning.txt` and unrelated files untouched.
+
+### Changed paths / diffstat
+
+* `crates/qbind-node/tests/run_422_d7d2_signing_state_recovery_tests.rs` (new
+  test target, +750 lines at the tested checkpoint).
+* `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md` (this section).
+* `docs/protocol/QBIND_PROPOSAL_VOTE_AUTHORITY_LIFECYCLE_CONTRACT.md` (inventory /
+  next-step note only).
+* `docs/protocol/QBIND_GENESIS_AUTHORITY_ENGINE_QC_INTEGRATION_AUDIT.md` (short
+  successor note only).
+
+No production source file was modified. Production behavior is unchanged.
+
+### Selected test location (explained)
+
+Every reused recovery path is **public**
+(`BasicHotStuffEngine::{initialize_from_restart, initialize_from_snapshot_baseline,
+on_proposal_event, leader_for_view, current_view, committed_height, locked_qc}`,
+`NodeHotstuffHarness::load_persisted_state`, `observe_consensus_storage`, the
+`ConsensusStorage` put/get API, and the D6 `verify_vote_msg_with_domain`
+verifier over the real `MlDsa44Backend`). A single dedicated integration target
+(the one sanctioned by the task) therefore exercises the real entrypoints
+directly, keeps the change isolated from the large production consensus-loop
+module, and needs no `cfg(test)` accessor or private-state exposure. The minimal
+validator/key fixture in the new file is built only from public constructors and
+is explicitly labelled test fixture setup; it is not a production route.
+
+### Source / recovery path matrix (source inspection)
+
+| Entrypoint | Reachability | Persisted inputs it consumes | Reconstructs | Does NOT reconstruct |
+| --- | --- | --- | --- | --- |
+| `BasicHotStuffEngine::initialize_from_restart` (`basic_hotstuff_engine.rs:1134`) | production via `load_persisted_state`; harness; test | `(committed_block_id, committed_height, locked_qc)` passed by its caller | committed baseline; `current_view = committed_height + 1`; latch reset; optional lock from the supplied QC | any uncommitted vote; per-view vote latch state; block tree above committed |
+| `HotStuffStateEngine::initialize_from_restart` (`hotstuff_state_engine.rs:1190`) | via the above | committed block/height + optional locked QC | committed prefix + lock | vote accumulator; tree above committed |
+| `BasicHotStuffEngine::initialize_from_snapshot_baseline` (`basic_hotstuff_engine.rs:1201`) | binary B5 (`binary_consensus_loop.rs:2389`); test | `(snapshot_block_id, snapshot_height)` from `StateSnapshotMeta` | committed height; synthetic anchor block; `current_view = height + 1` | locked QC; QC/vote history; any intervening signing decision |
+| `NodeHotstuffHarness::load_persisted_state` (`hotstuff_node_sim.rs:2035`) | harness / async runner startup | `get_last_committed`, `get_block`, `get_qc`, embedded block QC, `get_current_epoch` | committed block+height; **lock reconstructed from the committed/stored QC** (higher-view of block-level vs embedded); epoch (>0 only) | latest uncommitted vote; latest pre-crash lock; C3F retained evidence |
+| `observe_consensus_storage` (`consensus_storage_observation.rs:295`) | read-only observation | schema, incomplete-transition marker, `meta:current_epoch` | `NoStorageHandle` / `PresentNoCommittedEpoch` / `CommittedEpoch(n)` | never coerces a missing epoch to zero; never authorizes |
+| `open_production_consensus_storage` / `persist_restored_snapshot_epoch` (`production_consensus_storage.rs:391/504`) | binary main (`main.rs:2470/4726`) | data-dir consensus RocksDB; snapshot epoch | epoch parity between restored state and consensus storage | any vote/lock/signing state |
+| `ConsensusStorage::apply_epoch_transition_atomic` (`storage.rs`; RocksDB `997`, in-memory `1318`) | epoch transition | reconfig block/QC, last-committed, new epoch | atomic committed-epoch transition | uncommitted signing decisions |
+
+Distinctions recorded: the lock produced by `load_persisted_state` /
+`initialize_from_restart` is a lock **reconstructed from committed/embedded QCs**,
+not the latest *pre-crash* lock; and committed-state recovery is distinct from
+preservation of an uncommitted signing decision. No relevant existing
+implementation persists a per-view vote or an anti-equivocation record consumed by
+any of these entrypoints; that absence is reported as a gap, not invented inside a
+fixture.
+
+### Scenario-to-test mapping, persisted inputs, and observed outcomes
+
+All five tests pass at the tested checkpoint.
+
+**A — ordinary restart after an uncommitted signing decision**
+(`d7d2_a_uncommitted_vote_lost_and_latch_reset_permits_conflicting_vote_after_restart`).
+Fixture: 4-validator set, real ML-DSA-44 keys, explicit epoch 0, view 1, mandatory
+v2 control signing domain, committed baseline at height 0. Exercised: a valid
+leader proposal for block X → `on_proposal_event` returns `BroadcastVote` (the
+engine **decision**; the emitted vote is unsigned). Same-process control: a
+conflicting proposal for block Y at the same view is refused by the engine's
+per-view vote latch (`voted_in_view`). Completed-signature boundary: the existing
+signer produces real ML-DSA-44 bytes over the vote position and the real D6
+verifier independently accepts them. Restart: a fresh engine is initialized from
+**only** the committed baseline the real writer persists
+(`initialize_from_restart([0x00;32], 0, None)`); observed `committed_height = 0`,
+`current_view = 1`, `locked_qc = None`. After restart the reset latch admits the
+previously-refused conflicting proposal for Y → the engine emits a second vote
+decision at the same view for a different block id. Both conflicting positions are
+independently signed and verified (same validator, domain, epoch and voting
+position; different signed messages). Boundary: this is engine-decision-level
+equivocation plus signer-level conflicting-signature capability; the facade
+handoff and network transmission were **not** exercised, and no persisted
+anti-equivocation record is consumed by the recovery entrypoint.
+
+**B — restore a snapshot captured before the decision**
+(`d7d2_b_snapshot_baseline_before_decision_omits_intervening_vote`). Scope stated
+accurately: this exercises the initializer-level snapshot baseline
+(`initialize_from_snapshot_baseline`, the binary B5 restore-aware start hook), **not**
+an end-to-end binary RocksDB restore; the artifact a `StateSnapshotMeta` carries
+today is only `(block_hash, height)`. A live engine is restored to a pre-decision
+baseline (height 5) and makes an uncommitted decision at view 6; a **fresh** engine
+instance then restores the earlier artifact (fields are not reset on the live
+engine). Observed on the fresh instance: `committed_height = Some(5)`,
+`current_view = 6`, `locked_qc = None`; a conflicting proposal at view 6 is
+admitted and voted. Epoch comparison kept explicit: both engines are at epoch 0 —
+an unchanged epoch does **not** establish preservation of the intervening decision;
+the decision is simply absent from the artifact.
+
+**C — existing committed-state recovery control**
+(`d7d2_c_load_persisted_state_recovers_committed_baseline_present_no_committed_epoch`,
+`d7d2_c_committed_epoch_zero_observed_distinctly_as_fixture_setup`,
+`d7d2_c_fresh_node_recovers_nothing`). The real reader
+`NodeHotstuffHarness::load_persisted_state` is exercised (not reproduced) against an
+`InMemoryConsensusStorage` seeded with a committed block at height 7 and its stored
+QC. Observed: the reader returns the committed block id; the engine reconstructs
+`committed_height = Some(7)`, `current_view = 8`, and a lock reconstructed from the
+stored QC (`locked_qc().view == 7`). The storage observation is **asserted**, not
+assumed: with no epoch seeded the observation is `PresentNoCommittedEpoch` (a
+committed block does not imply `meta:current_epoch`); with an explicit
+`put_current_epoch(0)` (labelled fixture setup) it is `CommittedEpoch(0)`, distinct
+from the absent-epoch case. A missing epoch is never coerced to zero. The
+fresh-node control recovers nothing. Stated boundary: this control recovers
+committed state only; it establishes recovery of neither the latest uncommitted
+vote, nor the latest pre-crash lock, nor C3F retained verified-justification
+evidence.
+
+### Evidence strength and controls (task §5)
+
+For each scenario the boundaries are kept separate: engine decision/action
+(`on_proposal_event` → `BroadcastVote`); signer invocation and **completed
+signature bytes** (real `MlDsa44Backend::sign` + `verify_vote_msg_with_domain`);
+facade handoff and network transmission — the last two are **not** exercised. The
+cleared latch, repeated action and reset view are reported as recovery-entrypoint
+observations, not as proof of transmitted conflicting signatures. The
+conflicting-signature capability in Scenario A is established at the signer/backend
+level under fixture-declared authority assumptions (fixture-established membership
+and keys), with the transmission boundary explicitly unexercised. Test-derived
+findings (green characterization tests) are kept separate from source-inspection
+findings (the path matrix); neither is presented as production capability.
+
+### Validation results
+
+Commands (default features, debug/test profile; no release rebuild — none is
+required for test/documentation-only changes):
+
+* `cargo test --test run_422_d7d2_signing_state_recovery_tests` → `ok. 5 passed; 0 failed`.
+* `cargo test --test hotstuff_restart_semantics_tests` → `ok. 14 passed; 0 failed`.
+* `cargo test --test persistence_integration_tests` → `ok. 6 passed; 0 failed`.
+* `cargo test --test b3_snapshot_restore_tests` → `ok. 10 passed; 0 failed`.
+* `cargo test --test run_422_d7c1_storage_observation_tests` → `ok. 23 passed; 0 failed`.
+* `cargo test --test run_422_startup_refusal_tests` → `ok. 4 passed; 0 failed` (real binary, startup refusal preserved).
+* `cargo clippy --test run_422_d7d2_signing_state_recovery_tests` → no warnings attributable to the new target (only pre-existing `qbind-node` lib warnings, unrelated and unchanged).
+
+All exit codes `0`. No repository-wide formatter was run; CRLF line endings of the
+edited Markdown files are preserved. Unrelated broad-target failures, if any, are
+out of scope and were not modified to green this report. Automated review /
+security tooling outcomes, if invoked by the environment, are recorded literally
+by that tooling; this pass does not claim a security-review pass on their behalf.
+
+### Scoped verdict
+
+`D7D2_SIGNING_STATE_RECOVERY_CHARACTERIZATION=COMPLETE-FOR-TESTED-SCOPE`
+
+The three required scenarios (A ordinary restart, B snapshot restored before the
+decision, C committed-state recovery control) have adequate source-backed and
+behavioral evidence within the stated boundaries. Signing-state **continuity** is
+reported **separately** and is **NOT** established: the tested recovery entrypoints
+carry no channel for an uncommitted vote or a per-view anti-equivocation record, so
+the in-process double-vote guard does not survive restart or pre-decision snapshot
+restore. A green characterization test here confirms *missing* protection; it is
+not translated into any safety claim.
+
+Retained posture (unchanged by this pass):
+
+* `D7_STATUS=PARTIAL-CODE-TEST / PRODUCTION-LIFECYCLE-UNAVAILABLE`
+* `DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED`
+* `GENESIS_AUTHORITY_ACTIVATION=DISABLED`
+* `PRODUCTION_WIRE_CHAIN_ID_BEHAVIOR=UNCHANGED`
+* `CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED`
+* `SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO`
+
+### One recommended next task (not implemented here)
+
+Add a bounded characterization of the **actual binary snapshot-restore call path**
+(`main.rs` restore → `open_production_consensus_storage` →
+`persist_restored_snapshot_epoch` → B5 `initialize_from_snapshot_baseline`) over a
+real RocksDB artifact using the existing supported snapshot/checkpoint procedure
+(closing storage handles before any filesystem-copy fixture), to observe the same
+uncommitted-decision boundary end-to-end rather than at the initializer level.
+This remains characterization only; it authorizes no durability fix, freshness
+anchor, or activation.
+
+### Clean-worktree / push status
+
+Worktree clean after each reported checkpoint; changes pushed to the supplied task
+branch via normal commits only. No PR was opened; no branch rename, force-push,
+rebase, or history rewrite.

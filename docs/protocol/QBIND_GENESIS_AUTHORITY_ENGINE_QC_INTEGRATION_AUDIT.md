@@ -1176,3 +1176,15 @@ authoritative text is in the contract):
 
 Activation stays disabled; no code, test, or readiness item changes. This note is
 additive.
+
+## Run 422 D7-D2 successor note (signing-state recovery characterization)
+
+Run 422 D7-D2 added a bounded characterization (test + source inspection) of
+signing-state continuity across restart and snapshot restore. It confirms — without
+changing production behavior — that the existing recovery entrypoints recover
+committed state and a QC-reconstructed lock but carry no channel for an uncommitted
+vote or per-view anti-equivocation record, so the in-process double-vote guard is
+lost on restart / pre-decision restore. Full report and path matrix:
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md` (Run 422 D7-D2). Posture
+unchanged: activation DISABLED, durable anti-rollback NOT-ESTABLISHED, signing-state
+continuity NOT-established. This note is additive.
