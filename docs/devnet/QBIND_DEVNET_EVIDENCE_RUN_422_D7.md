@@ -4187,3 +4187,139 @@ incomplete/unverified rather than converted into a pass.
 engine/QC pipeline: absent-QC/bootstrap authorization, outbound QC reconstruction/propagation,
 Timeout/NewView certificate migration, persistent evidence storage/recovery, production authority
 lifecycle/activation, durable anti-rollback and Run 423 remain separate, open obligations.
+## Run 422 D7-C3F — CORRECTION: retention postconditions, resource accounting and evidence association (code + test)
+
+**Bounded correction of the C3F pass above — not a new phase.** This subsection records
+newly-run commands and measured guarantees for three defects found in the C3F retention
+path. The C3D/C3E work and the original C3F handoff/ownership tests are preserved.
+
+### Inspected state (recorded, not manufactured)
+
+* **Working branch (inspected):** `copilot/copilotcopilot-run-422-d7-c3c-again`.
+* **Starting HEAD:** `066d8c9` (`update`) — worktree clean, shallow clone (depth 2).
+* **Reviewed revision `20b9e052c6109e095159bbb6c7df2be564e5cb58`:** object **absent** in this
+  shallow clone (missing history, distinguished from missing implementation — the C3D
+  verifier, the C3E gate and the C3F retention path were all present and executed green
+  before this correction).
+
+### Defects reproduced (then fixed; kept as regressions)
+
+* **A — retention postcondition violated under block-slot pressure.**
+  `register_block_with_verified_justification` inserted the candidate and then called
+  `evict_blocks_if_needed()`, which could evict the just-registered candidate while still
+  returning success; the engine path (`ingest_proposal`) discarded the registration
+  `Result` via `let _ =`, so a vote could be emitted with the block/evidence no longer
+  stored. Now: admission is decided **before** mutation (byte budget + block-slot), the
+  candidate is **never** evicted to make room (only other safe-to-evict blocks are), the
+  discarded `Result` is removed, and any failure propagates as a typed
+  `VerifiedProposalIngestError::RetentionCapacityUnavailable` / `RetentionBudgetExceeded`
+  before view advancement, block-tree changes, self-voting or outbound effects.
+* **B — resource accounting.** `retained_byte_size` used a fixed 128-byte constant plus
+  `len()` (not `capacity()`) of the signature buffers/bitmap/signer list, omitted the
+  `VerifiedQuorumCertificate` struct value and the outer `Vec<Vec<u8>>` descriptor storage,
+  and used `saturating_add`, so an overflowing projected total could saturate into an
+  admissible value. Now `retained_byte_size(&self) -> Result<u64, RetainedByteSizeError>`
+  charges: the struct value (`size_of`, covering inline `Vec` descriptors), the signer-bitmap
+  capacity, the outer signatures descriptor storage (`capacity * size_of::<Vec<u8>>()`), each
+  constituent signature-buffer capacity, and the signer-vector capacity, using only checked
+  conversion/add/mul; an unrepresentable total rejects explicitly. Allocator/process-wide
+  overhead and externally retained `Arc` handles are documented as outside the model.
+  `can_retain_evidence` uses `checked_add` so projected-total overflow is inadmissible.
+* **C — evidence association at the storage boundary.** The public
+  `register_block_with_verified_justification` accepted a caller-supplied
+  `justify_qc: Option<...>` and the direct path accepted `None` or a mismatching value. The
+  parameter is removed; the logical justification is now **derived from the verified
+  evidence** (block id = `certificate().block_id`, view = `certificate().height`, signers =
+  `evidence.signers()`). Evidence stays separate from `own_qc` and retains its original
+  certificate/domain/epoch metadata; no new parent/round/bootstrap rule is introduced.
+
+### What changed (production, this correction)
+
+* `qc_verify_domain.rs`: `retained_byte_size` is now checked/fallible with the accounting
+  model above; `RetainedByteSizeError` + checked helpers added; re-exported from `lib.rs`.
+* `block_state.rs`: `BlockNode` stores a per-node `verified_justification_charge: u64` (0 when
+  no evidence); `with_verified_justification(evidence, charge)` sets both, validated
+  independently of `retained_byte_size` on both sides of an assertion.
+* `hotstuff_state_engine.rs`: `EvidenceRetentionError` gains `SlotCapacityUnavailable` and
+  `UnrepresentableCharge`; new `can_admit_block_slot` (pure) and `reserve_block_slot_for_new`
+  (atomic; evicts only OTHER safe blocks, rejects up front on deficit, never touches the
+  candidate); `register_block_with_verified_justification` drops `justify_qc`, derives it from
+  evidence, and admits byte + slot before any insert with no post-insert eviction of the
+  candidate.
+* `basic_hotstuff_engine.rs`: `VerifiedProposalIngestError` gains
+  `RetentionCapacityUnavailable` and `RetentionChargeUnrepresentable`;
+  `on_verified_proposal_event` pre-checks checked-charge, byte budget and block-slot capacity
+  before `ingest_proposal`; `ingest_proposal` propagates the registration failure (no vote,
+  no panic, no rollback). New `BasicHotStuffEngine::with_state_limits` builds the engine with
+  custom `ConsensusLimitsConfig` so block-slot pressure is exercisable through the full path.
+* `binary_consensus_loop.rs`: C3F tests updated to the corrected API; three new regressions
+  added; the real-handler positive strengthened to exact backend counts.
+
+### Rejection counting (each path counts once)
+
+The engine preflight calls `note_rejected_evidence_over_budget()` before returning
+`RetentionBudgetExceeded` and does not call `ingest_proposal`; the direct registration path
+increments its own `rejected_evidence_over_budget` exactly once. Block-slot rejection is
+counted by the loop as `inbound_proposal_verified_qc_handoff_rejected_total`. Diagnostic
+counters may change on rejection; consensus and block state do not.
+
+### Behavioral tests (module `run422_d7a::run422_d7c3e::c3f`, now 11 tests)
+
+The 8 original tests A–H are preserved (A strengthened to assert EXACTLY `proposals()==1`
+and `votes()==3`, proving no duplicate QC verification — the previous `votes() >= 3` could
+not). Three new regressions:
+
+* **I** `c3f_i_block_slot_pressure_rejects_without_candidate_retention` — protected committed
+  anchor + `max_pending_blocks==1` + ample byte budget: the real handler rejects with
+  `handoff_rejected_total==1`, no view advance, no engine acceptance, candidate never stored,
+  anchor never evicted, no facade action; a `max_pending_blocks==2` control retains the
+  candidate and its exact evidence.
+* **J** `c3f_j_checked_accounting_rejects_overflow_and_charges_owned_allocations` — the charge
+  strictly exceeds `size_of::<VerifiedQuorumCertificate>()` (owned allocations counted); with
+  the maximum budget and a nonzero retained charge, `can_retain_evidence(_, u64::MAX)` is
+  rejected (checked, not saturated); exact-limit and one-over boundaries via pure arithmetic.
+* **K** `c3f_k_logical_justification_is_derived_from_verified_evidence` — the stored
+  `justify_qc` is derived from the evidence (block id/view/signers), certifies the parent not
+  the child, and `own_qc` stays `None`.
+
+### Validation — newly-run commands this correction (dev profile, exit 0 unless noted)
+
+Starting SHA `066d8c9`; final SHA recorded at the closing checkpoint.
+
+* `cargo test -p qbind-node --lib run422_d7a::run422_d7c3e::c3f` → **11 passed**.
+* `cargo test -p qbind-node --lib run422_d7c3e` → **40 passed**.
+* `cargo test -p qbind-node --lib binary_consensus_loop` → **251 passed**.
+* `cargo test -p qbind-consensus --lib` → **182 passed**.
+* `cargo test -p qbind-consensus --test run_422_d7c3d_qc_domain_verification_tests` → **46 passed** (C3D).
+* `cargo test -p qbind-consensus --test run_422_d6_pv_domain_isolation_tests` → **34 passed** (D6).
+* `cargo test -p qbind-consensus --test consensus_memory_limits_tests` → **19 passed**;
+  `--test consensus_state_memory_limits_tests` → **7 passed**;
+  `--test commit_log_memory_limits_tests` → **6 passed** (1 ignored).
+* `cargo test -p qbind-node --test run_420_production_policy_reachability_tests` → **3 passed**.
+* `cargo test -p qbind-node --test run_422_startup_refusal_tests` → **4 passed** (startup refusal preserved).
+* `cargo check -p qbind-node` (default production features) → **exit 0**.
+* `cargo clippy -p qbind-consensus --lib` → the changed regions produce **no** warnings; all
+  reported warnings are pre-existing and in unrelated files/lines (e.g. `basic_hotstuff_engine.rs:2077`
+  match-like-matches in `is_safe_to_vote`, and `slashing/mod.rs`, `adversarial_multi_sim.rs`).
+* `rustfmt`: changed-region formatting only. The two touched CRLF-committed files
+  (`qc_verify_domain.rs`, `binary_consensus_loop.rs`) were left with their original CRLF line
+  endings (a repo-wide `rustfmt` run would rewrite them entirely to LF and is not performed).
+* Release build: `cargo build --release -p qbind-node` — outcome recorded at the closing checkpoint.
+
+### Security tooling (recorded literally)
+
+Outcomes of `parallel_validation` / `secret_scanning` for this correction are recorded exactly
+as returned at the closing checkpoint; a skipped CodeQL analysis or an unavailable reviewer is
+recorded as **incomplete/unverified**, never converted into a pass.
+
+### Retained posture (unchanged by this correction)
+
+`D7_STATUS=PARTIAL-CODE-TEST / PRODUCTION-LIFECYCLE-UNAVAILABLE`;
+`DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED`;
+`GENESIS_AUTHORITY_ACTIVATION=DISABLED`;
+`PRODUCTION_WIRE_CHAIN_ID_BEHAVIOR=UNCHANGED`;
+`CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED`;
+`SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO`. This correction fixes retention
+postconditions, accounting and evidence association only; absent-QC/bootstrap authorization,
+outbound QC reconstruction, Timeout/NewView migration, persistent storage/recovery, production
+authority lifecycle/activation, durable anti-rollback and Run 423 remain separate, open obligations.

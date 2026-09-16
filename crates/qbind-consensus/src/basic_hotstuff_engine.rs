@@ -1793,9 +1793,7 @@ impl BasicHotStuffEngine<[u8; 32]> {
             Some(evidence) => {
                 if self
                     .state
-                    .register_block_with_verified_justification(
-                        block_id, view, parent_id, evidence,
-                    )
+                    .register_block_with_verified_justification(block_id, view, parent_id, evidence)
                     .is_err()
                 {
                     return None;
