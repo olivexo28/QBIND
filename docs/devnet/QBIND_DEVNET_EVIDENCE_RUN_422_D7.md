@@ -3728,9 +3728,70 @@ test result: ok. 22 passed; 0 failed; 0 ignored; 0 measured; 1590 filtered out
 ### Validation
 
 See the "Validation (D7-C3E)" subsection below for exact commands, profiles,
-counts, and exit codes. Security-tool outcomes are reported literally: a skip,
-unavailable reviewer, or model-registry error is recorded as
-incomplete/unverified regardless of any "0 alerts"/"no comments" surface.
+counts, and exit codes.
+
+#### Validation (D7-C3E) — exact commands, counts, exit codes (exit 0 unless noted)
+
+All commands run in this worktree; profiles as shown; disk monitored (peaked ~50%
+of 145G, ~73G free).
+
+* `cargo test -p qbind-node --lib` (dev) → **1612 passed; 0 failed** (includes
+  `run422_d7c3e` and retained D5/D6/D7 coverage).
+* `cargo test -p qbind-node --lib run422_d7c3e` (dev) → **22 passed; 0 failed**
+  (1590 filtered out).
+* `cargo test -p qbind-consensus --test run_422_d7c3d_qc_domain_verification_tests`
+  (dev) → **46 passed; 0 failed** (C3D target).
+* `cargo test -p qbind-consensus --test run_422_d6_pv_domain_isolation_tests`
+  (dev) → **34 passed; 0 failed** (D6 isolation target).
+* Run 418 regressions:
+  `run_418_authenticated_peer_consensus_sender_binding_tests` → **18 passed**;
+  `run_418_newview_demux_chain_integration_tests` → **3 passed**.
+* Run 420 production-policy reachability
+  (`run_420_production_policy_reachability_tests`) → **3 passed**.
+* Run 422: `run_422_startup_refusal_tests` → **4 passed**;
+  `run_422_d4_startup_ordering_tests` → **5 passed**;
+  `run_422_d7_authority_lifetime_tests` → **14 passed**;
+  `run_422_genesis_consensus_authority_tests` → **15 passed**.
+* Restore targets: `b3_snapshot_restore_tests` → **10 passed**;
+  `b5_restore_aware_consensus_start_tests` → **4 passed**;
+  `run_124_snapshot_restore_authority_marker_tests` → **7 passed**;
+  `run_140_snapshot_restore_v2_authority_marker_tests` → **13 passed**.
+* `cargo check -p qbind-node` (default production features, dev) → **Finished, exit
+  0**.
+* `cargo clippy -p qbind-consensus -p qbind-node --lib` → **Finished, no errors**;
+  all reported warnings are **pre-existing** and outside the C3E-edited line
+  ranges (verified by line-range filtering the C3E gate, counters, imports, test
+  module, and the `qc_verify_domain.rs` doc-comment block — zero warnings there).
+* `cargo fmt -p qbind-node -p qbind-consensus -- --check` → reports diffs, but this
+  is a **pre-existing, repo-wide** condition: unedited files such as
+  `crates/qbind-consensus/src/basic_hotstuff_engine.rs` (LF, not touched here) also
+  fail, and the diffs span the entire files rather than the C3E-edited regions. No
+  reformatting of unrelated code was performed.
+* `cargo build --release -p qbind-node --bin qbind-node` → **Finished release
+  profile, exit 0**; binary at `target/release/qbind-node` (compilation evidence
+  only — no production authority activation, and the release binary still refuses
+  `--consensus-authority-from-genesis`).
+
+Line endings preserved on every edited file (CRLF on the three docs and on
+`binary_consensus_loop.rs`/`qc_verify_domain.rs`; verified `LFonly=0`). No
+package-integrity anchor artifact changed, so no manifest refresh was required.
+
+**Security tooling (reported literally).** `parallel_validation` was run; both
+outcomes are recorded exactly as returned and are **incomplete / unverified**:
+
+* **CodeQL (rust):** surface read "Found 0 alerts", but "Analysis was skipped
+  because the database size is too large." A skipped analysis is **not** a passing
+  scan; 0 alerts here means **not analyzed**, not clean.
+* **Code review:** surface read "No review comments found" over 5 files, but the
+  tool also reported it "is not available in this environment" with a
+  model-registry error (`model claude-sonnet-4.6 not found in registry`). An
+  unavailable reviewer is **not** a passing review; "no comments" here means **not
+  reviewed**.
+
+Neither result establishes a clean security posture. A skip, unavailable reviewer,
+or model-registry error is recorded as incomplete/unverified regardless of any
+"0 alerts"/"no comments" surface. `SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO`
+is retained.
 
 ### Verdict and retained posture
 
