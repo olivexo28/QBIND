@@ -3809,3 +3809,160 @@ PRODUCTION-LIFECYCLE-UNAVAILABLE`; `DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED`;
 `CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED`;
 `SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO`. No readiness promotion,
 production activation, PR, or Run 423 work.
+
+## Run 422 D7-C3E — present-QC rejection completion + state-protection evidence (this pass, test + docs)
+
+**Continuation, not a redesign.** This pass adds the missing present-QC
+authorization-ordering rejection cases, Timeout non-substitution controls, and a
+strengthened direct block-state protection test to the existing `run422_d7c3e`
+module. The C3E production gate, C3D rules, D6 signing bytes, quorum policy, wire
+IDs, and authority constructors are unchanged; the only edited file is
+`crates/qbind-node/src/binary_consensus_loop.rs` (test code + test comments) plus
+this evidence section. No `main.rs`, engine-API, protocol-byte, or package-integrity
+anchor change; no manifest refresh required.
+
+### Inspected state (recorded, not manufactured)
+
+* **Working branch (inspected):** `copilot/copilotcopilotcopilotcopilotcopilotrun-422-d7-c3c`.
+  This differs from the problem statement's reported branch
+  `copilot/copilotcopilotcopilotcopilotrun-422-d7-c3c-again-a`; reported as a
+  deviation without fabricating ancestry.
+* **Starting HEAD (pre-C3E-continuation):** `1391c88` (`update`), parent `bee45c9`.
+* **Reviewed revision `722a093dee50841006e737bfe573ceed1a67ee03`:** object **absent**
+  in this shallow clone (`git cat-file -t` fails). Missing history is distinguished
+  from missing implementation: the C3E gate and the prior `run422_d7c3e` module
+  (22 tests) were **present** in the worktree and executed green before this pass.
+* Existing helpers were reused rather than duplicated: the D7-A snapshot builders
+  (`snapshot_superseded`), `coherent_snapshot_for` / `coherent_authority_for`, the
+  checked-overflow exhaustion latch (`set_generation_for_exhaustion_fixture` +
+  `replace_for_fixture`), the `C3eCountingVerifier` / `counting_registry`
+  instrumentation, `D7ActionRecorder`, and the F6 `pv_binding_gate`. The existing
+  UNAVAILABLE case (`c3e_g_unavailable_authorization_prevents_qc_verification`) is
+  reused and **not** re-implemented.
+
+### New present-QC authorization-ordering cases (section 2)
+
+Each delivers a correctly encoded, correctly OUTER-signed Proposal carrying a
+genuine D6-signed quorum (`valid_quorum`) through the real
+`handle_inbound_consensus_msg` `Proposal` arm under `Required`, with matching F6
+identity and coherent fixtures. Each asserts the **exact existing** rejection
+counter, **zero** outer/constituent verification where admission must stop first
+(instrumented `C3eCountingVerifier` proposal/vote counts and the crypto-latency
+observation counter all `0`), **unchanged** QC-gate counters
+(`inbound_proposal_embedded_qc_verified_total` /
+`inbound_proposal_embedded_qc_rejected_total` = 0,
+`inbound_proposal_engine_context_mismatch_total` = 0), and **no** delivery,
+deferral, reconfiguration observation, engine mutation, or facade effect:
+
+* **No P/V authority AND no current snapshot** →
+  `c3e_k_no_authority_no_snapshot_rejects_before_verification`: F6 admits, then
+  `inbound_proposal_verification_context_unavailable_total == 1`.
+* **Present P/V authority but missing current snapshot** →
+  `c3e_k_present_authority_missing_snapshot_rejects_before_verification`:
+  `inbound_proposal_current_state_unavailable_total == 1`; the present authority's
+  instrumented backend proves zero outer/QC verification.
+* **Unavailable current authorization** → reused existing
+  `c3e_g_unavailable_authorization_prevents_qc_verification` (not duplicated).
+* **Superseded current authorization** →
+  `c3e_k_superseded_current_authorization_prevents_qc_verification`:
+  `inbound_proposal_authority_superseded_total == 1`.
+* **Terminally exhausted current authorization** →
+  `c3e_k_exhausted_current_authorization_prevents_qc_verification`: drives the
+  **checked-overflow terminal latch** (generation positioned at `u64::MAX`, then one
+  `replace_for_fixture` whose `generation + 1` cannot be represented sets
+  `exhausted = true`) — asserted via `admit()` returning
+  `FreshnessError::AuthorizationExhausted` — not a bare generation set to MAX;
+  `inbound_proposal_authorization_exhausted_total == 1`.
+
+The **authorized control** demonstrating the same message can reach outer and QC
+verification is the retained `c3e_a_*` / `c3e_f_a_*` positive controls (control
+backend counts are kept in separate authorities from the rejection measurements).
+
+### Timeout non-substitution controls (section 3)
+
+`counting_timeout_ctx` builds a valid, populated `TimeoutVerificationContext`
+(shared fixture membership/keys, an **instrumented** backend registry, and a live
+`LocalKeySigner` — `signer.is_some()`). Repeating the two missing-context
+present-QC cases with this context wired proves it supplies neither the missing
+Proposal/Vote authorization nor any QC verification:
+
+* **Missing authority + valid Timeout context** →
+  `c3e_l_timeout_context_does_not_supply_missing_authority`: still
+  `inbound_proposal_verification_context_unavailable_total == 1`; the Timeout
+  context's instrumented backend recorded **0** proposal and **0** vote
+  verifications.
+* **Missing snapshot + valid Timeout context** →
+  `c3e_l_timeout_context_does_not_supply_missing_snapshot`: still
+  `inbound_proposal_current_state_unavailable_total == 1`; **both** the Timeout
+  context's backend and the present authority's backend recorded **0**/**0**.
+
+No alternate authority mechanism is introduced; existing fixtures are reused and
+the type-level Timeout↔P/V separation (no `From` conversion) is unchanged.
+
+### Strengthened state protection (section 4)
+
+`c3e_i_future_view_invalid_qc_no_state_change` now runs against a **coherent
+nonempty-state fixture** (`initialize_from_snapshot_baseline(anchor, 4)` — committed
+height 4, one anchored block, resume at view 5), so it demonstrates preservation of
+**existing** state, not merely the absence of a new commit. State is compared
+before vs. after directly through the engine/state APIs: `current_view()`,
+`locked_height()`, `locked_qc()` (the engine derives `TimeoutMsg.high_qc` from its
+locked QC — there is no separate high-QC store), `committed_height()`,
+`committed_block()`, `commit_log()`, and the block store via
+`state().block_count()`, `state().blocks_iter()`, and `state().get_block(&anchor)`.
+For a future-view Proposal (height 6) with a valid outer signature and an invalid
+(foreign-domain) embedded QC, every observation is unchanged, with no
+reconfiguration observation, delivery, deferral, engine acceptance, or facade
+action. A matching valid-QC control
+(`c3e_i_valid_qc_control_reaches_engine_and_registers_block`) uses the same
+nonempty baseline and an eligible future-view Proposal from the view's leader
+(validator 2) with a genuine quorum; it reaches engine acceptance, advances to view
+6, and registers exactly one new block (`block_count` +1, one new id in
+`blocks_iter`, pre-existing blocks preserved), proving the fixture is genuinely
+capable of the transition the invalid case suppresses. The fixture is described
+honestly as an in-memory seeded baseline — not authenticated catch-up, persistent
+recovery, or durable freshness.
+
+### Validation (this pass) — exact commands, counts, exit codes
+
+Test-and-documentation-only change (no production logic touched); per policy a
+release build is **not** repeated — its historical attribution above is retained.
+
+* `cargo test -p qbind-node --lib run422_d7c3e` (dev) → **29 passed; 0 failed; 0
+  ignored; 1590 filtered out**, exit 0. (Was 22 at the prior pass; +7:
+  `c3e_i_valid_qc_control_reaches_engine_and_registers_block`, four `c3e_k_*`, two
+  `c3e_l_*`.)
+* `cargo test -p qbind-node --lib binary_consensus_loop` (dev) → **240 passed; 0
+  failed; 0 ignored; 1379 filtered out**, exit 0. The `run422_d7c3e` set (29) is a
+  strict subset of this suite (240).
+* `cargo clippy -p qbind-node --lib` (dev) → **Finished, exit 0**; all reported
+  warnings are pre-existing and outside the C3E-edited ranges (e.g.
+  `cert_bound_node_id` dead-code in `p2p_node_builder.rs`); none reference the
+  `run422_d7c3e` module.
+* CRLF-aware whitespace / changed-region formatting: every edited file remains CRLF
+  (`binary_consensus_loop.rs` and this doc; verified no LF-only lines); no
+  added line carries trailing whitespace before the CR; unrelated formatting and
+  line endings were left untouched.
+
+### Security tooling (reported literally)
+
+`parallel_validation` outcomes are recorded exactly as returned:
+
+* **CodeQL (rust):** recorded literally. A skipped or size-limited analysis is
+  **incomplete** — "0 alerts" from a skip means **not analyzed**, not clean.
+* **Code review:** recorded literally. An unavailable reviewer / model-registry
+  error is **not** a successful review — "no comments" then means **not reviewed**.
+
+Neither establishes a clean security posture.
+
+### Retained posture (unchanged)
+
+`D7_STATUS=PARTIAL-CODE-TEST / PRODUCTION-LIFECYCLE-UNAVAILABLE`;
+`DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED`;
+`GENESIS_AUTHORITY_ACTIVATION=DISABLED`;
+`PRODUCTION_WIRE_CHAIN_ID_BEHAVIOR=UNCHANGED`;
+`CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED`;
+`SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO`. Absent-QC / bootstrap
+authorization, full engine/QC evidence retention, production lifecycle, and durable
+anti-rollback remain open. No readiness promotion, production activation, or Run 423
+work.

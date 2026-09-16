@@ -18511,24 +18511,57 @@ mod tests {
                 }
 
                 // ============================ I ============================
-                // State protection: a future-view Proposal with an invalid QC
-                // leaves engine view/lock/commit state unchanged, causes no
+                // State protection: a future-view Proposal with a valid OUTER
+                // signature but an invalid embedded QC leaves the engine's
+                // block store AND consensus state unchanged, causes no
                 // reconfiguration observation, no delivery/deferral, and zero
                 // facade actions.
+                //
+                // The fixture seeds a COHERENT NONEMPTY baseline (a committed
+                // prefix + one block-tree entry) so the test demonstrates
+                // PRESERVATION of pre-existing state, not merely the absence of
+                // a new commit. This is a fixture-seeded in-memory baseline —
+                // NOT authenticated catch-up, persistent recovery, or durable
+                // freshness. High-QC state is described precisely: this engine
+                // derives `TimeoutMsg.high_qc` from its locked QC (there is no
+                // separate high-QC store), so the locked-QC observation IS the
+                // high-QC observation; the baseline installs none, and none is
+                // adopted.
                 #[test]
                 fn c3e_i_future_view_invalid_qc_no_state_change() {
+                    use std::collections::HashSet;
                     let f = make_fixture(4);
                     let (reg, counts) = counting_registry();
                     let pv = c3e_pv(&f, c3e_domain(), reg, None);
                     let snap = coherent_snapshot_for(&pv);
                     let mut engine = make_engine(ValidatorId(0), 4);
-                    let view_before = engine.current_view();
-                    let locked_before = engine.locked_height();
-                    let committed_before = engine.committed_height();
+                    // Coherent nonempty-state fixture: committed height 4 with a
+                    // single anchored block; consensus resumes at view 5.
+                    let anchor = [0xAB; 32];
+                    engine.initialize_from_snapshot_baseline(anchor, 4);
 
-                    // Future view (height 5) with an invalid (foreign-domain) QC.
+                    // Full relevant state BEFORE — view, locked QC (⇒ high QC),
+                    // committed block/height, commit log, and the block store
+                    // examined directly via `state()`.
+                    let view_before = engine.current_view();
+                    let locked_height_before = engine.locked_height();
+                    let committed_height_before = engine.committed_height();
+                    let committed_block_before = engine.committed_block().copied();
+                    let locked_qc_present_before = engine.locked_qc().is_some();
+                    let commit_log_before = engine.commit_log().to_vec();
+                    let block_count_before = engine.state().block_count();
+                    let block_ids_before: HashSet<[u8; 32]> =
+                        engine.state().blocks_iter().map(|b| b.id).collect();
+                    assert!(
+                        engine.state().get_block(&anchor).is_some(),
+                        "baseline anchor block present before"
+                    );
+                    assert_eq!(block_count_before, 1, "nonempty baseline block store");
+
+                    // Eligible future view (height 6 > current view 5) with a
+                    // valid outer signature but an invalid (foreign-domain) QC.
                     let bad = build_signed_qc(&f, &foreign_domain(), C3E_WIRE, 0, &[0, 1, 2]);
-                    let p = proposal_with_qc(1, 5, &f, &c3e_domain(), Some(bad));
+                    let p = proposal_with_qc(1, 6, &f, &c3e_domain(), Some(bad));
                     let mut stats = BinaryConsensusLoopInboundStats::default();
                     let mut restore = RestoreCatchupModeState::from_config(None);
                     let facade = D7ActionRecorder::default();
@@ -18538,17 +18571,122 @@ mod tests {
                     );
 
                     assert_eq!(stats.inbound_proposal_embedded_qc_rejected_total, 1);
-                    // Meaningful state observations (not just return values):
+                    // Direct before/after comparison of engine + block-store
+                    // contents (absence of a committed block alone is not
+                    // sufficient evidence of preservation).
                     assert_eq!(engine.current_view(), view_before, "view unchanged");
-                    assert_eq!(engine.locked_height(), locked_before, "lock unchanged");
-                    assert_eq!(engine.committed_height(), committed_before, "commit unchanged");
-                    assert!(engine.locked_qc().is_none(), "no high/locked QC adopted");
-                    assert!(engine.committed_block().is_none(), "no block committed");
+                    assert_eq!(engine.locked_height(), locked_height_before, "lock unchanged");
+                    assert_eq!(
+                        engine.committed_height(),
+                        committed_height_before,
+                        "committed height unchanged"
+                    );
+                    assert_eq!(
+                        engine.committed_block().copied(),
+                        committed_block_before,
+                        "committed block unchanged"
+                    );
+                    assert_eq!(
+                        engine.locked_qc().is_some(),
+                        locked_qc_present_before,
+                        "locked QC (⇒ high QC) unchanged"
+                    );
+                    assert_eq!(
+                        engine.commit_log(),
+                        commit_log_before.as_slice(),
+                        "commit log unchanged"
+                    );
+                    assert_eq!(
+                        engine.state().block_count(),
+                        block_count_before,
+                        "block store size unchanged (no new block registered)"
+                    );
+                    let block_ids_after: HashSet<[u8; 32]> =
+                        engine.state().blocks_iter().map(|b| b.id).collect();
+                    assert_eq!(
+                        block_ids_after, block_ids_before,
+                        "block store contents unchanged"
+                    );
+                    assert!(
+                        engine.state().get_block(&anchor).is_some(),
+                        "baseline anchor block still present after"
+                    );
                     assert_eq!(detector.cached_headers(), 0, "no reconfiguration observation");
                     assert_eq!(stats.inbound_proposals_delivered, 0, "no delivery");
                     assert_eq!(stats.restore_catchup_proposals_deferred, 0, "no deferral");
+                    assert_eq!(stats.inbound_proposals_engine_accepted, 0, "engine not entered");
                     assert_eq!(facade.total(), 0, "zero facade actions");
                     assert!(counts.votes() >= 1, "QC crypto ran but produced no effect");
+                }
+
+                // Valid-QC control for the state-protection fixture: the SAME
+                // coherent nonempty baseline, an eligible future-view Proposal
+                // from the leader of that view carrying a genuine D6-signed
+                // quorum, reaches the intended engine path and registers a new
+                // block in the store — proving the fixture is genuinely capable
+                // of the state transition the invalid-QC case is shown to
+                // suppress.
+                #[test]
+                fn c3e_i_valid_qc_control_reaches_engine_and_registers_block() {
+                    use std::collections::HashSet;
+                    let f = make_fixture(4);
+                    // Bound signer for the local node so the engine-produced
+                    // self-vote is signed and forwarded.
+                    let pv = c3e_pv(&f, c3e_domain(), f.br.clone(), Some(ValidatorId(0)));
+                    let snap = coherent_snapshot_for(&pv);
+                    let mut engine = make_engine(ValidatorId(0), 4);
+                    let anchor = [0xAB; 32];
+                    engine.initialize_from_snapshot_baseline(anchor, 4);
+                    let block_count_before = engine.state().block_count();
+                    let block_ids_before: HashSet<[u8; 32]> =
+                        engine.state().blocks_iter().map(|b| b.id).collect();
+                    let committed_before = engine.committed_height();
+
+                    // Height 6 (> current view 5); leader_for_view(6) == 6 % 4 ==
+                    // validator 2, so this eligible proposal is engine-accepted.
+                    let p = proposal_with_qc(2, 6, &f, &c3e_domain(), Some(valid_quorum(&f)));
+                    let mut stats = BinaryConsensusLoopInboundStats::default();
+                    let mut restore = RestoreCatchupModeState::from_config(None);
+                    let facade = D7ActionRecorder::default();
+                    deliver(
+                        &mut engine, &mut stats, &mut restore, &pv, &snap, &p,
+                        Some(&facade), &origin_for(2),
+                    );
+
+                    assert_eq!(stats.inbound_proposal_embedded_qc_verified_total, 1, "valid QC verified");
+                    assert_eq!(stats.inbound_proposals_delivered, 1, "delivered");
+                    assert_eq!(
+                        stats.inbound_proposals_engine_accepted, 1,
+                        "engine accepted the leader's future-view proposal"
+                    );
+                    assert_eq!(engine.current_view(), 6, "engine advanced to the future view");
+                    // Block registration is directly observable in the store.
+                    assert_eq!(
+                        engine.state().block_count(),
+                        block_count_before + 1,
+                        "exactly one new block registered"
+                    );
+                    let block_ids_after: HashSet<[u8; 32]> =
+                        engine.state().blocks_iter().map(|b| b.id).collect();
+                    assert!(
+                        block_ids_after.is_superset(&block_ids_before),
+                        "pre-existing blocks preserved"
+                    );
+                    assert_eq!(
+                        block_ids_after.difference(&block_ids_before).count(),
+                        1,
+                        "one new block id appeared"
+                    );
+                    assert!(
+                        engine.state().get_block(&anchor).is_some(),
+                        "baseline anchor block still present"
+                    );
+                    assert_eq!(
+                        engine.committed_height(),
+                        committed_before,
+                        "a single proposal forms no new commit"
+                    );
+                    assert_eq!(facade.total(), 1, "self-vote forwarded via the outbound handoff");
                 }
 
                 // ============================ J ============================
@@ -18576,6 +18714,336 @@ mod tests {
                     assert_eq!(stats.inbound_proposal_embedded_qc_rejected_total, 0);
                     assert_eq!(stats.inbound_proposal_engine_context_mismatch_total, 0);
                     assert_eq!(counts.votes(), 0, "no constituent Vote crypto for an absent QC");
+                }
+
+                // ============================ K ============================
+                // Present-QC AUTHORIZATION-ORDERING coverage (section 2). Each
+                // case delivers a correctly encoded, correctly OUTER-signed
+                // Proposal carrying a genuine D6-signed quorum through the real
+                // handler under `Required`, and asserts that current-
+                // authorization admission stops the message BEFORE any outer or
+                // constituent verification — the exact existing rejection
+                // counter increments, the QC-gate counters stay at zero, and
+                // there is no delivery, deferral, reconfiguration observation,
+                // engine mutation, or facade effect.
+                //
+                // The UNAVAILABLE current-authorization case is already covered
+                // by `c3e_g_unavailable_authorization_prevents_qc_verification`
+                // and is not duplicated here.
+
+                /// No Proposal/Vote authority AND no current snapshot: under
+                /// `Required` the message is rejected verification-context-
+                /// unavailable before any verification.
+                #[test]
+                fn c3e_k_no_authority_no_snapshot_rejects_before_verification() {
+                    let f = make_fixture(4);
+                    let p = proposal_with_qc(1, 1, &f, &c3e_domain(), Some(valid_quorum(&f)));
+                    let mut engine = make_engine(ValidatorId(0), 4);
+                    let mut stats = BinaryConsensusLoopInboundStats::default();
+                    let mut restore = RestoreCatchupModeState::from_config(None);
+                    let gate = pv_binding_gate(4);
+                    let metrics = make_metrics();
+                    let origin = origin_for(1);
+                    let facade = D7ActionRecorder::default();
+                    let mut detector = BinaryReconfigDetector::default();
+                    {
+                        use qbind_wire::io::WireEncode;
+                        let mut bytes = Vec::new();
+                        p.encode(&mut bytes);
+                        handle_inbound_consensus_msg(
+                            &mut engine,
+                            ConsensusNetMsg::Proposal(bytes),
+                            &mut stats,
+                            Some(&facade),
+                            &metrics,
+                            ValidatorId(0),
+                            &mut restore,
+                            None, // no Timeout/NewView context
+                            None, // no Proposal/Vote authority
+                            None, // no current snapshot
+                            &mut detector,
+                            Some(&origin),
+                            Some(&gate),
+                            ConsensusVerificationPolicy::Required,
+                        );
+                    }
+                    assert_eq!(gate.metrics().accepted(), 1, "F6 admitted first");
+                    assert_eq!(stats.inbound_proposal_verification_context_unavailable_total, 1);
+                    assert_eq!(stats.inbound_proposal_current_state_unavailable_total, 0);
+                    // No verification of any kind ran.
+                    assert_eq!(stats.proposal_vote_crypto_verify_latency_observations_total, 0);
+                    assert_eq!(stats.inbound_proposal_verify_accepted, 0);
+                    // QC-gate counters unchanged.
+                    assert_eq!(stats.inbound_proposal_embedded_qc_verified_total, 0);
+                    assert_eq!(stats.inbound_proposal_embedded_qc_rejected_total, 0);
+                    assert_eq!(stats.inbound_proposal_engine_context_mismatch_total, 0);
+                    // No downstream effect.
+                    assert_eq!(stats.inbound_proposals_delivered, 0);
+                    assert_eq!(stats.restore_catchup_proposals_deferred, 0);
+                    assert_eq!(stats.inbound_proposals_engine_accepted, 0);
+                    assert_eq!(detector.cached_headers(), 0);
+                    assert_eq!(facade.total(), 0);
+                    assert_eq!(engine.current_view(), 0);
+                }
+
+                /// Present Proposal/Vote authority but NO current snapshot:
+                /// under `Required` the message is rejected current-state-
+                /// unavailable before any verification. The present authority's
+                /// instrumented backend proves neither the outer proposal nor
+                /// any constituent QC vote was verified.
+                #[test]
+                fn c3e_k_present_authority_missing_snapshot_rejects_before_verification() {
+                    let f = make_fixture(4);
+                    let (reg, counts) = counting_registry();
+                    let pv = c3e_pv(&f, c3e_domain(), reg, None);
+                    let p = proposal_with_qc(1, 1, &f, &c3e_domain(), Some(valid_quorum(&f)));
+                    let mut engine = make_engine(ValidatorId(0), 4);
+                    let mut stats = BinaryConsensusLoopInboundStats::default();
+                    let mut restore = RestoreCatchupModeState::from_config(None);
+                    let gate = pv_binding_gate(4);
+                    let metrics = make_metrics();
+                    let origin = origin_for(1);
+                    let facade = D7ActionRecorder::default();
+                    let mut detector = BinaryReconfigDetector::default();
+                    {
+                        use qbind_wire::io::WireEncode;
+                        let mut bytes = Vec::new();
+                        p.encode(&mut bytes);
+                        handle_inbound_consensus_msg(
+                            &mut engine,
+                            ConsensusNetMsg::Proposal(bytes),
+                            &mut stats,
+                            Some(&facade),
+                            &metrics,
+                            ValidatorId(0),
+                            &mut restore,
+                            None,      // no Timeout/NewView context
+                            Some(&pv), // authority IS present
+                            None,      // but NO current snapshot
+                            &mut detector,
+                            Some(&origin),
+                            Some(&gate),
+                            ConsensusVerificationPolicy::Required,
+                        );
+                    }
+                    assert_eq!(gate.metrics().accepted(), 1, "F6 admitted first");
+                    assert_eq!(stats.inbound_proposal_current_state_unavailable_total, 1);
+                    assert_eq!(stats.inbound_proposal_verification_context_unavailable_total, 0);
+                    assert_eq!(counts.proposals(), 0, "no outer verification");
+                    assert_eq!(counts.votes(), 0, "no constituent QC verification");
+                    assert_eq!(stats.proposal_vote_crypto_verify_latency_observations_total, 0);
+                    assert_eq!(stats.inbound_proposal_embedded_qc_verified_total, 0);
+                    assert_eq!(stats.inbound_proposal_embedded_qc_rejected_total, 0);
+                    assert_eq!(stats.inbound_proposal_engine_context_mismatch_total, 0);
+                    assert_eq!(stats.inbound_proposals_delivered, 0);
+                    assert_eq!(stats.restore_catchup_proposals_deferred, 0);
+                    assert_eq!(detector.cached_headers(), 0);
+                    assert_eq!(facade.total(), 0);
+                    assert_eq!(engine.current_view(), 0);
+                }
+
+                /// Superseded current authorization: the owner's independently-
+                /// held current state is a different established authority.
+                /// Admission rejects Superseded before any verification.
+                #[test]
+                fn c3e_k_superseded_current_authorization_prevents_qc_verification() {
+                    let f = make_fixture(4);
+                    let (reg, counts) = counting_registry();
+                    let pv = c3e_pv(&f, c3e_domain(), reg, None);
+                    let snap = snapshot_superseded(&pv, true);
+                    let p = proposal_with_qc(1, 1, &f, &c3e_domain(), Some(valid_quorum(&f)));
+                    let mut engine = make_engine(ValidatorId(0), 4);
+                    let mut stats = BinaryConsensusLoopInboundStats::default();
+                    let mut restore = RestoreCatchupModeState::from_config(None);
+                    let facade = D7ActionRecorder::default();
+                    let detector = deliver(
+                        &mut engine, &mut stats, &mut restore, &pv, &snap, &p,
+                        Some(&facade), &origin_for(1),
+                    );
+                    assert_eq!(stats.inbound_proposal_authority_superseded_total, 1);
+                    assert_eq!(stats.inbound_proposal_current_state_unavailable_total, 0);
+                    assert_eq!(counts.proposals(), 0, "no outer verification");
+                    assert_eq!(counts.votes(), 0, "no QC crypto under superseded authority");
+                    assert_eq!(stats.proposal_vote_crypto_verify_latency_observations_total, 0);
+                    assert_eq!(stats.inbound_proposal_embedded_qc_verified_total, 0);
+                    assert_eq!(stats.inbound_proposal_embedded_qc_rejected_total, 0);
+                    assert_eq!(stats.inbound_proposals_delivered, 0);
+                    assert_eq!(detector.cached_headers(), 0);
+                    assert_eq!(facade.total(), 0);
+                }
+
+                /// Terminally exhausted current authorization: the owner is
+                /// driven into the CHECKED-OVERFLOW terminal latch (generation
+                /// positioned at `u64::MAX`, then one `replace_for_fixture`
+                /// whose `generation + 1` cannot be represented sets
+                /// `exhausted = true`) — not merely a generation set to MAX.
+                /// Admission rejects AuthorizationExhausted before verification.
+                #[test]
+                fn c3e_k_exhausted_current_authorization_prevents_qc_verification() {
+                    use crate::genesis_consensus_authority::{FreshnessError, LocalAuthorizationState};
+                    let f = make_fixture(4);
+                    let (reg, counts) = counting_registry();
+                    let pv = c3e_pv(&f, c3e_domain(), reg, None);
+                    let mut snap = coherent_snapshot_for(&pv);
+                    let coherent = snap.owner().candidate().config_identity();
+                    snap.owner_mut().set_generation_for_exhaustion_fixture(u64::MAX);
+                    snap.owner_mut()
+                        .replace_for_fixture(LocalAuthorizationState::Established(coherent));
+                    assert!(
+                        matches!(snap.owner().admit(), Err(FreshnessError::AuthorizationExhausted)),
+                        "the checked-overflow latch (not a bare generation=MAX) refuses admission"
+                    );
+                    let p = proposal_with_qc(1, 1, &f, &c3e_domain(), Some(valid_quorum(&f)));
+                    let mut engine = make_engine(ValidatorId(0), 4);
+                    let mut stats = BinaryConsensusLoopInboundStats::default();
+                    let mut restore = RestoreCatchupModeState::from_config(None);
+                    let facade = D7ActionRecorder::default();
+                    let detector = deliver(
+                        &mut engine, &mut stats, &mut restore, &pv, &snap, &p,
+                        Some(&facade), &origin_for(1),
+                    );
+                    assert_eq!(stats.inbound_proposal_authorization_exhausted_total, 1);
+                    assert_eq!(stats.inbound_proposal_current_state_unavailable_total, 0);
+                    assert_eq!(stats.inbound_proposal_authority_superseded_total, 0);
+                    assert_eq!(counts.proposals(), 0, "no outer verification");
+                    assert_eq!(counts.votes(), 0, "no QC crypto under an exhausted owner");
+                    assert_eq!(stats.proposal_vote_crypto_verify_latency_observations_total, 0);
+                    assert_eq!(stats.inbound_proposal_embedded_qc_verified_total, 0);
+                    assert_eq!(stats.inbound_proposal_embedded_qc_rejected_total, 0);
+                    assert_eq!(stats.inbound_proposals_delivered, 0);
+                    assert_eq!(detector.cached_headers(), 0);
+                    assert_eq!(facade.total(), 0);
+                }
+
+                // ============================ L ============================
+                // Timeout NON-SUBSTITUTION (section 3): a valid, populated
+                // `TimeoutVerificationContext` supplies NEITHER the missing
+                // Proposal/Vote authorization NOR any QC verification. Each case
+                // repeats a present-QC section-2 rejection with the Timeout
+                // context wired, and uses direct backend instrumentation on the
+                // Timeout context to prove its backend never verified the outer
+                // proposal or any constituent QC vote. The bound-A / supplied-B
+                // controls and existing Timeout/NewView behavior are preserved;
+                // no alternate authority mechanism is introduced.
+
+                /// A valid, populated legacy Timeout/NewView context with an
+                /// instrumented backend and a live signer, built from the shared
+                /// fixture keys.
+                fn counting_timeout_ctx(f: &Fixture) -> (TimeoutVerificationContext, QcCallCounts) {
+                    let (reg, counts) = counting_registry();
+                    let sk = f.sk_objs.get(&ValidatorId(0)).expect("signer key present").clone();
+                    let signer: Option<Arc<dyn ValidatorSigner>> =
+                        Some(Arc::new(LocalKeySigner::new(ValidatorId(0), TEST_SUITE_U16, sk)));
+                    let ctx = TimeoutVerificationContext {
+                        validators: f.validators.clone(),
+                        key_provider: f.kp.clone(),
+                        backend_registry: reg,
+                        chain_id: QBIND_DEVNET_CHAIN_ID,
+                        signer,
+                    };
+                    (ctx, counts)
+                }
+
+                /// Missing-authority present-QC case WITH a valid Timeout
+                /// context: still verification-context-unavailable; the Timeout
+                /// backend verified nothing.
+                #[test]
+                fn c3e_l_timeout_context_does_not_supply_missing_authority() {
+                    let f = make_fixture(4);
+                    let (timeout_ctx, tcounts) = counting_timeout_ctx(&f);
+                    assert!(timeout_ctx.signer.is_some(), "context is populated (live signer)");
+                    let p = proposal_with_qc(1, 1, &f, &c3e_domain(), Some(valid_quorum(&f)));
+                    let mut engine = make_engine(ValidatorId(0), 4);
+                    let mut stats = BinaryConsensusLoopInboundStats::default();
+                    let mut restore = RestoreCatchupModeState::from_config(None);
+                    let gate = pv_binding_gate(4);
+                    let metrics = make_metrics();
+                    let origin = origin_for(1);
+                    let facade = D7ActionRecorder::default();
+                    let mut detector = BinaryReconfigDetector::default();
+                    {
+                        use qbind_wire::io::WireEncode;
+                        let mut bytes = Vec::new();
+                        p.encode(&mut bytes);
+                        handle_inbound_consensus_msg(
+                            &mut engine,
+                            ConsensusNetMsg::Proposal(bytes),
+                            &mut stats,
+                            Some(&facade),
+                            &metrics,
+                            ValidatorId(0),
+                            &mut restore,
+                            Some(&timeout_ctx), // valid, populated Timeout context
+                            None,               // no Proposal/Vote authority
+                            None,               // no current snapshot
+                            &mut detector,
+                            Some(&origin),
+                            Some(&gate),
+                            ConsensusVerificationPolicy::Required,
+                        );
+                    }
+                    assert_eq!(stats.inbound_proposal_verification_context_unavailable_total, 1);
+                    // The Timeout context supplied neither authority nor QC
+                    // verification: its instrumented backend never ran.
+                    assert_eq!(tcounts.proposals(), 0, "Timeout backend verified no proposal");
+                    assert_eq!(tcounts.votes(), 0, "Timeout backend verified no QC vote");
+                    assert_eq!(stats.inbound_proposal_embedded_qc_verified_total, 0);
+                    assert_eq!(stats.inbound_proposal_embedded_qc_rejected_total, 0);
+                    assert_eq!(stats.inbound_proposals_delivered, 0);
+                    assert_eq!(detector.cached_headers(), 0);
+                    assert_eq!(facade.total(), 0);
+                }
+
+                /// Missing-current-snapshot present-QC case WITH a valid Timeout
+                /// context: still current-state-unavailable; neither the present
+                /// authority's backend nor the Timeout context's backend ran.
+                #[test]
+                fn c3e_l_timeout_context_does_not_supply_missing_snapshot() {
+                    let f = make_fixture(4);
+                    let (reg, pvcounts) = counting_registry();
+                    let pv = c3e_pv(&f, c3e_domain(), reg, None);
+                    let (timeout_ctx, tcounts) = counting_timeout_ctx(&f);
+                    let p = proposal_with_qc(1, 1, &f, &c3e_domain(), Some(valid_quorum(&f)));
+                    let mut engine = make_engine(ValidatorId(0), 4);
+                    let mut stats = BinaryConsensusLoopInboundStats::default();
+                    let mut restore = RestoreCatchupModeState::from_config(None);
+                    let gate = pv_binding_gate(4);
+                    let metrics = make_metrics();
+                    let origin = origin_for(1);
+                    let facade = D7ActionRecorder::default();
+                    let mut detector = BinaryReconfigDetector::default();
+                    {
+                        use qbind_wire::io::WireEncode;
+                        let mut bytes = Vec::new();
+                        p.encode(&mut bytes);
+                        handle_inbound_consensus_msg(
+                            &mut engine,
+                            ConsensusNetMsg::Proposal(bytes),
+                            &mut stats,
+                            Some(&facade),
+                            &metrics,
+                            ValidatorId(0),
+                            &mut restore,
+                            Some(&timeout_ctx), // valid, populated Timeout context
+                            Some(&pv),          // authority present
+                            None,               // but NO current snapshot
+                            &mut detector,
+                            Some(&origin),
+                            Some(&gate),
+                            ConsensusVerificationPolicy::Required,
+                        );
+                    }
+                    assert_eq!(stats.inbound_proposal_current_state_unavailable_total, 1);
+                    assert_eq!(stats.inbound_proposal_verification_context_unavailable_total, 0);
+                    assert_eq!(tcounts.proposals(), 0, "Timeout backend verified no proposal");
+                    assert_eq!(tcounts.votes(), 0, "Timeout backend verified no QC vote");
+                    assert_eq!(pvcounts.proposals(), 0, "present authority verified no proposal");
+                    assert_eq!(pvcounts.votes(), 0, "present authority verified no QC vote");
+                    assert_eq!(stats.inbound_proposal_embedded_qc_verified_total, 0);
+                    assert_eq!(stats.inbound_proposal_embedded_qc_rejected_total, 0);
+                    assert_eq!(stats.inbound_proposals_delivered, 0);
+                    assert_eq!(detector.cached_headers(), 0);
+                    assert_eq!(facade.total(), 0);
                 }
             }
 
@@ -20177,4 +20645,4 @@ mod tests {
             }
         }
     }
-}
+}
