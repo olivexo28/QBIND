@@ -4161,10 +4161,20 @@ Tested SHA `c7f5819`; final SHA recorded at the closing checkpoint of this pass.
 
 ### Security tooling (reported literally)
 
-`parallel_validation` (CodeQL + code review) outcomes are recorded exactly as returned; production-source
-changes are NOT a trivial-change skip. A skipped/size-limited CodeQL analysis is **incomplete** ("0 alerts"
-from a skip ≠ clean); an unavailable reviewer is **not** a successful review. `secret_scanning` was run on
-the changed files.
+`parallel_validation` was run (production-source changes; declared **non-trivial** for CodeQL). Outcomes
+recorded exactly as returned:
+
+* **CodeQL (rust): INCOMPLETE / UNVERIFIED.** Returned literally: "Analysis was skipped because the
+  database size is too large. Found 0 alerts." A skipped analysis means **not analyzed** — the "0 alerts"
+  is **not** a clean result and does not establish CodeQL coverage for this change.
+* **Code review: UNVERIFIED.** The tool reported "Reviewed 9 file(s). No review comments found," but also
+  emitted a model-registry error (`model claude-sonnet-4.6 not found in registry`) and noted the reviewer
+  "is not available in this environment." An unavailable reviewer is **not** a successful review; "no
+  comments" here means **not reviewed**.
+* **secret_scanning:** run on the changed source and doc files — no secrets detected.
+
+Neither CodeQL nor the reviewer establishes a clean security posture for this change; both are recorded as
+incomplete/unverified rather than converted into a pass.
 
 ### Retained posture (unchanged)
 
