@@ -23,6 +23,7 @@ use crate::driver::{ConsensusEngineAction, HasCommitLog};
 use crate::hotstuff_state_engine::{CommittedEntry, HotStuffStateEngine};
 use crate::ids::ValidatorId;
 use crate::qc::{QcValidationError, QuorumCertificate};
+use crate::qc_verify_domain::VerifiedQuorumCertificate;
 use crate::timeout::{TimeoutAccumulator, TimeoutCertificate, TimeoutMsg, TimeoutValidationError};
 use crate::validator_set::ConsensusValidatorSet;
 
@@ -438,6 +439,91 @@ impl std::fmt::Display for PendingReconfigIntentError {
 }
 
 impl std::error::Error for PendingReconfigIntentError {}
+
+/// Run 422 D7-C3F: bounded, typed rejection taxonomy for the verified
+/// embedded-QC ingestion entrypoint
+/// ([`BasicHotStuffEngine::on_verified_proposal_event`]).
+///
+/// Every variant carries only small scalars (chain ids, epochs, byte counts) —
+/// never a certificate, signature bytes, or key material. A rejection never
+/// mutates engine state and never falls back to the legacy/raw entrypoint.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum VerifiedProposalIngestError {
+    /// The proposal carried no embedded QC. The verified path requires a
+    /// present embedded QC; absent-QC/bootstrap authorization is out of scope
+    /// and must be handled by the legacy path, never routed here.
+    MissingEmbeddedQc,
+    /// The supplied verified evidence does not correspond exactly to the
+    /// proposal's present embedded QC (some wire field, the signer bitmap, or a
+    /// signature byte differs).
+    EvidenceCertificateMismatch,
+    /// The proposal's wire `chain_id` disagrees with the wire chain the
+    /// evidence records verification against.
+    WireChainMismatch {
+        /// The outer proposal header's wire `chain_id`.
+        proposal_chain_id: u32,
+        /// The wire `chain_id` the evidence was verified under.
+        evidence_chain_id: u32,
+    },
+    /// The proposal's `epoch` disagrees with the authorized epoch the evidence
+    /// records verification against.
+    EpochMismatch {
+        /// The outer proposal header's epoch.
+        proposal_epoch: u64,
+        /// The authorized epoch the evidence was verified under.
+        evidence_epoch: u64,
+    },
+    /// Retaining the certificate would exceed the retained-evidence byte
+    /// budget. Rejected before any engine mutation; no partial effect.
+    RetentionBudgetExceeded {
+        /// Bytes the new evidence would have required.
+        needed_bytes: u64,
+        /// Bytes already retained across all blocks.
+        retained_bytes: u64,
+        /// The configured hard ceiling.
+        max_bytes: u64,
+    },
+}
+
+impl std::fmt::Display for VerifiedProposalIngestError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            VerifiedProposalIngestError::MissingEmbeddedQc => {
+                write!(f, "verified ingestion requires a present embedded QC")
+            }
+            VerifiedProposalIngestError::EvidenceCertificateMismatch => write!(
+                f,
+                "supplied evidence does not correspond exactly to the embedded QC"
+            ),
+            VerifiedProposalIngestError::WireChainMismatch {
+                proposal_chain_id,
+                evidence_chain_id,
+            } => write!(
+                f,
+                "proposal wire chain_id {proposal_chain_id} != evidence wire chain_id \
+                 {evidence_chain_id}"
+            ),
+            VerifiedProposalIngestError::EpochMismatch {
+                proposal_epoch,
+                evidence_epoch,
+            } => write!(
+                f,
+                "proposal epoch {proposal_epoch} != evidence authorized epoch {evidence_epoch}"
+            ),
+            VerifiedProposalIngestError::RetentionBudgetExceeded {
+                needed_bytes,
+                retained_bytes,
+                max_bytes,
+            } => write!(
+                f,
+                "retained-evidence budget exceeded: needed={needed_bytes} \
+                 retained={retained_bytes} max={max_bytes}"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for VerifiedProposalIngestError {}
 
 /// Fail-closed restore-catchup validation errors.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1448,6 +1534,118 @@ impl BasicHotStuffEngine<[u8; 32]> {
         from: ValidatorId,
         proposal: &qbind_wire::consensus::BlockProposal,
     ) -> Option<ConsensusEngineAction<ValidatorId>> {
+        // Legacy / absent-QC / unverified path: no retained evidence.
+        self.ingest_proposal(from, proposal, None)
+    }
+
+    /// Run 422 D7-C3F: verified embedded-QC ingestion entrypoint.
+    ///
+    /// This is the smallest explicit engine entrypoint for handing the
+    /// [`VerifiedQuorumCertificate`] produced by the caller's own C3E
+    /// verification (under its admitted snapshot) into the engine, so the
+    /// engine can **retain** that evidence with the proposed block's
+    /// justification. It reuses the existing proposal-processing logic
+    /// ([`Self::on_proposal_event`]'s shared body) rather than copying it.
+    ///
+    /// Before it changes engine view, registers a block, records a vote, or
+    /// emits an action it enforces, with bounded typed errors and **no** engine
+    /// mutation on failure and **no** fallback to the legacy/raw entrypoint:
+    ///
+    /// 1. A present embedded QC is required
+    ///    ([`VerifiedProposalIngestError::MissingEmbeddedQc`]).
+    /// 2. The supplied evidence corresponds **exactly** to that QC — all wire
+    ///    fields, bitmap and signature bytes — via `WireQuorumCertificate`'s
+    ///    derived equality
+    ///    ([`VerifiedProposalIngestError::EvidenceCertificateMismatch`]).
+    /// 3. Proposal/QC/evidence wire-chain and epoch correspondence hold against
+    ///    the already-established contract
+    ///    ([`VerifiedProposalIngestError::WireChainMismatch`],
+    ///    [`VerifiedProposalIngestError::EpochMismatch`]).
+    /// 4. The retained certificate fits the retained-evidence byte budget
+    ///    ([`VerifiedProposalIngestError::RetentionBudgetExceeded`]).
+    ///
+    /// The proposal and QC are never rewritten to force a match. Signer
+    /// identities, if needed, are those already carried by the evidence
+    /// (`VerifiedQuorumCertificate::signers()`); no second signer list is
+    /// decoded and **no** second constituent-signature verification is
+    /// performed here.
+    ///
+    /// On success it returns the same `Option<ConsensusEngineAction>` as
+    /// [`Self::on_proposal_event`]; if the engine registers the proposed block,
+    /// the evidence is retained as that block's `verified_justification`
+    /// (observable via [`HotStuffStateEngine::verified_justification`]).
+    pub fn on_verified_proposal_event(
+        &mut self,
+        from: ValidatorId,
+        proposal: &qbind_wire::consensus::BlockProposal,
+        evidence: Arc<VerifiedQuorumCertificate>,
+    ) -> Result<Option<ConsensusEngineAction<ValidatorId>>, VerifiedProposalIngestError> {
+        // (1) Require a present embedded QC. Absent-QC/bootstrap authorization
+        // is explicitly out of scope and must not be routed here.
+        let qc = proposal
+            .qc
+            .as_ref()
+            .ok_or(VerifiedProposalIngestError::MissingEmbeddedQc)?;
+
+        // (2) The evidence must correspond EXACTLY to the present embedded QC,
+        // including every wire field, the signer bitmap and all signature
+        // bytes. `WireQuorumCertificate` derives `PartialEq`/`Eq`, so `==`
+        // compares the whole certificate. Never rewrite either side to match.
+        if evidence.certificate() != qc {
+            return Err(VerifiedProposalIngestError::EvidenceCertificateMismatch);
+        }
+
+        // (3) Wire-chain and epoch correspondence against the established
+        // contract: the proposal must be bound to the same wire chain and epoch
+        // the evidence records verification under. (The QC's own chain_id/epoch
+        // were already bound to the evidence by the exact-match check above; the
+        // remaining check ties the *outer proposal* to that same context.)
+        if proposal.header.chain_id != evidence.expected_wire_chain_id() {
+            return Err(VerifiedProposalIngestError::WireChainMismatch {
+                proposal_chain_id: proposal.header.chain_id,
+                evidence_chain_id: evidence.expected_wire_chain_id(),
+            });
+        }
+        if proposal.header.epoch != evidence.authorized_epoch() {
+            return Err(VerifiedProposalIngestError::EpochMismatch {
+                proposal_epoch: proposal.header.epoch,
+                evidence_epoch: evidence.authorized_epoch(),
+            });
+        }
+
+        // (4) Reject an over-budget retention BEFORE any engine mutation, so a
+        // rejected request advances no view, registers no block, records no
+        // vote and emits no action. Pre-check the exact block id the engine
+        // would register for this proposal.
+        let block_id = Self::derive_block_id_from_header(
+            from,
+            proposal.header.height,
+            &proposal.header.parent_block_id,
+        );
+        let needed = evidence.retained_byte_size();
+        if !self.state.can_retain_evidence(&block_id, needed) {
+            return Err(VerifiedProposalIngestError::RetentionBudgetExceeded {
+                needed_bytes: needed,
+                retained_bytes: self.state.retained_evidence_bytes(),
+                max_bytes: self.state.max_retained_evidence_bytes(),
+            });
+        }
+
+        // Delegate to the shared proposal-processing body with the evidence.
+        Ok(self.ingest_proposal(from, proposal, Some(evidence)))
+    }
+
+    /// Shared proposal-processing body for [`Self::on_proposal_event`] (legacy,
+    /// `verified_evidence = None`) and [`Self::on_verified_proposal_event`]
+    /// (`verified_evidence = Some`). Identical logic in both cases except that,
+    /// when evidence is supplied and the block is registered, the evidence is
+    /// retained as the block's `verified_justification`.
+    fn ingest_proposal(
+        &mut self,
+        from: ValidatorId,
+        proposal: &qbind_wire::consensus::BlockProposal,
+        verified_evidence: Option<Arc<VerifiedQuorumCertificate>>,
+    ) -> Option<ConsensusEngineAction<ValidatorId>> {
         // T101: Epoch validation - reject proposals from wrong epoch
         if proposal.header.epoch != self.current_epoch {
             // Log and reject (future work: return explicit error)
@@ -1502,8 +1700,23 @@ impl BasicHotStuffEngine<[u8; 32]> {
         } else {
             Some(proposal.header.parent_block_id)
         };
-        self.state
-            .register_block(block_id, view, parent_id, justify_qc);
+        // Register the block, retaining verified evidence as its
+        // justification when supplied through the verified ingestion path. The
+        // caller (`on_verified_proposal_event`) has already pre-checked the
+        // retention budget before any mutation, so the retention here does not
+        // fail; a defensive failure is treated as "not registered" (no evidence
+        // retained) rather than panicking.
+        match verified_evidence {
+            Some(evidence) => {
+                let _ = self.state.register_block_with_verified_justification(
+                    block_id, view, parent_id, justify_qc, evidence,
+                );
+            }
+            None => {
+                self.state
+                    .register_block(block_id, view, parent_id, justify_qc);
+            }
+        }
 
         // Enforce locked-block safety: only vote if this block is on a chain
         // that includes the locked block as an ancestor (or if there is no lock yet).

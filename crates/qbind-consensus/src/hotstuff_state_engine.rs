@@ -21,12 +21,29 @@
 //! - Timeouts or view-change mechanics
 
 use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
+use std::sync::Arc;
 
 use crate::block_state::BlockNode;
 use crate::ids::ValidatorId;
 use crate::qc::{QcValidationError, QuorumCertificate};
+use crate::qc_verify_domain::VerifiedQuorumCertificate;
 use crate::validator_set::ConsensusValidatorSet;
 use crate::vote_accumulator::{ConsensusLimitsConfig, VoteAccumulator};
+
+/// Run 422 D7-C3F: default byte budget for retained embedded-QC verification
+/// evidence ([`BlockNode::verified_justification`]).
+///
+/// This is a dedicated, explicit budget: the existing `max_pending_blocks`
+/// count limit bounds the *number* of blocks but says nothing about the
+/// variable-length signature buffers a verified certificate retains, so it is
+/// not an adequate byte bound on its own. The default is sized so that, up to
+/// the default `max_pending_blocks` (4096) blocks, a generously-sized retained
+/// certificate per block still fits, while remaining a hard, checked ceiling
+/// that rejects new retention requests once exhausted.
+///
+/// Semantics: this bounds only the bytes attributed to retained
+/// `VerifiedQuorumCertificate` evidence; it is not a process-wide memory audit.
+pub const DEFAULT_MAX_RETAINED_EVIDENCE_BYTES: u64 = 256 * 1024 * 1024;
 
 /// An entry in the commit log recording a committed block.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -38,6 +55,44 @@ pub struct CommittedEntry<BlockIdT> {
     /// The height of the block in the chain from genesis.
     pub height: u64,
 }
+
+/// Run 422 D7-C3F: bounded, typed failure of a verified-evidence retention
+/// request.
+///
+/// Deliberately carries only byte-count scalars — never a certificate,
+/// signature bytes, or key material.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EvidenceRetentionError {
+    /// The retention could not be accommodated within the configured
+    /// retained-evidence byte budget. The block tree and byte accounting are
+    /// left unchanged (no partial effect).
+    BudgetExceeded {
+        /// Bytes the new evidence would have required.
+        needed_bytes: u64,
+        /// Bytes currently retained across all blocks.
+        retained_bytes: u64,
+        /// The configured hard ceiling.
+        max_bytes: u64,
+    },
+}
+
+impl std::fmt::Display for EvidenceRetentionError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            EvidenceRetentionError::BudgetExceeded {
+                needed_bytes,
+                retained_bytes,
+                max_bytes,
+            } => write!(
+                f,
+                "retained-evidence budget exceeded: needed={needed_bytes} \
+                 retained={retained_bytes} max={max_bytes}"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for EvidenceRetentionError {}
 
 /// Outcome of recording a vote in the history tracker.
 ///
@@ -123,6 +178,25 @@ where
 
     /// Counter for commit log entries evicted due to memory limits.
     evicted_commit_log_entries: u64,
+
+    /// Run 422 D7-C3F: current total bytes of retained embedded-QC
+    /// verification evidence across all blocks in `blocks`. Maintained with
+    /// checked/saturating accounting by every block insert/remove/replace path
+    /// so it always equals the sum of `retained_byte_size()` over every stored
+    /// block's `verified_justification`.
+    retained_evidence_bytes: u64,
+
+    /// Run 422 D7-C3F: hard ceiling on `retained_evidence_bytes`. A new
+    /// retention request whose projected total would exceed this is rejected
+    /// *before* any engine mutation; see
+    /// [`Self::register_block_with_verified_justification`].
+    max_retained_evidence_bytes: u64,
+
+    /// Run 422 D7-C3F: count of retention requests rejected because they could
+    /// not be accommodated within `max_retained_evidence_bytes`. Rejected
+    /// requests leave the block tree and byte accounting unchanged (no partial
+    /// effect).
+    rejected_evidence_over_budget: u64,
 }
 
 impl<BlockIdT> HotStuffStateEngine<BlockIdT>
@@ -164,6 +238,9 @@ where
             evicted_blocks: 0,
             evicted_votes_by_view_entries: 0,
             evicted_commit_log_entries: 0,
+            retained_evidence_bytes: 0,
+            max_retained_evidence_bytes: DEFAULT_MAX_RETAINED_EVIDENCE_BYTES,
+            rejected_evidence_over_budget: 0,
         }
     }
 
@@ -277,6 +354,109 @@ where
         self.evicted_commit_log_entries
     }
 
+    // ========================================================================
+    // Run 422 D7-C3F: retained embedded-QC verification evidence
+    // ========================================================================
+
+    /// Read-only access to the verification evidence retained for a block's
+    /// `justify_qc`, if it was registered through the verified ingestion path.
+    ///
+    /// This is the inspectable, read-only API that lets a caller observe the
+    /// complete retained [`VerifiedQuorumCertificate`] (certificate,
+    /// signatures, bitmap, domain, authorized epoch, signer identities and
+    /// voting-power result) *after* the inbound handler returns. It never
+    /// exposes mutation and never converts the evidence into authorization.
+    pub fn verified_justification(&self, id: &BlockIdT) -> Option<&VerifiedQuorumCertificate> {
+        self.blocks
+            .get(id)
+            .and_then(|b| b.verified_justification.as_deref())
+    }
+
+    /// Current total bytes of retained embedded-QC verification evidence.
+    pub fn retained_evidence_bytes(&self) -> u64 {
+        self.retained_evidence_bytes
+    }
+
+    /// The configured hard ceiling on retained embedded-QC evidence bytes.
+    pub fn max_retained_evidence_bytes(&self) -> u64 {
+        self.max_retained_evidence_bytes
+    }
+
+    /// Count of retention requests rejected for exceeding the byte budget.
+    pub fn rejected_evidence_over_budget(&self) -> u64 {
+        self.rejected_evidence_over_budget
+    }
+
+    /// Configure the retained-evidence byte budget.
+    ///
+    /// This is an explicit configuration knob (used by tests with small
+    /// fixture limits and available for deployment tuning). Lowering it below
+    /// the currently retained total does not evict anything already retained;
+    /// it only causes subsequent retention requests to be rejected until the
+    /// retained total falls back under the ceiling.
+    pub fn set_max_retained_evidence_bytes(&mut self, max: u64) {
+        self.max_retained_evidence_bytes = max;
+    }
+
+    /// Compute the byte footprint a node's retained evidence would occupy.
+    fn evidence_bytes_of_node(node: &BlockNode<BlockIdT>) -> u64 {
+        node.verified_justification
+            .as_ref()
+            .map(|e| e.retained_byte_size())
+            .unwrap_or(0)
+    }
+
+    /// Would retaining `needed` bytes of evidence for block `id` fit within the
+    /// budget, accounting for reclaiming any evidence already retained for the
+    /// SAME `id` (a replacement)?
+    ///
+    /// Pure check with no mutation — the entrypoint calls this *before* any
+    /// engine mutation so an over-budget request is rejected with no partial
+    /// effect.
+    pub fn can_retain_evidence(&self, id: &BlockIdT, needed: u64) -> bool {
+        let reclaimable = self
+            .blocks
+            .get(id)
+            .map(Self::evidence_bytes_of_node)
+            .unwrap_or(0);
+        let projected = self
+            .retained_evidence_bytes
+            .saturating_sub(reclaimable)
+            .saturating_add(needed);
+        projected <= self.max_retained_evidence_bytes
+    }
+
+    /// Record that a retention request was rejected for exceeding the budget.
+    fn note_rejected_evidence_over_budget(&mut self) {
+        self.rejected_evidence_over_budget = self.rejected_evidence_over_budget.saturating_add(1);
+    }
+
+    /// Insert `node`, reconciling the retained-evidence byte accounting: any
+    /// evidence previously retained for the same id is reclaimed and the new
+    /// node's evidence bytes are added. This is the single choke point for
+    /// every block insert so accounting can never drift.
+    fn insert_block_node(&mut self, node: BlockNode<BlockIdT>) {
+        let id = node.id.clone();
+        if let Some(old) = self.blocks.get(&id) {
+            let old_bytes = Self::evidence_bytes_of_node(old);
+            self.retained_evidence_bytes =
+                self.retained_evidence_bytes.saturating_sub(old_bytes);
+        }
+        let new_bytes = Self::evidence_bytes_of_node(&node);
+        self.retained_evidence_bytes = self.retained_evidence_bytes.saturating_add(new_bytes);
+        self.blocks.insert(id, node);
+    }
+
+    /// Remove a block, reclaiming any retained-evidence bytes it held.
+    fn remove_block_and_reclaim(&mut self, id: &BlockIdT) -> Option<BlockNode<BlockIdT>> {
+        let removed = self.blocks.remove(id);
+        if let Some(ref node) = removed {
+            let bytes = Self::evidence_bytes_of_node(node);
+            self.retained_evidence_bytes = self.retained_evidence_bytes.saturating_sub(bytes);
+        }
+        removed
+    }
+
     /// Check if a block is safe to evict.
     ///
     /// A block is NOT safe to evict if:
@@ -354,7 +534,7 @@ where
             let mut evicted = false;
             while let Some(block_id) = self.pending_block_order.pop_front() {
                 if self.blocks.contains_key(&block_id) && self.is_block_safe_to_evict(&block_id) {
-                    self.blocks.remove(&block_id);
+                    self.remove_block_and_reclaim(&block_id);
                     self.evicted_blocks += 1;
                     evicted = true;
                     break;
@@ -437,7 +617,12 @@ where
         // Check if this is an update to an existing block
         let is_new = !self.blocks.contains_key(&id);
 
-        self.blocks.insert(id.clone(), node);
+        // A legacy/unverified registration replaces any prior node for this id,
+        // including any earlier *verified* designation: the new node carries no
+        // `verified_justification`, and `insert_block_node` reclaims the old
+        // node's retained-evidence bytes. An unverified block therefore never
+        // inherits an earlier verified certificate.
+        self.insert_block_node(node);
 
         // If it's a new block, add to pending block order for eviction
         if is_new {
@@ -446,6 +631,67 @@ where
 
         // Evict blocks if we're over the limit
         self.evict_blocks_if_needed();
+    }
+
+    /// Run 422 D7-C3F: register a block whose `justify_qc` is backed by
+    /// verified embedded-QC evidence, retaining the complete
+    /// [`VerifiedQuorumCertificate`] with the block.
+    ///
+    /// This is the state-engine half of the verified ingestion path. It mirrors
+    /// [`Self::register_block`] but additionally attaches `evidence` as the
+    /// block's non-serialized `verified_justification`, under checked
+    /// retention-budget accounting.
+    ///
+    /// # Budget
+    ///
+    /// The retention is rejected — with **no** block-tree or accounting change
+    /// — if it cannot be accommodated within the retained-evidence byte budget
+    /// (see [`Self::can_retain_evidence`]). Callers that must avoid *any* engine
+    /// mutation on rejection (e.g. view advancement in a higher-level
+    /// entrypoint) should pre-check [`Self::can_retain_evidence`] before mutating
+    /// engine state; this method re-checks defensively and returns
+    /// [`EvidenceRetentionError::BudgetExceeded`] rather than silently dropping
+    /// the evidence.
+    ///
+    /// # Distinction preserved
+    ///
+    /// The evidence is stored only as the *justification* evidence (the QC
+    /// certifies this block's parent); it is never placed in `own_qc` and thus
+    /// never becomes a certificate for this (child) block itself.
+    pub fn register_block_with_verified_justification(
+        &mut self,
+        id: BlockIdT,
+        view: u64,
+        parent_id: Option<BlockIdT>,
+        justify_qc: Option<QuorumCertificate<BlockIdT>>,
+        evidence: Arc<VerifiedQuorumCertificate>,
+    ) -> Result<(), EvidenceRetentionError> {
+        let needed = evidence.retained_byte_size();
+        if !self.can_retain_evidence(&id, needed) {
+            self.note_rejected_evidence_over_budget();
+            return Err(EvidenceRetentionError::BudgetExceeded {
+                needed_bytes: needed,
+                retained_bytes: self.retained_evidence_bytes,
+                max_bytes: self.max_retained_evidence_bytes,
+            });
+        }
+
+        // Compute height identically to `register_block`.
+        let height = match parent_id.as_ref() {
+            None => 0,
+            Some(pid) => self.blocks.get(pid).map(|p| p.height + 1).unwrap_or(0),
+        };
+
+        let node = BlockNode::new(id.clone(), view, parent_id, justify_qc, height)
+            .with_verified_justification(evidence);
+
+        let is_new = !self.blocks.contains_key(&id);
+        self.insert_block_node(node);
+        if is_new {
+            self.pending_block_order.push_back(id);
+        }
+        self.evict_blocks_if_needed();
+        Ok(())
     }
 
     // ========================================================================
@@ -839,7 +1085,7 @@ where
             committed_height,
         );
         let is_new = !self.blocks.contains_key(&committed_block_id);
-        self.blocks.insert(committed_block_id.clone(), node);
+        self.insert_block_node(node);
         if is_new {
             // Track for eviction order, though `is_block_safe_to_evict`
             // refuses to evict any block whose height ≤ committed_height.

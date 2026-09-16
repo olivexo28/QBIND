@@ -1733,6 +1733,30 @@ pub struct BinaryConsensusLoopInboundStats {
     pub inbound_proposal_embedded_qc_verified_total: u64,
     pub inbound_proposal_embedded_qc_rejected_total: u64,
     pub inbound_proposal_engine_context_mismatch_total: u64,
+    // Run 422 D7-C3F: verified embedded-QC HANDOFF accounting at the engine
+    // ingestion boundary (`BasicHotStuffEngine::on_verified_proposal_event`).
+    // These count the ENGINE-LEVEL outcome of passing the C3E-produced
+    // `VerifiedQuorumCertificate` into the engine, and are strictly distinct
+    // from both the C3E QC-verification counters above and the handler DELIVERY
+    // counter (`inbound_proposals_delivered`). Delivery accounting must NEVER be
+    // equated with successful engine acceptance/retention: a handoff can be
+    // rejected by the engine (evidence mismatch or retention-budget exhaustion)
+    // AFTER the C3E QC verified.
+    //
+    //   * `inbound_proposal_verified_qc_handoff_total`: the handler invoked the
+    //     verified engine entrypoint and it returned `Ok(_)` (the evidence
+    //     corresponded to the QC, wire-chain/epoch matched, and the retention
+    //     budget could accommodate it). This is the point at which the engine
+    //     may retain the evidence with the registered block; it is NOT by itself
+    //     proof the engine registered a block (view/leader rules may still yield
+    //     no action), only that the verified handoff was accepted.
+    //   * `inbound_proposal_verified_qc_handoff_rejected_total`: the verified
+    //     engine entrypoint returned a bounded typed error (missing embedded QC,
+    //     evidence/QC mismatch, wire-chain/epoch mismatch, or retention budget
+    //     exceeded). Fail-closed: the handler does NOT fall back to the legacy
+    //     entrypoint on such an error.
+    pub inbound_proposal_verified_qc_handoff_total: u64,
+    pub inbound_proposal_verified_qc_handoff_rejected_total: u64,
     pub inbound_vote_current_state_unavailable_total: u64,
     pub inbound_vote_authority_superseded_total: u64,
     pub inbound_vote_authority_stale_before_effect_total: u64,
@@ -4794,16 +4818,65 @@ pub(crate) fn handle_inbound_consensus_msg(
                     // the two existing canonical header fields; no
                     // new schema is invented.
                     reconfig_detector.record_observed_proposal(&proposal);
-                    if let Some(action) = engine.on_proposal_event(from, &proposal) {
-                        // B10: an action returned from `on_proposal_event`
-                        // means the engine performed the full accept path
-                        // (epoch ok, view ok, leader ok, safe-to-vote ok)
-                        // and produced a vote. Reflect that in both the
-                        // loop's structured stats and the public
-                        // `consensus_t154.proposals_accepted` counter on
-                        // `/metrics`. Without this, the counter could
-                        // never increment for inbound traffic on the
-                        // multi-validator binary path.
+                    // Run 422 D7-C3F: choose the engine ingestion path. For the
+                    // Required, present-QC handoff the handler passes the
+                    // VerifiedQuorumCertificate produced by ITS OWN C3E
+                    // verification (under the SAME admitted snapshot) into the
+                    // explicit verified engine entrypoint, so the engine retains
+                    // that evidence with the registered block's justification.
+                    // The evidence-bearing entrypoint enforces exact
+                    // evidence↔QC correspondence, wire-chain/epoch
+                    // correspondence, and the retention budget BEFORE any engine
+                    // mutation, and is used only when a present embedded QC was
+                    // just verified (`_retained_verified_qc = Some`). On any of
+                    // its bounded typed errors we reject fail-closed and do NOT
+                    // fall back to the legacy/raw entrypoint. Absent-QC and the
+                    // test-only LocalFixtureUnsigned passthrough keep the legacy
+                    // entrypoint (no retained evidence).
+                    let engine_action = match _retained_verified_qc {
+                        Some(verified) => {
+                            match engine.on_verified_proposal_event(
+                                from,
+                                &proposal,
+                                std::sync::Arc::new(verified),
+                            ) {
+                                Ok(action) => {
+                                    stats.inbound_proposal_verified_qc_handoff_total = stats
+                                        .inbound_proposal_verified_qc_handoff_total
+                                        .saturating_add(1);
+                                    action
+                                }
+                                Err(e) => {
+                                    // Engine-level retention/correspondence
+                                    // failure: counted distinctly from handler
+                                    // delivery, never as engine acceptance, and
+                                    // never retried on the legacy path.
+                                    stats.inbound_proposal_verified_qc_handoff_rejected_total =
+                                        stats
+                                            .inbound_proposal_verified_qc_handoff_rejected_total
+                                            .saturating_add(1);
+                                    eprintln!(
+                                        "[binary-consensus] Run 422 D7-C3F: inbound proposal \
+                                         REJECTED (verified embedded-QC engine ingestion) \
+                                         height={} proposer={:?} reason={} — fail-closed, no \
+                                         legacy fallback",
+                                        proposal.header.height, from, e,
+                                    );
+                                    return;
+                                }
+                            }
+                        }
+                        None => engine.on_proposal_event(from, &proposal),
+                    };
+                    if let Some(action) = engine_action {
+                        // B10: an action returned from the engine means the
+                        // engine performed the full accept path (epoch ok, view
+                        // ok, leader ok, safe-to-vote ok) and produced a vote.
+                        // Reflect that in both the loop's structured stats and
+                        // the public `consensus_t154.proposals_accepted` counter
+                        // on `/metrics`. Without this, the counter could never
+                        // increment for inbound traffic on the multi-validator
+                        // binary path.
                         stats.inbound_proposals_engine_accepted =
                             stats.inbound_proposals_engine_accepted.saturating_add(1);
                         metrics.consensus_t154().inc_proposal_accepted();
