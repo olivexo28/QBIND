@@ -644,6 +644,40 @@ where
         }
     }
 
+    /// Create a new `BasicHotStuffEngine` whose block-tree state engine uses
+    /// the supplied memory limits (e.g. a small `max_pending_blocks`) instead
+    /// of the defaults. All other engine state matches [`Self::new`].
+    ///
+    /// This mirrors [`HotStuffStateEngine::with_limits`] and exists so callers
+    /// (and tests) can exercise block-slot pressure through the full engine
+    /// path without reaching into private state.
+    pub fn with_state_limits(
+        local_id: ValidatorId,
+        validators: ConsensusValidatorSet,
+        limits: crate::vote_accumulator::ConsensusLimitsConfig,
+    ) -> Self {
+        let mut ids: Vec<ValidatorId> = validators.iter().map(|v| v.id).collect();
+        ids.sort_by_key(|id| id.0);
+
+        BasicHotStuffEngine {
+            local_id,
+            state: HotStuffStateEngine::with_limits(validators, limits),
+            current_view: 0,
+            current_epoch: 0,
+            leaders: ids,
+            proposed_in_view: false,
+            voted_in_view: false,
+            last_view_start_instant: Some(Instant::now()),
+            view_duration_recorder: None,
+            progress_recorder: None,
+            validator_vote_recorder: None,
+            equivocation_recorder: None,
+            timeout_accumulator: TimeoutAccumulator::new(),
+            timeout_emitted_in_view: false,
+            pending_reconfig_next_epoch: None,
+        }
+    }
+
     /// Attach a view duration recorder for metrics (T90.5).
     ///
     /// The recorder will be called on each view transition with the
