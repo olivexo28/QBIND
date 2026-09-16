@@ -391,14 +391,24 @@ truncated, or wrapped. A bitmap cannot repeat a bit, so signer ids are distinct
 duplicate-bit encoding). For this bounded phase a membership containing an id the
 u16 wire index cannot represent (`> u16::MAX`) is rejected.
 
-**Size bounds (a complete structural preflight, all validated before any clone,
-backend invocation, or signer-result allocation).**
+**Size bounds (a complete structural preflight, all validated before any
+signature-buffer clone and before any backend invocation).** Signature-count
+representability and the bitmap bounds precede signer-vector construction;
+`collect_signers` then materializes a temporary signer vector before the
+popcount-correspondence, per-signature-size, and aggregate-size checks. The
+per-signature and aggregate size checks therefore run *after* that temporary
+vector exists — they precede only the signature-buffer clone and backend
+invocation, not every allocation. The temporary vector is bounded by the
+bitmap's capacity: before correspondence succeeds it may hold up to `65536`
+entries (a full 8192-byte bitmap's popcount), and only after successful
+correspondence is it bounded by `MAX_SIGNATURE_COUNT` (`65535`).
 
 * **Signature-count representability.** The wire QC encodes `signatures.len()`
   as a `u16` (`sig_count`), so at most `MAX_SIGNATURE_COUNT` (`u16::MAX ==
   65535`) signatures are encodable. `signatures.len() > MAX_SIGNATURE_COUNT` is
-  rejected (`SignatureCountNotRepresentable`) before any crypto or signer-result
-  allocation, without changing the wire format or encoder. Three distinct
+  rejected (`SignatureCountNotRepresentable`) before any crypto, before the
+  signer vector is constructed, without changing the wire format or encoder.
+  Three distinct
   quantities: the maximum *validator index* is `65535` (valid); the number of
   *representable indices* is `65536` (`0..=65535`); the maximum *encodable
   signature count* is `65535`. A full 8192-byte bitmap has `65536` set bits — one
@@ -419,8 +429,9 @@ backend invocation, or signer-result allocation).**
   falls *within* the span still rejects at the per-signer membership check
   (`UnknownSigner`). Because every `max_id <= u16::MAX`, the span is always
   `<= MAX_BITMAP_LEN`.
-* `popcount(signer_bitmap) == signatures.len()`; signatures are associated with
-  set bits in ascending-bit order.
+* `popcount(signer_bitmap) == signatures.len()`; `collect_signers` builds the
+  temporary ascending-bit-order signer vector and this correspondence is checked
+  against it. Signatures are associated with set bits in ascending-bit order.
 * **Per-signature size.** Every signature length `<= MAX_SIGNATURE_LEN`
   (`u16::MAX`, the wire length bound), validated for *all* signatures before the
   crypto loop, so an oversized signature at any position (including after quorum
