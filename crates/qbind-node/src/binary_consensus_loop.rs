@@ -18514,33 +18514,153 @@ mod tests {
 
                 // ============================ I ============================
                 // State protection: a future-view Proposal with a valid OUTER
-                // signature but an invalid embedded QC leaves the engine's
-                // block store AND consensus state unchanged, causes no
-                // reconfiguration observation, no delivery/deferral, and zero
-                // facade actions.
+                // signature is driven at the engine over a COHERENT NONEMPTY
+                // baseline (a committed prefix + one anchored block-tree entry).
+                // The invalid-QC case and its valid-QC control are delivered
+                // through an IDENTICAL environment — the same membership, epoch,
+                // and initial view; the same bound authority + admitted domain;
+                // an instrumented backend (with per-case-isolated counters); an
+                // available local signer; a recording facade; and the same
+                // Proposal header/payload from the SAME proposer, which is the
+                // leader of the target view (`leader_for_view(6) == 2`). The
+                // ONLY thing that varies between the two cases is the embedded
+                // QC's signing domain/signatures; each outer Proposal is
+                // re-signed AFTER its QC is attached, so both outer signatures
+                // are valid under the admitted domain. A single shared fixture
+                // builds this environment for both cases to prevent drift.
                 //
-                // The fixture seeds a COHERENT NONEMPTY baseline (a committed
-                // prefix + one block-tree entry) so the test demonstrates
-                // PRESERVATION of pre-existing state, not merely the absence of
-                // a new commit. This is a fixture-seeded in-memory baseline —
-                // NOT authenticated catch-up, persistent recovery, or durable
+                // This isolates the state-protection control: the invalid case
+                // must reach outer acceptance and constituent QC verification
+                // and then reject the QC with no downstream effect, while the
+                // valid control verifies the QC, reaches engine acceptance,
+                // registers the expected block, advances the view, and produces
+                // the expected facade action.
+                //
+                // The baseline is a fixture-seeded in-memory prefix — NOT
+                // authenticated catch-up, persistent recovery, or durable
                 // freshness. High-QC state is described precisely: this engine
                 // derives `TimeoutMsg.high_qc` from its locked QC (there is no
                 // separate high-QC store), so the locked-QC observation IS the
                 // high-QC observation; the baseline installs none, and none is
                 // adopted.
-                #[test]
-                fn c3e_i_future_view_invalid_qc_no_state_change() {
-                    use std::collections::HashSet;
+
+                const C3E_I_ANCHOR: [u8; 32] = [0xAB; 32];
+                const C3E_I_BASELINE_HEIGHT: u64 = 4;
+                const C3E_I_TARGET_VIEW: u64 = 6;
+
+                /// The shared, drift-free environment for the state-protection
+                /// pair. Both cases build this identical setup; only the
+                /// embedded QC (and therefore the re-signed outer Proposal)
+                /// differs. Backend counters are per-instance, so the two cases
+                /// never share counter state.
+                struct C3eStateFixture {
+                    f: Fixture,
+                    pv: ProposalVoteAuthority,
+                    snap: AuthorizedProposalVoteSnapshot,
+                    engine: BasicHotStuffEngine<[u8; 32]>,
+                    counts: QcCallCounts,
+                }
+
+                fn c3e_state_fixture() -> C3eStateFixture {
                     let f = make_fixture(4);
+                    // Instrumented backend (isolated per instance) + an
+                    // available local signer, so the valid control's engine
+                    // self-vote is signed and forwarded; the invalid case simply
+                    // never reaches self-vote emission.
                     let (reg, counts) = counting_registry();
-                    let pv = c3e_pv(&f, c3e_domain(), reg, None);
+                    let pv = c3e_pv(&f, c3e_domain(), reg, Some(ValidatorId(0)));
                     let snap = coherent_snapshot_for(&pv);
                     let mut engine = make_engine(ValidatorId(0), 4);
                     // Coherent nonempty-state fixture: committed height 4 with a
                     // single anchored block; consensus resumes at view 5.
-                    let anchor = [0xAB; 32];
-                    engine.initialize_from_snapshot_baseline(anchor, 4);
+                    engine.initialize_from_snapshot_baseline(C3E_I_ANCHOR, C3E_I_BASELINE_HEIGHT);
+                    C3eStateFixture {
+                        f,
+                        pv,
+                        snap,
+                        engine,
+                        counts,
+                    }
+                }
+
+                /// Reproduce the engine's private `derive_block_id_from_header`
+                /// for the candidate block a height-`view` Proposal from
+                /// `proposer` parented at `parent` would register. Kept
+                /// test-local (no production getter is added); any drift is
+                /// caught loudly by the before/after presence assertions.
+                fn c3e_candidate_block_id(proposer: u16, view: u64, parent: &[u8; 32]) -> [u8; 32] {
+                    let mut id = [0u8; 32];
+                    id[..8].copy_from_slice(&(proposer as u64).to_le_bytes());
+                    id[8..16].copy_from_slice(&view.to_le_bytes());
+                    id[16..32].copy_from_slice(&parent[..16]);
+                    id
+                }
+
+                /// Test-local structural projection of a stored `BlockNode`'s
+                /// fields (`id`, `view`, `parent_id`, `height`, `justify_qc`,
+                /// `own_qc`). QC fields compare structurally via
+                /// `QuorumCertificate`'s derived `PartialEq`; no production
+                /// getter or engine behavior is added.
+                type C3eBlockProjection = (
+                    [u8; 32],
+                    u64,
+                    Option<[u8; 32]>,
+                    u64,
+                    Option<QuorumCertificate<[u8; 32]>>,
+                    Option<QuorumCertificate<[u8; 32]>>,
+                );
+                fn c3e_project_block(node: &BlockNode<[u8; 32]>) -> C3eBlockProjection {
+                    (
+                        node.id,
+                        node.view,
+                        node.parent_id,
+                        node.height,
+                        node.justify_qc.clone(),
+                        node.own_qc.clone(),
+                    )
+                }
+
+                /// Project every currently stored block into an id→fields map so
+                /// pre-existing entries can be compared field-by-field before and
+                /// after a delivery.
+                fn c3e_project_all(
+                    engine: &BasicHotStuffEngine<[u8; 32]>,
+                ) -> std::collections::HashMap<[u8; 32], C3eBlockProjection> {
+                    engine
+                        .state()
+                        .blocks_iter()
+                        .map(|b| (b.id, c3e_project_block(b)))
+                        .collect()
+                }
+
+                #[test]
+                fn c3e_i_future_view_invalid_qc_no_state_change() {
+                    use std::collections::HashSet;
+                    let C3eStateFixture {
+                        f,
+                        pv,
+                        snap,
+                        mut engine,
+                        counts,
+                    } = c3e_state_fixture();
+
+                    // Proposer 2 IS the leader of the target view, matching the
+                    // valid control exactly; the two cases differ ONLY in the
+                    // embedded QC.
+                    let proposer: u16 = 2;
+                    assert_eq!(
+                        engine.leader_for_view(C3E_I_TARGET_VIEW),
+                        ValidatorId(proposer as u64),
+                        "invalid-QC proposer matches the target view's leader"
+                    );
+                    let anchor = C3E_I_ANCHOR;
+                    // The candidate block the engine would register for this
+                    // Proposal, derived exactly as the engine derives it.
+                    let candidate = c3e_candidate_block_id(
+                        proposer,
+                        C3E_I_TARGET_VIEW,
+                        &base_header(proposer).parent_block_id,
+                    );
 
                     // Full relevant state BEFORE — view, locked QC (⇒ high QC),
                     // committed block/height, commit log, and the block store
@@ -18554,25 +18674,38 @@ mod tests {
                     let block_count_before = engine.state().block_count();
                     let block_ids_before: HashSet<[u8; 32]> =
                         engine.state().blocks_iter().map(|b| b.id).collect();
+                    // Field-level snapshot of every pre-existing BlockNode.
+                    let projection_before = c3e_project_all(&engine);
                     assert!(
                         engine.state().get_block(&anchor).is_some(),
                         "baseline anchor block present before"
                     );
                     assert_eq!(block_count_before, 1, "nonempty baseline block store");
+                    assert!(
+                        engine.state().get_block(&candidate).is_none(),
+                        "candidate block absent before rejection"
+                    );
 
                     // Eligible future view (height 6 > current view 5) with a
                     // valid outer signature but an invalid (foreign-domain) QC.
+                    // The outer Proposal is re-signed after attaching the QC, so
+                    // its outer signature is valid under the admitted domain.
                     let bad = build_signed_qc(&f, &foreign_domain(), C3E_WIRE, 0, &[0, 1, 2]);
-                    let p = proposal_with_qc(1, 6, &f, &c3e_domain(), Some(bad));
+                    let p =
+                        proposal_with_qc(proposer, C3E_I_TARGET_VIEW, &f, &c3e_domain(), Some(bad));
                     let mut stats = BinaryConsensusLoopInboundStats::default();
                     let mut restore = RestoreCatchupModeState::from_config(None);
                     let facade = D7ActionRecorder::default();
                     let detector = deliver(
                         &mut engine, &mut stats, &mut restore, &pv, &snap, &p,
-                        Some(&facade), &origin_for(1),
+                        Some(&facade), &origin_for(proposer),
                     );
 
+                    // The invalid case reaches outer acceptance and constituent
+                    // QC verification, then rejects the QC.
+                    assert_eq!(stats.inbound_proposal_verify_accepted, 1, "outer accepted");
                     assert_eq!(stats.inbound_proposal_embedded_qc_rejected_total, 1);
+                    assert!(counts.votes() >= 1, "constituent QC crypto ran");
                     // Direct before/after comparison of engine + block-store
                     // contents (absence of a committed block alone is not
                     // sufficient evidence of preservation).
@@ -18607,18 +18740,36 @@ mod tests {
                         engine.state().blocks_iter().map(|b| b.id).collect();
                     assert_eq!(
                         block_ids_after, block_ids_before,
-                        "block store contents unchanged"
+                        "block store id-set unchanged"
+                    );
+                    // Every pre-existing BlockNode's stored fields (id, view,
+                    // parent_id, height, justify_qc, own_qc) are identical before
+                    // and after; QC fields compare structurally.
+                    let projection_after = c3e_project_all(&engine);
+                    assert_eq!(
+                        projection_after, projection_before,
+                        "pre-existing block contents unchanged"
                     );
                     assert!(
                         engine.state().get_block(&anchor).is_some(),
                         "baseline anchor block still present after"
                     );
+                    assert!(
+                        engine.state().get_block(&candidate).is_none(),
+                        "candidate block still absent after rejection"
+                    );
                     assert_eq!(detector.cached_headers(), 0, "no reconfiguration observation");
                     assert_eq!(stats.inbound_proposals_delivered, 0, "no delivery");
                     assert_eq!(stats.restore_catchup_proposals_deferred, 0, "no deferral");
-                    assert_eq!(stats.inbound_proposals_engine_accepted, 0, "engine not entered");
+                    // Evidence is tied to the observed state above and the
+                    // inspected call ordering, NOT to `engine_accepted == 0`
+                    // alone (which by itself does not prove the engine was never
+                    // entered).
+                    assert_eq!(
+                        stats.inbound_proposals_engine_accepted, 0,
+                        "no engine acceptance recorded (corroborating the unchanged state above)"
+                    );
                     assert_eq!(facade.total(), 0, "zero facade actions");
-                    assert!(counts.votes() >= 1, "QC crypto ran but produced no effect");
                 }
 
                 // Valid-QC control for the state-protection fixture: the SAME
@@ -18631,37 +18782,70 @@ mod tests {
                 #[test]
                 fn c3e_i_valid_qc_control_reaches_engine_and_registers_block() {
                     use std::collections::HashSet;
-                    let f = make_fixture(4);
-                    // Bound signer for the local node so the engine-produced
-                    // self-vote is signed and forwarded.
-                    let pv = c3e_pv(&f, c3e_domain(), f.br.clone(), Some(ValidatorId(0)));
-                    let snap = coherent_snapshot_for(&pv);
-                    let mut engine = make_engine(ValidatorId(0), 4);
-                    let anchor = [0xAB; 32];
-                    engine.initialize_from_snapshot_baseline(anchor, 4);
+                    let C3eStateFixture {
+                        f,
+                        pv,
+                        snap,
+                        mut engine,
+                        counts,
+                    } = c3e_state_fixture();
+
+                    // Height 6 (> current view 5); the SAME proposer as the
+                    // invalid case, which must be the leader of the target view
+                    // for the engine to accept.
+                    let proposer: u16 = 2;
+                    assert_eq!(
+                        engine.leader_for_view(C3E_I_TARGET_VIEW),
+                        ValidatorId(proposer as u64),
+                        "valid-QC proposer matches the target view's leader"
+                    );
+                    let anchor = C3E_I_ANCHOR;
+                    let candidate = c3e_candidate_block_id(
+                        proposer,
+                        C3E_I_TARGET_VIEW,
+                        &base_header(proposer).parent_block_id,
+                    );
+
                     let block_count_before = engine.state().block_count();
                     let block_ids_before: HashSet<[u8; 32]> =
                         engine.state().blocks_iter().map(|b| b.id).collect();
+                    let projection_before = c3e_project_all(&engine);
                     let committed_before = engine.committed_height();
+                    assert!(
+                        engine.state().get_block(&candidate).is_none(),
+                        "candidate block absent before the valid control"
+                    );
 
-                    // Height 6 (> current view 5); leader_for_view(6) == 6 % 4 ==
-                    // validator 2, so this eligible proposal is engine-accepted.
-                    let p = proposal_with_qc(2, 6, &f, &c3e_domain(), Some(valid_quorum(&f)));
+                    // The outer Proposal is re-signed after attaching a genuine
+                    // D6-signed quorum, so its outer signature is valid under the
+                    // admitted domain.
+                    let p = proposal_with_qc(
+                        proposer,
+                        C3E_I_TARGET_VIEW,
+                        &f,
+                        &c3e_domain(),
+                        Some(valid_quorum(&f)),
+                    );
                     let mut stats = BinaryConsensusLoopInboundStats::default();
                     let mut restore = RestoreCatchupModeState::from_config(None);
                     let facade = D7ActionRecorder::default();
                     deliver(
                         &mut engine, &mut stats, &mut restore, &pv, &snap, &p,
-                        Some(&facade), &origin_for(2),
+                        Some(&facade), &origin_for(proposer),
                     );
 
                     assert_eq!(stats.inbound_proposal_embedded_qc_verified_total, 1, "valid QC verified");
+                    assert!(counts.votes() >= 1, "constituent QC crypto ran");
                     assert_eq!(stats.inbound_proposals_delivered, 1, "delivered");
                     assert_eq!(
                         stats.inbound_proposals_engine_accepted, 1,
                         "engine accepted the leader's future-view proposal"
                     );
-                    assert_eq!(engine.current_view(), 6, "engine advanced to the future view");
+                    assert_eq!(
+                        engine.current_view(),
+                        C3E_I_TARGET_VIEW,
+                        "engine advanced to the future view"
+                    );
                     // Block registration is directly observable in the store.
                     assert_eq!(
                         engine.state().block_count(),
@@ -18679,6 +18863,29 @@ mod tests {
                         1,
                         "one new block id appeared"
                     );
+                    // The single new id is EXACTLY the derived candidate block,
+                    // now present in the store.
+                    assert!(
+                        engine.state().get_block(&candidate).is_some(),
+                        "candidate block present after the valid control"
+                    );
+                    // Every pre-existing entry is preserved field-for-field; the
+                    // ONLY projection difference is the newly added candidate.
+                    let projection_after = c3e_project_all(&engine);
+                    for (id, before) in &projection_before {
+                        assert_eq!(
+                            projection_after.get(id),
+                            Some(before),
+                            "pre-existing block contents unchanged"
+                        );
+                    }
+                    let candidate_node = engine
+                        .state()
+                        .get_block(&candidate)
+                        .expect("candidate present");
+                    let candidate_proj = c3e_project_block(candidate_node);
+                    assert_eq!(candidate_proj.0, candidate, "candidate id matches derivation");
+                    assert_eq!(candidate_proj.1, C3E_I_TARGET_VIEW, "candidate view is the target view");
                     assert!(
                         engine.state().get_block(&anchor).is_some(),
                         "baseline anchor block still present"
