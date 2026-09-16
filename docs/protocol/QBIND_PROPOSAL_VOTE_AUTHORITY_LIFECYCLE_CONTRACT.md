@@ -222,9 +222,14 @@ a claim that concurrent invalidation has been implemented.
   it must pass `authorize_configuration` for the founding epoch (S3).
 * **Independent evidence that would authorize activation.** Correspondence
   between the pinned expected identity, the observed persisted epoch (S9), and
-  the claimed record (S10/S12) — **plus** a durable, rollback-resistant proof
-  that the observed epoch is *current now* (the Missing rows). Correspondence
-  alone is explicitly **not** activation.
+  the claimed record (S10/S12), and a durable, rollback-resistant proof that the
+  observed epoch is *current now* (requirement B, the Missing rows), are each
+  **necessary but not sufficient**: neither, nor both together, authorizes
+  activation. Activation additionally requires an **independent trusted
+  activation root / evidence** authorizing this exact authority (requirement A,
+  §4.0) plus the requirement-C signing-state prerequisites. The complete set of
+  activation prerequisites is the §3.3.1 checklist; correspondence plus freshness
+  alone is explicitly **not** authorization to activate.
 * **When an authority becomes current.** Only when a real current-authorization
   source constructs an `Established` `CurrentAuthorizationOwner`. Today the only
   production constructor is `unavailable(...)`, so no authority is ever current
@@ -305,9 +310,14 @@ on its own terms, are:
    `try_build_timeout_verification_context`; S13/S14/S15; S5/S6).
 5. **Applicable QC formation / propagation and Timeout / NewView compatibility**
    (S13/S14; the Timeout bridge, §6.1) — open.
-6. **Signing-state recovery and rollback safety** (requirement C, §2.3.2; §5) —
-   missing durable last-voted-view / locked-QC / anti-rollback.
-7. **Configured-authority release-binary adversarial evidence** —
+6. **Current-authority freshness** (requirement B, §2.3 / §5) — a durable,
+   rollback-resistant proof, via an independent anchor (§5.2), that the observed
+   epoch is current now; **missing** and distinct from item 7. A persisted
+   committed epoch (S9) is evidence, never freshness.
+7. **Signing-state recovery and rollback safety** (requirement C, §2.3.2; §5) —
+   missing durable last-voted-view / locked-QC / anti-rollback; distinct from the
+   item 6 freshness proof.
+8. **Configured-authority release-binary adversarial evidence** —
    `CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED` (S16).
 
 A3 issuer identity / exhaustion (S4) and A4 serialized-handler ordering are
@@ -344,7 +354,10 @@ Constructing an `Established` owner would be the **representation** of an
 authorization decision, not proof it was legitimate; the mechanism that would make
 that decision (an operator policy / trust root / signed activation evidence bound
 to the exact authority) is a **recorded missing prerequisite**, not something this
-contract supplies. Anchor selection (§5) alone does **not** unblock activation.
+contract supplies. Anchor selection (§5) alone does **not** unblock activation. The
+complete activation acceptance checklist is §3.3.1; requirement A is one item on
+it and is **not** established by identity validation (1), correspondence (2), or
+freshness (4).
 
 ### 4.1 Current absent-QC Proposal path (traced)
 
@@ -352,12 +365,27 @@ In the inbound Proposal arm, the present-QC gate (S14) runs only when
 **both** a bound snapshot and `proposal.qc == Some(..)` exist. `proposal.qc == None`
 is preserved exactly: it is **neither verified nor counted**, and is **never**
 inferred as a validated bootstrap exception. In a production release the arm
-never reaches the QC gate at all: production preflight supplies **no** effective
-Proposal / Vote verification authority (`proposal_vote_authority: None`,
-`main.rs:5549`), so under the fail-closed `Required` policy the inbound arm is
-rejected as verification-context / current-state-unavailable **before any crypto**.
-(The distinct *present-authority / `unavailable(...)`-owner* arm is `cfg(test)`
--exercised only; either way production authority remains unavailable.) There is therefore no production absent-QC bootstrap
+never reaches the QC gate at all. Under the fail-closed `Required` policy, after a
+successful F6 sender binding, the handler rejects **before any crypto** in one of
+two **distinct** cases (reusing the audit condition/result/timing table in
+`QBIND_GENESIS_AUTHORITY_ENGINE_QC_INTEGRATION_AUDIT.md` §2):
+
+* **No effective Proposal / Vote verification authority** — increment
+  `inbound_proposal_verification_context_unavailable_total` or
+  `inbound_vote_verification_context_unavailable_total`; reject before crypto.
+* **Effective authority present but the current authorization snapshot is absent**
+  — increment the corresponding
+  `inbound_proposal_current_state_unavailable_total` /
+  `inbound_vote_current_state_unavailable_total`; reject before crypto.
+
+Current production wiring supplies **no** Proposal / Vote authority and **no**
+authorization snapshot (`proposal_vote_authority: None`, `main.rs:5549`), so it
+takes the **first** case. The second case is a **compiled production branch**, not
+a `cfg(test)`-only construct; production wiring simply never reaches it because it
+supplies no effective authority. What is restricted to `cfg(test)` is
+**constructing an `Established` current authorization** (the present-authority
+fixture) — the sole production owner constructor is `unavailable(...)` — not the
+rejection branch itself. There is therefore no production absent-QC bootstrap
 permission today, and none is fabricated here.
 
 ### 4.2 Requirements for any future bootstrap exception
@@ -369,8 +397,11 @@ anchor** (independent of the DB and of peers); the exact **admitted epoch**; the
 permission must **not** be inferred from an empty database, a missing epoch, an
 engine default, an unsigned/empty QC, a genesis label, or a peer assertion. An
 empty database may mean either first initialization **or** lost/restored state;
-the trust model must distinguish them via an **external** first-boot witness
-(the §5 anchor), because the local filesystem alone cannot tell the two apart.
+the trust model must distinguish them via appropriately authenticated trusted
+state / evidence **outside the specified attacker rollback domain** (the §5
+anchor — protected local hardware or a remote witness, neither mandated nor
+selected here, and not necessarily an off-box service), because the local
+filesystem alone cannot tell the two apart.
 The present-QC path is not weakened and no QC is fabricated to solve bootstrap.
 
 ### 4.3 Per-transition record (conceptual; not new code types)
@@ -505,8 +536,15 @@ is **trusted production consumption**, not another wire-alias registry.
   `--validator-consensus-key` path builds **only** the Timeout / NewView context
   and sets `proposal_vote_authority: None` (`main.rs:5545`–`5549`), so Timeout
   credentials must never be read as Proposal / Vote activation.
-* **Authorized epoch and activation provenance** — S3 founding-epoch guard + S9
-  observed epoch + §5 durable anchor.
+* **Authorized-epoch correspondence** — S3 founding-epoch guard + S9 observed
+  epoch (correspondence and evidence only, **not** activation).
+* **Activation authorization** — an independent trusted activation root /
+  evidence authorizing this exact authority (requirement A, §4.0); a **missing
+  prerequisite** today (S16 refuses the flag), never derived from the founding-
+  epoch guard or the observed epoch.
+* **Current-authority freshness** — the §5 durable, rollback-resistant anchor
+  (requirement B), still unselected. The complete activation prerequisites are the
+  §3.3.1 checklist.
 * **Engine, verifier, signer, cache, recovery context** — S13 verifier, S15
   retention, S6/S7 forwarding/re-emission, S8 restore disposition.
 
@@ -533,16 +571,25 @@ does **not** close any dependency above.
 * **Recommended profile:** **A — founding-authority-only** (§3.3), because it
   minimizes the safety surface and reuses S3 unchanged.
 * **Dependency order (must be satisfied in sequence):**
-  1. Satisfy the full §3.3.1 Profile A dependency list — activation-authorization
+  1. **Implementation and isolated (non-production) validation — produces the
+     required evidence.** Wire the coherent authority / engine / verifier / signer
+     path (S2 feeding `try_build_timeout_verification_context`; S13/S14/S15;
+     S5/S6), exercise founding-epoch activation in isolation, and **capture the
+     configured-authority release-binary adversarial evidence**. These steps
+     *produce* the evidence the checklist later requires; none of them is
+     production activation, and none authorizes a test bypass or a new activation
+     flag.
+  2. Durable ordering commit-before-activate-before-sign (§5.4).
+  3. **Production activation is permitted only after the complete §3.3.1
+     activation acceptance checklist is satisfied** — activation-authorization
      root (requirement A), current-authority freshness (requirement B) via an
      independent anchor (§5.2), signing-state continuity (requirement C), bootstrap
-     / absent-QC policy (§4.2), coherent authority / engine / verifier / signer
-     wiring, applicable QC / Timeout / NewView compatibility, and configured-authority
-     release-binary evidence. Anchor selection alone does **not** unblock activation.
-  2. Durable ordering commit-before-activate-before-sign (§5.4).
-  3. Founding-epoch activation wiring replacing the S16 refusal (behind evidence).
-  4. Release-binary adversarial evidence capture.
-  5. (Profile B only) serialized epoch-transition marker + committed-epoch source.
+     / absent-QC policy (§4.2), coherent wiring, applicable QC / Timeout / NewView
+     compatibility, and the release-binary evidence captured in step 1. Founding-
+     epoch activation wiring then replaces the S16 refusal. Anchor selection alone
+     does **not** unblock activation, and activation is never its own
+     prerequisite.
+  4. (Profile B only) serialized epoch-transition marker + committed-epoch source.
 
 ---
 
@@ -555,8 +602,10 @@ does **not** close any dependency above.
    value (typed rollback refusal); without the anchor it stays `unavailable`.
 3. **VM-snapshot restore rejected.** A whole-VM snapshot including local markers
    (T4) does not activate; a trusted anchor outside the rollback domain (protected local hardware or a remote witness — not selected here) detects staleness.
-4. **Empty-DB ambiguity.** First-init vs lost-state is resolved only by the
-   external witness; an empty DB alone never grants bootstrap.
+4. **Empty-DB ambiguity.** First-init vs lost-state is resolved only by
+   appropriately authenticated trusted state / evidence outside the specified
+   attacker rollback domain (§5 — not necessarily an off-box service or any one
+   fixed anchor); an empty DB alone never grants bootstrap.
 5. **Replacement between completed operations (not mid-handler).** The existing
    synchronous handler holds the owner by an immutable borrow, so **no same-owner
    replacement occurs halfway through a single handler's borrow**; replacement is
@@ -637,8 +686,12 @@ activation.
   signatures were created or transmitted; any later behavioral claim must name the
   boundary actually exercised.
 * **Exclusions:** no new module, storage schema, wire format, or anchor transport;
-  **no `freshness_anchor_observation.rs`**; no activation, signing, or readiness
-  promotion; no Run 423 work. The task is **not** implementation-ready as
+  **no `freshness_anchor_observation.rs`**; no activation or readiness promotion;
+  no Run 423 work. **Isolated test-fixture signing is permitted for
+  characterization** — scenarios 1 and 2 sign a Vote in a `cfg(test)` fixture to
+  exercise the uncommitted-signing-decision case; **production signing enablement
+  and authority activation remain prohibited.** The task is **not**
+  implementation-ready as
   *protection* while its security semantics (requirement-C durability) remain
   unspecified — it is bounded to **characterization** of existing paths, and it
   distinguishes evidence of missing protection from evidence that protection

@@ -4708,3 +4708,100 @@ identified below; earlier text is preserved.
 `CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED`;
 `SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO`. No readiness promotion or Run 423
 work.
+
+## Run 422 D7-D1 — five-correction contract reconciliation (this pass, documentation only)
+
+This additive pass corrects the five remaining contract inconsistencies (A–E)
+identified for RUN 422 D7-D1 in
+`docs/protocol/QBIND_PROPOSAL_VOTE_AUTHORITY_LIFECYCLE_CONTRACT.md`, and reconciles
+this evidence summary with the corrected text. Prior evidence above is preserved
+unchanged; several operative summaries in the earlier reconciliation notes are
+**superseded** where identified below. No Rust, test, configuration, schema,
+wire-format, workflow, authority, or activation change; `task/warning.txt` and
+unrelated files untouched.
+
+### Inspected state (recorded, not manufactured)
+
+* **Working branch (actual):** `copilot/copilot-run-422-d7-d1`
+  (`git branch --show-current`). The task **reports** the branch as
+  `copilot/copilotcopilotcopilot-run-422-d7-d1`; the actual checkout differs and
+  is not renamed.
+* **Worktree HEAD (actual) at this pass:** `689454237696a6d56cb66037a19748cf7d19fd66`
+  (`update`); worktree clean before this pass.
+* **Reviewed revision named by the task** `11bc2279a605d48c04bfda552a098eb7890cd0c4`:
+  **object absent** from this shallow clone (`git cat-file -t 11bc2279…` → could
+  not get object info); not in local ancestry and not referenced by any tracked
+  file. Corrections were applied to the actual worktree; no ancestry to an absent
+  object is manufactured.
+
+### Corrections applied (A–E)
+
+* **A — one complete activation checklist.** §3.1's independent-evidence bullet no
+  longer treats correspondence plus freshness as sufficient authorization to
+  activate; it now references the independent trusted activation root / evidence
+  (requirement A, §4.0) and the complete §3.3.1 prerequisite checklist. §3.3.1 now
+  lists **current-authority freshness (requirement B)** as its own item, distinct
+  from **signing-state recovery / rollback safety (requirement C)**; the
+  release-binary-evidence item renumbered accordingly. §6.1 splits the former
+  “authorized epoch and activation provenance” bullet into **authorized-epoch
+  correspondence**, **activation authorization** (requirement A, missing), and
+  **current-authority freshness** (requirement B). §4.0 now points to §3.3.1 as the
+  single acceptance checklist. §3.3.1 is the one complete activation acceptance
+  checklist and the other sections reference it.
+* **B — circular dependency removed.** §7's dependency order no longer requires the
+  complete checklist (including configured-authority release-binary evidence)
+  *before* the wiring / capture that produces that evidence. Implementation and
+  isolated (non-production) validation now **produce** the evidence (step 1);
+  production activation is permitted **only after** the complete §3.3.1 checklist
+  is satisfied (step 3). Activation is never described as its own prerequisite. No
+  test bypass, new activation flag, or production activation is authorized; Profile
+  A remains a proposed founding-authority-only profile.
+* **C — exact rejection categories and compilation status.** §4.1 replaces the
+  combined “verification-context / current-state-unavailable” description with the
+  two distinct pre-crypto cases and their exact counters
+  (`inbound_{proposal,vote}_verification_context_unavailable_total` when no
+  effective authority; `inbound_{proposal,vote}_current_state_unavailable_total`
+  when authority is present but the snapshot is absent), reusing the audit
+  condition/result/timing table (`QBIND_GENESIS_AUTHORITY_ENGINE_QC_INTEGRATION_AUDIT.md`
+  §2). Current production wiring (`proposal_vote_authority: None`, `main.rs:5549`)
+  takes the **first** case. The current-state-unavailable branch is now recorded as
+  a **compiled production branch** — not `cfg(test)`-only — that production wiring
+  simply never reaches; only **constructing an `Established` current authorization**
+  is `cfg(test)`-restricted. This **supersedes** the prior reconciliation note's
+  “verification-context / current-state-unavailable … (the present-authority /
+  unavailable-owner arm is `cfg(test)`-only)” wording.
+* **D — consistent rollback-domain requirement.** §4.2 (“external first-boot
+  witness”) and §8 scenario 4 (“only by the external witness”) now require
+  appropriately authenticated trusted state / evidence **outside the specified
+  attacker rollback domain**, without mandating an off-box service or selecting any
+  one concrete anchor (protected local hardware or a remote witness, neither
+  mandated nor selected). The empty-database ambiguity requirement is preserved, and
+  the epoch-0 external-witness counterexample (§2.3.1) is left intact.
+* **E — characterization fixture signing permitted.** §9's exclusions no longer
+  exclude all “signing”; they now state that **isolated test-fixture signing is
+  permitted for characterization** while **production signing enablement and
+  authority activation remain prohibited**. The three characterization scenarios
+  (ordinary restart; snapshot restored before the decision; committed-state
+  recovery control) and their distinctions are preserved; the tests are not
+  implemented in this pass.
+
+### Checks performed
+
+Exactly the three authorized Markdown files changed; CRLF line endings preserved
+(each file retains its single no-trailing-newline final line); no genuine trailing
+whitespace introduced; earlier accepted corrections (C1–C3F and the prior D7-D1
+passes) left intact; no production activation or readiness promotion implied.
+Semantic agreement re-read across the §3.3.1 checklist, the §7 dependency order,
+the §4.3 transition rows, the §8 scenarios, and §9. No Cargo test / check / Clippy
+/ release build was run or is required for this documentation-only correction;
+historical execution results are retained at their actual revisions. No PR opened;
+no branch rename, force-push, rebase, or history rewrite.
+
+### Retained posture (unchanged by this pass)
+
+`D7_STATUS=PARTIAL-CODE-TEST / PRODUCTION-LIFECYCLE-UNAVAILABLE`;
+`DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED`; `GENESIS_AUTHORITY_ACTIVATION=DISABLED`;
+`PRODUCTION_WIRE_CHAIN_ID_BEHAVIOR=UNCHANGED`;
+`CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED`;
+`SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO`. No readiness promotion or Run 423
+work.
