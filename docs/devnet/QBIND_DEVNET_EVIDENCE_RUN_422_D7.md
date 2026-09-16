@@ -3901,27 +3901,86 @@ the type-level Timeout↔P/V separation (no `From` conversion) is unchanged.
 
 ### Strengthened state protection (section 4)
 
-`c3e_i_future_view_invalid_qc_no_state_change` now runs against a **coherent
-nonempty-state fixture** (`initialize_from_snapshot_baseline(anchor, 4)` — committed
-height 4, one anchored block, resume at view 5), so it demonstrates preservation of
-**existing** state, not merely the absence of a new commit. State is compared
-before vs. after directly through the engine/state APIs: `current_view()`,
+The state-protection pair is now an **isolated control**: the invalid-QC case
+(`c3e_i_future_view_invalid_qc_no_state_change`) and its valid-QC control
+(`c3e_i_valid_qc_control_reaches_engine_and_registers_block`) are built by a single
+shared setup (`c3e_state_fixture`) so the two deliveries share an **identical**
+environment — the same membership, epoch, and initial view; the same bound
+authority + admitted domain; an instrumented backend (with per-case-isolated
+counters); an available local signer; a recording facade; and the same Proposal
+header/payload. Both deliver from **proposer 2**, which is asserted to equal
+`engine.leader_for_view(6)`, and each outer Proposal is **re-signed after** its QC
+is attached, so both outer signatures are valid under the admitted domain. The
+**only** thing that varies between the two cases is the embedded QC's signing
+domain/signatures — correcting the earlier "matching control" gap where the
+invalid case used a non-leader proposer (1) while its control used proposer 2.
+
+Both cases run against a **coherent nonempty-state fixture**
+(`initialize_from_snapshot_baseline(anchor, 4)` — committed height 4, one anchored
+block, resume at view 5), so they demonstrate preservation/transition of
+**existing** state, not merely the absence/presence of a new commit. State is
+compared before vs. after directly through the engine/state APIs: `current_view()`,
 `locked_height()`, `locked_qc()` (the engine derives `TimeoutMsg.high_qc` from its
 locked QC — there is no separate high-QC store), `committed_height()`,
 `committed_block()`, `commit_log()`, and the block store via
-`state().block_count()`, `state().blocks_iter()`, and `state().get_block(&anchor)`.
-For a future-view Proposal (height 6) with a valid outer signature and an invalid
-(foreign-domain) embedded QC, every observation is unchanged, with no
-reconfiguration observation, delivery, deferral, engine acceptance, or facade
-action. A matching valid-QC control
-(`c3e_i_valid_qc_control_reaches_engine_and_registers_block`) uses the same
-nonempty baseline and an eligible future-view Proposal from the view's leader
-(validator 2) with a genuine quorum; it reaches engine acceptance, advances to view
-6, and registers exactly one new block (`block_count` +1, one new id in
-`blocks_iter`, pre-existing blocks preserved), proving the fixture is genuinely
-capable of the transition the invalid case suppresses. The fixture is described
-honestly as an in-memory seeded baseline — not authenticated catch-up, persistent
-recovery, or durable freshness.
+`state().block_count()`, `state().blocks_iter()`, and `state().get_block(...)`.
+
+The "block contents unchanged" claim is now backed by a **field-level** comparison,
+not just an id-set: a test-local projection reads each pre-existing `BlockNode`'s
+`id`, `view`, `parent_id`, `height`, `justify_qc`, and `own_qc` (QC fields compared
+structurally via `QuorumCertificate`'s derived `PartialEq`; no production getter or
+engine behavior is added) into an id→fields map, and asserts every pre-existing
+entry is identical before and after. The **candidate block** the Proposal would
+register is derived exactly as the engine derives it (`derive_block_id_from_header`,
+reproduced test-locally) and asserted **absent before and after** the rejection, and
+**absent before / present after** the valid control.
+
+For the invalid case (height 6, valid outer signature, foreign-domain embedded QC)
+the delivery reaches **outer acceptance** (`inbound_proposal_verify_accepted == 1`)
+and **constituent QC verification** (instrumented backend recorded ≥1 vote) and then
+**rejects** the QC (`inbound_proposal_embedded_qc_rejected_total == 1`); every state
+observation, the full block-content projection, both anchor and candidate presence,
+and the id-set are unchanged, with no reconfiguration observation, delivery,
+deferral, engine acceptance, or facade action. `inbound_proposals_engine_accepted ==
+0` is **not** treated as standalone proof the engine was never entered — it is
+asserted as corroboration alongside the direct state observations and inspected call
+ordering. The valid control reaches engine acceptance, advances to view 6, verifies
+the QC, and registers exactly one new block (`block_count` +1, one new id in
+`blocks_iter` equal to the derived candidate, pre-existing entries preserved
+field-for-field) and produces the expected single facade action, proving the fixture
+is genuinely capable of the transition the invalid case suppresses. The fixture is
+described honestly as an in-memory seeded baseline — not authenticated catch-up,
+persistent recovery, or durable freshness.
+
+
+### State-protection control isolation (this correction pass)
+
+This sub-pass corrects the state-protection pair only (tests + comments in
+`binary_consensus_loop.rs` and this C3E subsection); no production, authorization,
+history, activation, or Run 423 change.
+
+* **Actual working branch (inspected):** `copilot/copilot-run-422-d7-c3c`. This
+  differs from the problem statement's reported branch
+  `copilot/copilotcopilotcopilotcopilotcopilotrun-422-d7-c3c`; reported as a
+  deviation without fabricating ancestry.
+* **Starting HEAD:** `9f812c4` (`update`).
+* **Reviewed revision `1a33547a0f639ea3a5f8eac063b9ccee97d3faed`:** object **absent**
+  in this shallow clone (`git cat-file -t` fails). Missing history is distinguished
+  from missing implementation: the `run422_d7c3e` module (29 tests) and the C3E gate
+  were **present** in the worktree and executed green before and after this pass.
+* **What changed:** both `c3e_i_*` cases now share a single `c3e_state_fixture`
+  (identical membership/epoch/view, bound authority + admitted domain, instrumented
+  backend with per-case-isolated counters, available local signer, recording facade,
+  Proposal header/payload); both deliver from **proposer 2** with a matching
+  authenticated origin, asserting the proposer equals `engine.leader_for_view(6)`;
+  each outer Proposal is re-signed after its QC is attached; and the only variation
+  is the embedded QC's signing domain/signatures. Block-state evidence was
+  strengthened from an id-set check to a field-level `BlockNode` projection (`id`,
+  `view`, `parent_id`, `height`, `justify_qc`, `own_qc`, QC compared structurally)
+  plus explicit candidate-block presence assertions (absent before/after rejection;
+  absent before / present after the valid control) using a test-local reproduction of
+  the engine's block-id derivation. No production getter or engine behavior was added.
+  The test count is unchanged at **29** (existing cases strengthened, none added).
 
 ### Validation (this pass) — exact commands, counts, exit codes
 
@@ -3931,7 +3990,8 @@ release build is **not** repeated — its historical attribution above is retain
 * `cargo test -p qbind-node --lib run422_d7c3e` (dev) → **29 passed; 0 failed; 0
   ignored; 1590 filtered out**, exit 0. (Was 22 at the prior pass; +7:
   `c3e_i_valid_qc_control_reaches_engine_and_registers_block`, four `c3e_k_*`, two
-  `c3e_l_*`.)
+  `c3e_l_*`. This correction pass strengthened the two `c3e_i_*` cases without
+  changing the count.)
 * `cargo test -p qbind-node --lib binary_consensus_loop` (dev) → **240 passed; 0
   failed; 0 ignored; 1379 filtered out**, exit 0. The `run422_d7c3e` set (29) is a
   strict subset of this suite (240).
