@@ -1030,3 +1030,21 @@ Regressions: `c3f_l_eviction_preserves_candidate_height_and_evidence` (eviction-
 admission at height 6 with a free-slot control) and
 `c3f_b_expected_charge_sums_every_capacity_component`. This note is additive; all
 historical findings and the retained D7 posture flags are preserved.
+
+## 14. Successor note (Run 422 D7-D1 — production authority lifecycle contract)
+
+Run 422 D7-D1 produces the single authoritative lifecycle contract for future
+production Proposal/Vote signing authority at
+`docs/protocol/QBIND_PROPOSAL_VOTE_AUTHORITY_LIFECYCLE_CONTRACT.md`. It reuses the
+mechanisms audited here (genesis verify + pin, the dormant
+`build_genesis_consensus_authority`, the founding-epoch `authorize_configuration`
+guard, the fail-closed `CurrentAuthorizationOwner` admission model, the C1
+storage observation, the C2/C3A/C3B correspondence and alias mapping, the C3D
+domain-bound QC verifier, the C3E present-QC gate, and the C3F in-process
+retention) and records, as still **Missing**, both a durable rollback-resistant
+current-authorization source and an independent freshness anchor. It recommends a
+founding-authority-only first release, fixes no code, and keeps every retained D7
+posture flag and the `CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED`
+classification unchanged. Its single bounded next task is a read-only,
+non-authorizing durable freshness-anchor observation module; activation remains
+disabled and no readiness item moves. This note is additive.
