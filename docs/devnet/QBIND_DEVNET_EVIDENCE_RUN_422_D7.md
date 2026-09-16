@@ -4518,11 +4518,17 @@ storage-schema, wire-format, workflow, or activation change. All prior D7 work,
 
 * **Profile A (founding-authority-only)** first; do not broaden the founding-epoch
   guard or treat fixed authority as removing restart/rollback safety.
-* **Bounded next task:** a read-only, non-authorizing durable **freshness-anchor
-  observation** module that compares an abstract externally sourced current-epoch
-  witness to the S9 persisted epoch and emits a typed classification, never
-  activating authority and never derived from peers or the same DB. Files, tests,
-  and exclusions are enumerated in the contract §9.
+* **Bounded next task (revised in the D7-D1 review correction below):** a
+  **source characterization of existing signing-state persistence and recovery**
+  for the same-epoch restart / restore case, through the real
+  `initialize_from_restart` / `initialize_from_snapshot_baseline`,
+  `apply_epoch_transition_atomic`, `get_last_committed` / `get_current_epoch`, and
+  S9 `observe_consensus_storage` paths — characterizing what is restored vs
+  dropped for an uncommitted Vote at epoch 0. The previously proposed generic
+  **freshness-anchor / epoch-witness observation module is withdrawn** (a
+  comparison classifies but cannot authenticate a caller-supplied value). Files,
+  tests, prerequisites, and exclusions are enumerated in the corrected contract
+  §9.
 
 ### Validation (documentation-only)
 
@@ -4541,3 +4547,78 @@ review/security-tool outcomes are recorded literally in the final report.
 `SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO`. This phase proposes a lifecycle
 and audits reuse only; it does not activate authority, promote readiness, or
 perform Run 423 work.
+
+## Run 422 D7-D1 — review correction (this pass, documentation only)
+
+This pass applied the D7-D1 review corrections to
+`docs/protocol/QBIND_PROPOSAL_VOTE_AUTHORITY_LIFECYCLE_CONTRACT.md` in place and
+appended this reconciliation note; prior evidence above is preserved unchanged.
+
+### Inspected state (recorded, not manufactured)
+
+* **Working branch (actual):** `copilot/copilotcopilot-run-422-d7-d1`. The review
+  task reports the branch as `copilot/copilotcopilot-run-422-d7-c3f`; the actual
+  checkout is the `-d1` branch (deviation recorded, branch not renamed).
+* **Worktree HEAD (actual) at this pass:** `9ce29ac` (`update`); the prior D7-D1
+  section above recorded `38339d6`.
+* **Reviewed revision named by the task** `ffa7b71cbdaa2d31badff519c346b40f00a9bc25`:
+  **object absent** from this shallow clone; not in local ancestry and not
+  referenced by any tracked file. Corrections were applied to the actual worktree.
+
+### Corrections applied
+
+* **A — three requirements separated.** Activation authorization (A),
+  current-authority freshness (B), and signing / consensus-state continuity (C)
+  are now distinct; an *equal* epoch comparison establishes none of them
+  (epoch-0 snapshot → sign → restore counterexample). A source-backed inventory
+  (contract §2.3.2) shows `voted_in_view` (`basic_hotstuff_engine.rs:317`),
+  `proposed_in_view` (`:314`), `current_view` (`:299`, reset to
+  `committed_height + 1` at `:1146`), `locked_qc` (`hotstuff_state_engine.rs:173`),
+  and `votes_by_view` (`:192`) are **in-memory only**; the `ConsensusStorage`
+  trait (`storage.rs:142`) persists committed block / QC / epoch and has **no**
+  `put_last_voted_view` / `put_locked_qc` / vote-record method, so a
+  committed-block checkpoint (`apply_epoch_transition_atomic`, `:997`) does not
+  cover an uncommitted signing decision.
+* **B — provenance vs authentication.** Withdrew the claim that an abstract
+  caller-supplied epoch witness can reject peer / same-DB values by provenance; a
+  comparison classifies but cannot authenticate. Added the anchor-interface
+  preconditions and the live-quorum / QC assumption list; anchor selection stays
+  explicitly unresolved (contract §5.2.1 / §5.3).
+* **C — lifecycle / ordering.** Corrected the outbound order to admission/epoch →
+  **sign** → **confirm** → facade handoff (`forward_actions_to_facade`, cached
+  path signs before `confirm`); distinguished a completed signature from a
+  transmitted one; removed the mid-handler same-owner replacement requirement;
+  corrected "replacement fails → keep gen N" to fail-closed when superseded /
+  revoked or when current authorization is unavailable; recorded that generation
+  advance is in-process bookkeeping, not activation (contract §3–§4).
+* **D — activation permission.** Recorded the trusted activation root / evidence
+  (requirement A) as a **missing prerequisite**; kept Profile A as a proposed
+  first-release profile (not an activation approval) with its full dependency list
+  (contract §3.3.1 / §4.0).
+* **E — source classifications.** `resolve_network_wire_alias` is defined in
+  `qbind-types` (`network_wire_alias.rs`) and imported by the correspondence
+  module; production preflight supplies `proposal_vote_authority: None`
+  (`main.rs:5549`); S13 is **conditionally reachable** via the C3E gate
+  (`binary_consensus_loop.rs:4736`), not dormant; S15 retains without a second
+  constituent verification; Timeout / NewView credentials do not establish
+  Proposal / Vote authority; governance replay persistence is not validator
+  signing-state persistence or whole-DB rollback protection.
+* **Next task replaced.** The generic freshness-anchor observation module is
+  withdrawn from all three documents; the replacement is a bounded source
+  characterization of existing signing-state persistence / recovery (contract §9).
+
+### Validation
+
+Source-reference, link / path, diff-scope, secret, and CRLF line-ending checks
+performed. No Cargo test / check / release rebuild is required or authorized by
+this documentation-only pass. Posture flags unchanged (below).
+
+### Retained posture (unchanged by the D7-D1 review correction)
+
+`D7_STATUS=PARTIAL-CODE-TEST / PRODUCTION-LIFECYCLE-UNAVAILABLE`;
+`DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED`;
+`GENESIS_AUTHORITY_ACTIVATION=DISABLED`;
+`PRODUCTION_WIRE_CHAIN_ID_BEHAVIOR=UNCHANGED`;
+`CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED`;
+`SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO`. No activation, readiness
+promotion, or Run 423 work.
