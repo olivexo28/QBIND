@@ -16,12 +16,17 @@ SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO
 ```
 
 This is the single authoritative lifecycle contract for future production
-Proposal / Vote signing authority. It separates, and never conflates:
-independently pinned genesis identity; standard runtime / wire correspondence;
-signature verification; quorum-certificate validation; **current activation
-authorization**; in-process freshness; and **persistent anti-rollback**. Success
-in one category never establishes another. Proposed conceptual state names below
-are documentation only and are **not** instructions to add new code types.
+Proposal / Vote signing authority. It separates, and never conflates, **three
+distinct security requirements** (§2.3) — **(A) activation authorization**, **(B)
+current-authority freshness**, and **(C) signing / consensus-state continuity** —
+together with their supporting inputs: independently pinned genesis identity;
+standard runtime / wire correspondence; signature verification; and
+quorum-certificate validation. Neither message correspondence nor a matching
+epoch number establishes all three; success in one category never establishes
+another. In particular an *equal* epoch comparison (§2.3.1) cannot establish
+preservation of prior signing decisions (requirement C). Proposed conceptual
+state names below are documentation only and are **not** instructions to add new
+code types.
 
 ---
 
@@ -31,13 +36,20 @@ are documentation only and are **not** instructions to add new code types.
 
 Inspected against the **actual supplied worktree**, not the SHAs the task recites.
 
-* **Working branch (actual):** `copilot/copilotcopilot-run-422-d7-c3f`
-  (`git branch --show-current`). The task's **Reported branch**
-  `copilot/copilot-run-422-d7-c3f` differs by the doubled `copilot` path
-  segment; the checkout carries the doubled form.
+* **Working branch (actual):** `copilot/copilotcopilot-run-422-d7-d1`
+  (`git branch --show-current`). The D7-D1 review task **reports** the branch as
+  `copilot/copilotcopilot-run-422-d7-c3f`; the actual checkout is the `-d1`
+  branch. The initial D7-D1 draft was recorded while the working label read
+  `-c3f`; this review pass records the actual `-d1` branch and does not rename it.
 * **Inspected worktree HEAD (actual):**
-  `38339d697797aa320ab372fdd5849ab0b45e595b` (`update`). Worktree clean before
-  this documentation pass.
+  `9ce29acbb88c5611064f155ec7566e02052c2720` (`update`) at this review pass; the
+  prior D7-D1 draft recorded `38339d697797aa320ab372fdd5849ab0b45e595b`. Worktree
+  clean before this documentation pass.
+* **Reviewed revision named by the D7-D1 task**
+  `ffa7b71cbdaa2d31badff519c346b40f00a9bc25`: **object absent** from this shallow
+  clone; not in local ancestry and not referenced by any tracked file. Ancestry
+  to an absent object is not manufactured; the correction is applied to the actual
+  worktree content.
 * **Accepted C3F final revision named by the task**
   `f97b49f72dc9af843d237f1758376096b58c08c1`: **object absent** from this clone
   (`git cat-file -t f97b49f7…` → *could not get object info*), even after
@@ -69,7 +81,7 @@ Inspected against the **actual supplied worktree**, not the SHAs the task recite
 | S8 | Restore-catchup deferral | `binary_consensus_loop.rs` (`should_defer_restore_proposal_for_catchup`; `restore_catchup_proposals_deferred`) |
 | S9 | Read-only storage observation (C1) | `crates/qbind-node/src/consensus_storage_observation.rs` (`observe_consensus_storage`, `ConsensusStorageObservation`) |
 | S10 | Genesis / record correspondence (C2) | `crates/qbind-node/src/genesis_authority_record_correspondence.rs` (`ExpectedGenesisIdentity::load_pinned`, `check_genesis_record_correspondence`) |
-| S11 | Standard-network alias mapping (C3A) | `genesis_authority_record_correspondence.rs` (`resolve_network_wire_alias`) |
+| S11 | Standard-network alias mapping (C3A) | `crates/qbind-types/src/network_wire_alias.rs` (`resolve_network_wire_alias`, **defined here**), imported by `genesis_authority_record_correspondence.rs` (C3B `check_network_correspondence`) |
 | S12 | Pinned-genesis / network correspondence (C3B) | `genesis_authority_record_correspondence.rs` (`check_network_correspondence`, `GenesisNetworkCorrespondence`) |
 | S13 | Domain-bound QC verifier (C3D, dormant) | `crates/qbind-consensus/src/qc_verify_domain.rs` (`verify_quorum_certificate_with_domain`, `VerifiedQuorumCertificate`) |
 | S14 | Present-QC admission gate (C3E) | `binary_consensus_loop.rs` (inbound Proposal arm; `inbound_proposal_embedded_qc_verified_total`) |
@@ -81,10 +93,14 @@ Inspected against the **actual supplied worktree**, not the SHAs the task recite
 
 ## 2. Reuse audit
 
-Traced the actual binary path from `main.rs` and classified each mechanism as
-**production-reachable**, **dormant** (compiled, no production caller),
-**test-only** (`cfg(test)` / disabled default), or **unavailable** (refused at
-startup). Older run reports were treated as leads, not proof.
+Traced the actual binary path from `main.rs` and classified each mechanism with
+**distinct** labels that are **not** interchangeable: **production-reachable**;
+**conditionally reachable** (compiled with a production caller that only fires
+under specific runtime conditions, e.g. the C3E present-QC gate → S13);
+**dormant** (compiled, no production caller); **disabled-by-default** (present but
+off unless explicitly enabled, e.g. S17); **startup-refused** (S16 exits
+non-zero); and **`cfg(test)`-only** (compiled only under test). Older run reports
+were treated as leads, not proof.
 
 ### 2.1 Reuse table
 
@@ -93,7 +109,7 @@ startup). Older run reports were treated as leads, not proof.
 | Independently pinned genesis identity | S1 `verify_boot_time_genesis(Some(pin))`; S10 `ExpectedGenesisIdentity::load_pinned` | Boot-time single-read verify of external genesis against an independent expected-hash pin; env policy from `map_environment` | Non-MainNet **permits an absent pin** (compare skipped); a supplied `--genesis-path` alone is a file, not a pin | **Reuse** (do not build a new genesis parser) |
 | Genesis-derived validator set / keys / suites | S2 `build_genesis_consensus_authority` | Derives consensus validator set + per-validator ML-DSA-44 `(suite,pk)` provider from boot-verified `GenesisConfig.validators[]`, feeding the same `try_build_timeout_verification_context` main uses | **Dormant** — no production caller; release binary refuses the activating flag (S16) | **Reuse** (adapt as the single authority source) |
 | Founding-epoch authority lifetime | S3 `authorize_configuration` | Fail-closed: authorizes **only** founding epoch 0 config (chain→genesis→count→commitment→epoch), else `AuthorityLifetimeError` | Founding epoch only; does **not** cover serialized epoch transitions | **Reuse** (adapt for multi-epoch profile) |
-| Rollback-resistant *current* authorization | S4 `CurrentAuthorizationOwner` | In-process current-state model: `admit`→`confirm` with issuer binding (`ptr_eq`), monotonic `generation`, terminal `exhausted` latch | **`Established` current state is `cfg(test)` only**; the sole production constructor is `unavailable(...)` → always fail-closed. Generation is **not durable** | **Missing** (production current-authorization source unavailable) |
+| Rollback-resistant *current* authorization | S4 `CurrentAuthorizationOwner` | In-process current-state model: `admit`→`confirm` with issuer binding (`ptr_eq`), monotonic `generation`, terminal `exhausted` latch | Production preflight supplies **`proposal_vote_authority: None`** (`main.rs:5549`) — no authority object at all — which is distinct from a *present-authority / missing-owner* case and a *present-authority / unavailable-owner* case; where an owner does exist, `Established` is `cfg(test)` only and the sole production constructor is `unavailable(...)`. Generation is **not durable** | **Missing** (production current-authorization source unavailable) |
 | Inbound Proposal/Vote admission | S5 Required policy + `unavailable(...)` wiring | Under `Required` (production default), a present authority with `current_auth=None` rejects as current-state-unavailable **before crypto** | Rejects everything in production because current authorization is unavailable | **Reuse** (fail-closed gate is correct; needs a real current source) |
 | Immediate outbound forwarding authorization | S6 `forward_actions_to_facade` | `admit`→epoch-check→sign via bound `snapshot.verifier()`→`confirm`→facade for BroadcastProposal/Vote/SendVoteTo; production wires `None` snapshot | Fail-closed only; no production authority to authorize a real send | **Reuse** |
 | Cached re-emission authorization | S7 `admit_cached_reemission` | Fresh owner `admit`+`confirm` of an issuer+generation-bound `CachedReemissionProvenance` ticket before re-send | In-process only; no durability across restart | **Reuse** |
@@ -101,10 +117,10 @@ startup). Older run reports were treated as leads, not proof.
 | Persisted-epoch observation | S9 `observe_consensus_storage` | Read-only classification: NoStorageHandle / PresentNoCommittedEpoch / CommittedEpoch(u64); reuses schema + incomplete-transition + get_current_epoch | **Never converts to authorization**; persisted epoch is evidence only | **Reuse** (evidence input, not an authority) |
 | Genesis ↔ record correspondence | S10 `check_genesis_record_correspondence` | Compares pinned expected identity vs untrusted claimed record vs C1 observation → all of co-origin / activation / current-auth **NOT-established** | Correspondence is **not** activation permission | **Reuse** (evidence input) |
 | Runtime / wire-alias correspondence | S11 `resolve_network_wire_alias`; S12 `check_network_correspondence` | Standard-network aliases; retained validation policy vs `map_environment`; typed mismatches | Mapping policy only; not authorization | **Reuse** (do not build another alias registry) |
-| Domain-bound QC verification | S13 `verify_quorum_certificate_with_domain` | Pure verifier: each signer via D6 v2 preimage, checked ceil(2W/3) in u128 → `VerifiedQuorumCertificate` | **Dormant** — non-authorizing result; no production caller besides S14/S15 | **Reuse** |
+| Domain-bound QC verification | S13 `verify_quorum_certificate_with_domain` | Pure verifier: each signer via D6 v2 preimage, checked ceil(2W/3) in u128 → `VerifiedQuorumCertificate` | **Conditionally reachable**, not dormant: called by the inbound present-QC gate (C3E) at `binary_consensus_loop.rs:4736`, only when a bound snapshot **and** a present embedded QC exist; the result is non-authorizing | **Reuse** |
 | Present-QC inbound gate | S14 inbound Proposal arm | Verifies a **present** embedded QC through S13 before engine effects; `proposal.qc == None` preserved exactly (neither verified, counted, nor inferred as bootstrap) | Only active when a bound snapshot **and** a present QC exist | **Reuse** |
-| Verified-evidence retention | S15 `on_verified_proposal_event` / `register_block_with_verified_justification` | Retains the exact `Arc<VerifiedQuorumCertificate>` at block registration under a byte budget, pre-mutation, with typed errors | **In-process evidence ownership only**; not persistence, not anti-rollback | **Reuse** |
-| Durable replay / crash consistency | S17 `pqc_governance_production_durable_replay_rocksdb.rs` | Restart persistence, atomic-write + partial-residue recovery, replay/equivocation rejection | **Test-only / disabled default** (MainNet refused); **no DB-wide monotonic counter / external anchor** → an older-but-valid DB is accepted on open | **Missing for anti-rollback** (do not equate replay prevention with rollback resistance) |
+| Verified-evidence retention | S15 `on_verified_proposal_event` / `register_block_with_verified_justification` | Retains the exact `Arc<VerifiedQuorumCertificate>` produced by the C3E gate at block registration under a byte budget, pre-mutation, with typed errors; performs **no second constituent-signature verification** | **In-process evidence ownership only** (`verified_justification` is non-serialized and discarded on restart); not persistence, not anti-rollback | **Reuse** |
+| Durable replay / crash consistency | S17 `pqc_governance_production_durable_replay_rocksdb.rs` | **Governance**-replay restart persistence, atomic-write + partial-residue recovery, governance replay/equivocation rejection | **Test-only / disabled-by-default** (MainNet refused); its scope is **governance replay**, **not** validator Proposal/Vote signing-state persistence (§2.3.2) and **not** whole-database rollback protection; **no DB-wide monotonic counter / external anchor** → an older-but-valid DB is accepted on open | **Missing for anti-rollback** and **missing for signing-state continuity** (do not equate governance replay prevention with either) |
 | Persistent anti-rollback anchor | S17 Run 055 sequence file; Trust-Anchor model §8 | Sequence anti-rollback for trust bundles, stored under `<data_dir>` | Stored in the **same rollbackable filesystem**; whole-DB / VM-snapshot restore defeats it | **Missing** (no independent freshness anchor) |
 
 ### 2.2 Duplication guardrails (explicit)
@@ -116,6 +132,78 @@ alias mapping; S13 supplies QC verification; S15 supplies in-process retention.
 Conversely, do **not** equate replay prevention (S17), crash consistency (S17),
 or signed metadata with **rollback-resistant current authorization** (the
 **Missing** rows: durable current source and independent freshness anchor).
+
+### 2.3 Three distinct security requirements (never conflated)
+
+Correct activation and safe operation require **three independent** properties.
+None is established by message correspondence, and none by a matching or
+"fresh-looking" epoch number:
+
+* **(A) Activation authorization.** *Who or what policy authorizes this exact
+  authority to operate?* A decision backed by a trusted root / evidence, not
+  merely a validation that an identity is well-formed. Constructing an
+  `Established` `CurrentAuthorizationOwner` (S4) is the **representation** of such
+  a decision, **not** proof that the decision was legitimate. Today the only
+  production owner constructor is `unavailable(...)` (S4; `Established` is
+  `cfg(test)` only), so activation authorization is **absent** in a release build
+  (§4).
+* **(B) Current-authority freshness.** *Is that authorization still applicable to
+  this network, epoch, membership, keys, and domain — now?* A statement about
+  latestness against a rollback-capable environment (§5). A persisted committed
+  epoch (S9) is **evidence**, never a freshness proof.
+* **(C) Signing / consensus-state continuity.** *Has the validator retained the
+  safety-relevant history needed to avoid incompatible actions after restart or
+  rollback?* Distinct from (A) and (B): a correctly authorized, "fresh" authority
+  can still double-sign if the record of its own prior signing decisions did not
+  survive restart.
+
+Neither correspondence nor a fresh epoch number establishes all three.
+
+#### 2.3.1 Epoch equality does not establish (C) — explicit counterexample
+
+Consider one validator plus an external witness, all reporting **epoch 0**:
+
+1. A snapshot is taken **before** the validator signs a Vote.
+2. The validator signs that Vote.
+3. The earlier snapshot is restored.
+4. Both snapshots and the external witness still report **epoch 0**.
+
+An epoch comparison returns **equal** throughout. It cannot detect that a Vote
+was signed between the snapshot and its restore, so it **cannot** establish
+preservation of signing decisions or consensus safety state. A fresh or matching
+epoch number is therefore not a substitute for requirement (C), and is not by
+itself requirement (B).
+
+#### 2.3.2 Safety-relevant signing state — source-backed inventory
+
+Traced from the actual engine and storage. "Recovered" means a production
+restart/restore path actually reads and restores the value; a `cfg(test)` fixture
+is **not** production recovery.
+
+| Safety-relevant state | Symbol / source | In-memory | Persisted | Recovered | Status |
+|---|---|---|---|---|---|
+| Current view | `current_view` (`basic_hotstuff_engine.rs:299`) | yes | no | reset to `committed_height + 1` (`:1146`, `initialize_from_restart`) | **not preserved** |
+| Voted-in-view latch (anti double-vote) | `voted_in_view` (`:317`; checked `:1753`; set `:1824`; reset `:1012/1148/1220/2030`) | yes | no | reset to `false` on restart | **missing** |
+| Proposed-in-view latch | `proposed_in_view` (`:314`) | yes | no | reset on restart | **missing** |
+| Locked QC (locking rule) | `locked_qc` (`hotstuff_state_engine.rs:173`; getter `:293`) | yes | no (no `put_locked_qc`) | reconstructed from tree or discarded | **not durably preserved** |
+| Per-view equivocation map | `votes_by_view` (`hotstuff_state_engine.rs:192`; cleared `:340`) | yes | no | not recovered | **missing** |
+| Retained QC evidence (C3F) | `verified_justification` (`block_state.rs:74`) | yes | no (non-serialized `Arc`) | discarded on restart | **in-process only** |
+| Committed block / QC | `put_block`/`put_qc` in `apply_epoch_transition_atomic` (`storage.rs:997`) | yes | yes | `get_last_committed` (`production_consensus_storage.rs:101`) | **preserved (committed only)** |
+| Committed epoch | `put_current_epoch` (`storage.rs:1034`) | yes | yes | `get_current_epoch` via `observe_consensus_storage` (S9) | **preserved (committed only)** |
+
+The `ConsensusStorage` trait (`storage.rs:142`) exposes `put_block` / `put_qc` /
+`put_last_committed` / `put_current_epoch` / schema / epoch-transition-marker
+methods **only**; there is **no** `put_last_voted_view`, `put_locked_qc`, or
+vote-record method. `apply_epoch_transition_atomic` persists the **committed**
+block, its QC, `last_committed`, and the target epoch — a **committed-block
+checkpoint**. An earlier **uncommitted** signing decision (a Vote signed but not
+yet committed, recorded only by the in-memory `voted_in_view` latch) is therefore
+**not covered** by that checkpoint: on restart `voted_in_view` is `false` and
+`current_view` is `committed_height + 1`, so the same view can be re-entered
+without the prior signing decision being visible. This is why requirement (C) is
+**not** satisfied by any persisted committed epoch, and why the §2.3.1
+epoch-equality comparison cannot stand in for it. No new persistence format or
+per-signature mechanism is prescribed in this documentation pass.
 
 ---
 
@@ -151,19 +239,38 @@ a claim that concurrent invalidation has been implemented.
   which discards the decoded Proposal and re-admits fresh.
 * **Shutdown / restart / recovery / exhaustion.** Restart re-derives a candidate
   but yields an `unavailable(...)` owner until a real current source exists (no
-  signing). Exhaustion (`is_exhausted`) is a terminal latch: no admission or
-  confirmation ever succeeds again, with no wraparound or reset.
+  signing). Restart also does **not** restore the requirement-(C) signing state:
+  `voted_in_view`/`proposed_in_view` reset and `current_view` becomes
+  `committed_height + 1` (§2.3.2), so even were an owner available, signing-state
+  continuity would remain unestablished. Exhaustion (`is_exhausted`) is a terminal
+  latch: no admission or confirmation ever succeeds again, with no wraparound or
+  reset.
 
 ### 3.2 Effect boundaries (must be distinguished; never conflated)
 
 | Boundary | Mechanism | Cancellable after the fact? |
 |---|---|---|
 | Engine mutation | S15 block registration | No — once state mutates it is not "un-signed" |
-| Signing | S4 `confirm` then sign via bound verifier context | Only *before* `confirm` returns |
+| Signing (produce signature) | S4 `admit`→epoch-check→**sign** via bound verifier context | A produced signature may still be suppressed before transmission |
+| Transmit signature (`confirm`→handoff) | S4 `confirm` gate, then facade handoff (S6) | Only *before* `confirm` returns; not after handoff |
 | Facade handoff | S6 `forward_actions_to_facade` | No after handoff |
 | Queued transmission | facade queue | No after enqueue |
 | Actual socket delivery | transport | No |
 | Remote processing | peer | No |
+
+**Actual outbound order (traced).** For BroadcastProposal / BroadcastVote /
+SendVoteTo the real sequence is **admission/epoch checks → signing → confirmation
+→ facade handoff**: `admit_outbound_action` (and the cached-reemission admit),
+then `sign_vote_for_broadcast` / proposal signing, then
+`confirm_outbound_before_effect`, then `facade.broadcast_*`
+(`binary_consensus_loop.rs` `forward_actions_to_facade` ~`:3505`–`:3613`; the
+cached path near `:3571`–`:3596` signs *before* `confirm`). A **completed
+signature** (bytes already produced) is therefore distinct from a **transmitted
+signature**: `confirm` can suppress an already-computed signature before the
+facade handoff, but once handed off the effect is not cancellable. Any different
+future ordering (for example confirming *before* signing) is **proposed only** and
+would carry the additional requirement of not producing signature bytes before the
+current-authority check; it is not the current behavior.
 
 **No effect that has already occurred is promised cancellation.** For delayed
 work the transition rule is explicit: **discard and re-admit fresh** (the S8
@@ -173,7 +280,7 @@ disposition), never silently complete under a superseded authority.
 
 | Profile | Reuses | Remaining work |
 |---|---|---|
-| **A. Founding-authority-only first release** | S1–S3 (validate + founding-epoch guard), S4 fail-closed owner, S13–S15 verification/retention | A durable, rollback-resistant proof that the founding epoch is *current* (Missing rows); release-binary adversarial evidence (S16 refusal today) |
+| **A. Founding-authority-only first release** | S1–S3 (validate + founding-epoch guard), S4 fail-closed owner, S13–S15 verification/retention | The full dependency list in §3.3.1 (activation root, freshness, wiring, QC/Timeout compatibility, signing-state recovery + rollback safety, adversarial evidence) — **not** just an epoch-current proof |
 | **B. Serialized epoch transitions** | All of A plus a serialized transition marker + committed-epoch source | Everything in A **plus** durable transition ordering, an epoch source beyond the same-disk DB, and per-transition anti-rollback |
 
 **Recommendation:** pursue **Profile A first**. It has the smallest safety
@@ -183,6 +290,25 @@ solving serialized multi-epoch durability before a first release. Profile A is
 anti-rollback proof of §5 before it can sign in production. Do **not** silently
 broaden the founding-epoch guard to admit later epochs, and do **not** treat a
 fixed authority as eliminating restart / rollback safety.
+
+**Profile A is a *proposed first-release profile*, not an activation approval.**
+Anchor selection (§5) alone does not unblock it. Its dependencies, each satisfied
+on its own terms, are:
+
+#### 3.3.1 Profile A dependency list
+
+1. **Activation-authorization root / evidence** (requirement A, §2.3 / §4.0) —
+   currently a **missing prerequisite** (S16 refuses activation).
+2. **Bootstrap / absent-QC policy** (§4.2) — open.
+3. **Trusted production identity and runtime / wire correspondence** (S1, S11/S12).
+4. **Coherent authority, engine, verifier, and signer wiring** (S2 feeding
+   `try_build_timeout_verification_context`; S13/S14/S15; S5/S6).
+5. **Applicable QC formation / propagation and Timeout / NewView compatibility**
+   (S13/S14; the Timeout bridge, §6.1) — open.
+6. **Signing-state recovery and rollback safety** (requirement C, §2.3.2; §5) —
+   missing durable last-voted-view / locked-QC / anti-rollback.
+7. **Configured-authority release-binary adversarial evidence** —
+   `CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED` (S16).
 
 A3 issuer identity / exhaustion (S4) and A4 serialized-handler ordering are
 existing **scoped** results; this contract does not reopen them as wholly
@@ -196,10 +322,29 @@ These five steps are **independent**; each must be satisfied on its own terms:
 
 1. **Validate an independently pinned genesis** — S1 (`verify_boot_time_genesis(Some(pin))`).
 2. **Establish network / membership correspondence** — S11/S12.
-3. **Authorize activation** — currently **disabled** (S16 refuses the flag).
-4. **Establish that an authority is current now** — Missing (needs a real
-   current source + durable freshness).
-5. **Permit a specific Proposal/Vote effect** — S5/S6 `admit`→`confirm`.
+3. **Authorize activation** — a *decision* backed by a trusted root / evidence,
+   **not** the same thing as validating identity (1) or freshness (4). Currently
+   **disabled** (S16 refuses the flag); the authorizing mechanism itself is a
+   missing prerequisite (§4.0).
+4. **Establish that an authority is current now** — Missing (needs a real current
+   source + durable freshness (B) and signing-state continuity (C)).
+5. **Permit a specific Proposal/Vote effect** — S5/S6 in the actual order
+   `admit`→epoch-check→**sign**→`confirm`→facade handoff (§3.2).
+
+### 4.0 Activation authorization root (requirement A) is a missing prerequisite
+
+Step 3 is **not** satisfied by steps 1, 2, 4, or 5. Validating that an authority
+is well-formed (S1/S2), that it corresponds to the network (S11/S12), and even
+that it is fresh (§5) does **not** identify *who or what policy authorizes this
+exact authority to begin signing*. No such trusted activation root / evidence
+exists in the worktree today: the only production owner constructor is
+`unavailable(...)`, and the release binary refuses
+`--consensus-authority-from-genesis` with `std::process::exit(1)` (S16).
+Constructing an `Established` owner would be the **representation** of an
+authorization decision, not proof it was legitimate; the mechanism that would make
+that decision (an operator policy / trust root / signed activation evidence bound
+to the exact authority) is a **recorded missing prerequisite**, not something this
+contract supplies. Anchor selection (§5) alone does **not** unblock activation.
 
 ### 4.1 Current absent-QC Proposal path (traced)
 
@@ -232,7 +377,20 @@ The present-QC path is not weakened and no QC is fabricated to solve bootstrap.
 | Candidate build | none | boot | pinned genesis (S1) | S3 founding-epoch guard passes | none (in-memory) | build owner `unavailable(...)` | refuse to activate (S16) |
 | Activation | candidate + `unavailable` | operator + evidence | S9 epoch + S10/S12 correspondence + **durable freshness anchor** | all correspond **and** anchor proves current | anchor + committed epoch durably ordered | construct `Established` owner | remain `unavailable` (no signing) |
 | Sign effect | `Established` owner | inbound/outbound action | admitted ticket (S4) | `confirm` matches generation, not exhausted | none beyond activation | sign + forward (S6) | `Stale`/`Exhausted`/`ForeignIssuer` reject |
-| Replacement | `Established` gen N | new epoch | new correspondence + anchor advance | new candidate authorized + anchor strictly newer | durable epoch advance before signing | generation advance | reject; keep gen N |
+| Replacement | `Established` gen N | new epoch | new correspondence + anchor advance | new candidate authorized + anchor strictly newer | durable epoch advance before signing | generation advance (in-process bookkeeping only) | reject the new candidate; gen N may keep signing **only** while independently established current and authorized — if superseded/revoked or if current authorization is unavailable, **fail closed** |
+
+**Generation advancement is not activation.** The private `generation` counter on
+`CurrentAuthorizationOwner` is **in-process invalidation bookkeeping**: it makes a
+stale ticket fail `confirm`. It is **not** by itself authenticated activation, a
+durable cutover, or a protocol-wide transition, and advancing it does not by
+itself authorize the successor. A replacement that *fails* does not automatically
+license continuing under the prior generation: the prior authority may sign only
+while it remains independently established as current and authorized (requirements
+A and B); if it is known superseded or revoked, or if current authorization
+becomes unavailable, signing MUST fail closed rather than "keep generation N".
+Activation durability (a one-time cutover) is separate from ongoing
+signing / recovery safety (requirement C); "no durability beyond activation" is
+**not** a sufficient lifecycle contract.
 
 ---
 
@@ -268,12 +426,48 @@ do **not** make a cloud/operator service a new trusted authority. Any
 peer-assisted recovery must explain why its reference is **current and
 independently trusted**; "highest epoch received" is explicitly insufficient.
 
+### 5.2.1 What an anchor interface must state before it is permissible
+
+A comparison can **classify** a supplied value (ahead / equal / behind); it
+**cannot authenticate the value's origin**, and a caller-controlled "source label"
+does not change that. An abstract anchor interface is permissible **only** after
+its contract states:
+
+* **What authenticates the witness** (not a self-declared source field).
+* **Which network / genesis / authority and which validator instance** it
+  concerns.
+* **What safety-relevant state or history it binds** (requirements B and C),
+  including whether it binds signing-state continuity or only an epoch number.
+* **How freshness and replay resistance are established.**
+* **Which state lies outside the attacker's rollback capability** (the rollback
+  domain), described relative to that domain rather than by mandating one fixed
+  transport. Protected local hardware state and a remote witness make **different**
+  assumptions and are both admissible designs; an off-box service is **not** the
+  only possible design.
+* **Behavior on unavailable, conflicting, stale, or unverifiable evidence**
+  (fail-closed unless independently established otherwise).
+
+No classical-signature / attestation dependency may be introduced silently, and no
+cloud / operator service may become a new trusted authority (§5.2 table).
+
+**Live-quorum / QC anchor proposals** must additionally state their
+**authentication**, **freshness**, **trusted-membership**, **cold-start**,
+**all-validator-restart**, and **partition** assumptions. A valid QC verified via
+S13 proves a quorum signed a block; it does **not** prove it is the **latest**
+state, nor does it preserve any validator's prior signing decisions (requirement
+C). It is therefore not, by itself, a freshness or continuity anchor.
+
 ### 5.3 Unresolved decision (recorded, not resolved)
 
 The available evidence does **not** yet justify selecting a specific anchor.
 Consequence, stated exactly: **production current authorization remains
 unavailable** (`DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED`). This contract does
 **not** claim durable anti-rollback has been established.
+
+Anchor selection stays **explicitly unresolved**. No "durable freshness" claim may
+rest on a caller-supplied scalar: a provenance / source label attached to such a
+scalar classifies but does not authenticate it, so it cannot establish requirement
+(B) or (C).
 
 ### 5.4 Required ordering
 
@@ -299,7 +493,13 @@ is **trusted production consumption**, not another wire-alias registry.
   runtime ID.
 * **Membership, voting power, keys, suites, signing domain** — from
   `build_genesis_consensus_authority` (S2) feeding the same
-  `try_build_timeout_verification_context` main uses.
+  `try_build_timeout_verification_context` main uses. Note the direction of this
+  relationship: genesis-derived membership / keys feed the **Timeout / NewView**
+  verification bridge; that bridge does **not**, by itself, establish Proposal /
+  Vote authority. Production makes this explicit — the legacy
+  `--validator-consensus-key` path builds **only** the Timeout / NewView context
+  and sets `proposal_vote_authority: None` (`main.rs:5545`–`5549`), so Timeout
+  credentials must never be read as Proposal / Vote activation.
 * **Authorized epoch and activation provenance** — S3 founding-epoch guard + S9
   observed epoch + §5 durable anchor.
 * **Engine, verifier, signer, cache, recovery context** — S13 verifier, S15
@@ -347,9 +547,15 @@ does **not** close any dependency above.
    (T4) does not activate; the off-box anchor detects staleness.
 4. **Empty-DB ambiguity.** First-init vs lost-state is resolved only by the
    external witness; an empty DB alone never grants bootstrap.
-5. **Stale mid-handler replacement.** A ticket admitted under generation N fails
-   `confirm` after a generation advance; the pending effect is discarded, not
-   completed.
+5. **Replacement between completed operations (not mid-handler).** The existing
+   synchronous handler holds the owner by an immutable borrow, so **no same-owner
+   replacement occurs halfway through a single handler's borrow**; replacement is
+   modeled only **between** completed operations. A ticket admitted under
+   generation N and re-checked after a subsequent generation advance fails
+   `confirm`; the pending effect is discarded (the S8 disposition), not completed.
+   A produced-but-not-yet-transmitted signature is likewise suppressed at
+   `confirm` (§3.2). This scenario does **not** assert or require mid-handler
+   replacement.
 6. **Present-QC unchanged / absent-QC unchanged.** A present embedded QC is still
    verified through S13/S14; `proposal.qc == None` remains neither verified,
    counted, nor treated as bootstrap.
@@ -358,30 +564,49 @@ does **not** close any dependency above.
 
 ## 9. Single bounded next implementation task
 
-**Objective.** Introduce a **read-only durable freshness-anchor observation**
-(non-authorizing) that records an externally sourced current-epoch witness and
-compares it to the S9 observed persisted epoch, emitting a typed
-`FreshnessAnchorObservation` (e.g. `AnchorAhead` / `AnchorEqual` /
-`AnchorBehind(persisted)` / `AnchorUnavailable`). It must **never** activate an
-authority and must **never** be derived from peers or from the same rollbackable
-DB. This is the smallest step that turns §5's unresolved anchor decision into an
-inspectable, testable evidence surface without enabling activation.
+**Objective.** Produce a **source characterization of existing signing-state
+persistence and recovery** for the same-epoch restart / restore case, using the
+paths that already exist — **before** proposing any new abstraction. Concretely,
+document, through the real entrypoints, exactly what the restart / restore path
+reads and restores versus what it drops for a validator that signed a Vote in the
+current (e.g. founding, epoch 0) view but did not commit it, and classify the
+result as *evidence of missing protection* vs *evidence that protection exists*.
+This turns §2.3.2's inventory into a bounded, testable characterization without
+inventing a new module, storage key, or anchor transport, and without enabling
+activation.
 
-* **Existing mechanisms to reuse:** S9 `observe_consensus_storage` (persisted
-  epoch, read-only); S10/S12 correspondence pattern (untrusted-input vs pinned
-  evidence, non-authorizing result types); the D7-C module conventions
-  (`cfg(test)` fixtures, typed errors, no production wiring).
-* **Prerequisites:** none beyond the worktree; documentation-defined anchor
-  interface only. Do **not** select the concrete anchor transport yet (that is
-  the §5 decision) — the module consumes an abstract, caller-supplied witness.
-* **Files likely affected:** a new
-  `crates/qbind-node/src/freshness_anchor_observation.rs` module + `pub mod` in
-  `crates/qbind-node/src/lib.rs`; a new
-  `crates/qbind-node/tests/run_422_d7d2_freshness_anchor_observation_tests.rs`;
-  an evidence subsection in `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md`.
-* **Tests:** anchor-ahead / equal / behind / unavailable classification; that the
-  result never converts to authorization; that a peer-sourced or same-DB value is
-  rejected as an anchor input; parity with S9 observation states.
-* **Exclusions:** no activation, no signing, no storage-schema or wire change, no
-  concrete anchor transport, no Run 423 work, no readiness promotion. Do not
-  generate a speculative sequence of many new modules or promise a run count.
+* **Actual entrypoints / paths to characterize:**
+  * `basic_hotstuff_engine.rs` `initialize_from_restart` (`:1138`) and the
+    production `initialize_from_snapshot_baseline` restore path used by
+    `binary_consensus_loop.rs`, including `current_view = committed_height + 1`
+    (`:1146`) and the reset of `voted_in_view` / `proposed_in_view`.
+  * `storage.rs` `apply_epoch_transition_atomic` (`:997`), `get_last_committed`
+    (`:879`), `get_current_epoch` (`:936`), and the absence of any
+    `put_last_voted_view` / `put_locked_qc` / vote-record method on the
+    `ConsensusStorage` trait (`:142`).
+  * S9 `observe_consensus_storage` (`consensus_storage_observation.rs`) as the
+    existing read-only, non-authorizing observation surface.
+* **Reusable mechanisms:** S9 observation states; the D7-C module conventions
+  (`cfg(test)` fixtures, typed non-authorizing result types, no production
+  wiring). No new production module is required to *characterize* current behavior.
+* **Prerequisites (state explicitly; do not fabricate):** there is **no** durable
+  writer / reader / recovery path for last-voted-view, locked-QC, or per-vote
+  signing decisions in the worktree (§2.3.2). A characterization task must **not**
+  create such a path in a fixture and then present the result as production
+  recovery. If the task is later extended to *add* protection, that durable
+  writer / reader / recovery path is a **prerequisite**, not an assumption.
+* **Test scenarios (characterization, `cfg(test)`):** sign a Vote in view V at
+  epoch 0; take a snapshot; restore it; observe that `observe_consensus_storage`
+  still reports `CommittedEpoch(0)` / `PresentNoCommittedEpoch` while
+  `voted_in_view` is `false` and `current_view` is `committed_height + 1` after
+  restore — demonstrating that the committed-epoch observation does **not** cover
+  the uncommitted signing decision. Include the control that a *committed* block
+  **is** restored via `get_last_committed`, and assert the observation never
+  converts to authorization.
+* **Exclusions:** no new module, storage schema, wire format, or anchor transport;
+  **no `freshness_anchor_observation.rs`**; no activation, signing, or readiness
+  promotion; no Run 423 work. The task is **not** implementation-ready as
+  *protection* while its security semantics (requirement-C durability) remain
+  unspecified — it is bounded to **characterization** of existing paths, and it
+  distinguishes evidence of missing protection from evidence that protection
+  exists.

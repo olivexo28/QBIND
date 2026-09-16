@@ -1045,6 +1045,50 @@ retention) and records, as still **Missing**, both a durable rollback-resistant
 current-authorization source and an independent freshness anchor. It recommends a
 founding-authority-only first release, fixes no code, and keeps every retained D7
 posture flag and the `CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED`
-classification unchanged. Its single bounded next task is a read-only,
-non-authorizing durable freshness-anchor observation module; activation remains
-disabled and no readiness item moves. This note is additive.
+classification unchanged. Its single bounded next task, **as revised in the
+D7-D1 review correction (§15)**, is a **source characterization of existing
+signing-state persistence and recovery** through the real restart / restore
+paths; the previously proposed generic freshness-anchor / epoch-witness
+observation module is **withdrawn**. Activation remains disabled and no readiness
+item moves. This note is additive.
+
+## 15. Successor note (Run 422 D7-D1 review correction)
+
+The D7-D1 review corrected the lifecycle contract in place. Summary for
+cross-reference only (the authoritative text is in
+`docs/protocol/QBIND_PROPOSAL_VOTE_AUTHORITY_LIFECYCLE_CONTRACT.md`):
+
+* **Three requirements separated** — activation authorization (A),
+  current-authority freshness (B), and signing / consensus-state continuity (C)
+  are distinct; an equal epoch comparison establishes none of them (epoch-0
+  snapshot / sign / restore counterexample). Source-backed inventory:
+  `voted_in_view` / `proposed_in_view` / `locked_qc` / `current_view` /
+  `votes_by_view` are in-memory only; the `ConsensusStorage` trait persists
+  committed block / QC / epoch and has no last-voted-view / locked-QC / vote-record
+  method, so a committed-block checkpoint does not cover an uncommitted signing
+  decision.
+* **Provenance vs authentication** — a comparison classifies but cannot
+  authenticate a caller-supplied value; the abstract anchor interface is gated on
+  a stated authentication / binding / freshness / rollback-domain / failure
+  contract; live-quorum / QC assumptions enumerated; anchor selection stays
+  unresolved.
+* **Lifecycle / ordering** — actual outbound order is admission/epoch → sign →
+  confirm → facade handoff; a completed signature is distinct from a transmitted
+  one; mid-handler same-owner replacement is not modeled; generation advance is
+  in-process bookkeeping, not activation; "replacement fails → keep gen N" is
+  corrected to fail-closed when superseded / revoked or when current authorization
+  is unavailable.
+* **Activation** — the trusted activation root / evidence (requirement A) is a
+  recorded missing prerequisite; Profile A stays a proposed first-release profile
+  (not an activation approval) with the full dependency list.
+* **Source classifications** — `resolve_network_wire_alias` is defined in
+  `qbind-types` and imported by the correspondence module; production preflight
+  supplies `proposal_vote_authority: None`; S13 is conditionally reachable via
+  C3E; S15 retains without a second constituent verification; Timeout / NewView
+  credentials do not establish Proposal / Vote authority; governance replay
+  persistence is not validator signing-state persistence or whole-DB rollback
+  protection.
+* **Next task withdrawn / replaced** — the generic freshness-anchor observation
+  module is withdrawn; the replacement is a bounded source characterization of
+  existing signing-state persistence / recovery. Activation remains disabled; no
+  readiness item moves. This note is additive.
