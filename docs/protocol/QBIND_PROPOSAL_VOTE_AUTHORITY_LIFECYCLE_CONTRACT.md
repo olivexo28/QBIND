@@ -83,7 +83,7 @@ Inspected against the **actual supplied worktree**, not the SHAs the task recite
 | S10 | Genesis / record correspondence (C2) | `crates/qbind-node/src/genesis_authority_record_correspondence.rs` (`ExpectedGenesisIdentity::load_pinned`, `check_genesis_record_correspondence`) |
 | S11 | Standard-network alias mapping (C3A) | `crates/qbind-types/src/network_wire_alias.rs` (`resolve_network_wire_alias`, **defined here**), imported by `genesis_authority_record_correspondence.rs` (C3B `check_network_correspondence`) |
 | S12 | Pinned-genesis / network correspondence (C3B) | `genesis_authority_record_correspondence.rs` (`check_network_correspondence`, `GenesisNetworkCorrespondence`) |
-| S13 | Domain-bound QC verifier (C3D, dormant) | `crates/qbind-consensus/src/qc_verify_domain.rs` (`verify_quorum_certificate_with_domain`, `VerifiedQuorumCertificate`) |
+| S13 | Domain-bound QC verifier (C3D; conditionally reachable via the C3E gate) | `crates/qbind-consensus/src/qc_verify_domain.rs` (`verify_quorum_certificate_with_domain`, `VerifiedQuorumCertificate`) |
 | S14 | Present-QC admission gate (C3E) | `binary_consensus_loop.rs` (inbound Proposal arm; `inbound_proposal_embedded_qc_verified_total`) |
 | S15 | Verified-evidence retention (C3F) | `crates/qbind-consensus/src/basic_hotstuff_engine.rs` (`on_verified_proposal_event`); `crates/qbind-consensus/src/hotstuff_state_engine.rs` (`register_block_with_verified_justification`, `verified_justification`) |
 | S16 | Activation refusal (release binary) | `crates/qbind-node/src/main.rs` (`--consensus-authority-from-genesis` refused, `std::process::exit(1)`) |
@@ -185,10 +185,10 @@ is **not** production recovery.
 | Current view | `current_view` (`basic_hotstuff_engine.rs:299`) | yes | no | reset to `committed_height + 1` (`:1146`, `initialize_from_restart`) | **not preserved** |
 | Voted-in-view latch (anti double-vote) | `voted_in_view` (`:317`; checked `:1753`; set `:1824`; reset `:1012/1148/1220/2030`) | yes | no | reset to `false` on restart | **missing** |
 | Proposed-in-view latch | `proposed_in_view` (`:314`) | yes | no | reset on restart | **missing** |
-| Locked QC (locking rule) | `locked_qc` (`hotstuff_state_engine.rs:173`; getter `:293`) | yes | no (no `put_locked_qc`) | reconstructed from tree or discarded | **not durably preserved** |
+| Locked QC (locking rule) | `locked_qc` (`hotstuff_state_engine.rs:173`; getter `:293`) | yes | no (no `put_locked_qc`) | harness `load_persisted_state` reconstructs a *conservative* logical lock from the committed / embedded QC (`hotstuff_node_sim.rs:2095`–`:2135`) before `initialize_from_restart` — **not** recovery of the exact latest pre-crash locked QC; the production binary snapshot path (`initialize_from_snapshot_baseline`) restores none | **not durably preserved** |
 | Per-view equivocation map | `votes_by_view` (`hotstuff_state_engine.rs:192`; cleared `:340`) | yes | no | not recovered | **missing** |
 | Retained QC evidence (C3F) | `verified_justification` (`block_state.rs:74`) | yes | no (non-serialized `Arc`) | discarded on restart | **in-process only** |
-| Committed block / QC | `put_block`/`put_qc` in `apply_epoch_transition_atomic` (`storage.rs:997`) | yes | yes | `get_last_committed` (`production_consensus_storage.rs:101`) | **preserved (committed only)** |
+| Committed block / QC | `put_block`/`put_qc` in `apply_epoch_transition_atomic` (`storage.rs:997`) | yes | yes | harness `load_persisted_state` reads `get_last_committed`→`get_block`→`get_qc` (`hotstuff_node_sim.rs:2049` / `:2066` / `:2085`) then `initialize_from_restart`; the **production binary** restore uses `initialize_from_snapshot_baseline` (`binary_consensus_loop.rs:2390`), reading **neither** `get_last_committed` **nor** any QC | **preserved (committed only); recovered on the harness path only** |
 | Committed epoch | `put_current_epoch` (`storage.rs:1034`) | yes | yes | `get_current_epoch` via `observe_consensus_storage` (S9) | **preserved (committed only)** |
 
 The `ConsensusStorage` trait (`storage.rs:142`) exposes `put_block` / `put_qc` /
@@ -352,9 +352,12 @@ In the inbound Proposal arm, the present-QC gate (S14) runs only when
 **both** a bound snapshot and `proposal.qc == Some(..)` exist. `proposal.qc == None`
 is preserved exactly: it is **neither verified nor counted**, and is **never**
 inferred as a validated bootstrap exception. In a production release the arm
-never reaches the QC gate at all, because the present authority has an
-`unavailable(...)` current state and is rejected as current-state-unavailable
-before any crypto. There is therefore no production absent-QC bootstrap
+never reaches the QC gate at all: production preflight supplies **no** effective
+Proposal / Vote verification authority (`proposal_vote_authority: None`,
+`main.rs:5549`), so under the fail-closed `Required` policy the inbound arm is
+rejected as verification-context / current-state-unavailable **before any crypto**.
+(The distinct *present-authority / `unavailable(...)`-owner* arm is `cfg(test)`
+-exercised only; either way production authority remains unavailable.) There is therefore no production absent-QC bootstrap
 permission today, and none is fabricated here.
 
 ### 4.2 Requirements for any future bootstrap exception
@@ -375,8 +378,8 @@ The present-QC path is not weakened and no QC is fabricated to solve bootstrap.
 | Transition | Prior state | Trigger | Trusted inputs | Authorization condition | Required durability | Permitted effects | Fail-closed outcome |
 |---|---|---|---|---|---|---|---|
 | Candidate build | none | boot | pinned genesis (S1) | S3 founding-epoch guard passes | none (in-memory) | build owner `unavailable(...)` | refuse to activate (S16) |
-| Activation | candidate + `unavailable` | operator + evidence | S9 epoch + S10/S12 correspondence + **durable freshness anchor** | all correspond **and** anchor proves current | anchor + committed epoch durably ordered | construct `Established` owner | remain `unavailable` (no signing) |
-| Sign effect | `Established` owner | inbound/outbound action | admitted ticket (S4) | `confirm` matches generation, not exhausted | none beyond activation | sign + forward (S6) | `Stale`/`Exhausted`/`ForeignIssuer` reject |
+| Activation | candidate + `unavailable` | operator + evidence | S9 epoch + S10/S12 correspondence + **durable freshness anchor** + **a trusted activation-authorization root (requirement A)** + **requirement-C signing / recovery prerequisites** | all correspond **and** anchor proves current **and** a trusted root authorizes this exact authority **and** signing-state continuity is established — correspondence + anchor alone are **insufficient** | anchor + committed epoch durably ordered | construct `Established` owner | remain `unavailable` (no signing) |
+| Sign effect | `Established` owner | inbound/outbound action | admitted ticket (S4) | `confirm` matches generation, not exhausted | durable signing-state continuity (requirement C) is an **unmet** prerequisite — one-time activation durability does **not** establish ongoing signing-state continuity | sign + forward (S6) | `Stale`/`Exhausted`/`ForeignIssuer` reject |
 | Replacement | `Established` gen N | new epoch | new correspondence + anchor advance | new candidate authorized + anchor strictly newer | durable epoch advance before signing | generation advance (in-process bookkeeping only) | reject the new candidate; gen N may keep signing **only** while independently established current and authorized — if superseded/revoked or if current authorization is unavailable, **fail closed** |
 
 **Generation advancement is not activation.** The private `generation` counter on
@@ -400,10 +403,10 @@ signing / recovery safety (requirement C); "no durability beyond activation" is
 
 | # | Threat | Handled today | Requires additional trust |
 |---|---|---|---|
-| T1 | Ordinary restart / interrupted write | S17 atomic-write + partial-residue recovery (disabled default) | — |
+| T1 | Ordinary restart / interrupted write | S17 atomic-write + partial-residue recovery (disabled default) — **governance-replay crash consistency only**; does **not** establish validator signing-state continuity (requirement C) | crash consistency ≠ signing-state continuity |
 | T2 | Incomplete epoch transition / corrupted metadata | S9 detects incomplete transition (read-only) | activation ordering |
 | T3 | Restoration of an older **valid** database | **No** | independent freshness anchor |
-| T4 | Whole machine / VM snapshot restore (incl. local markers) | **No** | off-box anchor |
+| T4 | Whole machine / VM snapshot restore (incl. local markers) | **No** | trusted state / evidence outside the attacker's rollback domain (protected local hardware **or** a remote witness — neither selected nor proven here) |
 | T5 | Cloned / compromised signing keys | **No** | key custody / attestation (out of scope here) |
 | T6 | Network partition / loss of freshness service | **No** | anchor availability model |
 
@@ -473,7 +476,9 @@ scalar classifies but does not authenticate it, so it cannot establish requireme
 
 Durable state MUST be committed **before** authority activation, and activation
 MUST precede any signing / external effect: `commit(epoch+anchor)` →
-`activate(Established owner)` → `admit`/`confirm` → sign → forward. **Crash
+`activate(Established owner)` → `admit` → epoch check → **sign** → `confirm` →
+facade handoff (the §3.2 order; `confirm` follows signing and can only suppress an
+already-produced signature *before* handoff, never un-create it). **Crash
 safety** (T1/T2, addressable by S17-class atomic writes) is distinct from
 **protection against malicious rollback** (T3/T4, requiring the independent
 anchor). The former does not imply the latter.
@@ -528,7 +533,12 @@ does **not** close any dependency above.
 * **Recommended profile:** **A — founding-authority-only** (§3.3), because it
   minimizes the safety surface and reuses S3 unchanged.
 * **Dependency order (must be satisfied in sequence):**
-  1. Independent freshness anchor selection (§5.2) — unblocks activation.
+  1. Satisfy the full §3.3.1 Profile A dependency list — activation-authorization
+     root (requirement A), current-authority freshness (requirement B) via an
+     independent anchor (§5.2), signing-state continuity (requirement C), bootstrap
+     / absent-QC policy (§4.2), coherent authority / engine / verifier / signer
+     wiring, applicable QC / Timeout / NewView compatibility, and configured-authority
+     release-binary evidence. Anchor selection alone does **not** unblock activation.
   2. Durable ordering commit-before-activate-before-sign (§5.4).
   3. Founding-epoch activation wiring replacing the S16 refusal (behind evidence).
   4. Release-binary adversarial evidence capture.
@@ -544,7 +554,7 @@ does **not** close any dependency above.
    with the anchor refuses to activate an epoch older than the anchor's current
    value (typed rollback refusal); without the anchor it stays `unavailable`.
 3. **VM-snapshot restore rejected.** A whole-VM snapshot including local markers
-   (T4) does not activate; the off-box anchor detects staleness.
+   (T4) does not activate; a trusted anchor outside the rollback domain (protected local hardware or a remote witness — not selected here) detects staleness.
 4. **Empty-DB ambiguity.** First-init vs lost-state is resolved only by the
    external witness; an empty DB alone never grants bootstrap.
 5. **Replacement between completed operations (not mid-handler).** The existing
@@ -589,20 +599,43 @@ activation.
 * **Reusable mechanisms:** S9 observation states; the D7-C module conventions
   (`cfg(test)` fixtures, typed non-authorizing result types, no production
   wiring). No new production module is required to *characterize* current behavior.
-* **Prerequisites (state explicitly; do not fabricate):** there is **no** durable
-  writer / reader / recovery path for last-voted-view, locked-QC, or per-vote
-  signing decisions in the worktree (§2.3.2). A characterization task must **not**
+* **Prerequisites (state explicitly; do not fabricate):** the traced paths — the
+  `ConsensusStorage` trait (`storage.rs:142`), `apply_epoch_transition_atomic`, the
+  harness `load_persisted_state` / `initialize_from_restart`, and the production
+  `initialize_from_snapshot_baseline` — expose **no** durable writer / reader /
+  recovery path for last-voted-view, locked-QC, or per-vote signing decisions
+  (§2.3.2). This is a finding about **those inspected interfaces and paths**, not a
+  proven repository-wide absence; the characterization task's job is to determine
+  what the actual paths establish. A characterization task must **not**
   create such a path in a fixture and then present the result as production
   recovery. If the task is later extended to *add* protection, that durable
   writer / reader / recovery path is a **prerequisite**, not an assumption.
-* **Test scenarios (characterization, `cfg(test)`):** sign a Vote in view V at
-  epoch 0; take a snapshot; restore it; observe that `observe_consensus_storage`
-  still reports `CommittedEpoch(0)` / `PresentNoCommittedEpoch` while
-  `voted_in_view` is `false` and `current_view` is `committed_height + 1` after
-  restore — demonstrating that the committed-epoch observation does **not** cover
-  the uncommitted signing decision. Include the control that a *committed* block
-  **is** restored via `get_last_committed`, and assert the observation never
-  converts to authorization.
+* **Test scenarios (characterization, `cfg(test)`) — three distinct cases, each
+  naming its entrypoint and persisted data; keep harness recovery
+  (`load_persisted_state` / `initialize_from_restart`) distinct from the production
+  binary snapshot path (`initialize_from_snapshot_baseline`), and keep
+  `CommittedEpoch(0)` distinct from `PresentNoCommittedEpoch`:**
+  1. **Ordinary restart after an uncommitted signing decision.** Sign a Vote in view
+     V at epoch 0 (not committed), then restart. The decision is recorded only by the
+     in-memory `voted_in_view` latch, which no writer persists; after the restart
+     entrypoint `voted_in_view` is `false` and `current_view` is `committed_height +
+     1`. Characterize what the entrypoint reads versus drops.
+  2. **Restoration of a snapshot captured BEFORE that signing decision.** Snapshot
+     before the Vote is signed; sign the Vote; restore the earlier snapshot. The
+     production restore uses `StateSnapshotMeta` + `initialize_from_snapshot_baseline`,
+     which carries only height / block hash and restores no QC or vote history, so the
+     signed-then-rolled-back Vote leaves no trace.
+  3. **Existing committed-state recovery (control).** On the harness path a
+     *committed* block **is** restored via `load_persisted_state`
+     (`get_last_committed`→`get_block`→`get_qc`→`initialize_from_restart`); assert
+     `observe_consensus_storage` reports `CommittedEpoch(0)` (distinct from
+     `PresentNoCommittedEpoch`) and never converts to authorization.
+
+  Scenarios 1–2 show that neither restart nor snapshot restore covers an uncommitted
+  signing decision; scenario 3 bounds what committed-state recovery restores. A reset
+  latch or a repeated engine action is **not**, by itself, proof that two conflicting
+  signatures were created or transmitted; any later behavioral claim must name the
+  boundary actually exercised.
 * **Exclusions:** no new module, storage schema, wire format, or anchor transport;
   **no `freshness_anchor_observation.rs`**; no activation, signing, or readiness
   promotion; no Run 423 work. The task is **not** implementation-ready as

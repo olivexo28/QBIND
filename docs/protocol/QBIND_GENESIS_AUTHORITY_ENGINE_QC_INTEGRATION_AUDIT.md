@@ -1048,7 +1048,9 @@ posture flag and the `CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTU
 classification unchanged. Its single bounded next task, **as revised in the
 D7-D1 review correction (§15)**, is a **source characterization of existing
 signing-state persistence and recovery** through the real restart / restore
-paths; the previously proposed generic freshness-anchor / epoch-witness
+paths — keeping the harness `load_persisted_state` / `initialize_from_restart`
+recovery distinct from the production `initialize_from_snapshot_baseline` snapshot
+restore; the previously proposed generic freshness-anchor / epoch-witness
 observation module is **withdrawn**. Activation remains disabled and no readiness
 item moves. This note is additive.
 
@@ -1092,3 +1094,40 @@ cross-reference only (the authoritative text is in
   module is withdrawn; the replacement is a bounded source characterization of
   existing signing-state persistence / recovery. Activation remains disabled; no
   readiness item moves. This note is additive.
+
+## 16. Successor note (Run 422 D7-D1 reconciliation pass)
+
+This additive note records the D7-D1 reconciliation pass that fixed the remaining
+**operative** contradictions in the lifecycle contract
+(`docs/protocol/QBIND_PROPOSAL_VOTE_AUTHORITY_LIFECYCLE_CONTRACT.md`) so its tables
+and checklists agree with the §15 summary. For cross-reference only:
+
+* **Recovery inventory corrected.** The contract §2.3.2 *Committed block / QC* row
+  previously cited `get_last_committed` at `production_consensus_storage.rs:101`;
+  that file contains **no** `get_last_committed`. The actual recovery reader is the
+  harness `load_persisted_state` (`hotstuff_node_sim.rs:2049`), while the production
+  binary restore uses `initialize_from_snapshot_baseline`
+  (`binary_consensus_loop.rs:2390`) and reads neither `get_last_committed` nor any QC.
+  The locked-QC row now describes a conservative reconstruction from committed /
+  embedded QCs, not recovery of the exact latest pre-crash locked QC. The
+  `ConsensusStorage` absence finding is scoped to that interface and the traced paths.
+
+* **Activation / ordering rows fixed in place.** The §4.3 signing row no longer reads
+  “none beyond activation” (durable requirement-C continuity is an unmet
+  prerequisite); the activation row now also requires a trusted activation root (A)
+  and requirement-C prerequisites, not correspondence + anchor alone; §5.4's outbound
+  order is `admit` → epoch check → sign → `confirm` → facade handoff; §7 no longer
+  claims anchor selection “unblocks activation.”
+
+* **Rejection path and labels.** §4.1 records production `proposal_vote_authority:
+  None` (`main.rs:5549`) failing closed under `Required`, not a present-authority /
+  unavailable-owner case; the stale “dormant” S13 label was reconciled to
+  conditionally reachable via the C3E gate (`binary_consensus_loop.rs:4736`).
+
+* **Threat model.** T1 is scoped to governance-replay crash consistency (not validator
+  signing-state continuity); “off-box” requirements were replaced by trusted state /
+  evidence outside the attacker's rollback domain (protected local hardware or a remote
+  witness, neither selected). The epoch-0 counterexample is intact.
+
+Activation stays disabled; no code, test, or readiness item changes. This note is
+additive.

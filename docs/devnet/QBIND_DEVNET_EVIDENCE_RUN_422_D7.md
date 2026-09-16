@@ -4520,11 +4520,14 @@ storage-schema, wire-format, workflow, or activation change. All prior D7 work,
   guard or treat fixed authority as removing restart/rollback safety.
 * **Bounded next task (revised in the D7-D1 review correction below):** a
   **source characterization of existing signing-state persistence and recovery**
-  for the same-epoch restart / restore case, through the real
-  `initialize_from_restart` / `initialize_from_snapshot_baseline`,
-  `apply_epoch_transition_atomic`, `get_last_committed` / `get_current_epoch`, and
-  S9 `observe_consensus_storage` paths — characterizing what is restored vs
-  dropped for an uncommitted Vote at epoch 0. The previously proposed generic
+  for the same-epoch restart / restore case, through the real paths, keeping the
+  **harness** recovery (`load_persisted_state` reading `get_last_committed` /
+  `get_block` / `get_qc` then `initialize_from_restart`, `hotstuff_node_sim.rs:2049`)
+  distinct from the **production binary** snapshot restore
+  (`initialize_from_snapshot_baseline`, `binary_consensus_loop.rs:2390`, which reads
+  neither `get_last_committed` nor any QC), plus `apply_epoch_transition_atomic`,
+  `get_current_epoch`, and S9 `observe_consensus_storage` — characterizing what is
+  restored vs dropped for an uncommitted Vote at epoch 0. The previously proposed generic
   **freshness-anchor / epoch-witness observation module is withdrawn** (a
   comparison classifies but cannot authenticate a caller-supplied value). Files,
   tests, prerequisites, and exclusions are enumerated in the corrected contract
@@ -4622,3 +4625,86 @@ this documentation-only pass. Posture flags unchanged (below).
 `CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED`;
 `SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO`. No activation, readiness
 promotion, or Run 423 work.
+
+## Run 422 D7-D1 — reconciliation pass (this pass, documentation only)
+
+This pass reconciles the operative contract rows/checklists with the D7-D1 review
+summaries above. The prior review-correction section recorded corrections A–E, but
+several **operative** rows still carried the pre-correction wording (an appended
+qualification does not fix an incorrect table row). Superseded operative claims are
+identified below; earlier text is preserved.
+
+* **Inspected state (recorded, not manufactured):** working branch (actual)
+  `copilot/copilotcopilotcopilot-run-422-d7-d1`; worktree HEAD `7a995f6` (`update`),
+  clean before this pass. The reviewed object
+  `d2bd379eb8a1854d8a225b55d6f5ab3cd92815ff` is **absent** from this shallow (depth-2)
+  clone — not in local ancestry, not referenced by any tracked file; corrections were
+  applied to the actual worktree content, and no ancestry to an absent object is
+  manufactured.
+
+* **Correction A (activation / signing / ordering) — operative rows fixed in place:**
+  contract §4.3 *Sign effect* row's Required-durability cell no longer reads
+  “none beyond activation”; it now states durable signing-state continuity
+  (requirement C) is an **unmet** prerequisite. The §4.3 *Activation* row's
+  authorization condition no longer relies on correspondence + anchor alone; it now
+  also requires a trusted activation-authorization root (A) and requirement-C
+  prerequisites. §5.4's ordering was corrected to `admit` → epoch check → **sign** →
+  `confirm` → facade handoff (matching §3.2; confirmation after signing cannot
+  un-create a signature). §7's dependency-order item 1 no longer asserts anchor
+  selection “unblocks activation”; it references the single §3.3.1 dependency list.
+
+* **Correction B (persistence / recovery inventory) — corrected citations:** the
+  §2.3.2 *Committed block / QC* row previously cited `get_last_committed`
+  (`production_consensus_storage.rs:101`), which is **wrong** — that file contains no
+  `get_last_committed`; line 101 is an enum doc-comment. The actual recovery reader is
+  the harness `load_persisted_state` (`hotstuff_node_sim.rs:2049` → `:2066` → `:2085`
+  → `initialize_from_restart`); the production binary restore uses
+  `initialize_from_snapshot_baseline` (`binary_consensus_loop.rs:2390`), reading
+  neither `get_last_committed` nor any QC. The *Locked QC* row now states the harness
+  reconstructs a conservative logical lock from committed / embedded QCs (not recovery
+  of the exact latest pre-crash locked QC). The `ConsensusStorage` absence finding is
+  scoped to that interface and the traced paths, **not** a repository-wide absence.
+
+* **Correction C (production rejection path):** contract §4.1 no longer describes
+  production as a *present* authority with an `unavailable(...)` owner; production
+  preflight supplies `proposal_vote_authority: None` (`main.rs:5549`), so under
+  `Required` the inbound arm fails closed as verification-context / current-state-
+  unavailable before crypto (the present-authority / unavailable-owner arm is
+  `cfg(test)`-only). S13's stale “dormant” label in the §1.2 source inventory was
+  reconciled to conditionally reachable via the C3E gate
+  (`binary_consensus_loop.rs:4736`); production authority remains unavailable.
+
+* **Correction D (threat model):** the T1 row no longer reads a blanket “handled” —
+  S17's atomic-write / partial-residue recovery is **governance-replay crash
+  consistency only** and does not establish validator signing-state continuity. The
+  T4 row and acceptance scenario 3 replace the unconditional “off-box anchor” with
+  trusted state / evidence **outside the attacker's rollback domain** (protected local
+  hardware or a remote witness — neither selected nor proven). The epoch-0 snapshot /
+  sign / restore counterexample (§2.3.1) is intact.
+
+* **Single next task reconciled:** contract §9 retains a bounded signing-state
+  persistence / recovery **characterization** (no pre-decided repository-wide absence)
+  requiring three distinct scenarios — (1) ordinary restart after an uncommitted
+  signing decision, (2) restoration of a snapshot captured **before** that decision,
+  and (3) existing committed-state recovery as a control — each naming its entrypoint
+  and persisted data, keeping harness recovery distinct from the production snapshot
+  path and `CommittedEpoch(0)` distinct from `PresentNoCommittedEpoch`. Not implemented
+  in this pass.
+
+* **Checks performed:** exactly the three authorized Markdown files changed; CRLF
+  line endings preserved; no genuine trailing whitespace; source references
+  re-verified against this checkout (`main.rs:5549`, `hotstuff_node_sim.rs:2049`,
+  `binary_consensus_loop.rs:2390` / `:4736`, `production_consensus_storage.rs`
+  contains no `get_last_committed`). No Cargo test / check / Clippy / release build
+  run or authorized for this documentation-only pass; prior executions retained at
+  their actual revisions. `task/warning.txt` and unrelated files untouched; no PR,
+  branch rename, force-push, rebase, or history rewrite.
+
+### Retained posture (unchanged by this reconciliation pass)
+
+`D7_STATUS=PARTIAL-CODE-TEST / PRODUCTION-LIFECYCLE-UNAVAILABLE`;
+`DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED`; `GENESIS_AUTHORITY_ACTIVATION=DISABLED`;
+`PRODUCTION_WIRE_CHAIN_ID_BEHAVIOR=UNCHANGED`;
+`CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED`;
+`SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO`. No readiness promotion or Run 423
+work.
