@@ -17659,6 +17659,927 @@ mod tests {
             }
 
             // =============================================================
+            // Run 422 D7-C3E — verify PRESENT embedded wire QuorumCertificates
+            // through the existing C3D domain verifier BEFORE any inbound
+            // Proposal effect (restore-deferral accounting, delivery, reconfig
+            // observation, engine mutation/view advancement, immediate outbound
+            // handoff). Every test drives the ACTUAL encoded-envelope handler
+            // (`deliver_proposal_fresh`) under `Required` policy with a real F6
+            // gate + authenticated origin, coherent snapshots, real ML-DSA-44,
+            // independently counted Proposal/Vote backend calls, and a recording
+            // facade. For each invalid-QC case the OUTER signature is made valid
+            // over that exact invalid QC (the QC is attached BEFORE the outer
+            // proposal is signed) so a rejection can never be attributed to a
+            // stale outer signature.
+            // =============================================================
+            mod run422_d7c3e {
+                use super::*;
+                use qbind_consensus::crypto_verifier::{
+                    ConsensusSigBackendRegistry, SimpleBackendRegistry,
+                };
+                use qbind_crypto::consensus_sig::{ConsensusSigError, ConsensusSigVerifier};
+                use qbind_crypto::ml_dsa44::MlDsa44Backend;
+                use qbind_wire::consensus::QuorumCertificate as WireQc;
+                use std::sync::atomic::{AtomicU64, Ordering::SeqCst};
+
+                const C3E_WIRE: u32 = 1;
+
+                /// The standard C3E domain: identical to the D5 control domain
+                /// except it expects wire chain id 1 — matching the wire chain
+                /// id the engine stamps on the self-vote it emits, so the full
+                /// positive control can reach genuine engine acceptance AND the
+                /// immediate outbound handoff.
+                fn c3e_domain() -> ProposalVoteSigningDomainV2 {
+                    wire_variant_domain(C3E_WIRE)
+                }
+
+                /// A structurally-identical but FOREIGN domain (same wire chain
+                /// id and epoch, different genesis identity + authority
+                /// commitment ⇒ different vote preimage). Used to prove
+                /// same-key/foreign-domain QC signatures are rejected as invalid
+                /// constituent signatures, not passed through.
+                fn foreign_domain() -> ProposalVoteSigningDomainV2 {
+                    ProposalVoteSigningDomainV2::try_new(
+                        ChainId(0xFEED_0000_0000_0001),
+                        C3E_WIRE,
+                        [0xABu8; 32],
+                        [0xCDu8; 32],
+                    )
+                    .expect("valid foreign domain")
+                }
+
+                // ---- Counting backend registry (separate vote vs proposal) ----
+                //
+                // "Before QC crypto" means ZERO constituent Vote backend calls;
+                // the outer Proposal signature may already have been verified.
+                // This verifier therefore instruments verify_vote and
+                // verify_proposal into SEPARATE atomics, delegating to the REAL
+                // ML-DSA-44 backend.
+                struct C3eCountingVerifier {
+                    inner: Arc<dyn ConsensusSigVerifier>,
+                    vote_calls: Arc<AtomicU64>,
+                    proposal_calls: Arc<AtomicU64>,
+                }
+                impl ConsensusSigVerifier for C3eCountingVerifier {
+                    fn verify_vote(
+                        &self,
+                        validator_id: u64,
+                        pk: &[u8],
+                        preimage: &[u8],
+                        signature: &[u8],
+                    ) -> Result<(), ConsensusSigError> {
+                        self.vote_calls.fetch_add(1, SeqCst);
+                        self.inner.verify_vote(validator_id, pk, preimage, signature)
+                    }
+                    fn verify_proposal(
+                        &self,
+                        validator_id: u64,
+                        pk: &[u8],
+                        preimage: &[u8],
+                        signature: &[u8],
+                    ) -> Result<(), ConsensusSigError> {
+                        self.proposal_calls.fetch_add(1, SeqCst);
+                        self.inner
+                            .verify_proposal(validator_id, pk, preimage, signature)
+                    }
+                }
+
+                struct QcCallCounts {
+                    votes: Arc<AtomicU64>,
+                    proposals: Arc<AtomicU64>,
+                }
+                impl QcCallCounts {
+                    fn votes(&self) -> u64 {
+                        self.votes.load(SeqCst)
+                    }
+                    fn proposals(&self) -> u64 {
+                        self.proposals.load(SeqCst)
+                    }
+                }
+
+                fn counting_registry() -> (Arc<dyn ConsensusSigBackendRegistry>, QcCallCounts) {
+                    let votes = Arc::new(AtomicU64::new(0));
+                    let proposals = Arc::new(AtomicU64::new(0));
+                    let backend: Arc<dyn ConsensusSigVerifier> = Arc::new(C3eCountingVerifier {
+                        inner: Arc::new(MlDsa44Backend),
+                        vote_calls: Arc::clone(&votes),
+                        proposal_calls: Arc::clone(&proposals),
+                    });
+                    let reg = SimpleBackendRegistry::with_backend(TEST_SUITE, backend);
+                    (Arc::new(reg), QcCallCounts { votes, proposals })
+                }
+
+                /// A Proposal/Vote authority over the shared fixture membership +
+                /// key provider, with an explicit backend registry, `domain`, and
+                /// optional local signer.
+                fn c3e_pv(
+                    fixture: &Fixture,
+                    domain: ProposalVoteSigningDomainV2,
+                    registry: Arc<dyn ConsensusSigBackendRegistry>,
+                    local_signer_for: Option<ValidatorId>,
+                ) -> ProposalVoteAuthority {
+                    let signer: Option<Arc<dyn ValidatorSigner>> = local_signer_for.map(|id| {
+                        let sk = fixture.sk_objs.get(&id).expect("signer key present").clone();
+                        Arc::new(LocalKeySigner::new(id, TEST_SUITE_U16, sk))
+                            as Arc<dyn ValidatorSigner>
+                    });
+                    ProposalVoteAuthority {
+                        validators: fixture.validators.clone(),
+                        key_provider: fixture.kp.clone(),
+                        backend_registry: registry,
+                        chain_id: QBIND_DEVNET_CHAIN_ID,
+                        signer,
+                        signing_domain: domain,
+                    }
+                }
+
+                // ---- Wire QC construction (real ML-DSA-44 constituent votes) ----
+                fn set_bit(bitmap: &mut Vec<u8>, index: u16) {
+                    let byte = (index / 8) as usize;
+                    let bit = index % 8;
+                    if bitmap.len() <= byte {
+                        bitmap.resize(byte + 1, 0);
+                    }
+                    bitmap[byte] |= 1u8 << bit;
+                }
+
+                fn unsigned_qc(chain_id: u32, epoch: u64) -> WireQc {
+                    WireQc {
+                        version: 1,
+                        chain_id,
+                        epoch,
+                        height: 1,
+                        round: 1,
+                        step: 1,
+                        block_id: [9u8; 32],
+                        suite_id: TEST_SUITE_U16,
+                        signer_bitmap: vec![],
+                        signatures: vec![],
+                    }
+                }
+
+                fn constituent_vote(qc: &WireQc, signer_index: u16) -> Vote {
+                    Vote {
+                        version: qc.version,
+                        chain_id: qc.chain_id,
+                        epoch: qc.epoch,
+                        height: qc.height,
+                        round: qc.round,
+                        step: qc.step,
+                        block_id: qc.block_id,
+                        validator_index: signer_index,
+                        suite_id: qc.suite_id,
+                        signature: vec![],
+                    }
+                }
+
+                /// Build a QC signed under `domain` by `signers` (ascending,
+                /// distinct). Constituent signatures are real ML-DSA-44
+                /// signatures over the v2 vote preimage of each reconstructed
+                /// Vote.
+                fn build_signed_qc(
+                    fixture: &Fixture,
+                    domain: &ProposalVoteSigningDomainV2,
+                    chain_id: u32,
+                    epoch: u64,
+                    signers: &[u16],
+                ) -> WireQc {
+                    let mut qc = unsigned_qc(chain_id, epoch);
+                    let mut bitmap: Vec<u8> = Vec::new();
+                    let mut sigs: Vec<Vec<u8>> = Vec::new();
+                    for &s in signers {
+                        set_bit(&mut bitmap, s);
+                        let vote = constituent_vote(&qc, s);
+                        let pre = domain.vote_preimage(&vote);
+                        let sk = fixture.sks.get(&ValidatorId(s as u64)).expect("sk");
+                        sigs.push(MlDsa44Backend::sign(sk, &pre).expect("sign"));
+                    }
+                    qc.signer_bitmap = bitmap;
+                    qc.signatures = sigs;
+                    qc
+                }
+
+                /// A genuine D6-signed quorum (power 3 ≥ ceil(2*4/3)=3) under the
+                /// standard C3E domain.
+                fn valid_quorum(fixture: &Fixture) -> WireQc {
+                    build_signed_qc(fixture, &c3e_domain(), C3E_WIRE, 0, &[0, 1, 2])
+                }
+
+                /// Attach `qc` to a height-`height` proposal from `proposer`, then
+                /// sign the OUTER proposal over the mandatory v2 preimage — so the
+                /// outer signature covers the EXACT embedded QC.
+                fn proposal_with_qc(
+                    proposer: u16,
+                    height: u64,
+                    fixture: &Fixture,
+                    domain: &ProposalVoteSigningDomainV2,
+                    qc: Option<WireQc>,
+                ) -> BlockProposal {
+                    let mut header = base_header(proposer);
+                    header.chain_id = C3E_WIRE;
+                    header.height = height;
+                    header.round = height;
+                    let mut p = BlockProposal {
+                        header,
+                        qc,
+                        txs: vec![],
+                        signature: vec![],
+                    };
+                    let pre = domain.proposal_preimage(&p);
+                    let sk = fixture.sks.get(&ValidatorId(proposer as u64)).expect("sk");
+                    p.signature = MlDsa44Backend::sign(sk, &pre).expect("sign");
+                    p
+                }
+
+                fn origin_for(proposer: u16) -> AuthenticatedConsensusOrigin {
+                    AuthenticatedConsensusOrigin::new(
+                        pv_node_for(proposer as u64),
+                        ValidatorId(proposer as u64),
+                    )
+                }
+
+                /// Drive the real handler with an F6 gate and matching origin.
+                #[allow(clippy::too_many_arguments)]
+                fn deliver(
+                    engine: &mut BasicHotStuffEngine<[u8; 32]>,
+                    stats: &mut BinaryConsensusLoopInboundStats,
+                    restore: &mut RestoreCatchupModeState,
+                    pv: &ProposalVoteAuthority,
+                    snap: &AuthorizedProposalVoteSnapshot,
+                    proposal: &BlockProposal,
+                    outbound: Option<&dyn ConsensusNetworkFacade>,
+                    origin: &AuthenticatedConsensusOrigin,
+                ) -> BinaryReconfigDetector {
+                    let gate = pv_binding_gate(4);
+                    let metrics = make_metrics();
+                    deliver_proposal_fresh(
+                        engine,
+                        stats,
+                        restore,
+                        None,
+                        Some(pv),
+                        Some(snap),
+                        proposal,
+                        &metrics,
+                        outbound,
+                        Some(origin),
+                        Some(&gate),
+                        ConsensusVerificationPolicy::Required,
+                    )
+                }
+
+                // ============================ A ============================
+                // Positive controls: a valid outer Proposal + genuine D6-signed
+                // quorum pass the new gate and reach delivery, distinctly from
+                // engine acceptance and outbound results.
+
+                #[test]
+                fn c3e_a_valid_qc_delivers_distinct_from_engine_accept() {
+                    // Proposer 2 is NOT the leader of view 1, so the proposal is
+                    // DELIVERED (and its QC verified) yet the engine does not
+                    // accept it — proving delivery is distinguished from engine
+                    // acceptance.
+                    let f = make_fixture(4);
+                    let (reg, counts) = counting_registry();
+                    let pv = c3e_pv(&f, c3e_domain(), reg, None);
+                    let snap = coherent_snapshot_for(&pv);
+                    let mut engine = make_engine(ValidatorId(0), 4);
+                    let mut stats = BinaryConsensusLoopInboundStats::default();
+                    let mut restore = RestoreCatchupModeState::from_config(None);
+
+                    let p = proposal_with_qc(2, 1, &f, &c3e_domain(), Some(valid_quorum(&f)));
+                    let detector = deliver(
+                        &mut engine,
+                        &mut stats,
+                        &mut restore,
+                        &pv,
+                        &snap,
+                        &p,
+                        None,
+                        &origin_for(2),
+                    );
+
+                    assert_eq!(stats.inbound_proposal_verify_accepted, 1, "outer accepted");
+                    assert_eq!(stats.inbound_proposal_embedded_qc_verified_total, 1);
+                    assert_eq!(stats.inbound_proposal_embedded_qc_rejected_total, 0);
+                    assert_eq!(stats.inbound_proposal_engine_context_mismatch_total, 0);
+                    assert_eq!(stats.inbound_proposals_delivered, 1, "delivered");
+                    assert_eq!(
+                        stats.inbound_proposals_engine_accepted, 0,
+                        "non-leader ⇒ engine did not accept (distinct from delivery)"
+                    );
+                    assert_eq!(detector.cached_headers(), 1, "reconfig observation ran");
+                    // The QC crypto actually ran (3 constituent votes) after the
+                    // single outer proposal verification.
+                    assert_eq!(counts.proposals(), 1);
+                    assert_eq!(counts.votes(), 3);
+                }
+
+                #[test]
+                fn c3e_a_valid_qc_reaches_engine_acceptance_and_outbound() {
+                    // Proposer 1 IS the leader of view 1; with a bound signer the
+                    // engine accepts, emits a self-vote, and the immediate
+                    // outbound handoff signs and forwards it. Distinguishes
+                    // delivery, engine acceptance, and outbound results.
+                    let f = make_fixture(4);
+                    let pv = c3e_pv(&f, c3e_domain(), f.br.clone(), Some(ValidatorId(0)));
+                    let snap = coherent_snapshot_for(&pv);
+                    let mut engine = make_engine(ValidatorId(0), 4);
+                    let mut stats = BinaryConsensusLoopInboundStats::default();
+                    let mut restore = RestoreCatchupModeState::from_config(None);
+                    let facade = D7ActionRecorder::default();
+
+                    let p = proposal_with_qc(1, 1, &f, &c3e_domain(), Some(valid_quorum(&f)));
+                    deliver(
+                        &mut engine,
+                        &mut stats,
+                        &mut restore,
+                        &pv,
+                        &snap,
+                        &p,
+                        Some(&facade),
+                        &origin_for(1),
+                    );
+
+                    assert_eq!(stats.inbound_proposal_embedded_qc_verified_total, 1);
+                    assert_eq!(stats.inbound_proposals_delivered, 1, "delivered");
+                    assert_eq!(
+                        stats.inbound_proposals_engine_accepted, 1,
+                        "leader proposal ⇒ engine accepted"
+                    );
+                    assert_eq!(facade.total(), 1, "outbound self-vote forwarded");
+                    assert_eq!(engine.current_view(), 1, "engine advanced view AFTER the gate");
+                }
+
+                // ============================ B ============================
+                // Valid outer signature, invalid embedded constituent signature
+                // ⇒ QC rejection and no downstream effects. A valid quorum is
+                // followed by an invalid EXTRA signature.
+                #[test]
+                fn c3e_b_valid_quorum_plus_invalid_extra_signature_rejects() {
+                    let f = make_fixture(4);
+                    let (reg, counts) = counting_registry();
+                    let pv = c3e_pv(&f, c3e_domain(), reg, None);
+                    let snap = coherent_snapshot_for(&pv);
+
+                    // Valid quorum [0,1,2], then add signer 3 with a corrupted
+                    // signature, and sign the OUTER proposal over THIS exact QC.
+                    let mut qc = build_signed_qc(&f, &c3e_domain(), C3E_WIRE, 0, &[0, 1, 2, 3]);
+                    let last = qc.signatures.last_mut().unwrap();
+                    last[0] ^= 0xFF;
+                    let p = proposal_with_qc(1, 1, &f, &c3e_domain(), Some(qc));
+
+                    let mut engine = make_engine(ValidatorId(0), 4);
+                    let mut stats = BinaryConsensusLoopInboundStats::default();
+                    let mut restore = RestoreCatchupModeState::from_config(None);
+                    let facade = D7ActionRecorder::default();
+                    let detector = deliver(
+                        &mut engine,
+                        &mut stats,
+                        &mut restore,
+                        &pv,
+                        &snap,
+                        &p,
+                        Some(&facade),
+                        &origin_for(1),
+                    );
+
+                    assert_eq!(stats.inbound_proposal_verify_accepted, 1, "outer valid");
+                    assert_eq!(stats.inbound_proposal_embedded_qc_rejected_total, 1);
+                    assert_eq!(stats.inbound_proposal_embedded_qc_verified_total, 0);
+                    assert_eq!(stats.inbound_proposals_delivered, 0, "no delivery");
+                    assert_eq!(stats.inbound_proposals_engine_accepted, 0);
+                    assert_eq!(detector.cached_headers(), 0, "no reconfig observation");
+                    assert_eq!(facade.total(), 0, "no outbound");
+                    assert_eq!(engine.current_view(), 0, "engine view unchanged");
+                    assert_eq!(counts.proposals(), 1, "outer signature verified");
+                }
+
+                // ============================ C ============================
+                // Insufficient quorum, bitmap/signature mismatch, and
+                // Some(empty_qc) all reject. (Encodable limits only; pure C3D
+                // retains the non-encodable ones.)
+                #[test]
+                fn c3e_c_insufficient_quorum_rejects() {
+                    let f = make_fixture(4);
+                    let (reg, _counts) = counting_registry();
+                    let pv = c3e_pv(&f, c3e_domain(), reg, None);
+                    let snap = coherent_snapshot_for(&pv);
+                    // Power 2 < threshold 3.
+                    let qc = build_signed_qc(&f, &c3e_domain(), C3E_WIRE, 0, &[0, 1]);
+                    let p = proposal_with_qc(1, 1, &f, &c3e_domain(), Some(qc));
+
+                    let mut engine = make_engine(ValidatorId(0), 4);
+                    let mut stats = BinaryConsensusLoopInboundStats::default();
+                    let mut restore = RestoreCatchupModeState::from_config(None);
+                    deliver(
+                        &mut engine, &mut stats, &mut restore, &pv, &snap, &p, None,
+                        &origin_for(1),
+                    );
+                    assert_eq!(stats.inbound_proposal_embedded_qc_rejected_total, 1);
+                    assert_eq!(stats.inbound_proposals_delivered, 0);
+                }
+
+                #[test]
+                fn c3e_c_some_empty_qc_rejects_not_routed_as_absent() {
+                    let f = make_fixture(4);
+                    let (reg, _counts) = counting_registry();
+                    let pv = c3e_pv(&f, c3e_domain(), reg, None);
+                    let snap = coherent_snapshot_for(&pv);
+                    // Some(empty QC): present but carries no signers/signatures.
+                    let empty = unsigned_qc(C3E_WIRE, 0);
+                    let p = proposal_with_qc(1, 1, &f, &c3e_domain(), Some(empty));
+
+                    let mut engine = make_engine(ValidatorId(0), 4);
+                    let mut stats = BinaryConsensusLoopInboundStats::default();
+                    let mut restore = RestoreCatchupModeState::from_config(None);
+                    deliver(
+                        &mut engine, &mut stats, &mut restore, &pv, &snap, &p, None,
+                        &origin_for(1),
+                    );
+                    // Rejected as a present-but-invalid QC; NEVER converted into
+                    // None or routed through absent-QC behavior.
+                    assert_eq!(stats.inbound_proposal_embedded_qc_rejected_total, 1);
+                    assert_eq!(stats.inbound_proposal_embedded_qc_verified_total, 0);
+                    assert_eq!(stats.inbound_proposals_delivered, 0);
+                }
+
+                #[test]
+                fn c3e_c_bitmap_signature_count_mismatch_rejects_before_crypto() {
+                    let f = make_fixture(4);
+                    let (reg, counts) = counting_registry();
+                    let pv = c3e_pv(&f, c3e_domain(), reg, None);
+                    let snap = coherent_snapshot_for(&pv);
+                    // Three set bits but only two signatures ⇒ popcount mismatch,
+                    // rejected before any constituent Vote crypto.
+                    let mut qc = build_signed_qc(&f, &c3e_domain(), C3E_WIRE, 0, &[0, 1, 2]);
+                    qc.signatures.pop();
+                    let p = proposal_with_qc(1, 1, &f, &c3e_domain(), Some(qc));
+
+                    let mut engine = make_engine(ValidatorId(0), 4);
+                    let mut stats = BinaryConsensusLoopInboundStats::default();
+                    let mut restore = RestoreCatchupModeState::from_config(None);
+                    deliver(
+                        &mut engine, &mut stats, &mut restore, &pv, &snap, &p, None,
+                        &origin_for(1),
+                    );
+                    assert_eq!(stats.inbound_proposal_embedded_qc_rejected_total, 1);
+                    assert_eq!(counts.votes(), 0, "rejected before constituent Vote crypto");
+                }
+
+                // ============================ D ============================
+                // Domain and epoch isolation.
+                #[test]
+                fn c3e_d_foreign_domain_qc_rejects_current_domain_succeeds() {
+                    let f = make_fixture(4);
+                    let (reg, _counts) = counting_registry();
+                    let pv = c3e_pv(&f, c3e_domain(), reg, None);
+                    let snap = coherent_snapshot_for(&pv);
+
+                    // Same keys, but the constituent votes are signed under a
+                    // FOREIGN domain (different preimage) ⇒ invalid under A.
+                    let foreign_qc =
+                        build_signed_qc(&f, &foreign_domain(), C3E_WIRE, 0, &[0, 1, 2]);
+                    let p_bad = proposal_with_qc(1, 1, &f, &c3e_domain(), Some(foreign_qc));
+                    let mut engine = make_engine(ValidatorId(0), 4);
+                    let mut stats = BinaryConsensusLoopInboundStats::default();
+                    let mut restore = RestoreCatchupModeState::from_config(None);
+                    deliver(
+                        &mut engine, &mut stats, &mut restore, &pv, &snap, &p_bad, None,
+                        &origin_for(1),
+                    );
+                    assert_eq!(stats.inbound_proposal_verify_accepted, 1, "outer valid");
+                    assert_eq!(stats.inbound_proposal_embedded_qc_rejected_total, 1);
+                    assert_eq!(stats.inbound_proposals_delivered, 0);
+
+                    // Same-key positive control under the CURRENT domain succeeds.
+                    let p_ok = proposal_with_qc(1, 1, &f, &c3e_domain(), Some(valid_quorum(&f)));
+                    let mut engine2 = make_engine(ValidatorId(0), 4);
+                    let mut stats2 = BinaryConsensusLoopInboundStats::default();
+                    let mut restore2 = RestoreCatchupModeState::from_config(None);
+                    deliver(
+                        &mut engine2, &mut stats2, &mut restore2, &pv, &snap, &p_ok, None,
+                        &origin_for(1),
+                    );
+                    assert_eq!(stats2.inbound_proposal_embedded_qc_verified_total, 1);
+                    assert_eq!(stats2.inbound_proposals_delivered, 1);
+                }
+
+                #[test]
+                fn c3e_d_qc_wire_chain_mismatch_rejects_before_vote_crypto() {
+                    let f = make_fixture(4);
+                    let (reg, counts) = counting_registry();
+                    let pv = c3e_pv(&f, c3e_domain(), reg, None);
+                    let snap = coherent_snapshot_for(&pv);
+                    // QC wire chain id 2 ≠ domain expected 1; the outer proposal
+                    // header keeps wire 1 so the outer signature stays valid.
+                    let qc = build_signed_qc(&f, &c3e_domain(), 2, 0, &[0, 1, 2]);
+                    let p = proposal_with_qc(1, 1, &f, &c3e_domain(), Some(qc));
+
+                    let mut engine = make_engine(ValidatorId(0), 4);
+                    let mut stats = BinaryConsensusLoopInboundStats::default();
+                    let mut restore = RestoreCatchupModeState::from_config(None);
+                    deliver(
+                        &mut engine, &mut stats, &mut restore, &pv, &snap, &p, None,
+                        &origin_for(1),
+                    );
+                    assert_eq!(stats.inbound_proposal_verify_accepted, 1, "outer valid");
+                    assert_eq!(stats.inbound_proposal_embedded_qc_rejected_total, 1);
+                    assert_eq!(counts.votes(), 0, "QC wire mismatch rejected before Vote crypto");
+                    assert_eq!(stats.inbound_proposals_delivered, 0);
+                }
+
+                #[test]
+                fn c3e_d_qc_epoch_mismatch_rejects_before_vote_crypto() {
+                    let f = make_fixture(4);
+                    let (reg, counts) = counting_registry();
+                    let pv = c3e_pv(&f, c3e_domain(), reg, None);
+                    let snap = coherent_snapshot_for(&pv);
+                    // QC epoch 1 ≠ authorized epoch 0; the outer proposal keeps
+                    // epoch 0 so admission + outer verification still pass.
+                    let qc = build_signed_qc(&f, &c3e_domain(), C3E_WIRE, 1, &[0, 1, 2]);
+                    let p = proposal_with_qc(1, 1, &f, &c3e_domain(), Some(qc));
+
+                    let mut engine = make_engine(ValidatorId(0), 4);
+                    let mut stats = BinaryConsensusLoopInboundStats::default();
+                    let mut restore = RestoreCatchupModeState::from_config(None);
+                    deliver(
+                        &mut engine, &mut stats, &mut restore, &pv, &snap, &p, None,
+                        &origin_for(1),
+                    );
+                    assert_eq!(stats.inbound_proposal_verify_accepted, 1, "outer valid");
+                    assert_eq!(stats.inbound_proposal_embedded_qc_rejected_total, 1);
+                    assert_eq!(counts.votes(), 0, "QC epoch mismatch rejected before Vote crypto");
+                }
+
+                // ============================ E ============================
+                // Engine / verifier mismatch — reject before QC crypto/effects.
+                fn engine_with_entries(entries: Vec<ValidatorSetEntry>) -> BasicHotStuffEngine<[u8; 32]> {
+                    let set = ConsensusValidatorSet::new(entries).expect("valid set");
+                    BasicHotStuffEngine::new(ValidatorId(0), set)
+                }
+
+                #[test]
+                fn c3e_e_same_size_different_ids_rejects_before_qc_crypto() {
+                    let f = make_fixture(4);
+                    let (reg, counts) = counting_registry();
+                    let pv = c3e_pv(&f, c3e_domain(), reg, None);
+                    let snap = coherent_snapshot_for(&pv);
+                    // Four validators, but ids 10..14 instead of 0..4.
+                    let mut engine = engine_with_entries(
+                        (10..14)
+                            .map(|i| ValidatorSetEntry { id: ValidatorId(i), voting_power: 1 })
+                            .collect(),
+                    );
+                    let p = proposal_with_qc(1, 1, &f, &c3e_domain(), Some(valid_quorum(&f)));
+                    let mut stats = BinaryConsensusLoopInboundStats::default();
+                    let mut restore = RestoreCatchupModeState::from_config(None);
+                    deliver(
+                        &mut engine, &mut stats, &mut restore, &pv, &snap, &p, None,
+                        &origin_for(1),
+                    );
+                    assert_eq!(stats.inbound_proposal_engine_context_mismatch_total, 1);
+                    assert_eq!(stats.inbound_proposal_embedded_qc_verified_total, 0);
+                    assert_eq!(stats.inbound_proposals_delivered, 0);
+                    assert_eq!(counts.votes(), 0, "rejected before QC crypto");
+                }
+
+                #[test]
+                fn c3e_e_same_ids_different_weights_rejects_before_qc_crypto() {
+                    let f = make_fixture(4);
+                    let (reg, counts) = counting_registry();
+                    let pv = c3e_pv(&f, c3e_domain(), reg, None);
+                    let snap = coherent_snapshot_for(&pv);
+                    // Same ids 0..4, but validator 0 has weight 2 (counts alone
+                    // would match — weights must be compared too).
+                    let mut engine = engine_with_entries(
+                        (0..4)
+                            .map(|i| ValidatorSetEntry {
+                                id: ValidatorId(i),
+                                voting_power: if i == 0 { 2 } else { 1 },
+                            })
+                            .collect(),
+                    );
+                    let p = proposal_with_qc(1, 1, &f, &c3e_domain(), Some(valid_quorum(&f)));
+                    let mut stats = BinaryConsensusLoopInboundStats::default();
+                    let mut restore = RestoreCatchupModeState::from_config(None);
+                    deliver(
+                        &mut engine, &mut stats, &mut restore, &pv, &snap, &p, None,
+                        &origin_for(1),
+                    );
+                    assert_eq!(stats.inbound_proposal_engine_context_mismatch_total, 1);
+                    assert_eq!(counts.votes(), 0, "rejected before QC crypto");
+                }
+
+                #[test]
+                fn c3e_e_engine_epoch_mismatch_rejects_before_qc_crypto() {
+                    let f = make_fixture(4);
+                    let (reg, counts) = counting_registry();
+                    let pv = c3e_pv(&f, c3e_domain(), reg, None);
+                    let snap = coherent_snapshot_for(&pv);
+                    let mut engine = make_engine(ValidatorId(0), 4);
+                    engine.set_current_epoch(1); // ≠ authorized epoch 0
+                    let p = proposal_with_qc(1, 1, &f, &c3e_domain(), Some(valid_quorum(&f)));
+                    let mut stats = BinaryConsensusLoopInboundStats::default();
+                    let mut restore = RestoreCatchupModeState::from_config(None);
+                    deliver(
+                        &mut engine, &mut stats, &mut restore, &pv, &snap, &p, None,
+                        &origin_for(1),
+                    );
+                    assert_eq!(stats.inbound_proposal_engine_context_mismatch_total, 1);
+                    assert_eq!(counts.votes(), 0, "rejected before QC crypto");
+                }
+
+                #[test]
+                fn c3e_e_by_value_matching_membership_positive_control() {
+                    // A freshly-allocated but structurally-equal engine membership
+                    // (same ids + weights, different allocation, no Arc identity)
+                    // is a POSITIVE control: the gate accepts and the QC verifies.
+                    let f = make_fixture(4);
+                    let (reg, _counts) = counting_registry();
+                    let pv = c3e_pv(&f, c3e_domain(), reg, None);
+                    let snap = coherent_snapshot_for(&pv);
+                    let mut engine = make_engine(ValidatorId(0), 4);
+                    let p = proposal_with_qc(2, 1, &f, &c3e_domain(), Some(valid_quorum(&f)));
+                    let mut stats = BinaryConsensusLoopInboundStats::default();
+                    let mut restore = RestoreCatchupModeState::from_config(None);
+                    deliver(
+                        &mut engine, &mut stats, &mut restore, &pv, &snap, &p, None,
+                        &origin_for(2),
+                    );
+                    assert_eq!(stats.inbound_proposal_engine_context_mismatch_total, 0);
+                    assert_eq!(stats.inbound_proposal_embedded_qc_verified_total, 1);
+                    assert_eq!(stats.inbound_proposals_delivered, 1);
+                }
+
+                // ============================ F ============================
+                // Bound context: admitted snapshot A + separately-supplied
+                // authority B still uses A. B is instrumented to prove it is
+                // never touched by the QC gate.
+                #[test]
+                fn c3e_f_a_valid_qc_succeeds_supplied_b_never_used() {
+                    let f = make_fixture(4);
+                    // A: the admitted snapshot's bound verifier (current domain).
+                    let pv_a = c3e_pv(&f, c3e_domain(), f.br.clone(), None);
+                    let snap_a = coherent_snapshot_for(&pv_a);
+                    // B: a separately-supplied authority over a FOREIGN domain,
+                    // with an instrumented backend registry.
+                    let (reg_b, counts_b) = counting_registry();
+                    let pv_b = c3e_pv(&f, foreign_domain(), reg_b, None);
+
+                    // QC valid under A.
+                    let p = proposal_with_qc(2, 1, &f, &c3e_domain(), Some(valid_quorum(&f)));
+                    let mut engine = make_engine(ValidatorId(0), 4);
+                    let mut stats = BinaryConsensusLoopInboundStats::default();
+                    let mut restore = RestoreCatchupModeState::from_config(None);
+                    let gate = pv_binding_gate(4);
+                    let metrics = make_metrics();
+                    let origin = origin_for(2);
+                    // Supply B as pv_authority, A as the admitted snapshot.
+                    deliver_proposal_fresh(
+                        &mut engine, &mut stats, &mut restore, None,
+                        Some(&pv_b), Some(&snap_a), &p, &metrics, None, Some(&origin),
+                        Some(&gate), ConsensusVerificationPolicy::Required,
+                    );
+                    assert_eq!(stats.inbound_proposal_embedded_qc_verified_total, 1, "A verified");
+                    assert_eq!(stats.inbound_proposals_delivered, 1);
+                    assert_eq!(counts_b.votes(), 0, "supplied B never verified any Vote");
+                    assert_eq!(counts_b.proposals(), 0, "supplied B never verified the proposal");
+                }
+
+                #[test]
+                fn c3e_f_b_only_valid_qc_fails_under_a() {
+                    let f = make_fixture(4);
+                    let pv_a = c3e_pv(&f, c3e_domain(), f.br.clone(), None);
+                    let snap_a = coherent_snapshot_for(&pv_a);
+                    let (reg_b, counts_b) = counting_registry();
+                    let pv_b = c3e_pv(&f, foreign_domain(), reg_b, None);
+
+                    // QC valid ONLY under B's foreign domain; the outer proposal
+                    // is signed under A so admission + outer verification pass.
+                    let b_qc = build_signed_qc(&f, &foreign_domain(), C3E_WIRE, 0, &[0, 1, 2]);
+                    let p = proposal_with_qc(2, 1, &f, &c3e_domain(), Some(b_qc));
+                    let mut engine = make_engine(ValidatorId(0), 4);
+                    let mut stats = BinaryConsensusLoopInboundStats::default();
+                    let mut restore = RestoreCatchupModeState::from_config(None);
+                    let gate = pv_binding_gate(4);
+                    let metrics = make_metrics();
+                    let origin = origin_for(2);
+                    deliver_proposal_fresh(
+                        &mut engine, &mut stats, &mut restore, None,
+                        Some(&pv_b), Some(&snap_a), &p, &metrics, None, Some(&origin),
+                        Some(&gate), ConsensusVerificationPolicy::Required,
+                    );
+                    assert_eq!(
+                        stats.inbound_proposal_embedded_qc_rejected_total, 1,
+                        "B-valid QC fails under admitted A"
+                    );
+                    assert_eq!(stats.inbound_proposals_delivered, 0);
+                    assert_eq!(counts_b.votes(), 0, "supplied B never used to verify the QC");
+                }
+
+                // ============================ G ============================
+                // Ordering: F6 rejection, unavailable authorization, and invalid
+                // outer signatures all prevent QC verification (existing
+                // reason/counter semantics preserved).
+                #[test]
+                fn c3e_g_f6_rejection_prevents_qc_verification() {
+                    let f = make_fixture(4);
+                    let (reg, counts) = counting_registry();
+                    let pv = c3e_pv(&f, c3e_domain(), reg, None);
+                    let snap = coherent_snapshot_for(&pv);
+                    // Claimed proposer 1, but the authenticated origin is
+                    // validator 2 ⇒ F6 sender-binding rejection.
+                    let p = proposal_with_qc(1, 1, &f, &c3e_domain(), Some(valid_quorum(&f)));
+                    let mut engine = make_engine(ValidatorId(0), 4);
+                    let mut stats = BinaryConsensusLoopInboundStats::default();
+                    let mut restore = RestoreCatchupModeState::from_config(None);
+                    deliver(
+                        &mut engine, &mut stats, &mut restore, &pv, &snap, &p, None,
+                        &origin_for(2),
+                    );
+                    assert_eq!(stats.inbound_sender_binding_rejected_total, 1);
+                    assert_eq!(stats.inbound_proposal_embedded_qc_verified_total, 0);
+                    assert_eq!(stats.inbound_proposal_embedded_qc_rejected_total, 0);
+                    assert_eq!(counts.votes(), 0);
+                    assert_eq!(counts.proposals(), 0, "no crypto at all after F6 rejection");
+                }
+
+                #[test]
+                fn c3e_g_unavailable_authorization_prevents_qc_verification() {
+                    use crate::genesis_consensus_authority::CurrentStateUnavailableReason;
+                    let f = make_fixture(4);
+                    let (reg, counts) = counting_registry();
+                    let pv = c3e_pv(&f, c3e_domain(), reg, None);
+                    // Coherently bound, but current authorization is unavailable.
+                    let candidate = coherent_authority_for(&pv);
+                    let owner = CurrentAuthorizationOwner::unavailable(
+                        candidate,
+                        CurrentStateUnavailableReason::MissingStorage,
+                    );
+                    let snap = AuthorizedProposalVoteSnapshot::try_bind(owner, Arc::new(pv.clone()))
+                        .expect("binds");
+                    let p = proposal_with_qc(1, 1, &f, &c3e_domain(), Some(valid_quorum(&f)));
+                    let mut engine = make_engine(ValidatorId(0), 4);
+                    let mut stats = BinaryConsensusLoopInboundStats::default();
+                    let mut restore = RestoreCatchupModeState::from_config(None);
+                    deliver(
+                        &mut engine, &mut stats, &mut restore, &pv, &snap, &p, None,
+                        &origin_for(1),
+                    );
+                    assert_eq!(stats.inbound_proposal_current_state_unavailable_total, 1);
+                    assert_eq!(stats.inbound_proposal_embedded_qc_verified_total, 0);
+                    assert_eq!(stats.inbound_proposal_embedded_qc_rejected_total, 0);
+                    assert_eq!(counts.votes(), 0, "no QC crypto without current authorization");
+                }
+
+                #[test]
+                fn c3e_g_invalid_outer_signature_prevents_qc_verification() {
+                    let f = make_fixture(4);
+                    let (reg, counts) = counting_registry();
+                    let pv = c3e_pv(&f, c3e_domain(), reg, None);
+                    let snap = coherent_snapshot_for(&pv);
+                    // Attach a valid QC, then corrupt the OUTER signature.
+                    let mut p = proposal_with_qc(1, 1, &f, &c3e_domain(), Some(valid_quorum(&f)));
+                    p.signature[0] ^= 0xFF;
+                    let mut engine = make_engine(ValidatorId(0), 4);
+                    let mut stats = BinaryConsensusLoopInboundStats::default();
+                    let mut restore = RestoreCatchupModeState::from_config(None);
+                    deliver(
+                        &mut engine, &mut stats, &mut restore, &pv, &snap, &p, None,
+                        &origin_for(1),
+                    );
+                    assert_eq!(stats.inbound_proposal_verify_rejected_total, 1, "outer rejected");
+                    assert_eq!(stats.inbound_proposal_embedded_qc_verified_total, 0);
+                    assert_eq!(stats.inbound_proposal_embedded_qc_rejected_total, 0);
+                    assert_eq!(counts.votes(), 0, "invalid outer signature ⇒ no QC crypto");
+                }
+
+                // ============================ H ============================
+                // Active restore: an invalid QC rejects BEFORE deferral; a
+                // matching valid-QC control reaches the existing deferral branch.
+                fn active_restore() -> (BasicHotStuffEngine<[u8; 32]>, RestoreCatchupModeState) {
+                    let mut engine = make_engine(ValidatorId(0), 4);
+                    engine.initialize_from_snapshot_baseline([0x01; 32], 5);
+                    let mode = RestoreCatchupModeState::from_config(Some(RestoreBaseline {
+                        snapshot_height: 5,
+                        snapshot_block_id: [0x01; 32],
+                    }));
+                    (engine, mode)
+                }
+
+                #[test]
+                fn c3e_h_invalid_qc_rejects_before_deferral() {
+                    let f = make_fixture(4);
+                    let (reg, _counts) = counting_registry();
+                    let pv = c3e_pv(&f, c3e_domain(), reg, None);
+                    let snap = coherent_snapshot_for(&pv);
+                    // Far-future height 7 (> committed 5 + 1) would defer, but the
+                    // QC is invalid (foreign domain) ⇒ rejected first.
+                    let bad = build_signed_qc(&f, &foreign_domain(), C3E_WIRE, 0, &[0, 1, 2]);
+                    let p = proposal_with_qc(1, 7, &f, &c3e_domain(), Some(bad));
+                    let (mut engine, mut restore) = active_restore();
+                    let mut stats = BinaryConsensusLoopInboundStats::default();
+                    deliver(
+                        &mut engine, &mut stats, &mut restore, &pv, &snap, &p, None,
+                        &origin_for(1),
+                    );
+                    assert_eq!(stats.inbound_proposal_embedded_qc_rejected_total, 1);
+                    assert_eq!(stats.restore_catchup_proposals_deferred, 0, "rejected before deferral");
+                    assert_eq!(stats.inbound_proposals_delivered, 0);
+                }
+
+                #[test]
+                fn c3e_h_valid_qc_reaches_deferral_branch() {
+                    let f = make_fixture(4);
+                    let (reg, _counts) = counting_registry();
+                    let pv = c3e_pv(&f, c3e_domain(), reg, None);
+                    let snap = coherent_snapshot_for(&pv);
+                    let p = proposal_with_qc(1, 7, &f, &c3e_domain(), Some(valid_quorum(&f)));
+                    let (mut engine, mut restore) = active_restore();
+                    let mut stats = BinaryConsensusLoopInboundStats::default();
+                    deliver(
+                        &mut engine, &mut stats, &mut restore, &pv, &snap, &p, None,
+                        &origin_for(1),
+                    );
+                    assert_eq!(stats.inbound_proposal_embedded_qc_verified_total, 1);
+                    assert_eq!(
+                        stats.restore_catchup_proposals_deferred, 1,
+                        "valid QC reaches the existing deferral branch"
+                    );
+                    assert_eq!(stats.inbound_proposals_delivered, 0, "deferred, not delivered");
+                }
+
+                // ============================ I ============================
+                // State protection: a future-view Proposal with an invalid QC
+                // leaves engine view/lock/commit state unchanged, causes no
+                // reconfiguration observation, no delivery/deferral, and zero
+                // facade actions.
+                #[test]
+                fn c3e_i_future_view_invalid_qc_no_state_change() {
+                    let f = make_fixture(4);
+                    let (reg, counts) = counting_registry();
+                    let pv = c3e_pv(&f, c3e_domain(), reg, None);
+                    let snap = coherent_snapshot_for(&pv);
+                    let mut engine = make_engine(ValidatorId(0), 4);
+                    let view_before = engine.current_view();
+                    let locked_before = engine.locked_height();
+                    let committed_before = engine.committed_height();
+
+                    // Future view (height 5) with an invalid (foreign-domain) QC.
+                    let bad = build_signed_qc(&f, &foreign_domain(), C3E_WIRE, 0, &[0, 1, 2]);
+                    let p = proposal_with_qc(1, 5, &f, &c3e_domain(), Some(bad));
+                    let mut stats = BinaryConsensusLoopInboundStats::default();
+                    let mut restore = RestoreCatchupModeState::from_config(None);
+                    let facade = D7ActionRecorder::default();
+                    let detector = deliver(
+                        &mut engine, &mut stats, &mut restore, &pv, &snap, &p,
+                        Some(&facade), &origin_for(1),
+                    );
+
+                    assert_eq!(stats.inbound_proposal_embedded_qc_rejected_total, 1);
+                    // Meaningful state observations (not just return values):
+                    assert_eq!(engine.current_view(), view_before, "view unchanged");
+                    assert_eq!(engine.locked_height(), locked_before, "lock unchanged");
+                    assert_eq!(engine.committed_height(), committed_before, "commit unchanged");
+                    assert!(engine.locked_qc().is_none(), "no high/locked QC adopted");
+                    assert!(engine.committed_block().is_none(), "no block committed");
+                    assert_eq!(detector.cached_headers(), 0, "no reconfiguration observation");
+                    assert_eq!(stats.inbound_proposals_delivered, 0, "no delivery");
+                    assert_eq!(stats.restore_catchup_proposals_deferred, 0, "no deferral");
+                    assert_eq!(facade.total(), 0, "zero facade actions");
+                    assert!(counts.votes() >= 1, "QC crypto ran but produced no effect");
+                }
+
+                // ============================ J ============================
+                // Absent-QC compatibility: preserved None behavior, and it is
+                // NOT counted as a successful QC verification.
+                #[test]
+                fn c3e_j_absent_qc_behavior_preserved_and_uncounted() {
+                    let f = make_fixture(4);
+                    let (reg, counts) = counting_registry();
+                    let pv = c3e_pv(&f, c3e_domain(), reg, None);
+                    let snap = coherent_snapshot_for(&pv);
+                    // proposal.qc == None.
+                    let p = proposal_with_qc(2, 1, &f, &c3e_domain(), None);
+                    let mut engine = make_engine(ValidatorId(0), 4);
+                    let mut stats = BinaryConsensusLoopInboundStats::default();
+                    let mut restore = RestoreCatchupModeState::from_config(None);
+                    deliver(
+                        &mut engine, &mut stats, &mut restore, &pv, &snap, &p, None,
+                        &origin_for(2),
+                    );
+                    // Preserved delivery; the QC gate neither verified nor
+                    // rejected anything, and did not run a mismatch check.
+                    assert_eq!(stats.inbound_proposals_delivered, 1, "None behavior preserved");
+                    assert_eq!(stats.inbound_proposal_embedded_qc_verified_total, 0, "absent ≠ verified");
+                    assert_eq!(stats.inbound_proposal_embedded_qc_rejected_total, 0);
+                    assert_eq!(stats.inbound_proposal_engine_context_mismatch_total, 0);
+                    assert_eq!(counts.votes(), 0, "no constituent Vote crypto for an absent QC");
+                }
+            }
+
+            // =============================================================
             // Run 422 D7-B1 — CURRENT AUTHORIZATION enforced at the immediate
             // OUTBOUND action-forwarding boundary (`forward_actions_to_facade`).
             //
