@@ -94,6 +94,12 @@ use qbind_consensus::key_registry::SuiteAwareValidatorKeyProvider;
 use qbind_consensus::proposal_vote_verify::{
     verify_proposal_msg_with_domain, verify_vote_msg_with_domain, ProposalVoteVerifyError,
 };
+// Run 422 D7-C3E: the existing C3D domain-bound QuorumCertificate verifier,
+// reused (not re-implemented) to admit PRESENT embedded wire QCs before any
+// inbound Proposal effect.
+use qbind_consensus::qc_verify_domain::{
+    verify_quorum_certificate_with_domain, VerifiedQuorumCertificate,
+};
 use qbind_consensus::timeout::{TimeoutCertificate, TimeoutMsg};
 use qbind_consensus::timeout_verify::{
     verify_timeout_certificate_with_evidence, verify_timeout_msg, TimeoutVerifyError,
@@ -1702,6 +1708,31 @@ pub struct BinaryConsensusLoopInboundStats {
     /// Run 422 D7-A3: inbound proposals rejected because the current-authorization
     /// owner has terminally exhausted its generation space (fail-closed).
     pub inbound_proposal_authorization_exhausted_total: u64,
+    // Run 422 D7-C3E: bounded categories for the PRESENT embedded-QC admission
+    // gate. These are strictly distinct from the outer Proposal signature
+    // counters (`inbound_proposal_verify_{accepted,rejected_total}`): the outer
+    // signature can be — and in every C3E negative control is — accepted while
+    // the embedded QC subsequently rejects. An outer-signature acceptance
+    // counter increasing must therefore NEVER be relabeled as whole-Proposal
+    // acceptance. Both stay zero unless a bound current-authorization snapshot
+    // is wired and the Proposal carries `Some(qc)`; an absent QC is neither
+    // verified nor counted here.
+    //
+    //   * `inbound_proposal_embedded_qc_verified_total`: the present embedded QC
+    //     passed the existing C3D domain verifier under the admitted snapshot's
+    //     trusted inputs. Not itself proof of delivery or engine acceptance.
+    //   * `inbound_proposal_embedded_qc_rejected_total`: the present embedded QC
+    //     failed C3D verification (bad constituent signature, insufficient
+    //     quorum, malformed/empty QC, wire-chain or epoch mismatch, foreign
+    //     domain, ...) — fail-closed before ticket confirmation and any
+    //     downstream effect.
+    //   * `inbound_proposal_engine_context_mismatch_total`: the engine's actual
+    //     validator membership (ids + voting weights) or current epoch did not
+    //     match the admitted snapshot's bound verifier / authorized epoch.
+    //     Rejected BEFORE any constituent-QC cryptography or downstream effect.
+    pub inbound_proposal_embedded_qc_verified_total: u64,
+    pub inbound_proposal_embedded_qc_rejected_total: u64,
+    pub inbound_proposal_engine_context_mismatch_total: u64,
     pub inbound_vote_current_state_unavailable_total: u64,
     pub inbound_vote_authority_superseded_total: u64,
     pub inbound_vote_authority_stale_before_effect_total: u64,
@@ -4603,6 +4634,113 @@ pub(crate) fn handle_inbound_consensus_msg(
                                 return;
                             }
                             // LocalFixtureUnsigned: historical passthrough.
+                        }
+                    }
+                    // Run 422 D7-C3E (section 2/4): with a bound
+                    // current-authorization snapshot, enforce engine-context
+                    // correspondence and then verify EVERY PRESENT embedded wire
+                    // QuorumCertificate through the existing C3D domain verifier
+                    // (`verify_quorum_certificate_with_domain`) — BEFORE the
+                    // freshness ticket is confirmed (step f) and before ANY
+                    // downstream Proposal effect (restore-deferral accounting,
+                    // delivery accounting, reconfiguration observation, engine
+                    // mutation including view advancement, and the immediate
+                    // outbound handoff). The reviewed engine's
+                    // `on_proposal_event` can advance `current_view`, so this
+                    // gate must precede the engine call, never sit inside or
+                    // after it.
+                    //
+                    // A valid OUTER Proposal signature must not make an invalid
+                    // embedded QC acceptable: the outer signature has already
+                    // been verified above, yet an invalid present QC still
+                    // rejects here fail-closed.
+                    //
+                    // Trusted inputs (domain, membership, key provider, backend
+                    // registry, authorized epoch) are drawn from the SAME
+                    // admitted `snap`/`snap.verifier()` used for the outer
+                    // verification — never from the QC, the Proposal header, the
+                    // engine's default epoch, a separately-supplied
+                    // `pv_authority`, or the Timeout/NewView context. A supplied
+                    // authority B can never substitute for admitted snapshot A.
+                    //
+                    // Scope: the gate is conditional on BOTH a bound snapshot AND
+                    // a PRESENT QC. The test-only `LocalFixtureUnsigned`
+                    // passthrough (no snapshot) is unchanged, and
+                    // `proposal.qc == None` behavior is preserved exactly — an
+                    // absent QC is neither verified nor counted, and is never
+                    // inferred as a validated bootstrap exception. A
+                    // `Some(empty_or_invalid_qc)` is verified (and rejected)
+                    // here; it is never converted into `None` or routed through
+                    // the absent-QC behavior.
+                    let mut _retained_verified_qc: Option<VerifiedQuorumCertificate> = None;
+                    if let (Some(snap), Some(qc)) = (current_auth, proposal.qc.as_ref()) {
+                        let verifier = snap.verifier();
+                        // (d) Engine-context correspondence — reject disagreement
+                        // BEFORE any constituent-QC cryptography or downstream
+                        // effect (zero constituent Vote backend calls). The engine
+                        // holds membership by value; require STRUCTURAL equality of
+                        // validator ids AND voting weights via the existing
+                        // predicate (matching counts alone is insufficient), not
+                        // Arc pointer identity, and require the engine's current
+                        // epoch to equal the snapshot's authorized epoch.
+                        // Membership is never resized, replaced, renumbered, or
+                        // mutated to force a match.
+                        if !validator_membership_matches(
+                            engine.validators(),
+                            verifier.validators.as_ref(),
+                        ) || engine.current_epoch() != snap.authorized_epoch()
+                        {
+                            stats.inbound_proposal_engine_context_mismatch_total = stats
+                                .inbound_proposal_engine_context_mismatch_total
+                                .saturating_add(1);
+                            eprintln!(
+                                "[binary-consensus] Run 422 D7-C3E: inbound proposal REJECTED \
+                                 (engine-context mismatch) height={} proposer={:?} \
+                                 engine_epoch={} authorized_epoch={} — fail-closed, before \
+                                 QC crypto and not delivered",
+                                proposal.header.height,
+                                from,
+                                engine.current_epoch(),
+                                snap.authorized_epoch(),
+                            );
+                            return;
+                        }
+                        // (e) Verify the PRESENT embedded QC once through C3D
+                        // using the admitted snapshot's trusted inputs. Preserve
+                        // the actual signed fields (no rewriting, normalization,
+                        // legacy retry, or unsigned fallback).
+                        match verify_quorum_certificate_with_domain(
+                            qc,
+                            &verifier.signing_domain,
+                            snap.authorized_epoch(),
+                            verifier.validators.as_ref(),
+                            verifier.key_provider.as_ref(),
+                            verifier.backend_registry.as_ref(),
+                        ) {
+                            Ok(verified) => {
+                                stats.inbound_proposal_embedded_qc_verified_total = stats
+                                    .inbound_proposal_embedded_qc_verified_total
+                                    .saturating_add(1);
+                                // Keep the returned VerifiedQuorumCertificate
+                                // associated with THIS immutable Proposal through
+                                // confirmation and the immediate handoff (no
+                                // reusable "already verified" flag or cache;
+                                // retention beyond this synchronous call is out of
+                                // scope).
+                                _retained_verified_qc = Some(verified);
+                            }
+                            Err(e) => {
+                                stats.inbound_proposal_embedded_qc_rejected_total = stats
+                                    .inbound_proposal_embedded_qc_rejected_total
+                                    .saturating_add(1);
+                                eprintln!(
+                                    "[binary-consensus] Run 422 D7-C3E: inbound proposal \
+                                     REJECTED (embedded QC verification) height={} proposer={:?} \
+                                     reason={} — fail-closed, not delivered",
+                                    proposal.header.height, from, e,
+                                );
+                                return;
+                            }
                         }
                     }
                     // Run 422 D7-A: re-confirm the freshness admission
