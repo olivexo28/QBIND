@@ -29,9 +29,13 @@
 //!
 //! Evidence-strength boundaries (task §5) are kept explicit. The engine's
 //! `on_proposal_event` return is an *engine decision* (an unsigned
-//! `BroadcastVote` action); *completed signature bytes* are produced separately
-//! by the real signer and verified independently by the real D6 verifier. No
-//! facade handoff or network transmission is exercised by these tests.
+//! `BroadcastVote` action); *completed signature bytes* are produced by a
+//! test-local adapter (`complete_signature_over_emitted_vote`) that consumes
+//! that ACTUAL emitted `Vote`, applies the documented suite selection, and
+//! signs it with the local validator's real key — mirroring the production
+//! `sign_vote_for_broadcast` preparation — and are verified independently by
+//! the real D6 verifier. No facade handoff or network transmission is exercised
+//! by these tests.
 
 use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
@@ -50,9 +54,12 @@ use qbind_wire::pv_signing_domain::ProposalVoteSigningDomainV2;
 
 // ---------------------------------------------------------------------------
 // Minimal signing fixture (public constructors only; test fixture setup).
-// Mirrors the shape of the existing private `make_fixture`/`signed_vote`
-// helpers in `binary_consensus_loop.rs` but uses only exported types so the
-// characterization can live in a single dedicated integration target.
+// Mirrors the shape of the existing private `make_fixture` helper in
+// `binary_consensus_loop.rs` but uses only exported types so the
+// characterization can live in a single dedicated integration target. The
+// completed signature is produced by `complete_signature_over_emitted_vote`
+// below, which adapts the engine's ACTUAL emitted `Vote` rather than
+// reconstructing a separate one.
 // ---------------------------------------------------------------------------
 
 const TEST_SUITE: ConsensusSigSuiteId = SUITE_PQ_RESERVED_1; // 100 = ML-DSA-44
@@ -102,56 +109,106 @@ fn make_fixture(n: u64) -> SignFixture {
     }
 }
 
-/// The control v2 signing domain. `expected_wire_chain_id = 0` matches the
-/// `chain_id = 0` carried by the votes signed below.
-fn control_domain() -> ProposalVoteSigningDomainV2 {
+/// The explicitly-declared fixture signing domain (task §2). Its
+/// `expected_wire_chain_id = 1` matches the wire `chain_id = 1` the engine
+/// stamps on every emitted `Vote` (see `BasicHotStuffEngine::ingest_proposal`,
+/// `crates/qbind-consensus/src/basic_hotstuff_engine.rs`). This is trusted
+/// fixture configuration; it is **not** derived from any incoming message and
+/// activates no production runtime→wire mapping.
+fn fixture_domain() -> ProposalVoteSigningDomainV2 {
     ProposalVoteSigningDomainV2::try_new(
         ChainId(0xD7D2_0000_0000_0001),
-        0,
+        1, // matches the preserved emitted wire chain_id (see engine).
         [0x7Du8; 32],
         [0xD2u8; 32],
     )
-    .expect("valid d7d2 control domain")
+    .expect("valid d7d2 fixture domain")
 }
 
-fn base_vote(voter: u16, height: u64, block_id: [u8; 32]) -> Vote {
-    Vote {
-        version: 1,
-        chain_id: 0,
-        epoch: 0,
-        height,
-        round: height,
-        step: 1,
-        block_id,
-        validator_index: voter,
-        suite_id: TEST_SUITE_U16,
-        signature: vec![],
-    }
-}
-
-/// Produce a vote carrying **completed** ML-DSA-44 signature bytes over the
-/// mandatory v2 control-domain preimage, using the existing real signer.
-fn signed_vote(voter: u16, height: u64, block_id: [u8; 32], fixture: &SignFixture) -> Vote {
-    let mut v = base_vote(voter, height, block_id);
-    let preimage = control_domain().vote_preimage(&v);
+/// Test-local signing adapter over the engine's **actual** emitted `Vote`
+/// (task §2). It deliberately mirrors the production outbound signing
+/// preparation `sign_vote_for_broadcast` in
+/// `crates/qbind-node/src/binary_consensus_loop.rs`:
+///
+/// 1. Documented suite selection — overwrite **only** the placeholder
+///    `suite_id` the engine emits (`DEFAULT_CONSENSUS_SUITE_ID = 0`) with the
+///    signer's configured real suite (`signer.suite_id()` in production; the
+///    ML-DSA-44 `TEST_SUITE_U16` here). This is distinct from changing the
+///    voting identity or position.
+/// 2. Compute the mandatory v2 preimage over the emitted domain.
+/// 3. Assign **completed** signature bytes produced by the **local** validator's
+///    real ML-DSA-44 key (the emitted `validator_index`), never the
+///    proposer/leader's key.
+///
+/// It preserves the emitted version, validator index, wire chain, epoch,
+/// height, round, step and block id; it reconstructs no separate `Vote` from
+/// selected fields.
+fn complete_signature_over_emitted_vote(
+    emitted: &Vote,
+    domain: &ProposalVoteSigningDomainV2,
+    fixture: &SignFixture,
+) -> Vote {
+    let signer = ValidatorId(emitted.validator_index as u64);
     let sk = fixture
         .sks
-        .get(&ValidatorId(voter as u64))
-        .expect("signer key present");
-    v.signature = MlDsa44Backend::sign(sk, &preimage).expect("sign");
-    v
+        .get(&signer)
+        .expect("local validator signing key present");
+    let mut completed = emitted.clone();
+    // (1) Documented suite selection over the emitted Vote.
+    completed.suite_id = TEST_SUITE_U16;
+    // (2)+(3) Real v2 preimage + completed signature bytes from the local key.
+    let preimage = domain.vote_preimage(&completed);
+    completed.signature = MlDsa44Backend::sign(sk, &preimage).expect("sign");
+    completed
 }
 
-/// Independently verify a vote's completed signature via the real D6 verifier
-/// and the real backend registry.
-fn verify_completed_vote(v: &Vote, voter: u16, fixture: &SignFixture) -> bool {
+/// Assert the completed signature changed **only** the documented suite
+/// selection and the newly-assigned signature bytes; every other emitted field
+/// (voting identity, wire chain, epoch, height, round, step, block id) is
+/// preserved unchanged (task §2).
+fn assert_only_suite_and_signature_changed(emitted: &Vote, completed: &Vote) {
+    assert_eq!(completed.version, emitted.version, "version preserved");
+    assert_eq!(completed.chain_id, emitted.chain_id, "wire chain preserved");
+    assert_eq!(completed.epoch, emitted.epoch, "epoch preserved");
+    assert_eq!(completed.height, emitted.height, "height preserved");
+    assert_eq!(completed.round, emitted.round, "round preserved");
+    assert_eq!(completed.step, emitted.step, "step preserved");
+    assert_eq!(completed.block_id, emitted.block_id, "block id preserved");
+    assert_eq!(
+        completed.validator_index, emitted.validator_index,
+        "voting identity preserved"
+    );
+    assert_eq!(
+        emitted.suite_id,
+        qbind_wire::DEFAULT_CONSENSUS_SUITE_ID,
+        "the engine emits the placeholder suite"
+    );
+    assert_eq!(
+        completed.suite_id, TEST_SUITE_U16,
+        "the configured real signing suite is selected"
+    );
+    assert!(emitted.signature.is_empty(), "engine decision is unsigned");
+    assert!(
+        !completed.signature.is_empty(),
+        "completed signature bytes are assigned"
+    );
+}
+
+/// Independently verify a completed vote via the existing D6 message-bound
+/// verifier and the real backend registry. `claimed` is taken from the vote's
+/// own `validator_index` (the engine's local validator).
+fn verify_completed_vote(
+    v: &Vote,
+    domain: &ProposalVoteSigningDomainV2,
+    fixture: &SignFixture,
+) -> bool {
     verify_vote_msg_with_domain(
         v,
-        ValidatorId(voter as u64),
+        ValidatorId(v.validator_index as u64),
         &fixture.validators,
         &fixture.kp,
         &fixture.br,
-        &control_domain(),
+        domain,
     )
     .is_ok()
 }
@@ -201,165 +258,253 @@ fn emitted_vote(action: Option<ConsensusEngineAction<ValidatorId>>) -> Option<Vo
 // Scenario A — ordinary restart after an uncommitted signing decision.
 // ===========================================================================
 //
+// Both the pre-decision engine and the restarted engine are initialized from
+// the SAME explicit baseline inputs (task §3): committed block id, committed
+// height, an explicitly-absent lock/QC, the local validator + membership, and
+// epoch/view. Baseline state is asserted BEFORE and AFTER initialization, not
+// merely the resulting view.
+//
 // Observed boundaries:
 //   * engine decision/action: `on_proposal_event` returns `BroadcastVote`.
-//   * completed signature bytes: `signed_vote` + `verify_completed_vote`.
-//   * facade handoff / network transmission: NOT exercised.
+//   * fixture signer invocation + completed signature bytes:
+//     `complete_signature_over_emitted_vote` + `verify_completed_vote`.
+//   * facade handoff / network transmission: NOT exercised. This correction
+//     does not exercise or establish production authorization or transmission.
 #[test]
 fn d7d2_a_uncommitted_vote_lost_and_latch_reset_permits_conflicting_vote_after_restart() {
     let fixture = make_fixture(4);
+    let domain = fixture_domain();
 
-    // --- Pre-crash engine at view 1. ---
+    // Explicit shared baseline inputs, reused for BOTH engines below.
+    let baseline_committed_id = [0x00u8; 32];
+    let baseline_committed_height = 0u64;
+    // Explicitly-absent lock/QC is part of THIS fixture's baseline.
+
+    // --- Pre-decision engine, initialized from the shared baseline. ---
     let mut engine = make_engine(0, 4);
-    // The proposal at height 1 advances the fresh engine (view 0 -> 1); the
-    // leader for view 1 is deterministic.
+    assert_eq!(
+        engine.committed_height(),
+        None,
+        "baseline BEFORE init: fresh engine has no committed baseline"
+    );
+    engine.initialize_from_restart(baseline_committed_id, baseline_committed_height, None);
+    // Baseline AFTER init (asserted state, not merely the view).
+    assert_eq!(engine.committed_height(), Some(0));
+    assert_eq!(engine.current_view(), 1);
+    assert!(
+        engine.locked_qc().is_none(),
+        "explicitly-absent lock/QC baseline"
+    );
+    assert_eq!(engine.current_epoch(), 0, "baseline epoch is explicitly 0");
+
     let leader = engine.leader_for_view(1);
     let leader_u16 = leader.0 as u16;
 
-    // (1) ENGINE DECISION: deliver a valid leader proposal for block X.
+    // (1) ENGINE DECISION: the engine emits its OWN `BroadcastVote` for block X.
     let p_x = leader_proposal(leader_u16, 1, [0xFFu8; 32]); // no-parent sentinel
-    let vote_x = emitted_vote(engine.on_proposal_event(leader, &p_x))
+    let emitted_x = emitted_vote(engine.on_proposal_event(leader, &p_x))
         .expect("engine votes for the first valid proposal at view 1");
-    assert_eq!(vote_x.height, 1, "the uncommitted decision is at view 1");
-    let block_x = vote_x.block_id;
+    assert_eq!(emitted_x.height, 1, "the uncommitted decision is at view 1");
+    assert_eq!(
+        emitted_x.validator_index, 0,
+        "the emitted decision is the LOCAL validator's vote, not the leader's"
+    );
+    let block_x = emitted_x.block_id;
 
     // (2) SAME-PROCESS CONTROL: a conflicting leader proposal for block Y at the
-    // SAME view is refused in-process by the engine's per-view vote latch. This
-    // is the existing guard that prevents equivocation while the process lives.
+    // SAME view is refused in-process by the engine's per-view vote latch.
     let p_y = leader_proposal(leader_u16, 1, [0x22u8; 32]);
-    let control = engine.on_proposal_event(leader, &p_y);
     assert!(
-        emitted_vote(control).is_none(),
+        emitted_vote(engine.on_proposal_event(leader, &p_y)).is_none(),
         "in-process vote latch refuses a second (conflicting) vote at the same view"
     );
 
-    // (3) COMPLETED SIGNATURE BYTES boundary (distinct from the unsigned engine
-    // action): the existing signer produces real ML-DSA-44 bytes over the vote
-    // position, and the real D6 verifier accepts them independently.
-    let signed_x = signed_vote(leader_u16, 1, block_x, &fixture);
-    assert!(!signed_x.signature.is_empty(), "completed signature bytes exist");
+    // (3) FIXTURE SIGNER INVOCATION + COMPLETED SIGNATURE over the ACTUAL
+    // emitted decision (distinct from the unsigned engine action). All other
+    // emitted fields are preserved; the real D6 verifier accepts it.
+    let signed_x = complete_signature_over_emitted_vote(&emitted_x, &domain, &fixture);
+    assert_only_suite_and_signature_changed(&emitted_x, &signed_x);
     assert!(
-        verify_completed_vote(&signed_x, leader_u16, &fixture),
-        "the real backend independently verifies the completed vote signature"
+        verify_completed_vote(&signed_x, &domain, &fixture),
+        "the real backend independently verifies the completed vote over the engine's decision"
     );
 
-    // --- Restart. A fresh engine is initialized from ONLY the committed
-    // baseline the real writer persists. The uncommitted view-1 vote was never
-    // committed and no writer persisted it, so it cannot be an input here. We
-    // model "nothing above genesis was committed" (committed_height = 0, no
-    // stored QC -> no reconstructed lock). ---
+    // --- Restart: a FRESH engine initialized from the SAME explicit baseline.
+    // The uncommitted view-1 vote was never committed and no writer persisted
+    // it, so it cannot be an input here. ---
     let mut restarted = make_engine(0, 4);
-    restarted.initialize_from_restart([0x00u8; 32], 0, None);
-
-    // Committed-state recovery observed via public getters: the baseline is
-    // restored, the resume view is committed_height + 1, and there is NO lock
-    // (no QC was persisted for the committed baseline).
+    assert_eq!(
+        restarted.committed_height(),
+        None,
+        "baseline BEFORE init: fresh restart engine"
+    );
+    restarted.initialize_from_restart(baseline_committed_id, baseline_committed_height, None);
     assert_eq!(restarted.committed_height(), Some(0));
     assert_eq!(restarted.current_view(), 1);
     assert!(
         restarted.locked_qc().is_none(),
-        "no locked QC is reconstructed when the writer persisted none"
+        "no locked QC is reconstructed from an absent baseline QC"
     );
+    assert_eq!(restarted.current_epoch(), 0);
 
     // (4) After restart the per-view latch is reset (a fresh process carries no
     // record of the pre-crash vote). Delivering the conflicting proposal for
-    // block Y at the SAME view 1 now succeeds: the engine emits a vote for Y.
+    // block Y at the SAME view 1 now yields a decision.
     let leader2 = restarted.leader_for_view(1);
     assert_eq!(leader2, leader, "leader for view 1 is deterministic");
-    let vote_y = emitted_vote(restarted.on_proposal_event(leader2, &p_y))
+    let emitted_y = emitted_vote(restarted.on_proposal_event(leader2, &p_y))
         .expect("after restart the reset latch permits voting again at view 1");
-    let block_y = vote_y.block_id;
+    let block_y = emitted_y.block_id;
+    assert_eq!(emitted_y.validator_index, 0, "still the LOCAL validator's vote");
 
-    // The two engine decisions are for DIFFERENT blocks at the SAME view: the
-    // in-process guard that prevented this did not survive the restart because
-    // the vote was uncommitted and unpersisted.
+    // The two engine decisions are for DIFFERENT blocks at the SAME voting
+    // position: the in-process guard did not survive the restart because the
+    // vote was uncommitted and unpersisted. Same key/domain/epoch/position.
     assert_ne!(
         block_x, block_y,
         "conflicting block ids voted at the same view across the restart"
     );
-    assert_eq!(vote_x.height, vote_y.height);
-
-    // The signer likewise will produce completed, independently-verified
-    // signatures for BOTH conflicting positions (same validator, domain, epoch
-    // and voting position; different signed messages). This establishes the
-    // fixture-level capability to produce conflicting signatures; the missing
-    // protection is that no persisted anti-equivocation record is consumed by
-    // any recovery entrypoint. The facade/network transmission boundary is not
-    // exercised.
-    let signed_y = signed_vote(leader_u16, 1, block_y, &fixture);
-    assert!(verify_completed_vote(&signed_x, leader_u16, &fixture));
-    assert!(verify_completed_vote(&signed_y, leader_u16, &fixture));
-    assert_ne!(
-        signed_x.signature, signed_y.signature,
-        "the two completed signatures cover different messages"
+    assert_eq!(emitted_x.height, emitted_y.height, "same voting height");
+    assert_eq!(emitted_x.round, emitted_y.round, "same round");
+    assert_eq!(emitted_x.step, emitted_y.step, "same step");
+    assert_eq!(emitted_x.epoch, emitted_y.epoch, "same epoch");
+    assert_eq!(emitted_x.chain_id, emitted_y.chain_id, "same wire chain");
+    assert_eq!(
+        emitted_x.validator_index, emitted_y.validator_index,
+        "same voting identity"
     );
+
+    // Completed signature over the SECOND emitted decision. Both signatures use
+    // the SAME key/domain/epoch/voting position but cover DIFFERENT signed
+    // message bodies (different block ids). Both pass D6 verification. The
+    // facade/network transmission boundary is not exercised.
+    let signed_y = complete_signature_over_emitted_vote(&emitted_y, &domain, &fixture);
+    assert_only_suite_and_signature_changed(&emitted_y, &signed_y);
+    assert!(verify_completed_vote(&signed_x, &domain, &fixture));
+    assert!(verify_completed_vote(&signed_y, &domain, &fixture));
+    // The signed message BODIES differ — different signature bytes alone would
+    // not establish conflicting messages.
+    assert_ne!(
+        domain.vote_preimage(&signed_x),
+        domain.vote_preimage(&signed_y),
+        "the two completed signatures cover DIFFERENT signed messages"
+    );
+    assert_ne!(signed_x.signature, signed_y.signature);
 }
 
 // ===========================================================================
-// Scenario B — restore a snapshot captured before the decision.
+// Scenario B — replay the same pre-decision snapshot baseline inputs.
 // ===========================================================================
 //
-// Scope: this exercises the initializer-level snapshot baseline
-// (`initialize_from_snapshot_baseline`, the binary B5 restore-aware start
-// hook), NOT an end-to-end binary RocksDB restore. The artifact a
-// `StateSnapshotMeta` carries today is only `(block_hash, height)`. A FRESH
-// engine instance is used for the restore, as the startup contract requires;
-// fields are not reset on the live engine.
+// Scope (task §4): this test replays the SAME declared pre-decision
+// initializer inputs into a fresh engine and exercises
+// `initialize_from_snapshot_baseline` ONLY. It does NOT exercise snapshot
+// creation, serialization, filesystem restoration, RocksDB recovery, or the
+// full binary startup path.
+//
+// `StateSnapshotMeta` (crates/qbind-ledger/src/state_snapshot.rs) actually
+// carries a COMPLETE metadata structure: `height`, `block_hash`,
+// `created_at_unix_ms`, `chain_id`, `epoch: Option<u64>`,
+// `authority_state: Option<..>` and `authority_state_v2: Option<..>`. The
+// engine initializer `initialize_from_snapshot_baseline` consumes ONLY TWO of
+// these — `block_hash` (reused as an opaque parent id) and `height`. The
+// epoch/chain/authority metadata is NOT recovered by this initializer and is
+// NOT recovered Proposal/Vote signing history or current authorization.
+//
+// A FRESH engine instance is used for the replay, as the startup contract
+// requires; fields are not reset on the live engine.
 #[test]
 fn d7d2_b_snapshot_baseline_before_decision_omits_intervening_vote() {
     let fixture = make_fixture(4);
+    let domain = fixture_domain();
 
-    // Snapshot captured BEFORE the decision: committed baseline at height 5.
+    // Declared pre-decision initializer inputs (the two `StateSnapshotMeta`
+    // fields this initializer consumes).
     let snap_id = [0x01u8; 32];
     let snap_height = 5u64;
 
     // Live engine restored to the pre-decision baseline, then makes an
     // uncommitted signing decision at view 6.
     let mut engine = make_engine(0, 4);
+    assert_eq!(
+        engine.committed_height(),
+        None,
+        "baseline BEFORE init: fresh engine"
+    );
     engine.initialize_from_snapshot_baseline(snap_id, snap_height);
     assert_eq!(engine.committed_height(), Some(snap_height));
     assert_eq!(engine.current_view(), snap_height + 1);
+    assert!(
+        engine.locked_qc().is_none(),
+        "snapshot baseline carries no QC/lock"
+    );
+    assert_eq!(engine.current_epoch(), 0, "baseline epoch is explicitly 0");
 
     let leader = engine.leader_for_view(snap_height + 1);
     let leader_u16 = leader.0 as u16;
     let p_x = leader_proposal(leader_u16, snap_height + 1, snap_id);
-    let vote_x = emitted_vote(engine.on_proposal_event(leader, &p_x))
+    let emitted_x = emitted_vote(engine.on_proposal_event(leader, &p_x))
         .expect("engine votes at view 6 after the pre-decision snapshot baseline");
-    let block_x = vote_x.block_id;
-    // Real completed signature for the decision.
-    let signed_x = signed_vote(leader_u16, snap_height + 1, block_x, &fixture);
-    assert!(verify_completed_vote(&signed_x, leader_u16, &fixture));
+    assert_eq!(emitted_x.validator_index, 0, "the LOCAL validator's vote");
+    let block_x = emitted_x.block_id;
 
-    // Restore the EARLIER artifact on a FRESH engine/process-equivalent
-    // instance through the existing restore path.
+    // SAME-PROCESS CONTROL (task §3): a conflicting proposal for block Y at the
+    // SAME view 6 is refused in-process by the per-view vote latch.
+    let p_y = leader_proposal(leader_u16, snap_height + 1, [0x33u8; 32]);
+    assert!(
+        emitted_vote(engine.on_proposal_event(leader, &p_y)).is_none(),
+        "in-process vote latch refuses a second (conflicting) vote at the same view"
+    );
+
+    // Completed signature over the ACTUAL emitted decision.
+    let signed_x = complete_signature_over_emitted_vote(&emitted_x, &domain, &fixture);
+    assert_only_suite_and_signature_changed(&emitted_x, &signed_x);
+    assert!(verify_completed_vote(&signed_x, &domain, &fixture));
+
+    // Replay the SAME declared inputs into a FRESH engine/process-equivalent
+    // instance through the same initializer.
     let mut restored = make_engine(0, 4);
+    assert_eq!(
+        restored.committed_height(),
+        None,
+        "baseline BEFORE init: fresh replay engine"
+    );
     restored.initialize_from_snapshot_baseline(snap_id, snap_height);
 
-    // The artifact contains only (block id, height): the baseline is restored,
-    // but there is no QC/lock and no record of the intervening vote.
+    // The initializer restores only (block id, height): the baseline is
+    // restored, but there is no QC/lock and no record of the intervening vote.
     assert_eq!(restored.committed_height(), Some(snap_height));
     assert_eq!(restored.current_view(), snap_height + 1);
     assert!(
         restored.locked_qc().is_none(),
         "snapshot baseline carries no QC/lock history"
     );
+    assert_eq!(restored.current_epoch(), 0, "replayed baseline epoch is explicitly 0");
 
     // A conflicting proposal for block Y at the SAME view 6 is admitted, because
-    // the restore carries no record of the earlier decision.
-    let p_y = leader_proposal(leader_u16, snap_height + 1, [0x33u8; 32]);
+    // the replay carries no record of the earlier decision.
     let leader_r = restored.leader_for_view(snap_height + 1);
-    let vote_y = emitted_vote(restored.on_proposal_event(leader_r, &p_y))
-        .expect("restored-from-snapshot engine votes again at view 6");
+    let emitted_y = emitted_vote(restored.on_proposal_event(leader_r, &p_y))
+        .expect("engine re-initialized from the same baseline votes again at view 6");
     assert_ne!(
-        block_x, vote_y.block_id,
-        "snapshot restore does not carry the intervening signing decision"
+        block_x, emitted_y.block_id,
+        "the baseline replay does not carry the intervening signing decision"
     );
 
-    // Epoch comparison kept explicit: both engines are at epoch 0. An UNCHANGED
-    // epoch does NOT establish preservation of the intervening decision; the
-    // decision is simply absent from the artifact.
-    let signed_y = signed_vote(leader_u16, snap_height + 1, vote_y.block_id, &fixture);
-    assert!(verify_completed_vote(&signed_y, leader_u16, &fixture));
+    // Epoch comparison kept explicit for BOTH engines: an UNCHANGED epoch does
+    // NOT establish preservation of the intervening decision; the decision is
+    // simply absent from the replayed baseline.
+    assert_eq!(engine.current_epoch(), 0);
+    assert_eq!(restored.current_epoch(), 0);
+
+    let signed_y = complete_signature_over_emitted_vote(&emitted_y, &domain, &fixture);
+    assert_only_suite_and_signature_changed(&emitted_y, &signed_y);
+    assert!(verify_completed_vote(&signed_y, &domain, &fixture));
+    assert_ne!(
+        domain.vote_preimage(&signed_x),
+        domain.vote_preimage(&signed_y),
+        "the two completed signatures cover DIFFERENT signed messages"
+    );
     assert_ne!(signed_x.signature, signed_y.signature);
 }
 
@@ -608,6 +753,11 @@ mod committed_state_recovery_control {
 
     /// A committed block proposal at `height`, and a matching wire QC recorded
     /// for it (as the on-disk writer would). Returns `(block_id, block, qc)`.
+    ///
+    /// The QC is an **unverified storage/reconstruction fixture**: it carries an
+    /// empty `signatures` vector (no constituent signatures). Its successful
+    /// loading by the reader establishes reader/reconstruction behavior only —
+    /// NOT authenticated quorum evidence or recovery safety.
     fn committed_block_and_qc(height: u64) -> ([u8; 32], BlockProposal, QuorumCertificate) {
         let block_id = [0x77u8; 32];
         let block = leader_proposal(1, height, [0x00u8; 32]);
@@ -621,15 +771,21 @@ mod committed_state_recovery_control {
             block_id,
             suite_id: TEST_SUITE_U16,
             signer_bitmap: vec![0x0F],
-            signatures: vec![],
+            signatures: vec![], // unverified fixture: no constituent signatures.
         };
         (block_id, block, qc)
     }
 
     /// C1: committed block present, but NO `meta:current_epoch` seeded. The
     /// storage observation must be `PresentNoCommittedEpoch` (a committed block
-    /// does not imply a committed-epoch key), and the real reader reconstructs
-    /// the committed baseline and a lock from the stored QC.
+    /// does not imply a committed-epoch key). The real reader reconstructs the
+    /// committed baseline and a lock from the stored/embedded QC — this is a
+    /// lock reconstructed from the committed/stored QC, NOT recovery of the
+    /// exact latest pre-crash lock.
+    ///
+    /// Correction D: the C1 observation is asserted BEFORE and AFTER the harness
+    /// read; the harness reader's own missing-epoch fallback (which defaults to
+    /// 0) is recorded SEPARATELY from C1's explicit-absence observation.
     #[test]
     fn d7d2_c_load_persisted_state_recovers_committed_baseline_present_no_committed_epoch() {
         let setup = create_test_setup();
@@ -644,9 +800,9 @@ mod committed_state_recovery_control {
             .expect("put_last_committed");
         // No put_current_epoch: a committed block does not seed meta:current_epoch.
 
-        // Actual storage observation (asserted, not assumed).
-        let obs = observe_consensus_storage(Some(storage.as_ref())).expect("observe");
-        assert_eq!(obs, ConsensusStorageObservation::PresentNoCommittedEpoch);
+        // Actual storage observation BEFORE the harness read (asserted).
+        let obs_before = observe_consensus_storage(Some(storage.as_ref())).expect("observe");
+        assert_eq!(obs_before, ConsensusStorageObservation::PresentNoCommittedEpoch);
 
         // Exercise the REAL reader.
         let cfg = node_cfg();
@@ -671,15 +827,38 @@ mod committed_state_recovery_control {
         assert_eq!(harness.current_view(), committed_height + 1);
 
         // Reconstructed lock: the stored QC (height 7) becomes the locked QC
-        // (view 7). This is a lock reconstructed from the committed/stored QC —
-        // NOT the latest pre-crash lock.
+        // (view 7). This is a lock reconstructed from the committed/stored QC
+        // (an unverified fixture, no constituent signatures) — NOT the exact
+        // latest pre-crash lock.
         let locked = harness.driver().engine().locked_qc();
         assert!(locked.is_some(), "a lock is reconstructed from the stored QC");
         assert_eq!(locked.unwrap().view, committed_height);
 
+        // Correction D — the C1 observation is re-checked AFTER the reader ran.
+        // The harness reader is read-only w.r.t. the committed-epoch key: no
+        // epoch record was written, so C1 still reports the explicit absence.
+        let obs_after = observe_consensus_storage(Some(storage.as_ref())).expect("observe after");
+        assert_eq!(
+            obs_after,
+            ConsensusStorageObservation::PresentNoCommittedEpoch,
+            "C1 still observes no committed epoch after the harness read"
+        );
+
+        // Recorded SEPARATELY: the harness/async-runner reader's OWN epoch
+        // fallback (`storage.get_current_epoch()?.unwrap_or(0)` in
+        // `hotstuff_node_sim.rs`) defaults the MISSING epoch to 0 in the
+        // resulting engine. This is that reader's behavior only — it is NOT
+        // C1's explicit-absence observation, and it does NOT imply the entire
+        // recovery path never defaults a missing epoch to zero.
+        assert_eq!(
+            harness.driver().engine().current_epoch(),
+            0,
+            "the harness reader defaults the missing epoch to 0 in the engine"
+        );
+
         // Boundary statement: this control recovers committed state only. It
-        // does NOT recover the latest uncommitted vote, the latest pre-crash
-        // lock, or C3F retained verified-justification evidence.
+        // does NOT recover the latest uncommitted vote, the exact latest
+        // pre-crash lock, or C3F retained verified-justification evidence.
     }
 
     /// C2: same committed baseline, but with `put_current_epoch(0)` seeded
@@ -701,10 +880,10 @@ mod committed_state_recovery_control {
         // Explicit fixture setup: seed committed epoch 0.
         storage.put_current_epoch(0).expect("put_current_epoch");
 
-        let obs = observe_consensus_storage(Some(storage.as_ref())).expect("observe");
-        assert_eq!(obs, ConsensusStorageObservation::CommittedEpoch(0));
+        let obs_before = observe_consensus_storage(Some(storage.as_ref())).expect("observe");
+        assert_eq!(obs_before, ConsensusStorageObservation::CommittedEpoch(0));
         // Distinct from the absent-epoch observation.
-        assert_ne!(obs, ConsensusStorageObservation::PresentNoCommittedEpoch);
+        assert_ne!(obs_before, ConsensusStorageObservation::PresentNoCommittedEpoch);
 
         let cfg = node_cfg();
         let mut harness = NodeHotstuffHarness::new_from_validator_config(
@@ -720,6 +899,15 @@ mod committed_state_recovery_control {
         assert_eq!(loaded, Some(block_id));
         assert_eq!(harness.driver().engine().committed_height(), Some(committed_height));
         assert_eq!(harness.current_view(), committed_height + 1);
+
+        // Correction D — the explicit `put_current_epoch(0)` fixture yields the
+        // distinct `CommittedEpoch(0)` observation, still present after the
+        // read. Epoch 0 takes no epoch-restore branch, so the resulting engine
+        // epoch is 0 — here from the seeded committed epoch, distinct from the
+        // missing-epoch fallback exercised in the C1 test above.
+        let obs_after = observe_consensus_storage(Some(storage.as_ref())).expect("observe after");
+        assert_eq!(obs_after, ConsensusStorageObservation::CommittedEpoch(0));
+        assert_eq!(harness.driver().engine().current_epoch(), 0);
     }
 
     /// Fresh-node control: no persisted state -> the reader returns None and no

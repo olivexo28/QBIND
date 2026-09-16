@@ -4818,27 +4818,39 @@ ML-DSA-44 backend is used for characterization only.
 
 ### Provenance and object limitations
 
-* Actual branch: `copilot/copilotcopilot-run-422-d7-d2`.
+* Actual branch inspected in this clone: `copilot/copilotcopilotcopilot-run-422-d7-d2`.
+  Deviation reported, not manufactured: the task and the earlier D7-D2 write-up
+  name the branch `copilot/copilotcopilot-run-422-d7-d2` (two `copilot` segments);
+  the checked-out branch carries three (`copilotcopilotcopilot`). No branch rename
+  was performed to reconcile this — the working branch is reported as-is.
+* Reviewed final revision `d685e29746e8b52b9e354335478a4d7018d0b981` and the
+  previously reported tested checkpoint
+  `5aa2f9dd62e72e16a2c6d6e382a1b5683ba94f0d` are **not present** in this clone
+  (`git cat-file -t` fails for both; `.git/shallow` present). Missing historical
+  objects do not imply missing implementation: the D7-D2 test target and this
+  documentation section are present in-tree and were re-inspected directly.
 * Accepted D7-D1 baseline: `70d665277f987ee43013e41de55c409b21ae2331`. This object
-  is **not present** in the working clone (`git cat-file -t` fails; `.git/shallow`
-  present). The D7-D1 documentation content is present in-tree (the five accepted
-  corrections and the D7-D1 sections above are intact); content correspondence is
-  therefore reported separately from ancestry, which cannot be verified from this
-  shallow clone. No accepted C3F implementation or D1 documentation review was
-  reopened.
-* Tested implementation checkpoint (tests committed, all validation run at this
-  tree): `5aa2f9dd62e72e16a2c6d6e382a1b5683ba94f0d`.
-* Final pushed SHA: the commit that adds this documentation section (recorded by
-  the progress push that carries this file).
+  is likewise **not present** in the shallow clone. The D7-D1 documentation content
+  is present in-tree (the five accepted corrections and the D7-D1 sections above are
+  intact); content correspondence is therefore reported separately from ancestry,
+  which cannot be verified from this shallow clone. No accepted C3F implementation
+  or D1 documentation review was reopened.
+* Starting SHA of this correction pass (D2-findings correction): `1c29ae6` (branch
+  HEAD at checkout). New test checkpoint recorded for this pass: `d7002e4`
+  (the corrected test target + evidence). Validation below was run at this tree.
 * Supplied task branch used with normal commits + push only. No PR, no main
   changes, no branch rename, no force-push, rebase, or history rewrite.
   `task/warning.txt` and unrelated files untouched.
 
 ### Changed paths / diffstat
 
-* `crates/qbind-node/tests/run_422_d7d2_signing_state_recovery_tests.rs` (new
-  test target, +750 lines at the tested checkpoint).
-* `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md` (this section).
+* `crates/qbind-node/tests/run_422_d7d2_signing_state_recovery_tests.rs`
+  (dedicated integration target; corrected in this pass to sign the engine's
+  actual emitted decisions, use comparable baselines and same-process controls,
+  state initializer-only snapshot scope, and distinguish C1-versus-harness epoch
+  behavior — corrections A–D).
+* `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md` (this section, corrected in
+  place plus one appended correction note).
 * `docs/protocol/QBIND_PROPOSAL_VOTE_AUTHORITY_LIFECYCLE_CONTRACT.md` (inventory /
   next-step note only).
 * `docs/protocol/QBIND_GENESIS_AUTHORITY_ENGINE_QC_INTEGRATION_AUDIT.md` (short
@@ -4864,11 +4876,11 @@ is explicitly labelled test fixture setup; it is not a production route.
 
 | Entrypoint | Reachability | Persisted inputs it consumes | Reconstructs | Does NOT reconstruct |
 | --- | --- | --- | --- | --- |
-| `BasicHotStuffEngine::initialize_from_restart` (`basic_hotstuff_engine.rs:1134`) | production via `load_persisted_state`; harness; test | `(committed_block_id, committed_height, locked_qc)` passed by its caller | committed baseline; `current_view = committed_height + 1`; latch reset; optional lock from the supplied QC | any uncommitted vote; per-view vote latch state; block tree above committed |
+| `BasicHotStuffEngine::initialize_from_restart` (`basic_hotstuff_engine.rs:1134`) | called by the harness/async-runner reader `load_persisted_state`; test. NOT shown production-binary-reachable here solely because the harness calls it — the production binary snapshot path is `main.rs` restore → `open_production_consensus_storage` → B5 `initialize_from_snapshot_baseline`, which does not route through this entrypoint | `(committed_block_id, committed_height, locked_qc)` passed by its caller | committed baseline; `current_view = committed_height + 1`; latch reset; optional lock from the supplied QC | any uncommitted vote; per-view vote latch state; block tree above committed |
 | `HotStuffStateEngine::initialize_from_restart` (`hotstuff_state_engine.rs:1190`) | via the above | committed block/height + optional locked QC | committed prefix + lock | vote accumulator; tree above committed |
-| `BasicHotStuffEngine::initialize_from_snapshot_baseline` (`basic_hotstuff_engine.rs:1201`) | binary B5 (`binary_consensus_loop.rs:2389`); test | `(snapshot_block_id, snapshot_height)` from `StateSnapshotMeta` | committed height; synthetic anchor block; `current_view = height + 1` | locked QC; QC/vote history; any intervening signing decision |
-| `NodeHotstuffHarness::load_persisted_state` (`hotstuff_node_sim.rs:2035`) | harness / async runner startup | `get_last_committed`, `get_block`, `get_qc`, embedded block QC, `get_current_epoch` | committed block+height; **lock reconstructed from the committed/stored QC** (higher-view of block-level vs embedded); epoch (>0 only) | latest uncommitted vote; latest pre-crash lock; C3F retained evidence |
-| `observe_consensus_storage` (`consensus_storage_observation.rs:295`) | read-only observation | schema, incomplete-transition marker, `meta:current_epoch` | `NoStorageHandle` / `PresentNoCommittedEpoch` / `CommittedEpoch(n)` | never coerces a missing epoch to zero; never authorizes |
+| `BasicHotStuffEngine::initialize_from_snapshot_baseline` (`basic_hotstuff_engine.rs:1201`) | binary B5 (`binary_consensus_loop.rs:2389`); test | ONLY `block_hash` + `height` — the two `StateSnapshotMeta` fields this initializer reads (the full meta also carries `created_at_unix_ms`, `chain_id`, `epoch`, `authority_state`, `authority_state_v2`, none of which this initializer consumes) | committed height; synthetic anchor block; `current_view = height + 1` | locked QC; QC/vote history; any intervening signing decision; and it does NOT reconstruct any QC lock |
+| `NodeHotstuffHarness::load_persisted_state` (`hotstuff_node_sim.rs:2035`) | harness / async-runner startup only (this is the harness/async-runner reader, distinct from the production binary snapshot path) | `get_last_committed`, `get_block`, `get_qc`, embedded block QC, `get_current_epoch` | committed block+height; **lock reconstructed from the committed/stored QC** (higher-view of block-level vs embedded); epoch via `get_current_epoch()?.unwrap_or(0)` — a MISSING epoch is defaulted to 0 by this reader (restore branch taken only when `> 0`) | latest uncommitted vote; latest pre-crash lock; C3F retained evidence |
+| `observe_consensus_storage` (`consensus_storage_observation.rs:295`) | read-only observation (C1) | schema, incomplete-transition marker, `meta:current_epoch` | `NoStorageHandle` / `PresentNoCommittedEpoch` / `CommittedEpoch(n)` | the C1 observer never coerces a missing epoch to zero (this is distinct from the harness reader's `unwrap_or(0)` fallback above); never authorizes |
 | `open_production_consensus_storage` / `persist_restored_snapshot_epoch` (`production_consensus_storage.rs:391/504`) | binary main (`main.rs:2470/4726`) | data-dir consensus RocksDB; snapshot epoch | epoch parity between restored state and consensus storage | any vote/lock/signing state |
 | `ConsensusStorage::apply_epoch_transition_atomic` (`storage.rs`; RocksDB `997`, in-memory `1318`) | epoch transition | reconfig block/QC, last-committed, new epoch | atomic committed-epoch transition | uncommitted signing decisions |
 
@@ -4886,56 +4898,99 @@ All five tests pass at the tested checkpoint.
 
 **A — ordinary restart after an uncommitted signing decision**
 (`d7d2_a_uncommitted_vote_lost_and_latch_reset_permits_conflicting_vote_after_restart`).
-Fixture: 4-validator set, real ML-DSA-44 keys, explicit epoch 0, view 1, mandatory
-v2 control signing domain, committed baseline at height 0. Exercised: a valid
-leader proposal for block X → `on_proposal_event` returns `BroadcastVote` (the
-engine **decision**; the emitted vote is unsigned). Same-process control: a
-conflicting proposal for block Y at the same view is refused by the engine's
-per-view vote latch (`voted_in_view`). Completed-signature boundary: the existing
-signer produces real ML-DSA-44 bytes over the vote position and the real D6
-verifier independently accepts them. Restart: a fresh engine is initialized from
-**only** the committed baseline the real writer persists
-(`initialize_from_restart([0x00;32], 0, None)`); observed `committed_height = 0`,
-`current_view = 1`, `locked_qc = None`. After restart the reset latch admits the
-previously-refused conflicting proposal for Y → the engine emits a second vote
-decision at the same view for a different block id. Both conflicting positions are
-independently signed and verified (same validator, domain, epoch and voting
-position; different signed messages). Boundary: this is engine-decision-level
-equivocation plus signer-level conflicting-signature capability; the facade
-handoff and network transmission were **not** exercised, and no persisted
-anti-equivocation record is consumed by the recovery entrypoint.
+Fixture: 4-validator set, real ML-DSA-44 keys, explicit epoch 0, view 1, an
+explicitly-declared v2 fixture signing domain whose `expected_wire_chain_id = 1`
+matches the wire `chain_id = 1` the engine stamps on every emitted `Vote`.
+Comparable baseline (correction B): BOTH the pre-decision engine and the
+restarted engine are initialized from the SAME explicit inputs
+(`initialize_from_restart([0x00;32], 0, None)` — committed id, committed height 0,
+explicitly-absent lock/QC); baseline state is asserted BEFORE and AFTER
+initialization (`committed_height None → Some(0)`, `current_view = 1`,
+`locked_qc = None`, `current_epoch = 0`), not merely the resulting view.
+Exercised: a valid leader proposal for block X → `on_proposal_event` returns
+`BroadcastVote` (the engine **decision**; the emitted vote is unsigned, carries
+`validator_index = 0` = the LOCAL validator, and the placeholder
+`suite_id = DEFAULT_CONSENSUS_SUITE_ID = 0`). Same-process control: a conflicting
+proposal for block Y at the same view is refused by the engine's per-view vote
+latch (`voted_in_view`). Completed-signature boundary (correction A): a
+test-local signing adapter — mirroring the production preparation
+`sign_vote_for_broadcast` — consumes the ACTUAL emitted `Vote`, applies the
+documented suite selection (overwriting ONLY the placeholder `suite_id` with the
+configured real suite, exactly as `vote.suite_id = signer.suite_id()` does),
+computes the mandatory v2 preimage over the emitted domain, and assigns completed
+signature bytes from the LOCAL validator's key. All other emitted fields (version,
+validator index, wire chain, epoch, height, round, step, block id) are asserted
+unchanged; the real D6 verifier independently accepts the completed signature over
+the engine's decision. Restart: a fresh engine initialized from the SAME baseline;
+observed `committed_height = 0`, `current_view = 1`, `locked_qc = None`,
+`current_epoch = 0`. After restart the reset latch admits the previously-refused
+conflicting proposal for Y → the engine emits a second vote decision at the same
+view for a different block id. Both emitted decisions are signed by the same
+local validator over the same key/domain/epoch/voting position but DIFFERENT
+signed message bodies (asserted: the two v2 preimages differ, not merely the
+signature bytes), and both pass D6 verification. Boundary: this is
+engine-decision-level equivocation plus signer-level conflicting-signature
+capability; the facade handoff and network transmission were **not** exercised,
+this correction establishes no production authorization or transmission, and no
+persisted anti-equivocation record is consumed by the recovery entrypoint.
 
-**B — restore a snapshot captured before the decision**
+**B — replay the same pre-decision snapshot baseline inputs**
 (`d7d2_b_snapshot_baseline_before_decision_omits_intervening_vote`). Scope stated
-accurately: this exercises the initializer-level snapshot baseline
-(`initialize_from_snapshot_baseline`, the binary B5 restore-aware start hook), **not**
-an end-to-end binary RocksDB restore; the artifact a `StateSnapshotMeta` carries
-today is only `(block_hash, height)`. A live engine is restored to a pre-decision
-baseline (height 5) and makes an uncommitted decision at view 6; a **fresh** engine
-instance then restores the earlier artifact (fields are not reset on the live
-engine). Observed on the fresh instance: `committed_height = Some(5)`,
-`current_view = 6`, `locked_qc = None`; a conflicting proposal at view 6 is
-admitted and voted. Epoch comparison kept explicit: both engines are at epoch 0 —
-an unchanged epoch does **not** establish preservation of the intervening decision;
-the decision is simply absent from the artifact.
+accurately (correction C): this test replays the SAME declared pre-decision
+initializer inputs into a fresh engine and exercises
+`initialize_from_snapshot_baseline` ONLY. It does **not** exercise snapshot
+creation, serialization, filesystem restoration, RocksDB recovery, or the full
+binary startup path. `StateSnapshotMeta`
+(`crates/qbind-ledger/src/state_snapshot.rs:91`) actually carries a COMPLETE
+structure — `height`, `block_hash`, `created_at_unix_ms`, `chain_id`,
+`epoch: Option<u64>`, `authority_state: Option<..>`, `authority_state_v2:
+Option<..>`; the engine initializer consumes ONLY TWO of these (`block_hash` reused
+as an opaque parent id, and `height`). The epoch/chain/authority metadata is not
+recovered by this initializer and is **not** recovered Proposal/Vote signing
+history or current authorization. A live engine is restored to a pre-decision
+baseline (height 5) and makes an uncommitted decision at view 6; a same-process
+conflicting proposal at view 6 is refused by the per-view latch (correction B
+control); a **fresh** engine instance then replays the same inputs (fields are not
+reset on the live engine). Baseline state is asserted BEFORE and AFTER init on both
+engines (`committed_height None → Some(5)`, `current_view = 6`, `locked_qc = None`,
+`current_epoch = 0`). Observed on the fresh instance: a conflicting proposal at
+view 6 is admitted and voted for a different block id. Both engine epochs are
+asserted explicitly at 0 — an unchanged epoch does **not** establish preservation
+of the intervening decision; the decision is simply absent from the replayed
+baseline. Completed signatures follow the same correction-A adapter over the actual
+emitted decisions (documented suite selection, local-validator key, preserved
+fields, differing preimages).
 
 **C — existing committed-state recovery control**
 (`d7d2_c_load_persisted_state_recovers_committed_baseline_present_no_committed_epoch`,
 `d7d2_c_committed_epoch_zero_observed_distinctly_as_fixture_setup`,
-`d7d2_c_fresh_node_recovers_nothing`). The real reader
+`d7d2_c_fresh_node_recovers_nothing`). The real harness/async-runner reader
 `NodeHotstuffHarness::load_persisted_state` is exercised (not reproduced) against an
-`InMemoryConsensusStorage` seeded with a committed block at height 7 and its stored
-QC. Observed: the reader returns the committed block id; the engine reconstructs
-`committed_height = Some(7)`, `current_view = 8`, and a lock reconstructed from the
-stored QC (`locked_qc().view == 7`). The storage observation is **asserted**, not
-assumed: with no epoch seeded the observation is `PresentNoCommittedEpoch` (a
-committed block does not imply `meta:current_epoch`); with an explicit
-`put_current_epoch(0)` (labelled fixture setup) it is `CommittedEpoch(0)`, distinct
-from the absent-epoch case. A missing epoch is never coerced to zero. The
-fresh-node control recovers nothing. Stated boundary: this control recovers
-committed state only; it establishes recovery of neither the latest uncommitted
-vote, nor the latest pre-crash lock, nor C3F retained verified-justification
-evidence.
+`InMemoryConsensusStorage` seeded with a committed block at height 7 and an
+**unverified storage/reconstruction QC fixture** (empty `signatures` — no
+constituent signatures). Its successful loading establishes reader/reconstruction
+behavior only, NOT authenticated quorum evidence or recovery safety. Observed: the
+reader returns the committed block id; the engine reconstructs
+`committed_height = Some(7)`, `current_view = 8`, and a lock **reconstructed from
+the stored/embedded QC** (`locked_qc().view == 7`) — this is a lock reconstructed
+from the committed/stored QC, kept explicitly separate from recovery of the exact
+latest pre-crash lock. C1-versus-harness epoch behavior (correction D) is asserted
+distinctly: the `observe_consensus_storage` (C1) observation is checked BEFORE and
+AFTER the harness read; with no epoch seeded it is `PresentNoCommittedEpoch` both
+times (the reader is read-only w.r.t. the epoch key, so storage remains missing);
+separately, the harness reader's own fallback
+(`storage.get_current_epoch()?.unwrap_or(0)`) defaults that MISSING epoch to 0 in
+the resulting engine (`engine().current_epoch() == 0`). These are recorded as two
+distinct behaviors — the C1 observer never coerces the missing epoch to zero, while
+the harness reader does; this does NOT claim the entire recovery path never
+defaults a missing epoch to zero. With an explicit `put_current_epoch(0)`
+(labelled fixture setup) the observation is `CommittedEpoch(0)` (distinct from the
+absent-epoch case, and still present after the read), with the resulting engine
+epoch 0 sourced from the seeded committed epoch rather than the missing-epoch
+fallback. The fresh-node control recovers nothing. Stated boundary: this control
+recovers committed state only; it establishes recovery of neither the latest
+uncommitted vote, nor the exact latest pre-crash lock, nor C3F retained
+verified-justification evidence.
 
 ### Evidence strength and controls (task §5)
 
@@ -4954,21 +5009,23 @@ findings (the path matrix); neither is presented as production capability.
 ### Validation results
 
 Commands (default features, debug/test profile; no release rebuild — none is
-required for test/documentation-only changes):
+required for test/documentation-only changes), re-run at the corrected checkpoint:
 
-* `cargo test --test run_422_d7d2_signing_state_recovery_tests` → `ok. 5 passed; 0 failed`.
-* `cargo test --test hotstuff_restart_semantics_tests` → `ok. 14 passed; 0 failed`.
-* `cargo test --test persistence_integration_tests` → `ok. 6 passed; 0 failed`.
-* `cargo test --test b3_snapshot_restore_tests` → `ok. 10 passed; 0 failed`.
-* `cargo test --test run_422_d7c1_storage_observation_tests` → `ok. 23 passed; 0 failed`.
-* `cargo test --test run_422_startup_refusal_tests` → `ok. 4 passed; 0 failed` (real binary, startup refusal preserved).
-* `cargo clippy --test run_422_d7d2_signing_state_recovery_tests` → no warnings attributable to the new target (only pre-existing `qbind-node` lib warnings, unrelated and unchanged).
+* `cargo test -p qbind-node --test run_422_d7d2_signing_state_recovery_tests` → `ok. 5 passed; 0 failed`.
+* `cargo test -p qbind-node --test hotstuff_restart_semantics_tests` → `ok. 14 passed; 0 failed`.
+* `cargo test -p qbind-node --test persistence_integration_tests` → `ok. 6 passed; 0 failed`.
+* `cargo test -p qbind-node --test run_422_d7c1_storage_observation_tests` → `ok. 23 passed; 0 failed`.
+* `cargo test -p qbind-node --test run_422_startup_refusal_tests` → `ok. 4 passed; 0 failed` (real binary, startup refusal preserved).
+* `cargo clippy -p qbind-node --test run_422_d7d2_signing_state_recovery_tests` → exit 0; no warning is attributable to the edited target (only pre-existing `qbind-node` lib warnings, unrelated and unchanged).
 
 All exit codes `0`. No repository-wide formatter was run; CRLF line endings of the
-edited Markdown files are preserved. Unrelated broad-target failures, if any, are
-out of scope and were not modified to green this report. Automated review /
-security tooling outcomes, if invoked by the environment, are recorded literally
-by that tooling; this pass does not claim a security-review pass on their behalf.
+edited Markdown and Rust files are preserved. Unrelated broad-target failures, if
+any, are out of scope and were not modified to green this report. Automated
+tooling outcomes are recorded literally: the Code Review pass returned no review
+comments but its model backend reported an error (`model claude-sonnet-4.6 not
+found in registry`), and the CodeQL Security Scan was **skipped** (changes declared
+trivial: test + documentation only). Neither a skip nor a backend error
+establishes a successful security review; `SECURITY_POSTURE` is unchanged.
 
 ### Scoped verdict
 
@@ -5008,3 +5065,25 @@ anchor, or activation.
 Worktree clean after each reported checkpoint; changes pushed to the supplied task
 branch via normal commits only. No PR was opened; no branch rename, force-push,
 rebase, or history rewrite.
+
+### D2-review correction note (this pass)
+
+The four D2 review findings were corrected in place above; the original scenario
+structure and accepted D1/C3F results are preserved. Concisely: (A) scenarios A and
+B now sign the engine's ACTUAL emitted `Vote` — via a test-local adapter mirroring
+the production `sign_vote_for_broadcast` suite selection, using the LOCAL
+validator's key and the emitted wire chain (1)/epoch/position, asserting only
+`suite_id` and `signature` changed and that both completed signatures cover
+different signed message BODIES — replacing the earlier reconstruction helper that
+re-signed a separate vote under the leader's identity with wire chain 0/step 1;
+(B) the pre-decision and restarted/replayed engines now use the SAME explicit
+baseline inputs with before/after state assertions, and both scenarios carry a
+same-process conflicting-decision control with explicitly-asserted engine epochs;
+(C) scenario B is described as initializer-only replay (`initialize_from_snapshot_baseline`,
+consuming only `block_hash` + `height`) and the `StateSnapshotMeta` claim is
+corrected to its complete field set; (D) the C1 observer's explicit-absence
+behavior is distinguished from the harness reader's `get_current_epoch().unwrap_or(0)`
+fallback, the stored QC is labelled an unverified fixture, the reconstructed lock is
+kept separate from the exact latest pre-crash lock, and the source matrix no longer
+labels `initialize_from_restart` production-binary-reachable solely because the
+harness calls it. No production source changed.
