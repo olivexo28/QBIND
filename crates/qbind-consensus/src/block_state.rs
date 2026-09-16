@@ -101,10 +101,7 @@ impl<BlockIdT: Clone> BlockNode<BlockIdT> {
     /// block's `justify_qc`. Consumes and returns `self` so callers can build a
     /// node and its evidence handle in one expression. The evidence is an
     /// immutable shared handle; see [`BlockNode::verified_justification`].
-    pub fn with_verified_justification(
-        mut self,
-        evidence: Arc<VerifiedQuorumCertificate>,
-    ) -> Self {
+    pub fn with_verified_justification(mut self, evidence: Arc<VerifiedQuorumCertificate>) -> Self {
         self.verified_justification = Some(evidence);
         self
     }

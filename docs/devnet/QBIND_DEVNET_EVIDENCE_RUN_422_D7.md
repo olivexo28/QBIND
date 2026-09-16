@@ -4026,3 +4026,154 @@ Neither establishes a clean security posture.
 authorization, full engine/QC evidence retention, production lifecycle, and durable
 anti-rollback remain open. No readiness promotion, production activation, or Run 423
 work.
+## Run 422 D7-C3F — retain verified embedded-QC evidence at engine block registration (code + test)
+
+**Continuation, not a redesign.** This pass consumes the `VerifiedQuorumCertificate`
+that the existing C3E gate already produces for a PRESENT embedded QC and passes it,
+under the SAME admitted snapshot, into an explicit engine ingestion path that retains
+the complete verified evidence with the proposed block's justification. No second
+verifier, validator registry, signing domain, or block-ID algorithm is introduced;
+the C3D verifier and C3E admission protections are preserved unchanged.
+
+### Inspected state (recorded, not manufactured)
+
+* **Working branch (inspected):** `copilot/copilot-run-422-d7-c3c-again`. The problem
+  statement's reported branch is `copilot/copilot-run-422-d7-c3c`; recorded as a
+  deviation without fabricating ancestry.
+* **Starting HEAD:** `860d1ed` (`update`). **Production checkpoint:** `935c662`.
+  **Tests checkpoint:** `c7f5819`.
+* **Accepted C3E revision `ffb82a5dc322e9bc2a04ccfd6b18af440b4c4078`:** object **absent**
+  in this shallow clone. Missing history is distinguished from missing implementation:
+  the C3D verifier (`qc_verify_domain.rs`) and the C3E gate + `run422_d7c3e` module were
+  **present** in the worktree and executed green before this pass.
+
+### Reuse map (no new verifier / registry / domain / block-ID)
+
+* `VerifiedQuorumCertificate` + `verify_quorum_certificate_with_domain` (C3D) — the ONLY
+  source of verified evidence; retained as-is.
+* The C3E Proposal-handler gate and its retained `_retained_verified_qc` result — now
+  consumed instead of discarded.
+* `BasicHotStuffEngine::on_proposal_event` — refactored into a thin wrapper over a shared
+  private `ingest_proposal`; the legacy proposal-processing logic is reused, not copied.
+* `BlockNode`, `HotStuffStateEngine::register_block`, block replacement/eviction — reused
+  for evidence ownership, replacement and reclamation via a single insert choke point.
+* Logical `QuorumCertificate` serde type and Timeout/NewView serialization — **unchanged**;
+  evidence is stored in a separate, non-serialized `Arc<VerifiedQuorumCertificate>` handle.
+* Existing C3E test helpers (`counting_registry`/`C3eCountingVerifier`, `D7ActionRecorder`,
+  `coherent_snapshot_for`, `c3e_state_fixture`, `c3e_candidate_block_id`, `deliver`,
+  `valid_quorum`, `build_signed_qc`, `proposal_with_qc`) — reused, not re-implemented.
+
+### What changed (production)
+
+* `crates/qbind-consensus/src/block_state.rs`: `BlockNode` gains a non-serialized
+  `verified_justification: Option<Arc<VerifiedQuorumCertificate>>` plus a
+  `with_verified_justification` builder. `BlockNode::new` sets it `None`, so restart/
+  baseline/legacy nodes never manufacture verified evidence.
+* `crates/qbind-consensus/src/qc_verify_domain.rs`: `VerifiedQuorumCertificate::retained_byte_size()`
+  (fixed overhead + signature buffers + bitmap + signer-id list, saturating) for checked
+  byte accounting.
+* `crates/qbind-consensus/src/hotstuff_state_engine.rs`: a dedicated retained-evidence byte
+  budget (`DEFAULT_MAX_RETAINED_EVIDENCE_BYTES = 256 MiB`, configurable via
+  `set_max_retained_evidence_bytes`), running `retained_evidence_bytes`, a
+  `rejected_evidence_over_budget` counter, a pure `can_retain_evidence` pre-check, a single
+  `insert_block_node` accounting choke point (reclaims same-id evidence, adds new), a
+  `remove_block_and_reclaim` used by eviction, and
+  `register_block_with_verified_justification(...) -> Result<(), EvidenceRetentionError>`.
+  The retention budget is a **separate** engine-level bound, NOT `ConsensusLimitsConfig`
+  (which is `Copy` with exhaustive struct-literals in out-of-scope tests); block-count
+  limits alone are not described as a byte bound.
+* `crates/qbind-consensus/src/basic_hotstuff_engine.rs`: `VerifiedProposalIngestError`
+  (`MissingEmbeddedQc`, `EvidenceCertificateMismatch`, `WireChainMismatch`, `EpochMismatch`,
+  `RetentionBudgetExceeded`) and `on_verified_proposal_event(from, proposal, evidence)`. Before
+  any engine mutation it: requires a present QC; checks `evidence.certificate() == qc` (WireQC
+  derives `Eq` ⇒ all wire fields, bitmap and signature bytes); checks proposal↔evidence wire-chain
+  and epoch correspondence; and pre-checks the retention budget for the exact derived block id.
+  It never rewrites a Proposal or QC and performs **no** second constituent-signature verification.
+* `crates/qbind-node/src/binary_consensus_loop.rs`: the Required, present-QC handoff now calls
+  `engine.on_verified_proposal_event(...)` with the evidence returned by ITS OWN C3E verification;
+  `Ok` increments `inbound_proposal_verified_qc_handoff_total`; any typed `Err` increments
+  `inbound_proposal_verified_qc_handoff_rejected_total`, logs, and returns **fail-closed with no
+  legacy fallback**. Absent-QC and the test-only `LocalFixtureUnsigned` passthrough keep the legacy
+  `on_proposal_event` entrypoint (no retained evidence). Handler-delivery accounting is kept
+  distinct from engine acceptance.
+
+### Ownership, lifecycle and resource bounds
+
+* Evidence is stored ONLY as the block's `verified_justification` (justifies the parent), never in
+  `own_qc`; a retained certificate therefore never becomes a certificate for the child block itself.
+* Block replacement, legacy re-registration and eviction all route through the insert/remove choke
+  points: an unverified replacement drops any earlier verified designation and reclaims its bytes; a
+  removed block releases its evidence; retained bytes never grow unbounded.
+* A new retention that cannot be accommodated is rejected BEFORE engine mutation
+  (`RetentionBudgetExceeded` / `EvidenceRetentionError::BudgetExceeded`), with the failure counted
+  at the engine boundary (`rejected_evidence_over_budget`, and the loop's
+  `inbound_proposal_verified_qc_handoff_rejected_total`).
+
+### Behavioral tests (module `run422_d7a::run422_d7c3e::c3f`, 8 tests)
+
+Real D6/PQC verification, reusing accepted C3E fixtures:
+
+* **A** `c3f_a_real_handler_retains_exact_verified_evidence` — real handler positive: after the
+  handler returns, the registered child block retains the exact certificate, signatures, bitmap,
+  domain, epoch, signer identities `[0,1,2]`, voting power `3` and threshold `3`; the certified
+  block id (`[9;32]`) differs from the child candidate.
+* **B** `c3f_b_evidence_for_a_rejected_against_proposal_carrying_b` — evidence for QC A cannot
+  accompany a Proposal carrying QC B (same logical block/view, different genuine quorum) →
+  `EvidenceCertificateMismatch` before any engine mutation.
+* **C** `c3f_c_retained_evidence_independent_of_caller_wire_input` — mutating/dropping the caller's
+  wire input does not alter retained evidence.
+* **D** `c3f_d_engine_retention_adds_no_second_qc_verification` — direct backend counts: one up-front
+  constituent-vote pass (`votes == 3`); engine ingestion adds `0`.
+* **E** `c3f_e_invalid_qc_retains_no_evidence_positive_control_does` — invalid (foreign-domain) QC:
+  no handoff, no view advance, no block, no retained evidence, no facade action; matching positive
+  control retains.
+* **F** `c3f_f_replacement_and_removal_lifecycle` — real state-engine replacement (unverified replacement
+  does not inherit; bytes reclaimed) and eviction (evidence released; bytes reclaimed).
+* **G** `c3f_g_resource_limits_checked_accounting` — exact-capacity accept (`retained == max`),
+  over-capacity reject (typed `BudgetExceeded`, block absent, `retained == 0`,
+  `rejected_evidence_over_budget == 1`), replacement accounting (no double-count), and real-handler
+  over-budget rejection (`handoff_rejected == 1`, no view advance, no retained evidence).
+* **H** `c3f_h_absent_qc_and_typed_contract_errors` — absent-QC compatibility preserved (no handoff,
+  no retention) plus typed `MissingEmbeddedQc` / `WireChainMismatch` / `EpochMismatch`.
+
+### Validation — exact commands, profiles, exit codes (exit 0 unless noted)
+
+Tested SHA `c7f5819`; final SHA recorded at the closing checkpoint of this pass.
+
+* `cargo test -p qbind-node --lib run422_d7a::run422_d7c3e::c3f` → **8 passed** (dev).
+* `cargo test -p qbind-node --lib binary_consensus_loop` → **248 passed** (includes `run422_d7c3e`).
+* `cargo test -p qbind-consensus --lib` → **182 passed**.
+* `cargo test -p qbind-consensus --test run_422_d7c3d_qc_domain_verification_tests` → **46 passed** (C3D).
+* `cargo test -p qbind-consensus --test run_422_d6_pv_domain_isolation_tests` → **34 passed** (D6).
+* Block-state/engine: `consensus_state_tests` **8**, `consensus_state_memory_limits_tests` **7**,
+  `commit_log_memory_limits_tests` **6** (1 ignored), `hotstuff_state_tests` **15**,
+  `hotstuff_state_commit_tests` **7**, `basic_hotstuff_engine_sims_tests` **6** — all passed.
+* `cargo test -p qbind-node --test run_420_production_policy_reachability_tests` → **3 passed**.
+* `cargo test -p qbind-node --test run_422_startup_refusal_tests` → **4 passed** (startup refusal preserved).
+* `cargo check -p qbind-node` (default production features) → **exit 0**.
+* `cargo clippy -p qbind-consensus --lib` and `-p qbind-node --lib` → no new warnings in the C3F-edited
+  regions (pre-existing repo warnings unchanged; e.g. `is_safe_to_vote_at_height` match-like-matches is
+  pre-existing and untouched).
+* `rustfmt --check` on the changed consensus files: the C3F-authored lines are conformant; the repo is
+  broadly non-`rustfmt`-clean pre-existing (dozens of unrelated files flagged), so no repo-wide
+  reformat was performed (unrelated formatting left untouched).
+* Release build: `cargo build -p qbind-node --release` — recorded at the closing checkpoint.
+
+### Security tooling (reported literally)
+
+`parallel_validation` (CodeQL + code review) outcomes are recorded exactly as returned; production-source
+changes are NOT a trivial-change skip. A skipped/size-limited CodeQL analysis is **incomplete** ("0 alerts"
+from a skip ≠ clean); an unavailable reviewer is **not** a successful review. `secret_scanning` was run on
+the changed files.
+
+### Retained posture (unchanged)
+
+`D7_STATUS=PARTIAL-CODE-TEST / PRODUCTION-LIFECYCLE-UNAVAILABLE`;
+`DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED`;
+`GENESIS_AUTHORITY_ACTIVATION=DISABLED`;
+`PRODUCTION_WIRE_CHAIN_ID_BEHAVIOR=UNCHANGED`;
+`CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED`;
+`SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO`. Retaining an inbound embedded QC does not close the full
+engine/QC pipeline: absent-QC/bootstrap authorization, outbound QC reconstruction/propagation,
+Timeout/NewView certificate migration, persistent evidence storage/recovery, production authority
+lifecycle/activation, durable anti-rollback and Run 423 remain separate, open obligations.

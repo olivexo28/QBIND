@@ -586,6 +586,65 @@ no-QC bootstrap authorization, persisted certificate evidence, locally formed QC
 emission, full engine/QC adoption + retention, and other engine entrypoints
 remain explicitly **unclosed**.
 
+## 9C. In-process handoff + retention of verified embedded-QC evidence (Run 422 D7-C3F)
+
+Run 422 D7-C3F consumes the non-authorizing `VerifiedQuorumCertificate` that the
+§9B gate already produces for a **present** embedded QC and hands it, under the
+**same** admitted `snapshot`, into an explicit engine ingestion entrypoint that
+**retains** the complete verified evidence with the proposed block's
+justification. This closes only the in-process retention half; it does not create
+authorization, activation, durable freshness, or permission to reuse a certificate
+under another authority.
+
+**Handoff contract (engine entrypoint).** For the Required, present-QC binary
+path the handler calls `BasicHotStuffEngine::on_verified_proposal_event(from,
+proposal, evidence)` with the evidence returned by its **own** §9B verification.
+Before the engine changes view, registers a block, records a vote, or emits an
+action the entrypoint checks, with bounded typed errors and no rewriting of either
+side:
+
+1. a present embedded QC (`MissingEmbeddedQc` otherwise);
+2. `evidence.certificate() == proposal.qc` — exact equality over **all** wire
+   fields, the signer bitmap and every signature byte (`EvidenceCertificateMismatch`);
+3. proposal↔evidence wire-chain correspondence (`WireChainMismatch`) and epoch
+   correspondence (`EpochMismatch`) against the already-established §9A/§9B contract;
+4. the retained-evidence byte budget for the exact derived block id
+   (`RetentionBudgetExceeded`).
+
+There is **no** second constituent-signature verification: only `==` and scalar
+checks run, so backend crypto counts show engine retention adds no QC-verification
+pass. The handler supplies the evidence from its own admitted snapshot; a
+separately supplied authority, Timeout context, or independently cached certificate
+must not substitute. On any typed error the handler rejects **fail-closed** and
+never falls back to the legacy `on_proposal_event`. Absent-QC and the test-only
+`LocalFixtureUnsigned` passthrough keep the legacy entrypoint (no retained
+evidence). Logical signer identities, if needed at this boundary, are read from
+`VerifiedQuorumCertificate::signers()`, never re-decoded.
+
+**Retention contract (evidence ownership/lifecycle/bounds).** Evidence is stored
+as a separate, **non-serialized** `Arc<VerifiedQuorumCertificate>` on the owning
+`BlockNode` (`verified_justification`); the shared serde-derived logical
+`QuorumCertificate` and Timeout/NewView serialization are unchanged. The full
+certificate and its verification metadata (domain, authorized epoch, signer
+identities, voting-power result and threshold) are retained — never reduced to a
+boolean or a signer count — and are inspectable read-only via
+`HotStuffStateEngine::verified_justification(&id)` after the handler returns. The
+evidence is stored only as the block's justification (certifying its parent); it is
+never placed in `own_qc`, so it never becomes a certificate for the child block
+itself.
+
+Lifecycle is explicit and routed through single insert/remove choke points:
+block replacement drops any stale evidence and reclaims its bytes; a
+legacy/unverified registration never inherits an earlier verified designation; a
+removed/evicted block releases its evidence; and restart/restore builds nodes with
+no evidence, never manufacturing it from logical QC fields. Retained bytes are
+bounded by an explicit engine-level budget (`DEFAULT_MAX_RETAINED_EVIDENCE_BYTES`,
+configurable) with checked accounting (`retained_evidence_bytes`,
+`rejected_evidence_over_budget`); a retention whose capacity cannot be safely
+obtained is rejected **before** engine mutation rather than silently dropped. This
+budget is distinct from block-count limits, which are not treated as an adequate
+byte bound.
+
 ## 10. Non-goals (D7 and beyond)
 
 This task establishes a scoped cryptographic boundary only. It does **not**

@@ -439,8 +439,7 @@ where
         let id = node.id.clone();
         if let Some(old) = self.blocks.get(&id) {
             let old_bytes = Self::evidence_bytes_of_node(old);
-            self.retained_evidence_bytes =
-                self.retained_evidence_bytes.saturating_sub(old_bytes);
+            self.retained_evidence_bytes = self.retained_evidence_bytes.saturating_sub(old_bytes);
         }
         let new_bytes = Self::evidence_bytes_of_node(&node);
         self.retained_evidence_bytes = self.retained_evidence_bytes.saturating_add(new_bytes);

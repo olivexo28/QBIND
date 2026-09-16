@@ -963,3 +963,26 @@ additive; all historical findings above are preserved. The remaining scope
 called out in §4 and §10-of-the-protocol-doc (absent-QC/bootstrap
 authorization, full engine/QC adoption and retention, production lifecycle, and
 durable anti-rollback) stays open.
+
+## 11. Successor note (Run 422 D7-C3F)
+
+Building on §10, Run 422 D7-C3F closes the **in-process retention** half of the
+QC information flow traced in §3.2–§3.4: instead of discarding the verified
+evidence after the §9B gate, the Required present-QC handoff now passes the
+`VerifiedQuorumCertificate` into an explicit engine entrypoint
+(`BasicHotStuffEngine::on_verified_proposal_event`) that retains the complete
+evidence with the registered block's justification, under exact evidence↔QC
+correspondence, wire-chain/epoch correspondence and a checked retained-evidence
+byte budget — all enforced **before** engine mutation, fail-closed, with no legacy
+fallback and no second constituent-signature verification. Retention uses a
+separate non-serialized `Arc<VerifiedQuorumCertificate>` on `BlockNode`, so the
+shared logical-QC serialization users in §3.5 are unchanged. Evidence is the
+block's justification (certifying the parent), never `own_qc`, and its lifecycle
+(replacement, unverified re-registration, eviction, restart) is routed through
+single accounting choke points. See §9C of
+`docs/protocol/QBIND_PROPOSAL_VOTE_SIGNING_DOMAIN_V2.md` and the Run 422 D7-C3F
+section of `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md`. This note is additive;
+all historical findings above are preserved. Absent-QC/bootstrap authorization,
+outbound QC reconstruction/propagation, Timeout/NewView migration, persistent
+evidence storage/recovery, production authority lifecycle/activation, durable
+anti-rollback, and Run 423 remain open.
