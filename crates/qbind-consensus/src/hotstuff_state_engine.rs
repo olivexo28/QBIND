@@ -74,6 +74,23 @@ pub enum EvidenceRetentionError {
         /// The configured hard ceiling.
         max_bytes: u64,
     },
+    /// Block-slot pressure could not be relieved without evicting the candidate
+    /// block itself: the block tree is at its `max_pending_blocks` limit and no
+    /// *other* block is safe to evict (all remaining blocks are protected —
+    /// committed, locked, or part of a QC chain). The candidate is **not**
+    /// registered and **not** evicted; the block tree and byte accounting are
+    /// left unchanged (no partial effect). Distinct from [`Self::BudgetExceeded`]
+    /// (byte pressure) so callers can attribute the rejection precisely.
+    SlotCapacityUnavailable {
+        /// Number of blocks currently in the tree.
+        block_count: usize,
+        /// The configured maximum number of pending blocks.
+        max_pending_blocks: usize,
+    },
+    /// The retained-byte charge for the evidence (or the projected total) is not
+    /// representable / would break the accounting invariant. Rejected
+    /// explicitly rather than saturated into an admissible total. No mutation.
+    UnrepresentableCharge,
 }
 
 impl std::fmt::Display for EvidenceRetentionError {
@@ -87,6 +104,19 @@ impl std::fmt::Display for EvidenceRetentionError {
                 f,
                 "retained-evidence budget exceeded: needed={needed_bytes} \
                  retained={retained_bytes} max={max_bytes}"
+            ),
+            EvidenceRetentionError::SlotCapacityUnavailable {
+                block_count,
+                max_pending_blocks,
+            } => write!(
+                f,
+                "block-slot capacity unavailable: block_count={block_count} \
+                 max_pending_blocks={max_pending_blocks} (no non-candidate block \
+                 safe to evict)"
+            ),
+            EvidenceRetentionError::UnrepresentableCharge => write!(
+                f,
+                "retained-evidence charge or projected total is not representable"
             ),
         }
     }
@@ -398,37 +428,137 @@ where
         self.max_retained_evidence_bytes = max;
     }
 
-    /// Compute the byte footprint a node's retained evidence would occupy.
+    /// The byte footprint a node's retained evidence occupies: the **checked**
+    /// charge computed and stored when the evidence was attached
+    /// ([`BlockNode::verified_justification_charge`]). Reading the stored value
+    /// keeps insert/replace/remove accounting exact and infallible — it never
+    /// re-derives (or re-fails) the charge.
     fn evidence_bytes_of_node(node: &BlockNode<BlockIdT>) -> u64 {
-        node.verified_justification
-            .as_ref()
-            .map(|e| e.retained_byte_size())
-            .unwrap_or(0)
+        node.verified_justification_charge
     }
 
     /// Would retaining `needed` bytes of evidence for block `id` fit within the
-    /// budget, accounting for reclaiming any evidence already retained for the
-    /// SAME `id` (a replacement)?
+    /// byte budget, accounting for reclaiming any evidence already retained for
+    /// the SAME `id` (a replacement)?
     ///
-    /// Pure check with no mutation — the entrypoint calls this *before* any
-    /// engine mutation so an over-budget request is rejected with no partial
-    /// effect.
+    /// Pure check with no mutation. Uses **checked** arithmetic: if the
+    /// projected total is not representable it is treated as **not** admissible
+    /// (rejected), so overflow can never be saturated into an admissible total.
     pub fn can_retain_evidence(&self, id: &BlockIdT, needed: u64) -> bool {
         let reclaimable = self
             .blocks
             .get(id)
             .map(Self::evidence_bytes_of_node)
             .unwrap_or(0);
-        let projected = self
+        // `reclaimable <= retained_evidence_bytes` by construction, so the
+        // subtraction cannot underflow; the addition is the only overflow risk
+        // and is checked explicitly.
+        let projected = match self
             .retained_evidence_bytes
             .saturating_sub(reclaimable)
-            .saturating_add(needed);
+            .checked_add(needed)
+        {
+            Some(p) => p,
+            None => return false,
+        };
         projected <= self.max_retained_evidence_bytes
     }
 
-    /// Record that a retention request was rejected for exceeding the budget.
-    fn note_rejected_evidence_over_budget(&mut self) {
+    /// Record that a retention request was rejected for exceeding the byte
+    /// budget. Public so the engine preflight path (which rejects *before*
+    /// calling the registration method) counts each budget rejection exactly
+    /// once, matching the direct state-registration path.
+    pub fn note_rejected_evidence_over_budget(&mut self) {
         self.rejected_evidence_over_budget = self.rejected_evidence_over_budget.saturating_add(1);
+    }
+
+    /// Count blocks (other than `exclude`) that are currently safe to evict.
+    fn count_safe_to_evict_excluding(&self, exclude: &BlockIdT) -> usize {
+        self.blocks
+            .keys()
+            .filter(|id| *id != exclude && self.is_block_safe_to_evict(id))
+            .count()
+    }
+
+    /// Would a NEW block `id` be admissible under the block-slot limit WITHOUT
+    /// evicting the candidate itself?
+    ///
+    /// Pure check with no mutation. A replacement (id already present) needs no
+    /// new slot and is always slot-admissible. A genuinely new block is
+    /// admissible iff, after using any free slots, enough *other* blocks are
+    /// safe to evict to cover the remaining deficit.
+    pub fn can_admit_block_slot(&self, id: &BlockIdT) -> bool {
+        if self.blocks.contains_key(id) {
+            return true; // replacement: no new slot required
+        }
+        let max = self.limits().max_pending_blocks;
+        let current = self.blocks.len();
+        if current < max {
+            return true; // a free slot already exists
+        }
+        // We must end with `current + 1 - evictions <= max`, i.e. evict at least
+        // `current + 1 - max` OTHER blocks.
+        let deficit = current + 1 - max; // current >= max here, so >= 1
+        self.count_safe_to_evict_excluding(id) >= deficit
+    }
+
+    /// Reserve block-slot capacity for one NEW block `id` by evicting exactly
+    /// enough *other* safe-to-evict blocks. Atomic: if capacity is not
+    /// admissible it evicts nothing and returns
+    /// [`EvidenceRetentionError::SlotCapacityUnavailable`]; the candidate is
+    /// never evicted.
+    fn reserve_block_slot_for_new(&mut self, id: &BlockIdT) -> Result<(), EvidenceRetentionError> {
+        let max = self.limits().max_pending_blocks;
+        let current = self.blocks.len();
+        if current < max {
+            return Ok(()); // free slot already available
+        }
+        let deficit = current + 1 - max;
+        // Admissibility is decided up front so a rejection performs no eviction.
+        if self.count_safe_to_evict_excluding(id) < deficit {
+            return Err(EvidenceRetentionError::SlotCapacityUnavailable {
+                block_count: current,
+                max_pending_blocks: max,
+            });
+        }
+        // Evict exactly `deficit` safe-to-evict OTHER blocks, following the
+        // existing eviction order among safe candidates.
+        let mut evicted = 0usize;
+        while evicted < deficit {
+            let Some(block_id) = self.pending_block_order.pop_front() else {
+                break;
+            };
+            if &block_id != id
+                && self.blocks.contains_key(&block_id)
+                && self.is_block_safe_to_evict(&block_id)
+            {
+                self.remove_block_and_reclaim(&block_id);
+                self.evicted_blocks += 1;
+                evicted += 1;
+            }
+        }
+        // The up-front admissibility check guarantees `deficit` safe blocks
+        // existed; but the eviction order (`pending_block_order`) may not have
+        // enumerated all of them (a pre-existing quirk where non-evicted blocks
+        // are dropped from the order). Fall back to a full scan for any
+        // shortfall so the reservation is honored without touching `id`.
+        if evicted < deficit {
+            let mut remaining: Vec<BlockIdT> = self
+                .blocks
+                .keys()
+                .filter(|k| *k != id && self.is_block_safe_to_evict(k))
+                .cloned()
+                .collect();
+            while evicted < deficit {
+                let Some(block_id) = remaining.pop() else {
+                    break;
+                };
+                self.remove_block_and_reclaim(&block_id);
+                self.evicted_blocks += 1;
+                evicted += 1;
+            }
+        }
+        Ok(())
     }
 
     /// Insert `node`, reconciling the retained-evidence byte accounting: any
@@ -639,18 +769,43 @@ where
     /// This is the state-engine half of the verified ingestion path. It mirrors
     /// [`Self::register_block`] but additionally attaches `evidence` as the
     /// block's non-serialized `verified_justification`, under checked
-    /// retention-budget accounting.
+    /// retention accounting.
     ///
-    /// # Budget
+    /// # Evidence association (storage boundary)
+    ///
+    /// The logical `justify_qc` is **derived from the evidence itself**, never
+    /// accepted from the caller: its `block_id` and `view` are the verified
+    /// certificate's own block id and height, and its signer identities are the
+    /// verified signer set. A public caller therefore cannot attach verified
+    /// evidence to an *absent* or *unrelated* logical justification — the two
+    /// are structurally the same projection. (This does **not** assert the
+    /// certificate's block id equals any proposal header's parent; it only ties
+    /// the stored logical QC to the evidence it came from. The evidence is kept
+    /// separate from `own_qc` and retains its original certificate/domain/epoch
+    /// metadata.)
+    ///
+    /// # Admission (byte and block-slot pressure), no candidate eviction
     ///
     /// The retention is rejected — with **no** block-tree or accounting change
-    /// — if it cannot be accommodated within the retained-evidence byte budget
-    /// (see [`Self::can_retain_evidence`]). Callers that must avoid *any* engine
-    /// mutation on rejection (e.g. view advancement in a higher-level
-    /// entrypoint) should pre-check [`Self::can_retain_evidence`] before mutating
-    /// engine state; this method re-checks defensively and returns
-    /// [`EvidenceRetentionError::BudgetExceeded`] rather than silently dropping
-    /// the evidence.
+    /// — if it cannot be admitted:
+    ///
+    /// * [`EvidenceRetentionError::UnrepresentableCharge`] if the evidence's
+    ///   checked retained-byte charge (or the projected total) is not
+    ///   representable;
+    /// * [`EvidenceRetentionError::BudgetExceeded`] if it does not fit the
+    ///   retained-evidence byte budget;
+    /// * [`EvidenceRetentionError::SlotCapacityUnavailable`] if the block-slot
+    ///   limit is reached and no *other* block is safe to evict.
+    ///
+    /// Crucially, this method **never evicts the candidate it just registered**:
+    /// block-slot room is made by evicting other, safe-to-evict blocks *before*
+    /// insertion (see [`Self::reserve_block_slot_for_new`]); if room cannot be
+    /// made without evicting the candidate it rejects up front. A successful
+    /// return therefore guarantees the block and its matching evidence are
+    /// present. Callers that must avoid *any* engine mutation on rejection
+    /// (e.g. view advancement in a higher-level entrypoint) should pre-check
+    /// [`Self::can_retain_evidence`] and [`Self::can_admit_block_slot`] before
+    /// mutating engine state.
     ///
     /// # Distinction preserved
     ///
@@ -662,10 +817,18 @@ where
         id: BlockIdT,
         view: u64,
         parent_id: Option<BlockIdT>,
-        justify_qc: Option<QuorumCertificate<BlockIdT>>,
         evidence: Arc<VerifiedQuorumCertificate>,
-    ) -> Result<(), EvidenceRetentionError> {
-        let needed = evidence.retained_byte_size();
+    ) -> Result<(), EvidenceRetentionError>
+    where
+        BlockIdT: From<[u8; 32]>,
+    {
+        // Checked charge; an unrepresentable charge is rejected explicitly (no
+        // saturation into an admissible total) with no mutation.
+        let needed = evidence
+            .retained_byte_size()
+            .map_err(|_| EvidenceRetentionError::UnrepresentableCharge)?;
+
+        // Byte-budget admission (checked, no mutation on rejection).
         if !self.can_retain_evidence(&id, needed) {
             self.note_rejected_evidence_over_budget();
             return Err(EvidenceRetentionError::BudgetExceeded {
@@ -675,6 +838,24 @@ where
             });
         }
 
+        let is_new = !self.blocks.contains_key(&id);
+
+        // Block-slot admission: for a genuinely new block, make room by evicting
+        // OTHER safe-to-evict blocks first — never the candidate. Atomic: on
+        // rejection nothing is evicted or inserted.
+        if is_new {
+            self.reserve_block_slot_for_new(&id)?;
+        }
+
+        // Derive the logical justification from the verified evidence so it can
+        // never be absent or mismatched. Signer identities come from the
+        // verified signer set.
+        let justify_qc = Some(QuorumCertificate::new(
+            BlockIdT::from(evidence.certificate().block_id),
+            evidence.certificate().height,
+            evidence.signers().to_vec(),
+        ));
+
         // Compute height identically to `register_block`.
         let height = match parent_id.as_ref() {
             None => 0,
@@ -682,14 +863,16 @@ where
         };
 
         let node = BlockNode::new(id.clone(), view, parent_id, justify_qc, height)
-            .with_verified_justification(evidence);
+            .with_verified_justification(evidence, needed);
 
-        let is_new = !self.blocks.contains_key(&id);
+        // Room is already reserved for a new block, so `insert_block_node`
+        // followed by NO further eviction leaves `blocks.len() <=
+        // max_pending_blocks` with the candidate retained. (Legacy
+        // `register_block` keeps its insert-then-evict behavior unchanged.)
         self.insert_block_node(node);
         if is_new {
             self.pending_block_order.push_back(id);
         }
-        self.evict_blocks_if_needed();
         Ok(())
     }
 

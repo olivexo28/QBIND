@@ -19389,6 +19389,14 @@ mod tests {
                         se
                     }
 
+                    /// The **checked** retained-byte charge for `ev`. The charge
+                    /// is well within `u64` for every fixture certificate, so an
+                    /// unrepresentable result is a test-fixture bug.
+                    fn charge(ev: &VerifiedQuorumCertificate) -> u64 {
+                        ev.retained_byte_size()
+                            .expect("fixture evidence charge is representable")
+                    }
+
                     // ======================= A =======================
                     // Real-handler positive: a valid outer Proposal with a valid
                     // embedded QC reaches the new engine path; after the handler
@@ -19502,9 +19510,22 @@ mod tests {
                             ev.certificate().block_id, candidate,
                             "retained certificate is never a certificate for the child block itself"
                         );
-                        assert!(
-                            counts.votes() >= 3,
-                            "genuine constituent QC crypto ran during verification"
+                        // Exact backend accounting: the single delivery ran EXACTLY
+                        // one outer-proposal verification and EXACTLY three
+                        // constituent-vote verifications. This proves the engine
+                        // retention added NO second QC-verification pass (a `>= 3`
+                        // bound alone could not distinguish a duplicate QC verify).
+                        // Signing the self-vote is a sign, not a verify, so it does
+                        // not perturb these counts.
+                        assert_eq!(
+                            counts.proposals(),
+                            1,
+                            "exactly one outer-proposal verification"
+                        );
+                        assert_eq!(
+                            counts.votes(),
+                            3,
+                            "exactly the three constituent Vote verifications — no duplicate QC verify"
                         );
                     }
 
@@ -19809,12 +19830,10 @@ mod tests {
                         // and reclaims the retained bytes.
                         let mut se = state_engine(&pv, DEFAULT_MAX_RETAINED_EVIDENCE_BYTES);
                         let ev = verify_qc_epoch(&pv, 0, &qc);
-                        let bytes = ev.retained_byte_size();
+                        let bytes = charge(&ev);
                         let id = [1u8; 32];
-                        se.register_block_with_verified_justification(
-                            id, 1, None, None, Arc::new(ev),
-                        )
-                        .expect("verified registration accepted");
+                        se.register_block_with_verified_justification(id, 1, None, Arc::new(ev))
+                            .expect("verified registration accepted");
                         assert!(se.verified_justification(&id).is_some());
                         assert_eq!(se.retained_evidence_bytes(), bytes);
 
@@ -19839,9 +19858,9 @@ mod tests {
                             limits,
                         );
                         let ev2 = verify_qc_epoch(&pv, 0, &qc);
-                        let bytes2 = ev2.retained_byte_size();
+                        let bytes2 = charge(&ev2);
                         se2.register_block_with_verified_justification(
-                            [1u8; 32], 1, None, None, Arc::new(ev2),
+                            [1u8; 32], 1, None, Arc::new(ev2),
                         )
                         .expect("accepted");
                         assert_eq!(se2.retained_evidence_bytes(), bytes2);
@@ -19873,14 +19892,13 @@ mod tests {
                         let (reg, _c) = counting_registry();
                         let pv = c3e_pv(&f, c3e_domain(), reg, None);
                         let qc = valid_quorum(&f);
-                        let size = verify_qc_epoch(&pv, 0, &qc).retained_byte_size();
+                        let size = charge(&verify_qc_epoch(&pv, 0, &qc));
 
                         // Exact capacity accepts; retained == max.
                         let mut se = state_engine(&pv, size);
                         se.register_block_with_verified_justification(
                             [1u8; 32],
                             1,
-                            None,
                             None,
                             Arc::new(verify_qc_epoch(&pv, 0, &qc)),
                         )
@@ -19894,7 +19912,6 @@ mod tests {
                             .register_block_with_verified_justification(
                                 [2u8; 32],
                                 1,
-                                None,
                                 None,
                                 Arc::new(verify_qc_epoch(&pv, 0, &qc)),
                             )
@@ -19925,13 +19942,12 @@ mod tests {
                         let qc_small = build_signed_qc(&f, &c3e_domain(), C3E_WIRE, 0, &[0, 1, 2]);
                         let qc_large =
                             build_signed_qc(&f, &c3e_domain(), C3E_WIRE, 0, &[0, 1, 2, 3]);
-                        let small = verify_qc_epoch(&pv, 0, &qc_small).retained_byte_size();
-                        let large = verify_qc_epoch(&pv, 0, &qc_large).retained_byte_size();
+                        let small = charge(&verify_qc_epoch(&pv, 0, &qc_small));
+                        let large = charge(&verify_qc_epoch(&pv, 0, &qc_large));
                         assert!(large > small, "four-signer cert is larger than three-signer");
                         se3.register_block_with_verified_justification(
                             [3u8; 32],
                             1,
-                            None,
                             None,
                             Arc::new(verify_qc_epoch(&pv, 0, &qc_small)),
                         )
@@ -19940,7 +19956,6 @@ mod tests {
                         se3.register_block_with_verified_justification(
                             [3u8; 32],
                             1,
-                            None,
                             None,
                             Arc::new(verify_qc_epoch(&pv, 0, &qc_large)),
                         )
@@ -19973,7 +19988,7 @@ mod tests {
                         );
                         let qc2 = valid_quorum(&f);
                         let need =
-                            verify_qc_epoch(&pv, snap.authorized_epoch(), &qc2).retained_byte_size();
+                            charge(&verify_qc_epoch(&pv, snap.authorized_epoch(), &qc2));
                         engine
                             .state_mut()
                             .set_max_retained_evidence_bytes(need - 1);
@@ -20120,6 +20135,287 @@ mod tests {
                         assert!(
                             matches!(err, VerifiedProposalIngestError::EpochMismatch { .. }),
                             "typed EpochMismatch, got {err:?}"
+                        );
+                    }
+
+                    // ======================= I =======================
+                    // Defect A regression: under BLOCK-SLOT pressure with a
+                    // PROTECTED (committed) anchor and ample byte budget, the
+                    // real handler REJECTS the candidate fail-closed — the
+                    // candidate is never immediately evicted and reported as
+                    // retained, no view advances, no vote is emitted and no
+                    // facade effect occurs. An otherwise-identical
+                    // capacity-available control retains the candidate and its
+                    // exact evidence.
+                    #[test]
+                    fn c3f_i_block_slot_pressure_rejects_without_candidate_retention() {
+                        // A protected-anchor engine with a bounded slot budget.
+                        // The committed anchor (height 4 ≤ committed height 4) is
+                        // never safe to evict.
+                        fn engine_with_slots(
+                            pv: &ProposalVoteAuthority,
+                            max_pending_blocks: usize,
+                        ) -> BasicHotStuffEngine<[u8; 32]> {
+                            let limits = ConsensusLimitsConfig {
+                                max_pending_blocks,
+                                ..ConsensusLimitsConfig::default()
+                            };
+                            let mut e = BasicHotStuffEngine::<[u8; 32]>::with_state_limits(
+                                ValidatorId(0),
+                                pv.validators.as_ref().clone(),
+                                limits,
+                            );
+                            e.initialize_from_snapshot_baseline(
+                                C3E_I_ANCHOR,
+                                C3E_I_BASELINE_HEIGHT,
+                            );
+                            e
+                        }
+
+                        let f = make_fixture(4);
+                        let (reg, _c) = counting_registry();
+                        // A local signer is available so a self-vote WOULD be
+                        // signed/forwarded on acceptance — proving the rejection
+                        // suppresses exactly that.
+                        let pv = c3e_pv(&f, c3e_domain(), reg, Some(ValidatorId(0)));
+                        let snap = coherent_snapshot_for(&pv);
+                        let proposer: u16 = 2;
+                        let candidate = c3e_candidate_block_id(
+                            proposer,
+                            C3E_I_TARGET_VIEW,
+                            &base_header(proposer).parent_block_id,
+                        );
+                        let qc = valid_quorum(&f);
+
+                        // ---- Exhausted: only the protected anchor fits. ----
+                        let mut engine = engine_with_slots(&pv, 1);
+                        assert_eq!(
+                            engine.state().block_count(),
+                            1,
+                            "only the protected committed anchor is present"
+                        );
+                        let view_before = engine.current_view();
+                        let p = proposal_with_qc(
+                            proposer,
+                            C3E_I_TARGET_VIEW,
+                            &f,
+                            &c3e_domain(),
+                            Some(qc.clone()),
+                        );
+                        let mut stats = BinaryConsensusLoopInboundStats::default();
+                        let mut restore = RestoreCatchupModeState::from_config(None);
+                        let facade = D7ActionRecorder::default();
+                        deliver(
+                            &mut engine, &mut stats, &mut restore, &pv, &snap, &p,
+                            Some(&facade), &origin_for(proposer),
+                        );
+                        assert_eq!(
+                            stats.inbound_proposal_verified_qc_handoff_rejected_total, 1,
+                            "block-slot exhaustion counted as an engine-level rejection exactly once"
+                        );
+                        assert_eq!(stats.inbound_proposal_verified_qc_handoff_total, 0);
+                        assert_eq!(
+                            stats.inbound_proposals_engine_accepted, 0,
+                            "candidate not accepted under slot exhaustion"
+                        );
+                        assert_eq!(
+                            engine.current_view(),
+                            view_before,
+                            "no view advancement on slot rejection"
+                        );
+                        assert_eq!(
+                            engine.state().block_count(),
+                            1,
+                            "candidate not registered; only the anchor remains"
+                        );
+                        assert!(
+                            engine.state().get_block(&candidate).is_none(),
+                            "candidate never stored (not immediately evicted after a false success)"
+                        );
+                        assert!(
+                            engine.state().verified_justification(&candidate).is_none(),
+                            "no evidence retained on slot rejection"
+                        );
+                        assert!(
+                            engine.state().get_block(&C3E_I_ANCHOR).is_some(),
+                            "protected anchor is never evicted to make room"
+                        );
+                        assert_eq!(
+                            facade.total(),
+                            0,
+                            "no facade actions (no self-vote forwarded) on slot rejection"
+                        );
+
+                        // ---- Capacity-available control: one extra slot admits
+                        // the candidate and retains its exact evidence. ----
+                        let embedded = qc.clone();
+                        let mut engine2 = engine_with_slots(&pv, 2);
+                        let p2 = proposal_with_qc(
+                            proposer,
+                            C3E_I_TARGET_VIEW,
+                            &f,
+                            &c3e_domain(),
+                            Some(qc.clone()),
+                        );
+                        let mut stats2 = BinaryConsensusLoopInboundStats::default();
+                        let mut restore2 = RestoreCatchupModeState::from_config(None);
+                        let facade2 = D7ActionRecorder::default();
+                        deliver(
+                            &mut engine2, &mut stats2, &mut restore2, &pv, &snap, &p2,
+                            Some(&facade2), &origin_for(proposer),
+                        );
+                        assert_eq!(
+                            stats2.inbound_proposal_verified_qc_handoff_total, 1,
+                            "capacity-available control takes the verified handoff"
+                        );
+                        assert_eq!(
+                            stats2.inbound_proposal_verified_qc_handoff_rejected_total, 0,
+                            "no rejection when a slot is available"
+                        );
+                        assert_eq!(
+                            stats2.inbound_proposals_engine_accepted, 1,
+                            "candidate accepted with capacity"
+                        );
+                        let ev = engine2
+                            .state()
+                            .verified_justification(&candidate)
+                            .expect("evidence retained with capacity");
+                        assert_eq!(
+                            ev.certificate(),
+                            &embedded,
+                            "exact evidence retained by the capacity-available control"
+                        );
+                        assert!(
+                            engine2.state().get_block(&C3E_I_ANCHOR).is_some(),
+                            "protected anchor still present alongside the retained candidate"
+                        );
+                    }
+
+                    // ======================= J =======================
+                    // Defect B regression: the retained-byte charge accounts for
+                    // OWNED heap allocations (not just the struct value), and the
+                    // projected-total is CHECKED — an overflow is rejected rather
+                    // than saturated into an admissible total. Exact-limit and
+                    // one-over boundaries are covered by pure arithmetic.
+                    #[test]
+                    fn c3f_j_checked_accounting_rejects_overflow_and_charges_owned_allocations() {
+                        let f = make_fixture(4);
+                        let (reg, _c) = counting_registry();
+                        let pv = c3e_pv(&f, c3e_domain(), reg, None);
+                        let qc = valid_quorum(&f);
+                        let bytes = charge(&verify_qc_epoch(&pv, 0, &qc));
+
+                        // (i) Owned heap allocations ARE charged: the charge
+                        // strictly exceeds the flat struct value size, i.e. it
+                        // includes the signature/bitmap/signer heap capacities and
+                        // the outer signatures descriptor storage — allocations
+                        // `size_of` alone omits.
+                        assert!(
+                            (bytes as usize)
+                                > core::mem::size_of::<VerifiedQuorumCertificate>(),
+                            "charge accounts owned heap allocations beyond the struct value \
+                             (charge={bytes}, struct={})",
+                            core::mem::size_of::<VerifiedQuorumCertificate>()
+                        );
+
+                        // (ii) Projected-total overflow is REJECTED (checked), not
+                        // saturated. With the MAXIMUM budget, a nonzero retained
+                        // charge plus an extreme requested charge is unrepresentable
+                        // and therefore inadmissible. A saturating implementation
+                        // would wrongly admit it (u64::MAX ≤ u64::MAX).
+                        let mut se = state_engine(&pv, u64::MAX);
+                        se.register_block_with_verified_justification(
+                            [1u8; 32],
+                            1,
+                            None,
+                            Arc::new(verify_qc_epoch(&pv, 0, &qc)),
+                        )
+                        .expect("first retention accepted under the maximum budget");
+                        assert!(
+                            se.retained_evidence_bytes() > 0,
+                            "a nonzero retained charge is established"
+                        );
+                        assert!(
+                            !se.can_retain_evidence(&[2u8; 32], u64::MAX),
+                            "projected-total overflow is rejected (checked, never saturated)"
+                        );
+
+                        // (iii) Exact-limit boundary via pure arithmetic: exactly
+                        // `bytes` fits a `bytes` budget; one more requested byte
+                        // does not. Validated WITHOUT relying on
+                        // `retained_byte_size` on both sides of the assertion.
+                        let se2 = state_engine(&pv, bytes);
+                        assert!(
+                            se2.can_retain_evidence(&[9u8; 32], bytes),
+                            "exact charge fits the exact budget"
+                        );
+                        assert!(
+                            !se2.can_retain_evidence(&[9u8; 32], bytes + 1),
+                            "one byte over the budget is rejected"
+                        );
+                    }
+
+                    // ======================= K =======================
+                    // Defect C regression: the public state-registration API
+                    // DERIVES the logical justification from the verified
+                    // evidence, so a caller can no longer attach verified evidence
+                    // to an absent or unrelated justification. The evidence is
+                    // kept SEPARATE from own_qc and retains the parent's
+                    // certificate identity.
+                    #[test]
+                    fn c3f_k_logical_justification_is_derived_from_verified_evidence() {
+                        let f = make_fixture(4);
+                        let (reg, _c) = counting_registry();
+                        let pv = c3e_pv(&f, c3e_domain(), reg, None);
+                        // `valid_quorum` certifies block_id [9;32], height 1,
+                        // signers {0,1,2}.
+                        let qc = valid_quorum(&f);
+                        let ev = verify_qc_epoch(&pv, 0, &qc);
+
+                        let mut se = state_engine(&pv, DEFAULT_MAX_RETAINED_EVIDENCE_BYTES);
+                        let child = [7u8; 32];
+                        se.register_block_with_verified_justification(
+                            child,
+                            6,
+                            None,
+                            Arc::new(ev),
+                        )
+                        .expect("verified registration accepted");
+
+                        // The stored logical justification is not caller-supplied;
+                        // it is present and structurally derived from the evidence.
+                        let node = se.get_block(&child).expect("child registered");
+                        let jqc = node
+                            .justify_qc
+                            .as_ref()
+                            .expect("logical justification is present, never absent");
+                        assert_eq!(
+                            jqc.block_id, [9u8; 32],
+                            "justification block id is the certificate's (parent) block id"
+                        );
+                        assert_eq!(
+                            jqc.view, 1,
+                            "justification view is the certificate height"
+                        );
+                        assert_eq!(
+                            jqc.signers,
+                            vec![ValidatorId(0), ValidatorId(1), ValidatorId(2)],
+                            "justification signers are the verified signer set"
+                        );
+                        assert_ne!(
+                            jqc.block_id, child,
+                            "the justification certifies the parent, never the child itself"
+                        );
+
+                        // The evidence is retained SEPARATELY from own_qc — it is
+                        // never promoted into a certificate for the child block.
+                        assert!(
+                            node.own_qc.is_none(),
+                            "verified evidence is never promoted into own_qc"
+                        );
+                        assert!(
+                            se.verified_justification(&child).is_some(),
+                            "evidence retained as justification evidence"
                         );
                     }
                 }

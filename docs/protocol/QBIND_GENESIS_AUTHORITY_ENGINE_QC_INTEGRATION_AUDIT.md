@@ -986,3 +986,26 @@ all historical findings above are preserved. Absent-QC/bootstrap authorization,
 outbound QC reconstruction/propagation, Timeout/NewView migration, persistent
 evidence storage/recovery, production authority lifecycle/activation, durable
 anti-rollback, and Run 423 remain open.
+
+## 12. Successor note (Run 422 D7-C3F correction)
+
+A bounded correction of §11 (not a new phase) fixed three defects in the C3F
+retention path without changing the §11 information flow: (A) under **block-slot**
+pressure the prior path could evict the just-registered candidate yet report success
+and emit a vote — retention is now decided **before** mutation against both the byte
+budget and block-slot capacity, the candidate is never evicted (only other
+safe-to-evict blocks are), the discarded registration `Result` is removed, and
+failure propagates as a typed `RetentionCapacityUnavailable`/`RetentionBudgetExceeded`
+before view advancement, self-voting or outbound effects; (B) `retained_byte_size` is
+now **checked/fallible** and charges the certificate struct value, signer-bitmap
+capacity, outer signatures descriptor storage and each constituent
+signature/signer capacity, rejecting unrepresentable totals instead of saturating
+them; (C) the block's logical justification is **derived from the verified evidence**
+(no caller-supplied or `None` justification), keeping evidence separate from `own_qc`
+with its original certificate/domain/epoch metadata and introducing no new
+parent/round/bootstrap rule. Each budget rejection is counted exactly once on both the
+engine-preflight and direct-registration paths; consensus and block state are
+unchanged on rejection. The 256 MiB default budget is retained. See §9C of
+`docs/protocol/QBIND_PROPOSAL_VOTE_SIGNING_DOMAIN_V2.md` and the Run 422 D7-C3F
+CORRECTION subsection of `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md`. This note
+is additive; all historical findings and the retained D7 posture flags are preserved.

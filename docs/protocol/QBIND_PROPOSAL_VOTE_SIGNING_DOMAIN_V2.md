@@ -608,8 +608,13 @@ side:
    fields, the signer bitmap and every signature byte (`EvidenceCertificateMismatch`);
 3. proposal↔evidence wire-chain correspondence (`WireChainMismatch`) and epoch
    correspondence (`EpochMismatch`) against the already-established §9A/§9B contract;
-4. the retained-evidence byte budget for the exact derived block id
-   (`RetentionBudgetExceeded`).
+4. that the retention can be **admitted before any engine mutation** for the
+   exact derived block id, against **both** the retained-evidence byte budget
+   (`RetentionBudgetExceeded`) **and** block-slot capacity
+   (`RetentionCapacityUnavailable`). Block-slot room is made only by evicting
+   **other** safe-to-evict blocks — the candidate is never evicted and then
+   reported as retained; a checked-unrepresentable charge rejects as
+   `RetentionChargeUnrepresentable`.
 
 There is **no** second constituent-signature verification: only `==` and scalar
 checks run, so backend crypto counts show engine retention adds no QC-verification
@@ -631,7 +636,13 @@ boolean or a signer count — and are inspectable read-only via
 `HotStuffStateEngine::verified_justification(&id)` after the handler returns. The
 evidence is stored only as the block's justification (certifying its parent); it is
 never placed in `own_qc`, so it never becomes a certificate for the child block
-itself.
+itself. The block's **logical** justification is not caller-supplied: it is
+**derived from the verified evidence** (block id, view and signer identities taken
+from the certificate and `VerifiedQuorumCertificate::signers()`), so a public caller
+cannot attach verified evidence to an absent or mismatching justification. The
+evidence keeps its original certificate/domain/epoch metadata; storing it does not
+assert that the certificate's block id equals the proposal header's parent, and no
+new parent/round/bootstrap rule is introduced here.
 
 Lifecycle is explicit and routed through single insert/remove choke points:
 block replacement drops any stale evidence and reclaims its bytes; a
@@ -641,9 +652,16 @@ no evidence, never manufacturing it from logical QC fields. Retained bytes are
 bounded by an explicit engine-level budget (`DEFAULT_MAX_RETAINED_EVIDENCE_BYTES`,
 configurable) with checked accounting (`retained_evidence_bytes`,
 `rejected_evidence_over_budget`); a retention whose capacity cannot be safely
-obtained is rejected **before** engine mutation rather than silently dropped. This
-budget is distinct from block-count limits, which are not treated as an adequate
-byte bound.
+obtained is rejected **before** engine mutation rather than silently dropped. The
+per-certificate charge (`retained_byte_size`) is **checked/fallible**: it counts the
+`VerifiedQuorumCertificate` struct value, the signer-bitmap capacity, the outer
+signatures descriptor storage and each constituent signature/signer capacity using
+only checked conversion/add/mul, rejecting any unrepresentable total rather than
+saturating it into an admissible value (allocator/process-wide overhead and
+externally retained `Arc` handles are outside the model). This byte budget is
+distinct from block-count limits; **block-slot** pressure is handled separately so a
+protected anchor at the block-count limit rejects a new retention rather than
+evicting the just-registered candidate.
 
 ## 10. Non-goals (D7 and beyond)
 

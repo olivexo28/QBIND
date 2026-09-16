@@ -72,6 +72,18 @@ pub struct BlockNode<BlockIdT> {
     /// [`HotStuffStateEngine::register_block_with_verified_justification`]:
     ///     crate::hotstuff_state_engine::HotStuffStateEngine::register_block_with_verified_justification
     pub verified_justification: Option<Arc<VerifiedQuorumCertificate>>,
+
+    /// Run 422 D7-C3F: the **checked** retained-byte charge computed for
+    /// `verified_justification` at the instant it was attached
+    /// ([`VerifiedQuorumCertificate::retained_byte_size`]), or `0` when no
+    /// verified evidence is retained.
+    ///
+    /// The charge is stored once at registration so the engine's byte
+    /// accounting (insert/replace/remove) is exact and infallible and never
+    /// re-derives (or re-fails) the charge on a hot path. A node's contribution
+    /// to the engine's `retained_evidence_bytes` total is always exactly this
+    /// value.
+    pub verified_justification_charge: u64,
 }
 
 impl<BlockIdT: Clone> BlockNode<BlockIdT> {
@@ -94,15 +106,26 @@ impl<BlockIdT: Clone> BlockNode<BlockIdT> {
             own_qc: None,
             height,
             verified_justification: None,
+            verified_justification_charge: 0,
         }
     }
 
     /// Run 422 D7-C3F: attach non-serialized verification evidence for this
-    /// block's `justify_qc`. Consumes and returns `self` so callers can build a
-    /// node and its evidence handle in one expression. The evidence is an
-    /// immutable shared handle; see [`BlockNode::verified_justification`].
-    pub fn with_verified_justification(mut self, evidence: Arc<VerifiedQuorumCertificate>) -> Self {
+    /// block's `justify_qc`, together with its pre-computed **checked**
+    /// retained-byte `charge`. Consumes and returns `self` so callers can build
+    /// a node and its evidence handle in one expression. The evidence is an
+    /// immutable shared handle; see [`BlockNode::verified_justification`]. The
+    /// `charge` must be the value returned by
+    /// [`VerifiedQuorumCertificate::retained_byte_size`] for `evidence`; the
+    /// engine computes it once (rejecting an unrepresentable charge) before
+    /// calling this, so accounting never re-derives it.
+    pub fn with_verified_justification(
+        mut self,
+        evidence: Arc<VerifiedQuorumCertificate>,
+        charge: u64,
+    ) -> Self {
         self.verified_justification = Some(evidence);
+        self.verified_justification_charge = charge;
         self
     }
 }
