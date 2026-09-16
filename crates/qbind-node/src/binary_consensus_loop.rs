@@ -17674,9 +17674,11 @@ mod tests {
             // =============================================================
             mod run422_d7c3e {
                 use super::*;
+                use qbind_consensus::block_state::BlockNode;
                 use qbind_consensus::crypto_verifier::{
                     ConsensusSigBackendRegistry, SimpleBackendRegistry,
                 };
+                use qbind_consensus::qc::QuorumCertificate;
                 use qbind_crypto::consensus_sig::{ConsensusSigError, ConsensusSigVerifier};
                 use qbind_crypto::ml_dsa44::MlDsa44Backend;
                 use qbind_wire::consensus::QuorumCertificate as WireQc;
