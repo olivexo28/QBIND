@@ -19327,6 +19327,802 @@ mod tests {
                     assert_eq!(detector.cached_headers(), 0);
                     assert_eq!(facade.total(), 0);
                 }
+
+                // =========================================================
+                // Run 422 D7-C3F — RETAIN verified embedded-QC evidence at
+                // engine block registration.
+                //
+                // These tests exercise the new evidence-bearing engine
+                // ingestion path end-to-end via the REAL inbound handler
+                // (`deliver`) for the positive/negative handler flows, and via
+                // the explicit engine/state entrypoints
+                // (`on_verified_proposal_event`,
+                // `register_block_with_verified_justification`) for the
+                // engine-level correspondence, ownership, resource-bound and
+                // lifecycle properties. They reuse the accepted C3E fixtures and
+                // real D6/PQC verification; no second verifier, block-id
+                // algorithm or signing domain is introduced.
+                // =========================================================
+                mod c3f {
+                    use super::*;
+                    use qbind_consensus::qc_verify_domain::{
+                        verify_quorum_certificate_with_domain, VerifiedQuorumCertificate,
+                    };
+                    use qbind_consensus::{
+                        ConsensusLimitsConfig, EvidenceRetentionError, HotStuffStateEngine,
+                        VerifiedProposalIngestError, DEFAULT_MAX_RETAINED_EVIDENCE_BYTES,
+                    };
+
+                    /// Verify `qc` under `pv`'s admitted membership/keys/backend
+                    /// and `domain`, at `epoch`, producing the exact
+                    /// `VerifiedQuorumCertificate` the C3E gate would produce.
+                    /// This is the ONLY way to obtain a `VerifiedQuorumCertificate`
+                    /// (it has no public constructor), so tests can never
+                    /// fabricate evidence.
+                    fn verify_qc_epoch(
+                        pv: &ProposalVoteAuthority,
+                        epoch: u64,
+                        qc: &WireQc,
+                    ) -> VerifiedQuorumCertificate {
+                        verify_quorum_certificate_with_domain(
+                            qc,
+                            &pv.signing_domain,
+                            epoch,
+                            pv.validators.as_ref(),
+                            pv.key_provider.as_ref(),
+                            pv.backend_registry.as_ref(),
+                        )
+                        .expect("fixture QC verifies under the admitted snapshot")
+                    }
+
+                    /// A standalone state engine over the fixture membership with
+                    /// the given retention budget (default limits otherwise).
+                    fn state_engine(
+                        pv: &ProposalVoteAuthority,
+                        max_bytes: u64,
+                    ) -> HotStuffStateEngine<[u8; 32]> {
+                        let mut se = HotStuffStateEngine::<[u8; 32]>::with_limits(
+                            pv.validators.as_ref().clone(),
+                            ConsensusLimitsConfig::default(),
+                        );
+                        se.set_max_retained_evidence_bytes(max_bytes);
+                        se
+                    }
+
+                    // ======================= A =======================
+                    // Real-handler positive: a valid outer Proposal with a valid
+                    // embedded QC reaches the new engine path; after the handler
+                    // returns the expected block retains the EXACT certificate,
+                    // signatures, bitmap, domain, epoch, signer identities and
+                    // verification metadata.
+                    #[test]
+                    fn c3f_a_real_handler_retains_exact_verified_evidence() {
+                        let C3eStateFixture {
+                            f,
+                            pv,
+                            snap,
+                            mut engine,
+                            counts,
+                        } = c3e_state_fixture();
+
+                        let proposer: u16 = 2;
+                        assert_eq!(
+                            engine.leader_for_view(C3E_I_TARGET_VIEW),
+                            ValidatorId(proposer as u64),
+                            "proposer is the leader of the target view"
+                        );
+                        let candidate = c3e_candidate_block_id(
+                            proposer,
+                            C3E_I_TARGET_VIEW,
+                            &base_header(proposer).parent_block_id,
+                        );
+
+                        // Capture the EXACT wire QC embedded in the proposal (ML-DSA
+                        // signatures may be randomized, so we compare against this
+                        // exact clone rather than rebuilding).
+                        let qc = valid_quorum(&f);
+                        let embedded = qc.clone();
+                        let p = proposal_with_qc(
+                            proposer,
+                            C3E_I_TARGET_VIEW,
+                            &f,
+                            &c3e_domain(),
+                            Some(qc),
+                        );
+                        let block_count_before = engine.state().block_count();
+
+                        let mut stats = BinaryConsensusLoopInboundStats::default();
+                        let mut restore = RestoreCatchupModeState::from_config(None);
+                        let facade = D7ActionRecorder::default();
+                        deliver(
+                            &mut engine, &mut stats, &mut restore, &pv, &snap, &p,
+                            Some(&facade), &origin_for(proposer),
+                        );
+
+                        // The verified-QC engine handoff was taken exactly once,
+                        // with no engine-level rejection.
+                        assert_eq!(
+                            stats.inbound_proposal_verified_qc_handoff_total, 1,
+                            "verified-QC engine handoff taken exactly once"
+                        );
+                        assert_eq!(
+                            stats.inbound_proposal_verified_qc_handoff_rejected_total, 0,
+                            "no engine-level handoff rejection"
+                        );
+                        assert_eq!(stats.inbound_proposals_engine_accepted, 1);
+                        assert_eq!(
+                            engine.state().block_count(),
+                            block_count_before + 1,
+                            "candidate block registered"
+                        );
+
+                        // The retained evidence is inspectable via the read-only
+                        // API after the handler returns, and preserves EVERY field.
+                        let ev = engine
+                            .state()
+                            .verified_justification(&candidate)
+                            .expect("verified justification retained for the child block");
+                        assert_eq!(
+                            ev.certificate(),
+                            &embedded,
+                            "exact certificate: all wire fields, bitmap and signature bytes"
+                        );
+                        assert_eq!(
+                            ev.certificate().signatures, embedded.signatures,
+                            "exact signature bytes"
+                        );
+                        assert_eq!(
+                            ev.certificate().signer_bitmap, embedded.signer_bitmap,
+                            "exact signer bitmap"
+                        );
+                        assert_eq!(
+                            ev.signers(),
+                            &[ValidatorId(0), ValidatorId(1), ValidatorId(2)],
+                            "signer identities derived from the verified certificate"
+                        );
+                        assert_eq!(ev.domain(), &c3e_domain(), "verification domain retained");
+                        assert_eq!(
+                            ev.authorized_epoch(),
+                            snap.authorized_epoch(),
+                            "authorized epoch retained"
+                        );
+                        assert_eq!(ev.verified_voting_power(), 3, "voting-power result retained");
+                        assert_eq!(ev.threshold(), 3, "threshold retained");
+                        assert_eq!(ev.expected_wire_chain_id(), C3E_WIRE, "wire chain id retained");
+
+                        // The retained certificate certifies the JUSTIFIED
+                        // (parent) block, NOT the child block itself; the two are
+                        // distinct.
+                        assert_eq!(
+                            ev.certificate().block_id,
+                            [9u8; 32],
+                            "certificate certifies the embedded-QC block (parent)"
+                        );
+                        assert_ne!(
+                            ev.certificate().block_id, candidate,
+                            "retained certificate is never a certificate for the child block itself"
+                        );
+                        assert!(
+                            counts.votes() >= 3,
+                            "genuine constituent QC crypto ran during verification"
+                        );
+                    }
+
+                    // ======================= B =======================
+                    // Evidence association: verified evidence for QC A cannot
+                    // accompany a Proposal carrying a different QC B. Rejected
+                    // before ANY engine mutation.
+                    #[test]
+                    fn c3f_b_evidence_for_a_rejected_against_proposal_carrying_b() {
+                        let f = make_fixture(4);
+                        let (reg, _counts) = counting_registry();
+                        let pv = c3e_pv(&f, c3e_domain(), reg, Some(ValidatorId(0)));
+                        let mut engine = make_engine(ValidatorId(0), 4);
+                        engine.initialize_from_snapshot_baseline(
+                            C3E_I_ANCHOR,
+                            C3E_I_BASELINE_HEIGHT,
+                        );
+                        let proposer: u16 = 2;
+
+                        // Same logical block/view, DIFFERENT certificate evidence:
+                        // QC A signed by {1,2,3}; QC B (embedded) signed by {0,1,2}.
+                        // Both are genuine, structurally-plausible quorums.
+                        let qc_a = build_signed_qc(&f, &c3e_domain(), C3E_WIRE, 0, &[1, 2, 3]);
+                        let qc_b = build_signed_qc(&f, &c3e_domain(), C3E_WIRE, 0, &[0, 1, 2]);
+                        let ev_a = verify_qc_epoch(&pv, 0, &qc_a);
+                        let p_b = proposal_with_qc(
+                            proposer,
+                            C3E_I_TARGET_VIEW,
+                            &f,
+                            &c3e_domain(),
+                            Some(qc_b),
+                        );
+
+                        let view_before = engine.current_view();
+                        let block_count_before = engine.state().block_count();
+                        let projection_before = c3e_project_all(&engine);
+
+                        let err = engine
+                            .on_verified_proposal_event(
+                                ValidatorId(proposer as u64),
+                                &p_b,
+                                Arc::new(ev_a),
+                            )
+                            .expect_err("evidence for A cannot certify a proposal carrying B");
+                        assert!(
+                            matches!(err, VerifiedProposalIngestError::EvidenceCertificateMismatch),
+                            "typed evidence↔certificate mismatch, got {err:?}"
+                        );
+
+                        // No engine mutation whatsoever.
+                        assert_eq!(engine.current_view(), view_before, "view unchanged");
+                        assert_eq!(
+                            engine.state().block_count(),
+                            block_count_before,
+                            "no block registered"
+                        );
+                        let candidate = c3e_candidate_block_id(
+                            proposer,
+                            C3E_I_TARGET_VIEW,
+                            &base_header(proposer).parent_block_id,
+                        );
+                        assert!(
+                            engine.state().verified_justification(&candidate).is_none(),
+                            "no evidence retained on rejection"
+                        );
+                        assert_eq!(
+                            c3e_project_all(&engine),
+                            projection_before,
+                            "pre-existing block contents unchanged"
+                        );
+                    }
+
+                    // ======================= C =======================
+                    // Ownership: changing or dropping the original caller-owned
+                    // wire input cannot alter the retained evidence.
+                    #[test]
+                    fn c3f_c_retained_evidence_independent_of_caller_wire_input() {
+                        let C3eStateFixture {
+                            f,
+                            pv,
+                            snap,
+                            mut engine,
+                            counts: _counts,
+                        } = c3e_state_fixture();
+                        let proposer: u16 = 2;
+                        let candidate = c3e_candidate_block_id(
+                            proposer,
+                            C3E_I_TARGET_VIEW,
+                            &base_header(proposer).parent_block_id,
+                        );
+
+                        let qc = valid_quorum(&f);
+                        let expected = qc.clone();
+                        let mut p = proposal_with_qc(
+                            proposer,
+                            C3E_I_TARGET_VIEW,
+                            &f,
+                            &c3e_domain(),
+                            Some(qc),
+                        );
+                        let mut stats = BinaryConsensusLoopInboundStats::default();
+                        let mut restore = RestoreCatchupModeState::from_config(None);
+                        let facade = D7ActionRecorder::default();
+                        deliver(
+                            &mut engine, &mut stats, &mut restore, &pv, &snap, &p,
+                            Some(&facade), &origin_for(proposer),
+                        );
+                        assert_eq!(stats.inbound_proposal_verified_qc_handoff_total, 1);
+
+                        // Mutate then drop the caller-owned wire input.
+                        p.qc = Some(build_signed_qc(&f, &c3e_domain(), C3E_WIRE, 0, &[1, 2, 3]));
+                        p.signature.clear();
+                        drop(p);
+
+                        // Retained evidence is unchanged — the engine owns its own
+                        // immutable handle, decoupled from the caller's buffer.
+                        let ev = engine
+                            .state()
+                            .verified_justification(&candidate)
+                            .expect("retained evidence still present");
+                        assert_eq!(
+                            ev.certificate(),
+                            &expected,
+                            "retained certificate unaffected by mutating/dropping caller input"
+                        );
+                    }
+
+                    // ======================= D =======================
+                    // No duplicate verification: direct backend counts show the
+                    // engine retention adds NO second QC-verification pass beyond
+                    // the single up-front constituent-vote verification.
+                    #[test]
+                    fn c3f_d_engine_retention_adds_no_second_qc_verification() {
+                        let f = make_fixture(4);
+                        let (reg, counts) = counting_registry();
+                        let pv = c3e_pv(&f, c3e_domain(), reg, Some(ValidatorId(0)));
+                        let snap = coherent_snapshot_for(&pv);
+                        let mut engine = make_engine(ValidatorId(0), 4);
+                        engine.initialize_from_snapshot_baseline(
+                            C3E_I_ANCHOR,
+                            C3E_I_BASELINE_HEIGHT,
+                        );
+                        let proposer: u16 = 2;
+
+                        let qc = valid_quorum(&f);
+                        let p = proposal_with_qc(
+                            proposer,
+                            C3E_I_TARGET_VIEW,
+                            &f,
+                            &c3e_domain(),
+                            Some(qc.clone()),
+                        );
+
+                        // Verify the QC ONCE (the up-front constituent-vote pass).
+                        let ev = verify_qc_epoch(&pv, snap.authorized_epoch(), &qc);
+                        let votes_after_verify = counts.votes();
+                        let proposals_after_verify = counts.proposals();
+                        assert_eq!(
+                            votes_after_verify, 3,
+                            "exactly the three constituent Vote verifications"
+                        );
+
+                        // Ingest into the engine (registers + retains). This
+                        // performs only `==`/scalar checks — NO crypto.
+                        let action = engine
+                            .on_verified_proposal_event(
+                                ValidatorId(proposer as u64),
+                                &p,
+                                Arc::new(ev),
+                            )
+                            .expect("valid evidence ingested");
+                        assert!(action.is_some(), "engine accepted the leader's proposal");
+
+                        assert_eq!(
+                            counts.votes(),
+                            votes_after_verify,
+                            "engine retention ran no second constituent Vote verification"
+                        );
+                        assert_eq!(
+                            counts.proposals(),
+                            proposals_after_verify,
+                            "engine retention ran no proposal verification"
+                        );
+                        let candidate = c3e_candidate_block_id(
+                            proposer,
+                            C3E_I_TARGET_VIEW,
+                            &base_header(proposer).parent_block_id,
+                        );
+                        assert!(
+                            engine.state().verified_justification(&candidate).is_some(),
+                            "evidence retained despite no second verification"
+                        );
+                    }
+
+                    // ======================= E =======================
+                    // Invalid-QC containment via the REAL handler: an invalid
+                    // (foreign-domain) embedded QC must not advance view, register
+                    // a block, change existing block contents or retain evidence;
+                    // a matching positive control does.
+                    #[test]
+                    fn c3f_e_invalid_qc_retains_no_evidence_positive_control_does() {
+                        // Negative: foreign-domain constituent signatures fail C3E
+                        // verification, so the verified-QC handoff is never taken.
+                        let C3eStateFixture {
+                            f,
+                            pv,
+                            snap,
+                            mut engine,
+                            counts: _c,
+                        } = c3e_state_fixture();
+                        let proposer: u16 = 2;
+                        let candidate = c3e_candidate_block_id(
+                            proposer,
+                            C3E_I_TARGET_VIEW,
+                            &base_header(proposer).parent_block_id,
+                        );
+                        let view_before = engine.current_view();
+                        let projection_before = c3e_project_all(&engine);
+
+                        // Genuine signatures under a FOREIGN domain: structurally a
+                        // full quorum, but invalid under the admitted domain.
+                        let bad_qc =
+                            build_signed_qc(&f, &foreign_domain(), C3E_WIRE, 0, &[0, 1, 2]);
+                        let p = proposal_with_qc(
+                            proposer,
+                            C3E_I_TARGET_VIEW,
+                            &f,
+                            &c3e_domain(),
+                            Some(bad_qc),
+                        );
+                        let mut stats = BinaryConsensusLoopInboundStats::default();
+                        let mut restore = RestoreCatchupModeState::from_config(None);
+                        let facade = D7ActionRecorder::default();
+                        deliver(
+                            &mut engine, &mut stats, &mut restore, &pv, &snap, &p,
+                            Some(&facade), &origin_for(proposer),
+                        );
+                        assert_eq!(
+                            stats.inbound_proposal_verified_qc_handoff_total, 0,
+                            "invalid QC never reaches the verified engine handoff"
+                        );
+                        assert_eq!(stats.inbound_proposals_engine_accepted, 0);
+                        assert_eq!(engine.current_view(), view_before, "view unchanged");
+                        assert!(
+                            engine.state().verified_justification(&candidate).is_none(),
+                            "no evidence retained for an invalid QC"
+                        );
+                        assert!(
+                            engine.state().get_block(&candidate).is_none(),
+                            "no block registered for an invalid QC"
+                        );
+                        assert_eq!(
+                            c3e_project_all(&engine),
+                            projection_before,
+                            "existing block contents unchanged"
+                        );
+                        assert_eq!(facade.total(), 0, "no facade actions for an invalid QC");
+
+                        // Positive control: same fixture, same proposer/state, a
+                        // valid embedded QC → retention occurs.
+                        let C3eStateFixture {
+                            f,
+                            pv,
+                            snap,
+                            mut engine,
+                            counts: _c2,
+                        } = c3e_state_fixture();
+                        let p_ok = proposal_with_qc(
+                            proposer,
+                            C3E_I_TARGET_VIEW,
+                            &f,
+                            &c3e_domain(),
+                            Some(valid_quorum(&f)),
+                        );
+                        let mut stats = BinaryConsensusLoopInboundStats::default();
+                        let mut restore = RestoreCatchupModeState::from_config(None);
+                        let facade = D7ActionRecorder::default();
+                        deliver(
+                            &mut engine, &mut stats, &mut restore, &pv, &snap, &p_ok,
+                            Some(&facade), &origin_for(proposer),
+                        );
+                        assert_eq!(stats.inbound_proposal_verified_qc_handoff_total, 1);
+                        assert!(
+                            engine.state().verified_justification(&candidate).is_some(),
+                            "positive control retains evidence"
+                        );
+                    }
+
+                    // ======================= F =======================
+                    // Replacement and removal via the ACTUAL state-engine paths:
+                    // evidence cannot remain incorrectly attached, be inherited by
+                    // an unverified replacement, or remain after removal.
+                    #[test]
+                    fn c3f_f_replacement_and_removal_lifecycle() {
+                        let f = make_fixture(4);
+                        let (reg, _c) = counting_registry();
+                        let pv = c3e_pv(&f, c3e_domain(), reg, None);
+                        let qc = valid_quorum(&f);
+
+                        // (i) A legacy/unverified registration REPLACING a verified
+                        // block does not inherit the earlier verified designation,
+                        // and reclaims the retained bytes.
+                        let mut se = state_engine(&pv, DEFAULT_MAX_RETAINED_EVIDENCE_BYTES);
+                        let ev = verify_qc_epoch(&pv, 0, &qc);
+                        let bytes = ev.retained_byte_size();
+                        let id = [1u8; 32];
+                        se.register_block_with_verified_justification(
+                            id, 1, None, None, Arc::new(ev),
+                        )
+                        .expect("verified registration accepted");
+                        assert!(se.verified_justification(&id).is_some());
+                        assert_eq!(se.retained_evidence_bytes(), bytes);
+
+                        se.register_block(id, 1, None, None); // legacy replacement
+                        assert!(
+                            se.verified_justification(&id).is_none(),
+                            "unverified replacement does not inherit verified evidence"
+                        );
+                        assert_eq!(
+                            se.retained_evidence_bytes(),
+                            0,
+                            "replacement reclaimed the retained bytes"
+                        );
+
+                        // (ii) Removal via the real eviction path releases evidence.
+                        let limits = ConsensusLimitsConfig {
+                            max_pending_blocks: 1,
+                            ..ConsensusLimitsConfig::default()
+                        };
+                        let mut se2 = HotStuffStateEngine::<[u8; 32]>::with_limits(
+                            pv.validators.as_ref().clone(),
+                            limits,
+                        );
+                        let ev2 = verify_qc_epoch(&pv, 0, &qc);
+                        let bytes2 = ev2.retained_byte_size();
+                        se2.register_block_with_verified_justification(
+                            [1u8; 32], 1, None, None, Arc::new(ev2),
+                        )
+                        .expect("accepted");
+                        assert_eq!(se2.retained_evidence_bytes(), bytes2);
+                        // A second (legacy) block evicts the first, non-committed,
+                        // non-ancestor block.
+                        se2.register_block([2u8; 32], 2, None, None);
+                        assert!(
+                            se2.get_block(&[1u8; 32]).is_none(),
+                            "first block evicted by the real eviction path"
+                        );
+                        assert!(
+                            se2.verified_justification(&[1u8; 32]).is_none(),
+                            "evidence released when its owning block is removed"
+                        );
+                        assert_eq!(
+                            se2.retained_evidence_bytes(),
+                            0,
+                            "retained bytes reclaimed on removal — not unbounded"
+                        );
+                    }
+
+                    // ======================= G =======================
+                    // Resource limits: exact-capacity acceptance and over-capacity
+                    // rejection with checked accounting and NO partial engine
+                    // effects, plus replacement accounting and reclamation.
+                    #[test]
+                    fn c3f_g_resource_limits_checked_accounting() {
+                        let f = make_fixture(4);
+                        let (reg, _c) = counting_registry();
+                        let pv = c3e_pv(&f, c3e_domain(), reg, None);
+                        let qc = valid_quorum(&f);
+                        let size = verify_qc_epoch(&pv, 0, &qc).retained_byte_size();
+
+                        // Exact capacity accepts; retained == max.
+                        let mut se = state_engine(&pv, size);
+                        se.register_block_with_verified_justification(
+                            [1u8; 32],
+                            1,
+                            None,
+                            None,
+                            Arc::new(verify_qc_epoch(&pv, 0, &qc)),
+                        )
+                        .expect("exact-capacity retention accepted");
+                        assert_eq!(se.retained_evidence_bytes(), size);
+                        assert!(se.verified_justification(&[1u8; 32]).is_some());
+
+                        // One byte short rejects with NO engine effect.
+                        let mut se2 = state_engine(&pv, size - 1);
+                        let err = se2
+                            .register_block_with_verified_justification(
+                                [2u8; 32],
+                                1,
+                                None,
+                                None,
+                                Arc::new(verify_qc_epoch(&pv, 0, &qc)),
+                            )
+                            .expect_err("over-capacity retention rejected");
+                        assert!(
+                            matches!(err, EvidenceRetentionError::BudgetExceeded { .. }),
+                            "typed budget-exceeded error, got {err:?}"
+                        );
+                        assert!(
+                            se2.get_block(&[2u8; 32]).is_none(),
+                            "no block registered on budget rejection"
+                        );
+                        assert_eq!(
+                            se2.retained_evidence_bytes(),
+                            0,
+                            "no bytes accounted on rejection"
+                        );
+                        assert_eq!(
+                            se2.rejected_evidence_over_budget(),
+                            1,
+                            "budget rejection counted"
+                        );
+
+                        // Replacement accounting: a larger cert replaces a smaller
+                        // one for the same id; the old bytes are reclaimed (no
+                        // double-count).
+                        let mut se3 = state_engine(&pv, DEFAULT_MAX_RETAINED_EVIDENCE_BYTES);
+                        let qc_small = build_signed_qc(&f, &c3e_domain(), C3E_WIRE, 0, &[0, 1, 2]);
+                        let qc_large =
+                            build_signed_qc(&f, &c3e_domain(), C3E_WIRE, 0, &[0, 1, 2, 3]);
+                        let small = verify_qc_epoch(&pv, 0, &qc_small).retained_byte_size();
+                        let large = verify_qc_epoch(&pv, 0, &qc_large).retained_byte_size();
+                        assert!(large > small, "four-signer cert is larger than three-signer");
+                        se3.register_block_with_verified_justification(
+                            [3u8; 32],
+                            1,
+                            None,
+                            None,
+                            Arc::new(verify_qc_epoch(&pv, 0, &qc_small)),
+                        )
+                        .expect("small accepted");
+                        assert_eq!(se3.retained_evidence_bytes(), small);
+                        se3.register_block_with_verified_justification(
+                            [3u8; 32],
+                            1,
+                            None,
+                            None,
+                            Arc::new(verify_qc_epoch(&pv, 0, &qc_large)),
+                        )
+                        .expect("large replacement accepted");
+                        assert_eq!(
+                            se3.retained_evidence_bytes(),
+                            large,
+                            "reclaimed small, accounted large — no double count"
+                        );
+                        assert_eq!(
+                            se3.verified_justification(&[3u8; 32]).unwrap().signers().len(),
+                            4,
+                            "replacement evidence is the four-signer certificate"
+                        );
+
+                        // Real-handler entrypoint over-budget: rejected fail-closed
+                        // with NO view advancement and NO retained evidence.
+                        let C3eStateFixture {
+                            f,
+                            pv,
+                            snap,
+                            mut engine,
+                            counts: _c,
+                        } = c3e_state_fixture();
+                        let proposer: u16 = 2;
+                        let candidate = c3e_candidate_block_id(
+                            proposer,
+                            C3E_I_TARGET_VIEW,
+                            &base_header(proposer).parent_block_id,
+                        );
+                        let qc2 = valid_quorum(&f);
+                        let need =
+                            verify_qc_epoch(&pv, snap.authorized_epoch(), &qc2).retained_byte_size();
+                        engine
+                            .state_mut()
+                            .set_max_retained_evidence_bytes(need - 1);
+                        let view_before = engine.current_view();
+                        let p = proposal_with_qc(
+                            proposer,
+                            C3E_I_TARGET_VIEW,
+                            &f,
+                            &c3e_domain(),
+                            Some(qc2),
+                        );
+                        let mut stats = BinaryConsensusLoopInboundStats::default();
+                        let mut restore = RestoreCatchupModeState::from_config(None);
+                        let facade = D7ActionRecorder::default();
+                        deliver(
+                            &mut engine, &mut stats, &mut restore, &pv, &snap, &p,
+                            Some(&facade), &origin_for(proposer),
+                        );
+                        assert_eq!(
+                            stats.inbound_proposal_verified_qc_handoff_rejected_total, 1,
+                            "over-budget handoff counted as an engine-level rejection"
+                        );
+                        assert_eq!(stats.inbound_proposal_verified_qc_handoff_total, 0);
+                        assert_eq!(stats.inbound_proposals_engine_accepted, 0);
+                        assert_eq!(
+                            engine.current_view(),
+                            view_before,
+                            "no view advancement on budget rejection"
+                        );
+                        assert!(
+                            engine.state().get_block(&candidate).is_none(),
+                            "no block registered on budget rejection"
+                        );
+                        assert!(
+                            engine.state().verified_justification(&candidate).is_none(),
+                            "no evidence retained on budget rejection"
+                        );
+                        assert_eq!(facade.total(), 0, "no facade actions on budget rejection");
+                    }
+
+                    // ======================= H =======================
+                    // Compatibility: absent-QC behavior preserved (no retention,
+                    // no handoff); and the engine entrypoint enforces the present
+                    // QC / wire-chain / epoch contract with bounded typed errors.
+                    #[test]
+                    fn c3f_h_absent_qc_and_typed_contract_errors() {
+                        let f = make_fixture(4);
+                        let (reg, _c) = counting_registry();
+                        let pv = c3e_pv(&f, c3e_domain(), reg, None);
+                        let snap = coherent_snapshot_for(&pv);
+                        let mut engine = make_engine(ValidatorId(0), 4);
+                        engine.initialize_from_snapshot_baseline(
+                            C3E_I_ANCHOR,
+                            C3E_I_BASELINE_HEIGHT,
+                        );
+                        let proposer: u16 = 2;
+
+                        // Absent-QC path: legacy behavior preserved, no verified
+                        // handoff and no retention.
+                        let p_none = proposal_with_qc(
+                            proposer,
+                            C3E_I_TARGET_VIEW,
+                            &f,
+                            &c3e_domain(),
+                            None,
+                        );
+                        let mut stats = BinaryConsensusLoopInboundStats::default();
+                        let mut restore = RestoreCatchupModeState::from_config(None);
+                        let facade = D7ActionRecorder::default();
+                        deliver(
+                            &mut engine, &mut stats, &mut restore, &pv, &snap, &p_none,
+                            Some(&facade), &origin_for(proposer),
+                        );
+                        assert_eq!(
+                            stats.inbound_proposal_verified_qc_handoff_total, 0,
+                            "absent QC never takes the verified handoff"
+                        );
+                        assert_eq!(stats.inbound_proposal_verified_qc_handoff_rejected_total, 0);
+                        let candidate = c3e_candidate_block_id(
+                            proposer,
+                            C3E_I_TARGET_VIEW,
+                            &base_header(proposer).parent_block_id,
+                        );
+                        assert!(
+                            engine.state().verified_justification(&candidate).is_none(),
+                            "absent-QC registration retains no verified evidence"
+                        );
+
+                        // MissingEmbeddedQc: the verified entrypoint requires a
+                        // present embedded QC.
+                        let qc = valid_quorum(&f);
+                        let ev = verify_qc_epoch(&pv, 0, &qc);
+                        let err = engine
+                            .on_verified_proposal_event(
+                                ValidatorId(proposer as u64),
+                                &p_none,
+                                Arc::new(ev),
+                            )
+                            .expect_err("absent QC rejected at the verified entrypoint");
+                        assert!(
+                            matches!(err, VerifiedProposalIngestError::MissingEmbeddedQc),
+                            "typed MissingEmbeddedQc, got {err:?}"
+                        );
+
+                        // WireChainMismatch: proposal wire chain differs from the
+                        // evidence's expected wire chain.
+                        let mut p_badchain = proposal_with_qc(
+                            proposer,
+                            C3E_I_TARGET_VIEW,
+                            &f,
+                            &c3e_domain(),
+                            Some(qc.clone()),
+                        );
+                        p_badchain.header.chain_id = C3E_WIRE + 7;
+                        let err = engine
+                            .on_verified_proposal_event(
+                                ValidatorId(proposer as u64),
+                                &p_badchain,
+                                Arc::new(verify_qc_epoch(&pv, 0, &qc)),
+                            )
+                            .expect_err("wire-chain mismatch rejected");
+                        assert!(
+                            matches!(err, VerifiedProposalIngestError::WireChainMismatch { .. }),
+                            "typed WireChainMismatch, got {err:?}"
+                        );
+
+                        // EpochMismatch: proposal epoch differs from the evidence's
+                        // authorized epoch.
+                        let mut p_badepoch = proposal_with_qc(
+                            proposer,
+                            C3E_I_TARGET_VIEW,
+                            &f,
+                            &c3e_domain(),
+                            Some(qc.clone()),
+                        );
+                        p_badepoch.header.epoch = 1;
+                        let err = engine
+                            .on_verified_proposal_event(
+                                ValidatorId(proposer as u64),
+                                &p_badepoch,
+                                Arc::new(verify_qc_epoch(&pv, 0, &qc)),
+                            )
+                            .expect_err("epoch mismatch rejected");
+                        assert!(
+                            matches!(err, VerifiedProposalIngestError::EpochMismatch { .. }),
+                            "typed EpochMismatch, got {err:?}"
+                        );
+                    }
+                }
             }
 
             // =============================================================
