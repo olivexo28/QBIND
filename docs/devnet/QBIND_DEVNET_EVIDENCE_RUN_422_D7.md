@@ -4323,3 +4323,130 @@ recorded as **incomplete/unverified**, never converted into a pass.
 postconditions, accounting and evidence association only; absent-QC/bootstrap authorization,
 outbound QC reconstruction, Timeout/NewView migration, persistent storage/recovery, production
 authority lifecycle/activation, durable anti-rollback and Run 423 remain separate, open obligations.
+## Run 422 D7-C3F — CORRECTION (continuation): preserve candidate metadata during eviction + independent allocation accounting (code + test)
+
+**Bounded continuation of the C3F correction above — not a new phase.** This subsection
+closes the eviction-order height regression and the incomplete allocation-accounting test
+identified in the reviewed C3F correction, and finalizes this correction's provenance. All
+prior C3D/C3E/C3F work and tests are preserved; `task/warning.txt` and unrelated task files
+are untouched.
+
+### Inspected state (recorded, not manufactured)
+
+* **Working branch (inspected):** `copilot/copilot-run-422-d7-c3f`.
+* **Starting HEAD:** `5a327ed` (`update`) — worktree clean, shallow single-branch clone.
+* **Reviewed branch named in the task** (`copilot/copilotcopilot-run-422-d7-c3c-again`) and
+  **reviewed tip `f88e6fc67bc18649815c73c1aa79c5a2025cc420`:** object **absent** from this
+  shallow clone (missing history, distinguished from missing implementation — the C3D
+  verifier, C3E gate and C3F retention path were all present and executed green here).
+* **Tested code checkpoint (recorded before validation):**
+  `5cedb9ca6b55cb4931d632730f7f390237978203`.
+
+### Correction A — candidate metadata survives capacity reservation
+
+`register_block_with_verified_justification` computed the candidate's `height` from
+`self.blocks.get(parent)` **after** calling `reserve_block_slot_for_new`, which can evict a
+safe-to-evict parent to make block-slot room. Evicting the known parent made the later
+lookup fall back to height zero, so a candidate whose parent was at height 5 registered at
+height 0 instead of 6. **Fix (smallest):** the state-dependent metadata (`height`) is now
+derived from the **pre-eviction** state — computed before `reserve_block_slot_for_new`.
+Genuinely missing parents still register at height 0; no new parent/QC linkage, bootstrap
+policy or consensus redesign is introduced. All prior guarantees are preserved (capacity
+rejection precedes mutation; the candidate is never evicted to fake retention success;
+protected blocks stay protected; evidence association, byte accounting, replacement and
+reclamation are unchanged; no vote/outbound action follows a retention rejection).
+
+### Correction B — independently verify the allocation charge
+
+The prior `c3f_j` assertion only proved the charge exceeds
+`size_of::<VerifiedQuorumCertificate>()`, not that every required component is included. A
+new in-module test (under `cfg(test)` in `qc_verify_domain.rs`, so it can inspect private
+allocation capacities) starts from **genuinely verified** evidence, grows each heap
+component's allocation **capacity** above its length without changing certificate contents,
+and asserts `retained_byte_size` equals the documented component sum — struct value +
+bitmap capacity + outer signatures-vector descriptor capacity + each constituent
+signature-buffer capacity + signer-vector capacity — computed WITHOUT calling
+`retained_byte_size`. Because capacity > length for every component, the test detects both
+the omission of any required component and the substitution of length for capacity. The
+useful projected-total overflow test is preserved. No production mutation API or unchecked
+evidence constructor is exposed.
+
+### What changed (this continuation)
+
+* `hotstuff_state_engine.rs`: in `register_block_with_verified_justification`, the `height`
+  computation is moved ahead of `reserve_block_slot_for_new` (pre-eviction derivation);
+  logic otherwise unchanged.
+* `qc_verify_domain.rs`: new `#[cfg(test)] mod c3f_expected_charge_tests` with the
+  independent expected-charge assertion (real ML-DSA-44 evidence; capacity-inflation helper
+  that preserves contents).
+* `binary_consensus_loop.rs`: new regression
+  `c3f_l_eviction_preserves_candidate_height_and_evidence` added to module
+  `run422_d7a::run422_d7c3e::c3f` (the protected-anchor rejection test `c3f_i` is retained).
+* `docs/protocol/QBIND_PROPOSAL_VOTE_SIGNING_DOMAIN_V2.md` (§9C) and
+  `docs/protocol/QBIND_GENESIS_AUTHORITY_ENGINE_QC_INTEGRATION_AUDIT.md` (§13): narrow
+  descriptions of the pre-eviction metadata derivation and strengthened accounting.
+
+### Behavioral tests (module `run422_d7a::run422_d7c3e::c3f`, now 12 tests)
+
+* **L** `c3f_l_eviction_preserves_candidate_height_and_evidence` — real handler/engine path:
+  protected committed anchor A (height 4) + unprotected child P (height 5) fill both slots
+  (`max_pending_blocks==2`) with ample byte budget; admitting candidate C (parent P) evicts
+  P and registers C at **height 6, not 0**, with exactly one eviction, the protected anchor
+  preserved, the exact verified evidence retained, the derived logical justification
+  (certificate parent block id/height/signers) correct, and
+  `retained_evidence_bytes == charge(retained)`. An otherwise-identical free-slot control
+  (`max_pending_blocks==3`) registers the SAME height 6 with no eviction and P retained.
+
+### Allocation-accounting test (`qc_verify_domain`, +1 test)
+
+* `c3f_b_expected_charge_sums_every_capacity_component` — independent expected-charge model
+  as above; asserts equality with `retained_byte_size`, that dropping any single component
+  changes the total (omission detected), and that a length-substituted model is strictly
+  smaller and unequal (capacity, not length).
+
+### Validation — newly-run commands this continuation (dev profile unless noted, exit 0)
+
+Tested checkpoint SHA `5cedb9ca6b55cb4931d632730f7f390237978203`; final SHA recorded at the
+closing checkpoint of this pass.
+
+* `cargo test -p qbind-node --lib run422_d7a::run422_d7c3e::c3f` → **12 passed**.
+* `cargo test -p qbind-node --lib run422_d7c3e` → **41 passed** (overlaps the C3F subset).
+* `cargo test -p qbind-node --lib binary_consensus_loop` → **252 passed** (overlaps the two above).
+* `cargo test -p qbind-consensus --lib` → **183 passed** (includes the new accounting test; +1 vs 182).
+* `cargo test -p qbind-consensus --test run_422_d7c3d_qc_domain_verification_tests` → **46 passed** (C3D).
+* `cargo test -p qbind-consensus --test run_422_d6_pv_domain_isolation_tests` → **34 passed** (D6).
+* `cargo test -p qbind-consensus --test consensus_memory_limits_tests` → **19 passed**;
+  `--test consensus_state_memory_limits_tests` → **7 passed**;
+  `--test commit_log_memory_limits_tests` → **6 passed** (1 ignored).
+* `cargo test -p qbind-node --test run_420_production_policy_reachability_tests` → **3 passed**.
+* `cargo test -p qbind-node --test run_422_startup_refusal_tests` → **4 passed** (startup refusal preserved).
+* `cargo check -p qbind-node` (default production features) → **exit 0**.
+* `cargo clippy -p qbind-consensus --lib` and `-p qbind-node --lib` → **no new warnings** in the
+  changed regions; all reported warnings are pre-existing and in unrelated files/lines
+  (`basic_hotstuff_engine.rs:2075`, `slashing/mod.rs`, `adversarial_multi_sim.rs`, etc.).
+* `rustfmt --check` on `hotstuff_state_engine.rs` (LF file): the changed region is conformant;
+  the only reported diff is a pre-existing end-of-file newline at `:1359`. The CRLF-committed
+  files (`qc_verify_domain.rs`, `binary_consensus_loop.rs`) keep their CRLF endings and their
+  changed regions have no trailing whitespace; no repo-wide reformat is performed.
+* Release build: `cargo build --release -p qbind-node --bin qbind-node` → **Finished (exit 0)**,
+  tested revision `5cedb9ca6b55cb4931d632730f7f390237978203`.
+
+### Security tooling (recorded literally)
+
+`secret_scanning` and `parallel_validation` (Code Review + CodeQL) outcomes for this
+continuation are recorded exactly as returned at the closing checkpoint (below). A skipped
+CodeQL analysis or an unavailable/errored reviewer is recorded as incomplete/unverified,
+never converted into a pass or into "0 alerts".
+
+### Retained posture (unchanged by this continuation)
+
+`D7_STATUS=PARTIAL-CODE-TEST / PRODUCTION-LIFECYCLE-UNAVAILABLE`;
+`DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED`;
+`GENESIS_AUTHORITY_ACTIVATION=DISABLED`;
+`PRODUCTION_WIRE_CHAIN_ID_BEHAVIOR=UNCHANGED`;
+`CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED`;
+`SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO`. This continuation fixes the eviction-order
+height regression and strengthens allocation accounting only; absent-QC/bootstrap
+authorization, outbound QC reconstruction, Timeout/NewView migration, persistent
+storage/recovery, production authority lifecycle/activation, durable anti-rollback and Run 423
+remain separate, open obligations. No production activation or readiness promotion is performed.

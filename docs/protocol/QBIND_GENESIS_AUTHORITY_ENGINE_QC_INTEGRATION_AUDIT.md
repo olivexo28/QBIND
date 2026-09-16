@@ -1009,3 +1009,24 @@ unchanged on rejection. The 256 MiB default budget is retained. See §9C of
 `docs/protocol/QBIND_PROPOSAL_VOTE_SIGNING_DOMAIN_V2.md` and the Run 422 D7-C3F
 CORRECTION subsection of `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md`. This note
 is additive; all historical findings and the retained D7 posture flags are preserved.
+
+## 13. Successor note (Run 422 D7-C3F correction — candidate metadata + strengthened accounting)
+
+A further bounded correction of §§11-12 (not a new phase) closes two residual gaps
+without changing the information flow: (A) `register_block_with_verified_justification`
+now derives the candidate’s state-dependent metadata (its height, from its parent) from
+the **pre-eviction** engine state, before `reserve_block_slot_for_new` may evict a
+safe-to-evict parent to make block-slot room — so admitting a candidate whose parent is
+legitimately evicted no longer collapses the candidate height to zero; genuinely missing
+parents still register at height zero, and no new parent/QC linkage or bootstrap rule is
+introduced. (B) The allocation-charge accounting test is strengthened: an independent
+expected-charge assertion (inside the `qc_verify_domain` module under `cfg(test)`, with
+capacity > length for every component) verifies `retained_byte_size` equals the documented
+component sum (struct value + bitmap capacity + outer signatures descriptor capacity +
+each constituent signature-buffer capacity + signer-vector capacity), computed WITHOUT
+calling `retained_byte_size`, so omission of any required component or substitution of
+length for capacity is detected; the prior projected-total overflow test is preserved.
+Regressions: `c3f_l_eviction_preserves_candidate_height_and_evidence` (eviction-required
+admission at height 6 with a free-slot control) and
+`c3f_b_expected_charge_sums_every_capacity_component`. This note is additive; all
+historical findings and the retained D7 posture flags are preserved.

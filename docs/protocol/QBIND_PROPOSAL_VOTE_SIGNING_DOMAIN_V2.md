@@ -661,7 +661,11 @@ saturating it into an admissible value (allocator/process-wide overhead and
 externally retained `Arc` handles are outside the model). This byte budget is
 distinct from block-count limits; **block-slot** pressure is handled separately so a
 protected anchor at the block-count limit rejects a new retention rather than
-evicting the just-registered candidate.
+evicting the just-registered candidate. When a retention **is** admitted by evicting
+an OTHER safe-to-evict block, the candidate's state-dependent metadata (its height,
+derived from its parent) is computed from the **pre-eviction** state, so evicting a
+known parent to make room does not collapse the candidate's height to zero; genuinely
+missing parents still register at height zero unchanged.
 
 ## 10. Non-goals (D7 and beyond)
 
