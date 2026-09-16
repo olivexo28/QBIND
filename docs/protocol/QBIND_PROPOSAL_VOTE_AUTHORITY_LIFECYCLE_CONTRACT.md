@@ -704,11 +704,15 @@ production change) what the existing recovery entrypoints preserve across restar
 and pre-decision snapshot restore. Inventory observation: none of
 `BasicHotStuffEngine::initialize_from_restart`,
 `initialize_from_snapshot_baseline`, or `NodeHotstuffHarness::load_persisted_state`
-consumes a persisted per-view vote or anti-equivocation record; each reconstructs
-committed state and a lock derived from committed/embedded QCs only. The
-in-process double-vote latch therefore does not survive restart or restore, so
-signing-state continuity remains NOT-established. Evidence:
-`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md` (Run 422 D7-D2 section) and
+consumes a persisted per-view vote or anti-equivocation record. The harness reader
+path (`load_persisted_state` → `initialize_from_restart`) reconstructs committed
+state plus a conservative lock derived from committed/embedded QCs only; the
+production binary snapshot initializer `initialize_from_snapshot_baseline`
+reconstructs committed height + an opaque anchor from the two `StateSnapshotMeta`
+fields it consumes (`block_hash`, `height`) and reconstructs **no** QC lock
+(`locked_qc()` stays `None`). The in-process double-vote latch therefore does not
+survive restart or restore, so signing-state continuity remains NOT-established.
+Evidence: `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md` (Run 422 D7-D2 section) and
 `crates/qbind-node/tests/run_422_d7d2_signing_state_recovery_tests.rs`. Next step
 (not authorized here): characterize the actual binary snapshot-restore call path
 over a real RocksDB artifact before considering any durable protection.

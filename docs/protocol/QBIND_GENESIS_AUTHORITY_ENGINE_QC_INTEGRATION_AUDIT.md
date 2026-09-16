@@ -1181,10 +1181,13 @@ additive.
 
 Run 422 D7-D2 added a bounded characterization (test + source inspection) of
 signing-state continuity across restart and snapshot restore. It confirms — without
-changing production behavior — that the existing recovery entrypoints recover
-committed state and a QC-reconstructed lock but carry no channel for an uncommitted
-vote or per-view anti-equivocation record, so the in-process double-vote guard is
-lost on restart / pre-decision restore. Full report and path matrix:
+changing production behavior — that the harness reader path
+(`load_persisted_state` → `initialize_from_restart`) recovers committed state plus a
+lock reconstructed from committed/embedded QCs, while the production binary snapshot
+initializer `initialize_from_snapshot_baseline` recovers only committed height + an
+opaque anchor and reconstructs **no** QC lock; neither carries a channel for an
+uncommitted vote or per-view anti-equivocation record, so the in-process double-vote
+guard is lost on restart / pre-decision restore. Full report and path matrix:
 `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md` (Run 422 D7-D2). Posture
 unchanged: activation DISABLED, durable anti-rollback NOT-ESTABLISHED, signing-state
 continuity NOT-established. This note is additive.
