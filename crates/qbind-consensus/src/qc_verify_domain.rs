@@ -1033,3 +1033,269 @@ where
         domain: domain.clone(),
     })
 }
+// ===========================================================================
+// Run 422 D7-C3F — Correction B: independent expected-charge accounting.
+//
+// These tests live INSIDE this module (under `cfg(test)`) solely so they can
+// inspect the private allocation *capacities* backing a genuinely verified
+// `VerifiedQuorumCertificate`. They expose NO production mutation API and NO
+// unchecked evidence constructor: evidence is always produced by the real
+// `verify_quorum_certificate_with_domain` over real ML-DSA-44 signatures, and
+// only allocation *capacity* is grown afterwards — the certificate contents
+// (bytes, signers, context) are never altered.
+//
+// The core assertion computes the documented retained-byte charge component by
+// component (struct value + bitmap capacity + outer signatures-vector
+// descriptor capacity + each constituent signature buffer's capacity + signer
+// vector capacity) WITHOUT calling `retained_byte_size()`, then requires the
+// method to equal it exactly. Because the fixture forces capacity > length for
+// every component, the test detects both the omission of any required
+// component and the substitution of length for capacity.
+// ===========================================================================
+#[cfg(test)]
+mod c3f_expected_charge_tests {
+    use super::*;
+    use crate::crypto_verifier::SimpleBackendRegistry;
+    use crate::validator_set::ValidatorSetEntry;
+    use qbind_crypto::ml_dsa44::MlDsa44Backend;
+    use qbind_crypto::SUITE_PQ_RESERVED_1;
+    use qbind_types::ChainId;
+    use std::collections::HashMap;
+    use std::mem::size_of;
+    use std::sync::Arc;
+
+    const TEST_SUITE: ConsensusSigSuiteId = SUITE_PQ_RESERVED_1; // ML-DSA-44
+    const TEST_SUITE_U16: u16 = 100;
+    const WIRE_CHAIN: u32 = 5;
+    const EPOCH: u64 = 0;
+
+    #[derive(Debug, Clone, Default)]
+    struct TestKeyProvider {
+        keys: HashMap<ValidatorId, (ConsensusSigSuiteId, Vec<u8>)>,
+    }
+    impl SuiteAwareValidatorKeyProvider for TestKeyProvider {
+        fn get_suite_and_key(&self, id: ValidatorId) -> Option<(ConsensusSigSuiteId, Vec<u8>)> {
+            self.keys.get(&id).cloned()
+        }
+    }
+
+    struct Fixture {
+        validators: ConsensusValidatorSet,
+        kp: TestKeyProvider,
+        sks: HashMap<ValidatorId, Vec<u8>>,
+    }
+
+    fn uniform_fixture(n: u64) -> Fixture {
+        let mut keys = HashMap::new();
+        let mut sks = HashMap::new();
+        let mut entries = Vec::new();
+        for id in 0..n {
+            let (pk, sk) = MlDsa44Backend::generate_keypair().expect("keygen");
+            keys.insert(ValidatorId(id), (TEST_SUITE, pk));
+            sks.insert(ValidatorId(id), sk);
+            entries.push(ValidatorSetEntry {
+                id: ValidatorId(id),
+                voting_power: 1,
+            });
+        }
+        Fixture {
+            validators: ConsensusValidatorSet::new(entries).expect("valid set"),
+            kp: TestKeyProvider { keys },
+            sks,
+        }
+    }
+
+    fn base_domain() -> ProposalVoteSigningDomainV2 {
+        ProposalVoteSigningDomainV2::try_new(
+            ChainId(0xABCD_0000_0000_0001),
+            WIRE_CHAIN,
+            [1u8; 32],
+            [2u8; 32],
+        )
+        .expect("domain")
+    }
+
+    fn set_bit(bitmap: &mut Vec<u8>, index: u16) {
+        let byte = (index / 8) as usize;
+        let bit = index % 8;
+        if bitmap.len() <= byte {
+            bitmap.resize(byte + 1, 0);
+        }
+        bitmap[byte] |= 1u8 << bit;
+    }
+
+    /// Build a QC signed under `d` by `signers` (ascending, distinct) with real
+    /// ML-DSA-44 signatures over each reconstructed constituent vote.
+    fn build_signed_qc(
+        f: &Fixture,
+        d: &ProposalVoteSigningDomainV2,
+        signers: &[u16],
+    ) -> WireQuorumCertificate {
+        let mut qc = WireQuorumCertificate {
+            version: 1,
+            chain_id: WIRE_CHAIN,
+            epoch: EPOCH,
+            height: 9,
+            round: 9,
+            step: 1,
+            block_id: [7u8; 32],
+            suite_id: TEST_SUITE_U16,
+            signer_bitmap: vec![],
+            signatures: vec![],
+        };
+        let mut bitmap: Vec<u8> = Vec::new();
+        let mut sigs: Vec<Vec<u8>> = Vec::new();
+        for &s in signers {
+            set_bit(&mut bitmap, s);
+            let vote = Vote {
+                version: qc.version,
+                chain_id: qc.chain_id,
+                epoch: qc.epoch,
+                height: qc.height,
+                round: qc.round,
+                step: qc.step,
+                block_id: qc.block_id,
+                validator_index: s,
+                suite_id: qc.suite_id,
+                signature: vec![],
+            };
+            let pre = d.vote_preimage(&vote);
+            let sk = f.sks.get(&ValidatorId(s as u64)).expect("sk");
+            sigs.push(MlDsa44Backend::sign(sk, &pre).expect("sign"));
+        }
+        qc.signer_bitmap = bitmap;
+        qc.signatures = sigs;
+        qc
+    }
+
+    fn real_registry() -> SimpleBackendRegistry {
+        SimpleBackendRegistry::with_backend(TEST_SUITE, Arc::new(MlDsa44Backend))
+    }
+
+    /// A fresh `Vec` holding the same elements as `src` but with capacity
+    /// strictly greater than its length (allocation capacity is inflated; the
+    /// contents are preserved). We never assume a specific resulting capacity —
+    /// callers read the real `capacity()`.
+    fn grown<T: Clone>(src: &[T], extra: usize) -> Vec<T> {
+        assert!(extra > 0);
+        let mut v = Vec::with_capacity(src.len() + extra);
+        v.extend(src.iter().cloned());
+        v
+    }
+
+    /// Genuinely verify a 3-of-4 quorum, then inflate the allocation capacity
+    /// of every heap component (bitmap, outer signatures vector, each inner
+    /// signature buffer, signer vector) WITHOUT changing the certificate
+    /// contents, so capacity > length holds for each.
+    fn verified_with_slack() -> (VerifiedQuorumCertificate, WireQuorumCertificate, Vec<ValidatorId>) {
+        let f = uniform_fixture(4); // total power 4, threshold ceil(8/3)=3
+        let d = base_domain();
+        let qc = build_signed_qc(&f, &d, &[0, 1, 2]); // power 3 >= 3
+        let br = real_registry();
+        let mut ev = verify_quorum_certificate_with_domain(
+            &qc, &d, EPOCH, &f.validators, &f.kp, &br,
+        )
+        .expect("valid quorum verifies");
+
+        let original_cert = ev.certificate.clone();
+        let original_signers = ev.signers.clone();
+
+        // Inflate capacities. The inner signature buffers are grown FIRST and
+        // moved (not cloned) into a pre-sized outer vector, so both the outer
+        // descriptor capacity AND each inner buffer capacity exceed their
+        // lengths simultaneously.
+        ev.certificate.signer_bitmap = grown(&ev.certificate.signer_bitmap, 16);
+        let mut new_sigs: Vec<Vec<u8>> = Vec::with_capacity(ev.certificate.signatures.len() + 4);
+        for s in &ev.certificate.signatures {
+            new_sigs.push(grown(s, 32));
+        }
+        ev.certificate.signatures = new_sigs;
+        ev.signers = grown(&ev.signers, 8);
+
+        // Contents are unchanged (equality ignores capacity).
+        assert_eq!(ev.certificate, original_cert, "certificate contents preserved");
+        assert_eq!(ev.signers, original_signers, "signer identities preserved");
+
+        (ev, original_cert, original_signers)
+    }
+
+    #[test]
+    fn c3f_b_expected_charge_sums_every_capacity_component() {
+        let (ev, _cert, _signers) = verified_with_slack();
+
+        // The fixture genuinely has capacity > length for EVERY component, so a
+        // length-substituted or component-omitting model is distinguishable.
+        assert!(
+            ev.certificate.signer_bitmap.capacity() > ev.certificate.signer_bitmap.len(),
+            "bitmap capacity exceeds its length"
+        );
+        assert!(
+            ev.certificate.signatures.capacity() > ev.certificate.signatures.len(),
+            "outer signatures vector capacity exceeds its length"
+        );
+        assert!(
+            !ev.certificate.signatures.is_empty(),
+            "there is at least one constituent signature buffer"
+        );
+        for s in &ev.certificate.signatures {
+            assert!(s.capacity() > s.len(), "each signature buffer capacity exceeds its length");
+        }
+        assert!(
+            ev.signers.capacity() > ev.signers.len(),
+            "signer vector capacity exceeds its length"
+        );
+
+        // Independent expected charge, component by component, from CAPACITIES —
+        // never by calling `retained_byte_size()`.
+        let struct_v = size_of::<VerifiedQuorumCertificate>() as u64;
+        let bitmap_cap = ev.certificate.signer_bitmap.capacity() as u64;
+        let outer_desc =
+            ev.certificate.signatures.capacity() as u64 * size_of::<Vec<u8>>() as u64;
+        let inner_sum: u64 = ev
+            .certificate
+            .signatures
+            .iter()
+            .map(|s| s.capacity() as u64)
+            .sum();
+        let signer_v = ev.signers.capacity() as u64 * size_of::<ValidatorId>() as u64;
+
+        let expected = struct_v + bitmap_cap + outer_desc + inner_sum + signer_v;
+        let actual = ev.retained_byte_size().expect("charge is representable");
+        assert_eq!(
+            actual, expected,
+            "checked charge equals the documented component sum \
+             (struct={struct_v}, bitmap={bitmap_cap}, outer_desc={outer_desc}, \
+             inner_sum={inner_sum}, signer_v={signer_v})"
+        );
+
+        // Omission sensitivity: dropping ANY required component changes the
+        // total, so the method cannot silently omit one. (Every component is
+        // strictly positive here.)
+        assert!(bitmap_cap > 0 && outer_desc > 0 && inner_sum > 0 && signer_v > 0);
+        assert_ne!(actual, expected - bitmap_cap, "omitting the bitmap capacity is detected");
+        assert_ne!(actual, expected - outer_desc, "omitting the outer descriptor is detected");
+        assert_ne!(actual, expected - inner_sum, "omitting the signature buffers is detected");
+        assert_ne!(actual, expected - signer_v, "omitting the signer vector is detected");
+        assert_ne!(actual, expected - struct_v, "omitting the struct value is detected");
+
+        // Length-substitution sensitivity: a model that charges lengths instead
+        // of capacities is strictly smaller and therefore distinguishable.
+        let length_model = struct_v
+            + ev.certificate.signer_bitmap.len() as u64
+            + ev.certificate.signatures.len() as u64 * size_of::<Vec<u8>>() as u64
+            + ev.certificate
+                .signatures
+                .iter()
+                .map(|s| s.len() as u64)
+                .sum::<u64>()
+            + ev.signers.len() as u64 * size_of::<ValidatorId>() as u64;
+        assert!(
+            length_model < expected,
+            "the length model is strictly smaller than the capacity charge"
+        );
+        assert_ne!(
+            actual, length_model,
+            "the charge uses allocation capacity, not length"
+        );
+    }
+}

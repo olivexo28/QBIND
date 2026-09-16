@@ -840,6 +840,19 @@ where
 
         let is_new = !self.blocks.contains_key(&id);
 
+        // Compute height identically to `register_block`, but from the
+        // PRE-EVICTION state: the block-slot reservation below may legitimately
+        // evict a safe-to-evict parent, and the candidate's height must reflect
+        // the parent that was known at admission time rather than falling back
+        // to zero after that parent is gone. Deriving this state-dependent
+        // metadata before `reserve_block_slot_for_new` preserves the existing
+        // semantics for genuinely missing parents (still height 0) while
+        // preventing an evicted-but-known parent from collapsing the height.
+        let height = match parent_id.as_ref() {
+            None => 0,
+            Some(pid) => self.blocks.get(pid).map(|p| p.height + 1).unwrap_or(0),
+        };
+
         // Block-slot admission: for a genuinely new block, make room by evicting
         // OTHER safe-to-evict blocks first — never the candidate. Atomic: on
         // rejection nothing is evicted or inserted.
@@ -855,12 +868,6 @@ where
             evidence.certificate().height,
             evidence.signers().to_vec(),
         ));
-
-        // Compute height identically to `register_block`.
-        let height = match parent_id.as_ref() {
-            None => 0,
-            Some(pid) => self.blocks.get(pid).map(|p| p.height + 1).unwrap_or(0),
-        };
 
         let node = BlockNode::new(id.clone(), view, parent_id, justify_qc, height)
             .with_verified_justification(evidence, needed);
