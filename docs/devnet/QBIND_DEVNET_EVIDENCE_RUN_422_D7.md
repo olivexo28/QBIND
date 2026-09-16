@@ -4438,6 +4438,17 @@ continuation are recorded exactly as returned at the closing checkpoint (below).
 CodeQL analysis or an unavailable/errored reviewer is recorded as incomplete/unverified,
 never converted into a pass or into "0 alerts".
 
+* **`secret_scanning`** (changed files) → **no secrets detected**.
+* **Code Review** → returned "reviewed 6 file(s), no review comments", but the run also
+  reported a **backend error** ("Code review tool is not available in this environment …
+  model claude-sonnet-4.6 not found in registry"). Per the record-literally rule, the empty
+  result **after a backend error is treated as incomplete/unverified — NOT a clean review**.
+* **CodeQL Security Scan** → reported "0 alerts" but with "Analysis was **skipped** because
+  the database size is too large." Per the record-literally rule this is a **SKIPPED /
+  not-run analysis — NOT 0-alerts-verified**. CodeQL was declared non-trivial (production
+  consensus source changed) but could not execute here; a full CodeQL pass over the
+  production-source correction remains **not captured**.
+
 ### Retained posture (unchanged by this continuation)
 
 `D7_STATUS=PARTIAL-CODE-TEST / PRODUCTION-LIFECYCLE-UNAVAILABLE`;
