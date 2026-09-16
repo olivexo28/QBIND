@@ -1245,14 +1245,30 @@ fn c3d_14_checked_aggregate_signature_bytes_boundaries() {
         }
         other => panic!("expected AggregateSignatureBytesTooLarge, got {:?}", other),
     }
-    // A checked-add overflow is reported saturated to usize::MAX.
-    match checked_aggregate_signature_bytes([usize::MAX, usize::MAX]) {
+    // Actual checked-add overflow: the first addition (0 + 1) succeeds and stays
+    // within the acceptance bound, then the second addition (1 + usize::MAX)
+    // overflows the usize accumulator. The overflow is reported with the
+    // aggregate saturated to usize::MAX and the documented acceptance bound.
+    match checked_aggregate_signature_bytes([1usize, usize::MAX]) {
         Err(QcDomainVerifyError::AggregateSignatureBytesTooLarge { aggregate, max }) => {
             assert_eq!(aggregate, usize::MAX);
             assert_eq!(max, MAX_AGGREGATE_SIGNATURE_BYTES);
         }
         other => panic!(
             "expected saturated AggregateSignatureBytesTooLarge, got {:?}",
+            other
+        ),
+    }
+    // Retained immediate bound-rejection case: a single element already exceeding
+    // the aggregate bound is rejected on the first addition via the `> MAX`
+    // branch (not checked-add overflow), reporting the exact aggregate value.
+    match checked_aggregate_signature_bytes([usize::MAX]) {
+        Err(QcDomainVerifyError::AggregateSignatureBytesTooLarge { aggregate, max }) => {
+            assert_eq!(aggregate, usize::MAX);
+            assert_eq!(max, MAX_AGGREGATE_SIGNATURE_BYTES);
+        }
+        other => panic!(
+            "expected immediate bound-rejection AggregateSignatureBytesTooLarge, got {:?}",
             other
         ),
     }

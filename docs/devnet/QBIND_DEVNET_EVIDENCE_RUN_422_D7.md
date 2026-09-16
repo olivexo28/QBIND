@@ -3432,3 +3432,128 @@ Retained verdicts are unchanged:
 `PRODUCTION_WIRE_CHAIN_ID_BEHAVIOR=UNCHANGED`,
 `CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED`,
 `SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO`.
+
+## Run 422 D7-C3D — arithmetic-test & evidence correction (this pass, test + comments + docs)
+
+This subsection records a narrow follow-up to the structural-preflight correction
+above. It corrects one ineffective test assertion and reconciles the
+allocation-order wording and provenance. **No production logic, exports, wire
+format, engine, handler, storage, authority, or activation change was made.** The
+dormant `verify_quorum_certificate_with_domain` boundary is unchanged and still
+has no non-test callers.
+
+### Actual state (this pass)
+
+* Branch (actual, in this shallow clone): `copilot/copilotcopilotcopilotrun-422-d7-c3c-again-again`.
+  Recorded as-is; not renamed, not rewritten.
+* HEAD at start of this pass: `d3087542ce6aa3d32a6eaad8a94497e4924c43d0`
+  (subject `update`); its only available parent / shallow boundary is
+  `95d863243e96cb189d9ae7dc28b05d1e155a93c8`. `git rev-list --count HEAD == 2`;
+  `.git/shallow` pins `95d8632`.
+* The task-reported reviewed revision `df9f742f316c5610d1caa5ca7b6350a701c86bae`
+  and reported code checkpoint `50aeba3fd6413ced471bd97950a95b1d1f595f0b` are
+  **not present as objects** in this shallow clone (`git cat-file -t` fails for
+  both). Recorded as missing historical objects, not missing source; no ancestry
+  was manufactured. Present source was verified directly in the worktree.
+
+### Correction dispositions
+
+**1. Arithmetic test (`c3d_14_checked_aggregate_signature_bytes_boundaries`) —
+CORRECTED.** The former input `[usize::MAX, usize::MAX]` never reached the
+checked-add overflow path: the *first* element (`usize::MAX`) already exceeds
+`MAX_AGGREGATE_SIGNATURE_BYTES`, so `checked_aggregate_signature_bytes` rejects it
+on the first addition via the `> MAX` branch (with `aggregate == usize::MAX`),
+returning before the second element is ever added. It exercised immediate bound
+rejection, not addition overflow. The test now uses `[1usize, usize::MAX]`: the
+first addition `0 + 1 == 1` succeeds and remains within the acceptance bound, and
+the *second* checked addition `1 + usize::MAX` overflows the `usize` accumulator,
+returning the existing bounded `AggregateSignatureBytesTooLarge { aggregate:
+usize::MAX, max: MAX_AGGREGATE_SIGNATURE_BYTES }`. A separate retained case
+`[usize::MAX]` is now explicitly described as **immediate bound rejection** (not
+overflow). The exact-bound (`[MAX_AGGREGATE_SIGNATURE_BYTES] ⇒ Ok`) and over-bound
+(`[MAX_AGGREGATE_SIGNATURE_BYTES, 1] ⇒ AggregateSignatureBytesTooLarge`) cases are
+retained unchanged. No production arithmetic or acceptance policy was altered.
+
+**2. Allocation-order descriptions — RECONCILED (comments/docs only).** The
+implemented order is: signature-count representability and the bitmap bounds
+(global length, membership-relative span) precede signer-vector construction;
+`collect_signers` then materializes a **temporary** signer vector; only after that
+do the popcount-correspondence, per-signature-size (`MAX_SIGNATURE_LEN`), and
+checked aggregate-size checks run. Those per-signature and aggregate checks
+therefore precede only the signature-buffer clone and backend invocation — **not
+every allocation**. The blanket claim that every structural check precedes any
+signer-result allocation is removed from the module doc "Size bounds" heading,
+protocol §9A, and this evidence. The temporary vector is bounded by the bitmap's
+capacity: before correspondence succeeds it can hold up to `65536` entries (a full
+8192-byte bitmap's popcount, one more than `MAX_SIGNATURE_COUNT`), and only after
+successful correspondence is it bounded by `MAX_SIGNATURE_COUNT` (`65535`).
+Production behavior was **not** changed to match any overstated description; the
+signature-count-representability check specifically does still precede the signer
+vector and remains accurately described as such.
+
+### Provenance & evidence reconciliation
+
+* The actual starting-to-final diff (`95d8632` → `d3087542`) spans **FIVE** files:
+  `crates/qbind-consensus/src/lib.rs`,
+  `crates/qbind-consensus/src/qc_verify_domain.rs`, the C3D test file
+  `crates/qbind-consensus/tests/run_422_d7c3d_qc_domain_verification_tests.rs`, and
+  the two Markdown records
+  (`docs/protocol/QBIND_PROPOSAL_VOTE_SIGNING_DOMAIN_V2.md`, this evidence file)
+  — `git diff --stat` confirms 5 files. The `lib.rs` **export** changes
+  (`pub mod qc_verify_domain` + the re-export list) occurred at the reported code
+  checkpoint `50aeba3`; they do **not** predate this correction line and are not
+  described as pre-existing.
+* The subsequent Rust-file changes at the reviewed revision `df9f742` were
+  **formatting / newline-only**, with **no behavioral change** (recorded from the
+  task-supplied provenance; those two revisions are not locally recoverable in
+  this shallow clone, so this is a supplied report rather than an independently
+  re-derived diff).
+
+### Validation (this pass) — independently executed here
+
+* `cargo test -p qbind-consensus --test run_422_d7c3d_qc_domain_verification_tests`
+  ⇒ **46 passed; 0 failed; 0 ignored** (finished ~1.3s).
+* Focused Clippy on the changed test target
+  (`cargo clippy -p qbind-consensus --test run_422_d7c3d_qc_domain_verification_tests`)
+  ⇒ no warnings referencing the changed test target. The 8 emitted warnings are
+  pre-existing `qbind-consensus` **lib** warnings in unrelated modules
+  (`adversarial_multi_sim.rs`, `basic_hotstuff_engine.rs`, `slashing/mod.rs`,
+  the `needless_return`/hardened-evidence sites); they are untouched and not
+  introduced here.
+* Formatting / whitespace, restricted to edited files: CRLF line endings
+  preserved on all three edited source/doc files (verified per file); no trailing
+  whitespace introduced in edited hunks. `rustfmt --check` on the two Rust files
+  reports only a pre-existing end-of-file blank-line normalization artifact at
+  lines outside the edited regions (a CRLF-vs-rustfmt artifact), not a change from
+  this pass.
+
+### Not re-executed this pass (supplied vs. recovered)
+
+Per scope, **no** release rebuild or broad regression rerun was performed for this
+test/comment/documentation correction. The node-check (`cargo check -p qbind-node`),
+Run 420 production-policy reachability / startup-refusal, release-build, and
+security-tool (CodeQL / review-tool) outcomes are **preserved at their actual
+prior reported checkpoints** as recorded elsewhere in this document; they are
+**supplied prior results**, not independently recovered execution logs from this
+pass, and are not relabelled as newly executed. Reported literally: the
+security-tool / CodeQL results carried forward remain **SKIPPED / INCOMPLETE**
+(database-size skips / not-run in this environment) — a skip, unavailable backend,
+or model error is recorded as such and is **not** a successful scan or review.
+
+### Legacy / D6 control attribution
+
+The three-way legacy/D6 controls exercise (a) **raw ML-DSA-44 verification over
+each signed input** (legacy signatures verify over legacy bytes and fail under the
+D6 v2 preimage; D6 signatures fail over legacy bytes), and (b) the **D6 QC
+entrypoint** (`verify_vote_msg_with_domain` via the domain QC verifier). The
+**legacy public QC verifier was not exercised**; no test implies otherwise.
+
+### Retained posture (this pass)
+
+The positive verdict covers **only** the dormant QC-verification boundary. No
+readiness item moves Green. Retained verdicts are unchanged: `D7_STATUS=PARTIAL`;
+production authority remains **unavailable**; `GENESIS_AUTHORITY_ACTIVATION=DISABLED`;
+`DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED`;
+`CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED`;
+`SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO`. No engine adoption, activation,
+readiness promotion, or Run 423 work.

@@ -78,8 +78,15 @@
 //!   members that fall *within* the span continue to reject at the membership
 //!   check. Because every `max_id <= u16::MAX`, the span is always
 //!   `<= MAX_BITMAP_LEN`.
-//! * `popcount(bitmap) == signatures.len()` is required; signatures are
-//!   associated with set bits in ascending-bit order.
+//! * `popcount(bitmap) == signatures.len()` is required; `collect_signers`
+//!   builds the temporary ascending-bit-order signer vector that this
+//!   correspondence is checked against. That temporary vector is bounded by the
+//!   bitmap capacity — before correspondence succeeds it can hold up to `65536`
+//!   entries (a full 8192-byte bitmap's popcount), and only after successful
+//!   correspondence is it bounded by [`MAX_SIGNATURE_COUNT`]. The per-signature
+//!   and aggregate size checks below therefore run *after* this temporary
+//!   allocation; they precede only the signature-buffer clone and any backend
+//!   invocation, not every allocation.
 //! * **Per-signature size.** Each signature length ≤ [`MAX_SIGNATURE_LEN`] (the
 //!   wire u16 length bound), validated for *every* signature before the crypto
 //!   loop.
@@ -785,10 +792,13 @@ where
         });
     }
 
-    // Step 4d: popcount(bitmap) == signatures.len(). Collecting the signer ids
-    // also yields the ascending-bit-order signer list. Because the count is
-    // already representable and popcount must equal it, the signer vector is
-    // bounded by MAX_SIGNATURE_COUNT.
+    // Step 4d: collect_signers materializes the ascending-bit-order signer
+    // vector, then popcount(bitmap) == signatures.len() is checked against it.
+    // The temporary vector is bounded by the bitmap's capacity: before this
+    // correspondence succeeds it can hold up to 65536 entries (a full 8192-byte
+    // bitmap's popcount, one more than MAX_SIGNATURE_COUNT). Only after the
+    // correspondence succeeds is it bounded by MAX_SIGNATURE_COUNT, because the
+    // count was already checked representable and popcount must equal it.
     let signers = collect_signers(&qc.signer_bitmap)?;
     if signers.len() != qc.signatures.len() {
         return Err(QcDomainVerifyError::SignatureCountMismatch {
