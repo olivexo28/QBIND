@@ -4461,3 +4461,83 @@ height regression and strengthens allocation accounting only; absent-QC/bootstra
 authorization, outbound QC reconstruction, Timeout/NewView migration, persistent
 storage/recovery, production authority lifecycle/activation, durable anti-rollback and Run 423
 remain separate, open obligations. No production activation or readiness promotion is performed.
+
+## Run 422 D7-D1 — Production authority lifecycle contract and reuse audit (documentation only)
+
+**Documentation and source inspection only.** No Rust, test, configuration,
+storage-schema, wire-format, workflow, or activation change. All prior D7 work,
+`task/warning.txt`, and unrelated files are preserved.
+
+### Inspected state (recorded, not manufactured)
+
+* **Working branch (actual):** `copilot/copilotcopilot-run-422-d7-c3f`; the task's
+  reported branch `copilot/copilot-run-422-d7-c3f` differs by the doubled
+  `copilot` segment.
+* **Worktree HEAD (actual):** `38339d697797aa320ab372fdd5849ab0b45e595b` (`update`),
+  worktree clean before this pass.
+* **Accepted C3F final revision `f97b49f72dc9af843d237f1758376096b58c08c1`:** object
+  **absent** from this clone even after `git fetch --unshallow` (840 commits);
+  not in local ancestry and not referenced by any tracked file. Ancestry to an
+  absent object is not manufactured.
+* **Accepted tested checkpoint `5cedb9ca6b55cb4931d632730f7f390237978203`:** object
+  **absent** locally, but cited textually in the C3F correction subsections above
+  as the tested revision. Missing history is distinguished from missing
+  implementation: the C3D verifier, the C3E present-QC gate, and the C3F
+  retention path are all present in this worktree.
+
+### What D7-D1 produced
+
+* New single authoritative contract
+  `docs/protocol/QBIND_PROPOSAL_VOTE_AUTHORITY_LIFECYCLE_CONTRACT.md`: inspected
+  revision + source references (S1–S17); a reuse table
+  (requirement -> symbol/path -> guarantee -> limitation -> reuse/adapt/missing);
+  the proposed serialized-transition lifecycle and effect-boundary table; the
+  durable-freshness / rollback threat model (T1–T6) with unresolved anchor
+  decision; a first-release **Profile A (founding-authority-only)**
+  recommendation; the dependency order; acceptance scenarios; and exactly one
+  bounded next task.
+* A short **successor reference** appended to
+  `docs/protocol/QBIND_GENESIS_AUTHORITY_ENGINE_QC_INTEGRATION_AUDIT.md` (§14).
+
+### Reuse findings (summary)
+
+* **Reuse (do not duplicate):** genesis verify + pin (S1), genesis authority
+  builder (S2, dormant), founding-epoch guard (S3), fail-closed admission/owner
+  (S4/S5), outbound + cached re-emission + restore-disposition (S6/S7/S8),
+  storage observation (S9), genesis/network correspondence + alias mapping
+  (S10/S11/S12), QC verifier (S13, dormant), present-QC gate (S14), verified
+  retention (S15).
+* **Missing (not satisfied by reuse):** a **durable, rollback-resistant current
+  authorization** source (the production `CurrentAuthorizationOwner` constructor
+  is `unavailable(...)`; `Established` is `cfg(test)` only) and an **independent
+  freshness anchor** (S17 replay backend and the Run 055 sequence file are
+  same-disk / disabled and have no anti-rollback). Replay prevention and crash
+  consistency are **not** equated with rollback-resistant current authorization.
+
+### Recommended lifecycle profile and next task
+
+* **Profile A (founding-authority-only)** first; do not broaden the founding-epoch
+  guard or treat fixed authority as removing restart/rollback safety.
+* **Bounded next task:** a read-only, non-authorizing durable **freshness-anchor
+  observation** module that compares an abstract externally sourced current-epoch
+  witness to the S9 persisted epoch and emits a typed classification, never
+  activating authority and never derived from peers or the same DB. Files, tests,
+  and exclusions are enumerated in the contract §9.
+
+### Validation (documentation-only)
+
+Source-reference, link/path, diff-scope, secret, and line-ending checks performed
+below. No Cargo test/check/release rebuild is required for this phase; earlier
+execution results are retained at their actual tested revisions. Available
+review/security-tool outcomes are recorded literally in the final report.
+
+### Retained posture (unchanged by D7-D1)
+
+`D7_STATUS=PARTIAL-CODE-TEST / PRODUCTION-LIFECYCLE-UNAVAILABLE`;
+`DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED`;
+`GENESIS_AUTHORITY_ACTIVATION=DISABLED`;
+`PRODUCTION_WIRE_CHAIN_ID_BEHAVIOR=UNCHANGED`;
+`CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED`;
+`SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO`. This phase proposes a lifecycle
+and audits reuse only; it does not activate authority, promote readiness, or
+perform Run 423 work.
