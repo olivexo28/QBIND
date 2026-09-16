@@ -1131,3 +1131,48 @@ and checklists agree with the §15 summary. For cross-reference only:
 
 Activation stays disabled; no code, test, or readiness item changes. This note is
 additive.
+
+## 17. Successor note (Run 422 D7-D1 five-correction contract reconciliation)
+
+This additive note records the D7-D1 pass that corrected the five remaining
+inconsistencies (A–E) in the lifecycle contract
+(`docs/protocol/QBIND_PROPOSAL_VOTE_AUTHORITY_LIFECYCLE_CONTRACT.md`) and reconciles
+this audit's summaries with the corrected text. For cross-reference only (the
+authoritative text is in the contract):
+
+* **A — one complete activation checklist.** The three requirements stay distinct:
+  (A) trusted authorization to activate the exact authority, (B) evidence that the
+  authorization is current (freshness), and (C) continuity of signing / consensus
+  state across restart and rollback. Contract §3.1 no longer treats correspondence
+  plus freshness as sufficient authorization; §3.3.1 lists requirement B separately
+  from requirement C and is the single complete activation acceptance checklist;
+  §6.1 separates authorized-epoch correspondence, activation authorization, and
+  freshness; §4.0 references §3.3.1.
+* **B — circular dependency removed.** Contract §7 now has implementation and
+  isolated validation **produce** the configured-authority release-binary evidence,
+  and permits production activation **only after** the complete §3.3.1 checklist is
+  satisfied — evidence is no longer required both before and after the work that
+  produces it, and activation is never its own prerequisite. Profile A stays a
+  proposed founding-authority-only profile; no test bypass or new activation flag is
+  authorized.
+* **C — exact rejection categories.** Contract §4.1 now reuses this audit's
+  Required-policy condition/result/timing table (§2): with no effective authority
+  the handler rejects via `inbound_{proposal,vote}_verification_context_unavailable_total`;
+  with authority present but the snapshot absent it rejects via
+  `inbound_{proposal,vote}_current_state_unavailable_total`; both before crypto.
+  Production wiring (`main.rs:5549` = `None`) takes the first case. The
+  current-state-unavailable branch is a compiled production branch, not
+  `cfg(test)`-only; only constructing an `Established` current authorization is
+  `cfg(test)`-restricted (the sole production constructor is `unavailable(...)`).
+* **D — rollback-domain requirement.** Contract §4.2 and §8 scenario 4 now require
+  appropriately authenticated trusted state / evidence outside the specified attacker
+  rollback domain rather than a mandated external witness / off-box service; the
+  empty-database ambiguity requirement and the epoch-0 counterexample (§2.3.1) are
+  intact.
+* **E — characterization fixture signing.** Contract §9 now permits isolated
+  test-fixture signing for the characterization scenarios while keeping production
+  signing enablement and authority activation prohibited; the three scenarios are
+  preserved and not implemented in this pass.
+
+Activation stays disabled; no code, test, or readiness item changes. This note is
+additive.
