@@ -4836,8 +4836,8 @@ ML-DSA-44 backend is used for characterization only.
   which cannot be verified from this shallow clone. No accepted C3F implementation
   or D1 documentation review was reopened.
 * Starting SHA of this correction pass (D2-findings correction): `1c29ae6` (branch
-  HEAD at checkout). A new test checkpoint is recorded by the progress commit that
-  carries the corrected test target; the final pushed SHA is that commit.
+  HEAD at checkout). New test checkpoint recorded for this pass: `d7002e4`
+  (the corrected test target + evidence). Validation below was run at this tree.
 * Supplied task branch used with normal commits + push only. No PR, no main
   changes, no branch rename, no force-push, rebase, or history rewrite.
   `task/warning.txt` and unrelated files untouched.
@@ -5019,10 +5019,13 @@ required for test/documentation-only changes), re-run at the corrected checkpoin
 * `cargo clippy -p qbind-node --test run_422_d7d2_signing_state_recovery_tests` → exit 0; no warning is attributable to the edited target (only pre-existing `qbind-node` lib warnings, unrelated and unchanged).
 
 All exit codes `0`. No repository-wide formatter was run; CRLF line endings of the
-edited Markdown files are preserved. Unrelated broad-target failures, if any, are
-out of scope and were not modified to green this report. Automated review /
-security tooling outcomes, if invoked by the environment, are recorded literally
-by that tooling; this pass does not claim a security-review pass on their behalf.
+edited Markdown and Rust files are preserved. Unrelated broad-target failures, if
+any, are out of scope and were not modified to green this report. Automated
+tooling outcomes are recorded literally: the Code Review pass returned no review
+comments but its model backend reported an error (`model claude-sonnet-4.6 not
+found in registry`), and the CodeQL Security Scan was **skipped** (changes declared
+trivial: test + documentation only). Neither a skip nor a backend error
+establishes a successful security review; `SECURITY_POSTURE` is unchanged.
 
 ### Scoped verdict
 
