@@ -20418,6 +20418,269 @@ mod tests {
                             "evidence retained as justification evidence"
                         );
                     }
+
+                    // ======================= L =======================
+                    // Defect A (eviction-order) regression: a successful
+                    // admission that ACTUALLY requires eviction must derive the
+                    // candidate's height from the PRE-eviction state. A
+                    // protected committed anchor A (height 4) and an
+                    // UNPROTECTED child P (height 5, no lock / own-QC) fill both
+                    // block slots (limit 2); admitting candidate C whose parent
+                    // is P forces P's eviction. C must register at height 6
+                    // (P.height + 1), never collapsing to height 0 after its
+                    // known parent is evicted. The protected anchor is
+                    // preserved, the exact verified evidence is retained, byte
+                    // accounting matches the retained evidence, and the block
+                    // count stays within the limit. An otherwise-identical
+                    // free-slot control (limit 3, no eviction) admits the SAME
+                    // candidate at the SAME height without evicting P.
+                    #[test]
+                    fn c3f_l_eviction_preserves_candidate_height_and_evidence() {
+                        // Engine seeded with a protected committed anchor A
+                        // (height 4) plus an unprotected child P (height 5,
+                        // parent = A, no own_qc / lock so it is safe to evict),
+                        // under a given block-slot limit and an ample retention
+                        // budget.
+                        fn engine_with_parent(
+                            pv: &ProposalVoteAuthority,
+                            max_pending_blocks: usize,
+                            parent_id: [u8; 32],
+                        ) -> BasicHotStuffEngine<[u8; 32]> {
+                            let limits = ConsensusLimitsConfig {
+                                max_pending_blocks,
+                                ..ConsensusLimitsConfig::default()
+                            };
+                            let mut e = BasicHotStuffEngine::<[u8; 32]>::with_state_limits(
+                                ValidatorId(0),
+                                pv.validators.as_ref().clone(),
+                                limits,
+                            );
+                            e.initialize_from_snapshot_baseline(
+                                C3E_I_ANCHOR,
+                                C3E_I_BASELINE_HEIGHT,
+                            );
+                            // Unprotected child P at height 5 (parent = anchor A).
+                            e.state_mut().register_block(
+                                parent_id,
+                                C3E_I_BASELINE_HEIGHT + 1,
+                                Some(C3E_I_ANCHOR),
+                                None,
+                            );
+                            e
+                        }
+
+                        // A verified-QC proposal whose PARENT is `parent_id`,
+                        // signed over the v2 domain. Mirrors `proposal_with_qc`
+                        // but overrides the parent so the candidate's parent is
+                        // the unprotected block P.
+                        fn proposal_with_parent(
+                            proposer: u16,
+                            height: u64,
+                            fixture: &Fixture,
+                            domain: &ProposalVoteSigningDomainV2,
+                            parent_id: [u8; 32],
+                            qc: WireQc,
+                        ) -> BlockProposal {
+                            let mut header = base_header(proposer);
+                            header.chain_id = C3E_WIRE;
+                            header.height = height;
+                            header.round = height;
+                            header.parent_block_id = parent_id;
+                            let mut p = BlockProposal {
+                                header,
+                                qc: Some(qc),
+                                txs: vec![],
+                                signature: vec![],
+                            };
+                            let pre = domain.proposal_preimage(&p);
+                            let sk =
+                                fixture.sks.get(&ValidatorId(proposer as u64)).expect("sk");
+                            p.signature = MlDsa44Backend::sign(sk, &pre).expect("sign");
+                            p
+                        }
+
+                        let f = make_fixture(4);
+                        let (reg, _c) = counting_registry();
+                        // A local signer is available so acceptance is exercised
+                        // through the same real handler path as the other tests.
+                        let pv = c3e_pv(&f, c3e_domain(), reg, Some(ValidatorId(0)));
+                        let snap = coherent_snapshot_for(&pv);
+                        let proposer: u16 = 2;
+                        // Parent P's id: distinct from the anchor and from the
+                        // derived candidate id.
+                        let parent_p: [u8; 32] = [0x5C; 32];
+                        let qc = valid_quorum(&f);
+                        let embedded = qc.clone();
+                        let candidate =
+                            c3e_candidate_block_id(proposer, C3E_I_TARGET_VIEW, &parent_p);
+
+                        // ---- Eviction-required admission: {A, P} full at limit 2. ----
+                        let mut engine = engine_with_parent(&pv, 2, parent_p);
+                        assert_eq!(
+                            engine.state().block_count(),
+                            2,
+                            "protected anchor A and unprotected parent P fill both slots"
+                        );
+                        assert_eq!(
+                            engine
+                                .state()
+                                .get_block(&parent_p)
+                                .expect("parent P present")
+                                .height,
+                            C3E_I_BASELINE_HEIGHT + 1,
+                            "parent P is registered at height 5 before admission"
+                        );
+                        let evicted_before = engine.state().evicted_blocks();
+
+                        let p = proposal_with_parent(
+                            proposer,
+                            C3E_I_TARGET_VIEW,
+                            &f,
+                            &c3e_domain(),
+                            parent_p,
+                            qc.clone(),
+                        );
+                        let mut stats = BinaryConsensusLoopInboundStats::default();
+                        let mut restore = RestoreCatchupModeState::from_config(None);
+                        let facade = D7ActionRecorder::default();
+                        deliver(
+                            &mut engine, &mut stats, &mut restore, &pv, &snap, &p,
+                            Some(&facade), &origin_for(proposer),
+                        );
+
+                        assert_eq!(
+                            stats.inbound_proposal_verified_qc_handoff_total, 1,
+                            "eviction-required admission takes the verified handoff"
+                        );
+                        assert_eq!(
+                            stats.inbound_proposal_verified_qc_handoff_rejected_total, 0,
+                            "admission is accepted (room made by evicting the unprotected parent)"
+                        );
+                        assert_eq!(
+                            stats.inbound_proposals_engine_accepted, 1,
+                            "candidate accepted after eviction"
+                        );
+
+                        // Candidate height is derived from the PRE-eviction
+                        // parent, NOT collapsed to zero after P is evicted.
+                        let node = engine
+                            .state()
+                            .get_block(&candidate)
+                            .expect("candidate registered");
+                        assert_eq!(
+                            node.height,
+                            C3E_I_BASELINE_HEIGHT + 2,
+                            "candidate registers at height 6 (parent P height 5 + 1)"
+                        );
+                        assert_ne!(
+                            node.height, 0,
+                            "known-parent height is never lost to eviction"
+                        );
+
+                        // Expected eviction occurred; the protected anchor stays.
+                        assert_eq!(
+                            engine.state().evicted_blocks(),
+                            evicted_before + 1,
+                            "exactly one block (the unprotected parent P) was evicted"
+                        );
+                        assert!(
+                            engine.state().get_block(&parent_p).is_none(),
+                            "unprotected parent P was evicted to make room"
+                        );
+                        assert!(
+                            engine.state().get_block(&C3E_I_ANCHOR).is_some(),
+                            "protected committed anchor is never evicted"
+                        );
+
+                        // Candidate and its EXACT verified evidence retained,
+                        // with correct logical justification and byte accounting.
+                        let ev = engine
+                            .state()
+                            .verified_justification(&candidate)
+                            .expect("evidence retained for the admitted candidate");
+                        assert_eq!(
+                            ev.certificate(),
+                            &embedded,
+                            "exact verified evidence retained"
+                        );
+                        let jqc = node
+                            .justify_qc
+                            .as_ref()
+                            .expect("logical justification present");
+                        assert_eq!(
+                            jqc.block_id, [9u8; 32],
+                            "justification is the certificate's (parent) block id"
+                        );
+                        assert_eq!(jqc.view, 1, "justification view is the certificate height");
+                        assert_eq!(
+                            jqc.signers,
+                            vec![ValidatorId(0), ValidatorId(1), ValidatorId(2)],
+                            "justification signers are the verified signer set"
+                        );
+                        assert_eq!(
+                            engine.state().retained_evidence_bytes(),
+                            charge(ev),
+                            "retained-evidence byte accounting equals the retained charge"
+                        );
+
+                        // Block count stays within the configured limit.
+                        assert_eq!(
+                            engine.state().block_count(),
+                            2,
+                            "block count remains within the configured slot limit"
+                        );
+
+                        // ---- Free-slot control: identical inputs, one extra
+                        // slot, no eviction required. ----
+                        let mut engine2 = engine_with_parent(&pv, 3, parent_p);
+                        let evicted_before2 = engine2.state().evicted_blocks();
+                        let p2 = proposal_with_parent(
+                            proposer,
+                            C3E_I_TARGET_VIEW,
+                            &f,
+                            &c3e_domain(),
+                            parent_p,
+                            qc.clone(),
+                        );
+                        let mut stats2 = BinaryConsensusLoopInboundStats::default();
+                        let mut restore2 = RestoreCatchupModeState::from_config(None);
+                        let facade2 = D7ActionRecorder::default();
+                        deliver(
+                            &mut engine2, &mut stats2, &mut restore2, &pv, &snap, &p2,
+                            Some(&facade2), &origin_for(proposer),
+                        );
+                        assert_eq!(
+                            stats2.inbound_proposals_engine_accepted, 1,
+                            "free-slot control admits the candidate"
+                        );
+                        let node2 = engine2
+                            .state()
+                            .get_block(&candidate)
+                            .expect("control candidate registered");
+                        assert_eq!(
+                            node2.height,
+                            C3E_I_BASELINE_HEIGHT + 2,
+                            "free-slot control registers the SAME height 6 (no eviction dependency)"
+                        );
+                        assert_eq!(
+                            engine2.state().evicted_blocks(),
+                            evicted_before2,
+                            "no eviction occurred with a free slot"
+                        );
+                        assert!(
+                            engine2.state().get_block(&parent_p).is_some(),
+                            "parent P retained when a free slot exists"
+                        );
+                        assert!(
+                            engine2.state().get_block(&C3E_I_ANCHOR).is_some(),
+                            "protected anchor retained in the control"
+                        );
+                        assert_eq!(
+                            engine2.state().block_count(),
+                            3,
+                            "control holds anchor, parent and candidate within the limit"
+                        );
+                    }
                 }
             }
 
