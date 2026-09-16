@@ -13,7 +13,10 @@
 //! - Parent block reference
 //! - Justifying QC (QC that justifies this block)
 
+use std::sync::Arc;
+
 use crate::qc::QuorumCertificate;
+use crate::qc_verify_domain::VerifiedQuorumCertificate;
 
 /// A minimal internal node structure representing a block in the HotStuff tree.
 ///
@@ -40,6 +43,35 @@ pub struct BlockNode<BlockIdT> {
     pub own_qc: Option<QuorumCertificate<BlockIdT>>,
     /// Height of this block in the chain from genesis.
     pub height: u64,
+    /// Run 422 D7-C3F: **non-serialized** cryptographic verification evidence
+    /// for this block's `justify_qc` (the embedded, *parent-certifying* QC),
+    /// present only when the block was registered through the verified
+    /// ingestion path
+    /// ([`HotStuffStateEngine::register_block_with_verified_justification`]).
+    ///
+    /// This is an immutable shared handle
+    /// (`Arc<`[`VerifiedQuorumCertificate`]`>`) so the complete certificate,
+    /// signatures, bitmap, domain, authorized epoch, signer identities and
+    /// voting-power result can be retained and inspected read-only without
+    /// repeatedly cloning signature buffers.
+    ///
+    /// Semantics and invariants:
+    /// - It is **never** serialized and has no `Deserialize`; restart/restore
+    ///   paths that reconstruct blocks from logical QC fields leave it `None`
+    ///   (they never manufacture verified evidence).
+    /// - It records verification under trusted inputs **at admission time
+    ///   only**; it is not current authorization, an activation capability, or
+    ///   durable freshness.
+    /// - It refers to the QC that certifies this block's *parent*; it must
+    ///   never be treated as a certificate for this (child) block itself. The
+    ///   `own_qc` field remains the only slot for a QC formed *for this block*.
+    /// - A legacy/unverified (re-)registration replaces the node with `None`
+    ///   here, so an unverified block never inherits an earlier verified
+    ///   designation.
+    ///
+    /// [`HotStuffStateEngine::register_block_with_verified_justification`]:
+    ///     crate::hotstuff_state_engine::HotStuffStateEngine::register_block_with_verified_justification
+    pub verified_justification: Option<Arc<VerifiedQuorumCertificate>>,
 }
 
 impl<BlockIdT: Clone> BlockNode<BlockIdT> {
@@ -61,6 +93,16 @@ impl<BlockIdT: Clone> BlockNode<BlockIdT> {
             justify_qc,
             own_qc: None,
             height,
+            verified_justification: None,
         }
+    }
+
+    /// Run 422 D7-C3F: attach non-serialized verification evidence for this
+    /// block's `justify_qc`. Consumes and returns `self` so callers can build a
+    /// node and its evidence handle in one expression. The evidence is an
+    /// immutable shared handle; see [`BlockNode::verified_justification`].
+    pub fn with_verified_justification(mut self, evidence: Arc<VerifiedQuorumCertificate>) -> Self {
+        self.verified_justification = Some(evidence);
+        self
     }
 }

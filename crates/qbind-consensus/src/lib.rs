@@ -63,7 +63,7 @@ pub use basic_hotstuff_engine::{
     BasicHotStuffEngine, ConsensusProgressRecorder, NoopConsensusProgressRecorder,
     NoopValidatorEquivocationRecorder, NoopValidatorVoteRecorder, NoopViewDurationRecorder,
     PendingReconfigIntentError, ValidatorEquivocationRecorder, ValidatorVoteRecorder,
-    ViewDurationRecorder,
+    VerifiedProposalIngestError, ViewDurationRecorder,
 };
 pub use block_state::BlockNode;
 pub use crypto_verifier::{
@@ -76,7 +76,10 @@ pub use driver::{
     ToValidatorId, ValidatorContext,
 };
 pub use governed_key_registry::{ConsensusKeyGovernance, GovernedValidatorKeyRegistry};
-pub use hotstuff_state_engine::{CommittedEntry, HotStuffStateEngine};
+pub use hotstuff_state_engine::{
+    CommittedEntry, EvidenceRetentionError, HotStuffStateEngine,
+    DEFAULT_MAX_RETAINED_EVIDENCE_BYTES,
+};
 pub use ids::{ConsensusNodeId, ValidatorId, ValidatorPublicKey};
 pub use key_registry::{
     SuiteAwareValidatorKeyProvider, ValidatorKeyProvider, ValidatorKeyRegistry,

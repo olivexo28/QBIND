@@ -570,6 +570,41 @@ impl VerifiedQuorumCertificate {
     pub fn domain(&self) -> &ProposalVoteSigningDomainV2 {
         &self.domain
     }
+
+    /// Run 422 D7-C3F: the number of bytes this evidence occupies when retained
+    /// by an engine's block tree, for **checked** retention-budget accounting.
+    ///
+    /// Existing block-count limits alone are **not** an adequate byte bound:
+    /// each retained certificate carries variable-length constituent signature
+    /// buffers and a signer bitmap. This method sums those variable buffers
+    /// (all constituent signature bytes and the bitmap) plus the derived signer
+    /// identity list plus a fixed per-certificate overhead approximating the
+    /// scalar wire fields and metadata. It uses saturating arithmetic so a
+    /// pathological (already length-bounded) certificate can never wrap the
+    /// accumulator; the verifier's own [`crate::qc_verify_domain::MAX_AGGREGATE_SIGNATURE_BYTES`]
+    /// and bitmap bounds keep the realistic value far below `u64::MAX`.
+    ///
+    /// This is the certificate's *own* retained footprint only; it deliberately
+    /// does not attempt a complete process-wide memory audit.
+    pub fn retained_byte_size(&self) -> u64 {
+        // Fixed overhead: an over-approximation of the retained scalar wire
+        // fields (version/chain_id/epoch/height/round/step/block_id/suite_id)
+        // plus this struct's own scalar metadata
+        // (verified_voting_power/threshold/expected_wire_chain_id/
+        // authorized_epoch) and the domain. Kept as a small constant; the
+        // dominant term is always the signature buffers.
+        const FIXED_OVERHEAD: u64 = 128;
+        let mut bytes: u64 = FIXED_OVERHEAD;
+        // Variable: every constituent signature buffer.
+        for sig in &self.certificate.signatures {
+            bytes = bytes.saturating_add(sig.len() as u64);
+        }
+        // Variable: the signer bitmap.
+        bytes = bytes.saturating_add(self.certificate.signer_bitmap.len() as u64);
+        // Variable: the derived signer identity list (8 bytes per ValidatorId).
+        bytes = bytes.saturating_add((self.signers.len() as u64).saturating_mul(8));
+        bytes
+    }
 }
 
 impl std::fmt::Debug for VerifiedQuorumCertificate {
