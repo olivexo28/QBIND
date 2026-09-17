@@ -5087,3 +5087,255 @@ fallback, the stored QC is labelled an unverified fixture, the reconstructed loc
 kept separate from the exact latest pre-crash lock, and the source matrix no longer
 labels `initialize_from_restart` production-binary-reachable solely because the
 harness calls it. No production source changed.
+## Run 422 D7-D3 — real snapshot artifact and binary restore characterization (test + evidence)
+
+This phase is a **bounded characterization** of the *existing* snapshot/restore
+mechanisms exercised end-to-end, including through the **unmodified `qbind-node`
+release executable**. It adds one focused integration target plus this evidence
+section. It implements no durable signing protection, no anti-rollback, no
+production behavior change, no public getter, no CLI flag, no storage
+key/schema change, and authorizes no production signing or authority
+activation. Genesis-authority activation stays DISABLED.
+
+### Provenance and object limitations
+
+* Actual branch inspected in this clone: `copilot/copilotcopilotcopilotcopilot-run-422-d7-d2`
+  (four `copilot` segments). The task's reported D7-D2 branch was
+  `copilot/copilotcopilotcopilot-run-422-d7-d2` (three segments). No branch
+  rename was performed; the working branch is reported as-is.
+* Accepted D7-D2 reference commits `9e66680deda49b67962d1e6f7ea665fc305d10ec`
+  (final) and `d7002e4736fd756ea3e3e334655ce96b357dcd92` (tested checkpoint)
+  are **not present** in this shallow clone (`git cat-file -t` fails for both;
+  `git rev-parse --is-shallow-repository` = `true`). Missing historical objects
+  do not imply missing implementation: the D7-D2 target, the B3/B5/Run 097
+  targets, and the production restore/storage sources named by the task are all
+  present in-tree and were re-inspected directly. Content correspondence is
+  reported separately from ancestry, which cannot be verified from this shallow
+  clone.
+* Starting HEAD at checkout: `7675df8388b32aea64fb5f917154491db8f23176`.
+  Capacity at start: `/dev/root` 145G total, 85G avail (42% used), inodes 6%
+  used.
+* Supplied task branch used with normal commits + push only. No PR, no main
+  changes, no branch rename, no force-push, rebase, or history rewrite.
+  `task/warning.txt` and unrelated files untouched.
+
+### Source / reuse map (exact missing coverage identified)
+
+| Mechanism (reused, not reimplemented) | Location |
+| --- | --- |
+| Real RocksDB checkpoint via `StateSnapshotter::create_snapshot` | `crates/qbind-ledger/src/execution.rs` (impl for `RocksDbAccountState`) |
+| `StateSnapshotMeta` (`height`/`block_hash`/`chain_id`/`epoch`) + `with_epoch` | `crates/qbind-ledger/src/state_snapshot.rs` |
+| `restore_from_snapshot` / `apply_snapshot_restore_if_requested` | `crates/qbind-node/src/snapshot_restore.rs` |
+| Startup ordering: restore → storage open → epoch persist → loop | `crates/qbind-node/src/main.rs` (restore ~L2463, Run 093 open ~L4684, Run 097 persist ~L4726) |
+| `open_production_consensus_storage` / `persist_restored_snapshot_epoch` | `crates/qbind-node/src/production_consensus_storage.rs` |
+| `observe_consensus_storage` (C1 read-only epoch observation) | `crates/qbind-node/src/consensus_storage_observation.rs` |
+| `RestoreBaseline` / `initialize_from_snapshot_baseline` wiring | `crates/qbind-node/src/binary_consensus_loop.rs`, `crates/qbind-consensus/src/basic_hotstuff_engine.rs` |
+| Deadline-based child-process runner (kill+reap+drain-join, timeout = hard fail) | pattern from `crates/qbind-node/tests/run_422_d4_startup_ordering_tests.rs` |
+| Real-checkpoint fixture build + reopen-and-observe | pattern from `b3_snapshot_restore_tests.rs`, `run_097_snapshot_epoch_parity_tests.rs` |
+
+**Exact missing coverage before D7-D3:** the B3/B5/Run 097 targets call library
+entrypoints in-process; they never launch a child `qbind-node` process, never
+observe the ordered production startup stages of a real restore invocation, and
+never independently reopen the restored RocksDB stores after a real process
+exit. D7-D3 adds precisely that child-process / release-binary layer while
+reusing every underlying mechanism above. No new parser, snapshot
+implementation, epoch observer, signing adapter, or authorization mechanism was
+introduced.
+
+### Changed paths
+
+* `crates/qbind-node/tests/run_422_d7d3_binary_snapshot_restore_characterization_tests.rs`
+  (new dedicated integration target; 4 tests). Contains a test-support
+  process runner and a `QBIND_D7D3_NODE_BIN` executable-selection override
+  used to point the identical child-process cases at an explicitly selected
+  release executable. Both live entirely in the test file, outside production
+  code.
+* `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md` (this section).
+* `docs/protocol/QBIND_PROPOSAL_VOTE_AUTHORITY_LIFECYCLE_CONTRACT.md`
+  (successor note only).
+* `docs/protocol/QBIND_GENESIS_AUTHORITY_ENGINE_QC_INTEGRATION_AUDIT.md`
+  (successor note only).
+
+No production source file was modified. Production behavior is unchanged.
+
+### Scenario matrix with exact exercised entrypoints and evidence boundary
+
+| Case | Entrypoint exercised | Evidence level | Result |
+| --- | --- | --- | --- |
+| **A** canonical real checkpoint + point-in-time control | `StateSnapshotter::create_snapshot` → mutate source via `put_account_state` → `restore_from_snapshot` → reopen | **library / in-process** | PASS — restored artifact holds checkpoint value 4242; mutated source holds later value 9999; source artifact intact |
+| **B1** binary restore, snapshot epoch **absent** | child `qbind-node --restore-from-snapshot` (LocalMesh DevNet) → deliberate terminate at loop → independent reopen of `state_vm_v0` + `consensus` | **child-process / release-binary** + independent reopen | PASS — account 4242 restored; consensus observed `PresentNoCommittedEpoch` (explicit absence) |
+| **B2** binary restore, snapshot epoch **Some(0)** | same as B1, snapshot meta `epoch=Some(0)` | **child-process / release-binary** + independent reopen | PASS — account 4242 restored; consensus observed `CommittedEpoch(0)`; distinction absence≠0 asserted |
+| **C** epoch-conflict fail-closed control | child `qbind-node` onto fresh `state_vm_v0` + separately seeded `consensus` committed epoch 42, snapshot epoch 7 | **child-process / release-binary** + independent reopen | PASS — nonzero exit, Run 097 `RestoreEpochInconsistent` FATAL, loop NOT reached, existing epoch 42 preserved; `state_vm_v0` account restored *before* rejection (reported, not hidden) |
+| **D** signing-state evidence boundary | structural inspection of `meta.json`, restore audit marker, restored account store, restore baseline | **fixture / structural** | PASS — no signing/vote/lock field present in any restore-path artifact |
+
+### Artifact and metadata provenance
+
+* Checkpoint is produced by RocksDB's checkpoint API through
+  `StateSnapshotter::create_snapshot` (a `state/` checkpoint plus `meta.json`),
+  **not** a copy of an open database directory.
+* `StateSnapshotMeta` height, block hash (`[height as u8; 32]`), and epoch are
+  **fixture declarations**, not authenticated consensus evidence, and are
+  labelled as such in the target.
+* DevNet chain id observed end-to-end: `0x51424e4444455600`.
+  Copied checkpoint size per case: `bytes_copied=8572`.
+
+### Process commands, executable hash and outcomes (exact release executable)
+
+Release build (as required):
+
+```
+cargo build --release -p qbind-node --bin qbind-node   # Finished release in 7m35s
+sha256sum target/release/qbind-node
+060fb0f00685f267307bf302728f539a4dfdce7bd73ea452cd488a20abfe475d  target/release/qbind-node
+```
+
+The representative valid-restoration cases (B1/B2) and the epoch-conflict
+control (C) were executed against **that exact release executable** by pointing
+the target at it:
+
+```
+QBIND_D7D3_NODE_BIN="$PWD/target/release/qbind-node" \
+  cargo test -p qbind-node \
+  --test run_422_d7d3_binary_snapshot_restore_characterization_tests \
+  -- --test-threads=1
+# test result: ok. 4 passed; 0 failed
+```
+
+Observed ordered stderr from the release executable (transcribed via the
+target's `QBIND_D7D3_DUMP_STDERR` echo; publish-safe, no secrets):
+
+**B1 (epoch absent):**
+```
+[restore] complete: height=111 chain_id=0x51424e4444455600 bytes_copied=8572 target=.../state_vm_v0
+[restore] OK: restored from snapshot height=111 chain_id=0x51424e4444455600
+[binary] B5: restore-aware consensus start enabled (snapshot_height=111, starting_view=112)
+[binary] Run 093 consensus storage: state=present-no-committed-epoch path=.../consensus
+[binary] Run 097: no snapshot epoch persistence performed (snapshot_epoch=None, storage_state=present-no-committed-epoch).
+[binary] LocalMesh mode: starting consensus loop. environment=DevNet profile=nonce-only
+```
+Then deliberately terminated (SIGKILL) after the loop marker; reaped; independent
+reopen → account 4242, consensus `PresentNoCommittedEpoch`.
+
+**B2 (epoch Some(0)):**
+```
+[binary] Run 093 consensus storage: state=present-no-committed-epoch path=.../consensus
+[restore] Run 097 persisted snapshot canonical epoch=0 into .../consensus
+[binary] Run 097: snapshot canonical epoch=0 persisted into <data_dir>/consensus meta:current_epoch.
+[binary] LocalMesh mode: starting consensus loop. environment=DevNet profile=nonce-only
+```
+Then deliberately terminated; reaped; independent reopen → account 4242,
+consensus `CommittedEpoch(0)`. Distinction absence (`None`) ≠ explicit zero
+(`Some(0)`) asserted.
+
+**C (epoch conflict, fail-closed):**
+```
+[restore] OK: restored from snapshot height=333 chain_id=0x51424e4444455600
+[binary] B5: restore-aware consensus start enabled (snapshot_height=333, starting_view=334)
+[binary] Run 093 consensus storage: state=committed-epoch epoch=42 path=.../consensus
+[binary] FATAL: Run 097 snapshot epoch parity failed: ... existing meta:current_epoch=42 but snapshot meta.json declares epoch=7. Refusing to silently overwrite. ...
+```
+Natural nonzero exit (`std::process::exit(1)`); loop marker never emitted;
+independent reopen → consensus epoch **still 42** (preserved). The restored
+`state_vm_v0` account (7,4242) **is** materialized because account-state
+restoration precedes the epoch-parity rejection; the data directory is
+therefore **not** wholly unchanged. This earlier effect is asserted explicitly,
+not hidden.
+
+### Process vs library vs fixture distinctions (explicit)
+
+* **Child-process (release binary):** cases B1, B2, C — the restoration
+  invocation, the ordered startup-stage observation, the fail-closed exit, and
+  the deliberate termination of the running loop. Post-process storage reads
+  are **independent in-process reopens** after the child was reaped.
+* **Library / in-process:** case A (checkpoint + point-in-time control) and the
+  `restore_from_snapshot` calls used only to inspect artifacts in case D.
+* **Fixture declaration:** `StateSnapshotMeta` height/block-hash/epoch values.
+  These are inputs, not authenticated consensus evidence.
+
+### Signing-state evidence boundary (case D, precise)
+
+* **What the checkpoint contains:** a RocksDB account-state checkpoint (the
+  single known account) plus `meta.json`. No signing/vote/lock material.
+* **What `meta.json` declares:** `height`, `block_hash`, `chain_id`, `epoch`
+  (fixture declarations). Structurally asserted to contain no `signature`,
+  `signed_vote`, `vote`, `locked_qc`, `signing`, or `secret` field.
+* **What is materialized in account storage:** account state only.
+* **What is written/observed in the separate consensus store:** only
+  `meta:current_epoch` (absent, or the explicit value persisted by Run 097).
+* **What the binary passes to the engine initializer:** only the
+  `RestoreBaseline` (`snapshot_height` + `snapshot_block_id`) via
+  `initialize_from_snapshot_baseline`. No per-view vote latch or
+  anti-equivocation record travels this path (consistent with D7-D2).
+* **Signing/locking evidence restored / reconstructed / absent / unobservable:**
+  **absent** through every restore path exercised here. Account-state rollback
+  is **not** proof of conflicting signatures, and epoch equality is **not**
+  proof of signing-state continuity. The production binary performs **no**
+  signature demonstration during restore; D7-D2's fixture signing demonstration
+  is a separate activity and is **not** repeated here as if the binary
+  performed it.
+
+### Validation results (dev profile unless noted; sequential)
+
+* `run_422_d7d3_binary_snapshot_restore_characterization_tests` — 4 passed
+  (dev binary and, via `QBIND_D7D3_NODE_BIN`, the exact release executable).
+* `run_422_d7d2_signing_state_recovery_tests` — 5 passed.
+* `b3_snapshot_restore_tests` — 10 passed.
+* `b5_restore_aware_consensus_start_tests` — 4 passed.
+* `run_422_d7c1_storage_observation_tests` — 23 passed.
+* `run_422_startup_refusal_tests` — 4 passed.
+* Run 097 coverage located and reused: `run_097_snapshot_epoch_parity_tests`
+  — 7 passed (creation parity, restore parity, old-snapshot compatibility,
+  fail-closed inconsistency, activation isolation). D7-D3 adds the
+  release-binary layer above these library-level cases rather than duplicating
+  them.
+* Focused Clippy: `cargo clippy -p qbind-node --test run_422_d7d3_binary_snapshot_restore_characterization_tests`
+  — clean for the new target (the ~85 pre-existing `qbind-node` lib warnings are
+  unrelated and unchanged).
+* Release build: `cargo build --release -p qbind-node --bin qbind-node` — Finished.
+
+### Security tooling (recorded literally)
+
+* Secret scan of the new target: **no secrets detected**.
+* CodeQL / reviewer backend outcomes are recorded literally in the final report
+  for this pass. A skipped CodeQL or reviewer backend error is treated as
+  incomplete/unverified regardless of any accompanying "0 alerts"/"no comments".
+
+### Scoped verdict
+
+`D7D3_BINARY_SNAPSHOT_RESTORE_CHARACTERIZATION=COMPLETE-FOR-TESTED-SCOPE`
+
+The required executable/artifact observations were actually obtained: the
+unmodified release executable (sha256 `060fb0f0…`) performed the restore, the
+ordered startup stages were observed, the process was deliberately terminated
+or failed closed, and the RocksDB stores were independently reopened after the
+process exited.
+
+### Retained posture (unchanged by D7-D3)
+
+* `D7_STATUS=PARTIAL-CODE-TEST / PRODUCTION-LIFECYCLE-UNAVAILABLE`
+* `DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED`
+* `GENESIS_AUTHORITY_ACTIVATION=DISABLED`
+* `PRODUCTION_WIRE_CHAIN_ID_BEHAVIOR=UNCHANGED`
+* `CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED`
+  (D7-D3 is *restore-path* release-binary evidence, not configured-authority
+  release-binary evidence, and not Run 423.)
+* `SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO`
+
+Signing-state continuity remains NOT-established. No readiness promotion.
+
+### One recommended next task (justified by findings)
+
+Case C established that the restore path materializes `state_vm_v0` **before**
+the Run 097 epoch-parity rejection, leaving a restored account store on disk
+after a fail-closed exit. A bounded successor should characterize whether a
+subsequent restart over that partially-restored directory (occupied
+`state_vm_v0` + preserved conflicting `consensus` epoch) is rejected honestly
+by the existing B3 `TargetStateNotEmpty` guard through the **release binary**,
+and record the exact operator-recovery boundary — without adding any cleanup,
+rollback, or anti-rollback mechanism (which remain out of scope).
+
+### Clean-worktree / push status
+
+Normal task-branch commits + push only. No PR, no main changes, no branch
+rename, no force-push/rebase/history rewrite. `task/warning.txt` and unrelated
+task files untouched.

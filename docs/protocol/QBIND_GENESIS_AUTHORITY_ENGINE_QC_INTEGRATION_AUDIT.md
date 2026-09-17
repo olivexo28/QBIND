@@ -1191,3 +1191,19 @@ guard is lost on restart / pre-decision restore. Full report and path matrix:
 `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md` (Run 422 D7-D2). Posture
 unchanged: activation DISABLED, durable anti-rollback NOT-ESTABLISHED, signing-state
 continuity NOT-established. This note is additive.
+## Run 422 D7-D3 successor note (binary snapshot-restore characterization)
+
+Run 422 D7-D3 added release-binary restore-path evidence above the D7-D2
+library-level characterization: the unmodified `qbind-node` executable was
+launched with `--restore-from-snapshot` over a real RocksDB checkpoint, its
+ordered startup stages were observed, and the restored account/consensus stores
+were independently reopened after the process exited. Findings are additive and
+change no accepted section: the restore baseline carries only
+`snapshot_height`/`snapshot_block_id` into the engine initializer; epoch-absence
+is preserved distinct from explicit `0`; and an epoch-parity conflict fails
+closed with the pre-existing consensus epoch preserved. No signing-state is
+restored or observable through these paths. Posture unchanged:
+`GENESIS_AUTHORITY_ACTIVATION=DISABLED`, `DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED`,
+`CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED` (D7-D3 is
+restore-path, not configured-authority, release-binary evidence; not Run 423).
+Evidence: `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md` (Run 422 D7-D3).
