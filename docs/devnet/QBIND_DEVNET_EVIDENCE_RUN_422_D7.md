@@ -5757,11 +5757,21 @@ retained unchanged and not re-run/relabelled.
 
 ### Security tooling (recorded literally, this pass)
 
-* Secret scan (`secret_scanning`) of the changed target: **no secrets detected**.
-* `parallel_validation` (CodeQL + Code Review) literal outcomes for this pass are
-  recorded in the run's final report. A CodeQL skip is INCOMPLETE analysis and a
-  reviewer backend error is INCOMPLETE/UNVERIFIED review; neither becomes a pass
-  because its output also says "0 alerts" / "no comments."
+* Secret scan (`secret_scanning`) of the changed files: **no secrets detected**.
+* `parallel_validation` (CodeQL + Code Review) LITERAL outcomes for this pass:
+  * **CodeQL Security Scan: SKIPPED = INCOMPLETE ANALYSIS.** Returned literally
+    "Skipped: all changes are trivial." (declared trivial for CodeQL — a single
+    Rust integration TEST file plus Markdown docs, no production source). A
+    skipped run does **not** establish CodeQL coverage and is **not** a
+    0-alerts-verified pass.
+  * **Code Review: INCOMPLETE / UNVERIFIED.** The tool reported "No review
+    comments found" but ALSO emitted a backend error: "Code review tool is not
+    available in this environment: … model `claude-sonnet-4.6` not found in
+    registry" (`capi-prod-claude-sonnet-4.6` creation failure). An
+    unavailable/errored reviewer is **not** a successful review; "no comments"
+    alongside a backend error does **not** become a pass.
+* Neither CodeQL nor the reviewer establishes a clean security posture for this
+  change; both are recorded as incomplete/unverified per the run rules.
 
 ### Scoped verdict (this pass)
 
