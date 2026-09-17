@@ -1207,3 +1207,25 @@ restored or observable through these paths. Posture unchanged:
 `CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED` (D7-D3 is
 restore-path, not configured-authority, release-binary evidence; not Run 423).
 Evidence: `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md` (Run 422 D7-D3).
+
+## Run 422 D7-D3 correction successor note (process observation + evidence boundaries)
+
+The D7-D3 characterization was corrected for process-observation and
+evidence-boundary honesty; no accepted section changes and no production change.
+Engine-initializer consumption of the `RestoreBaseline` is now executable-observed
+via the existing post-baseline observation `[binary-consensus] B5: applied
+restore baseline: snapshot_height=… starting_view=…` (emitted after
+`initialize_from_snapshot_baseline` runs); the earlier `[binary] B5: …enabled`
+and `LocalMesh mode: starting consensus loop` lines only mark baseline
+construction and startup-dispatch entry. The signing-state finding remains
+source-traced (no per-view vote latch / anti-equivocation record travels the
+recovery interface); signing-state continuity stays NOT-established. The process
+runner was hardened (full `ExitStatus` preserved; already-exited positive child
+rejected; liveness/terminate race resolved on the real post-kill status;
+truncated capture cannot support an absent-marker claim), and case C now requires
+the natural exit code 1 plus the epoch-conflict-specific diagnostic (existing
+epoch 42 vs snapshot epoch 7). Posture unchanged:
+`GENESIS_AUTHORITY_ACTIVATION=DISABLED`, `DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED`,
+`CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED`. Evidence:
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md` (Run 422 D7-D3 correction
+subsection).

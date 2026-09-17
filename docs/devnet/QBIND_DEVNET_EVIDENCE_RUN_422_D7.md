@@ -5166,7 +5166,7 @@ No production source file was modified. Production behavior is unchanged.
 | **B1** binary restore, snapshot epoch **absent** | child `qbind-node --restore-from-snapshot` (LocalMesh DevNet) → deliberate terminate at loop → independent reopen of `state_vm_v0` + `consensus` | **child-process / release-binary** + independent reopen | PASS — account 4242 restored; consensus observed `PresentNoCommittedEpoch` (explicit absence) |
 | **B2** binary restore, snapshot epoch **Some(0)** | same as B1, snapshot meta `epoch=Some(0)` | **child-process / release-binary** + independent reopen | PASS — account 4242 restored; consensus observed `CommittedEpoch(0)`; distinction absence≠0 asserted |
 | **C** epoch-conflict fail-closed control | child `qbind-node` onto fresh `state_vm_v0` + separately seeded `consensus` committed epoch 42, snapshot epoch 7 | **child-process / release-binary** + independent reopen | PASS — nonzero exit, Run 097 `RestoreEpochInconsistent` FATAL, loop NOT reached, existing epoch 42 preserved; `state_vm_v0` account restored *before* rejection (reported, not hidden) |
-| **D** signing-state evidence boundary | structural inspection of `meta.json`, restore audit marker, restored account store, restore baseline | **fixture / structural** | PASS — no signing/vote/lock field present in any restore-path artifact |
+| **D** signing-state evidence boundary | typed `StateSnapshotMeta::from_json` + scoped content inspection of THIS fixture's `meta.json` / restore audit marker / single account lookup / restore baseline | **fixture / structural + source-traced** | PASS — signing-state continuity **NOT-established**; the keyword checks are scoped content observations of this fixture, not a universal absence or schema claim (corrected — see D7-D3 correction subsection) |
 
 ### Artifact and metadata provenance
 
@@ -5256,16 +5256,28 @@ not hidden.
 
 * **What the checkpoint contains:** a RocksDB account-state checkpoint (the
   single known account) plus `meta.json`. No signing/vote/lock material.
-* **What `meta.json` declares:** `height`, `block_hash`, `chain_id`, `epoch`
-  (fixture declarations). Structurally asserted to contain no `signature`,
-  `signed_vote`, `vote`, `locked_qc`, `signing`, or `secret` field.
+* **What `meta.json` declares:** parsed with the existing typed
+  `StateSnapshotMeta::from_json` parser. The schema is NOT merely
+  `height`/`block_hash`/`chain_id`/`epoch`: it also carries `created_at_unix_ms`
+  and the optional Run 117/140 `authority_state` / `authority_state_v2`
+  carriers, which are **absent (omitted) in THIS fixture** (built with no
+  authority marker) — recorded as an absence in this fixture, not a schema-wide
+  guarantee. The `signature`/`signed_vote`/`vote`/`locked_qc`/`signing`/`secret`
+  keyword check is a scoped observation of THIS fixture's serialized content,
+  not a universal absence claim.
 * **What is materialized in account storage:** account state only.
 * **What is written/observed in the separate consensus store:** only
   `meta:current_epoch` (absent, or the explicit value persisted by Run 097).
 * **What the binary passes to the engine initializer:** only the
   `RestoreBaseline` (`snapshot_height` + `snapshot_block_id`) via
-  `initialize_from_snapshot_baseline`. No per-view vote latch or
-  anti-equivocation record travels this path (consistent with D7-D2).
+  `initialize_from_snapshot_baseline`. That the initializer actually RAN at
+  runtime is now observed at the executable level via the post-baseline
+  `[binary-consensus] B5: applied restore baseline: snapshot_height=… starting_view=…`
+  observation (see the D7-D3 correction subsection); the earlier `[binary] B5:
+  …enabled` and `[binary] LocalMesh mode: starting consensus loop` lines only
+  establish baseline construction and entry into the LocalMesh startup dispatch.
+  That NO per-view vote latch or anti-equivocation record travels this path is a
+  source-traced finding (consistent with D7-D2), not a runtime inventory.
 * **Signing/locking evidence restored / reconstructed / absent / unobservable:**
   **absent** through every restore path exercised here. Account-state rollback
   is **not** proof of conflicting signatures, and epoch equality is **not**
@@ -5323,19 +5335,249 @@ process exited.
 
 Signing-state continuity remains NOT-established. No readiness promotion.
 
-### One recommended next task (justified by findings)
+### One recommended next task (justified by findings) — corrected distinction
 
 Case C established that the restore path materializes `state_vm_v0` **before**
 the Run 097 epoch-parity rejection, leaving a restored account store on disk
-after a fail-closed exit. A bounded successor should characterize whether a
-subsequent restart over that partially-restored directory (occupied
-`state_vm_v0` + preserved conflicting `consensus` epoch) is rejected honestly
-by the existing B3 `TargetStateNotEmpty` guard through the **release binary**,
-and record the exact operator-recovery boundary — without adding any cleanup,
-rollback, or anti-rollback mechanism (which remain out of scope).
+after a fail-closed exit. A bounded successor should characterize a restart
+over that partially-restored directory (occupied `state_vm_v0` + preserved
+conflicting `consensus` epoch), and it MUST distinguish two DIFFERENT paths
+rather than conflating them:
+
+* **Restart WITH `--restore-from-snapshot`** (fast-sync requested again). Only
+  this path runs the B3 validate→materialize pipeline, and only this path
+  reaches the `TargetStateNotEmpty` guard (`snapshot_restore.rs` step 4), which
+  refuses because `state_vm_v0` is now non-empty. The guard belongs to
+  *requested* restoration.
+* **Ordinary restart WITHOUT `--restore-from-snapshot`.**
+  `apply_snapshot_restore_if_requested` returns `Ok(None)` when restoration is
+  not requested (fast-sync disabled), so the `TargetStateNotEmpty` guard NEVER
+  fires on this path. The ordinary-startup outcome over the partially-restored
+  directory is therefore NOT predetermined by that guard and must be
+  characterized on its own.
+
+Do NOT claim `TargetStateNotEmpty` protects both paths, and do NOT predetermine
+the ordinary-startup outcome. Neither successor scenario is added in this
+correction, and no cleanup, rollback, or anti-rollback mechanism is introduced
+(all remain out of scope).
 
 ### Clean-worktree / push status
 
 Normal task-branch commits + push only. No PR, no main changes, no branch
 rename, no force-push/rebase/history rewrite. `task/warning.txt` and unrelated
 task files untouched.
+
+## Run 422 D7-D3 correction — process observation and evidence boundaries (test + evidence)
+
+This bounded correction preserves the useful real-checkpoint, account-restoration
+and epoch-parity evidence already implemented and fixes the process-observation
+and evidence-boundary overclaims identified in review. It changes **only** the
+D7-D3 test target and documentation; no production source was touched, no getter,
+CLI flag, storage/schema, authorization wiring, recovery redesign, cleanup, or
+activation was added. Genesis-authority activation stays DISABLED.
+
+### Provenance and object availability (this correction pass)
+
+* Actual branch inspected/used: `copilot/copilotcopilotcopilotcopilotcopilot-run-422-d7-d2`
+  (five `copilot` segments). Supplied task branch used with normal commits +
+  push only — no PR, main change, branch rename, force-push, rebase, or history
+  rewrite. `task/warning.txt` and unrelated files untouched. Worktree was clean
+  at checkout; shallow single-branch clone (`git rev-parse --is-shallow-repository`
+  = `true`).
+* Starting HEAD at checkout: `4ecb3fb5a062d3649bc67c9d52a333a9041f129a`.
+* Capacity at start: `/dev/root` 145G total, ~85G avail (42% used); inodes ~6% used.
+* Reviewed D7-D3 reference objects are **not present** in this shallow clone
+  (`git cat-file -t` fails for both): final revision
+  `2068f5d4e18edabf2e6e645130592ddfe949e4ca` and test checkpoint
+  `ccb4d755e476fbf85982847886fab4c9f3c1da5a`. The historical checkpoint
+  `ccb4d755…` is thus recorded **as supplied, object-unavailable** (not
+  verifiable from this clone). Missing reference objects do not imply missing
+  implementation: the D7-D3 target and all named production sources are present
+  in-tree and were re-inspected directly; content correspondence is reported
+  separately from ancestry, which cannot be verified here.
+* The prior pass's release binary (`060fb0f0…`) is not present in this fresh
+  clone (`target/` absent), so the source-corresponding release executable was
+  rebuilt for this pass (hash below).
+
+### Changed files (this correction)
+
+* `crates/qbind-node/tests/run_422_d7d3_binary_snapshot_restore_characterization_tests.rs`
+  (corrections A/B/C + 3 new runner-control tests; now 7 tests).
+* `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md` (this subsection + in-place
+  corrections to the case-D matrix row, the engine-initializer boundary bullet,
+  the `meta.json` schema bullet, and the successor distinction).
+* `docs/protocol/QBIND_PROPOSAL_VOTE_AUTHORITY_LIFECYCLE_CONTRACT.md`,
+  `docs/protocol/QBIND_GENESIS_AUTHORITY_ENGINE_QC_INTEGRATION_AUDIT.md`
+  (successor-note corrections only).
+
+No production source file was modified; production behavior is unchanged.
+
+### Disposition of corrections
+
+* **Correction A (startup dispatch vs engine initialization): applied.** The
+  misleading "loop reached" anchor description was renamed to say it marks only
+  ENTRY into the LocalMesh startup dispatch (`run_local_mesh_node`), before the
+  config is built and before `spawn_binary_consensus_loop` runs. An EXISTING
+  post-baseline observation was adopted as the honest anchor:
+  `[binary-consensus] B5: applied restore baseline: snapshot_height=… starting_view=… (engine committed_height=…)`,
+  emitted by `run_binary_consensus_loop_with_io` AFTER
+  `engine.initialize_from_snapshot_baseline(...)` executes. No production
+  instrumentation was added, no pre-initialization message / sleep / task-spawn
+  was substituted for evidence that initialization completed. Cases B1/B2 now
+  assert marker ORDER (not mere presence) —
+  `restore OK → B5 construct → Run 093 storage open → Run 097 epoch → LocalMesh
+  entry → baseline applied` — and assert the fixture height/starting-view the
+  diagnostics expose (111→112, 222→223).
+* **Correction B (reliable process outcomes): applied.** The runner now
+  preserves the full `ExitStatus` (signals via `ExitStatusExt`, never collapsed
+  to an integer); rejects an already-exited positive child even when its
+  markers were captured (liveness checked first); resolves the
+  liveness/terminate race by classifying on the ACTUAL post-kill status (a
+  natural exit code is reported as an unexpected exit, not deliberate
+  termination); handles kill/wait errors explicitly on the normal path; keeps
+  `Drop` best-effort with no second panic during unwinding; drains and joins
+  captured streams before final diagnostics; and refuses to support a
+  "forbidden later marker absent" assertion on truncated capture (case C
+  asserts `stderr_dropped_bytes()==0` first). Three focused runner-control tests
+  use a small test-only `sh -c` child (kept separate from qbind-node protocol
+  evidence; per-`Command` `env_remove` only, no process-global env mutation):
+  marker-then-unsuccessful-exit ⇒ rejected (exit code 7 preserved);
+  marker-then-alive ⇒ deliberate termination identified (signal); missing-marker
+  ⇒ bounded-deadline failure. Case C now requires the exact natural exit code 1
+  (not merely nonzero), asserts the epoch-conflict-SPECIFIC diagnostic
+  (`existing meta:current_epoch=42 but snapshot meta.json declares epoch=7`), and
+  preserves the loop-dispatch-absent / epoch-42-preserved / account-restored
+  assertions, additionally asserting the baseline-applied observation is absent
+  (initializer never ran).
+* **Correction C (structural/provenance claims): applied.** Case D now parses
+  `meta.json` with the EXISTING typed `StateSnapshotMeta::from_json` (no second
+  parser), records that the schema carries more than height/hash/chain/epoch
+  (`created_at_unix_ms` + optional `authority_state`/`authority_state_v2`
+  carriers, absent in this fixture), reframes the keyword denylists as scoped
+  CONTENT observations of THIS fixture (not a universal absence or schema
+  claim), separates the single observed account value and the single-key
+  `meta:current_epoch` reads from the source-traced recovery-interface finding,
+  and preserves the NOT-established signing-state-continuity conclusion. The
+  executable-provenance runner line is explicitly labelled `byte_len … (no
+  sha256 emitted here)`; the authoritative SHA-256 is captured out-of-band by
+  `sha256sum` and recorded below (the runner does not emit a content hash).
+
+### Exact observed startup boundary vs source-only inference
+
+* **Executable-observed (release binary):** account-state restoration; the
+  ordered restore/storage/epoch markers; entry into the LocalMesh startup
+  dispatch; and — new in this correction — that
+  `initialize_from_snapshot_baseline` actually ran, via the post-baseline
+  `[binary-consensus] B5: applied restore baseline …` observation. Consensus
+  storage epoch handling is executable-observed plus independent post-process
+  reopen.
+* **Source-traced (not runtime-observed by this test):** that only
+  `snapshot_height`/`snapshot_block_id` travel the `RestoreBaseline`, and that
+  no per-view vote latch or anti-equivocation record travels the recovery
+  interface (Run 422 D7-D2). Signing-state continuity remains NOT-established.
+
+### Positive/negative process outcomes and runner-control results
+
+* B1 (epoch absent): observed-then-deliberately-terminated (SIGKILL after the
+  baseline-applied marker); independent reopen ⇒ account `(7,4242)`, consensus
+  `PresentNoCommittedEpoch`.
+* B2 (epoch `Some(0)`): observed-then-deliberately-terminated; independent
+  reopen ⇒ account `(7,4242)`, consensus `CommittedEpoch(0)`; absence ≠ 0.
+* C (epoch conflict): natural exit code **1**; epoch-conflict-specific FATAL
+  (42 vs 7); loop-dispatch + baseline-applied markers absent (untruncated
+  capture); consensus epoch **42 preserved**; `state_vm_v0` account restored
+  before rejection.
+* Runner controls: reject-on-unsuccessful-exit (code 7 preserved) PASS;
+  identify-deliberate-termination (signal) PASS; missing-marker deadline failure
+  PASS.
+
+### Commands, test counts, profiles, release-executable hash
+
+Release build (source-corresponding, rebuilt this pass):
+
+```
+cargo build --release -p qbind-node --bin qbind-node   # Finished release in 7m12s
+sha256sum target/release/qbind-node
+70671e40871c9a8010b3ddbff5dc489ce4cb28aeb807460ccaf0d06f36cce923  target/release/qbind-node
+# byte_len = 16953520
+```
+
+This exact release executable was built from the checked-out source tree at this
+correction's HEAD via the required command above; B1/B2/C were repeated against
+it (a successful build alone was treated as insufficient):
+
+```
+QBIND_D7D3_NODE_BIN="$PWD/target/release/qbind-node"   cargo test -p qbind-node   --test run_422_d7d3_binary_snapshot_restore_characterization_tests -- --test-threads=1
+# test result: ok. 7 passed; 0 failed
+```
+
+Retained-log excerpts (below) were obtained by selecting the release executable
+AND enabling the stderr-dump option:
+
+```
+QBIND_D7D3_NODE_BIN="$PWD/target/release/qbind-node" QBIND_D7D3_DUMP_STDERR=1   cargo test -p qbind-node   --test run_422_d7d3_binary_snapshot_restore_characterization_tests   -- --test-threads=1 --nocapture
+```
+
+Newly observed post-baseline lines from the release executable (publish-safe):
+
+```
+[d7d3][B1-epoch-absent] [binary-consensus] B5: applied restore baseline: snapshot_height=111 starting_view=112 (engine committed_height=Some(111))
+[d7d3][B2-epoch-zero]   [binary-consensus] B5: applied restore baseline: snapshot_height=222 starting_view=223 (engine committed_height=Some(222))
+```
+
+Validation targets (dev profile unless noted; `--test-threads=1`):
+
+* `run_422_d7d3_binary_snapshot_restore_characterization_tests` — **7 passed**
+  (dev binary and, via `QBIND_D7D3_NODE_BIN`, the exact release executable
+  `70671e40…`). Includes the 3 runner-control cases.
+* `b3_snapshot_restore_tests` — 10 passed.
+* `b5_restore_aware_consensus_start_tests` — 4 passed.
+* `run_422_d7c1_storage_observation_tests` — 23 passed.
+* `run_422_startup_refusal_tests` — 4 passed.
+* `run_097_snapshot_epoch_parity_tests` — 7 passed (Run 097 epoch-parity reuse).
+* `run_422_d7d2_signing_state_recovery_tests` — 5 passed.
+* Focused Clippy: `cargo clippy -p qbind-node --test
+  run_422_d7d3_binary_snapshot_restore_characterization_tests` — **clean for the
+  changed target** (zero warnings referencing the target file; the ~85
+  pre-existing `qbind-node` lib warnings are unrelated and unchanged).
+* No repository-wide formatting or unrelated warning fixes; file-specific CRLF
+  line endings and no-final-newline EOF conventions preserved.
+
+### Security tooling (recorded literally)
+
+* Secret scan of the changed target: no secrets detected.
+* Secret scan (`secret_scanning`) over all four changed files: **no secrets
+  detected**.
+* `parallel_validation` was run for THIS correction pass with the following
+  LITERAL outcomes (recorded here, not deferred to the final chat report):
+  * **CodeQL Security Scan: SKIPPED = INCOMPLETE ANALYSIS.** Returned literally
+    "Skipped: all changes are trivial." (changes were declared trivial for
+    CodeQL — test-only Rust file plus Markdown docs, no production source). A
+    skipped run does **not** establish CodeQL coverage and is **not** a
+    0-alerts-verified pass.
+  * **Code Review: INCOMPLETE / UNVERIFIED.** The backend emitted a
+    model-registry error (`model claude-sonnet-4.6 not found in registry` /
+    "Code review tool is not available in this environment") while reporting
+    "No review comments found." An unavailable/errored reviewer is **not** a
+    successful review; "no comments" alongside a backend error does **not**
+    become a pass.
+* Neither CodeQL nor the reviewer establishes a clean security posture for this
+  change; both are recorded as incomplete/unverified per the run rules.
+
+### Scoped verdict (corrected)
+
+`D7D3_BINARY_SNAPSHOT_RESTORE_CHARACTERIZATION=COMPLETE-FOR-TESTED-SCOPE`, with
+the evidence boundary stated honestly: account restoration and consensus-storage/
+epoch handling are executable-observed (plus independent reopen); baseline
+construction/dispatch is observed at the actual markers; engine-initializer
+CONSUMPTION is now executable-observed via the post-baseline
+`[binary-consensus] B5: applied restore baseline …` line; and the
+recovery-interface signing-state finding remains **source-traced, not runtime
+observed**, so signing-state continuity stays **NOT-established**. Retained
+unchanged: `D7_STATUS=PARTIAL-CODE-TEST / PRODUCTION-LIFECYCLE-UNAVAILABLE`,
+`DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED`, `GENESIS_AUTHORITY_ACTIVATION=DISABLED`,
+`PRODUCTION_WIRE_CHAIN_ID_BEHAVIOR=UNCHANGED`,
+`CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED`,
+`SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO`. No readiness promotion and no
+Run 423 work. Prior execution results at their actual revisions are retained and
+not relabelled as newly executed.

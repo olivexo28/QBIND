@@ -736,3 +736,27 @@ state continuity remains NOT-established; `DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED
 `GENESIS_AUTHORITY_ACTIVATION=DISABLED`. Evidence:
 `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md` (Run 422 D7-D3 section) and
 `crates/qbind-node/tests/run_422_d7d3_binary_snapshot_restore_characterization_tests.rs`.
+
+### Run 422 D7-D3 correction (process observation + successor distinction)
+
+The D7-D3 evidence was corrected for process-observation and evidence-boundary
+honesty. The ordered startup observation now runs THROUGH an existing
+post-baseline observation — `[binary-consensus] B5: applied restore baseline:
+snapshot_height=… starting_view=…`, emitted after
+`engine.initialize_from_snapshot_baseline(...)` executes — so engine-initializer
+CONSUMPTION of the `RestoreBaseline` is executable-observed, whereas the earlier
+`[binary] B5: …enabled` and `[binary] LocalMesh mode: starting consensus loop`
+lines establish only baseline construction and entry into the LocalMesh startup
+dispatch. That no per-view vote latch / anti-equivocation record travels the
+recovery interface remains a source-traced finding; signing-state continuity
+stays NOT-established. No production change; no readiness promotion.
+
+The recommended successor MUST distinguish two paths over a partially-restored
+directory and must not conflate them: a restart **WITH** `--restore-from-snapshot`
+reaches the B3 `TargetStateNotEmpty` guard (that guard belongs to *requested*
+restoration), whereas an **ordinary restart WITHOUT** the restore request has
+`apply_snapshot_restore_if_requested` return `Ok(None)` and never reaches that
+guard — so its outcome is not predetermined by `TargetStateNotEmpty`. Neither
+scenario is implemented in this correction. Evidence:
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md` (Run 422 D7-D3 correction
+subsection).
