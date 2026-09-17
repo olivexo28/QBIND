@@ -49,11 +49,11 @@
 //! this test file (outside production code); its only purpose is executable
 //! selection. The binary's sha256 is captured per run in the emitted logs.
 
-use std::io::Read;
+use std::io::{self, Read};
 use std::os::unix::process::ExitStatusExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus, Stdio};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
@@ -192,16 +192,46 @@ const POSITIVE_DEADLINE: Duration = Duration::from_secs(30);
 struct CapturedStream {
     buf: String,
     dropped_bytes: usize,
+    /// Terminal outcome of the draining reader loop for this stream.
+    ///
+    /// `None` while the drain thread is still running; `Some(Ok(()))` on a
+    /// clean EOF; `Some(Err(desc))` when a non-`Interrupted` read error ended
+    /// the loop. A read failure means the captured buffer is INCOMPLETE and
+    /// must not be used to support an absence assertion. `desc` is a bounded
+    /// diagnostic description (never the unbounded raw payload).
+    read_outcome: Option<Result<(), String>>,
+}
+
+/// Lock a capture mutex, recovering the inner data even if a drain thread
+/// panicked and poisoned it. This keeps best-effort cleanup (including `Drop`
+/// during unwinding) from raising a second panic on a poisoned lock; a poisoned
+/// lock is separately surfaced as a capture-thread failure via the join path.
+fn lock_recover(m: &Mutex<CapturedStream>) -> MutexGuard<'_, CapturedStream> {
+    m.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+/// Bounded, allocation-light description of a read error (kind only; never the
+/// unbounded payload), suitable for diagnostics.
+fn bounded_read_error_desc(e: &io::Error) -> String {
+    let mut s = format!("read error: kind={:?}", e.kind());
+    const MAX: usize = 200;
+    if s.len() > MAX {
+        s.truncate(MAX);
+    }
+    s
 }
 
 fn drain_into(mut reader: impl Read, sink: Arc<Mutex<CapturedStream>>) {
     let mut chunk = [0u8; 8192];
-    loop {
+    // Distinguish successful EOF from a read failure and record it as the
+    // stream's terminal outcome, so `stderr_dropped_bytes()==0` alone can no
+    // longer be mistaken for complete capture.
+    let terminal: Result<(), String> = loop {
         match reader.read(&mut chunk) {
-            Ok(0) => break,
+            Ok(0) => break Ok(()),
             Ok(n) => {
                 let text = String::from_utf8_lossy(&chunk[..n]);
-                let mut guard = sink.lock().expect("capture lock");
+                let mut guard = lock_recover(&sink);
                 let remaining = CAPTURE_CAP_BYTES.saturating_sub(guard.buf.len());
                 if remaining == 0 {
                     guard.dropped_bytes += text.len();
@@ -217,7 +247,59 @@ fn drain_into(mut reader: impl Read, sink: Arc<Mutex<CapturedStream>>) {
                 }
             }
             Err(ref e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
-            Err(_) => break,
+            // A non-Interrupted read error ends capture with a recorded failure
+            // (NOT a silent break): the buffer is incomplete from here on.
+            Err(e) => break Err(bounded_read_error_desc(&e)),
+        }
+    };
+    lock_recover(&sink).read_outcome = Some(terminal);
+}
+
+/// Completed capture integrity for a drained stream, resolvable only AFTER the
+/// drain thread has been joined. Distinguishes a clean complete capture, a
+/// bounded truncation, a read failure and a capture-thread (join) failure.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum CaptureOutcome {
+    /// Clean EOF and nothing dropped: the capture is complete and untruncated.
+    Complete,
+    /// Clean EOF but the ring cap forced some bytes to be dropped.
+    Truncated { dropped_bytes: usize },
+    /// The draining reader returned a non-`Interrupted` I/O error.
+    ReadFailed { detail: String },
+    /// The capture thread itself failed to join (it panicked).
+    ThreadPanicked,
+    /// The drain thread has not finished (outcome not yet recorded).
+    StillDraining,
+}
+
+impl CaptureOutcome {
+    /// Only a clean, complete, untruncated capture may support an assertion
+    /// that a forbidden *later* marker was ABSENT.
+    fn is_complete(&self) -> bool {
+        matches!(self, CaptureOutcome::Complete)
+    }
+}
+
+/// Classify a stream's completed capture integrity from its recorded terminal
+/// outcome plus whether its capture thread failed to join. Pure over inputs so
+/// it is deterministically unit-testable without a real child.
+fn classify_capture(stream: &CapturedStream, thread_panicked: bool) -> CaptureOutcome {
+    if thread_panicked {
+        return CaptureOutcome::ThreadPanicked;
+    }
+    match &stream.read_outcome {
+        None => CaptureOutcome::StillDraining,
+        Some(Err(detail)) => CaptureOutcome::ReadFailed {
+            detail: detail.clone(),
+        },
+        Some(Ok(())) => {
+            if stream.dropped_bytes > 0 {
+                CaptureOutcome::Truncated {
+                    dropped_bytes: stream.dropped_bytes,
+                }
+            } else {
+                CaptureOutcome::Complete
+            }
         }
     }
 }
@@ -229,6 +311,11 @@ struct DrainedChild {
     stderr: Arc<Mutex<CapturedStream>>,
     stdout_thread: Option<JoinHandle<()>>,
     stderr_thread: Option<JoinHandle<()>>,
+    /// Set true if the stdout/stderr capture thread failed to join (panicked).
+    /// A failed join means the corresponding capture is unreliable.
+    #[allow(dead_code)]
+    stdout_join_failed: bool,
+    stderr_join_failed: bool,
     reaped: bool,
 }
 
@@ -287,39 +374,64 @@ impl DrainedChild {
             stderr,
             stdout_thread,
             stderr_thread,
+            stdout_join_failed: false,
+            stderr_join_failed: false,
             reaped: false,
         }
     }
 
     #[allow(dead_code)]
     fn stdout_snapshot(&self) -> String {
-        self.stdout.lock().expect("capture lock").buf.clone()
+        lock_recover(&self.stdout).buf.clone()
     }
     fn stderr_snapshot(&self) -> String {
-        self.stderr.lock().expect("capture lock").buf.clone()
+        lock_recover(&self.stderr).buf.clone()
     }
 
-    /// Number of stderr bytes the capture had to DROP (ring cap or capture
-    /// failure). A nonzero value means the captured stderr is truncated, so it
-    /// cannot support any assertion that a forbidden *later* marker was absent.
+    /// Number of stderr bytes the capture had to DROP (ring cap). A nonzero
+    /// value means the captured stderr is truncated, so it cannot support any
+    /// assertion that a forbidden *later* marker was absent. This is a raw
+    /// count only; use [`DrainedChild::stderr_capture`] for the full integrity
+    /// classification (which also reflects read/join failures).
+    #[allow(dead_code)]
     fn stderr_dropped_bytes(&self) -> usize {
-        self.stderr.lock().expect("capture lock").dropped_bytes
+        lock_recover(&self.stderr).dropped_bytes
+    }
+
+    /// Completed capture integrity for stderr. Only meaningful AFTER the drain
+    /// threads have been joined (otherwise `StillDraining`). Reflects a read
+    /// failure, a truncation, a capture-thread (join) failure, or a clean
+    /// complete capture. A missing-marker/absence assertion must require
+    /// [`CaptureOutcome::Complete`].
+    fn stderr_capture(&self) -> CaptureOutcome {
+        // Read the join flag WITHOUT locking first: if the capture thread
+        // panicked the mutex may be poisoned, but `lock_recover` still yields
+        // the inner data, so classification never itself panics.
+        classify_capture(&lock_recover(&self.stderr), self.stderr_join_failed)
     }
 
     fn join_drain_threads(&mut self) {
+        // Record (do not discard) capture-thread join failures: a panicked
+        // drain thread means that stream's capture is unreliable.
         if let Some(h) = self.stdout_thread.take() {
-            let _ = h.join();
+            if h.join().is_err() {
+                self.stdout_join_failed = true;
+            }
         }
         if let Some(h) = self.stderr_thread.take() {
-            let _ = h.join();
+            if h.join().is_err() {
+                self.stderr_join_failed = true;
+            }
         }
     }
 
     fn kill_and_reap(&mut self) {
         if !self.reaped {
             let _ = self.child.kill();
-            let _ = self.child.wait();
-            self.reaped = true;
+            // Only mark cleanup complete when reaping actually succeeded.
+            if self.child.wait().is_ok() {
+                self.reaped = true;
+            }
         }
         self.join_drain_threads();
     }
@@ -367,20 +479,26 @@ impl DrainedChild {
     /// (this method never panics on a normal outcome; the caller decides what
     /// is acceptable).
     ///
-    /// Reliability properties (Correction B):
+    /// Reliability properties (Correction B1):
     ///
     /// * Liveness is checked FIRST each iteration, so an already-exited child
     ///   is rejected as [`PositiveObservation::ExitedBeforeDeliberateTermination`]
     ///   even if the expected markers were captured.
-    /// * When markers are present and the child is alive we kill+wait and
-    ///   inspect the REAL `ExitStatus`: a terminating signal ⇒ deliberate
-    ///   termination; a natural exit code (the liveness/terminate race lost)
-    ///   ⇒ we report the unexpected exit rather than claiming deliberate
-    ///   termination.
-    ///   Signals are preserved via `ExitStatus`, never collapsed to an integer.
-    /// * Kill/wait errors are handled explicitly on the normal result path.
+    /// * When markers are present and the child is alive we request the kill and
+    ///   reap, preserving BOTH the termination-request result and the full
+    ///   `ExitStatus`. Only a SUCCESSFUL kill request whose observed terminating
+    ///   signal equals the expected SIGKILL is accepted
+    ///   ([`PositiveObservation::ObservedThenTerminated`]). A natural exit (the
+    ///   liveness/terminate race lost) ⇒
+    ///   [`PositiveObservation::ExitedBeforeDeliberateTermination`]; a different
+    ///   terminating signal or a failed kill request ⇒
+    ///   [`PositiveObservation::UnexpectedTermination`]. Signals are preserved
+    ///   via `ExitStatus`, never collapsed to an integer.
+    /// * Wait errors are handled explicitly; cleanup is NOT marked complete when
+    ///   reaping failed (so `Drop` retries).
     /// * Captured streams are drained and joined before the returned stderr is
-    ///   snapshotted, so callers assess final diagnostics on complete output.
+    ///   snapshotted, and the capture integrity ([`CaptureOutcome`]) is carried
+    ///   on the positive result so it cannot rest on truncated/failed capture.
     /// * A deadline is a bounded failure ([`PositiveObservation::Deadline`]).
     fn observe_then_terminate(
         &mut self,
@@ -410,50 +528,160 @@ impl DrainedChild {
             // 2. Child alive: are all markers present?
             let err = self.stderr_snapshot();
             if markers.iter().all(|m| err.contains(m)) {
-                // Deliberate termination. Kill + wait, handling errors
-                // explicitly, then classify on the ACTUAL status to resolve
-                // the liveness/terminate race.
+                // Deliberate termination. Request the kill and reap, preserving
+                // BOTH the termination-request result and the full ExitStatus.
+                // Classify on the ACTUAL status: only a SUCCESSFUL kill request
+                // whose observed terminating signal equals the expected SIGKILL
+                // is an accepted deliberate termination. A natural exit (the
+                // liveness/terminate race lost), a different terminating signal
+                // (e.g. a crash), or a failed kill request are all rejected.
                 let kill_res = self.child.kill();
                 let wait_res = self.child.wait();
-                self.reaped = true;
-                self.join_drain_threads();
-                let stderr = self.stderr_snapshot();
                 match wait_res {
                     Ok(status) => {
-                        if let Some(term_signal) = status.signal() {
-                            return PositiveObservation::ObservedThenTerminated {
-                                stderr,
-                                term_signal,
-                            };
-                        }
-                        // Lost the race: the child exited naturally between the
-                        // liveness check and the kill. Do NOT claim deliberate
-                        // termination — report the recorded unexpected exit.
-                        let _ = kill_res;
-                        return PositiveObservation::ExitedBeforeDeliberateTermination {
+                        // Reaping succeeded → cleanup complete.
+                        self.reaped = true;
+                        self.join_drain_threads();
+                        let stderr = self.stderr_snapshot();
+                        match classify_termination(
+                            kill_res.is_ok(),
                             status,
-                            stderr,
-                        };
+                            EXPECTED_TERMINATION_SIGNAL,
+                        ) {
+                            TerminationClass::DeliberatelyTerminated { term_signal } => {
+                                return PositiveObservation::ObservedThenTerminated {
+                                    stderr,
+                                    term_signal,
+                                    capture: self.stderr_capture(),
+                                };
+                            }
+                            TerminationClass::NaturalExit { .. } => {
+                                return PositiveObservation::ExitedBeforeDeliberateTermination {
+                                    status,
+                                    stderr,
+                                };
+                            }
+                            TerminationClass::UnexpectedSignal { term_signal } => {
+                                return PositiveObservation::UnexpectedTermination {
+                                    status,
+                                    stderr,
+                                    detail: format!(
+                                        "terminating signal {term_signal} != expected \
+                                         SIGKILL {EXPECTED_TERMINATION_SIGNAL}"
+                                    ),
+                                };
+                            }
+                            TerminationClass::KillRequestFailed => {
+                                return PositiveObservation::UnexpectedTermination {
+                                    status,
+                                    stderr,
+                                    detail: "kill request failed; termination not \
+                                             attributable to the runner"
+                                        .to_string(),
+                                };
+                            }
+                        }
                     }
-                    Err(e) => panic!(
-                        "TEST FAILURE: wait after kill errored (kill_ok={}): {e}; stderr=\n{}",
-                        kill_res.is_ok(),
-                        stderr
-                    ),
+                    // Explicit wait-error handling: reaping failed, so cleanup
+                    // is NOT marked complete (Drop retries).
+                    Err(e) => {
+                        self.join_drain_threads();
+                        let stderr = self.stderr_snapshot();
+                        panic!(
+                            "TEST FAILURE: wait after kill errored (kill_ok={}): {e}; stderr=\n{}",
+                            kill_res.is_ok(),
+                            stderr
+                        );
+                    }
                 }
             }
 
             // 3. Bounded deadline — timeout is failure.
             if start.elapsed() >= deadline {
-                let dropped_bytes = self.stderr_dropped_bytes();
                 self.kill_and_reap();
                 return PositiveObservation::Deadline {
                     stderr: self.stderr_snapshot(),
-                    dropped_bytes,
+                    capture: self.stderr_capture(),
                 };
             }
             thread::sleep(Duration::from_millis(25));
         }
+    }
+
+    /// Establish, via a bounded PROCESS-STATUS wait (repeated `try_wait`, NOT a
+    /// fixed sleep hoping the child finished), that the child has actually
+    /// exited. Returns the completed `ExitStatus`, which `std` also caches in
+    /// the `Child`, so a following [`DrainedChild::observe_then_terminate`]
+    /// deterministically takes its already-exited branch instead of racing the
+    /// kill against a natural exit. Panics on deadline.
+    fn establish_exit(&mut self, deadline: Duration) -> ExitStatus {
+        let start = Instant::now();
+        loop {
+            match self.child.try_wait() {
+                Ok(Some(status)) => return status,
+                Ok(None) => {
+                    if start.elapsed() >= deadline {
+                        self.kill_and_reap();
+                        panic!(
+                            "TEST FAILURE: runner-control child did not exit within {deadline:?}"
+                        );
+                    }
+                    // Poll interval only (a real status wait), not a fixed
+                    // duration standing in for the child's completion.
+                    thread::sleep(Duration::from_millis(10));
+                }
+                Err(e) => {
+                    self.kill_and_reap();
+                    panic!("TEST FAILURE: try_wait errored while establishing exit: {e}");
+                }
+            }
+        }
+    }
+}
+
+/// Deliberate-termination classification result over a completed termination
+/// request. Pure over its inputs so it is deterministically unit-testable with
+/// constructed `ExitStatus` values (no scheduling dependence).
+#[derive(Debug, PartialEq, Eq)]
+enum TerminationClass {
+    /// The requested kill succeeded AND the child terminated with exactly the
+    /// expected signal — the only accepted deliberate termination.
+    DeliberatelyTerminated { term_signal: i32 },
+    /// The child exited naturally (an exit code, no terminating signal): the
+    /// liveness/terminate race was lost. NOT a deliberate termination.
+    NaturalExit { code: Option<i32> },
+    /// The child terminated on a DIFFERENT signal than requested (e.g. a crash
+    /// signal that arrived during the race). NOT accepted.
+    UnexpectedSignal { term_signal: i32 },
+    /// The kill request itself failed, so termination is not attributable to
+    /// the runner. NEVER an accepted positive outcome, even if the observed
+    /// signal happens to match.
+    KillRequestFailed,
+}
+
+/// On Unix, `Child::kill()` sends SIGKILL (9). A deliberate termination is
+/// accepted ONLY when the requested kill succeeded and the observed terminating
+/// signal is exactly this value. (`std` has no SIGKILL constant; 9 is the
+/// POSIX-fixed value.)
+const EXPECTED_TERMINATION_SIGNAL: i32 = 9;
+
+/// Classify a completed termination request. A natural exit is reported
+/// regardless of the kill result; a terminating signal is accepted only when
+/// the kill succeeded and the signal matches `expected_signal`.
+fn classify_termination(
+    kill_succeeded: bool,
+    status: ExitStatus,
+    expected_signal: i32,
+) -> TerminationClass {
+    match status.signal() {
+        None => TerminationClass::NaturalExit {
+            code: status.code(),
+        },
+        Some(_) if !kill_succeeded => TerminationClass::KillRequestFailed,
+        Some(sig) if sig == expected_signal => {
+            TerminationClass::DeliberatelyTerminated { term_signal: sig }
+        }
+        Some(sig) => TerminationClass::UnexpectedSignal { term_signal: sig },
     }
 }
 
@@ -464,33 +692,65 @@ impl DrainedChild {
 #[derive(Debug)]
 enum PositiveObservation {
     /// All markers observed while the child was still alive; the runner then
-    /// deliberately terminated it with signal `term_signal`.
-    ObservedThenTerminated { stderr: String, term_signal: i32 },
-    /// The child exited on its own (natural or unexpected) before deliberate
-    /// termination — rejected even if the expected markers were captured. The
-    /// full `ExitStatus` is preserved.
+    /// deliberately terminated it, the kill request succeeded, and the observed
+    /// terminating signal matched the expected SIGKILL. `capture` records the
+    /// stderr capture integrity so a positive result cannot silently rest on
+    /// truncated/failed capture.
+    ObservedThenTerminated {
+        stderr: String,
+        term_signal: i32,
+        capture: CaptureOutcome,
+    },
+    /// The child exited on its own (natural) before deliberate termination —
+    /// rejected even if the expected markers were captured. The full
+    /// `ExitStatus` is preserved.
     ExitedBeforeDeliberateTermination { status: ExitStatus, stderr: String },
+    /// The child terminated, but NOT as an accepted deliberate termination: a
+    /// different terminating signal, or the kill request itself failed. Never a
+    /// positive. The full `ExitStatus` and a bounded `detail` are preserved
+    /// (surfaced via `Debug` in the caller's failure panic).
+    #[allow(dead_code)]
+    UnexpectedTermination {
+        status: ExitStatus,
+        stderr: String,
+        detail: String,
+    },
     /// The bounded deadline elapsed before all markers were observed.
-    Deadline { stderr: String, dropped_bytes: usize },
+    Deadline {
+        stderr: String,
+        capture: CaptureOutcome,
+    },
 }
 
 impl PositiveObservation {
     /// Assert this is the accepted positive outcome (observed-while-alive then
-    /// deliberately signal-terminated) and return the captured stderr. Any
-    /// other outcome — including an already-exited child that had emitted the
-    /// markers — is a hard failure.
+    /// deliberately SIGKILL-terminated on a SUCCESSFUL kill request) AND the
+    /// stderr capture was complete/untruncated, then return the captured
+    /// stderr. Any other outcome — an already-exited child that had emitted the
+    /// markers, a different terminating signal, a failed kill, a deadline, or a
+    /// positive whose capture was truncated/failed — is a hard failure.
     fn expect_observed_then_terminated(self, tag: &str) -> String {
         match self {
-            PositiveObservation::ObservedThenTerminated { stderr, term_signal } => {
+            PositiveObservation::ObservedThenTerminated {
+                stderr,
+                term_signal,
+                capture,
+            } => {
+                assert_eq!(
+                    term_signal, EXPECTED_TERMINATION_SIGNAL,
+                    "[{tag}] deliberate termination must carry the expected SIGKILL \
+                     {EXPECTED_TERMINATION_SIGNAL}, got {term_signal}"
+                );
                 assert!(
-                    term_signal > 0,
-                    "[{tag}] deliberate termination must carry a real signal, got {term_signal}"
+                    capture.is_complete(),
+                    "[{tag}] a positive observation requires complete, untruncated stderr \
+                     capture; got {capture:?}"
                 );
                 stderr
             }
             other => panic!(
                 "TEST FAILURE [{tag}]: expected observed-while-alive-then-deliberately-\
-                 terminated positive outcome; got {other:?}"
+                 SIGKILL-terminated positive outcome with complete capture; got {other:?}"
             ),
         }
     }
@@ -875,10 +1135,10 @@ fn d7d3_c_binary_epoch_conflict_fails_closed_preserving_existing_epoch() {
     let args = restore_localmesh_args(data_dir.path(), &snapshot_dir);
     log_executable_provenance("C-epoch-conflict", &args);
 
-    let (status, stderr, stderr_dropped) = {
+    let (status, stderr, capture) = {
         let mut child = DrainedChild::spawn(&args);
         let status = child.wait_natural_exit(NEGATIVE_DEADLINE);
-        (status, child.stderr_snapshot(), child.stderr_dropped_bytes())
+        (status, child.stderr_snapshot(), child.stderr_capture())
     };
     maybe_dump_child_stderr("C-epoch-conflict", &stderr);
 
@@ -907,12 +1167,13 @@ fn d7d3_c_binary_epoch_conflict_fails_closed_preserving_existing_epoch() {
         "must carry the epoch-conflict-specific diagnostic (existing 42 vs snapshot 7); stderr=\n{}",
         stderr
     );
-    // A "forbidden later marker absent" assertion is only valid on UNTRUNCATED
-    // capture: truncation/capture-failure cannot support an absence claim.
-    assert_eq!(
-        stderr_dropped, 0,
-        "stderr capture was truncated ({stderr_dropped} bytes dropped); cannot assert a \
-         forbidden later marker was absent"
+    // A "forbidden later marker absent" assertion is only valid on COMPLETE,
+    // untruncated capture: truncation, a read failure, or a capture-thread
+    // failure cannot support an absence claim.
+    assert!(
+        capture.is_complete(),
+        "stderr capture was not complete ({capture:?}); cannot assert a forbidden later \
+         marker was absent"
     );
     // The consensus loop-dispatch marker must NOT have been reached, and the
     // engine initializer must NOT have run (no baseline-applied observation).
@@ -1072,29 +1333,71 @@ fn d7d3_d_signing_state_continuity_is_not_established_by_restore_path() {
 // Runner controls (test-only child command; NOT qbind-node protocol evidence)
 // ============================================================================
 //
-// These cases exercise the OUTCOME CLASSIFICATION of the process runner itself
-// using a tiny `sh -c` child, kept deliberately separate from the qbind-node
-// protocol cases above. They assert that:
-//   * a child that prints the expected marker then exits UNSUCCESSFULLY before
-//     observation is REJECTED (not accepted as a positive), with its exit code
-//     preserved;
+// These cases exercise the OUTCOME CLASSIFICATION and cleanup behavior of the
+// process runner itself using a tiny single-process child, kept deliberately
+// separate from the qbind-node protocol cases above. They assert that:
+//   * a child that prints the expected marker then exits UNSUCCESSFULLY is
+//     REJECTED (not accepted as a positive), with its exit code preserved —
+//     and its completed exit is established via a bounded PROCESS-STATUS wait
+//     (not a fixed sleep) before the already-exited path is exercised;
 //   * a child that prints the expected marker and stays ALIVE is correctly
-//     identified as observed-then-deliberately-terminated;
-//   * a missing-marker child hits the bounded deadline and is a FAILURE.
-// No process-global environment is mutated, so these run safely in parallel.
+//     identified as observed-then-deliberately-SIGKILL-terminated, and cleanup
+//     completes well within a generous outer bound (no surviving pipe-holding
+//     descendant blocks the drain-thread joins);
+//   * a missing-marker child hits the bounded deadline, is a FAILURE, and again
+//     cleanup completes within the generous outer bound.
+//
+// Every control uses a SINGLE-PROCESS waiting child (`exec sleep` after the
+// marker) so that killing it closes the captured pipes immediately — there is
+// never a descendant still holding stdout/stderr. No process-global environment
+// is mutated, so these run safely in parallel.
 
 /// Short bounded deadline for the runner-control cases (they must not depend on
 /// the long protocol deadlines).
 #[cfg(unix)]
 const RUNNER_CONTROL_DEADLINE: Duration = Duration::from_secs(5);
 
+/// Generous outer bound for runner-control CLEANUP. If cleanup ever waited on a
+/// surviving `sleep 30` descendant, the elapsed time would blow past this; it
+/// is deliberately far below 30s but comfortable for a loaded CI host.
+#[cfg(unix)]
+const RUNNER_CONTROL_CLEANUP_OUTER_BOUND: Duration = Duration::from_secs(15);
+
+/// Bounded process-status wait for `establish_exit` in the controls.
+#[cfg(unix)]
+const RUNNER_CONTROL_EXIT_WAIT: Duration = Duration::from_secs(10);
+
+impl DrainedChild {
+    /// A single-process control child that prints `marker` to stderr and then
+    /// `exec sleep`s, so ONE process holds the captured pipes. Killing it
+    /// closes the pipes immediately (no descendant survives to block joins).
+    #[cfg(unix)]
+    fn sh_marker_then_exec_sleep(marker: &str) -> Self {
+        let script = format!("printf '%s\\n' '{marker}' 1>&2; exec sleep 30");
+        Self::sh_child(&script)
+    }
+}
+
 #[cfg(unix)]
 #[test]
 fn runner_control_rejects_marker_then_unsuccessful_exit() {
     let marker = "runner-control-marker-A";
-    // Print the marker to stderr, then exit unsuccessfully BEFORE observation.
+    // Single-process child: `printf` is a shell builtin (no fork) and `exit 7`
+    // exits the shell itself, so there is no pipe-holding descendant.
     let script = format!("printf '%s\\n' '{marker}' 1>&2; exit 7");
     let mut child = DrainedChild::sh_child(&script);
+
+    // Establish the child's COMPLETED exit via a bounded process-status wait
+    // (repeated `try_wait`, NOT a fixed sleep) BEFORE exercising the
+    // already-exited observation path. This removes the scheduling race in
+    // which the runner's kill could otherwise land first.
+    let established = child.establish_exit(RUNNER_CONTROL_EXIT_WAIT);
+    assert_eq!(
+        established.code(),
+        Some(7),
+        "bounded status wait established the real exit code before observation"
+    );
+
     let outcome = child.observe_then_terminate(&[marker], RUNNER_CONTROL_DEADLINE);
     match outcome {
         PositiveObservation::ExitedBeforeDeliberateTermination { status, stderr } => {
@@ -1114,37 +1417,259 @@ fn runner_control_rejects_marker_then_unsuccessful_exit() {
 #[test]
 fn runner_control_identifies_deliberate_termination_of_live_marked_child() {
     let marker = "runner-control-marker-B";
-    // Print the marker, then stay alive well past the observation window.
-    let script = format!("printf '%s\\n' '{marker}' 1>&2; sleep 30");
-    let mut child = DrainedChild::sh_child(&script);
+    // Single-process: `exec sleep` replaces the shell, so the ONLY process
+    // holding the pipes is the sleep — killing it closes them at once.
+    let mut child = DrainedChild::sh_marker_then_exec_sleep(marker);
+    let start = Instant::now();
     let outcome = child.observe_then_terminate(&[marker], RUNNER_CONTROL_DEADLINE);
+    let elapsed = start.elapsed();
     match outcome {
-        PositiveObservation::ObservedThenTerminated { stderr, term_signal } => {
+        PositiveObservation::ObservedThenTerminated {
+            stderr,
+            term_signal,
+            capture,
+        } => {
             assert!(stderr.contains(marker), "marker observed; stderr=\n{stderr}");
-            assert!(term_signal > 0, "deliberate termination carries a real signal");
+            assert_eq!(
+                term_signal, EXPECTED_TERMINATION_SIGNAL,
+                "deliberate termination carries the expected SIGKILL"
+            );
+            assert!(
+                capture.is_complete(),
+                "single-process control yields complete capture; got {capture:?}"
+            );
         }
         other => panic!("expected deliberate-termination identification, got {other:?}"),
     }
+    // Honest, bounded cleanup: because no descendant survives to hold the pipes,
+    // the kill+reap+drain-join completes far below the surviving-sleep duration.
+    assert!(
+        elapsed < RUNNER_CONTROL_CLEANUP_OUTER_BOUND,
+        "cleanup must not wait on a surviving descendant sleep; elapsed={elapsed:?} \
+         (outer bound {RUNNER_CONTROL_CLEANUP_OUTER_BOUND:?})"
+    );
 }
 
 #[cfg(unix)]
 #[test]
 fn runner_control_missing_marker_deadline_is_failure() {
-    // Alive child that never prints the marker → bounded deadline is a failure.
-    let mut child = DrainedChild::sh_child("sleep 30");
-    let outcome =
-        child.observe_then_terminate(&["never-emitted-marker"], RUNNER_CONTROL_DEADLINE);
+    // Single-process alive child that never prints the marker (`exec sleep`, so
+    // no pipe-holding descendant) → bounded deadline is a failure, and cleanup
+    // does not wait on any surviving descendant.
+    let mut child = DrainedChild::sh_child("exec sleep 30");
+    let start = Instant::now();
+    let outcome = child.observe_then_terminate(&["never-emitted-marker"], RUNNER_CONTROL_DEADLINE);
+    let elapsed = start.elapsed();
     match outcome {
-        PositiveObservation::Deadline {
-            stderr,
-            dropped_bytes,
-        } => {
+        PositiveObservation::Deadline { stderr, capture } => {
             // The never-emitted marker is genuinely absent, and the capture was
-            // untruncated — so absence is a real observation, not a truncation
-            // artifact.
+            // COMPLETE/untruncated — so absence is a real observation, not a
+            // truncation or capture-failure artifact.
             assert!(!stderr.contains("never-emitted-marker"));
-            assert_eq!(dropped_bytes, 0, "runner-control child emitted nothing to drop");
+            assert!(
+                capture.is_complete(),
+                "runner-control child emitted nothing to drop; capture must be complete, \
+                 got {capture:?}"
+            );
         }
         other => panic!("expected a bounded-deadline failure, got {other:?}"),
     }
+    // Deadline result plus cleanup must return within the generous outer bound;
+    // a result returned only after the 30s descendant sleep would NOT be
+    // bounded cleanup.
+    assert!(
+        elapsed < RUNNER_CONTROL_CLEANUP_OUTER_BOUND,
+        "deadline+cleanup must return within the generous outer bound; elapsed={elapsed:?} \
+         (outer bound {RUNNER_CONTROL_CLEANUP_OUTER_BOUND:?})"
+    );
+}
+
+// ============================================================================
+// Constructed classification controls (NOT real-child observations)
+// ============================================================================
+//
+// The following tests exercise the runner's pure classification logic with
+// CONSTRUCTED `ExitStatus` values and CONSTRUCTED capture state. They are
+// deliberately distinguished from the real-child runner controls above and from
+// the qbind-node protocol/evidence cases: they establish the decision table
+// deterministically, without any process scheduling.
+
+/// B1 classification table over constructed statuses (`ExitStatus::from_raw`):
+/// only a successful kill request whose signal equals SIGKILL is accepted.
+#[cfg(unix)]
+#[test]
+fn classify_termination_decision_table() {
+    // (a) Successful requested termination with the expected signal ⇒ accepted.
+    let sigkill = ExitStatus::from_raw(EXPECTED_TERMINATION_SIGNAL);
+    assert_eq!(
+        classify_termination(true, sigkill, EXPECTED_TERMINATION_SIGNAL),
+        TerminationClass::DeliberatelyTerminated {
+            term_signal: EXPECTED_TERMINATION_SIGNAL
+        },
+        "kill succeeded and signal matches SIGKILL ⇒ deliberate termination"
+    );
+
+    // (b) A DIFFERENT terminating signal (e.g. SIGABRT=6, a crash during the
+    //     race) is rejected even though the kill request succeeded.
+    let sigabrt = ExitStatus::from_raw(6);
+    assert_eq!(
+        classify_termination(true, sigabrt, EXPECTED_TERMINATION_SIGNAL),
+        TerminationClass::UnexpectedSignal { term_signal: 6 },
+        "a different terminating signal is NOT accepted as deliberate termination"
+    );
+
+    // (c) A FAILED kill request never becomes an accepted positive outcome,
+    //     even if the observed signal happens to equal SIGKILL.
+    assert_eq!(
+        classify_termination(false, sigkill, EXPECTED_TERMINATION_SIGNAL),
+        TerminationClass::KillRequestFailed,
+        "a failed kill request is never an accepted positive outcome"
+    );
+
+    // (d) An already-exited child retains its ACTUAL natural exit status
+    //     (code 7, no signal), regardless of the kill result.
+    let exit7 = ExitStatus::from_raw(7 << 8);
+    assert_eq!(exit7.code(), Some(7), "constructed natural exit code 7");
+    assert_eq!(exit7.signal(), None, "constructed status has no terminating signal");
+    assert_eq!(
+        classify_termination(true, exit7, EXPECTED_TERMINATION_SIGNAL),
+        TerminationClass::NaturalExit { code: Some(7) },
+        "a natural exit retains its real code and is not a deliberate termination"
+    );
+    assert_eq!(
+        classify_termination(false, exit7, EXPECTED_TERMINATION_SIGNAL),
+        TerminationClass::NaturalExit { code: Some(7) },
+        "a natural exit is a natural exit regardless of the kill result"
+    );
+}
+
+/// B2 control: a test-local reader that yields bytes and then returns an I/O
+/// error. `drain_into` must record the read FAILURE (not a silent break), so
+/// the capture is classified `ReadFailed` and cannot support an absence claim.
+#[test]
+fn capture_read_error_is_propagated_not_silently_dropped() {
+    struct ErringReader {
+        emitted: bool,
+    }
+    impl Read for ErringReader {
+        fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+            if self.emitted {
+                return Err(io::Error::other("injected read failure"));
+            }
+            self.emitted = true;
+            let bytes = b"partial-before-error\n";
+            let n = bytes.len().min(buf.len());
+            buf[..n].copy_from_slice(&bytes[..n]);
+            Ok(n)
+        }
+    }
+
+    let sink = Arc::new(Mutex::new(CapturedStream::default()));
+    drain_into(ErringReader { emitted: false }, sink.clone());
+
+    let guard = lock_recover(&sink);
+    assert!(
+        guard.buf.contains("partial-before-error"),
+        "the bytes emitted before the error were still captured"
+    );
+    // The read failure is recorded as the stream's terminal outcome, so
+    // classification reports an INCOMPLETE capture — not a clean EOF.
+    let outcome = classify_capture(&guard, /* thread_panicked */ false);
+    match &outcome {
+        CaptureOutcome::ReadFailed { detail } => {
+            assert!(detail.contains("read error"), "bounded failure description: {detail}");
+        }
+        other => panic!("expected ReadFailed, got {other:?}"),
+    }
+    assert!(
+        !outcome.is_complete(),
+        "a read failure cannot support an absence assertion"
+    );
+}
+
+/// B2 control (join-error path): a capture thread that panics must be recorded
+/// as a join FAILURE, classified `ThreadPanicked`, and cannot support a
+/// complete-capture claim. Exercises the exact `JoinHandle::join().is_err()`
+/// branch `join_drain_threads` uses.
+#[test]
+fn capture_thread_join_failure_is_recorded() {
+    // A thread that panics WITHOUT touching any capture mutex (so no poisoning
+    // side effects): joining it yields Err, the recorded signal for a failed
+    // capture thread.
+    let panicking: JoinHandle<()> = thread::spawn(|| panic!("injected capture-thread failure"));
+    assert!(
+        panicking.join().is_err(),
+        "a panicked capture thread joins with an error (the recorded join-failure signal)"
+    );
+    let ok: JoinHandle<()> = thread::spawn(|| {});
+    assert!(ok.join().is_ok(), "a clean capture thread joins without error");
+
+    // A thread failure classifies as ThreadPanicked regardless of buffered
+    // bytes, and cannot support an absence assertion.
+    let stream = CapturedStream {
+        buf: "some-buffered-output".to_string(),
+        dropped_bytes: 0,
+        read_outcome: Some(Ok(())),
+    };
+    let outcome = classify_capture(&stream, /* thread_panicked */ true);
+    assert_eq!(outcome, CaptureOutcome::ThreadPanicked);
+    assert!(!outcome.is_complete(), "a capture-thread failure is not complete capture");
+}
+
+/// B2 truncation control: a reader that emits MORE than the ring cap then EOF.
+/// The capture drops bytes, is classified `Truncated`, and an absence assertion
+/// cannot rest on it — even though the read itself ended cleanly.
+#[test]
+fn capture_truncation_cannot_support_absence() {
+    struct OverflowReader {
+        remaining: usize,
+    }
+    impl Read for OverflowReader {
+        fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+            if self.remaining == 0 {
+                return Ok(0); // clean EOF
+            }
+            let n = buf.len().min(self.remaining);
+            for b in buf[..n].iter_mut() {
+                *b = b'x';
+            }
+            self.remaining -= n;
+            Ok(n)
+        }
+    }
+
+    // Emit CAP + 4 KiB so the ring cap must drop bytes, then EOF cleanly.
+    let overflow = OverflowReader {
+        remaining: CAPTURE_CAP_BYTES + 4096,
+    };
+    let sink = Arc::new(Mutex::new(CapturedStream::default()));
+    drain_into(overflow, sink.clone());
+
+    let guard = lock_recover(&sink);
+    assert_eq!(guard.buf.len(), CAPTURE_CAP_BYTES, "buffer capped at the ring bound");
+    assert!(guard.dropped_bytes > 0, "overflow forced byte drops");
+    let outcome = classify_capture(&guard, /* thread_panicked */ false);
+    match outcome {
+        CaptureOutcome::Truncated { dropped_bytes } => {
+            assert_eq!(dropped_bytes, guard.dropped_bytes);
+        }
+        other => panic!("expected Truncated, got {other:?}"),
+    }
+    assert!(
+        !classify_capture(&guard, false).is_complete(),
+        "a truncated capture cannot support an absence assertion, despite a clean EOF"
+    );
+}
+
+/// A clean, complete, untruncated capture is the ONLY outcome that supports an
+/// absence assertion.
+#[test]
+fn complete_capture_is_the_only_absence_supporting_outcome() {
+    let stream = CapturedStream {
+        buf: "hello".to_string(),
+        dropped_bytes: 0,
+        read_outcome: Some(Ok(())),
+    };
+    assert_eq!(classify_capture(&stream, false), CaptureOutcome::Complete);
+    assert!(classify_capture(&stream, false).is_complete());
 }

@@ -1220,10 +1220,17 @@ and `LocalMesh mode: starting consensus loop` lines only mark baseline
 construction and startup-dispatch entry. The signing-state finding remains
 source-traced (no per-view vote latch / anti-equivocation record travels the
 recovery interface); signing-state continuity stays NOT-established. The process
-runner was hardened (full `ExitStatus` preserved; already-exited positive child
-rejected; liveness/terminate race resolved on the real post-kill status;
-truncated capture cannot support an absent-marker claim), and case C now requires
-the natural exit code 1 plus the epoch-conflict-specific diagnostic (existing
+runner was further corrected (Run 422 D7-D3 process-runner reliability pass): a
+deliberate termination is accepted only when the requested kill SUCCEEDED and the
+observed terminating signal equals the expected SIGKILL — a natural exit, a
+different terminating signal, or a failed kill request are rejected; the full
+`ExitStatus` and kill result are preserved; capture read errors and capture-thread
+(join) failures are propagated so that neither a positive observation nor an
+absent-marker claim can rest on incomplete/truncated capture; and the runner
+controls are single-process and deterministic (a bounded process-status wait
+establishes the exit-7 child's completed exit, and cleanup does not wait on
+surviving pipe-holding descendants). Case C requires the natural exit code 1 plus
+the epoch-conflict-specific diagnostic (existing
 epoch 42 vs snapshot epoch 7). Posture unchanged:
 `GENESIS_AUTHORITY_ACTIVATION=DISABLED`, `DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED`,
 `CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED`. Evidence:
