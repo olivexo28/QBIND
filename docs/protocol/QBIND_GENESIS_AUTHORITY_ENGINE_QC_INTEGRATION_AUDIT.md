@@ -1236,3 +1236,24 @@ epoch 42 vs snapshot epoch 7). Posture unchanged:
 `CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED`. Evidence:
 `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md` (Run 422 D7-D3 correction
 subsection).
+
+## Run 422 D7-D4 successor note (restart after a partially completed restore)
+
+Run 422 D7-D4 characterizes (test + source, no production change) the two
+subsequent starts that follow the D7-D3 case-C partial restore (restored
+`state_vm_v0` alongside preserved consensus `CommittedEpoch(42)`). Repeating
+startup WITH `--restore-from-snapshot` is refused by the requested-restoration
+`RestoreError::TargetStateNotEmpty` guard (natural exit 1, before any copy or
+audit-marker write; account value, epoch 42, and restore marker unchanged).
+Ordinary startup WITHOUT the flag returns `Ok(None)` from
+`apply_snapshot_restore_if_requested` — the `TargetStateNotEmpty` guard and the
+Run 097 epoch comparison do NOT run — and proceeds to the consensus-loop-start
+boundary with `restore_baseline=false` over the mixed account/epoch destination
+(epoch 42 unchanged at loop-start). That proceed-over-mixed-state behavior is an
+observed limitation requiring assessment before production activation, NOT safe
+recovery, and is not repaired here. A fresh control reaches the same boundary but
+shows `PresentNoCommittedEpoch`. Posture unchanged:
+`GENESIS_AUTHORITY_ACTIVATION=DISABLED`, `DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED`,
+`CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED`; signing-state
+continuity stays NOT-established. Evidence:
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md` (Run 422 D7-D4 section).

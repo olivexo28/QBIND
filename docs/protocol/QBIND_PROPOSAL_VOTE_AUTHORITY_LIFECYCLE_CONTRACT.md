@@ -760,3 +760,20 @@ guard — so its outcome is not predetermined by `TargetStateNotEmpty`. Neither
 scenario is implemented in this correction. Evidence:
 `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md` (Run 422 D7-D3 correction
 subsection).
+
+## Run 422 D7-D4 successor note (partial-restore restart characterization only)
+
+The D7-D3 next step is now extended by characterization only. Run 422 D7-D4
+records, against the same release executable, what the binary does on the two
+starts that follow a partially completed restore (restored `state_vm_v0` +
+preserved conflicting consensus epoch 42): the WITH-flag repeat is refused by the
+requested-restoration `TargetStateNotEmpty` guard (natural exit 1; no state,
+epoch, or audit-marker mutation), while the WITHOUT-flag ordinary start returns
+`Ok(None)` (no `TargetStateNotEmpty` guard, no Run 097 epoch comparison) and
+proceeds to the consensus-loop-start boundary with `restore_baseline=false` over
+the mixed destination — an observed limitation requiring assessment, not safe
+recovery, and not repaired here. This changes no lifecycle-contract clause and
+authorizes nothing: no proposal/vote authority is derived, activated, or
+continued by either start. Signing-state continuity remains NOT-established and
+C4/C5 stay open. Evidence:
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md` (Run 422 D7-D4 section).

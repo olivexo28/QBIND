@@ -5788,3 +5788,230 @@ PRODUCTION-LIFECYCLE-UNAVAILABLE`, `DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED`,
 `SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO`. Signing-state continuity remains
 NOT-established. No readiness promotion and no Run 423 successor restart
 investigation was started.
+
+## Run 422 D7-D4 — restart after a partially completed restore (test + evidence)
+
+This phase is a **bounded characterization** of what the *existing* binary does
+on the two subsequent starts that follow the D3 case-C partial restore (a
+restored `state_vm_v0` alongside a preserved conflicting consensus epoch). It
+adds three `d7d4_*` cases to the existing D3 integration target plus this
+evidence section. It implements **no** recovery repair, rollback protection,
+authority activation, production-source/CLI/config/schema/storage-format/
+signing/wire change, cleanup command, or new persistence mechanism.
+Genesis-authority activation stays DISABLED. A successful characterization
+records existing behavior; it does **not** establish safe recovery, state
+coherence, signing continuity, or production readiness.
+
+### Provenance and object limitations
+
+* **Actual branch** inspected in this clone:
+  `copilot/copilotcopilotcopilotcopilotcopilotcopilotcopilot` (seven `copilot`
+  segments). The task's **reported** branch was
+  `copilot/copilotcopilotcopilotcopilotcopilotcopilot-run-422`. No branch rename
+  was performed; the working branch is reported as-is.
+* **Actual starting HEAD** at checkout:
+  `358a69052a73d906dbe29c722f741579b9b5e19a`. **Tested implementation
+  checkpoint** (committed before recording validation):
+  `7208e043415b3b184235e20d0f178b7553fa7252`. The task's **reported** final
+  `dba99d62691bc33e888706a75cba6d4cbf49ed4a` and checkpoint
+  `8751e8bf4d05c2d8f27b46d542a36ce580dbf24b` are **not present** in this shallow
+  clone (`git cat-file -t` fails for both). The clone is shallow with a single
+  grafted boundary at `b21814a7e3935488dd81f0014ff30e42ecdfa97e` (`.git/shallow`).
+  Missing historical objects do **not** imply missing implementation: the D3
+  target and every reused production source named by the task are present in-tree
+  and were re-inspected directly. Content correspondence is reported separately
+  from ancestry, which cannot be verified from this shallow clone.
+* Capacity at start: `/dev/root` 145G total, 85G avail (42% used) — ample.
+* Supplied task branch used with normal commits + push only. No PR, no main
+  changes, no branch rename, no force-push, rebase, or history rewrite.
+  `task/warning.txt` and unrelated files untouched. File-specific CRLF line
+  endings of the D3 target and this doc are preserved.
+
+### Source trace: WITH vs WITHOUT the restore flag (distinct paths)
+
+Both starts share the same early dispatch
+(`crates/qbind-node/src/main.rs` ~L2463) but diverge on whether restoration is
+requested:
+
+* **WITH `--restore-from-snapshot` (requested restoration).**
+  `apply_snapshot_restore_if_requested_inner` (fast-sync enabled) runs the
+  materialization pipeline. Because no `--genesis-path` is supplied and no local
+  `pqc_authority_state.json` marker exists on the partial destination, it takes
+  the legacy no-context branch → `restore_from_snapshot` →
+  `materialize_validated_snapshot`
+  (`crates/qbind-node/src/snapshot_restore.rs`). There the `target_state_dir`
+  (`<data_dir>/state_vm_v0`) already exists and is **non-empty** (it was
+  materialized by the case-C restore), so the empty-check returns
+  `RestoreError::TargetStateNotEmpty` **before** any byte copy or
+  `write_restore_marker`. `main.rs` prints `[restore] ERROR: <Display>` and
+  `std::process::exit(1)`. The `TargetStateNotEmpty` guard belongs to this
+  requested-restoration path only.
+* **WITHOUT the flag (ordinary startup).**
+  `apply_snapshot_restore_if_requested` sees fast-sync disabled and returns
+  `Ok(None)`. `main.rs` prints the normal-startup line, builds **no**
+  `RestoreBaseline`, and **skips** the Run 097 epoch block entirely (it is
+  guarded by `if let Some(outcome)`). The `TargetStateNotEmpty` guard does
+  **not** run and no snapshot-epoch comparison is performed. Startup then opens
+  the canonical consensus storage (which already holds epoch 42), dispatches into
+  `run_local_mesh_node`, and enters `run_binary_consensus_loop_with_io` with
+  `restore_baseline=None`, so `initialize_from_snapshot_baseline` is **not**
+  invoked (no `[binary-consensus] B5: applied restore baseline` line). The honest
+  last-observed boundary is the existing `[binary-consensus] Starting consensus
+  loop:` line (exposing `restore_baseline=false`), reached while the child is
+  still alive.
+
+The `[binary] LocalMesh mode: starting consensus loop` line is a **dispatch
+marker only**; engine baseline application is a distinct, later step and is
+**not** claimed for the WITHOUT-flag path (there is no baseline to apply).
+
+### How each partial destination was produced (independently, through the real binary)
+
+Each continuation calls the extracted test-local helper
+`reproduce_case_c_partial_restore`, which reproduces D3 case C end-to-end through
+the **unmodified release executable** for its **own** independent tempdirs:
+
+1. Build a real RocksDB account-state store (account `0xCD..`, value 4242) and a
+   real checkpoint via `StateSnapshotter::create_snapshot`, meta declaring
+   height 333, **epoch 7**.
+2. Seed **only** `<data_dir>/consensus` with committed **epoch 42** (RocksDB
+   handle dropped before launch).
+3. Launch `qbind-node --restore-from-snapshot` (LocalMesh DevNet).
+4. Require natural **exit 1**, complete capture, the Run 097 epoch-parity FATAL
+   with the exact `existing meta:current_epoch=42 but snapshot meta.json declares
+   epoch=7` diagnostic, and `restore → B5 → storage-open → epoch-FATAL` order.
+5. After the child is reaped, independently reopen both stores: restored account
+   `AccountState::new(7, 4242)` and consensus `CommittedEpoch(42)`.
+6. Record the restore audit-marker (`RESTORED_FROM_SNAPSHOT.json`) written by
+   this first invocation.
+
+The helper preserves every original case-C assertion; `d7d3_c` now calls it. The
+continuations never share a destination and never hand-fabricate the partial
+directory. All RocksDB handles are closed before every child launch; stored
+logical values are read only after reaping (a selected-value match is **not**
+claimed to be directory byte-identity).
+
+### Scenario table (observed against the release executable)
+
+| Case | Args (beyond `--env devnet --network-mode local-mesh --data-dir <partial>`) | Observed exit / termination | Capture | Last observed startup boundary | Before → after stored values |
+| --- | --- | --- | --- | --- | --- |
+| **A** WITH-flag retry | `--restore-from-snapshot <snap-epoch7>` | **natural exit 1** (no signal) | complete | `[restore] ERROR: … target state directory is not empty:` (`TargetStateNotEmpty`); **no** storage-open, loop, or baseline | account 7/4242 → 7/4242; `CommittedEpoch(42)` → `CommittedEpoch(42)`; audit marker byte-identical (not appended/replaced) |
+| **B** WITHOUT-flag restart | *(none — flag omitted)* | observed-while-alive → deliberate SIGKILL(9) | complete | `[binary-consensus] Starting consensus loop:` with `restore_baseline=false` (proceeded past `[restore] no …; normal startup.` → storage-open `state=committed-epoch epoch=42` → LocalMesh dispatch) | account 7/4242 → 7/4242; `CommittedEpoch(42)` → `CommittedEpoch(42)` (unchanged at loop-start); audit marker byte-identical (ordinary start writes none) |
+| **C** fresh control | *(none — flag omitted, fresh empty data dir)* | observed-while-alive → deliberate SIGKILL(9) | complete | `[binary-consensus] Starting consensus loop:` with `restore_baseline=false` (storage-open `state=present-no-committed-epoch`) | consensus `PresentNoCommittedEpoch` (never `CommittedEpoch(42)`) — distinct from the partial destination |
+
+### Evidence-boundary separation (explicit)
+
+* **Executable observations:** the exit codes, terminating signal (SIGKILL 9),
+  ordered stderr markers, and `restore_baseline=false` field are all from the
+  real child `qbind-node` process; timeouts are hard failures and only an
+  observed-while-alive → deliberate-SIGKILL outcome with complete capture counts
+  as a positive (`observe_then_terminate` / `expect_observed_then_terminated`).
+* **Independent database reads:** account value and consensus observation are
+  read by reopening the RocksDB stores in-process **after** the child is reaped,
+  via the existing `RocksDbAccountState` reader and
+  `observe_consensus_storage` (C1). These are single-key/single-account reads,
+  not a full-store inventory or a directory byte-identity claim.
+* **Fixture declarations:** snapshot height 333 / block hash / epoch 7 are
+  `StateSnapshotMeta` inputs, not authenticated consensus evidence.
+* **Source-only conclusions:** the WITH/WITHOUT branch divergence, the
+  `TargetStateNotEmpty` location before any copy/marker write, and the absence of
+  a Run 097 comparison on the WITHOUT-flag path are source-traced (cited above),
+  distinct from the executable observations.
+
+### Newly characterized recovery limitation
+
+Ordinary startup (case B) **proceeds** over the mixed account/epoch destination:
+restored `state_vm_v0` (account 7/4242) coexists with preserved consensus
+`CommittedEpoch(42)`, and the binary starts the consensus loop from a fresh
+(`restore_baseline=false`) engine without any snapshot-epoch comparison. This is
+recorded as an **observed limitation requiring assessment before production
+activation** — it is **not** coherent or safe recovery, and it is **not**
+repaired in this task. The last observed boundary is the consensus-loop-start
+line; **no** engine recovery of the mixed state is inferred from startup
+dispatch.
+
+### Validation (recorded literally)
+
+Dev profile unless noted; the child-process cases additionally executed against
+the explicitly selected release executable via `QBIND_D7D3_NODE_BIN`.
+
+* **Full D3+D4 integration target — dev binary:**
+  `cargo test -p qbind-node --test run_422_d7d3_binary_snapshot_restore_characterization_tests -- --test-threads=1`
+  → **15 passed; 0 failed** (12 D3/runner-control + 3 new D4 = 15; retained
+  runner controls intact).
+* **Full D3+D4 integration target — explicitly selected release executable:**
+  `QBIND_D7D3_NODE_BIN="$PWD/target/release/qbind-node" cargo test -p qbind-node --test run_422_d7d3_binary_snapshot_restore_characterization_tests -- --test-threads=1`
+  → **15 passed; 0 failed**. The three D4 cases were also run in isolation with
+  `QBIND_D7D3_DUMP_STDERR=1` to transcribe the exact child stderr shown above.
+* **Focused Clippy (changed test target):**
+  `cargo clippy -p qbind-node --test run_422_d7d3_binary_snapshot_restore_characterization_tests`
+  → the changed test target compiles with **no warnings attributable to it**.
+  With `-D warnings` the command fails on **pre-existing** `clippy::needless_return`
+  lints in the `qbind-consensus` **library** (`basic_hotstuff_engine.rs`), a
+  dependency this test-only change does not touch and does not modify — recorded
+  literally, not converted into a pass or a regression.
+* **Focused regressions:** `cargo test -p qbind-node --test b3_snapshot_restore_tests`
+  → **10 passed**; `cargo test -p qbind-node --test run_097_snapshot_epoch_parity_tests`
+  → **7 passed**. (Newly executed subsets are reported separately; not summed
+  with overlapping historical D3 counts.)
+* **File-specific whitespace / line endings:** the changed target retains **CRLF**
+  line endings throughout (2061/2061 lines CRLF; final `}` without trailing
+  newline, matching the pre-existing file), no trailing whitespace, no tabs.
+  `git diff --numstat` = `391 insertions, 4 deletions` (the moved case-C body
+  matched as unchanged context — no whole-file line-ending churn).
+
+### Executable identity
+
+| Field | Value |
+| --- | --- |
+| Path | `target/release/qbind-node` |
+| SHA-256 | `575215409d09a2b8500a48d04d1ef6026da45d76d04e05c9c24574998d6df54c` |
+| Byte length | `16953520` |
+| Build / source revision | `358a69052a73d906dbe29c722f741579b9b5e19a` (starting HEAD) |
+| Profile | `release` |
+| Build command | `cargo build --release -p qbind-node --bin qbind-node` |
+
+A different hash on a future rebuild is an observation, not proof of either
+reproducibility or a regression.
+
+### Security tooling (recorded literally)
+
+Reported literally: no CodeQL result is asserted in this section. A skipped
+CodeQL run is incomplete analysis, and an unavailable or errored reviewer is not
+a completed review; “0 alerts” or “no comments” accompanying such outcomes are
+**not** converted into passes. The changes are **test + documentation only**
+(no production source, CLI, schema, storage-format, signing, or wire change).
+
+### Scoped verdict
+
+`D7D4_PARTIAL_RESTORE_RESTART_CHARACTERIZATION=COMPLETE-FOR-TESTED-SCOPE`
+
+Both continuations and the control have concrete, asserted outcomes against the
+identified release executable (SHA-256 `57521540…`): (A) the WITH-flag retry is
+refused with the `TargetStateNotEmpty` diagnostic at natural exit 1, leaving the
+account value, consensus epoch 42, and restore audit marker unchanged; (B) the
+WITHOUT-flag restart proceeds to the consensus-loop-start boundary with
+`restore_baseline=false` over the mixed destination (observed limitation), epoch
+42 unchanged at loop-start; (C) the fresh control reaches the same boundary but
+shows `PresentNoCommittedEpoch`, distinguishing partial-destination behavior from
+normal startup. No deadline or runner failure was used to complete any scenario.
+
+### Retained posture (unchanged by D7-D4)
+
+`D7_STATUS=PARTIAL-CODE-TEST / PRODUCTION-LIFECYCLE-UNAVAILABLE`,
+`DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED`,
+`GENESIS_AUTHORITY_ACTIVATION=DISABLED`,
+`PRODUCTION_WIRE_CHAIN_ID_BEHAVIOR=UNCHANGED`,
+`CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED`,
+`SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO`. Signing-state continuity
+remains **NOT-established**; C4/C5 stay open. No readiness promotion and no
+Run 423 successor work was started. The one material contradiction surfaced —
+ordinary startup proceeding over a mixed account/epoch destination — is recorded
+above as a recovery limitation for separate follow-up assessment, not repaired
+here.
+
+### Clean-worktree / push status
+
+Changes limited to the four authorized paths, committed to the task branch and
+pushed via the progress tool (test checkpoint committed **before** validation
+results were recorded). No PR, no main changes, no branch rename, no force-push,
+rebase, or history rewrite. Worktree clean after the documentation commit.
