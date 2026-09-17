@@ -716,3 +716,23 @@ Evidence: `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md` (Run 422 D7-D2 secti
 `crates/qbind-node/tests/run_422_d7d2_signing_state_recovery_tests.rs`. Next step
 (not authorized here): characterize the actual binary snapshot-restore call path
 over a real RocksDB artifact before considering any durable protection.
+## Run 422 D7-D3 successor note (binary snapshot-restore characterization only)
+
+The D7-D2 next step above is now covered by characterization only. Run 422 D7-D3
+exercised the actual binary snapshot-restore call path over a real RocksDB
+checkpoint through the **unmodified `qbind-node` release executable**
+(sha256 `060fb0f0…`): create checkpoint via `StateSnapshotter::create_snapshot`,
+launch the binary with `--restore-from-snapshot`, observe the ordered startup
+stages (restore → Run 093 storage open → Run 097 epoch parity → LocalMesh loop),
+deliberately terminate or fail closed, then independently reopen the RocksDB
+stores. It confirmed, at the executable level, that only the `RestoreBaseline`
+(`snapshot_height` + `snapshot_block_id`) reaches
+`initialize_from_snapshot_baseline`, that the consensus store distinguishes
+epoch-absence from explicit `0`, and that an epoch-parity conflict fails closed
+(nonzero exit, existing epoch preserved) with account-state restoration having
+already occurred before rejection. No signing/locking evidence is restored,
+reconstructed, or observable through these paths. No production change; signing-
+state continuity remains NOT-established; `DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED`;
+`GENESIS_AUTHORITY_ACTIVATION=DISABLED`. Evidence:
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md` (Run 422 D7-D3 section) and
+`crates/qbind-node/tests/run_422_d7d3_binary_snapshot_restore_characterization_tests.rs`.
