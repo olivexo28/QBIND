@@ -5581,3 +5581,200 @@ unchanged: `D7_STATUS=PARTIAL-CODE-TEST / PRODUCTION-LIFECYCLE-UNAVAILABLE`,
 `SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO`. No readiness promotion and no
 Run 423 work. Prior execution results at their actual revisions are retained and
 not relabelled as newly executed.
+
+## Run 422 D7-D3 correction (process-runner reliability, this pass) — B1/B2/B3 (test + evidence)
+
+This bounded pass completes the **process-runner reliability** corrections on the
+D7-D3 target. It refines the earlier "Correction B" (which still classified any
+terminating signal as deliberate and silently dropped capture failures) and makes
+the runner controls deterministic. It preserves the accepted A/C findings above
+and the real-checkpoint / account-restoration / epoch-parity evidence. It changes
+**only** the D7-D3 test target and documentation; no production source, getter,
+CLI flag, storage/schema, authorization, activation, or recovery redesign was
+touched. Genesis-authority activation stays DISABLED.
+
+### Provenance and object availability (this pass)
+
+* Actual branch inspected/used: `copilot/copilotcopilotcopilotcopilotcopilotcopilot-run-422`
+  (six `copilot` segments — differs from the reported
+  `copilot/copilotcopilotcopilotcopilotcopilot-run-422-d7-d2`). Supplied task
+  branch used unchanged with normal commits + push only — no PR, main change,
+  branch rename, force-push, rebase, or history rewrite. `task/warning.txt` and
+  unrelated files untouched. Worktree clean at checkout; shallow single-branch
+  clone (`git rev-parse --is-shallow-repository` = `true`).
+* Starting HEAD at checkout: `b21814a7e3935488dd81f0014ff30e42ecdfa97e`.
+* Capacity at start: `/dev/root` 145G total, ~85G avail (42% used).
+* Reviewed revision `278a87ebf9c524cf1af286641197272a4400845a` is **not present**
+  in this shallow clone (`git cat-file -t` fails). Missing reference objects do
+  not imply missing implementation: the D7-D3 target and named production sources
+  are present in-tree and were re-inspected directly; content correspondence is
+  reported separately from ancestry, which cannot be verified here.
+* Implementation checkpoint (corrected test committed BEFORE validation):
+  `8751e8bf4d05c2d8f27b46d542a36ce580dbf24b`.
+
+### Changed files (this pass)
+
+* `crates/qbind-node/tests/run_422_d7d3_binary_snapshot_restore_characterization_tests.rs`
+  (B1/B2/B3 corrections; now **12 tests**: A/B/C/D + 3 runner-control + 5
+  constructed classification/capture controls).
+* `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md` (this subsection).
+* `docs/protocol/QBIND_GENESIS_AUTHORITY_ENGINE_QC_INTEGRATION_AUDIT.md`
+  (successor-note refinement of the runner description to match B1/B2/B3 only).
+  `docs/protocol/QBIND_PROPOSAL_VOTE_AUTHORITY_LIFECYCLE_CONTRACT.md` was left
+  unchanged (its successor note is accurate and does not overstate the runner).
+
+No production source file was modified; production behavior is unchanged.
+
+### Disposition of B1/B2/B3
+
+* **B1 (classify deliberate termination correctly): applied.**
+  `observe_then_terminate` now preserves BOTH the termination-request result
+  (`kill()` outcome) and the full `ExitStatus`, and classifies via a pure,
+  unit-testable `classify_termination(kill_succeeded, status, expected_signal)`
+  helper. A deliberate termination is accepted **only** when the requested kill
+  succeeded AND the observed terminating signal equals the expected SIGKILL
+  (`EXPECTED_TERMINATION_SIGNAL=9`). A natural exit ⇒
+  `ExitedBeforeDeliberateTermination` (real status preserved); a different
+  terminating signal or a failed kill request ⇒ `UnexpectedTermination` (never a
+  positive). Liveness is still checked first; wait errors are handled explicitly
+  and cleanup is **not** marked complete when reaping failed (`Drop` retries).
+  `Drop` stays best-effort and cannot raise a second panic during unwinding
+  (poison-tolerant `lock_recover`; no `.expect` locks in the cleanup path).
+  Constructed-status coverage (`classify_termination_decision_table`, using
+  `ExitStatus::from_raw`): (a) SIGKILL+kill-ok ⇒ `DeliberatelyTerminated`;
+  (b) SIGABRT(6)+kill-ok ⇒ `UnexpectedSignal` (rejected); (c) SIGKILL+kill-failed
+  ⇒ `KillRequestFailed` (never accepted); (d) exit code 7 ⇒ `NaturalExit{Some(7)}`
+  regardless of kill result. These constructed tests are clearly separated from
+  real-child observations and qbind-node evidence.
+* **B2 (propagate capture failures): applied.** `drain_into` now records a
+  terminal per-stream `read_outcome` (`Some(Ok)` on EOF, `Some(Err(bounded
+  desc))` on a non-`Interrupted` read error — no silent break).
+  `join_drain_threads` records capture-thread join failures (panics) instead of
+  discarding them. A new `CaptureOutcome` (`Complete` / `Truncated` /
+  `ReadFailed` / `ThreadPanicked` / `StillDraining`) is computed by the pure
+  `classify_capture`; only `Complete` (`is_complete()`) may support an absence
+  assertion. Positive results now CARRY the capture outcome
+  (`ObservedThenTerminated{…, capture}` / `Deadline{…, capture}`);
+  `expect_observed_then_terminated` asserts `capture.is_complete()`. Case C's
+  missing-marker absence assertions now require `capture.is_complete()` (not the
+  weaker `stderr_dropped_bytes()==0`). Deterministic controls:
+  `capture_read_error_is_propagated_not_silently_dropped` (reader yields bytes
+  then an I/O error ⇒ `ReadFailed`, cannot support absence);
+  `capture_thread_join_failure_is_recorded` (panicking `JoinHandle` ⇒
+  `join().is_err()`; `ThreadPanicked` cannot support absence);
+  `capture_truncation_cannot_support_absence` (reader overflows the ring cap then
+  EOF ⇒ `Truncated`, cannot support absence despite a clean EOF).
+* **B3 (deterministic, bounded child controls): applied.** All runner controls
+  use SINGLE-PROCESS waiting children so no descendant survives holding the
+  pipes: the alive controls `exec sleep` after the marker (`printf … 1>&2; exec
+  sleep 30` and `exec sleep 30`), so a kill closes the captured pipes at once and
+  drain-thread joins do not block on a surviving sleep. The exit-7 control now
+  establishes the child's COMPLETED exit through a bounded PROCESS-STATUS wait
+  (`establish_exit`, repeated `try_wait`, NOT a fixed sleep) before exercising the
+  already-exited observation path, removing the kill-vs-exit race. Marker content
+  and exit-code assertions are preserved. Both the deliberate-termination and the
+  missing-marker deadline controls assert cleanup returns within a generous outer
+  bound (`RUNNER_CONTROL_CLEANUP_OUTER_BOUND=15s`, far below the 30s descendant
+  sleep) — a result returned only after a 30s sleep would fail these. No
+  process-global environment mutation (per-`Command` `env_remove` only).
+
+### Runner-control and constructed-control outcomes (exact)
+
+* `runner_control_rejects_marker_then_unsuccessful_exit` — PASS. `establish_exit`
+  returns code 7; `observe_then_terminate` ⇒ `ExitedBeforeDeliberateTermination`
+  with code 7 preserved and the marker captured (rejected despite the marker).
+* `runner_control_identifies_deliberate_termination_of_live_marked_child` — PASS.
+  ⇒ `ObservedThenTerminated{term_signal=9, capture=Complete}`; cleanup elapsed
+  well under the 15s outer bound (no surviving-sleep block).
+* `runner_control_missing_marker_deadline_is_failure` — PASS. ⇒ `Deadline{capture=
+  Complete}`, marker genuinely absent; deadline+cleanup under the 15s outer bound.
+* `classify_termination_decision_table` — PASS (B1 decision table above).
+* `capture_read_error_is_propagated_not_silently_dropped` — PASS (`ReadFailed`).
+* `capture_thread_join_failure_is_recorded` — PASS (`ThreadPanicked`).
+* `capture_truncation_cannot_support_absence` — PASS (`Truncated`).
+* `complete_capture_is_the_only_absence_supporting_outcome` — PASS (`Complete`).
+
+### Commands, counts, profiles, release-executable hash (this pass)
+
+Release build (source-corresponding, rebuilt this pass because the previously
+reported executable `70671e40…` is not present in this fresh clone and its hash /
+source correspondence could not be established here):
+
+```
+cargo build --release -p qbind-node --bin qbind-node   # Finished release in 6m41s
+sha256sum target/release/qbind-node
+e62a6e5ef576b2afb403b3b4c048cdb0b75db364c3339151fd95c16724f44165  target/release/qbind-node
+# byte_len = 16953504
+```
+
+The rebuilt hash **differs** from the previously reported `70671e40…`; per the run
+rules no reproducibility or non-reproducibility is inferred from the differing
+hash. This executable was built from the checked-out source at this pass's HEAD;
+compilation alone was not treated as executable-level validation.
+
+D7-D3 target (dev profile) and repeated against the exact release executable via
+`QBIND_D7D3_NODE_BIN` (cases B1/B2/C execute against that binary):
+
+```
+cargo test -p qbind-node --test run_422_d7d3_binary_snapshot_restore_characterization_tests
+# test result: ok. 12 passed; 0 failed
+
+QBIND_D7D3_NODE_BIN="$PWD/target/release/qbind-node" \
+  cargo test -p qbind-node --test run_422_d7d3_binary_snapshot_restore_characterization_tests
+# test result: ok. 12 passed; 0 failed   (B1 epoch-absent, B2 epoch-zero, C epoch-conflict against e62a6e5e…)
+```
+
+Real-binary B1/B2/C results against `e62a6e5e…`:
+
+* B1 (epoch absent): observed-then-deliberately-SIGKILL-terminated at
+  `M_BASELINE_APPLIED`, complete capture; independent reopen ⇒ account `(7,4242)`,
+  consensus `PresentNoCommittedEpoch`.
+* B2 (epoch `Some(0)`): observed-then-deliberately-SIGKILL-terminated, complete
+  capture; independent reopen ⇒ account `(7,4242)`, consensus `CommittedEpoch(0)`;
+  absence ≠ explicit 0.
+* C (epoch conflict): natural exit code **1** (signal `None`); epoch-conflict-
+  specific FATAL (existing 42 vs snapshot 7); loop-dispatch + baseline-applied
+  markers absent under **complete** capture; consensus epoch **42 preserved**;
+  `state_vm_v0` account restored before the fail-closed rejection.
+
+Scope of retesting: the changes are confined to this single test target (no shared
+helper outside it), so previous regression results at their actual revisions are
+retained unchanged and not re-run/relabelled.
+
+* Focused Clippy: `cargo clippy -p qbind-node --no-deps --test
+  run_422_d7d3_binary_snapshot_restore_characterization_tests -- -D warnings` —
+  **clean for the changed target** (zero findings referencing the target file
+  after fixing one `clippy::io_other_error` in the new test code). The pre-existing
+  `qbind-node` lib and `qbind-consensus` clippy findings are unrelated to this
+  change and were not touched.
+* Formatting/whitespace checked in the changed file only: no real trailing
+  whitespace introduced (0 lines with space/tab before the CR); CRLF line endings
+  and the no-final-newline EOF convention preserved. The file follows a
+  pre-existing house style with single-line `assert!` messages wider than the
+  default rustfmt `max_width`; default-rustfmt line-wrap diffs (pre-existing and
+  in the additions alike) were **not** applied to avoid reformatting unrelated
+  lines and introducing a mixed style.
+
+### Security tooling (recorded literally, this pass)
+
+* Secret scan (`secret_scanning`) of the changed target: **no secrets detected**.
+* `parallel_validation` (CodeQL + Code Review) literal outcomes for this pass are
+  recorded in the run's final report. A CodeQL skip is INCOMPLETE analysis and a
+  reviewer backend error is INCOMPLETE/UNVERIFIED review; neither becomes a pass
+  because its output also says "0 alerts" / "no comments."
+
+### Scoped verdict (this pass)
+
+`D7D3_PROCESS_RUNNER_RELIABILITY=COMPLETE-FOR-TESTED-SCOPE`: unexpected
+exits/signals can no longer pass as deliberate termination (B1); capture
+read/join failures cannot support successful observations or missing-marker
+claims (B2); runner controls are deterministic and cleanup does not wait on
+surviving sleep descendants (B3); and the corrected real-binary B1/B2/C cases pass
+against `e62a6e5e…`. Retained unchanged: `D7_STATUS=PARTIAL-CODE-TEST /
+PRODUCTION-LIFECYCLE-UNAVAILABLE`, `DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED`,
+`GENESIS_AUTHORITY_ACTIVATION=DISABLED`,
+`PRODUCTION_WIRE_CHAIN_ID_BEHAVIOR=UNCHANGED`,
+`CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED`,
+`SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO`. Signing-state continuity remains
+NOT-established. No readiness promotion and no Run 423 successor restart
+investigation was started.
