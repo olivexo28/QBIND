@@ -50,8 +50,9 @@
 //! selection. The binary's sha256 is captured per run in the emitted logs.
 
 use std::io::Read;
+use std::os::unix::process::ExitStatusExt;
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
+use std::process::{Child, Command, ExitStatus, Stdio};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
@@ -88,16 +89,19 @@ fn qbind_node_bin() -> PathBuf {
 
 /// Emit a single provenance line for the executable under test.
 ///
-/// Records the executable path and its byte length (a std-only, dependency-free
-/// weak fingerprint). The authoritative sha256 of the exact release executable
-/// is recorded out-of-band in the D7-D3 evidence doc (computed with
-/// `sha256sum`), so this line does not introduce a new hashing dependency into
-/// the test crate.
+/// This runner records ONLY the executable path and its byte length (a
+/// std-only, dependency-free weak fingerprint). It does **not** compute or emit
+/// a SHA-256: the authoritative sha256 of the exact release executable is
+/// recorded separately, out-of-band, in the D7-D3 evidence doc (computed with
+/// `sha256sum`). This keeps a new hashing dependency out of the test crate and
+/// avoids any claim that the runner itself emits a content hash.
 fn log_executable_provenance(tag: &str, args: &[String]) {
     let bin = qbind_node_bin();
     let len = std::fs::metadata(&bin).map(|m| m.len()).unwrap_or(0);
+    // NOTE: `byte_len` is a weak fingerprint only; it is NOT a SHA-256. The
+    // sha256 is captured out-of-band (see the D7-D3 evidence doc).
     eprintln!(
-        "[d7d3][{tag}] executable={} byte_len={} args={:?}",
+        "[d7d3][{tag}] executable={} byte_len={} (no sha256 emitted here) args={:?}",
         bin.display(),
         len,
         args
@@ -113,6 +117,7 @@ fn maybe_dump_child_stderr(tag: &str, stderr: &str) {
         for line in stderr.lines() {
             if line.starts_with("[restore]")
                 || line.starts_with("[binary]")
+                || line.starts_with("[binary-consensus]")
                 || line.contains("FATAL")
             {
                 eprintln!("[d7d3][{tag}] {line}");
@@ -228,20 +233,44 @@ struct DrainedChild {
 }
 
 impl DrainedChild {
+    /// Spawn the `qbind-node` release/dev executable for a protocol-evidence
+    /// case. Per-child `env_remove` isolation only — no process-global
+    /// environment mutation, so parallel tests never interfere.
     fn spawn(args: &[String]) -> Self {
-        let mut child = Command::new(qbind_node_bin())
+        let mut command = Command::new(qbind_node_bin());
+        command
             .args(args)
             // Isolate inherited environment: no external listener/env may
-            // redirect the fixture or bind a non-loopback endpoint.
+            // redirect the fixture or bind a non-loopback endpoint. These are
+            // per-`Command` removals (not `std::env::set_var`), so they do not
+            // affect any other test process.
             .env_remove("QBIND_METRICS_HTTP_ADDR")
             .env_remove("QBIND_MUTUAL_AUTH")
             .env_remove("QBIND_DRAIN_ONCE_DELAY_SECS")
-            .env_remove("QBIND_DEVNET_FORGED_INJECTION")
+            .env_remove("QBIND_DEVNET_FORGED_INJECTION");
+        Self::spawn_command(command, "spawn qbind-node")
+    }
+
+    /// Spawn a small **test-only** child command used exclusively by the
+    /// runner-control tests (see the `runner_control_*` cases). Kept
+    /// deliberately separate from `spawn`, which launches the real qbind-node
+    /// protocol binary: these controls exercise the *runner's* outcome
+    /// classification, not qbind-node protocol evidence.
+    #[cfg(unix)]
+    fn sh_child(script: &str) -> Self {
+        let mut command = Command::new("sh");
+        command.arg("-c").arg(script);
+        Self::spawn_command(command, "spawn sh runner-control child")
+    }
+
+    /// Common spawn path: wire piped stdio and start the drain threads.
+    fn spawn_command(mut command: Command, ctx: &'static str) -> Self {
+        let mut child = command
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
-            .expect("spawn qbind-node");
+            .unwrap_or_else(|e| panic!("{ctx}: {e}"));
 
         let stdout = Arc::new(Mutex::new(CapturedStream::default()));
         let stderr = Arc::new(Mutex::new(CapturedStream::default()));
@@ -270,6 +299,13 @@ impl DrainedChild {
         self.stderr.lock().expect("capture lock").buf.clone()
     }
 
+    /// Number of stderr bytes the capture had to DROP (ring cap or capture
+    /// failure). A nonzero value means the captured stderr is truncated, so it
+    /// cannot support any assertion that a forbidden *later* marker was absent.
+    fn stderr_dropped_bytes(&self) -> usize {
+        self.stderr.lock().expect("capture lock").dropped_bytes
+    }
+
     fn join_drain_threads(&mut self) {
         if let Some(h) = self.stdout_thread.take() {
             let _ = h.join();
@@ -289,18 +325,22 @@ impl DrainedChild {
     }
 
     /// Wait for the child to terminate on its own within `deadline`, returning
-    /// its exit code. A timeout is a HARD test failure (never an acceptable
-    /// nonzero refusal): the child is killed/reaped and the function panics.
-    fn wait_natural_exit(&mut self, deadline: Duration) -> i32 {
+    /// the FULL `ExitStatus` (exit code AND terminating signal preserved; not
+    /// collapsed into an arbitrary integer). A timeout is a HARD test failure
+    /// (never an acceptable nonzero refusal): the child is killed/reaped and
+    /// the function panics. Captured streams are drained and joined before the
+    /// status is returned so callers assess final diagnostics on complete
+    /// output.
+    fn wait_natural_exit(&mut self, deadline: Duration) -> ExitStatus {
         let start = Instant::now();
         loop {
-            match self.child.try_wait().expect("try_wait") {
-                Some(status) => {
+            match self.child.try_wait() {
+                Ok(Some(status)) => {
                     self.reaped = true;
                     self.join_drain_threads();
-                    return status.code().unwrap_or(-1);
+                    return status;
                 }
-                None => {
+                Ok(None) => {
                     if start.elapsed() >= deadline {
                         let err = self.stderr_snapshot();
                         self.kill_and_reap();
@@ -312,47 +352,146 @@ impl DrainedChild {
                     }
                     thread::sleep(Duration::from_millis(25));
                 }
+                Err(e) => {
+                    // Explicit wait-error handling on the normal result path.
+                    let err = self.stderr_snapshot();
+                    self.kill_and_reap();
+                    panic!("TEST FAILURE: try_wait errored: {e}; stderr so far=\n{}", err);
+                }
             }
         }
     }
 
-    /// Wait until every marker in `markers` is present in captured stderr
-    /// within `deadline`, then deliberately terminate the child. If the child
-    /// exits first, or the deadline expires, the case FAILS. Returns the
-    /// captured stderr snapshot at the moment all markers were observed.
+    /// Observe every marker in `markers` while the child is STILL ALIVE, then
+    /// deliberately terminate it. Returns a classified [`PositiveObservation`]
+    /// (this method never panics on a normal outcome; the caller decides what
+    /// is acceptable).
     ///
-    /// This is "successful observation followed by deliberate termination" —
-    /// explicitly distinguished from a normal exit and from an unexpected
-    /// failure.
-    fn observe_then_terminate(&mut self, markers: &[&str], deadline: Duration) -> String {
+    /// Reliability properties (Correction B):
+    ///
+    /// * Liveness is checked FIRST each iteration, so an already-exited child
+    ///   is rejected as [`PositiveObservation::ExitedBeforeDeliberateTermination`]
+    ///   even if the expected markers were captured.
+    /// * When markers are present and the child is alive we kill+wait and
+    ///   inspect the REAL `ExitStatus`: a terminating signal ⇒ deliberate
+    ///   termination; a natural exit code (the liveness/terminate race lost)
+    ///   ⇒ we report the unexpected exit rather than claiming deliberate
+    ///   termination.
+    ///   Signals are preserved via `ExitStatus`, never collapsed to an integer.
+    /// * Kill/wait errors are handled explicitly on the normal result path.
+    /// * Captured streams are drained and joined before the returned stderr is
+    ///   snapshotted, so callers assess final diagnostics on complete output.
+    /// * A deadline is a bounded failure ([`PositiveObservation::Deadline`]).
+    fn observe_then_terminate(
+        &mut self,
+        markers: &[&str],
+        deadline: Duration,
+    ) -> PositiveObservation {
         let start = Instant::now();
         loop {
+            // 1. Liveness FIRST — an already-exited child is rejected even if
+            //    its markers were captured.
+            match self.child.try_wait() {
+                Ok(Some(status)) => {
+                    self.reaped = true;
+                    self.join_drain_threads();
+                    return PositiveObservation::ExitedBeforeDeliberateTermination {
+                        status,
+                        stderr: self.stderr_snapshot(),
+                    };
+                }
+                Ok(None) => {}
+                Err(e) => {
+                    self.kill_and_reap();
+                    panic!("TEST FAILURE: try_wait errored: {e}");
+                }
+            }
+
+            // 2. Child alive: are all markers present?
             let err = self.stderr_snapshot();
             if markers.iter().all(|m| err.contains(m)) {
-                self.kill_and_reap();
-                return err;
-            }
-            if let Some(status) = self.child.try_wait().expect("try_wait") {
+                // Deliberate termination. Kill + wait, handling errors
+                // explicitly, then classify on the ACTUAL status to resolve
+                // the liveness/terminate race.
+                let kill_res = self.child.kill();
+                let wait_res = self.child.wait();
                 self.reaped = true;
-                let err = self.stderr_snapshot();
-                self.kill_and_reap();
-                panic!(
-                    "TEST FAILURE: positive child exited ({:?}) before emitting markers \
-                     {:?}; stderr=\n{}",
-                    status.code(),
-                    markers,
-                    err
-                );
+                self.join_drain_threads();
+                let stderr = self.stderr_snapshot();
+                match wait_res {
+                    Ok(status) => {
+                        if let Some(term_signal) = status.signal() {
+                            return PositiveObservation::ObservedThenTerminated {
+                                stderr,
+                                term_signal,
+                            };
+                        }
+                        // Lost the race: the child exited naturally between the
+                        // liveness check and the kill. Do NOT claim deliberate
+                        // termination — report the recorded unexpected exit.
+                        let _ = kill_res;
+                        return PositiveObservation::ExitedBeforeDeliberateTermination {
+                            status,
+                            stderr,
+                        };
+                    }
+                    Err(e) => panic!(
+                        "TEST FAILURE: wait after kill errored (kill_ok={}): {e}; stderr=\n{}",
+                        kill_res.is_ok(),
+                        stderr
+                    ),
+                }
             }
+
+            // 3. Bounded deadline — timeout is failure.
             if start.elapsed() >= deadline {
-                let err = self.stderr_snapshot();
+                let dropped_bytes = self.stderr_dropped_bytes();
                 self.kill_and_reap();
-                panic!(
-                    "TEST FAILURE: markers {:?} not observed within {:?}; stderr=\n{}",
-                    markers, deadline, err
-                );
+                return PositiveObservation::Deadline {
+                    stderr: self.stderr_snapshot(),
+                    dropped_bytes,
+                };
             }
             thread::sleep(Duration::from_millis(25));
+        }
+    }
+}
+
+/// Classified outcome of [`DrainedChild::observe_then_terminate`].
+///
+/// Only [`PositiveObservation::ObservedThenTerminated`] is an accepted positive
+/// result; the other variants are rejections that a positive case must fail on.
+#[derive(Debug)]
+enum PositiveObservation {
+    /// All markers observed while the child was still alive; the runner then
+    /// deliberately terminated it with signal `term_signal`.
+    ObservedThenTerminated { stderr: String, term_signal: i32 },
+    /// The child exited on its own (natural or unexpected) before deliberate
+    /// termination — rejected even if the expected markers were captured. The
+    /// full `ExitStatus` is preserved.
+    ExitedBeforeDeliberateTermination { status: ExitStatus, stderr: String },
+    /// The bounded deadline elapsed before all markers were observed.
+    Deadline { stderr: String, dropped_bytes: usize },
+}
+
+impl PositiveObservation {
+    /// Assert this is the accepted positive outcome (observed-while-alive then
+    /// deliberately signal-terminated) and return the captured stderr. Any
+    /// other outcome — including an already-exited child that had emitted the
+    /// markers — is a hard failure.
+    fn expect_observed_then_terminated(self, tag: &str) -> String {
+        match self {
+            PositiveObservation::ObservedThenTerminated { stderr, term_signal } => {
+                assert!(
+                    term_signal > 0,
+                    "[{tag}] deliberate termination must carry a real signal, got {term_signal}"
+                );
+                stderr
+            }
+            other => panic!(
+                "TEST FAILURE [{tag}]: expected observed-while-alive-then-deliberately-\
+                 terminated positive outcome; got {other:?}"
+            ),
         }
     }
 }
@@ -377,8 +516,25 @@ const M_STORAGE_OPEN: &str = "[binary] Run 093 consensus storage:";
 const M_EPOCH_ABSENT: &str = "[binary] Run 097: no snapshot epoch persistence performed";
 /// Run 097 epoch-persist path (`snapshot canonical epoch=<n> persisted`).
 const M_EPOCH_PERSIST: &str = "[binary] Run 097: snapshot canonical epoch=";
-/// LocalMesh consensus loop reached — the deliberate-termination anchor.
+/// Entry into the LocalMesh **startup function** (`run_local_mesh_node`).
+///
+/// IMPORTANT boundary: at the reviewed revision this line is printed at the
+/// very *beginning* of `run_local_mesh_node`, BEFORE the
+/// `BinaryConsensusLoopConfig` is built and BEFORE `spawn_binary_consensus_loop`
+/// runs the loop that consumes the restore baseline. Its presence therefore
+/// establishes only **entry into the LocalMesh startup dispatch**, not that the
+/// engine initializer executed. Do not read this marker as proof that
+/// `initialize_from_snapshot_baseline` ran.
 const M_LOOP_REACHED: &str = "[binary] LocalMesh mode: starting consensus loop";
+/// The **post-baseline-application** observation emitted by the running
+/// consensus loop (`run_binary_consensus_loop_with_io`) *after*
+/// `engine.initialize_from_snapshot_baseline(...)` has executed
+/// (`crates/qbind-node/src/binary_consensus_loop.rs`). This is the earliest
+/// existing observation that the engine initializer actually consumed the
+/// restore baseline at runtime, so it — not `M_LOOP_REACHED` — is the honest
+/// deliberate-termination anchor for the positive cases. It is an existing
+/// production `eprintln!`; no instrumentation was added to obtain it.
+const M_BASELINE_APPLIED: &str = "[binary-consensus] B5: applied restore baseline: snapshot_height=";
 /// Run 097 fail-closed epoch-parity FATAL diagnostic (case C).
 const M_EPOCH_FATAL: &str = "[binary] FATAL: Run 097 snapshot epoch parity failed";
 
@@ -399,6 +555,32 @@ fn restore_localmesh_args(data_dir: &Path, snapshot_dir: &Path) -> Vec<String> {
         "--restore-from-snapshot".to_string(),
         snapshot_dir.display().to_string(),
     ]
+}
+
+// ============================================================================
+// Ordered-marker assertion helper
+// ============================================================================
+
+/// Assert every marker in `ordered` is present in `haystack` AND appears in the
+/// given order (by first byte offset). Presence alone cannot establish a
+/// startup ORDERING claim; this asserts the order explicitly.
+fn assert_marker_order(haystack: &str, ordered: &[&str]) {
+    let mut last_idx = 0usize;
+    let mut last_marker = "<start>";
+    for m in ordered {
+        match haystack.find(m) {
+            Some(idx) => {
+                assert!(
+                    idx >= last_idx,
+                    "startup ordering violated: {m:?} (idx {idx}) precedes {last_marker:?} \
+                     (idx {last_idx}); haystack=\n{haystack}"
+                );
+                last_idx = idx;
+                last_marker = m;
+            }
+            None => panic!("expected ordered marker {m:?} not present; haystack=\n{haystack}"),
+        }
+    }
 }
 
 // ============================================================================
@@ -507,9 +689,17 @@ fn observe_restored_data_dir(data_dir: &Path) -> (AccountState, ConsensusStorage
 
 /// Case B — launch the unmodified binary with `--restore-from-snapshot` for
 /// two fresh destinations: snapshot epoch ABSENT and snapshot epoch Some(0).
-/// Establish the startup stages reached, deliberately terminate at the loop
-/// boundary, reap, then INDEPENDENTLY reopen the RocksDB stores and assert the
-/// distinction between epoch-absence and explicit-zero.
+/// Observe the ordered startup markers THROUGH the post-baseline-application
+/// observation (`M_BASELINE_APPLIED`), deliberately terminate the still-alive
+/// process at that boundary, reap, then INDEPENDENTLY reopen the RocksDB stores
+/// and assert the distinction between epoch-absence and explicit-zero.
+///
+/// Boundary honesty (Correction A): the deliberate-termination anchor is
+/// `M_BASELINE_APPLIED`, the existing observation emitted AFTER
+/// `engine.initialize_from_snapshot_baseline(...)` runs — NOT the earlier
+/// `M_LOOP_REACHED`, which only marks entry into the LocalMesh startup
+/// dispatch. Startup ORDER (not mere presence) is asserted, and the fixture
+/// height/starting-view exposed by the existing diagnostics is asserted.
 ///
 /// Evidence level: **child-process / release-binary** for the restoration and
 /// stage observation; **independent in-process reopen** for the post-process
@@ -529,18 +719,41 @@ fn d7d3_b_binary_restore_epoch_absent_vs_explicit_zero() {
     log_executable_provenance("B1-epoch-absent", &args_absent);
     let stderr_absent = {
         let mut child = DrainedChild::spawn(&args_absent);
-        // The loop-reached marker is the deliberate-termination anchor; the
-        // ordered restore/storage/epoch markers must all be present by then.
-        child.observe_then_terminate(&[M_LOOP_REACHED], POSITIVE_DEADLINE)
+        // Anchor on the POST-baseline-application observation so termination
+        // implies `initialize_from_snapshot_baseline` actually executed.
+        child
+            .observe_then_terminate(&[M_BASELINE_APPLIED], POSITIVE_DEADLINE)
+            .expect_observed_then_terminated("B1-epoch-absent")
     };
     maybe_dump_child_stderr("B1-epoch-absent", &stderr_absent);
-    for m in [M_RESTORE_OK, M_B5, M_STORAGE_OPEN, M_EPOCH_ABSENT] {
-        assert!(
-            stderr_absent.contains(m),
-            "epoch-absent startup must have reached marker {m:?}; stderr=\n{}",
-            stderr_absent
-        );
-    }
+    // Assert the startup ORDER (not just presence): restore → B5 construct →
+    // storage open → epoch-absent → LocalMesh dispatch entry → baseline applied.
+    assert_marker_order(
+        &stderr_absent,
+        &[
+            M_RESTORE_OK,
+            M_B5,
+            M_STORAGE_OPEN,
+            M_EPOCH_ABSENT,
+            M_LOOP_REACHED,
+            M_BASELINE_APPLIED,
+        ],
+    );
+    // Assert the fixture height/starting-view exposed by the existing
+    // diagnostics (height 111 ⇒ starting_view 112), both at baseline
+    // construction and at baseline application.
+    assert!(
+        stderr_absent
+            .contains("[binary] B5: restore-aware consensus start enabled (snapshot_height=111, starting_view=112)"),
+        "B5 construction diagnostic must expose the fixture height/starting-view; stderr=\n{}",
+        stderr_absent
+    );
+    assert!(
+        stderr_absent
+            .contains("[binary-consensus] B5: applied restore baseline: snapshot_height=111 starting_view=112"),
+        "baseline-application diagnostic must expose the fixture height/starting-view; stderr=\n{}",
+        stderr_absent
+    );
     // The persist path must NOT have fired for an epoch-absent snapshot.
     assert!(
         !stderr_absent.contains(M_EPOCH_PERSIST),
@@ -571,16 +784,37 @@ fn d7d3_b_binary_restore_epoch_absent_vs_explicit_zero() {
     log_executable_provenance("B2-epoch-zero", &args_zero);
     let stderr_zero = {
         let mut child = DrainedChild::spawn(&args_zero);
-        child.observe_then_terminate(&[M_LOOP_REACHED], POSITIVE_DEADLINE)
+        child
+            .observe_then_terminate(&[M_BASELINE_APPLIED], POSITIVE_DEADLINE)
+            .expect_observed_then_terminated("B2-epoch-zero")
     };
     maybe_dump_child_stderr("B2-epoch-zero", &stderr_zero);
-    for m in [M_RESTORE_OK, M_B5, M_STORAGE_OPEN, M_EPOCH_PERSIST] {
-        assert!(
-            stderr_zero.contains(m),
-            "epoch-zero startup must have reached marker {m:?}; stderr=\n{}",
-            stderr_zero
-        );
-    }
+    // Startup ORDER: restore → B5 construct → storage open → epoch-persist →
+    // LocalMesh dispatch entry → baseline applied.
+    assert_marker_order(
+        &stderr_zero,
+        &[
+            M_RESTORE_OK,
+            M_B5,
+            M_STORAGE_OPEN,
+            M_EPOCH_PERSIST,
+            M_LOOP_REACHED,
+            M_BASELINE_APPLIED,
+        ],
+    );
+    // Fixture height 222 ⇒ starting_view 223, exposed at both diagnostics.
+    assert!(
+        stderr_zero
+            .contains("[binary] B5: restore-aware consensus start enabled (snapshot_height=222, starting_view=223)"),
+        "B5 construction diagnostic must expose the fixture height/starting-view; stderr=\n{}",
+        stderr_zero
+    );
+    assert!(
+        stderr_zero
+            .contains("[binary-consensus] B5: applied restore baseline: snapshot_height=222 starting_view=223"),
+        "baseline-application diagnostic must expose the fixture height/starting-view; stderr=\n{}",
+        stderr_zero
+    );
 
     let (acct_zero, obs_zero) = observe_restored_data_dir(data_zero.path());
     assert_eq!(
@@ -641,33 +875,60 @@ fn d7d3_c_binary_epoch_conflict_fails_closed_preserving_existing_epoch() {
     let args = restore_localmesh_args(data_dir.path(), &snapshot_dir);
     log_executable_provenance("C-epoch-conflict", &args);
 
-    let (code, stderr) = {
+    let (status, stderr, stderr_dropped) = {
         let mut child = DrainedChild::spawn(&args);
-        let code = child.wait_natural_exit(NEGATIVE_DEADLINE);
-        (code, child.stderr_snapshot())
+        let status = child.wait_natural_exit(NEGATIVE_DEADLINE);
+        (status, child.stderr_snapshot(), child.stderr_dropped_bytes())
     };
     maybe_dump_child_stderr("C-epoch-conflict", &stderr);
 
-    assert_ne!(code, 0, "epoch conflict must fail closed nonzero; stderr=\n{}", stderr);
-    assert!(
-        stderr.contains(M_EPOCH_FATAL),
-        "must carry the Run 097 epoch-parity FATAL diagnostic; stderr=\n{}",
+    // Require the expected NATURAL exit code 1 (from `std::process::exit(1)`),
+    // with the full ExitStatus preserved (code, not signal).
+    assert_eq!(
+        status.code(),
+        Some(1),
+        "epoch conflict must fail closed with natural exit code 1 (status={status:?}); stderr=\n{}",
         stderr
     );
-    // The consensus loop must NOT have been reached.
+    assert!(
+        status.signal().is_none(),
+        "fail-closed refusal must be a natural exit, not a signal (status={status:?}); stderr=\n{}",
+        stderr
+    );
+    // Carry the epoch-conflict-SPECIFIC diagnostic (existing epoch 42 vs
+    // snapshot epoch 7), not merely the generic Run 097 failure prefix.
+    assert!(
+        stderr.contains(M_EPOCH_FATAL),
+        "must carry the Run 097 epoch-parity FATAL prefix; stderr=\n{}",
+        stderr
+    );
+    assert!(
+        stderr.contains("existing meta:current_epoch=42 but snapshot meta.json declares epoch=7"),
+        "must carry the epoch-conflict-specific diagnostic (existing 42 vs snapshot 7); stderr=\n{}",
+        stderr
+    );
+    // A "forbidden later marker absent" assertion is only valid on UNTRUNCATED
+    // capture: truncation/capture-failure cannot support an absence claim.
+    assert_eq!(
+        stderr_dropped, 0,
+        "stderr capture was truncated ({stderr_dropped} bytes dropped); cannot assert a \
+         forbidden later marker was absent"
+    );
+    // The consensus loop-dispatch marker must NOT have been reached, and the
+    // engine initializer must NOT have run (no baseline-applied observation).
     assert!(
         !stderr.contains(M_LOOP_REACHED),
-        "consensus loop must NOT start when epoch parity fails; stderr=\n{}",
+        "consensus loop dispatch must NOT start when epoch parity fails; stderr=\n{}",
+        stderr
+    );
+    assert!(
+        !stderr.contains(M_BASELINE_APPLIED),
+        "engine initializer must NOT run when epoch parity fails; stderr=\n{}",
         stderr
     );
     // Earlier stages up to storage-open were reached (rejection is at epoch
-    // parity, AFTER restore + storage open).
-    assert!(
-        stderr.contains(M_RESTORE_OK),
-        "restore materialization precedes the epoch-parity rejection; stderr=\n{}",
-        stderr
-    );
-    assert!(stderr.contains(M_STORAGE_OPEN));
+    // parity, AFTER restore + storage open). Assert their order too.
+    assert_marker_order(&stderr, &[M_RESTORE_OK, M_B5, M_STORAGE_OPEN, M_EPOCH_FATAL]);
 
     // Independent post-process observation.
     // (1) The pre-existing consensus epoch is preserved (never overwritten).
@@ -700,19 +961,33 @@ fn d7d3_c_binary_epoch_conflict_fails_closed_preserving_existing_epoch() {
 // D. Signing-state evidence boundary (documentation-grade structural asserts)
 // ============================================================================
 
-/// Case D — document precisely, with structural assertions, what the checkpoint
-/// / meta.json / account storage / consensus store contain, and what
-/// signing/locking evidence is restored, reconstructed, absent, or unobservable
-/// through these paths.
+/// Case D — describe PRECISELY, with typed assertions, what THIS fixture
+/// constructed and inspected, and separate observed values from source-backed
+/// findings. The signing-state boundary conclusion is NOT-established; nothing
+/// here is a universal absence proof.
 ///
-/// Load-bearing negatives:
+/// Scope honesty (Correction C):
+/// * The keyword denylists below are observations about the CONTENT of THIS
+///   fixture's `meta.json` and restore marker — they are NOT a universal
+///   absence of signing/locking material from any database or restore artifact,
+///   and NOT a schema-level guarantee.
+/// * `StateSnapshotMeta` is parsed with the EXISTING typed parser
+///   (`StateSnapshotMeta::from_json`); no second parser is introduced. Its
+///   structure is NOT merely height/block_hash/chain_id/epoch — it also carries
+///   `created_at_unix_ms` and the optional Run 117/140 `authority_state` /
+///   `authority_state_v2` carriers (omitted from JSON when `None`, as here).
+/// * The account-state check is a SINGLE account lookup, not a full-store
+///   inventory. The `meta:current_epoch` reads in cases B/C are single-key
+///   reads and do not inventory all consensus-database keys.
+///
+/// Load-bearing negatives (preserved):
 /// * Account-state rollback (case A/B) is NOT proof of conflicting signatures.
 /// * Epoch equality (case B2) is NOT proof of signing-state continuity.
 /// * The production binary performs NO signature demonstration during restore;
 ///   any signing demonstration (e.g. D7-D2's) is a separate fixture activity,
 ///   not a child-process observation.
 #[test]
-fn d7d3_d_signing_state_evidence_boundary_is_structurally_empty() {
+fn d7d3_d_signing_state_continuity_is_not_established_by_restore_path() {
     let chain_id = devnet_chain_id();
     let src_state = tempdir().expect("tempdir");
     let snap_root = tempdir().expect("tempdir");
@@ -720,24 +995,46 @@ fn d7d3_d_signing_state_evidence_boundary_is_structurally_empty() {
     let snapshot_dir = snap_root.path().join("snap-boundary");
     build_real_snapshot(src_state.path(), &snapshot_dir, chain_id, 444, 4242, Some(5));
 
-    // (1) What meta.json declares: height / block_hash / chain_id / epoch —
-    //     and NO signing/vote/lock field.
+    // (1) TYPED metadata inspection via the existing parser. This is the
+    //     authoritative structural view; the raw-string denylist that follows
+    //     is a scoped CONTENT observation only.
     let meta_bytes = std::fs::read(snapshot_dir.join("meta.json")).expect("read meta.json");
+    let parsed = StateSnapshotMeta::from_json(&meta_bytes)
+        .expect("meta.json parses with the existing StateSnapshotMeta parser");
+    assert_eq!(parsed.height, 444, "typed height");
+    assert_eq!(parsed.chain_id, chain_id, "typed chain_id");
+    assert_eq!(parsed.epoch, Some(5), "typed epoch (fixture declaration)");
+    // The metadata schema carries MORE than height/hash/chain/epoch: a creation
+    // timestamp and optional authority-state carriers. In THIS fixture (built
+    // with no authority marker) both carriers are absent — recorded honestly,
+    // not generalized into a schema-wide claim.
+    assert_eq!(parsed.created_at_unix_ms, 1_700_000_000_000, "typed created_at_unix_ms");
+    assert!(
+        parsed.authority_state.is_none(),
+        "this fixture carries no v1 authority_state carrier (absent, not a schema guarantee)"
+    );
+    assert!(
+        parsed.authority_state_v2.is_none(),
+        "this fixture carries no v2 authority_state carrier (absent, not a schema guarantee)"
+    );
+
+    // (1b) Scoped CONTENT observation of THIS fixture's serialized meta.json:
+    //      it contains no signing/vote/lock keyword. NOT a universal-absence or
+    //      schema claim.
     let meta_json = String::from_utf8(meta_bytes).expect("meta.json utf8");
     for forbidden in ["signature", "signed_vote", "vote", "locked_qc", "signing", "secret"] {
         assert!(
             !meta_json.contains(forbidden),
-            "meta.json must not declare signing/locking evidence (found {forbidden:?}): {meta_json}"
+            "this fixture's meta.json content carries no {forbidden:?} keyword: {meta_json}"
         );
     }
-    // Positive: it DOES declare the fixture consensus anchors.
     assert!(meta_json.contains("\"height\""));
     assert!(meta_json.contains("\"chain_id\""));
     assert!(meta_json.contains("\"epoch\""));
 
     // (2) What the restore materializes + the audit marker records. Drive the
     //     library restore to inspect the on-disk marker (same content the
-    //     binary writes).
+    //     binary writes). Again a scoped content observation of THIS marker.
     let outcome = restore_from_snapshot(&snapshot_dir, data_dir.path(), chain_id)
         .expect("restore for boundary inspection");
     let marker = std::fs::read_to_string(data_dir.path().join(RESTORE_MARKER_FILENAME))
@@ -745,25 +1042,109 @@ fn d7d3_d_signing_state_evidence_boundary_is_structurally_empty() {
     for forbidden in ["signature", "signed_vote", "locked_qc", "signing", "secret"] {
         assert!(
             !marker.contains(forbidden),
-            "restore audit marker must not carry signing evidence (found {forbidden:?}): {marker}"
+            "this restore audit marker's content carries no {forbidden:?} keyword: {marker}"
         );
     }
 
-    // (3) What is materialized in account storage: account state only. No
-    //     signing/lock artifact is restored into the account-state store — the
-    //     store's only observable is account state.
+    // (3) OBSERVED account value: a SINGLE account lookup restores to the
+    //     checkpoint value. This is one observed value, not a full-store
+    //     inventory and not proof the store holds no other kind of state.
     let restored = RocksDbAccountState::open(&outcome.target_state_dir).expect("reopen restored");
     assert_eq!(restored.get_account_state(&ACCOUNT_ID), AccountState::new(7, 4242));
 
-    // (4) What the binary passes to the engine initializer: only the restore
-    //     baseline (snapshot_height + snapshot_block_id). This is asserted by
-    //     the B5 marker's presence in the child-process cases above and is
-    //     recorded here as the boundary: NO per-view vote latch or
-    //     anti-equivocation record travels through the restore baseline (see
-    //     Run 422 D7-D2). Account-state rollback and epoch equality therefore
-    //     do NOT establish signing-state continuity.
+    // (4) SOURCE-BACKED finding (not a runtime inventory here): the restore
+    //     baseline the binary hands to the engine initializer carries only
+    //     `snapshot_height` + `snapshot_block_id` (`RestoreBaseline` /
+    //     `initialize_from_snapshot_baseline`). Cases B/C observe, at the
+    //     executable level, that the initializer ran (M_BASELINE_APPLIED); the
+    //     recovery-interface finding that NO per-view vote latch or
+    //     anti-equivocation record travels this path is source-traced (see
+    //     Run 422 D7-D2), kept separate from the observed values above.
+    //     Therefore account-state rollback and epoch equality do NOT establish
+    //     signing-state continuity, which remains NOT-established.
     assert_eq!(outcome.meta.height, 444);
     // block_hash is the fixture-declared `[height as u8; 32]` (444 as u8 = 188).
     assert_eq!(outcome.meta.block_hash, [444u32 as u8; 32]);
     assert_eq!(outcome.meta.epoch, Some(5));
+}
+
+// ============================================================================
+// Runner controls (test-only child command; NOT qbind-node protocol evidence)
+// ============================================================================
+//
+// These cases exercise the OUTCOME CLASSIFICATION of the process runner itself
+// using a tiny `sh -c` child, kept deliberately separate from the qbind-node
+// protocol cases above. They assert that:
+//   * a child that prints the expected marker then exits UNSUCCESSFULLY before
+//     observation is REJECTED (not accepted as a positive), with its exit code
+//     preserved;
+//   * a child that prints the expected marker and stays ALIVE is correctly
+//     identified as observed-then-deliberately-terminated;
+//   * a missing-marker child hits the bounded deadline and is a FAILURE.
+// No process-global environment is mutated, so these run safely in parallel.
+
+/// Short bounded deadline for the runner-control cases (they must not depend on
+/// the long protocol deadlines).
+#[cfg(unix)]
+const RUNNER_CONTROL_DEADLINE: Duration = Duration::from_secs(5);
+
+#[cfg(unix)]
+#[test]
+fn runner_control_rejects_marker_then_unsuccessful_exit() {
+    let marker = "runner-control-marker-A";
+    // Print the marker to stderr, then exit unsuccessfully BEFORE observation.
+    let script = format!("printf '%s\\n' '{marker}' 1>&2; exit 7");
+    let mut child = DrainedChild::sh_child(&script);
+    let outcome = child.observe_then_terminate(&[marker], RUNNER_CONTROL_DEADLINE);
+    match outcome {
+        PositiveObservation::ExitedBeforeDeliberateTermination { status, stderr } => {
+            // Exit code preserved (not collapsed), and rejection stands EVEN
+            // THOUGH the expected marker was captured.
+            assert_eq!(status.code(), Some(7), "unsuccessful exit code preserved");
+            assert!(
+                stderr.contains(marker),
+                "marker WAS captured, yet the already-exited child is still rejected; stderr=\n{stderr}"
+            );
+        }
+        other => panic!("expected rejection of an already-exited positive child, got {other:?}"),
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn runner_control_identifies_deliberate_termination_of_live_marked_child() {
+    let marker = "runner-control-marker-B";
+    // Print the marker, then stay alive well past the observation window.
+    let script = format!("printf '%s\\n' '{marker}' 1>&2; sleep 30");
+    let mut child = DrainedChild::sh_child(&script);
+    let outcome = child.observe_then_terminate(&[marker], RUNNER_CONTROL_DEADLINE);
+    match outcome {
+        PositiveObservation::ObservedThenTerminated { stderr, term_signal } => {
+            assert!(stderr.contains(marker), "marker observed; stderr=\n{stderr}");
+            assert!(term_signal > 0, "deliberate termination carries a real signal");
+        }
+        other => panic!("expected deliberate-termination identification, got {other:?}"),
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn runner_control_missing_marker_deadline_is_failure() {
+    // Alive child that never prints the marker → bounded deadline is a failure.
+    let mut child = DrainedChild::sh_child("sleep 30");
+    let outcome =
+        child.observe_then_terminate(&["never-emitted-marker"], RUNNER_CONTROL_DEADLINE);
+    match outcome {
+        PositiveObservation::Deadline {
+            stderr,
+            dropped_bytes,
+        } => {
+            // The never-emitted marker is genuinely absent, and the capture was
+            // untruncated — so absence is a real observation, not a truncation
+            // artifact.
+            assert!(!stderr.contains("never-emitted-marker"));
+            assert_eq!(dropped_bytes, 0, "runner-control child emitted nothing to drop");
+        }
+        other => panic!("expected a bounded-deadline failure, got {other:?}"),
+    }
 }
