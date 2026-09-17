@@ -797,6 +797,23 @@ const M_LOOP_REACHED: &str = "[binary] LocalMesh mode: starting consensus loop";
 const M_BASELINE_APPLIED: &str = "[binary-consensus] B5: applied restore baseline: snapshot_height=";
 /// Run 097 fail-closed epoch-parity FATAL diagnostic (case C).
 const M_EPOCH_FATAL: &str = "[binary] FATAL: Run 097 snapshot epoch parity failed";
+/// D7-D4: ordinary-startup line printed when `--restore-from-snapshot` is NOT
+/// requested (`apply_snapshot_restore_if_requested` returned `Ok(None)`).
+const M_NO_RESTORE: &str = "[restore] no --restore-from-snapshot requested; normal startup.";
+/// D7-D4: the `TargetStateNotEmpty` refusal diagnostic surfaced when the restore
+/// flag is repeated over an already-restored (non-empty) `state_vm_v0` — the
+/// `Display` string of `RestoreError::TargetStateNotEmpty` (see
+/// `crates/qbind-node/src/snapshot_restore.rs`). Printed by `main.rs` as
+/// `[restore] ERROR: <this>` immediately before `std::process::exit(1)`.
+const M_TARGET_NOT_EMPTY: &str = "restore-from-snapshot target state directory is not empty:";
+/// D7-D4: the honest last-observed boundary for an ordinary (no-baseline)
+/// startup. Emitted at the START of `run_binary_consensus_loop_with_io`
+/// (`crates/qbind-node/src/binary_consensus_loop.rs`) AFTER the (absent)
+/// baseline branch, so its presence establishes that the consensus loop
+/// function actually began running — while its `restore_baseline=false` field
+/// confirms NO snapshot baseline was applied. It is NOT proof of engine
+/// recovery of any mixed account/epoch state.
+const M_CONSENSUS_LOOP_STARTED: &str = "[binary-consensus] Starting consensus loop:";
 
 /// Base argv for a restore-driven LocalMesh DevNet start against a fresh
 /// data dir. No `--genesis-path` is supplied, so the binary takes the legacy
@@ -814,6 +831,22 @@ fn restore_localmesh_args(data_dir: &Path, snapshot_dir: &Path) -> Vec<String> {
         data_dir.display().to_string(),
         "--restore-from-snapshot".to_string(),
         snapshot_dir.display().to_string(),
+    ]
+}
+
+/// Base argv for an ORDINARY LocalMesh DevNet start — identical to
+/// [`restore_localmesh_args`] except the `--restore-from-snapshot` option and
+/// its argument are omitted (equivalent environment, network mode, and data
+/// directory). Used by the D7-D4 WITHOUT-flag restart (case B) and the
+/// fresh-directory control (case C).
+fn ordinary_localmesh_args(data_dir: &Path) -> Vec<String> {
+    vec![
+        "--env".to_string(),
+        "devnet".to_string(),
+        "--network-mode".to_string(),
+        "local-mesh".to_string(),
+        "--data-dir".to_string(),
+        data_dir.display().to_string(),
     ]
 }
 
@@ -1112,8 +1145,41 @@ fn d7d3_b_binary_restore_epoch_absent_vs_explicit_zero() {
 /// restoration occurs BEFORE the epoch-parity rejection, so the restored
 /// `state_vm_v0` IS materialized even though the whole startup fails closed.
 /// This is asserted, not hidden.
-#[test]
-fn d7d3_c_binary_epoch_conflict_fails_closed_preserving_existing_epoch() {
+/// A **partially completed restore** destination produced through the real
+/// binary by [`reproduce_case_c_partial_restore`]. The backing `TempDir`s are
+/// retained so the directories stay live for the D7-D4 continuations.
+struct PartialRestoreDestination {
+    _src_state: tempfile::TempDir,
+    _snap_root: tempfile::TempDir,
+    /// The partially restored destination (`state_vm_v0` restored + consensus
+    /// `CommittedEpoch(42)` preserved).
+    data_dir: tempfile::TempDir,
+    /// The snapshot directory declaring epoch 7 (reused by the WITH-flag retry).
+    snapshot_dir: PathBuf,
+    /// `<data_dir>/state_vm_v0` (materialized by the case-C restore).
+    state_dir: PathBuf,
+    /// Full contents of `<data_dir>/RESTORED_FROM_SNAPSHOT.json` produced by the
+    /// first (successful-then-fail-closed) invocation. Recorded so a later
+    /// refused/ordinary start can be shown NOT to append or replace it.
+    restore_marker_after_partial: String,
+}
+
+/// Reproduce the D3 case-C **partially completed restore** through the real
+/// binary and assert every case-C property (so the assertions are preserved
+/// exactly), returning the live partial destination.
+///
+/// A fresh account-state destination is seeded ONLY with a conflicting consensus
+/// `CommittedEpoch(42)`; the snapshot declares epoch 7. Launching the unmodified
+/// binary WITH `--restore-from-snapshot` restores `state_vm_v0` (account 7/4242)
+/// and writes the restore audit marker, then fails closed at Run 097 epoch
+/// parity (natural exit 1) with the pre-existing epoch 42 preserved. The result
+/// is a partial destination: restored state alongside preserved consensus epoch.
+///
+/// Each D7-D4 continuation calls this to obtain an INDEPENDENT partial
+/// destination (its own tempdirs, its own child invocation) so the first start
+/// cannot change the second's starting conditions and no directory is
+/// hand-fabricated.
+fn reproduce_case_c_partial_restore(tag: &str) -> PartialRestoreDestination {
     let chain_id = devnet_chain_id();
 
     let src_state = tempdir().expect("tempdir");
@@ -1133,14 +1199,14 @@ fn d7d3_c_binary_epoch_conflict_fails_closed_preserving_existing_epoch() {
     }
 
     let args = restore_localmesh_args(data_dir.path(), &snapshot_dir);
-    log_executable_provenance("C-epoch-conflict", &args);
+    log_executable_provenance(tag, &args);
 
     let (status, stderr, capture) = {
         let mut child = DrainedChild::spawn(&args);
         let status = child.wait_natural_exit(NEGATIVE_DEADLINE);
         (status, child.stderr_snapshot(), child.stderr_capture())
     };
-    maybe_dump_child_stderr("C-epoch-conflict", &stderr);
+    maybe_dump_child_stderr(tag, &stderr);
 
     // Require the expected NATURAL exit code 1 (from `std::process::exit(1)`),
     // with the full ExitStatus preserved (code, not signal).
@@ -1215,6 +1281,47 @@ fn d7d3_c_binary_epoch_conflict_fails_closed_preserving_existing_epoch() {
         restored.get_account_state(&ACCOUNT_ID),
         AccountState::new(7, 4242),
         "restored account value present despite fail-closed startup"
+    );
+    drop(restored);
+
+    // Record the restore audit marker written by THIS first invocation (the
+    // successful account restoration that preceded the epoch-parity refusal).
+    let restore_marker_after_partial =
+        std::fs::read_to_string(data_dir.path().join(RESTORE_MARKER_FILENAME))
+            .expect("read restore audit marker after partial restore");
+    assert!(
+        !restore_marker_after_partial.is_empty(),
+        "the successful account restoration writes a restore audit marker line"
+    );
+
+    PartialRestoreDestination {
+        _src_state: src_state,
+        _snap_root: snap_root,
+        data_dir,
+        snapshot_dir,
+        state_dir,
+        restore_marker_after_partial,
+    }
+}
+
+#[test]
+fn d7d3_c_binary_epoch_conflict_fails_closed_preserving_existing_epoch() {
+    // The shared helper performs (and therefore preserves) every case-C
+    // property: fail-closed natural exit 1, the epoch-conflict-specific
+    // diagnostic, complete capture, no loop/baseline observation, the
+    // restore → B5 → storage-open → epoch-FATAL order, and the independent
+    // post-process reads (consensus epoch 42 preserved, restored account
+    // 7/4242 present). It additionally records the audit marker for D7-D4.
+    let partial = reproduce_case_c_partial_restore("C-epoch-conflict");
+    // The partial destination has a materialized restored state dir and a
+    // written audit marker — the exact precondition D7-D4 characterizes.
+    assert!(
+        partial.state_dir.exists(),
+        "case-C leaves a materialized restored state dir"
+    );
+    assert!(
+        !partial.restore_marker_after_partial.is_empty(),
+        "case-C leaves a written restore audit marker"
     );
 }
 
@@ -1327,6 +1434,286 @@ fn d7d3_d_signing_state_continuity_is_not_established_by_restore_path() {
     // block_hash is the fixture-declared `[height as u8; 32]` (444 as u8 = 188).
     assert_eq!(outcome.meta.block_hash, [444u32 as u8; 32]);
     assert_eq!(outcome.meta.epoch, Some(5));
+}
+
+// ============================================================================
+// D7-D4. Restart after a partially completed restore (child-process, release-binary)
+// ============================================================================
+//
+// D3 case C leaves a **partially completed** destination: the binary restores
+// `state_vm_v0` (account 7/4242) and then fails closed at Run 097 epoch parity,
+// with the pre-existing consensus `CommittedEpoch(42)` preserved. D7-D4
+// characterizes two DISTINCT subsequent starts from that partial state plus a
+// fresh-directory control:
+//
+//   A. Repeat startup WITH `--restore-from-snapshot`. Requested restoration:
+//      `apply_snapshot_restore_if_requested_inner` runs the materialization
+//      pipeline, whose non-empty `state_vm_v0` check returns
+//      `RestoreError::TargetStateNotEmpty` BEFORE any copy or audit-marker
+//      write. `main.rs` prints `[restore] ERROR: ...` then `exit(1)`.
+//   B. Ordinary startup WITHOUT the flag. `apply_snapshot_restore_if_requested`
+//      returns `Ok(None)` (fast-sync disabled): NO `TargetStateNotEmpty` guard
+//      and NO Run 097 epoch comparison run (both are gated on a requested
+//      restore). The observed branch is encoded below from the real binary.
+//   C. A matched fresh-directory ordinary start, to distinguish partial-
+//      destination behavior from ordinary startup / unrelated config failure.
+//
+// Each continuation reproduces an INDEPENDENT partial destination through the
+// same real procedure (`reproduce_case_c_partial_restore`) so the first start
+// cannot change the second's starting conditions, and NONE hand-fabricates the
+// partially restored directory. All RocksDB handles are closed before every
+// child launch; stored logical values are read AFTER the child is reaped (a
+// selected-value match is NOT claimed to be byte-identity of the directory).
+
+/// D7-D4 case A — repeat WITH the restore flag over the partially restored
+/// destination. Source-confirmed non-empty-target refusal
+/// (`RestoreError::TargetStateNotEmpty`): the retry restores nothing, opens no
+/// storage, applies no baseline, and does not touch the pre-existing account
+/// value, consensus epoch, or restore audit marker.
+#[test]
+fn d7d4_a_repeat_with_restore_flag_refuses_nonempty_target() {
+    // 1. Independently reproduce the partial destination (its OWN case-C run;
+    //    NOT shared with case B).
+    let partial = reproduce_case_c_partial_restore("D4-A-partial");
+
+    // Pre-retry independent reads (the values the refused attempt must not move).
+    let (acct_before, obs_before) = observe_restored_data_dir(partial.data_dir.path());
+    assert_eq!(acct_before, AccountState::new(7, 4242));
+    assert_eq!(obs_before, ConsensusStorageObservation::CommittedEpoch(42));
+    let marker_before = partial.restore_marker_after_partial.clone();
+
+    // 2. Restart the SAME partial destination WITH the same snapshot + flag and
+    //    otherwise-equivalent arguments.
+    let args = restore_localmesh_args(partial.data_dir.path(), &partial.snapshot_dir);
+    log_executable_provenance("D4-A-retry-with-flag", &args);
+    let (status, stderr, capture) = {
+        let mut child = DrainedChild::spawn(&args);
+        let status = child.wait_natural_exit(NEGATIVE_DEADLINE);
+        (status, child.stderr_snapshot(), child.stderr_capture())
+    };
+    maybe_dump_child_stderr("D4-A-retry-with-flag", &stderr);
+
+    // Natural failure exit with the actual expected code (1), not a signal.
+    assert_eq!(
+        status.code(),
+        Some(1),
+        "WITH-flag retry over a non-empty target must fail closed with natural exit \
+         code 1 (status={status:?}); stderr=\n{}",
+        stderr
+    );
+    assert!(
+        status.signal().is_none(),
+        "the refusal must be a natural exit, not a signal (status={status:?}); stderr=\n{}",
+        stderr
+    );
+    // The specific non-empty-target diagnostic corresponding to
+    // `TargetStateNotEmpty` (not merely a generic restore-error prefix).
+    assert!(
+        stderr.contains(M_TARGET_NOT_EMPTY),
+        "must carry the TargetStateNotEmpty non-empty-target diagnostic; stderr=\n{}",
+        stderr
+    );
+    // Complete capture before any absent-marker claim below.
+    assert!(
+        capture.is_complete(),
+        "stderr capture was not complete ({capture:?}); cannot assert forbidden markers absent"
+    );
+    // No NEW successful-restore or baseline observation from THIS second
+    // invocation. The refusal is BEFORE storage-open, so none of restore-OK,
+    // B5 construction, storage-open, loop dispatch, or baseline application
+    // appear in the second child's captured output. (Only this child's output
+    // is inspected; the first invocation's successful restore is not reused.)
+    for forbidden in [M_RESTORE_OK, M_B5, M_STORAGE_OPEN, M_LOOP_REACHED, M_BASELINE_APPLIED] {
+        assert!(
+            !stderr.contains(forbidden),
+            "refused WITH-flag retry must not emit {forbidden:?}; stderr=\n{}",
+            stderr
+        );
+    }
+
+    // 3. Independently reopened account value and consensus epoch remain at
+    //    their pre-retry values.
+    let (acct_after, obs_after) = observe_restored_data_dir(partial.data_dir.path());
+    assert_eq!(
+        acct_after, acct_before,
+        "refused retry must not change the restored account value"
+    );
+    assert_eq!(
+        obs_after, obs_before,
+        "refused retry must not change the preserved consensus epoch (still 42)"
+    );
+
+    // 4. Existing restore audit-marker contents are NOT appended or replaced by
+    //    the refused attempt (materialization returns `TargetStateNotEmpty`
+    //    BEFORE `write_restore_marker`).
+    let marker_after = std::fs::read_to_string(
+        partial.data_dir.path().join(RESTORE_MARKER_FILENAME),
+    )
+    .expect("read restore audit marker after refused retry");
+    assert_eq!(
+        marker_after, marker_before,
+        "the refused retry must not append to or replace the restore audit marker"
+    );
+}
+
+/// D7-D4 case B — restart WITHOUT the restore flag from a SEPARATELY reproduced
+/// partial destination. Source trace (encoded, then verified against the real
+/// binary): `apply_snapshot_restore_if_requested` returns `Ok(None)` → the
+/// "normal startup" line is printed, NO restore baseline is built, and the
+/// Run 097 epoch block is skipped (`if let Some(outcome)`). Ordinary startup
+/// then opens the canonical consensus storage (already holding epoch 42),
+/// dispatches into `run_local_mesh_node`, and enters
+/// `run_binary_consensus_loop_with_io` with `restore_baseline=None` (no baseline
+/// application). The honest last-observed boundary is the existing
+/// `[binary-consensus] Starting consensus loop:` line (exposing
+/// `restore_baseline=false`), reached while the child is still alive.
+///
+/// **Observed limitation (recorded, not repaired):** ordinary startup PROCEEDS
+/// over the mixed account/epoch destination. This is an observed limitation
+/// requiring assessment before production activation; it is NOT coherent or safe
+/// recovery, and this task does not repair it.
+#[test]
+fn d7d4_b_restart_without_restore_flag_from_partial_destination() {
+    let partial = reproduce_case_c_partial_restore("D4-B-partial");
+    let (acct_before, obs_before) = observe_restored_data_dir(partial.data_dir.path());
+    assert_eq!(acct_before, AccountState::new(7, 4242));
+    assert_eq!(obs_before, ConsensusStorageObservation::CommittedEpoch(42));
+    let marker_before = partial.restore_marker_after_partial.clone();
+
+    // Ordinary start: equivalent env/network-mode/data-dir, NO restore flag.
+    let args = ordinary_localmesh_args(partial.data_dir.path());
+    log_executable_provenance("D4-B-ordinary-no-flag", &args);
+    let stderr = {
+        let mut child = DrainedChild::spawn(&args);
+        // Anchor on the consensus-loop-start line (reached while alive), then
+        // deliberately terminate. Complete capture + successful reap are
+        // enforced by `expect_observed_then_terminated`.
+        child
+            .observe_then_terminate(&[M_CONSENSUS_LOOP_STARTED], POSITIVE_DEADLINE)
+            .expect_observed_then_terminated("D4-B-ordinary-no-flag")
+    };
+    maybe_dump_child_stderr("D4-B-ordinary-no-flag", &stderr);
+
+    // Observed branch: ordinary startup PROCEEDS. Assert the observed startup
+    // observations in their actual order: normal-start → storage open →
+    // LocalMesh dispatch → consensus loop started.
+    assert!(
+        stderr.contains(M_NO_RESTORE),
+        "ordinary start must print the normal-startup line; stderr=\n{}",
+        stderr
+    );
+    assert_marker_order(
+        &stderr,
+        &[M_NO_RESTORE, M_STORAGE_OPEN, M_LOOP_REACHED, M_CONSENSUS_LOOP_STARTED],
+    );
+    // No restore work: no successful-restore, no B5 baseline construction, no
+    // baseline application. The loop reports `restore_baseline=false`.
+    for forbidden in [M_RESTORE_OK, M_B5, M_BASELINE_APPLIED] {
+        assert!(
+            !stderr.contains(forbidden),
+            "ordinary (no-flag) start must not emit {forbidden:?}; stderr=\n{}",
+            stderr
+        );
+    }
+    assert!(
+        stderr.contains("restore_baseline=false"),
+        "the consensus-loop-start line must confirm NO baseline was applied; stderr=\n{}",
+        stderr
+    );
+
+    // Last-observed boundary is the consensus-loop-start line. We do NOT infer
+    // engine recovery of the mixed account/epoch state from startup dispatch.
+
+    // Independent post-process reads (after reap). Report honestly.
+    let (acct_after, obs_after) = observe_restored_data_dir(partial.data_dir.path());
+    assert_eq!(
+        acct_after,
+        AccountState::new(7, 4242),
+        "restored account value observable after ordinary restart (unchanged at loop-start)"
+    );
+    // Observed limitation: the pre-existing consensus epoch is still present and
+    // unchanged after ordinary startup proceeded over the mixed destination.
+    assert_eq!(
+        obs_after, obs_before,
+        "ordinary startup proceeded over the mixed account/epoch destination; the \
+         pre-existing consensus epoch is unchanged at the loop-start boundary \
+         (observed limitation, not safe recovery)"
+    );
+    assert_eq!(obs_after, ConsensusStorageObservation::CommittedEpoch(42));
+    // Ordinary startup writes no restore audit marker; the existing marker is
+    // unchanged.
+    let marker_after = std::fs::read_to_string(
+        partial.data_dir.path().join(RESTORE_MARKER_FILENAME),
+    )
+    .expect("read restore audit marker after ordinary restart");
+    assert_eq!(
+        marker_after, marker_before,
+        "ordinary (no-flag) restart must not append to or replace the restore audit marker"
+    );
+}
+
+/// D7-D4 case C — matched fresh-directory ordinary-start control. Same
+/// equivalent args as case B (no restore flag) over a fresh, unseeded data dir.
+/// Purpose: distinguish partial-destination behavior from normal startup — the
+/// control reaches the SAME consensus-loop-start boundary, but its
+/// independently reopened consensus store shows `PresentNoCommittedEpoch`
+/// (never the partial destination's `CommittedEpoch(42)`). A control that starts
+/// establishes NO consensus progress, signing authorization, or recovery
+/// correctness — only observed startup and storage behavior.
+#[test]
+fn d7d4_c_fresh_directory_ordinary_start_control() {
+    let data_dir = tempdir().expect("tempdir");
+    let args = ordinary_localmesh_args(data_dir.path());
+    log_executable_provenance("D4-C-fresh-control", &args);
+    let stderr = {
+        let mut child = DrainedChild::spawn(&args);
+        child
+            .observe_then_terminate(&[M_CONSENSUS_LOOP_STARTED], POSITIVE_DEADLINE)
+            .expect_observed_then_terminated("D4-C-fresh-control")
+    };
+    maybe_dump_child_stderr("D4-C-fresh-control", &stderr);
+
+    // Same ordinary-start observations and order as case B.
+    assert!(
+        stderr.contains(M_NO_RESTORE),
+        "fresh ordinary start must print the normal-startup line; stderr=\n{}",
+        stderr
+    );
+    assert_marker_order(
+        &stderr,
+        &[M_NO_RESTORE, M_STORAGE_OPEN, M_LOOP_REACHED, M_CONSENSUS_LOOP_STARTED],
+    );
+    for forbidden in [M_RESTORE_OK, M_B5, M_BASELINE_APPLIED] {
+        assert!(
+            !stderr.contains(forbidden),
+            "fresh ordinary start must not emit {forbidden:?}; stderr=\n{}",
+            stderr
+        );
+    }
+    assert!(
+        stderr.contains("restore_baseline=false"),
+        "the consensus-loop-start line must confirm NO baseline was applied; stderr=\n{}",
+        stderr
+    );
+
+    // Independent post-process read: a fresh consensus store has NO committed
+    // epoch — the distinguishing difference from the partial destination.
+    let consensus_dir = data_dir.path().join("consensus");
+    let obs = {
+        let storage =
+            RocksDbConsensusStorage::open(&consensus_dir).expect("reopen fresh consensus");
+        observe_consensus_storage(Some(&storage)).expect("observe fresh consensus")
+    };
+    assert_eq!(
+        obs,
+        ConsensusStorageObservation::PresentNoCommittedEpoch,
+        "fresh ordinary start has no committed epoch"
+    );
+    assert_ne!(
+        obs,
+        ConsensusStorageObservation::CommittedEpoch(42),
+        "the control is distinct from the partial destination (which holds epoch 42)"
+    );
 }
 
 // ============================================================================
