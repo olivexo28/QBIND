@@ -7035,3 +7035,120 @@ the marker before/with the state under a single commit point, or refuse and
 surface a partially-materialized `state_vm_v0` on the next startup rather than
 proceeding as `restore_baseline=false`). This addresses the root cause; it is out
 of scope for this characterization.
+
+## Run 422 D7-D7 — Restore Completion and Fail-Closed Startup Contract (documentation only)
+
+This section records the documentation-only D7-D7 phase, which produces the new
+authoritative contract
+`docs/protocol/QBIND_SNAPSHOT_RESTORE_COMPLETION_CONTRACT.md`. It implements
+**no** production code, tests, storage schema, journal, CLI flag, recovery
+command, cleanup, or activation change. Defining the contract does **not**
+establish operational protection.
+
+### Provenance and object availability (actual checkout)
+
+* Actual working branch: `copilot/run-422-d7-d7`.
+* Actual `HEAD` at authoring: `1babc12216f29bf02a44742a56996acb8d691a3f`
+  (parent `36f179469753e85b24a51cc2b116e3f959e549fd`).
+* Shallow single-branch clone (`git rev-list --count HEAD` = 2). The D7-D6
+  provenance named in the task — accepted branch `copilot/run-422-d7-d6`,
+  accepted revision `9d9723e09b65381bba5f784d0cd10b1d2455c6ea`, and D6 test
+  checkpoint `0099517183bfe842e0a8c04ddd179c44c285934a` — are **not resolvable as
+  git objects** here (`git cat-file -t` → "could not get object info" for both).
+  `36f179469753e85b24a51cc2b116e3f959e549fd` remains separately identified as the
+  previously reported base / build-source reference; it is NOT relabeled as the
+  test-implementation checkpoint. No branch renamed, no ancestry manufactured.
+  Missing objects do not establish missing implementation: the D5/D6 behavior the
+  contract builds on is present in this worktree and cited by file and line in the
+  contract.
+
+### What the contract establishes (summary; full text in the protocol doc)
+
+* The central requirement: ordinary startup must not admit a tracked, interrupted
+  restore as completed; completion must cover account-state installation, the
+  required audit record, and the required epoch persistence.
+* The source-backed failure window: account-state copy
+  (`snapshot_restore.rs:652`) precedes the un-synced audit-marker append
+  (`snapshot_restore.rs:746`), which precedes Run 097
+  `persist_restored_snapshot_epoch` → `put_current_epoch` (`storage.rs:912`, plain
+  `self.db.put`, RocksDB default async write). Obstructing the marker (D6
+  `d7d6_*`) leaves account state copied, marker failed, epoch unpersisted, and an
+  ordinary no-flag restart proceeds with `restore_baseline=false` without
+  inspecting the destination.
+* The protocol: one durable restore-transaction record (RTR) with `INTENT` /
+  `COMPLETE` states, bound to `destination_id`, `snapshot_meta_digest`,
+  `attempt_nonce`, and `expected_epoch` (`Option`, preserving missing-vs-zero),
+  written durably before the first destination mutation and upgraded to
+  `COMPLETE` only after all required effects are durable. Startup consults the RTR
+  before using `state_vm_v0` or starting services and refuses interrupted,
+  corrupt, mismatched, foreign, or untracked-non-empty destinations.
+* Trust model stated separately for ordinary I/O error, process termination,
+  host/power failure, and malicious directory rollback; explicit
+  synced-write / atomic-publish (temp+fsync+rename+dir-fsync) durability profile;
+  destination-scoped exclusive lock (the consensus RocksDB LOCK covers only
+  `<data_dir>/consensus`); explicit legacy/untracked "refuse — investigate"
+  compatibility decision with an unresolved adoption prerequisite; D5
+  restore/CLI incompatibility, live-read epoch semantics, authority-marker checks,
+  and fail-closed defaults preserved, with a bypass-entrypoint inventory.
+* A single bounded successor implementation task (RTR + ordinary-startup guard)
+  naming `snapshot_restore.rs`, `main.rs`, and `production_consensus_storage.rs`
+  as the smallest file set, with automatic repair, anti-rollback, and signing
+  continuity kept separate.
+
+### Reuse findings (non-restore mechanisms not conflated)
+
+The M16 `EpochTransitionMarker` / `EpochTransitionBatch` (`storage.rs:350`,
+`:361`, `check_for_incomplete_epoch_transition:1087`) is a consensus epoch-boundary
+mechanism inside the `<data_dir>/consensus` RocksDB WriteBatch, NOT a restore
+transaction; the contract uses its start/clear-marker pattern only as a design
+reference and does not reuse it for restore completion. The D7-C1 read-only
+`observe_consensus_storage` is reused as the startup epoch-state reader (evidence,
+not authority). Governance replay records are not treated as restore transactions.
+
+### Contradiction-ledger reconciliation
+
+`docs/whitepaper/contradiction.md` C4 is `OPEN — partial` (B3 VM-v0 restore, B5
+restore-aware start among its partial items). This documentation-only phase does
+not change C4's status and requires no ledger rewrite; the ledger already reflects
+C4/C5 open and the restore path as partial, consistent with
+`DEFINED-NOT-IMPLEMENTED`. Reconciliation is required only when the successor task
+establishes an actual boundary.
+
+### Changed documents (this phase)
+
+1. NEW `docs/protocol/QBIND_SNAPSHOT_RESTORE_COMPLETION_CONTRACT.md` (authoritative).
+2. `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md` — this section.
+3. `docs/protocol/QBIND_PROPOSAL_VOTE_AUTHORITY_LIFECYCLE_CONTRACT.md` — concise
+   successor reference only.
+4. `docs/protocol/QBIND_GENESIS_AUTHORITY_ENGINE_QC_INTEGRATION_AUDIT.md` — concise
+   successor reference only.
+
+### Checks and tool limitations (documentation phase)
+
+* Source-reference check: every code citation in the new contract
+  (`snapshot_restore.rs:613/638/652/669/715/746`, `main.rs` ~L2511/2553/2660/4920,
+  `production_consensus_storage.rs:535/619`, `storage.rs:350/361/912/1087`,
+  `consensus_storage_observation.rs`, and the D3–D6 test names) was read in this
+  checkout before citing.
+* Cross-section consistency: the new contract, this evidence section, and the two
+  successor references state the same protocol, durability profile, legacy policy,
+  and unresolved decisions.
+* Diff scope: only the four documents above are changed; no production source,
+  test, schema, or CLI change.
+* Link check: internal doc paths reference existing files.
+* Whitespace / line endings: the new contract and all edited docs use CRLF
+  (matching the existing protocol/evidence files); no repository-wide reformatting;
+  no trailing whitespace added in changed regions.
+* Secret scan: documentation only; no secrets, credentials, or tokens introduced.
+* No Cargo rebuild or test execution performed or required for this phase; no
+  security tool was skipped with an error to record beyond this documentation
+  scope.
+
+### Retained posture
+
+`D7_STATUS=PARTIAL-CODE-TEST / PRODUCTION-LIFECYCLE-UNAVAILABLE`,
+`DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED`, `GENESIS_AUTHORITY_ACTIVATION=DISABLED`,
+`PRODUCTION_WIRE_CHAIN_ID_BEHAVIOR=UNCHANGED`,
+`CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED`,
+`SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO`. C4/C5 remain open. Scoped
+status: `D7D7_RESTORE_COMPLETION_CONTRACT=DEFINED-NOT-IMPLEMENTED`.

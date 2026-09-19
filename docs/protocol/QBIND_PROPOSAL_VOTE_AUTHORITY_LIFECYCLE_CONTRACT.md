@@ -810,3 +810,17 @@ leave a stale decision to authorize a conflicting overwrite, and a live-read
 failure stays an error rather than epoch absence. Authority lifecycle posture is
 unchanged. Evidence:
 `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md` (Run 422 D7-D5 corrective pass).
+
+## Run 422 D7-D7 successor reference (restore completion contract)
+
+The authoritative contract for containing interrupted snapshot restores is now
+`docs/protocol/QBIND_SNAPSHOT_RESTORE_COMPLETION_CONTRACT.md` (status
+`D7D7_RESTORE_COMPLETION_CONTRACT=DEFINED-NOT-IMPLEMENTED`). It defines a durable
+restore-transaction record (INTENT/COMPLETE) so that ordinary startup refuses a
+tracked, interrupted restore and admits only a COMPLETE restore covering
+account-state installation, the required audit record, and required epoch
+persistence. It is documentation-only and establishes no operational protection;
+matching, missing, or completed restores are still not authorization, signing
+continuity, or activation evidence. Authority lifecycle posture is unchanged and
+C4/C5 stay open. Evidence:
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md` (Run 422 D7-D7 section).

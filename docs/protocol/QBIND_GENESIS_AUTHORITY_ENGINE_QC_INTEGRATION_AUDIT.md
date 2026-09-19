@@ -1304,3 +1304,16 @@ authorize a conflicting overwrite; a live-read failure surfaces as an error, nev
 epoch absence. A post-precheck occupied-target refusal persists no epoch. Posture
 is unchanged. Evidence:
 `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md` (Run 422 D7-D5 corrective pass).
+
+## Run 422 D7-D7 successor reference (restore completion contract)
+
+Restore completion is now specified authoritatively in
+`docs/protocol/QBIND_SNAPSHOT_RESTORE_COMPLETION_CONTRACT.md` (status
+`D7D7_RESTORE_COMPLETION_CONTRACT=DEFINED-NOT-IMPLEMENTED`). That contract adds a
+durable restore-transaction record so ordinary startup cannot admit a tracked,
+interrupted restore as completed. It is documentation-only: restore completion is
+necessary evidence for the ordinary-startup boundary only, and is NOT proof of
+consensus recovery, signing-state continuity, authorization, QC integration, or
+rollback resistance. Genesis-authority activation stays DISABLED and C4/C5 remain
+open. Evidence:
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md` (Run 422 D7-D7 section).
