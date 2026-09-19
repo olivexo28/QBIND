@@ -1257,3 +1257,30 @@ shows `PresentNoCommittedEpoch`. Posture unchanged:
 `CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED`; signing-state
 continuity stays NOT-established. Evidence:
 `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md` (Run 422 D7-D4 section).
+
+## Run 422 D7-D5 successor note (reject restore epoch conflicts before materialization)
+
+Run 422 D7-D5 is the bounded production correction that prevents creation of the
+D7-D3/D4 partial destination. For a requested restore whose snapshot declares a
+canonical epoch conflicting with the destination consensus storage's committed
+epoch, the corrected binary now refuses BEFORE any `state_vm_v0` creation,
+account-byte copy, restore-marker write, or baseline construction, and the
+pre-existing committed epoch is preserved. The non-writing compatibility decision
+is factored into `evaluate_restore_epoch_compatibility` (production consensus
+storage) and reused by both the early pre-materialization check and the later
+Run 097 persistence path, so they cannot drift; the early check never writes an
+epoch. The check consumes the SAME validated `StateSnapshotMeta` used to
+materialize the restore, threaded through the restore pipeline via
+`SnapshotEpochPrecheckFn`; a single canonical consensus-storage handle spans the
+check, materialization, and persistence. Storage is opened early only on a
+requested restore (CLI storage-exit modes excluded to avoid a double-open lock);
+`open_production_consensus_storage` is not read-only (it may create the consensus
+directory / RocksDB), and read/open failures remain fail-closed, never treated as
+epoch absence. This authorizes nothing: durable anti-rollback stays
+NOT-established, no atomicity across account/consensus databases is claimed, and
+ordinary startup over a legacy partial directory remains outside scope. Posture
+unchanged: `GENESIS_AUTHORITY_ACTIVATION=DISABLED`,
+`DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED`,
+`CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED`; signing-state
+continuity stays NOT-established. Evidence:
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md` (Run 422 D7-D5 section).

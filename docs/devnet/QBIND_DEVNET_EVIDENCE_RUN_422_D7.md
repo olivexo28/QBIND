@@ -6015,3 +6015,321 @@ Changes limited to the four authorized paths, committed to the task branch and
 pushed via the progress tool (test checkpoint committed **before** validation
 results were recorded). No PR, no main changes, no branch rename, no force-push,
 rebase, or history rewrite. Worktree clean after the documentation commit.
+
+## Run 422 D7-D5 — reject restore epoch conflicts before account-state materialization (code + test + evidence)
+
+D7-D3/D4 demonstrated a partial-destination defect: with a snapshot declaring
+canonical epoch 7 restored over a destination whose consensus storage already
+committed epoch 42, the *pre-fix* binary materialized `state_vm_v0`, copied the
+snapshot account-state bytes, and wrote the restore audit marker, and only THEN
+did the Run 097 check reject the epoch conflict — leaving a partially restored
+destination. Ordinary startup (no restore flag) could subsequently reach the
+consensus loop over that partial destination. D7-D5 is the bounded correction
+that prevents creation of that partial destination.
+
+### Old vs corrected effect ordering
+
+Old (pre-fix) ordering for a conflicting restore:
+
+1. `apply_snapshot_restore_if_requested` validates + materializes `state_vm_v0`
+   (copies account-state bytes) and writes `RESTORED_FROM_SNAPSHOT.json`.
+2. `[binary] B5:` restore baseline constructed.
+3. `open_production_consensus_storage` opens `<data_dir>/consensus`.
+4. `persist_restored_snapshot_epoch` detects `Some(7)` vs committed `Some(42)`
+   and fails closed (`RestoreEpochInconsistent`) — AFTER materialization.
+
+Result: exit 1, but `state_vm_v0` + restore marker already on disk.
+
+Corrected (D7-D5) ordering for a conflicting restore:
+
+1. `open_production_consensus_storage` opens `<data_dir>/consensus` EARLY (only
+   when a restore is requested and no CLI storage-exit mode is active); logs the
+   `[binary] Run 093 consensus storage:` summary.
+2. `[restore] requested:` — the restore pipeline validates the snapshot and the
+   authority marker, then runs the D7-D5 pre-materialization epoch precheck on
+   the SAME validated `StateSnapshotMeta`.
+3. The precheck calls `evaluate_restore_epoch_compatibility(&opened, meta.epoch)`.
+   On `Some(7)` vs committed `Some(42)` it returns `RestoreEpochInconsistent`;
+   `main.rs` prints `[restore] FATAL: refused by Run 422 D7-D5 consensus
+   epoch-conflict check …`, the restore returns
+   `RestoreError::ConsensusEpochConflict`, `main.rs` prints `[restore] ERROR: …`
+   and `std::process::exit(1)` — BEFORE any `state_vm_v0` creation, account-byte
+   copy, restore-marker write, or baseline construction.
+
+Result: exit 1, `state_vm_v0` and the restore audit marker ABSENT, committed
+consensus epoch 42 preserved. No partial destination is created.
+
+### Reused compatibility policy and exact check/write separation
+
+The Run 097 helper `persist_restored_snapshot_epoch` previously combined the
+epoch comparison and the write. D7-D5 factors the non-writing decision into
+`evaluate_restore_epoch_compatibility(opened, snapshot_epoch) ->
+Result<RestoreEpochPlan, ProductionConsensusStorageError>` in
+`crates/qbind-node/src/production_consensus_storage.rs`. It is the single source
+of truth for the compatibility matrix and NEVER writes:
+
+| Snapshot epoch | Existing committed epoch | `RestoreEpochPlan` / result       |
+| -------------- | ------------------------ | --------------------------------- |
+| None           | any                      | `NoEpochToPersist` (no write)     |
+| Some(n)        | none committed           | `PersistAfterMaterialization{n}`  |
+| Some(n)        | Some(n)                  | `AlreadyConsistent{n}` (no write) |
+| Some(n)        | Some(m), m ≠ n           | `Err(RestoreEpochInconsistent)`   |
+| any            | no storage handle        | `NoStorageHandle` (no write)      |
+
+`persist_restored_snapshot_epoch` now calls `evaluate_restore_epoch_compatibility`
+and acts on the plan — only `PersistAfterMaterialization` writes — so the early
+check and the later persistence path cannot drift. The early check writes
+nothing (in particular it never persists the snapshot epoch when storage has no
+committed epoch). Failed validation or materialization never becomes an
+instruction to persist. Epoch persistence is retained AFTER successful
+account-state materialization.
+
+### Validated-metadata ownership and canonical-storage handle lifetime
+
+The early check consumes the SAME validated `StateSnapshotMeta` used to
+materialize the restore and to perform later epoch handling: the precheck is a
+closure threaded into the restore pipeline via
+`apply_snapshot_restore_if_requested_with_context_and_epoch_precheck` /
+`SnapshotEpochPrecheckFn`, invoked AFTER `validate_snapshot_for_restore` and the
+authority-marker check and BEFORE `materialize_validated_snapshot`. `main.rs`
+does not parse `meta.json` separately; no unchecked "validated snapshot"
+constructor was introduced. Both production restore branches (authority-context
+and no-context) receive the check through the shared inner seam.
+
+A single `OpenedProductionConsensusStorage` handle spans the early check,
+materialization, and the later Run 097 persistence: it is opened once
+(`pre_opened_consensus_storage`), borrowed by the precheck closure (borrow ends
+before the move), then moved into `consensus_storage_lifecycle` and reused at the
+Run 093 site — avoiding a second `open_production_consensus_storage` on the same
+path (which would fail on the RocksDB lock). Ordinary (non-restore) startups open
+at the Run 093 site exactly as before.
+
+### Early storage-opening effects and error precedence
+
+`open_production_consensus_storage` is NOT read-only: it can create the
+`<data_dir>/consensus` directory and open/create RocksDB, and it runs the
+established schema and incomplete-transition checks. The D7-D5 negative guarantee
+is specifically about account-state materialization, restore-marker writes, and
+preservation of the existing committed epoch — not byte-identical storage
+directories. Read/open failures remain failures (fail-closed) and are never
+reinterpreted as epoch absence; "no committed epoch" means a successful read of
+an uncommitted surface, not a failed read or an unavailable handle.
+
+Because storage now opens before the requested restore, three CLI early-exit
+modes that themselves open `<data_dir>/consensus`
+(`--p2p-trust-bundle-reload-check`, the Run 077 hook, and the trust-bundle
+reload-apply path) are explicitly EXCLUDED from the early open via
+`cli_storage_exit_mode_active`, preventing a double-open lock failure. Those
+modes never reach the consensus loop, so D7-D5 does not apply to them and their
+behavior is unchanged.
+
+Deliberate diagnostic-precedence changes (documented and tested):
+
+* Startup marker order for a compatible requested restore now begins with the
+  `[binary] Run 093 consensus storage:` open (early), then `[restore] OK:`,
+  `[binary] B5:`, the Run 097 persistence line (when applicable), the LocalMesh
+  loop-start, and the baseline-application line.
+* Over a directory holding BOTH a non-empty `state_vm_v0` AND a conflicting
+  committed epoch, the epoch-conflict refusal now precedes the
+  `TargetStateNotEmpty` occupied-target refusal (the epoch check runs before
+  `materialize_validated_snapshot`). The authority-marker check still precedes
+  the epoch check. The new check only ADDS refusals; no existing refusal was
+  turned into permission to restore.
+
+### Conflict rejection, compatible controls, and failure controls (tests)
+
+Migrated / added in
+`crates/qbind-node/tests/run_422_d7d3_binary_snapshot_restore_characterization_tests.rs`:
+
+* `d7d3_c_binary_epoch_conflict_rejected_before_materialization` (migrated D3
+  case C): real snapshot epoch 7, seeded consensus epoch 42, `state_vm_v0` and
+  restore marker absent. The corrected release-selectable binary refuses with the
+  D7-D5 pre-materialization diagnostic at natural exit 1; complete capture is
+  required before absent-marker assertions; no `M_RESTORE_OK` / `M_B5` /
+  `M_LOOP_REACHED` / `M_BASELINE_APPLIED` / `M_EPOCH_PERSIST`; `M_STORAGE_OPEN`
+  precedes the refusal; `state_vm_v0` and the restore marker remain absent
+  (checked via `Path::exists()` BEFORE any account accessor); an independent
+  reopen shows committed epoch 42 preserved. The rejected request is REPEATED
+  over the same destination and must reject again on epoch conflict (not a
+  manufactured occupied-target failure), leaving no restored account state.
+* `d7d5_c_preexisting_restore_marker_preserved_on_rejection`: with a pre-placed
+  `RESTORED_FROM_SNAPSHOT.json` (permitted because the epoch check precedes the
+  occupied-target check and never touches the marker), the refused restore leaves
+  the marker byte-for-byte unchanged.
+* `d7d5_b_compatible_present_epochs_reach_baseline`: real-binary compatible
+  controls for `Some(n)/None` (persist n) and `Some(n)/Some(n)` (matching epoch
+  NOT overwritten; no `M_EPOCH_PERSIST`), both reaching baseline application with
+  the expected committed epoch. Complements `d7d3_b` (None/None and Some(0)/None).
+* Unit tests in `production_consensus_storage.rs` (`d7d5_evaluate_matrix_*`,
+  `d7d5_persist_and_evaluate_agree_*`) prove the full matrix and that invoking
+  the compatibility check alone never persists an epoch into storage with no
+  committed epoch, and that check and writer agree.
+
+Existing writer-behavior tests (Run 097) and the deterministic restore-failure
+paths are retained; snapshot-invalid, wrong-chain, authority-marker, and
+occupied-target refusals remain covered by their existing suites (b3, Run 124,
+Run 140) and were re-run green. Storage-open/read, incompatible-schema, and
+incomplete-transition fail-closed behavior remains covered by Run 093.
+
+### Migration of historical D3/D4 tests
+
+The corrected binary no longer produces the old case-C partial destination, so
+the D3 conflict case now asserts the pre-materialization refusal (above). D7-D4
+coverage of behavior over a directory left by older behavior uses a clearly
+labeled legacy-layout fixture, `build_legacy_partial_restore_destination`, built
+via real library materialization (`restore_from_snapshot`, which performs no
+consensus epoch check) over a seeded conflicting consensus epoch — an
+imported/pre-fix on-disk layout, NOT a failure produced by the corrected
+executable:
+
+* `d7d4_a_repeat_with_restore_flag_over_legacy_partial_rejects_epoch_conflict`:
+  the corrected binary WITH the flag over the legacy partial directory now
+  refuses with the D7-D5 epoch-conflict refusal (epoch check precedes the
+  occupied-target check), leaving account value, consensus epoch 42, and the
+  restore marker untouched. (The `TargetStateNotEmpty` occupied-target refusal
+  itself remains covered by `b3_snapshot_restore_tests`.)
+* `d7d4_b_restart_without_restore_flag_over_legacy_partial_proceeds`: ordinary
+  startup (no flag) still proceeds to the consensus loop over the mixed
+  account/epoch legacy directory — OUTSIDE this correction's protection (D7-D5
+  guards only the requested-restore path). This remains an observed limitation,
+  recorded and not repaired here.
+
+Historical D3/D4 execution claims remain at their original SHAs; current tests
+distinguish newly prevented partial-state creation from behavior over an
+already-existing legacy partial directory.
+
+### D4 record reconciliation
+
+The final accepted D4 revision is `bf5a692a1524537e876197a05e1cf35371b892d0`
+(tested checkpoint `7208e043415b3b184235e20d0f178b7553fa7252`). That historical
+D4 report recorded a CodeQL scope skip (database-size/backend) and reviewer
+unavailability; those outcomes are attributed to that historical report and are
+NOT claimed as newly executed here. The present D7-D5 pass records its own tool
+outcomes literally below.
+
+### Remaining crash-consistency and legacy-directory limitations
+
+D7-D5 prevents creation of the demonstrated partial destination for a requested
+restore with conflicting present epochs. It does NOT repair existing partial
+directories, make restoration atomic across the account and consensus databases,
+or establish durable anti-rollback. A crash or I/O failure DURING a compatible
+restore remains a separate recovery problem: the post-materialization Run 097
+persistence/error boundary is retained and is not made infallible by the early
+check. Ordinary startup over a legacy partial directory remains outside this
+correction's protection. Missing epochs, matching epochs, and successful
+restoration are not authorization, signing continuity, or activation evidence.
+The assumptions are serialized startup and exclusive directory access; no
+protection against concurrent hostile filesystem replacement is claimed.
+
+### Retained posture (unchanged by D7-D5)
+
+`D7_STATUS=PARTIAL-CODE-TEST / PRODUCTION-LIFECYCLE-UNAVAILABLE`,
+`DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED`,
+`GENESIS_AUTHORITY_ACTIVATION=DISABLED`,
+`PRODUCTION_WIRE_CHAIN_ID_BEHAVIOR=UNCHANGED`,
+`CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED`,
+`SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO`. Required defaults,
+unavailable production Proposal/Vote authority, genesis activation refusal,
+existing `CurrentEpochUnavailable` behavior, D6 signing bytes, and
+Timeout/NewView separation are preserved. No readiness promotion, authority
+activation, or Run 423 work.
+
+### Exact release-binary evidence and literal tool outcomes (this pass)
+
+Actual checkout (D7-D5 pass):
+
+* Branch: `copilot/copilotcopilotcopilotcopilotcopilotcopilotcopilotc`
+  (trailing `c`; differs from the D7-D4 report's
+  `copilot/copilotcopilotcopilotcopilotcopilotcopilotcopilot`). Not renamed.
+* Shallow single-branch clone: `.git/shallow` grafts at
+  `358a69052a73d906dbe29c722f741579b9b5e19a`; only two commits are locally
+  reachable. The accepted D7-D4 references
+  (`bf5a692a1524537e876197a05e1cf35371b892d0` final,
+  `7208e043415b3b184235e20d0f178b7553fa7252` checkpoint) are NOT present as
+  objects in this clone (`git cat-file` fails). Per repository instruction,
+  missing historical objects do not imply missing implementation — every named
+  production source and test target is present and was inspected.
+* Worktree clean before edits; disk capacity ample.
+
+Release build and integration run:
+
+```text
+# cargo build --release -p qbind-node --bin qbind-node   (profile: release)
+# executable: target/release/qbind-node
+# sha256   = eaa42a5bcee4d9ab654cdaf1e56baca5270a28bacce17a74518336d51779163a
+# byte_len = 16957384
+# build/source revision = 7f7db1c20a0c12f33c0be00ce7797ecc3b977a0d (this branch HEAD at build time)
+
+# QBIND_D7D3_NODE_BIN=<abs>/target/release/qbind-node \
+#   cargo test -p qbind-node --test run_422_d7d3_binary_snapshot_restore_characterization_tests
+# test result: ok. 17 passed; 0 failed   (release binary; incl. d7d3_c pre-materialization
+#                                          rejection, d7d5_b compatible controls, d7d5_c marker
+#                                          preservation, d7d4_a/b legacy-layout fixtures)
+
+# Dev-profile run of the same target (CARGO_BIN_EXE_qbind-node):
+# test result: ok. 17 passed; 0 failed
+
+# cargo test -p qbind-node --lib production_consensus_storage
+# test result: ok. 19 passed; 0 failed   (incl. d7d5_evaluate_matrix_* + d7d5_persist_and_evaluate_agree_*)
+
+# cargo test -p qbind-node --test run_097_snapshot_epoch_parity_tests       => ok. 7 passed
+# cargo test -p qbind-node --test b3_snapshot_restore_tests                 => ok. 10 passed
+# cargo test -p qbind-node --test b5_restore_aware_consensus_start_tests    => ok. 4 passed
+# cargo test -p qbind-node --test run_093_production_consensus_storage_lifecycle_tests => ok. 12 passed
+# cargo test -p qbind-node --test run_124_snapshot_restore_authority_marker_tests      => ok. 7 passed
+# cargo test -p qbind-node --test run_140_snapshot_restore_v2_authority_marker_tests   => ok. 13 passed
+# cargo test -p qbind-node --test run_422_d4_startup_ordering_tests         => ok. 5 passed
+# cargo test -p qbind-node --test run_422_startup_refusal_tests             => ok. 4 passed
+# cargo check -p qbind-node                                                 => Finished (default features)
+```
+
+Literal tool outcomes / limitations:
+
+* `rustfmt --check` on the three changed source files reports diffs, but the
+  same diffs are PRE-EXISTING on the base revision (`HEAD~2`):
+  `main.rs`, `production_consensus_storage.rs`, and `snapshot_restore.rs` are
+  hand-formatted (and the two `*_consensus_storage.rs`/`snapshot_restore.rs`
+  sources are CRLF with no trailing newline), so rustfmt is not the governing
+  formatter. Changed code matches the surrounding hand-formatted convention
+  (e.g. single-line `opened.handle.as_ref().unwrap().put_current_epoch(n)`
+  chains as used by existing tests). Unrelated lines were NOT reformatted, and
+  file-specific line endings were preserved.
+* `cargo clippy -p qbind-node --lib`: the only lint touching the new code is the
+  pre-existing `clippy::result_large_err` on functions returning
+  `Result<_, RestoreError>` (the large `RestoreError::SnapshotInvalid` variant,
+  ≈456 bytes, already triggers this across ~16 sites file-wide). The new small
+  `ConsensusEpochConflict` variant does not become the largest variant; boxing
+  the enum would be an out-of-scope crate-wide refactor. No new clippy category
+  was introduced by the D7-D5 code.
+* CodeQL (this pass, literal): **"Analysis was skipped because the database size
+  is too large."** Production source changes were declared non-trivial. Per the
+  task's reporting rule this is **incomplete/unverified security coverage**, NOT a
+  clean result — the reported "0 alerts" does not constitute a completed scan of
+  the changed Rust code.
+* Code Review (this pass, literal): the reviewer returned **no review comments**,
+  but its backend also logged a model-registry error
+  (`model claude-sonnet-4.6 not found in registry`), so the "no comments" outcome
+  should be read as reviewer-unavailable rather than an affirmatively clean
+  review. Both outcomes are recorded verbatim rather than interpreted as passing.
+
+### Scoped verdict and worktree/push status
+
+`D7D5_RESTORE_EPOCH_CONFLICT_BEFORE_MATERIALIZATION=CODE-AND-RELEASE-TEST-POSITIVE`
+
+Justification: the corrected production path rejects a conflicting requested
+restore BEFORE `state_vm_v0` creation, account-byte copy, restore-marker write,
+and baseline construction while preserving the committed epoch, and this is
+demonstrated against a freshly built release executable
+(`sha256 eaa42a5b…`, 16957384 bytes) via `QBIND_D7D3_NODE_BIN` (17/17), plus the
+compatible controls, marker-preservation, and legacy-layout characterization.
+All retained D7 posture lines are unchanged (see above). This verdict is scoped
+strictly to pre-materialization epoch-conflict rejection; it does NOT promote
+readiness, does not repair pre-existing partial directories, does not make
+restore atomic across databases, and does not establish durable anti-rollback.
+
+Changes are limited to the six authorized paths (`main.rs`,
+`production_consensus_storage.rs`, `snapshot_restore.rs`, the D7-D3 test target,
+and the three docs), committed to the task branch and pushed via the progress
+tool with an unambiguous implementation checkpoint recorded BEFORE validation
+outcomes. `task/warning.txt` and unrelated files are untouched. No PR, no main
+changes, no branch rename, no force-push, no rebase, no history rewrite.

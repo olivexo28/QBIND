@@ -77,8 +77,9 @@ use qbind_node::node_config::{ConfigProfile, NetworkMode};
 use qbind_node::p2p_inbound::ChannelConsensusHandler;
 use qbind_node::p2p_node_builder::P2pNodeBuilder;
 use qbind_node::production_consensus_storage::{
-    open_production_consensus_storage, persist_restored_snapshot_epoch,
-    OpenedProductionConsensusStorage,
+    evaluate_restore_epoch_compatibility, open_production_consensus_storage,
+    persist_restored_snapshot_epoch, OpenedProductionConsensusStorage,
+    ProductionConsensusStorageError,
 };
 use qbind_node::snapshot_restore::RestoreOutcome;
 use qbind_node::vm_v0_runtime::{SnapshotAnchor, VmV0RuntimeState};
@@ -2459,19 +2460,133 @@ async fn main() {
     // the binary-path consensus startup so the engine begins from the
     // restored height/view baseline rather than from view 0. See
     // `binary_consensus_loop::RestoreBaseline`.
+    //
+    // Run 422 D7-D5: when a restore is requested, the canonical
+    // `<data_dir>/consensus` storage is opened HERE (before materialization)
+    // so a pre-materialization consensus epoch-conflict check can reject a
+    // conflicting restore BEFORE `state_vm_v0` is created, before any
+    // snapshot bytes are copied, and before the restore audit marker is
+    // written. The SAME opened handle is reused for the later Run 093
+    // lifecycle logging and the Run 097 post-materialization epoch persist,
+    // so the RocksDB lock is held continuously across check → materialize →
+    // persist and the storage is never double-opened. The compatibility
+    // decision is the factored, non-writing
+    // `evaluate_restore_epoch_compatibility`; the early check never writes
+    // the snapshot epoch (in particular it never writes into a
+    // present-no-committed-epoch destination — that write only happens after
+    // successful materialization via `persist_restored_snapshot_epoch`).
     // ------------------------------------------------------------------
-    let restore_result = match canonical_genesis_hash_hex_for_restore.as_deref() {
-        Some(genesis_hex) => {
-            let ctx = qbind_node::snapshot_restore::RestoreAuthorityContext {
+    let restore_requested = config.fast_sync_config.is_enabled();
+
+    // Some CLI validation/apply subcommand modes open the canonical
+    // `<data_dir>/consensus` storage themselves (Run 098
+    // `load_activation_current_epoch_for_cli`) and then exit before normal
+    // startup. Opening the storage early here for those invocations would
+    // double-open the same RocksDB path (lock failure). Detect those modes so
+    // the early open is skipped for them — they do not reach the consensus
+    // loop, so the D7-D5 pre-materialization check does not apply, and their
+    // behavior is left exactly as before.
+    let cli_storage_exit_mode_active = args.p2p_trust_bundle_reload_check.is_some()
+        || qbind_node::pqc_peer_candidate_binary::run077_hook_active(
+            args.p2p_trust_bundle_peer_candidate_check.as_deref(),
+            args.p2p_trust_bundle_peer_candidate_validation_enabled,
+        )
+        || args.p2p_trust_bundle_reload_apply_path.is_some()
+        || args.p2p_trust_bundle_reload_apply_enabled;
+
+    // Open the canonical consensus storage early ONLY when a restore is
+    // requested and we are on the normal-startup path, so ordinary
+    // (non-restore) startups are byte-for-byte unchanged and no unrelated
+    // command path acquires the consensus lock earlier than before.
+    let pre_opened_consensus_storage: Option<OpenedProductionConsensusStorage> =
+        if restore_requested && !cli_storage_exit_mode_active {
+            match open_production_consensus_storage(&config) {
+                Ok(opened) => {
+                    eprintln!("{}", opened.log_summary());
+                    Some(opened)
+                }
+                Err(e) => {
+                    eprintln!(
+                        "[binary] FATAL: Run 093 production consensus storage open failed \
+                         (pre-restore epoch check): {}",
+                        e
+                    );
+                    eprintln!(
+                        "[binary] qbind-node refuses to start because the canonical \
+                         <data_dir>/consensus directory could not be honestly opened, \
+                         schema-checked, or recovery-verified before the requested restore. \
+                         No fallback path. See \
+                         docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_093.md and \
+                         docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md."
+                    );
+                    std::process::exit(1);
+                }
+            }
+        } else {
+            None
+        };
+
+    let restore_result = {
+        // Bind the pre-materialization epoch-conflict closure to a local so
+        // its borrow of `pre_opened_consensus_storage` ends before the handle
+        // is moved into `consensus_storage_lifecycle` below.
+        let epoch_precheck_closure = pre_opened_consensus_storage.as_ref().map(|opened| {
+            move |meta: &qbind_ledger::StateSnapshotMeta| -> Result<
+                (),
+                qbind_node::snapshot_restore::RestoreError,
+            > {
+                match evaluate_restore_epoch_compatibility(opened, meta.epoch) {
+                    Ok(_plan) => Ok(()),
+                    Err(ProductionConsensusStorageError::RestoreEpochInconsistent {
+                        path,
+                        existing,
+                        snapshot,
+                    }) => {
+                        eprintln!(
+                            "[restore] FATAL: refused by Run 422 D7-D5 consensus \
+                             epoch-conflict check at {}: existing meta:current_epoch={} \
+                             but snapshot meta.json declares epoch={}. Refusing BEFORE \
+                             account-state materialization or audit-marker write; the \
+                             pre-existing committed consensus epoch is preserved.",
+                            path.display(),
+                            existing,
+                            snapshot
+                        );
+                        Err(
+                            qbind_node::snapshot_restore::RestoreError::ConsensusEpochConflict {
+                                existing,
+                                snapshot,
+                                consensus_path: path,
+                            },
+                        )
+                    }
+                    // `evaluate_restore_epoch_compatibility` only ever returns
+                    // `RestoreEpochInconsistent` as an error; treat any other as
+                    // a fail-closed IO-class refusal (defensive, unreachable).
+                    Err(other) => Err(qbind_node::snapshot_restore::RestoreError::Io(format!(
+                        "unexpected consensus epoch pre-check error: {}",
+                        other
+                    ))),
+                }
+            }
+        });
+        let epoch_precheck: Option<&qbind_node::snapshot_restore::SnapshotEpochPrecheckFn<'_>> =
+            epoch_precheck_closure
+                .as_ref()
+                .map(|c| c as &qbind_node::snapshot_restore::SnapshotEpochPrecheckFn<'_>);
+
+        let authority_ctx = canonical_genesis_hash_hex_for_restore.as_deref().map(|genesis_hex| {
+            qbind_node::snapshot_restore::RestoreAuthorityContext {
                 runtime_env: config.environment,
                 runtime_chain_id: config.chain_id(),
                 runtime_genesis_hash_hex: genesis_hex,
-            };
-            qbind_node::snapshot_restore::apply_snapshot_restore_if_requested_with_authority_context(
-                &config, &ctx,
-            )
-        }
-        None => qbind_node::snapshot_restore::apply_snapshot_restore_if_requested(&config),
+            }
+        });
+        qbind_node::snapshot_restore::apply_snapshot_restore_if_requested_with_context_and_epoch_precheck(
+            &config,
+            authority_ctx.as_ref(),
+            epoch_precheck,
+        )
     };
     let restore_outcome: Option<RestoreOutcome> = match restore_result {
             Ok(None) => {
@@ -4679,24 +4794,38 @@ async fn main() {
     // Fail-closed on any open / schema / recovery / probe failure —
     // we never silently degrade to "no storage" when `data_dir` is
     // set.
+    //
+    // Run 422 D7-D5: when a restore was requested, this storage was already
+    // opened earlier (before materialization) for the pre-materialization
+    // epoch-conflict check. Reuse that SAME handle here rather than
+    // reopening — a second `open_production_consensus_storage` on the same
+    // path would fail on the RocksDB lock. Ordinary (non-restore) startups
+    // open here exactly as before.
     // ------------------------------------------------------------------
     let consensus_storage_lifecycle: OpenedProductionConsensusStorage =
-        match open_production_consensus_storage(&config) {
-            Ok(opened) => {
-                eprintln!("{}", opened.log_summary());
+        match pre_opened_consensus_storage {
+            Some(opened) => {
+                // Already opened (and logged) earlier for the pre-restore
+                // epoch check. Reuse the same live handle/lock.
                 opened
             }
-            Err(e) => {
-                eprintln!("[binary] FATAL: Run 093 production consensus storage open failed: {}", e);
-                eprintln!(
-                    "[binary] qbind-node refuses to start because the canonical \
-                     <data_dir>/consensus directory could not be honestly opened, \
-                     schema-checked, or recovery-verified. No fallback path. See \
-                     docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_093.md and \
-                     docs/whitepaper/contradiction.md C4."
-                );
-                std::process::exit(1);
-            }
+            None => match open_production_consensus_storage(&config) {
+                Ok(opened) => {
+                    eprintln!("{}", opened.log_summary());
+                    opened
+                }
+                Err(e) => {
+                    eprintln!("[binary] FATAL: Run 093 production consensus storage open failed: {}", e);
+                    eprintln!(
+                        "[binary] qbind-node refuses to start because the canonical \
+                         <data_dir>/consensus directory could not be honestly opened, \
+                         schema-checked, or recovery-verified. No fallback path. See \
+                         docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_093.md and \
+                         docs/whitepaper/contradiction.md C4."
+                    );
+                    std::process::exit(1);
+                }
+            },
         };
     // ------------------------------------------------------------------
     // Run 097: snapshot epoch parity for the restore path.

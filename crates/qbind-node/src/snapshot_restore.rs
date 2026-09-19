@@ -141,6 +141,25 @@ pub enum RestoreError {
     /// no-context [`apply_snapshot_restore_if_requested`] path when a
     /// local marker file already exists on disk.
     AuthorityContextMissing,
+
+    /// **Run 422 D7-D5.** The snapshot's declared canonical epoch
+    /// (`StateSnapshotMeta::epoch`) conflicts with an epoch already
+    /// committed in the destination `<data_dir>/consensus` storage. The
+    /// restore is refused by the pre-materialization epoch-compatibility
+    /// check BEFORE any account-state materialization, snapshot-byte copy,
+    /// restore audit-marker write, or restore-baseline construction, so the
+    /// pre-existing committed consensus epoch is preserved and no partial
+    /// destination is created. The fields carry the precise reason, mirrored
+    /// from
+    /// [`crate::production_consensus_storage::ProductionConsensusStorageError::RestoreEpochInconsistent`].
+    ConsensusEpochConflict {
+        /// The epoch already committed in `<data_dir>/consensus`.
+        existing: u64,
+        /// The conflicting epoch declared by the snapshot's `meta.json`.
+        snapshot: u64,
+        /// The canonical consensus storage path.
+        consensus_path: PathBuf,
+    },
 }
 
 impl fmt::Display for RestoreError {
@@ -179,6 +198,22 @@ impl fmt::Display for RestoreError {
                 f,
                 "restore-from-snapshot refused: a local pqc_authority_state.json marker exists but no runtime authority context (env, chain_id, genesis_hash) was supplied to the restore surface (fail closed). Use restore_from_snapshot_with_authority_marker_check from a binary surface that has loaded the canonical genesis."
             ),
+            RestoreError::ConsensusEpochConflict {
+                existing,
+                snapshot,
+                consensus_path,
+            } => write!(
+                f,
+                "restore-from-snapshot refused by consensus epoch-conflict check at '{}': \
+                 existing meta:current_epoch={} but snapshot meta.json declares epoch={}. \
+                 Refusing before any account-state materialization or audit-marker write; \
+                 the pre-existing committed consensus epoch is preserved. Either the \
+                 snapshot is from a different node/epoch, or the on-disk consensus storage \
+                 was advanced after the snapshot was taken.",
+                consensus_path.display(),
+                existing,
+                snapshot
+            ),
         }
     }
 }
@@ -203,6 +238,22 @@ pub struct RestoreOutcome {
     /// Total bytes copied from `snapshot/state/` into the target state dir.
     pub bytes_copied: u64,
 }
+
+/// **Run 422 D7-D5.** A pre-materialization epoch-compatibility check.
+///
+/// This borrowed closure is invoked by the restore pipeline with the SAME
+/// validated [`StateSnapshotMeta`] value that will be used to materialize
+/// the restore, AFTER all snapshot-layout / chain-id / authority-marker
+/// checks and BEFORE any account-state materialization, snapshot-byte copy,
+/// or restore audit-marker write. Returning `Err(...)` vetoes the restore
+/// before any of those effects occur. The binary (`main.rs`) wires this to
+/// the canonical `<data_dir>/consensus` epoch-compatibility decision
+/// (`production_consensus_storage::evaluate_restore_epoch_compatibility`),
+/// mapping an epoch conflict to
+/// [`RestoreError::ConsensusEpochConflict`]. Library/test callers that have
+/// no consensus context pass `None` and observe the pre-existing behavior.
+pub type SnapshotEpochPrecheckFn<'a> =
+    dyn Fn(&StateSnapshotMeta) -> Result<(), RestoreError> + 'a;
 
 /// Apply a restore-from-snapshot if `config.fast_sync_config` requests one.
 ///
@@ -229,7 +280,7 @@ pub struct RestoreOutcome {
 pub fn apply_snapshot_restore_if_requested(
     config: &NodeConfig,
 ) -> Result<Option<RestoreOutcome>, RestoreError> {
-    apply_snapshot_restore_if_requested_inner(config, None)
+    apply_snapshot_restore_if_requested_inner(config, None, None)
 }
 
 /// **Run 124.** Apply a restore-from-snapshot with the runtime authority
@@ -254,12 +305,37 @@ pub fn apply_snapshot_restore_if_requested_with_authority_context(
     config: &NodeConfig,
     authority_ctx: &RestoreAuthorityContext<'_>,
 ) -> Result<Option<RestoreOutcome>, RestoreError> {
-    apply_snapshot_restore_if_requested_inner(config, Some(authority_ctx))
+    apply_snapshot_restore_if_requested_inner(config, Some(authority_ctx), None)
+}
+
+/// **Run 422 D7-D5.** Apply a restore-from-snapshot with the (optional)
+/// runtime authority context AND an (optional) pre-materialization epoch
+/// compatibility check.
+///
+/// This is the production entry point the binary (`main.rs`) calls once the
+/// canonical consensus storage has been opened. The `epoch_precheck` closure
+/// is invoked with the SAME validated [`StateSnapshotMeta`] that will be
+/// materialized — after all snapshot-layout / chain-id / authority-marker
+/// checks and BEFORE any account-state materialization or audit-marker write.
+/// When it returns `Err(...)`, the restore is refused before those effects,
+/// so the destination is never left partially restored.
+///
+/// Passing `authority_ctx = None` selects the legacy no-context path (which
+/// still fails closed with [`RestoreError::AuthorityContextMissing`] if a
+/// local marker exists). Passing `epoch_precheck = None` reproduces the
+/// pre-D7-D5 behavior (no early epoch check).
+pub fn apply_snapshot_restore_if_requested_with_context_and_epoch_precheck(
+    config: &NodeConfig,
+    authority_ctx: Option<&RestoreAuthorityContext<'_>>,
+    epoch_precheck: Option<&SnapshotEpochPrecheckFn<'_>>,
+) -> Result<Option<RestoreOutcome>, RestoreError> {
+    apply_snapshot_restore_if_requested_inner(config, authority_ctx, epoch_precheck)
 }
 
 fn apply_snapshot_restore_if_requested_inner(
     config: &NodeConfig,
     authority_ctx: Option<&RestoreAuthorityContext<'_>>,
+    epoch_precheck: Option<&SnapshotEpochPrecheckFn<'_>>,
 ) -> Result<Option<RestoreOutcome>, RestoreError> {
     if !config.fast_sync_config.is_enabled() {
         return Ok(None);
@@ -288,11 +364,12 @@ fn apply_snapshot_restore_if_requested_inner(
     );
 
     let outcome = match authority_ctx {
-        Some(ctx) => restore_from_snapshot_with_authority_marker_check(
+        Some(ctx) => restore_from_snapshot_with_authority_marker_check_inner(
             &snapshot_dir,
             &data_dir,
             expected_chain_id,
             ctx,
+            epoch_precheck,
         )?,
         None => {
             // Legacy no-context path: still enforce the conservative
@@ -303,7 +380,12 @@ fn apply_snapshot_restore_if_requested_inner(
             if marker_path.exists() {
                 return Err(RestoreError::AuthorityContextMissing);
             }
-            restore_from_snapshot(&snapshot_dir, &data_dir, expected_chain_id)?
+            restore_from_snapshot_inner(
+                &snapshot_dir,
+                &data_dir,
+                expected_chain_id,
+                epoch_precheck,
+            )?
         }
     };
 
@@ -354,7 +436,25 @@ pub fn restore_from_snapshot(
     data_dir: &Path,
     expected_chain_id: u64,
 ) -> Result<RestoreOutcome, RestoreError> {
+    restore_from_snapshot_inner(snapshot_dir, data_dir, expected_chain_id, None)
+}
+
+/// Internal restore primitive with the optional Run 422 D7-D5
+/// pre-materialization epoch check. The public [`restore_from_snapshot`]
+/// delegates here with `epoch_precheck = None`.
+fn restore_from_snapshot_inner(
+    snapshot_dir: &Path,
+    data_dir: &Path,
+    expected_chain_id: u64,
+    epoch_precheck: Option<&SnapshotEpochPrecheckFn<'_>>,
+) -> Result<RestoreOutcome, RestoreError> {
     let meta = validate_snapshot_for_restore(snapshot_dir, expected_chain_id)?;
+    // Run 422 D7-D5: consult the pre-materialization epoch check with the
+    // SAME validated meta that will be materialized, before any account-state
+    // materialization or audit-marker write.
+    if let Some(check) = epoch_precheck {
+        check(&meta)?;
+    }
     materialize_validated_snapshot(snapshot_dir, data_dir, meta)
 }
 
@@ -374,6 +474,44 @@ pub fn restore_from_snapshot_with_authority_marker_check(
     data_dir: &Path,
     expected_chain_id: u64,
     authority_ctx: &RestoreAuthorityContext<'_>,
+) -> Result<RestoreOutcome, RestoreError> {
+    restore_from_snapshot_with_authority_marker_check_inner(
+        snapshot_dir,
+        data_dir,
+        expected_chain_id,
+        authority_ctx,
+        None,
+    )
+}
+
+/// Internal authority-marker restore primitive with the optional Run 422
+/// D7-D5 pre-materialization epoch check. The public
+/// [`restore_from_snapshot_with_authority_marker_check`] delegates here with
+/// `epoch_precheck = None`.
+///
+/// # Diagnostic ordering (Run 422 D7-D5)
+///
+/// The checks run in this deliberate order, each strictly before any
+/// account-state materialization or audit-marker write:
+///
+/// 1. snapshot layout / chain-id / meta parse (`validate_snapshot_for_restore`)
+/// 2. Run 124/140 authority-marker conflict check
+/// 3. Run 422 D7-D5 consensus epoch-conflict check (`epoch_precheck`)
+/// 4. occupied-target (`TargetStateNotEmpty`) check inside
+///    `materialize_validated_snapshot`
+///
+/// The epoch check is placed AFTER the authority-marker check so an authority
+/// conflict is still reported as such (preserving existing precedence), and
+/// BEFORE the occupied-target check so a conflicting-epoch destination is
+/// refused without materialization even if the target were also occupied.
+/// The new check only ADDS refusals; it never turns an existing refusal into
+/// permission to restore.
+fn restore_from_snapshot_with_authority_marker_check_inner(
+    snapshot_dir: &Path,
+    data_dir: &Path,
+    expected_chain_id: u64,
+    authority_ctx: &RestoreAuthorityContext<'_>,
+    epoch_precheck: Option<&SnapshotEpochPrecheckFn<'_>>,
 ) -> Result<RestoreOutcome, RestoreError> {
     // 1. Validate snapshot layout / chain id / meta parse first, so any
     //    snapshot-layer failure is reported as such (not as an authority
@@ -436,6 +574,14 @@ pub fn restore_from_snapshot_with_authority_marker_check(
             "[restore] Run 124 authority-marker check: {} (proceeding with materialization)",
             check_outcome
         );
+    }
+
+    // 3b. Run 422 D7-D5 pre-materialization consensus epoch-conflict check,
+    //     consuming the SAME validated `meta` (after the authority-marker
+    //     check, before materialization). A conflict is refused here, before
+    //     any account-state materialization or audit-marker write.
+    if let Some(check) = epoch_precheck {
+        check(&meta)?;
     }
 
     // 4. Materialize. The marker file under <data_dir> is NEVER written,

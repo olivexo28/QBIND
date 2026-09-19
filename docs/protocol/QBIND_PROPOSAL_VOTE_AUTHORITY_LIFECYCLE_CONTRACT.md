@@ -777,3 +777,22 @@ authorizes nothing: no proposal/vote authority is derived, activated, or
 continued by either start. Signing-state continuity remains NOT-established and
 C4/C5 stay open. Evidence:
 `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md` (Run 422 D7-D4 section).
+
+## Run 422 D7-D5 successor note (pre-materialization epoch-conflict rejection)
+
+Run 422 D7-D5 adds a production correction (code + test): a requested snapshot
+restore whose declared canonical epoch conflicts with the destination consensus
+storage's committed epoch is rejected BEFORE account-state materialization,
+snapshot-byte copy, restore-marker write, or baseline construction, preserving
+the pre-existing committed epoch. The reusable non-writing compatibility decision
+(`evaluate_restore_epoch_compatibility`) is shared by the early check and the
+Run 097 persistence path; the early check writes nothing. The check binds to the
+same validated `StateSnapshotMeta` that materializes the restore and reuses one
+canonical consensus-storage handle across check, materialization, and
+persistence. This authorizes nothing: no proposal/vote authority is derived,
+activated, or continued; matching, missing, or successfully restored epochs are
+not authorization, signing continuity, or activation evidence. Signing-state
+continuity remains NOT-established and C4/C5 stay open; durable anti-rollback and
+cross-database atomicity remain NOT-established, and ordinary startup over a
+legacy partial directory is outside this correction's scope. Evidence:
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md` (Run 422 D7-D5 section).
