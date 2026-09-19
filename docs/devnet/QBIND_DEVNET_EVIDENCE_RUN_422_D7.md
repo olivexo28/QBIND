@@ -6749,3 +6749,17 @@ cross-database crash consistency, signing-state continuity, and durable
 anti-rollback remain unresolved. No activation, readiness promotion, new recovery
 mechanism, or Run 423 work. No protocol/lifecycle/audit/contradiction-ledger edit
 was needed for this coverage-only correction.
+
+### Literal security-tool outcomes (this correction, verbatim)
+
+Recorded literally; a skipped CodeQL analysis or an errored/unavailable reviewer
+is NOT a successful security review:
+
+* CodeQL Security Scan (`parallel_validation`): "Skipped: all changes are
+  trivial." — the changes are test-file + documentation only, declared trivial
+  for CodeQL. This is a SKIP, not a completed clean scan.
+* Code Review (`parallel_validation`): reported "Reviewed 2 file(s). No review
+  comments found." but ALSO reported a backend error — "Code review tool is not
+  available in this environment: ... model claude-sonnet-4.6 not found in
+  registry." The no-comments result is therefore NOT evidence of a completed
+  model review.
