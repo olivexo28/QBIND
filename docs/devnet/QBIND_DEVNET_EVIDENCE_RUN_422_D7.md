@@ -7048,7 +7048,14 @@ establish operational protection.
 
 ### Provenance and object availability (actual checkout)
 
-* Actual working branch: `copilot/run-422-d7-d7-again`.
+* This D7-D7 review-correction pass (corrections A–C below) ran on actual branch
+  `copilot/copilotrun-422-d7-d7-again`, starting HEAD
+  `79dd28eaf01924d13008e8b0c013a2924fac00ec`, clean worktree. The reviewed revision
+  `bc0bc2541f53492d19aae1a6c7848381e2c1ac36` is **not resolvable as a git object**
+  here (`git cat-file -t` → "could not get object info"); worktree content
+  corresponds to the reviewed contract but no ancestry is manufactured. Edits stay
+  on this branch (no PR, rename, force-push, or history rewrite).
+* Earlier draft pass working branch: `copilot/run-422-d7-d7-again`.
 * Prior on-branch commits before this correction pass: `a3d82382` (parent
   `1babc12216f29bf02a44742a56996acb8d691a3f`) — the reviewed draft. The
   review-named draft revision `b8333f33b422e273f439983e269d577637655b8f` is **not
@@ -7148,6 +7155,48 @@ establish operational protection.
   the `storage.rs` interface change and no new enablement flag; and kept the
   security-tool reporting honest (a CodeQL Markdown-only skip is not a passed scan;
   a reviewer backend/model-registry error is not a successful review).
+
+### D7-D7 review-correction pass (three material fixes, applied in place)
+
+A subsequent review kept the disposition **PARTIAL** and named three remaining
+contract inconsistencies. Each is corrected in the operative text of
+`docs/protocol/QBIND_SNAPSHOT_RESTORE_COMPLETION_CONTRACT.md`, not merely appended:
+
+* **Correction A — eligibility before intent.** The prior §5.9 published `INTENT`
+  (step 2) and only refused a non-empty target during the copy (step 3), so a
+  rejected restore over an ordinary populated directory could leave a persistent,
+  startup-refusing `INTENT`. §5.9 step 1 now performs, before any RTR write, the
+  ordered checks lock-held → existing-RTR inspection → snapshot validation + D5
+  gates (precedence preserved) → a **non-writing** destination-eligibility
+  (occupied-target) check that factors the existing
+  `snapshot_restore.rs:627-638` occupancy read; only then is `INTENT` published.
+  §4.3 lists the eligibility check ahead of intent, and §10's safety boundary
+  states occupied-target refusal precedes any `INTENT`. §7 adds the occupied-target
+  acceptance test (ordinary non-empty destination, no RTR, sentinel unchanged, RTR
+  stays absent, ordinary startup still proceeds).
+* **Correction B — observable crash decisions.** The §6 "during `COMPLETE` write /
+  sync" row ("`INTENT` or torn `COMPLETE`" / "refuse unless `COMPLETE` fully
+  durable") is replaced by decisions on the **observable final record** under the
+  atomic temp→`fsync`→`rename`→dir-`fsync` model: valid final `INTENT` ⇒ refuse;
+  valid published `COMPLETE` ⇒ apply the completion/destination/required-state
+  checks; temporary artifacts are never promoted; malformed/corrupt/unreadable
+  final record ⇒ separate fail-closed refusal; no final record during interrupted
+  initial intent ⇒ absent-record policy. §5.9 separates writer synchronization
+  obligations from what a restarting reader can observe, and specifies any
+  restart-admission durability barrier directly instead of an unknowable claim about
+  the previous process's `fsync` acknowledgment. Process-kill tests characterize
+  observed interruption only, not power-loss durability.
+* **Correction C — active-attempt binding vs ordinary restart.** §4.5, §4.8, §6, and
+  §10 no longer require ordinary (no-flag) admission to match a freshly supplied
+  snapshot identity or attempt nonce (neither exists on that path). During an active
+  restore attempt the `INTENT`/`COMPLETE` bind to the validated snapshot metadata
+  (both authority fields) and the attempt nonce that attempt holds, and wrong-nonce/
+  wrong-snapshot comparisons occur only there. On ordinary restart, admission
+  validates the record format, checks the recorded `destination_id` against the
+  actual destination, and requires `state_vm_v0` present and the startup checks;
+  historical digest/nonce are provenance, and the epoch/baseline are never rewritten
+  from the historical record. Future "wrong nonce" tests must name an active-attempt
+  comparison, not invent an expected nonce for ordinary restart.
 
 ### Reuse findings (non-restore mechanisms not conflated)
 

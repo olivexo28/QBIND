@@ -19,6 +19,18 @@ protocol documents
 `docs/protocol/QBIND_GENESIS_AUTHORITY_ENGINE_QC_INTEGRATION_AUDIT.md` carry only
 concise successor references to it; they are not superseded on any other subject.
 
+**Correction note (D7-D7 review PARTIAL → three fixes, applied in place).** A later
+review found three material contract inconsistencies, now corrected in the operative
+text rather than merely appended: **(A)** the durability sequence (§5.9, §4.3) rejects
+an occupied destination **before** publishing `INTENT`, so a rejected restore over an
+ordinary populated directory leaves no interrupted-restore record; **(B)** crash
+decisions (§6, §5.9) are stated from the observable final record under the atomic
+temp→sync→rename publication model, replacing the old "`INTENT` or torn `COMPLETE` /
+refuse unless fully durable" row; and **(C)** active-attempt binding is separated from
+ordinary restart (§4.5, §4.8, §6, §10) — historical `snapshot_meta_digest`/`attempt_nonce`
+are provenance on the no-flag path, compared only during an active attempt that holds
+those values. The accepted decisions of §3-§10 are otherwise unchanged.
+
 Retained posture (unchanged by this document; see §11):
 
 * `D7_STATUS=PARTIAL-CODE-TEST / PRODUCTION-LIFECYCLE-UNAVAILABLE`
@@ -32,7 +44,15 @@ Retained posture (unchanged by this document; see §11):
 
 ## 1. Provenance and object availability (actual checkout)
 
-* Actual working branch: `copilot/run-422-d7-d7-again`.
+* This D7-D7 correction pass ran on actual branch
+  `copilot/copilotrun-422-d7-d7-again` with starting HEAD
+  `79dd28eaf01924d13008e8b0c013a2924fac00ec` and a clean worktree. The reviewed
+  revision `bc0bc2541f53492d19aae1a6c7848381e2c1ac36` is **not resolvable as a git
+  object** in this checkout (`git cat-file -t` → "could not get object info"); the
+  present worktree content corresponds to the reviewed contract but no ancestry is
+  manufactured. Corrections A-C below are committed on this branch (no PR, rename,
+  force-push, or history rewrite).
+* Actual working branch (earlier draft pass): `copilot/run-422-d7-d7-again`.
 * Prior on-branch commits before this correction pass: `a3d82382` (parent
   `1babc12216f29bf02a44742a56996acb8d691a3f`) — the reviewed draft (review
   disposition PARTIAL). The review-named draft revision
@@ -175,10 +195,12 @@ upgraded to `COMPLETE` denotes an interrupted restore.
 ### 4.3 What permits account-state installation
 
 Account-state installation (the `copy_dir_recursive` into `state_vm_v0`) is
-permitted only after: snapshot validation passed; the D5 authority-marker check
-passed; the D5 epoch-compatibility precheck PERMITTED; and the `INTENT` RTR is
-durable. This preserves the existing pre-materialization gates and adds the
-intent gate ahead of the first mutation.
+permitted only after, in order: snapshot validation passed; the D5 authority-marker
+check passed; the D5 epoch-compatibility precheck PERMITTED; the non-writing
+destination-eligibility (occupied-target) check passed; and only then the `INTENT`
+RTR is made durable. The eligibility check precedes intent so a rejected restore
+over an occupied destination never creates an `INTENT`; this preserves the existing
+pre-materialization gates and adds the intent gate ahead of the first mutation.
 
 ### 4.4 What constitutes completion
 
@@ -206,9 +228,9 @@ it:
 | absent + empty `state_vm_v0` | Proceed (fresh node). | Proceed with restore. |
 | absent + non-empty `state_vm_v0` (ordinary node / untracked legacy) | **Proceed** — this is the ordinary steady state (an ordinary node writes `state_vm_v0` via `vm_v0_runtime.rs:70`); startup is unchanged from pre-RTR behavior (§4.7, §5.7). | Existing `TargetStateNotEmpty` refusal (cannot restore over occupied state). |
 | `INTENT` (interrupted tracked restore) | **Refuse — fail-closed, investigate.** Must not admit as completed. | **Refuse** the occupied destination; operator must clear/replace before retry (no auto-cleanup). |
-| `COMPLETE` for this destination, `state_vm_v0` present (with-flag additionally requires matching snapshot identity/nonce — see §4.8) | Proceed; the restored state is admitted (destination match + state present; no snapshot is supplied to compare on this path; no re-copy, no epoch re-write; §4.6.1). | **Refuse** — the destination is occupied by a completed restore; no idempotent-success route (operator clears/replaces before any retry). |
+| `COMPLETE` for this destination, `state_vm_v0` present | Proceed; the restored state is admitted after validating the record format and that the recorded `destination_id` matches the actual destination and `state_vm_v0` is present. No fresh snapshot or nonce exists on this path, so none is compared; the historical `snapshot_meta_digest`/`attempt_nonce` are provenance only (§4.8). No re-copy, no epoch re-write (§4.6.1). | **Refuse** — the destination is occupied by a completed restore; no idempotent-success route (operator clears/replaces before any retry). A new snapshot/nonce would exist here, but it is **not** used to manufacture an idempotent match. |
 | `COMPLETE` present but `state_vm_v0` missing/unreadable | **Refuse — fail-closed, investigate;** do **not** recreate restored state (§4.8.1). | **Refuse.** |
-| `COMPLETE` but destination/nonce/snapshot mismatch | **Refuse** — a stale/foreign completion must not authorize this destination. | **Refuse.** |
+| `COMPLETE` whose recorded `destination_id` does not match this destination (foreign/stale) | **Refuse** — a foreign completion must not authorize this destination. (Nonce/snapshot are provenance, not compared on the no-flag path; §4.8.) | **Refuse.** |
 | corrupt / unreadable / malformed / unsupported-version RTR | **Refuse — fail-closed, investigate.** | **Refuse.** |
 
 The comparison inputs, their sources, and the phase in which each applies are
@@ -480,9 +502,14 @@ and MUST be inventoried by the implementation:
 The restore path performs the following in order. Steps 0.a–0.c are **permitted
 preparatory effects** (creating a directory, a lock object, or opening consensus
 storage); the **first protected restore mutation** is the account-state copy
-(step 3). Intent (step 2) is published before the first *protected* mutation — the
-contract does **not** claim intent precedes *every* destination mutation, because
-the lock file and directory-create in step 0 necessarily precede it.
+(step 3). Intent (step 2) is published before the first *protected* mutation and
+only after step 1 has established — without writing anything — that the existing RTR
+state, the D5 gates, and destination occupancy all permit installation. The contract
+does **not** claim intent precedes *every* destination mutation, because the lock
+file and directory-create in step 0 necessarily precede it; it does require that
+occupied-target refusal occurs **before** any `INTENT` is created or replaced, so a
+rejected restore over an ordinary populated directory can never leave a persistent
+startup-refusing record.
 
 0. **Preparatory (permitted before intent).**
    a. Canonicalize the destination; create `data_dir` if absent.
@@ -490,15 +517,36 @@ the lock file and directory-create in step 0 necessarily precede it.
       (§5.5). On `EWOULDBLOCK`, refuse.
    c. Open `<data_dir>/consensus` (`open_production_consensus_storage`) for the D5
       reads. Opening storage is preparatory, not a protected restore mutation.
-1. **Ownership + precondition checks.** Lock held; snapshot validation
-   (`validate_snapshot_for_restore`); D5 authority-marker check; D5
-   epoch-compatibility precheck (`evaluate_restore_epoch_compatibility`, a fresh
-   live `get_current_epoch`) must PERMIT. Any failure ⇒ refuse.
-2. **Durable intent publication.** Write the `INTENT` RTR (§4.1 fields, version,
-   nonce) via temp-file → `fsync` file → atomic `rename` → `fsync` parent dir.
-   Only after this is durable may a protected mutation begin.
-3. **Account-state copy / installation.** `copy_dir_recursive` into
-   `state_vm_v0` (`snapshot_restore.rs:652`), refusing a non-empty target.
+1. **Ownership, precondition, and eligibility checks (no protected mutation, no
+   RTR write).** Performed in this order, with D5 precedence preserved:
+   a. Lock held (§5.5).
+   b. **Inspect existing RTR state and enforce its refusal rules** (§4.5): a
+      tracked `INTENT` (interrupted), a `COMPLETE` occupying the destination, or a
+      corrupt/foreign/unsupported record refuses the requested restore here; a new
+      attempt never overwrites or replaces an existing RTR.
+   c. Snapshot validation (`validate_snapshot_for_restore`); D5 authority-marker
+      check; D5 epoch-compatibility precheck
+      (`evaluate_restore_epoch_compatibility`, a fresh live `get_current_epoch`)
+      must PERMIT. Any failure ⇒ refuse.
+   d. **Non-writing destination-eligibility check.** Read `state_vm_v0` and refuse
+      an occupied target (`TargetStateNotEmpty`) — the same read-only occupancy test
+      the copy step performs (`snapshot_restore.rs:627-638`), factored ahead of
+      intent so it is reused rather than duplicated with a divergent occupancy
+      policy. This check writes nothing.
+   The valid snapshot and compatible epochs of (c) ensure no other gate masks the
+   occupancy check of (d). Any failure at (a)–(d) refuses **before** any RTR is
+   created or replaced, so a rejected request against an ordinary populated
+   destination leaves no `INTENT` and no interrupted-restore record.
+2. **Durable intent publication.** Only after step 1 establishes eligibility, write
+   the `INTENT` RTR (§4.1 fields, version, nonce) via temp-file → `fsync` file →
+   atomic `rename` → `fsync` parent dir. Only after this is durable may a protected
+   mutation begin. Once a genuine attempt has durably published `INTENT`, a
+   subsequent failure retains the fail-closed record — no automatic rollback or
+   deletion (§4.6).
+3. **Account-state copy / installation.** `copy_dir_recursive` into `state_vm_v0`
+   (`snapshot_restore.rs:652`). The copy path re-applies the same occupied-target
+   guard defensively, but the authoritative occupancy refusal already occurred at
+   step 1(d), before intent.
 4. **File and directory synchronization.** `fsync` every copied file, `fsync` the
    `state_vm_v0` directory, and `fsync` the parent of every newly created path
    (including `state_vm_v0` itself when first created).
@@ -527,15 +575,51 @@ the lock file and directory-create in step 0 necessarily precede it.
 | `Some(n)` | `Some(m)`, m ≠ n (conflict) | `RestoreEpochInconsistent` — **refuse** | n/a (refuse) |
 | `Some(n)` | read/write/sync failure | `EpochProbeFailed` / I/O error — **refuse** | n/a (refuse) |
 
-Startup decisions use only **observable on-disk state** (RTR state + `state_vm_v0`
-presence + live epoch). Startup never assumes it knows whether the previous
-process received an `fsync` acknowledgment: an `INTENT` that could be either
-"pre-`fsync`-loss" or "genuinely interrupted" is treated identically — **refuse**.
-Record publication is atomic (temp+rename), so a torn `COMPLETE` is never a valid
-`COMPLETE`. Finally, these are **specified durability assumptions**, not validated
-guarantees: SIGKILL/process-kill tests exercise the interruption ordering but do
-**not** establish power-loss durability, which remains a separate evidence
-obligation (§7, §9).
+Startup decides from **observable on-disk records** only (the single final RTR +
+`state_vm_v0` presence + live epoch). Separate what the **writer** must synchronize
+from what a **restarting reader** can observe:
+
+* **Writer obligations (§5.9):** before continuing past each step the writer fsyncs
+  the copied state, the audit file, and the epoch effect, and publishes each RTR
+  atomically (temp → `fsync` → `rename` → dir-`fsync`). A valid `COMPLETE` can be
+  published **only** after every prerequisite effect has satisfied its durability
+  barrier, because `COMPLETE` publication is the last step (step 7) and is gated on
+  steps 3–6 being durable under the selected writer model.
+* **Reader observations (startup):** the reader validates the single final record
+  actually present; it cannot know whether the previous process received its final
+  `fsync` acknowledgment, so it never substitutes that unknowable fact for an
+  on-disk observation.
+
+Decisions from the observable final record, under the §5.6 filesystem/storage
+assumptions:
+
+* **Valid final `INTENT`:** refuse (interrupted; a pre-`fsync`-loss `INTENT` and a
+  genuinely interrupted `INTENT` are indistinguishable and treated identically).
+* **Valid final `COMPLETE`:** apply the defined completion-record, destination, and
+  required-state checks (§4.5, §4.8); proceed only if they pass.
+* **Temporary artifacts** (a staged temp RTR not yet atomically renamed): never
+  promoted into completion evidence; their presence does not override the final
+  record.
+* **Malformed, unsupported, corrupt, or unreadable final record:** refuse
+  (fail-closed; kept separate from the normal atomic-publish outcomes).
+* **No final record during an interrupted initial intent publication:** use the
+  absent-record policy (§4.7), justified by the invariant that protected restore
+  mutations cannot begin before durable intent (§5.9 step 2).
+
+For replacement of an already-durable `INTENT` with `COMPLETE` (step 7), a valid old
+record (`INTENT`) present with no valid new record ⇒ refuse; a valid new record
+(`COMPLETE`) atomically published ⇒ proceed under the checks above. Because
+publication is atomic (temp → `rename`), a torn final record is **not** the normal
+result of the chosen mechanism; a torn/partial `COMPLETE` is never a valid
+`COMPLETE`, and any unexpected corruption of the final record is the separate
+fail-closed case above. If restart admission itself requires a durability barrier on
+an observed record before acting on it, that operation (e.g. an `fsync` of the RTR
+directory on open) and its fail-closed error handling are specified directly, rather
+than substituting an unknowable claim about the previous process's acknowledgment.
+Finally, these are **specified durability assumptions**, not validated guarantees:
+SIGKILL/process-kill tests exercise the interruption ordering and observed-record
+behavior but do **not** establish power-loss durability or reveal historical `fsync`
+acknowledgments, which remain a separate evidence obligation (§7, §9).
 
 ---
 
@@ -554,8 +638,12 @@ implemented, the "evidence" column names what is required to validate the claim.
 | Before required epoch persist | `INTENT` (+ state, marker) | **Refuse** | With-flag: refuse occupied | The exact D6 window (`d7d6_a/b/c`). |
 | During epoch persist | `INTENT`; epoch possibly written un-synced | **Refuse** | With-flag: refuse occupied | Power-loss evidence for the epoch synced write. |
 | After epoch persist, before `COMPLETE` | `INTENT` + all effects present | **Refuse** (not yet `COMPLETE`) | With-flag: refuse occupied | Process-kill test between persist and `COMPLETE`. |
-| During `COMPLETE` write / sync | `INTENT` or torn `COMPLETE` | **Refuse** unless `COMPLETE` fully durable | With-flag: refuse occupied | Atomic-publish (temp+fsync+rename+dir-fsync) test. |
-| After `COMPLETE`, before normal startup | `COMPLETE` (matching dest/nonce/snapshot) | **Proceed**; admit restored state (no re-copy, no epoch re-write) | With-flag: **refuse** occupied (no idempotent-success route) | `d7d5_b`-style compatible-restore + subsequent startup. |
+| During `COMPLETE` write / sync | final record is still the durable `INTENT` (temp `COMPLETE` not yet atomically renamed) **or** a fully published `COMPLETE` | `INTENT` observed ⇒ **refuse**; a valid published `COMPLETE` ⇒ **proceed** (apply §4.5/§4.8 checks); a temp/torn `COMPLETE` artifact is never promoted; unexpected corruption ⇒ refuse | With-flag: refuse occupied | Atomic-publish (temp+fsync+rename+dir-fsync) + process-kill test. |
+| After `COMPLETE`, before normal startup | valid published `COMPLETE` (recorded `destination_id` matches; `state_vm_v0` present) | **Proceed**; admit restored state (no re-copy, no epoch re-write). No fresh snapshot/nonce exists to compare; historical digest/nonce are provenance (§4.8) | With-flag: **refuse** occupied (no idempotent-success route) | `d7d5_b`-style compatible-restore + subsequent startup. |
+
+Every row decides from the **observable final record** only, per the observable-state
+decision list in §5.9: temporary artifacts are never promoted into completion
+evidence, and a malformed or corrupt final record is the separate fail-closed case.
 
 ---
 
@@ -577,10 +665,22 @@ Deterministic I/O tests:
   `d7d6_c`): assert refusal (occupied / `INTENT`).
 * Successful completion then startup: assert `COMPLETE` published, then a
   subsequent no-flag startup proceeds and admits the state (`d7d5_b` control).
+* **Occupied-target refusal before intent (Correction A):** begin with an ordinary
+  non-empty `state_vm_v0`, **no** RTR, and a known account sentinel; supply a valid
+  snapshot with compatible epochs so no other gate masks the occupancy check. Assert
+  the requested restore refuses with the occupied-target reason
+  (`TargetStateNotEmpty`); the account sentinel, logical epoch, audit marker, and
+  RTR status are unchanged; the RTR remains **absent**; and a subsequent ordinary
+  no-flag startup still proceeds under the ordinary lifecycle (§4.7).
 * Epoch matrix: missing (`None`) vs zero (`Some(0)`) vs matching vs conflicting
   (`d7d3_b`, `d7d3_c`, D5 conflict controls) with RTR present.
-* Corrupt / stale / mismatched RTR (wrong `destination_id`, wrong `attempt_nonce`,
-  truncated/garbage record, unsupported version): assert fail-closed refusal.
+* Corrupt / stale / mismatched RTR: a wrong `destination_id` (both phases), a
+  truncated/garbage record, or an unsupported version ⇒ fail-closed refusal. A
+  "wrong `attempt_nonce`" test must name an **active-attempt** comparison that can
+  actually occur — the durable `INTENT`/`COMPLETE` of an in-progress attempt versus
+  the validated snapshot metadata and attempt nonce that attempt holds — and must
+  **not** invent an expected nonce for an ordinary restart, which supplies none
+  (§4.8).
 * **Normal-node restart** (ordinary node: non-empty `state_vm_v0`, RTR **absent**):
   assert ordinary startup **proceeds** and is **not** treated as an interrupted
   restore (the §4.7 Ordinary-3 case). Untracked empty: assert proceed (fresh).
@@ -589,8 +689,11 @@ Deterministic I/O tests:
 * **`COMPLETE` with missing `state_vm_v0`:** assert fail-closed refusal and that no
   state is recreated (§4.8.1).
 
-Process-kill tests (SIGKILL at each §6 boundary): assert only `absent` or
-`INTENT` or fully-durable `COMPLETE` are ever observed — never a torn `COMPLETE`.
+Process-kill tests (SIGKILL at each §6 boundary): assert only `absent`, a valid
+final `INTENT`, or a fully-durable valid `COMPLETE` is ever admitted — a torn or
+temporary `COMPLETE` artifact is never promoted into completion evidence. These
+tests establish observed interruption behavior; they do **not** prove power-loss
+durability or reveal historical `fsync` acknowledgments.
 
 Competing-process ownership: two concurrent restore/startup processes over one
 `data_dir` — assert the destination lock serializes them and the loser refuses.
@@ -689,14 +792,27 @@ the ordinary-startup restore-completion guard.**
   this purpose.
 * Complete safety boundary the implementation must establish: every participating
   entrypoint (§5.5.1) acquires the `flock(LOCK_EX|LOCK_NB)` destination lock before
-  any authorizing decision; ordinary startup refuses any tracked interrupted
-  (`INTENT`), corrupt, mismatched, foreign, or missing-state `COMPLETE`, while
-  proceeding over untracked (ordinary/legacy) destinations; a requested restore is
-  refused over any occupied (`INTENT` or `COMPLETE`) destination with **no**
-  idempotent-success route; a `COMPLETE` never re-copies state or re-writes the
-  epoch (§4.6.1); it admits only a `COMPLETE` RTR matching this destination,
-  `attempt_nonce`, and validated snapshot identity with `state_vm_v0` present; and
-  `COMPLETE` is never published before every required effect is durable (§5.9).
+  any authorizing decision; the occupied-target eligibility check runs **before** any
+  `INTENT` is created or replaced (§5.9 step 1, §4.3); ordinary startup refuses any
+  tracked interrupted (`INTENT`), corrupt, mismatched, foreign, or missing-state
+  `COMPLETE`, while proceeding over untracked (ordinary/legacy) destinations; a
+  requested restore is refused over any occupied (`INTENT` or `COMPLETE`) destination
+  with **no** idempotent-success route; a `COMPLETE` never re-copies state or
+  re-writes the epoch (§4.6.1); and `COMPLETE` is never published before every
+  required effect is durable (§5.9). Admission and binding differ by phase:
+
+  * **During an active restore attempt**, the durable `INTENT` and its subsequent
+    `COMPLETE` are bound to the validated snapshot metadata (the whole
+    `StateSnapshotMeta`, both authority fields included; §4.1) and the attempt nonce
+    that the attempt holds; wrong-nonce/wrong-snapshot comparisons occur only here,
+    against those held values (§4.8).
+  * **On ordinary restart**, admission requires a valid, supported, bounded
+    `COMPLETE` record whose recorded `destination_id` matches the actual destination
+    and whose `state_vm_v0` is present, plus the applicable startup checks. It does
+    **not** require equality with a freshly supplied snapshot or nonce (neither
+    exists); the historical `snapshot_meta_digest`/`attempt_nonce` are provenance
+    fields, not independent freshness or authorization evidence, and the epoch/baseline
+    are never rewritten from the historical record (§4.6.1, §4.8).
 * No new enablement flag and no implied bypass "behind existing fail-closed
   defaults": the guard is always-on for participating entrypoints; it introduces
   no opt-out.
