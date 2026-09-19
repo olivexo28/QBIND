@@ -459,6 +459,105 @@ pub fn open_production_consensus_storage(
 // Run 097 — restore-time epoch parity
 // ============================================================================
 
+/// **Run 422 D7-D5.** The non-writing decision produced by
+/// [`evaluate_restore_epoch_compatibility`].
+///
+/// This is the reusable, side-effect-free compatibility verdict factored
+/// out of the Run 097 persistence policy so the *early* pre-materialization
+/// check and the *later* post-materialization persistence path cannot drift
+/// apart (they consult the identical decision). Evaluating this plan never
+/// writes `meta:current_epoch`; in particular a
+/// [`ConsensusStorageState::PresentNoCommittedEpoch`] destination yields
+/// [`RestoreEpochPlan::PersistAfterMaterialization`] as a *deferred*
+/// instruction, not a write.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RestoreEpochPlan {
+    /// The snapshot carries no canonical epoch (`meta.epoch == None`).
+    /// Nothing is persisted; a pre-existing committed epoch (if any) is
+    /// preserved and no epoch correspondence is invented.
+    NoEpochToPersist,
+
+    /// No open production `ConsensusStorage` handle is available
+    /// (`data_dir` unset / [`ConsensusStorageState::NoConsensusStorage`]).
+    /// Defensive: unreachable on the supported restore path because
+    /// restore itself requires `--data-dir`.
+    NoStorageHandle,
+
+    /// The snapshot epoch already matches the committed epoch on disk.
+    /// Restore succeeds and the matching epoch is *not* overwritten.
+    AlreadyConsistent { epoch: u64 },
+
+    /// The destination has no committed epoch, so the snapshot epoch must
+    /// be persisted **after** successful account-state materialization.
+    /// This variant is only an instruction to persist later — it performs
+    /// no write itself.
+    PersistAfterMaterialization { epoch: u64 },
+}
+
+/// **Run 422 D7-D5.** Factored, non-writing epoch-compatibility decision.
+///
+/// Given the startup [`ConsensusStorageState`] observed on the canonical
+/// `<data_dir>/consensus` storage and the snapshot-declared canonical epoch
+/// (`StateSnapshotMeta::epoch`), return the [`RestoreEpochPlan`] describing
+/// what a subsequent restore should do — or a fail-closed
+/// [`ProductionConsensusStorageError::RestoreEpochInconsistent`] when the
+/// snapshot epoch conflicts with an already-committed epoch.
+///
+/// This function is the single source of truth for the compatibility matrix:
+///
+/// | Snapshot epoch | Existing committed epoch | Result                                           |
+/// | -------------- | ------------------------ | ------------------------------------------------ |
+/// | `None`         | `None`                   | `Ok(NoEpochToPersist)`                            |
+/// | `None`         | `Some(m)`                | `Ok(NoEpochToPersist)` (m preserved)             |
+/// | `Some(n)`      | `None`                   | `Ok(PersistAfterMaterialization { n })`          |
+/// | `Some(n)`      | `Some(n)`                | `Ok(AlreadyConsistent { n })`                    |
+/// | `Some(n)`      | `Some(m)`, m ≠ n         | `Err(RestoreEpochInconsistent { m, n })`         |
+///
+/// "None" in the storage column means *no committed epoch*
+/// ([`ConsensusStorageState::PresentNoCommittedEpoch`]), never a failed read
+/// or an unavailable required storage handle — those are surfaced earlier as
+/// fatal errors by [`open_production_consensus_storage`].
+///
+/// It performs **no writes** and never coerces epoch absence into `Some(0)`.
+/// Both [`persist_restored_snapshot_epoch`] (the writer) and the early
+/// pre-materialization restore check consume this same decision.
+pub fn evaluate_restore_epoch_compatibility(
+    opened: &OpenedProductionConsensusStorage,
+    snapshot_epoch: Option<u64>,
+) -> Result<RestoreEpochPlan, ProductionConsensusStorageError> {
+    let Some(target_epoch) = snapshot_epoch else {
+        return Ok(RestoreEpochPlan::NoEpochToPersist);
+    };
+
+    // No live storage handle (no --data-dir). Defensive: unreachable on the
+    // supported restore path (restore requires --data-dir).
+    if opened.path.is_none() || opened.handle.is_none() {
+        return Ok(RestoreEpochPlan::NoStorageHandle);
+    }
+
+    match opened.state {
+        ConsensusStorageState::CommittedEpoch(existing) if existing == target_epoch => {
+            Ok(RestoreEpochPlan::AlreadyConsistent { epoch: existing })
+        }
+        ConsensusStorageState::CommittedEpoch(existing) => {
+            Err(ProductionConsensusStorageError::RestoreEpochInconsistent {
+                path: opened
+                    .path
+                    .clone()
+                    .expect("path presence checked above"),
+                existing,
+                snapshot: target_epoch,
+            })
+        }
+        ConsensusStorageState::PresentNoCommittedEpoch => {
+            Ok(RestoreEpochPlan::PersistAfterMaterialization {
+                epoch: target_epoch,
+            })
+        }
+        ConsensusStorageState::NoConsensusStorage => Ok(RestoreEpochPlan::NoStorageHandle),
+    }
+}
+
 /// Run 097: persist a snapshot-supplied canonical committed epoch into the
 /// production `<data_dir>/consensus` storage opened by
 /// [`open_production_consensus_storage`].
@@ -505,46 +604,49 @@ pub fn persist_restored_snapshot_epoch(
     opened: &OpenedProductionConsensusStorage,
     snapshot_epoch: Option<u64>,
 ) -> Result<bool, ProductionConsensusStorageError> {
-    let Some(target_epoch) = snapshot_epoch else {
-        eprintln!(
-            "[restore] Run 097 snapshot meta carries no canonical epoch (epoch=None); \
-             leaving <data_dir>/consensus meta:current_epoch unchanged (explicit absence, NOT 0)"
-        );
-        return Ok(false);
-    };
-
-    let (path, storage) = match (&opened.path, &opened.handle) {
-        (Some(p), Some(s)) => (p.clone(), s.clone()),
-        _ => {
+    // Reuse the single, non-writing compatibility decision so the early
+    // pre-materialization check (Run 422 D7-D5) and this later persistence
+    // path cannot drift: a conflict here fails closed identically, and only
+    // the `PersistAfterMaterialization` verdict ever writes.
+    match evaluate_restore_epoch_compatibility(opened, snapshot_epoch)? {
+        RestoreEpochPlan::NoEpochToPersist => {
             eprintln!(
-                "[restore] Run 097 snapshot canonical epoch={} not persisted: \
-                 no production ConsensusStorage handle open (no --data-dir). \
-                 This is unreachable on the supported restore path because \
-                 restore itself requires --data-dir.",
-                target_epoch
-            );
-            return Ok(false);
-        }
-    };
-
-    match opened.state {
-        ConsensusStorageState::CommittedEpoch(existing) if existing == target_epoch => {
-            eprintln!(
-                "[restore] Run 097 snapshot canonical epoch={} already matches \
-                 pre-existing meta:current_epoch at {}; no-op (idempotent restore)",
-                target_epoch,
-                path.display()
+                "[restore] Run 097 snapshot meta carries no canonical epoch (epoch=None); \
+                 leaving <data_dir>/consensus meta:current_epoch unchanged (explicit absence, NOT 0)"
             );
             Ok(false)
         }
-        ConsensusStorageState::CommittedEpoch(existing) => {
-            Err(ProductionConsensusStorageError::RestoreEpochInconsistent {
-                path,
-                existing,
-                snapshot: target_epoch,
-            })
+        RestoreEpochPlan::NoStorageHandle => {
+            eprintln!(
+                "[restore] Run 097 snapshot canonical epoch not persisted: \
+                 no production ConsensusStorage handle open (no --data-dir). \
+                 This is unreachable on the supported restore path because \
+                 restore itself requires --data-dir."
+            );
+            Ok(false)
         }
-        ConsensusStorageState::PresentNoCommittedEpoch => {
+        RestoreEpochPlan::AlreadyConsistent { epoch } => {
+            let path = opened
+                .path
+                .as_ref()
+                .map(|p| p.display().to_string())
+                .unwrap_or_else(|| "<none>".to_string());
+            eprintln!(
+                "[restore] Run 097 snapshot canonical epoch={} already matches \
+                 pre-existing meta:current_epoch at {}; no-op (idempotent restore)",
+                epoch, path
+            );
+            Ok(false)
+        }
+        RestoreEpochPlan::PersistAfterMaterialization {
+            epoch: target_epoch,
+        } => {
+            let (path, storage) = match (&opened.path, &opened.handle) {
+                (Some(p), Some(s)) => (p.clone(), s.clone()),
+                // Unreachable: `PersistAfterMaterialization` is only produced
+                // when a live handle exists, but keep a defensive no-op.
+                _ => return Ok(false),
+            };
             eprintln!(
                 "[restore] Run 097 persisting snapshot canonical epoch={} into \
                  {} (state was present-no-committed-epoch)",
@@ -564,10 +666,6 @@ pub fn persist_restored_snapshot_epoch(
                 path.display()
             );
             Ok(true)
-        }
-        ConsensusStorageState::NoConsensusStorage => {
-            // Defensive: matched the (None, None) branch above; never reached.
-            Ok(false)
         }
     }
 }
@@ -832,5 +930,150 @@ mod tests {
         drop(opened);
         let opened2 = open_production_consensus_storage(&cfg).expect("reopen");
         assert_eq!(opened2.state, ConsensusStorageState::CommittedEpoch(0));
+    }
+
+    // ------------------------------------------------------------------
+    // Run 422 D7-D5 — non-writing compatibility decision
+    // (`evaluate_restore_epoch_compatibility`) + check-vs-write separation.
+    // ------------------------------------------------------------------
+
+    /// The full compatibility matrix, decided WITHOUT any write.
+    #[test]
+    fn d7d5_evaluate_matrix_none_snapshot_preserves_existing() {
+        let tmp = TempDir::new().unwrap();
+        let cfg = devnet_config_with_data_dir(tmp.path());
+
+        // Some(m) committed, snapshot None -> NoEpochToPersist, m preserved.
+        {
+            let opened = open_production_consensus_storage(&cfg).expect("open");
+            opened.handle.as_ref().unwrap().put_current_epoch(9).unwrap();
+        }
+        let opened = open_production_consensus_storage(&cfg).expect("reopen");
+        assert_eq!(opened.state, ConsensusStorageState::CommittedEpoch(9));
+        assert_eq!(
+            evaluate_restore_epoch_compatibility(&opened, None).unwrap(),
+            RestoreEpochPlan::NoEpochToPersist
+        );
+        // Non-writing: epoch unchanged.
+        assert_eq!(
+            opened.handle.as_ref().unwrap().get_current_epoch().unwrap(),
+            Some(9)
+        );
+    }
+
+    #[test]
+    fn d7d5_evaluate_matrix_present_no_committed_epoch() {
+        let tmp = TempDir::new().unwrap();
+        let cfg = devnet_config_with_data_dir(tmp.path());
+        let opened = open_production_consensus_storage(&cfg).expect("open");
+        assert_eq!(opened.state, ConsensusStorageState::PresentNoCommittedEpoch);
+
+        // None snapshot, None committed -> NoEpochToPersist (no epoch invented).
+        assert_eq!(
+            evaluate_restore_epoch_compatibility(&opened, None).unwrap(),
+            RestoreEpochPlan::NoEpochToPersist
+        );
+        // Some(n) snapshot, None committed -> deferred persist.
+        assert_eq!(
+            evaluate_restore_epoch_compatibility(&opened, Some(7)).unwrap(),
+            RestoreEpochPlan::PersistAfterMaterialization { epoch: 7 }
+        );
+        // Some(0) snapshot, None committed -> deferred persist of explicit 0.
+        assert_eq!(
+            evaluate_restore_epoch_compatibility(&opened, Some(0)).unwrap(),
+            RestoreEpochPlan::PersistAfterMaterialization { epoch: 0 }
+        );
+
+        // CRITICAL check-vs-write separation: evaluating the compatibility
+        // decision alone NEVER persists an epoch into a
+        // present-no-committed-epoch destination.
+        assert_eq!(
+            opened.handle.as_ref().unwrap().get_current_epoch().unwrap(),
+            None
+        );
+        drop(opened);
+        let reopened = open_production_consensus_storage(&cfg).expect("reopen");
+        assert_eq!(
+            reopened.state,
+            ConsensusStorageState::PresentNoCommittedEpoch,
+            "compatibility evaluation must not write meta:current_epoch"
+        );
+    }
+
+    #[test]
+    fn d7d5_evaluate_matrix_matching_committed_is_already_consistent() {
+        let tmp = TempDir::new().unwrap();
+        let cfg = devnet_config_with_data_dir(tmp.path());
+        {
+            let opened = open_production_consensus_storage(&cfg).expect("open");
+            opened.handle.as_ref().unwrap().put_current_epoch(5).unwrap();
+        }
+        let opened = open_production_consensus_storage(&cfg).expect("reopen");
+        assert_eq!(
+            evaluate_restore_epoch_compatibility(&opened, Some(5)).unwrap(),
+            RestoreEpochPlan::AlreadyConsistent { epoch: 5 }
+        );
+    }
+
+    #[test]
+    fn d7d5_evaluate_matrix_conflicting_committed_fails_closed_without_write() {
+        let tmp = TempDir::new().unwrap();
+        let cfg = devnet_config_with_data_dir(tmp.path());
+        {
+            let opened = open_production_consensus_storage(&cfg).expect("open");
+            opened.handle.as_ref().unwrap().put_current_epoch(42).unwrap();
+        }
+        let opened = open_production_consensus_storage(&cfg).expect("reopen");
+        let err = evaluate_restore_epoch_compatibility(&opened, Some(7))
+            .expect_err("conflict must fail closed");
+        match err {
+            ProductionConsensusStorageError::RestoreEpochInconsistent {
+                existing, snapshot, ..
+            } => {
+                assert_eq!(existing, 42);
+                assert_eq!(snapshot, 7);
+            }
+            other => panic!("expected RestoreEpochInconsistent, got {other:?}"),
+        }
+        // Non-writing: the conflicting epoch 42 is preserved verbatim.
+        assert_eq!(
+            opened.handle.as_ref().unwrap().get_current_epoch().unwrap(),
+            Some(42)
+        );
+    }
+
+    #[test]
+    fn d7d5_evaluate_no_storage_handle_is_defensive_plan() {
+        let opened = OpenedProductionConsensusStorage::no_storage();
+        assert_eq!(
+            evaluate_restore_epoch_compatibility(&opened, Some(3)).unwrap(),
+            RestoreEpochPlan::NoStorageHandle
+        );
+        assert_eq!(
+            evaluate_restore_epoch_compatibility(&opened, None).unwrap(),
+            RestoreEpochPlan::NoEpochToPersist
+        );
+    }
+
+    /// The writer and the checker consult the identical decision: a conflict
+    /// makes BOTH fail closed, and the checker never writes even where the
+    /// writer would (present-no-committed-epoch).
+    #[test]
+    fn d7d5_persist_and_evaluate_agree_on_conflict_and_write_boundary() {
+        let tmp = TempDir::new().unwrap();
+        let cfg = devnet_config_with_data_dir(tmp.path());
+        {
+            let opened = open_production_consensus_storage(&cfg).expect("open");
+            opened.handle.as_ref().unwrap().put_current_epoch(42).unwrap();
+        }
+        let opened = open_production_consensus_storage(&cfg).expect("reopen");
+        // Checker: fail closed, no write.
+        assert!(evaluate_restore_epoch_compatibility(&opened, Some(7)).is_err());
+        // Writer: fail closed, no write.
+        assert!(persist_restored_snapshot_epoch(&opened, Some(7)).is_err());
+        assert_eq!(
+            opened.handle.as_ref().unwrap().get_current_epoch().unwrap(),
+            Some(42)
+        );
     }
 }
