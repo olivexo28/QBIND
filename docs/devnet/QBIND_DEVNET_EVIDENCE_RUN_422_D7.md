@@ -6301,11 +6301,16 @@ Literal tool outcomes / limitations:
   `ConsensusEpochConflict` variant does not become the largest variant; boxing
   the enum would be an out-of-scope crate-wide refactor. No new clippy category
   was introduced by the D7-D5 code.
-* CodeQL/reviewer outcomes for THIS pass are recorded from the
-  `parallel_validation` run appended at commit time; production source changes
-  in this task are non-trivial and were declared as such. Any database-size skip
-  or backend error is reported literally as incomplete/unverified coverage
-  rather than as a clean result.
+* CodeQL (this pass, literal): **"Analysis was skipped because the database size
+  is too large."** Production source changes were declared non-trivial. Per the
+  task's reporting rule this is **incomplete/unverified security coverage**, NOT a
+  clean result — the reported "0 alerts" does not constitute a completed scan of
+  the changed Rust code.
+* Code Review (this pass, literal): the reviewer returned **no review comments**,
+  but its backend also logged a model-registry error
+  (`model claude-sonnet-4.6 not found in registry`), so the "no comments" outcome
+  should be read as reviewer-unavailable rather than an affirmatively clean
+  review. Both outcomes are recorded verbatim rather than interpreted as passing.
 
 ### Scoped verdict and worktree/push status
 
