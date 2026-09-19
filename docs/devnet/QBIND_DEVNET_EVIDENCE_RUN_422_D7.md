@@ -7038,7 +7038,8 @@ of scope for this characterization.
 
 ## Run 422 D7-D7 — Restore Completion and Fail-Closed Startup Contract (documentation only)
 
-This section records the documentation-only D7-D7 phase, which produces the new
+This section records the documentation-only D7-D7 phase, which produces and then
+**corrects** (per the review disposition PARTIAL on the reviewed draft) the new
 authoritative contract
 `docs/protocol/QBIND_SNAPSHOT_RESTORE_COMPLETION_CONTRACT.md`. It implements
 **no** production code, tests, storage schema, journal, CLI flag, recovery
@@ -7047,10 +7048,15 @@ establish operational protection.
 
 ### Provenance and object availability (actual checkout)
 
-* Actual working branch: `copilot/run-422-d7-d7`.
-* Actual `HEAD` at authoring: `1babc12216f29bf02a44742a56996acb8d691a3f`
-  (parent `36f179469753e85b24a51cc2b116e3f959e549fd`).
-* Shallow single-branch clone (`git rev-list --count HEAD` = 2). The D7-D6
+* Actual working branch: `copilot/run-422-d7-d7-again`.
+* Prior on-branch commits before this correction pass: `a3d82382` (parent
+  `1babc12216f29bf02a44742a56996acb8d691a3f`) — the reviewed draft. The
+  review-named draft revision `b8333f33b422e273f439983e269d577637655b8f` is **not
+  resolvable as a git object** in this checkout (`git cat-file -t` → "could not get
+  object info"); missing objects do not establish missing source and no ancestry
+  is manufactured. This correction pass edits the four authorized documents in
+  place on the same branch (no PR, rename, force-push, or history rewrite).
+* Shallow single-branch clone. The D7-D6
   provenance named in the task — accepted branch `copilot/run-422-d7-d6`,
   accepted revision `9d9723e09b65381bba5f784d0cd10b1d2455c6ea`, and D6 test
   checkpoint `0099517183bfe842e0a8c04ddd179c44c285934a` — are **not resolvable as
@@ -7080,20 +7086,68 @@ establish operational protection.
   `attempt_nonce`, and `expected_epoch` (`Option`, preserving missing-vs-zero),
   written durably before the first destination mutation and upgraded to
   `COMPLETE` only after all required effects are durable. Startup consults the RTR
-  before using `state_vm_v0` or starting services and refuses interrupted,
-  corrupt, mismatched, foreign, or untracked-non-empty destinations.
+  before using `state_vm_v0` or starting services and refuses interrupted
+  (`INTENT`), corrupt, mismatched, foreign, or missing-state `COMPLETE`
+  destinations, while **proceeding** over untracked (ordinary/legacy) destinations
+  whether empty or non-empty — an ordinary node writes `state_vm_v0` normally and
+  never creates an RTR, so RTR-absence is the ordinary lifecycle, not an
+  interrupted restore.
 * Trust model stated separately for ordinary I/O error, process termination,
-  host/power failure, and malicious directory rollback; explicit
-  synced-write / atomic-publish (temp+fsync+rename+dir-fsync) durability profile;
-  destination-scoped exclusive lock (the consensus RocksDB LOCK covers only
-  `<data_dir>/consensus`); explicit legacy/untracked "refuse — investigate"
-  compatibility decision with an unresolved adoption prerequisite; D5
-  restore/CLI incompatibility, live-read epoch semantics, authority-marker checks,
-  and fail-closed defaults preserved, with a bypass-entrypoint inventory.
-* A single bounded successor implementation task (RTR + ordinary-startup guard)
-  naming `snapshot_restore.rs`, `main.rs`, and `production_consensus_storage.rs`
-  as the smallest file set, with automatic repair, anti-rollback, and signing
-  continuity kept separate.
+  host/power failure, and malicious directory rollback; a complete ordered
+  durability sequence (preparatory effects vs the first protected mutation, all
+  epoch outcomes) with explicit synced-write / atomic-publish
+  (temp+fsync+rename+dir-fsync) barriers; one chosen destination lock — a
+  kernel-managed advisory `flock(LOCK_EX|LOCK_NB)` on `<data_dir>/restore.lock`
+  held for the process lifetime and auto-released on death (the consensus RocksDB
+  LOCK covers only `<data_dir>/consensus`); an explicit first-profile legacy policy
+  that **admits** untracked destinations as ordinary (no operator adoption step,
+  no refusal of legitimate fresh nodes); an association/comparison-input table
+  naming each compared value, its source, the trusted source, and the phase; and
+  D5 restore/CLI incompatibility, live-read epoch semantics, authority-marker
+  checks, and fail-closed defaults preserved, with a bypass-entrypoint inventory.
+* A single bounded successor implementation task (RTR + ordinary-startup guard +
+  destination lock) naming `snapshot_restore.rs`, `main.rs`,
+  `production_consensus_storage.rs`, and a **required `storage.rs` interface
+  change** (a synced epoch effect the current `ConsensusStorage` API does not
+  expose) as the smallest file set, with no new enablement flag, and with
+  automatic repair, anti-rollback, and signing continuity kept separate.
+
+### Corrections applied to the reviewed draft (A–F)
+
+* **A (initialization / restart).** The draft refused any untracked non-empty
+  `state_vm_v0`, which would have refused a legitimate fresh node that merely wrote
+  account data (the VM-v0 runtime opens `state_vm_v0` via
+  `vm_v0_runtime.rs:70`). Corrected to one coherent lifecycle: RTR-absence is the
+  ordinary lifecycle and startup proceeds; only a lingering `INTENT` marks an
+  interrupted restore. Added a fresh-start → ordinary-writes → restart transition
+  table alongside the successful and interrupted restore paths; the minimal
+  missing mechanism is exactly the `INTENT`/`COMPLETE` RTR.
+* **B (durability ordering).** Added a complete ordered sequence distinguishing
+  permitted preparatory effects (lock/dir create, consensus-storage open) from the
+  first protected mutation (the account copy), with synchronization for copied
+  files, installed directories, the audit file, and new paths, and all epoch
+  outcomes (`None` no-coercion, required write, already-matching barrier, conflict
+  refuse). Recorded that the current `ConsensusStorage` API exposes no synced-write
+  and that a `storage.rs` interface change is required.
+* **C (association / comparison inputs).** Added a table naming each compared
+  value, its source, the trusted source, and the phase; noted ordinary restart
+  supplies no new snapshot/nonce (no self-comparison); bound `authority_state` and
+  `authority_state_v2` into the digest and limited the identity claim (not
+  authentication/freshness/authorization); defined version, bounded record, nonce,
+  and invalid-record refusal; and specified refusal when a `COMPLETE`'s state is
+  missing.
+* **D/E (retries / ownership).** Removed the idempotent-success route: a requested
+  restore over an occupied `COMPLETE` destination is refused; a historical
+  `COMPLETE` never re-applies an old baseline/epoch. Chose one lock mechanism
+  (kernel advisory `flock` on `<data_dir>/restore.lock`) with acquisition,
+  coverage, lifetime, competing-process, process-death, identity, and participating
+  entrypoints defined, plus read-only/test limits. Updated future tests.
+* **F (readiness / successor / evidence).** Withdrew the "implementation-ready"
+  claim; separated resolved protocol choices from remaining implementation and
+  durability-evidence obligations; provided one corrected successor task including
+  the `storage.rs` interface change and no new enablement flag; and kept the
+  security-tool reporting honest (a CodeQL Markdown-only skip is not a passed scan;
+  a reviewer backend/model-registry error is not a successful review).
 
 ### Reuse findings (non-restore mechanisms not conflated)
 
@@ -7116,7 +7170,8 @@ establishes an actual boundary.
 
 ### Changed documents (this phase)
 
-1. NEW `docs/protocol/QBIND_SNAPSHOT_RESTORE_COMPLETION_CONTRACT.md` (authoritative).
+1. `docs/protocol/QBIND_SNAPSHOT_RESTORE_COMPLETION_CONTRACT.md` (authoritative;
+   corrected in place per corrections A–F).
 2. `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md` — this section.
 3. `docs/protocol/QBIND_PROPOSAL_VOTE_AUTHORITY_LIFECYCLE_CONTRACT.md` — concise
    successor reference only.
@@ -7125,14 +7180,16 @@ establishes an actual boundary.
 
 ### Checks and tool limitations (documentation phase)
 
-* Source-reference check: every code citation in the new contract
+* Source-reference check: every code citation in the corrected contract
   (`snapshot_restore.rs:613/638/652/669/715/746`, `main.rs` ~L2511/2553/2660/4920,
-  `production_consensus_storage.rs:535/619`, `storage.rs:350/361/912/1087`,
-  `consensus_storage_observation.rs`, and the D3–D6 test names) was read in this
-  checkout before citing.
-* Cross-section consistency: the new contract, this evidence section, and the two
-  successor references state the same protocol, durability profile, legacy policy,
-  and unresolved decisions.
+  `production_consensus_storage.rs:535/619`, `storage.rs:142/188/350/361/912/1087`,
+  `consensus_storage_observation.rs`, `vm_v0_runtime.rs:70`,
+  `state_snapshot.rs:169/187`, and the D3–D6 test names) was read in this checkout
+  before citing.
+* Cross-section consistency: the contract, this evidence section, and the two
+  successor references state the same protocol, complete durability ordering,
+  admit-untracked legacy policy, chosen `flock` lock, and the separation of
+  resolved protocol choices from remaining implementation/evidence obligations.
 * Diff scope: only the four documents above are changed; no production source,
   test, schema, or CLI change.
 * Link check: internal doc paths reference existing files.
@@ -7140,9 +7197,13 @@ establishes an actual boundary.
   (matching the existing protocol/evidence files); no repository-wide reformatting;
   no trailing whitespace added in changed regions.
 * Secret scan: documentation only; no secrets, credentials, or tokens introduced.
-* No Cargo rebuild or test execution performed or required for this phase; no
-  security tool was skipped with an error to record beyond this documentation
-  scope.
+* No Cargo rebuild or test execution performed or required for this phase.
+* Security-tool reporting (kept honest): this correction pass changes Markdown
+  only, so CodeQL is a **scope skip**, which is **not** a passed scan, and any
+  model-backed reviewer "no comments" is **not** an independent pass if the
+  reviewer backend reported an environment/model-registry error. Earlier D7 passes'
+  recorded CodeQL database-size skips and qualified reviewer outcomes stand as
+  recorded and are not overwritten.
 
 ### Retained posture
 

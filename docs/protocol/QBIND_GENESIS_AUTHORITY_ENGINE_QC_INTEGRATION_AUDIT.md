@@ -1310,8 +1310,10 @@ is unchanged. Evidence:
 Restore completion is now specified authoritatively in
 `docs/protocol/QBIND_SNAPSHOT_RESTORE_COMPLETION_CONTRACT.md` (status
 `D7D7_RESTORE_COMPLETION_CONTRACT=DEFINED-NOT-IMPLEMENTED`). That contract adds a
-durable restore-transaction record so ordinary startup cannot admit a tracked,
-interrupted restore as completed. It is documentation-only: restore completion is
+durable restore-transaction record (serialized by a chosen `flock` destination
+lock) so ordinary startup cannot admit a tracked, interrupted restore as completed,
+while ordinary/untracked destinations proceed unchanged. It is documentation-only:
+restore completion is
 necessary evidence for the ordinary-startup boundary only, and is NOT proof of
 consensus recovery, signing-state continuity, authorization, QC integration, or
 rollback resistance. Genesis-authority activation stays DISABLED and C4/C5 remain

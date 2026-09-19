@@ -816,8 +816,10 @@ unchanged. Evidence:
 The authoritative contract for containing interrupted snapshot restores is now
 `docs/protocol/QBIND_SNAPSHOT_RESTORE_COMPLETION_CONTRACT.md` (status
 `D7D7_RESTORE_COMPLETION_CONTRACT=DEFINED-NOT-IMPLEMENTED`). It defines a durable
-restore-transaction record (INTENT/COMPLETE) so that ordinary startup refuses a
-tracked, interrupted restore and admits only a COMPLETE restore covering
+restore-transaction record (INTENT/COMPLETE), serialized by a chosen
+destination lock (kernel advisory `flock` on `<data_dir>/restore.lock`), so that
+ordinary startup refuses a tracked, interrupted restore (`INTENT`) while proceeding
+over untracked/ordinary destinations, and admits only a COMPLETE restore covering
 account-state installation, the required audit record, and required epoch
 persistence. It is documentation-only and establishes no operational protection;
 matching, missing, or completed restores are still not authorization, signing
