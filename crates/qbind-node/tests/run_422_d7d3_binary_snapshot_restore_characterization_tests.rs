@@ -795,8 +795,25 @@ const M_LOOP_REACHED: &str = "[binary] LocalMesh mode: starting consensus loop";
 /// deliberate-termination anchor for the positive cases. It is an existing
 /// production `eprintln!`; no instrumentation was added to obtain it.
 const M_BASELINE_APPLIED: &str = "[binary-consensus] B5: applied restore baseline: snapshot_height=";
-/// Run 097 fail-closed epoch-parity FATAL diagnostic (case C).
+/// Run 097 fail-closed epoch-parity FATAL diagnostic (legacy post-materialization
+/// path). **Run 422 D7-D5:** the corrected binary no longer reaches this
+/// diagnostic for a requested restore over a conflicting present epoch — it now
+/// refuses earlier, before materialization (see [`M_D7D5_REJECT`]). This marker
+/// is retained only to assert its ABSENCE in the corrected pre-materialization
+/// rejection path.
 const M_EPOCH_FATAL: &str = "[binary] FATAL: Run 097 snapshot epoch parity failed";
+/// **Run 422 D7-D5.** The pre-materialization consensus epoch-conflict refusal
+/// emitted by `main.rs` from the restore epoch-precheck closure BEFORE any
+/// account-state materialization or audit-marker write. See
+/// `crates/qbind-node/src/main.rs` and
+/// `crates/qbind-node/src/production_consensus_storage.rs`
+/// (`evaluate_restore_epoch_compatibility`).
+const M_D7D5_REJECT: &str =
+    "[restore] FATAL: refused by Run 422 D7-D5 consensus epoch-conflict check";
+/// **Run 422 D7-D5.** The `RestoreError::ConsensusEpochConflict` `Display`
+/// substring surfaced by `main.rs` as `[restore] ERROR: <this>` immediately
+/// before `std::process::exit(1)`.
+const M_D7D5_REJECT_ERROR: &str = "restore-from-snapshot refused by consensus epoch-conflict check";
 /// D7-D4: ordinary-startup line printed when `--restore-from-snapshot` is NOT
 /// requested (`apply_snapshot_restore_if_requested` returned `Ok(None)`).
 const M_NO_RESTORE: &str = "[restore] no --restore-from-snapshot requested; normal startup.";
@@ -1024,9 +1041,9 @@ fn d7d3_b_binary_restore_epoch_absent_vs_explicit_zero() {
     assert_marker_order(
         &stderr_absent,
         &[
+            M_STORAGE_OPEN,
             M_RESTORE_OK,
             M_B5,
-            M_STORAGE_OPEN,
             M_EPOCH_ABSENT,
             M_LOOP_REACHED,
             M_BASELINE_APPLIED,
@@ -1087,9 +1104,9 @@ fn d7d3_b_binary_restore_epoch_absent_vs_explicit_zero() {
     assert_marker_order(
         &stderr_zero,
         &[
+            M_STORAGE_OPEN,
             M_RESTORE_OK,
             M_B5,
-            M_STORAGE_OPEN,
             M_EPOCH_PERSIST,
             M_LOOP_REACHED,
             M_BASELINE_APPLIED,
@@ -1131,85 +1148,248 @@ fn d7d3_b_binary_restore_epoch_absent_vs_explicit_zero() {
     assert_eq!(obs_zero.committed_epoch(), Some(0));
 }
 
-// ============================================================================
-// C. Fail-closed control through the executable (child-process, release-binary)
-// ============================================================================
-
-/// Case C — a fresh account-state destination with a separately seeded
-/// consensus store whose committed epoch (42) conflicts with the snapshot
-/// epoch (7). The unmodified binary must fail closed: nonzero exit, the exact
-/// Run 097 epoch-parity FATAL diagnostic, the consensus loop NOT reached, and
-/// the pre-existing consensus epoch preserved.
+/// **Run 422 D7-D5 — compatible present-epoch controls (child-process,
+/// release-binary).** Complements `d7d3_b` (None/None and Some(0)/None) with the
+/// two remaining COMPATIBLE matrix rows that involve a present committed epoch:
 ///
-/// The task requires honest reporting of earlier restore effects: account-state
-/// restoration occurs BEFORE the epoch-parity rejection, so the restored
-/// `state_vm_v0` IS materialized even though the whole startup fails closed.
-/// This is asserted, not hidden.
-/// A **partially completed restore** destination produced through the real
-/// binary by [`reproduce_case_c_partial_restore`]. The backing `TempDir`s are
-/// retained so the directories stay live for the D7-D4 continuations.
-struct PartialRestoreDestination {
+///   * `Some(n)/None`  — a nonzero snapshot epoch into storage with no committed
+///     epoch: restore SUCCEEDS, then persists `n` (CommittedEpoch(n)).
+///   * `Some(n)/Some(n)` — matching present epochs: restore SUCCEEDS and the
+///     matching epoch is NOT overwritten (persist is a no-op; epoch preserved).
+///
+/// Both must pass the D7-D5 pre-materialization compatibility check (they are
+/// compatible), reach baseline application, and leave the expected committed
+/// epoch. Evidence level: child-process/release-binary for restoration + staged
+/// observation; independent in-process reopen for the post-process storage read.
+#[test]
+fn d7d5_b_compatible_present_epochs_reach_baseline() {
+    let chain_id = devnet_chain_id();
+
+    // ---- Some(n)/None : nonzero snapshot epoch into fresh storage ----------
+    let src_n = tempdir().expect("tempdir");
+    let snap_n_root = tempdir().expect("tempdir");
+    let data_n = tempdir().expect("tempdir");
+    let snap_n = snap_n_root.path().join("snap-n");
+    build_real_snapshot(src_n.path(), &snap_n, chain_id, 555, 4242, Some(7));
+
+    let args_n = restore_localmesh_args(data_n.path(), &snap_n);
+    log_executable_provenance("D5-B-some-n-into-fresh", &args_n);
+    let stderr_n = {
+        let mut child = DrainedChild::spawn(&args_n);
+        child
+            .observe_then_terminate(&[M_BASELINE_APPLIED], POSITIVE_DEADLINE)
+            .expect_observed_then_terminated("D5-B-some-n-into-fresh")
+    };
+    maybe_dump_child_stderr("D5-B-some-n-into-fresh", &stderr_n);
+    // Compatible: restore → B5 → storage open → epoch-persist(7) → loop → baseline.
+    assert_marker_order(
+        &stderr_n,
+        &[
+            M_STORAGE_OPEN,
+            M_RESTORE_OK,
+            M_B5,
+            M_EPOCH_PERSIST,
+            M_LOOP_REACHED,
+            M_BASELINE_APPLIED,
+        ],
+    );
+    // The D7-D5 check must NOT have refused a compatible restore.
+    assert!(
+        !stderr_n.contains(M_D7D5_REJECT),
+        "a compatible Some(n)/None restore must not be refused; stderr=\n{}",
+        stderr_n
+    );
+    let (acct_n, obs_n) = observe_restored_data_dir(data_n.path());
+    assert_eq!(acct_n, AccountState::new(7, 4242));
+    assert_eq!(
+        obs_n,
+        ConsensusStorageObservation::CommittedEpoch(7),
+        "nonzero snapshot epoch persisted into previously-uncommitted storage"
+    );
+
+    // ---- Some(n)/Some(n) : matching present epochs (not overwritten) -------
+    let src_m = tempdir().expect("tempdir");
+    let snap_m_root = tempdir().expect("tempdir");
+    let data_m = tempdir().expect("tempdir");
+    let snap_m = snap_m_root.path().join("snap-m");
+    build_real_snapshot(src_m.path(), &snap_m, chain_id, 666, 4242, Some(7));
+    // Pre-seed the consensus store with the SAME committed epoch (7).
+    {
+        let storage = RocksDbConsensusStorage::open(&data_m.path().join("consensus"))
+            .expect("seed consensus");
+        storage.put_current_epoch(7).expect("seed committed epoch 7");
+    }
+
+    let args_m = restore_localmesh_args(data_m.path(), &snap_m);
+    log_executable_provenance("D5-B-matching-epochs", &args_m);
+    let stderr_m = {
+        let mut child = DrainedChild::spawn(&args_m);
+        child
+            .observe_then_terminate(&[M_BASELINE_APPLIED], POSITIVE_DEADLINE)
+            .expect_observed_then_terminated("D5-B-matching-epochs")
+    };
+    maybe_dump_child_stderr("D5-B-matching-epochs", &stderr_m);
+    // Compatible (matching): restore → B5 → storage open → loop → baseline.
+    // No M_EPOCH_PERSIST: a matching epoch is NOT overwritten.
+    assert_marker_order(
+        &stderr_m,
+        &[M_STORAGE_OPEN, M_RESTORE_OK, M_B5, M_LOOP_REACHED, M_BASELINE_APPLIED],
+    );
+    assert!(
+        !stderr_m.contains(M_D7D5_REJECT),
+        "matching present epochs must not be refused; stderr=\n{}",
+        stderr_m
+    );
+    assert!(
+        !stderr_m.contains(M_EPOCH_PERSIST),
+        "a matching committed epoch must NOT be overwritten/re-persisted; stderr=\n{}",
+        stderr_m
+    );
+    let (acct_m, obs_m) = observe_restored_data_dir(data_m.path());
+    assert_eq!(acct_m, AccountState::new(7, 4242));
+    assert_eq!(
+        obs_m,
+        ConsensusStorageObservation::CommittedEpoch(7),
+        "matching committed epoch (7) preserved through a compatible restore"
+    );
+}
+
+// ============================================================================
+// C. Pre-materialization epoch-conflict rejection (child-process, release-binary)
+//    **Run 422 D7-D5 migration of the historical D3 case C.**
+// ============================================================================
+//
+// Historical note (kept honest): at the accepted D7-D3/D4 SHAs the binary
+// restored `state_vm_v0` and wrote the restore audit marker BEFORE the Run 097
+// epoch-parity rejection, leaving a *partial destination*. That historical
+// effect ordering is documented in
+// `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md` and is NOT reproduced here
+// with the corrected executable. The corrected binary refuses the conflicting
+// restore BEFORE any account-state materialization or audit-marker write, so no
+// partial destination is created. This section asserts that corrected
+// pre-materialization refusal; the D7-D4 continuations below operate over a
+// clearly-labeled *legacy-layout fixture* constructed via library calls (not
+// produced by the corrected executable).
+
+/// A **legacy** partially-restored destination, constructed via library
+/// materialization to imitate the on-disk layout that the *pre-fix* binary left
+/// behind (restored `state_vm_v0` alongside a preserved, conflicting consensus
+/// `CommittedEpoch(42)`). This is an imported/pre-fix layout fixture — it is
+/// NOT produced by the corrected executable — used to characterize behavior of
+/// the corrected binary when it encounters such a directory.
+struct LegacyPartialRestoreDestination {
     _src_state: tempfile::TempDir,
     _snap_root: tempfile::TempDir,
-    /// The partially restored destination (`state_vm_v0` restored + consensus
-    /// `CommittedEpoch(42)` preserved).
+    /// The legacy partial destination (`state_vm_v0` materialized + consensus
+    /// `CommittedEpoch(42)`).
     data_dir: tempfile::TempDir,
     /// The snapshot directory declaring epoch 7 (reused by the WITH-flag retry).
     snapshot_dir: PathBuf,
-    /// `<data_dir>/state_vm_v0` (materialized by the case-C restore).
-    state_dir: PathBuf,
-    /// Full contents of `<data_dir>/RESTORED_FROM_SNAPSHOT.json` produced by the
-    /// first (successful-then-fail-closed) invocation. Recorded so a later
-    /// refused/ordinary start can be shown NOT to append or replace it.
-    restore_marker_after_partial: String,
+    /// `<data_dir>/state_vm_v0` (materialized by the library restore).
+    _state_dir: PathBuf,
+    /// Full contents of `<data_dir>/RESTORED_FROM_SNAPSHOT.json` written by the
+    /// library restore. Recorded so a later refused/ordinary start can be shown
+    /// NOT to append or replace it.
+    restore_marker: String,
 }
 
-/// Reproduce the D3 case-C **partially completed restore** through the real
-/// binary and assert every case-C property (so the assertions are preserved
-/// exactly), returning the live partial destination.
+/// Construct a legacy partial-restore destination WITHOUT the corrected binary:
+/// seed the consensus store with a conflicting `CommittedEpoch(42)`, then drive
+/// the existing library restore (`restore_from_snapshot`, which performs NO
+/// consensus epoch check) to materialize `state_vm_v0` (account 7/4242) and the
+/// restore audit marker. The result is exactly the pre-fix on-disk layout, built
+/// from real snapshot/library materialization — not a failure produced by the
+/// corrected executable.
+fn build_legacy_partial_restore_destination(tag: &str) -> LegacyPartialRestoreDestination {
+    let chain_id = devnet_chain_id();
+
+    let src_state = tempdir().expect("tempdir");
+    let snap_root = tempdir().expect("tempdir");
+    let data_dir = tempdir().expect("tempdir");
+    let snapshot_dir = snap_root.path().join("snap-legacy");
+    // Snapshot declares epoch 7.
+    build_real_snapshot(src_state.path(), &snapshot_dir, chain_id, 333, 4242, Some(7));
+
+    // Seed ONLY the consensus store with a DIFFERENT committed epoch (42).
+    let consensus_dir = data_dir.path().join("consensus");
+    {
+        let storage = RocksDbConsensusStorage::open(&consensus_dir).expect("seed consensus");
+        storage.put_current_epoch(42).expect("seed committed epoch 42");
+    }
+
+    // Library materialization (no epoch check) → the legacy partial layout.
+    let outcome = restore_from_snapshot(&snapshot_dir, data_dir.path(), chain_id)
+        .expect("library restore materializes the legacy partial layout");
+    let state_dir = outcome.target_state_dir.clone();
+
+    let restore_marker = std::fs::read_to_string(data_dir.path().join(RESTORE_MARKER_FILENAME))
+        .expect("read restore audit marker written by the library restore");
+    assert!(
+        !restore_marker.is_empty(),
+        "[{tag}] the library restore writes a restore audit marker line"
+    );
+
+    // Confirm the constructed layout matches the pre-fix expectation.
+    let (acct, obs) = observe_restored_data_dir(data_dir.path());
+    assert_eq!(acct, AccountState::new(7, 4242), "[{tag}] legacy state materialized");
+    assert_eq!(
+        obs,
+        ConsensusStorageObservation::CommittedEpoch(42),
+        "[{tag}] legacy consensus epoch 42 present"
+    );
+
+    LegacyPartialRestoreDestination {
+        _src_state: src_state,
+        _snap_root: snap_root,
+        data_dir,
+        snapshot_dir,
+        _state_dir: state_dir,
+        restore_marker,
+    }
+}
+
+/// **Run 422 D7-D5 (migrated D3 case C).** A fresh account-state destination is
+/// seeded ONLY with a conflicting consensus `CommittedEpoch(42)`; the snapshot
+/// declares epoch 7. The corrected binary WITH `--restore-from-snapshot` must
+/// refuse the restore BEFORE any account-state materialization or audit-marker
+/// write: natural exit 1, the D7-D5 epoch-conflict diagnostic, `state_vm_v0`
+/// and the restore audit marker ABSENT, no successful-restore/baseline
+/// observation, and the pre-existing consensus epoch (42) preserved.
 ///
-/// A fresh account-state destination is seeded ONLY with a conflicting consensus
-/// `CommittedEpoch(42)`; the snapshot declares epoch 7. Launching the unmodified
-/// binary WITH `--restore-from-snapshot` restores `state_vm_v0` (account 7/4242)
-/// and writes the restore audit marker, then fails closed at Run 097 epoch
-/// parity (natural exit 1) with the pre-existing epoch 42 preserved. The result
-/// is a partial destination: restored state alongside preserved consensus epoch.
-///
-/// Each D7-D4 continuation calls this to obtain an INDEPENDENT partial
-/// destination (its own tempdirs, its own child invocation) so the first start
-/// cannot change the second's starting conditions and no directory is
-/// hand-fabricated.
-fn reproduce_case_c_partial_restore(tag: &str) -> PartialRestoreDestination {
+/// Filesystem-absence checks are performed with `Path::exists()` BEFORE any
+/// account accessor is invoked, so no RocksDB is created by the assertion.
+#[test]
+fn d7d3_c_binary_epoch_conflict_rejected_before_materialization() {
     let chain_id = devnet_chain_id();
 
     let src_state = tempdir().expect("tempdir");
     let snap_root = tempdir().expect("tempdir");
     let data_dir = tempdir().expect("tempdir");
     let snapshot_dir = snap_root.path().join("snap-conflict");
-    // Snapshot declares epoch 7.
     build_real_snapshot(src_state.path(), &snapshot_dir, chain_id, 333, 4242, Some(7));
 
-    // Pre-seed ONLY the <data_dir>/consensus store with a DIFFERENT committed
-    // epoch (42). state_vm_v0 is left absent/empty so B3 restore is permitted.
+    // Pre-seed ONLY the consensus store with a conflicting committed epoch (42).
     let consensus_dir = data_dir.path().join("consensus");
     {
         let storage = RocksDbConsensusStorage::open(&consensus_dir).expect("seed consensus");
         storage.put_current_epoch(42).expect("seed committed epoch 42");
-        // Drop before spawning so the binary can take the RocksDB lock.
     }
+    let state_dir = data_dir.path().join(VM_V0_STATE_SUBDIR);
+    let marker_path = data_dir.path().join(RESTORE_MARKER_FILENAME);
+    // Preconditions: account-state dir + restore marker absent.
+    assert!(!state_dir.exists(), "precondition: state_vm_v0 absent before restore");
+    assert!(!marker_path.exists(), "precondition: restore marker absent before restore");
 
     let args = restore_localmesh_args(data_dir.path(), &snapshot_dir);
-    log_executable_provenance(tag, &args);
-
+    log_executable_provenance("D5-C-epoch-conflict", &args);
     let (status, stderr, capture) = {
         let mut child = DrainedChild::spawn(&args);
         let status = child.wait_natural_exit(NEGATIVE_DEADLINE);
         (status, child.stderr_snapshot(), child.stderr_capture())
     };
-    maybe_dump_child_stderr(tag, &stderr);
+    maybe_dump_child_stderr("D5-C-epoch-conflict", &stderr);
 
-    // Require the expected NATURAL exit code 1 (from `std::process::exit(1)`),
-    // with the full ExitStatus preserved (code, not signal).
+    // Natural fail-closed exit 1 (from std::process::exit(1)), not a signal.
     assert_eq!(
         status.code(),
         Some(1),
@@ -1221,11 +1401,11 @@ fn reproduce_case_c_partial_restore(tag: &str) -> PartialRestoreDestination {
         "fail-closed refusal must be a natural exit, not a signal (status={status:?}); stderr=\n{}",
         stderr
     );
-    // Carry the epoch-conflict-SPECIFIC diagnostic (existing epoch 42 vs
-    // snapshot epoch 7), not merely the generic Run 097 failure prefix.
+    // The NEW pre-materialization D7-D5 refusal, carrying the epoch-conflict
+    // specific diagnostic (existing 42 vs snapshot 7).
     assert!(
-        stderr.contains(M_EPOCH_FATAL),
-        "must carry the Run 097 epoch-parity FATAL prefix; stderr=\n{}",
+        stderr.contains(M_D7D5_REJECT),
+        "must carry the D7-D5 pre-materialization epoch-conflict refusal; stderr=\n{}",
         stderr
     );
     assert!(
@@ -1233,95 +1413,137 @@ fn reproduce_case_c_partial_restore(tag: &str) -> PartialRestoreDestination {
         "must carry the epoch-conflict-specific diagnostic (existing 42 vs snapshot 7); stderr=\n{}",
         stderr
     );
-    // A "forbidden later marker absent" assertion is only valid on COMPLETE,
-    // untruncated capture: truncation, a read failure, or a capture-thread
-    // failure cannot support an absence claim.
+    assert!(
+        stderr.contains(M_D7D5_REJECT_ERROR),
+        "must carry the RestoreError::ConsensusEpochConflict operator error line; stderr=\n{}",
+        stderr
+    );
+    // The corrected binary must NOT reach the legacy post-materialization Run
+    // 097 epoch-parity FATAL path.
+    assert!(
+        !stderr.contains(M_EPOCH_FATAL),
+        "corrected binary must reject BEFORE the legacy Run 097 post-materialization \
+         path; stderr=\n{}",
+        stderr
+    );
+    // Complete capture is required before any absent-marker assertion.
     assert!(
         capture.is_complete(),
-        "stderr capture was not complete ({capture:?}); cannot assert a forbidden later \
-         marker was absent"
+        "stderr capture was not complete ({capture:?}); cannot assert forbidden markers absent"
     );
-    // The consensus loop-dispatch marker must NOT have been reached, and the
-    // engine initializer must NOT have run (no baseline-applied observation).
-    assert!(
-        !stderr.contains(M_LOOP_REACHED),
-        "consensus loop dispatch must NOT start when epoch parity fails; stderr=\n{}",
-        stderr
-    );
-    assert!(
-        !stderr.contains(M_BASELINE_APPLIED),
-        "engine initializer must NOT run when epoch parity fails; stderr=\n{}",
-        stderr
-    );
-    // Earlier stages up to storage-open were reached (rejection is at epoch
-    // parity, AFTER restore + storage open). Assert their order too.
-    assert_marker_order(&stderr, &[M_RESTORE_OK, M_B5, M_STORAGE_OPEN, M_EPOCH_FATAL]);
+    // No successful account-restore or baseline observation, and the consensus
+    // loop must NOT be reached.
+    for forbidden in [M_RESTORE_OK, M_B5, M_LOOP_REACHED, M_BASELINE_APPLIED, M_EPOCH_PERSIST] {
+        assert!(
+            !stderr.contains(forbidden),
+            "pre-materialization rejection must not emit {forbidden:?}; stderr=\n{}",
+            stderr
+        );
+    }
+    // Ordering: storage was opened early (for the check) BEFORE the refusal.
+    assert_marker_order(&stderr, &[M_STORAGE_OPEN, M_D7D5_REJECT]);
 
-    // Independent post-process observation.
-    // (1) The pre-existing consensus epoch is preserved (never overwritten).
+    // Filesystem-absence checks BEFORE any account accessor (no DB creation).
+    assert!(
+        !state_dir.exists(),
+        "state_vm_v0 must remain ABSENT after a pre-materialization rejection"
+    );
+    assert!(
+        !marker_path.exists(),
+        "the restore audit marker must remain ABSENT after a pre-materialization rejection"
+    );
+
+    // Independent reopen: the pre-existing consensus epoch (42) is preserved.
     {
         let storage = RocksDbConsensusStorage::open(&consensus_dir).expect("reopen consensus");
         let obs = observe_consensus_storage(Some(&storage)).expect("observe");
         assert_eq!(
             obs,
             ConsensusStorageObservation::CommittedEpoch(42),
-            "existing committed epoch must be preserved after a fail-closed restore"
+            "existing committed epoch must be preserved after a pre-materialization rejection"
         );
     }
-    // (2) Honest earlier-effect report: account-state restoration DID occur
-    //     before the epoch-parity rejection, so state_vm_v0 is materialized.
-    let state_dir = data_dir.path().join(VM_V0_STATE_SUBDIR);
-    assert!(
-        state_dir.exists(),
-        "account-state restoration occurs before epoch-parity rejection; \
-         the data directory is NOT wholly unchanged"
-    );
-    let restored = RocksDbAccountState::open(&state_dir).expect("reopen restored state");
-    assert_eq!(
-        restored.get_account_state(&ACCOUNT_ID),
-        AccountState::new(7, 4242),
-        "restored account value present despite fail-closed startup"
-    );
-    drop(restored);
 
-    // Record the restore audit marker written by THIS first invocation (the
-    // successful account restoration that preceded the epoch-parity refusal).
-    let restore_marker_after_partial =
-        std::fs::read_to_string(data_dir.path().join(RESTORE_MARKER_FILENAME))
-            .expect("read restore audit marker after partial restore");
+    // Repeat the rejected request over the SAME destination: it must remain free
+    // of restored account state; the first rejection must not manufacture an
+    // occupied-target failure for the second attempt.
+    let (status2, stderr2, capture2) = {
+        let mut child = DrainedChild::spawn(&args);
+        let status = child.wait_natural_exit(NEGATIVE_DEADLINE);
+        (status, child.stderr_snapshot(), child.stderr_capture())
+    };
+    maybe_dump_child_stderr("D5-C-epoch-conflict-retry", &stderr2);
+    assert_eq!(status2.code(), Some(1), "second attempt also fails closed; stderr=\n{stderr2}");
+    assert!(status2.signal().is_none());
     assert!(
-        !restore_marker_after_partial.is_empty(),
-        "the successful account restoration writes a restore audit marker line"
+        stderr2.contains(M_D7D5_REJECT),
+        "second attempt must ALSO reject on epoch conflict (not a manufactured \
+         occupied-target failure); stderr=\n{}",
+        stderr2
     );
-
-    PartialRestoreDestination {
-        _src_state: src_state,
-        _snap_root: snap_root,
-        data_dir,
-        snapshot_dir,
-        state_dir,
-        restore_marker_after_partial,
-    }
+    assert!(
+        !stderr2.contains(M_TARGET_NOT_EMPTY),
+        "the first rejection must NOT manufacture an occupied-target failure for \
+         the second attempt; stderr=\n{}",
+        stderr2
+    );
+    assert!(capture2.is_complete());
+    assert!(!state_dir.exists(), "state_vm_v0 still absent after the second rejection");
+    assert!(!marker_path.exists(), "restore marker still absent after the second rejection");
 }
 
+/// **Run 422 D7-D5.** Preservation of an already-existing restore audit marker
+/// on a pre-materialization rejection. A pre-existing
+/// `RESTORED_FROM_SNAPSHOT.json` is permitted by the preceding checks (the
+/// epoch check runs before the occupied-target check and never touches the
+/// restore marker), so the refused restore must leave that file byte-for-byte
+/// unchanged.
 #[test]
-fn d7d3_c_binary_epoch_conflict_fails_closed_preserving_existing_epoch() {
-    // The shared helper performs (and therefore preserves) every case-C
-    // property: fail-closed natural exit 1, the epoch-conflict-specific
-    // diagnostic, complete capture, no loop/baseline observation, the
-    // restore → B5 → storage-open → epoch-FATAL order, and the independent
-    // post-process reads (consensus epoch 42 preserved, restored account
-    // 7/4242 present). It additionally records the audit marker for D7-D4.
-    let partial = reproduce_case_c_partial_restore("C-epoch-conflict");
-    // The partial destination has a materialized restored state dir and a
-    // written audit marker — the exact precondition D7-D4 characterizes.
+fn d7d5_c_preexisting_restore_marker_preserved_on_rejection() {
+    let chain_id = devnet_chain_id();
+
+    let src_state = tempdir().expect("tempdir");
+    let snap_root = tempdir().expect("tempdir");
+    let data_dir = tempdir().expect("tempdir");
+    let snapshot_dir = snap_root.path().join("snap-conflict-marker");
+    build_real_snapshot(src_state.path(), &snapshot_dir, chain_id, 333, 4242, Some(7));
+
+    let consensus_dir = data_dir.path().join("consensus");
+    {
+        let storage = RocksDbConsensusStorage::open(&consensus_dir).expect("seed consensus");
+        storage.put_current_epoch(42).expect("seed committed epoch 42");
+    }
+    // Pre-place a restore audit marker (a prior restore receipt). state_vm_v0
+    // stays absent so the epoch check — not the occupied-target check — governs.
+    let marker_path = data_dir.path().join(RESTORE_MARKER_FILENAME);
+    let preexisting_marker = "{\"preexisting\":\"prior restore receipt\"}\n";
+    std::fs::write(&marker_path, preexisting_marker).expect("write pre-existing marker");
+    let state_dir = data_dir.path().join(VM_V0_STATE_SUBDIR);
+    assert!(!state_dir.exists(), "precondition: state_vm_v0 absent");
+
+    let args = restore_localmesh_args(data_dir.path(), &snapshot_dir);
+    log_executable_provenance("D5-C-marker-preserved", &args);
+    let (status, stderr, capture) = {
+        let mut child = DrainedChild::spawn(&args);
+        let status = child.wait_natural_exit(NEGATIVE_DEADLINE);
+        (status, child.stderr_snapshot(), child.stderr_capture())
+    };
+    maybe_dump_child_stderr("D5-C-marker-preserved", &stderr);
+
+    assert_eq!(status.code(), Some(1), "epoch conflict fails closed; stderr=\n{stderr}");
+    assert!(status.signal().is_none());
+    assert!(stderr.contains(M_D7D5_REJECT), "D7-D5 refusal expected; stderr=\n{stderr}");
+    assert!(capture.is_complete());
     assert!(
-        partial.state_dir.exists(),
-        "case-C leaves a materialized restored state dir"
+        !state_dir.exists(),
+        "state_vm_v0 must remain absent (rejection before materialization)"
     );
-    assert!(
-        !partial.restore_marker_after_partial.is_empty(),
-        "case-C leaves a written restore audit marker"
+    // The pre-existing marker is byte-for-byte unchanged (never appended to or
+    // replaced by the refused restore).
+    let marker_after = std::fs::read_to_string(&marker_path).expect("read marker after rejection");
+    assert_eq!(
+        marker_after, preexisting_marker,
+        "pre-existing restore audit marker must be preserved verbatim on rejection"
     );
 }
 
@@ -1437,50 +1659,64 @@ fn d7d3_d_signing_state_continuity_is_not_established_by_restore_path() {
 }
 
 // ============================================================================
-// D7-D4. Restart after a partially completed restore (child-process, release-binary)
+// D7-D4. Behavior over a legacy (pre-fix) partially-restored directory
+//        (child-process, release-binary). **Migrated for Run 422 D7-D5.**
 // ============================================================================
 //
-// D3 case C leaves a **partially completed** destination: the binary restores
-// `state_vm_v0` (account 7/4242) and then fails closed at Run 097 epoch parity,
-// with the pre-existing consensus `CommittedEpoch(42)` preserved. D7-D4
-// characterizes two DISTINCT subsequent starts from that partial state plus a
-// fresh-directory control:
+// At the accepted D7-D3/D4 SHAs, the *pre-fix* binary produced a partially
+// completed destination (restored `state_vm_v0` + preserved conflicting
+// consensus `CommittedEpoch(42)`) because the epoch check ran only AFTER
+// materialization. The corrected binary no longer produces that layout (see
+// `d7d3_c_binary_epoch_conflict_rejected_before_materialization`). To keep the
+// D7-D4 characterization of behavior OVER such a directory, these cases operate
+// on a clearly-labeled *legacy-layout fixture*
+// (`build_legacy_partial_restore_destination`) built via real
+// snapshot/library materialization — an imported/pre-fix layout, NOT a failure
+// produced by the corrected executable.
 //
-//   A. Repeat startup WITH `--restore-from-snapshot`. Requested restoration:
-//      `apply_snapshot_restore_if_requested_inner` runs the materialization
-//      pipeline, whose non-empty `state_vm_v0` check returns
-//      `RestoreError::TargetStateNotEmpty` BEFORE any copy or audit-marker
-//      write. `main.rs` prints `[restore] ERROR: ...` then `exit(1)`.
-//   B. Ordinary startup WITHOUT the flag. `apply_snapshot_restore_if_requested`
-//      returns `Ok(None)` (fast-sync disabled): NO `TargetStateNotEmpty` guard
-//      and NO Run 097 epoch comparison run (both are gated on a requested
-//      restore). The observed branch is encoded below from the real binary.
-//   C. A matched fresh-directory ordinary start, to distinguish partial-
-//      destination behavior from ordinary startup / unrelated config failure.
+//   A. Repeat startup WITH `--restore-from-snapshot` over the legacy partial
+//      directory. **Deliberate ordering change (Run 422 D7-D5):** the corrected
+//      binary opens consensus storage early and runs the epoch-conflict check
+//      BEFORE the materialization pipeline's occupied-target check. Because the
+//      legacy directory carries a conflicting `CommittedEpoch(42)` vs the
+//      snapshot's epoch 7, the refusal is now the D7-D5 epoch-conflict refusal
+//      (pre-materialization), NOT `TargetStateNotEmpty`. The retry restores
+//      nothing and leaves the account value, consensus epoch, and restore audit
+//      marker untouched. (The occupied-target refusal itself remains covered by
+//      the existing `b3_snapshot_restore_tests` suite.)
+//   B. Ordinary startup WITHOUT the flag over the legacy partial directory.
+//      `apply_snapshot_restore_if_requested` returns `Ok(None)` (fast-sync
+//      disabled): NO restore/epoch check runs, and startup PROCEEDS to the
+//      consensus loop over the mixed account/epoch state. **This path is
+//      OUTSIDE this correction's protection** (D7-D5 guards only the requested
+//      restore path); the observed limitation is recorded, not repaired.
+//   C. A matched fresh-directory ordinary start, to distinguish legacy-directory
+//      behavior from ordinary startup / unrelated config failure.
 //
-// Each continuation reproduces an INDEPENDENT partial destination through the
-// same real procedure (`reproduce_case_c_partial_restore`) so the first start
-// cannot change the second's starting conditions, and NONE hand-fabricates the
-// partially restored directory. All RocksDB handles are closed before every
-// child launch; stored logical values are read AFTER the child is reaped (a
-// selected-value match is NOT claimed to be byte-identity of the directory).
+// Each continuation constructs an INDEPENDENT legacy fixture (its own tempdirs)
+// so one start cannot change another's starting conditions; NONE hand-fabricates
+// the layout (real library materialization + consensus setup is used). All
+// RocksDB handles are closed before every child launch; stored logical values
+// are read AFTER the child is reaped (a selected-value match is NOT claimed to
+// be byte-identity of the directory).
 
-/// D7-D4 case A — repeat WITH the restore flag over the partially restored
-/// destination. Source-confirmed non-empty-target refusal
-/// (`RestoreError::TargetStateNotEmpty`): the retry restores nothing, opens no
-/// storage, applies no baseline, and does not touch the pre-existing account
-/// value, consensus epoch, or restore audit marker.
+/// D7-D4 case A — repeat WITH the restore flag over the legacy partial
+/// directory. **Run 422 D7-D5:** the corrected binary refuses with the
+/// pre-materialization epoch-conflict refusal (epoch check precedes the
+/// occupied-target check). The retry restores nothing, materializes no new
+/// state, and does not touch the pre-existing account value, consensus epoch, or
+/// restore audit marker.
 #[test]
-fn d7d4_a_repeat_with_restore_flag_refuses_nonempty_target() {
-    // 1. Independently reproduce the partial destination (its OWN case-C run;
-    //    NOT shared with case B).
-    let partial = reproduce_case_c_partial_restore("D4-A-partial");
+fn d7d4_a_repeat_with_restore_flag_over_legacy_partial_rejects_epoch_conflict() {
+    // 1. Independently construct the legacy partial layout via library
+    //    materialization (NOT via the corrected binary).
+    let partial = build_legacy_partial_restore_destination("D4-A-legacy");
 
     // Pre-retry independent reads (the values the refused attempt must not move).
     let (acct_before, obs_before) = observe_restored_data_dir(partial.data_dir.path());
     assert_eq!(acct_before, AccountState::new(7, 4242));
     assert_eq!(obs_before, ConsensusStorageObservation::CommittedEpoch(42));
-    let marker_before = partial.restore_marker_after_partial.clone();
+    let marker_before = partial.restore_marker.clone();
 
     // 2. Restart the SAME partial destination WITH the same snapshot + flag and
     //    otherwise-equivalent arguments.
@@ -1497,8 +1733,8 @@ fn d7d4_a_repeat_with_restore_flag_refuses_nonempty_target() {
     assert_eq!(
         status.code(),
         Some(1),
-        "WITH-flag retry over a non-empty target must fail closed with natural exit \
-         code 1 (status={status:?}); stderr=\n{}",
+        "WITH-flag retry over the legacy partial directory must fail closed with \
+         natural exit code 1 (status={status:?}); stderr=\n{}",
         stderr
     );
     assert!(
@@ -1506,11 +1742,19 @@ fn d7d4_a_repeat_with_restore_flag_refuses_nonempty_target() {
         "the refusal must be a natural exit, not a signal (status={status:?}); stderr=\n{}",
         stderr
     );
-    // The specific non-empty-target diagnostic corresponding to
-    // `TargetStateNotEmpty` (not merely a generic restore-error prefix).
+    // Run 422 D7-D5 deliberate ordering: the conflicting present epoch (42 vs 7)
+    // is detected by the pre-materialization epoch check, which runs BEFORE the
+    // materialization pipeline's occupied-target (`TargetStateNotEmpty`) check.
+    // So the refusal is the D7-D5 epoch-conflict refusal, not TargetStateNotEmpty.
     assert!(
-        stderr.contains(M_TARGET_NOT_EMPTY),
-        "must carry the TargetStateNotEmpty non-empty-target diagnostic; stderr=\n{}",
+        stderr.contains(M_D7D5_REJECT),
+        "must carry the D7-D5 pre-materialization epoch-conflict refusal; stderr=\n{}",
+        stderr
+    );
+    assert!(
+        !stderr.contains(M_TARGET_NOT_EMPTY),
+        "the epoch check precedes the occupied-target check, so TargetStateNotEmpty \
+         must NOT be the refusal here; stderr=\n{}",
         stderr
     );
     // Complete capture before any absent-marker claim below.
@@ -1518,12 +1762,10 @@ fn d7d4_a_repeat_with_restore_flag_refuses_nonempty_target() {
         capture.is_complete(),
         "stderr capture was not complete ({capture:?}); cannot assert forbidden markers absent"
     );
-    // No NEW successful-restore or baseline observation from THIS second
-    // invocation. The refusal is BEFORE storage-open, so none of restore-OK,
-    // B5 construction, storage-open, loop dispatch, or baseline application
-    // appear in the second child's captured output. (Only this child's output
-    // is inspected; the first invocation's successful restore is not reused.)
-    for forbidden in [M_RESTORE_OK, M_B5, M_STORAGE_OPEN, M_LOOP_REACHED, M_BASELINE_APPLIED] {
+    // No NEW successful-restore or baseline observation from THIS invocation.
+    // Storage IS opened early (for the epoch check) BEFORE the refusal, so
+    // M_STORAGE_OPEN is expected present and is NOT in the forbidden set.
+    for forbidden in [M_RESTORE_OK, M_B5, M_LOOP_REACHED, M_BASELINE_APPLIED, M_EPOCH_PERSIST] {
         assert!(
             !stderr.contains(forbidden),
             "refused WITH-flag retry must not emit {forbidden:?}; stderr=\n{}",
@@ -1544,8 +1786,8 @@ fn d7d4_a_repeat_with_restore_flag_refuses_nonempty_target() {
     );
 
     // 4. Existing restore audit-marker contents are NOT appended or replaced by
-    //    the refused attempt (materialization returns `TargetStateNotEmpty`
-    //    BEFORE `write_restore_marker`).
+    //    the refused attempt (the epoch-conflict refusal precedes any
+    //    materialization / `write_restore_marker`).
     let marker_after = std::fs::read_to_string(
         partial.data_dir.path().join(RESTORE_MARKER_FILENAME),
     )
@@ -1556,8 +1798,9 @@ fn d7d4_a_repeat_with_restore_flag_refuses_nonempty_target() {
     );
 }
 
-/// D7-D4 case B — restart WITHOUT the restore flag from a SEPARATELY reproduced
-/// partial destination. Source trace (encoded, then verified against the real
+/// D7-D4 case B — restart WITHOUT the restore flag over an independently
+/// constructed legacy partial directory. Source trace (encoded, then verified
+/// against the real
 /// binary): `apply_snapshot_restore_if_requested` returns `Ok(None)` → the
 /// "normal startup" line is printed, NO restore baseline is built, and the
 /// Run 097 epoch block is skipped (`if let Some(outcome)`). Ordinary startup
@@ -1571,14 +1814,16 @@ fn d7d4_a_repeat_with_restore_flag_refuses_nonempty_target() {
 /// **Observed limitation (recorded, not repaired):** ordinary startup PROCEEDS
 /// over the mixed account/epoch destination. This is an observed limitation
 /// requiring assessment before production activation; it is NOT coherent or safe
-/// recovery, and this task does not repair it.
+/// recovery, and this task does not repair it. **Run 422 D7-D5** guards only the
+/// requested-restore path; ordinary startup over a legacy partial directory
+/// remains outside this correction's protection.
 #[test]
-fn d7d4_b_restart_without_restore_flag_from_partial_destination() {
-    let partial = reproduce_case_c_partial_restore("D4-B-partial");
+fn d7d4_b_restart_without_restore_flag_over_legacy_partial_proceeds() {
+    let partial = build_legacy_partial_restore_destination("D4-B-legacy");
     let (acct_before, obs_before) = observe_restored_data_dir(partial.data_dir.path());
     assert_eq!(acct_before, AccountState::new(7, 4242));
     assert_eq!(obs_before, ConsensusStorageObservation::CommittedEpoch(42));
-    let marker_before = partial.restore_marker_after_partial.clone();
+    let marker_before = partial.restore_marker.clone();
 
     // Ordinary start: equivalent env/network-mode/data-dir, NO restore flag.
     let args = ordinary_localmesh_args(partial.data_dir.path());
