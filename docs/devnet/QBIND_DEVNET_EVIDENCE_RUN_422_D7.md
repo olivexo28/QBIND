@@ -6333,3 +6333,289 @@ and the three docs), committed to the task branch and pushed via the progress
 tool with an unambiguous implementation checkpoint recorded BEFORE validation
 outcomes. `task/warning.txt` and unrelated files are untouched. No PR, no main
 changes, no branch rename, no force-push, no rebase, no history rewrite.
+
+## Run 422 D7-D5 corrective pass — close CLI precheck bypass and cached-epoch decisions (code + test + evidence)
+
+The immediately preceding D7-D5 subsection ("reject restore epoch conflicts
+before account-state materialization") landed the factored, non-writing
+`evaluate_restore_epoch_compatibility` decision and the pre-materialization
+epoch precheck, and closed its verdict as
+`CODE-AND-RELEASE-TEST-POSITIVE`. This corrective pass **supersedes that prior
+unrestricted D5 completion claim**: review of the actual checkout found two
+still-open defects (A, B) and one missing direct test (C). The verdict is only
+re-asserted after all three are closed with the evidence below.
+
+### Finding A — CLI modes bypassed the pre-materialization check (closed)
+
+Previously, `cli_storage_exit_mode_active` (any of
+`--p2p-trust-bundle-reload-check`, the Run 077 peer-candidate hook, the
+trust-bundle reload-apply path, or reload-apply enabled) merely SKIPPED the
+early storage open when a restore was also requested, producing
+`epoch_precheck=None` while the restore pipeline still ran — copying
+account-state and writing the restore marker before the CLI command executed or
+rejected its arguments. The absence of later consensus startup did not prevent
+those effects. The operative claim that "these modes never reach the consensus
+loop, so D7-D5 does not apply to them" has been REMOVED from `main.rs`.
+
+`main.rs` now REFUSES a requested restore combined with any
+`cli_storage_exit_mode_active` mode BEFORE the early storage open, before
+account-state materialization, and before any restore-marker write, with an
+unmistakable diagnostic that names the offending mode(s)
+(`[binary] FATAL: refused by Run 422 D7-D5: --restore-from-snapshot is
+unsupported in combination with the CLI validation/apply exit mode(s): ...`)
+and `std::process::exit(1)`. Every predicate is covered, including its
+partial-configuration shapes: the Run 077 hook is active for a peer-candidate
+path WITHOUT the enabled flag or the enabled flag WITHOUT a path
+(`run077_hook_active(path, enabled) = path.is_some() || enabled`), and the
+reload-apply predicate is active for a path without the enabled flag or vice
+versa. A flag destined to be rejected later therefore can no longer first
+disable the epoch check and permit restoration. CLI modes WITHOUT a restore
+request retain their existing behavior (the guard only fires when
+`restore_requested` is also true), and normal compatible restores are
+unchanged.
+
+Release-binary coverage (in
+`run_422_d7d3_binary_snapshot_restore_characterization_tests.rs`), each using a
+valid real snapshot declaring epoch 7 against a destination whose consensus
+storage already holds committed epoch 42:
+
+* `d7d5a_restore_with_reload_check_mode_refused_before_effects` — predicate
+  `p2p_trust_bundle_reload_check.is_some()`.
+* `d7d5a_restore_with_peer_candidate_check_path_only_refused_before_effects` —
+  Run 077 hook, path-only partial shape.
+* `d7d5a_restore_with_peer_candidate_enabled_only_refused_before_effects` —
+  Run 077 hook, enabled-only partial shape.
+* `d7d5a_restore_with_reload_apply_path_mode_refused_before_effects` —
+  `p2p_trust_bundle_reload_apply_path.is_some()`.
+* `d7d5a_restore_with_reload_apply_enabled_mode_refused_before_effects` —
+  `p2p_trust_bundle_reload_apply_enabled`.
+
+Each asserts: the specific combination refusal itself (not a later missing-file
+or command-configuration error), natural failure exit 1 (no signal), complete
+stderr capture, ABSENCE of the early storage-open log / epoch-conflict refusal /
+`TargetStateNotEmpty` / restore-OK / B5 / loop / baseline / epoch-persist
+markers, `state_vm_v0` and the restore marker ABSENT (checked via
+`Path::exists()` before any accessor), and an independent reopen confirming the
+committed epoch 42 is preserved.
+`d7d5a_restore_without_cli_exit_mode_is_permitted_control` is the deliberate-
+command-contract control: a restore with NO CLI exit-mode flag reaches the
+normal restore path and persists epoch 7. The CLI-only regressions
+(`run_069_pqc_trust_bundle_reload_check_tests`,
+`run_077_binary_peer_candidate_check_tests`,
+`run_070_pqc_trust_bundle_reload_apply_tests`) confirm those commands WITHOUT
+restoration remain supported as before.
+
+### Finding B — decisions now read the live storage value (closed)
+
+`evaluate_restore_epoch_compatibility` previously matched
+`OpenedProductionConsensusStorage.state`, the cached startup observation. A
+write through the same live handle after open (including this binary's own Run
+097 persistence) makes that field stale, so the later persistence path could
+consume a stale "matching"/"absent" decision and overwrite a now-conflicting
+epoch. The function now performs a FRESH read of `meta:current_epoch` through
+the canonical live handle
+(`ConsensusStorage::get_current_epoch`) at the moment of decision; `opened.state`
+is retained only as a startup observation for logging. Both the early precheck
+and `persist_restored_snapshot_epoch` consume this same live-backed decision, so
+re-evaluation means a real re-read, not a re-read of the cached field. Semantics
+are preserved: snapshot `None` never becomes zero and writes nothing; explicit
+`Some(0)` stays distinct from absence; a genuinely missing committed epoch
+persists only after successful materialization; matching present epochs are not
+overwritten; conflicting present epochs reject; a live-read failure surfaces as
+`ProductionConsensusStorageError::EpochProbeFailed` and NEVER as epoch absence
+or a successful plan. Because live reads are now performed inside the decision,
+`main.rs`'s precheck error handling and comments were updated: errors other than
+`RestoreEpochInconsistent` (notably `EpochProbeFailed`) are no longer
+unreachable and are treated as a fail-closed read-error refusal before
+materialization.
+
+Same-object regressions (unit tests in `production_consensus_storage.rs`, using
+real temporary storage and mutating through the SAME
+`OpenedProductionConsensusStorage` WITHOUT closing/reopening between the
+mutation and the decision):
+
+* `d7d5b_live_write_after_open_forces_conflict_not_cached_persist` — open with
+  no epoch, write 42 through the live handle, evaluate snapshot 7: both
+  evaluator and writer reject; 42 preserved.
+* `d7d5b_cached_matching_value_does_not_authorize_after_live_update` — open with
+  epoch 7, update the live handle to 42, evaluate snapshot 7: the cached
+  "matching" 7 does not authorize; rejects on the live 42.
+* `d7d5b_second_persist_through_same_object_rejects_on_live_value` — open with
+  no epoch, persist 7, then attempt to persist 9 through the same object:
+  rejects and preserves 7.
+* `d7d5b_repeat_persist_same_epoch_through_same_object_is_idempotent` —
+  repeating persistence of 7 through the same object is an idempotent no-op.
+* `d7d5b_live_read_error_surfaces_as_probe_failed_not_absence` — a corrupted
+  on-disk `meta:current_epoch` (raw-put corruption mirroring the D7-C1 pattern,
+  no public production corruption API added) surfaces as `EpochProbeFailed`,
+  never absence or a plan, with the cached `state` deliberately set to a value
+  that would otherwise authorize.
+
+The existing positive/no-write semantic-matrix controls
+(`d7d5_evaluate_matrix_*`, `d7d5_persist_and_evaluate_agree_*`, and the Run 097
+writer tests) are retained. These fixture mutations exercise stale-observation
+handling only; they do NOT authorize production epoch rollback and do NOT
+establish durable anti-rollback.
+
+### Finding C — no premature persistence after a materialization refusal (closed)
+
+`d7d5c_occupied_target_refused_after_precheck_permits` (release-binary) exercises
+the NEW production precheck path (not a library entrypoint that passes no
+precheck): a valid real snapshot with epoch `Some(7)`; the destination consensus
+storage opens successfully with NO committed epoch (so the epoch compatibility
+check PERMITS the attempt — `PersistAfterMaterialization`); `state_vm_v0` is
+already occupied with a known sentinel account (id `0xAB..`, value
+`AccountState::new(99, 123456)`); and no CLI exclusion mode is selected. The
+subsequent occupied-target check refuses materialization.
+
+Before → after observations: consensus `PresentNoCommittedEpoch` → still
+`PresentNoCommittedEpoch` (no snapshot-epoch persistence); sentinel account
+`(99, 123456)` → unchanged; restore audit marker absent → still absent. The test
+requires natural failure exit 1 (no signal) with the specific
+`restore-from-snapshot target state directory is not empty:`
+(`TargetStateNotEmpty`) diagnostic, absence of the epoch-conflict refusal
+(proving the precheck permitted) and of any restore-OK / baseline / epoch-persist
+marker, complete capture, and `M_STORAGE_OPEN` preceding the refusal. The
+compatible empty-target control demonstrating successful materialization then
+persistence of epoch 7 is reused from
+`d7d5_b_compatible_present_epochs_reach_baseline` (case `Some(7)/None`). No
+production hook was added and the occupied-target guard was not weakened.
+
+### Actual checkout (this corrective pass)
+
+* Branch: `copilot/run-422-close-cli-precheck-bypass` (the actual working
+  branch). This differs from the problem statement's reported branch
+  `copilot/copilotcopilotcopilotcopilotcopilotcopilotcopilotc`; not renamed.
+* HEAD at start of this pass: `412b0cd24484f7fb82215b3c8eb4b717704e66a8`
+  (parent / starting revision of the pass:
+  `2e28c2645d55149ba4eaaa269b38426e273aa455`, present locally).
+* Shallow single-branch clone (`.git/shallow` grafts at
+  `2e28c2645d55149ba4eaaa269b38426e273aa455`); only two commits are locally
+  reachable. The problem statement's referenced revisions
+  `0d6ac9e512655a23388719d558d0014233aa55dd` (final) and
+  `7f7db1c20a0c12f33c0be00ce7797ecc3b977a0d` (release build/test) are NOT present
+  as objects in this clone (`git cat-file` fails). Per repository instruction,
+  missing history does not imply missing implementation: every named production
+  source and test target is present and was inspected.
+* Worktree clean before edits; disk capacity ample (~85 GiB free). Changed files
+  preserved their file-specific line endings
+  (`production_consensus_storage.rs` and the D7-D3 test target are CRLF;
+  `main.rs` is LF); `task/warning.txt` and unrelated files untouched.
+
+### Changed files (this corrective pass)
+
+Exactly THREE files carry code/test changes plus the documentation set:
+
+* `crates/qbind-node/src/main.rs` — correction A refusal + correction B precheck
+  error-handling/comment updates.
+* `crates/qbind-node/src/production_consensus_storage.rs` — correction B live
+  read in `evaluate_restore_epoch_compatibility` + same-object/live-read unit
+  tests.
+* `crates/qbind-node/tests/run_422_d7d3_binary_snapshot_restore_characterization_tests.rs`
+  — correction A predicate/control tests + correction C occupied-target test.
+* Docs: this file, plus
+  `docs/protocol/QBIND_GENESIS_AUTHORITY_ENGINE_QC_INTEGRATION_AUDIT.md` and
+  `docs/protocol/QBIND_PROPOSAL_VOTE_AUTHORITY_LIFECYCLE_CONTRACT.md`.
+
+`crates/qbind-node/src/snapshot_restore.rs` was NOT modified in this corrective
+pass: its precheck contract (authority-marker check → epoch precheck →
+occupied-target materialization) already propagates errors correctly and needed
+no change.
+
+### Release-binary evidence and validation outcomes (this corrective pass)
+
+```text
+# cargo build --release -p qbind-node --bin qbind-node   (profile: release)
+# executable: target/release/qbind-node
+# sha256   = cbb8a7bfeef4f36dfeb17e4910d3bcece6a8db6535df3bac1998b1c7b2a68816
+# byte_len = 16952728
+# source/build revision = a7564d6eb3ebf6bffd4a3031873132ba71a603dc
+#   (implementation checkpoint committed BEFORE these validation outcomes; the
+#    later documentation/formatting changes in this section are recorded separately
+#    and do not alter the tested binary)
+
+# QBIND_D7D3_NODE_BIN=<abs>/target/release/qbind-node #   cargo test -p qbind-node --test run_422_d7d3_binary_snapshot_restore_characterization_tests
+# test result: ok. 24 passed; 0 failed   (release binary; incl. d7d5a_* CLI-combo refusals +
+#                                          control, d7d5c occupied-target, d7d3_c, d7d4_a/b/c,
+#                                          d7d5_b/c, runner/capture controls)
+
+# cargo test -p qbind-node --lib production_consensus_storage
+# test result: ok. 24 passed; 0 failed   (incl. d7d5b_* same-object live-read/stale-observation
+#                                          + retained d7d5_evaluate_matrix_* / persist controls)
+
+# cargo test -p qbind-node --test run_097_snapshot_epoch_parity_tests       => ok. 7 passed
+# cargo test -p qbind-node --test b3_snapshot_restore_tests                 => ok. 10 passed
+# cargo test -p qbind-node --test b5_restore_aware_consensus_start_tests    => ok. 4 passed
+# cargo test -p qbind-node --test run_069_pqc_trust_bundle_reload_check_tests     => ok. 12 passed
+# cargo test -p qbind-node --test run_077_binary_peer_candidate_check_tests       => ok. 12 passed
+# cargo test -p qbind-node --test run_070_pqc_trust_bundle_reload_apply_tests     => ok. 13 passed
+# cargo test -p qbind-node --test run_422_startup_refusal_tests             => ok. 4 passed
+# cargo test -p qbind-node --test run_422_d4_startup_ordering_tests         => ok. 5 passed
+# cargo check -p qbind-node                                                 => Finished (default features)
+```
+
+Literal tool outcomes / limitations (this corrective pass):
+
+* `cargo fmt -p qbind-node -- --check`: the three changed files are NOT in the
+  reported diff (pre-existing diffs are confined to unrelated `build.rs` /
+  `examples/*` files, which were left untouched). Changed code matches the
+  surrounding hand-formatted convention. File-specific line endings preserved;
+  no trailing-whitespace was introduced in the changed hunks.
+* `cargo clippy -p qbind-node --tests`: no new clippy category is introduced by
+  the corrective-pass code (the pre-existing `clippy::result_large_err` on
+  `Result<_, RestoreError>` is unchanged and not aggravated; no new large error
+  variant was added).
+* CodeQL / Code Review (`parallel_validation`): recorded LITERALLY below in the
+  final report — a skipped or backend-errored security tool is incomplete
+  analysis, not a passing "0 alerts"/"no comments" result.
+
+### Reconciliation
+
+* The prior D5 subsection's
+  `D7D5_RESTORE_EPOCH_CONFLICT_BEFORE_MATERIALIZATION=CODE-AND-RELEASE-TEST-POSITIVE`
+  claim was UNRESTRICTED with respect to CLI-mode combinations and cached-epoch
+  decisions; it is **superseded** by this corrective pass, which re-establishes
+  the verdict only after findings A, B, and C are closed with the evidence above.
+* The newly explicit restore/CLI incompatibility (A) and the live-read-versus-
+  cached-startup-observation distinction (B) are documented above; the
+  post-precheck materialization-refusal test (C) is recorded above.
+* Historical execution remains attributed to its actual SHAs; missing objects in
+  this shallow clone do not retract prior work.
+* D4 attribution correction: the historical D4 report's CodeQL outcome was a
+  trivial-scope skip, NOT a newly verified database-size result. This corrective
+  pass does not inherit or re-assert that as a completed scan.
+* Actual changed-file count for this corrective pass: THREE code/test files plus
+  three documentation files (enumerated above).
+
+### Verdict (this corrective pass)
+
+`D7D5_RESTORE_EPOCH_CONFLICT_BEFORE_MATERIALIZATION=CODE-AND-RELEASE-TEST-POSITIVE`
+— re-asserted only now that A (restore/CLI-combination refused before any
+effect), B (decisions read the live committed epoch; read failures stay errors),
+and C (occupied-target refusal after a permitting precheck persists nothing) are
+each closed with concrete implementation and release-binary/unit-test evidence.
+
+All retained D7 posture lines are UNCHANGED:
+`D7_STATUS=PARTIAL-CODE-TEST / PRODUCTION-LIFECYCLE-UNAVAILABLE`,
+`DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED`,
+`GENESIS_AUTHORITY_ACTIVATION=DISABLED`,
+`PRODUCTION_WIRE_CHAIN_ID_BEHAVIOR=UNCHANGED`,
+`CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED`,
+`SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO`. Existing partial-directory
+handling, cross-database crash consistency, signing-state continuity, and durable
+anti-rollback remain unresolved. No readiness promotion and no Run 423 work.
+
+### Literal security-tool outcomes (this corrective pass)
+
+Reported verbatim; a skipped or backend-errored tool is INCOMPLETE analysis, not a
+passing result:
+
+* CodeQL Security Scan (rust): "Analysis was skipped because the database size is
+  too large." — 0 alerts is therefore a SKIP, not a verified clean scan. This is
+  the genuine database-size skip; it is distinct from the historical D4 CodeQL
+  outcome, which was a trivial-scope skip and must not be re-attributed as a
+  verified database-size result.
+* Code Review: reviewed 6 file(s), no review comments; however the tool also
+  reported a backend limitation ("Code review tool is not available in this
+  environment: ... model claude-sonnet-4.6 not found in registry"). The
+  no-comments result is therefore NOT evidence of a completed model review.

@@ -796,3 +796,17 @@ continuity remains NOT-established and C4/C5 stay open; durable anti-rollback an
 cross-database atomicity remain NOT-established, and ordinary startup over a
 legacy partial directory is outside this correction's scope. Evidence:
 `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md` (Run 422 D7-D5 section).
+
+## Run 422 D7-D5 corrective note (CLI precheck bypass + cached-epoch decisions)
+
+The D7-D5 successor note above is corrected. A requested restore combined with any
+CLI storage-exit mode is now REFUSED before the early storage open and before any
+account-state materialization or restore-marker write (all predicates covered,
+including the Run 077 peer-candidate path-only and enabled-only partial shapes);
+CLI modes without a restore are unchanged. The epoch-compatibility decision is now
+taken from a fresh LIVE read of the committed epoch through the canonical storage
+handle rather than the cached startup observation, so a same-handle write cannot
+leave a stale decision to authorize a conflicting overwrite, and a live-read
+failure stays an error rather than epoch absence. Authority lifecycle posture is
+unchanged. Evidence:
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md` (Run 422 D7-D5 corrective pass).

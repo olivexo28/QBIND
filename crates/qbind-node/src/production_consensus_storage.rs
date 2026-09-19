@@ -505,22 +505,33 @@ pub enum RestoreEpochPlan {
 ///
 /// This function is the single source of truth for the compatibility matrix:
 ///
-/// | Snapshot epoch | Existing committed epoch | Result                                           |
+/// | Snapshot epoch | Live committed epoch     | Result                                           |
 /// | -------------- | ------------------------ | ------------------------------------------------ |
-/// | `None`         | `None`                   | `Ok(NoEpochToPersist)`                            |
-/// | `None`         | `Some(m)`                | `Ok(NoEpochToPersist)` (m preserved)             |
+/// | `None`         | (not read)               | `Ok(NoEpochToPersist)`                            |
 /// | `Some(n)`      | `None`                   | `Ok(PersistAfterMaterialization { n })`          |
 /// | `Some(n)`      | `Some(n)`                | `Ok(AlreadyConsistent { n })`                    |
 /// | `Some(n)`      | `Some(m)`, m ≠ n         | `Err(RestoreEpochInconsistent { m, n })`         |
+/// | `Some(n)`      | read fails               | `Err(EpochProbeFailed { .. })`                   |
 ///
-/// "None" in the storage column means *no committed epoch*
-/// ([`ConsensusStorageState::PresentNoCommittedEpoch`]), never a failed read
-/// or an unavailable required storage handle — those are surfaced earlier as
-/// fatal errors by [`open_production_consensus_storage`].
+/// **Run 422 D7-D5 correction B.** The "live committed epoch" is read
+/// **fresh through the canonical live handle**
+/// ([`ConsensusStorage::get_current_epoch`]) at the moment the decision is
+/// made — it is NOT the cached [`OpenedProductionConsensusStorage::state`]
+/// startup observation. A write through that same handle after open (or by
+/// this binary's own earlier persistence) would make the cached field stale;
+/// consulting the live value keeps the early pre-materialization check and
+/// the later persistence path consistent with the actual on-disk epoch.
+/// `opened.state` remains only a startup observation useful for logging.
+///
+/// "None" in the live column means *no committed epoch has ever been written*
+/// (an honest `Ok(None)` from the storage), never a failed read: a failed
+/// read is surfaced as [`ProductionConsensusStorageError::EpochProbeFailed`]
+/// and never collapses into epoch absence or a successful plan.
 ///
 /// It performs **no writes** and never coerces epoch absence into `Some(0)`.
 /// Both [`persist_restored_snapshot_epoch`] (the writer) and the early
-/// pre-materialization restore check consume this same decision.
+/// pre-materialization restore check consume this same decision, so both
+/// observe the identical live value.
 pub fn evaluate_restore_epoch_compatibility(
     opened: &OpenedProductionConsensusStorage,
     snapshot_epoch: Option<u64>,
@@ -529,32 +540,37 @@ pub fn evaluate_restore_epoch_compatibility(
         return Ok(RestoreEpochPlan::NoEpochToPersist);
     };
 
-    // No live storage handle (no --data-dir). Defensive: unreachable on the
-    // supported restore path (restore requires --data-dir).
-    if opened.path.is_none() || opened.handle.is_none() {
-        return Ok(RestoreEpochPlan::NoStorageHandle);
-    }
+    // A live storage handle is required to read the CURRENT committed epoch.
+    // Absent (no --data-dir) is defensive: unreachable on the supported
+    // restore path (restore requires --data-dir).
+    let (path, storage) = match (&opened.path, &opened.handle) {
+        (Some(p), Some(s)) => (p, s),
+        _ => return Ok(RestoreEpochPlan::NoStorageHandle),
+    };
 
-    match opened.state {
-        ConsensusStorageState::CommittedEpoch(existing) if existing == target_epoch => {
+    // Run 422 D7-D5 correction B: decide from a FRESH read through the
+    // canonical live handle, not the cached `opened.state` startup
+    // observation. Read failures remain fatal errors — never epoch absence,
+    // never a successful plan.
+    let live_epoch = storage.get_current_epoch().map_err(|source| {
+        ProductionConsensusStorageError::EpochProbeFailed {
+            path: path.clone(),
+            source,
+        }
+    })?;
+
+    match live_epoch {
+        Some(existing) if existing == target_epoch => {
             Ok(RestoreEpochPlan::AlreadyConsistent { epoch: existing })
         }
-        ConsensusStorageState::CommittedEpoch(existing) => {
-            Err(ProductionConsensusStorageError::RestoreEpochInconsistent {
-                path: opened
-                    .path
-                    .clone()
-                    .expect("path presence checked above"),
-                existing,
-                snapshot: target_epoch,
-            })
-        }
-        ConsensusStorageState::PresentNoCommittedEpoch => {
-            Ok(RestoreEpochPlan::PersistAfterMaterialization {
-                epoch: target_epoch,
-            })
-        }
-        ConsensusStorageState::NoConsensusStorage => Ok(RestoreEpochPlan::NoStorageHandle),
+        Some(existing) => Err(ProductionConsensusStorageError::RestoreEpochInconsistent {
+            path: path.clone(),
+            existing,
+            snapshot: target_epoch,
+        }),
+        None => Ok(RestoreEpochPlan::PersistAfterMaterialization {
+            epoch: target_epoch,
+        }),
     }
 }
 
@@ -1075,5 +1091,188 @@ mod tests {
             opened.handle.as_ref().unwrap().get_current_epoch().unwrap(),
             Some(42)
         );
+    }
+
+    // ------------------------------------------------------------------
+    // Run 422 D7-D5 correction B — decisions read the LIVE committed epoch
+    // through the canonical handle, never the cached `opened.state` startup
+    // observation. Each test mutates the epoch through the SAME
+    // `OpenedProductionConsensusStorage` object and does NOT close/reopen
+    // between the mutation and the decision (closing/reopening would refresh
+    // the cached field and hide the defect this covers).
+    // ------------------------------------------------------------------
+
+    /// Correction B, test 1. Open with no committed epoch (cached state =
+    /// PresentNoCommittedEpoch), write 42 through the live handle, then
+    /// evaluate a snapshot declaring epoch 7. The cached "no epoch" would
+    /// authorize a `PersistAfterMaterialization`; the live read must instead
+    /// force a conflict rejection from BOTH the evaluator and the writer,
+    /// and 42 must be preserved.
+    #[test]
+    fn d7d5b_live_write_after_open_forces_conflict_not_cached_persist() {
+        let tmp = TempDir::new().unwrap();
+        let cfg = devnet_config_with_data_dir(tmp.path());
+        let opened = open_production_consensus_storage(&cfg).expect("open");
+        // Cached startup observation: no committed epoch.
+        assert_eq!(opened.state, ConsensusStorageState::PresentNoCommittedEpoch);
+
+        // Mutate through the SAME live handle — cached `opened.state` is now stale.
+        opened.handle.as_ref().unwrap().put_current_epoch(42).unwrap();
+
+        // Evaluator must consult the live 42 (conflict), not the cached absence.
+        match evaluate_restore_epoch_compatibility(&opened, Some(7)) {
+            Err(ProductionConsensusStorageError::RestoreEpochInconsistent {
+                existing,
+                snapshot,
+                ..
+            }) => {
+                assert_eq!(existing, 42, "evaluator must read the live 42");
+                assert_eq!(snapshot, 7);
+            }
+            other => panic!("expected live conflict, got {other:?}"),
+        }
+
+        // Writer (which consumes the same decision) must also reject and never
+        // overwrite the live 42.
+        assert!(persist_restored_snapshot_epoch(&opened, Some(7)).is_err());
+        assert_eq!(
+            opened.handle.as_ref().unwrap().get_current_epoch().unwrap(),
+            Some(42),
+            "the live committed epoch 42 must be preserved on rejection"
+        );
+    }
+
+    /// Correction B, test 2. Open with committed epoch 7 (cached state =
+    /// CommittedEpoch(7)), update the live handle to 42, then evaluate a
+    /// snapshot declaring epoch 7. The cached value would report a spurious
+    /// `AlreadyConsistent { 7 }` match; the live read must reject (42 ≠ 7).
+    #[test]
+    fn d7d5b_cached_matching_value_does_not_authorize_after_live_update() {
+        let tmp = TempDir::new().unwrap();
+        let cfg = devnet_config_with_data_dir(tmp.path());
+        {
+            let seed = open_production_consensus_storage(&cfg).expect("open");
+            seed.handle.as_ref().unwrap().put_current_epoch(7).unwrap();
+        }
+        let opened = open_production_consensus_storage(&cfg).expect("reopen");
+        assert_eq!(opened.state, ConsensusStorageState::CommittedEpoch(7));
+
+        // Advance the live handle to 42; the cached CommittedEpoch(7) is now stale.
+        opened.handle.as_ref().unwrap().put_current_epoch(42).unwrap();
+
+        // A cached "matching" 7 must NOT authorize; the live 42 conflicts.
+        match evaluate_restore_epoch_compatibility(&opened, Some(7)) {
+            Err(ProductionConsensusStorageError::RestoreEpochInconsistent {
+                existing,
+                snapshot,
+                ..
+            }) => {
+                assert_eq!(existing, 42, "must reject on the live 42, not cached 7");
+                assert_eq!(snapshot, 7);
+            }
+            other => panic!("cached matching value must not authorize; got {other:?}"),
+        }
+        assert_eq!(
+            opened.handle.as_ref().unwrap().get_current_epoch().unwrap(),
+            Some(42)
+        );
+    }
+
+    /// Correction B, test 3. Open with no committed epoch; successfully persist
+    /// epoch 7 through the object; then, using the SAME object (whose cached
+    /// state is still the pre-write PresentNoCommittedEpoch), attempt to persist
+    /// epoch 9. The second call must reject on the live 7 and preserve it.
+    #[test]
+    fn d7d5b_second_persist_through_same_object_rejects_on_live_value() {
+        let tmp = TempDir::new().unwrap();
+        let cfg = devnet_config_with_data_dir(tmp.path());
+        let opened = open_production_consensus_storage(&cfg).expect("open");
+        assert_eq!(opened.state, ConsensusStorageState::PresentNoCommittedEpoch);
+
+        // First persist writes 7 through the live handle.
+        assert!(persist_restored_snapshot_epoch(&opened, Some(7)).expect("persist 7"));
+        assert_eq!(
+            opened.handle.as_ref().unwrap().get_current_epoch().unwrap(),
+            Some(7)
+        );
+
+        // Same object, cached state still says PresentNoCommittedEpoch. A second
+        // persist of 9 must consult the live 7 and reject — not re-persist.
+        assert!(
+            persist_restored_snapshot_epoch(&opened, Some(9)).is_err(),
+            "second persist of a conflicting epoch must reject on the live value"
+        );
+        assert_eq!(
+            opened.handle.as_ref().unwrap().get_current_epoch().unwrap(),
+            Some(7),
+            "the live 7 must be preserved after the rejected second persist"
+        );
+    }
+
+    /// Correction B, test 4. Repeating persistence of the SAME epoch 7 through
+    /// the same object remains an idempotent no-op (live read observes the just-
+    /// written 7 and reports AlreadyConsistent).
+    #[test]
+    fn d7d5b_repeat_persist_same_epoch_through_same_object_is_idempotent() {
+        let tmp = TempDir::new().unwrap();
+        let cfg = devnet_config_with_data_dir(tmp.path());
+        let opened = open_production_consensus_storage(&cfg).expect("open");
+
+        assert!(persist_restored_snapshot_epoch(&opened, Some(7)).expect("persist 7"));
+        // Second persist of the same 7: idempotent no-op via the live read.
+        assert!(
+            !persist_restored_snapshot_epoch(&opened, Some(7)).expect("idempotent"),
+            "repeating the same epoch must be an idempotent no-op"
+        );
+        assert_eq!(
+            opened.handle.as_ref().unwrap().get_current_epoch().unwrap(),
+            Some(7)
+        );
+    }
+
+    /// Correction B — live-read error propagation. A corrupted on-disk
+    /// `meta:current_epoch` (raw-put bypassing the storage API, mirroring the
+    /// Run 422 D7-C1 `raw_put` corruption pattern) must surface as a fatal
+    /// [`ProductionConsensusStorageError::EpochProbeFailed`] from the live read
+    /// inside `evaluate_restore_epoch_compatibility` — never epoch absence and
+    /// never a successful plan. The cached `state` is deliberately set to a
+    /// value that would otherwise authorize, proving the live read governs.
+    #[test]
+    fn d7d5b_live_read_error_surfaces_as_probe_failed_not_absence() {
+        let tmp = TempDir::new().unwrap();
+        let cfg = devnet_config_with_data_dir(tmp.path());
+        let canonical_path = cfg.consensus_storage_dir().expect("data_dir set");
+        // Create the database and close it so it can be corrupted on disk.
+        {
+            let _ = open_production_consensus_storage(&cfg).expect("open");
+        }
+        // Corrupt the checksummed epoch envelope directly on disk: a valid
+        // checksum prefix is absent, so the strict metadata unwrap must error.
+        {
+            let mut opts = rocksdb::Options::default();
+            opts.create_if_missing(false);
+            let db = rocksdb::DB::open(&opts, &canonical_path).expect("reopen raw for corruption");
+            let mut corrupt = Vec::new();
+            corrupt.extend_from_slice(&[0xDE, 0xAD, 0xBE, 0xEF]); // wrong checksum
+            corrupt.extend_from_slice(&42u64.to_be_bytes()); // plausible payload
+            db.put(b"meta:current_epoch", &corrupt).expect("raw put corrupt");
+        }
+        // Re-open the handle WITHOUT probing (the probe lives in
+        // `open_production_consensus_storage`; using the low-level open lets us
+        // reach `evaluate`'s own live read). The cached `state` is set to a
+        // value that would authorize a matching restore if it were consulted.
+        let handle = RocksDbConsensusStorage::open(&canonical_path).expect("reopen handle");
+        let opened = OpenedProductionConsensusStorage {
+            path: Some(canonical_path),
+            handle: Some(Arc::new(handle)),
+            state: ConsensusStorageState::CommittedEpoch(7),
+        };
+        match evaluate_restore_epoch_compatibility(&opened, Some(7)) {
+            Err(ProductionConsensusStorageError::EpochProbeFailed { .. }) => {}
+            other => panic!(
+                "a corrupted live epoch read must surface as EpochProbeFailed, \
+                 never absence or a plan; got {other:?}"
+            ),
+        }
     }
 }

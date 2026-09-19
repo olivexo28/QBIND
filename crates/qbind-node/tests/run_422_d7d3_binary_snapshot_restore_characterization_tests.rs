@@ -832,6 +832,16 @@ const M_TARGET_NOT_EMPTY: &str = "restore-from-snapshot target state directory i
 /// recovery of any mixed account/epoch state.
 const M_CONSENSUS_LOOP_STARTED: &str = "[binary-consensus] Starting consensus loop:";
 
+/// **Run 422 D7-D5 correction A.** The pre-storage-open refusal emitted by
+/// `main.rs` when a requested `--restore-from-snapshot` is combined with any
+/// CLI validation/apply exit mode (`cli_storage_exit_mode_active`). This
+/// refusal fires BEFORE the early consensus-storage open, before account-state
+/// materialization, and before any restore-marker write. See
+/// `crates/qbind-node/src/main.rs`.
+const M_D7D5_CLI_COMBO_REJECT: &str =
+    "[binary] FATAL: refused by Run 422 D7-D5: --restore-from-snapshot is \
+     unsupported in combination with the CLI validation/apply exit mode(s):";
+
 /// Base argv for a restore-driven LocalMesh DevNet start against a fresh
 /// data dir. No `--genesis-path` is supplied, so the binary takes the legacy
 /// `apply_snapshot_restore_if_requested` path (no authority-marker context)
@@ -1545,6 +1555,339 @@ fn d7d5_c_preexisting_restore_marker_preserved_on_rejection() {
         marker_after, preexisting_marker,
         "pre-existing restore audit marker must be preserved verbatim on rejection"
     );
+}
+
+// ============================================================================
+// Correction A. Restore + CLI validation/apply exit-mode combination refusal
+//               (child-process, release-binary). **Run 422 D7-D5.**
+// ============================================================================
+//
+// A requested `--restore-from-snapshot` combined with ANY mode covered by
+// `cli_storage_exit_mode_active` is unsupported and must be refused BEFORE the
+// early consensus-storage open, before account-state materialization, and
+// before any restore-marker write. Previously such a combination merely
+// skipped the epoch precheck (`epoch_precheck=None`) yet still ran the restore
+// pipeline; the absence of later consensus startup did not prevent account-
+// state copying or marker writes. Every predicate — including its partial-
+// configuration shapes — is exercised with a real restore request against a
+// destination whose consensus storage already holds a committed epoch (42),
+// and the pre-existing epoch is asserted to remain after the refusal.
+
+/// One excluded-mode case: `flag_args` are the CLI validation/apply exit-mode
+/// arguments appended to a real restore request. Returns nothing; panics on any
+/// deviation from the required pre-effect refusal contract.
+fn assert_restore_plus_cli_mode_refused_before_effects(tag: &str, flag_args: &[&str]) {
+    let chain_id = devnet_chain_id();
+
+    let src_state = tempdir().expect("tempdir");
+    let snap_root = tempdir().expect("tempdir");
+    let data_dir = tempdir().expect("tempdir");
+    let snapshot_dir = snap_root.path().join("snap-cli-combo");
+    // Valid real snapshot declaring epoch 7.
+    build_real_snapshot(src_state.path(), &snapshot_dir, chain_id, 333, 4242, Some(7));
+
+    // Destination consensus storage already holds a committed epoch (42).
+    let consensus_dir = data_dir.path().join("consensus");
+    {
+        let storage = RocksDbConsensusStorage::open(&consensus_dir).expect("seed consensus");
+        storage.put_current_epoch(42).expect("seed committed epoch 42");
+    }
+    let state_dir = data_dir.path().join(VM_V0_STATE_SUBDIR);
+    let marker_path = data_dir.path().join(RESTORE_MARKER_FILENAME);
+    assert!(!state_dir.exists(), "[{tag}] precondition: state_vm_v0 absent");
+    assert!(!marker_path.exists(), "[{tag}] precondition: restore marker absent");
+
+    // Restore request + the excluded CLI exit-mode flag(s).
+    let mut args = restore_localmesh_args(data_dir.path(), &snapshot_dir);
+    for a in flag_args {
+        args.push((*a).to_string());
+    }
+    log_executable_provenance(tag, &args);
+    let (status, stderr, capture) = {
+        let mut child = DrainedChild::spawn(&args);
+        let status = child.wait_natural_exit(NEGATIVE_DEADLINE);
+        (status, child.stderr_snapshot(), child.stderr_capture())
+    };
+    maybe_dump_child_stderr(tag, &stderr);
+
+    // Natural fail-closed exit 1 (std::process::exit(1)), not a signal.
+    assert_eq!(
+        status.code(),
+        Some(1),
+        "[{tag}] the unsupported restore+CLI-mode combination must fail closed with \
+         natural exit code 1 (status={status:?}); stderr=\n{stderr}"
+    );
+    assert!(
+        status.signal().is_none(),
+        "[{tag}] the refusal must be a natural exit, not a signal (status={status:?}); \
+         stderr=\n{stderr}"
+    );
+    // The specific combination refusal itself (NOT a later missing-file or
+    // command-configuration error).
+    assert!(
+        stderr.contains(M_D7D5_CLI_COMBO_REJECT),
+        "[{tag}] must carry the D7-D5 restore+CLI-mode combination refusal; stderr=\n{stderr}"
+    );
+    // Complete capture before any absence assertion.
+    assert!(
+        capture.is_complete(),
+        "[{tag}] stderr capture was not complete ({capture:?}); cannot assert forbidden markers"
+    );
+    // The refusal precedes the early storage open, so NONE of these appear:
+    // no storage-open log, no epoch-conflict refusal, no materialization, no
+    // occupied-target refusal, no successful-restore/baseline observation.
+    for forbidden in [
+        M_STORAGE_OPEN,
+        M_D7D5_REJECT,
+        M_TARGET_NOT_EMPTY,
+        M_RESTORE_OK,
+        M_B5,
+        M_LOOP_REACHED,
+        M_BASELINE_APPLIED,
+        M_EPOCH_PERSIST,
+    ] {
+        assert!(
+            !stderr.contains(forbidden),
+            "[{tag}] pre-open combination refusal must not emit {forbidden:?}; stderr=\n{stderr}"
+        );
+    }
+
+    // Filesystem-absence checks BEFORE any account accessor (no DB creation).
+    assert!(
+        !state_dir.exists(),
+        "[{tag}] state_vm_v0 must remain ABSENT (refusal before materialization)"
+    );
+    assert!(
+        !marker_path.exists(),
+        "[{tag}] the restore audit marker must remain ABSENT (refusal before any marker write)"
+    );
+
+    // Independent reopen: the pre-existing consensus epoch (42) is preserved.
+    {
+        let storage = RocksDbConsensusStorage::open(&consensus_dir).expect("reopen consensus");
+        let obs = observe_consensus_storage(Some(&storage)).expect("observe");
+        assert_eq!(
+            obs,
+            ConsensusStorageObservation::CommittedEpoch(42),
+            "[{tag}] the pre-existing committed epoch 42 must be preserved after the refusal"
+        );
+    }
+}
+
+/// **Run 422 D7-D5 correction A.** Each excluded predicate — and each of the
+/// peer-candidate hook's / reload-apply's partial-configuration shapes — is
+/// exercised with a real restore request and must trigger the pre-effect
+/// combination refusal.
+#[test]
+fn d7d5a_restore_with_reload_check_mode_refused_before_effects() {
+    // Predicate 1: `p2p_trust_bundle_reload_check.is_some()`.
+    assert_restore_plus_cli_mode_refused_before_effects(
+        "D5-A-reload-check",
+        &["--p2p-trust-bundle-reload-check", "/tmp/qbind-d5a-nonexistent-bundle.json"],
+    );
+}
+
+#[test]
+fn d7d5a_restore_with_peer_candidate_check_path_only_refused_before_effects() {
+    // Predicate 2 (partial shape: path only) via `run077_hook_active`.
+    assert_restore_plus_cli_mode_refused_before_effects(
+        "D5-A-peer-candidate-path-only",
+        &["--p2p-trust-bundle-peer-candidate-check", "/tmp/qbind-d5a-nonexistent-candidate.json"],
+    );
+}
+
+#[test]
+fn d7d5a_restore_with_peer_candidate_enabled_only_refused_before_effects() {
+    // Predicate 2 (partial shape: enabled only) via `run077_hook_active`.
+    assert_restore_plus_cli_mode_refused_before_effects(
+        "D5-A-peer-candidate-enabled-only",
+        &["--p2p-trust-bundle-peer-candidate-validation-enabled"],
+    );
+}
+
+#[test]
+fn d7d5a_restore_with_reload_apply_path_mode_refused_before_effects() {
+    // Predicate 3: `p2p_trust_bundle_reload_apply_path.is_some()`.
+    assert_restore_plus_cli_mode_refused_before_effects(
+        "D5-A-reload-apply-path",
+        &["--p2p-trust-bundle-reload-apply-path", "/tmp/qbind-d5a-nonexistent-apply.json"],
+    );
+}
+
+#[test]
+fn d7d5a_restore_with_reload_apply_enabled_mode_refused_before_effects() {
+    // Predicate 4: `p2p_trust_bundle_reload_apply_enabled`.
+    assert_restore_plus_cli_mode_refused_before_effects(
+        "D5-A-reload-apply-enabled",
+        &["--p2p-trust-bundle-reload-apply-enabled"],
+    );
+}
+
+/// **Run 422 D7-D5 correction A — deliberate-command-contract control.** A
+/// restore request carrying NO CLI validation/apply exit-mode flag is NOT
+/// refused by the combination guard: it reaches the normal restore path and
+/// (over a fresh, compatible destination) materializes and persists epoch 7.
+/// This demonstrates the refusal above is the deliberate contract for the
+/// restore+CLI-mode combination specifically, not a blanket restore refusal.
+/// (The full compatible-restore matrix is covered by
+/// `d7d5_b_compatible_present_epochs_reach_baseline`.)
+#[test]
+fn d7d5a_restore_without_cli_exit_mode_is_permitted_control() {
+    let chain_id = devnet_chain_id();
+    let src_state = tempdir().expect("tempdir");
+    let snap_root = tempdir().expect("tempdir");
+    let data_dir = tempdir().expect("tempdir");
+    let snapshot_dir = snap_root.path().join("snap-control");
+    build_real_snapshot(src_state.path(), &snapshot_dir, chain_id, 777, 4242, Some(7));
+
+    // Plain restore, no CLI validation/apply exit-mode flag.
+    let args = restore_localmesh_args(data_dir.path(), &snapshot_dir);
+    log_executable_provenance("D5-A-permitted-control", &args);
+    let stderr = {
+        let mut child = DrainedChild::spawn(&args);
+        child
+            .observe_then_terminate(&[M_BASELINE_APPLIED], POSITIVE_DEADLINE)
+            .expect_observed_then_terminated("D5-A-permitted-control")
+    };
+    maybe_dump_child_stderr("D5-A-permitted-control", &stderr);
+    // The combination guard must NOT fire for a restore without a CLI exit mode.
+    assert!(
+        !stderr.contains(M_D7D5_CLI_COMBO_REJECT),
+        "a restore without a CLI exit mode must not be refused by the combination guard; \
+         stderr=\n{stderr}"
+    );
+    // It reaches the normal restore path and persists epoch 7.
+    assert_marker_order(
+        &stderr,
+        &[M_STORAGE_OPEN, M_RESTORE_OK, M_B5, M_EPOCH_PERSIST, M_LOOP_REACHED, M_BASELINE_APPLIED],
+    );
+    let (acct, obs) = observe_restored_data_dir(data_dir.path());
+    assert_eq!(acct, AccountState::new(7, 4242));
+    assert_eq!(obs, ConsensusStorageObservation::CommittedEpoch(7));
+}
+
+// ============================================================================
+// Correction C. Occupied-target refusal AFTER the epoch precheck PERMITS
+//               (child-process, release-binary). **Run 422 D7-D5.**
+// ============================================================================
+//
+// Establishes the post-precheck materialization-refusal path through the
+// corrected production binary (NOT a library entrypoint that passes no
+// precheck): the destination consensus storage opens with NO committed epoch,
+// so the epoch compatibility check PERMITS the restore attempt; but the
+// destination `state_vm_v0` is already occupied with a known sentinel account,
+// so the subsequent occupied-target check refuses materialization with the
+// `TargetStateNotEmpty` diagnostic. Nothing is persisted, the sentinel is
+// untouched, and no restore marker is written.
+
+/// **Run 422 D7-D5 correction C.** Precheck permits, occupied-target refuses.
+#[test]
+fn d7d5c_occupied_target_refused_after_precheck_permits() {
+    let chain_id = devnet_chain_id();
+
+    let src_state = tempdir().expect("tempdir");
+    let snap_root = tempdir().expect("tempdir");
+    let data_dir = tempdir().expect("tempdir");
+    let snapshot_dir = snap_root.path().join("snap-occupied");
+    // Valid real snapshot with epoch Some(7).
+    build_real_snapshot(src_state.path(), &snapshot_dir, chain_id, 888, 4242, Some(7));
+
+    // Destination consensus storage opens successfully with NO committed epoch:
+    // create the directory as an empty RocksDB (no put_current_epoch), so the
+    // live precheck read returns None → PersistAfterMaterialization (permits).
+    let consensus_dir = data_dir.path().join("consensus");
+    {
+        let _storage = RocksDbConsensusStorage::open(&consensus_dir).expect("open empty consensus");
+    }
+
+    // Destination state_vm_v0 is already occupied with a known sentinel account.
+    const SENTINEL_ID: [u8; 32] = [0xAB; 32];
+    let sentinel_value = AccountState::new(99, 123_456);
+    let state_dir = data_dir.path().join(VM_V0_STATE_SUBDIR);
+    {
+        let occupied = RocksDbAccountState::open(&state_dir).expect("open occupied state_vm_v0");
+        occupied
+            .put_account_state(&SENTINEL_ID, &sentinel_value)
+            .expect("seed sentinel account");
+        occupied.flush().expect("flush sentinel");
+    }
+    let marker_path = data_dir.path().join(RESTORE_MARKER_FILENAME);
+    assert!(!marker_path.exists(), "precondition: restore marker absent");
+
+    // No CLI exclusion mode is selected — a plain restore request.
+    let args = restore_localmesh_args(data_dir.path(), &snapshot_dir);
+    log_executable_provenance("D5-C-occupied-target", &args);
+    let (status, stderr, capture) = {
+        let mut child = DrainedChild::spawn(&args);
+        let status = child.wait_natural_exit(NEGATIVE_DEADLINE);
+        (status, child.stderr_snapshot(), child.stderr_capture())
+    };
+    maybe_dump_child_stderr("D5-C-occupied-target", &stderr);
+
+    // Natural fail-closed exit 1 with the SPECIFIC TargetStateNotEmpty diagnostic.
+    assert_eq!(
+        status.code(),
+        Some(1),
+        "occupied-target refusal must fail closed with natural exit code 1 (status={status:?}); \
+         stderr=\n{stderr}"
+    );
+    assert!(status.signal().is_none());
+    assert!(
+        stderr.contains(M_TARGET_NOT_EMPTY),
+        "must carry the TargetStateNotEmpty occupied-target refusal; stderr=\n{stderr}"
+    );
+    // The epoch precheck PERMITTED the attempt (no epoch conflict), so the D7-D5
+    // epoch-conflict refusal must be ABSENT — this proves the occupied-target
+    // check is what refused, on the production precheck path.
+    assert!(
+        !stderr.contains(M_D7D5_REJECT),
+        "the epoch precheck must PERMIT (no conflict); the refusal must be occupied-target, \
+         not epoch-conflict; stderr=\n{stderr}"
+    );
+    assert!(
+        !stderr.contains(M_D7D5_CLI_COMBO_REJECT),
+        "no CLI exit mode is selected; the combination guard must not fire; stderr=\n{stderr}"
+    );
+    // Storage was opened early (for the permitting precheck) BEFORE the refusal.
+    assert_marker_order(&stderr, &[M_STORAGE_OPEN, M_TARGET_NOT_EMPTY]);
+    // Complete capture before any absence / no-persistence assertion.
+    assert!(
+        capture.is_complete(),
+        "stderr capture was not complete ({capture:?}); cannot assert forbidden markers"
+    );
+    // No successful restore, baseline application, or snapshot-epoch persistence.
+    for forbidden in [M_RESTORE_OK, M_B5, M_LOOP_REACHED, M_BASELINE_APPLIED, M_EPOCH_PERSIST] {
+        assert!(
+            !stderr.contains(forbidden),
+            "occupied-target refusal must not emit {forbidden:?}; stderr=\n{stderr}"
+        );
+    }
+
+    // The restore audit marker must remain ABSENT (it was absent pre-run).
+    assert!(
+        !marker_path.exists(),
+        "restore audit marker must remain absent after an occupied-target refusal"
+    );
+
+    // Independent reopen: consensus still reports PresentNoCommittedEpoch and the
+    // sentinel account value is unchanged.
+    {
+        let storage = RocksDbConsensusStorage::open(&consensus_dir).expect("reopen consensus");
+        let obs = observe_consensus_storage(Some(&storage)).expect("observe");
+        assert_eq!(
+            obs,
+            ConsensusStorageObservation::PresentNoCommittedEpoch,
+            "no snapshot epoch may be persisted when materialization is refused"
+        );
+    }
+    {
+        let occupied = RocksDbAccountState::open(&state_dir).expect("reopen occupied state_vm_v0");
+        assert_eq!(
+            occupied.get_account_state(&SENTINEL_ID),
+            sentinel_value,
+            "the pre-existing sentinel account value must remain unchanged"
+        );
+    }
 }
 
 // ============================================================================
