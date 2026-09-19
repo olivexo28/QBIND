@@ -2343,6 +2343,488 @@ fn d7d4_c_fresh_directory_ordinary_start_control() {
 }
 
 // ============================================================================
+// D7-D6. Late restore FAILURE (marker-open) and subsequent restart paths
+//        (child-process, release-binary). **Run 422 D7-D6.**
+// ============================================================================
+//
+// This section characterizes a DIFFERENT failure than D7-D4: not a legacy
+// pre-fix layout imported via library calls, but a failure produced by the
+// CORRECTED release executable itself during an otherwise-COMPATIBLE restore.
+//
+// Source-backed operation ordering (`snapshot_restore.rs`
+// `materialize_validated_snapshot` and `main.rs` restore path):
+//   1. `main.rs` opens the canonical `<data_dir>/consensus` storage early for a
+//      requested restore (`M_STORAGE_OPEN`), reads the live committed epoch, and
+//      runs the D5 pre-materialization epoch-compatibility precheck.
+//   2. For a compatible snapshot (`Some(7)` into a destination with NO committed
+//      epoch) the precheck PERMITS, and `materialize_validated_snapshot`:
+//        a. creates `<data_dir>/state_vm_v0` and COPIES the snapshot account
+//           state into it (`copy_dir_recursive`), THEN
+//        b. calls `write_restore_marker`, which OPENS the
+//           `RESTORE_MARKER_FILENAME` path with `OpenOptions::create(true)
+//           .append(true).open(path)` to append one audit line.
+//   3. The Run 097 snapshot-epoch persistence runs only AFTER a successful
+//      restore outcome (`if let Some(outcome)` in `main.rs`).
+//
+// Deterministic failure mechanism: at the `RESTORE_MARKER_FILENAME` path we
+// pre-create a DIRECTORY (containing a small fixed-byte sentinel file). Opening
+// a directory as an appendable file fails with EISDIR ("Is a directory"), so
+// step (2b) fails AFTER the account state was already copied in step (2a) and
+// BEFORE the Run 097 epoch persistence in step (3). `main.rs` maps the
+// `RestoreError::Io` to a fatal `[restore] ERROR: ...` and `std::process::exit(1)`.
+// A directory (not a chmod) is used so the obstruction survives tests run as
+// root, which a permission-only obstruction would not.
+//
+// This is an ORDINARY local I/O-failure characterization — NOT a power-loss
+// simulation, malicious-rollback test, or durability proof. Reaching the
+// consensus loop (case B) or preserving an account value is NOT signing-state
+// continuity or safe recovery; the marker directory is NOT an "absent" marker
+// (the obstruction exists; no successful audit record was written).
+
+/// Fixed sentinel bytes written into the obstructing marker DIRECTORY. Their
+/// preservation across each child run is asserted (the failed marker open must
+/// not have mutated the obstruction).
+const OBSTRUCTION_SENTINEL_BYTES: &[u8] = b"D7D6-marker-open-obstruction-sentinel-v1";
+/// Name of the sentinel file placed INSIDE the obstructing marker directory.
+const OBSTRUCTION_SENTINEL_FILENAME: &str = "obstruction_sentinel.bin";
+/// Substring of the `write_restore_marker` open-failure message
+/// (`snapshot_restore.rs`): `cannot open marker file <path>: <os error>`.
+const M_MARKER_OPEN_FAIL: &str = "cannot open marker file";
+/// The `RestoreError::Io` `Display` prefix surfaced by `main.rs` as
+/// `[restore] ERROR: restore-from-snapshot IO error: ...`.
+const M_RESTORE_IO_ERROR: &str = "restore-from-snapshot IO error:";
+
+/// A destination left behind by a COMPATIBLE restore that copied account state
+/// and then FAILED to open its audit marker (obstructed by a directory). The
+/// tempdirs are retained so the continuation cases (B/C) can operate over the
+/// exact failed directory without it being cleaned up.
+struct MarkerObstructedFailedDestination {
+    _src_state: tempfile::TempDir,
+    _snap_root: tempfile::TempDir,
+    /// The failed destination: restored `state_vm_v0` + `PresentNoCommittedEpoch`
+    /// consensus + an obstructing marker DIRECTORY holding the sentinel.
+    data_dir: tempfile::TempDir,
+    /// Snapshot directory declaring epoch `Some(7)` (reused by the case-C retry).
+    snapshot_dir: PathBuf,
+    /// `<data_dir>/RESTORE_MARKER_FILENAME` — a DIRECTORY (the obstruction).
+    marker_dir_path: PathBuf,
+    /// `<marker_dir_path>/OBSTRUCTION_SENTINEL_FILENAME` — the fixed-byte sentinel.
+    sentinel_path: PathBuf,
+}
+
+/// Produce AND verify the marker-obstructed failed destination through the
+/// CORRECTED release executable (this is Run 422 D7-D6 scenario A, factored into
+/// a reusable helper so B and C can each reproduce it independently with their
+/// OWN temporary directories).
+///
+/// Fixture (task section 4):
+///   * Real supported checkpoint, snapshot epoch `Some(7)`, known account
+///     (`ACCOUNT_ID` = 7/4242).
+///   * Destination consensus storage opened as `PresentNoCommittedEpoch`,
+///     EXPLICITLY observed before launch.
+///   * Account-state destination (`state_vm_v0`) initially ABSENT.
+///   * No excluded CLI mode.
+///   * At `RESTORE_MARKER_FILENAME`: a DIRECTORY containing a small sentinel
+///     file with fixed bytes (obstructs the appendable-file open).
+///   * All DB handles closed before the child launches.
+///
+/// Scenario-A requirements verified here: natural exit 1 (no signal); the
+/// specific marker-open I/O failure naming the obstructed marker path; complete
+/// capture; storage-open observed BEFORE the failure; NO CLI-combination or
+/// epoch-conflict refusal; NO restore-success/baseline/consensus-loop/epoch
+/// persistence; and, after reap, independent reads find the restored account and
+/// `PresentNoCommittedEpoch`, with the marker path still a directory and the
+/// sentinel bytes unchanged.
+fn produce_and_verify_marker_obstructed_failure(
+    tag: &str,
+) -> MarkerObstructedFailedDestination {
+    let chain_id = devnet_chain_id();
+
+    let src_state = tempdir().expect("tempdir");
+    let snap_root = tempdir().expect("tempdir");
+    let data_dir = tempdir().expect("tempdir");
+    let snapshot_dir = snap_root.path().join("snap-marker-obstructed");
+    // Real supported checkpoint with snapshot epoch Some(7) and known account.
+    build_real_snapshot(src_state.path(), &snapshot_dir, chain_id, 707, 4242, Some(7));
+
+    // Destination consensus storage opens with NO committed epoch. Open+close so
+    // the schema exists and the live precheck read returns None (PERMITS), then
+    // EXPLICITLY observe PresentNoCommittedEpoch before launch.
+    let consensus_dir = data_dir.path().join("consensus");
+    {
+        let storage =
+            RocksDbConsensusStorage::open(&consensus_dir).expect("open empty consensus");
+        let obs = observe_consensus_storage(Some(&storage)).expect("observe pre-launch consensus");
+        assert_eq!(
+            obs,
+            ConsensusStorageObservation::PresentNoCommittedEpoch,
+            "[{tag}] destination consensus must open as PresentNoCommittedEpoch before launch"
+        );
+    }
+
+    // The account-state destination is initially ABSENT.
+    let state_dir = data_dir.path().join(VM_V0_STATE_SUBDIR);
+    assert!(
+        !state_dir.exists(),
+        "[{tag}] precondition: state_vm_v0 destination must be initially absent"
+    );
+
+    // Obstruction: at the RESTORE_MARKER_FILENAME path create a DIRECTORY holding
+    // a fixed-byte sentinel file. A directory (not a permission bit) is used so
+    // the obstruction survives a root test runner.
+    let marker_dir_path = data_dir.path().join(RESTORE_MARKER_FILENAME);
+    std::fs::create_dir(&marker_dir_path).expect("create obstructing marker directory");
+    let sentinel_path = marker_dir_path.join(OBSTRUCTION_SENTINEL_FILENAME);
+    std::fs::write(&sentinel_path, OBSTRUCTION_SENTINEL_BYTES).expect("write sentinel bytes");
+    assert!(
+        marker_dir_path.is_dir(),
+        "[{tag}] precondition: marker path must be a directory (obstruction present)"
+    );
+
+    // No CLI exclusion mode is selected — a plain compatible restore request.
+    let args = restore_localmesh_args(data_dir.path(), &snapshot_dir);
+    log_executable_provenance(tag, &args);
+    let (status, stderr, capture) = {
+        let mut child = DrainedChild::spawn(&args);
+        let status = child.wait_natural_exit(NEGATIVE_DEADLINE);
+        (status, child.stderr_snapshot(), child.stderr_capture())
+    };
+    maybe_dump_child_stderr(tag, &stderr);
+
+    // Natural fail-closed exit 1, NOT a terminating signal.
+    assert_eq!(
+        status.code(),
+        Some(1),
+        "[{tag}] late marker-open failure must fail closed with natural exit code 1 \
+         (status={status:?}); stderr=\n{stderr}"
+    );
+    assert!(
+        status.signal().is_none(),
+        "[{tag}] the failure must be a natural exit, not a signal (status={status:?}); \
+         stderr=\n{stderr}"
+    );
+
+    // The SPECIFIC marker-open I/O failure, naming the obstructed marker path.
+    assert!(
+        stderr.contains(M_MARKER_OPEN_FAIL),
+        "[{tag}] must carry the specific marker-open failure {M_MARKER_OPEN_FAIL:?}; \
+         stderr=\n{stderr}"
+    );
+    assert!(
+        stderr.contains(M_RESTORE_IO_ERROR),
+        "[{tag}] the failure must surface as a restore IO error; stderr=\n{stderr}"
+    );
+    assert!(
+        stderr.contains(&marker_dir_path.display().to_string()),
+        "[{tag}] the failure must identify the obstructed marker path {}; stderr=\n{stderr}",
+        marker_dir_path.display()
+    );
+    assert!(
+        stderr.contains("Is a directory") || stderr.contains("os error 21"),
+        "[{tag}] the marker-open failure must be the EISDIR obstruction; stderr=\n{stderr}"
+    );
+
+    // Complete capture BEFORE any absent-marker claim.
+    assert!(
+        capture.is_complete(),
+        "[{tag}] stderr capture was not complete ({capture:?}); cannot assert forbidden markers"
+    );
+
+    // Storage-open observation occurred BEFORE the marker-open failure.
+    assert_marker_order(&stderr, &[M_STORAGE_OPEN, M_MARKER_OPEN_FAIL]);
+
+    // No CLI-combination or epoch-conflict refusal — the restore was compatible
+    // and no CLI exit mode is active; the failure is a late I/O failure.
+    assert!(
+        !stderr.contains(M_D7D5_REJECT),
+        "[{tag}] a compatible restore must not be refused by the epoch-conflict check; \
+         stderr=\n{stderr}"
+    );
+    assert!(
+        !stderr.contains(M_D7D5_REJECT_ERROR),
+        "[{tag}] the failure is a marker-open IO error, not an epoch-conflict refusal; \
+         stderr=\n{stderr}"
+    );
+    assert!(
+        !stderr.contains(M_D7D5_CLI_COMBO_REJECT),
+        "[{tag}] no CLI exit mode is selected; the combination guard must not fire; \
+         stderr=\n{stderr}"
+    );
+    assert!(
+        !stderr.contains(M_TARGET_NOT_EMPTY),
+        "[{tag}] the account-state destination was absent; TargetStateNotEmpty must not fire; \
+         stderr=\n{stderr}"
+    );
+
+    // No restore-success, baseline, consensus-loop-entry, or epoch-persistence.
+    for forbidden in [
+        M_RESTORE_OK,
+        M_B5,
+        M_LOOP_REACHED,
+        M_BASELINE_APPLIED,
+        M_CONSENSUS_LOOP_STARTED,
+        M_EPOCH_PERSIST,
+        M_EPOCH_ABSENT,
+        M_EPOCH_FATAL,
+    ] {
+        assert!(
+            !stderr.contains(forbidden),
+            "[{tag}] late marker-open failure must not emit {forbidden:?}; stderr=\n{stderr}"
+        );
+    }
+
+    // After reap, INDEPENDENT reads: the account WAS copied before the marker
+    // open failed, and no snapshot epoch was persisted.
+    let (account, observation) = observe_restored_data_dir(data_dir.path());
+    assert_eq!(
+        account,
+        AccountState::new(7, 4242),
+        "[{tag}] the compatible restore copied account state BEFORE the marker-open failure"
+    );
+    assert_eq!(
+        observation,
+        ConsensusStorageObservation::PresentNoCommittedEpoch,
+        "[{tag}] no snapshot epoch may be persisted when the restore failed before Run 097"
+    );
+
+    // The marker path remains a DIRECTORY (not an "absent" marker, not a written
+    // audit file) and its sentinel bytes are unchanged.
+    assert!(
+        marker_dir_path.is_dir(),
+        "[{tag}] the obstructing marker path must remain a directory after the failure"
+    );
+    let sentinel_after = std::fs::read(&sentinel_path).expect("read sentinel after failure");
+    assert_eq!(
+        sentinel_after.as_slice(),
+        OBSTRUCTION_SENTINEL_BYTES,
+        "[{tag}] the marker directory's sentinel bytes must remain unchanged"
+    );
+
+    MarkerObstructedFailedDestination {
+        _src_state: src_state,
+        _snap_root: snap_root,
+        data_dir,
+        snapshot_dir,
+        marker_dir_path,
+        sentinel_path,
+    }
+}
+
+/// D7-D6 case A — a COMPATIBLE restore copies account state and then FAILS to
+/// OPEN its audit marker (obstructed by a directory), exiting 1 after the account
+/// copy and before Run 097 epoch persistence. The reusable helper both PRODUCES
+/// and VERIFIES this failed destination against the corrected release executable;
+/// case A asserts nothing further.
+#[test]
+fn d7d6_a_late_marker_open_failure() {
+    let _failed = produce_and_verify_marker_obstructed_failure("D6-A-late-marker-open");
+    // All scenario-A invariants are checked inside the helper: natural exit 1,
+    // the specific marker-open EISDIR failure naming the obstructed path,
+    // complete capture, storage-open-before-failure, no CLI/epoch refusal, no
+    // restore-success/baseline/loop/epoch observations, and the post-reap
+    // restored account + PresentNoCommittedEpoch + intact directory/sentinel.
+}
+
+/// D7-D6 case B — ordinary restart WITHOUT `--restore-from-snapshot` over the
+/// failed destination produced by case A, without deleting or repairing anything.
+///
+/// Source trace (verified against the real binary): a no-flag start makes
+/// `apply_snapshot_restore_if_requested` return `Ok(None)` (`M_NO_RESTORE`); NO
+/// restore/epoch check and NO Run 097 block run; startup opens the canonical
+/// consensus storage (still `PresentNoCommittedEpoch`), dispatches into
+/// `run_local_mesh_node`, and enters `run_binary_consensus_loop_with_io` with
+/// `restore_baseline=false`. The honest last-observed boundary is the existing
+/// `[binary-consensus] Starting consensus loop:` line, reached while the child
+/// is still ALIVE and then DELIBERATELY terminated through the validated runner
+/// (a LocalMesh dispatch message alone is insufficient).
+///
+/// The obstructing marker directory is irrelevant to a no-flag start (no marker
+/// write is attempted). Reaching the loop is an OBSERVED limitation, NOT safe
+/// recovery and NOT whole-directory identity.
+#[test]
+fn d7d6_b_ordinary_restart_without_flag_over_marker_obstructed_failure() {
+    let failed = produce_and_verify_marker_obstructed_failure("D6-B-pre-failure");
+
+    // Pre-restart independent reads.
+    let (acct_before, obs_before) = observe_restored_data_dir(failed.data_dir.path());
+    assert_eq!(acct_before, AccountState::new(7, 4242));
+    assert_eq!(obs_before, ConsensusStorageObservation::PresentNoCommittedEpoch);
+    let sentinel_before =
+        std::fs::read(&failed.sentinel_path).expect("read sentinel before restart");
+
+    // Ordinary start: equivalent env/network-mode/data-dir, NO restore flag.
+    let args = ordinary_localmesh_args(failed.data_dir.path());
+    log_executable_provenance("D6-B-ordinary-no-flag", &args);
+    let stderr = {
+        let mut child = DrainedChild::spawn(&args);
+        child
+            .observe_then_terminate(&[M_CONSENSUS_LOOP_STARTED], POSITIVE_DEADLINE)
+            .expect_observed_then_terminated("D6-B-ordinary-no-flag")
+    };
+    maybe_dump_child_stderr("D6-B-ordinary-no-flag", &stderr);
+
+    // Observed branch: ordinary startup PROCEEDS to the consensus loop.
+    assert!(
+        stderr.contains(M_NO_RESTORE),
+        "ordinary start must print the normal-startup line; stderr=\n{}",
+        stderr
+    );
+    assert_marker_order(
+        &stderr,
+        &[M_NO_RESTORE, M_STORAGE_OPEN, M_LOOP_REACHED, M_CONSENSUS_LOOP_STARTED],
+    );
+    // No restore work; the loop reports `restore_baseline=false`.
+    for forbidden in [M_RESTORE_OK, M_B5, M_BASELINE_APPLIED] {
+        assert!(
+            !stderr.contains(forbidden),
+            "ordinary (no-flag) start must not emit {forbidden:?}; stderr=\n{}",
+            stderr
+        );
+    }
+    // A no-flag start attempts no marker write, so the marker-open failure must
+    // NOT recur.
+    assert!(
+        !stderr.contains(M_MARKER_OPEN_FAIL),
+        "a no-flag start writes no restore marker; the marker-open failure must not recur; \
+         stderr=\n{}",
+        stderr
+    );
+    assert!(
+        stderr.contains("restore_baseline=false"),
+        "the consensus-loop-start line must confirm NO baseline was applied; stderr=\n{}",
+        stderr
+    );
+
+    // Independent post-process reads (after reap). Report honestly; do NOT claim
+    // whole-directory identity or safe recovery.
+    let (acct_after, obs_after) = observe_restored_data_dir(failed.data_dir.path());
+    assert_eq!(
+        acct_after, acct_before,
+        "restored account value observable after ordinary restart (unchanged at loop-start)"
+    );
+    assert_eq!(
+        obs_after, obs_before,
+        "ordinary startup proceeded over the destination; committed epoch still absent \
+         (observed limitation, not safe recovery)"
+    );
+    assert_eq!(obs_after, ConsensusStorageObservation::PresentNoCommittedEpoch);
+    // The obstructing marker directory and sentinel are unchanged.
+    assert!(
+        failed.marker_dir_path.is_dir(),
+        "ordinary restart must not repair or replace the obstructing marker directory"
+    );
+    let sentinel_after =
+        std::fs::read(&failed.sentinel_path).expect("read sentinel after restart");
+    assert_eq!(
+        sentinel_after, sentinel_before,
+        "ordinary restart must not mutate the marker directory's sentinel bytes"
+    );
+}
+
+/// D7-D6 case C — repeat the ORIGINAL restore request WITH the flag over the
+/// unchanged failed destination.
+///
+/// Source prediction (verified): the destination consensus storage is still
+/// `PresentNoCommittedEpoch`, so the D5 epoch precheck PERMITS; but `state_vm_v0`
+/// is now NON-EMPTY (case A copied the account state before failing), so
+/// `materialize_validated_snapshot` refuses with `TargetStateNotEmpty` BEFORE
+/// reaching `write_restore_marker` (so the marker-open failure does NOT recur).
+/// Natural exit 1, complete capture, storage opened before the refusal, no
+/// restore success/baseline/epoch persistence, and independently verified
+/// preservation of the account, missing committed epoch, and obstruction/sentinel.
+#[test]
+fn d7d6_c_repeated_restore_with_flag_over_marker_obstructed_failure() {
+    let failed = produce_and_verify_marker_obstructed_failure("D6-C-pre-failure");
+
+    // Pre-retry independent reads (the refused retry must not move these).
+    let (acct_before, obs_before) = observe_restored_data_dir(failed.data_dir.path());
+    assert_eq!(acct_before, AccountState::new(7, 4242));
+    assert_eq!(obs_before, ConsensusStorageObservation::PresentNoCommittedEpoch);
+    let sentinel_before = std::fs::read(&failed.sentinel_path).expect("read sentinel before retry");
+
+    // Retry the SAME restore request over the unchanged destination.
+    let args = restore_localmesh_args(failed.data_dir.path(), &failed.snapshot_dir);
+    log_executable_provenance("D6-C-retry-with-flag", &args);
+    let (status, stderr, capture) = {
+        let mut child = DrainedChild::spawn(&args);
+        let status = child.wait_natural_exit(NEGATIVE_DEADLINE);
+        (status, child.stderr_snapshot(), child.stderr_capture())
+    };
+    maybe_dump_child_stderr("D6-C-retry-with-flag", &stderr);
+
+    // Natural fail-closed exit 1 with the SPECIFIC occupied-target refusal.
+    assert_eq!(
+        status.code(),
+        Some(1),
+        "WITH-flag retry over the failed destination must fail closed with natural exit code 1 \
+         (status={status:?}); stderr=\n{stderr}"
+    );
+    assert!(
+        status.signal().is_none(),
+        "the refusal must be a natural exit, not a signal (status={status:?}); stderr=\n{stderr}"
+    );
+    assert!(
+        stderr.contains(M_TARGET_NOT_EMPTY),
+        "must carry the TargetStateNotEmpty occupied-target refusal (state_vm_v0 non-empty from \
+         the case-A partial restore); stderr=\n{stderr}"
+    );
+    // The epoch precheck PERMITTED (still no committed epoch), so the refusal is
+    // occupied-target, NOT epoch-conflict.
+    assert!(
+        !stderr.contains(M_D7D5_REJECT),
+        "the epoch precheck must PERMIT (no committed epoch); the refusal must be \
+         occupied-target, not epoch-conflict; stderr=\n{stderr}"
+    );
+    assert!(
+        !stderr.contains(M_D7D5_CLI_COMBO_REJECT),
+        "no CLI exit mode is selected; the combination guard must not fire; stderr=\n{stderr}"
+    );
+    // TargetStateNotEmpty refuses BEFORE the marker write, so the marker-open
+    // failure must NOT recur here.
+    assert!(
+        !stderr.contains(M_MARKER_OPEN_FAIL),
+        "the occupied-target refusal precedes write_restore_marker; the marker-open failure \
+         must not recur; stderr=\n{stderr}"
+    );
+    // Storage was opened early (for the permitting precheck) BEFORE the refusal.
+    assert_marker_order(&stderr, &[M_STORAGE_OPEN, M_TARGET_NOT_EMPTY]);
+    // Complete capture before any forbidden-marker claim.
+    assert!(
+        capture.is_complete(),
+        "stderr capture was not complete ({capture:?}); cannot assert forbidden markers"
+    );
+    // No new successful restore, baseline application, or epoch persistence.
+    for forbidden in [M_RESTORE_OK, M_B5, M_LOOP_REACHED, M_BASELINE_APPLIED, M_EPOCH_PERSIST] {
+        assert!(
+            !stderr.contains(forbidden),
+            "refused WITH-flag retry must not emit {forbidden:?}; stderr=\n{stderr}"
+        );
+    }
+
+    // Independent post-process reads: account, missing committed epoch, and the
+    // obstruction/sentinel are all preserved.
+    let (acct_after, obs_after) = observe_restored_data_dir(failed.data_dir.path());
+    assert_eq!(
+        acct_after, acct_before,
+        "refused retry must not change the restored account value"
+    );
+    assert_eq!(
+        obs_after, obs_before,
+        "refused retry must not persist any committed epoch (still PresentNoCommittedEpoch)"
+    );
+    assert_eq!(obs_after, ConsensusStorageObservation::PresentNoCommittedEpoch);
+    assert!(
+        failed.marker_dir_path.is_dir(),
+        "refused retry must not repair or replace the obstructing marker directory"
+    );
+    let sentinel_after = std::fs::read(&failed.sentinel_path).expect("read sentinel after retry");
+    assert_eq!(
+        sentinel_after, sentinel_before,
+        "refused retry must not mutate the marker directory's sentinel bytes"
+    );
+}
+
+// ============================================================================
 // Runner controls (test-only child command; NOT qbind-node protocol evidence)
 // ============================================================================
 //
