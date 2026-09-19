@@ -2483,9 +2483,23 @@ async fn main() {
     // `load_activation_current_epoch_for_cli`) and then exit before normal
     // startup. Opening the storage early here for those invocations would
     // double-open the same RocksDB path (lock failure). Detect those modes so
-    // the early open is skipped for them — they do not reach the consensus
-    // loop, so the D7-D5 pre-materialization check does not apply, and their
-    // behavior is left exactly as before.
+    // the early open is skipped for them.
+    //
+    // Run 422 D7-D5 correction A: these CLI-exit modes are mutually exclusive
+    // with a requested snapshot restore. Previously the early open was merely
+    // skipped for such a combination, which produced `epoch_precheck=None` yet
+    // still ran the restore pipeline (account-state materialization and audit-
+    // marker writes) before the CLI command executed or rejected its
+    // arguments. The absence of a later consensus startup does NOT prevent
+    // those restore side effects, so a flag destined to be rejected later must
+    // not first disable the epoch check and permit restoration. We therefore
+    // refuse the combination up front — before the early storage open, before
+    // materialization, and before any marker write — with an unmistakable
+    // diagnostic. Each predicate (including its partial-configuration shapes:
+    // a peer-candidate path without the enabled flag or vice versa, and a
+    // reload-apply path without the enabled flag or vice versa) is covered by
+    // the OR below, and `active_cli_exit_modes` names the specific offending
+    // mode(s) so neither operation is silently ignored.
     let cli_storage_exit_mode_active = args.p2p_trust_bundle_reload_check.is_some()
         || qbind_node::pqc_peer_candidate_binary::run077_hook_active(
             args.p2p_trust_bundle_peer_candidate_check.as_deref(),
@@ -2494,10 +2508,48 @@ async fn main() {
         || args.p2p_trust_bundle_reload_apply_path.is_some()
         || args.p2p_trust_bundle_reload_apply_enabled;
 
+    if restore_requested && cli_storage_exit_mode_active {
+        let mut active_cli_exit_modes: Vec<&str> = Vec::new();
+        if args.p2p_trust_bundle_reload_check.is_some() {
+            active_cli_exit_modes.push("--p2p-trust-bundle-reload-check");
+        }
+        if qbind_node::pqc_peer_candidate_binary::run077_hook_active(
+            args.p2p_trust_bundle_peer_candidate_check.as_deref(),
+            args.p2p_trust_bundle_peer_candidate_validation_enabled,
+        ) {
+            active_cli_exit_modes.push(
+                "--p2p-trust-bundle-peer-candidate-check / \
+                 --p2p-trust-bundle-peer-candidate-validation-enabled (Run 077 hook)",
+            );
+        }
+        if args.p2p_trust_bundle_reload_apply_path.is_some() {
+            active_cli_exit_modes.push("--p2p-trust-bundle-reload-apply-path");
+        }
+        if args.p2p_trust_bundle_reload_apply_enabled {
+            active_cli_exit_modes.push("--p2p-trust-bundle-reload-apply-enabled");
+        }
+        eprintln!(
+            "[binary] FATAL: refused by Run 422 D7-D5: --restore-from-snapshot is \
+             unsupported in combination with the CLI validation/apply exit mode(s): {}. \
+             These modes open the canonical <data_dir>/consensus storage themselves and \
+             exit before normal startup; combining them with a restore would run the \
+             account-state materialization and audit-marker writes before the CLI command \
+             executes or rejects its arguments. Refusing the whole invocation BEFORE any \
+             storage open, account-state materialization, or restore-marker write. Run the \
+             restore and the CLI command as separate invocations. See \
+             docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md.",
+            active_cli_exit_modes.join(", ")
+        );
+        std::process::exit(1);
+    }
+
     // Open the canonical consensus storage early ONLY when a restore is
     // requested and we are on the normal-startup path, so ordinary
     // (non-restore) startups are byte-for-byte unchanged and no unrelated
-    // command path acquires the consensus lock earlier than before.
+    // command path acquires the consensus lock earlier than before. The
+    // `restore_requested && cli_storage_exit_mode_active` combination has
+    // already been refused above, so this branch only ever runs a restore on
+    // the normal-startup path.
     let pre_opened_consensus_storage: Option<OpenedProductionConsensusStorage> =
         if restore_requested && !cli_storage_exit_mode_active {
             match open_production_consensus_storage(&config) {
@@ -2560,13 +2612,28 @@ async fn main() {
                             },
                         )
                     }
-                    // `evaluate_restore_epoch_compatibility` only ever returns
-                    // `RestoreEpochInconsistent` as an error; treat any other as
-                    // a fail-closed IO-class refusal (defensive, unreachable).
-                    Err(other) => Err(qbind_node::snapshot_restore::RestoreError::Io(format!(
-                        "unexpected consensus epoch pre-check error: {}",
-                        other
-                    ))),
+                    // Run 422 D7-D5 correction B: `evaluate_restore_epoch_compatibility`
+                    // now performs a fresh LIVE read of `meta:current_epoch`
+                    // through the canonical handle, so errors other than
+                    // `RestoreEpochInconsistent` are no longer unreachable — a
+                    // live-read failure surfaces here as
+                    // `EpochProbeFailed` (checksum/IO corruption of the epoch
+                    // key). Treat any such non-conflict error as a fail-closed
+                    // read-error refusal BEFORE materialization; never proceed.
+                    Err(other) => {
+                        eprintln!(
+                            "[restore] FATAL: refused by Run 422 D7-D5 consensus \
+                             epoch-conflict check: the canonical <data_dir>/consensus \
+                             current-epoch could not be honestly read before the \
+                             requested restore: {}. Refusing BEFORE account-state \
+                             materialization or audit-marker write.",
+                            other
+                        );
+                        Err(qbind_node::snapshot_restore::RestoreError::Io(format!(
+                            "consensus epoch pre-check read error: {}",
+                            other
+                        )))
+                    }
                 }
             }
         });
