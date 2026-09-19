@@ -6763,3 +6763,275 @@ is NOT a successful security review:
   available in this environment: ... model claude-sonnet-4.6 not found in
   registry." The no-comments result is therefore NOT evidence of a completed
   model review.
+
+## Run 422 D7-D6 — Late restore FAILURE (marker-open) and restart characterization (test + evidence only)
+
+This section characterizes a deterministic **late** restore failure produced by
+the corrected release executable itself — a compatible restore that copies
+account state and then fails to OPEN its audit marker — and the two subsequent
+restart paths over the resulting directory. It **does not** implement recovery
+protection. It is an ordinary local I/O-failure characterization, **not** a
+power-loss simulation, malicious-rollback test, or durability proof. Only two
+files were edited:
+`crates/qbind-node/tests/run_422_d7d3_binary_snapshot_restore_characterization_tests.rs`
+and this evidence document. No production source, CLI flag, environment bypass,
+fault-injection hook, parser, storage schema, recovery journal, automatic
+cleanup, or second process runner was added.
+
+### Provenance and object availability (actual checkout)
+
+* Actual working branch: `copilot/run-422-d7-d6`.
+* Starting `HEAD` for this task: `36f179469753e85b24a51cc2b116e3f959e549fd`.
+* Tested checkpoint (test-implementation commit exercised by validation): the
+  first D7-D6 commit on this branch (`Add D7-D6 late-restore marker-open failure
+  characterization tests`), with the release executable rebuilt from it.
+* Referenced-object limitation: the D7-D5 acceptance provenance named in the task
+  — accepted branch `copilot/run-422-complete-compatible-epoch-cli-refusal-cont`,
+  accepted revision `df0f6aac31c669285c9cc167d39d64f5c834805f`, and source
+  checkpoint `a6ac1fbee840f9f5696801676794cda2994fa001` — are **not resolvable
+  as git objects** in this shallow, single-branch clone (`git cat-file -t` →
+  "could not get object info" for both). No branch was renamed and no ancestry
+  was manufactured. Missing objects do **not** establish missing implementation:
+  the accepted D5 behavior is present in this worktree (the D5 pre-materialization
+  epoch-conflict precheck and restore+CLI-combination refusal in
+  `crates/qbind-node/src/main.rs`, live epoch reads in
+  `production_consensus_storage.rs`, and the `d7d5_*` positive/negative controls
+  in the test file), and is exercised green by the retained cases below.
+
+### Source-backed operation ordering (not modified here)
+
+Read from `crates/qbind-node/src/snapshot_restore.rs`
+(`materialize_validated_snapshot`, `write_restore_marker`) and
+`crates/qbind-node/src/main.rs` (restore path):
+
+1. For a requested restore on the normal-startup path, `main.rs` opens the
+   canonical `<data_dir>/consensus` storage EARLY
+   (`open_production_consensus_storage`, logged `[binary] Run 093 consensus
+   storage: ...`), performs a LIVE committed-epoch read, and runs the D5
+   pre-materialization epoch-compatibility precheck.
+2. When the precheck PERMITS (compatible snapshot),
+   `materialize_validated_snapshot`:
+   1. computes `<data_dir>/state_vm_v0`, and (when absent) creates it and
+      **copies** the snapshot account state into it (`copy_dir_recursive`), THEN
+   2. calls `write_restore_marker`, which OPENS `RESTORE_MARKER_FILENAME`
+      (`RESTORED_FROM_SNAPSHOT.json`) with
+      `OpenOptions::create(true).append(true).open(path)` to append one JSON
+      audit line.
+3. The Run 097 snapshot-epoch persistence runs only AFTER a successful restore
+   outcome (`if let Some(outcome)` in `main.rs`); a restore `Err` prints
+   `[restore] ERROR: <e>` and `std::process::exit(1)`.
+
+Because the audit-marker open (2b) happens **after** the account-state copy (2a)
+and **before** the Run 097 epoch persistence (3), obstructing only the marker
+path yields a copy-succeeded / marker-failed / epoch-not-persisted destination.
+
+### Exact fixture construction and failure mechanism
+
+One reusable test-local helper, `produce_and_verify_marker_obstructed_failure`,
+constructs and verifies the failed destination; cases A/B/C each invoke it
+independently with their **own** temporary directories. The fixture:
+
+* Real supported RocksDB checkpoint via `build_real_snapshot`, snapshot epoch
+  `Some(7)`, known account (`ACCOUNT_ID` = `AccountState::new(7, 4242)`).
+* Destination `<data_dir>/consensus` opened once as an empty RocksDB so it
+  reports `PresentNoCommittedEpoch`, **explicitly observed** with
+  `observe_consensus_storage` before launch.
+* Account-state destination `<data_dir>/state_vm_v0` initially **absent**.
+* No excluded CLI mode (a plain `--restore-from-snapshot` LocalMesh DevNet start).
+* At the existing `RESTORE_MARKER_FILENAME` path a **directory** is created,
+  holding a small sentinel file (`obstruction_sentinel.bin`) with fixed bytes
+  (`OBSTRUCTION_SENTINEL_BYTES`).
+* All RocksDB handles are dropped before the child launches.
+
+Failure mechanism: opening a **directory** as an appendable file fails with
+`EISDIR`. A directory (not a permission bit) is used deliberately so the
+obstruction survives a test runner executing as **root**, which a permission-only
+obstruction would not. This obstruction is produced/consumed by the corrected
+executable itself; it does **not** reuse the legacy partial-directory fixture.
+
+### Case A — late marker-open failure (child-process / release-binary)
+
+Child args: `--env devnet --network-mode local-mesh --data-dir <D> \
+--restore-from-snapshot <snap>`. Termination classification: **natural exit code
+1, no terminating signal** (bounded `wait_natural_exit`, complete capture).
+Observed boundary (verbatim, paths abbreviated):
+
+```
+[binary] Run 093 consensus storage: state=present-no-committed-epoch path=<D>/consensus
+[restore] requested: snapshot_dir=<snap> data_dir=<D> expected_chain_id=0x51424e4444455600
+[restore] ERROR: restore-from-snapshot IO error: cannot open marker file <D>/RESTORED_FROM_SNAPSHOT.json: Is a directory (os error 21)
+[restore] qbind-node refuses to start because the requested snapshot restore could not be honestly applied. ...
+```
+
+Asserted: the specific marker-open I/O failure naming the obstructed marker path
+(`cannot open marker file <D>/RESTORED_FROM_SNAPSHOT.json` + EISDIR); storage-open
+observed BEFORE the failure (`M_STORAGE_OPEN` precedes the marker failure); NO
+CLI-combination or epoch-conflict refusal; and ABSENCE of any restore-success,
+baseline, consensus-loop-entry, or epoch-persistence observation. The marker is
+**not** called "absent": the obstruction exists, but no successful audit record
+was written.
+
+Independent database reads (after reap, fresh reopen): restored account =
+`AccountState::new(7, 4242)` (copied before the marker open failed); consensus =
+`PresentNoCommittedEpoch` (no epoch persisted). Obstruction observations: the
+marker path remains a **directory**; its sentinel bytes are byte-unchanged.
+
+### Case B — ordinary restart WITHOUT the restore flag (child-process)
+
+Independently reproduces A, then starts the SAME failed destination with NO
+restore flag (`--env devnet --network-mode local-mesh --data-dir <D>`), without
+deleting or repairing anything. Termination classification: observed while ALIVE
+at the existing `[binary-consensus] Starting consensus loop:` line, then
+**deliberately SIGKILL-terminated** through the validated runner
+(`observe_then_terminate` + `expect_observed_then_terminated`, complete capture,
+successful reap). A LocalMesh dispatch line alone was **not** accepted. Observed
+boundary (verbatim):
+
+```
+[restore] no --restore-from-snapshot requested; normal startup.
+[binary] Run 093 consensus storage: state=present-no-committed-epoch path=<D>/consensus
+[binary] LocalMesh mode: starting consensus loop. environment=DevNet profile=nonce-only
+[binary-consensus] Starting consensus loop: ... restore_baseline=false ...
+```
+
+Ordinary startup therefore PROCEEDS to the consensus loop with
+`restore_baseline=false`; the obstructing marker directory is irrelevant (no
+marker write is attempted). Independent reads afterward: account unchanged
+(`7/4242`); consensus still `PresentNoCommittedEpoch`; marker path still a
+directory; sentinel bytes unchanged. This is an OBSERVED limitation — reaching
+the loop is **not** whole-directory identity, signing-state continuity, or safe
+recovery.
+
+### Case C — repeated restore WITH the flag (child-process / release-binary)
+
+Independently reproduces A, then retries the ORIGINAL restore request over the
+unchanged destination. Termination classification: **natural exit code 1, no
+signal**, complete capture. Observed boundary (verbatim):
+
+```
+[binary] Run 093 consensus storage: state=present-no-committed-epoch path=<D>/consensus
+[restore] ERROR: restore-from-snapshot target state directory is not empty: <D>/state_vm_v0 (refusing to overwrite; remove or move it before restoring)
+```
+
+As the source predicts: the epoch precheck PERMITS (still no committed epoch),
+then `materialize_validated_snapshot` refuses with `TargetStateNotEmpty` because
+`state_vm_v0` is now non-empty from case A's copy — BEFORE reaching
+`write_restore_marker`, so the marker-open failure does **not** recur. Storage
+opened before the refusal (`M_STORAGE_OPEN` precedes `TargetStateNotEmpty`); no
+restore success, baseline, or epoch persistence. Independent reads afterward:
+account unchanged (`7/4242`); consensus still `PresentNoCommittedEpoch`; marker
+path still a directory; sentinel bytes unchanged.
+
+### Positive control (retained, executed)
+
+The existing `Some(7)/None` compatible-restore control
+(`d7d5_b_compatible_present_epochs_reach_baseline`) — WITHOUT the obstruction —
+reaches baseline application and persists epoch 7 (`CommittedEpoch(7)`). It is
+retained and passes in the full-target run below; its fixture and assertions are
+not duplicated.
+
+### Evidence-level separation
+
+* **Release-executable observations**: the ordered stderr markers, exit codes,
+  and termination classifications above (cases A/B/C) come from launching the
+  unmodified release binary.
+* **Independent database reads**: every account value and consensus observation
+  is a fresh in-process reopen AFTER the child was reaped
+  (`observe_restored_data_dir` / `observe_consensus_storage`); a selected-value
+  match is not a byte-identity claim over the directory.
+* **Source-only findings**: the operation ordering (copy → marker-open → Run 097)
+  is read from `snapshot_restore.rs` / `main.rs`; no production line was changed.
+
+### Validation and release-executable identity (this execution)
+
+The test-implementation checkpoint was committed BEFORE recording these outcomes.
+
+```
+# Release executable rebuilt from the task branch (production source UNCHANGED):
+# cargo build --release -p qbind-node                        (profile: release) => Finished in 7m19s
+# executable  = target/release/qbind-node
+# source rev  = 36f179469753e85b24a51cc2b116e3f959e549fd  (HEAD; test + docs-only edit, main.rs unchanged)
+# sha256      = dc00c48bbb3a3735bcc383a3e921f50437ed2c7fcc04c9a6d08c21345fecd6e0
+# byte_len    = 16953040
+#   (a first link of the same source produced 41c7b0e8…/16952680; `cargo test --release`
+#    relinked the SAME path to dc00c48b…/16953040, which is the binary actually exercised.
+#    Both differ from the historical 0299f445…/16952776 record — hashes are NOT assumed
+#    reproducible, exactly as the task cautions.)
+
+# Focused D7-D6 cases against the identified release executable:
+# QBIND_D7D3_NODE_BIN=<abs>/target/release/qbind-node \
+#   cargo test -p qbind-node --release --test run_422_d7d3_binary_snapshot_restore_characterization_tests d7d6_
+# test result: ok. 3 passed; 0 failed; 0 ignored; 25 filtered out
+
+# Complete existing D3/D4/D5 + new D6 target against the same executable:
+# QBIND_D7D3_NODE_BIN=<abs>/target/release/qbind-node \
+#   cargo test -p qbind-node --release --test run_422_d7d3_binary_snapshot_restore_characterization_tests
+# test result: ok. 28 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+#   (was 25 before this +3 D7-D6 cases; the 28 is a strict superset of the focused d7d6_ run)
+
+# Focused Clippy (qbind-node tests): the only lint pointing at this test file is a
+# pre-existing `needless_borrows_for_generic_args` at the existing d7d5_b line 1228
+# (rust-1.98.0 toolchain strictness), NOT in the new D7-D6 region, which is lint-clean.
+# `-D warnings` fails on unrelated pre-existing qbind-ledger lib lints; left unfixed
+# (out of scope for this test/docs-only change).
+# Changed-region whitespace: no trailing whitespace in the added lines; file-specific
+# CRLF line endings preserved (no repository-wide reformatting).
+```
+
+Runner discipline: bounded deadlines and complete capture throughout; no
+fixed-sleep race, no process-global environment mutation of the parent, no leaked
+child (kill+reap+drain-join on every path, including `Drop`), and no unexpected
+signal supports a passing result.
+
+### Literal security-tool outcomes (this correction, verbatim)
+
+Recorded literally; a skipped CodeQL analysis or an errored/unavailable reviewer
+is NOT a successful security review and no historical outcome is upgraded here.
+
+* CodeQL Security Scan (`parallel_validation`): "Skipped: all changes are
+  trivial." — the changes are test-file + documentation only, declared trivial
+  for CodeQL. This is a SKIP, **not** a completed clean scan.
+* Code Review (`parallel_validation`): reported "Code review completed. Reviewed
+  2 file(s). No review comments found." but ALSO reported a backend error —
+  "Code review tool is not available in this environment: ... model
+  claude-sonnet-4.6 not found in registry." The no-comments result is therefore
+  **not** evidence of a completed model review.
+
+### Scoped verdict and preserved posture
+
+The three required scenarios (A late marker-open failure; B ordinary restart
+without the flag; C repeated restore with the flag) and the retained positive
+control are concretely established against the identified release executable, so:
+
+`D7D6_LATE_RESTORE_FAILURE_RESTART_CHARACTERIZATION=COMPLETE-FOR-TESTED-SCOPE`
+
+This means the characterization is complete; the recovery risk is **not**
+repaired. The accepted D5 verdict is intact — a later I/O failure does not
+invalidate D5's scoped pre-materialization epoch-conflict protection:
+`D7D5_RESTORE_EPOCH_CONFLICT_BEFORE_MATERIALIZATION=CODE-AND-RELEASE-TEST-POSITIVE`
+is unchanged. All retained posture lines are UNCHANGED:
+`D7_STATUS=PARTIAL-CODE-TEST / PRODUCTION-LIFECYCLE-UNAVAILABLE`,
+`DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED`,
+`GENESIS_AUTHORITY_ACTIVATION=DISABLED`,
+`PRODUCTION_WIRE_CHAIN_ID_BEHAVIOR=UNCHANGED`,
+`CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED`,
+`SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO`. No authority activation,
+signing enablement, readiness promotion, Run 423 work, cleanup/repair mechanism,
+or cross-database atomicity claim is made here.
+
+### Unresolved risk and one concrete containment requirement (for a later task)
+
+Observed risk: a compatible restore can copy account state and then fail to write
+its audit marker, and BOTH subsequent restarts leave the destination in a state
+that is neither cleanly restored nor cleanly refused — the WITHOUT-flag restart
+silently proceeds to the consensus loop over a marker-less restored `state_vm_v0`
+(no successful audit record), and the WITH-flag retry is permanently blocked by
+`TargetStateNotEmpty`. Concrete containment requirement for a subsequent
+implementation task (NOT implemented here): make the requested-restore path
+**atomic with respect to its audit marker** — the restored `state_vm_v0` must not
+be observable to a later startup as a completed restore unless the corresponding
+`RESTORED_FROM_SNAPSHOT.json` audit record was successfully written (e.g. write
+the marker before/with the state under a single commit point, or refuse and
+surface a partially-materialized `state_vm_v0` on the next startup rather than
+proceeding as `restore_baseline=false`). This addresses the root cause; it is out
+of scope for this characterization.
