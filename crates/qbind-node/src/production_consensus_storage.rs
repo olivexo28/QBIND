@@ -686,6 +686,107 @@ pub fn persist_restored_snapshot_epoch(
     }
 }
 
+/// **Run 422 D7-D8.** Durable variant of [`persist_restored_snapshot_epoch`]
+/// for the guarded restore-completion boundary (§5.9 step 8).
+///
+/// Reuses the single non-writing [`evaluate_restore_epoch_compatibility`]
+/// decision so the early pre-materialization check and this later durable
+/// effect cannot drift, then performs the **synchronous, durability-barriered**
+/// epoch effect required before a `COMPLETE` record may be published:
+///
+/// | Plan                            | Effect                                             |
+/// | ------------------------------- | -------------------------------------------------- |
+/// | `NoEpochToPersist`              | no write, no barrier — `Ok(false)`                 |
+/// | `PersistAfterMaterialization`   | `put_current_epoch_synced(n)` — `Ok(true)`         |
+/// | `AlreadyConsistent { n }`       | `flush_epoch_durable()` barrier only — `Ok(false)` |
+/// | `NoStorageHandle`               | defensive no-op — `Ok(false)`                       |
+///
+/// A conflicting live epoch is surfaced as
+/// [`ProductionConsensusStorageError::RestoreEpochInconsistent`] by the shared
+/// evaluation, and a read failure as
+/// [`ProductionConsensusStorageError::EpochProbeFailed`]; both fail closed.
+/// Unlike the Run 097 asynchronous [`persist_restored_snapshot_epoch`], this
+/// function uses the [`ConsensusStorage`] synced-epoch durability interface
+/// (`put_current_epoch_synced` / `flush_epoch_durable`) so the effect is on
+/// stable storage before completion is claimed. The already-matching case
+/// still performs an explicit durability barrier rather than silently
+/// assuming the previously written value reached disk.
+///
+/// [`ConsensusStorage`]: crate::storage::ConsensusStorage
+pub fn persist_restored_snapshot_epoch_durable(
+    opened: &OpenedProductionConsensusStorage,
+    snapshot_epoch: Option<u64>,
+) -> Result<bool, ProductionConsensusStorageError> {
+    match evaluate_restore_epoch_compatibility(opened, snapshot_epoch)? {
+        RestoreEpochPlan::NoEpochToPersist => {
+            eprintln!(
+                "[restore] D7-D8 snapshot meta carries no canonical epoch (epoch=None); \
+                 leaving <data_dir>/consensus meta:current_epoch unchanged (explicit \
+                 absence, NOT 0); no epoch write and no durability barrier"
+            );
+            Ok(false)
+        }
+        RestoreEpochPlan::NoStorageHandle => {
+            eprintln!(
+                "[restore] D7-D8 snapshot canonical epoch not persisted: no production \
+                 ConsensusStorage handle open (no --data-dir). Unreachable on the \
+                 supported restore path because restore requires --data-dir."
+            );
+            Ok(false)
+        }
+        RestoreEpochPlan::AlreadyConsistent { epoch } => {
+            let (path, storage) = match (&opened.path, &opened.handle) {
+                (Some(p), Some(s)) => (p.clone(), s.clone()),
+                _ => return Ok(false),
+            };
+            // §5.9: an already-matching epoch still requires an explicit
+            // durability barrier — do not assume a previously written value
+            // reached stable storage.
+            eprintln!(
+                "[restore] D7-D8 snapshot canonical epoch={} already matches \
+                 meta:current_epoch at {}; performing durability barrier only",
+                epoch,
+                path.display()
+            );
+            storage.flush_epoch_durable().map_err(|e| {
+                ProductionConsensusStorageError::RestoreEpochWriteFailed {
+                    path: path.clone(),
+                    epoch,
+                    source: e,
+                }
+            })?;
+            Ok(false)
+        }
+        RestoreEpochPlan::PersistAfterMaterialization {
+            epoch: target_epoch,
+        } => {
+            let (path, storage) = match (&opened.path, &opened.handle) {
+                (Some(p), Some(s)) => (p.clone(), s.clone()),
+                _ => return Ok(false),
+            };
+            eprintln!(
+                "[restore] D7-D8 persisting snapshot canonical epoch={} into {} \
+                 (synced) (state was present-no-committed-epoch)",
+                target_epoch,
+                path.display()
+            );
+            storage.put_current_epoch_synced(target_epoch).map_err(|e| {
+                ProductionConsensusStorageError::RestoreEpochWriteFailed {
+                    path: path.clone(),
+                    epoch: target_epoch,
+                    source: e,
+                }
+            })?;
+            eprintln!(
+                "[restore] D7-D8 persisted snapshot canonical epoch={} (synced) into {}",
+                target_epoch,
+                path.display()
+            );
+            Ok(true)
+        }
+    }
+}
+
 // ============================================================================
 // Unit tests
 // ============================================================================

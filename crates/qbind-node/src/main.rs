@@ -78,8 +78,8 @@ use qbind_node::p2p_inbound::ChannelConsensusHandler;
 use qbind_node::p2p_node_builder::P2pNodeBuilder;
 use qbind_node::production_consensus_storage::{
     evaluate_restore_epoch_compatibility, open_production_consensus_storage,
-    persist_restored_snapshot_epoch, OpenedProductionConsensusStorage,
-    ProductionConsensusStorageError,
+    persist_restored_snapshot_epoch, persist_restored_snapshot_epoch_durable,
+    OpenedProductionConsensusStorage, ProductionConsensusStorageError,
 };
 use qbind_node::snapshot_restore::RestoreOutcome;
 use qbind_node::vm_v0_runtime::{SnapshotAnchor, VmV0RuntimeState};
@@ -2476,6 +2476,56 @@ async fn main() {
     // present-no-committed-epoch destination — that write only happens after
     // successful materialization via `persist_restored_snapshot_epoch`).
     // ------------------------------------------------------------------
+    // ------------------------------------------------------------------
+    // Run 422 D7-D8: acquire the advisory exclusive destination lock
+    // (`flock(LOCK_EX | LOCK_NB)` on `<data_dir>/restore.lock`) before any
+    // participating startup/restore decision or protected state use, and hold
+    // it for the remainder of the process (ownership is passed through the
+    // startup path by holding this single binding — never re-acquired). A
+    // competing participating process refuses on contention. Stateless
+    // invocations without a `--data-dir` have no destination to protect and
+    // are left unchanged: no data directory is invented for them. The lock
+    // file is never unlinked or recreated as a signalling / stale-lock act;
+    // the kernel releases it automatically on process death. See
+    // docs/protocol/QBIND_SNAPSHOT_RESTORE_COMPLETION_CONTRACT.md §5.5.
+    // ------------------------------------------------------------------
+    let _destination_lock: Option<qbind_node::restore_completion::DestinationLock> =
+        if let Some(data_dir) = config.data_dir.as_ref() {
+            if let Err(e) = std::fs::create_dir_all(data_dir) {
+                eprintln!(
+                    "[binary] FATAL: Run 422 D7-D8 could not create data_dir {} for the \
+                     advisory exclusive destination lock: {}",
+                    data_dir.display(),
+                    e
+                );
+                std::process::exit(1);
+            }
+            match qbind_node::restore_completion::acquire_destination_lock(data_dir) {
+                Ok(lock) => {
+                    eprintln!(
+                        "[binary] Run 422 D7-D8: acquired advisory exclusive destination \
+                         lock at {}",
+                        lock.path().display()
+                    );
+                    Some(lock)
+                }
+                Err(e) => {
+                    eprintln!(
+                        "[binary] FATAL: Run 422 D7-D8 refused: could not acquire the advisory \
+                         exclusive destination lock: {}. Another participating qbind-node \
+                         process may already own this data directory, or the platform does \
+                         not support the required advisory locking. Refusing to proceed \
+                         without destination ownership. See \
+                         docs/protocol/QBIND_SNAPSHOT_RESTORE_COMPLETION_CONTRACT.md §5.5.",
+                        e
+                    );
+                    std::process::exit(1);
+                }
+            }
+        } else {
+            None
+        };
+
     let restore_requested = config.fast_sync_config.is_enabled();
 
     // Some CLI validation/apply subcommand modes open the canonical
@@ -2649,10 +2699,160 @@ async fn main() {
                 runtime_genesis_hash_hex: genesis_hex,
             }
         });
-        qbind_node::snapshot_restore::apply_snapshot_restore_if_requested_with_context_and_epoch_precheck(
+        // Run 422 D7-D8: inspect the existing RTR precondition BEFORE any
+        // validation or mutation (§5.9 step 1(b)). A requested restore over an
+        // existing INTENT or COMPLETE (or a corrupt/unreadable record) is
+        // refused — a new attempt never overwrites or replaces an existing
+        // RTR.
+        if restore_requested {
+            if let Some(data_dir) = config.data_dir.as_ref() {
+                use qbind_node::restore_completion::{
+                    evaluate_requested_restore_precondition, RequestedRestorePrecondition,
+                };
+                match evaluate_requested_restore_precondition(data_dir) {
+                    RequestedRestorePrecondition::ProceedNoExistingRtr => {}
+                    RequestedRestorePrecondition::RefuseOccupied(state) => {
+                        eprintln!(
+                            "[restore] FATAL: refused by Run 422 D7-D8: a restore-transaction \
+                             record is already present ({}) at {}. A requested restore never \
+                             overwrites an existing INTENT or COMPLETE; resolve the existing \
+                             record before retrying. See \
+                             docs/protocol/QBIND_SNAPSHOT_RESTORE_COMPLETION_CONTRACT.md.",
+                            state.tag(),
+                            data_dir.display()
+                        );
+                        std::process::exit(1);
+                    }
+                    RequestedRestorePrecondition::RefuseInvalid(msg) => {
+                        eprintln!(
+                            "[restore] FATAL: refused by Run 422 D7-D8: the existing \
+                             restore-transaction record at {} is invalid/corrupt/unreadable: \
+                             {}. Refusing before any restore mutation.",
+                            data_dir.display(),
+                            msg
+                        );
+                        std::process::exit(1);
+                    }
+                }
+            }
+        }
+
+        // Bind the restore-completion attempt identity (canonical destination
+        // id + fresh per-attempt nonce) held constant across INTENT and
+        // COMPLETE for this attempt.
+        let restore_attempt_identity: Option<(
+            std::path::PathBuf,
+            qbind_node::restore_completion::DestinationId,
+            [u8; 16],
+        )> = if restore_requested {
+            match config.data_dir.as_ref() {
+                Some(data_dir) => {
+                    let dest = match qbind_node::restore_completion::DestinationId::canonicalize(
+                        data_dir,
+                    ) {
+                        Ok(d) => d,
+                        Err(e) => {
+                            eprintln!(
+                                "[restore] FATAL: Run 422 D7-D8 cannot canonicalize the \
+                                 destination for the restore-transaction record: {}",
+                                e
+                            );
+                            std::process::exit(1);
+                        }
+                    };
+                    let nonce = match qbind_node::restore_completion::fresh_attempt_nonce() {
+                        Ok(n) => n,
+                        Err(e) => {
+                            eprintln!(
+                                "[restore] FATAL: Run 422 D7-D8 cannot generate the restore \
+                                 attempt nonce: {}",
+                                e
+                            );
+                            std::process::exit(1);
+                        }
+                    };
+                    Some((data_dir.clone(), dest, nonce))
+                }
+                None => None,
+            }
+        } else {
+            None
+        };
+
+        // Restore-completion hooks (§5.9): publish durable INTENT (step 4),
+        // perform the durable barriered epoch effect (step 8), and publish
+        // durable COMPLETE (step 9). INTENT and COMPLETE bind the SAME held
+        // nonce, destination, and validated-metadata digest.
+        let publish_intent = |meta: &qbind_ledger::StateSnapshotMeta| -> Result<
+            (),
+            qbind_node::snapshot_restore::RestoreError,
+        > {
+            let (data_dir, dest, nonce) = restore_attempt_identity
+                .as_ref()
+                .expect("restore path implies data_dir");
+            let digest = qbind_node::restore_completion::snapshot_meta_digest(meta);
+            let rec = qbind_node::restore_completion::RestoreTransactionRecord::new_intent(
+                dest, digest, *nonce, meta.epoch,
+            );
+            qbind_node::restore_completion::publish_record(data_dir, &rec).map_err(|e| {
+                qbind_node::snapshot_restore::RestoreError::Io(format!(
+                    "cannot publish INTENT restore-transaction record: {}",
+                    e
+                ))
+            })
+        };
+        let durable_epoch_effect = |meta: &qbind_ledger::StateSnapshotMeta| -> Result<
+            (),
+            qbind_node::snapshot_restore::RestoreError,
+        > {
+            match pre_opened_consensus_storage.as_ref() {
+                Some(opened) => persist_restored_snapshot_epoch_durable(opened, meta.epoch)
+                    .map(|_| ())
+                    .map_err(|e| {
+                        qbind_node::snapshot_restore::RestoreError::Io(format!(
+                            "durable restore epoch effect failed: {}",
+                            e
+                        ))
+                    }),
+                // Unreachable on the supported restore path (restore requires
+                // --data-dir, which opens the storage), but fail-closed rather
+                // than silently skipping the epoch effect.
+                None => Err(qbind_node::snapshot_restore::RestoreError::Io(
+                    "durable restore epoch effect unavailable: no consensus storage handle"
+                        .to_string(),
+                )),
+            }
+        };
+        let publish_complete = |meta: &qbind_ledger::StateSnapshotMeta| -> Result<
+            (),
+            qbind_node::snapshot_restore::RestoreError,
+        > {
+            let (data_dir, dest, nonce) = restore_attempt_identity
+                .as_ref()
+                .expect("restore path implies data_dir");
+            let digest = qbind_node::restore_completion::snapshot_meta_digest(meta);
+            let rec = qbind_node::restore_completion::RestoreTransactionRecord::new_intent(
+                dest, digest, *nonce, meta.epoch,
+            )
+            .into_complete();
+            qbind_node::restore_completion::publish_record(data_dir, &rec).map_err(|e| {
+                qbind_node::snapshot_restore::RestoreError::Io(format!(
+                    "cannot publish COMPLETE restore-transaction record: {}",
+                    e
+                ))
+            })
+        };
+        let hooks = qbind_node::snapshot_restore::RestoreCompletionHooks {
+            publish_intent: &publish_intent,
+            durable_epoch_effect: &durable_epoch_effect,
+            publish_complete: &publish_complete,
+        };
+
+        qbind_node::snapshot_restore::apply_guarded_snapshot_restore(
             &config,
             authority_ctx.as_ref(),
             epoch_precheck,
+            &hooks,
         )
     };
     let restore_outcome: Option<RestoreOutcome> = match restore_result {
@@ -4828,6 +5028,99 @@ async fn main() {
         CryptoMetricsRefs::new(),
         metrics_shutdown_rx,
     );
+
+    // ------------------------------------------------------------------
+    // Run 422 D7-D8: ordinary-startup restore-completion guard (§4.5, §7).
+    //
+    // Before the affected VM-v0 state can be opened with create-if-missing
+    // semantics or used by services, an ordinary (no-flag) startup consults
+    // the observable final restore-transaction record (RTR) under the held
+    // destination lock:
+    //
+    //   * RTR absent  -> proceed (ordinary lifecycle; untracked non-empty
+    //     legacy destinations are preserved).
+    //   * valid final COMPLETE for this destination with installed state
+    //     present -> proceed and admit the restored state (never re-copy, never
+    //     rewrite epoch).
+    //   * valid final INTENT -> refuse: a tracked interrupted restore
+    //     (INTENT may be observed, but must never be admitted).
+    //   * invalid / unsupported / corrupt / unreadable / foreign / missing
+    //     required-state -> refuse, fail-closed.
+    //
+    // This runs on the ordinary (non-restore) startup path. The requested
+    // restore path establishes its own RTR earlier this process and, on
+    // success, has already published COMPLETE before reaching here. Crash
+    // decisions use only the observable final record; the reader cannot infer
+    // whether a previous process received its last synchronization
+    // acknowledgement, so it fails closed on read errors.
+    // ------------------------------------------------------------------
+    if !restore_requested {
+        if let Some(data_dir) = config.data_dir.as_ref() {
+            use qbind_node::restore_completion::{evaluate_ordinary_startup, OrdinaryStartupDecision};
+            let decision = evaluate_ordinary_startup(data_dir);
+            if !decision.permits_startup() {
+                match &decision {
+                    OrdinaryStartupDecision::RefuseIntent => {
+                        eprintln!(
+                            "[binary] FATAL: refused by Run 422 D7-D8 ordinary-startup guard: a \
+                             tracked interrupted restore (INTENT) is present at {}. A prior \
+                             restore attempt published INTENT but never reached a durable \
+                             COMPLETE — refusing to start over the incomplete destination. \
+                             INTENT may be observed but is never admitted. Resolve the \
+                             interrupted restore before starting. See \
+                             docs/protocol/QBIND_SNAPSHOT_RESTORE_COMPLETION_CONTRACT.md §7.",
+                            data_dir.display()
+                        );
+                    }
+                    OrdinaryStartupDecision::RefuseInvalid(msg) => {
+                        eprintln!(
+                            "[binary] FATAL: refused by Run 422 D7-D8 ordinary-startup guard: the \
+                             restore-transaction record at {} is invalid/unsupported/corrupt/\
+                             unreadable: {}. Refusing before opening affected state.",
+                            data_dir.display(),
+                            msg
+                        );
+                    }
+                    OrdinaryStartupDecision::RefuseForeign { recorded, actual } => {
+                        eprintln!(
+                            "[binary] FATAL: refused by Run 422 D7-D8 ordinary-startup guard: the \
+                             COMPLETE restore-transaction record at {} records a different \
+                             destination (recorded={}, actual={}). Refusing before opening \
+                             affected state.",
+                            data_dir.display(),
+                            recorded,
+                            actual
+                        );
+                    }
+                    OrdinaryStartupDecision::RefuseMissingState(msg) => {
+                        eprintln!(
+                            "[binary] FATAL: refused by Run 422 D7-D8 ordinary-startup guard: a \
+                             COMPLETE restore-transaction record at {} is present but the \
+                             required installed state is missing/empty/unreadable: {}. Refusing \
+                             to silently recreate it.",
+                            data_dir.display(),
+                            msg
+                        );
+                    }
+                    OrdinaryStartupDecision::ProceedAbsent
+                    | OrdinaryStartupDecision::ProceedComplete => {
+                        // Unreachable: permits_startup() is false here.
+                    }
+                }
+                std::process::exit(1);
+            }
+            eprintln!(
+                "[binary] Run 422 D7-D8 ordinary-startup guard: {} at {} (proceeding)",
+                match decision {
+                    OrdinaryStartupDecision::ProceedAbsent => "no restore-transaction record",
+                    OrdinaryStartupDecision::ProceedComplete =>
+                        "valid COMPLETE with installed state present",
+                    _ => "proceed",
+                },
+                data_dir.display()
+            );
+        }
+    }
 
     let vm_v0_runtime = match VmV0RuntimeState::open_from_config(&config) {
         Ok(runtime) => runtime,

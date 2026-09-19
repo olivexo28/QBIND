@@ -404,10 +404,192 @@ fn apply_snapshot_restore_if_requested_inner(
     Ok(Some(outcome))
 }
 
-/// **Run 124.** Borrowed bundle of runtime authority-trust-domain inputs
-/// required to enforce the snapshot/restore authority-marker conflict
-/// check. Constructed by the binary surface from the same Run 102/105
-/// boot context the rest of the trust-bundle pipeline uses.
+/// **Run 422 D7-D8.** Hooks the guarded restore orchestration invokes at the
+/// three restore-completion boundaries defined by
+/// `docs/protocol/QBIND_SNAPSHOT_RESTORE_COMPLETION_CONTRACT.md` §5.9.
+///
+/// Each hook receives the SAME validated [`StateSnapshotMeta`] identity the
+/// orchestration materializes, so the binary surface can bind the durable
+/// restore-transaction record (RTR) to the held attempt nonce, the canonical
+/// destination id, and the whole validated-metadata digest without this module
+/// depending on the consensus-storage or RTR types directly.
+///
+/// The orchestration calls them in strict order: `publish_intent` (step 4,
+/// after eligibility, before any copy), then `durable_epoch_effect` (step 8,
+/// after the copied files, directory entries and audit record are synced),
+/// then `publish_complete` (step 9, only once every prerequisite effect has
+/// succeeded). A hook returning `Err(..)` aborts the orchestration and leaves
+/// whatever durable record was last published (a genuine attempt that
+/// published `INTENT` retains that fail-closed record).
+pub struct RestoreCompletionHooks<'a> {
+    /// Publish the durable `INTENT` record (step 4).
+    pub publish_intent: &'a dyn Fn(&StateSnapshotMeta) -> Result<(), RestoreError>,
+    /// Perform the durable, barriered epoch effect (step 8).
+    pub durable_epoch_effect: &'a dyn Fn(&StateSnapshotMeta) -> Result<(), RestoreError>,
+    /// Publish the durable `COMPLETE` record (step 9).
+    pub publish_complete: &'a dyn Fn(&StateSnapshotMeta) -> Result<(), RestoreError>,
+}
+
+/// **Run 422 D7-D8.** Apply a requested restore under the bounded
+/// restore-completion boundary (§5.9), reusing the exact same validation,
+/// authority-marker, epoch-precheck, occupancy, copy and audit-marker
+/// primitives as the legacy path — this is NOT a parallel restore path, it
+/// wraps the same primitives with intent/complete publication and durable
+/// synchronization.
+///
+/// Ordering (all under the caller-held destination lock; the caller has
+/// already inspected the existing RTR precondition, §5.9 step 1(b)):
+///
+/// 1. validate snapshot + authority-marker check + D5 epoch precheck → `meta`
+/// 2. non-writing target-eligibility (occupancy) check — refuse an occupied
+///    ordinary destination BEFORE any intent is published
+/// 3. `publish_intent(&meta)` — durable `INTENT`
+/// 4. materialize (create target, copy state, write audit marker)
+/// 5. fsync the installed files, the target directory tree, the audit marker
+///    and the data directory entry
+/// 6. `durable_epoch_effect(&meta)` — synced epoch effect + durability barrier
+/// 7. `publish_complete(&meta)` — durable `COMPLETE`
+///
+/// Returns `Ok(None)` when no restore is requested (`fast_sync` disabled),
+/// otherwise `Ok(Some(outcome))` once `COMPLETE` is durably published.
+pub fn apply_guarded_snapshot_restore(
+    config: &NodeConfig,
+    authority_ctx: Option<&RestoreAuthorityContext<'_>>,
+    epoch_precheck: Option<&SnapshotEpochPrecheckFn<'_>>,
+    hooks: &RestoreCompletionHooks<'_>,
+) -> Result<Option<RestoreOutcome>, RestoreError> {
+    if !config.fast_sync_config.is_enabled() {
+        return Ok(None);
+    }
+
+    let snapshot_dir = config
+        .fast_sync_config
+        .fast_sync_snapshot_dir
+        .as_ref()
+        .expect("is_enabled() guarantees Some")
+        .clone();
+
+    let data_dir = config
+        .data_dir
+        .as_ref()
+        .ok_or(RestoreError::MissingDataDir)?
+        .clone();
+
+    let expected_chain_id = config.chain_id().as_u64();
+
+    eprintln!(
+        "[restore] D7-D8 guarded restore: snapshot_dir={} data_dir={} \
+         expected_chain_id=0x{:016x}",
+        snapshot_dir.display(),
+        data_dir.display(),
+        expected_chain_id,
+    );
+
+    // 1. Validate + authority-marker check + D5 epoch precheck → meta.
+    let meta = validate_and_authorize_for_restore(
+        &snapshot_dir,
+        &data_dir,
+        expected_chain_id,
+        authority_ctx,
+        epoch_precheck,
+    )?;
+
+    // 2. Non-writing occupancy check BEFORE intent — a rejected request
+    //    against an ordinary occupied destination must not create an RTR.
+    check_target_state_eligibility(&data_dir)?;
+
+    // 3. Durable INTENT (step 4).
+    (hooks.publish_intent)(&meta)?;
+    eprintln!("[restore] D7-D8 durable INTENT published; installing account state");
+
+    // 4. Materialize: create target, copy state, write audit marker (steps
+    //    5 + 7). Reuses the exact legacy materialization primitive.
+    let outcome = materialize_validated_snapshot(&snapshot_dir, &data_dir, meta)?;
+
+    // 5. Synchronize installed files, the target tree, the audit marker and
+    //    the data-directory entry (step 6 + audit sync). Fail closed on any
+    //    synchronization error — do not proceed to COMPLETE.
+    sync_restore_effects(&data_dir, &outcome)?;
+
+    // 6. Durable, barriered epoch effect (step 8).
+    (hooks.durable_epoch_effect)(&outcome.meta)?;
+
+    // 7. Durable COMPLETE (step 9) — only after every prerequisite effect
+    //    above has succeeded.
+    (hooks.publish_complete)(&outcome.meta)?;
+
+    eprintln!(
+        "[restore] D7-D8 durable COMPLETE published: height={} chain_id=0x{:016x} \
+         bytes_copied={} target={}",
+        outcome.meta.height,
+        outcome.meta.chain_id,
+        outcome.bytes_copied,
+        outcome.target_state_dir.display(),
+    );
+
+    Ok(Some(outcome))
+}
+
+/// Shared "validate snapshot + authorize + D5 epoch precheck" step used by
+/// both the legacy [`apply_snapshot_restore_if_requested_inner`] callers and
+/// the D7-D8 [`apply_guarded_snapshot_restore`] orchestration, so the two
+/// cannot diverge. Preserves the established precedence: snapshot-layer parse
+/// first, then the authority-marker check (or the legacy
+/// [`RestoreError::AuthorityContextMissing`] fail-closed when a marker exists
+/// without a runtime authority context), then the D5 epoch precheck. Performs
+/// no materialization.
+fn validate_and_authorize_for_restore(
+    snapshot_dir: &Path,
+    data_dir: &Path,
+    expected_chain_id: u64,
+    authority_ctx: Option<&RestoreAuthorityContext<'_>>,
+    epoch_precheck: Option<&SnapshotEpochPrecheckFn<'_>>,
+) -> Result<StateSnapshotMeta, RestoreError> {
+    match authority_ctx {
+        Some(ctx) => {
+            let meta = validate_snapshot_for_restore(snapshot_dir, expected_chain_id)?;
+            enforce_authority_marker_check(&meta, data_dir, ctx)?;
+            if let Some(check) = epoch_precheck {
+                check(&meta)?;
+            }
+            Ok(meta)
+        }
+        None => {
+            // Legacy no-context path: still enforce the conservative
+            // fail-closed rule that a pre-existing local marker requires a
+            // runtime authority context (no silent shadowing).
+            let marker_path = authority_state_file_path(data_dir);
+            if marker_path.exists() {
+                return Err(RestoreError::AuthorityContextMissing);
+            }
+            let meta = validate_snapshot_for_restore(snapshot_dir, expected_chain_id)?;
+            if let Some(check) = epoch_precheck {
+                check(&meta)?;
+            }
+            Ok(meta)
+        }
+    }
+}
+
+/// **Run 422 D7-D8.** Synchronize all restore effects to stable storage before
+/// the durable epoch effect and `COMPLETE` publication (§5.9 step 6, audit
+/// sync). Covers the copied files and nested directory entries under
+/// `state_vm_v0`, the audit-marker file, and the parent data-directory entry.
+/// Fail closed on any synchronization error.
+fn sync_restore_effects(data_dir: &Path, outcome: &RestoreOutcome) -> Result<(), RestoreError> {
+    let map_sync = |e: crate::restore_completion::RtrError| {
+        RestoreError::Io(format!("restore effect synchronization failed: {}", e))
+    };
+    // Installed files + nested directory entries under the target state dir.
+    crate::restore_completion::fsync_tree(&outcome.target_state_dir).map_err(map_sync)?;
+    // The audit-marker file itself.
+    crate::restore_completion::fsync_file(&outcome.marker_path).map_err(map_sync)?;
+    // The data-directory entry so the newly created target dir + marker links
+    // are durable.
+    crate::restore_completion::fsync_dir(data_dir).map_err(map_sync)?;
+    Ok(())
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct RestoreAuthorityContext<'a> {
     /// Runtime network environment (Devnet / Testnet / Mainnet).
@@ -518,16 +700,61 @@ fn restore_from_snapshot_with_authority_marker_check_inner(
     //    check failure).
     let meta = validate_snapshot_for_restore(snapshot_dir, expected_chain_id)?;
 
-    // 2. Compute the local marker path.
+    // 2-3. Enforce the Run 124/140 authority-marker conflict check.
+    enforce_authority_marker_check(&meta, data_dir, authority_ctx)?;
+
+    // 3b. Run 422 D7-D5 pre-materialization consensus epoch-conflict check,
+    //     consuming the SAME validated `meta` (after the authority-marker
+    //     check, before materialization). A conflict is refused here, before
+    //     any account-state materialization or audit-marker write.
+    if let Some(check) = epoch_precheck {
+        check(&meta)?;
+    }
+
+    // 4. Materialize. The marker file under <data_dir> is NEVER written,
+    //    rewritten, or deleted by the restore surface — only the audit
+    //    marker (RESTORED_FROM_SNAPSHOT.json) plus the state checkpoint.
+    materialize_validated_snapshot(snapshot_dir, data_dir, meta)
+}
+
+/// Run the existing B3 validation pipeline and return the parsed meta.
+/// Factored out so [`restore_from_snapshot`] and
+/// [`restore_from_snapshot_with_authority_marker_check`] share identical
+/// snapshot-layer semantics.
+fn validate_snapshot_for_restore(
+    snapshot_dir: &Path,
+    expected_chain_id: u64,
+) -> Result<StateSnapshotMeta, RestoreError> {
+    if !snapshot_dir.exists() {
+        return Err(RestoreError::SnapshotPathMissing(snapshot_dir.to_path_buf()));
+    }
+    match validate_snapshot_dir(snapshot_dir, expected_chain_id) {
+        SnapshotValidationResult::Valid(m) => Ok(m),
+        other => Err(RestoreError::SnapshotInvalid(other)),
+    }
+}
+
+/// Enforce the Run 124 (v1) / Run 140 (v2) snapshot/restore authority-marker
+/// conflict check against the locally persisted
+/// `<data_dir>/pqc_authority_state.json` marker.
+///
+/// Extracted so the legacy restore path and the Run 422 D7-D8 guarded restore
+/// orchestration share one authority-check implementation (no divergence). A
+/// rejecting outcome returns the typed [`RestoreError`] BEFORE any state
+/// materialization or audit-marker write.
+fn enforce_authority_marker_check(
+    meta: &StateSnapshotMeta,
+    data_dir: &Path,
+    authority_ctx: &RestoreAuthorityContext<'_>,
+) -> Result<(), RestoreError> {
     let marker_path = authority_state_file_path(data_dir);
 
-    // 3. Dispatch on the snapshot meta's authority block(s):
-    //    - Run 140: if the snapshot carries a v2 block, route the pure
-    //      check through `verify_snapshot_authority_state_for_restore_v2`,
-    //      passing `snapshot_also_carries_v1_block` so an ambiguous
-    //      snapshot (both v1 + v2 blocks present) is rejected fail-closed
-    //      without consulting either block.
-    //    - Otherwise: Run 124 v1 path verbatim (no v1 regression).
+    // Dispatch on the snapshot meta's authority block(s):
+    //  - Run 140: if the snapshot carries a v2 block, route the pure check
+    //    through `verify_snapshot_authority_state_for_restore_v2`, passing
+    //    `snapshot_also_carries_v1_block` so an ambiguous snapshot (both v1 +
+    //    v2 blocks present) is rejected fail-closed without consulting either.
+    //  - Otherwise: Run 124 v1 path verbatim (no v1 regression).
     if meta.authority_state_v2.is_some() {
         let check_outcome_v2 = verify_snapshot_authority_state_for_restore_v2(
             SnapshotRestoreAuthorityCheckV2Inputs {
@@ -575,35 +802,36 @@ fn restore_from_snapshot_with_authority_marker_check_inner(
             check_outcome
         );
     }
-
-    // 3b. Run 422 D7-D5 pre-materialization consensus epoch-conflict check,
-    //     consuming the SAME validated `meta` (after the authority-marker
-    //     check, before materialization). A conflict is refused here, before
-    //     any account-state materialization or audit-marker write.
-    if let Some(check) = epoch_precheck {
-        check(&meta)?;
-    }
-
-    // 4. Materialize. The marker file under <data_dir> is NEVER written,
-    //    rewritten, or deleted by the restore surface — only the audit
-    //    marker (RESTORED_FROM_SNAPSHOT.json) plus the state checkpoint.
-    materialize_validated_snapshot(snapshot_dir, data_dir, meta)
+    Ok(())
 }
 
-/// Run the existing B3 validation pipeline and return the parsed meta.
-/// Factored out so [`restore_from_snapshot`] and
-/// [`restore_from_snapshot_with_authority_marker_check`] share identical
-/// snapshot-layer semantics.
-fn validate_snapshot_for_restore(
-    snapshot_dir: &Path,
-    expected_chain_id: u64,
-) -> Result<StateSnapshotMeta, RestoreError> {
-    if !snapshot_dir.exists() {
-        return Err(RestoreError::SnapshotPathMissing(snapshot_dir.to_path_buf()));
-    }
-    match validate_snapshot_dir(snapshot_dir, expected_chain_id) {
-        SnapshotValidationResult::Valid(m) => Ok(m),
-        other => Err(RestoreError::SnapshotInvalid(other)),
+/// **Run 422 D7-D8.** The non-writing target-eligibility check (§5.9 step 3).
+///
+/// Returns `Ok(())` when `<data_dir>/state_vm_v0` is absent or empty (a restore
+/// may proceed), and [`RestoreError::TargetStateNotEmpty`] when it exists and
+/// is non-empty. This performs **no** mutation — in particular it does not
+/// create the target directory — so a rejected request against an ordinary
+/// occupied destination leaves the directory unchanged and, called before
+/// `INTENT` publication, never creates or replaces an RTR. The same occupancy
+/// predicate is re-checked inside [`materialize_validated_snapshot`]; this
+/// factoring simply lets the guarded orchestration refuse an occupied target
+/// before publishing intent.
+pub fn check_target_state_eligibility(data_dir: &Path) -> Result<(), RestoreError> {
+    let target_state_dir = data_dir.join(VM_V0_STATE_SUBDIR);
+    match std::fs::read_dir(&target_state_dir) {
+        Ok(mut entries) => {
+            if entries.next().is_some() {
+                Err(RestoreError::TargetStateNotEmpty(target_state_dir))
+            } else {
+                Ok(())
+            }
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(RestoreError::Io(format!(
+            "cannot read target state dir {}: {}",
+            target_state_dir.display(),
+            e
+        ))),
     }
 }
 
@@ -624,20 +852,11 @@ fn materialize_validated_snapshot(
         ))
     })?;
 
-    // 4. Compute target state dir and refuse to overwrite if non-empty.
+    // 4. Refuse to overwrite a non-empty target (shared occupancy predicate),
+    //    otherwise create the (empty) target state dir.
     let target_state_dir = data_dir.join(VM_V0_STATE_SUBDIR);
-    if target_state_dir.exists() {
-        let mut entries = std::fs::read_dir(&target_state_dir).map_err(|e| {
-            RestoreError::Io(format!(
-                "cannot read target state dir {}: {}",
-                target_state_dir.display(),
-                e
-            ))
-        })?;
-        if entries.next().is_some() {
-            return Err(RestoreError::TargetStateNotEmpty(target_state_dir));
-        }
-    } else {
+    check_target_state_eligibility(data_dir)?;
+    if !target_state_dir.exists() {
         std::fs::create_dir_all(&target_state_dir).map_err(|e| {
             RestoreError::Io(format!(
                 "cannot create target state dir {}: {}",
