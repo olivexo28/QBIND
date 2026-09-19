@@ -419,6 +419,13 @@ impl ConsensusStorage for FaultInjectingStorage {
             Ok(None)
         }
     }
+    // Run 422 D7-D8: read-only reader must not write.
+    fn put_current_epoch_synced(&self, _: u64) -> Result<(), StorageError> {
+        panic!("read-only reader must not write");
+    }
+    fn flush_epoch_durable(&self) -> Result<(), StorageError> {
+        panic!("read-only reader must not write");
+    }
     fn put_schema_version(&self, _: u32) -> Result<(), StorageError> {
         panic!("read-only reader must not write");
     }
@@ -614,6 +621,15 @@ impl ConsensusStorage for WriteCountingStorage {
     fn get_current_epoch(&self) -> Result<Option<u64>, StorageError> {
         self.inner.get_current_epoch()
     }
+    // Run 422 D7-D8: count synced writes like ordinary writes; the barrier
+    // performs no value change and is not counted.
+    fn put_current_epoch_synced(&self, e: u64) -> Result<(), StorageError> {
+        self.bump();
+        self.inner.put_current_epoch_synced(e)
+    }
+    fn flush_epoch_durable(&self) -> Result<(), StorageError> {
+        self.inner.flush_epoch_durable()
+    }
     fn put_schema_version(&self, v: u32) -> Result<(), StorageError> {
         self.bump();
         self.inner.put_schema_version(v)
@@ -772,6 +788,13 @@ impl ConsensusStorage for StorageReportedIncompleteBackend {
             FailAt::Epoch => Err(Self::incomplete()),
             _ => Ok(None),
         }
+    }
+    // Run 422 D7-D8: read-only reader must not write.
+    fn put_current_epoch_synced(&self, _: u64) -> Result<(), StorageError> {
+        panic!("read-only reader must not write");
+    }
+    fn flush_epoch_durable(&self) -> Result<(), StorageError> {
+        panic!("read-only reader must not write");
     }
     fn put_schema_version(&self, _: u32) -> Result<(), StorageError> {
         panic!("read-only reader must not write");

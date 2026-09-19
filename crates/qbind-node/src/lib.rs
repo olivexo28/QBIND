@@ -2141,6 +2141,12 @@ pub mod remote_signer;
 pub mod secure_channel;
 pub mod signer_loader;
 pub mod snapshot_restore;
+// Run 422 D7-D8 — restore-completion boundary primitives: the bounded
+// restore-transaction record (RTR), the `flock` destination lock, atomic
+// durable publication, fsync helpers, and the ordinary-startup restore
+// guard defined by
+// `docs/protocol/QBIND_SNAPSHOT_RESTORE_COMPLETION_CONTRACT.md`.
+pub mod restore_completion;
 pub mod startup_validation;
 pub mod storage;
 pub mod production_consensus_storage;
