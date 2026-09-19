@@ -6987,7 +6987,15 @@ signal supports a passing result.
 
 Recorded literally; a skipped CodeQL analysis or an errored/unavailable reviewer
 is NOT a successful security review and no historical outcome is upgraded here.
-(See the final report for the exact `parallel_validation` strings from this run.)
+
+* CodeQL Security Scan (`parallel_validation`): "Skipped: all changes are
+  trivial." — the changes are test-file + documentation only, declared trivial
+  for CodeQL. This is a SKIP, **not** a completed clean scan.
+* Code Review (`parallel_validation`): reported "Code review completed. Reviewed
+  2 file(s). No review comments found." but ALSO reported a backend error —
+  "Code review tool is not available in this environment: ... model
+  claude-sonnet-4.6 not found in registry." The no-comments result is therefore
+  **not** evidence of a completed model review.
 
 ### Scoped verdict and preserved posture
 
