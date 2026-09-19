@@ -748,14 +748,7 @@ pub fn persist_restored_snapshot_epoch_durable(
                 epoch,
                 path.display()
             );
-            storage.flush_epoch_durable().map_err(|e| {
-                ProductionConsensusStorageError::RestoreEpochWriteFailed {
-                    path: path.clone(),
-                    epoch,
-                    source: e,
-                }
-            })?;
-            Ok(false)
+            apply_durable_epoch_effect(storage.as_ref(), &path, DurableEpochEffect::Barrier(epoch))
         }
         RestoreEpochPlan::PersistAfterMaterialization {
             epoch: target_epoch,
@@ -770,19 +763,82 @@ pub fn persist_restored_snapshot_epoch_durable(
                 target_epoch,
                 path.display()
             );
-            storage.put_current_epoch_synced(target_epoch).map_err(|e| {
-                ProductionConsensusStorageError::RestoreEpochWriteFailed {
-                    path: path.clone(),
-                    epoch: target_epoch,
-                    source: e,
-                }
-            })?;
+            let wrote = apply_durable_epoch_effect(
+                storage.as_ref(),
+                &path,
+                DurableEpochEffect::PersistSynced(target_epoch),
+            )?;
             eprintln!(
                 "[restore] D7-D8 persisted snapshot canonical epoch={} (synced) into {}",
                 target_epoch,
                 path.display()
             );
+            Ok(wrote)
+        }
+    }
+}
+
+/// The concrete durable epoch effect selected by
+/// [`persist_restored_snapshot_epoch_durable`] once the shared
+/// [`evaluate_restore_epoch_compatibility`] decision has been made.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DurableEpochEffect {
+    /// Persist the snapshot epoch through the synced-write interface (returns
+    /// `Ok(true)`).
+    PersistSynced(u64),
+    /// Perform an explicit durability barrier over an already-matching epoch
+    /// (returns `Ok(false)`).
+    Barrier(u64),
+}
+
+/// The minimal durability surface [`apply_durable_epoch_effect`] needs, so the
+/// effect is directly unit-testable (§F) against a trivial two-method double
+/// without re-implementing the full [`ConsensusStorage`] trait. Blanket-
+/// implemented for every [`ConsensusStorage`], so the concrete RocksDB handle
+/// satisfies it transparently.
+trait DurableEpochStore {
+    fn put_current_epoch_synced(&self, epoch: u64) -> Result<(), StorageError>;
+    fn flush_epoch_durable(&self) -> Result<(), StorageError>;
+}
+
+impl<T: ConsensusStorage + ?Sized> DurableEpochStore for T {
+    fn put_current_epoch_synced(&self, epoch: u64) -> Result<(), StorageError> {
+        ConsensusStorage::put_current_epoch_synced(self, epoch)
+    }
+    fn flush_epoch_durable(&self) -> Result<(), StorageError> {
+        ConsensusStorage::flush_epoch_durable(self)
+    }
+}
+
+/// Perform a [`DurableEpochEffect`] against a durable epoch store. Extracted
+/// so the already-matching durability barrier and the synced write are both
+/// directly unit-testable against a counting/faulting double (§F), independent
+/// of the concrete RocksDB handle. Fails closed on any storage error.
+fn apply_durable_epoch_effect(
+    storage: &dyn DurableEpochStore,
+    path: &PathBuf,
+    effect: DurableEpochEffect,
+) -> Result<bool, ProductionConsensusStorageError> {
+    match effect {
+        DurableEpochEffect::PersistSynced(epoch) => {
+            storage.put_current_epoch_synced(epoch).map_err(|e| {
+                ProductionConsensusStorageError::RestoreEpochWriteFailed {
+                    path: path.clone(),
+                    epoch,
+                    source: e,
+                }
+            })?;
             Ok(true)
+        }
+        DurableEpochEffect::Barrier(epoch) => {
+            storage.flush_epoch_durable().map_err(|e| {
+                ProductionConsensusStorageError::RestoreEpochWriteFailed {
+                    path: path.clone(),
+                    epoch,
+                    source: e,
+                }
+            })?;
+            Ok(false)
         }
     }
 }
@@ -1047,6 +1103,215 @@ mod tests {
         drop(opened);
         let opened2 = open_production_consensus_storage(&cfg).expect("reopen");
         assert_eq!(opened2.state, ConsensusStorageState::CommittedEpoch(0));
+    }
+
+    // ------------------------------------------------------------------
+    // Run 422 D7-D8 — durable epoch effect
+    // (`persist_restored_snapshot_epoch_durable`): synced write / barrier.
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn d7d8_durable_persist_none_is_noop_no_coercion() {
+        let tmp = TempDir::new().unwrap();
+        let cfg = devnet_config_with_data_dir(tmp.path());
+        let opened = open_production_consensus_storage(&cfg).expect("open");
+        // epoch=None must not write and must not coerce to 0.
+        let wrote = persist_restored_snapshot_epoch_durable(&opened, None).expect("ok");
+        assert!(!wrote);
+        assert_eq!(
+            opened.handle.as_ref().unwrap().get_current_epoch().unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn d7d8_durable_persist_some_into_present_writes_synced_and_survives_reopen() {
+        let tmp = TempDir::new().unwrap();
+        let cfg = devnet_config_with_data_dir(tmp.path());
+        let opened = open_production_consensus_storage(&cfg).expect("open");
+        assert_eq!(opened.state, ConsensusStorageState::PresentNoCommittedEpoch);
+
+        let wrote = persist_restored_snapshot_epoch_durable(&opened, Some(21)).expect("write ok");
+        assert!(wrote);
+        assert_eq!(
+            opened.handle.as_ref().unwrap().get_current_epoch().unwrap(),
+            Some(21)
+        );
+
+        // The synced write survives a reopen as a committed epoch.
+        drop(opened);
+        let opened2 = open_production_consensus_storage(&cfg).expect("reopen");
+        assert_eq!(opened2.state, ConsensusStorageState::CommittedEpoch(21));
+    }
+
+    #[test]
+    fn d7d8_durable_persist_epoch_zero_is_committed_epoch_zero() {
+        let tmp = TempDir::new().unwrap();
+        let cfg = devnet_config_with_data_dir(tmp.path());
+        let opened = open_production_consensus_storage(&cfg).expect("open");
+        let wrote = persist_restored_snapshot_epoch_durable(&opened, Some(0)).expect("ok");
+        assert!(wrote);
+        drop(opened);
+        let opened2 = open_production_consensus_storage(&cfg).expect("reopen");
+        assert_eq!(opened2.state, ConsensusStorageState::CommittedEpoch(0));
+    }
+
+    #[test]
+    fn d7d8_durable_persist_already_matching_runs_barrier_preserves_value() {
+        // §5.9: an already-matching snapshot epoch still performs an explicit
+        // durability barrier (flush_epoch_durable) and returns Ok(false)
+        // without changing the value.
+        let tmp = TempDir::new().unwrap();
+        let cfg = devnet_config_with_data_dir(tmp.path());
+        {
+            let opened = open_production_consensus_storage(&cfg).expect("open");
+            opened
+                .handle
+                .as_ref()
+                .unwrap()
+                .put_current_epoch(5)
+                .unwrap();
+        }
+        let opened = open_production_consensus_storage(&cfg).expect("reopen");
+        assert_eq!(opened.state, ConsensusStorageState::CommittedEpoch(5));
+
+        let wrote = persist_restored_snapshot_epoch_durable(&opened, Some(5)).expect("barrier ok");
+        assert!(!wrote);
+        // The value is preserved through the barrier.
+        assert_eq!(
+            opened.handle.as_ref().unwrap().get_current_epoch().unwrap(),
+            Some(5)
+        );
+    }
+
+    #[test]
+    fn d7d8_durable_persist_conflict_fails_closed() {
+        let tmp = TempDir::new().unwrap();
+        let cfg = devnet_config_with_data_dir(tmp.path());
+        {
+            let opened = open_production_consensus_storage(&cfg).expect("open");
+            opened
+                .handle
+                .as_ref()
+                .unwrap()
+                .put_current_epoch(9)
+                .unwrap();
+        }
+        let opened = open_production_consensus_storage(&cfg).expect("reopen");
+        let err =
+            persist_restored_snapshot_epoch_durable(&opened, Some(7)).expect_err("must fail");
+        match err {
+            ProductionConsensusStorageError::RestoreEpochInconsistent {
+                existing,
+                snapshot,
+                ..
+            } => {
+                assert_eq!(existing, 9);
+                assert_eq!(snapshot, 7);
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
+        // Value unchanged.
+        assert_eq!(
+            opened.handle.as_ref().unwrap().get_current_epoch().unwrap(),
+            Some(9)
+        );
+    }
+
+    // A counting/faulting durable-epoch store double used to assert the
+    // durable epoch effect INVOKES the barrier / synced-write directly (§F),
+    // rather than merely observing the absence of a value change.
+    #[derive(Default)]
+    struct CountingDurableStorage {
+        synced_writes: std::sync::atomic::AtomicUsize,
+        flushes: std::sync::atomic::AtomicUsize,
+        fail_flush: bool,
+        fail_synced: bool,
+    }
+
+    impl super::DurableEpochStore for CountingDurableStorage {
+        fn put_current_epoch_synced(
+            &self,
+            _epoch: u64,
+        ) -> Result<(), crate::storage::StorageError> {
+            self.synced_writes
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            if self.fail_synced {
+                return Err(crate::storage::StorageError::Io(
+                    "injected synced-write failure".to_string(),
+                ));
+            }
+            Ok(())
+        }
+        fn flush_epoch_durable(&self) -> Result<(), crate::storage::StorageError> {
+            self.flushes
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            if self.fail_flush {
+                return Err(crate::storage::StorageError::Io(
+                    "injected flush failure".to_string(),
+                ));
+            }
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn d7d8_apply_durable_effect_barrier_invokes_flush() {
+        use std::sync::atomic::Ordering::SeqCst;
+        let storage = CountingDurableStorage::default();
+        let path = std::path::PathBuf::from("/data/qbind/consensus");
+        let wrote =
+            apply_durable_epoch_effect(&storage, &path, DurableEpochEffect::Barrier(5)).expect("ok");
+        assert!(!wrote);
+        assert_eq!(storage.flushes.load(SeqCst), 1);
+        assert_eq!(storage.synced_writes.load(SeqCst), 0);
+    }
+
+    #[test]
+    fn d7d8_apply_durable_effect_persist_invokes_synced_write() {
+        use std::sync::atomic::Ordering::SeqCst;
+        let storage = CountingDurableStorage::default();
+        let path = std::path::PathBuf::from("/data/qbind/consensus");
+        let wrote = apply_durable_epoch_effect(
+            &storage,
+            &path,
+            DurableEpochEffect::PersistSynced(7),
+        )
+        .expect("ok");
+        assert!(wrote);
+        assert_eq!(storage.synced_writes.load(SeqCst), 1);
+        assert_eq!(storage.flushes.load(SeqCst), 0);
+    }
+
+    #[test]
+    fn d7d8_apply_durable_effect_barrier_failure_fails_closed() {
+        let storage = CountingDurableStorage {
+            fail_flush: true,
+            ..Default::default()
+        };
+        let path = std::path::PathBuf::from("/data/qbind/consensus");
+        let err = apply_durable_epoch_effect(&storage, &path, DurableEpochEffect::Barrier(5))
+            .expect_err("barrier failure must surface");
+        assert!(matches!(
+            err,
+            ProductionConsensusStorageError::RestoreEpochWriteFailed { epoch: 5, .. }
+        ));
+    }
+
+    #[test]
+    fn d7d8_apply_durable_effect_synced_failure_fails_closed() {
+        let storage = CountingDurableStorage {
+            fail_synced: true,
+            ..Default::default()
+        };
+        let path = std::path::PathBuf::from("/data/qbind/consensus");
+        let err =
+            apply_durable_epoch_effect(&storage, &path, DurableEpochEffect::PersistSynced(7))
+                .expect_err("synced-write failure must surface");
+        assert!(matches!(
+            err,
+            ProductionConsensusStorageError::RestoreEpochWriteFailed { epoch: 7, .. }
+        ));
     }
 
     // ------------------------------------------------------------------

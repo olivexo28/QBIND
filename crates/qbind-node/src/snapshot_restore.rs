@@ -404,37 +404,36 @@ fn apply_snapshot_restore_if_requested_inner(
     Ok(Some(outcome))
 }
 
-/// **Run 422 D7-D8.** Hooks the guarded restore orchestration invokes at the
-/// three restore-completion boundaries defined by
+/// **Run 422 D7-D8.** Hook the guarded restore orchestration invokes at the
+/// `INTENT` boundary defined by
 /// `docs/protocol/QBIND_SNAPSHOT_RESTORE_COMPLETION_CONTRACT.md` §5.9.
 ///
-/// Each hook receives the SAME validated [`StateSnapshotMeta`] identity the
+/// The hook receives the SAME validated [`StateSnapshotMeta`] identity the
 /// orchestration materializes, so the binary surface can bind the durable
 /// restore-transaction record (RTR) to the held attempt nonce, the canonical
 /// destination id, and the whole validated-metadata digest without this module
 /// depending on the consensus-storage or RTR types directly.
 ///
-/// The orchestration calls them in strict order: `publish_intent` (step 4,
-/// after eligibility, before any copy), then `durable_epoch_effect` (step 8,
-/// after the copied files, directory entries and audit record are synced),
-/// then `publish_complete` (step 9, only once every prerequisite effect has
-/// succeeded). A hook returning `Err(..)` aborts the orchestration and leaves
-/// whatever durable record was last published (a genuine attempt that
-/// published `INTENT` retains that fail-closed record).
+/// The orchestration calls `publish_intent` at step 4 (after eligibility,
+/// before any copy). The remaining durable steps — the barriered epoch effect
+/// (step 8) and the durable `COMPLETE` publication (step 9) — are performed by
+/// the caller at the established Run 097 epoch-persistence site so that the
+/// single canonical consensus-storage handle drives the epoch effect and the
+/// existing epoch-parity diagnostics are preserved. See the binary
+/// (`crates/qbind-node/src/main.rs`) for the caller-side finalization. A hook
+/// returning `Err(..)` aborts the orchestration and leaves whatever durable
+/// record was last published (a genuine attempt that published `INTENT` retains
+/// that fail-closed record).
 pub struct RestoreCompletionHooks<'a> {
     /// Publish the durable `INTENT` record (step 4).
     pub publish_intent: &'a dyn Fn(&StateSnapshotMeta) -> Result<(), RestoreError>,
-    /// Perform the durable, barriered epoch effect (step 8).
-    pub durable_epoch_effect: &'a dyn Fn(&StateSnapshotMeta) -> Result<(), RestoreError>,
-    /// Publish the durable `COMPLETE` record (step 9).
-    pub publish_complete: &'a dyn Fn(&StateSnapshotMeta) -> Result<(), RestoreError>,
 }
 
 /// **Run 422 D7-D8.** Apply a requested restore under the bounded
 /// restore-completion boundary (§5.9), reusing the exact same validation,
 /// authority-marker, epoch-precheck, occupancy, copy and audit-marker
 /// primitives as the legacy path — this is NOT a parallel restore path, it
-/// wraps the same primitives with intent/complete publication and durable
+/// wraps the same primitives with intent publication and durable
 /// synchronization.
 ///
 /// Ordering (all under the caller-held destination lock; the caller has
@@ -447,11 +446,15 @@ pub struct RestoreCompletionHooks<'a> {
 /// 4. materialize (create target, copy state, write audit marker)
 /// 5. fsync the installed files, the target directory tree, the audit marker
 ///    and the data directory entry
-/// 6. `durable_epoch_effect(&meta)` — synced epoch effect + durability barrier
-/// 7. `publish_complete(&meta)` — durable `COMPLETE`
+///
+/// The caller then performs step 8 (the durable, barriered epoch effect) and
+/// step 9 (durable `COMPLETE`) at the canonical consensus-storage handle. This
+/// function returns once `INTENT` is published and the installed state + audit
+/// record are durably synchronized; it does NOT publish `COMPLETE`.
 ///
 /// Returns `Ok(None)` when no restore is requested (`fast_sync` disabled),
-/// otherwise `Ok(Some(outcome))` once `COMPLETE` is durably published.
+/// otherwise `Ok(Some(outcome))` once the installed state + audit record are
+/// durably synchronized (with a fail-closed `INTENT` published).
 pub fn apply_guarded_snapshot_restore(
     config: &NodeConfig,
     authority_ctx: Option<&RestoreAuthorityContext<'_>>,
@@ -508,19 +511,12 @@ pub fn apply_guarded_snapshot_restore(
 
     // 5. Synchronize installed files, the target tree, the audit marker and
     //    the data-directory entry (step 6 + audit sync). Fail closed on any
-    //    synchronization error — do not proceed to COMPLETE.
+    //    synchronization error — do not proceed toward COMPLETE.
     sync_restore_effects(&data_dir, &outcome)?;
 
-    // 6. Durable, barriered epoch effect (step 8).
-    (hooks.durable_epoch_effect)(&outcome.meta)?;
-
-    // 7. Durable COMPLETE (step 9) — only after every prerequisite effect
-    //    above has succeeded.
-    (hooks.publish_complete)(&outcome.meta)?;
-
     eprintln!(
-        "[restore] D7-D8 durable COMPLETE published: height={} chain_id=0x{:016x} \
-         bytes_copied={} target={}",
+        "[restore] D7-D8 INTENT + install + sync complete: height={} chain_id=0x{:016x} \
+         bytes_copied={} target={}; deferring epoch barrier + COMPLETE to the Run 097 site",
         outcome.meta.height,
         outcome.meta.chain_id,
         outcome.bytes_copied,

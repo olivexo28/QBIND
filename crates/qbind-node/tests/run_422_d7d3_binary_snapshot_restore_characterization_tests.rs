@@ -69,6 +69,7 @@ use qbind_node::node_config::NodeConfig;
 use qbind_node::snapshot_restore::{
     restore_from_snapshot, RESTORE_MARKER_FILENAME, VM_V0_STATE_SUBDIR,
 };
+use qbind_node::restore_completion::{read_rtr, RtrReadResult, RtrState, RTR_FILENAME};
 use qbind_node::storage::{ConsensusStorage, RocksDbConsensusStorage};
 
 // ============================================================================
@@ -841,6 +842,25 @@ const M_CONSENSUS_LOOP_STARTED: &str = "[binary-consensus] Starting consensus lo
 const M_D7D5_CLI_COMBO_REJECT: &str =
     "[binary] FATAL: refused by Run 422 D7-D5: --restore-from-snapshot is \
      unsupported in combination with the CLI validation/apply exit mode(s):";
+
+/// **Run 422 D7-D8.** The durable-INTENT publication line printed by the
+/// guarded restore before any account-state copy.
+const M_D7D8_INTENT_PUBLISHED: &str = "[restore] D7-D8 durable INTENT published";
+
+/// **Run 422 D7-D8.** The durable-COMPLETE publication line printed only after
+/// every prerequisite effect (copy, sync, audit, epoch barrier) has succeeded.
+const M_D7D8_COMPLETE_PUBLISHED: &str = "[restore] D7-D8 durable COMPLETE published";
+
+/// **Run 422 D7-D8.** The ordinary-startup guard refusal over a tracked
+/// interrupted restore (a valid final `INTENT`). INTENT may be observed but is
+/// never admitted.
+const M_D7D8_ORDINARY_REFUSE_INTENT: &str =
+    "refused by Run 422 D7-D8 ordinary-startup guard: a tracked interrupted restore (INTENT)";
+
+/// **Run 422 D7-D8.** The requested-restore precondition refusal when an RTR
+/// (`INTENT` or `COMPLETE`) already occupies the destination.
+const M_D7D8_PRECOND_OCCUPIED: &str =
+    "refused by Run 422 D7-D8: a restore-transaction record is already present";
 
 /// Base argv for a restore-driven LocalMesh DevNet start against a fresh
 /// data dir. No `--genesis-path` is supplied, so the binary takes the legacy
@@ -1901,7 +1921,25 @@ fn d7d5c_occupied_target_refused_after_precheck_permits() {
         );
     }
 
-    // The restore audit marker must remain ABSENT (it was absent pre-run).
+    // Run 422 D7-D8: the non-writing occupancy (target-eligibility) check runs
+    // BEFORE any INTENT is published, so a rejected request against an ordinary
+    // occupied destination must neither publish an INTENT nor create an RTR.
+    assert!(
+        !stderr.contains(M_D7D8_INTENT_PUBLISHED),
+        "the occupied-target refusal must precede INTENT publication; stderr=\n{stderr}"
+    );
+    assert!(
+        matches!(
+            read_rtr(data_dir.path()).expect("read RTR after occupied-target refusal"),
+            RtrReadResult::Absent
+        ),
+        "a rejected request against an ordinary occupied destination must not create an RTR; \
+         stderr=\n{stderr}"
+    );
+    assert!(
+        !data_dir.path().join(RTR_FILENAME).exists(),
+        "no restore-transaction record file may exist after an occupied-target refusal"
+    );
     assert!(
         !marker_path.exists(),
         "restore audit marker must remain absent after an occupied-target refusal"
@@ -2600,6 +2638,29 @@ fn produce_and_verify_marker_obstructed_failure(
         "[{tag}] the marker directory's sentinel bytes must remain unchanged"
     );
 
+    // Run 422 D7-D8: a genuine attempt published a durable INTENT before the
+    // account copy; the late marker-open failure retains that fail-closed
+    // INTENT record (it is never promoted to COMPLETE and never auto-removed).
+    assert!(
+        stderr.contains(M_D7D8_INTENT_PUBLISHED),
+        "[{tag}] the guarded restore must publish a durable INTENT before copying state; \
+         stderr=\n{stderr}"
+    );
+    assert!(
+        !stderr.contains(M_D7D8_COMPLETE_PUBLISHED),
+        "[{tag}] a restore that fails at the audit marker must never publish COMPLETE; \
+         stderr=\n{stderr}"
+    );
+    let rtr_after = read_rtr(data_dir.path()).expect("read RTR after failure");
+    match rtr_after {
+        RtrReadResult::Present(rec) => assert_eq!(
+            rec.state,
+            RtrState::Intent,
+            "[{tag}] the retained restore-transaction record must be INTENT, never COMPLETE"
+        ),
+        other => panic!("[{tag}] expected a present INTENT RTR after failure, got {other:?}"),
+    }
+
     MarkerObstructedFailedDestination {
         _src_state: src_state,
         _snap_root: snap_root,
@@ -2625,22 +2686,18 @@ fn d7d6_a_late_marker_open_failure() {
     // restored account + PresentNoCommittedEpoch + intact directory/sentinel.
 }
 
-/// D7-D6 case B — ordinary restart WITHOUT `--restore-from-snapshot` over the
-/// failed destination produced by case A, without deleting or repairing anything.
+/// D7-D6/D8 case B — ordinary restart WITHOUT `--restore-from-snapshot` over
+/// the failed destination produced by case A, without deleting or repairing
+/// anything.
 ///
-/// Source trace (verified against the real binary): a no-flag start makes
-/// `apply_snapshot_restore_if_requested` return `Ok(None)` (`M_NO_RESTORE`); NO
-/// restore/epoch check and NO Run 097 block run; startup opens the canonical
-/// consensus storage (still `PresentNoCommittedEpoch`), dispatches into
-/// `run_local_mesh_node`, and enters `run_binary_consensus_loop_with_io` with
-/// `restore_baseline=false`. The honest last-observed boundary is the existing
-/// `[binary-consensus] Starting consensus loop:` line, reached while the child
-/// is still ALIVE and then DELIBERATELY terminated through the validated runner
-/// (a LocalMesh dispatch message alone is insufficient).
-///
-/// The obstructing marker directory is irrelevant to a no-flag start (no marker
-/// write is attempted). Reaching the loop is an OBSERVED limitation, NOT safe
-/// recovery and NOT whole-directory identity.
+/// **Run 422 D7-D8 containment.** Case A now leaves a durable `INTENT`
+/// restore-transaction record. A no-flag restart therefore hits the
+/// ordinary-startup guard, which observes the tracked interrupted restore and
+/// REFUSES (natural exit 1) BEFORE opening the affected VM-v0 state or the
+/// consensus storage and BEFORE entering the consensus loop. `INTENT` may be
+/// observed but is never admitted. This is the exact D7-D6 failure the D8
+/// mechanism contains: the previous run reached the consensus loop over the
+/// incomplete destination; the guarded build now fails closed.
 #[test]
 fn d7d6_b_ordinary_restart_without_flag_over_marker_obstructed_failure() {
     let failed = produce_and_verify_marker_obstructed_failure("D6-B-pre-failure");
@@ -2655,30 +2712,51 @@ fn d7d6_b_ordinary_restart_without_flag_over_marker_obstructed_failure() {
     // Ordinary start: equivalent env/network-mode/data-dir, NO restore flag.
     let args = ordinary_localmesh_args(failed.data_dir.path());
     log_executable_provenance("D6-B-ordinary-no-flag", &args);
-    let stderr = {
+    let (status, stderr, capture) = {
         let mut child = DrainedChild::spawn(&args);
-        child
-            .observe_then_terminate(&[M_CONSENSUS_LOOP_STARTED], POSITIVE_DEADLINE)
-            .expect_observed_then_terminated("D6-B-ordinary-no-flag")
+        let status = child.wait_natural_exit(NEGATIVE_DEADLINE);
+        (status, child.stderr_snapshot(), child.stderr_capture())
     };
     maybe_dump_child_stderr("D6-B-ordinary-no-flag", &stderr);
 
-    // Observed branch: ordinary startup PROCEEDS to the consensus loop.
+    // D7-D8: ordinary startup now REFUSES over the tracked INTENT — natural
+    // fail-closed exit 1, not a signal.
+    assert_eq!(
+        status.code(),
+        Some(1),
+        "no-flag restart over a tracked INTENT must fail closed with natural exit code 1 \
+         (status={status:?}); stderr=\n{stderr}"
+    );
+    assert!(
+        status.signal().is_none(),
+        "the refusal must be a natural exit, not a signal (status={status:?}); stderr=\n{stderr}"
+    );
+    assert!(
+        stderr.contains(M_D7D8_ORDINARY_REFUSE_INTENT),
+        "the ordinary-startup guard must refuse over the tracked interrupted restore (INTENT); \
+         stderr=\n{stderr}"
+    );
+    // A no-flag start still prints the normal-startup line (the restore branch
+    // returned Ok(None)) BEFORE the guard refuses.
     assert!(
         stderr.contains(M_NO_RESTORE),
-        "ordinary start must print the normal-startup line; stderr=\n{}",
-        stderr
+        "ordinary start prints the normal-startup line before the guard; stderr=\n{stderr}"
     );
-    assert_marker_order(
-        &stderr,
-        &[M_NO_RESTORE, M_STORAGE_OPEN, M_LOOP_REACHED, M_CONSENSUS_LOOP_STARTED],
+    assert!(
+        capture.is_complete(),
+        "stderr capture was not complete ({capture:?}); cannot assert forbidden markers"
     );
-    // No restore work; the loop reports `restore_baseline=false`.
-    for forbidden in [M_RESTORE_OK, M_B5, M_BASELINE_APPLIED] {
+    // The guard refuses BEFORE opening affected state or entering the loop.
+    for forbidden in [
+        M_CONSENSUS_LOOP_STARTED,
+        M_LOOP_REACHED,
+        M_RESTORE_OK,
+        M_B5,
+        M_BASELINE_APPLIED,
+    ] {
         assert!(
             !stderr.contains(forbidden),
-            "ordinary (no-flag) start must not emit {forbidden:?}; stderr=\n{}",
-            stderr
+            "a refused no-flag restart must not emit {forbidden:?}; stderr=\n{stderr}"
         );
     }
     // A no-flag start attempts no marker write, so the marker-open failure must
@@ -2686,52 +2764,54 @@ fn d7d6_b_ordinary_restart_without_flag_over_marker_obstructed_failure() {
     assert!(
         !stderr.contains(M_MARKER_OPEN_FAIL),
         "a no-flag start writes no restore marker; the marker-open failure must not recur; \
-         stderr=\n{}",
-        stderr
-    );
-    assert!(
-        stderr.contains("restore_baseline=false"),
-        "the consensus-loop-start line must confirm NO baseline was applied; stderr=\n{}",
-        stderr
+         stderr=\n{stderr}"
     );
 
-    // Independent post-process reads (after reap). Report honestly; do NOT claim
-    // whole-directory identity or safe recovery.
+    // Independent post-process reads (after reap): the refusal changed nothing.
     let (acct_after, obs_after) = observe_restored_data_dir(failed.data_dir.path());
     assert_eq!(
         acct_after, acct_before,
-        "restored account value observable after ordinary restart (unchanged at loop-start)"
+        "the refused restart must not change the restored account value"
     );
     assert_eq!(
         obs_after, obs_before,
-        "ordinary startup proceeded over the destination; committed epoch still absent \
-         (observed limitation, not safe recovery)"
+        "the refused restart must not persist any committed epoch (still \
+         PresentNoCommittedEpoch)"
     );
     assert_eq!(obs_after, ConsensusStorageObservation::PresentNoCommittedEpoch);
+    // The retained INTENT record is not removed to make startup pass.
+    match read_rtr(failed.data_dir.path()).expect("read RTR after refused restart") {
+        RtrReadResult::Present(rec) => assert_eq!(
+            rec.state,
+            RtrState::Intent,
+            "the refused restart must retain the fail-closed INTENT record"
+        ),
+        other => panic!("expected a retained INTENT RTR, got {other:?}"),
+    }
     // The obstructing marker directory and sentinel are unchanged.
     assert!(
         failed.marker_dir_path.is_dir(),
-        "ordinary restart must not repair or replace the obstructing marker directory"
+        "the refused restart must not repair or replace the obstructing marker directory"
     );
     let sentinel_after =
         std::fs::read(&failed.sentinel_path).expect("read sentinel after restart");
     assert_eq!(
         sentinel_after, sentinel_before,
-        "ordinary restart must not mutate the marker directory's sentinel bytes"
+        "the refused restart must not mutate the marker directory's sentinel bytes"
     );
 }
 
-/// D7-D6 case C — repeat the ORIGINAL restore request WITH the flag over the
-/// unchanged failed destination.
+/// D7-D6/D8 case C — repeat the ORIGINAL restore request WITH the flag over
+/// the unchanged failed destination produced by case A.
 ///
-/// Source prediction (verified): the destination consensus storage is still
-/// `PresentNoCommittedEpoch`, so the D5 epoch precheck PERMITS; but `state_vm_v0`
-/// is now NON-EMPTY (case A copied the account state before failing), so
-/// `materialize_validated_snapshot` refuses with `TargetStateNotEmpty` BEFORE
-/// reaching `write_restore_marker` (so the marker-open failure does NOT recur).
-/// Natural exit 1, complete capture, storage opened before the refusal, no
-/// restore success/baseline/epoch persistence, and independently verified
-/// preservation of the account, missing committed epoch, and obstruction/sentinel.
+/// **Run 422 D7-D8 containment.** Case A now leaves a durable `INTENT`
+/// restore-transaction record. The requested-restore precondition
+/// (`evaluate_requested_restore_precondition`) observes that existing record
+/// FIRST — before D5 validation, the occupancy/target-eligibility check, or any
+/// mutation — and REFUSES (natural exit 1): a requested restore never
+/// overwrites or replaces an existing `INTENT`/`COMPLETE`. Because the refusal
+/// now precedes `materialize_validated_snapshot`, neither the
+/// `TargetStateNotEmpty` occupancy refusal NOR the marker-open failure recur.
 #[test]
 fn d7d6_c_repeated_restore_with_flag_over_marker_obstructed_failure() {
     let failed = produce_and_verify_marker_obstructed_failure("D6-C-pre-failure");
@@ -2752,11 +2832,11 @@ fn d7d6_c_repeated_restore_with_flag_over_marker_obstructed_failure() {
     };
     maybe_dump_child_stderr("D6-C-retry-with-flag", &stderr);
 
-    // Natural fail-closed exit 1 with the SPECIFIC occupied-target refusal.
+    // Natural fail-closed exit 1 with the SPECIFIC RTR-precondition refusal.
     assert_eq!(
         status.code(),
         Some(1),
-        "WITH-flag retry over the failed destination must fail closed with natural exit code 1 \
+        "WITH-flag retry over a tracked INTENT must fail closed with natural exit code 1 \
          (status={status:?}); stderr=\n{stderr}"
     );
     assert!(
@@ -2764,30 +2844,35 @@ fn d7d6_c_repeated_restore_with_flag_over_marker_obstructed_failure() {
         "the refusal must be a natural exit, not a signal (status={status:?}); stderr=\n{stderr}"
     );
     assert!(
-        stderr.contains(M_TARGET_NOT_EMPTY),
-        "must carry the TargetStateNotEmpty occupied-target refusal (state_vm_v0 non-empty from \
-         the case-A partial restore); stderr=\n{stderr}"
+        stderr.contains(M_D7D8_PRECOND_OCCUPIED),
+        "must carry the D7-D8 requested-restore precondition refusal over the existing RTR; \
+         stderr=\n{stderr}"
     );
-    // The epoch precheck PERMITTED (still no committed epoch), so the refusal is
-    // occupied-target, NOT epoch-conflict.
     assert!(
-        !stderr.contains(M_D7D5_REJECT),
-        "the epoch precheck must PERMIT (no committed epoch); the refusal must be \
-         occupied-target, not epoch-conflict; stderr=\n{stderr}"
+        stderr.contains("(INTENT)"),
+        "the precondition refusal must name the existing INTENT record; stderr=\n{stderr}"
+    );
+    // The precondition refusal PRECEDES validation, occupancy and marker write,
+    // so neither TargetStateNotEmpty nor the marker-open failure recur, and no
+    // fresh INTENT is published for the refused retry.
+    assert!(
+        !stderr.contains(M_TARGET_NOT_EMPTY),
+        "the RTR precondition refuses BEFORE the occupancy check; TargetStateNotEmpty must not \
+         fire; stderr=\n{stderr}"
+    );
+    assert!(
+        !stderr.contains(M_MARKER_OPEN_FAIL),
+        "the RTR precondition refuses BEFORE write_restore_marker; the marker-open failure must \
+         not recur; stderr=\n{stderr}"
+    );
+    assert!(
+        !stderr.contains(M_D7D8_INTENT_PUBLISHED),
+        "a refused retry must not publish a fresh INTENT over the existing record; stderr=\n{stderr}"
     );
     assert!(
         !stderr.contains(M_D7D5_CLI_COMBO_REJECT),
         "no CLI exit mode is selected; the combination guard must not fire; stderr=\n{stderr}"
     );
-    // TargetStateNotEmpty refuses BEFORE the marker write, so the marker-open
-    // failure must NOT recur here.
-    assert!(
-        !stderr.contains(M_MARKER_OPEN_FAIL),
-        "the occupied-target refusal precedes write_restore_marker; the marker-open failure \
-         must not recur; stderr=\n{stderr}"
-    );
-    // Storage was opened early (for the permitting precheck) BEFORE the refusal.
-    assert_marker_order(&stderr, &[M_STORAGE_OPEN, M_TARGET_NOT_EMPTY]);
     // Complete capture before any forbidden-marker claim.
     assert!(
         capture.is_complete(),
@@ -2801,8 +2886,8 @@ fn d7d6_c_repeated_restore_with_flag_over_marker_obstructed_failure() {
         );
     }
 
-    // Independent post-process reads: account, missing committed epoch, and the
-    // obstruction/sentinel are all preserved.
+    // Independent post-process reads: account, missing committed epoch, the
+    // retained INTENT record, and the obstruction/sentinel are all preserved.
     let (acct_after, obs_after) = observe_restored_data_dir(failed.data_dir.path());
     assert_eq!(
         acct_after, acct_before,
@@ -2813,6 +2898,14 @@ fn d7d6_c_repeated_restore_with_flag_over_marker_obstructed_failure() {
         "refused retry must not persist any committed epoch (still PresentNoCommittedEpoch)"
     );
     assert_eq!(obs_after, ConsensusStorageObservation::PresentNoCommittedEpoch);
+    match read_rtr(failed.data_dir.path()).expect("read RTR after refused retry") {
+        RtrReadResult::Present(rec) => assert_eq!(
+            rec.state,
+            RtrState::Intent,
+            "the refused retry must retain the original fail-closed INTENT record"
+        ),
+        other => panic!("expected a retained INTENT RTR, got {other:?}"),
+    }
     assert!(
         failed.marker_dir_path.is_dir(),
         "refused retry must not repair or replace the obstructing marker directory"
