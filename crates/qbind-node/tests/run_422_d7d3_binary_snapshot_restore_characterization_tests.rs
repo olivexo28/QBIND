@@ -1570,13 +1570,24 @@ fn d7d5_c_preexisting_restore_marker_preserved_on_rejection() {
 // pipeline; the absence of later consensus startup did not prevent account-
 // state copying or marker writes. Every predicate — including its partial-
 // configuration shapes — is exercised with a real restore request against a
-// destination whose consensus storage already holds a committed epoch (42),
-// and the pre-existing epoch is asserted to remain after the refusal.
+// destination whose consensus storage already holds a committed epoch (42 for
+// the conflicting-epoch cases, 7 for the matching-epoch case), and the
+// pre-existing epoch is asserted to remain after the refusal. The refusal is
+// shown to be independent of any epoch conflict: it fires identically whether
+// the destination epoch conflicts with the snapshot epoch (7) or matches it.
 
 /// One excluded-mode case: `flag_args` are the CLI validation/apply exit-mode
-/// arguments appended to a real restore request. Returns nothing; panics on any
-/// deviation from the required pre-effect refusal contract.
-fn assert_restore_plus_cli_mode_refused_before_effects(tag: &str, flag_args: &[&str]) {
+/// arguments appended to a real restore request; `dest_committed_epoch` is the
+/// committed epoch seeded into the destination consensus storage before launch.
+/// Returns nothing; panics on any deviation from the required pre-effect refusal
+/// contract. The refusal fires regardless of whether the destination epoch
+/// conflicts with the snapshot epoch (7) or matches it, because it precedes the
+/// epoch precheck entirely.
+fn assert_restore_plus_cli_mode_refused_before_effects(
+    tag: &str,
+    flag_args: &[&str],
+    dest_committed_epoch: u64,
+) {
     let chain_id = devnet_chain_id();
 
     let src_state = tempdir().expect("tempdir");
@@ -1586,11 +1597,13 @@ fn assert_restore_plus_cli_mode_refused_before_effects(tag: &str, flag_args: &[&
     // Valid real snapshot declaring epoch 7.
     build_real_snapshot(src_state.path(), &snapshot_dir, chain_id, 333, 4242, Some(7));
 
-    // Destination consensus storage already holds a committed epoch (42).
+    // Destination consensus storage already holds a committed epoch.
     let consensus_dir = data_dir.path().join("consensus");
     {
         let storage = RocksDbConsensusStorage::open(&consensus_dir).expect("seed consensus");
-        storage.put_current_epoch(42).expect("seed committed epoch 42");
+        storage
+            .put_current_epoch(dest_committed_epoch)
+            .expect("seed destination committed epoch");
     }
     let state_dir = data_dir.path().join(VM_V0_STATE_SUBDIR);
     let marker_path = data_dir.path().join(RESTORE_MARKER_FILENAME);
@@ -1662,14 +1675,15 @@ fn assert_restore_plus_cli_mode_refused_before_effects(tag: &str, flag_args: &[&
         "[{tag}] the restore audit marker must remain ABSENT (refusal before any marker write)"
     );
 
-    // Independent reopen: the pre-existing consensus epoch (42) is preserved.
+    // Independent reopen: the pre-existing consensus epoch is preserved.
     {
         let storage = RocksDbConsensusStorage::open(&consensus_dir).expect("reopen consensus");
         let obs = observe_consensus_storage(Some(&storage)).expect("observe");
         assert_eq!(
             obs,
-            ConsensusStorageObservation::CommittedEpoch(42),
-            "[{tag}] the pre-existing committed epoch 42 must be preserved after the refusal"
+            ConsensusStorageObservation::CommittedEpoch(dest_committed_epoch),
+            "[{tag}] the pre-existing committed epoch {dest_committed_epoch} must be preserved \
+             after the refusal"
         );
     }
 }
@@ -1684,6 +1698,7 @@ fn d7d5a_restore_with_reload_check_mode_refused_before_effects() {
     assert_restore_plus_cli_mode_refused_before_effects(
         "D5-A-reload-check",
         &["--p2p-trust-bundle-reload-check", "/tmp/qbind-d5a-nonexistent-bundle.json"],
+        42,
     );
 }
 
@@ -1693,6 +1708,7 @@ fn d7d5a_restore_with_peer_candidate_check_path_only_refused_before_effects() {
     assert_restore_plus_cli_mode_refused_before_effects(
         "D5-A-peer-candidate-path-only",
         &["--p2p-trust-bundle-peer-candidate-check", "/tmp/qbind-d5a-nonexistent-candidate.json"],
+        42,
     );
 }
 
@@ -1702,6 +1718,7 @@ fn d7d5a_restore_with_peer_candidate_enabled_only_refused_before_effects() {
     assert_restore_plus_cli_mode_refused_before_effects(
         "D5-A-peer-candidate-enabled-only",
         &["--p2p-trust-bundle-peer-candidate-validation-enabled"],
+        42,
     );
 }
 
@@ -1711,6 +1728,7 @@ fn d7d5a_restore_with_reload_apply_path_mode_refused_before_effects() {
     assert_restore_plus_cli_mode_refused_before_effects(
         "D5-A-reload-apply-path",
         &["--p2p-trust-bundle-reload-apply-path", "/tmp/qbind-d5a-nonexistent-apply.json"],
+        42,
     );
 }
 
@@ -1720,6 +1738,26 @@ fn d7d5a_restore_with_reload_apply_enabled_mode_refused_before_effects() {
     assert_restore_plus_cli_mode_refused_before_effects(
         "D5-A-reload-apply-enabled",
         &["--p2p-trust-bundle-reload-apply-enabled"],
+        42,
+    );
+}
+
+/// **Run 422 D7-D5 correction A — matching-epoch combination refusal.** The
+/// restore+CLI-mode combination refusal is INDEPENDENT of any epoch conflict:
+/// here the destination consensus storage already holds a committed epoch that
+/// MATCHES the snapshot's declared epoch (7), so the epoch precheck — were it
+/// reached — would PERMIT. The combination guard nonetheless refuses BEFORE the
+/// early storage open, before account-state materialization, and before any
+/// restore-marker write. This proves the refusal is triggered by the excluded
+/// CLI mode itself, not by an epoch mismatch. Reuses the same
+/// `--p2p-trust-bundle-reload-apply-enabled` predicate as the conflicting-epoch
+/// case above with a matching destination `CommittedEpoch(7)`.
+#[test]
+fn d7d5a_restore_with_cli_mode_and_matching_epoch_refused_before_effects() {
+    assert_restore_plus_cli_mode_refused_before_effects(
+        "D5-A-reload-apply-enabled-matching-epoch",
+        &["--p2p-trust-bundle-reload-apply-enabled"],
+        7,
     );
 }
 

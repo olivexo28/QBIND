@@ -6619,3 +6619,147 @@ passing result:
   reported a backend limitation ("Code review tool is not available in this
   environment: ... model claude-sonnet-4.6 not found in registry"). The
   no-comments result is therefore NOT evidence of a completed model review.
+## Run 422 D7-D5 correction — matching-epoch CLI-combination refusal control (test + evidence only)
+
+This is a coverage-only correction. No production behavior changed; only the two
+files below were edited. It closes the one acceptance control the prior D7-D5
+corrective pass left missing: a real-binary regression showing that the
+restore + excluded-CLI-mode refusal fires even when the snapshot and destination
+committed epochs MATCH (i.e. independently of any epoch conflict).
+
+### Provenance and object availability (actual checkout)
+
+* Actual working branch: `copilot/run-422-complete-compatible-epoch-cli-refusal-cont`.
+* Starting SHA (this session): `49c3554`.
+* Reviewed-branch / final-revision / tested-checkpoint SHAs cited in the task
+  (`copilot/run-422-close-cli-precheck-bypass`, `b1ff541…`, `a7564d6…`) are NOT
+  present in this shallow single-branch clone: `git cat-file -t b1ff541…` and
+  `git cat-file -t a7564d6…` both return "could not get object info". Missing
+  historical objects do not establish missing implementation; the reviewed
+  restore/CLI-combination guard and its five predicate cases are present in the
+  worktree and pass here (below).
+* Final SHA is the task-branch commit recorded by the push accompanying this
+  entry.
+
+### Change (two files only, no production change)
+
+* `crates/qbind-node/tests/run_422_d7d3_binary_snapshot_restore_characterization_tests.rs`
+  — the existing refusal helper `assert_restore_plus_cli_mode_refused_before_effects`
+  was minimally parameterized with a `dest_committed_epoch: u64` argument (used
+  when seeding the destination consensus store and in the post-reap
+  `CommittedEpoch(dest_committed_epoch)` observation). The five pre-existing
+  predicate cases are UNCHANGED in meaning — each now passes `42` explicitly and
+  still seeds/asserts `CommittedEpoch(42)`. One case was added:
+  `d7d5a_restore_with_cli_mode_and_matching_epoch_refused_before_effects`
+  (snapshot `Some(7)`, destination `CommittedEpoch(7)`, existing
+  `--p2p-trust-bundle-reload-apply-enabled` predicate). The
+  restore-without-CLI positive control (`d7d5a_restore_without_cli_exit_mode_is_permitted_control`)
+  and the B/C regressions are unchanged. No new runner, fixture framework,
+  parser, or production accessor was introduced.
+* `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md` — this entry.
+
+### New matching-epoch case — concrete observations
+
+Valid real snapshot declaring epoch 7; destination seeded to `CommittedEpoch(7)`
+(matching), with NO `state_vm_v0` directory and NO restore marker; storage
+handles closed before the child launched. Via the existing child-process runner,
+capture checks, markers, and `QBIND_D7D3_NODE_BIN` selector, the case asserts:
+
+* Natural exit code 1, `status.signal()` is `None` (no terminating signal).
+* stderr carries `M_D7D5_CLI_COMBO_REJECT` (the specific D7-D5 restore+CLI-mode
+  combination refusal).
+* stderr capture is complete before any absence assertion is relied on.
+* NONE of `M_STORAGE_OPEN`, `M_D7D5_REJECT` (epoch-conflict), `M_TARGET_NOT_EMPTY`
+  (occupied-target), `M_RESTORE_OK`, `M_B5` (baseline construction), `M_LOOP_REACHED`
+  (consensus-loop entry), `M_BASELINE_APPLIED`, or `M_EPOCH_PERSIST` appears.
+* `state_vm_v0` remains ABSENT (filesystem check performed before any account
+  accessor, so no database is created).
+* The restore marker remains ABSENT.
+* Independent post-reap reopen observes `CommittedEpoch(7)` (the matching
+  pre-existing epoch preserved). No whole-directory byte-identity claim is made.
+
+This differs from the retained no-CLI positive control (which is a compatible
+restore that reaches baseline and persists epoch 7): the positive control was NOT
+the requested matching-epoch COMBINATION rejection. The five conflicting-epoch
+cases (destination `CommittedEpoch(42)`) are retained unchanged.
+
+### Validation and executable provenance (this execution)
+
+Test implementation checkpoint was committed before these outcomes were recorded.
+
+Release executable — the historically recorded binary
+(`sha256 cbb8a7bf…`, `16952728` bytes, source `a7564d6`) is NOT available in this
+clone and its source checkpoint object is absent, so it could not be reused. The
+current release binary was rebuilt and its ACTUAL identity recorded (the rebuilt
+hash is NOT assumed to match the historical evidence):
+
+```
+# cargo build --release -p qbind-node --bin qbind-node        (profile: release)   => Finished in 5m59s
+# executable  = target/release/qbind-node
+# source rev  = a6ac1fbee840f9f5696801676794cda2994fa001 (task-branch checkpoint; test-only edit, main.rs unchanged)
+# sha256      = 0299f445fe7c9d5668366496122ba9ac0eacb69373427fc22bf3595e3fae700c
+# byte_len    = 16952776
+#   (rebuilt hash/length differ from the historical cbb8a7bf…/16952728 record; NOT assumed equal)
+
+# QBIND_D7D3_NODE_BIN=<abs>/target/release/qbind-node \
+#   cargo test -p qbind-node --release --test run_422_d7d3_binary_snapshot_restore_characterization_tests d7d5a_
+# test result: ok. 7 passed; 0 failed; 18 filtered out
+#   (includes the new d7d5a_restore_with_cli_mode_and_matching_epoch_refused_before_effects,
+#    the five conflicting-epoch predicate cases, and the no-CLI positive control)
+
+# QBIND_D7D3_NODE_BIN=<abs>/target/release/qbind-node \
+#   cargo test -p qbind-node --release --test run_422_d7d3_binary_snapshot_restore_characterization_tests
+# test result: ok. 25 passed; 0 failed; 0 ignored   (was 24 before this +1 case; superset of the focused d7d5a_* run)
+```
+
+The focused `d7d5a_*` run (7) is a subset of the full target run (25). The full
+count increased by exactly one (24 → 25) from the added matching-epoch case.
+
+Focused Clippy (`cargo clippy -p qbind-node --release --test
+run_422_d7d3_binary_snapshot_restore_characterization_tests`): the changed target
+compiles with the SAME single pre-existing `clippy::needless_borrows_for_generic_args`
+warning at line ~1228 (outside the changed hunks); the parameterized helper and
+new case add no new Clippy warning. Changed-region formatting matches the file's
+established wider hand-formatted convention (the whole file already diverges from
+default rustfmt); no repository-wide formatting was run. The evidence doc's CRLF
+line endings were preserved.
+
+### Literal security-tool outcomes (this correction)
+
+Recorded verbatim below in the final report; a skipped CodeQL analysis or an
+errored/unavailable reviewer is NOT a successful security review and no historical
+outcome is upgraded here.
+
+### Scoped disposition
+
+The matching-epoch CLI-combination case passes against the identified (rebuilt)
+release executable and the retained D3/D4/D5 target cases pass, so the scoped D5
+verdict is recorded:
+
+`D7D5_RESTORE_EPOCH_CONFLICT_BEFORE_MATERIALIZATION=CODE-AND-RELEASE-TEST-POSITIVE`
+
+All retained posture lines are UNCHANGED:
+`D7_STATUS=PARTIAL-CODE-TEST / PRODUCTION-LIFECYCLE-UNAVAILABLE`,
+`DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED`,
+`GENESIS_AUTHORITY_ACTIVATION=DISABLED`,
+`PRODUCTION_WIRE_CHAIN_ID_BEHAVIOR=UNCHANGED`,
+`CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED`,
+`SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO`. Partial-directory handling,
+cross-database crash consistency, signing-state continuity, and durable
+anti-rollback remain unresolved. No activation, readiness promotion, new recovery
+mechanism, or Run 423 work. No protocol/lifecycle/audit/contradiction-ledger edit
+was needed for this coverage-only correction.
+
+### Literal security-tool outcomes (this correction, verbatim)
+
+Recorded literally; a skipped CodeQL analysis or an errored/unavailable reviewer
+is NOT a successful security review:
+
+* CodeQL Security Scan (`parallel_validation`): "Skipped: all changes are
+  trivial." — the changes are test-file + documentation only, declared trivial
+  for CodeQL. This is a SKIP, not a completed clean scan.
+* Code Review (`parallel_validation`): reported "Reviewed 2 file(s). No review
+  comments found." but ALSO reported a backend error — "Code review tool is not
+  available in this environment: ... model claude-sonnet-4.6 not found in
+  registry." The no-comments result is therefore NOT evidence of a completed
+  model review.
