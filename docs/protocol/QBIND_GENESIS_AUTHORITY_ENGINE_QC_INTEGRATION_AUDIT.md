@@ -1284,3 +1284,23 @@ unchanged: `GENESIS_AUTHORITY_ACTIVATION=DISABLED`,
 `CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED`; signing-state
 continuity stays NOT-established. Evidence:
 `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md` (Run 422 D7-D5 section).
+
+## Run 422 D7-D5 corrective note (close CLI precheck bypass and cached-epoch decisions)
+
+The D7-D5 successor note above is superseded on two points. (1) Its parenthetical
+"CLI storage-exit modes excluded to avoid a double-open lock" described a bypass:
+a requested restore combined with any `cli_storage_exit_mode_active` mode
+(`--p2p-trust-bundle-reload-check`, the Run 077 peer-candidate hook including its
+path-only and enabled-only partial shapes, the reload-apply path, or reload-apply
+enabled) skipped the early storage open yet still ran the restore pipeline,
+copying account state and writing the restore marker before the CLI command
+executed. The corrected binary now REFUSES that combination before the early
+storage open and before any account-state or marker effect, with an unmistakable
+diagnostic; CLI modes without a restore are unchanged. (2) The compatibility
+decision now reads the committed epoch LIVE through the canonical handle at the
+moment of decision rather than trusting the cached startup observation, so a write
+through the same handle cannot leave a stale "matching"/"absent" decision to
+authorize a conflicting overwrite; a live-read failure surfaces as an error, never
+epoch absence. A post-precheck occupied-target refusal persists no epoch. Posture
+is unchanged. Evidence:
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md` (Run 422 D7-D5 corrective pass).
