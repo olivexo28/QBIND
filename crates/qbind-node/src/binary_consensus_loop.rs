@@ -22420,6 +22420,111 @@ mod tests {
                         assert!(f2.proposals.lock().unwrap().is_empty());
                     }
 
+                    /// Run 422 D7-D10 Correction A (handler facade suppression) —
+                    /// a test signer that returns an EMPTY result (invalid signer
+                    /// output). The guarded publication boundary must refuse it: the
+                    /// signer runs exactly once, the result is NOT published, nothing
+                    /// is delivered to the facade, and the reservation is preserved.
+                    #[test]
+                    fn d10_empty_signer_output_refused_suppresses_handoff_preserves_reservation() {
+                        /// A signer that returns an empty signature — used ONLY to
+                        /// exercise the invalid-signer-output refusal path.
+                        struct EmptyResultSigner {
+                            inner: LocalKeySigner,
+                            proposal_calls: Arc<AtomicU64>,
+                        }
+                        impl ValidatorSigner for EmptyResultSigner {
+                            fn validator_id(&self) -> &ValidatorId {
+                                self.inner.validator_id()
+                            }
+                            fn suite_id(&self) -> u16 {
+                                self.inner.suite_id()
+                            }
+                            fn sign_proposal(
+                                &self,
+                                _p: &[u8],
+                            ) -> Result<Vec<u8>, crate::validator_signer::SignError>
+                            {
+                                self.proposal_calls.fetch_add(1, SeqCst);
+                                Ok(Vec::new())
+                            }
+                            fn sign_vote(
+                                &self,
+                                _p: &[u8],
+                            ) -> Result<Vec<u8>, crate::validator_signer::SignError>
+                            {
+                                Ok(Vec::new())
+                            }
+                            fn sign_timeout(
+                                &self,
+                                view: u64,
+                                high_qc: Option<
+                                    &qbind_consensus::qc::QuorumCertificate<[u8; 32]>,
+                                >,
+                            ) -> Result<Vec<u8>, crate::validator_signer::SignError>
+                            {
+                                self.inner.sign_timeout(view, high_qc)
+                            }
+                            fn sign_timeout_with_chain_id(
+                                &self,
+                                chain_id: ChainId,
+                                view: u64,
+                                high_qc: Option<
+                                    &qbind_consensus::qc::QuorumCertificate<[u8; 32]>,
+                                >,
+                            ) -> Result<Vec<u8>, crate::validator_signer::SignError>
+                            {
+                                self.inner.sign_timeout_with_chain_id(chain_id, view, high_qc)
+                            }
+                        }
+
+                        let fixture = make_fixture(4);
+                        let proposal_calls = Arc::new(AtomicU64::new(0));
+                        let sk = fixture.sk_objs.get(&ValidatorId(0)).expect("sk").clone();
+                        let inner = LocalKeySigner::new(ValidatorId(0), TEST_SUITE_U16, sk);
+                        let signer: Arc<dyn ValidatorSigner> = Arc::new(EmptyResultSigner {
+                            inner,
+                            proposal_calls: proposal_calls.clone(),
+                        });
+                        let pv = ProposalVoteAuthority {
+                            validators: fixture.validators.clone(),
+                            key_provider: fixture.kp.clone(),
+                            backend_registry: fixture.br.clone(),
+                            chain_id: QBIND_DEVNET_CHAIN_ID,
+                            signer: Some(signer),
+                            signing_domain: d6_control_domain(),
+                        };
+                        let snap = snapshot_matching(&pv);
+                        let store = D10Store::new();
+                        let j = journal(store.clone());
+
+                        // The signer runs once and returns an empty result; the
+                        // checked publication boundary refuses it. No delivery.
+                        let (s, f) = drive_j(&snap, &j, proposal_at(0, 1, [4u8; 32]));
+                        assert_eq!(
+                            proposal_calls.load(SeqCst),
+                            1,
+                            "invalid-output signer invoked exactly once"
+                        );
+                        assert_eq!(s.outbound_proposal_journal_result_persist_failure_total, 1);
+                        assert_eq!(s.outbound_proposals_sent, 0);
+                        assert!(f.proposals.lock().unwrap().is_empty());
+
+                        // The reservation is preserved as a valid RESERVED record: a
+                        // retry after a modelled restart is potentially-signed and
+                        // never re-signs (no empty bytes were ever written).
+                        let store2 = store.reopen();
+                        let j2 = journal(store2.clone());
+                        let (s2, f2) = drive_j(&snap, &j2, proposal_at(0, 1, [4u8; 32]));
+                        assert_eq!(
+                            proposal_calls.load(SeqCst),
+                            1,
+                            "no re-sign; the reservation is preserved"
+                        );
+                        assert_eq!(s2.outbound_proposal_journal_potentially_signed_total, 1);
+                        assert!(f2.proposals.lock().unwrap().is_empty());
+                    }
+
                     // ---- E(model). Recovery posture (real RocksDB in the
                     //      integration test file; here the state-machine posture).
 
@@ -22583,95 +22688,333 @@ mod tests {
 
                     // ---- A(concurrent). Deterministic contested reservation ----
 
+                    /// A bounded, two-phase gate for the deterministic contention
+                    /// schedule. `wait_entered` blocks (with a deadline) until the
+                    /// paused worker reaches the signer; `wait_release` blocks the
+                    /// worker inside the signer (with a deadline) until the test
+                    /// releases it. Neither wait can block unbounded — every wait
+                    /// returns once its deadline elapses, so a failing test path
+                    /// can never deadlock the worker or the harness.
+                    struct SignGate {
+                        entered: std::sync::Mutex<bool>,
+                        entered_cv: std::sync::Condvar,
+                        release: std::sync::Mutex<bool>,
+                        release_cv: std::sync::Condvar,
+                    }
+                    impl SignGate {
+                        fn new() -> Arc<Self> {
+                            Arc::new(SignGate {
+                                entered: std::sync::Mutex::new(false),
+                                entered_cv: std::sync::Condvar::new(),
+                                release: std::sync::Mutex::new(false),
+                                release_cv: std::sync::Condvar::new(),
+                            })
+                        }
+                        fn mark_entered(&self) {
+                            *self.entered.lock().unwrap() = true;
+                            self.entered_cv.notify_all();
+                        }
+                        /// Bounded wait for the paused worker to reach the signer.
+                        /// Returns `true` if it entered within `deadline`, `false`
+                        /// on timeout.
+                        fn wait_entered(&self, deadline: std::time::Duration) -> bool {
+                            let start = std::time::Instant::now();
+                            let mut g = self.entered.lock().unwrap();
+                            while !*g {
+                                let elapsed = start.elapsed();
+                                if elapsed >= deadline {
+                                    return false;
+                                }
+                                let (ng, to) = self
+                                    .entered_cv
+                                    .wait_timeout(g, deadline - elapsed)
+                                    .unwrap();
+                                g = ng;
+                                if to.timed_out() && !*g {
+                                    return false;
+                                }
+                            }
+                            true
+                        }
+                        fn release(&self) {
+                            *self.release.lock().unwrap() = true;
+                            self.release_cv.notify_all();
+                        }
+                        /// Bounded wait inside the signer until released. Returns
+                        /// once released OR once `deadline` elapses, so a worker can
+                        /// never hang indefinitely on a failed schedule.
+                        fn wait_release(&self, deadline: std::time::Duration) {
+                            let start = std::time::Instant::now();
+                            let mut g = self.release.lock().unwrap();
+                            while !*g {
+                                let elapsed = start.elapsed();
+                                if elapsed >= deadline {
+                                    break;
+                                }
+                                let (ng, _to) = self
+                                    .release_cv
+                                    .wait_timeout(g, deadline - elapsed)
+                                    .unwrap();
+                                g = ng;
+                            }
+                        }
+                    }
+
+                    /// Bounded schedule deadlines. Generous relative to a single
+                    /// ML-DSA signature so a healthy run never approaches them,
+                    /// while still guaranteeing termination.
+                    const GATE_ENTER_DEADLINE: std::time::Duration =
+                        std::time::Duration::from_secs(30);
+                    const GATE_RELEASE_DEADLINE: std::time::Duration =
+                        std::time::Duration::from_secs(30);
+
+                    /// A recording signer that, on its FIRST proposal signature
+                    /// (while `armed`), signals the gate and pauses inside the
+                    /// signer until released. The reservation write has already
+                    /// completed and NO ownership-domain mutex is held while it
+                    /// waits, so a contender can run against a definitely-
+                    /// outstanding reservation.
+                    struct PausingSigner {
+                        inner: LocalKeySigner,
+                        proposal_calls: Arc<AtomicU64>,
+                        vote_calls: Arc<AtomicU64>,
+                        gate: Arc<SignGate>,
+                        armed: AtomicBool,
+                    }
+                    impl ValidatorSigner for PausingSigner {
+                        fn validator_id(&self) -> &ValidatorId {
+                            self.inner.validator_id()
+                        }
+                        fn suite_id(&self) -> u16 {
+                            self.inner.suite_id()
+                        }
+                        fn sign_proposal(
+                            &self,
+                            p: &[u8],
+                        ) -> Result<Vec<u8>, crate::validator_signer::SignError>
+                        {
+                            self.proposal_calls.fetch_add(1, SeqCst);
+                            if self.armed.swap(false, SeqCst) {
+                                self.gate.mark_entered();
+                                self.gate.wait_release(GATE_RELEASE_DEADLINE);
+                            }
+                            self.inner.sign_proposal(p)
+                        }
+                        fn sign_vote(
+                            &self,
+                            p: &[u8],
+                        ) -> Result<Vec<u8>, crate::validator_signer::SignError>
+                        {
+                            self.vote_calls.fetch_add(1, SeqCst);
+                            self.inner.sign_vote(p)
+                        }
+                        fn sign_timeout(
+                            &self,
+                            view: u64,
+                            high_qc: Option<
+                                &qbind_consensus::qc::QuorumCertificate<[u8; 32]>,
+                            >,
+                        ) -> Result<Vec<u8>, crate::validator_signer::SignError>
+                        {
+                            self.inner.sign_timeout(view, high_qc)
+                        }
+                        fn sign_timeout_with_chain_id(
+                            &self,
+                            chain_id: ChainId,
+                            view: u64,
+                            high_qc: Option<
+                                &qbind_consensus::qc::QuorumCertificate<[u8; 32]>,
+                            >,
+                        ) -> Result<Vec<u8>, crate::validator_signer::SignError>
+                        {
+                            self.inner.sign_timeout_with_chain_id(chain_id, view, high_qc)
+                        }
+                    }
+
+                    /// A `ProposalVoteAuthority` whose validator-0 signer pauses on
+                    /// its first proposal signature via `gate`.
+                    fn pausing_pv(
+                        fixture: &Fixture,
+                        gate: Arc<SignGate>,
+                    ) -> (ProposalVoteAuthority, SignerCounters) {
+                        let vote_calls = Arc::new(AtomicU64::new(0));
+                        let proposal_calls = Arc::new(AtomicU64::new(0));
+                        let sk = fixture.sk_objs.get(&ValidatorId(0)).expect("sk").clone();
+                        let inner = LocalKeySigner::new(ValidatorId(0), TEST_SUITE_U16, sk);
+                        let signer: Arc<dyn ValidatorSigner> = Arc::new(PausingSigner {
+                            inner,
+                            proposal_calls: proposal_calls.clone(),
+                            vote_calls: vote_calls.clone(),
+                            gate,
+                            armed: AtomicBool::new(true),
+                        });
+                        let pv = ProposalVoteAuthority {
+                            validators: fixture.validators.clone(),
+                            key_provider: fixture.kp.clone(),
+                            backend_registry: fixture.br.clone(),
+                            chain_id: QBIND_DEVNET_CHAIN_ID,
+                            signer: Some(signer),
+                            signing_domain: d6_control_domain(),
+                        };
+                        (
+                            pv,
+                            SignerCounters {
+                                vote_calls,
+                                proposal_calls,
+                            },
+                        )
+                    }
+
                     #[test]
                     fn d10_concurrent_same_binding_at_most_one_live_sign() {
-                        use std::sync::Barrier;
                         let fixture = make_fixture(4);
-                        let (pv, c) = recording_pv(&fixture);
+                        let gate = SignGate::new();
+                        let (pv, c) = pausing_pv(&fixture, gate.clone());
                         let snap = snapshot_matching(&pv);
                         let store = D10Store::new();
 
-                        // Two SUPPORTED independent handles over the SAME backend
-                        // instance ⇒ ONE shared ownership domain. Release both
-                        // threads simultaneously (bounded barrier, no sleeps) into
-                        // the contested reservation window for the SAME position and
-                        // SAME content.
-                        let start = Barrier::new(2);
-                        let (out_a, out_b) = std::thread::scope(|scope| {
-                            let ha = scope.spawn(|| {
-                                let j = journal(store.clone());
-                                start.wait();
-                                drive_j(&snap, &j, proposal_at(0, 1, [5u8; 32]))
+                        // Two SUPPORTED handles over the SAME backend instance ⇒ ONE
+                        // shared ownership domain. The winner durably reserves and
+                        // obtains its continuation, then pauses inside the signer
+                        // (holding NO ownership-domain mutex). The contender runs
+                        // while that reservation is DEFINITELY outstanding.
+                        let (entered, winner_out, contender_out, signer_during_window) =
+                            std::thread::scope(|scope| {
+                                let winner = scope.spawn(|| {
+                                    let j = journal(store.clone());
+                                    drive_j(&snap, &j, proposal_at(0, 1, [5u8; 32]))
+                                });
+                                let entered = gate.wait_entered(GATE_ENTER_DEADLINE);
+                                let (contender_out, signer_during_window) = if entered {
+                                    let jb = journal(store.clone());
+                                    let out = drive_j(&snap, &jb, proposal_at(0, 1, [5u8; 32]));
+                                    (Some(out), c.proposal_calls.load(SeqCst))
+                                } else {
+                                    (None, c.proposal_calls.load(SeqCst))
+                                };
+                                // ALWAYS release the paused winner before joining so a
+                                // failed schedule cannot deadlock.
+                                gate.release();
+                                let winner_out = winner.join().unwrap();
+                                (entered, winner_out, contender_out, signer_during_window)
                             });
-                            let hb = scope.spawn(|| {
-                                let j = journal(store.clone());
-                                start.wait();
-                                drive_j(&snap, &j, proposal_at(0, 1, [5u8; 32]))
-                            });
-                            (ha.join().unwrap(), hb.join().unwrap())
-                        });
 
-                        // Exactly one signer invocation across the contested window.
+                        assert!(
+                            entered,
+                            "winner durably reserved and reached the signer within the deadline"
+                        );
+                        let contender_out = contender_out.expect("contender ran");
+
+                        // Exactly ONE signer invocation during the outstanding-
+                        // reservation window (the winner's), and zero contender
+                        // signer invocations.
+                        assert_eq!(
+                            signer_during_window, 1,
+                            "only the winner invoked the signer during the outstanding window"
+                        );
+                        // No additional signer call after release: exactly one total.
+                        assert_eq!(c.proposal_calls.load(SeqCst), 1);
+
+                        // The contender observed the outstanding same-binding
+                        // reservation ⇒ potentially-signed: exactly zero fresh
+                        // continuations and zero handoffs for it.
+                        assert_eq!(contender_out.0.outbound_proposal_journal_reserved_total, 0);
+                        assert_eq!(
+                            contender_out.0.outbound_proposal_journal_potentially_signed_total,
+                            1
+                        );
+                        assert!(
+                            contender_out.1.proposals.lock().unwrap().is_empty(),
+                            "no contender handoff during the outstanding-reservation window"
+                        );
+
+                        // The winner: exactly one fresh continuation and exactly one
+                        // successful handoff of the exact reserved decision.
+                        assert_eq!(winner_out.0.outbound_proposal_journal_reserved_total, 1);
+                        assert_eq!(winner_out.0.outbound_proposal_signing_success, 1);
+                        assert_eq!(winner_out.1.proposals.lock().unwrap().len(), 1);
+                        let winner_sig =
+                            winner_out.1.proposals.lock().unwrap()[0].signature.clone();
+
+                        // Preservation + separate post-publication resend control:
+                        // once publication has completed, delivering the IDENTICAL
+                        // decision again is a legitimate retained resend under the
+                        // current policy — the exact retained result is reused with
+                        // ZERO additional signer calls (we do NOT weaken this to an
+                        // incorrect global "one handoff" assertion).
+                        let jr = journal(store.clone());
+                        let (sr, fr) = drive_j(&snap, &jr, proposal_at(0, 1, [5u8; 32]));
                         assert_eq!(
                             c.proposal_calls.load(SeqCst),
                             1,
-                            "at most one live signing continuation across handles"
+                            "post-publication exact retry costs zero additional signer calls"
                         );
-                        // Exactly one facade handoff in total.
-                        let sent = out_a.1.proposals.lock().unwrap().len()
-                            + out_b.1.proposals.lock().unwrap().len();
-                        assert_eq!(sent, 1);
-                        // The loser observed a live reservation for the same
-                        // binding ⇒ potentially-signed (never a second fresh
-                        // continuation, never a re-sign).
-                        let reserved = out_a.0.outbound_proposal_journal_reserved_total
-                            + out_b.0.outbound_proposal_journal_reserved_total;
-                        let potentially = out_a.0.outbound_proposal_journal_potentially_signed_total
-                            + out_b.0.outbound_proposal_journal_potentially_signed_total;
-                        assert_eq!(reserved, 1);
-                        assert_eq!(potentially, 1);
+                        assert_eq!(sr.outbound_proposal_journal_retained_resend_total, 1);
+                        let resent = fr.proposals.lock().unwrap();
+                        assert_eq!(resent.len(), 1);
+                        assert_eq!(
+                            resent[0].signature, winner_sig,
+                            "retained resend reuses the exact retained signature"
+                        );
                     }
 
                     #[test]
                     fn d10_concurrent_different_binding_at_most_one_live_sign() {
-                        use std::sync::Barrier;
                         let fixture = make_fixture(4);
-                        let (pv, c) = recording_pv(&fixture);
+                        let gate = SignGate::new();
+                        let (pv, c) = pausing_pv(&fixture, gate.clone());
                         let snap = snapshot_matching(&pv);
                         let store = D10Store::new();
 
-                        // Same position, DIFFERENT content (binding). The shared
-                        // domain serializes the contested window: one reserves and
-                        // signs, the other observes a conflicting live reservation.
-                        let start = Barrier::new(2);
-                        let (out_a, out_b) = std::thread::scope(|scope| {
-                            let ha = scope.spawn(|| {
-                                let j = journal(store.clone());
-                                start.wait();
-                                drive_j(&snap, &j, proposal_at(0, 1, [1u8; 32]))
+                        // Same schedule, DIFFERENT content: the winner reserves and
+                        // pauses in the signer; the contender runs against the
+                        // outstanding reservation and observes a CONFLICT for the
+                        // different binding at the same position.
+                        let (entered, winner_out, contender_out, signer_during_window) =
+                            std::thread::scope(|scope| {
+                                let winner = scope.spawn(|| {
+                                    let j = journal(store.clone());
+                                    drive_j(&snap, &j, proposal_at(0, 1, [1u8; 32]))
+                                });
+                                let entered = gate.wait_entered(GATE_ENTER_DEADLINE);
+                                let (contender_out, signer_during_window) = if entered {
+                                    let jb = journal(store.clone());
+                                    let out = drive_j(&snap, &jb, proposal_at(0, 1, [2u8; 32]));
+                                    (Some(out), c.proposal_calls.load(SeqCst))
+                                } else {
+                                    (None, c.proposal_calls.load(SeqCst))
+                                };
+                                gate.release();
+                                let winner_out = winner.join().unwrap();
+                                (entered, winner_out, contender_out, signer_during_window)
                             });
-                            let hb = scope.spawn(|| {
-                                let j = journal(store.clone());
-                                start.wait();
-                                drive_j(&snap, &j, proposal_at(0, 1, [2u8; 32]))
-                            });
-                            (ha.join().unwrap(), hb.join().unwrap())
-                        });
+
+                        assert!(
+                            entered,
+                            "winner durably reserved and reached the signer within the deadline"
+                        );
+                        let contender_out = contender_out.expect("contender ran");
 
                         assert_eq!(
-                            c.proposal_calls.load(SeqCst),
-                            1,
-                            "at most one live signing continuation for the position"
+                            signer_during_window, 1,
+                            "only the winner invoked the signer during the outstanding window"
                         );
-                        let sent = out_a.1.proposals.lock().unwrap().len()
-                            + out_b.1.proposals.lock().unwrap().len();
-                        assert_eq!(sent, 1);
-                        let reserved = out_a.0.outbound_proposal_journal_reserved_total
-                            + out_b.0.outbound_proposal_journal_reserved_total;
-                        let conflict = out_a.0.outbound_proposal_journal_conflict_total
-                            + out_b.0.outbound_proposal_journal_conflict_total;
-                        assert_eq!(reserved, 1);
-                        assert_eq!(conflict, 1);
+                        assert_eq!(c.proposal_calls.load(SeqCst), 1);
+
+                        // The contender observed the outstanding DIFFERENT-binding
+                        // reservation ⇒ conflict: zero fresh continuations, zero
+                        // handoffs, and it never rewrote the record.
+                        assert_eq!(contender_out.0.outbound_proposal_journal_reserved_total, 0);
+                        assert_eq!(contender_out.0.outbound_proposal_journal_conflict_total, 1);
+                        assert!(
+                            contender_out.1.proposals.lock().unwrap().is_empty(),
+                            "no contender handoff during the outstanding-reservation window"
+                        );
+
+                        // The winner: exactly one fresh continuation and one handoff.
+                        assert_eq!(winner_out.0.outbound_proposal_journal_reserved_total, 1);
+                        assert_eq!(winner_out.0.outbound_proposal_signing_success, 1);
+                        assert_eq!(winner_out.1.proposals.lock().unwrap().len(), 1);
                     }
 
                     // ---- G. Cached re-emission caller family ----

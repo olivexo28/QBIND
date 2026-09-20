@@ -1706,4 +1706,203 @@ mod tests {
             ReservationOutcome::ExactRetryRetained(ref s) if s == b"sig-A"
         ));
     }
+
+    // ------------------------------------------------------------------
+    // Run 422 D7-D10 Correction A — reject structurally invalid (empty)
+    // result publication at the checked boundary.
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn empty_result_publication_refused_and_preserves_reservation() {
+        let store = Arc::new(ModelStore::default());
+        let journal = SigningReservationJournal::attach(store.clone());
+        let pos = position(SigningKind::Proposal, 70);
+        let b = binding(b"decision");
+        let cap = reserve_and_invoke(&journal, &pos, &b);
+
+        // Publishing an EMPTY result is refused with a typed error BEFORE any
+        // write — a record the decoder would immediately reject is never stored.
+        assert!(matches!(
+            journal.record_signed_result(&cap, b""),
+            Err(JournalError::InvalidResultPublication(_))
+        ));
+
+        // The stored bytes are UNCHANGED and decode as the original valid
+        // reservation (Reserved stage, no retained signature).
+        let key = pos.storage_key();
+        let stored = store
+            .map
+            .read()
+            .unwrap()
+            .get(&key)
+            .cloned()
+            .expect("reservation bytes present");
+        let decoded = SigningDecisionRecord::decode(&stored).expect("decode reservation");
+        assert_eq!(decoded, SigningDecisionRecord::reserved(pos, b));
+
+        // The reservation obligation is preserved: an exact retry remains
+        // potentially-signed (live, un-acked), and a conflicting binding is
+        // still refused.
+        assert!(matches!(
+            journal.reserve_for_sign(&pos, &b).unwrap(),
+            ReservationOutcome::PotentiallySigned
+        ));
+        assert!(matches!(
+            journal.reserve_for_sign(&pos, &binding(b"other")).unwrap(),
+            ReservationOutcome::Conflict
+        ));
+
+        // The oversized refusal is unaffected (control), and a valid nonempty
+        // result still publishes successfully and is retained for exact retry.
+        let oversized = vec![7u8; MAX_RETAINED_SIGNATURE_LEN + 1];
+        assert!(matches!(
+            journal.record_signed_result(&cap, &oversized),
+            Err(JournalError::OversizeRecord { .. })
+        ));
+        journal.record_signed_result(&cap, b"real-sig").unwrap();
+        assert!(matches!(
+            journal.reserve_for_sign(&pos, &b).unwrap(),
+            ReservationOutcome::ExactRetryRetained(ref s) if s == b"real-sig"
+        ));
+    }
+
+    // ------------------------------------------------------------------
+    // Run 422 D7-D10 Correction B — a recovered retained result requires an
+    // established durability barrier. Models lost process-local knowledge:
+    // Signed bytes survive, the live-operation table does not, and readable
+    // bytes alone are NOT a durability acknowledgement.
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn recovered_signed_requires_durability_barrier_before_resend() {
+        let store = Arc::new(ModelStore::default());
+        let pos = position(SigningKind::Vote, 71);
+        let b = binding(b"decision");
+
+        // (1)-(3) A reservation is durably acknowledged, the operation crosses the
+        //         invocation boundary, and result publication makes the Signed
+        //         bytes READABLE but returns an error (uncertain durable write).
+        {
+            let journal = SigningReservationJournal::attach(store.clone());
+            let cap = reserve_and_invoke(&journal, &pos, &b);
+            store.set_store_then_error(true);
+            assert!(matches!(
+                journal.record_signed_result(&cap, b"the-sig"),
+                Err(JournalError::Storage(_))
+            ));
+            store.set_store_then_error(false);
+            // The Signed bytes are readable on the surviving model.
+            assert!(store.map.read().unwrap().contains_key(&pos.storage_key()));
+        }
+
+        // (4)-(5) Original live ownership is discarded: a FRESH backend ownership
+        //         domain is created over the surviving model bytes.
+        let reopened_store = store.reopen();
+        let reopened = SigningReservationJournal::attach(reopened_store.clone());
+
+        // (6)-(7) A retained-result lookup cannot succeed merely because those
+        //         bytes are readable. With the recovery durability op failing, the
+        //         barrier is not established ⇒ retained delivery is suppressed, and
+        //         a repeated failure remains a failure.
+        reopened_store.set_fail_writes(true);
+        assert!(matches!(
+            reopened.reserve_for_sign(&pos, &b),
+            Err(JournalError::Storage(_))
+        ));
+        assert!(matches!(
+            reopened.reserve_for_sign(&pos, &b),
+            Err(JournalError::Storage(_))
+        ));
+
+        // (8) A later successful recovery barrier permits ONLY exact retained
+        //     reuse (no signer is ever invoked on this path).
+        reopened_store.set_fail_writes(false);
+        assert!(matches!(
+            reopened.reserve_for_sign(&pos, &b).unwrap(),
+            ReservationOutcome::ExactRetryRetained(ref s) if s == b"the-sig"
+        ));
+
+        // The acknowledgement is cached bound to the exact record: a subsequent
+        // lookup is served WITHOUT reissuing the durable write (a failing write
+        // no longer blocks the exact retained resend).
+        reopened_store.set_fail_writes(true);
+        assert!(matches!(
+            reopened.reserve_for_sign(&pos, &b).unwrap(),
+            ReservationOutcome::ExactRetryRetained(ref s) if s == b"the-sig"
+        ));
+    }
+
+    #[test]
+    fn recovered_signed_conflict_refused_without_rewrite_and_reserved_potentially_signed() {
+        let store = Arc::new(ModelStore::default());
+        let pos = position(SigningKind::Proposal, 72);
+        let b = binding(b"decision");
+        {
+            let journal = SigningReservationJournal::attach(store.clone());
+            let cap = reserve_and_invoke(&journal, &pos, &b);
+            journal.record_signed_result(&cap, b"sig").unwrap();
+        }
+        let reopened_store = store.reopen();
+        let reopened = SigningReservationJournal::attach(reopened_store.clone());
+
+        // A conflicting binding over a recovered Signed record is refused and does
+        // NOT rewrite the record (the stored bytes are unchanged).
+        let before = reopened_store
+            .map
+            .read()
+            .unwrap()
+            .get(&pos.storage_key())
+            .cloned()
+            .unwrap();
+        assert!(matches!(
+            reopened.reserve_for_sign(&pos, &binding(b"different")).unwrap(),
+            ReservationOutcome::Conflict
+        ));
+        let after = reopened_store
+            .map
+            .read()
+            .unwrap()
+            .get(&pos.storage_key())
+            .cloned()
+            .unwrap();
+        assert_eq!(before, after, "conflict must not rewrite the record");
+
+        // A recovered Reserved record remains potentially-signed (never a
+        // continuation) even under a fresh domain.
+        let rpos = position(SigningKind::Proposal, 73);
+        let rb = binding(b"reserved-only");
+        {
+            let journal = SigningReservationJournal::attach(store.clone());
+            let cont = match journal.reserve_for_sign(&rpos, &rb).unwrap() {
+                ReservationOutcome::FreshlyReserved(c) => c,
+                other => panic!("expected FreshlyReserved, got {:?}", other),
+            };
+            let _cap = journal.consume_for_signing(cont).unwrap();
+        }
+        let reopened2 = SigningReservationJournal::attach(store.reopen());
+        assert!(matches!(
+            reopened2.reserve_for_sign(&rpos, &rb).unwrap(),
+            ReservationOutcome::PotentiallySigned
+        ));
+    }
+
+    #[test]
+    fn recovered_signed_corruption_fails_closed_before_recovery_publication() {
+        let store = Arc::new(ModelStore::default());
+        let pos = position(SigningKind::Vote, 74);
+        let b = binding(b"decision");
+        {
+            let journal = SigningReservationJournal::attach(store.clone());
+            let cap = reserve_and_invoke(&journal, &pos, &b);
+            journal.record_signed_result(&cap, b"the-sig").unwrap();
+        }
+        // Corrupt the stored Signed record; a fresh domain must fail closed BEFORE
+        // any recovery re-publication.
+        store.corrupt(&pos.storage_key());
+        let reopened = SigningReservationJournal::attach(store.reopen());
+        assert!(matches!(
+            reopened.reserve_for_sign(&pos, &b),
+            Err(JournalError::Corruption(_))
+        ));
+    }
 }
