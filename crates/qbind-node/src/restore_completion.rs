@@ -480,12 +480,21 @@ pub(crate) fn read_bounded_final_record_bytes<R: std::io::Read>(
 /// and failing closed on any open/stat error (Correction B).
 ///
 /// Returns `Ok(None)` ONLY for a genuinely absent record (open ⇒ NotFound).
-/// The open validates the OPENED object: symlinks are followed to their target
-/// and the target MUST be a regular file; a FIFO, device, socket, directory, or
-/// other special file is refused. On the supported Unix profile the open uses
-/// `O_NONBLOCK` so a FIFO (or other special file) cannot block startup during
-/// the open itself — the object is classified and refused without blocking.
-/// `O_NONBLOCK` has no adverse effect on a regular file.
+/// The open validates the OPENED object: the authoritative final component is
+/// opened WITHOUT following a symlink (Correction A) — a final-component symlink
+/// is refused whether its target exists or is dangling, closing the prior hole
+/// where a dangling symlink was mis-mapped to `NotFound`/absence even though a
+/// directory entry existed. The opened object MUST be a regular file; a FIFO,
+/// device, socket, directory, symlink, or other special file is refused. On the
+/// supported Unix profile the open combines `O_NOFOLLOW` (atomic no-follow of
+/// the final component; a separate stat-then-open would be a check-then-follow
+/// race) with `O_NONBLOCK` so a FIFO (or other special file) cannot block
+/// startup during the open itself — the object is classified and refused
+/// without blocking. Neither flag has an adverse effect on a regular file.
+///
+/// A genuinely absent final record (no directory entry) still opens to
+/// `NotFound` and is treated as absence; a final-component symlink instead
+/// fails the no-follow open (`ELOOP`) and is refused, never absence.
 fn open_regular_final_record(path: &Path) -> Result<Option<std::fs::File>, RtrError> {
     let open_result = {
         #[cfg(unix)]
@@ -493,7 +502,7 @@ fn open_regular_final_record(path: &Path) -> Result<Option<std::fs::File>, RtrEr
             use std::os::unix::fs::OpenOptionsExt;
             std::fs::OpenOptions::new()
                 .read(true)
-                .custom_flags(libc::O_NONBLOCK)
+                .custom_flags(libc::O_NONBLOCK | libc::O_NOFOLLOW)
                 .open(path)
         }
         #[cfg(not(unix))]
@@ -1914,6 +1923,119 @@ mod tests {
         std::fs::create_dir(rtr_path(tmp.path())).expect("mk dir at rtr path");
         let err = read_rtr(tmp.path()).expect_err("directory must be refused");
         assert!(matches!(err, RtrError::Io(_)));
+    }
+
+    /// Correction A: a final-component symlink whose target is a valid regular
+    /// RTR must be refused (no-follow open), NOT read as `Present`, and neither
+    /// the link nor its target may be deleted/replaced/repaired by the reader.
+    #[cfg(unix)]
+    #[test]
+    fn read_rtr_symlink_to_valid_regular_is_refused_and_preserved() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        // A valid regular RTR stored under a side name (not the authoritative
+        // path), then a symlink at the authoritative path pointing to it.
+        let target = tmp.path().join("real_rtr_target");
+        let rec = sample_record(RtrState::Complete);
+        std::fs::write(&target, rec.encode()).expect("write target");
+        let link = rtr_path(tmp.path());
+        std::os::unix::fs::symlink(&target, &link).expect("symlink");
+
+        let err = read_rtr(tmp.path()).expect_err("symlink to valid RTR must be refused");
+        assert!(matches!(err, RtrError::Io(_)));
+
+        // The link itself must still be a symlink (not followed/replaced/removed),
+        // proven via symlink_metadata (Path::exists follows the link).
+        let link_meta = std::fs::symlink_metadata(&link).expect("link must still exist");
+        assert!(
+            link_meta.file_type().is_symlink(),
+            "authoritative path must remain a symlink; reader must not rewrite it"
+        );
+        // The target must be untouched and still decode to the same record.
+        let target_bytes = std::fs::read(&target).expect("target must remain");
+        match RestoreTransactionRecord::decode(&target_bytes) {
+            Ok(got) => assert_eq!(got, rec, "target record must be unchanged"),
+            Err(d) => panic!("target must remain a valid record, got {d:?}"),
+        }
+    }
+
+    /// Correction A: a dangling final-component symlink (target missing) must be
+    /// refused, NOT mis-mapped to absence, and the dangling link must be
+    /// preserved. `Path::exists()` alone cannot distinguish a dangling link from
+    /// a genuinely absent record; `symlink_metadata` proves the link entry.
+    #[cfg(unix)]
+    #[test]
+    fn read_rtr_dangling_symlink_is_refused_and_preserved() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let missing_target = tmp.path().join("does_not_exist_target");
+        let link = rtr_path(tmp.path());
+        std::os::unix::fs::symlink(&missing_target, &link).expect("symlink");
+        // Sanity: the link is dangling — following it would report absence.
+        assert!(!link.exists(), "target is intentionally missing (dangling)");
+
+        let err = read_rtr(tmp.path()).expect_err("dangling symlink must be refused, not absent");
+        assert!(matches!(err, RtrError::Io(_)));
+
+        // The dangling link entry must still exist (a directory entry is present,
+        // so this is NOT ordinary absence) and must remain a symlink.
+        let link_meta =
+            std::fs::symlink_metadata(&link).expect("dangling link entry must still exist");
+        assert!(
+            link_meta.file_type().is_symlink(),
+            "dangling link must be preserved as a symlink; reader must not delete/repair it"
+        );
+        // The reader must not have created the missing target.
+        assert!(
+            std::fs::symlink_metadata(&missing_target).is_err(),
+            "reader must not create/repair the dangling target"
+        );
+    }
+
+    /// Correction A control: genuine absence (no directory entry at all) retains
+    /// ordinary-lifecycle `Absent` behavior and is distinct from a dangling link.
+    #[cfg(unix)]
+    #[test]
+    fn read_rtr_genuine_absence_is_absent_not_refused() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        // No entry of any kind at the authoritative path.
+        assert!(
+            std::fs::symlink_metadata(rtr_path(tmp.path())).is_err(),
+            "there must be no directory entry (genuine absence)"
+        );
+        assert!(matches!(
+            read_rtr(tmp.path()).expect("read"),
+            RtrReadResult::Absent
+        ));
+    }
+
+    /// Correction A: exercise the symlink refusal through the ordinary-startup
+    /// precondition — a final-component symlink refuses (fail-closed) before any
+    /// protected state is admitted, rather than proceeding as absent.
+    #[cfg(unix)]
+    #[test]
+    fn ordinary_startup_refuses_final_component_symlink() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let target = tmp.path().join("real_rtr_target");
+        std::fs::write(&target, sample_record(RtrState::Complete).encode()).expect("write");
+        std::os::unix::fs::symlink(&target, rtr_path(tmp.path())).expect("symlink");
+        assert!(matches!(
+            evaluate_ordinary_startup(tmp.path()),
+            OrdinaryStartupDecision::RefuseInvalid(_)
+        ));
+    }
+
+    /// Correction A: exercise the symlink refusal through the requested-restore
+    /// precondition — a dangling final-component symlink refuses before any
+    /// validation/mutation, rather than being treated as an empty destination.
+    #[cfg(unix)]
+    #[test]
+    fn requested_restore_precondition_refuses_dangling_symlink() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        std::os::unix::fs::symlink(tmp.path().join("missing_target"), rtr_path(tmp.path()))
+            .expect("symlink");
+        assert!(matches!(
+            evaluate_requested_restore_precondition(tmp.path()),
+            RequestedRestorePrecondition::RefuseInvalid(_)
+        ));
     }
 
     #[test]

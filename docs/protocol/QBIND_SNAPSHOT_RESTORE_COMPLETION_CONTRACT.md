@@ -62,29 +62,59 @@ remaining implementation and durability-evidence obligations).
 >   unrelated-only, or unopenable databases refuse before dispatch. This is a
 >   **bounded database-open** guarantee (the checks `open_existing` performs), not
 >   a full integrity scrub or authentication of checkpoint contents.
-> * **Correction B (bounded RTR read).** `read_rtr` opens the authoritative final
->   record once, validates it as a regular file (on Unix, `O_NONBLOCK` + `fstat`,
->   so a FIFO/special file cannot block the open), reads at most the configured
->   maximum plus one detection byte with checked arithmetic, rejects over-limit
->   input before decoding, never allocates from metadata/encoded length, and maps
->   I/O failure to refusal (never absence/success). A genuinely absent final
->   record is still absence; temporary artifacts never count as completion.
+> * **Correction B (bounded RTR read with final-component symlink refusal).**
+>   `read_rtr` opens the authoritative final record once. On Unix the open now
+>   combines `O_NOFOLLOW` with `O_NONBLOCK`, so a **final-component symlink is
+>   refused** (fail-closed) whether its target exists or is dangling — closing
+>   the prior hole where a dangling symlink at the RTR pathname was mis-mapped to
+>   `NotFound`/absence even though a directory entry existed. The opened
+>   descriptor is then validated as a regular file (`fstat`, so a FIFO/special
+>   file cannot block the open); the read consumes at most the configured maximum
+>   plus one detection byte with checked arithmetic, rejects over-limit input
+>   before decoding, never allocates from metadata/encoded length, and maps I/O
+>   failure to refusal (never absence/success). A **genuinely absent** final
+>   record (no directory entry ⇒ open `NotFound`) is still the ordinary-lifecycle
+>   absence; symlinks, unsupported file types, and open/read failures are refused;
+>   temporary artifacts never count as completion. The no-follow is applied atomically
+>   at open (no path-check-then-follow race); this is a final-component refusal only,
+>   not general ancestor-path hardening. Refused symlinks and their targets are
+>   never deleted, replaced, or repaired.
 > * **Correction C (finalization diagnostics).** A finalization mismatch reports
 >   only what is established — the attempt was refused, the inconsistent final
 >   record was **not** overwritten, and this startup stops before protected state
 >   use — and never claims an on-disk `INTENT` merely because finalization failed.
 >
-> Executed acceptance tests: focused unit tests in `restore_completion.rs`,
+> Executed acceptance tests: focused unit tests in `restore_completion.rs`
+> (including the final-component symlink-refusal cases: a symlink to a valid
+> regular RTR is refused, a dangling symlink is refused, both with the link and
+> any target preserved via `symlink_metadata`, and a genuine-absence control),
 > `vm_v0_runtime.rs`, and `qbind-ledger/src/execution.rs`; and the release-binary
 > integration target
-> `crates/qbind-node/tests/run_422_d7d3_binary_snapshot_restore_characterization_tests.rs`
-> (profile-independent COMPLETE admission/refusal, completion+restart with
-> preserved state, occupied-refusal→ordinary-restart, destination-lock
-> contention/death/reacquire, and late-failure containment). See
-> `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md` for the D7-D8 evidence and the
-> release-executable identity. Power-loss durability, durable anti-rollback,
-> consensus recovery, signing-state continuity, and production authority readiness
-> remain **NOT-established** (§11).
+> `crates/qbind-node/tests/run_422_d7d3_binary_snapshot_restore_characterization_tests.rs`.
+> Through the release binary the following were executed: profile-independent
+> COMPLETE admission/refusal across **both** execution profiles (VM-v0 and the
+> non-VM-v0 `nonce-only`) over the valid / missing-directory / empty-directory /
+> unrelated-only / invalid-unopenable database states (each negative case asserts
+> a natural nonzero exit with the specific refusal, complete stderr capture before
+> any forbidden-marker absence assertion, no replacement-DB initialization, and
+> preserved sentinel/RTR evidence); completion followed by **fixture-driven**
+> account and consensus-epoch advancement to distinct values, then an ordinary
+> restart that preserves the advanced account value and advanced epoch,
+> reapplies neither the historical snapshot baseline nor its epoch, republishes
+> **neither INTENT nor COMPLETE**, and leaves the authoritative RTR as the same
+> historical completion record; occupied-refusal→ordinary-restart with the
+> consensus epoch **independently observed** before and after (never the snapshot
+> epoch); and destination-lock contention with the holder kept alive, a specific
+> lock-contention refusal from the contender, classified deliberate SIGKILL
+> termination of the holder with completed reaping, and successor reacquisition
+> without unlinking the lock file — all observed through the classified
+> termination path with capture-integrity requirements (a timeout is a test
+> failure, never evidence of refusal). See
+> `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md` for the D7-D8 evidence, the
+> release-executable identity, and the literal security-tool outcomes. Process
+> termination and injected errors do not prove power-loss durability. Power-loss
+> durability, durable anti-rollback, consensus recovery, signing-state continuity,
+> and production authority readiness remain **NOT-established** (§11).
 
 This document is the authoritative contract for restore completion. The existing
 protocol documents
@@ -770,15 +800,34 @@ it **must never be admitted** as completion: an ordinary startup over a final
 
 **Implemented (Run 422 D7-D8).** The cases below are exercised by the extended
 `run_422_d7d3_binary_snapshot_restore_characterization_tests.rs` target,
-including the VM-v0-profile release-binary cases that actually open the
-protected state: `d7d8_correction_a_vm_v0_state_opens_only_after_durable_complete`
-(ordering: INTENT → Run 097 epoch → COMPLETE → VM-v0 open, existing-only),
-`d7d8_correction_b_missing_or_unrelated_state_refuses_via_binary` (a
-COMPLETE-admitted destination with an unrelated-only or empty restored database
-fails closed without initializing a replacement), and
-`d7d8_a_complete_then_ordinary_restart_preserves_state` (completion then ordinary
-restart is admitted through the valid `COMPLETE`, opens existing-only, does not
-republish INTENT/COMPLETE, and preserves the restored account value).
+including the release-binary cases that actually open/validate the protected
+state:
+`d7d8_correction_a_vm_v0_state_opens_only_after_durable_complete`
+(ordering: INTENT → Run 097 epoch → COMPLETE → VM-v0 open, existing-only);
+`d7d8_correction_b_missing_or_unrelated_state_refuses_via_binary` **and**
+`d7d8_correction_b_missing_or_unrelated_state_refuses_via_binary_nonce_only`
+(the SAME valid / missing-directory / empty-directory / unrelated-only /
+invalid-unopenable matrix across **both** execution profiles — VM-v0 and the
+non-VM-v0 `nonce-only`; each negative case asserts a natural exit 1 with the
+specific refusal, complete capture before absence assertions, and no replacement
+database initialized); and
+`d7d8_a_complete_then_ordinary_restart_preserves_state` (completion, then
+**fixture-driven** advancement of the account and consensus epoch to distinct
+values, then an ordinary restart that is admitted through the valid `COMPLETE`,
+opens existing-only, republishes **neither INTENT nor COMPLETE**, reapplies
+neither the historical snapshot baseline nor its epoch, and preserves the
+**advanced** account value and advanced epoch, with the authoritative RTR
+unchanged). The final-component symlink refusal (Correction A of this task) is
+exercised at unit level through the real reader in `restore_completion.rs`
+(symlink→valid-RTR refused, dangling symlink refused, both preserved via
+`symlink_metadata`, genuine-absence control) and through the ordinary-startup and
+requested-restore preconditions. `d7d8_c_destination_lock_contention_death_and_reacquire`
+keeps the holder alive during contention, requires the contender's specific
+lock-contention refusal with complete capture, terminates the holder through the
+classified deliberate-SIGKILL path (successful kill, expected signal, completed
+reaping), and observes successor reacquisition through the same classified path
+without ever unlinking the lock file. A timeout is a test failure, never evidence
+of refusal.
 
 Reuse `run_422_d7d3_binary_snapshot_restore_characterization_tests.rs`
 (`DrainedChild`, `observe_then_terminate`, `ordinary_localmesh_args`,
