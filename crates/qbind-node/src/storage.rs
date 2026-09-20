@@ -199,6 +199,48 @@ pub trait ConsensusStorage: Send + Sync {
     /// if the stored epoch data is malformed.
     fn get_current_epoch(&self) -> Result<Option<u64>, StorageError>;
 
+    /// **Run 422 D7-D8.** Store the current epoch under an explicit durability
+    /// barrier (synced write).
+    ///
+    /// Unlike [`Self::put_current_epoch`], which persists the epoch through the
+    /// storage's default (asynchronous, un-`fsync`'d) write path, this method
+    /// MUST NOT return `Ok(())` until the epoch value has been synchronized to
+    /// stable storage under the `crates/qbind-node/src/restore_completion.rs`
+    /// durability profile. The restore-completion boundary requires this synced
+    /// effect to complete BEFORE it publishes a durable `COMPLETE`
+    /// restore-transaction record — a value written by the default
+    /// `put_current_epoch` cannot be claimed power-loss durable.
+    ///
+    /// There is deliberately **no** default implementation: a default that
+    /// forwarded to the asynchronous `put_current_epoch` would silently and
+    /// falsely report durability for backends (e.g. RocksDB) whose default
+    /// write does not `fsync`. Each backend states its true durability
+    /// behavior — the RocksDB backend performs a real synced write, and the
+    /// in-memory backend documents itself as a non-durable test/model.
+    ///
+    /// # Errors
+    ///
+    /// Returns `StorageError::Io` if the synced write fails.
+    fn put_current_epoch_synced(&self, epoch: u64) -> Result<(), StorageError>;
+
+    /// **Run 422 D7-D8.** Force any already-written epoch value to stable
+    /// storage (an explicit durability barrier over the epoch surface).
+    ///
+    /// Used by the restore-completion boundary for the "already consistent"
+    /// epoch outcome, where the snapshot epoch already matches the live
+    /// committed epoch and no value change is performed: a successful *read*
+    /// does not prove the value was ever `fsync`'d, so an explicit barrier is
+    /// still required before a durable `COMPLETE` may be published.
+    ///
+    /// There is deliberately **no** default implementation (see
+    /// [`Self::put_current_epoch_synced`]). The RocksDB backend flushes its
+    /// write-ahead log; the in-memory backend is a non-durable test/model.
+    ///
+    /// # Errors
+    ///
+    /// Returns `StorageError::Io` if the flush fails.
+    fn flush_epoch_durable(&self) -> Result<(), StorageError>;
+
     /// Store the schema version (T104).
     ///
     /// The schema version is stored as a u32 in big-endian format (4 bytes)
@@ -967,6 +1009,47 @@ impl ConsensusStorage for RocksDbConsensusStorage {
         result
     }
 
+    fn put_current_epoch_synced(&self, epoch: u64) -> Result<(), StorageError> {
+        use crate::metrics::StorageOp;
+        use std::time::Instant;
+
+        let start = Instant::now();
+        // Store epoch as big-endian u64 (8 bytes), wrapped in the same
+        // checksum envelope as `put_current_epoch`, but under a SYNCED write
+        // (`WriteOptions::set_sync(true)`) so the value is `fsync`'d to stable
+        // storage before this call returns. Run 422 D7-D8: the
+        // restore-completion boundary requires this before publishing a
+        // durable `COMPLETE`.
+        let epoch_bytes = epoch.to_be_bytes();
+        let value = wrap_checksummed(&epoch_bytes);
+        let mut write_opts = rocksdb::WriteOptions::default();
+        write_opts.set_sync(true);
+        let result = self
+            .db
+            .put_opt(CURRENT_EPOCH_KEY, &value, &write_opts)
+            .map_err(|e| StorageError::Io(e.to_string()));
+
+        if let Some(ref metrics) = self.metrics {
+            metrics
+                .storage()
+                .record(StorageOp::PutCurrentEpoch, start.elapsed());
+        }
+
+        result
+    }
+
+    fn flush_epoch_durable(&self) -> Result<(), StorageError> {
+        // Run 422 D7-D8: an explicit durability barrier over the epoch
+        // surface. Flushing the write-ahead log with `sync=true` forces any
+        // previously written (possibly un-`fsync`'d) `meta:current_epoch`
+        // value to stable storage. Used for the "already consistent" epoch
+        // outcome, where no value change is performed but a durability barrier
+        // is still required before a durable `COMPLETE` may be published.
+        self.db
+            .flush_wal(true)
+            .map_err(|e| StorageError::Io(e.to_string()))
+    }
+
     fn put_schema_version(&self, version: u32) -> Result<(), StorageError> {
         // Store schema version as big-endian u32 (4 bytes)
         let version_bytes = version.to_be_bytes();
@@ -1296,6 +1379,21 @@ impl ConsensusStorage for InMemoryConsensusStorage {
             .read()
             .map_err(|e| StorageError::Other(format!("lock poisoned: {}", e)))?;
         Ok(*current)
+    }
+
+    fn put_current_epoch_synced(&self, epoch: u64) -> Result<(), StorageError> {
+        // Run 422 D7-D8: MODEL behavior only. An in-memory map has no stable
+        // storage and provides NO power-loss durability; this simply updates
+        // the in-memory value exactly like `put_current_epoch`. It exists so
+        // the restore-completion boundary can be exercised in unit/model tests
+        // and must NOT be read as durability evidence.
+        self.put_current_epoch(epoch)
+    }
+
+    fn flush_epoch_durable(&self) -> Result<(), StorageError> {
+        // Run 422 D7-D8: MODEL behavior only — nothing to flush for an
+        // in-memory backend. Not durability evidence.
+        Ok(())
     }
 
     fn put_schema_version(&self, version: u32) -> Result<(), StorageError> {

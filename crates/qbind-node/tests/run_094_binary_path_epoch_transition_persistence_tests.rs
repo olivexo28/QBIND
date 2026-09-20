@@ -203,6 +203,13 @@ fn run_094_persistence_failure_is_fail_closed_with_canonical_epoch_pair() {
         fn get_current_epoch(&self) -> Result<Option<u64>, StorageError> {
             Ok(None)
         }
+        // Run 422 D7-D8: test double (non-durable model).
+        fn put_current_epoch_synced(&self, _: u64) -> Result<(), StorageError> {
+            Ok(())
+        }
+        fn flush_epoch_durable(&self) -> Result<(), StorageError> {
+            Ok(())
+        }
         fn put_schema_version(&self, _: u32) -> Result<(), StorageError> {
             Ok(())
         }
