@@ -252,26 +252,68 @@ obligation. Those current attributes bind the *exact authorized message*
 (exact-message fields, below); they never relax the position key.
 
 **Canonical consensus position for the supported founding-authority profile.**
-The supported profile is single, static founding authority. In the actual source
-the engine derives its view from `proposal.header.height` on ingest
-(`ingest_proposal`, `basic_hotstuff_engine.rs:1732`), and every locally-emitted
-Proposal and Vote sets `height = round = view` with `step = 0` (`on_leader_step`,
-L1503–1504 / L1522–1524 / L1557–1559; the second vote emit at L1833–1835). There
-is therefore exactly **one** engine voting position per view: the engine **view**.
-The canonical position key is:
+The supported profile is single, static founding authority. Each signed decision
+is bound to the **originating consensus view of the action itself** — the view that
+was current when the engine *constructed* that action — **not** whatever value
+`engine.current_view()` happens to hold later when the action reaches signing. This
+distinction is load-bearing. In `on_leader_step` the engine captures
+`view = self.current_view` (`basic_hotstuff_engine.rs:1443`), builds the
+`BlockProposal` and self-`Vote` for that captured `view`, and — when the self-vote
+immediately forms a QC — calls `advance_view()` (L1577) **before returning the
+already-constructed actions** (L1581–1584). The returned `BroadcastProposal` /
+`BroadcastVote` therefore already carry view `V` while the engine may already sit at
+`V+1`. The reservation position MUST be that originating `V`, read from the action,
+and MUST NOT be recomputed from the newer `engine.current_view()`, nor may the
+message be rewritten to match the engine's later view.
+
+The originating view is recoverable from the **existing** action and its provenance
+without any new production field: a locally-emitted `BlockProposal` carries it in
+`header.height` (`= view`, L1503) and a `Vote` carries it in `height` (`= view`,
+L1557 / the proposal-triggered vote at L1833); for cached re-emission the captured
+decision (its provenance ticket plus the cached `BlockProposal` / `Vote`) already
+fixes the same originating view, so re-emission reserves that historical position
+rather than the engine's current one. On ingest the engine likewise derives a peer
+proposal's view from `proposal.header.height` (`ingest_proposal`,
+`basic_hotstuff_engine.rs:1732`); that ingest view is the originating view of an
+inbound decision, distinct from the local engine's mutable `current_view`. There is
+exactly **one** engine voting position per originating view. The canonical position
+key is:
 
 * the stable validator identity (above), within its fixed network/genesis;
 * the consensus **kind**: Proposal vs Vote (two distinct sub-namespaces of one
   view — see below);
-* the engine **view**.
+* the **originating consensus view** carried by the action (never a later
+  `current_view`).
 
-Height, round, and step are **not** independent position coordinates for this
-profile; they are redundant encodings of the view. The record MUST enforce their
-correspondence as a **proposed pre-lookup requirement**: `height == round == view`
-and `step == 0` for the founding-authority profile. A message whose
-height/round/step do **not** satisfy that correspondence is an unsupported or
-inconsistent combination and MUST be **refused** — it MUST NOT be admitted under a
-second namespace derived from its divergent numeric fields.
+The redundant numeric fields differ by message kind and MUST be classified
+accordingly. A locally-emitted `BlockProposal` carries a `BlockHeader` with
+`height = round = view` and **no step field at all** (`BlockHeader` has none —
+L1503–1504); a `Vote` carries `height = round = view` **and** `step = 0`
+(L1557–1559 / L1833–1835). An embedded `QuorumCertificate` carries **its own**
+`height` / `round` / `step` certifying **its own** position (L1522–1524); it is
+verified and associated separately (§4.1) and its fields are **never** borrowed to
+fill the Proposal's originating position. Height and round are **not** independent
+position coordinates; they are redundant encodings of the originating view, and for
+a Vote `step` is an additional canonical field. The record MUST enforce, as a
+**proposed pre-lookup requirement**, `height == round == view` for both kinds, plus
+`step == 0` for the locally-emitted **Vote** profile; a Proposal has no step to
+check. A message whose height/round (or a Vote's step) do **not** satisfy that
+correspondence is an unsupported or inconsistent combination and MUST be
+**refused** — it MUST NOT be admitted under a second namespace derived from its
+divergent numeric fields.
+
+**Identity of the decision vs eligibility to send it (kept separate).** Two
+questions are distinct and MUST NOT be merged: (1) *which* decision is being
+reserved — fixed by the originating view above and never redefined by later engine
+progress; and (2) *whether* that decision may be sent **now** — governed by the
+existing authorization / freshness / re-emission eligibility checks
+(`admit_outbound_action`, `confirm_outbound_before_effect`, and the cached
+re-emission provenance rules in `admit_cached_reemission`). Current-view equality is
+**not** introduced here as a new universal signing prerequisite: an action whose
+originating view differs from the engine's current view is not thereby ineligible,
+and its reservation identity remains its originating view. The existing cached
+re-emission eligibility checks and their provenance rules are preserved unchanged
+and do **not** redefine the historical position of the cached decision.
 
 **Field classification.** Each field has one trusted source and one role — it
 either participates in the position key or it binds the exact authorized message —
@@ -282,12 +324,13 @@ with a required consistency check and a fail-closed rejection behavior:
 | validator identity (`ValidatorId`) | admitted snapshot's bound signer/domain, not the wire | position key | equals the admitted local validator identity | refuse (foreign/mismatched identity) |
 | network / genesis | pinned domain (`ProposalVoteSigningDomainV2`) | position key | equals the pinned network/genesis | refuse (wrong network/genesis) |
 | kind (Proposal vs Vote) | engine action type | position key (sub-namespace) | Proposal and Vote are distinct; broadcast vs directed of one Vote are the same kind | n/a (both legitimately exist per view) |
-| engine view | engine (`current_view` / `ingest_proposal` view) | position key | single value per position | refuse on divergence |
-| height / round | wire header (`header.height` / `header.round`) | redundant encoding of view | equals view | refuse if `height != view` or `round != view` |
-| step | wire (`step`) | redundant, canonical only | equals `0` for this profile | refuse if `step != 0` |
+| originating consensus view | the action itself (locally-emitted `header.height` / `Vote.height` captured at construction; inbound `ingest_proposal` view) — **not** a later `engine.current_view()` | position key | single value per position, taken from the action and never recomputed from newer engine state | refuse on divergence |
+| height / round | wire header (`header.height` / `header.round`) for a Proposal; `Vote.height` / `Vote.round` for a Vote | redundant encoding of the originating view | equals the originating view | refuse if `height != view` or `round != view` |
+| step | wire `Vote.step` only (a `BlockProposal` / `BlockHeader` has **no** step field; an embedded QC's `step` certifies the QC's own position and is never substituted for the Proposal) | redundant, canonical, Vote-only | equals `0` for the locally-emitted Vote profile | refuse if a Vote's `step != 0`; not applicable to a Proposal |
 | authorized epoch | admitted snapshot (`authorized_epoch()`) | exact-message binding | equals the admitted epoch | refuse (epoch-unauthorized) |
 | current key / suite | admitted snapshot's bound signer (suite assigned at `sign_*_for_broadcast`, L3706 / L3785) | exact-message binding | equals the admitted signer's bound key/suite | refuse; a *validated change* does not open a new position namespace |
-| message version | pinned domain (v2) | exact-message binding | equals the supported version | refuse (unsupported version) |
+| wire-message version | wire field `BlockHeader.version` / `Vote.version` (the engine emits `1`, L1500 / L1554), validated against the supported wire-format source — **distinct from** the D6 signing-format version | exact-message binding | equals the supported wire version (`1`) | refuse (unsupported wire version) |
+| D6 signing-format version | the `ProposalVoteSigningDomainV2` envelope (`signing_format_version` byte `2`) wrapping the message's existing canonical body — does **not** imply wire-message version 2 | exact-message binding (domain isolation) | is the pinned v2 domain | refuse (wrong / absent domain) |
 | authority commitment | pinned domain / admitted snapshot | exact-message binding | equals the admitted commitment | refuse |
 | block id + justification (QC) id | prepared engine action | exact-message binding | matches the reserved decision | conflict if changed at the same position |
 | canonical preimage digest | the prepared D6 preimage `signer.sign_*` receives | exact-message binding | is the exact input reserved (§4.1) | conflict if changed at the same position |
@@ -303,11 +346,12 @@ position and block are the **same** decision (exact retry, §3.5), not a conflic
 broadcast-vs-directed delivery is not a consensus-step distinction and no new step
 policy is invented here.
 
-**Non-bypass rule.** A changed block identifier, height, round, step, suite, key,
-message version, authority-commitment label, owner generation, process identifier,
-or caller label MUST NOT create a namespace that evades the position key: the
-height/round/step correspondence check runs **before** lookup, and
-key/suite/version/commitment are exact-message bindings, not namespace selectors.
+**Non-bypass rule.** A changed block identifier, height, round, a Vote's step,
+suite, key, wire-message version, authority-commitment label, owner generation,
+process identifier, or caller label MUST NOT create a namespace that evades the
+position key: the height/round correspondence check (plus a Vote's `step == 0`
+check) runs **before** lookup, and key/suite/version/commitment are exact-message
+bindings, not namespace selectors.
 Authorization to rotate a key or membership does **not** by itself prove that
 earlier signing obligations may be discarded. For this founding-authority design,
 **rotation / epoch-transition continuity is explicitly gated**: a new conflict
@@ -320,8 +364,10 @@ rotation create a fresh namespace.
 
 The record is **proposed, not implemented**. It MUST be:
 
-* **Bounded and versioned:** fixed maximum size, an explicit format-version
-  field; unknown/incompatible versions are refused fail-closed.
+* **Bounded and versioned:** fixed maximum size, an explicit **journal-record
+  format-version** field (a persistence-format identifier, distinct from the
+  wire-message version and the D6 signing-format version); unknown/incompatible
+  record versions are refused fail-closed.
 * **Checked arithmetic:** all counters/lengths use checked/saturating
   operations; overflow is a fail-closed terminal state, never wraparound.
 * **Integrity-checked:** a checksum over the record detects truncation/corruption.
@@ -331,13 +377,17 @@ The record is **proposed, not implemented**. It MUST be:
   record makes the covered position **potentially-signed** (refuse to sign),
   never "assume unused."
 
-Record fields (conceptual): format version; stable validator identity +
-network/genesis; position key (kind + engine view — with height/round/step stored
-only as the view's checked redundant encoding, never as independent coordinates);
-exact-message binding digest (authorized epoch + current key/suite + message
-version + authority commitment + block id + justification id + canonical preimage
-digest); lifecycle stage (§3.4); optional retained signature/result for exact
-retry; checksum.
+Record fields (conceptual): **journal-record format version** (a persistence-format
+identifier for the signing record, independent of both the wire-message version and
+the D6 signing-format version — changing it alters neither the consensus position
+nor the signed wire bytes); stable validator identity + network/genesis; position
+key (kind + **originating consensus view** — with height/round, and a Vote's step,
+stored only as that view's checked redundant encoding, never as independent
+coordinates, and never taken from a later `engine.current_view()`); exact-message
+binding digest (authorized epoch + current key/suite + **wire-message version** +
+**D6 signing-format (v2) domain** + authority commitment + block id + justification
+id + canonical preimage digest); lifecycle stage (§3.4); optional retained
+signature/result for exact retry; checksum.
 
 ### 3.4 The signing-state machine (per position)
 
@@ -679,9 +729,33 @@ These are **future** controls, not newly executed claims:
 * Exact retry (resend, no re-sign) and conflicting retry (refuse).
 * Repeated position with changed message/binding fields that must **not** evade
   conflict detection.
-* Evasion attempts via **inconsistent position fields** (height/round/step not
-  equal to the engine view for this profile) — refused **before** lookup, never
-  admitted under a second namespace.
+* Evasion attempts via **inconsistent position fields** (a Proposal or Vote whose
+  `height` / `round` — or a Vote's `step` — does not equal its originating view for
+  this profile) — refused **before** lookup, never admitted under a second
+  namespace.
+* **Originating-view persistence across engine progress:** an action constructed at
+  view `V` whose engine advances to `V+1` (via `advance_view()`) **before** the
+  action is forwarded to signing keeps its reservation associated with `V`; the
+  later `engine.current_view()` never redefines or overwrites the reserved position.
+* **Real per-kind field sets:** a Proposal record uses `BlockHeader` fields
+  (`height`, `round`, **no step**) and a Vote record uses `height`, `round`, `step`;
+  no Proposal step is invented and no embedded-QC field is borrowed to fill a
+  Proposal position.
+* **Vote.step rejection:** a Vote presenting an unsupported `step` value is refused
+  **before** lookup, without inventing or requiring a Proposal step.
+* **Independent versions bound correctly:** a wire-message-version-`1` Proposal /
+  Vote signed through the existing D6 v2 signing domain reserves and verifies with
+  the wire-message version and the D6 signing-format version bound
+  **independently** — D6 v2 does not imply wire version 2, and neither is rewritten
+  to match the other.
+* **Journal-record format-version independence:** changing the journal-record
+  format version alters neither the consensus (originating) position nor the signed
+  wire message; a record re-encoded under a new record version still reserves the
+  same decision.
+* **Conflict survives engine progress:** a conflicting decision at the **same
+  originating position** (same identity + kind + originating view, different binding
+  digest) remains a conflict and is REFUSED even though the engine has since
+  advanced to a later view.
 * Evasion attempts via changed **key / suite / message version / authority-
   commitment / owner-generation / caller-label** at the same position — treated as
   the same position (exact-message conflict if content differs), never a new
@@ -790,6 +864,31 @@ is begun:
   remote witness, neither selected; a monotonic number alone is insufficient and
   anchor selection stays UNRESOLVED (§5.1, §6.2, §6.5, §6.6).
 
+A subsequent correction in the same D7-D9 documentation series additionally
+resolved two originating-view / field-mapping issues, re-verified against the
+engine and wire sources; the protocol stays `DEFINED-NOT-IMPLEMENTED`:
+
+* **E — originating-view binding.** The reservation position is the **originating
+  consensus view carried by the action** (captured at construction; `on_leader_step`
+  calls `advance_view()` at L1577 **before returning** the already-built actions at
+  L1581–1584, so `engine.current_view()` can already be `V+1` while the action is
+  view `V`). The position is read from the action and its provenance, never
+  recomputed from a later `current_view`; the message is not rewritten to a newer
+  view; current-view equality is **not** a new universal signing prerequisite.
+  Decision identity and send-time eligibility are kept separate, and the cached
+  re-emission provenance rules are preserved (§3.2). The field-classification table's
+  view row now names a concrete action-origin relationship rather than an ambiguous
+  `current_view` / `ingest_proposal` listing.
+* **F — per-kind fields and independent versions.** A `BlockProposal` /
+  `BlockHeader` has **no** step; only a `Vote` has `step` (scoped `step == 0` to the
+  locally-emitted Vote profile); an embedded QC's fields certify the QC's own
+  position and are never borrowed for the Proposal. Three versions are separated:
+  **wire-message version** (`BlockHeader.version` / `Vote.version` = `1`), **D6
+  signing-format version** (`ProposalVoteSigningDomainV2`, byte `2` — does not imply
+  wire version 2), and the **journal-record format version** (persistence-only,
+  independent of both). The field-classification table and record fields now name
+  each source separately (§3.2, §3.3).
+
 ---
 
 ## 8. Validation performed and retained posture
@@ -799,6 +898,16 @@ is begun:
 * Verified cited paths, symbols, and caller relationships against the inspected
   `c9025f2` checkout (function line numbers in §1.1; ordering in
   `forward_actions_to_facade` L4114–4160 confirms admit→sign→confirm→facade).
+* Re-verified the originating-view and per-kind field facts directly in
+  `basic_hotstuff_engine.rs`: `on_leader_step` captures `view = self.current_view`
+  (L1443), sets the `BlockHeader` `height = round = view` with no step (L1500–1504),
+  the embedded QC's own `height`/`round`/`step` (L1522–1524), and the `Vote`
+  `height = round = view`, `step = 0` (L1557–1559 / L1833–1835), then `advance_view()`
+  (L1577) runs **before** the actions are returned (L1581–1584); wire structs in
+  `crates/qbind-wire/src/consensus.rs` confirm `BlockHeader`/`BlockProposal` carry no
+  step while `Vote`/`QuorumCertificate` do; `ProposalVoteSigningDomainV2`
+  (`pv_signing_domain.rs`) confirms the v2 signing-format byte is separate from the
+  wire `version` field.
 * Confirmed the storage trait exposes `put_current_epoch_synced` (L224) /
   `flush_epoch_durable` (L242) and **no** signing-decision method (§2.4).
 * Reviewed each state transition (§3.4) and failure-matrix row (§5.2) for

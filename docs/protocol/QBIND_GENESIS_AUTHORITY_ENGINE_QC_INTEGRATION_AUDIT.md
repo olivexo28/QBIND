@@ -1340,9 +1340,11 @@ by **both** the immediate-forwarding callers in
 `binary_consensus_loop.rs::forward_actions_to_facade` **and** the
 cached-re-emission callers in `maybe_reemit_on_late_peer_connect` — a conflict rule
 derived from the HotStuff decision rules (canonical position = validator identity +
-kind + engine view; height/round/step are checked redundant encodings, not
-independent coordinates), and a failure/recovery matrix keyed to observable durable
-evidence.
+kind + the action's **originating** consensus view — captured when the action is
+built, not a later `engine.current_view()`; a Proposal's `height`/`round` and a
+Vote's `height`/`round`/`step == 0` are checked redundant encodings of that view,
+not independent coordinates, and an embedded QC's fields are never borrowed for the
+Proposal), and a failure/recovery matrix keyed to observable durable evidence.
 Signing-state records are guards, not authorization; the durable anti-rollback
 anchor is explicitly UNRESOLVED and consensus-lock recovery is an unmet
 prerequisite. This audit's QC-integration findings are unchanged; signing is not
