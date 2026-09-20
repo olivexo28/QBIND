@@ -380,6 +380,12 @@ const SCHEMA_VERSION_KEY: &[u8] = b"meta:schema_version";
 /// Format: `meta:epoch_transition_marker` → `EpochTransitionMarker` (JSON)
 const EPOCH_TRANSITION_MARKER_KEY: &[u8] = b"meta:epoch_transition_marker";
 
+/// Run 422 D7-D10 — key prefix for signing-decision journal records. This is a
+/// distinct namespace from the block (`b:`) / QC (`q:`) / epoch (`meta:`) keys;
+/// their layout and semantics are unchanged. The full key is
+/// `sig:` + the journal's position-key bytes.
+const SIGNING_RECORD_STORAGE_PREFIX: &[u8] = b"sig:";
+
 // ============================================================================
 // Epoch Transition Batch (M16)
 // ============================================================================
@@ -520,6 +526,15 @@ fn compute_crc32(data: &[u8]) -> u32 {
         crc = CRC32_TABLE[idx] ^ (crc >> 8);
     }
     !crc
+}
+
+/// Run 422 D7-D10 — expose the existing CRC-32 (IEEE 802.3) facility to the
+/// signing-reservation journal so its record integrity check reuses the same
+/// corruption detector as the block/QC/epoch records rather than introducing a
+/// parallel checksum. This is a corruption detector only — not authentication
+/// and not rollback protection.
+pub(crate) fn signing_journal_crc32(data: &[u8]) -> u32 {
+    compute_crc32(data)
 }
 
 /// Wrap a payload in a checksummed envelope.
@@ -1261,6 +1276,48 @@ impl RocksDbConsensusStorage {
     }
 }
 
+impl RocksDbConsensusStorage {
+    /// Build the full storage key for a signing-decision journal record from the
+    /// journal's position-key bytes (Run 422 D7-D10).
+    fn signing_record_key(position_key: &[u8]) -> Vec<u8> {
+        let mut key = Vec::with_capacity(SIGNING_RECORD_STORAGE_PREFIX.len() + position_key.len());
+        key.extend_from_slice(SIGNING_RECORD_STORAGE_PREFIX);
+        key.extend_from_slice(position_key);
+        key
+    }
+}
+
+/// Run 422 D7-D10 — durable, synced backing store for the signing-reservation
+/// journal. This is a REAL power-loss-durable backend: writes go through
+/// `WriteOptions::set_sync(true)` (`fsync`) exactly like `put_current_epoch_synced`,
+/// and the durable acknowledgement corresponds to the signing-record write
+/// itself (not an unrelated epoch operation). Records are wrapped in the same
+/// CRC-32 checksum envelope used for blocks/QCs/epoch values (corruption
+/// detection only — not authentication, not rollback protection).
+impl crate::signing_reservation_journal::SigningJournalStorage for RocksDbConsensusStorage {
+    fn get_signing_record(&self, key: &[u8]) -> Result<Option<Vec<u8>>, StorageError> {
+        let full = Self::signing_record_key(key);
+        match self.db.get(&full) {
+            Ok(Some(raw)) => {
+                let payload = unwrap_checksummed(&raw, "signing_record")?;
+                Ok(Some(payload))
+            }
+            Ok(None) => Ok(None),
+            Err(e) => Err(StorageError::Io(e.to_string())),
+        }
+    }
+
+    fn put_signing_record_synced(&self, key: &[u8], value: &[u8]) -> Result<(), StorageError> {
+        let full = Self::signing_record_key(key);
+        let wrapped = wrap_checksummed(value);
+        let mut write_opts = rocksdb::WriteOptions::default();
+        write_opts.set_sync(true);
+        self.db
+            .put_opt(&full, &wrapped, &write_opts)
+            .map_err(|e| StorageError::Io(e.to_string()))
+    }
+}
+
 // ============================================================================
 // InMemoryConsensusStorage (for testing)
 // ============================================================================
@@ -1281,7 +1338,35 @@ pub struct InMemoryConsensusStorage {
     schema_version: RwLock<Option<u32>>,
     /// Epoch transition marker (M16).
     epoch_transition_marker: RwLock<Option<EpochTransitionMarker>>,
+    /// Run 422 D7-D10 — signing-decision journal records (MODEL only; no
+    /// durability). Present so the journal's read/write model can be exercised
+    /// in unit tests; it must NOT be read as durability evidence.
+    signing_records: RwLock<HashMap<Vec<u8>, Vec<u8>>>,
 }
+
+/// Run 422 D7-D10 — MODEL signing-journal backing store for
+/// `InMemoryConsensusStorage`. It provides NO power-loss durability; the synced
+/// write simply updates the in-memory map. It exists only for unit/model tests
+/// and must never masquerade as a durable production backend.
+impl crate::signing_reservation_journal::SigningJournalStorage for InMemoryConsensusStorage {
+    fn get_signing_record(&self, key: &[u8]) -> Result<Option<Vec<u8>>, StorageError> {
+        let map = self
+            .signing_records
+            .read()
+            .map_err(|e| StorageError::Other(format!("lock poisoned: {}", e)))?;
+        Ok(map.get(key).cloned())
+    }
+
+    fn put_signing_record_synced(&self, key: &[u8], value: &[u8]) -> Result<(), StorageError> {
+        let mut map = self
+            .signing_records
+            .write()
+            .map_err(|e| StorageError::Other(format!("lock poisoned: {}", e)))?;
+        map.insert(key.to_vec(), value.to_vec());
+        Ok(())
+    }
+}
+
 
 impl InMemoryConsensusStorage {
     /// Create a new empty in-memory storage.
