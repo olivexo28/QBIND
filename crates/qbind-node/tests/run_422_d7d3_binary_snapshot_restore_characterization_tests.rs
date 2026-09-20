@@ -930,6 +930,28 @@ const M_D7D8_LOCK_ACQUIRED: &str =
 const M_D7D8_LOCK_CONTENDED: &str =
     "could not acquire the advisory exclusive destination lock";
 
+/// **Run 422 D7-D8 (Correction A).** The ordinary-startup guard refusal for a
+/// present-but-unreadable RTR — the RefuseInvalid arm surfaced by `main.rs`. A
+/// final-component symlink at the authoritative RTR pathname fails the
+/// `O_NOFOLLOW` open and reaches this refusal (never treated as absence).
+const M_D7D8_ORDINARY_INVALID_RTR: &str =
+    "ordinary-startup guard: the restore-transaction record at";
+
+/// **Run 422 D7-D8 (Correction A).** The requested-restore precondition refusal
+/// for a present-but-unreadable existing RTR — the RefuseInvalid arm surfaced by
+/// `main.rs` before any restore mutation. A dangling final-component symlink at
+/// the authoritative RTR pathname reaches this refusal.
+const M_D7D8_RESTORE_INVALID_RTR: &str =
+    "the existing restore-transaction record at";
+
+/// **Run 422 D7-D8 (Correction A).** The specific RTR no-follow open refusal
+/// substring emitted by `restore_completion::read_rtr` (via
+/// `open_regular_final_record`) when the authoritative final component cannot be
+/// opened as a regular file — e.g. an `O_NOFOLLOW` open of a symlink fails with
+/// `ELOOP`. Asserting this substring proves the refusal is the RTR-read/open
+/// refusal, not some other invalid-record diagnostic.
+const M_RTR_OPEN_REFUSED: &str = "cannot open RTR";
+
 /// Base argv for a restore-driven LocalMesh DevNet start against a fresh
 /// data dir. No `--genesis-path` is supplied, so the binary takes the legacy
 /// `apply_snapshot_restore_if_requested` path (no authority-marker context)
@@ -3470,6 +3492,22 @@ fn run_correction_b_matrix(
         "[{tag}] the valid case must leave a real RocksDB restored database (CURRENT present)"
     );
 
+    // Retain the ACTUAL binary-produced COMPLETE record. Every negative case
+    // below re-reads the authoritative RTR and compares it against this retained
+    // historical COMPLETE (a failed/refused ordinary start must never rewrite,
+    // promote, or remove the completion record).
+    let rtr_complete = match read_rtr(data_dir.path()).expect("read RTR after genuine COMPLETE") {
+        RtrReadResult::Present(rec) => {
+            assert_eq!(
+                rec.state,
+                RtrState::Complete,
+                "[{tag}] phase 1 must leave a final COMPLETE record"
+            );
+            rec
+        }
+        other => panic!("[{tag}] expected a COMPLETE RTR after phase 1, got {other:?}"),
+    };
+
     let ordinary_args = apply_profile(ordinary_localmesh_args(data_dir.path()));
 
     // Helper: run an ordinary startup that must fail closed with a specific
@@ -3477,6 +3515,19 @@ fn run_correction_b_matrix(
     // replacement DB was initialized (a fresh RocksDB would create a CURRENT);
     // it is disabled only for the invalid case, whose fixture deliberately
     // supplies a (bogus) CURRENT that must be preserved rather than absent.
+    //
+    // The common negative-case assertions live HERE so EVERY negative case
+    // receives them (not only the cases that inspect the returned stderr):
+    //
+    //   * natural exit code 1 + complete capture before any absence claim;
+    //   * the specific refusal marker;
+    //   * no successful protected-account admission markers (neither the VM-v0
+    //     runtime-open line NOR the non-runtime existing-database validation
+    //     line);
+    //   * no LocalMesh/consensus dispatch and no actual consensus-loop-start;
+    //   * neither INTENT nor COMPLETE republished;
+    //   * the authoritative RTR still equals the retained historical COMPLETE;
+    //   * no replacement database initialized (unless the fixture supplies one).
     let run_negative = |phase: &str, expect_marker: &str, expect_no_current: bool| -> String {
         log_executable_provenance(&format!("D7D8-B-{tag}-{phase}"), &ordinary_args);
         let (status, stderr, capture) = {
@@ -3499,6 +3550,43 @@ fn run_correction_b_matrix(
             stderr.contains(expect_marker),
             "[{tag}/{phase}] expected specific refusal {expect_marker:?}; stderr=\n{stderr}"
         );
+        // No successful protected-account admission marker for EITHER profile:
+        // neither the VM-v0 runtime-open line nor the non-runtime existing-DB
+        // validation-success line may appear on a refused start.
+        for admitted in [M_VM_V0_OPENED, M_VM_V0_VALIDATED_NONRUNTIME] {
+            assert!(
+                !stderr.contains(admitted),
+                "[{tag}/{phase}] a refused start must NOT emit a protected-account admission \
+                 marker {admitted:?}; stderr=\n{stderr}"
+            );
+        }
+        // No LocalMesh/consensus dispatch and no actual consensus-loop start.
+        for dispatched in [M_LOOP_REACHED, M_CONSENSUS_LOOP_STARTED] {
+            assert!(
+                !stderr.contains(dispatched),
+                "[{tag}/{phase}] a refused start must NOT reach consensus dispatch {dispatched:?}; \
+                 stderr=\n{stderr}"
+            );
+        }
+        // Neither INTENT nor COMPLETE republished (an ordinary start is not a
+        // restore and never writes the RTR).
+        for republished in [M_D7D8_INTENT_PUBLISHED, M_D7D8_COMPLETE_PUBLISHED] {
+            assert!(
+                !stderr.contains(republished),
+                "[{tag}/{phase}] a refused ordinary start must NOT republish {republished:?}; \
+                 stderr=\n{stderr}"
+            );
+        }
+        // The authoritative RTR is unchanged — still the retained historical
+        // COMPLETE (re-read independently after the child was reaped).
+        match read_rtr(data_dir.path()).expect("re-read RTR after negative case") {
+            RtrReadResult::Present(rec) => assert_eq!(
+                rec, rtr_complete,
+                "[{tag}/{phase}] the authoritative RTR must remain the retained historical \
+                 COMPLETE (never rewritten/promoted/removed by a refused start)"
+            ),
+            other => panic!("[{tag}/{phase}] the historical COMPLETE RTR must persist, got {other:?}"),
+        }
         // No replacement database was initialized.
         if expect_no_current {
             assert!(
@@ -3684,12 +3772,18 @@ fn d7d8_a_complete_then_ordinary_restart_preserves_state() {
     }
 
     // ---- Phase 2: ordinary restart (no restore flag) over the completed dir.
+    // Observe PAST the VM-v0 open through the consensus-loop-start boundary
+    // while the child remains alive, so the evidence covers the later baseline
+    // boundary rather than stopping at M_VM_V0_OPENED.
     let ordinary_args = with_vm_v0_profile(ordinary_localmesh_args(data_dir.path()));
     log_executable_provenance("D7D8-A-restart-phase2", &ordinary_args);
     let stderr2 = {
         let mut child = DrainedChild::spawn(&ordinary_args);
         child
-            .observe_then_terminate(&[M_VM_V0_OPENED], POSITIVE_DEADLINE)
+            .observe_then_terminate(
+                &[M_VM_V0_OPENED, M_CONSENSUS_LOOP_STARTED],
+                POSITIVE_DEADLINE,
+            )
             .expect_observed_then_terminated("D7D8-A-restart-phase2")
     };
     maybe_dump_child_stderr("D7D8-A-restart-phase2", &stderr2);
@@ -3703,6 +3797,16 @@ fn d7d8_a_complete_then_ordinary_restart_preserves_state() {
     assert!(
         stderr2.contains(M_VM_V0_MODE_EXISTING),
         "ordinary restart over a COMPLETE must open existing-only; stderr=\n{stderr2}"
+    );
+    // The restart is observed through the consensus-loop-start boundary, and the
+    // running loop confirms NO snapshot baseline was applied
+    // (`restore_baseline=false`) — the historical snapshot baseline/epoch is not
+    // reapplied over the advanced state.
+    assert_marker_order(&stderr2, &[M_VM_V0_OPENED, M_CONSENSUS_LOOP_STARTED]);
+    assert!(
+        stderr2.contains("restore_baseline=false"),
+        "the ordinary restart's consensus-loop-start line must report \
+         restore_baseline=false (no baseline reapplied); stderr=\n{stderr2}"
     );
     // An ordinary restart is NOT a restore: it must republish NEITHER INTENT NOR
     // COMPLETE, and must NOT reapply the historical snapshot baseline/epoch.
@@ -4012,4 +4116,241 @@ fn d7d8_c_destination_lock_contention_death_and_reacquire() {
         "the tracked INTENT must be preserved (never auto-promoted or removed)"
     );
     assert!(lock_path.exists(), "the lock file must persist after the INTENT refusal");
+}
+
+// ============================================================================
+// Run 422 D7-D8 (Correction A) — release-binary dangling-RTR symlink refusal.
+//
+// The accepted symlink/absence UNIT cases live in `restore_completion::tests`
+// (final-component symlink to a valid regular file refused + preserved;
+// dangling final-component symlink refused + preserved; regular RTR read
+// normally; genuine absence; non-regular files refused) and exercise the reader
+// and precondition functions in-process. They are NOT duplicated here.
+//
+// This section adds the missing INTEGRATION coverage: the SAME dangling
+// final-component RTR symlink is placed at the authoritative pathname and the
+// unmodified release executable is launched through BOTH the ordinary-startup
+// and requested-restore paths using the existing runner, binary selector,
+// snapshot fixtures, and startup markers. `symlink_metadata` (never
+// `Path::exists()` alone, which follows the link) inspects the link entry;
+// protected-artifact absence is checked BEFORE any accessor that could create
+// them. The preparatory advisory lock file (§5.5) and the early
+// consensus-storage open are permitted preparatory artifacts and are NOT
+// misreported as protected account-state materialization; whole-directory byte
+// identity is never asserted.
+// ============================================================================
+
+/// **Run 422 D7-D8 (Correction A) — case A (ordinary startup).** A dangling
+/// final-component symlink at the authoritative RTR pathname must make an
+/// ORDINARY (no-flag) startup of the release executable fail closed with the
+/// specific RTR-read/ordinary-startup refusal (natural exit 1), without any
+/// successful protected-account admission or consensus dispatch. The symlink is
+/// preserved (still a symlink) and its missing target is never created.
+#[test]
+fn d7d8_d_ordinary_startup_refuses_dangling_rtr_symlink_via_binary() {
+    let data_dir = tempdir().expect("tempdir");
+    let rtr = data_dir.path().join(RTR_FILENAME);
+    let missing_target = data_dir.path().join("missing_rtr_target");
+    // A DANGLING final-component symlink: a directory entry exists at the
+    // authoritative RTR pathname, but its target is absent. This is NOT
+    // ordinary absence (no directory entry); the `O_NOFOLLOW` open must refuse.
+    std::os::unix::fs::symlink(&missing_target, &rtr).expect("create dangling RTR symlink");
+    // Inspect the link with `symlink_metadata` (Path::exists would follow it and
+    // report "missing" for a dangling link, hiding the entry).
+    assert!(
+        std::fs::symlink_metadata(&rtr)
+            .expect("link entry must exist")
+            .file_type()
+            .is_symlink(),
+        "the authoritative RTR pathname must start as a symlink"
+    );
+    assert!(
+        std::fs::symlink_metadata(&missing_target).is_err(),
+        "the symlink target must be genuinely absent (dangling)"
+    );
+    // Protected-artifact absence BEFORE launch (nothing that an accessor could
+    // create should exist yet).
+    let state_dir = data_dir.path().join(VM_V0_STATE_SUBDIR);
+    assert!(
+        std::fs::symlink_metadata(&state_dir).is_err(),
+        "no protected VM-v0 state may exist before launch"
+    );
+
+    let args = ordinary_localmesh_args(data_dir.path());
+    log_executable_provenance("D7D8-D-ordinary-symlink", &args);
+    let (status, stderr, capture) = {
+        let mut child = DrainedChild::spawn(&args);
+        let status = child.wait_natural_exit(NEGATIVE_DEADLINE);
+        (status, child.stderr_snapshot(), child.stderr_capture())
+    };
+    maybe_dump_child_stderr("D7D8-D-ordinary-symlink", &stderr);
+
+    // Natural exit 1 with the SPECIFIC ordinary-startup RTR-read refusal, and a
+    // COMPLETE capture required BEFORE any absence assertion.
+    assert_eq!(
+        status.code(),
+        Some(1),
+        "a dangling RTR symlink must make ordinary startup fail closed with exit 1; \
+         stderr=\n{stderr}"
+    );
+    assert!(
+        capture.is_complete(),
+        "stderr capture must be complete before absence assertions; got {capture:?}"
+    );
+    assert!(
+        stderr.contains(M_D7D8_ORDINARY_INVALID_RTR),
+        "the refusal must be the ordinary-startup RTR-invalid guard; stderr=\n{stderr}"
+    );
+    assert!(
+        stderr.contains(M_RTR_OPEN_REFUSED),
+        "the refusal must specifically be the RTR no-follow open refusal; stderr=\n{stderr}"
+    );
+    // No successful protected-account admission and no consensus dispatch.
+    for forbidden in [
+        M_VM_V0_OPENED,
+        M_VM_V0_VALIDATED_NONRUNTIME,
+        M_D7D8_GUARD_PROCEED_COMPLETE,
+        M_LOOP_REACHED,
+        M_CONSENSUS_LOOP_STARTED,
+    ] {
+        assert!(
+            !stderr.contains(forbidden),
+            "a refused symlink start must NOT emit {forbidden:?}; stderr=\n{stderr}"
+        );
+    }
+    // The link itself is preserved (still a symlink, not followed/replaced/
+    // removed) and its missing target was never created — proven via
+    // `symlink_metadata`, not `Path::exists()`.
+    let link_meta = std::fs::symlink_metadata(&rtr).expect("link entry must still exist");
+    assert!(
+        link_meta.file_type().is_symlink(),
+        "the authoritative RTR pathname must remain a symlink (reader must not rewrite it)"
+    );
+    assert!(
+        std::fs::symlink_metadata(&missing_target).is_err(),
+        "the dangling symlink target must NOT have been created"
+    );
+    // No protected restored database was materialized (the preparatory advisory
+    // lock file is permitted and is deliberately NOT asserted absent).
+    assert!(
+        std::fs::symlink_metadata(state_dir.join("CURRENT")).is_err(),
+        "a refused symlink start must NOT materialize a restored database"
+    );
+}
+
+/// **Run 422 D7-D8 (Correction A) — case B (requested restoration).** With a
+/// valid snapshot and otherwise-compatible destination, a dangling
+/// final-component symlink at the authoritative RTR pathname must make a
+/// requested restore (`--restore-from-snapshot`) fail closed at the RTR
+/// precondition/read with the specific refusal (natural exit 1), publishing no
+/// INTENT/COMPLETE, materializing no account state, writing no restore audit
+/// marker, applying no baseline, and dispatching no consensus. The symlink is
+/// preserved and its missing target is never created.
+#[test]
+fn d7d8_d_requested_restore_refuses_dangling_rtr_symlink_via_binary() {
+    let chain_id = devnet_chain_id();
+    let src = tempdir().expect("tempdir");
+    let snap_root = tempdir().expect("tempdir");
+    let data_dir = tempdir().expect("tempdir");
+    // A genuinely VALID snapshot: the refusal must come from the RTR precondition,
+    // NOT from an invalid snapshot.
+    let snapshot_dir = snap_root.path().join("snap-d-restore-symlink");
+    build_real_snapshot(src.path(), &snapshot_dir, chain_id, 240, 4242, Some(7));
+
+    let rtr = data_dir.path().join(RTR_FILENAME);
+    let missing_target = data_dir.path().join("missing_rtr_target");
+    std::os::unix::fs::symlink(&missing_target, &rtr).expect("create dangling RTR symlink");
+    assert!(
+        std::fs::symlink_metadata(&rtr)
+            .expect("link entry must exist")
+            .file_type()
+            .is_symlink(),
+        "the authoritative RTR pathname must start as a symlink"
+    );
+    assert!(
+        std::fs::symlink_metadata(&missing_target).is_err(),
+        "the symlink target must be genuinely absent (dangling)"
+    );
+    // Protected/audit-artifact absence BEFORE launch.
+    let state_dir = data_dir.path().join(VM_V0_STATE_SUBDIR);
+    let restore_marker = data_dir.path().join(RESTORE_MARKER_FILENAME);
+    assert!(
+        std::fs::symlink_metadata(&state_dir).is_err(),
+        "no restored VM-v0 state may exist before launch"
+    );
+    assert!(
+        std::fs::symlink_metadata(&restore_marker).is_err(),
+        "no restore audit marker may exist before launch"
+    );
+
+    let args = restore_localmesh_args(data_dir.path(), &snapshot_dir);
+    log_executable_provenance("D7D8-D-restore-symlink", &args);
+    let (status, stderr, capture) = {
+        let mut child = DrainedChild::spawn(&args);
+        let status = child.wait_natural_exit(NEGATIVE_DEADLINE);
+        (status, child.stderr_snapshot(), child.stderr_capture())
+    };
+    maybe_dump_child_stderr("D7D8-D-restore-symlink", &stderr);
+
+    assert_eq!(
+        status.code(),
+        Some(1),
+        "a dangling RTR symlink must make a requested restore fail closed with exit 1; \
+         stderr=\n{stderr}"
+    );
+    assert!(
+        capture.is_complete(),
+        "stderr capture must be complete before absence assertions; got {capture:?}"
+    );
+    assert!(
+        stderr.contains(M_D7D8_RESTORE_INVALID_RTR),
+        "the refusal must be the requested-restore RTR precondition (invalid/unreadable); \
+         stderr=\n{stderr}"
+    );
+    assert!(
+        stderr.contains(M_RTR_OPEN_REFUSED),
+        "the refusal must specifically be the RTR no-follow open refusal; stderr=\n{stderr}"
+    );
+    // No INTENT/COMPLETE publication, no materialization/baseline, no dispatch.
+    for forbidden in [
+        M_D7D8_INTENT_PUBLISHED,
+        M_D7D8_COMPLETE_PUBLISHED,
+        M_RESTORE_OK,
+        M_BASELINE_APPLIED,
+        M_VM_V0_OPENED,
+        M_VM_V0_VALIDATED_NONRUNTIME,
+        M_LOOP_REACHED,
+        M_CONSENSUS_LOOP_STARTED,
+    ] {
+        assert!(
+            !stderr.contains(forbidden),
+            "a refused restore over a symlinked RTR must NOT emit {forbidden:?}; stderr=\n{stderr}"
+        );
+    }
+    // The link is preserved and its missing target remains absent.
+    let link_meta = std::fs::symlink_metadata(&rtr).expect("link entry must still exist");
+    assert!(
+        link_meta.file_type().is_symlink(),
+        "the authoritative RTR pathname must remain a symlink (precondition must not rewrite it)"
+    );
+    assert!(
+        std::fs::symlink_metadata(&missing_target).is_err(),
+        "the dangling symlink target must NOT have been created"
+    );
+    // No restored account state materialized and no restore audit marker written
+    // (the preparatory advisory lock file is permitted and NOT asserted absent).
+    assert!(
+        std::fs::symlink_metadata(state_dir.join("CURRENT")).is_err(),
+        "a refused restore must NOT materialize a restored account database"
+    );
+    assert!(
+        std::fs::symlink_metadata(&restore_marker).is_err(),
+        "a refused restore must NOT write a restore audit marker"
+    );
+    // The RTR pathname holds no valid record — reading it is a refusal, never a
+    // spuriously-published INTENT/COMPLETE.
+    assert!(
+        read_rtr(data_dir.path()).is_err(),
+        "reading the symlinked RTR must remain a refusal (no record was published)"
+    );
 }

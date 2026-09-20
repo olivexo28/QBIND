@@ -91,15 +91,27 @@ remaining implementation and durability-evidence obligations).
 > `vm_v0_runtime.rs`, and `qbind-ledger/src/execution.rs`; and the release-binary
 > integration target
 > `crates/qbind-node/tests/run_422_d7d3_binary_snapshot_restore_characterization_tests.rs`.
-> Through the release binary the following were executed: profile-independent
+> Through the release binary the following were executed: a **dangling
+> final-component RTR symlink refused through BOTH the ordinary-startup and the
+> requested-restore paths** (the specific RTR no-follow open refusal
+> `cannot open RTR`, natural exit 1, complete capture, the link and its missing
+> target preserved and inspected via `symlink_metadata`, and no protected-account
+> admission, no consensus dispatch, and — on the restore path — no
+> INTENT/COMPLETE publication, no account-state materialization, and no restore
+> audit-marker creation); profile-independent
 > COMPLETE admission/refusal across **both** execution profiles (VM-v0 and the
 > non-VM-v0 `nonce-only`) over the valid / missing-directory / empty-directory /
 > unrelated-only / invalid-unopenable database states (each negative case asserts
 > a natural nonzero exit with the specific refusal, complete stderr capture before
-> any forbidden-marker absence assertion, no replacement-DB initialization, and
-> preserved sentinel/RTR evidence); completion followed by **fixture-driven**
+> any forbidden-marker absence assertion, no successful protected-account
+> admission marker, no consensus dispatch, neither INTENT nor COMPLETE
+> republished, the authoritative RTR re-read equal to the retained historical
+> COMPLETE, no replacement-DB initialization, and preserved sentinel/RTR
+> evidence); completion followed by **fixture-driven**
 > account and consensus-epoch advancement to distinct values, then an ordinary
-> restart that preserves the advanced account value and advanced epoch,
+> restart — **observed through the consensus-loop-start boundary reporting
+> `restore_baseline=false`** — that preserves the advanced account value and
+> advanced epoch,
 > reapplies neither the historical snapshot baseline nor its epoch, republishes
 > **neither INTENT nor COMPLETE**, and leaves the authoritative RTR as the same
 > historical completion record; occupied-refusal→ordinary-restart with the
@@ -814,14 +826,25 @@ database initialized); and
 `d7d8_a_complete_then_ordinary_restart_preserves_state` (completion, then
 **fixture-driven** advancement of the account and consensus epoch to distinct
 values, then an ordinary restart that is admitted through the valid `COMPLETE`,
-opens existing-only, republishes **neither INTENT nor COMPLETE**, reapplies
+opens existing-only, is **observed through the consensus-loop-start boundary
+reporting `restore_baseline=false`**, republishes **neither INTENT nor
+COMPLETE**, reapplies
 neither the historical snapshot baseline nor its epoch, and preserves the
 **advanced** account value and advanced epoch, with the authoritative RTR
 unchanged). The final-component symlink refusal (Correction A of this task) is
 exercised at unit level through the real reader in `restore_completion.rs`
 (symlink→valid-RTR refused, dangling symlink refused, both preserved via
 `symlink_metadata`, genuine-absence control) and through the ordinary-startup and
-requested-restore preconditions. `d7d8_c_destination_lock_contention_death_and_reacquire`
+requested-restore preconditions, **and at the release-binary integration level**
+through `d7d8_d_ordinary_startup_refuses_dangling_rtr_symlink_via_binary` and
+`d7d8_d_requested_restore_refuses_dangling_rtr_symlink_via_binary` (a dangling
+final-component RTR symlink at the authoritative pathname refused on BOTH the
+ordinary-startup and requested-restore release paths — specific `cannot open RTR`
+refusal, natural exit 1, complete capture, link/target preserved via
+`symlink_metadata`, and no admission/dispatch/INTENT/COMPLETE/materialization/
+audit-marker), with `d7d4_c_fresh_directory_ordinary_start_control` reused as the
+genuine-absence positive control.
+`d7d8_c_destination_lock_contention_death_and_reacquire`
 keeps the holder alive during contention, requires the contender's specific
 lock-contention refusal with complete capture, terminates the holder through the
 classified deliberate-SIGKILL path (successful kill, expected signal, completed
