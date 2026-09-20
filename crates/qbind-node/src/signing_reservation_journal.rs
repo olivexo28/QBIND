@@ -648,6 +648,17 @@ struct LiveState {
 struct DomainInner {
     /// Positions with a live operation in this process.
     live: HashMap<SigningPosition, LiveState>,
+    /// Run 422 D7-D10 Correction B — recovery-acknowledgement cache. After a
+    /// recovered (no live entry) `Signed` record has had its signing-record
+    /// durability barrier established in THIS domain (an identical synced re-write
+    /// that returned `Ok`), the exact acknowledged record is retained here keyed
+    /// by position. This is deliberately bound to the EXACT stored record (the
+    /// full `SigningDecisionRecord`, position + binding + retained bytes): a cache
+    /// hit authorizes an exact retained resend of ONLY that record. It is never a
+    /// generic "position acknowledged" flag and can never authorize a different,
+    /// conflicting, or later-mutated record. It grants no signer-invocation and no
+    /// result-publication capability.
+    recovered_acked: HashMap<SigningPosition, SigningDecisionRecord>,
     /// Count of distinct new positions reserved in this domain (exhaustion
     /// accounting, checked arithmetic).
     reserved_positions: u64,
@@ -669,6 +680,7 @@ impl SigningOwnershipDomain {
             token: NEXT_TOKEN.fetch_add(1, Ordering::Relaxed),
             inner: Mutex::new(DomainInner {
                 live: HashMap::new(),
+                recovered_acked: HashMap::new(),
                 reserved_positions: 0,
                 next_operation_id: 1,
             }),
@@ -782,20 +794,29 @@ impl SigningReservationJournal {
             }
             return match record.stage {
                 SigningRecordStage::Signed => {
-                    let sig = record.retained_signature.ok_or_else(|| {
+                    let sig = record.retained_signature.clone().ok_or_else(|| {
                         JournalError::Corruption(
                             "signed record missing retained signature".to_string(),
                         )
                     })?;
-                    // Correction C uncertainty rule: within THIS process, a live
-                    // operation whose result write has NOT been durably
-                    // acknowledged must not have its readable `Signed` bytes
-                    // presented as a clean retained resend. A recovered record
-                    // (no live entry) or an acknowledged result is a genuine
-                    // exact-retry resend.
-                    match inner.live.get(position) {
-                        Some(ls) if !ls.result_acked => Ok(ReservationOutcome::PotentiallySigned),
-                        _ => Ok(ReservationOutcome::ExactRetryRetained(sig)),
+                    // Correction C uncertainty rule + Correction B recovery
+                    // acknowledgement. Within THIS process:
+                    //   * a live operation whose result write has NOT been durably
+                    //     acknowledged must not have its readable `Signed` bytes
+                    //     presented as a clean retained resend (`PotentiallySigned`);
+                    //   * a live operation with an established acknowledgement is a
+                    //     genuine in-process fast path (`ExactRetryRetained`);
+                    //   * a recovered record (no live entry) must not silently equate
+                    //     "readable bytes" with a durability acknowledgement — an
+                    //     explicit signing-record durability barrier is established
+                    //     BEFORE any retained resend is offered.
+                    let live_acked = inner.live.get(position).map(|ls| ls.result_acked);
+                    match live_acked {
+                        Some(false) => Ok(ReservationOutcome::PotentiallySigned),
+                        Some(true) => Ok(ReservationOutcome::ExactRetryRetained(sig)),
+                        None => self
+                            .acknowledge_recovered_signed(&mut inner, position, &key, &bytes, record)
+                            .map(|()| ReservationOutcome::ExactRetryRetained(sig)),
                     }
                 }
                 // A durable `Reserved` record never yields a fresh live
@@ -845,6 +866,48 @@ impl SigningReservationJournal {
             binding: *binding,
             operation_id,
         }))
+    }
+
+    /// Run 422 D7-D10 Correction B — establish the signing-record durability
+    /// barrier for a **recovered** `Signed` record (one with no live operation in
+    /// this process) BEFORE its retained result may be resent.
+    ///
+    /// Reading valid `Signed` bytes after reopening establishes only record
+    /// availability and structural validity; it is NOT, by itself, a durability
+    /// acknowledgement. This helper closes that gap under the ownership-domain
+    /// lock already held by the caller:
+    ///
+    /// * If the exact record has already been acknowledged in THIS domain (a
+    ///   cache hit bound to the identical record), the barrier is satisfied.
+    /// * Otherwise the identical stored bytes are reissued through the existing
+    ///   synced-write operation (the signing-record durability op, not an
+    ///   unrelated epoch write). Only on `Ok` is the acknowledgement cached and
+    ///   the retained resend permitted; a failed or uncertain write returns `Err`
+    ///   and suppresses retained-result delivery. Retrying re-issues the durable
+    ///   write; it never invokes the signer and never mints a continuation or a
+    ///   publication capability.
+    ///
+    /// The reissued bytes are the exact validated record already confirmed to
+    /// match `position`/`binding`; a conflicting, malformed, missing, or
+    /// differently-associated record is rejected before this point and never
+    /// overwritten.
+    fn acknowledge_recovered_signed(
+        &self,
+        inner: &mut DomainInner,
+        position: &SigningPosition,
+        key: &[u8],
+        bytes: &[u8],
+        record: SigningDecisionRecord,
+    ) -> Result<(), JournalError> {
+        // A cached acknowledgement authorizes ONLY the exact identical record.
+        if inner.recovered_acked.get(position) == Some(&record) {
+            return Ok(());
+        }
+        // Establish the barrier by reissuing the identical stored record through
+        // the synced write. Failure/uncertainty ⇒ Err ⇒ no delivery, no cache.
+        self.store.put_signing_record_synced(key, bytes)?;
+        inner.recovered_acked.insert(*position, record);
+        Ok(())
     }
 
     /// Consume the live [`SigningContinuation`] immediately BEFORE invoking the
@@ -924,6 +987,19 @@ impl SigningReservationJournal {
                 len: signature.len(),
                 max: MAX_RETAINED_SIGNATURE_LEN,
             });
+        }
+        // Run 422 D7-D10 Correction A — reject a structurally invalid empty result
+        // at the checked publication boundary, BEFORE writing a `Signed` record or
+        // recording any acknowledgement. An empty signature encodes to a record the
+        // decoder immediately rejects (a `Signed` record must carry a signature),
+        // so accepting it would report a successful publication for bytes that can
+        // never be read back. The original reserved record and its conflict
+        // obligation are preserved (no write occurs), no continuation is granted,
+        // and no publication is reported.
+        if signature.is_empty() {
+            return Err(JournalError::InvalidResultPublication(
+                "refusing to publish a structurally invalid empty signed result".to_string(),
+            ));
         }
         // Hold the domain lock across the read-validate-write so publication is a
         // checked transition and concurrent supported handles cannot alter the
