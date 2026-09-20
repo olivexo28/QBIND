@@ -8166,11 +8166,17 @@ evidence are reused as inputs, not re-derived or re-run.
   `admit_cached_reemission` → sign → confirm cycle and does **not** pass through
   `forward_actions_to_facade`.
 * Conflict rule DERIVED from HotStuff decision rules. The canonical position key
-  is the **stable validator identity + kind (Proposal vs Vote) + engine view**;
-  for the founding-authority profile the engine sets `height = round = view`,
-  `step = 0`, so height/round/step are **checked redundant encodings** of the view
-  (correspondence enforced **before** lookup), **not** independent coordinates and
-  **not** "committed height." Current key / suite / message version / authority
+  is the **stable validator identity + kind (Proposal vs Vote) + the action's
+  originating consensus view** — the view captured when the action was built
+  (`on_leader_step` captures `view = self.current_view`, then `advance_view()` at
+  L1577 runs **before** the actions are returned at L1581–1584), **never** recomputed
+  from a later `engine.current_view()`. For the founding-authority profile a
+  `BlockProposal`/`BlockHeader` sets `height = round = view` with **no step field**,
+  and a `Vote` sets `height = round = view`, `step = 0`, so height/round (and a
+  Vote's step) are **checked redundant encodings** of the originating view
+  (correspondence enforced **before** lookup), **not** independent coordinates,
+  **not** "committed height," and never filled from an embedded QC's own
+  height/round/step. Current key / suite / wire-message version / authority
   commitment / owner generation are **exact-message bindings**, not namespace
   selectors: a validated rotation does not open a new namespace or erase a conflict
   obligation (rotation/epoch continuity is explicitly gated). A new process / owner
@@ -8299,3 +8305,43 @@ is required for these Markdown-only changes and none is claimed. D7-D8's accepte
 verdict and all earlier results are preserved at their actual revisions and not
 re-run. `D7D9_SIGNING_STATE_CONTINUITY_CONTRACT=DEFINED-NOT-IMPLEMENTED` is
 retained and is not equated with review acceptance.
+
+### D7-D9 correction pass 2 (originating-view binding and message/version field mapping)
+
+Documentation-only; no execution evidence added and none relabelled. Re-verified
+against the actual worktree (branch `copilot/copilotcopilotrun-422-d7-d9`; the
+reviewed-final object named by the task is ABSENT from this shallow clone, so
+correspondence is asserted against worktree content, not ancestry). Two remaining
+specification issues in the continuity contract were corrected in place:
+
+* **Originating-view binding.** Reservations are bound to the action's originating
+  consensus view, not a later `engine.current_view()`. Source re-confirmed:
+  `on_leader_step` captures `view = self.current_view`
+  (`basic_hotstuff_engine.rs:1443`), builds the `BlockProposal` + self-`Vote` for
+  that `view`, may form a QC from the self-vote, and calls `advance_view()` (L1577)
+  **before returning** the already-constructed actions (L1581–1584) — so a returned
+  action can carry view `V` while the engine already sits at `V+1`. The contract now
+  reads the reserved position from the action and its provenance (and, for inbound
+  decisions, the `ingest_proposal` view at L1732), never from a newer `current_view`,
+  and keeps decision identity separate from send-time eligibility; cached
+  re-emission provenance rules are preserved (contract §3.2, §3.3, §7.1, §7.4-E).
+* **Message/version field mapping.** The earlier recital that "every Proposal and
+  Vote sets `height = round = view`, `step = 0`" (citing L1522–1524, which is the
+  **embedded QC**) is corrected: a `BlockProposal`/`BlockHeader` has **no step**
+  (L1500–1504); only a `Vote` has `step` (`= 0`, L1557–1559 / L1833–1835); an
+  embedded `QuorumCertificate` has its own height/round/step (L1522–1524) certifying
+  its own position and is never substituted for the Proposal. Three independent
+  versions are now separated: **wire-message version** (`BlockHeader.version` /
+  `Vote.version` = `1`), **D6 signing-format version** (`ProposalVoteSigningDomainV2`
+  byte `2`, which does **not** imply wire version 2), and the **journal-record
+  format version** (persistence-only). The field-classification table's ambiguous
+  "engine view (`current_view` / `ingest_proposal` view)" and
+  "message version — pinned domain (v2)" rows are replaced with concrete,
+  separately-sourced rows (contract §3.2, §3.3, §7.1, §7.4-F).
+
+Secret scan re-run over the changed documentation paths; outcome — no secrets
+detected (Markdown protocol/evidence text only). No Cargo/Clippy/release rebuild is
+required for these Markdown-only changes and none is claimed. D7-D8's accepted
+verdict and all earlier results are preserved at their actual revisions and not
+re-run. `D7D9_SIGNING_STATE_CONTINUITY_CONTRACT=DEFINED-NOT-IMPLEMENTED` is retained
+and is not equated with review acceptance.
