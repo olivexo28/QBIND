@@ -8649,3 +8649,172 @@ SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO
 
 C4/C5 remain OPEN. No PR beyond the task branch, no production activation, no D11,
 no Run 423 work.
+
+## Run 422 D7-D10 — B/C review follow-up correction (tested checkpoint `d9e625c`)
+
+This subsection **supersedes the specific overclaims** in the immediately
+preceding *Corrections B/C completion pass* block. That block is retained as
+historical evidence; the review found it not yet accepted, so the counts,
+the "bounded `Barrier`" concurrency wording, and the "exactly one facade handoff
+across supported handles" claim there are corrected below. No prior section is
+rewritten.
+
+### Source identity and object availability
+
+* Branch: `copilot/copilotcopilotcopilotrun-422-d7-d10` (the actual checkout;
+  note it differs from the problem statement's `copilot/copilotcopilotrun-422-d7-d10`).
+* Starting HEAD before this pass: `7a60fd6`. Tested/pushed checkpoint for this
+  pass: `d9e625c`.
+* The reviewed revision `048215d9c85f8761733646a5a3905ee347f08ecc` is **not
+  present** in this shallow single-branch clone (`git cat-file` fails); the
+  implementation was inspected and corrected directly. This is a content-
+  correspondence review, not an ancestry check; unavailable historical objects
+  are not treated as missing source. `task/warning.txt` and unrelated work are
+  preserved.
+
+### Findings confirmed at the reviewed implementation (before correction)
+
+1. **Empty result permitted at publication.** `record_signed_result` checked the
+   maximum signature length but accepted an empty signature; `encode()` succeeded
+   while `decode()` immediately rejected the resulting `Signed` record. A
+   "successful" publication therefore wrote bytes the decoder could never read
+   back.
+2. **Recovered result had no durability barrier.** A live *unacknowledged* result
+   was withheld, but an otherwise identical recovered `Signed` record with no live
+   entry (after reopening) yielded `ExactRetryRetained` immediately. This is an
+   unclosed acknowledgement contract and acceptance-test gap — **not** an observed
+   RocksDB data-loss event.
+3. **Concurrency was start-barrier-only.** A `Barrier::new(2)` start gate did not
+   force the contender to observe an outstanding reservation; one thread could
+   finish publication before the other reserved, permitting a legitimate retained
+   resend and two handoffs with a single signer invocation.
+
+### Corrections landed this pass
+
+* **A (empty-result refusal at the publication boundary).** `record_signed_result`
+  now rejects an empty signature with `JournalError::InvalidResultPublication`
+  before any write, alongside the retained oversize refusal. The reserved record
+  and its conflict obligation are preserved, no continuation or publication
+  capability is minted, and no successful publication is reported. Before/after
+  the failed attempt the stored bytes are unchanged and decode as the original
+  valid **reserved** record; an exact retry remains potentially signed and a
+  conflicting binding remains refused (asserted in
+  `empty_result_publication_refused_and_preserves_reservation` and, over real
+  RocksDB, `empty_result_publication_refused_over_real_storage`).
+* **B (recovered-result durability barrier).** Under the ownership-domain lock the
+  journal reads and validates the exact stored `Signed` record and reissues that
+  identical record through the existing signing-record synced-write operation
+  (`acknowledge_recovered_signed`); `ExactRetryRetained` is returned **only after**
+  that write succeeds. A failed/uncertain barrier returns an error and suppresses
+  retained-result delivery; retrying re-issues the durable write and never invokes
+  the signer or mints a capability. Success caches the acknowledgement bound to the
+  exact record (`recovered_acked`, keyed by position and compared on the full
+  record) so a differently-associated record cannot be authorized by a cache hit.
+  A recovered `Reserved` record stays `PotentiallySigned`; conflicting/malformed/
+  missing/mismatched records fail closed before any recovery re-publication and are
+  never overwritten.
+* **C (deterministic controlled-schedule concurrency).** The start-barrier is
+  replaced by a test-controlled `SignGate` (Condvar). Two supported handles share
+  one backend; the winner durably reserves, obtains its continuation, and pauses
+  inside the signer (`PausingSigner`) **without holding the ownership-domain
+  mutex**. The contender then runs against a definitely-outstanding reservation and
+  must return `PotentiallySigned` (same binding) or `Conflict` (different binding).
+  The winner is released and completes. All coordination waits have explicit
+  deadlines (`wait_entered`/`release`, 30s), and the paused worker is released on
+  every path (including failures) before join, so a broken schedule cannot
+  deadlock. Asserted: exactly one fresh continuation, exactly one winner signer
+  invocation, zero contender signer calls, zero contender handoffs during the
+  window, one winner handoff, and preservation of the exact reserved decision and
+  retained result. A **separate** post-publication exact-retry control confirms
+  that a legitimate retained resend after publication costs zero additional signer
+  calls — the resend policy is not weakened to satisfy an incorrect global
+  "one handoff" assertion.
+
+### Uncertainty / recovery model evidence (lost process-local knowledge)
+
+The store-then-error model test drives: durable reservation → one signer call →
+result bytes become readable but publication returns an error → the live ownership
+state is discarded → a **fresh** backend ownership domain is created over the
+surviving model bytes → a retained lookup cannot succeed merely because those bytes
+are readable → a failed recovery durability op still prevents delivery → a later
+successful barrier permits only exact retained reuse with no additional signer
+invocation. Repeated barrier failure remains failure; a conflicting binding remains
+refused without rewrite; a recovered `Reserved` remains potentially signed; a
+previously acknowledged result remains recoverable; a second handle over the same
+live backend cannot bypass an outstanding unacknowledged operation; corruption /
+mismatch fails closed before recovery publication. This is a model of **lost
+process-local knowledge**, not a power-loss test.
+
+### Executed validation (checkpoint `d9e625c`, default + `test-utils` as noted)
+
+* Journal unit tests — `cargo test -p qbind-node --lib signing_reservation_journal`
+  → **25 passed, 0 failed** (incl. the new empty-result and recovery-uncertainty
+  cases). *Supersedes the earlier module counts for this scope.*
+* Colocated D10 handler tests — `cargo test -p qbind-node --lib run422_d7d10`
+  → **22 passed, 0 failed** (controlled contention same-/different-binding, empty-
+  signer facade suppression, post-publication resend control). *Supersedes the
+  earlier "21 passed / bounded `Barrier` / one handoff" wording.*
+* Outbound + cached-reemission regression superset —
+  `cargo test -p qbind-node --lib run422_d7b` → **81 passed, 0 failed**.
+* D10 integration (default features) —
+  `cargo test -p qbind-node --test run_422_d7d10_signing_reservation_journal_tests`
+  → **10 passed, 1 ignored** (incl. empty-result refusal over real RocksDB and the
+  recovery-acknowledgement path over reserve→consume→publish→reopen→exact
+  retrieval).
+* D10 integration (`--features test-utils`) → **11 passed, 1 ignored**.
+* `cargo check -p qbind-node` (default production features) → **Finished** (OK).
+* Focused Clippy (`cargo clippy -p qbind-node --lib`) → no new warnings in the
+  changed regions (`signing_reservation_journal.rs`, the `run422_d7d10` test
+  module). Pre-existing repository-wide warnings (e.g. large `Err` variants) are
+  unchanged and not introduced by this pass.
+* Changed-region formatting/whitespace: all three source files and both docs are
+  **CRLF**; added lines preserve CRLF with no space-before-CR trailing whitespace,
+  and the large handler file was not reformatted. The 1,750-test historical result
+  is **not** rerun here and remains historical; focused counts above are not
+  double-counted into a superset claim.
+
+### Corrected remaining overclaims (still OPEN — not repaired here)
+
+* **Child-process death/reopen is not a bounded, classified process-death test.**
+  `reserved_only_child_death_then_reopen_refuses` still uses an unbounded
+  `.status()` wait and only asserts an unsuccessful exit. It remains OPEN under F;
+  it must not be described as bounded/classified. The "bounded child-process"
+  wording in the preceding historical block is corrected by this statement.
+* **Established-journal initialization and persistent capacity remain OPEN under
+  E.** The current `attach` API opens an established/empty journal with an in-
+  memory live table; it does **not** implement explicit journal initialization
+  versus established-journal opening, nor persistent capacity accounting.
+* **Post-storage original-owner/ticket revalidation remains OPEN under D.**
+* **Correction A (missing-journal signing refusal across all routes) remains OPEN**
+  and is distinct from the empty-result *publication* refusal landed here.
+
+### Security tooling (literal)
+
+Production-source changes (`signing_reservation_journal.rs`) are declared
+**non-trivial** for security tooling; CodeQL was requested with
+`codeql.isTrivial=false`. CodeQL and code-review outcomes are reported literally in
+the session record. A size skip, backend error, or an accompanying "0 alerts / no
+comments" is not treated as a completed security analysis, and tool unavailability
+is left visible without erasing the independently obtained test evidence above.
+
+### Scoped disposition (posture preserved)
+
+Corrections A(empty-result)/B/C and their required model, real-RocksDB, and handler
+evidence are complete for their **demonstrated local scope**. Overall D10 remains
+**PARTIAL** because the missing-journal refusal (A), post-storage revalidation (D),
+initialization/capacity (E), and remaining engine-progress/process-runner work (F)
+are excluded and OPEN. No production activation, readiness promotion, D11, or Run
+423 work is performed; no PR, branch rename, force-push, rebase, or history rewrite.
+
+```
+D7D10_LOCAL_SIGNING_RESERVATION=PARTIAL
+D7D8_RESTORE_COMPLETION_CONTAINMENT=CODE-AND-RELEASE-TEST-POSITIVE
+D7_STATUS=PARTIAL-CODE-TEST / PRODUCTION-LIFECYCLE-UNAVAILABLE
+DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED
+GENESIS_AUTHORITY_ACTIVATION=DISABLED
+PRODUCTION_WIRE_CHAIN_ID_BEHAVIOR=UNCHANGED
+CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED
+SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO
+```
+
+C4/C5 remain OPEN.
