@@ -8792,10 +8792,20 @@ process-local knowledge**, not a power-loss test.
 
 Production-source changes (`signing_reservation_journal.rs`) are declared
 **non-trivial** for security tooling; CodeQL was requested with
-`codeql.isTrivial=false`. CodeQL and code-review outcomes are reported literally in
-the session record. A size skip, backend error, or an accompanying "0 alerts / no
-comments" is not treated as a completed security analysis, and tool unavailability
-is left visible without erasing the independently obtained test evidence above.
+`codeql.isTrivial=false`. Literal outcomes on checkpoint `d9e625c`:
+
+* **CodeQL (rust): analysis SKIPPED** — reported "Found 0 alerts" but with
+  "Analysis was skipped because the database size is too large." A size skip with
+  an accompanying "0 alerts" is **not** a completed security analysis and is not
+  treated as a clean pass.
+* **Code review: tool UNAVAILABLE** — returned "No review comments found" but with
+  an environment error ("model … not found in registry"); no real review analysis
+  was performed.
+
+Tool unavailability is left **visible** and does not erase the independently
+obtained test evidence above (journal 25, handler 22, integration 10+1 / 11+1,
+d7b regression 81, `cargo check` OK). Completed CodeQL/code-review remains an
+outstanding obligation.
 
 ### Scoped disposition (posture preserved)
 
