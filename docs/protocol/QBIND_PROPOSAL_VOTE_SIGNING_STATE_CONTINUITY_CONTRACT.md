@@ -994,7 +994,7 @@ production; the guard engages only when a journal is explicitly wired (tests).
   namespace. Directed and broadcast delivery of one Vote are the same decision;
   a Proposal and a self-Vote at one view are distinct decisions.
 
-### 9.3 Storage namespace, record format, bounds, initialization
+### 9.3 Storage namespace, record format, bounds, attach
 
 * Keyspace `sig:` + `sj:v1:` record-key prefix, disjoint from block/QC/epoch
   keys (unchanged). Record layout: `magic | record-format-version | kind |
@@ -1002,14 +1002,28 @@ production; the guard engages only when a journal is explicitly wired (tests).
   sig_len | sig | crc32` (big-endian, checksum over the body). The checksum is
   corruption detection only — **not** authentication or rollback protection.
 * Bounds: retained signature ≤ 8 KiB, record ≤ bounded max, reservation count
-  budgeted (checked arithmetic; overflow is terminal, never wraparound).
-  Exhaustion **refuses further signing** with no silent eviction of conflict
-  obligations. Decode is fail-closed on malformed/truncated/incompatible/
-  inconsistent input; no allocation from unchecked stored lengths.
-* Initialization is explicit: `attach` never creates, repairs, or converts
-  missing/corrupt established state into an empty usable journal; its in-memory
-  live-permit map starts empty (the crash-recovery posture). Production startup
-  does not initialize a journal.
+  budgeted **per attached handle** (checked arithmetic; overflow is terminal,
+  never wraparound). Exhaustion **refuses further signing** with no silent
+  eviction of conflict obligations. Decode is fail-closed on malformed/
+  truncated/incompatible/inconsistent input; no allocation from unchecked
+  stored lengths.
+* Attach is **not** an initialization step. `attach` only binds a handle to the
+  backend's ownership domain and starts with an empty in-memory live-permit map
+  (the crash-recovery posture): a `Reserved` record already in the store is
+  treated as potentially-signed on the next reservation, and no live
+  continuation is ever minted from it. Specifically, `attach`:
+  * does **not** implement explicit first-time initialization versus
+    established-journal validation (distinguishing a never-initialized keyspace
+    from a valid or a corrupt established journal);
+  * does **not** implement persistent capacity accounting (the reservation
+    budget is a per-handle in-memory bound, not a durable count reconstructed
+    from storage);
+  * therefore does **not** wipe, repair, or convert missing/corrupt established
+    state into an empty usable journal — it simply fails closed on the affected
+    read.
+  Both established-journal initialization/validation and persistent capacity
+  accounting remain **OPEN under E** (see §12). Production startup does **not**
+  initialize a journal.
 
 ### 9.4 Exclusivity, live continuation, recovered-record behavior
 
@@ -1117,17 +1131,45 @@ production; the guard engages only when a journal is explicitly wired (tests).
   **deterministic controlled-schedule** contested reservation — the winner
   durably reserves and pauses inside the signer, holding no ownership-domain mutex,
   while the contender runs against a definitely-outstanding reservation and returns
-  `PotentiallySigned` (same binding) or `Conflict` (different binding); all
-  coordination waits are deadline-bounded and paused workers are always released on
-  every path) → real-RocksDB restart/reopen
+  `PotentiallySigned` (same binding) or `Conflict` (different binding). The
+  test gate returns an **explicit outcome** — `Released`, `TimedOut`, or
+  `Cancelled` — and only an explicit `Released` permits the paused signer to
+  invoke the underlying `LocalKeySigner`; a timeout or a cleanup cancellation
+  returns a signer error (via the existing `SignError`) **without** invoking the
+  underlying signer, so no timeout can silently authorize a real signature or a
+  passing handoff (direct controls assert both: explicit release ⇒ one real
+  D6-verifiable signature and one handoff; an immediate `Duration::ZERO`
+  deadline ⇒ zero underlying calls, a signing failure, and no delivery — with no
+  30-second wait). Wrapper entry and underlying-call counts are tracked
+  separately, so a counter incremented before the pause cannot stand in for a
+  real signature. **Exactly two coordination waits are deadline-bounded** —
+  `wait_entered` (test waits for the paused worker to reach the signer) and
+  `wait_release` (worker waits inside the signer); the later `thread::scope`
+  join is **not** itself a deadline. Prompt termination on a failing/panicking
+  path is guaranteed by a test-local cleanup guard that **cancels** (not
+  releases) the gate on drop, and a cancellation is never counted as a
+  successful schedule. Successful schedules additionally assert that no gate
+  timeout occurred) → an **actual guarded-handler recovery-handoff** leg over a
+  **fresh model ownership domain** (real signer + recording facade): after an
+  uncertain result write leaves readable `Signed` bytes, a reopened domain over
+  the surviving bytes suppresses delivery while the recovery durability barrier
+  fails or is uncertain (journal-error counter, zero facade delivery, unchanged
+  signer count, exact record preserved, conflicting binding still refused), and
+  permits **only** an exact retained resend once the barrier succeeds — the
+  delivered signature is D6-verified and byte-identical to the retained journal
+  record, with the signer count remaining one across the entire sequence
+  (labelled model storage representing lost process-local knowledge, **not** a
+  process-death/power-loss/release-binary/production-authorization claim) →
+  real-RocksDB restart/reopen
   (reserve→consume→publish→reopen→exact retrieval demonstrating the recovery
   acknowledgement path, reserved-only reopen refusing a new continuation,
   conflict-after-reopen, empty-result refusal over the real backend, idempotent +
-  conflicting-overwrite, shared-handle ownership over the real backend) → bounded
-  child-process death/reopen (the child self-aborts after a durable reserve and
-  the parent reopens a fresh domain; note this control uses an unbounded
-  `.status()` wait and only asserts an unsuccessful exit — it is **not** a
-  bounded/classified process-death test, which remains OPEN under F). Direct
+  conflicting-overwrite, shared-handle ownership over the real backend) → an
+  **unrepaired** child-process death/reopen runner (the child self-aborts after a
+  durable reserve and the parent reopens a fresh domain; this control uses an
+  **unbounded** `.status()` wait and only asserts an unsuccessful exit — it is
+  explicitly **not** a bounded/classified process-death test, which remains OPEN
+  under F, and is retained here only as historical evidence). Direct
   signer-call counts and facade effects are
   asserted (not logs alone). A separate post-publication exact-retry control
   confirms a legitimate retained resend after publication costs zero additional
