@@ -729,10 +729,11 @@ These are **future** controls, not newly executed claims:
 * Exact retry (resend, no re-sign) and conflicting retry (refuse).
 * Repeated position with changed message/binding fields that must **not** evade
   conflict detection.
-* Evasion attempts via **inconsistent position fields** (a Proposal or Vote whose
-  `height` / `round` — or a Vote's `step` — does not equal its originating view for
-  this profile) — refused **before** lookup, never admitted under a second
-  namespace.
+* Evasion attempts via **inconsistent position fields** — a Proposal or Vote whose
+  `height` / `round` does not equal its originating view, **or** a Vote whose `step`
+  is not `0` (for this profile `height == round == originating view` and, for a Vote,
+  `step == 0` — the step equals zero, **not** the view) — refused **before** lookup,
+  never admitted under a second namespace.
 * **Originating-view persistence across engine progress:** an action constructed at
   view `V` whose engine advances to `V+1` (via `advance_view()`) **before** the
   action is forwarded to signing keeps its reservation associated with `V`; the
@@ -942,3 +943,114 @@ unresolved (§6.6) and **consensus-lock recovery** is an unmet prerequisite
 operational signing-state continuity. C4/C5 remain OPEN. No activation, readiness
 promotion, or Run 423 work is authorized. The bounded successor (§7.3)
 implementation is **not** begun.
+---
+
+## 9. RUN 422 D7-D10 implementation status (bounded successor, CODE-AND-STORAGE-TEST)
+
+The §7.3 bounded successor is now **implemented as source + tests only** — a
+non-authorizing, crash-consistent local signing-reservation journal placed
+before the existing Proposal/Vote signer invocations. The §8.2
+`D7D9_SIGNING_STATE_CONTINUITY_CONTRACT=DEFINED-NOT-IMPLEMENTED` record is a
+historical D9 verdict and is **preserved**; D10 adds a separate implementation
+status below. No production authority is activated and no signing is enabled in
+production; the guard engages only when a journal is explicitly wired (tests).
+
+### 9.1 Reuse inventory and new paths
+
+* **New module** `crates/qbind-node/src/signing_reservation_journal.rs`: record
+  format, 5-state machine, conflict rule, exclusivity, `SigningJournalStorage`
+  trait, and the `SigningReservationJournal` reserve/sign/record/recover API.
+* **`crates/qbind-node/src/storage.rs`**: reuses the existing CRC-32 facility
+  (new `signing_journal_crc32`, same polynomial as block/QC/epoch) and the
+  existing RocksDB synced-write path; adds a `sig:`-prefixed keyspace and
+  `impl SigningJournalStorage` for `RocksDbConsensusStorage` (real
+  `WriteOptions::set_sync(true)` fsync) and for `InMemoryConsensusStorage`
+  (explicitly-labelled MODEL, non-durable — never a production fallback).
+* **`crates/qbind-node/src/binary_consensus_loop.rs`**: one shared
+  `guarded_sign_proposal_for_broadcast` / `guarded_sign_vote_for_broadcast`
+  wraps the existing `sign_*_for_broadcast` helpers and is threaded through
+  **both** caller families — `forward_actions_to_facade` (immediate
+  BroadcastProposal / BroadcastVote / SendVoteTo, incl. leader/self-vote) and
+  `maybe_reemit_on_late_peer_connect` (cached re-emission). Existing D6
+  preimage construction, admission, ticket/owner revalidation, epoch/supersession
+  checks, and confirmation are reused unchanged.
+* Reuses existing validator identity, signer, `ProposalVoteSigningDomainV2`
+  preimage, and verification APIs; no parallel authority registry, parser,
+  signing format, or cryptographic construction was introduced.
+
+### 9.2 Conflict key and prepared-input binding
+
+* **Position key** = stable local validator identity + bound network/genesis +
+  message kind (Proposal|Vote) + **originating consensus view** taken from the
+  action (never recomputed from a later `engine.current_view()`).
+* **Per-kind checks before lookup:** Proposal `height == round == originating
+  view`, no step; Vote `height == round == originating view` **and `step == 0`**
+  (the step equals zero, not the view).
+* **Binding digest** covers the position, authorized epoch, prepared suite id,
+  wire-message version and D6 signing-format version (bound independently), the
+  authority commitment, the block identifier, and the exact D6 canonical
+  preimage. Key/suite/epoch/authority-commitment/wire-version/owner-generation/
+  caller-label changes are exact-message bindings, never a conflict-evading
+  namespace. Directed and broadcast delivery of one Vote are the same decision;
+  a Proposal and a self-Vote at one view are distinct decisions.
+
+### 9.3 Storage namespace, record format, bounds, initialization
+
+* Keyspace `sig:` + `sj:v1:` record-key prefix, disjoint from block/QC/epoch
+  keys (unchanged). Record layout: `magic | record-format-version | kind |
+  stage | validator_id | network_genesis | originating_view | binding |
+  sig_len | sig | crc32` (big-endian, checksum over the body). The checksum is
+  corruption detection only — **not** authentication or rollback protection.
+* Bounds: retained signature ≤ 8 KiB, record ≤ bounded max, reservation count
+  budgeted (checked arithmetic; overflow is terminal, never wraparound).
+  Exhaustion **refuses further signing** with no silent eviction of conflict
+  obligations. Decode is fail-closed on malformed/truncated/incompatible/
+  inconsistent input; no allocation from unchecked stored lengths.
+* Initialization is explicit: `attach` never creates, repairs, or converts
+  missing/corrupt established state into an empty usable journal; its in-memory
+  live-permit map starts empty (the crash-recovery posture). Production startup
+  does not initialize a journal.
+
+### 9.4 Exclusivity, live continuation, recovered-record behavior
+
+* **Exclusivity** is a per-instance `Mutex` serializing the read-then-write
+  reservation across every handle/caller sharing that journal; the durable
+  acknowledgement corresponds to the signing-record write itself. An atomic
+  batch alone is not treated as sufficient.
+* **Live continuation:** only the one exclusive live operation holding an
+  in-memory permit that has not yet invoked the signer may sign once. This
+  permit is **not** reconstructible by reading `Reserved` from storage.
+* **After process death:** a recovered `Reserved` (or otherwise uncertain state
+  without a usable retained result) is **PotentiallySigned** → refuse re-signing
+  and preserve the reservation. A valid retained result for the exact decision
+  is eligible only for resend after association + current-authorization checks.
+  A conflicting request is refused without altering the original obligation.
+* **Durable result handling:** if result persistence fails/uncertain after
+  signing, the facade handoff is suppressed, the reservation is preserved, and
+  the signer is not re-invoked. Retained results are validated via existing D6
+  verification before reuse; no pruning is authorized in this task.
+
+### 9.5 Executed evidence levels and unexecuted dependencies
+
+* **Executed:** source-contract → colocated unit + injected-failure tests →
+  real-RocksDB restart/reopen → bounded child-process death/reopen. Direct
+  signer-call counts and facade effects are asserted (not logs alone).
+* **Not executed / still unmet (unchanged posture):** durable anti-rollback
+  anchor (§6.6), consensus-lock recovery (§5.3/§6.7), whole-copy rollback,
+  copied-key/cross-host exclusivity, Timeout/NewView compatibility, power-loss
+  evidence, and production authority activation. Local crash consistency does
+  **not** close any of these.
+
+```
+D7D10_LOCAL_SIGNING_RESERVATION=CODE-AND-STORAGE-TEST-POSITIVE
+D7D9_SIGNING_STATE_CONTINUITY_CONTRACT=DEFINED-NOT-IMPLEMENTED   (D9 record preserved)
+D7D8_RESTORE_COMPLETION_CONTAINMENT=CODE-AND-RELEASE-TEST-POSITIVE   (preserved)
+D7_STATUS=PARTIAL-CODE-TEST / PRODUCTION-LIFECYCLE-UNAVAILABLE
+DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED
+GENESIS_AUTHORITY_ACTIVATION=DISABLED
+PRODUCTION_WIRE_CHAIN_ID_BEHAVIOR=UNCHANGED
+CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED
+SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO
+```
+
+C4/C5 remain OPEN. No production activation, PR, or Run 423 work is performed.

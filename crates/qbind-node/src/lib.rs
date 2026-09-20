@@ -2149,6 +2149,14 @@ pub mod snapshot_restore;
 pub mod restore_completion;
 pub mod startup_validation;
 pub mod storage;
+// Run 422 D7-D10 — local, non-authorizing, crash-consistent signing-reservation
+// journal. Durable-before-sign reservation of the exact prepared Proposal/Vote
+// decision, conflict refusal at one canonical position, exact-retry retained
+// signature reuse, and recovered-reservation refusal after process death. Never
+// establishes activation authorization or current-authority freshness; provides
+// no durable anti-rollback anchor. See
+// docs/protocol/QBIND_PROPOSAL_VOTE_SIGNING_STATE_CONTINUITY_CONTRACT.md.
+pub mod signing_reservation_journal;
 pub mod production_consensus_storage;
 // Run 422 D7-C1 — read-only, non-authorizing observation boundary over an
 // already-opened consensus storage handle. Distinguishes absent handle,

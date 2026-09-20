@@ -8345,3 +8345,110 @@ required for these Markdown-only changes and none is claimed. D7-D8's accepted
 verdict and all earlier results are preserved at their actual revisions and not
 re-run. `D7D9_SIGNING_STATE_CONTINUITY_CONTRACT=DEFINED-NOT-IMPLEMENTED` is retained
 and is not equated with review acceptance.
+## Run 422 D7-D10 — Local signing-reservation journal and guarded signing boundary
+
+**Scope.** Implement the §7.3 bounded successor of the signing-state continuity
+contract: a non-authorizing, crash-consistent local signing-reservation journal
+placed before the existing Proposal/Vote signer invocations. Source + tests only;
+no production authority activation, no new CLI/config, no signing enabled in
+production. The D9 `DEFINED-NOT-IMPLEMENTED` record is preserved; this is a
+separate D10 implementation-status entry.
+
+### Changed paths and reused mechanisms
+
+* `crates/qbind-node/src/signing_reservation_journal.rs` (new) — record format,
+  5-state machine, conflict rule, exclusivity, `SigningJournalStorage` trait, and
+  the `SigningReservationJournal` reserve/sign/record/recover API.
+* `crates/qbind-node/src/storage.rs` — reuses the existing CRC-32 facility
+  (`signing_journal_crc32`) and the RocksDB synced-write path; adds a `sig:`
+  keyspace and `impl SigningJournalStorage` for `RocksDbConsensusStorage` (real
+  `set_sync(true)` fsync) and `InMemoryConsensusStorage` (explicitly MODEL).
+* `crates/qbind-node/src/binary_consensus_loop.rs` — one shared
+  `guarded_sign_{proposal,vote}_for_broadcast` wraps the existing
+  `sign_*_for_broadcast` helpers with the contract §4.1 ordering, threaded through
+  **both** `forward_actions_to_facade` (immediate) and
+  `maybe_reemit_on_late_peer_connect` (cached re-emission); typed journal-outcome
+  counters added. The guard is backward-compatible (engages only when a journal is
+  wired; production wires none and continues to fail closed).
+* `crates/qbind-node/src/lib.rs` — `pub mod signing_reservation_journal;`.
+
+### Journal representation, bounds, durability, exclusivity
+
+* Record: `magic | record-format-version | kind | stage | validator_id |
+  network_genesis | originating_view | binding | sig_len | sig | crc32`
+  (big-endian; CRC over body = corruption detection only, not authentication or
+  rollback protection). Retained signature ≤ 8 KiB; reservation budget with
+  checked arithmetic (overflow terminal); exhaustion refuses further signing.
+* Durability: RocksDB `WriteOptions::set_sync(true)` fsync on the signing-record
+  write itself. Exclusivity: a per-instance `Mutex` serializes read-then-write
+  reservation across all handles/callers sharing the journal.
+
+### Ordering before signer invocation (both caller families)
+
+admission/context checks → per-kind identity/position checks (Proposal
+`height==round==view`, no step; Vote `height==round==view` and `step==0`) →
+prepared suite + existing D6 preimage → exclusive conflict lookup + durable
+reservation → owner/ticket + snapshot revalidation → **one** signer call for a
+freshly-reserved live op, or validated reuse of an exact retained result →
+durable result handling → existing confirmation → delivery / cached re-emission.
+No signer call before reservation acknowledgement, and none on conflict,
+corrupt/unavailable journal, recovery ambiguity, exhaustion, or failed
+authorization.
+
+### Test evidence (direct signer-call / facade counts, not logs)
+
+* **Colocated `binary_consensus_loop` tests** `mod run422_d7d10` — **18 tests, all
+  pass**. Categories A (Proposal/broadcast-Vote/directed-Vote success:
+  reserve-before-single-sign), B (conflict → zero additional signer calls + no
+  delivery; exact retry reuses retained signature; directed/broadcast Vote
+  equivalence; Proposal vs self-Vote distinct; binding change ≠ new namespace),
+  C (reserve the action's originating view not a later view; conflict survives
+  engine progress; inconsistent height/round and unsupported `Vote.step` refused
+  before lookup), D (read/write/durability failure → zero signer calls;
+  result-persist failure → no facade handoff, reservation preserved, no
+  automatic re-sign), F (second handle no second permit; exhaustion refuses),
+  G (cached Proposal + cached Vote re-emission reuse retained signatures with
+  zero additional signer calls; admission/confirmation preserved).
+* **Real-storage integration** `tests/run_422_d7d10_signing_reservation_journal_tests.rs`
+  (`--features test-utils`) — **9 tests + 1 child-mode helper, all pass**. Real
+  `RocksDbConsensusStorage` close/reopen: reserved-only recovery refuses
+  re-signing; signed result survives reopen and supports exact resend; conflict
+  stays refused; corruption, truncation, unknown record version, and missing
+  signature fail closed; a second handle over the same store cannot obtain a
+  second permit; and a **bounded child-process death/reopen** (test-only self
+  re-exec + `std::process::abort()` after a durable reservation, before any
+  recorded result) recovers `PotentiallySigned` and refuses re-signing.
+* Backward compatibility: the 59 existing `run422_d7b` outbound/cached-reemission
+  tests still pass with the guard wired.
+
+**Evidence levels (kept separate).** source contract → colocated unit +
+injected-failure → real-RocksDB reopen → bounded child-process death/reopen.
+Process termination is **not** power-loss evidence; the isolated test signer is
+**not** configured production authority.
+
+### Validation
+
+* Tested checkpoint recorded before validation: commit `d9994d15c462a8b97c8a3792a6af7c4f154b04dc`.
+* `cargo test -p qbind-node --lib run422_d7d10` → 18 passed.
+* `cargo test -p qbind-node --features test-utils --test run_422_d7d10_signing_reservation_journal_tests`
+  → 9 passed, 1 ignored (child-mode helper, exercised by the orchestrator).
+* `cargo test -p qbind-node --lib run422_d7b` → 59 passed (no regression).
+* `cargo check -p qbind-node` (default features) → clean.
+
+### Retained posture
+
+```
+D7D10_LOCAL_SIGNING_RESERVATION=CODE-AND-STORAGE-TEST-POSITIVE
+D7D8_RESTORE_COMPLETION_CONTAINMENT=CODE-AND-RELEASE-TEST-POSITIVE   (preserved)
+D7_STATUS=PARTIAL-CODE-TEST / PRODUCTION-LIFECYCLE-UNAVAILABLE
+DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED
+GENESIS_AUTHORITY_ACTIVATION=DISABLED
+PRODUCTION_WIRE_CHAIN_ID_BEHAVIOR=UNCHANGED
+CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED
+SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO
+```
+
+Unresolved (explicitly retained): anti-rollback anchor selection, whole-copy
+rollback, copied-key exclusivity, consensus-lock recovery, Timeout/NewView
+compatibility, power-loss evidence, and production authority readiness. C4/C5
+remain OPEN. No PR and no Run 423 work.

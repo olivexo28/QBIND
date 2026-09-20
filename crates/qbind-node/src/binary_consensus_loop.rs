@@ -126,6 +126,10 @@ use crate::peer_consensus_binding::{
     AuthenticatedConsensusOrigin, ConsensusBindingReject, PeerConsensusBindingGate,
 };
 use crate::storage::{ConsensusStorage, EpochTransitionBatch, StorageError};
+use crate::signing_reservation_journal::{
+    BindingDigest, DecisionBindingInput, ReservationOutcome, SigningKind, SigningPosition,
+    SigningReservationJournal,
+};
 use crate::validator_signer::ValidatorSigner;
 use crate::vm_v0_runtime::{SnapshotAnchor, VmV0RuntimeError, VmV0RuntimeState};
 
@@ -1850,6 +1854,52 @@ pub struct BinaryConsensusLoopInboundStats {
     pub outbound_proposal_reemit_provenance_rejected_total: u64,
     pub outbound_vote_reemit_missing_provenance_total: u64,
     pub outbound_vote_reemit_provenance_rejected_total: u64,
+
+    // ------------------------------------------------------------------
+    // Run 422 D7-D10 — local signing-reservation journal outcomes.
+    //
+    // These count the typed [`crate::signing_reservation_journal::ReservationOutcome`]
+    // (and pre-lookup/persistence) results at the guarded signing boundary.
+    // They are only ever incremented when a journal is wired (the guard is
+    // backward-compatible: with no journal the existing behavior and counters
+    // are preserved exactly). A journal outcome NEVER constitutes current
+    // authorization; it can only suppress or resend an already-authorized
+    // decision.
+    //
+    //   * `*_journal_reserved_total`: a fresh durable reservation was
+    //     acknowledged before the (single) signer invocation.
+    //   * `*_journal_retained_resend_total`: an exact retry reused a validated
+    //     retained signature WITHOUT invoking the signer.
+    //   * `*_journal_conflict_total`: a different signed content was requested
+    //     at the same canonical position — refused, original obligation intact.
+    //   * `*_journal_potentially_signed_total`: a recovered/uncertain
+    //     reservation without a usable retained result — refuse re-signing.
+    //   * `*_journal_exhausted_total`: the reservation budget was exhausted —
+    //     refuse further signing safely (no eviction of conflict obligations).
+    //   * `*_journal_position_inconsistent_total`: pre-lookup per-kind
+    //     identity/position checks failed (height/round/view or Vote.step) —
+    //     refused before any lookup or signing.
+    //   * `*_journal_error_total`: a read/decode/lock/typed journal error, or a
+    //     retained-result that failed existing D6 revalidation — fail closed.
+    //   * `*_journal_result_persist_failure_total`: the signer ran but the
+    //     retained-result write failed/was uncertain — facade handoff is
+    //     suppressed, the potentially-signed obligation preserved, no re-sign.
+    pub outbound_proposal_journal_reserved_total: u64,
+    pub outbound_proposal_journal_retained_resend_total: u64,
+    pub outbound_proposal_journal_conflict_total: u64,
+    pub outbound_proposal_journal_potentially_signed_total: u64,
+    pub outbound_proposal_journal_exhausted_total: u64,
+    pub outbound_proposal_journal_position_inconsistent_total: u64,
+    pub outbound_proposal_journal_error_total: u64,
+    pub outbound_proposal_journal_result_persist_failure_total: u64,
+    pub outbound_vote_journal_reserved_total: u64,
+    pub outbound_vote_journal_retained_resend_total: u64,
+    pub outbound_vote_journal_conflict_total: u64,
+    pub outbound_vote_journal_potentially_signed_total: u64,
+    pub outbound_vote_journal_exhausted_total: u64,
+    pub outbound_vote_journal_position_inconsistent_total: u64,
+    pub outbound_vote_journal_error_total: u64,
+    pub outbound_vote_journal_result_persist_failure_total: u64,
 }
 
 /// Transition state for the bounded "restore-catchup mode → normal
@@ -2807,6 +2857,7 @@ pub async fn run_binary_consensus_loop_with_io(
                             // re-emission rejects fail-closed under `Required`.
                             None,
                             proposal_vote_authority.as_deref(),
+                            None, // Run 422 D7-D10: no signing-reservation journal wired
                             verification_policy,
                         );
                     }
@@ -2950,6 +3001,7 @@ pub async fn run_binary_consensus_loop_with_io(
                             // re-emission rejects fail-closed under `Required`.
                             None,
                             proposal_vote_authority.as_deref(),
+                            None, // Run 422 D7-D10: no signing-reservation journal wired
                             verification_policy,
                         );
                     }
@@ -3291,7 +3343,7 @@ fn do_leader_tick(
         metrics.consensus_t154().inc_proposal_accepted();
     }
     if let Some(facade) = outbound {
-        forward_actions_to_facade(actions, facade, inbound_stats, current_auth, signer_ctx, verification_policy);
+        forward_actions_to_facade(actions, facade, inbound_stats, current_auth, signer_ctx, None, verification_policy);
     }
 }
 
@@ -3393,6 +3445,12 @@ fn maybe_reemit_on_late_peer_connect(
     // Test-only `LocalFixtureUnsigned` passthrough authority, consulted ONLY
     // when no snapshot is wired. Never substitutes for a wired snapshot.
     pv_authority: Option<&ProposalVoteAuthority>,
+    // Run 422 D7-D10: the local signing-reservation journal for the cached
+    // re-emission caller family. Production wires `None` (guard disengaged);
+    // a test fixture may wire `Some` so cached exact re-emission reuses the
+    // retained signature rather than signing again, and conflicting/recovered
+    // reservations are refused before the signer is invoked.
+    journal: Option<&SigningReservationJournal>,
     verification_policy: ConsensusVerificationPolicy,
 ) {
     // Always refresh the connected snapshot so reconnect churn within
@@ -3493,7 +3551,7 @@ fn maybe_reemit_on_late_peer_connect(
     // Run 420 / D6: the re-emitted proposal is signed fail-closed through the
     // snapshot's bound verifier, so a late-peer re-emit cannot become a bypass
     // that broadcasts unsigned or wrong-domain consensus material.
-    let proposal = match sign_proposal_for_broadcast(proposal, proposal_signer, verification_policy, stats) {
+    let proposal = match guarded_sign_proposal_for_broadcast(proposal, proposal_signer, journal, verification_policy, stats) {
         Some(p) => p,
         None => return,
     };
@@ -3571,7 +3629,7 @@ fn maybe_reemit_on_late_peer_connect(
             CachedReemitAdmission::Admitted { signer_ctx, fresh_ticket } => {
                 // Run 420 / D6: sign the re-emitted vote fail-closed as well.
                 if let Some(signed_vote) =
-                    sign_vote_for_broadcast(vote, signer_ctx, verification_policy, stats)
+                    guarded_sign_vote_for_broadcast(vote, signer_ctx, journal, verification_policy, stats)
                 {
                     if confirm_outbound_before_effect(
                         current_auth,
@@ -3623,6 +3681,418 @@ fn maybe_reemit_on_late_peer_connect(
 /// [`ConsensusNetworkFacade`]. Errors are logged but do not stop the loop;
 /// per-action delivery is best-effort and the engine itself remains the
 /// source of truth for protocol progress.
+/// Run 422 D7-D10 — D6 signing-format version bound into the reservation
+/// binding. This is the persistent record's view of the "v2 envelope" the D6
+/// preimage uses; it is DISTINCT from the wire-message version (`header.version`
+/// / `vote.version`) and from the journal-record format version
+/// (`SIGNING_RECORD_FORMAT_VERSION`, persistence only).
+const D6_SIGNING_FORMAT_VERSION: u8 = 2;
+
+/// Run 422 D7-D10 — guard `sign_proposal_for_broadcast` with the local
+/// signing-reservation journal.
+///
+/// Backward-compatible by construction: when `journal` is `None` this delegates
+/// verbatim to [`sign_proposal_for_broadcast`], so every existing caller and
+/// test that passes no journal keeps its exact behavior and counters.
+///
+/// When `journal` is `Some`, the reservation guard engages with the ordering
+/// required by the accepted continuity contract §4.1: existing admission /
+/// context / wire-chain checks, per-kind identity/position checks, permitted
+/// suite assignment, existing D6 preimage construction, exclusive conflict
+/// lookup + durable reservation, then EITHER exactly one signer invocation for a
+/// freshly-reserved live operation OR validated reuse of an exact retained
+/// result, then durable result handling. A journal outcome never creates
+/// current authorization; the caller still applies the existing
+/// `confirm_outbound_before_effect` revalidation before facade handoff.
+fn guarded_sign_proposal_for_broadcast(
+    proposal: BlockProposal,
+    ctx: Option<&ProposalVoteAuthority>,
+    journal: Option<&SigningReservationJournal>,
+    verification_policy: ConsensusVerificationPolicy,
+    inbound_stats: &mut BinaryConsensusLoopInboundStats,
+) -> Option<BlockProposal> {
+    match journal {
+        None => sign_proposal_for_broadcast(proposal, ctx, verification_policy, inbound_stats),
+        Some(journal) => guarded_sign_proposal_inner(
+            proposal,
+            ctx,
+            journal,
+            verification_policy,
+            inbound_stats,
+        ),
+    }
+}
+
+fn guarded_sign_proposal_inner(
+    mut proposal: BlockProposal,
+    ctx: Option<&ProposalVoteAuthority>,
+    journal: &SigningReservationJournal,
+    verification_policy: ConsensusVerificationPolicy,
+    inbound_stats: &mut BinaryConsensusLoopInboundStats,
+) -> Option<BlockProposal> {
+    // (1) Existing authorization-context and wire-chain admission — IDENTICAL to
+    //     `sign_proposal_for_broadcast`; the journal never weakens these.
+    let ctx = match ctx {
+        None => {
+            if verification_policy.requires_context() {
+                inbound_stats.outbound_proposal_verification_context_unavailable_total =
+                    inbound_stats
+                        .outbound_proposal_verification_context_unavailable_total
+                        .saturating_add(1);
+                return None;
+            }
+            // LocalFixtureUnsigned passthrough: no signer, so no signing decision
+            // to reserve; preserve the historical unsigned passthrough exactly.
+            return Some(proposal);
+        }
+        Some(c) => c,
+    };
+    let signer = match ctx.signer.as_ref() {
+        Some(s) => s,
+        None => {
+            inbound_stats.outbound_proposal_signing_failure = inbound_stats
+                .outbound_proposal_signing_failure
+                .saturating_add(1);
+            return None;
+        }
+    };
+    if !ctx.wire_chain_id_ok(proposal.header.chain_id) {
+        inbound_stats.outbound_proposal_wire_chain_mismatch = inbound_stats
+            .outbound_proposal_wire_chain_mismatch
+            .saturating_add(1);
+        return None;
+    }
+
+    // (2) Per-kind identity/position checks BEFORE lookup/signing. For the
+    //     founding profile a Proposal's height, round and originating view are
+    //     one value; there is no Proposal step field to fabricate. The
+    //     originating view is the ACTION's own view (`header.height`), never a
+    //     later `engine.current_view()`.
+    let originating_view = proposal.header.height;
+    if proposal.header.round != originating_view {
+        inbound_stats.outbound_proposal_journal_position_inconsistent_total = inbound_stats
+            .outbound_proposal_journal_position_inconsistent_total
+            .saturating_add(1);
+        return None;
+    }
+
+    // (3) Permitted suite assignment + existing D6 preimage construction. Signed
+    //     fields cannot change after this point.
+    proposal.header.suite_id = signer.suite_id();
+    let preimage = ctx.proposal_preimage(&proposal);
+
+    // (4) Canonical position + exact-decision binding, then exclusive conflict
+    //     lookup + durable reservation.
+    let position = SigningPosition {
+        validator_id: signer.validator_id().as_u64(),
+        network_genesis: *ctx.signing_domain.genesis_identity(),
+        kind: SigningKind::Proposal,
+        originating_view,
+    };
+    let binding = BindingDigest::compute(&DecisionBindingInput {
+        position,
+        authorized_epoch: proposal.header.epoch,
+        suite_id: signer.suite_id(),
+        wire_message_version: proposal.header.version as u16,
+        d6_signing_format_version: D6_SIGNING_FORMAT_VERSION,
+        authority_commitment: *ctx.signing_domain.authority_commitment(),
+        block_id: proposal.header.payload_hash,
+        canonical_preimage: &preimage,
+    });
+
+    match journal.reserve_for_sign(&position, &binding) {
+        Ok(ReservationOutcome::FreshlyReserved) => {
+            inbound_stats.outbound_proposal_journal_reserved_total = inbound_stats
+                .outbound_proposal_journal_reserved_total
+                .saturating_add(1);
+            // (6) Exactly one signer invocation for the newly reserved live
+            //     operation. Mark the intent to invoke first so any live retry
+            //     cannot re-enter as a fresh permit.
+            if journal.note_signer_invoked(&position).is_err() {
+                inbound_stats.outbound_proposal_journal_error_total = inbound_stats
+                    .outbound_proposal_journal_error_total
+                    .saturating_add(1);
+                return None;
+            }
+            match signer.sign_proposal(&preimage) {
+                Ok(sig) => {
+                    // (7) Durable result handling. On persistence failure/uncertainty
+                    //     preserve the potentially-signed obligation, suppress facade
+                    //     handoff, and do NOT re-sign.
+                    if journal
+                        .record_signed_result(&position, &binding, &sig)
+                        .is_err()
+                    {
+                        inbound_stats.outbound_proposal_journal_result_persist_failure_total =
+                            inbound_stats
+                                .outbound_proposal_journal_result_persist_failure_total
+                                .saturating_add(1);
+                        return None;
+                    }
+                    proposal.signature = sig;
+                    inbound_stats.outbound_proposal_signing_success = inbound_stats
+                        .outbound_proposal_signing_success
+                        .saturating_add(1);
+                    Some(proposal)
+                }
+                Err(e) => {
+                    inbound_stats.outbound_proposal_signing_failure = inbound_stats
+                        .outbound_proposal_signing_failure
+                        .saturating_add(1);
+                    eprintln!(
+                        "[binary-consensus] Run 420: outbound proposal signing FAILED \
+                         (fail-closed, not broadcast): {:?}",
+                        e
+                    );
+                    None
+                }
+            }
+        }
+        Ok(ReservationOutcome::ExactRetryRetained(sig)) => {
+            // Validate the retained result's decision/context association and
+            // signature via the existing D6 verification machinery BEFORE reuse.
+            proposal.signature = sig;
+            let verified = verify_proposal_msg_with_domain(
+                &proposal,
+                *signer.validator_id(),
+                ctx.validators.as_ref(),
+                ctx.key_provider.as_ref(),
+                ctx.backend_registry.as_ref(),
+                &ctx.signing_domain,
+            )
+            .is_ok();
+            if verified {
+                inbound_stats.outbound_proposal_journal_retained_resend_total = inbound_stats
+                    .outbound_proposal_journal_retained_resend_total
+                    .saturating_add(1);
+                Some(proposal)
+            } else {
+                inbound_stats.outbound_proposal_journal_error_total = inbound_stats
+                    .outbound_proposal_journal_error_total
+                    .saturating_add(1);
+                None
+            }
+        }
+        Ok(ReservationOutcome::Conflict) => {
+            inbound_stats.outbound_proposal_journal_conflict_total = inbound_stats
+                .outbound_proposal_journal_conflict_total
+                .saturating_add(1);
+            None
+        }
+        Ok(ReservationOutcome::PotentiallySigned) => {
+            inbound_stats.outbound_proposal_journal_potentially_signed_total = inbound_stats
+                .outbound_proposal_journal_potentially_signed_total
+                .saturating_add(1);
+            None
+        }
+        Ok(ReservationOutcome::Exhausted) => {
+            inbound_stats.outbound_proposal_journal_exhausted_total = inbound_stats
+                .outbound_proposal_journal_exhausted_total
+                .saturating_add(1);
+            None
+        }
+        Err(e) => {
+            inbound_stats.outbound_proposal_journal_error_total = inbound_stats
+                .outbound_proposal_journal_error_total
+                .saturating_add(1);
+            eprintln!(
+                "[binary-consensus] Run 422 D7-D10: outbound proposal NOT signed \
+                 (journal error, fail-closed): {:?}",
+                e
+            );
+            None
+        }
+    }
+}
+
+/// Run 422 D7-D10 — guard `sign_vote_for_broadcast` with the local
+/// signing-reservation journal. See [`guarded_sign_proposal_for_broadcast`] for
+/// the shared ordering/semantics; the per-kind preparation differs (a Vote's
+/// height, round and originating view are one value and `step` must be `0` for
+/// the founding profile).
+fn guarded_sign_vote_for_broadcast(
+    vote: Vote,
+    ctx: Option<&ProposalVoteAuthority>,
+    journal: Option<&SigningReservationJournal>,
+    verification_policy: ConsensusVerificationPolicy,
+    inbound_stats: &mut BinaryConsensusLoopInboundStats,
+) -> Option<Vote> {
+    match journal {
+        None => sign_vote_for_broadcast(vote, ctx, verification_policy, inbound_stats),
+        Some(journal) => {
+            guarded_sign_vote_inner(vote, ctx, journal, verification_policy, inbound_stats)
+        }
+    }
+}
+
+fn guarded_sign_vote_inner(
+    mut vote: Vote,
+    ctx: Option<&ProposalVoteAuthority>,
+    journal: &SigningReservationJournal,
+    verification_policy: ConsensusVerificationPolicy,
+    inbound_stats: &mut BinaryConsensusLoopInboundStats,
+) -> Option<Vote> {
+    // (1) Existing admission / wire-chain checks — identical to
+    //     `sign_vote_for_broadcast`.
+    let ctx = match ctx {
+        None => {
+            if verification_policy.requires_context() {
+                inbound_stats.outbound_vote_verification_context_unavailable_total = inbound_stats
+                    .outbound_vote_verification_context_unavailable_total
+                    .saturating_add(1);
+                return None;
+            }
+            return Some(vote);
+        }
+        Some(c) => c,
+    };
+    let signer = match ctx.signer.as_ref() {
+        Some(s) => s,
+        None => {
+            inbound_stats.outbound_vote_signing_failure = inbound_stats
+                .outbound_vote_signing_failure
+                .saturating_add(1);
+            return None;
+        }
+    };
+    if !ctx.wire_chain_id_ok(vote.chain_id) {
+        inbound_stats.outbound_vote_wire_chain_mismatch = inbound_stats
+            .outbound_vote_wire_chain_mismatch
+            .saturating_add(1);
+        return None;
+    }
+
+    // (2) Per-kind identity/position checks BEFORE lookup/signing: for this
+    //     founding profile height == round == originating view AND step == 0.
+    let originating_view = vote.height;
+    if vote.round != originating_view || vote.step != 0 {
+        inbound_stats.outbound_vote_journal_position_inconsistent_total = inbound_stats
+            .outbound_vote_journal_position_inconsistent_total
+            .saturating_add(1);
+        return None;
+    }
+
+    // (3) Permitted suite assignment + existing D6 preimage construction.
+    vote.suite_id = signer.suite_id();
+    let preimage = ctx.vote_preimage(&vote);
+
+    // (4) Canonical position + binding + exclusive reservation. Directed and
+    //     broadcast delivery of the same Vote resolve to the SAME position/
+    //     binding (delivery target is not part of the decision identity).
+    let position = SigningPosition {
+        validator_id: signer.validator_id().as_u64(),
+        network_genesis: *ctx.signing_domain.genesis_identity(),
+        kind: SigningKind::Vote,
+        originating_view,
+    };
+    let binding = BindingDigest::compute(&DecisionBindingInput {
+        position,
+        authorized_epoch: vote.epoch,
+        suite_id: signer.suite_id(),
+        wire_message_version: vote.version as u16,
+        d6_signing_format_version: D6_SIGNING_FORMAT_VERSION,
+        authority_commitment: *ctx.signing_domain.authority_commitment(),
+        block_id: vote.block_id,
+        canonical_preimage: &preimage,
+    });
+
+    match journal.reserve_for_sign(&position, &binding) {
+        Ok(ReservationOutcome::FreshlyReserved) => {
+            inbound_stats.outbound_vote_journal_reserved_total = inbound_stats
+                .outbound_vote_journal_reserved_total
+                .saturating_add(1);
+            if journal.note_signer_invoked(&position).is_err() {
+                inbound_stats.outbound_vote_journal_error_total = inbound_stats
+                    .outbound_vote_journal_error_total
+                    .saturating_add(1);
+                return None;
+            }
+            match signer.sign_vote(&preimage) {
+                Ok(sig) => {
+                    if journal
+                        .record_signed_result(&position, &binding, &sig)
+                        .is_err()
+                    {
+                        inbound_stats.outbound_vote_journal_result_persist_failure_total =
+                            inbound_stats
+                                .outbound_vote_journal_result_persist_failure_total
+                                .saturating_add(1);
+                        return None;
+                    }
+                    vote.signature = sig;
+                    inbound_stats.outbound_vote_signing_success = inbound_stats
+                        .outbound_vote_signing_success
+                        .saturating_add(1);
+                    Some(vote)
+                }
+                Err(e) => {
+                    inbound_stats.outbound_vote_signing_failure = inbound_stats
+                        .outbound_vote_signing_failure
+                        .saturating_add(1);
+                    eprintln!(
+                        "[binary-consensus] Run 420: outbound vote signing FAILED \
+                         (fail-closed, not transmitted): {:?}",
+                        e
+                    );
+                    None
+                }
+            }
+        }
+        Ok(ReservationOutcome::ExactRetryRetained(sig)) => {
+            vote.signature = sig;
+            let verified = verify_vote_msg_with_domain(
+                &vote,
+                *signer.validator_id(),
+                ctx.validators.as_ref(),
+                ctx.key_provider.as_ref(),
+                ctx.backend_registry.as_ref(),
+                &ctx.signing_domain,
+            )
+            .is_ok();
+            if verified {
+                inbound_stats.outbound_vote_journal_retained_resend_total = inbound_stats
+                    .outbound_vote_journal_retained_resend_total
+                    .saturating_add(1);
+                Some(vote)
+            } else {
+                inbound_stats.outbound_vote_journal_error_total = inbound_stats
+                    .outbound_vote_journal_error_total
+                    .saturating_add(1);
+                None
+            }
+        }
+        Ok(ReservationOutcome::Conflict) => {
+            inbound_stats.outbound_vote_journal_conflict_total = inbound_stats
+                .outbound_vote_journal_conflict_total
+                .saturating_add(1);
+            None
+        }
+        Ok(ReservationOutcome::PotentiallySigned) => {
+            inbound_stats.outbound_vote_journal_potentially_signed_total = inbound_stats
+                .outbound_vote_journal_potentially_signed_total
+                .saturating_add(1);
+            None
+        }
+        Ok(ReservationOutcome::Exhausted) => {
+            inbound_stats.outbound_vote_journal_exhausted_total = inbound_stats
+                .outbound_vote_journal_exhausted_total
+                .saturating_add(1);
+            None
+        }
+        Err(e) => {
+            inbound_stats.outbound_vote_journal_error_total = inbound_stats
+                .outbound_vote_journal_error_total
+                .saturating_add(1);
+            eprintln!(
+                "[binary-consensus] Run 422 D7-D10: outbound vote NOT signed \
+                 (journal error, fail-closed): {:?}",
+                e
+            );
+            None
+        }
+    }
+}
+
 /// Run 420 (F3/F8): sign a locally-originated outbound `BlockProposal` before
 /// broadcast, fail-closed.
 ///
@@ -4109,6 +4579,11 @@ fn forward_actions_to_facade(
     // Test-only `LocalFixtureUnsigned` passthrough authority, consulted ONLY
     // when no snapshot is wired. Never substitutes for a wired snapshot.
     pv_authority: Option<&ProposalVoteAuthority>,
+    // Run 422 D7-D10: the local signing-reservation journal. Production forwards
+    // `None` (guard disengaged, exact existing behavior); a test fixture may
+    // wire `Some` to durably reserve every Proposal/Vote decision before the
+    // signer runs on this immediate-outbound caller family.
+    journal: Option<&SigningReservationJournal>,
     verification_policy: ConsensusVerificationPolicy,
 ) {
     for action in actions {
@@ -4136,9 +4611,10 @@ fn forward_actions_to_facade(
                     }
                     OutboundAuthAdmission::Rejected => continue,
                 };
-                let proposal = match sign_proposal_for_broadcast(
+                let proposal = match guarded_sign_proposal_for_broadcast(
                     *proposal,
                     signer_ctx,
+                    journal,
                     verification_policy,
                     inbound_stats,
                 ) {
@@ -4190,9 +4666,10 @@ fn forward_actions_to_facade(
                     }
                     OutboundAuthAdmission::Rejected => continue,
                 };
-                let vote = match sign_vote_for_broadcast(
+                let vote = match guarded_sign_vote_for_broadcast(
                     vote,
                     signer_ctx,
+                    journal,
                     verification_policy,
                     inbound_stats,
                 ) {
@@ -4244,9 +4721,10 @@ fn forward_actions_to_facade(
                     }
                     OutboundAuthAdmission::Rejected => continue,
                 };
-                let vote = match sign_vote_for_broadcast(
+                let vote = match guarded_sign_vote_for_broadcast(
                     vote,
                     signer_ctx,
+                    journal,
                     verification_policy,
                     inbound_stats,
                 ) {
@@ -4902,6 +5380,7 @@ pub(crate) fn handle_inbound_consensus_msg(
                                 stats,
                                 current_auth,
                                 pv_authority,
+                                None,
                                 verification_policy,
                             );
                         }
@@ -10552,6 +11031,7 @@ mod tests {
                     &mut stats,
                     current_auth,
                     pv_passthrough,
+                    None, // Run 422 D7-D10: no signing-reservation journal wired
                     policy,
                 );
                 ReemitOutcome {
@@ -11058,6 +11538,7 @@ mod tests {
                     &mut stats,
                     Some(&snap),
                     None,
+                    None, // Run 422 D7-D10: no signing-reservation journal wired
                     ConsensusVerificationPolicy::Required,
                 );
                 assert_eq!(stats.outbound_proposal_late_peer_reemits, 0);
@@ -11109,6 +11590,7 @@ mod tests {
                     &mut stats,
                     Some(&snap),
                     None,
+                    None, // Run 422 D7-D10: no signing-reservation journal wired
                     ConsensusVerificationPolicy::Required,
                 );
                 assert_eq!(stats.outbound_proposal_late_peer_reemits, 1);
@@ -11130,6 +11612,7 @@ mod tests {
                     &mut stats,
                     Some(&snap),
                     None,
+                    None, // Run 422 D7-D10: no signing-reservation journal wired
                     ConsensusVerificationPolicy::Required,
                 );
                 connectivity.0.store(true, SeqCst);
@@ -11144,6 +11627,7 @@ mod tests {
                     &mut stats,
                     Some(&snap),
                     None,
+                    None, // Run 422 D7-D10: no signing-reservation journal wired
                     ConsensusVerificationPolicy::Required,
                 );
                 // Still exactly one Proposal, no Vote: single-shot preserved.
@@ -11472,6 +11956,7 @@ mod tests {
                     &mut stats,
                     Some(&snap),
                     None,
+                    None, // Run 422 D7-D10: no signing-reservation journal wired
                     ConsensusVerificationPolicy::Required,
                 );
 
@@ -11593,6 +12078,7 @@ mod tests {
                     &mut stats,
                     Some(&snap),
                     None,
+                    None, // Run 422 D7-D10: no signing-reservation journal wired
                     ConsensusVerificationPolicy::Required,
                 );
                 // The unproven entry stays rejected; replay never manufactures
@@ -13430,6 +13916,7 @@ mod tests {
                 &mut stats,
                 None, // Run 422 D7-B1: no current-authorization snapshot wired
                 None, // Proposal/Vote passthrough authority absent (production)
+                None, // Run 422 D7-D10: no signing-reservation journal wired
                 ConsensusVerificationPolicy::Required,
             );
 
@@ -13667,6 +14154,7 @@ mod tests {
                 &mut stats,
                 None, // Run 422 D7-B2: no current-authorization snapshot wired
                 None, // ABSENT Proposal/Vote authority (production wiring)
+                None, // Run 422 D7-D10: no signing-reservation journal wired
                 ConsensusVerificationPolicy::Required,
             );
 
@@ -14540,6 +15028,7 @@ mod tests {
                 &mut stats,
                 Some(&snap),
                 None,
+                None, // Run 422 D7-D10: no signing-reservation journal wired
                 ConsensusVerificationPolicy::Required,
             );
 
@@ -14695,6 +15184,7 @@ mod tests {
                 &mut stats,
                 Some(&snap),
                 None,
+                None, // Run 422 D7-D10: no signing-reservation journal wired
                 ConsensusVerificationPolicy::Required,
             );
 
@@ -14878,6 +15368,7 @@ mod tests {
                     &mut stats,
                     Some(&snap),
                     None,
+                    None,
                     ConsensusVerificationPolicy::Required,
                 );
 
@@ -14937,6 +15428,7 @@ mod tests {
                     &facade,
                     &mut stats,
                     Some(&snap),
+                    None,
                     None,
                     ConsensusVerificationPolicy::Required,
                 );
@@ -20870,6 +21362,7 @@ mod tests {
                         &mut stats,
                         current_auth,
                         pv_passthrough,
+                        None,
                         ConsensusVerificationPolicy::Required,
                     );
                     (stats, facade)
@@ -21057,6 +21550,7 @@ mod tests {
                             &facade,
                             &mut stats,
                             Some(&snap),
+                            None,
                             None,
                             ConsensusVerificationPolicy::Required,
                         );
@@ -21385,6 +21879,695 @@ mod tests {
                     assert_eq!(stats2.outbound_send_vote_to, 0);
                     assert_eq!(c.vote_calls.load(SeqCst), 1);
                     assert!(facade2.directed_votes.lock().unwrap().is_empty());
+                }
+
+                // =====================================================
+                // Run 422 D7-D10 — the guarded signing boundary with a
+                // local signing-reservation journal wired, exercised
+                // through BOTH caller families
+                // (`forward_actions_to_facade` immediate outbound and
+                // `maybe_reemit_on_late_peer_connect` cached re-emission).
+                //
+                // Every case here uses a wired coherent snapshot, the
+                // real ML-DSA-44 `RecordingSigner`, the recording facade,
+                // and DIRECT signer-call / facade-effect counts — not
+                // logs. A "process death / restart" is modelled by
+                // attaching a NEW `SigningReservationJournal` over the
+                // SAME `Arc<D10Store>`: the durable bytes survive, the
+                // in-memory live-permit map does not, which is exactly the
+                // crash-recovery posture (reading `RESERVED` from storage
+                // alone never yields a permit). The real-RocksDB
+                // close/reopen and child-process-death evidence lives in
+                // `tests/run_422_d7d10_signing_reservation_journal_tests.rs`.
+                // =====================================================
+                mod run422_d7d10 {
+                    use super::*;
+                    use crate::signing_reservation_journal::{
+                        SigningJournalStorage, SigningReservationJournal,
+                    };
+                    use crate::storage::StorageError;
+                    use std::collections::HashMap as StdHashMap;
+                    use std::sync::atomic::{AtomicBool, AtomicI64};
+                    use std::sync::RwLock as StdRwLock;
+
+                    /// A fully test-controlled, explicitly non-durable
+                    /// signing-journal backing store. It supports injected
+                    /// read failure and a write budget (so a write can be
+                    /// made to fail AFTER the reservation write succeeds,
+                    /// modelling result-persistence failure). It is NOT a
+                    /// durable backend and never claims to be; a "restart"
+                    /// is a new journal over the same `Arc<D10Store>`.
+                    #[derive(Default)]
+                    struct D10Store {
+                        map: StdRwLock<StdHashMap<Vec<u8>, Vec<u8>>>,
+                        fail_reads: AtomicBool,
+                        /// Number of writes still permitted before failing;
+                        /// `i64::MAX` on construction means effectively
+                        /// unlimited for the small fixtures here.
+                        write_budget: AtomicI64,
+                    }
+                    impl D10Store {
+                        fn new() -> Arc<Self> {
+                            Arc::new(D10Store {
+                                map: StdRwLock::new(StdHashMap::new()),
+                                fail_reads: AtomicBool::new(false),
+                                write_budget: AtomicI64::new(i64::MAX),
+                            })
+                        }
+                        fn set_fail_reads(&self, v: bool) {
+                            self.fail_reads.store(v, SeqCst);
+                        }
+                        /// Permit exactly `n` further writes, then fail.
+                        fn set_write_budget(&self, n: i64) {
+                            self.write_budget.store(n, SeqCst);
+                        }
+                        /// Overwrite the stored bytes at a position's key with
+                        /// arbitrary (e.g. corrupt) bytes, bypassing the
+                        /// journal — used to model on-disk corruption.
+                        fn poke(&self, key: &[u8], bytes: Vec<u8>) {
+                            self.map.write().unwrap().insert(key.to_vec(), bytes);
+                        }
+                    }
+                    impl SigningJournalStorage for D10Store {
+                        fn get_signing_record(
+                            &self,
+                            key: &[u8],
+                        ) -> Result<Option<Vec<u8>>, StorageError> {
+                            if self.fail_reads.load(SeqCst) {
+                                return Err(StorageError::Io("injected read failure".into()));
+                            }
+                            Ok(self.map.read().unwrap().get(key).cloned())
+                        }
+                        fn put_signing_record_synced(
+                            &self,
+                            key: &[u8],
+                            value: &[u8],
+                        ) -> Result<(), StorageError> {
+                            let remaining = self.write_budget.fetch_sub(1, SeqCst);
+                            if remaining <= 0 {
+                                // Restore so the counter cannot underflow across
+                                // repeated attempts, and fail this write.
+                                self.write_budget.fetch_add(1, SeqCst);
+                                return Err(StorageError::Io("injected write failure".into()));
+                            }
+                            self.map
+                                .write()
+                                .unwrap()
+                                .insert(key.to_vec(), value.to_vec());
+                            Ok(())
+                        }
+                    }
+
+                    fn journal(store: Arc<D10Store>) -> SigningReservationJournal {
+                        SigningReservationJournal::attach(store)
+                    }
+
+                    /// Drive one engine action through the guarded immediate
+                    /// outbound boundary WITH a wired journal.
+                    fn drive_j(
+                        snap: &AuthorizedProposalVoteSnapshot,
+                        j: &SigningReservationJournal,
+                        action: ConsensusEngineAction<ValidatorId>,
+                    ) -> (BinaryConsensusLoopInboundStats, OutboundRecorder) {
+                        let facade = OutboundRecorder::default();
+                        let mut stats = BinaryConsensusLoopInboundStats::default();
+                        forward_actions_to_facade(
+                            vec![action],
+                            &facade,
+                            &mut stats,
+                            Some(snap),
+                            None,
+                            Some(j),
+                            ConsensusVerificationPolicy::Required,
+                        );
+                        (stats, facade)
+                    }
+
+                    /// A Proposal engine action at an explicit view with an
+                    /// explicit payload hash (payload hash distinguishes
+                    /// conflicting content at the same position).
+                    fn proposal_at(
+                        epoch: u64,
+                        view: u64,
+                        payload: [u8; 32],
+                    ) -> ConsensusEngineAction<ValidatorId> {
+                        let mut header = base_header(0);
+                        header.epoch = epoch;
+                        header.height = view;
+                        header.round = view;
+                        header.payload_hash = payload;
+                        ConsensusEngineAction::BroadcastProposal(Box::new(BlockProposal {
+                            header,
+                            qc: None,
+                            txs: vec![],
+                            signature: vec![],
+                        }))
+                    }
+
+                    /// A founding-profile Vote (`step == 0`) at an explicit
+                    /// view with an explicit block id.
+                    fn vote_v0(epoch: u64, view: u64, block_id: [u8; 32]) -> Vote {
+                        let mut v = base_vote(0);
+                        v.step = 0;
+                        v.epoch = epoch;
+                        v.height = view;
+                        v.round = view;
+                        v.block_id = block_id;
+                        v
+                    }
+
+                    // ---- A. Proposal / Vote success (reserve-before-sign) ----
+
+                    #[test]
+                    fn d10_proposal_success_reserves_before_single_sign() {
+                        let fixture = make_fixture(4);
+                        let (pv, c) = recording_pv(&fixture);
+                        let snap = snapshot_matching(&pv);
+                        let store = D10Store::new();
+                        let j = journal(store);
+
+                        let (stats, facade) =
+                            drive_j(&snap, &j, proposal_at(0, 1, [9u8; 32]));
+
+                        // Exactly one signer invocation, reservation acknowledged.
+                        assert_eq!(c.proposal_calls.load(SeqCst), 1);
+                        assert_eq!(stats.outbound_proposal_journal_reserved_total, 1);
+                        assert_eq!(stats.outbound_proposal_signing_success, 1);
+                        assert_eq!(stats.outbound_proposals_sent, 1);
+                        let proposals = facade.proposals.lock().unwrap();
+                        assert_eq!(proposals.len(), 1);
+                        // Result verifies through the existing D6 verification.
+                        assert!(qbind_consensus::verify_proposal_msg_with_domain(
+                            &proposals[0],
+                            ValidatorId(0),
+                            fixture.validators.as_ref(),
+                            fixture.kp.as_ref(),
+                            fixture.br.as_ref(),
+                            &d6_control_domain(),
+                        )
+                        .is_ok());
+                    }
+
+                    #[test]
+                    fn d10_broadcast_vote_success_reserves_before_single_sign() {
+                        let fixture = make_fixture(4);
+                        let (pv, c) = recording_pv(&fixture);
+                        let snap = snapshot_matching(&pv);
+                        let store = D10Store::new();
+                        let j = journal(store);
+
+                        let (stats, facade) = drive_j(
+                            &snap,
+                            &j,
+                            ConsensusEngineAction::BroadcastVote(vote_v0(0, 1, [9u8; 32])),
+                        );
+
+                        assert_eq!(c.vote_calls.load(SeqCst), 1);
+                        assert_eq!(stats.outbound_vote_journal_reserved_total, 1);
+                        assert_eq!(stats.outbound_vote_signing_success, 1);
+                        assert_eq!(stats.outbound_votes_sent, 1);
+                        assert_eq!(facade.broadcast_votes.lock().unwrap().len(), 1);
+                    }
+
+                    #[test]
+                    fn d10_directed_vote_success_reserves_before_single_sign() {
+                        let fixture = make_fixture(4);
+                        let (pv, c) = recording_pv(&fixture);
+                        let snap = snapshot_matching(&pv);
+                        let store = D10Store::new();
+                        let j = journal(store);
+
+                        let (stats, facade) = drive_j(
+                            &snap,
+                            &j,
+                            ConsensusEngineAction::SendVoteTo {
+                                to: ValidatorId(1),
+                                vote: vote_v0(0, 1, [9u8; 32]),
+                            },
+                        );
+
+                        assert_eq!(c.vote_calls.load(SeqCst), 1);
+                        assert_eq!(stats.outbound_vote_journal_reserved_total, 1);
+                        assert_eq!(stats.outbound_send_vote_to, 1);
+                        assert_eq!(facade.directed_votes.lock().unwrap().len(), 1);
+                    }
+
+                    // ---- B. Conflict and retry ----
+
+                    #[test]
+                    fn d10_conflict_same_position_diff_content_zero_additional_sign() {
+                        let fixture = make_fixture(4);
+                        let (pv, c) = recording_pv(&fixture);
+                        let snap = snapshot_matching(&pv);
+                        let store = D10Store::new();
+
+                        // First decision at view 1 signs once and persists.
+                        let j1 = journal(store.clone());
+                        let (_s1, f1) = drive_j(&snap, &j1, proposal_at(0, 1, [1u8; 32]));
+                        assert_eq!(c.proposal_calls.load(SeqCst), 1);
+                        assert_eq!(f1.proposals.lock().unwrap().len(), 1);
+
+                        // A DIFFERENT signed content at the SAME position (same
+                        // view, different payload) through a fresh handle over
+                        // the same store: refused, zero additional signer calls,
+                        // no delivery.
+                        let j2 = journal(store.clone());
+                        let (s2, f2) = drive_j(&snap, &j2, proposal_at(0, 1, [2u8; 32]));
+                        assert_eq!(c.proposal_calls.load(SeqCst), 1, "no re-sign on conflict");
+                        assert_eq!(s2.outbound_proposal_journal_conflict_total, 1);
+                        assert_eq!(s2.outbound_proposals_sent, 0);
+                        assert!(f2.proposals.lock().unwrap().is_empty());
+                    }
+
+                    #[test]
+                    fn d10_exact_retry_reuses_retained_signature_zero_sign() {
+                        let fixture = make_fixture(4);
+                        let (pv, c) = recording_pv(&fixture);
+                        let snap = snapshot_matching(&pv);
+                        let store = D10Store::new();
+
+                        let j1 = journal(store.clone());
+                        let (_s1, f1) = drive_j(&snap, &j1, proposal_at(0, 1, [7u8; 32]));
+                        assert_eq!(c.proposal_calls.load(SeqCst), 1);
+                        let first_sig = f1.proposals.lock().unwrap()[0].signature.clone();
+
+                        // Exact same decision through a fresh handle (restart):
+                        // the retained signature is reused; the signer is NOT
+                        // invoked again; the message is still delivered.
+                        let j2 = journal(store.clone());
+                        let (s2, f2) = drive_j(&snap, &j2, proposal_at(0, 1, [7u8; 32]));
+                        assert_eq!(
+                            c.proposal_calls.load(SeqCst),
+                            1,
+                            "exact retry reuses retained signature, no re-sign"
+                        );
+                        assert_eq!(s2.outbound_proposal_journal_retained_resend_total, 1);
+                        assert_eq!(s2.outbound_proposals_sent, 1);
+                        let resent = f2.proposals.lock().unwrap();
+                        assert_eq!(resent.len(), 1);
+                        assert_eq!(resent[0].signature, first_sig, "identical retained signature");
+                    }
+
+                    #[test]
+                    fn d10_directed_and_broadcast_vote_same_decision_retained() {
+                        let fixture = make_fixture(4);
+                        let (pv, c) = recording_pv(&fixture);
+                        let snap = snapshot_matching(&pv);
+                        let store = D10Store::new();
+
+                        // Broadcast the vote (signs once).
+                        let j1 = journal(store.clone());
+                        let (_s1, _f1) = drive_j(
+                            &snap,
+                            &j1,
+                            ConsensusEngineAction::BroadcastVote(vote_v0(0, 1, [5u8; 32])),
+                        );
+                        assert_eq!(c.vote_calls.load(SeqCst), 1);
+
+                        // Directed delivery of the SAME vote is the SAME decision:
+                        // retained-signature reuse, no second signer call.
+                        let j2 = journal(store.clone());
+                        let (s2, f2) = drive_j(
+                            &snap,
+                            &j2,
+                            ConsensusEngineAction::SendVoteTo {
+                                to: ValidatorId(2),
+                                vote: vote_v0(0, 1, [5u8; 32]),
+                            },
+                        );
+                        assert_eq!(c.vote_calls.load(SeqCst), 1, "directed==broadcast decision");
+                        assert_eq!(s2.outbound_vote_journal_retained_resend_total, 1);
+                        assert_eq!(f2.directed_votes.lock().unwrap().len(), 1);
+                    }
+
+                    #[test]
+                    fn d10_proposal_and_self_vote_same_view_are_distinct_decisions() {
+                        let fixture = make_fixture(4);
+                        let (pv, c) = recording_pv(&fixture);
+                        let snap = snapshot_matching(&pv);
+                        let store = D10Store::new();
+                        let j = journal(store);
+
+                        let (sp, _fp) = drive_j(&snap, &j, proposal_at(0, 1, [9u8; 32]));
+                        let (sv, _fv) = drive_j(
+                            &snap,
+                            &j,
+                            ConsensusEngineAction::BroadcastVote(vote_v0(0, 1, [9u8; 32])),
+                        );
+
+                        // Both are fresh reservations and both sign once: a
+                        // Proposal and a self-Vote at one view are distinct kinds.
+                        assert_eq!(sp.outbound_proposal_journal_reserved_total, 1);
+                        assert_eq!(sv.outbound_vote_journal_reserved_total, 1);
+                        assert_eq!(c.proposal_calls.load(SeqCst), 1);
+                        assert_eq!(c.vote_calls.load(SeqCst), 1);
+                    }
+
+                    // ---- C. Originating view and field/version checks ----
+
+                    #[test]
+                    fn d10_reserves_action_view_not_a_later_view() {
+                        // The action for view 7 must reserve position view 7, and
+                        // a conflicting view-7 decision remains a conflict even
+                        // when offered later (modelled by a fresh handle, i.e. a
+                        // subsequent tick after engine progress).
+                        let fixture = make_fixture(4);
+                        let (pv, c) = recording_pv(&fixture);
+                        let snap = snapshot_matching(&pv);
+                        let store = D10Store::new();
+
+                        let j1 = journal(store.clone());
+                        let (_s1, _f1) = drive_j(&snap, &j1, proposal_at(0, 7, [1u8; 32]));
+                        assert_eq!(c.proposal_calls.load(SeqCst), 1);
+
+                        // Conflict at view 7 after "progress": still a conflict.
+                        let j2 = journal(store.clone());
+                        let (s2, _f2) = drive_j(&snap, &j2, proposal_at(0, 7, [2u8; 32]));
+                        assert_eq!(s2.outbound_proposal_journal_conflict_total, 1);
+                        assert_eq!(c.proposal_calls.load(SeqCst), 1);
+                    }
+
+                    #[test]
+                    fn d10_inconsistent_proposal_height_round_refused_before_sign() {
+                        let fixture = make_fixture(4);
+                        let (pv, c) = recording_pv(&fixture);
+                        let snap = snapshot_matching(&pv);
+                        let store = D10Store::new();
+                        let j = journal(store.clone());
+
+                        let mut header = base_header(0);
+                        header.height = 3;
+                        header.round = 4; // round != height
+                        let action = ConsensusEngineAction::BroadcastProposal(Box::new(
+                            BlockProposal {
+                                header,
+                                qc: None,
+                                txs: vec![],
+                                signature: vec![],
+                            },
+                        ));
+                        let (s, f) = drive_j(&snap, &j, action);
+                        assert_eq!(s.outbound_proposal_journal_position_inconsistent_total, 1);
+                        assert_eq!(c.proposal_calls.load(SeqCst), 0, "no sign on bad position");
+                        assert_eq!(s.outbound_proposals_sent, 0);
+                        assert!(f.proposals.lock().unwrap().is_empty());
+                        // Nothing was reserved.
+                        assert!(store.map.read().unwrap().is_empty());
+                    }
+
+                    #[test]
+                    fn d10_unsupported_vote_step_refused_before_sign() {
+                        let fixture = make_fixture(4);
+                        let (pv, c) = recording_pv(&fixture);
+                        let snap = snapshot_matching(&pv);
+                        let store = D10Store::new();
+                        let j = journal(store.clone());
+
+                        let mut v = vote_v0(0, 1, [9u8; 32]);
+                        v.step = 1; // founding profile requires step == 0
+                        let (s, f) =
+                            drive_j(&snap, &j, ConsensusEngineAction::BroadcastVote(v));
+                        assert_eq!(s.outbound_vote_journal_position_inconsistent_total, 1);
+                        assert_eq!(c.vote_calls.load(SeqCst), 0);
+                        assert!(f.broadcast_votes.lock().unwrap().is_empty());
+                        assert!(store.map.read().unwrap().is_empty());
+                    }
+
+                    // ---- D. Persistence failures ----
+
+                    #[test]
+                    fn d10_read_failure_yields_no_signer_call() {
+                        let fixture = make_fixture(4);
+                        let (pv, c) = recording_pv(&fixture);
+                        let snap = snapshot_matching(&pv);
+                        let store = D10Store::new();
+                        store.set_fail_reads(true);
+                        let j = journal(store.clone());
+
+                        let (s, f) = drive_j(&snap, &j, proposal_at(0, 1, [9u8; 32]));
+                        assert_eq!(c.proposal_calls.load(SeqCst), 0, "no sign on read failure");
+                        assert_eq!(s.outbound_proposal_journal_error_total, 1);
+                        assert!(f.proposals.lock().unwrap().is_empty());
+                    }
+
+                    #[test]
+                    fn d10_reservation_write_failure_yields_no_signer_call() {
+                        let fixture = make_fixture(4);
+                        let (pv, c) = recording_pv(&fixture);
+                        let snap = snapshot_matching(&pv);
+                        let store = D10Store::new();
+                        store.set_write_budget(0); // even the reservation write fails
+                        let j = journal(store.clone());
+
+                        let (s, f) = drive_j(&snap, &j, proposal_at(0, 1, [9u8; 32]));
+                        assert_eq!(c.proposal_calls.load(SeqCst), 0, "no sign without durable ack");
+                        assert_eq!(s.outbound_proposal_journal_error_total, 1);
+                        assert!(f.proposals.lock().unwrap().is_empty());
+                        assert!(store.map.read().unwrap().is_empty());
+                    }
+
+                    #[test]
+                    fn d10_result_persist_failure_suppresses_handoff_preserves_reservation() {
+                        let fixture = make_fixture(4);
+                        let (pv, c) = recording_pv(&fixture);
+                        let snap = snapshot_matching(&pv);
+                        let store = D10Store::new();
+                        // Permit exactly ONE write (the reservation); the signed
+                        // result write then fails.
+                        store.set_write_budget(1);
+                        let j = journal(store.clone());
+
+                        let (s, f) = drive_j(&snap, &j, proposal_at(0, 1, [9u8; 32]));
+                        // The signer DID run once, but the result-persist failure
+                        // suppresses facade handoff and preserves the obligation.
+                        assert_eq!(c.proposal_calls.load(SeqCst), 1);
+                        assert_eq!(s.outbound_proposal_journal_result_persist_failure_total, 1);
+                        assert_eq!(s.outbound_proposals_sent, 0);
+                        assert!(f.proposals.lock().unwrap().is_empty());
+
+                        // The reservation record survives as RESERVED; a later
+                        // retry (restart) must NOT re-sign — it is treated as
+                        // potentially-signed.
+                        store.set_write_budget(i64::MAX);
+                        let j2 = journal(store.clone());
+                        let (s2, f2) = drive_j(&snap, &j2, proposal_at(0, 1, [9u8; 32]));
+                        assert_eq!(
+                            c.proposal_calls.load(SeqCst),
+                            1,
+                            "recovered RESERVED must not re-sign"
+                        );
+                        assert_eq!(s2.outbound_proposal_journal_potentially_signed_total, 1);
+                        assert!(f2.proposals.lock().unwrap().is_empty());
+                    }
+
+                    // ---- E(model). Recovery posture (real RocksDB in the
+                    //      integration test file; here the state-machine posture).
+
+                    #[test]
+                    fn d10_recovered_reserved_only_refuses_resigning() {
+                        let fixture = make_fixture(4);
+                        let (pv, c) = recording_pv(&fixture);
+                        let snap = snapshot_matching(&pv);
+                        let store = D10Store::new();
+                        // Permit only the reservation write, then fail — leaving a
+                        // RESERVED-only record, no retained result. This is the
+                        // durable state a crash after reserve/before result leaves.
+                        store.set_write_budget(1);
+                        let j1 = journal(store.clone());
+                        let (_s1, _f1) = drive_j(&snap, &j1, proposal_at(0, 1, [3u8; 32]));
+                        assert_eq!(c.proposal_calls.load(SeqCst), 1);
+
+                        // Restart: new journal over the same bytes. RESERVED with
+                        // no live permit and no retained result ⇒ refuse.
+                        store.set_write_budget(i64::MAX);
+                        let j2 = journal(store.clone());
+                        let (s2, f2) = drive_j(&snap, &j2, proposal_at(0, 1, [3u8; 32]));
+                        assert_eq!(c.proposal_calls.load(SeqCst), 1, "no re-sign after death");
+                        assert_eq!(s2.outbound_proposal_journal_potentially_signed_total, 1);
+                        assert!(f2.proposals.lock().unwrap().is_empty());
+                    }
+
+                    #[test]
+                    fn d10_corrupt_record_on_reopen_fails_closed() {
+                        let fixture = make_fixture(4);
+                        let (pv, c) = recording_pv(&fixture);
+                        let snap = snapshot_matching(&pv);
+                        let store = D10Store::new();
+
+                        // Establish a real signed record first.
+                        let j1 = journal(store.clone());
+                        let (_s1, _f1) = drive_j(&snap, &j1, proposal_at(0, 1, [4u8; 32]));
+                        assert_eq!(c.proposal_calls.load(SeqCst), 1);
+
+                        // Corrupt the stored bytes at that position, then reopen.
+                        let position = crate::signing_reservation_journal::SigningPosition {
+                            validator_id: 0,
+                            network_genesis: *d6_control_domain().genesis_identity(),
+                            kind: crate::signing_reservation_journal::SigningKind::Proposal,
+                            originating_view: 1,
+                        };
+                        let key = position.storage_key();
+                        store.poke(&key, vec![0xFF; 16]);
+
+                        let j2 = journal(store.clone());
+                        let (s2, f2) = drive_j(&snap, &j2, proposal_at(0, 1, [4u8; 32]));
+                        // Corruption fails closed: journal error, no sign, no send.
+                        assert_eq!(c.proposal_calls.load(SeqCst), 1, "no sign on corruption");
+                        assert_eq!(s2.outbound_proposal_journal_error_total, 1);
+                        assert!(f2.proposals.lock().unwrap().is_empty());
+                    }
+
+                    // ---- F. Exclusivity and bounds ----
+
+                    #[test]
+                    fn d10_second_handle_cannot_get_second_permit_for_reserved() {
+                        let fixture = make_fixture(4);
+                        let (pv, c) = recording_pv(&fixture);
+                        let snap = snapshot_matching(&pv);
+                        let store = D10Store::new();
+
+                        // Handle 1 reserves + signs.
+                        let j1 = journal(store.clone());
+                        let (_s1, _f1) = drive_j(&snap, &j1, proposal_at(0, 1, [8u8; 32]));
+                        assert_eq!(c.proposal_calls.load(SeqCst), 1);
+
+                        // A SECOND handle over the same store cannot obtain a live
+                        // permit for the already-reserved position with different
+                        // content (conflict) — no second signing continuation.
+                        let j2 = journal(store.clone());
+                        let (s2, _f2) = drive_j(&snap, &j2, proposal_at(0, 1, [9u8; 32]));
+                        assert_eq!(c.proposal_calls.load(SeqCst), 1);
+                        assert_eq!(s2.outbound_proposal_journal_conflict_total, 1);
+                    }
+
+                    #[test]
+                    fn d10_exhaustion_refuses_further_signing() {
+                        let fixture = make_fixture(4);
+                        let (pv, c) = recording_pv(&fixture);
+                        let snap = snapshot_matching(&pv);
+                        let store = D10Store::new();
+                        // Budget of exactly one distinct position.
+                        let j = SigningReservationJournal::attach_with_budget(store, 1);
+
+                        // First position (view 1) reserves + signs.
+                        let (s1, _f1) = drive_j(&snap, &j, proposal_at(0, 1, [1u8; 32]));
+                        assert_eq!(s1.outbound_proposal_journal_reserved_total, 1);
+                        assert_eq!(c.proposal_calls.load(SeqCst), 1);
+
+                        // Second, distinct position (view 2) is refused as the
+                        // budget is exhausted — no signer call.
+                        let (s2, f2) = drive_j(&snap, &j, proposal_at(0, 2, [2u8; 32]));
+                        assert_eq!(s2.outbound_proposal_journal_exhausted_total, 1);
+                        assert_eq!(c.proposal_calls.load(SeqCst), 1, "no sign when exhausted");
+                        assert!(f2.proposals.lock().unwrap().is_empty());
+                    }
+
+                    // ---- G. Cached re-emission caller family ----
+
+                    /// A peer-connectivity source reporting exactly one connected
+                    /// peer, so `maybe_reemit_on_late_peer_connect` observes a
+                    /// genuine new-peer transition and attempts re-emission.
+                    struct OneReemitPeer(NodeId);
+                    impl PeerConnectivitySource for OneReemitPeer {
+                        fn connected_peers(&self) -> Vec<NodeId> {
+                            vec![self.0]
+                        }
+                    }
+
+                    #[test]
+                    fn d10_cached_reemission_reuses_retained_signatures_no_resign() {
+                        // Immediate outbound at the engine's current view signs the
+                        // Proposal + self-Vote once each and persists them; a later
+                        // cached re-emission of the SAME decisions through the
+                        // SEPARATE cached-re-emission caller family reuses the
+                        // retained signatures with ZERO additional signer calls.
+                        let fixture = make_fixture(4);
+                        let (pv, c) = recording_pv(&fixture);
+                        let snap = snapshot_matching(&pv);
+                        let store = D10Store::new();
+                        let j = journal(store.clone());
+
+                        let engine = make_engine(ValidatorId(0), 4);
+                        assert!(engine.is_leader_for_current_view());
+                        let view = engine.current_view();
+
+                        // Immediate family: sign + persist proposal and self-vote
+                        // at the engine's current view.
+                        let (_sp, _fp) = drive_j(&snap, &j, proposal_at(0, view, [9u8; 32]));
+                        let (_sv, _fv) = drive_j(
+                            &snap,
+                            &j,
+                            ConsensusEngineAction::BroadcastVote(vote_v0(0, view, [9u8; 32])),
+                        );
+                        assert_eq!(c.proposal_calls.load(SeqCst), 1);
+                        assert_eq!(c.vote_calls.load(SeqCst), 1);
+
+                        // Build cached decisions with IDENTICAL signed content, so
+                        // they resolve to the same position + binding.
+                        let cached_proposal = {
+                            let mut header = base_header(0);
+                            header.epoch = 0;
+                            header.height = view;
+                            header.round = view;
+                            header.payload_hash = [9u8; 32];
+                            CachedLeaderProposal {
+                                view,
+                                proposal: BlockProposal {
+                                    header,
+                                    qc: None,
+                                    txs: vec![],
+                                    signature: vec![],
+                                },
+                                provenance: CachedReemissionProvenance::capture(Some(&snap)),
+                            }
+                        };
+                        let cached_vote = CachedLeaderVote {
+                            view,
+                            vote: vote_v0(0, view, [9u8; 32]),
+                            provenance: CachedReemissionProvenance::capture(Some(&snap)),
+                        };
+
+                        let facade = OutboundRecorder::default();
+                        let mut stats = BinaryConsensusLoopInboundStats::default();
+                        let mut lp = Some(cached_proposal);
+                        let mut lv = Some(cached_vote);
+                        let mut reemitted: Option<u64> = None;
+                        let mut last_peers: HashSet<NodeId> = HashSet::new();
+                        let connectivity = OneReemitPeer(pv_node_for(1));
+
+                        maybe_reemit_on_late_peer_connect(
+                            &engine,
+                            &mut lp,
+                            &mut lv,
+                            &mut reemitted,
+                            &mut last_peers,
+                            &connectivity,
+                            Some(&facade),
+                            &mut stats,
+                            Some(&snap),
+                            None,
+                            Some(&j),
+                            ConsensusVerificationPolicy::Required,
+                        );
+
+                        // Both cached decisions re-emitted via retained-result
+                        // reuse, no re-sign; admission/confirmation preserved
+                        // (they were actually delivered to the facade).
+                        assert_eq!(
+                            c.proposal_calls.load(SeqCst),
+                            1,
+                            "cached proposal reemission reused retained signature"
+                        );
+                        assert_eq!(
+                            c.vote_calls.load(SeqCst),
+                            1,
+                            "cached vote reemission reused retained signature"
+                        );
+                        assert_eq!(stats.outbound_proposal_journal_retained_resend_total, 1);
+                        assert_eq!(stats.outbound_vote_journal_retained_resend_total, 1);
+                        assert_eq!(facade.proposals.lock().unwrap().len(), 1);
+                        assert_eq!(facade.broadcast_votes.lock().unwrap().len(), 1);
+                    }
                 }
             }
             // =============================================================
