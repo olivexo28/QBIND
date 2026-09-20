@@ -1013,28 +1013,92 @@ production; the guard engages only when a journal is explicitly wired (tests).
 
 ### 9.4 Exclusivity, live continuation, recovered-record behavior
 
-* **Exclusivity** is a per-instance `Mutex` serializing the read-then-write
-  reservation across every handle/caller sharing that journal; the durable
-  acknowledgement corresponds to the signing-record write itself. An atomic
-  batch alone is not treated as sufficient.
-* **Live continuation:** only the one exclusive live operation holding an
-  in-memory permit that has not yet invoked the signer may sign once. This
-  permit is **not** reconstructible by reading `Reserved` from storage.
+> **Run 422 D7-D10 Corrections B/C (this pass):** the earlier position-level
+> boolean ownership was replaced with a shared **ownership domain** plus an
+> operation-bound, **one-use** continuation, and result publication is now a
+> **checked, capability-gated** transition with an explicit durable-acknowledgement
+> rule. The paragraphs below describe the corrected model. Earlier positive
+> wording is superseded historical evidence only.
+
+* **Exclusivity (ownership domain):** every supported handle attached over one
+  backend instance shares a single `SigningOwnershipDomain` (owned by the
+  backend and fetched through the `SigningJournalStorage::signing_ownership_domain`
+  trait method, cached per-instance). A second handle **cannot** bypass
+  coordination by allocating its own mutex — reservation *and* checked result
+  publication run under the one domain mutex, so the read-validate-write is a
+  single serialized transition. Scope is **one local journal/storage ownership
+  domain**: a different backend instance over the same on-disk directory (a real
+  close/reopen, or a modelled restart) is a **fresh** domain — this is the honest
+  crash-recovery posture, not cross-copy/cross-host exclusivity. A genuinely
+  foreign journal/operation is rejected by domain-token mismatch. The durable
+  acknowledgement corresponds to the signing-record synced write itself; an
+  atomic batch alone is not treated as sufficient.
+* **Operation-bound one-use continuation:** a fresh reservation returns a
+  `SigningContinuation` created **only after** the reservation write's durability
+  acknowledgement, bound to the domain, position, binding, and a unique live
+  operation id. It is **non-cloneable**, has no public constructor (so a durable
+  `Reserved` record can never be turned into one), and is consumed **at most
+  once** by move (`consume_for_signing`) immediately before the signer runs,
+  yielding a `ResultPublicationCapability` for the *same* operation. The API
+  rejects: invocation without a fresh continuation, duplicate consumption, wrong
+  position/binding, foreign domain/operation, recovered `Reserved` converted to a
+  live continuation, and a second caller inheriting another operation's unused
+  continuation. Dropping, failing, or losing a continuation does **not** release
+  the durable reservation or return the position to unused state.
+* **Checked publication:** `record_signed_result` requires the valid
+  publication capability (matching domain, live+invoked operation, position, and
+  binding), a valid stored record with a permitted transition, and a bounded,
+  structurally valid retained result, then performs the required durable synced
+  write. It refuses missing/foreign/stale operations, arbitrary position/binding
+  arguments, empty/oversized results, and any conflicting overwrite of an
+  existing signed obligation. Retaining publication authority never re-authorizes
+  signing.
 * **After process death:** a recovered `Reserved` (or otherwise uncertain state
-  without a usable retained result) is **PotentiallySigned** → refuse re-signing
-  and preserve the reservation. A valid retained result for the exact decision
-  is eligible only for resend after association + current-authorization checks.
-  A conflicting request is refused without altering the original obligation.
-* **Durable result handling:** if result persistence fails/uncertain after
-  signing, the facade handoff is suppressed, the reservation is preserved, and
-  the signer is not re-invoked. Retained results are validated via existing D6
-  verification before reuse; no pruning is authorized in this task.
+  without a usable *acknowledged* retained result) is **PotentiallySigned** →
+  refuse re-signing and preserve the reservation. A valid retained result for the
+  exact decision is eligible only for resend after association +
+  current-authorization checks. A conflicting request is refused without altering
+  the original obligation.
+* **Uncertain / idempotent result writes:** readable byte-equality is **not** a
+  durability barrier. If a result write becomes readable but its durability
+  operation returns an error/uncertain outcome, publication is **not** reported
+  successful; an in-process retry observes the unacknowledged live operation and
+  is refused as **PotentiallySigned** (never re-signing), and re-publication
+  through the same capability re-issues the synced write until a durable
+  acknowledgement is established. Idempotent identical republication succeeds
+  **only** once this operation holds a durable acknowledgement in-process; it can
+  never replace its signature with different bytes. If result persistence
+  fails/uncertain after signing, the facade handoff is suppressed, the
+  reservation is preserved, and the signer is not re-invoked. Retained results are
+  validated via existing D6 verification before reuse; no pruning is authorized in
+  this task.
+* **What is known:** a successful acknowledged write in the live process
+  establishes the in-process durable barrier; a visible record following an
+  uncertain write establishes readability only (not power-loss durability);
+  reopening stored state after process death establishes the recovered durable
+  bytes but a fresh (empty) live table. Power-loss durability is **not** inferred
+  from a read, checksum, or process restart alone.
 
 ### 9.5 Executed evidence levels and unexecuted dependencies
 
-* **Executed:** source-contract → colocated unit + injected-failure tests →
-  real-RocksDB restart/reopen → bounded child-process death/reopen. Direct
-  signer-call counts and facade effects are asserted (not logs alone).
+* **Executed (Corrections B/C pass):** source-contract → journal unit tests
+  (operation-bound capability ownership: foreign domain, dropped continuation,
+  conflicting/idempotent/oversize publication, and the store-then-error
+  uncertainty rule) → colocated handler tests (fresh continuation consumed once
+  before the signer, publication through the matching operation, facade handoff
+  suppressed on publication failure, **deterministic concurrent** contested
+  reservation via a bounded barrier proving at most one live signing across
+  supported handles, and the store-then-error write-uncertainty case) →
+  real-RocksDB restart/reopen (reserve→consume→publish→reopen→exact retrieval,
+  reserved-only reopen refusing a new continuation, conflict-after-reopen,
+  idempotent + conflicting-overwrite, shared-handle ownership over the real
+  backend) → bounded child-process death/reopen. Direct signer-call counts and
+  facade effects are asserted (not logs alone).
+* **Still OPEN in D10 (not addressed by this pass):** Correction A
+  (missing-journal refusal across all signing routes), Correction D (post-storage
+  original-owner revalidation and remaining identity/version checks), Correction E
+  (established-journal initialization and persistent capacity accounting), and the
+  remaining F engine-progress/process-runner work.
 * **Not executed / still unmet (unchanged posture):** durable anti-rollback
   anchor (§6.6), consensus-lock recovery (§5.3/§6.7), whole-copy rollback,
   copied-key/cross-host exclusivity, Timeout/NewView compatibility, power-loss
@@ -1042,7 +1106,7 @@ production; the guard engages only when a journal is explicitly wired (tests).
   **not** close any of these.
 
 ```
-D7D10_LOCAL_SIGNING_RESERVATION=CODE-AND-STORAGE-TEST-POSITIVE
+D7D10_LOCAL_SIGNING_RESERVATION=PARTIAL   (Corrections B/C complete for their demonstrated local scope; A, D, E, F remain OPEN. Supersedes the earlier CODE-AND-STORAGE-TEST-POSITIVE wording, which is retained only as historical evidence.)
 D7D9_SIGNING_STATE_CONTINUITY_CONTRACT=DEFINED-NOT-IMPLEMENTED   (D9 record preserved)
 D7D8_RESTORE_COMPLETION_CONTAINMENT=CODE-AND-RELEASE-TEST-POSITIVE   (preserved)
 D7_STATUS=PARTIAL-CODE-TEST / PRODUCTION-LIFECYCLE-UNAVAILABLE
