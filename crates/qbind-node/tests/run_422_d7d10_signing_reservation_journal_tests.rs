@@ -146,6 +146,13 @@ fn reserved_only_survives_reopen_and_refuses_resigning() {
 
 /// A signed result survives a reopen and supports an exact resend (retained
 /// signature reuse), while conflicting content stays refused.
+///
+/// Run 422 D7-D10 Correction B: after reopen the retained resend is offered only
+/// once the recovered `Signed` record has had its signing-record durability
+/// barrier established (the identical record is reissued through the synced-write
+/// operation). Over this real RocksDB backend the synced write succeeds, so the
+/// exact-retry retained signature is served; the acknowledgement is thereafter
+/// cached bound to the exact record.
 #[test]
 fn signed_result_survives_reopen_and_supports_exact_resend() {
     let dir = tempfile::tempdir().expect("tempdir");
@@ -180,6 +187,69 @@ fn signed_result_survives_reopen_and_supports_exact_resend() {
             .expect("conflict lookup"),
         ReservationOutcome::Conflict
     ));
+
+    // The recovery acknowledgement is cached bound to the exact record: a
+    // second exact retry over the SAME reopened journal remains a retained
+    // resend of the identical signature (no additional durability op is needed).
+    match journal.reserve_for_sign(&pos, &bind).expect("second retry lookup") {
+        ReservationOutcome::ExactRetryRetained(sig) => assert_eq!(sig, signature),
+        other => panic!("expected ExactRetryRetained, got {:?}", other),
+    }
+}
+
+/// Run 422 D7-D10 Correction A over the real RocksDB backend: an empty signed
+/// result is refused at the checked publication boundary; the durable bytes are
+/// unchanged (still a valid RESERVED record that decodes); the oversized refusal
+/// is preserved; and a valid nonempty result still publishes and is retained for
+/// an exact retry.
+#[test]
+fn empty_result_publication_refused_over_real_storage() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let pos = proposal_position(17);
+    let bind = binding(0x2E);
+
+    let store = open_store(dir.path());
+    let journal =
+        SigningReservationJournal::attach(store.clone() as Arc<dyn SigningJournalStorage>);
+    let cap = reserve_and_invoke(&journal, &pos, &bind);
+
+    // Snapshot the durable RESERVED bytes before the invalid publication attempt.
+    let key = pos.storage_key();
+    let before = store
+        .get_signing_record(&key)
+        .expect("read")
+        .expect("reserved present");
+
+    // Publishing an EMPTY result is refused with a typed error before any write.
+    assert!(matches!(
+        journal.record_signed_result(&cap, b""),
+        Err(JournalError::InvalidResultPublication(_))
+    ));
+
+    // The durable bytes are byte-identical and unchanged.
+    let after = store
+        .get_signing_record(&key)
+        .expect("read")
+        .expect("still present");
+    assert_eq!(before, after, "empty publication must not alter stored bytes");
+
+    // The oversized refusal is unaffected (control); MAX_RETAINED_SIGNATURE_LEN
+    // is 8 KiB, so 8 KiB + 1 is over-bound.
+    let oversized = vec![0x5Au8; 8 * 1024 + 1];
+    assert!(matches!(
+        journal.record_signed_result(&cap, &oversized),
+        Err(JournalError::OversizeRecord { .. })
+    ));
+
+    // A valid nonempty result publishes durably and is retained for exact retry.
+    let signature = vec![0x91, 0x92, 0x93, 0x94];
+    journal
+        .record_signed_result(&cap, &signature)
+        .expect("valid nonempty publish");
+    match journal.reserve_for_sign(&pos, &bind).expect("retry lookup") {
+        ReservationOutcome::ExactRetryRetained(sig) => assert_eq!(sig, signature),
+        other => panic!("expected ExactRetryRetained, got {:?}", other),
+    }
 }
 
 /// A Proposal and a self-Vote at the same view are distinct decisions and each
