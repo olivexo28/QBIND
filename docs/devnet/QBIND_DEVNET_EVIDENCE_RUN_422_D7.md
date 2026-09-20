@@ -7623,3 +7623,237 @@ SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO
 ```
 
 No readiness promotion, authority activation, or Run 423 work. C4/C5 remain OPEN.
+
+## Run 422 D7-D8 — RTR final-component symlink refusal and completed acceptance evidence (corrections A–D)
+
+This delta continues the D7-D8 completion pass above and resolves the four
+review findings that remained after it: (A) the bounded RTR reader followed a
+final-component symlink so a dangling symlink at the authoritative RTR pathname
+mapped to `Absent`; (B) the invalid-database release-binary integration case
+covered only VM-v0; (C) `d7d8_a_complete_then_ordinary_restart_preserves_state`
+checked only the original restored account value and discarded the epoch
+observation, so it did not prove preservation of *later* progress; and (D) the
+lock test used a helper that discarded the kill result/exit status and several
+new negative cases asserted marker absence without requiring complete capture.
+Earlier D7-D8 evidence and figures above are preserved unchanged as the
+prior-pass record.
+
+### Checkout and objects
+
+* Branch: `copilot/copilotcopilotcopilotrun-422-d7-d8-again` (supplied branch,
+  used unchanged; differs from the reviewed `copilot/copilotcopilotrun-422-d7-d8-again`).
+* Reviewed references `09f7001c85de738a37e340f769011edcf52d3c51` (final revision)
+  and `441c9fb69c71962fee653e6212c86e5613d4ca58` (release-build checkpoint) are
+  **not present** in this shallow single-branch clone (`git cat-file` fails);
+  the accepted implementation was confirmed by direct worktree inspection, not
+  ancestry. Content correspondence — not commit ancestry — was used throughout.
+* `task/warning.txt` and per-file line endings were preserved. Only the two
+  authorized code/test files and the four documentation files were changed.
+
+### Correction A — reject final-component RTR symlinks (production change, non-trivial)
+
+The single authorized production change is in
+`crates/qbind-node/src/restore_completion.rs`: `open_regular_final_record` now
+opens the authoritative final record with `libc::O_NONBLOCK | libc::O_NOFOLLOW`
+(previously `O_NONBLOCK` only). The change is atomic at open (no
+check-then-follow race) and scoped to the final component only — no
+ancestor-path hardening or arbitrary-rollback protection was added.
+
+* Genuine absence → open `NotFound` → `Ok(None)` → `RtrReadResult::Absent`
+  (ordinary lifecycle preserved).
+* A final-component symlink (valid target **or** dangling) → `ELOOP` → caught by
+  the existing catch-all → `RtrError::Io` **refusal**. `symlink_metadata` is used
+  in the tests to prove the link itself (and its target) is neither deleted,
+  replaced, nor repaired, since `Path::exists()` alone cannot distinguish a
+  dangling link from absence.
+* FIFO/other non-regular files remain refused by the post-open `fstat`
+  regular-file check; the bounded `max + 1` read and decode behavior is
+  unchanged.
+
+Unit tests through the real reader (`restore_completion` lib, 51 pass) added
+this pass: genuine-absence control; regular valid RTR read normally; symlink→
+valid-RTR refused **and preserved**; dangling symlink refused **and preserved**;
+ordinary-startup precondition refuses a final-component symlink; requested-
+restore precondition refuses a dangling symlink. Existing FIFO/non-regular and
+bounded-reader cases remain green. A timeout is treated as a test failure, never
+as evidence of refusal.
+
+### Correction B — release-binary profile matrix across both execution profiles
+
+The existing invalid-database integration case was minimally parameterized into
+`run_correction_b_matrix`, reusing the genuine binary-produced COMPLETE,
+snapshot fixture, runner, and independent-reopen helpers. It is invoked by two
+release-binary test wrappers:
+
+* `d7d8_correction_b_missing_or_unrelated_state_refuses_via_binary` (VM-v0).
+* `d7d8_correction_b_missing_or_unrelated_state_refuses_via_binary_nonce_only`
+  (the supported non-VM-v0 profile; CLI spelling `--execution-profile nonce-only`,
+  confirmed from `crates/qbind-node/src/cli.rs`).
+
+For each profile the matrix covers, with deterministic fixtures (no reliance on
+permission denial that disappears under root): valid restored database → admitted
+normally; missing database directory → refusal; empty directory → refusal;
+unrelated-only directory → refusal **without** initializing a replacement DB;
+invalid/unopenable database (a bogus `state_vm_v0/CURRENT` pointing at a missing
+manifest) → refusal. Each negative case asserts a natural nonzero exit with the
+expected specific refusal, complete capture (`stderr_capture().is_complete()`)
+before any forbidden-marker-absence assertion, no service/consensus dispatch, no
+replacement-database initialization (no `MANIFEST-*` created; the bogus `CURRENT`
+is preserved unchanged), and preserved sentinel/RTR evidence. The guarantee stays
+scoped to the existing database-open checks (not a whole-directory byte-identity
+scrub); a failed open may leave permitted diagnostic/lock artifacts.
+
+### Correction C — preservation after fixture-driven account and epoch progress
+
+`d7d8_a_complete_then_ordinary_restart_preserves_state` was strengthened to prove
+preservation of *progressed* state, not just the original restored value:
+
+1. Produce a genuine COMPLETE through the release binary; reap the child and
+   close all handles.
+2. Read and retain the actual RTR and the initial account/epoch observations.
+3. Using the existing fixture storage APIs (`RocksDbAccountState` /
+   `RocksDbConsensusStorage`), advance the account state and consensus epoch to
+   **distinct** values; persist and close handles before the next launch.
+4. Start ordinarily (no restore flag); observe successful ordinary startup and
+   existing-database admission; reap and independently reopen the stores.
+
+Asserted: the advanced account value remains; the advanced consensus epoch
+remains; the historical snapshot epoch is **not** reapplied; no restore baseline
+is reapplied; **neither INTENT nor COMPLETE** is republished; the authoritative
+RTR remains the same historical completion record. The epoch observation is no
+longer discarded, and `None` vs `Some(0)` semantics are preserved in the related
+epoch-matrix tests. The advancement is described accurately as **fixture-driven**:
+it is not authenticated consensus progress, durable anti-rollback, or
+signing-state recovery.
+
+### Correction D — classified termination and capture-integrity evidence in the lock test
+
+`d7d8_c_destination_lock_contention_death_and_reacquire` was corrected to use the
+runner's established evidence checks:
+
+* The holder is kept **alive** (via `wait_for_marker_alive`) while the contender
+  runs.
+* The contender is required to fail with the **specific** destination-lock
+  refusal (not a generic startup failure or port collision), and
+  `stderr_capture().is_complete()` is required before any forbidden-marker
+  absence is asserted.
+* After contention the holder is terminated through the existing classified
+  termination path (`observe_then_terminate` / `expect_observed_then_terminated`),
+  requiring a successful deliberate kill with the expected signal
+  (`EXPECTED_TERMINATION_SIGNAL = 9`) and completed reaping.
+* The successor's positive reacquisition is observed through the same classified
+  path; the lock file is never unlinked to force reacquisition; and the
+  subsequent proof that a reacquired lock does not bypass an ordinary-startup
+  INTENT refusal is retained.
+
+Complete-capture checks were also applied to the occupied-refusal case
+(`d7d8_b_occupied_refusal_then_ordinary_start`) and the other newly added
+negative cases that assert absence. For occupied-refusal followed by ordinary
+startup, the consensus epoch is independently inspected before and after (a
+missing epoch-write log alone does not prove storage was unchanged); the account
+sentinel and absent-RTR assertions are retained. Best-effort cleanup is left as
+cleanup and is never used as affirmative process-death evidence.
+
+### Acceptance matrix (this pass)
+
+Overlapping subsets are identified rather than summed (the 34-case release target
+is a strict superset that includes the D3–D7 cases).
+
+| Requirement | Test name | Execution level | Concrete assertion | Result |
+|---|---|---|---|---|
+| A: genuine absence = ordinary lifecycle | `restore_completion::tests` absence control | unit (real reader) | open `NotFound` → `Absent` | PASS |
+| A: valid regular RTR read | `restore_completion::tests` valid-RTR | unit (real reader) | record decoded normally | PASS |
+| A: symlink→valid RTR refused + preserved | `restore_completion::tests` symlink-to-valid | unit (real reader) | `ELOOP` → refusal; link+target intact (`symlink_metadata`) | PASS |
+| A: dangling symlink refused + preserved | `restore_completion::tests` dangling-symlink | unit (real reader) | `ELOOP` → refusal; link intact, not repaired | PASS |
+| A: ordinary-startup precondition symlink refusal | `restore_completion::tests` ordinary-startup symlink | unit (real reader) | refusal before protected use | PASS |
+| A: requested-restore precondition dangling refusal | `restore_completion::tests` requested-restore dangling | unit (real reader) | refusal before protected use | PASS |
+| A: FIFO/non-regular + bounded reader remain green | existing `restore_completion` cases | unit (real reader) | 51/51 pass | PASS |
+| B: VM-v0 valid/missing/empty/unrelated/invalid | `d7d8_correction_b_missing_or_unrelated_state_refuses_via_binary` | release binary | valid admitted; 4 negatives exit 1 with specific refusal, capture complete, no re-init | PASS |
+| B: nonce-only same matrix | `d7d8_correction_b_missing_or_unrelated_state_refuses_via_binary_nonce_only` | release binary | same as above for `--execution-profile nonce-only` | PASS |
+| C: preservation after account+epoch progress | `d7d8_a_complete_then_ordinary_restart_preserves_state` | release binary | advanced account+epoch retained; snapshot epoch/baseline not reapplied; no INTENT/COMPLETE republish; RTR unchanged | PASS |
+| C: COMPLETE ordering before protected open | `d7d8_correction_a_vm_v0_state_opens_only_after_durable_complete` | release binary | INTENT→epoch→COMPLETE→VM-v0 existing-only open | PASS |
+| D: occupied refusal → ordinary start | `d7d8_b_occupied_refusal_then_ordinary_start` | release binary | `TargetStateNotEmpty`; complete capture; epoch before/after inspected; no committed epoch applied | PASS |
+| D: classified lock contention/death/reacquire | `d7d8_c_destination_lock_contention_death_and_reacquire` | release binary | specific lock refusal + complete capture; classified SIGKILL(9) + reaping; successor reacquires; lock file never unlinked; INTENT refusal not bypassed | PASS |
+| Runner evidence-check guards | `runner_control_*`, `classify_termination_decision_table`, `complete_capture_is_the_only_absence_supporting_outcome`, `capture_*` | unit | termination classifier + capture-completeness self-tests | PASS |
+
+### Validation outcomes (this pass, recorded)
+
+* `cargo test -p qbind-node --lib restore_completion` — **51 pass** (includes the
+  6 new symlink/absence cases).
+* `cargo test -p qbind-node --lib vm_v0_runtime` — **15 pass**.
+* Full extended D3–D8 integration target against the **release** executable via
+  `QBIND_D7D3_NODE_BIN` — **34/34 pass**.
+* `b3_snapshot_restore_tests` — **10 pass**; `b5_restore_aware_consensus_start_tests`
+  — **4 pass**.
+* `run_093_production_consensus_storage_lifecycle_tests` — **12 pass**;
+  `run_097_snapshot_epoch_parity_tests` — **7 pass**.
+* `run_422_startup_refusal_tests` — **4 pass**;
+  `run_422_d4_startup_ordering_tests` — **5 pass**.
+* `cargo check -p qbind-node` (default production features) — clean.
+* Focused Clippy on the changed `restore_completion` region — no findings (the
+  pre-existing `acquire_destination_lock` `.create(true)` lint at line 866 is an
+  intentional false positive — the lock file must never be truncated — and was
+  left untouched). No repository-wide formatter was run; only changed-region
+  wrapping/whitespace was hand-checked. `task/warning.txt` preserved.
+
+### Release executable identity (this pass)
+
+```
+source revision : 18036eaa54df164ceb60fc0583e76277e9750d0f (pre-doc checkpoint;
+                  code/test tree identical to the pushed final revision)
+build command   : cargo build --release -p qbind-node --bin qbind-node
+profile         : release (optimized)
+features        : default production features
+executable      : target/release/qbind-node
+byte length     : 17031472
+sha256          : 9abb0c6e25dbd4d1ec8a4bf3f88e3c8d6ef2ef881b20f6430535b8ed4538dd58
+integration run : QBIND_D7D3_NODE_BIN=<abs>/target/release/qbind-node \
+                  cargo test -p qbind-node --test \
+                  run_422_d7d3_binary_snapshot_restore_characterization_tests
+                  => 34 passed; 0 failed
+```
+
+Unit/helper observations (real reader, in-process) are reported separately from
+the unmodified release-executable observations. No new production
+fault-injection switch was added; process termination and injected errors do not
+prove power-loss durability.
+
+### Security-tool outcomes (recorded literally)
+
+Production change declared non-trivial (`codeql.isTrivial=false`). Literal
+outcomes from the `parallel_validation` run for this pass:
+
+* **CodeQL (rust):** _recorded literally in the final report_ — a scope/size skip
+  is **not** a passed scan; "0 alerts" after a skipped analysis is not a pass.
+* **Code Review:** _recorded literally in the final report_ — a "no comments"
+  result after a backend/model error is **not** an independent clean pass.
+
+Earlier D7 skips/qualified outcomes are not overwritten.
+
+### Scoped verdict (this pass)
+
+```
+D7D8_RESTORE_COMPLETION_CONTAINMENT=CODE-AND-RELEASE-TEST-POSITIVE
+```
+
+This applies only to the demonstrated restore-admission and startup-containment
+scope: final-component symlink refusal, valid/invalid COMPLETE destinations
+across **both** execution profiles, completion followed by fixture-driven
+account/epoch progress and ordinary restart, occupied refusal followed by
+ordinary startup, classified holder termination/contention/reacquisition, and
+retained late-failure containment and requested-retry refusal. It does **not**
+establish power-loss durability, durable anti-rollback, consensus recovery,
+signing-state continuity, or production authority readiness.
+
+### Retained posture (unchanged)
+
+```
+D7_STATUS=PARTIAL-CODE-TEST / PRODUCTION-LIFECYCLE-UNAVAILABLE
+DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED
+GENESIS_AUTHORITY_ACTIVATION=DISABLED
+PRODUCTION_WIRE_CHAIN_ID_BEHAVIOR=UNCHANGED
+CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED
+SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO
+```
+
+No readiness promotion, authority activation, or Run 423 work. C4/C5 remain OPEN.
