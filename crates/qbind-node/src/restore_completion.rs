@@ -2030,11 +2030,8 @@ mod tests {
     #[test]
     fn requested_restore_precondition_refuses_dangling_symlink() {
         let tmp = tempfile::tempdir().expect("tempdir");
-        std::os::unix::fs::symlink(
-            tmp.path().join("missing_target"),
-            rtr_path(tmp.path()),
-        )
-        .expect("symlink");
+        std::os::unix::fs::symlink(tmp.path().join("missing_target"), rtr_path(tmp.path()))
+            .expect("symlink");
         assert!(matches!(
             evaluate_requested_restore_precondition(tmp.path()),
             RequestedRestorePrecondition::RefuseInvalid(_)

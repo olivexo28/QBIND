@@ -3378,7 +3378,8 @@ fn with_nonce_only_profile(mut args: Vec<String>) -> Vec<String> {
 /// marker: the required restored account database is validated existing-only and
 /// NO VM-v0 runtime is built. This is the profile-independent existing-only
 /// validation surfacing under a non-VM-v0 profile.
-const M_VM_V0_VALIDATED_NONRUNTIME: &str = "[vm-v0] validated required restored account database at";
+const M_VM_V0_VALIDATED_NONRUNTIME: &str =
+    "[vm-v0] validated required restored account database at";
 
 /// Correction A — the protected VM-v0 account state is opened ONLY after the
 /// durable restore-completion boundary (INTENT published -> durable epoch
@@ -3510,7 +3511,10 @@ fn run_correction_b_matrix(
 
     // ---- Case 2 (missing database directory): remove the state dir entirely. ----
     std::fs::remove_dir_all(&state_dir).expect("remove restored db");
-    assert!(!state_dir.exists(), "[{tag}] state dir must be absent for the missing case");
+    assert!(
+        !state_dir.exists(),
+        "[{tag}] state dir must be absent for the missing case"
+    );
     // The profile-independent ordinary-startup guard refuses (COMPLETE present,
     // required installed state missing).
     run_negative("phase2-missing", M_D7D8_MISSING_STATE, true);
@@ -3571,7 +3575,11 @@ fn d7d8_correction_b_missing_or_unrelated_state_refuses_via_binary() {
 /// validated-no-runtime line instead of the VM-v0 runtime-open line).
 #[test]
 fn d7d8_correction_b_missing_or_unrelated_state_refuses_via_binary_nonce_only() {
-    run_correction_b_matrix("nonce-only", with_nonce_only_profile, M_VM_V0_VALIDATED_NONRUNTIME);
+    run_correction_b_matrix(
+        "nonce-only",
+        with_nonce_only_profile,
+        M_VM_V0_VALIDATED_NONRUNTIME,
+    );
 }
 
 /// Scenario A — a successful completion, then FIXTURE-DRIVEN account/epoch
@@ -3598,7 +3606,14 @@ fn d7d8_a_complete_then_ordinary_restart_preserves_state() {
     let snapshot_dir = snap_root.path().join("snap-complete");
     // Snapshot fixture: account (7, 4242), historical snapshot epoch Some(7).
     const SNAPSHOT_EPOCH: u64 = 7;
-    build_real_snapshot(src.path(), &snapshot_dir, chain_id, 230, 4242, Some(SNAPSHOT_EPOCH));
+    build_real_snapshot(
+        src.path(),
+        &snapshot_dir,
+        chain_id,
+        230,
+        4242,
+        Some(SNAPSHOT_EPOCH),
+    );
 
     // ---- Phase 1: real restore to durable COMPLETE. ----
     let restore_args = with_vm_v0_profile(restore_localmesh_args(data_dir.path(), &snapshot_dir));
@@ -3644,7 +3659,10 @@ fn d7d8_a_complete_then_ordinary_restart_preserves_state() {
     // Fixture-driven progress to DISTINCT values (all handles closed before the
     // next child launches). This is a direct storage write, not consensus.
     let advanced_account = AccountState::new(11, 55_555);
-    assert_ne!(advanced_account, account_before, "progress must be distinct");
+    assert_ne!(
+        advanced_account, account_before,
+        "progress must be distinct"
+    );
     const ADVANCED_EPOCH: u64 = 9;
     assert_ne!(ADVANCED_EPOCH, SNAPSHOT_EPOCH, "epoch progress must be distinct");
     {
@@ -3898,7 +3916,11 @@ fn d7d8_c_destination_lock_contention_death_and_reacquire() {
     let (c_status, c_stderr, c_capture) = {
         let mut contender = DrainedChild::spawn(&contender_args);
         let status = contender.wait_natural_exit(NEGATIVE_DEADLINE);
-        (status, contender.stderr_snapshot(), contender.stderr_capture())
+        (
+            status,
+            contender.stderr_snapshot(),
+            contender.stderr_capture(),
+        )
     };
     maybe_dump_child_stderr("D7D8-C-contender", &c_stderr);
     assert_eq!(
