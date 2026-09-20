@@ -394,6 +394,23 @@ impl SigningDecisionRecord {
     }
 }
 
+/// Test-only: fabricate a correctly-checksummed `Reserved` record encoding at
+/// `position`/`binding` while overriding the declared record-format version.
+/// Used by real-storage recovery tests to inject an otherwise-well-formed but
+/// unsupported-version record so the fail-closed decode path can be exercised
+/// through the public [`SigningJournalStorage`] surface. This is not a
+/// production path and never grants a signing permit.
+#[cfg(any(test, feature = "test-utils"))]
+pub fn fabricate_reserved_record_bytes_with_version(
+    position: &SigningPosition,
+    binding: &BindingDigest,
+    override_version: u16,
+) -> Vec<u8> {
+    let mut record = SigningDecisionRecord::reserved(*position, *binding);
+    record.record_format_version = override_version;
+    record.encode().expect("fabricated reserved record must encode")
+}
+
 // ============================================================================
 // Errors and outcomes
 // ============================================================================
