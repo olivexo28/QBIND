@@ -862,6 +862,29 @@ const M_D7D8_ORDINARY_REFUSE_INTENT: &str =
 const M_D7D8_PRECOND_OCCUPIED: &str =
     "refused by Run 422 D7-D8: a restore-transaction record is already present";
 
+/// **Run 422 D7-D8 (Correction A/B).** The protected VM-v0 persistent
+/// account-state open line. It is emitted ONLY for the VM-v0 execution profile
+/// and, on a completed/ordinary-restart destination, strictly AFTER the durable
+/// INTENT->COMPLETE completion boundary.
+const M_VM_V0_OPENED: &str = "[vm-v0] opened persistent state at";
+
+/// **Run 422 D7-D8 (Correction B).** The existing-only open mode suffix: a
+/// COMPLETE-admitted destination must never create a missing restored database.
+const M_VM_V0_MODE_EXISTING: &str = "(mode=existing-only)";
+
+/// **Run 422 D7-D8 (Correction B).** The fail-closed VM-v0 open refusal emitted
+/// when a COMPLETE-admitted destination's restored database cannot be opened
+/// existing-only (absent/unrelated-only/unreadable) — no silent re-init.
+const M_T164_ERROR: &str = "[T164] ERROR";
+
+/// **Run 422 D7-D8 (Correction B).** The ordinary-startup guard refusal when a
+/// COMPLETE record is present but the installed state is missing/empty.
+const M_D7D8_MISSING_STATE: &str = "required installed state is missing/empty/unreadable";
+
+/// **Run 422 D7-D8.** The ordinary-startup guard proceed line for a valid
+/// COMPLETE whose installed state is present.
+const M_D7D8_GUARD_PROCEED_COMPLETE: &str = "valid COMPLETE with installed state present";
+
 /// Base argv for a restore-driven LocalMesh DevNet start against a fresh
 /// data dir. No `--genesis-path` is supplied, so the binary takes the legacy
 /// `apply_snapshot_restore_if_requested` path (no authority-marker context)
@@ -3260,4 +3283,223 @@ fn complete_capture_is_the_only_absence_supporting_outcome() {
     };
     assert_eq!(classify_capture(&stream, false), CaptureOutcome::Complete);
     assert!(classify_capture(&stream, false).is_complete());
+}
+
+// ============================================================================
+// Run 422 D7-D8 — Correction A/B and completion-lifecycle release-binary cases
+//
+// These cases explicitly select the VM-v0 execution profile so the protected
+// persistent account state is actually opened (the LocalMesh default-profile
+// cases above never reach a VM-v0 open, so they cannot witness the ordering
+// boundary Correction A establishes). Evidence level: child-process /
+// release-binary for the ordered markers; independent in-process reopen for the
+// post-process account read.
+// ============================================================================
+
+/// Append `--execution-profile vm-v0` to a base argv so the binary opens the
+/// protected VM-v0 persistent account state.
+fn with_vm_v0_profile(mut args: Vec<String>) -> Vec<String> {
+    args.push("--execution-profile".to_string());
+    args.push("vm-v0".to_string());
+    args
+}
+
+/// Correction A — the protected VM-v0 account state is opened ONLY after the
+/// durable restore-completion boundary (INTENT published -> durable epoch
+/// barrier -> COMPLETE published). A restore that just completed opens the
+/// restored database existing-only (Correction B).
+#[test]
+fn d7d8_correction_a_vm_v0_state_opens_only_after_durable_complete() {
+    let chain_id = devnet_chain_id();
+    let src = tempdir().expect("tempdir");
+    let snap_root = tempdir().expect("tempdir");
+    let data_dir = tempdir().expect("tempdir");
+    let snapshot_dir = snap_root.path().join("snap-a");
+    build_real_snapshot(src.path(), &snapshot_dir, chain_id, 210, 4242, Some(7));
+
+    let args = with_vm_v0_profile(restore_localmesh_args(data_dir.path(), &snapshot_dir));
+    log_executable_provenance("D7D8-A-order", &args);
+    let stderr = {
+        let mut child = DrainedChild::spawn(&args);
+        child
+            .observe_then_terminate(&[M_VM_V0_OPENED], POSITIVE_DEADLINE)
+            .expect_observed_then_terminated("D7D8-A-order")
+    };
+    maybe_dump_child_stderr("D7D8-A-order", &stderr);
+
+    // The protected VM-v0 state open must follow the entire durable completion
+    // boundary: INTENT published -> Run 097 durable epoch effect -> COMPLETE
+    // published -> only THEN the VM-v0 persistent-state open.
+    assert_marker_order(
+        &stderr,
+        &[
+            M_D7D8_INTENT_PUBLISHED,
+            M_EPOCH_PERSIST,
+            M_D7D8_COMPLETE_PUBLISHED,
+            M_VM_V0_OPENED,
+        ],
+    );
+    // A just-completed restore opens the restored database existing-only.
+    assert!(
+        stderr.contains(M_VM_V0_MODE_EXISTING),
+        "a completed restore must open the protected state existing-only; stderr=\n{stderr}"
+    );
+}
+
+/// Correction B (through the release binary) — a COMPLETE-admitted destination
+/// whose restored database is absent/unrelated-only/empty must fail closed on
+/// ordinary restart WITHOUT silently initializing a replacement database.
+///
+/// Phase 1 produces a genuine COMPLETE + real restored database through the
+/// binary. Phase 2a replaces the database with an unrelated-only directory:
+/// the structural pre-filter admits it, but the existing-only open fails closed
+/// (`[T164] ERROR`) and no new database is initialized. Phase 2b empties the
+/// directory: the ordinary-startup guard itself refuses (missing/empty state).
+#[test]
+fn d7d8_correction_b_missing_or_unrelated_state_refuses_via_binary() {
+    let chain_id = devnet_chain_id();
+    let src = tempdir().expect("tempdir");
+    let snap_root = tempdir().expect("tempdir");
+    let data_dir = tempdir().expect("tempdir");
+    let snapshot_dir = snap_root.path().join("snap-b");
+    build_real_snapshot(src.path(), &snapshot_dir, chain_id, 220, 4242, Some(7));
+
+    // ---- Phase 1: produce a genuine COMPLETE + real restored database. ----
+    let restore_args = with_vm_v0_profile(restore_localmesh_args(data_dir.path(), &snapshot_dir));
+    log_executable_provenance("D7D8-B-phase1-restore", &restore_args);
+    {
+        let mut child = DrainedChild::spawn(&restore_args);
+        child
+            .observe_then_terminate(&[M_VM_V0_OPENED], POSITIVE_DEADLINE)
+            .expect_observed_then_terminated("D7D8-B-phase1-restore");
+    }
+    let state_dir = data_dir.path().join(VM_V0_STATE_SUBDIR);
+    assert!(
+        state_dir.join("CURRENT").exists(),
+        "phase 1 must leave a real RocksDB restored database (CURRENT present)"
+    );
+
+    // ---- Phase 2a: replace the DB with an unrelated-only directory. ----
+    std::fs::remove_dir_all(&state_dir).expect("remove restored db");
+    std::fs::create_dir_all(&state_dir).expect("recreate state dir");
+    let sentinel = state_dir.join("UNRELATED.txt");
+    let sentinel_bytes = b"not-a-rocksdb-sentinel";
+    std::fs::write(&sentinel, sentinel_bytes).expect("write unrelated sentinel");
+
+    let ordinary_args = with_vm_v0_profile(ordinary_localmesh_args(data_dir.path()));
+    log_executable_provenance("D7D8-B-phase2a-unrelated", &ordinary_args);
+    let (status_a, stderr_a) = {
+        let mut child = DrainedChild::spawn(&ordinary_args);
+        let status = child.wait_natural_exit(NEGATIVE_DEADLINE);
+        (status, child.stderr_snapshot())
+    };
+    maybe_dump_child_stderr("D7D8-B-phase2a-unrelated", &stderr_a);
+    assert_eq!(
+        status_a.code(),
+        Some(1),
+        "unrelated-only state must fail closed with natural exit 1; stderr=\n{stderr_a}"
+    );
+    assert!(
+        stderr_a.contains(M_T164_ERROR),
+        "unrelated-only state must be refused at the existing-only VM-v0 open; stderr=\n{stderr_a}"
+    );
+    // No replacement database was initialized, and the sentinel is preserved.
+    assert!(
+        !state_dir.join("CURRENT").exists(),
+        "a refused existing-only open must NOT initialize a new database (no CURRENT)"
+    );
+    assert_eq!(
+        std::fs::read(&sentinel).expect("read sentinel"),
+        sentinel_bytes,
+        "the unrelated sentinel must be preserved byte-for-byte"
+    );
+
+    // ---- Phase 2b: empty the directory entirely. ----
+    std::fs::remove_dir_all(&state_dir).expect("remove unrelated dir");
+    std::fs::create_dir_all(&state_dir).expect("recreate empty state dir");
+    log_executable_provenance("D7D8-B-phase2b-empty", &ordinary_args);
+    let (status_b, stderr_b) = {
+        let mut child = DrainedChild::spawn(&ordinary_args);
+        let status = child.wait_natural_exit(NEGATIVE_DEADLINE);
+        (status, child.stderr_snapshot())
+    };
+    maybe_dump_child_stderr("D7D8-B-phase2b-empty", &stderr_b);
+    assert_eq!(
+        status_b.code(),
+        Some(1),
+        "empty state must fail closed with natural exit 1; stderr=\n{stderr_b}"
+    );
+    assert!(
+        stderr_b.contains(M_D7D8_MISSING_STATE),
+        "empty state must be refused by the ordinary-startup guard; stderr=\n{stderr_b}"
+    );
+    assert!(
+        !state_dir.join("CURRENT").exists(),
+        "a guard refusal must NOT initialize a new database (no CURRENT)"
+    );
+}
+
+/// Scenario A — a successful completion followed by an ordinary restart. The
+/// restore publishes a real COMPLETE, and a later ordinary start (no restore
+/// flag) is admitted through that COMPLETE, opens the SAME restored database
+/// existing-only WITHOUT republishing INTENT/COMPLETE, and the restored account
+/// value is preserved.
+#[test]
+fn d7d8_a_complete_then_ordinary_restart_preserves_state() {
+    let chain_id = devnet_chain_id();
+    let src = tempdir().expect("tempdir");
+    let snap_root = tempdir().expect("tempdir");
+    let data_dir = tempdir().expect("tempdir");
+    let snapshot_dir = snap_root.path().join("snap-complete");
+    build_real_snapshot(src.path(), &snapshot_dir, chain_id, 230, 4242, Some(7));
+
+    // ---- Phase 1: real restore to durable COMPLETE. ----
+    let restore_args = with_vm_v0_profile(restore_localmesh_args(data_dir.path(), &snapshot_dir));
+    log_executable_provenance("D7D8-A-restart-phase1", &restore_args);
+    let stderr1 = {
+        let mut child = DrainedChild::spawn(&restore_args);
+        child
+            .observe_then_terminate(&[M_VM_V0_OPENED], POSITIVE_DEADLINE)
+            .expect_observed_then_terminated("D7D8-A-restart-phase1")
+    };
+    maybe_dump_child_stderr("D7D8-A-restart-phase1", &stderr1);
+    assert!(
+        stderr1.contains(M_D7D8_COMPLETE_PUBLISHED),
+        "phase 1 must publish a durable COMPLETE; stderr=\n{stderr1}"
+    );
+
+    // ---- Phase 2: ordinary restart (no restore flag) over the completed dir.
+    let ordinary_args = with_vm_v0_profile(ordinary_localmesh_args(data_dir.path()));
+    log_executable_provenance("D7D8-A-restart-phase2", &ordinary_args);
+    let stderr2 = {
+        let mut child = DrainedChild::spawn(&ordinary_args);
+        child
+            .observe_then_terminate(&[M_VM_V0_OPENED], POSITIVE_DEADLINE)
+            .expect_observed_then_terminated("D7D8-A-restart-phase2")
+    };
+    maybe_dump_child_stderr("D7D8-A-restart-phase2", &stderr2);
+
+    // The ordinary restart is admitted through the valid COMPLETE and opens the
+    // restored database existing-only.
+    assert!(
+        stderr2.contains(M_D7D8_GUARD_PROCEED_COMPLETE),
+        "ordinary restart must be admitted through the valid COMPLETE; stderr=\n{stderr2}"
+    );
+    assert!(
+        stderr2.contains(M_VM_V0_MODE_EXISTING),
+        "ordinary restart over a COMPLETE must open existing-only; stderr=\n{stderr2}"
+    );
+    // An ordinary restart is NOT a restore: it must not republish INTENT/COMPLETE.
+    assert!(
+        !stderr2.contains(M_D7D8_INTENT_PUBLISHED),
+        "an ordinary restart must not republish INTENT; stderr=\n{stderr2}"
+    );
+
+    // The restored account value is preserved across the completion + restart.
+    let (account, _observation) = observe_restored_data_dir(data_dir.path());
+    assert_eq!(
+        account,
+        AccountState::new(7, 4242),
+        "the completed + restarted destination preserves the restored account value"
+    );
 }
