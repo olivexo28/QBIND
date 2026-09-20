@@ -7584,10 +7584,17 @@ No repository-wide formatter was run; unrelated pre-existing warnings
 ### Security-tool outcomes (recorded literally)
 
 Production changes declared non-trivial (`codeql.isTrivial=false`). Literal
-outcomes are recorded from the `parallel_validation` run for this pass in the
-final report; a size/scope skip or a reviewer-backend error is recorded as such
-and is **not** a passed scan. Earlier D7 skips/qualified outcomes are not
-overwritten.
+outcomes from the `parallel_validation` run for this completion pass:
+
+* **CodeQL (rust):** `Analysis was skipped because the database size is too
+  large.` — a **scope/size skip**, NOT a passed scan (`Found 0 alerts` here means
+  the analysis did not run, not that the code is clean).
+* **Code Review:** reported `No review comments found` (9 files reviewed), but the
+  reviewer backend also emitted `model claude-sonnet-4.6 not found in registry` —
+  a **model-registry error**, so the "no comments" result is **not** an
+  independent clean pass.
+
+Earlier D7 skips/qualified outcomes are not overwritten.
 
 ### Scoped verdict (this pass)
 
