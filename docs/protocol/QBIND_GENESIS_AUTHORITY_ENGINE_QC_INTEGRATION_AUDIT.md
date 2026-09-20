@@ -1324,3 +1324,21 @@ consensus recovery, signing-state continuity, authorization, QC integration, or
 rollback resistance. Genesis-authority activation stays DISABLED and C4/C5 remain
 open. Evidence:
 `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md` (Run 422 D7-D7 and D7-D8 sections).
+
+## Run 422 D7-D9 successor reference (signing-state continuity contract)
+
+The authoritative contract for preserving Proposal/Vote signing decisions across
+restart and identifying the additional protection against restoration of older
+storage is now
+`docs/protocol/QBIND_PROPOSAL_VOTE_SIGNING_STATE_CONTINUITY_CONTRACT.md`
+(status `D7D9_SIGNING_STATE_CONTINUITY_CONTRACT=DEFINED-NOT-IMPLEMENTED`). It
+elaborates requirement (C) of
+`docs/protocol/QBIND_PROPOSAL_VOTE_AUTHORITY_LIFECYCLE_CONTRACT.md` only: a
+durable-before-sign reservation guarding every `signer.sign_*` invocation on the
+`binary_consensus_loop.rs::forward_actions_to_facade` path, a conflict rule
+derived from the HotStuff decision rules, and a failure/recovery matrix.
+Signing-state records are guards, not authorization; the durable anti-rollback
+anchor is explicitly UNRESOLVED and consensus-lock recovery is an unmet
+prerequisite. This audit's QC-integration findings are unchanged; signing is not
+enabled and no activation/readiness change is implied. Evidence:
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md` (Run 422 D7-D9 section).
