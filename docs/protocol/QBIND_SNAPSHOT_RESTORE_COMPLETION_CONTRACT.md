@@ -1,8 +1,27 @@
 # QBIND Snapshot-Restore Completion Contract
 
-Status: `D7D7_RESTORE_COMPLETION_CONTRACT=DEFINED-NOT-IMPLEMENTED`
+Status (historical, D7-D7): `D7D7_RESTORE_COMPLETION_CONTRACT=DEFINED-NOT-IMPLEMENTED`
 
-Scope: **documentation-only.** This document defines a complete but
+Status (current, D7-D8): `D7D8_RESTORE_COMPLETION_CONTAINMENT=CODE-AND-RELEASE-TEST-POSITIVE`
+(restore-admission and startup containment only; see the "Run 422 D7-D8
+implementation status" block below for the exact implemented and tested scope,
+and §11 for the separate durability/anti-rollback/authority axes that remain
+NOT-established).
+
+Scope of §§3–10 below: this contract text was authored D7-D7 as a
+**documentation-only** definition. At D7-D7 it added **no** production code,
+tests, storage schema, journal, CLI flag, recovery command, cleanup, or
+activation change; the "implementation-ready" claim was withdrawn and the
+protocol was recorded as `DEFINED-NOT-IMPLEMENTED`. That paragraph is retained
+below as the **historical D7-D7 result**. It no longer describes the current
+tree: Run 422 D7-D8 implemented the bounded restore-completion lifecycle
+(RTR representation/reader/publisher/finalizer, the advisory destination lock,
+the ordinary-startup guard, and the synced-storage completion barrier) and
+captured release-binary acceptance evidence. Read the historical scope paragraph
+and the D7-D8 status block together.
+
+Scope: **(Historical D7-D7 result — see the current-status block above; superseded
+in the tree by Run 422 D7-D8.)** This document defines a complete but
 **not-yet-implemented** protocol for containing interrupted snapshot restores. It
 adds **no** production code, tests, storage schema, journal, CLI flag, recovery
 command, cleanup, or activation change. The earlier "implementation-ready" claim
@@ -12,6 +31,60 @@ implemented. Defining this contract does **not** establish operational
 protection; the safety boundary exists only once the bounded successor task in
 §10 is implemented and validated (§9 separates resolved protocol choices from the
 remaining implementation and durability-evidence obligations).
+
+> **Run 422 D7-D8 implementation status (current).** The D7-D7 "no code exists"
+> statement above is a historical record, not a description of the current tree.
+> Run 422 D7-D8 implemented and tested, as narrowly scoped restore-admission and
+> startup containment, the following — each **now exists** in production code:
+>
+> * The **RTR** representation, bounded reader (`read_rtr`), publisher
+>   (`publish_record`, atomic temp→fsync→rename), and active-attempt finalizer
+>   (`crates/qbind-node/src/restore_completion.rs`).
+> * The **advisory exclusive destination lock** acquired for process lifetime at
+>   startup, with a specific fail-closed contention refusal
+>   (`acquire_destination_lock`; `crates/qbind-node/src/main.rs`).
+> * The **ordinary-startup guard** (`evaluate_ordinary_startup`) that admits a
+>   valid `COMPLETE`, refuses a tracked `INTENT`/malformed/foreign record, and
+>   validates required restored state (below).
+> * The **synced storage / durable-epoch completion barrier** ordered before
+>   `COMPLETE` and before protected account-state opening (Run 097 durable epoch
+>   effect; `production_consensus_storage.rs`).
+>
+> Implemented D7-D8 corrections and their tested scope:
+>
+> * **Correction A (profile-independent required-state admission).** Every normal
+>   startup admitted through `COMPLETE` validates the required restored account
+>   database with the **existing-only** storage implementation
+>   (`RocksDbAccountState::open_existing`), regardless of the selected execution
+>   profile, and never initializes a replacement database during validation
+>   (`crates/qbind-node/src/vm_v0_runtime.rs::validate_required_restored_account_db`).
+>   A non-empty directory alone does not establish the database; missing, empty,
+>   unrelated-only, or unopenable databases refuse before dispatch. This is a
+>   **bounded database-open** guarantee (the checks `open_existing` performs), not
+>   a full integrity scrub or authentication of checkpoint contents.
+> * **Correction B (bounded RTR read).** `read_rtr` opens the authoritative final
+>   record once, validates it as a regular file (on Unix, `O_NONBLOCK` + `fstat`,
+>   so a FIFO/special file cannot block the open), reads at most the configured
+>   maximum plus one detection byte with checked arithmetic, rejects over-limit
+>   input before decoding, never allocates from metadata/encoded length, and maps
+>   I/O failure to refusal (never absence/success). A genuinely absent final
+>   record is still absence; temporary artifacts never count as completion.
+> * **Correction C (finalization diagnostics).** A finalization mismatch reports
+>   only what is established — the attempt was refused, the inconsistent final
+>   record was **not** overwritten, and this startup stops before protected state
+>   use — and never claims an on-disk `INTENT` merely because finalization failed.
+>
+> Executed acceptance tests: focused unit tests in `restore_completion.rs`,
+> `vm_v0_runtime.rs`, and `qbind-ledger/src/execution.rs`; and the release-binary
+> integration target
+> `crates/qbind-node/tests/run_422_d7d3_binary_snapshot_restore_characterization_tests.rs`
+> (profile-independent COMPLETE admission/refusal, completion+restart with
+> preserved state, occupied-refusal→ordinary-restart, destination-lock
+> contention/death/reacquire, and late-failure containment). See
+> `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md` for the D7-D8 evidence and the
+> release-executable identity. Power-loss durability, durable anti-rollback,
+> consensus recovery, signing-state continuity, and production authority readiness
+> remain **NOT-established** (§11).
 
 This document is the authoritative contract for restore completion. The existing
 protocol documents
@@ -331,12 +404,19 @@ accordingly above.
 * **Bounded representation:** a fixed maximum record size (small, e.g. a few KiB);
   over-size, trailing bytes, or truncation ⇒ invalid → **refuse**.
 * **Canonical metadata encoding / digest:** the `snapshot_meta_digest` is computed
-  over a canonical encoding of the whole validated `StateSnapshotMeta` —
-  deterministic field order, fixed-width big-endian integers, explicit `Option`
-  tags, and the `authority_state` / `authority_state_v2` fields — hashed with the
-  `sha3` digest already vendored in `crates/qbind-node/Cargo.toml` (no new crypto
+  over the reused deterministic JSON serialization already produced by
+  `StateSnapshotMeta::to_json()` — which covers the whole validated
+  `StateSnapshotMeta`, including `height`, `block_hash`, `chain_id`,
+  `created_at_unix_ms`, `epoch` (explicit `Option`), and the `authority_state` /
+  `authority_state_v2` fields — hashed with `Sha3_256` (SHA3-256) from the `sha3`
+  digest already vendored in `crates/qbind-node/Cargo.toml` (no new crypto
   dependency; distinct from the CRC-style `wrap_checksummed` envelope used for
-  storage values). Equal digests assert equal validated metadata only (§4.1).
+  storage values). Concretely `snapshot_meta_digest(meta) = Sha3_256(meta.to_json())`
+  (`crates/qbind-node/src/restore_completion.rs:134`). This is **not** a fixed-width
+  binary encoding: the digest input is the canonical `to_json()` string. Equal
+  digests assert equal validated metadata only (§4.1). (The separate on-disk RTR
+  *record* — not the metadata digest — is what uses the fixed-width big-endian
+  `encode()` layout with a trailing SHA3-256 record checksum.)
 * **Nonce semantics:** `attempt_nonce` is a per-attempt unique value drawn from the
   OS RNG at restore start, stored in `INTENT` and copied verbatim into `COMPLETE`;
   it binds a `COMPLETE` to the specific attempt that produced it, so an old

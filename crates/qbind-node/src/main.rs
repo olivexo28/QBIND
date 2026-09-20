@@ -5032,9 +5032,9 @@ async fn main() {
     // whether a previous process received its last synchronization
     // acknowledgement, so it fails closed on read errors.
     // ------------------------------------------------------------------
-    // Correction B: whether an ordinary (no-flag) startup was admitted through
-    // a valid COMPLETE record. Drives existing-only opening of the protected
-    // VM-v0 account state below.
+    // Correction A: whether an ordinary (no-flag) startup was admitted through
+    // a valid COMPLETE record. Drives profile-independent existing-only
+    // validation of the required restored account database below.
     let mut admitted_via_complete = false;
     if !restore_requested {
         if let Some(data_dir) = config.data_dir.as_ref() {
@@ -5091,9 +5091,10 @@ async fn main() {
                 }
                 std::process::exit(1);
             }
-            // Correction B: remember whether this ordinary startup was admitted
-            // through a valid COMPLETE, so the protected VM-v0 state is later
-            // opened with create-if-missing DISABLED (existing-only).
+            // Correction A: remember whether this ordinary startup was admitted
+            // through a valid COMPLETE, so the required restored account
+            // database is later validated with create-if-missing DISABLED
+            // (existing-only) regardless of the selected execution profile.
             admitted_via_complete =
                 matches!(decision, OrdinaryStartupDecision::ProceedComplete);
             eprintln!(
@@ -5273,11 +5274,45 @@ async fn main() {
                         );
                         std::process::exit(1);
                     }
-                    Err(e) => {
+                    Err(FinalizeError::Publish(PublishError::BeforeReplace(inner))) => {
+                        // Correction C: a publication failure BEFORE the atomic
+                        // replacement did not overwrite the authoritative final
+                        // record — whatever record was on disk before this
+                        // attempt remains unmodified. Do NOT claim an INTENT is
+                        // on disk merely because publication failed.
                         eprintln!(
-                            "[binary] FATAL: Run 422 D7-D8 could not finalize the COMPLETE \
-                             restore-transaction record at {}: {}. COMPLETE is suppressed; the \
-                             fail-closed INTENT record is retained; refusing to start.",
+                            "[binary] FATAL: Run 422 D7-D8 COMPLETE publication failed BEFORE \
+                             the atomic replacement at {}: {}. No replacement occurred, so the \
+                             authoritative final record was not overwritten and remains as it \
+                             was before this attempt; COMPLETE is suppressed. This startup stops \
+                             here, before any protected state use. A later startup evaluates the \
+                             actual observable final record under the accepted contract.",
+                            data_dir.display(),
+                            inner
+                        );
+                        std::process::exit(1);
+                    }
+                    Err(e @ (FinalizeError::Mismatch(_)
+                    | FinalizeError::ExpectedIntentUnavailable(_)
+                    | FinalizeError::ExpectedNotIntent)) => {
+                        // Correction C: finalization refused because the observed
+                        // authoritative final record did not match the expected
+                        // active-attempt INTENT (wrong state — e.g. already
+                        // COMPLETE — wrong destination/nonce/digest/epoch/version,
+                        // or an absent/corrupt/unreadable record). The attempt did
+                        // NOT overwrite the inconsistent final record with a freshly
+                        // reconstructed success record. This does NOT establish that
+                        // an INTENT is on disk; the record is left exactly as
+                        // observed. This startup stops here, before any protected
+                        // state use; a later startup evaluates the actual observable
+                        // final record under the accepted contract.
+                        eprintln!(
+                            "[binary] FATAL: Run 422 D7-D8 refused to finalize the COMPLETE \
+                             restore-transaction record at {}: {}. The validation mismatch \
+                             suppressed COMPLETE and did NOT overwrite the inconsistent final \
+                             record (no claim is made that an INTENT remains on disk). Refusing \
+                             to start before protected state use; a later startup classifies the \
+                             actual observable record under the accepted contract.",
                             data_dir.display(),
                             e
                         );
@@ -5301,19 +5336,23 @@ async fn main() {
     }
 
     // ------------------------------------------------------------------
-    // Run 422 D7-D8 Correction A + B: open the protected VM-v0 account state
-    // ONLY now — after restore completion has durably succeeded (epoch barrier
-    // + COMPLETE published) on the restore path, and after the ordinary-startup
-    // RTR admission guard on the non-restore path. Opening restored account
-    // storage while the attempt is still INTENT would expose protected state
-    // before completion, so it is deferred here; the affected-state consumers
-    // (`run_local_mesh_node` / `run_p2p_node`) are dispatched below, strictly
-    // after this open.
+    // Run 422 D7-D8 Correction A: validate/open the required restored account
+    // database ONLY now — after restore completion has durably succeeded (epoch
+    // barrier + COMPLETE published) on the restore path, and after the
+    // ordinary-startup RTR admission guard on the non-restore path. Opening
+    // restored account storage while the attempt is still INTENT would expose
+    // protected state before completion, so it is deferred here; the
+    // affected-state consumers (`run_local_mesh_node` / `run_p2p_node`) are
+    // dispatched below, strictly after this open.
     //
-    // Correction B: when the destination was admitted through a valid COMPLETE
-    // (ordinary restart) or a restore just completed this process, open with
-    // create-if-missing DISABLED so a missing/empty/unrelated restored database
-    // fails closed instead of silently initializing a replacement.
+    // Correction A: when the destination was admitted through a valid COMPLETE
+    // (ordinary restart) or a restore just completed this process, the required
+    // restored account database is validated with create-if-missing DISABLED
+    // (existing-only) REGARDLESS of the selected execution profile — a
+    // missing/empty/unrelated/unopenable restored database fails closed here,
+    // before consensus/service dispatch, instead of silently initializing a
+    // replacement. For the VM-v0 profile the validated handle is reused for the
+    // runtime; a non-VM-v0 profile validates and returns no runtime.
     // ------------------------------------------------------------------
     let require_existing_vm_v0 = admitted_via_complete || restore_outcome.is_some();
     let vm_v0_runtime = {
@@ -5327,8 +5366,9 @@ async fn main() {
             Err(e) => {
                 eprintln!("[T164] ERROR: {}", e);
                 eprintln!(
-                    "[T164] qbind-node refuses to start because VM-v0 persistent state \
-                     could not be honestly opened (require_existing={}).",
+                    "[T164] qbind-node refuses to start because the required restored \
+                     account database could not be honestly opened existing-only \
+                     (require_existing={}). No replacement database was initialized.",
                     require_existing_vm_v0
                 );
                 std::process::exit(1);

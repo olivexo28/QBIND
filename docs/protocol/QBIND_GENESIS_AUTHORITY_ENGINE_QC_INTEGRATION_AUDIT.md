@@ -1312,10 +1312,15 @@ Restore completion is now specified authoritatively in
 `D7D7_RESTORE_COMPLETION_CONTRACT=DEFINED-NOT-IMPLEMENTED`). That contract adds a
 durable restore-transaction record (serialized by a chosen `flock` destination
 lock) so ordinary startup cannot admit a tracked, interrupted restore as completed,
-while ordinary/untracked destinations proceed unchanged. It is documentation-only:
-restore completion is
+while ordinary/untracked destinations proceed unchanged. As authored at D7-D7 it
+was documentation-only. **Run 422 D7-D8 update:** its restore-admission and
+startup-containment scope is now implemented and tested in the tree (bounded RTR
+reader, advisory destination lock, ordinary-startup guard, profile-independent
+required-state admission, synced-storage completion barrier) with release-binary
+acceptance evidence; see the "Run 422 D7-D8 implementation status" block in that
+contract. Restore completion is
 necessary evidence for the ordinary-startup boundary only, and is NOT proof of
 consensus recovery, signing-state continuity, authorization, QC integration, or
 rollback resistance. Genesis-authority activation stays DISABLED and C4/C5 remain
 open. Evidence:
-`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md` (Run 422 D7-D7 section).
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md` (Run 422 D7-D7 and D7-D8 sections).

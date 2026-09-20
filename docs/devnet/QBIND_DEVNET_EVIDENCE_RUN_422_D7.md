@@ -7461,3 +7461,165 @@ SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO
 
 No readiness promotion, authority activation, or Run 423 work. C4/C5 remain
 OPEN.
+
+---
+
+## Run 422 D7-D8 — completion pass: restore-admission corrections and full acceptance evidence (code + test + release evidence)
+
+This pass continues the D7-D8 section above. It confirmed the three corrections
+remained gaps at the starting revision, finished the remaining acceptance
+coverage (the previously-outstanding dedicated destination-lock-contention and
+occupied-then-ordinary release-binary cases), and captured fresh release-binary
+evidence. Earlier D7-D8 evidence and its historical `PARTIAL` verdict above are
+preserved unchanged as the prior-pass record.
+
+### Checkout and objects
+
+* Branch: `copilot/copilotcopilotrun-422-d7-d8-again` (supplied branch, used
+  unchanged; differs from the reviewed `copilot/copilotrun-422-d7-d8`).
+* Reviewed references `f1200c8` / `a333cc8` / `a4399a3` are **not present** in
+  this shallow single-branch clone (`git cat-file` fails); implementation was
+  confirmed by direct source inspection, not ancestry.
+* `task/warning.txt` and its pre-existing unrelated warnings were preserved;
+  per-file line endings (CRLF in `restore_completion.rs`, `vm_v0_runtime.rs`, and
+  the integration test; LF in `main.rs`, `execution.rs`) were preserved.
+
+### Corrections confirmed and implemented this pass
+
+* **Correction A — profile-independent COMPLETE admission.** Every normal startup
+  admitted through `COMPLETE` now validates the required restored account database
+  with the existing-only implementation (`RocksDbAccountState::open_existing`),
+  regardless of execution profile, via
+  `vm_v0_runtime::validate_required_restored_account_db`; the VM-v0 runtime reuses
+  the successfully opened handle. A non-empty directory alone no longer admits;
+  missing/empty/unrelated-only/unopenable databases refuse before dispatch, and no
+  replacement database is initialized during validation. This is a bounded
+  database-open guarantee, not an integrity scrub.
+* **Correction B — bounded RTR read.** `read_rtr` opens the authoritative final
+  record once, validates it as a regular file (Unix `O_NONBLOCK` open + `fstat`,
+  so a FIFO/special file cannot block the open), reads at most `max + 1` bytes with
+  checked arithmetic, rejects over-limit input before decoding, never allocates
+  from metadata/encoded length, and maps I/O failure to refusal. Absent-record
+  semantics are preserved only for a genuinely absent final record; temporary
+  artifacts never count as completion.
+* **Correction C — finalization diagnostics.** The generic `main.rs` finalization
+  error now reports only what is established (attempt refused; inconsistent final
+  record not overwritten; startup stops before protected state use) and never
+  claims an on-disk `INTENT` merely because finalization failed. Before- vs
+  after-replacement publication failures remain distinguished.
+
+Changed production paths: `crates/qbind-node/src/restore_completion.rs`,
+`crates/qbind-node/src/vm_v0_runtime.rs`, `crates/qbind-node/src/main.rs`
+(comment-accuracy only in the finalization/admission region plus the new
+diagnostics). `crates/qbind-ledger/src/execution.rs` required no change
+(`open_existing` + its tests already existed). No changes to
+`snapshot_restore.rs`, `production_consensus_storage.rs`, or `storage.rs`.
+
+### Acceptance matrix (this pass)
+
+Unit (compiled + run):
+
+* `restore_completion` unit tests — 46 pass (includes Correction B bounded-reader
+  cases: valid/absent/truncated/trailing/oversized/max-boundary, more-bytes-than-
+  advertised seam, read-error-after-partial, FIFO/non-regular refusal without a
+  blocking open, temp-artifact-never-replaces; plus the `authority_state_v2`
+  metadata-digest case).
+* `vm_v0_runtime` unit tests — 15 pass (Correction A `correction_a_*`).
+* `qbind-ledger::execution` `open*` unit tests — 4 pass.
+
+Release-binary integration target
+`run_422_d7d3_binary_snapshot_restore_characterization_tests` — **33/33 pass**
+against the release executable via `QBIND_D7D3_NODE_BIN` (was 31; +2 this pass):
+
+* `d7d8_correction_a_vm_v0_state_opens_only_after_durable_complete` — completion
+  precedes protected VM-v0 open.
+* `d7d8_correction_b_missing_or_unrelated_state_refuses_via_binary` — existing-only
+  refusal (missing/empty/unrelated) with no re-init.
+* `d7d8_a_complete_then_ordinary_restart_preserves_state` — completion then
+  ordinary restart preserves restored account value; no INTENT/COMPLETE republish.
+* `d7d8_b_occupied_refusal_then_ordinary_start` (**new**) — occupied-target
+  refusal (`TargetStateNotEmpty`) with no RTR/INTENT and no snapshot-epoch apply,
+  followed by an ordinary startup over the same legitimate destination that
+  proceeds through the RTR-absent lifecycle and preserves the pre-existing account.
+* `d7d8_c_destination_lock_contention_death_and_reacquire` (**new**) — a holder
+  acquires the advisory destination lock and reaches the live consensus loop; a
+  competing process refuses with the SPECIFIC lock-contention message before the
+  consensus loop (not a port collision/generic error); after the holder is killed
+  and reaped the lock file is NOT deleted yet a successor reacquires it; and a
+  reacquired lock does not bypass an ordinary-startup `INTENT` refusal (the
+  tracked INTENT is neither promoted nor removed). Synchronization is bounded
+  marker/status polling (no arbitrary sleeps); the lock file is never unlinked to
+  make a step pass.
+
+Unit/helper vs release boundary: the bounded-reader more-bytes-than-advertised and
+read-error-after-partial cases use a **deterministic in-test reader seam** around
+the shared bounded reader (labelled unit/helper). The finalization publication
+before/after-replacement boundary uses the existing `publish_record_inner`
+directory-sync seam (unit/helper). All `d7d8_*` and `d7d3/4/5/6` cases above are
+**unmodified release-executable** observations. No production fault-injection flag
+was added to relabel a helper test as a release test.
+
+### Release executable identity (this pass)
+
+```
+source revision : 441c9fb69c71962fee653e6212c86e5613d4ca58
+build command   : cargo build --release -p qbind-node --bin qbind-node
+profile         : release (optimized)
+features        : default production features
+executable      : target/release/qbind-node
+byte length     : 17031352
+sha256          : 3e944560c745ee38e9e74a4cdf70f7c782adc2be69e3ad5eff62ef4098f4e515
+integration run : QBIND_D7D3_NODE_BIN=<abs>/target/release/qbind-node \
+                  cargo test -p qbind-node --test \
+                  run_422_d7d3_binary_snapshot_restore_characterization_tests
+                  => 33 passed; 0 failed
+```
+
+Additional validation: `cargo check -p qbind-node` (default features) clean;
+focused Clippy on changed code clean (the one finding in changed code — an
+`io::Error::new(Other, _)` in a test seam — was converted to `io::Error::other`).
+No repository-wide formatter was run; unrelated pre-existing warnings
+(`signed_vote_v1_legacy`, `cert_bound_node_id`) were left untouched.
+
+### Security-tool outcomes (recorded literally)
+
+Production changes declared non-trivial (`codeql.isTrivial=false`). Literal
+outcomes from the `parallel_validation` run for this completion pass:
+
+* **CodeQL (rust):** `Analysis was skipped because the database size is too
+  large.` — a **scope/size skip**, NOT a passed scan (`Found 0 alerts` here means
+  the analysis did not run, not that the code is clean).
+* **Code Review:** reported `No review comments found` (9 files reviewed), but the
+  reviewer backend also emitted `model claude-sonnet-4.6 not found in registry` —
+  a **model-registry error**, so the "no comments" result is **not** an
+  independent clean pass.
+
+Earlier D7 skips/qualified outcomes are not overwritten.
+
+### Scoped verdict (this pass)
+
+```
+D7D8_RESTORE_COMPLETION_CONTAINMENT=CODE-AND-RELEASE-TEST-POSITIVE
+```
+
+The specified restore-admission and startup-containment code plus the
+release-binary acceptance scope — profile-independent COMPLETE admission/refusal,
+successful completion/restart with progressed/preserved state, occupied-refusal→
+ordinary-restart, actual late-failure containment, and destination-lock
+contention/death — are demonstrated against the release executable. This verdict
+does **not** establish power-loss durability, durable anti-rollback, consensus
+recovery, signing-state continuity, or production authority readiness; those axes
+remain separately unmet.
+
+### Retained posture (unchanged)
+
+```
+D7_STATUS=PARTIAL-CODE-TEST / PRODUCTION-LIFECYCLE-UNAVAILABLE
+DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED
+GENESIS_AUTHORITY_ACTIVATION=DISABLED
+PRODUCTION_WIRE_CHAIN_ID_BEHAVIOR=UNCHANGED
+CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED
+SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO
+```
+
+No readiness promotion, authority activation, or Run 423 work. C4/C5 remain OPEN.

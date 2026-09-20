@@ -69,7 +69,10 @@ use qbind_node::node_config::NodeConfig;
 use qbind_node::snapshot_restore::{
     restore_from_snapshot, RESTORE_MARKER_FILENAME, VM_V0_STATE_SUBDIR,
 };
-use qbind_node::restore_completion::{read_rtr, RtrReadResult, RtrState, RTR_FILENAME};
+use qbind_node::restore_completion::{
+    publish_record, read_rtr, DestinationId, RestoreTransactionRecord, RtrReadResult, RtrState,
+    RESTORE_LOCK_FILENAME, RTR_FILENAME,
+};
 use qbind_node::storage::{ConsensusStorage, RocksDbConsensusStorage};
 
 // ============================================================================
@@ -638,6 +641,36 @@ impl DrainedChild {
             }
         }
     }
+
+    /// Wait until the child has emitted `marker` on stderr WHILE STILL ALIVE,
+    /// using a bounded status/marker poll (not a fixed sleep). Returns `true`
+    /// once the marker is observed with the child still running; returns `false`
+    /// if the child exits before the marker appears or the deadline elapses.
+    /// The child is left running on success so the caller can hold it (e.g. as a
+    /// destination-lock owner) while spawning a competing process.
+    fn wait_for_marker_alive(&mut self, marker: &str, deadline: Duration) -> bool {
+        let start = Instant::now();
+        loop {
+            match self.child.try_wait() {
+                Ok(Some(_status)) => {
+                    // Exited before the marker: not a live holder.
+                    return false;
+                }
+                Ok(None) => {}
+                Err(e) => {
+                    self.kill_and_reap();
+                    panic!("TEST FAILURE: try_wait errored while waiting for marker: {e}");
+                }
+            }
+            if self.stderr_snapshot().contains(marker) {
+                return true;
+            }
+            if start.elapsed() >= deadline {
+                return false;
+            }
+            thread::sleep(Duration::from_millis(25));
+        }
+    }
 }
 
 /// Deliberate-termination classification result over a completed termination
@@ -884,6 +917,18 @@ const M_D7D8_MISSING_STATE: &str = "required installed state is missing/empty/un
 /// **Run 422 D7-D8.** The ordinary-startup guard proceed line for a valid
 /// COMPLETE whose installed state is present.
 const M_D7D8_GUARD_PROCEED_COMPLETE: &str = "valid COMPLETE with installed state present";
+
+/// **Run 422 D7-D8 (§5.5).** The advisory exclusive destination-lock acquisition
+/// line, emitted once the process owns `<data_dir>/restore.lock`.
+const M_D7D8_LOCK_ACQUIRED: &str =
+    "Run 422 D7-D8: acquired advisory exclusive destination lock";
+
+/// **Run 422 D7-D8 (§5.5).** The fail-closed lock-contention refusal emitted
+/// when a competing process cannot acquire the destination lock. This is a
+/// SPECIFIC lock-contention refusal, distinct from a port collision or generic
+/// startup error.
+const M_D7D8_LOCK_CONTENDED: &str =
+    "could not acquire the advisory exclusive destination lock";
 
 /// Base argv for a restore-driven LocalMesh DevNet start against a fresh
 /// data dir. No `--genesis-path` is supplied, so the binary takes the legacy
@@ -3502,4 +3547,217 @@ fn d7d8_a_complete_then_ordinary_restart_preserves_state() {
         AccountState::new(7, 4242),
         "the completed + restarted destination preserves the restored account value"
     );
+}
+
+/// Scenario B — an occupied-target restore refusal followed by an ordinary
+/// startup over the SAME legitimate (untracked) destination.
+///
+/// Phase 1: a requested restore against a destination whose `state_vm_v0` is
+/// already occupied by a legitimate (non-RTR) database refuses at the
+/// occupied-target check, WITHOUT publishing an INTENT, creating an RTR, or
+/// applying the snapshot epoch. Phase 2: an ordinary startup over that same
+/// destination proceeds through the ordinary lifecycle (RTR absent), preserving
+/// the pre-existing account observation.
+#[test]
+fn d7d8_b_occupied_refusal_then_ordinary_start() {
+    let chain_id = devnet_chain_id();
+    let src = tempdir().expect("tempdir");
+    let snap_root = tempdir().expect("tempdir");
+    let data_dir = tempdir().expect("tempdir");
+    let snapshot_dir = snap_root.path().join("snap-occupied-then-ordinary");
+    build_real_snapshot(src.path(), &snapshot_dir, chain_id, 260, 4242, Some(7));
+
+    // Pre-occupy the destination state_vm_v0 with a legitimate (untracked)
+    // database carrying a known sentinel account.
+    let state_dir = data_dir.path().join(VM_V0_STATE_SUBDIR);
+    const SENTINEL_ID: [u8; 32] = [0x5B; 32];
+    {
+        let occupied = RocksDbAccountState::open(&state_dir).expect("open occupied state_vm_v0");
+        occupied
+            .put_account_state(&SENTINEL_ID, &AccountState::new(9, 999))
+            .expect("seed sentinel");
+        occupied.flush().expect("flush sentinel");
+    }
+
+    // ---- Phase 1: requested restore refuses at the occupied-target check. ----
+    let restore_args = with_vm_v0_profile(restore_localmesh_args(data_dir.path(), &snapshot_dir));
+    log_executable_provenance("D7D8-B-occupied", &restore_args);
+    let (status1, stderr1) = {
+        let mut child = DrainedChild::spawn(&restore_args);
+        let status = child.wait_natural_exit(NEGATIVE_DEADLINE);
+        (status, child.stderr_snapshot())
+    };
+    maybe_dump_child_stderr("D7D8-B-occupied", &stderr1);
+    assert_eq!(
+        status1.code(),
+        Some(1),
+        "occupied-target restore must fail closed with natural exit 1; stderr=\n{stderr1}"
+    );
+    assert!(
+        stderr1.contains(M_TARGET_NOT_EMPTY),
+        "the refusal must be the occupied-target check; stderr=\n{stderr1}"
+    );
+    // No INTENT published, no RTR created, no snapshot epoch applied.
+    assert!(
+        !stderr1.contains(M_D7D8_INTENT_PUBLISHED),
+        "occupied-target refusal must precede INTENT publication; stderr=\n{stderr1}"
+    );
+    assert!(
+        matches!(
+            read_rtr(data_dir.path()).expect("read RTR after occupied refusal"),
+            RtrReadResult::Absent
+        ),
+        "occupied-target refusal must not create an RTR"
+    );
+    assert!(
+        !data_dir.path().join(RTR_FILENAME).exists(),
+        "no restore-transaction record file may exist after an occupied-target refusal"
+    );
+    assert!(
+        !stderr1.contains(M_EPOCH_PERSIST),
+        "occupied-target refusal must not apply the snapshot epoch; stderr=\n{stderr1}"
+    );
+
+    // ---- Phase 2: ordinary startup over the same legitimate destination. ----
+    let ordinary_args = with_vm_v0_profile(ordinary_localmesh_args(data_dir.path()));
+    log_executable_provenance("D7D8-B-ordinary", &ordinary_args);
+    let stderr2 = {
+        let mut child = DrainedChild::spawn(&ordinary_args);
+        child
+            .observe_then_terminate(&[M_LOOP_REACHED], POSITIVE_DEADLINE)
+            .expect_observed_then_terminated("D7D8-B-ordinary")
+    };
+    maybe_dump_child_stderr("D7D8-B-ordinary", &stderr2);
+    // The ordinary lifecycle proceeds (RTR absent) — no INTENT/COMPLETE.
+    assert!(
+        !stderr2.contains(M_D7D8_INTENT_PUBLISHED) && !stderr2.contains(M_D7D8_COMPLETE_PUBLISHED),
+        "an ordinary start over an untracked destination must not publish INTENT/COMPLETE; \
+         stderr=\n{stderr2}"
+    );
+    assert!(
+        matches!(
+            read_rtr(data_dir.path()).expect("read RTR after ordinary start"),
+            RtrReadResult::Absent
+        ),
+        "an ordinary start over an untracked destination must not create an RTR"
+    );
+    // The pre-existing sentinel account observation is preserved.
+    let reopened = RocksDbAccountState::open(&state_dir).expect("reopen state_vm_v0");
+    assert_eq!(
+        reopened.get_account_state(&SENTINEL_ID),
+        AccountState::new(9, 999),
+        "the legitimate pre-existing account must be preserved across refusal + ordinary start"
+    );
+}
+
+/// Scenario C — destination-lock contention, holder death, reacquisition
+/// without deleting the lock file, and proof that reacquiring the lock does NOT
+/// bypass an INTENT refusal.
+///
+/// All synchronization is deterministic (bounded marker/status polls, no
+/// arbitrary sleeps) and the advisory lock file is NEVER deleted to make a step
+/// pass.
+#[test]
+fn d7d8_c_destination_lock_contention_death_and_reacquire() {
+    let data_dir = tempdir().expect("tempdir");
+    let lock_path = data_dir.path().join(RESTORE_LOCK_FILENAME);
+
+    // ---- Holder: process 1 acquires the lock and reaches the live loop. ----
+    let holder_args = with_vm_v0_profile(ordinary_localmesh_args(data_dir.path()));
+    log_executable_provenance("D7D8-C-holder", &holder_args);
+    let mut holder = DrainedChild::spawn(&holder_args);
+    assert!(
+        holder.wait_for_marker_alive(M_D7D8_LOCK_ACQUIRED, POSITIVE_DEADLINE),
+        "holder must acquire the destination lock while alive"
+    );
+    assert!(
+        holder.wait_for_marker_alive(M_LOOP_REACHED, POSITIVE_DEADLINE),
+        "holder must reach the consensus loop while holding the lock"
+    );
+    assert!(lock_path.exists(), "the advisory lock file must exist while held");
+
+    // ---- Contender: process 2 refuses on lock contention before effects. ----
+    let contender_args = with_vm_v0_profile(ordinary_localmesh_args(data_dir.path()));
+    log_executable_provenance("D7D8-C-contender", &contender_args);
+    let (c_status, c_stderr) = {
+        let mut contender = DrainedChild::spawn(&contender_args);
+        let status = contender.wait_natural_exit(NEGATIVE_DEADLINE);
+        (status, contender.stderr_snapshot())
+    };
+    maybe_dump_child_stderr("D7D8-C-contender", &c_stderr);
+    assert_eq!(
+        c_status.code(),
+        Some(1),
+        "a competing process must fail closed with natural exit 1; stderr=\n{c_stderr}"
+    );
+    assert!(
+        c_stderr.contains(M_D7D8_LOCK_CONTENDED),
+        "the refusal must be SPECIFIC lock contention, not a port collision or generic error; \
+         stderr=\n{c_stderr}"
+    );
+    // The contention refusal precedes protected effects: no consensus loop, no
+    // INTENT publication for the contender.
+    assert!(
+        !c_stderr.contains(M_LOOP_REACHED),
+        "the contender must refuse BEFORE reaching the consensus loop; stderr=\n{c_stderr}"
+    );
+
+    // ---- Holder death, then reacquisition WITHOUT deleting the lock file. ----
+    holder.kill_and_reap();
+    assert!(
+        lock_path.exists(),
+        "the advisory lock file must remain on disk after the holder dies (never unlinked)"
+    );
+    let successor_args = with_vm_v0_profile(ordinary_localmesh_args(data_dir.path()));
+    log_executable_provenance("D7D8-C-successor", &successor_args);
+    let s_stderr = {
+        let mut successor = DrainedChild::spawn(&successor_args);
+        let acquired = successor.wait_for_marker_alive(M_D7D8_LOCK_ACQUIRED, POSITIVE_DEADLINE);
+        let snap = successor.stderr_snapshot();
+        successor.kill_and_reap();
+        assert!(acquired, "a successor must acquire the freed lock; stderr=\n{snap}");
+        snap
+    };
+    assert!(
+        s_stderr.contains(M_D7D8_LOCK_ACQUIRED),
+        "the successor must acquire the lock without the file being deleted; stderr=\n{s_stderr}"
+    );
+    assert!(
+        lock_path.exists(),
+        "the advisory lock file must still exist after successor acquisition"
+    );
+
+    // ---- Reacquiring the lock does NOT bypass an INTENT refusal. ----
+    // Publish a tracked INTENT for this destination, then start ordinarily: the
+    // process acquires the (free) lock but the ordinary-startup guard still
+    // refuses the tracked interrupted restore.
+    let dest = DestinationId::canonicalize(data_dir.path()).expect("canonicalize dest");
+    let intent = RestoreTransactionRecord::new_intent(&dest, [0x11; 32], [0x22; 16], Some(3));
+    publish_record(data_dir.path(), &intent).expect("publish INTENT");
+    let intent_args = with_vm_v0_profile(ordinary_localmesh_args(data_dir.path()));
+    log_executable_provenance("D7D8-C-intent-not-bypassed", &intent_args);
+    let (i_status, i_stderr) = {
+        let mut child = DrainedChild::spawn(&intent_args);
+        let status = child.wait_natural_exit(NEGATIVE_DEADLINE);
+        (status, child.stderr_snapshot())
+    };
+    maybe_dump_child_stderr("D7D8-C-intent-not-bypassed", &i_stderr);
+    assert_eq!(
+        i_status.code(),
+        Some(1),
+        "an INTENT-occupied destination must refuse ordinary startup even after lock \
+         reacquisition; stderr=\n{i_stderr}"
+    );
+    // The lock WAS acquired (proving reacquisition is possible) yet the INTENT
+    // refusal still fires afterwards (reacquisition does not bypass it).
+    assert_marker_order(&i_stderr, &[M_D7D8_LOCK_ACQUIRED, M_D7D8_ORDINARY_REFUSE_INTENT]);
+    // The tracked INTENT is neither promoted nor removed.
+    assert!(
+        matches!(
+            read_rtr(data_dir.path()).expect("read RTR after INTENT refusal"),
+            RtrReadResult::Present(rec) if rec.state == RtrState::Intent
+        ),
+        "the tracked INTENT must be preserved (never auto-promoted or removed)"
+    );
+    assert!(lock_path.exists(), "the lock file must persist after the INTENT refusal");
 }
