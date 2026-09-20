@@ -7823,10 +7823,15 @@ prove power-loss durability.
 Production change declared non-trivial (`codeql.isTrivial=false`). Literal
 outcomes from the `parallel_validation` run for this pass:
 
-* **CodeQL (rust):** _recorded literally in the final report_ — a scope/size skip
-  is **not** a passed scan; "0 alerts" after a skipped analysis is not a pass.
-* **Code Review:** _recorded literally in the final report_ — a "no comments"
-  result after a backend/model error is **not** an independent clean pass.
+* **CodeQL (rust):** `Analysis Result for 'rust'. Found 0 alerts:` followed by
+  `rust: Analysis was skipped because the database size is too large.` — this is
+  a **scope/size skip**, NOT a passed scan; "Found 0 alerts" here means the
+  analysis did not run, not that the code is clean.
+* **Code Review:** `Reviewed 5 file(s). No review comments found.` but the
+  reviewer backend also emitted `Code review tool is not available in this
+  environment: ... model claude-sonnet-4.6 not found in registry` (an
+  `autofind ... command_failed` model-registry error) — so the "no comments"
+  result is **not** an independent clean pass.
 
 Earlier D7 skips/qualified outcomes are not overwritten.
 
