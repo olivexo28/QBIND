@@ -1826,7 +1826,7 @@ mod tests {
                 }
                 return Ok(n);
             }
-            Err(std::io::Error::new(std::io::ErrorKind::Other, "injected read error"))
+            Err(std::io::Error::other("injected read error"))
         }
     }
 
