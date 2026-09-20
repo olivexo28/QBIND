@@ -22524,6 +22524,156 @@ mod tests {
                         assert!(f2.proposals.lock().unwrap().is_empty());
                     }
 
+                    // ---- D. Write uncertainty (readable ≠ acknowledged) ----
+
+                    #[test]
+                    fn d10_uncertain_result_write_is_not_reported_durably_published() {
+                        let fixture = make_fixture(4);
+                        let (pv, c) = recording_pv(&fixture);
+                        let snap = snapshot_matching(&pv);
+                        let store = D10Store::new();
+                        // The reservation write succeeds durably; the RESULT write
+                        // STORES its bytes (they become readable) and THEN returns
+                        // an error — a clearly-labelled uncertain durable write.
+                        store.set_write_budget(1);
+                        store.set_store_then_error(true);
+                        let j = journal(store.clone());
+
+                        // First attempt: the signer runs once, but the uncertain
+                        // result write suppresses facade handoff and preserves the
+                        // obligation. Readable bytes are NOT a durable ack.
+                        let (s1, f1) = drive_j(&snap, &j, proposal_at(0, 1, [7u8; 32]));
+                        assert_eq!(c.proposal_calls.load(SeqCst), 1);
+                        assert_eq!(
+                            s1.outbound_proposal_journal_result_persist_failure_total, 1
+                        );
+                        assert_eq!(s1.outbound_proposals_sent, 0);
+                        assert!(f1.proposals.lock().unwrap().is_empty());
+
+                        // The Signed bytes ARE now readable on the model store.
+                        let position = crate::signing_reservation_journal::SigningPosition {
+                            validator_id: 0,
+                            network_genesis: *d6_control_domain().genesis_identity(),
+                            kind: crate::signing_reservation_journal::SigningKind::Proposal,
+                            originating_view: 1,
+                        };
+                        let key = position.storage_key();
+                        assert!(
+                            store.map.read().unwrap().contains_key(&key),
+                            "result bytes became readable after the uncertain write"
+                        );
+
+                        // In-process retry over the SAME journal: the live
+                        // operation has no durable acknowledgement, so the readable
+                        // Signed bytes are treated as potentially-signed — refused,
+                        // with NO additional signer call and no facade handoff. The
+                        // retained-result lookup does NOT bypass the uncertainty
+                        // rule.
+                        let (s2, f2) = drive_j(&snap, &j, proposal_at(0, 1, [7u8; 32]));
+                        assert_eq!(
+                            c.proposal_calls.load(SeqCst),
+                            1,
+                            "no re-sign on an uncertain in-process retry"
+                        );
+                        assert_eq!(
+                            s2.outbound_proposal_journal_potentially_signed_total, 1
+                        );
+                        assert!(f2.proposals.lock().unwrap().is_empty());
+                    }
+
+                    // ---- A(concurrent). Deterministic contested reservation ----
+
+                    #[test]
+                    fn d10_concurrent_same_binding_at_most_one_live_sign() {
+                        use std::sync::Barrier;
+                        let fixture = make_fixture(4);
+                        let (pv, c) = recording_pv(&fixture);
+                        let snap = snapshot_matching(&pv);
+                        let store = D10Store::new();
+
+                        // Two SUPPORTED independent handles over the SAME backend
+                        // instance ⇒ ONE shared ownership domain. Release both
+                        // threads simultaneously (bounded barrier, no sleeps) into
+                        // the contested reservation window for the SAME position and
+                        // SAME content.
+                        let start = Barrier::new(2);
+                        let (out_a, out_b) = std::thread::scope(|scope| {
+                            let ha = scope.spawn(|| {
+                                let j = journal(store.clone());
+                                start.wait();
+                                drive_j(&snap, &j, proposal_at(0, 1, [5u8; 32]))
+                            });
+                            let hb = scope.spawn(|| {
+                                let j = journal(store.clone());
+                                start.wait();
+                                drive_j(&snap, &j, proposal_at(0, 1, [5u8; 32]))
+                            });
+                            (ha.join().unwrap(), hb.join().unwrap())
+                        });
+
+                        // Exactly one signer invocation across the contested window.
+                        assert_eq!(
+                            c.proposal_calls.load(SeqCst),
+                            1,
+                            "at most one live signing continuation across handles"
+                        );
+                        // Exactly one facade handoff in total.
+                        let sent = out_a.1.proposals.lock().unwrap().len()
+                            + out_b.1.proposals.lock().unwrap().len();
+                        assert_eq!(sent, 1);
+                        // The loser observed a live reservation for the same
+                        // binding ⇒ potentially-signed (never a second fresh
+                        // continuation, never a re-sign).
+                        let reserved = out_a.0.outbound_proposal_journal_reserved_total
+                            + out_b.0.outbound_proposal_journal_reserved_total;
+                        let potentially = out_a.0.outbound_proposal_journal_potentially_signed_total
+                            + out_b.0.outbound_proposal_journal_potentially_signed_total;
+                        assert_eq!(reserved, 1);
+                        assert_eq!(potentially, 1);
+                    }
+
+                    #[test]
+                    fn d10_concurrent_different_binding_at_most_one_live_sign() {
+                        use std::sync::Barrier;
+                        let fixture = make_fixture(4);
+                        let (pv, c) = recording_pv(&fixture);
+                        let snap = snapshot_matching(&pv);
+                        let store = D10Store::new();
+
+                        // Same position, DIFFERENT content (binding). The shared
+                        // domain serializes the contested window: one reserves and
+                        // signs, the other observes a conflicting live reservation.
+                        let start = Barrier::new(2);
+                        let (out_a, out_b) = std::thread::scope(|scope| {
+                            let ha = scope.spawn(|| {
+                                let j = journal(store.clone());
+                                start.wait();
+                                drive_j(&snap, &j, proposal_at(0, 1, [1u8; 32]))
+                            });
+                            let hb = scope.spawn(|| {
+                                let j = journal(store.clone());
+                                start.wait();
+                                drive_j(&snap, &j, proposal_at(0, 1, [2u8; 32]))
+                            });
+                            (ha.join().unwrap(), hb.join().unwrap())
+                        });
+
+                        assert_eq!(
+                            c.proposal_calls.load(SeqCst),
+                            1,
+                            "at most one live signing continuation for the position"
+                        );
+                        let sent = out_a.1.proposals.lock().unwrap().len()
+                            + out_b.1.proposals.lock().unwrap().len();
+                        assert_eq!(sent, 1);
+                        let reserved = out_a.0.outbound_proposal_journal_reserved_total
+                            + out_b.0.outbound_proposal_journal_reserved_total;
+                        let conflict = out_a.0.outbound_proposal_journal_conflict_total
+                            + out_b.0.outbound_proposal_journal_conflict_total;
+                        assert_eq!(reserved, 1);
+                        assert_eq!(conflict, 1);
+                    }
+
                     // ---- G. Cached re-emission caller family ----
 
                     /// A peer-connectivity source reporting exactly one connected
