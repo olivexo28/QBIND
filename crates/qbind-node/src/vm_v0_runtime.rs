@@ -57,7 +57,37 @@ pub struct VmV0RuntimeState {
 }
 
 impl VmV0RuntimeState {
+    /// Open the VM-v0 persistent account state, creating it if missing.
+    ///
+    /// This is the ordinary fresh/legacy lifecycle opener (`create_if_missing`
+    /// enabled). Run 422 D7-D8: it MUST only be used on a destination that is
+    /// NOT admitted through a `COMPLETE` restore-transaction record — a
+    /// COMPLETE-admitted destination must instead use
+    /// [`Self::open_existing_from_config`], which refuses to initialize a
+    /// missing restored database.
     pub fn open_from_config(config: &NodeConfig) -> Result<Option<Arc<Self>>, VmV0RuntimeError> {
+        Self::open_from_config_mode(config, false)
+    }
+
+    /// Open the VM-v0 persistent account state, refusing to create it if
+    /// missing (Run 422 D7-D8, Correction B).
+    ///
+    /// Used when a destination is admitted through a valid `COMPLETE`
+    /// restore-transaction record (ordinary restart over a completed restore)
+    /// or immediately after a successful restore. The underlying database is
+    /// opened with `create_if_missing` DISABLED: an absent, empty, or
+    /// unrelated-only state directory fails closed instead of silently
+    /// initializing a replacement account database.
+    pub fn open_existing_from_config(
+        config: &NodeConfig,
+    ) -> Result<Option<Arc<Self>>, VmV0RuntimeError> {
+        Self::open_from_config_mode(config, true)
+    }
+
+    fn open_from_config_mode(
+        config: &NodeConfig,
+        require_existing: bool,
+    ) -> Result<Option<Arc<Self>>, VmV0RuntimeError> {
         if config.execution_profile != ExecutionProfile::VmV0 {
             return Ok(None);
         }
@@ -67,13 +97,24 @@ impl VmV0RuntimeState {
             .as_ref()
             .ok_or(VmV0RuntimeError::MissingDataDir)?;
         let state_dir = vm_v0_state_dir(data_dir);
-        let state = RocksDbAccountState::open(&state_dir).map_err(|source| {
-            VmV0RuntimeError::OpenState {
-                path: state_dir.clone(),
-                source,
-            }
+        let open_result = if require_existing {
+            RocksDbAccountState::open_existing(&state_dir)
+        } else {
+            RocksDbAccountState::open(&state_dir)
+        };
+        let state = open_result.map_err(|source| VmV0RuntimeError::OpenState {
+            path: state_dir.clone(),
+            source,
         })?;
-        eprintln!("[vm-v0] opened persistent state at {}", state_dir.display());
+        eprintln!(
+            "[vm-v0] opened persistent state at {} (mode={})",
+            state_dir.display(),
+            if require_existing {
+                "existing-only"
+            } else {
+                "create-if-missing"
+            }
+        );
 
         Ok(Some(Arc::new(Self {
             state_dir,

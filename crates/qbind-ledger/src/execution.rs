@@ -1420,6 +1420,33 @@ impl RocksDbAccountState {
         Ok(Self { db })
     }
 
+    /// Open an **existing** RocksDB database at the given path, refusing to
+    /// create one if it is missing.
+    ///
+    /// Unlike [`Self::open`], this uses `create_if_missing(false)`: if the path
+    /// does not already contain an openable database (it is absent, empty, or
+    /// contains only unrelated files), the open fails with `StorageError::Io`
+    /// and no new database is initialized. This is required by the Run 422
+    /// D7-D8 restore-completion boundary: a destination admitted through a valid
+    /// `COMPLETE` restore-transaction record must open its already-restored
+    /// account database and must never silently initialize a replacement when
+    /// that database is missing. A failed open may still create permitted
+    /// diagnostic/lock artifacts (e.g. `LOG`, `LOCK`) in the directory; it does
+    /// not create the database itself.
+    ///
+    /// # Errors
+    ///
+    /// Returns `StorageError::Io` if the database does not exist or cannot be
+    /// opened.
+    pub fn open_existing<P: AsRef<Path>>(path: P) -> Result<Self, StorageError> {
+        let mut opts = rocksdb::Options::default();
+        opts.create_if_missing(false);
+
+        let db = rocksdb::DB::open(&opts, path).map_err(|e| StorageError::Io(e.to_string()))?;
+
+        Ok(Self { db })
+    }
+
     /// Build the storage key for an account.
     fn account_key(account: &AccountId) -> Vec<u8> {
         let mut key = Vec::with_capacity(ACCOUNT_PREFIX.len() + 32);
@@ -2984,5 +3011,57 @@ mod tests {
             &result.events[0],
             ExecutionEvent::TxAccepted { sender: s, nonce: 0 } if *s == sender
         ));
+    }
+
+    // ------------------------------------------------------------------
+    // Run 422 D7-D8 Correction B: existing-only open behavior.
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn open_existing_refuses_absent_database() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let missing = tmp.path().join("state_vm_v0");
+        // No database exists yet: existing-only open must fail closed and must
+        // NOT create one.
+        let err = RocksDbAccountState::open_existing(&missing);
+        assert!(err.is_err(), "existing-only open must refuse an absent database");
+    }
+
+    #[test]
+    fn open_existing_refuses_unrelated_only_directory() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let dir = tmp.path().join("state_vm_v0");
+        std::fs::create_dir_all(&dir).expect("mk dir");
+        // Only an unrelated sentinel file — not a RocksDB database.
+        std::fs::write(dir.join("UNRELATED_SENTINEL"), b"x").expect("write sentinel");
+        let err = RocksDbAccountState::open_existing(&dir);
+        assert!(
+            err.is_err(),
+            "existing-only open must refuse a directory that is not an openable database"
+        );
+        // The unrelated sentinel is preserved (no replacement database written
+        // over it).
+        assert!(dir.join("UNRELATED_SENTINEL").exists());
+    }
+
+    #[test]
+    fn open_existing_succeeds_on_real_database() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let dir = tmp.path().join("state_vm_v0");
+        // Create a real database with create-if-missing.
+        {
+            let _created = RocksDbAccountState::open(&dir).expect("create db");
+        }
+        // Now existing-only open must succeed.
+        let _reopened = RocksDbAccountState::open_existing(&dir).expect("open existing db");
+    }
+
+    #[test]
+    fn open_create_still_initializes_fresh_database() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let dir = tmp.path().join("state_vm_v0");
+        // The ordinary create path still initializes a fresh database.
+        let _created = RocksDbAccountState::open(&dir).expect("create fresh db");
+        assert!(dir.exists());
     }
 }

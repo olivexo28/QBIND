@@ -561,8 +561,42 @@ startup-refusing record.
    `attempt_nonce`/`destination_id`) via temp → `fsync` → `rename` → dir-`fsync`,
    only after steps 3–6 are durable. Publishing `COMPLETE` before any required
    effect is durable is prohibited.
+
+   **Implemented (Run 422 D7-D8).** The `COMPLETE` is not reconstructed blindly:
+   finalization re-reads the authoritative final record and validates the
+   transition against the retained successfully-published `INTENT` while
+   destination ownership is held (`finalize_complete_from_intent`,
+   `restore_completion.rs`). A missing/invalid expected intent, wrong state,
+   wrong destination, wrong attempt nonce, wrong whole-metadata digest, or wrong
+   expected epoch (`None` vs `Some(0)` preserved) **suppresses** `COMPLETE`
+   rather than overwriting inconsistent evidence with a freshly constructed
+   success record.
+
+   **Publication-stage error reporting (Correction C).** `publish_record`
+   performs temp write → temp `fsync` → `rename` → dir-`fsync`. A failure is
+   reported by its actual stage: a failure **before** the atomic `rename`
+   (`PublishError::BeforeReplace`) leaves the prior final record authoritative;
+   a failure **after** `rename` but before the successful directory `fsync`
+   (`PublishError::AfterReplace`) reports failure without asserting an
+   unobserved final state — the final pathname may already hold a valid
+   `COMPLETE`. Either way the current startup stops before protected state use;
+   no record is deleted, no older record is restored, and no automatic rollback
+   is manufactured. A later startup classifies the actual final record under
+   this contract.
 8. **Admission to subsequent state use.** Only after `COMPLETE` is durable does the
-   node open `state_vm_v0` for use and start consensus services.
+   node open `state_vm_v0` for use and start consensus services. **Implemented
+   (Run 422 D7-D8, Correction A/B):** the protected VM-v0 state open is deferred
+   in `main.rs` to strictly after the durable completion boundary (INTENT
+   published → Run 097 durable epoch effect → `COMPLETE` published), and a
+   COMPLETE-admitted destination (restore-just-completed or ordinary restart
+   over a valid `COMPLETE`) opens the restored database **existing-only**
+   (`RocksDbAccountState::open_existing`, `create_if_missing(false)`), so a
+   missing/empty/unrelated-only restored database fails closed instead of
+   silently initializing a replacement. This scopes the guarantee to the
+   existing database-open checks actually performed; it is not a full integrity
+   scrub or authentication of checkpoint contents, and a refused existing-only
+   open may create permitted diagnostic/lock artifacts (LOG/LOCK) without
+   initializing a database (no `CURRENT`).
 
 **Epoch-outcome matrix** (verbs from `evaluate_restore_epoch_compatibility` /
 `persist_restored_snapshot_epoch`, `production_consensus_storage.rs:535/619`):
@@ -638,7 +672,7 @@ implemented, the "evidence" column names what is required to validate the claim.
 | Before required epoch persist | `INTENT` (+ state, marker) | **Refuse** | With-flag: refuse occupied | The exact D6 window (`d7d6_a/b/c`). |
 | During epoch persist | `INTENT`; epoch possibly written un-synced | **Refuse** | With-flag: refuse occupied | Power-loss evidence for the epoch synced write. |
 | After epoch persist, before `COMPLETE` | `INTENT` + all effects present | **Refuse** (not yet `COMPLETE`) | With-flag: refuse occupied | Process-kill test between persist and `COMPLETE`. |
-| During `COMPLETE` write / sync | final record is still the durable `INTENT` (temp `COMPLETE` not yet atomically renamed) **or** a fully published `COMPLETE` | `INTENT` observed ⇒ **refuse**; a valid published `COMPLETE` ⇒ **proceed** (apply §4.5/§4.8 checks); a temp/torn `COMPLETE` artifact is never promoted; unexpected corruption ⇒ refuse | With-flag: refuse occupied | Atomic-publish (temp+fsync+rename+dir-fsync) + process-kill test. |
+| During `COMPLETE` write / sync | before `rename`: final record is still the durable `INTENT`; after `rename` but before dir-`fsync`: the final pathname may already hold a valid `COMPLETE` | the **publisher reports the failure by its actual stage** (Correction C) and stops this startup — an after-`rename` dir-sync failure does **not** falsely assert "INTENT retained"; on a later startup `INTENT` observed ⇒ **refuse**, a valid published `COMPLETE` ⇒ **proceed** (§4.5/§4.8), a temp/torn `COMPLETE` artifact is never promoted, unexpected corruption ⇒ refuse | With-flag: refuse occupied | Deterministic before/after-`rename` injection (test-only) + atomic-publish + process-kill test. |
 | After `COMPLETE`, before normal startup | valid published `COMPLETE` (recorded `destination_id` matches; `state_vm_v0` present) | **Proceed**; admit restored state (no re-copy, no epoch re-write). No fresh snapshot/nonce exists to compare; historical digest/nonce are provenance (§4.8) | With-flag: **refuse** occupied (no idempotent-success route) | `d7d5_b`-style compatible-restore + subsequent startup. |
 
 Every row decides from the **observable final record** only, per the observable-state
@@ -647,7 +681,24 @@ evidence, and a malformed or corrupt final record is the separate fail-closed ca
 
 ---
 
-## 7. Future acceptance tests (reuse existing fixtures and runner)
+## 7. Acceptance tests (reuse existing fixtures and runner)
+
+**Principle.** A tracked `INTENT` **may be observed** by a restarting node, but
+it **must never be admitted** as completion: an ordinary startup over a final
+`INTENT` refuses, and a completion is admitted only through a valid, durable
+`COMPLETE` that passes the §4.5/§4.8 checks.
+
+**Implemented (Run 422 D7-D8).** The cases below are exercised by the extended
+`run_422_d7d3_binary_snapshot_restore_characterization_tests.rs` target,
+including the VM-v0-profile release-binary cases that actually open the
+protected state: `d7d8_correction_a_vm_v0_state_opens_only_after_durable_complete`
+(ordering: INTENT → Run 097 epoch → COMPLETE → VM-v0 open, existing-only),
+`d7d8_correction_b_missing_or_unrelated_state_refuses_via_binary` (a
+COMPLETE-admitted destination with an unrelated-only or empty restored database
+fails closed without initializing a replacement), and
+`d7d8_a_complete_then_ordinary_restart_preserves_state` (completion then ordinary
+restart is admitted through the valid `COMPLETE`, opens existing-only, does not
+republish INTENT/COMPLETE, and preserves the restored account value).
 
 Reuse `run_422_d7d3_binary_snapshot_restore_characterization_tests.rs`
 (`DrainedChild`, `observe_then_terminate`, `ordinary_localmesh_args`,
