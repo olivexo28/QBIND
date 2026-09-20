@@ -21880,6 +21880,695 @@ mod tests {
                     assert_eq!(c.vote_calls.load(SeqCst), 1);
                     assert!(facade2.directed_votes.lock().unwrap().is_empty());
                 }
+
+                // =====================================================
+                // Run 422 D7-D10 — the guarded signing boundary with a
+                // local signing-reservation journal wired, exercised
+                // through BOTH caller families
+                // (`forward_actions_to_facade` immediate outbound and
+                // `maybe_reemit_on_late_peer_connect` cached re-emission).
+                //
+                // Every case here uses a wired coherent snapshot, the
+                // real ML-DSA-44 `RecordingSigner`, the recording facade,
+                // and DIRECT signer-call / facade-effect counts — not
+                // logs. A "process death / restart" is modelled by
+                // attaching a NEW `SigningReservationJournal` over the
+                // SAME `Arc<D10Store>`: the durable bytes survive, the
+                // in-memory live-permit map does not, which is exactly the
+                // crash-recovery posture (reading `RESERVED` from storage
+                // alone never yields a permit). The real-RocksDB
+                // close/reopen and child-process-death evidence lives in
+                // `tests/run_422_d7d10_signing_reservation_journal_tests.rs`.
+                // =====================================================
+                mod run422_d7d10 {
+                    use super::*;
+                    use crate::signing_reservation_journal::{
+                        SigningJournalStorage, SigningReservationJournal,
+                    };
+                    use crate::storage::StorageError;
+                    use std::collections::HashMap as StdHashMap;
+                    use std::sync::atomic::{AtomicBool, AtomicI64};
+                    use std::sync::RwLock as StdRwLock;
+
+                    /// A fully test-controlled, explicitly non-durable
+                    /// signing-journal backing store. It supports injected
+                    /// read failure and a write budget (so a write can be
+                    /// made to fail AFTER the reservation write succeeds,
+                    /// modelling result-persistence failure). It is NOT a
+                    /// durable backend and never claims to be; a "restart"
+                    /// is a new journal over the same `Arc<D10Store>`.
+                    #[derive(Default)]
+                    struct D10Store {
+                        map: StdRwLock<StdHashMap<Vec<u8>, Vec<u8>>>,
+                        fail_reads: AtomicBool,
+                        /// Number of writes still permitted before failing;
+                        /// `i64::MAX` on construction means effectively
+                        /// unlimited for the small fixtures here.
+                        write_budget: AtomicI64,
+                    }
+                    impl D10Store {
+                        fn new() -> Arc<Self> {
+                            Arc::new(D10Store {
+                                map: StdRwLock::new(StdHashMap::new()),
+                                fail_reads: AtomicBool::new(false),
+                                write_budget: AtomicI64::new(i64::MAX),
+                            })
+                        }
+                        fn set_fail_reads(&self, v: bool) {
+                            self.fail_reads.store(v, SeqCst);
+                        }
+                        /// Permit exactly `n` further writes, then fail.
+                        fn set_write_budget(&self, n: i64) {
+                            self.write_budget.store(n, SeqCst);
+                        }
+                        /// Overwrite the stored bytes at a position's key with
+                        /// arbitrary (e.g. corrupt) bytes, bypassing the
+                        /// journal — used to model on-disk corruption.
+                        fn poke(&self, key: &[u8], bytes: Vec<u8>) {
+                            self.map.write().unwrap().insert(key.to_vec(), bytes);
+                        }
+                    }
+                    impl SigningJournalStorage for D10Store {
+                        fn get_signing_record(
+                            &self,
+                            key: &[u8],
+                        ) -> Result<Option<Vec<u8>>, StorageError> {
+                            if self.fail_reads.load(SeqCst) {
+                                return Err(StorageError::Io("injected read failure".into()));
+                            }
+                            Ok(self.map.read().unwrap().get(key).cloned())
+                        }
+                        fn put_signing_record_synced(
+                            &self,
+                            key: &[u8],
+                            value: &[u8],
+                        ) -> Result<(), StorageError> {
+                            let remaining = self.write_budget.fetch_sub(1, SeqCst);
+                            if remaining <= 0 {
+                                // Restore so the counter cannot underflow across
+                                // repeated attempts, and fail this write.
+                                self.write_budget.fetch_add(1, SeqCst);
+                                return Err(StorageError::Io("injected write failure".into()));
+                            }
+                            self.map
+                                .write()
+                                .unwrap()
+                                .insert(key.to_vec(), value.to_vec());
+                            Ok(())
+                        }
+                    }
+
+                    fn journal(store: Arc<D10Store>) -> SigningReservationJournal {
+                        SigningReservationJournal::attach(store)
+                    }
+
+                    /// Drive one engine action through the guarded immediate
+                    /// outbound boundary WITH a wired journal.
+                    fn drive_j(
+                        snap: &AuthorizedProposalVoteSnapshot,
+                        j: &SigningReservationJournal,
+                        action: ConsensusEngineAction<ValidatorId>,
+                    ) -> (BinaryConsensusLoopInboundStats, OutboundRecorder) {
+                        let facade = OutboundRecorder::default();
+                        let mut stats = BinaryConsensusLoopInboundStats::default();
+                        forward_actions_to_facade(
+                            vec![action],
+                            &facade,
+                            &mut stats,
+                            Some(snap),
+                            None,
+                            Some(j),
+                            ConsensusVerificationPolicy::Required,
+                        );
+                        (stats, facade)
+                    }
+
+                    /// A Proposal engine action at an explicit view with an
+                    /// explicit payload hash (payload hash distinguishes
+                    /// conflicting content at the same position).
+                    fn proposal_at(
+                        epoch: u64,
+                        view: u64,
+                        payload: [u8; 32],
+                    ) -> ConsensusEngineAction<ValidatorId> {
+                        let mut header = base_header(0);
+                        header.epoch = epoch;
+                        header.height = view;
+                        header.round = view;
+                        header.payload_hash = payload;
+                        ConsensusEngineAction::BroadcastProposal(Box::new(BlockProposal {
+                            header,
+                            qc: None,
+                            txs: vec![],
+                            signature: vec![],
+                        }))
+                    }
+
+                    /// A founding-profile Vote (`step == 0`) at an explicit
+                    /// view with an explicit block id.
+                    fn vote_v0(epoch: u64, view: u64, block_id: [u8; 32]) -> Vote {
+                        let mut v = base_vote(0);
+                        v.step = 0;
+                        v.epoch = epoch;
+                        v.height = view;
+                        v.round = view;
+                        v.block_id = block_id;
+                        v
+                    }
+
+                    // ---- A. Proposal / Vote success (reserve-before-sign) ----
+
+                    #[test]
+                    fn d10_proposal_success_reserves_before_single_sign() {
+                        let fixture = make_fixture(4);
+                        let (pv, c) = recording_pv(&fixture);
+                        let snap = snapshot_matching(&pv);
+                        let store = D10Store::new();
+                        let j = journal(store);
+
+                        let (stats, facade) =
+                            drive_j(&snap, &j, proposal_at(0, 1, [9u8; 32]));
+
+                        // Exactly one signer invocation, reservation acknowledged.
+                        assert_eq!(c.proposal_calls.load(SeqCst), 1);
+                        assert_eq!(stats.outbound_proposal_journal_reserved_total, 1);
+                        assert_eq!(stats.outbound_proposal_signing_success, 1);
+                        assert_eq!(stats.outbound_proposals_sent, 1);
+                        let proposals = facade.proposals.lock().unwrap();
+                        assert_eq!(proposals.len(), 1);
+                        // Result verifies through the existing D6 verification.
+                        assert!(qbind_consensus::verify_proposal_msg_with_domain(
+                            &proposals[0],
+                            ValidatorId(0),
+                            fixture.validators.as_ref(),
+                            fixture.kp.as_ref(),
+                            fixture.br.as_ref(),
+                            &d6_control_domain(),
+                        )
+                        .is_ok());
+                    }
+
+                    #[test]
+                    fn d10_broadcast_vote_success_reserves_before_single_sign() {
+                        let fixture = make_fixture(4);
+                        let (pv, c) = recording_pv(&fixture);
+                        let snap = snapshot_matching(&pv);
+                        let store = D10Store::new();
+                        let j = journal(store);
+
+                        let (stats, facade) = drive_j(
+                            &snap,
+                            &j,
+                            ConsensusEngineAction::BroadcastVote(vote_v0(0, 1, [9u8; 32])),
+                        );
+
+                        assert_eq!(c.vote_calls.load(SeqCst), 1);
+                        assert_eq!(stats.outbound_vote_journal_reserved_total, 1);
+                        assert_eq!(stats.outbound_vote_signing_success, 1);
+                        assert_eq!(stats.outbound_votes_sent, 1);
+                        assert_eq!(facade.broadcast_votes.lock().unwrap().len(), 1);
+                    }
+
+                    #[test]
+                    fn d10_directed_vote_success_reserves_before_single_sign() {
+                        let fixture = make_fixture(4);
+                        let (pv, c) = recording_pv(&fixture);
+                        let snap = snapshot_matching(&pv);
+                        let store = D10Store::new();
+                        let j = journal(store);
+
+                        let (stats, facade) = drive_j(
+                            &snap,
+                            &j,
+                            ConsensusEngineAction::SendVoteTo {
+                                to: ValidatorId(1),
+                                vote: vote_v0(0, 1, [9u8; 32]),
+                            },
+                        );
+
+                        assert_eq!(c.vote_calls.load(SeqCst), 1);
+                        assert_eq!(stats.outbound_vote_journal_reserved_total, 1);
+                        assert_eq!(stats.outbound_send_vote_to, 1);
+                        assert_eq!(facade.directed_votes.lock().unwrap().len(), 1);
+                    }
+
+                    // ---- B. Conflict and retry ----
+
+                    #[test]
+                    fn d10_conflict_same_position_diff_content_zero_additional_sign() {
+                        let fixture = make_fixture(4);
+                        let (pv, c) = recording_pv(&fixture);
+                        let snap = snapshot_matching(&pv);
+                        let store = D10Store::new();
+
+                        // First decision at view 1 signs once and persists.
+                        let j1 = journal(store.clone());
+                        let (_s1, f1) = drive_j(&snap, &j1, proposal_at(0, 1, [1u8; 32]));
+                        assert_eq!(c.proposal_calls.load(SeqCst), 1);
+                        assert_eq!(f1.proposals.lock().unwrap().len(), 1);
+
+                        // A DIFFERENT signed content at the SAME position (same
+                        // view, different payload) through a fresh handle over
+                        // the same store: refused, zero additional signer calls,
+                        // no delivery.
+                        let j2 = journal(store.clone());
+                        let (s2, f2) = drive_j(&snap, &j2, proposal_at(0, 1, [2u8; 32]));
+                        assert_eq!(c.proposal_calls.load(SeqCst), 1, "no re-sign on conflict");
+                        assert_eq!(s2.outbound_proposal_journal_conflict_total, 1);
+                        assert_eq!(s2.outbound_proposals_sent, 0);
+                        assert!(f2.proposals.lock().unwrap().is_empty());
+                    }
+
+                    #[test]
+                    fn d10_exact_retry_reuses_retained_signature_zero_sign() {
+                        let fixture = make_fixture(4);
+                        let (pv, c) = recording_pv(&fixture);
+                        let snap = snapshot_matching(&pv);
+                        let store = D10Store::new();
+
+                        let j1 = journal(store.clone());
+                        let (_s1, f1) = drive_j(&snap, &j1, proposal_at(0, 1, [7u8; 32]));
+                        assert_eq!(c.proposal_calls.load(SeqCst), 1);
+                        let first_sig = f1.proposals.lock().unwrap()[0].signature.clone();
+
+                        // Exact same decision through a fresh handle (restart):
+                        // the retained signature is reused; the signer is NOT
+                        // invoked again; the message is still delivered.
+                        let j2 = journal(store.clone());
+                        let (s2, f2) = drive_j(&snap, &j2, proposal_at(0, 1, [7u8; 32]));
+                        assert_eq!(
+                            c.proposal_calls.load(SeqCst),
+                            1,
+                            "exact retry reuses retained signature, no re-sign"
+                        );
+                        assert_eq!(s2.outbound_proposal_journal_retained_resend_total, 1);
+                        assert_eq!(s2.outbound_proposals_sent, 1);
+                        let resent = f2.proposals.lock().unwrap();
+                        assert_eq!(resent.len(), 1);
+                        assert_eq!(resent[0].signature, first_sig, "identical retained signature");
+                    }
+
+                    #[test]
+                    fn d10_directed_and_broadcast_vote_same_decision_retained() {
+                        let fixture = make_fixture(4);
+                        let (pv, c) = recording_pv(&fixture);
+                        let snap = snapshot_matching(&pv);
+                        let store = D10Store::new();
+
+                        // Broadcast the vote (signs once).
+                        let j1 = journal(store.clone());
+                        let (_s1, _f1) = drive_j(
+                            &snap,
+                            &j1,
+                            ConsensusEngineAction::BroadcastVote(vote_v0(0, 1, [5u8; 32])),
+                        );
+                        assert_eq!(c.vote_calls.load(SeqCst), 1);
+
+                        // Directed delivery of the SAME vote is the SAME decision:
+                        // retained-signature reuse, no second signer call.
+                        let j2 = journal(store.clone());
+                        let (s2, f2) = drive_j(
+                            &snap,
+                            &j2,
+                            ConsensusEngineAction::SendVoteTo {
+                                to: ValidatorId(2),
+                                vote: vote_v0(0, 1, [5u8; 32]),
+                            },
+                        );
+                        assert_eq!(c.vote_calls.load(SeqCst), 1, "directed==broadcast decision");
+                        assert_eq!(s2.outbound_vote_journal_retained_resend_total, 1);
+                        assert_eq!(f2.directed_votes.lock().unwrap().len(), 1);
+                    }
+
+                    #[test]
+                    fn d10_proposal_and_self_vote_same_view_are_distinct_decisions() {
+                        let fixture = make_fixture(4);
+                        let (pv, c) = recording_pv(&fixture);
+                        let snap = snapshot_matching(&pv);
+                        let store = D10Store::new();
+                        let j = journal(store);
+
+                        let (sp, _fp) = drive_j(&snap, &j, proposal_at(0, 1, [9u8; 32]));
+                        let (sv, _fv) = drive_j(
+                            &snap,
+                            &j,
+                            ConsensusEngineAction::BroadcastVote(vote_v0(0, 1, [9u8; 32])),
+                        );
+
+                        // Both are fresh reservations and both sign once: a
+                        // Proposal and a self-Vote at one view are distinct kinds.
+                        assert_eq!(sp.outbound_proposal_journal_reserved_total, 1);
+                        assert_eq!(sv.outbound_vote_journal_reserved_total, 1);
+                        assert_eq!(c.proposal_calls.load(SeqCst), 1);
+                        assert_eq!(c.vote_calls.load(SeqCst), 1);
+                    }
+
+                    // ---- C. Originating view and field/version checks ----
+
+                    #[test]
+                    fn d10_reserves_action_view_not_a_later_view() {
+                        // The action for view 7 must reserve position view 7, and
+                        // a conflicting view-7 decision remains a conflict even
+                        // when offered later (modelled by a fresh handle, i.e. a
+                        // subsequent tick after engine progress).
+                        let fixture = make_fixture(4);
+                        let (pv, c) = recording_pv(&fixture);
+                        let snap = snapshot_matching(&pv);
+                        let store = D10Store::new();
+
+                        let j1 = journal(store.clone());
+                        let (_s1, _f1) = drive_j(&snap, &j1, proposal_at(0, 7, [1u8; 32]));
+                        assert_eq!(c.proposal_calls.load(SeqCst), 1);
+
+                        // Conflict at view 7 after "progress": still a conflict.
+                        let j2 = journal(store.clone());
+                        let (s2, _f2) = drive_j(&snap, &j2, proposal_at(0, 7, [2u8; 32]));
+                        assert_eq!(s2.outbound_proposal_journal_conflict_total, 1);
+                        assert_eq!(c.proposal_calls.load(SeqCst), 1);
+                    }
+
+                    #[test]
+                    fn d10_inconsistent_proposal_height_round_refused_before_sign() {
+                        let fixture = make_fixture(4);
+                        let (pv, c) = recording_pv(&fixture);
+                        let snap = snapshot_matching(&pv);
+                        let store = D10Store::new();
+                        let j = journal(store.clone());
+
+                        let mut header = base_header(0);
+                        header.height = 3;
+                        header.round = 4; // round != height
+                        let action = ConsensusEngineAction::BroadcastProposal(Box::new(
+                            BlockProposal {
+                                header,
+                                qc: None,
+                                txs: vec![],
+                                signature: vec![],
+                            },
+                        ));
+                        let (s, f) = drive_j(&snap, &j, action);
+                        assert_eq!(s.outbound_proposal_journal_position_inconsistent_total, 1);
+                        assert_eq!(c.proposal_calls.load(SeqCst), 0, "no sign on bad position");
+                        assert_eq!(s.outbound_proposals_sent, 0);
+                        assert!(f.proposals.lock().unwrap().is_empty());
+                        // Nothing was reserved.
+                        assert!(store.map.read().unwrap().is_empty());
+                    }
+
+                    #[test]
+                    fn d10_unsupported_vote_step_refused_before_sign() {
+                        let fixture = make_fixture(4);
+                        let (pv, c) = recording_pv(&fixture);
+                        let snap = snapshot_matching(&pv);
+                        let store = D10Store::new();
+                        let j = journal(store.clone());
+
+                        let mut v = vote_v0(0, 1, [9u8; 32]);
+                        v.step = 1; // founding profile requires step == 0
+                        let (s, f) =
+                            drive_j(&snap, &j, ConsensusEngineAction::BroadcastVote(v));
+                        assert_eq!(s.outbound_vote_journal_position_inconsistent_total, 1);
+                        assert_eq!(c.vote_calls.load(SeqCst), 0);
+                        assert!(f.broadcast_votes.lock().unwrap().is_empty());
+                        assert!(store.map.read().unwrap().is_empty());
+                    }
+
+                    // ---- D. Persistence failures ----
+
+                    #[test]
+                    fn d10_read_failure_yields_no_signer_call() {
+                        let fixture = make_fixture(4);
+                        let (pv, c) = recording_pv(&fixture);
+                        let snap = snapshot_matching(&pv);
+                        let store = D10Store::new();
+                        store.set_fail_reads(true);
+                        let j = journal(store.clone());
+
+                        let (s, f) = drive_j(&snap, &j, proposal_at(0, 1, [9u8; 32]));
+                        assert_eq!(c.proposal_calls.load(SeqCst), 0, "no sign on read failure");
+                        assert_eq!(s.outbound_proposal_journal_error_total, 1);
+                        assert!(f.proposals.lock().unwrap().is_empty());
+                    }
+
+                    #[test]
+                    fn d10_reservation_write_failure_yields_no_signer_call() {
+                        let fixture = make_fixture(4);
+                        let (pv, c) = recording_pv(&fixture);
+                        let snap = snapshot_matching(&pv);
+                        let store = D10Store::new();
+                        store.set_write_budget(0); // even the reservation write fails
+                        let j = journal(store.clone());
+
+                        let (s, f) = drive_j(&snap, &j, proposal_at(0, 1, [9u8; 32]));
+                        assert_eq!(c.proposal_calls.load(SeqCst), 0, "no sign without durable ack");
+                        assert_eq!(s.outbound_proposal_journal_error_total, 1);
+                        assert!(f.proposals.lock().unwrap().is_empty());
+                        assert!(store.map.read().unwrap().is_empty());
+                    }
+
+                    #[test]
+                    fn d10_result_persist_failure_suppresses_handoff_preserves_reservation() {
+                        let fixture = make_fixture(4);
+                        let (pv, c) = recording_pv(&fixture);
+                        let snap = snapshot_matching(&pv);
+                        let store = D10Store::new();
+                        // Permit exactly ONE write (the reservation); the signed
+                        // result write then fails.
+                        store.set_write_budget(1);
+                        let j = journal(store.clone());
+
+                        let (s, f) = drive_j(&snap, &j, proposal_at(0, 1, [9u8; 32]));
+                        // The signer DID run once, but the result-persist failure
+                        // suppresses facade handoff and preserves the obligation.
+                        assert_eq!(c.proposal_calls.load(SeqCst), 1);
+                        assert_eq!(s.outbound_proposal_journal_result_persist_failure_total, 1);
+                        assert_eq!(s.outbound_proposals_sent, 0);
+                        assert!(f.proposals.lock().unwrap().is_empty());
+
+                        // The reservation record survives as RESERVED; a later
+                        // retry (restart) must NOT re-sign — it is treated as
+                        // potentially-signed.
+                        store.set_write_budget(i64::MAX);
+                        let j2 = journal(store.clone());
+                        let (s2, f2) = drive_j(&snap, &j2, proposal_at(0, 1, [9u8; 32]));
+                        assert_eq!(
+                            c.proposal_calls.load(SeqCst),
+                            1,
+                            "recovered RESERVED must not re-sign"
+                        );
+                        assert_eq!(s2.outbound_proposal_journal_potentially_signed_total, 1);
+                        assert!(f2.proposals.lock().unwrap().is_empty());
+                    }
+
+                    // ---- E(model). Recovery posture (real RocksDB in the
+                    //      integration test file; here the state-machine posture).
+
+                    #[test]
+                    fn d10_recovered_reserved_only_refuses_resigning() {
+                        let fixture = make_fixture(4);
+                        let (pv, c) = recording_pv(&fixture);
+                        let snap = snapshot_matching(&pv);
+                        let store = D10Store::new();
+                        // Permit only the reservation write, then fail — leaving a
+                        // RESERVED-only record, no retained result. This is the
+                        // durable state a crash after reserve/before result leaves.
+                        store.set_write_budget(1);
+                        let j1 = journal(store.clone());
+                        let (_s1, _f1) = drive_j(&snap, &j1, proposal_at(0, 1, [3u8; 32]));
+                        assert_eq!(c.proposal_calls.load(SeqCst), 1);
+
+                        // Restart: new journal over the same bytes. RESERVED with
+                        // no live permit and no retained result ⇒ refuse.
+                        store.set_write_budget(i64::MAX);
+                        let j2 = journal(store.clone());
+                        let (s2, f2) = drive_j(&snap, &j2, proposal_at(0, 1, [3u8; 32]));
+                        assert_eq!(c.proposal_calls.load(SeqCst), 1, "no re-sign after death");
+                        assert_eq!(s2.outbound_proposal_journal_potentially_signed_total, 1);
+                        assert!(f2.proposals.lock().unwrap().is_empty());
+                    }
+
+                    #[test]
+                    fn d10_corrupt_record_on_reopen_fails_closed() {
+                        let fixture = make_fixture(4);
+                        let (pv, c) = recording_pv(&fixture);
+                        let snap = snapshot_matching(&pv);
+                        let store = D10Store::new();
+
+                        // Establish a real signed record first.
+                        let j1 = journal(store.clone());
+                        let (_s1, _f1) = drive_j(&snap, &j1, proposal_at(0, 1, [4u8; 32]));
+                        assert_eq!(c.proposal_calls.load(SeqCst), 1);
+
+                        // Corrupt the stored bytes at that position, then reopen.
+                        let position = crate::signing_reservation_journal::SigningPosition {
+                            validator_id: 0,
+                            network_genesis: *d6_control_domain().genesis_identity(),
+                            kind: crate::signing_reservation_journal::SigningKind::Proposal,
+                            originating_view: 1,
+                        };
+                        let key = position.storage_key();
+                        store.poke(&key, vec![0xFF; 16]);
+
+                        let j2 = journal(store.clone());
+                        let (s2, f2) = drive_j(&snap, &j2, proposal_at(0, 1, [4u8; 32]));
+                        // Corruption fails closed: journal error, no sign, no send.
+                        assert_eq!(c.proposal_calls.load(SeqCst), 1, "no sign on corruption");
+                        assert_eq!(s2.outbound_proposal_journal_error_total, 1);
+                        assert!(f2.proposals.lock().unwrap().is_empty());
+                    }
+
+                    // ---- F. Exclusivity and bounds ----
+
+                    #[test]
+                    fn d10_second_handle_cannot_get_second_permit_for_reserved() {
+                        let fixture = make_fixture(4);
+                        let (pv, c) = recording_pv(&fixture);
+                        let snap = snapshot_matching(&pv);
+                        let store = D10Store::new();
+
+                        // Handle 1 reserves + signs.
+                        let j1 = journal(store.clone());
+                        let (_s1, _f1) = drive_j(&snap, &j1, proposal_at(0, 1, [8u8; 32]));
+                        assert_eq!(c.proposal_calls.load(SeqCst), 1);
+
+                        // A SECOND handle over the same store cannot obtain a live
+                        // permit for the already-reserved position with different
+                        // content (conflict) — no second signing continuation.
+                        let j2 = journal(store.clone());
+                        let (s2, _f2) = drive_j(&snap, &j2, proposal_at(0, 1, [9u8; 32]));
+                        assert_eq!(c.proposal_calls.load(SeqCst), 1);
+                        assert_eq!(s2.outbound_proposal_journal_conflict_total, 1);
+                    }
+
+                    #[test]
+                    fn d10_exhaustion_refuses_further_signing() {
+                        let fixture = make_fixture(4);
+                        let (pv, c) = recording_pv(&fixture);
+                        let snap = snapshot_matching(&pv);
+                        let store = D10Store::new();
+                        // Budget of exactly one distinct position.
+                        let j = SigningReservationJournal::attach_with_budget(store, 1);
+
+                        // First position (view 1) reserves + signs.
+                        let (s1, _f1) = drive_j(&snap, &j, proposal_at(0, 1, [1u8; 32]));
+                        assert_eq!(s1.outbound_proposal_journal_reserved_total, 1);
+                        assert_eq!(c.proposal_calls.load(SeqCst), 1);
+
+                        // Second, distinct position (view 2) is refused as the
+                        // budget is exhausted — no signer call.
+                        let (s2, f2) = drive_j(&snap, &j, proposal_at(0, 2, [2u8; 32]));
+                        assert_eq!(s2.outbound_proposal_journal_exhausted_total, 1);
+                        assert_eq!(c.proposal_calls.load(SeqCst), 1, "no sign when exhausted");
+                        assert!(f2.proposals.lock().unwrap().is_empty());
+                    }
+
+                    // ---- G. Cached re-emission caller family ----
+
+                    /// A peer-connectivity source reporting exactly one connected
+                    /// peer, so `maybe_reemit_on_late_peer_connect` observes a
+                    /// genuine new-peer transition and attempts re-emission.
+                    struct OneReemitPeer(NodeId);
+                    impl PeerConnectivitySource for OneReemitPeer {
+                        fn connected_peers(&self) -> Vec<NodeId> {
+                            vec![self.0]
+                        }
+                    }
+
+                    #[test]
+                    fn d10_cached_reemission_reuses_retained_signatures_no_resign() {
+                        // Immediate outbound at the engine's current view signs the
+                        // Proposal + self-Vote once each and persists them; a later
+                        // cached re-emission of the SAME decisions through the
+                        // SEPARATE cached-re-emission caller family reuses the
+                        // retained signatures with ZERO additional signer calls.
+                        let fixture = make_fixture(4);
+                        let (pv, c) = recording_pv(&fixture);
+                        let snap = snapshot_matching(&pv);
+                        let store = D10Store::new();
+                        let j = journal(store.clone());
+
+                        let engine = make_engine(ValidatorId(0), 4);
+                        assert!(engine.is_leader_for_current_view());
+                        let view = engine.current_view();
+
+                        // Immediate family: sign + persist proposal and self-vote
+                        // at the engine's current view.
+                        let (_sp, _fp) = drive_j(&snap, &j, proposal_at(0, view, [9u8; 32]));
+                        let (_sv, _fv) = drive_j(
+                            &snap,
+                            &j,
+                            ConsensusEngineAction::BroadcastVote(vote_v0(0, view, [9u8; 32])),
+                        );
+                        assert_eq!(c.proposal_calls.load(SeqCst), 1);
+                        assert_eq!(c.vote_calls.load(SeqCst), 1);
+
+                        // Build cached decisions with IDENTICAL signed content, so
+                        // they resolve to the same position + binding.
+                        let cached_proposal = {
+                            let mut header = base_header(0);
+                            header.epoch = 0;
+                            header.height = view;
+                            header.round = view;
+                            header.payload_hash = [9u8; 32];
+                            CachedLeaderProposal {
+                                view,
+                                proposal: BlockProposal {
+                                    header,
+                                    qc: None,
+                                    txs: vec![],
+                                    signature: vec![],
+                                },
+                                provenance: CachedReemissionProvenance::capture(Some(&snap)),
+                            }
+                        };
+                        let cached_vote = CachedLeaderVote {
+                            view,
+                            vote: vote_v0(0, view, [9u8; 32]),
+                            provenance: CachedReemissionProvenance::capture(Some(&snap)),
+                        };
+
+                        let facade = OutboundRecorder::default();
+                        let mut stats = BinaryConsensusLoopInboundStats::default();
+                        let mut lp = Some(cached_proposal);
+                        let mut lv = Some(cached_vote);
+                        let mut reemitted: Option<u64> = None;
+                        let mut last_peers: HashSet<NodeId> = HashSet::new();
+                        let connectivity = OneReemitPeer(pv_node_for(1));
+
+                        maybe_reemit_on_late_peer_connect(
+                            &engine,
+                            &mut lp,
+                            &mut lv,
+                            &mut reemitted,
+                            &mut last_peers,
+                            &connectivity,
+                            Some(&facade),
+                            &mut stats,
+                            Some(&snap),
+                            None,
+                            Some(&j),
+                            ConsensusVerificationPolicy::Required,
+                        );
+
+                        // Both cached decisions re-emitted via retained-result
+                        // reuse, no re-sign; admission/confirmation preserved
+                        // (they were actually delivered to the facade).
+                        assert_eq!(
+                            c.proposal_calls.load(SeqCst),
+                            1,
+                            "cached proposal reemission reused retained signature"
+                        );
+                        assert_eq!(
+                            c.vote_calls.load(SeqCst),
+                            1,
+                            "cached vote reemission reused retained signature"
+                        );
+                        assert_eq!(stats.outbound_proposal_journal_retained_resend_total, 1);
+                        assert_eq!(stats.outbound_vote_journal_retained_resend_total, 1);
+                        assert_eq!(facade.proposals.lock().unwrap().len(), 1);
+                        assert_eq!(facade.broadcast_votes.lock().unwrap().len(), 1);
+                    }
+                }
             }
             // =============================================================
             // Run 422 D7-B3 — restore-catchup deferral disposition and FRESH
