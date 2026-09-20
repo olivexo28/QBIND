@@ -821,8 +821,15 @@ destination lock (kernel advisory `flock` on `<data_dir>/restore.lock`), so that
 ordinary startup refuses a tracked, interrupted restore (`INTENT`) while proceeding
 over untracked/ordinary destinations, and admits only a COMPLETE restore covering
 account-state installation, the required audit record, and required epoch
-persistence. It is documentation-only and establishes no operational protection;
-matching, missing, or completed restores are still not authorization, signing
-continuity, or activation evidence. Authority lifecycle posture is unchanged and
+persistence. As authored at D7-D7 it was documentation-only and established no
+operational protection. **Run 422 D7-D8 update:** the restore-admission and
+startup-containment scope of that contract is now implemented and tested in the
+tree (bounded RTR reader, advisory destination lock, ordinary-startup guard,
+profile-independent required-state admission, and synced-storage completion
+barrier), with release-binary acceptance evidence; see the "Run 422 D7-D8
+implementation status" block in that contract. Matching, missing, or completed
+restores are still not authorization, signing continuity, or activation
+evidence, and power-loss durability / durable anti-rollback remain
+NOT-established. Authority lifecycle posture is unchanged and
 C4/C5 stay open. Evidence:
-`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md` (Run 422 D7-D7 section).
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md` (Run 422 D7-D7 and D7-D8 sections).
