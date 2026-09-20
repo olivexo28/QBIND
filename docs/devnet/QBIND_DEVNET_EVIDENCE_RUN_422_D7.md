@@ -8157,14 +8157,24 @@ evidence are reused as inputs, not re-derived or re-run.
 
 * Reuse table (existing mechanism → callers → property → limit → missing
   requirement) and traced signing routes classified production-reachable /
-  conditionally-reachable / fixture-only. Route order confirmed against
-  `binary_consensus_loop.rs::forward_actions_to_facade` (L4101): admit (L3852) →
-  sign (L3646/L3733) → confirm (L3913, after signing) → facade.
-* Conflict rule DERIVED from HotStuff decision rules (position key = validator
-  identity + kind + view/round + committed height + network/genesis/authority-
-  epoch), not a generic "one signature per height"; binding fields identify the
-  exact authorized message; a new process / owner generation / PID / caller label
-  is NOT a fresh identity and cannot open a new namespace.
+  conditionally-reachable / fixture-only. **Two caller families** reach the shared
+  `sign_proposal_for_broadcast` / `sign_vote_for_broadcast` helpers (L3646/L3733):
+  the immediate-forwarding family inside
+  `binary_consensus_loop.rs::forward_actions_to_facade` (L4101; admit L3852 → sign
+  → confirm L3913 after signing → facade) **and** the cached-re-emission family in
+  `maybe_reemit_on_late_peer_connect` (L3379), which runs its **own**
+  `admit_cached_reemission` → sign → confirm cycle and does **not** pass through
+  `forward_actions_to_facade`.
+* Conflict rule DERIVED from HotStuff decision rules. The canonical position key
+  is the **stable validator identity + kind (Proposal vs Vote) + engine view**;
+  for the founding-authority profile the engine sets `height = round = view`,
+  `step = 0`, so height/round/step are **checked redundant encodings** of the view
+  (correspondence enforced **before** lookup), **not** independent coordinates and
+  **not** "committed height." Current key / suite / message version / authority
+  commitment / owner generation are **exact-message bindings**, not namespace
+  selectors: a validated rotation does not open a new namespace or erase a conflict
+  obligation (rotation/epoch continuity is explicitly gated). A new process / owner
+  generation / PID / caller label is NOT a fresh identity.
 * Bounded, versioned, checked-arithmetic, checksum-integrity record (checksum =
   corruption detection only, not authentication or rollback protection) and a
   five-state machine (NONE / RESERVED / SIGNING / SIGNED / REFUSED) with no
@@ -8173,32 +8183,46 @@ evidence are reused as inputs, not re-derived or re-run.
   durability barrier acknowledged BEFORE `signer.sign_*`; the linearization point
   is the acknowledged reservation; exact retry compared by canonical decision,
   not signature bytes; resend vs re-sign kept distinct.
-* Failure/recovery matrix (12 rows) covering pre-reservation failure, uncertain
-  write, crash before/during signing, confirmation/handoff failure, exact vs
-  conflicting retry, malformed records, ordinary restart, older-snapshot rollback,
-  whole-directory rollback, and same-key dual instances.
+* Failure/recovery matrix — every row keyed to **observable durable evidence**,
+  distinguishing a **live** in-process continuation (may sign once) from
+  **recovery after process death** (a `RESERVED` position with no usable retained
+  result is **potentially signed** → refuse, no re-sign, no release). Covers
+  pre-reservation failure, uncertain write, recovery at a reserved position,
+  confirmation/handoff failure, exact vs conflicting retry, malformed records,
+  ordinary restart, **same-epoch** older-snapshot rollback (correspondence-based,
+  not epoch-inequality), whole-directory rollback (locally indistinguishable from a
+  valid older state), and same-key dual instances.
 * Crash-consistency (local synced journal) separated from rollback-resistance;
-  anti-rollback anchor requirements enumerated (outside rollback domain,
-  authentication, validator/network + signing-history binding, freshness/
-  monotonicity/exclusive use, ordering, availability). Epoch-only witness,
-  historical QC, source label, and checksum are each declared insufficient.
+  anti-rollback requirements enumerated for **appropriately trusted state/evidence
+  outside the attacker's rollback domain** — a **protected local hardware
+  mechanism OR a remote witness**, neither selected, implemented, or proven
+  (authentication, validator/network + signing-history binding, freshness/
+  monotonicity/exclusive use, ordering as a proposed/conditional requirement,
+  availability/partial-update). A monotonic number **alone** is insufficient.
+  Epoch-only witness, historical QC, source label, and checksum are each declared
+  insufficient.
 
 ### Decisions and unresolved dependencies (prominent)
 
 * Durable anti-rollback ANCHOR: EXPLICITLY UNRESOLVED. No repository mechanism
   (Run 291 replay backend, D8 restore lock, synced epoch APIs) supplies an
-  authenticated, rollback-resistant, freshness-bearing signing-history anchor.
-  The unsatisfied activation gate is named; no unimplementable "authenticated
-  witness" is invented.
+  authenticated, rollback-resistant, freshness-bearing signing-history commitment
+  outside the attacker's rollback domain (protected local hardware or a remote
+  witness — neither selected). The unsatisfied activation gate is named; no
+  unimplementable "authenticated witness" is invented.
 * Consensus-lock recovery: unmet PREREQUISITE. Preventing conflicting signatures
   does not restore the HotStuff lock across later views; a high-water mark alone
   does not recover a lock; Timeout/NewView compatibility is an unmigrated
   dependency.
 * One bounded successor: a non-authorizing, crash-consistent local signing-
   reservation journal (source + tests only), extending `storage.rs` and a single
-  guarded signing entrypoint around `forward_actions_to_facade`; explicitly
-  excludes the anchor, cross-host/whole-copy rollback detection, lock-recovery
-  redesign, and enabling signing. Implementation is NOT begun.
+  guarded signing entrypoint over the shared `sign_proposal_for_broadcast` /
+  `sign_vote_for_broadcast` helpers so it covers **both** caller families — the
+  immediate-forwarding callers in `forward_actions_to_facade` **and** the
+  cached-re-emission callers in `maybe_reemit_on_late_peer_connect` (a wrapper
+  around `forward_actions_to_facade` alone is insufficient). Explicitly excludes
+  the domain-external anchor, cross-host/whole-copy rollback detection,
+  lock-recovery redesign, and enabling signing. Implementation is NOT begun.
 
 ### Checks performed and literal security-tool outcomes
 
@@ -8233,3 +8257,45 @@ SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO
 Design completion does not establish operational signing-state continuity. C4/C5
 remain OPEN. No activation, readiness promotion, or Run 423 work. The successor
 implementation is not begun.
+
+### D7-D9 correction pass (four material inconsistencies reconciled)
+
+Documentation-only. Re-verified against the actual worktree (branch
+`copilot/copilotrun-422-d7-d9`; the reviewed-final object named by the task is
+absent from this shallow clone, so correspondence is asserted against worktree
+content, not ancestry). Source facts re-confirmed:
+`ingest_proposal` derives the view from `proposal.header.height`
+(`basic_hotstuff_engine.rs:1732`); locally-emitted Proposals/Votes set
+`height = round = view`, `step = 0` (L1503–1504 / L1522–1524 / L1557–1559 /
+L1833–1835); `maybe_reemit_on_late_peer_connect` (`binary_consensus_loop.rs:3379`)
+calls `sign_proposal_for_broadcast` / `sign_vote_for_broadcast` (L3646/L3733)
+through its own `admit_cached_reemission` (L3989) / `confirm_outbound_before_effect`
+cycle, **bypassing** `forward_actions_to_facade`; the helpers assign the local
+signer's suite (`suite_id`, L3706/L3785) before the D6 preimage is built.
+
+* **A — conflict identity:** canonical position = stable validator identity + kind
+  + engine view; height/round/step are checked redundant encodings (not
+  independent coordinates, not "committed height"); key/suite/version/commitment/
+  owner-generation are exact-message bindings, not namespace selectors; rotation/
+  epoch continuity explicitly gated. Field-classification table added.
+* **B — recovery:** every matrix row keyed to observable durable evidence; a
+  recovered `RESERVED` with no usable retained result is potentially-signed
+  (refuse, no re-sign, no release); live continuation vs process-death recovery vs
+  resend vs re-sign kept distinct.
+* **C — caller coverage:** both the immediate-forwarding and cached-re-emission
+  caller families covered by a proposed common boundary over the shared signing
+  helpers (a wrapper around `forward_actions_to_facade` alone is insufficient);
+  reservation binds the prepared preimage; revalidation preserves the original
+  ticket issuer/owner + bound context (generation number alone insufficient).
+* **D — rollback:** same-epoch older-snapshot rollback handled via signing-history/
+  recovery-state correspondence (not epoch inequality); whole-copy rollback stated
+  locally indistinguishable; trust is appropriately-trusted state/evidence outside
+  the rollback domain (protected local hardware OR remote witness — neither
+  selected); a monotonic number alone is insufficient; anchor UNRESOLVED.
+
+Secret scan re-run over the changed documentation paths; outcome — no secrets
+detected (Markdown protocol/evidence text only). No Cargo/Clippy/release rebuild
+is required for these Markdown-only changes and none is claimed. D7-D8's accepted
+verdict and all earlier results are preserved at their actual revisions and not
+re-run. `D7D9_SIGNING_STATE_CONTINUITY_CONTRACT=DEFINED-NOT-IMPLEMENTED` is
+retained and is not equated with review acceptance.

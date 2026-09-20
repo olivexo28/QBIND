@@ -847,14 +847,17 @@ signing record alone establishes neither.
 Operative reconciliation (current implementation vs proposed requirement — the
 D7-D9 protocol is NOT relabelled as existing behavior):
 
-* **Current behavior (traced):** the outbound signing path
+* **Current behavior (traced):** the immediate outbound signing path
   (`binary_consensus_loop.rs::forward_actions_to_facade`, L4101) runs
   `admit_outbound_action` (L3852) → `sign_proposal_for_broadcast` /
   `sign_vote_for_broadcast` (L3646/L3733) → `confirm_outbound_before_effect`
-  (L3913) → facade. Confirmation runs AFTER a completed signature and can only
-  suppress the network effect; it cannot un-sign. No signing decision is
-  persisted; `voted_in_view` / `proposed_in_view` latches are in-memory and lost
-  on restart.
+  (L3913) → facade. A **second** caller family, cached re-emission
+  (`maybe_reemit_on_late_peer_connect`, L3379), reaches the **same** signing
+  helpers through its **own** `admit_cached_reemission` → sign → confirm cycle and
+  does **not** pass through `forward_actions_to_facade`. Confirmation runs AFTER a
+  completed signature and can only suppress the network effect; it cannot un-sign.
+  No signing decision is persisted; `voted_in_view` / `proposed_in_view` latches
+  are in-memory and lost on restart.
 * **Current storage inventory (corrected):** `ConsensusStorage`
   (`storage.rs` L142) exposes `put_current_epoch_synced` (L224) and
   `flush_epoch_durable` (L242); the obsolete claim that it exposes no synced
