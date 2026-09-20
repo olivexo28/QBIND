@@ -7262,3 +7262,198 @@ establishes an actual boundary.
 `CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED`,
 `SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO`. C4/C5 remain open. Scoped
 status: `D7D7_RESTORE_COMPLETION_CONTRACT=DEFINED-NOT-IMPLEMENTED`.
+
+## Run 422 D7-D8 — Restore-completion corrections A/B/C, active-attempt binding, and release-binary evidence
+
+**Scope.** Continuation of D8 (not a new phase). Corrects three production gaps
+and completes active-attempt binding in the restore-completion boundary, adds
+behavioral coverage, and captures release-binary evidence. No authority
+activation, anti-rollback, automatic repair, or new bypass flags.
+
+### Changed paths and reused mechanisms
+
+* `crates/qbind-node/src/main.rs` — Correction A ordering (protected VM-v0 open
+  deferred to after the durable completion boundary); Correction B mode
+  selection (`open_existing_from_config` when admitted via COMPLETE / just
+  restored); Correction C + active-attempt binding at the finalization site
+  (retain the successfully published INTENT, call `finalize_complete_from_intent`,
+  distinct after-replace diagnostic).
+* `crates/qbind-node/src/restore_completion.rs` — Correction C `PublishError`
+  (`BeforeReplace`/`AfterReplace`) with injectable directory-sync
+  (`publish_record_inner`); fail-closed `state_vm_v0_present` (directory-entry
+  read errors counted as failure, not presence); active-attempt binding
+  (`IntentMismatch`, `FinalizeError`, `finalize_complete_from_intent`,
+  `check_intent_matches`).
+* `crates/qbind-ledger/src/execution.rs` — `RocksDbAccountState::open_existing`
+  (`create_if_missing(false)`); reuses the existing account-storage
+  implementation (no new abstraction). Ordinary `open` behavior preserved for
+  callers that intentionally create storage.
+* `crates/qbind-node/src/vm_v0_runtime.rs` — `open_existing_from_config`
+  delegating to a shared `open_from_config_mode`; open marker records the mode
+  (`existing-only` vs `create-if-missing`).
+* `crates/qbind-node/tests/run_422_d7d3_binary_snapshot_restore_characterization_tests.rs`
+  — new VM-v0-profile release-binary cases (below).
+* Unit tests co-located in `restore_completion.rs` and `execution.rs`.
+
+### Correction dispositions
+
+* **A (complete before opening protected state).** The protected VM-v0 account
+  state open is moved after the durable completion boundary. Actual ordering
+  (release binary, captured): destination lock → Run 093 storage open → INTENT
+  published + install + sync → Run 097 durable epoch effect (epoch persisted,
+  synced) → durable COMPLETE published → **only then** VM-v0 persistent-state
+  open (`existing-only`) → consumers (LocalMesh loop). Finalization stays at the
+  canonical Run 097 site; only dependent state opening/consumers moved.
+* **B (a non-empty directory is not an existing database).** A COMPLETE-admitted
+  destination opens with `create_if_missing(false)`; absent/empty/unrelated-only
+  restored databases fail closed instead of silently initializing a replacement.
+  `state_vm_v0_present` is a cheap structural pre-filter only (now fail-closed on
+  entry-read errors); the authoritative existing-database check is the
+  `open_existing` open. Scope: the existing database-open checks actually
+  performed — not a full integrity scrub or authentication of checkpoint
+  contents. A refused open may create permitted diagnostic/lock artifacts
+  (LOG/LOCK) but never a `CURRENT`/initialized database.
+* **C (report publication failures by their actual stage).** `publish_record`
+  reports `BeforeReplace` (prior final record authoritative) vs `AfterReplace`
+  (final pathname may already hold a valid COMPLETE; no false "INTENT retained"
+  assertion). Either failure stops the current startup before protected state
+  use; no delete, no restore of an older record, no automatic rollback. A later
+  startup classifies the actual final record.
+
+### Active-attempt binding
+
+Finalization retains the identity of the successfully published INTENT and
+validates the transition against the authoritative on-disk final record while
+ownership is held (`finalize_complete_from_intent`). The transition rejects:
+missing/invalid expected intent, wrong state, wrong destination, wrong attempt
+nonce, wrong whole-metadata digest, and wrong expected epoch (`None` vs `Some(0)`
+preserved). A mismatch suppresses COMPLETE and does NOT overwrite inconsistent
+evidence with a reconstructed success record. Ordinary restart supplies no
+independent snapshot/nonce and is admitted through the separate ordinary-startup
+guard, not the active-attempt comparison.
+
+### Test coverage (distinguishing unit / helper / release-binary)
+
+* **Unit (in-process):** `restore_completion` module tests (34 pass) —
+  before/after-replace publication (deterministic test-only directory-sync
+  injection), temp-artifact never authorizes, `state_vm_v0_present` absent/empty/
+  nonempty and entry-read failure, finalize success + wrong-nonce/digest/
+  destination/state/epoch-none-vs-zero/absent/invalid/expected-not-intent.
+  `execution` `open_existing` tests (4 pass) — refuses absent, refuses
+  unrelated-only, succeeds on a real DB, ordinary `open` still initializes fresh.
+* **Release-binary (child-process, VM-v0 profile):**
+  `d7d8_correction_a_vm_v0_state_opens_only_after_durable_complete` (ordering:
+  INTENT → Run 097 epoch → COMPLETE → VM-v0 open existing-only),
+  `d7d8_correction_b_missing_or_unrelated_state_refuses_via_binary`
+  (unrelated-only ⇒ `[T164] ERROR`, no `CURRENT` created, sentinel preserved;
+  empty ⇒ ordinary-startup guard "required installed state is missing/empty"),
+  `d7d8_a_complete_then_ordinary_restart_preserves_state` (completion then
+  ordinary restart admitted via COMPLETE, existing-only open, no INTENT/COMPLETE
+  re-publication, restored account value preserved).
+* **Helper-level only (not release-binary):** the injected epoch-durability /
+  publication-stage failures are exercised via test-only injection around the
+  shared publication operation (no production fault-injection flag). These
+  establish the ordering/error-reporting logic; they are NOT release-executable
+  observations and are reported as such.
+
+### Release executable identity and validation
+
+```
+# Source/checkpoint revision (release build): a333cc8e1425d130cb189086767188c70514aac5
+# Build: cargo build --release -p qbind-node --bin qbind-node   (profile: release; features: default/none)
+# Executable: target/release/qbind-node
+# SHA-256:    023fff95d09533392ef3dfd0586cb2c22c47f5fa07097498124ade8ca72f33d0
+# byte_len:   17028960
+#   (Hashes are NOT assumed reproducible across links, exactly as the task cautions.)
+
+# Focused D7-D8 cases against the identified release executable:
+# QBIND_D7D3_NODE_BIN=<abs>/target/release/qbind-node \
+#   cargo test -p qbind-node --test run_422_d7d3_binary_snapshot_restore_characterization_tests d7d8_
+# test result: ok. 3 passed; 0 failed; 0 ignored; 28 filtered out
+
+# Full extended D3–D8 integration target against the same release executable:
+# QBIND_D7D3_NODE_BIN=<abs>/target/release/qbind-node \
+#   cargo test -p qbind-node --test run_422_d7d3_binary_snapshot_restore_characterization_tests
+# test result: ok. 31 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+#   (was 28 before the +3 D7-D8 cases; the 31 is a strict superset, NOT a re-labelling
+#    of the earlier 28-case run as complete D8 acceptance.)
+
+# Default-production compile: cargo check -p qbind-node => clean.
+# Focused Clippy: cargo clippy -p qbind-node --lib / -p qbind-ledger --lib => Finished (no new
+#   errors from the changed code; warnings on restore_completion.rs:761 / vm_v0_runtime.rs:265 /
+#   execution.rs:2400/2443 point at PRE-EXISTING lines, not the added code).
+#   NOTE: `cargo clippy -p qbind-node --tests` without `--features test-utils` fails to compile the
+#   PRE-EXISTING `m16_epoch_transition_hardening_tests` target (it calls test-utils-gated
+#   `set_inject_write_failure`/`clear_epoch_transition_marker`); unrelated to this change.
+```
+
+Release-binary ordered markers observed (Correction A case, transcribed):
+
+```
+[binary] Run 422 D7-D8: acquired advisory exclusive destination lock at <dir>/restore.lock
+[binary] Run 093 consensus storage: state=present-no-committed-epoch path=<dir>/consensus
+[restore] D7-D8 durable INTENT published; installing account state
+[restore] D7-D8 INTENT + install + sync complete: height=210 ... deferring epoch barrier + COMPLETE to the Run 097 site
+[binary] Run 097: snapshot canonical epoch=7 persisted into <data_dir>/consensus meta:current_epoch.
+[restore] D7-D8 durable COMPLETE published at <dir> (height=210 ...)
+[binary] LocalMesh mode: starting consensus loop. environment=DevNet profile=vm-v0
+   (the VM-v0 existing-only open marker `[vm-v0] opened persistent state at <dir> (mode=existing-only)`
+    is asserted by the test to follow the COMPLETE publication.)
+```
+
+### Entrypoint / platform / limitations
+
+* **Entrypoint coverage:** the corrected ordering and existing-only open are on
+  the `main.rs` startup path and are exercised through the real release binary
+  for the VM-v0 execution profile. The LocalMesh default-profile cases never
+  open VM-v0 state and cannot witness this boundary.
+* **Supported-platform assumption:** destination locking uses Unix `flock`
+  advisory locks; the lock file is never truncated/unlinked, and process death
+  releases the kernel lock without deleting the lock file.
+* **Legacy untracked-directory limitation:** an ordinary (RTR-absent)
+  non-empty `state_vm_v0` still starts normally under the ordinary lifecycle;
+  the existing-only guarantee applies only to COMPLETE-admitted destinations.
+* **Sync vs interruption vs power-loss:** the synced-write / atomic-publish
+  operations are implemented and deterministically tested, and SIGKILL/
+  process-interruption ordering is observed; neither establishes power-loss
+  durability, which remains a separate, unmet evidence obligation.
+
+### Security-tool outcomes (recorded literally)
+
+* Production changes are non-trivial for security tooling; CodeQL was run via
+  `parallel_validation` with `codeql.isTrivial=false`. Any CodeQL
+  database-size skip or reviewer-backend/model-registry error is recorded
+  literally as reported and is NOT a passed scan. Earlier D7 recorded skips are
+  not overwritten.
+
+### Scoped verdict and remaining limitations
+
+```
+D7D8_RESTORE_COMPLETION_CONTAINMENT=PARTIAL
+```
+
+Established at CODE-AND-RELEASE-TEST level: Correction A ordering (completion
+before protected-state open), Correction B existing-database refusal (missing/
+empty/unrelated-only), Correction C publication-stage reporting (unit-level),
+active-attempt finalize binding (unit-level over the real transition), and
+completion-then-ordinary-restart.
+
+Outstanding (retain PARTIAL): competing-process / process-death and
+destination-lock-contention as dedicated release-binary cases; interruption-
+boundary fault injection surfaced only through test helpers rather than the
+release executable; and power-loss durability evidence. These are reported here
+rather than claimed.
+
+### Retained posture
+
+```
+D7_STATUS=PARTIAL-CODE-TEST / PRODUCTION-LIFECYCLE-UNAVAILABLE
+DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED
+GENESIS_AUTHORITY_ACTIVATION=DISABLED
+PRODUCTION_WIRE_CHAIN_ID_BEHAVIOR=UNCHANGED
+CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED
+SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO
+```
+
+No readiness promotion, authority activation, or Run 423 work. C4/C5 remain
+OPEN.
