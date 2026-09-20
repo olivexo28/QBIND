@@ -1095,6 +1095,20 @@ fn observe_restored_data_dir(data_dir: &Path) -> (AccountState, ConsensusStorage
     (account, observation)
 }
 
+/// Independently inspect the consensus epoch at `data_dir`, tolerating an absent
+/// consensus store (returns `None` when no `consensus/` directory exists yet).
+/// A missing epoch-write LOG line alone cannot prove storage was unchanged; this
+/// re-opens the store and reports the committed-epoch observation directly.
+fn observe_consensus_epoch_opt(data_dir: &Path) -> Option<ConsensusStorageObservation> {
+    let consensus_dir = data_dir.join("consensus");
+    if !consensus_dir.exists() {
+        return None;
+    }
+    let storage =
+        RocksDbConsensusStorage::open(&consensus_dir).expect("independently reopen consensus");
+    Some(observe_consensus_storage(Some(&storage)).expect("observe consensus storage"))
+}
+
 /// Case B — launch the unmodified binary with `--restore-from-snapshot` for
 /// two fresh destinations: snapshot epoch ABSENT and snapshot epoch Some(0).
 /// Observe the ordered startup markers THROUGH the post-baseline-application
@@ -3349,6 +3363,23 @@ fn with_vm_v0_profile(mut args: Vec<String>) -> Vec<String> {
     args
 }
 
+/// Append `--execution-profile nonce-only` (the supported non-VM-v0 profile,
+/// the one exercised by the `correction_a_nonce_only_*` unit tests) to a base
+/// argv. Under this profile the required restored account database is still
+/// validated existing-only (profile-independent), but no VM-v0 runtime handle
+/// is built (see `VmV0RuntimeState::open_existing_from_config`).
+fn with_nonce_only_profile(mut args: Vec<String>) -> Vec<String> {
+    args.push("--execution-profile".to_string());
+    args.push("nonce-only".to_string());
+    args
+}
+
+/// **Run 422 D7-D8 (Correction B).** The non-VM-v0 (`nonce-only`) valid-admission
+/// marker: the required restored account database is validated existing-only and
+/// NO VM-v0 runtime is built. This is the profile-independent existing-only
+/// validation surfacing under a non-VM-v0 profile.
+const M_VM_V0_VALIDATED_NONRUNTIME: &str = "[vm-v0] validated required restored account database at";
+
 /// Correction A — the protected VM-v0 account state is opened ONLY after the
 /// durable restore-completion boundary (INTENT published -> durable epoch
 /// barrier -> COMPLETE published). A restore that just completed opens the
@@ -3392,103 +3423,172 @@ fn d7d8_correction_a_vm_v0_state_opens_only_after_durable_complete() {
 }
 
 /// Correction B (through the release binary) — a COMPLETE-admitted destination
-/// whose restored database is absent/unrelated-only/empty must fail closed on
-/// ordinary restart WITHOUT silently initializing a replacement database.
+/// whose restored database is valid/missing/empty/unrelated-only/invalid is
+/// handled correctly across BOTH execution profiles (VM-v0 and the supported
+/// non-VM-v0 `nonce-only`), reusing the SAME genuine binary-produced COMPLETE,
+/// snapshot fixture, runner, and independent reopen helpers. The existing-only
+/// database validation is profile-independent
+/// (`VmV0RuntimeState::open_existing_from_config`), so both profiles fail closed
+/// on a missing/empty/unrelated/invalid restored database WITHOUT initializing a
+/// replacement; only the valid-admission marker differs by profile.
 ///
-/// Phase 1 produces a genuine COMPLETE + real restored database through the
-/// binary. Phase 2a replaces the database with an unrelated-only directory:
-/// the structural pre-filter admits it, but the existing-only open fails closed
-/// (`[T164] ERROR`) and no new database is initialized. Phase 2b empties the
-/// directory: the ordinary-startup guard itself refuses (missing/empty state).
-#[test]
-fn d7d8_correction_b_missing_or_unrelated_state_refuses_via_binary() {
+/// `apply_profile` selects the profile; `valid_admission_marker` is the profile's
+/// existing-only admission line (VM-v0 opens a runtime handle; nonce-only
+/// validates and builds no runtime). Deterministic fixtures only — no reliance on
+/// permission denial that disappears under root.
+fn run_correction_b_matrix(
+    tag: &str,
+    apply_profile: fn(Vec<String>) -> Vec<String>,
+    valid_admission_marker: &str,
+) {
     let chain_id = devnet_chain_id();
     let src = tempdir().expect("tempdir");
     let snap_root = tempdir().expect("tempdir");
     let data_dir = tempdir().expect("tempdir");
-    let snapshot_dir = snap_root.path().join("snap-b");
+    let snapshot_dir = snap_root.path().join(format!("snap-b-{tag}"));
     build_real_snapshot(src.path(), &snapshot_dir, chain_id, 220, 4242, Some(7));
 
-    // ---- Phase 1: produce a genuine COMPLETE + real restored database. ----
-    let restore_args = with_vm_v0_profile(restore_localmesh_args(data_dir.path(), &snapshot_dir));
-    log_executable_provenance("D7D8-B-phase1-restore", &restore_args);
+    // ---- Case 1 (valid): produce a genuine COMPLETE + real restored database,
+    // admitted normally through the profile's existing-only path. ----
+    let restore_args = apply_profile(restore_localmesh_args(data_dir.path(), &snapshot_dir));
+    log_executable_provenance(&format!("D7D8-B-{tag}-phase1-restore"), &restore_args);
     {
         let mut child = DrainedChild::spawn(&restore_args);
-        child
-            .observe_then_terminate(&[M_VM_V0_OPENED], POSITIVE_DEADLINE)
-            .expect_observed_then_terminated("D7D8-B-phase1-restore");
+        let stderr = child
+            .observe_then_terminate(&[valid_admission_marker], POSITIVE_DEADLINE)
+            .expect_observed_then_terminated(&format!("D7D8-B-{tag}-phase1-restore"));
+        assert!(
+            stderr.contains("mode=existing-only"),
+            "[{tag}] a completed restore must open/validate the restored DB existing-only; \
+             stderr=\n{stderr}"
+        );
     }
     let state_dir = data_dir.path().join(VM_V0_STATE_SUBDIR);
     assert!(
         state_dir.join("CURRENT").exists(),
-        "phase 1 must leave a real RocksDB restored database (CURRENT present)"
+        "[{tag}] the valid case must leave a real RocksDB restored database (CURRENT present)"
     );
 
-    // ---- Phase 2a: replace the DB with an unrelated-only directory. ----
+    let ordinary_args = apply_profile(ordinary_localmesh_args(data_dir.path()));
+
+    // Helper: run an ordinary startup that must fail closed with a specific
+    // refusal marker and complete capture. `expect_no_current` asserts no
+    // replacement DB was initialized (a fresh RocksDB would create a CURRENT);
+    // it is disabled only for the invalid case, whose fixture deliberately
+    // supplies a (bogus) CURRENT that must be preserved rather than absent.
+    let run_negative = |phase: &str, expect_marker: &str, expect_no_current: bool| -> String {
+        log_executable_provenance(&format!("D7D8-B-{tag}-{phase}"), &ordinary_args);
+        let (status, stderr, capture) = {
+            let mut child = DrainedChild::spawn(&ordinary_args);
+            let status = child.wait_natural_exit(NEGATIVE_DEADLINE);
+            (status, child.stderr_snapshot(), child.stderr_capture())
+        };
+        maybe_dump_child_stderr(&format!("D7D8-B-{tag}-{phase}"), &stderr);
+        assert_eq!(
+            status.code(),
+            Some(1),
+            "[{tag}/{phase}] must fail closed with natural exit 1; stderr=\n{stderr}"
+        );
+        // Complete capture before asserting the refusal / DB-absence claims.
+        assert!(
+            capture.is_complete(),
+            "[{tag}/{phase}] stderr capture must be complete before assertions; got {capture:?}"
+        );
+        assert!(
+            stderr.contains(expect_marker),
+            "[{tag}/{phase}] expected specific refusal {expect_marker:?}; stderr=\n{stderr}"
+        );
+        // No replacement database was initialized.
+        if expect_no_current {
+            assert!(
+                !state_dir.join("CURRENT").exists(),
+                "[{tag}/{phase}] a refused start must NOT initialize a new database (no CURRENT)"
+            );
+        }
+        stderr
+    };
+
+    // ---- Case 2 (missing database directory): remove the state dir entirely. ----
     std::fs::remove_dir_all(&state_dir).expect("remove restored db");
-    std::fs::create_dir_all(&state_dir).expect("recreate state dir");
+    assert!(!state_dir.exists(), "[{tag}] state dir must be absent for the missing case");
+    // The profile-independent ordinary-startup guard refuses (COMPLETE present,
+    // required installed state missing).
+    run_negative("phase2-missing", M_D7D8_MISSING_STATE, true);
+
+    // ---- Case 3 (empty directory): recreate an empty state dir. ----
+    std::fs::create_dir_all(&state_dir).expect("recreate empty state dir");
+    run_negative("phase3-empty", M_D7D8_MISSING_STATE, true);
+
+    // ---- Case 4 (unrelated-only directory): a non-empty dir with only an
+    // unrelated sentinel; the structural pre-filter admits it but the
+    // existing-only DB open fails closed without initializing a replacement. ----
     let sentinel = state_dir.join("UNRELATED.txt");
     let sentinel_bytes = b"not-a-rocksdb-sentinel";
     std::fs::write(&sentinel, sentinel_bytes).expect("write unrelated sentinel");
-
-    let ordinary_args = with_vm_v0_profile(ordinary_localmesh_args(data_dir.path()));
-    log_executable_provenance("D7D8-B-phase2a-unrelated", &ordinary_args);
-    let (status_a, stderr_a) = {
-        let mut child = DrainedChild::spawn(&ordinary_args);
-        let status = child.wait_natural_exit(NEGATIVE_DEADLINE);
-        (status, child.stderr_snapshot())
-    };
-    maybe_dump_child_stderr("D7D8-B-phase2a-unrelated", &stderr_a);
-    assert_eq!(
-        status_a.code(),
-        Some(1),
-        "unrelated-only state must fail closed with natural exit 1; stderr=\n{stderr_a}"
-    );
-    assert!(
-        stderr_a.contains(M_T164_ERROR),
-        "unrelated-only state must be refused at the existing-only VM-v0 open; stderr=\n{stderr_a}"
-    );
-    // No replacement database was initialized, and the sentinel is preserved.
-    assert!(
-        !state_dir.join("CURRENT").exists(),
-        "a refused existing-only open must NOT initialize a new database (no CURRENT)"
-    );
+    run_negative("phase4-unrelated", M_T164_ERROR, true);
     assert_eq!(
         std::fs::read(&sentinel).expect("read sentinel"),
         sentinel_bytes,
-        "the unrelated sentinel must be preserved byte-for-byte"
+        "[{tag}] the unrelated sentinel must be preserved byte-for-byte"
     );
 
-    // ---- Phase 2b: empty the directory entirely. ----
+    // ---- Case 5 (invalid/unopenable database): a directory that LOOKS like a
+    // RocksDB (a CURRENT pointer) but references a missing MANIFEST, so the
+    // existing-only open fails closed deterministically (no permission reliance).
     std::fs::remove_dir_all(&state_dir).expect("remove unrelated dir");
-    std::fs::create_dir_all(&state_dir).expect("recreate empty state dir");
-    log_executable_provenance("D7D8-B-phase2b-empty", &ordinary_args);
-    let (status_b, stderr_b) = {
-        let mut child = DrainedChild::spawn(&ordinary_args);
-        let status = child.wait_natural_exit(NEGATIVE_DEADLINE);
-        (status, child.stderr_snapshot())
-    };
-    maybe_dump_child_stderr("D7D8-B-phase2b-empty", &stderr_b);
+    std::fs::create_dir_all(&state_dir).expect("recreate state dir for invalid case");
+    // A CURRENT file pointing at a non-existent manifest makes RocksDB's
+    // existing-only open fail deterministically for any UID.
+    std::fs::write(state_dir.join("CURRENT"), b"MANIFEST-000999\n").expect("write bogus CURRENT");
+    let stderr5 = run_negative("phase5-invalid", M_T164_ERROR, false);
+    // The bogus CURRENT must be preserved (the reader must not repair the DB),
+    // and no real MANIFEST may have been created (no silent replacement).
     assert_eq!(
-        status_b.code(),
-        Some(1),
-        "empty state must fail closed with natural exit 1; stderr=\n{stderr_b}"
+        std::fs::read(state_dir.join("CURRENT")).expect("read CURRENT"),
+        b"MANIFEST-000999\n",
+        "[{tag}] the invalid CURRENT pointer must be preserved (no silent repair); \
+         stderr=\n{stderr5}"
     );
+    let manifest_created = std::fs::read_dir(&state_dir)
+        .expect("read invalid state dir")
+        .filter_map(Result::ok)
+        .any(|e| e.file_name().to_string_lossy().starts_with("MANIFEST-"));
     assert!(
-        stderr_b.contains(M_D7D8_MISSING_STATE),
-        "empty state must be refused by the ordinary-startup guard; stderr=\n{stderr_b}"
-    );
-    assert!(
-        !state_dir.join("CURRENT").exists(),
-        "a guard refusal must NOT initialize a new database (no CURRENT)"
+        !manifest_created,
+        "[{tag}] a refused invalid-DB open must NOT initialize a replacement (no MANIFEST-*)"
     );
 }
 
-/// Scenario A — a successful completion followed by an ordinary restart. The
-/// restore publishes a real COMPLETE, and a later ordinary start (no restore
-/// flag) is admitted through that COMPLETE, opens the SAME restored database
-/// existing-only WITHOUT republishing INTENT/COMPLETE, and the restored account
-/// value is preserved.
+/// Correction B — VM-v0 profile: valid/missing/empty/unrelated/invalid matrix.
+#[test]
+fn d7d8_correction_b_missing_or_unrelated_state_refuses_via_binary() {
+    run_correction_b_matrix("vm-v0", with_vm_v0_profile, M_VM_V0_OPENED);
+}
+
+/// Correction B — non-VM-v0 (`nonce-only`) profile: the SAME matrix. The
+/// existing-only database validation is profile-independent, so the negative
+/// cases fail closed identically; only the valid-admission marker differs (the
+/// validated-no-runtime line instead of the VM-v0 runtime-open line).
+#[test]
+fn d7d8_correction_b_missing_or_unrelated_state_refuses_via_binary_nonce_only() {
+    run_correction_b_matrix("nonce-only", with_nonce_only_profile, M_VM_V0_VALIDATED_NONRUNTIME);
+}
+
+/// Scenario A — a successful completion, then FIXTURE-DRIVEN account/epoch
+/// progress, then an ordinary restart that PRESERVES that later progress
+/// (Correction C). The restore publishes a real COMPLETE; between processes the
+/// test advances the installed account state and the consensus epoch to DISTINCT
+/// values through the existing fixture storage APIs and persists them; a later
+/// ordinary start (no restore flag) is admitted through that COMPLETE, opens the
+/// SAME restored database existing-only WITHOUT republishing INTENT/COMPLETE and
+/// WITHOUT reapplying the historical snapshot baseline/epoch, and the ADVANCED
+/// account value AND advanced consensus epoch both remain.
+///
+/// The advancement is deliberately described as fixture-driven: it is a direct
+/// storage write, NOT authenticated consensus progress, durable anti-rollback,
+/// or signing-state recovery. Its only role is to establish that a genuine later
+/// state survives the ordinary restart unchanged (not silently rolled back to
+/// the historical snapshot baseline).
 #[test]
 fn d7d8_a_complete_then_ordinary_restart_preserves_state() {
     let chain_id = devnet_chain_id();
@@ -3496,7 +3596,9 @@ fn d7d8_a_complete_then_ordinary_restart_preserves_state() {
     let snap_root = tempdir().expect("tempdir");
     let data_dir = tempdir().expect("tempdir");
     let snapshot_dir = snap_root.path().join("snap-complete");
-    build_real_snapshot(src.path(), &snapshot_dir, chain_id, 230, 4242, Some(7));
+    // Snapshot fixture: account (7, 4242), historical snapshot epoch Some(7).
+    const SNAPSHOT_EPOCH: u64 = 7;
+    build_real_snapshot(src.path(), &snapshot_dir, chain_id, 230, 4242, Some(SNAPSHOT_EPOCH));
 
     // ---- Phase 1: real restore to durable COMPLETE. ----
     let restore_args = with_vm_v0_profile(restore_localmesh_args(data_dir.path(), &snapshot_dir));
@@ -3512,6 +3614,56 @@ fn d7d8_a_complete_then_ordinary_restart_preserves_state() {
         stderr1.contains(M_D7D8_COMPLETE_PUBLISHED),
         "phase 1 must publish a durable COMPLETE; stderr=\n{stderr1}"
     );
+
+    // ---- Phase 1.5: child reaped (observe_then_terminate reaped+joined). Read
+    // and RETAIN the actual RTR and the initial account/epoch observations, then
+    // advance both to DISTINCT values via the existing fixture storage APIs. ----
+    let rtr_before = match read_rtr(data_dir.path()).expect("read RTR after COMPLETE") {
+        RtrReadResult::Present(rec) => {
+            assert_eq!(
+                rec.state,
+                RtrState::Complete,
+                "phase 1 must leave a final COMPLETE record"
+            );
+            rec
+        }
+        other => panic!("expected a COMPLETE RTR after phase 1, got {other:?}"),
+    };
+    let (account_before, obs_before) = observe_restored_data_dir(data_dir.path());
+    assert_eq!(
+        account_before,
+        AccountState::new(7, 4242),
+        "the just-restored destination holds the snapshot account value"
+    );
+    assert_eq!(
+        obs_before,
+        ConsensusStorageObservation::CommittedEpoch(SNAPSHOT_EPOCH),
+        "the just-restored destination holds the historical snapshot epoch"
+    );
+
+    // Fixture-driven progress to DISTINCT values (all handles closed before the
+    // next child launches). This is a direct storage write, not consensus.
+    let advanced_account = AccountState::new(11, 55_555);
+    assert_ne!(advanced_account, account_before, "progress must be distinct");
+    const ADVANCED_EPOCH: u64 = 9;
+    assert_ne!(ADVANCED_EPOCH, SNAPSHOT_EPOCH, "epoch progress must be distinct");
+    {
+        let state_dir = data_dir.path().join(VM_V0_STATE_SUBDIR);
+        let account = RocksDbAccountState::open(&state_dir).expect("open state to advance");
+        account
+            .put_account_state(&ACCOUNT_ID, &advanced_account)
+            .expect("advance account state");
+        account.flush().expect("flush advanced account");
+    }
+    {
+        let consensus_dir = data_dir.path().join("consensus");
+        let storage =
+            RocksDbConsensusStorage::open(&consensus_dir).expect("open consensus to advance");
+        storage
+            .put_current_epoch_synced(ADVANCED_EPOCH)
+            .expect("advance consensus epoch");
+        storage.flush_epoch_durable().expect("flush advanced epoch");
+    }
 
     // ---- Phase 2: ordinary restart (no restore flag) over the completed dir.
     let ordinary_args = with_vm_v0_profile(ordinary_localmesh_args(data_dir.path()));
@@ -3534,19 +3686,51 @@ fn d7d8_a_complete_then_ordinary_restart_preserves_state() {
         stderr2.contains(M_VM_V0_MODE_EXISTING),
         "ordinary restart over a COMPLETE must open existing-only; stderr=\n{stderr2}"
     );
-    // An ordinary restart is NOT a restore: it must not republish INTENT/COMPLETE.
+    // An ordinary restart is NOT a restore: it must republish NEITHER INTENT NOR
+    // COMPLETE, and must NOT reapply the historical snapshot baseline/epoch.
     assert!(
         !stderr2.contains(M_D7D8_INTENT_PUBLISHED),
         "an ordinary restart must not republish INTENT; stderr=\n{stderr2}"
     );
-
-    // The restored account value is preserved across the completion + restart.
-    let (account, _observation) = observe_restored_data_dir(data_dir.path());
-    assert_eq!(
-        account,
-        AccountState::new(7, 4242),
-        "the completed + restarted destination preserves the restored account value"
+    assert!(
+        !stderr2.contains(M_D7D8_COMPLETE_PUBLISHED),
+        "an ordinary restart must not republish COMPLETE; stderr=\n{stderr2}"
     );
+    assert!(
+        !stderr2.contains(M_BASELINE_APPLIED),
+        "an ordinary restart must not reapply the historical snapshot baseline; stderr=\n{stderr2}"
+    );
+    assert!(
+        !stderr2.contains(M_EPOCH_PERSIST),
+        "an ordinary restart must not reapply the historical snapshot epoch; stderr=\n{stderr2}"
+    );
+
+    // ---- Phase 3: independently reopen the stores and prove the ADVANCED
+    // progress survived (not rolled back to the historical snapshot baseline).
+    let (account_after, obs_after) = observe_restored_data_dir(data_dir.path());
+    assert_eq!(
+        account_after, advanced_account,
+        "the fixture-advanced account value must remain after the ordinary restart"
+    );
+    assert_eq!(
+        obs_after,
+        ConsensusStorageObservation::CommittedEpoch(ADVANCED_EPOCH),
+        "the fixture-advanced consensus epoch must remain after the ordinary restart"
+    );
+    assert_ne!(
+        obs_after,
+        ConsensusStorageObservation::CommittedEpoch(SNAPSHOT_EPOCH),
+        "the historical snapshot epoch must NOT be reapplied over the advanced epoch"
+    );
+
+    // The authoritative RTR is unchanged — the same historical completion record.
+    match read_rtr(data_dir.path()).expect("read RTR after ordinary restart") {
+        RtrReadResult::Present(rec) => assert_eq!(
+            rec, rtr_before,
+            "the authoritative RTR must remain the same historical COMPLETE record"
+        ),
+        other => panic!("expected the same COMPLETE RTR to persist, got {other:?}"),
+    }
 }
 
 /// Scenario B — an occupied-target restore refusal followed by an ordinary
@@ -3580,12 +3764,15 @@ fn d7d8_b_occupied_refusal_then_ordinary_start() {
     }
 
     // ---- Phase 1: requested restore refuses at the occupied-target check. ----
+    // Record the consensus epoch BEFORE the refusal (independently, tolerating an
+    // absent store) so the "unchanged" claim rests on a re-open, not a log.
+    let epoch_before = observe_consensus_epoch_opt(data_dir.path());
     let restore_args = with_vm_v0_profile(restore_localmesh_args(data_dir.path(), &snapshot_dir));
     log_executable_provenance("D7D8-B-occupied", &restore_args);
-    let (status1, stderr1) = {
+    let (status1, stderr1, capture1) = {
         let mut child = DrainedChild::spawn(&restore_args);
         let status = child.wait_natural_exit(NEGATIVE_DEADLINE);
-        (status, child.stderr_snapshot())
+        (status, child.stderr_snapshot(), child.stderr_capture())
     };
     maybe_dump_child_stderr("D7D8-B-occupied", &stderr1);
     assert_eq!(
@@ -3596,6 +3783,12 @@ fn d7d8_b_occupied_refusal_then_ordinary_start() {
     assert!(
         stderr1.contains(M_TARGET_NOT_EMPTY),
         "the refusal must be the occupied-target check; stderr=\n{stderr1}"
+    );
+    // Complete capture is required before any forbidden-marker absence assertion.
+    assert!(
+        capture1.is_complete(),
+        "the occupied-refusal stderr capture must be complete before asserting marker absence; \
+         got {capture1:?}"
     );
     // No INTENT published, no RTR created, no snapshot epoch applied.
     assert!(
@@ -3616,6 +3809,19 @@ fn d7d8_b_occupied_refusal_then_ordinary_start() {
     assert!(
         !stderr1.contains(M_EPOCH_PERSIST),
         "occupied-target refusal must not apply the snapshot epoch; stderr=\n{stderr1}"
+    );
+    // Independently confirm the consensus epoch was not COMMITTED by the refusal.
+    // The refusal may create an empty consensus store (PresentNoCommittedEpoch),
+    // but it must never commit the snapshot epoch: no committed epoch may exist.
+    let epoch_after_refusal = observe_consensus_epoch_opt(data_dir.path());
+    let _ = epoch_before; // retained for provenance; the store may be created by the refusal
+    assert!(
+        !matches!(
+            epoch_after_refusal,
+            Some(ConsensusStorageObservation::CommittedEpoch(_))
+        ),
+        "the occupied-target refusal must not commit any consensus epoch (independently \
+         observed, not merely a missing log line); got {epoch_after_refusal:?}"
     );
 
     // ---- Phase 2: ordinary startup over the same legitimate destination. ----
@@ -3648,6 +3854,16 @@ fn d7d8_b_occupied_refusal_then_ordinary_start() {
         AccountState::new(9, 999),
         "the legitimate pre-existing account must be preserved across refusal + ordinary start"
     );
+    // Independently inspect the consensus epoch AFTER the ordinary startup: the
+    // snapshot epoch must never have been applied by either the refusal or the
+    // ordinary (no-restore) start.
+    let epoch_after = observe_consensus_epoch_opt(data_dir.path());
+    assert_ne!(
+        epoch_after,
+        Some(ConsensusStorageObservation::CommittedEpoch(7)),
+        "neither the occupied refusal nor the ordinary start may apply the snapshot epoch \
+         (independently observed)"
+    );
 }
 
 /// Scenario C — destination-lock contention, holder death, reacquisition
@@ -3679,10 +3895,10 @@ fn d7d8_c_destination_lock_contention_death_and_reacquire() {
     // ---- Contender: process 2 refuses on lock contention before effects. ----
     let contender_args = with_vm_v0_profile(ordinary_localmesh_args(data_dir.path()));
     log_executable_provenance("D7D8-C-contender", &contender_args);
-    let (c_status, c_stderr) = {
+    let (c_status, c_stderr, c_capture) = {
         let mut contender = DrainedChild::spawn(&contender_args);
         let status = contender.wait_natural_exit(NEGATIVE_DEADLINE);
-        (status, contender.stderr_snapshot())
+        (status, contender.stderr_snapshot(), contender.stderr_capture())
     };
     maybe_dump_child_stderr("D7D8-C-contender", &c_stderr);
     assert_eq!(
@@ -3695,6 +3911,13 @@ fn d7d8_c_destination_lock_contention_death_and_reacquire() {
         "the refusal must be SPECIFIC lock contention, not a port collision or generic error; \
          stderr=\n{c_stderr}"
     );
+    // Complete capture is required BEFORE asserting a forbidden marker is absent:
+    // a truncated/failed capture cannot support an absence claim.
+    assert!(
+        c_capture.is_complete(),
+        "the contender's stderr capture must be complete before asserting marker absence; \
+         got {c_capture:?}"
+    );
     // The contention refusal precedes protected effects: no consensus loop, no
     // INTENT publication for the contender.
     assert!(
@@ -3702,21 +3925,28 @@ fn d7d8_c_destination_lock_contention_death_and_reacquire() {
         "the contender must refuse BEFORE reaching the consensus loop; stderr=\n{c_stderr}"
     );
 
-    // ---- Holder death, then reacquisition WITHOUT deleting the lock file. ----
-    holder.kill_and_reap();
+    // ---- Holder termination via the CLASSIFIED deliberate-termination path. ----
+    // The holder is still alive with both markers present; terminate it through
+    // observe_then_terminate so termination is affirmatively classified as a
+    // successful SIGKILL with complete capture (NOT best-effort cleanup used as
+    // process-death evidence).
+    let holder_stderr = holder
+        .observe_then_terminate(&[M_D7D8_LOCK_ACQUIRED, M_LOOP_REACHED], POSITIVE_DEADLINE)
+        .expect_observed_then_terminated("D7D8-C-holder-terminate");
+    maybe_dump_child_stderr("D7D8-C-holder-terminate", &holder_stderr);
     assert!(
         lock_path.exists(),
         "the advisory lock file must remain on disk after the holder dies (never unlinked)"
     );
+    // ---- Successor reacquires the freed lock WITHOUT deleting the lock file,
+    // observed through the CLASSIFIED positive path. ----
     let successor_args = with_vm_v0_profile(ordinary_localmesh_args(data_dir.path()));
     log_executable_provenance("D7D8-C-successor", &successor_args);
     let s_stderr = {
         let mut successor = DrainedChild::spawn(&successor_args);
-        let acquired = successor.wait_for_marker_alive(M_D7D8_LOCK_ACQUIRED, POSITIVE_DEADLINE);
-        let snap = successor.stderr_snapshot();
-        successor.kill_and_reap();
-        assert!(acquired, "a successor must acquire the freed lock; stderr=\n{snap}");
-        snap
+        successor
+            .observe_then_terminate(&[M_D7D8_LOCK_ACQUIRED], POSITIVE_DEADLINE)
+            .expect_observed_then_terminated("D7D8-C-successor")
     };
     assert!(
         s_stderr.contains(M_D7D8_LOCK_ACQUIRED),
