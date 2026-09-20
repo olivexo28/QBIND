@@ -3801,26 +3801,31 @@ fn guarded_sign_proposal_inner(
     });
 
     match journal.reserve_for_sign(&position, &binding) {
-        Ok(ReservationOutcome::FreshlyReserved) => {
+        Ok(ReservationOutcome::FreshlyReserved(continuation)) => {
             inbound_stats.outbound_proposal_journal_reserved_total = inbound_stats
                 .outbound_proposal_journal_reserved_total
                 .saturating_add(1);
-            // (6) Exactly one signer invocation for the newly reserved live
-            //     operation. Mark the intent to invoke first so any live retry
-            //     cannot re-enter as a fresh permit.
-            if journal.note_signer_invoked(&position).is_err() {
-                inbound_stats.outbound_proposal_journal_error_total = inbound_stats
-                    .outbound_proposal_journal_error_total
-                    .saturating_add(1);
-                return None;
-            }
+            // (6) Consume the one-use, operation-bound continuation immediately
+            //     BEFORE invoking the signer, converting it into the publication
+            //     capability for THIS operation. A live retry can never re-enter
+            //     as a fresh continuation.
+            let publish_cap = match journal.consume_for_signing(continuation) {
+                Ok(cap) => cap,
+                Err(_) => {
+                    inbound_stats.outbound_proposal_journal_error_total = inbound_stats
+                        .outbound_proposal_journal_error_total
+                        .saturating_add(1);
+                    return None;
+                }
+            };
             match signer.sign_proposal(&preimage) {
                 Ok(sig) => {
-                    // (7) Durable result handling. On persistence failure/uncertainty
-                    //     preserve the potentially-signed obligation, suppress facade
-                    //     handoff, and do NOT re-sign.
+                    // (7) Durable result handling bound to the same operation. On
+                    //     persistence failure/uncertainty preserve the
+                    //     potentially-signed obligation, suppress facade handoff,
+                    //     and do NOT re-sign.
                     if journal
-                        .record_signed_result(&position, &binding, &sig)
+                        .record_signed_result(&publish_cap, &sig)
                         .is_err()
                     {
                         inbound_stats.outbound_proposal_journal_result_persist_failure_total =
@@ -3997,20 +4002,23 @@ fn guarded_sign_vote_inner(
     });
 
     match journal.reserve_for_sign(&position, &binding) {
-        Ok(ReservationOutcome::FreshlyReserved) => {
+        Ok(ReservationOutcome::FreshlyReserved(continuation)) => {
             inbound_stats.outbound_vote_journal_reserved_total = inbound_stats
                 .outbound_vote_journal_reserved_total
                 .saturating_add(1);
-            if journal.note_signer_invoked(&position).is_err() {
-                inbound_stats.outbound_vote_journal_error_total = inbound_stats
-                    .outbound_vote_journal_error_total
-                    .saturating_add(1);
-                return None;
-            }
+            let publish_cap = match journal.consume_for_signing(continuation) {
+                Ok(cap) => cap,
+                Err(_) => {
+                    inbound_stats.outbound_vote_journal_error_total = inbound_stats
+                        .outbound_vote_journal_error_total
+                        .saturating_add(1);
+                    return None;
+                }
+            };
             match signer.sign_vote(&preimage) {
                 Ok(sig) => {
                     if journal
-                        .record_signed_result(&position, &binding, &sig)
+                        .record_signed_result(&publish_cap, &sig)
                         .is_err()
                     {
                         inbound_stats.outbound_vote_journal_result_persist_failure_total =
@@ -21915,23 +21923,51 @@ mod tests {
                     /// read failure and a write budget (so a write can be
                     /// made to fail AFTER the reservation write succeeds,
                     /// modelling result-persistence failure). It is NOT a
-                    /// durable backend and never claims to be; a "restart"
-                    /// is a new journal over the same `Arc<D10Store>`.
-                    #[derive(Default)]
+                    /// durable backend and never claims to be.
+                    ///
+                    /// Run 422 D7-D10 Correction B: the durable byte map is a
+                    /// shared `Arc`, while the ownership domain is per-instance.
+                    /// Two handles over the SAME instance share one domain (a
+                    /// concurrent second handle). A modelled process restart is
+                    /// [`D10Store::reopen`]: a NEW instance sharing the SAME byte
+                    /// map but with a FRESH ownership domain — the durable bytes
+                    /// survive, the live-operation table does not, exactly the
+                    /// crash-recovery posture.
                     struct D10Store {
-                        map: StdRwLock<StdHashMap<Vec<u8>, Vec<u8>>>,
+                        map: Arc<StdRwLock<StdHashMap<Vec<u8>, Vec<u8>>>>,
                         fail_reads: AtomicBool,
                         /// Number of writes still permitted before failing;
                         /// `i64::MAX` on construction means effectively
                         /// unlimited for the small fixtures here.
                         write_budget: AtomicI64,
+                        /// When true, the injected write STORES the bytes and
+                        /// THEN returns an error (an uncertain durable write),
+                        /// instead of failing before storing. Clearly labelled
+                        /// per Correction C write-uncertainty testing.
+                        store_then_error: AtomicBool,
+                        domain: std::sync::OnceLock<
+                            Arc<crate::signing_reservation_journal::SigningOwnershipDomain>,
+                        >,
                     }
                     impl D10Store {
                         fn new() -> Arc<Self> {
                             Arc::new(D10Store {
-                                map: StdRwLock::new(StdHashMap::new()),
+                                map: Arc::new(StdRwLock::new(StdHashMap::new())),
                                 fail_reads: AtomicBool::new(false),
                                 write_budget: AtomicI64::new(i64::MAX),
+                                store_then_error: AtomicBool::new(false),
+                                domain: std::sync::OnceLock::new(),
+                            })
+                        }
+                        /// Model a process restart: same durable bytes, a fresh
+                        /// (empty) ownership domain and default injection state.
+                        fn reopen(&self) -> Arc<Self> {
+                            Arc::new(D10Store {
+                                map: Arc::clone(&self.map),
+                                fail_reads: AtomicBool::new(false),
+                                write_budget: AtomicI64::new(i64::MAX),
+                                store_then_error: AtomicBool::new(false),
+                                domain: std::sync::OnceLock::new(),
                             })
                         }
                         fn set_fail_reads(&self, v: bool) {
@@ -21940,6 +21976,10 @@ mod tests {
                         /// Permit exactly `n` further writes, then fail.
                         fn set_write_budget(&self, n: i64) {
                             self.write_budget.store(n, SeqCst);
+                        }
+                        /// Enable "store the result then return an error" mode.
+                        fn set_store_then_error(&self, v: bool) {
+                            self.store_then_error.store(v, SeqCst);
                         }
                         /// Overwrite the stored bytes at a position's key with
                         /// arbitrary (e.g. corrupt) bytes, bypassing the
@@ -21968,6 +22008,14 @@ mod tests {
                                 // Restore so the counter cannot underflow across
                                 // repeated attempts, and fail this write.
                                 self.write_budget.fetch_add(1, SeqCst);
+                                if self.store_then_error.load(SeqCst) {
+                                    // Uncertain write: the bytes become readable
+                                    // but the durability op returns an error.
+                                    self.map
+                                        .write()
+                                        .unwrap()
+                                        .insert(key.to_vec(), value.to_vec());
+                                }
                                 return Err(StorageError::Io("injected write failure".into()));
                             }
                             self.map
@@ -21975,6 +22023,16 @@ mod tests {
                                 .unwrap()
                                 .insert(key.to_vec(), value.to_vec());
                             Ok(())
+                        }
+                        fn signing_ownership_domain(
+                            &self,
+                        ) -> Arc<crate::signing_reservation_journal::SigningOwnershipDomain>
+                        {
+                            self.domain
+                                .get_or_init(
+                                    crate::signing_reservation_journal::SigningOwnershipDomain::new,
+                                )
+                                .clone()
                         }
                     }
 
@@ -22151,10 +22209,12 @@ mod tests {
                         assert_eq!(c.proposal_calls.load(SeqCst), 1);
                         let first_sig = f1.proposals.lock().unwrap()[0].signature.clone();
 
-                        // Exact same decision through a fresh handle (restart):
-                        // the retained signature is reused; the signer is NOT
+                        // Exact same decision after a modelled restart (fresh
+                        // ownership domain over the same durable bytes): the
+                        // retained signature is reused; the signer is NOT
                         // invoked again; the message is still delivered.
-                        let j2 = journal(store.clone());
+                        let store2 = store.reopen();
+                        let j2 = journal(store2.clone());
                         let (s2, f2) = drive_j(&snap, &j2, proposal_at(0, 1, [7u8; 32]));
                         assert_eq!(
                             c.proposal_calls.load(SeqCst),
@@ -22346,10 +22406,10 @@ mod tests {
                         assert!(f.proposals.lock().unwrap().is_empty());
 
                         // The reservation record survives as RESERVED; a later
-                        // retry (restart) must NOT re-sign — it is treated as
-                        // potentially-signed.
-                        store.set_write_budget(i64::MAX);
-                        let j2 = journal(store.clone());
+                        // retry after a modelled restart (fresh ownership domain)
+                        // must NOT re-sign — it is treated as potentially-signed.
+                        let store2 = store.reopen();
+                        let j2 = journal(store2.clone());
                         let (s2, f2) = drive_j(&snap, &j2, proposal_at(0, 1, [9u8; 32]));
                         assert_eq!(
                             c.proposal_calls.load(SeqCst),
@@ -22377,10 +22437,11 @@ mod tests {
                         let (_s1, _f1) = drive_j(&snap, &j1, proposal_at(0, 1, [3u8; 32]));
                         assert_eq!(c.proposal_calls.load(SeqCst), 1);
 
-                        // Restart: new journal over the same bytes. RESERVED with
-                        // no live permit and no retained result ⇒ refuse.
-                        store.set_write_budget(i64::MAX);
-                        let j2 = journal(store.clone());
+                        // Restart: fresh ownership domain over the same durable
+                        // bytes. RESERVED with no live operation and no retained
+                        // result ⇒ refuse.
+                        let store2 = store.reopen();
+                        let j2 = journal(store2.clone());
                         let (s2, f2) = drive_j(&snap, &j2, proposal_at(0, 1, [3u8; 32]));
                         assert_eq!(c.proposal_calls.load(SeqCst), 1, "no re-sign after death");
                         assert_eq!(s2.outbound_proposal_journal_potentially_signed_total, 1);
@@ -22409,7 +22470,8 @@ mod tests {
                         let key = position.storage_key();
                         store.poke(&key, vec![0xFF; 16]);
 
-                        let j2 = journal(store.clone());
+                        let store2 = store.reopen();
+                        let j2 = journal(store2.clone());
                         let (s2, f2) = drive_j(&snap, &j2, proposal_at(0, 1, [4u8; 32]));
                         // Corruption fails closed: journal error, no sign, no send.
                         assert_eq!(c.proposal_calls.load(SeqCst), 1, "no sign on corruption");

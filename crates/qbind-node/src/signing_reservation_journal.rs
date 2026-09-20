@@ -483,36 +483,94 @@ impl From<StorageError> for JournalError {
     }
 }
 
-/// The outcome of a reservation request. Every non-`FreshlyReserved` outcome
-/// that is not an exact retry must lead the caller to refuse the signer.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// The outcome of a reservation request. Every outcome that is neither a fresh
+/// reservation nor an exact retry must lead the caller to refuse the signer.
+///
+/// Run 422 D7-D10 Correction B: [`Self::FreshlyReserved`] no longer carries a
+/// freely-copyable marker plus position-only invocation bookkeeping. It carries
+/// a [`SigningContinuation`] — an operation-bound, non-cloneable, one-use
+/// capability that is created **only after** the reservation write has received
+/// its durability acknowledgement, is bound to the ownership domain / position /
+/// binding / unique live operation, and cannot be reconstructed from a durable
+/// `Reserved` record. This outcome is therefore not `Clone`/`Eq`.
+#[derive(Debug)]
 pub enum ReservationOutcome {
-    /// A fresh reservation was durably committed under exclusive ownership. The
-    /// caller — the one exclusive live operation — MAY invoke the signer exactly
-    /// once for this decision. This permit is held in memory and is NOT
-    /// reconstructible merely by reading `Reserved` from storage after a
-    /// restart.
-    FreshlyReserved,
+    /// A fresh reservation was durably committed under this ownership domain.
+    /// The enclosed [`SigningContinuation`] is the one live operation's single
+    /// authority to invoke the signer once for this exact decision.
+    FreshlyReserved(SigningContinuation),
     /// An exact retry: the identical decision was previously signed and its
     /// signature retained. Resend the retained signature; do NOT invoke the
     /// signer. The caller MUST still validate the retained signature's
-    /// decision/context association before reuse.
+    /// decision/context association before reuse. This is returned only when the
+    /// stored `Signed` result is not shadowed by a live operation whose result
+    /// write has not yet been durably acknowledged in this process (see the
+    /// uncertainty rule in [`SigningReservationJournal::reserve_for_sign`]).
     ExactRetryRetained(Vec<u8>),
     /// A conflicting decision (same position, different binding) exists. Refuse
     /// without altering the original obligation.
     Conflict,
     /// The position is in an uncertain state: a recovered `Reserved` record
-    /// without a live permit, or another state that cannot establish the signer
-    /// was never invoked. Treat as potentially-signed: refuse re-signing and
-    /// preserve the reservation.
+    /// (no live continuation is ever minted from durable `Reserved` state), an
+    /// already-live reservation for this position, or a `Signed` result whose
+    /// durable acknowledgement is not established in this process. Treat as
+    /// potentially-signed: refuse re-signing and preserve the reservation.
     PotentiallySigned,
-    /// The journal's per-instance reservation budget is exhausted. Refuse
-    /// further signing safely (no silent eviction of any conflict obligation).
+    /// The reservation budget is exhausted. Refuse further signing safely (no
+    /// silent eviction of any conflict obligation).
     Exhausted,
 }
 
+/// Run 422 D7-D10 Correction B — an **operation-bound, one-use** continuation:
+/// the single authority to invoke the signer for exactly one reserved decision.
+///
+/// It is deliberately:
+/// * **Non-cloneable / non-copyable** — there is exactly one, and consuming it
+///   moves it, so it can be spent at most once.
+/// * **Constructible only** inside [`SigningReservationJournal::reserve_for_sign`]
+///   after a durable reservation acknowledgement (all fields are private and
+///   there is no public constructor). A durable `Reserved` record read back from
+///   storage can never be turned into one.
+/// * **Bound** to the issuing ownership domain (`domain_token`), the canonical
+///   `position`, the exact-message `binding`, and a unique live `operation_id`.
+///
+/// Dropping it without consuming it does NOT release the durable reservation and
+/// does NOT return the position to unused state; a later reservation for that
+/// position observes the recorded reservation and refuses re-signing.
+#[derive(Debug)]
+pub struct SigningContinuation {
+    domain_token: u64,
+    position: SigningPosition,
+    binding: BindingDigest,
+    operation_id: u64,
+}
+
+impl SigningContinuation {
+    /// The canonical position this continuation authorizes signing for.
+    pub fn position(&self) -> SigningPosition {
+        self.position
+    }
+}
+
+/// Run 422 D7-D10 Correction C — the authority to **publish the result** of the
+/// exact operation that reserved a decision and crossed the signer-invocation
+/// boundary. Obtained only by consuming a [`SigningContinuation`] via
+/// [`SigningReservationJournal::consume_for_signing`]; it carries the same
+/// operation binding (`domain_token`, `position`, `binding`, `operation_id`) so
+/// publication cannot be authorized by passing arbitrary position/binding
+/// arguments. It is non-cloneable, but MAY be used for more than one publication
+/// **attempt** (an uncertain result write is retried through the same capability)
+/// — retrying publication is never permission to sign again.
+#[derive(Debug)]
+pub struct ResultPublicationCapability {
+    domain_token: u64,
+    position: SigningPosition,
+    binding: BindingDigest,
+    operation_id: u64,
+}
+
 // ============================================================================
-// Backing store abstraction
+// Backing store abstraction and shared ownership domain
 // ============================================================================
 
 /// Durable backing store for signing-decision records. Implemented for the
@@ -533,87 +591,179 @@ pub trait SigningJournalStorage: Send + Sync {
     /// (synced write). MUST NOT return `Ok(())` until the record is synchronized
     /// to stable storage (for a durable backend).
     fn put_signing_record_synced(&self, key: &[u8], value: &[u8]) -> Result<(), StorageError>;
+
+    /// Run 422 D7-D10 Correction B — the single **ownership domain** for this
+    /// local journal/storage instance. Implementations MUST return the SAME
+    /// [`SigningOwnershipDomain`] `Arc` for every call on one backend instance
+    /// (typically cached in a per-instance `OnceLock`). This is what makes the
+    /// serialization boundary enforceable rather than advisory: every supported
+    /// handle attached over one backend instance shares one coordinator, so a
+    /// second handle cannot bypass coordination by allocating its own mutex, and
+    /// two handles cannot both grant a live continuation for the same unused
+    /// position.
+    ///
+    /// The ownership domain is **local to one backend instance**. A genuinely
+    /// foreign journal — a different backend instance, e.g. a separately opened
+    /// handle over a copied directory or another host — returns a *different*
+    /// domain with a different token; capabilities never cross that boundary.
+    /// This is not an anti-rollback anchor and makes no cross-copy/cross-host
+    /// exclusivity claim.
+    fn signing_ownership_domain(&self) -> Arc<SigningOwnershipDomain>;
+}
+
+/// Run 422 D7-D10 Correction B — the shared, in-process coordination state for
+/// one local journal/storage ownership domain. Owned by the backend instance and
+/// shared by every supported handle attached over it. It holds the single
+/// [`Mutex`] that serializes every read-then-write reservation and checked
+/// publication, the live-operation table, the reservation accounting, and the
+/// monotonic operation-id source.
+#[derive(Debug)]
+pub struct SigningOwnershipDomain {
+    /// A process-unique token identifying THIS domain. Capabilities carry it so
+    /// a foreign domain's capability is rejected. It is in-process bookkeeping,
+    /// never a durable anti-rollback anchor.
+    token: u64,
+    inner: Mutex<DomainInner>,
+}
+
+/// The in-memory live state for one reserved position within a domain. Its
+/// presence — and the `invoked` / `result_acked` flags — is exactly the
+/// knowledge a restart cannot reconstruct: reading `Reserved` (or even `Signed`)
+/// bytes from storage alone never manufactures it.
+#[derive(Debug)]
+struct LiveState {
+    /// The unique live operation that reserved this position.
+    operation_id: u64,
+    /// The exact-message binding the operation reserved.
+    binding: BindingDigest,
+    /// The signing continuation has been consumed (the signer may have run).
+    invoked: bool,
+    /// A durable result-write acknowledgement has been established in THIS
+    /// process for this operation. Readable `Signed` bytes without this flag are
+    /// NOT an acknowledged durability barrier (Correction C uncertainty rule).
+    result_acked: bool,
+}
+
+#[derive(Debug)]
+struct DomainInner {
+    /// Positions with a live operation in this process.
+    live: HashMap<SigningPosition, LiveState>,
+    /// Count of distinct new positions reserved in this domain (exhaustion
+    /// accounting, checked arithmetic).
+    reserved_positions: u64,
+    /// Monotonic source of unique live operation ids (checked; exhaustion is a
+    /// terminal fail-closed state, never wraparound). In-process bookkeeping.
+    next_operation_id: u64,
+}
+
+impl SigningOwnershipDomain {
+    /// Create a fresh ownership domain with a process-unique token. Backends call
+    /// this once per instance (via a `OnceLock`) and share the resulting `Arc`.
+    pub fn new() -> Arc<Self> {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        // Process-unique, monotonically increasing domain token. This only needs
+        // to distinguish concurrently-live domains within one process; it is not
+        // persisted and carries no durability meaning.
+        static NEXT_TOKEN: AtomicU64 = AtomicU64::new(1);
+        Arc::new(Self {
+            token: NEXT_TOKEN.fetch_add(1, Ordering::Relaxed),
+            inner: Mutex::new(DomainInner {
+                live: HashMap::new(),
+                reserved_positions: 0,
+                next_operation_id: 1,
+            }),
+        })
+    }
 }
 
 // ============================================================================
 // The journal
 // ============================================================================
 
-/// In-memory permit for a single live operation over one position. Its presence
-/// (and the `signer_invoked` flag) is the knowledge that a restart cannot
-/// reconstruct: reading `Reserved` from storage alone never yields a permit.
-#[derive(Debug, Clone, Copy)]
-struct LivePermit {
-    signer_invoked: bool,
-}
-
-#[derive(Debug, Default)]
-struct JournalInner {
-    /// Positions this live instance has reserved and may (once) sign.
-    live: HashMap<SigningPosition, LivePermit>,
-    /// Count of distinct new positions reserved by this instance (exhaustion
-    /// accounting, checked arithmetic).
-    reserved_positions: u64,
-}
-
-/// A bounded, versioned, signing-scoped, crash-consistent reservation journal.
+/// A bounded, versioned, signing-scoped, crash-consistent reservation journal
+/// **handle** over one shared [`SigningOwnershipDomain`].
 ///
-/// Exclusivity is enforced by a single [`Mutex`] guarding every read-then-write
-/// reservation for all callers **sharing this instance** (share it via
-/// `Arc<SigningReservationJournal>`); an atomic storage write alone would not
-/// make an unsynchronized read-then-write safe. A *second* handle wrapping the
-/// same store cannot obtain a live permit for an already-`Reserved` position:
-/// its live map does not contain that position, so the lookup returns
-/// [`ReservationOutcome::PotentiallySigned`].
+/// Run 422 D7-D10 Correction B: the serialization boundary is the single
+/// [`Mutex`] inside the ownership domain, which is owned by the backend instance
+/// and shared by every supported handle attached over it. A second handle
+/// therefore cannot bypass coordination by allocating its own mutex, and two
+/// handles cannot both observe an unused position and grant conflicting live
+/// continuations. Handles attached over *different* backend instances (a copied
+/// directory, another host, or a modelled restart) are distinct domains and are
+/// treated as foreign; the durable record they share is still honoured
+/// fail-closed, but no live continuation is ever transferred across domains.
 pub struct SigningReservationJournal {
     store: Arc<dyn SigningJournalStorage>,
-    inner: Mutex<JournalInner>,
+    domain: Arc<SigningOwnershipDomain>,
     max_reserved_positions: u64,
 }
 
 impl std::fmt::Debug for SigningReservationJournal {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("SigningReservationJournal")
+            .field("domain_token", &self.domain.token)
             .field("max_reserved_positions", &self.max_reserved_positions)
             .finish()
     }
 }
 
 impl SigningReservationJournal {
-    /// Attach to (reopen) a signing journal over `store`, with the default
+    /// Attach a handle over `store`'s single ownership domain, with the default
     /// reservation budget.
     ///
     /// This is deliberately non-scanning and non-initializing: it does not wipe,
     /// repair, or convert missing/corrupt established state into an empty usable
-    /// journal. Its in-memory live-permit map starts empty, which is exactly the
-    /// crash-recovery posture — any `Reserved` record already in the store is
-    /// treated as potentially-signed on the next reservation.
+    /// journal. The shared domain's live-operation table is whatever the backend
+    /// instance already holds; a freshly opened backend instance starts empty,
+    /// which is exactly the crash-recovery posture — any `Reserved` record
+    /// already in the store is treated as potentially-signed on the next
+    /// reservation, and no live continuation is minted from it.
     pub fn attach(store: Arc<dyn SigningJournalStorage>) -> Self {
         Self::attach_with_budget(store, DEFAULT_MAX_RESERVED_POSITIONS)
     }
 
     /// Attach with an explicit reservation budget (small-fixture / bounds tests).
-    pub fn attach_with_budget(store: Arc<dyn SigningJournalStorage>, max_reserved_positions: u64) -> Self {
+    /// The budget is enforced by this handle against the shared domain's
+    /// reservation counter.
+    pub fn attach_with_budget(
+        store: Arc<dyn SigningJournalStorage>,
+        max_reserved_positions: u64,
+    ) -> Self {
+        let domain = store.signing_ownership_domain();
         Self {
             store,
-            inner: Mutex::new(JournalInner::default()),
+            domain,
             max_reserved_positions,
         }
     }
 
+    /// The process-unique token of the ownership domain this handle serves.
+    /// Two handles reporting the same token share one serialization boundary.
+    pub fn ownership_domain_token(&self) -> u64 {
+        self.domain.token
+    }
+
     /// Reserve `position` for exactly one decision identified by `binding`,
-    /// serialized against all callers sharing this instance.
+    /// serialized against all handles sharing this ownership domain.
     ///
-    /// Ordering guarantee: on [`ReservationOutcome::FreshlyReserved`] the durable
-    /// reservation has been written and its barrier acknowledged BEFORE this
-    /// returns; if the durable write fails or is uncertain, an `Err` is returned
-    /// and no permit is granted (the caller must not sign).
+    /// On [`ReservationOutcome::FreshlyReserved`] the durable reservation has
+    /// been written and its barrier acknowledged BEFORE the enclosed
+    /// [`SigningContinuation`] is minted; if the durable write fails or is
+    /// uncertain, an `Err` is returned and no continuation is granted (the caller
+    /// must not sign). A position that already has a live operation in this
+    /// domain, or a recovered `Reserved` record, is [`ReservationOutcome::
+    /// PotentiallySigned`] — a durable `Reserved` state is never converted into a
+    /// live continuation. A `Signed` result is [`ReservationOutcome::
+    /// ExactRetryRetained`] for resend, EXCEPT when a live operation for that
+    /// position in THIS process has not yet had its result write durably
+    /// acknowledged, in which case it is `PotentiallySigned` (readable `Signed`
+    /// bytes are not, by themselves, an acknowledged durability barrier).
     pub fn reserve_for_sign(
         &self,
         position: &SigningPosition,
         binding: &BindingDigest,
     ) -> Result<ReservationOutcome, JournalError> {
-        let mut inner = self.inner.lock().map_err(|_| JournalError::LockPoisoned)?;
+        let mut inner = self.domain.inner.lock().map_err(|_| JournalError::LockPoisoned)?;
 
         let key = position.storage_key();
         let existing = self.store.get_signing_record(&key)?; // read failure ⇒ Err ⇒ no sign
@@ -631,94 +781,141 @@ impl SigningReservationJournal {
                 return Ok(ReservationOutcome::Conflict);
             }
             return match record.stage {
-                SigningRecordStage::Signed => match record.retained_signature {
-                    Some(sig) => Ok(ReservationOutcome::ExactRetryRetained(sig)),
-                    None => Err(JournalError::Corruption(
-                        "signed record missing retained signature".to_string(),
-                    )),
-                },
-                SigningRecordStage::Reserved => match inner.live.get(position) {
-                    // A live operation that has NOT yet invoked the signer may
-                    // continue exactly once under its own exclusive ownership.
-                    Some(permit) if !permit.signer_invoked => Ok(ReservationOutcome::FreshlyReserved),
-                    // A live op that already invoked the signer, or a recovered
-                    // reservation with no live permit at all, is potentially
-                    // signed — refuse re-signing and preserve the reservation.
-                    _ => Ok(ReservationOutcome::PotentiallySigned),
-                },
+                SigningRecordStage::Signed => {
+                    let sig = record.retained_signature.ok_or_else(|| {
+                        JournalError::Corruption(
+                            "signed record missing retained signature".to_string(),
+                        )
+                    })?;
+                    // Correction C uncertainty rule: within THIS process, a live
+                    // operation whose result write has NOT been durably
+                    // acknowledged must not have its readable `Signed` bytes
+                    // presented as a clean retained resend. A recovered record
+                    // (no live entry) or an acknowledged result is a genuine
+                    // exact-retry resend.
+                    match inner.live.get(position) {
+                        Some(ls) if !ls.result_acked => Ok(ReservationOutcome::PotentiallySigned),
+                        _ => Ok(ReservationOutcome::ExactRetryRetained(sig)),
+                    }
+                }
+                // A durable `Reserved` record never yields a fresh live
+                // continuation — neither a recovered reservation nor a second
+                // handle over an already-live position may re-sign it.
+                SigningRecordStage::Reserved => Ok(ReservationOutcome::PotentiallySigned),
             };
         }
 
-        // No existing record: a new position in this journal.
+        // No existing record: a new position in this domain. Perform every
+        // checked-arithmetic step and the durable write BEFORE mutating any
+        // in-memory state, so a write failure leaves the domain pristine (a later
+        // attempt is a fresh reservation, not a conflict).
         if inner.reserved_positions >= self.max_reserved_positions {
             return Ok(ReservationOutcome::Exhausted);
         }
+        let operation_id = inner.next_operation_id;
+        let next_operation_id = operation_id
+            .checked_add(1)
+            .ok_or(JournalError::Overflow)?;
+        let new_reserved = inner
+            .reserved_positions
+            .checked_add(1)
+            .ok_or(JournalError::Overflow)?;
 
         let record = SigningDecisionRecord::reserved(*position, *binding);
         let encoded = record.encode()?;
         // Durable reservation acknowledgement corresponds to THIS record write.
-        self.store.put_signing_record_synced(&key, &encoded)?; // failure ⇒ Err ⇒ no permit
+        self.store.put_signing_record_synced(&key, &encoded)?; // failure ⇒ Err ⇒ no state change
 
-        // Only after the durable ack do we record the accounting and the live
-        // permit (checked arithmetic; overflow is terminal, never wraparound).
-        inner.reserved_positions = inner
-            .reserved_positions
-            .checked_add(1)
-            .ok_or(JournalError::Overflow)?;
-        inner
-            .live
-            .insert(*position, LivePermit { signer_invoked: false });
-        Ok(ReservationOutcome::FreshlyReserved)
+        // Only after the durable ack do we commit the accounting and mint the
+        // one-use continuation bound to this operation.
+        inner.reserved_positions = new_reserved;
+        inner.next_operation_id = next_operation_id;
+        inner.live.insert(
+            *position,
+            LiveState {
+                operation_id,
+                binding: *binding,
+                invoked: false,
+                result_acked: false,
+            },
+        );
+        Ok(ReservationOutcome::FreshlyReserved(SigningContinuation {
+            domain_token: self.domain.token,
+            position: *position,
+            binding: *binding,
+            operation_id,
+        }))
     }
 
-    /// Mark that the exclusive live operation is about to invoke the signer for
-    /// `position`. After this, a repeated live reservation for the same position
-    /// is treated as potentially-signed (the signer may already have run).
+    /// Consume the live [`SigningContinuation`] immediately BEFORE invoking the
+    /// signer, converting it (at most once, by move) into a
+    /// [`ResultPublicationCapability`] for the SAME operation.
     ///
-    /// Call this immediately BEFORE `signer.sign_*`.
-    pub fn note_signer_invoked(&self, position: &SigningPosition) -> Result<(), JournalError> {
-        let mut inner = self.inner.lock().map_err(|_| JournalError::LockPoisoned)?;
-        // The single live continuation may be consumed AT MOST ONCE. A missing
-        // permit (a foreign/recovered operation, or a position this instance
-        // never reserved) or an already-consumed permit refuses fail-closed
-        // rather than silently authorizing a second signer invocation.
-        match inner.live.get_mut(position) {
-            Some(permit) if !permit.signer_invoked => {
-                permit.signer_invoked = true;
-                Ok(())
+    /// Rejects a continuation from a foreign ownership domain, one whose
+    /// operation/binding no longer matches the live state, or one already
+    /// consumed. After this returns, a repeated reservation for the position is
+    /// potentially-signed (the signer may already have run), and only the
+    /// returned capability may publish that operation's result.
+    pub fn consume_for_signing(
+        &self,
+        continuation: SigningContinuation,
+    ) -> Result<ResultPublicationCapability, JournalError> {
+        let mut inner = self.domain.inner.lock().map_err(|_| JournalError::LockPoisoned)?;
+        if continuation.domain_token != self.domain.token {
+            return Err(JournalError::InvalidResultPublication(
+                "signing continuation belongs to a foreign ownership domain".to_string(),
+            ));
+        }
+        match inner.live.get_mut(&continuation.position) {
+            Some(ls)
+                if ls.operation_id == continuation.operation_id
+                    && ls.binding == continuation.binding
+                    && !ls.invoked =>
+            {
+                ls.invoked = true;
+                Ok(ResultPublicationCapability {
+                    domain_token: continuation.domain_token,
+                    position: continuation.position,
+                    binding: continuation.binding,
+                    operation_id: continuation.operation_id,
+                })
             }
-            Some(_) => Err(JournalError::InvalidResultPublication(
-                "signer already invoked for this reservation".to_string(),
-            )),
-            None => Err(JournalError::InvalidResultPublication(
-                "no live signing continuation owns this position".to_string(),
+            // A live entry for a DIFFERENT operation (or an already-consumed one)
+            // must never be usurped by this continuation.
+            _ => Err(JournalError::InvalidResultPublication(
+                "no fresh live signing continuation owns this operation".to_string(),
             )),
         }
     }
 
     /// Publish the retained signature for the exact reserved decision as a
     /// **checked state transition** (Run 422 D7-D10 Correction C), never a blind
-    /// overwrite. Publication succeeds only when ALL of the following hold:
+    /// overwrite. The `cap` proves the caller holds the live operation that
+    /// reserved this decision and crossed the invocation boundary; publication
+    /// succeeds only when ALL of the following hold:
     ///
-    /// * this instance holds the live continuation for `position` and has
-    ///   already marked the signer invoked (operation ownership) — a missing or
-    ///   foreign operation is refused;
-    /// * a matching durable reservation exists at `position` with the exact
-    ///   `binding` — a missing reservation, wrong binding, or position mismatch
-    ///   is refused;
+    /// * `cap` belongs to THIS ownership domain and matches a live, invoked
+    ///   operation for its position with its binding — a missing, foreign, or
+    ///   stale operation is refused;
+    /// * a matching durable reservation exists at the position with the exact
+    ///   binding — a missing reservation, wrong binding, or position mismatch is
+    ///   refused;
     /// * the stored stage is `Reserved` (the permitted transition), or already
-    ///   `Signed` with the **identical** retained content (idempotent
-    ///   republication). A `Signed` record with different content is refused —
-    ///   an existing signed obligation is NEVER overwritten with different bytes.
+    ///   `Signed` with the **identical** retained content. A `Signed` record
+    ///   with different content is refused — an existing signed obligation is
+    ///   NEVER overwritten with different bytes.
     ///
-    /// If the checked write fails (or is uncertain), the caller MUST preserve the
-    /// potentially-signed obligation, suppress facade handoff for that attempt,
-    /// and NOT invoke the signer again to recover availability — the reservation
-    /// is never released here.
+    /// Correction C uncertainty rule: idempotent identical republication is
+    /// reported successful ONLY once this operation has established a durable
+    /// result-write acknowledgement in this process. If it has not (e.g. a prior
+    /// write stored bytes but returned an error), readable byte-equality is not
+    /// accepted as a barrier — the synced write is (re)issued, and a repeated
+    /// failure remains a failure. On any failure the caller MUST preserve the
+    /// potentially-signed obligation, suppress facade handoff, and NOT invoke the
+    /// signer again; the reservation is never released here.
     pub fn record_signed_result(
         &self,
-        position: &SigningPosition,
-        binding: &BindingDigest,
+        cap: &ResultPublicationCapability,
         signature: &[u8],
     ) -> Result<(), JournalError> {
         // Bounded result write: never allocate/persist an out-of-bounds signature.
@@ -728,41 +925,52 @@ impl SigningReservationJournal {
                 max: MAX_RETAINED_SIGNATURE_LEN,
             });
         }
-        // Hold the exclusivity lock across the read-validate-write so publication
-        // is a checked transition, not a blind overwrite.
-        let inner = self.inner.lock().map_err(|_| JournalError::LockPoisoned)?;
+        // Hold the domain lock across the read-validate-write so publication is a
+        // checked transition and concurrent supported handles cannot alter the
+        // record between validation and the acknowledged effect.
+        let mut inner = self.domain.inner.lock().map_err(|_| JournalError::LockPoisoned)?;
 
-        // (1) Operation ownership: only the live operation that reserved this
-        //     position AND invoked the signer may publish its result. A missing
-        //     permit (foreign journal/operation, a recovered reservation with no
-        //     live permit, or a never-reserved position) or an un-invoked permit
-        //     refuses — an unrelated operation can never publish over this
-        //     obligation.
-        match inner.live.get(position) {
-            Some(permit) if permit.signer_invoked => {}
+        if cap.domain_token != self.domain.token {
+            return Err(JournalError::InvalidResultPublication(
+                "publication capability belongs to a foreign ownership domain".to_string(),
+            ));
+        }
+
+        // (1) Operation ownership: only the live, invoked operation identified by
+        //     `cap` may publish its result. A missing/foreign/stale/un-invoked
+        //     operation is refused — an unrelated operation can never publish
+        //     over this obligation.
+        let already_acked = match inner.live.get(&cap.position) {
+            Some(ls)
+                if ls.operation_id == cap.operation_id
+                    && ls.binding == cap.binding
+                    && ls.invoked =>
+            {
+                ls.result_acked
+            }
             _ => {
                 return Err(JournalError::InvalidResultPublication(
-                    "no live invoked signing operation owns this position".to_string(),
+                    "no live invoked operation owns this publication".to_string(),
                 ));
             }
-        }
+        };
 
         // (2) The stored state must be the exact matching reservation. Read the
         //     current record and validate position, binding, and a permitted
         //     stage transition BEFORE overwriting anything.
-        let key = position.storage_key();
+        let key = cap.position.storage_key();
         let existing = self.store.get_signing_record(&key)?.ok_or_else(|| {
             JournalError::InvalidResultPublication(
                 "result publication without an existing reservation".to_string(),
             )
         })?;
         let current = SigningDecisionRecord::decode(&existing)?;
-        if current.position != *position {
+        if current.position != cap.position {
             return Err(JournalError::Corruption(
                 "stored record position mismatch for key".to_string(),
             ));
         }
-        if current.binding != *binding {
+        if current.binding != cap.binding {
             return Err(JournalError::InvalidResultPublication(
                 "result binding does not match the reserved decision".to_string(),
             ));
@@ -774,7 +982,15 @@ impl SigningReservationJournal {
             // retained result under the same position+binding; conflicting
             // content is NEVER silently overwritten.
             SigningRecordStage::Signed => match current.retained_signature.as_deref() {
-                Some(existing_sig) if existing_sig == signature => return Ok(()),
+                Some(existing_sig) if existing_sig == signature => {
+                    // Byte-identical AND this operation already has a durable
+                    // acknowledgement in-process ⇒ genuinely idempotent success.
+                    // Otherwise fall through and (re)issue the synced write: a
+                    // readable-but-unacknowledged result is not a barrier.
+                    if already_acked {
+                        return Ok(());
+                    }
+                }
                 _ => {
                     return Err(JournalError::InvalidResultPublication(
                         "refusing to overwrite an existing signed obligation with \
@@ -786,11 +1002,16 @@ impl SigningReservationJournal {
         }
 
         // (3) Checked, durable result write. On failure/uncertainty the Err
-        //     propagates and the caller preserves the potentially-signed
-        //     obligation; the reservation is never released here.
-        let record = SigningDecisionRecord::signed(*position, *binding, signature.to_vec());
+        //     propagates, `result_acked` stays false (so a retry re-issues the
+        //     synced write rather than trusting readable bytes), and the caller
+        //     preserves the potentially-signed obligation; the reservation is
+        //     never released here.
+        let record = SigningDecisionRecord::signed(cap.position, cap.binding, signature.to_vec());
         let encoded = record.encode()?;
         self.store.put_signing_record_synced(&key, &encoded)?;
+        if let Some(ls) = inner.live.get_mut(&cap.position) {
+            ls.result_acked = true;
+        }
         Ok(())
     }
 }
@@ -803,23 +1024,45 @@ mod tests {
 
     /// An explicitly-labelled in-memory model store for unit tests. It provides
     /// NO power-loss durability; it exists only to exercise the journal's
-    /// read/write/serialize/recovery model deterministically. A "restart" is
-    /// modelled by constructing a NEW `SigningReservationJournal` over the SAME
-    /// `Arc<ModelStore>` (the bytes survive; the in-memory live-permit map does
-    /// not).
+    /// read/write/serialize/recovery model deterministically.
+    ///
+    /// Run 422 D7-D10 Correction B: the durable byte map is a shared `Arc`, the
+    /// ownership domain is per-instance. Two handles over the SAME instance share
+    /// one domain (a concurrent second handle). A modelled restart is
+    /// [`ModelStore::reopen`]: a NEW instance sharing the SAME byte map but with a
+    /// FRESH domain — bytes survive, the live-operation table does not.
     #[derive(Default)]
     struct ModelStore {
-        map: RwLock<StdHashMap<Vec<u8>, Vec<u8>>>,
+        map: Arc<RwLock<StdHashMap<Vec<u8>, Vec<u8>>>>,
         fail_reads: RwLock<bool>,
         fail_writes: RwLock<bool>,
+        /// When set, `put_signing_record_synced` FIRST stores the bytes (so a
+        /// subsequent read observes them) and THEN returns an error — modelling a
+        /// write that became readable but whose durability acknowledgement is
+        /// uncertain. This is a clearly-labelled TEST fault injector.
+        store_then_error: RwLock<bool>,
+        domain: std::sync::OnceLock<Arc<SigningOwnershipDomain>>,
     }
 
     impl ModelStore {
+        /// Model a process restart: same durable bytes, a fresh ownership domain.
+        fn reopen(&self) -> Arc<Self> {
+            Arc::new(ModelStore {
+                map: Arc::clone(&self.map),
+                fail_reads: RwLock::new(false),
+                fail_writes: RwLock::new(false),
+                store_then_error: RwLock::new(false),
+                domain: std::sync::OnceLock::new(),
+            })
+        }
         fn set_fail_reads(&self, v: bool) {
             *self.fail_reads.write().unwrap() = v;
         }
         fn set_fail_writes(&self, v: bool) {
             *self.fail_writes.write().unwrap() = v;
+        }
+        fn set_store_then_error(&self, v: bool) {
+            *self.store_then_error.write().unwrap() = v;
         }
         fn corrupt(&self, key: &[u8]) {
             let mut m = self.map.write().unwrap();
@@ -845,8 +1088,34 @@ mod tests {
             if *self.fail_writes.read().unwrap() {
                 return Err(StorageError::Io("injected write failure".to_string()));
             }
+            if *self.store_then_error.read().unwrap() {
+                // The bytes become readable, but the durability acknowledgement
+                // is reported uncertain (error). A correct journal must NOT treat
+                // the later readable bytes as an acknowledged barrier.
+                self.map.write().unwrap().insert(key.to_vec(), value.to_vec());
+                return Err(StorageError::Io("injected post-store sync failure".to_string()));
+            }
             self.map.write().unwrap().insert(key.to_vec(), value.to_vec());
             Ok(())
+        }
+        fn signing_ownership_domain(&self) -> Arc<SigningOwnershipDomain> {
+            self.domain.get_or_init(SigningOwnershipDomain::new).clone()
+        }
+    }
+
+    /// Helper: reserve a fresh decision and consume its continuation, returning
+    /// the publication capability for the same operation (models the
+    /// reserve→invoke boundary in a single step for tests that then publish).
+    fn reserve_and_invoke(
+        journal: &SigningReservationJournal,
+        pos: &SigningPosition,
+        b: &BindingDigest,
+    ) -> ResultPublicationCapability {
+        match journal.reserve_for_sign(pos, b).unwrap() {
+            ReservationOutcome::FreshlyReserved(cont) => {
+                journal.consume_for_signing(cont).unwrap()
+            }
+            other => panic!("expected FreshlyReserved, got {:?}", other),
         }
     }
 
@@ -924,19 +1193,16 @@ mod tests {
         let pos = position(SigningKind::Proposal, 3);
         let b = binding(b"decision-A");
 
-        // First reservation is fresh.
-        assert_eq!(
-            journal.reserve_for_sign(&pos, &b).unwrap(),
-            ReservationOutcome::FreshlyReserved
-        );
-        journal.note_signer_invoked(&pos).unwrap();
-        journal.record_signed_result(&pos, &b, b"sigbytes").unwrap();
+        // First reservation is fresh: consume the one-use continuation, then
+        // publish through the matching operation's capability.
+        let cap = reserve_and_invoke(&journal, &pos, &b);
+        journal.record_signed_result(&cap, b"sigbytes").unwrap();
 
-        // Exact retry reuses the retained signature; no fresh permit.
-        assert_eq!(
+        // Exact retry reuses the retained signature; no fresh continuation.
+        assert!(matches!(
             journal.reserve_for_sign(&pos, &b).unwrap(),
-            ReservationOutcome::ExactRetryRetained(b"sigbytes".to_vec())
-        );
+            ReservationOutcome::ExactRetryRetained(ref s) if s == b"sigbytes"
+        ));
     }
 
     #[test]
@@ -947,14 +1213,14 @@ mod tests {
         let b1 = binding(b"content-1");
         let b2 = binding(b"content-2");
         assert_ne!(b1, b2);
-        assert_eq!(
+        assert!(matches!(
             journal.reserve_for_sign(&pos, &b1).unwrap(),
-            ReservationOutcome::FreshlyReserved
-        );
-        assert_eq!(
+            ReservationOutcome::FreshlyReserved(_)
+        ));
+        assert!(matches!(
             journal.reserve_for_sign(&pos, &b2).unwrap(),
             ReservationOutcome::Conflict
-        );
+        ));
     }
 
     #[test]
@@ -964,16 +1230,16 @@ mod tests {
         let prop = position(SigningKind::Proposal, 6);
         let vote = position(SigningKind::Vote, 6);
         let b = binding(b"x");
-        assert_eq!(
+        assert!(matches!(
             journal.reserve_for_sign(&prop, &b).unwrap(),
-            ReservationOutcome::FreshlyReserved
-        );
+            ReservationOutcome::FreshlyReserved(_)
+        ));
         // Distinct kind ⇒ distinct position ⇒ another fresh reservation, not a
         // conflict.
-        assert_eq!(
+        assert!(matches!(
             journal.reserve_for_sign(&vote, &b).unwrap(),
-            ReservationOutcome::FreshlyReserved
-        );
+            ReservationOutcome::FreshlyReserved(_)
+        ));
     }
 
     #[test]
@@ -983,27 +1249,29 @@ mod tests {
         let b = binding(b"decision-R");
         {
             let journal = SigningReservationJournal::attach(store.clone());
-            assert_eq!(
-                journal.reserve_for_sign(&pos, &b).unwrap(),
-                ReservationOutcome::FreshlyReserved
-            );
-            journal.note_signer_invoked(&pos).unwrap();
-            // Simulate process death BEFORE record_signed_result: drop journal.
+            let cont = match journal.reserve_for_sign(&pos, &b).unwrap() {
+                ReservationOutcome::FreshlyReserved(c) => c,
+                other => panic!("expected FreshlyReserved, got {:?}", other),
+            };
+            // Cross the invocation boundary, then simulate process death BEFORE
+            // record_signed_result by dropping the capability and the journal.
+            let _cap = journal.consume_for_signing(cont).unwrap();
         }
-        // Reopen over the SAME store: the RESERVED byte survives, the live permit
-        // does not ⇒ potentially-signed, refuse re-signing.
-        let reopened = SigningReservationJournal::attach(store.clone());
-        assert_eq!(
+        // Reopen over the SAME durable bytes with a FRESH ownership domain: the
+        // RESERVED byte survives, the live operation table does not ⇒
+        // potentially-signed, refuse re-signing.
+        let reopened = SigningReservationJournal::attach(store.reopen());
+        assert!(matches!(
             reopened.reserve_for_sign(&pos, &b).unwrap(),
             ReservationOutcome::PotentiallySigned
-        );
+        ));
         // A conflicting request after recovery is still refused as a conflict,
         // without altering the original obligation.
         let b2 = binding(b"decision-R2");
-        assert_eq!(
+        assert!(matches!(
             reopened.reserve_for_sign(&pos, &b2).unwrap(),
             ReservationOutcome::Conflict
-        );
+        ));
     }
 
     #[test]
@@ -1013,15 +1281,14 @@ mod tests {
         let b = binding(b"decision-S");
         {
             let journal = SigningReservationJournal::attach(store.clone());
-            journal.reserve_for_sign(&pos, &b).unwrap();
-            journal.note_signer_invoked(&pos).unwrap();
-            journal.record_signed_result(&pos, &b, b"the-sig").unwrap();
+            let cap = reserve_and_invoke(&journal, &pos, &b);
+            journal.record_signed_result(&cap, b"the-sig").unwrap();
         }
-        let reopened = SigningReservationJournal::attach(store);
-        assert_eq!(
+        let reopened = SigningReservationJournal::attach(store.reopen());
+        assert!(matches!(
             reopened.reserve_for_sign(&pos, &b).unwrap(),
-            ReservationOutcome::ExactRetryRetained(b"the-sig".to_vec())
-        );
+            ReservationOutcome::ExactRetryRetained(ref s) if s == b"the-sig"
+        ));
     }
 
     #[test]
@@ -1045,11 +1312,12 @@ mod tests {
         ));
         store.set_fail_writes(false);
         // After the failed write there is no durable reservation and no live
-        // permit: a subsequent attempt is a fresh reservation, not a conflict.
-        assert_eq!(
+        // continuation: a subsequent attempt is a fresh reservation, not a
+        // conflict.
+        assert!(matches!(
             journal.reserve_for_sign(&pos, &b).unwrap(),
-            ReservationOutcome::FreshlyReserved
-        );
+            ReservationOutcome::FreshlyReserved(_)
+        ));
     }
 
     #[test]
@@ -1062,7 +1330,7 @@ mod tests {
             journal.reserve_for_sign(&pos, &b).unwrap();
         }
         store.corrupt(&pos.storage_key());
-        let reopened = SigningReservationJournal::attach(store);
+        let reopened = SigningReservationJournal::attach(store.reopen());
         assert!(matches!(
             reopened.reserve_for_sign(&pos, &b),
             Err(JournalError::Corruption(_))
@@ -1077,17 +1345,18 @@ mod tests {
         let pos = position(SigningKind::Vote, 20);
         let b = binding(b"decision-X");
         // Handle A reserves.
-        assert_eq!(
+        assert!(matches!(
             handle_a.reserve_for_sign(&pos, &b).unwrap(),
-            ReservationOutcome::FreshlyReserved
-        );
-        // Handle B (another supported handle over the same store) sees the
-        // RESERVED record but has no live permit ⇒ potentially-signed. It can
-        // NEVER acquire a second live continuation for the same position.
-        assert_eq!(
+            ReservationOutcome::FreshlyReserved(_)
+        ));
+        // Handle B (another supported handle over the same backend instance,
+        // sharing the one ownership domain) sees the live reservation ⇒
+        // potentially-signed. It can NEVER acquire a second live continuation for
+        // the same position.
+        assert!(matches!(
             handle_b.reserve_for_sign(&pos, &b).unwrap(),
             ReservationOutcome::PotentiallySigned
-        );
+        ));
     }
 
     #[test]
@@ -1097,21 +1366,27 @@ mod tests {
         let p0 = position(SigningKind::Proposal, 30);
         let p1 = position(SigningKind::Proposal, 31);
         let b = binding(b"budget");
-        assert_eq!(
+        assert!(matches!(
             journal.reserve_for_sign(&p0, &b).unwrap(),
-            ReservationOutcome::FreshlyReserved
-        );
+            ReservationOutcome::FreshlyReserved(_)
+        ));
         // Budget of 1 reached: a NEW position is refused as exhausted.
-        assert_eq!(
+        assert!(matches!(
             journal.reserve_for_sign(&p1, &b).unwrap(),
             ReservationOutcome::Exhausted
-        );
-        // The already-reserved position's obligation is preserved: a live
-        // continuation is still available and a conflict is still detected.
-        assert_eq!(
+        ));
+        // The already-reserved position's obligation is preserved: its durable
+        // reservation is still present, so a re-request is potentially-signed
+        // (never a second fresh live continuation), and a conflict is still
+        // detected under a different binding.
+        assert!(matches!(
             journal.reserve_for_sign(&p0, &b).unwrap(),
-            ReservationOutcome::FreshlyReserved
-        );
+            ReservationOutcome::PotentiallySigned
+        ));
+        assert!(matches!(
+            journal.reserve_for_sign(&p0, &binding(b"budget-2")).unwrap(),
+            ReservationOutcome::Conflict
+        ));
     }
 
     #[test]
@@ -1133,73 +1408,91 @@ mod tests {
     }
 
     // ------------------------------------------------------------------
-    // Run 422 D7-D10 Correction C + §4 one-time continuation hardening.
+    // Run 422 D7-D10 Correction B/C — operation-bound capability ownership,
+    // checked publication, and the durable-acknowledgement uncertainty rule.
     // ------------------------------------------------------------------
 
     #[test]
-    fn note_signer_invoked_without_permit_refuses() {
-        let store = Arc::new(ModelStore::default());
-        let journal = SigningReservationJournal::attach(store);
+    fn consume_rejects_foreign_domain_continuation() {
+        // Two DISTINCT backend instances ⇒ two distinct ownership domains.
+        let store_a = Arc::new(ModelStore::default());
+        let store_b = Arc::new(ModelStore::default());
+        let journal_a = SigningReservationJournal::attach(store_a);
+        let journal_b = SigningReservationJournal::attach(store_b);
         let pos = position(SigningKind::Proposal, 50);
-        // No reservation ⇒ no live continuation ⇒ refuse fail-closed.
+        let b = binding(b"decision");
+        let cont = match journal_a.reserve_for_sign(&pos, &b).unwrap() {
+            ReservationOutcome::FreshlyReserved(c) => c,
+            other => panic!("expected FreshlyReserved, got {:?}", other),
+        };
+        // A foreign journal cannot consume another domain's continuation.
         assert!(matches!(
-            journal.note_signer_invoked(&pos),
+            journal_b.consume_for_signing(cont),
             Err(JournalError::InvalidResultPublication(_))
         ));
-    }
-
-    #[test]
-    fn note_signer_invoked_twice_refuses() {
-        let store = Arc::new(ModelStore::default());
-        let journal = SigningReservationJournal::attach(store);
-        let pos = position(SigningKind::Vote, 51);
-        let b = binding(b"once");
-        assert_eq!(
-            journal.reserve_for_sign(&pos, &b).unwrap(),
-            ReservationOutcome::FreshlyReserved
-        );
-        journal.note_signer_invoked(&pos).unwrap();
-        // The single continuation is consumed at most once.
+        // The originating reservation's obligation is preserved (a repeat request
+        // is potentially-signed, never a fresh second continuation).
         assert!(matches!(
-            journal.note_signer_invoked(&pos),
-            Err(JournalError::InvalidResultPublication(_))
-        ));
-    }
-
-    #[test]
-    fn record_signed_result_without_live_operation_refuses() {
-        let store = Arc::new(ModelStore::default());
-        let journal = SigningReservationJournal::attach(store);
-        let pos = position(SigningKind::Proposal, 52);
-        let b = binding(b"orphan");
-        // Publishing without a live invoked operation is refused.
-        assert!(matches!(
-            journal.record_signed_result(&pos, &b, b"sig"),
-            Err(JournalError::InvalidResultPublication(_))
-        ));
-    }
-
-    #[test]
-    fn record_signed_result_wrong_binding_refuses_and_preserves() {
-        let store = Arc::new(ModelStore::default());
-        let journal = SigningReservationJournal::attach(store);
-        let pos = position(SigningKind::Vote, 53);
-        let b1 = binding(b"reserved-decision");
-        let b2 = binding(b"other-decision");
-        assert_ne!(b1, b2);
-        journal.reserve_for_sign(&pos, &b1).unwrap();
-        journal.note_signer_invoked(&pos).unwrap();
-        // Publishing under a DIFFERENT binding than reserved is refused.
-        assert!(matches!(
-            journal.record_signed_result(&pos, &b2, b"sig"),
-            Err(JournalError::InvalidResultPublication(_))
-        ));
-        // The original reservation is preserved (never became Signed): a lookup
-        // of the reserved decision is potentially-signed, not an exact retry.
-        assert_eq!(
-            journal.reserve_for_sign(&pos, &b1).unwrap(),
+            journal_a.reserve_for_sign(&pos, &b).unwrap(),
             ReservationOutcome::PotentiallySigned
+        ));
+    }
+
+    #[test]
+    fn record_signed_result_rejects_foreign_domain_capability() {
+        let store_a = Arc::new(ModelStore::default());
+        let store_b = Arc::new(ModelStore::default());
+        let journal_a = SigningReservationJournal::attach(store_a);
+        let journal_b = SigningReservationJournal::attach(store_b);
+        let pos = position(SigningKind::Vote, 51);
+        let b = binding(b"decision");
+        let cap = reserve_and_invoke(&journal_a, &pos, &b);
+        // A capability minted in domain A cannot publish through domain B.
+        assert!(matches!(
+            journal_b.record_signed_result(&cap, b"sig"),
+            Err(JournalError::InvalidResultPublication(_))
+        ));
+    }
+
+    #[test]
+    fn dropped_continuation_preserves_reservation_and_never_resigns() {
+        let store = Arc::new(ModelStore::default());
+        let journal = SigningReservationJournal::attach(store.clone());
+        let pos = position(SigningKind::Proposal, 52);
+        let b = binding(b"decision");
+        // Reserve and then DROP the continuation without consuming it.
+        match journal.reserve_for_sign(&pos, &b).unwrap() {
+            ReservationOutcome::FreshlyReserved(_cont) => { /* dropped here */ }
+            other => panic!("expected FreshlyReserved, got {:?}", other),
+        }
+        // The durable reservation is NOT released: the position never returns to
+        // unused state; a later request is potentially-signed, never fresh.
+        assert!(matches!(
+            journal.reserve_for_sign(&pos, &b).unwrap(),
+            ReservationOutcome::PotentiallySigned
+        ));
+    }
+
+    #[test]
+    fn second_supported_handle_cannot_obtain_a_continuation_for_a_live_position() {
+        // Two supported handles over the SAME backend instance share one domain.
+        let store = Arc::new(ModelStore::default());
+        let handle_a = SigningReservationJournal::attach(store.clone());
+        let handle_b = SigningReservationJournal::attach(store.clone());
+        assert_eq!(
+            handle_a.ownership_domain_token(),
+            handle_b.ownership_domain_token()
         );
+        let pos = position(SigningKind::Proposal, 53);
+        let b = binding(b"decision");
+        // Handle A owns the single live operation.
+        let _cap_a = reserve_and_invoke(&handle_a, &pos, &b);
+        // Handle B can NEVER obtain a continuation for the same live position, so
+        // it can never publish over A's obligation.
+        assert!(matches!(
+            handle_b.reserve_for_sign(&pos, &b).unwrap(),
+            ReservationOutcome::PotentiallySigned
+        ));
     }
 
     #[test]
@@ -1208,20 +1501,19 @@ mod tests {
         let journal = SigningReservationJournal::attach(store);
         let pos = position(SigningKind::Proposal, 54);
         let b = binding(b"decision");
-        journal.reserve_for_sign(&pos, &b).unwrap();
-        journal.note_signer_invoked(&pos).unwrap();
-        journal.record_signed_result(&pos, &b, b"first-sig").unwrap();
-        // A second, DIFFERENT result under the same position+binding must not
-        // overwrite the existing signed obligation.
+        let cap = reserve_and_invoke(&journal, &pos, &b);
+        journal.record_signed_result(&cap, b"first-sig").unwrap();
+        // A second, DIFFERENT result under the same capability must not overwrite
+        // the existing signed obligation.
         assert!(matches!(
-            journal.record_signed_result(&pos, &b, b"second-sig"),
+            journal.record_signed_result(&cap, b"second-sig"),
             Err(JournalError::InvalidResultPublication(_))
         ));
         // The original retained signature is intact for exact retry.
-        assert_eq!(
+        assert!(matches!(
             journal.reserve_for_sign(&pos, &b).unwrap(),
-            ReservationOutcome::ExactRetryRetained(b"first-sig".to_vec())
-        );
+            ReservationOutcome::ExactRetryRetained(ref s) if s == b"first-sig"
+        ));
     }
 
     #[test]
@@ -1230,32 +1522,112 @@ mod tests {
         let journal = SigningReservationJournal::attach(store);
         let pos = position(SigningKind::Vote, 55);
         let b = binding(b"decision");
-        journal.reserve_for_sign(&pos, &b).unwrap();
-        journal.note_signer_invoked(&pos).unwrap();
-        journal.record_signed_result(&pos, &b, b"the-sig").unwrap();
-        // Republishing the IDENTICAL retained content is idempotently accepted.
-        journal.record_signed_result(&pos, &b, b"the-sig").unwrap();
-        assert_eq!(
+        let cap = reserve_and_invoke(&journal, &pos, &b);
+        journal.record_signed_result(&cap, b"the-sig").unwrap();
+        // Republishing the IDENTICAL retained content, once durably acknowledged
+        // in-process, is idempotently accepted through the same capability.
+        journal.record_signed_result(&cap, b"the-sig").unwrap();
+        assert!(matches!(
             journal.reserve_for_sign(&pos, &b).unwrap(),
-            ReservationOutcome::ExactRetryRetained(b"the-sig".to_vec())
-        );
+            ReservationOutcome::ExactRetryRetained(ref s) if s == b"the-sig"
+        ));
     }
 
     #[test]
-    fn foreign_handle_cannot_publish_result() {
+    fn record_signed_result_oversize_signature_refused_and_preserves() {
         let store = Arc::new(ModelStore::default());
-        let handle_a = SigningReservationJournal::attach(store.clone());
-        let handle_b = SigningReservationJournal::attach(store.clone());
+        let journal = SigningReservationJournal::attach(store);
         let pos = position(SigningKind::Proposal, 56);
         let b = binding(b"decision");
-        // Handle A owns the live operation.
-        handle_a.reserve_for_sign(&pos, &b).unwrap();
-        handle_a.note_signer_invoked(&pos).unwrap();
-        // Handle B has no live continuation for this position ⇒ it can never
-        // publish a result over another operation's obligation.
+        let cap = reserve_and_invoke(&journal, &pos, &b);
+        let oversized = vec![7u8; MAX_RETAINED_SIGNATURE_LEN + 1];
         assert!(matches!(
-            handle_b.record_signed_result(&pos, &b, b"sig"),
+            journal.record_signed_result(&cap, &oversized),
+            Err(JournalError::OversizeRecord { .. })
+        ));
+        // No Signed record was created; the reservation is preserved.
+        assert!(matches!(
+            journal.reserve_for_sign(&pos, &b).unwrap(),
+            ReservationOutcome::PotentiallySigned
+        ));
+    }
+
+    // ------------------------------------------------------------------
+    // Correction C uncertainty rule — a readable-but-unacknowledged result
+    // write is never reported as a durable publication.
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn uncertain_write_not_reported_success_and_retry_reissues_synced_write() {
+        let store = Arc::new(ModelStore::default());
+        let journal = SigningReservationJournal::attach(store.clone());
+        let pos = position(SigningKind::Vote, 60);
+        let b = binding(b"decision");
+        let cap = reserve_and_invoke(&journal, &pos, &b);
+
+        // (1) The write stores bytes but the durability ack is uncertain (error).
+        store.set_store_then_error(true);
+        assert!(matches!(
+            journal.record_signed_result(&cap, b"the-sig"),
+            Err(JournalError::Storage(_))
+        ));
+
+        // (2) The bytes are now READABLE, but readable-equality is NOT a barrier:
+        //     a retained-result lookup in this process is potentially-signed, not
+        //     an exact retry.
+        assert!(matches!(
+            journal.reserve_for_sign(&pos, &b).unwrap(),
+            ReservationOutcome::PotentiallySigned
+        ));
+
+        // (3) A second uncertain attempt through the same capability remains a
+        //     failure (never a success on byte-equality), and never re-signs.
+        assert!(matches!(
+            journal.record_signed_result(&cap, b"the-sig"),
+            Err(JournalError::Storage(_))
+        ));
+        assert!(matches!(
+            journal.reserve_for_sign(&pos, &b).unwrap(),
+            ReservationOutcome::PotentiallySigned
+        ));
+
+        // (4) Once the durability action succeeds, the same capability re-issues
+        //     the synced write and publication becomes acknowledged; only then is
+        //     a retained resend reported.
+        store.set_store_then_error(false);
+        journal.record_signed_result(&cap, b"the-sig").unwrap();
+        assert!(matches!(
+            journal.reserve_for_sign(&pos, &b).unwrap(),
+            ReservationOutcome::ExactRetryRetained(ref s) if s == b"the-sig"
+        ));
+    }
+
+    #[test]
+    fn uncertain_write_does_not_permit_conflicting_replacement() {
+        let store = Arc::new(ModelStore::default());
+        let journal = SigningReservationJournal::attach(store.clone());
+        let pos = position(SigningKind::Proposal, 61);
+        let b = binding(b"decision");
+        let cap = reserve_and_invoke(&journal, &pos, &b);
+
+        // First attempt stores "sig-A" bytes but reports uncertain.
+        store.set_store_then_error(true);
+        assert!(matches!(
+            journal.record_signed_result(&cap, b"sig-A"),
+            Err(JournalError::Storage(_))
+        ));
+        store.set_store_then_error(false);
+        // A conflicting replacement with DIFFERENT bytes is refused — the
+        // operation cannot replace its own result with different content.
+        assert!(matches!(
+            journal.record_signed_result(&cap, b"sig-B"),
             Err(JournalError::InvalidResultPublication(_))
+        ));
+        // Re-issuing the ORIGINAL bytes establishes the durable acknowledgement.
+        journal.record_signed_result(&cap, b"sig-A").unwrap();
+        assert!(matches!(
+            journal.reserve_for_sign(&pos, &b).unwrap(),
+            ReservationOutcome::ExactRetryRetained(ref s) if s == b"sig-A"
         ));
     }
 }
