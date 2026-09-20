@@ -8452,3 +8452,91 @@ Unresolved (explicitly retained): anti-rollback anchor selection, whole-copy
 rollback, copied-key exclusivity, consensus-lock recovery, Timeout/NewView
 compatibility, power-loss evidence, and production authority readiness. C4/C5
 remain OPEN. No PR and no Run 423 work.
+
+## Run 422 D7-D10 — Review correction pass (scoped; D10 remains PARTIAL)
+
+A subsequent independent review did **not** accept the prior
+`D7D10_LOCAL_SIGNING_RESERVATION=CODE-AND-STORAGE-TEST-POSITIVE` verdict. D10 is
+**PARTIAL**. This subsection records only the scoped correction actually landed
+in this pass and the reviewed defects that remain OPEN; the historical evidence
+above is preserved at its original revisions and is not restated as accepted.
+
+### Landed in this pass
+
+* **Correction C — checked result publication.**
+  `SigningReservationJournal::record_signed_result` is now a checked state
+  transition rather than a blind overwrite. It publishes a `Signed` record only
+  when (a) this instance holds the live continuation for the position and has
+  already marked the signer invoked (operation ownership — a missing/foreign
+  operation is refused), (b) a matching durable `Reserved` record exists at the
+  exact position **and** binding, and (c) the stage is `Reserved`, or already
+  `Signed` with byte-identical retained content (idempotent republication). A
+  `Signed` record with different content is refused with the new typed
+  `JournalError::InvalidResultPublication`; the original obligation is never
+  overwritten. The read-validate-write is performed under the journal lock. The
+  bounded, durable-acknowledged result write itself is unchanged.
+  (`crates/qbind-node/src/signing_reservation_journal.rs`.)
+* **§4 (partial) — one-time live continuation.** `note_signer_invoked` now
+  fails closed (`InvalidResultPublication`) when the position has no live permit
+  or its permit was already consumed, so a single reserved continuation can
+  authorize at most one signer invocation.
+* **Tests (journal unit, colocated — all pass):** publication without a live
+  operation, wrong binding (reservation preserved, not signed), conflicting
+  overwrite refused (original retained signature intact), idempotent identical
+  republication accepted, a foreign handle cannot publish a result, and
+  duplicate/absent continuation consumption refused. Existing 19 journal unit
+  tests and 18 colocated `run422_d7d10` handler tests continue to pass.
+* **Correction F (default-feature build).** The integration target
+  `tests/run_422_d7d10_signing_reservation_journal_tests.rs` previously imported
+  the `test-utils`-gated `fabricate_reserved_record_bytes_with_version` seam
+  unconditionally, so the **default-feature** build of that target failed to
+  compile. The import and its single feature-specific case
+  (`unknown_version_record_on_reopen_fails_closed`) are now gated behind
+  `#[cfg(feature = "test-utils")]`. Default-feature build/run: 8 cases pass
+  (+1 ignored child helper); `--features test-utils`: 9 cases pass (+1 ignored).
+  No production API is exposed and the target is not disabled.
+
+### Reviewed defects still OPEN (NOT addressed in this pass)
+
+* **Correction A — missing-journal signing bypass.**
+  `guarded_sign_{proposal,vote}_for_broadcast` still delegate to the unguarded
+  `sign_*_for_broadcast` when `journal == None`. The required fail-closed
+  missing-journal boundary before signing is **not** yet implemented.
+* **Correction B — cross-handle exclusivity / operation-bound capability.** Each
+  `attach()` still creates a separate mutex; the fresh-reservation race across
+  independent handles over one store and an operation-bound (non-reconstructible,
+  non-cloneable) continuation are **not** yet implemented. The `note_signer_invoked`
+  hardening above narrows, but does not close, this item.
+* **Correction D — post-storage revalidation.** The guard does not receive or
+  re-check the original admitted owner/ticket after durable reservation; the
+  supported-wire-version / local validator-proposer association checks and the
+  ordering claim of "owner/ticket + snapshot revalidation" above are **not**
+  established.
+* **Correction E — initialization vs. established-journal open and persistent
+  capacity.** `attach()` still starts empty in-memory accounting and the budget
+  resets on reopen; explicit-initialization vs. established-metadata validation
+  and persistent/reconstructed bounded accounting are **not** implemented.
+* **Correction F (partial) — acceptance-test / default-feature repairs.** The
+  default-feature compilation of the integration target is **fixed** (see
+  "Landed in this pass"). The remaining F items — direct storage/signer boundary
+  instrumentation for reserve-before-sign ordering, deterministic
+  ownership/exclusivity cases, real engine-progress evidence, and stricter
+  bounded child-process exit classification — are **not** addressed here.
+
+### Corrected posture
+
+```
+D7D10_LOCAL_SIGNING_RESERVATION=PARTIAL   (prior CODE-AND-STORAGE-TEST-POSITIVE not accepted)
+D7D8_RESTORE_COMPLETION_CONTAINMENT=CODE-AND-RELEASE-TEST-POSITIVE   (preserved)
+D7_STATUS=PARTIAL-CODE-TEST / PRODUCTION-LIFECYCLE-UNAVAILABLE
+DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED
+GENESIS_AUTHORITY_ACTIVATION=DISABLED
+PRODUCTION_WIRE_CHAIN_ID_BEHAVIOR=UNCHANGED
+CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED
+SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO
+```
+
+Local reservation protection is not activation authorization, current-authority
+freshness, consensus-lock recovery, copied-key fencing, or durable anti-rollback.
+C4/C5 remain OPEN. No PR beyond the task branch, no production activation, no D11,
+no Run 423 work.

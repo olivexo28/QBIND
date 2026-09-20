@@ -25,9 +25,16 @@
 use std::sync::Arc;
 
 use qbind_node::signing_reservation_journal::{
-    fabricate_reserved_record_bytes_with_version, BindingDigest, JournalError, ReservationOutcome,
-    SigningJournalStorage, SigningKind, SigningPosition, SigningReservationJournal,
-    SIGNING_RECORD_FORMAT_VERSION,
+    BindingDigest, JournalError, ReservationOutcome, SigningJournalStorage, SigningKind,
+    SigningPosition, SigningReservationJournal,
+};
+// Run 422 D7-D10 Correction F: the version-fabrication helper is a test-only
+// seam gated behind `test-utils`. Import it (and the record-format constant it
+// pairs with) ONLY under that feature so the default-feature integration target
+// compiles; the single feature-specific case that uses it is gated to match.
+#[cfg(feature = "test-utils")]
+use qbind_node::signing_reservation_journal::{
+    fabricate_reserved_record_bytes_with_version, SIGNING_RECORD_FORMAT_VERSION,
 };
 use qbind_node::storage::RocksDbConsensusStorage;
 
@@ -261,6 +268,7 @@ fn truncated_record_on_reopen_fails_closed() {
 
 /// An otherwise well-formed record declaring an unsupported record-format
 /// version must fail closed on reopen.
+#[cfg(feature = "test-utils")]
 #[test]
 fn unknown_version_record_on_reopen_fails_closed() {
     let dir = tempfile::tempdir().expect("tempdir");
