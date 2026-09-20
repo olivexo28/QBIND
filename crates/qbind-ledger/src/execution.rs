@@ -1420,6 +1420,33 @@ impl RocksDbAccountState {
         Ok(Self { db })
     }
 
+    /// Open an **existing** RocksDB database at the given path, refusing to
+    /// create one if it is missing.
+    ///
+    /// Unlike [`Self::open`], this uses `create_if_missing(false)`: if the path
+    /// does not already contain an openable database (it is absent, empty, or
+    /// contains only unrelated files), the open fails with `StorageError::Io`
+    /// and no new database is initialized. This is required by the Run 422
+    /// D7-D8 restore-completion boundary: a destination admitted through a valid
+    /// `COMPLETE` restore-transaction record must open its already-restored
+    /// account database and must never silently initialize a replacement when
+    /// that database is missing. A failed open may still create permitted
+    /// diagnostic/lock artifacts (e.g. `LOG`, `LOCK`) in the directory; it does
+    /// not create the database itself.
+    ///
+    /// # Errors
+    ///
+    /// Returns `StorageError::Io` if the database does not exist or cannot be
+    /// opened.
+    pub fn open_existing<P: AsRef<Path>>(path: P) -> Result<Self, StorageError> {
+        let mut opts = rocksdb::Options::default();
+        opts.create_if_missing(false);
+
+        let db = rocksdb::DB::open(&opts, path).map_err(|e| StorageError::Io(e.to_string()))?;
+
+        Ok(Self { db })
+    }
+
     /// Build the storage key for an account.
     fn account_key(account: &AccountId) -> Vec<u8> {
         let mut key = Vec::with_capacity(ACCOUNT_PREFIX.len() + 32);

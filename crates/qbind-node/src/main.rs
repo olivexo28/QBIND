@@ -2672,6 +2672,13 @@ async fn main() {
         None
     };
 
+    // Run 422 D7-D8: retain the identity of the INTENT this process actually
+    // published, so the later INTENT->COMPLETE transition validates the active
+    // attempt against the authoritative on-disk record (active-attempt
+    // binding). Populated by the `publish_intent` hook on success.
+    let published_intent: std::cell::RefCell<
+        Option<qbind_node::restore_completion::RestoreTransactionRecord>,
+    > = std::cell::RefCell::new(None);
     let restore_result = {
         // Bind the pre-materialization epoch-conflict closure to a local so
         // its borrow of `pre_opened_consensus_storage` ends before the handle
@@ -2798,12 +2805,22 @@ async fn main() {
             let rec = qbind_node::restore_completion::RestoreTransactionRecord::new_intent(
                 dest, digest, *nonce, meta.epoch,
             );
-            qbind_node::restore_completion::publish_record(data_dir, &rec).map_err(|e| {
-                qbind_node::snapshot_restore::RestoreError::Io(format!(
+            // Run 422 D7-D8 Correction C: a publication failure is reported by
+            // its ACTUAL stage. Either stage fails closed here; the message must
+            // not assert an unobserved final state.
+            match qbind_node::restore_completion::publish_record(data_dir, &rec) {
+                Ok(()) => {
+                    // Retain the identity of the SUCCESSFULLY published INTENT so
+                    // the later COMPLETE transition is validated against this
+                    // active attempt (active-attempt binding).
+                    *published_intent.borrow_mut() = Some(rec);
+                    Ok(())
+                }
+                Err(e) => Err(qbind_node::snapshot_restore::RestoreError::Io(format!(
                     "cannot publish INTENT restore-transaction record: {}",
                     e
-                ))
-            })
+                ))),
+            }
         };
         let hooks = qbind_node::snapshot_restore::RestoreCompletionHooks {
             publish_intent: &publish_intent,
@@ -5015,6 +5032,10 @@ async fn main() {
     // whether a previous process received its last synchronization
     // acknowledgement, so it fails closed on read errors.
     // ------------------------------------------------------------------
+    // Correction B: whether an ordinary (no-flag) startup was admitted through
+    // a valid COMPLETE record. Drives existing-only opening of the protected
+    // VM-v0 account state below.
+    let mut admitted_via_complete = false;
     if !restore_requested {
         if let Some(data_dir) = config.data_dir.as_ref() {
             use qbind_node::restore_completion::{evaluate_ordinary_startup, OrdinaryStartupDecision};
@@ -5070,6 +5091,11 @@ async fn main() {
                 }
                 std::process::exit(1);
             }
+            // Correction B: remember whether this ordinary startup was admitted
+            // through a valid COMPLETE, so the protected VM-v0 state is later
+            // opened with create-if-missing DISABLED (existing-only).
+            admitted_via_complete =
+                matches!(decision, OrdinaryStartupDecision::ProceedComplete);
             eprintln!(
                 "[binary] Run 422 D7-D8 ordinary-startup guard: {} at {} (proceeding)",
                 match decision {
@@ -5083,17 +5109,14 @@ async fn main() {
         }
     }
 
-    let vm_v0_runtime = match VmV0RuntimeState::open_from_config(&config) {
-        Ok(runtime) => runtime,
-        Err(e) => {
-            eprintln!("[T164] ERROR: {}", e);
-            eprintln!(
-                "[T164] qbind-node refuses to start because VM-v0 persistent state \
-                 could not be honestly opened."
-            );
-            std::process::exit(1);
-        }
-    };
+    // ------------------------------------------------------------------
+    // Run 422 D7-D8 Correction A: the protected VM-v0 account state is opened
+    // AFTER restore completion (durable epoch barrier + COMPLETE publication)
+    // on the restore path, and after the ordinary-startup RTR admission guard
+    // above. Its opening and its consumers are deferred to below (search for
+    // `let vm_v0_runtime =`) rather than opened here while the attempt could
+    // still be INTENT.
+    // ------------------------------------------------------------------
 
     // ------------------------------------------------------------------
     // Run 093: open the canonical production-binary `ConsensusStorage`
@@ -5210,54 +5233,108 @@ async fn main() {
             }
         }
 
-        // §5.9 step 9: publish the durable COMPLETE only after every
-        // prerequisite effect (install, sync, audit, epoch barrier) has
-        // succeeded. Binds the SAME held nonce, destination, and validated
-        // metadata digest as the INTENT published inside the guarded restore.
-        match restore_attempt_identity.as_ref() {
-            Some((data_dir, dest, nonce)) => {
-                let digest =
-                    qbind_node::restore_completion::snapshot_meta_digest(&outcome.meta);
-                let rec = qbind_node::restore_completion::RestoreTransactionRecord::new_intent(
-                    dest,
-                    digest,
-                    *nonce,
-                    outcome.meta.epoch,
-                )
-                .into_complete();
-                if let Err(e) =
-                    qbind_node::restore_completion::publish_record(data_dir, &rec)
-                {
-                    eprintln!(
-                        "[binary] FATAL: Run 422 D7-D8 could not publish the COMPLETE \
-                         restore-transaction record at {}: {}. The fail-closed INTENT \
-                         record is retained; refusing to start.",
-                        data_dir.display(),
-                        e
-                    );
-                    std::process::exit(1);
+        // §5.9 step 9 + active-attempt binding: promote the SUCCESSFULLY
+        // published INTENT for THIS attempt to COMPLETE, validating the
+        // transition against the authoritative on-disk record while destination
+        // ownership is held. The transition rejects a missing/invalid/
+        // wrong-state/wrong-destination/wrong-nonce/wrong-digest/wrong-epoch
+        // record and, on mismatch, suppresses COMPLETE without overwriting the
+        // inconsistent evidence with a freshly reconstructed success record.
+        // Publication failures are reported by their ACTUAL stage (Correction
+        // C): a failure AFTER the atomic replacement does not claim the INTENT
+        // is retained.
+        let finalize_target = restore_attempt_identity
+            .as_ref()
+            .map(|(data_dir, _dest, _nonce)| data_dir.clone());
+        match (finalize_target, published_intent.borrow().as_ref()) {
+            (Some(data_dir), Some(intent)) => {
+                use qbind_node::restore_completion::{FinalizeError, PublishError};
+                match qbind_node::restore_completion::finalize_complete_from_intent(
+                    &data_dir, intent,
+                ) {
+                    Ok(()) => {
+                        eprintln!(
+                            "[restore] D7-D8 durable COMPLETE published at {} (height={} \
+                             chain_id=0x{:016x})",
+                            data_dir.display(),
+                            outcome.meta.height,
+                            outcome.meta.chain_id,
+                        );
+                    }
+                    Err(FinalizeError::Publish(PublishError::AfterReplace(inner))) => {
+                        eprintln!(
+                            "[binary] FATAL: Run 422 D7-D8 COMPLETE publication failed AFTER \
+                             the atomic replacement at {}: {}. The final record may already be \
+                             a valid COMPLETE but its durability is unacknowledged; refusing to \
+                             start. A later startup classifies the actual final record under \
+                             the accepted contract.",
+                            data_dir.display(),
+                            inner
+                        );
+                        std::process::exit(1);
+                    }
+                    Err(e) => {
+                        eprintln!(
+                            "[binary] FATAL: Run 422 D7-D8 could not finalize the COMPLETE \
+                             restore-transaction record at {}: {}. COMPLETE is suppressed; the \
+                             fail-closed INTENT record is retained; refusing to start.",
+                            data_dir.display(),
+                            e
+                        );
+                        std::process::exit(1);
+                    }
                 }
-                eprintln!(
-                    "[restore] D7-D8 durable COMPLETE published at {} (height={} \
-                     chain_id=0x{:016x})",
-                    data_dir.display(),
-                    outcome.meta.height,
-                    outcome.meta.chain_id,
-                );
             }
-            None => {
+            _ => {
                 // Unreachable on the supported restore path: a restore requires
-                // --data-dir, which populates the attempt identity. Fail closed
-                // rather than proceed without publishing COMPLETE.
+                // --data-dir (populating the attempt identity) and a successful
+                // INTENT publication (populating the retained intent). Fail
+                // closed rather than proceed without publishing COMPLETE.
                 eprintln!(
                     "[binary] FATAL: Run 422 D7-D8 has a restore outcome but no bound \
-                     restore-completion attempt identity; cannot publish COMPLETE. \
-                     Refusing to start."
+                     restore-completion attempt identity or retained INTENT; cannot \
+                     publish COMPLETE. Refusing to start."
                 );
                 std::process::exit(1);
             }
         }
     }
+
+    // ------------------------------------------------------------------
+    // Run 422 D7-D8 Correction A + B: open the protected VM-v0 account state
+    // ONLY now — after restore completion has durably succeeded (epoch barrier
+    // + COMPLETE published) on the restore path, and after the ordinary-startup
+    // RTR admission guard on the non-restore path. Opening restored account
+    // storage while the attempt is still INTENT would expose protected state
+    // before completion, so it is deferred here; the affected-state consumers
+    // (`run_local_mesh_node` / `run_p2p_node`) are dispatched below, strictly
+    // after this open.
+    //
+    // Correction B: when the destination was admitted through a valid COMPLETE
+    // (ordinary restart) or a restore just completed this process, open with
+    // create-if-missing DISABLED so a missing/empty/unrelated restored database
+    // fails closed instead of silently initializing a replacement.
+    // ------------------------------------------------------------------
+    let require_existing_vm_v0 = admitted_via_complete || restore_outcome.is_some();
+    let vm_v0_runtime = {
+        let open_result = if require_existing_vm_v0 {
+            VmV0RuntimeState::open_existing_from_config(&config)
+        } else {
+            VmV0RuntimeState::open_from_config(&config)
+        };
+        match open_result {
+            Ok(runtime) => runtime,
+            Err(e) => {
+                eprintln!("[T164] ERROR: {}", e);
+                eprintln!(
+                    "[T164] qbind-node refuses to start because VM-v0 persistent state \
+                     could not be honestly opened (require_existing={}).",
+                    require_existing_vm_v0
+                );
+                std::process::exit(1);
+            }
+        }
+    };
     // ------------------------------------------------------------------
     // Run 422 containment correction — genesis-authority activation is
     // DISABLED pending D4-D7.

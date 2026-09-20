@@ -476,20 +476,92 @@ pub fn read_rtr(data_dir: &Path) -> Result<RtrReadResult, RtrError> {
 // Publication (atomic, durable)
 // ============================================================================
 
-/// Publish a record durably at `data_dir` using the selected temp-file →
-/// `fsync` file → atomic `rename` → `fsync` parent-dir sequence (§5.9). A
-/// temp artifact is never promoted into completion evidence.
+/// The stage at which a [`publish_record`] operation failed (§5.9).
+///
+/// The publication sequence is temp-write → temp-`fsync` → atomic `rename` →
+/// parent-directory `fsync`. Reporting the ACTUAL stage is required so a caller
+/// never asserts an unobserved final on-disk state: a failure AFTER the rename
+/// may have already left the new record at the final pathname, so the prior
+/// record can NOT be claimed to be retained.
+#[derive(Debug, Clone)]
+pub enum PublishError {
+    /// The failure occurred BEFORE the atomic replacement (temp open, write,
+    /// `fsync`, or the `rename` itself failed). The previously published final
+    /// record — if any — remains authoritative and unmodified.
+    BeforeReplace(RtrError),
+    /// The atomic `rename` succeeded but the subsequent parent-directory
+    /// `fsync` failed. The final pathname may ALREADY contain the new record,
+    /// but its durability is unacknowledged. A caller MUST NOT assert that the
+    /// prior record is retained; it must fail closed and let a later startup
+    /// classify the actual final record under the accepted contract.
+    AfterReplace(RtrError),
+}
+
+impl PublishError {
+    /// The underlying IO error, regardless of stage.
+    pub fn io(&self) -> &RtrError {
+        match self {
+            PublishError::BeforeReplace(e) | PublishError::AfterReplace(e) => e,
+        }
+    }
+
+    /// Whether the atomic replacement had ALREADY occurred when the failure was
+    /// observed (so the prior record can NOT be claimed retained).
+    pub fn replaced(&self) -> bool {
+        matches!(self, PublishError::AfterReplace(_))
+    }
+}
+
+impl fmt::Display for PublishError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            PublishError::BeforeReplace(e) => write!(
+                f,
+                "restore-transaction publication failed before atomic replacement \
+                 (prior final record retained): {e}"
+            ),
+            PublishError::AfterReplace(e) => write!(
+                f,
+                "restore-transaction publication failed AFTER atomic replacement but \
+                 before its directory-sync was acknowledged (the final record may \
+                 already be the new record; the prior record is NOT retained): {e}"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for PublishError {}
+
+/// Publish a record durably at `data_dir` using the temp-file → `fsync` file →
+/// atomic `rename` → `fsync` parent-dir sequence (§5.9). A temp artifact is
+/// never promoted into completion evidence.
+///
+/// On failure the returned [`PublishError`] distinguishes a failure BEFORE the
+/// atomic replacement (prior record retained) from a failure AFTER it (the new
+/// record may already be final; the prior record is NOT retained).
 pub fn publish_record(
     data_dir: &Path,
     record: &RestoreTransactionRecord,
-) -> Result<(), RtrError> {
+) -> Result<(), PublishError> {
+    publish_record_inner(data_dir, record, &|dir| fsync_dir(dir))
+}
+
+/// Internal publication with an injectable post-rename directory-sync step so
+/// tests can deterministically exercise the AFTER-replacement failure boundary
+/// without any production fault-injection flag or environment switch. Production
+/// callers use [`publish_record`], which always passes the real [`fsync_dir`].
+fn publish_record_inner(
+    data_dir: &Path,
+    record: &RestoreTransactionRecord,
+    dir_sync: &dyn Fn(&Path) -> Result<(), RtrError>,
+) -> Result<(), PublishError> {
     use std::io::Write;
 
     let final_path = rtr_path(data_dir);
     let temp_path = data_dir.join(RTR_TEMP_FILENAME);
     let bytes = record.encode();
 
-    // Write temp, fsync temp.
+    // Write temp, fsync temp. Any failure here is BEFORE replacement.
     {
         let mut f = std::fs::OpenOptions::new()
             .create(true)
@@ -497,40 +569,43 @@ pub fn publish_record(
             .truncate(true)
             .open(&temp_path)
             .map_err(|e| {
-                RtrError::Io(format!(
+                PublishError::BeforeReplace(RtrError::Io(format!(
                     "cannot open temp RTR {}: {}",
                     temp_path.display(),
                     e
-                ))
+                )))
             })?;
         f.write_all(&bytes).map_err(|e| {
-            RtrError::Io(format!(
+            PublishError::BeforeReplace(RtrError::Io(format!(
                 "cannot write temp RTR {}: {}",
                 temp_path.display(),
                 e
-            ))
+            )))
         })?;
         f.sync_all().map_err(|e| {
-            RtrError::Io(format!(
+            PublishError::BeforeReplace(RtrError::Io(format!(
                 "cannot fsync temp RTR {}: {}",
                 temp_path.display(),
                 e
-            ))
+            )))
         })?;
     }
 
-    // Atomic rename temp -> final.
+    // Atomic rename temp -> final. A failure here leaves the prior final record
+    // in place (BEFORE replacement).
     std::fs::rename(&temp_path, &final_path).map_err(|e| {
-        RtrError::Io(format!(
+        PublishError::BeforeReplace(RtrError::Io(format!(
             "cannot atomically publish RTR {} -> {}: {}",
             temp_path.display(),
             final_path.display(),
             e
-        ))
+        )))
     })?;
 
-    // fsync the parent directory so the rename is durable.
-    fsync_dir(data_dir)?;
+    // fsync the parent directory so the rename is durable. The rename has
+    // ALREADY replaced the final pathname; a failure here is AFTER replacement
+    // and must never be reported as "prior record retained".
+    dir_sync(data_dir).map_err(PublishError::AfterReplace)?;
     Ok(())
 }
 
@@ -758,18 +833,43 @@ impl OrdinaryStartupDecision {
     }
 }
 
-/// Whether `state_vm_v0` under `data_dir` is present and non-empty. A
-/// missing/empty/unreadable required state behind a `COMPLETE` is refused.
+/// Whether `state_vm_v0` under `data_dir` is present and non-empty, failing
+/// closed on any directory-read error.
+///
+/// This is a cheap STRUCTURAL pre-filter only: it refuses an absent or empty
+/// state directory, and a directory-entry read error is treated as a failure
+/// (NOT as presence). It deliberately does NOT attempt to distinguish an
+/// unrelated file from a real account database — a non-empty directory is not,
+/// by itself, an existing database. The authoritative existing-database check
+/// is performed by opening the account state with create-if-missing DISABLED
+/// (`RocksDbAccountState::open_existing`, wired through
+/// `VmV0RuntimeState::open_existing_from_config`) on the COMPLETE admission
+/// path, which fails closed for a directory that does not contain an openable
+/// database and never initializes a replacement. See
+/// `docs/protocol/QBIND_SNAPSHOT_RESTORE_COMPLETION_CONTRACT.md` §7.
 fn state_vm_v0_present(data_dir: &Path) -> Result<bool, RtrError> {
     let dir = data_dir.join(crate::snapshot_restore::VM_V0_STATE_SUBDIR);
-    match std::fs::read_dir(&dir) {
-        Ok(mut entries) => Ok(entries.next().is_some()),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
-        Err(e) => Err(RtrError::Io(format!(
-            "cannot read installed state {}: {}",
+    let mut entries = match std::fs::read_dir(&dir) {
+        Ok(entries) => entries,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(e) => {
+            return Err(RtrError::Io(format!(
+                "cannot read installed state {}: {}",
+                dir.display(),
+                e
+            )))
+        }
+    };
+    match entries.next() {
+        // A successfully-read first entry proves the directory is non-empty.
+        Some(Ok(_)) => Ok(true),
+        // A directory-entry read error is a failure, NOT presence (fail-closed).
+        Some(Err(e)) => Err(RtrError::Io(format!(
+            "cannot read installed state entry under {}: {}",
             dir.display(),
             e
         ))),
+        None => Ok(false),
     }
 }
 
@@ -846,6 +946,173 @@ pub fn evaluate_requested_restore_precondition(
         }
         Err(e) => RequestedRestorePrecondition::RefuseInvalid(e.to_string()),
     }
+}
+
+// ============================================================================
+// Active-attempt finalization (INTENT -> COMPLETE transition)
+// ============================================================================
+
+/// Why an on-disk final record failed to match the expected published INTENT
+/// during finalization (§5.9 step 9, active-attempt binding). Every variant
+/// suppresses `COMPLETE`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum IntentMismatch {
+    /// The on-disk record is not in `INTENT` state (e.g. already `COMPLETE`).
+    WrongState { found: RtrState },
+    /// The on-disk record binds a different destination.
+    WrongDestination { expected: String, found: String },
+    /// The on-disk record binds a different per-attempt nonce.
+    WrongNonce,
+    /// The on-disk record binds a different whole-metadata digest.
+    WrongDigest,
+    /// The on-disk record binds a different expected epoch (preserving the
+    /// `None` vs `Some(0)` distinction).
+    WrongEpoch {
+        expected: Option<u64>,
+        found: Option<u64>,
+    },
+    /// The on-disk record has a different schema version.
+    WrongVersion { found: u32 },
+}
+
+impl fmt::Display for IntentMismatch {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            IntentMismatch::WrongState { found } => {
+                write!(f, "on-disk record is {} (expected INTENT)", found.tag())
+            }
+            IntentMismatch::WrongDestination { expected, found } => write!(
+                f,
+                "on-disk record binds a different destination (expected={expected}, found={found})"
+            ),
+            IntentMismatch::WrongNonce => {
+                write!(f, "on-disk record binds a different per-attempt nonce")
+            }
+            IntentMismatch::WrongDigest => {
+                write!(f, "on-disk record binds a different whole-metadata digest")
+            }
+            IntentMismatch::WrongEpoch { expected, found } => write!(
+                f,
+                "on-disk record binds a different expected epoch (expected={expected:?}, found={found:?})"
+            ),
+            IntentMismatch::WrongVersion { found } => {
+                write!(f, "on-disk record has a different schema version {found}")
+            }
+        }
+    }
+}
+
+/// A finalization failure (§5.9 step 9). `COMPLETE` is suppressed and the
+/// inconsistent on-disk evidence is NOT overwritten.
+#[derive(Debug)]
+pub enum FinalizeError {
+    /// The authoritative final record is absent, undecodable, or unreadable.
+    ExpectedIntentUnavailable(String),
+    /// The authoritative final record does not match the expected published
+    /// INTENT identity for this active attempt.
+    Mismatch(IntentMismatch),
+    /// The expected INTENT identity supplied by the caller is itself not a
+    /// well-formed `INTENT` (programming error; fail closed).
+    ExpectedNotIntent,
+    /// Publishing the `COMPLETE` record failed (stage-classified).
+    Publish(PublishError),
+}
+
+impl fmt::Display for FinalizeError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            FinalizeError::ExpectedIntentUnavailable(m) => write!(
+                f,
+                "cannot finalize COMPLETE: authoritative INTENT record unavailable: {m}"
+            ),
+            FinalizeError::Mismatch(m) => write!(
+                f,
+                "cannot finalize COMPLETE: active-attempt binding mismatch: {m}"
+            ),
+            FinalizeError::ExpectedNotIntent => write!(
+                f,
+                "cannot finalize COMPLETE: the supplied expected record is not an INTENT"
+            ),
+            FinalizeError::Publish(e) => {
+                write!(f, "cannot finalize COMPLETE: publication failed: {e}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for FinalizeError {}
+
+/// Validate and perform the INTENT→COMPLETE transition for the active attempt
+/// while destination ownership is held (§5.9 step 9, active-attempt binding).
+///
+/// `expected_intent` is the identity of the `INTENT` this process successfully
+/// published for the current attempt. The authoritative final record on disk is
+/// re-read and must match it exactly (state `INTENT`, same destination, nonce,
+/// whole-metadata digest, expected epoch preserving `None` vs `Some(0)`, and
+/// version). Only then is the RETAINED INTENT identity promoted to `COMPLETE`
+/// and published. Any mismatch suppresses `COMPLETE` and leaves the
+/// inconsistent evidence untouched — the transition never overwrites an
+/// inconsistent active attempt with a freshly reconstructed success record.
+pub fn finalize_complete_from_intent(
+    data_dir: &Path,
+    expected_intent: &RestoreTransactionRecord,
+) -> Result<(), FinalizeError> {
+    if expected_intent.state != RtrState::Intent {
+        return Err(FinalizeError::ExpectedNotIntent);
+    }
+    let found = match read_rtr(data_dir) {
+        Ok(RtrReadResult::Present(rec)) => rec,
+        Ok(RtrReadResult::Absent) => {
+            return Err(FinalizeError::ExpectedIntentUnavailable(
+                "no restore-transaction record present at finalization".to_string(),
+            ))
+        }
+        Ok(RtrReadResult::Invalid(d)) => {
+            return Err(FinalizeError::ExpectedIntentUnavailable(d.to_string()))
+        }
+        Err(e) => return Err(FinalizeError::ExpectedIntentUnavailable(e.to_string())),
+    };
+    check_intent_matches(expected_intent, &found).map_err(FinalizeError::Mismatch)?;
+    // Promote the RETAINED intent identity (not a fresh reconstruction of
+    // unknown provenance) to COMPLETE and publish it durably.
+    let complete = expected_intent.clone().into_complete();
+    publish_record(data_dir, &complete).map_err(FinalizeError::Publish)
+}
+
+/// Compare the authoritative on-disk record against the expected published
+/// INTENT identity. `found` must be an `INTENT` with identical version,
+/// destination, nonce, digest, and epoch.
+fn check_intent_matches(
+    expected: &RestoreTransactionRecord,
+    found: &RestoreTransactionRecord,
+) -> Result<(), IntentMismatch> {
+    if found.state != RtrState::Intent {
+        return Err(IntentMismatch::WrongState { found: found.state });
+    }
+    if found.version != expected.version {
+        return Err(IntentMismatch::WrongVersion {
+            found: found.version,
+        });
+    }
+    if found.destination_id != expected.destination_id {
+        return Err(IntentMismatch::WrongDestination {
+            expected: expected.destination_id.clone(),
+            found: found.destination_id.clone(),
+        });
+    }
+    if found.attempt_nonce != expected.attempt_nonce {
+        return Err(IntentMismatch::WrongNonce);
+    }
+    if found.snapshot_meta_digest != expected.snapshot_meta_digest {
+        return Err(IntentMismatch::WrongDigest);
+    }
+    if found.expected_epoch != expected.expected_epoch {
+        return Err(IntentMismatch::WrongEpoch {
+            expected: expected.expected_epoch,
+            found: found.expected_epoch,
+        });
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -1103,5 +1370,253 @@ mod tests {
             evaluate_requested_restore_precondition(tmp.path()),
             RequestedRestorePrecondition::ProceedNoExistingRtr
         ));
+    }
+
+    // ------------------------------------------------------------------
+    // Correction C — publication failures reported by their actual stage.
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn publish_before_replace_retains_prior_final_record() {
+        // A prior valid INTENT is authoritative.
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let intent = sample_record(RtrState::Intent);
+        publish_record(tmp.path(), &intent).expect("publish intent");
+
+        // Force a BEFORE-rename failure deterministically: make the temp path a
+        // directory so opening it as a file fails before any rename.
+        let temp_path = tmp.path().join(RTR_TEMP_FILENAME);
+        std::fs::create_dir(&temp_path).expect("mk temp dir");
+
+        let complete = intent.clone().into_complete();
+        let err = publish_record(tmp.path(), &complete).expect_err("must fail before replace");
+        assert!(matches!(err, PublishError::BeforeReplace(_)));
+        assert!(!err.replaced());
+
+        // The prior final record is retained: still the original INTENT.
+        match read_rtr(tmp.path()).expect("read") {
+            RtrReadResult::Present(rec) => {
+                assert_eq!(rec.state, RtrState::Intent);
+                assert_eq!(rec, intent);
+            }
+            other => panic!("expected present INTENT, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn publish_after_replace_reports_failure_final_may_be_new() {
+        // Failure AFTER rename but before directory-sync: the operation reports
+        // failure, but the final record may ALREADY be the new record. No false
+        // "prior retained" assertion is made.
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let intent = sample_record(RtrState::Intent);
+        publish_record(tmp.path(), &intent).expect("publish intent");
+
+        let complete = intent.clone().into_complete();
+        let failing_dir_sync =
+            |_dir: &Path| -> Result<(), RtrError> { Err(RtrError::Io("injected dir-sync failure".to_string())) };
+        let err = publish_record_inner(tmp.path(), &complete, &failing_dir_sync)
+            .expect_err("must fail after replace");
+        assert!(matches!(err, PublishError::AfterReplace(_)));
+        assert!(err.replaced());
+
+        // The rename already happened: the final record is the NEW COMPLETE.
+        match read_rtr(tmp.path()).expect("read") {
+            RtrReadResult::Present(rec) => {
+                assert_eq!(rec.state, RtrState::Complete);
+                assert_eq!(rec, complete);
+            }
+            other => panic!("expected present COMPLETE, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn temp_artifact_never_authorizes_startup() {
+        // A lone temp artifact (no final record) is NOT a completion record:
+        // the destination reads as Absent.
+        let tmp = tempfile::tempdir().expect("tempdir");
+        std::fs::write(tmp.path().join(RTR_TEMP_FILENAME), b"partial-junk").expect("write temp");
+        assert!(matches!(read_rtr(tmp.path()).expect("read"), RtrReadResult::Absent));
+        assert!(matches!(
+            evaluate_ordinary_startup(tmp.path()),
+            OrdinaryStartupDecision::ProceedAbsent
+        ));
+
+        // A temp artifact alongside a valid final INTENT does not upgrade it:
+        // the final INTENT still refuses ordinary startup.
+        let dest = DestinationId::canonicalize(tmp.path()).expect("canon");
+        let intent = RestoreTransactionRecord::new_intent(&dest, [1u8; 32], [2u8; 16], Some(3));
+        publish_record(tmp.path(), &intent).expect("publish intent");
+        std::fs::write(tmp.path().join(RTR_TEMP_FILENAME), b"partial-junk").expect("write temp");
+        assert!(matches!(
+            evaluate_ordinary_startup(tmp.path()),
+            OrdinaryStartupDecision::RefuseIntent
+        ));
+    }
+
+    // ------------------------------------------------------------------
+    // state_vm_v0_present — non-empty directory is not silently "present".
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn state_present_absent_and_empty_are_false() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        // Absent state dir.
+        assert!(!state_vm_v0_present(tmp.path()).expect("absent ok"));
+        // Empty state dir.
+        std::fs::create_dir_all(tmp.path().join(crate::snapshot_restore::VM_V0_STATE_SUBDIR))
+            .expect("mk empty state");
+        assert!(!state_vm_v0_present(tmp.path()).expect("empty ok"));
+    }
+
+    #[test]
+    fn state_present_nonempty_is_true_prefilter_only() {
+        // A non-empty directory passes the cheap structural pre-filter; the
+        // authoritative existing-database check happens at open time.
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let state = tmp.path().join(crate::snapshot_restore::VM_V0_STATE_SUBDIR);
+        std::fs::create_dir_all(&state).expect("mk state");
+        std::fs::write(state.join("UNRELATED_SENTINEL"), b"x").expect("write sentinel");
+        assert!(state_vm_v0_present(tmp.path()).expect("nonempty ok"));
+    }
+
+    // ------------------------------------------------------------------
+    // Active-attempt binding — INTENT->COMPLETE transition validation.
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn finalize_success_publishes_complete() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let intent = sample_record(RtrState::Intent);
+        publish_record(tmp.path(), &intent).expect("publish intent");
+        finalize_complete_from_intent(tmp.path(), &intent).expect("finalize");
+        match read_rtr(tmp.path()).expect("read") {
+            RtrReadResult::Present(rec) => {
+                assert_eq!(rec.state, RtrState::Complete);
+                assert_eq!(rec.attempt_nonce, intent.attempt_nonce);
+                assert_eq!(rec.snapshot_meta_digest, intent.snapshot_meta_digest);
+                assert_eq!(rec.destination_id, intent.destination_id);
+                assert_eq!(rec.expected_epoch, intent.expected_epoch);
+            }
+            other => panic!("expected COMPLETE, got {other:?}"),
+        }
+    }
+
+    /// Assert the on-disk record is still the original untouched INTENT.
+    fn assert_still_intent(dir: &Path, expected: &RestoreTransactionRecord) {
+        match read_rtr(dir).expect("read") {
+            RtrReadResult::Present(rec) => {
+                assert_eq!(rec.state, RtrState::Intent);
+                assert_eq!(&rec, expected);
+            }
+            other => panic!("expected untouched INTENT, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn finalize_wrong_nonce_suppresses_complete() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let intent = sample_record(RtrState::Intent);
+        publish_record(tmp.path(), &intent).expect("publish intent");
+        let mut expected = intent.clone();
+        expected.attempt_nonce = [0xAA; 16];
+        let err = finalize_complete_from_intent(tmp.path(), &expected).expect_err("mismatch");
+        assert!(matches!(err, FinalizeError::Mismatch(IntentMismatch::WrongNonce)));
+        assert_still_intent(tmp.path(), &intent);
+    }
+
+    #[test]
+    fn finalize_wrong_digest_suppresses_complete() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let intent = sample_record(RtrState::Intent);
+        publish_record(tmp.path(), &intent).expect("publish intent");
+        let mut expected = intent.clone();
+        expected.snapshot_meta_digest = [0xBB; 32];
+        let err = finalize_complete_from_intent(tmp.path(), &expected).expect_err("mismatch");
+        assert!(matches!(err, FinalizeError::Mismatch(IntentMismatch::WrongDigest)));
+        assert_still_intent(tmp.path(), &intent);
+    }
+
+    #[test]
+    fn finalize_wrong_destination_suppresses_complete() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let intent = sample_record(RtrState::Intent);
+        publish_record(tmp.path(), &intent).expect("publish intent");
+        let mut expected = intent.clone();
+        expected.destination_id = "/some/other/dest".to_string();
+        let err = finalize_complete_from_intent(tmp.path(), &expected).expect_err("mismatch");
+        assert!(matches!(
+            err,
+            FinalizeError::Mismatch(IntentMismatch::WrongDestination { .. })
+        ));
+        assert_still_intent(tmp.path(), &intent);
+    }
+
+    #[test]
+    fn finalize_wrong_epoch_none_vs_zero_suppresses_complete() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let mut intent = sample_record(RtrState::Intent);
+        intent.expected_epoch = None;
+        publish_record(tmp.path(), &intent).expect("publish intent");
+        let mut expected = intent.clone();
+        expected.expected_epoch = Some(0);
+        let err = finalize_complete_from_intent(tmp.path(), &expected).expect_err("mismatch");
+        assert!(matches!(
+            err,
+            FinalizeError::Mismatch(IntentMismatch::WrongEpoch {
+                expected: Some(0),
+                found: None
+            })
+        ));
+        assert_still_intent(tmp.path(), &intent);
+    }
+
+    #[test]
+    fn finalize_wrong_state_already_complete_suppresses() {
+        // The on-disk record is already COMPLETE: the transition refuses rather
+        // than overwrite it with a reconstructed success record.
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let intent = sample_record(RtrState::Intent);
+        let complete = intent.clone().into_complete();
+        publish_record(tmp.path(), &complete).expect("publish complete");
+        let err = finalize_complete_from_intent(tmp.path(), &intent).expect_err("mismatch");
+        assert!(matches!(
+            err,
+            FinalizeError::Mismatch(IntentMismatch::WrongState {
+                found: RtrState::Complete
+            })
+        ));
+        // Unchanged COMPLETE.
+        match read_rtr(tmp.path()).expect("read") {
+            RtrReadResult::Present(rec) => assert_eq!(rec, complete),
+            other => panic!("expected COMPLETE unchanged, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn finalize_absent_record_fails_closed() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let intent = sample_record(RtrState::Intent);
+        let err = finalize_complete_from_intent(tmp.path(), &intent).expect_err("absent");
+        assert!(matches!(err, FinalizeError::ExpectedIntentUnavailable(_)));
+    }
+
+    #[test]
+    fn finalize_invalid_record_fails_closed() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        // Write a corrupt final record.
+        std::fs::write(rtr_path(tmp.path()), b"not-a-valid-rtr-record").expect("write junk");
+        let intent = sample_record(RtrState::Intent);
+        let err = finalize_complete_from_intent(tmp.path(), &intent).expect_err("invalid");
+        assert!(matches!(err, FinalizeError::ExpectedIntentUnavailable(_)));
+    }
+
+    #[test]
+    fn finalize_rejects_expected_not_intent() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let complete = sample_record(RtrState::Complete);
+        publish_record(tmp.path(), &complete).expect("publish");
+        let err = finalize_complete_from_intent(tmp.path(), &complete).expect_err("not intent");
+        assert!(matches!(err, FinalizeError::ExpectedNotIntent));
     }
 }
