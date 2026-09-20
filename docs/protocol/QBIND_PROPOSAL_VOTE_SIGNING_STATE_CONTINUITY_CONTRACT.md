@@ -1050,8 +1050,14 @@ production; the guard engages only when a journal is explicitly wired (tests).
   binding), a valid stored record with a permitted transition, and a bounded,
   structurally valid retained result, then performs the required durable synced
   write. It refuses missing/foreign/stale operations, arbitrary position/binding
-  arguments, empty/oversized results, and any conflicting overwrite of an
-  existing signed obligation. Retaining publication authority never re-authorizes
+  arguments, and any conflicting overwrite of an existing signed obligation.
+  **Empty and oversized results are rejected at the checked publication boundary
+  before any write** (`JournalError::InvalidResultPublication` /
+  `OversizeRecord`): an empty signature would encode to a record the decoder
+  immediately rejects, so accepting it would report a successful publication for
+  bytes that can never be read back — instead the original reserved record and its
+  conflict obligation are preserved, no continuation is granted, and no
+  publication is reported. Retaining publication authority never re-authorizes
   signing.
 * **After process death:** a recovered `Reserved` (or otherwise uncertain state
   without a usable *acknowledged* retained result) is **PotentiallySigned** →
@@ -1059,6 +1065,23 @@ production; the guard engages only when a journal is explicitly wired (tests).
   exact decision is eligible only for resend after association +
   current-authorization checks. A conflicting request is refused without altering
   the original obligation.
+* **Recovered-result durability barrier (recovery acknowledgement rule):**
+  reading valid `Signed` bytes after reopening establishes record availability and
+  structural validity only — it is **not**, by itself, a durability
+  acknowledgement. Before a *recovered* `Signed` record (one with no live
+  operation in this process) may be resent as `ExactRetryRetained`, the journal
+  establishes an explicit **signing-record durability barrier**: under the
+  ownership-domain lock it reads and validates the exact stored record and
+  reissues that identical record through the existing synced-write operation (the
+  signing-record durability op, never an unrelated epoch write). The retained
+  result is offered **only after** that operation succeeds; a failed or uncertain
+  barrier returns an error and **suppresses** retained-result delivery, and
+  retrying re-issues the durable write without ever invoking the signer or minting
+  a continuation/publication capability. A successful barrier caches the
+  acknowledgement **bound to the exact record** within the ownership domain (never
+  a generic position flag that could authorize a different record); a conflicting,
+  malformed, missing, or differently-associated record fails closed before any
+  recovery re-publication and is never overwritten.
 * **Uncertain / idempotent result writes:** readable byte-equality is **not** a
   durability barrier. If a result write becomes readable but its durability
   operation returns an error/uncertain outcome, publication is **not** reported
@@ -1083,17 +1106,33 @@ production; the guard engages only when a journal is explicitly wired (tests).
 
 * **Executed (Corrections B/C pass):** source-contract → journal unit tests
   (operation-bound capability ownership: foreign domain, dropped continuation,
-  conflicting/idempotent/oversize publication, and the store-then-error
-  uncertainty rule) → colocated handler tests (fresh continuation consumed once
-  before the signer, publication through the matching operation, facade handoff
-  suppressed on publication failure, **deterministic concurrent** contested
-  reservation via a bounded barrier proving at most one live signing across
-  supported handles, and the store-then-error write-uncertainty case) →
-  real-RocksDB restart/reopen (reserve→consume→publish→reopen→exact retrieval,
-  reserved-only reopen refusing a new continuation, conflict-after-reopen,
-  idempotent + conflicting-overwrite, shared-handle ownership over the real
-  backend) → bounded child-process death/reopen. Direct signer-call counts and
-  facade effects are asserted (not logs alone).
+  conflicting/idempotent/oversize publication, the store-then-error uncertainty
+  rule, **empty-result refusal preserving the reservation**, and the
+  **recovered-result durability barrier** under a fresh domain over surviving
+  bytes — a failed barrier suppresses delivery, a later successful barrier permits
+  only exact retained reuse, and the acknowledgement is cached bound to the exact
+  record) → colocated handler tests (fresh continuation consumed once before the
+  signer, publication through the matching operation, facade handoff suppressed on
+  publication failure **and on invalid empty signer output**, and a
+  **deterministic controlled-schedule** contested reservation — the winner
+  durably reserves and pauses inside the signer, holding no ownership-domain mutex,
+  while the contender runs against a definitely-outstanding reservation and returns
+  `PotentiallySigned` (same binding) or `Conflict` (different binding); all
+  coordination waits are deadline-bounded and paused workers are always released on
+  every path) → real-RocksDB restart/reopen
+  (reserve→consume→publish→reopen→exact retrieval demonstrating the recovery
+  acknowledgement path, reserved-only reopen refusing a new continuation,
+  conflict-after-reopen, empty-result refusal over the real backend, idempotent +
+  conflicting-overwrite, shared-handle ownership over the real backend) → bounded
+  child-process death/reopen (the child self-aborts after a durable reserve and
+  the parent reopens a fresh domain; note this control uses an unbounded
+  `.status()` wait and only asserts an unsuccessful exit — it is **not** a
+  bounded/classified process-death test, which remains OPEN under F). Direct
+  signer-call counts and facade effects are
+  asserted (not logs alone). A separate post-publication exact-retry control
+  confirms a legitimate retained resend after publication costs zero additional
+  signer calls (the current resend policy is not weakened to an incorrect global
+  "one handoff" assertion).
 * **Still OPEN in D10 (not addressed by this pass):** Correction A
   (missing-journal refusal across all signing routes), Correction D (post-storage
   original-owner revalidation and remaining identity/version checks), Correction E
