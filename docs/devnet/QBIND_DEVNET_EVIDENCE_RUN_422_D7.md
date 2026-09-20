@@ -7420,11 +7420,15 @@ Release-binary ordered markers observed (Correction A case, transcribed):
 
 ### Security-tool outcomes (recorded literally)
 
-* Production changes are non-trivial for security tooling; CodeQL was run via
-  `parallel_validation` with `codeql.isTrivial=false`. Any CodeQL
-  database-size skip or reviewer-backend/model-registry error is recorded
-  literally as reported and is NOT a passed scan. Earlier D7 recorded skips are
-  not overwritten.
+* Production changes are non-trivial for security tooling; `parallel_validation`
+  was run with `codeql.isTrivial=false`. Literal outcomes from this run:
+  * **CodeQL (rust):** `Analysis was skipped because the database size is too
+    large.` — a **scope/size skip**, NOT a passed scan.
+  * **Code Review:** reported "No review comments found", but the reviewer
+    backend also emitted `model claude-sonnet-4.6 not found in registry` — a
+    **model-registry error**, so the "no comments" result is **not** an
+    independent clean pass.
+  Earlier D7 recorded skips/qualified outcomes are not overwritten.
 
 ### Scoped verdict and remaining limitations
 
