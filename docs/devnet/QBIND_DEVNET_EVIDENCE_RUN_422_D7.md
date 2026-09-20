@@ -7650,6 +7650,16 @@ prior-pass record.
 * `task/warning.txt` and per-file line endings were preserved. Only the two
   authorized code/test files and the four documentation files were changed.
 
+> **Correction (superseded by the release-symlink pass below).** The claim on
+> the preceding line that this test file's *per-file line endings were
+> preserved* is inaccurate: the reviewed test file
+> `crates/qbind-node/tests/run_422_d7d3_binary_snapshot_restore_characterization_tests.rs`
+> had been changed from its original uniform CRLF to LF (0 CRLF / all-LF at the
+> reviewed revision). The line-ending convention was **not** preserved in that
+> pass. The subsequent "release-binary RTR-symlink integration" pass below
+> restores uniform CRLF (no final newline) in that file and verifies the fix at
+> the raw byte level; its content corrections are retained.
+
 ### Correction A — reject final-component RTR symlinks (production change, non-trivial)
 
 The single authorized production change is in
@@ -7862,3 +7872,250 @@ SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO
 ```
 
 No readiness promotion, authority activation, or Run 423 work. C4/C5 remain OPEN.
+## Run 422 D7-D8 — release-binary RTR-symlink integration coverage, profile-matrix/restart strengthening, and CRLF restoration
+
+This delta continues the D7-D8 sections above. It is a **test- and
+documentation-only** continuation: no production source was changed. It finishes
+the remaining acceptance work the prior pass **overclaimed** as complete —
+namely (3) release-binary (not merely in-process unit) coverage of a dangling
+final-component RTR symlink through both the ordinary-startup and
+requested-restore paths; (4) completing the profile-matrix negative assertions;
+(5) observing the progressed-state ordinary restart through the consensus-start
+boundary; and (6) restoring the test file's original CRLF convention (the prior
+pass had changed it to LF). The reviewed production corrections (Correction A
+`O_NONBLOCK | O_NOFOLLOW` RTR open, bounded reader + regular-file validation,
+profile-independent existing-only admission, active-attempt finalization,
+durable epoch/COMPLETE/account-open ordering, destination lock and
+ordinary/retry refusal) are preserved unchanged.
+
+### Checkout and objects
+
+* Branch: `copilot/copilotcopilotcopilotcopilotrun-422-d7-d8-again` (supplied
+  branch, used unchanged; note it differs from the reviewed
+  `copilot/copilotcopilotcopilotrun-422-d7-d8-again` by one `copilot` segment).
+* Starting revision: `2aadc012693d3282146b49f16f19cd0a7aca5821` (parent
+  `9d96f009e0bdd008b13c9fa48f0ecc1aecc1a181`, the prior starting revision that
+  held the CRLF test file).
+* Reviewed references `a0d0bb71daaacf0c52ae2b2f743053302ca5862f` (reviewed final
+  revision) and `18036eaa54df164ceb60fc0583e76277e9750d0f` (release-build
+  checkpoint) are **not present** in this shallow single-branch clone
+  (`git cat-file` fails). Missing historical objects do not imply missing
+  implementation: source content was inspected directly and ancestry is reported
+  separately.
+* Only the single authorized test file was changed in this pass at the code
+  level; the three authorized documentation files are updated for reconciliation.
+  Production source under `crates/*/src` is byte-for-byte unchanged from the
+  starting revision (`git diff --name-only 2aadc01..HEAD` lists only the test
+  file and docs). `task/warning.txt` and unrelated work are preserved.
+
+### (3) Release-binary dangling-RTR symlink refusal — ordinary + requested restore
+
+The accepted UNIT cases (final-component symlink->valid-regular refused +
+preserved; dangling symlink refused + preserved; regular RTR read normally;
+genuine absence; non-regular/FIFO refused) remain in `restore_completion::tests`
+and are **not** duplicated. This pass adds the missing INTEGRATION coverage to
+the existing D3-D8 target, reusing its runner, binary selector
+(`QBIND_D7D3_NODE_BIN`), snapshot fixtures, and startup markers:
+
+* `d7d8_d_ordinary_startup_refuses_dangling_rtr_symlink_via_binary` — a dangling
+  final-component symlink at the authoritative RTR pathname; ordinary (no-flag)
+  startup of the release executable exits **1 naturally** with the specific
+  ordinary-startup RTR-invalid guard (`M_D7D8_ORDINARY_INVALID_RTR`) whose detail
+  is the RTR no-follow open refusal (`cannot open RTR`). Complete capture is
+  required before absence assertions. No protected-account admission
+  (`M_VM_V0_OPENED`, `M_VM_V0_VALIDATED_NONRUNTIME`,
+  `M_D7D8_GUARD_PROCEED_COMPLETE`) and no consensus dispatch (`M_LOOP_REACHED`,
+  `M_CONSENSUS_LOOP_STARTED`). The link is inspected with `symlink_metadata`
+  (never `Path::exists()` alone) and remains a symlink; its missing target is
+  never created; no restored database (`state_vm_v0/CURRENT`) is materialized.
+  The preparatory advisory lock file is a permitted artifact and is **not**
+  asserted absent.
+* `d7d8_d_requested_restore_refuses_dangling_rtr_symlink_via_binary` — a **valid**
+  snapshot plus a dangling final-component RTR symlink; a requested
+  `--restore-from-snapshot` exits **1 naturally** at the RTR precondition with
+  the specific requested-restore RTR-invalid refusal
+  (`M_D7D8_RESTORE_INVALID_RTR`) whose detail is again `cannot open RTR`. No
+  INTENT/COMPLETE publication, no account-state materialization, no restore
+  audit-marker (`RESTORE_MARKER_FILENAME`) creation, no baseline application
+  (`M_BASELINE_APPLIED`, `M_RESTORE_OK`), and no consensus dispatch. The link is
+  preserved and its missing target remains absent (`symlink_metadata`);
+  `read_rtr` over the destination remains a refusal (no record published).
+* **Genuine-absence control (C):** reused
+  `d7d4_c_fresh_directory_ordinary_start_control` — a genuinely absent RTR (no
+  directory entry) retains the supported ordinary lifecycle and reaches
+  `M_CONSENSUS_LOOP_STARTED` with `restore_baseline=false`. This is the
+  explicitly-identified reused positive control; no duplicate was added.
+
+### (4) Profile-matrix negative assertions completed
+
+`run_correction_b_matrix` (invoked by the VM-v0 and `nonce-only` wrappers) was
+strengthened rather than duplicated. After its genuine binary-produced COMPLETE,
+the actual COMPLETE record is retained. The common negative-case assertions were
+moved **into** the shared `run_negative` helper so every negative case (missing,
+empty, unrelated-only, invalid) — not only the two that inspected the returned
+stderr — receives them:
+
+* specific refusal + natural exit 1 + complete capture (kept);
+* absence of successful protected-account admission markers — both the VM-v0
+  runtime-open marker (`M_VM_V0_OPENED`) and the non-runtime existing-database
+  validation-success marker (`M_VM_V0_VALIDATED_NONRUNTIME`);
+* absence of LocalMesh/consensus dispatch and the actual consensus-loop-start
+  marker (`M_LOOP_REACHED`, `M_CONSENSUS_LOOP_STARTED`);
+* neither INTENT nor COMPLETE republished;
+* the authoritative RTR re-read and compared equal to the retained historical
+  COMPLETE;
+* the existing no-reinitialization and sentinel/`CURRENT`-preservation
+  assertions (kept). Whole-directory byte identity is **not** asserted; permitted
+  diagnostic/lock artifacts stay outside that claim.
+
+### (5) Progressed-state restart observed through the consensus-start boundary
+
+`d7d8_a_complete_then_ordinary_restart_preserves_state` retains its strengthened
+account/epoch advancement. The ordinary-restart observation now proceeds PAST
+`M_VM_V0_OPENED` and waits through `M_CONSENSUS_LOOP_STARTED` while the child
+remains alive, requires the startup output to report `restore_baseline=false`,
+keeps the existing-only account-admission observation, terminates through the
+classified SIGKILL path with complete capture and completed reaping, and keeps
+the assertions that neither INTENT nor COMPLETE is republished and no snapshot
+baseline/epoch is reapplied. The advanced account and epoch are independently
+re-opened and asserted, and the authoritative RTR equality check is kept. This
+advancement remains **fixture-driven**: it does not establish authenticated
+consensus progress, signing-state recovery, or durable anti-rollback.
+
+### (6) CRLF convention restored in the test file
+
+The reviewed final revision had changed this test file from CRLF to LF (the
+prior pass's "line endings preserved" claim, corrected above). This pass restores
+uniform CRLF while preserving the content corrections, and preserves the baseline
+EOF convention (no final newline):
+
+```
+raw byte-level (restored file):
+  CR = 4355, LF = 4355, lone-LF = 0, lone-CR = 0, ends-with-newline = false
+diff scope check:
+  git diff --numstat                 => 342 added, 1 removed
+  git diff --ignore-cr-at-eol        => 342 added, 1 removed   (identical)
+  content-only (CR stripped) diff    => 342 added, 1 removed   (identical)
+```
+
+The normal and line-ending-insensitive diffs are byte-identical, proving there
+are **no** line-ending-only flips — every changed line is an intended test
+change. No repository-wide formatter was run; no other file's line endings were
+converted.
+
+### Release executable identity (this pass — newly built, NOT the historical binary)
+
+The historical release executable (source checkpoint `18036eaa...`,
+sha256 `9abb0c6e...`) was **not available** on disk in this checkout, so it was
+rebuilt from the actual starting revision. The rebuilt binary has the SAME byte
+length as the historical one but a **DISTINCT** sha256 (release builds are not
+bit-reproducible here); it is recorded as a new binary and is **not** relabeled
+as the historical executable:
+
+```
+source revision : 2aadc012693d3282146b49f16f19cd0a7aca5821 (actual starting rev;
+                  test checkpoint is the pushed commit that adds the two new
+                  release-symlink cases — kept distinct from this build rev)
+build command   : cargo build --release -p qbind-node --bin qbind-node
+profile         : release (optimized)
+features        : default production features
+executable      : target/release/qbind-node
+byte length     : 17031472        (equal to the historical binary's length)
+sha256          : dfe0737cd9672fc36359d48a9fa3a0d43099fb8a74acc935e3c9dab542564778
+                  (DISTINCT from historical 9abb0c6e...; not reproducible, not relabeled)
+integration run : QBIND_D7D3_NODE_BIN=<abs>/target/release/qbind-node \
+                  cargo test --release -p qbind-node --test \
+                  run_422_d7d3_binary_snapshot_restore_characterization_tests
+```
+
+### Validation outcomes (this pass, recorded)
+
+* Focused new/strengthened D8 cases against the identified release executable via
+  `QBIND_D7D3_NODE_BIN` —
+  `d7d8_d_ordinary_startup_refuses_dangling_rtr_symlink_via_binary`,
+  `d7d8_d_requested_restore_refuses_dangling_rtr_symlink_via_binary`,
+  `d7d8_a_complete_then_ordinary_restart_preserves_state`,
+  `d7d8_correction_b_missing_or_unrelated_state_refuses_via_binary`,
+  `d7d8_correction_b_missing_or_unrelated_state_refuses_via_binary_nonce_only`
+  — **5 passed; 0 failed**.
+* Full extended D3-D8 integration target against the **release** executable via
+  `QBIND_D7D3_NODE_BIN` — **36/36 pass** (the prior pass's 34; +2 new
+  release-symlink cases; this is a strict superset and is **not** summed with the
+  focused 5).
+* Focused Clippy on the changed test target — the code added this pass is
+  clippy-clean; **one pre-existing** `needless_borrows_for_generic_args` warning
+  remains at line 1352 inside the unrelated `d7d5_b` helper and was left
+  untouched (out of scope). `-D warnings` cannot be applied crate-wide here
+  because the `qbind-node`/`qbind-ledger` **libraries** carry pre-existing
+  clippy lints unrelated to this test-only pass.
+* Changed-file whitespace/line-ending checks — no trailing whitespace and no hard
+  tabs in added lines; CRLF verification as above.
+
+The previously recorded B3/B5, Run 093/097, startup-refusal/ordering, and unit
+(`restore_completion` 51, `vm_v0_runtime` 15) results remain at their actual
+prior revisions and were **not** re-executed in this pass; they are not re-claimed
+here.
+
+### Acceptance matrix (this pass)
+
+| Requirement | Test name | Execution level | Concrete assertion | Result |
+|---|---|---|---|---|
+| Ordinary startup refuses dangling RTR symlink | `d7d8_d_ordinary_startup_refuses_dangling_rtr_symlink_via_binary` | release binary | natural exit 1; ordinary-startup RTR-invalid guard + `cannot open RTR`; complete capture; no admission/dispatch; link preserved (`symlink_metadata`), target uncreated; no `CURRENT` | PASS |
+| Requested restore refuses dangling RTR symlink | `d7d8_d_requested_restore_refuses_dangling_rtr_symlink_via_binary` | release binary | valid snapshot; natural exit 1; requested-restore RTR-invalid precondition + `cannot open RTR`; no INTENT/COMPLETE, no materialization, no audit marker, no baseline, no dispatch; link preserved, target absent | PASS |
+| Genuine-absence ordinary lifecycle (reused control) | `d7d4_c_fresh_directory_ordinary_start_control` | release binary | absent RTR -> ordinary lifecycle to `M_CONSENSUS_LOOP_STARTED`, `restore_baseline=false` | PASS (reused) |
+| Profile matrix (VM-v0) negatives strengthened | `d7d8_correction_b_missing_or_unrelated_state_refuses_via_binary` | release binary | each negative: exit 1 + refusal + complete capture; no VM-v0/nonruntime admission; no dispatch; no INTENT/COMPLETE; RTR == retained COMPLETE; no re-init | PASS |
+| Profile matrix (nonce-only) negatives strengthened | `d7d8_correction_b_missing_or_unrelated_state_refuses_via_binary_nonce_only` | release binary | same strengthened assertions under `--execution-profile nonce-only` | PASS |
+| Progressed restart through consensus-start | `d7d8_a_complete_then_ordinary_restart_preserves_state` | release binary | observe `M_VM_V0_OPENED`->`M_CONSENSUS_LOOP_STARTED` alive; `restore_baseline=false`; classified SIGKILL + reaping; no INTENT/COMPLETE republish; no baseline/epoch reapplied; advanced account+epoch retained; RTR unchanged | PASS |
+
+Counts are reported per level and are **not** summed across the overlapping
+focused (5) and full-target (36) runs.
+
+### Security-tool outcomes (recorded literally)
+
+This pass is test/documentation-only; the CodeQL triviality was declared
+accordingly (`codeql.isTrivial=true`, test/doc-only). Literal outcomes from the
+`parallel_validation` run for this pass:
+
+* **CodeQL Security Scan:** `Skipped: all changes are trivial.` A trivial-scope
+  skip is **not** a passed production scan; prior production-analysis limitations
+  and the earlier CodeQL size-skip qualifications above are unchanged.
+* **Code Review:** `Reviewed 4 file(s).` `No review comments found.` The reviewer
+  backend additionally reported it was unavailable in this environment
+  (`model claude-sonnet-4.6 not found in registry`), so this is a backend-limited
+  result, not an affirmative production sign-off.
+* **Secret scan:** `No secrets detected in the scanned files.` across the three
+  changed documentation files; the test file introduced no credentials or tokens.
+
+A scope skip or backend error is **not** a passed scan; prior production-analysis
+limitations are unchanged, and the earlier CodeQL size-skip / Code-Review
+backend-error qualifications above are not overwritten.
+
+### Scoped verdict (this pass)
+
+```
+D7D8_RESTORE_COMPLETION_CONTAINMENT=CODE-AND-RELEASE-TEST-POSITIVE
+```
+
+The narrow verdict now covers, at CODE-AND-RELEASE-TEST level, the demonstrated
+restore-admission and startup-containment scope: final-component RTR-symlink
+refusal executed through BOTH the ordinary-startup and requested-restore release
+paths (previously unit-only), the profile-matrix dispatch/state-use absence and
+RTR-preservation assertions across both profiles, and the progressed-state
+ordinary restart observed through consensus start with `restore_baseline=false`.
+It does **not** establish power-loss durability, durable anti-rollback, consensus
+recovery, signing-state continuity, or production authority readiness.
+
+### Retained posture (unchanged)
+
+```
+D7_STATUS=PARTIAL-CODE-TEST / PRODUCTION-LIFECYCLE-UNAVAILABLE
+DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED
+GENESIS_AUTHORITY_ACTIVATION=DISABLED
+PRODUCTION_WIRE_CHAIN_ID_BEHAVIOR=UNCHANGED
+CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED
+SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO
+```
+
+No readiness promotion, authority activation, or Run 423 work. C4/C5 remain OPEN.
+Power-loss durability, signing-state continuity, durable anti-rollback, and
+production authority readiness remain separate and unestablished.
