@@ -1343,6 +1343,42 @@ mod tests {
     }
 
     #[test]
+    fn digest_binds_authority_state_v2_field() {
+        // Independently of the v1 authority_state, a change to authority_state_v2
+        // alone must change the whole-metadata digest (§4.1 binding covers the
+        // full validated metadata, including the v2 marker carrier).
+        use qbind_ledger::state_snapshot::AuthorityStateSnapshotMetaV2;
+        let base = StateSnapshotMeta::new(10, [1u8; 32], 123, 0x42);
+        let with_v2 = base.clone().with_authority_state_v2(Some(AuthorityStateSnapshotMetaV2 {
+            chain_id_hex: "0000000000000042".to_string(),
+            environment: "devnet".to_string(),
+            genesis_hash_hex: "ab".repeat(32),
+            authority_root_fingerprint: "cd".repeat(16),
+            authority_root_suite_id: 1,
+            active_bundle_signing_key_fingerprint: "ef".repeat(16),
+            active_bundle_signing_key_suite_id: 1,
+            latest_authority_domain_sequence: 3,
+            latest_lifecycle_action_byte: 0,
+            previous_bundle_signing_key_fingerprint: None,
+            latest_ratification_v2_digest: "12".repeat(32),
+            revoked_key_metadata: None,
+        }));
+        assert_ne!(
+            snapshot_meta_digest(&base),
+            snapshot_meta_digest(&with_v2)
+        );
+        // Changing a single v2 field again produces a distinct digest.
+        let mut mutated = with_v2.clone();
+        if let Some(v2) = mutated.authority_state_v2.as_mut() {
+            v2.latest_authority_domain_sequence = 4;
+        }
+        assert_ne!(
+            snapshot_meta_digest(&with_v2),
+            snapshot_meta_digest(&mutated)
+        );
+    }
+
+    #[test]
     fn publish_then_read_roundtrip() {
         let tmp = tempfile::tempdir().expect("tempdir");
         let rec = sample_record(RtrState::Intent);
