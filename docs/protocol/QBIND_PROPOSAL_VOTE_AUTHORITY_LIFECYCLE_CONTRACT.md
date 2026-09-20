@@ -833,3 +833,39 @@ evidence, and power-loss durability / durable anti-rollback remain
 NOT-established. Authority lifecycle posture is unchanged and
 C4/C5 stay open. Evidence:
 `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md` (Run 422 D7-D7 and D7-D8 sections).
+
+## Run 422 D7-D9 successor reference (signing-state continuity contract)
+
+Requirement (C) — signing / consensus-state continuity — is now elaborated by
+the single authoritative peer contract
+`docs/protocol/QBIND_PROPOSAL_VOTE_SIGNING_STATE_CONTINUITY_CONTRACT.md`
+(status `D7D9_SIGNING_STATE_CONTINUITY_CONTRACT=DEFINED-NOT-IMPLEMENTED`). This
+lifecycle contract remains the authority over requirements (A) activation and
+(B) current-authority freshness; the D7-D9 contract does not reopen (A)/(B) and a
+signing record alone establishes neither.
+
+Operative reconciliation (current implementation vs proposed requirement — the
+D7-D9 protocol is NOT relabelled as existing behavior):
+
+* **Current behavior (traced):** the outbound signing path
+  (`binary_consensus_loop.rs::forward_actions_to_facade`, L4101) runs
+  `admit_outbound_action` (L3852) → `sign_proposal_for_broadcast` /
+  `sign_vote_for_broadcast` (L3646/L3733) → `confirm_outbound_before_effect`
+  (L3913) → facade. Confirmation runs AFTER a completed signature and can only
+  suppress the network effect; it cannot un-sign. No signing decision is
+  persisted; `voted_in_view` / `proposed_in_view` latches are in-memory and lost
+  on restart.
+* **Current storage inventory (corrected):** `ConsensusStorage`
+  (`storage.rs` L142) exposes `put_current_epoch_synced` (L224) and
+  `flush_epoch_durable` (L242); the obsolete claim that it exposes no synced
+  operation is not repeated. Those epoch operations persist a coarse epoch value
+  only and do NOT persist any signing decision.
+* **Proposed requirement (D7-D9, not implemented):** a durable, fail-closed
+  reservation of the exact authorized decision committed BEFORE `signer.sign_*`
+  is invoked (durable-before-sign, INV-1), with the linearization point at the
+  acknowledged reservation. Durable anti-rollback anchor selection stays
+  UNRESOLVED and consensus-lock recovery stays an unmet prerequisite.
+
+Authority lifecycle posture is unchanged; C4/C5 stay open; no activation or
+readiness promotion. Evidence:
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md` (Run 422 D7-D9 section).

@@ -8119,3 +8119,117 @@ SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO
 No readiness promotion, authority activation, or Run 423 work. C4/C5 remain OPEN.
 Power-loss durability, signing-state continuity, durable anti-rollback, and
 production authority readiness remain separate and unestablished.
+
+## Run 422 D7-D9 — Durable Proposal/Vote Signing-State Continuity Contract (documentation only)
+
+Documentation-only. No Rust, test, dependency, storage key/schema, CLI flag,
+configuration, workflow, wire-format, signing-preimage, or activation change.
+Signing is not enabled. D7-D2 characterization and D7-D8 restore-completion
+evidence are reused as inputs, not re-derived or re-run.
+
+### Inspected revision
+
+* Branch (actual): `copilot/run-422-d7-d9`.
+* Starting HEAD (full SHA): `c9025f2f3db06c2a0f1ec5e69514c29bb1fce035`; worktree
+  clean before the pass.
+* Reviewed D7-D8 objects: `9979c1ef43ce14346b47411d228edcab4afe8e61` (accepted
+  final) and `1942c7a89c8871757d26bb2bc59a90573cc006e1` (test checkpoint) are
+  ABSENT from this shallow clone (`git cat-file -t` → could not get object info);
+  correspondence asserted against worktree content only, not ancestry.
+  `2aadc012693d3282146b49f16f19cd0a7aca5821` (release-build source) is PRESENT
+  (parent of HEAD).
+
+### Changed paths (documentation-only)
+
+* NEW `docs/protocol/QBIND_PROPOSAL_VOTE_SIGNING_STATE_CONTINUITY_CONTRACT.md` —
+  the single authoritative contract.
+* `docs/protocol/QBIND_PROPOSAL_VOTE_AUTHORITY_LIFECYCLE_CONTRACT.md` — concise
+  D7-D9 successor reference (requirement C pointer; ordering + storage-inventory
+  reconciliation).
+* `docs/protocol/QBIND_GENESIS_AUTHORITY_ENGINE_QC_INTEGRATION_AUDIT.md` —
+  concise successor reference to the continuity contract.
+* This evidence section.
+* `docs/whitepaper/contradiction.md` unchanged: no operative claim requires a
+  narrow reconciliation (the obsolete "no synced operation" claim was searched
+  for and is not present).
+
+### What the contract defines
+
+* Reuse table (existing mechanism → callers → property → limit → missing
+  requirement) and traced signing routes classified production-reachable /
+  conditionally-reachable / fixture-only. Route order confirmed against
+  `binary_consensus_loop.rs::forward_actions_to_facade` (L4101): admit (L3852) →
+  sign (L3646/L3733) → confirm (L3913, after signing) → facade.
+* Conflict rule DERIVED from HotStuff decision rules (position key = validator
+  identity + kind + view/round + committed height + network/genesis/authority-
+  epoch), not a generic "one signature per height"; binding fields identify the
+  exact authorized message; a new process / owner generation / PID / caller label
+  is NOT a fresh identity and cannot open a new namespace.
+* Bounded, versioned, checked-arithmetic, checksum-integrity record (checksum =
+  corruption detection only, not authentication or rollback protection) and a
+  five-state machine (NONE / RESERVED / SIGNING / SIGNED / REFUSED) with no
+  erase-on-failure transition.
+* Durable-before-sign invariant (INV-1): a reservation committed and its
+  durability barrier acknowledged BEFORE `signer.sign_*`; the linearization point
+  is the acknowledged reservation; exact retry compared by canonical decision,
+  not signature bytes; resend vs re-sign kept distinct.
+* Failure/recovery matrix (12 rows) covering pre-reservation failure, uncertain
+  write, crash before/during signing, confirmation/handoff failure, exact vs
+  conflicting retry, malformed records, ordinary restart, older-snapshot rollback,
+  whole-directory rollback, and same-key dual instances.
+* Crash-consistency (local synced journal) separated from rollback-resistance;
+  anti-rollback anchor requirements enumerated (outside rollback domain,
+  authentication, validator/network + signing-history binding, freshness/
+  monotonicity/exclusive use, ordering, availability). Epoch-only witness,
+  historical QC, source label, and checksum are each declared insufficient.
+
+### Decisions and unresolved dependencies (prominent)
+
+* Durable anti-rollback ANCHOR: EXPLICITLY UNRESOLVED. No repository mechanism
+  (Run 291 replay backend, D8 restore lock, synced epoch APIs) supplies an
+  authenticated, rollback-resistant, freshness-bearing signing-history anchor.
+  The unsatisfied activation gate is named; no unimplementable "authenticated
+  witness" is invented.
+* Consensus-lock recovery: unmet PREREQUISITE. Preventing conflicting signatures
+  does not restore the HotStuff lock across later views; a high-water mark alone
+  does not recover a lock; Timeout/NewView compatibility is an unmigrated
+  dependency.
+* One bounded successor: a non-authorizing, crash-consistent local signing-
+  reservation journal (source + tests only), extending `storage.rs` and a single
+  guarded signing entrypoint around `forward_actions_to_facade`; explicitly
+  excludes the anchor, cross-host/whole-copy rollback detection, lock-recovery
+  redesign, and enabling signing. Implementation is NOT begun.
+
+### Checks performed and literal security-tool outcomes
+
+* Path/symbol/caller verification against the `c9025f2` checkout (function line
+  numbers and ordering confirmed by direct source view).
+* State-transition and failure-matrix rows reviewed for contradictions; every
+  freshness/provenance comparison names an independent input or is marked
+  unresolved.
+* File-specific line endings preserved: the new contract and edited
+  `docs/protocol` / `docs/devnet` files use CRLF; no trailing whitespace added;
+  each edited file's no-trailing-newline EOF convention preserved;
+  `task/warning.txt` and unrelated files untouched.
+* No Cargo tests, Clippy, or release rebuild required or claimed for these
+  Markdown-only changes; D7-D8's bounded verdict is not reopened.
+* Secret scan: run over the changed documentation paths; outcome — no secrets
+  detected (Markdown protocol/evidence text only). A CodeQL scope skip is not a
+  security pass and none is claimed.
+
+### Scoped verdict and retained posture
+
+```
+D7D9_SIGNING_STATE_CONTINUITY_CONTRACT=DEFINED-NOT-IMPLEMENTED
+D7D8_RESTORE_COMPLETION_CONTAINMENT=CODE-AND-RELEASE-TEST-POSITIVE
+D7_STATUS=PARTIAL-CODE-TEST / PRODUCTION-LIFECYCLE-UNAVAILABLE
+DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED
+GENESIS_AUTHORITY_ACTIVATION=DISABLED
+PRODUCTION_WIRE_CHAIN_ID_BEHAVIOR=UNCHANGED
+CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED
+SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO
+```
+
+Design completion does not establish operational signing-state continuity. C4/C5
+remain OPEN. No activation, readiness promotion, or Run 423 work. The successor
+implementation is not begun.
