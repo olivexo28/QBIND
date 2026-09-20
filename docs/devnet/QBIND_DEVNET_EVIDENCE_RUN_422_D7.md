@@ -8827,4 +8827,110 @@ CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED
 SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO
 ```
 
+## Run 422 D7-D10 — B/C controlled-schedule & recovery-handoff completion (this pass)
+
+Test/doc-only continuation of the reviewed checkpoint `d9e625c` / final `6526b78`
+(historical objects absent from this shallow clone; source correspondence inspected
+directly). Branch `copilot/copilotcopilotcopilotcopilotrun-422-d7-d10`; starting SHA
+`63c547b`; implementation checkpoint `b618b4e`; final SHA is this evidence commit.
+
+### Authorized changes (production behavior unchanged)
+
+* `crates/qbind-node/src/binary_consensus_loop.rs` — the `run422_d7d10` test module
+  and its test-local helpers only.
+* `docs/protocol/QBIND_PROPOSAL_VOTE_SIGNING_STATE_CONTINUITY_CONTRACT.md` — §9.3
+  attach/initialization overclaim replaced; §9.5 contention/recovery/runner wording
+  reconciled.
+* `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_422_D7.md` — this subsection.
+
+No production accessor, error variant, flag, storage API, dependency, or runner was
+added; `signing_reservation_journal.rs`, `storage.rs`, and the real-RocksDB
+integration target are reused unmodified.
+
+### Correction A — explicit release vs timeout (gate)
+
+The test-local `SignGate::wait_release` now returns an explicit `GateOutcome`
+(`Released` / `TimedOut` / `Cancelled`). Only an explicit `Released` lets
+`PausingSigner::sign_proposal` invoke the underlying `LocalKeySigner`; a timeout or
+a cleanup cancellation returns `SignError::HsmError(..)` (existing error mechanism)
+**without** invoking it. Wrapper entry (`proposal_entries`) and underlying-call
+(`proposal_calls`) counts are separate, so a counter incremented before the pause
+cannot stand in for a real signature. **Bounded waits:** exactly `wait_entered` and
+`wait_release` (deadline-bounded condvar waits); the `thread::scope` join is **not**
+a deadline — a test-local `GateReleaseGuard` **cancels** (never releases) the gate on
+drop so a paused worker returns on a failing/panicking path. Deadlines are
+configurable; the timeout control uses an immediate `Duration::ZERO` (no 30 s wait).
+
+Direct controls:
+* `d10_gate_release_permits_underlying_sign` — explicit release ⇒ 1 underlying
+  signature (D6-verified), 1 handoff, `timed_out()==false`.
+* `d10_gate_timeout_prevents_underlying_sign` — immediate timeout ⇒ 1 wrapper entry,
+  **0** underlying calls, `signing_failure=1`, 0 delivery, reservation preserved
+  (potentially-signed on modelled restart), `timed_out()==true`.
+
+Both contention schedules (`d10_concurrent_same_binding…`, `…_different_binding…`)
+now assert entries=1 / underlying=0 during the outstanding window, exactly one
+underlying winner signature and handoff after explicit release, `timed_out()==false`,
+zero contender signer calls/handoffs (same ⇒ `PotentiallySigned`, different ⇒
+`Conflict`), and the separate post-publication exact-retry resend (0 extra signs).
+
+### Correction B — recovered-result recovery-handoff through the guarded handler
+
+`d10_uncertain_result_write_is_not_reported_durably_published` keeps its in-process
+assertions and is extended through a **fresh ownership domain** (`D10Store::reopen`)
+over the surviving `Signed` bytes, driven through the actual guarded handler with the
+real signer and recording facade:
+* Recovery durability barrier **fails** (`write_budget=0`) ⇒ `journal_error_total=1`,
+  0 delivery, signer count unchanged, exact record preserved; a conflicting binding
+  at the same position is still refused with no signature.
+* Recovery barrier **uncertain** (store-then-error) ⇒ still suppressed, record preserved.
+* Recovery barrier **succeeds** ⇒ exact retained resend delivered, D6-verified and
+  byte-identical to the signature decoded from the journal record; **no** additional
+  signer invocation. The single signer counter stays **one** across initial signing,
+  both failed recovery attempts, and the successful resend.
+
+Labelled as actual guarded-handler + real-signer execution over **model** storage
+whose fresh domain represents lost process-local knowledge — **not** a
+process-death / power-loss / release-binary / production-authorization claim. The
+historical real-RocksDB close/reopen and the still-unrepaired (unbounded `.status()`)
+child-process runner remain separately attributed to their own tests/revision.
+
+### Evidence boundaries
+
+* **Journal state-machine (opaque results):** `signing_reservation_journal` unit tests
+  (prior revision, unchanged).
+* **Real-signer guarded-handler (facade observations):** the `run422_d7d10` module,
+  including the extended recovery-handoff test (this pass).
+* **Historical real-RocksDB close/reopen + child-process runner:** integration target
+  (prior revision, unchanged; runner is unrepaired/unbounded, OPEN under F).
+
+### Commands, counts, outcomes (default features)
+
+* `cargo test -p qbind-node --lib --no-run` — OK (only 2 pre-existing `dead_code`
+  warnings, unrelated).
+* `cargo test -p qbind-node --lib run422_d7d10` — **24 passed**, 0 failed (incl. the
+  two new gate controls and the extended recovery test).
+* `cargo test -p qbind-node --lib run422_d7b` — **83 passed**, 0 failed
+  (D7-B outbound/cached-reemission regression superset; overlaps the focused D10 set,
+  reported separately).
+* Changed-region whitespace clean; files remain **CRLF with no final newline**
+  (no repository-wide reformat).
+
+### Security-tool limitations (literal)
+
+* This pass is **test/doc-only**; CodeQL declared `codeql.isTrivial=true`
+  (test-and-doc-only changes). A CodeQL scope skip is **not** a completed scan.
+* An unavailable or errored reviewer is **not** a completed independent review.
+* Tool limitations are recorded separately from the executed test results above.
+
+### Scoped disposition
+
+Closes only the remaining **B/C** evidence corrections. **Still OPEN:** A
+(missing-journal refusal across all signing routes), D (post-storage
+original-owner/ticket revalidation), E (established-journal initialization and
+persistent capacity accounting, incl. recovered-record acknowledgement-cache
+accounting), and remaining F (engine-progress + bounded/classified child-process
+runner). No activation, readiness promotion, D11, or Run 423; no PR, branch rename,
+force-push, rebase, or history rewrite.
+
 C4/C5 remain OPEN.

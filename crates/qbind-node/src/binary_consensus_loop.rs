@@ -21286,7 +21286,16 @@ mod tests {
 
                 struct SignerCounters {
                     vote_calls: Arc<AtomicU64>,
+                    /// Underlying (real `LocalKeySigner`) proposal signatures that
+                    /// ACTUALLY ran. For the pausing signer this is incremented ONLY
+                    /// around the underlying call, so a paused-but-not-yet-signed
+                    /// worker reads zero here (entry alone never proves signing).
                     proposal_calls: Arc<AtomicU64>,
+                    /// Entries into the test signer wrapper (incremented before the
+                    /// pause). Distinct from `proposal_calls`: a counter incremented
+                    /// before the pause cannot, by itself, prove the underlying
+                    /// signer ran. Always zero for `RecordingSigner`.
+                    proposal_entries: Arc<AtomicU64>,
                 }
 
                 /// A `ProposalVoteAuthority` over the D6 control domain whose
@@ -21314,6 +21323,9 @@ mod tests {
                         SignerCounters {
                             vote_calls,
                             proposal_calls,
+                            // `RecordingSigner` has no wrapper-entry pause, so this
+                            // stays zero; present only for a uniform counter type.
+                            proposal_entries: Arc::new(AtomicU64::new(0)),
                         },
                     )
                 }
@@ -22684,30 +22696,198 @@ mod tests {
                             s2.outbound_proposal_journal_potentially_signed_total, 1
                         );
                         assert!(f2.proposals.lock().unwrap().is_empty());
+
+                        // ---- Correction B: recovery-barrier handoff through the
+                        //      actual guarded handler over a FRESH ownership domain.
+                        //
+                        // LABELLING: this is actual guarded-handler + real-signer
+                        // execution over MODEL storage whose FRESH ownership domain
+                        // represents lost process-local knowledge (the surviving
+                        // durable bytes, empty live-operation table). It is NOT a
+                        // process-death / power-loss / release-binary / production-
+                        // authorization claim — the real-RocksDB close/reopen and
+                        // child-process evidence lives in the integration target and
+                        // its own revision.
+                        //
+                        // The signer counters below are NOT reset: the SAME `c` spans
+                        // the initial signature, every failed recovery attempt, and
+                        // the successful retained resend, so "signer count stays one"
+                        // is a single-counter fact across the whole sequence.
+
+                        // Capture the exact retained result from the surviving bytes
+                        // (shared map) via the existing record decoder, for the later
+                        // signature comparison and record-preservation assertions.
+                        let signed_bytes_before = store
+                            .map
+                            .read()
+                            .unwrap()
+                            .get(&key)
+                            .cloned()
+                            .expect("Signed bytes survive the uncertain write");
+                        let retained_sig = {
+                            let rec = crate::signing_reservation_journal::SigningDecisionRecord::decode(
+                                &signed_bytes_before,
+                            )
+                            .expect("surviving record decodes");
+                            rec.retained_signature
+                                .clone()
+                                .expect("Signed record carries a retained signature")
+                        };
+
+                        // (6) Fresh backend ownership domain over the SAME surviving
+                        //     durable bytes. Stop using the original journal `j`.
+                        let store_r = store.reopen();
+                        let jr = journal(store_r.clone());
+
+                        // (7)/(8)/(9) Configure the recovery durability barrier to
+                        //     FAIL, then deliver the same action through the actual
+                        //     guarded handler: the recovered `Signed` record's barrier
+                        //     write fails, so delivery is suppressed with the journal
+                        //     error counter, and the signer count is unchanged.
+                        store_r.set_write_budget(0);
+                        let (sr1, fr1) = drive_j(&snap, &jr, proposal_at(0, 1, [7u8; 32]));
+                        assert_eq!(
+                            c.proposal_calls.load(SeqCst),
+                            1,
+                            "failed recovery barrier performs NO additional signature"
+                        );
+                        assert_eq!(sr1.outbound_proposal_journal_error_total, 1);
+                        assert_eq!(sr1.outbound_proposal_journal_retained_resend_total, 0);
+                        assert_eq!(sr1.outbound_proposals_sent, 0);
+                        assert!(
+                            fr1.proposals.lock().unwrap().is_empty(),
+                            "no delivery on a failed recovery barrier"
+                        );
+
+                        // The exact durable record is preserved across the failed
+                        // attempt, and a conflicting binding at the same position is
+                        // still refused (no signer call, no delivery).
+                        assert_eq!(
+                            store.map.read().unwrap().get(&key).cloned(),
+                            Some(signed_bytes_before.clone()),
+                            "the exact record is preserved across a failed recovery attempt"
+                        );
+                        let (sc, fc) = drive_j(&snap, &jr, proposal_at(0, 1, [9u8; 32]));
+                        assert_eq!(sc.outbound_proposal_journal_conflict_total, 1);
+                        assert_eq!(
+                            c.proposal_calls.load(SeqCst),
+                            1,
+                            "a conflicting binding never signs during recovery"
+                        );
+                        assert!(fc.proposals.lock().unwrap().is_empty());
+
+                        // (10) Repeat with an UNCERTAIN store-then-error recovery
+                        //      barrier write: the barrier bytes become readable but
+                        //      the durability op errors — delivery is still suppressed.
+                        store_r.set_write_budget(0);
+                        store_r.set_store_then_error(true);
+                        let (sr2, fr2) = drive_j(&snap, &jr, proposal_at(0, 1, [7u8; 32]));
+                        assert_eq!(
+                            c.proposal_calls.load(SeqCst),
+                            1,
+                            "uncertain recovery barrier performs NO additional signature"
+                        );
+                        assert_eq!(sr2.outbound_proposal_journal_error_total, 1);
+                        assert_eq!(sr2.outbound_proposals_sent, 0);
+                        assert!(
+                            fr2.proposals.lock().unwrap().is_empty(),
+                            "no delivery on an uncertain recovery barrier"
+                        );
+                        assert_eq!(
+                            store.map.read().unwrap().get(&key).cloned(),
+                            Some(signed_bytes_before.clone()),
+                            "the exact record is preserved across an uncertain recovery attempt"
+                        );
+
+                        // (11)/(12) Permit the recovery barrier to SUCCEED, deliver the
+                        //      same action again, and assert exact retained-result
+                        //      delivery with NO additional signer invocation.
+                        store_r.set_store_then_error(false);
+                        store_r.set_write_budget(i64::MAX);
+                        let (sr3, fr3) = drive_j(&snap, &jr, proposal_at(0, 1, [7u8; 32]));
+                        assert_eq!(
+                            c.proposal_calls.load(SeqCst),
+                            1,
+                            "successful recovery resend reuses the retained signature; \
+                             signer count stays one across the entire sequence"
+                        );
+                        assert_eq!(sr3.outbound_proposal_journal_retained_resend_total, 1);
+                        assert_eq!(sr3.outbound_proposals_sent, 1);
+                        let delivered = fr3.proposals.lock().unwrap();
+                        assert_eq!(delivered.len(), 1);
+
+                        // Validate the delivered retained signature via the existing
+                        // D6 verification API under the original fixture's identity /
+                        // domain, and confirm it is byte-identical to the signature
+                        // retained in the journal record (existing decoder).
+                        assert!(qbind_consensus::verify_proposal_msg_with_domain(
+                            &delivered[0],
+                            ValidatorId(0),
+                            fixture.validators.as_ref(),
+                            fixture.kp.as_ref(),
+                            fixture.br.as_ref(),
+                            &d6_control_domain(),
+                        )
+                        .is_ok());
+                        assert_eq!(
+                            delivered[0].signature, retained_sig,
+                            "delivered signature equals the retained journal signature"
+                        );
                     }
 
                     // ---- A(concurrent). Deterministic contested reservation ----
+
+                    /// The explicit outcome of a bounded `wait_release`: the paused
+                    /// worker was either explicitly released (the only outcome that
+                    /// authorizes the underlying signer), timed out (the deadline
+                    /// elapsed with no release), or cancelled by cleanup (a
+                    /// failed/panicking schedule unblocking the worker). A timeout
+                    /// and a cancellation are BOTH non-success and both refuse the
+                    /// underlying signature.
+                    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+                    enum GateOutcome {
+                        Released,
+                        TimedOut,
+                        Cancelled,
+                    }
+
+                    /// The release channel's tri-state: pending until either an
+                    /// explicit `release` or a cleanup `cancel` occurs.
+                    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+                    enum ReleaseSignal {
+                        Pending,
+                        Released,
+                        Cancelled,
+                    }
 
                     /// A bounded, two-phase gate for the deterministic contention
                     /// schedule. `wait_entered` blocks (with a deadline) until the
                     /// paused worker reaches the signer; `wait_release` blocks the
                     /// worker inside the signer (with a deadline) until the test
-                    /// releases it. Neither wait can block unbounded — every wait
-                    /// returns once its deadline elapses, so a failing test path
-                    /// can never deadlock the worker or the harness.
+                    /// explicitly releases OR cancels it. These two condvar waits are
+                    /// the ONLY bounded coordination points — each returns once its
+                    /// deadline elapses, so a failing path cannot deadlock the worker.
+                    /// (The later `thread::scope`/`join` is NOT itself a deadline: it
+                    /// is the cleanup guard's `cancel` that guarantees a paused worker
+                    /// returns promptly so the unconditional join can complete.)
                     struct SignGate {
                         entered: std::sync::Mutex<bool>,
                         entered_cv: std::sync::Condvar,
-                        release: std::sync::Mutex<bool>,
+                        release: std::sync::Mutex<ReleaseSignal>,
                         release_cv: std::sync::Condvar,
+                        /// Set only when a `wait_release` actually elapsed its
+                        /// deadline. A successful schedule asserts this stayed false;
+                        /// the timeout control asserts it became true.
+                        timed_out: AtomicBool,
                     }
                     impl SignGate {
                         fn new() -> Arc<Self> {
                             Arc::new(SignGate {
                                 entered: std::sync::Mutex::new(false),
                                 entered_cv: std::sync::Condvar::new(),
-                                release: std::sync::Mutex::new(false),
+                                release: std::sync::Mutex::new(ReleaseSignal::Pending),
                                 release_cv: std::sync::Condvar::new(),
+                                timed_out: AtomicBool::new(false),
                             })
                         }
                         fn mark_entered(&self) {
@@ -22736,26 +22916,82 @@ mod tests {
                             }
                             true
                         }
+                        /// Explicit successful release: the ONLY signal that permits
+                        /// the paused signer to invoke the underlying `LocalKeySigner`.
                         fn release(&self) {
-                            *self.release.lock().unwrap() = true;
+                            *self.release.lock().unwrap() = ReleaseSignal::Released;
                             self.release_cv.notify_all();
                         }
-                        /// Bounded wait inside the signer until released. Returns
-                        /// once released OR once `deadline` elapses, so a worker can
-                        /// never hang indefinitely on a failed schedule.
-                        fn wait_release(&self, deadline: std::time::Duration) {
+                        /// Cleanup cancellation: unblock a paused worker on a
+                        /// failed/panicking schedule WITHOUT authorizing the
+                        /// underlying signature. Never a success signal.
+                        fn cancel(&self) {
+                            let mut g = self.release.lock().unwrap();
+                            // A prior explicit release wins — cleanup never downgrades
+                            // an already-granted successful release.
+                            if *g == ReleaseSignal::Pending {
+                                *g = ReleaseSignal::Cancelled;
+                            }
+                            self.release_cv.notify_all();
+                        }
+                        /// Whether any `wait_release` actually elapsed its deadline.
+                        fn timed_out(&self) -> bool {
+                            self.timed_out.load(SeqCst)
+                        }
+                        /// Bounded wait inside the signer. Returns the explicit
+                        /// outcome: `Released` (explicit release), `Cancelled`
+                        /// (cleanup), or `TimedOut` once `deadline` elapses — so a
+                        /// worker can never hang indefinitely on a failed schedule.
+                        fn wait_release(&self, deadline: std::time::Duration) -> GateOutcome {
                             let start = std::time::Instant::now();
                             let mut g = self.release.lock().unwrap();
-                            while !*g {
+                            loop {
+                                match *g {
+                                    ReleaseSignal::Released => return GateOutcome::Released,
+                                    ReleaseSignal::Cancelled => return GateOutcome::Cancelled,
+                                    ReleaseSignal::Pending => {}
+                                }
                                 let elapsed = start.elapsed();
                                 if elapsed >= deadline {
-                                    break;
+                                    self.timed_out.store(true, SeqCst);
+                                    return GateOutcome::TimedOut;
                                 }
                                 let (ng, _to) = self
                                     .release_cv
                                     .wait_timeout(g, deadline - elapsed)
                                     .unwrap();
                                 g = ng;
+                            }
+                        }
+                    }
+
+                    /// A test-local cleanup guard: unless an explicit successful
+                    /// release is recorded, it `cancel`s the gate on drop so a paused
+                    /// worker returns promptly if the schedule fails or panics. A
+                    /// cancellation is NEVER counted as proof that the intended
+                    /// successful schedule occurred (the signer refuses it).
+                    struct GateReleaseGuard {
+                        gate: Arc<SignGate>,
+                        released: bool,
+                    }
+                    impl GateReleaseGuard {
+                        fn new(gate: Arc<SignGate>) -> Self {
+                            GateReleaseGuard {
+                                gate,
+                                released: false,
+                            }
+                        }
+                        /// Perform the explicit successful release and mark it, so the
+                        /// drop cleanup becomes a no-op.
+                        fn release(mut self) {
+                            self.gate.release();
+                            self.released = true;
+                        }
+                    }
+                    impl Drop for GateReleaseGuard {
+                        fn drop(&mut self) {
+                            if !self.released {
+                                self.gate.cancel();
                             }
                         }
                     }
@@ -22774,12 +23010,22 @@ mod tests {
                     /// completed and NO ownership-domain mutex is held while it
                     /// waits, so a contender can run against a definitely-
                     /// outstanding reservation.
+                    ///
+                    /// Correction A: entering the wrapper (`proposal_entries`) is
+                    /// recorded BEFORE the pause; the underlying `LocalKeySigner`
+                    /// call (`proposal_calls`) is recorded ONLY on an explicit
+                    /// release. A timeout or a cleanup cancellation returns a signer
+                    /// error via the existing `SignError` mechanism WITHOUT invoking
+                    /// the underlying signer, so no timeout/cleanup can silently
+                    /// authorize a real signature or a passing handoff.
                     struct PausingSigner {
                         inner: LocalKeySigner,
                         proposal_calls: Arc<AtomicU64>,
+                        proposal_entries: Arc<AtomicU64>,
                         vote_calls: Arc<AtomicU64>,
                         gate: Arc<SignGate>,
                         armed: AtomicBool,
+                        release_deadline: std::time::Duration,
                     }
                     impl ValidatorSigner for PausingSigner {
                         fn validator_id(&self) -> &ValidatorId {
@@ -22793,11 +23039,32 @@ mod tests {
                             p: &[u8],
                         ) -> Result<Vec<u8>, crate::validator_signer::SignError>
                         {
-                            self.proposal_calls.fetch_add(1, SeqCst);
+                            // Entry into the wrapper — NOT proof the underlying
+                            // signer ran.
+                            self.proposal_entries.fetch_add(1, SeqCst);
                             if self.armed.swap(false, SeqCst) {
                                 self.gate.mark_entered();
-                                self.gate.wait_release(GATE_RELEASE_DEADLINE);
+                                match self.gate.wait_release(self.release_deadline) {
+                                    GateOutcome::Released => { /* fall through to sign */ }
+                                    GateOutcome::TimedOut => {
+                                        return Err(crate::validator_signer::SignError::HsmError(
+                                            "pausing gate timed out: underlying signer NOT \
+                                             invoked"
+                                                .to_string(),
+                                        ));
+                                    }
+                                    GateOutcome::Cancelled => {
+                                        return Err(crate::validator_signer::SignError::HsmError(
+                                            "pausing gate cancelled by cleanup: underlying \
+                                             signer NOT invoked"
+                                                .to_string(),
+                                        ));
+                                    }
+                                }
                             }
+                            // Only an explicit release (or an unarmed pass) reaches
+                            // the real signer.
+                            self.proposal_calls.fetch_add(1, SeqCst);
                             self.inner.sign_proposal(p)
                         }
                         fn sign_vote(
@@ -22832,21 +23099,28 @@ mod tests {
                     }
 
                     /// A `ProposalVoteAuthority` whose validator-0 signer pauses on
-                    /// its first proposal signature via `gate`.
+                    /// its first proposal signature via `gate`. `release_deadline`
+                    /// bounds the in-signer pause: contention schedules pass the
+                    /// generous `GATE_RELEASE_DEADLINE`; the timeout control passes
+                    /// `Duration::ZERO` for an immediate (no-wait) timeout.
                     fn pausing_pv(
                         fixture: &Fixture,
                         gate: Arc<SignGate>,
+                        release_deadline: std::time::Duration,
                     ) -> (ProposalVoteAuthority, SignerCounters) {
                         let vote_calls = Arc::new(AtomicU64::new(0));
                         let proposal_calls = Arc::new(AtomicU64::new(0));
+                        let proposal_entries = Arc::new(AtomicU64::new(0));
                         let sk = fixture.sk_objs.get(&ValidatorId(0)).expect("sk").clone();
                         let inner = LocalKeySigner::new(ValidatorId(0), TEST_SUITE_U16, sk);
                         let signer: Arc<dyn ValidatorSigner> = Arc::new(PausingSigner {
                             inner,
                             proposal_calls: proposal_calls.clone(),
+                            proposal_entries: proposal_entries.clone(),
                             vote_calls: vote_calls.clone(),
                             gate,
                             armed: AtomicBool::new(true),
+                            release_deadline,
                         });
                         let pv = ProposalVoteAuthority {
                             validators: fixture.validators.clone(),
@@ -22861,6 +23135,7 @@ mod tests {
                             SignerCounters {
                                 vote_calls,
                                 proposal_calls,
+                                proposal_entries,
                             },
                         )
                     }
@@ -22869,7 +23144,7 @@ mod tests {
                     fn d10_concurrent_same_binding_at_most_one_live_sign() {
                         let fixture = make_fixture(4);
                         let gate = SignGate::new();
-                        let (pv, c) = pausing_pv(&fixture, gate.clone());
+                        let (pv, c) = pausing_pv(&fixture, gate.clone(), GATE_RELEASE_DEADLINE);
                         let snap = snapshot_matching(&pv);
                         let store = D10Store::new();
 
@@ -22878,25 +23153,39 @@ mod tests {
                         // obtains its continuation, then pauses inside the signer
                         // (holding NO ownership-domain mutex). The contender runs
                         // while that reservation is DEFINITELY outstanding.
-                        let (entered, winner_out, contender_out, signer_during_window) =
+                        let (entered, winner_out, contender_out, entries_window, underlying_window) =
                             std::thread::scope(|scope| {
+                                // Cleanup guard: if any assertion below panics before
+                                // the explicit release, the paused winner is cancelled
+                                // (NOT released) so the unconditional join can complete.
+                                let guard = GateReleaseGuard::new(gate.clone());
                                 let winner = scope.spawn(|| {
                                     let j = journal(store.clone());
                                     drive_j(&snap, &j, proposal_at(0, 1, [5u8; 32]))
                                 });
                                 let entered = gate.wait_entered(GATE_ENTER_DEADLINE);
-                                let (contender_out, signer_during_window) = if entered {
+                                let (contender_out, entries_window, underlying_window) = if entered {
                                     let jb = journal(store.clone());
                                     let out = drive_j(&snap, &jb, proposal_at(0, 1, [5u8; 32]));
-                                    (Some(out), c.proposal_calls.load(SeqCst))
+                                    // Snapshot the counters WHILE the winner is still
+                                    // paused and the contender has completed.
+                                    (
+                                        Some(out),
+                                        c.proposal_entries.load(SeqCst),
+                                        c.proposal_calls.load(SeqCst),
+                                    )
                                 } else {
-                                    (None, c.proposal_calls.load(SeqCst))
+                                    (
+                                        None,
+                                        c.proposal_entries.load(SeqCst),
+                                        c.proposal_calls.load(SeqCst),
+                                    )
                                 };
-                                // ALWAYS release the paused winner before joining so a
-                                // failed schedule cannot deadlock.
-                                gate.release();
+                                // Explicit SUCCESSFUL release (not cleanup): the winner
+                                // now performs its one real underlying signature.
+                                guard.release();
                                 let winner_out = winner.join().unwrap();
-                                (entered, winner_out, contender_out, signer_during_window)
+                                (entered, winner_out, contender_out, entries_window, underlying_window)
                             });
 
                         assert!(
@@ -22905,15 +23194,26 @@ mod tests {
                         );
                         let contender_out = contender_out.expect("contender ran");
 
-                        // Exactly ONE signer invocation during the outstanding-
-                        // reservation window (the winner's), and zero contender
-                        // signer invocations.
+                        // Exactly ONE worker (the winner) entered the signer wrapper,
+                        // and — crucially — the underlying signer had NOT yet run while
+                        // it was paused: a wrapper entry alone does not prove signing.
                         assert_eq!(
-                            signer_during_window, 1,
-                            "only the winner invoked the signer during the outstanding window"
+                            entries_window, 1,
+                            "only the winner reached the signer wrapper during the window"
                         );
-                        // No additional signer call after release: exactly one total.
+                        assert_eq!(
+                            underlying_window, 0,
+                            "the paused winner had NOT yet invoked the underlying signer, and the \
+                             contender invoked it zero times during the outstanding window"
+                        );
+                        // After the explicit release: exactly one real underlying
+                        // signature total (the winner's), reached via release — never
+                        // via a timeout.
                         assert_eq!(c.proposal_calls.load(SeqCst), 1);
+                        assert!(
+                            !gate.timed_out(),
+                            "the successful schedule established that no gate timeout occurred"
+                        );
 
                         // The contender observed the outstanding same-binding
                         // reservation ⇒ potentially-signed: exactly zero fresh
@@ -22962,7 +23262,7 @@ mod tests {
                     fn d10_concurrent_different_binding_at_most_one_live_sign() {
                         let fixture = make_fixture(4);
                         let gate = SignGate::new();
-                        let (pv, c) = pausing_pv(&fixture, gate.clone());
+                        let (pv, c) = pausing_pv(&fixture, gate.clone(), GATE_RELEASE_DEADLINE);
                         let snap = snapshot_matching(&pv);
                         let store = D10Store::new();
 
@@ -22970,23 +23270,32 @@ mod tests {
                         // pauses in the signer; the contender runs against the
                         // outstanding reservation and observes a CONFLICT for the
                         // different binding at the same position.
-                        let (entered, winner_out, contender_out, signer_during_window) =
+                        let (entered, winner_out, contender_out, entries_window, underlying_window) =
                             std::thread::scope(|scope| {
+                                let guard = GateReleaseGuard::new(gate.clone());
                                 let winner = scope.spawn(|| {
                                     let j = journal(store.clone());
                                     drive_j(&snap, &j, proposal_at(0, 1, [1u8; 32]))
                                 });
                                 let entered = gate.wait_entered(GATE_ENTER_DEADLINE);
-                                let (contender_out, signer_during_window) = if entered {
+                                let (contender_out, entries_window, underlying_window) = if entered {
                                     let jb = journal(store.clone());
                                     let out = drive_j(&snap, &jb, proposal_at(0, 1, [2u8; 32]));
-                                    (Some(out), c.proposal_calls.load(SeqCst))
+                                    (
+                                        Some(out),
+                                        c.proposal_entries.load(SeqCst),
+                                        c.proposal_calls.load(SeqCst),
+                                    )
                                 } else {
-                                    (None, c.proposal_calls.load(SeqCst))
+                                    (
+                                        None,
+                                        c.proposal_entries.load(SeqCst),
+                                        c.proposal_calls.load(SeqCst),
+                                    )
                                 };
-                                gate.release();
+                                guard.release();
                                 let winner_out = winner.join().unwrap();
-                                (entered, winner_out, contender_out, signer_during_window)
+                                (entered, winner_out, contender_out, entries_window, underlying_window)
                             });
 
                         assert!(
@@ -22996,10 +23305,19 @@ mod tests {
                         let contender_out = contender_out.expect("contender ran");
 
                         assert_eq!(
-                            signer_during_window, 1,
-                            "only the winner invoked the signer during the outstanding window"
+                            entries_window, 1,
+                            "only the winner reached the signer wrapper during the window"
+                        );
+                        assert_eq!(
+                            underlying_window, 0,
+                            "the paused winner had NOT yet invoked the underlying signer, and the \
+                             contender invoked it zero times during the outstanding window"
                         );
                         assert_eq!(c.proposal_calls.load(SeqCst), 1);
+                        assert!(
+                            !gate.timed_out(),
+                            "the successful schedule established that no gate timeout occurred"
+                        );
 
                         // The contender observed the outstanding DIFFERENT-binding
                         // reservation ⇒ conflict: zero fresh continuations, zero
@@ -23015,6 +23333,119 @@ mod tests {
                         assert_eq!(winner_out.0.outbound_proposal_journal_reserved_total, 1);
                         assert_eq!(winner_out.0.outbound_proposal_signing_success, 1);
                         assert_eq!(winner_out.1.proposals.lock().unwrap().len(), 1);
+                    }
+
+                    /// Correction A direct control — an EXPLICIT release permits the
+                    /// paused signer to invoke the underlying `LocalKeySigner` exactly
+                    /// once, producing a real, D6-verifiable signature and a single
+                    /// handoff. No timeout is involved.
+                    #[test]
+                    fn d10_gate_release_permits_underlying_sign() {
+                        let fixture = make_fixture(4);
+                        let gate = SignGate::new();
+                        let (pv, c) = pausing_pv(&fixture, gate.clone(), GATE_RELEASE_DEADLINE);
+                        let snap = snapshot_matching(&pv);
+                        let store = D10Store::new();
+
+                        let (entered, out, entries_window, underlying_window) =
+                            std::thread::scope(|scope| {
+                                let guard = GateReleaseGuard::new(gate.clone());
+                                let worker = scope.spawn(|| {
+                                    let j = journal(store.clone());
+                                    drive_j(&snap, &j, proposal_at(0, 1, [6u8; 32]))
+                                });
+                                let entered = gate.wait_entered(GATE_ENTER_DEADLINE);
+                                // Paused inside the signer: reservation done, underlying
+                                // signature NOT yet performed.
+                                let entries_window = c.proposal_entries.load(SeqCst);
+                                let underlying_window = c.proposal_calls.load(SeqCst);
+                                guard.release();
+                                let out = worker.join().unwrap();
+                                (entered, out, entries_window, underlying_window)
+                            });
+
+                        assert!(entered, "worker reached the signer within the deadline");
+                        assert_eq!(entries_window, 1, "worker entered the wrapper");
+                        assert_eq!(
+                            underlying_window, 0,
+                            "underlying signer had NOT run while paused (entry ≠ signature)"
+                        );
+                        // After explicit release: exactly one real underlying signature.
+                        assert_eq!(c.proposal_calls.load(SeqCst), 1);
+                        assert!(!gate.timed_out(), "no timeout on an explicit release");
+                        let (stats, facade) = out;
+                        assert_eq!(stats.outbound_proposal_journal_reserved_total, 1);
+                        assert_eq!(stats.outbound_proposal_signing_success, 1);
+                        let proposals = facade.proposals.lock().unwrap();
+                        assert_eq!(proposals.len(), 1);
+                        assert!(qbind_consensus::verify_proposal_msg_with_domain(
+                            &proposals[0],
+                            ValidatorId(0),
+                            fixture.validators.as_ref(),
+                            fixture.kp.as_ref(),
+                            fixture.br.as_ref(),
+                            &d6_control_domain(),
+                        )
+                        .is_ok());
+                    }
+
+                    /// Correction A direct control — a TIMEOUT prevents the underlying
+                    /// call and cannot support a passing handoff. An immediate
+                    /// (`Duration::ZERO`) release deadline makes the pause time out
+                    /// with NO 30-second wait: the wrapper is entered, the underlying
+                    /// `LocalKeySigner` is NEVER invoked, the guarded boundary reports
+                    /// a signing failure, and nothing is delivered. The durable
+                    /// RESERVED obligation is preserved (no re-sign on a modelled
+                    /// restart).
+                    #[test]
+                    fn d10_gate_timeout_prevents_underlying_sign() {
+                        let fixture = make_fixture(4);
+                        let gate = SignGate::new();
+                        // Immediate timeout: no explicit release will ever arrive.
+                        let (pv, c) = pausing_pv(&fixture, gate.clone(), std::time::Duration::ZERO);
+                        let snap = snapshot_matching(&pv);
+                        let store = D10Store::new();
+                        let j = journal(store.clone());
+
+                        // Runs on the main thread: the ZERO deadline returns TimedOut
+                        // immediately without blocking.
+                        let (s, f) = drive_j(&snap, &j, proposal_at(0, 1, [7u8; 32]));
+
+                        // The wrapper was entered but the underlying signer NEVER ran.
+                        assert_eq!(c.proposal_entries.load(SeqCst), 1, "wrapper entered once");
+                        assert_eq!(
+                            c.proposal_calls.load(SeqCst),
+                            0,
+                            "timeout prevents the underlying signature entirely"
+                        );
+                        assert!(gate.timed_out(), "the gate recorded a genuine timeout");
+                        // The reservation was taken, then the signer failed: no
+                        // success, no handoff — a timeout cannot authorize delivery.
+                        assert_eq!(s.outbound_proposal_journal_reserved_total, 1);
+                        assert_eq!(s.outbound_proposal_signing_failure, 1);
+                        assert_eq!(s.outbound_proposal_signing_success, 0);
+                        assert_eq!(s.outbound_proposals_sent, 0);
+                        assert!(
+                            f.proposals.lock().unwrap().is_empty(),
+                            "no handoff can follow a gate timeout"
+                        );
+
+                        // The durable RESERVED obligation survives a modelled restart
+                        // and is treated as potentially-signed — never re-signed.
+                        let store2 = store.reopen();
+                        let j2 = journal(store2.clone());
+                        // A normal (non-pausing) recording signer would re-sign a truly
+                        // unused position; here the recovered RESERVED record refuses
+                        // re-signing regardless of signer, so we reuse the same pausing
+                        // authority (now disarmed) — no wrapper pause occurs.
+                        let (s2, f2) = drive_j(&snap, &j2, proposal_at(0, 1, [7u8; 32]));
+                        assert_eq!(
+                            c.proposal_calls.load(SeqCst),
+                            0,
+                            "recovered RESERVED never re-signs after a timeout"
+                        );
+                        assert_eq!(s2.outbound_proposal_journal_potentially_signed_total, 1);
+                        assert!(f2.proposals.lock().unwrap().is_empty());
                     }
 
                     // ---- G. Cached re-emission caller family ----
