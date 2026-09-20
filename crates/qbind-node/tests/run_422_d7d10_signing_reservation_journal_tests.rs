@@ -25,8 +25,8 @@
 use std::sync::Arc;
 
 use qbind_node::signing_reservation_journal::{
-    BindingDigest, JournalError, ReservationOutcome, SigningJournalStorage, SigningKind,
-    SigningPosition, SigningReservationJournal,
+    BindingDigest, JournalError, ReservationOutcome, ResultPublicationCapability,
+    SigningJournalStorage, SigningKind, SigningPosition, SigningReservationJournal,
 };
 // Run 422 D7-D10 Correction F: the version-fabrication helper is a test-only
 // seam gated behind `test-utils`. Import it (and the record-format constant it
@@ -74,6 +74,21 @@ fn open_store(path: &std::path::Path) -> Arc<RocksDbConsensusStorage> {
     Arc::new(RocksDbConsensusStorage::open(path).expect("open rocksdb consensus storage"))
 }
 
+/// Reserve a fresh decision and consume its one-use continuation, returning the
+/// operation-bound publication capability (models the reserve→invoke boundary).
+fn reserve_and_invoke(
+    journal: &SigningReservationJournal,
+    pos: &SigningPosition,
+    bind: &BindingDigest,
+) -> ResultPublicationCapability {
+    match journal.reserve_for_sign(pos, bind).expect("reserve must succeed") {
+        ReservationOutcome::FreshlyReserved(cont) => {
+            journal.consume_for_signing(cont).expect("consume continuation")
+        }
+        other => panic!("expected FreshlyReserved, got {:?}", other),
+    }
+}
+
 /// Reserved-only recovery: after a durable reservation with no retained result,
 /// reopening the store and attaching a fresh journal must treat the position as
 /// potentially-signed and refuse re-signing, without altering the record.
@@ -87,37 +102,46 @@ fn reserved_only_survives_reopen_and_refuses_resigning() {
         let store = open_store(dir.path());
         let journal = SigningReservationJournal::attach(store.clone() as Arc<dyn SigningJournalStorage>);
         // Fresh reservation acknowledged durably; the live operation dies before
-        // recording any signed result (we simply drop it here).
-        let outcome = journal
+        // recording any signed result (we drop the one-use continuation here).
+        match journal
             .reserve_for_sign(&pos, &bind)
-            .expect("reserve must succeed");
-        assert_eq!(outcome, ReservationOutcome::FreshlyReserved);
+            .expect("reserve must succeed")
+        {
+            ReservationOutcome::FreshlyReserved(_cont) => { /* dropped: crash before sign */ }
+            other => panic!("expected FreshlyReserved, got {:?}", other),
+        }
     }
 
-    // Reopen: fresh journal, empty live-permit map — exactly the crash posture.
+    // Reopen: fresh journal (fresh ownership domain), empty live table — exactly
+    // the crash posture.
     let store = open_store(dir.path());
     let journal = SigningReservationJournal::attach(store as Arc<dyn SigningJournalStorage>);
-    let outcome = journal
-        .reserve_for_sign(&pos, &bind)
-        .expect("reservation lookup must not error");
-    assert_eq!(
-        outcome,
-        ReservationOutcome::PotentiallySigned,
-        "a recovered Reserved record with no live permit must be potentially-signed"
+    assert!(
+        matches!(
+            journal
+                .reserve_for_sign(&pos, &bind)
+                .expect("reservation lookup must not error"),
+            ReservationOutcome::PotentiallySigned
+        ),
+        "a recovered Reserved record with no live continuation must be potentially-signed"
     );
 
     // A conflicting request at the same position must remain refused, and must
     // not alter the original obligation.
-    let conflict = journal
-        .reserve_for_sign(&pos, &binding(0xB2))
-        .expect("conflict lookup must not error");
-    assert_eq!(conflict, ReservationOutcome::Conflict);
+    assert!(matches!(
+        journal
+            .reserve_for_sign(&pos, &binding(0xB2))
+            .expect("conflict lookup must not error"),
+        ReservationOutcome::Conflict
+    ));
 
     // The original obligation is still potentially-signed after the conflict.
-    let again = journal
-        .reserve_for_sign(&pos, &bind)
-        .expect("re-lookup must not error");
-    assert_eq!(again, ReservationOutcome::PotentiallySigned);
+    assert!(matches!(
+        journal
+            .reserve_for_sign(&pos, &bind)
+            .expect("re-lookup must not error"),
+        ReservationOutcome::PotentiallySigned
+    ));
 }
 
 /// A signed result survives a reopen and supports an exact resend (retained
@@ -132,13 +156,11 @@ fn signed_result_survives_reopen_and_supports_exact_resend() {
     {
         let store = open_store(dir.path());
         let journal = SigningReservationJournal::attach(store.clone() as Arc<dyn SigningJournalStorage>);
-        assert_eq!(
-            journal.reserve_for_sign(&pos, &bind).expect("reserve"),
-            ReservationOutcome::FreshlyReserved
-        );
-        journal.note_signer_invoked(&pos).expect("note signer");
+        // Reserve → consume the one-use continuation → publish through the
+        // matching operation's capability.
+        let cap = reserve_and_invoke(&journal, &pos, &bind);
         journal
-            .record_signed_result(&pos, &bind, &signature)
+            .record_signed_result(&cap, &signature)
             .expect("record signed result durably");
     }
 
@@ -152,12 +174,12 @@ fn signed_result_survives_reopen_and_supports_exact_resend() {
     }
 
     // Conflicting content at the same position stays refused after reopen.
-    assert_eq!(
+    assert!(matches!(
         journal
             .reserve_for_sign(&pos, &binding(0x44))
             .expect("conflict lookup"),
         ReservationOutcome::Conflict
-    );
+    ));
 }
 
 /// A Proposal and a self-Vote at the same view are distinct decisions and each
@@ -171,27 +193,27 @@ fn proposal_and_vote_same_view_are_independent_records_across_reopen() {
     {
         let store = open_store(dir.path());
         let journal = SigningReservationJournal::attach(store.clone() as Arc<dyn SigningJournalStorage>);
-        assert_eq!(
+        assert!(matches!(
             journal.reserve_for_sign(&prop, &binding(1)).expect("reserve proposal"),
-            ReservationOutcome::FreshlyReserved
-        );
-        assert_eq!(
+            ReservationOutcome::FreshlyReserved(_)
+        ));
+        assert!(matches!(
             journal.reserve_for_sign(&vote, &binding(2)).expect("reserve vote"),
-            ReservationOutcome::FreshlyReserved
-        );
+            ReservationOutcome::FreshlyReserved(_)
+        ));
     }
 
     let store = open_store(dir.path());
     let journal = SigningReservationJournal::attach(store as Arc<dyn SigningJournalStorage>);
     // Both recovered independently as potentially-signed (distinct keys).
-    assert_eq!(
+    assert!(matches!(
         journal.reserve_for_sign(&prop, &binding(1)).expect("lookup proposal"),
         ReservationOutcome::PotentiallySigned
-    );
-    assert_eq!(
+    ));
+    assert!(matches!(
         journal.reserve_for_sign(&vote, &binding(2)).expect("lookup vote"),
         ReservationOutcome::PotentiallySigned
-    );
+    ));
 }
 
 /// Corruption of a stored record on reopen must fail closed (no permit).
@@ -204,10 +226,10 @@ fn corrupt_record_on_reopen_fails_closed() {
     {
         let store = open_store(dir.path());
         let journal = SigningReservationJournal::attach(store.clone() as Arc<dyn SigningJournalStorage>);
-        assert_eq!(
+        assert!(matches!(
             journal.reserve_for_sign(&pos, &bind).expect("reserve"),
-            ReservationOutcome::FreshlyReserved
-        );
+            ReservationOutcome::FreshlyReserved(_)
+        ));
     }
 
     // Read back the exact record bytes through the public backend, corrupt a
@@ -241,10 +263,10 @@ fn truncated_record_on_reopen_fails_closed() {
     {
         let store = open_store(dir.path());
         let journal = SigningReservationJournal::attach(store.clone() as Arc<dyn SigningJournalStorage>);
-        assert_eq!(
+        assert!(matches!(
             journal.reserve_for_sign(&pos, &bind).expect("reserve"),
-            ReservationOutcome::FreshlyReserved
-        );
+            ReservationOutcome::FreshlyReserved(_)
+        ));
     }
 
     let store = open_store(dir.path());
@@ -307,13 +329,9 @@ fn missing_expected_signature_on_reopen_fails_closed() {
     {
         let store = open_store(dir.path());
         let journal = SigningReservationJournal::attach(store.clone() as Arc<dyn SigningJournalStorage>);
-        assert_eq!(
-            journal.reserve_for_sign(&pos, &bind).expect("reserve"),
-            ReservationOutcome::FreshlyReserved
-        );
-        journal.note_signer_invoked(&pos).expect("note signer");
+        let cap = reserve_and_invoke(&journal, &pos, &bind);
         journal
-            .record_signed_result(&pos, &bind, &signature)
+            .record_signed_result(&cap, &signature)
             .expect("record signed");
     }
 
@@ -349,26 +367,63 @@ fn second_handle_over_same_store_cannot_get_second_permit() {
 
     let store = open_store(dir.path());
     let journal_a = SigningReservationJournal::attach(store.clone() as Arc<dyn SigningJournalStorage>);
-    assert_eq!(
+    assert!(matches!(
         journal_a.reserve_for_sign(&pos, &bind).expect("reserve A"),
-        ReservationOutcome::FreshlyReserved
-    );
+        ReservationOutcome::FreshlyReserved(_)
+    ));
 
-    // A second, independently-attached handle sharing the SAME durable store.
+    // A second, independently-attached handle sharing the SAME durable store
+    // (same backend instance ⇒ ONE shared ownership domain).
     let journal_b = SigningReservationJournal::attach(store as Arc<dyn SigningJournalStorage>);
-    let outcome = journal_b
-        .reserve_for_sign(&pos, &bind)
-        .expect("reserve B lookup");
-    assert_eq!(
-        outcome,
-        ReservationOutcome::PotentiallySigned,
-        "a second handle must not manufacture a second live permit from a durable Reserved record"
+    assert!(
+        matches!(
+            journal_b
+                .reserve_for_sign(&pos, &bind)
+                .expect("reserve B lookup"),
+            ReservationOutcome::PotentiallySigned
+        ),
+        "a second handle must not manufacture a second live continuation from a durable Reserved record"
     );
 }
 
 // ---------------------------------------------------------------------------
 // Bounded child-process death / reopen.
 // ---------------------------------------------------------------------------
+
+/// Correction C over the real RocksDB backend: idempotent identical publication
+/// is accepted once durably acknowledged, a conflicting overwrite with different
+/// bytes is refused, and the original retained signature is preserved for an
+/// exact resend.
+#[test]
+fn publication_is_idempotent_and_refuses_conflicting_overwrite() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let pos = proposal_position(21);
+    let bind = binding(0x6C);
+    let signature = vec![0xC0, 0xFF, 0xEE, 0x01];
+
+    let store = open_store(dir.path());
+    let journal = SigningReservationJournal::attach(store as Arc<dyn SigningJournalStorage>);
+    let cap = reserve_and_invoke(&journal, &pos, &bind);
+    journal
+        .record_signed_result(&cap, &signature)
+        .expect("first durable publish");
+    // Idempotent identical republication through the same capability is accepted
+    // (this operation already holds a durable acknowledgement).
+    journal
+        .record_signed_result(&cap, &signature)
+        .expect("idempotent identical republish");
+    // A conflicting overwrite with DIFFERENT bytes is refused — an existing
+    // signed obligation is never replaced with different content.
+    assert!(matches!(
+        journal.record_signed_result(&cap, &[0xDE, 0xAD]),
+        Err(JournalError::InvalidResultPublication(_))
+    ));
+    // The original retained signature is intact for exact retry.
+    match journal.reserve_for_sign(&pos, &bind).expect("retry lookup") {
+        ReservationOutcome::ExactRetryRetained(sig) => assert_eq!(sig, signature),
+        other => panic!("expected ExactRetryRetained, got {:?}", other),
+    }
+}
 
 /// Child mode: open the real store at `$QBIND_D7D10_CHILD_DB`, durably reserve a
 /// fixed Proposal position, then abort BEFORE recording any signed result. This
@@ -384,10 +439,13 @@ fn d7d10_child_reserve_then_abort() {
     let path = std::path::PathBuf::from(db);
     let store = open_store(&path);
     let journal = SigningReservationJournal::attach(store as Arc<dyn SigningJournalStorage>);
-    let outcome = journal
+    match journal
         .reserve_for_sign(&child_position(), &child_binding())
-        .expect("child reservation must succeed");
-    assert_eq!(outcome, ReservationOutcome::FreshlyReserved);
+        .expect("child reservation must succeed")
+    {
+        ReservationOutcome::FreshlyReserved(_cont) => { /* durable ack; drop before sign */ }
+        other => panic!("expected FreshlyReserved, got {:?}", other),
+    }
     // Durable reservation acknowledged; simulate crash before signing/recording.
     std::io::Write::flush(&mut std::io::stdout()).ok();
     std::process::abort();
@@ -439,20 +497,21 @@ fn reserved_only_child_death_then_reopen_refuses() {
     // live-permit map, exactly the post-death posture.
     let store = open_store(&db_path);
     let journal = SigningReservationJournal::attach(store as Arc<dyn SigningJournalStorage>);
-    let outcome = journal
-        .reserve_for_sign(&child_position(), &child_binding())
-        .expect("post-death lookup must not error");
-    assert_eq!(
-        outcome,
-        ReservationOutcome::PotentiallySigned,
+    assert!(
+        matches!(
+            journal
+                .reserve_for_sign(&child_position(), &child_binding())
+                .expect("post-death lookup must not error"),
+            ReservationOutcome::PotentiallySigned
+        ),
         "a reservation recovered after child death must refuse re-signing"
     );
 
     // A conflicting request after death is refused without altering the record.
-    assert_eq!(
+    assert!(matches!(
         journal
             .reserve_for_sign(&child_position(), &binding(0x01))
             .expect("post-death conflict lookup"),
         ReservationOutcome::Conflict
-    );
+    ));
 }

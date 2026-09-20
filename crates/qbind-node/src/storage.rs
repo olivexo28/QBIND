@@ -711,6 +711,11 @@ pub struct RocksDbConsensusStorage {
     db: rocksdb::DB,
     /// Optional metrics for tracking operation latency (T107).
     metrics: Option<Arc<crate::metrics::NodeMetrics>>,
+    /// Run 422 D7-D10 Correction B — the single signing-journal ownership domain
+    /// for THIS backend instance, created lazily and shared by every attached
+    /// handle so the reservation/publication serialization boundary is enforced,
+    /// not advisory.
+    signing_domain: std::sync::OnceLock<Arc<crate::signing_reservation_journal::SigningOwnershipDomain>>,
     /// Test-only: When true, forces apply_epoch_transition_atomic() to simulate
     /// a WriteBatch commit failure (M16 atomicity testing).
     #[cfg(any(test, feature = "test-utils"))]
@@ -745,6 +750,7 @@ impl RocksDbConsensusStorage {
         Ok(RocksDbConsensusStorage {
             db,
             metrics: None,
+            signing_domain: std::sync::OnceLock::new(),
             #[cfg(any(test, feature = "test-utils"))]
             inject_write_failure: false,
         })
@@ -1316,6 +1322,15 @@ impl crate::signing_reservation_journal::SigningJournalStorage for RocksDbConsen
             .put_opt(&full, &wrapped, &write_opts)
             .map_err(|e| StorageError::Io(e.to_string()))
     }
+
+    fn signing_ownership_domain(
+        &self,
+    ) -> Arc<crate::signing_reservation_journal::SigningOwnershipDomain> {
+        // One domain per backend instance, shared by every attached handle.
+        self.signing_domain
+            .get_or_init(crate::signing_reservation_journal::SigningOwnershipDomain::new)
+            .clone()
+    }
 }
 
 // ============================================================================
@@ -1342,6 +1357,10 @@ pub struct InMemoryConsensusStorage {
     /// durability). Present so the journal's read/write model can be exercised
     /// in unit tests; it must NOT be read as durability evidence.
     signing_records: RwLock<HashMap<Vec<u8>, Vec<u8>>>,
+    /// Run 422 D7-D10 Correction B — per-instance signing-journal ownership
+    /// domain (MODEL only, in-process). `OnceLock` is `Default`, so the derived
+    /// `Default`/`new` still hold.
+    signing_domain: std::sync::OnceLock<Arc<crate::signing_reservation_journal::SigningOwnershipDomain>>,
 }
 
 /// Run 422 D7-D10 — MODEL signing-journal backing store for
@@ -1364,6 +1383,14 @@ impl crate::signing_reservation_journal::SigningJournalStorage for InMemoryConse
             .map_err(|e| StorageError::Other(format!("lock poisoned: {}", e)))?;
         map.insert(key.to_vec(), value.to_vec());
         Ok(())
+    }
+
+    fn signing_ownership_domain(
+        &self,
+    ) -> Arc<crate::signing_reservation_journal::SigningOwnershipDomain> {
+        self.signing_domain
+            .get_or_init(crate::signing_reservation_journal::SigningOwnershipDomain::new)
+            .clone()
     }
 }
 

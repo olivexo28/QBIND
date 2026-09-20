@@ -8540,3 +8540,112 @@ Local reservation protection is not activation authorization, current-authority
 freshness, consensus-lock recovery, copied-key fencing, or durable anti-rollback.
 C4/C5 remain OPEN. No PR beyond the task branch, no production activation, no D11,
 no Run 423 work.
+
+## Run 422 D7-D10 — Corrections B/C completion pass (D10 still PARTIAL)
+
+This pass completes **Corrections B and C** for their demonstrated **local**
+scope, superseding the earlier `note_signer_invoked` half-measure. It does **not**
+touch Corrections A, D, E, or the remaining F work, and does **not** replace the
+journal or begin D11/Run 423.
+
+### Landed in this pass
+
+* **B — one enforceable ownership domain.** A single `SigningOwnershipDomain`
+  (unique `token`, `Mutex`-guarded live/accounting state) is **owned by the
+  backend instance** and fetched through a new
+  `SigningJournalStorage::signing_ownership_domain` trait method (cached in a
+  per-instance `OnceLock`, implemented for `RocksDbConsensusStorage`,
+  `InMemoryConsensusStorage`, and the test stores). Every supported handle
+  attached over one backend instance shares that one domain, so a second handle
+  cannot bypass coordination by allocating its own mutex; reservation **and**
+  checked publication run under the same domain lock. A different backend instance
+  over the same directory (real close/reopen, or a modelled restart) is a fresh
+  domain — the honest crash-recovery posture. Scope is one local
+  journal/storage ownership domain, **not** cross-copy/-key/-host.
+* **B — operation-bound, one-use continuation.** `reserve_for_sign` now returns
+  `FreshlyReserved(SigningContinuation)`. The continuation is created only after
+  the reservation write's durable acknowledgement; is bound to the domain token,
+  position, binding, and a unique live operation id; is **non-cloneable** with no
+  public constructor (a durable `Reserved` record can never be turned into one);
+  and is consumed **at most once by move** (`consume_for_signing`) immediately
+  before the signer runs, yielding a `ResultPublicationCapability` for the same
+  operation. Dropping/losing it never releases the reservation. An operation
+  counter with checked exhaustion provides in-process ids (not an anti-rollback
+  anchor).
+* **C — checked, capability-gated publication.**
+  `record_signed_result(&ResultPublicationCapability, &sig)` requires a matching
+  domain + live-and-invoked operation + position + binding, a valid stored record
+  with a permitted transition, and a bounded, structurally valid result, then
+  performs the durable synced write. It refuses missing/foreign/stale operations,
+  arbitrary position/binding arguments, empty/oversized results, and any
+  conflicting overwrite (`JournalError::InvalidResultPublication`). Publication
+  retry is never permission to sign again.
+* **C — uncertainty / durable acknowledgement.** `LiveState.result_acked` tracks
+  whether *this* operation obtained a durable acknowledgement in-process. Readable
+  byte-equality is not a barrier: after a store-then-error result write,
+  publication is not reported successful; an in-process retry sees the
+  unacknowledged live operation and returns `PotentiallySigned` (never re-signs);
+  republication through the same capability re-issues the synced write until the
+  acknowledgement is established; idempotent identical success is reported only
+  when already acknowledged; and the operation can never replace its signature
+  with different bytes. `reserve_for_sign` applies the same rule to the
+  retained-result lookup (`ExactRetryRetained` is withheld while a live
+  unacknowledged operation shadows the `Signed` bytes).
+
+### Tests executed (this pass)
+
+* **Journal unit** (`--lib signing_reservation_journal`): **21 passed** — incl.
+  foreign-domain continuation/capability rejection, dropped-continuation
+  preserving the reservation, second-handle cannot obtain a continuation for a
+  live position, conflicting-overwrite/idempotent/oversize publication, and the
+  store-then-error uncertainty + conflicting-replacement cases.
+* **Colocated handler** (`--lib run422_d7d10`): **21 passed** — incl. the new
+  write-uncertainty handler case and **deterministic concurrent** contested
+  reservation (bounded `Barrier`, same- and different-binding) proving at most one
+  live signing continuation and exactly one facade handoff across supported
+  handles.
+* **Real-RocksDB integration**
+  (`--test run_422_d7d10_signing_reservation_journal_tests`): default features
+  **9 passed, 1 ignored**; `--features test-utils` **10 passed, 1 ignored** —
+  reserve→consume→publish→reopen→exact retrieval, reserved-only reopen refusing a
+  new continuation, conflict-after-reopen, idempotent + conflicting-overwrite over
+  the real backend, shared-handle ownership, corruption/truncation/unknown-version
+  fail-closed, and the bounded child-process death/reopen orchestrator.
+* Broader affected outbound/cached-reemission and storage tests via the full
+  `cargo test -p qbind-node --lib` run (see the validation record for the exact
+  tested commit and counts). Opaque signature fixtures establish storage behavior
+  only; cryptographic resend evidence stays with the real signer/verifier tests.
+
+### What is known / not known
+
+A successful acknowledged write in the live process establishes the in-process
+durable barrier. A visible record following an uncertain write establishes
+readability only. Reopening stored state after process death establishes the
+recovered durable bytes with a fresh (empty) live table. Power-loss durability is
+**not** inferred from a read, checksum, or process restart alone.
+
+### Still OPEN (not addressed here)
+
+Correction A (missing-journal refusal across all signing routes), Correction D
+(post-storage original-owner revalidation and remaining identity/version checks),
+Correction E (established-journal initialization and persistent capacity
+accounting), and the remaining F engine-progress/process-runner work. Overall D10
+remains **PARTIAL**. Local reservation protection is not activation authorization,
+current-authority freshness, consensus-lock recovery, copied-key fencing, or
+durable anti-rollback.
+
+### Corrected posture (this pass)
+
+```
+D7D10_LOCAL_SIGNING_RESERVATION=PARTIAL   (Corrections B/C complete for demonstrated local scope; A, D, E, F remain OPEN)
+D7D8_RESTORE_COMPLETION_CONTAINMENT=CODE-AND-RELEASE-TEST-POSITIVE   (preserved)
+D7_STATUS=PARTIAL-CODE-TEST / PRODUCTION-LIFECYCLE-UNAVAILABLE
+DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED
+GENESIS_AUTHORITY_ACTIVATION=DISABLED
+PRODUCTION_WIRE_CHAIN_ID_BEHAVIOR=UNCHANGED
+CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED
+SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO
+```
+
+C4/C5 remain OPEN. No PR beyond the task branch, no production activation, no D11,
+no Run 423 work.
