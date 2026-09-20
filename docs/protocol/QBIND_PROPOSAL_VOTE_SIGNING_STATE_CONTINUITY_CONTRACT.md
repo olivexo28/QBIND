@@ -32,8 +32,10 @@ it never establishes (A) or (B), and a signing record alone establishes neither.
 **Unresolved dependencies (stated prominently, up front):**
 
 * **Durable anti-rollback anchor: UNRESOLVED.** No repository mechanism today
-  supplies an authenticated, rollback-resistant, freshness-bearing external
-  commitment for signing history. Selection is left explicitly open (§6.6).
+  supplies an authenticated, rollback-resistant, freshness-bearing commitment for
+  signing history **outside the attacker's rollback domain** (a protected local
+  hardware mechanism or a remote witness — neither selected, implemented, or
+  proven). Selection is left explicitly open (§6.6).
 * **Consensus-lock recovery: DEPENDENCY, NOT SOLVED HERE.** Preventing
   conflicting signatures at one position does not by itself restore the HotStuff
   locking rule across later views (§6.7). Timeout / NewView compatibility is an
@@ -181,21 +183,35 @@ record. Requirement (C) is therefore still unmet by existing storage.
 
 ### 2.5 Traced signing routes and reachability classes
 
-Every relevant Proposal/Vote signing route passes through
-`forward_actions_to_facade` and the `admit → sign → confirm → facade` sequence:
+**Not every signing route passes through `forward_actions_to_facade`.** Two caller
+families reach the shared signing helpers `sign_proposal_for_broadcast` (L3646) /
+`sign_vote_for_broadcast` (L3733): the immediate-forwarding family (inside
+`forward_actions_to_facade`, L4101) and the **cached re-emission** family
+(`maybe_reemit_on_late_peer_connect`, L3379), which performs its **own**
+`admit_cached_reemission` (L3989) → `sign_*_for_broadcast` →
+`confirm_outbound_before_effect` cycle and does **not** call
+`forward_actions_to_facade`. A guard wrapped around `forward_actions_to_facade`
+alone would therefore miss the cached-re-emission callers.
 
-| Route | Path | Reachability |
-|---|---|---|
-| Leader proposal broadcast | `BroadcastProposal` arm (L4116) → admit/sign/confirm | Production-reachable (Required policy, `None` snapshot → fail-closed today) |
-| Broadcast vote (incl. leader self-vote) | `BroadcastVote` arm (L4170) | Production-reachable |
-| Directed vote | `SendVoteTo` arm (L4224) | Production-reachable |
-| Cached late-peer re-emission | `maybe_reemit_on_late_peer_connect` (L3379) + `admit_cached_reemission` | Conditionally reachable (in-process cache; per-view single-shot) |
-| `LocalFixtureUnsigned` passthrough authority | `pv_authority` arg consulted only when no snapshot wired | Fixture-only (test policy) |
+| Caller | Entry | Shared helper | Through `forward_actions_to_facade`? | Reachability |
+|---|---|---|---|---|
+| Immediate Proposal forwarding | `BroadcastProposal` arm (L4116) | `sign_proposal_for_broadcast` (L3646) | Yes | Production-reachable (`Required`, `None` snapshot → fail-closed today) |
+| Broadcast Vote | `BroadcastVote` arm (L4170) | `sign_vote_for_broadcast` (L3733) | Yes | Production-reachable |
+| Directed Vote | `SendVoteTo` arm (L4224) | `sign_vote_for_broadcast` (L3733) | Yes | Production-reachable |
+| Leader / self-vote handling | leader tick → `BroadcastProposal` + `BroadcastVote` arms | both helpers | Yes | Production-reachable |
+| Cached Proposal re-emission | `maybe_reemit_on_late_peer_connect` (L3379) → `admit_cached_reemission` (L3989) | `sign_proposal_for_broadcast` (L3646) | **No — own admit/confirm cycle** | Conditionally reachable (in-process cache; per-view single-shot) |
+| Cached Vote re-emission | `maybe_reemit_on_late_peer_connect` (L3379) → `admit_cached_reemission` (L3989) | `sign_vote_for_broadcast` (L3733) | **No — own admit/confirm cycle** | Conditionally reachable |
+| `LocalFixtureUnsigned` passthrough | `pv_authority` consulted only when no snapshot wired | — | n/a | Fixture-only (test policy) |
 
-Immediate forwarding, leader/self-vote handling, directed votes, and cached
-re-emission all reach `signer.sign_*`. Under production `Required` policy the
-snapshot is `None`, so all routes fail closed **today**; this contract specifies
-the reservation that must guard each route **when signing is later enabled**.
+Both caller families reach `signer.sign_*` through the two shared helpers, and
+each helper **assigns the local signer's suite into the message**
+(`proposal.header.suite_id = signer.suite_id()` L3706; `vote.suite_id =
+signer.suite_id()` L3785) **before the D6 preimage is constructed**. A reservation
+taken over an earlier, unprepared message would not bind the bytes actually
+signed; the reservation MUST be taken over the prepared preimage (§4.1). Under
+production `Required` policy the snapshot is `None`, so all routes fail closed
+**today**; this contract specifies the reservation that must guard each route —
+**both** caller families — when signing is later enabled (§4.2, §7.3).
 
 ---
 
@@ -219,46 +235,86 @@ linearization point defined in §5.
 
 The conflict rule is **derived from the existing HotStuff decision rules**, not
 a generic "one signature per height." Two signing decisions **conflict** when
-they occupy the same **consensus voting position** for the same stable validator
-identity in the same network/authority context, yet bind different signed
-content.
+they occupy the same **canonical consensus voting position** for the same stable
+validator identity, yet bind different signed content. The position is defined so
+that no independently-supplied numeric field and no mutable key/suite/version/
+context label can split one engine voting position into two records.
 
-**Stable validator identity and context.** Identity is the validator's genesis-
-membership identity as expressed by `ValidatorId` + the `ProposalVoteSigningDomainV2`
-binding (network / genesis identity / authority commitment / authorized epoch /
-membership / key / suite / message version). A **new OS process, a new in-process
-`CurrentAuthorizationOwner` generation, a new PID, or a new caller label is NOT a
-fresh validator identity** and MUST NOT open a new conflict namespace.
+**Stable validator identity (distinct from its current attributes).** Identity is
+the validator's genesis-membership identity as expressed by `ValidatorId` within a
+fixed network/genesis. This stable identity is **not** the validator's *current*
+key, signature suite, message version, authority commitment, or in-process
+`CurrentAuthorizationOwner` generation. A **new OS process, a new owner
+generation, a new PID, or a new caller label is NOT a fresh validator identity**,
+and neither is a validated change of the validator's current key or suite: none of
+these may open a new conflict namespace or silently erase an existing conflict
+obligation. Those current attributes bind the *exact authorized message*
+(exact-message fields, below); they never relax the position key.
 
-**Conflict-identifying fields (the position key).** Two decisions are compared on:
+**Canonical consensus position for the supported founding-authority profile.**
+The supported profile is single, static founding authority. In the actual source
+the engine derives its view from `proposal.header.height` on ingest
+(`ingest_proposal`, `basic_hotstuff_engine.rs:1732`), and every locally-emitted
+Proposal and Vote sets `height = round = view` with `step = 0` (`on_leader_step`,
+L1503–1504 / L1522–1524 / L1557–1559; the second vote emit at L1833–1835). There
+is therefore exactly **one** engine voting position per view: the engine **view**.
+The canonical position key is:
 
-* validator identity (as above);
-* consensus **step / kind**: Proposal vs Vote (distinct sub-namespaces);
-* the consensus **view/round** and the **height** the message commits to (for a
-  Vote, the voted block's height/round as the engine assigns them; for a
-  Proposal, the proposed height/round);
-* the network/genesis/authority-epoch context.
+* the stable validator identity (above), within its fixed network/genesis;
+* the consensus **kind**: Proposal vs Vote (two distinct sub-namespaces of one
+  view — see below);
+* the engine **view**.
 
-**Binding (exact-message) fields.** The stored record additionally binds the
-fields that identify the *exact* authorized message: the block identifier being
-voted for / proposed, the attached justification (QC) identity, and the domain-
-canonical preimage bytes after permitted suite preparation **before** signing
-(the same input `signer.sign_*` receives). A change to a **binding** field at the
-same **position key** is a conflict, not a new namespace.
+Height, round, and step are **not** independent position coordinates for this
+profile; they are redundant encodings of the view. The record MUST enforce their
+correspondence as a **proposed pre-lookup requirement**: `height == round == view`
+and `step == 0` for the founding-authority profile. A message whose
+height/round/step do **not** satisfy that correspondence is an unsupported or
+inconsistent combination and MUST be **refused** — it MUST NOT be admitted under a
+second namespace derived from its divergent numeric fields.
 
-**Proposal vs Vote and legitimate combinations.** A leader legitimately produces
-one Proposal and one self-Vote at the same view; these are distinct kinds and do
-**not** conflict with each other. Two Votes at the same position for different
-blocks conflict. A directed vote and a broadcast vote for the **same** position
-and block are the **same** decision (exact retry, §3.5), not a conflict.
+**Field classification.** Each field has one trusted source and one role — it
+either participates in the position key or it binds the exact authorized message —
+with a required consistency check and a fail-closed rejection behavior:
 
-**Non-bypass rule.** A changed block identifier, height, step, suite, key, owner
-generation, process identifier, or caller label MUST NOT create a namespace that
-evades the position key. Only a change that legitimately creates a **new
-authorization context** — a different network/genesis, a different authorized
-epoch under a validated authority transition, or a different membership/key under
-a validated rotation — creates a new conflict namespace, and only when the
-lifecycle contract's requirement (A)/(B) has independently authorized it.
+| Field | Trusted source | Role | Required consistency check | Rejection behavior |
+|---|---|---|---|---|
+| validator identity (`ValidatorId`) | admitted snapshot's bound signer/domain, not the wire | position key | equals the admitted local validator identity | refuse (foreign/mismatched identity) |
+| network / genesis | pinned domain (`ProposalVoteSigningDomainV2`) | position key | equals the pinned network/genesis | refuse (wrong network/genesis) |
+| kind (Proposal vs Vote) | engine action type | position key (sub-namespace) | Proposal and Vote are distinct; broadcast vs directed of one Vote are the same kind | n/a (both legitimately exist per view) |
+| engine view | engine (`current_view` / `ingest_proposal` view) | position key | single value per position | refuse on divergence |
+| height / round | wire header (`header.height` / `header.round`) | redundant encoding of view | equals view | refuse if `height != view` or `round != view` |
+| step | wire (`step`) | redundant, canonical only | equals `0` for this profile | refuse if `step != 0` |
+| authorized epoch | admitted snapshot (`authorized_epoch()`) | exact-message binding | equals the admitted epoch | refuse (epoch-unauthorized) |
+| current key / suite | admitted snapshot's bound signer (suite assigned at `sign_*_for_broadcast`, L3706 / L3785) | exact-message binding | equals the admitted signer's bound key/suite | refuse; a *validated change* does not open a new position namespace |
+| message version | pinned domain (v2) | exact-message binding | equals the supported version | refuse (unsupported version) |
+| authority commitment | pinned domain / admitted snapshot | exact-message binding | equals the admitted commitment | refuse |
+| block id + justification (QC) id | prepared engine action | exact-message binding | matches the reserved decision | conflict if changed at the same position |
+| canonical preimage digest | the prepared D6 preimage `signer.sign_*` receives | exact-message binding | is the exact input reserved (§4.1) | conflict if changed at the same position |
+
+A change to any **exact-message binding** field at the same **position key** is a
+**conflict**, not a new namespace.
+
+**Proposal vs Vote and delivery equivalence (preserved).** A leader legitimately
+produces one Proposal and one self-Vote at the same view; these are distinct kinds
+and do **not** conflict with each other. Two Votes at the same position for
+different blocks conflict. A directed vote and a broadcast vote for the **same**
+position and block are the **same** decision (exact retry, §3.5), not a conflict —
+broadcast-vs-directed delivery is not a consensus-step distinction and no new step
+policy is invented here.
+
+**Non-bypass rule.** A changed block identifier, height, round, step, suite, key,
+message version, authority-commitment label, owner generation, process identifier,
+or caller label MUST NOT create a namespace that evades the position key: the
+height/round/step correspondence check runs **before** lookup, and
+key/suite/version/commitment are exact-message bindings, not namespace selectors.
+Authorization to rotate a key or membership does **not** by itself prove that
+earlier signing obligations may be discarded. For this founding-authority design,
+**rotation / epoch-transition continuity is explicitly gated**: a new conflict
+namespace for a different authorized epoch or a different membership/key is **not**
+designed here and remains deferred until its fencing and reservation-preservation
+rules are defined (§5.3 / §6). No automatic rule makes a validated key/membership
+rotation create a fresh namespace.
 
 ### 3.3 The signing-decision record (proposed representation)
 
@@ -275,11 +331,13 @@ The record is **proposed, not implemented**. It MUST be:
   record makes the covered position **potentially-signed** (refuse to sign),
   never "assume unused."
 
-Record fields (conceptual): format version; validator identity + domain binding
-digest; position key (kind, view/round, height, epoch, network/genesis/authority
-context); binding digest (block id + justification id + preimage digest);
-lifecycle stage (§3.4); optional retained signature/result for exact retry;
-checksum.
+Record fields (conceptual): format version; stable validator identity +
+network/genesis; position key (kind + engine view — with height/round/step stored
+only as the view's checked redundant encoding, never as independent coordinates);
+exact-message binding digest (authorized epoch + current key/suite + message
+version + authority commitment + block id + justification id + canonical preimage
+digest); lifecycle stage (§3.4); optional retained signature/result for exact
+retry; checksum.
 
 ### 3.4 The signing-state machine (per position)
 
@@ -326,21 +384,36 @@ transmission failed, or an acknowledgement was lost. Once state may have reached
 1. **Authorization + context checks (existing):** `admit_outbound_action`
    (L3852) — current-authority `admit()` + epoch equality against
    `authorized_epoch()`; obtain `(signer_ctx, ticket)`.
-2. **Final signed-field preparation (existing):** compute the domain-canonical
-   preimage via `ProposalVoteAuthority::proposal_preimage` / `vote_preimage`
-   after wire-chain-id validation.
+2. **Final signed-field preparation (existing):** using the **admitted
+   snapshot's bound signer/domain**, perform the wire-chain-id / epoch checks,
+   apply the permitted local suite preparation (`suite_id = signer.suite_id()`,
+   L3706 / L3785), then compute the domain-canonical preimage via
+   `ProposalVoteAuthority::proposal_preimage` / `vote_preimage`. This is the exact
+   input `signer.sign_*` will receive; no parallel parser or new signing encoding
+   is introduced (existing canonicalization is reused).
 3. **Conflict lookup + exclusive reservation (new):** derive the position key
-   and binding digest; look up existing record; if a conflicting record exists →
-   **REFUSE**; otherwise reserve exclusively (`NONE → RESERVED`).
+   (§3.2, after the height/round/step correspondence check) and the binding digest
+   over the **prepared** preimage; look up existing record; if a conflicting
+   record exists → **REFUSE**; otherwise reserve exactly that decision
+   (`NONE → RESERVED`). The reserved signed fields and signing context MUST NOT
+   change between this reservation and the signer invocation at step 6.
 4. **Durable reservation acknowledgement (new):** commit the reservation with a
    synced write and an acknowledged durability barrier (the semantic already
    available via `put_current_epoch_synced` / `flush_epoch_durable` for epochs
    is the model; a signing-scoped store is required). No barrier ack ⇒ treat as
    uncertain ⇒ **no signer call**.
 5. **Authorization revalidation after storage waits (new):** because the storage
-   commit may block, re-check current authorization (re-`admit` / generation
-   unchanged) before signing; a superseded authority ⇒ refuse to sign (the
-   reservation is retained).
+   commit may block, before signing re-validate authorization against the
+   **original ticket issuer/owner identity and its bound snapshot** (epoch,
+   domain, membership, signer association) — a matching generation number **alone
+   is insufficient** and MUST NOT be treated as revalidation. The admitted context
+   is never silently replaced by a newly-supplied owner or signer after the
+   reservation. A superseded, exhausted, or foreign-issuer authority ⇒ refuse to
+   sign (the reservation is retained). This reuses the existing `admit` / `confirm`
+   semantics (`admit_outbound_action` / `confirm_outbound_before_effect`) on the
+   single serialized handler; the serialized boundary is what closes the
+   check-to-sign gap, and no concurrent mutation is assumed in today's
+   implementation.
 6. **Signer invocation (existing):** `signer.sign_*` over the prepared preimage
    (`SIGNING`; on success, `SIGNED` + retained result).
 7. **Result handling (new + existing):** persist the signed/`SIGNED` marker;
@@ -362,12 +435,21 @@ can pass step 3→4, and the signer at step 6 is reached only after that point.
 
 * **Preserve current handler assumptions:** do not invent concurrent mutation
   that today's serialized handler does not have.
+* **Common signing boundary (covers both caller families):** the reservation
+  MUST wrap the shared `sign_proposal_for_broadcast` / `sign_vote_for_broadcast`
+  helpers so that it covers **both** the immediate-forwarding callers inside
+  `forward_actions_to_facade` **and** the cached-re-emission callers in
+  `maybe_reemit_on_late_peer_connect` (§2.5). A wrapper around
+  `forward_actions_to_facade` alone is **insufficient** because it does not sit on
+  the cached-re-emission path. This boundary is specified here and **not
+  implemented** in this phase.
 * **Future crossings:** if future storage I/O, async work, or another signing
   caller is introduced, the reservation/signing boundary MUST be protected so
   that no two callers cross step 3→6 for the same position; the single durable
   writer + exclusive reservation is the enforcement point. A second signing
-  caller that bypasses the guarded path is outside the guarantee and MUST be
-  prevented structurally (single guarded signing entrypoint), not assumed away.
+  caller that bypasses the guarded helpers is outside the guarantee and MUST be
+  prevented structurally (single guarded signing entrypoint over the shared
+  helpers), not assumed away.
 * **Single-writer scope and its limit:** D8's advisory destination `flock`
   serializes writers to one destination directory; it does **not** establish
   exclusivity for a **copied key**, **another directory**, **another host**, or a
@@ -387,7 +469,10 @@ can pass step 3→4, and the signer at step 6 is reached only after that point.
   decision as **potentially signed**.
 * **No fallback** to an unprotected signer or a legacy digest.
 * Cached re-emission stays bound to the recorded decision and must pass current
-  authorization checks.
+  authorization checks. **Today** `maybe_reemit_on_late_peer_connect` re-enters the
+  signing helpers (it re-signs on re-emission); a future **resend-only** path
+  (§3.5) that resends the retained signature instead of re-invoking the signer is a
+  **proposed behavior change**, not existing behavior, and is not implemented here.
 * **Signing permission does not arise from the persistence record alone** — the
   record is a *guard*, not an *authorization*; requirements (A)/(B) must hold
   independently.
@@ -413,31 +498,51 @@ consensus-state continuity**. A signing record establishes neither (A) nor (B).
 An **empty** signing store MUST NOT automatically mean a previously used
 validator key is unused. "Never signed before" (legitimate first use) and "signed
 before but the record was lost/rolled back" are indistinguishable from local
-state alone. Distinguishing them requires **trusted external evidence** (an
-anchor, §6) that binds the validator/network to a signing-history commitment.
-Absent that evidence, first initialization over a non-empty key is **ambiguous**
-and MUST be treated fail-closed (refuse to sign) until an activation gate
-resolves it.
+state alone. Distinguishing them requires **appropriately trusted state or
+evidence outside the specified attacker's rollback domain** (§6) — a protected
+local hardware mechanism or a remote witness, neither selected here — that binds
+the validator/network to a signing-history commitment. Absent that evidence, first
+initialization over a non-empty key is **ambiguous** and MUST be treated
+fail-closed (refuse to sign) until an activation gate resolves it.
 
 ### 5.2 Failure / recovery matrix
 
-For each row: observable state → permitted action → refused action → supporting
-assumption.
+Every row is keyed to **observable durable evidence**; no row relies on knowing an
+unrecorded crash location. For each row: observable durable state → permitted
+action → refused action → supporting assumption.
 
-| # | Scenario | Observable state | Permitted | Refused | Assumption |
+**Live continuation vs recovery (never conflated).** Four operations are kept
+distinct: (1) a **live** operation continuing, *in the same process*, after its
+own acknowledged reservation under exclusive in-process ownership — it may proceed
+to sign under the required authorization checks; (2) **recovery after process
+death**, which sees only the durable record and cannot know whether the signer was
+invoked; (3) **resending a retained signature**; and (4) **invoking the signer
+again**. From the durable record alone a `RESERVED` position with no usable
+retained result is indistinguishable whether the crash preceded or followed the
+signer call, so after restart it is treated as **potentially signed**: it cannot
+authorize automatic re-signing and cannot be released. A retained result may back
+an exact resend only after its association with the canonical decision and current
+authorization is validated.
+
+| # | Scenario | Observable durable state | Permitted | Refused | Assumption |
 |---|---|---|---|---|---|
 | 1 | Failure **before** reservation persistence | No durable record | Retry reservation | Any signer call | Sync not acknowledged ⇒ never signed |
 | 2 | Reservation write / barrier failure or **uncertain** completion | Record may or may not exist | Treat as RESERVED-or-worse; may retry reservation idempotently | Signer call until a clean RESERVED is confirmed | Uncertainty ⇒ potentially reserved, not signed |
-| 3 | Crash **after** durable reservation, **before** signing | RESERVED, no result | Resume: re-validate auth, then sign once | Signing a *different* decision at this position | RESERVED binds exactly one decision |
-| 4 | Crash **during** signing / after signature, before result persistence | SIGNING (result unknown) | Resend only if a retained result exists; else refuse | Re-invoking signer; releasing reservation | Potentially-signed ⇒ conservative |
-| 5 | Confirmation / handoff failure after signing | SIGNED, effect suppressed | Exact-retry resend of retained signature | Signing a new decision | Confirm suppresses effect, not signature |
-| 6 | Exact retry | Matching position key + binding digest | Resend retained signature | Re-signing | Canonical-decision equality, not byte equality |
+| 3 | **Live** in-process continuation after own acknowledged reservation | RESERVED held under exclusive in-process ownership (same run) | Proceed to sign once, under re-validated authorization (§4.1 step 5) | Signing a *different* decision at this position | In-process ownership proves the signer was not yet invoked |
+| 4 | **Recovery after process death** at a reserved position | RESERVED, **no** usable retained result | Refuse; retain the reservation | Re-invoking the signer; releasing the reservation | Record cannot distinguish pre- from post-invocation ⇒ potentially signed |
+| 5 | Confirmation / handoff failure after signing | SIGNED, retained result present, effect suppressed | Exact-retry resend of the retained signature after validating its association + current authorization | Signing a new decision | Confirm suppresses effect, not signature |
+| 6 | Exact retry | Matching position key + binding digest, retained result present | Resend retained signature | Re-signing | Canonical-decision equality, not byte equality |
 | 7 | Conflicting retry | Same position key, different binding | Refuse | Any signature | Conflict rule §3.2 |
 | 8 | Missing / malformed / truncated / incompatible record | Undecodable | Refuse (fail-closed) | Assuming unused | §3.3 |
-| 9 | Ordinary restart, valid records | Consistent RESERVED/SIGNED set | Resume per state machine | Ignoring records | Local synced journal covers ordinary crash |
-| 10 | Restoration of an **older account snapshot** while newer signing records remain | Snapshot epoch < journal records | Refuse to sign at superseded positions; require anchor to resolve | Signing from stale snapshot | Same-epoch/older snapshot must not un-record newer decisions |
-| 11 | Restoration of the **entire** signing-state directory (older copy) | All local references older, internally consistent | Refuse until anchor confirms latestness | Trusting the restored journal as current | Local journal cannot self-detect a whole-copy rollback (§6.5) |
-| 12 | Two instances using the **same** validator key | Two guarded signers, same key | At most one may hold exclusivity; other must refuse | Both signing | D8 lock does not cover copied keys/hosts (§4.2) |
+| 9 | Ordinary restart, required state intact | Consistent RESERVED/SIGNED set + lock inputs present | Resume per state machine (§3.4) and §5.3 | Ignoring records | Local synced journal covers ordinary crash; lock recovery per §5.3 |
+| 10 | Older account/consensus state restored, **newer signing records retained** (incl. **same-epoch**: signed at epoch E, then an earlier epoch-E snapshot restored) | Retained signing records / recovery state do **not** correspond to the restored account/consensus state | Refuse to sign at positions the retained records already cover; require trusted out-of-domain state to resolve | Signing from the stale restored state | **Epoch equality does not prove freshness**; correspondence, not epoch inequality, is the test (§6) |
+| 11 | Complete restoration of **older signing records and all local references** (internally consistent older copy) | All local references older and mutually consistent | Refuse until trusted out-of-domain state confirms latestness | Trusting the restored journal as current | A whole-copy rollback is **locally indistinguishable** from a valid older state (§6.1 / §6.5); the local reader cannot recognize it |
+| 12 | Missing or unverifiable recovery / signing state | State absent or fails its integrity check | Refuse (fail-closed) | Assuming unused / assuming current | Neither latestness nor the consensus lock can be established |
+| 13 | Two instances using the **same** validator key | Two guarded signers, same key | At most one may hold exclusivity; other must refuse | Both signing | D8 lock does not cover copied keys/hosts (§4.2) |
+
+The journal **alone** does not detect every old snapshot and does not establish
+the recovered consensus lock (§5.3). Where correspondence or lock recovery is
+unestablished, signing remains refused under the stated prerequisites.
 
 ### 5.3 Consensus-lock recovery is a separate requirement
 
@@ -474,24 +579,35 @@ full rollback protection and must never be labeled as such.
 
 ### 6.2 The independent continuity (anti-rollback) requirement
 
-To resist rollback, an **independent** commitment is required. Concretely it must
-answer:
+To resist rollback, an **independent** commitment is required: **appropriately
+trusted state or evidence outside the specified attacker's rollback domain.** That
+domain-external state MAY be a **protected local mechanism** (e.g., hardware-
+protected local state the attacker's rollback cannot rewind) **or** a **remote
+witness**; both are different possible models and **neither is selected,
+implemented, or proven** here (cf. the lifecycle contract's T4 row). It is **not**
+mandated to be an off-box service, a new pinned remote signing root, or any
+particular transport. Whichever model a future mechanism picks, it must answer:
 
 * **Outside the attacker's rollback domain:** what state is *not* restorable by
-  the specified attacker (e.g., an external, append-only or monotonic authority
-  the local host cannot rewind)?
-* **Authentication:** how is that state authenticated (a real cryptographic
-  verification against a pinned trust root — **not** a source label, which is not
-  authenticated provenance)?
+  the specified attacker? A **local** mechanism MUST state its hardware/access
+  assumptions; a **remote** mechanism MUST state its authentication and
+  operational assumptions. Neither may silently introduce a classical
+  cryptographic dependency.
+* **Authentication:** how is that state authenticated (a real verification against
+  a pinned trust root — **not** a source label, which is not authenticated
+  provenance)?
 * **Binding:** what validator/network identity and **signing-history commitment**
-  does it bind (must bind this validator + network + a monotonic signing-history
-  value, not merely an epoch)?
+  does it bind (must bind this validator + network + a signing-history value, not
+  merely an epoch; a **monotonic number alone does not establish history binding**
+  and does not prevent two cloned signers from authorizing conflicting decisions)?
 * **Freshness / monotonicity / exclusive use:** how are latestness, monotonic
   advance, and single-writer/exclusive use established?
-* **Ordering of local-record vs anchor updates:** which is written first, and
-  what is the recovery rule if one succeeds and the other fails?
-* **Availability:** behavior during anchor unavailability, partition, cold start,
-  or all-validator restart.
+* **Ordering of local-record vs domain-external update (proposed, conditional):**
+  which is written first, and what is the recovery rule if one succeeds and the
+  other fails? Any such ordering is a **proposed requirement conditional on a
+  future concrete mechanism**, not a fixed design.
+* **Availability / partial update:** behavior during unavailability, partition,
+  cold start, all-validator restart, or a partial update.
 
 ### 6.3 What is insufficient (explicit)
 
@@ -513,28 +629,36 @@ answer:
 * `put_current_epoch_synced` / `flush_epoch_durable`: durability barrier for a
   coarse epoch; not a signing-history commitment. Insufficient as an anchor.
 
-### 6.5 Ordering and partial-failure (when an anchor is later chosen)
+### 6.5 Ordering and partial-failure (proposed, conditional on a future mechanism)
 
-Local record and anchor updates MUST be ordered so that neither a lost local
-record nor a lost anchor update can license a conflicting future decision:
-reserve locally (durable) → advance the anchor monotonically → then sign. If the
-anchor advance succeeds but the local record is lost, recovery treats the
+This ordering is a **proposed requirement conditional on a concrete
+domain-external mechanism being chosen**; it is not a fixed design, and a
+**monotonic number alone does not establish history binding**. Were such a
+mechanism chosen (local protected or remote), local record and domain-external
+updates would be ordered so that neither a lost local record nor a lost
+domain-external update can license a conflicting future decision: reserve locally
+(durable) → advance the domain-external commitment → then sign. If the
+domain-external advance succeeds but the local record is lost, recovery treats the
 position as potentially-signed (refuse). If the local record persists but the
-anchor advance is uncertain, refuse until the anchor is reconciled. During anchor
+domain-external advance is uncertain, refuse until it is reconciled. During
 unavailability / partition / cold start / all-validator restart, **refuse to
 sign** rather than proceed on stale local state.
 
-### 6.6 Anchor recommendation — EXPLICITLY UNRESOLVED
+### 6.6 Domain-external anchor recommendation — EXPLICITLY UNRESOLVED
 
 The repository and current evidence do **not** justify selecting a concrete
-rollback-resistant mechanism. Classical signatures, hardware-attestation roots,
-external chains, cloud services, and a centralized signer each introduce distinct
-cryptographic, operational, availability, and decentralization assumptions and
-are **not** silently introduced here. Selection is left **explicitly unresolved**.
-The unsatisfied activation gate is: *an authenticated, rollback-resistant,
-freshness-bearing external anchor binding this validator/network to a monotonic
-signing-history commitment.* No "authenticated witness" is invented that no
-implementation can supply.
+rollback-resistant mechanism. A **protected local mechanism** (hardware-protected
+state) and a **remote witness** are different possible models; classical
+signatures, hardware-attestation roots, external chains, cloud services, and a
+centralized signer each introduce distinct cryptographic, operational,
+availability, and decentralization assumptions and are **not** silently introduced
+here — no off-box service, pinned remote signing root, or particular transport is
+mandated. Selection is left **explicitly unresolved**. The unsatisfied activation
+gate is: *appropriately trusted, authenticated, rollback-resistant,
+freshness-bearing state/evidence outside the attacker's rollback domain, binding
+this validator/network to a signing-history commitment* (a monotonic number alone
+is insufficient). No "authenticated witness" is invented that no implementation can
+supply. **Anchor selection remains UNRESOLVED.**
 
 ### 6.7 Consensus-recovery dependency (restated)
 
@@ -553,19 +677,30 @@ These are **future** controls, not newly executed claims:
 
 * Proposal positive control; Vote positive control.
 * Exact retry (resend, no re-sign) and conflicting retry (refuse).
-* Repeated view with changed message/binding fields that must **not** evade
+* Repeated position with changed message/binding fields that must **not** evade
   conflict detection.
+* Evasion attempts via **inconsistent position fields** (height/round/step not
+  equal to the engine view for this profile) — refused **before** lookup, never
+  admitted under a second namespace.
+* Evasion attempts via changed **key / suite / message version / authority-
+  commitment / owner-generation / caller-label** at the same position — treated as
+  the same position (exact-message conflict if content differs), never a new
+  namespace.
 * Signing-persistence failure with **direct zero-backend-call** assertions on
   the signer.
-* Durable reservation followed by process death **before** signing (resume-sign
-  once).
-* Signature completion followed by failure **before** handoff (exact-retry
-  resend only).
+* Durable reservation followed by **process death**: on recovery the position is
+  **potentially signed** — refuse (no automatic re-sign, no release); only a
+  **live** in-process continuation after its own reservation may sign once (§5.2).
+* Signature completion followed by failure **before** handoff (exact-retry resend
+  only, after validating the retained result's association + current
+  authorization).
 * Conflicting callers and cloned-validator-instance limits.
 * Wrong network / domain / epoch / key association (refuse).
 * Missing / corrupt records and ambiguous first initialization (fail-closed).
-* Same-epoch older-snapshot rollback and whole-directory rollback (refuse
-  pending anchor).
+* Same-epoch older-snapshot rollback (signed at epoch E, then an earlier epoch-E
+  snapshot restored) and whole-directory rollback — refuse pending trusted
+  state/evidence outside the rollback domain; the local reader cannot by itself
+  recognize a whole-copy rollback.
 * Consensus-lock recovery prerequisites (refuse to sign until lock recovered).
 * Authority revocation / supersession during the proposed I/O boundary (refuse
   to sign; reservation retained).
@@ -596,9 +731,12 @@ signing-reservation journal — source + tests only.**
 * **Extends:** `crates/qbind-node/src/storage.rs` (a new *disabled-by-default*,
   signing-scoped record store modeled on the Run 291 atomic-write backend, using
   the existing synced-write / durability-barrier semantics), consulted from a
-  single guarded signing entrypoint refactor around
-  `binary_consensus_loop.rs::forward_actions_to_facade` (L4101) so the reservation
-  sits **before** `sign_proposal_for_broadcast` / `sign_vote_for_broadcast`.
+  single guarded signing entrypoint over the shared `sign_proposal_for_broadcast` /
+  `sign_vote_for_broadcast` helpers (L3646 / L3733) so the reservation sits
+  **before** signing for **both** caller families — the immediate-forwarding
+  callers in `binary_consensus_loop.rs::forward_actions_to_facade` (L4101) **and**
+  the cached-re-emission callers in `maybe_reemit_on_late_peer_connect` (L3379). A
+  wrapper around `forward_actions_to_facade` alone is insufficient (§2.5).
 * **Prerequisites:** the conflict rule (§3.2), record/state machine (§3.3–3.4),
   and durable-before-sign ordering (§4.1) in this contract; no change to
   authority activation (A) or freshness (B).
@@ -613,6 +751,44 @@ signing-reservation journal — source + tests only.**
   and MUST NOT be called full rollback protection.
 
 The successor **implementation is not begun** in this task.
+
+---
+
+## 7.4 Correction note (RUN 422 D7-D9 review pass)
+
+This pass corrected four material inconsistencies in place, re-verified against
+the actual worktree; the protocol stays `DEFINED-NOT-IMPLEMENTED` and no successor
+is begun:
+
+* **A — one non-bypassable conflict identity.** The canonical position is the
+  stable validator identity + kind + **engine view**; height/round/step are
+  checked redundant encodings of the view (`height == round == view`, `step == 0`
+  enforced **before** lookup), not independent coordinates. Current key / suite /
+  message version / authority commitment / owner generation are **exact-message
+  bindings**, not namespace selectors; a validated rotation neither opens a new
+  namespace nor erases a conflict obligation (rotation/epoch continuity explicitly
+  gated). A field-classification table (§3.2) fixes each field's source, role,
+  check, and rejection. "Committed height" is no longer used as a signing-position
+  description.
+* **B — recovery on observable durable state.** A recovered `RESERVED` position
+  with no usable retained result is **potentially signed** (refuse; no re-sign, no
+  release). Live in-process continuation, recovery after process death, resending a
+  retained signature, and re-invoking the signer are kept distinct; every matrix
+  row names observable durable evidence (§5.2).
+* **C — full caller coverage and exact-input binding.** `maybe_reemit_on_late_peer_connect`
+  reaches the shared `sign_*_for_broadcast` helpers via its own admit/confirm cycle
+  and bypasses `forward_actions_to_facade`; the proposed guard wraps the shared
+  helpers to cover **both** caller families (§2.5, §4.2, §7.3). Suite is prepared
+  before the D6 preimage, so the reservation binds the prepared preimage (§4.1).
+  Revalidation preserves the original ticket issuer/owner identity and bound
+  context — a generation number alone is insufficient (§4.1 step 5).
+* **D — same-epoch rollback and rollback-domain trust.** The older-snapshot rows
+  use signing-history/recovery-state **correspondence**, not epoch inequality (a
+  same-epoch restore is covered); a whole-copy rollback is stated to be locally
+  indistinguishable. Trust is **appropriately trusted state/evidence outside the
+  attacker's rollback domain** — a protected local hardware mechanism **or** a
+  remote witness, neither selected; a monotonic number alone is insufficient and
+  anchor selection stays UNRESOLVED (§5.1, §6.2, §6.5, §6.6).
 
 ---
 

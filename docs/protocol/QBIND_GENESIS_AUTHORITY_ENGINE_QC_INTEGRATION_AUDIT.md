@@ -1335,8 +1335,14 @@ storage is now
 elaborates requirement (C) of
 `docs/protocol/QBIND_PROPOSAL_VOTE_AUTHORITY_LIFECYCLE_CONTRACT.md` only: a
 durable-before-sign reservation guarding every `signer.sign_*` invocation on the
-`binary_consensus_loop.rs::forward_actions_to_facade` path, a conflict rule
-derived from the HotStuff decision rules, and a failure/recovery matrix.
+shared `sign_proposal_for_broadcast` / `sign_vote_for_broadcast` helpers — reached
+by **both** the immediate-forwarding callers in
+`binary_consensus_loop.rs::forward_actions_to_facade` **and** the
+cached-re-emission callers in `maybe_reemit_on_late_peer_connect` — a conflict rule
+derived from the HotStuff decision rules (canonical position = validator identity +
+kind + engine view; height/round/step are checked redundant encodings, not
+independent coordinates), and a failure/recovery matrix keyed to observable durable
+evidence.
 Signing-state records are guards, not authorization; the durable anti-rollback
 anchor is explicitly UNRESOLVED and consensus-lock recovery is an unmet
 prerequisite. This audit's QC-integration findings are unchanged; signing is not
