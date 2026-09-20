@@ -428,47 +428,143 @@ pub fn rtr_path(data_dir: &Path) -> PathBuf {
     data_dir.join(RTR_FILENAME)
 }
 
+/// The outcome of a bounded read of the authoritative final record's bytes
+/// (Correction B). Distinguishes an over-limit object from an in-limit one,
+/// without ever trusting file metadata or an encoded length field to size an
+/// allocation. Absence is handled separately at open time.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum BoundedRecordBytes {
+    /// The opened object supplied strictly more than the configured maximum;
+    /// the single detection byte beyond the limit was observed. Over-limit
+    /// input is rejected before decoding.
+    Oversized,
+    /// The opened object supplied at most the configured maximum bytes.
+    Bytes(Vec<u8>),
+}
+
+/// Bounded read of an already-opened final-record reader (Correction B).
+///
+/// Reads at most `max + 1` bytes using checked arithmetic: the `+ 1` is a
+/// single detection byte that lets an over-limit object be distinguished from a
+/// maximum-size one WITHOUT trusting any advertised/metadata length. The
+/// allocation is bounded by `max + 1` regardless of how many bytes the reader
+/// actually supplies, so a source that yields more bytes than its initial
+/// advertised size can never force an unbounded buffer. An I/O failure
+/// (including one after a partial read) is propagated as a refusal, never
+/// absence or success.
+pub(crate) fn read_bounded_final_record_bytes<R: std::io::Read>(
+    mut reader: R,
+    max: usize,
+    what: &str,
+) -> Result<BoundedRecordBytes, RtrError> {
+    let cap = max
+        .checked_add(1)
+        .ok_or_else(|| RtrError::Io(format!("bounded read limit overflow for {}", what)))?;
+    let mut buf = Vec::with_capacity(cap);
+    // `take(cap)` caps the total bytes `read_to_end` will consume/allocate at
+    // `cap`, independent of any advertised length; failures propagate as Io.
+    use std::io::Read as _;
+    let read = std::io::Read::take(&mut reader, cap as u64)
+        .read_to_end(&mut buf)
+        .map_err(|e| RtrError::Io(format!("cannot read {}: {}", what, e)))?;
+    debug_assert_eq!(read, buf.len());
+    if buf.len() > max {
+        // At least one byte beyond the limit was present ⇒ over-limit; reject
+        // before decoding and without reading/allocating the whole object.
+        return Ok(BoundedRecordBytes::Oversized);
+    }
+    Ok(BoundedRecordBytes::Bytes(buf))
+}
+
+/// Open the authoritative final record at `path`, refusing a non-regular file
+/// and failing closed on any open/stat error (Correction B).
+///
+/// Returns `Ok(None)` ONLY for a genuinely absent record (open ⇒ NotFound).
+/// The open validates the OPENED object: symlinks are followed to their target
+/// and the target MUST be a regular file; a FIFO, device, socket, directory, or
+/// other special file is refused. On the supported Unix profile the open uses
+/// `O_NONBLOCK` so a FIFO (or other special file) cannot block startup during
+/// the open itself — the object is classified and refused without blocking.
+/// `O_NONBLOCK` has no adverse effect on a regular file.
+fn open_regular_final_record(path: &Path) -> Result<Option<std::fs::File>, RtrError> {
+    let open_result = {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            std::fs::OpenOptions::new()
+                .read(true)
+                .custom_flags(libc::O_NONBLOCK)
+                .open(path)
+        }
+        #[cfg(not(unix))]
+        {
+            std::fs::OpenOptions::new().read(true).open(path)
+        }
+    };
+    let file = match open_result {
+        Ok(f) => f,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => {
+            return Err(RtrError::Io(format!(
+                "cannot open RTR {}: {}",
+                path.display(),
+                e
+            )))
+        }
+    };
+    let meta = file.metadata().map_err(|e| {
+        RtrError::Io(format!(
+            "cannot stat opened RTR {}: {}",
+            path.display(),
+            e
+        ))
+    })?;
+    if !meta.file_type().is_file() {
+        return Err(RtrError::Io(format!(
+            "RTR {} is not a regular file ({:?}); refusing (fail-closed)",
+            path.display(),
+            meta.file_type()
+        )));
+    }
+    Ok(Some(file))
+}
+
 /// Read and classify the final RTR at `data_dir`.
 ///
 /// A missing file is [`RtrReadResult::Absent`]. A present-but-unreadable file
 /// is an IO error (fail-closed). A present-but-undecodable file is
 /// [`RtrReadResult::Invalid`]. Only a strictly valid record yields
-/// [`RtrReadResult::Present`]. The read is bounded: a file larger than
-/// [`RTR_MAX_RECORD_SIZE`] is refused without allocating from its length.
+/// [`RtrReadResult::Present`].
+///
+/// Correction B: the read is bounded during the read itself. The authoritative
+/// final record is opened ONCE; the opened object is validated as a regular
+/// file (special files are refused without a blocking open); at most
+/// [`RTR_MAX_RECORD_SIZE`] plus one detection byte are read using checked
+/// arithmetic; an over-limit object is rejected before decoding. No buffer is
+/// ever allocated from file metadata or an encoded length, so a file that grows
+/// (or advertises a smaller size than it supplies) between operations cannot
+/// force an unbounded read. Absent semantics are preserved ONLY for a genuinely
+/// absent final record; every I/O failure — including one after a partial read
+/// — is a refusal, never absence or success.
 pub fn read_rtr(data_dir: &Path) -> Result<RtrReadResult, RtrError> {
     let path = rtr_path(data_dir);
-    let meta = match std::fs::metadata(&path) {
-        Ok(m) => m,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            return Ok(RtrReadResult::Absent)
-        }
-        Err(e) => {
-            return Err(RtrError::Io(format!(
-                "cannot stat RTR {}: {}",
-                path.display(),
-                e
+    let file = match open_regular_final_record(&path)? {
+        Some(f) => f,
+        None => return Ok(RtrReadResult::Absent),
+    };
+    let what = format!("RTR {}", path.display());
+    match read_bounded_final_record_bytes(file, RTR_MAX_RECORD_SIZE, &what)? {
+        BoundedRecordBytes::Oversized => {
+            // Report the smallest known over-limit length; the reader never
+            // consumed (or trusted) the object's full advertised size.
+            Ok(RtrReadResult::Invalid(RtrDecodeError::Oversized(
+                RTR_MAX_RECORD_SIZE + 1,
             )))
         }
-    };
-    if meta.len() > RTR_MAX_RECORD_SIZE as u64 {
-        // Do not allocate from an untrusted oversized length.
-        return Ok(RtrReadResult::Invalid(RtrDecodeError::Oversized(
-            meta.len() as usize,
-        )));
-    }
-    let bytes = match std::fs::read(&path) {
-        Ok(b) => b,
-        Err(e) => {
-            return Err(RtrError::Io(format!(
-                "cannot read RTR {}: {}",
-                path.display(),
-                e
-            )))
-        }
-    };
-    match RestoreTransactionRecord::decode(&bytes) {
-        Ok(rec) => Ok(RtrReadResult::Present(rec)),
-        Err(d) => Ok(RtrReadResult::Invalid(d)),
+        BoundedRecordBytes::Bytes(bytes) => match RestoreTransactionRecord::decode(&bytes) {
+            Ok(rec) => Ok(RtrReadResult::Present(rec)),
+            Err(d) => Ok(RtrReadResult::Invalid(d)),
+        },
     }
 }
 
@@ -1618,5 +1714,181 @@ mod tests {
         publish_record(tmp.path(), &complete).expect("publish");
         let err = finalize_complete_from_intent(tmp.path(), &complete).expect_err("not intent");
         assert!(matches!(err, FinalizeError::ExpectedNotIntent));
+    }
+
+    // ------------------------------------------------------------------
+    // Correction B — bounded final-record reader.
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn bounded_reader_valid_record_reads_all_bytes() {
+        let rec = sample_record(RtrState::Complete);
+        let bytes = rec.encode();
+        let out = read_bounded_final_record_bytes(&bytes[..], RTR_MAX_RECORD_SIZE, "test")
+            .expect("read");
+        assert_eq!(out, BoundedRecordBytes::Bytes(bytes));
+    }
+
+    #[test]
+    fn bounded_reader_maximum_size_boundary_is_accepted() {
+        // Exactly `max` bytes is in-limit; `max + 1` is over-limit.
+        let at_max = vec![0u8; RTR_MAX_RECORD_SIZE];
+        let out = read_bounded_final_record_bytes(&at_max[..], RTR_MAX_RECORD_SIZE, "test")
+            .expect("read");
+        assert!(matches!(out, BoundedRecordBytes::Bytes(b) if b.len() == RTR_MAX_RECORD_SIZE));
+
+        let over = vec![0u8; RTR_MAX_RECORD_SIZE + 1];
+        let out = read_bounded_final_record_bytes(&over[..], RTR_MAX_RECORD_SIZE, "test")
+            .expect("read");
+        assert_eq!(out, BoundedRecordBytes::Oversized);
+    }
+
+    /// A reader that advertises a small size but yields far more bytes than
+    /// advertised — the bounded reader must NOT trust the advertised size and
+    /// must still cap the bytes it consumes/allocates at `max + 1`.
+    struct LyingReader {
+        remaining: usize,
+    }
+    impl std::io::Read for LyingReader {
+        fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+            if self.remaining == 0 {
+                return Ok(0);
+            }
+            let n = buf.len().min(self.remaining);
+            for b in &mut buf[..n] {
+                *b = 0xAB;
+            }
+            self.remaining -= n;
+            Ok(n)
+        }
+    }
+
+    #[test]
+    fn bounded_reader_ignores_advertised_size_and_caps_allocation() {
+        // The source will supply 4 MiB but the bounded reader must stop at
+        // max + 1 and classify it Oversized without allocating the whole thing.
+        let reader = LyingReader {
+            remaining: 4 * 1024 * 1024,
+        };
+        let out =
+            read_bounded_final_record_bytes(reader, RTR_MAX_RECORD_SIZE, "lying").expect("read");
+        assert_eq!(out, BoundedRecordBytes::Oversized);
+    }
+
+    /// A reader that returns some bytes then a hard I/O error — a read error
+    /// after partial input must propagate as refusal, never absence/success.
+    struct PartialThenError {
+        yielded: bool,
+    }
+    impl std::io::Read for PartialThenError {
+        fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+            if !self.yielded {
+                self.yielded = true;
+                let n = buf.len().min(16);
+                for b in &mut buf[..n] {
+                    *b = 1;
+                }
+                return Ok(n);
+            }
+            Err(std::io::Error::new(std::io::ErrorKind::Other, "injected read error"))
+        }
+    }
+
+    #[test]
+    fn bounded_reader_read_error_after_partial_is_refusal() {
+        let reader = PartialThenError { yielded: false };
+        let err = read_bounded_final_record_bytes(reader, RTR_MAX_RECORD_SIZE, "partial")
+            .expect_err("must refuse");
+        assert!(matches!(err, RtrError::Io(_)));
+    }
+
+    #[test]
+    fn read_rtr_truncated_record_is_invalid() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let rec = sample_record(RtrState::Complete);
+        let bytes = rec.encode();
+        std::fs::write(rtr_path(tmp.path()), &bytes[..bytes.len() - 1]).expect("write truncated");
+        assert!(matches!(
+            read_rtr(tmp.path()).expect("read"),
+            RtrReadResult::Invalid(_)
+        ));
+    }
+
+    #[test]
+    fn read_rtr_trailing_bytes_is_invalid() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let rec = sample_record(RtrState::Complete);
+        let mut bytes = rec.encode();
+        bytes.push(0x00);
+        std::fs::write(rtr_path(tmp.path()), &bytes).expect("write trailing");
+        assert!(matches!(
+            read_rtr(tmp.path()).expect("read"),
+            RtrReadResult::Invalid(RtrDecodeError::TrailingData)
+        ));
+    }
+
+    #[test]
+    fn read_rtr_oversized_on_disk_is_invalid_without_trusting_metadata() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        // Write far more than the maximum. The bounded reader rejects it before
+        // decoding, without allocating from metadata.
+        let big = vec![0xCDu8; RTR_MAX_RECORD_SIZE + 4096];
+        std::fs::write(rtr_path(tmp.path()), &big).expect("write oversized");
+        match read_rtr(tmp.path()).expect("read") {
+            RtrReadResult::Invalid(RtrDecodeError::Oversized(n)) => {
+                assert_eq!(n, RTR_MAX_RECORD_SIZE + 1)
+            }
+            other => panic!("expected Oversized, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn read_rtr_maximum_valid_size_boundary_ok() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let rec = sample_record(RtrState::Complete);
+        let bytes = rec.encode();
+        assert!(bytes.len() <= RTR_MAX_RECORD_SIZE);
+        std::fs::write(rtr_path(tmp.path()), &bytes).expect("write");
+        assert!(matches!(
+            read_rtr(tmp.path()).expect("read"),
+            RtrReadResult::Present(_)
+        ));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn read_rtr_fifo_is_refused_without_blocking_open() {
+        use std::ffi::CString;
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let path = rtr_path(tmp.path());
+        let c = CString::new(path.as_os_str().to_str().unwrap()).unwrap();
+        // Create a FIFO at the authoritative record path (no writer attached).
+        let rc = unsafe { libc::mkfifo(c.as_ptr(), 0o600) };
+        assert_eq!(rc, 0, "mkfifo failed");
+        // read_rtr must refuse (not block) — the open uses O_NONBLOCK and the
+        // non-regular file type is rejected.
+        let err = read_rtr(tmp.path()).expect_err("fifo must be refused");
+        assert!(matches!(err, RtrError::Io(_)));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn read_rtr_directory_at_record_path_is_refused() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        std::fs::create_dir(rtr_path(tmp.path())).expect("mk dir at rtr path");
+        let err = read_rtr(tmp.path()).expect_err("directory must be refused");
+        assert!(matches!(err, RtrError::Io(_)));
+    }
+
+    #[test]
+    fn read_rtr_temp_artifact_never_replaces_authoritative_record() {
+        // A temp artifact is never the authoritative final record; with only a
+        // temp artifact present the destination reads Absent.
+        let tmp = tempfile::tempdir().expect("tempdir");
+        std::fs::write(tmp.path().join(RTR_TEMP_FILENAME), b"junk").expect("write temp");
+        assert!(matches!(
+            read_rtr(tmp.path()).expect("read"),
+            RtrReadResult::Absent
+        ));
     }
 }

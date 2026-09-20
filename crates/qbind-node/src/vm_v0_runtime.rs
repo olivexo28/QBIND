@@ -66,28 +66,6 @@ impl VmV0RuntimeState {
     /// [`Self::open_existing_from_config`], which refuses to initialize a
     /// missing restored database.
     pub fn open_from_config(config: &NodeConfig) -> Result<Option<Arc<Self>>, VmV0RuntimeError> {
-        Self::open_from_config_mode(config, false)
-    }
-
-    /// Open the VM-v0 persistent account state, refusing to create it if
-    /// missing (Run 422 D7-D8, Correction B).
-    ///
-    /// Used when a destination is admitted through a valid `COMPLETE`
-    /// restore-transaction record (ordinary restart over a completed restore)
-    /// or immediately after a successful restore. The underlying database is
-    /// opened with `create_if_missing` DISABLED: an absent, empty, or
-    /// unrelated-only state directory fails closed instead of silently
-    /// initializing a replacement account database.
-    pub fn open_existing_from_config(
-        config: &NodeConfig,
-    ) -> Result<Option<Arc<Self>>, VmV0RuntimeError> {
-        Self::open_from_config_mode(config, true)
-    }
-
-    fn open_from_config_mode(
-        config: &NodeConfig,
-        require_existing: bool,
-    ) -> Result<Option<Arc<Self>>, VmV0RuntimeError> {
         if config.execution_profile != ExecutionProfile::VmV0 {
             return Ok(None);
         }
@@ -97,23 +75,15 @@ impl VmV0RuntimeState {
             .as_ref()
             .ok_or(VmV0RuntimeError::MissingDataDir)?;
         let state_dir = vm_v0_state_dir(data_dir);
-        let open_result = if require_existing {
-            RocksDbAccountState::open_existing(&state_dir)
-        } else {
-            RocksDbAccountState::open(&state_dir)
-        };
-        let state = open_result.map_err(|source| VmV0RuntimeError::OpenState {
-            path: state_dir.clone(),
-            source,
+        let state = RocksDbAccountState::open(&state_dir).map_err(|source| {
+            VmV0RuntimeError::OpenState {
+                path: state_dir.clone(),
+                source,
+            }
         })?;
         eprintln!(
-            "[vm-v0] opened persistent state at {} (mode={})",
-            state_dir.display(),
-            if require_existing {
-                "existing-only"
-            } else {
-                "create-if-missing"
-            }
+            "[vm-v0] opened persistent state at {} (mode=create-if-missing)",
+            state_dir.display()
         );
 
         Ok(Some(Arc::new(Self {
@@ -123,6 +93,74 @@ impl VmV0RuntimeState {
             state: Mutex::new(state),
             snapshot_in_progress: AtomicBool::new(false),
         })))
+    }
+
+    /// Open the VM-v0 persistent account state, refusing to create it if
+    /// missing (Run 422 D7-D8, Correction A).
+    ///
+    /// Used when a destination is admitted through a valid `COMPLETE`
+    /// restore-transaction record (ordinary restart over a completed restore)
+    /// or immediately after a successful restore. The required restored account
+    /// database is ALWAYS validated with `create_if_missing` DISABLED
+    /// (`RocksDbAccountState::open_existing`) via
+    /// [`validate_required_restored_account_db`], regardless of the selected
+    /// execution profile: a non-VM-v0 profile must not admit a COMPLETE
+    /// destination whose restored database is missing, empty, unrelated-only,
+    /// or unopenable. An absent, empty, or unrelated-only state directory fails
+    /// closed instead of silently initializing a replacement account database.
+    ///
+    /// When the VM-v0 profile is selected, the successfully opened handle is
+    /// REUSED for the runtime (avoiding a divergent second validation). For a
+    /// non-VM-v0 profile there is no VM-v0 runtime, so the validated handle is
+    /// dropped after confirming the database opens (`Ok(None)`); the validation
+    /// itself never initializes a replacement.
+    pub fn open_existing_from_config(
+        config: &NodeConfig,
+    ) -> Result<Option<Arc<Self>>, VmV0RuntimeError> {
+        // Correction A: validate the required restored account database for
+        // EVERY execution profile using the existing-only opener.
+        let opened = validate_required_restored_account_db(config)?;
+        if config.execution_profile != ExecutionProfile::VmV0 {
+            // Validation succeeded; a non-VM-v0 profile has no VM-v0 runtime, so
+            // drop the validated handle. No replacement database was created.
+            let data_dir = config
+                .data_dir
+                .as_ref()
+                .ok_or(VmV0RuntimeError::MissingDataDir)?;
+            eprintln!(
+                "[vm-v0] validated required restored account database at {} \
+                 (mode=existing-only, profile={:?}, no VM-v0 runtime built)",
+                vm_v0_state_dir(data_dir).display(),
+                config.execution_profile
+            );
+            return Ok(None);
+        }
+        // Reuse the validated handle for the VM-v0 runtime.
+        Ok(Some(Self::from_opened_state(config, opened)?))
+    }
+
+    /// Build a runtime around an already-opened account-state handle, reusing it
+    /// rather than re-opening (Correction A).
+    fn from_opened_state(
+        config: &NodeConfig,
+        state: RocksDbAccountState,
+    ) -> Result<Arc<Self>, VmV0RuntimeError> {
+        let data_dir = config
+            .data_dir
+            .as_ref()
+            .ok_or(VmV0RuntimeError::MissingDataDir)?;
+        let state_dir = vm_v0_state_dir(data_dir);
+        eprintln!(
+            "[vm-v0] opened persistent state at {} (mode=existing-only)",
+            state_dir.display()
+        );
+        Ok(Arc::new(Self {
+            state_dir,
+            snapshot_dir: config.snapshot_config.snapshot_dir.clone(),
+            max_snapshots: config.snapshot_config.max_snapshots.max(1),
+            state: Mutex::new(state),
+            snapshot_in_progress: AtomicBool::new(false),
+        }))
     }
 
     pub fn state_dir(&self) -> &Path {
@@ -238,6 +276,33 @@ impl VmV0RuntimeState {
 
 pub fn vm_v0_state_dir(data_dir: &Path) -> PathBuf {
     data_dir.join(VM_V0_STATE_DIR_NAME)
+}
+
+/// Validate that the required restored account database exists and is openable,
+/// regardless of the selected execution profile (Run 422 D7-D8, Correction A).
+///
+/// Opens `<data_dir>/state_vm_v0` with `create_if_missing` DISABLED
+/// (`RocksDbAccountState::open_existing`). A missing, empty, unrelated-only, or
+/// otherwise unopenable directory fails closed with
+/// [`VmV0RuntimeError::OpenState`] and NEVER initializes a replacement database.
+/// On success the opened handle is returned so a caller can REUSE it (the VM-v0
+/// runtime) rather than performing a divergent second open; a validation-only
+/// caller drops the handle. A failed open may leave permitted diagnostic/lock
+/// artifacts (e.g. `LOG`, `LOCK`) but does not create the database itself.
+pub fn validate_required_restored_account_db(
+    config: &NodeConfig,
+) -> Result<RocksDbAccountState, VmV0RuntimeError> {
+    let data_dir = config
+        .data_dir
+        .as_ref()
+        .ok_or(VmV0RuntimeError::MissingDataDir)?;
+    let state_dir = vm_v0_state_dir(data_dir);
+    RocksDbAccountState::open_existing(&state_dir).map_err(|source| {
+        VmV0RuntimeError::OpenState {
+            path: state_dir,
+            source,
+        }
+    })
 }
 
 fn prune_old_snapshots(
@@ -532,5 +597,88 @@ mod tests {
             .get_account_state(&account);
 
         assert_eq!(restored_state.nonce, 3);
+    }
+
+    // ------------------------------------------------------------------
+    // Run 422 D7-D8 Correction A: profile-independent existing-only validation
+    // of the required restored account database.
+    // ------------------------------------------------------------------
+
+    fn make_real_state_db(data_dir: &Path) {
+        // Create a genuine RocksDB account database at <data_dir>/state_vm_v0.
+        let dir = vm_v0_state_dir(data_dir);
+        let _db = RocksDbAccountState::open(&dir).expect("create real db");
+    }
+
+    #[test]
+    fn correction_a_nonce_only_complete_requires_existing_db_missing_refuses() {
+        // A non-VM-v0 (NonceOnly) profile admitted through COMPLETE must still
+        // validate the required restored database; a missing one refuses.
+        let temp = TempDir::new().unwrap();
+        let mut config = NodeConfig::devnet_v0_preset();
+        config.execution_profile = ExecutionProfile::NonceOnly;
+        config.data_dir = Some(temp.path().to_path_buf());
+        let err = VmV0RuntimeState::open_existing_from_config(&config).unwrap_err();
+        assert!(matches!(err, VmV0RuntimeError::OpenState { .. }));
+        // No replacement database was initialized: a fresh existing-only open
+        // still refuses.
+        assert!(RocksDbAccountState::open_existing(vm_v0_state_dir(temp.path())).is_err());
+    }
+
+    #[test]
+    fn correction_a_nonce_only_complete_unrelated_only_refuses() {
+        let temp = TempDir::new().unwrap();
+        let dir = vm_v0_state_dir(temp.path());
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("UNRELATED_SENTINEL"), b"x").unwrap();
+        let mut config = NodeConfig::devnet_v0_preset();
+        config.execution_profile = ExecutionProfile::NonceOnly;
+        config.data_dir = Some(temp.path().to_path_buf());
+        let err = VmV0RuntimeState::open_existing_from_config(&config).unwrap_err();
+        assert!(matches!(err, VmV0RuntimeError::OpenState { .. }));
+        // The unrelated sentinel is preserved (no replacement written over it).
+        assert!(dir.join("UNRELATED_SENTINEL").exists());
+    }
+
+    #[test]
+    fn correction_a_nonce_only_complete_real_db_validates_without_runtime() {
+        let temp = TempDir::new().unwrap();
+        make_real_state_db(temp.path());
+        let mut config = NodeConfig::devnet_v0_preset();
+        config.execution_profile = ExecutionProfile::NonceOnly;
+        config.data_dir = Some(temp.path().to_path_buf());
+        // Validation succeeds; a non-VM-v0 profile builds no runtime.
+        let runtime = VmV0RuntimeState::open_existing_from_config(&config).unwrap();
+        assert!(runtime.is_none());
+    }
+
+    #[test]
+    fn correction_a_vm_v0_complete_missing_db_refuses() {
+        let temp = TempDir::new().unwrap();
+        let config = vm_v0_config(temp.path(), None);
+        let err = VmV0RuntimeState::open_existing_from_config(&config).unwrap_err();
+        assert!(matches!(err, VmV0RuntimeError::OpenState { .. }));
+        // Existing-only open never created a replacement database.
+        assert!(RocksDbAccountState::open_existing(vm_v0_state_dir(temp.path())).is_err());
+    }
+
+    #[test]
+    fn correction_a_vm_v0_complete_real_db_reuses_handle_for_runtime() {
+        let temp = TempDir::new().unwrap();
+        make_real_state_db(temp.path());
+        let config = vm_v0_config(temp.path(), None);
+        let runtime = VmV0RuntimeState::open_existing_from_config(&config)
+            .unwrap()
+            .expect("vm-v0 runtime built from validated handle");
+        assert_eq!(runtime.state_dir(), &vm_v0_state_dir(temp.path()));
+    }
+
+    #[test]
+    fn correction_a_validate_free_fn_requires_data_dir() {
+        let mut config = NodeConfig::devnet_v0_preset();
+        config.execution_profile = ExecutionProfile::NonceOnly;
+        config.data_dir = None;
+        let err = validate_required_restored_account_db(&config).unwrap_err();
+        assert!(matches!(err, VmV0RuntimeError::MissingDataDir));
     }
 }
