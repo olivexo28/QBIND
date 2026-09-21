@@ -959,6 +959,22 @@ pub struct SigningOwnershipDomain {
     inner: Mutex<DomainInner>,
 }
 
+/// Run 422 D7-D10 Correction E — the tracked outcome envelope of a single
+/// atomic reservation/accounting write whose durable acknowledgement was
+/// uncertain. A failed acknowledgement does not prove nothing was stored, so the
+/// only two consistent durable outcomes are: the write did NOT land (the count
+/// is still `prior_count`) or it DID land (the count is exactly
+/// `attempted_count`, i.e. `prior_count + 1`). Reconciliation resolves the
+/// failed batch against these bounds and refuses any durable count that regressed
+/// below `prior_count`, exceeded `attempted_count`, or whose limit changed.
+#[derive(Debug, Clone, Copy)]
+struct UncertainAttempt {
+    /// The last durably-acknowledged position count before the uncertain write.
+    prior_count: u64,
+    /// The count the uncertain write attempted to make durable (`prior_count + 1`).
+    attempted_count: u64,
+}
+
 /// The in-memory live state for one reserved position within a domain. Its
 /// presence — and the `invoked` / `result_acked` flags — is exactly the
 /// knowledge a restart cannot reconstruct: reading `Reserved` (or even `Signed`)
@@ -1011,6 +1027,11 @@ struct DomainInner {
     /// re-reads the durable metadata count and reconciles before admitting any new
     /// position, so stale accounting can never admit past the durable limit.
     accounting_uncertain: bool,
+    /// Run 422 D7-D10 Correction E — the tracked attempted update of the last
+    /// uncertain reservation/accounting write, used to resolve the failed batch's
+    /// possible durable outcomes conservatively during reconciliation. `None` when
+    /// the uncertainty did not originate from a tracked reservation write.
+    uncertain_attempt: Option<UncertainAttempt>,
     /// Monotonic source of unique live operation ids (checked; exhaustion is a
     /// terminal fail-closed state, never wraparound). In-process bookkeeping.
     next_operation_id: u64,
@@ -1035,6 +1056,7 @@ impl SigningOwnershipDomain {
                 recovered_acked: RecoveredAckCache::new(MAX_RECOVERED_ACK_ENTRIES),
                 reserved_positions: 0,
                 accounting_uncertain: false,
+                uncertain_attempt: None,
                 next_operation_id: 1,
             }),
         })
@@ -1406,10 +1428,16 @@ impl SigningReservationJournal {
             Ok(()) => {}
             Err(e) => {
                 // A failed/uncertain acknowledgement does NOT prove nothing was
-                // stored. Mark the in-memory accounting uncertain so the next
-                // admission reconciles against the durable count; grant no
-                // continuation and do not advance the in-memory counter.
+                // stored. Mark the in-memory accounting uncertain and record the
+                // tracked attempted update (prior count, attempted count, limit) so
+                // the next admission can resolve the failed batch's possible
+                // outcomes against the durable metadata; grant no continuation and
+                // do not advance the in-memory counter.
                 inner.accounting_uncertain = true;
+                inner.uncertain_attempt = Some(UncertainAttempt {
+                    prior_count: inner.reserved_positions,
+                    attempted_count: new_reserved,
+                });
                 return Err(e.into());
             }
         }
@@ -1440,10 +1468,22 @@ impl SigningReservationJournal {
     /// If a prior atomic reservation/accounting write returned a failed or
     /// uncertain acknowledgement, the in-memory `reserved_positions` counter can
     /// no longer be trusted (a failed ack does not prove nothing was stored). This
-    /// re-reads the durable metadata count — the persisted source of truth — and
-    /// resets the in-memory counter to it before any further admission. If the
-    /// metadata read or decode fails, the uncertain flag stays set and the caller
-    /// fails closed (no new position is admitted). Runs under the domain lock.
+    /// re-reads the durable metadata — the persisted source of truth — and
+    /// resolves the failed batch's possible outcomes against the tracked attempted
+    /// update before clearing the uncertainty. It refuses fail-closed (leaving the
+    /// domain uncertain and unusable for new reservations) when:
+    /// * the metadata is missing, unreadable, or corrupt;
+    /// * the durable journal-wide limit differs from the established limit (the
+    ///   limit cannot change silently);
+    /// * the durable count regressed below the previously acknowledged obligations
+    ///   or exceeded the attempted update (an unexpected count regression or
+    ///   record/accounting mismatch).
+    ///
+    /// It performs NO repair write and never mints a reconstructed continuation
+    /// from a surviving record; it is a local consistency check that resolves the
+    /// two possible outcomes of one uncertain batch and does not, and cannot,
+    /// detect an internally consistent whole-copy rollback. Runs under the domain
+    /// lock.
     fn reconcile_accounting_if_uncertain(
         &self,
         inner: &mut DomainInner,
@@ -1451,15 +1491,66 @@ impl SigningReservationJournal {
         if !inner.accounting_uncertain {
             return Ok(());
         }
+        // The established journal-wide limit is the fixed invariant. It is present
+        // for any handle constructed via `initialize`/`open`.
+        let established_limit = inner
+            .established
+            .ok_or(JournalError::NotInitialized)?
+            .max_reserved_positions;
+        // Read + decode the durable metadata. A missing, unreadable, or corrupt
+        // metadata read leaves the uncertain flag SET (never cleared) so the domain
+        // stays unusable for new reservations and the caller fails closed.
         let bytes = self.store.get_signing_metadata()?.ok_or_else(|| {
             JournalError::AccountingInconsistent(
                 "initialization metadata missing during revalidation".to_string(),
             )
         })?;
         let metadata = SigningJournalMetadata::decode(&bytes)?;
-        // The established limit is fixed; only the durable count is reconciled.
+        // The established journal-wide limit cannot change silently. A durable
+        // metadata limit that differs from the established one is refused; the
+        // domain stays uncertain and unusable.
+        if metadata.max_reserved_positions != established_limit {
+            return Err(JournalError::AccountingInconsistent(format!(
+                "durable limit {} differs from established limit {} during revalidation",
+                metadata.max_reserved_positions, established_limit
+            )));
+        }
+        // Resolve the failed batch's possible outcomes against the tracked
+        // attempted update. The durable count may reflect that the write did NOT
+        // land (still `prior_count`) or DID land (exactly `attempted_count`). It
+        // must never regress below the previously acknowledged obligations, nor
+        // exceed the attempted update.
+        match inner.uncertain_attempt {
+            Some(attempt) => {
+                if metadata.reserved_positions < attempt.prior_count {
+                    return Err(JournalError::AccountingInconsistent(format!(
+                        "durable count {} regressed below acknowledged {} during revalidation",
+                        metadata.reserved_positions, attempt.prior_count
+                    )));
+                }
+                if metadata.reserved_positions > attempt.attempted_count {
+                    return Err(JournalError::AccountingInconsistent(format!(
+                        "durable count {} exceeds attempted {} during revalidation",
+                        metadata.reserved_positions, attempt.attempted_count
+                    )));
+                }
+            }
+            None => {
+                // Uncertainty without a tracked reservation attempt: the durable
+                // count must at least not regress below the last known in-memory
+                // count.
+                if metadata.reserved_positions < inner.reserved_positions {
+                    return Err(JournalError::AccountingInconsistent(format!(
+                        "durable count {} regressed below in-memory {} during revalidation",
+                        metadata.reserved_positions, inner.reserved_positions
+                    )));
+                }
+            }
+        }
+        // Only a fully consistent durable observation clears the uncertainty.
         inner.reserved_positions = metadata.reserved_positions;
         inner.accounting_uncertain = false;
+        inner.uncertain_attempt = None;
         Ok(())
     }
 
@@ -2397,6 +2488,142 @@ mod tests {
         assert!(matches!(
             journal.reserve_for_sign(&pos, &b).unwrap(),
             ReservationOutcome::ExactRetryRetained(ref s) if s == b"sig-A"
+        ));
+    }
+
+    // ------------------------------------------------------------------
+    // Run 422 D7-D10 Correction E — conservative uncertain-write reconciliation:
+    // the established limit cannot change silently, the count cannot regress, and
+    // an unreadable/corrupt metadata read leaves the domain uncertain.
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn reconcile_refuses_unexpected_limit_change() {
+        let store = Arc::new(ModelStore::default());
+        let journal =
+            SigningReservationJournal::initialize(store.clone(), 8).expect("initialize");
+
+        // Force the atomic reservation/accounting write to be uncertain: the bytes
+        // (record + metadata new(8,1)) become readable but the ack is an error.
+        store.set_store_then_error(true);
+        let pos1 = position(SigningKind::Proposal, 1);
+        let b = binding(b"m1");
+        assert!(matches!(
+            journal.reserve_for_sign(&pos1, &b),
+            Err(JournalError::Storage(_))
+        ));
+        store.set_store_then_error(false);
+
+        // Simulate the established journal-wide limit changing silently underneath
+        // the handle (a limit that differs from the established one).
+        store.overwrite(MODEL_META_KEY, SigningJournalMetadata::new(9, 1).encode());
+
+        // The next admission reconciles first and must refuse — the limit cannot
+        // change silently — leaving the domain unusable for new reservations.
+        let pos2 = position(SigningKind::Proposal, 2);
+        assert!(matches!(
+            journal.reserve_for_sign(&pos2, &b),
+            Err(JournalError::AccountingInconsistent(_))
+        ));
+        // Still uncertain: a further admission also refuses.
+        assert!(matches!(
+            journal.reserve_for_sign(&pos2, &b),
+            Err(JournalError::AccountingInconsistent(_))
+        ));
+    }
+
+    #[test]
+    fn reconcile_refuses_count_regression() {
+        let store = Arc::new(ModelStore::default());
+        let journal =
+            SigningReservationJournal::initialize(store.clone(), 8).expect("initialize");
+        let b = binding(b"m");
+
+        // A first successful reservation acknowledges count = 1.
+        let pos1 = position(SigningKind::Proposal, 1);
+        let _cap1 = reserve_and_invoke(&journal, &pos1, &b);
+
+        // A second reservation is uncertain: durable metadata becomes new(8,2),
+        // tracked attempt is {prior:1, attempted:2}.
+        store.set_store_then_error(true);
+        let pos2 = position(SigningKind::Proposal, 2);
+        assert!(matches!(
+            journal.reserve_for_sign(&pos2, &b),
+            Err(JournalError::Storage(_))
+        ));
+        store.set_store_then_error(false);
+
+        // The durable count regresses below the previously acknowledged obligation
+        // (1). Reconciliation must refuse rather than adopt a regressed count.
+        store.overwrite(MODEL_META_KEY, SigningJournalMetadata::new(8, 0).encode());
+        let pos3 = position(SigningKind::Proposal, 3);
+        assert!(matches!(
+            journal.reserve_for_sign(&pos3, &b),
+            Err(JournalError::AccountingInconsistent(_))
+        ));
+    }
+
+    #[test]
+    fn reconcile_refuses_count_above_attempt() {
+        let store = Arc::new(ModelStore::default());
+        let journal =
+            SigningReservationJournal::initialize(store.clone(), 8).expect("initialize");
+        let b = binding(b"m");
+
+        // One uncertain reservation: attempt {prior:0, attempted:1}.
+        store.set_store_then_error(true);
+        let pos1 = position(SigningKind::Proposal, 1);
+        assert!(matches!(
+            journal.reserve_for_sign(&pos1, &b),
+            Err(JournalError::Storage(_))
+        ));
+        store.set_store_then_error(false);
+
+        // A durable count that EXCEEDS the attempted update cannot be explained by
+        // this handle's single failed batch — refuse rather than adopt it.
+        store.overwrite(MODEL_META_KEY, SigningJournalMetadata::new(8, 5).encode());
+        let pos2 = position(SigningKind::Proposal, 2);
+        assert!(matches!(
+            journal.reserve_for_sign(&pos2, &b),
+            Err(JournalError::AccountingInconsistent(_))
+        ));
+    }
+
+    #[test]
+    fn reconcile_metadata_read_failure_leaves_domain_uncertain() {
+        let store = Arc::new(ModelStore::default());
+        let journal =
+            SigningReservationJournal::initialize(store.clone(), 8).expect("initialize");
+        let b = binding(b"m");
+
+        // Make the atomic write uncertain to enter the uncertain state.
+        store.set_store_then_error(true);
+        let pos1 = position(SigningKind::Proposal, 1);
+        assert!(matches!(
+            journal.reserve_for_sign(&pos1, &b),
+            Err(JournalError::Storage(_))
+        ));
+        store.set_store_then_error(false);
+
+        // An unreadable metadata read during reconciliation must leave the domain
+        // uncertain (never cleared) and fail closed.
+        store.set_fail_reads(true);
+        let pos2 = position(SigningKind::Proposal, 2);
+        assert!(matches!(
+            journal.reserve_for_sign(&pos2, &b),
+            Err(JournalError::Storage(_))
+        ));
+
+        // Once reads recover AND the durable metadata is a consistent outcome of
+        // the failed batch (count is prior or attempted, limit unchanged),
+        // reconciliation clears the uncertainty and admission resumes.
+        store.set_fail_reads(false);
+        // Durable metadata from store_then_error is new(8,1) == attempted; a fresh
+        // position now admits.
+        let pos3 = position(SigningKind::Proposal, 3);
+        assert!(matches!(
+            journal.reserve_for_sign(&pos3, &b).unwrap(),
+            ReservationOutcome::FreshlyReserved(_)
         ));
     }
 
