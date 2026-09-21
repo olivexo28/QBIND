@@ -9440,3 +9440,171 @@ local demonstrated scope; model reopen, not power-loss/release-binary evidence).
 the remaining F work; C4/C5 remain OPEN. No authority activation, readiness
 promotion, D11, or Run 423 work; no PR, branch rename, force-push, rebase, or
 history rewrite.
+## Run 422 D7-D10 — Correction D finalization: operation binding across the prepare/complete split
+
+### Provenance and object limitations
+
+* **Branch:** `copilot/run-422-complete-correction-d-again` (the reviewed
+  `copilot/run-422-complete-correction-d` does **not** exist in this checkout).
+* **Starting SHA:** `ce80ee4886a75e9ed94629aa34d4856ba59dd81f` (parent of the
+  pre-existing `update` commit; present in `.git/shallow`).
+* **Implementation/test checkpoint:** `ae894dd898181845594d4e9bed84fd57aa71f00d`
+  (code + tests). Documentation (this evidence + continuity contract §4.1/§9.5) is
+  committed **after** the checkpoint and is documentation-only: it does not alter
+  the binary or the tests validated at the checkpoint.
+* **Historical objects:** the reviewed final `a0f25008…`, the reported checkpoint
+  `f94a8f6a…`, and the reported checkpoint `f94a8f6a…` are **not reachable** in
+  this shallow single-branch clone (only `ce80ee4` is in `.git/shallow`); current
+  source correspondence was inspected directly without manufacturing ancestry.
+
+### Changed paths and operation-binding implementation
+
+Single code/test file: `crates/qbind-node/src/binary_consensus_loop.rs`.
+
+* New private `BoundSigningOperation<'a>` freezes, **before any journal work**, the
+  original admission ticket (an owned `AuthorizationTicket` clone preserving exact
+  issuer/generation identity), the selected bound context (`&'a ProposalVoteAuthority`),
+  and the selected signer (`&'a Arc<dyn ValidatorSigner>`).
+* `PreparedProposalSigning`/`PreparedVoteSigning` now carry `{ op: BoundSigningOperation,
+  kind }`, where `kind` (`Fresh { proposal, preimage, publish_cap }` /
+  `Retained { proposal, retained_sig }`) holds only the message-specific journal
+  outcome. The prepared value never carries a fresh ticket, a reconstructed
+  capability, or a replacement signer.
+* `prepare_{proposal,vote}_signing_reservation` gained an `admission` parameter used
+  **only** to freeze the original ticket into `op` before `reserve_for_sign`.
+* `complete_{proposal,vote}_signing` **no longer** takes `ctx`/`admission`/`signer`
+  parameters; it takes only `current_snapshot: Option<&AuthorizedProposalVoteSnapshot>`
+  for drift detection.
+* `AdmittedSigningIdentity::reconfirm_after_journal` was replaced by the free function
+  `reconfirm_bound_operation(op, current_snapshot)`: it requires the frozen `op.ctx`
+  to be the current snapshot's bound verifier by **pointer identity**
+  (`ContextUnbound` otherwise), then confirms the **frozen original ticket** against
+  the current owner. A required op (`Some` ticket) with `current_snapshot == None`
+  refuses fail-closed; a fixture op (`None` ticket) has nothing to reconfirm.
+* Fresh-vs-retained diagnostic wording reconciled in the post-journal rejection logs
+  (fresh: no signer invocation, `Reserved` preserved; retained: no additional
+  signature, existing `Signed` preserved; no delivery).
+
+### What the prepared operation now freezes; which completion inputs remain
+
+Freezes original ticket, bound context, and selected signer. Completion accepts
+only the current snapshot (drift detection); it has **no** ticket/context/signer
+parameter, so a replacement ticket minted after storage, a substituted context, or
+a different signer cannot be supplied at completion. Original-ticket confirmation
+after owner change uses the **frozen** ticket against `current.owner().confirm(…)`:
+a supplied current owner never becomes the original issuer merely by matching
+fields; a newly-minted ticket for the advanced owner is never accepted.
+
+### Test cases and evidence boundaries (`run422_d7d10::correction_d`, 36 tests)
+
+* **A — replacement ticket:** `cd_i_replacement_ticket_t1_cannot_authorize_prepared_t0_operation`
+  — prepare/reserve/consume under T0, advance owner generation, obtain a valid T1
+  (asserted to confirm against the updated owner), show completion still refuses via
+  the frozen (now `Stale`) T0; zero signer calls, byte-identical `Reserved`. The
+  replacement-ticket parameter elimination is a source/type guarantee (completion
+  has no ticket parameter).
+* **B — foreign owner/context:** `cd_i_substituted_current_context_refused_across_split`
+  (bound-context pointer identity decisive → `bound_context_unbound`) plus retained
+  `cd_b_different_owner_equal_config_generation_foreign_issuer` (foreign issuer via
+  the production guard) and `cd_c_substituted_verifier_refused_before_signing`;
+  `cd_i_required_operation_without_current_snapshot_refuses_before_sign` (required op
+  cannot degrade into a fixture op).
+* **C — frozen signer:** `cd_i_completion_signs_through_frozen_signer_not_a_same_id_replacement`
+  — an independent same-`ValidatorId(0)`/same-suite signer `Arc` is frozen at prepare;
+  completion signs through it exactly once (D6-verifies, publishes) while the
+  snapshot's own bound signer counter stays 0. Structural: no completion signer
+  parameter to substitute.
+* **D — both families + retained reuse:** Vote counterpart
+  `cd_i_vote_between_phase_generation_advance_suppresses_before_sign`; generation
+  advance / made-unavailable / terminal exhaustion staged cases; recovered-retained
+  suppression + control (`cd_i_recovered_retained_reuse_*`) preserving the exact
+  `Signed` record with no additional signature. Labelled MODEL reopen — **not** real
+  RocksDB, process-death, power-loss, release-binary, or production-authorization
+  evidence.
+* **E — normal callers:** immediate/directed/leader-self/cached controls (`cd_a_*`,
+  `cd_f_*`) retained through their actual shared production guard paths.
+
+Between-phase tests are **staged** tests of the serialized implementation (no sleeps,
+no unsafe aliasing, no fabricated concurrent mutation, no duplicated test-only signing
+implementation, no new public accessor); they are **not** real-handler concurrency
+evidence. The staged split clones the snapshot's verifier/signer `Arc`s into locals
+before prepare so the frozen op does not borrow `snap`, permitting the between-phase
+`&mut snap` mutation while pointer identity still holds.
+
+### Validation (code+test checkpoint `ae894dd`, dev profile unless noted, all exit 0)
+
+* `cargo test -p qbind-node --lib correction_d` → **36 passed, 0 failed, 0 ignored**
+  (1769 filtered out).
+* `cargo test -p qbind-node --lib` (default features) → **1805 passed, 0 failed,
+  0 ignored** (subsumes Correction-A `ca_*`, required-admission `cd_g_*`,
+  suite/backend `cd_h_*`, and the `run422_d7d10`/`run422_d7b`/`run422_d7b2` subsets).
+* `cargo test -p qbind-node --test run_422_d7d10_signing_reservation_journal_tests`
+  (default) → **10 passed, 0 failed, 1 ignored**.
+* same target `--features test-utils` → **11 passed, 0 failed, 1 ignored**.
+* `cargo test -p qbind-consensus --test run_422_d6_pv_domain_isolation_tests`
+  → **34 passed, 0 failed, 0 ignored**.
+* `cargo test -p qbind-node --test run_420_production_policy_reachability_tests`
+  → **3 passed, 0 failed, 0 ignored**.
+* `cargo test -p qbind-node --test run_422_startup_refusal_tests`
+  → **4 passed, 0 failed, 0 ignored**.
+* `cargo check -p qbind-node` → exit 0.
+* `cargo clippy -p qbind-node --lib` → exit 0; 95 pre-existing warnings, **none** in
+  the changed functions (`BoundSigningOperation`, `reconfirm_bound_operation`,
+  `prepare_*`/`complete_*`). Not repaired (unrelated).
+* `cargo build --release -p qbind-node --bin qbind-node` → exit 0.
+
+The one ignored integration test in each `run_422_d7d10` run is the unbounded
+child-process death control (F-scope, retained ignored). rustfmt: the file has a
+large **pre-existing** repo-wide divergence and was **not** reformatted (task rule);
+changed regions match the surrounding hand-format style; CRLF/EOF preserved.
+
+### Release executable identity
+
+* Path: `target/release/qbind-node`; profile: `release` (optimized); features: default.
+* Source revision: code at checkpoint `ae894dd` (doc-only edits committed later do
+  not alter the binary).
+* Byte length: **17084336**; SHA-256: `7553ffd8366a276813e12084861dd19bf5a76b206c60395f373e4272974ac254`.
+* Release compilation establishes **buildability only**; it does **not** close
+  configured-authority release-binary runtime evidence
+  (`CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED`).
+
+### Security / review outcomes (literal)
+
+* CodeQL security scan and the independent Code Review tool were **not executed** in
+  this finalization pass. Per policy this is recorded as **incomplete analysis /
+  incomplete independent review** — it is **not** a pass. Historical security
+  outcomes from prior passes are **not** copied here as newly executed.
+* No secrets/keys/signatures are exposed by the code, tests, logs, or docs changed
+  in this pass.
+
+### Documentation & EOL reconciliation
+
+* `docs/protocol/QBIND_PROPOSAL_VOTE_SIGNING_STATE_CONTINUITY_CONTRACT.md` §4.1 step 5
+  rewritten to describe the frozen `BoundSigningOperation` and parameterless
+  completion (replacing the obsolete `AdmittedSigningIdentity::reconfirm_after_journal`
+  wording); §9.5 adds an Executed (Correction D operation binding) bullet, updates the
+  test count to 36, and refreshes the `D7D10_POST_STORAGE_AUTHORIZATION_REVALIDATION`
+  marker text. Earlier operative instructions superseded, not deleted.
+* `docs/whitepaper/contradiction.md`: inspected; **unchanged** — its "Correction D"
+  references concern Run 422 D7-D8 restore-completion, not this signing split; no
+  operative statement became inaccurate.
+* EOL/EOF: `binary_consensus_loop.rs` and both edited docs remain **CRLF**; no
+  repository-wide reformat; changed regions whitespace-clean (the `\r` flagged by
+  `git diff --check` is the file's own CRLF convention, preserved).
+
+### Scoped disposition
+
+`D7D10_POST_STORAGE_AUTHORIZATION_REVALIDATION=CODE-TEST-POSITIVE` (serialized-handler
+local demonstrated scope; the prepared operation is now bound across the split — model
+reopen, not power-loss/release-binary evidence). Retained unchanged:
+`D7D10_LOCAL_SIGNING_RESERVATION=PARTIAL`,
+`D7D10_MISSING_JOURNAL_SIGNING_REFUSAL=CODE-TEST-POSITIVE`,
+`D7D8_RESTORE_COMPLETION_CONTAINMENT=CODE-AND-RELEASE-TEST-POSITIVE`,
+`D7_STATUS=PARTIAL-CODE-TEST / PRODUCTION-LIFECYCLE-UNAVAILABLE`,
+`DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED`, `GENESIS_AUTHORITY_ACTIVATION=DISABLED`,
+`PRODUCTION_WIRE_CHAIN_ID_BEHAVIOR=UNCHANGED`,
+`CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED`,
+`SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO`. **Still OPEN:** Correction E and the
+remaining F work; C4/C5 remain OPEN. No authority activation, readiness promotion,
+D11, or Run 423 work; no PR, branch rename, force-push, rebase, or history rewrite;
+`task/warning.txt` and unrelated work preserved.

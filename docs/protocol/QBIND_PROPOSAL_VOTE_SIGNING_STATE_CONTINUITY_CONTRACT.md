@@ -473,29 +473,43 @@ transmission failed, or an acknowledgement was lost. Once state may have reached
    sign (the reservation is retained). This reuses the existing `admit` / `confirm`
    semantics on the single serialized handler; the serialized boundary is what
    closes the check-to-sign gap, and no concurrent mutation is assumed in today's
-   implementation. **Correction D implements this step.** The original
-   `(bound snapshot, AuthorizationTicket)` obtained at step 1 is carried
-   **unchanged** through the shared guard as a private `AdmittedSigningIdentity`
-   (borrowed references only — never a freshly-minted ticket, a separately-supplied
-   authority, or a newly-selected signer). `AdmittedSigningIdentity::reconfirm_after_journal`
-   runs immediately **after** `consume_for_signing` (which acquires the
-   ownership-domain mutex) and immediately **before** `signer.sign_*`, so that mutex
-   acquisition is not an unaccounted wait between the confirmation and signing; no
-   journal mutex is held during signing and no other blocking storage op sits
-   between the confirmation and the signer. It first checks the operation still
-   signs through the snapshot's **exact bound verifier** (by pointer identity —
-   `outbound_{proposal,vote}_bound_context_unbound_total` on mismatch), then
-   `owner().confirm(ticket)` (foreign issuer / generation advance / exhaustion ⇒
+   implementation. **Correction D implements this step, and binds the prepared
+   operation across the prepare/complete split.** The original selection obtained
+   at step 1 — the `AuthorizationTicket`, the bound signing context, and the
+   selected signer — is **frozen before any journal work** into a small private
+   `BoundSigningOperation` (an owned clone of the original ticket, preserving its
+   exact issuer/generation identity, plus borrowed references to the selected
+   context and signer — never a freshly-minted ticket, a separately-supplied
+   authority, or a newly-selected signer). The completion phase takes **no**
+   independent ticket, context, or signer parameter: those are carried inside the
+   prepared operation and cannot be replaced after storage. Completion receives
+   **only** the current snapshot, used solely for drift detection.
+   `reconfirm_bound_operation` runs immediately **after** `consume_for_signing`
+   (which acquires the ownership-domain mutex) and immediately **before**
+   `signer.sign_*`, so that mutex acquisition is not an unaccounted wait between
+   the confirmation and signing; no journal mutex is held during signing and no
+   other blocking storage op sits between the confirmation and the signer. It
+   first checks the operation still signs through its **frozen bound context** —
+   the frozen context must be the current snapshot's exact bound verifier by
+   pointer identity (`outbound_{proposal,vote}_bound_context_unbound_total` on
+   mismatch) — then `current.owner().confirm(<frozen original ticket>)` (foreign
+   issuer / generation advance / exhaustion ⇒
    `outbound_{proposal,vote}_post_journal_authorization_revalidation_failed_total`).
+   A new ticket minted for the updated owner is never accepted, because there is
+   no ticket parameter; only the frozen original is confirmed. A supplied current
+   owner does not become the original issuer merely because its fields match.
    On any failure: zero signer calls, no result publication, no delivery, the
    durable `Reserved` record and its conflict obligation preserved (the operation
    capability is dropped, never released/reset), and no re-admit/retry within the
    operation. The retained-result reuse path performs the **same** reconfirmation
    after the B/C recovery-acknowledgement barrier and before treating the retained
    signature as an authorized reuse (existing D6 verification of the exact retained
-   message/signature is retained). The `(snapshot, ticket)` pairing is resolved
-   fail-closed: both present ⇒ revalidate; neither present (the `LocalFixtureUnsigned`
-   no-context passthrough) ⇒ nothing to revalidate; exactly one present ⇒ refuse.
+   message/signature is retained). Required-versus-permitted fixture semantics stay
+   explicit across the split: a required operation freezes `Some(ticket)` and MUST
+   reconfirm (an absent current snapshot at completion ⇒ refuse fail-closed, it
+   never degrades into a fixture operation by omitting admission); the
+   `LocalFixtureUnsigned` no-context passthrough freezes `None` and has nothing to
+   revalidate.
 6. **Signer invocation (existing):** `signer.sign_*` over the prepared preimage
    (`SIGNING`; on success, `SIGNED` + retained result).
 7. **Result handling (new + existing):** persist the signed/`SIGNED` marker;
@@ -1295,30 +1309,40 @@ production; the guard engages only when a journal is explicitly wired (tests).
   counterpart) exercise missing key entry, suite mismatch, and missing backend,
   each refusing before journal access and signing; the existing real-signer/D6
   positive control is retained.
-* **Executed (Correction D post-journal continuation — this pass):** the shared
-  signing guard carries the **original** admission identity through journal work and
-  revalidates it before the signer. The `(bound snapshot, AuthorizationTicket)`
-  obtained at admission is threaded **unchanged** into
-  `guarded_sign_{proposal,vote}_for_broadcast` / `_reserved` as a borrowed
-  `AdmittedSigningIdentity`. To make the **actual** production continuation testable
-  without duplicating reconfirm/sign/publish logic, `_reserved` is a thin wrapper
-  over a private `prepare_{proposal,vote}_signing_reservation` (per-kind
-  identity/version/suite checks + D6 preimage + exact-decision binding + durable
-  reservation with the one-use continuation consumed) followed by
-  `complete_{proposal,vote}_signing` (`reconfirm_after_journal` immediately after
-  `consume_for_signing` takes the ownership-domain mutex and immediately before
-  `signer.sign_*` on the fresh path, and after the recovery-acknowledgement barrier
-  before retained reuse). The production caller and the staged tests use the **same**
-  completion implementation. It refuses (fail-closed, distinct counters, **zero**
-  signer calls, no publication/handoff, durable `Reserved` record and conflict
-  obligation preserved, byte-identical `Reserved`, exact retry ⇒ `PotentiallySigned`,
-  conflicting binding ⇒ refused) when the bound signing context is substituted
-  (`outbound_{proposal,vote}_bound_context_unbound_total`) or the original ticket no
-  longer confirms against its issuer — `ForeignIssuer`, `Stale` (generation advance /
-  replace-back), owner made unavailable, or terminal `Exhausted` — via
-  `outbound_{proposal,vote}_post_journal_authorization_revalidation_failed_total`.
-  Both caller families are covered — immediate broadcast Proposal / broadcast +
-  directed Vote (`forward_actions_to_facade`) and cached Proposal/Vote re-emission
+* **Executed (Correction D operation binding across the split — this pass):** the
+  prepared signing operation is now **bound** to its original admission, signing
+  context, and selected signer across the prepare/complete journal split. Before any
+  journal work, `prepare_{proposal,vote}_signing_reservation` **freezes** the
+  original `AuthorizationTicket` (an owned clone preserving its exact issuer/
+  generation identity), the selected bound context, and the selected signer into a
+  small private `BoundSigningOperation` carried inside the returned prepared value.
+  `complete_{proposal,vote}_signing` takes **no** independent `ctx`, `admission`, or
+  `signer` parameter — those cannot be replaced after storage — and receives **only**
+  the current snapshot for drift detection. `reconfirm_bound_operation` runs
+  immediately after `consume_for_signing` takes the ownership-domain mutex and
+  immediately before `signer.sign_*` on the fresh path (and after the recovery-
+  acknowledgement barrier before retained reuse); it first requires the frozen bound
+  context to be the current snapshot's exact bound verifier by **pointer identity**
+  (`outbound_{proposal,vote}_bound_context_unbound_total` on mismatch), then confirms
+  the **frozen original ticket** against the current owner. A ticket freshly minted
+  for a replaced/advanced owner is **never** accepted — there is no ticket parameter
+  to supply it; only the frozen original is confirmed (`ForeignIssuer`, `Stale`,
+  owner-unavailable, or terminal `Exhausted` ⇒
+  `outbound_{proposal,vote}_post_journal_authorization_revalidation_failed_total`).
+  Required-versus-permitted fixture semantics stay explicit across the split: a
+  required operation freezes `Some(ticket)` and refuses fail-closed if the current
+  snapshot is absent at completion (it never degrades into a fixture operation);
+  `LocalFixtureUnsigned` freezes `None` and has nothing to reconfirm. The frozen
+  signer is a structural guarantee that completion cannot silently substitute a
+  same-`ValidatorId`/same-suite replacement signer, established by source/type
+  inspection (no signer parameter) and a direct staged control. The production
+  caller (`_reserved` thin wrapper) and the staged tests use the **same**
+  `prepare`/`complete` implementation. On any refusal: **zero** signer calls, no
+  publication/handoff, the durable `Reserved` record and its conflict obligation
+  preserved byte-identically (dropping the operation capability never releases it),
+  exact retry ⇒ `PotentiallySigned`, conflicting binding ⇒ refused. Both caller
+  families are covered — immediate broadcast Proposal / broadcast + directed Vote
+  (`forward_actions_to_facade`) and cached Proposal/Vote re-emission
   (`maybe_reemit_on_late_peer_connect`, Proposal-first cached ordering).
 * **Test reconciliation (accurate labelling):** the earlier stale-owner tests
   (`cd_b_*`, `cd_c_*`, `cd_d_*`, `cd_e_*`) invalidate the owner (or substitute the
@@ -1342,8 +1366,19 @@ production; the guard engages only when a journal is explicitly wired (tests).
   original admission is invalidated before `complete`, and the completion suppresses
   reuse with **no** new signature, no authorized reuse/handoff, and the exact `Signed`
   record byte-preserved; a valid recovered-reuse control resends once (D6-verified)
-  with no additional signer call. Evidence is in `run422_d7d10::correction_d`
-  (32 tests). Fresh pre-sign rejection preserves `Reserved` (dropping `publish_cap`
+  with no additional signer call. In addition, dedicated operation-binding cases
+  drive the frozen selection across the split: a **replacement ticket** obtained
+  after an owner-generation advance (a valid new ticket T1 for the updated owner)
+  cannot authorize the T0-prepared operation — completion confirms only the frozen
+  T0 (now `Stale`) and refuses; a **substituted current context** at completion (an
+  independent equal-looking verifier instance) is refused by bound-context pointer
+  identity; a **required operation with an absent current snapshot** at completion
+  refuses fail-closed rather than degrading into a fixture operation; and a **frozen
+  signer** control proves completion signs through the signer selected at preparation
+  (a distinct same-`ValidatorId`/same-suite `Arc`), while the snapshot's own bound
+  signer is not used — there is no completion signer parameter to substitute. Evidence
+  is in `run422_d7d10::correction_d` (36 tests). Fresh pre-sign rejection preserves
+  `Reserved` (dropping `publish_cap`
   never releases the obligation); retained-reuse rejection preserves the existing
   `Signed` record, produces no additional signature, delivers nothing, and never
   turns the record back into `Reserved` — a completed historical signature is never
@@ -1362,7 +1397,7 @@ production; the guard engages only when a journal is explicitly wired (tests).
 
 ```
 D7D10_MISSING_JOURNAL_SIGNING_REFUSAL=CODE-TEST-POSITIVE   (Correction A: signer-eligible Proposal/Vote with no journal refuses before the signer across every production route; distinct per-family counters; earlier admission precedence intact; LocalFixtureUnsigned no-signer passthrough preserved. Local demonstrated scope only — no configured-authority runtime evidence, F engine-progress obligation unaffected.)
-D7D10_POST_STORAGE_AUTHORIZATION_REVALIDATION=CODE-TEST-POSITIVE   (Correction D: policy-aware Required admission refuses a missing original admission at the shared guard before journal/reuse/signer; governed suite/key/backend correspondence is checked before reservation (establishing signer/governance suite correspondence and backend availability only — not private-key possession); the original admission ticket + bound context are carried unchanged through journal work via a private prepare/complete split and reconfirmed immediately before the signer on the fresh path (after the ownership-domain mutex is taken by consume_for_signing) and before retained-result reuse; substituted context, foreign/stale/exhausted issuer, unsupported wire version, signer-index/membership mismatch, and missing key/suite-mismatch/missing-backend all refuse fail-closed with distinct counters; genuine between-phase mutation through the same production completion preserves the durable Reserved record byte-identically (retry ⇒ PotentiallySigned, conflict ⇒ refused) and recovered-retained reuse preserves the exact Signed record with no new signature; immediate and cached callers share the boundary. Serialized-handler local demonstrated scope only — model reopen is not power-loss/release-binary evidence; no configured-authority runtime evidence; E and F remain OPEN.)
+D7D10_POST_STORAGE_AUTHORIZATION_REVALIDATION=CODE-TEST-POSITIVE   (Correction D: policy-aware Required admission refuses a missing original admission at the shared guard before journal/reuse/signer; governed suite/key/backend correspondence is checked before reservation (establishing signer/governance suite correspondence and backend availability only — not private-key possession); the prepared operation FREEZES its original admission ticket, bound context, and selected signer before journal work into a private BoundSigningOperation, and completion takes no independent ctx/admission/signer parameter — it receives only the current snapshot for drift detection and reconfirms the frozen selection immediately before the signer on the fresh path (after the ownership-domain mutex is taken by consume_for_signing) and before retained-result reuse; a replacement ticket minted for a replaced/advanced owner cannot authorize the prepared operation, substituted context, foreign/stale/exhausted issuer, unsupported wire version, signer-index/membership mismatch, and missing key/suite-mismatch/missing-backend all refuse fail-closed with distinct counters; genuine between-phase mutation through the same production completion preserves the durable Reserved record byte-identically (retry ⇒ PotentiallySigned, conflict ⇒ refused) and recovered-retained reuse preserves the exact Signed record with no new signature; immediate and cached callers share the boundary. Serialized-handler local demonstrated scope only — model reopen is not power-loss/release-binary evidence; no configured-authority runtime evidence; E and F remain OPEN.)
 D7D10_LOCAL_SIGNING_RESERVATION=PARTIAL   (Corrections A, B/C, and D complete for their demonstrated local scope; E and F remain OPEN. Supersedes the earlier CODE-AND-STORAGE-TEST-POSITIVE wording, which is retained only as historical evidence.)
 D7D9_SIGNING_STATE_CONTINUITY_CONTRACT=DEFINED-NOT-IMPLEMENTED   (D9 record preserved)
 D7D8_RESTORE_COMPLETION_CONTAINMENT=CODE-AND-RELEASE-TEST-POSITIVE   (preserved)
