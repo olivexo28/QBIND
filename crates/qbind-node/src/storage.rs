@@ -1371,30 +1371,47 @@ impl crate::signing_reservation_journal::SigningJournalStorage for RocksDbConsen
             .map_err(|e| StorageError::Io(e.to_string()))
     }
 
-    fn for_each_signing_record(
+    fn for_each_signing_namespace_entry(
         &self,
         visitor: &mut dyn FnMut(&[u8], &[u8]) -> Result<(), StorageError>,
     ) -> Result<(), StorageError> {
-        // Bounded streaming over record keys only. The record range is
-        // `sig:` + `sj:v1:`; iterate forward from that prefix and stop at the
-        // first key outside it. The metadata key `sig:meta:v1` is before this
-        // range and never visited.
-        let mut prefix =
-            Vec::with_capacity(SIGNING_RECORD_STORAGE_PREFIX.len() + crate::signing_reservation_journal::SIGNING_RECORD_KEY_PREFIX.len());
-        prefix.extend_from_slice(SIGNING_RECORD_STORAGE_PREFIX);
-        prefix.extend_from_slice(crate::signing_reservation_journal::SIGNING_RECORD_KEY_PREFIX);
+        // Bounded streaming over the ENTIRE signing namespace (`sig:`), EXCLUDING
+        // only the exact backend-owned metadata key `sig:meta:v1`. Iterate forward
+        // from the `sig:` prefix and stop at the first key outside it. Unexpected /
+        // foreign keys within the namespace ARE yielded so the caller can classify
+        // and refuse. Unrelated block/QC/epoch namespaces are never visited.
+        //
+        // The maximum decision record is `MAX_RECORD_LEN`; with the 4-byte CRC
+        // envelope the stored value is at most `4 + MAX_RECORD_LEN`. That value
+        // length bound is applied to the RAW stored bytes BEFORE the envelope is
+        // unwrapped (which copies the payload).
+        const MAX_STORED_ENVELOPE_LEN: usize =
+            4 + crate::signing_reservation_journal::MAX_RECORD_LEN;
+        let prefix = SIGNING_RECORD_STORAGE_PREFIX;
         let iter = self
             .db
-            .iterator(rocksdb::IteratorMode::From(&prefix, rocksdb::Direction::Forward));
+            .iterator(rocksdb::IteratorMode::From(prefix, rocksdb::Direction::Forward));
         for item in iter {
             let (raw_key, raw_val) = item.map_err(|e| StorageError::Io(e.to_string()))?;
-            if !raw_key.starts_with(&prefix) {
-                break; // left the record range
+            if !raw_key.starts_with(prefix) {
+                break; // left the signing namespace
+            }
+            // The exact metadata key is classified separately (get_signing_metadata).
+            if raw_key.as_ref() == SIGNING_METADATA_STORAGE_KEY {
+                continue;
+            }
+            // Length check BEFORE copying/unwrapping the payload.
+            if raw_val.len() > MAX_STORED_ENVELOPE_LEN {
+                return Err(StorageError::Corruption(format!(
+                    "signing-namespace value exceeds bound (len={} max={})",
+                    raw_val.len(),
+                    MAX_STORED_ENVELOPE_LEN
+                )));
             }
             // Strip the backend storage prefix so the visitor sees the
-            // journal-level record key (same space as `get_signing_record`).
+            // journal-level key (same space as `get_signing_record`).
             let journal_key = &raw_key[SIGNING_RECORD_STORAGE_PREFIX.len()..];
-            let payload = unwrap_checksummed(&raw_val, "signing_record")?;
+            let payload = unwrap_checksummed(&raw_val, "signing_namespace_entry")?;
             visitor(journal_key, &payload)?;
         }
         Ok(())
@@ -1504,7 +1521,7 @@ impl crate::signing_reservation_journal::SigningJournalStorage for InMemoryConse
         Ok(())
     }
 
-    fn for_each_signing_record(
+    fn for_each_signing_namespace_entry(
         &self,
         visitor: &mut dyn FnMut(&[u8], &[u8]) -> Result<(), StorageError>,
     ) -> Result<(), StorageError> {
@@ -1512,16 +1529,23 @@ impl crate::signing_reservation_journal::SigningJournalStorage for InMemoryConse
             .signing_records
             .read()
             .map_err(|e| StorageError::Other(format!("lock poisoned: {}", e)))?;
-        // Visit only decision records (`sj:v1:` prefix); the metadata key is
-        // excluded. Sort keys for a deterministic, storage-key-like order.
-        let record_prefix = crate::signing_reservation_journal::SIGNING_RECORD_KEY_PREFIX;
-        let mut keys: Vec<&Vec<u8>> = map
-            .keys()
-            .filter(|k| k.starts_with(record_prefix))
-            .collect();
-        keys.sort();
-        for k in keys {
-            let v = &map[k];
+        // Whole-namespace streaming: visit EVERY entry except the backend-owned
+        // metadata key. Stream directly over the map's entries; never collect the
+        // namespace into a temporary vector. The stored value is the raw record
+        // (no envelope), bounded by `MAX_RECORD_LEN`; that per-entry length bound is
+        // applied before the caller decodes.
+        const MAX_STORED_LEN: usize = crate::signing_reservation_journal::MAX_RECORD_LEN;
+        for (k, v) in map.iter() {
+            if k.as_slice() == INMEM_SIGNING_METADATA_KEY {
+                continue;
+            }
+            if v.len() > MAX_STORED_LEN {
+                return Err(StorageError::Corruption(format!(
+                    "signing-namespace value exceeds bound (len={} max={})",
+                    v.len(),
+                    MAX_STORED_LEN
+                )));
+            }
             visitor(k, v)?;
         }
         Ok(())
