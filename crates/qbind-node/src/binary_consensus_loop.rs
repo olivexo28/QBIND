@@ -1884,6 +1884,13 @@ pub struct BinaryConsensusLoopInboundStats {
     //   * `*_journal_result_persist_failure_total`: the signer ran but the
     //     retained-result write failed/was uncertain — facade handoff is
     //     suppressed, the potentially-signed obligation preserved, no re-sign.
+    //   * `*_journal_unavailable_total`: Run 422 D7-D10 Correction A — an
+    //     otherwise-eligible outbound signing operation (present authority,
+    //     available signer, matching wire domain) was refused BEFORE the signer
+    //     was invoked because no signing-reservation journal was available. No
+    //     signer call, no reservation, no retained resend, no facade delivery,
+    //     and no unsigned/cached substitute occurs; a signature already present
+    //     in the supplied message does not exempt the operation.
     pub outbound_proposal_journal_reserved_total: u64,
     pub outbound_proposal_journal_retained_resend_total: u64,
     pub outbound_proposal_journal_conflict_total: u64,
@@ -1892,6 +1899,7 @@ pub struct BinaryConsensusLoopInboundStats {
     pub outbound_proposal_journal_position_inconsistent_total: u64,
     pub outbound_proposal_journal_error_total: u64,
     pub outbound_proposal_journal_result_persist_failure_total: u64,
+    pub outbound_proposal_journal_unavailable_total: u64,
     pub outbound_vote_journal_reserved_total: u64,
     pub outbound_vote_journal_retained_resend_total: u64,
     pub outbound_vote_journal_conflict_total: u64,
@@ -1900,6 +1908,7 @@ pub struct BinaryConsensusLoopInboundStats {
     pub outbound_vote_journal_position_inconsistent_total: u64,
     pub outbound_vote_journal_error_total: u64,
     pub outbound_vote_journal_result_persist_failure_total: u64,
+    pub outbound_vote_journal_unavailable_total: u64,
 }
 
 /// Transition state for the bounded "restore-catchup mode → normal
@@ -3691,9 +3700,20 @@ const D6_SIGNING_FORMAT_VERSION: u8 = 2;
 /// Run 422 D7-D10 — guard `sign_proposal_for_broadcast` with the local
 /// signing-reservation journal.
 ///
-/// Backward-compatible by construction: when `journal` is `None` this delegates
-/// verbatim to [`sign_proposal_for_broadcast`], so every existing caller and
-/// test that passes no journal keeps its exact behavior and counters.
+/// Correction A (Run 422 D7-D10): a signing-reservation journal is REQUIRED for
+/// any otherwise-eligible outbound Proposal signing operation. When a signer
+/// would be used (present authorization, available signer, matching wire
+/// domain) but `journal` is `None`, the operation refuses BEFORE invoking the
+/// signer and records `outbound_proposal_journal_unavailable_total`. A missing
+/// journal is never treated as "guard disengaged" or "backward-compatible
+/// signing", and `LocalFixtureUnsigned` is not an exemption once a signer is
+/// supplied. The genuinely-unsigned fixture passthrough (no authority context
+/// under `LocalFixtureUnsigned`, hence no signer and no signing decision to
+/// reserve) is preserved unchanged.
+///
+/// The existing authorization-context, signer-availability, and wire-domain
+/// rejection paths run first and keep their precedence; a missing-journal check
+/// never relabels one of those earlier refusals.
 ///
 /// When `journal` is `Some`, the reservation guard engages with the ordering
 /// required by the accepted continuity contract §4.1: existing admission /
@@ -3711,27 +3731,9 @@ fn guarded_sign_proposal_for_broadcast(
     verification_policy: ConsensusVerificationPolicy,
     inbound_stats: &mut BinaryConsensusLoopInboundStats,
 ) -> Option<BlockProposal> {
-    match journal {
-        None => sign_proposal_for_broadcast(proposal, ctx, verification_policy, inbound_stats),
-        Some(journal) => guarded_sign_proposal_inner(
-            proposal,
-            ctx,
-            journal,
-            verification_policy,
-            inbound_stats,
-        ),
-    }
-}
-
-fn guarded_sign_proposal_inner(
-    mut proposal: BlockProposal,
-    ctx: Option<&ProposalVoteAuthority>,
-    journal: &SigningReservationJournal,
-    verification_policy: ConsensusVerificationPolicy,
-    inbound_stats: &mut BinaryConsensusLoopInboundStats,
-) -> Option<BlockProposal> {
     // (1) Existing authorization-context and wire-chain admission — IDENTICAL to
-    //     `sign_proposal_for_broadcast`; the journal never weakens these.
+    //     `sign_proposal_for_broadcast`; the journal never weakens these and the
+    //     missing-journal refusal below never relabels one of these rejections.
     let ctx = match ctx {
         None => {
             if verification_policy.requires_context() {
@@ -3741,8 +3743,10 @@ fn guarded_sign_proposal_inner(
                         .saturating_add(1);
                 return None;
             }
-            // LocalFixtureUnsigned passthrough: no signer, so no signing decision
-            // to reserve; preserve the historical unsigned passthrough exactly.
+            // Genuinely unsigned fixture passthrough: no signer, so no signing
+            // decision to reserve; a missing journal is irrelevant here. This is
+            // the preserved `LocalFixtureUnsigned` no-context behavior and does
+            // NOT become production authorization.
             return Some(proposal);
         }
         Some(c) => c,
@@ -3763,7 +3767,40 @@ fn guarded_sign_proposal_inner(
         return None;
     }
 
-    // (2) Per-kind identity/position checks BEFORE lookup/signing. For the
+    // (2) Correction A missing-journal refusal. The operation is otherwise
+    //     signer-eligible, so a signing-reservation journal is REQUIRED. A
+    //     missing/unavailable journal refuses HERE, before any signer
+    //     invocation, reservation, retained resend, or facade handoff. A
+    //     signature already present in `proposal` does not exempt it, and no
+    //     other journal/authority/cached signature/unsigned message is
+    //     substituted.
+    let journal = match journal {
+        Some(j) => j,
+        None => {
+            inbound_stats.outbound_proposal_journal_unavailable_total = inbound_stats
+                .outbound_proposal_journal_unavailable_total
+                .saturating_add(1);
+            eprintln!(
+                "[binary-consensus] Run 422 D7-D10: outbound proposal NOT signed \
+                 (signing-reservation journal unavailable) — fail-closed"
+            );
+            return None;
+        }
+    };
+
+    guarded_sign_proposal_reserved(proposal, ctx, signer, journal, inbound_stats)
+}
+
+/// Run 422 D7-D10 — reservation-guarded Proposal signing for an operation that
+/// has already passed the shared authority/signer/wire-domain admission and has
+/// a present journal. See [`guarded_sign_proposal_for_broadcast`].
+fn guarded_sign_proposal_reserved(
+    mut proposal: BlockProposal,
+    ctx: &ProposalVoteAuthority,
+    signer: &Arc<dyn ValidatorSigner>,
+    journal: &SigningReservationJournal,
+    inbound_stats: &mut BinaryConsensusLoopInboundStats,
+) -> Option<BlockProposal> {
     //     founding profile a Proposal's height, round and originating view are
     //     one value; there is no Proposal step field to fabricate. The
     //     originating view is the ACTION's own view (`header.height`), never a
@@ -3912,9 +3949,9 @@ fn guarded_sign_proposal_inner(
 
 /// Run 422 D7-D10 — guard `sign_vote_for_broadcast` with the local
 /// signing-reservation journal. See [`guarded_sign_proposal_for_broadcast`] for
-/// the shared ordering/semantics; the per-kind preparation differs (a Vote's
-/// height, round and originating view are one value and `step` must be `0` for
-/// the founding profile).
+/// the shared ordering/semantics and the Correction A missing-journal refusal;
+/// the per-kind preparation differs (a Vote's height, round and originating
+/// view are one value and `step` must be `0` for the founding profile).
 fn guarded_sign_vote_for_broadcast(
     vote: Vote,
     ctx: Option<&ProposalVoteAuthority>,
@@ -3922,23 +3959,9 @@ fn guarded_sign_vote_for_broadcast(
     verification_policy: ConsensusVerificationPolicy,
     inbound_stats: &mut BinaryConsensusLoopInboundStats,
 ) -> Option<Vote> {
-    match journal {
-        None => sign_vote_for_broadcast(vote, ctx, verification_policy, inbound_stats),
-        Some(journal) => {
-            guarded_sign_vote_inner(vote, ctx, journal, verification_policy, inbound_stats)
-        }
-    }
-}
-
-fn guarded_sign_vote_inner(
-    mut vote: Vote,
-    ctx: Option<&ProposalVoteAuthority>,
-    journal: &SigningReservationJournal,
-    verification_policy: ConsensusVerificationPolicy,
-    inbound_stats: &mut BinaryConsensusLoopInboundStats,
-) -> Option<Vote> {
     // (1) Existing admission / wire-chain checks — identical to
-    //     `sign_vote_for_broadcast`.
+    //     `sign_vote_for_broadcast`; the journal never weakens these and the
+    //     missing-journal refusal below never relabels one of these rejections.
     let ctx = match ctx {
         None => {
             if verification_policy.requires_context() {
@@ -3947,6 +3970,8 @@ fn guarded_sign_vote_inner(
                     .saturating_add(1);
                 return None;
             }
+            // Genuinely unsigned fixture passthrough (preserved `LocalFixtureUnsigned`
+            // no-context behavior): no signer, so no signing decision to reserve.
             return Some(vote);
         }
         Some(c) => c,
@@ -3967,6 +3992,37 @@ fn guarded_sign_vote_inner(
         return None;
     }
 
+    // (2) Correction A missing-journal refusal: an otherwise signer-eligible
+    //     Vote refuses HERE when the signing-reservation journal is unavailable,
+    //     before any signer invocation, reservation, retained resend, or facade
+    //     handoff. A populated signature does not exempt it.
+    let journal = match journal {
+        Some(j) => j,
+        None => {
+            inbound_stats.outbound_vote_journal_unavailable_total = inbound_stats
+                .outbound_vote_journal_unavailable_total
+                .saturating_add(1);
+            eprintln!(
+                "[binary-consensus] Run 422 D7-D10: outbound vote NOT signed \
+                 (signing-reservation journal unavailable) — fail-closed"
+            );
+            return None;
+        }
+    };
+
+    guarded_sign_vote_reserved(vote, ctx, signer, journal, inbound_stats)
+}
+
+/// Run 422 D7-D10 — reservation-guarded Vote signing for an operation that has
+/// already passed the shared authority/signer/wire-domain admission and has a
+/// present journal. See [`guarded_sign_vote_for_broadcast`].
+fn guarded_sign_vote_reserved(
+    mut vote: Vote,
+    ctx: &ProposalVoteAuthority,
+    signer: &Arc<dyn ValidatorSigner>,
+    journal: &SigningReservationJournal,
+    inbound_stats: &mut BinaryConsensusLoopInboundStats,
+) -> Option<Vote> {
     // (2) Per-kind identity/position checks BEFORE lookup/signing: for this
     //     founding profile height == round == originating view AND step == 0.
     let originating_view = vote.height;
@@ -4104,6 +4160,12 @@ fn guarded_sign_vote_inner(
 /// Run 420 (F3/F8): sign a locally-originated outbound `BlockProposal` before
 /// broadcast, fail-closed.
 ///
+/// Run 422 D7-D10 Correction A: this raw helper is no longer production
+/// reachable — the production outbound path signs exclusively through
+/// [`guarded_sign_proposal_for_broadcast`], which requires a signing-reservation
+/// journal. It is retained as test-only raw cryptographic-unit evidence
+/// (distinct from guarded-handler evidence) and is therefore `#[cfg(test)]`.
+///
 /// Semantics:
 /// - `ctx == None`: the outcome is governed by `verification_policy`, never
 ///   inferred from the `None`. Under
@@ -4121,6 +4183,7 @@ fn guarded_sign_vote_inner(
 /// - `ctx == Some(signer)`: the wire `suite_id` is set to the signer's suite,
 ///   the canonical chain-aware preimage is signed, and the signature is
 ///   attached. A signing error fails closed (returns `None`).
+#[cfg(test)]
 fn sign_proposal_for_broadcast(
     mut proposal: BlockProposal,
     ctx: Option<&ProposalVoteAuthority>,
@@ -4208,6 +4271,12 @@ fn sign_proposal_for_broadcast(
 /// Run 420 (F4/F8): sign a locally-originated outbound `Vote` before
 /// transmission, fail-closed. See [`sign_proposal_for_broadcast`] for the
 /// `None` / no-signer / signer semantics.
+///
+/// Run 422 D7-D10 Correction A: no longer production reachable (the production
+/// outbound path signs through [`guarded_sign_vote_for_broadcast`], which
+/// requires a signing-reservation journal); retained as test-only raw
+/// cryptographic-unit evidence and therefore `#[cfg(test)]`.
+#[cfg(test)]
 fn sign_vote_for_broadcast(
     mut vote: Vote,
     ctx: Option<&ProposalVoteAuthority>,
