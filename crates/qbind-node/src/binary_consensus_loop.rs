@@ -4432,7 +4432,10 @@ fn complete_proposal_signing(
             if let Some(adm) = admission {
                 if let Err(rej) = adm.reconfirm_after_journal(ctx) {
                     record_post_journal_proposal_rejection(inbound_stats, &rej);
-                    drop(publish_cap);
+                    // The one-use publication capability falls out of scope
+                    // WITHOUT publishing: no result is emitted and the durable
+                    // `Reserved` record + conflict obligation are intentionally
+                    // NOT released (a later exact retry sees `PotentiallySigned`).
                     return None;
                 }
             }
@@ -4804,7 +4807,9 @@ fn complete_vote_signing(
             if let Some(adm) = admission {
                 if let Err(rej) = adm.reconfirm_after_journal(ctx) {
                     record_post_journal_vote_rejection(inbound_stats, &rej);
-                    drop(publish_cap);
+                    // See the Proposal path: the one-use publication capability
+                    // falls out of scope WITHOUT publishing; the durable
+                    // `Reserved` record + conflict obligation are NOT released.
                     return None;
                 }
             }
