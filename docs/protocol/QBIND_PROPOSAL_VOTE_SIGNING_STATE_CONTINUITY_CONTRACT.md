@@ -440,7 +440,18 @@ transmission failed, or an acknowledgement was lost. Once state may have reached
    L3706 / L3785), then compute the domain-canonical preimage via
    `ProposalVoteAuthority::proposal_preimage` / `vote_preimage`. This is the exact
    input `signer.sign_*` will receive; no parallel parser or new signing encoding
-   is introduced (existing canonicalization is reused).
+   is introduced (existing canonicalization is reused). **Correction D** adds two
+   pre-journal gates here, evaluated **before** the conflict lookup at step 3: the
+   wire-message version must be a supported local Proposal/Vote version
+   (`LOCAL_PROPOSAL_VOTE_WIRE_MESSAGE_VERSION = 1`, kept distinct from the D6
+   signing-format version and the journal-record format version), and the wire
+   `proposer_index` / `validator_index` must equal the bound signer's stable
+   `ValidatorId` (compared by **widening** the wire index to `u64`, so a large id
+   cannot alias a representable wire index through narrowing) **and** that signer
+   must belong to the admitted membership. Either mismatch refuses before any
+   journal lookup/write and before the signer, with a distinct counter
+   (`outbound_{proposal,vote}_wire_version_unsupported_total` /
+   `outbound_{proposal,vote}_signer_identity_mismatch_total`); no field is rewritten.
 3. **Conflict lookup + exclusive reservation (new):** derive the position key
    (§3.2, after the height/round/step correspondence check) and the binding digest
    over the **prepared** preimage; look up existing record; if a conflicting
@@ -460,10 +471,31 @@ transmission failed, or an acknowledgement was lost. Once state may have reached
    is never silently replaced by a newly-supplied owner or signer after the
    reservation. A superseded, exhausted, or foreign-issuer authority ⇒ refuse to
    sign (the reservation is retained). This reuses the existing `admit` / `confirm`
-   semantics (`admit_outbound_action` / `confirm_outbound_before_effect`) on the
-   single serialized handler; the serialized boundary is what closes the
-   check-to-sign gap, and no concurrent mutation is assumed in today's
-   implementation.
+   semantics on the single serialized handler; the serialized boundary is what
+   closes the check-to-sign gap, and no concurrent mutation is assumed in today's
+   implementation. **Correction D implements this step.** The original
+   `(bound snapshot, AuthorizationTicket)` obtained at step 1 is carried
+   **unchanged** through the shared guard as a private `AdmittedSigningIdentity`
+   (borrowed references only — never a freshly-minted ticket, a separately-supplied
+   authority, or a newly-selected signer). `AdmittedSigningIdentity::reconfirm_after_journal`
+   runs immediately **after** `consume_for_signing` (which acquires the
+   ownership-domain mutex) and immediately **before** `signer.sign_*`, so that mutex
+   acquisition is not an unaccounted wait between the confirmation and signing; no
+   journal mutex is held during signing and no other blocking storage op sits
+   between the confirmation and the signer. It first checks the operation still
+   signs through the snapshot's **exact bound verifier** (by pointer identity —
+   `outbound_{proposal,vote}_bound_context_unbound_total` on mismatch), then
+   `owner().confirm(ticket)` (foreign issuer / generation advance / exhaustion ⇒
+   `outbound_{proposal,vote}_post_journal_authorization_revalidation_failed_total`).
+   On any failure: zero signer calls, no result publication, no delivery, the
+   durable `Reserved` record and its conflict obligation preserved (the operation
+   capability is dropped, never released/reset), and no re-admit/retry within the
+   operation. The retained-result reuse path performs the **same** reconfirmation
+   after the B/C recovery-acknowledgement barrier and before treating the retained
+   signature as an authorized reuse (existing D6 verification of the exact retained
+   message/signature is retained). The `(snapshot, ticket)` pairing is resolved
+   fail-closed: both present ⇒ revalidate; neither present (the `LocalFixtureUnsigned`
+   no-context passthrough) ⇒ nothing to revalidate; exactly one present ⇒ refuse.
 6. **Signer invocation (existing):** `signer.sign_*` over the prepared preimage
    (`SIGNING`; on success, `SIGNED` + retained result).
 7. **Result handling (new + existing):** persist the signed/`SIGNED` marker;
@@ -1226,11 +1258,42 @@ production; the guard engages only when a journal is explicitly wired (tests).
   positive control. This closes Correction A for its demonstrated local scope; it
   does **not** supply configured-authority runtime evidence and does **not**
   close the separate Correction F engine-progress obligation.
-* **Still OPEN in D10 (not addressed by this pass):** Correction D (post-storage
-  original-owner revalidation and remaining identity/version checks), Correction E
-  (established-journal initialization and persistent capacity accounting, including
-  recovered-record acknowledgement-cache accounting), and the
-  remaining F engine-progress/process-runner work.
+* **Executed (Correction D — this pass):** the shared signing guard now carries the
+  **original** admission identity through journal work and revalidates it before the
+  signer. The `(bound snapshot, AuthorizationTicket)` obtained at admission is
+  threaded **unchanged** into `guarded_sign_{proposal,vote}_for_broadcast` /
+  `_reserved` as a borrowed `AdmittedSigningIdentity`;
+  `AdmittedSigningIdentity::reconfirm_after_journal` runs immediately after
+  `consume_for_signing` (which takes the ownership-domain mutex) and immediately
+  before `signer.sign_*` on the fresh path, and after the recovery-acknowledgement
+  barrier before retained-result reuse. It refuses (fail-closed, distinct counters,
+  **zero** signer calls, no publication/handoff, durable `Reserved` record and
+  conflict obligation preserved, retry ⇒ `PotentiallySigned`) when the bound signing
+  context is substituted (pointer-identity check —
+  `outbound_{proposal,vote}_bound_context_unbound_total`) or when the original ticket
+  no longer confirms against its issuer — a different owner with identical config and
+  equal generation (`ForeignIssuer`), a generation advance or replace-back
+  (`Stale`), the owner made unavailable, or terminal generation exhaustion
+  (`Exhausted`) — via
+  `outbound_{proposal,vote}_post_journal_authorization_revalidation_failed_total`.
+  Unsupported wire-message versions (distinct from the D6 signing-format version)
+  and signer-index / membership mismatches (widened comparison, no narrowing alias)
+  refuse **before** the journal lookup. Both caller families are covered — immediate
+  broadcast Proposal / broadcast + directed Vote (`forward_actions_to_facade`) and
+  cached Proposal/Vote re-emission (`maybe_reemit_on_late_peer_connect`), the latter
+  respecting Proposal-first cached ordering. Evidence is in
+  `run422_d7d10::correction_d` (19 tests): normal-entrypoint success/coverage
+  controls (`cd_a_*`, `cd_f_*`) prove the production wiring reaches the boundary and
+  keeps the new counters at 0 on success, and **staged** tests (`cd_b_*`, `cd_c_*`,
+  `cd_d_*`, `cd_e_*`) exercise the same private post-journal continuation, mutating
+  the fixture owner between explicit phases (no unsafe aliasing, no production hook,
+  no sleeps, no fabricated concurrent owner). This is a bounded local demonstration
+  on the **serialized** handler; it supplies **no** configured-authority runtime
+  evidence and does **not** close E or F.
+* **Still OPEN in D10 (not addressed by this pass):** Correction E
+  (explicit initialization vs established-journal validation, persistent capacity
+  and recovered-record acknowledgement-cache accounting), and the remaining
+  F engine-progress evidence / bounded-and-classified child-process runner.
 * **Not executed / still unmet (unchanged posture):** durable anti-rollback
   anchor (§6.6), consensus-lock recovery (§5.3/§6.7), whole-copy rollback,
   copied-key/cross-host exclusivity, Timeout/NewView compatibility, power-loss
@@ -1239,7 +1302,8 @@ production; the guard engages only when a journal is explicitly wired (tests).
 
 ```
 D7D10_MISSING_JOURNAL_SIGNING_REFUSAL=CODE-TEST-POSITIVE   (Correction A: signer-eligible Proposal/Vote with no journal refuses before the signer across every production route; distinct per-family counters; earlier admission precedence intact; LocalFixtureUnsigned no-signer passthrough preserved. Local demonstrated scope only — no configured-authority runtime evidence, F engine-progress obligation unaffected.)
-D7D10_LOCAL_SIGNING_RESERVATION=PARTIAL   (Corrections A and B/C complete for their demonstrated local scope; D, E, F remain OPEN. Supersedes the earlier CODE-AND-STORAGE-TEST-POSITIVE wording, which is retained only as historical evidence.)
+D7D10_POST_STORAGE_AUTHORIZATION_REVALIDATION=CODE-TEST-POSITIVE   (Correction D: the original admission ticket + bound context are carried unchanged through journal work and reconfirmed immediately before the signer on the fresh path (after the ownership-domain mutex is taken by consume_for_signing) and before retained-result reuse; substituted context, foreign/stale/exhausted issuer, unsupported wire version, and signer-index/membership mismatch all refuse fail-closed with distinct counters; rejection preserves the durable Reserved record and conflict obligation; immediate and cached callers share the boundary. Serialized-handler local demonstrated scope only — no configured-authority runtime evidence; E and F remain OPEN.)
+D7D10_LOCAL_SIGNING_RESERVATION=PARTIAL   (Corrections A, B/C, and D complete for their demonstrated local scope; E and F remain OPEN. Supersedes the earlier CODE-AND-STORAGE-TEST-POSITIVE wording, which is retained only as historical evidence.)
 D7D9_SIGNING_STATE_CONTINUITY_CONTRACT=DEFINED-NOT-IMPLEMENTED   (D9 record preserved)
 D7D8_RESTORE_COMPLETION_CONTAINMENT=CODE-AND-RELEASE-TEST-POSITIVE   (preserved)
 D7_STATUS=PARTIAL-CODE-TEST / PRODUCTION-LIFECYCLE-UNAVAILABLE
