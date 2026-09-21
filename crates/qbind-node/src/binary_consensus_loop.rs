@@ -4676,10 +4676,14 @@ fn forward_actions_to_facade(
     // Test-only `LocalFixtureUnsigned` passthrough authority, consulted ONLY
     // when no snapshot is wired. Never substitutes for a wired snapshot.
     pv_authority: Option<&ProposalVoteAuthority>,
-    // Run 422 D7-D10: the local signing-reservation journal. Production forwards
-    // `None` (guard disengaged, exact existing behavior); a test fixture may
-    // wire `Some` to durably reserve every Proposal/Vote decision before the
-    // signer runs on this immediate-outbound caller family.
+    // Run 422 D7-D10 Correction A: the local signing-reservation journal. An
+    // otherwise signer-eligible Proposal/Vote on this immediate-outbound caller
+    // family REQUIRES a present journal: the decision is durably reserved before
+    // the signer runs, and a missing/unavailable journal refuses the operation
+    // (no signer invocation, no delivery) rather than falling back to unreserved
+    // signing. Production forwards `None`; under `Required` an absent
+    // current-authorization snapshot already rejects every action at admission,
+    // so production never reaches the signing stage.
     journal: Option<&SigningReservationJournal>,
     verification_policy: ConsensusVerificationPolicy,
 ) {
@@ -15703,9 +15707,175 @@ mod tests {
                     .is_err());
                 }
             }
+
+            // =====================================================
+            // Run 422 D7-D10 Correction A — missing-journal refusal at the
+            // leader-self-emit (`do_leader_tick`) and cached re-emission
+            // (`maybe_reemit_on_late_peer_connect`) boundaries (task §6 C/D
+            // negatives). Positive controls for these paths already exist
+            // (`d7b2_do_leader_tick_creates_caches_then_real_reemission_uses_them`,
+            // `d7b2_valid_cache_current_auth_emits_both_families`,
+            // `d7b2_recording_signer_positive_control_directly_counts_both_invocations`).
+            // =====================================================
+            // The engine stamps wire chain id 1 / epoch 0 on its leader-emitted
+            // Proposal/Vote, so the bound authority's v2 domain must expect wire
+            // chain id 1 (this mirrors the existing leader-tick positive control).
+            fn ca_leader_domain() -> ProposalVoteSigningDomainV2 {
+                d6_domain(
+                    0xD6D6_0000_0000_00A1,
+                    1,
+                    d6_genesis_identity(0x51),
+                    d6_authority_commitment(0x61),
+                )
+            }
+
+            // C (negative): a leader tick with NO journal reaches the guarded
+            // outbound boundary for BOTH the leader Proposal and the paired
+            // self-Vote, and refuses each before the signer runs.
+            #[test]
+            fn ca_c_leader_tick_missing_journal_refuses_both_families() {
+                let fixture = make_fixture(4);
+                let (pv, counters) = recording_ctx_v2(&fixture, ca_leader_domain());
+                let snap = coherent_snapshot_for(&pv);
+
+                let mut engine = make_engine(ValidatorId(0), 4);
+                assert!(engine.is_leader_for_current_view());
+
+                let metrics = make_metrics();
+                let mut proposals_emitted: u64 = 0;
+                let mut last_leader_proposal: Option<CachedLeaderProposal> = None;
+                let mut last_leader_vote: Option<CachedLeaderVote> = None;
+                let mut reconfig_detector = BinaryReconfigDetector::default();
+                let mut stats = BinaryConsensusLoopInboundStats::default();
+                let facade = RecordingFacade::default();
+
+                do_leader_tick(
+                    &mut engine,
+                    &mut proposals_emitted,
+                    &metrics,
+                    &mut stats,
+                    Some(&facade),
+                    &mut last_leader_proposal,
+                    &mut last_leader_vote,
+                    &mut reconfig_detector,
+                    Some(&snap),
+                    None,
+                    None, // Run 422 D7-D10: journal ABSENT
+                    ConsensusVerificationPolicy::Required,
+                );
+
+                // Both the leader Proposal and the self-Vote reached the guarded
+                // boundary and refused (distinct per-family counters).
+                assert_eq!(stats.outbound_proposal_journal_unavailable_total, 1);
+                assert_eq!(stats.outbound_vote_journal_unavailable_total, 1);
+                // Neither obtained an underlying signature.
+                assert_eq!(counters.proposals(), 0);
+                assert_eq!(counters.votes(), 0);
+                // Nothing was signed, sent, or handed off.
+                assert_eq!(stats.outbound_proposal_signing_success, 0);
+                assert_eq!(stats.outbound_vote_signing_success, 0);
+                assert_eq!(stats.outbound_proposals_sent, 0);
+                assert_eq!(stats.outbound_votes_sent, 0);
+                facade.assert_silent();
+            }
+
+            // D (negative): a REAL cached re-emission with NO journal cannot sign
+            // or re-emit. Caches (with valid captured provenance) are first
+            // produced by a journaled leader tick; the re-emission itself is then
+            // driven with the journal ABSENT. The cached Proposal is signed
+            // FIRST; its missing-journal refusal short-circuits the whole
+            // attempt, so the cached Vote's missing-journal branch is NOT reached
+            // — we report that boundary accurately (Proposal counter 1, Vote
+            // counter 0). Cached-Vote missing-journal coverage is established
+            // separately by the shared Vote guard negative
+            // (`correction_a_immediate::ca_a_vote_*`), the verified production
+            // Vote call site, and the journal-present cached-Vote positive
+            // control (`d7b2_do_leader_tick_creates_caches_then_real_reemission_uses_them`).
+            #[test]
+            fn ca_d_cached_reemission_missing_journal_prevents_signing_and_reemission() {
+                let fixture = make_fixture(4);
+                let (pv, counters) = recording_ctx_v2(&fixture, ca_leader_domain());
+                let snap = coherent_snapshot_for(&pv);
+
+                let mut engine = make_engine(ValidatorId(0), 4);
+                assert!(engine.is_leader_for_current_view());
+
+                let metrics = make_metrics();
+                let mut proposals_emitted: u64 = 0;
+                let mut last_leader_proposal: Option<CachedLeaderProposal> = None;
+                let mut last_leader_vote: Option<CachedLeaderVote> = None;
+                let mut reconfig_detector = BinaryReconfigDetector::default();
+                let mut stats = BinaryConsensusLoopInboundStats::default();
+
+                // Produce the REAL Proposal/Vote caches (with captured
+                // provenance) via a journaled leader tick.
+                let setup_journal = fresh_signing_journal();
+                let setup_facade = RecordingFacade::default();
+                do_leader_tick(
+                    &mut engine,
+                    &mut proposals_emitted,
+                    &metrics,
+                    &mut stats,
+                    Some(&setup_facade),
+                    &mut last_leader_proposal,
+                    &mut last_leader_vote,
+                    &mut reconfig_detector,
+                    Some(&snap),
+                    None,
+                    Some(&setup_journal),
+                    ConsensusVerificationPolicy::Required,
+                );
+                assert!(last_leader_proposal.is_some(), "proposal cached");
+                assert!(last_leader_vote.is_some(), "vote cached");
+                let signed_p_baseline = counters.proposals();
+                let signed_v_baseline = counters.votes();
+                assert_eq!(signed_p_baseline, 1, "setup tick signed the Proposal once");
+                assert_eq!(signed_v_baseline, 1, "setup tick signed the Vote once");
+
+                // Now drive the REAL cached re-emission entrypoint over a genuine
+                // new-peer transition with the journal ABSENT.
+                let mut reemitted_for_view: Option<u64> = None;
+                let mut last_known_peers: HashSet<NodeId> = HashSet::new();
+                let peer = pv_node_for(1);
+                let connectivity = OnePeer(peer);
+                let reemit_facade = RecordingFacade::default();
+
+                maybe_reemit_on_late_peer_connect(
+                    &engine,
+                    &mut last_leader_proposal,
+                    &mut last_leader_vote,
+                    &mut reemitted_for_view,
+                    &mut last_known_peers,
+                    &connectivity,
+                    Some(&reemit_facade),
+                    &mut stats,
+                    Some(&snap),
+                    None,
+                    None, // Run 422 D7-D10: journal ABSENT
+                    ConsensusVerificationPolicy::Required,
+                );
+
+                // The cached Proposal's missing-journal refusal fired and
+                // short-circuited the attempt BEFORE the paired Vote branch.
+                assert_eq!(stats.outbound_proposal_journal_unavailable_total, 1);
+                assert_eq!(
+                    stats.outbound_vote_journal_unavailable_total, 0,
+                    "cached Vote missing-journal branch is not reached (Proposal-first short-circuit)"
+                );
+                // The re-emission signed nothing NEW beyond the setup tick.
+                assert_eq!(counters.proposals(), signed_p_baseline);
+                assert_eq!(counters.votes(), signed_v_baseline);
+                // No re-emission, no facade traffic on the re-emit path.
+                assert_eq!(stats.outbound_proposal_late_peer_reemits, 0);
+                assert_eq!(stats.outbound_vote_late_peer_reemits, 0);
+                assert!(reemitted_for_view.is_none());
+                reemit_facade.assert_silent();
+                // Peer-connectivity bookkeeping still ran (the transition was
+                // genuinely observed) even though signing was refused.
+                assert!(last_known_peers.contains(&peer));
+            }
         }
 
-        // =================================================================
         // Run 422 D7-A — independent CURRENT AUTHORIZATION enforcement at the
         // REAL inbound Proposal/Vote boundary.
         //
@@ -22187,8 +22357,428 @@ mod tests {
                 }
 
                 // =====================================================
-                // Run 422 D7-D10 — the guarded signing boundary with a
-                // local signing-reservation journal wired, exercised
+                // Run 422 D7-D10 Correction A — missing-journal signing
+                // refusal at the SHARED immediate-outbound boundary
+                // (`forward_actions_to_facade`), covering task §6 A/B/E for
+                // the BroadcastProposal, BroadcastVote and SendVoteTo
+                // families. Every case uses a wired coherent snapshot, the
+                // real ML-DSA-44 `RecordingSigner`, the recording facade and
+                // DIRECT signer-call / facade-effect counts. Journal-present
+                // controls actually sign and deliver with D6 verification.
+                // =====================================================
+                mod correction_a_immediate {
+                    use super::*;
+
+                    // ---- A: shared-boundary missing-journal refusal --------
+
+                    #[test]
+                    fn ca_a_proposal_required_missing_journal_refuses_before_signer() {
+                        let fixture = make_fixture(4);
+                        let (pv, c) = recording_pv(&fixture);
+                        let snap = snapshot_matching(&pv);
+                        let facade = OutboundRecorder::default();
+                        let mut stats = BinaryConsensusLoopInboundStats::default();
+                        // Otherwise-eligible (admitted authorization, present
+                        // signer, matching wire domain) but NO journal.
+                        forward_actions_to_facade(
+                            vec![proposal_action(0)],
+                            &facade,
+                            &mut stats,
+                            Some(&snap),
+                            None,
+                            None,
+                            ConsensusVerificationPolicy::Required,
+                        );
+                        assert_eq!(stats.outbound_proposal_journal_unavailable_total, 1);
+                        // The underlying signer was NEVER invoked.
+                        assert_eq!(c.proposal_calls.load(SeqCst), 0);
+                        // No signing success, no reservation, no delivery.
+                        assert_eq!(stats.outbound_proposal_signing_success, 0);
+                        assert_eq!(stats.outbound_proposal_journal_reserved_total, 0);
+                        assert_eq!(stats.outbound_proposals_sent, 0);
+                        assert!(facade.proposals.lock().unwrap().is_empty());
+                        // No earlier-refusal counter was relabelled.
+                        assert_eq!(stats.outbound_proposal_current_state_unavailable_total, 0);
+                        assert_eq!(stats.outbound_proposal_epoch_unauthorized_total, 0);
+                        assert_eq!(stats.outbound_proposal_signing_failure, 0);
+                        assert_eq!(stats.outbound_proposal_wire_chain_mismatch, 0);
+                    }
+
+                    #[test]
+                    fn ca_a_vote_required_missing_journal_refuses_before_signer() {
+                        let fixture = make_fixture(4);
+                        let (pv, c) = recording_pv(&fixture);
+                        let snap = snapshot_matching(&pv);
+                        let facade = OutboundRecorder::default();
+                        let mut stats = BinaryConsensusLoopInboundStats::default();
+                        forward_actions_to_facade(
+                            vec![broadcast_vote_action(0)],
+                            &facade,
+                            &mut stats,
+                            Some(&snap),
+                            None,
+                            None,
+                            ConsensusVerificationPolicy::Required,
+                        );
+                        assert_eq!(stats.outbound_vote_journal_unavailable_total, 1);
+                        assert_eq!(c.vote_calls.load(SeqCst), 0);
+                        assert_eq!(stats.outbound_vote_signing_success, 0);
+                        assert_eq!(stats.outbound_vote_journal_reserved_total, 0);
+                        assert_eq!(stats.outbound_votes_sent, 0);
+                        assert!(facade.broadcast_votes.lock().unwrap().is_empty());
+                        assert_eq!(stats.outbound_vote_current_state_unavailable_total, 0);
+                        assert_eq!(stats.outbound_vote_epoch_unauthorized_total, 0);
+                        assert_eq!(stats.outbound_vote_signing_failure, 0);
+                        assert_eq!(stats.outbound_vote_wire_chain_mismatch, 0);
+                    }
+
+                    // LocalFixtureUnsigned is NOT an exemption once a signer is
+                    // supplied: a supplied signer + no journal still refuses.
+                    #[test]
+                    fn ca_a_localfixture_unsigned_with_signer_still_refuses_missing_journal() {
+                        let fixture = make_fixture(4);
+                        let (pv, c) = recording_pv(&fixture);
+                        let facade = OutboundRecorder::default();
+                        let mut stats = BinaryConsensusLoopInboundStats::default();
+                        // No current-authorization snapshot, LocalFixtureUnsigned
+                        // policy, but a REAL signer supplied via `pv_authority`.
+                        forward_actions_to_facade(
+                            vec![proposal_action(0), broadcast_vote_action(0)],
+                            &facade,
+                            &mut stats,
+                            None,
+                            Some(&pv),
+                            None,
+                            ConsensusVerificationPolicy::LocalFixtureUnsigned,
+                        );
+                        assert_eq!(stats.outbound_proposal_journal_unavailable_total, 1);
+                        assert_eq!(stats.outbound_vote_journal_unavailable_total, 1);
+                        assert_eq!(c.proposal_calls.load(SeqCst), 0);
+                        assert_eq!(c.vote_calls.load(SeqCst), 0);
+                        assert!(facade.proposals.lock().unwrap().is_empty());
+                        assert!(facade.broadcast_votes.lock().unwrap().is_empty());
+
+                        // Control: the SAME LocalFixtureUnsigned+signer path DOES
+                        // sign once a journal is supplied (proving the refusal was
+                        // the journal, not the policy).
+                        let facade2 = OutboundRecorder::default();
+                        let mut stats2 = BinaryConsensusLoopInboundStats::default();
+                        let journal = fresh_signing_journal();
+                        forward_actions_to_facade(
+                            vec![proposal_action(0)],
+                            &facade2,
+                            &mut stats2,
+                            None,
+                            Some(&pv),
+                            Some(&journal),
+                            ConsensusVerificationPolicy::LocalFixtureUnsigned,
+                        );
+                        assert_eq!(stats2.outbound_proposal_signing_success, 1);
+                        assert_eq!(c.proposal_calls.load(SeqCst), 1);
+                        assert_eq!(facade2.proposals.lock().unwrap().len(), 1);
+                    }
+
+                    // A populated signature on the supplied message does NOT
+                    // exempt an otherwise signing-capable operation from the guard.
+                    #[test]
+                    fn ca_a_supplied_signature_does_not_bypass_missing_journal() {
+                        let fixture = make_fixture(4);
+                        let (pv, c) = recording_pv(&fixture);
+                        let snap = snapshot_matching(&pv);
+                        let facade = OutboundRecorder::default();
+                        let mut stats = BinaryConsensusLoopInboundStats::default();
+
+                        // A Proposal and a Vote that ALREADY carry (bogus but
+                        // populated) signature bytes.
+                        let mut p = base_header(0);
+                        p.epoch = 0;
+                        let signed_proposal = BlockProposal {
+                            header: p,
+                            qc: None,
+                            txs: vec![],
+                            signature: vec![0xAB; 16],
+                        };
+                        let mut v = base_vote(0);
+                        v.round = v.height;
+                        v.step = 0;
+                        v.signature = vec![0xCD; 16];
+
+                        forward_actions_to_facade(
+                            vec![
+                                ConsensusEngineAction::BroadcastProposal(Box::new(
+                                    signed_proposal,
+                                )),
+                                ConsensusEngineAction::BroadcastVote(v),
+                            ],
+                            &facade,
+                            &mut stats,
+                            Some(&snap),
+                            None,
+                            None,
+                            ConsensusVerificationPolicy::Required,
+                        );
+                        assert_eq!(stats.outbound_proposal_journal_unavailable_total, 1);
+                        assert_eq!(stats.outbound_vote_journal_unavailable_total, 1);
+                        assert_eq!(c.proposal_calls.load(SeqCst), 0);
+                        assert_eq!(c.vote_calls.load(SeqCst), 0);
+                        assert_eq!(stats.outbound_proposals_sent, 0);
+                        assert_eq!(stats.outbound_votes_sent, 0);
+                        facade
+                            .proposals
+                            .lock()
+                            .map(|g| assert!(g.is_empty()))
+                            .unwrap();
+                        assert!(facade.broadcast_votes.lock().unwrap().is_empty());
+                    }
+
+                    // ---- B: immediate + directed delivery ------------------
+
+                    #[test]
+                    fn ca_b_broadcast_proposal_absent_then_present_control() {
+                        let fixture = make_fixture(4);
+                        let (pv, c) = recording_pv(&fixture);
+                        let snap = snapshot_matching(&pv);
+
+                        // Journal ABSENT: no signer call, no facade effect.
+                        let facade = OutboundRecorder::default();
+                        let mut stats = BinaryConsensusLoopInboundStats::default();
+                        forward_actions_to_facade(
+                            vec![proposal_action(0)],
+                            &facade,
+                            &mut stats,
+                            Some(&snap),
+                            None,
+                            None,
+                            ConsensusVerificationPolicy::Required,
+                        );
+                        assert_eq!(c.proposal_calls.load(SeqCst), 0);
+                        assert_eq!(stats.outbound_proposals_sent, 0);
+                        assert!(facade.proposals.lock().unwrap().is_empty());
+
+                        // Journal PRESENT control: signs, delivers, D6-verifies.
+                        let facade2 = OutboundRecorder::default();
+                        let mut stats2 = BinaryConsensusLoopInboundStats::default();
+                        let journal = fresh_signing_journal();
+                        forward_actions_to_facade(
+                            vec![proposal_action(0)],
+                            &facade2,
+                            &mut stats2,
+                            Some(&snap),
+                            None,
+                            Some(&journal),
+                            ConsensusVerificationPolicy::Required,
+                        );
+                        assert_eq!(c.proposal_calls.load(SeqCst), 1);
+                        assert_eq!(stats2.outbound_proposal_signing_success, 1);
+                        assert_eq!(stats2.outbound_proposals_sent, 1);
+                        let emitted = facade2.proposals.lock().unwrap();
+                        assert_eq!(emitted.len(), 1);
+                        assert!(qbind_consensus::verify_proposal_msg_with_domain(
+                            &emitted[0],
+                            ValidatorId(0),
+                            fixture.validators.as_ref(),
+                            fixture.kp.as_ref(),
+                            fixture.br.as_ref(),
+                            &d6_control_domain(),
+                        )
+                        .is_ok());
+                    }
+
+                    #[test]
+                    fn ca_b_broadcast_vote_absent_then_present_control() {
+                        let fixture = make_fixture(4);
+                        let (pv, c) = recording_pv(&fixture);
+                        let snap = snapshot_matching(&pv);
+
+                        let facade = OutboundRecorder::default();
+                        let mut stats = BinaryConsensusLoopInboundStats::default();
+                        forward_actions_to_facade(
+                            vec![broadcast_vote_action(0)],
+                            &facade,
+                            &mut stats,
+                            Some(&snap),
+                            None,
+                            None,
+                            ConsensusVerificationPolicy::Required,
+                        );
+                        assert_eq!(c.vote_calls.load(SeqCst), 0);
+                        assert_eq!(stats.outbound_votes_sent, 0);
+                        assert!(facade.broadcast_votes.lock().unwrap().is_empty());
+
+                        let facade2 = OutboundRecorder::default();
+                        let mut stats2 = BinaryConsensusLoopInboundStats::default();
+                        let journal = fresh_signing_journal();
+                        forward_actions_to_facade(
+                            vec![broadcast_vote_action(0)],
+                            &facade2,
+                            &mut stats2,
+                            Some(&snap),
+                            None,
+                            Some(&journal),
+                            ConsensusVerificationPolicy::Required,
+                        );
+                        assert_eq!(c.vote_calls.load(SeqCst), 1);
+                        assert_eq!(stats2.outbound_vote_signing_success, 1);
+                        assert_eq!(stats2.outbound_votes_sent, 1);
+                        let emitted = facade2.broadcast_votes.lock().unwrap();
+                        assert_eq!(emitted.len(), 1);
+                        assert!(qbind_consensus::verify_vote_msg_with_domain(
+                            &emitted[0],
+                            ValidatorId(0),
+                            fixture.validators.as_ref(),
+                            fixture.kp.as_ref(),
+                            fixture.br.as_ref(),
+                            &d6_control_domain(),
+                        )
+                        .is_ok());
+                    }
+
+                    #[test]
+                    fn ca_b_send_vote_to_absent_then_present_control() {
+                        let fixture = make_fixture(4);
+                        let (pv, c) = recording_pv(&fixture);
+                        let snap = snapshot_matching(&pv);
+
+                        let facade = OutboundRecorder::default();
+                        let mut stats = BinaryConsensusLoopInboundStats::default();
+                        forward_actions_to_facade(
+                            vec![send_vote_to_action(ValidatorId(3), 0)],
+                            &facade,
+                            &mut stats,
+                            Some(&snap),
+                            None,
+                            None,
+                            ConsensusVerificationPolicy::Required,
+                        );
+                        assert_eq!(stats.outbound_vote_journal_unavailable_total, 1);
+                        assert_eq!(c.vote_calls.load(SeqCst), 0);
+                        assert_eq!(stats.outbound_send_vote_to, 0);
+                        assert!(facade.directed_votes.lock().unwrap().is_empty());
+
+                        let facade2 = OutboundRecorder::default();
+                        let mut stats2 = BinaryConsensusLoopInboundStats::default();
+                        let journal = fresh_signing_journal();
+                        forward_actions_to_facade(
+                            vec![send_vote_to_action(ValidatorId(3), 0)],
+                            &facade2,
+                            &mut stats2,
+                            Some(&snap),
+                            None,
+                            Some(&journal),
+                            ConsensusVerificationPolicy::Required,
+                        );
+                        assert_eq!(c.vote_calls.load(SeqCst), 1);
+                        assert_eq!(stats2.outbound_vote_signing_success, 1);
+                        assert_eq!(stats2.outbound_send_vote_to, 1);
+                        let dv = facade2.directed_votes.lock().unwrap();
+                        assert_eq!(dv.len(), 1);
+                        assert_eq!(dv[0].0, ValidatorId(3));
+                        assert!(qbind_consensus::verify_vote_msg_with_domain(
+                            &dv[0].1,
+                            ValidatorId(0),
+                            fixture.validators.as_ref(),
+                            fixture.kp.as_ref(),
+                            fixture.br.as_ref(),
+                            &d6_control_domain(),
+                        )
+                        .is_ok());
+                    }
+
+                    // ---- E: refusal precedence + unsigned-fixture control --
+
+                    // An earlier authority refusal is NOT relabelled as a
+                    // missing-journal refusal: a superseded current
+                    // authorization rejects at admission even with no journal,
+                    // and the missing-journal counter stays zero.
+                    #[test]
+                    fn ca_e_superseded_authority_takes_precedence_over_missing_journal() {
+                        let fixture = make_fixture(4);
+                        let (pv, c) = recording_pv(&fixture);
+                        let mut snap = snapshot_matching(&pv);
+                        replace_current_with_b(&mut snap);
+                        let facade = OutboundRecorder::default();
+                        let mut stats = BinaryConsensusLoopInboundStats::default();
+                        forward_actions_to_facade(
+                            vec![proposal_action(0)],
+                            &facade,
+                            &mut stats,
+                            Some(&snap),
+                            None,
+                            None,
+                            ConsensusVerificationPolicy::Required,
+                        );
+                        // The EARLIER authority refusal fired; the missing-journal
+                        // counter was NOT incremented (no relabelling).
+                        assert_eq!(stats.outbound_proposal_authority_superseded_total, 1);
+                        assert_eq!(stats.outbound_proposal_journal_unavailable_total, 0);
+                        assert_eq!(c.proposal_calls.load(SeqCst), 0);
+                        assert!(facade.proposals.lock().unwrap().is_empty());
+                    }
+
+                    // A wrong-wire-domain refusal also takes precedence over the
+                    // missing-journal check (journal counter stays zero).
+                    #[test]
+                    fn ca_e_wire_domain_refusal_takes_precedence_over_missing_journal() {
+                        let fixture = make_fixture(4);
+                        let (pv, c) = recording_pv(&fixture);
+                        let snap = snapshot_matching(&pv);
+                        let facade = OutboundRecorder::default();
+                        let mut stats = BinaryConsensusLoopInboundStats::default();
+                        // A Vote whose wire chain id (1) mismatches the control
+                        // domain's expected 0.
+                        let mut v = base_vote(0);
+                        v.round = v.height;
+                        v.step = 0;
+                        v.chain_id = 1;
+                        forward_actions_to_facade(
+                            vec![ConsensusEngineAction::BroadcastVote(v)],
+                            &facade,
+                            &mut stats,
+                            Some(&snap),
+                            None,
+                            None,
+                            ConsensusVerificationPolicy::Required,
+                        );
+                        assert_eq!(stats.outbound_vote_wire_chain_mismatch, 1);
+                        assert_eq!(stats.outbound_vote_journal_unavailable_total, 0);
+                        assert_eq!(c.vote_calls.load(SeqCst), 0);
+                        assert!(facade.broadcast_votes.lock().unwrap().is_empty());
+                    }
+
+                    // A genuinely-unsigned fixture control: NO authority context
+                    // under LocalFixtureUnsigned (hence no signer), so the
+                    // Proposal passes through unsigned with ZERO signer calls and
+                    // the missing-journal counter stays zero (no signing decision
+                    // to reserve). This preserved passthrough is NOT a bypass of
+                    // the guard for a signer-bearing operation.
+                    #[test]
+                    fn ca_e_unsigned_fixture_no_context_preserved_no_signer() {
+                        let fixture = make_fixture(4);
+                        let (_pv, c) = recording_pv(&fixture);
+                        let facade = OutboundRecorder::default();
+                        let mut stats = BinaryConsensusLoopInboundStats::default();
+                        // No snapshot AND no `pv_authority` ⇒ no signing context.
+                        forward_actions_to_facade(
+                            vec![proposal_action(0)],
+                            &facade,
+                            &mut stats,
+                            None,
+                            None,
+                            None,
+                            ConsensusVerificationPolicy::LocalFixtureUnsigned,
+                        );
+                        // Passed through unsigned to the facade; signer untouched;
+                        // no missing-journal refusal (there was no signer).
+                        assert_eq!(c.proposal_calls.load(SeqCst), 0);
+                        assert_eq!(stats.outbound_proposal_journal_unavailable_total, 0);
+                        assert_eq!(stats.outbound_proposals_sent, 1);
+                        assert_eq!(facade.proposals.lock().unwrap().len(), 1);
+                        // The passthrough message is genuinely unsigned.
+                        assert!(facade.proposals.lock().unwrap()[0].signature.is_empty());
+                    }
+                }
+
+
                 // through BOTH caller families
                 // (`forward_actions_to_facade` immediate outbound and
                 // `maybe_reemit_on_late_peer_connect` cached re-emission).
