@@ -75,11 +75,12 @@ fn open_store(path: &std::path::Path) -> Arc<RocksDbConsensusStorage> {
     Arc::new(RocksDbConsensusStorage::open(path).expect("open rocksdb consensus storage"))
 }
 
-/// Open-or-initialize helper mirroring production's initialize-vs-open
-/// selection: a fresh (empty) signing namespace is explicitly initialized at the
-/// default supported limit and durably publishes bounded initialization
-/// metadata; an established namespace is opened and validated (never falling
-/// back to initialization). Both routes validate.
+/// Test-fixture setup helper (NOT a mirror of production selection): a fresh
+/// (empty) signing namespace is explicitly initialized at the default supported
+/// limit and durably publishes bounded initialization metadata; an established
+/// namespace is opened and validated (never falling back to initialization).
+/// Both routes validate. Production journal initialization remains unwired; this
+/// selector exists only to set up these tests.
 fn journal(store: Arc<dyn SigningJournalStorage>) -> SigningReservationJournal {
     if store
         .get_signing_metadata()
@@ -865,6 +866,21 @@ fn child_binding() -> BindingDigest {
 /// Bounded child-process death then reopen: spawn this test binary in child
 /// mode, let it durably reserve and then abort, then reopen the same store in
 /// the parent and assert the recovered reserved-only record refuses re-signing.
+///
+/// Correction-F boundary (NOT closed under E): this parent is the ACTIVE test;
+/// [`d7d10_child_reserve_then_abort`] is the `#[ignore]`d child-mode helper it
+/// re-executes. The child runner here is deliberately left UNCORRECTED under E:
+/// * It waits with an UNBOUNDED [`std::process::Command::status`] — there is no
+///   timeout or runtime bound on the child; a hung child would block here, so
+///   this does NOT establish bounded process termination.
+/// * It accepts ANY unsuccessful exit (`!status.success()`) — it does not
+///   classify the termination (e.g. it does not require the specific SIGABRT
+///   from `std::process::abort()` vs. any other nonzero/​signalled exit), so it
+///   does NOT establish classified process termination either.
+///
+/// Consequently a PASS here evidences only durable reserved-only recovery across
+/// a real child death; it does NOT close Correction F. An outer command/tool
+/// timeout wrapping the whole test run is not a child bound and does not close F.
 #[test]
 fn reserved_only_child_death_then_reopen_refuses() {
     // Isolate the RocksDB directory outside the child so it survives the abort.
@@ -884,7 +900,10 @@ fn reserved_only_child_death_then_reopen_refuses() {
         .status()
         .expect("spawn child test process");
 
-    // The child aborted: it must NOT have exited successfully.
+    // The child aborted: it must NOT have exited successfully. NOTE (Correction
+    // F, unmet under E): this only checks "not success" — it neither bounds the
+    // child's runtime nor classifies HOW it terminated, so it does not establish
+    // bounded/classified termination.
     assert!(
         !status.success(),
         "child was expected to abort before completing, got {:?}",
