@@ -629,6 +629,13 @@ pub enum JournalError {
     /// recorded count, the count exceeds the limit, or a stored key does not match
     /// its record's canonical position). Refused fail-closed; never repaired.
     AccountingInconsistent(String),
+    /// Run 422 D7-D10 Correction E — the signing namespace contains an entry that
+    /// is neither the exact recognized initialization-metadata key nor a supported
+    /// decision record (a `sj:v1:` key). This covers unsupported decision-key
+    /// versions (e.g. `sj:v2:…`), unknown metadata keys/versions, and other
+    /// malformed or unexpected signing-namespace entries. Refused fail-closed; the
+    /// entry is never adopted, deleted, migrated, or overwritten.
+    UnexpectedNamespaceEntry(String),
 }
 
 impl std::fmt::Display for JournalError {
@@ -669,6 +676,9 @@ impl std::fmt::Display for JournalError {
             }
             JournalError::AccountingInconsistent(m) => {
                 write!(f, "signing-journal accounting inconsistent: {}", m)
+            }
+            JournalError::UnexpectedNamespaceEntry(m) => {
+                write!(f, "signing-journal unexpected namespace entry: {}", m)
             }
         }
     }
@@ -798,7 +808,7 @@ pub trait SigningJournalStorage: Send + Sync {
     /// for this signing namespace, or `None` if absent. Corruption detected by the
     /// storage envelope is surfaced as [`StorageError::Corruption`]. The metadata
     /// is stored under a backend-owned key **within** the signing namespace and is
-    /// never returned by [`Self::for_each_signing_record`].
+    /// never returned by [`Self::for_each_signing_namespace_entry`].
     fn get_signing_metadata(&self) -> Result<Option<Vec<u8>>, StorageError>;
 
     /// Run 422 D7-D10 Correction E — write the initialization-metadata bytes under
@@ -826,21 +836,30 @@ pub trait SigningJournalStorage: Send + Sync {
         metadata_value: &[u8],
     ) -> Result<(), StorageError>;
 
-    /// Run 422 D7-D10 Correction E — bounded **streaming** visit over every
-    /// signing-decision record in this namespace, in storage-key order. The
-    /// visitor is called once per record with the journal-level record key (the
-    /// same key space as [`Self::get_signing_record`], i.e. the backend's own
-    /// storage prefix is stripped) and the envelope-unwrapped record bytes.
+    /// Run 422 D7-D10 Correction E — bounded **streaming** visit over every entry
+    /// in the signing namespace, INCLUDING unexpected or foreign keys, EXCLUDING
+    /// only the backend-owned initialization-metadata key (which is classified
+    /// separately via [`Self::get_signing_metadata`]). The visitor is called once
+    /// per entry with the journal-level key (the same key space as
+    /// [`Self::get_signing_record`], i.e. the backend's own storage prefix is
+    /// stripped) and the envelope-unwrapped value bytes.
     ///
-    /// This is deliberately streaming: the backend yields one record at a time and
+    /// This is deliberately streaming: the backend yields one entry at a time and
     /// never materializes the whole namespace into a collection, and the caller
-    /// counts/validates incrementally. Read/iterator errors and envelope
-    /// corruption are propagated as [`StorageError`] and abort the scan; a visitor
-    /// error aborts the scan and is propagated. The initialization-metadata key is
-    /// excluded. Each yielded value is bounded by the record encoding the caller
-    /// enforces; the underlying database API still allocates one key/value buffer
-    /// per yielded record (documented, per-record bounded, honesty note).
-    fn for_each_signing_record(
+    /// counts/classifies/validates incrementally and may abort early via a visitor
+    /// error. Read/iterator errors and envelope corruption are propagated as
+    /// [`StorageError`] and abort the scan; a visitor error aborts the scan and is
+    /// propagated. The backend applies the available per-entry value-length bound
+    /// BEFORE copying/unwrapping the payload. The underlying database API still
+    /// allocates one key/value buffer per yielded entry (documented, per-entry
+    /// bounded, honesty note); the caller performs NO allocation from stored counts
+    /// or unchecked lengths.
+    ///
+    /// Initialization uses this to check the ENTIRE signing namespace for any
+    /// existing state; open uses it to classify EVERY entry and refuse fail-closed
+    /// on any entry that is neither the metadata key nor a supported decision
+    /// record. Unrelated block/QC/epoch namespaces are never visited.
+    fn for_each_signing_namespace_entry(
         &self,
         visitor: &mut dyn FnMut(&[u8], &[u8]) -> Result<(), StorageError>,
     ) -> Result<(), StorageError>;
@@ -1135,9 +1154,10 @@ impl SigningReservationJournal {
         if store.get_signing_metadata()?.is_some() {
             return Err(JournalError::AlreadyInitialized);
         }
-        // A new journal requires an empty namespace: refuse if any record exists.
-        // Bounded streaming existence check — abort on the first record.
-        if Self::namespace_has_any_record(store.as_ref())? {
+        // A new journal requires an empty signing namespace: refuse if ANY entry
+        // exists (a decision record OR any unexpected/foreign key). Bounded
+        // streaming existence check — abort on the first entry.
+        if Self::namespace_has_any_entry(store.as_ref())? {
             return Err(JournalError::NonEmptyNamespace);
         }
 
@@ -1171,6 +1191,7 @@ impl SigningReservationJournal {
     /// * `AccountingInconsistent` — counted positions disagree with the recorded
     ///   count, the count exceeds the limit, or a stored key does not match its
     ///   record's canonical position.
+    ///
     /// Iterator/read errors and record corruption are propagated.
     pub fn open(store: Arc<dyn SigningJournalStorage>) -> Result<Self, JournalError> {
         let domain = store.signing_ownership_domain();
@@ -1189,24 +1210,39 @@ impl SigningReservationJournal {
             Some(bytes) => SigningJournalMetadata::decode(&bytes)?,
             None => {
                 // No metadata: distinguish a never-initialized empty namespace from
-                // a legacy/foreign namespace that has records without metadata.
-                if Self::namespace_has_any_record(store.as_ref())? {
+                // a legacy/foreign namespace that has ANY existing signing state.
+                if Self::namespace_has_any_entry(store.as_ref())? {
                     return Err(JournalError::LegacyRecordsWithoutMetadata);
                 }
                 return Err(JournalError::NotInitialized);
             }
         };
 
-        // Bounded streaming validation: count distinct persisted positions and
-        // check key/record association, formats, bounds, and checksums per record.
-        // We never collect the namespace or allocate from stored counts. A record
-        // validation failure is captured as its precise `JournalError` and the
-        // scan is aborted via a sentinel; a genuine iterator/read error propagates
-        // distinctly.
+        // Bounded streaming validation over the ENTIRE signing namespace: classify
+        // every entry, count distinct persisted positions, and check key/record
+        // association, formats, bounds, and checksums per record. We never collect
+        // the namespace or allocate from stored counts. Validation stops as soon as
+        // a violation is observed (an unexpected entry, a mismatched key, or an
+        // over-count) — at most one excess/unexpected entry is needed to establish
+        // the violation. A validation failure is captured as its precise
+        // `JournalError` and the scan is aborted via a sentinel; a genuine
+        // iterator/read error propagates distinctly.
         const ABORT: &str = "__signing_validation_abort__";
         let mut counted: u64 = 0;
         let mut validation_err: Option<JournalError> = None;
-        let scan = store.for_each_signing_record(&mut |key: &[u8], value: &[u8]| {
+        let expected = metadata.reserved_positions;
+        let scan = store.for_each_signing_namespace_entry(&mut |key: &[u8], value: &[u8]| {
+            // Whole-namespace classification: only a supported decision key
+            // (`sj:v1:`) is a record; every other entry is unexpected and refused
+            // BEFORE any decode/copy of its value.
+            if !key.starts_with(SIGNING_RECORD_KEY_PREFIX) {
+                validation_err = Some(JournalError::UnexpectedNamespaceEntry(format!(
+                    "signing-namespace key is neither metadata nor a supported \
+                     decision record (len={})",
+                    key.len()
+                )));
+                return Err(StorageError::Other(ABORT.to_string()));
+            }
             let record = match SigningDecisionRecord::decode(value) {
                 Ok(r) => r,
                 Err(e) => {
@@ -1229,6 +1265,16 @@ impl SigningReservationJournal {
                     return Err(StorageError::Other(ABORT.to_string()));
                 }
             }
+            // Early termination: as soon as the observed count exceeds the durable
+            // expected count, the namespace holds an excess record. Stop now — a
+            // single excess entry establishes the violation; do not scan the rest.
+            if counted > expected {
+                validation_err = Some(JournalError::AccountingInconsistent(format!(
+                    "stored positions exceed metadata count {}",
+                    expected
+                )));
+                return Err(StorageError::Other(ABORT.to_string()));
+            }
             Ok(())
         });
         match scan {
@@ -1241,9 +1287,10 @@ impl SigningReservationJournal {
             Err(e) => return Err(e.into()),
         }
 
-        // Accounting consistency: the streamed count MUST equal the durable count,
-        // and the durable count MUST be within the established limit (already
-        // checked structurally in decode; re-checked against the stream here).
+        // Accounting consistency: the streamed count MUST equal the durable count
+        // (the over-count case already aborted early above; this catches an
+        // under-count), and the durable count MUST be within the established limit
+        // (already checked structurally in decode; re-checked against the stream).
         if counted != metadata.reserved_positions {
             return Err(JournalError::AccountingInconsistent(format!(
                 "metadata records {} distinct positions but {} are stored",
@@ -1265,13 +1312,15 @@ impl SigningReservationJournal {
         Ok(Self { store, domain })
     }
 
-    /// Bounded streaming existence check: returns `true` as soon as any signing
-    /// record is observed, aborting the scan. Never collects the namespace.
-    fn namespace_has_any_record(store: &dyn SigningJournalStorage) -> Result<bool, JournalError> {
+    /// Bounded streaming existence check over the ENTIRE signing namespace:
+    /// returns `true` as soon as any entry (a decision record OR any unexpected /
+    /// foreign key, excluding only the metadata key) is observed, aborting the
+    /// scan. Never collects the namespace.
+    fn namespace_has_any_entry(store: &dyn SigningJournalStorage) -> Result<bool, JournalError> {
         // A sentinel `StorageError` signals "found one" and stops the scan early.
-        const FOUND: &str = "__signing_namespace_has_record__";
+        const FOUND: &str = "__signing_namespace_has_entry__";
         let mut found = false;
-        let scan = store.for_each_signing_record(&mut |_key, _value| {
+        let scan = store.for_each_signing_namespace_entry(&mut |_key, _value| {
             found = true;
             Err(StorageError::Other(FOUND.to_string()))
         });
@@ -1911,7 +1960,7 @@ mod tests {
             m.insert(MODEL_META_KEY.to_vec(), metadata_value.to_vec());
             Ok(())
         }
-        fn for_each_signing_record(
+        fn for_each_signing_namespace_entry(
             &self,
             visitor: &mut dyn FnMut(&[u8], &[u8]) -> Result<(), StorageError>,
         ) -> Result<(), StorageError> {
@@ -1919,13 +1968,22 @@ mod tests {
                 return Err(StorageError::Io("injected read failure".to_string()));
             }
             let m = self.map.read().unwrap();
-            let mut keys: Vec<&Vec<u8>> = m
-                .keys()
-                .filter(|k| k.starts_with(SIGNING_RECORD_KEY_PREFIX))
-                .collect();
-            keys.sort();
-            for k in keys {
-                visitor(k, &m[k])?;
+            // Whole-namespace streaming: visit EVERY entry except the backend-owned
+            // metadata key. We stream directly over the map's entries and never
+            // collect the namespace into a temporary vector (a per-entry value
+            // length bound is applied before the caller decodes).
+            for (k, v) in m.iter() {
+                if k.as_slice() == MODEL_META_KEY {
+                    continue;
+                }
+                if v.len() > MAX_RECORD_LEN {
+                    return Err(StorageError::Corruption(format!(
+                        "signing-namespace value exceeds bound (len={} max={})",
+                        v.len(),
+                        MAX_RECORD_LEN
+                    )));
+                }
+                visitor(k, v)?;
             }
             Ok(())
         }
@@ -1950,16 +2008,17 @@ mod tests {
         }
     }
 
-    /// Test convenience mirroring production's initialize-vs-open selection with
-    /// the default limit.
+    /// Test-fixture convenience (NOT production selection): initialize-or-open with
+    /// the default limit for fixture setup.
     fn attach(store: Arc<ModelStore>) -> SigningReservationJournal {
         attach_with_budget(store, DEFAULT_MAX_RESERVED_POSITIONS)
     }
 
-    /// Test convenience: an empty, un-initialized namespace is explicitly
-    /// initialized with `limit`; an established one is opened and validated.
-    /// BOTH routes validate — this is not an unchecked bypass, just a fixture
-    /// selector for pre-existing A–D tests. Correction-E tests call
+    /// Test-fixture setup (NOT a mirror of production selection): an empty,
+    /// un-initialized namespace is explicitly initialized with `limit`; an already-
+    /// established one is opened and validated. BOTH routes validate — this is not
+    /// an unchecked bypass, just a fixture selector for pre-existing A–D tests.
+    /// Production journal initialization remains unwired. Correction-E tests call
     /// [`SigningReservationJournal::initialize`]/[`SigningReservationJournal::open`]
     /// directly to exercise each route and its refusals explicitly.
     fn attach_with_budget(store: Arc<ModelStore>, limit: u64) -> SigningReservationJournal {

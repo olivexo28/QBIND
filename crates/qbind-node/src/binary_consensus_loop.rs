@@ -23819,7 +23819,7 @@ mod tests {
                             m.insert(D10_META_KEY.to_vec(), metadata_value.to_vec());
                             Ok(())
                         }
-                        fn for_each_signing_record(
+                        fn for_each_signing_namespace_entry(
                             &self,
                             visitor: &mut dyn FnMut(&[u8], &[u8]) -> Result<(), StorageError>,
                         ) -> Result<(), StorageError> {
@@ -23827,13 +23827,23 @@ mod tests {
                                 return Err(StorageError::Io("injected read failure".into()));
                             }
                             let m = self.map.read().unwrap();
-                            let prefix =
-                                crate::signing_reservation_journal::SIGNING_RECORD_KEY_PREFIX;
-                            let mut keys: Vec<&Vec<u8>> =
-                                m.keys().filter(|k| k.starts_with(prefix)).collect();
-                            keys.sort();
-                            for k in keys {
-                                visitor(k, &m[k])?;
+                            // Whole-namespace streaming: visit EVERY entry except
+                            // the backend-owned metadata key; never collect into a
+                            // Vec. A per-entry value length bound is applied first.
+                            const MAX_STORED_LEN: usize =
+                                crate::signing_reservation_journal::MAX_RECORD_LEN;
+                            for (k, v) in m.iter() {
+                                if k.as_slice() == D10_META_KEY {
+                                    continue;
+                                }
+                                if v.len() > MAX_STORED_LEN {
+                                    return Err(StorageError::Corruption(format!(
+                                        "signing-namespace value exceeds bound (len={} max={})",
+                                        v.len(),
+                                        MAX_STORED_LEN
+                                    )));
+                                }
+                                visitor(k, v)?;
                             }
                             Ok(())
                         }
@@ -23855,10 +23865,11 @@ mod tests {
                     const D10_META_KEY: &[u8] = b"__d10_signing_metadata_v1__";
 
                     fn journal(store: Arc<D10Store>) -> SigningReservationJournal {
-                        // Mirror production's initialize-vs-open selection: a fresh
-                        // (empty) namespace is explicitly initialized; an
-                        // established one is opened and validated. Both routes
-                        // validate.
+                        // TEST FIXTURE SETUP (not production selection): a fresh
+                        // (empty) namespace is explicitly initialized; an already-
+                        // established one is opened and validated. Production journal
+                        // initialization remains unwired; this selector only sets up
+                        // the fixture for these tests.
                         if store
                             .get_signing_metadata()
                             .expect("metadata probe must not fail in fixture setup")
