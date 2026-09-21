@@ -9034,8 +9034,10 @@ obligation.
 ### Validation (all against `9ea380c`, dev profile unless noted, exit 0)
 
 * `cargo test -p qbind-node --lib --no-run` — OK (2 pre-existing `dead_code` warnings).
-* `cargo test -p qbind-node --lib correction_a` — **16 passed** (8 immediate
-  `binary_consensus_loop` cases + 8 unrelated same-named `vm_v0_runtime` cases).
+* `cargo test -p qbind-node --lib correction_a` — **16 passed** (10 handler
+  `binary_consensus_loop::run422_d7b::correction_a_immediate` cases + 6 existing
+  same-named `vm_v0_runtime` cases; the earlier "8 + 8" breakdown was a
+  miscount — the historical total of 16 and checkpoint `9ea380c` are unchanged).
 * `cargo test -p qbind-node --lib run420::run422_d7b2` — **26 passed** (leader/cached,
   incl. relocated `ca_c`/`ca_d`).
 * `cargo test -p qbind-node --lib run422_d7d10` — **24 passed**.
@@ -9111,3 +9113,188 @@ disabled; production wire-chain behavior unchanged; configured-authority
 release-binary evidence not yet captured; RS1 OPEN / public-DevNet NO-GO; C4/C5
 OPEN. No readiness promotion, D11, Run 423, PR, branch rename, force-push, rebase,
 or history rewrite; no activation change.
+
+## Run 422 D7-D10 — Correction D: post-storage authorization revalidation before signing
+
+Code + test + doc pass implementing the bounded Correction-D signing boundary: the
+**original** admission identity is carried unchanged through journal work and
+revalidated before the signer (fresh path) or before retained-result reuse, and
+signer-identity / wire-message-version checks refuse before journal lookup.
+Production authority activation remains **disabled**; D10 remains **PARTIAL**.
+
+### Provenance
+
+* Branch `copilot/copilotmissing-journal-signing-refusal` (supplied task branch,
+  unchanged). Starting HEAD `ab86e58`. Reference objects `6ee6217` (Correction-A
+  final) and `9ea380c` (tested checkpoint) are **not present** in this shallow
+  (depth-2) clone, so correspondence is established from implementation content,
+  not ancestry. The implementation + test checkpoint validated below is `0276fda`.
+
+### Where the original ticket / context is retained
+
+* `AdmittedSigningIdentity<'a>` (private, `binary_consensus_loop.rs`) holds only
+  borrowed references to the admitted `AuthorizedProposalVoteSnapshot` and the exact
+  `AuthorizationTicket` its owner issued at admission — never a freshly-minted
+  ticket, a separately-supplied authority, or a newly-selected signer. It is
+  resolved fail-closed by `resolve_admitted_identity` from the caller's
+  `(current_auth, ticket)` pair (both present ⇒ revalidate; neither ⇒ the
+  `LocalFixtureUnsigned` no-context passthrough; exactly one ⇒ refuse) and threaded
+  into `guarded_sign_{proposal,vote}_for_broadcast` / `_reserved` at all five
+  production call sites: three in `forward_actions_to_facade` (broadcast Proposal,
+  broadcast Vote, directed `SendVoteTo`) and two in
+  `maybe_reemit_on_late_peer_connect` (cached Proposal, cached Vote).
+
+### Exact ordering
+
+* **Fresh path** (`guarded_sign_*_reserved`): existing admission/epoch → context /
+  signer / wire-domain / Correction-A missing-journal checks → per-kind
+  height/round(/step) position check → **wire-version** check → **signer-identity /
+  membership** check → suite assignment + D6 preimage → `reserve_for_sign`
+  (`FreshlyReserved`) → `consume_for_signing` (acquires the ownership-domain mutex)
+  → **`reconfirm_after_journal(ctx)`** (bound-context pointer identity, then
+  `owner().confirm(ticket)`) → `signer.sign_*` → `record_signed_result` →
+  `confirm_outbound_before_effect` → delivery. The final pre-sign confirmation is
+  placed **after** `consume_for_signing` so the mutex acquisition is not an
+  unaccounted wait between confirmation and signing; no journal mutex is held during
+  signing and no other blocking storage op sits between the confirmation and the
+  signer.
+* **Retained-result path** (`ExactRetryRetained`): the B/C recovery-acknowledgement
+  barrier completes inside `reserve_for_sign`; then `reconfirm_after_journal` runs
+  before the retained signature is treated as an authorized reuse; existing D6
+  verification of the exact retained message/signature is retained; confirmation
+  before delivery is preserved.
+
+### Rejection behavior (reservation preservation)
+
+* A post-journal confirmation failure performs **zero** signer calls and **zero**
+  delivery, publishes no result, drops the operation capability, and **preserves**
+  the durable `Reserved` record and its conflict obligation (never deletes,
+  releases, resets, or overwrites it); no re-admit/retry occurs within the
+  operation. A retry of the same decision therefore resolves to
+  `PotentiallySigned` (conservative potentially-signed treatment), asserted by both
+  unchanged stored bytes and the retry counter.
+* Distinct bounded counters keep the reasons separable:
+  `outbound_{proposal,vote}_wire_version_unsupported_total`,
+  `outbound_{proposal,vote}_signer_identity_mismatch_total`,
+  `outbound_{proposal,vote}_bound_context_unbound_total`, and
+  `outbound_{proposal,vote}_post_journal_authorization_revalidation_failed_total`.
+
+### Identity / version checks and trusted sources
+
+* Wire index vs bound signer `ValidatorId` is compared by **widening** the wire
+  index to `u64` (`bound_id.as_u64() == proposer_index as u64` /
+  `... == validator_index as u64`), so a `ValidatorId` larger than `u16::MAX`
+  cannot alias a representable wire index through narrowing; membership uses the
+  admitted `ConsensusValidatorSet::contains`. The supported local Proposal/Vote
+  wire-message version is `1` (`LOCAL_PROPOSAL_VOTE_WIRE_MESSAGE_VERSION`, matching
+  the `BlockHeader` / `Vote` wire structs), kept **distinct** from the D6
+  signing-format version (`D6_SIGNING_FORMAT_VERSION = 2`) and the journal-record
+  format version. Wire version 2 is therefore refused and is never mistaken for D6
+  version 2. No identity or version field is rewritten to make a message pass.
+* Earlier Correction-A / admission refusal precedence is intact: the new checks sit
+  after the existing authority / current-state / epoch / signer / wire-domain /
+  missing-journal rejections and never relabel them.
+
+### Direct observations vs staged/helper evidence
+
+* **Normal-entrypoint controls** drive the real immediate
+  (`forward_actions_to_facade` via `drive_j`) and cached
+  (`maybe_reemit_on_late_peer_connect`) callers, proving the production wiring
+  reaches the boundary and keeps the new counters at 0 on the success path
+  (`cd_a_immediate_success_keeps_revalidation_counters_zero`,
+  `cd_f_directed_vote_entrypoint_reaches_boundary`,
+  `cd_f_cached_reemission_entrypoint_control`).
+* **Staged tests** (`cd_b_*`, `cd_c_*`, `cd_d_*`, `cd_e_*`, and the staged success
+  control) call the **same** private post-journal continuation the production
+  callers use, mutating the fixture owner between explicit phases via the existing
+  `owner_mut()` / `replace_for_fixture` / `set_generation_for_exhaustion_fixture`
+  APIs — **no** unsafe aliasing, **no** production mutation hook, **no** sleeps,
+  **no** fabricated concurrent owner. Signer invocation is observed **directly**
+  via the `RecordingSigner` per-call atomics (underlying signer, not wrapper entry).
+  These are labelled staged in-source.
+* This is a bounded local demonstration on the **serialized** handler (today the
+  owner is non-cloneable, replacement needs `&mut`, and the handler is serialized).
+  It is **not** configured-authority runtime evidence.
+
+### Current serialized-owner assumption and remaining limitations
+
+* The check-to-sign gap is closed by the serialized outbound handler; no concurrent
+  owner mutation or authority-locking redesign is introduced. **E** (explicit
+  initialization vs established-journal validation; persistent capacity and
+  acknowledgement-cache accounting) and **F** (remaining engine-progress evidence;
+  bounded/classified child-process runner) remain **OPEN**.
+
+### Validation (implementation+test checkpoint `0276fda`, dev profile unless noted, exit 0)
+
+* `cargo test -p qbind-node --lib run422_d7d10::...::correction_d` — **19 passed**.
+* `cargo test -p qbind-node --lib run422_d7d10` — **43 passed**.
+* `cargo test -p qbind-node --lib run422_d7b` — **114 passed** (d7b/d7b2/d7b3 +
+  `correction_a_immediate` + `correction_d`; overlaps the focused sets).
+* `cargo test -p qbind-node --lib correction_a` — **16 passed** (10 handler
+  `correction_a_immediate` + 6 existing `vm_v0_runtime`).
+* `cargo test -p qbind-node --lib run420::run422_d7b2` — **26 passed**.
+* `cargo test -p qbind-node --lib` — **1788 passed**, 0 failed (1769 prior + 19 new).
+* `cargo test -p qbind-node --test run_422_d7d10_signing_reservation_journal_tests`
+  — default features **10 passed / 1 ignored**; `--features test-utils`
+  **11 passed / 1 ignored**.
+* `cargo test -p qbind-consensus --test run_422_d6_pv_domain_isolation_tests` — **34 passed**.
+* `cargo test -p qbind-node --test run_420_production_policy_reachability_tests` — **3 passed**.
+* `cargo test -p qbind-node --test run_422_startup_refusal_tests` — **4 passed**.
+* `cargo check -p qbind-node` — Finished, no errors.
+* `cargo clippy -p qbind-node --lib` — Finished; **0 errors**; the pre-existing
+  style warnings (large `Err` variants, `is_multiple_of`, `suspicious_open_options`,
+  etc.) are all in unrelated code — **none** reference the Correction-D functions or
+  the `correction_d` test module (the sole `too_many_arguments` site is L6644, not a
+  changed guard; the new guards take 6 arguments).
+* `cargo build --release -p qbind-node --bin qbind-node` — Finished (release, optimized).
+
+### Release executable identity
+
+* Path `target/release/qbind-node`; source revision `0276fda`; profile release
+  [optimized]; features **default** (no `--features`); bin `qbind-node`.
+* Byte length **17072352**; SHA-256
+  `6f87516611a3c0c4e39e7253fdb5caf2d361c3ad858fec8657aa2cb785cec9a9`.
+* Compilation establishes buildability only — **not** configured-authority runtime
+  evidence.
+
+### Security-tool outcomes (literal)
+
+* Code Review: reported success over 3 changed files with **no review comments**,
+  but the same run emitted a backend model-registry error
+  (`model claude-sonnet-4.6 not found in registry`); this degraded run is therefore
+  **not** counted as a clean completed independent review.
+* CodeQL (rust): **0 alerts**, but the analysis was **Skipped — database size too
+  large**. A database-size skip is **not** a completed scan.
+
+### Documentation & EOL reconciliation
+
+* `QBIND_PROPOSAL_VOTE_SIGNING_STATE_CONTINUITY_CONTRACT.md`: §4.1 step 2/3 now
+  documents the pre-journal wire-version + signer-identity gates and step 5 is
+  marked **implemented by Correction D** (`AdmittedSigningIdentity::reconfirm_after_journal`
+  after `consume_for_signing`, before the signer; retained-reuse reconfirmation;
+  fail-closed pairing). §9.5 adds an Executed (Correction D) bullet and trims the
+  Still-OPEN bullet to E + F; the marker block adds
+  `D7D10_POST_STORAGE_AUTHORIZATION_REVALIDATION=CODE-TEST-POSITIVE` and keeps
+  `D7D10_LOCAL_SIGNING_RESERVATION=PARTIAL`.
+* The preceding Correction-A count breakdown is corrected: its `correction_a`
+  filter is **10 handler** (`correction_a_immediate`) **+ 6 existing** `vm_v0_runtime`
+  cases = **16** (the earlier "8 + 8" split was a miscount; the historical total of
+  16 and checkpoint `9ea380c` are unchanged).
+* `contradiction.md`: inspected; **unchanged** — no operative statement conflicts
+  with carrying/revalidating the admission through journal work.
+* EOL/EOF: `binary_consensus_loop.rs` and both edited docs remain **CRLF with no
+  final newline**; no repository-wide reformat; changed regions whitespace-clean.
+
+### Scoped disposition
+
+`D7D10_POST_STORAGE_AUTHORIZATION_REVALIDATION=CODE-TEST-POSITIVE` (serialized-handler
+local demonstrated scope). `D7D10_LOCAL_SIGNING_RESERVATION=PARTIAL` unchanged.
+Preserved: `D7D10_MISSING_JOURNAL_SIGNING_REFUSAL=CODE-TEST-POSITIVE`,
+`D7D8_RESTORE_COMPLETION_CONTAINMENT=CODE-AND-RELEASE-TEST-POSITIVE`,
+`D7_STATUS=PARTIAL-CODE-TEST / PRODUCTION-LIFECYCLE-UNAVAILABLE`,
+`DURABLE_ANTI_ROLLBACK=NOT-ESTABLISHED`, `GENESIS_AUTHORITY_ACTIVATION=DISABLED`,
+`PRODUCTION_WIRE_CHAIN_ID_BEHAVIOR=UNCHANGED`,
+`CONFIGURED_AUTHORITY_RELEASE_BINARY_EVIDENCE=NOT-YET-CAPTURED`,
+`SECURITY_POSTURE=RS1-OPEN / PUBLIC-DEVNET-NO-GO`. **Still OPEN:** E and F (as
+above); C4/C5 remain OPEN. No authority activation, readiness promotion, D11, or
+Run 423 work; no PR, branch rename, force-push, rebase, or history rewrite.
