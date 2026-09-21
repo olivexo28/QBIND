@@ -1884,6 +1884,13 @@ pub struct BinaryConsensusLoopInboundStats {
     //   * `*_journal_result_persist_failure_total`: the signer ran but the
     //     retained-result write failed/was uncertain — facade handoff is
     //     suppressed, the potentially-signed obligation preserved, no re-sign.
+    //   * `*_journal_unavailable_total`: Run 422 D7-D10 Correction A — an
+    //     otherwise-eligible outbound signing operation (present authority,
+    //     available signer, matching wire domain) was refused BEFORE the signer
+    //     was invoked because no signing-reservation journal was available. No
+    //     signer call, no reservation, no retained resend, no facade delivery,
+    //     and no unsigned/cached substitute occurs; a signature already present
+    //     in the supplied message does not exempt the operation.
     pub outbound_proposal_journal_reserved_total: u64,
     pub outbound_proposal_journal_retained_resend_total: u64,
     pub outbound_proposal_journal_conflict_total: u64,
@@ -1892,6 +1899,7 @@ pub struct BinaryConsensusLoopInboundStats {
     pub outbound_proposal_journal_position_inconsistent_total: u64,
     pub outbound_proposal_journal_error_total: u64,
     pub outbound_proposal_journal_result_persist_failure_total: u64,
+    pub outbound_proposal_journal_unavailable_total: u64,
     pub outbound_vote_journal_reserved_total: u64,
     pub outbound_vote_journal_retained_resend_total: u64,
     pub outbound_vote_journal_conflict_total: u64,
@@ -1900,6 +1908,7 @@ pub struct BinaryConsensusLoopInboundStats {
     pub outbound_vote_journal_position_inconsistent_total: u64,
     pub outbound_vote_journal_error_total: u64,
     pub outbound_vote_journal_result_persist_failure_total: u64,
+    pub outbound_vote_journal_unavailable_total: u64,
 }
 
 /// Transition state for the bounded "restore-catchup mode → normal
@@ -2742,6 +2751,7 @@ pub async fn run_binary_consensus_loop_with_io(
                                 &mut reconfig_detector,
                                 origin.as_ref(),
                                 binding_gate.as_deref(),
+                                None, // Run 422 D7-D10: no signing-reservation journal wired in production
                                 verification_policy,
                             );
                             // Reflect engine state changes (view / commits)
@@ -2834,6 +2844,10 @@ pub async fn run_binary_consensus_loop_with_io(
                         // fail-closed under `Required`.
                         None,
                         proposal_vote_authority.as_deref(),
+                        // Run 422 D7-D10: no signing-reservation journal wired in
+                        // production (leader-self actions reject fail-closed at
+                        // admission before this matters).
+                        None,
                         verification_policy,
                     );
                     // B9 + B10: poll for a late-peer-connect transition
@@ -2984,6 +2998,10 @@ pub async fn run_binary_consensus_loop_with_io(
                         // fail-closed under `Required`.
                         None,
                         proposal_vote_authority.as_deref(),
+                        // Run 422 D7-D10: no signing-reservation journal wired in
+                        // production (leader-self actions reject fail-closed at
+                        // admission before this matters).
+                        None,
                         verification_policy,
                     );
                     if let Some(pc) = peer_connectivity.as_deref() {
@@ -3259,6 +3277,14 @@ fn do_leader_tick(
     // only on the test-only `LocalFixtureUnsigned` passthrough.
     current_auth: Option<&AuthorizedProposalVoteSnapshot>,
     signer_ctx: Option<&ProposalVoteAuthority>,
+    // Run 422 D7-D10 Correction A: the local signing-reservation journal for the
+    // leader-self-emitted Proposal/Vote outbound path. Production wires `None`
+    // (under `Required` leader-self actions already reject fail-closed at
+    // admission with no snapshot); a test fixture wires `Some` so leader
+    // Proposal and self-Vote reach the guarded reservation boundary and sign,
+    // and with `None` an otherwise-eligible leader/self action is refused before
+    // the signer runs.
+    journal: Option<&SigningReservationJournal>,
     verification_policy: ConsensusVerificationPolicy,
 ) {
     let view_at_step = engine.current_view();
@@ -3343,7 +3369,7 @@ fn do_leader_tick(
         metrics.consensus_t154().inc_proposal_accepted();
     }
     if let Some(facade) = outbound {
-        forward_actions_to_facade(actions, facade, inbound_stats, current_auth, signer_ctx, None, verification_policy);
+        forward_actions_to_facade(actions, facade, inbound_stats, current_auth, signer_ctx, journal, verification_policy);
     }
 }
 
@@ -3445,11 +3471,14 @@ fn maybe_reemit_on_late_peer_connect(
     // Test-only `LocalFixtureUnsigned` passthrough authority, consulted ONLY
     // when no snapshot is wired. Never substitutes for a wired snapshot.
     pv_authority: Option<&ProposalVoteAuthority>,
-    // Run 422 D7-D10: the local signing-reservation journal for the cached
-    // re-emission caller family. Production wires `None` (guard disengaged);
-    // a test fixture may wire `Some` so cached exact re-emission reuses the
-    // retained signature rather than signing again, and conflicting/recovered
-    // reservations are refused before the signer is invoked.
+    // Run 422 D7-D10 Correction A: the local signing-reservation journal for
+    // the cached re-emission caller family. Production wires `None`; under
+    // `Required` every cached re-emission is already rejected fail-closed at
+    // admission (no snapshot), and were it otherwise signer-eligible a missing
+    // journal now REFUSES before the signer is invoked (never "guard
+    // disengaged"). A test fixture wires `Some` so cached exact re-emission
+    // reuses the retained signature rather than signing again, and
+    // conflicting/recovered reservations are refused before the signer runs.
     journal: Option<&SigningReservationJournal>,
     verification_policy: ConsensusVerificationPolicy,
 ) {
@@ -3691,9 +3720,20 @@ const D6_SIGNING_FORMAT_VERSION: u8 = 2;
 /// Run 422 D7-D10 — guard `sign_proposal_for_broadcast` with the local
 /// signing-reservation journal.
 ///
-/// Backward-compatible by construction: when `journal` is `None` this delegates
-/// verbatim to [`sign_proposal_for_broadcast`], so every existing caller and
-/// test that passes no journal keeps its exact behavior and counters.
+/// Correction A (Run 422 D7-D10): a signing-reservation journal is REQUIRED for
+/// any otherwise-eligible outbound Proposal signing operation. When a signer
+/// would be used (present authorization, available signer, matching wire
+/// domain) but `journal` is `None`, the operation refuses BEFORE invoking the
+/// signer and records `outbound_proposal_journal_unavailable_total`. A missing
+/// journal is never treated as "guard disengaged" or "backward-compatible
+/// signing", and `LocalFixtureUnsigned` is not an exemption once a signer is
+/// supplied. The genuinely-unsigned fixture passthrough (no authority context
+/// under `LocalFixtureUnsigned`, hence no signer and no signing decision to
+/// reserve) is preserved unchanged.
+///
+/// The existing authorization-context, signer-availability, and wire-domain
+/// rejection paths run first and keep their precedence; a missing-journal check
+/// never relabels one of those earlier refusals.
 ///
 /// When `journal` is `Some`, the reservation guard engages with the ordering
 /// required by the accepted continuity contract §4.1: existing admission /
@@ -3711,27 +3751,9 @@ fn guarded_sign_proposal_for_broadcast(
     verification_policy: ConsensusVerificationPolicy,
     inbound_stats: &mut BinaryConsensusLoopInboundStats,
 ) -> Option<BlockProposal> {
-    match journal {
-        None => sign_proposal_for_broadcast(proposal, ctx, verification_policy, inbound_stats),
-        Some(journal) => guarded_sign_proposal_inner(
-            proposal,
-            ctx,
-            journal,
-            verification_policy,
-            inbound_stats,
-        ),
-    }
-}
-
-fn guarded_sign_proposal_inner(
-    mut proposal: BlockProposal,
-    ctx: Option<&ProposalVoteAuthority>,
-    journal: &SigningReservationJournal,
-    verification_policy: ConsensusVerificationPolicy,
-    inbound_stats: &mut BinaryConsensusLoopInboundStats,
-) -> Option<BlockProposal> {
     // (1) Existing authorization-context and wire-chain admission — IDENTICAL to
-    //     `sign_proposal_for_broadcast`; the journal never weakens these.
+    //     `sign_proposal_for_broadcast`; the journal never weakens these and the
+    //     missing-journal refusal below never relabels one of these rejections.
     let ctx = match ctx {
         None => {
             if verification_policy.requires_context() {
@@ -3741,8 +3763,10 @@ fn guarded_sign_proposal_inner(
                         .saturating_add(1);
                 return None;
             }
-            // LocalFixtureUnsigned passthrough: no signer, so no signing decision
-            // to reserve; preserve the historical unsigned passthrough exactly.
+            // Genuinely unsigned fixture passthrough: no signer, so no signing
+            // decision to reserve; a missing journal is irrelevant here. This is
+            // the preserved `LocalFixtureUnsigned` no-context behavior and does
+            // NOT become production authorization.
             return Some(proposal);
         }
         Some(c) => c,
@@ -3763,7 +3787,40 @@ fn guarded_sign_proposal_inner(
         return None;
     }
 
-    // (2) Per-kind identity/position checks BEFORE lookup/signing. For the
+    // (2) Correction A missing-journal refusal. The operation is otherwise
+    //     signer-eligible, so a signing-reservation journal is REQUIRED. A
+    //     missing/unavailable journal refuses HERE, before any signer
+    //     invocation, reservation, retained resend, or facade handoff. A
+    //     signature already present in `proposal` does not exempt it, and no
+    //     other journal/authority/cached signature/unsigned message is
+    //     substituted.
+    let journal = match journal {
+        Some(j) => j,
+        None => {
+            inbound_stats.outbound_proposal_journal_unavailable_total = inbound_stats
+                .outbound_proposal_journal_unavailable_total
+                .saturating_add(1);
+            eprintln!(
+                "[binary-consensus] Run 422 D7-D10: outbound proposal NOT signed \
+                 (signing-reservation journal unavailable) — fail-closed"
+            );
+            return None;
+        }
+    };
+
+    guarded_sign_proposal_reserved(proposal, ctx, signer, journal, inbound_stats)
+}
+
+/// Run 422 D7-D10 — reservation-guarded Proposal signing for an operation that
+/// has already passed the shared authority/signer/wire-domain admission and has
+/// a present journal. See [`guarded_sign_proposal_for_broadcast`].
+fn guarded_sign_proposal_reserved(
+    mut proposal: BlockProposal,
+    ctx: &ProposalVoteAuthority,
+    signer: &Arc<dyn ValidatorSigner>,
+    journal: &SigningReservationJournal,
+    inbound_stats: &mut BinaryConsensusLoopInboundStats,
+) -> Option<BlockProposal> {
     //     founding profile a Proposal's height, round and originating view are
     //     one value; there is no Proposal step field to fabricate. The
     //     originating view is the ACTION's own view (`header.height`), never a
@@ -3912,9 +3969,9 @@ fn guarded_sign_proposal_inner(
 
 /// Run 422 D7-D10 — guard `sign_vote_for_broadcast` with the local
 /// signing-reservation journal. See [`guarded_sign_proposal_for_broadcast`] for
-/// the shared ordering/semantics; the per-kind preparation differs (a Vote's
-/// height, round and originating view are one value and `step` must be `0` for
-/// the founding profile).
+/// the shared ordering/semantics and the Correction A missing-journal refusal;
+/// the per-kind preparation differs (a Vote's height, round and originating
+/// view are one value and `step` must be `0` for the founding profile).
 fn guarded_sign_vote_for_broadcast(
     vote: Vote,
     ctx: Option<&ProposalVoteAuthority>,
@@ -3922,23 +3979,9 @@ fn guarded_sign_vote_for_broadcast(
     verification_policy: ConsensusVerificationPolicy,
     inbound_stats: &mut BinaryConsensusLoopInboundStats,
 ) -> Option<Vote> {
-    match journal {
-        None => sign_vote_for_broadcast(vote, ctx, verification_policy, inbound_stats),
-        Some(journal) => {
-            guarded_sign_vote_inner(vote, ctx, journal, verification_policy, inbound_stats)
-        }
-    }
-}
-
-fn guarded_sign_vote_inner(
-    mut vote: Vote,
-    ctx: Option<&ProposalVoteAuthority>,
-    journal: &SigningReservationJournal,
-    verification_policy: ConsensusVerificationPolicy,
-    inbound_stats: &mut BinaryConsensusLoopInboundStats,
-) -> Option<Vote> {
     // (1) Existing admission / wire-chain checks — identical to
-    //     `sign_vote_for_broadcast`.
+    //     `sign_vote_for_broadcast`; the journal never weakens these and the
+    //     missing-journal refusal below never relabels one of these rejections.
     let ctx = match ctx {
         None => {
             if verification_policy.requires_context() {
@@ -3947,6 +3990,8 @@ fn guarded_sign_vote_inner(
                     .saturating_add(1);
                 return None;
             }
+            // Genuinely unsigned fixture passthrough (preserved `LocalFixtureUnsigned`
+            // no-context behavior): no signer, so no signing decision to reserve.
             return Some(vote);
         }
         Some(c) => c,
@@ -3967,6 +4012,37 @@ fn guarded_sign_vote_inner(
         return None;
     }
 
+    // (2) Correction A missing-journal refusal: an otherwise signer-eligible
+    //     Vote refuses HERE when the signing-reservation journal is unavailable,
+    //     before any signer invocation, reservation, retained resend, or facade
+    //     handoff. A populated signature does not exempt it.
+    let journal = match journal {
+        Some(j) => j,
+        None => {
+            inbound_stats.outbound_vote_journal_unavailable_total = inbound_stats
+                .outbound_vote_journal_unavailable_total
+                .saturating_add(1);
+            eprintln!(
+                "[binary-consensus] Run 422 D7-D10: outbound vote NOT signed \
+                 (signing-reservation journal unavailable) — fail-closed"
+            );
+            return None;
+        }
+    };
+
+    guarded_sign_vote_reserved(vote, ctx, signer, journal, inbound_stats)
+}
+
+/// Run 422 D7-D10 — reservation-guarded Vote signing for an operation that has
+/// already passed the shared authority/signer/wire-domain admission and has a
+/// present journal. See [`guarded_sign_vote_for_broadcast`].
+fn guarded_sign_vote_reserved(
+    mut vote: Vote,
+    ctx: &ProposalVoteAuthority,
+    signer: &Arc<dyn ValidatorSigner>,
+    journal: &SigningReservationJournal,
+    inbound_stats: &mut BinaryConsensusLoopInboundStats,
+) -> Option<Vote> {
     // (2) Per-kind identity/position checks BEFORE lookup/signing: for this
     //     founding profile height == round == originating view AND step == 0.
     let originating_view = vote.height;
@@ -4104,6 +4180,12 @@ fn guarded_sign_vote_inner(
 /// Run 420 (F3/F8): sign a locally-originated outbound `BlockProposal` before
 /// broadcast, fail-closed.
 ///
+/// Run 422 D7-D10 Correction A: this raw helper is no longer production
+/// reachable — the production outbound path signs exclusively through
+/// [`guarded_sign_proposal_for_broadcast`], which requires a signing-reservation
+/// journal. It is retained as test-only raw cryptographic-unit evidence
+/// (distinct from guarded-handler evidence) and is therefore `#[cfg(test)]`.
+///
 /// Semantics:
 /// - `ctx == None`: the outcome is governed by `verification_policy`, never
 ///   inferred from the `None`. Under
@@ -4121,6 +4203,7 @@ fn guarded_sign_vote_inner(
 /// - `ctx == Some(signer)`: the wire `suite_id` is set to the signer's suite,
 ///   the canonical chain-aware preimage is signed, and the signature is
 ///   attached. A signing error fails closed (returns `None`).
+#[cfg(test)]
 fn sign_proposal_for_broadcast(
     mut proposal: BlockProposal,
     ctx: Option<&ProposalVoteAuthority>,
@@ -4208,6 +4291,12 @@ fn sign_proposal_for_broadcast(
 /// Run 420 (F4/F8): sign a locally-originated outbound `Vote` before
 /// transmission, fail-closed. See [`sign_proposal_for_broadcast`] for the
 /// `None` / no-signer / signer semantics.
+///
+/// Run 422 D7-D10 Correction A: no longer production reachable (the production
+/// outbound path signs through [`guarded_sign_vote_for_broadcast`], which
+/// requires a signing-reservation journal); retained as test-only raw
+/// cryptographic-unit evidence and therefore `#[cfg(test)]`.
+#[cfg(test)]
 fn sign_vote_for_broadcast(
     mut vote: Vote,
     ctx: Option<&ProposalVoteAuthority>,
@@ -4587,10 +4676,14 @@ fn forward_actions_to_facade(
     // Test-only `LocalFixtureUnsigned` passthrough authority, consulted ONLY
     // when no snapshot is wired. Never substitutes for a wired snapshot.
     pv_authority: Option<&ProposalVoteAuthority>,
-    // Run 422 D7-D10: the local signing-reservation journal. Production forwards
-    // `None` (guard disengaged, exact existing behavior); a test fixture may
-    // wire `Some` to durably reserve every Proposal/Vote decision before the
-    // signer runs on this immediate-outbound caller family.
+    // Run 422 D7-D10 Correction A: the local signing-reservation journal. An
+    // otherwise signer-eligible Proposal/Vote on this immediate-outbound caller
+    // family REQUIRES a present journal: the decision is durably reserved before
+    // the signer runs, and a missing/unavailable journal refuses the operation
+    // (no signer invocation, no delivery) rather than falling back to unreserved
+    // signing. Production forwards `None`; under `Required` an absent
+    // current-authorization snapshot already rejects every action at admission,
+    // so production never reaches the signing stage.
     journal: Option<&SigningReservationJournal>,
     verification_policy: ConsensusVerificationPolicy,
 ) {
@@ -4848,6 +4941,15 @@ pub(crate) fn handle_inbound_consensus_msg(
     reconfig_detector: &mut BinaryReconfigDetector,
     origin: Option<&AuthenticatedConsensusOrigin>,
     binding_gate: Option<&PeerConsensusBindingGate>,
+    // Run 422 D7-D10 Correction A: the local signing-reservation journal for the
+    // self-Vote (and any engine-produced) outbound action this inbound handler
+    // hands to `forward_actions_to_facade`. Production wires `None`; under
+    // `Required` an absent current-authorization snapshot already rejects the
+    // outbound action at admission, and were it otherwise signer-eligible a
+    // missing journal now refuses before the signer runs. A test fixture wires
+    // `Some` so the inbound→self-Vote handoff reaches the guarded reservation
+    // boundary and signs.
+    journal: Option<&SigningReservationJournal>,
     verification_policy: ConsensusVerificationPolicy,
 ) {
     use qbind_wire::consensus::{BlockProposal, Vote};
@@ -5388,7 +5490,7 @@ pub(crate) fn handle_inbound_consensus_msg(
                                 stats,
                                 current_auth,
                                 pv_authority,
-                                None,
+                                journal,
                                 verification_policy,
                             );
                         }
@@ -6101,6 +6203,7 @@ pub(crate) fn deliver_inbound_for_run035(
         &mut detector,
         None,
         None,
+        None, // Run 422 D7-D10: no signing-reservation journal
         verification_policy,
     );
 }
@@ -9120,6 +9223,7 @@ mod tests {
             &mut BinaryReconfigDetector::default(),
             None,
             None,
+            None, // Run 422 D7-D10: signing-reservation journal (unwired here)
             ConsensusVerificationPolicy::LocalFixtureUnsigned,
         );
         assert_eq!(engine.current_view(), view_before);
@@ -9148,6 +9252,7 @@ mod tests {
             &mut BinaryReconfigDetector::default(),
             None,
             None,
+            None, // Run 422 D7-D10: signing-reservation journal (unwired here)
             ConsensusVerificationPolicy::LocalFixtureUnsigned,
         );
         assert_eq!(engine.current_view(), view_before);
@@ -9197,6 +9302,7 @@ mod tests {
             &mut BinaryReconfigDetector::default(),
             None,
             None,
+            None, // Run 422 D7-D10: signing-reservation journal (unwired here)
             ConsensusVerificationPolicy::LocalFixtureUnsigned,
         );
         assert_eq!(stats.inbound_new_views_delivered, 1);
@@ -9244,6 +9350,7 @@ mod tests {
             &mut BinaryReconfigDetector::default(),
             None,
             None,
+            None, // Run 422 D7-D10: signing-reservation journal (unwired here)
             ConsensusVerificationPolicy::LocalFixtureUnsigned,
         );
         assert_eq!(stats.inbound_new_views_delivered, 1);
@@ -9323,6 +9430,7 @@ mod tests {
             &mut BinaryReconfigDetector::default(),
             None,
             None,
+            None, // Run 422 D7-D10: signing-reservation journal (unwired here)
             ConsensusVerificationPolicy::LocalFixtureUnsigned,
         );
         // 2/4 timeouts ⇒ still no TC, view still 15.
@@ -9351,6 +9459,7 @@ mod tests {
             &mut BinaryReconfigDetector::default(),
             None,
             None,
+            None, // Run 422 D7-D10: signing-reservation journal (unwired here)
             ConsensusVerificationPolicy::LocalFixtureUnsigned,
         );
         assert_eq!(stats.inbound_timeouts_delivered, 2);
@@ -9397,6 +9506,7 @@ mod tests {
             &mut BinaryReconfigDetector::default(),
             None,
             None,
+            None, // Run 422 D7-D10: signing-reservation journal (unwired here)
             ConsensusVerificationPolicy::LocalFixtureUnsigned,
         );
         assert_eq!(engine.current_view(), view_before);
@@ -9420,6 +9530,7 @@ mod tests {
             &mut BinaryReconfigDetector::default(),
             None,
             None,
+            None, // Run 422 D7-D10: signing-reservation journal (unwired here)
             ConsensusVerificationPolicy::LocalFixtureUnsigned,
         );
         assert_eq!(engine.current_view(), view_before);
@@ -10145,6 +10256,7 @@ mod tests {
                 &mut BinaryReconfigDetector::default(),
                 None,
                 None,
+                None, // Run 422 D7-D10: signing-reservation journal (unwired here)
                 ConsensusVerificationPolicy::LocalFixtureUnsigned,
             );
         }
@@ -10278,6 +10390,7 @@ mod tests {
                 &mut BinaryReconfigDetector::default(),
                 None,
                 None,
+                None, // Run 422 D7-D10: signing-reservation journal (unwired here)
                 ConsensusVerificationPolicy::LocalFixtureUnsigned,
             );
             assert!(stats.view_timeout_decode_failures >= 1);
@@ -10313,6 +10426,7 @@ mod tests {
                 &mut BinaryReconfigDetector::default(),
                 None,
                 None,
+                None, // Run 422 D7-D10: signing-reservation journal (unwired here)
                 ConsensusVerificationPolicy::LocalFixtureUnsigned,
             );
         }
@@ -10567,6 +10681,7 @@ mod tests {
                 &mut BinaryReconfigDetector::default(),
                 None,
                 None,
+                None, // Run 422 D7-D10: signing-reservation journal (unwired here)
                 ConsensusVerificationPolicy::LocalFixtureUnsigned,
             );
 
@@ -10676,6 +10791,20 @@ mod tests {
 
         const TEST_SUITE: ConsensusSigSuiteId = SUITE_PQ_RESERVED_1; // 100 = ML-DSA-44
         const TEST_SUITE_U16: u16 = 100;
+
+        /// Run 422 D7-D10 Correction A — an explicit, supported in-memory test
+        /// signing-reservation journal for adapting pre-existing positive
+        /// fixtures that supply a signer but historically wired no journal. It
+        /// uses the production `InMemoryConsensusStorage` `SigningJournalStorage`
+        /// backend (a fresh empty ownership domain per call) so each adapted
+        /// positive still signs and delivers through the guarded reservation
+        /// path. It is MODEL-only accounting and never durability evidence.
+        fn fresh_signing_journal(
+        ) -> crate::signing_reservation_journal::SigningReservationJournal {
+            crate::signing_reservation_journal::SigningReservationJournal::attach(Arc::new(
+                crate::storage::InMemoryConsensusStorage::new(),
+            ))
+        }
 
         #[derive(Debug, Clone)]
         struct TestKeyProvider {
@@ -10991,6 +11120,12 @@ mod tests {
             ) -> CachedLeaderVote {
                 let mut v = base_vote(0);
                 v.epoch = epoch;
+                // Run 422 D7-D10 Correction A: canonical founding-profile Vote
+                // (height == round == view, step 0) so the reservation path in
+                // the cached re-emission accepts it.
+                v.height = view;
+                v.round = view;
+                v.step = 0;
                 CachedLeaderVote { view, vote: v, provenance }
             }
 
@@ -11028,6 +11163,15 @@ mod tests {
                 let connectivity = OnePeer(peer);
                 let facade = RecordingFacade::default();
                 let mut stats = BinaryConsensusLoopInboundStats::default();
+                // Run 422 D7-D10 Correction A: the cached leader Proposal/Vote
+                // carry a signer, so the cached re-emission now REQUIRES a
+                // signing-reservation journal. Wire an explicit fresh test
+                // journal so these positive/partial fixtures still sign and
+                // re-emit (the paired Proposal and Vote are different signing
+                // kinds → distinct positions → each signs once). New
+                // missing-journal negatives drive `maybe_reemit_on_late_peer_connect`
+                // with `None` directly.
+                let journal = fresh_signing_journal();
                 maybe_reemit_on_late_peer_connect(
                     &engine,
                     &mut proposal_cache,
@@ -11039,7 +11183,7 @@ mod tests {
                     &mut stats,
                     current_auth,
                     pv_passthrough,
-                    None, // Run 422 D7-D10: no signing-reservation journal wired
+                    Some(&journal),
                     policy,
                 );
                 ReemitOutcome {
@@ -11585,6 +11729,12 @@ mod tests {
                     }
                 }
                 let connectivity = Toggle(std::sync::atomic::AtomicBool::new(true), peer);
+                // Run 422 D7-D10 Correction A: signer present → a journal is
+                // required. One journal shared across the same-view ticks: only
+                // the first transition signs the Proposal; the single-shot latch
+                // suppresses the later transition BEFORE any signing, so the
+                // journal never sees a second reservation.
+                let journal = fresh_signing_journal();
 
                 // First tick: Proposal emitted, Vote denied (missing provenance).
                 maybe_reemit_on_late_peer_connect(
@@ -11598,7 +11748,7 @@ mod tests {
                     &mut stats,
                     Some(&snap),
                     None,
-                    None, // Run 422 D7-D10: no signing-reservation journal wired
+                    Some(&journal),
                     ConsensusVerificationPolicy::Required,
                 );
                 assert_eq!(stats.outbound_proposal_late_peer_reemits, 1);
@@ -11620,7 +11770,7 @@ mod tests {
                     &mut stats,
                     Some(&snap),
                     None,
-                    None, // Run 422 D7-D10: no signing-reservation journal wired
+                    Some(&journal),
                     ConsensusVerificationPolicy::Required,
                 );
                 connectivity.0.store(true, SeqCst);
@@ -11635,7 +11785,7 @@ mod tests {
                     &mut stats,
                     Some(&snap),
                     None,
-                    None, // Run 422 D7-D10: no signing-reservation journal wired
+                    Some(&journal),
                     ConsensusVerificationPolicy::Required,
                 );
                 // Still exactly one Proposal, no Vote: single-shot preserved.
@@ -11901,6 +12051,14 @@ mod tests {
 
                 // ---- Initial forwarding (distinct facade) ----
                 let initial_facade = RecordingFacade::default();
+                // Run 422 D7-D10 Correction A: signer present, so a journal is
+                // required. ONE journal is shared with the later re-emission
+                // because re-emitting the SAME cached leader Proposal/Vote is the
+                // SAME signing decision — the initial forward reserves+signs each
+                // once and the re-emission is an EXACT retained resend of those
+                // signatures (no second signature), per the accepted B/C
+                // continuity contract.
+                let journal = fresh_signing_journal();
                 do_leader_tick(
                     &mut engine,
                     &mut proposals_emitted,
@@ -11912,6 +12070,7 @@ mod tests {
                     &mut reconfig_detector,
                     Some(&snap),
                     None,
+                    Some(&journal),
                     ConsensusVerificationPolicy::Required,
                 );
 
@@ -11964,7 +12123,7 @@ mod tests {
                     &mut stats,
                     Some(&snap),
                     None,
-                    None, // Run 422 D7-D10: no signing-reservation journal wired
+                    Some(&journal),
                     ConsensusVerificationPolicy::Required,
                 );
 
@@ -11976,12 +12135,17 @@ mod tests {
                 assert_eq!(reemit_facade.nproposals(), 1);
                 assert_eq!(reemit_facade.nbroadcast_votes(), 1);
 
-                // EXPLICIT deltas distinguish initial forwarding from re-emission:
-                // the real signer ran a SECOND time per family.
-                assert_eq!(counters.proposals(), 2, "re-emission invoked the Proposal signer a second time");
-                assert_eq!(counters.votes(), 2, "re-emission invoked the Vote signer a second time");
-                assert_eq!(stats.outbound_proposal_signing_success - initial_p_success, 1);
-                assert_eq!(stats.outbound_vote_signing_success - initial_v_success, 1);
+                // Run 422 D7-D10 Correction A: re-emitting the SAME decision is an
+                // EXACT retained resend through the shared journal — the real
+                // signer is NOT invoked a second time, and the retained signature
+                // is re-used verbatim. This is the accepted B/C behavior (exact
+                // retained reuse without extra signing), not a second signature.
+                assert_eq!(counters.proposals(), 1, "re-emission re-used the retained Proposal signature (no second signer call)");
+                assert_eq!(counters.votes(), 1, "re-emission re-used the retained Vote signature (no second signer call)");
+                assert_eq!(stats.outbound_proposal_signing_success - initial_p_success, 0);
+                assert_eq!(stats.outbound_vote_signing_success - initial_v_success, 0);
+                assert_eq!(stats.outbound_proposal_journal_retained_resend_total, 1);
+                assert_eq!(stats.outbound_vote_journal_retained_resend_total, 1);
 
                 // Re-emission did not drop or refresh the originating provenance:
                 // it is minted ONLY at cache-creation in `do_leader_tick`, so the
@@ -12059,6 +12223,7 @@ mod tests {
                     &mut reconfig_detector,
                     None,
                     Some(&pv),
+                    None, // Run 422 D7-D10: no signing-reservation journal wired
                     ConsensusVerificationPolicy::LocalFixtureUnsigned,
                 );
                 let cached_p = last_leader_proposal.clone().expect("proposal cached");
@@ -12496,6 +12661,7 @@ mod tests {
                 &mut BinaryReconfigDetector::default(),
                 None,
                 None,
+                None, // Run 422 D7-D10: signing-reservation journal (unwired here)
                 ConsensusVerificationPolicy::LocalFixtureUnsigned,
             );
         }
@@ -12525,6 +12691,7 @@ mod tests {
                 &mut BinaryReconfigDetector::default(),
                 None,
                 None,
+                None, // Run 422 D7-D10: signing-reservation journal (unwired here)
                 ConsensusVerificationPolicy::LocalFixtureUnsigned,
             );
         }
@@ -12832,6 +12999,7 @@ mod tests {
                 &mut BinaryReconfigDetector::default(),
                 None,
                 None,
+                None, // Run 422 D7-D10: signing-reservation journal (unwired here)
                 ConsensusVerificationPolicy::LocalFixtureUnsigned,
             );
             assert_eq!(stats.inbound_proposal_verify_accepted, 0);
@@ -13047,6 +13215,7 @@ mod tests {
                 &mut detector,
                 None,
                 None,
+                None, // Run 422 D7-D10: signing-reservation journal (unwired here)
                 policy,
             );
             detector
@@ -13082,6 +13251,7 @@ mod tests {
                 &mut BinaryReconfigDetector::default(),
                 None,
                 None,
+                None, // Run 422 D7-D10: signing-reservation journal (unwired here)
                 policy,
             );
         }
@@ -13625,6 +13795,7 @@ mod tests {
                 &mut detector,
                 origin,
                 gate,
+                None, // Run 422 D7-D10: signing-reservation journal (unwired here)
                 policy,
             );
             detector
@@ -13664,6 +13835,7 @@ mod tests {
                 &mut BinaryReconfigDetector::default(),
                 origin,
                 gate,
+                None, // Run 422 D7-D10: signing-reservation journal (unwired here)
                 policy,
             );
         }
@@ -14043,6 +14215,7 @@ mod tests {
                 &mut detector,
                 origin,
                 gate,
+                None, // Run 422 D7-D10: signing-reservation journal (unwired here)
                 policy,
             );
             detector
@@ -15014,7 +15187,16 @@ mod tests {
             });
             let mut last_leader_vote = Some(CachedLeaderVote {
                 view: cur_view,
-                vote: base_vote(0),
+                // Run 422 D7-D10 Correction A: founding-profile Vote
+                // (height == round == view, step 0) so the reservation-guarded
+                // re-emission signs it.
+                vote: {
+                    let mut v = base_vote(0);
+                    v.height = cur_view;
+                    v.round = cur_view;
+                    v.step = 0;
+                    v
+                },
                 provenance: CachedReemissionProvenance::capture(Some(&snap)),
             });
             let mut reemitted_for_view: Option<u64> = None;
@@ -15024,6 +15206,11 @@ mod tests {
             let connectivity = OnePeer(peer);
             let facade = CapturingFacade::default();
             let mut stats = BinaryConsensusLoopInboundStats::default();
+            // Run 422 D7-D10 Correction A: signer present, so the cached
+            // re-emission requires a journal. The Proposal and Vote are
+            // different signing kinds (distinct positions), so each reserves and
+            // signs exactly once.
+            let journal = fresh_signing_journal();
 
             maybe_reemit_on_late_peer_connect(
                 &engine,
@@ -15036,7 +15223,7 @@ mod tests {
                 &mut stats,
                 Some(&snap),
                 None,
-                None, // Run 422 D7-D10: no signing-reservation journal wired
+                Some(&journal),
                 ConsensusVerificationPolicy::Required,
             );
 
@@ -15423,12 +15610,27 @@ mod tests {
                 let snap = coherent_snapshot_for(&pv);
                 let facade = VoteRecordingFacade::default();
                 let mut stats = BinaryConsensusLoopInboundStats::default();
+                // Run 422 D7-D10 Correction A: signer present, so an explicit
+                // signing-reservation journal is required for this positive
+                // control. The two actions are the SAME vote (broadcast then
+                // directed), i.e. the SAME signing decision — the journal signs
+                // it once and the directed send is an exact retained resend of
+                // that signature (identity preserved, no second signature).
+                let journal = fresh_signing_journal();
 
+                // Run 422 D7-D10 Correction A: a founding-profile Vote
+                // (height == round == view, step 0) the reservation path accepts.
+                let founding_vote = {
+                    let mut v = base_vote(0);
+                    v.round = v.height;
+                    v.step = 0;
+                    v
+                };
                 let actions: Vec<ConsensusEngineAction<ValidatorId>> = vec![
-                    ConsensusEngineAction::BroadcastVote(base_vote(0)),
+                    ConsensusEngineAction::BroadcastVote(founding_vote.clone()),
                     ConsensusEngineAction::SendVoteTo {
                         to: ValidatorId(1),
-                        vote: base_vote(0),
+                        vote: founding_vote.clone(),
                     },
                 ];
                 forward_actions_to_facade(
@@ -15437,19 +15639,24 @@ mod tests {
                     &mut stats,
                     Some(&snap),
                     None,
-                    None,
+                    Some(&journal),
                     ConsensusVerificationPolicy::Required,
                 );
 
-                // No wire refusal; both votes signed and transmitted via the
-                // intended methods exactly once each.
+                // No wire refusal; both votes transmitted via the intended
+                // methods exactly once each. The broadcast reserves+signs once;
+                // the directed send of the same decision is an exact retained
+                // resend (no additional signature).
                 assert_eq!(stats.outbound_vote_wire_chain_mismatch, 0);
-                assert_eq!(stats.outbound_vote_signing_success, 2);
+                assert_eq!(stats.outbound_vote_signing_success, 1);
+                assert_eq!(stats.outbound_vote_journal_reserved_total, 1);
+                assert_eq!(stats.outbound_vote_journal_retained_resend_total, 1);
                 assert_eq!(stats.outbound_votes_sent, 1);
                 assert_eq!(stats.outbound_send_vote_to, 1);
-                // The signer was DIRECTLY invoked exactly twice as a vote signer
-                // (never as a proposal signer).
-                assert_eq!(vote_calls.load(SeqCst), 2);
+                // The signer was DIRECTLY invoked exactly once as a vote signer
+                // (never as a proposal signer); the retained resend re-used the
+                // stored signature without calling the signer again.
+                assert_eq!(vote_calls.load(SeqCst), 1);
                 assert_eq!(proposal_calls.load(SeqCst), 0);
 
                 let bv = facade.broadcast_votes.lock().unwrap();
@@ -15500,9 +15707,175 @@ mod tests {
                     .is_err());
                 }
             }
+
+            // =====================================================
+            // Run 422 D7-D10 Correction A — missing-journal refusal at the
+            // leader-self-emit (`do_leader_tick`) and cached re-emission
+            // (`maybe_reemit_on_late_peer_connect`) boundaries (task §6 C/D
+            // negatives). Positive controls for these paths already exist
+            // (`d7b2_do_leader_tick_creates_caches_then_real_reemission_uses_them`,
+            // `d7b2_valid_cache_current_auth_emits_both_families`,
+            // `d7b2_recording_signer_positive_control_directly_counts_both_invocations`).
+            // =====================================================
+            // The engine stamps wire chain id 1 / epoch 0 on its leader-emitted
+            // Proposal/Vote, so the bound authority's v2 domain must expect wire
+            // chain id 1 (this mirrors the existing leader-tick positive control).
+            fn ca_leader_domain() -> ProposalVoteSigningDomainV2 {
+                d6_domain(
+                    0xD6D6_0000_0000_00A1,
+                    1,
+                    d6_genesis_identity(0x51),
+                    d6_authority_commitment(0x61),
+                )
+            }
+
+            // C (negative): a leader tick with NO journal reaches the guarded
+            // outbound boundary for BOTH the leader Proposal and the paired
+            // self-Vote, and refuses each before the signer runs.
+            #[test]
+            fn ca_c_leader_tick_missing_journal_refuses_both_families() {
+                let fixture = make_fixture(4);
+                let (pv, counters) = recording_ctx_v2(&fixture, ca_leader_domain());
+                let snap = coherent_snapshot_for(&pv);
+
+                let mut engine = make_engine(ValidatorId(0), 4);
+                assert!(engine.is_leader_for_current_view());
+
+                let metrics = make_metrics();
+                let mut proposals_emitted: u64 = 0;
+                let mut last_leader_proposal: Option<CachedLeaderProposal> = None;
+                let mut last_leader_vote: Option<CachedLeaderVote> = None;
+                let mut reconfig_detector = BinaryReconfigDetector::default();
+                let mut stats = BinaryConsensusLoopInboundStats::default();
+                let facade = RecordingFacade::default();
+
+                do_leader_tick(
+                    &mut engine,
+                    &mut proposals_emitted,
+                    &metrics,
+                    &mut stats,
+                    Some(&facade),
+                    &mut last_leader_proposal,
+                    &mut last_leader_vote,
+                    &mut reconfig_detector,
+                    Some(&snap),
+                    None,
+                    None, // Run 422 D7-D10: journal ABSENT
+                    ConsensusVerificationPolicy::Required,
+                );
+
+                // Both the leader Proposal and the self-Vote reached the guarded
+                // boundary and refused (distinct per-family counters).
+                assert_eq!(stats.outbound_proposal_journal_unavailable_total, 1);
+                assert_eq!(stats.outbound_vote_journal_unavailable_total, 1);
+                // Neither obtained an underlying signature.
+                assert_eq!(counters.proposals(), 0);
+                assert_eq!(counters.votes(), 0);
+                // Nothing was signed, sent, or handed off.
+                assert_eq!(stats.outbound_proposal_signing_success, 0);
+                assert_eq!(stats.outbound_vote_signing_success, 0);
+                assert_eq!(stats.outbound_proposals_sent, 0);
+                assert_eq!(stats.outbound_votes_sent, 0);
+                facade.assert_silent();
+            }
+
+            // D (negative): a REAL cached re-emission with NO journal cannot sign
+            // or re-emit. Caches (with valid captured provenance) are first
+            // produced by a journaled leader tick; the re-emission itself is then
+            // driven with the journal ABSENT. The cached Proposal is signed
+            // FIRST; its missing-journal refusal short-circuits the whole
+            // attempt, so the cached Vote's missing-journal branch is NOT reached
+            // — we report that boundary accurately (Proposal counter 1, Vote
+            // counter 0). Cached-Vote missing-journal coverage is established
+            // separately by the shared Vote guard negative
+            // (`correction_a_immediate::ca_a_vote_*`), the verified production
+            // Vote call site, and the journal-present cached-Vote positive
+            // control (`d7b2_do_leader_tick_creates_caches_then_real_reemission_uses_them`).
+            #[test]
+            fn ca_d_cached_reemission_missing_journal_prevents_signing_and_reemission() {
+                let fixture = make_fixture(4);
+                let (pv, counters) = recording_ctx_v2(&fixture, ca_leader_domain());
+                let snap = coherent_snapshot_for(&pv);
+
+                let mut engine = make_engine(ValidatorId(0), 4);
+                assert!(engine.is_leader_for_current_view());
+
+                let metrics = make_metrics();
+                let mut proposals_emitted: u64 = 0;
+                let mut last_leader_proposal: Option<CachedLeaderProposal> = None;
+                let mut last_leader_vote: Option<CachedLeaderVote> = None;
+                let mut reconfig_detector = BinaryReconfigDetector::default();
+                let mut stats = BinaryConsensusLoopInboundStats::default();
+
+                // Produce the REAL Proposal/Vote caches (with captured
+                // provenance) via a journaled leader tick.
+                let setup_journal = fresh_signing_journal();
+                let setup_facade = RecordingFacade::default();
+                do_leader_tick(
+                    &mut engine,
+                    &mut proposals_emitted,
+                    &metrics,
+                    &mut stats,
+                    Some(&setup_facade),
+                    &mut last_leader_proposal,
+                    &mut last_leader_vote,
+                    &mut reconfig_detector,
+                    Some(&snap),
+                    None,
+                    Some(&setup_journal),
+                    ConsensusVerificationPolicy::Required,
+                );
+                assert!(last_leader_proposal.is_some(), "proposal cached");
+                assert!(last_leader_vote.is_some(), "vote cached");
+                let signed_p_baseline = counters.proposals();
+                let signed_v_baseline = counters.votes();
+                assert_eq!(signed_p_baseline, 1, "setup tick signed the Proposal once");
+                assert_eq!(signed_v_baseline, 1, "setup tick signed the Vote once");
+
+                // Now drive the REAL cached re-emission entrypoint over a genuine
+                // new-peer transition with the journal ABSENT.
+                let mut reemitted_for_view: Option<u64> = None;
+                let mut last_known_peers: HashSet<NodeId> = HashSet::new();
+                let peer = pv_node_for(1);
+                let connectivity = OnePeer(peer);
+                let reemit_facade = RecordingFacade::default();
+
+                maybe_reemit_on_late_peer_connect(
+                    &engine,
+                    &mut last_leader_proposal,
+                    &mut last_leader_vote,
+                    &mut reemitted_for_view,
+                    &mut last_known_peers,
+                    &connectivity,
+                    Some(&reemit_facade),
+                    &mut stats,
+                    Some(&snap),
+                    None,
+                    None, // Run 422 D7-D10: journal ABSENT
+                    ConsensusVerificationPolicy::Required,
+                );
+
+                // The cached Proposal's missing-journal refusal fired and
+                // short-circuited the attempt BEFORE the paired Vote branch.
+                assert_eq!(stats.outbound_proposal_journal_unavailable_total, 1);
+                assert_eq!(
+                    stats.outbound_vote_journal_unavailable_total, 0,
+                    "cached Vote missing-journal branch is not reached (Proposal-first short-circuit)"
+                );
+                // The re-emission signed nothing NEW beyond the setup tick.
+                assert_eq!(counters.proposals(), signed_p_baseline);
+                assert_eq!(counters.votes(), signed_v_baseline);
+                // No re-emission, no facade traffic on the re-emit path.
+                assert_eq!(stats.outbound_proposal_late_peer_reemits, 0);
+                assert_eq!(stats.outbound_vote_late_peer_reemits, 0);
+                assert!(reemitted_for_view.is_none());
+                reemit_facade.assert_silent();
+                // Peer-connectivity bookkeeping still ran (the transition was
+                // genuinely observed) even though signing was refused.
+                assert!(last_known_peers.contains(&peer));
+            }
         }
 
-        // =================================================================
         // Run 422 D7-A — independent CURRENT AUTHORIZATION enforcement at the
         // REAL inbound Proposal/Vote boundary.
         //
@@ -15754,6 +16127,51 @@ mod tests {
                     &mut detector,
                     origin,
                     gate,
+                    None, // Run 422 D7-D10: signing-reservation journal (unwired here)
+                    policy,
+                );
+                detector
+            }
+
+            // Run 422 D7-D10 Correction A: variant of `deliver_proposal_fresh`
+            // that threads an explicit signing-reservation journal so an
+            // inbound Proposal that makes the engine emit a signer-eligible
+            // self-Vote reaches the guarded reservation boundary and signs.
+            #[allow(clippy::too_many_arguments)]
+            fn deliver_proposal_fresh_j(
+                engine: &mut BasicHotStuffEngine<[u8; 32]>,
+                stats: &mut BinaryConsensusLoopInboundStats,
+                restore_mode: &mut RestoreCatchupModeState,
+                timeout_ctx: Option<&TimeoutVerificationContext>,
+                pv: Option<&ProposalVoteAuthority>,
+                current_auth: Option<&AuthorizedProposalVoteSnapshot>,
+                proposal: &BlockProposal,
+                metrics: &Arc<NodeMetrics>,
+                outbound: Option<&dyn ConsensusNetworkFacade>,
+                origin: Option<&AuthenticatedConsensusOrigin>,
+                gate: Option<&PeerConsensusBindingGate>,
+                journal: Option<&SigningReservationJournal>,
+                policy: ConsensusVerificationPolicy,
+            ) -> BinaryReconfigDetector {
+                use qbind_wire::io::WireEncode;
+                let mut bytes = Vec::new();
+                proposal.encode(&mut bytes);
+                let mut detector = BinaryReconfigDetector::default();
+                handle_inbound_consensus_msg(
+                    engine,
+                    ConsensusNetMsg::Proposal(bytes),
+                    stats,
+                    outbound,
+                    metrics,
+                    ValidatorId(0),
+                    restore_mode,
+                    timeout_ctx,
+                    pv,
+                    current_auth,
+                    &mut detector,
+                    origin,
+                    gate,
+                    journal,
                     policy,
                 );
                 detector
@@ -15790,6 +16208,7 @@ mod tests {
                     &mut BinaryReconfigDetector::default(),
                     origin,
                     gate,
+                    None, // Run 422 D7-D10: signing-reservation journal (unwired here)
                     policy,
                 );
             }
@@ -16408,6 +16827,7 @@ mod tests {
                     &mut BinaryReconfigDetector::default(),
                     Some(&origin),
                     Some(&gate),
+                    None, // Run 422 D7-D10: signing-reservation journal (unwired here)
                     ConsensusVerificationPolicy::Required,
                 );
 
@@ -17441,7 +17861,11 @@ mod tests {
                 let mut restore = RestoreCatchupModeState::from_config(None);
                 let facade = HandoffFacade::default();
 
-                deliver_proposal_fresh(
+                // Run 422 D7-D10 Correction A: the self-Vote the engine emits
+                // from this inbound Proposal is signer-eligible under the bound
+                // A authority, so the immediate handoff now requires a journal.
+                let journal = fresh_signing_journal();
+                deliver_proposal_fresh_j(
                     &mut engine,
                     &mut stats,
                     &mut restore,
@@ -17453,6 +17877,7 @@ mod tests {
                     Some(&facade),
                     Some(&origin),
                     Some(&gate),
+                    Some(&journal),
                     ConsensusVerificationPolicy::Required,
                 );
 
@@ -17829,6 +18254,7 @@ mod tests {
                     &mut BinaryReconfigDetector::default(),
                     Some(&origin),
                     Some(&gate),
+                    None, // Run 422 D7-D10: signing-reservation journal (unwired here)
                     ConsensusVerificationPolicy::Required,
                 );
 
@@ -18487,7 +18913,13 @@ mod tests {
                 ) -> BinaryReconfigDetector {
                     let gate = pv_binding_gate(4);
                     let metrics = make_metrics();
-                    deliver_proposal_fresh(
+                    // Run 422 D7-D10 Correction A: thread an explicit journal so
+                    // an engine-emitted, signer-eligible self-Vote reaches the
+                    // guarded reservation boundary and signs. Earlier
+                    // authority/QC/wire refusals still take precedence, so the
+                    // negative controls remain unaffected.
+                    let journal = fresh_signing_journal();
+                    deliver_proposal_fresh_j(
                         engine,
                         stats,
                         restore,
@@ -18499,6 +18931,7 @@ mod tests {
                         outbound,
                         Some(origin),
                         Some(&gate),
+                        Some(&journal),
                         ConsensusVerificationPolicy::Required,
                     )
                 }
@@ -19546,6 +19979,7 @@ mod tests {
                             &mut detector,
                             Some(&origin),
                             Some(&gate),
+                            None, // Run 422 D7-D10: signing-reservation journal (unwired here)
                             ConsensusVerificationPolicy::Required,
                         );
                     }
@@ -19605,6 +20039,7 @@ mod tests {
                             &mut detector,
                             Some(&origin),
                             Some(&gate),
+                            None, // Run 422 D7-D10: signing-reservation journal (unwired here)
                             ConsensusVerificationPolicy::Required,
                         );
                     }
@@ -19761,6 +20196,7 @@ mod tests {
                             &mut detector,
                             Some(&origin),
                             Some(&gate),
+                            None, // Run 422 D7-D10: signing-reservation journal (unwired here)
                             ConsensusVerificationPolicy::Required,
                         );
                     }
@@ -19812,6 +20248,7 @@ mod tests {
                             &mut detector,
                             Some(&origin),
                             Some(&gate),
+                            None, // Run 422 D7-D10: signing-reservation journal (unwired here)
                             ConsensusVerificationPolicy::Required,
                         );
                     }
@@ -21358,6 +21795,10 @@ mod tests {
                 fn broadcast_vote_action(epoch: u64) -> ConsensusEngineAction<ValidatorId> {
                     let mut v = base_vote(0);
                     v.epoch = epoch;
+                    // Run 422 D7-D10 Correction A: a founding-profile Vote the
+                    // reservation path accepts (height == round == view, step 0).
+                    v.round = v.height;
+                    v.step = 0;
                     ConsensusEngineAction::BroadcastVote(v)
                 }
                 fn send_vote_to_action(
@@ -21366,6 +21807,9 @@ mod tests {
                 ) -> ConsensusEngineAction<ValidatorId> {
                     let mut v = base_vote(0);
                     v.epoch = epoch;
+                    // Run 422 D7-D10 Correction A: founding-profile Vote (step 0).
+                    v.round = v.height;
+                    v.step = 0;
                     ConsensusEngineAction::SendVoteTo { to, vote: v }
                 }
 
@@ -21376,13 +21820,21 @@ mod tests {
                 ) -> (BinaryConsensusLoopInboundStats, OutboundRecorder) {
                     let facade = OutboundRecorder::default();
                     let mut stats = BinaryConsensusLoopInboundStats::default();
+                    // Run 422 D7-D10 Correction A: these D7-B1 fixtures supply a
+                    // signer, so a signing-reservation journal is now REQUIRED
+                    // for the otherwise-eligible outbound signing to proceed.
+                    // Wire a fresh explicit test journal per call; each action
+                    // here signs a distinct decision, so it reserves and signs
+                    // exactly once (the negatives still reject BEFORE the journal
+                    // and are unaffected).
+                    let journal = fresh_signing_journal();
                     forward_actions_to_facade(
                         vec![action],
                         &facade,
                         &mut stats,
                         current_auth,
                         pv_passthrough,
-                        None,
+                        Some(&journal),
                         ConsensusVerificationPolicy::Required,
                     );
                     (stats, facade)
@@ -21565,13 +22017,16 @@ mod tests {
                     let (stats1, facade1) = {
                         let facade = OutboundRecorder::default();
                         let mut stats = BinaryConsensusLoopInboundStats::default();
+                        // Run 422 D7-D10 Correction A: signer present ⇒ a journal
+                        // is required for the eligible signing to proceed.
+                        let journal = fresh_signing_journal();
                         forward_actions_to_facade(
                             vec![proposal_action(0)],
                             &facade,
                             &mut stats,
                             Some(&snap),
                             None,
-                            None,
+                            Some(&journal),
                             ConsensusVerificationPolicy::Required,
                         );
                         (stats, facade)
@@ -21902,8 +22357,428 @@ mod tests {
                 }
 
                 // =====================================================
-                // Run 422 D7-D10 — the guarded signing boundary with a
-                // local signing-reservation journal wired, exercised
+                // Run 422 D7-D10 Correction A — missing-journal signing
+                // refusal at the SHARED immediate-outbound boundary
+                // (`forward_actions_to_facade`), covering task §6 A/B/E for
+                // the BroadcastProposal, BroadcastVote and SendVoteTo
+                // families. Every case uses a wired coherent snapshot, the
+                // real ML-DSA-44 `RecordingSigner`, the recording facade and
+                // DIRECT signer-call / facade-effect counts. Journal-present
+                // controls actually sign and deliver with D6 verification.
+                // =====================================================
+                mod correction_a_immediate {
+                    use super::*;
+
+                    // ---- A: shared-boundary missing-journal refusal --------
+
+                    #[test]
+                    fn ca_a_proposal_required_missing_journal_refuses_before_signer() {
+                        let fixture = make_fixture(4);
+                        let (pv, c) = recording_pv(&fixture);
+                        let snap = snapshot_matching(&pv);
+                        let facade = OutboundRecorder::default();
+                        let mut stats = BinaryConsensusLoopInboundStats::default();
+                        // Otherwise-eligible (admitted authorization, present
+                        // signer, matching wire domain) but NO journal.
+                        forward_actions_to_facade(
+                            vec![proposal_action(0)],
+                            &facade,
+                            &mut stats,
+                            Some(&snap),
+                            None,
+                            None,
+                            ConsensusVerificationPolicy::Required,
+                        );
+                        assert_eq!(stats.outbound_proposal_journal_unavailable_total, 1);
+                        // The underlying signer was NEVER invoked.
+                        assert_eq!(c.proposal_calls.load(SeqCst), 0);
+                        // No signing success, no reservation, no delivery.
+                        assert_eq!(stats.outbound_proposal_signing_success, 0);
+                        assert_eq!(stats.outbound_proposal_journal_reserved_total, 0);
+                        assert_eq!(stats.outbound_proposals_sent, 0);
+                        assert!(facade.proposals.lock().unwrap().is_empty());
+                        // No earlier-refusal counter was relabelled.
+                        assert_eq!(stats.outbound_proposal_current_state_unavailable_total, 0);
+                        assert_eq!(stats.outbound_proposal_epoch_unauthorized_total, 0);
+                        assert_eq!(stats.outbound_proposal_signing_failure, 0);
+                        assert_eq!(stats.outbound_proposal_wire_chain_mismatch, 0);
+                    }
+
+                    #[test]
+                    fn ca_a_vote_required_missing_journal_refuses_before_signer() {
+                        let fixture = make_fixture(4);
+                        let (pv, c) = recording_pv(&fixture);
+                        let snap = snapshot_matching(&pv);
+                        let facade = OutboundRecorder::default();
+                        let mut stats = BinaryConsensusLoopInboundStats::default();
+                        forward_actions_to_facade(
+                            vec![broadcast_vote_action(0)],
+                            &facade,
+                            &mut stats,
+                            Some(&snap),
+                            None,
+                            None,
+                            ConsensusVerificationPolicy::Required,
+                        );
+                        assert_eq!(stats.outbound_vote_journal_unavailable_total, 1);
+                        assert_eq!(c.vote_calls.load(SeqCst), 0);
+                        assert_eq!(stats.outbound_vote_signing_success, 0);
+                        assert_eq!(stats.outbound_vote_journal_reserved_total, 0);
+                        assert_eq!(stats.outbound_votes_sent, 0);
+                        assert!(facade.broadcast_votes.lock().unwrap().is_empty());
+                        assert_eq!(stats.outbound_vote_current_state_unavailable_total, 0);
+                        assert_eq!(stats.outbound_vote_epoch_unauthorized_total, 0);
+                        assert_eq!(stats.outbound_vote_signing_failure, 0);
+                        assert_eq!(stats.outbound_vote_wire_chain_mismatch, 0);
+                    }
+
+                    // LocalFixtureUnsigned is NOT an exemption once a signer is
+                    // supplied: a supplied signer + no journal still refuses.
+                    #[test]
+                    fn ca_a_localfixture_unsigned_with_signer_still_refuses_missing_journal() {
+                        let fixture = make_fixture(4);
+                        let (pv, c) = recording_pv(&fixture);
+                        let facade = OutboundRecorder::default();
+                        let mut stats = BinaryConsensusLoopInboundStats::default();
+                        // No current-authorization snapshot, LocalFixtureUnsigned
+                        // policy, but a REAL signer supplied via `pv_authority`.
+                        forward_actions_to_facade(
+                            vec![proposal_action(0), broadcast_vote_action(0)],
+                            &facade,
+                            &mut stats,
+                            None,
+                            Some(&pv),
+                            None,
+                            ConsensusVerificationPolicy::LocalFixtureUnsigned,
+                        );
+                        assert_eq!(stats.outbound_proposal_journal_unavailable_total, 1);
+                        assert_eq!(stats.outbound_vote_journal_unavailable_total, 1);
+                        assert_eq!(c.proposal_calls.load(SeqCst), 0);
+                        assert_eq!(c.vote_calls.load(SeqCst), 0);
+                        assert!(facade.proposals.lock().unwrap().is_empty());
+                        assert!(facade.broadcast_votes.lock().unwrap().is_empty());
+
+                        // Control: the SAME LocalFixtureUnsigned+signer path DOES
+                        // sign once a journal is supplied (proving the refusal was
+                        // the journal, not the policy).
+                        let facade2 = OutboundRecorder::default();
+                        let mut stats2 = BinaryConsensusLoopInboundStats::default();
+                        let journal = fresh_signing_journal();
+                        forward_actions_to_facade(
+                            vec![proposal_action(0)],
+                            &facade2,
+                            &mut stats2,
+                            None,
+                            Some(&pv),
+                            Some(&journal),
+                            ConsensusVerificationPolicy::LocalFixtureUnsigned,
+                        );
+                        assert_eq!(stats2.outbound_proposal_signing_success, 1);
+                        assert_eq!(c.proposal_calls.load(SeqCst), 1);
+                        assert_eq!(facade2.proposals.lock().unwrap().len(), 1);
+                    }
+
+                    // A populated signature on the supplied message does NOT
+                    // exempt an otherwise signing-capable operation from the guard.
+                    #[test]
+                    fn ca_a_supplied_signature_does_not_bypass_missing_journal() {
+                        let fixture = make_fixture(4);
+                        let (pv, c) = recording_pv(&fixture);
+                        let snap = snapshot_matching(&pv);
+                        let facade = OutboundRecorder::default();
+                        let mut stats = BinaryConsensusLoopInboundStats::default();
+
+                        // A Proposal and a Vote that ALREADY carry (bogus but
+                        // populated) signature bytes.
+                        let mut p = base_header(0);
+                        p.epoch = 0;
+                        let signed_proposal = BlockProposal {
+                            header: p,
+                            qc: None,
+                            txs: vec![],
+                            signature: vec![0xAB; 16],
+                        };
+                        let mut v = base_vote(0);
+                        v.round = v.height;
+                        v.step = 0;
+                        v.signature = vec![0xCD; 16];
+
+                        forward_actions_to_facade(
+                            vec![
+                                ConsensusEngineAction::BroadcastProposal(Box::new(
+                                    signed_proposal,
+                                )),
+                                ConsensusEngineAction::BroadcastVote(v),
+                            ],
+                            &facade,
+                            &mut stats,
+                            Some(&snap),
+                            None,
+                            None,
+                            ConsensusVerificationPolicy::Required,
+                        );
+                        assert_eq!(stats.outbound_proposal_journal_unavailable_total, 1);
+                        assert_eq!(stats.outbound_vote_journal_unavailable_total, 1);
+                        assert_eq!(c.proposal_calls.load(SeqCst), 0);
+                        assert_eq!(c.vote_calls.load(SeqCst), 0);
+                        assert_eq!(stats.outbound_proposals_sent, 0);
+                        assert_eq!(stats.outbound_votes_sent, 0);
+                        facade
+                            .proposals
+                            .lock()
+                            .map(|g| assert!(g.is_empty()))
+                            .unwrap();
+                        assert!(facade.broadcast_votes.lock().unwrap().is_empty());
+                    }
+
+                    // ---- B: immediate + directed delivery ------------------
+
+                    #[test]
+                    fn ca_b_broadcast_proposal_absent_then_present_control() {
+                        let fixture = make_fixture(4);
+                        let (pv, c) = recording_pv(&fixture);
+                        let snap = snapshot_matching(&pv);
+
+                        // Journal ABSENT: no signer call, no facade effect.
+                        let facade = OutboundRecorder::default();
+                        let mut stats = BinaryConsensusLoopInboundStats::default();
+                        forward_actions_to_facade(
+                            vec![proposal_action(0)],
+                            &facade,
+                            &mut stats,
+                            Some(&snap),
+                            None,
+                            None,
+                            ConsensusVerificationPolicy::Required,
+                        );
+                        assert_eq!(c.proposal_calls.load(SeqCst), 0);
+                        assert_eq!(stats.outbound_proposals_sent, 0);
+                        assert!(facade.proposals.lock().unwrap().is_empty());
+
+                        // Journal PRESENT control: signs, delivers, D6-verifies.
+                        let facade2 = OutboundRecorder::default();
+                        let mut stats2 = BinaryConsensusLoopInboundStats::default();
+                        let journal = fresh_signing_journal();
+                        forward_actions_to_facade(
+                            vec![proposal_action(0)],
+                            &facade2,
+                            &mut stats2,
+                            Some(&snap),
+                            None,
+                            Some(&journal),
+                            ConsensusVerificationPolicy::Required,
+                        );
+                        assert_eq!(c.proposal_calls.load(SeqCst), 1);
+                        assert_eq!(stats2.outbound_proposal_signing_success, 1);
+                        assert_eq!(stats2.outbound_proposals_sent, 1);
+                        let emitted = facade2.proposals.lock().unwrap();
+                        assert_eq!(emitted.len(), 1);
+                        assert!(qbind_consensus::verify_proposal_msg_with_domain(
+                            &emitted[0],
+                            ValidatorId(0),
+                            fixture.validators.as_ref(),
+                            fixture.kp.as_ref(),
+                            fixture.br.as_ref(),
+                            &d6_control_domain(),
+                        )
+                        .is_ok());
+                    }
+
+                    #[test]
+                    fn ca_b_broadcast_vote_absent_then_present_control() {
+                        let fixture = make_fixture(4);
+                        let (pv, c) = recording_pv(&fixture);
+                        let snap = snapshot_matching(&pv);
+
+                        let facade = OutboundRecorder::default();
+                        let mut stats = BinaryConsensusLoopInboundStats::default();
+                        forward_actions_to_facade(
+                            vec![broadcast_vote_action(0)],
+                            &facade,
+                            &mut stats,
+                            Some(&snap),
+                            None,
+                            None,
+                            ConsensusVerificationPolicy::Required,
+                        );
+                        assert_eq!(c.vote_calls.load(SeqCst), 0);
+                        assert_eq!(stats.outbound_votes_sent, 0);
+                        assert!(facade.broadcast_votes.lock().unwrap().is_empty());
+
+                        let facade2 = OutboundRecorder::default();
+                        let mut stats2 = BinaryConsensusLoopInboundStats::default();
+                        let journal = fresh_signing_journal();
+                        forward_actions_to_facade(
+                            vec![broadcast_vote_action(0)],
+                            &facade2,
+                            &mut stats2,
+                            Some(&snap),
+                            None,
+                            Some(&journal),
+                            ConsensusVerificationPolicy::Required,
+                        );
+                        assert_eq!(c.vote_calls.load(SeqCst), 1);
+                        assert_eq!(stats2.outbound_vote_signing_success, 1);
+                        assert_eq!(stats2.outbound_votes_sent, 1);
+                        let emitted = facade2.broadcast_votes.lock().unwrap();
+                        assert_eq!(emitted.len(), 1);
+                        assert!(qbind_consensus::verify_vote_msg_with_domain(
+                            &emitted[0],
+                            ValidatorId(0),
+                            fixture.validators.as_ref(),
+                            fixture.kp.as_ref(),
+                            fixture.br.as_ref(),
+                            &d6_control_domain(),
+                        )
+                        .is_ok());
+                    }
+
+                    #[test]
+                    fn ca_b_send_vote_to_absent_then_present_control() {
+                        let fixture = make_fixture(4);
+                        let (pv, c) = recording_pv(&fixture);
+                        let snap = snapshot_matching(&pv);
+
+                        let facade = OutboundRecorder::default();
+                        let mut stats = BinaryConsensusLoopInboundStats::default();
+                        forward_actions_to_facade(
+                            vec![send_vote_to_action(ValidatorId(3), 0)],
+                            &facade,
+                            &mut stats,
+                            Some(&snap),
+                            None,
+                            None,
+                            ConsensusVerificationPolicy::Required,
+                        );
+                        assert_eq!(stats.outbound_vote_journal_unavailable_total, 1);
+                        assert_eq!(c.vote_calls.load(SeqCst), 0);
+                        assert_eq!(stats.outbound_send_vote_to, 0);
+                        assert!(facade.directed_votes.lock().unwrap().is_empty());
+
+                        let facade2 = OutboundRecorder::default();
+                        let mut stats2 = BinaryConsensusLoopInboundStats::default();
+                        let journal = fresh_signing_journal();
+                        forward_actions_to_facade(
+                            vec![send_vote_to_action(ValidatorId(3), 0)],
+                            &facade2,
+                            &mut stats2,
+                            Some(&snap),
+                            None,
+                            Some(&journal),
+                            ConsensusVerificationPolicy::Required,
+                        );
+                        assert_eq!(c.vote_calls.load(SeqCst), 1);
+                        assert_eq!(stats2.outbound_vote_signing_success, 1);
+                        assert_eq!(stats2.outbound_send_vote_to, 1);
+                        let dv = facade2.directed_votes.lock().unwrap();
+                        assert_eq!(dv.len(), 1);
+                        assert_eq!(dv[0].0, ValidatorId(3));
+                        assert!(qbind_consensus::verify_vote_msg_with_domain(
+                            &dv[0].1,
+                            ValidatorId(0),
+                            fixture.validators.as_ref(),
+                            fixture.kp.as_ref(),
+                            fixture.br.as_ref(),
+                            &d6_control_domain(),
+                        )
+                        .is_ok());
+                    }
+
+                    // ---- E: refusal precedence + unsigned-fixture control --
+
+                    // An earlier authority refusal is NOT relabelled as a
+                    // missing-journal refusal: a superseded current
+                    // authorization rejects at admission even with no journal,
+                    // and the missing-journal counter stays zero.
+                    #[test]
+                    fn ca_e_superseded_authority_takes_precedence_over_missing_journal() {
+                        let fixture = make_fixture(4);
+                        let (pv, c) = recording_pv(&fixture);
+                        let mut snap = snapshot_matching(&pv);
+                        replace_current_with_b(&mut snap);
+                        let facade = OutboundRecorder::default();
+                        let mut stats = BinaryConsensusLoopInboundStats::default();
+                        forward_actions_to_facade(
+                            vec![proposal_action(0)],
+                            &facade,
+                            &mut stats,
+                            Some(&snap),
+                            None,
+                            None,
+                            ConsensusVerificationPolicy::Required,
+                        );
+                        // The EARLIER authority refusal fired; the missing-journal
+                        // counter was NOT incremented (no relabelling).
+                        assert_eq!(stats.outbound_proposal_authority_superseded_total, 1);
+                        assert_eq!(stats.outbound_proposal_journal_unavailable_total, 0);
+                        assert_eq!(c.proposal_calls.load(SeqCst), 0);
+                        assert!(facade.proposals.lock().unwrap().is_empty());
+                    }
+
+                    // A wrong-wire-domain refusal also takes precedence over the
+                    // missing-journal check (journal counter stays zero).
+                    #[test]
+                    fn ca_e_wire_domain_refusal_takes_precedence_over_missing_journal() {
+                        let fixture = make_fixture(4);
+                        let (pv, c) = recording_pv(&fixture);
+                        let snap = snapshot_matching(&pv);
+                        let facade = OutboundRecorder::default();
+                        let mut stats = BinaryConsensusLoopInboundStats::default();
+                        // A Vote whose wire chain id (1) mismatches the control
+                        // domain's expected 0.
+                        let mut v = base_vote(0);
+                        v.round = v.height;
+                        v.step = 0;
+                        v.chain_id = 1;
+                        forward_actions_to_facade(
+                            vec![ConsensusEngineAction::BroadcastVote(v)],
+                            &facade,
+                            &mut stats,
+                            Some(&snap),
+                            None,
+                            None,
+                            ConsensusVerificationPolicy::Required,
+                        );
+                        assert_eq!(stats.outbound_vote_wire_chain_mismatch, 1);
+                        assert_eq!(stats.outbound_vote_journal_unavailable_total, 0);
+                        assert_eq!(c.vote_calls.load(SeqCst), 0);
+                        assert!(facade.broadcast_votes.lock().unwrap().is_empty());
+                    }
+
+                    // A genuinely-unsigned fixture control: NO authority context
+                    // under LocalFixtureUnsigned (hence no signer), so the
+                    // Proposal passes through unsigned with ZERO signer calls and
+                    // the missing-journal counter stays zero (no signing decision
+                    // to reserve). This preserved passthrough is NOT a bypass of
+                    // the guard for a signer-bearing operation.
+                    #[test]
+                    fn ca_e_unsigned_fixture_no_context_preserved_no_signer() {
+                        let fixture = make_fixture(4);
+                        let (_pv, c) = recording_pv(&fixture);
+                        let facade = OutboundRecorder::default();
+                        let mut stats = BinaryConsensusLoopInboundStats::default();
+                        // No snapshot AND no `pv_authority` ⇒ no signing context.
+                        forward_actions_to_facade(
+                            vec![proposal_action(0)],
+                            &facade,
+                            &mut stats,
+                            None,
+                            None,
+                            None,
+                            ConsensusVerificationPolicy::LocalFixtureUnsigned,
+                        );
+                        // Passed through unsigned to the facade; signer untouched;
+                        // no missing-journal refusal (there was no signer).
+                        assert_eq!(c.proposal_calls.load(SeqCst), 0);
+                        assert_eq!(stats.outbound_proposal_journal_unavailable_total, 0);
+                        assert_eq!(stats.outbound_proposals_sent, 1);
+                        assert_eq!(facade.proposals.lock().unwrap().len(), 1);
+                        // The passthrough message is genuinely unsigned.
+                        assert!(facade.proposals.lock().unwrap()[0].signature.is_empty());
+                    }
+                }
+
+
                 // through BOTH caller families
                 // (`forward_actions_to_facade` immediate outbound and
                 // `maybe_reemit_on_late_peer_connect` cached re-emission).
